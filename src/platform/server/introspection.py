@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import inspect
+import logging
 from dataclasses import dataclass
 from functools import lru_cache
 from typing import Any, Callable, Iterable, List, Sequence
@@ -102,6 +103,7 @@ class MethodExecutionService:
     def __init__(self, state_manager: StateManager, introspector: MethodIntrospector | None = None) -> None:
         self.state_manager = state_manager
         self.introspector = introspector or MethodIntrospector()
+        self._log = logging.getLogger(__name__)
 
     def describe_methods(self, session_id: str, path: Sequence[str]) -> List[MethodMetadata]:
         """Return cached metadata for the object addressed by path."""
@@ -127,7 +129,8 @@ class MethodExecutionService:
         try:
             return method()
         except Exception as exc:  # noqa: BLE001 - propagate as structured error
-            raise MethodInvocationError(f"Method '{method_name}' failed: {exc}") from exc
+            self._log.exception("Method '%s' failed during invocation", method_name)
+            raise MethodInvocationError(f"Method '{method_name}' failed during execution.") from exc
 
     def _resolve_object(self, session_id: str, path: Sequence[str]) -> Any:
         if not self.state_manager.has_session(session_id):

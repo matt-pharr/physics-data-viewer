@@ -157,7 +157,11 @@ def introspect_methods(request: Request, payload: IntrospectRequest) -> Introspe
         methods = executor.describe_methods(payload.session_id, payload.path)
     except MethodResolutionError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
-    method_payloads = [MethodInfo(name=method.name, doc=method.doc, requires_arguments=method.requires_arguments) for method in methods]
+    method_payloads: List[MethodInfo] = []
+    for method in methods:
+        method_payloads.append(
+            MethodInfo(name=method.name, doc=method.doc, requires_arguments=method.requires_arguments)
+        )
     return IntrospectResponse(session_id=payload.session_id, path=payload.path, methods=method_payloads)
 
 
