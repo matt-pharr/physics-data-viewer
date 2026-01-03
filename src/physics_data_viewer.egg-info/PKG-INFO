@@ -1,3 +1,15 @@
+Metadata-Version: 2.4
+Name: physics-data-viewer
+Version: 0.1.0
+Summary: Foundation for the physics data analysis platform
+Author: Physics Data Viewer Team
+Requires-Python: >=3.8
+Description-Content-Type: text/markdown
+Requires-Dist: pyyaml>=6.0.1
+Provides-Extra: test
+Requires-Dist: pytest>=7.4; extra == "test"
+Dynamic: requires-python
+
 # Physics Data Viewer
 
 This repository hosts the foundations of a modern physics data analysis platform. The application is designed for domain experts to explore nested data structures, run Python analysis, and extend functionality through a module (plugin) system.
