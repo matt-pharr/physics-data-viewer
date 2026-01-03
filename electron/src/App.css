@@ -76,6 +76,7 @@ body {
   display: flex;
   flex-direction: column;
   overflow: hidden;
+  gap: 8px;
 }
 
 .output-panel h2,
@@ -113,6 +114,126 @@ body {
 .empty-state {
   color: #858585;
   font-style: italic;
+}
+
+.panel-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.log-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  height: 100%;
+}
+
+.log-controls {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.log-meta {
+  color: #cccccc;
+  font-size: 13px;
+}
+
+.log-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.log-list {
+  flex: 1;
+  overflow-y: auto;
+  font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
+  font-size: 13px;
+  line-height: 1.5;
+  background-color: #1e1e1e;
+  padding: 12px;
+  border-radius: 4px;
+  border: 1px solid #3e3e42;
+}
+
+.log-entry {
+  border-bottom: 1px solid #2e2e32;
+  padding-bottom: 8px;
+  margin-bottom: 8px;
+}
+
+.log-entry:last-of-type {
+  border-bottom: none;
+  margin-bottom: 0;
+  padding-bottom: 0;
+}
+
+.log-entry__meta {
+  display: flex;
+  justify-content: space-between;
+  color: #858585;
+  font-size: 12px;
+  margin-bottom: 4px;
+}
+
+.log-entry__code,
+.log-entry__stdout,
+.log-entry__stderr,
+.log-entry__error {
+  margin: 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.log-entry__code {
+  background-color: #1a1a1d;
+  border: 1px solid #3e3e42;
+  border-radius: 4px;
+  padding: 8px;
+  color: #4ec9b0;
+}
+
+.log-entry__stdout {
+  color: #d4d4d4;
+}
+
+.log-entry__stderr {
+  color: #ff9d88;
+}
+
+.log-entry__error {
+  color: #f48771;
+}
+
+.log-prompt {
+  color: #569cd6;
+  font-weight: 600;
+}
+
+.log-search {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.log-search__input {
+  flex: 1;
+  padding: 8px 10px;
+  border-radius: 4px;
+  border: 1px solid #3e3e42;
+  background-color: #1e1e1e;
+  color: #d4d4d4;
+}
+
+.log-search__input:focus {
+  outline: 1px solid #4ec9b0;
+}
+
+.log-search__count {
+  color: #858585;
+  font-size: 12px;
 }
 
 .output-line {

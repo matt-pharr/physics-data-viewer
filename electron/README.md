@@ -1,6 +1,6 @@
 # Physics Data Viewer - Electron Frontend
 
-This directory contains the Electron-based frontend for the Physics Data Viewer application, implementing PR #7 features: Python Command Input & Autocomplete and PR #8 data viewer integration.
+This directory contains the Electron-based frontend for the Physics Data Viewer application, implementing PR #7 features: Python Command Input & Autocomplete, PR #8 data viewer integration, and PR #9 command output log display.
 
 ## Features
 
@@ -14,6 +14,7 @@ This directory contains the Electron-based frontend for the Physics Data Viewer 
 - **Real-time Execution**: Execute code with Ctrl+Enter and see results immediately
 - **Modern UI**: Dark theme with responsive layout
 - **Data Viewer**: React tree view with virtual scrolling, context menu actions, and double-click method invocation results
+- **Command Log**: Scrollable, searchable command/output history with timestamps, execution time, and export/clear controls
 
 ## Setup
 
@@ -99,7 +100,7 @@ electron/
 
 1. Type Python code in the Monaco editor
 2. Press **Ctrl+Enter** to execute
-3. View output in the output panel above
+3. View output in the command log panel above; search or export the history as needed
 
 ### Autocomplete
 
