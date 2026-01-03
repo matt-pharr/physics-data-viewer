@@ -1,0 +1,20 @@
+[build-system]
+requires = ["setuptools>=64", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "physics-data-viewer"
+version = "0.1.0"
+description = "Foundation for the physics data analysis platform"
+readme = "README.md"
+requires-python = ">=3.8"
+authors = [{ name = "Physics Data Viewer Team" }]
+dependencies = ["pyyaml>=6.0.1"]
+
+[project.optional-dependencies]
+test = ["pytest>=7.4"]
+
+[tool.pytest.ini_options]
+minversion = "7.0"
+testpaths = ["tests"]
+addopts = "-q"
