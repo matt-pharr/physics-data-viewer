@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Optional
 
 
@@ -14,7 +14,7 @@ class BaseWindow:
     session_id: str
     route: str = "/"
     dev_mode: bool = False
-    window_id: str = field(default_factory=lambda: "")
+    window_id: Optional[str] = None
 
     def set_route(self, route: str) -> None:
         """Update the active route for the window."""
@@ -27,4 +27,3 @@ class BaseWindow:
     def attach_id(self, window_id: str) -> None:
         """Assign an identifier after creation."""
         self.window_id = window_id
-

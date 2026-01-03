@@ -15,6 +15,7 @@ For the complete vision and roadmap, see [DEVELOPMENT_PLAN.md](DEVELOPMENT_PLAN.
 The repository now includes a lightweight frontend scaffold that can operate against the FastAPI backend without requiring Node or Electron during development. The `platform.gui.FrontendApp` coordinates a `BackendClient` and a `WindowManager`, allowing multiple logical windows to share or create new backend sessions.
 
 ```python
+import asyncio
 from platform.gui import FrontendApp
 
 app = FrontendApp(backend_url="http://localhost:8000")

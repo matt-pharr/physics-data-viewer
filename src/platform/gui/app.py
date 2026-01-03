@@ -14,12 +14,18 @@ HotReloadCallback = Callable[[], Optional[Awaitable[None]]]
 class FrontendApp:
     """Coordinating object representing the frontend runtime."""
 
-    def __init__(self, backend_url: str = "http://localhost:8000", client: Optional[BackendClient] = None) -> None:
+    def __init__(
+        self,
+        backend_url: str = "http://localhost:8000",
+        client: Optional[BackendClient] = None,
+        default_title: str = "Physics Data Viewer",
+    ) -> None:
         self.backend_url = backend_url
         self.client = client or BackendClient(backend_url)
         self.window_manager = WindowManager()
         self.default_session_id: Optional[str] = None
         self.dev_mode = False
+        self.default_title = default_title
         self._hot_reload_callbacks: list[HotReloadCallback] = []
 
     async def start(self, dev_mode: bool = False) -> BaseWindow:
@@ -27,7 +33,7 @@ class FrontendApp:
         self.dev_mode = dev_mode
         self.default_session_id = await self.client.connect()
         window = self.window_manager.create_window(
-            title="Physics Data Viewer", session_id=self.default_session_id, dev_mode=dev_mode
+            title=self.default_title, session_id=self.default_session_id, dev_mode=dev_mode
         )
         if dev_mode:
             self.register_hot_reload_callback(self._reload_active_windows)
@@ -66,12 +72,14 @@ class FrontendApp:
         existing = tuple(self.window_manager.list_windows())
         self.window_manager = WindowManager()
         for window in existing:
-            recreated = self.window_manager.create_window(
-                title=window.title, session_id=window.session_id, route=window.route, dev_mode=self.dev_mode
+            self.window_manager.create_window(
+                title=window.title,
+                session_id=window.session_id,
+                route=window.route,
+                dev_mode=self.dev_mode,
+                window_id=window.window_id,
             )
-            recreated.set_route(window.route)
 
     async def shutdown(self) -> None:
         """Shutdown the frontend and close resources."""
         await self.client.aclose()
-
