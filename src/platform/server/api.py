@@ -13,6 +13,12 @@ from .state import StateManager
 router = APIRouter()
 
 
+@router.get("/")
+def root() -> Dict[str, str]:
+    """Health endpoint for root path."""
+    return {"status": "ok"}
+
+
 class SessionResponse(BaseModel):
     """Response payload when creating a session."""
 
