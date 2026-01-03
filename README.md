@@ -24,9 +24,13 @@ For the complete vision and roadmap, see [DEVELOPMENT_PLAN.md](DEVELOPMENT_PLAN.
 # Terminal 1: Start the backend
 PYTHONPATH=src uvicorn platform.server.app:app --host 127.0.0.1 --port 8000
 
-# Terminal 2: Start Electron
-cd electron && npm start
+# Terminal 2: Start Electron (first run npm install in electron directory)
+cd electron
+npm install  # First time only
+npm start    # Builds and launches automatically
 ```
+
+**Note:** The first `npm start` will build the frontend (10-30 seconds). Subsequent starts are faster.
 
 **See [QUICKSTART.md](QUICKSTART.md) for detailed instructions and troubleshooting.**
 

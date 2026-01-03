@@ -38,9 +38,14 @@ In another terminal:
 # Navigate to the electron directory
 cd /home/runner/work/physics-data-viewer/physics-data-viewer/electron
 
-# Start Electron
+# Install dependencies (first time only)
+npm install
+
+# Start Electron (this will build automatically)
 npm start
 ```
+
+**Note:** The first `npm start` may take 10-30 seconds to build the frontend. Subsequent starts will be faster if you don't change the code.
 
 This will launch the Electron window with the Physics Data Viewer application.
 

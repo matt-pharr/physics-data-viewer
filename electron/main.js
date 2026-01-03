@@ -1,9 +1,27 @@
-const { app, BrowserWindow, ipcMain } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog } = require('electron');
 const path = require('path');
+const fs = require('fs');
 
 let mainWindow;
 
 function createWindow() {
+  // Check if dist folder exists
+  const distPath = path.join(__dirname, 'dist', 'index.html');
+  if (!fs.existsSync(distPath)) {
+    dialog.showErrorBox(
+      'Build Required',
+      'The frontend has not been built yet.\n\n' +
+      'Please run the following commands:\n' +
+      '1. cd electron\n' +
+      '2. npm install (if not done yet)\n' +
+      '3. npm run build\n\n' +
+      'Or simply run: npm start\n' +
+      '(which will build automatically)'
+    );
+    app.quit();
+    return;
+  }
+
   mainWindow = new BrowserWindow({
     width: 1200,
     height: 800,

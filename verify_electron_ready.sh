@@ -41,9 +41,7 @@ fi
 # Check if frontend is built
 echo "✓ Checking frontend build..."
 if [ ! -f "electron/dist/bundle.js" ]; then
-    echo "⚠️  Frontend not built"
-    echo "   Run: cd electron && npm run build"
-    exit 1
+    echo "⚠️  Frontend not built yet (will build automatically on first npm start)"
 fi
 
 # Run tests
@@ -63,7 +61,10 @@ echo "Terminal 1 - Start Backend:"
 echo "  PYTHONPATH=src uvicorn platform.server.app:app --host 127.0.0.1 --port 8000"
 echo ""
 echo "Terminal 2 - Start Electron:"
-echo "  cd electron && npm start"
+echo "  cd electron"
+echo "  npm install  # First time only"
+echo "  npm start    # Builds automatically and launches"
 echo ""
+echo "Note: First npm start may take 10-30 seconds to build."
 echo "See QUICKSTART.md for detailed instructions."
 echo "=================================================="
