@@ -165,12 +165,12 @@ class AutocompleteEngine:
 
     def _get_value_kind(self, value: Any) -> str:
         """Determine the kind of a value for completion purposes."""
+        if isinstance(value, type):
+            return "class"
         if callable(value):
             if hasattr(value, "__self__"):
                 return "method"
             return "function"
-        if isinstance(value, type):
-            return "class"
         if hasattr(value, "__module__"):
             return "module"
         return "variable"

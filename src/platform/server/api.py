@@ -8,6 +8,7 @@ from fastapi import APIRouter, Body, HTTPException, Request, status
 from fastapi.encoders import jsonable_encoder
 from pydantic import BaseModel, Field
 
+from .autocomplete import AutocompleteEngine, CompletionItem
 from .executor import ExecutionError, ExecutionResult, SubprocessExecutor
 from .introspection import MethodResolutionError
 from .method_executor import MethodExecutionResult, MethodExecutor
@@ -89,6 +90,30 @@ class InvokeResponse(BaseModel):
     traceback: Optional[str] = None
 
 
+class AutocompleteRequest(BaseModel):
+    """Payload for requesting autocomplete suggestions."""
+
+    code: str
+    position: int = Field(..., ge=0)
+    session_id: str
+
+
+class CompletionItemResponse(BaseModel):
+    """A single completion suggestion."""
+
+    label: str
+    kind: str
+    detail: Optional[str] = None
+    documentation: Optional[str] = None
+    insertText: Optional[str] = None
+
+
+class AutocompleteResponse(BaseModel):
+    """Response containing completion suggestions."""
+
+    completions: List[CompletionItemResponse]
+
+
 def _get_state_manager(request: Request) -> StateManager:
     manager = getattr(request.app.state, "state_manager", None)
     if manager is None:
@@ -108,6 +133,13 @@ def _get_method_executor(request: Request) -> MethodExecutor:
     if executor is None:
         raise HTTPException(status_code=500, detail="Method execution unavailable")
     return executor
+
+
+def _get_autocomplete_engine(request: Request) -> AutocompleteEngine:
+    engine: Optional[AutocompleteEngine] = getattr(request.app.state, "autocomplete_engine", None)
+    if engine is None:
+        raise HTTPException(status_code=500, detail="Autocomplete engine unavailable")
+    return engine
 
 
 @router.post("/sessions", response_model=SessionResponse)
@@ -183,3 +215,32 @@ def invoke_method(request: Request, payload: InvokeRequest) -> InvokeResponse:
         error=result.error,
         traceback=result.traceback,
     )
+
+
+@router.post("/autocomplete", response_model=AutocompleteResponse)
+def autocomplete(request: Request, payload: AutocompleteRequest) -> AutocompleteResponse:
+    """Get autocomplete suggestions for Python code."""
+    engine = _get_autocomplete_engine(request)
+    manager = _get_state_manager(request)
+    
+    # Get the current namespace for the session
+    namespace = {}
+    if manager.has_session(payload.session_id):
+        namespace = manager.get_session_state(payload.session_id)
+    
+    # Get completions from the engine
+    completions = engine.get_completions(payload.code, payload.position, namespace)
+    
+    # Convert to response format
+    completion_responses = [
+        CompletionItemResponse(
+            label=item.label,
+            kind=item.kind,
+            detail=item.detail,
+            documentation=item.documentation,
+            insertText=item.insert_text,
+        )
+        for item in completions
+    ]
+    
+    return AutocompleteResponse(completions=completion_responses)
