@@ -27,7 +27,7 @@ Execute Python code in an isolated subprocess scoped to a session.
 {
   "code": "x = 2\nprint(x)",
   "session_id": "existing-session-id (optional)",
-  "timeout": 1.0
+  "timeout": 5.0
 }
 ```
 

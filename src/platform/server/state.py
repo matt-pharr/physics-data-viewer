@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import uuid
 from copy import deepcopy
-from typing import Any, Dict, Iterable
+from typing import Any, Dict, Iterable, Optional
 
 
 class StateManager:
@@ -14,7 +14,7 @@ class StateManager:
     def __init__(self) -> None:
         self._sessions: Dict[str, Dict[str, Any]] = {}
 
-    def create_session(self, session_id: str | None = None) -> str:
+    def create_session(self, session_id: Optional[str] = None) -> str:
         """Create a new session or ensure an existing session is registered."""
         sid = session_id or str(uuid.uuid4())
         self._sessions.setdefault(sid, {})

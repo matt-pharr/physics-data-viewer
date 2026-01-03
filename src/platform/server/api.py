@@ -24,7 +24,7 @@ class ExecuteRequest(BaseModel):
 
     code: str
     session_id: Optional[str] = None
-    timeout: float = 1.0
+    timeout: float = 5.0
 
 
 class ExecuteResponse(BaseModel):

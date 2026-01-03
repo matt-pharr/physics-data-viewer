@@ -79,7 +79,7 @@ class SubprocessExecutor:
         """Cleanup hook; currently a no-op."""
         LOG.debug("SubprocessExecutor shutdown.")
 
-    def execute(self, code: str, session_id: str, timeout: float = 1.0) -> ExecutionResult:
+    def execute(self, code: str, session_id: str, timeout: float = 5.0) -> ExecutionResult:
         """Execute Python code in an isolated subprocess for the given session."""
         if not code:
             raise ExecutionError("Code to execute must not be empty.")
@@ -113,6 +113,9 @@ class SubprocessExecutor:
 
         new_state = payload.get("state") or {}
         self.state_manager.update_session_state(session, new_state)
+
+        if payload.get("error"):
+            LOG.warning("Execution returned error for session %s: %s", session, payload["error"])
 
         return ExecutionResult(
             stdout=payload.get("stdout", ""),

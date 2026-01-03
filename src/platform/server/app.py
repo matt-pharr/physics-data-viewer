@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 
@@ -18,25 +19,25 @@ def create_app() -> FastAPI:
     state_manager = StateManager()
     executor = SubprocessExecutor(state_manager)
 
+    @asynccontextmanager
+    async def lifespan(app: FastAPI):
+        LOG.info("Starting backend server")
+        executor.start()
+        try:
+            yield
+        finally:
+            LOG.info("Shutting down backend server")
+            executor.shutdown()
+
     app = FastAPI(
         title="Physics Data Viewer Backend",
         version="0.1.0",
         description="Async backend server for command execution and state management.",
+        lifespan=lifespan,
     )
 
     app.state.state_manager = state_manager
     app.state.executor = executor
-
-    @app.on_event("startup")
-    async def _startup() -> None:
-        LOG.info("Starting backend server")
-        executor.start()
-
-    @app.on_event("shutdown")
-    async def _shutdown() -> None:
-        LOG.info("Shutting down backend server")
-        executor.shutdown()
-
     app.include_router(router)
     return app
 
