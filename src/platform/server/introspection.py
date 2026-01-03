@@ -127,7 +127,7 @@ class MethodExecutionService:
 
         try:
             return method()
-        except Exception as exc:  # noqa: BLE001 - propagate as structured error
+        except Exception as exc:
             self._log.exception("Method '%s' failed during invocation", method_name)
             raise MethodInvocationError(f"Method '{method_name}' failed during execution.") from exc
 

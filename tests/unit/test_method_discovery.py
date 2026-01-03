@@ -35,7 +35,10 @@ def test_method_introspector_caches_metadata():
 
     sample = Sample()
     first = introspector.methods_for(sample)
-    assert {m.name for m in first} >= {"show", "plot", "requires"}
+    names = {m.name for m in first}
+    assert "show" in names
+    assert "plot" in names
+    assert "requires" in names
     assert all(m.name != "_hidden" for m in first)
     requires = next(m for m in first if m.name == "requires")
     assert requires.requires_arguments
@@ -55,7 +58,9 @@ def test_method_execution_service_invokes_zero_arg_methods():
     service = MethodExecutionService(state)
     metadata = service.describe_methods(session, ["root", "sample"])
     names = {m.name for m in metadata}
-    assert names >= {"show", "plot", "requires"}
+    assert "show" in names
+    assert "plot" in names
+    assert "requires" in names
 
     result = service.invoke_method(session, ["root", "sample"], "show")
     assert result == "show-1"
