@@ -17,6 +17,8 @@ class ModuleWatcher:
         self.modules_dir = modules_dir.expanduser().resolve()
         self.on_change = on_change
         self.poll_interval = poll_interval
+        # Allow a short grace period for the polling loop to exit cleanly.
+        self.stop_timeout = poll_interval * 2
         self._known: Dict[Path, float] = {}
         self._thread: Optional[threading.Thread] = None
         self._running = False
@@ -33,7 +35,7 @@ class ModuleWatcher:
         """Stop background polling."""
         self._running = False
         if self._thread and self._thread.is_alive():
-            self._thread.join(timeout=self.poll_interval * 2)
+            self._thread.join(timeout=self.stop_timeout)
         self._thread = None
 
     def prime(self) -> None:

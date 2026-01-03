@@ -38,7 +38,13 @@ class ModuleManifest:
         dependencies = raw.get("dependencies", []) or []
         if not isinstance(dependencies, list) or not all(isinstance(dep, str) for dep in dependencies):
             raise ManifestError("dependencies must be a list of strings")
-        dependencies = list(dict.fromkeys(dependencies))  # remove duplicates while preserving order
+        deduped: List[str] = []
+        seen = set()
+        for dep in dependencies:
+            if dep not in seen:
+                deduped.append(dep)
+                seen.add(dep)
+        dependencies = deduped
 
         description = raw.get("description", "") or ""
         if raw.get("name") in dependencies:

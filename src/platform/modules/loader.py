@@ -119,8 +119,12 @@ def load_all(modules_dir: Path) -> ModuleLoadResult:
             instance = load_module(directory, manifest)
             _initialize_module(instance)
             result.modules.append(instance)
-        except Exception as exc:  # pragma: no cover - exercised via tests
+        except ModuleLoadError as exc:
             result.errors.append(exc)
+        except Exception as exc:  # pragma: no cover - best effort safety net
+            result.errors.append(
+                ModuleLoadError(f"Unexpected error loading module {module_name}: {exc}")
+            )
 
     return result
 
