@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'">
+  <title>Physics Data Viewer</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+    
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen',
+        'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue',
+        sans-serif;
+      -webkit-font-smoothing: antialiased;
+      -moz-osx-font-smoothing: grayscale;
+      background-color: #1e1e1e;
+      color: #d4d4d4;
+    }
+
+    #root {
+      width: 100vw;
+      height: 100vh;
+    }
+
+    .container {
+      display: flex;
+      flex-direction: column;
+      height: 100%;
+      padding: 20px;
+    }
+
+    .header {
+      margin-bottom: 20px;
+    }
+
+    .header h1 {
+      font-size: 24px;
+      color: #569cd6;
+    }
+
+    .editor-container {
+      flex: 0 0 auto;
+      margin-bottom: 20px;
+    }
+
+    .editor-label {
+      margin-bottom: 8px;
+      font-size: 14px;
+      color: #9cdcfe;
+    }
+
+    .output-container {
+      flex: 1 1 auto;
+      overflow: auto;
+      background-color: #252526;
+      border: 1px solid #3c3c3c;
+      border-radius: 4px;
+      padding: 12px;
+    }
+
+    .output-label {
+      margin-bottom: 8px;
+      font-size: 14px;
+      color: #9cdcfe;
+    }
+
+    .output-content {
+      font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
+      font-size: 13px;
+      white-space: pre-wrap;
+      word-wrap: break-word;
+    }
+
+    .hint {
+      margin-top: 8px;
+      font-size: 12px;
+      color: #858585;
+    }
+  </style>
+</head>
+<body>
+  <div id="root">
+    <div class="container">
+      <div class="header">
+        <h1>Physics Data Viewer - Python Command Input</h1>
+      </div>
+      
+      <div class="editor-container">
+        <div class="editor-label">Python Command Input:</div>
+        <div id="editor-mount"></div>
+        <div class="hint">
+          Press <strong>Ctrl+Enter</strong> (Cmd+Enter on Mac) to execute. Use <strong>↑/↓</strong> arrows for command history.
+        </div>
+      </div>
+
+      <div class="output-container">
+        <div class="output-label">Output:</div>
+        <div id="output" class="output-content">
+          Ready. Enter Python commands above and press Ctrl+Enter to execute.
+        </div>
+      </div>
+    </div>
+  </div>
+  
+  <script>
+    // This will be replaced with the bundled React app
+    // For now, it's a placeholder for the development setup
+  </script>
+</body>
+</html>

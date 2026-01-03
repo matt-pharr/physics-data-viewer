@@ -8,6 +8,7 @@ from fastapi import APIRouter, Body, HTTPException, Request, status
 from fastapi.encoders import jsonable_encoder
 from pydantic import BaseModel, Field
 
+from .autocomplete import AutocompleteProvider
 from .executor import ExecutionError, ExecutionResult, SubprocessExecutor
 from .introspection import MethodResolutionError
 from .method_executor import MethodExecutionResult, MethodExecutor
@@ -183,3 +184,45 @@ def invoke_method(request: Request, payload: InvokeRequest) -> InvokeResponse:
         error=result.error,
         traceback=result.traceback,
     )
+
+
+class AutocompleteRequest(BaseModel):
+    """Payload for requesting autocomplete suggestions."""
+
+    session_id: str
+    code: str = Field(..., max_length=10000)
+    cursor_position: Optional[int] = None
+
+
+class AutocompleteResponse(BaseModel):
+    """Response containing autocomplete suggestions."""
+
+    session_id: str
+    completions: List[str]
+
+
+def _get_autocomplete_provider(request: Request) -> AutocompleteProvider:
+    provider = getattr(request.app.state, "autocomplete_provider", None)
+    if provider is None:
+        raise HTTPException(status_code=500, detail="Autocomplete provider unavailable")
+    return provider
+
+
+@router.post("/autocomplete", response_model=AutocompleteResponse)
+def autocomplete(request: Request, payload: AutocompleteRequest) -> AutocompleteResponse:
+    """Generate autocomplete suggestions for the given code."""
+    provider = _get_autocomplete_provider(request)
+    manager = _get_state_manager(request)
+
+    # Get session state for context
+    if not manager.has_session(payload.session_id):
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    state = manager.get_session_state(payload.session_id)
+    completions = provider.get_completions(
+        code=payload.code,
+        cursor_position=payload.cursor_position,
+        state=state,
+    )
+
+    return AutocompleteResponse(session_id=payload.session_id, completions=completions)

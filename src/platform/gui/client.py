@@ -120,6 +120,19 @@ class BackendClient:
         response.raise_for_status()
         return response.json()
 
+    async def get_completions(
+        self, session_id: str, code: str, cursor_position: Optional[int] = None
+    ) -> list[str]:
+        """Get autocomplete suggestions for the given code."""
+        request_payload: Dict[str, Any] = {"session_id": session_id, "code": code}
+        if cursor_position is not None:
+            request_payload["cursor_position"] = cursor_position
+
+        response = await self._client.post("/autocomplete", json=request_payload)
+        response.raise_for_status()
+        data = response.json()
+        return data.get("completions", [])
+
     async def aclose(self) -> None:
         """Close the underlying HTTP client if owned by this instance."""
         if self._owns_client:

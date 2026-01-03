@@ -11,6 +11,7 @@ For the complete vision and roadmap, see [DEVELOPMENT_PLAN.md](DEVELOPMENT_PLAN.
 - Example modules and data types demonstrating expected patterns
 - Pytest-based test infrastructure
 - Nested data viewer utilities with lazy loading, search, and virtual scrolling for large datasets
+- **Python command input with autocomplete (PR #7)**: Monaco Editor-based input with syntax highlighting, command history, and intelligent autocomplete
 
 ## Frontend scaffold (PR #3)
 
@@ -39,6 +40,18 @@ asyncio.run(main())
 
 This scaffold provides a foundation for future GUI work while keeping connectivity and window lifecycle testable.
 
+## Electron Frontend (PR #7)
+
+The `electron/` directory contains a modern Electron-based frontend with:
+
+- **Monaco Editor**: VS Code's editor component for Python code input
+- **Syntax Highlighting**: Built-in Python syntax highlighting
+- **Command History**: Navigate previously executed commands with ↑/↓ arrows
+- **Autocomplete**: Intelligent completion for keywords, builtins, state variables, and modules
+- **Multi-line Support**: Full support for multi-line Python code
+
+See [electron/README.md](electron/README.md) for setup and development instructions.
+
 ## Getting Started
 
 1. Install dependencies (including testing extras):
@@ -56,6 +69,7 @@ pytest
 3. Explore the examples:
    - `examples/minimal_module/` shows the simplest module with a manifest and `Module` class.
    - `examples/custom_types_example/` contains reference implementations of `ShowablePlottable` data types.
+   - `examples/command_input_example.py` demonstrates the autocomplete and command history features (PR #7).
 
 ## Module Manifests
 

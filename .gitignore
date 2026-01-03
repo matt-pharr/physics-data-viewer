@@ -4,3 +4,22 @@ __pycache__/
 *.egg-info/
 *.egg
 .pytest_cache/
+
+# Electron / Node.js
+node_modules/
+electron/dist/
+electron/out/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
