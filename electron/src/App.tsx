@@ -69,12 +69,23 @@ export const App: React.FC = () => {
     );
   };
 
-  const handleClear = () => {
-    setCommandBoxes(boxes =>
-      boxes.map(box =>
-        box.id === activeBoxId ? { ...box, code: '' } : box
-      )
-    );
+  const handleClearOrClose = () => {
+    const activeBox = commandBoxes.find(box => box.id === activeBoxId);
+    
+    // If the active box is empty, close it (unless it's the last tab)
+    if (activeBox && !activeBox.code.trim() && commandBoxes.length > 1) {
+      const newBoxes = commandBoxes.filter(box => box.id !== activeBoxId);
+      setCommandBoxes(newBoxes);
+      // Switch to the first remaining tab
+      setActiveBoxId(newBoxes[0].id);
+    } else {
+      // Otherwise, just clear the code
+      setCommandBoxes(boxes =>
+        boxes.map(box =>
+          box.id === activeBoxId ? { ...box, code: '' } : box
+        )
+      );
+    }
   };
 
   const handleAddCommandBox = () => {
@@ -85,6 +96,7 @@ export const App: React.FC = () => {
   };
 
   const activeBox = commandBoxes.find(box => box.id === activeBoxId);
+  const isActiveBoxEmpty = !activeBox?.code.trim();
 
   return (
     <div className="app">
@@ -138,28 +150,25 @@ export const App: React.FC = () => {
               {error}
             </div>
           )}
-          {isConnected ? (
-            <>
-              <PythonEditor
-                key={activeBoxId}
-                value={activeBox?.code || ''}
-                onCodeChange={handleCodeChange}
-                onExecute={handleExecute}
-                client={client}
-                height="200px"
-              />
-              <div className="command-actions">
-                <button className="action-button execute" onClick={handleExecute}>
-                  Execute
-                </button>
-                <button className="action-button clear" onClick={handleClear}>
-                  Clear
-                </button>
-              </div>
-            </>
-          ) : (
-            <div className="loading">Connecting to backend...</div>
-          )}
+          <PythonEditor
+            key={activeBoxId}
+            value={activeBox?.code || ''}
+            onCodeChange={handleCodeChange}
+            onExecute={handleExecute}
+            client={client}
+            height="200px"
+          />
+          <div className="command-actions">
+            <button className="action-button execute" onClick={handleExecute}>
+              Execute
+            </button>
+            <button 
+              className={`action-button ${isActiveBoxEmpty ? 'close' : 'clear'}`} 
+              onClick={handleClearOrClose}
+            >
+              {isActiveBoxEmpty && commandBoxes.length > 1 ? 'Close' : 'Clear'}
+            </button>
+          </div>
         </div>
       </main>
     </div>

@@ -206,6 +206,17 @@ body {
   border-color: #ff9d88;
 }
 
+.action-button.close {
+  background-color: #d16969;
+  color: #1e1e1e;
+  border-color: #d16969;
+}
+
+.action-button.close:hover {
+  background-color: #e07979;
+  border-color: #e07979;
+}
+
 .error-message {
   background-color: #f48771;
   color: #1e1e1e;
