@@ -390,6 +390,7 @@ This document outlines the complete development roadmap for building a modern, e
 - Timestamp and execution time tracking
 - Clear log functionality
 - Integration with PythonEditor from PR #7
+- Continue exposing the central project **Tree** data structure in the Electron UI (placeholder added in PR #8, to be populated in later PRs)
 
 **Success Criteria**: 
 - Log displays 1000+ entries smoothly

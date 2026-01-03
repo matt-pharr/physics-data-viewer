@@ -13,6 +13,8 @@ interface CommandBox {
   code: string;
 }
 
+type ViewerTab = 'namespace' | 'tree';
+
 interface AppProps {
   client?: BackendClient;
 }
@@ -27,12 +29,14 @@ export const App: React.FC<AppProps> = ({ client: providedClient }) => {
   const [activeBoxId, setActiveBoxId] = useState(1);
   const [nextId, setNextId] = useState(2);
   const [viewerData, setViewerData] = useState<Record<string, any>>({});
+  const [treeData] = useState<Record<string, any>>({});
   const [results, setResults] = useState<DisplayResult[]>([]);
   const [contextMenu, setContextMenu] = useState<{
     position: { x: number; y: number };
     node: TreeNodeData;
     methods: { name: string; requires_arguments: boolean }[];
   } | null>(null);
+  const [viewerTab, setViewerTab] = useState<ViewerTab>('namespace');
   const [introspector] = useState(() => new MethodIntrospector(client));
 
   useEffect(() => {
@@ -209,6 +213,20 @@ export const App: React.FC<AppProps> = ({ client: providedClient }) => {
           <div className="data-panel">
             <div className="data-panel-header">
               <h2>Data Viewer</h2>
+              <div className="data-tabs">
+                <button
+                  className={`tab ${viewerTab === 'namespace' ? 'active' : ''}`}
+                  onClick={() => setViewerTab('namespace')}
+                >
+                  Namespace
+                </button>
+                <button
+                  className={`tab ${viewerTab === 'tree' ? 'active' : ''}`}
+                  onClick={() => setViewerTab('tree')}
+                >
+                  Tree
+                </button>
+              </div>
               <div className="data-actions">
                 <button className="action-button" onClick={handleRefreshState} disabled={!sessionId}>
                   Refresh
@@ -216,11 +234,16 @@ export const App: React.FC<AppProps> = ({ client: providedClient }) => {
               </div>
             </div>
             <TreeView
-              data={viewerData}
+              data={viewerTab === 'namespace' ? viewerData : treeData}
               viewportHeight={260}
               onNodeDoubleClick={handleNodeDoubleClick}
               onContextMenu={handleContextMenu}
             />
+            {viewerTab === 'tree' && (
+              <div className="data-panel-note">
+                Central project Tree placeholder — future PRs will populate this nested structure.
+              </div>
+            )}
             <ResultWindow results={results} onClear={() => setResults([])} />
           </div>
         </div>

@@ -96,6 +96,7 @@ body {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: 6px;
 }
 
 .output-content {
@@ -133,6 +134,11 @@ body {
   background-color: #1e1e1e;
   border: 1px solid #3e3e42;
   border-radius: 4px;
+}
+
+.data-tabs {
+  display: flex;
+  gap: 6px;
 }
 
 .tree-row {
@@ -204,6 +210,11 @@ body {
   display: flex;
   flex-direction: column;
   gap: 10px;
+}
+
+.data-panel-note {
+  color: #858585;
+  font-size: 12px;
 }
 
 .result-window__header {
