@@ -5,13 +5,17 @@ import { BackendClient, CompletionItem } from '../../api/client';
 import { CommandHistory } from '../../utils/commandHistory';
 
 interface PythonEditorProps {
-  onExecute: (code: string) => void;
+  value: string;
+  onCodeChange: (code: string) => void;
+  onExecute: () => void;
   client: BackendClient;
   height?: string;
   placeholder?: string;
 }
 
 export const PythonEditor: React.FC<PythonEditorProps> = ({
+  value,
+  onCodeChange,
   onExecute,
   client,
   height = '150px',
@@ -116,8 +120,8 @@ export const PythonEditor: React.FC<PythonEditorProps> = ({
     const code = editorRef.current.getValue();
     if (code.trim()) {
       historyRef.current.add(code);
-      onExecute(code);
-      editorRef.current.setValue('');
+      onExecute();
+      // Don't clear the editor - user requested persistence
       setIsNavigatingHistory(false);
     }
   }, [onExecute]);
@@ -130,6 +134,7 @@ export const PythonEditor: React.FC<PythonEditorProps> = ({
     
     if (previousCommand !== null) {
       editorRef.current.setValue(previousCommand);
+      onCodeChange(previousCommand);
       setIsNavigatingHistory(true);
       
       // Move cursor to end
@@ -140,7 +145,7 @@ export const PythonEditor: React.FC<PythonEditorProps> = ({
         editorRef.current.setPosition({ lineNumber: lineCount, column: lineLength + 1 });
       }
     }
-  }, []);
+  }, [onCodeChange]);
 
   const navigateHistoryForward = useCallback(() => {
     if (!editorRef.current) return;
@@ -149,6 +154,7 @@ export const PythonEditor: React.FC<PythonEditorProps> = ({
     
     if (nextCommand !== null) {
       editorRef.current.setValue(nextCommand);
+      onCodeChange(nextCommand);
       
       // Move cursor to end
       const model = editorRef.current.getModel();
@@ -160,14 +166,15 @@ export const PythonEditor: React.FC<PythonEditorProps> = ({
     } else {
       setIsNavigatingHistory(false);
     }
-  }, []);
+  }, [onCodeChange]);
 
   return (
     <div style={{ border: '1px solid #ccc', borderRadius: '4px', overflow: 'hidden' }}>
       <Editor
         height={height}
         defaultLanguage="python"
-        defaultValue=""
+        value={value}
+        onChange={(newValue) => onCodeChange(newValue || '')}
         theme="vs-dark"
         onMount={handleEditorDidMount}
         options={{

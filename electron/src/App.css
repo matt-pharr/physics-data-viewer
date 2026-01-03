@@ -109,6 +109,103 @@ body {
   flex-shrink: 0;
 }
 
+.command-panel-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 12px;
+}
+
+.command-tabs {
+  display: flex;
+  gap: 4px;
+  align-items: center;
+}
+
+.tab {
+  background-color: #2d2d30;
+  color: #cccccc;
+  border: 1px solid #3e3e42;
+  border-radius: 4px;
+  padding: 6px 12px;
+  cursor: pointer;
+  font-size: 14px;
+  transition: all 0.2s;
+  min-width: 40px;
+  text-align: center;
+}
+
+.tab:hover {
+  background-color: #3e3e42;
+  border-color: #4ec9b0;
+}
+
+.tab.active {
+  background-color: #4ec9b0;
+  color: #1e1e1e;
+  border-color: #4ec9b0;
+  font-weight: 600;
+}
+
+.tab.add-tab {
+  background-color: #1e1e1e;
+  color: #4ec9b0;
+  border-color: #4ec9b0;
+  font-weight: bold;
+  font-size: 18px;
+  padding: 4px 10px;
+}
+
+.tab.add-tab:hover {
+  background-color: #4ec9b0;
+  color: #1e1e1e;
+}
+
+.command-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.action-button {
+  background-color: #2d2d30;
+  color: #cccccc;
+  border: 1px solid #3e3e42;
+  border-radius: 4px;
+  padding: 8px 16px;
+  cursor: pointer;
+  font-size: 14px;
+  transition: all 0.2s;
+  font-weight: 500;
+}
+
+.action-button:hover {
+  background-color: #3e3e42;
+  border-color: #4ec9b0;
+}
+
+.action-button.execute {
+  background-color: #4ec9b0;
+  color: #1e1e1e;
+  border-color: #4ec9b0;
+}
+
+.action-button.execute:hover {
+  background-color: #6dd6b8;
+  border-color: #6dd6b8;
+}
+
+.action-button.clear {
+  background-color: #f48771;
+  color: #1e1e1e;
+  border-color: #f48771;
+}
+
+.action-button.clear:hover {
+  background-color: #ff9d88;
+  border-color: #ff9d88;
+}
+
 .error-message {
   background-color: #f48771;
   color: #1e1e1e;
