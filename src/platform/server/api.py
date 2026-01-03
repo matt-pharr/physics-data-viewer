@@ -9,7 +9,8 @@ from fastapi.encoders import jsonable_encoder
 from pydantic import BaseModel, Field
 
 from .executor import ExecutionError, ExecutionResult, SubprocessExecutor
-from .introspection import MethodExecutionService, MethodInvocationError, MethodResolutionError
+from .introspection import MethodResolutionError
+from .method_executor import MethodExecutionResult, MethodExecutor
 from .state import StateManager
 
 router = APIRouter()
@@ -83,6 +84,9 @@ class InvokeResponse(BaseModel):
     path: List[str]
     method_name: str
     result: Any
+    result_type: str = "object"
+    error: Optional[str] = None
+    traceback: Optional[str] = None
 
 
 def _get_state_manager(request: Request) -> StateManager:
@@ -99,8 +103,8 @@ def _get_executor(request: Request) -> SubprocessExecutor:
     return executor
 
 
-def _get_method_executor(request: Request) -> MethodExecutionService:
-    executor: Optional[MethodExecutionService] = getattr(request.app.state, "method_execution", None)
+def _get_method_executor(request: Request) -> MethodExecutor:
+    executor: Optional[MethodExecutor] = getattr(request.app.state, "method_execution", None)
     if executor is None:
         raise HTTPException(status_code=500, detail="Method execution unavailable")
     return executor
@@ -169,15 +173,13 @@ def introspect_methods(request: Request, payload: IntrospectRequest) -> Introspe
 def invoke_method(request: Request, payload: InvokeRequest) -> InvokeResponse:
     """Invoke a zero-argument method on the targeted object."""
     executor = _get_method_executor(request)
-    try:
-        result = executor.invoke_method(payload.session_id, payload.path, payload.method_name)
-    except MethodResolutionError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
-    except MethodInvocationError as exc:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    result: MethodExecutionResult = executor.invoke(payload.session_id, payload.path, payload.method_name)
     return InvokeResponse(
         session_id=payload.session_id,
         path=payload.path,
         method_name=payload.method_name,
-        result=jsonable_encoder(result),
+        result=jsonable_encoder(result.result),
+        result_type=result.result_type,
+        error=result.error,
+        traceback=result.traceback,
     )

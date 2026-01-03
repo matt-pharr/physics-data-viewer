@@ -10,6 +10,7 @@ from fastapi import FastAPI
 from .api import router
 from .executor import SubprocessExecutor
 from .introspection import MethodExecutionService, MethodIntrospector
+from .method_executor import MethodExecutor
 from .state import StateManager
 
 LOG = logging.getLogger(__name__)
@@ -20,7 +21,8 @@ def create_app() -> FastAPI:
     state_manager = StateManager()
     executor = SubprocessExecutor(state_manager)
     introspector = MethodIntrospector()
-    method_execution = MethodExecutionService(state_manager, introspector)
+    method_execution_service = MethodExecutionService(state_manager, introspector)
+    method_executor = MethodExecutor(state_manager, introspector, method_execution_service)
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
@@ -30,7 +32,7 @@ def create_app() -> FastAPI:
             yield
         finally:
             LOG.info("Shutting down backend server")
-            executor.shutdown()
+        executor.shutdown()
 
     app = FastAPI(
         title="Physics Data Viewer Backend",
@@ -42,7 +44,7 @@ def create_app() -> FastAPI:
     app.state.state_manager = state_manager
     app.state.executor = executor
     app.state.introspector = introspector
-    app.state.method_execution = method_execution
+    app.state.method_execution = method_executor
     app.include_router(router)
     return app
 

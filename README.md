@@ -7,6 +7,7 @@ For the complete vision and roadmap, see [DEVELOPMENT_PLAN.md](DEVELOPMENT_PLAN.
 - Python package scaffolding using a `src/` layout
 - A module system foundation with manifest parsing and filesystem discovery
 - `ShowablePlottable` protocols for custom data types that can render text (`show`) and visualizations (`plot`)
+- Double-click invocation of `show`/`plot` methods with result routing alongside right-click context menus
 - Example modules and data types demonstrating expected patterns
 - Pytest-based test infrastructure
 - Nested data viewer utilities with lazy loading, search, and virtual scrolling for large datasets
