@@ -5,7 +5,7 @@ from __future__ import annotations
 import inspect
 from dataclasses import dataclass
 from functools import lru_cache
-from typing import Any, Iterable, List, Sequence
+from typing import Any, Callable, Iterable, List, Sequence
 
 from .state import StateManager
 
@@ -121,9 +121,11 @@ class MethodExecutionService:
         method = getattr(obj, method_name, None)
         if method is None or not callable(method):
             raise MethodInvocationError(f"Method '{method_name}' is not callable.")
+        if _requires_additional_arguments(method):
+            raise MethodInvocationError(f"Method '{method_name}' requires arguments and cannot be auto-invoked.")
 
         try:
-            return method()  # type: ignore[misc]
+            return method()
         except Exception as exc:  # noqa: BLE001 - propagate as structured error
             raise MethodInvocationError(f"Method '{method_name}' failed: {exc}") from exc
 

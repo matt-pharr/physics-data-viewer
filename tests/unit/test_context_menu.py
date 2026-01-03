@@ -34,10 +34,12 @@ async def test_context_menu_builds_items_and_routes_to_backend():
         labels = menu.labels()
         assert "show" in labels
         assert "plot" in labels
-        needs_args = next(item for item in menu.items if item.method_name == "needs_args")
+        needs_args = next((item for item in menu.items if item.method_name == "needs_args"), None)
+        assert needs_args is not None
         assert not needs_args.enabled
 
-        show_item = next(item for item in menu.items if item.method_name == "show")
+        show_item = next((item for item in menu.items if item.method_name == "show"), None)
+        assert show_item is not None
         result = await show_item.trigger()
         assert result == "shown"
 
