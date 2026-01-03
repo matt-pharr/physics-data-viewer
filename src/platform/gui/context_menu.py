@@ -4,12 +4,12 @@ from __future__ import annotations
 
 import inspect
 from dataclasses import dataclass
-from typing import Any, Awaitable, Callable, Iterable, List, Sequence
+from typing import Any, Awaitable, Callable, Iterable, List, Sequence, Union
 
 from .client import BackendClient, InvokeResult, MethodInfo
 
 
-Runner = Callable[[], Awaitable[Any] | Any]
+Runner = Callable[[], Union[Awaitable[Any], Any]]
 
 
 @dataclass

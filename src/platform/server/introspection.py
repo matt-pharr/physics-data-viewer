@@ -6,7 +6,7 @@ import inspect
 import logging
 from dataclasses import dataclass
 from functools import lru_cache
-from typing import Any, Callable, Iterable, List, Sequence
+from typing import Any, Callable, Iterable, List, Optional, Sequence
 
 from .state import StateManager
 
@@ -16,7 +16,7 @@ class MethodMetadata:
     """Structured description of an object's callable attribute."""
 
     name: str
-    doc: str | None
+    doc: Optional[str]
     requires_arguments: bool
 
 
@@ -100,7 +100,7 @@ class MethodIntrospector:
 class MethodExecutionService:
     """Resolve and invoke methods against session state safely."""
 
-    def __init__(self, state_manager: StateManager, introspector: MethodIntrospector | None = None) -> None:
+    def __init__(self, state_manager: StateManager, introspector: Optional[MethodIntrospector] = None) -> None:
         self.state_manager = state_manager
         self.introspector = introspector or MethodIntrospector()
         self._log = logging.getLogger(__name__)
