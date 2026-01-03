@@ -19,7 +19,7 @@ class Demo:
 
 class PlotOnly:
     def plot(self):
-        return {"points": [(1, 2)]}
+        return {"points": [[1, 2]]}
 
 
 class Erroring:
@@ -33,14 +33,14 @@ async def test_double_click_invocation_populates_result_window():
     state: StateManager = app.state.state_manager
     session = state.create_session("double-click")
 
-    state.set_nested(session, ["root", "demo"], Demo())
-    state.set_nested(session, ["root", "plot"], PlotOnly())
-    state.set_nested(session, ["root", "error"], Erroring())
+    state.set_nested(session, ["demo"], Demo())
+    state.set_nested(session, ["plot"], PlotOnly())
+    state.set_nested(session, ["error"], Erroring())
 
     viewer = DataViewer(state.get_session_state(session))
-    demo_node = viewer.tree.root.find_by_path(("root", "root", "demo"))
-    plot_node = viewer.tree.root.find_by_path(("root", "root", "plot"))
-    error_node = viewer.tree.root.find_by_path(("root", "root", "error"))
+    demo_node = viewer.tree.root.find_by_path(("root", "demo"))
+    plot_node = viewer.tree.root.find_by_path(("root", "plot"))
+    error_node = viewer.tree.root.find_by_path(("root", "error"))
 
     assert demo_node is not None and plot_node is not None and error_node is not None
 
