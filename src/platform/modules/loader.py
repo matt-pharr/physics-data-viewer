@@ -126,7 +126,7 @@ def load_all(modules_dir: Path) -> ModuleLoadResult:
 
 
 def _initialize_module(module: BaseModule) -> None:
-    """Initialize a module and mark it initialized."""
+    """Initialize a module and ensure it is marked initialized."""
     module.initialize()
     if not module.initialized:
         module.mark_initialized()
@@ -138,6 +138,4 @@ __all__ = [
     "discover_manifests",
     "load_module",
     "load_all",
-    "ModuleManifest",
-    "ManifestError",
 ]

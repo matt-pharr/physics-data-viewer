@@ -12,6 +12,9 @@ from platform.modules.watcher import ModuleWatcher
 def _write_module(module_dir, manifest_data, body: str = ""):
     module_dir.mkdir(parents=True, exist_ok=True)
     (module_dir / "manifest.yaml").write_text(yaml.safe_dump(manifest_data))
+    indented_body = textwrap.indent(body.strip("\n"), " " * 12)
+    if indented_body:
+        indented_body = f"\n{indented_body}\n"
     module_code = textwrap.dedent(
         f"""
         from platform.modules.base import BaseModule
@@ -26,7 +29,7 @@ def _write_module(module_dir, manifest_data, body: str = ""):
             def initialize(self):
                 self.initialize_called = True
                 self.mark_initialized()
-        {body}
+{indented_body}
             def shutdown(self):
                 self.shutdown_called = True
         """
