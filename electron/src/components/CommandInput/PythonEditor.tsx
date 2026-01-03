@@ -5,7 +5,7 @@
 
 import React, { useRef, useEffect, useState } from 'react';
 import Editor, { Monaco } from '@monaco-editor/react';
-import type { editor } from 'monaco-editor';
+import type { editor, languages, Position, IRange } from 'monaco-editor';
 import { getCompletions } from '../../utils/autocompletion';
 
 interface PythonEditorProps {
@@ -81,7 +81,10 @@ export const PythonEditor: React.FC<PythonEditorProps> = ({
 
     // Register autocomplete provider
     monaco.languages.registerCompletionItemProvider('python', {
-      provideCompletionItems: async (model, position) => {
+      provideCompletionItems: async (
+        model: editor.ITextModel,
+        position: Position
+      ): Promise<languages.CompletionList> => {
         const code = model.getValue();
         const offset = model.getOffsetAt(position);
 
@@ -94,7 +97,7 @@ export const PythonEditor: React.FC<PythonEditorProps> = ({
           );
 
           return {
-            suggestions: completions.map((completion) => ({
+            suggestions: completions.map((completion): languages.CompletionItem => ({
               label: completion,
               kind: monaco.languages.CompletionItemKind.Text,
               insertText: completion,
@@ -103,7 +106,7 @@ export const PythonEditor: React.FC<PythonEditorProps> = ({
                 startColumn: position.column,
                 endLineNumber: position.lineNumber,
                 endColumn: position.column,
-              },
+              } as IRange,
             })),
           };
         } catch (error) {
