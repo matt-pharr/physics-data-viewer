@@ -24,6 +24,10 @@ class StateManager:
         """Return a deep copy of the session state."""
         return deepcopy(self._sessions.get(session_id, {}))
 
+    def get_session_state_ref(self, session_id: str) -> Dict[str, Any]:
+        """Return a mutable reference to the session state without copying."""
+        return self._sessions.setdefault(session_id, {})
+
     def has_session(self, session_id: str) -> bool:
         """Check whether a session exists."""
         return session_id in self._sessions

@@ -50,6 +50,52 @@ Return the stored state for a session. Returns `404` if the session is unknown.
 { "x": 2 }
 ```
 
+### `POST /introspect`
+Return public methods for an object stored in session state. The `path` is a list of keys or indexes leading to the target value.
+
+**Request Body**
+```json
+{
+  "session_id": "existing-session-id",
+  "path": ["root", "sample-object"]
+}
+```
+
+**Response**
+```json
+{
+  "session_id": "existing-session-id",
+  "path": ["root", "sample-object"],
+  "methods": [
+    { "name": "show", "doc": "Display object", "requires_arguments": false },
+    { "name": "plot", "doc": null, "requires_arguments": false },
+    { "name": "requires", "doc": null, "requires_arguments": true }
+  ]
+}
+```
+
+### `POST /invoke`
+Invoke a zero-argument method on the object at the provided path. Methods that require arguments will return `400`.
+
+**Request Body**
+```json
+{
+  "session_id": "existing-session-id",
+  "path": ["root", "sample-object"],
+  "method_name": "show"
+}
+```
+
+**Response**
+```json
+{
+  "session_id": "existing-session-id",
+  "path": ["root", "sample-object"],
+  "method_name": "show",
+  "result": "rendered output"
+}
+```
+
 ## Behavior
 
 - Sessions are managed by `StateManager` and persist across executions.

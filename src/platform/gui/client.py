@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, Sequence
 
 import httpx
 
@@ -26,6 +26,23 @@ class ExecuteResult:
     def success(self) -> bool:
         """True if execution completed without reported error."""
         return self.error is None
+
+
+@dataclass(frozen=True)
+class MethodInfo:
+    """Metadata describing a backend method."""
+
+    name: str
+    doc: Optional[str]
+    requires_arguments: bool
+
+
+@dataclass
+class InvokeResult:
+    """Result of invoking a backend method."""
+
+    method_name: str
+    result: Any
 
 
 class BackendClient:
@@ -64,6 +81,29 @@ class BackendClient:
             state=data["state"],
             error=data.get("error"),
         )
+
+    async def list_methods(self, session_id: str, path: Sequence[str]) -> list[MethodInfo]:
+        """Return public methods for an object stored in backend state."""
+        response = await self._client.post("/introspect", json={"session_id": session_id, "path": list(path)})
+        response.raise_for_status()
+        data = response.json()
+        return [
+            MethodInfo(
+                name=entry["name"],
+                doc=entry.get("doc"),
+                requires_arguments=entry.get("requires_arguments", False),
+            )
+            for entry in data.get("methods", [])
+        ]
+
+    async def invoke_method(self, session_id: str, path: Sequence[str], method_name: str) -> InvokeResult:
+        """Invoke a method by name on the backend."""
+        response = await self._client.post(
+            "/invoke", json={"session_id": session_id, "path": list(path), "method_name": method_name}
+        )
+        response.raise_for_status()
+        data = response.json()
+        return InvokeResult(method_name=data["method_name"], result=data.get("result"))
 
     async def get_state(self, session_id: str) -> Dict[str, Any]:
         """Fetch the current state for a session."""

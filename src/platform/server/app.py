@@ -9,6 +9,7 @@ from fastapi import FastAPI
 
 from .api import router
 from .executor import SubprocessExecutor
+from .introspection import MethodExecutionService, MethodIntrospector
 from .state import StateManager
 
 LOG = logging.getLogger(__name__)
@@ -18,6 +19,8 @@ def create_app() -> FastAPI:
     """Create and configure the FastAPI application."""
     state_manager = StateManager()
     executor = SubprocessExecutor(state_manager)
+    introspector = MethodIntrospector()
+    method_execution = MethodExecutionService(state_manager, introspector)
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
@@ -38,6 +41,8 @@ def create_app() -> FastAPI:
 
     app.state.state_manager = state_manager
     app.state.executor = executor
+    app.state.introspector = introspector
+    app.state.method_execution = method_execution
     app.include_router(router)
     return app
 

@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Body, HTTPException, Request, status
+from fastapi.encoders import jsonable_encoder
 from pydantic import BaseModel, Field
 
 from .executor import ExecutionError, ExecutionResult, SubprocessExecutor
+from .introspection import MethodExecutionService, MethodInvocationError, MethodResolutionError
 from .state import StateManager
 
 router = APIRouter()
@@ -43,6 +45,46 @@ class ExecuteResponse(BaseModel):
     error: Optional[str] = None
 
 
+class MethodInfo(BaseModel):
+    """Metadata exposed for a single method."""
+
+    name: str
+    doc: Optional[str] = None
+    requires_arguments: bool = False
+
+
+class IntrospectRequest(BaseModel):
+    """Payload describing the target object to introspect."""
+
+    session_id: str
+    path: List[str] = Field(default_factory=list)
+
+
+class IntrospectResponse(BaseModel):
+    """Response containing available method metadata."""
+
+    session_id: str
+    path: List[str]
+    methods: List[MethodInfo]
+
+
+class InvokeRequest(BaseModel):
+    """Payload to execute a method on a target object."""
+
+    session_id: str
+    path: List[str] = Field(default_factory=list)
+    method_name: str = Field(..., min_length=1)
+
+
+class InvokeResponse(BaseModel):
+    """Response returned after invoking a method."""
+
+    session_id: str
+    path: List[str]
+    method_name: str
+    result: Any
+
+
 def _get_state_manager(request: Request) -> StateManager:
     manager = getattr(request.app.state, "state_manager", None)
     if manager is None:
@@ -54,6 +96,13 @@ def _get_executor(request: Request) -> SubprocessExecutor:
     executor = getattr(request.app.state, "executor", None)
     if executor is None:
         raise HTTPException(status_code=500, detail="Executor unavailable")
+    return executor
+
+
+def _get_method_executor(request: Request) -> MethodExecutionService:
+    executor: Optional[MethodExecutionService] = getattr(request.app.state, "method_execution", None)
+    if executor is None:
+        raise HTTPException(status_code=500, detail="Method execution unavailable")
     return executor
 
 
@@ -97,4 +146,34 @@ def execute(request: Request, payload: ExecuteRequest) -> ExecuteResponse:
         stderr=result.stderr,
         state=result.state,
         error=result.error,
+    )
+
+
+@router.post("/introspect", response_model=IntrospectResponse)
+def introspect_methods(request: Request, payload: IntrospectRequest) -> IntrospectResponse:
+    """Return available methods for the object located at the provided path."""
+    executor = _get_method_executor(request)
+    try:
+        methods = executor.describe_methods(payload.session_id, payload.path)
+    except MethodResolutionError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    method_payloads = [MethodInfo(name=method.name, doc=method.doc, requires_arguments=method.requires_arguments) for method in methods]
+    return IntrospectResponse(session_id=payload.session_id, path=payload.path, methods=method_payloads)
+
+
+@router.post("/invoke", response_model=InvokeResponse)
+def invoke_method(request: Request, payload: InvokeRequest) -> InvokeResponse:
+    """Invoke a zero-argument method on the targeted object."""
+    executor = _get_method_executor(request)
+    try:
+        result = executor.invoke_method(payload.session_id, payload.path, payload.method_name)
+    except MethodResolutionError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except MethodInvocationError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    return InvokeResponse(
+        session_id=payload.session_id,
+        path=payload.path,
+        method_name=payload.method_name,
+        result=jsonable_encoder(result),
     )
