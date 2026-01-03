@@ -121,8 +121,7 @@ class MethodExecutionService:
         method = getattr(obj, method_name, None)
         if method is None or not callable(method):
             raise MethodInvocationError(f"Method '{method_name}' is not callable.")
-        requires_arguments = metadata.requires_arguments or _requires_additional_arguments(method)
-        if requires_arguments:
+        if metadata.requires_arguments:
             raise MethodInvocationError(f"Method '{method_name}' requires arguments and cannot be auto-invoked.")
 
         try:
@@ -154,7 +153,7 @@ class MethodExecutionService:
                 return current[index]
             except IndexError as exc:  # pragma: no cover - defensive guard
                 raise MethodResolutionError(f"Index '{segment}' out of range.") from exc
-        raise MethodResolutionError(f"Cannot descend into object of type {type(current).__name__!s}.")
+        raise MethodResolutionError(f"Cannot descend into object of type {type(current).__name__}.")
 
 
 __all__ = [
