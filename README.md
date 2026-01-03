@@ -9,6 +9,7 @@ For the complete vision and roadmap, see [DEVELOPMENT_PLAN.md](DEVELOPMENT_PLAN.
 - `ShowablePlottable` protocols for custom data types that can render text (`show`) and visualizations (`plot`)
 - Example modules and data types demonstrating expected patterns
 - Pytest-based test infrastructure
+- Nested data viewer utilities with lazy loading, search, and virtual scrolling for large datasets
 
 ## Frontend scaffold (PR #3)
 
