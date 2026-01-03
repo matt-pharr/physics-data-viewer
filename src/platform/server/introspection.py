@@ -117,13 +117,12 @@ class MethodExecutionService:
         metadata = methods.get(method_name)
         if metadata is None:
             raise MethodInvocationError(f"Method '{method_name}' not available on target.")
-        if metadata.requires_arguments:
-            raise MethodInvocationError(f"Method '{method_name}' requires arguments and cannot be auto-invoked.")
 
         method = getattr(obj, method_name, None)
         if method is None or not callable(method):
             raise MethodInvocationError(f"Method '{method_name}' is not callable.")
-        if _requires_additional_arguments(method):
+        requires_arguments = metadata.requires_arguments or _requires_additional_arguments(method)
+        if requires_arguments:
             raise MethodInvocationError(f"Method '{method_name}' requires arguments and cannot be auto-invoked.")
 
         try:
