@@ -4,3 +4,10 @@ __pycache__/
 *.egg-info/
 *.egg
 .pytest_cache/
+
+# Electron
+electron/node_modules/
+electron/dist/
+electron/out/
+electron/.cache/
+electron/package-lock.json

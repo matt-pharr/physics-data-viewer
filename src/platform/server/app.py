@@ -8,6 +8,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 
 from .api import router
+from .autocomplete import AutocompleteEngine
 from .executor import SubprocessExecutor
 from .introspection import MethodExecutionService, MethodIntrospector
 from .method_executor import MethodExecutor
@@ -23,6 +24,7 @@ def create_app() -> FastAPI:
     introspector = MethodIntrospector()
     method_execution_service = MethodExecutionService(state_manager, introspector)
     method_executor = MethodExecutor(state_manager, introspector, method_execution_service)
+    autocomplete_engine = AutocompleteEngine()
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
@@ -45,6 +47,7 @@ def create_app() -> FastAPI:
     app.state.executor = executor
     app.state.introspector = introspector
     app.state.method_execution = method_executor
+    app.state.autocomplete_engine = autocomplete_engine
     app.include_router(router)
     return app
 

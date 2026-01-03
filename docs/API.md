@@ -2,6 +2,8 @@
 
 This document describes the lightweight backend API introduced in PR #2. The API is served by the FastAPI application defined in `src/platform/server/app.py`.
 
+**Updated in PR #7**: Added autocomplete endpoint for Python code completion.
+
 ## Endpoints
 
 ### `POST /sessions`
@@ -95,6 +97,46 @@ Invoke a zero-argument method on the object at the provided path. Methods that r
   "result": "rendered output"
 }
 ```
+
+### `POST /autocomplete`
+Get autocomplete suggestions for Python code at a specific cursor position.
+
+**Request Body**
+```json
+{
+  "code": "x = 1\nfor",
+  "position": 9,
+  "session_id": "existing-session-id"
+}
+```
+
+**Response**
+```json
+{
+  "completions": [
+    {
+      "label": "for",
+      "kind": "keyword",
+      "detail": "Python keyword",
+      "documentation": null,
+      "insertText": "for"
+    },
+    {
+      "label": "format",
+      "kind": "function",
+      "detail": "builtin",
+      "documentation": null,
+      "insertText": "format"
+    }
+  ]
+}
+```
+
+The autocomplete engine provides suggestions for:
+- Python keywords (if, for, while, etc.)
+- Variables and functions in the current session namespace
+- Builtin Python functions and types
+- Module names (from imported modules in namespace)
 
 ## Behavior
 
