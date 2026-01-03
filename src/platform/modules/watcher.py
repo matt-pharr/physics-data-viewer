@@ -10,6 +10,9 @@ from typing import Callable, Dict, Optional, Set
 from .loader import MANIFEST_FILENAMES
 
 
+STOP_TIMEOUT_MULTIPLIER = 2.0
+
+
 class ModuleWatcher:
     """Lightweight polling-based watcher for module directories."""
 
@@ -18,7 +21,7 @@ class ModuleWatcher:
         self.on_change = on_change
         self.poll_interval = poll_interval
         # Allow a short grace period for the polling loop to exit cleanly.
-        self.stop_timeout = poll_interval * 2
+        self.stop_timeout = poll_interval * STOP_TIMEOUT_MULTIPLIER
         self._known: Dict[Path, float] = {}
         self._thread: Optional[threading.Thread] = None
         self._running = False

@@ -123,7 +123,10 @@ def load_all(modules_dir: Path) -> ModuleLoadResult:
             result.errors.append(exc)
         except Exception as exc:  # pragma: no cover - best effort safety net
             result.errors.append(
-                ModuleLoadError(f"Unexpected error loading module {module_name}: {exc}")
+                ModuleLoadError(
+                    f"Unexpected error loading module {module_name}: "
+                    f"{exc.__class__.__name__}: {exc}"
+                )
             )
 
     return result
