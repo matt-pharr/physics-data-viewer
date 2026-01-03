@@ -41,8 +41,10 @@ class BackendClient:
         try:
             response = await self._client.post("/sessions", json=None)
             response.raise_for_status()
-        except httpx.HTTPError as exc:  # pragma: no cover - defensive
-            raise FrontendConnectionError("Unable to reach backend") from exc
+        except httpx.RequestError as exc:
+            raise FrontendConnectionError(f"Unable to reach backend at {self.base_url}. Is it running?") from exc
+        except httpx.HTTPStatusError as exc:  # pragma: no cover - defensive
+            raise FrontendConnectionError(f"Backend at {self.base_url} returned an error: {exc.response.status_code}") from exc
         payload = response.json()
         return payload["session_id"]
 
@@ -73,4 +75,3 @@ class BackendClient:
         """Close the underlying HTTP client if owned by this instance."""
         if self._owns_client:
             await self._client.aclose()
-

@@ -21,6 +21,13 @@ from platform.gui import FrontendApp
 app = FrontendApp(backend_url="http://localhost:8000")
 main_window = asyncio.run(app.start(dev_mode=True))
 result = asyncio.run(app.send_command("x = 1"))
+print(result.stdout)
+```
+
+Before running the snippet above, start the backend server in another shell:
+
+```bash
+uvicorn platform.server.app:app --host 127.0.0.1 --port 8000
 ```
 
 This scaffold provides a foundation for future GUI work while keeping connectivity and window lifecycle testable.
