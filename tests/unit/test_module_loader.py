@@ -23,6 +23,7 @@ def _write_module(module_dir, manifest_data):
 
             def initialize(self):
                 self.initialize_called = True
+                self.mark_initialized()
 
             def shutdown(self):
                 self.initialized = False

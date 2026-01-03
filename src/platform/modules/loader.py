@@ -7,6 +7,7 @@ import inspect
 import sys
 from pathlib import Path
 from typing import Iterable, List, Tuple
+from importlib.abc import Loader
 
 from .base import BaseModule
 from .manifest import ManifestError, ModuleManifest
@@ -55,8 +56,11 @@ def load_module(module_dir: Path, manifest: ModuleManifest) -> BaseModule:
 
     module = importlib.util.module_from_spec(spec)
     sys.modules[spec.name] = module
+    loader = spec.loader
+    if not isinstance(loader, Loader):
+        raise ModuleLoadError(f"Invalid loader for module at {module_file}")
     try:
-        spec.loader.exec_module(module)  # type: ignore[arg-type]
+        loader.exec_module(module)
     except Exception as exc:
         raise ModuleLoadError(f"Failed to import module {manifest.name}") from exc
 

@@ -18,7 +18,7 @@ def _has_method(obj: Any, name: str) -> bool:
     required = [
         param
         for param in params
-        if param.default is inspect._empty
+        if param.default is inspect.Parameter.empty
         and param.kind
         in (
             inspect.Parameter.POSITIONAL_ONLY,

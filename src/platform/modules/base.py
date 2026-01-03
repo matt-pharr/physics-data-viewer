@@ -35,7 +35,7 @@ class BaseModule(abc.ABC):
         self.initialized = True
 
     @abc.abstractmethod
-    def initialize(self) -> Optional[None]:
+    def initialize(self) -> None:
         """Perform module setup. Called after loading."""
 
     def shutdown(self) -> None:

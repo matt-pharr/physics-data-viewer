@@ -1,0 +1,7 @@
+setup:
+  - step: "Install Python dependencies in editable mode with tests"
+    command: "python -m pip install --upgrade pip && python -m pip install -e .[test]"
+  - step: "Run the unit test suite"
+    command: "pytest"
+  - step: "Review architecture plan"
+    note: "Read DEVELOPMENT_PLAN.md to align changes with the roadmap."

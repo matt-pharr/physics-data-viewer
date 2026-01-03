@@ -29,7 +29,8 @@ def test_showable_protocol_and_introspection():
     obj = FullImplementation()
     assert supports_show(obj)
     assert supports_plot(obj)
-    assert describe_capabilities(obj) == {"show": True, "plot": True}
+    expected_capabilities = {"show": True, "plot": True}
+    assert describe_capabilities(obj) == expected_capabilities
     assert isinstance(obj, ShowablePlottable)
     assert isinstance(obj, Showable)
     assert isinstance(obj, Plottable)

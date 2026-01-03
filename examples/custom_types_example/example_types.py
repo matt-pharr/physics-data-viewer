@@ -1,6 +1,6 @@
 """Example custom data types implementing show/plot interfaces."""
 
-from typing import Any
+from typing import Any, List, Tuple
 
 from platform.types.showable import Plottable, Showable, ShowablePlottable
 
@@ -14,7 +14,7 @@ class ShowableData(Showable):
 
 
 class PlottableData(Plottable):
-    def __init__(self, points: list[tuple[float, float]]):
+    def __init__(self, points: List[Tuple[float, float]]):
         self.points = points
 
     def plot(self):
@@ -22,7 +22,7 @@ class PlottableData(Plottable):
 
 
 class FullData(ShowablePlottable):
-    def __init__(self, label: str, data: list[int]):
+    def __init__(self, label: str, data: List[int]):
         self.label = label
         self.data = data
 
