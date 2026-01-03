@@ -31,7 +31,7 @@ export const App: React.FC = () => {
           headers: {
             'Content-Type': 'application/json',
           },
-          body: JSON.stringify({}),
+          body: JSON.stringify({ session_id: null }),
         });
 
         if (!response.ok) {
