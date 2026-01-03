@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from functools import partial
 from typing import Any, Callable, Iterable, List, Optional, Sequence, Tuple
 
 from .formatting import FormattedValue, format_value
@@ -101,10 +102,7 @@ class TreeView:
         node_path = (*path, str(key))
         loader: Optional[Callable[[], List[TreeNode]]] = None
         if is_container:
-            def loader_func(val: Any = value, node_path: Path = node_path) -> List[TreeNode]:
-                return self._build_children(val, node_path)
-
-            loader = loader_func
+            loader = partial(self._build_children, value, node_path)
         return TreeNode(
             key=str(key),
             value=value,
