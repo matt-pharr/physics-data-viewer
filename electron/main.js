@@ -5,8 +5,8 @@ let mainWindow;
 
 function createWindow() {
   mainWindow = new BrowserWindow({
-    width: 1200,
-    height: 800,
+    width: 1400,
+    height: 900,
     webPreferences: {
       nodeIntegration: false,
       contextIsolation: true,
@@ -14,14 +14,14 @@ function createWindow() {
     }
   });
 
-  // In development, load from dev server; in production, load from file
+  // Load the index.html file
+  mainWindow.loadFile(path.join(__dirname, 'index.html'));
+
+  // Check if dev mode
   const isDev = process.argv.includes('--dev');
   
   if (isDev) {
-    mainWindow.loadURL('http://localhost:3000');
     mainWindow.webContents.openDevTools();
-  } else {
-    mainWindow.loadFile(path.join(__dirname, 'dist', 'index.html'));
   }
 
   mainWindow.on('closed', () => {

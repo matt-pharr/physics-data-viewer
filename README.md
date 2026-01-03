@@ -40,17 +40,35 @@ asyncio.run(main())
 
 This scaffold provides a foundation for future GUI work while keeping connectivity and window lifecycle testable.
 
-## Electron Frontend (PR #7)
+## Electron Frontend (PR #7 + PR #8)
 
-The `electron/` directory contains a modern Electron-based frontend with:
+The `electron/` directory contains a **fully functional** Electron-based frontend with:
 
 - **Monaco Editor**: VS Code's editor component for Python code input
 - **Syntax Highlighting**: Built-in Python syntax highlighting
 - **Command History**: Navigate previously executed commands with ↑/↓ arrows
 - **Autocomplete**: Intelligent completion for keywords, builtins, state variables, and modules
 - **Multi-line Support**: Full support for multi-line Python code
+- **Real-time Output**: See execution results immediately
+- **State Viewer**: Monitor session variables in real-time
+- **Complete REPL UI**: Full Python REPL experience in Electron
 
-See [electron/README.md](electron/README.md) for setup and development instructions.
+### Quick Start
+
+**See [QUICKSTART.md](QUICKSTART.md) for detailed instructions.**
+
+```bash
+# Terminal 1: Start backend
+export PYTHONPATH="$(pwd)/src"
+uvicorn platform.server.app:app --host 127.0.0.1 --port 8000
+
+# Terminal 2: Run Electron app
+cd electron
+npm install  # First time only
+npm start
+```
+
+See [electron/README.md](electron/README.md) for complete setup and development instructions.
 
 ## Getting Started
 
