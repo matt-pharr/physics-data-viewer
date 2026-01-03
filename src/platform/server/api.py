@@ -4,10 +4,10 @@ from __future__ import annotations
 
 from typing import Any, Dict, Optional
 
-from fastapi import APIRouter, Body, HTTPException, Request
-from pydantic import BaseModel
+from fastapi import APIRouter, Body, HTTPException, Request, status
+from pydantic import BaseModel, Field
 
-from .executor import ExecutionResult, SubprocessExecutor
+from .executor import ExecutionError, ExecutionResult, SubprocessExecutor
 from .state import StateManager
 
 router = APIRouter()
@@ -22,9 +22,9 @@ class SessionResponse(BaseModel):
 class ExecuteRequest(BaseModel):
     """Payload for executing Python code."""
 
-    code: str
+    code: str = Field(..., min_length=1, max_length=10000)
     session_id: Optional[str] = None
-    timeout: float = 5.0
+    timeout: float = Field(default=5.0, gt=0, le=60.0)
 
 
 class ExecuteResponse(BaseModel):
@@ -75,11 +75,16 @@ def execute(request: Request, payload: ExecuteRequest) -> ExecuteResponse:
     manager = _get_state_manager(request)
     session_id = payload.session_id or manager.create_session()
 
-    result: ExecutionResult = executor.execute(
-        code=payload.code,
-        session_id=session_id,
-        timeout=payload.timeout,
-    )
+    try:
+        result: ExecutionResult = executor.execute(
+            code=payload.code,
+            session_id=session_id,
+            timeout=payload.timeout,
+        )
+    except ExecutionError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)
+        ) from exc
     return ExecuteResponse(
         session_id=session_id,
         stdout=result.stdout,
