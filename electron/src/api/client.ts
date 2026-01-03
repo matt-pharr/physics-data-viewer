@@ -22,6 +22,20 @@ export interface CompletionResult {
   completions: CompletionItem[];
 }
 
+export interface MethodInfo {
+  name: string;
+  doc?: string | null;
+  requires_arguments: boolean;
+}
+
+export interface InvokeResult {
+  method_name: string;
+  result: any;
+  result_type: string;
+  error?: string | null;
+  traceback?: string | null;
+}
+
 export class BackendClient {
   private baseUrl: string;
   private sessionId: string | null = null;
@@ -122,6 +136,54 @@ export class BackendClient {
     }
 
     return await response.json();
+  }
+
+  /**
+   * List available methods for a value at the provided backend path.
+   */
+  async listMethods(sessionId: string, path: string[]): Promise<MethodInfo[]> {
+    const response = await fetch(`${this.baseUrl}/introspect`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ session_id: sessionId, path }),
+    });
+
+    if (!response.ok) {
+      throw new Error(`Introspection failed: ${response.statusText}`);
+    }
+
+    const data = await response.json();
+    return (data.methods || []).map((entry: any) => ({
+      name: entry.name,
+      doc: entry.doc,
+      requires_arguments: Boolean(entry.requires_arguments),
+    }));
+  }
+
+  /**
+   * Invoke a zero-argument method for a backend path.
+   */
+  async invokeMethod(sessionId: string, path: string[], methodName: string): Promise<InvokeResult> {
+    const response = await fetch(`${this.baseUrl}/invoke`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ session_id: sessionId, path, method_name: methodName }),
+    });
+
+    if (!response.ok) {
+      const payload = await response.json().catch(() => ({}));
+      const detail = payload?.detail ?? response.statusText;
+      throw new Error(`Invoke failed: ${detail}`);
+    }
+
+    const data = await response.json();
+    return {
+      method_name: data.method_name ?? methodName,
+      result: data.result,
+      result_type: data.result_type ?? 'object',
+      error: data.error,
+      traceback: data.traceback,
+    };
   }
 
   getSessionId(): string | null {

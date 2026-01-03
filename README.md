@@ -58,7 +58,7 @@ npm start    # Builds and launches automatically
 
 ### Prerequisites
 
-- Python 3.8+
+- Python 3.10 - 3.14
 - Node.js 18+ and npm (for Electron frontend)
 
 ### Backend Setup

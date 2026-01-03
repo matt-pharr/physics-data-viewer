@@ -1,6 +1,6 @@
 # Physics Data Viewer - Electron Frontend
 
-This directory contains the Electron-based frontend for the Physics Data Viewer application, implementing PR #7 features: Python Command Input & Autocomplete.
+This directory contains the Electron-based frontend for the Physics Data Viewer application, implementing PR #7 features: Python Command Input & Autocomplete and PR #8 data viewer integration.
 
 ## Features
 
@@ -13,13 +13,14 @@ This directory contains the Electron-based frontend for the Physics Data Viewer 
 - **Multi-line Input**: Support for multi-line Python code
 - **Real-time Execution**: Execute code with Ctrl+Enter and see results immediately
 - **Modern UI**: Dark theme with responsive layout
+- **Data Viewer**: React tree view with virtual scrolling, context menu actions, and double-click method invocation results
 
 ## Setup
 
 ### Prerequisites
 
 - Node.js 18+ and npm
-- Python 3.8+ with the backend installed
+- Python 3.10 - 3.14 with the backend installed
 
 ### Installation
 
@@ -72,6 +73,7 @@ electron/
 ├── package.json                 # Node.js dependencies
 ├── webpack.config.js            # Webpack build configuration
 ├── tsconfig.json                # TypeScript configuration
+├── jest.config.js               # Jest test configuration
 └── src/
     ├── index.tsx                # React entry point
     ├── index.html               # HTML template
@@ -80,9 +82,14 @@ electron/
     ├── api/
     │   └── client.ts            # Backend HTTP client
     ├── components/
+    │   ├── ContextMenu/         # Context menu UI
+    │   ├── DataViewer/          # Tree view + virtual scroller
+    │   └── ResultDisplay/       # Result history panel
     │   └── CommandInput/
     │       └── PythonEditor.tsx # Monaco-based Python editor
     └── utils/
+        ├── dataFormatting.ts    # Data viewer formatting helpers
+        └── methodIntrospection.ts # Backend method helpers
         └── commandHistory.ts    # Command history manager
 ```
 
@@ -132,6 +139,13 @@ The backend autocomplete logic has comprehensive unit tests:
 pytest tests/unit/test_autocomplete.py -v
 ```
 
+Electron frontend unit and integration tests (Jest + React Testing Library):
+
+```bash
+cd electron
+npm test
+```
+
 ## Known Limitations
 
 - Autocomplete does not yet support attribute completion (e.g., `obj.method`)
@@ -140,9 +154,6 @@ pytest tests/unit/test_autocomplete.py -v
 
 ## Future Enhancements (Planned for Later PRs)
 
-- Data structure visualization (tree view)
-- Context menus for method invocation
-- Result display windows
 - Module/plugin system integration
 - Multi-window support
 - Performance optimizations for large datasets

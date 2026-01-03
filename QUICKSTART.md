@@ -2,7 +2,7 @@
 
 ## Prerequisites Check
 
-✅ Python 3.8+ installed  
+✅ Python 3.10 - 3.14 installed  
 ✅ Node.js 18+ and npm installed  
 ✅ Dependencies installed (`pip install -e .[test]`)  
 ✅ Electron dependencies installed (`cd electron && npm install`)  
