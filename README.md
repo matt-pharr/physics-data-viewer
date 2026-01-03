@@ -16,6 +16,20 @@ For the complete vision and roadmap, see [DEVELOPMENT_PLAN.md](DEVELOPMENT_PLAN.
 - ✅ Real-time code execution with output display
 - ✅ Modern dark-themed UI
 
+### ✅ The Electron App is Ready to Run!
+
+**Quick Start:**
+
+```bash
+# Terminal 1: Start the backend
+PYTHONPATH=src uvicorn platform.server.app:app --host 127.0.0.1 --port 8000
+
+# Terminal 2: Start Electron
+cd electron && npm start
+```
+
+**See [QUICKSTART.md](QUICKSTART.md) for detailed instructions and troubleshooting.**
+
 ### Architecture
 
 ```
