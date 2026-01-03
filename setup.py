@@ -9,5 +9,5 @@ setup(
     packages=find_packages(where="src"),
     include_package_data=True,
     install_requires=["pyyaml>=6.0.1", "fastapi>=0.110.0"],
-    python_requires=">=3.8",
+    python_requires=">=3.10, <3.15",
 )

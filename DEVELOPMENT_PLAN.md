@@ -714,7 +714,7 @@ This document outlines the complete development roadmap for building a modern, e
 - [ ] All features have >80% test coverage
 - [ ] Documentation is comprehensive and beginner-friendly
 - [ ] At least 5 working example modules included
-- [ ] Supports Python 3.8+ on Linux, macOS, Windows
+- [ ] Supports Python 3.10 - 3.14 on Linux, macOS, Windows
 - [ ] Multi-window support works reliably
 - [ ] Module developers can create fully functional modules from templates
 - [ ] Performance meets or exceeds specialized proprietary solutions

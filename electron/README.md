@@ -20,7 +20,7 @@ This directory contains the Electron-based frontend for the Physics Data Viewer 
 ### Prerequisites
 
 - Node.js 18+ and npm
-- Python 3.8+ with the backend installed
+- Python 3.10 - 3.14 with the backend installed
 
 ### Installation
 
