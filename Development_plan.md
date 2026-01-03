@@ -1,447 +1,738 @@
-# Scientific Data Viewer - Development Plan
+# Physics Data Analysis Platform - Development Plan
 
-## Mission
+## Overview
 
-Build a modern, high-performance application for interactive analysis and visualization of scientific data that enables: 
-- Interactive nested dictionary/data structure exploration
-- Double-click and right-click method invocation (. show(), .plot(), custom methods)
-- Python command execution environment for interactive analysis
-- An extensible module/plugin system enabling domain scientists (non-developers) to create analysis tools
-- Multi-window support with responsive UI
-- Excellent performance handling large, complex data structures
+This document outlines the complete development roadmap for building a modern, extensible physics data analysis platform. The application provides: 
+
+- An interactive nested data structure viewer with double-click and right-click capabilities
+- A Python REPL command execution environment
+- An extensible module/plugin system for domain experts (physicists)
+- Multi-window support with modern, responsive UI
+- High performance data visualization and interaction
+- Seamless integration with scientific Python ecosystem (numpy, xarray, matplotlib, etc.)
 
 ## Core Principles
 
-1. **Accessibility**: Non-developer scientists must be able to create analysis modules from templates
-2. **Performance**: Large data structures (100k+ items) must remain responsive
-3. **Developer Experience**: Clear separation of concerns, minimal boilerplate for module creators
-4. **Maintainability**: Conservative dependency decisions; only add when benefit significantly outweighs burden
-5. **Language Flexibility**: Use the right tool for the job (Python for logic, modern UI framework for frontend, C/Rust for performance-critical code)
-6. **Version Stability**: Support Python 3.9+ with graceful degradation for edge cases
+1. **Performance First**: Data visualization must remain responsive even with large datasets (10k+ items, <100ms load time)
+2. **Accessibility**: Domain experts (physicists) without deep software engineering knowledge must be able to create and deploy modules
+3. **Maintainability**: Conservative dependency management - each dependency must justify its maintenance burden with clear performance or usability gains
+4. **Flexibility**: GUI technology should be modern and responsive; custom technologies (Electron, web frameworks) are acceptable if they improve deployment and performance
+5. **Integration**: Seamless compatibility with scientific Python ecosystem (numpy, xarray, matplotlib, scipy, etc.)
+6. **Extensibility**: Plugin system allows custom data types with `.show()` and `.plot()` methods
 
-## Technology Stack
+## Technology Stack Rationale
 
-### Frontend / GUI
-- **Framework**: Electron + React (or equivalent modern framework)
-  - *Rationale*: Superior multi-window handling, modern UI patterns, native OS integration, easier deployment
-  - *Alternative consideration*: PyQt6 if rapid iteration needed before Electron implementation
-- **Build**:  Vite or similar modern bundler
-- **Styling**: TailwindCSS or styled-components
+### Frontend/GUI
+- **Primary Option**: Electron + React/Vue.js
+  - Modern, responsive UI out of the box
+  - Multi-window support is native
+  - Better performance than Tkinter for complex layouts
+  - Easier distribution (single executable)
+  - Web technologies familiar to many developers
+  
+- **Fallback Option**: PyQt6/PySide6 + Python
+  - More native Python integration
+  - No Node.js dependency in final distribution
+  - Better system integration on some platforms
+  - Steeper learning curve
 
-### Backend / Data Processing
-- **Core Server**: FastAPI (lightweight, async-capable, perfect for this scale)
-- **Process Management**: Python subprocess with resource limits
-- **Data Handling**: 
-  - xarray (for n-dimensional data)
-  - numpy (assumed already used)
-  - pandas (assumed already used)
-  - matplotlib (assumed already used)
-  - scipy (for scientific computing)
+**Recommendation**: Start with Electron for superior UX.  Can migrate to PyQt6 if deployment becomes problematic.
+
+### Backend/Server
+- **Python HTTP Server**: Custom lightweight server using `aiohttp` or `FastAPI`
+  - Justification: Simpler than Electron IPC, allows for future web UI
+  - Performance: async/await handles concurrent requests efficiently
+  - Extensibility:  Modules can register their own endpoints
+
+### Data Execution
+- **Python subprocess execution** with state management
+- **Namespace isolation** for REPL sessions
+- **Resource limits** via `resource` module or Docker containers for HPC users
 
 ### Performance-Critical Components
-- **Tree/Dict Traversal**: Consider C extension if benchmarks show >10ms for 10k items
-- **Rendering**: Virtual scrolling at UI layer (Electron handles this well)
-- **Data Serialization**: Protocol Buffers or msgpack if JSON becomes bottleneck
+- **Rust via PyO3** for performance hotspots (tree traversal, data filtering)
+- **NumPy/Pandas/Xarray** for scientific data operations (already in community stack)
+- **Cython** for intermediate performance needs (easier than Rust for Python team)
 
-### Testing & Development
-- **Testing**:  pytest
-- **Linting**: ruff (fast, modern alternative to flake8)
-- **Type Checking**: pyright
-- **Task Runner**: Just or Make
+### Acceptable Dependencies
 
-### Deployment
-- **Packaging**:  PyInstaller for executables, or Electron builder
-- **Distribution**: GitHub releases, optional PyPI (if server-only install), Conda
+#### Core Runtime (required)
+- `aiohttp` or `fastapi` (server framework - justified for async handling)
+- `pydantic` (data validation - minimal, focused)
+- Scientific stack: `numpy`, `scipy`, `matplotlib`, `xarray` (physicist-required)
+
+#### GUI (Electron path)
+- `electron` (distribution)
+- Standard web stack (`react` or `vue`)
+
+#### GUI (PyQt6 path)
+- `PyQt6` or `PySide6` (justified for native GUI)
+
+#### Development/Testing
+- `pytest` (testing - minimal overhead)
+- `hypothesis` (property-based testing for critical paths)
+- `pytest-benchmark` (performance testing)
+
+**Philosophy**:  Avoid large dependency trees. Before adding a dependency, ask: 
+- Does it save >10% development time?
+- Does it measurably improve performance?
+- Is it actively maintained by established projects?
+- What's the total transitive dependency count?
 
 ---
 
-## Work Breakdown:  22 Pull Requests
+## Architecture Overview
 
-### Phase 1: Foundation & Architecture (PRs 1-4)
+```
+┌─────────────────────────────────────────────┐
+│         Frontend (Electron + React)         │
+│  - Data Structure Viewer (Tree Widget)      │
+│  - Python Command Input (Monaco Editor)     │
+│  - Output/Log Display                       │
+│  - Module UI Panels                         │
+│  - Multi-Window Management                  │
+└─────────────────────┬───────────────────────┘
+                      │ HTTP/WebSocket
+┌─────────────────────▼───────────────────────┐
+│      Python Backend (FastAPI + aiohttp)    │
+│  - State Management                         │
+│  - REPL Execution Engine                    │
+│  - Module Loader & Lifecycle                │
+│  - Event System                             │
+│  - Caching & Performance                    │
+└─────────────────────┬───────────────────────┘
+                      │
+┌─────────────────────▼───────────────────────┐
+│    Module Ecosystem (User-Developed)       │
+│  - Physics Analysis Modules                 │
+│  - Custom Data Type Handlers                │
+│  - Visualization Plugins                    │
+└─────────────────────────────────────────────┘
+```
 
-**PR #1: Project Initialization & Core Architecture**
-- Repository structure and build system
-- Define base classes for custom data types (ShowablePlottable)
-- Module system architecture design
-- Backend server skeleton (FastAPI)
-- CI/CD pipeline setup
-- **Deliverables**:
-  - Directory structure with `/frontend`, `/backend`, `/modules`
-  - `backend/core/types.py` - ShowablePlottable base classes
-  - `backend/core/module_system.py` - Plugin loader framework
-  - `backend/main.py` - FastAPI app skeleton
-  - `.github/workflows/` - test and lint workflows
-  - `pyproject.toml` with minimal dependencies
-  - `tests/test_module_system.py`
-  - `tests/test_types.py`
+---
 
-**PR #2: Backend Data Management & State**
-- Data structure serialization (dict → JSON/msgpack)
-- Session/workspace management
-- Efficient data access patterns for nested structures
-- **Deliverables**:
-  - `backend/core/data_manager.py` - State handling
-  - `backend/core/serializer.py` - Serialization layer
-  - `backend/api/data_routes.py` - REST endpoints for data access
-  - `tests/test_data_manager.py`
-  - `tests/test_serializer.py` with performance benchmarks
+## Work Breakdown:  20 Pull Requests
 
-**PR #3: Frontend Scaffolding & Window Management**
-- Electron app initialization
+### Phase 1: Foundation & Architecture (PRs #1-3)
+
+#### PR #1: Project Initialization & Module System Foundation
+**Scope**: Repository setup, package structure, foundational abstractions
+
+**Deliverables**:
+- Python package structure (`src/platform/` layout)
+- Base module system architecture
+- `ShowablePlottable` protocol/abstract base class
+- Module manifest schema (YAML/JSON)
+- Module loader implementation
+- Unit tests for module discovery and loading
+
+**Success Criteria**:
+- Module can be loaded from filesystem
+- Custom types can implement `.show()` and `.plot()` methods
+- Test coverage >85%
+
+**Key Files**:
+- `src/platform/__init__.py`
+- `src/platform/modules/base.py` - Base module class
+- `src/platform/modules/loader.py` - Module discovery
+- `src/platform/types/showable.py` - ShowablePlottable protocol
+- `tests/unit/test_module_loader.py`
+- `examples/minimal_module/` - Reference module
+
+---
+
+#### PR #2: Python Backend Server Infrastructure
+**Scope**:  Lightweight async server, command execution, state management
+
+**Deliverables**:
+- FastAPI/aiohttp server bootstrap
+- Safe Python REPL execution engine (subprocess-based)
+- State manager (nested dict management, serialization)
+- Session management
+- Error handling and logging
+- HTTP API specification
+
+**Success Criteria**: 
+- Server starts/stops cleanly
+- Commands execute with proper namespace isolation
+- State persists correctly
+- Response time <100ms for typical commands
+
+**Key Files**:
+- `src/platform/server/app.py` - Server setup
+- `src/platform/server/executor.py` - Command execution
+- `src/platform/server/state.py` - State management
+- `src/platform/server/api.py` - API routes
+- `tests/unit/test_executor.py`
+- `tests/integration/test_server.py`
+- `docs/API.md` - API specification
+
+---
+
+#### PR #3: Frontend/GUI Framework Decision & Initial Setup
+**Scope**: GUI framework selection, window management, communication layer
+
+**Deliverables**: 
+- Electron application scaffold (or PyQt6 alternative setup)
+- Client-server communication layer (HTTP client)
 - Window manager for multi-window support
-- IPC (Inter-Process Communication) setup between Electron main and renderer
-- **Deliverables**:
-  - `/frontend` React project structure
-  - `frontend/main.js` - Electron main process
-  - `frontend/preload.js` - Secure IPC bridge
-  - `frontend/src/components/WindowManager.tsx`
-  - `frontend/src/ipc/index.ts` - IPC wrapper
-  - Integration tests for window lifecycle
+- Build/dev infrastructure
+- Example basic window
 
-**PR #4: API Specification & Backend Routes**
-- Define OpenAPI spec for frontend-backend communication
-- Implement core CRUD routes for data exploration
-- Error handling and response formats
-- **Deliverables**:
-  - `backend/api/spec.yaml` or inline FastAPI docs
-  - `backend/api/routes/` - All route modules
-  - `backend/api/models. py` - Pydantic schemas
-  - Request/response examples in docs
-  - Integration tests for API endpoints
+**Success Criteria**:
+- Frontend starts and connects to backend
+- Can send/receive commands
+- Multiple windows can coexist
+- Hot-reload works for development
+
+**Key Files**:
+- `electron/main.js` (or `src/platform/gui/app.py` for PyQt)
+- `electron/src/api/client.ts` (or Python equivalent)
+- `electron/src/components/BaseWindow.tsx`
+- Build configuration for distribution
 
 ---
 
-### Phase 2: Dictionary Viewer & Data Exploration (PRs 5-7)
+### Phase 2: Data Viewer & Interaction (PRs #4-6)
 
-**PR #5: Dictionary Viewer Component**
-- React component for recursive data structure display
-- Virtual scrolling for performance (10k+ items)
-- Expand/collapse functionality
-- Type detection and display hints
-- **Deliverables**:
-  - `frontend/src/components/DictViewer.tsx` - Core component
-  - `frontend/src/components/TreeNode.tsx` - Individual node renderer
-  - `frontend/src/hooks/useVirtualScroll.ts` - Virtualization hook
-  - `frontend/src/utils/treeUtils.ts` - Tree manipulation functions
-  - Performance benchmarks:  <100ms for 10k nodes on typical hardware
-  - `tests/components/DictViewer.test. tsx`
-  - `tests/performance/dict_viewer_perf.test.ts`
+#### PR #4: Nested Data Structure Viewer Component
+**Scope**: High-performance tree view for arbitrary nested data
 
-**PR #6: Right-Click Context Menu System**
-- Context menu framework
-- Automatic method detection (. show(), .plot(), custom methods)
-- Method introspection and caching (backend)
-- Menu routing
-- **Deliverables**: 
-  - `frontend/src/components/ContextMenu.tsx`
-  - `frontend/src/hooks/useContextMenu.ts`
-  - `backend/core/introspection.py` - Object introspection
-  - `backend/api/routes/introspection.py` - Introspection endpoints
-  - Method cache decorator in backend
-  - `tests/components/ContextMenu.test.tsx`
-  - `tests/test_introspection.py`
+**Deliverables**: 
+- Tree widget displaying nested dicts/lists
+- Virtual scrolling for large datasets (10k+ items)
+- Custom type detection and formatting
+- Search/filter functionality
+- Lazy loading for deep structures
+- Performance benchmarks
 
-**PR #7: Method Invocation & Result Display**
-- Safe method execution system (sandboxed subprocess)
-- Result capture and display
-- Error handling with stack traces
-- Visualization rendering (for . plot() returns)
-- **Deliverables**:
-  - `backend/core/executor.py` - Safe method runner
-  - `backend/api/routes/execute.py` - Execution endpoints
-  - `frontend/src/components/ResultDisplay. tsx`
-  - `frontend/src/components/ImageViewer.tsx`
-  - `frontend/src/components/TextDisplay.tsx`
-  - Resource limiting and timeout handling
-  - `tests/test_executor.py` with timeout, exception, and resource tests
+**Success Criteria**: 
+- Displays 10k items in <100ms
+- Smooth scrolling with 1000+ visible items
+- Custom types render appropriately
+- Memory usage <50MB for 100k items
+
+**Key Files**: 
+- `electron/src/components/DataViewer/TreeView.tsx`
+- `electron/src/components/DataViewer/VirtualScroller.tsx`
+- `electron/src/utils/dataFormatting.ts`
+- `tests/performance/test_viewer_perf.test.ts`
+- `benchmarks/viewer_benchmark.ts`
 
 ---
 
-### Phase 3: REPL & Command Interface (PRs 8-10)
+#### PR #5: Right-Click Context Menu System
+**Scope**: Context menu framework with method detection and routing
 
-**PR #8: Python REPL Backend**
-- Execution context with namespace management
-- Code compilation and execution
-- Output/error capture
-- Variable access from executed code
-- **Deliverables**:
-  - `backend/core/repl.py` - REPL engine
-  - `backend/api/routes/repl.py` - REPL endpoints
-  - Subprocess isolation for code execution
-  - `tests/test_repl.py` with comprehensive execution scenarios
+**Deliverables**: 
+- Context menu component
+- Method introspection for custom types (.  show(), .plot(), custom methods)
+- Menu action routing
+- Caching of method metadata
+- Backend support for method execution
 
-**PR #9: Command Input & History UI**
-- Syntax-highlighted code input (frontend)
-- Command history with navigation
-- Auto-completion (backend powered)
+**Success Criteria**: 
+- Context menu appears on right-click
+- Detects all public methods automatically
+- Menu options are specific to data type
+- Method execution is reliable
+
+**Key Files**:
+- `electron/src/components/ContextMenu/ContextMenu.tsx`
+- `electron/src/utils/methodIntrospection.ts`
+- `src/platform/server/introspection.py` - Backend introspection
+- `tests/unit/test_context_menu.test.ts`
+- `tests/unit/test_method_discovery.py`
+
+---
+
+#### PR #6: Double-Click Method Invocation & Result Display
+**Scope**: Execute methods on double-click, display results appropriately
+
+**Deliverables**:
+- Double-click event handler
+- Method execution with error handling
+- Result window/panel display
+- Support for multiple result types (text, images, plots, data structures)
+- Error display with stack traces
+
+**Success Criteria**: 
+- Methods execute reliably on double-click
+- Results display correctly for all types
+- Errors show helpful information
+- No UI freezes during execution
+
+**Key Files**: 
+- `electron/src/components/DataViewer/TreeView.tsx` (updated)
+- `electron/src/components/ResultDisplay/ResultWindow.tsx`
+- `src/platform/server/method_executor.py`
+- `tests/unit/test_method_invocation.test.ts`
+- `tests/integration/test_result_display.test.ts`
+
+---
+
+### Phase 3: Command Interface (PRs #7-9)
+
+#### PR #7: Python Command Input & Autocomplete
+**Scope**: Rich Python code input with syntax highlighting and completion
+
+**Deliverables**: 
+- Monaco Editor (VS Code editor component) for Python input
+- Syntax highlighting (built into Monaco)
+- Command history with navigation (up/down arrows)
+- Auto-completion for: 
+  - Dictionary/namespace keys
+  - Python keywords
+  - Imported modules
 - Multi-line input support
-- **Deliverables**:
-  - `frontend/src/components/CommandInput.tsx`
-  - `frontend/src/components/CommandHistory.tsx`
-  - `frontend/src/hooks/useCommandHistory.ts`
-  - `backend/core/autocomplete.py` - Completion suggestions
-  - Integration with dict viewer (auto-complete variable names)
-  - `tests/components/CommandInput.test.tsx`
 
-**PR #10: Command Log & Output Display**
-- Scrollable, syntax-highlighted command log
-- Input/output separation
-- Search and filtering
-- Export functionality (save session)
-- **Deliverables**:
-  - `frontend/src/components/CommandLog.tsx`
-  - `frontend/src/components/LogEntry.tsx`
-  - `frontend/src/hooks/useLogSearch.ts`
-  - Export to file/markdown functionality
-  - `tests/components/CommandLog.test.tsx`
+**Success Criteria**: 
+- Input is responsive to typing
+- History navigation works smoothly
+- Autocomplete is accurate and helpful
+- Multi-line code works correctly
+
+**Key Files**: 
+- `electron/src/components/CommandInput/PythonEditor.tsx`
+- `electron/src/utils/autocompletion.ts`
+- `src/platform/server/autocomplete.py` - Backend completion logic
+- `tests/unit/test_autocomplete.py`
 
 ---
 
-### Phase 4: Module System & Plugin Architecture (PRs 11-14)
+#### PR #8: REPL Environment & Command Execution
+**Scope**: Safe Python execution with proper state management
 
-**PR #11: Module Discovery & Loading**
-- Filesystem-based module discovery
-- Module manifest system (metadata, dependencies, entry points)
-- Safe module initialization with error handling
-- Module versioning and compatibility checking
-- **Deliverables**:
-  - `backend/modules/loader.py` - Module discovery and loading
-  - `backend/modules/manifest.py` - Manifest parsing (dataclass + JSON schema)
-  - `backend/modules/registry.py` - Global module registry
-  - Standard module manifest schema (JSON schema file)
-  - `tests/test_module_loader.py`
-  - `MODULES.md` - Module developer guide (first draft)
+**Deliverables**:
+- Python REPL context with namespace persistence
+- Proper handling of imports and module reloading
+- Output capture (stdout, stderr)
+- Exception handling with traceback
+- Timeout protection for hung code
+- Memory limits for subprocess
+- Module integration (loaded modules accessible in REPL)
 
-**PR #12: Module API & Base Classes**
+**Success Criteria**:
+- Commands execute in persistent namespace
+- Output is captured and displayed
+- Errors are formatted helpfully
+- Hung code doesn't freeze UI
+- Modules can be imported and used
+
+**Key Files**:
+- `src/platform/server/repl. py` - REPL implementation
+- `src/platform/server/safe_executor.py` - Safe execution wrapper
+- `tests/unit/test_repl. py`
+- `tests/integration/test_command_execution.py`
+
+---
+
+#### PR #9: Command Output Log Display
+**Scope**: Beautiful, searchable command history display
+
+**Deliverables**: 
+- Scrollable log showing all executed commands and output
+- Syntax highlighting for Python code and output
+- Search/filter by command or output
+- Export capabilities (save to file)
+- Timestamp and execution time tracking
+- Clear log functionality
+
+**Success Criteria**: 
+- Log displays 1000+ entries smoothly
+- Search is responsive (<100ms for typical queries)
+- Export works correctly
+- UI remains responsive
+
+**Key Files**:
+- `electron/src/components/CommandLog/LogViewer.tsx`
+- `electron/src/components/CommandLog/LogSearch.tsx`
+- `electron/src/utils/logFormatting.ts`
+- `src/platform/server/logging_service.py`
+- `tests/unit/test_log_viewer.test.ts`
+- `tests/unit/test_log_export.py`
+
+---
+
+### Phase 4: Module System & Extensibility (PRs #10-12)
+
+#### PR #10: Module Discovery, Loading & Lifecycle
+**Scope**: Robust module system with proper initialization/shutdown
+
+**Deliverables**: 
+- Filesystem-based module discovery (watches `modules/` directory)
+- Module manifest schema (name, version, author, description, dependencies)
+- Module initialization hooks (setup, cleanup)
+- Dependency resolution and validation
+- Error handling for broken modules
+- Hot-reload support for development
+
+**Success Criteria**:
+- Modules discovered automatically on startup
+- Dependencies resolved correctly
+- Broken modules don't crash application
+- Hot-reload works in development mode
+
+**Key Files**: 
+- `src/platform/modules/loader.py` (updated/refactored)
+- `src/platform/modules/manifest.py` - Manifest parsing
+- `src/platform/modules/resolver.py` - Dependency resolution
+- `src/platform/modules/watcher.py` - Filesystem watcher
+- `tests/unit/test_module_lifecycle.py`
+- `examples/example_module/manifest.yaml`
+
+---
+
+#### PR #11: Module GUI Integration
+**Scope**: Allow modules to contribute custom UI panels and widgets
+
+**Deliverables**: 
 - BaseModule class for module developers
-- Lifecycle hooks (initialize, shutdown, on_data_change)
-- Data access APIs
-- Logging and configuration for modules
-- **Deliverables**:
-  - `backend/modules/base.py` - BaseModule abstract class
-  - `backend/modules/api.py` - Public API for module developers
-  - `backend/modules/config.py` - Module configuration system
-  - Comprehensive docstrings with examples
-  - `tests/test_module_api.py`
-  - Updated `MODULES.md` with API reference
+- UI registration system (modules can register custom panels)
+- Module context (access to app state, REPL, data)
+- Module lifecycle (init, shutdown with UI cleanup)
+- IPC between frontend modules and Python backend
+- Documentation and template for module developers
 
-**PR #13: Module GUI Integration**
-- Framework for modules to register custom UI panels
-- Component registration and rendering (frontend)
-- Data binding between module code and UI
-- Module-specific state management
-- **Deliverables**:
-  - `backend/modules/ui_registry.py` - UI component registration
-  - `frontend/src/modules/ModulePanel.tsx` - Renderer for module UIs
-  - `frontend/src/hooks/useModuleData.ts` - Data binding hook
-  - `backend/api/routes/modules. py` - Module UI endpoints
-  - Example module with custom UI panel
-  - `tests/test_module_ui.py`
-  - `tests/components/ModulePanel.test.tsx`
+**Success Criteria**: 
+- Module can register a custom UI panel
+- Panel persists across sessions
+- Module can access application state
+- UI updates from module don't freeze main app
 
-**PR #14: Inter-Module Communication & Events**
-- Event system for module-to-module communication
-- State synchronization
-- Dependency management
-- Transaction-like behavior for multi-step operations
-- **Deliverables**:
-  - `backend/modules/events.py` - Event bus
-  - `backend/modules/dependencies.py` - Dependency resolver
-  - Event type definitions and schemas
-  - `tests/test_module_events.py`
-  - `tests/test_module_dependencies.py`
-  - Updated `MODULES.md` with event examples
+**Key Files**: 
+- `src/platform/modules/base. py` (updated)
+- `src/platform/modules/ui_registry.py` - UI registration
+- `electron/src/components/ModulePanel/ModulePanel.tsx`
+- `tests/unit/test_module_ui_integration.py`
+- `docs/MODULE_DEVELOPMENT.md` - Module developer guide
+- `examples/example_gui_module/` - Reference module with UI
 
 ---
 
-### Phase 5: Example & Reference Modules (PRs 15-16)
+#### PR #12: Module Communication & Events
+**Scope**: Inter-module communication and state synchronization
 
-**PR #15: Example Modules - Data Analysis**
-- CSV data loader module
-- Basic statistics and filtering
-- Data validation checker
-- These serve as templates for users
-- **Deliverables**: 
-  - `examples/data_loader/` - Full working module
-  - `examples/statistics_analyzer/` - Full working module
-  - `examples/data_validator/` - Full working module
-  - Each with manifest, entry point, tests
-  - README for each explaining code
-  - Integration tests running examples
+**Deliverables**:
+- Event system (publish/subscribe) for module communication
+- State update notifications
+- Module dependency injection
+- Data passing between modules
+- Event filtering/routing
 
-**PR #16: Example Modules - Visualization**
-- Matplotlib integration module (plot data with . plot())
-- Interactive plotting helpers
-- Export visualization utilities
-- **Deliverables**:
-  - `examples/matplotlib_bridge/` - Full working module
-  - `examples/interactive_plotter/` - Full working module
-  - `examples/export_utilities/` - Full working module
-  - Tests and documentation
-  - Screenshots/demo in README
+**Success Criteria**:
+- Modules can communicate via events
+- State updates propagate correctly
+- No circular dependencies possible
+- Events are processed efficiently
+
+**Key Files**:
+- `src/platform/modules/event_system.py`
+- `src/platform/modules/context.py` - Module context/scope
+- `tests/unit/test_event_system.py`
+- `tests/integration/test_module_communication.py`
+- `examples/example_event_module/` - Module demonstrating events
 
 ---
 
-### Phase 6: Performance Optimization (PRs 17-19)
+### Phase 5: Performance Optimization (PRs #13-15)
 
-**PR #17: Data Structure Caching & Lazy Loading**
-- Caching layer for frequently accessed data
+#### PR #13: Performance Profiling & Bottleneck Identification
+**Scope**: Identify and measure performance-critical paths
+
+**Deliverables**: 
+- Built-in profiler (CPU, memory, I/O)
+- Benchmarking infrastructure
+- Performance regression tests
+- Flamegraph generation for analysis
+- Documentation of known bottlenecks
+
+**Success Criteria**:
+- Can profile individual operations
+- Benchmark runs give reproducible results
+- Regressions are detected in CI
+- Slowest paths identified for optimization
+
+**Key Files**: 
+- `src/platform/profiling/profiler.py`
+- `src/platform/profiling/metrics.py`
+- `tests/performance/profiling_utils.py`
+- `.github/workflows/benchmark.yml` - CI benchmarking
+
+---
+
+#### PR #14: Optimization via Cython/Rust Extensions (Conditional)
+**Scope**: Implement performance-critical operations in compiled languages
+
+**Deliverables**:
+- Identification of bottlenecks from PR #13
+- Cython extensions for moderate hotspots
+- Rust extensions (PyO3) for severe bottlenecks
+- Performance comparison (before/after)
+- Build system for compiled extensions
+
+**Success Criteria**: 
+- Identified bottlenecks show 2-10x improvement
+- Compiled code is faster than equivalent Python
+- Installation remains straightforward
+- Fallback to pure Python if compilation fails
+
+**Key Files**: 
+- `src/platform/extensions/tree_walker.pyx` (Cython, if needed)
+- `src/platform/extensions/fast_filter.py` (PyO3 Rust, if needed)
+- `setup.py` (updated with extension build)
+- `tests/performance/test_optimization_gains.py`
+- `docs/EXTENDING. md` - Compilation instructions
+
+---
+
+#### PR #15: Caching, Lazy Loading & Memory Management
+**Scope**: Optimize memory usage and responsiveness for large datasets
+
+**Deliverables**:
+- Cache manager for frequently accessed data
 - Lazy loading for large nested structures
-- Pagination for very large datasets
-- Cache invalidation strategies
-- **Deliverables**:
-  - `backend/core/cache.py` - Cache manager
-  - `backend/core/lazy_loader.py` - Lazy loading strategy
-  - `backend/api/routes/data.py` - Pagination support
-  - `tests/test_cache.py` with correctness and performance tests
-  - Benchmarks showing impact
+- Cache invalidation strategy
+- Memory usage monitoring
+- Cleanup policies for unused data
 
-**PR #18: Performance Profiling & Monitoring**
-- Built-in performance profiler
-- Slow operation detection and logging
-- Memory tracking
-- Frontend performance metrics (render times, API response times)
-- **Deliverables**:
-  - `backend/profiling/profiler.py`
-  - `backend/profiling/metrics.py` - Performance metrics collection
-  - `frontend/src/hooks/usePerformanceMetrics.ts`
-  - `backend/api/routes/metrics.py` - Metrics endpoints
-  - Debug dashboard showing performance data
-  - `tests/test_profiling.py`
+**Success Criteria**: 
+- 10MB+ datasets load and display smoothly
+- Memory usage stays under 500MB for typical use
+- Cache hits improve performance by 5-10x
+- Cache invalidation is correct and timely
 
-**PR #19: C Extension for Performance-Critical Path (Conditional)**
-- Profile dictionary viewer and identify bottlenecks
-- If benchmarks show >10ms for dict traversal with 10k items, implement C extension
-- Tree traversal and filtering in C
-- Measure before/after improvements
-- **Deliverables**:
-  - `backend/extensions/` - C extension code (if needed)
-  - Build configuration for C extensions
-  - Fallback pure-Python implementation
-  - Comprehensive benchmarks
-  - `tests/test_extensions.py` with performance validation
-  - Installation guide for developers
+**Key Files**: 
+- `src/platform/caching/cache_manager.py`
+- `src/platform/caching/lazy_loader.py`
+- `tests/unit/test_caching.py`
+- `tests/performance/test_memory_usage.py`
 
 ---
 
-### Phase 7: User Experience & Configuration (PRs 20-21)
+### Phase 6: User Experience & Configuration (PRs #16-18)
 
-**PR #20: Configuration System & Themes**
-- User preferences (JSON-based, human-readable)
-- Theme system (light/dark, custom colors)
+#### PR #16: Configuration System & Persistence
+**Scope**: Application-wide configuration and state persistence
+
+**Deliverables**: 
+- Configuration file management (YAML/JSON)
+- Theme system (light/dark modes)
 - Window layout persistence
 - Keyboard shortcuts customization
-- **Deliverables**:
-  - `backend/config/config_manager.py`
-  - `backend/config/schemas.py` - JSON schema for config
-  - `frontend/src/context/ThemeContext.tsx`
-  - `frontend/src/hooks/useConfig.ts`
-  - `frontend/src/styles/themes.ts` - Theme definitions
-  - Config import/export
-  - `tests/test_config.py`
-  - `tests/components/ThemeProvider.test.tsx`
+- User preferences (font size, colors, etc.)
 
-**PR #21: Help System, Documentation, & Logging**
-- Context-sensitive help panels
-- In-app tooltips and guides
-- Application-wide logging with debug mode
-- Issue reporting/crash reporting helpers
-- **Deliverables**:
-  - `backend/help/help_system.py`
-  - `frontend/src/components/HelpPanel.tsx`
-  - `backend/logging/logger.py` with structured logging
-  - `frontend/src/utils/errorReporter.ts`
-  - Help content (markdown files)
-  - Debug logging configuration
-  - `tests/test_help_system.py`
+**Success Criteria**:
+- Configuration loads on startup
+- Changes persist across sessions
+- Layouts are restored correctly
+- Preferences apply immediately
+
+**Key Files**:
+- `src/platform/config/config_manager.py`
+- `electron/src/config/themes/` - Theme definitions
+- `electron/src/utils/persistenceManager.ts`
+- `tests/unit/test_config_manager.py`
+- `config/defaults.yaml` - Default configuration
 
 ---
 
-### Phase 8: Packaging, Distribution & Final Documentation (PR #22)
+#### PR #17: Help System & Documentation
+**Scope**: In-app help and documentation system
 
-**PR #22: Packaging, Installation, & Complete Documentation**
-- Python package setup for server component
-- Electron builder configuration for client
-- Installation guides (pip, conda, binary downloads)
-- Comprehensive API documentation
-- Module developer tutorial (step-by-step)
+**Deliverables**:
+- Help panel with searchable documentation
+- Context-sensitive help (F1 on components)
+- Tooltip system for UI elements
+- Quick-start guide
+- API documentation generator
+- Link to external documentation (modules)
+
+**Success Criteria**: 
+- Help content is accessible and findable
+- Tooltips appear on hover
+- Documentation is comprehensive
+- Users can find answers without leaving the app
+
+**Key Files**: 
+- `electron/src/components/Help/HelpPanel.tsx`
+- `electron/src/components/Help/Tooltip.tsx`
+- `docs/USER_GUIDE.md`
+- `docs/api/generated/` - Auto-generated API docs
+
+---
+
+#### PR #18: Logging, Debugging & Error Reporting
+**Scope**: Comprehensive logging and user-friendly error handling
+
+**Deliverables**:
+- Application-wide logging system (file + console)
+- Debug mode with increased verbosity
+- Structured error messages for common issues
+- Crash report generation
+- Error recovery suggestions
+- User-friendly error dialogs
+
+**Success Criteria**: 
+- Logs are helpful for debugging
+- Errors suggest solutions
+- Crashes don't lose user work
+- Debug mode shows necessary details
+
+**Key Files**:
+- `src/platform/logging/logger.py`
+- `electron/src/utils/errorHandler.ts`
+- `electron/src/components/ErrorDialog/ErrorDialog.tsx`
+- `tests/unit/test_error_handling.py`
+
+---
+
+### Phase 7: Packaging, Distribution & Documentation (PRs #19-20)
+
+#### PR #19: Packaging, Installation & Distribution
+**Scope**: Build system, installation, and distribution infrastructure
+
+**Deliverables**: 
+- Python package setup (setup.py, pyproject.toml)
+- Electron build configuration
+- Installation guides (pip, conda, compiled binaries)
+- Dependency documentation with justification
+- Version management
+- Platform-specific installers (Windows . exe, macOS .app, Linux .AppImage/. deb)
+
+**Success Criteria**:
+- Package installs via `pip install platform-name`
+- Conda package available
+- Compiled binaries work on target platforms
+- Dependencies are documented
+- Installation <30 seconds on modern hardware
+
+**Key Files**:
+- `setup.py` / `pyproject.toml`
+- `electron/package. json`
+- `electron/forge.config.js` - Electron Forge build config
+- `.github/workflows/build.yml` - CI/CD build pipeline
+- `docs/INSTALLATION.md`
+- `DEPENDENCIES.md` - Dependency justification document
+
+---
+
+#### PR #20: Comprehensive Documentation & Example Modules
+**Scope**: Complete documentation suite and reference implementations
+
+**Deliverables**: 
+- README with quick start
+- Architecture documentation
+- Module development tutorial for physicists
+- 3-5 example modules: 
+  - Data analysis (CSV loading, statistics)
+  - Plotting helper (Matplotlib integration)
+  - Data validation (checking consistency)
+  - HDF5 file viewer
+  - Interactive parameter explorer
+- API reference (auto-generated)
 - Troubleshooting guide
-- **Deliverables**:
-  - `pyproject.toml` / `setup.py` (if needed)
-  - `electron-builder.yml` configuration
-  - `.github/workflows/` for building/releasing
-  - `/docs` folder with: 
-    - `README.md` - Quick start and overview
-    - `INSTALLATION.md` - Detailed installation
-    - `MODULES.md` - Module development guide (final version)
-    - `API. md` - Backend API reference
-    - `CONTRIBUTING.md` - Contribution guidelines
-    - `TROUBLESHOOTING.md` - Common issues and fixes
-  - `examples/` folder with all example modules
-  - Release checklist
-  - Tests for documentation examples
+- Contribution guidelines
+
+**Success Criteria**: 
+- New users can get started in <10 minutes
+- Module developers have clear examples
+- All APIs are documented
+- Example modules are fully functional
+- Contribution process is clear
+
+**Key Files**: 
+- `README.md`
+- `docs/ARCHITECTURE.md`
+- `docs/MODULE_DEVELOPMENT.md`
+- `docs/API. md` (auto-generated)
+- `docs/TROUBLESHOOTING.md`
+- `examples/` folder with 5 complete modules
+- `CONTRIBUTING.md`
 
 ---
 
-## Success Criteria
+## Success Criteria (Overall)
 
-### Functionality
-- [ ] Application launches in <3 seconds
-- [ ] Dictionary viewer displays 100k items smoothly (virtual scrolling)
-- [ ] Double-click and right-click on objects executes custom methods
-- [ ] REPL executes Python code with proper error handling
-- [ ] Command history persists across sessions
-- [ ] Modules can be created from templates without deep Python knowledge
-- [ ] Multi-window support is stable and responsive
+- [ ] Application loads in <2 seconds
+- [ ] Data viewer displays 10k items in <100ms
+- [ ] Module loading/installation is simple enough for non-programmers
+- [ ] All features have >80% test coverage
+- [ ] Documentation is comprehensive and beginner-friendly
+- [ ] At least 5 working example modules included
+- [ ] Supports Python 3.8+ on Linux, macOS, Windows
+- [ ] Multi-window support works reliably
+- [ ] Module developers can create fully functional modules from templates
+- [ ] Performance meets or exceeds specialized proprietary solutions
 
-### Performance
-- [ ] Dict viewer:  <100ms load for 10k items
-- [ ] REPL: <1s response for typical operations
-- [ ] Memory usage stable (no leaks after 1000+ commands)
-- [ ] Startup time: <3s on typical hardware
+---
+
+## Guidelines for Developers
 
 ### Code Quality
-- [ ] >80% test coverage for critical modules
-- [ ] All linting checks pass (ruff, pyright)
-- [ ] All dependencies justified in `DEVELOPMENT_PLAN.md`
-- [ ] Type hints for >90% of public API
+- Follow PEP 8 for Python code
+- Use type hints throughout Python code
+- ESLint + Prettier for JavaScript/TypeScript
+- Aim for >80% test coverage on critical paths
+- Comment complex logic
 
-### User Experience
-- [ ] Non-developer scientists can create working module from tutorial in <30 min
-- [ ] All features have keyboard shortcuts
-- [ ] Error messages are helpful and actionable
-- [ ] Built-in help is accessible and clear
+### Git Workflow
+- Each PR addresses exactly one item from this plan
+- PR titles follow:  `feat: PR #N description` format
+- Branch names:  `feature/pr-NN-short-description`
+- PRs are reviewed and merged individually
+- CI/CD checks pass before merge
 
-### Accessibility
-- [ ] Works on Python 3.9, 3.10, 3.11, 3.12
-- [ ] Builds for Linux, macOS, Windows
-- [ ] Single-command installation
+### Testing Requirements Per PR
+- Unit tests for new functionality
+- Integration tests for multi-component features
+- Performance tests for optimization PRs
+- Example code in docstrings (doctest where appropriate)
+
+### Documentation
+- Update relevant docs with each PR
+- API changes documented immediately
+- Examples added for new features
+- README updated if user-facing changes
+
+---
+
+## Performance Targets
+
+| Component | Target | Measurement |
+|-----------|--------|------------|
+| App startup | <2 seconds | Cold start from binary |
+| Data viewer (10k items) | <100ms | Initial render + scroll |
+| REPL command execution | <100ms | Typical Python statement |
+| Module load | <500ms | Time to load + initialize |
+| Context menu popup | <50ms | Right-click to menu visible |
+| Method execution | <1 second | Double-click to result display |
+| Memory (idle) | <100MB | Base application |
+| Memory (10k items) | <500MB | Data + viewer + caches |
 
 ---
 
 ## Dependency Philosophy
 
-Add a dependency if and only if:
-1. It significantly improves performance (e.g., compiled C binding)
-2. It dramatically reduces code (e.g., FastAPI vs.  http.server)
-3. It is already in the domain (numpy, matplotlib, xarray, scipy)
-4. It is a standard development tool (pytest, ruff)
-5. It has excellent maintenance record and broad adoption
+### Accepted Dependencies
+- **Scientific Stack**: numpy, scipy, matplotlib, xarray (physicist-required)
+- **Backend**: FastAPI or aiohttp (async server, justified by responsiveness)
+- **Data**: pydantic (small, focused validation)
+- **Frontend**: React or Vue. js (Electron ecosystem)
+- **Testing**: pytest, hypothesis (justified by test complexity)
 
-Do NOT add if:
-- Feature can be implemented in <200 lines of code
-- Maintenance burden is high relative to benefit
-- It fragments the community (use mainstream packages)
+### Rejected/Alternatives
+- ❌ Django (too heavy for this use case)
+- ❌ SQLAlchemy for simple state management (use native Python)
+- ❌ Multiple web frameworks (pick one:  FastAPI or aiohttp)
+- ✅ Cython/Rust for performance (justified if benchmarks prove 2x+ gain)
 
----
+### Decision Process for New Dependencies
+1. Does it solve a significant problem?
+2. Are there proven alternatives?
+3. What's the transitive dependency count?
+4. Is it actively maintained?
+5. Does it have a stable API (unlikely to break)?
 
-## Module Developer Experience
-
-The goal is for a domain scientist to: 
-
-1. Copy a template from `examples/`
-2. Rename files and update manifest
-3. Implement 2-3 functions
-4. See their module working in the app
-
-Example module structure:
+If in doubt, implement the feature in pure Python first, profile it, then optimize if needed.
