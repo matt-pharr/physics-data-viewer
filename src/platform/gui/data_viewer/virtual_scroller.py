@@ -27,7 +27,7 @@ class VirtualScroller:
         end = min(total_items, clamped_start + self.viewport_size + self.overscan)
         return start, end
 
-    def window(self, items: list, start_index: int = 0):
+    def window(self, items: list, start_index: int = 0) -> list:
         """Return the items within the computed visible range."""
         start, end = self.visible_range(total_items=len(items), start_index=start_index)
         return items[start:end]

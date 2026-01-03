@@ -101,7 +101,10 @@ class TreeView:
         node_path = (*path, str(key))
         loader: Optional[Callable[[], List[TreeNode]]] = None
         if is_container:
-            loader = lambda value=value, node_path=node_path: self._build_children(value, node_path)
+            def loader_func(val: Any = value, node_path: Path = node_path) -> List[TreeNode]:
+                return self._build_children(val, node_path)
+
+            loader = loader_func
         return TreeNode(
             key=str(key),
             value=value,
