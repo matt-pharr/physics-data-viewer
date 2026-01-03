@@ -6,7 +6,7 @@
 import React, { useRef, useEffect, useState } from 'react';
 import Editor, { Monaco } from '@monaco-editor/react';
 import type { editor } from 'monaco-editor';
-import { getCompletions } from '../utils/autocompletion';
+import { getCompletions } from '../../utils/autocompletion';
 
 interface PythonEditorProps {
   sessionId: string;
