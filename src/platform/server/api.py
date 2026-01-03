@@ -143,7 +143,7 @@ def _get_autocomplete_engine(request: Request) -> AutocompleteEngine:
 
 
 @router.post("/sessions", response_model=SessionResponse)
-def create_session(request: Request, session_id: Optional[str] = Body(default=None)) -> SessionResponse:
+def create_session(request: Request, session_id: Optional[str] = Body(default=None, embed=True)) -> SessionResponse:
     """Create a new session or register an existing session id."""
     manager = _get_state_manager(request)
     sid = manager.create_session(session_id)

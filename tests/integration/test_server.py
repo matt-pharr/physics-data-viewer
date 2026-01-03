@@ -6,7 +6,7 @@ from platform.server.app import create_app
 def test_create_session_and_execute_code():
     app = create_app()
     with TestClient(app) as client:
-        session_resp = client.post("/sessions")
+        session_resp = client.post("/sessions", json={})
         session_id = session_resp.json()["session_id"]
 
         exec_resp = client.post(
