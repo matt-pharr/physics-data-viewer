@@ -59,6 +59,8 @@ class ContextMenuBuilder:
 
         async def _runner() -> Any:
             invoke: InvokeResult = await self.client.invoke_method(session_id, cached_path, method.name)
+            if invoke.error:
+                raise RuntimeError(invoke.error)
             return invoke.result
 
         return ContextMenuItem(label=method.name, method_name=method.name, enabled=not method.requires_arguments, _runner=_runner)

@@ -43,6 +43,9 @@ class InvokeResult:
 
     method_name: str
     result: Any
+    result_type: str
+    error: Optional[str] = None
+    traceback: Optional[str] = None
 
 
 class BackendClient:
@@ -101,9 +104,15 @@ class BackendClient:
         response = await self._client.post(
             "/invoke", json={"session_id": session_id, "path": list(path), "method_name": method_name}
         )
-        response.raise_for_status()
         data = response.json()
-        return InvokeResult(method_name=data["method_name"], result=data.get("result"))
+        # Do not raise for status so error payloads can propagate to the caller.
+        return InvokeResult(
+            method_name=data.get("method_name", method_name),
+            result=data.get("result"),
+            result_type=data.get("result_type", "object"),
+            error=data.get("error"),
+            traceback=data.get("traceback"),
+        )
 
     async def get_state(self, session_id: str) -> Dict[str, Any]:
         """Fetch the current state for a session."""
