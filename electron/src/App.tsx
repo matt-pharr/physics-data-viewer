@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { PythonEditor } from './components/CommandInput/PythonEditor';
 import { BackendClient, ExecuteResult } from './api/client';
 import { TreeView, TreeNodeData } from './components/DataViewer/TreeView';
@@ -6,6 +6,9 @@ import { ContextMenu } from './components/ContextMenu/ContextMenu';
 import { ResultWindow, DisplayResult } from './components/ResultDisplay/ResultWindow';
 import { MethodIntrospector, normalizeInvokeResult, pickDefaultMethod } from './utils/methodIntrospection';
 import { backendPath } from './utils/dataFormatting';
+import { LogViewer } from './components/CommandLog/LogViewer';
+import { LogSearch } from './components/CommandLog/LogSearch';
+import { LogEntry, buildLogExport } from './utils/logFormatting';
 import './App.css';
 
 interface CommandBox {
@@ -23,7 +26,6 @@ export const App: React.FC<AppProps> = ({ client: providedClient }) => {
   const [client] = useState(() => providedClient ?? new BackendClient('http://localhost:8000'));
   const [isConnected, setIsConnected] = useState(false);
   const [sessionId, setSessionId] = useState<string | null>(null);
-  const [output, setOutput] = useState<string[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [commandBoxes, setCommandBoxes] = useState<CommandBox[]>([{ id: 1, code: '' }]);
   const [activeBoxId, setActiveBoxId] = useState(1);
@@ -31,6 +33,8 @@ export const App: React.FC<AppProps> = ({ client: providedClient }) => {
   const [viewerData, setViewerData] = useState<Record<string, any>>({});
   const [treeData] = useState<Record<string, any>>({});
   const [results, setResults] = useState<DisplayResult[]>([]);
+  const [logEntries, setLogEntries] = useState<LogEntry[]>([]);
+  const [logQuery, setLogQuery] = useState('');
   const [contextMenu, setContextMenu] = useState<{
     position: { x: number; y: number };
     node: TreeNodeData;
@@ -38,6 +42,7 @@ export const App: React.FC<AppProps> = ({ client: providedClient }) => {
   } | null>(null);
   const [viewerTab, setViewerTab] = useState<ViewerTab>('namespace');
   const [introspector] = useState(() => new MethodIntrospector(client));
+  const logIdRef = useRef(1);
 
   useEffect(() => {
     // Connect to backend on mount
@@ -55,6 +60,22 @@ export const App: React.FC<AppProps> = ({ client: providedClient }) => {
       });
   }, [client]);
 
+  const filteredLogEntries = useMemo(() => {
+    if (!logQuery.trim()) {
+      return logEntries;
+    }
+    const query = logQuery.toLowerCase();
+    return logEntries.filter((entry) => {
+      return [entry.code, entry.stdout, entry.stderr, entry.error]
+        .filter(Boolean)
+        .some((text) => (text as string).toLowerCase().includes(query));
+    });
+  }, [logEntries, logQuery]);
+
+  const appendLogEntry = (payload: Omit<LogEntry, 'id'>) => {
+    setLogEntries((prev) => [...prev, { ...payload, id: logIdRef.current++ }]);
+  };
+
   const handleExecute = async () => {
     if (!isConnected) {
       setError('Not connected to backend');
@@ -66,22 +87,30 @@ export const App: React.FC<AppProps> = ({ client: providedClient }) => {
       return;
     }
 
+    const startedAt = Date.now();
+    const startHr = performance.now();
+
     try {
       const result: ExecuteResult = await client.execute(activeBox.code);
       setSessionId(result.session_id);
       setViewerData(result.state || {});
 
-      // Add to output log
-      const newOutput = [
-        `>>> ${activeBox.code}`,
-        ...(result.stdout ? [result.stdout] : []),
-        ...(result.stderr ? [result.stderr] : []),
-        ...(result.error ? [`Error: ${result.error}`] : []),
-      ];
-      
-      setOutput((prev) => [...prev, ...newOutput]);
+      appendLogEntry({
+        code: activeBox.code,
+        stdout: result.stdout || undefined,
+        stderr: result.stderr || undefined,
+        error: result.error || undefined,
+        timestamp: startedAt,
+        durationMs: performance.now() - startHr,
+      });
       setError(null);
     } catch (err: any) {
+      appendLogEntry({
+        code: activeBox.code,
+        error: err.message,
+        timestamp: startedAt,
+        durationMs: performance.now() - startHr,
+      });
       setError(`Execution failed: ${err.message}`);
       console.error('Execution error:', err);
     }
@@ -177,6 +206,23 @@ export const App: React.FC<AppProps> = ({ client: providedClient }) => {
     setNextId(nextId + 1);
   };
 
+  const handleClearLog = () => setLogEntries([]);
+
+  const handleExportLog = () => {
+    if (logEntries.length === 0) {
+      return;
+    }
+    const blob = new Blob([buildLogExport(logEntries)], { type: 'text/plain' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = 'command-log.txt';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  };
+
   const activeBox = commandBoxes.find(box => box.id === activeBoxId);
   const isActiveBoxEmpty = !activeBox?.code.trim();
 
@@ -196,18 +242,17 @@ export const App: React.FC<AppProps> = ({ client: providedClient }) => {
       <main className="app-main">
         <div className="top-grid">
           <div className="output-panel">
-            <h2>Output</h2>
-            <div className="output-content">
-              {output.length === 0 ? (
-                <div className="empty-state">No output yet. Execute some Python code below.</div>
-              ) : (
-                output.map((line, index) => (
-                  <div key={index} className="output-line">
-                    {line}
-                  </div>
-                ))
-              )}
+            <div className="panel-header">
+              <h2>Command Log</h2>
             </div>
+            <LogSearch
+              query={logQuery}
+              total={logEntries.length}
+              filteredCount={filteredLogEntries.length}
+              onChange={setLogQuery}
+              onReset={() => setLogQuery('')}
+            />
+            <LogViewer entries={filteredLogEntries} onClear={handleClearLog} onExport={handleExportLog} />
           </div>
 
           <div className="data-panel">
