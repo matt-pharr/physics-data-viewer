@@ -6,7 +6,7 @@ import importlib.util
 import inspect
 import sys
 from pathlib import Path
-from typing import Iterable, List, Tuple
+from typing import Iterable, List, Optional, Tuple
 from importlib.abc import Loader
 
 from .base import BaseModule
@@ -36,7 +36,7 @@ def discover_manifests(modules_dir: Path) -> List[Tuple[Path, ModuleManifest]]:
     return discovered
 
 
-def _find_manifest(module_dir: Path) -> Path | None:
+def _find_manifest(module_dir: Path) -> Optional[Path]:
     for candidate in MANIFEST_FILENAMES:
         path = module_dir / candidate
         if path.exists():
