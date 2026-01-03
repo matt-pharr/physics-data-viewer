@@ -25,10 +25,14 @@ Then, from another shell (with the same PYTHONPATH set) or after `pip install -e
 import asyncio
 from platform.gui import FrontendApp
 
-app = FrontendApp(backend_url="http://localhost:8000")
-main_window = asyncio.run(app.start(dev_mode=True))
-result = asyncio.run(app.send_command("x = 1"))
-print(result.stdout)
+async def main():
+    app = FrontendApp(backend_url="http://localhost:8000")
+    await app.start(dev_mode=True)
+    result = await app.send_command("x = 1")
+    print(result.stdout)
+    await app.shutdown()
+
+asyncio.run(main())
 ```
 
 This scaffold provides a foundation for future GUI work while keeping connectivity and window lifecycle testable.
