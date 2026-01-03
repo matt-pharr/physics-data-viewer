@@ -54,7 +54,7 @@ class ModuleWatcher:
             if path not in self._known or self._known[path] < mtime:
                 changed_dirs.add(path.parent)
 
-        for path in list(self._known):
+        for path in self._known:
             if path not in current:
                 changed_dirs.add(path.parent)
 

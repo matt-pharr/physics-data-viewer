@@ -104,8 +104,12 @@ def load_all(modules_dir: Path) -> ModuleLoadResult:
     manifest_map = {}
     path_map = {}
     for directory, manifest in manifests:
-        if manifest.name in manifest_map:
-            raise ManifestError(f"Duplicate module name detected: {manifest.name}")
+        existing_dir = path_map.get(manifest.name)
+        if existing_dir is not None:
+            raise ManifestError(
+                f"Duplicate module name detected: {manifest.name} "
+                f"at {existing_dir} and {directory}"
+            )
         manifest_map[manifest.name] = manifest
         path_map[manifest.name] = directory
 

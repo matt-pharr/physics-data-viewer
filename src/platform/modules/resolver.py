@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Dict, List, Tuple
+from typing import Dict, List, Optional, Tuple
 
 from .manifest import ModuleManifest
 
@@ -11,7 +11,7 @@ from .manifest import ModuleManifest
 class DependencyResolutionError(Exception):
     """Raised when module dependencies cannot be resolved."""
 
-    def __init__(self, message: str, module: str | None = None) -> None:
+    def __init__(self, message: str, module: Optional[str] = None) -> None:
         super().__init__(message)
         self.module = module
 
