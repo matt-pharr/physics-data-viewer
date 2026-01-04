@@ -7,13 +7,16 @@ import inspect
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Callable, List, Optional, Tuple
+from typing import Callable, List, Optional, Tuple, TYPE_CHECKING
 from importlib.abc import Loader
 
 from .base import BaseModule
 from .manifest import ManifestError, ModuleManifest
 from .context import ModuleContext
 from .resolver import ResolutionResult, resolve_dependencies
+
+if TYPE_CHECKING:
+    from .event_system import EventSystem
 
 MANIFEST_FILENAMES = ("manifest.yaml", "manifest.yml", "manifest.json")
 
@@ -100,7 +103,9 @@ def load_module(module_dir: Path, manifest: ModuleManifest) -> BaseModule:
 
 
 def load_all(
-    modules_dir: Path, context_factory: Optional[Callable[[ModuleManifest], Optional[ModuleContext]]] = None
+    modules_dir: Path,
+    context_factory: Optional[Callable[[ModuleManifest], Optional[ModuleContext]]] = None,
+    event_system: Optional["EventSystem"] = None,
 ) -> ModuleLoadResult:
     """Discover, resolve dependencies, and load all modules in a directory.
 
@@ -132,7 +137,14 @@ def load_all(
             instance = load_module(directory, manifest)
             context = context_factory(manifest) if context_factory else None
             if context is not None:
+                if event_system is not None and context.event_system is None:
+                    context.attach_event_system(event_system)
                 instance.attach_context(context)
+            if event_system is not None:
+                try:
+                    event_system.register_module(instance, manifest)
+                except Exception as exc:
+                    raise ModuleLoadError(f"Failed to register module {module_name}: {exc}") from exc
             _initialize_module(instance)
             result.modules.append(instance)
             result.contexts.append(context)

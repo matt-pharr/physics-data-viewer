@@ -68,7 +68,19 @@ def initialize(self, context: ModuleContext | None = None):
 
 - `context.get_session_state(session_id)` returns a copy of a session’s state.
 - `context.set_project_value(path, value)` writes concrete data into the `ProjectTree`.
+- `context.update_session_value(session_id, path, value)` updates nested session state (emits state change notifications).
 - `context.execute_in_repl(code, session_id=None, timeout=5.0)` executes Python in the shared REPL (requires the backend executor).
+
+## Module Communication & Events
+
+PR #12 adds a lightweight event bus for inter-module communication:
+
+- `context.publish_event(event_type, payload, metadata=None)` broadcasts an event.
+- `context.subscribe_event(event_type, callback, predicate=None)` listens for events; use `predicate` to filter.
+- `context.get_dependency(name)` returns a declared module dependency (enforced via the manifest).
+- ProjectTree and session state updates automatically emit `project_tree` and `session_state` events when the context is attached to the shared `EventSystem`.
+
+See `examples/example_event_module` for a minimal publish/subscribe module.
 
 ## Reference Module
 
