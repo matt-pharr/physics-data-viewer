@@ -3,9 +3,12 @@
 from __future__ import annotations
 
 import abc
-from typing import Optional
+from typing import Optional, TYPE_CHECKING
 
 from .manifest import ModuleManifest
+
+if TYPE_CHECKING:
+    from .context import ModuleContext
 
 
 class BaseModule(abc.ABC):
@@ -14,6 +17,7 @@ class BaseModule(abc.ABC):
     def __init__(self, manifest: ModuleManifest) -> None:
         self.manifest = manifest
         self.initialized: bool = False
+        self.context: Optional["ModuleContext"] = None
 
     @property
     def name(self) -> str:
@@ -33,6 +37,10 @@ class BaseModule(abc.ABC):
     def mark_initialized(self) -> None:
         """Mark the module as initialized."""
         self.initialized = True
+
+    def attach_context(self, context: "ModuleContext") -> None:
+        """Attach a runtime context for interacting with the host application."""
+        self.context = context
 
     @abc.abstractmethod
     def initialize(self) -> None:

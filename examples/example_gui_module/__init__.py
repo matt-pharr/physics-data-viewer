@@ -1,0 +1,1 @@
+"""Example GUI module package."""

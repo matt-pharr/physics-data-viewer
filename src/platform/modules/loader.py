@@ -7,11 +7,12 @@ import inspect
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import List, Optional, Tuple
+from typing import Callable, List, Optional, Tuple
 from importlib.abc import Loader
 
 from .base import BaseModule
 from .manifest import ManifestError, ModuleManifest
+from .context import ModuleContext
 from .resolver import ResolutionResult, resolve_dependencies
 
 MANIFEST_FILENAMES = ("manifest.yaml", "manifest.yml", "manifest.json")
@@ -26,15 +27,21 @@ class ModuleLoadResult:
     """Container for module load outcomes."""
 
     modules: List[BaseModule] = field(default_factory=list)
+    contexts: List[Optional[ModuleContext]] = field(default_factory=list)
     errors: List[Exception] = field(default_factory=list)
 
     def shutdown_all(self) -> None:
         """Invoke shutdown on loaded modules in reverse order."""
-        for module in reversed(self.modules):
+        for module, context in reversed(list(zip(self.modules, self.contexts))):
             try:
                 module.shutdown()
             except Exception as exc:  # pragma: no cover - best effort cleanup
                 self.errors.append(exc)
+            if context is not None:
+                try:
+                    context.cleanup()
+                except Exception as exc:  # pragma: no cover - best effort cleanup
+                    self.errors.append(exc)
 
 
 def discover_manifests(modules_dir: Path) -> List[Tuple[Path, ModuleManifest]]:
@@ -92,7 +99,9 @@ def load_module(module_dir: Path, manifest: ModuleManifest) -> BaseModule:
     return instance
 
 
-def load_all(modules_dir: Path) -> ModuleLoadResult:
+def load_all(
+    modules_dir: Path, context_factory: Optional[Callable[[ModuleManifest], Optional[ModuleContext]]] = None
+) -> ModuleLoadResult:
     """Discover, resolve dependencies, and load all modules in a directory.
 
     Returns a ModuleLoadResult containing successfully loaded modules and any
@@ -121,8 +130,12 @@ def load_all(modules_dir: Path) -> ModuleLoadResult:
         directory = path_map[module_name]
         try:
             instance = load_module(directory, manifest)
+            context = context_factory(manifest) if context_factory else None
+            if context is not None:
+                instance.attach_context(context)
             _initialize_module(instance)
             result.modules.append(instance)
+            result.contexts.append(context)
         except ModuleLoadError as exc:
             result.errors.append(exc)
         except Exception as exc:  # pragma: no cover - best effort safety net
@@ -138,7 +151,11 @@ def load_all(modules_dir: Path) -> ModuleLoadResult:
 
 def _initialize_module(module: BaseModule) -> None:
     """Initialize a module and ensure it is marked initialized."""
-    module.initialize()
+    context = getattr(module, "context", None)
+    try:
+        module.initialize(context)
+    except TypeError:
+        module.initialize()
     if not module.initialized:
         module.mark_initialized()
 

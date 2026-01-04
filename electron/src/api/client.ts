@@ -36,6 +36,15 @@ export interface InvokeResult {
   traceback?: string | null;
 }
 
+export interface ModulePanel {
+  panel_id: string;
+  module: string;
+  title: string;
+  description: string;
+  content: Record<string, any>;
+  updated_at: number;
+}
+
 export class BackendClient {
   private baseUrl: string;
   private sessionId: string | null = null;
@@ -207,6 +216,29 @@ export class BackendClient {
       error: data.error,
       traceback: data.traceback,
     };
+  }
+
+  /**
+   * List module-provided UI panels.
+   */
+  async listModulePanels(): Promise<ModulePanel[]> {
+    const response = await fetch(`${this.baseUrl}/modules/ui-panels`);
+    if (!response.ok) {
+      throw new Error(`Failed to list module panels: ${response.statusText}`);
+    }
+    return await response.json();
+  }
+
+  /**
+   * Refresh a single module panel.
+   */
+  async refreshModulePanel(panelId: string): Promise<ModulePanel> {
+    const response = await fetch(`${this.baseUrl}/modules/ui-panels/${panelId}/refresh`, { method: 'POST' });
+    if (!response.ok) {
+      const payload = await response.json().catch(() => ({}));
+      throw new Error(payload?.detail || `Failed to refresh panel ${panelId}`);
+    }
+    return await response.json();
   }
 
   getSessionId(): string | null {
