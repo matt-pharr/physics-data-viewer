@@ -15,6 +15,8 @@ interface CommandBox {
   code: string;
 }
 
+const COMMAND_BOX_STORAGE_PREFIX = 'pdv-command-boxes-';
+
 type ViewerTab = 'namespace' | 'tree';
 
 interface AppProps {
@@ -38,7 +40,7 @@ export const App: React.FC<AppProps> = ({ client: providedClient }) => {
     node: TreeNodeData;
     methods: { name: string; requires_arguments: boolean }[];
   } | null>(null);
-  const [viewerTab, setViewerTab] = useState<ViewerTab>('namespace');
+  const [viewerTab, setViewerTab] = useState<ViewerTab>('tree');
   const [introspector] = useState(() => new MethodIntrospector(client));
   const [columnRatio, setColumnRatio] = useState(0.55);
   const [rightSplitRatio, setRightSplitRatio] = useState(0.55);
@@ -69,6 +71,34 @@ export const App: React.FC<AppProps> = ({ client: providedClient }) => {
         console.error('Connection error:', err);
       });
   }, [client]);
+
+  // Load command boxes for the session from localStorage when available
+  useEffect(() => {
+    if (!sessionId) return;
+    const stored = window.localStorage.getItem(`${COMMAND_BOX_STORAGE_PREFIX}${sessionId}`);
+    if (!stored) return;
+    try {
+      const parsed = JSON.parse(stored) as { boxes?: CommandBox[]; activeId?: number; nextId?: number };
+      if (parsed.boxes && parsed.boxes.length > 0) {
+        setCommandBoxes(parsed.boxes);
+        setActiveBoxId(parsed.activeId ?? parsed.boxes[0].id);
+        setNextId(parsed.nextId ?? Math.max(...parsed.boxes.map((b) => b.id)) + 1);
+      }
+    } catch (err) {
+      console.warn('Failed to parse stored command boxes', err);
+    }
+  }, [sessionId]);
+
+  // Persist command boxes per session
+  useEffect(() => {
+    if (!sessionId) return;
+    const payload = JSON.stringify({
+      boxes: commandBoxes,
+      activeId: activeBoxId,
+      nextId,
+    });
+    window.localStorage.setItem(`${COMMAND_BOX_STORAGE_PREFIX}${sessionId}`, payload);
+  }, [sessionId, commandBoxes, activeBoxId, nextId]);
 
   useEffect(() => {
     const handleMove = (event: MouseEvent) => {
@@ -329,7 +359,6 @@ export const App: React.FC<AppProps> = ({ client: providedClient }) => {
               </div>
               <TreeView
                 data={viewerTab === 'namespace' ? viewerData : treeData}
-                viewportHeight={360}
                 onNodeDoubleClick={handleNodeDoubleClick}
                 onContextMenu={handleContextMenu}
               />

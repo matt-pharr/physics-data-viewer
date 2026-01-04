@@ -4,7 +4,8 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, Body, HTTPException, Request, status
+from fastapi import APIRouter, Body, File, HTTPException, Request, UploadFile, status
+from fastapi.responses import Response
 from fastapi.encoders import jsonable_encoder
 from pydantic import BaseModel, Field
 
@@ -14,6 +15,7 @@ from .introspection import MethodResolutionError
 from .method_executor import MethodExecutionResult, MethodExecutor
 from .state import StateManager
 from platform.state.project_tree import ProjectTree
+from platform.state.project_io import ProjectIOError, load_project_tree, serialize_project_tree
 
 router = APIRouter()
 
@@ -113,6 +115,13 @@ class AutocompleteResponse(BaseModel):
     """Response containing completion suggestions."""
 
     completions: List[CompletionItemResponse]
+
+
+class ProjectLoadResponse(BaseModel):
+    """Response returned after loading a project archive."""
+
+    status: str
+    root_keys: List[str]
 
 
 def _get_state_manager(request: Request) -> StateManager:
@@ -259,3 +268,32 @@ def get_project_tree(request: Request) -> Dict[str, Any]:
     """Return a serialized view of the global ProjectTree."""
     tree = _get_project_tree(request)
     return tree.to_dict()
+
+
+@router.get("/project/save")
+def save_project(request: Request) -> Response:
+    """Serialize and download the current ProjectTree."""
+    tree = _get_project_tree(request)
+    try:
+        archive = serialize_project_tree(tree)
+    except ProjectIOError as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+    return Response(
+        content=archive,
+        media_type="application/octet-stream",
+        headers={"Content-Disposition": 'attachment; filename="project.pdz"'},
+    )
+
+
+@router.post("/project/load", response_model=ProjectLoadResponse)
+async def load_project(request: Request, file: UploadFile = File(...)) -> ProjectLoadResponse:
+    """Load a ProjectTree archive into the global tree."""
+    tree = _get_project_tree(request)
+    data = await file.read()
+    if not data:
+        raise HTTPException(status_code=400, detail="Empty project archive")
+    try:
+        load_project_tree(data, target=tree)
+    except ProjectIOError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return ProjectLoadResponse(status="ok", root_keys=list(tree.keys()))

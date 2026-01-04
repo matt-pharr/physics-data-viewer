@@ -81,6 +81,7 @@ body {
   display: flex;
   flex-direction: column;
   gap: 12px;
+  flex: 1;
 }
 
 .data-panel-header {
@@ -249,11 +250,41 @@ body {
   background-color: #1e1e1e;
   border: 1px solid #3e3e42;
   border-radius: 4px;
+  display: flex;
+  flex-direction: column;
+  height: 100%;
 }
 
 .data-tabs {
   display: flex;
   gap: 6px;
+}
+
+.tree-header {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background-color: #252526;
+  border-bottom: 1px solid #3e3e42;
+  font-size: 12px;
+  color: #cccccc;
+  user-select: none;
+}
+
+.tree-header-cell {
+  padding: 6px 8px;
+  font-weight: 600;
+  font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
+}
+
+.tree-header-resizer {
+  width: 6px;
+  cursor: col-resize;
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  margin-left: -3px;
+  background: linear-gradient(90deg, transparent 0%, #3e3e42 50%, transparent 100%);
 }
 
 .tree-row {
@@ -290,7 +321,21 @@ body {
 
 .tree-type {
   color: #858585;
-  margin-left: 6px;
+}
+
+.tree-cell {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  padding: 4px 8px;
+}
+
+.tree-cell-value {
+  color: #d4d4d4;
+}
+
+.tree-cell-type {
+  color: #858585;
 }
 
 .context-menu {

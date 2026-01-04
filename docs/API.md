@@ -149,3 +149,14 @@ The autocomplete engine provides suggestions for:
 - A global `ProjectTree` singleton is reset on backend startup and exposed via `app.state.project_tree`.
 - Modules can read/write project data with `platform.state.project_tree.get_project_tree()`, using `set_path`/`get_path` helpers for nested updates.
 - The nested data viewer now defaults to rendering this shared ProjectTree namespace, including lazy nodes.
+
+## Project Save/Load (PR #10.6)
+
+- `GET /project/save` returns a binary archive (`project.pdz`) containing the serialized ProjectTree, including lazy node metadata and snapshots when available.
+- `POST /project/load` accepts the uploaded archive (`file` form field) and restores the ProjectTree. The response includes the root keys present after loading.
+
+Example load request with `curl`:
+
+```bash
+curl -X POST -F "file=@project.pdz" http://localhost:8000/project/load
+```
