@@ -167,8 +167,9 @@ export const PythonEditor: React.FC<PythonEditorProps> = ({
   }, [onCodeChange]);
 
   return (
-    <div style={{ border: '1px solid #ccc', borderRadius: '4px', overflow: 'hidden', height }}>
+    <div style={{ border: '1px solid #ccc', borderRadius: '4px', overflow: 'hidden', height, width: '100%' }}>
       <Editor
+        width="100%"
         height="100%"
         defaultLanguage="python"
         value={value}

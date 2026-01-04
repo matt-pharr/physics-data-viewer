@@ -477,6 +477,7 @@ kbd {
   flex: 1;
   min-height: 200px;
   display: flex;
+  width: 100%;
 }
 
 .command-actions-top {
