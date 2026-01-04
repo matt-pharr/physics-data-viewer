@@ -48,10 +48,22 @@ export class BackendClient {
    * Connect to the backend and create a session.
    */
   async connect(existingSessionId?: string): Promise<string> {
+    // Prefer a known session id to avoid regenerating on reload.
+    if (existingSessionId) {
+      this.sessionId = existingSessionId;
+      try {
+        await this.getState(existingSessionId);
+        return existingSessionId;
+      } catch (err) {
+        // Fall through and re-register the session id below.
+        console.warn('Existing session unavailable, re-registering:', err);
+      }
+    }
+
     const response = await fetch(`${this.baseUrl}/sessions`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ session_id: existingSessionId }),
+      body: JSON.stringify({ session_id: this.sessionId ?? existingSessionId }),
     });
 
     if (!response.ok) {
