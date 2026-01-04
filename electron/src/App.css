@@ -48,18 +48,8 @@ body {
 
 .app-main {
   flex: 1;
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
   padding: 16px;
-  gap: 16px;
-}
-
-.top-grid {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 16px;
-  align-items: stretch;
+  overflow: hidden;
 }
 
 .output-panel,
@@ -249,6 +239,9 @@ body {
 
 .command-panel {
   flex-shrink: 0;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
 }
 
 .tree-view {
@@ -507,4 +500,62 @@ kbd {
   padding: 2px 6px;
   font-family: monospace;
   font-size: 11px;
+}
+
+.split-layout {
+  display: flex;
+  height: 100%;
+  gap: 8px;
+}
+
+.pane {
+  height: 100%;
+  overflow: hidden;
+}
+
+.data-pane .data-panel,
+.right-pane .output-panel,
+.right-pane .command-panel {
+  height: 100%;
+}
+
+.vertical-resizer {
+  width: 6px;
+  cursor: col-resize;
+  background-color: #2d2d30;
+  border: 1px solid #3e3e42;
+  border-radius: 4px;
+  margin: 0 2px;
+}
+
+.horizontal-resizer {
+  height: 6px;
+  cursor: row-resize;
+  background-color: #2d2d30;
+  border: 1px solid #3e3e42;
+  border-radius: 4px;
+  margin: 4px 0;
+}
+
+.right-pane {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.right-top {
+  min-height: 140px;
+}
+
+.right-bottom {
+  flex: 1;
+  min-height: 180px;
+}
+
+.output-panel {
+  overflow: hidden;
+}
+
+.log-list {
+  max-height: 100%;
 }
