@@ -22,6 +22,7 @@ export interface TreeViewProps {
 }
 
 const DEFAULT_ROW_HEIGHT = 28;
+const DEFAULT_VIEWPORT_HEIGHT = 360;
 
 function isContainer(value: any): boolean {
   return value !== null && typeof value === 'object';
@@ -68,6 +69,7 @@ export const TreeView: React.FC<TreeViewProps> = ({
   onNodeDoubleClick,
   onContextMenu,
 }) => {
+  const resolvedHeight = viewportHeight ?? DEFAULT_VIEWPORT_HEIGHT;
   const root = useMemo(() => buildTree(data ?? {}), [data]);
   const [expanded, setExpanded] = useState<Set<string>>(new Set([pathKey(root.path)]));
   const [scrollTop, setScrollTop] = useState(0);
@@ -81,7 +83,7 @@ export const TreeView: React.FC<TreeViewProps> = ({
     return nodes;
   }, [expanded, root]);
 
-  const rowsPerViewport = Math.max(1, Math.ceil(viewportHeight / rowHeight));
+  const rowsPerViewport = Math.max(1, Math.ceil(resolvedHeight / rowHeight));
   const scroller = useMemo(() => new VirtualScroller(rowsPerViewport, overscan), [rowsPerViewport, overscan]);
   const startIndex = Math.floor(scrollTop / rowHeight);
   const [start, end] = useMemo(
@@ -151,7 +153,7 @@ export const TreeView: React.FC<TreeViewProps> = ({
     <div
       className="tree-view"
       ref={containerRef}
-      style={{ height: viewportHeight ?? '100%', overflow: 'auto', position: 'relative', display: 'flex', flexDirection: 'column' }}
+      style={{ height: resolvedHeight, overflow: 'auto', position: 'relative', display: 'flex', flexDirection: 'column' }}
       onScroll={(e) => setScrollTop(e.currentTarget.scrollTop)}
       data-testid="tree-view"
     >
