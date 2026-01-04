@@ -49,17 +49,20 @@ export const App: React.FC<AppProps> = ({ client: providedClient }) => {
 
   useEffect(() => {
     // Connect to backend on mount
+    const storedSession = window.localStorage.getItem('pdv-session-id') || undefined;
     client
-      .connect()
+      .connect(storedSession)
       .then((sid) => {
         setSessionId(sid);
+        window.localStorage.setItem('pdv-session-id', sid);
         setIsConnected(true);
         return client.getState(sid).catch(() => ({}));
       })
-      .then((state) => {
+      .then(async (state) => {
         const resolved = state || {};
         setViewerData(resolved);
-        setTreeData({ ProjectTree: resolved });
+        const tree = await client.getProjectTree().catch(() => ({}));
+        setTreeData(tree);
       })
       .catch((err) => {
         setError(`Failed to connect to backend: ${err.message}`);
@@ -133,9 +136,11 @@ export const App: React.FC<AppProps> = ({ client: providedClient }) => {
     try {
       const result: ExecuteResult = await client.execute(activeBox.code);
       setSessionId(result.session_id);
+      window.localStorage.setItem('pdv-session-id', result.session_id);
       const resolvedState = result.state || {};
       setViewerData(resolvedState);
-      setTreeData({ ProjectTree: resolvedState });
+      const tree = await client.getProjectTree().catch(() => ({}));
+      setTreeData(tree);
 
       appendLogEntry({
         code: activeBox.code,
@@ -166,7 +171,8 @@ export const App: React.FC<AppProps> = ({ client: providedClient }) => {
       const state = await client.getState(sessionId);
       const resolved = state || {};
       setViewerData(resolved);
-      setTreeData({ ProjectTree: resolved });
+      const tree = await client.getProjectTree().catch(() => ({}));
+      setTreeData(tree);
     } catch (err: any) {
       setError(`Failed to refresh state: ${err.message}`);
     }

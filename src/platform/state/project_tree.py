@@ -171,6 +171,31 @@ class Tree(MutableMapping[str, Any]):
         if clear_observers:
             self._observers.clear()
 
+    def to_dict(self) -> Dict[str, Any]:
+        """Return a serializable representation of the tree for API responses."""
+        result: Dict[str, Any] = {}
+        for key, value, _, is_lazy, resolver in self.iter_entries():
+            if is_lazy and resolver:
+                try:
+                    resolved = resolver()
+                except Exception:
+                    resolved = "<lazy>"
+                result[key] = self._serialize_value(resolved)
+            else:
+                result[key] = self._serialize_value(value)
+        return result
+
+    def _serialize_value(self, value: Any) -> Any:
+        if isinstance(value, Tree):
+            return value.to_dict()
+        if isinstance(value, dict):
+            return {k: self._serialize_value(v) for k, v in value.items()}
+        if isinstance(value, (list, tuple)):
+            return [self._serialize_value(v) for v in value]
+        if isinstance(value, (str, int, float, bool)) or value is None:
+            return value
+        return repr(value)
+
     def _materialize_lazy(self, key: str, lazy: Optional[LazyNode] = None) -> Any:
         target = lazy or self._data.get(key)
         if not isinstance(target, LazyNode):

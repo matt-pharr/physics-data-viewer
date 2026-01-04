@@ -47,11 +47,11 @@ export class BackendClient {
   /**
    * Connect to the backend and create a session.
    */
-  async connect(): Promise<string> {
+  async connect(existingSessionId?: string): Promise<string> {
     const response = await fetch(`${this.baseUrl}/sessions`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({}),
+      body: JSON.stringify({ session_id: existingSessionId }),
     });
 
     if (!response.ok) {
@@ -135,6 +135,17 @@ export class BackendClient {
       throw new Error(`Failed to get state: ${response.statusText}`);
     }
 
+    return await response.json();
+  }
+
+  /**
+   * Get the serialized global ProjectTree.
+   */
+  async getProjectTree(): Promise<Record<string, any>> {
+    const response = await fetch(`${this.baseUrl}/project-tree`);
+    if (!response.ok) {
+      throw new Error(`Failed to get project tree: ${response.statusText}`);
+    }
     return await response.json();
   }
 
