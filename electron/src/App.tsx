@@ -3,7 +3,6 @@ import { PythonEditor } from './components/CommandInput/PythonEditor';
 import { BackendClient, ExecuteResult } from './api/client';
 import { TreeView, TreeNodeData } from './components/DataViewer/TreeView';
 import { ContextMenu } from './components/ContextMenu/ContextMenu';
-import { ResultWindow, DisplayResult } from './components/ResultDisplay/ResultWindow';
 import { MethodIntrospector, normalizeInvokeResult, pickDefaultMethod } from './utils/methodIntrospection';
 import { backendPath } from './utils/dataFormatting';
 import { LogViewer } from './components/CommandLog/LogViewer';
@@ -32,7 +31,6 @@ export const App: React.FC<AppProps> = ({ client: providedClient }) => {
   const [nextId, setNextId] = useState(2);
   const [viewerData, setViewerData] = useState<Record<string, any>>({});
   const [treeData, setTreeData] = useState<Record<string, any>>({});
-  const [results, setResults] = useState<DisplayResult[]>([]);
   const [logEntries, setLogEntries] = useState<LogEntry[]>([]);
   const [logQuery, setLogQuery] = useState('');
   const [contextMenu, setContextMenu] = useState<{
@@ -188,7 +186,13 @@ export const App: React.FC<AppProps> = ({ client: providedClient }) => {
       }
       const result = await client.invokeMethod(sessionId, backendPath(node.path), target.name);
       const display = normalizeInvokeResult(result);
-      setResults((prev) => [...prev, display]);
+      appendLogEntry({
+        code: `[invoke] ${backendPath(node.path).join('.')} :: ${target.name}`,
+        stdout: display.content ? JSON.stringify(display.content, null, 2) : undefined,
+        error: display.error ?? undefined,
+        timestamp: Date.now(),
+        durationMs: 0,
+      });
       setError(display.error ?? null);
     } catch (err: any) {
       setError(err.message);
@@ -214,7 +218,13 @@ export const App: React.FC<AppProps> = ({ client: providedClient }) => {
     }
     const result = await client.invokeMethod(sessionId, backendPath(node.path), methodName);
     const display = normalizeInvokeResult(result);
-    setResults((prev) => [...prev, display]);
+    appendLogEntry({
+      code: `[invoke] ${backendPath(node.path).join('.')} :: ${methodName}`,
+      stdout: display.content ? JSON.stringify(display.content, null, 2) : undefined,
+      error: display.error ?? undefined,
+      timestamp: Date.now(),
+      durationMs: 0,
+    });
     setError(display.error ?? null);
   };
 
@@ -317,7 +327,6 @@ export const App: React.FC<AppProps> = ({ client: providedClient }) => {
                 onNodeDoubleClick={handleNodeDoubleClick}
                 onContextMenu={handleContextMenu}
               />
-              <ResultWindow results={results} onClear={() => setResults([])} />
             </div>
           </div>
 
@@ -327,7 +336,7 @@ export const App: React.FC<AppProps> = ({ client: providedClient }) => {
             <div className="right-top" style={{ height: `${rightSplitRatio * 100}%` }}>
               <div className="output-panel">
                 <div className="panel-header">
-                  <h2>Command Log</h2>
+                  <h2>Console</h2>
                 </div>
                 <LogSearch
                   query={logQuery}
@@ -346,44 +355,44 @@ export const App: React.FC<AppProps> = ({ client: providedClient }) => {
               <div className="command-panel">
                 <div className="command-panel-header">
                   <h2>Command Input</h2>
-                  <div className="command-tabs">
-                    {commandBoxes.map((box) => (
-                      <button
-                        key={box.id}
-                        className={`tab ${box.id === activeBoxId ? 'active' : ''}`}
-                        onClick={() => setActiveBoxId(box.id)}
-                      >
-                        {box.id}
+                  <div className="command-header-actions">
+                    <div className="command-tabs">
+                      {commandBoxes.map((box) => (
+                        <button
+                          key={box.id}
+                          className={`tab ${box.id === activeBoxId ? 'active' : ''}`}
+                          onClick={() => setActiveBoxId(box.id)}
+                        >
+                          {box.id}
+                        </button>
+                      ))}
+                      <button className="tab add-tab" onClick={handleAddCommandBox} title="Add new command box">
+                        +
                       </button>
-                    ))}
-                    <button className="tab add-tab" onClick={handleAddCommandBox} title="Add new command box">
-                      +
-                    </button>
+                    </div>
+                    <div className="command-actions-top">
+                      <button className="action-button execute" onClick={handleExecute}>
+                        Execute
+                      </button>
+                      <button
+                        className={`action-button ${isActiveBoxEmpty ? 'close' : 'clear'}`}
+                        onClick={handleClearOrClose}
+                      >
+                        {isActiveBoxEmpty && commandBoxes.length > 1 ? 'Close' : 'Clear'}
+                      </button>
+                    </div>
                   </div>
                 </div>
-                {error && (
-                  <div className="error-message">
-                    {error}
-                  </div>
-                )}
-                <PythonEditor
-                  key={activeBoxId}
-                  value={activeBox?.code || ''}
-                  onCodeChange={handleCodeChange}
-                  onExecute={handleExecute}
-                  client={client}
-                  height="200px"
-                />
-                <div className="command-actions">
-                  <button className="action-button execute" onClick={handleExecute}>
-                    Execute
-                  </button>
-                  <button 
-                    className={`action-button ${isActiveBoxEmpty ? 'close' : 'clear'}`} 
-                    onClick={handleClearOrClose}
-                  >
-                    {isActiveBoxEmpty && commandBoxes.length > 1 ? 'Close' : 'Clear'}
-                  </button>
+                {error && <div className="error-message">{error}</div>}
+                <div className="command-panel-content">
+                  <PythonEditor
+                    key={activeBoxId}
+                    value={activeBox?.code || ''}
+                    onCodeChange={handleCodeChange}
+                    onExecute={handleExecute}
+                    client={client}
+                    height="100%"
+                  />
                 </div>
               </div>
             </div>

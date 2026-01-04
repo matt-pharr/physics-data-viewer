@@ -10,7 +10,6 @@ interface PythonEditorProps {
   onExecute: () => void;
   client: BackendClient;
   height?: string;
-  placeholder?: string;
 }
 
 export const PythonEditor: React.FC<PythonEditorProps> = ({
@@ -18,8 +17,7 @@ export const PythonEditor: React.FC<PythonEditorProps> = ({
   onCodeChange,
   onExecute,
   client,
-  height = '150px',
-  placeholder = '# Enter Python code here...',
+  height = '100%',
 }) => {
   const editorRef = useRef<monacoEditor.editor.IStandaloneCodeEditor | null>(null);
   const monacoRef = useRef<Monaco | null>(null);
@@ -169,9 +167,9 @@ export const PythonEditor: React.FC<PythonEditorProps> = ({
   }, [onCodeChange]);
 
   return (
-    <div style={{ border: '1px solid #ccc', borderRadius: '4px', overflow: 'hidden' }}>
+    <div style={{ border: '1px solid #ccc', borderRadius: '4px', overflow: 'hidden', height }}>
       <Editor
-        height={height}
+        height="100%"
         defaultLanguage="python"
         value={value}
         onChange={(newValue) => onCodeChange(newValue || '')}
@@ -191,17 +189,6 @@ export const PythonEditor: React.FC<PythonEditorProps> = ({
           acceptSuggestionOnEnter: 'on',
         }}
       />
-      <div
-        style={{
-          padding: '8px',
-          backgroundColor: '#1e1e1e',
-          color: '#888',
-          fontSize: '12px',
-          borderTop: '1px solid #333',
-        }}
-      >
-        Press <kbd>Ctrl+Enter</kbd> to execute | <kbd>↑</kbd>/<kbd>↓</kbd> to navigate history
-      </div>
     </div>
   );
 };

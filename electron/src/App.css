@@ -331,49 +331,19 @@ body {
   font-size: 12px;
 }
 
-.result-window__header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-}
-
-.result-window__list {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-.result-card {
-  background-color: #252526;
-  border: 1px solid #3e3e42;
-  border-radius: 4px;
-  padding: 8px;
-}
-
-.result-card .result-title {
-  margin-bottom: 6px;
-}
-
-.result-card .result-type {
-  color: #858585;
-}
-
-.result-content {
-  white-space: pre-wrap;
-  font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
-  font-size: 12px;
-  margin: 0;
-}
-
-.result-error {
-  color: #f48771;
-}
-
 .command-panel-header {
   display: flex;
   justify-content: space-between;
   align-items: center;
   margin-bottom: 12px;
+}
+
+.command-header-actions {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
 }
 
 .command-tabs {
@@ -502,6 +472,16 @@ kbd {
   font-size: 11px;
 }
 
+.command-panel-content {
+  flex: 1;
+  min-height: 200px;
+}
+
+.command-actions-top {
+  display: flex;
+  gap: 8px;
+}
+
 .split-layout {
   display: flex;
   height: 100%;
@@ -549,7 +529,8 @@ kbd {
 
 .right-bottom {
   flex: 1;
-  min-height: 180px;
+  min-height: 220px;
+  display: flex;
 }
 
 .output-panel {
