@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import io
 import json
+import logging
 import zipfile
 from pathlib import Path
 from typing import Any, BinaryIO, Callable, Dict, Union
@@ -13,6 +14,7 @@ from .project_tree import LazyNode, ProjectTree, Tree, get_project_tree
 ARCHIVE_PAYLOAD = "project.json"
 KIND_KEY = "__pdv_kind__"
 ArchiveSource = Union[str, Path, bytes, BinaryIO]
+LOG = logging.getLogger(__name__)
 
 
 class ProjectIOError(Exception):
@@ -104,7 +106,8 @@ def _serialize_entry(value: Any, metadata: Dict[str, Any]) -> Dict[str, Any]:
 def _safe_serialize_value(loader: Callable[[], Any]) -> Any:
     try:
         return _serialize_value(loader())
-    except Exception:
+    except Exception as exc:  # noqa: BLE001 - serialization best-effort
+        LOG.debug("Failed to serialize lazy loader value: %s", exc)
         return None
 
 
@@ -190,7 +193,7 @@ def _build_lazy_loader(snapshot: Any) -> Callable[[], Any]:
 
     value = _deserialize_value(snapshot)
 
-    def _loader(value=value) -> Any:
+    def _loader() -> Any:
         return value
 
     return _loader
