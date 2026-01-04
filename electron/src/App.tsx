@@ -59,7 +59,7 @@ export const App: React.FC<AppProps> = ({ client: providedClient }) => {
       .then((state) => {
         const resolved = state || {};
         setViewerData(resolved);
-        setTreeData(resolved);
+        setTreeData({ ProjectTree: resolved });
       })
       .catch((err) => {
         setError(`Failed to connect to backend: ${err.message}`);
@@ -135,7 +135,7 @@ export const App: React.FC<AppProps> = ({ client: providedClient }) => {
       setSessionId(result.session_id);
       const resolvedState = result.state || {};
       setViewerData(resolvedState);
-      setTreeData(resolvedState);
+      setTreeData({ ProjectTree: resolvedState });
 
       appendLogEntry({
         code: activeBox.code,
@@ -166,7 +166,7 @@ export const App: React.FC<AppProps> = ({ client: providedClient }) => {
       const state = await client.getState(sessionId);
       const resolved = state || {};
       setViewerData(resolved);
-      setTreeData(resolved);
+      setTreeData({ ProjectTree: resolved });
     } catch (err: any) {
       setError(`Failed to refresh state: ${err.message}`);
     }

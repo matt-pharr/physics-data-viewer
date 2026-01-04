@@ -242,6 +242,7 @@ body {
   height: 100%;
   display: flex;
   flex-direction: column;
+  width: 100%;
 }
 
 .tree-view {
@@ -475,6 +476,7 @@ kbd {
 .command-panel-content {
   flex: 1;
   min-height: 200px;
+  display: flex;
 }
 
 .command-actions-top {
@@ -491,6 +493,13 @@ kbd {
 .pane {
   height: 100%;
   overflow: hidden;
+}
+
+.right-bottom {
+  flex: 1;
+  min-height: 220px;
+  display: flex;
+  flex-direction: column;
 }
 
 .data-pane .data-panel,
