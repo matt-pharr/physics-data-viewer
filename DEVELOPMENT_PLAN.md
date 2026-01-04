@@ -437,13 +437,57 @@ This document outlines the complete development roadmap for building a modern, e
 
 ---
 
+#### PR #10.5: Central Project Tree Data Structure
+**Scope**: Introduce the core ProjectTree namespace for all project data and wire it into the existing nested dictionary viewer.
+
+**Deliverables**:
+- `ProjectTree` singleton created on app start (empty by default)
+- `Tree` class (dict-like) with app-specific helpers (lazy children, metadata, observers)
+- Integration so ProjectTree backs the nested dictionary viewer
+- Hooks for modules to read/write into ProjectTree
+
+**Success Criteria**:
+- ProjectTree exists globally and is displayed by the data viewer
+- Modules can add/read nodes without breaking existing viewer behavior
+- Lazy child resolution works for large/xarray-like datasets
+
+**Key Files**:
+- `src/platform/state/project_tree.py`
+- `src/platform/gui/data_viewer/tree_view.py` (wired to ProjectTree)
+- `tests/unit/test_project_tree.py`
+- `tests/integration/test_project_tree_viewer.py`
+
+---
+
+#### PR #10.6: Project Save/Load (Single Archive)
+**Scope**: Persist and restore ProjectTree to/from a single efficient binary file (zip or similar), including lazy data handles (e.g., HDF5 references).
+
+**Deliverables**:
+- Serializer/deserializer for ProjectTree with lazy dataset handles
+- CLI/API endpoints to save/load a project
+- Basic corruption/error handling and validation
+
+**Success Criteria**:
+- ProjectTree can be saved to and restored from one file without data loss
+- Lazy references (e.g., HDF5-backed nodes) restore correctly
+- Errors surface without crashing the app
+
+**Key Files**:
+- `src/platform/state/project_io.py`
+- `src/platform/server/api.py` (save/load endpoints)
+- `tests/integration/test_project_save_load.py`
+
+---
+
 #### PR #11: Module GUI Integration
 **Scope**: Allow modules to contribute custom UI panels and widgets
 
 **Deliverables**: 
 - BaseModule class for module developers
-- UI registration system (modules can register custom panels)
-- Module context (access to app state, REPL, data)
+- UI registration system (modules can register custom panels via a Python API)
+- Python-facing panel API (declare panel name, layout, callbacks; no direct JS required)
+- Data-provider interface for modules to expose lazy xarray/HDF5-backed nodes into ProjectTree
+- Module context (access to app state, REPL, ProjectTree/data)
 - Module lifecycle (init, shutdown with UI cleanup)
 - IPC between frontend modules and Python backend
 - Documentation and template for module developers

@@ -1,0 +1,6 @@
+name: example_module
+version: "0.1.0"
+author: Physics Data Viewer Team
+description: Example module manifest demonstrating required fields and dependencies.
+dependencies:
+  - numpy

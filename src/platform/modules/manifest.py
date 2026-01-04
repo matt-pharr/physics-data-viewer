@@ -38,8 +38,17 @@ class ModuleManifest:
         dependencies = raw.get("dependencies", []) or []
         if not isinstance(dependencies, list) or not all(isinstance(dep, str) for dep in dependencies):
             raise ManifestError("dependencies must be a list of strings")
+        deduped: List[str] = []
+        seen = set()
+        for dep in dependencies:
+            if dep not in seen:
+                deduped.append(dep)
+                seen.add(dep)
+        dependencies = deduped
 
         description = raw.get("description", "") or ""
+        if raw.get("name") in dependencies:
+            raise ManifestError("Manifest cannot list itself as a dependency")
         return cls(
             name=str(raw["name"]),
             version=str(raw["version"]),

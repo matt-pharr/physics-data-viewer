@@ -5,18 +5,36 @@ from __future__ import annotations
 import importlib.util
 import inspect
 import sys
+from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Iterable, List, Optional, Tuple
+from typing import List, Optional, Tuple
 from importlib.abc import Loader
 
 from .base import BaseModule
 from .manifest import ManifestError, ModuleManifest
+from .resolver import ResolutionResult, resolve_dependencies
 
 MANIFEST_FILENAMES = ("manifest.yaml", "manifest.yml", "manifest.json")
 
 
 class ModuleLoadError(Exception):
     """Raised when a module fails to load."""
+
+
+@dataclass
+class ModuleLoadResult:
+    """Container for module load outcomes."""
+
+    modules: List[BaseModule] = field(default_factory=list)
+    errors: List[Exception] = field(default_factory=list)
+
+    def shutdown_all(self) -> None:
+        """Invoke shutdown on loaded modules in reverse order."""
+        for module in reversed(self.modules):
+            try:
+                module.shutdown()
+            except Exception as exc:  # pragma: no cover - best effort cleanup
+                self.errors.append(exc)
 
 
 def discover_manifests(modules_dir: Path) -> List[Tuple[Path, ModuleManifest]]:
@@ -74,19 +92,61 @@ def load_module(module_dir: Path, manifest: ModuleManifest) -> BaseModule:
     return instance
 
 
-def load_all(modules_dir: Path) -> List[BaseModule]:
-    """Discover and load all modules in a directory."""
-    modules: List[BaseModule] = []
-    for directory, manifest in discover_manifests(modules_dir):
-        modules.append(load_module(directory, manifest))
-    return modules
+def load_all(modules_dir: Path) -> ModuleLoadResult:
+    """Discover, resolve dependencies, and load all modules in a directory.
+
+    Returns a ModuleLoadResult containing successfully loaded modules and any
+    errors encountered (resolution or load errors). Broken modules are skipped
+    so they do not crash application startup.
+    """
+
+    manifests = discover_manifests(modules_dir)
+    manifest_map = {}
+    path_map = {}
+    for directory, manifest in manifests:
+        existing_dir = path_map.get(manifest.name)
+        if existing_dir is not None:
+            raise ManifestError(
+                f"Duplicate module name detected: {manifest.name} "
+                f"at {existing_dir} and {directory}"
+            )
+        manifest_map[manifest.name] = manifest
+        path_map[manifest.name] = directory
+
+    resolution: ResolutionResult = resolve_dependencies(manifest_map)
+    result = ModuleLoadResult(errors=list(resolution.errors))
+
+    for module_name in resolution.order:
+        manifest = manifest_map[module_name]
+        directory = path_map[module_name]
+        try:
+            instance = load_module(directory, manifest)
+            _initialize_module(instance)
+            result.modules.append(instance)
+        except ModuleLoadError as exc:
+            result.errors.append(exc)
+        except Exception as exc:  # pragma: no cover - best effort safety net
+            result.errors.append(
+                ModuleLoadError(
+                    f"Unexpected error loading module {module_name}: "
+                    f"{exc.__class__.__name__}: {exc}"
+                )
+            )
+
+    return result
+
+
+def _initialize_module(module: BaseModule) -> None:
+    """Initialize a module and ensure it is marked initialized."""
+    module.initialize()
+    if not module.initialized:
+        module.mark_initialized()
 
 
 __all__ = [
     "ModuleLoadError",
+    "ModuleLoadResult",
     "discover_manifests",
     "load_module",
     "load_all",
-    "ModuleManifest",
-    "ManifestError",
 ]
