@@ -143,3 +143,9 @@ The autocomplete engine provides suggestions for:
 - Sessions are managed by `StateManager` and persist across executions.
 - Code executes inside a subprocess (`SubprocessExecutor`) and returns structured stdout/stderr, updated state, and error information without crashing the server.
 - Startup/shutdown hooks are registered in `app.py` to ensure clean lifecycle handling.
+
+## Project Tree (PR #10.5)
+
+- A global `ProjectTree` singleton is reset on backend startup and exposed via `app.state.project_tree`.
+- Modules can read/write project data with `platform.state.project_tree.get_project_tree()`, using `set_path`/`get_path` helpers for nested updates.
+- The nested data viewer now defaults to rendering this shared ProjectTree namespace, including lazy nodes.
