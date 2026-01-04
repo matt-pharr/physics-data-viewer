@@ -16,6 +16,7 @@ from .method_executor import MethodExecutionResult, MethodExecutor
 from .state import StateManager
 from platform.state.project_tree import ProjectTree
 from platform.state.project_io import ProjectIOError, load_project_tree, serialize_project_tree
+from platform.modules.ui_registry import UIRegistry, UIPanel
 
 router = APIRouter()
 
@@ -124,6 +125,17 @@ class ProjectLoadResponse(BaseModel):
     root_keys: List[str]
 
 
+class ModulePanelResponse(BaseModel):
+    """Response payload for a registered UI panel."""
+
+    panel_id: str
+    module: str
+    title: str
+    description: str
+    content: Dict[str, Any]
+    updated_at: float
+
+
 def _get_state_manager(request: Request) -> StateManager:
     manager = getattr(request.app.state, "state_manager", None)
     if manager is None:
@@ -157,6 +169,13 @@ def _get_project_tree(request: Request) -> ProjectTree:
     if tree is None:
         raise HTTPException(status_code=500, detail="Project tree unavailable")
     return tree
+
+
+def _get_ui_registry(request: Request) -> UIRegistry:
+    registry: Optional[UIRegistry] = getattr(request.app.state, "ui_registry", None)
+    if registry is None:
+        raise HTTPException(status_code=500, detail="UI registry unavailable")
+    return registry
 
 
 @router.post("/sessions", response_model=SessionResponse)
@@ -297,3 +316,39 @@ async def load_project(request: Request, file: UploadFile = File(...)) -> Projec
     except ProjectIOError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return ProjectLoadResponse(status="ok", root_keys=list(tree.keys()))
+
+
+@router.get("/modules/ui-panels", response_model=List[ModulePanelResponse])
+def list_module_panels(request: Request) -> List[ModulePanelResponse]:
+    """Return all module-provided UI panels."""
+    registry = _get_ui_registry(request)
+    panels: List[UIPanel] = registry.list_panels()
+    return [
+        ModulePanelResponse(
+            panel_id=panel.panel_id,
+            module=panel.module,
+            title=panel.title,
+            description=panel.description,
+            content=panel.content,
+            updated_at=panel.updated_at,
+        )
+        for panel in panels
+    ]
+
+
+@router.post("/modules/ui-panels/{panel_id}/refresh", response_model=ModulePanelResponse)
+def refresh_module_panel(panel_id: str, request: Request) -> ModulePanelResponse:
+    """Re-render a module-provided panel."""
+    registry = _get_ui_registry(request)
+    try:
+        panel = registry.refresh_panel(panel_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return ModulePanelResponse(
+        panel_id=panel.panel_id,
+        module=panel.module,
+        title=panel.title,
+        description=panel.description,
+        content=panel.content,
+        updated_at=panel.updated_at,
+    )

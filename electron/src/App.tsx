@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { PythonEditor } from './components/CommandInput/PythonEditor';
-import { BackendClient, ExecuteResult } from './api/client';
+import { BackendClient, ExecuteResult, ModulePanel } from './api/client';
 import { TreeView, TreeNodeData } from './components/DataViewer/TreeView';
 import { ContextMenu } from './components/ContextMenu/ContextMenu';
 import { MethodIntrospector, normalizeInvokeResult, pickDefaultMethod } from './utils/methodIntrospection';
@@ -8,6 +8,7 @@ import { backendPath } from './utils/dataFormatting';
 import { LogViewer } from './components/CommandLog/LogViewer';
 import { LogSearch } from './components/CommandLog/LogSearch';
 import { LogEntry, buildLogExport } from './utils/logFormatting';
+import { ModulePanelCard } from './components/ModulePanel/ModulePanel';
 import './App.css';
 
 interface CommandBox {
@@ -17,7 +18,7 @@ interface CommandBox {
 
 const COMMAND_BOX_STORAGE_PREFIX = 'pdv-command-boxes-';
 
-type ViewerTab = 'namespace' | 'tree';
+type ViewerTab = 'namespace' | 'tree' | 'modules';
 
 interface AppProps {
   client?: BackendClient;
@@ -35,6 +36,8 @@ export const App: React.FC<AppProps> = ({ client: providedClient }) => {
   const [treeData, setTreeData] = useState<Record<string, any>>({});
   const [logEntries, setLogEntries] = useState<LogEntry[]>([]);
   const [logQuery, setLogQuery] = useState('');
+  const [modulePanels, setModulePanels] = useState<ModulePanel[]>([]);
+  const [modulePanelsLoading, setModulePanelsLoading] = useState(false);
   const [contextMenu, setContextMenu] = useState<{
     position: { x: number; y: number };
     node: TreeNodeData;
@@ -65,6 +68,7 @@ export const App: React.FC<AppProps> = ({ client: providedClient }) => {
         setViewerData(resolved);
         const tree = await client.getProjectTree().catch(() => ({}));
         setTreeData(tree);
+        await loadModulePanels();
       })
       .catch((err) => {
         setError(`Failed to connect to backend: ${err.message}`);
@@ -145,6 +149,33 @@ export const App: React.FC<AppProps> = ({ client: providedClient }) => {
     });
   }, [logEntries, logQuery]);
 
+  const loadModulePanels = async () => {
+    setModulePanelsLoading(true);
+    try {
+      const panels = await client.listModulePanels();
+      setModulePanels(panels);
+    } catch (err: any) {
+      setError(err.message);
+    } finally {
+      setModulePanelsLoading(false);
+    }
+  };
+
+  const refreshModulePanel = async (panelId: string) => {
+    try {
+      const refreshed = await client.refreshModulePanel(panelId);
+      setModulePanels((prev) => {
+        const known = prev.some((panel) => panel.panel_id === panelId);
+        if (!known) {
+          throw new Error(`Panel not found: ${panelId}`);
+        }
+        return prev.map((panel) => (panel.panel_id === panelId ? refreshed : panel));
+      });
+    } catch (err: any) {
+      setError(err.message);
+    }
+  };
+
   const appendLogEntry = (payload: Omit<LogEntry, 'id'>) => {
     setLogEntries((prev) => [...prev, { ...payload, id: logIdRef.current++ }]);
   };
@@ -171,6 +202,7 @@ export const App: React.FC<AppProps> = ({ client: providedClient }) => {
       setViewerData(resolvedState);
       const tree = await client.getProjectTree().catch(() => ({}));
       setTreeData(tree);
+      await loadModulePanels();
 
       appendLogEntry({
         code: activeBox.code,
@@ -203,6 +235,7 @@ export const App: React.FC<AppProps> = ({ client: providedClient }) => {
       setViewerData(resolved);
       const tree = await client.getProjectTree().catch(() => ({}));
       setTreeData(tree);
+      await loadModulePanels();
     } catch (err: any) {
       setError(`Failed to refresh state: ${err.message}`);
     }
@@ -350,6 +383,12 @@ export const App: React.FC<AppProps> = ({ client: providedClient }) => {
                   >
                     Tree
                   </button>
+                  <button
+                    className={`tab ${viewerTab === 'modules' ? 'active' : ''}`}
+                    onClick={() => setViewerTab('modules')}
+                  >
+                    Modules
+                  </button>
                 </div>
                 <div className="data-actions">
                   <button className="action-button" onClick={handleRefreshState} disabled={!sessionId}>
@@ -357,11 +396,25 @@ export const App: React.FC<AppProps> = ({ client: providedClient }) => {
                   </button>
                 </div>
               </div>
-              <TreeView
-                data={viewerTab === 'namespace' ? viewerData : treeData}
-                onNodeDoubleClick={handleNodeDoubleClick}
-                onContextMenu={handleContextMenu}
-              />
+              {viewerTab === 'modules' ? (
+                <div className="module-panels">
+                  {modulePanelsLoading ? (
+                    <div className="loading">Loading module panels…</div>
+                  ) : modulePanels.length === 0 ? (
+                    <div className="empty-state">No module panels registered by modules.</div>
+                  ) : (
+                    modulePanels.map((panel) => (
+                      <ModulePanelCard key={panel.panel_id} panel={panel} onRefresh={refreshModulePanel} />
+                    ))
+                  )}
+                </div>
+              ) : (
+                <TreeView
+                  data={viewerTab === 'namespace' ? viewerData : treeData}
+                  onNodeDoubleClick={handleNodeDoubleClick}
+                  onContextMenu={handleContextMenu}
+                />
+              )}
             </div>
           </div>
 

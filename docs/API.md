@@ -160,3 +160,13 @@ Example load request with `curl`:
 ```bash
 curl -X POST -F "file=@project.pdz" http://localhost:8000/project/load
 ```
+
+## Module UI Panels (PR #11)
+
+- `GET /modules/ui-panels` returns all UI panels registered by loaded modules. Each entry includes:
+  - `panel_id`, `module`, `title`, `description`
+  - `content` (module-defined dictionary payload, often containing `sections`)
+  - `updated_at` (Unix timestamp)
+- `POST /modules/ui-panels/{panel_id}/refresh` re-runs the module’s render callback and returns the refreshed panel payload.
+
+These endpoints power the Electron “Modules” tab and do not require module authors to write frontend code.
