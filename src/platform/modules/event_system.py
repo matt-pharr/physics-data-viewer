@@ -43,6 +43,7 @@ class EventSystem:
         self._manifests: Dict[str, ModuleManifest] = {}
         self._project_tree_attached = False
         self._state_manager: Optional[StateManager] = None
+        self._token_index: Dict[str, str] = {}
 
     def register_module(self, module: BaseModule, manifest: ModuleManifest) -> None:
         """Register a module for dependency injection and routing."""
@@ -91,12 +92,17 @@ class EventSystem:
             predicate=predicate,
             module=module,
         )
+        self._token_index[token] = event_type
         return token
 
     def unsubscribe(self, token: str) -> None:
         """Remove a subscription if present."""
-        for subscribers in self._subscribers.values():
-            subscribers.pop(token, None)
+        event_type = self._token_index.pop(token, None)
+        if event_type is not None:
+            self._subscribers.get(event_type, {}).pop(token, None)
+        else:
+            for subscribers in self._subscribers.values():
+                subscribers.pop(token, None)
 
     def publish(
         self, event_type: str, payload: Any, *, source: Optional[str] = None, metadata: Optional[Dict[str, Any]] = None
