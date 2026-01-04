@@ -13,12 +13,15 @@ from .executor import SubprocessExecutor
 from .introspection import MethodExecutionService, MethodIntrospector
 from .method_executor import MethodExecutor
 from .state import StateManager
+from platform.state.project_tree import get_project_tree
 
 LOG = logging.getLogger(__name__)
 
 
 def create_app() -> FastAPI:
     """Create and configure the FastAPI application."""
+    project_tree = get_project_tree()
+    project_tree.reset(clear_observers=True)
     state_manager = StateManager()
     executor = SubprocessExecutor(state_manager)
     introspector = MethodIntrospector()
@@ -48,6 +51,7 @@ def create_app() -> FastAPI:
     app.state.introspector = introspector
     app.state.method_execution = method_executor
     app.state.autocomplete_engine = autocomplete_engine
+    app.state.project_tree = project_tree
     app.include_router(router)
     return app
 

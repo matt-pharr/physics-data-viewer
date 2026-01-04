@@ -3,7 +3,6 @@ import { PythonEditor } from './components/CommandInput/PythonEditor';
 import { BackendClient, ExecuteResult } from './api/client';
 import { TreeView, TreeNodeData } from './components/DataViewer/TreeView';
 import { ContextMenu } from './components/ContextMenu/ContextMenu';
-import { ResultWindow, DisplayResult } from './components/ResultDisplay/ResultWindow';
 import { MethodIntrospector, normalizeInvokeResult, pickDefaultMethod } from './utils/methodIntrospection';
 import { backendPath } from './utils/dataFormatting';
 import { LogViewer } from './components/CommandLog/LogViewer';
@@ -31,8 +30,7 @@ export const App: React.FC<AppProps> = ({ client: providedClient }) => {
   const [activeBoxId, setActiveBoxId] = useState(1);
   const [nextId, setNextId] = useState(2);
   const [viewerData, setViewerData] = useState<Record<string, any>>({});
-  const [treeData] = useState<Record<string, any>>({});
-  const [results, setResults] = useState<DisplayResult[]>([]);
+  const [treeData, setTreeData] = useState<Record<string, any>>({});
   const [logEntries, setLogEntries] = useState<LogEntry[]>([]);
   const [logQuery, setLogQuery] = useState('');
   const [contextMenu, setContextMenu] = useState<{
@@ -42,23 +40,68 @@ export const App: React.FC<AppProps> = ({ client: providedClient }) => {
   } | null>(null);
   const [viewerTab, setViewerTab] = useState<ViewerTab>('namespace');
   const [introspector] = useState(() => new MethodIntrospector(client));
+  const [columnRatio, setColumnRatio] = useState(0.55);
+  const [rightSplitRatio, setRightSplitRatio] = useState(0.55);
   const logIdRef = useRef(1);
+  const layoutRef = useRef<HTMLDivElement | null>(null);
+  const rightPaneRef = useRef<HTMLDivElement | null>(null);
+  const dragModeRef = useRef<'vertical' | 'horizontal' | null>(null);
 
   useEffect(() => {
     // Connect to backend on mount
+    const storedSession = window.localStorage.getItem('pdv-session-id') || undefined;
     client
-      .connect()
+      .connect(storedSession)
       .then((sid) => {
         setSessionId(sid);
+        window.localStorage.setItem('pdv-session-id', sid);
         setIsConnected(true);
         return client.getState(sid).catch(() => ({}));
       })
-      .then((state) => setViewerData(state || {}))
+      .then(async (state) => {
+        const resolved = state || {};
+        setViewerData(resolved);
+        const tree = await client.getProjectTree().catch(() => ({}));
+        setTreeData(tree);
+      })
       .catch((err) => {
         setError(`Failed to connect to backend: ${err.message}`);
         console.error('Connection error:', err);
       });
   }, [client]);
+
+  useEffect(() => {
+    const handleMove = (event: MouseEvent) => {
+      if (!layoutRef.current || !dragModeRef.current) {
+        return;
+      }
+      if (dragModeRef.current === 'vertical') {
+        const rect = layoutRef.current.getBoundingClientRect();
+        const ratio = (event.clientX - rect.left) / rect.width;
+        setColumnRatio(Math.min(0.8, Math.max(0.2, ratio)));
+      } else if (dragModeRef.current === 'horizontal' && rightPaneRef.current) {
+        const rect = rightPaneRef.current.getBoundingClientRect();
+        const ratio = (event.clientY - rect.top) / rect.height;
+        setRightSplitRatio(Math.min(0.85, Math.max(0.25, ratio)));
+      }
+    };
+
+    const handleUp = () => {
+      dragModeRef.current = null;
+    };
+
+    window.addEventListener('mousemove', handleMove);
+    window.addEventListener('mouseup', handleUp);
+    return () => {
+      window.removeEventListener('mousemove', handleMove);
+      window.removeEventListener('mouseup', handleUp);
+    };
+  }, []);
+
+  const startDrag = (mode: 'vertical' | 'horizontal') => (event: React.MouseEvent) => {
+    event.preventDefault();
+    dragModeRef.current = mode;
+  };
 
   const filteredLogEntries = useMemo(() => {
     if (!logQuery.trim()) {
@@ -93,7 +136,11 @@ export const App: React.FC<AppProps> = ({ client: providedClient }) => {
     try {
       const result: ExecuteResult = await client.execute(activeBox.code);
       setSessionId(result.session_id);
-      setViewerData(result.state || {});
+      window.localStorage.setItem('pdv-session-id', result.session_id);
+      const resolvedState = result.state || {};
+      setViewerData(resolvedState);
+      const tree = await client.getProjectTree().catch(() => ({}));
+      setTreeData(tree);
 
       appendLogEntry({
         code: activeBox.code,
@@ -122,7 +169,10 @@ export const App: React.FC<AppProps> = ({ client: providedClient }) => {
     }
     try {
       const state = await client.getState(sessionId);
-      setViewerData(state || {});
+      const resolved = state || {};
+      setViewerData(resolved);
+      const tree = await client.getProjectTree().catch(() => ({}));
+      setTreeData(tree);
     } catch (err: any) {
       setError(`Failed to refresh state: ${err.message}`);
     }
@@ -142,7 +192,13 @@ export const App: React.FC<AppProps> = ({ client: providedClient }) => {
       }
       const result = await client.invokeMethod(sessionId, backendPath(node.path), target.name);
       const display = normalizeInvokeResult(result);
-      setResults((prev) => [...prev, display]);
+      appendLogEntry({
+        code: `[invoke] ${backendPath(node.path).join('.')} :: ${target.name}`,
+        stdout: display.content ? JSON.stringify(display.content, null, 2) : undefined,
+        error: display.error ?? undefined,
+        timestamp: Date.now(),
+        durationMs: 0,
+      });
       setError(display.error ?? null);
     } catch (err: any) {
       setError(err.message);
@@ -168,7 +224,13 @@ export const App: React.FC<AppProps> = ({ client: providedClient }) => {
     }
     const result = await client.invokeMethod(sessionId, backendPath(node.path), methodName);
     const display = normalizeInvokeResult(result);
-    setResults((prev) => [...prev, display]);
+    appendLogEntry({
+      code: `[invoke] ${backendPath(node.path).join('.')} :: ${methodName}`,
+      stdout: display.content ? JSON.stringify(display.content, null, 2) : undefined,
+      error: display.error ?? undefined,
+      timestamp: Date.now(),
+      durationMs: 0,
+    });
     setError(display.error ?? null);
   };
 
@@ -240,100 +302,106 @@ export const App: React.FC<AppProps> = ({ client: providedClient }) => {
       </header>
 
       <main className="app-main">
-        <div className="top-grid">
-          <div className="output-panel">
-            <div className="panel-header">
-              <h2>Command Log</h2>
+        <div className="split-layout" ref={layoutRef}>
+          <div className="pane data-pane" style={{ width: `${columnRatio * 100}%` }}>
+            <div className="data-panel">
+              <div className="data-panel-header">
+                <h2>Data Viewer</h2>
+                <div className="data-tabs">
+                  <button
+                    className={`tab ${viewerTab === 'namespace' ? 'active' : ''}`}
+                    onClick={() => setViewerTab('namespace')}
+                  >
+                    Namespace
+                  </button>
+                  <button
+                    className={`tab ${viewerTab === 'tree' ? 'active' : ''}`}
+                    onClick={() => setViewerTab('tree')}
+                  >
+                    Tree
+                  </button>
+                </div>
+                <div className="data-actions">
+                  <button className="action-button" onClick={handleRefreshState} disabled={!sessionId}>
+                    Refresh
+                  </button>
+                </div>
+              </div>
+              <TreeView
+                data={viewerTab === 'namespace' ? viewerData : treeData}
+                viewportHeight={360}
+                onNodeDoubleClick={handleNodeDoubleClick}
+                onContextMenu={handleContextMenu}
+              />
             </div>
-            <LogSearch
-              query={logQuery}
-              total={logEntries.length}
-              filteredCount={filteredLogEntries.length}
-              onChange={setLogQuery}
-              onReset={() => setLogQuery('')}
-            />
-            <LogViewer entries={filteredLogEntries} onClear={handleClearLog} onExport={handleExportLog} />
           </div>
 
-          <div className="data-panel">
-            <div className="data-panel-header">
-              <h2>Data Viewer</h2>
-              <div className="data-tabs">
-                <button
-                  className={`tab ${viewerTab === 'namespace' ? 'active' : ''}`}
-                  onClick={() => setViewerTab('namespace')}
-                >
-                  Namespace
-                </button>
-                <button
-                  className={`tab ${viewerTab === 'tree' ? 'active' : ''}`}
-                  onClick={() => setViewerTab('tree')}
-                >
-                  Tree
-                </button>
-              </div>
-              <div className="data-actions">
-                <button className="action-button" onClick={handleRefreshState} disabled={!sessionId}>
-                  Refresh
-                </button>
-              </div>
-            </div>
-            <TreeView
-              data={viewerTab === 'namespace' ? viewerData : treeData}
-              viewportHeight={260}
-              onNodeDoubleClick={handleNodeDoubleClick}
-              onContextMenu={handleContextMenu}
-            />
-            {viewerTab === 'tree' && (
-              <div className="data-panel-note">
-                Central project Tree placeholder — future PRs will populate this nested structure.
-              </div>
-            )}
-            <ResultWindow results={results} onClear={() => setResults([])} />
-          </div>
-        </div>
+          <div className="vertical-resizer" onMouseDown={startDrag('vertical')} />
 
-        <div className="command-panel">
-          <div className="command-panel-header">
-            <h2>Command Input</h2>
-            <div className="command-tabs">
-              {commandBoxes.map((box) => (
-                <button
-                  key={box.id}
-                  className={`tab ${box.id === activeBoxId ? 'active' : ''}`}
-                  onClick={() => setActiveBoxId(box.id)}
-                >
-                  {box.id}
-                </button>
-              ))}
-              <button className="tab add-tab" onClick={handleAddCommandBox} title="Add new command box">
-                +
-              </button>
+          <div className="pane right-pane" ref={rightPaneRef} style={{ width: `${(1 - columnRatio) * 100}%` }}>
+            <div className="right-top" style={{ height: `${rightSplitRatio * 100}%` }}>
+              <div className="output-panel">
+                <div className="panel-header">
+                  <h2>Console</h2>
+                </div>
+                <LogSearch
+                  query={logQuery}
+                  total={logEntries.length}
+                  filteredCount={filteredLogEntries.length}
+                  onChange={setLogQuery}
+                  onReset={() => setLogQuery('')}
+                />
+                <LogViewer entries={filteredLogEntries} onClear={handleClearLog} onExport={handleExportLog} />
+              </div>
             </div>
-          </div>
-          {error && (
-            <div className="error-message">
-              {error}
+
+            <div className="horizontal-resizer" onMouseDown={startDrag('horizontal')} />
+
+            <div className="right-bottom">
+              <div className="command-panel">
+                <div className="command-panel-header">
+                  <h2>Command Input</h2>
+                  <div className="command-header-actions">
+                    <div className="command-tabs">
+                      {commandBoxes.map((box) => (
+                        <button
+                          key={box.id}
+                          className={`tab ${box.id === activeBoxId ? 'active' : ''}`}
+                          onClick={() => setActiveBoxId(box.id)}
+                        >
+                          {box.id}
+                        </button>
+                      ))}
+                      <button className="tab add-tab" onClick={handleAddCommandBox} title="Add new command box">
+                        +
+                      </button>
+                    </div>
+                    <div className="command-actions-top">
+                      <button className="action-button execute" onClick={handleExecute}>
+                        Execute
+                      </button>
+                      <button
+                        className={`action-button ${isActiveBoxEmpty ? 'close' : 'clear'}`}
+                        onClick={handleClearOrClose}
+                      >
+                        {isActiveBoxEmpty && commandBoxes.length > 1 ? 'Close' : 'Clear'}
+                      </button>
+                    </div>
+                  </div>
+                </div>
+                {error && <div className="error-message">{error}</div>}
+                <div className="command-panel-content">
+                  <PythonEditor
+                    key={activeBoxId}
+                    value={activeBox?.code || ''}
+                    onCodeChange={handleCodeChange}
+                    onExecute={handleExecute}
+                    client={client}
+                    height="100%"
+                  />
+                </div>
+              </div>
             </div>
-          )}
-          <PythonEditor
-            key={activeBoxId}
-            value={activeBox?.code || ''}
-            onCodeChange={handleCodeChange}
-            onExecute={handleExecute}
-            client={client}
-            height="200px"
-          />
-          <div className="command-actions">
-            <button className="action-button execute" onClick={handleExecute}>
-              Execute
-            </button>
-            <button 
-              className={`action-button ${isActiveBoxEmpty ? 'close' : 'clear'}`} 
-              onClick={handleClearOrClose}
-            >
-              {isActiveBoxEmpty && commandBoxes.length > 1 ? 'Close' : 'Clear'}
-            </button>
           </div>
         </div>
         {contextMenu && (

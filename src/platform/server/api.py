@@ -13,6 +13,7 @@ from .executor import ExecutionError, ExecutionResult, SubprocessExecutor
 from .introspection import MethodResolutionError
 from .method_executor import MethodExecutionResult, MethodExecutor
 from .state import StateManager
+from platform.state.project_tree import ProjectTree
 
 router = APIRouter()
 
@@ -142,6 +143,13 @@ def _get_autocomplete_engine(request: Request) -> AutocompleteEngine:
     return engine
 
 
+def _get_project_tree(request: Request) -> ProjectTree:
+    tree: Optional[ProjectTree] = getattr(request.app.state, "project_tree", None)
+    if tree is None:
+        raise HTTPException(status_code=500, detail="Project tree unavailable")
+    return tree
+
+
 @router.post("/sessions", response_model=SessionResponse)
 def create_session(request: Request, session_id: Optional[str] = Body(default=None, embed=True)) -> SessionResponse:
     """Create a new session or register an existing session id."""
@@ -244,3 +252,10 @@ def autocomplete(request: Request, payload: AutocompleteRequest) -> Autocomplete
     ]
     
     return AutocompleteResponse(completions=completion_responses)
+
+
+@router.get("/project-tree", response_model=Dict[str, Any])
+def get_project_tree(request: Request) -> Dict[str, Any]:
+    """Return a serialized view of the global ProjectTree."""
+    tree = _get_project_tree(request)
+    return tree.to_dict()

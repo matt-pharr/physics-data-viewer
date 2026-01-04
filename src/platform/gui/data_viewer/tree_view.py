@@ -8,6 +8,7 @@ from typing import Any, Callable, Iterable, List, Optional, Sequence, Tuple
 
 from .formatting import FormattedValue, format_value
 from .virtual_scroller import VirtualScroller
+from platform.state.project_tree import LazyNode, Tree, get_project_tree
 
 Formatter = Callable[[Any], FormattedValue]
 Path = Tuple[str, ...]
@@ -21,6 +22,7 @@ class TreeNode:
     value: Any
     path: Path
     formatter: Formatter = format_value
+    metadata: Optional[dict[str, Any]] = None
     is_leaf: bool = False
     _children_loader: Optional[Callable[[], List["TreeNode"]]] = None
     _children: Optional[List["TreeNode"]] = field(default=None, init=False, repr=False)
@@ -98,14 +100,24 @@ class TreeView:
             self.root.expand()
 
     def _build_node(self, key: str, value: Any, path: Path) -> TreeNode:
-        is_container = isinstance(value, (dict, list, tuple))
         node_path = (*path, str(key))
         loader: Optional[Callable[[], List[TreeNode]]] = None
-        if is_container:
+        node_value = value
+        is_container = self._is_container(value)
+
+        if isinstance(value, Tree):
+            loader = partial(self._build_tree_children, value, node_path)
+            is_container = True
+        elif isinstance(value, LazyNode):
+            loader = partial(self._build_lazy_node_children, value, node_path)
+            node_value = value.peek()
+            is_container = True
+        elif is_container:
             loader = partial(self._build_children, value, node_path)
+
         return TreeNode(
             key=str(key),
-            value=value,
+            value=node_value,
             path=node_path,
             formatter=self.formatter,
             is_leaf=not is_container,
@@ -114,6 +126,8 @@ class TreeView:
 
     def _build_children(self, value: Any, path: Path) -> List[TreeNode]:
         children: List[TreeNode] = []
+        if isinstance(value, Tree):
+            return self._build_tree_children(value, path)
         if isinstance(value, dict):
             iterator = value.items()
         elif isinstance(value, (list, tuple)):
@@ -123,6 +137,45 @@ class TreeView:
         for child_key, child_value in iterator:
             children.append(self._build_node(str(child_key), child_value, path))
         return children
+
+    def _build_tree_children(self, tree: Tree, path: Path) -> List[TreeNode]:
+        children: List[TreeNode] = []
+        for child_key, child_value, metadata, is_lazy, resolver in tree.iter_entries():
+            node_path = (*path, str(child_key))
+            loader: Optional[Callable[[], List[TreeNode]]] = None
+            is_leaf = False
+
+            if is_lazy and resolver:
+                loader = partial(self._resolve_lazy_child, resolver, node_path)
+            elif self._is_container(child_value):
+                loader = partial(self._build_children, child_value, node_path)
+            else:
+                is_leaf = True
+
+            children.append(
+                TreeNode(
+                    key=str(child_key),
+                    value=child_value,
+                    path=node_path,
+                    formatter=self.formatter,
+                    metadata=metadata or None,
+                    is_leaf=is_leaf,
+                    _children_loader=loader,
+                )
+            )
+        return children
+
+    def _build_lazy_node_children(self, lazy: LazyNode, path: Path) -> List[TreeNode]:
+        resolved = lazy.resolve()
+        return self._build_children(resolved, path)
+
+    def _resolve_lazy_child(self, resolver: Callable[[], Any], path: Path) -> List[TreeNode]:
+        resolved = resolver()
+        return self._build_children(resolved, path)
+
+    @staticmethod
+    def _is_container(value: Any) -> bool:
+        return isinstance(value, (dict, list, tuple, Tree))
 
     def iter_visible(self) -> Iterable[tuple[int, TreeNode]]:
         """Iterate over currently expanded nodes."""
@@ -165,13 +218,14 @@ class DataViewer:
 
     def __init__(
         self,
-        data: Any,
+        data: Any | None = None,
         formatter: Formatter = format_value,
         *,
         viewport_size: int = 50,
         overscan: int = 10,
     ) -> None:
-        self.tree = TreeView(data, formatter=formatter)
+        source = data if data is not None else get_project_tree()
+        self.tree = TreeView(source, formatter=formatter)
         self.scroller = VirtualScroller(viewport_size=viewport_size, overscan=overscan)
 
     def visible_window(self, start_index: int = 0) -> List[tuple[int, TreeNode]]:
