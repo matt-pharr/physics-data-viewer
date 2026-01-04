@@ -101,7 +101,7 @@ class ModuleContext:
     def publish_event(self, event_type: str, payload: Any, *, metadata: Optional[Dict[str, Any]] = None) -> None:
         """Publish an event to other modules via the shared event system."""
         if self.event_system is None:
-            raise RuntimeError("Event system unavailable for this context")
+            raise RuntimeError("Cannot publish event: event system unavailable for this context")
         self._ensure_hooks()
         self.event_system.publish(event_type, payload, source=self.manifest.name, metadata=metadata)
 

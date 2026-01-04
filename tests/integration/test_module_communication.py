@@ -68,6 +68,8 @@ def _build_context_factory(event_system: EventSystem):
 
 def test_modules_communicate_via_events(modules_dir):
     event_system = EventSystem()
+    producer_name = "producer"
+    consumer_name = "consumer"
 
     producer_init = """
 if context:
@@ -81,11 +83,11 @@ if context:
 
     consumer_init = """
 if context:
-    context.get_dependency("producer")
+    context.get_dependency("__PRODUCER__")
     context.subscribe_event(
         "data.ready",
         self._handle_data_ready,
-        predicate=lambda event: event.source == "producer",
+        predicate=lambda event: event.source == "__PRODUCER__",
     )
     context.publish_event("request.data", {"purpose": "integration-test"})
 """
@@ -95,20 +97,21 @@ if context:
             self.ctx.set_project_value(["events", "result"], event.payload["value"])
             self.received = event.payload["value"]
 """
+    consumer_init = consumer_init.replace("__PRODUCER__", producer_name)
 
     _write_module(
         modules_dir / "producer",
-        {"name": "producer", "version": "1.0.0", "author": "Tester"},
+        {"name": producer_name, "version": "1.0.0", "author": "Tester"},
         producer_init,
         producer_methods,
     )
     _write_module(
         modules_dir / "consumer",
         {
-            "name": "consumer",
+            "name": consumer_name,
             "version": "1.0.0",
             "author": "Tester",
-            "dependencies": ["producer"],
+            "dependencies": [producer_name],
         },
         consumer_init,
         consumer_methods,
@@ -119,7 +122,7 @@ if context:
     tree = get_project_tree()
     assert tree.get_path(["events", "result"]) == 42
 
-    consumer = next(mod for mod in result.modules if mod.name == "consumer")
-    producer = next(mod for mod in result.modules if mod.name == "producer")
+    consumer = next(mod for mod in result.modules if mod.name == consumer_name)
+    producer = next(mod for mod in result.modules if mod.name == producer_name)
     assert getattr(consumer, "received") == 42
     assert getattr(producer, "initialized") is True

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple
 from uuid import uuid4
@@ -10,6 +11,8 @@ from platform.modules.base import BaseModule
 from platform.modules.manifest import ModuleManifest
 from platform.server.state import StateManager
 from platform.state.project_tree import ProjectTree
+
+logger = logging.getLogger(__name__)
 
 EventCallback = Callable[["Event"], Any]
 EventFilter = Callable[["Event"], bool]
@@ -66,7 +69,7 @@ class EventSystem:
             raise PermissionError(f"{requester} is not allowed to access undeclared dependency {dependency}")
 
         target_manifest = self._manifests.get(dependency)
-        if target_manifest and requester in target_manifest.dependencies:
+        if target_manifest and self._detect_cycle(requester, dependency):
             raise ValueError(f"Circular dependency detected between {requester} and {dependency}")
 
         target = self._modules.get(dependency)
@@ -101,8 +104,13 @@ class EventSystem:
         if event_type is not None:
             self._subscribers.get(event_type, {}).pop(token, None)
         else:
+            found = False
             for subscribers in self._subscribers.values():
-                subscribers.pop(token, None)
+                if token in subscribers:
+                    subscribers.pop(token, None)
+                    found = True
+            if found:
+                logger.warning("Token %s missing from index but present in subscribers", token)
 
     def publish(
         self, event_type: str, payload: Any, *, source: Optional[str] = None, metadata: Optional[Dict[str, Any]] = None
@@ -147,6 +155,22 @@ class EventSystem:
             {"session": session_id, "path": path_tuple, "value": value, "action": action},
             metadata={"action": action, "session": session_id, "path": path_tuple},
         )
+
+    def _detect_cycle(self, requester: str, dependency: str) -> bool:
+        """Detect whether resolving dependency would introduce a cycle."""
+        to_visit = [dependency]
+        seen = set()
+        while to_visit:
+            current = to_visit.pop()
+            if current == requester:
+                return True
+            if current in seen:
+                continue
+            seen.add(current)
+            manifest = self._manifests.get(current)
+            if manifest:
+                to_visit.extend(manifest.dependencies)
+        return False
 
 
 __all__ = ["Event", "EventSystem"]
