@@ -3,7 +3,7 @@ from __future__ import annotations
 from fastapi.testclient import TestClient
 
 from platform.server.app import create_app
-from platform.state.project_tree import LazyNode, Tree
+from platform.state.project_tree import Tree
 
 
 def test_save_and_load_project_archive_round_trip():
@@ -37,7 +37,8 @@ def test_save_and_load_project_archive_round_trip():
         assert payload["status"] == "ok"
         assert "constants" in payload["root_keys"]
 
-    assert isinstance(project_tree._data["datasets"], LazyNode)  # noqa: SLF001
+    entries = {k: is_lazy for k, _, _, is_lazy, _ in project_tree.iter_entries()}
+    assert entries.get("datasets") is True
     assert project_tree["constants"]["pi"] == 3.14
     resolved = project_tree["datasets"]
     assert isinstance(resolved, Tree)

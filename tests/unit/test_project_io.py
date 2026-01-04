@@ -33,13 +33,17 @@ def test_round_trip_persists_lazy_nodes_and_metadata(project_tree: Tree):
     project_tree["constants"] = {"pi": 0}
     loaded = load_project_tree(archive, target=project_tree)
 
-    assert isinstance(loaded._data["waveforms"], LazyNode)  # noqa: SLF001
+    entries = {k: (is_lazy, resolver) for k, _, _, is_lazy, resolver in loaded.iter_entries()}
+    assert "waveforms" in entries
+    is_lazy, resolver = entries["waveforms"]
+    assert is_lazy
+    assert resolver is not None
     assert loaded.get_metadata("constants")["unit"] == "dimensionless"
     assert calls == ["loaded"]
 
-    resolved = loaded["waveforms"]
-    assert isinstance(resolved, Tree)
-    assert resolved["values"][-1] == 3
+    resolved_node = loaded["waveforms"]
+    assert isinstance(resolved_node, Tree)
+    assert resolved_node["values"][-1] == 3
     assert calls == ["loaded"]
 
 

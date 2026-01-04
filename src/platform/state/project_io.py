@@ -87,9 +87,10 @@ def _serialize_entry(value: Any, metadata: Dict[str, Any]) -> Dict[str, Any]:
             "value": _serialize_tree(value),
         }
     if isinstance(value, LazyNode):
-        snapshot = _safe_serialize_value(value.loader)
-        if value.resolved:
-            snapshot = _serialize_value(value._value) if hasattr(value, "_value") else snapshot  # noqa: SLF001
+        if value.resolved and value.resolved_value is not None:
+            snapshot = _serialize_value(value.resolved_value)
+        else:
+            snapshot = _safe_serialize_value(value.loader)
         return {
             "node_type": "lazy",
             "metadata": metadata,
@@ -146,6 +147,7 @@ def _apply_entry(tree: Tree, key: str, entry: Dict[str, Any]) -> None:
         loader = _build_lazy_loader(snapshot)
         tree.add_lazy(key, loader, preview=preview, metadata=metadata or None)
         if entry.get("resolved") and snapshot is not None:
+            # Trigger resolution so restored tree reflects resolved state
             _ = tree[key]
     elif node_type == "value":
         tree[key] = _deserialize_value(entry.get("value"))
@@ -187,7 +189,11 @@ def _build_lazy_loader(snapshot: Any) -> Callable[[], Any]:
         return _raise_missing
 
     value = _deserialize_value(snapshot)
-    return lambda value=value: value
+
+    def _loader(value=value) -> Any:
+        return value
+
+    return _loader
 
 
 __all__ = [

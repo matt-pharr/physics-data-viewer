@@ -36,6 +36,11 @@ class LazyNode:
         """True when the loader has been executed."""
         return self._resolved
 
+    @property
+    def resolved_value(self) -> Any:
+        """Return the resolved value if available without triggering resolution."""
+        return self._value if self._resolved else None
+
 
 class Tree(MutableMapping[str, Any]):
     """Dict-like container with lazy nodes, metadata, and observers."""
