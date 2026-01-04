@@ -61,3 +61,25 @@ def test_project_tree_persists_as_object_across_commands():
         assert data["error"] is None
         assert isinstance(app.state.project_tree, ProjectTree)
         assert "constants" in data["state"]["result"]
+
+
+def test_get_state_after_project_tree_binding_is_serializable():
+    app = create_app()
+    with TestClient(app) as client:
+        session_resp = client.post("/sessions", json={})
+        session_id = session_resp.json()["session_id"]
+
+        exec_resp = client.post(
+            "/execute",
+            json={
+                "code": "from platform.state import get_project_tree\nproject_tree = get_project_tree()\nvalue = 123",
+                "session_id": session_id,
+            },
+        )
+        assert exec_resp.status_code == 200
+
+        state_resp = client.get(f"/state/{session_id}")
+        assert state_resp.status_code == 200
+        payload = state_resp.json()
+        assert payload["value"] == 123
+        assert "__pdv_kind__" in payload.get("project_tree", {})

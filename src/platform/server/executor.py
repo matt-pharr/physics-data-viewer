@@ -158,8 +158,9 @@ class SubprocessExecutor:
             raise ExecutionError("Execution output was not valid JSON.") from exc
 
         hydrated_state = self._rehydrate_state(payload.get("state") or {})
-        self.state_manager.update_session_state(session, hydrated_state)
-        response_state = self._prepare_state(hydrated_state)
+        storable_state = self._prepare_state(hydrated_state)
+        self.state_manager.update_session_state(session, storable_state)
+        response_state = storable_state
 
         if payload.get("error"):
             LOG.warning("Execution returned error for session %s: %s", session, payload["error"])
