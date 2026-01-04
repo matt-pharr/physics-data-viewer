@@ -1,4 +1,4 @@
-import React, { useCallback, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { FormattedValue, formatValue } from '../../utils/dataFormatting';
 import { VirtualScroller } from './VirtualScroller';
 
@@ -22,7 +22,6 @@ export interface TreeViewProps {
 }
 
 const DEFAULT_ROW_HEIGHT = 28;
-const DEFAULT_VIEWPORT_HEIGHT = 320;
 
 function isContainer(value: any): boolean {
   return value !== null && typeof value === 'object';
@@ -64,7 +63,7 @@ function flatten(node: TreeNodeData, expanded: Set<string>, acc: TreeNodeData[])
 export const TreeView: React.FC<TreeViewProps> = ({
   data,
   rowHeight = DEFAULT_ROW_HEIGHT,
-  viewportHeight = DEFAULT_VIEWPORT_HEIGHT,
+  viewportHeight,
   overscan = 10,
   onNodeDoubleClick,
   onContextMenu,
@@ -72,6 +71,9 @@ export const TreeView: React.FC<TreeViewProps> = ({
   const root = useMemo(() => buildTree(data ?? {}), [data]);
   const [expanded, setExpanded] = useState<Set<string>>(new Set([pathKey(root.path)]));
   const [scrollTop, setScrollTop] = useState(0);
+  const [colWidths, setColWidths] = useState<[number, number, number]>([220, 140, 320]);
+  const dragState = useRef<{ index: number; startX: number; start: [number, number, number] } | null>(null);
+  const containerRef = useRef<HTMLDivElement | null>(null);
 
   const flattened = useMemo(() => {
     const nodes: TreeNodeData[] = [];
@@ -115,13 +117,59 @@ export const TreeView: React.FC<TreeViewProps> = ({
     [onContextMenu],
   );
 
+  const gridTemplateColumns = `${colWidths[0]}px ${colWidths[1]}px ${colWidths[2]}px`;
+
+  const handleResizeStart = useCallback((index: number, event: React.MouseEvent) => {
+    event.preventDefault();
+    dragState.current = { index, startX: event.clientX, start: [...colWidths] as [number, number, number] };
+  }, [colWidths]);
+
+  useEffect(() => {
+    const handleMove = (event: MouseEvent) => {
+      if (!dragState.current) return;
+      const { index, startX, start } = dragState.current;
+      const delta = event.clientX - startX;
+      const next = [...start] as [number, number, number];
+      const min = 80;
+      const total = start[index] + start[index + 1];
+      next[index] = Math.min(total - min, Math.max(min, start[index] + delta));
+      next[index + 1] = total - next[index];
+      setColWidths(next);
+    };
+    const handleUp = () => {
+      dragState.current = null;
+    };
+    window.addEventListener('mousemove', handleMove);
+    window.addEventListener('mouseup', handleUp);
+    return () => {
+      window.removeEventListener('mousemove', handleMove);
+      window.removeEventListener('mouseup', handleUp);
+    };
+  }, []);
+
   return (
     <div
       className="tree-view"
-      style={{ height: viewportHeight, overflow: 'auto', position: 'relative' }}
+      ref={containerRef}
+      style={{ height: viewportHeight ?? '100%', overflow: 'auto', position: 'relative', display: 'flex', flexDirection: 'column' }}
       onScroll={(e) => setScrollTop(e.currentTarget.scrollTop)}
       data-testid="tree-view"
     >
+      <div className="tree-header" style={{ display: 'grid', gridTemplateColumns, alignItems: 'center', position: 'relative' }}>
+        <div className="tree-header-cell">Key</div>
+        <div className="tree-header-cell">Type</div>
+        <div className="tree-header-cell">Value</div>
+        <div
+          className="tree-header-resizer"
+          style={{ left: colWidths[0] }}
+          onMouseDown={(e) => handleResizeStart(0, e)}
+        />
+        <div
+          className="tree-header-resizer"
+          style={{ left: colWidths[0] + colWidths[1] }}
+          onMouseDown={(e) => handleResizeStart(1, e)}
+        />
+      </div>
       <div style={{ paddingTop, paddingBottom }}>
         {visible.map((node) => {
           const isExpanded = expanded.has(pathKey(node.path));
@@ -129,29 +177,37 @@ export const TreeView: React.FC<TreeViewProps> = ({
             <div
               key={pathKey(node.path)}
               className="tree-row"
-              style={{ display: 'flex', alignItems: 'center', height: rowHeight, paddingLeft: node.depth * 14 }}
+              style={{
+                display: 'grid',
+                gridTemplateColumns,
+                alignItems: 'center',
+                height: rowHeight,
+              }}
               onDoubleClick={() => onNodeDoubleClick?.(node)}
               onContextMenu={(e) => handleContextMenu(e, node)}
               data-testid="tree-node"
             >
-              {node.hasChildren ? (
-                <button
-                  type="button"
-                  className="tree-toggle"
-                  onClick={() => togglePath(node.path)}
-                  aria-label={isExpanded ? 'Collapse' : 'Expand'}
-                >
-                  {isExpanded ? '▾' : '▸'}
-                </button>
-              ) : (
-                <span className="tree-spacer" style={{ width: 16 }} />
-              )}
-              <span className="tree-key">{node.key}</span>
-              <span className="tree-separator">:</span>
-              <span className="tree-preview" title={node.formatted.preview}>
-                {node.formatted.preview}
-              </span>
-              <span className="tree-type">({node.formatted.typeName})</span>
+              <div className="tree-cell tree-cell-key" style={{ paddingLeft: node.depth * 14, display: 'flex', alignItems: 'center', gap: 6 }}>
+                {node.hasChildren ? (
+                  <button
+                    type="button"
+                    className="tree-toggle"
+                    onClick={() => togglePath(node.path)}
+                    aria-label={isExpanded ? 'Collapse' : 'Expand'}
+                  >
+                    {isExpanded ? '▾' : '▸'}
+                  </button>
+                ) : (
+                  <span className="tree-spacer" style={{ width: 16 }} />
+                )}
+                <span className="tree-key">{node.key}</span>
+              </div>
+              <div className="tree-cell tree-cell-type">
+                <span className="tree-type">({node.formatted.typeName})</span>
+              </div>
+              <div className="tree-cell tree-cell-value" title={node.formatted.preview}>
+                <span className="tree-preview">{node.formatted.preview}</span>
+              </div>
             </div>
           );
         })}

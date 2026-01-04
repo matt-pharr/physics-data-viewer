@@ -359,7 +359,6 @@ export const App: React.FC<AppProps> = ({ client: providedClient }) => {
               </div>
               <TreeView
                 data={viewerTab === 'namespace' ? viewerData : treeData}
-                viewportHeight={360}
                 onNodeDoubleClick={handleNodeDoubleClick}
                 onContextMenu={handleContextMenu}
               />
