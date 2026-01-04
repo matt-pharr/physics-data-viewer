@@ -1,4 +1,0 @@
-name: example_gui_module
-version: "0.1.0"
-author: Physics Data Viewer Team
-description: Example GUI module exposing a panel and lazy dataset

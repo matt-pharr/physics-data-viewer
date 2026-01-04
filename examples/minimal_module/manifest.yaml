@@ -1,5 +1,0 @@
-name: minimal_module
-version: "0.1.0"
-author: Physics Data Viewer Team
-description: Minimal example module demonstrating BaseModule usage.
-dependencies: []
