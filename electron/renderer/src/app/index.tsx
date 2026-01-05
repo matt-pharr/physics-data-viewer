@@ -59,7 +59,9 @@ const App: React.FC = () => {
     const handleMove = (event: MouseEvent) => {
       if (!dragRef.current) return;
       if (dragRef.current === 'vertical') {
-        const next = Math.min(Math.max(event.clientX, 200), 600);
+        const viewportWidth = window.innerWidth || 1200;
+        const max = Math.max(200, viewportWidth - 300);
+        const next = Math.min(Math.max(event.clientX, 200), max);
         setLeftWidth(next);
       } else if (dragRef.current === 'horizontal') {
         const bounds = rightPaneRef.current?.getBoundingClientRect();

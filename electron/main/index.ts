@@ -211,12 +211,20 @@ if (!canRegisterHandlers) {
           return { error: result.error };
         }
 
-        if (typeof result.result !== 'string') {
-          return { error: 'Namespace result not serialized as string' };
-        }
-
         try {
-          const namespaceData = JSON.parse(result.result as string);
+          if (typeof result.result !== 'string') {
+            return { error: 'Namespace result not serialized as string' };
+          }
+
+          let serialized = (result.result as string).trim();
+          if (
+            (serialized.startsWith("'") && serialized.endsWith("'")) ||
+            (serialized.startsWith('"') && serialized.endsWith('"'))
+          ) {
+            serialized = serialized.slice(1, -1);
+          }
+
+          const namespaceData = JSON.parse(serialized);
           const variables: NamespaceVariable[] = Object.entries(namespaceData).map(
             ([name, info]) =>
               ({
