@@ -9,33 +9,55 @@ const App: React.FC = () => {
   const [commandTabs, setCommandTabs] = useState<number[]>([1]);
   const [activeCommandTab, setActiveCommandTab] = useState(1);
 
-  // Test IPC connection on mount
+  // Test IPC connection and kernel on mount
   useEffect(() => {
-    const testIPC = async () => {
+    const testKernelManager = async () => {
       try {
-        // Test kernel list
-        const kernels = await window.pdv.kernels.list();
-        console.log('[App] Kernels:', kernels);
+        console.log('[App] Testing Kernel Manager...');
 
-        // Test config
+        // Start a kernel
+        const kernel = await window.pdv.kernels.start({ language: 'python' });
+        console.log('[App] Kernel started:', kernel);
+
+        // List kernels
+        const kernels = await window.pdv.kernels.list();
+        console.log('[App] Running kernels:', kernels);
+
+        // Execute code
+        const result1 = await window.pdv.kernels.execute(kernel.id, {
+          code: 'print("Hello from PDV!")',
+        });
+        console.log('[App] Execute result:', result1);
+
+        // Execute expression
+        const result2 = await window.pdv.kernels.execute(kernel.id, {
+          code: '2 + 2',
+        });
+        console.log('[App] Expression result:', result2);
+
+        // Test completions
+        const completions = await window.pdv.kernels.complete(kernel.id, 'pri', 3);
+        console.log('[App] Completions for "pri":', completions.matches);
+
+        // Test inspection
+        const inspection = await window.pdv.kernels.inspect(kernel.id, 'print', 5);
+        console.log('[App] Inspection for "print":', inspection);
+
+        // Get config
         const config = await window.pdv.config.get();
         console.log('[App] Config:', config);
 
-        // Test tree list
+        // Get tree nodes
         const treeNodes = await window.pdv.tree.list('');
         console.log('[App] Tree nodes:', treeNodes);
 
-        // Test execute
-        const result = await window.pdv.kernels.execute('stub', { code: '1+1' });
-        console.log('[App] Execute result:', result);
-
-        console.log('[App] IPC connection verified ✓');
+        console.log('[App] ✓ All IPC tests passed!');
       } catch (error) {
-        console.error('[App] IPC connection failed:', error);
+        console.error('[App] IPC test failed:', error);
       }
     };
 
-    testIPC();
+    testKernelManager();
   }, []);
 
   const addCommandTab = () => {
