@@ -184,19 +184,38 @@ function parseMessage(frames: Buffer[]): JupyterMessage | null {
 
 function loadInitCell(language: 'python' | 'julia'): string {
   const filename = language === 'python' ? 'python-init.py' : 'julia-init.jl';
-  const initPath = path.join(__dirname, 'init', filename);
+  const candidatePaths = [
+    path.join(__dirname, 'init', filename),
+    path.join(__dirname, '..', 'init', filename),
+    path.join(process.cwd(), 'main', 'init', filename),
+    path.join(process.cwd(), 'dist', 'main', 'init', filename),
+  ];
 
-  try {
-    if (fs.existsSync(initPath)) {
-      return fs.readFileSync(initPath, 'utf-8');
+  for (const initPath of candidatePaths) {
+    try {
+      if (fs.existsSync(initPath)) {
+        return fs.readFileSync(initPath, 'utf-8');
+      }
+    } catch (error) {
+      console.warn(`[KernelManager] Failed to read init cell at ${initPath}:`, error);
     }
-  } catch (error) {
-    console.warn(`[KernelManager] Failed to load init cell for ${language}:`, error);
   }
 
-  return language === 'python'
-    ? '# Physics Data Viewer - Python kernel\nprint("PDV Python kernel ready")'
-    : '# Physics Data Viewer - Julia kernel\nprintln("PDV Julia kernel ready")';
+  // Fallback minimal definitions to avoid NameError in kernels
+  if (language === 'python') {
+    return `
+def pdv_info(obj):
+    return {'type': type(obj).__name__, 'preview': repr(obj)[:80]}
+
+def pdv_namespace(*args, **kwargs):
+    return {}
+print("PDV Python kernel ready (fallback init)")`;
+  }
+
+  return `
+pdv_info(obj) = Dict("type" => string(typeof(obj)), "preview" => repr(obj)[1:min(80, end)])
+pdv_namespace(; kwargs...) = Dict{String, Any}()
+println("PDV Julia kernel ready (fallback init)")`;
 }
 
 export class KernelManager {
