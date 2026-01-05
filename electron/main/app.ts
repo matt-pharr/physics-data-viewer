@@ -32,9 +32,11 @@ function createWindow(): void {
   });
 }
 
-const hasElectronApp = app && typeof (app as any).whenReady === 'function';
+const canCreateWindow = typeof app?.whenReady === 'function';
 
-if (hasElectronApp) {
+if (!canCreateWindow) {
+  console.warn('[main] Electron app not available (likely test environment); skipping window creation.');
+} else {
   app.whenReady().then(() => {
     createWindow();
 
@@ -50,6 +52,4 @@ if (hasElectronApp) {
       app.quit();
     }
   });
-} else {
-  console.warn('[main] Electron app not available (likely test environment); skipping window creation.');
 }
