@@ -19,6 +19,7 @@ export const IPC = {
     restart: 'kernels:restart',
     complete: 'kernels:complete',
     inspect: 'kernels:inspect',
+    validate: 'kernels:validate',
   },
   tree: {
     list: 'tree:list',
@@ -28,6 +29,7 @@ export const IPC = {
   files: {
     read: 'files:read',
     write: 'files:write',
+    pickExecutable: 'files:pickExecutable',
   },
   config: {
     get: 'config:get',
@@ -210,6 +212,10 @@ export interface Config {
   recentProjects?: string[];
   /** Custom kernel commands */
   customKernels?: KernelSpec[];
+  /** Custom python executable path */
+  pythonPath?: string;
+  /** Custom julia executable path */
+  juliaPath?: string;
 }
 
 // ============================================================================
@@ -227,6 +233,7 @@ export interface PDVApi {
     restart: (id: string) => Promise<KernelInfo>;
     complete: (id: string, code: string, cursorPos: number) => Promise<KernelCompleteResult>;
     inspect: (id: string, code: string, cursorPos: number) => Promise<KernelInspectResult>;
+    validate: (path: string, language: 'python' | 'julia') => Promise<{ valid: boolean; error?: string }>;
   };
   tree: {
     list: (path?: string) => Promise<TreeNode[]>;
@@ -236,6 +243,7 @@ export interface PDVApi {
   files: {
     read: (path: string, options?: FileReadOptions) => Promise<FileReadResult | null>;
     write: (path: string, content: string | ArrayBuffer) => Promise<boolean>;
+    pickExecutable: () => Promise<string | null>;
   };
   config: {
     get: () => Promise<Config>;

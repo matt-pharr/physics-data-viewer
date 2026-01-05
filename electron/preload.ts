@@ -47,6 +47,9 @@ const api: PDVApi = {
 
     inspect: (id: string, code: string, cursorPos: number): Promise<KernelInspectResult> =>
       ipcRenderer.invoke(IPC.kernels.inspect, id, code, cursorPos),
+
+    validate: (path: string, language: 'python' | 'julia'): Promise<{ valid: boolean; error?: string }> =>
+      ipcRenderer.invoke(IPC.kernels.validate, path, language),
   },
 
   tree: {
@@ -66,6 +69,9 @@ const api: PDVApi = {
 
     write: (path: string, content: string | ArrayBuffer): Promise<boolean> =>
       ipcRenderer.invoke(IPC.files.write, path, content),
+
+    pickExecutable: (): Promise<string | null> =>
+      ipcRenderer.invoke(IPC.files.pickExecutable),
   },
 
   config: {
