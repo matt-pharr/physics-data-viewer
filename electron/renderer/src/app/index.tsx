@@ -32,7 +32,7 @@ const App: React.FC = () => {
   }, []);
 
   const addCommandTab = () => {
-    const newId = Math.max(...commandTabs.map((t) => t.id)) + 1;
+    const newId = Math.max(0, ...commandTabs.map((t) => t.id)) + 1;
     setCommandTabs([...commandTabs, { id: newId, code: '' }]);
     setActiveCommandTab(newId);
   };
