@@ -310,7 +310,7 @@ export class KernelManager {
 3. **Validation:**
    - Check that executables exist and are executable
    - Verify ipykernel is installed (run `python -m ipykernel --version`)
-   - Verify IJulia is installed (run `julia -e 'using IJulia; println(IJulia. KERNEL_VERSION)'`)
+   - Verify IJulia is installed (run `julia -e 'using IJulia'`)
    - Show error if validation fails
 
 4. **Actions:**
@@ -469,7 +469,7 @@ ipcMain.handle('kernels:validate', async (_event, execPath, language) => {
     // Check if executable exists and is runnable
     const checkCmd = language === 'python'
       ? [execPath, '-m', 'ipykernel', '--version']
-      : [execPath, '-e', 'using IJulia; println(IJulia.KERNEL_VERSION)'];
+      : [execPath, '-e', 'using IJulia;'];
     
     return new Promise((resolve) => {
       const proc = spawn(checkCmd[0], checkCmd.slice(1));

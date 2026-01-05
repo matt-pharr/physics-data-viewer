@@ -5,7 +5,9 @@
  * Kernel operations are delegated to the KernelManager class.
  */
 
-import { ipcMain, app } from 'electron';
+import { ipcMain, app, dialog } from 'electron';
+import * as fs from 'fs';
+import * as path from 'path';
 import {
   IPC,
   KernelInfo,
@@ -17,12 +19,15 @@ import {
   Config,
 } from './ipc';
 import { getKernelManager, resetKernelManager } from './kernel-manager';
+import { loadConfig, updateConfig } from './config';
+import { spawn } from 'child_process';
 
 // ============================================================================
 // Kernel Manager Instance
 // ============================================================================
 
 const kernelManager = getKernelManager();
+let currentConfig: Config = loadConfig();
 
 const canRegisterHandlers = !!ipcMain && typeof ipcMain.handle === 'function';
 
@@ -72,6 +77,94 @@ if (!canRegisterHandlers) {
 
   ipcMain.handle(IPC.kernels.inspect, async (_event, id, code, cursorPos): Promise<KernelInspectResult> => {
     return kernelManager.inspect(id, code, cursorPos);
+  });
+
+  ipcMain.handle(IPC.kernels.validate, async (_event, execPath: string, language: 'python' | 'julia') => {
+    try {
+      const sanitizedPath = typeof execPath === 'string' ? execPath.trim() : '';
+      if (!sanitizedPath || sanitizedPath.includes('\n')) {
+        return { valid: false, error: 'Invalid executable path' };
+      }
+      const unsafePathPattern = /[^A-Za-z0-9_\s/.:+\-\\()]/;
+      if (unsafePathPattern.test(sanitizedPath) || sanitizedPath.length > 512) {
+        return { valid: false, error: 'Executable path contains invalid characters' };
+      }
+
+      if (path.isAbsolute(sanitizedPath)) {
+        try {
+          await fs.promises.access(sanitizedPath, fs.constants.X_OK);
+        } catch {
+          return { valid: false, error: `Executable not found or not accessible: ${sanitizedPath}` };
+        }
+      }
+
+      const args =
+        language === 'python'
+          ? [sanitizedPath, '-m', 'ipykernel', '--version']
+          : [sanitizedPath, '-e', 'using IJulia;'];
+
+      return await new Promise<{ valid: boolean; error?: string }>((resolve) => {
+        const proc = spawn(args[0], args.slice(1));
+        let output = '';
+        const MAX_OUTPUT = 4096;
+        let resolved = false;
+        const killTimer = setTimeout(() => {
+          if (!resolved) {
+            resolved = true;
+            proc.kill();
+            resolve({ valid: false, error: 'Validation timed out' });
+          }
+        }, 10000);
+
+        const appendOutput = (data: Buffer) => {
+          if (output.length >= MAX_OUTPUT) {
+            return;
+          }
+          output += data.toString();
+          if (output.length > MAX_OUTPUT) {
+            output = output.slice(0, MAX_OUTPUT);
+          }
+        };
+
+        proc.stdout.on('data', (data) => appendOutput(data));
+        proc.stderr.on('data', (data) => appendOutput(data));
+
+        proc.on('close', (code) => {
+          if (resolved) {
+            clearTimeout(killTimer);
+            return;
+          }
+          resolved = true;
+          clearTimeout(killTimer);
+          if (code === 0) {
+            resolve({ valid: true });
+          } else {
+            resolve({
+              valid: false,
+              error: `${language === 'python' ? 'ipykernel' : 'IJulia'} not found. Output: ${output}`.trim(),
+            });
+          }
+        });
+
+        proc.on('error', (err) => {
+          if (resolved) {
+            clearTimeout(killTimer);
+            return;
+          }
+          resolved = true;
+          clearTimeout(killTimer);
+          resolve({
+            valid: false,
+            error: `Failed to run ${sanitizedPath}: ${err.message}`,
+          });
+        });
+      });
+    } catch (error) {
+      return {
+        valid: false,
+        error: error instanceof Error ? error.message : String(error),
+      };
+    }
   });
 
   // ============================================================================
@@ -147,18 +240,21 @@ if (!canRegisterHandlers) {
     return true;
   });
 
+  ipcMain.handle(IPC.files.pickExecutable, async (): Promise<string | null> => {
+    const result = await dialog.showOpenDialog({
+      properties: ['openFile'],
+    });
+
+    if (result.canceled || result.filePaths.length === 0) {
+      return null;
+    }
+
+    return result.filePaths[0];
+  });
+
   // ============================================================================
   // Config Handlers (unchanged from Step 2)
   // ============================================================================
-
-  let currentConfig: Config = {
-    kernelSpec: 'python3',
-    plotMode: 'native',
-    cwd: process.cwd(),
-    trusted: false,
-    recentProjects: [],
-    customKernels: [],
-  };
 
   ipcMain.handle(IPC.config.get, async (): Promise<Config> => {
     return currentConfig;
@@ -166,7 +262,7 @@ if (!canRegisterHandlers) {
 
   ipcMain.handle(IPC.config.set, async (_event, config): Promise<boolean> => {
     console.log('[IPC] config:set', config);
-    currentConfig = { ...currentConfig, ...config };
+    currentConfig = updateConfig(config);
     return true;
   });
 

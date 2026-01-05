@@ -1,8 +1,10 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useRef, useCallback } from 'react';
 import { CommandBox } from '../components/CommandBox';
 import { Console } from '../components/Console';
 import { Tree } from '../components/Tree';
+import { EnvironmentSelector } from '../components/EnvironmentSelector';
 import type { CommandTab, LogEntry } from '../types';
+import type { Config } from '../../main/ipc';
 
 type Tab = 'tree' | 'namespace' | 'modules';
 type PlotMode = 'native' | 'capture';
@@ -17,20 +19,120 @@ const App: React.FC = () => {
   const [isExecuting, setIsExecuting] = useState(false);
   const [lastError, setLastError] = useState<string | undefined>(undefined);
   const [lastDuration, setLastDuration] = useState<number | null>(null);
+  const [config, setConfig] = useState<Config | null>(null);
+  const [showEnvSelector, setShowEnvSelector] = useState(false);
+  const initRef = useRef(false);
+  const [leftWidth, setLeftWidth] = useState(340);
+  const [consoleHeight, setConsoleHeight] = useState(260);
+  const dragRef = useRef<'vertical' | 'horizontal' | null>(null);
+  const rightPaneRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
-    const initKernel = async () => {
+    // Prevent double initialization in StrictMode
+    if (initRef.current) return;
+    initRef.current = true;
+
+    const initConfig = async () => {
       try {
-        const kernel = await window.pdv.kernels.start({ language: 'python' });
-        setCurrentKernelId(kernel.id);
-        console.log('[App] Kernel started:', kernel.id);
+        const loaded = await window.pdv.config.get();
+        setConfig(loaded);
+        setPlotMode(loaded.plotMode ?? 'native');
+
+        if (!loaded.pythonPath || !loaded.juliaPath) {
+          setShowEnvSelector(true);
+          return;
+        }
+
+        await startKernel(loaded);
       } catch (error) {
-        console.error('[App] Failed to start kernel:', error);
+        console.error('[App] Failed to load config:', error);
       }
     };
 
-    void initKernel();
+    void initConfig();
   }, []);
+
+  useEffect(() => {
+    const handleMove = (event: MouseEvent) => {
+      if (!dragRef.current) return;
+      if (dragRef.current === 'vertical') {
+        const next = Math.min(Math.max(event.clientX, 200), 600);
+        setLeftWidth(next);
+      } else if (dragRef.current === 'horizontal') {
+        const bounds = rightPaneRef.current?.getBoundingClientRect();
+        if (!bounds) return;
+        const relativeY = event.clientY - bounds.top;
+        const min = 140;
+        const max = Math.max(min, bounds.height - 180);
+        const next = Math.min(Math.max(relativeY, min), max);
+        setConsoleHeight(next);
+      }
+    };
+
+    const handleUp = () => {
+      dragRef.current = null;
+    };
+
+    window.addEventListener('mousemove', handleMove);
+    window.addEventListener('mouseup', handleUp);
+    return () => {
+      window.removeEventListener('mousemove', handleMove);
+      window.removeEventListener('mouseup', handleUp);
+    };
+  }, []);
+
+  const startVerticalDrag = useCallback((event: React.MouseEvent) => {
+    event.preventDefault();
+    dragRef.current = 'vertical';
+  }, []);
+
+  const startHorizontalDrag = useCallback((event: React.MouseEvent) => {
+    event.preventDefault();
+    dragRef.current = 'horizontal';
+  }, []);
+
+  const startKernel = async (cfg: Config) => {
+    try {
+      console.log('[App] Starting kernel with config:', cfg);
+      if (currentKernelId) {
+        console.log('[App] Stopping existing kernel:', currentKernelId);
+        await window.pdv.kernels.stop(currentKernelId);
+      }
+      
+      const spec = {
+        language: 'python' as const,
+        argv: cfg.pythonPath ? [cfg.pythonPath, '-m', 'ipykernel_launcher', '-f', '{connection_file}'] : undefined,
+        env: cfg.pythonPath ? { PYTHON_PATH: cfg.pythonPath } : undefined,
+      };
+      console.log('[App] Kernel spec:', spec);
+      
+      const kernel = await window.pdv.kernels.start(spec);
+      setCurrentKernelId(kernel.id);
+      console.log('[App] Kernel started successfully:', kernel);
+    } catch (error) {
+      console.error('[App] Failed to start kernel:', error);
+      // Show error to user
+      setLastError(error instanceof Error ? error.message : String(error));
+    }
+  };
+
+  const handleEnvSave = async (paths: { pythonPath: string; juliaPath: string }) => {
+    const updatedConfig: Config = {
+      kernelSpec: config?.kernelSpec ?? null,
+      plotMode: config?.plotMode ?? 'native',
+      cwd: config?.cwd ?? '',
+      trusted: config?.trusted ?? false,
+      recentProjects: config?.recentProjects ?? [],
+      customKernels: config?.customKernels ?? [],
+      pythonPath: paths.pythonPath,
+      juliaPath: paths.juliaPath,
+    };
+
+    await window.pdv.config.set(updatedConfig);
+    setConfig(updatedConfig);
+    setShowEnvSelector(false);
+    await startKernel(updatedConfig);
+  };
 
   const addCommandTab = () => {
     const newId = Math.max(0, ...commandTabs.map((t) => t.id)) + 1;
@@ -75,7 +177,10 @@ const App: React.FC = () => {
     };
 
     try {
-      const result = await window.pdv.kernels.execute(currentKernelId, { code });
+      const result = await window.pdv.kernels.execute(currentKernelId, {
+        code,
+        capture: plotMode === 'capture',
+      });
 
       logEntry.stdout = result.stdout;
       logEntry.stderr = result.stderr;
@@ -104,15 +209,15 @@ const App: React.FC = () => {
       {/* Header */}
       <header className="app-header">
         <h1 className="app-title">Physics Data Viewer</h1>
-        <div className="header-right">
-          <span className="connection-status connected">● Connected</span>
-        </div>
-      </header>
+         <div className="header-right">
+           <span className="connection-status connected">● Connected</span>
+         </div>
+       </header>
 
       {/* Main content */}
       <main className="app-main">
         {/* Left pane:  Tree */}
-        <aside className="left-pane">
+        <aside className="left-pane" style={{ width: `${leftWidth}px` }}>
           <div className="pane-tabs">
             <button
               className={`tab ${activeTab === 'tree' ? 'active' : ''}`}
@@ -148,14 +253,16 @@ const App: React.FC = () => {
         </aside>
 
         {/* Vertical resizer */}
-        <div className="vertical-resizer" />
+        <div className="vertical-resizer" onMouseDown={startVerticalDrag} />
 
         {/* Right pane: Console + Command Box */}
-        <div className="right-pane">
-          <Console logs={logs} onClear={handleClearConsole} />
+        <div className="right-pane" ref={rightPaneRef}>
+          <div className="console-wrapper" style={{ height: `${consoleHeight}px` }}>
+            <Console logs={logs} onClear={handleClearConsole} />
+          </div>
 
           {/* Horizontal resizer */}
-          <div className="horizontal-resizer" />
+          <div className="horizontal-resizer" onMouseDown={startHorizontalDrag} />
 
           <CommandBox
             tabs={commandTabs.map((tab) => ({
@@ -174,38 +281,61 @@ const App: React.FC = () => {
       </main>
 
       {/* Status bar */}
-      <footer className="status-bar">
-        <div className="status-left">
-          <span className="status-item">
-            <span className={`status-dot ${isExecuting ? 'busy' : 'idle'}`} />
-            <span>{isExecuting ? 'Busy' : 'Idle'}</span>
-          </span>
-          <span className="status-item">python3</span>
-          <span className="status-item">~/projects</span>
-        </div>
-        <div className="status-right">
-          <span className="status-item plot-toggle">
-            <span>Plot: </span>
-            <button
-              className={`toggle ${plotMode === 'native' ? 'active' : ''}`}
-              onClick={() => setPlotMode('native')}
-            >
-              Native
-            </button>
-            <button
-              className={`toggle ${plotMode === 'capture' ? 'active' : ''}`}
-              onClick={() => setPlotMode('capture')}
-            >
-              Capture
-            </button>
-          </span>
-          <span className="status-item">
-            Last: {lastDuration !== null ? `${Math.round(lastDuration)}ms` : '--'}
-          </span>
-        </div>
-      </footer>
-    </div>
-  );
-};
+       <footer className="status-bar">
+         <div className="status-left">
+           <span className="status-item">
+             <span className={`status-dot ${isExecuting ? 'busy' : 'idle'}`} />
+             <span>{isExecuting ? 'Busy' : 'Idle'}</span>
+           </span>
+           <span className="status-item">{config?.kernelSpec ?? 'python3'}</span>
+           <span className="status-item">~/projects</span>
+         </div>
+         <div className="status-right">
+           <span className="status-item plot-toggle">
+             <span>Plot: </span>
+             <button
+               className={`toggle ${plotMode === 'native' ? 'active' : ''}`}
+               onClick={async () => {
+                 setPlotMode('native');
+                 if (config) {
+                   const next = { ...config, plotMode: 'native' };
+                   setConfig(next);
+                   await window.pdv.config.set({ plotMode: 'native' });
+                 }
+               }}
+             >
+               Native
+             </button>
+             <button
+               className={`toggle ${plotMode === 'capture' ? 'active' : ''}`}
+               onClick={async () => {
+                 setPlotMode('capture');
+                 if (config) {
+                   const next = { ...config, plotMode: 'capture' };
+                   setConfig(next);
+                   await window.pdv.config.set({ plotMode: 'capture' });
+                 }
+               }}
+             >
+               Capture
+             </button>
+           </span>
+           <span className="status-item">
+             Last: {lastDuration !== null ? `${Math.round(lastDuration)}ms` : '--'}
+           </span>
+         </div>
+       </footer>
+
+       {showEnvSelector && (
+         <EnvironmentSelector
+           isFirstRun={!config?.pythonPath || !config?.juliaPath}
+           currentConfig={config || undefined}
+           onSave={handleEnvSave}
+           onCancel={() => setShowEnvSelector(false)}
+         />
+       )}
+     </div>
+   );
+ };
 
 export default App;

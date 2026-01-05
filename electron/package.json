@@ -17,6 +17,7 @@
     "@types/node": "^20.0.0",
     "@types/react": "^18.2.0",
     "@types/react-dom": "^18.2.0",
+    "@types/ws": "^8.5.10",
     "@vitejs/plugin-react": "^4.2.0",
     "concurrently": "^8.2.0",
     "cross-env": "^7.0.3",
@@ -27,9 +28,12 @@
     "vitest": "^1.0.0"
   },
   "dependencies": {
+    "@jupyterlab/services": "^7.0.0",
     "@monaco-editor/react": "^4.6.0",
     "monaco-editor": "^0.45.0",
     "react": "^18.2.0",
-    "react-dom": "^18.2.0"
+    "react-dom": "^18.2.0",
+    "ws": "^8.14.0",
+    "zeromq": "^6.5.0"
   }
 }

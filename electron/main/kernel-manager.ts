@@ -1,12 +1,13 @@
 /**
- * Kernel Manager
- *
- * Manages Jupyter kernel lifecycles and execution.
- * Currently a stub implementation; will integrate @jupyterlab/services later.
+ * Kernel Manager with direct kernel launching (no server required).
  */
 
 import * as fs from 'fs';
 import * as path from 'path';
+import * as os from 'os';
+import * as crypto from 'crypto';
+import { spawn, ChildProcess } from 'child_process';
+import * as zmq from 'zeromq';
 import {
   KernelSpec,
   KernelInfo,
@@ -16,17 +17,43 @@ import {
   KernelInspectResult,
 } from './ipc';
 
-// 1x1 transparent PNG placeholder used when capture mode is requested
-const STUB_IMAGE_DATA =
-  'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==';
+interface ConnectionInfo {
+  transport: string;
+  ip: string;
+  shell_port: number;
+  iopub_port: number;
+  stdin_port: number;
+  control_port: number;
+  hb_port: number;
+  signature_scheme: string;
+  key: string;
+}
 
-// ============================================================================
-// Types
-// ============================================================================
+interface JupyterMessage {
+  header: {
+    msg_id: string;
+    username: string;
+    session: string;
+    msg_type: string;
+    version: string;
+    date: string;
+  };
+  parent_header: Record<string, unknown> | object;
+  metadata: Record<string, unknown>;
+  content: Record<string, unknown>;
+  buffers?: ArrayBuffer[];
+}
 
 interface ManagedKernel {
   info: KernelInfo;
   spec: KernelSpec;
+  process: ChildProcess;
+  connectionInfo: ConnectionInfo;
+  connectionFile: string;
+  shellSocket: zmq.Dealer;
+  iopubSocket: zmq.Subscriber;
+  controlSocket: zmq.Dealer;
+  sessionId: string;
   startedAt: number;
   lastActivity: number;
   executionCount: number;
@@ -38,13 +65,121 @@ interface ExecutionOptions {
   timeout?: number;
 }
 
-// ============================================================================
-// Init Cell Loader
-// ============================================================================
+/**
+ * Create a unique connection file for a kernel
+ */
+function createConnectionFile(): { file: string; info: ConnectionInfo } {
+  const runtimeDir = path.join(os.tmpdir(), 'pdv-kernels');
+  if (!fs.existsSync(runtimeDir)) {
+    fs.mkdirSync(runtimeDir, { recursive: true });
+  }
+
+  const connectionFile = path.join(runtimeDir, `kernel-${crypto.randomUUID()}.json`);
+  const connectionInfo: ConnectionInfo = {
+    transport: 'tcp',
+    ip: '127.0.0.1',
+    shell_port: 0,
+    iopub_port: 0,
+    stdin_port: 0,
+    control_port: 0,
+    hb_port: 0,
+    signature_scheme: 'hmac-sha256',
+    key: crypto.randomUUID(),
+  };
+
+  fs.writeFileSync(connectionFile, JSON.stringify(connectionInfo, null, 2));
+  return { file: connectionFile, info: connectionInfo };
+}
 
 /**
- * Load init cell content for a given language
+ * Read connection info from a connection file
  */
+function readConnectionFile(filePath: string): ConnectionInfo {
+  const data = fs.readFileSync(filePath, 'utf-8');
+  return JSON.parse(data);
+}
+
+/**
+ * Create a Jupyter message
+ */
+function createMessage(
+  msgType: string,
+  content: Record<string, unknown>,
+  sessionId: string,
+  parentHeader: Record<string, unknown> | object = {},
+): JupyterMessage {
+  return {
+    header: {
+      msg_id: crypto.randomUUID(),
+      username: 'pdv',
+      session: sessionId,
+      msg_type: msgType,
+      version: '5.3',
+      date: new Date().toISOString(),
+    },
+    parent_header: parentHeader,
+    metadata: {},
+    content,
+  };
+}
+
+/**
+ * Sign and serialize a Jupyter message for ZMQ
+ */
+function serializeMessage(msg: JupyterMessage, key: string): Buffer[] {
+  const header = Buffer.from(JSON.stringify(msg.header));
+  const parentHeader = Buffer.from(JSON.stringify(msg.parent_header));
+  const metadata = Buffer.from(JSON.stringify(msg.metadata));
+  const content = Buffer.from(JSON.stringify(msg.content));
+
+  const hmac = crypto.createHmac('sha256', key);
+  hmac.update(header);
+  hmac.update(parentHeader);
+  hmac.update(metadata);
+  hmac.update(content);
+  const signature = hmac.digest('hex');
+
+  return [
+    Buffer.from('<IDS|MSG>'),
+    Buffer.from(signature),
+    header,
+    parentHeader,
+    metadata,
+    content,
+  ];
+}
+
+/**
+ * Parse a Jupyter message from ZMQ frames
+ */
+function parseMessage(frames: Buffer[]): JupyterMessage | null {
+  try {
+    // Find the delimiter
+    let delimiterIndex = -1;
+    for (let i = 0; i < frames.length; i++) {
+      if (frames[i].toString() === '<IDS|MSG>') {
+        delimiterIndex = i;
+        break;
+      }
+    }
+
+    if (delimiterIndex === -1 || frames.length < delimiterIndex + 6) {
+      return null;
+    }
+
+    // Skip signature validation for now (frames[delimiterIndex + 1])
+    const header = JSON.parse(frames[delimiterIndex + 2].toString());
+    const parentHeader = JSON.parse(frames[delimiterIndex + 3].toString());
+    const metadata = JSON.parse(frames[delimiterIndex + 4].toString());
+    const content = JSON.parse(frames[delimiterIndex + 5].toString());
+
+    return { header, parent_header: parentHeader, metadata, content };
+  } catch (error) {
+    console.error('[KernelManager] Failed to parse message:', error);
+    return null;
+  }
+}
+
 function loadInitCell(language: 'python' | 'julia'): string {
   const filename = language === 'python' ? 'python-init.py' : 'julia-init.jl';
   const initPath = path.join(__dirname, 'init', filename);
@@ -57,530 +192,504 @@ function loadInitCell(language: 'python' | 'julia'): string {
     console.warn(`[KernelManager] Failed to load init cell for ${language}:`, error);
   }
 
-  // Fallback minimal init
-  if (language === 'python') {
-    return '# Physics Data Viewer - Python kernel\nprint("PDV Python kernel ready")';
-  }
-  return '# Physics Data Viewer - Julia kernel\nprintln("PDV Julia kernel ready")';
+  return language === 'python'
+    ? '# Physics Data Viewer - Python kernel\nprint("PDV Python kernel ready")'
+    : '# Physics Data Viewer - Julia kernel\nprintln("PDV Julia kernel ready")';
 }
-
-// ============================================================================
-// Kernel Manager Class
-// ============================================================================
 
 export class KernelManager {
   private kernels: Map<string, ManagedKernel> = new Map();
-  private defaultSpecs: Map<string, KernelSpec> = new Map();
 
   constructor() {
-    // Register default kernel specs
-    this.defaultSpecs.set('python3', {
-      name: 'python3',
-      displayName: 'Python 3',
-      language: 'python',
-    });
-
-    this.defaultSpecs.set('julia', {
-      name: 'julia',
-      displayName: 'Julia',
-      language: 'julia',
-    });
-
-    console.log('[KernelManager] Initialized with default specs:', Array.from(this.defaultSpecs.keys()));
+    // No server connection needed!
   }
 
-  // ==========================================================================
-  // Kernel Lifecycle
-  // ==========================================================================
-
-  /**
-   * List all available kernel specs
-   */
   async listSpecs(): Promise<KernelSpec[]> {
-    // TODO: In real implementation, query jupyter kernelspec list
-    return Array.from(this.defaultSpecs.values());
+    // For now, return default specs for python and julia
+    return [
+      {
+        name: 'python3',
+        displayName: 'Python 3',
+        language: 'python',
+        argv: ['python', '-m', 'ipykernel_launcher', '-f', '{connection_file}'],
+      },
+      {
+        name: 'julia',
+        displayName: 'Julia',
+        language: 'julia',
+        argv: ['julia', '-i', '--startup-file=yes', '--color=yes', '-e', 
+               'using IJulia; IJulia.kernel_main("{connection_file}")'],
+      },
+    ];
   }
 
-  /**
-   * List all running kernels
-   */
   async list(): Promise<KernelInfo[]> {
-    return Array.from(this.kernels.values()).map((k) => k.info);
+    return Array.from(this.kernels.values()).map((k) => ({ ...k.info }));
   }
 
-  /**
-   * Start a new kernel
-   */
   async start(spec?: Partial<KernelSpec>): Promise<KernelInfo> {
-    const id = `kernel-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
     const language = spec?.language || 'python';
-    const name = spec?.name || (language === 'python' ? 'python3' : 'julia');
+    const kernelName = spec?.name || (language === 'python' ? 'python3' : 'julia');
 
-    const kernelSpec: KernelSpec = {
-      name,
-      displayName: spec?.displayName || this.defaultSpecs.get(name)?.displayName || name,
-      language,
-      argv: spec?.argv,
-      env: spec?.env,
-    };
+    const kernelId = crypto.randomUUID();
+    const sessionId = crypto.randomUUID();
 
     const kernelInfo: KernelInfo = {
-      id,
-      name,
+      id: kernelId,
+      name: kernelName,
       language,
       status: 'starting',
     };
 
-    const managed: ManagedKernel = {
-      info: kernelInfo,
-      spec: kernelSpec,
-      startedAt: Date.now(),
-      lastActivity: Date.now(),
-      executionCount: 0,
-    };
+    try {
+      // Create connection file
+      const { file: connectionFile, info: connectionInfo } = createConnectionFile();
 
-    this.kernels.set(id, managed);
-    console.log(`[KernelManager] Starting kernel: ${id} (${language})`);
+      // Build kernel command
+      let argv = spec?.argv;
+      if (!argv) {
+        if (language === 'python') {
+          const pythonExec = spec?.env?.PYTHON_PATH || 'python';
+          argv = [pythonExec, '-m', 'ipykernel_launcher', '-f', connectionFile];
+        } else {
+          const juliaExec = spec?.env?.JULIA_PATH || 'julia';
+          argv = [juliaExec, '-i', '--startup-file=yes', '--color=yes', 
+                  '-e', `using IJulia; IJulia.kernel_main("${connectionFile}")`];
+        }
+      } else {
+        // Replace {connection_file} placeholder
+        argv = argv.map((arg) => arg.replace('{connection_file}', connectionFile));
+      }
 
-    // Simulate startup delay
-    await this.simulateDelay(100);
+      console.log('[KernelManager] Launching kernel:', argv);
 
-    // Run init cell
-    const initCell = loadInitCell(language);
+      // Spawn kernel process
+      const kernelProcess = spawn(argv[0], argv.slice(1), {
+        env: { ...process.env, ...spec?.env },
+        stdio: ['ignore', 'pipe', 'pipe'],
+      });
+
+      // Log kernel output for debugging
+      kernelProcess.stdout?.on('data', (data) => {
+        console.log(`[Kernel ${kernelId}] stdout:`, data.toString());
+      });
+
+      kernelProcess.stderr?.on('data', (data) => {
+        console.error(`[Kernel ${kernelId}] stderr:`, data.toString());
+      });
+
+      kernelProcess.on('exit', (code) => {
+        console.log(`[Kernel ${kernelId}] exited with code ${code}`);
+        const managed = this.kernels.get(kernelId);
+        if (managed) {
+          managed.info.status = 'dead';
+        }
+      });
+
+      // Wait for connection file to be updated with ports
+      await this.waitForConnectionFile(connectionFile, 10000);
+
+      // Read updated connection info
+      const updatedConnectionInfo = readConnectionFile(connectionFile);
+
+      // Create ZMQ sockets
+      const shellSocket = new zmq.Dealer();
+      const iopubSocket = new zmq.Subscriber();
+      const controlSocket = new zmq.Dealer();
+
+      const baseUrl = `${updatedConnectionInfo.transport}://${updatedConnectionInfo.ip}`;
+      await shellSocket.connect(`${baseUrl}:${updatedConnectionInfo.shell_port}`);
+      await iopubSocket.connect(`${baseUrl}:${updatedConnectionInfo.iopub_port}`);
+      await controlSocket.connect(`${baseUrl}:${updatedConnectionInfo.control_port}`);
+
+      // Subscribe to all IOPub messages
+      iopubSocket.subscribe();
+
+      const managed: ManagedKernel = {
+        info: kernelInfo,
+        spec: {
+          name: kernelName,
+          displayName: spec?.displayName || kernelName,
+          language,
+          argv: spec?.argv,
+          env: spec?.env,
+        },
+        process: kernelProcess,
+        connectionInfo: updatedConnectionInfo,
+        connectionFile,
+        shellSocket,
+        iopubSocket,
+        controlSocket,
+        sessionId,
+        startedAt: Date.now(),
+        lastActivity: Date.now(),
+        executionCount: 0,
+      };
+
+      this.kernels.set(kernelId, managed);
+
+      // Send kernel_info_request to verify connection
+      await this.sendKernelInfoRequest(managed);
+
+      // Execute init cell
+      const initCell = loadInitCell(language);
+      await this.executeInternal(kernelId, initCell, { silent: true, storeHistory: false });
+
+      managed.info.status = 'idle';
+      managed.lastActivity = Date.now();
+      return { ...managed.info };
+    } catch (error) {
+      kernelInfo.status = 'error';
+      console.error('[KernelManager] Failed to start kernel:', error);
+      throw error;
+    }
+  }
+
+  private async waitForConnectionFile(filePath: string, timeout: number): Promise<void> {
+    const startTime = Date.now();
+    while (Date.now() - startTime < timeout) {
+      try {
+        const info = readConnectionFile(filePath);
+        if (info.shell_port > 0) {
+          return;
+        }
+      } catch (e) {
+        // File not ready yet
+      }
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    }
+    throw new Error('Timeout waiting for kernel connection file');
+  }
+
+  private async sendKernelInfoRequest(managed: ManagedKernel): Promise<void> {
+    const msg = createMessage('kernel_info_request', {}, managed.sessionId);
+    const frames = serializeMessage(msg, managed.connectionInfo.key);
+    await managed.shellSocket.send(frames);
+    
+    // Wait for reply
+    const reply = await managed.shellSocket.receive();
+    console.log('[KernelManager] Kernel info reply received');
+  }
+
+  async stop(id: string): Promise<boolean> {
+    const managed = this.kernels.get(id);
+    if (!managed) {
+      console.warn(`[KernelManager] Kernel not found: ${id}`);
+      return false;
+    }
+
+    try {
+      // Send shutdown request
+      const msg = createMessage('shutdown_request', { restart: false }, managed.sessionId);
+      const frames = serializeMessage(msg, managed.connectionInfo.key);
+      
+      try {
+        await managed.controlSocket.send(frames);
+      } catch (e) {
+        // Socket might already be closed
+      }
+
+      // Wait a bit for graceful shutdown
+      await new Promise((resolve) => setTimeout(resolve, 500));
+
+      // Close sockets safely
+      try {
+        await managed.shellSocket.close();
+      } catch (e) {
+        // Ignore errors during close
+      }
+      try {
+        await managed.iopubSocket.close();
+      } catch (e) {
+        // Ignore errors during close
+      }
+      try {
+        await managed.controlSocket.close();
+      } catch (e) {
+        // Ignore errors during close
+      }
+
+      // Kill process
+      if (!managed.process.killed) {
+        managed.process.kill('SIGTERM');
+        
+        // Give it time to exit gracefully
+        await new Promise((resolve) => setTimeout(resolve, 200));
+        
+        if (!managed.process.killed) {
+          managed.process.kill('SIGKILL');
+        }
+      }
+
+      // Clean up connection file
+      if (fs.existsSync(managed.connectionFile)) {
+        try {
+          fs.unlinkSync(managed.connectionFile);
+        } catch (e) {
+          // Ignore file deletion errors
+        }
+      }
+    } catch (error) {
+      console.error('[KernelManager] Error during shutdown:', error);
+    } finally {
+      this.kernels.delete(id);
+    }
+    return true;
+  }
+
+  async restart(id: string): Promise<KernelInfo> {
+    const managed = this.kernels.get(id);
+    if (!managed) {
+      throw new Error(`Kernel not found: ${id}`);
+    }
+
+    managed.info.status = 'starting';
+
+    // Send restart request
+    const msg = createMessage('shutdown_request', { restart: true }, managed.sessionId);
+    const frames = serializeMessage(msg, managed.connectionInfo.key);
+    await managed.controlSocket.send(frames);
+
+    // Wait for kernel to restart
+    await new Promise((resolve) => setTimeout(resolve, 2000));
+
+    const initCell = loadInitCell(managed.spec.language);
     await this.executeInternal(id, initCell, { silent: true, storeHistory: false });
 
-    // Update status to idle
     managed.info.status = 'idle';
-    managed.lastActivity = Date.now();
-
-    console.log(`[KernelManager] Kernel ready: ${id}`);
+    managed.executionCount = 0;
     return { ...managed.info };
   }
 
-  /**
-   * Stop a kernel
-   */
-  async stop(id: string): Promise<boolean> {
-    const kernel = this.kernels.get(id);
-    if (!kernel) {
-      console.warn(`[KernelManager] Kernel not found: ${id}`);
-      return false;
-    }
-
-    console.log(`[KernelManager] Stopping kernel: ${id}`);
-    kernel.info.status = 'dead';
-    this.kernels.delete(id);
-
-    return true;
-  }
-
-  /**
-   * Restart a kernel
-   */
-  async restart(id: string): Promise<KernelInfo> {
-    const kernel = this.kernels.get(id);
-    if (!kernel) {
-      throw new Error(`Kernel not found: ${id}`);
-    }
-
-    console.log(`[KernelManager] Restarting kernel: ${id}`);
-
-    // Mark as restarting
-    kernel.info.status = 'starting';
-    kernel.executionCount = 0;
-
-    // Simulate restart delay
-    await this.simulateDelay(200);
-
-    // Re-run init cell
-    const initCell = loadInitCell(kernel.spec.language);
-    await this.executeInternal(id, initCell, { silent: true, storeHistory: false });
-
-    // Mark as ready
-    kernel.info.status = 'idle';
-    kernel.lastActivity = Date.now();
-
-    console.log(`[KernelManager] Kernel restarted: ${id}`);
-    return { ...kernel.info };
-  }
-
-  /**
-   * Interrupt a running kernel
-   */
   async interrupt(id: string): Promise<boolean> {
-    const kernel = this.kernels.get(id);
-    if (!kernel) {
+    const managed = this.kernels.get(id);
+    if (!managed) {
       console.warn(`[KernelManager] Kernel not found: ${id}`);
       return false;
     }
 
-    console.log(`[KernelManager] Interrupting kernel: ${id}`);
-
-    // In real implementation, send SIGINT to kernel process
-    // For stub, just set status back to idle
-    kernel.info.status = 'idle';
-    kernel.lastActivity = Date.now();
-
+    // Send SIGINT to kernel process
+    managed.process.kill('SIGINT');
+    managed.info.status = 'idle';
+    managed.lastActivity = Date.now();
     return true;
   }
 
-  // ==========================================================================
-  // Code Execution
-  // ==========================================================================
-
-  /**
-   * Execute code in a kernel
-   */
   async execute(id: string, request: KernelExecuteRequest): Promise<KernelExecuteResult> {
-    const kernel = this.kernels.get(id);
-    if (!kernel) {
-      return {
-        error: `Kernel not found: ${id}`,
-        duration: 0,
-      };
+    const managed = this.kernels.get(id);
+    if (!managed) {
+      return { error: `Kernel not found: ${id}`, duration: 0 };
+    }
+
+    return this.executeInternal(id, request.code, {
+      storeHistory: true,
+      timeout: 30000,
+      silent: false,
+      capture: request.capture,
+    });
+  }
+
+  private async executeInternal(
+    id: string,
+    code: string,
+    options: ExecutionOptions & { capture?: boolean } = {},
+  ): Promise<KernelExecuteResult> {
+    const managed = this.kernels.get(id);
+    if (!managed) {
+      throw new Error(`Kernel not found: ${id}`);
     }
 
     const startTime = Date.now();
-    kernel.info.status = 'busy';
-    kernel.lastActivity = Date.now();
-    kernel.executionCount++;
+    managed.info.status = 'busy';
+    managed.lastActivity = startTime;
 
-    console.log(
-      `[KernelManager] Execute [${kernel.executionCount}] on ${id}: `,
-      request.code.slice(0, 100) + (request.code.length > 100 ? '...' : ''),
-    );
-
-    try {
-      const result = await this.executeInternal(id, request.code, {
-        storeHistory: true,
-        timeout: 30000,
-      });
-
-      const hasPlotCall =
-        !!request.code.match(/plt\.show\s*\(|matplotlib\.pyplot\.show\s*\(|plt\.savefig\s*\(/) ||
-        !!result.stdout?.includes('plt.show');
-
-      // Handle capture mode for plots
-      if (request.capture && hasPlotCall) {
-        result.images = [
-          {
-            mime: 'image/png',
-            data: STUB_IMAGE_DATA, // 1x1 transparent PNG stub
-          },
-        ];
-        result.stdout = result.stdout?.replace('plt.show()', '[Figure captured]') || '[Figure captured]';
-      }
-
-      result.duration = Date.now() - startTime;
-      return result;
-    } catch (error) {
-      return {
-        error: error instanceof Error ? error.message : String(error),
-        duration: Date.now() - startTime,
-      };
-    } finally {
-      kernel.info.status = 'idle';
-      kernel.lastActivity = Date.now();
-    }
-  }
-
-  /**
-   * Internal execution (used for init cells and user code)
-   */
-  private async executeInternal(id: string, code: string, _options: ExecutionOptions = {}): Promise<KernelExecuteResult> {
-    const kernel = this.kernels.get(id);
-    if (!kernel) {
-      throw new Error(`Kernel not found: ${id}`);
-    }
-
-    // Simulate execution delay based on code complexity
-    const delay = Math.min(50 + code.length / 10, 500);
-    await this.simulateDelay(delay);
-
-    // Stub execution logic
     const result: KernelExecuteResult = {
       stdout: '',
-      stderr: undefined,
+      stderr: '',
+      images: [],
+      rich: {},
       result: undefined,
-      images: undefined,
-      error: undefined,
     };
 
-    // Parse and "execute" the code (stub logic)
-    const lines = code.split('\n').filter((l) => l.trim() && !l.trim().startsWith('#'));
+    // Create execute request
+    const msg = createMessage(
+      'execute_request',
+      {
+        code,
+        silent: options.silent === true,
+        store_history: options.storeHistory !== false,
+        user_expressions: {},
+        allow_stdin: false,
+        stop_on_error: true,
+      },
+      managed.sessionId,
+    );
 
-    for (const line of lines) {
-      const trimmed = line.trim();
+    const msgId = msg.header.msg_id;
+    const frames = serializeMessage(msg, managed.connectionInfo.key);
 
-      // Handle print statements
-      const printMatch = trimmed.match(/^print\s*\(\s*["'](.*)["']\s*\)/);
-      if (printMatch) {
-        result.stdout = (result.stdout || '') + printMatch[1] + '\n';
-        continue;
-      }
+    // Send execute request
+    await managed.shellSocket.send(frames);
 
-      // Handle println (Julia)
-      const printlnMatch = trimmed.match(/^println\s*\(\s*["'](.*)["']\s*\)/);
-      if (printlnMatch) {
-        result.stdout = (result.stdout || '') + printlnMatch[1] + '\n';
-        continue;
-      }
+    // Listen for replies on IOPub
+    const timeoutMs = options.timeout ?? 30000;
+    const deadline = Date.now() + timeoutMs;
+    let executionComplete = false;
 
-      // Handle matplotlib show for capture mode
-      if (trimmed.startsWith('plt.show')) {
-        result.stdout = (result.stdout || '') + 'plt.show()\n';
-        continue;
-      }
-
-      // Handle simple expressions
-      const expressionMatch = trimmed.match(/^(\d+\.?\d*)\s*([\+\-\*\/])\s*(\d+\.?\d*)$/);
-      if (expressionMatch) {
-        const left = Number.parseFloat(expressionMatch[1]);
-        const operator = expressionMatch[2];
-        const right = Number.parseFloat(expressionMatch[3]);
-
-        switch (operator) {
-          case '+':
-            result.result = left + right;
-            break;
-          case '-':
-            result.result = left - right;
-            break;
-          case '*':
-            result.result = left * right;
-            break;
-          case '/':
-            if (right === 0) {
-              result.error = 'Division by zero';
-            } else {
-              result.result = left / right;
-            }
-            break;
-          default:
-            break;
+    try {
+      while (Date.now() < deadline && !executionComplete) {
+        // Wait for a message with a timeout
+        let replyFrames: Buffer[];
+        try {
+          const receivePromise = managed.iopubSocket.receive();
+          const timeoutPromise = new Promise<never>((_, reject) => 
+            setTimeout(() => reject(new Error('TIMEOUT')), 100)
+          );
+          replyFrames = (await Promise.race([receivePromise, timeoutPromise])) as Buffer[];
+        } catch (e) {
+          if (e instanceof Error && e.message === 'TIMEOUT') {
+            continue;
+          }
+          throw e;
         }
-        continue;
+
+        const reply = parseMessage(replyFrames);
+
+        if (!reply || !reply.parent_header || (reply.parent_header as any).msg_id !== msgId) {
+          continue;
+        }
+
+        const msgType = reply.header.msg_type;
+        const content = reply.content;
+
+        if (msgType === 'stream') {
+          const streamContent = content as { name: string; text: string };
+          if (streamContent.name === 'stdout') {
+            result.stdout = (result.stdout || '') + streamContent.text;
+          } else if (streamContent.name === 'stderr') {
+            result.stderr = (result.stderr || '') + streamContent.text;
+          }
+        } else if (msgType === 'execute_result') {
+          const data = (content as any).data;
+          result.result = data?.['text/plain'] ?? data;
+        } else if (msgType === 'display_data') {
+          const data = (content as any).data;
+          if (options.capture && data?.['image/png']) {
+            result.images?.push({ mime: 'image/png', data: data['image/png'] });
+          }
+          if (data?.['text/html']) {
+            result.rich = { ...(result.rich || {}), 'text/html': data['text/html'] };
+          }
+        } else if (msgType === 'error') {
+          const errorContent = content as { ename: string; evalue: string; traceback: string[] };
+          result.error = `${errorContent.ename}: ${errorContent.evalue}`;
+          if (errorContent.traceback && errorContent.traceback.length > 0) {
+            result.stderr = (result.stderr || '') + errorContent.traceback.join('\n');
+          }
+        } else if (msgType === 'status' && (content as any).execution_state === 'idle') {
+          executionComplete = true;
+        }
       }
 
-      // Handle variable assignments (just acknowledge)
-      if (trimmed.match(/^[a-zA-Z_]\w*\s*=/)) {
-        continue;
+      if (!executionComplete) {
+        result.error = 'Execution timed out';
       }
 
-      // Handle import statements
-      if (trimmed.startsWith('import ') || trimmed.startsWith('using ') || trimmed.startsWith('from ')) {
-        continue;
-      }
-    }
+      managed.executionCount++;
+    } catch (error) {
+      result.error = error instanceof Error ? error.message : String(error);
+    } finally {
+      managed.info.status = 'idle';
+      managed.lastActivity = Date.now();
+      result.duration = Date.now() - startTime;
 
-    // Clean up stdout
-    if (result.stdout) {
-      result.stdout = result.stdout.trim();
-    } else {
-      result.stdout = undefined;
+      if (result.stdout === '') result.stdout = undefined;
+      if (result.stderr === '') result.stderr = undefined;
+      if (result.images && result.images.length === 0) result.images = undefined;
+      if (result.rich && Object.keys(result.rich).length === 0) result.rich = undefined;
     }
 
     return result;
   }
 
-  // ==========================================================================
-  // Completions and Inspection
-  // ==========================================================================
-
-  /**
-   * Get code completions
-   */
   async complete(id: string, code: string, cursorPos: number): Promise<KernelCompleteResult> {
-    const kernel = this.kernels.get(id);
-    if (!kernel) {
+    const managed = this.kernels.get(id);
+    if (!managed) {
       return { matches: [], cursor_start: cursorPos, cursor_end: cursorPos };
     }
 
-    console.log(`[KernelManager] Complete on ${id} at position ${cursorPos}`);
+    const msg = createMessage(
+      'complete_request',
+      { code, cursor_pos: cursorPos },
+      managed.sessionId,
+    );
+    const frames = serializeMessage(msg, managed.connectionInfo.key);
+    await managed.shellSocket.send(frames);
 
-    // Stub: provide some common completions based on language
-    const beforeCursor = code.slice(0, cursorPos);
-    const wordMatch = beforeCursor.match(/[\w.]+$/);
-    const word = wordMatch ? wordMatch[0] : '';
-    const wordStart = cursorPos - word.length;
+    // Wait for reply
+    const replyFrames = await managed.shellSocket.receive();
+    const reply = parseMessage(replyFrames as Buffer[]);
 
-    let matches: string[] = [];
-
-    if (kernel.spec.language === 'python') {
-      const pythonKeywords = [
-        'import',
-        'from',
-        'def',
-        'class',
-        'return',
-        'if',
-        'else',
-        'elif',
-        'for',
-        'while',
-        'try',
-        'except',
-        'finally',
-        'with',
-        'as',
-        'lambda',
-        'print',
-        'len',
-        'range',
-        'list',
-        'dict',
-        'set',
-        'tuple',
-        'str',
-        'int',
-        'float',
-        'numpy',
-        'pandas',
-        'matplotlib',
-        'plt',
-        'np',
-        'pd',
-      ];
-      matches = pythonKeywords.filter((k) => k.startsWith(word) && k !== word);
-    } else {
-      const juliaKeywords = [
-        'using',
-        'import',
-        'function',
-        'end',
-        'if',
-        'else',
-        'elseif',
-        'for',
-        'while',
-        'try',
-        'catch',
-        'finally',
-        'return',
-        'struct',
-        'println',
-        'print',
-        'length',
-        'size',
-        'typeof',
-        'convert',
-        'Array',
-        'Vector',
-        'Matrix',
-        'Dict',
-        'Set',
-        'Tuple',
-        'Plots',
-        'DataFrames',
-        'LinearAlgebra',
-      ];
-      matches = juliaKeywords.filter((k) => k.startsWith(word) && k !== word);
+    if (reply && reply.content.status === 'ok') {
+      const content = reply.content as any;
+      return {
+        matches: content.matches ?? [],
+        cursor_start: content.cursor_start,
+        cursor_end: content.cursor_end,
+        metadata: content.metadata,
+      };
     }
 
-    return {
-      matches: matches.slice(0, 20),
-      cursor_start: wordStart,
-      cursor_end: cursorPos,
-    };
+    return { matches: [], cursor_start: cursorPos, cursor_end: cursorPos };
   }
 
-  /**
-   * Inspect an object
-   */
   async inspect(id: string, code: string, cursorPos: number): Promise<KernelInspectResult> {
-    const kernel = this.kernels.get(id);
-    if (!kernel) {
+    const managed = this.kernels.get(id);
+    if (!managed) {
       return { found: false };
     }
 
-    console.log(`[KernelManager] Inspect on ${id} at position ${cursorPos}`);
+    const msg = createMessage(
+      'inspect_request',
+      { code, cursor_pos: cursorPos, detail_level: 0 },
+      managed.sessionId,
+    );
+    const frames = serializeMessage(msg, managed.connectionInfo.key);
+    await managed.shellSocket.send(frames);
 
-    // Extract word at cursor
-    const beforeCursor = code.slice(0, cursorPos);
-    const afterCursor = code.slice(cursorPos);
-    const wordBefore = beforeCursor.match(/[\w.]+$/) || [''];
-    const wordAfter = afterCursor.match(/^[\w.]*/) || [''];
-    const word = wordBefore[0] + wordAfter[0];
+    // Wait for reply
+    const replyFrames = await managed.shellSocket.receive();
+    const reply = parseMessage(replyFrames as Buffer[]);
 
-    if (!word) {
-      return { found: false };
-    }
-
-    // Stub: provide documentation for common items
-    const docs: Record<string, string> = {
-      print: 'print(*args, sep=" ", end="\\n")\n\nPrint objects to the text stream.',
-      len: 'len(obj)\n\nReturn the number of items in a container.',
-      range: 'range(stop) or range(start, stop, step)\n\nReturn an immutable sequence.',
-      numpy: 'NumPy: The fundamental package for scientific computing with Python.',
-      np: 'NumPy: The fundamental package for scientific computing with Python.',
-      pandas: 'pandas: Powerful data structures for data analysis.',
-      pd: 'pandas: Powerful data structures for data analysis.',
-      matplotlib: 'Matplotlib: Comprehensive library for creating visualizations.',
-      plt: 'matplotlib.pyplot: State-based interface to matplotlib.',
-      println: 'println([io::IO], xs... )\n\nPrint objects to io followed by a newline.',
-      Plots: 'Plots.jl: Powerful convenience for visualization in Julia.',
-    };
-
-    const docText = docs[word];
-    if (docText) {
+    if (reply && reply.content.status === 'ok' && (reply.content as any).found) {
       return {
         found: true,
-        data: {
-          'text/plain': docText,
-        },
+        data: (reply.content as any).data,
       };
     }
 
     return { found: false };
   }
 
-  // ==========================================================================
-  // Utilities
-  // ==========================================================================
-
-  /**
-   * Get kernel info by ID
-   */
   getKernel(id: string): KernelInfo | undefined {
     return this.kernels.get(id)?.info;
   }
 
-  /**
-   * Check if a kernel exists
-   */
   hasKernel(id: string): boolean {
     return this.kernels.has(id);
   }
 
-  /**
-   * Get execution count for a kernel
-   */
   getExecutionCount(id: string): number {
     return this.kernels.get(id)?.executionCount || 0;
   }
 
-  /**
-   * Shutdown all kernels
-   */
   async shutdownAll(): Promise<void> {
-    console.log(`[KernelManager] Shutting down ${this.kernels.size} kernel(s)`);
     const ids = Array.from(this.kernels.keys());
     for (const id of ids) {
       await this.stop(id);
     }
   }
-
-  /**
-   * Simulate async delay (for stub implementation)
-   */
-  private simulateDelay(ms: number): Promise<void> {
-    return new Promise((resolve) => setTimeout(resolve, ms));
-  }
 }
-
-// ============================================================================
-// Singleton Instance
-// ============================================================================
 
 let instance: KernelManager | null = null;
 
