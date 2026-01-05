@@ -16,6 +16,9 @@ import {
   KernelInspectResult,
 } from './ipc';
 
+const STUB_IMAGE_DATA =
+  'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==';
+
 // ============================================================================
 // Types
 // ============================================================================
@@ -257,7 +260,7 @@ export class KernelManager {
         result.images = [
           {
             mime: 'image/png',
-            data: 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==', // 1x1 transparent PNG stub
+            data: STUB_IMAGE_DATA, // 1x1 transparent PNG stub
           },
         ];
         result.stdout = result.stdout?.replace('plt.show()', '[Figure captured]') || '[Figure captured]';
@@ -325,12 +328,27 @@ export class KernelManager {
       }
 
       // Handle simple expressions
-      if (trimmed.match(/^\d+\s*[\+\-\*\/]\s*\d+$/)) {
-        try {
-          // eslint-disable-next-line no-eval
-          result.result = eval(trimmed);
-        } catch {
-          // Ignore eval errors in stub
+      const expressionMatch = trimmed.match(/^(\d+)\s*([\+\-\*\/])\s*(\d+)$/);
+      if (expressionMatch) {
+        const left = Number(expressionMatch[1]);
+        const operator = expressionMatch[2];
+        const right = Number(expressionMatch[3]);
+
+        switch (operator) {
+          case '+':
+            result.result = left + right;
+            break;
+          case '-':
+            result.result = left - right;
+            break;
+          case '*':
+            result.result = left * right;
+            break;
+          case '/':
+            result.result = right !== 0 ? left / right : Infinity;
+            break;
+          default:
+            break;
         }
         continue;
       }

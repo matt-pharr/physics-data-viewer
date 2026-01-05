@@ -132,7 +132,8 @@ function pdv_info(obj)
         info["preview"] = string(obj)
 
     else
-        info["preview"] = repr(obj)[1:min(100, end)]
+        repr_str = repr(obj)
+        info["preview"] = repr_str[1:min(100, length(repr_str))]
     end
 
     return info
