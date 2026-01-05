@@ -25,7 +25,7 @@ def _pdv_setup_matplotlib(capture_mode=False):
 
         if capture_mode:
             matplotlib.use('Agg')
-            print("[PDV] Matplotlib backend:  Agg (capture mode)")
+            print("[PDV] Matplotlib backend: Agg (capture mode)")
         else:
             # Try interactive backends in order of preference
             backends_to_try = ['QtAgg', 'Qt5Agg', 'MacOSX', 'TkAgg']
@@ -53,13 +53,13 @@ def pdv_show(fig=None, fmt='png', dpi=100, close=True):
     Capture a matplotlib figure and return it as base64 for display in PDV.
 
     Args:
-        fig: The figure to capture.  If None, uses the current figure.
+        fig: The figure to capture. If None, uses the current figure.
         fmt: Output format ('png' or 'svg').
         dpi: Resolution for raster formats.
         close: If True, close the figure after capture.
 
     Returns:
-        dict: {'mime':  'image/png', 'data': '<base64 string>'}
+        dict: {'mime': 'image/png', 'data': '<base64 string>'}
              or {'error': '<error message>'}
 
     Example:
@@ -90,7 +90,7 @@ def pdv_show(fig=None, fmt='png', dpi=100, close=True):
         return {'mime': f'image/{fmt}', 'data': data}
 
     except ImportError:
-        return {'error':  'matplotlib not installed'}
+        return {'error': 'matplotlib not installed'}
     except Exception as e:
         return {'error': f'Failed to capture plot: {str(e)}'}
 
@@ -118,6 +118,7 @@ def _pdv_enable_auto_capture():
 
         def _captured_show(*args, **kwargs):
             """Replacement for plt.show() that captures instead of displaying"""
+            _ = (args, kwargs)
             result = pdv_show(close=False)
 
             if 'error' not in result:
@@ -129,14 +130,14 @@ def _pdv_enable_auto_capture():
                     display(Image(data=img_data, format='png'))
                 except ImportError:
                     # No IPython, just print result
-                    print(f"[PDV] Plot captured:  {result['mime']}")
+                    print(f"[PDV] Plot captured: {result['mime']}")
             else:
                 print(f"[PDV] Error capturing plot: {result['error']}")
 
             return result
 
         plt.show = _captured_show
-        print("[PDV] Auto-capture enabled:  plt.show() will capture plots")
+        print("[PDV] Auto-capture enabled: plt.show() will capture plots")
 
     except ImportError:
         print("[PDV] Warning: matplotlib not available for auto-capture")
@@ -150,7 +151,7 @@ def _pdv_disable_auto_capture():
             import matplotlib.pyplot as plt
             plt.show = _pdv_original_show
             _pdv_capture_mode = False
-            print("[PDV] Auto-capture disabled:  plt.show() restored to native")
+            print("[PDV] Auto-capture disabled: plt.show() restored to native")
         except ImportError:
             pass
 

@@ -584,13 +584,16 @@ export class KernelManager {
           result.result = data?.['text/plain'] ?? data;
         } else if (msgType === 'display_data') {
           const data = (content as any).data;
-          if (data?.['image/png']) {
+          const hasPng = data?.['image/png'];
+          const hasSvg = data?.['image/svg+xml'];
+          if (hasPng || hasSvg) {
             result.images = result.images || [];
-            result.images.push({ mime: 'image/png', data: data['image/png'] });
-          }
-          if (data?.['image/svg+xml']) {
-            result.images = result.images || [];
-            result.images.push({ mime: 'image/svg+xml', data: data['image/svg+xml'] });
+            if (hasPng) {
+              result.images.push({ mime: 'image/png', data: data['image/png'] });
+            }
+            if (hasSvg) {
+              result.images.push({ mime: 'image/svg+xml', data: data['image/svg+xml'] });
+            }
           }
           if (data?.['text/html']) {
             result.rich = { ...(result.rich || {}), 'text/html': data['text/html'] };
