@@ -8,6 +8,9 @@ It sets up the environment, configures plot backends, and defines helper functio
 import sys
 import os
 
+MAX_COLUMNS = 20
+MAX_PREVIEW_LENGTH = 100
+
 # =============================================================================
 # Matplotlib Backend Configuration
 # =============================================================================
@@ -156,13 +159,73 @@ def _pdv_disable_auto_capture():
             pass
 
 # =============================================================================
-# Data Inspection Helpers
+# Namespace Management
 # =============================================================================
 
+def pdv_namespace(include_private=False, include_modules=False, include_callables=False):
+    """
+    Get the current namespace as a dict suitable for the Namespace view.
+    Inclusion flags control which categories are returned.
+    
+    Args:
+        include_private:  If False, exclude variables starting with '_'
+        include_modules: If False, exclude module objects
+        include_callables: If False, exclude functions and classes
+    
+    Returns:
+        dict: Variable name -> metadata dict
+    """
+    import sys
+    import inspect
+    
+    # Get IPython namespace if available, otherwise use globals()
+    try:
+        ipython_fn = globals().get('get_ipython')
+        if callable(ipython_fn):
+            namespace = ipython_fn().user_ns
+        else:
+            namespace = globals()
+    except Exception:
+        namespace = globals()
+    
+    result = {}
+    
+    for name, obj in namespace.items():
+        # Skip private variables (unless requested)
+        if not include_private and name.startswith('_'):
+            continue
+        
+        # Skip modules (unless requested)
+        if not include_modules and inspect.ismodule(obj):
+            continue
+        
+        # Skip callables (unless requested)
+        if not include_callables and callable(obj) and not hasattr(obj, 'shape'):
+            continue
+        
+        # Skip PDV internals
+        if name.startswith('pdv_') or name.startswith('_pdv_'):
+            continue
+        
+        # Get metadata using pdv_info
+        try:
+            info = pdv_info(obj)
+            result[name] = info
+        except Exception as e:
+            # Fallback for objects that can't be inspected
+            result[name] = {
+                'type': type(obj).__name__,
+                'preview': str(obj)[:MAX_PREVIEW_LENGTH],
+                'error': f'Could not inspect: {str(e)}'
+            }
+    
+    return result
+
+# Update pdv_info to handle more types
 def pdv_info(obj):
     """
-    Get detailed information about an object for display in the Tree.
-
+    Get detailed information about an object for display in the Tree/Namespace. 
+    
     Returns:
         dict: Object metadata including type, shape, dtype, preview, etc.
     """
@@ -170,81 +233,89 @@ def pdv_info(obj):
         'type': type(obj).__name__,
         'module': type(obj).__module__,
     }
-
+    
     # NumPy arrays
     if hasattr(obj, 'shape') and hasattr(obj, 'dtype'):
         info['shape'] = list(obj.shape)
         info['dtype'] = str(obj.dtype)
         info['size'] = obj.nbytes if hasattr(obj, 'nbytes') else None
         info['preview'] = f"{obj.dtype} {tuple(obj.shape)}"
-
+        
+        # Add min/max/mean for numeric arrays
+        try:
+            if obj.size > 0 and obj.dtype.kind in ['i', 'u', 'f', 'c']:
+                info['min'] = float(obj.min())
+                info['max'] = float(obj.max())
+                info['mean'] = float(obj.mean())
+        except:
+            pass
+    
     # Pandas DataFrames
     elif hasattr(obj, 'columns') and hasattr(obj, 'index'):
         info['shape'] = list(obj.shape)
-        info['columns'] = list(obj.columns)
+        info['columns'] = list(obj.columns)[:MAX_COLUMNS]
         info['preview'] = f"DataFrame ({len(obj)} rows, {len(obj.columns)} cols)"
-
+        info['size'] = int(obj.memory_usage(deep=False).sum()) if hasattr(obj, 'memory_usage') else None
+    
     # Pandas Series
     elif hasattr(obj, 'index') and hasattr(obj, 'dtype') and not hasattr(obj, 'columns'):
         info['shape'] = [len(obj)]
         info['dtype'] = str(obj.dtype)
         info['preview'] = f"Series ({len(obj)}) [{obj.dtype}]"
-
+        info['size'] = int(obj.memory_usage(deep=False)) if hasattr(obj, 'memory_usage') else None
+    
     # Lists, tuples, sets
     elif isinstance(obj, (list, tuple, set)):
         info['length'] = len(obj)
         info['preview'] = f"{type(obj).__name__} ({len(obj)} items)"
-
+        
+        # Show first few elements
+        if len(obj) > 0:
+            try:
+                items = list(obj)[:3] if isinstance(obj, set) else obj[:3]
+                items_str = ', '.join(repr(item)[:20] for item in items)
+                if len(obj) > 3:
+                    items_str += ', ...'
+                info['preview'] += f":  [{items_str}]"
+            except:
+                pass
+    
     # Dicts
     elif isinstance(obj, dict):
         info['length'] = len(obj)
         info['keys'] = list(obj.keys())[:10]  # First 10 keys
         info['preview'] = f"dict ({len(obj)} items)"
-
+    
     # Strings
     elif isinstance(obj, str):
         info['length'] = len(obj)
-        info['preview'] = repr(obj[:50]) + ('...' if len(obj) > 50 else '')
-
+        preview = obj[:50]
+        if len(obj) > 50:
+            preview += '...'
+        info['preview'] = repr(preview)
+    
     # Numbers
     elif isinstance(obj, (int, float, complex)):
         info['preview'] = repr(obj)
-
+    
+    # Booleans
+    elif isinstance(obj, bool):
+        info['preview'] = repr(obj)
+    
+    # None
+    elif obj is None: 
+        info['preview'] = 'None'
+    
+    # Matplotlib figures
+    elif type(obj).__name__ == 'Figure':
+        info['preview'] = f"Figure ({obj.get_figwidth()}x{obj.get_figheight()} in)"
+        info['num_axes'] = len(obj.get_axes())
+    
+    # Generic objects
     else:
-        info['preview'] = repr(obj)[:100]
-
+        info['preview'] = repr(obj)[:MAX_PREVIEW_LENGTH]
+    
     return info
-
-# =============================================================================
-# Namespace Management
-# =============================================================================
-
-def pdv_namespace():
-    """
-    Get the current namespace as a dict suitable for the Tree view.
-    Filters out private variables, modules, and built-ins.
-    """
-    import sys
-
-    # Get the main namespace (this is a stub; real impl gets IPython's namespace)
-    namespace = {}
-
-    # Filter and process
-    result = {}
-    for name, obj in namespace.items():
-        # Skip private and dunder names
-        if name.startswith('_'):
-            continue
-        # Skip modules
-        if isinstance(obj, type(sys)):
-            continue
-        # Skip callables (functions, classes) unless explicitly requested
-        if callable(obj) and not hasattr(obj, 'shape'):
-            continue
-
-        result[name] = pdv_info(obj)
-
-    return result
 
 # =============================================================================
 # Initialization

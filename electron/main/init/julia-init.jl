@@ -5,6 +5,9 @@ This file is executed when a Julia kernel starts.
 It sets up the environment, configures plot backends, and defines helper functions.
 =#
 
+const MAX_COLUMNS = 20
+const MAX_PREVIEW_LENGTH = 100
+
 # =============================================================================
 # Plot Backend Configuration
 # =============================================================================
@@ -99,7 +102,7 @@ end
 """
     pdv_info(obj)
 
-Get detailed information about an object for display in the Tree.
+Get detailed information about an object for display in the Tree/Namespace.
 
 # Returns
 - `Dict`: Object metadata including type, shape, dtype, preview, etc.
@@ -116,12 +119,26 @@ function pdv_info(obj)
         info["dtype"] = string(eltype(obj))
         info["size"] = sizeof(obj)
         info["preview"] = "$(eltype(obj)) $(size(obj))"
+        
+        # Add min/max/mean for numeric arrays
+        try
+            if length(obj) > 0 && eltype(obj) <: Number
+                min_val, max_val = extrema(obj)
+                info["min"] = Float64(min_val)
+                info["max"] = Float64(max_val)
+                info["mean"] = Float64(sum(obj) / length(obj))
+            end
+        catch
+        end
 
     # DataFrames (if available)
-    elseif hasproperty(obj, :columns) && hasproperty(obj, :nrow)
-        info["shape"] = [obj.nrow, length(obj.columns)]
-        info["columns"] = string.(obj.columns)
-        info["preview"] = "DataFrame ($(obj.nrow) rows, $(length(obj.columns)) cols)"
+    elseif hasproperty(obj, :colindex) && hasproperty(obj, :nrow)
+        columns = names(obj)
+        info["shape"] = [obj.nrow, length(columns)]
+        info["columns"] = string.(columns[1:min(MAX_COLUMNS, end)])
+        info["preview"] = "DataFrame ($(obj.nrow) rows, $(length(columns)) cols)"
+        # Size estimation
+        info["size"] = sum(sizeof(col) for col in eachcol(obj))
 
     # Dicts
     elseif obj isa AbstractDict
@@ -144,9 +161,18 @@ function pdv_info(obj)
     elseif obj isa Number
         info["preview"] = string(obj)
 
+    # Booleans
+    elseif obj isa Bool
+        info["preview"] = string(obj)
+
+    # Nothing
+    elseif obj === nothing
+        info["preview"] = "nothing"
+
+    # Generic objects
     else
         repr_str = repr(obj)
-        info["preview"] = repr_str[1:min(100, length(repr_str))]
+        info["preview"] = repr_str[1:min(MAX_PREVIEW_LENGTH, length(repr_str))]
     end
 
     return info
@@ -157,30 +183,57 @@ end
 # =============================================================================
 
 """
-    pdv_namespace()
+    pdv_namespace(; include_private::Bool=false, include_modules::Bool=false)
 
-Get the current namespace as a Dict suitable for the Tree view.
+Get the current namespace as a Dict suitable for the Namespace view. 
+
+# Arguments
+- `include_private`: If false, exclude names starting with '_'
+- `include_modules`: If false, exclude Module objects
+
+# Returns
+- `Dict{String, Any}`: Variable name => metadata dict
 """
-function pdv_namespace()
-    # This is a stub; real implementation would inspect Main module
+function pdv_namespace(; include_private::Bool=false, include_modules::Bool=false)
     result = Dict{String, Any}()
-
+    
+    # Get names from Main module
     for name in names(Main, all=false, imported=false)
-        # Skip private names
-        startswith(string(name), "_") && continue
-
+        name_str = string(name)
+        
+        # Skip private names (unless requested)
+        if !include_private && startswith(name_str, "_")
+            continue
+        end
+        
+        # Skip PDV internals
+        if startswith(name_str, "pdv_") || startswith(name_str, "_pdv_")
+            continue
+        end
+        
         try
             obj = getfield(Main, name)
-            # Skip functions and modules
-            obj isa Function && continue
-            obj isa Module && continue
-
-            result[string(name)] = pdv_info(obj)
-        catch
+            
+            # Skip modules (unless requested)
+            if !include_modules && obj isa Module
+                continue
+            end
+            
+            # Skip functions (unless they're data-like)
+            if obj isa Function
+                continue
+            end
+            
+            # Get metadata
+            info = pdv_info(obj)
+            result[name_str] = info
+            
+        catch e
+            # Skip names that can't be accessed
             continue
         end
     end
-
+    
     return result
 end
 

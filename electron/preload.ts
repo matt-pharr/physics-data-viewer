@@ -19,6 +19,8 @@ import type {
   FileReadResult,
   Config,
   PDVApi,
+  NamespaceQueryOptions,
+  NamespaceVariable,
 } from './main/ipc';
 
 // IPC channel names (duplicated here to avoid runtime imports in preload context)
@@ -43,6 +45,9 @@ const IPC = {
     read: 'files:read',
     write: 'files:write',
     pickExecutable: 'files:pickExecutable',
+  },
+  namespace: {
+    query: 'namespace:query',
   },
   config: {
     get: 'config:get',
@@ -78,6 +83,14 @@ const api: PDVApi = {
 
     validate: (path: string, language: 'python' | 'julia'): Promise<{ valid: boolean; error?: string }> =>
       ipcRenderer.invoke(IPC.kernels.validate, path, language),
+  },
+
+  namespace: {
+    query: (
+      kernelId: string,
+      options?: NamespaceQueryOptions,
+    ): Promise<{ variables?: NamespaceVariable[]; error?: string }> =>
+      ipcRenderer.invoke(IPC.namespace.query, kernelId, options),
   },
 
   tree: {
