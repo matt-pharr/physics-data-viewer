@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { CommandBox } from '../components/CommandBox';
 import { Console } from '../components/Console';
+import { Tree } from '../components/Tree';
 import type { CommandTab, LogEntry } from '../types';
 
 type Tab = 'tree' | 'namespace' | 'modules';
@@ -133,31 +134,15 @@ const App: React.FC = () => {
             </button>
           </div>
 
-          <div className="tree-container">
-            <div className="tree-header">
-              <span className="tree-col key">Key</span>
-              <span className="tree-col type">Type</span>
-              <span className="tree-col preview">Preview</span>
+          <div className="tree-panels">
+            <div className={`tree-panel ${activeTab === 'tree' ? 'active' : ''}`}>
+              <Tree />
             </div>
-            <div className="tree-content">
-              {activeTab === 'tree' && (
-                <div className="tree-empty">
-                  <p>No data loaded</p>
-                  <p className="hint">Tree view will appear here</p>
-                </div>
-              )}
-              {activeTab === 'namespace' && (
-                <div className="tree-empty">
-                  <p>Namespace</p>
-                  <p className="hint">Kernel variables will appear here</p>
-                </div>
-              )}
-              {activeTab === 'modules' && (
-                <div className="tree-empty">
-                  <p>Modules</p>
-                  <p className="hint">Loaded modules will appear here</p>
-                </div>
-              )}
+            <div className={`tree-panel ${activeTab === 'namespace' ? 'active' : ''}`}>
+              <div className="tree-empty">Namespace view (coming soon)</div>
+            </div>
+            <div className={`tree-panel ${activeTab === 'modules' ? 'active' : ''}`}>
+              <div className="tree-empty">Modules view (coming soon)</div>
             </div>
           </div>
         </aside>
