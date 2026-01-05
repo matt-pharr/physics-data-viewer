@@ -65,7 +65,10 @@ const App: React.FC = () => {
     setLastError(undefined);
 
     const logEntry: LogEntry = {
-      id: `log-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+      id:
+        typeof crypto !== 'undefined' && 'randomUUID' in crypto
+          ? crypto.randomUUID()
+          : `log-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
       timestamp: Date.now(),
       code,
     };
