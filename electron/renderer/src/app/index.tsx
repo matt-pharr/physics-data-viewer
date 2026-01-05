@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useRef } from 'react';
+import React, { useEffect, useState, useRef, useCallback } from 'react';
 import { CommandBox } from '../components/CommandBox';
 import { Console } from '../components/Console';
 import { Tree } from '../components/Tree';
@@ -22,6 +22,10 @@ const App: React.FC = () => {
   const [config, setConfig] = useState<Config | null>(null);
   const [showEnvSelector, setShowEnvSelector] = useState(false);
   const initRef = useRef(false);
+  const [leftWidth, setLeftWidth] = useState(340);
+  const [consoleHeight, setConsoleHeight] = useState(260);
+  const dragRef = useRef<'vertical' | 'horizontal' | null>(null);
+  const rightPaneRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     // Prevent double initialization in StrictMode
@@ -46,6 +50,45 @@ const App: React.FC = () => {
     };
 
     void initConfig();
+  }, []);
+
+  useEffect(() => {
+    const handleMove = (event: MouseEvent) => {
+      if (!dragRef.current) return;
+      if (dragRef.current === 'vertical') {
+        const next = Math.min(Math.max(event.clientX, 200), 600);
+        setLeftWidth(next);
+      } else if (dragRef.current === 'horizontal') {
+        const bounds = rightPaneRef.current?.getBoundingClientRect();
+        if (!bounds) return;
+        const relativeY = event.clientY - bounds.top;
+        const min = 140;
+        const max = Math.max(min, bounds.height - 180);
+        const next = Math.min(Math.max(relativeY, min), max);
+        setConsoleHeight(next);
+      }
+    };
+
+    const handleUp = () => {
+      dragRef.current = null;
+    };
+
+    window.addEventListener('mousemove', handleMove);
+    window.addEventListener('mouseup', handleUp);
+    return () => {
+      window.removeEventListener('mousemove', handleMove);
+      window.removeEventListener('mouseup', handleUp);
+    };
+  }, []);
+
+  const startVerticalDrag = useCallback((event: React.MouseEvent) => {
+    event.preventDefault();
+    dragRef.current = 'vertical';
+  }, []);
+
+  const startHorizontalDrag = useCallback((event: React.MouseEvent) => {
+    event.preventDefault();
+    dragRef.current = 'horizontal';
   }, []);
 
   const startKernel = async (cfg: Config) => {
@@ -174,7 +217,7 @@ const App: React.FC = () => {
       {/* Main content */}
       <main className="app-main">
         {/* Left pane:  Tree */}
-        <aside className="left-pane">
+        <aside className="left-pane" style={{ width: `${leftWidth}px` }}>
           <div className="pane-tabs">
             <button
               className={`tab ${activeTab === 'tree' ? 'active' : ''}`}
@@ -210,14 +253,16 @@ const App: React.FC = () => {
         </aside>
 
         {/* Vertical resizer */}
-        <div className="vertical-resizer" />
+        <div className="vertical-resizer" onMouseDown={startVerticalDrag} />
 
         {/* Right pane: Console + Command Box */}
-        <div className="right-pane">
-          <Console logs={logs} onClear={handleClearConsole} />
+        <div className="right-pane" ref={rightPaneRef}>
+          <div className="console-wrapper" style={{ height: `${consoleHeight}px` }}>
+            <Console logs={logs} onClear={handleClearConsole} />
+          </div>
 
           {/* Horizontal resizer */}
-          <div className="horizontal-resizer" />
+          <div className="horizontal-resizer" onMouseDown={startHorizontalDrag} />
 
           <CommandBox
             tabs={commandTabs.map((tab) => ({

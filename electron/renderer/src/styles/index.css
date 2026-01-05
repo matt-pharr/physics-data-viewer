@@ -365,6 +365,7 @@ body {
   cursor: col-resize;
   background-color: var(--bg-primary);
   flex-shrink: 0;
+  user-select: none;
 }
 
 .vertical-resizer:hover {
@@ -376,6 +377,7 @@ body {
   cursor: row-resize;
   background-color: var(--bg-primary);
   flex-shrink: 0;
+  user-select: none;
 }
 
 .horizontal-resizer:hover {
@@ -393,11 +395,17 @@ body {
 
 /* ===== CONSOLE PANE ===== */
 .console-pane {
-  flex: 1;
-  min-height: 120px;
+  height: 100%;
+  min-height: 140px;
   display: flex;
   flex-direction: column;
   background-color: var(--bg-secondary);
+}
+
+.console-wrapper {
+  flex: none;
+  min-height: 140px;
+  overflow: hidden;
 }
 
 .pane-header {
