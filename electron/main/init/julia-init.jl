@@ -20,14 +20,14 @@
 # Captures the current plot and returns it as base64 PNG/SVG
 # for display in the Physics Data Viewer UI. 
 #
-# function pdv_show(p=Plots.current(); fmt=: png)
+# function pdv_show(p=Plots.current(); fmt=:png)
 #     io = IOBuffer()
 #     savefig(p, io, fmt)
 #     data = base64encode(take!(io))
 #     return Dict("mime" => "image/$fmt", "data" => data)
 # end
 
-# --- Revise. jl for hot reload (optional) ---
+# --- Revise.jl for hot reload (optional) ---
 # try
 #     using Revise
 # catch e

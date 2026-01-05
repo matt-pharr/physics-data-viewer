@@ -10,6 +10,6 @@
     "strict": true,
     "skipLibCheck": true
   },
-  "include": ["main/**/*. ts", "preload. ts"],
-  "exclude": ["node_modules", "renderer"]
+  "include": ["main/**/*.ts", "preload.ts"],
+  "exclude": ["node_modules", "renderer", "**/*.test.ts"]
 }
