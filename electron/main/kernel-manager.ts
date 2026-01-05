@@ -572,17 +572,22 @@ export class KernelManager {
     let executionComplete = false;
 
     try {
+      // Use socket-level timeout to avoid overlapping receive calls that cause
+      // "Socket is busy reading" errors when we poll for messages.
+      (managed.iopubSocket as any).receiveTimeout = 100;
+
       while (Date.now() < deadline && !executionComplete) {
-        // Wait for a message with a timeout
         let replyFrames: Buffer[];
         try {
-          const receivePromise = managed.iopubSocket.receive();
-          const timeoutPromise = new Promise<never>((_, reject) => 
-            setTimeout(() => reject(new Error('TIMEOUT')), 100)
-          );
-          replyFrames = (await Promise.race([receivePromise, timeoutPromise])) as Buffer[];
+          replyFrames = (await managed.iopubSocket.receive()) as Buffer[];
         } catch (e) {
-          if (e instanceof Error && e.message === 'TIMEOUT') {
+          // zmq throws different timeout flavors; ignore and keep polling
+          const msg = e instanceof Error ? e.message : String(e);
+          if (
+            msg.includes('Resource temporarily unavailable') ||
+            msg.includes('EAGAIN') ||
+            msg.includes('Operation was not possible or timed out')
+          ) {
             continue;
           }
           throw e;
@@ -606,7 +611,12 @@ export class KernelManager {
           }
         } else if (msgType === 'execute_result') {
           const data = (content as any).data;
-          result.result = data?.['text/plain'] ?? data;
+          // Prefer structured JSON when available to avoid fragile string parsing
+          if (data && Object.prototype.hasOwnProperty.call(data, 'application/json')) {
+            result.result = (data as any)['application/json'];
+          } else {
+            result.result = (data as any)?.['text/plain'] ?? data;
+          }
         } else if (msgType === 'display_data') {
           const data = (content as any).data;
           const hasPng = data?.['image/png'];
@@ -622,6 +632,9 @@ export class KernelManager {
           }
           if (data?.['text/html']) {
             result.rich = { ...(result.rich || {}), 'text/html': data['text/html'] };
+          }
+          if (Object.prototype.hasOwnProperty.call(data, 'application/json')) {
+            result.result = data['application/json'];
           }
         } else if (msgType === 'error') {
           const errorContent = content as { ename: string; evalue: string; traceback: string[] };

@@ -196,7 +196,8 @@ if (!canRegisterHandlers) {
           const includePrivate = options?.includePrivate ? 'True' : 'False';
           const includeModules = options?.includeModules ? 'True' : 'False';
           const includeCallables = options?.includeCallables ? 'True' : 'False';
-          code = `import json; json.dumps(pdv_namespace(include_private=${includePrivate}, include_modules=${includeModules}, include_callables=${includeCallables}))`;
+          // Ask IPython to emit application/json so we avoid repr strings with single quotes
+          code = `from IPython.display import JSON as PDVJSON\nPDVJSON(pdv_namespace(include_private=${includePrivate}, include_modules=${includeModules}, include_callables=${includeCallables}))`;
         } else if (language === 'julia') {
           const includePrivate = options?.includePrivate ? 'true' : 'false';
           const includeModules = options?.includeModules ? 'true' : 'false';
@@ -212,28 +213,33 @@ if (!canRegisterHandlers) {
         }
 
         try {
-          if (typeof result.result !== 'string') {
-            return { error: 'Namespace result not serialized as string' };
-          }
+          let namespaceData: unknown = result.result;
 
-          let serialized = (result.result as string).trim();
-          if (
-            (serialized.startsWith("'") && serialized.endsWith("'")) ||
-            (serialized.startsWith('"') && serialized.endsWith('"'))
-          ) {
-            serialized = serialized.slice(1, -1);
-          }
-
-          const tryParse = (value: string) => {
-            const cleaned = value.replace(/\\'/g, "'");
-            return JSON.parse(cleaned);
-          };
-
-          let namespaceData = tryParse(serialized);
-
-          // Fallback: some kernels may double-escape JSON; try an extra unwrap
+          // Prefer structured JSON results from the kernel when available
           if (typeof namespaceData === 'string') {
-            namespaceData = tryParse(namespaceData);
+            let serialized = namespaceData.trim();
+            if (
+              (serialized.startsWith("'") && serialized.endsWith("'")) ||
+              (serialized.startsWith('"') && serialized.endsWith('"'))
+            ) {
+              serialized = serialized.slice(1, -1);
+            }
+
+            const tryParse = (value: string) => {
+              const cleaned = value.replace(/\\'/g, "'");
+              return JSON.parse(cleaned);
+            };
+
+            namespaceData = tryParse(serialized);
+
+            // Fallback: some kernels may double-escape JSON; try an extra unwrap
+            if (typeof namespaceData === 'string') {
+              namespaceData = tryParse(namespaceData);
+            }
+          }
+
+          if (!namespaceData || typeof namespaceData !== 'object') {
+            return { error: 'Namespace result could not be parsed into an object' };
           }
           const variables: NamespaceVariable[] = Object.entries(namespaceData).map(
             ([name, info]) =>
