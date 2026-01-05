@@ -164,16 +164,19 @@ body {
   flex: 1;
   display: flex;
   flex-direction: column;
+  min-height: 0;
 }
 
 .tree-panel {
   flex: 1;
   display: none;
+  min-height: 0;
 }
 
 .tree-panel.active {
   display: flex;
   flex-direction: column;
+  min-height: 0;
 }
 
 .tree-container {
@@ -532,14 +535,16 @@ body {
 /* ===== COMMAND PANE ===== */
 .command-pane {
   min-height: 180px;
-  height: 240px;
+  flex: 1;
   display: flex;
   flex-direction: column;
   background-color: var(--bg-secondary);
+  overflow: hidden;
 }
 
 .command-content {
   flex: 1;
+  min-height: 0;
   overflow: hidden;
   background-color: var(--bg-primary);
 }
@@ -747,6 +752,7 @@ body {
   display: flex;
   flex-direction: column;
   height: 100%;
+  min-height: 0;
   overflow: hidden;
 }
 
@@ -821,6 +827,7 @@ body {
 
 .namespace-table-container {
   flex: 1;
+  min-height: 0;
   overflow-y: auto;
   background-color: var(--bg-primary);
 }
