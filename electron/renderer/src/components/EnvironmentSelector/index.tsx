@@ -102,11 +102,11 @@ export const EnvironmentSelector: React.FC<EnvironmentSelectorProps> = ({
 
         <div className="button-group">
           <button className="btn btn-primary" onClick={handleValidate} disabled={validating}>
-            {validating ? 'Validating...' : 'Test & Save'}
-          </button>
-          <button className="btn btn-secondary" onClick={() => onSave({ pythonPath, juliaPath })} disabled={validating}>
-            Use Defaults (Skip Validation)
-          </button>
+        {validating ? 'Validating...' : 'Test & Save'}
+      </button>
+      <button className="btn btn-secondary" onClick={() => onSave({ pythonPath, juliaPath })} disabled={validating}>
+        Save Without Validation
+      </button>
           {!isFirstRun && onCancel && (
             <button className="btn btn-secondary" onClick={onCancel} disabled={validating}>
               Cancel

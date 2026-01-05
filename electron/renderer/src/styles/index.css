@@ -702,6 +702,11 @@ body {
   font-size: 12px;
 }
 
+.help-text {
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
 .button-group {
   display: flex;
   gap: 12px;

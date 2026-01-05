@@ -6,6 +6,8 @@
  */
 
 import { ipcMain, app, dialog } from 'electron';
+import * as fs from 'fs';
+import * as path from 'path';
 import {
   IPC,
   KernelInfo,
@@ -79,19 +81,61 @@ if (!canRegisterHandlers) {
 
   ipcMain.handle(IPC.kernels.validate, async (_event, execPath: string, language: 'python' | 'julia') => {
     try {
+      const sanitizedPath = typeof execPath === 'string' ? execPath.trim() : '';
+      if (!sanitizedPath || sanitizedPath.includes('\n')) {
+        return { valid: false, error: 'Invalid executable path' };
+      }
+      const unsafePathPattern = /[^A-Za-z0-9_\s/.:+\-\\()]/;
+      if (unsafePathPattern.test(sanitizedPath) || sanitizedPath.length > 512) {
+        return { valid: false, error: 'Executable path contains invalid characters' };
+      }
+
+      if (path.isAbsolute(sanitizedPath)) {
+        try {
+          await fs.promises.access(sanitizedPath, fs.constants.X_OK);
+        } catch {
+          return { valid: false, error: `Executable not found or not accessible: ${sanitizedPath}` };
+        }
+      }
+
       const args =
         language === 'python'
-          ? [execPath, '-m', 'ipykernel', '--version']
-          : [execPath, '-e', 'using IJulia; println(IJulia.KERNEL_VERSION)'];
+          ? [sanitizedPath, '-m', 'ipykernel', '--version']
+          : [sanitizedPath, '-e', 'using IJulia; println(IJulia.KERNEL_VERSION)'];
 
       return await new Promise<{ valid: boolean; error?: string }>((resolve) => {
         const proc = spawn(args[0], args.slice(1));
         let output = '';
+        const MAX_OUTPUT = 4096;
+        let resolved = false;
+        const killTimer = setTimeout(() => {
+          if (!resolved) {
+            resolved = true;
+            proc.kill();
+            resolve({ valid: false, error: 'Validation timed out' });
+          }
+        }, 10000);
 
-        proc.stdout.on('data', (data) => (output += data.toString()));
-        proc.stderr.on('data', (data) => (output += data.toString()));
+        const appendOutput = (data: Buffer) => {
+          if (output.length >= MAX_OUTPUT) {
+            return;
+          }
+          output += data.toString();
+          if (output.length > MAX_OUTPUT) {
+            output = output.slice(0, MAX_OUTPUT);
+          }
+        };
+
+        proc.stdout.on('data', (data) => appendOutput(data));
+        proc.stderr.on('data', (data) => appendOutput(data));
 
         proc.on('close', (code) => {
+          if (resolved) {
+            clearTimeout(killTimer);
+            return;
+          }
+          resolved = true;
+          clearTimeout(killTimer);
           if (code === 0) {
             resolve({ valid: true });
           } else {
@@ -103,9 +147,15 @@ if (!canRegisterHandlers) {
         });
 
         proc.on('error', (err) => {
+          if (resolved) {
+            clearTimeout(killTimer);
+            return;
+          }
+          resolved = true;
+          clearTimeout(killTimer);
           resolve({
             valid: false,
-            error: `Failed to run ${execPath}: ${err.message}`,
+            error: `Failed to run ${sanitizedPath}: ${err.message}`,
           });
         });
       });

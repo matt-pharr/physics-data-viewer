@@ -38,12 +38,11 @@ export function loadConfig(): Config {
     if (fs.existsSync(configPath)) {
       const parsed = JSON.parse(fs.readFileSync(configPath, 'utf-8')) as Partial<Config>;
       const merged = { ...DEFAULT_CONFIG, ...parsed };
-      if (!Object.prototype.hasOwnProperty.call(parsed, 'pythonPath')) {
-        merged.pythonPath = undefined;
-      }
-      if (!Object.prototype.hasOwnProperty.call(parsed, 'juliaPath')) {
-        merged.juliaPath = undefined;
-      }
+      ['pythonPath', 'juliaPath'].forEach((key) => {
+        if (!(key in parsed)) {
+          (merged as Record<string, unknown>)[key] = undefined;
+        }
+      });
       cachedConfig = merged;
       return cachedConfig;
     }
@@ -51,7 +50,11 @@ export function loadConfig(): Config {
     cachedConfig = { ...DEFAULT_CONFIG, pythonPath: undefined, juliaPath: undefined };
     return cachedConfig;
   } catch (error) {
-    console.error('[config] Failed to load config, using defaults:', error);
+    const message =
+      error instanceof SyntaxError
+        ? '[config] Invalid config format, using defaults:'
+        : '[config] Failed to load config, using defaults:';
+    console.error(message, error);
   }
 
   cachedConfig = { ...DEFAULT_CONFIG };

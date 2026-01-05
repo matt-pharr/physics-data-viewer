@@ -59,10 +59,11 @@ export class KernelManager {
   private kernelSpecManager: KernelSpecManager;
 
   constructor() {
+    const baseUrl = process.env.JUPYTER_BASE_URL || 'http://localhost:8888';
     const serverSettings = ServerConnection.makeSettings({
       WebSocket,
       token: process.env.JUPYTER_TOKEN || '',
-      baseUrl: process.env.JUPYTER_BASE_URL,
+      baseUrl,
     });
 
     this.jupyterManager = new JupyterKernelManager({ serverSettings });
@@ -107,14 +108,6 @@ export class KernelManager {
     };
 
     try {
-      if (spec?.argv?.length) {
-        if (language === 'python') {
-          process.env.PYTHONEXECUTABLE = spec.argv[0];
-        } else if (language === 'julia') {
-          process.env.JULIA_EXECUTABLE = spec.argv[0];
-        }
-      }
-
       const kernel = await this.jupyterManager.startNew(
         { name: kernelName },
         { handleComms: false },
@@ -248,9 +241,7 @@ export class KernelManager {
     );
 
     const timeoutMs = options.timeout ?? 30000;
-    const timeoutPromise = new Promise<never>((_, reject) =>
-      setTimeout(() => reject(new Error('Execution timed out')), timeoutMs),
-    );
+    let timeoutHandle: NodeJS.Timeout | null = null;
 
     future.onIOPub = (msg) => {
       if (KernelMessage.isStreamMsg(msg)) {
@@ -281,11 +272,20 @@ export class KernelManager {
     };
 
     try {
+      const timeoutPromise = new Promise<never>((_, reject) => {
+        timeoutHandle = setTimeout(() => reject(new Error('Execution timed out')), timeoutMs);
+      });
       const reply = await Promise.race([future.done, timeoutPromise]);
+      if (timeoutHandle) {
+        clearTimeout(timeoutHandle);
+      }
       managed.executionCount = reply?.content?.execution_count ?? managed.executionCount + 1;
     } catch (error) {
       result.error = error instanceof Error ? error.message : String(error);
     } finally {
+      if (timeoutHandle) {
+        clearTimeout(timeoutHandle);
+      }
       managed.info.status = 'idle';
       managed.lastActivity = Date.now();
       result.duration = Date.now() - startTime;
