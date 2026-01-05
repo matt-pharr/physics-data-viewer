@@ -13,6 +13,8 @@ const TYPE_ICONS: Record<string, string> = {
   unknown: '❓',
 };
 
+const TREE_INDENT_SIZE = 20;
+
 interface TreeNodeRowProps {
   node: TreeNodeData & { depth: number };
   onExpand: (node: TreeNodeData) => void;
@@ -47,12 +49,11 @@ export const TreeNodeRow: React.FC<TreeNodeRowProps> = ({
         onRightClick(node, e);
       }}
     >
-      <div className="tree-col key" style={{ paddingLeft: (node.depth || 0) * 20 }}>
+      <div className="tree-col key" style={{ paddingLeft: (node.depth || 0) * TREE_INDENT_SIZE }}>
         <button
-          className="tree-toggle"
+          className={`tree-toggle ${node.hasChildren ? '' : 'hidden'}`}
           onClick={handleExpandClick}
           disabled={!node.hasChildren}
-          style={{ visibility: node.hasChildren ? 'visible' : 'hidden' }}
         >
           {node.isLoading ? <span className="spinner">⏳</span> : node.isExpanded ? '▼' : '▶'}
         </button>

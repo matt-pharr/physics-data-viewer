@@ -68,6 +68,7 @@ function getActionsForNode(node: TreeNodeData) {
 
   actions.push(
     { id: 'refresh', label: 'Refresh', disabled: false },
+    // Delete is disabled until the destructive flow is implemented
     { id: 'delete', label: 'Delete', disabled: true },
   );
 

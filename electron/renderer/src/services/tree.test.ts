@@ -62,7 +62,7 @@ describe('treeService', () => {
   });
 
   it('loads and caches children by path', async () => {
-    const parent = { ...rootNodes[0], hasChildren: true };
+    const parent = { ...rootNodes[0] };
 
     const first = await treeService.getChildren(parent);
     const second = await treeService.getChildren(parent);

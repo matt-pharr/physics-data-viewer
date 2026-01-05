@@ -270,6 +270,10 @@ body {
   opacity: 0;
 }
 
+.tree-toggle.hidden {
+  visibility: hidden;
+}
+
 .tree-icon {
   font-size: 14px;
   line-height: 1;
