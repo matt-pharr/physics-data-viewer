@@ -1,4 +1,7 @@
-import React, { useState, useEffect } from 'react';
+import React, { useEffect, useState } from 'react';
+import { CommandBox } from '../components/CommandBox';
+import { Console } from '../components/Console';
+import type { CommandTab, LogEntry } from '../types';
 
 type Tab = 'tree' | 'namespace' | 'modules';
 type PlotMode = 'native' | 'capture';
@@ -6,64 +9,90 @@ type PlotMode = 'native' | 'capture';
 const App: React.FC = () => {
   const [activeTab, setActiveTab] = useState<Tab>('tree');
   const [plotMode, setPlotMode] = useState<PlotMode>('native');
-  const [commandTabs, setCommandTabs] = useState<number[]>([1]);
+  const [commandTabs, setCommandTabs] = useState<CommandTab[]>([{ id: 1, code: '' }]);
   const [activeCommandTab, setActiveCommandTab] = useState(1);
+  const [logs, setLogs] = useState<LogEntry[]>([]);
+  const [currentKernelId, setCurrentKernelId] = useState<string | null>(null);
+  const [isExecuting, setIsExecuting] = useState(false);
+  const [lastError, setLastError] = useState<string | undefined>(undefined);
+  const [lastDuration, setLastDuration] = useState<number | null>(null);
 
-  // Test IPC connection and kernel on mount
   useEffect(() => {
-    const testKernelManager = async () => {
+    const initKernel = async () => {
       try {
-        console.log('[App] Testing Kernel Manager...');
-
-        // Start a kernel
         const kernel = await window.pdv.kernels.start({ language: 'python' });
-        console.log('[App] Kernel started:', kernel);
-
-        // List kernels
-        const kernels = await window.pdv.kernels.list();
-        console.log('[App] Running kernels:', kernels);
-
-        // Execute code
-        const result1 = await window.pdv.kernels.execute(kernel.id, {
-          code: 'print("Hello from PDV!")',
-        });
-        console.log('[App] Execute result:', result1);
-
-        // Execute expression
-        const result2 = await window.pdv.kernels.execute(kernel.id, {
-          code: '2 + 2',
-        });
-        console.log('[App] Expression result:', result2);
-
-        // Test completions
-        const completions = await window.pdv.kernels.complete(kernel.id, 'pri', 3);
-        console.log('[App] Completions for "pri":', completions.matches);
-
-        // Test inspection
-        const inspection = await window.pdv.kernels.inspect(kernel.id, 'print', 5);
-        console.log('[App] Inspection for "print":', inspection);
-
-        // Get config
-        const config = await window.pdv.config.get();
-        console.log('[App] Config:', config);
-
-        // Get tree nodes
-        const treeNodes = await window.pdv.tree.list('');
-        console.log('[App] Tree nodes:', treeNodes);
-
-        console.log('[App] ✓ All IPC tests passed!');
+        setCurrentKernelId(kernel.id);
+        console.log('[App] Kernel started:', kernel.id);
       } catch (error) {
-        console.error('[App] IPC test failed:', error);
+        console.error('[App] Failed to start kernel:', error);
       }
     };
 
-    testKernelManager();
+    void initKernel();
   }, []);
 
   const addCommandTab = () => {
-    const newId = Math.max(...commandTabs) + 1;
-    setCommandTabs([...commandTabs, newId]);
+    const newId = Math.max(...commandTabs.map((t) => t.id)) + 1;
+    setCommandTabs([...commandTabs, { id: newId, code: '' }]);
     setActiveCommandTab(newId);
+  };
+
+  const handleTabChange = (id: number) => {
+    setActiveCommandTab(id);
+    setLastError(undefined);
+  };
+
+  const handleCodeChange = (id: number, code: string) => {
+    setCommandTabs((prev) => prev.map((tab) => (tab.id === id ? { ...tab, code } : tab)));
+  };
+
+  const handleClearConsole = () => {
+    setLogs([]);
+    setLastDuration(null);
+  };
+
+  const handleClearCommand = () => {
+    setCommandTabs((prev) =>
+      prev.map((tab) => (tab.id === activeCommandTab ? { ...tab, code: '' } : tab)),
+    );
+    setLastError(undefined);
+  };
+
+  const handleExecute = async (code: string) => {
+    if (!currentKernelId || !code.trim()) return;
+
+    setIsExecuting(true);
+    setLastError(undefined);
+
+    const logEntry: LogEntry = {
+      id: `log-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+      timestamp: Date.now(),
+      code,
+    };
+
+    try {
+      const result = await window.pdv.kernels.execute(currentKernelId, { code });
+
+      logEntry.stdout = result.stdout;
+      logEntry.stderr = result.stderr;
+      logEntry.result = result.result;
+      logEntry.error = result.error;
+      logEntry.duration = result.duration;
+      logEntry.images = result.images;
+
+      if (result.error) {
+        setLastError(result.error);
+      }
+    } catch (error) {
+      logEntry.error = error instanceof Error ? error.message : String(error);
+      setLastError(logEntry.error);
+    } finally {
+      setLogs((prev) => [logEntry, ...prev]);
+      if (typeof logEntry.duration === 'number') {
+        setLastDuration(logEntry.duration);
+      }
+      setIsExecuting(false);
+    }
   };
 
   return (
@@ -135,56 +164,24 @@ const App: React.FC = () => {
 
         {/* Right pane: Console + Command Box */}
         <div className="right-pane">
-          {/* Console / Log */}
-          <section className="console-pane">
-            <div className="pane-header">
-              <h2>Console</h2>
-              <div className="pane-actions">
-                <button className="btn btn-secondary">Export</button>
-                <button className="btn btn-secondary">Clear</button>
-              </div>
-            </div>
-            <div className="console-content">
-              <div className="console-empty">
-                <p>No output yet</p>
-                <p className="hint">Execution results will appear here</p>
-              </div>
-            </div>
-          </section>
+          <Console logs={logs} onClear={handleClearConsole} />
 
           {/* Horizontal resizer */}
           <div className="horizontal-resizer" />
 
-          {/* Command Box */}
-          <section className="command-pane">
-            <div className="pane-header">
-              <h2>Command</h2>
-              <div className="command-tabs">
-                {commandTabs.map((tabId) => (
-                  <button
-                    key={tabId}
-                    className={`tab ${activeCommandTab === tabId ? 'active' : ''}`}
-                    onClick={() => setActiveCommandTab(tabId)}
-                  >
-                    {tabId}
-                  </button>
-                ))}
-                <button className="tab add" onClick={addCommandTab}>
-                  +
-                </button>
-              </div>
-              <div className="pane-actions">
-                <button className="btn btn-primary">Execute</button>
-                <button className="btn btn-secondary">Clear</button>
-              </div>
-            </div>
-            <div className="command-content">
-              <div className="command-editor-placeholder">
-                <p>Monaco Editor</p>
-                <p className="hint">Code editor will be integrated in Step 4</p>
-              </div>
-            </div>
-          </section>
+          <CommandBox
+            tabs={commandTabs.map((tab) => ({
+              ...tab,
+              onChange: (code: string) => handleCodeChange(tab.id, code),
+            }))}
+            activeTabId={activeCommandTab}
+            onTabChange={handleTabChange}
+            onAddTab={addCommandTab}
+            onExecute={handleExecute}
+            onClear={handleClearCommand}
+            isExecuting={isExecuting}
+            lastError={lastError}
+          />
         </div>
       </main>
 
@@ -192,8 +189,8 @@ const App: React.FC = () => {
       <footer className="status-bar">
         <div className="status-left">
           <span className="status-item">
-            <span className="status-dot idle" />
-            <span>Idle</span>
+            <span className={`status-dot ${isExecuting ? 'busy' : 'idle'}`} />
+            <span>{isExecuting ? 'Busy' : 'Idle'}</span>
           </span>
           <span className="status-item">python3</span>
           <span className="status-item">~/projects</span>
@@ -214,7 +211,9 @@ const App: React.FC = () => {
               Capture
             </button>
           </span>
-          <span className="status-item">Last: --</span>
+          <span className="status-item">
+            Last: {lastDuration !== null ? `${Math.round(lastDuration)}ms` : '--'}
+          </span>
         </div>
       </footer>
     </div>
