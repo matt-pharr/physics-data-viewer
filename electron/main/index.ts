@@ -224,7 +224,17 @@ if (!canRegisterHandlers) {
             serialized = serialized.slice(1, -1);
           }
 
-          const namespaceData = JSON.parse(serialized);
+          const tryParse = (value: string) => {
+            const cleaned = value.replace(/\\'/g, "'");
+            return JSON.parse(cleaned);
+          };
+
+          let namespaceData = tryParse(serialized);
+
+          // Fallback: some kernels may double-escape JSON; try an extra unwrap
+          if (typeof namespaceData === 'string') {
+            namespaceData = tryParse(namespaceData);
+          }
           const variables: NamespaceVariable[] = Object.entries(namespaceData).map(
             ([name, info]) =>
               ({
