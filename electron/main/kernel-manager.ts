@@ -184,19 +184,38 @@ function parseMessage(frames: Buffer[]): JupyterMessage | null {
 
 function loadInitCell(language: 'python' | 'julia'): string {
   const filename = language === 'python' ? 'python-init.py' : 'julia-init.jl';
-  const initPath = path.join(__dirname, 'init', filename);
+  const candidatePaths = [
+    path.join(__dirname, 'init', filename),
+    path.join(__dirname, '..', 'init', filename),
+    path.join(process.cwd(), 'main', 'init', filename),
+    path.join(process.cwd(), 'dist', 'main', 'init', filename),
+  ];
 
-  try {
-    if (fs.existsSync(initPath)) {
-      return fs.readFileSync(initPath, 'utf-8');
+  for (const initPath of candidatePaths) {
+    try {
+      if (fs.existsSync(initPath)) {
+        return fs.readFileSync(initPath, 'utf-8');
+      }
+    } catch (error) {
+      console.warn(`[KernelManager] Failed to read init cell at ${initPath}:`, error);
     }
-  } catch (error) {
-    console.warn(`[KernelManager] Failed to load init cell for ${language}:`, error);
   }
 
-  return language === 'python'
-    ? '# Physics Data Viewer - Python kernel\nprint("PDV Python kernel ready")'
-    : '# Physics Data Viewer - Julia kernel\nprintln("PDV Julia kernel ready")';
+  // Fallback minimal definitions to avoid NameError in kernels
+  if (language === 'python') {
+    return `
+def pdv_info(obj):
+    return {'type': type(obj).__name__, 'preview': repr(obj)[:80]}
+
+def pdv_namespace(*args, **kwargs):
+    return {}
+print("PDV Python kernel ready (fallback init)")`;
+  }
+
+  return `
+pdv_info(obj) = Dict("type" => string(typeof(obj)), "preview" => repr(obj)[1:min(80, end)])
+pdv_namespace(; kwargs...) = Dict{String, Any}()
+println("PDV Julia kernel ready (fallback init)")`;
 }
 
 export class KernelManager {
@@ -553,17 +572,22 @@ export class KernelManager {
     let executionComplete = false;
 
     try {
+      // Use socket-level timeout to avoid overlapping receive calls that cause
+      // "Socket is busy reading" errors when we poll for messages.
+      (managed.iopubSocket as any).receiveTimeout = 100;
+
       while (Date.now() < deadline && !executionComplete) {
-        // Wait for a message with a timeout
         let replyFrames: Buffer[];
         try {
-          const receivePromise = managed.iopubSocket.receive();
-          const timeoutPromise = new Promise<never>((_, reject) => 
-            setTimeout(() => reject(new Error('TIMEOUT')), 100)
-          );
-          replyFrames = (await Promise.race([receivePromise, timeoutPromise])) as Buffer[];
+          replyFrames = (await managed.iopubSocket.receive()) as Buffer[];
         } catch (e) {
-          if (e instanceof Error && e.message === 'TIMEOUT') {
+          // zmq throws different timeout flavors; ignore and keep polling
+          const msg = e instanceof Error ? e.message : String(e);
+          if (
+            msg.includes('Resource temporarily unavailable') ||
+            msg.includes('EAGAIN') ||
+            msg.includes('Operation was not possible or timed out')
+          ) {
             continue;
           }
           throw e;
@@ -587,7 +611,12 @@ export class KernelManager {
           }
         } else if (msgType === 'execute_result') {
           const data = (content as any).data;
-          result.result = data?.['text/plain'] ?? data;
+          // Prefer structured JSON when available to avoid fragile string parsing
+          if (data && Object.prototype.hasOwnProperty.call(data, 'application/json')) {
+            result.result = (data as any)['application/json'];
+          } else {
+            result.result = (data as any)?.['text/plain'] ?? data;
+          }
         } else if (msgType === 'display_data') {
           const data = (content as any).data;
           const hasPng = data?.['image/png'];
@@ -603,6 +632,9 @@ export class KernelManager {
           }
           if (data?.['text/html']) {
             result.rich = { ...(result.rich || {}), 'text/html': data['text/html'] };
+          }
+          if (Object.prototype.hasOwnProperty.call(data, 'application/json')) {
+            result.result = data['application/json'];
           }
         } else if (msgType === 'error') {
           const errorContent = content as { ename: string; evalue: string; traceback: string[] };

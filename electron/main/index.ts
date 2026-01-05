@@ -17,6 +17,8 @@ import {
   TreeNode,
   FileReadResult,
   Config,
+  NamespaceQueryOptions,
+  NamespaceVariable,
 } from './ipc';
 import { getKernelManager, resetKernelManager } from './kernel-manager';
 import { loadConfig, updateConfig } from './config';
@@ -166,6 +168,96 @@ if (!canRegisterHandlers) {
       };
     }
   });
+
+  // ============================================================================
+  // Namespace Handlers
+  // ============================================================================
+
+  ipcMain.handle(
+    IPC.namespace.query,
+    async (_event, kernelId: string, options?: NamespaceQueryOptions): Promise<{ variables?: NamespaceVariable[]; error?: string }> => {
+      console.log('[IPC] namespace:query', kernelId, options);
+
+      if (!kernelId) {
+        return { error: 'No kernel ID provided' };
+      }
+
+      try {
+        const kernel = kernelManager.getKernel(kernelId);
+
+        if (!kernel) {
+          return { error: `Kernel not found: ${kernelId}` };
+        }
+
+        const language = kernel.language;
+        let code = '';
+
+        if (language === 'python') {
+          const includePrivate = options?.includePrivate ? 'True' : 'False';
+          const includeModules = options?.includeModules ? 'True' : 'False';
+          const includeCallables = options?.includeCallables ? 'True' : 'False';
+          // Ask IPython to emit application/json so we avoid repr strings with single quotes
+          code = `from IPython.display import JSON as PDVJSON\nPDVJSON(pdv_namespace(include_private=${includePrivate}, include_modules=${includeModules}, include_callables=${includeCallables}))`;
+        } else if (language === 'julia') {
+          const includePrivate = options?.includePrivate ? 'true' : 'false';
+          const includeModules = options?.includeModules ? 'true' : 'false';
+          code = `using JSON; JSON.json(pdv_namespace(include_private=${includePrivate}, include_modules=${includeModules}))`;
+        } else {
+          return { error: `Unsupported language: ${language}` };
+        }
+
+        const result = await kernelManager.execute(kernelId, { code });
+
+        if (result.error) {
+          return { error: result.error };
+        }
+
+        try {
+          let namespaceData: unknown = result.result;
+
+          // Prefer structured JSON results from the kernel when available
+          if (typeof namespaceData === 'string') {
+            let serialized = namespaceData.trim();
+            if (
+              (serialized.startsWith("'") && serialized.endsWith("'")) ||
+              (serialized.startsWith('"') && serialized.endsWith('"'))
+            ) {
+              serialized = serialized.slice(1, -1);
+            }
+
+            const tryParse = (value: string) => {
+              const cleaned = value.replace(/\\'/g, "'");
+              return JSON.parse(cleaned);
+            };
+
+            namespaceData = tryParse(serialized);
+
+            // Fallback: some kernels may double-escape JSON; try an extra unwrap
+            if (typeof namespaceData === 'string') {
+              namespaceData = tryParse(namespaceData);
+            }
+          }
+
+          if (!namespaceData || typeof namespaceData !== 'object') {
+            return { error: 'Namespace result could not be parsed into an object' };
+          }
+          const variables: NamespaceVariable[] = Object.entries(namespaceData).map(
+            ([name, info]) =>
+              ({
+                name,
+                ...(info as Omit<NamespaceVariable, 'name'>),
+              }) as NamespaceVariable,
+          );
+
+          return { variables };
+        } catch (parseError) {
+          return { error: `Failed to parse namespace: ${parseError instanceof Error ? parseError.message : String(parseError)}` };
+        }
+      } catch (error) {
+        return { error: error instanceof Error ? error.message : String(error) };
+      }
+    },
+  );
 
   // ============================================================================
   // Tree Handlers (unchanged from Step 2)

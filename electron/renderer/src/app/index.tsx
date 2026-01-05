@@ -3,6 +3,7 @@ import { CommandBox } from '../components/CommandBox';
 import { Console } from '../components/Console';
 import { Tree } from '../components/Tree';
 import { EnvironmentSelector } from '../components/EnvironmentSelector';
+import { NamespaceView } from '../components/NamespaceView';
 import type { CommandTab, LogEntry } from '../types';
 import type { Config } from '../../main/ipc';
 
@@ -26,6 +27,8 @@ const App: React.FC = () => {
   const [consoleHeight, setConsoleHeight] = useState(260);
   const dragRef = useRef<'vertical' | 'horizontal' | null>(null);
   const rightPaneRef = useRef<HTMLDivElement | null>(null);
+  const [autoRefreshNamespace, setAutoRefreshNamespace] = useState(false);
+  const [namespaceRefreshToken, setNamespaceRefreshToken] = useState(0);
 
   useEffect(() => {
     // Prevent double initialization in StrictMode
@@ -56,7 +59,9 @@ const App: React.FC = () => {
     const handleMove = (event: MouseEvent) => {
       if (!dragRef.current) return;
       if (dragRef.current === 'vertical') {
-        const next = Math.min(Math.max(event.clientX, 200), 600);
+        const viewportWidth = window.innerWidth || 1200;
+        const max = Math.max(200, viewportWidth - 300);
+        const next = Math.min(Math.max(event.clientX, 200), max);
         setLeftWidth(next);
       } else if (dragRef.current === 'horizontal') {
         const bounds = rightPaneRef.current?.getBoundingClientRect();
@@ -211,6 +216,7 @@ const App: React.FC = () => {
         setLastDuration(logEntry.duration);
       }
       setIsExecuting(false);
+      setNamespaceRefreshToken((prev) => prev + 1);
     }
   };
 
@@ -230,16 +236,16 @@ const App: React.FC = () => {
         <aside className="left-pane" style={{ width: `${leftWidth}px` }}>
           <div className="pane-tabs">
             <button
-              className={`tab ${activeTab === 'tree' ? 'active' : ''}`}
-              onClick={() => setActiveTab('tree')}
-            >
-              Tree
-            </button>
-            <button
               className={`tab ${activeTab === 'namespace' ? 'active' : ''}`}
               onClick={() => setActiveTab('namespace')}
             >
               Namespace
+            </button>
+            <button
+              className={`tab ${activeTab === 'tree' ? 'active' : ''}`}
+              onClick={() => setActiveTab('tree')}
+            >
+              Tree
             </button>
             <button
               className={`tab ${activeTab === 'modules' ? 'active' : ''}`}
@@ -250,11 +256,17 @@ const App: React.FC = () => {
           </div>
 
           <div className="tree-panels">
+            <div className={`tree-panel ${activeTab === 'namespace' ? 'active' : ''}`}>
+              <NamespaceView
+                kernelId={currentKernelId}
+                autoRefresh={autoRefreshNamespace}
+                refreshToken={namespaceRefreshToken}
+                refreshInterval={2000}
+                onToggleAutoRefresh={setAutoRefreshNamespace}
+              />
+            </div>
             <div className={`tree-panel ${activeTab === 'tree' ? 'active' : ''}`}>
               <Tree />
-            </div>
-            <div className={`tree-panel ${activeTab === 'namespace' ? 'active' : ''}`}>
-              <div className="tree-empty">Namespace view (coming soon)</div>
             </div>
             <div className={`tree-panel ${activeTab === 'modules' ? 'active' : ''}`}>
               <div className="tree-empty">Modules view (coming soon)</div>

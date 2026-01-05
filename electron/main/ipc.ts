@@ -31,6 +31,9 @@ export const IPC = {
     write: 'files:write',
     pickExecutable: 'files:pickExecutable',
   },
+  namespace: {
+    query: 'namespace:query',
+  },
   config: {
     get: 'config:get',
     set: 'config:set',
@@ -100,6 +103,33 @@ export interface KernelCompleteResult {
 export interface KernelInspectResult {
   found: boolean;
   data?: Record<string, string>;
+}
+
+// ============================================================================
+// Namespace Types
+// ============================================================================
+
+export interface NamespaceQueryOptions {
+  includePrivate?: boolean;
+  includeModules?: boolean;
+  includeCallables?: boolean;
+}
+
+export interface NamespaceVariable {
+  name: string;
+  type: string;
+  module?: string;
+  shape?: number[];
+  dtype?: string;
+  size?: number;
+  preview?: string;
+  min?: number;
+  max?: number;
+  mean?: number;
+  length?: number;
+  columns?: string[];
+  keys?: string[];
+  error?: string;
 }
 
 // ============================================================================
@@ -234,6 +264,12 @@ export interface PDVApi {
     complete: (id: string, code: string, cursorPos: number) => Promise<KernelCompleteResult>;
     inspect: (id: string, code: string, cursorPos: number) => Promise<KernelInspectResult>;
     validate: (path: string, language: 'python' | 'julia') => Promise<{ valid: boolean; error?: string }>;
+  };
+  namespace: {
+    query: (
+      kernelId: string,
+      options?: NamespaceQueryOptions,
+    ) => Promise<{ variables?: NamespaceVariable[]; error?: string }>;
   };
   tree: {
     list: (path?: string) => Promise<TreeNode[]>;
