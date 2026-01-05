@@ -518,7 +518,12 @@ body {
 }
 
 .log-image {
-  max-width: 100%;
+  width: auto;
+  max-width: min(100%, 720px);
+  max-height: 50vh;
+  height: auto;
+  object-fit: contain;
+  align-self: flex-start;
   border: 1px solid var(--border-color);
   border-radius: 4px;
   background-color: #111;

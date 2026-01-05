@@ -58,6 +58,7 @@ interface ManagedKernel {
   startedAt: number;
   lastActivity: number;
   executionCount: number;
+  executing: boolean;
 }
 
 interface ExecutionOptions {
@@ -334,6 +335,7 @@ export class KernelManager {
         startedAt: Date.now(),
         lastActivity: Date.now(),
         executionCount: 0,
+        executing: false,
       };
 
       this.kernels.set(kernelId, managed);
@@ -508,10 +510,14 @@ export class KernelManager {
     if (!managed) {
       throw new Error(`Kernel not found: ${id}`);
     }
+    if (managed.executing) {
+      return { error: 'Kernel busy; please wait for the current execution to finish.', duration: 0 };
+    }
 
     const startTime = Date.now();
     managed.info.status = 'busy';
     managed.lastActivity = startTime;
+    managed.executing = true;
 
     const result: KernelExecuteResult = {
       stdout: '',
@@ -619,6 +625,7 @@ export class KernelManager {
     } finally {
       managed.info.status = 'idle';
       managed.lastActivity = Date.now();
+      managed.executing = false;
       result.duration = Date.now() - startTime;
 
       if (result.stdout === '') result.stdout = undefined;
