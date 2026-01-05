@@ -37,8 +37,10 @@ export const ContextMenu: React.FC<ContextMenuProps> = ({ x, y, node, onAction, 
   const actions = getActionsForNode(node);
   const menuWidth = 180;
   const estimatedHeight = actions.length * 32;
-  const clampedX = Math.max(0, Math.min(x, window.innerWidth - menuWidth));
-  const clampedY = Math.max(0, Math.min(y, window.innerHeight - estimatedHeight));
+  const viewportWidth = typeof window !== 'undefined' ? window.innerWidth : Number.POSITIVE_INFINITY;
+  const viewportHeight = typeof window !== 'undefined' ? window.innerHeight : Number.POSITIVE_INFINITY;
+  const clampedX = Math.max(0, Math.min(x, viewportWidth - menuWidth));
+  const clampedY = Math.max(0, Math.min(y, viewportHeight - estimatedHeight));
 
   return (
     <div

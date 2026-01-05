@@ -36,13 +36,11 @@ class TreeService {
     this.cache.clear();
   }
 
-  private enrichNode(node: TreeNode): TreeNodeData {
-    return {
-      ...node,
-      isExpanded: false,
-      isLoading: false,
-    };
-  }
+  private enrichNode = (node: TreeNode): TreeNodeData => ({
+    ...node,
+    isExpanded: false,
+    isLoading: false,
+  });
 }
 
 export const treeService = new TreeService();

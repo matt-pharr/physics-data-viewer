@@ -62,7 +62,9 @@ export const TreeNodeRow: React.FC<TreeNodeRowProps> = ({
           aria-label={toggleLabel}
         >
           {node.isLoading ? (
-            <span className="spinner" role="status" aria-label="Loading children" />
+            <span className="spinner" role="status" aria-label="Loading children">
+              <span aria-hidden="true">⏳</span>
+            </span>
           ) : node.isExpanded ? (
             <span aria-hidden="true">▼</span>
           ) : (
