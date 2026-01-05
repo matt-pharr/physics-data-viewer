@@ -61,7 +61,7 @@ export class KernelManager {
   constructor() {
     const baseUrl = process.env.JUPYTER_BASE_URL || 'http://localhost:8888';
     const serverSettings = ServerConnection.makeSettings({
-      WebSocket,
+      WebSocket: WebSocket as unknown as typeof globalThis.WebSocket,
       token: process.env.JUPYTER_TOKEN || '',
       baseUrl,
     });
@@ -77,12 +77,19 @@ export class KernelManager {
       const models = this.kernelSpecManager.specs;
       if (models?.kernelspecs) {
         Object.values(models.kernelspecs).forEach((spec) => {
+          if (!spec) return;
           specs.push({
             name: spec.name,
             displayName: spec.display_name,
             language: (spec.language as 'python' | 'julia') || 'python',
             argv: spec.argv,
-            env: spec.env ?? undefined,
+            env: spec.env && typeof spec.env === 'object'
+              ? Object.fromEntries(
+                  Object.entries(spec.env).filter(
+                    ([, v]) => typeof v === 'string',
+                  ) as Array<[string, string]>,
+                )
+              : undefined,
           });
         });
       }
@@ -131,7 +138,6 @@ export class KernelManager {
       this.attachKernelSignals(managed);
       this.kernels.set(kernel.id, managed);
 
-      await kernel.ready;
       const initCell = loadInitCell(language);
       await this.executeInternal(kernel.id, initCell, { silent: true, storeHistory: false });
 
@@ -170,8 +176,6 @@ export class KernelManager {
 
     managed.info.status = 'starting';
     await managed.kernel.restart();
-    await managed.kernel.ready;
-
     const initCell = loadInitCell(managed.spec.language);
     await this.executeInternal(id, initCell, { silent: true, storeHistory: false });
 
@@ -306,12 +310,16 @@ export class KernelManager {
     }
 
     const reply = await managed.kernel.requestComplete({ code, cursor_pos: cursorPos });
-    return {
-      matches: reply.content.matches ?? [],
-      cursor_start: reply.content.cursor_start,
-      cursor_end: reply.content.cursor_end,
-      metadata: reply.content.metadata as Record<string, unknown>,
-    };
+    if (reply.content.status === 'ok') {
+      return {
+        matches: reply.content.matches ?? [],
+        cursor_start: reply.content.cursor_start,
+        cursor_end: reply.content.cursor_end,
+        metadata: reply.content.metadata as Record<string, unknown>,
+      };
+    }
+
+    return { matches: [], cursor_start: cursorPos, cursor_end: cursorPos };
   }
 
   async inspect(id: string, code: string, cursorPos: number): Promise<KernelInspectResult> {
