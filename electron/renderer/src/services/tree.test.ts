@@ -73,11 +73,10 @@ describe('treeService', () => {
     expect(first).toBe(second);
     expect(first[0].path).toBe('data.array1');
   });
-});
-
-afterAll(() => {
-  Object.defineProperty(globalThis, 'window', {
-    value: originalWindow,
-    writable: true,
+  afterAll(() => {
+    Object.defineProperty(globalThis, 'window', {
+      value: originalWindow,
+      writable: true,
+    });
   });
 });

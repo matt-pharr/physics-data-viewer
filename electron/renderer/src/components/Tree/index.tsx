@@ -73,7 +73,7 @@ export const Tree: React.FC = () => {
       );
     } catch (err) {
       console.error('[Tree] Failed to load children for', node.path, err);
-      setError('Failed to load children');
+      setError(`Failed to load children for ${node.key}`);
       setNodes((prev) => updateNode(prev, node.path, (n) => ({ ...n, isLoading: false })));
     }
   };
@@ -116,7 +116,6 @@ export const Tree: React.FC = () => {
             <TreeNodeRow
               key={node.id}
               node={node}
-              depth={node.depth}
               onExpand={handleExpand}
               onDoubleClick={handleDoubleClick}
               onRightClick={handleRightClick}

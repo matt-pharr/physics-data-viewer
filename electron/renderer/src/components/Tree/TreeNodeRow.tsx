@@ -15,7 +15,6 @@ const TYPE_ICONS: Record<string, string> = {
 
 interface TreeNodeRowProps {
   node: TreeNodeData & { depth: number };
-  depth: number;
   onExpand: (node: TreeNodeData) => void;
   onDoubleClick: (node: TreeNodeData) => void;
   onRightClick: (node: TreeNodeData, event: React.MouseEvent) => void;
@@ -24,7 +23,6 @@ interface TreeNodeRowProps {
 
 export const TreeNodeRow: React.FC<TreeNodeRowProps> = ({
   node,
-  depth,
   onExpand,
   onDoubleClick,
   onRightClick,
@@ -49,7 +47,7 @@ export const TreeNodeRow: React.FC<TreeNodeRowProps> = ({
         onRightClick(node, e);
       }}
     >
-      <div className="tree-col key" style={{ paddingLeft: depth * 20 }}>
+      <div className="tree-col key" style={{ paddingLeft: (node.depth || 0) * 20 }}>
         <button
           className="tree-toggle"
           onClick={handleExpandClick}
