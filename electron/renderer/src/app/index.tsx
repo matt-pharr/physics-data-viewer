@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useRef } from 'react';
 import { CommandBox } from '../components/CommandBox';
 import { Console } from '../components/Console';
 import { Tree } from '../components/Tree';
@@ -21,8 +21,13 @@ const App: React.FC = () => {
   const [lastDuration, setLastDuration] = useState<number | null>(null);
   const [config, setConfig] = useState<Config | null>(null);
   const [showEnvSelector, setShowEnvSelector] = useState(false);
+  const initRef = useRef(false);
 
   useEffect(() => {
+    // Prevent double initialization in StrictMode
+    if (initRef.current) return;
+    initRef.current = true;
+
     const initConfig = async () => {
       try {
         const loaded = await window.pdv.config.get();
@@ -45,17 +50,26 @@ const App: React.FC = () => {
 
   const startKernel = async (cfg: Config) => {
     try {
+      console.log('[App] Starting kernel with config:', cfg);
       if (currentKernelId) {
+        console.log('[App] Stopping existing kernel:', currentKernelId);
         await window.pdv.kernels.stop(currentKernelId);
       }
-      const kernel = await window.pdv.kernels.start({
-        language: 'python',
+      
+      const spec = {
+        language: 'python' as const,
         argv: cfg.pythonPath ? [cfg.pythonPath, '-m', 'ipykernel_launcher', '-f', '{connection_file}'] : undefined,
-      });
+        env: cfg.pythonPath ? { PYTHON_PATH: cfg.pythonPath } : undefined,
+      };
+      console.log('[App] Kernel spec:', spec);
+      
+      const kernel = await window.pdv.kernels.start(spec);
       setCurrentKernelId(kernel.id);
-      console.log('[App] Kernel started:', kernel.id);
+      console.log('[App] Kernel started successfully:', kernel);
     } catch (error) {
       console.error('[App] Failed to start kernel:', error);
+      // Show error to user
+      setLastError(error instanceof Error ? error.message : String(error));
     }
   };
 

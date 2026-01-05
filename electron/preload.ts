@@ -6,8 +6,7 @@
  */
 
 import { contextBridge, ipcRenderer } from 'electron';
-import {
-  IPC,
+import type {
   KernelSpec,
   KernelInfo,
   KernelExecuteRequest,
@@ -21,6 +20,35 @@ import {
   Config,
   PDVApi,
 } from './main/ipc';
+
+// IPC channel names (duplicated here to avoid runtime imports in preload context)
+const IPC = {
+  kernels: {
+    list: 'kernels:list',
+    start: 'kernels:start',
+    stop: 'kernels:stop',
+    execute: 'kernels:execute',
+    interrupt: 'kernels:interrupt',
+    restart: 'kernels:restart',
+    complete: 'kernels:complete',
+    inspect: 'kernels:inspect',
+    validate: 'kernels:validate',
+  },
+  tree: {
+    list: 'tree:list',
+    get: 'tree:get',
+    save: 'tree:save',
+  },
+  files: {
+    read: 'files:read',
+    write: 'files:write',
+    pickExecutable: 'files:pickExecutable',
+  },
+  config: {
+    get: 'config:get',
+    set: 'config:set',
+  },
+} as const;
 
 const api: PDVApi = {
   kernels: {

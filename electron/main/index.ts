@@ -101,7 +101,7 @@ if (!canRegisterHandlers) {
       const args =
         language === 'python'
           ? [sanitizedPath, '-m', 'ipykernel', '--version']
-          : [sanitizedPath, '-e', 'using IJulia; println(IJulia.KERNEL_VERSION)'];
+          : [sanitizedPath, '-e', 'using IJulia;'];
 
       return await new Promise<{ valid: boolean; error?: string }>((resolve) => {
         const proc = spawn(args[0], args.slice(1));

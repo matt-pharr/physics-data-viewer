@@ -1,17 +1,13 @@
 /**
- * Kernel Manager with real Jupyter integration.
+ * Kernel Manager with direct kernel launching (no server required).
  */
 
 import * as fs from 'fs';
 import * as path from 'path';
-import WebSocket from 'ws';
-import {
-  KernelManager as JupyterKernelManager,
-  KernelMessage,
-  ServerConnection,
-  Kernel,
-} from '@jupyterlab/services';
-import { KernelSpecManager } from '@jupyterlab/services/lib/kernelspec';
+import * as os from 'os';
+import * as crypto from 'crypto';
+import { spawn, ChildProcess } from 'child_process';
+import * as zmq from 'zeromq';
 import {
   KernelSpec,
   KernelInfo,
@@ -21,10 +17,43 @@ import {
   KernelInspectResult,
 } from './ipc';
 
+interface ConnectionInfo {
+  transport: string;
+  ip: string;
+  shell_port: number;
+  iopub_port: number;
+  stdin_port: number;
+  control_port: number;
+  hb_port: number;
+  signature_scheme: string;
+  key: string;
+}
+
+interface JupyterMessage {
+  header: {
+    msg_id: string;
+    username: string;
+    session: string;
+    msg_type: string;
+    version: string;
+    date: string;
+  };
+  parent_header: Record<string, unknown> | object;
+  metadata: Record<string, unknown>;
+  content: Record<string, unknown>;
+  buffers?: ArrayBuffer[];
+}
+
 interface ManagedKernel {
   info: KernelInfo;
-  kernel: Kernel.IKernelConnection;
   spec: KernelSpec;
+  process: ChildProcess;
+  connectionInfo: ConnectionInfo;
+  connectionFile: string;
+  shellSocket: zmq.Dealer;
+  iopubSocket: zmq.Subscriber;
+  controlSocket: zmq.Dealer;
+  sessionId: string;
   startedAt: number;
   lastActivity: number;
   executionCount: number;
@@ -34,6 +63,121 @@ interface ExecutionOptions {
   silent?: boolean;
   storeHistory?: boolean;
   timeout?: number;
+}
+
+/**
+ * Create a unique connection file for a kernel
+ */
+function createConnectionFile(): { file: string; info: ConnectionInfo } {
+  const runtimeDir = path.join(os.tmpdir(), 'pdv-kernels');
+  if (!fs.existsSync(runtimeDir)) {
+    fs.mkdirSync(runtimeDir, { recursive: true });
+  }
+
+  const connectionFile = path.join(runtimeDir, `kernel-${crypto.randomUUID()}.json`);
+  const connectionInfo: ConnectionInfo = {
+    transport: 'tcp',
+    ip: '127.0.0.1',
+    shell_port: 0,
+    iopub_port: 0,
+    stdin_port: 0,
+    control_port: 0,
+    hb_port: 0,
+    signature_scheme: 'hmac-sha256',
+    key: crypto.randomUUID(),
+  };
+
+  fs.writeFileSync(connectionFile, JSON.stringify(connectionInfo, null, 2));
+  return { file: connectionFile, info: connectionInfo };
+}
+
+/**
+ * Read connection info from a connection file
+ */
+function readConnectionFile(filePath: string): ConnectionInfo {
+  const data = fs.readFileSync(filePath, 'utf-8');
+  return JSON.parse(data);
+}
+
+/**
+ * Create a Jupyter message
+ */
+function createMessage(
+  msgType: string,
+  content: Record<string, unknown>,
+  sessionId: string,
+  parentHeader: Record<string, unknown> | object = {},
+): JupyterMessage {
+  return {
+    header: {
+      msg_id: crypto.randomUUID(),
+      username: 'pdv',
+      session: sessionId,
+      msg_type: msgType,
+      version: '5.3',
+      date: new Date().toISOString(),
+    },
+    parent_header: parentHeader,
+    metadata: {},
+    content,
+  };
+}
+
+/**
+ * Sign and serialize a Jupyter message for ZMQ
+ */
+function serializeMessage(msg: JupyterMessage, key: string): Buffer[] {
+  const header = Buffer.from(JSON.stringify(msg.header));
+  const parentHeader = Buffer.from(JSON.stringify(msg.parent_header));
+  const metadata = Buffer.from(JSON.stringify(msg.metadata));
+  const content = Buffer.from(JSON.stringify(msg.content));
+
+  const hmac = crypto.createHmac('sha256', key);
+  hmac.update(header);
+  hmac.update(parentHeader);
+  hmac.update(metadata);
+  hmac.update(content);
+  const signature = hmac.digest('hex');
+
+  return [
+    Buffer.from('<IDS|MSG>'),
+    Buffer.from(signature),
+    header,
+    parentHeader,
+    metadata,
+    content,
+  ];
+}
+
+/**
+ * Parse a Jupyter message from ZMQ frames
+ */
+function parseMessage(frames: Buffer[]): JupyterMessage | null {
+  try {
+    // Find the delimiter
+    let delimiterIndex = -1;
+    for (let i = 0; i < frames.length; i++) {
+      if (frames[i].toString() === '<IDS|MSG>') {
+        delimiterIndex = i;
+        break;
+      }
+    }
+
+    if (delimiterIndex === -1 || frames.length < delimiterIndex + 6) {
+      return null;
+    }
+
+    // Skip signature validation for now (frames[delimiterIndex + 1])
+    const header = JSON.parse(frames[delimiterIndex + 2].toString());
+    const parentHeader = JSON.parse(frames[delimiterIndex + 3].toString());
+    const metadata = JSON.parse(frames[delimiterIndex + 4].toString());
+    const content = JSON.parse(frames[delimiterIndex + 5].toString());
+
+    return { header, parent_header: parentHeader, metadata, content };
+  } catch (error) {
+    console.error('[KernelManager] Failed to parse message:', error);
+    return null;
+  }
 }
 
 function loadInitCell(language: 'python' | 'julia'): string {
@@ -55,48 +199,28 @@ function loadInitCell(language: 'python' | 'julia'): string {
 
 export class KernelManager {
   private kernels: Map<string, ManagedKernel> = new Map();
-  private jupyterManager: JupyterKernelManager;
-  private kernelSpecManager: KernelSpecManager;
 
   constructor() {
-    const baseUrl = process.env.JUPYTER_BASE_URL || 'http://localhost:8888';
-    const serverSettings = ServerConnection.makeSettings({
-      WebSocket: WebSocket as unknown as typeof globalThis.WebSocket,
-      token: process.env.JUPYTER_TOKEN || '',
-      baseUrl,
-    });
-
-    this.jupyterManager = new JupyterKernelManager({ serverSettings });
-    this.kernelSpecManager = new KernelSpecManager({ serverSettings });
+    // No server connection needed!
   }
 
   async listSpecs(): Promise<KernelSpec[]> {
-    const specs: KernelSpec[] = [];
-    try {
-      await this.kernelSpecManager.refreshSpecs();
-      const models = this.kernelSpecManager.specs;
-      if (models?.kernelspecs) {
-        Object.values(models.kernelspecs).forEach((spec) => {
-          if (!spec) return;
-          specs.push({
-            name: spec.name,
-            displayName: spec.display_name,
-            language: (spec.language as 'python' | 'julia') || 'python',
-            argv: spec.argv,
-            env: spec.env && typeof spec.env === 'object'
-              ? Object.fromEntries(
-                  Object.entries(spec.env).filter(
-                    ([, v]) => typeof v === 'string',
-                  ) as Array<[string, string]>,
-                )
-              : undefined,
-          });
-        });
-      }
-    } catch (error) {
-      console.warn('[KernelManager] Failed to list specs:', error);
-    }
-    return specs;
+    // For now, return default specs for python and julia
+    return [
+      {
+        name: 'python3',
+        displayName: 'Python 3',
+        language: 'python',
+        argv: ['python', '-m', 'ipykernel_launcher', '-f', '{connection_file}'],
+      },
+      {
+        name: 'julia',
+        displayName: 'Julia',
+        language: 'julia',
+        argv: ['julia', '-i', '--startup-file=yes', '--color=yes', '-e', 
+               'using IJulia; IJulia.kernel_main("{connection_file}")'],
+      },
+    ];
   }
 
   async list(): Promise<KernelInfo[]> {
@@ -107,22 +231,82 @@ export class KernelManager {
     const language = spec?.language || 'python';
     const kernelName = spec?.name || (language === 'python' ? 'python3' : 'julia');
 
+    const kernelId = crypto.randomUUID();
+    const sessionId = crypto.randomUUID();
+
     const kernelInfo: KernelInfo = {
-      id: '',
+      id: kernelId,
       name: kernelName,
       language,
       status: 'starting',
     };
 
     try {
-      const kernel = await this.jupyterManager.startNew(
-        { name: kernelName },
-        { handleComms: false },
-      );
+      // Create connection file
+      const { file: connectionFile, info: connectionInfo } = createConnectionFile();
+
+      // Build kernel command
+      let argv = spec?.argv;
+      if (!argv) {
+        if (language === 'python') {
+          const pythonExec = spec?.env?.PYTHON_PATH || 'python';
+          argv = [pythonExec, '-m', 'ipykernel_launcher', '-f', connectionFile];
+        } else {
+          const juliaExec = spec?.env?.JULIA_PATH || 'julia';
+          argv = [juliaExec, '-i', '--startup-file=yes', '--color=yes', 
+                  '-e', `using IJulia; IJulia.kernel_main("${connectionFile}")`];
+        }
+      } else {
+        // Replace {connection_file} placeholder
+        argv = argv.map((arg) => arg.replace('{connection_file}', connectionFile));
+      }
+
+      console.log('[KernelManager] Launching kernel:', argv);
+
+      // Spawn kernel process
+      const kernelProcess = spawn(argv[0], argv.slice(1), {
+        env: { ...process.env, ...spec?.env },
+        stdio: ['ignore', 'pipe', 'pipe'],
+      });
+
+      // Log kernel output for debugging
+      kernelProcess.stdout?.on('data', (data) => {
+        console.log(`[Kernel ${kernelId}] stdout:`, data.toString());
+      });
+
+      kernelProcess.stderr?.on('data', (data) => {
+        console.error(`[Kernel ${kernelId}] stderr:`, data.toString());
+      });
+
+      kernelProcess.on('exit', (code) => {
+        console.log(`[Kernel ${kernelId}] exited with code ${code}`);
+        const managed = this.kernels.get(kernelId);
+        if (managed) {
+          managed.info.status = 'dead';
+        }
+      });
+
+      // Wait for connection file to be updated with ports
+      await this.waitForConnectionFile(connectionFile, 10000);
+
+      // Read updated connection info
+      const updatedConnectionInfo = readConnectionFile(connectionFile);
+
+      // Create ZMQ sockets
+      const shellSocket = new zmq.Dealer();
+      const iopubSocket = new zmq.Subscriber();
+      const controlSocket = new zmq.Dealer();
+
+      const baseUrl = `${updatedConnectionInfo.transport}://${updatedConnectionInfo.ip}`;
+      await shellSocket.connect(`${baseUrl}:${updatedConnectionInfo.shell_port}`);
+      await iopubSocket.connect(`${baseUrl}:${updatedConnectionInfo.iopub_port}`);
+      await controlSocket.connect(`${baseUrl}:${updatedConnectionInfo.control_port}`);
+
+      // Subscribe to all IOPub messages
+      iopubSocket.subscribe();
 
       const managed: ManagedKernel = {
-        info: { ...kernelInfo, id: kernel.id },
-        kernel,
+        info: kernelInfo,
         spec: {
           name: kernelName,
           displayName: spec?.displayName || kernelName,
@@ -130,16 +314,26 @@ export class KernelManager {
           argv: spec?.argv,
           env: spec?.env,
         },
+        process: kernelProcess,
+        connectionInfo: updatedConnectionInfo,
+        connectionFile,
+        shellSocket,
+        iopubSocket,
+        controlSocket,
+        sessionId,
         startedAt: Date.now(),
         lastActivity: Date.now(),
         executionCount: 0,
       };
 
-      this.attachKernelSignals(managed);
-      this.kernels.set(kernel.id, managed);
+      this.kernels.set(kernelId, managed);
 
+      // Send kernel_info_request to verify connection
+      await this.sendKernelInfoRequest(managed);
+
+      // Execute init cell
       const initCell = loadInitCell(language);
-      await this.executeInternal(kernel.id, initCell, { silent: true, storeHistory: false });
+      await this.executeInternal(kernelId, initCell, { silent: true, storeHistory: false });
 
       managed.info.status = 'idle';
       managed.lastActivity = Date.now();
@@ -151,6 +345,32 @@ export class KernelManager {
     }
   }
 
+  private async waitForConnectionFile(filePath: string, timeout: number): Promise<void> {
+    const startTime = Date.now();
+    while (Date.now() - startTime < timeout) {
+      try {
+        const info = readConnectionFile(filePath);
+        if (info.shell_port > 0) {
+          return;
+        }
+      } catch (e) {
+        // File not ready yet
+      }
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    }
+    throw new Error('Timeout waiting for kernel connection file');
+  }
+
+  private async sendKernelInfoRequest(managed: ManagedKernel): Promise<void> {
+    const msg = createMessage('kernel_info_request', {}, managed.sessionId);
+    const frames = serializeMessage(msg, managed.connectionInfo.key);
+    await managed.shellSocket.send(frames);
+    
+    // Wait for reply
+    const reply = await managed.shellSocket.receive();
+    console.log('[KernelManager] Kernel info reply received');
+  }
+
   async stop(id: string): Promise<boolean> {
     const managed = this.kernels.get(id);
     if (!managed) {
@@ -159,9 +379,58 @@ export class KernelManager {
     }
 
     try {
-      await managed.kernel.shutdown();
+      // Send shutdown request
+      const msg = createMessage('shutdown_request', { restart: false }, managed.sessionId);
+      const frames = serializeMessage(msg, managed.connectionInfo.key);
+      
+      try {
+        await managed.controlSocket.send(frames);
+      } catch (e) {
+        // Socket might already be closed
+      }
+
+      // Wait a bit for graceful shutdown
+      await new Promise((resolve) => setTimeout(resolve, 500));
+
+      // Close sockets safely
+      try {
+        await managed.shellSocket.close();
+      } catch (e) {
+        // Ignore errors during close
+      }
+      try {
+        await managed.iopubSocket.close();
+      } catch (e) {
+        // Ignore errors during close
+      }
+      try {
+        await managed.controlSocket.close();
+      } catch (e) {
+        // Ignore errors during close
+      }
+
+      // Kill process
+      if (!managed.process.killed) {
+        managed.process.kill('SIGTERM');
+        
+        // Give it time to exit gracefully
+        await new Promise((resolve) => setTimeout(resolve, 200));
+        
+        if (!managed.process.killed) {
+          managed.process.kill('SIGKILL');
+        }
+      }
+
+      // Clean up connection file
+      if (fs.existsSync(managed.connectionFile)) {
+        try {
+          fs.unlinkSync(managed.connectionFile);
+        } catch (e) {
+          // Ignore file deletion errors
+        }
+      }
     } catch (error) {
-      console.error('[KernelManager] Failed to shutdown kernel:', error);
+      console.error('[KernelManager] Error during shutdown:', error);
     } finally {
       this.kernels.delete(id);
     }
@@ -175,7 +444,15 @@ export class KernelManager {
     }
 
     managed.info.status = 'starting';
-    await managed.kernel.restart();
+
+    // Send restart request
+    const msg = createMessage('shutdown_request', { restart: true }, managed.sessionId);
+    const frames = serializeMessage(msg, managed.connectionInfo.key);
+    await managed.controlSocket.send(frames);
+
+    // Wait for kernel to restart
+    await new Promise((resolve) => setTimeout(resolve, 2000));
+
     const initCell = loadInitCell(managed.spec.language);
     await this.executeInternal(id, initCell, { silent: true, storeHistory: false });
 
@@ -191,7 +468,8 @@ export class KernelManager {
       return false;
     }
 
-    await managed.kernel.interrupt();
+    // Send SIGINT to kernel process
+    managed.process.kill('SIGINT');
     managed.info.status = 'idle';
     managed.lastActivity = Date.now();
     return true;
@@ -233,63 +511,94 @@ export class KernelManager {
       result: undefined,
     };
 
-    const future = managed.kernel.requestExecute(
+    // Create execute request
+    const msg = createMessage(
+      'execute_request',
       {
         code,
-        stop_on_error: true,
-        store_history: options.storeHistory !== false,
-        allow_stdin: false,
         silent: options.silent === true,
+        store_history: options.storeHistory !== false,
+        user_expressions: {},
+        allow_stdin: false,
+        stop_on_error: true,
       },
-      false,
+      managed.sessionId,
     );
 
-    const timeoutMs = options.timeout ?? 30000;
-    let timeoutHandle: NodeJS.Timeout | null = null;
+    const msgId = msg.header.msg_id;
+    const frames = serializeMessage(msg, managed.connectionInfo.key);
 
-    future.onIOPub = (msg) => {
-      if (KernelMessage.isStreamMsg(msg)) {
-        const content = msg.content;
-        if (content.name === 'stdout') {
-          result.stdout = (result.stdout || '') + content.text;
-        } else if (content.name === 'stderr') {
-          result.stderr = (result.stderr || '') + content.text;
-        }
-      } else if (KernelMessage.isExecuteResultMsg(msg)) {
-        const content = msg.content;
-        result.result = content.data['text/plain'] ?? content.data;
-      } else if (KernelMessage.isDisplayDataMsg(msg)) {
-        const content = msg.content;
-        if (options.capture && content.data['image/png']) {
-          result.images?.push({ mime: 'image/png', data: content.data['image/png'] as string });
-        }
-        if (content.data['text/html']) {
-          result.rich = { ...(result.rich || {}), 'text/html': content.data['text/html'] as string };
-        }
-      } else if (KernelMessage.isErrorMsg(msg)) {
-        const content = msg.content;
-        result.error = `${content.ename}: ${content.evalue}`;
-        if (content.traceback && content.traceback.length > 0) {
-          result.stderr = (result.stderr || '') + content.traceback.join('\n');
-        }
-      }
-    };
+    // Send execute request
+    await managed.shellSocket.send(frames);
+
+    // Listen for replies on IOPub
+    const timeoutMs = options.timeout ?? 30000;
+    const deadline = Date.now() + timeoutMs;
+    let executionComplete = false;
 
     try {
-      const timeoutPromise = new Promise<never>((_, reject) => {
-        timeoutHandle = setTimeout(() => reject(new Error('Execution timed out')), timeoutMs);
-      });
-      const reply = await Promise.race([future.done, timeoutPromise]);
-      if (timeoutHandle) {
-        clearTimeout(timeoutHandle);
+      while (Date.now() < deadline && !executionComplete) {
+        // Wait for a message with a timeout
+        let replyFrames: Buffer[];
+        try {
+          const receivePromise = managed.iopubSocket.receive();
+          const timeoutPromise = new Promise<never>((_, reject) => 
+            setTimeout(() => reject(new Error('TIMEOUT')), 100)
+          );
+          replyFrames = (await Promise.race([receivePromise, timeoutPromise])) as Buffer[];
+        } catch (e) {
+          if (e instanceof Error && e.message === 'TIMEOUT') {
+            continue;
+          }
+          throw e;
+        }
+
+        const reply = parseMessage(replyFrames);
+
+        if (!reply || !reply.parent_header || (reply.parent_header as any).msg_id !== msgId) {
+          continue;
+        }
+
+        const msgType = reply.header.msg_type;
+        const content = reply.content;
+
+        if (msgType === 'stream') {
+          const streamContent = content as { name: string; text: string };
+          if (streamContent.name === 'stdout') {
+            result.stdout = (result.stdout || '') + streamContent.text;
+          } else if (streamContent.name === 'stderr') {
+            result.stderr = (result.stderr || '') + streamContent.text;
+          }
+        } else if (msgType === 'execute_result') {
+          const data = (content as any).data;
+          result.result = data?.['text/plain'] ?? data;
+        } else if (msgType === 'display_data') {
+          const data = (content as any).data;
+          if (options.capture && data?.['image/png']) {
+            result.images?.push({ mime: 'image/png', data: data['image/png'] });
+          }
+          if (data?.['text/html']) {
+            result.rich = { ...(result.rich || {}), 'text/html': data['text/html'] };
+          }
+        } else if (msgType === 'error') {
+          const errorContent = content as { ename: string; evalue: string; traceback: string[] };
+          result.error = `${errorContent.ename}: ${errorContent.evalue}`;
+          if (errorContent.traceback && errorContent.traceback.length > 0) {
+            result.stderr = (result.stderr || '') + errorContent.traceback.join('\n');
+          }
+        } else if (msgType === 'status' && (content as any).execution_state === 'idle') {
+          executionComplete = true;
+        }
       }
-      managed.executionCount = reply?.content?.execution_count ?? managed.executionCount + 1;
+
+      if (!executionComplete) {
+        result.error = 'Execution timed out';
+      }
+
+      managed.executionCount++;
     } catch (error) {
       result.error = error instanceof Error ? error.message : String(error);
     } finally {
-      if (timeoutHandle) {
-        clearTimeout(timeoutHandle);
-      }
       managed.info.status = 'idle';
       managed.lastActivity = Date.now();
       result.duration = Date.now() - startTime;
@@ -309,13 +618,25 @@ export class KernelManager {
       return { matches: [], cursor_start: cursorPos, cursor_end: cursorPos };
     }
 
-    const reply = await managed.kernel.requestComplete({ code, cursor_pos: cursorPos });
-    if (reply.content.status === 'ok') {
+    const msg = createMessage(
+      'complete_request',
+      { code, cursor_pos: cursorPos },
+      managed.sessionId,
+    );
+    const frames = serializeMessage(msg, managed.connectionInfo.key);
+    await managed.shellSocket.send(frames);
+
+    // Wait for reply
+    const replyFrames = await managed.shellSocket.receive();
+    const reply = parseMessage(replyFrames as Buffer[]);
+
+    if (reply && reply.content.status === 'ok') {
+      const content = reply.content as any;
       return {
-        matches: reply.content.matches ?? [],
-        cursor_start: reply.content.cursor_start,
-        cursor_end: reply.content.cursor_end,
-        metadata: reply.content.metadata as Record<string, unknown>,
+        matches: content.matches ?? [],
+        cursor_start: content.cursor_start,
+        cursor_end: content.cursor_end,
+        metadata: content.metadata,
       };
     }
 
@@ -328,16 +649,22 @@ export class KernelManager {
       return { found: false };
     }
 
-    const reply = await managed.kernel.requestInspect({
-      code,
-      cursor_pos: cursorPos,
-      detail_level: 0,
-    });
+    const msg = createMessage(
+      'inspect_request',
+      { code, cursor_pos: cursorPos, detail_level: 0 },
+      managed.sessionId,
+    );
+    const frames = serializeMessage(msg, managed.connectionInfo.key);
+    await managed.shellSocket.send(frames);
 
-    if (reply.content.status === 'ok' && reply.content.found) {
+    // Wait for reply
+    const replyFrames = await managed.shellSocket.receive();
+    const reply = parseMessage(replyFrames as Buffer[]);
+
+    if (reply && reply.content.status === 'ok' && (reply.content as any).found) {
       return {
         found: true,
-        data: reply.content.data as Record<string, string>,
+        data: (reply.content as any).data,
       };
     }
 
@@ -361,25 +688,6 @@ export class KernelManager {
     for (const id of ids) {
       await this.stop(id);
     }
-  }
-
-  private attachKernelSignals(managed: ManagedKernel): void {
-    managed.kernel.statusChanged.connect((_sender, status) => {
-      if (status === 'idle' || status === 'busy' || status === 'starting') {
-        managed.info.status = status;
-      } else if (status === 'restarting') {
-        managed.info.status = 'starting';
-      } else if (status === 'dead' || status === 'terminating') {
-        managed.info.status = 'dead';
-      } else {
-        managed.info.status = 'error';
-      }
-    });
-
-    managed.kernel.disposed.connect(() => {
-      managed.info.status = 'dead';
-      this.kernels.delete(managed.info.id);
-    });
   }
 }
 

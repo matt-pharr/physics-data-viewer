@@ -44,11 +44,11 @@ We need a runnable Electron app that loads a React renderer. In dev mode, the re
 ## Step 2: IPC contracts ✅ COMPLETE
 
 **Context:**  
-The main process and renderer communicate via IPC. We define typed contracts so both sides stay in sync.  The preload exposes a safe `window.pdv` API.
+The main process and renderer communicate via IPC. We define typed contracts so both sides stay in sync.  The preload exposes a safe `window.pdv` API. 
 
 **Deliverables:**
 - `electron/main/ipc.ts` with channel names and TypeScript types
-- `electron/preload.ts` exposing typed `window.pdv` API
+- `electron/preload. ts` exposing typed `window.pdv` API
 - Type declarations for renderer
 
 **Exit criteria:**
@@ -118,13 +118,24 @@ The Tree is the central UI for browsing data. It must be virtualized, lazy-loade
 
 ---
 
-## Step 5.5: Real Kernel Integration + Environment Selector 🔄 IN PROGRESS
+## Step 5.5: Real Kernel Integration (Direct ZMQ) ✅ COMPLETE
 
 **Context:**  
-Replace stub KernelManager with real Jupyter integration using `@jupyterlab/services`. Add GUI for users to configure Python/Julia executable paths.
+Replace stub KernelManager with real Jupyter integration using **direct ZMQ connections**. No Jupyter server required—kernels are launched as child processes.
+
+**Architecture Decision:**  
+We use **direct kernel launching** (NOT `@jupyterlab/services`):
+- Spawn kernel process with `child_process.spawn()`
+- Create connection file with ZMQ ports and HMAC key
+- Connect directly via `zeromq` library (shell, iopub, control, stdin, hb sockets)
+- Implement Jupyter message protocol manually (serialization, HMAC signing)
+
+This is simpler, faster, and more appropriate for desktop apps.  It's the same approach used by VS Code, nteract, and Hydrogen.
 
 **Deliverables:**
-- Real KernelManager using `@jupyterlab/services`
+- Real KernelManager using direct ZMQ connections
+- Connection file creation and management
+- Jupyter wire protocol implementation (message formatting, HMAC signing)
 - Environment selector dialog for configuring executables
 - Executable validation
 - Config persistence for executable paths
@@ -137,22 +148,25 @@ Replace stub KernelManager with real Jupyter integration using `@jupyterlab/serv
 - Completions work
 - Environment selector appears on first run
 - Config persists across sessions
+- No Jupyter server needed
 
 ---
 
 ## Step 6: Plot Mode & Capture Integration
 
 **Context:**  
-Users need control over plot behavior:  native windows (default) or inline capture. This requires configuring matplotlib/Plots.jl backends and handling image display_data.
+Users need control over plot behavior:  native windows (default) or inline capture. This requires configuring matplotlib/Plots.jl backends and handling image display_data via ZMQ IOPub messages.
 
 **Goals:**
 - Wire plot mode toggle (Native vs Capture) to kernel execution
 - Update Python init cell to configure matplotlib backend based on mode
 - Update Julia init cell for Plots.jl backend configuration
 - Implement `pdv_show()` helper functions properly
-- Handle `display_data` messages with images in KernelManager
+- Handle `display_data` messages with images in KernelManager (via IOPub socket)
 - Render captured images in Console component
 - Test both modes with real matplotlib/Plots.jl code
+
+**Note:** Since we use direct ZMQ connections, `display_data` messages arrive on the IOPub socket as part of the Jupyter message protocol. The KernelManager already listens to IOPub; we just need to extract `image/png` or `image/svg+xml` from the message content.
 
 **Deliverables:**
 - Updated Python init cell with backend configuration
@@ -160,6 +174,7 @@ Users need control over plot behavior:  native windows (default) or inline captu
 - `pdv_show()` implementation for both languages
 - Image rendering in Console
 - Plot mode toggle functional in UI
+- IOPub message handling for `display_data`
 
 **Exit criteria:**
 - Native mode: `plt.show()` opens external window
@@ -173,7 +188,7 @@ Users need control over plot behavior:  native windows (default) or inline captu
 ## Step 7: Namespace View
 
 **Context:**  
-Users need to see what variables exist in their kernel's memory. The Namespace tab should show kernel variables in a tree-like structure.
+Users need to see what variables exist in their kernel's memory.  The Namespace tab should show kernel variables in a tree-like structure.
 
 **Goals:**
 - Query kernel for current namespace (`dir()` / `names(Main)`)
@@ -205,7 +220,7 @@ Users need to see what variables exist in their kernel's memory. The Namespace t
 Users need to run Python/Julia scripts from files, not just command boxes. Scripts should be normal files editable in external IDEs without warnings.  Scripts live in `tree/scripts/` and have a standard `run(tree, **kwargs)` entry point.
 
 **Goals:**
-- Define script structure: `run(tree, **kwargs)` as entry point
+- Define script structure:  `run(tree, **kwargs)` as entry point
 - Scan `tree/scripts/` directory for `.py`/`.jl` files
 - Create script tree nodes with metadata
 - Implement `tree.run_script(path, **kwargs)` in kernel
@@ -235,10 +250,10 @@ Users need to run Python/Julia scripts from files, not just command boxes. Scrip
 ## Step 9: Data Loaders (HDF5/Zarr/Parquet/NPY)
 
 **Context:**  
-Users need to browse and load scientific data files. Loaders extract metadata (shape, dtype) without loading full data.  Data files live in `tree/data/` and appear in Tree.
+Users need to browse and load scientific data files.  Loaders extract metadata (shape, dtype) without loading full data. Data files live in `tree/data/` and appear in Tree. 
 
 **Goals:**
-- Implement loaders for common formats: 
+- Implement loaders for common formats:  
   - HDF5 (h5py) - groups, datasets, attributes, lazy chunked reads
   - Zarr - array metadata, chunked reads
   - Parquet/Arrow - schema, paged reads
@@ -272,10 +287,10 @@ Users need to browse and load scientific data files. Loaders extract metadata (s
 
 ---
 
-## Step 10:  Arbitrary Object Store & Project Persistence
+## Step 10: Arbitrary Object Store & Project Persistence
 
 **Context:**  
-Users need to save arbitrary Python/Julia objects to the Tree (not just standard formats). We need a blob store (content-addressed by hash) and project save/load functionality.  Project structure mirrors file system. 
+Users need to save arbitrary Python/Julia objects to the Tree (not just standard formats). We need a blob store (content-addressed by hash) and project save/load functionality.  Project structure mirrors file system.  
 
 **Goals:**
 - Implement blob store (content-addressed, SHA256 hash)
@@ -320,7 +335,7 @@ Users (module developers) should be able to create custom GUIs for their analysi
 
 **Goals:**
 - Define manifest schema (JSON) for module panels
-- Basic widget types: 
+- Basic widget types:  
   - `number_input`, `text_input`, `checkbox`, `dropdown`, `slider`
   - `button` (with action:  method call or inline script)
   - `output` (text display)
@@ -355,7 +370,7 @@ Users (module developers) should be able to create custom GUIs for their analysi
 ## Step 12: Module Manifests & Dynamic UIs (Phase 2 - Advanced)
 
 **Context:**  
-Phase 1 established basic widgets. Phase 2 adds advanced widgets for real-world workflows:  tree selectors, code input, plot areas, tables, progress bars, etc.
+Phase 1 established basic widgets.  Phase 2 adds advanced widgets for real-world workflows:  tree selectors, code input, plot areas, tables, progress bars, etc.
 
 **Goals:**
 - Advanced widget types:
@@ -412,7 +427,7 @@ Prepare app for distribution to end users. Build installers for macOS, Windows, 
 - Error reporting/logging for production
 
 **Deliverables:**
-- `electron-builder.yml` or package.json config
+- `electron-builder. yml` or package.json config
 - Build scripts (`npm run dist: mac`, `dist:win`, `dist:linux`)
 - App icon (1024x1024 + all sizes)
 - Code signing certificate setup (docs)
@@ -433,7 +448,7 @@ Prepare app for distribution to end users. Build installers for macOS, Windows, 
 ## Step 14: Documentation & Polish
 
 **Context:**  
-Final step before release. Make the app usable by others with comprehensive documentation. 
+Final step before initial release. Make the app usable by others with comprehensive documentation.  
 
 **Goals:**
 - User guide (quickstart, tutorials, common workflows)
@@ -476,7 +491,7 @@ Final step before release. Make the app usable by others with comprehensive docu
 | 3 | Kernel manager (stub) | ✅ Complete |
 | 4 | Console + Monaco CommandBox | ✅ Complete |
 | 5 | Tree with lazy loading | ✅ Complete |
-| 5.5 | Real Jupyter kernels + env selector | 🔄 In Progress |
+| 5.5 | Real Jupyter kernels (direct ZMQ) | ✅ Complete |
 | 6 | Plot mode (native/capture) | ⏳ Next |
 | 7 | Namespace view | ⏳ |
 | 8 | Script execution & external editing | ⏳ |
@@ -491,10 +506,10 @@ Final step before release. Make the app usable by others with comprehensive docu
 
 ## Notes for Agents
 
-- Keep IPC types consistent across main/preload/renderer. 
+- **Direct ZMQ architecture**: We use **direct kernel launching** with ZMQ sockets, NOT `@jupyterlab/services`. Connection files and `zeromq` library handle all communication.
+- Keep IPC types consistent across main/preload/renderer.  
 - Do not expose Node APIs to renderer; only the typed bridge (`window.pdv`).
 - Keep diffs small; commit after each step.
 - Run `npm run build` and `npm run test` after each step to catch errors early.
-- If kernels are unavailable, keep kernel-manager stubbed and skip integration tests.
-- Trust-gate pickle/JLSO loads; always check the trust flag. 
+- Trust-gate pickle/JLSO loads; always check the trust flag.  
 - Use dark theme consistently (#1e1e1e background, #333 borders, #4ec9b0 accent).

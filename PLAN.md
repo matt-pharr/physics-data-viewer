@@ -1,23 +1,23 @@
 # Physics Data Viewer – Build Plan (React + Vite + Electron + Jupyter kernels)
 
-This plan guides implementation of Physics Data Viewer using AI agents and iterative steps with test checkpoints.  The focus is on:  a performant Electron UI, Jupyter-kernel-backed execution (Python/Julia), a file-system-based project structure with scripts and data, and native-plot behavior with a capture fallback.
+This plan guides implementation of Physics Data Viewer using AI agents and iterative steps with test checkpoints.  The focus is on:   a performant Electron UI, direct Jupyter-kernel launching (no server), a file-system-based project structure with scripts and data, and native-plot behavior with a capture fallback.
 
 ---
 
 ## Overall Goals (What the App Is Supposed To Be/Do)
 
-**In short:** A modernized, trimmed-down, generalized, minimalist version of OMFIT with an Electron frontend independent of the Python/Julia environment.  The burden of keeping a module compatible with a certain Python or Julia version lies solely with the module itself, not the app. 
+**In short:** A modernized, trimmed-down, generalized, minimalist version of OMFIT with an Electron frontend independent of the Python/Julia environment.  The burden of keeping a module compatible with a certain Python or Julia version lies solely with the module itself, not the app.  
 
 **Core objectives:**
 
-1. **Unified project workspace**:  Provide a desktop app (Electron) to explore, run, and manage scientific data workflows in a project-oriented way.
+1. **Unified project workspace**:   Provide a desktop app (Electron) to explore, run, and manage scientific data workflows in a project-oriented way.
 
-2. **Language-agnostic REPL control**: Talk to Python and Julia via Jupyter kernels; no runtimes bundled.  Users pick an environment/kernelspec on startup; switching kernels should not restart the UI.
+2. **Language-agnostic REPL control**: Talk to Python and Julia via Jupyter kernels launched directly; no runtimes bundled, no server required.  Users pick an environment/kernelspec on startup; switching kernels should not restart the UI.
 
-3. **File-system-based project structure**: Projects are directories on disk with a clear structure: 
+3. **File-system-based project structure**: Projects are directories on disk with a clear structure:  
    ```
    my_project/
-   ├── project.pdv              # Project metadata (tree structure, config)
+   ├── project. pdv              # Project metadata (tree structure, config)
    ├── tree/
    │   ├── data/               # Actual data files (HDF5, Zarr, etc.)
    │   ├── scripts/            # Python/Julia scripts (editable in any IDE)
@@ -25,7 +25,7 @@ This plan guides implementation of Physics Data Viewer using AI agents and itera
    └── blobs/                  # Content-addressed object store (pickles, JLSO)
    ```
 
-4. **Central Tree as source of truth**: A lazy, manifest-driven Tree that references files and objects.  It must: 
+4. **Central Tree as source of truth**: A lazy, manifest-driven Tree that references files and objects.   It must:  
    - Mirror the file system structure (`tree/` directory)
    - Store arbitrary objects with trust-gated serialization (pickle/JLSO/JLD2)
    - Provide lazy metadata-only browsing; fetch children/content on demand
@@ -33,7 +33,7 @@ This plan guides implementation of Physics Data Viewer using AI agents and itera
    - Support loader hints for chunked/streamed access to large datasets
    - Elements lazily loaded for compatibility with large-size data on disk
 
-5. **Script system (clean IDE experience)**: Scripts are normal Python/Julia files with a standard `run(tree, **kwargs)` entry point. No magic globals, no IDE warnings. Scripts live in `tree/scripts/` and are editable in external IDEs (VS Code, Neovim, etc.). Example: 
+5. **Script system (clean IDE experience)**: Scripts are normal Python/Julia files with a standard `run(tree, **kwargs)` entry point. No magic globals, no IDE warnings.  Scripts live in `tree/scripts/` and are editable in external IDEs (VS Code, Neovim, etc.). Example:  
    ```python
    # tree/scripts/analysis/fit_model.py
    def run(tree:  dict, data_path: str, model:  str = "linear") -> dict:
@@ -45,7 +45,7 @@ This plan guides implementation of Physics Data Viewer using AI agents and itera
    ```
    Execute from command box: `tree['scripts']['analysis']['fit_model']. run(data_path='data.raw', model='quadratic')`
 
-6. **Interactive execution UI**:
+6. **Interactive execution UI**: 
    - Monaco-based command boxes (cell analogues) with run-selection/full-cell, tabs for multiple scratchpads, inline error display, and duration
    - Console/log showing execution history (timestamps, durations, stdout/stderr/result summaries) with search/filter/clear
 
@@ -57,7 +57,7 @@ This plan guides implementation of Physics Data Viewer using AI agents and itera
 8. **Data loaders (lazy and efficient)**:
    - Chunked/streamed reads for large data (HDF5/Zarr/Parquet/Arrow/NPY); avoid blocking the renderer; offload to sidecar/worker where possible
    - Previews/metadata first; only load heavy payloads when needed
-   - Loaders for:  HDF5 (groups/datasets), Zarr (arrays), Parquet/Arrow (schema/pages), NPY (memmap), images (PIL)
+   - Loaders for:   HDF5 (groups/datasets), Zarr (arrays), Parquet/Arrow (schema/pages), NPY (memmap), images (PIL)
 
 9. **Extensibility via manifests**:
    - Modules can register custom GUIs using declarative JSON manifests
@@ -65,7 +65,7 @@ This plan guides implementation of Physics Data Viewer using AI agents and itera
    - Manifests define widgets (inputs, buttons, plots, tables) and actions (call Python methods)
    - UI panels/cards for modules driven by manifests
 
-10. **Project persistence**: 
+10. **Project persistence**:  
     - Save/load projects from `project.pdv` (JSON manifest)
     - File system structure persists scripts and data files naturally
     - Blob store for arbitrary objects (pickles, JLSO)
@@ -85,10 +85,79 @@ This plan guides implementation of Physics Data Viewer using AI agents and itera
 ## Tech Stack (Locked)
 
 - **Frontend**: Electron (with preload), React, Vite, TypeScript, Monaco editor
-- **Kernel bridge**: `@jupyterlab/services` (Jupyter protocol) in Electron main
+- **Kernel communication**: **Direct ZMQ** via `zeromq` library (no Jupyter server)
+- **Kernel launching**: `child_process.spawn()` with connection files
+- **Message protocol**: Jupyter wire protocol with HMAC-SHA256 signing
 - **Plot behavior**: Native windows by default; capture fallback via helper (`pdv_show`) for PNG/SVG
 - **Data**:  Lazy loaders for HDF5/Zarr/Parquet/Arrow/NPY/Image; pickle/JLSO for unknowns (trust-gated)
 - **Packaging**: `electron-builder`
+
+---
+
+## Kernel Architecture (Direct Launch)
+
+Physics Data Viewer launches Jupyter kernels **directly without a server**.  This is the standard architecture for desktop Jupyter clients (nteract, Hydrogen, VS Code).
+
+### How It Works
+
+1. **Process Spawning**:  Kernels started via `child_process.spawn()` with kernel executable
+2. **Connection Files**: Temporary JSON files with ZMQ port configuration and HMAC key
+3. **ZMQ Sockets**: Direct connections to kernel via five sockets:
+   - **Shell**: Execute, complete, inspect requests
+   - **IOPub**:  Output streams, display data, errors
+   - **Control**: Interrupt, shutdown requests
+   - **Stdin**: Input prompts (optional)
+   - **Heartbeat**: Kernel alive monitoring (optional)
+4. **Message Protocol**: Jupyter wire protocol implementation with HMAC-SHA256 signing
+5. **No Server**: No dependency on `jupyter server` or `@jupyterlab/services`
+
+### Connection File Format
+
+```json
+{
+  "shell_port": 54321,
+  "iopub_port": 54322,
+  "stdin_port": 54323,
+  "control_port": 54324,
+  "hb_port": 54325,
+  "ip": "127.0.0.1",
+  "key": "<uuid>",
+  "transport": "tcp",
+  "signature_scheme": "hmac-sha256",
+  "kernel_name":  "python3"
+}
+```
+
+### Benefits Over Server-Based Approach
+
+✅ **Lower Latency** - No HTTP layer between app and kernel  
+✅ **Simpler Deployment** - No server management, no port conflicts  
+✅ **Better Control** - Direct process ownership (logs, restart, cleanup)  
+✅ **No Authentication** - No XSRF tokens, cookies, or CORS issues  
+✅ **Faster Startup** - No server negotiation overhead  
+✅ **Standard Pattern** - Same approach as VS Code, nteract, Hydrogen  
+
+### Message Flow Example
+
+```
+User types "1+1" in Monaco → Execute button clicked
+  ↓
+Renderer:  window.pdv.kernels.execute(kernelId, {code: "1+1"})
+  ↓
+Main Process: KernelManager.execute()
+  ↓
+Create execute_request message with HMAC signature
+  ↓
+Send via ZMQ shell socket → Kernel
+  ↓
+Kernel processes, sends messages on IOPub socket
+  ↓
+Collect:  stream (stdout), execute_result (return value)
+  ↓
+Return KernelExecuteResult to renderer
+  ↓
+Console displays:  stdout + result + duration
+```
 
 ---
 
@@ -128,7 +197,7 @@ my_project/
   "created":  "2024-01-15T10:30:00Z",
   "tree": {
     "data": {
-      "raw_data. h5": {
+      "raw_data.h5": {
         "type": "file",
         "relativePath": "tree/data/raw_data.h5"
       }
@@ -211,7 +280,7 @@ my_project/
 - Columns: Key, Type, Preview (value snippet); header is sticky
 - Node types: folder, file, script, dataset, group, ndarray, dataframe, image, blob, etc.
 - Icons/badges for types; loading spinners on expand
-- Context menu actions: 
+- Context menu actions:  
   - Scripts: Run, Edit (external), Reload
   - Data files: Load to namespace, Preview
   - Datasets: Plot, Inspect
@@ -252,7 +321,7 @@ my_project/
 
 ### Script Structure
 
-Scripts are normal Python/Julia files with a standard entry point: 
+Scripts are normal Python/Julia files with a standard entry point:  
 
 **Python:**
 ```python
@@ -260,7 +329,7 @@ Scripts are normal Python/Julia files with a standard entry point:
 
 def run(tree: dict, data_path: str, model: str = "linear", **kwargs) -> dict:
     """
-    Entry point called by PDV. 
+    Entry point called by PDV.  
     
     Args:
         tree: Reference to PDV tree (dict-like)
@@ -281,10 +350,10 @@ def run(tree: dict, data_path: str, model: str = "linear", **kwargs) -> dict:
 ```julia
 # tree/scripts/analysis/solve_pde.jl
 
-function run(tree::Dict, initial_condition::String; tspan=(0.0, 1.0))
+function run(tree:: Dict, initial_condition::String; tspan=(0.0, 1.0))
     """Entry point called by PDV"""
     u0 = tree[initial_condition]
-    # ... solve PDE
+    # ...  solve PDE
     tree["results"]["solution"] = sol
     return Dict("status" => "success")
 end
@@ -315,7 +384,7 @@ Config: editors.python = "code %s"  # VS Code
 
 App spawns:  `code /path/to/project/tree/scripts/analysis/fit_model.py`
 
-File watcher detects changes → offers reload in UI.
+File watcher detects changes → offers reload in UI. 
 
 ### Benefits
 
@@ -372,7 +441,7 @@ class HDF5Loader(Loader):
         with h5py. File(path, 'r') as f:
             group = f[group_path] if group_path else f
             children = []
-            for key in group. keys():
+            for key in group.keys():
                 item = group[key]
                 if isinstance(item, h5py. Group):
                     children.append({
@@ -400,7 +469,7 @@ class HDF5Loader(Loader):
 
 ### Tree Integration
 
-HDF5 file appears in Tree: 
+HDF5 file appears in Tree:  
 ```
 📁 data
   📄 raw_data.h5
@@ -409,10 +478,10 @@ HDF5 file appears in Tree:
       📊 shot_002 (1000, 2048) float64
 ```
 
-Double-click `shot_001` → loads into kernel: 
+Double-click `shot_001` → loads into kernel:  
 ```python
 data = tree['data']['raw_data.h5']['experiments']['shot_001'][:]
-# Or lazy slice:
+# Or lazy slice: 
 preview = tree['data']['raw_data.h5']['experiments']['shot_001'][:10, : 10]
 ```
 
@@ -431,9 +500,9 @@ Modules define GUIs using JSON manifests:
   "description": "Apply smoothing filters to 1D data",
   "widgets": [
     {
-      "type":  "tree_selector",
+      "type": "tree_selector",
       "id": "input_data",
-      "label": "Input Data",
+      "label":  "Input Data",
       "filter": {"types": ["ndarray"], "shape": [null]}
     },
     {
@@ -476,7 +545,7 @@ Modules define GUIs using JSON manifests:
 ### Python Module
 
 ```python
-class SmoothingModule: 
+class SmoothingModule:
     def __init__(self, tree, gui_state):
         self.tree = tree
         self.gui = gui_state
@@ -516,7 +585,7 @@ pdv.register_module("smoothing", module)
 
 ### Frontend Rendering
 
-Frontend receives manifest → dynamically creates React components: 
+Frontend receives manifest → dynamically creates React components:  
 - `tree_selector` → `<TreePicker>` component
 - `number_input` → `<input type="number">`
 - `button` → `<button>` wired to IPC call
@@ -535,8 +604,8 @@ Result → Frontend updates plot area by polling `smoothing.result`
 
 ```typescript
 // Channel names
-kernels: list / kernels:start / kernels:stop / kernels:execute / kernels:interrupt / kernels:restart / kernels:complete / kernels:inspect
-tree:list / tree:get / tree:save / tree:run_script
+kernels: list / kernels: start / kernels:stop / kernels:execute / kernels:interrupt / kernels:restart / kernels:complete / kernels:inspect
+tree: list / tree:get / tree:save / tree:run_script
 files:read / files:write / files:edit
 config:get / config:set
 modules:register / modules:execute / modules:get_widget_value / modules:set_widget_value
@@ -545,28 +614,29 @@ project:save / project:load
 // Key types
 KernelExecuteRequest { code: string; capture?:  boolean; cwd?: string; }
 KernelExecuteResult { stdout?:  string; stderr?: string; result?: unknown; images?: Array<{mime, data}>; error?: string; duration?: number; }
-TreeNode { id: string; key: string; path: string; type: string; preview?: string; hasChildren: boolean; sizeBytes?: number; shape?: number[]; dtype?: string; loaderHint?: string; actions?: string[]; _file_path?: string; }
+TreeNode { id: string; key: string; path: string; type: string; preview?: string; hasChildren:  boolean; sizeBytes?: number; shape?: number[]; dtype?: string; loaderHint?: string; actions?: string[]; _file_path?: string; }
 ```
 
 ---
 
 ## Advice for Using AI Agents (GitHub Copilot)
 
-1. **Constrain scope per step**:  Work step-by-step; feed Copilot the interface you want (types/signatures) before asking for implementation. 
+1. **Constrain scope per step**:  Work step-by-step; feed Copilot the interface you want (types/signatures) before asking for implementation.  
 2. **Use TODO blocks**: Write function skeleton and comments; let Copilot fill body.  Review for API correctness.
 3. **Provide examples**: When writing loader registries or IPC shapes, paste a small example object so Copilot aligns with your schema.
 4. **Keep IPC contracts in one file**: Reference it often so Copilot stays consistent across main/preload/renderer.
-5. **Ask for tests alongside code**: Prompt Copilot to generate Vitest specs for every new module. 
-6. **Guard main vs renderer**: Remind Copilot which context a file runs in (main/preload/renderer) to avoid using forbidden APIs in the renderer. 
-7. **Small diffs**: Commit frequently with small, testable changes so Copilot has less surface to drift. 
-8. **Explicit backends**: In init cells, be explicit about matplotlib backend fallback logic; Copilot can guess wrong—keep it deterministic. 
-9. **Security notes**: Be explicit that pickle/JLSO loads are trust-gated; Copilot may omit safety—add checks manually. 
+5. **Ask for tests alongside code**: Prompt Copilot to generate Vitest specs for every new module.  
+6. **Guard main vs renderer**: Remind Copilot which context a file runs in (main/preload/renderer) to avoid using forbidden APIs in the renderer.  
+7. **Small diffs**:  Commit frequently with small, testable changes so Copilot has less surface to drift.  
+8. **Explicit backends**: In init cells, be explicit about matplotlib backend fallback logic; Copilot can guess wrong—keep it deterministic.  
+9. **Security notes**: Be explicit that pickle/JLSO loads are trust-gated; Copilot may omit safety—add checks manually.  
 10. **Review generated types**: Ensure discriminated unions for actions/loaders; Copilot might over-widen types. 
+11. **Direct kernel architecture**: Remind agents that we use **direct ZMQ connections**, NOT `@jupyterlab/services`. Connection files and `zeromq` library handle all kernel communication.
 
 ---
 
 ## Next Actions
 
-- Complete Step 5. 5 (Real Kernel Integration)
+- Complete Step 5. 5 (Real Kernel Integration via direct ZMQ)
 - Proceed with Step 6 (Plot Mode & Capture)
 - Build out Steps 7-14 incrementally with testing at each step
