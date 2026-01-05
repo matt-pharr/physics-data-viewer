@@ -11,3 +11,4 @@ electron/dist/
 electron/out/
 electron/.cache/
 electron/package-lock.json
+electron/renderer/dist/
