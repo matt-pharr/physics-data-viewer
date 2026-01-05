@@ -1,6 +1,10 @@
 import React, { useEffect, useRef } from 'react';
 import type { TreeNodeData } from '../../types';
 
+const MENU_WIDTH = 180;
+const MENU_ITEM_HEIGHT = 32;
+const DEFAULT_VIEWPORT = { width: 1024, height: 768 };
+
 interface ContextMenuProps {
   x: number;
   y: number;
@@ -35,11 +39,10 @@ export const ContextMenu: React.FC<ContextMenuProps> = ({ x, y, node, onAction, 
   }, [onClose]);
 
   const actions = getActionsForNode(node);
-  const menuWidth = 180;
-  const estimatedHeight = actions.length * 32;
-  const viewportWidth = typeof window !== 'undefined' ? window.innerWidth : Number.POSITIVE_INFINITY;
-  const viewportHeight = typeof window !== 'undefined' ? window.innerHeight : Number.POSITIVE_INFINITY;
-  const clampedX = Math.max(0, Math.min(x, viewportWidth - menuWidth));
+  const estimatedHeight = actions.length * MENU_ITEM_HEIGHT;
+  const viewportWidth = typeof window !== 'undefined' ? window.innerWidth : DEFAULT_VIEWPORT.width;
+  const viewportHeight = typeof window !== 'undefined' ? window.innerHeight : DEFAULT_VIEWPORT.height;
+  const clampedX = Math.max(0, Math.min(x, viewportWidth - MENU_WIDTH));
   const clampedY = Math.max(0, Math.min(y, viewportHeight - estimatedHeight));
 
   return (

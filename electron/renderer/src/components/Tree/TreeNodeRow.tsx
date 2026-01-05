@@ -13,8 +13,6 @@ const TYPE_ICONS: Record<string, string> = {
   unknown: '❓',
 };
 
-const TREE_INDENT_SIZE = 20;
-
 interface TreeNodeRowProps {
   node: TreeNodeData & { depth: number };
   onExpand: (node: TreeNodeData) => void;
@@ -36,6 +34,7 @@ export const TreeNodeRow: React.FC<TreeNodeRowProps> = ({
       ? `Collapse ${node.key}`
       : `Expand ${node.key}`
     : `${node.key} has no children`;
+  const indent = `calc(${node.depth || 0} * var(--tree-indent-size))`;
 
   const handleExpandClick = (e: React.MouseEvent) => {
     e.stopPropagation();
@@ -54,7 +53,7 @@ export const TreeNodeRow: React.FC<TreeNodeRowProps> = ({
         onRightClick(node, e);
       }}
     >
-      <div className="tree-col key" style={{ paddingLeft: (node.depth || 0) * TREE_INDENT_SIZE }}>
+      <div className="tree-col key" style={{ paddingLeft: indent }}>
         <button
           className={`tree-toggle ${node.hasChildren ? '' : 'hidden'}`}
           onClick={handleExpandClick}
