@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 
 type Tab = 'tree' | 'namespace' | 'modules';
 type PlotMode = 'native' | 'capture';
@@ -8,6 +8,35 @@ const App: React.FC = () => {
   const [plotMode, setPlotMode] = useState<PlotMode>('native');
   const [commandTabs, setCommandTabs] = useState<number[]>([1]);
   const [activeCommandTab, setActiveCommandTab] = useState(1);
+
+  // Test IPC connection on mount
+  useEffect(() => {
+    const testIPC = async () => {
+      try {
+        // Test kernel list
+        const kernels = await window.pdv.kernels.list();
+        console.log('[App] Kernels:', kernels);
+
+        // Test config
+        const config = await window.pdv.config.get();
+        console.log('[App] Config:', config);
+
+        // Test tree list
+        const treeNodes = await window.pdv.tree.list('');
+        console.log('[App] Tree nodes:', treeNodes);
+
+        // Test execute
+        const result = await window.pdv.kernels.execute('stub', { code: '1+1' });
+        console.log('[App] Execute result:', result);
+
+        console.log('[App] IPC connection verified ✓');
+      } catch (error) {
+        console.error('[App] IPC connection failed:', error);
+      }
+    };
+
+    testIPC();
+  }, []);
 
   const addCommandTab = () => {
     const newId = Math.max(...commandTabs) + 1;
