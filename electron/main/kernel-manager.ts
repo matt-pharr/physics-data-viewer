@@ -16,6 +16,7 @@ import {
   KernelCompleteResult,
   KernelInspectResult,
 } from './ipc';
+import { loadConfig } from './config';
 
 interface ConnectionInfo {
   transport: string;
@@ -230,6 +231,8 @@ export class KernelManager {
   async start(spec?: Partial<KernelSpec>): Promise<KernelInfo> {
     const language = spec?.language || 'python';
     const kernelName = spec?.name || (language === 'python' ? 'python3' : 'julia');
+    const config = loadConfig();
+    const captureMode = config.plotMode === 'capture';
 
     const kernelId = crypto.randomUUID();
     const sessionId = crypto.randomUUID();
@@ -264,9 +267,16 @@ export class KernelManager {
       console.log('[KernelManager] Launching kernel:', argv);
 
       // Spawn kernel process
+      const env = {
+        ...process.env,
+        ...spec?.env,
+        PDV_CAPTURE_MODE: captureMode ? 'true' : 'false',
+      };
+
       const kernelProcess = spawn(argv[0], argv.slice(1), {
-        env: { ...process.env, ...spec?.env },
+        env,
         stdio: ['ignore', 'pipe', 'pipe'],
+        cwd: config.cwd || process.cwd(),
       });
 
       // Log kernel output for debugging
@@ -574,8 +584,13 @@ export class KernelManager {
           result.result = data?.['text/plain'] ?? data;
         } else if (msgType === 'display_data') {
           const data = (content as any).data;
-          if (options.capture && data?.['image/png']) {
-            result.images?.push({ mime: 'image/png', data: data['image/png'] });
+          if (data?.['image/png']) {
+            result.images = result.images || [];
+            result.images.push({ mime: 'image/png', data: data['image/png'] });
+          }
+          if (data?.['image/svg+xml']) {
+            result.images = result.images || [];
+            result.images.push({ mime: 'image/svg+xml', data: data['image/svg+xml'] });
           }
           if (data?.['text/html']) {
             result.rich = { ...(result.rich || {}), 'text/html': data['text/html'] };

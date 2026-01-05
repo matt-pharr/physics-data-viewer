@@ -23,12 +23,12 @@ function _pdv_setup_plots(capture_mode::Bool=false)
 
         if capture_mode
             # Use GR with no display for capturing
-            gr(show=false)
-            println("[PDV] Plots backend: GR (capture mode)")
+            gr(show=false, size=(800, 600))
+            println("[PDV] Plots backend: GR (capture mode, show=false)")
         else
             # Use GR with interactive display
-            gr()
-            println("[PDV] Plots backend: GR (interactive)")
+            gr(size=(800, 600))
+            println("[PDV] Plots backend: GR (native mode)")
         end
     catch e
         println("[PDV] Plots.jl not installed: $e")
@@ -68,8 +68,21 @@ function pdv_show(p=nothing; fmt=:png, dpi=100)
             p = Plots.current()
         end
 
+        # Check if plot is empty
+        if length(p.series_list) == 0
+            return Dict("error" => "No plot to capture (plot is empty)")
+        end
+
         io = IOBuffer()
-        savefig(p, io, fmt)
+        if fmt == :png
+            savefig(p, io, :png; dpi=dpi)
+        elseif fmt == :svg
+            savefig(p, io, :svg)
+        else
+            return Dict("error" => "Unsupported format: $fmt (use :png or :svg)")
+        end
+
+        seekstart(io)
         data = base64encode(take!(io))
 
         return Dict("mime" => "image/$fmt", "data" => data)
@@ -191,9 +204,13 @@ end
 # Uncomment to enable Revise.jl:
 # _pdv_setup_revise()
 
-# Uncomment to set up Plots (kept disabled in stub to avoid backend issues during headless tests):
-# _pdv_setup_plots(capture_mode=false)
+# Check if capture mode is enabled via environment variable
+_capture_mode = get(ENV, "PDV_CAPTURE_MODE", "") == "true"
+
+# Configure Plots backend
+_pdv_setup_plots(_capture_mode)
 
 println("Physics Data Viewer Julia kernel initialized.")
 println("  - pdv_show(): Capture current plot")
 println("  - pdv_info(obj): Get object metadata")
+println("  - Capture mode: $(_capture_mode ? \"enabled\" :  \"disabled\")")

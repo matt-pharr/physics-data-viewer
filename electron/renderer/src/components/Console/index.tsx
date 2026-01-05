@@ -51,6 +51,7 @@ export const Console: React.FC<ConsoleProps> = ({ logs, onClear, onExport }) => 
 const LogEntryView: React.FC<{ log: LogEntry; index: number }> = ({ log, index }) => {
   const timestamp = useMemo(() => new Date(log.timestamp).toLocaleTimeString(), [log.timestamp]);
   const hasResult = log.result !== undefined;
+  const hasImages = log.images && log.images.length > 0;
 
   return (
     <div className="log-entry">
@@ -68,6 +69,18 @@ const LogEntryView: React.FC<{ log: LogEntry; index: number }> = ({ log, index }
       {log.stderr && <pre className="log-stderr">{log.stderr}</pre>}
       {hasResult && <pre className="log-result">{formatResult(log.result)}</pre>}
       {log.error && <pre className="log-error">Error: {log.error}</pre>}
+      {hasImages && (
+        <div className="log-images">
+          {log.images?.map((img, idx) => (
+            <img
+              key={`${log.id}-img-${idx}`}
+              className="log-image"
+              src={`data:${img.mime};base64,${img.data}`}
+              alt={`Result ${index} image ${idx + 1}`}
+            />
+          ))}
+        </div>
+      )}
     </div>
   );
 };
