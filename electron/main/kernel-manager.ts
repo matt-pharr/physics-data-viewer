@@ -16,6 +16,7 @@ import {
   KernelCompleteResult,
   KernelInspectResult,
 } from './ipc';
+import { loadConfig } from './config';
 
 interface ConnectionInfo {
   transport: string;
@@ -57,6 +58,7 @@ interface ManagedKernel {
   startedAt: number;
   lastActivity: number;
   executionCount: number;
+  executing: boolean;
 }
 
 interface ExecutionOptions {
@@ -230,6 +232,8 @@ export class KernelManager {
   async start(spec?: Partial<KernelSpec>): Promise<KernelInfo> {
     const language = spec?.language || 'python';
     const kernelName = spec?.name || (language === 'python' ? 'python3' : 'julia');
+    const config = loadConfig();
+    const captureMode = config.plotMode === 'capture';
 
     const kernelId = crypto.randomUUID();
     const sessionId = crypto.randomUUID();
@@ -264,9 +268,16 @@ export class KernelManager {
       console.log('[KernelManager] Launching kernel:', argv);
 
       // Spawn kernel process
+      const env = {
+        ...process.env,
+        ...spec?.env,
+        PDV_CAPTURE_MODE: captureMode ? 'true' : 'false',
+      };
+
       const kernelProcess = spawn(argv[0], argv.slice(1), {
-        env: { ...process.env, ...spec?.env },
+        env,
         stdio: ['ignore', 'pipe', 'pipe'],
+        cwd: config.cwd || process.cwd(),
       });
 
       // Log kernel output for debugging
@@ -324,6 +335,7 @@ export class KernelManager {
         startedAt: Date.now(),
         lastActivity: Date.now(),
         executionCount: 0,
+        executing: false,
       };
 
       this.kernels.set(kernelId, managed);
@@ -498,10 +510,14 @@ export class KernelManager {
     if (!managed) {
       throw new Error(`Kernel not found: ${id}`);
     }
+    if (managed.executing) {
+      return { error: 'Kernel busy; please wait for the current execution to finish.', duration: 0 };
+    }
 
     const startTime = Date.now();
     managed.info.status = 'busy';
     managed.lastActivity = startTime;
+    managed.executing = true;
 
     const result: KernelExecuteResult = {
       stdout: '',
@@ -574,8 +590,16 @@ export class KernelManager {
           result.result = data?.['text/plain'] ?? data;
         } else if (msgType === 'display_data') {
           const data = (content as any).data;
-          if (options.capture && data?.['image/png']) {
-            result.images?.push({ mime: 'image/png', data: data['image/png'] });
+          const hasPng = data?.['image/png'];
+          const hasSvg = data?.['image/svg+xml'];
+          if (hasPng || hasSvg) {
+            result.images = result.images || [];
+            if (hasPng) {
+              result.images.push({ mime: 'image/png', data: data['image/png'] });
+            }
+            if (hasSvg) {
+              result.images.push({ mime: 'image/svg+xml', data: data['image/svg+xml'] });
+            }
           }
           if (data?.['text/html']) {
             result.rich = { ...(result.rich || {}), 'text/html': data['text/html'] };
@@ -601,6 +625,7 @@ export class KernelManager {
     } finally {
       managed.info.status = 'idle';
       managed.lastActivity = Date.now();
+      managed.executing = false;
       result.duration = Date.now() - startTime;
 
       if (result.stdout === '') result.stdout = undefined;

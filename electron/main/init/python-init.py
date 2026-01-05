@@ -5,15 +5,8 @@ This file is executed when a Python kernel starts.
 It sets up the environment, configures plot backends, and defines helper functions.
 """
 
-# =============================================================================
-# Standard Imports (always available in namespace)
-# =============================================================================
-
-# Uncomment these once real kernel integration is done:
-# import sys
-# import os
-# import io
-# import base64
+import sys
+import os
 
 # =============================================================================
 # Matplotlib Backend Configuration
@@ -25,52 +18,54 @@ def _pdv_setup_matplotlib(capture_mode=False):
 
     Args:
         capture_mode: If True, use Agg backend for image capture.
-                      If False, use interactive backend (Qt/MacOSX/Tk).
+                     If False, use interactive backend.
     """
     try:
         import matplotlib
 
         if capture_mode:
-            # Non-interactive backend for capturing figures
             matplotlib.use('Agg')
             print("[PDV] Matplotlib backend: Agg (capture mode)")
         else:
             # Try interactive backends in order of preference
-            backends_to_try = ['QtAgg', 'Qt5Agg', 'MacOSX', 'TkAgg', 'Agg']
+            backends_to_try = ['QtAgg', 'Qt5Agg', 'MacOSX', 'TkAgg']
 
             for backend in backends_to_try:
                 try:
                     matplotlib.use(backend)
-                    print(f"[PDV] Matplotlib backend: {backend}")
+                    print(f"[PDV] Matplotlib backend: {backend} (native mode)")
                     break
                 except Exception:
                     continue
             else:
-                print("[PDV] Warning: No interactive matplotlib backend available")
+                matplotlib.use('Agg')
+                print("[PDV] Warning: No interactive backend available, using Agg")
 
     except ImportError:
-        print("[PDV] Matplotlib not installed")
+        print("[PDV] Warning: matplotlib not installed")
 
 # =============================================================================
 # Plot Capture Helper
 # =============================================================================
 
-def pdv_show(fig=None, fmt='png', dpi=100):
+def pdv_show(fig=None, fmt='png', dpi=100, close=True):
     """
-    Capture a matplotlib figure and return it as base64 for display in PDV UI.
+    Capture a matplotlib figure and return it as base64 for display in PDV.
 
     Args:
         fig: The figure to capture. If None, uses the current figure.
         fmt: Output format ('png' or 'svg').
         dpi: Resolution for raster formats.
+        close: If True, close the figure after capture.
 
     Returns:
         dict: {'mime': 'image/png', 'data': '<base64 string>'}
+             or {'error': '<error message>'}
 
     Example:
         >>> import matplotlib.pyplot as plt
         >>> plt.plot([1, 2, 3], [1, 4, 9])
-        >>> pdv_show()  # Captures and returns the figure
+        >>> result = pdv_show()  # Captures and returns the figure
     """
     try:
         import matplotlib.pyplot as plt
@@ -80,21 +75,85 @@ def pdv_show(fig=None, fmt='png', dpi=100):
         if fig is None:
             fig = plt.gcf()
 
+        if not fig.get_axes():
+            return {'error': 'No plot to capture (figure is empty)'}
+
         buf = io.BytesIO()
         fig.savefig(buf, format=fmt, dpi=dpi, bbox_inches='tight')
         buf.seek(0)
         data = base64.b64encode(buf.read()).decode('utf-8')
         buf.close()
 
-        # Optionally close the figure to free memory
-        # plt.close(fig)
+        if close:
+            plt.close(fig)
 
         return {'mime': f'image/{fmt}', 'data': data}
 
     except ImportError:
         return {'error': 'matplotlib not installed'}
     except Exception as e:
-        return {'error': str(e)}
+        return {'error': f'Failed to capture plot: {str(e)}'}
+
+# =============================================================================
+# Auto-Capture Hook
+# =============================================================================
+
+_pdv_original_show = None
+_pdv_capture_mode = False
+
+def _pdv_enable_auto_capture():
+    """
+    Monkey-patch plt.show() to automatically capture in capture mode.
+    Uses IPython display() to send display_data message to frontend.
+    """
+    global _pdv_original_show, _pdv_capture_mode
+
+    try:
+        import matplotlib.pyplot as plt
+
+        if _pdv_original_show is None:
+            _pdv_original_show = plt.show
+
+        _pdv_capture_mode = True
+
+        def _captured_show(*args, **kwargs):
+            """Replacement for plt.show() that captures instead of displaying"""
+            _ = (args, kwargs)
+            result = pdv_show(close=False)
+
+            if 'error' not in result:
+                # Send display_data message via IPython if available
+                try:
+                    from IPython.display import display, Image
+                    import base64
+                    img_data = base64.b64decode(result['data'])
+                    display(Image(data=img_data, format='png'))
+                except ImportError:
+                    # No IPython, just print result
+                    print(f"[PDV] Plot captured: {result['mime']}")
+            else:
+                print(f"[PDV] Error capturing plot: {result['error']}")
+
+            return result
+
+        plt.show = _captured_show
+        print("[PDV] Auto-capture enabled: plt.show() will capture plots")
+
+    except ImportError:
+        print("[PDV] Warning: matplotlib not available for auto-capture")
+
+def _pdv_disable_auto_capture():
+    """Restore original plt.show() behavior"""
+    global _pdv_original_show, _pdv_capture_mode
+
+    if _pdv_original_show is not None:
+        try:
+            import matplotlib.pyplot as plt
+            plt.show = _pdv_original_show
+            _pdv_capture_mode = False
+            print("[PDV] Auto-capture disabled: plt.show() restored to native")
+        except ImportError:
+            pass
 
 # =============================================================================
 # Data Inspection Helpers
@@ -191,9 +250,17 @@ def pdv_namespace():
 # Initialization
 # =============================================================================
 
-# Set up matplotlib with native windows by default (disabled in stub to avoid backend issues in headless tests)
-# _pdv_setup_matplotlib(capture_mode=False)  # Enable when running with a GUI backend
+# Check if capture mode is enabled via environment variable
+_capture_mode = os.environ.get('PDV_CAPTURE_MODE', '').lower() == 'true'
+
+# Configure matplotlib backend
+_pdv_setup_matplotlib(capture_mode=_capture_mode)
+
+# Enable auto-capture if in capture mode
+if _capture_mode:
+    _pdv_enable_auto_capture()
 
 print("Physics Data Viewer Python kernel initialized.")
 print("  - pdv_show(): Capture current figure")
 print("  - pdv_info(obj): Get object metadata")
+print(f"  - Capture mode: {'enabled' if _capture_mode else 'disabled'}")

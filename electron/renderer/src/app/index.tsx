@@ -161,6 +161,16 @@ const App: React.FC = () => {
     setLastError(undefined);
   };
 
+  const handlePlotModeChange = async (mode: PlotMode) => {
+    setPlotMode(mode);
+    if (config) {
+      const next = { ...config, plotMode: mode };
+      setConfig(next);
+      await window.pdv.config.set({ plotMode: mode });
+      await startKernel(next);
+    }
+  };
+
   const handleExecute = async (code: string) => {
     if (!currentKernelId || !code.trim()) return;
 
@@ -295,27 +305,13 @@ const App: React.FC = () => {
              <span>Plot: </span>
              <button
                className={`toggle ${plotMode === 'native' ? 'active' : ''}`}
-               onClick={async () => {
-                 setPlotMode('native');
-                 if (config) {
-                   const next = { ...config, plotMode: 'native' };
-                   setConfig(next);
-                   await window.pdv.config.set({ plotMode: 'native' });
-                 }
-               }}
+               onClick={() => handlePlotModeChange('native')}
              >
                Native
              </button>
              <button
                className={`toggle ${plotMode === 'capture' ? 'active' : ''}`}
-               onClick={async () => {
-                 setPlotMode('capture');
-                 if (config) {
-                   const next = { ...config, plotMode: 'capture' };
-                   setConfig(next);
-                   await window.pdv.config.set({ plotMode: 'capture' });
-                 }
-               }}
+               onClick={() => handlePlotModeChange('capture')}
              >
                Capture
              </button>

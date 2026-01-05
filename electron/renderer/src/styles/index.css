@@ -510,6 +510,25 @@ body {
   font-weight: 600;
 }
 
+.log-images {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 6px 0;
+}
+
+.log-image {
+  width: auto;
+  max-width: min(100%, 720px);
+  max-height: 50vh;
+  height: auto;
+  object-fit: contain;
+  align-self: flex-start;
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  background-color: #111;
+}
+
 /* ===== COMMAND PANE ===== */
 .command-pane {
   min-height: 180px;
