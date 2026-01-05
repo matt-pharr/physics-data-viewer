@@ -31,6 +31,11 @@ export const TreeNodeRow: React.FC<TreeNodeRowProps> = ({
   style,
 }) => {
   const icon = TYPE_ICONS[node.type] || TYPE_ICONS.unknown;
+  const toggleLabel = node.hasChildren
+    ? node.isExpanded
+      ? `Collapse ${node.key}`
+      : `Expand ${node.key}`
+    : `${node.key} has no children`;
 
   const handleExpandClick = (e: React.MouseEvent) => {
     e.stopPropagation();
@@ -54,8 +59,15 @@ export const TreeNodeRow: React.FC<TreeNodeRowProps> = ({
           className={`tree-toggle ${node.hasChildren ? '' : 'hidden'}`}
           onClick={handleExpandClick}
           disabled={!node.hasChildren}
+          aria-label={toggleLabel}
         >
-          {node.isLoading ? <span className="spinner">⏳</span> : node.isExpanded ? '▼' : '▶'}
+          {node.isLoading ? (
+            <span className="spinner" role="status" aria-label="Loading children" />
+          ) : node.isExpanded ? (
+            <span aria-hidden="true">▼</span>
+          ) : (
+            <span aria-hidden="true">▶</span>
+          )}
         </button>
 
         <span className="tree-icon">{icon}</span>

@@ -14,7 +14,7 @@ export const ContextMenu: React.FC<ContextMenuProps> = ({ x, y, node, onAction, 
 
   useEffect(() => {
     const handleClickOutside = (e: MouseEvent) => {
-      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
+      if (menuRef.current && e.target && !menuRef.current.contains(e.target as Node)) {
         onClose();
       }
     };
@@ -35,9 +35,17 @@ export const ContextMenu: React.FC<ContextMenuProps> = ({ x, y, node, onAction, 
   }, [onClose]);
 
   const actions = getActionsForNode(node);
+  const menuWidth = 180;
+  const estimatedHeight = actions.length * 32;
+  const clampedX = Math.max(0, Math.min(x, window.innerWidth - menuWidth));
+  const clampedY = Math.max(0, Math.min(y, window.innerHeight - estimatedHeight));
 
   return (
-    <div ref={menuRef} className="context-menu" style={{ position: 'fixed', top: y, left: x }}>
+    <div
+      ref={menuRef}
+      className="context-menu"
+      style={{ position: 'fixed', top: clampedY, left: clampedX }}
+    >
       {actions.map((action) => (
         <button
           key={action.id}
