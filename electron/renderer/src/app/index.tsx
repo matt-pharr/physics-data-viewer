@@ -90,7 +90,7 @@ const App: React.FC = () => {
       logEntry.error = error instanceof Error ? error.message : String(error);
       setLastError(logEntry.error);
     } finally {
-      setLogs((prev) => [logEntry, ...prev]);
+      setLogs((prev) => [...prev, logEntry]);
       if (typeof logEntry.duration === 'number') {
         setLastDuration(logEntry.duration);
       }

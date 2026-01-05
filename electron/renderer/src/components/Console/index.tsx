@@ -12,7 +12,7 @@ export const Console: React.FC<ConsoleProps> = ({ logs, onClear, onExport }) => 
 
   useEffect(() => {
     if (contentRef.current) {
-      contentRef.current.scrollTop = 0;
+      contentRef.current.scrollTop = contentRef.current.scrollHeight;
     }
   }, [logs.length]);
 
@@ -40,7 +40,7 @@ export const Console: React.FC<ConsoleProps> = ({ logs, onClear, onExport }) => 
           </div>
         ) : (
           logs.map((log, index) => (
-            <LogEntryView key={log.id} log={log} index={logs.length - index} />
+            <LogEntryView key={log.id} log={log} index={index + 1} />
           ))
         )}
       </div>
