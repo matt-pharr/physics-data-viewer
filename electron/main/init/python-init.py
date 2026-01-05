@@ -191,8 +191,8 @@ def pdv_namespace():
 # Initialization
 # =============================================================================
 
-# Set up matplotlib with native windows by default
-# _pdv_setup_matplotlib(capture_mode=False)
+# Set up matplotlib with native windows by default (disabled in stub to avoid backend issues in headless tests)
+# _pdv_setup_matplotlib(capture_mode=False)  # Enable when running with a GUI backend
 
 print("Physics Data Viewer Python kernel initialized.")
 print("  - pdv_show(): Capture current figure")

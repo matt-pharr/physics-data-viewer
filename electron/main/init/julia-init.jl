@@ -191,7 +191,7 @@ end
 # Uncomment to enable Revise.jl:
 # _pdv_setup_revise()
 
-# Uncomment to set up Plots:
+# Uncomment to set up Plots (kept disabled in stub to avoid backend issues during headless tests):
 # _pdv_setup_plots(capture_mode=false)
 
 println("Physics Data Viewer Julia kernel initialized.")

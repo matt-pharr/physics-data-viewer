@@ -16,6 +16,7 @@ import {
   KernelInspectResult,
 } from './ipc';
 
+// 1x1 transparent PNG placeholder used when capture mode is requested
 const STUB_IMAGE_DATA =
   'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==';
 
@@ -255,8 +256,12 @@ export class KernelManager {
         timeout: 30000,
       });
 
+      const hasPlotCall =
+        !!request.code.match(/plt\.show\s*\(|matplotlib\.pyplot\.show\s*\(|plt\.savefig\s*\(/) ||
+        !!result.stdout?.includes('plt.show');
+
       // Handle capture mode for plots
-      if (request.capture && (result.stdout?.includes('plt.show') || request.code.includes('plt.show'))) {
+      if (request.capture && hasPlotCall) {
         result.images = [
           {
             mime: 'image/png',
@@ -328,11 +333,11 @@ export class KernelManager {
       }
 
       // Handle simple expressions
-      const expressionMatch = trimmed.match(/^(\d+)\s*([\+\-\*\/])\s*(\d+)$/);
+      const expressionMatch = trimmed.match(/^(\d+\.?\d*)\s*([\+\-\*\/])\s*(\d+\.?\d*)$/);
       if (expressionMatch) {
-        const left = Number(expressionMatch[1]);
+        const left = Number.parseFloat(expressionMatch[1]);
         const operator = expressionMatch[2];
-        const right = Number(expressionMatch[3]);
+        const right = Number.parseFloat(expressionMatch[3]);
 
         switch (operator) {
           case '+':
@@ -345,7 +350,11 @@ export class KernelManager {
             result.result = left * right;
             break;
           case '/':
-            result.result = right !== 0 ? left / right : Infinity;
+            if (right === 0) {
+              result.error = 'Division by zero';
+            } else {
+              result.result = left / right;
+            }
             break;
           default:
             break;
