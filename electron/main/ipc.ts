@@ -260,6 +260,8 @@ export interface ScriptRunResult {
   result?: unknown;
   error?: string;
   duration?: number;
+  stdout?: string;
+  stderr?: string;
 }
 
 export interface ScriptParameter {

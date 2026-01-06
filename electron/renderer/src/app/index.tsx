@@ -236,6 +236,8 @@ const App: React.FC = () => {
         logEntry.result = result.result;
         logEntry.duration = result.duration;
       }
+      logEntry.stdout = result.stdout;
+      logEntry.stderr = result.stderr;
       setLogs((prev) => [...prev, logEntry]);
       setNamespaceRefreshToken((prev) => prev + 1);
     } catch (error) {

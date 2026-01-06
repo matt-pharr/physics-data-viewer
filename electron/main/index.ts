@@ -417,6 +417,8 @@ if (!canRegisterHandlers) {
         return {
           success: false,
           error: result.error,
+          stdout: result.stdout,
+          stderr: result.stderr,
           duration: Date.now() - startTime,
         };
       }
@@ -424,6 +426,8 @@ if (!canRegisterHandlers) {
       return {
         success: true,
         result: result.result,
+        stdout: result.stdout,
+        stderr: result.stderr,
         duration: Date.now() - startTime,
       };
     } catch (error) {
