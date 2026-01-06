@@ -3,44 +3,41 @@ import { treeService, type TreeNodeData } from '../../services/tree';
 import { TreeNodeRow } from './TreeNodeRow';
 import { ContextMenu } from './ContextMenu';
 
+interface TreeProps {
+  onAction?: (action: string, node: TreeNodeData) => void;
+}
+
 interface ContextMenuState {
   x: number;
   y: number;
   node: TreeNodeData;
 }
 
-export const Tree: React.FC = () => {
+export const Tree: React.FC<TreeProps> = ({ onAction }) => {
   const [nodes, setNodes] = useState<TreeNodeData[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | undefined>();
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
 
-  useEffect(() => {
-    let mounted = true;
-    const load = async () => {
-      setLoading(true);
-      setError(undefined);
-      try {
-        const rootNodes = await treeService.getRootNodes();
-        if (mounted) {
-          setNodes(rootNodes);
-        }
-      } catch (err) {
-        console.error('[Tree] Failed to load root nodes', err);
-        if (mounted) {
-          setError('Failed to load tree');
-        }
-      } finally {
-        if (mounted) {
-          setLoading(false);
-        }
-      }
-    };
+  const loadRoot = async (force?: boolean) => {
+    setLoading(true);
+    setError(undefined);
+    if (force) {
+      treeService.clearCache();
+    }
+    try {
+      const rootNodes = await treeService.getRootNodes();
+      setNodes(rootNodes);
+    } catch (err) {
+      console.error('[Tree] Failed to load root nodes', err);
+      setError('Failed to load tree');
+    } finally {
+      setLoading(false);
+    }
+  };
 
-    void load();
-    return () => {
-      mounted = false;
-    };
+  useEffect(() => {
+    void loadRoot();
   }, []);
 
   const updateNode = (list: TreeNodeData[], path: string, updater: (n: TreeNodeData) => TreeNodeData) =>
@@ -91,8 +88,12 @@ export const Tree: React.FC = () => {
   };
 
   const handleContextAction = (action: string, node: TreeNodeData) => {
-    console.log('[Tree] Action:', action, node);
     setContextMenu(null);
+    if (action === 'refresh') {
+      void loadRoot(true);
+      return;
+    }
+    onAction?.(action, node);
   };
 
   const flatNodes = useMemo(() => flattenTree(nodes), [nodes]);

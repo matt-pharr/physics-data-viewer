@@ -291,6 +291,7 @@ export class KernelManager {
         ...process.env,
         ...spec?.env,
         PDV_CAPTURE_MODE: captureMode ? 'true' : 'false',
+        PDV_PROJECT_ROOT: config.projectRoot || config.cwd || process.cwd(),
       };
 
       const kernelProcess = spawn(argv[0], argv.slice(1), {
