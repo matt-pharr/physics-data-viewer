@@ -675,6 +675,11 @@ function buildTreeQueryCode(path: string): string {
   return ['from IPython.display import JSON as PDVJSON', `PDVJSON(pdv_tree_snapshot(${safePath}))`].join('\n');
 }
 
+/**
+ * Normalize kernel results that may arrive as JSON objects or doubly-quoted strings.
+ * Handles cases where kernels emit JSON strings wrapped in single/double quotes or
+ * double-encoded JSON payloads, returning the parsed object when possible.
+ */
 function parseJsonResult(raw: unknown): any {
   let namespaceData: unknown = raw;
   if (typeof namespaceData === 'string') {

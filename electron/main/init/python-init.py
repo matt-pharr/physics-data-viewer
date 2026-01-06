@@ -182,10 +182,10 @@ def _pdv_node_type(value, info):
         return 'dataframe'
     if info.get('dtype') and info.get('shape') is not None:
         return 'ndarray'
-    if isinstance(value, str):
-        return 'string'
     if isinstance(value, bool):
         return 'boolean'
+    if isinstance(value, str):
+        return 'string'
     if value is None:
         return 'none'
     if isinstance(value, (int, float, complex)):
