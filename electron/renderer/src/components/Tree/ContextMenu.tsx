@@ -78,9 +78,9 @@ function getActionsForNode(node: TreeNodeData) {
       { id: 'reload', label: 'Reload', disabled: false },
       { id: 'view_source', label: 'View Source', disabled: false },
     );
-  } else if (node.type === 'folder') {
-    actions.push({ id: 'refresh', label: 'Refresh', disabled: false });
   } else {
+    actions.push({ id: 'refresh', label: 'Refresh', disabled: false });
+    actions.push({ id: 'create_script', label: 'Create new script', disabled: false });
     actions.push({ id: 'view', label: 'View', disabled: false });
   }
 

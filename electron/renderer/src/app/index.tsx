@@ -31,6 +31,7 @@ const App: React.FC = () => {
   const rightPaneRef = useRef<HTMLDivElement | null>(null);
   const [autoRefreshNamespace, setAutoRefreshNamespace] = useState(false);
   const [namespaceRefreshToken, setNamespaceRefreshToken] = useState(0);
+  const [treeRefreshToken, setTreeRefreshToken] = useState(0);
 
   useEffect(() => {
     // Prevent double initialization in StrictMode
@@ -181,7 +182,24 @@ const App: React.FC = () => {
   const handleTreeAction = async (action: string, node: TreeNodeData) => {
     console.log('[App] Tree action:', action, node);
 
-    if (action === 'run' && node.type === 'script') {
+    if (action === 'create_script') {
+      if (!currentKernelId) {
+        setLastError('Kernel not started');
+        return;
+      }
+      const name = window.prompt('New script name?');
+      if (!name) return;
+      try {
+        const result = await window.pdv.tree.createScript(currentKernelId, node.path, name);
+        if (!result.success) {
+          setLastError(result.error);
+        } else {
+          setTreeRefreshToken((prev) => prev + 1);
+        }
+      } catch (error) {
+        setLastError(error instanceof Error ? error.message : String(error));
+      }
+    } else if (action === 'run' && node.type === 'script') {
       setScriptDialog({
         scriptPath: node.path,
         scriptName: node.key,
@@ -261,6 +279,7 @@ const App: React.FC = () => {
       }
       setIsExecuting(false);
       setNamespaceRefreshToken((prev) => prev + 1);
+      setTreeRefreshToken((prev) => prev + 1);
     }
   };
 
@@ -310,7 +329,7 @@ const App: React.FC = () => {
               />
             </div>
             <div className={`tree-panel ${activeTab === 'tree' ? 'active' : ''}`}>
-              <Tree onAction={handleTreeAction} />
+              <Tree kernelId={currentKernelId} refreshToken={treeRefreshToken} onAction={handleTreeAction} />
             </div>
             <div className={`tree-panel ${activeTab === 'modules' ? 'active' : ''}`}>
               <div className="tree-empty">Modules view (coming soon)</div>

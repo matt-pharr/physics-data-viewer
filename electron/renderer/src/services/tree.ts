@@ -4,36 +4,63 @@ import type { TreeNodeData } from '../types';
 class TreeService {
   private cache: Map<string, TreeNodeData[]> = new Map();
 
-  async getRootNodes(): Promise<TreeNodeData[]> {
-    const cached = this.cache.get('');
+  private cacheKey(kernelId: string | null, path: string) {
+    return `${kernelId || 'none'}:${path}`;
+  }
+
+  async getRootNodes(kernelId: string | null): Promise<TreeNodeData[]> {
+    if (!kernelId) return [];
+
+    const key = this.cacheKey(kernelId, '');
+    const cached = this.cache.get(key);
     if (cached) {
       return cached;
     }
 
-    const nodes = await window.pdv.tree.list('');
+    const nodes = await window.pdv.tree.list(kernelId, '');
     const enriched = nodes.map(this.enrichNode);
-    this.cache.set('', enriched);
+    this.cache.set(key, enriched);
     return enriched;
   }
 
-  async getChildren(node: TreeNodeData): Promise<TreeNodeData[]> {
+  async getChildren(node: TreeNodeData, kernelId: string | null): Promise<TreeNodeData[]> {
+    if (!kernelId) return [];
     if (!node.hasChildren) {
       return [];
     }
 
-    const cached = this.cache.get(node.path);
+    const key = this.cacheKey(kernelId, node.path);
+    const cached = this.cache.get(key);
     if (cached) {
       return cached;
     }
 
-    const nodes = await window.pdv.tree.list(node.path);
+    const nodes = await window.pdv.tree.list(kernelId, node.path);
     const enriched = nodes.map(this.enrichNode);
-    this.cache.set(node.path, enriched);
+    this.cache.set(key, enriched);
     return enriched;
   }
 
-  clearCache(): void {
-    this.cache.clear();
+  async createScript(kernelId: string, targetPath: string, scriptName: string): Promise<TreeNodeData | undefined> {
+    const result = await window.pdv.tree.createScript(kernelId, targetPath, scriptName);
+    if (!result.success) {
+      throw new Error(result.error || 'Failed to create script');
+    }
+    this.clearCache(kernelId);
+    return result.node ? this.enrichNode(result.node) : undefined;
+  }
+
+  clearCache(kernelId?: string | null): void {
+    if (!kernelId) {
+      this.cache.clear();
+      return;
+    }
+    const prefix = `${kernelId}:`;
+    for (const key of Array.from(this.cache.keys())) {
+      if (key.startsWith(prefix)) {
+        this.cache.delete(key);
+      }
+    }
   }
 
   private enrichNode = (node: TreeNode): TreeNodeData => ({

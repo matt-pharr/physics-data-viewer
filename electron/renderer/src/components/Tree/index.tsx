@@ -4,6 +4,8 @@ import { TreeNodeRow } from './TreeNodeRow';
 import { ContextMenu } from './ContextMenu';
 
 interface TreeProps {
+  kernelId: string | null;
+  refreshToken?: number;
   onAction?: (action: string, node: TreeNodeData) => void;
 }
 
@@ -13,7 +15,7 @@ interface ContextMenuState {
   node: TreeNodeData;
 }
 
-export const Tree: React.FC<TreeProps> = ({ onAction }) => {
+export const Tree: React.FC<TreeProps> = ({ kernelId, refreshToken = 0, onAction }) => {
   const [nodes, setNodes] = useState<TreeNodeData[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | undefined>();
@@ -22,11 +24,17 @@ export const Tree: React.FC<TreeProps> = ({ onAction }) => {
   const loadRoot = async (force?: boolean) => {
     setLoading(true);
     setError(undefined);
+    if (!kernelId) {
+      setNodes([]);
+      setLoading(false);
+      setError(undefined);
+      return;
+    }
     if (force) {
-      treeService.clearCache();
+      treeService.clearCache(kernelId);
     }
     try {
-      const rootNodes = await treeService.getRootNodes();
+      const rootNodes = await treeService.getRootNodes(kernelId);
       setNodes(rootNodes);
     } catch (err) {
       console.error('[Tree] Failed to load root nodes', err);
@@ -37,8 +45,8 @@ export const Tree: React.FC<TreeProps> = ({ onAction }) => {
   };
 
   useEffect(() => {
-    void loadRoot();
-  }, []);
+    void loadRoot(true);
+  }, [kernelId, refreshToken]);
 
   const updateNode = (list: TreeNodeData[], path: string, updater: (n: TreeNodeData) => TreeNodeData) =>
     list.map((node) => {
@@ -52,6 +60,7 @@ export const Tree: React.FC<TreeProps> = ({ onAction }) => {
     });
 
   const handleExpand = async (node: TreeNodeData) => {
+    if (!kernelId) return;
     if (node.isExpanded) {
       setNodes((prev) => updateNode(prev, node.path, (n) => ({ ...n, isExpanded: false })));
       return;
@@ -59,7 +68,7 @@ export const Tree: React.FC<TreeProps> = ({ onAction }) => {
 
     setNodes((prev) => updateNode(prev, node.path, (n) => ({ ...n, isLoading: true })));
     try {
-      const children = await treeService.getChildren(node);
+      const children = await treeService.getChildren(node, kernelId);
       setNodes((prev) =>
         updateNode(prev, node.path, (n) => ({
           ...n,

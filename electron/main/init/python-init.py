@@ -7,6 +7,7 @@ It sets up the environment, configures plot backends, and defines helper functio
 
 import sys
 import os
+import re
 
 MAX_COLUMNS = 20
 MAX_PREVIEW_LENGTH = 100
@@ -93,6 +94,20 @@ class PDVTree(dict):
             dict.__setitem__(self, key, value)
 
 
+class PDVScript:
+    """Lightweight script wrapper stored inside the PDV tree"""
+
+    def __init__(self, file_path, language='python', doc=None):
+        self.file_path = file_path
+        self.language = language
+        self.doc = doc if doc is not None else _pdv_extract_docstring(file_path)
+
+    def preview(self):
+        if self.doc:
+            return self.doc.split('\n')[0]
+        return "PDV script"
+
+
 # Create global tree instance
 tree = PDVTree()
 
@@ -107,6 +122,152 @@ if 'scripts' not in tree:
     tree['scripts'] = PDVTree()
 if 'results' not in tree:
     tree['results'] = PDVTree()
+
+
+# =============================================================================
+# Tree Helpers
+# =============================================================================
+
+def _pdv_extract_docstring(file_path):
+    try:
+        with open(file_path, 'r', encoding='utf-8') as f:
+            content = f.read()
+        match = re.search(r'^"""([\s\S]*?)"""', content, re.M)
+        if not match:
+            match = re.search(r"^'''([\s\S]*?)'''", content, re.M)
+        if match:
+            return match.group(1).strip().split('\n')[0]
+    except Exception:
+        return None
+    return None
+
+
+def _pdv_resolve_tree_path(path):
+    if not path:
+        return tree
+    parts = [p for p in path.split('.') if p]
+    obj = tree
+    for part in parts:
+        if isinstance(obj, dict) and part in obj:
+            obj = obj[part]
+        elif isinstance(obj, (list, tuple)):
+            try:
+                idx = int(part)
+                obj = obj[idx]
+            except Exception:
+                return None
+        elif isinstance(obj, set):
+            try:
+                idx = int(part)
+                obj = list(sorted(obj, key=lambda x: repr(x)))[idx]
+            except Exception:
+                return None
+        else:
+            return None
+    return obj
+
+
+def _pdv_node_type(value, info):
+    if isinstance(value, PDVScript):
+        return 'script'
+    if isinstance(value, dict):
+        return 'dict'
+    if isinstance(value, list):
+        return 'list'
+    if isinstance(value, tuple):
+        return 'tuple'
+    if isinstance(value, set):
+        return 'set'
+    if info.get('columns'):
+        return 'dataframe'
+    if info.get('dtype') and info.get('shape') is not None:
+        return 'ndarray'
+    if isinstance(value, str):
+        return 'string'
+    if isinstance(value, bool):
+        return 'boolean'
+    if value is None:
+        return 'none'
+    if isinstance(value, (int, float, complex)):
+        return 'number'
+    return str(info.get('type') or type(value).__name__).lower() or 'unknown'
+
+
+def _pdv_make_node(name, value, base_path):
+    path = name if not base_path else f"{base_path}.{name}"
+    try:
+        info = pdv_info(value)
+    except Exception:
+        info = {'type': type(value).__name__, 'preview': repr(value)[:80]}
+    node_type = _pdv_node_type(value, info)
+    has_children = node_type in ('dict', 'list', 'tuple', 'set')
+    if node_type == 'ndarray' and info.get('shape'):
+        has_children = len(info.get('shape') or []) > 1
+    preview = info.get('preview')
+    if isinstance(value, PDVScript):
+        preview = value.preview()
+    elif node_type == 'dict':
+        preview = preview or f"dict ({len(value)} items)"
+    elif node_type in ('list', 'tuple', 'set'):
+        preview = preview or f"{node_type} ({len(value)})"
+    elif node_type == 'dataframe' and info.get('shape'):
+        preview = preview or f"DataFrame ({info['shape'][0]} x {info['shape'][1]})"
+
+    node = {
+        'id': path,
+        'key': str(name),
+        'path': path,
+        'type': node_type,
+        'preview': preview,
+        'hasChildren': has_children,
+        'shape': info.get('shape'),
+        'dtype': info.get('dtype'),
+        'min': info.get('min'),
+        'max': info.get('max'),
+        'mean': info.get('mean'),
+        'length': info.get('length'),
+        'columns': info.get('columns'),
+    }
+
+    if isinstance(value, PDVScript):
+        node['_file_path'] = value.file_path
+        node['language'] = value.language
+        node['actions'] = ['run', 'edit', 'reload', 'view_source']
+        node['hasChildren'] = False
+
+    return node
+
+
+def _pdv_children_for(obj, base_path):
+    children = []
+    if isinstance(obj, dict):
+        for key, value in obj.items():
+            children.append(_pdv_make_node(key, value, base_path))
+    elif isinstance(obj, (list, tuple)):
+        for idx, value in enumerate(obj):
+            children.append(_pdv_make_node(str(idx), value, base_path))
+    elif isinstance(obj, set):
+        for idx, value in enumerate(sorted(list(obj), key=lambda x: repr(x))):
+            children.append(_pdv_make_node(str(idx), value, base_path))
+    return children
+
+
+def pdv_tree_snapshot(path=""):
+    """Return a JSON-serializable snapshot of the PDV tree at a path"""
+    target = _pdv_resolve_tree_path(path)
+    if target is None:
+        return []
+    return _pdv_children_for(target, path)
+
+
+def pdv_register_script(parent_path, name, file_path, language='python'):
+    """Attach a PDVScript to the tree at the given parent path"""
+    parent = _pdv_resolve_tree_path(parent_path)
+    if parent is None or not isinstance(parent, dict):
+        return False
+    script_name = name or os.path.splitext(os.path.basename(file_path))[0]
+    parent[script_name] = PDVScript(file_path=file_path, language=language)
+    return True
 
 # =============================================================================
 # Matplotlib Backend Configuration

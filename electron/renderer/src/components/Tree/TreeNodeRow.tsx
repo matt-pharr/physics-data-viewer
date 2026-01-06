@@ -7,6 +7,15 @@ const TYPE_ICONS: Record<string, string> = {
   script: '📜',
   ndarray: '🔢',
   dataframe: '📊',
+  series: '📈',
+  dict: '🗂️',
+  list: '🧾',
+  tuple: '🧾',
+  set: '🧾',
+  string: '🔤',
+  number: '#️⃣',
+  boolean: '✔️',
+  none: '∅',
   image: '🖼️',
   json: '{ }',
   python: '🐍',
@@ -78,6 +87,7 @@ export const TreeNodeRow: React.FC<TreeNodeRowProps> = ({
 
       <div className="tree-col type">
         <span className="tree-type-badge">{node.type}</span>
+        {node.language && <span className="tree-type-badge subtle">{node.language}</span>}
       </div>
 
       <div className="tree-col preview">{node.preview || '—'}</div>
