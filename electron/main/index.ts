@@ -388,10 +388,15 @@ if (!canRegisterHandlers) {
           : language === 'julia'
             ? config.editors?.julia
             : undefined) || config.editors?.default || 'open %s';
-      const cmd = editorCmd.replace('%s', `"${filePath}"`);
+      const resolvedCmd = editorCmd.replace('%s', `"${filePath}"`);
+      const parts = resolvedCmd.match(/(?:[^\s"]+|"[^"]*")+/g) || [];
+      if (parts.length === 0) {
+        return { success: false, error: 'Invalid editor command' };
+      }
+      const [command, ...commandArgs] = parts.map((part) => part.replace(/(^"|"$)/g, ''));
 
-      spawn(cmd, {
-        shell: true,
+      spawn(command, commandArgs, {
+        shell: false,
         detached: true,
         stdio: 'ignore',
       }).unref();
@@ -421,7 +426,7 @@ if (!canRegisterHandlers) {
         return { success: false, error: `Script not found: ${scriptPath}` };
       }
 
-      const content = fs.readFileSync(scriptNode._file_path, 'utf-8');
+      const content = await fs.promises.readFile(scriptNode._file_path, 'utf-8');
       const language = scriptNode.language;
 
       const params: ScriptParameter[] = [];

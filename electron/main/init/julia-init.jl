@@ -42,7 +42,14 @@ Execute a script file with parameters.
 """
 function run_script(tree::PDVTree, script_path::String; kwargs...)
     path_parts = split(script_path, '.')
+    if any(p == "" || p == "." || p == ".." || occursin("/", p) || occursin("\\", p) for p in path_parts)
+        error("Invalid script path: $script_path")
+    end
     file_path = joinpath(tree.tree_root, path_parts...) * ".jl"
+    normalized = abspath(file_path)
+    if !startswith(normalized, abspath(tree.tree_root))
+        error("Script path escapes project tree: $script_path")
+    end
 
     if !isfile(file_path)
         error("Script not found: $file_path")

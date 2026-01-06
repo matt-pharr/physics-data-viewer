@@ -47,7 +47,12 @@ class PDVTree(dict):
         import importlib.util
 
         path_parts = script_path.split('.')
+        if any(part in ('', '.', '..') or '/' in part or '\\' in part for part in path_parts):
+            raise ValueError(f"Invalid script path: {script_path}")
         file_path = os.path.join(self._tree_root, *path_parts) + '.py'
+        normalized_path = os.path.realpath(file_path)
+        if not normalized_path.startswith(os.path.realpath(self._tree_root)):
+            raise ValueError(f"Script path escapes project tree: {script_path}")
 
         if not os.path.exists(file_path):
             raise FileNotFoundError(f"Script not found: {file_path}")

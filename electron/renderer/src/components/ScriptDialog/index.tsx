@@ -51,13 +51,6 @@ export const ScriptDialog: React.FC<ScriptDialogProps> = ({
     setValues((prev) => ({ ...prev, [paramName]: value }));
   };
 
-  const handleRun = () => {
-    onRun(values);
-  };
-
-  const canRun = () =>
-    params.every((p) => !p.required || (values[p.name] !== undefined && values[p.name] !== ''));
-
   const getParamKind = (type: string): 'string' | 'int' | 'float' | 'bool' => {
     const normalized = type.toLowerCase();
     if (normalized.includes('bool')) return 'bool';
@@ -65,6 +58,22 @@ export const ScriptDialog: React.FC<ScriptDialogProps> = ({
     if (normalized.includes('float')) return 'float';
     return 'string';
   };
+
+  const isValueProvided = (param: ScriptParameter) => {
+    const value = values[param.name];
+    if (value === undefined) return false;
+    const kind = getParamKind(param.type);
+    if (kind === 'string') {
+      return value !== undefined;
+    }
+    return value !== '';
+  };
+
+  const handleRun = () => {
+    onRun(values);
+  };
+
+  const canRun = () => params.every((p) => !p.required || isValueProvided(p));
 
   return (
     <div className="modal-overlay" onClick={onCancel}>
@@ -109,7 +118,12 @@ export const ScriptDialog: React.FC<ScriptDialogProps> = ({
                           onChange={(e) =>
                             handleChange(
                               param.name,
-                              e.target.value === '' ? undefined : parseInt(e.target.value, 10),
+                              e.target.value === ''
+                                ? undefined
+                                : (() => {
+                                    const parsed = parseInt(e.target.value, 10);
+                                    return Number.isNaN(parsed) ? undefined : parsed;
+                                  })(),
                             )
                           }
                           placeholder={param.default ? String(param.default) : ''}
@@ -125,7 +139,12 @@ export const ScriptDialog: React.FC<ScriptDialogProps> = ({
                           onChange={(e) =>
                             handleChange(
                               param.name,
-                              e.target.value === '' ? undefined : parseFloat(e.target.value),
+                              e.target.value === ''
+                                ? undefined
+                                : (() => {
+                                    const parsed = parseFloat(e.target.value);
+                                    return Number.isNaN(parsed) ? undefined : parsed;
+                                  })(),
                             )
                           }
                           placeholder={param.default ? String(param.default) : ''}

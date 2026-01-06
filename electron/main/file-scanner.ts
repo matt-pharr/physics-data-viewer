@@ -107,7 +107,7 @@ export class FileScanner {
       node.actions = ['run', 'edit', 'reload', 'view_source'];
 
       try {
-        const content = fs.readFileSync(filePath, 'utf-8');
+        const content = await fs.promises.readFile(filePath, 'utf-8');
         const docstring = this.extractDocstring(content, ext);
         if (docstring) {
           node.preview = docstring;
