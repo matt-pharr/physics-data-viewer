@@ -28,6 +28,12 @@ import { loadConfig, updateConfig } from './config';
 import { spawn } from 'child_process';
 import { FileScanner } from './file-scanner';
 
+const SCRIPT_STUB = `"""New PDV script"""
+def run(tree: dict, **kwargs):
+    # add your code here
+    return {}
+`;
+
 // ============================================================================
 // Kernel Manager Instance
 // ============================================================================
@@ -319,8 +325,7 @@ if (!canRegisterHandlers) {
           return { success: false, error: `File already exists: ${fileName}` };
         }
 
-        const stub = ['\"\"\"New PDV script\"\"\"', 'def run(tree: dict, **kwargs):', '    # add your code here', '    return {}', ''].join('\n');
-        await fs.promises.writeFile(filePath, stub, 'utf-8');
+        await fs.promises.writeFile(filePath, SCRIPT_STUB, 'utf-8');
 
         // Register script inside kernel tree (best-effort)
         const registerResult = await registerScriptInKernel(kernelId, targetPath, baseName, filePath);
@@ -692,14 +697,22 @@ function parseJsonResult(raw: unknown): any {
     }
 
     const tryParse = (value: string) => {
-      const cleaned = value.replace(/\\'/g, "'");
-      return JSON.parse(cleaned);
+      try {
+        const cleaned = value.replace(/\\'/g, "'");
+        return JSON.parse(cleaned);
+      } catch {
+        return undefined;
+      }
     };
 
-    namespaceData = tryParse(serialized);
+    const parsed = tryParse(serialized);
+    namespaceData = parsed !== undefined ? parsed : namespaceData;
 
     if (typeof namespaceData === 'string') {
-      namespaceData = tryParse(namespaceData);
+      const nested = tryParse(namespaceData);
+      if (nested !== undefined) {
+        namespaceData = nested;
+      }
     }
   }
   return namespaceData;
@@ -744,6 +757,7 @@ function sanitizeScriptName(name: string): string | null {
   if (!name) return null;
   const trimmed = name.trim();
   if (!trimmed || trimmed.includes('/') || trimmed.includes('\\')) return null;
+  if (/[<>:"|?*]/.test(trimmed)) return null;
   if (trimmed.length > 200) return null;
   return trimmed.replace(/\s+/g, '_');
 }

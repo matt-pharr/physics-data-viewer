@@ -132,9 +132,9 @@ def _pdv_extract_docstring(file_path):
     try:
         with open(file_path, 'r', encoding='utf-8') as f:
             content = f.read()
-        match = re.search(r'^"""([\s\S]*?)"""', content, re.M)
+        match = re.search(r'"""([\s\S]*?)"""', content, re.M)
         if not match:
-            match = re.search(r"^'''([\s\S]*?)'''", content, re.M)
+            match = re.search(r"'''([\s\S]*?)'''", content, re.M)
         if match:
             return match.group(1).strip().split('\n')[0]
     except Exception:
