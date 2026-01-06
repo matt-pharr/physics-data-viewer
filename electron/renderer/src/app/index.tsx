@@ -5,6 +5,7 @@ import { Tree } from '../components/Tree';
 import { EnvironmentSelector } from '../components/EnvironmentSelector';
 import { NamespaceView } from '../components/NamespaceView';
 import { ScriptDialog } from '../components/ScriptDialog';
+import { CreateScriptDialog } from '../components/Tree/CreateScriptDialog';
 import type { CommandTab, LogEntry, TreeNodeData } from '../types';
 import type { Config } from '../../main/ipc';
 
@@ -32,6 +33,7 @@ const App: React.FC = () => {
   const [autoRefreshNamespace, setAutoRefreshNamespace] = useState(false);
   const [namespaceRefreshToken, setNamespaceRefreshToken] = useState(0);
   const [treeRefreshToken, setTreeRefreshToken] = useState(0);
+  const [createScriptTarget, setCreateScriptTarget] = useState<string | null>(null);
 
   useEffect(() => {
     // Prevent double initialization in StrictMode
@@ -183,22 +185,7 @@ const App: React.FC = () => {
     console.log('[App] Tree action:', action, node);
 
     if (action === 'create_script') {
-      if (!currentKernelId) {
-        setLastError('Kernel not started');
-        return;
-      }
-      const name = window.prompt('New script name?');
-      if (!name) return;
-      try {
-        const result = await window.pdv.tree.createScript(currentKernelId, node.path, name);
-        if (!result.success) {
-          setLastError(result.error);
-        } else {
-          setTreeRefreshToken((prev) => prev + 1);
-        }
-      } catch (error) {
-        setLastError(error instanceof Error ? error.message : String(error));
-      }
+      setCreateScriptTarget(node.path);
     } else if (action === 'run' && node.type === 'script') {
       setScriptDialog({
         scriptPath: node.path,
@@ -376,6 +363,27 @@ const App: React.FC = () => {
           scriptName={scriptDialog.scriptName}
           onRun={handleScriptRun}
           onCancel={() => setScriptDialog(null)}
+        />
+      )}
+
+      {createScriptTarget && currentKernelId && (
+        <CreateScriptDialog
+          parentPath={createScriptTarget}
+          onCancel={() => setCreateScriptTarget(null)}
+          onCreate={async (name) => {
+            try {
+              const result = await window.pdv.tree.createScript(currentKernelId, createScriptTarget, name);
+              if (!result.success) {
+                setLastError(result.error);
+              } else {
+                setTreeRefreshToken((prev) => prev + 1);
+              }
+            } catch (error) {
+              setLastError(error instanceof Error ? error.message : String(error));
+            } finally {
+              setCreateScriptTarget(null);
+            }
+          }}
         />
       )}
 

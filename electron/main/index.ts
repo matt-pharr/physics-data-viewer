@@ -26,6 +26,7 @@ import {
 import { getKernelManager, resetKernelManager } from './kernel-manager';
 import { loadConfig, updateConfig } from './config';
 import { spawn } from 'child_process';
+import * as os from 'os';
 import { FileScanner } from './file-scanner';
 
 const SCRIPT_STUB = `"""New PDV script"""
@@ -325,7 +326,20 @@ if (!canRegisterHandlers) {
           return { success: false, error: `File already exists: ${fileName}` };
         }
 
-        await fs.promises.writeFile(filePath, SCRIPT_STUB, 'utf-8');
+        const now = new Date();
+        const header = [
+          '"""',
+          `${fileName}`,
+          `created by ${os.userInfo().username} on ${os.hostname()} at ${String(now.getHours()).padStart(2, '0')}:${String(
+            now.getMinutes(),
+          ).padStart(2, '0')}`,
+          'Description: ',
+          '',
+          '"""',
+          '',
+        ].join('\n');
+        const stub = `${header}${SCRIPT_STUB}`;
+        await fs.promises.writeFile(filePath, stub, 'utf-8');
 
         // Register script inside kernel tree (best-effort)
         const registerResult = await registerScriptInKernel(kernelId, targetPath, baseName, filePath);

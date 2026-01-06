@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { treeService, type TreeNodeData } from '../../services/tree';
 import { TreeNodeRow } from './TreeNodeRow';
 import { ContextMenu } from './ContextMenu';
@@ -21,6 +21,7 @@ export const Tree: React.FC<TreeProps> = ({ kernelId, refreshToken = 0, onAction
   const [error, setError] = useState<string | undefined>();
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
   const [selectedPath, setSelectedPath] = useState<string | null>(null);
+  const expandedPathsRef = useRef<Set<string>>(new Set());
 
   const loadRoot = async (force?: boolean) => {
     setLoading(true);
@@ -36,7 +37,8 @@ export const Tree: React.FC<TreeProps> = ({ kernelId, refreshToken = 0, onAction
     }
     try {
       const rootNodes = await treeService.getRootNodes(kernelId);
-      setNodes(rootNodes);
+      const restored = await restoreExpandedTree(rootNodes, expandedPathsRef.current, kernelId);
+      setNodes(restored);
     } catch (err) {
       console.error('[Tree] Failed to load root nodes', err);
       setError('Failed to load tree');
@@ -64,12 +66,15 @@ export const Tree: React.FC<TreeProps> = ({ kernelId, refreshToken = 0, onAction
     if (!kernelId) return;
     if (node.isExpanded) {
       setNodes((prev) => updateNode(prev, node.path, (n) => ({ ...n, isExpanded: false })));
+      expandedPathsRef.current.delete(node.path);
       return;
     }
 
+    expandedPathsRef.current.add(node.path);
     setNodes((prev) => updateNode(prev, node.path, (n) => ({ ...n, isLoading: true })));
     try {
       const children = await treeService.getChildren(node, kernelId);
+      expandedPathsRef.current.add(node.path);
       setNodes((prev) =>
         updateNode(prev, node.path, (n) => ({
           ...n,
@@ -187,4 +192,64 @@ function flattenTree(nodes: TreeNodeData[], depth = 0): Array<TreeNodeData & { d
   }
 
   return result;
+}
+
+async function restoreExpandedTree(
+  rootNodes: TreeNodeData[],
+  expanded: Set<string>,
+  kernelId: string,
+): Promise<TreeNodeData[]> {
+  let current = rootNodes;
+  const paths = Array.from(expanded).sort((a, b) => a.split('.').length - b.split('.').length);
+
+  for (const path of paths) {
+    const target = findNode(current, path);
+    if (!target) continue;
+    try {
+      const children = await treeService.getChildren(target, kernelId);
+      current = updateNodeImmut(current, path, (n) => ({ ...n, isExpanded: true, children }));
+    } catch (error) {
+      console.warn('[Tree] Failed to restore expanded path', path, error);
+    }
+  }
+
+  return current;
+}
+
+function findNode(nodes: TreeNodeData[], path: string): TreeNodeData | undefined {
+  for (const node of nodes) {
+    if (node.path === path) return node;
+    if (node.children) {
+      const found = findNode(node.children, path);
+      if (found) return found;
+    }
+  }
+  return undefined;
+}
+
+function updateNodeImmut(
+  list: TreeNodeData[],
+  path: string,
+  updater: (n: TreeNodeData) => TreeNodeData,
+): TreeNodeData[] {
+  return list.map((node) => {
+    if (node.path === path) {
+      return updater(node);
+    }
+    if (node.children) {
+      return { ...node, children: updateNodeImmut(node.children, path, updater) };
+    }
+    return node;
+  });
+}
+
+function applyExpandedState(nodes: TreeNodeData[], expanded: Set<string>): TreeNodeData[] {
+  return nodes.map((node) => {
+    const isExpanded = expanded.has(node.path);
+    return {
+      ...node,
+      isExpanded,
+      children: node.children ? applyExpandedState(node.children, expanded) : node.children,
+    };
+  });
 }

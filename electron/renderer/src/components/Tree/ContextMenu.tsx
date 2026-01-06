@@ -70,7 +70,7 @@ export const ContextMenu: React.FC<ContextMenuProps> = ({ x, y, node, onAction, 
 
 function getActionsForNode(node: TreeNodeData) {
   const actions: Array<{ id: string; label: string; disabled: boolean }> = [];
-  const canCreateScript = ['folder', 'dict', 'list', 'tuple', 'set', 'root'].includes(node.type);
+  const canCreateScript = node.type === 'dict' || node.type === 'folder' || node.type === 'root';
 
   if (node.type === 'script') {
     actions.push(
