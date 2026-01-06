@@ -56,7 +56,8 @@ class TreeService {
       this.cache.clear();
       return;
     }
-    const prefix = `${kernelId}:`;
+    const safeKernel = kernelId ?? '__none__';
+    const prefix = `${safeKernel}|`;
     for (const key of Array.from(this.cache.keys())) {
       if (key.startsWith(prefix)) {
         this.cache.delete(key);
