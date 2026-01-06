@@ -70,6 +70,7 @@ export const ContextMenu: React.FC<ContextMenuProps> = ({ x, y, node, onAction, 
 
 function getActionsForNode(node: TreeNodeData) {
   const actions: Array<{ id: string; label: string; disabled: boolean }> = [];
+  const canCreateScript = node.type === 'dict' || node.type === 'folder' || node.type === 'root';
 
   if (node.type === 'script') {
     actions.push(
@@ -78,9 +79,11 @@ function getActionsForNode(node: TreeNodeData) {
       { id: 'reload', label: 'Reload', disabled: false },
       { id: 'view_source', label: 'View Source', disabled: false },
     );
-  } else if (node.type === 'folder') {
-    actions.push({ id: 'refresh', label: 'Refresh', disabled: false });
   } else {
+    actions.push({ id: 'refresh', label: 'Refresh', disabled: false });
+    if (canCreateScript) {
+      actions.push({ id: 'create_script', label: 'Create new script', disabled: false });
+    }
     actions.push({ id: 'view', label: 'View', disabled: false });
   }
 

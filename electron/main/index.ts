@@ -26,7 +26,14 @@ import {
 import { getKernelManager, resetKernelManager } from './kernel-manager';
 import { loadConfig, updateConfig } from './config';
 import { spawn } from 'child_process';
+import * as os from 'os';
 import { FileScanner } from './file-scanner';
+
+const SCRIPT_STUB = `"""New PDV script"""
+def run(tree: dict, **kwargs):
+    # add your code here
+    return {}
+`;
 
 // ============================================================================
 // Kernel Manager Instance
@@ -277,16 +284,10 @@ if (!canRegisterHandlers) {
   // Tree Handlers (unchanged from Step 2)
   // ============================================================================
 
-  ipcMain.handle(IPC.tree.list, async (_event, path): Promise<TreeNode[]> => {
-    console.log('[IPC] tree:list', path);
+  ipcMain.handle(IPC.tree.list, async (_event, kernelId: string, path): Promise<TreeNode[]> => {
+    console.log('[IPC] tree:list', kernelId, path);
 
-    const scanner = getFileScanner();
-
-    if (!path || path === '' || path === 'root') {
-      return scanner.scanAll();
-    }
-
-    return scanner.getChildren(path);
+    return listTreeFromKernel(kernelId, path);
   });
 
   ipcMain.handle(IPC.tree.get, async (_event, id, options): Promise<unknown> => {
@@ -298,6 +299,72 @@ if (!canRegisterHandlers) {
     console.log('[IPC] tree:save', id, value);
     return true;
   });
+
+  ipcMain.handle(
+    IPC.tree.create_script,
+    async (_event, kernelId: string, targetPath: string, scriptName: string) => {
+      console.log('[IPC] tree:create_script', kernelId, targetPath, scriptName);
+
+      try {
+        const sanitized = sanitizeScriptName(scriptName);
+        if (!sanitized) {
+          return { success: false, error: 'Invalid script name' };
+        }
+
+        const config = loadConfig();
+        const projectRoot = config.projectRoot || config.cwd || process.cwd();
+        const treeRoot = path.join(projectRoot, 'tree');
+        const folderParts = targetPath ? targetPath.split('.').filter(Boolean) : [];
+        const folderPath = path.join(treeRoot, ...folderParts);
+        await fs.promises.mkdir(folderPath, { recursive: true });
+
+        const fileName = sanitized.endsWith('.py') ? sanitized : `${sanitized}.py`;
+        const baseName = fileName.replace(/\.py$/i, '');
+        const filePath = path.join(folderPath, fileName);
+
+        if (fs.existsSync(filePath)) {
+          return { success: false, error: `File already exists: ${fileName}` };
+        }
+
+        const now = new Date();
+        const header = [
+          '"""',
+          `${fileName}`,
+          `created by ${os.userInfo().username} on ${os.hostname()} at ${String(now.getHours()).padStart(2, '0')}:${String(
+            now.getMinutes(),
+          ).padStart(2, '0')}`,
+          'Description: ',
+          '',
+          '"""',
+          '',
+        ].join('\n');
+        const stub = `${header}${SCRIPT_STUB}`;
+        await fs.promises.writeFile(filePath, stub, 'utf-8');
+
+        // Register script inside kernel tree (best-effort)
+        const registerResult = await registerScriptInKernel(kernelId, targetPath, baseName, filePath);
+        if (registerResult?.error) {
+          console.warn('[IPC] Failed to register script in kernel:', registerResult.error);
+        }
+
+        // Open in configured editor (best-effort)
+        const language = 'python';
+        void openInEditor(filePath, language);
+
+        // Try to fetch newly created node for immediate UI update
+        const parentNodes = await listTreeFromKernel(kernelId, targetPath);
+        const fullPath = targetPath ? `${targetPath}.${baseName}` : baseName;
+        const node = parentNodes.find((n) => n.path === fullPath);
+
+        return { success: true, node };
+      } catch (error) {
+        return {
+          success: false,
+          error: error instanceof Error ? error.message : String(error),
+        };
+      }
+    },
+  );
 
   // ============================================================================
   // Script Handlers
@@ -350,6 +417,8 @@ if (!canRegisterHandlers) {
         return {
           success: false,
           error: result.error,
+          stdout: result.stdout,
+          stderr: result.stderr,
           duration: Date.now() - startTime,
         };
       }
@@ -357,6 +426,8 @@ if (!canRegisterHandlers) {
       return {
         success: true,
         result: result.result,
+        stdout: result.stdout,
+        stderr: result.stderr,
         duration: Date.now() - startTime,
       };
     } catch (error) {
@@ -379,28 +450,12 @@ if (!canRegisterHandlers) {
       }
 
       const filePath = scriptNode._file_path;
-      const config = loadConfig();
       const language = scriptNode.language || 'python';
 
-      const editorCmd =
-        (language === 'python'
-          ? config.editors?.python
-          : language === 'julia'
-            ? config.editors?.julia
-            : undefined) || config.editors?.default || 'open %s';
-      const resolvedCmd = editorCmd.replace('%s', `"${filePath}"`);
-      const parts = resolvedCmd.match(/(?:[^\s"]+|"[^"]*")+/g) || [];
-      if (parts.length === 0) {
-        return { success: false, error: 'Invalid editor command' };
+      const editorResult = openInEditor(filePath, language);
+      if (!editorResult.success && editorResult.error) {
+        return { success: false, error: editorResult.error };
       }
-      const [command, ...commandArgs] = parts.map((part) => part.replace(/(^"|"$)/g, ''));
-
-      spawn(command, commandArgs, {
-        shell: false,
-        detached: true,
-        stdio: 'ignore',
-      }).unref();
-
       return { success: true };
     } catch (error) {
       return {
@@ -566,6 +621,195 @@ async function resolveNodeByPath(scanner: FileScanner, targetPath: string): Prom
   }
 
   return currentNode;
+}
+
+async function listTreeFromKernel(kernelId: string, path: string | undefined): Promise<TreeNode[]> {
+  if (!kernelId) {
+    return [];
+  }
+
+  const kernel = kernelManager.getKernel(kernelId);
+  if (!kernel || kernel.language !== 'python') {
+    return [];
+  }
+
+  const trySnapshot = async (code: string) => {
+    const result = await kernelManager.execute(kernelId, { code });
+    if (result.error) {
+      console.warn('[tree] Kernel returned error:', result.error);
+      return undefined;
+    }
+    return parseJsonResult(result.result);
+  };
+
+  try {
+    const primary = await trySnapshot(buildTreeQueryCode(path || ''));
+    const parsedPrimary = Array.isArray(primary) ? primary : undefined;
+
+    const fallback =
+      parsedPrimary ||
+      (await trySnapshot(buildTreeQueryFallback(path || ''))) ||
+      undefined;
+
+    if (!Array.isArray(fallback)) {
+      return [];
+    }
+
+    return fallback.map(normalizeTreeNode).filter(Boolean) as TreeNode[];
+  } catch (error) {
+    console.warn('[tree] Failed to list tree from kernel:', error);
+    return [];
+  }
+}
+
+function normalizeTreeNode(node: unknown): TreeNode | null {
+  if (!node || typeof node !== 'object') return null;
+  const base = node as Partial<TreeNode>;
+  if (!base.path || !base.key || !base.id) return null;
+  return {
+    preview: base.preview,
+    hasChildren: !!base.hasChildren,
+    type: base.type || 'unknown',
+    id: base.id,
+    key: base.key,
+    path: base.path,
+    sizeBytes: base.sizeBytes,
+    shape: base.shape,
+    dtype: base.dtype,
+    loaderHint: base.loaderHint,
+    actions: base.actions,
+    expandable: base.expandable,
+    lazy: base.lazy,
+    language: base.language,
+    _file_path: base._file_path,
+    _modified: base._modified,
+  };
+}
+
+function buildTreeQueryCode(path: string): string {
+  const safePath = JSON.stringify(path ?? '');
+  return ['from IPython.display import JSON as PDVJSON', `PDVJSON(pdv_tree_snapshot(${safePath}))`].join('\n');
+}
+
+function buildTreeQueryFallback(path: string): string {
+  const safePath = JSON.stringify(path ?? '');
+  return ['import json', `print(json.dumps(pdv_tree_snapshot(${safePath})))`].join('\n');
+}
+
+/**
+ * Normalize kernel results that may arrive as JSON objects or doubly-quoted strings.
+ * Handles cases where kernels emit JSON strings wrapped in single/double quotes or
+ * double-encoded JSON payloads, returning the parsed object when possible.
+ */
+function parseJsonResult(raw: unknown): any {
+  let namespaceData: unknown = raw;
+  if (typeof namespaceData === 'string') {
+    let serialized = namespaceData.trim();
+    if (
+      (serialized.startsWith("'") && serialized.endsWith("'")) ||
+      (serialized.startsWith('"') && serialized.endsWith('"'))
+    ) {
+      serialized = serialized.slice(1, -1);
+    }
+
+    const tryParse = (value: string) => {
+      try {
+        const cleaned = value.replace(/\\'/g, "'");
+        return JSON.parse(cleaned);
+      } catch {
+        return undefined;
+      }
+    };
+
+    const parsed = tryParse(serialized);
+    namespaceData = parsed !== undefined ? parsed : namespaceData;
+
+    if (typeof namespaceData === 'string') {
+      const nested = tryParse(namespaceData);
+      if (nested !== undefined) {
+        namespaceData = nested;
+      }
+    }
+  }
+  return namespaceData;
+}
+
+async function registerScriptInKernel(
+  kernelId: string,
+  targetPath: string,
+  scriptName: string,
+  filePath: string,
+): Promise<{ success: boolean; error?: string }> {
+  if (!kernelId) {
+    return { success: false, error: 'No kernel available' };
+  }
+  const kernel = kernelManager.getKernel(kernelId);
+  if (!kernel || kernel.language !== 'python') {
+    return { success: false, error: 'Kernel not available or not python' };
+  }
+
+  const args = {
+    parent: targetPath,
+    name: scriptName,
+    file_path: filePath,
+  };
+  const encodedArgs = JSON.stringify(args);
+  const code = [
+    'import json',
+    `args = json.loads(${JSON.stringify(encodedArgs)})`,
+    'pdv_register_script(args.get("parent", ""), args.get("name"), args.get("file_path"))',
+    'from IPython.display import JSON as PDVJSON',
+    'PDVJSON({"ok": True})',
+  ].join('\n');
+
+  const result = await kernelManager.execute(kernelId, { code });
+  if (result.error) {
+    return { success: false, error: result.error };
+  }
+  return { success: true };
+}
+
+function sanitizeScriptName(name: string): string | null {
+  if (!name) return null;
+  const trimmed = name.trim();
+  if (!trimmed || trimmed.includes('/') || trimmed.includes('\\')) return null;
+  if (/[<>:"|?*\r\n]/.test(trimmed)) return null;
+  if (trimmed.length > 200) return null;
+  const normalized = trimmed.replace(/\s+/g, '_');
+  if (!/^[A-Za-z0-9._-]+$/.test(normalized)) return null;
+  return normalized;
+}
+
+function openInEditor(filePath: string, language?: string): { success: boolean; error?: string } {
+  try {
+    const config = loadConfig();
+    const editorCmd =
+      (language === 'python'
+        ? config.editors?.python
+        : language === 'julia'
+          ? config.editors?.julia
+          : undefined) || config.editors?.default || 'open %s';
+    const parts = editorCmd.match(/(?:[^\s"]+|"[^"]*")+/g) || [];
+    if (parts.length === 0) {
+      return { success: false, error: 'Invalid editor command' };
+    }
+    const cleaned = parts.map((part) => part.replace(/(^"|"$)/g, ''));
+    const [command, ...rawArgs] = cleaned;
+    const args = rawArgs.map((arg) => (arg === '%s' ? filePath : arg));
+    if (!rawArgs.some((arg) => arg === '%s')) {
+      args.push(filePath);
+    }
+
+    spawn(command, args, {
+      shell: false,
+      detached: true,
+      stdio: 'ignore',
+    }).unref();
+
+    return { success: true };
+  } catch (error) {
+    return { success: false, error: error instanceof Error ? error.message : String(error) };
+  }
 }
 
 function parseDefaultValue(value: string): unknown {

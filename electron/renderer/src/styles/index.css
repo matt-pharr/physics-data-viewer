@@ -251,6 +251,11 @@ body {
   background-color: var(--bg-hover);
 }
 
+.tree-row.selected {
+  background-color: var(--bg-tertiary);
+  border-left: 3px solid var(--accent);
+}
+
 .tree-toggle {
   width: 16px;
   height: 16px;
@@ -294,6 +299,13 @@ body {
   background-color: var(--bg-tertiary);
   border-radius: 3px;
   font-size: 11px;
+  color: var(--text-secondary);
+}
+.tree-type-badge + .tree-type-badge {
+  margin-left: 4px;
+}
+.tree-type-badge.subtle {
+  background-color: var(--bg-secondary);
   color: var(--text-secondary);
 }
 

@@ -1050,7 +1050,8 @@ const handleTreeAction = async (action: string, node: TreeNodeData) => {
       await window.pdv.kernels. execute(currentKernelId, { code });
     }
   } else if (action === 'copy_path') {
-    navigator.clipboard.writeText(node. path);
+    // Format path to be python dictionary style and add "tree" to beginning (e.g., tree["data"]["array1"])
+    navigator.clipboard.writeText(node. path.split('.').reduce((acc, part) => `${acc}["${part}"]`, 'tree'));
   }
 };
 

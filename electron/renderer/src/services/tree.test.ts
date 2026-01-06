@@ -24,7 +24,7 @@ describe('treeService', () => {
   beforeEach(() => {
     (globalThis.window as any).pdv = {
       tree: {
-        list: vi.fn(async (path?: string) => {
+        list: vi.fn(async (_kernelId?: string, path?: string) => {
           if (!path || path === '') {
             return rootNodes;
           }
@@ -33,6 +33,7 @@ describe('treeService', () => {
           }
           return [];
         }),
+        createScript: vi.fn(async () => ({ success: true })),
       },
     };
 
@@ -40,8 +41,8 @@ describe('treeService', () => {
   });
 
   it('loads and caches root nodes', async () => {
-    const first = await treeService.getRootNodes();
-    const second = await treeService.getRootNodes();
+    const first = await treeService.getRootNodes('k1');
+    const second = await treeService.getRootNodes('k1');
 
     const listMock = (window.pdv.tree.list as unknown as ReturnType<typeof vi.fn>);
 
@@ -54,7 +55,7 @@ describe('treeService', () => {
 
   it('returns empty array when node has no children', async () => {
     const node = { ...childNodes[0], isExpanded: false, isLoading: false };
-    const result = await treeService.getChildren(node);
+    const result = await treeService.getChildren(node, 'k1');
 
     expect(result).toEqual([]);
     const listMock = (window.pdv.tree.list as unknown as ReturnType<typeof vi.fn>);
@@ -64,14 +65,33 @@ describe('treeService', () => {
   it('loads and caches children by path', async () => {
     const parent = { ...rootNodes[0] };
 
-    const first = await treeService.getChildren(parent);
-    const second = await treeService.getChildren(parent);
+    const first = await treeService.getChildren(parent, 'k1');
+    const second = await treeService.getChildren(parent, 'k1');
 
     const listMock = (window.pdv.tree.list as unknown as ReturnType<typeof vi.fn>);
 
     expect(listMock).toHaveBeenCalledTimes(1);
     expect(first).toBe(second);
     expect(first[0].path).toBe('data.array1');
+  });
+
+  it('maintains cache per kernel', async () => {
+    const parent = { ...rootNodes[0] };
+    await treeService.getChildren(parent, 'k1');
+    await treeService.getChildren(parent, 'k2');
+
+    const listMock = (window.pdv.tree.list as unknown as ReturnType<typeof vi.fn>);
+    expect(listMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('creates script and clears cache', async () => {
+    const createMock = window.pdv.tree.createScript as unknown as ReturnType<typeof vi.fn>;
+    await treeService.getRootNodes('k1');
+    await treeService.createScript('k1', 'scripts', 'demo');
+
+    expect(createMock).toHaveBeenCalledWith('k1', 'scripts', 'demo');
+    const listMock = window.pdv.tree.list as unknown as ReturnType<typeof vi.fn>;
+    expect(listMock).toHaveBeenCalledTimes(1);
   });
   afterAll(() => {
     Object.defineProperty(globalThis, 'window', {

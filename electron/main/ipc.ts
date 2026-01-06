@@ -25,6 +25,7 @@ export const IPC = {
     list: 'tree:list',
     get: 'tree:get',
     save: 'tree:save',
+    create_script: 'tree:create_script',
   },
   script: {
     run: 'script:run',
@@ -259,6 +260,8 @@ export interface ScriptRunResult {
   result?: unknown;
   error?: string;
   duration?: number;
+  stdout?: string;
+  stderr?: string;
 }
 
 export interface ScriptParameter {
@@ -325,9 +328,14 @@ export interface PDVApi {
     ) => Promise<{ variables?: NamespaceVariable[]; error?: string }>;
   };
   tree: {
-    list: (path?: string) => Promise<TreeNode[]>;
+    list: (kernelId: string, path?: string) => Promise<TreeNode[]>;
     get: (id: string, options?: TreeGetOptions) => Promise<unknown>;
     save: (id: string, value: unknown) => Promise<boolean>;
+    createScript: (
+      kernelId: string,
+      targetPath: string,
+      scriptName: string,
+    ) => Promise<{ success: boolean; error?: string; node?: TreeNode }>;
   };
   files: {
     read: (path: string, options?: FileReadOptions) => Promise<FileReadResult | null>;

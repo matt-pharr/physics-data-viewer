@@ -5,6 +5,7 @@ import { Tree } from '../components/Tree';
 import { EnvironmentSelector } from '../components/EnvironmentSelector';
 import { NamespaceView } from '../components/NamespaceView';
 import { ScriptDialog } from '../components/ScriptDialog';
+import { CreateScriptDialog } from '../components/Tree/CreateScriptDialog';
 import type { CommandTab, LogEntry, TreeNodeData } from '../types';
 import type { Config } from '../../main/ipc';
 
@@ -31,6 +32,8 @@ const App: React.FC = () => {
   const rightPaneRef = useRef<HTMLDivElement | null>(null);
   const [autoRefreshNamespace, setAutoRefreshNamespace] = useState(false);
   const [namespaceRefreshToken, setNamespaceRefreshToken] = useState(0);
+  const [treeRefreshToken, setTreeRefreshToken] = useState(0);
+  const [createScriptTarget, setCreateScriptTarget] = useState<string | null>(null);
 
   useEffect(() => {
     // Prevent double initialization in StrictMode
@@ -168,6 +171,21 @@ const App: React.FC = () => {
     setLastError(undefined);
   };
 
+  const handleRemoveCommandTab = (id: number) => {
+    setCommandTabs((prev) => {
+      const next = prev.filter((t) => t.id !== id);
+      if (next.length === 0) {
+        const fallback = { id: 1, code: '' };
+        setActiveCommandTab(fallback.id);
+        return [fallback];
+      }
+      const newActive = next.find((t) => t.id === activeCommandTab) || next[0];
+      setActiveCommandTab(newActive.id);
+      return next;
+    });
+    setLastError(undefined);
+  };
+
   const handlePlotModeChange = async (mode: PlotMode) => {
     setPlotMode(mode);
     if (config) {
@@ -181,7 +199,9 @@ const App: React.FC = () => {
   const handleTreeAction = async (action: string, node: TreeNodeData) => {
     console.log('[App] Tree action:', action, node);
 
-    if (action === 'run' && node.type === 'script') {
+    if (action === 'create_script') {
+      setCreateScriptTarget(node.path);
+    } else if (action === 'run' && node.type === 'script') {
       setScriptDialog({
         scriptPath: node.path,
         scriptName: node.key,
@@ -195,7 +215,12 @@ const App: React.FC = () => {
     } else if (action === 'reload' && node.type === 'script') {
       await window.pdv.script.reload(node.path);
     } else if (action === 'copy_path') {
-      await navigator.clipboard.writeText(node.path);
+      // Format path to be python dictionary style and add "tree" to beginning (e.g., tree["data"]["array1"])
+      await navigator.clipboard.writeText(node.path.split('.').reduce((acc, part) => `${acc}["${part}"]`, 'tree'));
+    } else if (action === 'print') {
+      if (!currentKernelId) return;
+      const target = JSON.stringify(node.path);
+      await handleExecute(`print(tree[${target}])`);
     }
   };
 
@@ -205,6 +230,15 @@ const App: React.FC = () => {
     setScriptDialog(null);
 
     try {
+      const logEntry: LogEntry = {
+        id:
+          typeof crypto !== 'undefined' && 'randomUUID' in crypto
+            ? crypto.randomUUID()
+            : `log-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+        timestamp: Date.now(),
+        code: `tree.run_script("${scriptDialog.scriptPath}", **params)`,
+      };
+
       const result = await window.pdv.script.run(currentKernelId, {
         scriptPath: scriptDialog.scriptPath,
         params,
@@ -212,7 +246,15 @@ const App: React.FC = () => {
 
       if (!result.success) {
         setLastError(result.error);
+        logEntry.error = result.error;
+      } else {
+        logEntry.result = result.result;
+        logEntry.duration = result.duration;
       }
+      logEntry.stdout = result.stdout;
+      logEntry.stderr = result.stderr;
+      setLogs((prev) => [...prev, logEntry]);
+      setNamespaceRefreshToken((prev) => prev + 1);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       setLastError(message);
@@ -261,6 +303,7 @@ const App: React.FC = () => {
       }
       setIsExecuting(false);
       setNamespaceRefreshToken((prev) => prev + 1);
+      setTreeRefreshToken((prev) => prev + 1);
     }
   };
 
@@ -310,7 +353,7 @@ const App: React.FC = () => {
               />
             </div>
             <div className={`tree-panel ${activeTab === 'tree' ? 'active' : ''}`}>
-              <Tree onAction={handleTreeAction} />
+              <Tree kernelId={currentKernelId} refreshToken={treeRefreshToken} onAction={handleTreeAction} />
             </div>
             <div className={`tree-panel ${activeTab === 'modules' ? 'active' : ''}`}>
               <div className="tree-empty">Modules view (coming soon)</div>
@@ -338,6 +381,7 @@ const App: React.FC = () => {
             activeTabId={activeCommandTab}
             onTabChange={handleTabChange}
             onAddTab={addCommandTab}
+            onRemoveTab={handleRemoveCommandTab}
             onExecute={handleExecute}
             onClear={handleClearCommand}
             isExecuting={isExecuting}
@@ -352,6 +396,27 @@ const App: React.FC = () => {
           scriptName={scriptDialog.scriptName}
           onRun={handleScriptRun}
           onCancel={() => setScriptDialog(null)}
+        />
+      )}
+
+      {createScriptTarget && currentKernelId && (
+        <CreateScriptDialog
+          parentPath={createScriptTarget}
+          onCancel={() => setCreateScriptTarget(null)}
+          onCreate={async (name) => {
+            try {
+              const result = await window.pdv.tree.createScript(currentKernelId, createScriptTarget, name);
+              if (!result.success) {
+                setLastError(result.error);
+              } else {
+                setTreeRefreshToken((prev) => prev + 1);
+              }
+            } catch (error) {
+              setLastError(error instanceof Error ? error.message : String(error));
+            } finally {
+              setCreateScriptTarget(null);
+            }
+          }}
         />
       )}
 

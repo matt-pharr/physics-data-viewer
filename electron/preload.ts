@@ -43,6 +43,7 @@ const IPC = {
     list: 'tree:list',
     get: 'tree:get',
     save: 'tree:save',
+    create_script: 'tree:create_script',
   },
   script: {
     run: 'script:run',
@@ -105,14 +106,21 @@ const api: PDVApi = {
   },
 
   tree: {
-    list: (path?: string): Promise<TreeNode[]> =>
-      ipcRenderer.invoke(IPC.tree.list, path),
+    list: (kernelId: string, path?: string): Promise<TreeNode[]> =>
+      ipcRenderer.invoke(IPC.tree.list, kernelId, path),
 
     get: (id: string, options?: TreeGetOptions): Promise<unknown> =>
       ipcRenderer.invoke(IPC.tree.get, id, options),
 
     save: (id: string, value: unknown): Promise<boolean> =>
       ipcRenderer.invoke(IPC.tree.save, id, value),
+
+    createScript: (
+      kernelId: string,
+      targetPath: string,
+      scriptName: string,
+    ): Promise<{ success: boolean; error?: string; node?: TreeNode }> =>
+      ipcRenderer.invoke(IPC.tree.create_script, kernelId, targetPath, scriptName),
   },
 
   files: {

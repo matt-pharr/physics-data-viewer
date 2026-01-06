@@ -64,6 +64,16 @@ export const CommandBox: React.FC<CommandBoxProps> = ({
     onClear();
   };
 
+  const handleClose = () => {
+    if (onRemoveTab) {
+      onRemoveTab(activeTab.id);
+    } else {
+      handleClear();
+    }
+  };
+
+  const isEmpty = !activeTab.code.trim();
+
   return (
     <section className="command-pane">
       <header className="pane-header">
@@ -105,8 +115,8 @@ export const CommandBox: React.FC<CommandBoxProps> = ({
           >
             {isExecuting ? 'Running...' : 'Execute'}
           </button>
-          <button className="btn btn-secondary" onClick={handleClear} disabled={isExecuting}>
-            Clear
+          <button className="btn btn-secondary" onClick={isEmpty ? handleClose : handleClear} disabled={isExecuting}>
+            {isEmpty ? 'Close' : 'Clear'}
           </button>
         </div>
       </header>
