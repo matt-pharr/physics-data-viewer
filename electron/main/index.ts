@@ -324,14 +324,21 @@ if (!canRegisterHandlers) {
 
       if (language === 'python') {
         const paramsJson = JSON.stringify(request.params || {});
-        code = `tree.run_script('${request.scriptPath}', **${paramsJson.replace(/"/g, "'")})`;
+        const encoded = Buffer.from(paramsJson, 'utf-8').toString('base64');
+        code = [
+          'import json, base64',
+          `_params = json.loads(base64.b64decode("${encoded}").decode("utf-8"))`,
+          `tree.run_script("${request.scriptPath}", **_params)`,
+        ].join('\n');
       } else if (language === 'julia') {
-        const paramsStr = request.params
-          ? Object.entries(request.params)
-              .map(([k, v]) => `${k}=${JSON.stringify(v)}`)
-              .join(', ')
-          : '';
-        code = `tree.run_script("${request.scriptPath}"${paramsStr ? ', ' + paramsStr : ''})`;
+        const paramsJson = JSON.stringify(request.params || {});
+        const encoded = Buffer.from(paramsJson, 'utf-8').toString('base64');
+        code = [
+          'using JSON, Base64',
+          `_params = JSON.parse(String(base64decode("${encoded}")))`,
+          'kwargs = (; (Symbol(k) => v for (k, v) in _params)...)',
+          `tree.run_script("${request.scriptPath}"; kwargs...)`,
+        ].join('\n');
       } else {
         return { success: false, error: `Unsupported language: ${language}` };
       }
@@ -420,7 +427,7 @@ if (!canRegisterHandlers) {
       const params: ScriptParameter[] = [];
 
       if (language === 'python') {
-        const match = content.match(/def run\(([^)]*)\)/);
+        const match = content.match(/def\s+run\(([\s\S]*?)\)/);
         if (match) {
           const argsStr = match[1];
           const args = argsStr.split(',').map((a) => a.trim()).filter(Boolean);
@@ -429,19 +436,21 @@ if (!canRegisterHandlers) {
             if (arg === 'tree' || arg === 'self') continue;
 
             const [nameType, ...defaultParts] = arg.split('=');
-            const [name, typeHint] = nameType.split(':').map((s) => s.trim());
+            const [namePart, typePart] = nameType.split(':');
+            const name = namePart.trim();
+            const typeHint = typePart ? typePart.trim() : undefined;
             const defaultValue = defaultParts.length > 0 ? defaultParts.join('=').trim() : undefined;
 
             params.push({
               name,
               type: typeHint || 'unknown',
               default: defaultValue !== undefined ? parseDefaultValue(defaultValue) : undefined,
-              required: defaultValue === undefined || defaultValue === '',
+              required: defaultValue === undefined,
             });
           }
         }
       } else if (language === 'julia') {
-        const match = content.match(/function run\(([^)]*)\)/);
+        const match = content.match(/function run\(([\s\S]*?)\)/);
         if (match) {
           const argsStr = match[1];
           const args = argsStr.split(',').map((a) => a.trim()).filter(Boolean);
@@ -450,13 +459,15 @@ if (!canRegisterHandlers) {
             if (arg === 'tree') continue;
 
             const [nameType, defaultValue] = arg.split('=').map((s) => s.trim());
-            const [name, typeHint] = nameType.split('::').map((s) => s.trim());
+            const [namePart, typePart] = nameType.split('::');
+            const name = namePart.trim();
+            const typeHint = typePart ? typePart.trim() : undefined;
 
             params.push({
               name,
               type: typeHint || 'Any',
               default: defaultValue !== undefined ? parseDefaultValue(defaultValue) : undefined,
-              required: defaultValue === undefined || defaultValue === '',
+              required: defaultValue === undefined,
             });
           }
         }
@@ -553,9 +564,9 @@ function parseDefaultValue(value: string): unknown {
     return false;
   }
 
-  const num = Number(trimmed);
-  if (!Number.isNaN(num) && trimmed !== '') {
-    return num;
+  const numberPattern = /^-?\d+(\.\d+)?$/;
+  if (numberPattern.test(trimmed)) {
+    return Number(trimmed);
   }
 
   if (

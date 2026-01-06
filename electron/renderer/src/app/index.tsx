@@ -193,13 +193,7 @@ const App: React.FC = () => {
         console.error('[App] Failed to open editor:', error);
       }
     } else if (action === 'reload' && node.type === 'script') {
-      if (currentKernelId) {
-        const code =
-          node.language === 'python'
-            ? `import importlib; importlib.reload(${node.path.replace(/\./g, '_')})`
-            : 'Revise.revise()';
-        await window.pdv.kernels.execute(currentKernelId, { code });
-      }
+      await window.pdv.script.reload(node.path);
     } else if (action === 'copy_path') {
       await navigator.clipboard.writeText(node.path);
     }

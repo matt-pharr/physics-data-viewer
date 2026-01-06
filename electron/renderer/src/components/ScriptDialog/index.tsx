@@ -55,7 +55,16 @@ export const ScriptDialog: React.FC<ScriptDialogProps> = ({
     onRun(values);
   };
 
-  const canRun = () => params.every((p) => !p.required || values[p.name] !== undefined);
+  const canRun = () =>
+    params.every((p) => !p.required || (values[p.name] !== undefined && values[p.name] !== ''));
+
+  const getParamKind = (type: string): 'string' | 'int' | 'float' | 'bool' => {
+    const normalized = type.toLowerCase();
+    if (normalized.includes('bool')) return 'bool';
+    if (normalized.includes('int')) return 'int';
+    if (normalized.includes('float')) return 'float';
+    return 'string';
+  };
 
   return (
     <div className="modal-overlay" onClick={onCancel}>
@@ -89,43 +98,58 @@ export const ScriptDialog: React.FC<ScriptDialogProps> = ({
                     <span className="param-type">({param.type})</span>
                   </label>
 
-                  {param.type.toLowerCase().includes('str') || param.type === 'String' ? (
-                    <input
-                      type="text"
-                      value={(values[param.name] as string) ?? ''}
-                      onChange={(e) => handleChange(param.name, e.target.value)}
-                      placeholder={param.default ? String(param.default) : ''}
-                    />
-                  ) : param.type.toLowerCase().includes('int') || param.type.includes('Int') ? (
-                    <input
-                      type="number"
-                      step="1"
-                      value={(values[param.name] as number) ?? 0}
-                      onChange={(e) => handleChange(param.name, parseInt(e.target.value, 10))}
-                      placeholder={param.default ? String(param.default) : '0'}
-                    />
-                  ) : param.type.toLowerCase().includes('float') || param.type.includes('Float') ? (
-                    <input
-                      type="number"
-                      step="0.01"
-                      value={(values[param.name] as number) ?? 0}
-                      onChange={(e) => handleChange(param.name, parseFloat(e.target.value))}
-                      placeholder={param.default ? String(param.default) : '0.0'}
-                    />
-                  ) : param.type.toLowerCase().includes('bool') || param.type === 'Bool' ? (
-                    <input
-                      type="checkbox"
-                      checked={(values[param.name] as boolean) || false}
-                      onChange={(e) => handleChange(param.name, e.target.checked)}
-                    />
-                  ) : (
-                    <input
-                      type="text"
-                      value={String(values[param.name] ?? '')}
-                      onChange={(e) => handleChange(param.name, e.target.value)}
-                      placeholder={param.default ? String(param.default) : ''}
-                    />
-                  )}
+                  {(() => {
+                    const kind = getParamKind(param.type);
+                    if (kind === 'int') {
+                      return (
+                        <input
+                          type="number"
+                          step="1"
+                          value={values[param.name] === undefined ? '' : String(values[param.name])}
+                          onChange={(e) =>
+                            handleChange(
+                              param.name,
+                              e.target.value === '' ? undefined : parseInt(e.target.value, 10),
+                            )
+                          }
+                          placeholder={param.default ? String(param.default) : ''}
+                        />
+                      );
+                    }
+                    if (kind === 'float') {
+                      return (
+                        <input
+                          type="number"
+                          step="0.01"
+                          value={values[param.name] === undefined ? '' : String(values[param.name])}
+                          onChange={(e) =>
+                            handleChange(
+                              param.name,
+                              e.target.value === '' ? undefined : parseFloat(e.target.value),
+                            )
+                          }
+                          placeholder={param.default ? String(param.default) : ''}
+                        />
+                      );
+                    }
+                    if (kind === 'bool') {
+                      return (
+                        <input
+                          type="checkbox"
+                          checked={(values[param.name] as boolean) || false}
+                          onChange={(e) => handleChange(param.name, e.target.checked)}
+                        />
+                      );
+                    }
+                    return (
+                      <input
+                        type="text"
+                        value={(values[param.name] as string) ?? ''}
+                        onChange={(e) => handleChange(param.name, e.target.value)}
+                        placeholder={param.default ? String(param.default) : ''}
+                      />
+                    );
+                  })()}
 
                   {param.description && <span className="param-description">{param.description}</span>}
                 </div>

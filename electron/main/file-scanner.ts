@@ -188,7 +188,9 @@ export class FileScanner {
         return moduleDocMatch[1].trim().split('\n')[0];
       }
 
-      const runDocMatch = content.match(/def run\([^)]*\):[^"']*"""([\s\S]*?)"""/);
+      const runDocMatch =
+        content.match(/def\s+run\([^)]*\):[\s\S]*?"""([\s\S]*?)"""/) ||
+        content.match(/def\s+run\([^)]*\):[\s\S]*?'''([\s\S]*?)'''/);
       if (runDocMatch) {
         return runDocMatch[1].trim().split('\n')[0];
       }
