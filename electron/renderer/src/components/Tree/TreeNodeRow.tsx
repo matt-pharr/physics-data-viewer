@@ -4,6 +4,7 @@ import type { TreeNodeData } from '../../types';
 const TYPE_ICONS: Record<string, string> = {
   folder: '📁',
   file: '📄',
+  script: '📜',
   ndarray: '🔢',
   dataframe: '📊',
   image: '🖼️',

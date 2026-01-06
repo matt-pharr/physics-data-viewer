@@ -26,10 +26,18 @@ export const IPC = {
     get: 'tree:get',
     save: 'tree:save',
   },
+  script: {
+    run: 'script:run',
+    edit: 'script:edit',
+    reload: 'script:reload',
+    get_params: 'script:get_params',
+  },
   files: {
     read: 'files:read',
     write: 'files:write',
     pickExecutable: 'files:pickExecutable',
+    watch: 'files:watch',
+    unwatch: 'files:unwatch',
   },
   namespace: {
     query: 'namespace:query',
@@ -164,6 +172,12 @@ export interface TreeNode {
   expandable?: boolean;
   /** Whether this node's content is lazily loaded */
   lazy?: boolean;
+  /** Optional language for script nodes */
+  language?: string;
+  /** Backing file path on disk */
+  _file_path?: string;
+  /** Last modified timestamp */
+  _modified?: string;
 }
 
 /** Supported node types */
@@ -171,6 +185,13 @@ export type TreeNodeType =
   | 'root'
   | 'folder'
   | 'file'
+  | 'script'
+  | 'hdf5'
+  | 'zarr'
+  | 'parquet'
+  | 'npy'
+  | 'config'
+  | 'arrow'
   | 'group'        // HDF5 group, etc.
   | 'dataset'      // HDF5 dataset, etc.
   | 'ndarray'
@@ -225,6 +246,30 @@ export interface FileReadResult {
 }
 
 // ============================================================================
+// Script Types
+// ============================================================================
+
+export interface ScriptRunRequest {
+  scriptPath: string; // Tree path (e.g., "scripts.analysis.fit_model")
+  params?: Record<string, unknown>;
+}
+
+export interface ScriptRunResult {
+  success: boolean;
+  result?: unknown;
+  error?: string;
+  duration?: number;
+}
+
+export interface ScriptParameter {
+  name: string;
+  type: string;
+  default?: unknown;
+  required?: boolean;
+  description?: string;
+}
+
+// ============================================================================
 // Config Types
 // ============================================================================
 
@@ -246,6 +291,14 @@ export interface Config {
   pythonPath?: string;
   /** Custom julia executable path */
   juliaPath?: string;
+  /** External editor commands */
+  editors?: {
+    python?: string;
+    julia?: string;
+    default?: string;
+  };
+  /** Project root for tree scanning */
+  projectRoot?: string;
 }
 
 // ============================================================================
@@ -284,5 +337,11 @@ export interface PDVApi {
   config: {
     get: () => Promise<Config>;
     set: (config: Partial<Config>) => Promise<boolean>;
+  };
+  script: {
+    run: (kernelId: string, request: ScriptRunRequest) => Promise<ScriptRunResult>;
+    edit: (scriptPath: string) => Promise<{ success: boolean; error?: string }>;
+    reload: (scriptPath: string) => Promise<{ success: boolean; error?: string }>;
+    getParams: (scriptPath: string) => Promise<{ success: boolean; params?: ScriptParameter[]; error?: string }>;
   };
 }

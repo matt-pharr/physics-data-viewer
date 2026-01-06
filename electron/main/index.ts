@@ -19,10 +19,14 @@ import {
   Config,
   NamespaceQueryOptions,
   NamespaceVariable,
+  ScriptRunRequest,
+  ScriptRunResult,
+  ScriptParameter,
 } from './ipc';
 import { getKernelManager, resetKernelManager } from './kernel-manager';
 import { loadConfig, updateConfig } from './config';
 import { spawn } from 'child_process';
+import { FileScanner } from './file-scanner';
 
 // ============================================================================
 // Kernel Manager Instance
@@ -30,6 +34,16 @@ import { spawn } from 'child_process';
 
 const kernelManager = getKernelManager();
 let currentConfig: Config = loadConfig();
+let fileScanner: FileScanner | null = null;
+
+function getFileScanner(): FileScanner {
+  if (!fileScanner) {
+    const config = loadConfig();
+    const projectRoot = config.projectRoot || config.cwd || process.cwd();
+    fileScanner = new FileScanner(projectRoot);
+  }
+  return fileScanner;
+}
 
 const canRegisterHandlers = !!ipcMain && typeof ipcMain.handle === 'function';
 
@@ -266,52 +280,219 @@ if (!canRegisterHandlers) {
   ipcMain.handle(IPC.tree.list, async (_event, path): Promise<TreeNode[]> => {
     console.log('[IPC] tree:list', path);
 
+    const scanner = getFileScanner();
+
     if (!path || path === '' || path === 'root') {
-      return [
-        { id: 'data', key: 'data', path: 'data', type: 'folder', hasChildren: true, expandable: true },
-        { id: 'scripts', key: 'scripts', path: 'scripts', type: 'folder', hasChildren: true, expandable: true },
-        { id: 'results', key: 'results', path: 'results', type: 'folder', hasChildren: true, expandable: true },
-      ];
+      return scanner.scanAll();
     }
 
-    if (path === 'data') {
-      return [
-        { id: 'data.array1', key: 'array1', path: 'data.array1', type: 'ndarray', preview: 'float64 (100, 100)', hasChildren: false, shape: [100, 100], dtype: 'float64', sizeBytes: 80000 },
-        { id: 'data.df1', key: 'df1', path: 'data.df1', type: 'dataframe', preview: 'DataFrame (1000 rows, 5 cols)', hasChildren: false, shape: [1000, 5], sizeBytes: 40000 },
-      ];
-    }
-
-    if (path === 'scripts') {
-      return [
-        { id: 'scripts.analysis', key: 'analysis.py', path: 'scripts.analysis', type: 'file', preview: 'Python script', hasChildren: false, sizeBytes: 2048 },
-        { id: 'scripts.plot', key: 'plot.jl', path: 'scripts.plot', type: 'file', preview: 'Julia script', hasChildren: false, sizeBytes: 1024 },
-      ];
-    }
-
-    if (path === 'results') {
-      return [
-        { id: 'results.fig1', key: 'figure1.png', path: 'results.fig1', type: 'image', preview: 'PNG image (800x600)', hasChildren: false, sizeBytes: 50000 },
-        { id: 'results.config', key: 'config.json', path: 'results.config', type: 'json', preview: '{ "param1": 42, ... }', hasChildren: false, sizeBytes: 512 },
-      ];
-    }
-
-    return [];
+    return scanner.getChildren(path);
   });
 
   ipcMain.handle(IPC.tree.get, async (_event, id, options): Promise<unknown> => {
     console.log('[IPC] tree:get', id, options);
-    if (id === 'data.array1') {
-      return { type: 'ndarray', shape: [100, 100], dtype: 'float64', data: '<<binary>>' };
-    }
-    if (id === 'data.df1') {
-      return { type: 'dataframe', columns: ['a', 'b', 'c', 'd', 'e'], rows: 1000 };
-    }
     return null;
   });
 
   ipcMain.handle(IPC.tree.save, async (_event, id, value): Promise<boolean> => {
     console.log('[IPC] tree:save', id, value);
     return true;
+  });
+
+  // ============================================================================
+  // Script Handlers
+  // ============================================================================
+
+  ipcMain.handle(IPC.script.run, async (_event, kernelId: string, request: ScriptRunRequest): Promise<ScriptRunResult> => {
+    console.log('[IPC] script:run', kernelId, request);
+
+    try {
+      const kernel = kernelManager.getKernel(kernelId);
+      if (!kernel) {
+        return { success: false, error: `Kernel not found: ${kernelId}` };
+      }
+
+      const scanner = getFileScanner();
+      const scriptNode = await resolveNodeByPath(scanner, request.scriptPath);
+
+      if (!scriptNode || !scriptNode._file_path) {
+        return { success: false, error: `Script not found: ${request.scriptPath}` };
+      }
+
+      const language = kernel.language;
+      let code = '';
+
+      if (language === 'python') {
+        const paramsJson = JSON.stringify(request.params || {});
+        const encoded = Buffer.from(paramsJson, 'utf-8').toString('base64');
+        code = [
+          'import json, base64',
+          `_params = json.loads(base64.b64decode("${encoded}").decode("utf-8"))`,
+          `tree.run_script("${request.scriptPath}", **_params)`,
+        ].join('\n');
+      } else if (language === 'julia') {
+        const paramsJson = JSON.stringify(request.params || {});
+        const encoded = Buffer.from(paramsJson, 'utf-8').toString('base64');
+        code = [
+          'using JSON, Base64',
+          `_params = JSON.parse(String(base64decode("${encoded}")))`,
+          'kwargs = (; (Symbol(k) => v for (k, v) in _params)...)',
+          `tree.run_script("${request.scriptPath}"; kwargs...)`,
+        ].join('\n');
+      } else {
+        return { success: false, error: `Unsupported language: ${language}` };
+      }
+
+      const startTime = Date.now();
+      const result = await kernelManager.execute(kernelId, { code });
+
+      if (result.error) {
+        return {
+          success: false,
+          error: result.error,
+          duration: Date.now() - startTime,
+        };
+      }
+
+      return {
+        success: true,
+        result: result.result,
+        duration: Date.now() - startTime,
+      };
+    } catch (error) {
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : String(error),
+      };
+    }
+  });
+
+  ipcMain.handle(IPC.script.edit, async (_event, scriptPath: string) => {
+    console.log('[IPC] script:edit', scriptPath);
+
+    try {
+      const scanner = getFileScanner();
+      const scriptNode = await resolveNodeByPath(scanner, scriptPath);
+
+      if (!scriptNode || !scriptNode._file_path) {
+        return { success: false, error: `Script not found: ${scriptPath}` };
+      }
+
+      const filePath = scriptNode._file_path;
+      const config = loadConfig();
+      const language = scriptNode.language || 'python';
+
+      const editorCmd =
+        (language === 'python'
+          ? config.editors?.python
+          : language === 'julia'
+            ? config.editors?.julia
+            : undefined) || config.editors?.default || 'open %s';
+      const resolvedCmd = editorCmd.replace('%s', `"${filePath}"`);
+      const parts = resolvedCmd.match(/(?:[^\s"]+|"[^"]*")+/g) || [];
+      if (parts.length === 0) {
+        return { success: false, error: 'Invalid editor command' };
+      }
+      const [command, ...commandArgs] = parts.map((part) => part.replace(/(^"|"$)/g, ''));
+
+      spawn(command, commandArgs, {
+        shell: false,
+        detached: true,
+        stdio: 'ignore',
+      }).unref();
+
+      return { success: true };
+    } catch (error) {
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : String(error),
+      };
+    }
+  });
+
+  ipcMain.handle(IPC.script.reload, async (_event, scriptPath: string) => {
+    console.log('[IPC] script:reload', scriptPath);
+    return { success: true };
+  });
+
+  ipcMain.handle(IPC.script.get_params, async (_event, scriptPath: string) => {
+    console.log('[IPC] script:get_params', scriptPath);
+
+    try {
+      const scanner = getFileScanner();
+      const scriptNode = await resolveNodeByPath(scanner, scriptPath);
+
+      if (!scriptNode || !scriptNode._file_path) {
+        return { success: false, error: `Script not found: ${scriptPath}` };
+      }
+
+      const content = await fs.promises.readFile(scriptNode._file_path, 'utf-8');
+      const language = scriptNode.language;
+
+      const params: ScriptParameter[] = [];
+
+      if (language === 'python') {
+        const match = content.match(/def\s+run\(([\s\S]*?)\)/);
+        if (match) {
+          const argsStr = match[1];
+          const args = argsStr.split(',').map((a) => a.trim()).filter(Boolean);
+
+          for (const arg of args) {
+            if (arg === 'tree' || arg === 'self') continue;
+
+            const [nameType, ...defaultParts] = arg.split('=');
+            const [namePart, typePart] = nameType.split(':');
+            const name = namePart.trim();
+            const typeHint = typePart ? typePart.trim() : undefined;
+            const defaultValue = defaultParts.length > 0 ? defaultParts.join('=').trim() : undefined;
+
+            if (name === 'tree') {
+              continue;
+            }
+
+            params.push({
+              name,
+              type: typeHint || 'unknown',
+              default: defaultValue !== undefined ? parseDefaultValue(defaultValue) : undefined,
+              required: defaultValue === undefined,
+            });
+          }
+        }
+      } else if (language === 'julia') {
+        const match = content.match(/function run\(([\s\S]*?)\)/);
+        if (match) {
+          const argsStr = match[1];
+          const args = argsStr.split(',').map((a) => a.trim()).filter(Boolean);
+
+          for (const arg of args) {
+            if (arg === 'tree') continue;
+
+            const [nameType, defaultValue] = arg.split('=').map((s) => s.trim());
+            const [namePart, typePart] = nameType.split('::');
+            const name = namePart.trim();
+            const typeHint = typePart ? typePart.trim() : undefined;
+
+            if (name === 'tree') {
+              continue;
+            }
+
+            params.push({
+              name,
+              type: typeHint || 'Any',
+              default: defaultValue !== undefined ? parseDefaultValue(defaultValue) : undefined,
+              required: defaultValue === undefined,
+            });
+          }
+        }
+      }
+
+      return { success: true, params };
+    } catch (error) {
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : String(error),
+      };
+    }
   });
 
   // ============================================================================
@@ -344,6 +525,9 @@ if (!canRegisterHandlers) {
     return result.filePaths[0];
   });
 
+  ipcMain.handle(IPC.files.watch, async () => false);
+  ipcMain.handle(IPC.files.unwatch, async () => false);
+
   // ============================================================================
   // Config Handlers (unchanged from Step 2)
   // ============================================================================
@@ -355,10 +539,55 @@ if (!canRegisterHandlers) {
   ipcMain.handle(IPC.config.set, async (_event, config): Promise<boolean> => {
     console.log('[IPC] config:set', config);
     currentConfig = updateConfig(config);
+    fileScanner = null;
     return true;
   });
 
   // ============================================================================
 
   console.log('[main] IPC handlers registered');
+}
+
+async function resolveNodeByPath(scanner: FileScanner, targetPath: string): Promise<TreeNode | undefined> {
+  const parts = targetPath.split('.').filter(Boolean);
+  let nodes = await scanner.scanAll();
+  let currentNode: TreeNode | undefined;
+  let currentPath = '';
+
+  for (const part of parts) {
+    currentPath = currentPath ? `${currentPath}.${part}` : part;
+    currentNode = nodes.find((n) => n.path === currentPath);
+    if (!currentNode) {
+      return undefined;
+    }
+    if (currentPath !== targetPath && currentNode.hasChildren) {
+      nodes = await scanner.getChildren(currentNode.path);
+    }
+  }
+
+  return currentNode;
+}
+
+function parseDefaultValue(value: string): unknown {
+  const trimmed = value.trim();
+  if (trimmed === 'True' || trimmed === 'true') {
+    return true;
+  }
+  if (trimmed === 'False' || trimmed === 'false') {
+    return false;
+  }
+
+  const numberPattern = /^-?\d+(\.\d+)?$/;
+  if (numberPattern.test(trimmed)) {
+    return Number(trimmed);
+  }
+
+  if (
+    (trimmed.startsWith('"') && trimmed.endsWith('"')) ||
+    (trimmed.startsWith("'") && trimmed.endsWith("'"))
+  ) {
+    return trimmed.slice(1, -1);
+  }
+
+  return trimmed;
 }

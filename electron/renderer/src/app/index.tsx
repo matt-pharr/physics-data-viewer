@@ -4,7 +4,8 @@ import { Console } from '../components/Console';
 import { Tree } from '../components/Tree';
 import { EnvironmentSelector } from '../components/EnvironmentSelector';
 import { NamespaceView } from '../components/NamespaceView';
-import type { CommandTab, LogEntry } from '../types';
+import { ScriptDialog } from '../components/ScriptDialog';
+import type { CommandTab, LogEntry, TreeNodeData } from '../types';
 import type { Config } from '../../main/ipc';
 
 type Tab = 'tree' | 'namespace' | 'modules';
@@ -22,6 +23,7 @@ const App: React.FC = () => {
   const [lastDuration, setLastDuration] = useState<number | null>(null);
   const [config, setConfig] = useState<Config | null>(null);
   const [showEnvSelector, setShowEnvSelector] = useState(false);
+  const [scriptDialog, setScriptDialog] = useState<{ scriptPath: string; scriptName: string } | null>(null);
   const initRef = useRef(false);
   const [leftWidth, setLeftWidth] = useState(340);
   const [consoleHeight, setConsoleHeight] = useState(260);
@@ -176,6 +178,48 @@ const App: React.FC = () => {
     }
   };
 
+  const handleTreeAction = async (action: string, node: TreeNodeData) => {
+    console.log('[App] Tree action:', action, node);
+
+    if (action === 'run' && node.type === 'script') {
+      setScriptDialog({
+        scriptPath: node.path,
+        scriptName: node.key,
+      });
+    } else if (action === 'edit' && node.type === 'script') {
+      try {
+        await window.pdv.script.edit(node.path);
+      } catch (error) {
+        console.error('[App] Failed to open editor:', error);
+      }
+    } else if (action === 'reload' && node.type === 'script') {
+      await window.pdv.script.reload(node.path);
+    } else if (action === 'copy_path') {
+      await navigator.clipboard.writeText(node.path);
+    }
+  };
+
+  const handleScriptRun = async (params: Record<string, unknown>) => {
+    if (!scriptDialog || !currentKernelId) return;
+
+    setScriptDialog(null);
+
+    try {
+      const result = await window.pdv.script.run(currentKernelId, {
+        scriptPath: scriptDialog.scriptPath,
+        params,
+      });
+
+      if (!result.success) {
+        setLastError(result.error);
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      setLastError(message);
+      console.error('[App] Script execution error:', error);
+    }
+  };
+
   const handleExecute = async (code: string) => {
     if (!currentKernelId || !code.trim()) return;
 
@@ -266,7 +310,7 @@ const App: React.FC = () => {
               />
             </div>
             <div className={`tree-panel ${activeTab === 'tree' ? 'active' : ''}`}>
-              <Tree />
+              <Tree onAction={handleTreeAction} />
             </div>
             <div className={`tree-panel ${activeTab === 'modules' ? 'active' : ''}`}>
               <div className="tree-empty">Modules view (coming soon)</div>
@@ -301,6 +345,15 @@ const App: React.FC = () => {
           />
         </div>
       </main>
+
+      {scriptDialog && (
+        <ScriptDialog
+          scriptPath={scriptDialog.scriptPath}
+          scriptName={scriptDialog.scriptName}
+          onRun={handleScriptRun}
+          onCancel={() => setScriptDialog(null)}
+        />
+      )}
 
       {/* Status bar */}
        <footer className="status-bar">
