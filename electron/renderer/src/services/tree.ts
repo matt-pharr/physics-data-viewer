@@ -5,7 +5,8 @@ class TreeService {
   private cache: Map<string, TreeNodeData[]> = new Map();
 
   private cacheKey(kernelId: string | null, path: string) {
-    return `${kernelId || 'none'}:${path}`;
+    const safeKernel = kernelId ?? '__none__';
+    return `${safeKernel}|${path}`;
   }
 
   async getRootNodes(kernelId: string | null): Promise<TreeNodeData[]> {

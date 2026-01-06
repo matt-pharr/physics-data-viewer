@@ -432,28 +432,12 @@ if (!canRegisterHandlers) {
       }
 
       const filePath = scriptNode._file_path;
-      const config = loadConfig();
       const language = scriptNode.language || 'python';
 
-      const editorCmd =
-        (language === 'python'
-          ? config.editors?.python
-          : language === 'julia'
-            ? config.editors?.julia
-            : undefined) || config.editors?.default || 'open %s';
-      const resolvedCmd = editorCmd.replace('%s', `"${filePath}"`);
-      const parts = resolvedCmd.match(/(?:[^\s"]+|"[^"]*")+/g) || [];
-      if (parts.length === 0) {
-        return { success: false, error: 'Invalid editor command' };
+      const editorResult = openInEditor(filePath, language);
+      if (!editorResult.success && editorResult.error) {
+        return { success: false, error: editorResult.error };
       }
-      const [command, ...commandArgs] = parts.map((part) => part.replace(/(^"|"$)/g, ''));
-
-      spawn(command, commandArgs, {
-        shell: false,
-        detached: true,
-        stdio: 'ignore',
-      }).unref();
-
       return { success: true };
     } catch (error) {
       return {
@@ -757,9 +741,11 @@ function sanitizeScriptName(name: string): string | null {
   if (!name) return null;
   const trimmed = name.trim();
   if (!trimmed || trimmed.includes('/') || trimmed.includes('\\')) return null;
-  if (/[<>:"|?*]/.test(trimmed)) return null;
+  if (/[<>:"|?*\r\n]/.test(trimmed)) return null;
   if (trimmed.length > 200) return null;
-  return trimmed.replace(/\s+/g, '_');
+  const normalized = trimmed.replace(/\s+/g, '_');
+  if (!/^[A-Za-z0-9._-]+$/.test(normalized)) return null;
+  return normalized;
 }
 
 function openInEditor(filePath: string, language?: string): { success: boolean; error?: string } {
@@ -771,14 +757,18 @@ function openInEditor(filePath: string, language?: string): { success: boolean; 
         : language === 'julia'
           ? config.editors?.julia
           : undefined) || config.editors?.default || 'open %s';
-    const resolvedCmd = editorCmd.replace('%s', `"${filePath}"`);
-    const parts = resolvedCmd.match(/(?:[^\s"]+|"[^"]*")+/g) || [];
+    const parts = editorCmd.match(/(?:[^\s"]+|"[^"]*")+/g) || [];
     if (parts.length === 0) {
       return { success: false, error: 'Invalid editor command' };
     }
-    const [command, ...commandArgs] = parts.map((part) => part.replace(/(^"|"$)/g, ''));
+    const cleaned = parts.map((part) => part.replace(/(^"|"$)/g, ''));
+    const [command, ...rawArgs] = cleaned;
+    const args = rawArgs.map((arg) => (arg === '%s' ? filePath : arg));
+    if (!rawArgs.some((arg) => arg === '%s')) {
+      args.push(filePath);
+    }
 
-    spawn(command, commandArgs, {
+    spawn(command, args, {
       shell: false,
       detached: true,
       stdio: 'ignore',

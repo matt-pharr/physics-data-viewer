@@ -8,6 +8,7 @@ It sets up the environment, configures plot backends, and defines helper functio
 import sys
 import os
 import re
+import ast
 
 MAX_COLUMNS = 20
 MAX_PREVIEW_LENGTH = 100
@@ -132,6 +133,13 @@ def _pdv_extract_docstring(file_path):
     try:
         with open(file_path, 'r', encoding='utf-8') as f:
             content = f.read()
+        try:
+            module = ast.parse(content)
+            doc = ast.get_docstring(module)
+            if doc:
+                return doc.strip().split('\n')[0]
+        except Exception:
+            pass
         match = re.search(r'"""([\s\S]*?)"""', content, re.M)
         if not match:
             match = re.search(r"'''([\s\S]*?)'''", content, re.M)
