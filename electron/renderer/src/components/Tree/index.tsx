@@ -24,7 +24,7 @@ export const Tree: React.FC<TreeProps> = ({ kernelId, refreshToken = 0, onAction
   const expandedPathsRef = useRef<Set<string>>(new Set());
 
   const loadRoot = async (force?: boolean) => {
-    setLoading(true);
+    setLoading(nodes.length === 0);
     setError(undefined);
     if (!kernelId) {
       setNodes([]);

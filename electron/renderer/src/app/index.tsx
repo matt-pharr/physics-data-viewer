@@ -215,6 +215,15 @@ const App: React.FC = () => {
     setScriptDialog(null);
 
     try {
+      const logEntry: LogEntry = {
+        id:
+          typeof crypto !== 'undefined' && 'randomUUID' in crypto
+            ? crypto.randomUUID()
+            : `log-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+        timestamp: Date.now(),
+        code: `tree.run_script("${scriptDialog.scriptPath}", **params)`,
+      };
+
       const result = await window.pdv.script.run(currentKernelId, {
         scriptPath: scriptDialog.scriptPath,
         params,
@@ -222,7 +231,13 @@ const App: React.FC = () => {
 
       if (!result.success) {
         setLastError(result.error);
+        logEntry.error = result.error;
+      } else {
+        logEntry.result = result.result;
+        logEntry.duration = result.duration;
       }
+      setLogs((prev) => [...prev, logEntry]);
+      setNamespaceRefreshToken((prev) => prev + 1);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       setLastError(message);
