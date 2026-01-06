@@ -171,6 +171,21 @@ const App: React.FC = () => {
     setLastError(undefined);
   };
 
+  const handleRemoveCommandTab = (id: number) => {
+    setCommandTabs((prev) => {
+      const next = prev.filter((t) => t.id !== id);
+      if (next.length === 0) {
+        const fallback = { id: 1, code: '' };
+        setActiveCommandTab(fallback.id);
+        return [fallback];
+      }
+      const newActive = next.find((t) => t.id === activeCommandTab) || next[0];
+      setActiveCommandTab(newActive.id);
+      return next;
+    });
+    setLastError(undefined);
+  };
+
   const handlePlotModeChange = async (mode: PlotMode) => {
     setPlotMode(mode);
     if (config) {
@@ -366,6 +381,7 @@ const App: React.FC = () => {
             activeTabId={activeCommandTab}
             onTabChange={handleTabChange}
             onAddTab={addCommandTab}
+            onRemoveTab={handleRemoveCommandTab}
             onExecute={handleExecute}
             onClear={handleClearCommand}
             isExecuting={isExecuting}
