@@ -213,7 +213,8 @@ const App: React.FC = () => {
     } else if (action === 'reload' && node.type === 'script') {
       await window.pdv.script.reload(node.path);
     } else if (action === 'copy_path') {
-      await navigator.clipboard.writeText(node.path);
+      // Format path to be python dictionary style and add "tree" to beginning (e.g., tree["data"]["array1"])
+      await navigator.clipboard.writeText(node. path.split('.').reduce((acc, part) => `${acc}["${part}"]`, 'tree'));
     }
   };
 

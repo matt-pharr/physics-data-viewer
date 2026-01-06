@@ -530,7 +530,11 @@ export class KernelManager {
     if (!managed) {
       throw new Error(`Kernel not found: ${id}`);
     }
-    if (managed.executing) {
+
+    // Serialize access to the kernel instead of immediately erroring when busy.
+    // Some UI flows (tree refresh + namespace refresh) issue overlapping requests.
+    const acquired = await this.waitForAvailability(managed, options.timeout ?? 5000);
+    if (!acquired) {
       return { error: 'Kernel busy; please wait for the current execution to finish.', duration: 0 };
     }
 
@@ -668,6 +672,18 @@ export class KernelManager {
     }
 
     return result;
+  }
+
+  private async waitForAvailability(managed: ManagedKernel, timeoutMs: number): Promise<boolean> {
+    const start = Date.now();
+    while (managed.executing) {
+      if (Date.now() - start >= timeoutMs) {
+        return false;
+      }
+      // Small delay to avoid tight loop while another call is in-flight
+      await new Promise((resolve) => setTimeout(resolve, 25));
+    }
+    return true;
   }
 
   async complete(id: string, code: string, cursorPos: number): Promise<KernelCompleteResult> {
