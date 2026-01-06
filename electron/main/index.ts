@@ -615,20 +615,29 @@ async function listTreeFromKernel(kernelId: string, path: string | undefined): P
     return [];
   }
 
-  try {
-    const code = buildTreeQueryCode(path || '');
+  const trySnapshot = async (code: string) => {
     const result = await kernelManager.execute(kernelId, { code });
     if (result.error) {
       console.warn('[tree] Kernel returned error:', result.error);
+      return undefined;
+    }
+    return parseJsonResult(result.result);
+  };
+
+  try {
+    const primary = await trySnapshot(buildTreeQueryCode(path || ''));
+    const parsedPrimary = Array.isArray(primary) ? primary : undefined;
+
+    const fallback =
+      parsedPrimary ||
+      (await trySnapshot(buildTreeQueryFallback(path || ''))) ||
+      undefined;
+
+    if (!Array.isArray(fallback)) {
       return [];
     }
 
-    const parsed = parseJsonResult(result.result);
-    if (!Array.isArray(parsed)) {
-      return [];
-    }
-
-    return parsed.map(normalizeTreeNode).filter(Boolean) as TreeNode[];
+    return fallback.map(normalizeTreeNode).filter(Boolean) as TreeNode[];
   } catch (error) {
     console.warn('[tree] Failed to list tree from kernel:', error);
     return [];
@@ -662,6 +671,11 @@ function normalizeTreeNode(node: unknown): TreeNode | null {
 function buildTreeQueryCode(path: string): string {
   const safePath = JSON.stringify(path ?? '');
   return ['from IPython.display import JSON as PDVJSON', `PDVJSON(pdv_tree_snapshot(${safePath}))`].join('\n');
+}
+
+function buildTreeQueryFallback(path: string): string {
+  const safePath = JSON.stringify(path ?? '');
+  return ['import json', `print(json.dumps(pdv_tree_snapshot(${safePath})))`].join('\n');
 }
 
 /**
