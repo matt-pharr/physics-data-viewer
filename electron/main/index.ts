@@ -446,6 +446,10 @@ if (!canRegisterHandlers) {
             const typeHint = typePart ? typePart.trim() : undefined;
             const defaultValue = defaultParts.length > 0 ? defaultParts.join('=').trim() : undefined;
 
+            if (name === 'tree') {
+              continue;
+            }
+
             params.push({
               name,
               type: typeHint || 'unknown',
@@ -467,6 +471,10 @@ if (!canRegisterHandlers) {
             const [namePart, typePart] = nameType.split('::');
             const name = namePart.trim();
             const typeHint = typePart ? typePart.trim() : undefined;
+
+            if (name === 'tree') {
+              continue;
+            }
 
             params.push({
               name,
