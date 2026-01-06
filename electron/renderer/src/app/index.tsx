@@ -214,7 +214,11 @@ const App: React.FC = () => {
       await window.pdv.script.reload(node.path);
     } else if (action === 'copy_path') {
       // Format path to be python dictionary style and add "tree" to beginning (e.g., tree["data"]["array1"])
-      await navigator.clipboard.writeText(node. path.split('.').reduce((acc, part) => `${acc}["${part}"]`, 'tree'));
+      await navigator.clipboard.writeText(node.path.split('.').reduce((acc, part) => `${acc}["${part}"]`, 'tree'));
+    } else if (action === 'print') {
+      if (!currentKernelId) return;
+      const target = JSON.stringify(node.path);
+      await handleExecute(`print(tree[${target}])`);
     }
   };
 

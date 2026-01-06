@@ -20,6 +20,7 @@ export const Tree: React.FC<TreeProps> = ({ kernelId, refreshToken = 0, onAction
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | undefined>();
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
+  const [selectedPath, setSelectedPath] = useState<string | null>(null);
 
   const loadRoot = async (force?: boolean) => {
     setLoading(true);
@@ -88,6 +89,10 @@ export const Tree: React.FC<TreeProps> = ({ kernelId, refreshToken = 0, onAction
     console.log('[Tree] Double-clicked:', node);
   };
 
+  const handleSelect = (node: TreeNodeData) => {
+    setSelectedPath(node.path);
+  };
+
   const handleRightClick = (node: TreeNodeData, event: React.MouseEvent) => {
     setContextMenu({
       x: event.clientX,
@@ -107,8 +112,32 @@ export const Tree: React.FC<TreeProps> = ({ kernelId, refreshToken = 0, onAction
 
   const flatNodes = useMemo(() => flattenTree(nodes), [nodes]);
 
+  const selectedNode = selectedPath ? flatNodes.find((n) => n.path === selectedPath) : undefined;
+
+  const handleKeyDown = async (event: React.KeyboardEvent<HTMLDivElement>) => {
+    if (!selectedNode) return;
+
+    if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'c') {
+      event.preventDefault();
+      await navigator.clipboard.writeText(selectedNode.path);
+      onAction?.('copy_path', selectedNode);
+      return;
+    }
+
+    if (selectedNode.type === 'script' && event.key === ' ') {
+      event.preventDefault();
+      onAction?.('edit', selectedNode);
+      return;
+    }
+
+    if (event.key.toLowerCase() === 'p') {
+      event.preventDefault();
+      onAction?.('print', selectedNode);
+    }
+  };
+
   return (
-    <div className="tree-container">
+    <div className="tree-container" tabIndex={0} onKeyDown={handleKeyDown}>
       <div className="tree-header">
         <span className="tree-col key">Key</span>
         <span className="tree-col type">Type</span>
@@ -123,14 +152,15 @@ export const Tree: React.FC<TreeProps> = ({ kernelId, refreshToken = 0, onAction
         {!loading &&
           !error &&
           flatNodes.map((node) => (
-            <TreeNodeRow
-              key={node.id}
-              node={node}
-              onExpand={handleExpand}
-              onDoubleClick={handleDoubleClick}
-              onRightClick={handleRightClick}
-            />
-          ))}
+              <TreeNodeRow
+                key={node.id}
+                node={{ ...node, selected: node.path === selectedPath }}
+                onExpand={handleExpand}
+                onDoubleClick={handleDoubleClick}
+                onRightClick={handleRightClick}
+                onClick={handleSelect}
+              />
+            ))}
       </div>
 
       {contextMenu && (

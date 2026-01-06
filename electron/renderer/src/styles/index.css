@@ -247,6 +247,10 @@ body {
   border-bottom: 1px solid var(--bg-primary);
 }
 
+.tree-row.selected {
+  background-color: var(--bg-secondary);
+}
+
 .tree-row:hover {
   background-color: var(--bg-hover);
 }

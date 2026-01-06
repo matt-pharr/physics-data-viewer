@@ -24,10 +24,11 @@ const TYPE_ICONS: Record<string, string> = {
 };
 
 interface TreeNodeRowProps {
-  node: TreeNodeData & { depth: number };
+  node: TreeNodeData & { depth: number; selected?: boolean };
   onExpand: (node: TreeNodeData) => void;
   onDoubleClick: (node: TreeNodeData) => void;
   onRightClick: (node: TreeNodeData, event: React.MouseEvent) => void;
+  onClick: (node: TreeNodeData) => void;
   style?: React.CSSProperties;
 }
 
@@ -36,6 +37,7 @@ export const TreeNodeRow: React.FC<TreeNodeRowProps> = ({
   onExpand,
   onDoubleClick,
   onRightClick,
+  onClick,
   style,
 }) => {
   const icon = TYPE_ICONS[node.type] || TYPE_ICONS.unknown;
@@ -55,9 +57,10 @@ export const TreeNodeRow: React.FC<TreeNodeRowProps> = ({
 
   return (
     <div
-      className="tree-row"
+      className={`tree-row ${node.selected ? 'selected' : ''}`}
       style={style}
       onDoubleClick={() => onDoubleClick(node)}
+      onClick={() => onClick(node)}
       onContextMenu={(e) => {
         e.preventDefault();
         onRightClick(node, e);
