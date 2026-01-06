@@ -12,6 +12,105 @@ MAX_COLUMNS = 20
 MAX_PREVIEW_LENGTH = 100
 
 # =============================================================================
+# PDV Tree Object (Enhanced Dict)
+# =============================================================================
+
+class PDVTree(dict):
+    """
+    Enhanced dict that acts as the tree object in kernel namespace.
+    Provides methods for running scripts, loading data, etc.
+    """
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._project_root = None
+        self._tree_root = None
+
+    def _set_project_root(self, root):
+        """Internal: set project root path"""
+        self._project_root = root
+        self._tree_root = os.path.join(root, 'tree')
+
+    def run_script(self, script_path, **kwargs):
+        """
+        Execute a script file with parameters.
+
+        Args:
+            script_path: Path in tree (e.g., 'scripts.analysis.fit_model')
+            **kwargs: Parameters to pass to script's run() function
+
+        Returns:
+            Result from script's run() function
+        """
+        import importlib.util
+
+        # Convert tree path to file path
+        path_parts = script_path.split('.')
+        if any(part in ('', '..') for part in path_parts):
+            raise ValueError("Invalid script path")
+
+        file_path = os.path.join(self._tree_root, *path_parts) + '.py'
+        resolved = os.path.abspath(file_path)
+        root_with_sep = os.path.join(os.path.abspath(self._tree_root), '')
+        if not resolved.startswith(root_with_sep):
+            raise ValueError(f"Script path escapes tree root: {script_path}")
+
+        if not os.path.exists(file_path):
+            raise FileNotFoundError(f\"Script not found: {file_path}\")
+
+        # Load script as module
+        spec = importlib.util.spec_from_file_location(\"_pdv_script\", file_path)
+        if spec is None or spec.loader is None:
+            raise ImportError(f\"Failed to load script: {file_path}\")
+
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+
+        # Check for run() function
+        if not hasattr(module, 'run'):
+            raise AttributeError(f\"Script {script_path} does not have a run() function\")
+
+        # Call run() with tree and kwargs
+        return module.run(self, **kwargs)
+
+    def __getitem__(self, key):
+        """Override to support path navigation (e.g., tree['data.array1'])"""
+        if isinstance(key, str) and '.' in key:
+            keys = key.split('.')
+            obj = self
+            for k in keys:
+                obj = dict.__getitem__(obj, k)
+            return obj
+        return dict.__getitem__(self, key)
+
+    def __setitem__(self, key, value):
+        """Override to support path setting"""
+        if isinstance(key, str) and '.' in key:
+            keys = key.split('.')
+            obj = self
+            for k in keys[:-1]:
+                if k not in obj:
+                    obj[k] = PDVTree()
+                obj = obj[k]
+            dict.__setitem__(obj, keys[-1], value)
+        else:
+            dict.__setitem__(self, key, value)
+
+# Create global tree instance
+tree = PDVTree()
+
+# Set project root (will be injected by PDV)
+tree._set_project_root(os.environ.get('PDV_PROJECT_ROOT', os.getcwd()))
+
+# Initialize tree structure
+if 'data' not in tree:
+    tree['data'] = PDVTree()
+if 'scripts' not in tree:
+    tree['scripts'] = PDVTree()
+if 'results' not in tree:
+    tree['results'] = PDVTree()
+
+# =============================================================================
 # Matplotlib Backend Configuration
 # =============================================================================
 

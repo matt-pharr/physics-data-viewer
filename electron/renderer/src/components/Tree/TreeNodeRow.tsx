@@ -4,6 +4,7 @@ import type { TreeNodeData } from '../../types';
 const TYPE_ICONS: Record<string, string> = {
   folder: '📁',
   file: '📄',
+  script: '📜',
   ndarray: '🔢',
   dataframe: '📊',
   image: '🖼️',
@@ -77,6 +78,9 @@ export const TreeNodeRow: React.FC<TreeNodeRowProps> = ({
 
       <div className="tree-col type">
         <span className="tree-type-badge">{node.type}</span>
+        {node.type === 'script' && node.language && (
+          <span className="tree-type-badge">{node.language}</span>
+        )}
       </div>
 
       <div className="tree-col preview">{node.preview || '—'}</div>

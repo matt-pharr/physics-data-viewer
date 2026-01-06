@@ -21,6 +21,9 @@ import type {
   PDVApi,
   NamespaceQueryOptions,
   NamespaceVariable,
+  ScriptRunRequest,
+  ScriptRunResult,
+  ScriptParameter,
 } from './main/ipc';
 
 // IPC channel names (duplicated here to avoid runtime imports in preload context)
@@ -45,6 +48,14 @@ const IPC = {
     read: 'files:read',
     write: 'files:write',
     pickExecutable: 'files:pickExecutable',
+    watch: 'files:watch',
+    unwatch: 'files:unwatch',
+  },
+  script: {
+    run: 'script:run',
+    edit: 'script:edit',
+    reload: 'script:reload',
+    get_params: 'script:get_params',
   },
   namespace: {
     query: 'namespace:query',
@@ -121,6 +132,19 @@ const api: PDVApi = {
 
     set: (config: Partial<Config>): Promise<boolean> =>
       ipcRenderer.invoke(IPC.config.set, config),
+  },
+
+  script: {
+    run: (kernelId: string, request: ScriptRunRequest): Promise<ScriptRunResult> =>
+      ipcRenderer.invoke(IPC.script.run, kernelId, request),
+    edit: (scriptPath: string): Promise<{ success: boolean; error?: string }> =>
+      ipcRenderer.invoke(IPC.script.edit, scriptPath),
+    reload: (scriptPath: string): Promise<{ success: boolean; error?: string }> =>
+      ipcRenderer.invoke(IPC.script.reload, scriptPath),
+    getParams: (
+      scriptPath: string,
+    ): Promise<{ success: boolean; params?: ScriptParameter[]; error?: string }> =>
+      ipcRenderer.invoke(IPC.script.get_params, scriptPath),
   },
 };
 

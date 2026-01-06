@@ -12,6 +12,12 @@ const DEFAULT_CONFIG: Config = {
   customKernels: [],
   pythonPath: 'python3',
   juliaPath: 'julia',
+  editors: {
+    python: 'code %s',
+    julia: 'code %s',
+    default: 'open %s',
+  },
+  projectRoot: process.cwd(),
 };
 
 function getConfigPath(): string {

@@ -69,19 +69,29 @@ export const ContextMenu: React.FC<ContextMenuProps> = ({ x, y, node, onAction, 
 };
 
 function getActionsForNode(node: TreeNodeData) {
-  const actions = [{ id: 'view', label: 'View', disabled: false }];
+  const actions = [];
 
-  if (node.type === 'ndarray' || node.type === 'dataframe') {
-    actions.push({ id: 'plot', label: 'Plot', disabled: false });
-  }
-
-  if (node.type === 'file') {
-    actions.push({ id: 'open', label: 'Open', disabled: false });
+  if (node.type === 'script') {
+    actions.push(
+      { id: 'run', label: 'Run...', disabled: false },
+      { id: 'edit', label: 'Edit', disabled: false },
+      { id: 'reload', label: 'Reload', disabled: false },
+      { id: 'view_source', label: 'View Source', disabled: false },
+    );
+  } else if (node.type === 'folder') {
+    actions.push({ id: 'refresh', label: 'Refresh', disabled: false });
+  } else {
+    actions.push({ id: 'view', label: 'View', disabled: false });
+    if (node.type === 'ndarray' || node.type === 'dataframe') {
+      actions.push({ id: 'plot', label: 'Plot', disabled: false });
+    }
+    if (node.type === 'file') {
+      actions.push({ id: 'open', label: 'Open', disabled: false });
+    }
   }
 
   actions.push(
-    { id: 'refresh', label: 'Refresh', disabled: false },
-    // Delete is disabled until the destructive flow is implemented
+    { id: 'copy_path', label: 'Copy Path', disabled: false },
     { id: 'delete', label: 'Delete', disabled: true },
   );
 

@@ -9,6 +9,82 @@ const MAX_COLUMNS = 20
 const MAX_PREVIEW_LENGTH = 100
 
 # =============================================================================
+# PDV Tree Object
+# =============================================================================
+
+"""
+PDVTree
+
+Enhanced Dict that acts as the tree object in kernel namespace.
+"""
+mutable struct PDVTree
+    data::Dict{String, Any}
+    project_root::String
+    tree_root::String
+
+    function PDVTree(project_root::String=pwd())
+        tree_root = joinpath(project_root, "tree")
+        new(Dict{String, Any}(), project_root, tree_root)
+    end
+end
+
+# Make PDVTree behave like a Dict
+Base.getindex(tree::PDVTree, key::String) = tree.data[key]
+Base.setindex!(tree::PDVTree, value, key::String) = tree.data[key] = value
+Base.haskey(tree::PDVTree, key::String) = haskey(tree.data, key)
+Base.keys(tree::PDVTree) = keys(tree.data)
+Base.values(tree::PDVTree) = values(tree.data)
+
+"""
+    run_script(tree::PDVTree, script_path::String; kwargs...)
+
+Execute a script file with parameters.
+"""
+function run_script(tree::PDVTree, script_path::String; kwargs...)
+    # Convert tree path to file path
+    path_parts = split(script_path, '.')
+    if any(p == "" || p == ".." for p in path_parts)
+        error("Invalid script path")
+    end
+    file_path = joinpath(tree.tree_root, path_parts...) * ".jl"
+    resolved = abspath(file_path)
+    root_with_sep = joinpath(tree.tree_root, "")
+    if !startswith(resolved, root_with_sep)
+        error("Script path escapes tree root")
+    end
+
+    if !isfile(file_path)
+        error("Script not found: $file_path")
+    end
+
+    # Include script in a temporary module
+    script_module = Module()
+
+    # Make tree available in script namespace
+    Core.eval(script_module, :(tree = $tree))
+
+    # Include script
+    Base.include(script_module, file_path)
+
+    # Check for run() function
+    if !isdefined(script_module, :run)
+        error("Script $script_path does not have a run() function")
+    end
+
+    # Call run() with tree and kwargs
+    run_func = getfield(script_module, :run)
+    return run_func(tree; kwargs...)
+end
+
+# Create global tree instance
+tree = PDVTree(get(ENV, "PDV_PROJECT_ROOT", pwd()))
+
+# Initialize tree structure
+tree["data"] = Dict{String, Any}()
+tree["scripts"] = Dict{String, Any}()
+tree["results"] = Dict{String, Any}()
+
+# =============================================================================
 # Plot Backend Configuration
 # =============================================================================
 

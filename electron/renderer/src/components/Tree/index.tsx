@@ -9,7 +9,11 @@ interface ContextMenuState {
   node: TreeNodeData;
 }
 
-export const Tree: React.FC = () => {
+interface TreeProps {
+  onAction?: (action: string, node: TreeNodeData) => void;
+}
+
+export const Tree: React.FC<TreeProps> = ({ onAction }) => {
   const [nodes, setNodes] = useState<TreeNodeData[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | undefined>();
@@ -92,6 +96,9 @@ export const Tree: React.FC = () => {
 
   const handleContextAction = (action: string, node: TreeNodeData) => {
     console.log('[Tree] Action:', action, node);
+    if (onAction) {
+      onAction(action, node);
+    }
     setContextMenu(null);
   };
 

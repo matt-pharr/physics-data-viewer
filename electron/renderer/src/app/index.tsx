@@ -2,9 +2,10 @@ import React, { useEffect, useState, useRef, useCallback } from 'react';
 import { CommandBox } from '../components/CommandBox';
 import { Console } from '../components/Console';
 import { Tree } from '../components/Tree';
+import { ScriptDialog } from '../components/ScriptDialog';
 import { EnvironmentSelector } from '../components/EnvironmentSelector';
 import { NamespaceView } from '../components/NamespaceView';
-import type { CommandTab, LogEntry } from '../types';
+import type { CommandTab, LogEntry, TreeNodeData } from '../types';
 import type { Config } from '../../main/ipc';
 
 type Tab = 'tree' | 'namespace' | 'modules';
@@ -17,6 +18,7 @@ const App: React.FC = () => {
   const [activeCommandTab, setActiveCommandTab] = useState(1);
   const [logs, setLogs] = useState<LogEntry[]>([]);
   const [currentKernelId, setCurrentKernelId] = useState<string | null>(null);
+  const [scriptDialog, setScriptDialog] = useState<{ scriptPath: string; scriptName: string } | null>(null);
   const [isExecuting, setIsExecuting] = useState(false);
   const [lastError, setLastError] = useState<string | undefined>(undefined);
   const [lastDuration, setLastDuration] = useState<number | null>(null);
@@ -220,6 +222,56 @@ const App: React.FC = () => {
     }
   };
 
+  const handleTreeAction = async (action: string, node: TreeNodeData) => {
+    console.log('[App] Tree action:', action, node);
+
+    if (action === 'run' && node.type === 'script') {
+      setScriptDialog({
+        scriptPath: node.path,
+        scriptName: node.key,
+      });
+    } else if ((action === 'edit' || action === 'view_source') && node.type === 'script') {
+      try {
+        await window.pdv.script.edit(node.path);
+      } catch (error) {
+        console.error('[App] Failed to open editor:', error);
+      }
+    } else if (action === 'reload' && node.type === 'script') {
+      if (currentKernelId) {
+        const code =
+          node.language === 'julia'
+            ? 'using Revise; Revise.revise()'
+            : `import importlib; importlib.reload(${node.path.replace(/\./g, '_')})`;
+        await window.pdv.kernels.execute(currentKernelId, { code });
+      }
+    } else if (action === 'copy_path') {
+      void navigator.clipboard.writeText(node.path);
+    }
+  };
+
+  const handleScriptRun = async (params: Record<string, unknown>) => {
+    if (!scriptDialog || !currentKernelId) return;
+
+    setScriptDialog(null);
+
+    try {
+      const result = await window.pdv.script.run(currentKernelId, {
+        scriptPath: scriptDialog.scriptPath,
+        params,
+      });
+
+      if (!result.success) {
+        console.error('[App] Script execution failed:', result.error);
+        setLastError(result.error);
+      } else {
+        console.log('[App] Script executed successfully:', result);
+      }
+    } catch (error) {
+      console.error('[App] Script execution error:', error);
+      setLastError(error instanceof Error ? error.message : String(error));
+    }
+  };
+
   return (
     <div className="app">
       {/* Header */}
@@ -266,7 +318,7 @@ const App: React.FC = () => {
               />
             </div>
             <div className={`tree-panel ${activeTab === 'tree' ? 'active' : ''}`}>
-              <Tree />
+              <Tree onAction={handleTreeAction} />
             </div>
             <div className={`tree-panel ${activeTab === 'modules' ? 'active' : ''}`}>
               <div className="tree-empty">Modules view (coming soon)</div>
@@ -332,13 +384,22 @@ const App: React.FC = () => {
              Last: {lastDuration !== null ? `${Math.round(lastDuration)}ms` : '--'}
            </span>
          </div>
-       </footer>
+      </footer>
 
-       {showEnvSelector && (
-         <EnvironmentSelector
-           isFirstRun={!config?.pythonPath || !config?.juliaPath}
-           currentConfig={config || undefined}
-           onSave={handleEnvSave}
+      {scriptDialog && (
+        <ScriptDialog
+          scriptPath={scriptDialog.scriptPath}
+          scriptName={scriptDialog.scriptName}
+          onRun={handleScriptRun}
+          onCancel={() => setScriptDialog(null)}
+        />
+      )}
+
+      {showEnvSelector && (
+        <EnvironmentSelector
+          isFirstRun={!config?.pythonPath || !config?.juliaPath}
+          currentConfig={config || undefined}
+          onSave={handleEnvSave}
            onCancel={() => setShowEnvSelector(false)}
          />
        )}
