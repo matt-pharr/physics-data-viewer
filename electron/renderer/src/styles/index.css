@@ -618,6 +618,18 @@ body {
   border-color: var(--text-secondary);
 }
 
+.btn-warning {
+  background-color: var(--warning);
+  border-color: var(--warning);
+  color: var(--bg-primary);
+  font-weight: 600;
+}
+
+.btn-warning:hover {
+  background-color: #e4e4b4;
+  border-color: #e4e4b4;
+}
+
 .btn:disabled {
   opacity: 0.6;
   cursor: not-allowed;
@@ -647,6 +659,16 @@ body {
   align-items: center;
   gap: 6px;
   color: var(--text-secondary);
+}
+
+.status-clickable {
+  cursor: pointer;
+  transition: color 0.15s ease;
+}
+
+.status-clickable:hover {
+  color: var(--accent);
+  text-decoration: underline;
 }
 
 .status-dot {

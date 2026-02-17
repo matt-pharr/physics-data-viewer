@@ -3,14 +3,18 @@ import React, { useState } from 'react';
 interface EnvironmentSelectorProps {
   isFirstRun: boolean;
   currentConfig?: { pythonPath?: string; juliaPath?: string };
+  currentKernelId?: string | null;
   onSave: (config: { pythonPath: string; juliaPath: string }) => void;
+  onRestart?: () => void;
   onCancel?: () => void;
 }
 
 export const EnvironmentSelector: React.FC<EnvironmentSelectorProps> = ({
   isFirstRun,
   currentConfig,
+  currentKernelId,
   onSave,
+  onRestart,
   onCancel,
 }) => {
   const [pythonPath, setPythonPath] = useState(currentConfig?.pythonPath || 'python3');
@@ -107,6 +111,11 @@ export const EnvironmentSelector: React.FC<EnvironmentSelectorProps> = ({
       <button className="btn btn-secondary" onClick={() => onSave({ pythonPath, juliaPath })} disabled={validating}>
         Save Without Validation
       </button>
+          {!isFirstRun && currentKernelId && onRestart && (
+            <button className="btn btn-warning" onClick={onRestart} disabled={validating}>
+              Restart Kernel
+            </button>
+          )}
           {!isFirstRun && onCancel && (
             <button className="btn btn-secondary" onClick={onCancel} disabled={validating}>
               Cancel

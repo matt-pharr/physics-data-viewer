@@ -1,4 +1,4 @@
-import { app, BrowserWindow } from 'electron';
+import { app, BrowserWindow, Menu } from 'electron';
 import * as path from 'path';
 import './index'; // Register IPC handlers (even if empty for now)
 
@@ -20,6 +20,21 @@ function createWindow(): void {
     backgroundColor: '#1e1e1e',
   });
 
+  // Disable reload shortcuts
+  mainWindow.webContents.on('before-input-event', (event, input) => {
+    // Prevent Cmd+R, Ctrl+R, F5 from reloading the page
+    if (
+      (input.key === 'r' || input.key === 'R') &&
+      (input.control || input.meta) &&
+      input.type === 'keyDown'
+    ) {
+      event.preventDefault();
+    }
+    if (input.key === 'F5' && input.type === 'keyDown') {
+      event.preventDefault();
+    }
+  });
+
   if (isDev) {
     mainWindow.loadURL('http://localhost:5173');
     mainWindow.webContents.openDevTools();
@@ -38,6 +53,61 @@ if (!canCreateWindow) {
   console.warn('[main] Electron app not available (likely test environment); skipping window creation.');
 } else {
   app.whenReady().then(() => {
+    // Set up application menu without reload shortcuts
+    const template: Electron.MenuItemConstructorOptions[] = [
+      {
+        label: 'File',
+        submenu: [
+          { role: 'quit' }
+        ]
+      },
+      {
+        label: 'Edit',
+        submenu: [
+          { role: 'undo' },
+          { role: 'redo' },
+          { type: 'separator' },
+          { role: 'cut' },
+          { role: 'copy' },
+          { role: 'paste' },
+          { role: 'selectAll' }
+        ]
+      },
+      {
+        label: 'View',
+        submenu: [
+          { role: 'resetZoom' },
+          { role: 'zoomIn' },
+          { role: 'zoomOut' },
+          { type: 'separator' },
+          { role: 'togglefullscreen' }
+        ]
+      }
+    ];
+
+    // Add dev menu only in development
+    if (isDev) {
+      template.push({
+        label: 'Developer',
+        submenu: [
+          { role: 'toggleDevTools' },
+          { type: 'separator' },
+          { 
+            label: 'Reload (Use with caution)',
+            accelerator: 'CommandOrControl+Shift+R',
+            click: (_, window) => {
+              if (window) {
+                window.reload();
+              }
+            }
+          }
+        ]
+      });
+    }
+
+    const menu = Menu.buildFromTemplate(template);
+    Menu.setApplicationMenu(menu);
+
     createWindow();
 
     app.on('activate', () => {

@@ -12,11 +12,33 @@ import type { Config } from '../../main/ipc';
 type Tab = 'tree' | 'namespace' | 'modules';
 type PlotMode = 'native' | 'capture';
 
+// Helper functions for localStorage persistence
+const loadFromStorage = <T,>(key: string, defaultValue: T): T => {
+  try {
+    const stored = localStorage.getItem(key);
+    return stored ? JSON.parse(stored) : defaultValue;
+  } catch {
+    return defaultValue;
+  }
+};
+
+const saveToStorage = <T,>(key: string, value: T): void => {
+  try {
+    localStorage.setItem(key, JSON.stringify(value));
+  } catch (error) {
+    console.warn(`Failed to save ${key} to localStorage:`, error);
+  }
+};
+
 const App: React.FC = () => {
   const [activeTab, setActiveTab] = useState<Tab>('tree');
   const [plotMode, setPlotMode] = useState<PlotMode>('native');
-  const [commandTabs, setCommandTabs] = useState<CommandTab[]>([{ id: 1, code: '' }]);
-  const [activeCommandTab, setActiveCommandTab] = useState(1);
+  const [commandTabs, setCommandTabs] = useState<CommandTab[]>(() => 
+    loadFromStorage('pdv:commandTabs', [{ id: 1, code: '' }])
+  );
+  const [activeCommandTab, setActiveCommandTab] = useState(() => 
+    loadFromStorage('pdv:activeCommandTab', 1)
+  );
   const [logs, setLogs] = useState<LogEntry[]>([]);
   const [currentKernelId, setCurrentKernelId] = useState<string | null>(null);
   const [isExecuting, setIsExecuting] = useState(false);
@@ -34,6 +56,16 @@ const App: React.FC = () => {
   const [namespaceRefreshToken, setNamespaceRefreshToken] = useState(0);
   const [treeRefreshToken, setTreeRefreshToken] = useState(0);
   const [createScriptTarget, setCreateScriptTarget] = useState<string | null>(null);
+
+  // Persist command tabs to localStorage
+  useEffect(() => {
+    saveToStorage('pdv:commandTabs', commandTabs);
+  }, [commandTabs]);
+
+  // Persist active command tab to localStorage
+  useEffect(() => {
+    saveToStorage('pdv:activeCommandTab', activeCommandTab);
+  }, [activeCommandTab]);
 
   useEffect(() => {
     // Prevent double initialization in StrictMode
@@ -142,6 +174,24 @@ const App: React.FC = () => {
     setConfig(updatedConfig);
     setShowEnvSelector(false);
     await startKernel(updatedConfig);
+  };
+
+  const handleRestartKernel = async () => {
+    if (!currentKernelId) return;
+    
+    try {
+      console.log('[App] Restarting kernel:', currentKernelId);
+      const newKernel = await window.pdv.kernels.restart(currentKernelId);
+      setCurrentKernelId(newKernel.id);
+      setShowEnvSelector(false);
+      setLogs([]);
+      setNamespaceRefreshToken((prev) => prev + 1);
+      setTreeRefreshToken((prev) => prev + 1);
+      console.log('[App] Kernel restarted successfully:', newKernel);
+    } catch (error) {
+      console.error('[App] Failed to restart kernel:', error);
+      setLastError(error instanceof Error ? error.message : String(error));
+    }
   };
 
   const addCommandTab = () => {
@@ -427,7 +477,13 @@ const App: React.FC = () => {
              <span className={`status-dot ${isExecuting ? 'busy' : 'idle'}`} />
              <span>{isExecuting ? 'Busy' : 'Idle'}</span>
            </span>
-           <span className="status-item">{config?.kernelSpec ?? 'python3'}</span>
+           <span 
+             className="status-item status-clickable" 
+             onClick={() => setShowEnvSelector(true)}
+             title="Click to change kernel"
+           >
+             {config?.kernelSpec ?? 'python3'}
+           </span>
            <span className="status-item">~/projects</span>
          </div>
          <div className="status-right">
@@ -456,7 +512,9 @@ const App: React.FC = () => {
          <EnvironmentSelector
            isFirstRun={!config?.pythonPath || !config?.juliaPath}
            currentConfig={config || undefined}
+           currentKernelId={currentKernelId}
            onSave={handleEnvSave}
+           onRestart={handleRestartKernel}
            onCancel={() => setShowEnvSelector(false)}
          />
        )}
