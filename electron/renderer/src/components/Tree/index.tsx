@@ -63,13 +63,18 @@ export const Tree: React.FC<TreeProps> = ({ kernelId, refreshToken = 0, onAction
     }
   };
 
-  // Persist expanded paths to localStorage
+  // Persist expanded paths to localStorage whenever they change
+  // We trigger this by watching nodes, but use a ref callback to debounce
   useEffect(() => {
-    try {
-      localStorage.setItem('pdv:expandedPaths', JSON.stringify(Array.from(expandedPathsRef.current)));
-    } catch (error) {
-      console.warn('Failed to persist expanded paths:', error);
-    }
+    const timeoutId = setTimeout(() => {
+      try {
+        localStorage.setItem('pdv:expandedPaths', JSON.stringify(Array.from(expandedPathsRef.current)));
+      } catch (error) {
+        console.warn('Failed to persist expanded paths:', error);
+      }
+    }, 500); // Debounce saves to avoid excessive writes
+    
+    return () => clearTimeout(timeoutId);
   }, [nodes]); // Save whenever nodes change (expand/collapse)
 
   // Persist selected path to localStorage
