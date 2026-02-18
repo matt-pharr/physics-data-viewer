@@ -96,4 +96,28 @@ describe('Settings', () => {
     expect(loaded).toEqual(testSettings);
     expect(loaded.editors?.python).toBe('code %s');
   });
+
+  it('should deep merge nested editor settings', () => {
+    const initial = {
+      pythonPath: '/usr/bin/python3',
+      editors: {
+        python: 'code %s',
+        julia: 'code %s',
+        default: 'open %s',
+      },
+    };
+    
+    saveSettings(initial);
+    
+    // Update only python editor, should preserve julia and default
+    const updated = updateSettings({
+      editors: {
+        python: 'vim %s',
+      },
+    });
+    
+    expect(updated.editors?.python).toBe('vim %s');
+    expect(updated.editors?.julia).toBe('code %s');
+    expect(updated.editors?.default).toBe('open %s');
+  });
 });

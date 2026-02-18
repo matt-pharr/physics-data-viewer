@@ -54,13 +54,17 @@ export const Settings: React.FC<SettingsProps> = ({ onClose }) => {
       const updated: Partial<SettingsType> = {
         pythonPath: pythonPath || undefined,
         juliaPath: juliaPath || undefined,
-        editors: {
+        treeRoot: treeRoot || undefined,
+      };
+
+      // Only include editors if at least one field has a value
+      if (pythonEditor || juliaEditor || defaultEditor) {
+        updated.editors = {
           python: pythonEditor || undefined,
           julia: juliaEditor || undefined,
           default: defaultEditor || undefined,
-        },
-        treeRoot: treeRoot || undefined,
-      };
+        };
+      }
 
       const success = await window.pdv.settings.set(updated);
       if (success) {

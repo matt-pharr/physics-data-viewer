@@ -82,7 +82,18 @@ export function saveSettings(settings: Settings): void {
  */
 export function updateSettings(partial: Partial<Settings>): Settings {
   const current = loadSettings();
+  
+  // Deep merge for nested objects like editors
   const updated = { ...current, ...partial };
+  
+  // Special handling for nested editors object
+  if (partial.editors && current.editors) {
+    updated.editors = {
+      ...current.editors,
+      ...partial.editors,
+    };
+  }
+  
   saveSettings(updated);
   return updated;
 }
