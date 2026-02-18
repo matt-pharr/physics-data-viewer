@@ -51,6 +51,10 @@ export const IPC = {
     load: 'commandBoxes:load',
     save: 'commandBoxes:save',
   },
+  settings: {
+    get: 'settings:get',
+    set: 'settings:set',
+  },
 } as const;
 
 // ============================================================================
@@ -362,6 +366,11 @@ export interface PDVApi {
     load: () => Promise<CommandBoxData | null>;
     save: (data: CommandBoxData) => Promise<boolean>;
   };
+  settings: {
+    get: () => Promise<Settings>;
+    set: (settings: Partial<Settings>) => Promise<boolean>;
+    onOpenSettings: (callback: () => void) => () => void;
+  };
 }
 
 // ============================================================================
@@ -371,4 +380,21 @@ export interface PDVApi {
 export interface CommandBoxData {
   tabs: Array<{ id: number; code: string }>;
   activeTabId: number;
+}
+
+// ============================================================================
+// Settings Types
+// ============================================================================
+
+/** User settings stored in ~/.PDV/settings */
+export interface Settings {
+  pythonPath?: string;
+  juliaPath?: string;
+  editors?: {
+    python?: string;
+    julia?: string;
+    default?: string;
+  };
+  treeRoot?: string;
+  theme?: 'dark' | 'light';
 }

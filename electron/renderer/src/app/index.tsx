@@ -6,6 +6,7 @@ import { EnvironmentSelector } from '../components/EnvironmentSelector';
 import { NamespaceView } from '../components/NamespaceView';
 import { ScriptDialog } from '../components/ScriptDialog';
 import { CreateScriptDialog } from '../components/Tree/CreateScriptDialog';
+import { Settings } from '../components/Settings';
 import type { CommandTab, LogEntry, TreeNodeData } from '../types';
 import type { Config } from '../../main/ipc';
 
@@ -34,6 +35,7 @@ const App: React.FC = () => {
   const [namespaceRefreshToken, setNamespaceRefreshToken] = useState(0);
   const [treeRefreshToken, setTreeRefreshToken] = useState(0);
   const [createScriptTarget, setCreateScriptTarget] = useState<string | null>(null);
+  const [showSettings, setShowSettings] = useState(false);
 
   // Load command boxes from filesystem on startup
   useEffect(() => {
@@ -110,7 +112,15 @@ const App: React.FC = () => {
     void initConfig();
   }, []);
 
+  // Listen for settings open event from menu
   useEffect(() => {
+    const cleanup = window.pdv.settings.onOpenSettings(() => {
+      setShowSettings(true);
+    });
+    return cleanup;
+  }, []);
+
+  useEffect(() {
     const handleMove = (event: MouseEvent) => {
       if (!dragRef.current) return;
       if (dragRef.current === 'vertical') {
@@ -535,6 +545,10 @@ const App: React.FC = () => {
            onRestart={handleRestartKernel}
            onCancel={() => setShowEnvSelector(false)}
          />
+       )}
+
+       {showSettings && (
+         <Settings onClose={() => setShowSettings(false)} />
        )}
      </div>
    );

@@ -25,6 +25,7 @@ import type {
   ScriptRunResult,
   ScriptParameter,
   CommandBoxData,
+  Settings,
 } from './main/ipc';
 
 // IPC channel names (duplicated here to avoid runtime imports in preload context)
@@ -69,6 +70,10 @@ const IPC = {
   commandBoxes: {
     load: 'commandBoxes:load',
     save: 'commandBoxes:save',
+  },
+  settings: {
+    get: 'settings:get',
+    set: 'settings:set',
   },
 } as const;
 
@@ -165,6 +170,18 @@ const api: PDVApi = {
       ipcRenderer.invoke(IPC.commandBoxes.load),
     save: (data: CommandBoxData): Promise<boolean> =>
       ipcRenderer.invoke(IPC.commandBoxes.save, data),
+  },
+
+  settings: {
+    get: (): Promise<Settings> =>
+      ipcRenderer.invoke(IPC.settings.get),
+    set: (settings: Partial<Settings>): Promise<boolean> =>
+      ipcRenderer.invoke(IPC.settings.set, settings),
+    onOpenSettings: (callback: () => void) => {
+      const handler = () => callback();
+      ipcRenderer.on('open-settings', handler);
+      return () => ipcRenderer.removeListener('open-settings', handler);
+    },
   },
 };
 

@@ -58,6 +58,16 @@ if (!canCreateWindow) {
       {
         label: 'File',
         submenu: [
+          {
+            label: 'Settings...',
+            accelerator: 'CommandOrControl+,',
+            click: (_, window) => {
+              if (window) {
+                window.webContents.send('open-settings');
+              }
+            }
+          },
+          { type: 'separator' },
           { role: 'quit' }
         ]
       },

@@ -23,9 +23,11 @@ import {
   ScriptRunResult,
   ScriptParameter,
   CommandBoxData,
+  Settings,
 } from './ipc';
 import { getKernelManager, resetKernelManager } from './kernel-manager';
 import { loadConfig, updateConfig } from './config';
+import { loadSettings, saveSettings } from './settings';
 import { spawn } from 'child_process';
 import * as os from 'os';
 import { FileScanner } from './file-scanner';
@@ -693,6 +695,29 @@ if (!canRegisterHandlers) {
       return true;
     } catch (error) {
       console.error('[IPC] commandBoxes:save error:', error);
+      return false;
+    }
+  });
+
+  // ============================================================================
+  // Settings Handlers
+  // ============================================================================
+
+  ipcMain.handle(IPC.settings.get, async (): Promise<Settings> => {
+    console.log('[IPC] settings:get');
+    return loadSettings();
+  });
+
+  ipcMain.handle(IPC.settings.set, async (_event, settings: Partial<Settings>): Promise<boolean> => {
+    console.log('[IPC] settings:set', settings);
+    try {
+      const current = loadSettings();
+      const updated = { ...current, ...settings };
+      saveSettings(updated);
+      console.log('[IPC] settings:set - success');
+      return true;
+    } catch (error) {
+      console.error('[IPC] settings:set error:', error);
       return false;
     }
   });
