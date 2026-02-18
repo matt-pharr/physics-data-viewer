@@ -76,6 +76,11 @@ const App: React.FC = () => {
     return () => {
       if (saveTimeoutRef.current) {
         clearTimeout(saveTimeoutRef.current);
+        // Save immediately on cleanup to avoid data loss
+        void window.pdv.commandBoxes.save({
+          tabs: commandTabs,
+          activeTabId: activeCommandTab,
+        });
       }
     };
   }, [commandTabs, activeCommandTab]);

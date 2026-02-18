@@ -44,10 +44,24 @@ const kernelManager = getKernelManager();
 let currentConfig: Config = loadConfig();
 let fileScanner: FileScanner | null = null;
 
+/**
+ * Get the tree root directory from config with fallback chain.
+ * Priority: config.treeRoot > config.projectRoot/tree > config.cwd/tree > process.cwd()/tree
+ * 
+ * @returns The tree root directory path
+ */
+function getTreeRoot(): string {
+  const config = loadConfig();
+  if (config.treeRoot) {
+    return config.treeRoot;
+  }
+  const projectRoot = config.projectRoot || config.cwd || process.cwd();
+  return path.join(projectRoot, 'tree');
+}
+
 function getFileScanner(): FileScanner {
   if (!fileScanner) {
-    const config = loadConfig();
-    const treeRoot = config.treeRoot || path.join(config.projectRoot || config.cwd || process.cwd(), 'tree');
+    const treeRoot = getTreeRoot();
     fileScanner = new FileScanner(treeRoot);
   }
   return fileScanner;
@@ -628,10 +642,15 @@ if (!canRegisterHandlers) {
   // Command Box Handlers
   // ============================================================================
 
+  /**
+   * Get the command boxes file path.
+   * Command boxes are stored in the project directory (parent of tree root).
+   * Example: If tree is at /tmp/user/PDV/tree, command boxes are at /tmp/user/PDV/command-boxes.json
+   * 
+   * @returns The full path to command-boxes.json
+   */
   function getCommandBoxesPath(): string {
-    const config = loadConfig();
-    const treeRoot = config.treeRoot || path.join(config.projectRoot || config.cwd || process.cwd(), 'tree');
-    // Store command-boxes.json alongside the tree directory
+    const treeRoot = getTreeRoot();
     const projectDir = path.dirname(treeRoot);
     return path.join(projectDir, 'command-boxes.json');
   }
