@@ -1,12 +1,18 @@
 import React, { useState, useEffect } from 'react';
-import type { Settings as SettingsType } from '../../../main/ipc';
+import type { Settings as SettingsType, Theme, ThemeColors, KeyboardShortcut } from '../../../main/ipc';
+import { GeneralTab } from './tabs/GeneralTab';
+import { AppearanceTab } from './tabs/AppearanceTab';
+import { KeyboardShortcutsTab } from './tabs/KeyboardShortcutsTab';
 import './styles.css';
 
 interface SettingsProps {
   onClose: () => void;
 }
 
+type SettingsTab = 'general' | 'appearance' | 'shortcuts';
+
 export const Settings: React.FC<SettingsProps> = ({ onClose }) => {
+  const [activeTab, setActiveTab] = useState<SettingsTab>('general');
   const [settings, setSettings] = useState<SettingsType>({});
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -19,6 +25,9 @@ export const Settings: React.FC<SettingsProps> = ({ onClose }) => {
   const [juliaEditor, setJuliaEditor] = useState('');
   const [defaultEditor, setDefaultEditor] = useState('');
   const [treeRoot, setTreeRoot] = useState('');
+  const [selectedThemeId, setSelectedThemeId] = useState<string | undefined>(undefined);
+  const [customThemeColors, setCustomThemeColors] = useState<ThemeColors | undefined>(undefined);
+  const [keyboardShortcuts, setKeyboardShortcuts] = useState<KeyboardShortcut[] | undefined>(undefined);
 
   useEffect(() => {
     loadSettings();
@@ -37,6 +46,9 @@ export const Settings: React.FC<SettingsProps> = ({ onClose }) => {
       setJuliaEditor(loaded.editors?.julia || '');
       setDefaultEditor(loaded.editors?.default || '');
       setTreeRoot(loaded.treeRoot || '');
+      setSelectedThemeId(loaded.theme);
+      setCustomThemeColors(loaded.customThemeColors);
+      setKeyboardShortcuts(loaded.keyboardShortcuts);
       
       setError(null);
     } catch (err) {
@@ -55,6 +67,9 @@ export const Settings: React.FC<SettingsProps> = ({ onClose }) => {
         pythonPath: pythonPath || undefined,
         juliaPath: juliaPath || undefined,
         treeRoot: treeRoot || undefined,
+        theme: selectedThemeId,
+        customThemeColors: customThemeColors,
+        keyboardShortcuts: keyboardShortcuts,
       };
 
       // Only include editors if at least one field has a value
@@ -77,6 +92,36 @@ export const Settings: React.FC<SettingsProps> = ({ onClose }) => {
     } finally {
       setSaving(false);
     }
+  };
+
+  const handleThemeChange = async (themeId: string, colors: ThemeColors) => {
+    // Check if colors have been modified
+    const theme = await window.pdv.themes.load(themeId);
+    if (theme) {
+      const isModified = Object.keys(colors).some(
+        (key) => colors[key] !== theme.colors[key]
+      );
+      
+      if (isModified) {
+        // Create custom theme
+        try {
+          const customTheme = await window.pdv.themes.createCustom(theme, colors);
+          setSelectedThemeId(customTheme.id);
+          setCustomThemeColors(customTheme.colors);
+        } catch (err) {
+          console.error('[Settings] Failed to create custom theme:', err);
+          setError('Failed to create custom theme');
+        }
+      } else {
+        // Use the selected theme as-is
+        setSelectedThemeId(themeId);
+        setCustomThemeColors(undefined);
+      }
+    }
+  };
+
+  const handleShortcutsChange = (shortcuts: KeyboardShortcut[]) => {
+    setKeyboardShortcuts(shortcuts);
   };
 
   const handleBrowsePython = async () => {
@@ -113,100 +158,63 @@ export const Settings: React.FC<SettingsProps> = ({ onClose }) => {
           </button>
         </div>
 
+        <div className="settings-tabs">
+          <button
+            className={`settings-tab ${activeTab === 'general' ? 'active' : ''}`}
+            onClick={() => setActiveTab('general')}
+          >
+            General
+          </button>
+          <button
+            className={`settings-tab ${activeTab === 'appearance' ? 'active' : ''}`}
+            onClick={() => setActiveTab('appearance')}
+          >
+            Appearance
+          </button>
+          <button
+            className={`settings-tab ${activeTab === 'shortcuts' ? 'active' : ''}`}
+            onClick={() => setActiveTab('shortcuts')}
+          >
+            Keyboard Shortcuts
+          </button>
+        </div>
+
         <div className="settings-content">
           {error && <div className="settings-error">{error}</div>}
 
-          <div className="settings-section">
-            <h3>Interpreters</h3>
-            
-            <div className="settings-field">
-              <label htmlFor="pythonPath">Python Path</label>
-              <div className="settings-field-row">
-                <input
-                  id="pythonPath"
-                  type="text"
-                  value={pythonPath}
-                  onChange={(e) => setPythonPath(e.target.value)}
-                  placeholder="python3"
-                />
-                <button onClick={handleBrowsePython} className="settings-browse-btn">
-                  Browse...
-                </button>
-              </div>
-            </div>
+          {activeTab === 'general' && (
+            <GeneralTab
+              pythonPath={pythonPath}
+              juliaPath={juliaPath}
+              pythonEditor={pythonEditor}
+              juliaEditor={juliaEditor}
+              defaultEditor={defaultEditor}
+              treeRoot={treeRoot}
+              onPythonPathChange={setPythonPath}
+              onJuliaPathChange={setJuliaPath}
+              onPythonEditorChange={setPythonEditor}
+              onJuliaEditorChange={setJuliaEditor}
+              onDefaultEditorChange={setDefaultEditor}
+              onTreeRootChange={setTreeRoot}
+              onBrowsePython={handleBrowsePython}
+              onBrowseJulia={handleBrowseJulia}
+            />
+          )}
 
-            <div className="settings-field">
-              <label htmlFor="juliaPath">Julia Path</label>
-              <div className="settings-field-row">
-                <input
-                  id="juliaPath"
-                  type="text"
-                  value={juliaPath}
-                  onChange={(e) => setJuliaPath(e.target.value)}
-                  placeholder="julia"
-                />
-                <button onClick={handleBrowseJulia} className="settings-browse-btn">
-                  Browse...
-                </button>
-              </div>
-            </div>
-          </div>
+          {activeTab === 'appearance' && (
+            <AppearanceTab
+              currentThemeId={selectedThemeId}
+              customColors={customThemeColors}
+              onThemeChange={handleThemeChange}
+            />
+          )}
 
-          <div className="settings-section">
-            <h3>External Editors</h3>
-            
-            <div className="settings-field">
-              <label htmlFor="pythonEditor">Python Editor Command</label>
-              <input
-                id="pythonEditor"
-                type="text"
-                value={pythonEditor}
-                onChange={(e) => setPythonEditor(e.target.value)}
-                placeholder="code %s"
-              />
-              <div className="settings-hint">Use %s for the file path</div>
-            </div>
-
-            <div className="settings-field">
-              <label htmlFor="juliaEditor">Julia Editor Command</label>
-              <input
-                id="juliaEditor"
-                type="text"
-                value={juliaEditor}
-                onChange={(e) => setJuliaEditor(e.target.value)}
-                placeholder="code %s"
-              />
-              <div className="settings-hint">Use %s for the file path</div>
-            </div>
-
-            <div className="settings-field">
-              <label htmlFor="defaultEditor">Default Editor Command</label>
-              <input
-                id="defaultEditor"
-                type="text"
-                value={defaultEditor}
-                onChange={(e) => setDefaultEditor(e.target.value)}
-                placeholder="open %s"
-              />
-              <div className="settings-hint">Use %s for the file path</div>
-            </div>
-          </div>
-
-          <div className="settings-section">
-            <h3>Paths</h3>
-            
-            <div className="settings-field">
-              <label htmlFor="treeRoot">Tree Root Directory</label>
-              <input
-                id="treeRoot"
-                type="text"
-                value={treeRoot}
-                onChange={(e) => setTreeRoot(e.target.value)}
-                placeholder="/tmp/{username}/PDV/tree"
-              />
-              <div className="settings-hint">Location for data tree storage</div>
-            </div>
-          </div>
+          {activeTab === 'shortcuts' && (
+            <KeyboardShortcutsTab
+              shortcuts={keyboardShortcuts}
+              onShortcutsChange={handleShortcutsChange}
+            />
+          )}
         </div>
 
         <div className="settings-footer">

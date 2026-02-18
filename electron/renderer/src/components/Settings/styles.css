@@ -15,9 +15,9 @@
   background-color: #1e1e1e;
   border: 1px solid #3c3c3c;
   border-radius: 8px;
-  width: 600px;
+  width: 700px;
   max-width: 90vw;
-  max-height: 80vh;
+  max-height: 85vh;
   display: flex;
   flex-direction: column;
   box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
@@ -58,6 +58,33 @@
 .settings-close:hover {
   background-color: #3c3c3c;
   color: #ccc;
+}
+
+.settings-tabs {
+  display: flex;
+  border-bottom: 1px solid #3c3c3c;
+  background-color: #252525;
+}
+
+.settings-tab {
+  padding: 12px 24px;
+  background: none;
+  border: none;
+  color: #888;
+  font-size: 13px;
+  cursor: pointer;
+  transition: color 0.2s, background-color 0.2s;
+  border-bottom: 2px solid transparent;
+}
+
+.settings-tab:hover {
+  color: #ccc;
+  background-color: #2a2a2a;
+}
+
+.settings-tab.active {
+  color: #007acc;
+  border-bottom-color: #007acc;
 }
 
 .settings-content {
@@ -209,4 +236,187 @@
   text-align: center;
   color: #888;
   font-size: 14px;
+}
+
+/* Appearance Tab Styles */
+.settings-select {
+  width: 100%;
+  padding: 8px 12px;
+  background-color: #252525;
+  border: 1px solid #3c3c3c;
+  border-radius: 4px;
+  color: #cccccc;
+  font-size: 13px;
+  font-family: inherit;
+  cursor: pointer;
+}
+
+.settings-select:focus {
+  outline: none;
+  border-color: #007acc;
+}
+
+.settings-color-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 16px;
+}
+
+.settings-color-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.settings-color-field label {
+  font-size: 13px;
+  color: #cccccc;
+  font-weight: 500;
+}
+
+.settings-color-input-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.settings-color-picker {
+  width: 50px;
+  height: 32px;
+  border: 1px solid #3c3c3c;
+  border-radius: 4px;
+  cursor: pointer;
+  background-color: #252525;
+}
+
+.settings-color-text {
+  flex: 1;
+  padding: 6px 10px;
+  background-color: #252525;
+  border: 1px solid #3c3c3c;
+  border-radius: 4px;
+  color: #cccccc;
+  font-size: 12px;
+  font-family: 'Monaco', 'Menlo', 'Courier New', monospace;
+}
+
+.settings-color-text:focus {
+  outline: none;
+  border-color: #007acc;
+}
+
+/* Keyboard Shortcuts Tab Styles */
+.settings-section-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 16px;
+}
+
+.settings-shortcuts-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.settings-shortcut-row {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 12px;
+  background-color: #252525;
+  border: 1px solid #3c3c3c;
+  border-radius: 4px;
+}
+
+.settings-shortcut-action {
+  flex: 1;
+  font-size: 13px;
+  color: #cccccc;
+}
+
+.settings-shortcut-value {
+  padding: 4px 12px;
+  background-color: #3c3c3c;
+  border-radius: 4px;
+  font-size: 12px;
+  font-family: 'Monaco', 'Menlo', 'Courier New', monospace;
+  color: #cccccc;
+  min-width: 120px;
+  text-align: center;
+}
+
+.settings-shortcut-edit {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex: 1;
+}
+
+.settings-shortcut-modifiers {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+}
+
+.settings-checkbox-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: #cccccc;
+  cursor: pointer;
+}
+
+.settings-checkbox-label input[type="checkbox"] {
+  cursor: pointer;
+}
+
+.settings-shortcut-input {
+  padding: 6px 10px;
+  background-color: #252525;
+  border: 1px solid #3c3c3c;
+  border-radius: 4px;
+  color: #cccccc;
+  font-size: 12px;
+  font-family: 'Monaco', 'Menlo', 'Courier New', monospace;
+  width: 100px;
+}
+
+.settings-shortcut-input:focus {
+  outline: none;
+  border-color: #007acc;
+}
+
+.settings-shortcut-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.settings-btn-small {
+  padding: 4px 12px;
+  font-size: 12px;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: background-color 0.2s;
+  border: 1px solid #3c3c3c;
+}
+
+.settings-btn-small.settings-btn-primary {
+  background-color: #007acc;
+  border-color: #007acc;
+  color: #ffffff;
+}
+
+.settings-btn-small.settings-btn-primary:hover {
+  background-color: #005a9e;
+}
+
+.settings-btn-small.settings-btn-secondary {
+  background-color: transparent;
+  color: #cccccc;
+}
+
+.settings-btn-small.settings-btn-secondary:hover {
+  background-color: #3c3c3c;
 }
