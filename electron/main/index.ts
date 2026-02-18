@@ -22,6 +22,7 @@ import {
   ScriptRunRequest,
   ScriptRunResult,
   ScriptParameter,
+  CommandBoxData,
 } from './ipc';
 import { getKernelManager, resetKernelManager } from './kernel-manager';
 import { loadConfig, updateConfig } from './config';
@@ -553,18 +554,44 @@ if (!canRegisterHandlers) {
   // File Handlers (unchanged from Step 2)
   // ============================================================================
 
-  ipcMain.handle(IPC.files.read, async (_event, path, options): Promise<FileReadResult | null> => {
-    console.log('[IPC] files:read', path, options);
-    return {
-      content: `# Stub content for ${path}\nprint("Hello, world!")`,
-      size: 100,
-      mtime: Date.now(),
-    };
+  ipcMain.handle(IPC.files.read, async (_event, filePath, options): Promise<FileReadResult | null> => {
+    console.log('[IPC] files:read', filePath, options);
+    try {
+      if (!fs.existsSync(filePath)) {
+        return null;
+      }
+      const stats = fs.statSync(filePath);
+      const content = fs.readFileSync(filePath, 'utf-8');
+      return {
+        content,
+        size: stats.size,
+        mtime: stats.mtime.getTime(),
+      };
+    } catch (error) {
+      console.error('[IPC] files:read error:', error);
+      return null;
+    }
   });
 
-  ipcMain.handle(IPC.files.write, async (_event, path, content): Promise<boolean> => {
-    console.log('[IPC] files:write', path, typeof content === 'string' ? content.slice(0, 100) : '<binary>');
-    return true;
+  ipcMain.handle(IPC.files.write, async (_event, filePath, content): Promise<boolean> => {
+    console.log('[IPC] files:write', filePath, typeof content === 'string' ? content.slice(0, 100) : '<binary>');
+    try {
+      // Ensure directory exists
+      const dir = path.dirname(filePath);
+      if (!fs.existsSync(dir)) {
+        fs.mkdirSync(dir, { recursive: true });
+      }
+      
+      if (typeof content === 'string') {
+        fs.writeFileSync(filePath, content, 'utf-8');
+      } else {
+        fs.writeFileSync(filePath, Buffer.from(content));
+      }
+      return true;
+    } catch (error) {
+      console.error('[IPC] files:write error:', error);
+      return false;
+    }
   });
 
   ipcMain.handle(IPC.files.pickExecutable, async (): Promise<string | null> => {
@@ -595,6 +622,60 @@ if (!canRegisterHandlers) {
     currentConfig = updateConfig(config);
     fileScanner = null;
     return true;
+  });
+
+  // ============================================================================
+  // Command Box Handlers
+  // ============================================================================
+
+  function getCommandBoxesPath(): string {
+    const config = loadConfig();
+    const treeRoot = config.treeRoot || path.join(config.projectRoot || config.cwd || process.cwd(), 'tree');
+    // Store command-boxes.json alongside the tree directory
+    const projectDir = path.dirname(treeRoot);
+    return path.join(projectDir, 'command-boxes.json');
+  }
+
+  ipcMain.handle(IPC.commandBoxes.load, async (): Promise<CommandBoxData | null> => {
+    console.log('[IPC] commandBoxes:load');
+    try {
+      const commandBoxesPath = getCommandBoxesPath();
+      console.log('[IPC] commandBoxes:load path:', commandBoxesPath);
+      
+      if (!fs.existsSync(commandBoxesPath)) {
+        console.log('[IPC] commandBoxes:load - file does not exist, returning null');
+        return null;
+      }
+      
+      const content = fs.readFileSync(commandBoxesPath, 'utf-8');
+      const data = JSON.parse(content) as CommandBoxData;
+      console.log('[IPC] commandBoxes:load - loaded', data.tabs.length, 'tabs');
+      return data;
+    } catch (error) {
+      console.error('[IPC] commandBoxes:load error:', error);
+      return null;
+    }
+  });
+
+  ipcMain.handle(IPC.commandBoxes.save, async (_event, data: CommandBoxData): Promise<boolean> => {
+    console.log('[IPC] commandBoxes:save', data.tabs.length, 'tabs');
+    try {
+      const commandBoxesPath = getCommandBoxesPath();
+      console.log('[IPC] commandBoxes:save path:', commandBoxesPath);
+      
+      // Ensure directory exists
+      const dir = path.dirname(commandBoxesPath);
+      if (!fs.existsSync(dir)) {
+        fs.mkdirSync(dir, { recursive: true });
+      }
+      
+      fs.writeFileSync(commandBoxesPath, JSON.stringify(data, null, 2), 'utf-8');
+      console.log('[IPC] commandBoxes:save - success');
+      return true;
+    } catch (error) {
+      console.error('[IPC] commandBoxes:save error:', error);
+      return false;
+    }
   });
 
   // ============================================================================

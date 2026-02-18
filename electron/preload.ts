@@ -24,6 +24,7 @@ import type {
   ScriptRunRequest,
   ScriptRunResult,
   ScriptParameter,
+  CommandBoxData,
 } from './main/ipc';
 
 // IPC channel names (duplicated here to avoid runtime imports in preload context)
@@ -64,6 +65,10 @@ const IPC = {
   config: {
     get: 'config:get',
     set: 'config:set',
+  },
+  commandBoxes: {
+    load: 'commandBoxes:load',
+    save: 'commandBoxes:save',
   },
 } as const;
 
@@ -153,6 +158,13 @@ const api: PDVApi = {
       scriptPath: string,
     ): Promise<{ success: boolean; params?: ScriptParameter[]; error?: string }> =>
       ipcRenderer.invoke(IPC.script.get_params, scriptPath),
+  },
+
+  commandBoxes: {
+    load: (): Promise<CommandBoxData | null> =>
+      ipcRenderer.invoke(IPC.commandBoxes.load),
+    save: (data: CommandBoxData): Promise<boolean> =>
+      ipcRenderer.invoke(IPC.commandBoxes.save, data),
   },
 };
 

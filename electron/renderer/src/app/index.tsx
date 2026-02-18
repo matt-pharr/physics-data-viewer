@@ -12,33 +12,11 @@ import type { Config } from '../../main/ipc';
 type Tab = 'tree' | 'namespace' | 'modules';
 type PlotMode = 'native' | 'capture';
 
-// Helper functions for localStorage persistence
-const loadFromStorage = <T,>(key: string, defaultValue: T): T => {
-  try {
-    const stored = localStorage.getItem(key);
-    return stored ? JSON.parse(stored) : defaultValue;
-  } catch {
-    return defaultValue;
-  }
-};
-
-const saveToStorage = <T,>(key: string, value: T): void => {
-  try {
-    localStorage.setItem(key, JSON.stringify(value));
-  } catch (error) {
-    console.warn(`Failed to save ${key} to localStorage:`, error);
-  }
-};
-
 const App: React.FC = () => {
   const [activeTab, setActiveTab] = useState<Tab>('tree');
   const [plotMode, setPlotMode] = useState<PlotMode>('native');
-  const [commandTabs, setCommandTabs] = useState<CommandTab[]>(() => 
-    loadFromStorage('pdv:commandTabs', [{ id: 1, code: '' }])
-  );
-  const [activeCommandTab, setActiveCommandTab] = useState(() => 
-    loadFromStorage('pdv:activeCommandTab', 1)
-  );
+  const [commandTabs, setCommandTabs] = useState<CommandTab[]>([{ id: 1, code: '' }]);
+  const [activeCommandTab, setActiveCommandTab] = useState(1);
   const [logs, setLogs] = useState<LogEntry[]>([]);
   const [currentKernelId, setCurrentKernelId] = useState<string | null>(null);
   const [isExecuting, setIsExecuting] = useState(false);
@@ -57,15 +35,50 @@ const App: React.FC = () => {
   const [treeRefreshToken, setTreeRefreshToken] = useState(0);
   const [createScriptTarget, setCreateScriptTarget] = useState<string | null>(null);
 
-  // Persist command tabs to localStorage
+  // Load command boxes from filesystem on startup
   useEffect(() => {
-    saveToStorage('pdv:commandTabs', commandTabs);
-  }, [commandTabs]);
+    const loadCommandBoxes = async () => {
+      try {
+        const data = await window.pdv.commandBoxes.load();
+        if (data) {
+          setCommandTabs(data.tabs);
+          setActiveCommandTab(data.activeTabId);
+          console.log('[App] Loaded command boxes from filesystem:', data.tabs.length, 'tabs');
+        }
+      } catch (error) {
+        console.error('[App] Failed to load command boxes:', error);
+      }
+    };
+    void loadCommandBoxes();
+  }, []);
 
-  // Persist active command tab to localStorage
+  // Debounced save to filesystem
+  const saveTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   useEffect(() => {
-    saveToStorage('pdv:activeCommandTab', activeCommandTab);
-  }, [activeCommandTab]);
+    // Clear any pending save
+    if (saveTimeoutRef.current) {
+      clearTimeout(saveTimeoutRef.current);
+    }
+    
+    // Debounce saves by 500ms to avoid excessive file writes
+    saveTimeoutRef.current = setTimeout(async () => {
+      try {
+        await window.pdv.commandBoxes.save({
+          tabs: commandTabs,
+          activeTabId: activeCommandTab,
+        });
+        console.log('[App] Saved command boxes to filesystem');
+      } catch (error) {
+        console.error('[App] Failed to save command boxes:', error);
+      }
+    }, 500);
+
+    return () => {
+      if (saveTimeoutRef.current) {
+        clearTimeout(saveTimeoutRef.current);
+      }
+    };
+  }, [commandTabs, activeCommandTab]);
 
   useEffect(() => {
     // Prevent double initialization in StrictMode

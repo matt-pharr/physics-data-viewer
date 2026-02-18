@@ -47,6 +47,10 @@ export const IPC = {
     get: 'config:get',
     set: 'config:set',
   },
+  commandBoxes: {
+    load: 'commandBoxes:load',
+    save: 'commandBoxes:save',
+  },
 } as const;
 
 // ============================================================================
@@ -354,4 +358,17 @@ export interface PDVApi {
     reload: (scriptPath: string) => Promise<{ success: boolean; error?: string }>;
     getParams: (scriptPath: string) => Promise<{ success: boolean; params?: ScriptParameter[]; error?: string }>;
   };
+  commandBoxes: {
+    load: () => Promise<CommandBoxData | null>;
+    save: (data: CommandBoxData) => Promise<boolean>;
+  };
+}
+
+// ============================================================================
+// Command Box Types
+// ============================================================================
+
+export interface CommandBoxData {
+  tabs: Array<{ id: number; code: string }>;
+  activeTabId: number;
 }
