@@ -20,8 +20,24 @@ export const Tree: React.FC<TreeProps> = ({ kernelId, refreshToken = 0, onAction
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | undefined>();
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
-  const [selectedPath, setSelectedPath] = useState<string | null>(null);
-  const expandedPathsRef = useRef<Set<string>>(new Set());
+  const [selectedPath, setSelectedPath] = useState<string | null>(() => {
+    try {
+      return localStorage.getItem('pdv:selectedPath') || null;
+    } catch {
+      return null;
+    }
+  });
+  
+  const getInitialExpandedPaths = (): Set<string> => {
+    try {
+      const stored = localStorage.getItem('pdv:expandedPaths');
+      return stored ? new Set(JSON.parse(stored)) : new Set();
+    } catch {
+      return new Set();
+    }
+  };
+  
+  const expandedPathsRef = useRef<Set<string>>(getInitialExpandedPaths());
 
   const loadRoot = async (force?: boolean) => {
     setLoading(nodes.length === 0);
@@ -46,6 +62,33 @@ export const Tree: React.FC<TreeProps> = ({ kernelId, refreshToken = 0, onAction
       setLoading(false);
     }
   };
+
+  // Persist expanded paths to localStorage whenever they change
+  // We trigger this by watching nodes, but use a ref callback to debounce
+  useEffect(() => {
+    const timeoutId = setTimeout(() => {
+      try {
+        localStorage.setItem('pdv:expandedPaths', JSON.stringify(Array.from(expandedPathsRef.current)));
+      } catch (error) {
+        console.warn('Failed to persist expanded paths:', error);
+      }
+    }, 500); // Debounce saves to avoid excessive writes
+    
+    return () => clearTimeout(timeoutId);
+  }, [nodes]); // Save whenever nodes change (expand/collapse)
+
+  // Persist selected path to localStorage
+  useEffect(() => {
+    try {
+      if (selectedPath) {
+        localStorage.setItem('pdv:selectedPath', selectedPath);
+      } else {
+        localStorage.removeItem('pdv:selectedPath');
+      }
+    } catch (error) {
+      console.warn('Failed to persist selected path:', error);
+    }
+  }, [selectedPath]);
 
   useEffect(() => {
     void loadRoot(true);
