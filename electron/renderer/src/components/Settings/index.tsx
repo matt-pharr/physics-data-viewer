@@ -98,7 +98,9 @@ export const Settings: React.FC<SettingsProps> = ({ onClose }) => {
     // Check if colors have been modified
     const theme = await window.pdv.themes.load(themeId);
     if (theme) {
-      const isModified = Object.keys(colors).some(
+      // Compare both directions to detect modifications
+      const allKeys = new Set([...Object.keys(colors), ...Object.keys(theme.colors)]);
+      const isModified = Array.from(allKeys).some(
         (key) => colors[key] !== theme.colors[key]
       );
       

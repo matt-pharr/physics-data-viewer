@@ -121,7 +121,7 @@ describe('Themes', () => {
     
     const customTheme = createCustomTheme(baseTheme!, customColors);
     
-    expect(customTheme.id).toMatch(/^custom-\d+$/);
+    expect(customTheme.id).toMatch(/^custom-\d+-[a-z0-9]+$/);
     expect(customTheme.name).toContain('Custom');
     expect(customTheme.colors.background).toBe('#ff0000');
     expect(customTheme.colors.primary).toBe('#00ff00');

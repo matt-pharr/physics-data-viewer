@@ -47,7 +47,7 @@ export const KeyboardShortcutsTab: React.FC<KeyboardShortcutsTabProps> = ({
       updated[editingIndex] = {
         ...updated[editingIndex],
         key: editingKey,
-        modifiers: editingModifiers.length > 0 ? editingModifiers : undefined,
+        modifiers: editingModifiers.length > 0 ? editingModifiers : [],
       };
       setShortcuts(updated);
       onShortcutsChange(updated);

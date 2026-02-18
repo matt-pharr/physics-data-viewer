@@ -192,8 +192,9 @@ export function saveTheme(theme: Theme): void {
  */
 export function createCustomTheme(baseTheme: Theme, customColors: ThemeColors): Theme {
   const timestamp = Date.now();
+  const randomSuffix = Math.random().toString(36).substring(2, 8);
   const customTheme: Theme = {
-    id: `custom-${timestamp}`,
+    id: `custom-${timestamp}-${randomSuffix}`,
     name: `Custom (${baseTheme.name})`,
     colors: { ...baseTheme.colors, ...customColors },
     isCustom: true,

@@ -7,6 +7,8 @@ interface AppearanceTabProps {
   onThemeChange: (themeId: string, colors: ThemeColors) => void;
 }
 
+const DEFAULT_COLOR = '#000000';
+
 export const AppearanceTab: React.FC<AppearanceTabProps> = ({
   currentThemeId,
   customColors,
@@ -125,7 +127,7 @@ export const AppearanceTab: React.FC<AppearanceTabProps> = ({
                 <input
                   id={`color-${key}`}
                   type="color"
-                  value={colors[key] || '#000000'}
+                  value={colors[key] || DEFAULT_COLOR}
                   onChange={(e) => handleColorChange(key, e.target.value)}
                   className="settings-color-picker"
                 />
