@@ -71,7 +71,11 @@ describe('KernelManager', () => {
       const scriptContent = `"""Test script for unit testing"""
 
 def run(tree, **kwargs):
-    return {"status": "success", "message": "Script executed successfully", "params": kwargs}
+    return {
+        "status": "success",
+        "message": "Script executed successfully",
+        "params": kwargs
+    }
 `;
       fs.writeFileSync(scriptPath, scriptContent);
       
