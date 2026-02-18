@@ -55,6 +55,13 @@ export const IPC = {
     get: 'settings:get',
     set: 'settings:set',
   },
+  themes: {
+    list: 'themes:list',
+    load: 'themes:load',
+    save: 'themes:save',
+    delete: 'themes:delete',
+    createCustom: 'themes:createCustom',
+  },
 } as const;
 
 // ============================================================================
@@ -371,6 +378,13 @@ export interface PDVApi {
     set: (settings: Partial<Settings>) => Promise<boolean>;
     onOpenSettings: (callback: () => void) => () => void;
   };
+  themes: {
+    list: () => Promise<Theme[]>;
+    load: (themeId: string) => Promise<Theme | null>;
+    save: (theme: Theme) => Promise<boolean>;
+    delete: (themeId: string) => Promise<boolean>;
+    createCustom: (baseTheme: Theme, customColors: ThemeColors) => Promise<Theme>;
+  };
 }
 
 // ============================================================================
@@ -386,6 +400,35 @@ export interface CommandBoxData {
 // Settings Types
 // ============================================================================
 
+/** Keyboard shortcut definition */
+export interface KeyboardShortcut {
+  action: string;
+  key: string;
+  modifiers?: string[];
+}
+
+/** Theme color definition */
+export interface ThemeColors {
+  background?: string;
+  foreground?: string;
+  primary?: string;
+  secondary?: string;
+  accent?: string;
+  border?: string;
+  error?: string;
+  success?: string;
+  warning?: string;
+  [key: string]: string | undefined;
+}
+
+/** Complete theme definition */
+export interface Theme {
+  id: string;
+  name: string;
+  colors: ThemeColors;
+  isCustom?: boolean;
+}
+
 /** User settings stored in ~/.PDV/settings */
 export interface Settings {
   pythonPath?: string;
@@ -396,5 +439,7 @@ export interface Settings {
     default?: string;
   };
   treeRoot?: string;
-  theme?: 'dark' | 'light';
+  theme?: string;
+  customThemeColors?: ThemeColors;
+  keyboardShortcuts?: KeyboardShortcut[];
 }

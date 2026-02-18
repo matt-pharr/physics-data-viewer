@@ -24,10 +24,19 @@ import {
   ScriptParameter,
   CommandBoxData,
   Settings,
+  Theme,
+  ThemeColors,
 } from './ipc';
 import { getKernelManager, resetKernelManager } from './kernel-manager';
 import { loadConfig, updateConfig } from './config';
 import { loadSettings, saveSettings } from './settings';
+import {
+  listThemes,
+  loadTheme,
+  saveTheme,
+  deleteTheme,
+  createCustomTheme,
+} from './themes';
 import { spawn } from 'child_process';
 import * as os from 'os';
 import { FileScanner } from './file-scanner';
@@ -721,6 +730,44 @@ if (!canRegisterHandlers) {
       return false;
     }
   });
+
+  // ============================================================================
+  // Theme Handlers
+  // ============================================================================
+
+  ipcMain.handle(IPC.themes.list, async (): Promise<Theme[]> => {
+    console.log('[IPC] themes:list');
+    return listThemes();
+  });
+
+  ipcMain.handle(IPC.themes.load, async (_event, themeId: string): Promise<Theme | null> => {
+    console.log('[IPC] themes:load', themeId);
+    return loadTheme(themeId);
+  });
+
+  ipcMain.handle(IPC.themes.save, async (_event, theme: Theme): Promise<boolean> => {
+    console.log('[IPC] themes:save', theme.id);
+    try {
+      saveTheme(theme);
+      return true;
+    } catch (error) {
+      console.error('[IPC] themes:save error:', error);
+      return false;
+    }
+  });
+
+  ipcMain.handle(IPC.themes.delete, async (_event, themeId: string): Promise<boolean> => {
+    console.log('[IPC] themes:delete', themeId);
+    return deleteTheme(themeId);
+  });
+
+  ipcMain.handle(
+    IPC.themes.createCustom,
+    async (_event, baseTheme: Theme, customColors: ThemeColors): Promise<Theme> => {
+      console.log('[IPC] themes:createCustom', baseTheme.id);
+      return createCustomTheme(baseTheme, customColors);
+    }
+  );
 
   // ============================================================================
 

@@ -3,6 +3,31 @@ import * as path from 'path';
 import * as os from 'os';
 
 /**
+ * Keyboard shortcut definition
+ */
+export interface KeyboardShortcut {
+  action: string;
+  key: string;
+  modifiers?: string[];
+}
+
+/**
+ * Theme color definition
+ */
+export interface ThemeColors {
+  background?: string;
+  foreground?: string;
+  primary?: string;
+  secondary?: string;
+  accent?: string;
+  border?: string;
+  error?: string;
+  success?: string;
+  warning?: string;
+  [key: string]: string | undefined;
+}
+
+/**
  * Settings stored in ~/.PDV/settings
  */
 export interface Settings {
@@ -14,7 +39,9 @@ export interface Settings {
     default?: string;
   };
   treeRoot?: string;
-  theme?: 'dark' | 'light';
+  theme?: string; // Changed to string to support custom theme names
+  customThemeColors?: ThemeColors;
+  keyboardShortcuts?: KeyboardShortcut[];
 }
 
 /**

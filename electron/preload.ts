@@ -26,6 +26,8 @@ import type {
   ScriptParameter,
   CommandBoxData,
   Settings,
+  Theme,
+  ThemeColors,
 } from './main/ipc';
 
 // IPC channel names (duplicated here to avoid runtime imports in preload context)
@@ -74,6 +76,13 @@ const IPC = {
   settings: {
     get: 'settings:get',
     set: 'settings:set',
+  },
+  themes: {
+    list: 'themes:list',
+    load: 'themes:load',
+    save: 'themes:save',
+    delete: 'themes:delete',
+    createCustom: 'themes:createCustom',
   },
 } as const;
 
@@ -182,6 +191,19 @@ const api: PDVApi = {
       ipcRenderer.on('open-settings', handler);
       return () => ipcRenderer.removeListener('open-settings', handler);
     },
+  },
+
+  themes: {
+    list: (): Promise<Theme[]> =>
+      ipcRenderer.invoke(IPC.themes.list),
+    load: (themeId: string): Promise<Theme | null> =>
+      ipcRenderer.invoke(IPC.themes.load, themeId),
+    save: (theme: Theme): Promise<boolean> =>
+      ipcRenderer.invoke(IPC.themes.save, theme),
+    delete: (themeId: string): Promise<boolean> =>
+      ipcRenderer.invoke(IPC.themes.delete, themeId),
+    createCustom: (baseTheme: Theme, customColors: ThemeColors): Promise<Theme> =>
+      ipcRenderer.invoke(IPC.themes.createCustom, baseTheme, customColors),
   },
 };
 
