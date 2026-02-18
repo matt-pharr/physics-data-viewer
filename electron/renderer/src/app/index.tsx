@@ -120,7 +120,7 @@ const App: React.FC = () => {
     return cleanup;
   }, []);
 
-  useEffect(() {
+  useEffect(() => {
     const handleMove = (event: MouseEvent) => {
       if (!dragRef.current) return;
       if (dragRef.current === 'vertical') {
