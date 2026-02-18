@@ -286,12 +286,17 @@ export class KernelManager {
 
       console.log('[KernelManager] Launching kernel:', argv);
 
+      // Get the project root (parent directory of tree root)
+      // This is where PDVTree will look for the tree/ directory
+      const treeRoot = config.treeRoot || path.join(config.projectRoot || config.cwd || process.cwd(), 'tree');
+      const projectRoot = path.dirname(treeRoot);
+
       // Spawn kernel process
       const env = {
         ...process.env,
         ...spec?.env,
         PDV_CAPTURE_MODE: captureMode ? 'true' : 'false',
-        PDV_PROJECT_ROOT: config.projectRoot || config.cwd || process.cwd(),
+        PDV_PROJECT_ROOT: projectRoot,
       };
 
       const kernelProcess = spawn(argv[0], argv.slice(1), {
