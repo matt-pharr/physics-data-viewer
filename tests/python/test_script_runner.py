@@ -12,6 +12,21 @@ import shutil
 import pytest
 from pathlib import Path
 
+# Import from conftest's configured path
+import importlib.util
+
+
+# Path to python-init.py (configured in conftest.py)
+INIT_DIR = Path(__file__).parent.parent.parent / 'electron' / 'main' / 'init'
+
+
+def load_python_init():
+    """Load the python-init module."""
+    spec = importlib.util.spec_from_file_location("python_init", INIT_DIR / "python-init.py")
+    python_init = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(python_init)
+    return python_init
+
 
 class TestScriptRunner:
     """Test the PDVTree script runner with real script execution."""
@@ -28,15 +43,7 @@ class TestScriptRunner:
     @pytest.fixture
     def pdv_tree(self, temp_project_dir):
         """Initialize a PDVTree instance with test project root."""
-        # Add the init directory to Python path to import python-init
-        init_dir = Path(__file__).parent.parent.parent / 'electron' / 'main' / 'init'
-        sys.path.insert(0, str(init_dir))
-        
-        # Import and initialize PDVTree
-        import importlib.util
-        spec = importlib.util.spec_from_file_location("python_init", init_dir / "python-init.py")
-        python_init = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(python_init)
+        python_init = load_python_init()
         
         # Create a new PDVTree instance
         tree = python_init.PDVTree()

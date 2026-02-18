@@ -4,9 +4,6 @@
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { KernelManager, getKernelManager, resetKernelManager } from './kernel-manager';
-import * as fs from 'fs';
-import * as path from 'path';
-import * as os from 'os';
 
 const hasRealKernel = process.env.PDV_ENABLE_REAL_KERNEL_TESTS === 'true' && process.env.CI !== 'true';
 const realIt = hasRealKernel ? it : it.skip;
