@@ -10,7 +10,9 @@ import type { Config } from './ipc';
  * This creates a persistent location outside the repository to avoid Vite file watching
  */
 function getDefaultTreeRoot(): string {
-  const username = os.userInfo().username || 'user';
+  // Sanitize username to be filesystem-safe
+  const rawUsername = os.userInfo().username || 'user';
+  const username = rawUsername.replace(/[^a-zA-Z0-9_-]/g, '_');
   return path.join(os.tmpdir(), username, 'PDV', 'tree');
 }
 
@@ -19,13 +21,20 @@ function getDefaultTreeRoot(): string {
  */
 function ensureTreeRoot(treeRoot: string): void {
   try {
+    // Ensure main tree root directory exists
     if (!fs.existsSync(treeRoot)) {
       fs.mkdirSync(treeRoot, { recursive: true });
-      fs.mkdirSync(path.join(treeRoot, 'data'), { recursive: true });
-      fs.mkdirSync(path.join(treeRoot, 'scripts'), { recursive: true });
-      fs.mkdirSync(path.join(treeRoot, 'results'), { recursive: true });
       console.log('[config] Created tree root at:', treeRoot);
     }
+    
+    // Ensure subdirectories exist (even if tree root already existed)
+    const subdirs = ['data', 'scripts', 'results'];
+    subdirs.forEach(subdir => {
+      const subdirPath = path.join(treeRoot, subdir);
+      if (!fs.existsSync(subdirPath)) {
+        fs.mkdirSync(subdirPath, { recursive: true });
+      }
+    });
   } catch (error) {
     console.error('[config] Failed to create tree root:', error);
   }

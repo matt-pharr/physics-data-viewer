@@ -302,7 +302,7 @@ export interface Config {
   };
   /** Project root for tree scanning */
   projectRoot?: string;
-  /** Tree root directory (defaults to /tmp/{username}/PDV_{timestamp}/tree) */
+  /** Tree root directory (defaults to /tmp/{username}/PDV/tree) */
   treeRoot?: string;
 }
 
