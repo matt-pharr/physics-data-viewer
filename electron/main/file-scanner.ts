@@ -10,18 +10,16 @@ import * as path from 'path';
 import type { TreeNode } from './ipc';
 
 export interface ScanOptions {
-  projectRoot: string;
+  treeRoot?: string;
   includeHidden?: boolean;
 }
 
 export class FileScanner {
-  private projectRoot: string;
   private treeRoot: string;
   private includeHidden: boolean;
 
-  constructor(projectRoot: string, options?: { includeHidden?: boolean }) {
-    this.projectRoot = projectRoot;
-    this.treeRoot = path.join(projectRoot, 'tree');
+  constructor(treeRoot: string, options?: { includeHidden?: boolean }) {
+    this.treeRoot = treeRoot;
     this.includeHidden = options?.includeHidden ?? false;
   }
 

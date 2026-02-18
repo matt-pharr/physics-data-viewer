@@ -1,7 +1,35 @@
 import { app } from 'electron';
 import * as fs from 'fs';
 import * as path from 'path';
+import * as os from 'os';
 import type { Config } from './ipc';
+
+/**
+ * Get or create the tree root directory in /tmp
+ * Format: /tmp/{username}/PDV/tree
+ * This creates a persistent location outside the repository to avoid Vite file watching
+ */
+function getDefaultTreeRoot(): string {
+  const username = os.userInfo().username || 'user';
+  return path.join(os.tmpdir(), username, 'PDV', 'tree');
+}
+
+/**
+ * Ensure the tree root directory exists and has standard subdirectories
+ */
+function ensureTreeRoot(treeRoot: string): void {
+  try {
+    if (!fs.existsSync(treeRoot)) {
+      fs.mkdirSync(treeRoot, { recursive: true });
+      fs.mkdirSync(path.join(treeRoot, 'data'), { recursive: true });
+      fs.mkdirSync(path.join(treeRoot, 'scripts'), { recursive: true });
+      fs.mkdirSync(path.join(treeRoot, 'results'), { recursive: true });
+      console.log('[config] Created tree root at:', treeRoot);
+    }
+  } catch (error) {
+    console.error('[config] Failed to create tree root:', error);
+  }
+}
 
 const DEFAULT_CONFIG: Config = {
   kernelSpec: null,
@@ -18,6 +46,7 @@ const DEFAULT_CONFIG: Config = {
     default: 'open %s',
   },
   projectRoot: process.cwd(),
+  treeRoot: getDefaultTreeRoot(),
 };
 
 function getConfigPath(): string {
@@ -49,11 +78,20 @@ export function loadConfig(): Config {
           (merged as Record<string, unknown>)[key] = undefined;
         }
       });
+      // Ensure treeRoot exists
+      if (merged.treeRoot) {
+        ensureTreeRoot(merged.treeRoot);
+      }
       cachedConfig = merged;
       return cachedConfig;
     }
     // If no config exists yet, trigger first-run flow by omitting executable paths.
-    cachedConfig = { ...DEFAULT_CONFIG, pythonPath: undefined, juliaPath: undefined };
+    const initialConfig = { ...DEFAULT_CONFIG, pythonPath: undefined, juliaPath: undefined };
+    // Ensure treeRoot exists
+    if (initialConfig.treeRoot) {
+      ensureTreeRoot(initialConfig.treeRoot);
+    }
+    cachedConfig = initialConfig;
     return cachedConfig;
   } catch (error) {
     const message =
@@ -64,6 +102,10 @@ export function loadConfig(): Config {
   }
 
   cachedConfig = { ...DEFAULT_CONFIG };
+  // Ensure treeRoot exists
+  if (cachedConfig.treeRoot) {
+    ensureTreeRoot(cachedConfig.treeRoot);
+  }
   return cachedConfig;
 }
 

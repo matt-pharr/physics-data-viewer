@@ -46,8 +46,8 @@ let fileScanner: FileScanner | null = null;
 function getFileScanner(): FileScanner {
   if (!fileScanner) {
     const config = loadConfig();
-    const projectRoot = config.projectRoot || config.cwd || process.cwd();
-    fileScanner = new FileScanner(projectRoot);
+    const treeRoot = config.treeRoot || path.join(config.projectRoot || config.cwd || process.cwd(), 'tree');
+    fileScanner = new FileScanner(treeRoot);
   }
   return fileScanner;
 }
@@ -312,8 +312,7 @@ if (!canRegisterHandlers) {
         }
 
         const config = loadConfig();
-        const projectRoot = config.projectRoot || config.cwd || process.cwd();
-        const treeRoot = path.join(projectRoot, 'tree');
+        const treeRoot = config.treeRoot || path.join(config.projectRoot || config.cwd || process.cwd(), 'tree');
         const folderParts = targetPath ? targetPath.split('.').filter(Boolean) : [];
         const folderPath = path.join(treeRoot, ...folderParts);
         await fs.promises.mkdir(folderPath, { recursive: true });

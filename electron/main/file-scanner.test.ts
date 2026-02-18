@@ -28,7 +28,7 @@ describe('FileScanner', () => {
   });
 
   it('scans tree and extracts script metadata', async () => {
-    const scanner = new FileScanner(tempDir);
+    const scanner = new FileScanner(path.join(tempDir, 'tree'));
     const rootNodes = await scanner.scanAll();
 
     const scriptsNode = rootNodes.find((n) => n.path === 'scripts');
