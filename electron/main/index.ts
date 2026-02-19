@@ -655,7 +655,8 @@ if (!canRegisterHandlers) {
   /**
    * Get the command boxes file path.
    * Command boxes are stored in the project directory (parent of tree root).
-   * Example: If tree is at /tmp/user/PDV/tree, command boxes are at /tmp/user/PDV/command-boxes.json
+   * Example: If tree is at /tmp/user/PDV-2026_02_19_15:37:46/tree,
+   * command boxes are at /tmp/user/PDV-2026_02_19_15:37:46/command-boxes.json
    * 
    * @returns The full path to command-boxes.json
    */

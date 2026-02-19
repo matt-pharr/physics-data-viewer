@@ -42,14 +42,24 @@ const DEFAULT_THEMES: Array<{ name: string; colors: Record<string, string> }> = 
 
 /**
  * Get or create the tree root directory in /tmp
- * Format: /tmp/{username}/PDV/tree
+ * Format: /tmp/{username}/PDV-YYYY_MM_DD_HH:MM:SS/tree
  * This creates a persistent location outside the repository to avoid Vite file watching
  */
+function formatTimestamp(date: Date): string {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  const hours = String(date.getHours()).padStart(2, '0');
+  const minutes = String(date.getMinutes()).padStart(2, '0');
+  const seconds = String(date.getSeconds()).padStart(2, '0');
+  return `${year}_${month}_${day}_${hours}:${minutes}:${seconds}`;
+}
+
 function getDefaultTreeRoot(): string {
   // Sanitize username to be filesystem-safe
   const rawUsername = os.userInfo().username || 'user';
   const username = rawUsername.replace(/[^a-zA-Z0-9_-]/g, '_');
-  return path.join(os.tmpdir(), username, 'PDV', 'tree');
+  return path.join(os.tmpdir(), username, `PDV-${formatTimestamp(new Date())}`, 'tree');
 }
 
 /**

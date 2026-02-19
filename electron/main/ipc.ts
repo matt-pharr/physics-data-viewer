@@ -313,7 +313,7 @@ export interface Config {
   };
   /** Project root for tree scanning */
   projectRoot?: string;
-  /** Tree root directory (defaults to /tmp/{username}/PDV/tree) */
+  /** Tree root directory (defaults to /tmp/{username}/PDV-YYYY_MM_DD_HH:MM:SS/tree) */
   treeRoot?: string;
   /** User-editable keyboard shortcuts and appearance settings */
   settings?: {
