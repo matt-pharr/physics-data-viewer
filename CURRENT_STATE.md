@@ -44,6 +44,7 @@ The current architecture is consistent with the direct-kernel approach documente
 
 ### Preload (`/home/runner/work/physics-data-viewer/physics-data-viewer/electron/preload.ts`)
 - Exposes typed `window.pdv` bridge for all renderer->main interactions.
+- Uses shared IPC constants from `main/ipc.ts` (no duplicated channel map).
 
 ### Renderer (`/home/runner/work/physics-data-viewer/physics-data-viewer/electron/renderer/src`)
 - `app/index.tsx`
@@ -96,12 +97,10 @@ The current architecture is consistent with the direct-kernel approach documente
    - Renderer shows "Modules view (coming soon)".
 
 ### Redundant / zombie / likely-unused code
-1. **Duplicate IPC channel constants in preload**
-   - `preload.ts` duplicates channel names from `main/ipc.ts`.
-2. **Unused function in Tree component**
-   - `renderer/src/components/Tree/index.tsx`: `applyExpandedState(...)` is defined but not called.
-3. **Unused dependencies likely present**
-   - `electron/package.json`: `@jupyterlab/services` and `ws` are listed but not used by current direct-ZMQ code.
+Phase 1 cleanup items completed:
+1. **Duplicate IPC channel constants in preload** — resolved.
+2. **Unused function in Tree component (`applyExpandedState`)** — removed.
+3. **Unused dependencies (`@jupyterlab/services`, `ws`)** — removed from `electron/package.json`.
 
 ### Areas to rework (non-blocking but recommended)
 1. **Split very large handlers/files**
@@ -124,7 +123,7 @@ Status legend used below:
 |---|---|---|---|
 | 0 | Repo scaffolding/tooling | ✅ | Present and working |
 | 1 | Electron+Vite shell | ✅ | Implemented |
-| 2 | IPC contracts + preload bridge | ✅ | Implemented; preload channel duplication remains |
+| 2 | IPC contracts + preload bridge | ✅ | Implemented; preload now uses shared IPC constants |
 | 3 | Kernel manager stub | ✅ (superseded) | Replaced by real kernel manager |
 | 4 | Console + Monaco command box | ✅ | Implemented with tabs + shortcuts |
 | 5 | Tree POC lazy UI | ✅ | Implemented with caching/expand/context menu |
@@ -161,4 +160,3 @@ Status legend used below:
    - `script.reload`, file watching, `tree.get/save`.
 3. Define "done" by behavior-level acceptance tests for Step 6/7/8, since code already includes part of those features.
 4. Treat Step 9/10 as architectural milestones (loader abstraction + persistence model) before Step 11/12 dynamic UI complexity.
-

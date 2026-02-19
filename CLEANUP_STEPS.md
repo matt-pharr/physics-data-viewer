@@ -38,6 +38,8 @@ This document gives **execution-ready instructions for an AI coding agent** to f
 
 ## Phase 1 — Remove duplicate/zombie code first (low risk)
 
+**Status:** ✅ Complete
+
 ### 1A) Eliminate duplicate IPC channel constant definitions
 
 ### Why
@@ -56,6 +58,7 @@ This document gives **execution-ready instructions for an AI coding agent** to f
 - No duplicated channel-constant block remains in `preload.ts`.
 - TypeScript build passes.
 - Existing renderer calls still work unchanged.
+- **Completed:** ✅
 
 ---
 
@@ -74,6 +77,7 @@ This document gives **execution-ready instructions for an AI coding agent** to f
 ### Acceptance criteria
 - Function is removed.
 - Tree component tests still pass.
+- **Completed:** ✅
 
 ---
 
@@ -94,6 +98,7 @@ This document gives **execution-ready instructions for an AI coding agent** to f
 ### Acceptance criteria
 - Dependency list reflects actual usage.
 - Build/test unchanged.
+- **Completed:** ✅ (`@jupyterlab/services` and `ws` removed after usage search)
 
 ---
 
@@ -269,4 +274,3 @@ If developers have not finalized decisions yet, implement with these default-saf
 2. For script/file changes, prefer prompting/reload action over automatic re-run.
 3. Keep compatibility with current Python-first flow while adding Julia parity where explicitly required.
 4. Document any deferred choices in PR notes and keep interfaces extensible.
-

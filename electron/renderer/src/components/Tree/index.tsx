@@ -285,14 +285,3 @@ function updateNodeImmut(
     return node;
   });
 }
-
-function applyExpandedState(nodes: TreeNodeData[], expanded: Set<string>): TreeNodeData[] {
-  return nodes.map((node) => {
-    const isExpanded = expanded.has(node.path);
-    return {
-      ...node,
-      isExpanded,
-      children: node.children ? applyExpandedState(node.children, expanded) : node.children,
-    };
-  });
-}
