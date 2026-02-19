@@ -7,7 +7,7 @@ import * as path from 'path';
 import * as os from 'os';
 import * as crypto from 'crypto';
 import { spawn, ChildProcess } from 'child_process';
-import * as zmq from 'zeromq';
+import type * as Zmq from 'zeromq';
 import {
   KernelSpec,
   KernelInfo,
@@ -51,9 +51,9 @@ interface ManagedKernel {
   process: ChildProcess;
   connectionInfo: ConnectionInfo;
   connectionFile: string;
-  shellSocket: zmq.Dealer;
-  iopubSocket: zmq.Subscriber;
-  controlSocket: zmq.Dealer;
+  shellSocket: Zmq.Dealer;
+  iopubSocket: Zmq.Subscriber;
+  controlSocket: Zmq.Dealer;
   sessionId: string;
   startedAt: number;
   lastActivity: number;
@@ -218,6 +218,10 @@ pdv_namespace(; kwargs...) = Dict{String, Any}()
 println("PDV Julia kernel ready (fallback init)")`;
 }
 
+async function loadZmq(): Promise<typeof import('zeromq')> {
+  return import('zeromq');
+}
+
 export class KernelManager {
   private kernels: Map<string, ManagedKernel> = new Map();
 
@@ -334,6 +338,7 @@ export class KernelManager {
       const updatedConnectionInfo = readConnectionFile(connectionFile);
 
       // Create ZMQ sockets
+      const zmq = await loadZmq();
       const shellSocket = new zmq.Dealer();
       const iopubSocket = new zmq.Subscriber();
       const controlSocket = new zmq.Dealer();
