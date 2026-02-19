@@ -16,7 +16,7 @@ describe('config themes', () => {
     vi.resetModules();
   });
 
-  it('stores themes in ~/.PDV/themes and persists custom themes', async () => {
+  it('stores themes in ~/.pdv/themes directory and discovers individual files', async () => {
     tempHome = fs.mkdtempSync(path.join(os.tmpdir(), 'pdv-home-'));
     vi.doMock('electron', () => ({
       app: {
@@ -27,7 +27,9 @@ describe('config themes', () => {
     const { loadThemes, saveTheme } = await import('./config');
     const initialThemes = loadThemes();
     expect(initialThemes.some((theme) => theme.name === 'Dark')).toBe(true);
-    expect(fs.existsSync(path.join(tempHome, '.PDV', 'themes'))).toBe(true);
+    const themesDir = path.join(tempHome, '.pdv', 'themes');
+    expect(fs.existsSync(themesDir)).toBe(true);
+    expect(fs.statSync(themesDir).isDirectory()).toBe(true);
 
     saveTheme({
       name: 'My Custom Theme',
@@ -36,7 +38,18 @@ describe('config themes', () => {
       },
     });
 
+    fs.writeFileSync(
+      path.join(themesDir, 'discovered-theme.json'),
+      JSON.stringify({
+        name: 'Discovered Theme',
+        colors: { 'bg-primary': '#202020' },
+      }),
+      'utf-8',
+    );
+
     const afterSave = loadThemes();
     expect(afterSave.some((theme) => theme.name === 'My Custom Theme')).toBe(true);
+    expect(afterSave.some((theme) => theme.name === 'Discovered Theme')).toBe(true);
+    expect(fs.existsSync(path.join(themesDir, 'my-custom-theme.json'))).toBe(true);
   });
 });

@@ -312,10 +312,20 @@ const App: React.FC = () => {
     }
   };
 
-  const handleSettingsSave = async (settings: NonNullable<Config['settings']>) => {
-    applyAppearanceColors(settings.appearance?.colors);
-    await window.pdv.config.set({ settings });
-    setConfig((prev) => (prev ? { ...prev, settings } : prev));
+  const handleSettingsSave = async (updates: Partial<Config>) => {
+    if (updates.settings?.appearance?.colors) {
+      applyAppearanceColors(updates.settings.appearance.colors);
+    }
+    await window.pdv.config.set(updates);
+    const mergedConfig = config ? { ...config, ...updates } : null;
+    setConfig(mergedConfig);
+    if (
+      mergedConfig &&
+      ((updates.pythonPath && updates.pythonPath !== config?.pythonPath) ||
+        (updates.juliaPath && updates.juliaPath !== config?.juliaPath))
+    ) {
+      await startKernel(mergedConfig);
+    }
     setShowSettings(false);
   };
 

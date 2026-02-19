@@ -2,7 +2,7 @@ import { app } from 'electron';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
-import type { Config } from './ipc';
+import type { Config, Theme } from './ipc';
 
 const DEFAULT_THEME_COLORS: Record<string, string> = {
   'bg-primary': '#1e1e1e',
@@ -108,7 +108,18 @@ function getSettingsPath(): string {
 }
 
 function getThemesPath(): string {
-  return path.join(getPdvDirectory(), 'themes');
+  return path.join(getThemeDirectoryBase(), 'themes');
+}
+
+function getThemeDirectoryBase(): string {
+  try {
+    if (typeof app?.getPath === 'function') {
+      return path.join(app.getPath('home'), '.pdv');
+    }
+  } catch (error) {
+    console.error('[config] Failed to resolve home path for themes, falling back to os.homedir:', error);
+  }
+  return path.join(os.homedir(), '.pdv');
 }
 
 function getPdvDirectory(): string {
@@ -189,52 +200,70 @@ export function updateConfig(partial: Partial<Config>): Config {
   return next;
 }
 
-export function loadThemes(): Array<{ name: string; colors: Record<string, string> }> {
+function toThemeFileName(name: string): string {
+  const slug = name
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9_-]+/g, '-')
+    .replace(/^-+|-+$/g, '');
+  return `${slug || 'theme'}.json`;
+}
+
+function isTheme(value: unknown): value is Theme {
+  if (!value || typeof value !== 'object') {
+    return false;
+  }
+  const candidate = value as { name?: unknown; colors?: unknown };
+  if (typeof candidate.name !== 'string' || !candidate.colors || typeof candidate.colors !== 'object') {
+    return false;
+  }
+  return Object.values(candidate.colors as Record<string, unknown>).every((entry) => typeof entry === 'string');
+}
+
+function ensureDefaultThemes(): void {
+  const themesPath = getThemesPath();
+  if (!fs.existsSync(themesPath)) {
+    fs.mkdirSync(themesPath, { recursive: true });
+  }
+  const themeFiles = fs.readdirSync(themesPath).filter((file) => file.endsWith('.json'));
+  if (themeFiles.length === 0) {
+    DEFAULT_THEMES.forEach((theme) => {
+      const filePath = path.join(themesPath, toThemeFileName(theme.name));
+      fs.writeFileSync(filePath, JSON.stringify(theme, null, 2), 'utf-8');
+    });
+  }
+}
+
+export function loadThemes(): Theme[] {
   const themesPath = getThemesPath();
   try {
-    if (!fs.existsSync(themesPath)) {
-      saveThemes(DEFAULT_THEMES);
-      return DEFAULT_THEMES;
-    }
-    const parsed = JSON.parse(fs.readFileSync(themesPath, 'utf-8')) as unknown;
-    const normalized = Array.isArray(parsed)
-      ? parsed.filter(
-          (entry): entry is { name: string; colors: Record<string, string> } =>
-            !!entry &&
-            typeof entry === 'object' &&
-            typeof (entry as { name?: unknown }).name === 'string' &&
-            !!(entry as { colors?: unknown }).colors &&
-            typeof (entry as { colors?: unknown }).colors === 'object',
-        )
-      : [];
-    if (normalized.length === 0) {
-      saveThemes(DEFAULT_THEMES);
-      return DEFAULT_THEMES;
-    }
-    return normalized;
+    ensureDefaultThemes();
+    const files = fs.readdirSync(themesPath).filter((file) => file.endsWith('.json'));
+    const loadedThemes: Theme[] = [];
+    files.forEach((file) => {
+      try {
+        const parsed = JSON.parse(fs.readFileSync(path.join(themesPath, file), 'utf-8')) as unknown;
+        if (isTheme(parsed)) {
+          loadedThemes.push(parsed);
+        }
+      } catch (error) {
+        console.error(`[config] Failed to parse theme file ${file}:`, error);
+      }
+    });
+    return loadedThemes.length > 0 ? loadedThemes : DEFAULT_THEMES;
   } catch (error) {
     console.error('[config] Failed to load themes:', error);
     return DEFAULT_THEMES;
   }
 }
 
-export function saveThemes(themes: Array<{ name: string; colors: Record<string, string> }>): void {
+export function saveTheme(theme: Theme): void {
   const themesPath = getThemesPath();
   try {
-    fs.mkdirSync(path.dirname(themesPath), { recursive: true });
-    fs.writeFileSync(themesPath, JSON.stringify(themes, null, 2));
+    fs.mkdirSync(themesPath, { recursive: true });
+    const filePath = path.join(themesPath, toThemeFileName(theme.name));
+    fs.writeFileSync(filePath, JSON.stringify(theme, null, 2), 'utf-8');
   } catch (error) {
-    console.error('[config] Failed to save themes:', error);
+    console.error('[config] Failed to save theme:', error);
   }
-}
-
-export function saveTheme(theme: { name: string; colors: Record<string, string> }): void {
-  const themes = loadThemes();
-  const existingIndex = themes.findIndex((entry) => entry.name === theme.name);
-  if (existingIndex >= 0) {
-    themes[existingIndex] = theme;
-  } else {
-    themes.push(theme);
-  }
-  saveThemes(themes);
 }
