@@ -167,7 +167,7 @@ export const SettingsDialog: React.FC<SettingsDialogProps> = ({ isOpen, config, 
                       </option>
                     ))}
                   </select>
-                  <label htmlFor="settings-theme-name">Save As Name</label>
+                  <label htmlFor="settings-theme-name">Theme Name</label>
                   <input
                     id="settings-theme-name"
                     type="text"

@@ -217,7 +217,11 @@ function isTheme(value: unknown): value is Theme {
   if (typeof candidate.name !== 'string' || !candidate.colors || typeof candidate.colors !== 'object') {
     return false;
   }
-  return Object.values(candidate.colors as Record<string, unknown>).every((entry) => typeof entry === 'string');
+  const colors = candidate.colors as Record<string, unknown>;
+  if (Object.keys(colors).length === 0) {
+    return false;
+  }
+  return Object.values(colors).every((entry) => typeof entry === 'string');
 }
 
 function ensureDefaultThemes(): void {
