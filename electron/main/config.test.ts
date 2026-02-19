@@ -52,4 +52,48 @@ describe('config themes', () => {
     expect(afterSave.some((theme) => theme.name === 'Discovered Theme')).toBe(true);
     expect(fs.existsSync(path.join(themesDir, 'my-custom-theme.json'))).toBe(true);
   });
+
+  it('creates a timestamped default tree root with standard subdirectories', async () => {
+    tempHome = fs.mkdtempSync(path.join(os.tmpdir(), 'pdv-home-'));
+    vi.doMock('electron', () => ({
+      app: {
+        getPath: (target: string) => (target === 'home' ? tempHome : tempHome),
+      },
+    }));
+
+    const { loadConfig } = await import('./config');
+    const config = loadConfig();
+    expect(config.treeRoot).toBeTruthy();
+
+    const treeRoot = config.treeRoot as string;
+    const projectDir = path.dirname(treeRoot);
+    const rawUsername = os.userInfo().username || 'user';
+    const username = rawUsername.replace(/[^a-zA-Z0-9_-]/g, '_');
+    expect(path.dirname(projectDir)).toBe(path.join(os.tmpdir(), username));
+    expect(path.basename(projectDir)).toMatch(/^PDV-\d{4}_\d{2}_\d{2}_\d{2}:\d{2}:\d{2}$/);
+    expect(fs.existsSync(path.join(treeRoot, 'data'))).toBe(true);
+    expect(fs.existsSync(path.join(treeRoot, 'scripts'))).toBe(true);
+    expect(fs.existsSync(path.join(treeRoot, 'results'))).toBe(true);
+  });
+
+  it('migrates legacy /tmp/{username}/PDV/tree root to timestamped PDV directory', async () => {
+    tempHome = fs.mkdtempSync(path.join(os.tmpdir(), 'pdv-home-'));
+    vi.doMock('electron', () => ({
+      app: {
+        getPath: (target: string) => (target === 'home' ? tempHome : tempHome),
+      },
+    }));
+
+    const rawUsername = os.userInfo().username || 'user';
+    const username = rawUsername.replace(/[^a-zA-Z0-9_-]/g, '_');
+    const legacyTreeRoot = path.join(os.tmpdir(), username, 'PDV', 'tree');
+    const settingsPath = path.join(tempHome, '.PDV', 'settings');
+    fs.mkdirSync(path.dirname(settingsPath), { recursive: true });
+    fs.writeFileSync(settingsPath, JSON.stringify({ treeRoot: legacyTreeRoot }), 'utf-8');
+
+    const { loadConfig } = await import('./config');
+    const config = loadConfig();
+    expect(config.treeRoot).not.toBe(legacyTreeRoot);
+    expect(path.basename(path.dirname(config.treeRoot as string))).toMatch(/^PDV-\d{4}_\d{2}_\d{2}_\d{2}:\d{2}:\d{2}$/);
+  });
 });

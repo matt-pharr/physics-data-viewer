@@ -42,11 +42,27 @@ const DEFAULT_THEMES: Array<{ name: string; colors: Record<string, string> }> = 
 
 /**
  * Get or create the tree root directory in /tmp
- * Format: /tmp/{username}/PDV/tree
+ * Format: /tmp/{username}/PDV-YYYY_MM_DD_HH:MM:SS/tree
  * This creates a persistent location outside the repository to avoid Vite file watching
  */
+function formatTimestamp(date: Date): string {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  const hours = String(date.getHours()).padStart(2, '0');
+  const minutes = String(date.getMinutes()).padStart(2, '0');
+  const seconds = String(date.getSeconds()).padStart(2, '0');
+  return `${year}_${month}_${day}_${hours}:${minutes}:${seconds}`;
+}
+
 function getDefaultTreeRoot(): string {
   // Sanitize username to be filesystem-safe
+  const rawUsername = os.userInfo().username || 'user';
+  const username = rawUsername.replace(/[^a-zA-Z0-9_-]/g, '_');
+  return path.join(os.tmpdir(), username, `PDV-${formatTimestamp(new Date())}`, 'tree');
+}
+
+function getLegacyTreeRoot(): string {
   const rawUsername = os.userInfo().username || 'user';
   const username = rawUsername.replace(/[^a-zA-Z0-9_-]/g, '_');
   return path.join(os.tmpdir(), username, 'PDV', 'tree');
@@ -146,6 +162,9 @@ export function loadConfig(): Config {
     if (fs.existsSync(configPath)) {
       const parsed = JSON.parse(fs.readFileSync(configPath, 'utf-8')) as Partial<Config>;
       const merged = { ...DEFAULT_CONFIG, ...parsed };
+      if (merged.treeRoot === getLegacyTreeRoot()) {
+        merged.treeRoot = getDefaultTreeRoot();
+      }
       ['pythonPath', 'juliaPath'].forEach((key) => {
         if (!(key in parsed)) {
           (merged as Record<string, unknown>)[key] = undefined;
