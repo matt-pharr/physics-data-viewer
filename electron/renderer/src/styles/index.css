@@ -739,6 +739,40 @@ body {
   box-shadow: 0 12px 30px rgba(0, 0, 0, 0.4);
 }
 
+.settings-dialog {
+  background-color: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  width: 640px;
+  max-width: 92%;
+  max-height: 86vh;
+  display: flex;
+  flex-direction: column;
+}
+
+.settings-tabs {
+  display: flex;
+  gap: 8px;
+  padding: 8px 20px;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.settings-grid {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 10px 16px;
+  align-items: center;
+}
+
+.settings-grid input,
+.settings-grid select {
+  padding: 6px 8px;
+  border-radius: 4px;
+  border: 1px solid var(--border-color);
+  background-color: var(--bg-primary);
+  color: var(--text-primary);
+}
+
 .environment-selector h2 {
   margin-bottom: 8px;
 }

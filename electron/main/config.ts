@@ -4,6 +4,42 @@ import * as path from 'path';
 import * as os from 'os';
 import type { Config } from './ipc';
 
+const DEFAULT_THEME_COLORS: Record<string, string> = {
+  'bg-primary': '#1e1e1e',
+  'bg-secondary': '#252526',
+  'bg-tertiary': '#2d2d30',
+  'bg-hover': '#3e3e42',
+  'border-color': '#3e3e42',
+  'text-primary': '#d4d4d4',
+  'text-secondary': '#858585',
+  accent: '#4ec9b0',
+  'accent-hover': '#5fd4be',
+  error: '#f48771',
+  warning: '#dcdcaa',
+  success: '#4ec9b0',
+};
+
+const DEFAULT_THEMES: Array<{ name: string; colors: Record<string, string> }> = [
+  { name: 'Dark', colors: DEFAULT_THEME_COLORS },
+  {
+    name: 'Light',
+    colors: {
+      'bg-primary': '#f3f3f3',
+      'bg-secondary': '#ffffff',
+      'bg-tertiary': '#f7f7f7',
+      'bg-hover': '#e6e6e6',
+      'border-color': '#d0d0d0',
+      'text-primary': '#1f1f1f',
+      'text-secondary': '#4f4f4f',
+      accent: '#0078d4',
+      'accent-hover': '#268be4',
+      error: '#a4262c',
+      warning: '#8a6f00',
+      success: '#107c10',
+    },
+  },
+];
+
 /**
  * Get or create the tree root directory in /tmp
  * Format: /tmp/{username}/PDV/tree
@@ -56,17 +92,34 @@ const DEFAULT_CONFIG: Config = {
   },
   projectRoot: process.cwd(),
   treeRoot: getDefaultTreeRoot(),
+  settings: {
+    shortcuts: {
+      openSettings: 'CommandOrControl+,',
+    },
+    appearance: {
+      themeName: 'Dark',
+      colors: DEFAULT_THEME_COLORS,
+    },
+  },
 };
 
 function getConfigPath(): string {
+  return path.join(getPdvDirectory(), 'settings');
+}
+
+function getThemesPath(): string {
+  return path.join(getPdvDirectory(), 'themes');
+}
+
+function getPdvDirectory(): string {
   try {
     if (typeof app?.getPath === 'function') {
-      return path.join(app.getPath('userData'), 'config.json');
+      return path.join(app.getPath('home'), '.PDV');
     }
   } catch (error) {
-    console.error('[config] Failed to resolve userData path, falling back to cwd:', error);
+    console.error('[config] Failed to resolve home path, falling back to os.homedir:', error);
   }
-  return path.join(process.cwd(), 'config.json');
+  return path.join(os.homedir(), '.PDV');
 }
 
 let cachedConfig: Config | null = null;
@@ -134,4 +187,44 @@ export function updateConfig(partial: Partial<Config>): Config {
   const next = { ...current, ...partial };
   saveConfig(next);
   return next;
+}
+
+export function loadThemes(): Array<{ name: string; colors: Record<string, string> }> {
+  const themesPath = getThemesPath();
+  try {
+    if (!fs.existsSync(themesPath)) {
+      saveThemes(DEFAULT_THEMES);
+      return DEFAULT_THEMES;
+    }
+    const parsed = JSON.parse(fs.readFileSync(themesPath, 'utf-8')) as Array<{ name: string; colors: Record<string, string> }>;
+    if (!Array.isArray(parsed) || parsed.length === 0) {
+      saveThemes(DEFAULT_THEMES);
+      return DEFAULT_THEMES;
+    }
+    return parsed;
+  } catch (error) {
+    console.error('[config] Failed to load themes:', error);
+    return DEFAULT_THEMES;
+  }
+}
+
+export function saveThemes(themes: Array<{ name: string; colors: Record<string, string> }>): void {
+  const themesPath = getThemesPath();
+  try {
+    fs.mkdirSync(path.dirname(themesPath), { recursive: true });
+    fs.writeFileSync(themesPath, JSON.stringify(themes, null, 2));
+  } catch (error) {
+    console.error('[config] Failed to save themes:', error);
+  }
+}
+
+export function saveTheme(theme: { name: string; colors: Record<string, string> }): void {
+  const themes = loadThemes();
+  const existingIndex = themes.findIndex((entry) => entry.name === theme.name);
+  if (existingIndex >= 0) {
+    themes[existingIndex] = theme;
+  } else {
+    themes.push(theme);
+  }
+  saveThemes(themes);
 }

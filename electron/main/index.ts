@@ -23,9 +23,10 @@ import {
   ScriptRunResult,
   ScriptParameter,
   CommandBoxData,
+  Theme,
 } from './ipc';
 import { getKernelManager, resetKernelManager } from './kernel-manager';
-import { loadConfig, updateConfig } from './config';
+import { loadConfig, loadThemes, saveTheme, updateConfig } from './config';
 import { spawn } from 'child_process';
 import * as os from 'os';
 import { FileScanner } from './file-scanner';
@@ -635,6 +636,15 @@ if (!canRegisterHandlers) {
     console.log('[IPC] config:set', config);
     currentConfig = updateConfig(config);
     fileScanner = null;
+    return true;
+  });
+
+  ipcMain.handle(IPC.themes.get, async (): Promise<Theme[]> => {
+    return loadThemes();
+  });
+
+  ipcMain.handle(IPC.themes.save, async (_event, theme: Theme): Promise<boolean> => {
+    saveTheme(theme);
     return true;
   });
 

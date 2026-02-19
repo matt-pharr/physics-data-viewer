@@ -6,11 +6,19 @@ import { EnvironmentSelector } from '../components/EnvironmentSelector';
 import { NamespaceView } from '../components/NamespaceView';
 import { ScriptDialog } from '../components/ScriptDialog';
 import { CreateScriptDialog } from '../components/Tree/CreateScriptDialog';
+import { SettingsDialog } from '../components/SettingsDialog';
 import type { CommandTab, LogEntry, TreeNodeData } from '../types';
 import type { Config } from '../../main/ipc';
 
 type Tab = 'tree' | 'namespace' | 'modules';
 type PlotMode = 'native' | 'capture';
+
+function applyAppearanceColors(colors?: Record<string, string>): void {
+  if (!colors) return;
+  Object.entries(colors).forEach(([key, value]) => {
+    document.documentElement.style.setProperty(`--${key}`, value);
+  });
+}
 
 const App: React.FC = () => {
   const [activeTab, setActiveTab] = useState<Tab>('tree');
@@ -34,6 +42,7 @@ const App: React.FC = () => {
   const [namespaceRefreshToken, setNamespaceRefreshToken] = useState(0);
   const [treeRefreshToken, setTreeRefreshToken] = useState(0);
   const [createScriptTarget, setCreateScriptTarget] = useState<string | null>(null);
+  const [showSettings, setShowSettings] = useState(false);
 
   // Load command boxes from filesystem on startup
   useEffect(() => {
@@ -95,6 +104,7 @@ const App: React.FC = () => {
         const loaded = await window.pdv.config.get();
         setConfig(loaded);
         setPlotMode(loaded.plotMode ?? 'native');
+        applyAppearanceColors(loaded.settings?.appearance?.colors);
 
         if (!loaded.pythonPath || !loaded.juliaPath) {
           setShowEnvSelector(true);
@@ -108,6 +118,22 @@ const App: React.FC = () => {
     };
 
     void initConfig();
+  }, []);
+
+  useEffect(() => {
+    const unsubscribe = window.pdv.settings.onOpen(() => setShowSettings(true));
+    return unsubscribe;
+  }, []);
+
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if ((event.metaKey || event.ctrlKey) && event.key === ',') {
+        event.preventDefault();
+        setShowSettings(true);
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
   }, []);
 
   useEffect(() => {
@@ -186,6 +212,10 @@ const App: React.FC = () => {
       customKernels: config?.customKernels ?? [],
       pythonPath: paths.pythonPath,
       juliaPath: paths.juliaPath,
+      editors: config?.editors,
+      projectRoot: config?.projectRoot,
+      treeRoot: config?.treeRoot,
+      settings: config?.settings,
     };
 
     await window.pdv.config.set(updatedConfig);
@@ -262,6 +292,13 @@ const App: React.FC = () => {
       await window.pdv.config.set({ plotMode: mode });
       await startKernel(next);
     }
+  };
+
+  const handleSettingsSave = async (settings: NonNullable<Config['settings']>) => {
+    applyAppearanceColors(settings.appearance?.colors);
+    await window.pdv.config.set({ settings });
+    setConfig((prev) => (prev ? { ...prev, settings } : { kernelSpec: null, plotMode: 'native', cwd: '', trusted: false, settings }));
+    setShowSettings(false);
   };
 
   const handleTreeAction = async (action: string, node: TreeNodeData) => {
@@ -381,6 +418,7 @@ const App: React.FC = () => {
       <header className="app-header">
         <h1 className="app-title">Physics Data Viewer</h1>
          <div className="header-right">
+           <button className="btn btn-secondary" onClick={() => setShowSettings(true)}>Settings</button>
            <span className="connection-status connected">● Connected</span>
          </div>
        </header>
@@ -536,6 +574,12 @@ const App: React.FC = () => {
            onCancel={() => setShowEnvSelector(false)}
          />
        )}
+       <SettingsDialog
+         isOpen={showSettings}
+         config={config}
+         onClose={() => setShowSettings(false)}
+         onSave={handleSettingsSave}
+       />
      </div>
    );
  };
