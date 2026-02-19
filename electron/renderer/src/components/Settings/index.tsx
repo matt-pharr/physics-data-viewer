@@ -52,7 +52,10 @@ export const Settings: React.FC<SettingsProps> = ({ onClose }) => {
       setCustomThemeColors(loaded.customThemeColors);
       setPendingThemeColors(loaded.customThemeColors);
       setPendingThemeName(undefined);
-      setKeyboardShortcuts(loaded.keyboardShortcuts);
+      
+      // Load keyboard shortcuts from separate file
+      const shortcuts = await window.pdv.shortcuts.load();
+      setKeyboardShortcuts(shortcuts);
       
       setError(null);
     } catch (err) {
@@ -110,7 +113,6 @@ export const Settings: React.FC<SettingsProps> = ({ onClose }) => {
         treeRoot: treeRoot || undefined,
         theme: themeIdToSave,
         customThemeColors: colorsToSave,
-        keyboardShortcuts: keyboardShortcuts,
       };
 
       // Only include editors if at least one field has a value
@@ -122,12 +124,25 @@ export const Settings: React.FC<SettingsProps> = ({ onClose }) => {
         };
       }
 
+      // Save settings
       const success = await window.pdv.settings.set(updated);
-      if (success) {
-        onClose();
-      } else {
+      if (!success) {
         setError('Failed to save settings');
+        setSaving(false);
+        return;
       }
+
+      // Save keyboard shortcuts separately
+      if (keyboardShortcuts) {
+        const shortcutsSuccess = await window.pdv.shortcuts.save(keyboardShortcuts);
+        if (!shortcutsSuccess) {
+          setError('Failed to save keyboard shortcuts');
+          setSaving(false);
+          return;
+        }
+      }
+
+      onClose();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to save settings');
     } finally {
@@ -148,6 +163,41 @@ export const Settings: React.FC<SettingsProps> = ({ onClose }) => {
 
   const handleThemeNameChange = (name: string) => {
     setPendingThemeName(name);
+  };
+
+  const handleSaveTheme = async () => {
+    if (!selectedThemeId || !pendingThemeColors) {
+      throw new Error('No theme selected or no changes to save');
+    }
+
+    const theme = await window.pdv.themes.load(selectedThemeId);
+    if (!theme) {
+      throw new Error('Failed to load base theme');
+    }
+
+    // Compare both directions to detect modifications
+    const allKeys = new Set([...Object.keys(pendingThemeColors), ...Object.keys(theme.colors)]);
+    const isModified = Array.from(allKeys).some(
+      (key) => pendingThemeColors[key] !== theme.colors[key]
+    );
+    
+    // Also check if theme name has changed
+    const nameChanged = pendingThemeName && pendingThemeName !== theme.name;
+    
+    if (isModified || nameChanged) {
+      // Create custom theme with the pending changes
+      const customTheme = await window.pdv.themes.createCustom(theme, pendingThemeColors);
+      // Update the theme name if it was changed
+      if (nameChanged && pendingThemeName) {
+        customTheme.name = pendingThemeName;
+        await window.pdv.themes.save(customTheme);
+      }
+      setSelectedThemeId(customTheme.id);
+      setCustomThemeColors(customTheme.colors);
+      // Reset pending changes after successful save
+      setPendingThemeColors(undefined);
+      setPendingThemeName(undefined);
+    }
   };
 
   const handleShortcutsChange = (shortcuts: KeyboardShortcut[]) => {
@@ -239,6 +289,7 @@ export const Settings: React.FC<SettingsProps> = ({ onClose }) => {
               onThemeSelect={handleThemeSelect}
               onColorsChange={handleThemeColorsChange}
               onThemeNameChange={handleThemeNameChange}
+              onSaveTheme={handleSaveTheme}
             />
           )}
 

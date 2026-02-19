@@ -41,7 +41,6 @@ export interface Settings {
   treeRoot?: string;
   theme?: string; // Changed to string to support custom theme names
   customThemeColors?: ThemeColors;
-  keyboardShortcuts?: KeyboardShortcut[];
 }
 
 /**

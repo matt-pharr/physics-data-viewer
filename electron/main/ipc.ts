@@ -62,6 +62,11 @@ export const IPC = {
     delete: 'themes:delete',
     createCustom: 'themes:createCustom',
   },
+  shortcuts: {
+    load: 'shortcuts:load',
+    save: 'shortcuts:save',
+    reset: 'shortcuts:reset',
+  },
 } as const;
 
 // ============================================================================
@@ -385,6 +390,11 @@ export interface PDVApi {
     delete: (themeId: string) => Promise<boolean>;
     createCustom: (baseTheme: Theme, customColors: ThemeColors) => Promise<Theme>;
   };
+  shortcuts: {
+    load: () => Promise<KeyboardShortcut[]>;
+    save: (shortcuts: KeyboardShortcut[]) => Promise<boolean>;
+    reset: () => Promise<KeyboardShortcut[]>;
+  };
 }
 
 // ============================================================================
@@ -441,5 +451,4 @@ export interface Settings {
   treeRoot?: string;
   theme?: string;
   customThemeColors?: ThemeColors;
-  keyboardShortcuts?: KeyboardShortcut[];
 }

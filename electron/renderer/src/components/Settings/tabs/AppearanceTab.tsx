@@ -8,6 +8,7 @@ interface AppearanceTabProps {
   onThemeSelect: (themeId: string) => void;
   onColorsChange: (colors: ThemeColors) => void;
   onThemeNameChange: (name: string) => void;
+  onSaveTheme: () => Promise<void>;
 }
 
 const DEFAULT_COLOR = '#000000';
@@ -19,12 +20,14 @@ export const AppearanceTab: React.FC<AppearanceTabProps> = ({
   onThemeSelect,
   onColorsChange,
   onThemeNameChange,
+  onSaveTheme,
 }) => {
   const [themes, setThemes] = useState<Theme[]>([]);
   const [selectedTheme, setSelectedTheme] = useState<Theme | null>(null);
   const [colors, setColors] = useState<ThemeColors>({});
   const [themeName, setThemeName] = useState('');
   const [hasChanges, setHasChanges] = useState(false);
+  const [savingTheme, setSavingTheme] = useState(false);
 
   useEffect(() => {
     loadThemes();
@@ -95,6 +98,20 @@ export const AppearanceTab: React.FC<AppearanceTabProps> = ({
     onThemeNameChange(name);
   };
 
+  const handleSaveTheme = async () => {
+    try {
+      setSavingTheme(true);
+      await onSaveTheme();
+      setHasChanges(false);
+      // Reload themes to get the newly created theme
+      await loadThemes();
+    } catch (error) {
+      console.error('[AppearanceTab] Failed to save theme:', error);
+    } finally {
+      setSavingTheme(false);
+    }
+  };
+
   const colorFields: Array<{ key: keyof ThemeColors; label: string }> = [
     { key: 'background', label: 'Background' },
     { key: 'foreground', label: 'Foreground' },
@@ -140,10 +157,22 @@ export const AppearanceTab: React.FC<AppearanceTabProps> = ({
           />
           {hasChanges && (
             <div className="settings-hint">
-              Changes will create a new custom theme when you click Save
+              Theme changes are pending. Click "Save Theme" to create a custom theme.
             </div>
           )}
         </div>
+
+        {hasChanges && (
+          <div className="settings-field">
+            <button
+              onClick={handleSaveTheme}
+              className="settings-btn-primary"
+              disabled={savingTheme}
+            >
+              {savingTheme ? 'Saving Theme...' : 'Save Theme'}
+            </button>
+          </div>
+        )}
       </div>
 
       <div className="settings-section">

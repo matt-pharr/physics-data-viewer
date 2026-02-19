@@ -26,6 +26,7 @@ import {
   Settings,
   Theme,
   ThemeColors,
+  KeyboardShortcut,
 } from './ipc';
 import { getKernelManager, resetKernelManager } from './kernel-manager';
 import { loadConfig, updateConfig } from './config';
@@ -37,6 +38,11 @@ import {
   deleteTheme,
   createCustomTheme,
 } from './themes';
+import {
+  loadShortcuts,
+  saveShortcuts,
+  resetShortcuts,
+} from './shortcuts';
 import { spawn } from 'child_process';
 import * as os from 'os';
 import { FileScanner } from './file-scanner';
@@ -768,6 +774,31 @@ if (!canRegisterHandlers) {
       return createCustomTheme(baseTheme, customColors);
     }
   );
+
+  // ============================================================================
+  // Shortcuts Handlers
+  // ============================================================================
+
+  ipcMain.handle(IPC.shortcuts.load, async (): Promise<KeyboardShortcut[]> => {
+    console.log('[IPC] shortcuts:load');
+    return loadShortcuts();
+  });
+
+  ipcMain.handle(IPC.shortcuts.save, async (_event, shortcuts: KeyboardShortcut[]): Promise<boolean> => {
+    console.log('[IPC] shortcuts:save');
+    try {
+      saveShortcuts(shortcuts);
+      return true;
+    } catch (error) {
+      console.error('[IPC] shortcuts:save error:', error);
+      return false;
+    }
+  });
+
+  ipcMain.handle(IPC.shortcuts.reset, async (): Promise<KeyboardShortcut[]> => {
+    console.log('[IPC] shortcuts:reset');
+    return resetShortcuts();
+  });
 
   // ============================================================================
 

@@ -71,9 +71,14 @@ export const KeyboardShortcutsTab: React.FC<KeyboardShortcutsTabProps> = ({
     }
   };
 
-  const handleReset = () => {
-    setShortcuts(DEFAULT_SHORTCUTS);
-    onShortcutsChange(DEFAULT_SHORTCUTS);
+  const handleReset = async () => {
+    try {
+      const defaultShortcuts = await window.pdv.shortcuts.reset();
+      setShortcuts(defaultShortcuts);
+      onShortcutsChange(defaultShortcuts);
+    } catch (error) {
+      console.error('[KeyboardShortcutsTab] Failed to reset shortcuts:', error);
+    }
   };
 
   const formatShortcut = (shortcut: KeyboardShortcut): string => {

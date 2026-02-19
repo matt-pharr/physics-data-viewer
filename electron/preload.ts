@@ -28,6 +28,7 @@ import type {
   Settings,
   Theme,
   ThemeColors,
+  KeyboardShortcut,
 } from './main/ipc';
 
 // IPC channel names (duplicated here to avoid runtime imports in preload context)
@@ -83,6 +84,11 @@ const IPC = {
     save: 'themes:save',
     delete: 'themes:delete',
     createCustom: 'themes:createCustom',
+  },
+  shortcuts: {
+    load: 'shortcuts:load',
+    save: 'shortcuts:save',
+    reset: 'shortcuts:reset',
   },
 } as const;
 
@@ -204,6 +210,15 @@ const api: PDVApi = {
       ipcRenderer.invoke(IPC.themes.delete, themeId),
     createCustom: (baseTheme: Theme, customColors: ThemeColors): Promise<Theme> =>
       ipcRenderer.invoke(IPC.themes.createCustom, baseTheme, customColors),
+  },
+
+  shortcuts: {
+    load: (): Promise<KeyboardShortcut[]> =>
+      ipcRenderer.invoke(IPC.shortcuts.load),
+    save: (shortcuts: KeyboardShortcut[]): Promise<boolean> =>
+      ipcRenderer.invoke(IPC.shortcuts.save, shortcuts),
+    reset: (): Promise<KeyboardShortcut[]> =>
+      ipcRenderer.invoke(IPC.shortcuts.reset),
   },
 };
 
