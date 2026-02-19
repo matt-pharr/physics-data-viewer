@@ -44,7 +44,7 @@ The current architecture is consistent with the direct-kernel approach documente
 
 ### Preload (`/home/runner/work/physics-data-viewer/physics-data-viewer/electron/preload.ts`)
 - Exposes typed `window.pdv` bridge for all renderer->main interactions.
-- Uses shared IPC constants from `main/ipc.ts` (no duplicated channel map).
+- Uses an in-file IPC channel map to keep preload bridge startup behavior stable.
 
 ### Renderer (`/home/runner/work/physics-data-viewer/physics-data-viewer/electron/renderer/src`)
 - `app/index.tsx`
@@ -63,6 +63,7 @@ The current architecture is consistent with the direct-kernel approach documente
 
 ### Tests currently present
 - Main tests: config, file scanner, kernel manager basics, app import.
+- Main helper tests: index helper logic (`pickKernelForScriptReload`, `normalizeWatchPath`).
 - Renderer tests: tree service.
 - Existing baseline in this branch before changes:
   - `npm run build` passed
@@ -87,18 +88,18 @@ The current architecture is consistent with the direct-kernel approach documente
 ### Gaps / partial implementations
 1. **Tree object persistence APIs are still stubs**
    - `index.ts`: `IPC.tree.get` returns `null`; `IPC.tree.save` returns `true` without implementation.
-2. **Script reload is a stub**
-   - `index.ts`: `IPC.script.reload` currently logs and returns success without reloading behavior.
-3. **File watch APIs are stubs**
-   - `index.ts`: `IPC.files.watch` / `IPC.files.unwatch` always return `false`.
-4. **Tree listing is Python-only today**
+2. **Tree listing is Python-only today**
    - `listTreeFromKernel` only runs for kernels with `language === 'python'`; Julia tree snapshot path is not implemented.
-5. **Modules tab is placeholder UI**
+3. **Modules tab is placeholder UI**
    - Renderer shows "Modules view (coming soon)".
+4. **Script reload remains manual-only workflow**
+   - `script:reload` now validates and refreshes script references but does not auto re-run scripts.
+5. **File watch currently tracks watcher lifecycle only**
+   - `files.watch` / `files.unwatch` are implemented, but watcher events are not yet wired to renderer notifications.
 
 ### Redundant / zombie / likely-unused code
 Phase 1 cleanup items completed:
-1. **Duplicate IPC channel constants in preload** — resolved.
+1. **Duplicate IPC channel constants in preload** — reintroduced intentionally for startup stability after a GUI regression; still a candidate for future cleanup.
 2. **Unused function in Tree component (`applyExpandedState`)** — removed.
 3. **Unused dependencies (`@jupyterlab/services`, `ws`)** — removed from `electron/package.json`.
 
@@ -123,14 +124,14 @@ Status legend used below:
 |---|---|---|---|
 | 0 | Repo scaffolding/tooling | ✅ | Present and working |
 | 1 | Electron+Vite shell | ✅ | Implemented |
-| 2 | IPC contracts + preload bridge | ✅ | Implemented; preload now uses shared IPC constants |
+| 2 | IPC contracts + preload bridge | ✅ | Implemented; preload currently keeps local IPC map for startup stability |
 | 3 | Kernel manager stub | ✅ (superseded) | Replaced by real kernel manager |
 | 4 | Console + Monaco command box | ✅ | Implemented with tabs + shortcuts |
 | 5 | Tree POC lazy UI | ✅ | Implemented with caching/expand/context menu |
 | 5.5 | Real kernel integration (direct ZMQ) | ✅ | Implemented |
 | 6 | Plot mode + capture integration | 🟨 | Mode toggle + init config + display image rendering exist; end-to-end behavior hardening still advisable |
 | 7 | Namespace view | 🟨 | Query/filter/sort/refresh/auto-refresh implemented; advanced double-click inspect/plot behavior not implemented |
-| 8 | Script execution + file ops | 🟨 | Create/run/edit/param extraction implemented; reload + file watch not implemented |
+| 8 | Script execution + file ops | 🟨 | Create/run/edit/param extraction implemented; reload + watch lifecycle now implemented (auto rerun/event wiring still pending) |
 | 9 | Data loaders (real format loaders) | ⏳ | Scanner/classification exists, but true loader backends are not implemented |
 | 10 | Object store + persistence | ⏳ | `tree.get/save` and watch support are stubs |
 | 11 | Module manifests + dynamic UIs (basic) | ⏳ | Not implemented |
@@ -149,6 +150,7 @@ Status legend used below:
 - Namespace querying and display: `main/index.ts` namespace handler + `renderer/src/components/NamespaceView`
 - Tree listing and scanning: `main/index.ts` + `main/file-scanner.ts` + `renderer/src/components/Tree` + `renderer/src/services/tree.ts`
 - Script creation/run/edit/param dialog: `main/index.ts`, `main/init/python-init.py`, `main/init/julia-init.jl`, `renderer/src/components/ScriptDialog`, tree context actions
+- Script reload + watch lifecycle: `main/index.ts` (`script.reload`, `files.watch`, `files.unwatch`) plus reload helpers in init scripts
 - Theme and appearance persistence: `main/config.ts`, `renderer/src/components/SettingsDialog`
 - Command box persistence: `main/index.ts` command box handlers + `renderer/src/app/index.tsx`
 

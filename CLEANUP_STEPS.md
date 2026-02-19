@@ -58,7 +58,7 @@ This document gives **execution-ready instructions for an AI coding agent** to f
 - No duplicated channel-constant block remains in `preload.ts`.
 - TypeScript build passes.
 - Existing renderer calls still work unchanged.
-- **Completed:** ✅
+- **Completed:** ✅ (later adjusted to retain local preload IPC map for startup stability after GUI regression)
 
 ---
 
@@ -104,6 +104,8 @@ This document gives **execution-ready instructions for an AI coding agent** to f
 
 ## Phase 2 — Complete missing Step 8 behavior (scripts + watch)
 
+**Status:** ✅ Complete
+
 ### 2A) Implement real `script:reload`
 
 ### Why
@@ -124,6 +126,7 @@ This document gives **execution-ready instructions for an AI coding agent** to f
 ### Acceptance criteria
 - Reloading a modified script changes subsequent run behavior without app restart.
 - Reload failures (syntax/path errors) return actionable messages.
+- **Completed:** ✅
 
 ---
 
@@ -146,6 +149,7 @@ This document gives **execution-ready instructions for an AI coding agent** to f
 - `files.watch` returns `true` for active watches.
 - `files.unwatch` returns `true` when watcher is removed.
 - No leak from repeated watch/unwatch cycles.
+- **Completed:** ✅
 
 ---
 

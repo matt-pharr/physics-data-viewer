@@ -146,6 +146,12 @@ const api: PDVApi = {
 
     pickExecutable: (): Promise<string | null> =>
       ipcRenderer.invoke(IPC.files.pickExecutable),
+
+    watch: (path: string): Promise<boolean> =>
+      ipcRenderer.invoke(IPC.files.watch, path),
+
+    unwatch: (path: string): Promise<boolean> =>
+      ipcRenderer.invoke(IPC.files.unwatch, path),
   },
 
   config: {

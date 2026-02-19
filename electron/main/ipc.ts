@@ -369,6 +369,8 @@ export interface PDVApi {
     read: (path: string, options?: FileReadOptions) => Promise<FileReadResult | null>;
     write: (path: string, content: string | ArrayBuffer) => Promise<boolean>;
     pickExecutable: () => Promise<string | null>;
+    watch: (path: string) => Promise<boolean>;
+    unwatch: (path: string) => Promise<boolean>;
   };
   config: {
     get: () => Promise<Config>;
