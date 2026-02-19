@@ -32,6 +32,11 @@ class TestScriptRunner:
     """Test the PDVTree script runner with real script execution."""
 
     @pytest.fixture
+    def python_init_module(self):
+        """Load python-init module for tests that need module globals."""
+        return load_python_init()
+
+    @pytest.fixture
     def temp_project_dir(self):
         """Create a temporary project directory for testing."""
         temp_dir = tempfile.mkdtemp(prefix='pdv_test_')
@@ -41,9 +46,9 @@ class TestScriptRunner:
             shutil.rmtree(temp_dir)
 
     @pytest.fixture
-    def pdv_tree(self, temp_project_dir):
+    def pdv_tree(self, temp_project_dir, python_init_module):
         """Initialize a PDVTree instance with test project root."""
-        python_init = load_python_init()
+        python_init = python_init_module
         
         # Create a new PDVTree instance
         tree = python_init.PDVTree()
@@ -176,6 +181,32 @@ def run(tree, **kwargs):
         assert result is not None
         assert result['status'] == 'success'
         assert result['tree_data'] == 123
+
+    def test_script_object_handles_execution_and_relative_path(self, pdv_tree, python_init_module, temp_project_dir):
+        """Test PDVScript execution and project-relative path storage."""
+        python_init = python_init_module
+        scripts_dir = os.path.join(temp_project_dir, 'tree', 'scripts')
+        script_path = os.path.join(scripts_dir, 'test_object_runner.py')
+
+        script_content = '''"""Script object runner"""
+
+def run(tree, **kwargs):
+    return {"status": "success", "value": kwargs.get("value")}
+'''
+
+        with open(script_path, 'w') as f:
+            f.write(script_content)
+
+        python_init.tree = pdv_tree
+        assert python_init.pdv_register_script('scripts', 'object_runner', script_path)
+
+        script_obj = pdv_tree['scripts']['object_runner']
+        assert not os.path.isabs(script_obj.relative_path)
+        assert script_obj.relative_path == os.path.join('tree', 'scripts', 'test_object_runner.py')
+
+        result = pdv_tree.run_script('scripts.object_runner', value=7)
+        assert result['status'] == 'success'
+        assert result['value'] == 7
 
 
 if __name__ == '__main__':

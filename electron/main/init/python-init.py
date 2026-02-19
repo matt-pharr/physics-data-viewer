@@ -31,8 +31,25 @@ class PDVTree(dict):
     def _set_project_root(self, root):
         """Internal: set project root path"""
         import os
-        self._project_root = root
-        self._tree_root = os.path.join(root, 'tree')
+        self._project_root = os.path.realpath(root)
+        self._tree_root = os.path.join(self._project_root, 'tree')
+
+    def _resolve_project_path(self, relative_path):
+        """Resolve a project-relative path to an absolute path."""
+        import os
+        if not self._project_root:
+            raise RuntimeError("Project root is not set")
+        normalized = os.path.normpath(relative_path.replace('\\', '/'))
+        if os.path.isabs(normalized):
+            raise ValueError(f"Expected relative path, got absolute path: {relative_path}")
+        candidate = os.path.realpath(os.path.join(self._project_root, normalized))
+        try:
+            in_project = os.path.commonpath([self._project_root, candidate]) == self._project_root
+        except ValueError:
+            in_project = False
+        if not in_project:
+            raise ValueError(f"Path escapes project root: {relative_path}")
+        return candidate
 
     def run_script(self, script_path, **kwargs):
         """
@@ -46,30 +63,23 @@ class PDVTree(dict):
             Result from script's run() function
         """
         import os
-        import importlib.util
 
         path_parts = script_path.split('.')
         if any(part in ('', '.', '..') or '/' in part or '\\' in part for part in path_parts):
             raise ValueError(f"Invalid script path: {script_path}")
-        file_path = os.path.join(self._tree_root, *path_parts) + '.py'
-        normalized_path = os.path.realpath(file_path)
-        if not normalized_path.startswith(os.path.realpath(self._tree_root)):
+        script_obj = _pdv_resolve_tree_path(script_path, root=self)
+        if isinstance(script_obj, PDVScript):
+            return script_obj.run(self, **kwargs)
+
+        relative_path = os.path.join('tree', *path_parts) + '.py'
+        resolved_path = self._resolve_project_path(relative_path)
+        try:
+            in_tree = os.path.commonpath([self._tree_root, resolved_path]) == self._tree_root
+        except ValueError:
+            in_tree = False
+        if not in_tree:
             raise ValueError(f"Script path escapes project tree: {script_path}")
-
-        if not os.path.exists(file_path):
-            raise FileNotFoundError(f"Script not found: {file_path}")
-
-        spec = importlib.util.spec_from_file_location("_pdv_script", file_path)
-        if spec is None or spec.loader is None:
-            raise ImportError(f"Failed to load script: {file_path}")
-
-        module = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(module)
-
-        if not hasattr(module, 'run'):
-            raise AttributeError(f"Script {script_path} does not have a run() function")
-
-        return module.run(self, **kwargs)
+        return PDVScript(relative_path=relative_path, language='python', doc='').run(self, **kwargs)
 
     def __getitem__(self, key):
         """Override to support path navigation (e.g., tree['data.array1'])"""
@@ -98,10 +108,39 @@ class PDVTree(dict):
 class PDVScript:
     """Lightweight script wrapper stored inside the PDV tree"""
 
-    def __init__(self, file_path, language='python', doc=None):
-        self.file_path = file_path
+    def __init__(self, relative_path, language='python', doc=None):
+        self.relative_path = _pdv_to_project_relative_path(relative_path)
         self.language = language
-        self.doc = doc if doc is not None else _pdv_extract_docstring(file_path)
+        self.doc = doc if doc is not None else _pdv_extract_docstring(self._absolute_path())
+
+    def _target_tree(self, tree_obj=None):
+        target_tree = tree_obj or globals().get('tree')
+        if target_tree is None:
+            raise RuntimeError("PDV tree is not available for script path resolution")
+        return target_tree
+
+    def _absolute_path(self, tree_obj=None):
+        return self._target_tree(tree_obj)._resolve_project_path(self.relative_path)
+
+    def run(self, tree_obj=None, **kwargs):
+        import os
+        import importlib.util
+
+        file_path = self._absolute_path(tree_obj)
+        if not os.path.exists(file_path):
+            raise FileNotFoundError(f"Script not found: {file_path}")
+
+        spec = importlib.util.spec_from_file_location("_pdv_script", file_path)
+        if spec is None or spec.loader is None:
+            raise ImportError(f"Failed to load script: {file_path}")
+
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+
+        if not hasattr(module, 'run'):
+            raise AttributeError(f"Script {self.relative_path} does not have a run() function")
+
+        return module.run(self._target_tree(tree_obj), **kwargs)
 
     def preview(self):
         if self.doc:
@@ -150,11 +189,33 @@ def _pdv_extract_docstring(file_path):
     return None
 
 
-def _pdv_resolve_tree_path(path):
+def _pdv_to_project_relative_path(path):
     if not path:
-        return tree
+        raise ValueError("Path cannot be empty")
+    project_root = tree._project_root
+    if not project_root:
+        raise RuntimeError("Project root is not set")
+    normalized_input = path.replace('\\', '/')
+    if os.path.isabs(normalized_input):
+        normalized_input = os.path.relpath(os.path.realpath(normalized_input), project_root)
+    normalized = os.path.normpath(normalized_input)
+    if normalized in ('.', ''):
+        raise ValueError(f"Path escapes project root: {path}")
+    candidate = os.path.realpath(os.path.join(project_root, normalized))
+    try:
+        in_project = os.path.commonpath([project_root, candidate]) == project_root
+    except ValueError:
+        in_project = False
+    if not in_project:
+        raise ValueError(f"Path escapes project root: {path}")
+    return os.path.relpath(candidate, project_root)
+
+
+def _pdv_resolve_tree_path(path, root=None):
+    if not path:
+        return root if root is not None else tree
     parts = [p for p in path.split('.') if p]
-    obj = tree
+    obj = root if root is not None else tree
     for part in parts:
         if isinstance(obj, dict) and part in obj:
             obj = obj[part]
@@ -238,7 +299,7 @@ def _pdv_make_node(name, value, base_path):
     }
 
     if isinstance(value, PDVScript):
-        node['_file_path'] = value.file_path
+        node['_file_path'] = value.relative_path
         node['language'] = value.language
         node['actions'] = ['run', 'edit', 'reload', 'view_source']
         node['hasChildren'] = False
@@ -270,11 +331,12 @@ def pdv_tree_snapshot(path=""):
 
 def pdv_register_script(parent_path, name, file_path, language='python'):
     """Attach a PDVScript to the tree at the given parent path"""
-    parent = _pdv_resolve_tree_path(parent_path)
+    parent = _pdv_resolve_tree_path(parent_path, root=tree)
     if parent is None or not isinstance(parent, dict):
         return False
-    script_name = name or os.path.splitext(os.path.basename(file_path))[0]
-    parent[script_name] = PDVScript(file_path=file_path, language=language)
+    relative_path = _pdv_to_project_relative_path(file_path)
+    script_name = name or os.path.splitext(os.path.basename(relative_path))[0]
+    parent[script_name] = PDVScript(relative_path=relative_path, language=language)
     return True
 
 # =============================================================================
