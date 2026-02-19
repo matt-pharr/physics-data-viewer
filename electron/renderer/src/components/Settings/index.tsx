@@ -166,14 +166,28 @@ export const Settings: React.FC<SettingsProps> = ({ onClose }) => {
   };
 
   const handleSaveTheme = async () => {
-    if (!selectedThemeId || !pendingThemeColors) {
-      throw new Error('No theme selected or no changes to save');
+    console.log('[Settings] handleSaveTheme called', {
+      selectedThemeId,
+      hasPendingColors: !!pendingThemeColors,
+      hasPendingName: !!pendingThemeName,
+    });
+
+    if (!selectedThemeId) {
+      throw new Error('No theme selected');
+    }
+
+    if (!pendingThemeColors) {
+      throw new Error('No color changes to save. Please modify at least one color value.');
     }
 
     const theme = await window.pdv.themes.load(selectedThemeId);
     if (!theme) {
       throw new Error('Failed to load base theme');
     }
+
+    console.log('[Settings] Loaded base theme:', theme.name, 'colors:', theme.colors);
+    console.log('[Settings] Pending colors:', pendingThemeColors);
+    console.log('[Settings] Pending name:', pendingThemeName);
 
     // Compare both directions to detect modifications
     const allKeys = new Set([...Object.keys(pendingThemeColors), ...Object.keys(theme.colors)]);
@@ -184,20 +198,31 @@ export const Settings: React.FC<SettingsProps> = ({ onClose }) => {
     // Also check if theme name has changed
     const nameChanged = pendingThemeName && pendingThemeName !== theme.name;
     
-    if (isModified || nameChanged) {
-      // Create custom theme with the pending changes
-      const customTheme = await window.pdv.themes.createCustom(theme, pendingThemeColors);
-      // Update the theme name if it was changed
-      if (nameChanged && pendingThemeName) {
-        customTheme.name = pendingThemeName;
-        await window.pdv.themes.save(customTheme);
-      }
-      setSelectedThemeId(customTheme.id);
-      setCustomThemeColors(customTheme.colors);
-      // Reset pending changes after successful save
-      setPendingThemeColors(undefined);
-      setPendingThemeName(undefined);
+    console.log('[Settings] isModified:', isModified, 'nameChanged:', nameChanged);
+    
+    if (!isModified && !nameChanged) {
+      throw new Error('No changes detected. Please modify colors or theme name before saving.');
     }
+
+    // Create custom theme with the pending changes
+    console.log('[Settings] Creating custom theme...');
+    const customTheme = await window.pdv.themes.createCustom(theme, pendingThemeColors);
+    console.log('[Settings] Custom theme created:', customTheme.id);
+    
+    // Update the theme name if it was changed
+    if (nameChanged && pendingThemeName) {
+      customTheme.name = pendingThemeName;
+      await window.pdv.themes.save(customTheme);
+      console.log('[Settings] Theme name updated and saved');
+    }
+    
+    setSelectedThemeId(customTheme.id);
+    setCustomThemeColors(customTheme.colors);
+    // Reset pending changes after successful save
+    setPendingThemeColors(undefined);
+    setPendingThemeName(undefined);
+    
+    console.log('[Settings] Theme saved successfully');
   };
 
   const handleShortcutsChange = (shortcuts: KeyboardShortcut[]) => {

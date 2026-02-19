@@ -28,6 +28,7 @@ export const AppearanceTab: React.FC<AppearanceTabProps> = ({
   const [themeName, setThemeName] = useState('');
   const [hasChanges, setHasChanges] = useState(false);
   const [savingTheme, setSavingTheme] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
 
   useEffect(() => {
     loadThemes();
@@ -101,12 +102,17 @@ export const AppearanceTab: React.FC<AppearanceTabProps> = ({
   const handleSaveTheme = async () => {
     try {
       setSavingTheme(true);
+      setSaveError(null);
+      console.log('[AppearanceTab] Calling onSaveTheme...');
       await onSaveTheme();
+      console.log('[AppearanceTab] Theme saved successfully');
       setHasChanges(false);
       // Reload themes to get the newly created theme
       await loadThemes();
     } catch (error) {
       console.error('[AppearanceTab] Failed to save theme:', error);
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
+      setSaveError(errorMessage);
     } finally {
       setSavingTheme(false);
     }
@@ -158,6 +164,11 @@ export const AppearanceTab: React.FC<AppearanceTabProps> = ({
           {hasChanges && (
             <div className="settings-hint">
               Theme changes are pending. Click "Save Theme" to create a custom theme.
+            </div>
+          )}
+          {saveError && (
+            <div className="settings-error" style={{ marginTop: '8px' }}>
+              Error: {saveError}
             </div>
           )}
         </div>
