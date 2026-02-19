@@ -32,6 +32,11 @@ class TestScriptRunner:
     """Test the PDVTree script runner with real script execution."""
 
     @pytest.fixture
+    def python_init_module(self):
+        """Load python-init module for tests that need module globals."""
+        return load_python_init()
+
+    @pytest.fixture
     def temp_project_dir(self):
         """Create a temporary project directory for testing."""
         temp_dir = tempfile.mkdtemp(prefix='pdv_test_')
@@ -41,9 +46,9 @@ class TestScriptRunner:
             shutil.rmtree(temp_dir)
 
     @pytest.fixture
-    def pdv_tree(self, temp_project_dir):
+    def pdv_tree(self, temp_project_dir, python_init_module):
         """Initialize a PDVTree instance with test project root."""
-        python_init = load_python_init()
+        python_init = python_init_module
         
         # Create a new PDVTree instance
         tree = python_init.PDVTree()
@@ -59,7 +64,6 @@ class TestScriptRunner:
         tree['data'] = python_init.PDVTree()
         tree['scripts'] = python_init.PDVTree()
         tree['results'] = python_init.PDVTree()
-        tree._python_init = python_init
         
         yield tree
 
@@ -178,9 +182,9 @@ def run(tree, **kwargs):
         assert result['status'] == 'success'
         assert result['tree_data'] == 123
 
-    def test_script_object_handles_execution_and_relative_path(self, pdv_tree, temp_project_dir):
+    def test_script_object_handles_execution_and_relative_path(self, pdv_tree, python_init_module, temp_project_dir):
         """Test PDVScript execution and project-relative path storage."""
-        python_init = pdv_tree._python_init
+        python_init = python_init_module
         scripts_dir = os.path.join(temp_project_dir, 'tree', 'scripts')
         script_path = os.path.join(scripts_dir, 'test_object_runner.py')
 

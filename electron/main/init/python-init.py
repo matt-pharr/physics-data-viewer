@@ -43,7 +43,11 @@ class PDVTree(dict):
         if os.path.isabs(normalized):
             raise ValueError(f"Expected relative path, got absolute path: {relative_path}")
         candidate = os.path.realpath(os.path.join(self._project_root, normalized))
-        if os.path.commonpath([self._project_root, candidate]) != self._project_root:
+        try:
+            in_project = os.path.commonpath([self._project_root, candidate]) == self._project_root
+        except ValueError:
+            in_project = False
+        if not in_project:
             raise ValueError(f"Path escapes project root: {relative_path}")
         return candidate
 
@@ -58,20 +62,23 @@ class PDVTree(dict):
         Returns:
             Result from script's run() function
         """
+        import os
+
         path_parts = script_path.split('.')
         if any(part in ('', '.', '..') or '/' in part or '\\' in part for part in path_parts):
             raise ValueError(f"Invalid script path: {script_path}")
-        script_obj = self
-        for part in path_parts:
-            if isinstance(script_obj, dict) and part in script_obj:
-                script_obj = script_obj[part]
-            else:
-                script_obj = None
-                break
+        script_obj = _pdv_resolve_tree_path(script_path, root=self)
         if isinstance(script_obj, PDVScript):
             return script_obj.run(self, **kwargs)
 
         relative_path = os.path.join('tree', *path_parts) + '.py'
+        resolved_path = self._resolve_project_path(relative_path)
+        try:
+            in_tree = os.path.commonpath([self._tree_root, resolved_path]) == self._tree_root
+        except ValueError:
+            in_tree = False
+        if not in_tree:
+            raise ValueError(f"Script path escapes project tree: {script_path}")
         return PDVScript(relative_path=relative_path, language='python', doc='').run(self, **kwargs)
 
     def __getitem__(self, key):
@@ -103,15 +110,17 @@ class PDVScript:
 
     def __init__(self, relative_path, language='python', doc=None):
         self.relative_path = _pdv_to_project_relative_path(relative_path)
-        self.file_path = self.relative_path
         self.language = language
         self.doc = doc if doc is not None else _pdv_extract_docstring(self._absolute_path())
 
-    def _absolute_path(self, tree_obj=None):
+    def _target_tree(self, tree_obj=None):
         target_tree = tree_obj or globals().get('tree')
         if target_tree is None:
             raise RuntimeError("PDV tree is not available for script path resolution")
-        return target_tree._resolve_project_path(self.relative_path)
+        return target_tree
+
+    def _absolute_path(self, tree_obj=None):
+        return self._target_tree(tree_obj)._resolve_project_path(self.relative_path)
 
     def run(self, tree_obj=None, **kwargs):
         import os
@@ -131,8 +140,7 @@ class PDVScript:
         if not hasattr(module, 'run'):
             raise AttributeError(f"Script {self.relative_path} does not have a run() function")
 
-        target_tree = tree_obj or globals().get('tree')
-        return module.run(target_tree, **kwargs)
+        return module.run(self._target_tree(tree_obj), **kwargs)
 
     def preview(self):
         if self.doc:
@@ -184,21 +192,30 @@ def _pdv_extract_docstring(file_path):
 def _pdv_to_project_relative_path(path):
     if not path:
         raise ValueError("Path cannot be empty")
+    project_root = tree._project_root
+    if not project_root:
+        raise RuntimeError("Project root is not set")
     normalized_input = path.replace('\\', '/')
     if os.path.isabs(normalized_input):
-        project_root = tree._project_root or os.getcwd()
-        normalized_input = os.path.relpath(os.path.realpath(normalized_input), os.path.realpath(project_root))
+        normalized_input = os.path.relpath(os.path.realpath(normalized_input), project_root)
     normalized = os.path.normpath(normalized_input)
-    if normalized in ('.', '') or normalized.startswith('..'):
+    if normalized in ('.', ''):
         raise ValueError(f"Path escapes project root: {path}")
-    return normalized
+    candidate = os.path.realpath(os.path.join(project_root, normalized))
+    try:
+        in_project = os.path.commonpath([project_root, candidate]) == project_root
+    except ValueError:
+        in_project = False
+    if not in_project:
+        raise ValueError(f"Path escapes project root: {path}")
+    return os.path.relpath(candidate, project_root)
 
 
-def _pdv_resolve_tree_path(path):
+def _pdv_resolve_tree_path(path, root=None):
     if not path:
-        return tree
+        return root if root is not None else tree
     parts = [p for p in path.split('.') if p]
-    obj = tree
+    obj = root if root is not None else tree
     for part in parts:
         if isinstance(obj, dict) and part in obj:
             obj = obj[part]
@@ -282,7 +299,7 @@ def _pdv_make_node(name, value, base_path):
     }
 
     if isinstance(value, PDVScript):
-        node['_file_path'] = value.file_path
+        node['_file_path'] = value.relative_path
         node['language'] = value.language
         node['actions'] = ['run', 'edit', 'reload', 'view_source']
         node['hasChildren'] = False
@@ -314,7 +331,7 @@ def pdv_tree_snapshot(path=""):
 
 def pdv_register_script(parent_path, name, file_path, language='python'):
     """Attach a PDVScript to the tree at the given parent path"""
-    parent = _pdv_resolve_tree_path(parent_path)
+    parent = _pdv_resolve_tree_path(parent_path, root=tree)
     if parent is None or not isinstance(parent, dict):
         return False
     relative_path = _pdv_to_project_relative_path(file_path)
