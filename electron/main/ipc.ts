@@ -47,6 +47,13 @@ export const IPC = {
     get: 'config:get',
     set: 'config:set',
   },
+  themes: {
+    get: 'themes:get',
+    save: 'themes:save',
+  },
+  settings: {
+    open: 'settings:open',
+  },
   commandBoxes: {
     load: 'commandBoxes:load',
     save: 'commandBoxes:save',
@@ -308,6 +315,21 @@ export interface Config {
   projectRoot?: string;
   /** Tree root directory (defaults to /tmp/{username}/PDV/tree) */
   treeRoot?: string;
+  /** User-editable keyboard shortcuts and appearance settings */
+  settings?: {
+    shortcuts?: {
+      openSettings?: string;
+    };
+    appearance?: {
+      themeName?: string;
+      colors?: Record<string, string>;
+    };
+  };
+}
+
+export interface Theme {
+  name: string;
+  colors: Record<string, string>;
 }
 
 // ============================================================================
@@ -351,6 +373,13 @@ export interface PDVApi {
   config: {
     get: () => Promise<Config>;
     set: (config: Partial<Config>) => Promise<boolean>;
+  };
+  themes: {
+    get: () => Promise<Theme[]>;
+    save: (theme: Theme) => Promise<boolean>;
+  };
+  settings: {
+    onOpen: (callback: () => void) => () => void;
   };
   script: {
     run: (kernelId: string, request: ScriptRunRequest) => Promise<ScriptRunResult>;

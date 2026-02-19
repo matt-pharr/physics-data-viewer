@@ -1,5 +1,6 @@
 import { app, BrowserWindow, Menu } from 'electron';
 import * as path from 'path';
+import { IPC } from './ipc';
 import './index'; // Register IPC handlers (even if empty for now)
 
 const isDev = process.env.NODE_ENV === 'development';
@@ -64,6 +65,14 @@ if (!canCreateWindow) {
       {
         label: 'Edit',
         submenu: [
+          {
+            label: 'Settings…',
+            accelerator: 'CommandOrControl+,',
+            click: () => {
+              mainWindow?.webContents.send(IPC.settings.open);
+            },
+          },
+          { type: 'separator' },
           { role: 'undo' },
           { role: 'redo' },
           { type: 'separator' },

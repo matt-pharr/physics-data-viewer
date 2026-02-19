@@ -2,7 +2,43 @@ import { app } from 'electron';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
-import type { Config } from './ipc';
+import type { Config, Theme } from './ipc';
+
+const DEFAULT_THEME_COLORS: Record<string, string> = {
+  'bg-primary': '#1e1e1e',
+  'bg-secondary': '#252526',
+  'bg-tertiary': '#2d2d30',
+  'bg-hover': '#3e3e42',
+  'border-color': '#3e3e42',
+  'text-primary': '#d4d4d4',
+  'text-secondary': '#858585',
+  accent: '#4ec9b0',
+  'accent-hover': '#5fd4be',
+  error: '#f48771',
+  warning: '#dcdcaa',
+  success: '#4ec9b0',
+};
+
+const DEFAULT_THEMES: Array<{ name: string; colors: Record<string, string> }> = [
+  { name: 'Dark', colors: DEFAULT_THEME_COLORS },
+  {
+    name: 'Light',
+    colors: {
+      'bg-primary': '#f3f3f3',
+      'bg-secondary': '#ffffff',
+      'bg-tertiary': '#f7f7f7',
+      'bg-hover': '#e6e6e6',
+      'border-color': '#d0d0d0',
+      'text-primary': '#1f1f1f',
+      'text-secondary': '#4f4f4f',
+      accent: '#0078d4',
+      'accent-hover': '#268be4',
+      error: '#a4262c',
+      warning: '#8a6f00',
+      success: '#107c10',
+    },
+  },
+];
 
 /**
  * Get or create the tree root directory in /tmp
@@ -56,17 +92,45 @@ const DEFAULT_CONFIG: Config = {
   },
   projectRoot: process.cwd(),
   treeRoot: getDefaultTreeRoot(),
+  settings: {
+    shortcuts: {
+      openSettings: 'CommandOrControl+,',
+    },
+    appearance: {
+      themeName: 'Dark',
+      colors: DEFAULT_THEME_COLORS,
+    },
+  },
 };
 
-function getConfigPath(): string {
+function getSettingsPath(): string {
+  return path.join(getPdvDirectory(), 'settings');
+}
+
+function getThemesPath(): string {
+  return path.join(getThemeDirectoryBase(), 'themes');
+}
+
+function getThemeDirectoryBase(): string {
   try {
     if (typeof app?.getPath === 'function') {
-      return path.join(app.getPath('userData'), 'config.json');
+      return path.join(app.getPath('home'), '.pdv');
     }
   } catch (error) {
-    console.error('[config] Failed to resolve userData path, falling back to cwd:', error);
+    console.error('[config] Failed to resolve home path for themes, falling back to os.homedir:', error);
   }
-  return path.join(process.cwd(), 'config.json');
+  return path.join(os.homedir(), '.pdv');
+}
+
+function getPdvDirectory(): string {
+  try {
+    if (typeof app?.getPath === 'function') {
+      return path.join(app.getPath('home'), '.PDV');
+    }
+  } catch (error) {
+    console.error('[config] Failed to resolve home path, falling back to os.homedir:', error);
+  }
+  return path.join(os.homedir(), '.PDV');
 }
 
 let cachedConfig: Config | null = null;
@@ -76,7 +140,7 @@ export function loadConfig(): Config {
     return cachedConfig;
   }
 
-  const configPath = getConfigPath();
+  const configPath = getSettingsPath();
 
   try {
     if (fs.existsSync(configPath)) {
@@ -119,7 +183,7 @@ export function loadConfig(): Config {
 }
 
 export function saveConfig(config: Config): void {
-  const configPath = getConfigPath();
+  const configPath = getSettingsPath();
   try {
     fs.mkdirSync(path.dirname(configPath), { recursive: true });
     fs.writeFileSync(configPath, JSON.stringify(config, null, 2));
@@ -134,4 +198,76 @@ export function updateConfig(partial: Partial<Config>): Config {
   const next = { ...current, ...partial };
   saveConfig(next);
   return next;
+}
+
+function toThemeFileName(name: string): string {
+  const slug = name
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9_-]+/g, '-')
+    .replace(/^-+|-+$/g, '');
+  return `${slug || 'theme'}.json`;
+}
+
+function isTheme(value: unknown): value is Theme {
+  if (!value || typeof value !== 'object') {
+    return false;
+  }
+  const candidate = value as { name?: unknown; colors?: unknown };
+  if (typeof candidate.name !== 'string' || !candidate.colors || typeof candidate.colors !== 'object') {
+    return false;
+  }
+  const colors = candidate.colors as Record<string, unknown>;
+  if (Object.keys(colors).length === 0) {
+    return false;
+  }
+  return Object.values(colors).every((entry) => typeof entry === 'string');
+}
+
+function ensureDefaultThemes(): void {
+  const themesPath = getThemesPath();
+  if (!fs.existsSync(themesPath)) {
+    fs.mkdirSync(themesPath, { recursive: true });
+  }
+  const themeFiles = fs.readdirSync(themesPath).filter((file) => file.endsWith('.json'));
+  if (themeFiles.length === 0) {
+    DEFAULT_THEMES.forEach((theme) => {
+      const filePath = path.join(themesPath, toThemeFileName(theme.name));
+      fs.writeFileSync(filePath, JSON.stringify(theme, null, 2), 'utf-8');
+    });
+  }
+}
+
+export function loadThemes(): Theme[] {
+  const themesPath = getThemesPath();
+  try {
+    ensureDefaultThemes();
+    const files = fs.readdirSync(themesPath).filter((file) => file.endsWith('.json'));
+    const loadedThemes: Theme[] = [];
+    files.forEach((file) => {
+      try {
+        const parsed = JSON.parse(fs.readFileSync(path.join(themesPath, file), 'utf-8')) as unknown;
+        if (isTheme(parsed)) {
+          loadedThemes.push(parsed);
+        }
+      } catch (error) {
+        console.error(`[config] Failed to parse theme file ${file}:`, error);
+      }
+    });
+    return loadedThemes.length > 0 ? loadedThemes : DEFAULT_THEMES;
+  } catch (error) {
+    console.error('[config] Failed to load themes:', error);
+    return DEFAULT_THEMES;
+  }
+}
+
+export function saveTheme(theme: Theme): void {
+  const themesPath = getThemesPath();
+  try {
+    fs.mkdirSync(themesPath, { recursive: true });
+    const filePath = path.join(themesPath, toThemeFileName(theme.name));
+    fs.writeFileSync(filePath, JSON.stringify(theme, null, 2), 'utf-8');
+  } catch (error) {
+    console.error('[config] Failed to save theme:', error);
+  }
 }

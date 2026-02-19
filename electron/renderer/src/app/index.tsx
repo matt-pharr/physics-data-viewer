@@ -6,11 +6,36 @@ import { EnvironmentSelector } from '../components/EnvironmentSelector';
 import { NamespaceView } from '../components/NamespaceView';
 import { ScriptDialog } from '../components/ScriptDialog';
 import { CreateScriptDialog } from '../components/Tree/CreateScriptDialog';
+import { SettingsDialog } from '../components/SettingsDialog';
 import type { CommandTab, LogEntry, TreeNodeData } from '../types';
 import type { Config } from '../../main/ipc';
 
 type Tab = 'tree' | 'namespace' | 'modules';
 type PlotMode = 'native' | 'capture';
+const DEFAULT_OPEN_SETTINGS_SHORTCUT = 'CommandOrControl+,';
+
+function applyAppearanceColors(colors?: Record<string, string>): void {
+  if (!colors) return;
+  Object.entries(colors).forEach(([key, value]) => {
+    document.documentElement.style.setProperty(`--${key}`, value);
+  });
+}
+
+function matchesShortcut(event: KeyboardEvent, shortcut: string): boolean {
+  const parts = shortcut.toLowerCase().replace(/\s+/g, '').split('+').filter(Boolean);
+  const keyPart = parts.pop();
+  if (!keyPart) return false;
+  const normalizedKey = keyPart === 'comma' ? ',' : keyPart;
+  if (event.key.toLowerCase() !== normalizedKey) return false;
+  return parts.every((part) => {
+    if (part === 'commandorcontrol') return event.metaKey || event.ctrlKey;
+    if (part === 'command' || part === 'cmd' || part === 'meta') return event.metaKey;
+    if (part === 'control' || part === 'ctrl') return event.ctrlKey;
+    if (part === 'alt' || part === 'option') return event.altKey;
+    if (part === 'shift') return event.shiftKey;
+    return false;
+  });
+}
 
 const App: React.FC = () => {
   const [activeTab, setActiveTab] = useState<Tab>('tree');
@@ -34,6 +59,7 @@ const App: React.FC = () => {
   const [namespaceRefreshToken, setNamespaceRefreshToken] = useState(0);
   const [treeRefreshToken, setTreeRefreshToken] = useState(0);
   const [createScriptTarget, setCreateScriptTarget] = useState<string | null>(null);
+  const [showSettings, setShowSettings] = useState(false);
 
   // Load command boxes from filesystem on startup
   useEffect(() => {
@@ -95,6 +121,7 @@ const App: React.FC = () => {
         const loaded = await window.pdv.config.get();
         setConfig(loaded);
         setPlotMode(loaded.plotMode ?? 'native');
+        applyAppearanceColors(loaded.settings?.appearance?.colors);
 
         if (!loaded.pythonPath || !loaded.juliaPath) {
           setShowEnvSelector(true);
@@ -109,6 +136,23 @@ const App: React.FC = () => {
 
     void initConfig();
   }, []);
+
+  useEffect(() => {
+    const unsubscribe = window.pdv.settings.onOpen(() => setShowSettings(true));
+    return unsubscribe;
+  }, []);
+
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      const openSettingsShortcut = config?.settings?.shortcuts?.openSettings ?? DEFAULT_OPEN_SETTINGS_SHORTCUT;
+      if (matchesShortcut(event, openSettingsShortcut)) {
+        event.preventDefault();
+        setShowSettings(true);
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [config]);
 
   useEffect(() => {
     const handleMove = (event: MouseEvent) => {
@@ -186,6 +230,10 @@ const App: React.FC = () => {
       customKernels: config?.customKernels ?? [],
       pythonPath: paths.pythonPath,
       juliaPath: paths.juliaPath,
+      editors: config?.editors,
+      projectRoot: config?.projectRoot,
+      treeRoot: config?.treeRoot,
+      settings: config?.settings,
     };
 
     await window.pdv.config.set(updatedConfig);
@@ -262,6 +310,23 @@ const App: React.FC = () => {
       await window.pdv.config.set({ plotMode: mode });
       await startKernel(next);
     }
+  };
+
+  const handleSettingsSave = async (updates: Partial<Config>) => {
+    if (updates.settings?.appearance?.colors) {
+      applyAppearanceColors(updates.settings.appearance.colors);
+    }
+    await window.pdv.config.set(updates);
+    const mergedConfig = config ? { ...config, ...updates } : null;
+    setConfig(mergedConfig);
+    if (
+      mergedConfig &&
+      ((updates.pythonPath && updates.pythonPath !== config?.pythonPath) ||
+        (updates.juliaPath && updates.juliaPath !== config?.juliaPath))
+    ) {
+      await startKernel(mergedConfig);
+    }
+    setShowSettings(false);
   };
 
   const handleTreeAction = async (action: string, node: TreeNodeData) => {
@@ -381,6 +446,7 @@ const App: React.FC = () => {
       <header className="app-header">
         <h1 className="app-title">Physics Data Viewer</h1>
          <div className="header-right">
+           <button className="btn btn-secondary" onClick={() => setShowSettings(true)}>Settings</button>
            <span className="connection-status connected">● Connected</span>
          </div>
        </header>
@@ -536,6 +602,12 @@ const App: React.FC = () => {
            onCancel={() => setShowEnvSelector(false)}
          />
        )}
+       <SettingsDialog
+         isOpen={showSettings}
+         config={config}
+         onClose={() => setShowSettings(false)}
+         onSave={handleSettingsSave}
+       />
      </div>
    );
  };
