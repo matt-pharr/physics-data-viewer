@@ -5,14 +5,19 @@ import * as path from 'path';
 
 describe('config themes', () => {
   const originalHome = process.env.HOME;
+  let tempHome: string | undefined;
 
   afterEach(() => {
     process.env.HOME = originalHome;
+    if (tempHome && fs.existsSync(tempHome)) {
+      fs.rmSync(tempHome, { recursive: true, force: true });
+    }
+    tempHome = undefined;
     vi.resetModules();
   });
 
   it('stores themes in ~/.PDV/themes and persists custom themes', async () => {
-    const tempHome = fs.mkdtempSync(path.join(os.tmpdir(), 'pdv-home-'));
+    tempHome = fs.mkdtempSync(path.join(os.tmpdir(), 'pdv-home-'));
     vi.doMock('electron', () => ({
       app: {
         getPath: (target: string) => (target === 'home' ? tempHome : tempHome),

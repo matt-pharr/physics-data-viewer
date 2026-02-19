@@ -12,11 +12,28 @@ import type { Config } from '../../main/ipc';
 
 type Tab = 'tree' | 'namespace' | 'modules';
 type PlotMode = 'native' | 'capture';
+const DEFAULT_OPEN_SETTINGS_SHORTCUT = 'CommandOrControl+,';
 
 function applyAppearanceColors(colors?: Record<string, string>): void {
   if (!colors) return;
   Object.entries(colors).forEach(([key, value]) => {
     document.documentElement.style.setProperty(`--${key}`, value);
+  });
+}
+
+function matchesShortcut(event: KeyboardEvent, shortcut: string): boolean {
+  const parts = shortcut.toLowerCase().replace(/\s+/g, '').split('+').filter(Boolean);
+  const keyPart = parts.pop();
+  if (!keyPart) return false;
+  const normalizedKey = keyPart === 'comma' ? ',' : keyPart;
+  if (event.key.toLowerCase() !== normalizedKey) return false;
+  return parts.every((part) => {
+    if (part === 'commandorcontrol') return event.metaKey || event.ctrlKey;
+    if (part === 'command' || part === 'cmd' || part === 'meta') return event.metaKey;
+    if (part === 'control' || part === 'ctrl') return event.ctrlKey;
+    if (part === 'alt' || part === 'option') return event.altKey;
+    if (part === 'shift') return event.shiftKey;
+    return false;
   });
 }
 
@@ -127,14 +144,15 @@ const App: React.FC = () => {
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
-      if ((event.metaKey || event.ctrlKey) && event.key === ',') {
+      const openSettingsShortcut = config?.settings?.shortcuts?.openSettings ?? DEFAULT_OPEN_SETTINGS_SHORTCUT;
+      if (matchesShortcut(event, openSettingsShortcut)) {
         event.preventDefault();
         setShowSettings(true);
       }
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, []);
+  }, [config]);
 
   useEffect(() => {
     const handleMove = (event: MouseEvent) => {
@@ -297,7 +315,7 @@ const App: React.FC = () => {
   const handleSettingsSave = async (settings: NonNullable<Config['settings']>) => {
     applyAppearanceColors(settings.appearance?.colors);
     await window.pdv.config.set({ settings });
-    setConfig((prev) => (prev ? { ...prev, settings } : { kernelSpec: null, plotMode: 'native', cwd: '', trusted: false, settings }));
+    setConfig((prev) => (prev ? { ...prev, settings } : prev));
     setShowSettings(false);
   };
 

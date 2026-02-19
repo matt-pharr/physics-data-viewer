@@ -2,6 +2,16 @@ import React, { useEffect, useMemo, useState } from 'react';
 import type { Config, Theme } from '../../../../main/ipc';
 
 type SettingsTab = 'shortcuts' | 'appearance';
+const DEFAULT_OPEN_SETTINGS_SHORTCUT = 'CommandOrControl+,';
+const CUSTOM_THEME_PREFIX = 'Custom Theme';
+
+function colorsEqual(a: Record<string, string>, b: Record<string, string>): boolean {
+  const keys = Object.keys(a);
+  if (keys.length !== Object.keys(b).length) {
+    return false;
+  }
+  return keys.every((key) => a[key] === b[key]);
+}
 
 interface SettingsDialogProps {
   isOpen: boolean;
@@ -13,7 +23,7 @@ interface SettingsDialogProps {
 export const SettingsDialog: React.FC<SettingsDialogProps> = ({ isOpen, config, onClose, onSave }) => {
   const [activeTab, setActiveTab] = useState<SettingsTab>('shortcuts');
   const [themes, setThemes] = useState<Theme[]>([]);
-  const [shortcut, setShortcut] = useState('CommandOrControl+,');
+  const [shortcut, setShortcut] = useState(DEFAULT_OPEN_SETTINGS_SHORTCUT);
   const [selectedTheme, setSelectedTheme] = useState('Dark');
   const [themeName, setThemeName] = useState('Dark');
   const [colors, setColors] = useState<Record<string, string>>({});
@@ -29,7 +39,7 @@ export const SettingsDialog: React.FC<SettingsDialogProps> = ({ isOpen, config, 
       setThemeName(currentThemeName);
       setColors(config?.settings?.appearance?.colors ?? selected?.colors ?? {});
     };
-    setShortcut(config?.settings?.shortcuts?.openSettings ?? 'CommandOrControl+,');
+    setShortcut(config?.settings?.shortcuts?.openSettings ?? DEFAULT_OPEN_SETTINGS_SHORTCUT);
     void loadThemes();
   }, [config, isOpen]);
 
@@ -49,12 +59,13 @@ export const SettingsDialog: React.FC<SettingsDialogProps> = ({ isOpen, config, 
 
   const onSaveSettings = async () => {
     let savedThemeName = selectedTheme;
-    if (JSON.stringify(colors) !== JSON.stringify(selectedThemeColors)) {
-      savedThemeName = themeName.trim() || `Custom Theme ${Date.now()}`;
+    if (!colorsEqual(colors, selectedThemeColors)) {
+      const customThemeCount = themes.filter((theme) => theme.name.startsWith(CUSTOM_THEME_PREFIX)).length;
+      savedThemeName = themeName.trim() || `${CUSTOM_THEME_PREFIX} ${customThemeCount + 1}`;
       await window.pdv.themes.save({ name: savedThemeName, colors });
     }
     await onSave({
-      shortcuts: { openSettings: shortcut.trim() || 'CommandOrControl+,' },
+      shortcuts: { openSettings: shortcut.trim() || DEFAULT_OPEN_SETTINGS_SHORTCUT },
       appearance: { themeName: savedThemeName, colors },
     });
   };

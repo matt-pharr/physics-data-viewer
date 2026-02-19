@@ -103,7 +103,7 @@ const DEFAULT_CONFIG: Config = {
   },
 };
 
-function getConfigPath(): string {
+function getSettingsPath(): string {
   return path.join(getPdvDirectory(), 'settings');
 }
 
@@ -129,7 +129,7 @@ export function loadConfig(): Config {
     return cachedConfig;
   }
 
-  const configPath = getConfigPath();
+  const configPath = getSettingsPath();
 
   try {
     if (fs.existsSync(configPath)) {
@@ -172,7 +172,7 @@ export function loadConfig(): Config {
 }
 
 export function saveConfig(config: Config): void {
-  const configPath = getConfigPath();
+  const configPath = getSettingsPath();
   try {
     fs.mkdirSync(path.dirname(configPath), { recursive: true });
     fs.writeFileSync(configPath, JSON.stringify(config, null, 2));
@@ -196,12 +196,22 @@ export function loadThemes(): Array<{ name: string; colors: Record<string, strin
       saveThemes(DEFAULT_THEMES);
       return DEFAULT_THEMES;
     }
-    const parsed = JSON.parse(fs.readFileSync(themesPath, 'utf-8')) as Array<{ name: string; colors: Record<string, string> }>;
-    if (!Array.isArray(parsed) || parsed.length === 0) {
+    const parsed = JSON.parse(fs.readFileSync(themesPath, 'utf-8')) as unknown;
+    const normalized = Array.isArray(parsed)
+      ? parsed.filter(
+          (entry): entry is { name: string; colors: Record<string, string> } =>
+            !!entry &&
+            typeof entry === 'object' &&
+            typeof (entry as { name?: unknown }).name === 'string' &&
+            !!(entry as { colors?: unknown }).colors &&
+            typeof (entry as { colors?: unknown }).colors === 'object',
+        )
+      : [];
+    if (normalized.length === 0) {
       saveThemes(DEFAULT_THEMES);
       return DEFAULT_THEMES;
     }
-    return parsed;
+    return normalized;
   } catch (error) {
     console.error('[config] Failed to load themes:', error);
     return DEFAULT_THEMES;
