@@ -26,6 +26,8 @@ export const Settings: React.FC<SettingsProps> = ({ onClose }) => {
   const [defaultEditor, setDefaultEditor] = useState('');
   const [treeRoot, setTreeRoot] = useState('');
   const [selectedThemeId, setSelectedThemeId] = useState<string | undefined>(undefined);
+  const [pendingThemeColors, setPendingThemeColors] = useState<ThemeColors | undefined>(undefined);
+  const [pendingThemeName, setPendingThemeName] = useState<string | undefined>(undefined);
   const [customThemeColors, setCustomThemeColors] = useState<ThemeColors | undefined>(undefined);
   const [keyboardShortcuts, setKeyboardShortcuts] = useState<KeyboardShortcut[] | undefined>(undefined);
 
@@ -48,6 +50,8 @@ export const Settings: React.FC<SettingsProps> = ({ onClose }) => {
       setTreeRoot(loaded.treeRoot || '');
       setSelectedThemeId(loaded.theme);
       setCustomThemeColors(loaded.customThemeColors);
+      setPendingThemeColors(loaded.customThemeColors);
+      setPendingThemeName(undefined);
       setKeyboardShortcuts(loaded.keyboardShortcuts);
       
       setError(null);
@@ -63,12 +67,49 @@ export const Settings: React.FC<SettingsProps> = ({ onClose }) => {
       setSaving(true);
       setError(null);
 
+      // Check if we need to create a custom theme
+      let themeIdToSave = selectedThemeId;
+      let colorsToSave = customThemeColors;
+
+      if (selectedThemeId && pendingThemeColors) {
+        const theme = await window.pdv.themes.load(selectedThemeId);
+        if (theme) {
+          // Compare both directions to detect modifications
+          const allKeys = new Set([...Object.keys(pendingThemeColors), ...Object.keys(theme.colors)]);
+          const isModified = Array.from(allKeys).some(
+            (key) => pendingThemeColors[key] !== theme.colors[key]
+          );
+          
+          // Also check if theme name has changed
+          const nameChanged = pendingThemeName && pendingThemeName !== theme.name;
+          
+          if (isModified || nameChanged) {
+            // Create custom theme with the pending changes
+            try {
+              const customTheme = await window.pdv.themes.createCustom(theme, pendingThemeColors);
+              // Update the theme name if it was changed
+              if (nameChanged && pendingThemeName) {
+                customTheme.name = pendingThemeName;
+                await window.pdv.themes.save(customTheme);
+              }
+              themeIdToSave = customTheme.id;
+              colorsToSave = customTheme.colors;
+            } catch (err) {
+              console.error('[Settings] Failed to create custom theme:', err);
+              setError('Failed to create custom theme');
+              setSaving(false);
+              return;
+            }
+          }
+        }
+      }
+
       const updated: Partial<SettingsType> = {
         pythonPath: pythonPath || undefined,
         juliaPath: juliaPath || undefined,
         treeRoot: treeRoot || undefined,
-        theme: selectedThemeId,
-        customThemeColors: customThemeColors,
+        theme: themeIdToSave,
+        customThemeColors: colorsToSave,
         keyboardShortcuts: keyboardShortcuts,
       };
 
@@ -94,32 +135,19 @@ export const Settings: React.FC<SettingsProps> = ({ onClose }) => {
     }
   };
 
-  const handleThemeChange = async (themeId: string, colors: ThemeColors) => {
-    // Check if colors have been modified
-    const theme = await window.pdv.themes.load(themeId);
-    if (theme) {
-      // Compare both directions to detect modifications
-      const allKeys = new Set([...Object.keys(colors), ...Object.keys(theme.colors)]);
-      const isModified = Array.from(allKeys).some(
-        (key) => colors[key] !== theme.colors[key]
-      );
-      
-      if (isModified) {
-        // Create custom theme
-        try {
-          const customTheme = await window.pdv.themes.createCustom(theme, colors);
-          setSelectedThemeId(customTheme.id);
-          setCustomThemeColors(customTheme.colors);
-        } catch (err) {
-          console.error('[Settings] Failed to create custom theme:', err);
-          setError('Failed to create custom theme');
-        }
-      } else {
-        // Use the selected theme as-is
-        setSelectedThemeId(themeId);
-        setCustomThemeColors(undefined);
-      }
-    }
+  const handleThemeSelect = (themeId: string) => {
+    setSelectedThemeId(themeId);
+    // Reset pending changes when a new theme is selected
+    setPendingThemeColors(undefined);
+    setPendingThemeName(undefined);
+  };
+
+  const handleThemeColorsChange = (colors: ThemeColors) => {
+    setPendingThemeColors(colors);
+  };
+
+  const handleThemeNameChange = (name: string) => {
+    setPendingThemeName(name);
   };
 
   const handleShortcutsChange = (shortcuts: KeyboardShortcut[]) => {
@@ -206,8 +234,11 @@ export const Settings: React.FC<SettingsProps> = ({ onClose }) => {
           {activeTab === 'appearance' && (
             <AppearanceTab
               currentThemeId={selectedThemeId}
-              customColors={customThemeColors}
-              onThemeChange={handleThemeChange}
+              customColors={pendingThemeColors || customThemeColors}
+              customThemeName={pendingThemeName}
+              onThemeSelect={handleThemeSelect}
+              onColorsChange={handleThemeColorsChange}
+              onThemeNameChange={handleThemeNameChange}
             />
           )}
 

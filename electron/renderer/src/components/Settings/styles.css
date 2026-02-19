@@ -239,7 +239,8 @@
 }
 
 /* Appearance Tab Styles */
-.settings-select {
+.settings-select,
+.settings-input {
   width: 100%;
   padding: 8px 12px;
   background-color: #252525;
@@ -248,10 +249,14 @@
   color: #cccccc;
   font-size: 13px;
   font-family: inherit;
+}
+
+.settings-select {
   cursor: pointer;
 }
 
-.settings-select:focus {
+.settings-select:focus,
+.settings-input:focus {
   outline: none;
   border-color: #007acc;
 }

@@ -4,7 +4,10 @@ import type { Theme, ThemeColors } from '../../../../main/ipc';
 interface AppearanceTabProps {
   currentThemeId?: string;
   customColors?: ThemeColors;
-  onThemeChange: (themeId: string, colors: ThemeColors) => void;
+  customThemeName?: string;
+  onThemeSelect: (themeId: string) => void;
+  onColorsChange: (colors: ThemeColors) => void;
+  onThemeNameChange: (name: string) => void;
 }
 
 const DEFAULT_COLOR = '#000000';
@@ -12,11 +15,15 @@ const DEFAULT_COLOR = '#000000';
 export const AppearanceTab: React.FC<AppearanceTabProps> = ({
   currentThemeId,
   customColors,
-  onThemeChange,
+  customThemeName,
+  onThemeSelect,
+  onColorsChange,
+  onThemeNameChange,
 }) => {
   const [themes, setThemes] = useState<Theme[]>([]);
   const [selectedTheme, setSelectedTheme] = useState<Theme | null>(null);
   const [colors, setColors] = useState<ThemeColors>({});
+  const [themeName, setThemeName] = useState('');
   const [hasChanges, setHasChanges] = useState(false);
 
   useEffect(() => {
@@ -30,10 +37,11 @@ export const AppearanceTab: React.FC<AppearanceTabProps> = ({
       if (theme) {
         setSelectedTheme(theme);
         setColors(customColors || theme.colors);
+        setThemeName(customThemeName || theme.name);
         setHasChanges(false);
       }
     }
-  }, [currentThemeId, customColors, themes]);
+  }, [currentThemeId, customColors, customThemeName, themes]);
 
   const loadThemes = async () => {
     try {
@@ -45,24 +53,30 @@ export const AppearanceTab: React.FC<AppearanceTabProps> = ({
         if (theme) {
           setSelectedTheme(theme);
           setColors(customColors || theme.colors);
+          setThemeName(customThemeName || theme.name);
         }
       } else if (loadedThemes.length > 0) {
         // Default to first theme (dark)
         setSelectedTheme(loadedThemes[0]);
         setColors(loadedThemes[0].colors);
+        setThemeName(loadedThemes[0].name);
       }
     } catch (error) {
       console.error('[AppearanceTab] Failed to load themes:', error);
     }
   };
 
-  const handleThemeSelect = (themeId: string) => {
+  const handleThemeSelectChange = (themeId: string) => {
     const theme = themes.find((t) => t.id === themeId);
     if (theme) {
       setSelectedTheme(theme);
       setColors(theme.colors);
+      setThemeName(theme.name);
       setHasChanges(false);
-      onThemeChange(theme.id, theme.colors);
+      // Notify parent that a different theme was selected
+      onThemeSelect(theme.id);
+      onColorsChange(theme.colors);
+      onThemeNameChange(theme.name);
     }
   };
 
@@ -70,11 +84,15 @@ export const AppearanceTab: React.FC<AppearanceTabProps> = ({
     const updatedColors = { ...colors, [colorKey]: value };
     setColors(updatedColors);
     setHasChanges(true);
-    
-    // If we have a selected theme and colors have changed, trigger custom theme creation
-    if (selectedTheme) {
-      onThemeChange(selectedTheme.id, updatedColors);
-    }
+    // Notify parent of color changes, but don't create theme yet
+    onColorsChange(updatedColors);
+  };
+
+  const handleThemeNameChange = (name: string) => {
+    setThemeName(name);
+    setHasChanges(true);
+    // Notify parent of name change
+    onThemeNameChange(name);
   };
 
   const colorFields: Array<{ key: keyof ThemeColors; label: string }> = [
@@ -99,7 +117,7 @@ export const AppearanceTab: React.FC<AppearanceTabProps> = ({
           <select
             id="theme"
             value={selectedTheme?.id || ''}
-            onChange={(e) => handleThemeSelect(e.target.value)}
+            onChange={(e) => handleThemeSelectChange(e.target.value)}
             className="settings-select"
           >
             {themes.map((theme) => (
@@ -108,9 +126,21 @@ export const AppearanceTab: React.FC<AppearanceTabProps> = ({
               </option>
             ))}
           </select>
+        </div>
+
+        <div className="settings-field">
+          <label htmlFor="themeName">Theme Name</label>
+          <input
+            id="themeName"
+            type="text"
+            value={themeName}
+            onChange={(e) => handleThemeNameChange(e.target.value)}
+            placeholder="Enter theme name"
+            className="settings-input"
+          />
           {hasChanges && (
             <div className="settings-hint">
-              Changes will create a new custom theme based on {selectedTheme?.name}
+              Changes will create a new custom theme when you click Save
             </div>
           )}
         </div>
