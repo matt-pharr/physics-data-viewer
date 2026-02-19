@@ -6,7 +6,6 @@
  */
 
 import { contextBridge, ipcRenderer } from 'electron';
-import { IPC } from './main/ipc';
 import type {
   KernelSpec,
   KernelInfo,
@@ -28,6 +27,59 @@ import type {
   CommandBoxData,
   Theme,
 } from './main/ipc';
+
+// IPC channel names are duplicated here to keep preload runtime isolated from
+// main-process module loading concerns.
+const IPC = {
+  kernels: {
+    list: 'kernels:list',
+    start: 'kernels:start',
+    stop: 'kernels:stop',
+    execute: 'kernels:execute',
+    interrupt: 'kernels:interrupt',
+    restart: 'kernels:restart',
+    complete: 'kernels:complete',
+    inspect: 'kernels:inspect',
+    validate: 'kernels:validate',
+  },
+  tree: {
+    list: 'tree:list',
+    get: 'tree:get',
+    save: 'tree:save',
+    create_script: 'tree:create_script',
+  },
+  script: {
+    run: 'script:run',
+    edit: 'script:edit',
+    reload: 'script:reload',
+    get_params: 'script:get_params',
+  },
+  files: {
+    read: 'files:read',
+    write: 'files:write',
+    pickExecutable: 'files:pickExecutable',
+    watch: 'files:watch',
+    unwatch: 'files:unwatch',
+  },
+  namespace: {
+    query: 'namespace:query',
+  },
+  config: {
+    get: 'config:get',
+    set: 'config:set',
+  },
+  themes: {
+    get: 'themes:get',
+    save: 'themes:save',
+  },
+  settings: {
+    open: 'settings:open',
+  },
+  commandBoxes: {
+    load: 'commandBoxes:load',
+    save: 'commandBoxes:save',
+  },
+} as const;
 
 const api: PDVApi = {
   kernels: {

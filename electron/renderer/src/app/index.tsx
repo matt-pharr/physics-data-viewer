@@ -63,6 +63,9 @@ const App: React.FC = () => {
 
   // Load command boxes from filesystem on startup
   useEffect(() => {
+    if (!window.pdv?.commandBoxes) {
+      return;
+    }
     const loadCommandBoxes = async () => {
       try {
         const data = await window.pdv.commandBoxes.load();
@@ -81,6 +84,9 @@ const App: React.FC = () => {
   // Debounced save to filesystem
   const saveTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   useEffect(() => {
+    if (!window.pdv?.commandBoxes) {
+      return;
+    }
     // Clear any pending save
     if (saveTimeoutRef.current) {
       clearTimeout(saveTimeoutRef.current);
@@ -138,6 +144,9 @@ const App: React.FC = () => {
   }, []);
 
   useEffect(() => {
+    if (!window.pdv?.settings?.onOpen) {
+      return;
+    }
     const unsubscribe = window.pdv.settings.onOpen(() => setShowSettings(true));
     return unsubscribe;
   }, []);
