@@ -62,6 +62,12 @@ function getDefaultTreeRoot(): string {
   return path.join(os.tmpdir(), username, `PDV-${formatTimestamp(new Date())}`, 'tree');
 }
 
+function getLegacyTreeRoot(): string {
+  const rawUsername = os.userInfo().username || 'user';
+  const username = rawUsername.replace(/[^a-zA-Z0-9_-]/g, '_');
+  return path.join(os.tmpdir(), username, 'PDV', 'tree');
+}
+
 /**
  * Ensure the tree root directory exists and has standard subdirectories
  */
@@ -156,6 +162,9 @@ export function loadConfig(): Config {
     if (fs.existsSync(configPath)) {
       const parsed = JSON.parse(fs.readFileSync(configPath, 'utf-8')) as Partial<Config>;
       const merged = { ...DEFAULT_CONFIG, ...parsed };
+      if (merged.treeRoot === getLegacyTreeRoot()) {
+        merged.treeRoot = getDefaultTreeRoot();
+      }
       ['pythonPath', 'juliaPath'].forEach((key) => {
         if (!(key in parsed)) {
           (merged as Record<string, unknown>)[key] = undefined;
