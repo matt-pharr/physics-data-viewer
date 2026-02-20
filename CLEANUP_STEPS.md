@@ -11,6 +11,8 @@ This document gives **execution-ready instructions for an AI coding agent** to f
   - Step 9+ features (data loaders, object store, module manifests, packaging, etc.).
   - Broad refactors that change behavior beyond steps 6/7/8 and listed cleanup items.
 
+**Current policy note:** Python functionality is prioritized; Julia functionality should be treated as deferred/stubbed until Python feature completeness is achieved.
+
 ---
 
 ## Non-negotiable working rules for the implementing agent

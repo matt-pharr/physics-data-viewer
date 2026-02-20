@@ -3,7 +3,7 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import type { KernelInfo } from './ipc';
-import { normalizeWatchPath, pickKernelForScriptReload } from './index';
+import { getPythonFirstScriptCompatibilityError, normalizeWatchPath, pickKernelForScriptReload } from './index';
 
 describe('index helper utilities', () => {
   it('pickKernelForScriptReload prefers requested language when present', () => {
@@ -35,5 +35,17 @@ describe('index helper utilities', () => {
     } finally {
       fs.rmSync(tempDir, { recursive: true, force: true });
     }
+  });
+
+  it('getPythonFirstScriptCompatibilityError blocks julia script with python-only policy', () => {
+    expect(getPythonFirstScriptCompatibilityError('julia', 'python')).toContain('Julia scripts are not yet supported');
+  });
+
+  it('getPythonFirstScriptCompatibilityError blocks julia kernel with python-only policy', () => {
+    expect(getPythonFirstScriptCompatibilityError('python', 'julia')).toContain('Julia kernel execution is not yet supported');
+  });
+
+  it('getPythonFirstScriptCompatibilityError allows python script on python kernel', () => {
+    expect(getPythonFirstScriptCompatibilityError('python', 'python')).toBeNull();
   });
 });

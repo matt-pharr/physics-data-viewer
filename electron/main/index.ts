@@ -404,6 +404,10 @@ if (!canRegisterHandlers) {
       }
 
       const language = kernel.language;
+      const compatibilityError = getPythonFirstScriptCompatibilityError(scriptNode.language, language);
+      if (compatibilityError) {
+        return { success: false, error: compatibilityError };
+      }
       let code = '';
 
       if (language === 'python') {
@@ -413,15 +417,6 @@ if (!canRegisterHandlers) {
           'import json, base64',
           `_params = json.loads(base64.b64decode("${encoded}").decode("utf-8"))`,
           `tree.run_script("${request.scriptPath}", **_params)`,
-        ].join('\n');
-      } else if (language === 'julia') {
-        const paramsJson = JSON.stringify(request.params || {});
-        const encoded = Buffer.from(paramsJson, 'utf-8').toString('base64');
-        code = [
-          'using JSON, Base64',
-          `_params = JSON.parse(String(base64decode("${encoded}")))`,
-          'kwargs = (; (Symbol(k) => v for (k, v) in _params)...)',
-          `tree.run_script("${request.scriptPath}"; kwargs...)`,
         ].join('\n');
       } else {
         return { success: false, error: `Unsupported language: ${language}` };
@@ -492,10 +487,15 @@ if (!canRegisterHandlers) {
       }
 
       const kernels = await kernelManager.list();
-      const preferredLanguage = scriptNode.language === 'julia' ? 'julia' : 'python';
+      const preferredLanguage = 'python';
       const kernel = pickKernelForScriptReload(kernels, preferredLanguage);
       if (!kernel) {
         return { success: false, error: 'No active kernel available for reload' };
+      }
+
+      const compatibilityError = getPythonFirstScriptCompatibilityError(scriptNode.language, kernel.language);
+      if (compatibilityError) {
+        return { success: false, error: compatibilityError };
       }
 
       let code = '';
@@ -504,8 +504,6 @@ if (!canRegisterHandlers) {
           'from IPython.display import JSON as PDVJSON',
           `PDVJSON(pdv_reload_script(${JSON.stringify(scriptPath)}))`,
         ].join('\n');
-      } else if (kernel.language === 'julia') {
-        code = `using JSON; JSON.json(pdv_reload_script(${JSON.stringify(scriptPath)}))`;
       } else {
         return { success: false, error: `Unsupported kernel language: ${kernel.language}` };
       }
@@ -1095,4 +1093,17 @@ export function pickKernelForScriptReload(
   }
 
   return kernels[0];
+}
+
+export function getPythonFirstScriptCompatibilityError(
+  scriptLanguage: string | undefined,
+  kernelLanguage: 'python' | 'julia',
+): string | null {
+  if (kernelLanguage !== 'python') {
+    return 'Julia kernel execution is not yet supported. Please use a Python kernel.';
+  }
+  if (scriptLanguage && scriptLanguage !== 'python') {
+    return 'Julia scripts are not yet supported. Only Python scripts are currently supported.';
+  }
+  return null;
 }

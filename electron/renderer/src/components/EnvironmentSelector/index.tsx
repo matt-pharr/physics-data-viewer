@@ -4,7 +4,7 @@ interface EnvironmentSelectorProps {
   isFirstRun: boolean;
   currentConfig?: { pythonPath?: string; juliaPath?: string };
   currentKernelId?: string | null;
-  onSave: (config: { pythonPath: string; juliaPath: string }) => void;
+  onSave: (config: { pythonPath: string; juliaPath?: string }) => void;
   onRestart?: () => void;
   onCancel?: () => void;
 }
@@ -18,7 +18,7 @@ export const EnvironmentSelector: React.FC<EnvironmentSelectorProps> = ({
   onCancel,
 }) => {
   const [pythonPath, setPythonPath] = useState(currentConfig?.pythonPath || 'python3');
-  const [juliaPath, setJuliaPath] = useState(currentConfig?.juliaPath || 'julia');
+  const [juliaPath, setJuliaPath] = useState(currentConfig?.juliaPath || '');
   const [validating, setValidating] = useState(false);
   const [errors, setErrors] = useState<{ python?: string; julia?: string }>({});
 
@@ -27,20 +27,16 @@ export const EnvironmentSelector: React.FC<EnvironmentSelectorProps> = ({
     setErrors({});
 
     const pythonValid = await window.pdv.kernels.validate(pythonPath, 'python');
-    const juliaValid = await window.pdv.kernels.validate(juliaPath, 'julia');
 
     const nextErrors: { python?: string; julia?: string } = {};
     if (!pythonValid.valid) {
       nextErrors.python = pythonValid.error || 'Unable to validate Python interpreter';
     }
-    if (!juliaValid.valid) {
-      nextErrors.julia = juliaValid.error || 'Unable to validate Julia interpreter';
-    }
     setErrors(nextErrors);
     setValidating(false);
 
-    if (!nextErrors.python && !nextErrors.julia) {
-      onSave({ pythonPath, juliaPath });
+    if (!nextErrors.python) {
+      onSave({ pythonPath, juliaPath: juliaPath || undefined });
     }
   };
 
@@ -62,7 +58,7 @@ export const EnvironmentSelector: React.FC<EnvironmentSelectorProps> = ({
 
         {isFirstRun && (
           <p className="help-text">
-            Please specify paths to Python and Julia executables with Jupyter kernels installed.
+            Please specify a Python executable with ipykernel installed.
           </p>
         )}
 
@@ -86,21 +82,20 @@ export const EnvironmentSelector: React.FC<EnvironmentSelectorProps> = ({
         </div>
 
         <div className="input-group">
-          <label>Julia Executable</label>
+          <label>Julia Executable (deferred)</label>
           <div className="input-with-button">
             <input
               type="text"
               value={juliaPath}
               onChange={(e) => setJuliaPath(e.target.value)}
-              placeholder="/usr/local/bin/julia"
+              placeholder="Optional for future support"
             />
             <button className="btn btn-secondary" onClick={() => handleFilePicker('julia')}>
               Browse
             </button>
           </div>
-          {errors.julia && <div className="error-text">{errors.julia}</div>}
           <div className="help-text">
-            Requires IJulia: <code>using Pkg; Pkg.add("IJulia")</code>
+            Julia support will be enabled in a future release after Python development milestones are complete.
           </div>
         </div>
 
@@ -108,7 +103,7 @@ export const EnvironmentSelector: React.FC<EnvironmentSelectorProps> = ({
           <button className="btn btn-primary" onClick={handleValidate} disabled={validating}>
         {validating ? 'Validating...' : 'Test & Save'}
       </button>
-      <button className="btn btn-secondary" onClick={() => onSave({ pythonPath, juliaPath })} disabled={validating}>
+      <button className="btn btn-secondary" onClick={() => onSave({ pythonPath, juliaPath: juliaPath || undefined })} disabled={validating}>
         Save Without Validation
       </button>
           {!isFirstRun && currentKernelId && onRestart && (

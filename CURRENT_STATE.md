@@ -6,7 +6,7 @@
 
 ## High-level status
 The project is a working Electron + React desktop app that can:
-- launch Python/Julia Jupyter kernels directly via ZMQ,
+- launch Python kernels directly via ZMQ (Julia runtime is currently deferred/stubbed),
 - execute code from Monaco command boxes,
 - show stdout/stderr/results (including captured images),
 - browse a tree view (kernel snapshot + filesystem scripts/data),
@@ -83,7 +83,7 @@ The current architecture is consistent with the direct-kernel approach documente
 4. **Security-minded path handling exists in key places**
    - Executable validation and multiple script/path sanitization checks are present.
 5. **Plot capture plumbing exists now**
-   - Python/Julia init helpers + IOPub `display_data` handling + renderer image rendering are in place.
+   - Python init helpers + IOPub `display_data` handling + renderer image rendering are in place.
 
 ### Gaps / partial implementations
 1. **Tree object persistence APIs are still stubs**
@@ -96,6 +96,8 @@ The current architecture is consistent with the direct-kernel approach documente
    - `script:reload` now validates and refreshes script references but does not auto re-run scripts.
 5. **File watch currently tracks watcher lifecycle only**
    - `files.watch` / `files.unwatch` are implemented, but watcher events are not yet wired to renderer notifications.
+6. **Python-first runtime policy enabled**
+   - Script run/reload rejects Julia execution paths and returns deferred-support messaging.
 
 ### Redundant / zombie / likely-unused code
 Phase 1 cleanup items completed:
@@ -131,7 +133,7 @@ Status legend used below:
 | 5.5 | Real kernel integration (direct ZMQ) | ✅ | Implemented |
 | 6 | Plot mode + capture integration | 🟨 | Mode toggle + init config + display image rendering exist; end-to-end behavior hardening still advisable |
 | 7 | Namespace view | 🟨 | Query/filter/sort/refresh/auto-refresh implemented; advanced double-click inspect/plot behavior not implemented |
-| 8 | Script execution + file ops | 🟨 | Create/run/edit/param extraction implemented; reload + watch lifecycle now implemented (auto rerun/event wiring still pending) |
+| 8 | Script execution + file ops | 🟨 | Create/run/edit/param extraction implemented; reload + watch lifecycle now implemented (Python-only policy, auto rerun/event wiring still pending) |
 | 9 | Data loaders (real format loaders) | ⏳ | Scanner/classification exists, but true loader backends are not implemented |
 | 10 | Object store + persistence | ⏳ | `tree.get/save` and watch support are stubs |
 | 11 | Module manifests + dynamic UIs (basic) | ⏳ | Not implemented |

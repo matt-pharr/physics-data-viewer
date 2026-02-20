@@ -89,10 +89,8 @@ export const SettingsDialog: React.FC<SettingsDialogProps> = ({ isOpen, config, 
     setValidating(true);
     setRuntimeErrors({});
     const pythonValid = await window.pdv.kernels.validate(pythonPath, 'python');
-    const juliaValid = await window.pdv.kernels.validate(juliaPath, 'julia');
     const nextErrors: { python?: string; julia?: string } = {};
     if (!pythonValid.valid) nextErrors.python = pythonValid.error || 'Unable to validate Python interpreter';
-    if (!juliaValid.valid) nextErrors.julia = juliaValid.error || 'Unable to validate Julia interpreter';
     setRuntimeErrors(nextErrors);
     setValidating(false);
   };
@@ -140,12 +138,12 @@ export const SettingsDialog: React.FC<SettingsDialogProps> = ({ isOpen, config, 
                   {runtimeErrors.python && <div className="error-text">{runtimeErrors.python}</div>}
                 </div>
                 <div className="input-group">
-                  <label>Julia Executable</label>
+                  <label>Julia Executable (deferred)</label>
                   <div className="input-with-button">
                     <input value={juliaPath} onChange={(event) => setJuliaPath(event.target.value)} placeholder="/usr/local/bin/julia" />
                     <button className="btn btn-secondary" onClick={() => void handlePickExecutable('julia')}>Browse</button>
                   </div>
-                  {runtimeErrors.julia && <div className="error-text">{runtimeErrors.julia}</div>}
+                  <div className="help-text">Julia runtime validation will be available in a future release.</div>
                 </div>
                 <div className="button-group">
                   <button className="btn btn-secondary" onClick={() => void handleValidateRuntime()} disabled={validating}>
