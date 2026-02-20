@@ -68,6 +68,18 @@ function getLegacyTreeRoot(): string {
   return path.join(os.tmpdir(), username, 'PDV', 'tree');
 }
 
+function isTimestampedDefaultTreeRoot(treeRoot: string | undefined): boolean {
+  if (!treeRoot) {
+    return false;
+  }
+  const rawUsername = os.userInfo().username || 'user';
+  const username = rawUsername.replace(/[^a-zA-Z0-9_-]/g, '_');
+  const expectedParent = path.join(os.tmpdir(), username);
+  const projectDir = path.dirname(treeRoot);
+  const parentDir = path.dirname(projectDir);
+  return parentDir === expectedParent && /^PDV-\d{4}_\d{2}_\d{2}_\d{2}:\d{2}:\d{2}$/.test(path.basename(projectDir));
+}
+
 /**
  * Ensure the tree root directory exists and has standard subdirectories
  */
@@ -162,7 +174,7 @@ export function loadConfig(): Config {
     if (fs.existsSync(configPath)) {
       const parsed = JSON.parse(fs.readFileSync(configPath, 'utf-8')) as Partial<Config>;
       const merged = { ...DEFAULT_CONFIG, ...parsed };
-      if (merged.treeRoot === getLegacyTreeRoot()) {
+      if (merged.treeRoot === getLegacyTreeRoot() || isTimestampedDefaultTreeRoot(merged.treeRoot)) {
         merged.treeRoot = getDefaultTreeRoot();
       }
       ['pythonPath', 'juliaPath'].forEach((key) => {
