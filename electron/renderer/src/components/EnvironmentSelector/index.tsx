@@ -54,7 +54,7 @@ export const EnvironmentSelector: React.FC<EnvironmentSelectorProps> = ({
   return (
     <div className="modal-overlay">
       <div className="environment-selector">
-        <h2>Configure Runtime Environments</h2>
+        <h2>Configure Python Runtime</h2>
 
         {isFirstRun && (
           <p className="help-text">

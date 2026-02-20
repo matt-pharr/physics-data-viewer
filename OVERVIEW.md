@@ -3,7 +3,7 @@
 Physics Data Viewer is an Electron desktop application for interactive physics/scientific analysis workflows using Jupyter kernels.
 
 ## What the current code does
-- Launches Python and Julia kernels directly via ZMQ (no Jupyter server dependency).
+- Launches Python kernels directly via ZMQ (no Jupyter server dependency). Julia runtime support is currently deferred.
 - Runs user code from Monaco command tabs and displays:
   - stdout/stderr,
   - return values,
@@ -37,4 +37,3 @@ Physics Data Viewer is an Electron desktop application for interactive physics/s
 
 ## Practical intent for agents
 When modifying this codebase, preserve the direct-ZMQ architecture and typed IPC contracts, and favor incremental completion of existing partial workflows (plot/namespace/scripts/tree persistence) before introducing broader new frameworks.
-

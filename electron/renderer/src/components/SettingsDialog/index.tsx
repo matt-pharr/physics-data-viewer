@@ -112,7 +112,7 @@ export const SettingsDialog: React.FC<SettingsDialogProps> = ({ isOpen, config, 
         <div className="settings-tabs">
           <button className={`tab ${activeTab === 'shortcuts' ? 'active' : ''}`} onClick={() => setActiveTab('shortcuts')}>Keyboard Shortcuts</button>
           <button className={`tab ${activeTab === 'appearance' ? 'active' : ''}`} onClick={() => setActiveTab('appearance')}>Appearance</button>
-          <button className={`tab ${activeTab === 'runtime' ? 'active' : ''}`} onClick={() => setActiveTab('runtime')}>Runtime Environments</button>
+          <button className={`tab ${activeTab === 'runtime' ? 'active' : ''}`} onClick={() => setActiveTab('runtime')}>Python Runtime</button>
         </div>
         <div className="dialog-body">
           {activeTab === 'shortcuts' ? (
@@ -128,7 +128,7 @@ export const SettingsDialog: React.FC<SettingsDialogProps> = ({ isOpen, config, 
           ) : activeTab === 'runtime' ? (
             <div className="settings-runtime">
               <div className="settings-card">
-                <h4>Configure Runtime Environments</h4>
+                <h4>Configure Python Runtime</h4>
                 <div className="input-group">
                   <label>Python Executable</label>
                   <div className="input-with-button">
