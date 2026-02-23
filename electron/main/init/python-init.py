@@ -130,7 +130,10 @@ class PDVScript:
         if not os.path.exists(file_path):
             raise FileNotFoundError(f"Script not found: {file_path}")
 
-        spec = importlib.util.spec_from_file_location("_pdv_script", file_path)
+        module_name = _pdv_module_name_for_script(self.relative_path)
+        if module_name in sys.modules:
+            del sys.modules[module_name]
+        spec = importlib.util.spec_from_file_location(module_name, file_path)
         if spec is None or spec.loader is None:
             raise ImportError(f"Failed to load script: {file_path}")
 
@@ -187,6 +190,20 @@ def _pdv_extract_docstring(file_path):
     except Exception:
         return None
     return None
+
+
+def _pdv_module_name_for_script(relative_path):
+    """Generate a deterministic module name for a script relative path."""
+    return f"_pdv_script_{re.sub(r'[^A-Za-z0-9_]', '_', relative_path)}"
+
+
+def _pdv_relative_python_script_path(script_path):
+    """Convert dot-separated script path to relative tree path and validate parts."""
+    raw_parts = script_path.split('.')
+    if any(part in ('', '.', '..') or '/' in part or '\\' in part for part in raw_parts):
+        raise ValueError(f"Invalid script path: {script_path}")
+    path_parts = raw_parts
+    return os.path.join('tree', *path_parts) + '.py', path_parts
 
 
 def _pdv_to_project_relative_path(path):
@@ -338,6 +355,41 @@ def pdv_register_script(parent_path, name, file_path, language='python'):
     script_name = name or os.path.splitext(os.path.basename(relative_path))[0]
     parent[script_name] = PDVScript(relative_path=relative_path, language=language)
     return True
+
+
+def pdv_reload_script(script_path):
+    """Validate and refresh a script object in the tree."""
+    try:
+        if 'tree' not in globals():
+            raise RuntimeError("PDV tree is not initialized")
+        if not script_path:
+            raise ValueError("Script path is required")
+        relative_path, path_parts = _pdv_relative_python_script_path(script_path)
+        resolved_path = tree._resolve_project_path(relative_path)
+        if not os.path.exists(resolved_path):
+            raise FileNotFoundError(f"Script not found: {resolved_path}")
+
+        # Syntax validation before replacing script object
+        with open(resolved_path, 'r', encoding='utf-8') as f:
+            compile(f.read(), resolved_path, 'exec')
+
+        # Clear previous module cache variants
+        module_name = _pdv_module_name_for_script(relative_path)
+        if module_name in sys.modules:
+            del sys.modules[module_name]
+        if '_pdv_script' in sys.modules:
+            del sys.modules['_pdv_script']
+
+        script_name = path_parts[-1]
+        parent_path = '.'.join(path_parts[:-1])
+        parent = _pdv_resolve_tree_path(parent_path, root=tree) if parent_path else tree
+        if not isinstance(parent, dict):
+            raise ValueError(f"Invalid parent path for script reload: {script_path}")
+
+        parent[script_name] = PDVScript(relative_path=relative_path, language='python')
+        return {'success': True}
+    except Exception as e:
+        return {'success': False, 'error': str(e)}
 
 # =============================================================================
 # Matplotlib Backend Configuration

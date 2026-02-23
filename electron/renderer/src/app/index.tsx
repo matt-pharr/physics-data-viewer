@@ -63,6 +63,9 @@ const App: React.FC = () => {
 
   // Load command boxes from filesystem on startup
   useEffect(() => {
+    if (!window.pdv?.commandBoxes) {
+      return;
+    }
     const loadCommandBoxes = async () => {
       try {
         const data = await window.pdv.commandBoxes.load();
@@ -81,6 +84,9 @@ const App: React.FC = () => {
   // Debounced save to filesystem
   const saveTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   useEffect(() => {
+    if (!window.pdv?.commandBoxes) {
+      return;
+    }
     // Clear any pending save
     if (saveTimeoutRef.current) {
       clearTimeout(saveTimeoutRef.current);
@@ -123,7 +129,7 @@ const App: React.FC = () => {
         setPlotMode(loaded.plotMode ?? 'native');
         applyAppearanceColors(loaded.settings?.appearance?.colors);
 
-        if (!loaded.pythonPath || !loaded.juliaPath) {
+        if (!loaded.pythonPath) {
           setShowEnvSelector(true);
           return;
         }
@@ -138,6 +144,9 @@ const App: React.FC = () => {
   }, []);
 
   useEffect(() => {
+    if (!window.pdv?.settings?.onOpen) {
+      return;
+    }
     const unsubscribe = window.pdv.settings.onOpen(() => setShowSettings(true));
     return unsubscribe;
   }, []);
@@ -220,7 +229,7 @@ const App: React.FC = () => {
     }
   };
 
-  const handleEnvSave = async (paths: { pythonPath: string; juliaPath: string }) => {
+  const handleEnvSave = async (paths: { pythonPath: string; juliaPath?: string }) => {
     const updatedConfig: Config = {
       kernelSpec: config?.kernelSpec ?? null,
       plotMode: config?.plotMode ?? 'native',
@@ -229,7 +238,7 @@ const App: React.FC = () => {
       recentProjects: config?.recentProjects ?? [],
       customKernels: config?.customKernels ?? [],
       pythonPath: paths.pythonPath,
-      juliaPath: paths.juliaPath,
+      juliaPath: paths.juliaPath ?? config?.juliaPath,
       editors: config?.editors,
       projectRoot: config?.projectRoot,
       treeRoot: config?.treeRoot,
@@ -555,7 +564,7 @@ const App: React.FC = () => {
       )}
 
       {/* Status bar */}
-       <footer className="status-bar">
+        <footer className="status-bar">
          <div className="status-left">
            <span className="status-item">
              <span className={`status-dot ${isExecuting ? 'busy' : 'idle'}`} />
@@ -593,11 +602,11 @@ const App: React.FC = () => {
        </footer>
 
        {showEnvSelector && (
-         <EnvironmentSelector
-           isFirstRun={!config?.pythonPath || !config?.juliaPath}
-           currentConfig={config || undefined}
-           currentKernelId={currentKernelId}
-           onSave={handleEnvSave}
+          <EnvironmentSelector
+            isFirstRun={!config?.pythonPath}
+            currentConfig={config || undefined}
+            currentKernelId={currentKernelId}
+            onSave={handleEnvSave}
            onRestart={handleRestartKernel}
            onCancel={() => setShowEnvSelector(false)}
          />

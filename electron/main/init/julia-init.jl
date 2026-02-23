@@ -55,16 +55,60 @@ function run_script(tree::PDVTree, script_path::String; kwargs...)
         error("Script not found: $file_path")
     end
 
+    script_module = _pdv_validate_script_module(file_path, script_path)
+
+    run_func = getfield(script_module, :run)
+    return run_func(tree; kwargs...)
+end
+
+"""
+    pdv_reload_script(script_path::String)
+
+Validate and refresh script availability for a path in the project tree.
+"""
+function pdv_reload_script(script_path::String)
+    try
+        if !isdefined(Main, :tree)
+            error("PDV tree is not initialized")
+        end
+        path_parts = split(script_path, '.')
+        if any(p == "" || p == "." || p == ".." || occursin("/", p) || occursin("\\", p) for p in path_parts)
+            error("Invalid script path: $script_path")
+        end
+
+        file_path = joinpath(tree.tree_root, path_parts...) * ".jl"
+        normalized = abspath(file_path)
+        if !startswith(normalized, abspath(tree.tree_root))
+            error("Script path escapes project tree: $script_path")
+        end
+
+        if !isfile(normalized)
+            error("Script not found: $normalized")
+        end
+
+        _pdv_validate_script_module(normalized, script_path)
+
+        return Dict("success" => true)
+    catch e
+        return Dict("success" => false, "error" => sprint(showerror, e))
+    end
+end
+
+function _pdv_validate_script_module(file_path::String, script_path::String)
+    # Validate script by loading into a temporary module and checking run() exists.
+    if !isdefined(Main, :tree)
+        error("PDV tree is not initialized")
+    end
+
     script_module = Module()
-    Core.eval(script_module, :(tree = $tree))
+    Core.eval(script_module, :(tree = Main.tree))
     Base.include(script_module, file_path)
 
     if !isdefined(script_module, :run)
         error("Script $script_path does not have a run() function")
     end
 
-    run_func = getfield(script_module, :run)
-    return run_func(tree; kwargs...)
+    return script_module
 end
 
 # Create global tree instance

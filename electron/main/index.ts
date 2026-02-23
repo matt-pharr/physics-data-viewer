@@ -44,6 +44,7 @@ def run(tree: dict, **kwargs):
 const kernelManager = getKernelManager();
 let currentConfig: Config = loadConfig();
 let fileScanner: FileScanner | null = null;
+const fileWatchers = new Map<string, fs.FSWatcher>();
 
 /**
  * Get the tree root directory from config with fallback chain.
@@ -77,6 +78,7 @@ if (!canRegisterHandlers) {
   if (app?.on) {
     app.on('before-quit', async () => {
       console.log('[main] App quitting, shutting down kernels...');
+      closeAllFileWatchers();
       await kernelManager.shutdownAll();
       resetKernelManager();
     });
@@ -402,6 +404,10 @@ if (!canRegisterHandlers) {
       }
 
       const language = kernel.language;
+      const compatibilityError = getPythonFirstScriptCompatibilityError(scriptNode.language, language);
+      if (compatibilityError) {
+        return { success: false, error: compatibilityError };
+      }
       let code = '';
 
       if (language === 'python') {
@@ -411,15 +417,6 @@ if (!canRegisterHandlers) {
           'import json, base64',
           `_params = json.loads(base64.b64decode("${encoded}").decode("utf-8"))`,
           `tree.run_script("${request.scriptPath}", **_params)`,
-        ].join('\n');
-      } else if (language === 'julia') {
-        const paramsJson = JSON.stringify(request.params || {});
-        const encoded = Buffer.from(paramsJson, 'utf-8').toString('base64');
-        code = [
-          'using JSON, Base64',
-          `_params = JSON.parse(String(base64decode("${encoded}")))`,
-          'kwargs = (; (Symbol(k) => v for (k, v) in _params)...)',
-          `tree.run_script("${request.scriptPath}"; kwargs...)`,
         ].join('\n');
       } else {
         return { success: false, error: `Unsupported language: ${language}` };
@@ -482,7 +479,56 @@ if (!canRegisterHandlers) {
 
   ipcMain.handle(IPC.script.reload, async (_event, scriptPath: string) => {
     console.log('[IPC] script:reload', scriptPath);
-    return { success: true };
+    try {
+      const scanner = getFileScanner();
+      const scriptNode = await resolveNodeByPath(scanner, scriptPath);
+      if (!scriptNode || !scriptNode._file_path) {
+        return { success: false, error: `Script not found: ${scriptPath}` };
+      }
+
+      const kernels = await kernelManager.list();
+      const preferredLanguage = 'python';
+      const kernel = pickKernelForScriptReload(kernels, preferredLanguage);
+      if (!kernel) {
+        return { success: false, error: 'No active kernel available for reload' };
+      }
+
+      const compatibilityError = getPythonFirstScriptCompatibilityError(scriptNode.language, kernel.language);
+      if (compatibilityError) {
+        return { success: false, error: compatibilityError };
+      }
+
+      let code = '';
+      if (kernel.language === 'python') {
+        code = [
+          'from IPython.display import JSON as PDVJSON',
+          `PDVJSON(pdv_reload_script(${JSON.stringify(scriptPath)}))`,
+        ].join('\n');
+      } else {
+        return { success: false, error: `Unsupported kernel language: ${kernel.language}` };
+      }
+
+      const result = await kernelManager.execute(kernel.id, { code });
+      if (result.error) {
+        return { success: false, error: result.error };
+      }
+
+      const payload = parseJsonResult(result.result);
+      if (payload && typeof payload === 'object') {
+        const success = Boolean((payload as { success?: boolean }).success);
+        const message = (payload as { error?: unknown }).error;
+        const errorText =
+          typeof message === 'string' ? message : message !== undefined ? JSON.stringify(message) : undefined;
+        return success ? { success: true } : { success: false, error: errorText || 'Script reload failed' };
+      }
+
+      return { success: true };
+    } catch (error) {
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : String(error),
+      };
+    }
   });
 
   ipcMain.handle(IPC.script.get_params, async (_event, scriptPath: string) => {
@@ -621,8 +667,63 @@ if (!canRegisterHandlers) {
     return result.filePaths[0];
   });
 
-  ipcMain.handle(IPC.files.watch, async () => false);
-  ipcMain.handle(IPC.files.unwatch, async () => false);
+  ipcMain.handle(IPC.files.watch, async (_event, watchPath: string) => {
+    const normalizedPath = normalizeWatchPath(watchPath);
+    if (!normalizedPath) {
+      return false;
+    }
+
+    const existing = fileWatchers.get(normalizedPath);
+    if (existing) {
+      return true;
+    }
+
+    try {
+      const watcher = fs.watch(normalizedPath, { persistent: false }, (eventType, filename) => {
+        // TODO: Wire watch events to renderer notifications when Step 8 hot-reload UX is implemented.
+        console.log('[IPC] files:watch event', normalizedPath, eventType, filename ?? '');
+      });
+
+      watcher.on('error', (error) => {
+        console.warn('[IPC] files:watch watcher error:', error);
+        try {
+          watcher.close();
+        } catch {
+          // ignore close errors
+        }
+        fileWatchers.delete(normalizedPath);
+      });
+
+      fileWatchers.set(normalizedPath, watcher);
+      return true;
+    } catch (error) {
+      console.warn('[IPC] files:watch failed:', error);
+      return false;
+    }
+  });
+
+  ipcMain.handle(IPC.files.unwatch, async (_event, watchPath: string) => {
+    const normalizedPath = normalizeWatchPath(watchPath);
+    if (!normalizedPath) {
+      return false;
+    }
+
+    const watcher = fileWatchers.get(normalizedPath);
+    if (!watcher) {
+      return false;
+    }
+
+    try {
+      watcher.close();
+    } catch (error) {
+      console.warn('[IPC] files:unwatch close error:', error);
+      fileWatchers.delete(normalizedPath);
+      return false;
+    }
+
+    fileWatchers.delete(normalizedPath);
+    return true;
+  });
 
   // ============================================================================
   // Config Handlers (unchanged from Step 2)
@@ -944,4 +1045,65 @@ function parseDefaultValue(value: string): unknown {
   }
 
   return trimmed;
+}
+
+/**
+ * Close all active file watchers and clear the watcher registry.
+ */
+function closeAllFileWatchers(): void {
+  const entries = Array.from(fileWatchers.entries());
+  for (const [watchPath, watcher] of entries) {
+    try {
+      watcher.close();
+    } catch (error) {
+      console.warn(`[IPC] Failed to close watcher ${watchPath}:`, error);
+    }
+  }
+  fileWatchers.clear();
+}
+
+export function normalizeWatchPath(watchPath: string): string | null {
+  if (typeof watchPath !== 'string') {
+    return null;
+  }
+  const trimmed = watchPath.trim();
+  if (!trimmed || /[\0-\x1F]/.test(trimmed)) {
+    return null;
+  }
+  const resolved = path.resolve(trimmed);
+  if (!fs.existsSync(resolved)) {
+    return null;
+  }
+  return resolved;
+}
+
+export function pickKernelForScriptReload(
+  kernels: KernelInfo[],
+  preferredLanguage?: 'python' | 'julia',
+): KernelInfo | null {
+  if (!Array.isArray(kernels) || kernels.length === 0) {
+    return null;
+  }
+
+  if (preferredLanguage) {
+    const match = kernels.find((kernel) => kernel.language === preferredLanguage);
+    if (match) {
+      return match;
+    }
+  }
+
+  return kernels[0];
+}
+
+export function getPythonFirstScriptCompatibilityError(
+  scriptLanguage: string | undefined,
+  kernelLanguage: 'python' | 'julia',
+): string | null {
+  if (kernelLanguage !== 'python') {
+    return 'Julia kernel execution is not yet supported. Please use a Python kernel.';
+  }
+  if (scriptLanguage && scriptLanguage !== 'python') {
+    return 'Julia scripts are not yet supported. Only Python scripts are currently supported.';
+  }
+  return null;
 }

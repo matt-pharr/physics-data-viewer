@@ -28,7 +28,8 @@ import type {
   Theme,
 } from './main/ipc';
 
-// IPC channel names (duplicated here to avoid runtime imports in preload context)
+// IPC channel names are duplicated here to keep preload runtime isolated from
+// main-process module loading concerns.
 const IPC = {
   kernels: {
     list: 'kernels:list',
@@ -145,6 +146,12 @@ const api: PDVApi = {
 
     pickExecutable: (): Promise<string | null> =>
       ipcRenderer.invoke(IPC.files.pickExecutable),
+
+    watch: (path: string): Promise<boolean> =>
+      ipcRenderer.invoke(IPC.files.watch, path),
+
+    unwatch: (path: string): Promise<boolean> =>
+      ipcRenderer.invoke(IPC.files.unwatch, path),
   },
 
   config: {

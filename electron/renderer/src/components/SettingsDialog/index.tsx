@@ -89,10 +89,8 @@ export const SettingsDialog: React.FC<SettingsDialogProps> = ({ isOpen, config, 
     setValidating(true);
     setRuntimeErrors({});
     const pythonValid = await window.pdv.kernels.validate(pythonPath, 'python');
-    const juliaValid = await window.pdv.kernels.validate(juliaPath, 'julia');
     const nextErrors: { python?: string; julia?: string } = {};
     if (!pythonValid.valid) nextErrors.python = pythonValid.error || 'Unable to validate Python interpreter';
-    if (!juliaValid.valid) nextErrors.julia = juliaValid.error || 'Unable to validate Julia interpreter';
     setRuntimeErrors(nextErrors);
     setValidating(false);
   };
@@ -114,7 +112,7 @@ export const SettingsDialog: React.FC<SettingsDialogProps> = ({ isOpen, config, 
         <div className="settings-tabs">
           <button className={`tab ${activeTab === 'shortcuts' ? 'active' : ''}`} onClick={() => setActiveTab('shortcuts')}>Keyboard Shortcuts</button>
           <button className={`tab ${activeTab === 'appearance' ? 'active' : ''}`} onClick={() => setActiveTab('appearance')}>Appearance</button>
-          <button className={`tab ${activeTab === 'runtime' ? 'active' : ''}`} onClick={() => setActiveTab('runtime')}>Runtime Environments</button>
+          <button className={`tab ${activeTab === 'runtime' ? 'active' : ''}`} onClick={() => setActiveTab('runtime')}>Python Runtime</button>
         </div>
         <div className="dialog-body">
           {activeTab === 'shortcuts' ? (
@@ -130,7 +128,7 @@ export const SettingsDialog: React.FC<SettingsDialogProps> = ({ isOpen, config, 
           ) : activeTab === 'runtime' ? (
             <div className="settings-runtime">
               <div className="settings-card">
-                <h4>Configure Runtime Environments</h4>
+                <h4>Configure Python Runtime</h4>
                 <div className="input-group">
                   <label>Python Executable</label>
                   <div className="input-with-button">
@@ -140,12 +138,12 @@ export const SettingsDialog: React.FC<SettingsDialogProps> = ({ isOpen, config, 
                   {runtimeErrors.python && <div className="error-text">{runtimeErrors.python}</div>}
                 </div>
                 <div className="input-group">
-                  <label>Julia Executable</label>
+                  <label>Julia Executable (deferred)</label>
                   <div className="input-with-button">
                     <input value={juliaPath} onChange={(event) => setJuliaPath(event.target.value)} placeholder="/usr/local/bin/julia" />
                     <button className="btn btn-secondary" onClick={() => void handlePickExecutable('julia')}>Browse</button>
                   </div>
-                  {runtimeErrors.julia && <div className="error-text">{runtimeErrors.julia}</div>}
+                  <div className="help-text">Julia runtime validation will be available in a future release.</div>
                 </div>
                 <div className="button-group">
                   <button className="btn btn-secondary" onClick={() => void handleValidateRuntime()} disabled={validating}>

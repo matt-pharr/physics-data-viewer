@@ -96,4 +96,43 @@ describe('config themes', () => {
     expect(config.treeRoot).not.toBe(legacyTreeRoot);
     expect(path.basename(path.dirname(config.treeRoot as string))).toMatch(/^PDV-\d{4}_\d{2}_\d{2}_\d{2}:\d{2}:\d{2}$/);
   });
+
+  it('refreshes previously stored timestamped default tree root to a new timestamped directory', async () => {
+    tempHome = fs.mkdtempSync(path.join(os.tmpdir(), 'pdv-home-'));
+    vi.doMock('electron', () => ({
+      app: {
+        getPath: (target: string) => (target === 'home' ? tempHome : tempHome),
+      },
+    }));
+
+    const rawUsername = os.userInfo().username || 'user';
+    const username = rawUsername.replace(/[^a-zA-Z0-9_-]/g, '_');
+    const oldTimestampTreeRoot = path.join(os.tmpdir(), username, 'PDV-2020_01_01_00:00:00', 'tree');
+    const settingsPath = path.join(tempHome, '.PDV', 'settings');
+    fs.mkdirSync(path.dirname(settingsPath), { recursive: true });
+    fs.writeFileSync(settingsPath, JSON.stringify({ treeRoot: oldTimestampTreeRoot }), 'utf-8');
+
+    const { loadConfig } = await import('./config');
+    const config = loadConfig();
+    expect(config.treeRoot).not.toBe(oldTimestampTreeRoot);
+    expect(path.basename(path.dirname(config.treeRoot as string))).toMatch(/^PDV-\d{4}_\d{2}_\d{2}_\d{2}:\d{2}:\d{2}$/);
+  });
+
+  it('preserves explicit custom tree root paths from settings', async () => {
+    tempHome = fs.mkdtempSync(path.join(os.tmpdir(), 'pdv-home-'));
+    vi.doMock('electron', () => ({
+      app: {
+        getPath: (target: string) => (target === 'home' ? tempHome : tempHome),
+      },
+    }));
+
+    const customTreeRoot = path.join(tempHome, 'custom-project-root', 'tree');
+    const settingsPath = path.join(tempHome, '.PDV', 'settings');
+    fs.mkdirSync(path.dirname(settingsPath), { recursive: true });
+    fs.writeFileSync(settingsPath, JSON.stringify({ treeRoot: customTreeRoot }), 'utf-8');
+
+    const { loadConfig } = await import('./config');
+    const config = loadConfig();
+    expect(config.treeRoot).toBe(customTreeRoot);
+  });
 });

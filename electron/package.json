@@ -28,12 +28,10 @@
     "vitest": "^1.0.0"
   },
   "dependencies": {
-    "@jupyterlab/services": "^7.0.0",
     "@monaco-editor/react": "^4.6.0",
     "monaco-editor": "^0.45.0",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
-    "ws": "^8.14.0",
     "zeromq": "^6.5.0"
   }
 }
