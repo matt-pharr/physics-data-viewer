@@ -182,9 +182,19 @@ export function parseMessage(frames: Buffer[], key: string): JupyterMessage | nu
       hmac.update(parentHeaderBuf);
       hmac.update(metadataBuf);
       hmac.update(contentBuf);
-      const expectedSig = hmac.digest('hex');
-      if (receivedSig !== expectedSig) {
-        console.error('[KernelManager] Signature validation failed — message rejected');
+      const expectedSigHex = hmac.digest('hex');
+      try {
+        const receivedSigBuf = Buffer.from(receivedSig, 'hex');
+        const expectedSigBuf = Buffer.from(expectedSigHex, 'hex');
+        if (
+          receivedSigBuf.length !== expectedSigBuf.length ||
+          !crypto.timingSafeEqual(receivedSigBuf, expectedSigBuf)
+        ) {
+          console.error('[KernelManager] Signature validation failed — message rejected');
+          return null;
+        }
+      } catch {
+        console.error('[KernelManager] Signature validation failed — invalid signature encoding');
         return null;
       }
     }
@@ -254,12 +264,21 @@ export function safeJsonParse<T = unknown>(
   maxSize: number = 10 * 1024 * 1024,
 ): T | null {
   try {
-    const str = typeof data === 'string' ? data : data.toString();
-    if (str.length > maxSize) {
-      console.error(`[SafeJSON] Payload too large: ${str.length} > ${maxSize}`);
-      return null;
+    if (typeof data === 'string') {
+      const byteLength = Buffer.byteLength(data, 'utf8');
+      if (byteLength > maxSize) {
+        console.error(`[SafeJSON] Payload too large (string, bytes): ${byteLength} > ${maxSize}`);
+        return null;
+      }
+      return JSON.parse(data) as T;
+    } else {
+      if (data.length > maxSize) {
+        console.error(`[SafeJSON] Payload too large (buffer, bytes): ${data.length} > ${maxSize}`);
+        return null;
+      }
+      const str = data.toString('utf8');
+      return JSON.parse(str) as T;
     }
-    return JSON.parse(str) as T;
   } catch {
     return null;
   }
@@ -638,15 +657,15 @@ export class KernelManager {
     const msgId = msg.header.msg_id;
     const frames = serializeMessage(msg, managed.connectionInfo.key);
 
-    // Send execute request
-    await managed.shellSocket.send(frames);
-
     // Listen for replies on IOPub
     const timeoutMs = options.timeout ?? 30000;
     const deadline = Date.now() + timeoutMs;
     let executionComplete = false;
 
     try {
+      // Send execute request — inside try/finally so the lock is always released
+      await managed.shellSocket.send(frames);
+
       // Use socket-level timeout to avoid overlapping receive calls that cause
       // "Socket is busy reading" errors when we poll for messages.
       (managed.iopubSocket as any).receiveTimeout = 100;
