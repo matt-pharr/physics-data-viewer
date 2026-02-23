@@ -183,7 +183,12 @@ export function parseMessage(frames: Buffer[], key: string): JupyterMessage | nu
       hmac.update(metadataBuf);
       hmac.update(contentBuf);
       const expectedSig = hmac.digest('hex');
-      if (receivedSig !== expectedSig) {
+      const receivedBuf = Buffer.from(receivedSig);
+      const expectedBuf = Buffer.from(expectedSig);
+      if (
+        receivedBuf.length !== expectedBuf.length ||
+        !crypto.timingSafeEqual(receivedBuf, expectedBuf)
+      ) {
         console.error('[KernelManager] Signature validation failed — message rejected');
         return null;
       }
