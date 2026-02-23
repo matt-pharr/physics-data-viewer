@@ -152,11 +152,11 @@ function serializeMessage(msg: JupyterMessage, key: string): Buffer[] {
 }
 
 /**
- * Parse a Jupyter message from ZMQ frames
+ * Parse a Jupyter message from ZMQ frames, validating the HMAC-SHA256 signature.
+ * Returns null if the signature is invalid or parsing fails.
  */
-function parseMessage(frames: Buffer[]): JupyterMessage | null {
+export function parseMessage(frames: Buffer[], key: string): JupyterMessage | null {
   try {
-    // Find the delimiter
     let delimiterIndex = -1;
     for (let i = 0; i < frames.length; i++) {
       if (frames[i].toString() === '<IDS|MSG>') {
@@ -169,11 +169,45 @@ function parseMessage(frames: Buffer[]): JupyterMessage | null {
       return null;
     }
 
-    // Skip signature validation for now (frames[delimiterIndex + 1])
-    const header = JSON.parse(frames[delimiterIndex + 2].toString());
-    const parentHeader = JSON.parse(frames[delimiterIndex + 3].toString());
-    const metadata = JSON.parse(frames[delimiterIndex + 4].toString());
-    const content = JSON.parse(frames[delimiterIndex + 5].toString());
+    const receivedSig = frames[delimiterIndex + 1].toString();
+    const headerBuf = frames[delimiterIndex + 2];
+    const parentHeaderBuf = frames[delimiterIndex + 3];
+    const metadataBuf = frames[delimiterIndex + 4];
+    const contentBuf = frames[delimiterIndex + 5];
+
+    // Validate HMAC-SHA256 signature
+    if (key) {
+      const hmac = crypto.createHmac('sha256', key);
+      hmac.update(headerBuf);
+      hmac.update(parentHeaderBuf);
+      hmac.update(metadataBuf);
+      hmac.update(contentBuf);
+      const expectedSigHex = hmac.digest('hex');
+      try {
+        const receivedSigBuf = Buffer.from(receivedSig, 'hex');
+        const expectedSigBuf = Buffer.from(expectedSigHex, 'hex');
+        if (
+          receivedSigBuf.length !== expectedSigBuf.length ||
+          !crypto.timingSafeEqual(receivedSigBuf, expectedSigBuf)
+        ) {
+          console.error('[KernelManager] Signature validation failed — message rejected');
+          return null;
+        }
+      } catch {
+        console.error('[KernelManager] Signature validation failed — invalid signature encoding');
+        return null;
+      }
+    }
+
+    const header = safeJsonParse<JupyterMessage['header']>(headerBuf, 1024 * 1024);
+    const parentHeader = safeJsonParse<Record<string, unknown>>(parentHeaderBuf, 1024 * 1024);
+    const metadata = safeJsonParse<Record<string, unknown>>(metadataBuf, 1024 * 1024);
+    const content = safeJsonParse<Record<string, unknown>>(contentBuf, 8 * 1024 * 1024);
+
+    if (!header || !parentHeader || !metadata || !content) {
+      console.error('[KernelManager] Failed to parse one or more message frames');
+      return null;
+    }
 
     return { header, parent_header: parentHeader, metadata, content };
   } catch (error) {
@@ -181,6 +215,9 @@ function parseMessage(frames: Buffer[]): JupyterMessage | null {
     return null;
   }
 }
+
+/** Exported for tests only */
+export { serializeMessage };
 
 function loadInitCell(language: 'python' | 'julia'): string {
   const filename = language === 'python' ? 'python-init.py' : 'julia-init.jl';
@@ -218,12 +255,42 @@ pdv_namespace(; kwargs...) = Dict{String, Any}()
 println("PDV Julia kernel ready (fallback init)")`;
 }
 
+/**
+ * Safely parse JSON with a maximum size limit to prevent DoS via huge payloads.
+ * Returns null on parse failure or oversized input.
+ */
+export function safeJsonParse<T = unknown>(
+  data: string | Buffer,
+  maxSize: number = 10 * 1024 * 1024,
+): T | null {
+  try {
+    if (typeof data === 'string') {
+      const byteLength = Buffer.byteLength(data, 'utf8');
+      if (byteLength > maxSize) {
+        console.error(`[SafeJSON] Payload too large (string, bytes): ${byteLength} > ${maxSize}`);
+        return null;
+      }
+      return JSON.parse(data) as T;
+    } else {
+      if (data.length > maxSize) {
+        console.error(`[SafeJSON] Payload too large (buffer, bytes): ${data.length} > ${maxSize}`);
+        return null;
+      }
+      const str = data.toString('utf8');
+      return JSON.parse(str) as T;
+    }
+  } catch {
+    return null;
+  }
+}
+
 async function loadZmq(): Promise<typeof import('zeromq')> {
   return import('zeromq');
 }
 
 export class KernelManager {
   private kernels: Map<string, ManagedKernel> = new Map();
+  private executionLocks: Map<string, Promise<void>> = new Map();
 
   constructor() {
     // No server connection needed!
@@ -546,12 +613,19 @@ export class KernelManager {
       throw new Error(`Kernel not found: ${id}`);
     }
 
-    // Serialize access to the kernel instead of immediately erroring when busy.
-    // Some UI flows (tree refresh + namespace refresh) issue overlapping requests.
-    const acquired = await this.waitForAvailability(managed, options.timeout ?? 5000);
-    if (!acquired) {
-      return { error: 'Kernel busy; please wait for the current execution to finish.', duration: 0 };
+    // Per-kernel mutex: wait for any in-flight execution to finish before acquiring.
+    // This eliminates the TOCTOU race in the previous busy-wait approach.
+    const waitTimeout = options.timeout ?? 5000;
+    const startWait = Date.now();
+    while (this.executionLocks.has(id)) {
+      if (Date.now() - startWait >= waitTimeout) {
+        return { error: 'Kernel busy; please wait for the current execution to finish.', duration: 0 };
+      }
+      await this.executionLocks.get(id);
     }
+
+    let releaseLock!: () => void;
+    this.executionLocks.set(id, new Promise<void>((resolve) => { releaseLock = resolve; }));
 
     const startTime = Date.now();
     managed.info.status = 'busy';
@@ -583,15 +657,15 @@ export class KernelManager {
     const msgId = msg.header.msg_id;
     const frames = serializeMessage(msg, managed.connectionInfo.key);
 
-    // Send execute request
-    await managed.shellSocket.send(frames);
-
     // Listen for replies on IOPub
     const timeoutMs = options.timeout ?? 30000;
     const deadline = Date.now() + timeoutMs;
     let executionComplete = false;
 
     try {
+      // Send execute request — inside try/finally so the lock is always released
+      await managed.shellSocket.send(frames);
+
       // Use socket-level timeout to avoid overlapping receive calls that cause
       // "Socket is busy reading" errors when we poll for messages.
       (managed.iopubSocket as any).receiveTimeout = 100;
@@ -613,7 +687,7 @@ export class KernelManager {
           throw e;
         }
 
-        const reply = parseMessage(replyFrames);
+        const reply = parseMessage(replyFrames, managed.connectionInfo.key);
 
         if (!reply || !reply.parent_header || (reply.parent_header as any).msg_id !== msgId) {
           continue;
@@ -680,6 +754,10 @@ export class KernelManager {
       managed.executing = false;
       result.duration = Date.now() - startTime;
 
+      // Release the per-kernel execution lock
+      this.executionLocks.delete(id);
+      releaseLock();
+
       if (result.stdout === '') result.stdout = undefined;
       if (result.stderr === '') result.stderr = undefined;
       if (result.images && result.images.length === 0) result.images = undefined;
@@ -687,18 +765,6 @@ export class KernelManager {
     }
 
     return result;
-  }
-
-  private async waitForAvailability(managed: ManagedKernel, timeoutMs: number): Promise<boolean> {
-    const start = Date.now();
-    while (managed.executing) {
-      if (Date.now() - start >= timeoutMs) {
-        return false;
-      }
-      // Small delay to avoid tight loop while another call is in-flight
-      await new Promise((resolve) => setTimeout(resolve, 25));
-    }
-    return true;
   }
 
   async complete(id: string, code: string, cursorPos: number): Promise<KernelCompleteResult> {
@@ -717,7 +783,7 @@ export class KernelManager {
 
     // Wait for reply
     const replyFrames = await managed.shellSocket.receive();
-    const reply = parseMessage(replyFrames as Buffer[]);
+    const reply = parseMessage(replyFrames as Buffer[], managed.connectionInfo.key);
 
     if (reply && reply.content.status === 'ok') {
       const content = reply.content as any;
@@ -748,7 +814,7 @@ export class KernelManager {
 
     // Wait for reply
     const replyFrames = await managed.shellSocket.receive();
-    const reply = parseMessage(replyFrames as Buffer[]);
+    const reply = parseMessage(replyFrames as Buffer[], managed.connectionInfo.key);
 
     if (reply && reply.content.status === 'ok' && (reply.content as any).found) {
       return {

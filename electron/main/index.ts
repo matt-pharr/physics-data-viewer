@@ -25,11 +25,33 @@ import {
   CommandBoxData,
   Theme,
 } from './ipc';
-import { getKernelManager, resetKernelManager } from './kernel-manager';
+import { getKernelManager, resetKernelManager, safeJsonParse } from './kernel-manager';
 import { loadConfig, loadThemes, saveTheme, updateConfig } from './config';
 import { spawn } from 'child_process';
 import * as os from 'os';
 import { FileScanner } from './file-scanner';
+
+/**
+ * Resolve and validate that a file path stays within an allowed root directory.
+ * Returns the resolved absolute path on success, or null on path traversal / invalid input.
+ */
+export function validateFilePath(filePath: string, allowedRoot: string): string | null {
+  if (typeof filePath !== 'string' || !filePath.trim()) {
+    return null;
+  }
+  try {
+    const resolved = path.resolve(filePath);
+    const normalizedRoot = path.resolve(allowedRoot);
+    const relative = path.relative(normalizedRoot, resolved);
+    if (relative.startsWith('..') || path.isAbsolute(relative)) {
+      console.error('[Security] Path traversal attempt rejected:', filePath);
+      return null;
+    }
+    return resolved;
+  } catch {
+    return null;
+  }
+}
 
 const SCRIPT_STUB = `"""New PDV script"""
 def run(tree: dict, **kwargs):
@@ -617,12 +639,18 @@ if (!canRegisterHandlers) {
 
   ipcMain.handle(IPC.files.read, async (_event, filePath, options): Promise<FileReadResult | null> => {
     console.log('[IPC] files:read', filePath, options);
+    const projectRoot = path.dirname(getTreeRoot());
+    const validPath = validateFilePath(filePath, projectRoot);
+    if (!validPath) {
+      console.error('[IPC] files:read rejected invalid path:', filePath);
+      return null;
+    }
     try {
-      if (!fs.existsSync(filePath)) {
+      if (!fs.existsSync(validPath)) {
         return null;
       }
-      const stats = fs.statSync(filePath);
-      const content = fs.readFileSync(filePath, 'utf-8');
+      const stats = fs.statSync(validPath);
+      const content = fs.readFileSync(validPath, 'utf-8');
       return {
         content,
         size: stats.size,
@@ -636,17 +664,23 @@ if (!canRegisterHandlers) {
 
   ipcMain.handle(IPC.files.write, async (_event, filePath, content): Promise<boolean> => {
     console.log('[IPC] files:write', filePath, typeof content === 'string' ? content.slice(0, 100) : '<binary>');
+    const projectRoot = path.dirname(getTreeRoot());
+    const validPath = validateFilePath(filePath, projectRoot);
+    if (!validPath) {
+      console.error('[IPC] files:write rejected invalid path:', filePath);
+      return false;
+    }
     try {
       // Ensure directory exists
-      const dir = path.dirname(filePath);
+      const dir = path.dirname(validPath);
       if (!fs.existsSync(dir)) {
         fs.mkdirSync(dir, { recursive: true });
       }
       
       if (typeof content === 'string') {
-        fs.writeFileSync(filePath, content, 'utf-8');
+        fs.writeFileSync(validPath, content, 'utf-8');
       } else {
-        fs.writeFileSync(filePath, Buffer.from(content));
+        fs.writeFileSync(validPath, Buffer.from(content));
       }
       return true;
     } catch (error) {
@@ -779,7 +813,11 @@ if (!canRegisterHandlers) {
       }
       
       const content = fs.readFileSync(commandBoxesPath, 'utf-8');
-      const data = JSON.parse(content) as CommandBoxData;
+      const data = safeJsonParse<CommandBoxData>(content);
+      if (!data) {
+        console.error('[IPC] commandBoxes:load - failed to parse JSON');
+        return null;
+      }
       console.log('[IPC] commandBoxes:load - loaded', data.tabs.length, 'tabs');
       return data;
     } catch (error) {
@@ -980,7 +1018,7 @@ async function registerScriptInKernel(
   return { success: true };
 }
 
-function sanitizeScriptName(name: string): string | null {
+export function sanitizeScriptName(name: string): string | null {
   if (!name) return null;
   const trimmed = name.trim();
   if (!trimmed || trimmed.includes('/') || trimmed.includes('\\')) return null;
@@ -994,6 +1032,11 @@ function sanitizeScriptName(name: string): string | null {
 function openInEditor(filePath: string, language?: string): { success: boolean; error?: string } {
   try {
     const config = loadConfig();
+    const projectRoot = path.dirname(getTreeRoot());
+    const validPath = validateFilePath(filePath, projectRoot);
+    if (!validPath) {
+      return { success: false, error: 'Invalid file path' };
+    }
     const editorCmd =
       (language === 'python'
         ? config.editors?.python
@@ -1006,9 +1049,9 @@ function openInEditor(filePath: string, language?: string): { success: boolean; 
     }
     const cleaned = parts.map((part) => part.replace(/(^"|"$)/g, ''));
     const [command, ...rawArgs] = cleaned;
-    const args = rawArgs.map((arg) => (arg === '%s' ? filePath : arg));
+    const args = rawArgs.map((arg) => (arg === '%s' ? validPath : arg));
     if (!rawArgs.some((arg) => arg === '%s')) {
-      args.push(filePath);
+      args.push(validPath);
     }
 
     spawn(command, args, {
@@ -1023,7 +1066,7 @@ function openInEditor(filePath: string, language?: string): { success: boolean; 
   }
 }
 
-function parseDefaultValue(value: string): unknown {
+export function parseDefaultValue(value: string): unknown {
   const trimmed = value.trim();
   if (trimmed === 'True' || trimmed === 'true') {
     return true;
