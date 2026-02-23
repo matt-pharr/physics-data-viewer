@@ -1018,7 +1018,7 @@ async function registerScriptInKernel(
   return { success: true };
 }
 
-function sanitizeScriptName(name: string): string | null {
+export function sanitizeScriptName(name: string): string | null {
   if (!name) return null;
   const trimmed = name.trim();
   if (!trimmed || trimmed.includes('/') || trimmed.includes('\\')) return null;
@@ -1066,7 +1066,7 @@ function openInEditor(filePath: string, language?: string): { success: boolean; 
   }
 }
 
-function parseDefaultValue(value: string): unknown {
+export function parseDefaultValue(value: string): unknown {
   const trimmed = value.trim();
   if (trimmed === 'True' || trimmed === 'true') {
     return true;
