@@ -15,6 +15,8 @@
  * Reference: ARCHITECTURE.md §4.1
  */
 
+import { describe, it } from "vitest";
+
 describe("main process startup", () => {
   it("creates the working directory", async () => {
     // TODO: implement in Step 5

@@ -17,6 +17,7 @@
  * Reference: ARCHITECTURE.md §8
  */
 
+import { describe, it } from "vitest";
 import { ProjectManager } from "./project-manager";
 
 describe("ProjectManager", () => {

@@ -13,6 +13,7 @@
  * Reference: ARCHITECTURE.md §5.1
  */
 
+import { describe, it, beforeEach } from "vitest";
 import { EnvironmentDetector } from "./environment-detector";
 
 describe("EnvironmentDetector", () => {
