@@ -50,8 +50,32 @@ def dispatch(msg: dict) -> None:
     msg : dict
         Parsed PDV message envelope (see ARCHITECTURE.md §3.2).
     """
-    # TODO: implement in Step 2
-    raise NotImplementedError
+    from pdv_kernel.comms import send_error  # noqa: PLC0415
+
+    msg_type = msg.get("type", "")
+    msg_id = msg.get("msg_id", None)
+    handler = _DISPATCH.get(msg_type)
+
+    if handler is None:
+        response_type = (msg_type + ".response") if msg_type else "pdv.unknown.response"
+        send_error(
+            response_type,
+            "protocol.unknown_type",
+            f"Unknown PDV message type: '{msg_type}'",
+            in_reply_to=msg_id,
+        )
+        return
+
+    try:
+        handler(msg)
+    except Exception as exc:  # noqa: BLE001
+        response_type = (msg_type + ".response") if msg_type else "pdv.unknown.response"
+        send_error(
+            response_type,
+            "internal.error",
+            str(exc),
+            in_reply_to=msg_id,
+        )
 
 
 # Register all handlers by importing submodules.

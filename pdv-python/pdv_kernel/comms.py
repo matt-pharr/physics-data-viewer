@@ -37,6 +37,10 @@ _comm: Any = None
 # Flag to prevent double-bootstrap.
 _bootstrapped: bool = False
 
+# Reference to the PDVTree and IPython shell (set by bootstrap).
+_pdv_tree: Any = None
+_ip: Any = None
+
 
 def send_message(
     msg_type: str,
@@ -67,8 +71,20 @@ def send_message(
     RuntimeError
         If called before bootstrap (no comm is open).
     """
-    # TODO: implement in Step 2
-    raise NotImplementedError
+    global _comm
+    if _comm is None:
+        raise RuntimeError(
+            "No PDV comm channel is open. Was bootstrap() called before send_message()?"
+        )
+    envelope = {
+        "pdv_version": PDV_PROTOCOL_VERSION,
+        "msg_id": str(uuid.uuid4()),
+        "in_reply_to": in_reply_to,
+        "type": msg_type,
+        "status": status,
+        "payload": payload,
+    }
+    _comm.send(data=envelope)
 
 
 def send_error(
@@ -93,8 +109,12 @@ def send_error(
     in_reply_to : str or None
         The ``msg_id`` of the request being replied to.
     """
-    # TODO: implement in Step 2
-    raise NotImplementedError
+    send_message(
+        msg_type,
+        {"code": code, "message": message},
+        status="error",
+        in_reply_to=in_reply_to,
+    )
 
 
 def check_version(msg: dict) -> None:
@@ -111,8 +131,14 @@ def check_version(msg: dict) -> None:
         If the major version component of ``msg['pdv_version']`` differs
         from :data:`PDV_PROTOCOL_VERSION`. See ARCHITECTURE.md §3.6.
     """
-    # TODO: implement in Step 2
-    raise NotImplementedError
+    incoming = str(msg.get("pdv_version", ""))
+    expected_major = PDV_PROTOCOL_VERSION.split(".")[0]
+    incoming_major = incoming.split(".")[0] if incoming else ""
+    if incoming_major != expected_major:
+        raise PDVVersionError(
+            f"Incompatible PDV protocol version: got '{incoming}', "
+            f"expected major version '{expected_major}'"
+        )
 
 
 def _on_comm_message(msg: dict) -> None:
@@ -127,8 +153,21 @@ def _on_comm_message(msg: dict) -> None:
         Raw IPython comm message dict (``msg['content']['data']`` is the
         PDV envelope).
     """
-    # TODO: implement in Step 2
-    raise NotImplementedError
+    # Extract the PDV envelope from the IPython message structure
+    data = msg.get("content", {}).get("data", msg)
+
+    try:
+        check_version(data)
+    except PDVVersionError as exc:
+        # Cannot reply (no msg_id we can trust), just log and drop
+        import warnings  # noqa: PLC0415
+
+        warnings.warn(str(exc), stacklevel=1)
+        return
+
+    from pdv_kernel.handlers import dispatch  # noqa: PLC0415
+
+    dispatch(data)
 
 
 def _on_comm_open(comm: Any, open_msg: dict) -> None:
@@ -141,8 +180,11 @@ def _on_comm_open(comm: Any, open_msg: dict) -> None:
     open_msg : dict
         The comm_open message.
     """
-    # TODO: implement in Step 2
-    raise NotImplementedError
+    global _comm
+    _comm = comm
+    comm.on_msg(_on_comm_message)
+    # Send pdv.ready push notification now that the channel is open
+    send_message("pdv.ready", {}, in_reply_to=None)
 
 
 def register_comm_target(ip: Any) -> None:
@@ -156,5 +198,26 @@ def register_comm_target(ip: Any) -> None:
     ip : InteractiveShell
         The IPython shell instance.
     """
-    # TODO: implement in Step 2
-    raise NotImplementedError
+    ip.comm_manager.register_target(PDV_COMM_TARGET, _on_comm_open)
+
+
+def get_pdv_tree() -> Any:
+    """Return the global PDVTree instance, or None if not bootstrapped.
+
+    Returns
+    -------
+    PDVTree or None
+        The tree instance injected into the user namespace, or None before bootstrap.
+    """
+    return _pdv_tree
+
+
+def get_ip() -> Any:
+    """Return the global IPython shell instance, or None if not bootstrapped.
+
+    Returns
+    -------
+    InteractiveShell or None
+        The IPython shell, or None before bootstrap.
+    """
+    return _ip

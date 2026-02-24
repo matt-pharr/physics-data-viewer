@@ -56,8 +56,12 @@ class PDVNamespace(dict):
         PDVProtectedNameError
             If ``key`` is in :data:`_PROTECTED_NAMES`.
         """
-        # TODO: implement in Step 2
-        raise NotImplementedError
+        if key in _PROTECTED_NAMES:
+            raise PDVProtectedNameError(
+                f"'{key}' is a protected PDV object and cannot be reassigned. "
+                "Use pdv_tree['key'] = value to store data in the tree."
+            )
+        super().__setitem__(key, value)
 
     def __delitem__(self, key: str) -> None:
         """Block deletion of protected names.
@@ -72,8 +76,11 @@ class PDVNamespace(dict):
         PDVProtectedNameError
             If ``key`` is in :data:`_PROTECTED_NAMES`.
         """
-        # TODO: implement in Step 2
-        raise NotImplementedError
+        if key in _PROTECTED_NAMES:
+            raise PDVProtectedNameError(
+                f"'{key}' is a protected PDV object and cannot be deleted."
+            )
+        super().__delitem__(key)
 
 
 class PDVApp:
@@ -94,8 +101,12 @@ class PDVApp:
         Sends a ``pdv.project.save`` comm message to the app. The app
         will prompt for a save location if no project is currently open.
         """
-        # TODO: implement in Step 2
-        raise NotImplementedError
+        try:
+            from pdv_kernel.comms import send_message  # noqa: PLC0415
+
+            send_message("pdv.project.save", {})
+        except RuntimeError:
+            print("PDV: No comm channel open. Cannot trigger save.")
 
     def help(self, topic: str | None = None) -> None:
         """Print PDV help.
@@ -106,8 +117,18 @@ class PDVApp:
             A specific topic to get help on (e.g. ``'pdv_tree'``,
             ``'run_script'``). If None, prints a general overview.
         """
-        # TODO: implement in Step 2
-        raise NotImplementedError
+        if topic is None:
+            print(
+                "PDV Help\n"
+                "--------\n"
+                "  pdv_tree          — the project data tree (dict-like)\n"
+                "  pdv_tree['path']  — access or set a node by dot-path\n"
+                "  pdv_tree.run_script('path') — run a script node\n"
+                "  pdv.save()        — save the project\n"
+                "  pdv.help('pdv_tree') — help on a specific topic\n"
+            )
+        else:
+            print(f"PDV help for topic '{topic}' is not yet implemented.")
 
     def __repr__(self) -> str:
         return "<PDV app object — type pdv.help() for usage>"
@@ -146,5 +167,58 @@ def pdv_namespace(
         DataFrames also have ``shape``, ``dtype``; dicts have ``length``,
         etc. See ARCHITECTURE.md §3.4 (pdv.namespace.query.response).
     """
-    # TODO: implement in Step 2
-    raise NotImplementedError
+    import types  # noqa: PLC0415
+
+    from pdv_kernel.serialization import detect_kind, node_preview  # noqa: PLC0415
+
+    _INTERNAL: frozenset[str] = frozenset({"pdv_tree", "pdv"})
+    result: dict = {}
+
+    for name, value in ns.items():
+        # Always exclude PDV internals
+        if name in _INTERNAL:
+            continue
+        # Exclude internal PDV names starting with _pdv
+        if name.startswith("_pdv"):
+            continue
+        # Exclude private names unless requested
+        if not include_private and name.startswith("_"):
+            continue
+        # Exclude modules unless requested
+        if not include_modules and isinstance(value, types.ModuleType):
+            continue
+        # Exclude callables (functions/classes) unless requested
+        if not include_callables and callable(value) and not isinstance(value, type):
+            continue
+
+        try:
+            kind = detect_kind(value)
+            preview = node_preview(value, kind)
+        except Exception:  # noqa: BLE001
+            kind = "unknown"
+            preview = "<unknown>"
+
+        descriptor: dict = {"type": kind, "preview": preview}
+
+        # Add extra metadata for common types
+        try:
+            import numpy as np  # noqa: PLC0415
+
+            if isinstance(value, np.ndarray):
+                descriptor["shape"] = list(value.shape)
+                descriptor["dtype"] = str(value.dtype)
+        except ImportError:
+            pass
+        try:
+            import pandas as pd  # noqa: PLC0415
+
+            if isinstance(value, pd.DataFrame):
+                descriptor["shape"] = list(value.shape)
+            elif isinstance(value, pd.Series):
+                descriptor["shape"] = [len(value)]
+        except ImportError:
+            pass
+
+        result[name] = descriptor
+
+    return result
