@@ -420,6 +420,78 @@ Additionally, `npm run build` (or equivalent) must succeed without TypeScript er
 
 ---
 
+## Step 9 — Legacy Cleanup + OVERVIEW.md Overhaul
+
+**Goal**: Remove all legacy code now that the rewrite is complete and functional. Rewrite `OVERVIEW.md` so it accurately describes the current system — not the old one — and can serve as a useful entry point for new contributors.
+
+This step has no code changes and no new tests. It is purely a cleanup and documentation pass, done only after Step 8 (all tests green, TypeScript build clean).
+
+---
+
+### Part A — Delete the `legacy/` directory
+
+The `legacy/` directory was preserved during the rewrite as a reference for implementation decisions. That reference purpose is now exhausted.
+
+**Before deleting**, verify that:
+- All test files in `electron/main/*.test.ts` and `pdv-python/tests/` pass without importing anything from `legacy/`
+- No import or require statement in `electron/` or `pdv-python/` references a path under `legacy/`
+- `IMPLEMENTATION_STEPS.md` references to `legacy/` (the briefing section at the top) have been updated to remove those pointers
+
+**Then delete**:
+```bash
+rm -rf legacy/
+```
+
+Also remove the briefing bullets at the top of this document that reference `legacy/` as a code reference, since those files no longer exist.
+
+---
+
+### Part B — Rewrite `OVERVIEW.md`
+
+`OVERVIEW.md` currently describes the old (pre-rewrite) architecture and is explicitly marked as legacy-only. Rewrite it from scratch so it:
+
+1. **Describes the current system** — the three-process Electron model, the PDV comm protocol, `pdv-python`, the Tree authority model, and the IPC surface
+2. **Serves as an entry point for new contributors** — someone reading it should understand *what* the system does and *why* it is structured the way it is, with pointers to the authoritative detail (ARCHITECTURE.md)
+3. **Does not duplicate ARCHITECTURE.md** — OVERVIEW.md is a guided summary, not a specification. It should answer "what is this and how does it work?" not "what exactly is the message envelope schema?" Those answers live in ARCHITECTURE.md.
+
+#### Required sections
+
+- **What PDV is** — one concise paragraph. The core value proposition: Tree + command workflow as a physics analysis environment. The key differentiator from Jupyter.
+- **Process model** — describe the three processes (main, renderer, kernel) and what each owns. Include the ASCII diagram from ARCHITECTURE.md §2 (or a simplified version).
+- **The PDV comm protocol** — one short section. Explain that all structured data flows via a Jupyter comm channel (`pdv.kernel`), not via `execute_request`. Why: clean separation, no code-string injection. Pointer to ARCHITECTURE.md §3 for the full spec.
+- **The Tree** — explain the single-authority rule, lazy loading, and why `PDVTree` lives in the kernel rather than the app. Pointer to ARCHITECTURE.md §7.
+- **pdv-python package** — what it is, how it is installed, what `bootstrap()` does. Pointer to ARCHITECTURE.md §5.
+- **Renderer UI components** — brief list of the React components (CommandBox, Console, Tree panel, Namespace panel, EnvironmentSelector, Settings), what each does, and where they live.
+- **Developer setup** — clear, copy-pasteable commands to:
+  - Install `pdv-python` in dev mode
+  - Install Electron dependencies
+  - Run Python tests
+  - Run TypeScript tests
+  - Build and launch the app
+- **Key design decisions to know before touching the code** — a short bullet list of the "do not do this" rules that are easy to violate unknowingly:
+  - Main process never sends `execute_request` to call PDV internal functions
+  - Main process never builds tree state from filesystem scanning
+  - Renderer only accesses the kernel via `window.pdv.*` (never raw IPC channels)
+  - `pdv_tree` is protected in the kernel namespace — never reassignable by user code
+- **Pointer map** — a simple table: "If you want to know about X, read Y" linking the major topics to the right document and section.
+
+#### Tone
+
+Write it as you would write a README for an open-source project that you want a competent software engineer to be able to read in 10 minutes and know exactly what they are looking at.
+
+---
+
+### Tests to confirm completion
+
+There are no automated tests for this step. Completion criteria:
+
+- `legacy/` directory does not exist
+- No import or reference to `legacy/` anywhere in the codebase
+- `OVERVIEW.md` no longer contains the "This document describes the legacy architecture" warning banner
+- `OVERVIEW.md` accurately describes the system that exists after Step 8
+
+---
+
 ## Dependency Summary
 
 ```
@@ -431,6 +503,7 @@ Step 1 (PDVTree, serialization)
                                     └─► Step 6 (env detector, project manager)
                                             └─► Step 7 (renderer wiring)
                                                     └─► Step 8 (full test pass)
+                                                            └─► Step 9 (legacy cleanup + OVERVIEW.md)
 ```
 
 Steps 1 and 2 produce a standalone Python package with no Electron dependency.  
