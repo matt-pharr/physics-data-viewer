@@ -20,15 +20,26 @@
  * See Also
  * --------
  * ARCHITECTURE.md §8 (save and load sequences)
+ * ARCHITECTURE.md §6.2 (project save directory layout)
  * comm-router.ts — used to send pdv.project.save / pdv.project.load
  */
 
 import { CommRouter } from "./comm-router";
+import { PDVMessageType } from "./pdv-protocol";
+import * as fs from "fs/promises";
+import * as path from "path";
+import * as os from "os";
+import * as crypto from "crypto";
 
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
 
+/**
+ * Persisted metadata stored in ``project.json`` alongside ``command-boxes.json``.
+ *
+ * See ARCHITECTURE.md §8.1 for the full field semantics.
+ */
 export interface ProjectManifest {
   /** Schema version of project.json. */
   schema_version: string;
@@ -40,6 +51,42 @@ export interface ProjectManifest {
   tree_checksum: string;
 }
 
+/** Current schema major version. Increment on breaking changes to project.json. */
+const SCHEMA_VERSION = "1.0";
+
+/** Default manifest returned when project.json is missing (ARCHITECTURE.md §8). */
+const DEFAULT_MANIFEST: ProjectManifest = {
+  schema_version: SCHEMA_VERSION,
+  saved_at: new Date(0).toISOString(),
+  pdv_version: "1.0",
+  tree_checksum: "",
+};
+
+// ---------------------------------------------------------------------------
+// Error classes
+// ---------------------------------------------------------------------------
+
+/**
+ * Thrown by {@link ProjectManager.readManifest} when ``project.json`` contains
+ * a schema major version newer than this app understands.
+ */
+export class PDVSchemaVersionError extends Error {
+  /**
+   * @param found - The schema version string read from project.json.
+   * @param supported - The schema version this build supports.
+   */
+  constructor(
+    public readonly found: string,
+    public readonly supported: string
+  ) {
+    super(
+      `Unsupported project.json schema version: ${found} ` +
+        `(this app supports up to ${supported})`
+    );
+    this.name = "PDVSchemaVersionError";
+  }
+}
+
 // ---------------------------------------------------------------------------
 // ProjectManager
 // ---------------------------------------------------------------------------
@@ -48,48 +95,209 @@ export class ProjectManager {
   /**
    * @param commRouter - CommRouter connected to the active kernel.
    */
-  constructor(private readonly commRouter: CommRouter) {
-    // TODO: implement in Step 4
-    throw new Error("ProjectManager constructor not yet implemented");
+  constructor(private readonly commRouter: CommRouter) {}
+
+  /**
+   * Create a uniquely named working directory under the OS temp directory.
+   *
+   * The caller (Electron main process) is responsible for deleting this
+   * directory on clean shutdown. See ARCHITECTURE.md §6.1.
+   *
+   * @returns Absolute path to the newly created directory.
+   */
+  async createWorkingDir(): Promise<string> {
+    return fs.mkdtemp(path.join(os.tmpdir(), "pdv-"));
+  }
+
+  /**
+   * Recursively delete a working directory created by {@link createWorkingDir}.
+   *
+   * @param dirPath - Absolute path to the directory to remove.
+   */
+  async deleteWorkingDir(dirPath: string): Promise<void> {
+    await fs.rm(dirPath, { recursive: true, force: true });
   }
 
   /**
    * Save the current project to a directory.
    *
-   * Implements the full save sequence from ARCHITECTURE.md §8.1.
+   * Implements the full save sequence from ARCHITECTURE.md §8.1:
+   * 1. Send ``pdv.project.save`` comm and await the kernel's response.
+   * 2. Write ``command-boxes.json`` to ``saveDir``.
+   * 3. Write ``project.json`` to ``saveDir`` (only on full success).
+   *
+   * If the kernel responds with ``status: 'error'``, this method re-throws
+   * the comm error and does **not** write ``project.json``.
    *
    * @param saveDir - Absolute path to the project directory.
    * @param commandBoxes - The current command-box state from the renderer.
+   * @throws {PDVCommError} When the kernel responds with status='error'.
    */
   async save(saveDir: string, commandBoxes: unknown[]): Promise<void> {
-    // TODO: implement in Step 4
-    throw new Error("ProjectManager.save not yet implemented");
+    // Step 1 — send pdv.project.save comm; throws PDVCommError on error status.
+    const response = await this.commRouter.request(PDVMessageType.PROJECT_SAVE, {
+      save_dir: saveDir,
+    });
+
+    const payload = response.payload as { checksum?: string };
+    const checksum = payload.checksum ?? "";
+
+    // Step 2 — write command-boxes.json.
+    await fs.writeFile(
+      path.join(saveDir, "command-boxes.json"),
+      JSON.stringify(commandBoxes, null, 2),
+      "utf8"
+    );
+
+    // Step 3 — write project.json (only after both kernel and app state are flushed).
+    const manifest: ProjectManifest = {
+      schema_version: SCHEMA_VERSION,
+      saved_at: new Date().toISOString(),
+      pdv_version: "1.0",
+      tree_checksum: checksum,
+    };
+    await fs.writeFile(
+      path.join(saveDir, "project.json"),
+      JSON.stringify(manifest, null, 2),
+      "utf8"
+    );
   }
 
   /**
    * Load a project from a directory.
    *
-   * Implements the full load sequence from ARCHITECTURE.md §8.2.
-   * Returns once the ``pdv.project.loaded`` push notification is received.
+   * Implements the load sequence from ARCHITECTURE.md §8.2:
+   * 1. Send ``pdv.project.load`` comm with ``save_dir``.
+   * 2. Wait for the ``pdv.project.loaded`` push notification.
+   * 3. Read ``command-boxes.json`` from ``saveDir``.
    *
    * @param saveDir - Absolute path to the project directory.
-   * @returns The command-box state read from command-boxes.json.
+   * @returns The command-box state read from ``command-boxes.json``.
+   * @throws {PDVCommError} When the kernel responds with status='error'.
    */
   async load(saveDir: string): Promise<unknown[]> {
-    // TODO: implement in Step 4
-    throw new Error("ProjectManager.load not yet implemented");
+    // Step 1 — register the push handler BEFORE sending the request so the
+    // notification is never missed even if the kernel responds very quickly.
+    const pushPromise = new Promise<void>((resolve) => {
+      const handler = (): void => {
+        this.commRouter.offPush(PDVMessageType.PROJECT_LOADED, handler);
+        resolve();
+      };
+      this.commRouter.onPush(PDVMessageType.PROJECT_LOADED, handler);
+    });
+
+    // Step 2 — send pdv.project.load comm.
+    // The request resolves when the kernel sends pdv.project.load.response.
+    await this.commRouter.request(PDVMessageType.PROJECT_LOAD, {
+      save_dir: saveDir,
+    });
+
+    // Step 3 — wait for the pdv.project.loaded push notification.
+    await pushPromise;
+
+    // Step 4 — read command-boxes.json.
+    return _readCommandBoxes(saveDir);
   }
 
   /**
-   * Read project.json from a directory and return the manifest.
+   * Read ``project.json`` from a directory and return the manifest.
    *
    * Does NOT send any comm messages or interact with the kernel.
    *
+   * - If ``project.json`` is absent, returns {@link DEFAULT_MANIFEST} (no throw).
+   * - If the schema major version is greater than this app supports, throws
+   *   {@link PDVSchemaVersionError}.
+   *
    * @param saveDir - Absolute path to the project directory.
-   * @throws If project.json is absent or malformed.
+   * @returns Parsed project manifest.
+   * @throws {PDVSchemaVersionError} When the file's schema major version is
+   *   incompatible with this build.
    */
   static async readManifest(saveDir: string): Promise<ProjectManifest> {
-    // TODO: implement in Step 4
-    throw new Error("ProjectManager.readManifest not yet implemented");
+    const manifestPath = path.join(saveDir, "project.json");
+    let raw: string;
+    try {
+      raw = await fs.readFile(manifestPath, "utf8");
+    } catch (err) {
+      const e = err as NodeJS.ErrnoException;
+      if (e.code === "ENOENT") {
+        return { ...DEFAULT_MANIFEST };
+      }
+      throw err;
+    }
+
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(raw);
+    } catch {
+      throw new Error(`project.json is not valid JSON: ${manifestPath}`);
+    }
+
+    const obj = parsed as Record<string, unknown>;
+    const schemaVersion = String(obj.schema_version ?? "1.0");
+    _assertCompatibleSchema(schemaVersion);
+
+    return {
+      schema_version: schemaVersion,
+      saved_at: String(obj.saved_at ?? DEFAULT_MANIFEST.saved_at),
+      pdv_version: String(obj.pdv_version ?? DEFAULT_MANIFEST.pdv_version),
+      tree_checksum: String(obj.tree_checksum ?? ""),
+    };
+  }
+
+  /**
+   * Write a {@link ProjectManifest} to ``project.json`` in the given directory.
+   *
+   * @param saveDir - Absolute path to the project directory.
+   * @param manifest - Manifest data to write.
+   */
+  static async saveManifest(
+    saveDir: string,
+    manifest: ProjectManifest
+  ): Promise<void> {
+    await fs.writeFile(
+      path.join(saveDir, "project.json"),
+      JSON.stringify(manifest, null, 2),
+      "utf8"
+    );
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Internal helpers
+// ---------------------------------------------------------------------------
+
+/**
+ * Check that a schema version is compatible with this build.
+ *
+ * @param schemaVersion - Version string from project.json.
+ * @throws {PDVSchemaVersionError} When the major version exceeds supported.
+ */
+function _assertCompatibleSchema(schemaVersion: string): void {
+  const supportedMajor = Number(SCHEMA_VERSION.split(".")[0]);
+  const foundMajor = Number(schemaVersion.split(".")[0]);
+  if (isNaN(foundMajor) || foundMajor > supportedMajor) {
+    throw new PDVSchemaVersionError(schemaVersion, SCHEMA_VERSION);
+  }
+}
+
+/**
+ * Read and parse ``command-boxes.json`` from a project directory.
+ *
+ * Returns an empty array if the file does not exist.
+ *
+ * @param saveDir - Absolute path to the project directory.
+ * @returns Parsed command-box array, or ``[]`` when the file is absent.
+ */
+async function _readCommandBoxes(saveDir: string): Promise<unknown[]> {
+  const filePath = path.join(saveDir, "command-boxes.json");
+  try {
+    const raw = await fs.readFile(filePath, "utf8");
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch (err) {
+    const e = err as NodeJS.ErrnoException;
+    if (e.code === "ENOENT") return [];
+    throw err;
   }
 }
