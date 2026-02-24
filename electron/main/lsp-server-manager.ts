@@ -11,7 +11,7 @@
 import * as net from 'net';
 import * as child_process from 'child_process';
 import * as path from 'path';
-import { WebSocketServer } from 'ws';
+import { WebSocket, WebSocketServer } from 'ws';
 import type { WebSocket as WsWebSocket } from 'ws';
 import { BrowserWindow } from 'electron';
 import { getLspRegistry, LspServerDefinition } from './lsp-registry';
@@ -415,29 +415,26 @@ export class LspServerManager {
 
     const wss = new WebSocketServer({ host: '127.0.0.1', port: proxyPort });
 
+    // LSP process stdout → broadcast to all connected WebSocket clients
+    const broadcastStdout = (chunk: Buffer) => {
+      const messages = parser.push(chunk);
+      for (const msg of messages) {
+        wss.clients.forEach((client) => {
+          if (client.readyState === WebSocket.OPEN) {
+            client.send(msg);
+          }
+        });
+      }
+    };
+    proc.stdout?.on('data', broadcastStdout);
+
     wss.on('connection', (ws: WsWebSocket) => {
       console.log(`[lsp] Renderer connected to ${languageId} proxy on port ${proxyPort}`);
-
-      // LSP process stdout → WebSocket
-      const onData = (chunk: Buffer) => {
-        const messages = parser.push(chunk);
-        for (const msg of messages) {
-          if (ws.readyState === ws.OPEN) {
-            ws.send(msg);
-          }
-        }
-      };
-
-      proc.stdout?.on('data', onData);
 
       // WebSocket → LSP process stdin
       ws.on('message', (data) => {
         const json = typeof data === 'string' ? data : data.toString();
         proc.stdin?.write(frameLspMessage(json));
-      });
-
-      ws.on('close', () => {
-        proc.stdout?.removeListener('data', onData);
       });
 
       ws.on('error', (err) => {
@@ -460,11 +457,11 @@ export class LspServerManager {
 
   private async startTcpProxy(languageId: string, externalPort: number): Promise<number> {
     const proxyPort = await getFreePort();
-    const parser = new LspMessageParser();
 
     const wss = new WebSocketServer({ host: '127.0.0.1', port: proxyPort });
 
     wss.on('connection', (ws: WsWebSocket) => {
+      const parser = new LspMessageParser();
       const tcpSocket = new net.Socket();
       tcpSocket.connect(externalPort, '127.0.0.1', () => {
         console.log(`[lsp] TCP proxy for ${languageId} connected to port ${externalPort}`);
@@ -474,7 +471,7 @@ export class LspServerManager {
       tcpSocket.on('data', (chunk: Buffer) => {
         const messages = parser.push(chunk);
         for (const msg of messages) {
-          if (ws.readyState === ws.OPEN) {
+          if (ws.readyState === WebSocket.OPEN) {
             ws.send(msg);
           }
         }
@@ -535,6 +532,10 @@ export class LspServerManager {
     this.setStatus(languageId, {
       state: server.detectedCommand ? 'launchable' : 'not_found',
       detectedCommand: server.detectedCommand,
+      proxyPort: undefined,
+      externalPort: undefined,
+      detectedPort: undefined,
+      errorMessage: undefined,
     });
   }
 

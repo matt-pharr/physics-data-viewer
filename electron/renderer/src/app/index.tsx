@@ -8,11 +8,14 @@ import { ScriptDialog } from '../components/ScriptDialog';
 import { CreateScriptDialog } from '../components/Tree/CreateScriptDialog';
 import { SettingsDialog } from '../components/SettingsDialog';
 import type { CommandTab, LogEntry, TreeNodeData } from '../types';
-import type { Config, LspConnectionState } from '../../main/ipc';
+import type { Config, LspConnectionState, LspServerInfo } from '../../main/ipc';
 
 type Tab = 'tree' | 'namespace' | 'modules';
 type PlotMode = 'native' | 'capture';
 const DEFAULT_OPEN_SETTINGS_SHORTCUT = 'CommandOrControl+,';
+const shouldAutoConnect = (server: LspServerInfo): boolean =>
+  (server.userConfig?.enabled ?? true) &&
+  (server.userConfig?.autoStart ?? server.autoStartDefault);
 
 function applyAppearanceColors(colors?: Record<string, string>): void {
   if (!colors) return;
@@ -165,9 +168,14 @@ const App: React.FC = () => {
           setLspProxyPort(status.proxyPort);
         } else if (status.state !== 'connected') {
           setLspProxyPort(undefined);
-          // Auto-connect when server is detected but not yet running
           if (status.state === 'launchable' || status.state === 'external_running') {
-            void window.pdv.lsp.connect('python').catch(console.error);
+            void window.pdv.lsp.list().then((servers) => {
+              const python = servers.find((s) => s.languageId === 'python');
+              if (python && shouldAutoConnect(python)) {
+                return window.pdv.lsp.connect('python');
+              }
+              return undefined;
+            }).catch(console.error);
           }
         }
       }
@@ -181,7 +189,9 @@ const App: React.FC = () => {
         if (python.status.state === 'connected' && python.status.proxyPort) {
           setLspProxyPort(python.status.proxyPort);
         } else if (python.status.state === 'launchable' || python.status.state === 'external_running') {
-          void window.pdv.lsp.connect('python').catch(console.error);
+          if (shouldAutoConnect(python)) {
+            void window.pdv.lsp.connect('python').catch(console.error);
+          }
         }
       }
     }).catch(console.error);

@@ -99,6 +99,7 @@ export class LspClient {
     number,
     { resolve: (value: unknown) => void; reject: (reason: unknown) => void }
   >();
+  private pendingRequestTimeouts = new Map<number, ReturnType<typeof setTimeout>>();
   private notificationHandlers = new Map<string, ((params: unknown) => void)[]>();
   private disposables: monaco.IDisposable[] = [];
   private openDocuments = new Set<string>();
@@ -137,14 +138,15 @@ export class LspClient {
     this.ws.onclose = () => {
       console.log(`[lsp-client] Connection to ${this.languageId} server closed`);
       // Reject any pending requests
-      for (const [, pending] of this.pendingRequests) {
+      for (const [id, pending] of this.pendingRequests) {
+        this.clearPendingRequestTimeout(id);
         pending.reject(new Error('LSP connection closed'));
       }
       this.pendingRequests.clear();
     };
 
     // Initialize the LSP session
-    await this.initialize(workspaceRoot);
+    await this.initialize(workspaceRoot, monacoInstance);
 
     // Register all Monaco providers
     this.registerProviders(monacoInstance);
@@ -152,8 +154,8 @@ export class LspClient {
 
   // ── LSP Lifecycle ────────────────────────────────────────────────────────
 
-  private async initialize(workspaceRoot: string): Promise<void> {
-    const workspaceUri = `file://${workspaceRoot}`;
+  private async initialize(workspaceRoot: string, monacoInstance: typeof monaco): Promise<void> {
+    const workspaceUri = monacoInstance.Uri.file(workspaceRoot).toString();
 
     await this.sendRequest('initialize', {
       processId: null,
@@ -491,12 +493,14 @@ export class LspClient {
       this.ws.send(JSON.stringify(msg));
 
       // Timeout after 5 seconds
-      setTimeout(() => {
+      const timeout = setTimeout(() => {
         if (this.pendingRequests.has(id)) {
           this.pendingRequests.delete(id);
+          this.pendingRequestTimeouts.delete(id);
           reject(new Error(`LSP request timed out: ${method}`));
         }
       }, 5000);
+      this.pendingRequestTimeouts.set(id, timeout);
     });
   }
 
@@ -519,6 +523,7 @@ export class LspClient {
       const pending = this.pendingRequests.get(resp.id);
       if (pending) {
         this.pendingRequests.delete(resp.id);
+        this.clearPendingRequestTimeout(resp.id);
         if (resp.error) {
           pending.reject(new Error(resp.error.message));
         } else {
@@ -531,6 +536,7 @@ export class LspClient {
       const pending = this.pendingRequests.get(resp.id);
       if (pending) {
         this.pendingRequests.delete(resp.id);
+        this.clearPendingRequestTimeout(resp.id);
         pending.reject(new Error(resp.error?.message ?? 'Unknown LSP error'));
       }
     } else if (!('id' in msg)) {
@@ -549,6 +555,14 @@ export class LspClient {
 
   // ── Cleanup ───────────────────────────────────────────────────────────────
 
+  private clearPendingRequestTimeout(id: number): void {
+    const timeout = this.pendingRequestTimeouts.get(id);
+    if (timeout) {
+      clearTimeout(timeout);
+      this.pendingRequestTimeouts.delete(id);
+    }
+  }
+
   dispose(): void {
     for (const d of this.disposables) {
       d.dispose();
@@ -561,6 +575,10 @@ export class LspClient {
     }
 
     this.pendingRequests.clear();
+    for (const timeout of this.pendingRequestTimeouts.values()) {
+      clearTimeout(timeout);
+    }
+    this.pendingRequestTimeouts.clear();
     this.openDocuments.clear();
   }
 

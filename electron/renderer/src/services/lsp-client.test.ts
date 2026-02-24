@@ -43,6 +43,7 @@ function makeMockMonaco() {
     MarkerSeverity: { Error: 8, Warning: 4, Info: 2, Hint: 1 },
     Uri: {
       parse: (s: string) => ({ toString: () => s, _parsed: s }),
+      file: (s: string) => ({ toString: () => `file://${s}`, _file: s }),
     },
     _registeredProviders: registeredProviders,
     _modelMarkers: modelMarkers,
@@ -240,14 +241,15 @@ describe('LspClient', () => {
     });
 
     it('times out after 5 seconds with no server response', async () => {
-      vi.useFakeTimers();
       const { client } = await makeConnectedClient();
-
-      const requestPromise = client.sendRequest('textDocument/completion', {});
-      vi.advanceTimersByTime(5001);
-
-      await expect(requestPromise).rejects.toThrow(/timed out/i);
-      vi.useRealTimers();
+      vi.useFakeTimers();
+      try {
+        const requestPromise = client.sendRequest('textDocument/completion', {});
+        vi.advanceTimersByTime(5001);
+        await expect(requestPromise).rejects.toThrow(/timed out/i);
+      } finally {
+        vi.useRealTimers();
+      }
     });
 
     it('rejects immediately when WebSocket is not connected', async () => {

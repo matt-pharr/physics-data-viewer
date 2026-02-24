@@ -89,7 +89,6 @@ const IPC = {
     disconnect: 'lsp:disconnect',
     status: 'lsp:status',
     configure: 'lsp:configure',
-    port: 'lsp:port',
     stateChange: 'lsp:state-change',
   },
 } as const;
