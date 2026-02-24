@@ -130,12 +130,39 @@ export const CommandBox: React.FC<CommandBoxProps> = ({
           onChange={(value) => activeTab.onChange(value || '')}
           onMount={handleEditorMount}
           options={{
+            // Layout
             minimap: { enabled: false },
-            fontSize: 13,
-            lineNumbers: 'on',
             automaticLayout: true,
             scrollBeyondLastLine: false,
+            overviewRulerLanes: 0,
+
+            // Typography
+            fontSize: 13,
             wordWrap: 'on',
+
+            // Gutter
+            lineNumbers: 'on',
+            folding: false,
+            glyphMargin: false,
+
+            // Indentation — enforce Python conventions, never infer from content
+            tabSize: 4,
+            insertSpaces: true,
+            detectIndentation: false,
+
+            // Suggestions — disabled in favour of future kernel-backed completions (see UPCOMING_FEATURES §13)
+            quickSuggestions: false,
+            suggestOnTriggerCharacters: false,
+            wordBasedSuggestions: 'off',
+            parameterHints: { enabled: false },
+
+            // Formatting — preserve user intent when pasting code
+            formatOnPaste: false,
+            formatOnType: false,
+
+            // Scroll / cursor
+            smoothScrolling: true,
+            cursorSurroundingLines: 3,
           }}
         />
       </div>
