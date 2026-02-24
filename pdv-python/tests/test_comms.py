@@ -169,3 +169,60 @@ class TestDispatch:
         envelope = mock_comm._sent[0]
         assert envelope['status'] == 'error'
         assert envelope['payload']['code'] == 'protocol.unknown_type'
+
+
+class TestBootstrap:
+    """Tests for pdv_kernel.bootstrap() idempotency and injection."""
+
+    def test_bootstrap_idempotent(self, mock_ipython):
+        """bootstrap() called twice does not double-inject or open a second comm."""
+        import pdv_kernel.comms as comms_mod
+        from pdv_kernel import bootstrap
+
+        # Ensure clean state
+        comms_mod._bootstrapped = False
+        comms_mod._pdv_tree = None
+        comms_mod._ip = None
+
+        try:
+            # First call
+            bootstrap(mock_ipython)
+            tree1 = mock_ipython.user_ns.get('pdv_tree')
+            pdv1 = mock_ipython.user_ns.get('pdv')
+            calls_after_first = mock_ipython.comm_manager.register_target.call_count
+
+            # Second call — must be a no-op
+            bootstrap(mock_ipython)
+            tree2 = mock_ipython.user_ns.get('pdv_tree')
+            pdv2 = mock_ipython.user_ns.get('pdv')
+            calls_after_second = mock_ipython.comm_manager.register_target.call_count
+
+            # Identity must be preserved — no new objects created
+            assert tree1 is tree2
+            assert pdv1 is pdv2
+            # Comm target registered exactly once
+            assert calls_after_first == 1
+            assert calls_after_second == 1
+        finally:
+            # Restore state so other tests are not affected
+            comms_mod._bootstrapped = False
+            comms_mod._pdv_tree = None
+            comms_mod._ip = None
+
+    def test_bootstrap_injects_pdv_tree(self, mock_ipython):
+        """bootstrap() injects pdv_tree into the user namespace."""
+        import pdv_kernel.comms as comms_mod
+        from pdv_kernel import bootstrap
+
+        comms_mod._bootstrapped = False
+        comms_mod._pdv_tree = None
+        comms_mod._ip = None
+
+        try:
+            bootstrap(mock_ipython)
+            assert 'pdv_tree' in mock_ipython.user_ns
+            assert 'pdv' in mock_ipython.user_ns
+        finally:
+            comms_mod._bootstrapped = False
+            comms_mod._pdv_tree = None
+            comms_mod._ip = None
