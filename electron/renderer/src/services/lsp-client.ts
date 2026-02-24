@@ -86,6 +86,9 @@ const LSP_KIND_TO_MONACO: Record<number, monaco.languages.CompletionItemKind> = 
   25: 24, // TypeParameter → TypeParameter
 };
 
+// ─── WebSocket readyState constants (spec-defined, safe to use without the global) ──
+const WS_OPEN = 1;
+
 // ─── LspClient ───────────────────────────────────────────────────────────────
 
 export class LspClient {
@@ -478,7 +481,7 @@ export class LspClient {
 
   sendRequest(method: string, params: unknown): Promise<unknown> {
     return new Promise((resolve, reject) => {
-      if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
+      if (!this.ws || this.ws.readyState !== WS_OPEN) {
         reject(new Error('LSP WebSocket not connected'));
         return;
       }
@@ -498,7 +501,7 @@ export class LspClient {
   }
 
   sendNotification(method: string, params: unknown): void {
-    if (!this.ws || this.ws.readyState !== WebSocket.OPEN) return;
+    if (!this.ws || this.ws.readyState !== WS_OPEN) return;
     const msg: JsonRpcNotification = { jsonrpc: '2.0', method, params };
     this.ws.send(JSON.stringify(msg));
   }
@@ -562,6 +565,6 @@ export class LspClient {
   }
 
   get isConnected(): boolean {
-    return !!this.ws && this.ws.readyState === WebSocket.OPEN;
+    return !!this.ws && this.ws.readyState === WS_OPEN;
   }
 }
