@@ -459,9 +459,9 @@ export class KernelManager extends EventEmitter {
       managed.shellSocket,
       managed.iopubSocket,
       managed.controlSocket,
-    ] as Array<{ close(): Promise<void> }>) {
+    ] as unknown as Array<{ close(): Promise<void> | void }>) {
       try {
-        await sock.close();
+        await Promise.resolve(sock.close());
       } catch {
         // ignored
       }

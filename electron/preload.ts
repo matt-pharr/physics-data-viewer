@@ -1,92 +1,102 @@
 /**
- * preload.ts — Electron preload script.
+ * preload.ts — Typed renderer bridge (`window.pdv`).
  *
- * Exposes a minimal, typed ``window.pdv`` API to the renderer process via
- * ``contextBridge.exposeInMainWorld()``. The renderer MUST NOT call
- * ``ipcRenderer`` directly — all IPC goes through this bridge.
- *
- * The bridge surface:
- *
- * ```ts
- * window.pdv = {
- *   // Kernel
- *   execute(code: string): Promise<void>
- *   restartKernel(): Promise<void>
- *
- *   // Tree
- *   treeList(path: string): Promise<NodeDescriptor[]>
- *   treeGet(path: string, mode: string): Promise<unknown>
- *
- *   // Namespace
- *   namespaceQuery(options): Promise<NamespaceSnapshot>
- *
- *   // Project
- *   projectSave(saveDir: string, commandBoxes: unknown[]): Promise<void>
- *   projectLoad(saveDir: string): Promise<unknown[]>
- *   openDirDialog(): Promise<string | null>
- *
- *   // Config
- *   configGet(key: string): Promise<unknown>
- *   configSet(key: string, value: unknown): Promise<void>
- *
- *   // Push subscriptions (renderer → preload → ipcRenderer.on)
- *   onTreeChanged(handler: (payload: unknown) => void): () => void
- *   onProjectLoaded(handler: (payload: unknown) => void): () => void
- *   onKernelStatus(handler: (status: string) => void): () => void
- * }
- * ```
+ * Exposes a strictly-scoped API surface to the renderer via
+ * `contextBridge.exposeInMainWorld("pdv", ...)`. The renderer does not access
+ * Node.js/Electron APIs directly; all IPC goes through this bridge.
  *
  * See Also
  * --------
- * ARCHITECTURE.md §9 (IPC layer), §11 (renderer ↔ main contract)
- * electron/main/ipc.ts — the other side of these channels
+ * ARCHITECTURE.md §11.1, §11.2
+ * main/ipc.ts — IPC channel and API type source of truth
  */
 
 import { contextBridge, ipcRenderer } from "electron";
+import { IPC, type PDVApi } from "./main/ipc";
 
-// ---------------------------------------------------------------------------
-// Type declarations (must match ipc.ts channel names)
-// ---------------------------------------------------------------------------
+/**
+ * Register an IPC push listener and return an unsubscribe callback.
+ *
+ * @param channel - IPC push channel name.
+ * @param callback - Renderer callback invoked with push payload.
+ * @returns Function that removes the registered listener.
+ */
+function onPush<TPayload>(
+  channel: string,
+  callback: (payload: TPayload) => void
+): () => void {
+  const listener = (_event: unknown, payload: TPayload): void => {
+    callback(payload);
+  };
+  ipcRenderer.on(channel, listener);
+  return () => {
+    ipcRenderer.removeListener(channel, listener);
+  };
+}
 
-// TODO: Add NodeDescriptor and NamespaceSnapshot type imports or inline declarations
-// Reference: pdv-protocol.ts
-
-// ---------------------------------------------------------------------------
-// Bridge implementation
-// ---------------------------------------------------------------------------
-
-contextBridge.exposeInMainWorld("pdv", {
-  // TODO: implement in Step 5
-  // Stub — replace with real ipcRenderer.invoke() calls
-  _notImplemented: () => {
-    throw new Error("preload bridge not yet implemented — see IMPLEMENTATION_STEPS.md Step 5");
+/**
+ * Concrete implementation of the preload API contract.
+ */
+const api: PDVApi = {
+  kernels: {
+    list: () => ipcRenderer.invoke(IPC.kernels.list),
+    start: (spec) => ipcRenderer.invoke(IPC.kernels.start, spec),
+    stop: (kernelId) => ipcRenderer.invoke(IPC.kernels.stop, kernelId),
+    execute: (kernelId, request) =>
+      ipcRenderer.invoke(IPC.kernels.execute, kernelId, request),
+    interrupt: (kernelId) => ipcRenderer.invoke(IPC.kernels.interrupt, kernelId),
+    restart: (kernelId) => ipcRenderer.invoke(IPC.kernels.restart, kernelId),
+    complete: (kernelId, code, cursorPos) =>
+      ipcRenderer.invoke(IPC.kernels.complete, kernelId, code, cursorPos),
+    inspect: (kernelId, code, cursorPos) =>
+      ipcRenderer.invoke(IPC.kernels.inspect, kernelId, code, cursorPos),
+    validate: (executablePath, language) =>
+      ipcRenderer.invoke(IPC.kernels.validate, executablePath, language),
   },
-} satisfies Partial<Window["pdv"]>);
+  tree: {
+    list: (kernelId, nodePath = "") =>
+      ipcRenderer.invoke(IPC.tree.list, kernelId, nodePath),
+    get: (kernelId, nodePath) =>
+      ipcRenderer.invoke(IPC.tree.get, kernelId, nodePath),
+    createScript: (kernelId, targetPath, scriptName) =>
+      ipcRenderer.invoke(IPC.tree.createScript, kernelId, targetPath, scriptName),
+    onChanged: (callback) => onPush(IPC.push.treeChanged, callback),
+  },
+  namespace: {
+    query: (kernelId, options) =>
+      ipcRenderer.invoke(IPC.namespace.query, kernelId, options),
+  },
+  script: {
+    edit: (scriptPath) => ipcRenderer.invoke(IPC.script.edit, scriptPath),
+    reload: (scriptPath) => ipcRenderer.invoke(IPC.script.reload, scriptPath),
+  },
+  project: {
+    save: (saveDir, commandBoxes) =>
+      ipcRenderer.invoke(IPC.project.save, saveDir, commandBoxes),
+    load: (saveDir) => ipcRenderer.invoke(IPC.project.load, saveDir),
+    new: () => ipcRenderer.invoke(IPC.project.new),
+    onLoaded: (callback) => onPush(IPC.push.projectLoaded, callback),
+  },
+  config: {
+    get: () => ipcRenderer.invoke(IPC.config.get),
+    set: (updates) => ipcRenderer.invoke(IPC.config.set, updates),
+  },
+  themes: {
+    get: () => ipcRenderer.invoke(IPC.themes.get),
+    save: (theme) => ipcRenderer.invoke(IPC.themes.save, theme),
+  },
+  commandBoxes: {
+    load: () => ipcRenderer.invoke(IPC.commandBoxes.load),
+    save: (data) => ipcRenderer.invoke(IPC.commandBoxes.save, data),
+  },
+};
 
-// ---------------------------------------------------------------------------
-// Window type augmentation
-// ---------------------------------------------------------------------------
+contextBridge.exposeInMainWorld("pdv", api);
 
 declare global {
   interface Window {
-    pdv: {
-      execute(code: string): Promise<void>;
-      restartKernel(): Promise<void>;
-      treeList(path: string): Promise<unknown[]>;
-      treeGet(path: string, mode: string): Promise<unknown>;
-      namespaceQuery(options: {
-        includePrivate?: boolean;
-        includeModules?: boolean;
-        includeCallables?: boolean;
-      }): Promise<Record<string, unknown>>;
-      projectSave(saveDir: string, commandBoxes: unknown[]): Promise<void>;
-      projectLoad(saveDir: string): Promise<unknown[]>;
-      openDirDialog(): Promise<string | null>;
-      configGet(key: string): Promise<unknown>;
-      configSet(key: string, value: unknown): Promise<void>;
-      onTreeChanged(handler: (payload: unknown) => void): () => void;
-      onProjectLoaded(handler: (payload: unknown) => void): () => void;
-      onKernelStatus(handler: (status: string) => void): () => void;
-    };
+    /** Typed preload bridge available in the renderer process. */
+    pdv: PDVApi;
   }
 }
+

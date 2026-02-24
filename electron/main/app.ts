@@ -1,42 +1,32 @@
 /**
- * app.ts — Electron app lifecycle (BrowserWindow creation, app events).
+ * app.ts — Electron app lifecycle and BrowserWindow creation.
  *
- * Handles:
- * - Creating the BrowserWindow with the correct preload script.
- * - Loading the renderer URL (Vite dev server in development, file:// in production).
- * - Responding to ``app.on('activate')`` (macOS dock click).
- * - Calling ``registerIpcHandlers()`` after the window is ready.
- * - Graceful shutdown sequence on window-close.
- *
- * Does NOT own the kernel or comm layer — those are owned by index.ts and
- * passed in.
+ * Owns BrowserWindow creation/loading and high-level Electron app events.
+ * Kernel/comm business logic remains in `index.ts` and injected dependencies.
  *
  * See Also
  * --------
- * ARCHITECTURE.md §4.1 (startup), §6.3 (shutdown)
- * index.ts — the entry point that calls createWindow()
+ * ARCHITECTURE.md §4.1, §11.1
+ * index.ts — IPC handler registration and push forwarding
  */
 
 import { BrowserWindow, app } from "electron";
 import * as path from "path";
+
 import { KernelManager } from "./kernel-manager";
 import { CommRouter } from "./comm-router";
 import { ProjectManager } from "./project-manager";
 import { ConfigStore } from "./config";
-import { registerIpcHandlers, registerPushForwarding } from "./ipc";
-
-// ---------------------------------------------------------------------------
-// Window creation
-// ---------------------------------------------------------------------------
+import { registerIpcHandlers } from "./index";
 
 /**
- * Create the main BrowserWindow and load the renderer.
+ * Create and initialize the main BrowserWindow.
  *
- * @param kernelManager - An already-started KernelManager.
- * @param commRouter - The CommRouter from the kernel.
- * @param projectManager - The ProjectManager.
- * @param configStore - The ConfigStore.
- * @returns The created BrowserWindow.
+ * @param kernelManager - Active kernel manager instance.
+ * @param commRouter - Active comm router instance.
+ * @param projectManager - Active project manager instance.
+ * @param configStore - Active config store instance.
+ * @returns Created BrowserWindow.
  */
 export async function createWindow(
   kernelManager: KernelManager,
@@ -44,26 +34,66 @@ export async function createWindow(
   projectManager: ProjectManager,
   configStore: ConfigStore
 ): Promise<BrowserWindow> {
-  // TODO: implement in Step 5
-  throw new Error("createWindow not yet implemented");
+  const win = new BrowserWindow({
+    width: 1440,
+    height: 960,
+    webPreferences: {
+      preload: path.join(__dirname, "..", "preload.js"),
+      contextIsolation: true,
+      nodeIntegration: false,
+    },
+  });
+
+  registerIpcHandlers(win, kernelManager, commRouter, projectManager, configStore);
+
+  const devServerUrl = process.env.VITE_DEV_SERVER_URL;
+  if (process.env.NODE_ENV === "development" && devServerUrl) {
+    await win.loadURL(devServerUrl);
+  } else {
+    await win.loadFile(path.join(__dirname, "..", "renderer", "dist", "index.html"));
+  }
+
+  return win;
 }
 
-// ---------------------------------------------------------------------------
-// App event wiring
-// ---------------------------------------------------------------------------
-
 /**
- * Wire up ``app.on('activate')`` and ``app.on('window-all-closed')``
- * for macOS and cross-platform behaviour.
+ * Register core Electron app events.
  *
- * Called once from index.ts after the app is ready.
- *
- * @param getKernelManager - Returns the current KernelManager (may be null
- *   if the kernel hasn't started yet).
+ * @param getKernelManager - Lazy getter for the current kernel manager.
  */
 export function wireAppEvents(
   getKernelManager: () => KernelManager | null
 ): void {
-  // TODO: implement in Step 5
-  throw new Error("wireAppEvents not yet implemented");
+  app.on("window-all-closed", () => {
+    if (process.platform !== "darwin") {
+      app.quit();
+    }
+  });
+
+  // Guard against re-entry: Electron fires `before-quit` again after we call
+  // `app.quit()` once async shutdown is complete.
+  let isShuttingDown = false;
+
+  app.on("before-quit", (event) => {
+    const kernelManager = getKernelManager();
+    if (!kernelManager || isShuttingDown) {
+      return;
+    }
+    // Prevent the default quit so we can await async cleanup first.
+    event.preventDefault();
+    isShuttingDown = true;
+    kernelManager
+      .shutdownAll()
+      .catch((error: unknown) => {
+        console.error("[PDV] Failed to shutdown kernels during quit:", error);
+      })
+      .finally(() => {
+        app.quit();
+      });
+  });
+
+  app.on("activate", () => {
+    // Window re-creation is coordinated by the main startup module.
+  });
 }
+
