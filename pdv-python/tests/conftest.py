@@ -33,15 +33,17 @@ def tmp_working_dir() -> Generator[str, None, None]:
 
     The directory is deleted after the test, even if it fails.
     """
-    # TODO: implement in Step 1
-    raise NotImplementedError
+    d = tempfile.mkdtemp(prefix="pdv-test-work-")
+    yield os.path.realpath(d)
+    shutil.rmtree(d, ignore_errors=True)
 
 
 @pytest.fixture()
 def tmp_save_dir() -> Generator[str, None, None]:
     """Yield a freshly created temporary project save directory."""
-    # TODO: implement in Step 1
-    raise NotImplementedError
+    d = tempfile.mkdtemp(prefix="pdv-test-save-")
+    yield os.path.realpath(d)
+    shutil.rmtree(d, ignore_errors=True)
 
 
 @pytest.fixture()
@@ -57,19 +59,44 @@ def mock_send() -> MagicMock:
             call_type, call_payload = mock_send.call_args[0]
             assert call_type == 'pdv.tree.changed'
     """
-    # TODO: implement in Step 1
-    raise NotImplementedError
+    return MagicMock()
 
 
 @pytest.fixture()
 def tree_with_comm(tmp_working_dir, mock_send):
     """Return a PDVTree attached to mock_send, with working_dir set."""
-    # TODO: implement in Step 1
-    raise NotImplementedError
+    from pdv_kernel.tree import PDVTree
+
+    tree = PDVTree()
+    tree._set_working_dir(tmp_working_dir)
+    tree._attach_comm(mock_send)
+    return tree
 
 
 @pytest.fixture()
 def fresh_namespace(tree_with_comm):
     """Return a PDVNamespace with pdv_tree and pdv pre-injected."""
-    # TODO: implement in Step 2
-    raise NotImplementedError
+    from pdv_kernel.namespace import PDVApp, PDVNamespace
+
+    ns = PDVNamespace()
+    dict.__setitem__(ns, "pdv_tree", tree_with_comm)
+    dict.__setitem__(ns, "pdv", PDVApp())
+    return ns
+
+
+@pytest.fixture()
+def mock_ipython(tree_with_comm):
+    """Return a mock IPython shell with a PDVNamespace user_ns.
+
+    The namespace already contains pdv_tree and pdv.
+    """
+    from pdv_kernel.namespace import PDVApp, PDVNamespace
+
+    ns = PDVNamespace()
+    dict.__setitem__(ns, "pdv_tree", tree_with_comm)
+    dict.__setitem__(ns, "pdv", PDVApp())
+
+    ip = MagicMock()
+    ip.user_ns = ns
+    ip.comm_manager = MagicMock()
+    return ip

@@ -54,5 +54,44 @@ def bootstrap(ip=None):
     --------
     ARCHITECTURE.md §4.1 (startup sequence), §5.3 (bootstrap detail)
     """
-    # TODO: implement in Step 2
-    raise NotImplementedError("bootstrap() not yet implemented — see IMPLEMENTATION_STEPS.md Step 2")
+    import pdv_kernel.comms as comms_mod  # noqa: PLC0415
+
+    if comms_mod._bootstrapped:
+        return
+
+    if ip is None:
+        try:
+            import IPython  # noqa: PLC0415
+
+            ip = IPython.get_ipython()
+        except ImportError:
+            pass
+
+    from pdv_kernel.namespace import PDVApp, PDVNamespace  # noqa: PLC0415
+    from pdv_kernel.tree import PDVTree  # noqa: PLC0415
+
+    # Create the tree and app objects
+    tree = PDVTree()
+    app = PDVApp()
+
+    # Install the protected namespace and inject pdv_tree and pdv
+    if ip is not None:
+        existing = dict(ip.user_ns)
+        protected_ns = PDVNamespace(existing)
+        # Bypass protection to inject PDV names (bootstrap is the only caller)
+        dict.__setitem__(protected_ns, "pdv_tree", tree)
+        dict.__setitem__(protected_ns, "pdv", app)
+        ip.user_ns = protected_ns
+
+    # Store references in comms module for handler use
+    comms_mod._pdv_tree = tree
+    comms_mod._ip = ip
+
+    # Attach the comm send function to the tree for push notifications
+    tree._attach_comm(lambda msg_type, payload: comms_mod.send_message(msg_type, payload))
+
+    # Register the comm target with IPython so the app can connect
+    if ip is not None:
+        comms_mod.register_comm_target(ip)
+
+    comms_mod._bootstrapped = True

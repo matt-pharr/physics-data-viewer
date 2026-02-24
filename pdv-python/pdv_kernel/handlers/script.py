@@ -41,8 +41,48 @@ def handle_script_register(msg: dict) -> None:
     msg : dict
         Parsed PDV message envelope.
     """
-    # TODO: implement in Step 2
-    raise NotImplementedError
+    from pdv_kernel.comms import get_pdv_tree, send_error, send_message  # noqa: PLC0415
+    from pdv_kernel.tree import PDVScript  # noqa: PLC0415
+
+    msg_id = msg.get("msg_id")
+    payload = msg.get("payload", {})
+    parent_path = payload.get("parent_path", "")
+    name = payload.get("name", "")
+    relative_path = payload.get("relative_path", "")
+    language = payload.get("language", "python")
+
+    if not name:
+        send_error(
+            "pdv.script.register.response",
+            "script.missing_name",
+            "name is required in pdv.script.register payload",
+            in_reply_to=msg_id,
+        )
+        return
+    if not relative_path:
+        send_error(
+            "pdv.script.register.response",
+            "script.missing_relative_path",
+            "relative_path is required in pdv.script.register payload",
+            in_reply_to=msg_id,
+        )
+        return
+
+    tree = get_pdv_tree()
+    if tree is None:
+        send_error(
+            "pdv.script.register.response",
+            "script.no_tree",
+            "PDVTree is not initialized",
+            in_reply_to=msg_id,
+        )
+        return
+
+    script = PDVScript(relative_path=relative_path, language=language)
+    full_path = f"{parent_path}.{name}" if parent_path else name
+    tree[full_path] = script
+
+    send_message("pdv.script.register.response", {"path": full_path}, in_reply_to=msg_id)
 
 
 register("pdv.script.register", handle_script_register)

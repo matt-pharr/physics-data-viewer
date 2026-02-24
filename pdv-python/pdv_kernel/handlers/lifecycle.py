@@ -41,8 +41,39 @@ def handle_init(msg: dict) -> None:
     msg : dict
         Parsed PDV message envelope.
     """
-    # TODO: implement in Step 2
-    raise NotImplementedError
+    from pdv_kernel.comms import get_pdv_tree, send_error, send_message  # noqa: PLC0415
+    from pdv_kernel.environment import validate_working_dir  # noqa: PLC0415
+    from pdv_kernel.errors import PDVPathError  # noqa: PLC0415
+
+    msg_id = msg.get("msg_id")
+    payload = msg.get("payload", {})
+    working_dir = payload.get("working_dir")
+
+    if not working_dir:
+        send_error(
+            "pdv.init.response",
+            "init.missing_working_dir",
+            "working_dir is required in the pdv.init payload",
+            in_reply_to=msg_id,
+        )
+        return
+
+    try:
+        validated = validate_working_dir(working_dir)
+    except PDVPathError as exc:
+        send_error(
+            "pdv.init.response",
+            "init.invalid_working_dir",
+            str(exc),
+            in_reply_to=msg_id,
+        )
+        return
+
+    tree = get_pdv_tree()
+    if tree is not None:
+        tree._set_working_dir(validated)
+
+    send_message("pdv.init.response", {}, in_reply_to=msg_id)
 
 
 register("pdv.init", handle_init)

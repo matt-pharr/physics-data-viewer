@@ -50,8 +50,13 @@ def make_working_dir(base_tmp_dir: str) -> str:
     PDVPathError
         If ``base_tmp_dir`` does not exist or is not a directory.
     """
-    # TODO: implement in Step 1
-    raise NotImplementedError
+    import tempfile
+
+    if not os.path.exists(base_tmp_dir):
+        raise PDVPathError(f"Base temporary directory does not exist: {base_tmp_dir}")
+    if not os.path.isdir(base_tmp_dir):
+        raise PDVPathError(f"Base temporary path is not a directory: {base_tmp_dir}")
+    return tempfile.mkdtemp(prefix="pdv-", dir=base_tmp_dir)
 
 
 def validate_working_dir(path: str) -> str:
@@ -72,8 +77,14 @@ def validate_working_dir(path: str) -> str:
     PDVPathError
         If the path does not exist, is not a directory, or is not writable.
     """
-    # TODO: implement in Step 1
-    raise NotImplementedError
+    resolved = os.path.realpath(path)
+    if not os.path.exists(resolved):
+        raise PDVPathError(f"Working directory does not exist: {path}")
+    if not os.path.isdir(resolved):
+        raise PDVPathError(f"Working directory path is not a directory: {path}")
+    if not os.access(resolved, os.W_OK):
+        raise PDVPathError(f"Working directory is not writable: {path}")
+    return resolved
 
 
 def resolve_project_path(relative_path: str, project_root: str) -> str:
@@ -97,8 +108,15 @@ def resolve_project_path(relative_path: str, project_root: str) -> str:
     PDVPathError
         If the path is absolute, escapes the project root, or is otherwise unsafe.
     """
-    # TODO: implement in Step 1
-    raise NotImplementedError
+    if os.path.isabs(relative_path):
+        raise PDVPathError(f"Expected a relative path, got absolute path: {relative_path}")
+    candidate = os.path.realpath(os.path.join(project_root, relative_path))
+    root = os.path.realpath(project_root)
+    if not path_is_safe(candidate, root):
+        raise PDVPathError(
+            f"Path '{relative_path}' escapes the project root '{project_root}'"
+        )
+    return candidate
 
 
 def path_is_safe(candidate: str, root: str) -> bool:
@@ -116,8 +134,12 @@ def path_is_safe(candidate: str, root: str) -> bool:
     bool
         True if ``candidate`` is equal to or a descendant of ``root``.
     """
-    # TODO: implement in Step 1
-    raise NotImplementedError
+    try:
+        candidate_real = os.path.realpath(candidate)
+        root_real = os.path.realpath(root)
+        return candidate_real == root_real or candidate_real.startswith(root_real + os.sep)
+    except Exception:
+        return False
 
 
 def working_dir_tree_path(working_dir: str, tree_path: str, extension: str) -> str:
@@ -146,8 +168,8 @@ def working_dir_tree_path(working_dir: str, tree_path: str, extension: str) -> s
     >>> working_dir_tree_path('/tmp/pdv-abc', 'data.waveforms.ch1', '.npy')
     '/tmp/pdv-abc/tree/data/waveforms/ch1.npy'
     """
-    # TODO: implement in Step 1
-    raise NotImplementedError
+    parts = tree_path.split(".")
+    return os.path.join(working_dir, "tree", *parts[:-1], parts[-1] + extension)
 
 
 def ensure_parent(path: str) -> str:
@@ -163,5 +185,5 @@ def ensure_parent(path: str) -> str:
     str
         The input ``path`` unchanged (for chaining convenience).
     """
-    # TODO: implement in Step 1
-    raise NotImplementedError
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    return path
