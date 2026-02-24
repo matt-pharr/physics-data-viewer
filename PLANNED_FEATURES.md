@@ -181,7 +181,26 @@ The alpha testing strategy (ARCHITECTURE.md §14) covers unit tests for Python a
 
 ---
 
-## 11) Known Design Tensions to Resolve
+## 11) R Kernel Support
+
+### Goal
+R is widely used in experimental physics communities for statistical analysis and data visualization. The PDV comm protocol is language-agnostic (ARCHITECTURE.md §3), and the architecture already lists R support under explicit future deferral alongside Julia (ARCHITECTURE.md §15). R has lower priority than Julia — add Julia first, then use the same infrastructure for R.
+
+### Planned work
+- **IRkernel**: R support in Jupyter uses [IRkernel](https://irkernel.github.io/). `KernelManager` kernel launch and ZeroMQ socket management are identical to Python and Julia — no transport changes needed.
+- **`pdv-r` package**: R equivalent of `pdv-python`, implemented as an R package. Registers the `pdv.kernel` comm target with IRkernel, implements `PDVTree` as an R environment subclass, and handles all PDV message types. Serialization: Parquet is well-supported via the `arrow` R package; `.npy` for ndarray exchange with Python requires a bridge (the `reticulate` package or a standalone npy reader).
+- **Project-level language selection**: `project.json` `language_mode` (already in schema, ARCHITECTURE.md §6.2) gains `"r"` as a valid value.
+- **Script nodes**: `PDVScript` nodes in R projects use `.R` files. The `language` field in the node descriptor (ARCHITECTURE.md §7.3) is already a free string for this purpose.
+- **Autocompletion**: `complete_request` is language-agnostic; register an R completion provider in `CommandBox` using the same IPC channel as Python and Julia (see item 5).
+- **R integration tests**: Parity test suite comparable to the Python pytest suite, run against a real IRkernel process.
+
+### Notes
+- R is the lowest-priority language target. Do not begin until Julia support is complete and validated.
+- Cross-language data exchange between R and Python projects (e.g., opening a Python-saved project in an R session) requires that shared formats (Parquet, JSON scalars) are handled correctly by both the `pdv-python` and `pdv-r` serializers. `.npy` files written by Python sessions are not natively readable in R without a bridge.
+
+---
+
+## 12) Known Design Tensions to Resolve
 
 These are architectural decisions in the current design that are correct in scope for alpha but will create friction as the system grows.
 
@@ -199,25 +218,26 @@ Console output is intentionally not persisted (ARCHITECTURE.md §9.4). If the op
 
 ---
 
-## 12) Suggested Implementation Sequence (Post-Alpha)
+## 13) Suggested Implementation Sequence (Post-Alpha)
 
 Recommended priority order for features above:
 
-1. Kernel-backed autocompletion (item 5) — high value, low scope, fits cleanly into existing IPC
-2. Advanced lazy loading — chunked reads for HDF5/Zarr/Parquet (item 1)
-3. Tree watchers and hot reload (item 7)
-4. SSH/SFTP remote data connector (item 4, connector phase only)
-5. Modules system — manifest + install + action binding (item 2)
+1. Modules system — manifest + install + action binding (item 2)
+2. Kernel-backed autocompletion (item 5) — high value, low scope, fits cleanly into existing IPC
+3. Advanced lazy loading — chunked reads for HDF5/Zarr/Parquet (item 1)
+4. Tree watchers and hot reload (item 7)
+5. SSH/SFTP remote data connector (item 4, connector phase only)
 6. Julia parity + tests (item 3)
 7. Rich document artifacts — Markdown and PDF (item 6)
 8. Remote kernel execution — transport abstraction + SSH tunnel (item 4, execution phase)
 9. Security and trust model (item 9) — required before community module distribution
 10. Session restore and execution history (item 8)
 11. E2E test infrastructure expansion (item 10)
+12. R kernel support (item 11) — lowest priority; begin only after Julia is complete
 
 ---
 
-## 13) Definition of "Feature Complete" (relative to current vision)
+## 14) Definition of "Feature Complete" (relative to current vision)
 
 PDV can be considered close to the described target when all of the following are true:
 
@@ -231,3 +251,4 @@ PDV can be considered close to the described target when all of the following ar
 - Remote kernel execution is production-usable
 - Markdown and PDF artifacts integrate naturally into the tree workflow
 - A trust model governs untrusted projects and unsigned modules
+- Python and Julia have practical parity for all core workflows; R support is a bonus, not a requirement
