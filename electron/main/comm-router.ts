@@ -31,18 +31,29 @@ export type PushHandler = (msg: PDVEnvelope) => void;
 
 export class CommRouter {
   /**
-   * Construct a CommRouter.
+   * ⚠️  SKELETON DISCREPANCY — read before implementing.
    *
-   * @param sendFn - Async function that sends a raw data payload over the
-   *   Jupyter comm channel. Provided by KernelManager.
+   * This constructor signature is WRONG. It was generated as a placeholder.
+   * The correct interface is attach/detach, not a constructor sendFn.
    *
-   * Reference: ARCHITECTURE.md §3.3
+   * DO NOT implement this constructor. Instead implement:
+   *
+   *   attach(kernelManager: KernelManager, kernelId: string): void
+   *     Subscribes to onIopubMessage for the given kernel. Opens the
+   *     pdv.kernel comm on the shell socket.
+   *
+   *   detach(): void
+   *     Unsubscribes from iopub, rejects all pending requests.
+   *
+   * See IMPLEMENTATION_STEPS.md Step 4 and ARCHITECTURE.md §3.3 for the
+   * full authoritative interface.
+   *
+   * @deprecated — replace this entire constructor with attach/detach.
    */
-  constructor(
-    private readonly sendFn: (data: Record<string, unknown>) => Promise<void>
-  ) {
-    // TODO: implement in Step 3
-    throw new Error("CommRouter constructor not yet implemented");
+  constructor() {
+    // TODO: Replace with attach(kernelManager, kernelId): void
+    // See IMPLEMENTATION_STEPS.md Step 4 — this constructor is wrong.
+    throw new Error("CommRouter: do not implement this constructor — see IMPLEMENTATION_STEPS.md Step 4");
   }
 
   /**

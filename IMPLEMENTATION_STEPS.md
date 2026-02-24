@@ -204,6 +204,22 @@ electron/
   - `detach()` — unsubscribes from iopub, rejects all pending requests with a cancellation error
   - Internal: `_handleIopubMessage(raw)` — parses frame, validates envelope, dispatches to pending registry or push listeners
 
+### ⚠️ Skeleton file discrepancy
+
+The skeleton file `electron/main/comm-router.ts` was generated with a simplified constructor:
+
+```ts
+constructor(private readonly sendFn: (data: Record<string, unknown>) => Promise<void>)
+```
+
+**This is wrong.** The correct interface (as specified above and in ARCHITECTURE.md §3.3) is:
+
+```ts
+attach(kernelManager: KernelManager, kernelId: string): void
+```
+
+Ignore the skeleton constructor. Implement `CommRouter` with the `attach()` / `detach()` pattern. The skeleton is scaffolding only — ARCHITECTURE.md and these step descriptions take precedence over it in all cases.
+
 ### Tests to confirm completion
 ```bash
 cd electron && npm test -- --reporter=verbose comm-router
