@@ -24,12 +24,15 @@ import {
   ScriptParameter,
   CommandBoxData,
   Theme,
+  LspUserConfig,
 } from './ipc';
 import { getKernelManager, resetKernelManager, safeJsonParse } from './kernel-manager';
 import { loadConfig, loadThemes, saveTheme, updateConfig } from './config';
 import { spawn } from 'child_process';
 import * as os from 'os';
 import { FileScanner } from './file-scanner';
+import { getLspRegistry } from './lsp-registry';
+import { getLspServerManager, resetLspServerManager } from './lsp-server-manager';
 
 /**
  * Resolve and validate that a file path stays within an allowed root directory.
@@ -103,6 +106,8 @@ if (!canRegisterHandlers) {
       closeAllFileWatchers();
       await kernelManager.shutdownAll();
       resetKernelManager();
+      await getLspServerManager().shutdownAll();
+      resetLspServerManager();
     });
   }
 
@@ -843,6 +848,66 @@ if (!canRegisterHandlers) {
       return true;
     } catch (error) {
       console.error('[IPC] commandBoxes:save error:', error);
+      return false;
+    }
+  });
+
+  // ============================================================================
+  // LSP Handlers
+  // ============================================================================
+
+  const lspManager = getLspServerManager();
+  const lspRegistry = getLspRegistry();
+
+  // Kick off background detection for all registered languages on startup
+  void lspManager.detectAll();
+
+  ipcMain.handle(IPC.lsp.list, async () => {
+    const defs = lspRegistry.list();
+    const config = loadConfig();
+    return defs.map((def) => ({
+      languageId: def.languageId,
+      displayName: def.displayName,
+      fileExtensions: def.fileExtensions,
+      documentationUrl: def.documentationUrl,
+      installHint: def.installHint,
+      autoStartDefault: def.autoStartDefault,
+      source: def.source,
+      status: lspManager.getStatus(def.languageId),
+      userConfig: config.languageServers?.[def.languageId],
+    }));
+  });
+
+  ipcMain.handle(IPC.lsp.detect, async (_event, languageId: string) => {
+    const config = loadConfig();
+    return lspManager.detect(languageId, config.pythonPath);
+  });
+
+  ipcMain.handle(IPC.lsp.connect, async (_event, languageId: string) => {
+    return lspManager.connect(languageId);
+  });
+
+  ipcMain.handle(IPC.lsp.disconnect, async (_event, languageId: string) => {
+    await lspManager.disconnect(languageId);
+  });
+
+  ipcMain.handle(IPC.lsp.status, async (_event, languageId: string) => {
+    return lspManager.getStatus(languageId);
+  });
+
+  ipcMain.handle(IPC.lsp.configure, async (_event, languageId: string, userConfig: Partial<LspUserConfig>) => {
+    try {
+      const current = loadConfig();
+      const existing = current.languageServers?.[languageId] ?? { enabled: true, autoStart: false };
+      const updated = { ...existing, ...userConfig };
+      updateConfig({
+        languageServers: {
+          ...(current.languageServers ?? {}),
+          [languageId]: updated,
+        },
+      });
+      return true;
+    } catch {
       return false;
     }
   });

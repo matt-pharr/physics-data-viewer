@@ -58,6 +58,17 @@ export const IPC = {
     load: 'commandBoxes:load',
     save: 'commandBoxes:save',
   },
+  lsp: {
+    list: 'lsp:list',
+    detect: 'lsp:detect',
+    connect: 'lsp:connect',
+    disconnect: 'lsp:disconnect',
+    status: 'lsp:status',
+    configure: 'lsp:configure',
+    port: 'lsp:port',
+    /** Push notification from main → renderer */
+    stateChange: 'lsp:state-change',
+  },
 } as const;
 
 // ============================================================================
@@ -325,6 +336,59 @@ export interface Config {
       colors?: Record<string, string>;
     };
   };
+  /** Per-language LSP server user configuration */
+  languageServers?: Record<string, LspUserConfig>;
+}
+
+// ============================================================================
+// LSP Types
+// ============================================================================
+
+/** User-editable config for a single language server */
+export interface LspUserConfig {
+  /** Whether this language server is enabled (default: true) */
+  enabled: boolean;
+  /** Override command to launch the server */
+  command?: string;
+  /** Override arguments for the server */
+  args?: string[];
+  /** Manual port for connecting to an external server */
+  port?: number;
+  /** Automatically start the server when PDV launches */
+  autoStart: boolean;
+}
+
+export type LspConnectionState =
+  | 'not_configured'
+  | 'detecting'
+  | 'external_running'
+  | 'launchable'
+  | 'not_found'
+  | 'starting'
+  | 'connected'
+  | 'error'
+  | 'disabled';
+
+export interface LspServerStatus {
+  languageId: string;
+  state: LspConnectionState;
+  proxyPort?: number;
+  detectedCommand?: string;
+  detectedPort?: number;
+  errorMessage?: string;
+  displayName?: string;
+}
+
+export interface LspServerInfo {
+  languageId: string;
+  displayName: string;
+  fileExtensions: string[];
+  documentationUrl: string;
+  installHint: string;
+  autoStartDefault: boolean;
+  source?: string;
+  status: LspServerStatus;
+  userConfig?: LspUserConfig;
 }
 
 export interface Theme {
@@ -392,6 +456,22 @@ export interface PDVApi {
   commandBoxes: {
     load: () => Promise<CommandBoxData | null>;
     save: (data: CommandBoxData) => Promise<boolean>;
+  };
+  lsp: {
+    /** List all registered language server definitions with their current status */
+    list: () => Promise<LspServerInfo[]>;
+    /** Probe for a specific language server and return updated status */
+    detect: (languageId: string) => Promise<LspServerStatus>;
+    /** Connect (spawn or attach) to the language server for languageId */
+    connect: (languageId: string) => Promise<LspServerStatus>;
+    /** Disconnect from the language server for languageId */
+    disconnect: (languageId: string) => Promise<void>;
+    /** Get current connection status for a language */
+    status: (languageId: string) => Promise<LspServerStatus>;
+    /** Update user config for a language server */
+    configure: (languageId: string, config: Partial<LspUserConfig>) => Promise<boolean>;
+    /** Subscribe to state change push events */
+    onStateChange: (callback: (status: LspServerStatus) => void) => () => void;
   };
 }
 

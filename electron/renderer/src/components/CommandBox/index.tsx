@@ -2,6 +2,8 @@ import React, { useEffect, useMemo, useRef } from 'react';
 import Editor, { type OnMount } from '@monaco-editor/react';
 import type * as monaco from 'monaco-editor';
 import type { CommandTab } from '../../types';
+import { LspClient } from '../../services/lsp-client';
+import type { LspConnectionState } from '../../../../main/ipc';
 
 export interface CommandBoxProps {
   tabs: (CommandTab & { onChange: (code: string) => void })[];
@@ -13,6 +15,35 @@ export interface CommandBoxProps {
   onClear: () => void;
   isExecuting: boolean;
   lastError?: string;
+  /** When provided, connect this LSP proxy port for Python intelligence */
+  lspProxyPort?: number;
+  /** Current LSP connection state for status indicator */
+  lspState?: LspConnectionState;
+  /** Called when the user clicks the LSP status indicator */
+  onLspStatusClick?: () => void;
+}
+
+function lspStatusLabel(state: LspConnectionState | undefined): { dot: string; title: string } {
+  switch (state) {
+    case 'connected':
+      return { dot: '🟢', title: 'Language server connected' };
+    case 'starting':
+      return { dot: '🟡', title: 'Language server starting…' };
+    case 'detecting':
+      return { dot: '🟡', title: 'Detecting language server…' };
+    case 'launchable':
+      return { dot: '🟠', title: 'Language server available but not started — click to configure' };
+    case 'external_running':
+      return { dot: '🟠', title: 'External language server found — click to connect' };
+    case 'not_found':
+      return { dot: '⚫', title: 'No language server found — click to configure' };
+    case 'error':
+      return { dot: '🔴', title: 'Language server error — click to configure' };
+    case 'disabled':
+      return { dot: '⚫', title: 'Language server disabled' };
+    default:
+      return { dot: '⚫', title: 'Language server not configured — click to set up' };
+  }
 }
 
 export const CommandBox: React.FC<CommandBoxProps> = ({
@@ -25,11 +56,18 @@ export const CommandBox: React.FC<CommandBoxProps> = ({
   onClear,
   isExecuting,
   lastError,
+  lspProxyPort,
+  lspState,
+  onLspStatusClick,
 }) => {
   const editorRef = useRef<monaco.editor.IStandaloneCodeEditor | null>(null);
+  const monacoRef = useRef<typeof monaco | null>(null);
   const activeTab = useMemo(() => tabs.find((tab) => tab.id === activeTabId), [tabs, activeTabId]);
   const activeTabRef = useRef(activeTab);
   const isExecutingRef = useRef(isExecuting);
+  const lspClientRef = useRef<LspClient | null>(null);
+  const activeDocUriRef = useRef<string | null>(null);
+  const changeDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     activeTabRef.current = activeTab;
@@ -39,18 +77,69 @@ export const CommandBox: React.FC<CommandBoxProps> = ({
     isExecutingRef.current = isExecuting;
   }, [isExecuting]);
 
+  // Connect / disconnect LSP client when proxyPort changes
+  useEffect(() => {
+    if (!lspProxyPort || !monacoRef.current) return;
+
+    const client = new LspClient('python');
+    lspClientRef.current = client;
+
+    const workspaceRoot = '/'; // LSP workspace; improves with project root
+    client
+      .connect(lspProxyPort, monacoRef.current, workspaceRoot)
+      .then(() => {
+        console.log('[CommandBox] LSP client connected');
+        // Open the current active tab as a document
+        if (activeTabRef.current) {
+          const uri = `pdv-memory://session/tab-${activeTabRef.current.id}.py`;
+          activeDocUriRef.current = uri;
+          client.openDocument(uri, 'python', activeTabRef.current.code);
+        }
+      })
+      .catch((err: unknown) => {
+        console.error('[CommandBox] LSP connect error:', err);
+      });
+
+    return () => {
+      client.dispose();
+      lspClientRef.current = null;
+    };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [lspProxyPort]);
+
+  // When active tab changes, notify LSP of the new document
+  useEffect(() => {
+    const client = lspClientRef.current;
+    if (!client || !client.isConnected || !activeTab) return;
+
+    const newUri = `pdv-memory://session/tab-${activeTab.id}.py`;
+    if (activeDocUriRef.current && activeDocUriRef.current !== newUri) {
+      // The old URI stays open (LSP caches it), we just switch focus
+    }
+    activeDocUriRef.current = newUri;
+    client.openDocument(newUri, 'python', activeTab.code);
+  }, [activeTab?.id]); // eslint-disable-line react-hooks/exhaustive-deps
+
   if (!activeTab) {
     return null;
   }
 
   const handleEditorMount: OnMount = (editor, monacoInstance) => {
     editorRef.current = editor;
+    monacoRef.current = monacoInstance;
 
     editor.addCommand(monacoInstance.KeyMod.CtrlCmd | monacoInstance.KeyCode.Enter, () => {
       if (!isExecutingRef.current && activeTabRef.current) {
         onExecute(activeTabRef.current.code);
       }
     });
+
+    // Register pdv-memory URI scheme so Monaco accepts our synthetic URIs
+    try {
+      monacoInstance.editor.createModel('', 'python', monacoInstance.Uri.parse('pdv-memory://session/init.py'));
+    } catch {
+      // Model may already exist on hot reload
+    }
   };
 
   const handleExecute = () => {
@@ -72,7 +161,22 @@ export const CommandBox: React.FC<CommandBoxProps> = ({
     }
   };
 
+  const handleCodeChange = (value: string) => {
+    activeTab.onChange(value);
+
+    // Debounce LSP didChange notifications (100ms)
+    if (changeDebounceRef.current) clearTimeout(changeDebounceRef.current);
+    changeDebounceRef.current = setTimeout(() => {
+      const client = lspClientRef.current;
+      const uri = activeDocUriRef.current;
+      if (client && client.isConnected && uri) {
+        client.changeDocument(uri, value);
+      }
+    }, 100);
+  };
+
   const isEmpty = !activeTab.code.trim();
+  const { dot, title } = lspStatusLabel(lspState);
 
   return (
     <section className="command-pane">
@@ -109,6 +213,14 @@ export const CommandBox: React.FC<CommandBoxProps> = ({
 
         <div className="pane-actions">
           <button
+            className="lsp-status-btn"
+            title={title}
+            onClick={onLspStatusClick}
+            aria-label={title}
+          >
+            {dot}
+          </button>
+          <button
             className="btn btn-primary"
             onClick={handleExecute}
             disabled={isExecuting || !activeTab.code.trim()}
@@ -127,7 +239,7 @@ export const CommandBox: React.FC<CommandBoxProps> = ({
           theme="vs-dark"
           language="python"
           value={activeTab.code}
-          onChange={(value) => activeTab.onChange(value || '')}
+          onChange={(value) => handleCodeChange(value || '')}
           onMount={handleEditorMount}
           options={{
             minimap: { enabled: false },

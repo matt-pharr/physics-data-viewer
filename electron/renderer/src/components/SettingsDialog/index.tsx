@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import type { Config, Theme } from '../../../../main/ipc';
+import type { Config, Theme, LspServerInfo, LspUserConfig } from '../../../../main/ipc';
 
-type SettingsTab = 'shortcuts' | 'appearance' | 'runtime';
+type SettingsTab = 'shortcuts' | 'appearance' | 'runtime' | 'lsp';
 const DEFAULT_OPEN_SETTINGS_SHORTCUT = 'CommandOrControl+,';
 const CUSTOM_THEME_PREFIX = 'Custom Theme';
 
@@ -18,9 +18,11 @@ interface SettingsDialogProps {
   config: Config | null;
   onClose: () => void;
   onSave: (updates: Partial<Config>) => Promise<void>;
+  /** If provided, the dialog opens directly on the Language Servers tab */
+  openOnLspTab?: boolean;
 }
 
-export const SettingsDialog: React.FC<SettingsDialogProps> = ({ isOpen, config, onClose, onSave }) => {
+export const SettingsDialog: React.FC<SettingsDialogProps> = ({ isOpen, config, onClose, onSave, openOnLspTab }) => {
   const [activeTab, setActiveTab] = useState<SettingsTab>('shortcuts');
   const [themes, setThemes] = useState<Theme[]>([]);
   const [shortcut, setShortcut] = useState(DEFAULT_OPEN_SETTINGS_SHORTCUT);
@@ -31,9 +33,12 @@ export const SettingsDialog: React.FC<SettingsDialogProps> = ({ isOpen, config, 
   const [juliaPath, setJuliaPath] = useState('julia');
   const [validating, setValidating] = useState(false);
   const [runtimeErrors, setRuntimeErrors] = useState<{ python?: string; julia?: string }>({});
+  const [lspServers, setLspServers] = useState<LspServerInfo[]>([]);
+  const [lspLoading, setLspLoading] = useState<Record<string, boolean>>({});
 
   useEffect(() => {
     if (!isOpen) return;
+    if (openOnLspTab) setActiveTab('lsp');
     const loadThemes = async () => {
       const loadedThemes = await window.pdv.themes.get();
       setThemes(loadedThemes);
@@ -48,7 +53,12 @@ export const SettingsDialog: React.FC<SettingsDialogProps> = ({ isOpen, config, 
     setRuntimeErrors({});
     setShortcut(config?.settings?.shortcuts?.openSettings ?? DEFAULT_OPEN_SETTINGS_SHORTCUT);
     void loadThemes();
-  }, [config, isOpen]);
+
+    // Load LSP server list
+    if (window.pdv.lsp) {
+      void window.pdv.lsp.list().then(setLspServers).catch(console.error);
+    }
+  }, [config, isOpen, openOnLspTab]);
 
   const selectedThemeColors = useMemo(
     () => themes.find((theme) => theme.name === selectedTheme)?.colors ?? {},
@@ -102,6 +112,57 @@ export const SettingsDialog: React.FC<SettingsDialogProps> = ({ isOpen, config, 
     if (language === 'julia') setJuliaPath(selected);
   };
 
+  const handleLspConnect = async (languageId: string) => {
+    if (!window.pdv.lsp) return;
+    setLspLoading((prev) => ({ ...prev, [languageId]: true }));
+    try {
+      const status = await window.pdv.lsp.connect(languageId);
+      setLspServers((prev) =>
+        prev.map((s) => (s.languageId === languageId ? { ...s, status } : s)),
+      );
+    } catch (err) {
+      console.error('[Settings] LSP connect error:', err);
+    } finally {
+      setLspLoading((prev) => ({ ...prev, [languageId]: false }));
+    }
+  };
+
+  const handleLspDisconnect = async (languageId: string) => {
+    if (!window.pdv.lsp) return;
+    setLspLoading((prev) => ({ ...prev, [languageId]: true }));
+    try {
+      await window.pdv.lsp.disconnect(languageId);
+      const status = await window.pdv.lsp.status(languageId);
+      setLspServers((prev) =>
+        prev.map((s) => (s.languageId === languageId ? { ...s, status } : s)),
+      );
+    } catch (err) {
+      console.error('[Settings] LSP disconnect error:', err);
+    } finally {
+      setLspLoading((prev) => ({ ...prev, [languageId]: false }));
+    }
+  };
+
+  const handleLspDetect = async (languageId: string) => {
+    if (!window.pdv.lsp) return;
+    setLspLoading((prev) => ({ ...prev, [languageId]: true }));
+    try {
+      const status = await window.pdv.lsp.detect(languageId);
+      setLspServers((prev) =>
+        prev.map((s) => (s.languageId === languageId ? { ...s, status } : s)),
+      );
+    } finally {
+      setLspLoading((prev) => ({ ...prev, [languageId]: false }));
+    }
+  };
+
+  const handleLspConfigure = async (languageId: string, cfg: Partial<LspUserConfig>) => {
+    if (!window.pdv.lsp) return;
+    await window.pdv.lsp.configure(languageId, cfg);
+    const updated = await window.pdv.lsp.list();
+    setLspServers(updated);
+  };
+
   return (
     <div className="modal-overlay">
       <div className="settings-dialog">
@@ -113,6 +174,7 @@ export const SettingsDialog: React.FC<SettingsDialogProps> = ({ isOpen, config, 
           <button className={`tab ${activeTab === 'shortcuts' ? 'active' : ''}`} onClick={() => setActiveTab('shortcuts')}>Keyboard Shortcuts</button>
           <button className={`tab ${activeTab === 'appearance' ? 'active' : ''}`} onClick={() => setActiveTab('appearance')}>Appearance</button>
           <button className={`tab ${activeTab === 'runtime' ? 'active' : ''}`} onClick={() => setActiveTab('runtime')}>Python Runtime</button>
+          <button className={`tab ${activeTab === 'lsp' ? 'active' : ''}`} onClick={() => setActiveTab('lsp')}>Language Servers</button>
         </div>
         <div className="dialog-body">
           {activeTab === 'shortcuts' ? (
@@ -151,6 +213,140 @@ export const SettingsDialog: React.FC<SettingsDialogProps> = ({ isOpen, config, 
                   </button>
                 </div>
               </div>
+            </div>
+          ) : activeTab === 'lsp' ? (
+            <div className="settings-lsp">
+              {lspServers.length === 0 ? (
+                <div className="help-text">Loading language server information…</div>
+              ) : (
+                lspServers.map((server) => {
+                  const loading = lspLoading[server.languageId] ?? false;
+                  const { state, proxyPort, detectedCommand, detectedPort, errorMessage } = server.status;
+                  const userCfg = server.userConfig;
+
+                  const statusColor =
+                    state === 'connected'
+                      ? '#4ec9b0'
+                      : state === 'starting' || state === 'detecting'
+                      ? '#dcdcaa'
+                      : state === 'launchable' || state === 'external_running'
+                      ? '#ce9178'
+                      : state === 'error'
+                      ? '#f48771'
+                      : '#858585';
+
+                  const stateLabel =
+                    state === 'connected'
+                      ? `Connected${proxyPort ? ` (port ${proxyPort})` : ''}`
+                      : state === 'external_running'
+                      ? `External server detected (port ${detectedPort})`
+                      : state === 'launchable'
+                      ? `Available: ${detectedCommand ?? 'found on PATH'}`
+                      : state === 'starting'
+                      ? 'Starting…'
+                      : state === 'detecting'
+                      ? 'Detecting…'
+                      : state === 'not_found'
+                      ? 'Not found'
+                      : state === 'error'
+                      ? `Error: ${errorMessage ?? 'unknown'}`
+                      : state === 'disabled'
+                      ? 'Disabled'
+                      : 'Not configured';
+
+                  return (
+                    <div className="settings-card" key={server.languageId}>
+                      <div className="lsp-card-header">
+                        <h4>{server.displayName} Language Server</h4>
+                        <span className="lsp-status-badge" style={{ color: statusColor }}>
+                          ● {stateLabel}
+                        </span>
+                      </div>
+
+                      {server.source && (
+                        <div className="help-text">Provided by module: {server.source}</div>
+                      )}
+
+                      <div className="lsp-card-actions">
+                        {state === 'connected' && (
+                          <button
+                            className="btn btn-secondary"
+                            disabled={loading}
+                            onClick={() => void handleLspDisconnect(server.languageId)}
+                          >
+                            {loading ? 'Stopping…' : 'Stop Server'}
+                          </button>
+                        )}
+                        {(state === 'launchable' || state === 'not_found' || state === 'error') && (
+                          <button
+                            className="btn btn-primary"
+                            disabled={loading || state === 'not_found'}
+                            onClick={() => void handleLspConnect(server.languageId)}
+                          >
+                            {loading ? 'Starting…' : 'Start Server'}
+                          </button>
+                        )}
+                        {state === 'external_running' && (
+                          <button
+                            className="btn btn-primary"
+                            disabled={loading}
+                            onClick={() => void handleLspConnect(server.languageId)}
+                          >
+                            {loading ? 'Connecting…' : 'Connect'}
+                          </button>
+                        )}
+                        <button
+                          className="btn btn-secondary"
+                          disabled={loading}
+                          onClick={() => void handleLspDetect(server.languageId)}
+                        >
+                          {loading ? 'Detecting…' : 'Re-detect'}
+                        </button>
+                      </div>
+
+                      <div className="input-group" style={{ marginTop: '0.75rem' }}>
+                        <label>Auto-start with PDV</label>
+                        <input
+                          type="checkbox"
+                          checked={userCfg?.autoStart ?? server.autoStartDefault}
+                          onChange={(e) =>
+                            void handleLspConfigure(server.languageId, { autoStart: e.target.checked })
+                          }
+                        />
+                      </div>
+
+                      <div className="input-group">
+                        <label>Custom command (optional)</label>
+                        <input
+                          type="text"
+                          placeholder={`e.g. ${server.installHint.split(' ')[0]}`}
+                          defaultValue={userCfg?.command ?? ''}
+                          onBlur={(e) => {
+                            const val = e.target.value.trim();
+                            void handleLspConfigure(server.languageId, { command: val || undefined });
+                          }}
+                        />
+                      </div>
+
+                      <div className="help-text">
+                        Install:{' '}
+                        <code style={{ fontFamily: 'monospace', fontSize: '0.85em' }}>
+                          {server.installHint}
+                        </code>{' '}
+                        ·{' '}
+                        <a
+                          href={server.documentationUrl}
+                          target="_blank"
+                          rel="noreferrer"
+                          style={{ color: 'var(--accent)' }}
+                        >
+                          Documentation →
+                        </a>
+                      </div>
+                    </div>
+                  );
+                })
+              )}
             </div>
           ) : (
             <div className="settings-appearance-layout">

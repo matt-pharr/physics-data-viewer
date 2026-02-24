@@ -8,7 +8,7 @@ import { ScriptDialog } from '../components/ScriptDialog';
 import { CreateScriptDialog } from '../components/Tree/CreateScriptDialog';
 import { SettingsDialog } from '../components/SettingsDialog';
 import type { CommandTab, LogEntry, TreeNodeData } from '../types';
-import type { Config } from '../../main/ipc';
+import type { Config, LspConnectionState } from '../../main/ipc';
 
 type Tab = 'tree' | 'namespace' | 'modules';
 type PlotMode = 'native' | 'capture';
@@ -60,6 +60,9 @@ const App: React.FC = () => {
   const [treeRefreshToken, setTreeRefreshToken] = useState(0);
   const [createScriptTarget, setCreateScriptTarget] = useState<string | null>(null);
   const [showSettings, setShowSettings] = useState(false);
+  const [settingsOpenOnLsp, setSettingsOpenOnLsp] = useState(false);
+  const [lspProxyPort, setLspProxyPort] = useState<number | undefined>(undefined);
+  const [lspState, setLspState] = useState<LspConnectionState | undefined>(undefined);
 
   // Load command boxes from filesystem on startup
   useEffect(() => {
@@ -148,6 +151,35 @@ const App: React.FC = () => {
       return;
     }
     const unsubscribe = window.pdv.settings.onOpen(() => setShowSettings(true));
+    return unsubscribe;
+  }, []);
+
+  // Subscribe to LSP state changes pushed from main process
+  useEffect(() => {
+    if (!window.pdv?.lsp?.onStateChange) return;
+
+    const unsubscribe = window.pdv.lsp.onStateChange((status) => {
+      if (status.languageId === 'python') {
+        setLspState(status.state);
+        if (status.state === 'connected' && status.proxyPort) {
+          setLspProxyPort(status.proxyPort);
+        } else if (status.state !== 'connected') {
+          setLspProxyPort(undefined);
+        }
+      }
+    });
+
+    // Trigger initial Python detection if we have a pythonPath
+    void window.pdv.lsp.list().then((servers) => {
+      const python = servers.find((s) => s.languageId === 'python');
+      if (python) {
+        setLspState(python.status.state);
+        if (python.status.state === 'connected' && python.status.proxyPort) {
+          setLspProxyPort(python.status.proxyPort);
+        }
+      }
+    }).catch(console.error);
+
     return unsubscribe;
   }, []);
 
@@ -529,6 +561,12 @@ const App: React.FC = () => {
             onClear={handleClearCommand}
             isExecuting={isExecuting}
             lastError={lastError}
+            lspProxyPort={lspProxyPort}
+            lspState={lspState}
+            onLspStatusClick={() => {
+              setSettingsOpenOnLsp(true);
+              setShowSettings(true);
+            }}
           />
         </div>
       </main>
@@ -614,8 +652,9 @@ const App: React.FC = () => {
        <SettingsDialog
          isOpen={showSettings}
          config={config}
-         onClose={() => setShowSettings(false)}
+         onClose={() => { setShowSettings(false); setSettingsOpenOnLsp(false); }}
          onSave={handleSettingsSave}
+         openOnLspTab={settingsOpenOnLsp}
        />
      </div>
    );

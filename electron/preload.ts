@@ -26,6 +26,9 @@ import type {
   ScriptParameter,
   CommandBoxData,
   Theme,
+  LspServerInfo,
+  LspServerStatus,
+  LspUserConfig,
 } from './main/ipc';
 
 // IPC channel names are duplicated here to keep preload runtime isolated from
@@ -78,6 +81,16 @@ const IPC = {
   commandBoxes: {
     load: 'commandBoxes:load',
     save: 'commandBoxes:save',
+  },
+  lsp: {
+    list: 'lsp:list',
+    detect: 'lsp:detect',
+    connect: 'lsp:connect',
+    disconnect: 'lsp:disconnect',
+    status: 'lsp:status',
+    configure: 'lsp:configure',
+    port: 'lsp:port',
+    stateChange: 'lsp:state-change',
   },
 } as const;
 
@@ -197,6 +210,34 @@ const api: PDVApi = {
       ipcRenderer.invoke(IPC.commandBoxes.load),
     save: (data: CommandBoxData): Promise<boolean> =>
       ipcRenderer.invoke(IPC.commandBoxes.save, data),
+  },
+
+  lsp: {
+    list: (): Promise<LspServerInfo[]> =>
+      ipcRenderer.invoke(IPC.lsp.list),
+
+    detect: (languageId: string): Promise<LspServerStatus> =>
+      ipcRenderer.invoke(IPC.lsp.detect, languageId),
+
+    connect: (languageId: string): Promise<LspServerStatus> =>
+      ipcRenderer.invoke(IPC.lsp.connect, languageId),
+
+    disconnect: (languageId: string): Promise<void> =>
+      ipcRenderer.invoke(IPC.lsp.disconnect, languageId),
+
+    status: (languageId: string): Promise<LspServerStatus> =>
+      ipcRenderer.invoke(IPC.lsp.status, languageId),
+
+    configure: (languageId: string, config: Partial<LspUserConfig>): Promise<boolean> =>
+      ipcRenderer.invoke(IPC.lsp.configure, languageId, config),
+
+    onStateChange: (callback: (status: LspServerStatus) => void): (() => void) => {
+      const handler = (_event: Electron.IpcRendererEvent, status: LspServerStatus) => callback(status);
+      ipcRenderer.on(IPC.lsp.stateChange, handler);
+      return () => {
+        ipcRenderer.removeListener(IPC.lsp.stateChange, handler);
+      };
+    },
   },
 };
 
