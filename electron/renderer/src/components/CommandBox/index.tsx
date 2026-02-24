@@ -136,6 +136,7 @@ export const CommandBox: React.FC<CommandBoxProps> = ({
             automaticLayout: true,
             scrollBeyondLastLine: false,
             wordWrap: 'on',
+            acceptSuggestionOnEnter: 'off',
           }}
         />
       </div>
