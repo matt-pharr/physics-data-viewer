@@ -1,6 +1,16 @@
 # Physics Data Viewer (PDV) — System Overview
 
-## 1) Project Purpose
+> **This document describes the legacy (pre-rewrite) architecture.**
+> It is kept for historical reference only. Do not use it as a guide for new code.
+>
+> **Current authoritative documents:**
+> - [`ARCHITECTURE.md`](ARCHITECTURE.md) — authoritative design specification for the rewrite
+> - [`IMPLEMENTATION_STEPS.md`](IMPLEMENTATION_STEPS.md) — step-by-step implementation plan
+> - [`legacy/README.md`](legacy/README.md) — explains why the old code was replaced
+
+---
+
+## 1) Project Purpose (legacy context)
 
 Physics Data Viewer (PDV) is an Electron desktop application intended to become a **hybrid notebook + data tree + workflow environment** for computational and experimental physics analysis.
 

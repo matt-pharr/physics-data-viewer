@@ -1,134 +1,69 @@
-import { app, BrowserWindow, Menu } from 'electron';
-import * as path from 'path';
-import { IPC } from './ipc';
-import './index'; // Register IPC handlers (even if empty for now)
+/**
+ * app.ts — Electron app lifecycle (BrowserWindow creation, app events).
+ *
+ * Handles:
+ * - Creating the BrowserWindow with the correct preload script.
+ * - Loading the renderer URL (Vite dev server in development, file:// in production).
+ * - Responding to ``app.on('activate')`` (macOS dock click).
+ * - Calling ``registerIpcHandlers()`` after the window is ready.
+ * - Graceful shutdown sequence on window-close.
+ *
+ * Does NOT own the kernel or comm layer — those are owned by index.ts and
+ * passed in.
+ *
+ * See Also
+ * --------
+ * ARCHITECTURE.md §4.1 (startup), §6.3 (shutdown)
+ * index.ts — the entry point that calls createWindow()
+ */
 
-const isDev = process.env.NODE_ENV === 'development';
+import { BrowserWindow, app } from "electron";
+import * as path from "path";
+import { KernelManager } from "./kernel-manager";
+import { CommRouter } from "./comm-router";
+import { ProjectManager } from "./project-manager";
+import { ConfigStore } from "./config";
+import { registerIpcHandlers, registerPushForwarding } from "./ipc";
 
-let mainWindow: BrowserWindow | null = null;
+// ---------------------------------------------------------------------------
+// Window creation
+// ---------------------------------------------------------------------------
 
-function createWindow(): void {
-  mainWindow = new BrowserWindow({
-    width: 1280,
-    height: 800,
-    minWidth: 800,
-    minHeight: 600,
-    webPreferences: {
-      preload: path.join(__dirname, '..', 'preload.js'),
-      contextIsolation: true,
-      nodeIntegration: false,
-    },
-    backgroundColor: '#1e1e1e',
-  });
-
-  // Disable reload shortcuts
-  mainWindow.webContents.on('before-input-event', (event, input) => {
-    // Prevent Cmd+R, Ctrl+R, F5 from reloading the page
-    if (
-      (input.key === 'r' || input.key === 'R') &&
-      (input.control || input.meta) &&
-      input.type === 'keyDown'
-    ) {
-      event.preventDefault();
-    }
-    if (input.key === 'F5' && input.type === 'keyDown') {
-      event.preventDefault();
-    }
-  });
-
-  if (isDev) {
-    mainWindow.loadURL('http://localhost:5173');
-    mainWindow.webContents.openDevTools();
-  } else {
-    mainWindow.loadFile(path.join(__dirname, '..', 'renderer', 'dist', 'index.html'));
-  }
-
-  mainWindow.on('closed', () => {
-    mainWindow = null;
-  });
+/**
+ * Create the main BrowserWindow and load the renderer.
+ *
+ * @param kernelManager - An already-started KernelManager.
+ * @param commRouter - The CommRouter from the kernel.
+ * @param projectManager - The ProjectManager.
+ * @param configStore - The ConfigStore.
+ * @returns The created BrowserWindow.
+ */
+export async function createWindow(
+  kernelManager: KernelManager,
+  commRouter: CommRouter,
+  projectManager: ProjectManager,
+  configStore: ConfigStore
+): Promise<BrowserWindow> {
+  // TODO: implement in Step 5
+  throw new Error("createWindow not yet implemented");
 }
 
-const canCreateWindow = typeof app?.whenReady === 'function';
+// ---------------------------------------------------------------------------
+// App event wiring
+// ---------------------------------------------------------------------------
 
-if (!canCreateWindow) {
-  console.warn('[main] Electron app not available (likely test environment); skipping window creation.');
-} else {
-  app.whenReady().then(() => {
-    // Set up application menu without reload shortcuts
-    const template: Electron.MenuItemConstructorOptions[] = [
-      {
-        label: 'File',
-        submenu: [
-          { role: 'quit' }
-        ]
-      },
-      {
-        label: 'Edit',
-        submenu: [
-          {
-            label: 'Settings…',
-            accelerator: 'CommandOrControl+,',
-            click: () => {
-              mainWindow?.webContents.send(IPC.settings.open);
-            },
-          },
-          { type: 'separator' },
-          { role: 'undo' },
-          { role: 'redo' },
-          { type: 'separator' },
-          { role: 'cut' },
-          { role: 'copy' },
-          { role: 'paste' },
-          { role: 'selectAll' }
-        ]
-      },
-      {
-        label: 'View',
-        submenu: [
-          { role: 'resetZoom' },
-          { role: 'zoomIn' },
-          { role: 'zoomOut' },
-          { type: 'separator' },
-          { role: 'togglefullscreen' }
-        ]
-      }
-    ];
-
-    // Add dev menu only in development
-    if (isDev) {
-      template.push({
-        label: 'Developer',
-        submenu: [
-          { role: 'toggleDevTools' },
-          { type: 'separator' },
-          { 
-            label: 'Reload (Use with caution)',
-            accelerator: 'CommandOrControl+Shift+R',
-            click: (_, window) => {
-              if (window) {
-                window.reload();
-              }
-            }
-          }
-        ]
-      });
-    }
-
-    const menu = Menu.buildFromTemplate(template);
-    Menu.setApplicationMenu(menu);
-
-    createWindow();
-
-    app.on('activate', () => {
-      if (BrowserWindow.getAllWindows().length === 0) {
-        createWindow();
-      }
-    });
-  });
-
-  app.on('window-all-closed', () => {
-    if (process.platform !== 'darwin') {
-      app.quit();
-    }
-  });
+/**
+ * Wire up ``app.on('activate')`` and ``app.on('window-all-closed')``
+ * for macOS and cross-platform behaviour.
+ *
+ * Called once from index.ts after the app is ready.
+ *
+ * @param getKernelManager - Returns the current KernelManager (may be null
+ *   if the kernel hasn't started yet).
+ */
+export function wireAppEvents(
+  getKernelManager: () => KernelManager | null
+): void {
+  // TODO: implement in Step 5
+  throw new Error("wireAppEvents not yet implemented");
 }
