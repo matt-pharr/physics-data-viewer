@@ -239,7 +239,56 @@ Feature growth without stronger test coverage will increase breakage risk, espec
 
 ---
 
-## 13) Known Design/Implementation Issues to Address
+## 13) Kernel-Backed Autocompletion in the Command Box
+
+## What is missing
+- No autocompletion in the Monaco editor command box
+- Monaco's default word-based suggestion engine is disabled (see `CommandBox` options) because it produces low-quality, context-free guesses
+- No integration with the running kernel's completion machinery
+
+## Why it matters
+The most useful completions for PDV users are runtime-specific: `pdv_tree` key paths, live namespace variables, method chains on actual numpy arrays or DataFrames loaded in the current session. A static language server (Pylance, Pyright) cannot see any of this. The running ipykernel, on the other hand, uses jedi internally and introspects the live namespace — it can complete `pdv_tree['data.wave` → `data.waveforms.ch1` and `my_array.` → full numpy method list.
+
+Note: A static LSP integration is explicitly **not** recommended. The overhead of managing a Pyright subprocess, wiring it to the active environment, and providing PDV type stubs is high, and it still cannot complete runtime state. Kernel completions are strictly better for this use case.
+
+## Proposed direction
+
+### 1. `KernelManager`: add `complete_request` / `complete_reply` support
+The Jupyter Messaging Protocol already defines `complete_request` on the shell socket, which `KernelManager` already owns. Add:
+```ts
+complete(kernelId: string, code: string, cursorPos: number): Promise<CompleteResult>
+// CompleteResult: { matches: string[], cursorStart: number, cursorEnd: number }
+```
+
+### 2. IPC: add `kernel:complete` channel
+Add a `kernel:complete` handler in `ipc.ts` that proxies to `KernelManager.complete()`. The renderer calls this from the completion provider.
+
+### 3. `CommandBox`: register a Monaco completion provider
+After the editor mounts (`onMount`), register a completion item provider for Python:
+```ts
+monaco.languages.registerCompletionItemProvider('python', {
+  triggerCharacters: ['.', '[', "'", '"'],
+  async provideCompletionItems(model, position) {
+    const code = model.getValue();
+    const offset = model.getOffsetAt(position);
+    const result = await window.pdv.kernel.complete(code, offset);
+    // convert result.matches → CompletionItem[]
+  }
+});
+```
+The round-trip latency to a local kernel subprocess is typically a few milliseconds — well within Monaco's default provider timeout.
+
+### 4. Language-awareness
+The provider is registered per-language. When Julia support is introduced (see section 5), register a separate provider for `julia` using the same IPC channel — ipykernel's `complete_request` is language-agnostic.
+
+## Implementation notes
+- `quickSuggestions`, `suggestOnTriggerCharacters`, and `wordBasedSuggestions` should remain disabled in `CommandBox` options (the current config) — the registered provider above replaces them entirely with kernel-backed suggestions
+- The completion provider should be registered once globally (outside the component), not on every mount, to avoid duplicate provider registration across tab switches
+- If no kernel is running, `provideCompletionItems` should return `{ suggestions: [] }` rather than throw
+
+---
+
+## 14) Known Design/Implementation Issues to Address
 
 These are current implementation choices likely to create future friction if left unchanged.
 
@@ -269,7 +318,7 @@ These are current implementation choices likely to create future friction if lef
 
 ---
 
-## 14) Suggested Priority Order
+## 15) Suggested Priority Order
 
 Recommended implementation sequence:
 
@@ -284,7 +333,7 @@ Recommended implementation sequence:
 
 ---
 
-## 15) Definition of “Feature Complete” (relative to current vision)
+## 16) Definition of "Feature Complete" (relative to current vision)
 
 PDV can be considered close to the described target when all of the following are true:
 - Projects open/save reliably with complete state
