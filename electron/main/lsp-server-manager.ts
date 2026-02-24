@@ -58,8 +58,10 @@ interface ManagedServer {
 /**
  * Reads Content-Length framed LSP messages from a readable stream buffer
  * and calls onMessage for each complete JSON-RPC message body.
+ *
+ * Exported for testing.
  */
-class LspMessageParser {
+export class LspMessageParser {
   private buffer = Buffer.alloc(0);
 
   push(chunk: Buffer): string[] {
@@ -93,8 +95,10 @@ class LspMessageParser {
 
 /**
  * Wrap a JSON string as an LSP Content-Length framed message for stdin.
+ *
+ * Exported for testing.
  */
-function frameLspMessage(json: string): Buffer {
+export function frameLspMessage(json: string): Buffer {
   const body = Buffer.from(json, 'utf-8');
   const header = `Content-Length: ${body.length}\r\n\r\n`;
   return Buffer.concat([Buffer.from(header, 'ascii'), body]);
@@ -222,7 +226,7 @@ export class LspServerManager {
         if (ok) {
           return this.setStatus(languageId, {
             state: 'launchable',
-            detectedCommand: `${pythonPath} -m ${candidate.detectCommand}`,
+            detectedCommand: candidate.detectCommand,
           });
         }
       }
@@ -543,7 +547,10 @@ export class LspServerManager {
 
   getStatus(languageId: string): LspServerStatus {
     const server = this.servers.get(languageId);
-    if (!server) return { languageId, state: 'not_configured' };
+    if (!server) {
+      const def = getLspRegistry().get(languageId);
+      return { languageId, state: 'not_configured', displayName: def?.displayName };
+    }
     return this.toStatus(languageId, server);
   }
 

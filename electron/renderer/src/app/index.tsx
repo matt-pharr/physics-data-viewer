@@ -165,6 +165,10 @@ const App: React.FC = () => {
           setLspProxyPort(status.proxyPort);
         } else if (status.state !== 'connected') {
           setLspProxyPort(undefined);
+          // Auto-connect when server is detected but not yet running
+          if (status.state === 'launchable' || status.state === 'external_running') {
+            void window.pdv.lsp.connect('python').catch(console.error);
+          }
         }
       }
     });
@@ -176,6 +180,8 @@ const App: React.FC = () => {
         setLspState(python.status.state);
         if (python.status.state === 'connected' && python.status.proxyPort) {
           setLspProxyPort(python.status.proxyPort);
+        } else if (python.status.state === 'launchable' || python.status.state === 'external_running') {
+          void window.pdv.lsp.connect('python').catch(console.error);
         }
       }
     }).catch(console.error);
@@ -563,6 +569,7 @@ const App: React.FC = () => {
             lastError={lastError}
             lspProxyPort={lspProxyPort}
             lspState={lspState}
+            workspaceRoot={config?.treeRoot ?? '/'}
             onLspStatusClick={() => {
               setSettingsOpenOnLsp(true);
               setShowSettings(true);

@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import Editor, { type OnMount } from '@monaco-editor/react';
 import type * as monaco from 'monaco-editor';
 import type { CommandTab } from '../../types';
@@ -21,6 +21,8 @@ export interface CommandBoxProps {
   lspState?: LspConnectionState;
   /** Called when the user clicks the LSP status indicator */
   onLspStatusClick?: () => void;
+  /** Workspace root passed to the LSP server (defaults to '/') */
+  workspaceRoot?: string;
 }
 
 function lspStatusLabel(state: LspConnectionState | undefined): { dot: string; title: string } {
@@ -59,6 +61,7 @@ export const CommandBox: React.FC<CommandBoxProps> = ({
   lspProxyPort,
   lspState,
   onLspStatusClick,
+  workspaceRoot = '/',
 }) => {
   const editorRef = useRef<monaco.editor.IStandaloneCodeEditor | null>(null);
   const monacoRef = useRef<typeof monaco | null>(null);
@@ -68,6 +71,7 @@ export const CommandBox: React.FC<CommandBoxProps> = ({
   const lspClientRef = useRef<LspClient | null>(null);
   const activeDocUriRef = useRef<string | null>(null);
   const changeDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [editorMounted, setEditorMounted] = useState(false);
 
   useEffect(() => {
     activeTabRef.current = activeTab;
@@ -77,14 +81,13 @@ export const CommandBox: React.FC<CommandBoxProps> = ({
     isExecutingRef.current = isExecuting;
   }, [isExecuting]);
 
-  // Connect / disconnect LSP client when proxyPort changes
+  // Connect / disconnect LSP client when proxyPort changes or editor becomes available
   useEffect(() => {
     if (!lspProxyPort || !monacoRef.current) return;
 
     const client = new LspClient('python');
     lspClientRef.current = client;
 
-    const workspaceRoot = '/'; // LSP workspace; improves with project root
     client
       .connect(lspProxyPort, monacoRef.current, workspaceRoot)
       .then(() => {
@@ -105,7 +108,7 @@ export const CommandBox: React.FC<CommandBoxProps> = ({
       lspClientRef.current = null;
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [lspProxyPort]);
+  }, [lspProxyPort, editorMounted]);
 
   // When active tab changes, notify LSP of the new document
   useEffect(() => {
@@ -127,6 +130,7 @@ export const CommandBox: React.FC<CommandBoxProps> = ({
   const handleEditorMount: OnMount = (editor, monacoInstance) => {
     editorRef.current = editor;
     monacoRef.current = monacoInstance;
+    setEditorMounted(true);
 
     editor.addCommand(monacoInstance.KeyMod.CtrlCmd | monacoInstance.KeyCode.Enter, () => {
       if (!isExecutingRef.current && activeTabRef.current) {
@@ -134,12 +138,6 @@ export const CommandBox: React.FC<CommandBoxProps> = ({
       }
     });
 
-    // Register pdv-memory URI scheme so Monaco accepts our synthetic URIs
-    try {
-      monacoInstance.editor.createModel('', 'python', monacoInstance.Uri.parse('pdv-memory://session/init.py'));
-    } catch {
-      // Model may already exist on hot reload
-    }
   };
 
   const handleExecute = () => {
@@ -238,6 +236,7 @@ export const CommandBox: React.FC<CommandBoxProps> = ({
           height="100%"
           theme="vs-dark"
           language="python"
+          path={`pdv-memory://session/tab-${activeTab.id}.py`}
           value={activeTab.code}
           onChange={(value) => handleCodeChange(value || '')}
           onMount={handleEditorMount}
