@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useRef } from 'react';
 import type { LogEntry } from '../../types';
+import { ansiToHtml } from './ansi';
 
 export interface ConsoleProps {
   logs: LogEntry[];
@@ -65,8 +66,18 @@ const LogEntryView: React.FC<{ log: LogEntry; index: number }> = ({ log, index }
 
       <pre className="log-code">{log.code}</pre>
 
-      {log.stdout && <pre className="log-stdout">{log.stdout}</pre>}
-      {log.stderr && <pre className="log-stderr">{log.stderr}</pre>}
+      {log.stdout && (
+        <pre
+          className="log-stdout"
+          dangerouslySetInnerHTML={{ __html: ansiToHtml(log.stdout) }}
+        />
+      )}
+      {log.stderr && (
+        <pre
+          className="log-stderr"
+          dangerouslySetInnerHTML={{ __html: ansiToHtml(log.stderr) }}
+        />
+      )}
       {hasResult && <pre className="log-result">{formatResult(log.result)}</pre>}
       {log.error && <pre className="log-error">Error: {log.error}</pre>}
       {hasImages && (

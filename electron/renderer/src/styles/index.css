@@ -407,6 +407,10 @@ body {
   flex-shrink: 0;
 }
 
+.console-pane .pane-actions {
+  margin-left: auto;
+}
+
 .command-tabs {
   display: flex;
   gap: 4px;
