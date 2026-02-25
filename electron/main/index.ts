@@ -94,26 +94,19 @@ const kernelWorkingDirs = new Map<string, string>();
 
 const BOOTSTRAP_AND_OPEN_COMM = `
 from IPython import get_ipython
+import pdv_kernel
 import pdv_kernel.comms as _pdv_comms
-from pdv_kernel.tree import PDVTree
-from pdv_kernel.namespace import PDVApp
 try:
     from ipykernel.comm import Comm
 except Exception:
     from comm import Comm
 _ip = get_ipython()
-_tree = PDVTree()
-_app = PDVApp()
-_ip.user_ns["pdv_tree"] = _tree
-_ip.user_ns["pdv"] = _app
-_pdv_comms._pdv_tree = _tree
-_pdv_comms._ip = _ip
-_pdv_comms._bootstrapped = True
-_tree._attach_comm(lambda _type, _payload: _pdv_comms.send_message(_type, _payload))
-_pdv_comm = Comm(target_name="pdv.kernel")
-_pdv_comms._comm = _pdv_comm
-_pdv_comm.on_msg(_pdv_comms._on_comm_message)
-_pdv_comms.send_message("pdv.ready", {})
+pdv_kernel.bootstrap(_ip)
+if _pdv_comms._comm is None:
+    _pdv_comm = Comm(target_name="pdv.kernel")
+    _pdv_comms._comm = _pdv_comm
+    _pdv_comm.on_msg(_pdv_comms._on_comm_message)
+    _pdv_comms.send_message("pdv.ready", {})
 `;
 
 // ---------------------------------------------------------------------------

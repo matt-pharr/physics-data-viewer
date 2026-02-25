@@ -198,7 +198,15 @@ def register_comm_target(ip: Any) -> None:
     ip : InteractiveShell
         The IPython shell instance.
     """
-    ip.comm_manager.register_target(PDV_COMM_TARGET, _on_comm_open)
+    comm_manager = getattr(ip, "comm_manager", None)
+    if comm_manager is None or not hasattr(comm_manager, "register_target"):
+        kernel = getattr(ip, "kernel", None)
+        comm_manager = getattr(kernel, "comm_manager", None) if kernel is not None else None
+    if comm_manager is None or not hasattr(comm_manager, "register_target"):
+        raise AttributeError(
+            "IPython shell has no comm_manager; tried ip.comm_manager and ip.kernel.comm_manager"
+        )
+    comm_manager.register_target(PDV_COMM_TARGET, _on_comm_open)
 
 
 def get_pdv_tree() -> Any:

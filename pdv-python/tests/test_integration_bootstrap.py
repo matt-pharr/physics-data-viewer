@@ -3,6 +3,7 @@ pdv-python/tests/test_integration_bootstrap.py — Integration-style bootstrap/r
 """
 
 from unittest.mock import MagicMock
+from types import SimpleNamespace
 
 import pdv_kernel.comms as comms_mod
 from pdv_kernel import bootstrap
@@ -70,5 +71,21 @@ class TestBootstrapReadyFlow:
 
             ready_messages = [m for m in mock_comm._sent if m['type'] == 'pdv.ready']
             assert len(ready_messages) == 1
+        finally:
+            _reset_bootstrap_state()
+
+    def test_bootstrap_falls_back_to_kernel_comm_manager(self):
+        _reset_bootstrap_state()
+        try:
+            kernel_comm_manager = MagicMock()
+            shell = SimpleNamespace(
+                user_ns={},
+                kernel=SimpleNamespace(comm_manager=kernel_comm_manager),
+            )
+            bootstrap(shell)
+            kernel_comm_manager.register_target.assert_called_once_with(
+                comms_mod.PDV_COMM_TARGET,
+                comms_mod._on_comm_open,
+            )
         finally:
             _reset_bootstrap_state()
