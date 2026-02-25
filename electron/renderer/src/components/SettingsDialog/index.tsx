@@ -365,7 +365,7 @@ export const SettingsDialog: React.FC<SettingsDialogProps> = ({
         key,
         editedShortcuts[key].trim() || DEFAULT_SHORTCUTS[key],
       ]),
-    ) as typeof editedShortcuts;
+    ) as unknown as Shortcuts;
 
     // Persist theme: if dirty and based on a built-in, auto-save as custom first
     let savedThemeName = selectedThemeName;
