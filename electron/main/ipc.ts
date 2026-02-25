@@ -87,10 +87,10 @@ export const IPC = {
     get: "themes:get",
     save: "themes:save",
   },
-  /** Command-box persistence channels. */
-  commandBoxes: {
-    load: "commandBoxes:load",
-    save: "commandBoxes:save",
+  /** Code-cell persistence channels. */
+  codeCells: {
+    load: "codeCells:load",
+    save: "codeCells:save",
   },
   /** Main → renderer push channels forwarded from CommRouter push messages. */
   push: {
@@ -242,7 +242,7 @@ export interface MenuActionPayload {
 }
 
 // ---------------------------------------------------------------------------
-// Theme and command-box persistence types
+// Theme and code-cell persistence types
 // ---------------------------------------------------------------------------
 
 /**
@@ -256,9 +256,9 @@ export interface Theme {
 }
 
 /**
- * Command-box tab model persisted by `commandBoxes.save`.
+ * Code-cell tab model persisted by `codeCells.save`.
  */
-export interface CommandBoxData {
+export interface CodeCellData {
   /** Tab list in display order. */
   tabs: Array<{
     /** Stable tab ID. */
@@ -468,15 +468,15 @@ export interface PDVApi {
      * Save the current project.
      *
       * @param saveDir - Target save directory.
-      * @param commandBoxes - Command-box payload to persist.
+      * @param codeCells - Code-cell payload to persist.
       * @returns True when save request is accepted.
       */
-    save(saveDir: string, commandBoxes: unknown): Promise<boolean>;
+    save(saveDir: string, codeCells: unknown): Promise<boolean>;
     /**
      * Load an existing project.
      *
      * @param saveDir - Source save directory.
-      * @returns Loaded command-box state.
+      * @returns Loaded code-cell state.
       */
     load(saveDir: string): Promise<unknown>;
     /**
@@ -528,21 +528,21 @@ export interface PDVApi {
     save(theme: Theme): Promise<boolean>;
   };
 
-  /** Command-box persistence operations. */
-  commandBoxes: {
+  /** Code-cell persistence operations. */
+  codeCells: {
     /**
-     * Load persisted command-box tab state.
+     * Load persisted code-cell tab state.
      *
      * @returns Last saved state or null if none exists.
      */
-    load(): Promise<CommandBoxData | null>;
+    load(): Promise<CodeCellData | null>;
     /**
-     * Save command-box tab state.
+     * Save code-cell tab state.
      *
      * @param data - State payload to persist.
      * @returns True when save succeeded.
      */
-    save(data: CommandBoxData): Promise<boolean>;
+    save(data: CodeCellData): Promise<boolean>;
   };
 
   /** Native file/directory pickers (main process dialog wrappers). */

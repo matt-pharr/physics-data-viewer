@@ -260,7 +260,7 @@ electron/
   - `script.*` handlers: `edit` (opens external editor), `reload` (sends `pdv.script.register` comm with reload flag)
   - `config.*` handlers: `get`, `set`
   - `themes.*` handlers: `get`, `save`
-  - `commandBoxes.*` handlers: `load`, `save`
+  - `codeCells.*` handlers: `load`, `save`
   - Push notification forwarding: `pdv.tree.changed` and `pdv.project.loaded` are forwarded to renderer via `BrowserWindow.webContents.send()`
 - `app.ts`: creates `BrowserWindow`, registers `before-quit` handler, nothing else
 
@@ -312,8 +312,8 @@ electron/
   - `ProjectManager` class (holds reference to `CommRouter`):
   - `createWorkingDir(): Promise<string>` — creates uniquely named dir under OS temp; returns path
   - `deleteWorkingDir(path): Promise<void>` — recursive delete
-  - `saveProject(saveDir, commandBoxData): Promise<void>` — sends `pdv.project.save` comm, awaits response with checksum, writes `command-boxes.json`, writes `project.json` only on full success
-  - `loadProject(saveDir): Promise<ProjectLoadResult>` — sends `pdv.project.load` comm, reads `command-boxes.json`, returns both
+  - `saveProject(saveDir, commandBoxData): Promise<void>` — sends `pdv.project.save` comm, awaits response with checksum, writes `code-cells.json`, writes `project.json` only on full success
+  - `loadProject(saveDir): Promise<ProjectLoadResult>` — sends `pdv.project.load` comm, reads `code-cells.json`, returns both
   - `loadManifest(saveDir): PDVProjectManifest` — reads and validates `project.json`
   - `saveManifest(saveDir, manifest): void` — writes `project.json`
   - IPC handlers added to `index.ts`: `project:save`, `project:load`, `project:new`
@@ -327,9 +327,9 @@ Specific assertions that must pass:
 - `detectEnvironments()` returns an array with at least the system Python (CI always has Python)
 - `checkPDVInstalled(validPythonPath)` returns `{ installed: true }` when pdv_kernel is importable
 - `checkPDVInstalled('/nonexistent/python')` returns `{ installed: false }`
-- `saveProject()` sends `pdv.project.save` comm, then writes `command-boxes.json`, then writes `project.json` — in that order, with the comm awaited before either file write
+- `saveProject()` sends `pdv.project.save` comm, then writes `code-cells.json`, then writes `project.json` — in that order, with the comm awaited before either file write
 - `saveProject()` does NOT write `project.json` if the comm response has `status: 'error'`
-- `loadProject()` sends `pdv.project.load` comm and reads `command-boxes.json` from the save directory
+- `loadProject()` sends `pdv.project.load` comm and reads `code-cells.json` from the save directory
 - `loadManifest()` with a missing `project.json` returns a default manifest (does not throw)
 - `loadManifest()` with a future schema major version throws `PDVSchemaVersionError`
 - `createWorkingDir()` creates a directory that exists on disk
@@ -359,7 +359,7 @@ electron/
         components/
             Tree/index.tsx            ← verify window.pdv.tree.list; driven by treeRefreshToken from App
             NamespaceView/index.tsx   ← verify window.pdv.namespace.query; accept disabled prop
-            CommandBox/index.tsx      ← verify window.pdv.kernels.execute; accept disabled prop
+            CodeCell/index.tsx      ← verify window.pdv.kernels.execute; accept disabled prop
             Console/index.tsx         ← verify execution result consumption
             EnvironmentSelector/index.tsx ← use window.pdv.files.pickExecutable for file picker
             ScriptDialog/index.tsx    ← full rewrite: use NodeDescriptor.params; build kernels.execute
@@ -387,19 +387,19 @@ electron/
 **Kernel startup and `kernelStatus` state (`app/index.tsx`)**
 - Add `kernelStatus: 'idle' | 'starting' | 'ready' | 'error'` state (initially `'idle'`).
 - `startKernel()` sets `'starting'` before `await window.pdv.kernels.start(spec)`, then `'ready'` on success or `'error'` on rejection. See ARCHITECTURE.md §4.4.
-- All panels pass the locked state down: `Tree`, `NamespaceView`, and `CommandBox` all receive a `disabled` prop that is `true` when `kernelStatus !== 'ready'`. Disabled panels render a "Starting kernel…" overlay or are simply inert.
+- All panels pass the locked state down: `Tree`, `NamespaceView`, and `CodeCell` all receive a `disabled` prop that is `true` when `kernelStatus !== 'ready'`. Disabled panels render a "Starting kernel…" overlay or are simply inert.
 - On rejection, set `lastError` with the error message.
 
 **Push subscriptions (`app/index.tsx`)**
 - A single `useEffect` keyed on `currentKernelId` owns all push subscriptions. See ARCHITECTURE.md §11.4 for the canonical pattern.
 - `window.pdv.tree.onChanged(...)` increments `treeRefreshToken`, propagated to `Tree` as a prop and triggering a re-fetch. This replaces the current behaviour where the token is only incremented manually after explicit user actions.
-- `window.pdv.project.onLoaded(...)` repopulates command box tabs from the loaded project state.
+- `window.pdv.project.onLoaded(...)` repopulates code cell tabs from the loaded project state.
 - `useEffect` cleanup unsubscribes both; subscriptions are re-established when `currentKernelId` changes.
 
 **Project Save / Open UI (`app/index.tsx`)**
 - Two buttons added to the header: __Save Project__ and __Open Project__.
-- __Save Project__: calls `dialog.showSaveDialog` (via a new `window.pdv.files.pickDirectory()` call, or inline using Electron's `showOpenDialog` with `properties: ['openDirectory', 'createDirectory']`) to select/confirm the save directory, then calls `window.pdv.project.save(saveDir, commandBoxes)`.
-- __Open Project__: calls `dialog.showOpenDialog` (directory picker), then calls `window.pdv.project.load(saveDir)` and populates command box tabs from the result. The `pdv.project.onLoaded` push subscription then fires and refreshes the tree.
+- __Save Project__: calls `dialog.showSaveDialog` (via a new `window.pdv.files.pickDirectory()` call, or inline using Electron's `showOpenDialog` with `properties: ['openDirectory', 'createDirectory']`) to select/confirm the save directory, then calls `window.pdv.project.save(saveDir, codeCells)`.
+- __Open Project__: calls `dialog.showOpenDialog` (directory picker), then calls `window.pdv.project.load(saveDir)` and populates code cell tabs from the result. The `pdv.project.onLoaded` push subscription then fires and refreshes the tree.
 - Both buttons are disabled when `kernelStatus !== 'ready'`.
 - `window.pdv.files.pickDirectory()` must be added to `ipc.ts`, `index.ts`, and `preload.ts` alongside `pickExecutable`. It wraps `dialog.showOpenDialog({ properties: ['openDirectory', 'createDirectory'] })` and returns `string | null`.
 
@@ -430,10 +430,10 @@ electron/
 There are no automated tests for the renderer in alpha. Confirmation is by manual smoke test:
 
 1. Launch app (`npm run dev` or equivalent)
-2. All panels (Tree, Namespace, CommandBox) show a loading/disabled state while the kernel is starting; the Save and Open buttons in the header are also disabled
+2. All panels (Tree, Namespace, CodeCell) show a loading/disabled state while the kernel is starting; the Save and Open buttons in the header are also disabled
 3. App detects Python environment; if `pdv-python` is not installed, a prompt appears offering to install it; clicking "Browse" in either the environment selector or the Settings dialog opens a native file-picker dialog (`window.pdv.files.pickExecutable`)
 4. Kernel starts; UI fully unlocks; Tree panel shows an empty tree at the working directory root
-5. Typing `pdv_tree['x'] = 42` in the Command Box and running it causes the Tree panel to refresh **automatically** (via `pdv.tree.changed` push — NOT via a manual refresh button) and show node `x`
+5. Typing `pdv_tree['x'] = 42` in the Code Cell and running it causes the Tree panel to refresh **automatically** (via `pdv.tree.changed` push — NOT via a manual refresh button) and show node `x`
 6. Namespace panel shows `pdv_tree` and `pdv` as protected names, plus `x`
 7. Right-clicking a folder node and selecting "New Script" creates a script file; the created script file follows the template:
    ```python
@@ -442,8 +442,8 @@ There are no automated tests for the renderer in alpha. Confirmation is by manua
        return {}
    ```
 8. Right-clicking the script node and selecting "Run" opens `ScriptDialog`, which reads `params` from the `NodeDescriptor` (no IPC round-trip). If the script has no extra params beyond `pdv_tree`, the dialog shows no form fields and only a Run button. Clicking Run constructs and executes `pdv_tree["<path>"].run()` via `kernels.execute`; the generated code string appears in the Console exactly as user-typed code would, and the return value is logged
-9. Clicking __Save Project__ opens a directory picker; after selection, `project.json`, `tree-index.json`, and `command-boxes.json` are present in the chosen directory
-10. Restart app; click __Open Project__ and select the saved directory; the `pdv.project.onLoaded` push fires; the Tree panel repopulates with node `x`; command box tabs are restored from `command-boxes.json`
+9. Clicking __Save Project__ opens a directory picker; after selection, `project.json`, `tree-index.json`, and `code-cells.json` are present in the chosen directory
+10. Restart app; click __Open Project__ and select the saved directory; the `pdv.project.onLoaded` push fires; the Tree panel repopulates with node `x`; code cell tabs are restored from `code-cells.json`
 
 ---
 

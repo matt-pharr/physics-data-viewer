@@ -29,7 +29,7 @@ electron/                ← Electron app (TypeScript)
     preload.ts           ← exposes window.pdv API to renderer via contextBridge
     renderer/src/        ← React frontend
         app/index.tsx    ← root component; orchestrates all kernel lifecycle and state
-        components/      ← Tree, CommandBox, Console, NamespaceView, EnvironmentSelector, ...
+        components/      ← Tree, CodeCell, Console, NamespaceView, EnvironmentSelector, ...
         services/        ← tree.ts data-fetching service
         types/pdv.d.ts   ← all types used by renderer; re-exports from ipc.ts
 

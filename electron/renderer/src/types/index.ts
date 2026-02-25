@@ -32,7 +32,7 @@ export interface LogEntry {
   images?: Array<{ mime: string; data: string }>;
 }
 
-export interface CommandTab {
+export interface CellTab {
   id: number;
   code: string;
 }

@@ -7,14 +7,14 @@
  * Save coordination (ARCHITECTURE.md §8.1):
  * 1. App sends ``pdv.project.save`` comm → kernel writes tree + tree-index.json.
  * 2. Kernel responds with checksum.
- * 3. App writes command-boxes.json.
+ * 3. App writes code-cells.json.
  * 4. App writes project.json (only on full success).
  *
  * Load coordination (ARCHITECTURE.md §8.2):
  * 1. App sends ``pdv.project.load`` comm with save_dir.
  * 2. Kernel reads tree-index.json, populates lazy registry.
  * 3. Kernel pushes ``pdv.project.loaded`` notification.
- * 4. App reads command-boxes.json.
+ * 4. App reads code-cells.json.
  * 5. UI is unlocked.
  *
  * See Also
@@ -36,7 +36,7 @@ import * as crypto from "crypto";
 // ---------------------------------------------------------------------------
 
 /**
- * Persisted metadata stored in ``project.json`` alongside ``command-boxes.json``.
+ * Persisted metadata stored in ``project.json`` alongside ``code-cells.json``.
  *
  * See ARCHITECTURE.md §8.1 for the full field semantics.
  */
@@ -95,7 +95,7 @@ export class PDVSchemaVersionError extends Error {
  * Coordinates project save/load workflows between the app and kernel.
  *
  * Uses `CommRouter` for protocol requests and handles local manifest +
- * command-box file persistence. It does NOT own renderer state updates.
+ * code-cell file persistence. It does NOT own renderer state updates.
  */
 export class ProjectManager {
   /**
@@ -129,17 +129,17 @@ export class ProjectManager {
    *
    * Implements the full save sequence from ARCHITECTURE.md §8.1:
    * 1. Send ``pdv.project.save`` comm and await the kernel's response.
-   * 2. Write ``command-boxes.json`` to ``saveDir``.
+   * 2. Write ``code-cells.json`` to ``saveDir``.
    * 3. Write ``project.json`` to ``saveDir`` (only on full success).
    *
    * If the kernel responds with ``status: 'error'``, this method re-throws
    * the comm error and does **not** write ``project.json``.
    *
    * @param saveDir - Absolute path to the project directory.
-   * @param commandBoxes - The current command-box state from the renderer.
+   * @param codeCells - The current code-cell state from the renderer.
    * @throws {PDVCommError} When the kernel responds with status='error'.
    */
-  async save(saveDir: string, commandBoxes: unknown): Promise<void> {
+  async save(saveDir: string, codeCells: unknown): Promise<void> {
     // Step 1 — send pdv.project.save comm; throws PDVCommError on error status.
     const response = await this.commRouter.request(PDVMessageType.PROJECT_SAVE, {
       save_dir: saveDir,
@@ -148,10 +148,10 @@ export class ProjectManager {
     const payload = response.payload as { checksum?: string };
     const checksum = payload.checksum ?? "";
 
-    // Step 2 — write command-boxes.json.
+    // Step 2 — write code-cells.json.
     await fs.writeFile(
-      path.join(saveDir, "command-boxes.json"),
-      JSON.stringify(commandBoxes, null, 2),
+      path.join(saveDir, "code-cells.json"),
+      JSON.stringify(codeCells, null, 2),
       "utf8"
     );
 
@@ -175,10 +175,10 @@ export class ProjectManager {
    * Implements the load sequence from ARCHITECTURE.md §8.2:
    * 1. Send ``pdv.project.load`` comm with ``save_dir``.
    * 2. Wait for the ``pdv.project.loaded`` push notification.
-   * 3. Read ``command-boxes.json`` from ``saveDir``.
+   * 3. Read ``code-cells.json`` from ``saveDir``.
    *
    * @param saveDir - Absolute path to the project directory.
-   * @returns The command-box state read from ``command-boxes.json``.
+   * @returns The code-cell state read from ``code-cells.json``.
    * @throws {PDVCommError} When the kernel responds with status='error'.
    */
   async load(saveDir: string): Promise<unknown> {
@@ -201,8 +201,8 @@ export class ProjectManager {
     // Step 3 — wait for the pdv.project.loaded push notification.
     await pushPromise;
 
-    // Step 4 — read command-boxes.json.
-    return _readCommandBoxes(saveDir);
+    // Step 4 — read code-cells.json.
+    return _readCodeCelles(saveDir);
   }
 
   /**
@@ -288,15 +288,15 @@ function _assertCompatibleSchema(schemaVersion: string): void {
 }
 
 /**
- * Read and parse ``command-boxes.json`` from a project directory.
+ * Read and parse ``code-cells.json`` from a project directory.
  *
  * Returns an empty array if the file does not exist.
  *
  * @param saveDir - Absolute path to the project directory.
- * @returns Parsed command-box array, or ``[]`` when the file is absent.
+ * @returns Parsed code-cell array, or ``[]`` when the file is absent.
  */
-async function _readCommandBoxes(saveDir: string): Promise<unknown> {
-  const filePath = path.join(saveDir, "command-boxes.json");
+async function _readCodeCelles(saveDir: string): Promise<unknown> {
+  const filePath = path.join(saveDir, "code-cells.json");
   try {
     const raw = await fs.readFile(filePath, "utf8");
     return JSON.parse(raw);

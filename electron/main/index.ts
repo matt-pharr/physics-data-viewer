@@ -27,7 +27,7 @@ import { ProjectManager } from "./project-manager";
 import { ConfigStore } from "./config";
 import { updateRecentProjectsMenu } from "./menu";
 import {
-  CommandBoxData,
+  CodeCellData,
   IPC,
   KernelCompleteResult,
   KernelInspectResult,
@@ -75,15 +75,15 @@ const REGISTERED_CHANNELS: readonly string[] = [
   IPC.config.set,
   IPC.themes.get,
   IPC.themes.save,
-  IPC.commandBoxes.load,
-  IPC.commandBoxes.save,
+  IPC.codeCells.load,
+  IPC.codeCells.save,
   IPC.menu.updateRecentProjects,
   IPC.files.pickExecutable,
   IPC.files.pickDirectory,
 ];
 
 let savedThemes: Theme[] = [];
-let savedCommandBoxes: CommandBoxData | null = null;
+let savedCodeCells: CodeCellData | null = null;
 
 interface PushSubscription {
   commRouter: CommRouter;
@@ -619,20 +619,20 @@ export function registerIpcHandlers(
   });
 
   // Handles project:save requests from the renderer.
-  // Input: saveDir (string), commandBoxes payload.
+  // Input: saveDir (string), codeCells payload.
   // Returns: true on success.
   // On error: throws to renderer.
   ipcMain.handle(
     IPC.project.save,
-    async (_event, saveDir: string, commandBoxes: unknown) => {
-      await projectManager.save(saveDir, commandBoxes);
+    async (_event, saveDir: string, codeCells: unknown) => {
+      await projectManager.save(saveDir, codeCells);
       return true;
     }
   );
 
   // Handles project:load requests from the renderer.
   // Input: saveDir (string).
-  // Returns: command box payload loaded by ProjectManager.
+  // Returns: code cell payload loaded by ProjectManager.
   // On error: throws to renderer.
   ipcMain.handle(IPC.project.load, async (_event, saveDir: string) => {
     return projectManager.load(saveDir);
@@ -698,20 +698,20 @@ export function registerIpcHandlers(
     return true;
   });
 
-  // Handles commandBoxes:load requests from the renderer.
+  // Handles codeCells:load requests from the renderer.
   // Input: none.
-  // Returns: last saved command-box data or null.
+  // Returns: last saved code-cell data or null.
   // On error: throws to renderer.
-  ipcMain.handle(IPC.commandBoxes.load, async () => {
-    return savedCommandBoxes;
+  ipcMain.handle(IPC.codeCells.load, async () => {
+    return savedCodeCells;
   });
 
-  // Handles commandBoxes:save requests from the renderer.
-  // Input: command-box payload.
+  // Handles codeCells:save requests from the renderer.
+  // Input: code-cell payload.
   // Returns: true after save.
   // On error: throws to renderer.
-  ipcMain.handle(IPC.commandBoxes.save, async (_event, data: CommandBoxData) => {
-    savedCommandBoxes = data;
+  ipcMain.handle(IPC.codeCells.save, async (_event, data: CodeCellData) => {
+    savedCodeCells = data;
     return true;
   });
 

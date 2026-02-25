@@ -80,7 +80,7 @@ export interface Theme {
   colors: Record<string, string>;
 }
 
-export interface CommandBoxData {
+export interface CodeCellData {
   tabs: Array<{ id: number; code: string }>;
   activeTabId: number;
 }
@@ -164,7 +164,7 @@ export interface PDVApi {
     reload(scriptPath: string): Promise<{ success: boolean; error?: string }>;
   };
   project: {
-    save(saveDir: string, commandBoxes: unknown): Promise<boolean>;
+    save(saveDir: string, codeCells: unknown): Promise<boolean>;
     load(saveDir: string): Promise<unknown>;
     new(): Promise<boolean>;
     onLoaded(callback: (payload: Record<string, unknown>) => void): () => void;
@@ -177,9 +177,9 @@ export interface PDVApi {
     get(): Promise<Theme[]>;
     save(theme: Theme): Promise<boolean>;
   };
-  commandBoxes: {
-    load(): Promise<CommandBoxData | null>;
-    save(data: CommandBoxData): Promise<boolean>;
+  codeCells: {
+    load(): Promise<CodeCellData | null>;
+    save(data: CodeCellData): Promise<boolean>;
   };
   files: {
     pickExecutable(): Promise<string | null>;

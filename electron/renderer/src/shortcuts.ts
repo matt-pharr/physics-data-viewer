@@ -9,11 +9,11 @@
 export interface Shortcuts {
   /** Open the Settings dialog. */
   openSettings: string;
-  /** Execute the active command-box tab. */
+  /** Execute the active code-cell tab. */
   execute: string;
-  /** Add a new command-box tab. */
+  /** Add a new code-cell tab. */
   newTab: string;
-  /** Close the active command-box tab. */
+  /** Close the active code-cell tab. */
   closeTab: string;
   /** Close the application window. */
   closeWindow: string;

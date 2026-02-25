@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState, useRef, useCallback } from 'react';
-import { CommandBox } from '../components/CommandBox';
+import { CodeCell } from '../components/CodeCell';
 import { Console } from '../components/Console';
 import { Tree } from '../components/Tree';
 import { EnvironmentSelector } from '../components/EnvironmentSelector';
@@ -7,13 +7,13 @@ import { NamespaceView } from '../components/NamespaceView';
 import { ScriptDialog } from '../components/ScriptDialog';
 import { CreateScriptDialog } from '../components/Tree/CreateScriptDialog';
 import { SettingsDialog } from '../components/SettingsDialog';
-import type { CommandTab, Config, KernelExecuteResult, LogEntry, MenuActionPayload, TreeNodeData } from '../types';
+import type { CellTab, Config, KernelExecuteResult, LogEntry, MenuActionPayload, TreeNodeData } from '../types';
 import { matchesShortcut, resolveShortcuts } from '../shortcuts';
 
 type Tab = 'tree' | 'namespace' | 'modules';
 type KernelStatus = 'idle' | 'starting' | 'ready' | 'error';
 
-function normalizeLoadedCommandBoxes(data: unknown): { tabs: CommandTab[]; activeTabId: number } {
+function normalizeLoadedCodeCells(data: unknown): { tabs: CellTab[]; activeTabId: number } {
   const rawTabs =
     Array.isArray(data)
       ? data
@@ -31,7 +31,7 @@ function normalizeLoadedCommandBoxes(data: unknown): { tabs: CommandTab[]; activ
       const id = typeof maybe.id === 'number' ? maybe.id : index + 1;
       return { id, code };
     })
-    .filter((tab): tab is CommandTab => tab !== null);
+    .filter((tab): tab is CellTab => tab !== null);
   const normalizedTabs = tabs.length > 0 ? tabs : [{ id: 1, code: '' }];
   const requestedActive =
     data && typeof data === 'object' && typeof (data as { activeTabId?: unknown }).activeTabId === 'number'
@@ -68,8 +68,8 @@ function applyAppearanceColors(colors?: Record<string, string>): void {
 
 const App: React.FC = () => {
   const [activeTab, setActiveTab] = useState<Tab>('tree');
-  const [commandTabs, setCommandTabs] = useState<CommandTab[]>([{ id: 1, code: '' }]);
-  const [activeCommandTab, setActiveCommandTab] = useState(1);
+  const [CellTabs, setCellTabs] = useState<CellTab[]>([{ id: 1, code: '' }]);
+  const [activeCellTab, setActiveCellTab] = useState(1);
   const [logs, setLogs] = useState<LogEntry[]>([]);
   const [currentKernelId, setCurrentKernelId] = useState<string | null>(null);
   const [kernelStatus, setKernelStatus] = useState<KernelStatus>('idle');
@@ -81,7 +81,7 @@ const App: React.FC = () => {
   const [scriptDialog, setScriptDialog] = useState<TreeNodeData | null>(null);
   const [currentProjectDir, setCurrentProjectDir] = useState<string | null>(null);
   const initRef = useRef(false);
-  const loadedProjectTabsRef = useRef<{ tabs: CommandTab[]; activeTabId: number } | null>(null);
+  const loadedProjectTabsRef = useRef<{ tabs: CellTab[]; activeTabId: number } | null>(null);
   const [leftWidth, setLeftWidth] = useState(() => {
     const saved = localStorage.getItem('pdv.pane.leftWidth');
     return saved ? Number(saved) : 340;
@@ -101,30 +101,30 @@ const App: React.FC = () => {
 
   const shortcuts = useMemo(() => resolveShortcuts(config?.settings?.shortcuts), [config]);
 
-  // Load command boxes from filesystem on startup
+  // Load code celles from filesystem on startup
   useEffect(() => {
-    if (!window.pdv?.commandBoxes) {
+    if (!window.pdv?.codeCells) {
       return;
     }
-    const loadCommandBoxes = async () => {
+    const loadCodeCells = async () => {
       try {
-        const data = await window.pdv.commandBoxes.load();
+        const data = await window.pdv.codeCells.load();
         if (data) {
-          setCommandTabs(data.tabs);
-          setActiveCommandTab(data.activeTabId);
-          console.log('[App] Loaded command boxes from filesystem:', data.tabs.length, 'tabs');
+          setCellTabs(data.tabs);
+          setActiveCellTab(data.activeTabId);
+          console.log('[App] Loaded code celles from filesystem:', data.tabs.length, 'tabs');
         }
       } catch (error) {
-        console.error('[App] Failed to load command boxes:', error);
+        console.error('[App] Failed to load code celles:', error);
       }
     };
-    void loadCommandBoxes();
+    void loadCodeCells();
   }, []);
 
   // Debounced save to filesystem
   const saveTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   useEffect(() => {
-    if (!window.pdv?.commandBoxes) {
+    if (!window.pdv?.codeCells) {
       return;
     }
     // Clear any pending save
@@ -135,13 +135,13 @@ const App: React.FC = () => {
     // Debounce saves by 500ms to avoid excessive file writes
     saveTimeoutRef.current = setTimeout(async () => {
       try {
-        await window.pdv.commandBoxes.save({
-          tabs: commandTabs,
-          activeTabId: activeCommandTab,
+        await window.pdv.codeCells.save({
+          tabs: CellTabs,
+          activeTabId: activeCellTab,
         });
-        console.log('[App] Saved command boxes to filesystem');
+        console.log('[App] Saved code celles to filesystem');
       } catch (error) {
-        console.error('[App] Failed to save command boxes:', error);
+        console.error('[App] Failed to save code celles:', error);
       }
     }, 500);
 
@@ -149,13 +149,13 @@ const App: React.FC = () => {
       if (saveTimeoutRef.current) {
         clearTimeout(saveTimeoutRef.current);
         // Save immediately on cleanup to avoid data loss
-        void window.pdv.commandBoxes.save({
-          tabs: commandTabs,
-          activeTabId: activeCommandTab,
+        void window.pdv.codeCells.save({
+          tabs: CellTabs,
+          activeTabId: activeCellTab,
         });
       }
     };
-  }, [commandTabs, activeCommandTab]);
+  }, [CellTabs, activeCellTab]);
 
   useEffect(() => {
     // Prevent double initialization in StrictMode
@@ -197,19 +197,19 @@ const App: React.FC = () => {
     document.title = `PDV: ${projectName}`;
   }, [currentProjectDir]);
 
-  const addCommandTabRef = useRef<() => void>(null!);
+  const addCellTabRef = useRef<() => void>(null!);
   useEffect(() => {
-    addCommandTabRef.current = addCommandTab;
+    addCellTabRef.current = addCellTab;
   });
 
-  const activeCommandTabRef = useRef(activeCommandTab);
+  const activeCellTabRef = useRef(activeCellTab);
   useEffect(() => {
-    activeCommandTabRef.current = activeCommandTab;
-  }, [activeCommandTab]);
+    activeCellTabRef.current = activeCellTab;
+  }, [activeCellTab]);
 
-  const removeCommandTabRef = useRef<(id: number) => void>(null!);
+  const removeCellTabRef = useRef<(id: number) => void>(null!);
   useEffect(() => {
-    removeCommandTabRef.current = handleRemoveCommandTab;
+    removeCellTabRef.current = handleRemoveCellTab;
   });
 
   useEffect(() => {
@@ -221,11 +221,11 @@ const App: React.FC = () => {
       }
       if (matchesShortcut(event, shortcuts.newTab)) {
         event.preventDefault();
-        addCommandTabRef.current();
+        addCellTabRef.current();
       }
       if (matchesShortcut(event, shortcuts.closeTab)) {
         event.preventDefault();
-        removeCommandTabRef.current(activeCommandTabRef.current);
+        removeCellTabRef.current(activeCellTabRef.current);
       }
       if (matchesShortcut(event, shortcuts.closeWindow)) {
         event.preventDefault();
@@ -272,8 +272,8 @@ const App: React.FC = () => {
     const unsubscribeProject = window.pdv.project.onLoaded(() => {
       if (loadedProjectTabsRef.current) {
         const loaded = loadedProjectTabsRef.current;
-        setCommandTabs(loaded.tabs);
-        setActiveCommandTab(loaded.activeTabId);
+        setCellTabs(loaded.tabs);
+        setActiveCellTab(loaded.activeTabId);
       }
       setTreeRefreshToken((prev) => prev + 1);
     });
@@ -416,21 +416,21 @@ const App: React.FC = () => {
     }
   };
 
-  const addCommandTab = () => {
-    setCommandTabs((prev) => {
+  const addCellTab = () => {
+    setCellTabs((prev) => {
       const newId = Math.max(0, ...prev.map((t) => t.id)) + 1;
-      setActiveCommandTab(newId);
+      setActiveCellTab(newId);
       return [...prev, { id: newId, code: '' }];
     });
   };
 
   const handleTabChange = (id: number) => {
-    setActiveCommandTab(id);
+    setActiveCellTab(id);
     setLastError(undefined);
   };
 
   const handleCodeChange = (id: number, code: string) => {
-    setCommandTabs((prev) => prev.map((tab) => (tab.id === id ? { ...tab, code } : tab)));
+    setCellTabs((prev) => prev.map((tab) => (tab.id === id ? { ...tab, code } : tab)));
   };
 
   const handleClearConsole = () => {
@@ -439,25 +439,25 @@ const App: React.FC = () => {
   };
 
   const handleClearCommand = () => {
-    setCommandTabs((prev) =>
-      prev.map((tab) => (tab.id === activeCommandTab ? { ...tab, code: '' } : tab)),
+    setCellTabs((prev) =>
+      prev.map((tab) => (tab.id === activeCellTab ? { ...tab, code: '' } : tab)),
     );
     setLastError(undefined);
   };
 
-  const handleRemoveCommandTab = (id: number) => {
-    setCommandTabs((prev) => {
+  const handleRemoveCellTab = (id: number) => {
+    setCellTabs((prev) => {
       const next = prev.filter((t) => t.id !== id);
       if (next.length === 0) {
         const fallback = { id: 1, code: '' };
-        setActiveCommandTab(fallback.id);
+        setActiveCellTab(fallback.id);
         return [fallback];
       }
       // If the closed tab was active, move to the tab to its left (or the first tab)
-      if (id === activeCommandTab) {
+      if (id === activeCellTab) {
         const closedIndex = prev.findIndex((t) => t.id === id);
         const newActive = next[Math.max(0, closedIndex - 1)];
-        setActiveCommandTab(newActive.id);
+        setActiveCellTab(newActive.id);
       }
       return next;
     });
@@ -595,15 +595,15 @@ const App: React.FC = () => {
         return;
       }
       await window.pdv.project.save(saveDir, {
-        tabs: commandTabs,
-        activeTabId: activeCommandTab,
+        tabs: CellTabs,
+        activeTabId: activeCellTab,
       });
       setCurrentProjectDir(saveDir);
       await rememberRecentProject(saveDir);
     } catch (error) {
       setLastError(error instanceof Error ? error.message : String(error));
     }
-  }, [activeCommandTab, commandTabs, currentProjectDir, kernelStatus, rememberRecentProject]);
+  }, [activeCellTab, CellTabs, currentProjectDir, kernelStatus, rememberRecentProject]);
 
   const handleOpenProject = useCallback(async (directory?: string) => {
     if (kernelStatus !== 'ready') {
@@ -615,10 +615,10 @@ const App: React.FC = () => {
         return;
       }
       const loaded = await window.pdv.project.load(saveDir);
-      const normalized = normalizeLoadedCommandBoxes(loaded);
+      const normalized = normalizeLoadedCodeCells(loaded);
       loadedProjectTabsRef.current = normalized;
-      setCommandTabs(normalized.tabs);
-      setActiveCommandTab(normalized.activeTabId);
+      setCellTabs(normalized.tabs);
+      setActiveCellTab(normalized.activeTabId);
       setCurrentProjectDir(saveDir);
       await rememberRecentProject(saveDir);
       setNamespaceRefreshToken((prev) => prev + 1);
@@ -709,7 +709,7 @@ const App: React.FC = () => {
         {/* Vertical resizer */}
         <div className="vertical-resizer" onMouseDown={startVerticalDrag} />
 
-        {/* Right pane: Console + Command Box */}
+        {/* Right pane: Console + Code Cell */}
         <div className="right-pane" ref={rightPaneRef}>
           <div className="console-wrapper" style={{ height: `${consoleHeight}px` }}>
             <Console logs={logs} onClear={handleClearConsole} />
@@ -718,16 +718,16 @@ const App: React.FC = () => {
           {/* Horizontal resizer */}
           <div className="horizontal-resizer" onMouseDown={startHorizontalDrag} />
 
-          <CommandBox
-            tabs={commandTabs.map((tab) => ({
+          <CodeCell
+            tabs={CellTabs.map((tab) => ({
               ...tab,
               onChange: (code: string) => handleCodeChange(tab.id, code),
             }))}
-            activeTabId={activeCommandTab}
+            activeTabId={activeCellTab}
             disabled={kernelStatus !== 'ready'}
             onTabChange={handleTabChange}
-            onAddTab={addCommandTab}
-            onRemoveTab={handleRemoveCommandTab}
+            onAddTab={addCellTab}
+            onRemoveTab={handleRemoveCellTab}
             onExecute={handleExecute}
             onClear={handleClearCommand}
             isExecuting={isExecuting}

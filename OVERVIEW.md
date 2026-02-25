@@ -48,7 +48,7 @@ See `ARCHITECTURE.md` §5.
 
 Primary renderer components live under `electron/renderer/src/components`:
 
-- **CommandBox**: tabbed code editing and execution submission
+- **CodeCell**: tabbed code editing and execution submission
 - **Console**: execution outputs, errors, and result display
 - **Tree**: hierarchical data navigation and node actions
 - **NamespaceView**: filtered namespace variable listing

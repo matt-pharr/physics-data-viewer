@@ -576,12 +576,12 @@ describe("Step 5 IPC handlers", () => {
     expect(afterSave).toEqual([{ name: "dark", colors: {} }]);
   });
 
-  it("commandBoxes:load returns null initially, commandBoxes:save persists", async () => {
+  it("codeCells:load returns null initially, codeCells:save persists", async () => {
     setup();
-    const load = getHandler(IPC.commandBoxes.load);
+    const load = getHandler(IPC.codeCells.load);
     expect(await load({})).toBeNull();
 
-    const save = getHandler(IPC.commandBoxes.save);
+    const save = getHandler(IPC.codeCells.save);
     await save({}, { boxes: [{ id: "b1" }] });
 
     const afterSave = await load({});

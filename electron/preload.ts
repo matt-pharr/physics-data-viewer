@@ -73,8 +73,8 @@ const api: PDVApi = {
     reload: (scriptPath) => ipcRenderer.invoke(IPC.script.reload, scriptPath),
   },
   project: {
-    save: (saveDir, commandBoxes) =>
-      ipcRenderer.invoke(IPC.project.save, saveDir, commandBoxes),
+    save: (saveDir, codeCells) =>
+      ipcRenderer.invoke(IPC.project.save, saveDir, codeCells),
     load: (saveDir) => ipcRenderer.invoke(IPC.project.load, saveDir),
     new: () => ipcRenderer.invoke(IPC.project.new),
     onLoaded: (callback) => onPush(IPC.push.projectLoaded, callback),
@@ -87,9 +87,9 @@ const api: PDVApi = {
     get: () => ipcRenderer.invoke(IPC.themes.get),
     save: (theme) => ipcRenderer.invoke(IPC.themes.save, theme),
   },
-  commandBoxes: {
-    load: () => ipcRenderer.invoke(IPC.commandBoxes.load),
-    save: (data) => ipcRenderer.invoke(IPC.commandBoxes.save, data),
+  codeCells: {
+    load: () => ipcRenderer.invoke(IPC.codeCells.load),
+    save: (data) => ipcRenderer.invoke(IPC.codeCells.save, data),
   },
   files: {
     pickExecutable: () => ipcRenderer.invoke(IPC.files.pickExecutable),

@@ -86,10 +86,10 @@ Per existing decisions: implement **remote data connectors** before remote kerne
 
 ---
 
-## 5) Kernel-Backed Autocompletion in the Command Box
+## 5) Kernel-Backed Autocompletion in the Code Cell
 
 ### Goal
-Provide runtime-aware autocompletion in the Monaco editor command box. Static language servers (Pylance, Pyright) are explicitly ruled out: they cannot see `pdv_tree` key paths, live namespace variables, or method chains on objects loaded in the current session. The running ipykernel uses jedi internally and introspects the live namespace — it produces exactly the completions that matter in a PDV workflow.
+Provide runtime-aware autocompletion in the Monaco editor code cell. Static language servers (Pylance, Pyright) are explicitly ruled out: they cannot see `pdv_tree` key paths, live namespace variables, or method chains on objects loaded in the current session. The running ipykernel uses jedi internally and introspects the live namespace — it produces exactly the completions that matter in a PDV workflow.
 
 ### Planned work
 
@@ -103,7 +103,7 @@ complete(kernelId: string, code: string, cursorPos: number): Promise<CompleteRes
 #### IPC: `kernel:complete` channel
 Add a `kernel:complete` handler in `ipc.ts` (already listed in `window.pdv.kernels.*` surface, ARCHITECTURE.md §11.2) that proxies to `KernelManager.complete()`.
 
-#### `CommandBox`: Monaco completion provider
+#### `CodeCell`: Monaco completion provider
 Register a completion item provider for Python after the editor mounts:
 ```ts
 monaco.languages.registerCompletionItemProvider('python', {
@@ -121,7 +121,7 @@ Round-trip latency to a local kernel subprocess is typically a few milliseconds 
 #### Implementation constraints
 - The provider must be registered once globally (outside the component render cycle), not on every mount, to avoid duplicate provider registration across tab switches.
 - If no kernel is running, `provideCompletionItems` returns `{ suggestions: [] }` rather than throwing.
-- Monaco's `quickSuggestions`, `suggestOnTriggerCharacters`, and `wordBasedSuggestions` remain disabled (current `CommandBox` config). The registered provider above replaces them entirely with kernel-backed suggestions.
+- Monaco's `quickSuggestions`, `suggestOnTriggerCharacters`, and `wordBasedSuggestions` remain disabled (current `CodeCell` config). The registered provider above replaces them entirely with kernel-backed suggestions.
 - When Julia support is added (item 3), register a separate provider for `julia` using the same IPC channel — `complete_request` is language-agnostic.
 
 ---
@@ -172,7 +172,7 @@ Script nodes are designed to be edited in external editors (ARCHITECTURE.md §11
 ## 8) Session Restore and Execution History
 
 ### Goal
-Command box tabs are already saved and restored as part of project save/load (ARCHITECTURE.md §8, `command-boxes.json`). A future enhancement is optional capture of execution history so a session can be partially replayed or audited.
+Code cell tabs are already saved and restored as part of project save/load (ARCHITECTURE.md §8, `code-cells.json`). A future enhancement is optional capture of execution history so a session can be partially replayed or audited.
 
 ### Planned work
 - **Execution timeline serialization**: Optionally record each execution event (code snapshot, timestamp, stdout/stderr/error summary) to a `execution-history.json` in the project directory.
@@ -382,8 +382,8 @@ PDV is ready to ship 0.1.0-beta1 when all of the following are true:
 
 - Projects open and save reliably with complete state; older project files load without data loss
 - Tree is persistent, scalable, and lazily browsable for large datasets (100GB+)
-- Command box state is project-managed and recoverable
-- Kernel-backed autocompletion works in the command box for Python (and Julia when supported)
+- Code cell state is project-managed and recoverable
+- Kernel-backed autocompletion works in the code cell for Python (and Julia when supported)
 - Modules are installable and runnable via manifest-driven UI actions
 - Rich document artifacts (figures, Markdown notes, PDFs) are first-class tree nodes
 - Python and Julia have practical parity for all core workflows

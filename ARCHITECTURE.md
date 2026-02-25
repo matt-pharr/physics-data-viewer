@@ -51,7 +51,7 @@ PDV uses the standard Electron three-process architecture:
 │  │ (Node.js)    │        │ (React / TypeScript)   │ │
 │  │              │        │                        │ │
 │  │ - Kernel mgmt│        │ - Tree panel           │ │
-│  │ - IPC handlers        │ - Command Box          │ │
+│  │ - IPC handlers        │ - Code Cell          │ │
 │  │ - Filesystem │        │ - Console              │ │
 │  │ - Config     │        │ - Namespace panel      │ │
 │  │ - Comm router│        │ - Settings / dialogs   │ │
@@ -78,7 +78,7 @@ PDV uses the standard Electron three-process architecture:
 
 ### 2.2 Renderer Process Responsibilities
 - Display and interact with the Tree panel
-- Display and interact with the Command Box (Monaco editor tabs)
+- Display and interact with the Code Cell (Monaco editor tabs)
 - Display the Console (chronological execution output log)
 - Display the Namespace panel
 - All UI state (expansion, selection, scroll position) lives here and is ephemeral unless saved as part of a project
@@ -233,7 +233,7 @@ App launches
     │       status: error → display error with message
     │
     └─► Kernel is ready. UI unlocks.
-            Command Box: active
+            Code Cell: active
             Tree panel: empty, showing working directory root
             Namespace panel: active
 ```
@@ -258,8 +258,8 @@ User selects a save directory
     ├─► App receives pdv.project.loaded:
     │       payload: { node_count: N, project_name: "...", saved_at: "..." }
     │
-    └─► App loads command-boxes.json from save directory
-            Populates Command Box tabs with saved code
+    └─► App loads code-cells.json from save directory
+            Populates Code Cell tabs with saved code
             Console: empty (output history is ephemeral)
             Tree panel: refreshes via pdv.tree.list
 ```
@@ -287,7 +287,7 @@ From the renderer's perspective, startup is simply:
 
 ```tsx
 // Renderer (app/index.tsx)
-setKernelStatus('starting'); // locks UI — command box, tree, namespace all disabled
+setKernelStatus('starting'); // locks UI — code cell, tree, namespace all disabled
 const info = await window.pdv.kernels.start(spec);
 setCurrentKernelId(info.id);
 setKernelStatus('ready');   // unlocks UI
@@ -478,7 +478,7 @@ A persistent, user-chosen directory that stores a complete saved snapshot of a P
 my-project/
     project.json              ← project manifest (owned by Electron main process)
     tree-index.json           ← tree node registry (owned by kernel, written at save time)
-    command-boxes.json        ← command box tab state (owned by Electron main process)
+    code-cells.json        ← code cell tab state (owned by Electron main process)
     tree/
         data/
             waveforms/
@@ -501,7 +501,7 @@ my-project/
   "saved_at": "<iso8601>",
   "language_mode": "python",
   "tree_index_file": "tree-index.json",
-  "command_boxes_file": "command-boxes.json",
+  "code_cells_file": "code-cells.json",
   "kernel": {
     "preferred_python": null,
     "preferred_julia": null
@@ -511,7 +511,7 @@ my-project/
 
 **`tree-index.json` schema**: Written by the kernel during save. Contains an array of node descriptors — one per tree node — with enough information to reconstruct the full tree structure and lazy-load registry without opening any data files. See Section 7.3 for node descriptor fields.
 
-**`command-boxes.json` schema**: Written by the Electron main process during save. Contains tab code and active tab ID.
+**`code-cells.json` schema**: Written by the Electron main process during save. Contains tab code and active tab ID.
 
 ### 6.3 Lazy Loading from Save to Working Directory
 
@@ -641,7 +641,7 @@ User triggers save
     │       3. Responds with pdv.project.save.response:
     │              payload: { node_count: N, checksum: "<sha256 of tree-index.json>" }
     │
-    ├─► App writes command-boxes.json to save directory
+    ├─► App writes code-cells.json to save directory
     │
     ├─► App writes project.json to save directory
     │       (only after both kernel and app state are flushed)
@@ -666,7 +666,7 @@ Every file in `tree/` must have a corresponding entry in `tree-index.json`. File
 ### 9.1 Execution Channel
 
 All user-initiated code execution goes through the standard Jupyter `execute_request` message on the shell socket. This includes:
-- Code typed in the Command Box and run via the execute button or Cmd+Enter
+- Code typed in the Code Cell and run via the execute button or Cmd+Enter
 - Script `run()` calls triggered by context menu actions in the tree panel
 
 This is the only code that the main process sends via `execute_request`. The main process never uses `execute_request` to call PDV internal functions.
@@ -745,7 +745,7 @@ The API surface:
 - `window.pdv.project.*` — project lifecycle: `save`, `load`, `new`; push: `onLoaded(cb) → unsub`
 - `window.pdv.config.*` — app config: `get`, `set`
 - `window.pdv.themes.*` — theme persistence: `get`, `save`
-- `window.pdv.commandBoxes.*` — tab persistence: `load`, `save`
+- `window.pdv.codeCells.*` — tab persistence: `load`, `save`
 - `window.pdv.files.*` — native OS dialogs: `pickExecutable() → string | null` (wraps Electron `dialog.showOpenDialog` for executables); `pickDirectory() → string | null` (wraps `dialog.showOpenDialog` with `properties: ['openDirectory', 'createDirectory']`, used for Save/Open project)
 
 **Design decision — running scripts via `kernels.execute`**: There is no `window.pdv.script.run()`. Running a `PDVScript` node from the renderer is always done by calling `window.pdv.kernels.execute()` with the appropriate Python code string (e.g. `pdv_tree["path.to.script"].run(a=1)`). This keeps the IPC surface minimal and the comm substrate readable — a script run looks identical to any other user execution in the console and in the kernel logs. The `ScriptDialog` component builds the execute call; it does not call a separate IPC channel.
@@ -774,7 +774,7 @@ useEffect(() => {
   });
 
   const unsubProject = window.pdv.project.onLoaded(payload => {
-    // repopulate command box tabs from project
+    // repopulate code cell tabs from project
   });
 
   return () => {

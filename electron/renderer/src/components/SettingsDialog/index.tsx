@@ -278,7 +278,7 @@ export const SettingsDialog: React.FC<SettingsDialogProps> = ({
 
   const shortcutSections: { title: string; keys: Array<keyof Shortcuts> }[] = [
     { title: 'General',     keys: ['openSettings', 'closeWindow'] },
-    { title: 'Command Box', keys: ['execute', 'newTab', 'closeTab'] },
+    { title: 'Code Cells', keys: ['execute', 'newTab', 'closeTab'] },
     { title: 'Tree',        keys: ['treeCopyPath', 'treeEditScript', 'treePrint'] },
   ];
 

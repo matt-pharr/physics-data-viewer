@@ -411,7 +411,7 @@ body {
   margin-left: auto;
 }
 
-.command-tabs {
+.code-cell-tabs {
   display: flex;
   gap: 4px;
   margin-left: 12px;
@@ -422,7 +422,7 @@ body {
   scrollbar-width: none;
 }
 
-.command-tabs::-webkit-scrollbar {
+.code-cell-tabs::-webkit-scrollbar {
   display: none;
 }
 
@@ -521,7 +521,7 @@ body {
 }
 
 /* ===== COMMAND PANE ===== */
-.command-pane {
+.code-cell-pane {
   min-height: 180px;
   flex: 1;
   display: flex;
@@ -537,7 +537,7 @@ body {
   background-color: var(--bg-primary);
 }
 
-.command-error-bar {
+.code-cell-error-bar {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -548,7 +548,7 @@ body {
   font-size: 13px;
 }
 
-.command-status-bar {
+.code-cell-status-bar {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -559,7 +559,7 @@ body {
   font-size: 13px;
 }
 
-.command-editor-placeholder {
+.code-cell-editor-placeholder {
   height: 100%;
   display: flex;
   flex-direction: column;
@@ -568,7 +568,7 @@ body {
   color: var(--text-secondary);
 }
 
-.command-editor-placeholder p {
+.code-cell-editor-placeholder p {
   margin: 4px 0;
 }
 
