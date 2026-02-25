@@ -23,10 +23,11 @@ code. It can be imported and tested standalone.
 from __future__ import annotations
 
 import ast
+import inspect
 import importlib.util
 import os
 import sys
-from typing import Any, Callable
+from typing import Any, Callable, TypedDict
 
 from pdv_kernel.errors import PDVKeyError, PDVPathError, PDVScriptError
 
@@ -174,6 +175,79 @@ class LazyLoadRegistry:
 # PDVScript
 # ---------------------------------------------------------------------------
 
+
+class ScriptParameter(TypedDict):
+    """Descriptor for one user-facing PDVScript run() parameter."""
+
+    name: str
+    type: str
+    default: Any
+    required: bool
+
+
+def _annotation_to_type_name(annotation: Any) -> str:
+    """Convert a Python annotation object to a stable string label."""
+    if annotation is inspect.Parameter.empty:
+        return "any"
+    if isinstance(annotation, str):
+        return annotation
+    if hasattr(annotation, "__name__"):
+        return str(annotation.__name__)
+    return str(annotation)
+
+
+def _extract_script_params(file_path: str) -> list[ScriptParameter]:
+    """Extract user-facing run() params from a script file.
+
+    Returns an empty list if the file does not exist, cannot be parsed,
+    or does not define a callable run() function.
+    """
+    if not os.path.exists(file_path):
+        return []
+
+    module_name = f"_pdv_script_params_{abs(hash(file_path))}"
+    if module_name in sys.modules:
+        del sys.modules[module_name]
+
+    spec = importlib.util.spec_from_file_location(module_name, file_path)
+    if spec is None or spec.loader is None:
+        return []
+
+    module = importlib.util.module_from_spec(spec)
+    try:
+        spec.loader.exec_module(module)  # type: ignore[union-attr]
+    except (SyntaxError, FileNotFoundError, OSError, ImportError):
+        return []
+
+    run_fn = getattr(module, "run", None)
+    if not callable(run_fn):
+        return []
+
+    try:
+        signature = inspect.signature(run_fn)
+    except (TypeError, ValueError):
+        return []
+
+    extracted: list[ScriptParameter] = []
+    for index, (param_name, param) in enumerate(signature.parameters.items()):
+        if index == 0:
+            continue
+        if param.kind in (
+            inspect.Parameter.VAR_POSITIONAL,
+            inspect.Parameter.VAR_KEYWORD,
+        ):
+            continue
+        has_default = param.default is not inspect.Parameter.empty
+        extracted.append(
+            {
+                "name": param_name,
+                "type": _annotation_to_type_name(param.annotation),
+                "default": param.default if has_default else None,
+                "required": not has_default,
+            }
+        )
+    return extracted
+
 class PDVScript:
     """
     Lightweight wrapper for a script file stored as a PDV tree node.
@@ -201,6 +275,7 @@ class PDVScript:
         self._relative_path = relative_path
         self._language = language
         self._doc = doc
+        self._params: list[ScriptParameter] = _extract_script_params(relative_path)
 
     @property
     def relative_path(self) -> str:
@@ -217,6 +292,11 @@ class PDVScript:
         """First line of the script docstring, or None."""
         return self._doc
 
+    @property
+    def params(self) -> list[ScriptParameter]:
+        """User-facing run() parameters (excluding pdv_tree)."""
+        return self._params
+
     def preview(self) -> str:
         """Return a short human-readable preview string for the tree panel.
 
@@ -229,7 +309,7 @@ class PDVScript:
             return self._doc.split("\n")[0]
         return "PDV script"
 
-    def run(self, tree: "PDVTree", **kwargs: Any) -> Any:
+    def run(self, tree: "PDVTree" | None = None, **kwargs: Any) -> Any:
         """Load and execute the script, calling its ``run()`` function.
 
         Loads the module fresh on every call (no import cache). The
@@ -237,9 +317,10 @@ class PDVScript:
 
         Parameters
         ----------
-        tree : PDVTree
+        tree : PDVTree or None
             The live project data tree, passed as the first argument to
-            the script's ``run()`` function.
+            the script's ``run()`` function. When omitted, the bootstrapped
+            global tree from ``pdv_kernel.comms`` is used.
         **kwargs
             Additional keyword arguments forwarded to ``run()``.
 
@@ -253,8 +334,16 @@ class PDVScript:
         FileNotFoundError
             If the script file does not exist on disk.
         PDVScriptError
-            If the script has no ``run()`` function, or if ``run()`` raises.
+            If the script has no ``run()`` function, if no tree is available,
+            or if ``run()`` raises.
         """
+        if tree is None:
+            from pdv_kernel.comms import get_pdv_tree  # noqa: PLC0415
+
+            tree = get_pdv_tree()
+            if tree is None:
+                raise PDVScriptError("PDVTree is not initialized")
+
         # Resolve file path: if absolute, use directly; otherwise join with working_dir
         if os.path.isabs(self._relative_path):
             file_path = self._relative_path

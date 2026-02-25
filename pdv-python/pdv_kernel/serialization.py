@@ -163,6 +163,7 @@ def serialize_node(
     import json
     import os
     import pickle
+    import shutil
 
     from pdv_kernel.environment import ensure_parent, working_dir_tree_path  # noqa: PLC0415
 
@@ -194,11 +195,21 @@ def serialize_node(
         return descriptor
 
     if kind == KIND_SCRIPT:
+        source_path = value.relative_path  # type: ignore[union-attr]
+        if not os.path.isabs(source_path):
+            source_path = os.path.join(working_dir, source_path)
+        if not os.path.exists(source_path):
+            raise PDVSerializationError(f"Script file not found: {source_path}")
+        file_path = working_dir_tree_path(working_dir, tree_path, ".py")
+        ensure_parent(file_path)
+        if os.path.abspath(source_path) != os.path.abspath(file_path):
+            shutil.copy2(source_path, file_path)
+        rel_path = os.path.relpath(file_path, working_dir)
         descriptor["language"] = value.language  # type: ignore[union-attr]
         descriptor["storage"] = {
-            "backend": "inline",
+            "backend": "local_file",
+            "relative_path": rel_path,
             "format": FORMAT_PY_SCRIPT,
-            "value": value.relative_path,  # type: ignore[union-attr]
         }
         return descriptor
 

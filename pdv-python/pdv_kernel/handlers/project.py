@@ -33,7 +33,7 @@ def _set_tree_node(tree: "Any", path: str, value: "Any") -> None:
     value : Any
         The value to set at the path.
     """
-    from pdv_kernel.tree import PDVTree  # noqa: PLC0415
+    from pdv_kernel.tree import PDVTree, PDVScript  # noqa: PLC0415
 
     parts = path.split(".")
     current = tree
@@ -64,7 +64,7 @@ def _collect_nodes(tree: "Any", save_dir: str, prefix: str = "") -> list:
         List of node descriptor dicts.
     """
     from pdv_kernel.serialization import serialize_node  # noqa: PLC0415
-    from pdv_kernel.tree import PDVTree  # noqa: PLC0415
+    from pdv_kernel.tree import PDVTree, PDVScript  # noqa: PLC0415
 
     nodes = []
     for key in dict.keys(tree):
@@ -98,9 +98,10 @@ def handle_project_load(msg: dict) -> None:
     """
     import json
     import os
+    import shutil
 
     from pdv_kernel.comms import get_pdv_tree, send_error, send_message  # noqa: PLC0415
-    from pdv_kernel.tree import PDVTree  # noqa: PLC0415
+    from pdv_kernel.tree import PDVTree, PDVScript  # noqa: PLC0415
 
     msg_id = msg.get("msg_id")
     payload = msg.get("payload", {})
@@ -162,6 +163,27 @@ def handle_project_load(msg: dict) -> None:
 
         if node_type == "folder":
             _set_tree_node(tree, path, PDVTree())
+        elif node_type == "script":
+            relative_path = storage.get("relative_path", "")
+            source_path = os.path.join(save_dir, relative_path) if relative_path else storage.get("value", "")
+            if source_path and not os.path.isabs(source_path):
+                source_path = os.path.join(save_dir, source_path)
+            if not source_path or not os.path.exists(source_path):
+                send_error(
+                    "pdv.project.load.response",
+                    "project.missing_script_file",
+                    f"Script file not found for '{path}'",
+                    in_reply_to=msg_id,
+                )
+                return
+            target_relative = relative_path or os.path.join("tree", *path.split(".")) + ".py"
+            working_dir = tree._working_dir or save_dir
+            target_path = os.path.join(working_dir, target_relative)
+            os.makedirs(os.path.dirname(target_path), exist_ok=True)
+            if os.path.abspath(source_path) != os.path.abspath(target_path):
+                shutil.copy2(source_path, target_path)
+            language = node.get("language", "python")
+            _set_tree_node(tree, path, PDVScript(relative_path=target_path, language=language))
         elif backend == "inline":
             _set_tree_node(tree, path, storage.get("value"))
         elif node.get("lazy", False):
@@ -172,6 +194,11 @@ def handle_project_load(msg: dict) -> None:
             tree._lazy_registry.register(path, storage)
 
     node_count = len(nodes)
+    send_message(
+        "pdv.project.load.response",
+        {"node_count": node_count},
+        in_reply_to=msg_id,
+    )
     # Send pdv.project.loaded push notification (no in_reply_to)
     send_message(
         "pdv.project.loaded",

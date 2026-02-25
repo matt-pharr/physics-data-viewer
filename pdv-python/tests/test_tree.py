@@ -207,6 +207,17 @@ class TestPDVScript:
         result = script.run(tree_with_comm)
         assert result == 'PDVTree'
 
+    def test_run_uses_global_tree_when_tree_argument_is_omitted(self, tree_with_comm, tmp_path, monkeypatch):
+        """Calling script.run(**kwargs) uses the bootstrapped global tree."""
+        from pdv_kernel import comms
+
+        script_file = tmp_path / 'global_tree.py'
+        script_file.write_text('def run(tree, **kwargs):\n    return tree["x"]\n')
+        script = PDVScript(relative_path=str(script_file))
+        tree_with_comm['x'] = 7
+        monkeypatch.setattr(comms, '_pdv_tree', tree_with_comm)
+        assert script.run() == 7
+
     def test_run_missing_file_raises(self, tree_with_comm):
         """Running a non-existent script raises FileNotFoundError."""
         script = PDVScript(relative_path='/nonexistent/path/to/script.py')
@@ -233,3 +244,27 @@ class TestPDVScript:
         tree_with_comm['s'] = PDVScript(relative_path=str(script_file))
         result = tree_with_comm.run_script('s')
         assert result == 100
+
+    def test_params_extracted_from_run_signature(self, tmp_path):
+        """PDVScript extracts user-facing params from run() signature."""
+        script_file = tmp_path / 'param_script.py'
+        script_file.write_text(
+            'def run(pdv_tree: dict, required_count: int, scale: float = 1.5, label=None):\n'
+            '    return {}\n'
+        )
+        script = PDVScript(relative_path=str(script_file))
+        assert script.params == [
+            {'name': 'required_count', 'type': 'int', 'default': None, 'required': True},
+            {'name': 'scale', 'type': 'float', 'default': 1.5, 'required': False},
+            {'name': 'label', 'type': 'any', 'default': None, 'required': False},
+        ]
+
+    def test_params_empty_when_script_is_missing_or_invalid(self, tmp_path):
+        """Missing or invalid script files produce an empty params list."""
+        missing = PDVScript(relative_path=str(tmp_path / 'does_not_exist.py'))
+        assert missing.params == []
+
+        invalid_file = tmp_path / 'invalid.py'
+        invalid_file.write_text('def run(pdv_tree,\n')
+        invalid = PDVScript(relative_path=str(invalid_file))
+        assert invalid.params == []

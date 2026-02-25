@@ -18,7 +18,7 @@ import pytest
 from unittest.mock import MagicMock, patch
 import pdv_kernel.comms as comms_mod
 from pdv_kernel.handlers.tree import handle_tree_list, handle_tree_get
-from pdv_kernel.tree import PDVTree
+from pdv_kernel.tree import PDVScript, PDVTree
 
 
 def _make_mock_comm():
@@ -98,6 +98,29 @@ class TestHandleTreeList:
             assert 'path' in node
             assert 'key' in node
             assert 'type' in node
+
+    def test_script_nodes_include_params_only_for_scripts(self, tree_with_comm, tmp_path):
+        """Script nodes include params while non-script nodes do not."""
+        script_file = tmp_path / 'fit_model.py'
+        script_file.write_text('def run(pdv_tree: dict, sigma: float = 0.1):\n    return {}\n')
+        tree_with_comm['script_node'] = PDVScript(relative_path=str(script_file))
+        tree_with_comm['value_node'] = 42
+
+        mock_comm = _make_mock_comm()
+        msg = _make_msg('pdv.tree.list', {'path': ''})
+        with patch.object(comms_mod, '_comm', mock_comm), \
+             patch.object(comms_mod, '_pdv_tree', tree_with_comm):
+            handle_tree_list(msg)
+
+        nodes = mock_comm._sent[0]['payload']['nodes']
+        script_node = next(node for node in nodes if node['key'] == 'script_node')
+        value_node = next(node for node in nodes if node['key'] == 'value_node')
+
+        assert script_node['type'] == 'script'
+        assert script_node['params'] == [
+            {'name': 'sigma', 'type': 'float', 'default': 0.1, 'required': False}
+        ]
+        assert 'params' not in value_node
 
 
 class TestHandleTreeGet:

@@ -24,6 +24,7 @@ import type {
 import type {
   NodeDescriptor,
   PDVProjectLoadedPayload,
+  ScriptParameter as PDVScriptParameter,
   PDVTreeChangedPayload,
 } from "./pdv-protocol";
 import type { PDVConfig } from "./config";
@@ -95,6 +96,11 @@ export const IPC = {
     treeChanged: "pdv.tree.changed",
     projectLoaded: "pdv.project.loaded",
     kernelStatus: "pdv.kernel.status",
+  },
+  /** Native file/directory picker channels. */
+  files: {
+    pickExecutable: "files:pickExecutable",
+    pickDirectory: "files:pickDirectory",
   },
 } as const;
 
@@ -177,11 +183,17 @@ export interface NamespaceVariable {
 // ---------------------------------------------------------------------------
 
 /**
- * Tree node shape returned to the renderer.
- *
- * This currently mirrors the protocol's `NodeDescriptor`.
+ * Script run() parameter descriptor surfaced in script node metadata.
  */
-export type TreeNode = NodeDescriptor;
+export interface ScriptParameter extends PDVScriptParameter {}
+
+/**
+ * Tree node shape returned to the renderer.
+ */
+export interface TreeNode extends NodeDescriptor {
+  /** Present only when type === 'script'. */
+  params?: ScriptParameter[] | undefined;
+}
 
 /**
  * Result returned by `tree.createScript`.
@@ -405,10 +417,11 @@ export interface PDVApi {
     /**
      * Open a script path in the configured external editor.
      *
+     * @param kernelId - Target kernel ID.
      * @param scriptPath - Script path to edit.
      * @returns Operation status.
      */
-    edit(scriptPath: string): Promise<ScriptOperationResult>;
+    edit(kernelId: string, scriptPath: string): Promise<ScriptOperationResult>;
     /**
      * Re-register a script with reload semantics.
      *
@@ -423,18 +436,18 @@ export interface PDVApi {
     /**
      * Save the current project.
      *
-     * @param saveDir - Target save directory.
-     * @param commandBoxes - Command-box tab state to persist.
-     * @returns True when save request is accepted.
-     */
-    save(saveDir: string, commandBoxes: unknown[]): Promise<boolean>;
+      * @param saveDir - Target save directory.
+      * @param commandBoxes - Command-box payload to persist.
+      * @returns True when save request is accepted.
+      */
+    save(saveDir: string, commandBoxes: unknown): Promise<boolean>;
     /**
      * Load an existing project.
      *
      * @param saveDir - Source save directory.
-     * @returns Loaded command-box state.
-     */
-    load(saveDir: string): Promise<unknown[]>;
+      * @returns Loaded command-box state.
+      */
+    load(saveDir: string): Promise<unknown>;
     /**
      * Start a new empty project session.
      *
@@ -499,5 +512,21 @@ export interface PDVApi {
      * @returns True when save succeeded.
      */
     save(data: CommandBoxData): Promise<boolean>;
+  };
+
+  /** Native file/directory pickers (main process dialog wrappers). */
+  files: {
+    /**
+     * Open a native file picker for selecting an executable path.
+     *
+     * @returns Selected file path, or null if cancelled.
+     */
+    pickExecutable(): Promise<string | null>;
+    /**
+     * Open a native directory picker (with create-directory support).
+     *
+     * @returns Selected directory path, or null if cancelled.
+     */
+    pickDirectory(): Promise<string | null>;
   };
 }

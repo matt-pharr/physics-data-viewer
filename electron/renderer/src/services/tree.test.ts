@@ -1,14 +1,22 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { TreeNode } from '../../../main/ipc';
+import type { NodeDescriptor } from '../types/pdv';
 import { treeService } from './tree';
 
-const rootNodes: TreeNode[] = [
-  { id: 'data', key: 'data', path: 'data', type: 'folder', hasChildren: true },
-  { id: 'scripts', key: 'scripts', path: 'scripts', type: 'folder', hasChildren: true },
+const rootNodes: NodeDescriptor[] = [
+  { id: 'data', key: 'data', path: 'data', parent_path: null, type: 'folder', has_children: true, lazy: false },
+  { id: 'scripts', key: 'scripts', path: 'scripts', parent_path: null, type: 'folder', has_children: true, lazy: false },
 ];
 
-const childNodes: TreeNode[] = [
-  { id: 'data.array1', key: 'array1', path: 'data.array1', type: 'ndarray', hasChildren: false },
+const childNodes: NodeDescriptor[] = [
+  {
+    id: 'data.array1',
+    key: 'array1',
+    path: 'data.array1',
+    parent_path: 'data',
+    type: 'ndarray',
+    has_children: false,
+    lazy: false,
+  },
 ];
 
 const originalWindow = globalThis.window;
@@ -63,7 +71,7 @@ describe('treeService', () => {
   });
 
   it('loads and caches children by path', async () => {
-    const parent = { ...rootNodes[0] };
+    const parent = { ...rootNodes[0], hasChildren: true, parentPath: null };
 
     const first = await treeService.getChildren(parent, 'k1');
     const second = await treeService.getChildren(parent, 'k1');
@@ -76,7 +84,7 @@ describe('treeService', () => {
   });
 
   it('maintains cache per kernel', async () => {
-    const parent = { ...rootNodes[0] };
+    const parent = { ...rootNodes[0], hasChildren: true, parentPath: null };
     await treeService.getChildren(parent, 'k1');
     await treeService.getChildren(parent, 'k2');
 

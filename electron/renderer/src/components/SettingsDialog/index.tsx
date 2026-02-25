@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import type { Config, Theme } from '../../../../main/ipc';
+import type { Config, Theme } from '../../types';
 
 type SettingsTab = 'shortcuts' | 'appearance' | 'runtime';
 const DEFAULT_OPEN_SETTINGS_SHORTCUT = 'CommandOrControl+,';
@@ -88,18 +88,37 @@ export const SettingsDialog: React.FC<SettingsDialogProps> = ({ isOpen, config, 
   const handleValidateRuntime = async () => {
     setValidating(true);
     setRuntimeErrors({});
-    const pythonValid = await window.pdv.kernels.validate(pythonPath, 'python');
-    const nextErrors: { python?: string; julia?: string } = {};
-    if (!pythonValid.valid) nextErrors.python = pythonValid.error || 'Unable to validate Python interpreter';
-    setRuntimeErrors(nextErrors);
-    setValidating(false);
+    try {
+      if (!window.pdv?.kernels) {
+        throw new Error('PDV preload API is unavailable. Open the Electron window, not localhost in a browser.');
+      }
+      const pythonValid = await window.pdv.kernels.validate(pythonPath, 'python');
+      const nextErrors: { python?: string; julia?: string } = {};
+      if (!pythonValid.valid) nextErrors.python = pythonValid.error || 'Unable to validate Python interpreter';
+      setRuntimeErrors(nextErrors);
+    } catch (error) {
+      setRuntimeErrors({
+        python: error instanceof Error ? error.message : String(error),
+      });
+    } finally {
+      setValidating(false);
+    }
   };
 
   const handlePickExecutable = async (language: 'python' | 'julia') => {
-    const selected = await window.pdv.files.pickExecutable();
-    if (!selected) return;
-    if (language === 'python') setPythonPath(selected);
-    if (language === 'julia') setJuliaPath(selected);
+    try {
+      if (!window.pdv?.files) {
+        throw new Error('PDV preload API is unavailable. Open the Electron window, not localhost in a browser.');
+      }
+      const selected = await window.pdv.files.pickExecutable();
+      if (!selected) return;
+      if (language === 'python') setPythonPath(selected);
+      if (language === 'julia') setJuliaPath(selected);
+    } catch (error) {
+      setRuntimeErrors({
+        python: error instanceof Error ? error.message : String(error),
+      });
+    }
   };
 
   return (

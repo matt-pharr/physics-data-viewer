@@ -67,7 +67,8 @@ const api: PDVApi = {
       ipcRenderer.invoke(IPC.namespace.query, kernelId, options),
   },
   script: {
-    edit: (scriptPath) => ipcRenderer.invoke(IPC.script.edit, scriptPath),
+    edit: (kernelId, scriptPath) =>
+      ipcRenderer.invoke(IPC.script.edit, kernelId, scriptPath),
     reload: (scriptPath) => ipcRenderer.invoke(IPC.script.reload, scriptPath),
   },
   project: {
@@ -89,6 +90,10 @@ const api: PDVApi = {
     load: () => ipcRenderer.invoke(IPC.commandBoxes.load),
     save: (data) => ipcRenderer.invoke(IPC.commandBoxes.save, data),
   },
+  files: {
+    pickExecutable: () => ipcRenderer.invoke(IPC.files.pickExecutable),
+    pickDirectory: () => ipcRenderer.invoke(IPC.files.pickDirectory),
+  },
 };
 
 contextBridge.exposeInMainWorld("pdv", api);
@@ -99,4 +104,3 @@ declare global {
     pdv: PDVApi;
   }
 }
-

@@ -1,8 +1,9 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import type { NamespaceQueryOptions, NamespaceVariable } from '../../../main/ipc';
+import type { NamespaceQueryOptions, NamespaceVariable } from '../../types';
 
 interface NamespaceViewProps {
   kernelId: string | null;
+  disabled?: boolean;
   autoRefresh?: boolean;
   refreshInterval?: number; // milliseconds
   refreshToken?: number;
@@ -11,6 +12,7 @@ interface NamespaceViewProps {
 
 export const NamespaceView: React.FC<NamespaceViewProps> = ({
   kernelId,
+  disabled = false,
   autoRefresh = false,
   refreshInterval = 2000,
   refreshToken = 0,
@@ -28,9 +30,10 @@ export const NamespaceView: React.FC<NamespaceViewProps> = ({
   const [sortBy, setSortBy] = useState<'name' | 'type' | 'size'>('name');
 
   const fetchNamespace = useCallback(async () => {
-    if (!kernelId) {
+    if (!kernelId || disabled) {
       setVariables([]);
       setError(undefined);
+      setLoading(false);
       return;
     }
 
@@ -39,20 +42,14 @@ export const NamespaceView: React.FC<NamespaceViewProps> = ({
 
     try {
       const result = await window.pdv.namespace.query(kernelId, filters);
-
-      if (result.error) {
-        setError(result.error);
-        setVariables([]);
-      } else {
-        setVariables(result.variables || []);
-      }
+      setVariables(result);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
       setVariables([]);
     } finally {
       setLoading(false);
     }
-  }, [kernelId, filters]);
+  }, [kernelId, filters, disabled]);
 
   // Fetch on mount and when kernel/filters/refresh token change
   useEffect(() => {
@@ -61,14 +58,14 @@ export const NamespaceView: React.FC<NamespaceViewProps> = ({
 
   // Auto-refresh
   useEffect(() => {
-    if (!autoRefresh || !kernelId) return;
+    if (!autoRefresh || !kernelId || disabled) return;
 
     const interval = setInterval(() => {
       void fetchNamespace();
     }, refreshInterval);
 
     return () => clearInterval(interval);
-  }, [autoRefresh, refreshInterval, kernelId, fetchNamespace]);
+  }, [autoRefresh, refreshInterval, kernelId, fetchNamespace, disabled]);
 
   // Filter and sort variables
   const filteredVariables = variables
@@ -129,16 +126,17 @@ export const NamespaceView: React.FC<NamespaceViewProps> = ({
           placeholder="Search variables..."
           value={searchQuery}
           onChange={(e) => setSearchQuery(e.target.value)}
+          disabled={disabled}
         />
 
         <div className="namespace-controls">
-          <button
-            className="btn btn-icon"
-            onClick={handleRefresh}
-            disabled={loading || !kernelId}
-            title="Refresh"
-            aria-label="Refresh namespace"
-            type="button"
+            <button
+              className="btn btn-icon"
+              onClick={handleRefresh}
+              disabled={loading || !kernelId || disabled}
+              title="Refresh"
+              aria-label="Refresh namespace"
+              type="button"
           >
             🔄
           </button>
@@ -148,6 +146,7 @@ export const NamespaceView: React.FC<NamespaceViewProps> = ({
               type="checkbox"
               checked={!!filters.includePrivate}
               onChange={() => toggleFilter('includePrivate')}
+              disabled={disabled}
             />
             <span>Private</span>
           </label>
@@ -157,6 +156,7 @@ export const NamespaceView: React.FC<NamespaceViewProps> = ({
               type="checkbox"
               checked={!!filters.includeModules}
               onChange={() => toggleFilter('includeModules')}
+              disabled={disabled}
             />
             <span>Modules</span>
           </label>
@@ -166,6 +166,7 @@ export const NamespaceView: React.FC<NamespaceViewProps> = ({
               type="checkbox"
               checked={!!filters.includeCallables}
               onChange={() => toggleFilter('includeCallables')}
+              disabled={disabled}
             />
             <span>Functions</span>
           </label>
@@ -176,6 +177,7 @@ export const NamespaceView: React.FC<NamespaceViewProps> = ({
                 type="checkbox"
                 checked={autoRefresh}
                 onChange={() => onToggleAutoRefresh(!autoRefresh)}
+                disabled={disabled}
               />
               <span>Auto-refresh</span>
             </label>
@@ -242,7 +244,7 @@ export const NamespaceView: React.FC<NamespaceViewProps> = ({
             {!loading && !error && filteredVariables.length === 0 && (
               <tr>
                 <td colSpan={5} className="namespace-empty">
-                  {kernelId ? 'No variables in namespace' : 'No kernel active'}
+                  {disabled ? 'Starting kernel...' : kernelId ? 'No variables in namespace' : 'No kernel active'}
                 </td>
               </tr>
             )}

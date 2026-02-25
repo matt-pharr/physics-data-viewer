@@ -89,18 +89,19 @@ def handle_tree_list(msg: dict) -> None:
         preview = node_preview(value, kind)
         has_children = isinstance(value, dict) and bool(dict.keys(value))
         lazy = tree._lazy_registry.has(child_path)
-        nodes.append(
-            {
-                "id": child_path,
-                "path": child_path,
-                "key": key,
-                "parent_path": path,
-                "type": kind,
-                "has_children": has_children,
-                "lazy": lazy,
-                "preview": preview,
-            }
-        )
+        descriptor = {
+            "id": child_path,
+            "path": child_path,
+            "key": key,
+            "parent_path": path,
+            "type": kind,
+            "has_children": has_children,
+            "lazy": lazy,
+            "preview": preview,
+        }
+        if kind == "script":
+            descriptor["params"] = getattr(value, "params", [])
+        nodes.append(descriptor)
 
     # Also include lazy-only entries at this path level that are not yet in memory
     for reg_path in list(tree._lazy_registry._registry.keys()):

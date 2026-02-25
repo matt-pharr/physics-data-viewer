@@ -15,7 +15,7 @@
  * ipc.ts — channel constants and API types
  */
 
-import { ipcMain, BrowserWindow } from "electron";
+import { ipcMain, BrowserWindow, dialog } from "electron";
 import { spawn } from "child_process";
 import * as fs from "fs/promises";
 import * as os from "os";
@@ -76,6 +76,8 @@ const REGISTERED_CHANNELS: readonly string[] = [
   IPC.themes.save,
   IPC.commandBoxes.load,
   IPC.commandBoxes.save,
+  IPC.files.pickExecutable,
+  IPC.files.pickDirectory,
 ];
 
 let savedThemes: Theme[] = [];
@@ -88,6 +90,31 @@ interface PushSubscription {
 }
 
 const pushSubscriptions: PushSubscription[] = [];
+const kernelWorkingDirs = new Map<string, string>();
+
+const BOOTSTRAP_AND_OPEN_COMM = `
+from IPython import get_ipython
+import pdv_kernel.comms as _pdv_comms
+from pdv_kernel.tree import PDVTree
+from pdv_kernel.namespace import PDVApp
+try:
+    from ipykernel.comm import Comm
+except Exception:
+    from comm import Comm
+_ip = get_ipython()
+_tree = PDVTree()
+_app = PDVApp()
+_ip.user_ns["pdv_tree"] = _tree
+_ip.user_ns["pdv"] = _app
+_pdv_comms._pdv_tree = _tree
+_pdv_comms._ip = _ip
+_pdv_comms._bootstrapped = True
+_tree._attach_comm(lambda _type, _payload: _pdv_comms.send_message(_type, _payload))
+_pdv_comm = Comm(target_name="pdv.kernel")
+_pdv_comms._comm = _pdv_comm
+_pdv_comm.on_msg(_pdv_comms._on_comm_message)
+_pdv_comms.send_message("pdv.ready", {})
+`;
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -117,10 +144,15 @@ function resolveEditorCommand(config: PDVConfig): string {
   if (typeof configured === "string" && configured.trim()) {
     return configured.trim();
   }
-  if (typeof process.env.EDITOR === "string" && process.env.EDITOR.trim()) {
-    return process.env.EDITOR.trim();
+  return "code";
+}
+
+function parseCommand(command: string): { file: string; args: string[] } {
+  const parts = command.trim().split(/\s+/).filter(Boolean);
+  if (parts.length === 0) {
+    return { file: "code", args: [] };
   }
-  return process.platform === "win32" ? "notepad" : "vi";
+  return { file: parts[0], args: parts.slice(1) };
 }
 
 /**
@@ -152,6 +184,29 @@ function sanitizeScriptName(scriptName: string): string {
   return withExt.replace(/[\\/]/g, "_");
 }
 
+function resolveScriptPath(
+  kernelId: string,
+  scriptPath: string,
+  kernelWorkingDirs: Map<string, string>
+): string {
+  if (path.isAbsolute(scriptPath)) {
+    return scriptPath;
+  }
+  const workingDir = kernelWorkingDirs.get(kernelId);
+  if (!workingDir) {
+    throw new Error(`Kernel working directory not initialized: ${kernelId}`);
+  }
+  if (scriptPath.includes("/") || scriptPath.includes("\\")) {
+    return path.join(workingDir, scriptPath);
+  }
+  const parts = scriptPath.split(".").filter(Boolean);
+  if (parts.length === 0) {
+    throw new Error("Invalid script path");
+  }
+  const leaf = parts[parts.length - 1];
+  return path.join(workingDir, ...parts.slice(0, -1), `${leaf}.py`);
+}
+
 /**
  * Write a script stub if the file does not already exist.
  *
@@ -165,10 +220,21 @@ async function ensureScriptFile(scriptPath: string): Promise<void> {
     const err = error as NodeJS.ErrnoException;
     if (err.code !== "ENOENT") throw error;
   }
+  const now = new Date();
+  const date = `${now.getFullYear()}/${String(now.getMonth() + 1).padStart(2, "0")}/${String(now.getDate()).padStart(2, "0")}`;
+  const time = `${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}`;
+  const user = process.env.USER ?? process.env.USERNAME ?? "user";
+  const host = os.hostname();
+  const filename = path.basename(scriptPath);
   const template =
-    '"""PDV script"""\n\n' +
-    "def run(pdv_tree, **kwargs):\n" +
-    "    return None\n";
+    '"""\n' +
+    `${filename}\n` +
+    `created by ${user} on ${host} on ${date} at ${time}\n` +
+    "Description: add your script description here.\n" +
+    '"""\n\n' +
+    "def run(pdv_tree: dict, ) -> dict:\n" +
+    "    # add your code here\n" +
+    "    return {}\n";
   await fs.writeFile(scriptPath, template, "utf8");
 }
 
@@ -180,6 +246,48 @@ function clearPushSubscriptions(): void {
     sub.commRouter.offPush(sub.type, sub.handler);
   }
   pushSubscriptions.length = 0;
+}
+
+async function waitForPush(
+  commRouter: CommRouter,
+  type: string,
+  timeoutMs: number
+): Promise<void> {
+  await new Promise<void>((resolve, reject) => {
+    const timer = setTimeout(() => {
+      commRouter.offPush(type, handler);
+      reject(new Error(`Timed out waiting for push: ${type}`));
+    }, timeoutMs);
+    const handler = (): void => {
+      clearTimeout(timer);
+      commRouter.offPush(type, handler);
+      resolve();
+    };
+    commRouter.onPush(type, handler);
+  });
+}
+
+async function initializeKernelSession(
+  kernelManager: KernelManager,
+  commRouter: CommRouter,
+  projectManager: ProjectManager,
+  kernelId: string
+): Promise<void> {
+  const readyPromise = waitForPush(commRouter, PDVMessageType.READY, 15_000);
+  const bootstrapResult = await kernelManager.execute(kernelId, {
+    code: BOOTSTRAP_AND_OPEN_COMM,
+    silent: true,
+  });
+  if (bootstrapResult.error) {
+    throw new Error(bootstrapResult.error);
+  }
+  await readyPromise;
+  const workingDir = await projectManager.createWorkingDir();
+  await commRouter.request(PDVMessageType.INIT, {
+    working_dir: workingDir,
+    pdv_version: "1.0",
+  });
+  kernelWorkingDirs.set(kernelId, workingDir);
 }
 
 // ---------------------------------------------------------------------------
@@ -217,7 +325,12 @@ export function registerIpcHandlers(
   // Returns: KernelInfo for the started kernel.
   // On error: throws to renderer.
   ipcMain.handle(IPC.kernels.start, async (_event, spec) => {
-    return kernelManager.start(spec as Parameters<KernelManager["start"]>[0]);
+    const kernel = await kernelManager.start(
+      spec as Parameters<KernelManager["start"]>[0]
+    );
+    commRouter.attach(kernelManager, kernel.id);
+    await initializeKernelSession(kernelManager, commRouter, projectManager, kernel.id);
+    return kernel;
   });
 
   // Handles kernels:stop requests from the renderer.
@@ -226,6 +339,12 @@ export function registerIpcHandlers(
   // On error: throws to renderer.
   ipcMain.handle(IPC.kernels.stop, async (_event, kernelId: string) => {
     await kernelManager.stop(kernelId);
+    const workingDir = kernelWorkingDirs.get(kernelId);
+    if (workingDir) {
+      await projectManager.deleteWorkingDir(workingDir);
+      kernelWorkingDirs.delete(kernelId);
+    }
+    commRouter.detach();
     return true;
   });
 
@@ -258,17 +377,23 @@ export function registerIpcHandlers(
       restart?: (id: string) => Promise<KernelInfo>;
     };
     if (restartable.restart) {
-      return restartable.restart(kernelId);
+      const restarted = await restartable.restart(kernelId);
+      commRouter.attach(kernelManager, restarted.id);
+      await initializeKernelSession(kernelManager, commRouter, projectManager, restarted.id);
+      return restarted;
     }
     const current = kernelManager.getKernel(kernelId);
     if (!current) {
       throw new Error(`Kernel not found: ${kernelId}`);
     }
     await kernelManager.stop(kernelId);
-    return kernelManager.start({
+    const restarted = await kernelManager.start({
       name: current.name,
       language: current.language,
     });
+    commRouter.attach(kernelManager, restarted.id);
+    await initializeKernelSession(kernelManager, commRouter, projectManager, restarted.id);
+    return restarted;
   });
 
   // Handles kernels:complete requests from the renderer.
@@ -384,16 +509,25 @@ export function registerIpcHandlers(
       if (!kernelManager.getKernel(kernelId)) {
         throw new Error(`Kernel not found: ${kernelId}`);
       }
+      let workingDir = kernelWorkingDirs.get(kernelId);
+      if (!workingDir) {
+        workingDir = await projectManager.createWorkingDir();
+        kernelWorkingDirs.set(kernelId, workingDir);
+      }
       const safeName = sanitizeScriptName(scriptName);
-      const scriptsDir = path.join(os.tmpdir(), "pdv-scripts");
+      const scriptNodeName = path.parse(safeName).name;
+      const scriptsDir = path.join(
+        workingDir,
+        ...targetPath.split(".").filter(Boolean)
+      );
       await fs.mkdir(scriptsDir, { recursive: true });
       const scriptPath = path.join(scriptsDir, safeName);
       await ensureScriptFile(scriptPath);
 
       await commRouter.request(PDVMessageType.SCRIPT_REGISTER, {
         parent_path: targetPath,
-        name: safeName,
-        relative_path: safeName,
+        name: scriptNodeName,
+        relative_path: scriptPath,
         language: "python",
       });
       return { success: true, scriptPath };
@@ -419,7 +553,34 @@ export function registerIpcHandlers(
         toNamespaceQueryPayload(options)
       );
       const variables = (response.payload as { variables?: unknown }).variables;
-      return Array.isArray(variables) ? (variables as NamespaceVariable[]) : [];
+      let normalized: NamespaceVariable[] = [];
+      if (Array.isArray(variables)) {
+        normalized = variables as NamespaceVariable[];
+      } else if (variables && typeof variables === "object") {
+        normalized = Object.entries(variables as Record<string, unknown>).map(
+          ([name, value]) => ({
+            name,
+            ...(typeof value === "object" && value !== null
+              ? (value as Record<string, unknown>)
+              : {}),
+          })
+        ) as NamespaceVariable[];
+      }
+      if (!normalized.some((entry) => entry.name === "pdv_tree")) {
+        normalized.unshift({
+          name: "pdv_tree",
+          type: "protected",
+          preview: "PDVTree (protected)",
+        });
+      }
+      if (!normalized.some((entry) => entry.name === "pdv")) {
+        normalized.unshift({
+          name: "pdv",
+          type: "protected",
+          preview: "PDV app object (protected)",
+        });
+      }
+      return normalized;
     }
   );
 
@@ -427,10 +588,12 @@ export function registerIpcHandlers(
   // Input: scriptPath (string).
   // Returns: ScriptOperationResult.
   // On error: throws to renderer.
-  ipcMain.handle(IPC.script.edit, async (_event, scriptPath: string) => {
+  ipcMain.handle(IPC.script.edit, async (_event, kernelId: string, scriptPath: string) => {
     const config = readConfig(configStore);
     const editor = resolveEditorCommand(config);
-    const child = spawn(editor, [scriptPath], {
+    const resolvedScriptPath = resolveScriptPath(kernelId, scriptPath, kernelWorkingDirs);
+    const parsed = parseCommand(editor);
+    const child = spawn(parsed.file, [...parsed.args, resolvedScriptPath], {
       detached: true,
       stdio: "ignore",
     });
@@ -464,7 +627,7 @@ export function registerIpcHandlers(
   // On error: throws to renderer.
   ipcMain.handle(
     IPC.project.save,
-    async (_event, saveDir: string, commandBoxes: unknown[]) => {
+    async (_event, saveDir: string, commandBoxes: unknown) => {
       await projectManager.save(saveDir, commandBoxes);
       return true;
     }
@@ -555,6 +718,34 @@ export function registerIpcHandlers(
     return true;
   });
 
+  // Handles files:pickExecutable requests from the renderer.
+  // Input: none.
+  // Returns: selected executable file path or null when cancelled.
+  // On error: throws to renderer.
+  ipcMain.handle(IPC.files.pickExecutable, async () => {
+    const result = await dialog.showOpenDialog({
+      properties: ["openFile"],
+    });
+    if (result.canceled || result.filePaths.length === 0) {
+      return null;
+    }
+    return result.filePaths[0] ?? null;
+  });
+
+  // Handles files:pickDirectory requests from the renderer.
+  // Input: none.
+  // Returns: selected directory path or null when cancelled.
+  // On error: throws to renderer.
+  ipcMain.handle(IPC.files.pickDirectory, async () => {
+    const result = await dialog.showOpenDialog({
+      properties: ["openDirectory", "createDirectory"],
+    });
+    if (result.canceled || result.filePaths.length === 0) {
+      return null;
+    }
+    return result.filePaths[0] ?? null;
+  });
+
   registerPushForwarding(win, commRouter);
 }
 
@@ -587,5 +778,6 @@ export function unregisterIpcHandlers(): void {
   for (const channel of REGISTERED_CHANNELS) {
     ipcMain.removeHandler(channel);
   }
+  kernelWorkingDirs.clear();
   clearPushSubscriptions();
 }

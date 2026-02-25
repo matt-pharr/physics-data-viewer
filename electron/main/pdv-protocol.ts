@@ -244,8 +244,22 @@ export const NodeKind = {
 
 export type NodeKindValue = (typeof NodeKind)[keyof typeof NodeKind];
 
+/** Script run() parameter descriptor extracted by pdv-python from function signatures. */
+export interface ScriptParameter {
+  /** Parameter name in the Python run() signature. */
+  name: string;
+  /** Stringified annotation type (e.g. "float", "int", "str", "any"). */
+  type: string;
+  /** Default value (null when required/no default). */
+  default: unknown;
+  /** True when no default is defined in the signature. */
+  required: boolean;
+}
+
 /** Describes a single tree node as returned by pdv.tree.list.response. */
 export interface NodeDescriptor {
+  /** Stable node id (usually equal to path). */
+  id?: string;
   /** Dot-separated full path (e.g. "data.waveforms.ch1"). */
   path: string;
   /** Leaf key (e.g. "ch1"). */
@@ -259,11 +273,15 @@ export interface NodeDescriptor {
   /** True if the data has not yet been loaded from the save directory. */
   lazy: boolean;
   /** ISO 8601 creation timestamp. */
-  created_at: string;
+  created_at?: string;
   /** ISO 8601 last-modification timestamp. */
-  updated_at: string;
+  updated_at?: string;
   /** Human-readable preview string (e.g. "float64 array (1024 × 4)"). */
   preview?: string;
+  /** Script language for script nodes. */
+  language?: string | null;
+  /** Script parameters for script nodes only. */
+  params?: ScriptParameter[];
 }
 
 // ---------------------------------------------------------------------------

@@ -18,7 +18,7 @@ import pytest
 from unittest.mock import MagicMock, patch
 import pdv_kernel.comms as comms_mod
 from pdv_kernel.handlers.project import handle_project_load, handle_project_save
-from pdv_kernel.tree import PDVTree
+from pdv_kernel.tree import PDVTree, PDVScript
 
 
 def _make_mock_comm():
@@ -101,7 +101,38 @@ class TestHandleProjectLoad:
              patch.object(comms_mod, '_pdv_tree', tree_with_comm):
             handle_project_load(msg)
         types_sent = [e['type'] for e in mock_comm._sent]
+        assert 'pdv.project.load.response' in types_sent
         assert 'pdv.project.loaded' in types_sent
+
+    def test_script_nodes_restore_as_pdvscript(self, tree_with_comm, tmp_save_dir):
+        """Script descriptors are restored as PDVScript instances, not plain text."""
+        script_file = os.path.join(tmp_save_dir, 'tree', 'scripts', 'demo.py')
+        os.makedirs(os.path.dirname(script_file), exist_ok=True)
+        with open(script_file, 'w', encoding='utf-8') as fh:
+            fh.write('def run(pdv_tree: dict):\n    return {}\n')
+
+        nodes = [
+            {
+                'path': 'scripts',
+                'type': 'folder',
+                'lazy': False,
+                'storage': {'backend': 'none', 'format': 'none'},
+            },
+            {
+                'path': 'scripts.demo',
+                'type': 'script',
+                'lazy': False,
+                'language': 'python',
+                'storage': {'backend': 'inline', 'format': 'py_script', 'value': script_file},
+            },
+        ]
+        _write_tree_index(tmp_save_dir, nodes)
+        mock_comm = _make_mock_comm()
+        msg = _make_msg('pdv.project.load', {'save_dir': tmp_save_dir})
+        with patch.object(comms_mod, '_comm', mock_comm), \
+             patch.object(comms_mod, '_pdv_tree', tree_with_comm):
+            handle_project_load(msg)
+        assert isinstance(tree_with_comm['scripts.demo'], PDVScript)
 
     def test_nonexistent_save_dir_sends_error(self, tree_with_comm):
         """A non-existent save_dir sends status=error response."""

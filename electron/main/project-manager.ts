@@ -133,7 +133,7 @@ export class ProjectManager {
    * @param commandBoxes - The current command-box state from the renderer.
    * @throws {PDVCommError} When the kernel responds with status='error'.
    */
-  async save(saveDir: string, commandBoxes: unknown[]): Promise<void> {
+  async save(saveDir: string, commandBoxes: unknown): Promise<void> {
     // Step 1 — send pdv.project.save comm; throws PDVCommError on error status.
     const response = await this.commRouter.request(PDVMessageType.PROJECT_SAVE, {
       save_dir: saveDir,
@@ -175,7 +175,7 @@ export class ProjectManager {
    * @returns The command-box state read from ``command-boxes.json``.
    * @throws {PDVCommError} When the kernel responds with status='error'.
    */
-  async load(saveDir: string): Promise<unknown[]> {
+  async load(saveDir: string): Promise<unknown> {
     // Step 1 — register the push handler BEFORE sending the request so the
     // notification is never missed even if the kernel responds very quickly.
     const pushPromise = new Promise<void>((resolve) => {
@@ -289,15 +289,14 @@ function _assertCompatibleSchema(schemaVersion: string): void {
  * @param saveDir - Absolute path to the project directory.
  * @returns Parsed command-box array, or ``[]`` when the file is absent.
  */
-async function _readCommandBoxes(saveDir: string): Promise<unknown[]> {
+async function _readCommandBoxes(saveDir: string): Promise<unknown> {
   const filePath = path.join(saveDir, "command-boxes.json");
   try {
     const raw = await fs.readFile(filePath, "utf8");
-    const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) ? parsed : [];
+    return JSON.parse(raw);
   } catch (err) {
     const e = err as NodeJS.ErrnoException;
-    if (e.code === "ENOENT") return [];
+    if (e.code === "ENOENT") return { tabs: [], activeTabId: 1 };
     throw err;
   }
 }

@@ -2,7 +2,12 @@
   "name": "physics-data-viewer",
   "version": "0.0.2",
   "private": true,
-  "main": "dist/main/app.js",
+  "main": "dist/main/bootstrap.js",
+  "electronmon": {
+    "patterns": [
+      "!dist/**"
+    ]
+  },
   "scripts": {
     "dev": "concurrently -k \"npm:dev:main\" \"npm:dev:renderer\"",
     "dev:main": "cross-env NODE_ENV=development electronmon .",

@@ -41,13 +41,26 @@ const mocks = vi.hoisted(() => {
     throw err;
   });
   const fsWriteFile = vi.fn(async () => undefined);
-  return { handlers, ipcHandle, ipcRemoveHandler, spawn, fsMkdir, fsStat, fsWriteFile };
+  const dialogShowOpenDialog = vi.fn();
+  return {
+    handlers,
+    ipcHandle,
+    ipcRemoveHandler,
+    spawn,
+    fsMkdir,
+    fsStat,
+    fsWriteFile,
+    dialogShowOpenDialog,
+  };
 });
 
 vi.mock("electron", () => ({
   ipcMain: {
     handle: mocks.ipcHandle,
     removeHandler: mocks.ipcRemoveHandler,
+  },
+  dialog: {
+    showOpenDialog: mocks.dialogShowOpenDialog,
   },
 }));
 
@@ -105,15 +118,33 @@ function setup() {
     shutdownAll: vi.fn(async () => undefined),
   } as unknown as KernelManager;
 
+  const pushHandlers = new Map<string, Array<(message: PDVMessage) => void>>();
   const commRouter = {
     request: vi.fn(async () => makeMessage({})),
-    onPush: vi.fn(),
-    offPush: vi.fn(),
+    onPush: vi.fn((type: string, handler: (message: PDVMessage) => void) => {
+      const existing = pushHandlers.get(type) ?? [];
+      existing.push(handler);
+      pushHandlers.set(type, existing);
+      if (type === PDVMessageType.READY) {
+        handler(makeMessage({}));
+      }
+    }),
+    offPush: vi.fn((type: string, handler: (message: PDVMessage) => void) => {
+      const existing = pushHandlers.get(type) ?? [];
+      pushHandlers.set(
+        type,
+        existing.filter((entry) => entry !== handler)
+      );
+    }),
+    attach: vi.fn(),
+    detach: vi.fn(),
   } as unknown as CommRouter;
 
   const projectManager = {
     save: vi.fn(async () => undefined),
     load: vi.fn(async () => []),
+    createWorkingDir: vi.fn(async () => "/tmp/pdv-test"),
+    deleteWorkingDir: vi.fn(async () => undefined),
   } as unknown as ProjectManager;
 
   const configState: PDVConfig = {
@@ -257,7 +288,7 @@ describe("Step 5 IPC handlers", () => {
     });
 
     const edit = getHandler(IPC.script.edit);
-    await edit({}, "/tmp/script.py");
+    await edit({}, "kernel-1", "/tmp/script.py");
 
     expect(mocks.spawn).toHaveBeenCalledWith(
       "code",
@@ -463,13 +494,35 @@ describe("Step 5 IPC handlers", () => {
       PDVMessageType.SCRIPT_REGISTER,
       expect.objectContaining({
         parent_path: "scripts",
-        name: "analysis.py",
-        relative_path: "analysis.py",
+        name: "analysis",
+        relative_path: expect.stringMatching(/analysis\.py$/),
         language: "python",
       })
     );
     expect(result.success).toBe(true);
     expect(result.scriptPath).toBeTruthy();
+  });
+
+  it("files:pickExecutable returns selected file path", async () => {
+    setup();
+    mocks.dialogShowOpenDialog.mockResolvedValueOnce({
+      canceled: false,
+      filePaths: ["/usr/bin/python3"],
+    });
+    const pickExecutable = getHandler(IPC.files.pickExecutable);
+    const result = await pickExecutable({});
+    expect(result).toBe("/usr/bin/python3");
+  });
+
+  it("files:pickDirectory returns null on cancel", async () => {
+    setup();
+    mocks.dialogShowOpenDialog.mockResolvedValueOnce({
+      canceled: true,
+      filePaths: [],
+    });
+    const pickDirectory = getHandler(IPC.files.pickDirectory);
+    const result = await pickDirectory({});
+    expect(result).toBeNull();
   });
 
   it("script:reload sends pdv.script.register with parent_path and name", async () => {

@@ -19,6 +19,25 @@ import { ProjectManager } from "./project-manager";
 import { ConfigStore } from "./config";
 import { registerIpcHandlers } from "./index";
 
+async function loadDevUrlWithRetry(
+  win: BrowserWindow,
+  url: string,
+  attempts = 40,
+  delayMs = 250
+): Promise<void> {
+  let lastError: unknown;
+  for (let i = 0; i < attempts; i += 1) {
+    try {
+      await win.loadURL(url);
+      return;
+    } catch (error) {
+      lastError = error;
+      await new Promise((resolve) => setTimeout(resolve, delayMs));
+    }
+  }
+  throw lastError instanceof Error ? lastError : new Error("Failed to load dev server URL");
+}
+
 /**
  * Create and initialize the main BrowserWindow.
  *
@@ -37,20 +56,39 @@ export async function createWindow(
   const win = new BrowserWindow({
     width: 1440,
     height: 960,
+    show: false,
     webPreferences: {
       preload: path.join(__dirname, "..", "preload.js"),
       contextIsolation: true,
       nodeIntegration: false,
+      sandbox: false,
     },
   });
 
   registerIpcHandlers(win, kernelManager, commRouter, projectManager, configStore);
 
+  const rendererIndexPath = path.join(
+    __dirname,
+    "..",
+    "..",
+    "renderer",
+    "dist",
+    "index.html",
+  );
   const devServerUrl = process.env.VITE_DEV_SERVER_URL;
-  if (process.env.NODE_ENV === "development" && devServerUrl) {
-    await win.loadURL(devServerUrl);
-  } else {
-    await win.loadFile(path.join(__dirname, "..", "renderer", "dist", "index.html"));
+  try {
+    if (process.env.NODE_ENV === "development") {
+      if (!devServerUrl) {
+        throw new Error("VITE_DEV_SERVER_URL is not set");
+      }
+      await loadDevUrlWithRetry(win, devServerUrl);
+    } else {
+      await win.loadFile(rendererIndexPath);
+    }
+    win.show();
+  } catch (error) {
+    win.destroy();
+    throw error;
   }
 
   return win;
@@ -96,4 +134,3 @@ export function wireAppEvents(
     // Window re-creation is coordinated by the main startup module.
   });
 }
-

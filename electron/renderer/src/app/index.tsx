@@ -7,12 +7,42 @@ import { NamespaceView } from '../components/NamespaceView';
 import { ScriptDialog } from '../components/ScriptDialog';
 import { CreateScriptDialog } from '../components/Tree/CreateScriptDialog';
 import { SettingsDialog } from '../components/SettingsDialog';
-import type { CommandTab, LogEntry, TreeNodeData } from '../types';
-import type { Config } from '../../main/ipc';
+import type { CommandTab, Config, KernelExecuteResult, LogEntry, TreeNodeData } from '../types';
 
 type Tab = 'tree' | 'namespace' | 'modules';
 type PlotMode = 'native' | 'capture';
+type KernelStatus = 'idle' | 'starting' | 'ready' | 'error';
 const DEFAULT_OPEN_SETTINGS_SHORTCUT = 'CommandOrControl+,';
+
+function normalizeLoadedCommandBoxes(data: unknown): { tabs: CommandTab[]; activeTabId: number } {
+  const rawTabs =
+    Array.isArray(data)
+      ? data
+      : data && typeof data === 'object' && Array.isArray((data as { tabs?: unknown }).tabs)
+        ? ((data as { tabs: unknown[] }).tabs)
+        : [];
+
+  const tabs = rawTabs
+    .map((entry, index) => {
+      if (!entry || typeof entry !== 'object') {
+        return null;
+      }
+      const maybe = entry as Record<string, unknown>;
+      const code = typeof maybe.code === 'string' ? maybe.code : '';
+      const id = typeof maybe.id === 'number' ? maybe.id : index + 1;
+      return { id, code };
+    })
+    .filter((tab): tab is CommandTab => tab !== null);
+  const normalizedTabs = tabs.length > 0 ? tabs : [{ id: 1, code: '' }];
+  const requestedActive =
+    data && typeof data === 'object' && typeof (data as { activeTabId?: unknown }).activeTabId === 'number'
+      ? (data as { activeTabId: number }).activeTabId
+      : normalizedTabs[0].id;
+  const activeTabId = normalizedTabs.some((tab) => tab.id === requestedActive)
+    ? requestedActive
+    : normalizedTabs[0].id;
+  return { tabs: normalizedTabs, activeTabId };
+}
 
 function applyAppearanceColors(colors?: Record<string, string>): void {
   if (!colors) return;
@@ -44,13 +74,15 @@ const App: React.FC = () => {
   const [activeCommandTab, setActiveCommandTab] = useState(1);
   const [logs, setLogs] = useState<LogEntry[]>([]);
   const [currentKernelId, setCurrentKernelId] = useState<string | null>(null);
+  const [kernelStatus, setKernelStatus] = useState<KernelStatus>('idle');
   const [isExecuting, setIsExecuting] = useState(false);
   const [lastError, setLastError] = useState<string | undefined>(undefined);
   const [lastDuration, setLastDuration] = useState<number | null>(null);
   const [config, setConfig] = useState<Config | null>(null);
   const [showEnvSelector, setShowEnvSelector] = useState(false);
-  const [scriptDialog, setScriptDialog] = useState<{ scriptPath: string; scriptName: string } | null>(null);
+  const [scriptDialog, setScriptDialog] = useState<TreeNodeData | null>(null);
   const initRef = useRef(false);
+  const loadedProjectTabsRef = useRef<{ tabs: CommandTab[]; activeTabId: number } | null>(null);
   const [leftWidth, setLeftWidth] = useState(340);
   const [consoleHeight, setConsoleHeight] = useState(260);
   const dragRef = useRef<'vertical' | 'horizontal' | null>(null);
@@ -124,12 +156,16 @@ const App: React.FC = () => {
 
     const initConfig = async () => {
       try {
+        if (!window.pdv?.config) {
+          throw new Error('PDV preload API is unavailable. Use the Electron window, not the browser URL.');
+        }
         const loaded = await window.pdv.config.get();
         setConfig(loaded);
         setPlotMode(loaded.plotMode ?? 'native');
         applyAppearanceColors(loaded.settings?.appearance?.colors);
 
         if (!loaded.pythonPath) {
+          setKernelStatus('idle');
           setShowEnvSelector(true);
           return;
         }
@@ -137,18 +173,13 @@ const App: React.FC = () => {
         await startKernel(loaded);
       } catch (error) {
         console.error('[App] Failed to load config:', error);
+        setKernelStatus('error');
+        setLastError(error instanceof Error ? error.message : String(error));
+        setShowEnvSelector(true);
       }
     };
 
     void initConfig();
-  }, []);
-
-  useEffect(() => {
-    if (!window.pdv?.settings?.onOpen) {
-      return;
-    }
-    const unsubscribe = window.pdv.settings.onOpen(() => setShowSettings(true));
-    return unsubscribe;
   }, []);
 
   useEffect(() => {
@@ -162,6 +193,30 @@ const App: React.FC = () => {
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
   }, [config]);
+
+  useEffect(() => {
+    if (!currentKernelId) {
+      return;
+    }
+
+    const unsubscribeTree = window.pdv.tree.onChanged(() => {
+      setTreeRefreshToken((prev) => prev + 1);
+    });
+
+    const unsubscribeProject = window.pdv.project.onLoaded(() => {
+      if (loadedProjectTabsRef.current) {
+        const loaded = loadedProjectTabsRef.current;
+        setCommandTabs(loaded.tabs);
+        setActiveCommandTab(loaded.activeTabId);
+      }
+      setTreeRefreshToken((prev) => prev + 1);
+    });
+
+    return () => {
+      unsubscribeTree();
+      unsubscribeProject();
+    };
+  }, [currentKernelId]);
 
   useEffect(() => {
     const handleMove = (event: MouseEvent) => {
@@ -205,6 +260,8 @@ const App: React.FC = () => {
   }, []);
 
   const startKernel = async (cfg: Config) => {
+    setKernelStatus('starting');
+    setLastError(undefined);
     try {
       console.log('[App] Starting kernel with config:', cfg);
       if (currentKernelId) {
@@ -221,11 +278,16 @@ const App: React.FC = () => {
       
       const kernel = await window.pdv.kernels.start(spec);
       setCurrentKernelId(kernel.id);
+      setTreeRefreshToken((prev) => prev + 1);
+      setNamespaceRefreshToken((prev) => prev + 1);
+      setKernelStatus('ready');
       console.log('[App] Kernel started successfully:', kernel);
     } catch (error) {
       console.error('[App] Failed to start kernel:', error);
-      // Show error to user
+      setCurrentKernelId(null);
+      setKernelStatus('error');
       setLastError(error instanceof Error ? error.message : String(error));
+      setShowEnvSelector(true);
     }
   };
 
@@ -255,9 +317,12 @@ const App: React.FC = () => {
     if (!currentKernelId) return;
     
     try {
+      setKernelStatus('starting');
+      setLastError(undefined);
       console.log('[App] Restarting kernel:', currentKernelId);
       const newKernel = await window.pdv.kernels.restart(currentKernelId);
       setCurrentKernelId(newKernel.id);
+      setKernelStatus('ready');
       setShowEnvSelector(false);
       setLogs([]);
       setNamespaceRefreshToken((prev) => prev + 1);
@@ -265,6 +330,7 @@ const App: React.FC = () => {
       console.log('[App] Kernel restarted successfully:', newKernel);
     } catch (error) {
       console.error('[App] Failed to restart kernel:', error);
+      setKernelStatus('error');
       setLastError(error instanceof Error ? error.message : String(error));
     }
   };
@@ -344,68 +410,55 @@ const App: React.FC = () => {
     if (action === 'create_script') {
       setCreateScriptTarget(node.path);
     } else if (action === 'run' && node.type === 'script') {
-      setScriptDialog({
-        scriptPath: node.path,
-        scriptName: node.key,
-      });
-    } else if (action === 'edit' && node.type === 'script') {
+      setScriptDialog(node);
+    } else if ((action === 'edit' || action === 'view_source') && node.type === 'script') {
       try {
-        await window.pdv.script.edit(node.path);
+        if (!currentKernelId) return;
+        await window.pdv.script.edit(currentKernelId, node.path);
       } catch (error) {
         console.error('[App] Failed to open editor:', error);
       }
     } else if (action === 'reload' && node.type === 'script') {
       await window.pdv.script.reload(node.path);
     } else if (action === 'copy_path') {
-      // Format path to be python dictionary style and add "tree" to beginning (e.g., tree["data"]["array1"])
-      await navigator.clipboard.writeText(node.path.split('.').reduce((acc, part) => `${acc}["${part}"]`, 'tree'));
+      await navigator.clipboard.writeText(
+        node.path.split('.').reduce((acc, part) => `${acc}["${part}"]`, 'pdv_tree'),
+      );
     } else if (action === 'print') {
       if (!currentKernelId) return;
       const target = JSON.stringify(node.path);
-      await handleExecute(`print(tree[${target}])`);
+      await handleExecute(`print(pdv_tree[${target}])`);
     }
   };
 
-  const handleScriptRun = async (params: Record<string, unknown>) => {
-    if (!scriptDialog || !currentKernelId) return;
-
+  const handleScriptRun = (code: string, result: KernelExecuteResult) => {
+    const logEntry: LogEntry = {
+      id:
+        typeof crypto !== 'undefined' && 'randomUUID' in crypto
+          ? crypto.randomUUID()
+          : `log-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+      timestamp: Date.now(),
+      code,
+      stdout: result.stdout,
+      stderr: result.stderr,
+      result: result.result,
+      error: result.error,
+      duration: result.duration,
+      images: result.images,
+    };
+    setLogs((prev) => [...prev, logEntry]);
+    if (result.error) {
+      setLastError(result.error);
+    }
+    if (typeof result.duration === 'number') {
+      setLastDuration(result.duration);
+    }
+    setNamespaceRefreshToken((prev) => prev + 1);
     setScriptDialog(null);
-
-    try {
-      const logEntry: LogEntry = {
-        id:
-          typeof crypto !== 'undefined' && 'randomUUID' in crypto
-            ? crypto.randomUUID()
-            : `log-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
-        timestamp: Date.now(),
-        code: `tree.run_script("${scriptDialog.scriptPath}", **params)`,
-      };
-
-      const result = await window.pdv.script.run(currentKernelId, {
-        scriptPath: scriptDialog.scriptPath,
-        params,
-      });
-
-      if (!result.success) {
-        setLastError(result.error);
-        logEntry.error = result.error;
-      } else {
-        logEntry.result = result.result;
-        logEntry.duration = result.duration;
-      }
-      logEntry.stdout = result.stdout;
-      logEntry.stderr = result.stderr;
-      setLogs((prev) => [...prev, logEntry]);
-      setNamespaceRefreshToken((prev) => prev + 1);
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      setLastError(message);
-      console.error('[App] Script execution error:', error);
-    }
   };
 
-  const handleExecute = async (code: string) => {
-    if (!currentKernelId || !code.trim()) return;
+  const handleExecute = async (code: string, options?: { capture?: boolean }) => {
+    if (!currentKernelId || kernelStatus !== 'ready' || !code.trim()) return;
 
     setIsExecuting(true);
     setLastError(undefined);
@@ -422,7 +475,7 @@ const App: React.FC = () => {
     try {
       const result = await window.pdv.kernels.execute(currentKernelId, {
         code,
-        capture: plotMode === 'capture',
+        capture: options?.capture ?? (plotMode === 'capture'),
       });
 
       logEntry.stdout = result.stdout;
@@ -445,7 +498,44 @@ const App: React.FC = () => {
       }
       setIsExecuting(false);
       setNamespaceRefreshToken((prev) => prev + 1);
-      setTreeRefreshToken((prev) => prev + 1);
+    }
+  };
+
+  const handleSaveProject = async () => {
+    if (kernelStatus !== 'ready') {
+      return;
+    }
+    try {
+      const saveDir = await window.pdv.files.pickDirectory();
+      if (!saveDir) {
+        return;
+      }
+      await window.pdv.project.save(saveDir, {
+        tabs: commandTabs,
+        activeTabId: activeCommandTab,
+      });
+    } catch (error) {
+      setLastError(error instanceof Error ? error.message : String(error));
+    }
+  };
+
+  const handleOpenProject = async () => {
+    if (kernelStatus !== 'ready') {
+      return;
+    }
+    try {
+      const saveDir = await window.pdv.files.pickDirectory();
+      if (!saveDir) {
+        return;
+      }
+      const loaded = await window.pdv.project.load(saveDir);
+      const normalized = normalizeLoadedCommandBoxes(loaded);
+      loadedProjectTabsRef.current = normalized;
+      setCommandTabs(normalized.tabs);
+      setActiveCommandTab(normalized.activeTabId);
+      setNamespaceRefreshToken((prev) => prev + 1);
+    } catch (error) {
+      setLastError(error instanceof Error ? error.message : String(error));
     }
   };
 
@@ -455,10 +545,18 @@ const App: React.FC = () => {
       <header className="app-header">
         <h1 className="app-title">Physics Data Viewer</h1>
          <div className="header-right">
-           <button className="btn btn-secondary" onClick={() => setShowSettings(true)}>Settings</button>
-           <span className="connection-status connected">● Connected</span>
-         </div>
-       </header>
+            <button className="btn btn-secondary" onClick={() => void handleSaveProject()} disabled={kernelStatus !== 'ready'}>
+              Save Project
+            </button>
+            <button className="btn btn-secondary" onClick={() => void handleOpenProject()} disabled={kernelStatus !== 'ready'}>
+              Open Project
+            </button>
+            <button className="btn btn-secondary" onClick={() => setShowSettings(true)}>Settings</button>
+            <span className={`connection-status ${kernelStatus === 'ready' ? 'connected' : ''}`}>
+              ● {kernelStatus === 'ready' ? 'Connected' : kernelStatus === 'starting' ? 'Starting...' : 'Disconnected'}
+            </span>
+          </div>
+        </header>
 
       {/* Main content */}
       <main className="app-main">
@@ -489,6 +587,7 @@ const App: React.FC = () => {
             <div className={`tree-panel ${activeTab === 'namespace' ? 'active' : ''}`}>
               <NamespaceView
                 kernelId={currentKernelId}
+                disabled={kernelStatus !== 'ready'}
                 autoRefresh={autoRefreshNamespace}
                 refreshToken={namespaceRefreshToken}
                 refreshInterval={2000}
@@ -496,7 +595,12 @@ const App: React.FC = () => {
               />
             </div>
             <div className={`tree-panel ${activeTab === 'tree' ? 'active' : ''}`}>
-              <Tree kernelId={currentKernelId} refreshToken={treeRefreshToken} onAction={handleTreeAction} />
+              <Tree
+                kernelId={currentKernelId}
+                disabled={kernelStatus !== 'ready'}
+                refreshToken={treeRefreshToken}
+                onAction={handleTreeAction}
+              />
             </div>
             <div className={`tree-panel ${activeTab === 'modules' ? 'active' : ''}`}>
               <div className="tree-empty">Modules view (coming soon)</div>
@@ -522,6 +626,7 @@ const App: React.FC = () => {
               onChange: (code: string) => handleCodeChange(tab.id, code),
             }))}
             activeTabId={activeCommandTab}
+            disabled={kernelStatus !== 'ready'}
             onTabChange={handleTabChange}
             onAddTab={addCommandTab}
             onRemoveTab={handleRemoveCommandTab}
@@ -533,10 +638,10 @@ const App: React.FC = () => {
         </div>
       </main>
 
-      {scriptDialog && (
+      {scriptDialog && currentKernelId && (
         <ScriptDialog
-          scriptPath={scriptDialog.scriptPath}
-          scriptName={scriptDialog.scriptName}
+          node={scriptDialog}
+          kernelId={currentKernelId}
           onRun={handleScriptRun}
           onCancel={() => setScriptDialog(null)}
         />
@@ -551,8 +656,8 @@ const App: React.FC = () => {
               const result = await window.pdv.tree.createScript(currentKernelId, createScriptTarget, name);
               if (!result.success) {
                 setLastError(result.error);
-              } else {
-                setTreeRefreshToken((prev) => prev + 1);
+              } else if (result.scriptPath) {
+                await window.pdv.script.edit(currentKernelId, result.scriptPath);
               }
             } catch (error) {
               setLastError(error instanceof Error ? error.message : String(error));

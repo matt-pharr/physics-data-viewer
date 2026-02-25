@@ -1,4 +1,22 @@
-import type { TreeNode } from '../../../main/ipc';
+import type {
+  Config,
+  KernelExecuteResult,
+  NamespaceQueryOptions,
+  NamespaceVariable,
+  NodeDescriptor,
+  ScriptParameter,
+  Theme,
+} from './pdv';
+
+export type {
+  Config,
+  KernelExecuteResult,
+  NamespaceQueryOptions,
+  NamespaceVariable,
+  NodeDescriptor,
+  ScriptParameter,
+  Theme,
+};
 
 export interface LogEntry {
   id: string;
@@ -17,7 +35,10 @@ export interface CommandTab {
   code: string;
 }
 
-export interface TreeNodeData extends TreeNode {
+export interface TreeNodeData extends NodeDescriptor {
+  hasChildren: boolean;
+  parentPath: string | null;
+  params?: ScriptParameter[] | undefined;
   children?: TreeNodeData[];
   isExpanded?: boolean;
   isLoading?: boolean;

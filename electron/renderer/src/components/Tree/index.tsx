@@ -5,6 +5,7 @@ import { ContextMenu } from './ContextMenu';
 
 interface TreeProps {
   kernelId: string | null;
+  disabled?: boolean;
   refreshToken?: number;
   onAction?: (action: string, node: TreeNodeData) => void;
 }
@@ -15,7 +16,7 @@ interface ContextMenuState {
   node: TreeNodeData;
 }
 
-export const Tree: React.FC<TreeProps> = ({ kernelId, refreshToken = 0, onAction }) => {
+export const Tree: React.FC<TreeProps> = ({ kernelId, disabled = false, refreshToken = 0, onAction }) => {
   const [nodes, setNodes] = useState<TreeNodeData[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | undefined>();
@@ -42,7 +43,7 @@ export const Tree: React.FC<TreeProps> = ({ kernelId, refreshToken = 0, onAction
   const loadRoot = async (force?: boolean) => {
     setLoading(nodes.length === 0);
     setError(undefined);
-    if (!kernelId) {
+    if (!kernelId || disabled) {
       setNodes([]);
       setLoading(false);
       setError(undefined);
@@ -92,7 +93,7 @@ export const Tree: React.FC<TreeProps> = ({ kernelId, refreshToken = 0, onAction
 
   useEffect(() => {
     void loadRoot(true);
-  }, [kernelId, refreshToken]);
+  }, [kernelId, refreshToken, disabled]);
 
   const updateNode = (list: TreeNodeData[], path: string, updater: (n: TreeNodeData) => TreeNodeData) =>
     list.map((node) => {
@@ -106,7 +107,7 @@ export const Tree: React.FC<TreeProps> = ({ kernelId, refreshToken = 0, onAction
     });
 
   const handleExpand = async (node: TreeNodeData) => {
-    if (!kernelId) return;
+    if (!kernelId || disabled) return;
     if (node.isExpanded) {
       setNodes((prev) => updateNode(prev, node.path, (n) => ({ ...n, isExpanded: false })));
       expandedPathsRef.current.delete(node.path);
@@ -138,10 +139,12 @@ export const Tree: React.FC<TreeProps> = ({ kernelId, refreshToken = 0, onAction
   };
 
   const handleSelect = (node: TreeNodeData) => {
+    if (disabled) return;
     setSelectedPath(node.path);
   };
 
   const handleRightClick = (node: TreeNodeData, event: React.MouseEvent) => {
+    if (disabled) return;
     setContextMenu({
       x: event.clientX,
       y: event.clientY,
@@ -150,6 +153,7 @@ export const Tree: React.FC<TreeProps> = ({ kernelId, refreshToken = 0, onAction
   };
 
   const handleContextAction = (action: string, node: TreeNodeData) => {
+    if (disabled) return;
     setContextMenu(null);
     if (action === 'refresh') {
       void loadRoot(true);
@@ -163,7 +167,7 @@ export const Tree: React.FC<TreeProps> = ({ kernelId, refreshToken = 0, onAction
   const selectedNode = selectedPath ? flatNodes.find((n) => n.path === selectedPath) : undefined;
 
   const handleKeyDown = async (event: React.KeyboardEvent<HTMLDivElement>) => {
-    if (!selectedNode) return;
+    if (!selectedNode || disabled) return;
 
     if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'c') {
       event.preventDefault();
@@ -172,7 +176,7 @@ export const Tree: React.FC<TreeProps> = ({ kernelId, refreshToken = 0, onAction
       return;
     }
 
-    if (selectedNode.type === 'script' && event.key === ' ') {
+    if (selectedNode.type === 'script' && (event.key === ' ' || event.key.toLowerCase() === 'e')) {
       event.preventDefault();
       onAction?.('edit', selectedNode);
       return;
@@ -193,11 +197,13 @@ export const Tree: React.FC<TreeProps> = ({ kernelId, refreshToken = 0, onAction
       </div>
 
       <div className="tree-content">
-        {loading && <div className="tree-loading">Loading...</div>}
+        {disabled && <div className="tree-loading">Starting kernel...</div>}
+        {!disabled && loading && <div className="tree-loading">Loading...</div>}
         {error && <div className="tree-error">{error}</div>}
-        {!loading && !error && flatNodes.length === 0 && <div className="tree-empty">No data</div>}
+        {!disabled && !loading && !error && flatNodes.length === 0 && <div className="tree-empty">No data</div>}
 
-        {!loading &&
+        {!disabled &&
+          !loading &&
           !error &&
           flatNodes.map((node) => (
               <TreeNodeRow
