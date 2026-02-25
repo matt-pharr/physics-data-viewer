@@ -207,6 +207,11 @@ const App: React.FC = () => {
     activeCellTabRef.current = activeCellTab;
   }, [activeCellTab]);
 
+  const cellTabsRef = useRef(CellTabs);
+  useEffect(() => {
+    cellTabsRef.current = CellTabs;
+  }, [CellTabs]);
+
   const removeCellTabRef = useRef<(id: number) => void>(null!);
   useEffect(() => {
     removeCellTabRef.current = handleRemoveCellTab;
@@ -230,6 +235,20 @@ const App: React.FC = () => {
       if (matchesShortcut(event, shortcuts.closeWindow)) {
         event.preventDefault();
         window.close();
+      }
+      // Cmd+1–9 → go to nth tab; Cmd+0 → go to last tab
+      if ((event.metaKey || event.ctrlKey) && !event.shiftKey && !event.altKey) {
+        const digit = event.key;
+        if (digit >= '1' && digit <= '9') {
+          event.preventDefault();
+          const t = cellTabsRef.current;
+          const target = t[Math.min(Number(digit) - 1, t.length - 1)];
+          if (target) setActiveCellTab(target.id);
+        } else if (digit === '0') {
+          event.preventDefault();
+          const t = cellTabsRef.current;
+          if (t.length) setActiveCellTab(t[t.length - 1].id);
+        }
       }
     };
     window.addEventListener('keydown', onKeyDown);

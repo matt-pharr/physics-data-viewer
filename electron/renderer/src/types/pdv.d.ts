@@ -81,7 +81,7 @@ export interface Theme {
 }
 
 export interface CodeCellData {
-  tabs: Array<{ id: number; code: string }>;
+  tabs: Array<{ id: number; code: string; name?: string }>;
   activeTabId: number;
 }
 

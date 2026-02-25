@@ -40,6 +40,8 @@ export const CodeCell: React.FC<CodeCellProps> = ({
   const shortcutsRef = useRef(shortcuts);
   const onAddTabRef = useRef(onAddTab);
   const onRemoveTabRef = useRef(onRemoveTab);
+  const tabsRef = useRef(tabs);
+  const onTabChangeRef = useRef(onTabChange);
 
   useEffect(() => {
     activeTabRef.current = activeTab;
@@ -64,6 +66,14 @@ export const CodeCell: React.FC<CodeCellProps> = ({
   useEffect(() => {
     onRemoveTabRef.current = onRemoveTab;
   }, [onRemoveTab]);
+
+  useEffect(() => {
+    tabsRef.current = tabs;
+  }, [tabs]);
+
+  useEffect(() => {
+    onTabChangeRef.current = onTabChange;
+  }, [onTabChange]);
 
   if (!activeTab) {
     return null;
@@ -98,6 +108,22 @@ export const CodeCell: React.FC<CodeCellProps> = ({
         e.stopPropagation();
         window.close();
       }
+      // Cmd+1–9 → go to nth tab; Cmd+0 → go to last tab
+      if ((nativeEvent.metaKey || nativeEvent.ctrlKey) && !nativeEvent.shiftKey && !nativeEvent.altKey) {
+        const digit = nativeEvent.key;
+        if (digit >= '1' && digit <= '9') {
+          e.preventDefault();
+          e.stopPropagation();
+          const t = tabsRef.current;
+          const target = t[Math.min(Number(digit) - 1, t.length - 1)];
+          if (target) onTabChangeRef.current(target.id);
+        } else if (digit === '0') {
+          e.preventDefault();
+          e.stopPropagation();
+          const t = tabsRef.current;
+          if (t.length) onTabChangeRef.current(t[t.length - 1].id);
+        }
+      }
     });
   };
 
@@ -128,29 +154,33 @@ export const CodeCell: React.FC<CodeCellProps> = ({
         <h2>Code Cells</h2>
 
         <div className="code-cell-tabs">
-          {tabs.map((tab) => (
-            <button
-              key={tab.id}
-              className={`tab ${tab.id === activeTabId ? 'active' : ''}`}
-              onClick={() => onTabChange(tab.id)}
-              disabled={disabled}
-            >
-              {tab.id}
-              {onRemoveTab && (
-                <span
-                  className="tab-close"
-                  role="button"
-                  aria-label={`Close tab ${tab.id}`}
+          {tabs.map((tab, i) => {
+            const label = tab.name ?? String(i + 1);
+            return (
+              <button
+                key={tab.id}
+                className={`tab ${tab.id === activeTabId ? 'active' : ''}`}
+                onClick={() => onTabChange(tab.id)}
+                disabled={disabled}
+                title={tab.name ? `Cell ${i + 1}: ${tab.name}` : `Cell ${i + 1}`}
+              >
+                {label}
+                {onRemoveTab && (
+                  <span
+                    className="tab-close"
+                    role="button"
+                    aria-label={`Close cell ${i + 1}`}
                     onClick={(e) => {
                       e.stopPropagation();
                       if (!disabled) onRemoveTab(tab.id);
                     }}
-                >
-                  ×
-                </span>
-              )}
-            </button>
-          ))}
+                  >
+                    ×
+                  </span>
+                )}
+              </button>
+            );
+          })}
           <button className="tab add" onClick={onAddTab} disabled={disabled}>
             +
           </button>
@@ -170,7 +200,7 @@ export const CodeCell: React.FC<CodeCellProps> = ({
         </div>
       </header>
 
-      <div className="command-content">
+      <div className="code-cell-content">
         <Editor
           height="100%"
           theme="vs-dark"

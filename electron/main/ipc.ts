@@ -265,6 +265,8 @@ export interface CodeCellData {
     id: number;
     /** Code content in the tab editor. */
     code: string;
+    /** Optional user-defined name. When absent, the tab is labelled by its 1-based position. */
+    name?: string;
   }>;
   /** ID of the currently selected tab. */
   activeTabId: number;
