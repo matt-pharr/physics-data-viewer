@@ -126,6 +126,15 @@ export interface Config {
       darkTheme?: string;
       lightTheme?: string;
     };
+    editor?: {
+      fontSize?: number;
+      tabSize?: number;
+      wordWrap?: boolean;
+    };
+    fonts?: {
+      codeFont?: string;
+      displayFont?: string;
+    };
   };
 }
 

@@ -336,7 +336,7 @@ body {
 .context-menu-shortcut {
   font-size: 11px;
   color: var(--text-hint);
-  font-family: ui-monospace, monospace;
+  font-family: var(--font-mono);
   flex-shrink: 0;
 }
 
@@ -819,7 +819,7 @@ body {
   border: 1px solid var(--border-color);
   background: var(--bg-tertiary);
   color: var(--text-primary);
-  font-family: ui-monospace, monospace;
+  font-family: var(--font-mono);
   font-size: 12px;
   line-height: 1.5;
   white-space: nowrap;
@@ -897,7 +897,7 @@ body {
 }
 
 .settings-general-hint code {
-  font-family: ui-monospace, monospace;
+  font-family: var(--font-mono);
   background: var(--bg-tertiary);
   padding: 1px 4px;
   border-radius: 3px;
@@ -923,7 +923,7 @@ body {
   border-radius: 4px;
   background: var(--bg-primary);
   color: var(--text-primary);
-  font-family: ui-monospace, monospace;
+  font-family: var(--font-mono);
   font-size: 13px;
   width: 100%;
   box-sizing: border-box;
@@ -943,7 +943,7 @@ body {
 }
 
 .settings-general-desc code {
-  font-family: ui-monospace, monospace;
+  font-family: var(--font-mono);
   background: var(--bg-tertiary);
   padding: 1px 4px;
   border-radius: 3px;
@@ -959,6 +959,106 @@ body {
   display: flex;
   flex-direction: column;
   gap: 16px;
+}
+
+.appearance-section-header {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  color: var(--text-secondary);
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.appearance-section-header--spaced {
+  margin-top: 8px;
+}
+
+.appearance-editor-grid {
+  display: grid;
+  grid-template-columns: 110px 1fr;
+  gap: 8px 12px;
+  align-items: center;
+}
+
+.appearance-editor-grid label {
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+
+.appearance-editor-select {
+  padding: 5px 8px;
+  border-radius: 4px;
+  border: 1px solid var(--border-color);
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  font-size: 13px;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.appearance-editor-select:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.appearance-editor-input {
+  padding: 5px 8px;
+  border-radius: 4px;
+  border: 1px solid var(--border-color);
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  font-size: 13px;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.appearance-editor-input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.appearance-editor-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.appearance-editor-number {
+  width: 64px;
+  padding: 5px 8px;
+  border-radius: 4px;
+  border: 1px solid var(--border-color);
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  font-size: 13px;
+}
+
+.appearance-editor-number:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.appearance-editor-unit {
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.appearance-editor-check {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  color: var(--text-primary);
+  cursor: pointer;
+}
+
+.appearance-editor-check input[type="checkbox"] {
+  width: 15px;
+  height: 15px;
+  cursor: pointer;
+  accent-color: var(--accent);
 }
 
 .appearance-follow-row {
@@ -992,7 +1092,7 @@ body {
   flex-wrap: wrap;
 }
 
-
+.appearance-theme-row {
   display: flex;
   align-items: center;
   gap: 10px;
@@ -1069,7 +1169,7 @@ body {
   border-radius: 4px;
   background: var(--bg-primary);
   color: var(--text-primary);
-  font-family: ui-monospace, monospace;
+  font-family: var(--font-mono);
   font-size: 12px;
   flex-shrink: 0;
 }

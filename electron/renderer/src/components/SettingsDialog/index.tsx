@@ -6,6 +6,7 @@ import { EnvironmentSelector } from '../EnvironmentSelector';
 import {
   BUILTIN_THEMES, BUILTIN_THEME_NAMES, CSS_VAR_GROUPS, THEME_PAIRS,
   applyThemeColors, colorsEqual, defineMonacoThemes, getMonacoTheme, resolveThemeColors,
+  detectMonoFonts, detectDisplayFonts, applyFontSettings,
 } from '../../themes';
 import type { Theme } from '../../types';
 import { loader } from '@monaco-editor/react';
@@ -196,6 +197,17 @@ export const SettingsDialog: React.FC<SettingsDialogProps> = ({
   const [juliaEditorCmd, setJuliaEditorCmd] = useState('code {}');
   const [fileManagerCmd, setFileManagerCmd] = useState(DEFAULT_FILE_MANAGER);
 
+  // Editor settings state
+  const [editorFontSize, setEditorFontSize] = useState(13);
+  const [editorTabSize, setEditorTabSize] = useState(4);
+  const [editorWordWrap, setEditorWordWrap] = useState(true);
+
+  // Font settings state
+  const [codeFont, setCodeFont] = useState('');
+  const [displayFont, setDisplayFont] = useState('');
+  const [monoFonts, setMonoFonts] = useState<string[]>([]);
+  const [displayFonts, setDisplayFonts] = useState<string[]>([]);
+
   useEffect(() => {
     if (!isOpen) return;
     setActiveTab(initialTab);
@@ -203,6 +215,16 @@ export const SettingsDialog: React.FC<SettingsDialogProps> = ({
     setPythonEditorCmd(config?.pythonEditorCmd ?? 'code {}');
     setJuliaEditorCmd(config?.juliaEditorCmd ?? 'code {}');
     setFileManagerCmd(config?.fileManagerCmd ?? DEFAULT_FILE_MANAGER);
+    const ed = config?.settings?.editor;
+    setEditorFontSize(ed?.fontSize ?? 13);
+    setEditorTabSize(ed?.tabSize ?? 4);
+    setEditorWordWrap(ed?.wordWrap ?? true);
+    const fn = config?.settings?.fonts;
+    setCodeFont(fn?.codeFont ?? '');
+    setDisplayFont(fn?.displayFont ?? '');
+    // Detect installed fonts once per open
+    setMonoFonts(detectMonoFonts());
+    setDisplayFonts(detectDisplayFonts());
     const load = async () => {
       const loaded = await window.pdv.themes.get();
       setSavedThemes(loaded);
@@ -366,6 +388,15 @@ export const SettingsDialog: React.FC<SettingsDialogProps> = ({
           darkTheme: followSystemTheme ? darkThemeName : undefined,
           lightTheme: followSystemTheme ? lightThemeName : undefined,
         },
+        editor: {
+          fontSize: editorFontSize,
+          tabSize: editorTabSize,
+          wordWrap: editorWordWrap,
+        },
+        fonts: {
+          codeFont: codeFont || undefined,
+          displayFont: displayFont || undefined,
+        },
       },
     });
   };
@@ -472,6 +503,10 @@ export const SettingsDialog: React.FC<SettingsDialogProps> = ({
             />
           ) : (
             <div className="settings-appearance">
+
+              {/* ── Theme section ── */}
+              <div className="appearance-section-header appearance-section-header--spaced">Theme</div>
+
               {/* Follow system theme toggle */}
               <label className="appearance-follow-row">
                 <input
@@ -593,6 +628,75 @@ export const SettingsDialog: React.FC<SettingsDialogProps> = ({
                   </div>
                 </>
               )}
+
+              {/* ── Fonts section ── */}
+              <div className="appearance-section-header">Fonts</div>
+              <div className="appearance-editor-grid">
+                <label htmlFor="ae-code-font">Code font</label>
+                <select
+                  id="ae-code-font"
+                  className="appearance-editor-select"
+                  value={codeFont}
+                  onChange={(e) => { setCodeFont(e.target.value); applyFontSettings(e.target.value || undefined, displayFont || undefined); }}
+                >
+                  <option value="">Default</option>
+                  {monoFonts.map((f) => <option key={f} value={f}>{f}</option>)}
+                </select>
+
+                <label htmlFor="ae-display-font">Display font</label>
+                <select
+                  id="ae-display-font"
+                  className="appearance-editor-select"
+                  value={displayFont}
+                  onChange={(e) => { setDisplayFont(e.target.value); applyFontSettings(codeFont || undefined, e.target.value || undefined); }}
+                >
+                  <option value="">Default</option>
+                  {displayFonts.map((f) => <option key={f} value={f}>{f}</option>)}
+                </select>
+              </div>
+
+              {/* ── Editor section ── */}
+              <div className="appearance-section-header appearance-section-header--spaced">Editor</div>
+              <div className="appearance-editor-grid">
+                <label htmlFor="ae-font-size">Font size</label>
+                <div className="appearance-editor-row">
+                  <input
+                    id="ae-font-size"
+                    type="number"
+                    className="appearance-editor-number"
+                    value={editorFontSize}
+                    min={8}
+                    max={32}
+                    onChange={(e) => setEditorFontSize(Number(e.target.value) || 13)}
+                  />
+                  <span className="appearance-editor-unit">px</span>
+                </div>
+
+                <label htmlFor="ae-tab-size">Tab size</label>
+                <div className="appearance-editor-row">
+                  <input
+                    id="ae-tab-size"
+                    type="number"
+                    className="appearance-editor-number"
+                    value={editorTabSize}
+                    min={1}
+                    max={8}
+                    onChange={(e) => setEditorTabSize(Number(e.target.value) || 4)}
+                  />
+                  <span className="appearance-editor-unit">spaces</span>
+                </div>
+
+                <label htmlFor="ae-word-wrap">Word wrap</label>
+                <label className="appearance-editor-check">
+                  <input
+                    id="ae-word-wrap"
+                    type="checkbox"
+                    checked={editorWordWrap}
+                    onChange={(e) => setEditorWordWrap(e.target.checked)}
+                  />
+                  <span>Enabled</span>
+                </label>
+              </div>
             </div>
           )}
         </div>

@@ -293,3 +293,105 @@ export function colorsEqual(a: Record<string, string>, b: Record<string, string>
   if (keysA.length !== Object.keys(b).length) return false;
   return keysA.every((k) => a[k] === b[k]);
 }
+
+// ---------------------------------------------------------------------------
+// Font detection
+// ---------------------------------------------------------------------------
+
+/** Curated list of popular monospace fonts to probe for. */
+export const MONO_FONT_CANDIDATES = [
+  'JetBrains Mono',
+  'Fira Code',
+  'Cascadia Code',
+  'Cascadia Mono',
+  'Source Code Pro',
+  'SF Mono',
+  'Menlo',
+  'Monaco',
+  'Consolas',
+  'IBM Plex Mono',
+  'Hack',
+  'Inconsolata',
+  'Roboto Mono',
+  'Ubuntu Mono',
+  'DejaVu Sans Mono',
+  'Droid Sans Mono',
+  'Courier New',
+  'Lucida Console',
+  'Andale Mono',
+  'PT Mono',
+  'Iosevka',
+  'Victor Mono',
+  'Mononoki',
+  'Fantasque Sans Mono',
+  'Noto Sans Mono',
+];
+
+/** Curated list of popular display/UI fonts to probe for. */
+export const DISPLAY_FONT_CANDIDATES = [
+  'Inter',
+  'SF Pro Display',
+  'SF Pro Text',
+  'Helvetica Neue',
+  'Helvetica',
+  'Arial',
+  'Roboto',
+  'Open Sans',
+  'Lato',
+  'Nunito',
+  'Segoe UI',
+  'Ubuntu',
+  'Cantarell',
+  'Noto Sans',
+  'Source Sans Pro',
+  'Raleway',
+  'Fira Sans',
+  'IBM Plex Sans',
+  'DM Sans',
+];
+
+/**
+ * Returns true if the named font is installed, by checking whether it renders
+ * differently from a pure fallback font on a canvas.
+ */
+function fontInstalled(family: string, fallback: 'monospace' | 'sans-serif' = 'sans-serif'): boolean {
+  const canvas = document.createElement('canvas');
+  const ctx = canvas.getContext('2d');
+  if (!ctx) return false;
+  const probe = 'abcdefghijklmnopqrstuvwxyz0123456789MMWWII';
+  ctx.font = `16px ${fallback}`;
+  const wFallback = ctx.measureText(probe).width;
+  ctx.font = `16px '${family}', ${fallback}`;
+  const wFont = ctx.measureText(probe).width;
+  return Math.abs(wFont - wFallback) > 0.5;
+}
+
+/** Returns installed monospace fonts from the candidate list. */
+export function detectMonoFonts(): string[] {
+  return MONO_FONT_CANDIDATES.filter((f) => fontInstalled(f, 'monospace'));
+}
+
+/** Returns installed display fonts from the candidate list. */
+export function detectDisplayFonts(): string[] {
+  return DISPLAY_FONT_CANDIDATES.filter((f) => fontInstalled(f, 'sans-serif'));
+}
+
+/**
+ * Apply code/display font choices as CSS custom properties so the entire app
+ * (and Monaco, which is passed the value directly) reflects the selection.
+ *
+ * Pass `undefined` to revert to the stylesheet default.
+ */
+export function applyFontSettings(codeFont?: string, displayFont?: string): void {
+  const root = document.documentElement;
+  if (codeFont) {
+    root.style.setProperty('--font-mono', `'${codeFont}', ui-monospace, 'Courier New', monospace`);
+  } else {
+    root.style.removeProperty('--font-mono');
+  }
+  if (displayFont) {
+    root.style.setProperty('--font-sans', `'${displayFont}', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif`);
+  } else {
+    root.style.removeProperty('--font-sans');
+  }
+}

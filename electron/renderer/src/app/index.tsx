@@ -9,7 +9,7 @@ import { CreateScriptDialog } from '../components/Tree/CreateScriptDialog';
 import { SettingsDialog } from '../components/SettingsDialog';
 import type { CellTab, Config, KernelExecuteResult, LogEntry, MenuActionPayload, TreeNodeData } from '../types';
 import { matchesShortcut, resolveShortcuts } from '../shortcuts';
-import { BUILTIN_THEMES, applyThemeColors, getMonacoTheme, resolveThemeColors } from '../themes';
+import { BUILTIN_THEMES, applyThemeColors, applyFontSettings, getMonacoTheme, resolveThemeColors } from '../themes';
 
 type Tab = 'tree' | 'namespace' | 'modules';
 type KernelStatus = 'idle' | 'starting' | 'ready' | 'error';
@@ -123,6 +123,12 @@ const App: React.FC = () => {
       setMonacoTheme(getMonacoTheme(app.themeName ?? '', BUILTIN_THEMES));
     }
   }, [config, systemPrefersDark]);
+
+  // Apply font settings whenever config changes
+  useEffect(() => {
+    const fonts = config?.settings?.fonts;
+    applyFontSettings(fonts?.codeFont, fonts?.displayFont);
+  }, [config]);
 
   // Load code celles from filesystem on startup
   useEffect(() => {
@@ -772,6 +778,10 @@ const App: React.FC = () => {
             lastError={lastError}
             shortcuts={shortcuts}
             monacoTheme={monacoTheme}
+            editorFontFamily={config?.settings?.fonts?.codeFont}
+            editorFontSize={config?.settings?.editor?.fontSize}
+            editorTabSize={config?.settings?.editor?.tabSize}
+            editorWordWrap={config?.settings?.editor?.wordWrap}
           />
         </div>
       </main>

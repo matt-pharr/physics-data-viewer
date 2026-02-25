@@ -19,6 +19,10 @@ export interface CodeCellProps {
   lastError?: string;
   shortcuts: Shortcuts;
   monacoTheme?: string;
+  editorFontFamily?: string;
+  editorFontSize?: number;
+  editorTabSize?: number;
+  editorWordWrap?: boolean;
 }
 
 export const CodeCell: React.FC<CodeCellProps> = ({
@@ -34,6 +38,10 @@ export const CodeCell: React.FC<CodeCellProps> = ({
   lastError,
   shortcuts,
   monacoTheme = 'vs-dark',
+  editorFontFamily,
+  editorFontSize,
+  editorTabSize,
+  editorWordWrap,
 }) => {
   const editorRef = useRef<monaco.editor.IStandaloneCodeEditor | null>(null);
   const activeTab = useMemo(() => tabs.find((tab) => tab.id === activeTabId), [tabs, activeTabId]);
@@ -225,8 +233,9 @@ export const CodeCell: React.FC<CodeCellProps> = ({
             overviewRulerLanes: 0,
 
             // Typography
-            fontSize: 13,
-            wordWrap: 'on',
+            fontSize: editorFontSize ?? 13,
+            fontFamily: editorFontFamily || undefined,
+            wordWrap: editorWordWrap === false ? 'off' : 'on',
 
             // Gutter
             lineNumbers: 'on',
@@ -234,7 +243,7 @@ export const CodeCell: React.FC<CodeCellProps> = ({
             glyphMargin: false,
 
             // Indentation — enforce Python conventions, never infer from content
-            tabSize: 4,
+            tabSize: editorTabSize ?? 4,
             insertSpaces: true,
             detectIndentation: false,
 
