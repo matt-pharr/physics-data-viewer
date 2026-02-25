@@ -116,6 +116,12 @@ function setup() {
     interrupt: vi.fn(async () => undefined),
     getKernel: vi.fn(() => makeKernelInfo()),
     shutdownAll: vi.fn(async () => undefined),
+    complete: vi.fn(async (_id: string, _code: string, cursorPos: number) => ({
+      matches: [],
+      cursor_start: cursorPos,
+      cursor_end: cursorPos,
+    })),
+    inspect: vi.fn(async () => ({ found: false })),
   } as unknown as KernelManager;
 
   const pushHandlers = new Map<string, Array<(message: PDVMessage) => void>>();
@@ -436,26 +442,34 @@ describe("Step 5 IPC handlers", () => {
     expect(result).toMatchObject({ id: expect.any(String), status: "idle" });
   });
 
-  it("kernels:complete returns empty matches when complete() is absent", async () => {
-    const { kernelManager: _ } = setup();
+  it("kernels:complete calls kernelManager.complete() and returns its result", async () => {
+    const { kernelManager } = setup();
+    (kernelManager.complete as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+      matches: ["import", "importlib"],
+      cursor_start: 0,
+      cursor_end: 7,
+    });
     const complete = getHandler(IPC.kernels.complete);
     const result = (await complete({}, "kernel-1", "import ", 7)) as {
       matches: string[];
       cursor_start: number;
       cursor_end: number;
     };
-    expect(result).toEqual({
-      matches: [],
-      cursor_start: 7,
-      cursor_end: 7,
-    });
+    expect(kernelManager.complete).toHaveBeenCalledWith("kernel-1", "import ", 7);
+    expect(result.matches).toContain("import");
+    expect(result.cursor_start).toBe(0);
   });
 
-  it("kernels:inspect returns not-found when inspect() is absent", async () => {
-    const { kernelManager: _ } = setup();
+  it("kernels:inspect calls kernelManager.inspect() and returns its result", async () => {
+    const { kernelManager } = setup();
+    (kernelManager.inspect as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+      found: true,
+      data: { "text/plain": "Built-in functions, exceptions, and other objects." },
+    });
     const inspect = getHandler(IPC.kernels.inspect);
     const result = (await inspect({}, "kernel-1", "x", 0)) as { found: boolean };
-    expect(result).toEqual({ found: false });
+    expect(kernelManager.inspect).toHaveBeenCalledWith("kernel-1", "x", 0);
+    expect(result.found).toBe(true);
   });
 
   it("kernels:validate returns valid for non-empty path when validate() is absent", async () => {

@@ -29,8 +29,6 @@ import { updateRecentProjectsMenu } from "./menu";
 import {
   CommandBoxData,
   IPC,
-  KernelCompleteResult,
-  KernelInspectResult,
   KernelValidateResult,
   NamespaceQueryOptions,
   NamespaceVariable,
@@ -399,21 +397,7 @@ export function registerIpcHandlers(
   ipcMain.handle(
     IPC.kernels.complete,
     async (_event, kernelId: string, code: string, cursorPos: number) => {
-      const completable = kernelManager as KernelManager & {
-        complete?: (
-          id: string,
-          source: string,
-          pos: number
-        ) => Promise<KernelCompleteResult>;
-      };
-      if (completable.complete) {
-        return completable.complete(kernelId, code, cursorPos);
-      }
-      return {
-        matches: [],
-        cursor_start: cursorPos,
-        cursor_end: cursorPos,
-      };
+      return kernelManager.complete(kernelId, code, cursorPos);
     }
   );
 
@@ -424,17 +408,7 @@ export function registerIpcHandlers(
   ipcMain.handle(
     IPC.kernels.inspect,
     async (_event, kernelId: string, code: string, cursorPos: number) => {
-      const inspectable = kernelManager as KernelManager & {
-        inspect?: (
-          id: string,
-          source: string,
-          pos: number
-        ) => Promise<KernelInspectResult>;
-      };
-      if (inspectable.inspect) {
-        return inspectable.inspect(kernelId, code, cursorPos);
-      }
-      return { found: false };
+      return kernelManager.inspect(kernelId, code, cursorPos);
     }
   );
 

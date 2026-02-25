@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useRef, useCallback } from 'react';
-import { CommandBox } from '../components/CommandBox';
+import { CommandBox, type DiagnosticMarker } from '../components/CommandBox';
 import { Console } from '../components/Console';
 import { Tree } from '../components/Tree';
 import { EnvironmentSelector } from '../components/EnvironmentSelector';
@@ -81,6 +81,116 @@ function matchesShortcut(event: KeyboardEvent, shortcut: string): boolean {
   });
 }
 
+/**
+ * Encode a string to base64 in a UTF-8-safe way.
+ * btoa() alone fails on non-Latin1 characters; TextEncoder gives us raw bytes.
+ */
+function toBase64(str: string): string {
+  const bytes = new TextEncoder().encode(str);
+  let binary = '';
+  bytes.forEach((b) => { binary += String.fromCharCode(b); });
+  return btoa(binary);
+}
+
+/**
+ * Build the Python diagnostic code snippet.
+ *
+ * Strategy (in order of preference):
+ * 1. pyflakes (if installed) with kernel-namespace stubs to suppress false
+ *    positives for variables defined in prior executions.
+ * 2. ast.parse (always available) for syntax-only checking.
+ *
+ * The stub approach: before running pyflakes on the user's code, we prepend
+ * `name = None` lines for every non-underscore name currently in the kernel
+ * namespace. This prevents pyflakes from flagging variables like `np` or `x`
+ * that were defined in earlier executions but aren't in the current buffer.
+ *
+ * All identifiers are _-prefixed to stay hidden from the PDV namespace panel.
+ * All code runs inside try/except so it never raises.
+ */
+function buildDiagCode(b64: string): string {
+  // _ERROR_TYPES: pyflakes message class names that are hard errors, not warnings.
+  // Uses pyflakes.checker.Checker directly (not a custom Reporter class) to avoid
+  // the IPython exec scoping issue where class method bodies cannot access local
+  // variables from the enclosing cell scope.
+  return (
+    `import base64 as _b64, json as _json, ast as _ast\n` +
+    `_src = _b64.b64decode("${b64}").decode("utf-8")\n` +
+    `_diag = []\n` +
+    `_ERROR_TYPES = {"UndefinedName","UndefinedLocal","UndefinedExport",\n` +
+    `    "BreakOutsideLoop","ContinueOutsideLoop","ContinueInFinally",\n` +
+    `    "DefaultExceptNotLast","TwoStarredExpressions","DuplicateArgument"}\n` +
+    `try:\n` +
+    `    import keyword as _kw, pyflakes.checker as _pfc\n` +
+    `    _ns = get_ipython().user_ns\n` +
+    `    _names = [_k for _k in _ns if not _k.startswith("_") and not _kw.iskeyword(_k)]\n` +
+    `    _stub = "".join(_n + " = None\\n" for _n in _names)\n` +
+    `    _stub_lines = len(_names)\n` +
+    `    try:\n` +
+    `        _tree = _ast.parse(_stub + _src, filename="<editor>")\n` +
+    `        _chk = _pfc.Checker(_tree, filename="<editor>")\n` +
+    `        for _msg in _chk.messages:\n` +
+    `            _l = _msg.lineno - _stub_lines\n` +
+    `            if _l < 1: continue\n` +
+    `            _sev = "error" if type(_msg).__name__ in _ERROR_TYPES else "warning"\n` +
+    `            _diag.append({"sl":_l,"sc":_msg.col+1,"el":_l,"ec":_msg.col+2,"msg":_msg.message % _msg.message_args,"sev":_sev})\n` +
+    `    except SyntaxError as _e:\n` +
+    `        _l = (_e.lineno or 1) - _stub_lines\n` +
+    `        if _l >= 1:\n` +
+    `            _diag.append({"sl":_l,"sc":_e.offset or 1,"el":_l,"ec":getattr(_e,"end_offset",None) or (_e.offset or 1)+1,"msg":_e.msg or "SyntaxError","sev":"error"})\n` +
+    `        else:\n` +
+    `            try:\n` +
+    `                _ast.parse(_src, filename="<editor>")\n` +
+    `            except SyntaxError as _e2:\n` +
+    `                _diag.append({"sl":_e2.lineno or 1,"sc":_e2.offset or 1,"el":_e2.lineno or 1,"ec":getattr(_e2,"end_offset",None) or (_e2.offset or 1)+1,"msg":_e2.msg or "SyntaxError","sev":"error"})\n` +
+    `except ImportError:\n` +
+    `    try:\n` +
+    `        _ast.parse(_src, filename="<editor>")\n` +
+    `    except SyntaxError as _e:\n` +
+    `        _diag.append({"sl":_e.lineno or 1,"sc":_e.offset or 1,"el":_e.lineno or 1,\n` +
+    `            "ec":getattr(_e,"end_offset",None) or (_e.offset or 1)+1,"msg":_e.msg or "SyntaxError","sev":"error"})\n` +
+    `except Exception as _ex:\n` +
+    `    _diag.append({"sl":1,"sc":1,"el":1,"ec":2,"msg":"[PDV internal] " + repr(_ex),"sev":"warning"})\n` +
+    `    try:\n` +
+    `        _ast.parse(_src, filename="<editor>")\n` +
+    `    except SyntaxError as _e:\n` +
+    `        _diag.append({"sl":_e.lineno or 1,"sc":_e.offset or 1,"el":_e.lineno or 1,\n` +
+    `            "ec":getattr(_e,"end_offset",None) or (_e.offset or 1)+1,"msg":_e.msg or "SyntaxError","sev":"error"})\n` +
+    `print(_json.dumps(_diag))\n`
+  );
+}
+
+/** Raw JSON shape returned by buildDiagCode. */
+interface RawDiag { sl: number; sc: number; el: number; ec: number; msg: string; sev: string; }
+
+/**
+ * Try to extract a 1-based line number from a kernel error string.
+ * ipykernel includes line info in SyntaxError evalue: "msg (line N)"
+ * and in tracebacks: '  File "<ipython-input-...>", line N'.
+ */
+/**
+ * Extract the most relevant line number from a kernel error.
+ * Checks the traceback array first (most precise), then falls back to
+ * string patterns in the error message itself.
+ */
+function extractErrorLine(errorStr: string, traceback?: string[]): number | null {
+  if (traceback) {
+    // Walk backwards — the last user-code frame is the most relevant.
+    // IPython 7+ format:  Cell In[N], line N
+    // IPython <7 format:  File "<ipython-input-N-xxx>", line N
+    for (let i = traceback.length - 1; i >= 0; i--) {
+      let m = /Cell\s+In\s*\[\d+\],\s+line\s+(\d+)/.exec(traceback[i]);
+      if (m) return parseInt(m[1], 10);
+      m = /File\s+"<ipython-input[^"]*>",\s+line\s+(\d+)/.exec(traceback[i]);
+      if (m) return parseInt(m[1], 10);
+    }
+  }
+  // SyntaxError: invalid syntax (line 5)
+  let m = /\(line\s+(\d+)\)/.exec(errorStr);
+  if (m) return parseInt(m[1], 10);
+  return null;
+}
+
 const App: React.FC = () => {
   const [activeTab, setActiveTab] = useState<Tab>('tree');
   const [commandTabs, setCommandTabs] = useState<CommandTab[]>([{ id: 1, code: '' }]);
@@ -106,6 +216,12 @@ const App: React.FC = () => {
   const [treeRefreshToken, setTreeRefreshToken] = useState(0);
   const [createScriptTarget, setCreateScriptTarget] = useState<string | null>(null);
   const [showSettings, setShowSettings] = useState(false);
+  /** Per-tab diagnostic markers derived from debounced kernel-side syntax checking. */
+  const [commandTabMarkers, setCommandTabMarkers] = useState<Record<number, DiagnosticMarker[]>>({});
+  /** Per-tab execution-error markers (set after a failed run, cleared on next code change). */
+  const [execErrorMarkers, setExecErrorMarkers] = useState<Record<number, DiagnosticMarker[]>>({});
+  /** Incremented on each code change to discard stale diagnostic results. */
+  const diagGenerationRef = useRef(0);
 
   // Load command boxes from filesystem on startup
   useEffect(() => {
@@ -271,6 +387,63 @@ const App: React.FC = () => {
     };
   }, []);
 
+  // ---------------------------------------------------------------------------
+  // Debounced real-time syntax diagnostics via the kernel
+  // ---------------------------------------------------------------------------
+  // Runs ast.parse on the active tab's code via a silent execute_request
+  // (1.2 s after the user stops typing). ipykernel's ast.parse gives precise
+  // line/column info for SyntaxErrors. Skipped while executing or no kernel.
+  useEffect(() => {
+    // Skip if no kernel is ready or if user code is already running
+    if (!currentKernelId || kernelStatus !== 'ready' || isExecuting) return;
+
+    const tabId = activeCommandTab;
+    const code = commandTabs.find((t) => t.id === tabId)?.code ?? '';
+
+    if (!code.trim()) {
+      setCommandTabMarkers((prev) => ({ ...prev, [tabId]: [] }));
+      return;
+    }
+
+    const gen = ++diagGenerationRef.current;
+
+    const timer = setTimeout(async () => {
+      try {
+        const b64 = toBase64(code);
+        const diagCode = buildDiagCode(b64);
+        const result = await window.pdv.kernels.execute(currentKernelId, {
+          code: diagCode,
+          silent: true,
+        });
+
+        // Discard if a newer code version has arrived since we fired.
+        if (diagGenerationRef.current !== gen) return;
+
+        console.debug('[PDV diag] stdout:', result.stdout?.trim(), 'error:', result.error);
+        const markers: DiagnosticMarker[] = [];
+        if (result.stdout) {
+          try {
+            const raw = JSON.parse(result.stdout.trim()) as RawDiag[];
+            for (const d of raw) {
+              markers.push({
+                startLineNumber: d.sl,
+                startColumn: d.sc,
+                endLineNumber: d.el,
+                endColumn: d.ec,
+                message: d.msg,
+                severity: d.sev === 'warning' ? 'warning' : 'error',
+              });
+            }
+          } catch { /* malformed JSON — ignore */ }
+        }
+        console.debug('[PDV diag] setting', markers.length, 'markers');
+        setCommandTabMarkers((prev) => ({ ...prev, [tabId]: markers }));
+      } catch (e) { console.debug('[PDV diag] execute threw:', e); }
+    }, 1200);
+
+    return () => clearTimeout(timer);
+  }, [commandTabs, activeCommandTab, currentKernelId, kernelStatus, isExecuting]);
+
   const startVerticalDrag = useCallback((event: React.MouseEvent) => {
     event.preventDefault();
     dragRef.current = 'vertical';
@@ -383,6 +556,11 @@ const App: React.FC = () => {
 
   const handleCodeChange = (id: number, code: string) => {
     setCommandTabs((prev) => prev.map((tab) => (tab.id === id ? { ...tab, code } : tab)));
+    // Clear stale execution-error markers when the user edits the code.
+    setExecErrorMarkers((prev) => {
+      if (!prev[id]?.length) return prev;
+      return { ...prev, [id]: [] };
+    });
   };
 
   const handleClearConsole = () => {
@@ -485,6 +663,9 @@ const App: React.FC = () => {
   const handleExecute = async (code: string) => {
     if (!currentKernelId || kernelStatus !== 'ready' || !code.trim()) return;
 
+    // Clear execution-error markers for this tab; pyflakes markers stay.
+    setExecErrorMarkers((prev) => ({ ...prev, [activeCommandTab]: [] }));
+
     setIsExecuting(true);
     setLastError(undefined);
 
@@ -509,6 +690,23 @@ const App: React.FC = () => {
 
       if (result.error) {
         setLastError(result.error);
+        const errorLine = extractErrorLine(result.error, result.traceback);
+        if (errorLine !== null) {
+          setExecErrorMarkers((prev) => ({
+            ...prev,
+            [activeCommandTab]: [{
+              startLineNumber: errorLine,
+              startColumn: 1,
+              endLineNumber: errorLine,
+              endColumn: Number.MAX_SAFE_INTEGER,
+              message: result.error!,
+              severity: 'error',
+            }],
+          }));
+        }
+      } else {
+        // Successful execution — clear execution-error markers.
+        setExecErrorMarkers((prev) => ({ ...prev, [activeCommandTab]: [] }));
       }
     } catch (error) {
       logEntry.error = error instanceof Error ? error.message : String(error);
@@ -679,6 +877,8 @@ const App: React.FC = () => {
               onChange: (code: string) => handleCodeChange(tab.id, code),
             }))}
             activeTabId={activeCommandTab}
+            kernelId={currentKernelId}
+            markers={[...(commandTabMarkers[activeCommandTab] ?? []), ...(execErrorMarkers[activeCommandTab] ?? [])]}
             disabled={kernelStatus !== 'ready'}
             onTabChange={handleTabChange}
             onAddTab={addCommandTab}

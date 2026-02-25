@@ -43,6 +43,8 @@ export interface KernelExecuteResult {
   stderr?: string;
   result?: unknown;
   error?: string;
+  /** ANSI-stripped traceback lines from a kernel error message. */
+  traceback?: string[];
   duration?: number;
   /** Inline images captured from display_data iopub messages (Agg fallback). */
   images?: Array<{ mime: string; data: string }>;

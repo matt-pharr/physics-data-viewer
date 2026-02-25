@@ -7,9 +7,13 @@
  * 3. Opening ZeroMQ shell / iopub / control sockets and connecting them.
  * 4. Running a continuous background iopub reader loop that dispatches raw
  *    Jupyter messages to registered listeners (used by CommRouter).
- * 5. Sending execute_request messages and correlating their output via iopub.
- * 6. Graceful shutdown: shutdown_request → wait 3 s → SIGKILL.
- * 7. Crash detection: emits 'kernel:crashed' when a kernel exits unexpectedly.
+ * 5. Running a continuous background shell-reply reader loop that correlates
+ *    complete_reply and inspect_reply messages to waiting callers.
+ * 6. Sending execute_request messages and correlating their output via iopub.
+ * 7. Sending complete_request and inspect_request messages and correlating
+ *    their shell-socket replies by msg_id.
+ * 8. Graceful shutdown: shutdown_request → wait 3 s → SIGKILL.
+ * 9. Crash detection: emits 'kernel:crashed' when a kernel exits unexpectedly.
  *
  * KernelManager does NOT know about the PDV comm protocol — it speaks only
  * raw Jupyter Messaging Protocol (JMP). All PDV traffic is handled by
@@ -78,6 +82,8 @@ export interface KernelExecuteResult {
   result?: unknown;
   /** Error string if execution raised an exception. */
   error?: string;
+  /** Raw traceback lines from the error message (ANSI codes stripped). */
+  traceback?: string[];
   /** Wall-clock execution duration in milliseconds. */
   duration?: number;
   /** Inline images emitted via display_data (e.g. matplotlib Agg fallback). */
@@ -146,6 +152,8 @@ interface ManagedKernel {
   shuttingDown: boolean;
   /** Promise that resolves when the background iopub loop exits. */
   iopubLoopDone: Promise<void>;
+  /** Promise that resolves when the background shell reply loop exits. */
+  shellLoopDone: Promise<void>;
 }
 
 // ---------------------------------------------------------------------------
@@ -294,6 +302,12 @@ export class KernelManager extends EventEmitter {
   /** Per-kernel sets of iopub message listeners. */
   private readonly iopubListeners = new Map<string, Set<IopubCallback>>();
 
+  /** Per-kernel, per-msgId one-shot shell reply listeners for complete/inspect. */
+  private readonly shellReplyListeners = new Map<
+    string,
+    Map<string, (msg: JupyterMessage) => void>
+  >();
+
   constructor() {
     super();
   }
@@ -389,6 +403,10 @@ export class KernelManager extends EventEmitter {
     let resolveLoopDone!: () => void;
     const iopubLoopDone = new Promise<void>((r) => { resolveLoopDone = r; });
 
+    // Deferred that resolves when the background shell reply loop exits.
+    let resolveShellLoopDone!: () => void;
+    const shellLoopDone = new Promise<void>((r) => { resolveShellLoopDone = r; });
+
     const managed: ManagedKernel = {
       info: kernelInfo,
       spec: {
@@ -409,15 +427,20 @@ export class KernelManager extends EventEmitter {
       lastActivity: Date.now(),
       shuttingDown: false,
       iopubLoopDone,
+      shellLoopDone,
     };
 
     this.kernels.set(kernelId, managed);
     this.iopubListeners.set(kernelId, new Set());
+    this.shellReplyListeners.set(kernelId, new Map());
 
     // Start the background iopub reader *before* waiting for ready so that
     // any status messages arriving during startup are dispatched.
     // Resolve iopubLoopDone when the loop exits (normally or on error).
     this.runIopubLoop(managed).finally(resolveLoopDone);
+
+    // Start the background shell reply loop for complete_reply / inspect_reply.
+    this.runShellLoop(managed).finally(resolveShellLoopDone);
 
     // Emit 'kernel:crashed' when the process exits unexpectedly.
     // Do NOT remove from kernels map here: stop() needs the managed object
@@ -472,6 +495,9 @@ export class KernelManager extends EventEmitter {
     // close() destroys the native socket while receive() is still in flight.
     await managed.iopubLoopDone;
 
+    // Wait for the shell reply loop to exit for the same reason.
+    await managed.shellLoopDone;
+
     // Close sockets (safe — no pending receive operations remain).
     for (const sock of [
       managed.shellSocket,
@@ -511,6 +537,7 @@ export class KernelManager extends EventEmitter {
 
     this.kernels.delete(id);
     this.iopubListeners.delete(id);
+    this.shellReplyListeners.delete(id);
   }
 
   /**
@@ -625,6 +652,12 @@ export class KernelManager extends EventEmitter {
           result.error = `${String(content.ename ?? "Error")}: ${String(
             content.evalue ?? ""
           )}`;
+          // Capture and ANSI-strip the traceback so the renderer can extract line numbers.
+          const tb = content.traceback;
+          if (Array.isArray(tb)) {
+            // eslint-disable-next-line no-control-regex
+            result.traceback = (tb as string[]).map((l) => l.replace(/\x1b\[[0-9;]*m/g, ""));
+          }
         } else if (
           msgType === "status" &&
           content.execution_state === "idle"
@@ -734,9 +767,197 @@ export class KernelManager extends EventEmitter {
     );
   }
 
+  /**
+   * Request code completions from the kernel via `complete_request`.
+   *
+   * Uses the Jupyter Messaging Protocol shell channel to ask ipykernel
+   * (Jedi) for completions at the given cursor position. ipykernel inspects
+   * the live namespace, so completions reflect runtime objects (including
+   * `pdv_tree`, variables from prior executions, and method chains on live
+   * objects) — not just what is statically visible in the editor buffer.
+   *
+   * @param id - Kernel ID.
+   * @param code - Full source text of the editor buffer.
+   * @param cursorPos - Byte offset of the cursor in `code`.
+   * @returns Completion matches and the cursor range they should replace.
+   * @throws If the kernel is not found.
+   */
+  async complete(
+    id: string,
+    code: string,
+    cursorPos: number
+  ): Promise<{ matches: string[]; cursor_start: number; cursor_end: number; metadata?: Record<string, unknown> }> {
+    const managed = this.kernels.get(id);
+    if (!managed) throw new Error(`Kernel not found: ${id}`);
+
+    const msg = createMessage(
+      "complete_request",
+      { code, cursor_pos: cursorPos },
+      managed.sessionId
+    );
+    const msgId = msg.header.msg_id;
+
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => {
+        this.shellReplyListeners.get(id)?.delete(msgId);
+        resolve({ matches: [], cursor_start: cursorPos, cursor_end: cursorPos });
+      }, 5_000);
+
+      const cleanup = this.registerShellReply(id, msgId, (reply) => {
+        clearTimeout(timer);
+        if (reply.content.status === "error") {
+          resolve({ matches: [], cursor_start: cursorPos, cursor_end: cursorPos });
+          return;
+        }
+        resolve({
+          matches: (reply.content.matches as string[]) ?? [],
+          cursor_start: (reply.content.cursor_start as number) ?? cursorPos,
+          cursor_end: (reply.content.cursor_end as number) ?? cursorPos,
+          metadata: reply.content.metadata as Record<string, unknown> | undefined,
+        });
+      });
+
+      managed.shellSocket
+        .send(serializeMessage(msg, managed.connectionInfo.key))
+        .catch((err: Error) => {
+          clearTimeout(timer);
+          cleanup();
+          reject(err);
+        });
+    });
+  }
+
+  /**
+   * Request symbol documentation from the kernel via `inspect_request`.
+   *
+   * Returns the docstring or repr for the symbol at the cursor position.
+   * The renderer uses this to populate Monaco hover popups.
+   *
+   * @param id - Kernel ID.
+   * @param code - Full source text of the editor buffer.
+   * @param cursorPos - Byte offset of the cursor in `code`.
+   * @returns Inspection result with `found` flag and a mime-bundle `data` map.
+   * @throws If the kernel is not found.
+   */
+  async inspect(
+    id: string,
+    code: string,
+    cursorPos: number
+  ): Promise<{ found: boolean; data?: Record<string, string> }> {
+    const managed = this.kernels.get(id);
+    if (!managed) throw new Error(`Kernel not found: ${id}`);
+
+    const msg = createMessage(
+      "inspect_request",
+      { code, cursor_pos: cursorPos, detail_level: 0 },
+      managed.sessionId
+    );
+    const msgId = msg.header.msg_id;
+
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => {
+        this.shellReplyListeners.get(id)?.delete(msgId);
+        resolve({ found: false });
+      }, 5_000);
+
+      const cleanup = this.registerShellReply(id, msgId, (reply) => {
+        clearTimeout(timer);
+        if (reply.content.status === "error" || !reply.content.found) {
+          resolve({ found: false });
+          return;
+        }
+        resolve({
+          found: true,
+          data: reply.content.data as Record<string, string> | undefined,
+        });
+      });
+
+      managed.shellSocket
+        .send(serializeMessage(msg, managed.connectionInfo.key))
+        .catch((err: Error) => {
+          clearTimeout(timer);
+          cleanup();
+          reject(err);
+        });
+    });
+  }
+
   // -------------------------------------------------------------------------
   // Private helpers
   // -------------------------------------------------------------------------
+
+  /**
+   * Register a one-shot listener for a shell reply with the given parent msg_id.
+   *
+   * @param kernelId - Kernel ID.
+   * @param msgId - The msg_id of the request being awaited.
+   * @param callback - Invoked once when the reply arrives; then auto-removed.
+   * @returns A cleanup function that removes the listener without calling it.
+   */
+  private registerShellReply(
+    kernelId: string,
+    msgId: string,
+    callback: (msg: JupyterMessage) => void
+  ): () => void {
+    let map = this.shellReplyListeners.get(kernelId);
+    if (!map) {
+      map = new Map();
+      this.shellReplyListeners.set(kernelId, map);
+    }
+    map.set(msgId, callback);
+    return () => {
+      this.shellReplyListeners.get(kernelId)?.delete(msgId);
+    };
+  }
+
+  /**
+   * Dispatch a shell reply to the one-shot listener registered for its parent
+   * msg_id. Silently ignores messages with no registered listener (e.g.
+   * execute_reply, kernel_info_reply which we do not need to consume).
+   *
+   * @param kernelId - Kernel ID.
+   * @param msg - Parsed shell reply message.
+   */
+  private dispatchShellReply(kernelId: string, msg: JupyterMessage): void {
+    const parentMsgId = msg.parent_header.msg_id as string | undefined;
+    if (!parentMsgId) return;
+    const map = this.shellReplyListeners.get(kernelId);
+    const cb = map?.get(parentMsgId);
+    if (cb) {
+      map!.delete(parentMsgId);
+      try {
+        cb(msg);
+      } catch (err) {
+        console.error("[KernelManager] shell reply listener threw:", err);
+      }
+    }
+  }
+
+  /**
+   * Background async loop that reads shell replies and dispatches them.
+   *
+   * Reads complete_reply, inspect_reply (and silently discards execute_reply,
+   * kernel_info_reply, etc.). Runs until managed.shuttingDown is set.
+   *
+   * @param managed - The kernel whose shell socket to read.
+   */
+  private async runShellLoop(managed: ManagedKernel): Promise<void> {
+    (managed.shellSocket as unknown as { receiveTimeout: number }).receiveTimeout = 100;
+
+    while (!managed.shuttingDown) {
+      try {
+        const frames = await managed.shellSocket.receive();
+        const msg = parseMessage(frames as Buffer[], managed.connectionInfo.key);
+        if (msg) {
+          this.dispatchShellReply(managed.info.id, msg);
+        }
+      } catch (err: unknown) {
+        const e = err as { code?: string };
+        if (e.code === "EAGAIN") continue; // receive timeout — check shuttingDown
+        break; // socket closed or unexpected error
+      }
+    }
+  }
 
   /**
    * Dispatch a parsed iopub message to all registered listeners for a kernel.

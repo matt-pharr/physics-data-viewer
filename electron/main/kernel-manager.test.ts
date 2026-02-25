@@ -254,4 +254,83 @@ describe("@slow KernelManager (real kernel process)", { timeout: 60_000 }, () =>
       expect(received.length).toBe(0);
     });
   });
+
+  // -------------------------------------------------------------------------
+  // complete()
+  // -------------------------------------------------------------------------
+
+  describe("complete()", () => {
+    it("returns non-empty matches for a partial identifier", async () => {
+      const info = await km.start();
+      startedKernelId = info.id;
+
+      const result = await km.complete(info.id, "impor", 5);
+
+      expect(result.matches).toBeDefined();
+      expect(Array.isArray(result.matches)).toBe(true);
+      // 'import' should appear somewhere in the completions for 'impor'
+      expect(result.matches.some((m) => m.startsWith("impor") || m === "import")).toBe(true);
+      expect(typeof result.cursor_start).toBe("number");
+      expect(typeof result.cursor_end).toBe("number");
+    });
+
+    it("returns completions for a live namespace variable", async () => {
+      const info = await km.start();
+      startedKernelId = info.id;
+
+      // Create a variable in the kernel namespace
+      await km.execute(info.id, { code: "my_test_list = [1, 2, 3]" });
+
+      // Request completions at the end of 'my_test_list.'
+      const code = "my_test_list.";
+      const result = await km.complete(info.id, code, code.length);
+
+      expect(result.matches.length).toBeGreaterThan(0);
+      // list methods should appear (e.g. 'append', 'extend')
+      expect(result.matches.some((m) => m.includes("append") || m.includes("extend"))).toBe(true);
+    });
+
+    it("returns empty matches for an unknown kernel id", async () => {
+      const result = await km.complete("nonexistent-id", "x", 1).catch(() => ({
+        matches: [],
+        cursor_start: 1,
+        cursor_end: 1,
+      }));
+      expect(result.matches).toEqual([]);
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // inspect()
+  // -------------------------------------------------------------------------
+
+  describe("inspect()", () => {
+    it("returns found: true with docstring for a known symbol", async () => {
+      const info = await km.start();
+      startedKernelId = info.id;
+
+      const code = "len";
+      const result = await km.inspect(info.id, code, code.length);
+
+      expect(result.found).toBe(true);
+      expect(result.data?.["text/plain"]).toBeDefined();
+      expect(typeof result.data?.["text/plain"]).toBe("string");
+    });
+
+    it("returns found: false for a non-existent symbol", async () => {
+      const info = await km.start();
+      startedKernelId = info.id;
+
+      const result = await km.inspect(info.id, "xyzzy_undefined_symbol", 22);
+
+      expect(result.found).toBe(false);
+    });
+
+    it("returns empty for an unknown kernel id", async () => {
+      const result = await km.inspect("nonexistent-id", "len", 3).catch(() => ({
+        found: false,
+      }));
+      expect(result.found).toBe(false);
+    });
+  });
 });
