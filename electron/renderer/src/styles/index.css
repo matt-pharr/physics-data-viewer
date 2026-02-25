@@ -548,6 +548,17 @@ body {
   font-size: 13px;
 }
 
+.command-status-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 12px;
+  background-color: var(--bg-tertiary);
+  color: var(--text-secondary);
+  border-top: 1px solid var(--border-color);
+  font-size: 13px;
+}
+
 .command-editor-placeholder {
   height: 100%;
   display: flex;

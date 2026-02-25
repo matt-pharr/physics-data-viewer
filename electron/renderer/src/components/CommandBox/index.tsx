@@ -223,7 +223,7 @@ export const CommandBox: React.FC<CommandBoxProps> = ({
         </div>
       )}
       {disabled && (
-        <div className="command-error-bar">
+        <div className="command-status-bar">
           <span>Starting kernel...</span>
         </div>
       )}
