@@ -469,7 +469,6 @@ const App: React.FC = () => {
       result: result.result,
       error: result.error,
       duration: result.duration,
-      images: result.images,
     };
     setLogs((prev) => [...prev, logEntry]);
     if (result.error) {

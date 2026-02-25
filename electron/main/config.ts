@@ -48,6 +48,7 @@ const CONFIG_DEFAULTS: PDVConfig = {
 };
 
 // Parse and type-check config JSON loaded from disk.
+// Optional string fields may be null/undefined to explicitly clear them.
 function parseConfig(raw: string, filePath: string): Partial<PDVConfig> {
   let parsed: unknown;
   try {
@@ -62,16 +63,26 @@ function parseConfig(raw: string, filePath: string): Partial<PDVConfig> {
   const result: Partial<PDVConfig> = {};
 
   if ("pythonPath" in obj) {
-    if (typeof obj.pythonPath !== "string") {
+    const pythonPath = obj.pythonPath;
+    if (pythonPath !== null && pythonPath !== undefined && typeof pythonPath !== "string") {
       throw new Error(`Invalid config value for pythonPath in ${filePath}`);
     }
-    result.pythonPath = obj.pythonPath;
+    if (typeof pythonPath === "string") {
+      result.pythonPath = pythonPath;
+    }
   }
   if ("lastProjectDir" in obj) {
-    if (typeof obj.lastProjectDir !== "string") {
+    const lastProjectDir = obj.lastProjectDir;
+    if (
+      lastProjectDir !== null &&
+      lastProjectDir !== undefined &&
+      typeof lastProjectDir !== "string"
+    ) {
       throw new Error(`Invalid config value for lastProjectDir in ${filePath}`);
     }
-    result.lastProjectDir = obj.lastProjectDir;
+    if (typeof lastProjectDir === "string") {
+      result.lastProjectDir = lastProjectDir;
+    }
   }
   if ("showPrivateVariables" in obj) {
     if (typeof obj.showPrivateVariables !== "boolean") {
@@ -92,10 +103,13 @@ function parseConfig(raw: string, filePath: string): Partial<PDVConfig> {
     result.showCallableVariables = obj.showCallableVariables;
   }
   if ("theme" in obj) {
-    if (obj.theme !== "light" && obj.theme !== "dark") {
+    const theme = obj.theme;
+    if (theme !== null && theme !== undefined && theme !== "light" && theme !== "dark") {
       throw new Error(`Invalid config value for theme in ${filePath}`);
     }
-    result.theme = obj.theme;
+    if (theme === "light" || theme === "dark") {
+      result.theme = theme;
+    }
   }
 
   return result;
@@ -120,7 +134,7 @@ export class ConfigStore {
    * @param appDataDir - Absolute path to the Electron app data directory
    *   (``app.getPath('userData')`` in Electron main).
    * @returns A new ConfigStore instance.
-   * @throws {Error} When the on-disk config file contains invalid JSON/shape.
+   * @throws {Error} When the app data directory cannot be created.
    */
   constructor(private readonly appDataDir: string) {
     fs.mkdirSync(this.appDataDir, { recursive: true });
@@ -133,7 +147,6 @@ export class ConfigStore {
    *
    * @param key - Configuration key to read.
    * @returns The stored value for `key`.
-   * @throws {Error} When persisted config cannot be parsed/validated.
    */
   get<K extends keyof PDVConfig>(key: K): PDVConfig[K] {
     return this.getAll()[key];
@@ -156,7 +169,6 @@ export class ConfigStore {
    * Return the full configuration snapshot (defaults included).
    *
    * @returns Complete PDVConfig object.
-   * @throws {Error} When persisted config cannot be parsed/validated.
    */
   getAll(): PDVConfig {
     return { ...CONFIG_DEFAULTS, ...this.state };
@@ -173,13 +185,39 @@ export class ConfigStore {
     this.persist();
   }
 
-  // Read config state from disk (or default to empty state when missing).
+  // Read config state from disk; on invalid/corrupt content, log and return defaults.
   private loadState(): Partial<PDVConfig> {
     if (!fs.existsSync(this.configPath)) {
       return {};
     }
-    const raw = fs.readFileSync(this.configPath, "utf8");
-    return parseConfig(raw, this.configPath);
+    try {
+      const raw = fs.readFileSync(this.configPath, "utf8");
+      return parseConfig(raw, this.configPath);
+    } catch (error) {
+      console.error(
+        `[ConfigStore] Failed to load config from ${this.configPath}; falling back to defaults.`,
+        error
+      );
+      this.backupUnreadableConfig();
+      return {};
+    }
+  }
+
+  // Move unreadable config aside so future boots are clean and data is preserved for debugging.
+  private backupUnreadableConfig(): void {
+    if (!fs.existsSync(this.configPath)) {
+      return;
+    }
+    const backupPath = `${this.configPath}.corrupted-${Date.now()}`;
+    try {
+      fs.renameSync(this.configPath, backupPath);
+      console.error(`[ConfigStore] Backed up unreadable config to ${backupPath}`);
+    } catch (error) {
+      console.error(
+        `[ConfigStore] Failed to back up unreadable config at ${this.configPath}.`,
+        error
+      );
+    }
   }
 
   // Persist current in-memory state to disk.
