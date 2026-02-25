@@ -8,8 +8,7 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import * as fs from "fs/promises";
 import { KernelManager } from "./kernel-manager";
 
-const TEST_PYTHON_EXECUTABLE =
-  process.env.PYTHON_PATH ?? "/Users/pharr/miniconda3/envs/physview/bin/python";
+const TEST_PYTHON_EXECUTABLE = process.env.PYTHON_PATH ?? "python3";
 
 describe("@slow KernelManager error paths", { timeout: 60_000 }, () => {
   let km: KernelManager;
