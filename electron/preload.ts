@@ -1,0 +1,111 @@
+/**
+ * preload.ts — Typed renderer bridge (`window.pdv`).
+ *
+ * Exposes a strictly-scoped API surface to the renderer via
+ * `contextBridge.exposeInMainWorld("pdv", ...)`. The renderer does not access
+ * Node.js/Electron APIs directly; all IPC goes through this bridge.
+ *
+ * See Also
+ * --------
+ * ARCHITECTURE.md §11.1, §11.2
+ * main/ipc.ts — IPC channel and API type source of truth
+ */
+
+import { contextBridge, ipcRenderer } from "electron";
+import { IPC, type PDVApi } from "./main/ipc";
+
+/**
+ * Register an IPC push listener and return an unsubscribe callback.
+ *
+ * @param channel - IPC push channel name.
+ * @param callback - Renderer callback invoked with push payload.
+ * @returns Function that removes the registered listener.
+ */
+function onPush<TPayload>(
+  channel: string,
+  callback: (payload: TPayload) => void
+): () => void {
+  const listener = (_event: unknown, payload: TPayload): void => {
+    callback(payload);
+  };
+  ipcRenderer.on(channel, listener);
+  return () => {
+    ipcRenderer.removeListener(channel, listener);
+  };
+}
+
+/**
+ * Concrete implementation of the preload API contract.
+ */
+const api: PDVApi = {
+  kernels: {
+    list: () => ipcRenderer.invoke(IPC.kernels.list),
+    start: (spec) => ipcRenderer.invoke(IPC.kernels.start, spec),
+    stop: (kernelId) => ipcRenderer.invoke(IPC.kernels.stop, kernelId),
+    execute: (kernelId, request) =>
+      ipcRenderer.invoke(IPC.kernels.execute, kernelId, request),
+    interrupt: (kernelId) => ipcRenderer.invoke(IPC.kernels.interrupt, kernelId),
+    restart: (kernelId) => ipcRenderer.invoke(IPC.kernels.restart, kernelId),
+    complete: (kernelId, code, cursorPos) =>
+      ipcRenderer.invoke(IPC.kernels.complete, kernelId, code, cursorPos),
+    inspect: (kernelId, code, cursorPos) =>
+      ipcRenderer.invoke(IPC.kernels.inspect, kernelId, code, cursorPos),
+    validate: (executablePath, language) =>
+      ipcRenderer.invoke(IPC.kernels.validate, executablePath, language),
+  },
+  tree: {
+    list: (kernelId, nodePath = "") =>
+      ipcRenderer.invoke(IPC.tree.list, kernelId, nodePath),
+    get: (kernelId, nodePath) =>
+      ipcRenderer.invoke(IPC.tree.get, kernelId, nodePath),
+    createScript: (kernelId, targetPath, scriptName) =>
+      ipcRenderer.invoke(IPC.tree.createScript, kernelId, targetPath, scriptName),
+    onChanged: (callback) => onPush(IPC.push.treeChanged, callback),
+  },
+  namespace: {
+    query: (kernelId, options) =>
+      ipcRenderer.invoke(IPC.namespace.query, kernelId, options),
+  },
+  script: {
+    edit: (kernelId, scriptPath) =>
+      ipcRenderer.invoke(IPC.script.edit, kernelId, scriptPath),
+    reload: (scriptPath) => ipcRenderer.invoke(IPC.script.reload, scriptPath),
+  },
+  project: {
+    save: (saveDir, commandBoxes) =>
+      ipcRenderer.invoke(IPC.project.save, saveDir, commandBoxes),
+    load: (saveDir) => ipcRenderer.invoke(IPC.project.load, saveDir),
+    new: () => ipcRenderer.invoke(IPC.project.new),
+    onLoaded: (callback) => onPush(IPC.push.projectLoaded, callback),
+  },
+  config: {
+    get: () => ipcRenderer.invoke(IPC.config.get),
+    set: (updates) => ipcRenderer.invoke(IPC.config.set, updates),
+  },
+  themes: {
+    get: () => ipcRenderer.invoke(IPC.themes.get),
+    save: (theme) => ipcRenderer.invoke(IPC.themes.save, theme),
+  },
+  commandBoxes: {
+    load: () => ipcRenderer.invoke(IPC.commandBoxes.load),
+    save: (data) => ipcRenderer.invoke(IPC.commandBoxes.save, data),
+  },
+  files: {
+    pickExecutable: () => ipcRenderer.invoke(IPC.files.pickExecutable),
+    pickDirectory: () => ipcRenderer.invoke(IPC.files.pickDirectory),
+  },
+  menu: {
+    updateRecentProjects: (paths) =>
+      ipcRenderer.invoke(IPC.menu.updateRecentProjects, paths),
+    onAction: (callback) => onPush(IPC.push.menuAction, callback),
+  },
+};
+
+contextBridge.exposeInMainWorld("pdv", api);
+
+declare global {
+  interface Window {
+    /** Typed preload bridge available in the renderer process. */
+    pdv: PDVApi;
+  }
+}

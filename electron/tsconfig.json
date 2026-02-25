@@ -1,0 +1,15 @@
+{
+  "compilerOptions": {
+    "target": "ES2020",
+    "module": "CommonJS",
+    "moduleResolution": "Node",
+    "outDir": "dist",
+    "rootDir": ".",
+    "esModuleInterop": true,
+    "resolveJsonModule": true,
+    "strict": true,
+    "skipLibCheck": true
+  },
+  "include": ["main/**/*.ts", "preload.ts"],
+  "exclude": ["node_modules", "renderer", "**/*.test.ts"]
+}

@@ -1,0 +1,569 @@
+/**
+ * ipc.ts — IPC channels and shared TypeScript contracts.
+ *
+ * This module is the single source of truth for all renderer ↔ main IPC
+ * channel names and the typed preload API surface (`window.pdv`).
+ *
+ * This file intentionally contains no runtime logic. Handler registration
+ * lives in `index.ts`, and the preload bridge implementation lives in
+ * `../preload.ts`.
+ *
+ * See Also
+ * --------
+ * ARCHITECTURE.md §11.1, §11.2, §13.3
+ * index.ts — runtime `ipcMain.handle(...)` registration
+ * preload.ts — runtime `contextBridge.exposeInMainWorld(...)` wiring
+ */
+
+import type {
+  KernelExecuteRequest,
+  KernelExecuteResult,
+  KernelInfo,
+  KernelSpec,
+} from "./kernel-manager";
+import type {
+  NodeDescriptor,
+  PDVProjectLoadedPayload,
+  ScriptParameter as PDVScriptParameter,
+  PDVTreeChangedPayload,
+} from "./pdv-protocol";
+import type { PDVConfig } from "./config";
+
+export type { PDVConfig } from "./config";
+
+// ---------------------------------------------------------------------------
+// IPC channel catalogue
+// ---------------------------------------------------------------------------
+
+/**
+ * All renderer ↔ main IPC channel names.
+ *
+ * These constants are consumed by both:
+ * - main process handlers (`ipcMain.handle`)
+ * - preload bridge invoke/on wrappers (`ipcRenderer.invoke`, `ipcRenderer.on`)
+ */
+export const IPC = {
+  /** Kernel lifecycle and execution channels. */
+  kernels: {
+    list: "kernels:list",
+    start: "kernels:start",
+    stop: "kernels:stop",
+    execute: "kernels:execute",
+    interrupt: "kernels:interrupt",
+    restart: "kernels:restart",
+    complete: "kernels:complete",
+    inspect: "kernels:inspect",
+    validate: "kernels:validate",
+  },
+  /** Tree browsing and script-node creation channels. */
+  tree: {
+    list: "tree:list",
+    get: "tree:get",
+    createScript: "tree:createScript",
+  },
+  /** Namespace inspection channels. */
+  namespace: {
+    query: "namespace:query",
+  },
+  /** Script tooling channels. */
+  script: {
+    edit: "script:edit",
+    reload: "script:reload",
+  },
+  /** Project lifecycle channels. */
+  project: {
+    save: "project:save",
+    load: "project:load",
+    new: "project:new",
+  },
+  /** App configuration channels. */
+  config: {
+    get: "config:get",
+    set: "config:set",
+  },
+  /** Theme persistence channels. */
+  themes: {
+    get: "themes:get",
+    save: "themes:save",
+  },
+  /** Command-box persistence channels. */
+  commandBoxes: {
+    load: "commandBoxes:load",
+    save: "commandBoxes:save",
+  },
+  /** Main → renderer push channels forwarded from CommRouter push messages. */
+  push: {
+    treeChanged: "pdv.tree.changed",
+    projectLoaded: "pdv.project.loaded",
+    kernelStatus: "pdv.kernel.status",
+    menuAction: "menu:action",
+  },
+  /** App menu synchronization channels. */
+  menu: {
+    updateRecentProjects: "menu:updateRecentProjects",
+  },
+  /** Native file/directory picker channels. */
+  files: {
+    pickExecutable: "files:pickExecutable",
+    pickDirectory: "files:pickDirectory",
+  },
+} as const;
+
+// ---------------------------------------------------------------------------
+// Kernel request/response helper types
+// ---------------------------------------------------------------------------
+
+/**
+ * Completion response shape for `kernels.complete`.
+ */
+export interface KernelCompleteResult {
+  /** Completion candidate strings. */
+  matches: string[];
+  /** Inclusive start cursor index for replacement. */
+  cursor_start: number;
+  /** Exclusive end cursor index for replacement. */
+  cursor_end: number;
+  /** Optional kernel-provided metadata. */
+  metadata?: Record<string, unknown>;
+}
+
+/**
+ * Inspection response shape for `kernels.inspect`.
+ */
+export interface KernelInspectResult {
+  /** True when documentation/inspection data was found for the symbol. */
+  found: boolean;
+  /** Rich mime-bundle style content keyed by mime type. */
+  data?: Record<string, string>;
+}
+
+/**
+ * Environment validation result used by `kernels.validate`.
+ */
+export interface KernelValidateResult {
+  /** True when the selected executable/path appears usable. */
+  valid: boolean;
+  /** Optional user-facing error message when `valid` is false. */
+  error?: string;
+}
+
+// ---------------------------------------------------------------------------
+// Namespace types
+// ---------------------------------------------------------------------------
+
+/**
+ * Options for namespace filtering in `namespace.query`.
+ */
+export interface NamespaceQueryOptions {
+  /** If true, include underscore-prefixed names. */
+  includePrivate?: boolean;
+  /** If true, include imported module values. */
+  includeModules?: boolean;
+  /** If true, include callable values (functions/classes). */
+  includeCallables?: boolean;
+}
+
+/**
+ * Descriptor for a single variable in the namespace panel.
+ */
+export interface NamespaceVariable {
+  /** Variable name in the user namespace. */
+  name: string;
+  /** Runtime type label (e.g., `int`, `DataFrame`, `ndarray`). */
+  type: string;
+  /** Optional module the value originates from. */
+  module?: string;
+  /** Optional shape for array-like values. */
+  shape?: number[];
+  /** Optional dtype for typed values. */
+  dtype?: string;
+  /** Optional length for sequence-like values. */
+  length?: number;
+  /** Optional short UI preview string. */
+  preview?: string;
+}
+
+// ---------------------------------------------------------------------------
+// Tree and script types
+// ---------------------------------------------------------------------------
+
+/**
+ * Script run() parameter descriptor surfaced in script node metadata.
+ */
+export interface ScriptParameter extends PDVScriptParameter {}
+
+/**
+ * Tree node shape returned to the renderer.
+ */
+export interface TreeNode extends NodeDescriptor {
+  /** Present only when type === 'script'. */
+  params?: ScriptParameter[] | undefined;
+}
+
+/**
+ * Result returned by `tree.createScript`.
+ */
+export interface TreeCreateScriptResult {
+  /** True when script creation and registration succeeded. */
+  success: boolean;
+  /** Optional error message when `success` is false. */
+  error?: string;
+  /** Absolute path to the created script file. */
+  scriptPath?: string;
+}
+
+/**
+ * Result returned by `script.edit` and `script.reload`.
+ */
+export interface ScriptOperationResult {
+  /** True when the operation succeeded. */
+  success: boolean;
+  /** Optional error message when `success` is false. */
+  error?: string;
+}
+
+/**
+ * Payload delivered when the app menu triggers a renderer action.
+ */
+export interface MenuActionPayload {
+  /** Action identifier emitted by the File menu. */
+  action:
+    | "project:open"
+    | "project:openRecent"
+    | "project:save"
+    | "project:saveAs";
+  /** Project directory path for open-recent actions. */
+  path?: string;
+}
+
+// ---------------------------------------------------------------------------
+// Theme and command-box persistence types
+// ---------------------------------------------------------------------------
+
+/**
+ * Theme object persisted by `themes.save`.
+ */
+export interface Theme {
+  /** Stable theme name/identifier. */
+  name: string;
+  /** Map of semantic color keys to CSS color values. */
+  colors: Record<string, string>;
+}
+
+/**
+ * Command-box tab model persisted by `commandBoxes.save`.
+ */
+export interface CommandBoxData {
+  /** Tab list in display order. */
+  tabs: Array<{
+    /** Stable tab ID. */
+    id: number;
+    /** Code content in the tab editor. */
+    code: string;
+  }>;
+  /** ID of the currently selected tab. */
+  activeTabId: number;
+}
+
+// ---------------------------------------------------------------------------
+// Push payload aliases
+// ---------------------------------------------------------------------------
+
+/**
+ * Payload delivered on `IPC.push.treeChanged`.
+ */
+export type TreeChangedPayload = PDVTreeChangedPayload;
+
+/**
+ * Payload delivered on `IPC.push.projectLoaded`.
+ */
+export type ProjectLoadedPayload = PDVProjectLoadedPayload;
+
+// ---------------------------------------------------------------------------
+// Preload API surface
+// ---------------------------------------------------------------------------
+
+/**
+ * Fully typed API exposed to the renderer as `window.pdv`.
+ *
+ * Every method corresponds to one IPC request channel. Push subscriptions are
+ * exposed as callback registration helpers.
+ */
+export interface PDVApi {
+  /** Kernel lifecycle and execution methods. */
+  kernels: {
+    /**
+     * List running kernels.
+     *
+     * @returns Current running kernel metadata.
+     */
+    list(): Promise<KernelInfo[]>;
+    /**
+     * Start a new kernel process.
+     *
+     * @param spec - Optional kernel spec override.
+     * @returns Started kernel metadata.
+     */
+    start(spec?: Partial<KernelSpec>): Promise<KernelInfo>;
+    /**
+     * Stop a running kernel.
+     *
+     * @param kernelId - Kernel ID to stop.
+     * @returns True when the stop request was accepted.
+     */
+    stop(kernelId: string): Promise<boolean>;
+    /**
+     * Execute code in a kernel.
+     *
+     * @param kernelId - Target kernel ID.
+     * @param request - Execute request payload.
+     * @returns Structured execution result.
+     */
+    execute(
+      kernelId: string,
+      request: KernelExecuteRequest
+    ): Promise<KernelExecuteResult>;
+    /**
+     * Interrupt a running kernel execution.
+     *
+     * @param kernelId - Target kernel ID.
+     * @returns True when the interrupt request was accepted.
+     */
+    interrupt(kernelId: string): Promise<boolean>;
+    /**
+     * Restart a running kernel.
+     *
+     * @param kernelId - Target kernel ID.
+     * @returns Newly started kernel metadata.
+     */
+    restart(kernelId: string): Promise<KernelInfo>;
+    /**
+     * Request code completion from a kernel.
+     *
+     * @param kernelId - Target kernel ID.
+     * @param code - Source text around the cursor.
+     * @param cursorPos - Cursor index in `code`.
+     * @returns Completion result payload.
+     */
+    complete(
+      kernelId: string,
+      code: string,
+      cursorPos: number
+    ): Promise<KernelCompleteResult>;
+    /**
+     * Request symbol inspection/doc info from a kernel.
+     *
+     * @param kernelId - Target kernel ID.
+     * @param code - Source text around the cursor.
+     * @param cursorPos - Cursor index in `code`.
+     * @returns Inspection result payload.
+     */
+    inspect(
+      kernelId: string,
+      code: string,
+      cursorPos: number
+    ): Promise<KernelInspectResult>;
+    /**
+     * Validate an executable path for a target language.
+     *
+     * @param executablePath - Candidate executable path or command.
+     * @param language - Language runtime to validate.
+     * @returns Validation status payload.
+     */
+    validate(
+      executablePath: string,
+      language: "python" | "julia"
+    ): Promise<KernelValidateResult>;
+  };
+
+  /** Tree browsing and updates. */
+  tree: {
+    /**
+     * List child nodes at a tree path.
+     *
+     * @param kernelId - Target kernel ID.
+     * @param path - Optional dot-path to list. Empty string lists root.
+     * @returns Tree nodes at the requested level.
+     */
+    list(kernelId: string, path?: string): Promise<TreeNode[]>;
+    /**
+     * Resolve one tree node value/preview payload.
+     *
+     * @param kernelId - Target kernel ID.
+     * @param path - Dot-path of the requested node.
+     * @returns Message payload from `pdv.tree.get.response`.
+     */
+    get(kernelId: string, path: string): Promise<Record<string, unknown>>;
+    /**
+     * Create and register a new script node.
+     *
+     * @param kernelId - Target kernel ID.
+     * @param targetPath - Dot-path under which to register the script.
+     * @param scriptName - Script base filename.
+     * @returns Script creation result payload.
+     */
+    createScript(
+      kernelId: string,
+      targetPath: string,
+      scriptName: string
+    ): Promise<TreeCreateScriptResult>;
+    /**
+     * Subscribe to tree change push notifications.
+     *
+     * @param callback - Invoked with each tree-changed payload.
+     * @returns Unsubscribe function.
+     */
+    onChanged(callback: (payload: TreeChangedPayload) => void): () => void;
+  };
+
+  /** Namespace inspection operations. */
+  namespace: {
+    /**
+     * Query variables in the kernel namespace.
+     *
+     * @param kernelId - Target kernel ID.
+     * @param options - Optional visibility filters.
+     * @returns Variable descriptor array.
+     */
+    query(
+      kernelId: string,
+      options?: NamespaceQueryOptions
+    ): Promise<NamespaceVariable[]>;
+  };
+
+  /** Script tooling operations. */
+  script: {
+    /**
+     * Open a script path in the configured external editor.
+     *
+     * @param kernelId - Target kernel ID.
+     * @param scriptPath - Script path to edit.
+     * @returns Operation status.
+     */
+    edit(kernelId: string, scriptPath: string): Promise<ScriptOperationResult>;
+    /**
+     * Re-register a script with reload semantics.
+     *
+     * @param scriptPath - Script path to reload.
+     * @returns Operation status.
+     */
+    reload(scriptPath: string): Promise<ScriptOperationResult>;
+  };
+
+  /** Project save/load operations. */
+  project: {
+    /**
+     * Save the current project.
+     *
+      * @param saveDir - Target save directory.
+      * @param commandBoxes - Command-box payload to persist.
+      * @returns True when save request is accepted.
+      */
+    save(saveDir: string, commandBoxes: unknown): Promise<boolean>;
+    /**
+     * Load an existing project.
+     *
+     * @param saveDir - Source save directory.
+      * @returns Loaded command-box state.
+      */
+    load(saveDir: string): Promise<unknown>;
+    /**
+     * Start a new empty project session.
+     *
+     * @returns True when a new project was created/reset.
+     */
+    new: () => Promise<boolean>;
+    /**
+     * Subscribe to project-loaded push notifications.
+     *
+     * @param callback - Invoked with each project-loaded payload.
+     * @returns Unsubscribe function.
+     */
+    onLoaded(callback: (payload: ProjectLoadedPayload) => void): () => void;
+  };
+
+  /** App configuration accessors. */
+  config: {
+    /**
+     * Fetch current merged app configuration.
+     *
+     * @returns Current config object.
+     */
+    get(): Promise<PDVConfig>;
+    /**
+     * Persist a partial configuration update.
+     *
+     * @param updates - Partial config patch.
+     * @returns Updated merged config object.
+     */
+    set(updates: Partial<PDVConfig>): Promise<PDVConfig>;
+  };
+
+  /** Theme persistence operations. */
+  themes: {
+    /**
+     * Load available themes.
+     *
+     * @returns Theme array.
+     */
+    get(): Promise<Theme[]>;
+    /**
+     * Save or update one theme.
+     *
+     * @param theme - Theme payload to persist.
+     * @returns True when save succeeded.
+     */
+    save(theme: Theme): Promise<boolean>;
+  };
+
+  /** Command-box persistence operations. */
+  commandBoxes: {
+    /**
+     * Load persisted command-box tab state.
+     *
+     * @returns Last saved state or null if none exists.
+     */
+    load(): Promise<CommandBoxData | null>;
+    /**
+     * Save command-box tab state.
+     *
+     * @param data - State payload to persist.
+     * @returns True when save succeeded.
+     */
+    save(data: CommandBoxData): Promise<boolean>;
+  };
+
+  /** Native file/directory pickers (main process dialog wrappers). */
+  files: {
+    /**
+     * Open a native file picker for selecting an executable path.
+     *
+     * @returns Selected file path, or null if cancelled.
+     */
+    pickExecutable(): Promise<string | null>;
+    /**
+     * Open a native directory picker (with create-directory support).
+     *
+     * @returns Selected directory path, or null if cancelled.
+     */
+    pickDirectory(): Promise<string | null>;
+  };
+
+  /** App menu integration. */
+  menu: {
+    /**
+     * Push the latest recent-project paths into the File → Open Recent submenu.
+     *
+     * @param paths - Recent project directories (most recent first).
+     * @returns True when the menu was updated.
+     */
+    updateRecentProjects(paths: string[]): Promise<boolean>;
+    /**
+     * Subscribe to app-menu action events.
+     *
+     * @param callback - Invoked for File-menu actions.
+     * @returns Unsubscribe function.
+     */
+    onAction(callback: (payload: MenuActionPayload) => void): () => void;
+  };
+}
