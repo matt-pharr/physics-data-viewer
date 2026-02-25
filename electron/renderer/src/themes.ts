@@ -108,6 +108,34 @@ export const BUILTIN_THEMES: BuiltinTheme[] = [
 export const BUILTIN_THEME_NAMES = new Set(BUILTIN_THEMES.map((t) => t.name));
 
 /**
+ * A named pairing that associates a dark and light variant of the same theme family.
+ * Used to enable automatic switching based on `prefers-color-scheme`.
+ */
+export interface ThemePair {
+  /** Human-readable name for the pair (shown in settings). */
+  name: string;
+  dark: string;
+  light: string;
+}
+
+export const THEME_PAIRS: ThemePair[] = [
+  { name: 'VSCode', dark: 'Dark+ (VSCode)', light: 'Light+ (VSCode)' },
+];
+
+/**
+ * Look up the color map for a named theme from the built-ins or saved custom themes.
+ * Returns undefined if the name is not found.
+ */
+export function resolveThemeColors(
+  name: string | undefined,
+  savedThemes: Theme[],
+): Record<string, string> | undefined {
+  if (!name) return undefined;
+  const all = [...BUILTIN_THEMES, ...savedThemes];
+  return all.find((t) => t.name === name)?.colors;
+}
+
+/**
  * Register custom Monaco editor themes. Call this in the Editor's `beforeMount` prop.
  * Built-in Monaco themes (`vs`, `vs-dark`, `hc-black`) do not need registration.
  */

@@ -4,8 +4,8 @@ import { SHORTCUT_LABELS, DEFAULT_SHORTCUTS } from '../../shortcuts';
 import type { Shortcuts } from '../../shortcuts';
 import { EnvironmentSelector } from '../EnvironmentSelector';
 import {
-  BUILTIN_THEMES, BUILTIN_THEME_NAMES, CSS_VAR_GROUPS,
-  applyThemeColors, colorsEqual, defineMonacoThemes, getMonacoTheme,
+  BUILTIN_THEMES, BUILTIN_THEME_NAMES, CSS_VAR_GROUPS, THEME_PAIRS,
+  applyThemeColors, colorsEqual, defineMonacoThemes, getMonacoTheme, resolveThemeColors,
 } from '../../themes';
 import type { Theme } from '../../types';
 import { loader } from '@monaco-editor/react';
@@ -184,6 +184,11 @@ export const SettingsDialog: React.FC<SettingsDialogProps> = ({
   const [savedThemes, setSavedThemes] = useState<Theme[]>([]);
   const [selectedThemeName, setSelectedThemeName] = useState<string>(BUILTIN_THEMES[0].name);
   const [editedColors, setEditedColors] = useState<Record<string, string>>(BUILTIN_THEMES[0].colors);
+  const [followSystemTheme, setFollowSystemTheme] = useState(false);
+  const [darkThemeName, setDarkThemeName] = useState<string>(BUILTIN_THEMES[0].name);
+  const [lightThemeName, setLightThemeName] = useState<string>(
+    () => BUILTIN_THEMES.find((t) => t.monacoTheme === 'vs')?.name ?? BUILTIN_THEMES[0].name,
+  );
 
   useEffect(() => {
     if (!isOpen) return;
@@ -193,14 +198,17 @@ export const SettingsDialog: React.FC<SettingsDialogProps> = ({
       const loaded = await window.pdv.themes.get();
       setSavedThemes(loaded);
       const allThemes = [...BUILTIN_THEMES, ...loaded];
-      const activeName = config?.settings?.appearance?.themeName ?? BUILTIN_THEMES[0].name;
+      const app = config?.settings?.appearance;
+      const activeName = app?.themeName ?? BUILTIN_THEMES[0].name;
       const baseTheme = allThemes.find((t) => t.name === activeName) ?? BUILTIN_THEMES[0];
-      // Use persisted colors if available (they may differ from base if user edited)
-      const activeColors = config?.settings?.appearance?.colors ?? baseTheme.colors;
-      // Fill any missing keys from the base theme
-      const fullColors = { ...baseTheme.colors, ...activeColors };
+      const activeColors = app?.colors ?? baseTheme.colors;
       setSelectedThemeName(activeName);
-      setEditedColors(fullColors);
+      setEditedColors({ ...baseTheme.colors, ...activeColors });
+      setFollowSystemTheme(app?.followSystemTheme ?? false);
+      setDarkThemeName(app?.darkTheme ?? BUILTIN_THEMES[0].name);
+      setLightThemeName(
+        app?.lightTheme ?? (BUILTIN_THEMES.find((t) => t.monacoTheme === 'vs')?.name ?? BUILTIN_THEMES[0].name),
+      );
     };
     void load();
   }, [config, shortcuts, isOpen, initialTab]);
@@ -249,20 +257,42 @@ export const SettingsDialog: React.FC<SettingsDialogProps> = ({
 
   if (!isOpen) return null;
 
-  const handleThemeSelect = (name: string) => {
-    const theme = allThemes.find((t) => t.name === name);
-    if (!theme) return;
-    // Fill any missing vars from All_CSS_VARS with the current values
-    const full = { ...editedColors, ...theme.colors };
-    setSelectedThemeName(name);
-    setEditedColors(full);
-    applyThemeColors(full);
-    // Also switch Monaco editor theme live
+  const applyMonacoThemeLive = (name: string) => {
     const monacoThemeName = getMonacoTheme(name, BUILTIN_THEMES);
     void loader.init().then((monaco) => {
       defineMonacoThemes(monaco);
       monaco.editor.setTheme(monacoThemeName);
     });
+  };
+
+  const handleThemeSelect = (name: string) => {
+    const theme = allThemes.find((t) => t.name === name);
+    if (!theme) return;
+    const full = { ...editedColors, ...theme.colors };
+    setSelectedThemeName(name);
+    setEditedColors(full);
+    applyThemeColors(full);
+    applyMonacoThemeLive(name);
+  };
+
+  const handleDarkThemeSelect = (name: string) => {
+    setDarkThemeName(name);
+    // Live-preview only if system is currently dark
+    if (window.matchMedia('(prefers-color-scheme: dark)').matches) {
+      const colors = resolveThemeColors(name, savedThemes);
+      if (colors) applyThemeColors(colors);
+      applyMonacoThemeLive(name);
+    }
+  };
+
+  const handleLightThemeSelect = (name: string) => {
+    setLightThemeName(name);
+    // Live-preview only if system is currently light
+    if (!window.matchMedia('(prefers-color-scheme: dark)').matches) {
+      const colors = resolveThemeColors(name, savedThemes);
+      if (colors) applyThemeColors(colors);
+      applyMonacoThemeLive(name);
+    }
   };
 
   const handleColorChange = (key: string, value: string) => {
@@ -305,7 +335,7 @@ export const SettingsDialog: React.FC<SettingsDialogProps> = ({
 
     // Persist theme: if dirty and based on a built-in, auto-save as custom first
     let savedThemeName = selectedThemeName;
-    if (isDirty) {
+    if (!followSystemTheme && isDirty) {
       const isBuiltin = BUILTIN_THEME_NAMES.has(selectedThemeName);
       if (isBuiltin) savedThemeName = `${selectedThemeName} (Custom)`;
       await window.pdv.themes.save({ name: savedThemeName, colors: editedColors });
@@ -317,7 +347,13 @@ export const SettingsDialog: React.FC<SettingsDialogProps> = ({
     await onSave({
       settings: {
         shortcuts: savedShortcuts,
-        appearance: { themeName: savedThemeName, colors: editedColors },
+        appearance: {
+          themeName: savedThemeName,
+          colors: followSystemTheme ? undefined : editedColors,
+          followSystemTheme,
+          darkTheme: followSystemTheme ? darkThemeName : undefined,
+          lightTheme: followSystemTheme ? lightThemeName : undefined,
+        },
       },
     });
   };
@@ -375,74 +411,127 @@ export const SettingsDialog: React.FC<SettingsDialogProps> = ({
             />
           ) : (
             <div className="settings-appearance">
-              {/* Theme selector row */}
-              <div className="appearance-theme-row">
-                <label htmlFor="appearance-theme-select">Theme</label>
-                <select
-                  id="appearance-theme-select"
-                  value={selectedThemeName}
-                  onChange={(e) => handleThemeSelect(e.target.value)}
-                >
-                  {BUILTIN_THEMES.map((t) => (
-                    <option key={t.name} value={t.name}>{t.name}</option>
+              {/* Follow system theme toggle */}
+              <label className="appearance-follow-row">
+                <input
+                  type="checkbox"
+                  checked={followSystemTheme}
+                  onChange={(e) => setFollowSystemTheme(e.target.checked)}
+                />
+                <span>Follow system light/dark preference</span>
+              </label>
+
+              {followSystemTheme ? (
+                /* Paired-theme selectors */
+                <div className="appearance-pair-selectors">
+                  {[
+                    { label: '🌙 Dark theme', value: darkThemeName, onChange: handleDarkThemeSelect },
+                    { label: '☀️ Light theme', value: lightThemeName, onChange: handleLightThemeSelect },
+                  ].map(({ label, value, onChange }) => (
+                    <div key={label} className="appearance-theme-row">
+                      <label>{label}</label>
+                      <select value={value} onChange={(e) => onChange(e.target.value)}>
+                        {BUILTIN_THEMES.map((t) => (
+                          <option key={t.name} value={t.name}>{t.name}</option>
+                        ))}
+                        {savedThemes.length > 0 && (
+                          <optgroup label="Custom">
+                            {savedThemes.map((t) => (
+                              <option key={t.name} value={t.name}>{t.name}</option>
+                            ))}
+                          </optgroup>
+                        )}
+                      </select>
+                    </div>
                   ))}
-                  {savedThemes.length > 0 && (
-                    <optgroup label="Custom">
-                      {savedThemes.map((t) => (
+                  {THEME_PAIRS.length > 0 && (
+                    <div className="appearance-pair-hint">
+                      Suggested pairs:{' '}
+                      {THEME_PAIRS.map((p) => (
+                        <button
+                          key={p.name}
+                          type="button"
+                          className="btn btn-secondary btn-sm"
+                          onClick={() => { setDarkThemeName(p.dark); setLightThemeName(p.light); }}
+                        >
+                          {p.name}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <>
+                  {/* Single theme selector row */}
+                  <div className="appearance-theme-row">
+                    <label htmlFor="appearance-theme-select">Theme</label>
+                    <select
+                      id="appearance-theme-select"
+                      value={selectedThemeName}
+                      onChange={(e) => handleThemeSelect(e.target.value)}
+                    >
+                      {BUILTIN_THEMES.map((t) => (
                         <option key={t.name} value={t.name}>{t.name}</option>
                       ))}
-                    </optgroup>
-                  )}
-                </select>
-                <button
-                  type="button"
-                  className="btn btn-secondary"
-                  onClick={() => void handleDuplicate()}
-                  title="Save a copy of this theme for editing"
-                >
-                  Duplicate
-                </button>
-                <button
-                  type="button"
-                  className="btn btn-secondary"
-                  onClick={handleReset}
-                  disabled={!isDirty}
-                  title="Reset colours to this theme's defaults"
-                >
-                  Reset
-                </button>
-              </div>
-
-              {/* Colour groups */}
-              <div className="appearance-colors">
-                {CSS_VAR_GROUPS.map((group) => (
-                  <div key={group.label} className="appearance-color-group">
-                    <div className="appearance-group-label">{group.label}</div>
-                    {group.vars.map(({ key, label }) => {
-                      const value = editedColors[key] ?? '#000000';
-                      return (
-                        <div key={key} className="appearance-color-row">
-                          <span className="appearance-color-label">{label}</span>
-                          <input
-                            type="color"
-                            className="appearance-color-swatch"
-                            value={/^#[0-9a-fA-F]{6}$/.test(value) ? value : '#000000'}
-                            onChange={(e) => handleColorChange(key, e.target.value)}
-                          />
-                          <input
-                            type="text"
-                            className="appearance-color-hex"
-                            value={value}
-                            maxLength={7}
-                            spellCheck={false}
-                            onChange={(e) => handleHexInput(key, e.target.value)}
-                          />
-                        </div>
-                      );
-                    })}
+                      {savedThemes.length > 0 && (
+                        <optgroup label="Custom">
+                          {savedThemes.map((t) => (
+                            <option key={t.name} value={t.name}>{t.name}</option>
+                          ))}
+                        </optgroup>
+                      )}
+                    </select>
+                    <button
+                      type="button"
+                      className="btn btn-secondary"
+                      onClick={() => void handleDuplicate()}
+                      title="Save a copy of this theme for editing"
+                    >
+                      Duplicate
+                    </button>
+                    <button
+                      type="button"
+                      className="btn btn-secondary"
+                      onClick={handleReset}
+                      disabled={!isDirty}
+                      title="Reset colours to this theme's defaults"
+                    >
+                      Reset
+                    </button>
                   </div>
-                ))}
-              </div>
+
+                  {/* Colour groups */}
+                  <div className="appearance-colors">
+                    {CSS_VAR_GROUPS.map((group) => (
+                      <div key={group.label} className="appearance-color-group">
+                        <div className="appearance-group-label">{group.label}</div>
+                        {group.vars.map(({ key, label }) => {
+                          const value = editedColors[key] ?? '#000000';
+                          return (
+                            <div key={key} className="appearance-color-row">
+                              <span className="appearance-color-label">{label}</span>
+                              <input
+                                type="color"
+                                className="appearance-color-swatch"
+                                value={/^#[0-9a-fA-F]{6}$/.test(value) ? value : '#000000'}
+                                onChange={(e) => handleColorChange(key, e.target.value)}
+                              />
+                              <input
+                                type="text"
+                                className="appearance-color-hex"
+                                value={value}
+                                maxLength={7}
+                                spellCheck={false}
+                                onChange={(e) => handleHexInput(key, e.target.value)}
+                              />
+                            </div>
+                          );
+                        })}
+                      </div>
+                    ))}
+                  </div>
+                </>
+              )}
             </div>
           )}
         </div>

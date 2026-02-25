@@ -895,7 +895,38 @@ body {
   gap: 16px;
 }
 
-.appearance-theme-row {
+.appearance-follow-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  cursor: pointer;
+  color: var(--text-primary);
+}
+
+.appearance-follow-row input[type="checkbox"] {
+  width: 15px;
+  height: 15px;
+  cursor: pointer;
+  accent-color: var(--accent);
+}
+
+.appearance-pair-selectors {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.appearance-pair-hint {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--text-secondary);
+  flex-wrap: wrap;
+}
+
+
   display: flex;
   align-items: center;
   gap: 10px;

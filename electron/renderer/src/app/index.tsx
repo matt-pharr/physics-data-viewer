@@ -9,7 +9,7 @@ import { CreateScriptDialog } from '../components/Tree/CreateScriptDialog';
 import { SettingsDialog } from '../components/SettingsDialog';
 import type { CellTab, Config, KernelExecuteResult, LogEntry, MenuActionPayload, TreeNodeData } from '../types';
 import { matchesShortcut, resolveShortcuts } from '../shortcuts';
-import { BUILTIN_THEMES, applyThemeColors, getMonacoTheme } from '../themes';
+import { BUILTIN_THEMES, applyThemeColors, getMonacoTheme, resolveThemeColors } from '../themes';
 
 type Tab = 'tree' | 'namespace' | 'modules';
 type KernelStatus = 'idle' | 'starting' | 'ready' | 'error';
@@ -59,11 +59,6 @@ function normalizeRecentProjects(data: unknown): string[] {
   return next;
 }
 
-function applyAppearanceColors(colors?: Record<string, string>): void {
-  if (!colors) return;
-  applyThemeColors(colors);
-}
-
 
 const App: React.FC = () => {
   const [activeTab, setActiveTab] = useState<Tab>('tree');
@@ -98,8 +93,36 @@ const App: React.FC = () => {
   const [showSettings, setShowSettings] = useState(false);
   const [settingsInitialTab, setSettingsInitialTab] = useState<'shortcuts' | 'appearance' | 'runtime'>('shortcuts');
   const [monacoTheme, setMonacoTheme] = useState<string>('vs-dark');
+  const [systemPrefersDark, setSystemPrefersDark] = useState(
+    () => window.matchMedia('(prefers-color-scheme: dark)').matches,
+  );
 
   const shortcuts = useMemo(() => resolveShortcuts(config?.settings?.shortcuts), [config]);
+
+  // Track system color-scheme changes
+  useEffect(() => {
+    const mq = window.matchMedia('(prefers-color-scheme: dark)');
+    const handler = (e: MediaQueryListEvent) => setSystemPrefersDark(e.matches);
+    mq.addEventListener('change', handler);
+    return () => mq.removeEventListener('change', handler);
+  }, []);
+
+  // Apply theme whenever config or system preference changes
+  useEffect(() => {
+    if (!config?.settings?.appearance) return;
+    const app = config.settings.appearance;
+    if (app.followSystemTheme) {
+      const themeName = systemPrefersDark ? app.darkTheme : app.lightTheme;
+      const colors = resolveThemeColors(themeName, []);
+      if (colors) {
+        applyThemeColors(colors);
+        setMonacoTheme(getMonacoTheme(themeName ?? '', BUILTIN_THEMES));
+      }
+    } else {
+      if (app.colors) applyThemeColors(app.colors);
+      setMonacoTheme(getMonacoTheme(app.themeName ?? '', BUILTIN_THEMES));
+    }
+  }, [config, systemPrefersDark]);
 
   // Load code celles from filesystem on startup
   useEffect(() => {
@@ -168,10 +191,8 @@ const App: React.FC = () => {
           throw new Error('PDV preload API is unavailable. Use the Electron window, not the browser URL.');
         }
         const loaded = await window.pdv.config.get();
-        setConfig(loaded);
+        setConfig(loaded);  // theme applied by the reactive effect above
         setCurrentProjectDir(loaded.projectRoot ?? null);
-        applyAppearanceColors(loaded.settings?.appearance?.colors);
-        setMonacoTheme(getMonacoTheme(loaded.settings?.appearance?.themeName ?? '', BUILTIN_THEMES));
 
         if (!loaded.pythonPath) {
           setKernelStatus('idle');
@@ -485,15 +506,9 @@ const App: React.FC = () => {
   };
 
   const handleSettingsSave = async (updates: Partial<Config>) => {
-    if (updates.settings?.appearance?.colors) {
-      applyAppearanceColors(updates.settings.appearance.colors);
-    }
-    if (updates.settings?.appearance?.themeName !== undefined) {
-      setMonacoTheme(getMonacoTheme(updates.settings.appearance.themeName ?? '', BUILTIN_THEMES));
-    }
     await window.pdv.config.set(updates);
-    const mergedConfig = config ? { ...config, ...updates } : null;
-    setConfig(mergedConfig);
+    const mergedConfig = config ? { ...config, ...updates, settings: { ...config.settings, ...updates.settings, appearance: { ...config.settings?.appearance, ...updates.settings?.appearance } } } : null;
+    setConfig(mergedConfig);  // reactive effect applies theme
     if (
       mergedConfig &&
       ((updates.pythonPath && updates.pythonPath !== config?.pythonPath) ||

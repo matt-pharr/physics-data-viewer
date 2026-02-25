@@ -116,6 +116,9 @@ export interface Config {
     appearance?: {
       themeName?: string;
       colors?: Record<string, string>;
+      followSystemTheme?: boolean;
+      darkTheme?: string;
+      lightTheme?: string;
     };
   };
 }
