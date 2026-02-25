@@ -22,7 +22,6 @@
 13. [TypeScript Documentation Standard](#13-typescript-documentation-standard)
 14. [Testing Strategy](#14-testing-strategy)
 15. [What is Explicitly Out of Scope (Alpha)](#15-what-is-explicitly-out-of-scope-alpha)
-16. [Current Branch Delta vs `develop`](#16-current-branch-delta-vs-develop)
 
 ---
 
@@ -1085,46 +1084,6 @@ The following features are acknowledged as future work and must not influence th
 - **R kernel support** — same deferral as Julia
 
 ---
-
-## 16. Current Branch Delta vs `develop`
-
-This section tracks material differences in the current `frontend_refactor`
-branch so architecture readers can reconcile behavior with `develop`.
-
-### 16.1 Main/preload/API deltas
-
-- Preload API adds:
-  - `window.pdv.kernels.onOutput(cb)` for streamed execution chunks
-  - `window.pdv.about.getVersion()`
-  - `window.pdv.menu.onAction(cb)` and `window.pdv.menu.updateRecentProjects(paths)`
-- Config and UI persistence moved to `~/.PDV/`:
-  - `~/.PDV/preferences.json` for `config.get/set`
-  - `~/.PDV/themes/*.json` for custom/user-dropped themes
-  - `~/.PDV/state/code-cells.json` for code-cell state persistence
-- Script editing/file reveal commands support `{}` placeholder expansion for
-  external editor and file-manager command templates.
-
-### 16.2 Renderer/frontend deltas
-
-- Command editor surface is now **Code Cells** with browser-style tab behavior:
-  - Stable numeric tab labels by current left-to-right index
-  - Shortcut navigation (`Cmd/Ctrl+1..9`, `Cmd/Ctrl+0`)
-  - `Cmd/Ctrl+T` new tab and close semantics aligned with tabs UI
-  - Global `Cmd/Ctrl+Z` outside Monaco restores last clear/close action
-- Console supports ANSI control normalization and streamed output aggregation.
-- Settings dialog expanded to tabs:
-  - General (external editor commands)
-  - Keyboard Shortcuts (capture + conflict detection)
-  - Appearance (theme editing, system light/dark pairing, Monaco theme sync)
-  - Appearance → Fonts (detected code/display font families)
-  - Runtime and About (version + update-check stub)
-- Namespace view includes richer filtering/sorting controls and refresh toggles.
-- Tree context menu includes shortcut hints aligned with configurable bindings.
-
-### 16.3 Documentation deltas
-
-- `OVERVIEW.md` and this document now include branch-delta notes so readers can
-  map current behavior to this branch before merge to `develop`.
 
 ---
 
