@@ -8,6 +8,7 @@
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { BrowserWindow } from "electron";
+import os from "os";
 
 import { registerIpcHandlers, registerPushForwarding, unregisterIpcHandlers } from "./index";
 import {
@@ -159,7 +160,7 @@ function setup() {
     }),
   } as unknown as ConfigStore;
 
-  registerIpcHandlers(win, kernelManager, commRouter, projectManager, configStore);
+  registerIpcHandlers(win, kernelManager, commRouter, projectManager, configStore, os.tmpdir());
 
   return {
     webContentsSend,
@@ -415,7 +416,7 @@ describe("Step 5 IPC handlers", () => {
     const { kernelManager } = setup();
     const execute = getHandler(IPC.kernels.execute);
     const result = await execute({}, "kernel-1", { code: "1+1" });
-    expect(kernelManager.execute).toHaveBeenCalledWith("kernel-1", { code: "1+1" });
+    expect(kernelManager.execute).toHaveBeenCalledWith("kernel-1", { code: "1+1" }, expect.any(Function));
     expect(result).toEqual({ result: 2 });
   });
 
