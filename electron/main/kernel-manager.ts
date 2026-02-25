@@ -656,7 +656,7 @@ export class KernelManager extends EventEmitter {
           const tb = content.traceback;
           if (Array.isArray(tb)) {
             // eslint-disable-next-line no-control-regex
-            result.traceback = (tb as string[]).map((l) => l.replace(/\x1b\[[0-9;]*m/g, ""));
+            result.traceback = (tb as string[]).map((l) => l.replace(/\x1b\[[0-9;]*[A-Za-z]/g, ""));
           }
         } else if (
           msgType === "status" &&

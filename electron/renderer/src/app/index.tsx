@@ -133,7 +133,8 @@ function buildDiagCode(b64: string): string {
     `            _l = _msg.lineno - _stub_lines\n` +
     `            if _l < 1: continue\n` +
     `            _sev = "error" if type(_msg).__name__ in _ERROR_TYPES else "warning"\n` +
-    `            _diag.append({"sl":_l,"sc":_msg.col+1,"el":_l,"ec":_msg.col+2,"msg":_msg.message % _msg.message_args,"sev":_sev})\n` +
+    `            _ec = _msg.col + 1 + len(_msg.message_args[0]) if _msg.message_args and isinstance(_msg.message_args[0], str) else _msg.col + 2\n` +
+    `            _diag.append({"sl":_l,"sc":_msg.col+1,"el":_l,"ec":_ec,"msg":_msg.message % _msg.message_args,"sev":_sev})\n` +
     `    except SyntaxError as _e:\n` +
     `        _l = (_e.lineno or 1) - _stub_lines\n` +
     `        if _l >= 1:\n` +
@@ -163,11 +164,6 @@ function buildDiagCode(b64: string): string {
 /** Raw JSON shape returned by buildDiagCode. */
 interface RawDiag { sl: number; sc: number; el: number; ec: number; msg: string; sev: string; }
 
-/**
- * Try to extract a 1-based line number from a kernel error string.
- * ipykernel includes line info in SyntaxError evalue: "msg (line N)"
- * and in tracebacks: '  File "<ipython-input-...>", line N'.
- */
 /**
  * Extract the most relevant line number from a kernel error.
  * Checks the traceback array first (most precise), then falls back to
@@ -222,6 +218,9 @@ const App: React.FC = () => {
   const [execErrorMarkers, setExecErrorMarkers] = useState<Record<number, DiagnosticMarker[]>>({});
   /** Incremented on each code change to discard stale diagnostic results. */
   const diagGenerationRef = useRef(0);
+  /** Tracks isExecuting for use inside timer callbacks (avoids stale closure). */
+  const isExecutingRef = useRef(false);
+  useEffect(() => { isExecutingRef.current = isExecuting; }, [isExecuting]);
 
   // Load command boxes from filesystem on startup
   useEffect(() => {
@@ -408,6 +407,8 @@ const App: React.FC = () => {
     const gen = ++diagGenerationRef.current;
 
     const timer = setTimeout(async () => {
+      // Re-check: user may have started executing during the debounce window.
+      if (isExecutingRef.current) return;
       try {
         const b64 = toBase64(code);
         const diagCode = buildDiagCode(b64);
@@ -419,7 +420,6 @@ const App: React.FC = () => {
         // Discard if a newer code version has arrived since we fired.
         if (diagGenerationRef.current !== gen) return;
 
-        console.debug('[PDV diag] stdout:', result.stdout?.trim(), 'error:', result.error);
         const markers: DiagnosticMarker[] = [];
         if (result.stdout) {
           try {
@@ -436,9 +436,8 @@ const App: React.FC = () => {
             }
           } catch { /* malformed JSON — ignore */ }
         }
-        console.debug('[PDV diag] setting', markers.length, 'markers');
         setCommandTabMarkers((prev) => ({ ...prev, [tabId]: markers }));
-      } catch (e) { console.debug('[PDV diag] execute threw:', e); }
+      } catch { /* execute failed — ignore */ }
     }, 1200);
 
     return () => clearTimeout(timer);
