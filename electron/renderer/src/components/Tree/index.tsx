@@ -202,7 +202,14 @@ export const Tree: React.FC<TreeProps> = ({ kernelId, disabled = false, refreshT
 
       <div className="tree-content">
         {disabled && <div className="tree-loading">Starting kernel...</div>}
-        {!disabled && loading && <div className="tree-loading">Loading...</div>}
+        {!disabled && loading && (
+          <div className="tree-loading">
+            <span className="spinner" role="status" aria-label="Loading">
+              <span aria-hidden="true">⏳</span>
+            </span>
+            {' '}Loading...
+          </div>
+        )}
         {error && <div className="tree-error">{error}</div>}
         {!disabled && !loading && !error && flatNodes.length === 0 && <div className="tree-empty">No data</div>}
 

@@ -239,7 +239,10 @@ export const NamespaceView: React.FC<NamespaceViewProps> = ({
             {loading && (
               <tr>
                 <td colSpan={5} className="namespace-loading">
-                  Loading...
+                  <span className="spinner" role="status" aria-label="Loading">
+                    <span aria-hidden="true">⏳</span>
+                  </span>
+                  {' '}Loading...
                 </td>
               </tr>
             )}
