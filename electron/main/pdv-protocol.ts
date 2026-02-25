@@ -112,6 +112,7 @@ export type PDVEnvelope = PDVMessage;
 // Error payload (status = "error", ARCHITECTURE.md §3.5)
 // ---------------------------------------------------------------------------
 
+/** Standard payload shape for protocol responses with `status: "error"`. */
 export interface PDVErrorPayload {
   /** Machine-readable dot-namespaced error code (e.g. "tree.path_not_found"). */
   code: string;
@@ -242,6 +243,7 @@ export const NodeKind = {
   UNKNOWN: "unknown",
 } as const;
 
+/** Union of all valid node `type` values in tree descriptors. */
 export type NodeKindValue = (typeof NodeKind)[keyof typeof NodeKind];
 
 /** Script run() parameter descriptor extracted by pdv-python from function signatures. */
@@ -315,6 +317,7 @@ export const isPDVEnvelope = isPDVMessage;
  * Returns true when the given PDVMessage has status="error".
  *
  * @param msg - A validated PDVMessage.
+ * @returns True when `msg.status` is exactly `"error"`.
  */
 export function isErrorEnvelope(msg: PDVMessage): boolean {
   return msg.status === "error";

@@ -91,6 +91,12 @@ export class PDVSchemaVersionError extends Error {
 // ProjectManager
 // ---------------------------------------------------------------------------
 
+/**
+ * Coordinates project save/load workflows between the app and kernel.
+ *
+ * Uses `CommRouter` for protocol requests and handles local manifest +
+ * command-box file persistence. It does NOT own renderer state updates.
+ */
 export class ProjectManager {
   /**
    * @param commRouter - CommRouter connected to the active kernel.

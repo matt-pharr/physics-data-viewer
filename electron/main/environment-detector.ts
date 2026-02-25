@@ -96,6 +96,12 @@ const CONDA_TIMEOUT_MS = 10_000;
  */
 let _cache: DetectedEnvironment[] | null = null;
 
+/**
+ * Detects Python environments and validates/install checks for `pdv_kernel`.
+ *
+ * This class only performs environment discovery and subprocess probes; it
+ * does NOT start kernels or perform IPC registration.
+ */
 export class EnvironmentDetector {
   /**
    * Return the best available Python environment, using the resolution order

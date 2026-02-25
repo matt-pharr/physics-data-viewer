@@ -125,7 +125,18 @@ class LazyLoadRegistry:
         self._registry[path] = storage_ref
 
     def has(self, path: str) -> bool:
-        """Return True if a lazy-load entry exists for this path."""
+        """Return whether a lazy-load entry exists for a path.
+
+        Parameters
+        ----------
+        path : str
+            Dot-separated tree path.
+
+        Returns
+        -------
+        bool
+            True when the path is currently registered for lazy loading.
+        """
         return path in self._registry
 
     def fetch(self, path: str, save_dir: str) -> Any:
@@ -279,22 +290,46 @@ class PDVScript:
 
     @property
     def relative_path(self) -> str:
-        """Relative path from project root to the script file."""
+        """Relative path from project root to the script file.
+
+        Returns
+        -------
+        str
+            Relative script file path.
+        """
         return self._relative_path
 
     @property
     def language(self) -> str:
-        """Script language. Currently always ``'python'``."""
+        """Script language. Currently always ``'python'``.
+
+        Returns
+        -------
+        str
+            Script language identifier.
+        """
         return self._language
 
     @property
     def doc(self) -> str | None:
-        """First line of the script docstring, or None."""
+        """First line of the script docstring, or None.
+
+        Returns
+        -------
+        str or None
+            Cached script doc preview line.
+        """
         return self._doc
 
     @property
     def params(self) -> list[ScriptParameter]:
-        """User-facing run() parameters (excluding pdv_tree)."""
+        """User-facing run() parameters (excluding pdv_tree).
+
+        Returns
+        -------
+        list[ScriptParameter]
+            Extracted script parameter descriptors.
+        """
         return self._params
 
     def preview(self) -> str:

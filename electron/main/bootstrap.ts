@@ -8,30 +8,17 @@ import { app, BrowserWindow } from "electron";
 
 import { createWindow, wireAppEvents } from "./app";
 import { CommRouter } from "./comm-router";
-import { type ConfigStore } from "./config";
-import { type PDVConfig } from "./ipc";
+import { ConfigStore } from "./config";
 import { KernelManager } from "./kernel-manager";
 import { ProjectManager } from "./project-manager";
-
-class InMemoryConfigStore {
-  private state: Partial<PDVConfig> = {};
-
-  getAll(): PDVConfig {
-    return { ...(this.state as PDVConfig) };
-  }
-
-  set(key: string, value: unknown): void {
-    (this.state as Record<string, unknown>)[key] = value;
-  }
-}
 
 let kernelManager: KernelManager | null = null;
 let mainWindow: BrowserWindow | null = null;
 let openingWindow: Promise<void> | null = null;
+let configStore: ConfigStore | null = null;
 
 const commRouter = new CommRouter();
 const projectManager = new ProjectManager(commRouter);
-const configStore = new InMemoryConfigStore() as unknown as ConfigStore;
 
 async function openMainWindow(): Promise<void> {
   if (mainWindow && !mainWindow.isDestroyed()) {
@@ -44,6 +31,9 @@ async function openMainWindow(): Promise<void> {
   openingWindow = (async () => {
     if (!kernelManager) {
       kernelManager = new KernelManager();
+    }
+    if (!configStore) {
+      configStore = new ConfigStore(app.getPath("userData"));
     }
     const win = await createWindow(
       kernelManager,

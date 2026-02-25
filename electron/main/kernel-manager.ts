@@ -36,8 +36,11 @@ import { EventEmitter } from "events";
 
 /** Describes which kernel binary to launch. */
 export interface KernelSpec {
+  /** Kernel identifier (for example, `python3`). */
   name: string;
+  /** Human-readable kernel name shown in UI. */
   displayName: string;
+  /** Programming language provided by the kernel runtime. */
   language: "python" | "julia";
   /** Argv template; use `{connection_file}` as a placeholder. */
   argv?: string[];
@@ -47,9 +50,13 @@ export interface KernelSpec {
 
 /** Snapshot of a running kernel's identity and status. */
 export interface KernelInfo {
+  /** Runtime-generated kernel UUID. */
   id: string;
+  /** Kernel identifier (for example, `python3`). */
   name: string;
+  /** Programming language provided by the kernel runtime. */
   language: "python" | "julia";
+  /** Current runtime state reported by the app. */
   status: "idle" | "busy" | "starting" | "error" | "dead";
 }
 
@@ -104,10 +111,17 @@ interface JupyterMessageHeader {
   date: string;
 }
 
+/**
+ * Parsed Jupyter Messaging Protocol envelope received from ZeroMQ frames.
+ */
 export interface JupyterMessage {
+  /** Message header with msg_type, ids, and protocol version. */
   header: JupyterMessageHeader;
+  /** Parent message header used for request/response correlation. */
   parent_header: Record<string, unknown>;
+  /** Message metadata object (kernel-defined, may be empty). */
   metadata: Record<string, unknown>;
+  /** Message content object whose shape depends on msg_type. */
   content: Record<string, unknown>;
 }
 
@@ -199,6 +213,8 @@ function serializeMessage(msg: JupyterMessage, key: string): Buffer[] {
 /**
  * Parse a Jupyter message from raw ZMQ frames, validating the HMAC signature.
  *
+ * @param frames - Raw multipart message frames from a ZeroMQ socket.
+ * @param key - HMAC signing key from the kernel connection file.
  * @returns The parsed JupyterMessage, or null if frames are invalid or the
  *   signature check fails.
  */

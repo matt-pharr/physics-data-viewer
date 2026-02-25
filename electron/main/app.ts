@@ -47,6 +47,7 @@ async function loadDevUrlWithRetry(
  * @param projectManager - Active project manager instance.
  * @param configStore - Active config store instance.
  * @returns Created BrowserWindow.
+ * @throws {Error} When renderer content cannot be loaded.
  */
 export async function createWindow(
   kernelManager: KernelManager,
@@ -100,6 +101,7 @@ export async function createWindow(
  * Register core Electron app events.
  *
  * @param getKernelManager - Lazy getter for the current kernel manager.
+ * @returns Nothing.
  */
 export function wireAppEvents(
   getKernelManager: () => KernelManager | null

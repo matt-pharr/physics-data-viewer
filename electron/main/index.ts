@@ -297,6 +297,7 @@ async function initializeKernelSession(
  * @param commRouter - Comm router bound to the active kernel.
  * @param projectManager - Project manager dependency.
  * @param configStore - Config persistence dependency.
+ * @returns Nothing.
  */
 export function registerIpcHandlers(
   win: BrowserWindow,
@@ -758,6 +759,7 @@ export function registerIpcHandlers(
  *
  * @param win - Main BrowserWindow.
  * @param commRouter - Comm router instance.
+ * @returns Nothing.
  */
 export function registerPushForwarding(
   win: BrowserWindow,
@@ -777,6 +779,8 @@ export function registerPushForwarding(
 
 /**
  * Unregister every IPC handler and push subscription registered by this module.
+ *
+ * @returns Nothing.
  */
 export function unregisterIpcHandlers(): void {
   for (const channel of REGISTERED_CHANNELS) {
