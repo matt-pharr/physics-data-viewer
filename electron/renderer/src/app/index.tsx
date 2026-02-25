@@ -469,6 +469,7 @@ const App: React.FC = () => {
       result: result.result,
       error: result.error,
       duration: result.duration,
+      images: result.images,
     };
     setLogs((prev) => [...prev, logEntry]);
     if (result.error) {
@@ -504,6 +505,7 @@ const App: React.FC = () => {
       logEntry.result = result.result;
       logEntry.error = result.error;
       logEntry.duration = result.duration;
+      logEntry.images = result.images;
 
       if (result.error) {
         setLastError(result.error);

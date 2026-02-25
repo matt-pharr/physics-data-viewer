@@ -107,8 +107,11 @@ def bootstrap(ip=None):
 def _configure_matplotlib() -> None:
     """Set a sensible default matplotlib backend for native-mode PDV.
 
-    Tries platform-appropriate interactive backends in order, falling back
-    to Agg so that at minimum figures can be captured via ``pdv_show()``.
+    Tries platform-appropriate interactive backends in order.  If none are
+    available, falls back to Agg and monkey-patches ``plt.show()`` so that
+    figures are emitted as ``display_data`` iopub messages and appear inline
+    in the PDV console.
+
     Silently skips if matplotlib is not installed.
     """
     import sys  # noqa: PLC0415
@@ -118,22 +121,77 @@ def _configure_matplotlib() -> None:
     except ImportError:
         return
 
-    # If a backend was already set (e.g. user's matplotlibrc or a previous
-    # import of pyplot), respect it and do nothing.
+    # If a non-trivial backend is already configured (e.g. user's matplotlibrc
+    # or a previous import of pyplot), respect it and do nothing.
     current = matplotlib.get_backend().lower()
-    if current not in ("agg", "module://matplotlib_inline.backend_inline", ""):
+    _inline_backends = (
+        "agg",
+        "module://matplotlib_inline.backend_inline",
+        "module://ipykernel.pylab.backend_inline",
+        "",
+    )
+    if current not in _inline_backends:
         return
 
     if sys.platform == "darwin":
-        candidates = ["MacOSX", "TkAgg", "Agg"]
+        candidates = ["MacOSX", "TkAgg"]
     elif sys.platform.startswith("win"):
-        candidates = ["TkAgg", "Qt5Agg", "Agg"]
+        candidates = ["TkAgg", "Qt5Agg"]
     else:
-        candidates = ["Qt5Agg", "TkAgg", "GTK4Agg", "Agg"]
+        candidates = ["Qt5Agg", "TkAgg", "GTK4Agg"]
 
     for backend in candidates:
         try:
             matplotlib.use(backend)
+            # Successfully switched to an interactive backend — native windows
+            # will be used and no patching is needed.
             return
         except Exception:
             continue
+
+    # No interactive backend available.  Stay on Agg and patch plt.show() so
+    # that figures are sent to the PDV console as inline images.
+    matplotlib.use("Agg")
+    _patch_plt_show_for_inline_capture()
+
+
+def _patch_plt_show_for_inline_capture() -> None:
+    """Monkey-patch ``plt.show()`` to emit figures as display_data messages.
+
+    Only called when no interactive matplotlib backend is available.  Uses
+    IPython's ``display()`` / ``Image`` so the image appears in the PDV
+    console output just like any other captured result.
+    """
+    try:
+        import matplotlib.pyplot as plt  # noqa: PLC0415
+    except ImportError:
+        return
+
+    _original_show = plt.show
+
+    def _pdv_inline_show(*args, **kwargs):
+        _ = (args, kwargs)  # swallow block= and other kwargs
+        try:
+            import io  # noqa: PLC0415
+            import base64  # noqa: PLC0415
+
+            fig = plt.gcf()
+            buf = io.BytesIO()
+            fig.savefig(buf, format="png", bbox_inches="tight")
+            buf.seek(0)
+            png_b64 = base64.b64encode(buf.read()).decode("ascii")
+            buf.close()
+
+            try:
+                from IPython.display import display, Image  # noqa: PLC0415
+                display(Image(data=base64.b64decode(png_b64), format="png"))
+            except ImportError:
+                # IPython not available — nothing we can do
+                pass
+
+            plt.close(fig)
+        except Exception as exc:
+            print(f"[PDV] Could not capture figure: {exc}")
+
+    plt.show = _pdv_inline_show
+    print("[PDV] No interactive matplotlib backend found — figures will render inline in the PDV console.")

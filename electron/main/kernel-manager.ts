@@ -80,6 +80,8 @@ export interface KernelExecuteResult {
   error?: string;
   /** Wall-clock execution duration in milliseconds. */
   duration?: number;
+  /** Inline images emitted via display_data (e.g. matplotlib Agg fallback). */
+  images?: Array<{ mime: string; data: string }>;
 }
 
 /** Callback type for raw iopub message listeners. */
@@ -559,6 +561,7 @@ export class KernelManager extends EventEmitter {
         result.duration = Date.now() - startTime;
         if (result.stdout === "") delete result.stdout;
         if (result.stderr === "") delete result.stderr;
+        if (result.images?.length === 0) delete result.images;
         resolve(result);
       };
 
@@ -587,6 +590,34 @@ export class KernelManager extends EventEmitter {
                 result.result = JSON.parse(plain);
               } catch {
                 result.result = plain;
+              }
+            }
+          }
+        } else if (msgType === "display_data" || msgType === "execute_result") {
+          const data = content.data as Record<string, unknown> | undefined;
+          if (msgType === "display_data") {
+            // Collect inline images (Agg fallback or explicit IPython display())
+            const png = data?.["image/png"];
+            const svg = data?.["image/svg+xml"];
+            if (typeof png === "string") {
+              result.images = result.images ?? [];
+              result.images.push({ mime: "image/png", data: png });
+            } else if (typeof svg === "string") {
+              result.images = result.images ?? [];
+              result.images.push({ mime: "image/svg+xml", data: svg });
+            }
+          } else {
+            // execute_result — extract the return value
+            if (data && "application/json" in data) {
+              result.result = data["application/json"];
+            } else {
+              const plain = data?.["text/plain"];
+              if (typeof plain === "string") {
+                try {
+                  result.result = JSON.parse(plain);
+                } catch {
+                  result.result = plain;
+                }
               }
             }
           }

@@ -44,6 +44,8 @@ export interface KernelExecuteResult {
   result?: unknown;
   error?: string;
   duration?: number;
+  /** Inline images captured from display_data iopub messages (Agg fallback). */
+  images?: Array<{ mime: string; data: string }>;
 }
 
 export interface NamespaceQueryOptions {
