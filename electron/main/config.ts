@@ -164,7 +164,7 @@ export class ConfigStore {
    */
   constructor(private readonly appDataDir: string) {
     fs.mkdirSync(this.appDataDir, { recursive: true });
-    this.configPath = path.join(this.appDataDir, "config.json");
+    this.configPath = path.join(this.appDataDir, "preferences.json");
     this.state = this.loadState();
   }
 

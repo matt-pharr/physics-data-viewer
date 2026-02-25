@@ -18,6 +18,7 @@
 import { ipcMain, BrowserWindow, dialog, app } from "electron";
 import { spawn } from "child_process";
 import * as fs from "fs/promises";
+import * as fsSync from "fs";
 import * as os from "os";
 import * as path from "path";
 
@@ -305,9 +306,52 @@ export function registerIpcHandlers(
   kernelManager: KernelManager,
   commRouter: CommRouter,
   projectManager: ProjectManager,
-  configStore: ConfigStore
+  configStore: ConfigStore,
+  pdvDir: string
 ): void {
   unregisterIpcHandlers();
+
+  // Derive per-purpose sub-directories within ~/.PDV
+  const themesDir = path.join(pdvDir, "themes");
+  const stateDir  = path.join(pdvDir, "state");
+  const codeCellsPath = path.join(stateDir, "code-cells.json");
+  fs.mkdir(themesDir, { recursive: true }).catch(() => {});
+  fs.mkdir(stateDir,  { recursive: true }).catch(() => {});
+
+  // Populate savedThemes from disk on first call: load PDV-saved themes +
+  // any .json files the user has dropped in ~/.PDV/themes/.
+  if (savedThemes.length === 0) {
+    try {
+      const entries = fsSync.readdirSync(themesDir);
+      for (const entry of entries) {
+        if (!entry.endsWith(".json")) continue;
+        try {
+          const raw = fsSync.readFileSync(path.join(themesDir, entry), "utf8");
+          const parsed = JSON.parse(raw) as unknown;
+          if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+            const obj = parsed as Record<string, unknown>;
+            if (typeof obj.name === "string" && obj.colors && typeof obj.colors === "object") {
+              savedThemes.push({ name: obj.name, colors: obj.colors as Record<string, string> });
+            }
+          }
+        } catch {
+          // skip malformed files
+        }
+      }
+    } catch {
+      // themes dir may not exist yet
+    }
+  }
+
+  // Populate savedCodeCells from disk on first call.
+  if (savedCodeCells === null) {
+    try {
+      const raw = fsSync.readFileSync(codeCellsPath, "utf8");
+      savedCodeCells = JSON.parse(raw) as CodeCellData;
+    } catch {
+      // file may not exist yet
+    }
+  }
 
   // Handles kernels:list requests from the renderer.
   // Input: none.
@@ -699,6 +743,10 @@ export function registerIpcHandlers(
     } else {
       savedThemes = [...savedThemes, theme];
     }
+    // Persist to ~/.PDV/themes/<name>.json (sanitise name for filename)
+    const safeName = theme.name.replace(/[^a-zA-Z0-9_\-. ]/g, "_");
+    const filePath = path.join(themesDir, `${safeName}.json`);
+    await fs.writeFile(filePath, JSON.stringify(theme, null, 2), "utf8");
     return true;
   });
 
@@ -716,6 +764,7 @@ export function registerIpcHandlers(
   // On error: throws to renderer.
   ipcMain.handle(IPC.codeCells.save, async (_event, data: CodeCellData) => {
     savedCodeCells = data;
+    await fs.writeFile(codeCellsPath, JSON.stringify(data, null, 2), "utf8");
     return true;
   });
 

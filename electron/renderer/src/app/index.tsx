@@ -76,6 +76,11 @@ const App: React.FC = () => {
   const [currentProjectDir, setCurrentProjectDir] = useState<string | null>(null);
   const initRef = useRef(false);
   const loadedProjectTabsRef = useRef<{ tabs: CellTab[]; activeTabId: number } | null>(null);
+
+  // Undo stack for cell clear/close. Each entry captures the full tab list and
+  // active tab id so a single Cmd+Z restores exactly what was destroyed.
+  type CellSnapshot = { tabs: CellTab[]; activeTabId: number };
+  const cellUndoStack = useRef<CellSnapshot[]>([]);
   const [leftWidth, setLeftWidth] = useState(() => {
     const saved = localStorage.getItem('pdv.pane.leftWidth');
     return saved ? Number(saved) : 340;
@@ -248,6 +253,23 @@ const App: React.FC = () => {
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.repeat) return;
+
+      // Cmd+Z outside Monaco → undo last cell clear/close
+      // Monaco sets its editor textarea as the active element; when it has focus
+      // it handles Cmd+Z itself before this listener sees it.
+      const isMonacoFocused = (document.activeElement as HTMLElement)
+        ?.closest('.monaco-editor') != null;
+      if (!isMonacoFocused && (event.metaKey || event.ctrlKey) && event.key === 'z' && !event.shiftKey && !event.altKey) {
+        const snapshot = cellUndoStack.current[cellUndoStack.current.length - 1];
+        if (snapshot) {
+          event.preventDefault();
+          cellUndoStack.current = cellUndoStack.current.slice(0, -1);
+          setCellTabs(snapshot.tabs);
+          setActiveCellTab(snapshot.activeTabId);
+        }
+        return;
+      }
+
       if (matchesShortcut(event, shortcuts.openSettings)) {
         event.preventDefault();
         setShowSettings(true);
@@ -486,6 +508,11 @@ const App: React.FC = () => {
   };
 
   const handleClearCommand = () => {
+    // Snapshot before clearing so Cmd+Z can restore
+    cellUndoStack.current = [
+      ...cellUndoStack.current,
+      { tabs: CellTabs, activeTabId: activeCellTab },
+    ].slice(-20); // keep at most 20 levels
     setCellTabs((prev) =>
       prev.map((tab) => (tab.id === activeCellTab ? { ...tab, code: '' } : tab)),
     );
@@ -493,6 +520,11 @@ const App: React.FC = () => {
   };
 
   const handleRemoveCellTab = (id: number) => {
+    // Snapshot before closing so Cmd+Z can restore
+    cellUndoStack.current = [
+      ...cellUndoStack.current,
+      { tabs: CellTabs, activeTabId: activeCellTab },
+    ].slice(-20);
     setCellTabs((prev) => {
       const next = prev.filter((t) => t.id !== id);
       if (next.length === 0) {
@@ -828,7 +860,7 @@ const App: React.FC = () => {
              onClick={() => { setSettingsInitialTab('runtime'); setShowSettings(true); }}
              title="Click to change runtime"
            >
-             {config?.kernelSpec ?? 'python3'}
+             {config?.pythonPath ?? config?.kernelSpec ?? 'python3'}
            </span>
            <span className="status-item">{currentProjectDir ?? 'Unsaved Project'}</span>
          </div>
