@@ -103,6 +103,40 @@ export const BUILTIN_THEMES: BuiltinTheme[] = [
       'error':        '#f92672',
     },
   },
+  {
+    name: 'Xcode Light',
+    monacoTheme: 'pdv-xcode-light',
+    colors: {
+      'bg-primary':   '#ffffff',
+      'bg-secondary': '#f5f5f5',
+      'bg-tertiary':  '#c9c9c9',
+      'bg-hover':     '#dedcde',
+      'text-primary':   '#000000',
+      'text-secondary': '#444444',
+      'text-hint':      '#bbbbbb',
+      'accent':       '#128cff',
+      'accent-hover': '#0a70cc',
+      'border-color': '#d9d6d7',
+      'error':        '#ff0000',
+    },
+  },
+  {
+    name: 'Xcode Dark',
+    monacoTheme: 'pdv-xcode-dark',
+    colors: {
+      'bg-primary':   '#242529',
+      'bg-secondary': '#303136',
+      'bg-tertiary':  '#414045',
+      'bg-hover':     '#403f44',
+      'text-primary':   '#ffffff',
+      'text-secondary': '#a0a0a0',
+      'text-hint':      '#6c6b70',
+      'accent':       '#1780fa',
+      'accent-hover': '#0a64ca',
+      'border-color': '#1a191c',
+      'error':        '#f44747',
+    },
+  },
 ];
 
 export const BUILTIN_THEME_NAMES = new Set(BUILTIN_THEMES.map((t) => t.name));
@@ -120,6 +154,7 @@ export interface ThemePair {
 
 export const THEME_PAIRS: ThemePair[] = [
   { name: 'VSCode', dark: 'Dark+ (VSCode)', light: 'Light+ (VSCode)' },
+  { name: 'Xcode',  dark: 'Xcode Dark',     light: 'Xcode Light'     },
 ];
 
 /**
@@ -168,6 +203,65 @@ export function defineMonacoThemes(monaco: {
       'editorCursor.foreground':      '#f8f8f2',
       'editorLineNumber.foreground':  '#75715e',
       'editorIndentGuide.background': '#3b3a32',
+    },
+  });
+
+  monaco.editor.defineTheme('pdv-xcode-light', {
+    base: 'vs',
+    inherit: true,
+    rules: [
+      { token: 'comment',            foreground: '008E00', fontStyle: 'italic' },
+      { token: 'keyword',            foreground: 'C800A4' },
+      { token: 'keyword.operator',   foreground: 'C800A4' },
+      { token: 'string',             foreground: 'DF0002' },
+      { token: 'string.escape',      foreground: 'DF0002' },
+      { token: 'number',             foreground: '3A00DC' },
+      { token: 'constant.language',  foreground: 'C800A4' },
+      { token: 'type',               foreground: '438288' },
+      { token: 'type.identifier',    foreground: '438288' },
+      { token: 'entity.name.class',  foreground: '438288' },
+      { token: 'support',            foreground: '450084' },
+      { token: 'support.function',   foreground: '450084' },
+      { token: 'variable',           foreground: 'C800A4' },
+    ],
+    colors: {
+      'editor.background':              '#ffffff',
+      'editor.foreground':              '#000000',
+      'editor.selectionBackground':     '#b5d5ff',
+      'editor.lineHighlightBackground': '#eeeeee',
+      'editorCursor.foreground':        '#000000',
+      'editorLineNumber.foreground':    '#bbbbbb',
+      'editorLineNumber.activeForeground': '#666666',
+    },
+  });
+
+  monaco.editor.defineTheme('pdv-xcode-dark', {
+    base: 'vs-dark',
+    inherit: true,
+    rules: [
+      { token: 'comment',            foreground: '6C7986', fontStyle: 'italic' },
+      { token: 'keyword',            foreground: 'FC5FA3' },
+      { token: 'keyword.operator',   foreground: 'FC5FA3' },
+      { token: 'string',             foreground: 'FC6A5D' },
+      { token: 'string.escape',      foreground: 'FC6A5D' },
+      { token: 'number',             foreground: '9686F5' },
+      { token: 'constant.language',  foreground: '9686F5' },
+      { token: 'variable',           foreground: '53A5FB' },
+      { token: 'variable.parameter', foreground: 'FD8F3F' },
+      { token: 'type',               foreground: '91D462' },
+      { token: 'type.identifier',    foreground: '91D462' },
+      { token: 'entity.name.class',  foreground: '91D462' },
+      { token: 'function',           foreground: '91D462' },
+      { token: 'support',            foreground: '7AC8B6' },
+      { token: 'support.function',   foreground: '7AC8B6' },
+    ],
+    colors: {
+      'editor.background':              '#242529',
+      'editor.foreground':              '#ffffff',
+      'editor.selectionBackground':     '#444444',
+      'editor.lineHighlightBackground': '#303239',
+      'editorCursor.foreground':        '#ffffff',
+      'editorLineNumber.foreground':    '#6c6b70',
     },
   });
 }
