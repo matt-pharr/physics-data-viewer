@@ -39,6 +39,23 @@ export interface PDVConfig {
   showCallableVariables: boolean;
   /** UI theme override. Undefined = follow system. */
   theme?: "light" | "dark";
+  /**
+   * External editor command for Python scripts.
+   * Use `{}` as the file-path placeholder, e.g. `"code {}"` or `"nvim {}"`.
+   * If `{}` is absent the path is appended as the last argument.
+   * Defaults to `"code {}"`.
+   */
+  pythonEditorCmd?: string;
+  /**
+   * External editor command for Julia scripts.
+   * Same `{}` placeholder convention as `pythonEditorCmd`.
+   */
+  juliaEditorCmd?: string;
+  /**
+   * File-manager command used to reveal a file or folder in the OS browser.
+   * Use `{}` as the placeholder, e.g. `"open {}"` (macOS) or `"xdg-open {}"` (Linux).
+   */
+  fileManagerCmd?: string;
 }
 
 const CONFIG_DEFAULTS: PDVConfig = {
@@ -109,6 +126,15 @@ function parseConfig(raw: string, filePath: string): Partial<PDVConfig> {
     }
     if (theme === "light" || theme === "dark") {
       result.theme = theme;
+    }
+  }
+  for (const key of ["pythonEditorCmd", "juliaEditorCmd", "fileManagerCmd"] as const) {
+    if (key in obj) {
+      const val = obj[key];
+      if (val !== null && val !== undefined && typeof val !== "string") {
+        throw new Error(`Invalid config value for ${key} in ${filePath}`);
+      }
+      if (typeof val === "string") result[key] = val;
     }
   }
 

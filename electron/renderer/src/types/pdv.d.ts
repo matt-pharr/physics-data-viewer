@@ -105,6 +105,12 @@ export interface Config {
   showModuleVariables?: boolean;
   showCallableVariables?: boolean;
   theme?: "light" | "dark";
+  /** External editor command for Python scripts. Uses `{}` as file-path placeholder. */
+  pythonEditorCmd?: string;
+  /** External editor command for Julia scripts. Uses `{}` as file-path placeholder. */
+  juliaEditorCmd?: string;
+  /** File-manager command to reveal a file/folder. Uses `{}` as placeholder. */
+  fileManagerCmd?: string;
   settings?: {
     shortcuts?: {
       openSettings?: string;

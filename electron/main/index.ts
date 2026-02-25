@@ -127,27 +127,28 @@ function readConfig(configStore: ConfigStore): PDVConfig {
 }
 
 /**
- * Resolve an editor command for `script.edit`.
+ * Resolve and expand an editor command for a given file path.
  *
- * @param config - Current app config.
- * @returns Executable command string.
+ * The command string may contain `{}` as a placeholder for the file path.
+ * If no placeholder is present the path is appended as the last argument.
+ * Defaults to `"code {}"` (VS Code) when no command is configured.
+ *
+ * @param cmdString - Raw command string from config, e.g. `"nvim {}"`.
+ * @param filePath  - Absolute path to the file to open.
+ * @returns Object with the executable and expanded argument list.
  */
-function resolveEditorCommand(config: PDVConfig): string {
-  const configured = (
-    config as unknown as Record<string, unknown>
-  ).editorCommand;
-  if (typeof configured === "string" && configured.trim()) {
-    return configured.trim();
-  }
-  return "code";
-}
-
-function parseCommand(command: string): { file: string; args: string[] } {
-  const parts = command.trim().split(/\s+/).filter(Boolean);
-  if (parts.length === 0) {
-    return { file: "code", args: [] };
-  }
-  return { file: parts[0], args: parts.slice(1) };
+function buildEditorSpawn(
+  cmdString: string | undefined,
+  filePath: string,
+): { file: string; args: string[] } {
+  const raw = (cmdString ?? "code {}").trim() || "code {}";
+  const parts = raw.split(/\s+/).filter(Boolean);
+  const PLACEHOLDER = "{}";
+  const hasPlaceholder = parts.includes(PLACEHOLDER);
+  const expanded = hasPlaceholder
+    ? parts.map((p) => (p === PLACEHOLDER ? filePath : p))
+    : [...parts, filePath];
+  return { file: expanded[0], args: expanded.slice(1) };
 }
 
 /**
@@ -587,13 +588,11 @@ export function registerIpcHandlers(
   // On error: throws to renderer.
   ipcMain.handle(IPC.script.edit, async (_event, kernelId: string, scriptPath: string) => {
     const config = readConfig(configStore);
-    const editor = resolveEditorCommand(config);
     const resolvedScriptPath = resolveScriptPath(kernelId, scriptPath, kernelWorkingDirs);
-    const parsed = parseCommand(editor);
-    const child = spawn(parsed.file, [...parsed.args, resolvedScriptPath], {
-      detached: true,
-      stdio: "ignore",
-    });
+    const isJulia = resolvedScriptPath.endsWith(".jl");
+    const cmdString = isJulia ? config.juliaEditorCmd : config.pythonEditorCmd;
+    const { file, args } = buildEditorSpawn(cmdString, resolvedScriptPath);
+    const child = spawn(file, args, { detached: true, stdio: "ignore" });
     child.unref();
     const result: ScriptOperationResult = { success: true };
     return result;

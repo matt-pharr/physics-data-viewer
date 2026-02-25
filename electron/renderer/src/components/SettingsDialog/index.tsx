@@ -10,9 +10,10 @@ import {
 import type { Theme } from '../../types';
 import { loader } from '@monaco-editor/react';
 
-type SettingsTab = 'shortcuts' | 'appearance' | 'runtime';
+type SettingsTab = 'general' | 'shortcuts' | 'appearance' | 'runtime';
 
 const isMac = navigator.platform.toUpperCase().startsWith('MAC');
+const DEFAULT_FILE_MANAGER = isMac ? 'open {}' : 'xdg-open {}';
 
 /** Convert a stored shortcut token to a human-readable key badge label. */
 function tokenToLabel(token: string): string {
@@ -190,10 +191,18 @@ export const SettingsDialog: React.FC<SettingsDialogProps> = ({
     () => BUILTIN_THEMES.find((t) => t.monacoTheme === 'vs')?.name ?? BUILTIN_THEMES[0].name,
   );
 
+  // General settings state
+  const [pythonEditorCmd, setPythonEditorCmd] = useState('code {}');
+  const [juliaEditorCmd, setJuliaEditorCmd] = useState('code {}');
+  const [fileManagerCmd, setFileManagerCmd] = useState(DEFAULT_FILE_MANAGER);
+
   useEffect(() => {
     if (!isOpen) return;
     setActiveTab(initialTab);
     setEditedShortcuts(shortcuts);
+    setPythonEditorCmd(config?.pythonEditorCmd ?? 'code {}');
+    setJuliaEditorCmd(config?.juliaEditorCmd ?? 'code {}');
+    setFileManagerCmd(config?.fileManagerCmd ?? DEFAULT_FILE_MANAGER);
     const load = async () => {
       const loaded = await window.pdv.themes.get();
       setSavedThemes(loaded);
@@ -345,6 +354,9 @@ export const SettingsDialog: React.FC<SettingsDialogProps> = ({
     }
 
     await onSave({
+      pythonEditorCmd: pythonEditorCmd.trim() || 'code {}',
+      juliaEditorCmd:  juliaEditorCmd.trim()  || 'code {}',
+      fileManagerCmd:  fileManagerCmd.trim()  || DEFAULT_FILE_MANAGER,
       settings: {
         shortcuts: savedShortcuts,
         appearance: {
@@ -372,12 +384,61 @@ export const SettingsDialog: React.FC<SettingsDialogProps> = ({
           <button className="close-btn" onClick={onClose} aria-label="Close settings">×</button>
         </div>
         <div className="settings-tabs">
+          <button className={`tab ${activeTab === 'general' ? 'active' : ''}`} onClick={() => setActiveTab('general')}>General</button>
           <button className={`tab ${activeTab === 'shortcuts' ? 'active' : ''}`} onClick={() => setActiveTab('shortcuts')}>Keyboard Shortcuts</button>
           <button className={`tab ${activeTab === 'appearance' ? 'active' : ''}`} onClick={() => setActiveTab('appearance')}>Appearance</button>
           <button className={`tab ${activeTab === 'runtime' ? 'active' : ''}`} onClick={() => setActiveTab('runtime')}>Python Runtime</button>
         </div>
         <div className="dialog-body">
-          {activeTab === 'shortcuts' ? (
+          {activeTab === 'general' ? (
+            <div className="settings-general">
+              <p className="settings-general-hint">
+                Use <code>{'{}'}</code> as the file-path placeholder in commands.
+                If omitted, the path is appended automatically.
+              </p>
+              <div className="settings-general-grid">
+                <label htmlFor="sg-python-editor">Python editor</label>
+                <input
+                  id="sg-python-editor"
+                  type="text"
+                  value={pythonEditorCmd}
+                  onChange={(e) => setPythonEditorCmd(e.target.value)}
+                  placeholder="code {}"
+                  spellCheck={false}
+                />
+                <div className="settings-general-desc">
+                  Used when opening Python scripts from the Tree (e.g. <code>code {'{}' }</code>, <code>nvim {'{}' }</code>).
+                </div>
+
+                <label htmlFor="sg-julia-editor">Julia editor</label>
+                <input
+                  id="sg-julia-editor"
+                  type="text"
+                  value={juliaEditorCmd}
+                  onChange={(e) => setJuliaEditorCmd(e.target.value)}
+                  placeholder="code {}"
+                  spellCheck={false}
+                />
+                <div className="settings-general-desc">
+                  Used when opening Julia scripts (not yet in use).
+                </div>
+
+                <label htmlFor="sg-file-manager">File manager</label>
+                <input
+                  id="sg-file-manager"
+                  type="text"
+                  value={fileManagerCmd}
+                  onChange={(e) => setFileManagerCmd(e.target.value)}
+                  placeholder={DEFAULT_FILE_MANAGER}
+                  spellCheck={false}
+                />
+                <div className="settings-general-desc">
+                  Used to reveal files in the OS file browser (e.g.{' '}
+                  <code>open {'{}' }</code> on macOS, <code>xdg-open {'{}' }</code> on Linux).
+                </div>
+              </div>
+            </div>
+          ) : activeTab === 'shortcuts' ? (
             <div className="settings-shortcuts-grid">
               {shortcutSections.map((section, si) => (
                 <React.Fragment key={section.title}>

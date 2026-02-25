@@ -883,6 +883,72 @@ body {
   color: var(--text-primary);
 }
 
+/* ── General settings tab ── */
+.settings-general {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.settings-general-hint {
+  font-size: 12px;
+  color: var(--text-secondary);
+  margin: 0;
+}
+
+.settings-general-hint code {
+  font-family: ui-monospace, monospace;
+  background: var(--bg-tertiary);
+  padding: 1px 4px;
+  border-radius: 3px;
+}
+
+.settings-general-grid {
+  display: grid;
+  grid-template-columns: 150px 1fr;
+  gap: 8px 12px;
+  align-items: center;
+}
+
+.settings-general-grid label {
+  font-size: 13px;
+  color: var(--text-primary);
+  text-align: right;
+  padding-right: 4px;
+}
+
+.settings-general-grid input[type="text"] {
+  padding: 5px 8px;
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  font-family: ui-monospace, monospace;
+  font-size: 13px;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.settings-general-grid input[type="text"]:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.settings-general-desc {
+  grid-column: 2;
+  font-size: 11px;
+  color: var(--text-secondary);
+  margin-top: -4px;
+  margin-bottom: 4px;
+}
+
+.settings-general-desc code {
+  font-family: ui-monospace, monospace;
+  background: var(--bg-tertiary);
+  padding: 1px 4px;
+  border-radius: 3px;
+}
+
 .settings-runtime {
   display: grid;
   gap: 14px;
