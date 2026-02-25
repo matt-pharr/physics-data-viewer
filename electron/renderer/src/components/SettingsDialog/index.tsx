@@ -5,9 +5,10 @@ import type { Shortcuts } from '../../shortcuts';
 import { EnvironmentSelector } from '../EnvironmentSelector';
 import {
   BUILTIN_THEMES, BUILTIN_THEME_NAMES, CSS_VAR_GROUPS,
-  applyThemeColors, colorsEqual,
+  applyThemeColors, colorsEqual, defineMonacoThemes, getMonacoTheme,
 } from '../../themes';
 import type { Theme } from '../../types';
+import { loader } from '@monaco-editor/react';
 
 type SettingsTab = 'shortcuts' | 'appearance' | 'runtime';
 
@@ -256,6 +257,12 @@ export const SettingsDialog: React.FC<SettingsDialogProps> = ({
     setSelectedThemeName(name);
     setEditedColors(full);
     applyThemeColors(full);
+    // Also switch Monaco editor theme live
+    const monacoThemeName = getMonacoTheme(name, BUILTIN_THEMES);
+    void loader.init().then((monaco) => {
+      defineMonacoThemes(monaco);
+      monaco.editor.setTheme(monacoThemeName);
+    });
   };
 
   const handleColorChange = (key: string, value: string) => {

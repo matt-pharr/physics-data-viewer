@@ -1,9 +1,10 @@
 import React, { useEffect, useMemo, useRef } from 'react';
-import Editor, { type OnMount } from '@monaco-editor/react';
+import Editor, { type OnMount, type BeforeMount } from '@monaco-editor/react';
 import type * as monaco from 'monaco-editor';
 import type { CellTab } from '../../types';
 import type { Shortcuts } from '../../shortcuts';
 import { matchesShortcut } from '../../shortcuts';
+import { defineMonacoThemes } from '../../themes';
 
 export interface CodeCellProps {
   tabs: (CellTab & { onChange: (code: string) => void })[];
@@ -17,6 +18,7 @@ export interface CodeCellProps {
   isExecuting: boolean;
   lastError?: string;
   shortcuts: Shortcuts;
+  monacoTheme?: string;
 }
 
 export const CodeCell: React.FC<CodeCellProps> = ({
@@ -31,6 +33,7 @@ export const CodeCell: React.FC<CodeCellProps> = ({
   isExecuting,
   lastError,
   shortcuts,
+  monacoTheme = 'vs-dark',
 }) => {
   const editorRef = useRef<monaco.editor.IStandaloneCodeEditor | null>(null);
   const activeTab = useMemo(() => tabs.find((tab) => tab.id === activeTabId), [tabs, activeTabId]);
@@ -78,6 +81,10 @@ export const CodeCell: React.FC<CodeCellProps> = ({
   if (!activeTab) {
     return null;
   }
+
+  const handleBeforeMount: BeforeMount = (monaco) => {
+    defineMonacoThemes(monaco);
+  };
 
   const handleEditorMount: OnMount = (editor) => {
     editorRef.current = editor;
@@ -203,10 +210,11 @@ export const CodeCell: React.FC<CodeCellProps> = ({
       <div className="code-cell-content">
         <Editor
           height="100%"
-          theme="vs-dark"
+          theme={monacoTheme}
           language="python"
           value={activeTab.code}
           onChange={(value) => activeTab.onChange(value || '')}
+          beforeMount={handleBeforeMount}
           onMount={handleEditorMount}
           options={{
             readOnly: disabled,

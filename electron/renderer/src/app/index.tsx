@@ -9,7 +9,7 @@ import { CreateScriptDialog } from '../components/Tree/CreateScriptDialog';
 import { SettingsDialog } from '../components/SettingsDialog';
 import type { CellTab, Config, KernelExecuteResult, LogEntry, MenuActionPayload, TreeNodeData } from '../types';
 import { matchesShortcut, resolveShortcuts } from '../shortcuts';
-import { BUILTIN_THEMES, applyThemeColors } from '../themes';
+import { BUILTIN_THEMES, applyThemeColors, getMonacoTheme } from '../themes';
 
 type Tab = 'tree' | 'namespace' | 'modules';
 type KernelStatus = 'idle' | 'starting' | 'ready' | 'error';
@@ -97,6 +97,7 @@ const App: React.FC = () => {
   const [createScriptTarget, setCreateScriptTarget] = useState<string | null>(null);
   const [showSettings, setShowSettings] = useState(false);
   const [settingsInitialTab, setSettingsInitialTab] = useState<'shortcuts' | 'appearance' | 'runtime'>('shortcuts');
+  const [monacoTheme, setMonacoTheme] = useState<string>('vs-dark');
 
   const shortcuts = useMemo(() => resolveShortcuts(config?.settings?.shortcuts), [config]);
 
@@ -170,6 +171,7 @@ const App: React.FC = () => {
         setConfig(loaded);
         setCurrentProjectDir(loaded.projectRoot ?? null);
         applyAppearanceColors(loaded.settings?.appearance?.colors);
+        setMonacoTheme(getMonacoTheme(loaded.settings?.appearance?.themeName ?? '', BUILTIN_THEMES));
 
         if (!loaded.pythonPath) {
           setKernelStatus('idle');
@@ -486,6 +488,9 @@ const App: React.FC = () => {
     if (updates.settings?.appearance?.colors) {
       applyAppearanceColors(updates.settings.appearance.colors);
     }
+    if (updates.settings?.appearance?.themeName !== undefined) {
+      setMonacoTheme(getMonacoTheme(updates.settings.appearance.themeName ?? '', BUILTIN_THEMES));
+    }
     await window.pdv.config.set(updates);
     const mergedConfig = config ? { ...config, ...updates } : null;
     setConfig(mergedConfig);
@@ -751,6 +756,7 @@ const App: React.FC = () => {
             isExecuting={isExecuting}
             lastError={lastError}
             shortcuts={shortcuts}
+            monacoTheme={monacoTheme}
           />
         </div>
       </main>
