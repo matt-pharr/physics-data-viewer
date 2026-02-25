@@ -1,1152 +1,791 @@
 /**
- * IPC Handler Registration
+ * index.ts — IPC handler registration and comm push forwarding.
  *
- * Registers all IPC handlers for communication with the renderer.
- * Kernel operations are delegated to the KernelManager class.
+ * Registers all `ipcMain.handle(...)` channels consumed by the preload
+ * `window.pdv` API. Each handler translates renderer requests into either:
+ * - direct `KernelManager` operations, or
+ * - PDV comm requests via `CommRouter`.
+ *
+ * This module also forwards selected kernel push notifications to the
+ * renderer using `BrowserWindow.webContents.send(...)`.
+ *
+ * See Also
+ * --------
+ * ARCHITECTURE.md §11.1, §11.2, §11.3
+ * ipc.ts — channel constants and API types
  */
 
-import { ipcMain, app, dialog } from 'electron';
-import * as fs from 'fs';
-import * as path from 'path';
+import { ipcMain, BrowserWindow, dialog } from "electron";
+import { spawn } from "child_process";
+import * as fs from "fs/promises";
+import * as os from "os";
+import * as path from "path";
+
+import { CommRouter } from "./comm-router";
+import { KernelManager, type KernelInfo } from "./kernel-manager";
+import { ProjectManager } from "./project-manager";
+import { ConfigStore } from "./config";
+import { updateRecentProjectsMenu } from "./menu";
 import {
+  CommandBoxData,
   IPC,
-  KernelInfo,
-  KernelExecuteResult,
   KernelCompleteResult,
   KernelInspectResult,
-  TreeNode,
-  FileReadResult,
-  Config,
+  KernelValidateResult,
   NamespaceQueryOptions,
   NamespaceVariable,
-  ScriptRunRequest,
-  ScriptRunResult,
-  ScriptParameter,
-  CommandBoxData,
+  PDVConfig,
+  ScriptOperationResult,
   Theme,
-} from './ipc';
-import { getKernelManager, resetKernelManager, safeJsonParse } from './kernel-manager';
-import { loadConfig, loadThemes, saveTheme, updateConfig } from './config';
-import { spawn } from 'child_process';
-import * as os from 'os';
-import { FileScanner } from './file-scanner';
+  TreeCreateScriptResult,
+  TreeNode,
+} from "./ipc";
+import { PDVMessage, PDVMessageType } from "./pdv-protocol";
 
-/**
- * Resolve and validate that a file path stays within an allowed root directory.
- * Returns the resolved absolute path on success, or null on path traversal / invalid input.
- */
-export function validateFilePath(filePath: string, allowedRoot: string): string | null {
-  if (typeof filePath !== 'string' || !filePath.trim()) {
-    return null;
-  }
-  try {
-    const resolved = path.resolve(filePath);
-    const normalizedRoot = path.resolve(allowedRoot);
-    const relative = path.relative(normalizedRoot, resolved);
-    if (relative.startsWith('..') || path.isAbsolute(relative)) {
-      console.error('[Security] Path traversal attempt rejected:', filePath);
-      return null;
-    }
-    return resolved;
-  } catch {
-    return null;
-  }
+// ---------------------------------------------------------------------------
+// Internal state
+// ---------------------------------------------------------------------------
+
+const DEFAULT_CONFIG: PDVConfig = {
+  showPrivateVariables: false,
+  showModuleVariables: false,
+  showCallableVariables: false,
+};
+
+const REGISTERED_CHANNELS: readonly string[] = [
+  IPC.kernels.list,
+  IPC.kernels.start,
+  IPC.kernels.stop,
+  IPC.kernels.execute,
+  IPC.kernels.interrupt,
+  IPC.kernels.restart,
+  IPC.kernels.complete,
+  IPC.kernels.inspect,
+  IPC.kernels.validate,
+  IPC.tree.list,
+  IPC.tree.get,
+  IPC.tree.createScript,
+  IPC.namespace.query,
+  IPC.script.edit,
+  IPC.script.reload,
+  IPC.project.save,
+  IPC.project.load,
+  IPC.project.new,
+  IPC.config.get,
+  IPC.config.set,
+  IPC.themes.get,
+  IPC.themes.save,
+  IPC.commandBoxes.load,
+  IPC.commandBoxes.save,
+  IPC.menu.updateRecentProjects,
+  IPC.files.pickExecutable,
+  IPC.files.pickDirectory,
+];
+
+let savedThemes: Theme[] = [];
+let savedCommandBoxes: CommandBoxData | null = null;
+
+interface PushSubscription {
+  commRouter: CommRouter;
+  type: string;
+  handler: (message: PDVMessage) => void;
 }
 
-const SCRIPT_STUB = `"""New PDV script"""
-def run(tree: dict, **kwargs):
-    # add your code here
-    return {}
+const pushSubscriptions: PushSubscription[] = [];
+const kernelWorkingDirs = new Map<string, string>();
+
+const BOOTSTRAP_AND_OPEN_COMM = `
+from IPython import get_ipython
+import pdv_kernel
+import pdv_kernel.comms as _pdv_comms
+try:
+    from ipykernel.comm import Comm
+except Exception:
+    from comm import Comm
+_ip = get_ipython()
+pdv_kernel.bootstrap(_ip)
+if _pdv_comms._comm is None:
+    _pdv_comm = Comm(target_name="pdv.kernel")
+    _pdv_comms._comm = _pdv_comm
+    _pdv_comm.on_msg(_pdv_comms._on_comm_message)
+    _pdv_comms.send_message("pdv.ready", {})
 `;
 
-// ============================================================================
-// Kernel Manager Instance
-// ============================================================================
-
-const kernelManager = getKernelManager();
-let currentConfig: Config = loadConfig();
-let fileScanner: FileScanner | null = null;
-const fileWatchers = new Map<string, fs.FSWatcher>();
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
 
 /**
- * Get the tree root directory from config with fallback chain.
- * Priority: config.treeRoot > config.projectRoot/tree > config.cwd/tree > process.cwd()/tree
- * 
- * @returns The tree root directory path
+ * Read the current app configuration.
+ *
+ * @param configStore - Config store dependency.
+ * @returns Current config snapshot.
  */
-function getTreeRoot(): string {
-  const config = loadConfig();
-  if (config.treeRoot) {
-    return config.treeRoot;
-  }
-  const projectRoot = config.projectRoot || config.cwd || process.cwd();
-  return path.join(projectRoot, 'tree');
+function readConfig(configStore: ConfigStore): PDVConfig {
+  const raw = configStore.getAll() as unknown as Partial<PDVConfig>;
+  return { ...DEFAULT_CONFIG, ...raw };
 }
 
-function getFileScanner(): FileScanner {
-  if (!fileScanner) {
-    const treeRoot = getTreeRoot();
-    fileScanner = new FileScanner(treeRoot);
+/**
+ * Resolve an editor command for `script.edit`.
+ *
+ * @param config - Current app config.
+ * @returns Executable command string.
+ */
+function resolveEditorCommand(config: PDVConfig): string {
+  const configured = (
+    config as unknown as Record<string, unknown>
+  ).editorCommand;
+  if (typeof configured === "string" && configured.trim()) {
+    return configured.trim();
   }
-  return fileScanner;
+  return "code";
 }
 
-const canRegisterHandlers = !!ipcMain && typeof ipcMain.handle === 'function';
-
-if (!canRegisterHandlers) {
-  console.warn('[main] ipcMain not available; skipping IPC handler registration');
-} else {
-  // Cleanup on app quit
-  if (app?.on) {
-    app.on('before-quit', async () => {
-      console.log('[main] App quitting, shutting down kernels...');
-      closeAllFileWatchers();
-      await kernelManager.shutdownAll();
-      resetKernelManager();
-    });
+function parseCommand(command: string): { file: string; args: string[] } {
+  const parts = command.trim().split(/\s+/).filter(Boolean);
+  if (parts.length === 0) {
+    return { file: "code", args: [] };
   }
+  return { file: parts[0], args: parts.slice(1) };
+}
 
-  // ============================================================================
-  // Kernel Handlers
-  // ============================================================================
+/**
+ * Convert renderer namespace query filters to protocol payload keys.
+ *
+ * @param options - Renderer query options.
+ * @returns Protocol payload object for `pdv.namespace.query`.
+ */
+function toNamespaceQueryPayload(
+  options?: NamespaceQueryOptions
+): Record<string, unknown> {
+  if (!options) return {};
+  return {
+    include_private: options.includePrivate,
+    include_modules: options.includeModules,
+    include_callables: options.includeCallables,
+  };
+}
 
-  ipcMain.handle(IPC.kernels.list, async (): Promise<KernelInfo[]> => {
+/**
+ * Ensure script names are safe and end with `.py`.
+ *
+ * @param scriptName - User-provided script name.
+ * @returns Sanitized filename.
+ */
+function sanitizeScriptName(scriptName: string): string {
+  const trimmed = scriptName.trim() || "script";
+  const withExt = trimmed.endsWith(".py") ? trimmed : `${trimmed}.py`;
+  return withExt.replace(/[\\/]/g, "_");
+}
+
+function resolveScriptPath(
+  kernelId: string,
+  scriptPath: string,
+  kernelWorkingDirs: Map<string, string>
+): string {
+  if (path.isAbsolute(scriptPath)) {
+    return scriptPath;
+  }
+  const workingDir = kernelWorkingDirs.get(kernelId);
+  if (!workingDir) {
+    throw new Error(`Kernel working directory not initialized: ${kernelId}`);
+  }
+  if (scriptPath.includes("/") || scriptPath.includes("\\")) {
+    return path.join(workingDir, scriptPath);
+  }
+  const parts = scriptPath.split(".").filter(Boolean);
+  if (parts.length === 0) {
+    throw new Error("Invalid script path");
+  }
+  const leaf = parts[parts.length - 1];
+  return path.join(workingDir, ...parts.slice(0, -1), `${leaf}.py`);
+}
+
+/**
+ * Write a script stub if the file does not already exist.
+ *
+ * @param scriptPath - Absolute target script path.
+ */
+async function ensureScriptFile(scriptPath: string): Promise<void> {
+  try {
+    await fs.stat(scriptPath);
+    return;
+  } catch (error) {
+    const err = error as NodeJS.ErrnoException;
+    if (err.code !== "ENOENT") throw error;
+  }
+  const now = new Date();
+  const date = `${now.getFullYear()}/${String(now.getMonth() + 1).padStart(2, "0")}/${String(now.getDate()).padStart(2, "0")}`;
+  const time = `${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}`;
+  const user = process.env.USER ?? process.env.USERNAME ?? "user";
+  const host = os.hostname();
+  const filename = path.basename(scriptPath);
+  const template =
+    '"""\n' +
+    `${filename}\n` +
+    `created by ${user} on ${host} on ${date} at ${time}\n` +
+    "Description: add your script description here.\n" +
+    '"""\n\n' +
+    "def run(pdv_tree: dict, ) -> dict:\n" +
+    "    # add your code here\n" +
+    "    return {}\n";
+  await fs.writeFile(scriptPath, template, "utf8");
+}
+
+/**
+ * Remove all registered push subscriptions.
+ */
+function clearPushSubscriptions(): void {
+  for (const sub of pushSubscriptions) {
+    sub.commRouter.offPush(sub.type, sub.handler);
+  }
+  pushSubscriptions.length = 0;
+}
+
+async function waitForPush(
+  commRouter: CommRouter,
+  type: string,
+  timeoutMs: number
+): Promise<void> {
+  await new Promise<void>((resolve, reject) => {
+    const timer = setTimeout(() => {
+      commRouter.offPush(type, handler);
+      reject(new Error(`Timed out waiting for push: ${type}`));
+    }, timeoutMs);
+    const handler = (): void => {
+      clearTimeout(timer);
+      commRouter.offPush(type, handler);
+      resolve();
+    };
+    commRouter.onPush(type, handler);
+  });
+}
+
+async function initializeKernelSession(
+  kernelManager: KernelManager,
+  commRouter: CommRouter,
+  projectManager: ProjectManager,
+  kernelId: string
+): Promise<void> {
+  const readyPromise = waitForPush(commRouter, PDVMessageType.READY, 15_000);
+  const bootstrapResult = await kernelManager.execute(kernelId, {
+    code: BOOTSTRAP_AND_OPEN_COMM,
+    silent: true,
+  });
+  if (bootstrapResult.error) {
+    throw new Error(bootstrapResult.error);
+  }
+  await readyPromise;
+  const workingDir = await projectManager.createWorkingDir();
+  await commRouter.request(PDVMessageType.INIT, {
+    working_dir: workingDir,
+    pdv_version: "1.0",
+  });
+  kernelWorkingDirs.set(kernelId, workingDir);
+}
+
+// ---------------------------------------------------------------------------
+// Public registration API
+// ---------------------------------------------------------------------------
+
+/**
+ * Register all `ipcMain.handle(...)` channels required by Step 5.
+ *
+ * @param win - Main browser window used for push forwarding.
+ * @param kernelManager - Kernel manager instance.
+ * @param commRouter - Comm router bound to the active kernel.
+ * @param projectManager - Project manager dependency.
+ * @param configStore - Config persistence dependency.
+ * @returns Nothing.
+ */
+export function registerIpcHandlers(
+  win: BrowserWindow,
+  kernelManager: KernelManager,
+  commRouter: CommRouter,
+  projectManager: ProjectManager,
+  configStore: ConfigStore
+): void {
+  unregisterIpcHandlers();
+
+  // Handles kernels:list requests from the renderer.
+  // Input: none.
+  // Returns: KernelInfo[] snapshot.
+  // On error: throws to renderer.
+  ipcMain.handle(IPC.kernels.list, async () => {
     return kernelManager.list();
   });
 
-  ipcMain.handle(IPC.kernels.start, async (_event, spec): Promise<KernelInfo> => {
-    return kernelManager.start(spec);
+  // Handles kernels:start requests from the renderer.
+  // Input: optional Partial<KernelSpec>.
+  // Returns: KernelInfo for the started kernel.
+  // On error: throws to renderer.
+  ipcMain.handle(IPC.kernels.start, async (_event, spec) => {
+    const kernel = await kernelManager.start(
+      spec as Parameters<KernelManager["start"]>[0]
+    );
+    commRouter.attach(kernelManager, kernel.id);
+    await initializeKernelSession(kernelManager, commRouter, projectManager, kernel.id);
+    return kernel;
   });
 
-  ipcMain.handle(IPC.kernels.stop, async (_event, id): Promise<boolean> => {
-    return kernelManager.stop(id);
-  });
-
-  ipcMain.handle(IPC.kernels.execute, async (_event, id, request): Promise<KernelExecuteResult> => {
-    return kernelManager.execute(id, request);
-  });
-
-  ipcMain.handle(IPC.kernels.interrupt, async (_event, id): Promise<boolean> => {
-    return kernelManager.interrupt(id);
-  });
-
-  ipcMain.handle(IPC.kernels.restart, async (_event, id): Promise<KernelInfo> => {
-    return kernelManager.restart(id);
-  });
-
-  ipcMain.handle(IPC.kernels.complete, async (_event, id, code, cursorPos): Promise<KernelCompleteResult> => {
-    return kernelManager.complete(id, code, cursorPos);
-  });
-
-  ipcMain.handle(IPC.kernels.inspect, async (_event, id, code, cursorPos): Promise<KernelInspectResult> => {
-    return kernelManager.inspect(id, code, cursorPos);
-  });
-
-  ipcMain.handle(IPC.kernels.validate, async (_event, execPath: string, language: 'python' | 'julia') => {
-    try {
-      const sanitizedPath = typeof execPath === 'string' ? execPath.trim() : '';
-      if (!sanitizedPath || sanitizedPath.includes('\n')) {
-        return { valid: false, error: 'Invalid executable path' };
-      }
-      const unsafePathPattern = /[^A-Za-z0-9_\s/.:+\-\\()]/;
-      if (unsafePathPattern.test(sanitizedPath) || sanitizedPath.length > 512) {
-        return { valid: false, error: 'Executable path contains invalid characters' };
-      }
-
-      if (path.isAbsolute(sanitizedPath)) {
-        try {
-          await fs.promises.access(sanitizedPath, fs.constants.X_OK);
-        } catch {
-          return { valid: false, error: `Executable not found or not accessible: ${sanitizedPath}` };
-        }
-      }
-
-      const args =
-        language === 'python'
-          ? [sanitizedPath, '-m', 'ipykernel', '--version']
-          : [sanitizedPath, '-e', 'using IJulia;'];
-
-      return await new Promise<{ valid: boolean; error?: string }>((resolve) => {
-        const proc = spawn(args[0], args.slice(1));
-        let output = '';
-        const MAX_OUTPUT = 4096;
-        let resolved = false;
-        const killTimer = setTimeout(() => {
-          if (!resolved) {
-            resolved = true;
-            proc.kill();
-            resolve({ valid: false, error: 'Validation timed out' });
-          }
-        }, 10000);
-
-        const appendOutput = (data: Buffer) => {
-          if (output.length >= MAX_OUTPUT) {
-            return;
-          }
-          output += data.toString();
-          if (output.length > MAX_OUTPUT) {
-            output = output.slice(0, MAX_OUTPUT);
-          }
-        };
-
-        proc.stdout.on('data', (data) => appendOutput(data));
-        proc.stderr.on('data', (data) => appendOutput(data));
-
-        proc.on('close', (code) => {
-          if (resolved) {
-            clearTimeout(killTimer);
-            return;
-          }
-          resolved = true;
-          clearTimeout(killTimer);
-          if (code === 0) {
-            resolve({ valid: true });
-          } else {
-            resolve({
-              valid: false,
-              error: `${language === 'python' ? 'ipykernel' : 'IJulia'} not found. Output: ${output}`.trim(),
-            });
-          }
-        });
-
-        proc.on('error', (err) => {
-          if (resolved) {
-            clearTimeout(killTimer);
-            return;
-          }
-          resolved = true;
-          clearTimeout(killTimer);
-          resolve({
-            valid: false,
-            error: `Failed to run ${sanitizedPath}: ${err.message}`,
-          });
-        });
-      });
-    } catch (error) {
-      return {
-        valid: false,
-        error: error instanceof Error ? error.message : String(error),
-      };
+  // Handles kernels:stop requests from the renderer.
+  // Input: kernelId (string).
+  // Returns: true after stop completes.
+  // On error: throws to renderer.
+  ipcMain.handle(IPC.kernels.stop, async (_event, kernelId: string) => {
+    await kernelManager.stop(kernelId);
+    const workingDir = kernelWorkingDirs.get(kernelId);
+    if (workingDir) {
+      await projectManager.deleteWorkingDir(workingDir);
+      kernelWorkingDirs.delete(kernelId);
     }
-  });
-
-  // ============================================================================
-  // Namespace Handlers
-  // ============================================================================
-
-  ipcMain.handle(
-    IPC.namespace.query,
-    async (_event, kernelId: string, options?: NamespaceQueryOptions): Promise<{ variables?: NamespaceVariable[]; error?: string }> => {
-      console.log('[IPC] namespace:query', kernelId, options);
-
-      if (!kernelId) {
-        return { error: 'No kernel ID provided' };
-      }
-
-      try {
-        const kernel = kernelManager.getKernel(kernelId);
-
-        if (!kernel) {
-          return { error: `Kernel not found: ${kernelId}` };
-        }
-
-        const language = kernel.language;
-        let code = '';
-
-        if (language === 'python') {
-          const includePrivate = options?.includePrivate ? 'True' : 'False';
-          const includeModules = options?.includeModules ? 'True' : 'False';
-          const includeCallables = options?.includeCallables ? 'True' : 'False';
-          // Ask IPython to emit application/json so we avoid repr strings with single quotes
-          code = `from IPython.display import JSON as PDVJSON\nPDVJSON(pdv_namespace(include_private=${includePrivate}, include_modules=${includeModules}, include_callables=${includeCallables}))`;
-        } else if (language === 'julia') {
-          const includePrivate = options?.includePrivate ? 'true' : 'false';
-          const includeModules = options?.includeModules ? 'true' : 'false';
-          code = `using JSON; JSON.json(pdv_namespace(include_private=${includePrivate}, include_modules=${includeModules}))`;
-        } else {
-          return { error: `Unsupported language: ${language}` };
-        }
-
-        const result = await kernelManager.execute(kernelId, { code });
-
-        if (result.error) {
-          return { error: result.error };
-        }
-
-        try {
-          let namespaceData: unknown = result.result;
-
-          // Prefer structured JSON results from the kernel when available
-          if (typeof namespaceData === 'string') {
-            let serialized = namespaceData.trim();
-            if (
-              (serialized.startsWith("'") && serialized.endsWith("'")) ||
-              (serialized.startsWith('"') && serialized.endsWith('"'))
-            ) {
-              serialized = serialized.slice(1, -1);
-            }
-
-            const tryParse = (value: string) => {
-              const cleaned = value.replace(/\\'/g, "'");
-              return JSON.parse(cleaned);
-            };
-
-            namespaceData = tryParse(serialized);
-
-            // Fallback: some kernels may double-escape JSON; try an extra unwrap
-            if (typeof namespaceData === 'string') {
-              namespaceData = tryParse(namespaceData);
-            }
-          }
-
-          if (!namespaceData || typeof namespaceData !== 'object') {
-            return { error: 'Namespace result could not be parsed into an object' };
-          }
-          const variables: NamespaceVariable[] = Object.entries(namespaceData).map(
-            ([name, info]) =>
-              ({
-                name,
-                ...(info as Omit<NamespaceVariable, 'name'>),
-              }) as NamespaceVariable,
-          );
-
-          return { variables };
-        } catch (parseError) {
-          return { error: `Failed to parse namespace: ${parseError instanceof Error ? parseError.message : String(parseError)}` };
-        }
-      } catch (error) {
-        return { error: error instanceof Error ? error.message : String(error) };
-      }
-    },
-  );
-
-  // ============================================================================
-  // Tree Handlers (unchanged from Step 2)
-  // ============================================================================
-
-  ipcMain.handle(IPC.tree.list, async (_event, kernelId: string, path): Promise<TreeNode[]> => {
-    console.log('[IPC] tree:list', kernelId, path);
-
-    return listTreeFromKernel(kernelId, path);
-  });
-
-  ipcMain.handle(IPC.tree.get, async (_event, id, options): Promise<unknown> => {
-    console.log('[IPC] tree:get', id, options);
-    return null;
-  });
-
-  ipcMain.handle(IPC.tree.save, async (_event, id, value): Promise<boolean> => {
-    console.log('[IPC] tree:save', id, value);
+    commRouter.detach();
     return true;
   });
 
+  // Handles kernels:execute requests from the renderer.
+  // Input: kernelId (string), execute request payload.
+  // Returns: KernelExecuteResult.
+  // On error: throws to renderer.
+  ipcMain.handle(IPC.kernels.execute, async (_event, kernelId, request) => {
+    return kernelManager.execute(
+      kernelId as string,
+      request as Parameters<KernelManager["execute"]>[1]
+    );
+  });
+
+  // Handles kernels:interrupt requests from the renderer.
+  // Input: kernelId (string).
+  // Returns: true after interrupt is sent.
+  // On error: throws to renderer.
+  ipcMain.handle(IPC.kernels.interrupt, async (_event, kernelId: string) => {
+    await kernelManager.interrupt(kernelId);
+    return true;
+  });
+
+  // Handles kernels:restart requests from the renderer.
+  // Input: kernelId (string).
+  // Returns: KernelInfo for the restarted kernel.
+  // On error: throws to renderer.
+  ipcMain.handle(IPC.kernels.restart, async (_event, kernelId: string) => {
+    const restartable = kernelManager as KernelManager & {
+      restart?: (id: string) => Promise<KernelInfo>;
+    };
+    if (restartable.restart) {
+      const restarted = await restartable.restart(kernelId);
+      commRouter.attach(kernelManager, restarted.id);
+      await initializeKernelSession(kernelManager, commRouter, projectManager, restarted.id);
+      return restarted;
+    }
+    const current = kernelManager.getKernel(kernelId);
+    if (!current) {
+      throw new Error(`Kernel not found: ${kernelId}`);
+    }
+    await kernelManager.stop(kernelId);
+    const restarted = await kernelManager.start({
+      name: current.name,
+      language: current.language,
+    });
+    commRouter.attach(kernelManager, restarted.id);
+    await initializeKernelSession(kernelManager, commRouter, projectManager, restarted.id);
+    return restarted;
+  });
+
+  // Handles kernels:complete requests from the renderer.
+  // Input: kernelId (string), code (string), cursorPos (number).
+  // Returns: KernelCompleteResult.
+  // On error: throws to renderer.
   ipcMain.handle(
-    IPC.tree.create_script,
-    async (_event, kernelId: string, targetPath: string, scriptName: string) => {
-      console.log('[IPC] tree:create_script', kernelId, targetPath, scriptName);
-
-      try {
-        const sanitized = sanitizeScriptName(scriptName);
-        if (!sanitized) {
-          return { success: false, error: 'Invalid script name' };
-        }
-
-        const config = loadConfig();
-        const treeRoot = config.treeRoot || path.join(config.projectRoot || config.cwd || process.cwd(), 'tree');
-        const folderParts = targetPath ? targetPath.split('.').filter(Boolean) : [];
-        const folderPath = path.join(treeRoot, ...folderParts);
-        await fs.promises.mkdir(folderPath, { recursive: true });
-
-        const fileName = sanitized.endsWith('.py') ? sanitized : `${sanitized}.py`;
-        const baseName = fileName.replace(/\.py$/i, '');
-        const filePath = path.join(folderPath, fileName);
-
-        if (fs.existsSync(filePath)) {
-          return { success: false, error: `File already exists: ${fileName}` };
-        }
-
-        const now = new Date();
-        const header = [
-          '"""',
-          `${fileName}`,
-          `created by ${os.userInfo().username} on ${os.hostname()} at ${String(now.getHours()).padStart(2, '0')}:${String(
-            now.getMinutes(),
-          ).padStart(2, '0')}`,
-          'Description: ',
-          '',
-          '"""',
-          '',
-        ].join('\n');
-        const stub = `${header}${SCRIPT_STUB}`;
-        await fs.promises.writeFile(filePath, stub, 'utf-8');
-
-        // Register script inside kernel tree (best-effort)
-        const registerResult = await registerScriptInKernel(kernelId, targetPath, baseName, filePath);
-        if (registerResult?.error) {
-          console.warn('[IPC] Failed to register script in kernel:', registerResult.error);
-        }
-
-        // Open in configured editor (best-effort)
-        const language = 'python';
-        void openInEditor(filePath, language);
-
-        // Try to fetch newly created node for immediate UI update
-        const parentNodes = await listTreeFromKernel(kernelId, targetPath);
-        const fullPath = targetPath ? `${targetPath}.${baseName}` : baseName;
-        const node = parentNodes.find((n) => n.path === fullPath);
-
-        return { success: true, node };
-      } catch (error) {
-        return {
-          success: false,
-          error: error instanceof Error ? error.message : String(error),
-        };
+    IPC.kernels.complete,
+    async (_event, kernelId: string, code: string, cursorPos: number) => {
+      const completable = kernelManager as KernelManager & {
+        complete?: (
+          id: string,
+          source: string,
+          pos: number
+        ) => Promise<KernelCompleteResult>;
+      };
+      if (completable.complete) {
+        return completable.complete(kernelId, code, cursorPos);
       }
-    },
+      return {
+        matches: [],
+        cursor_start: cursorPos,
+        cursor_end: cursorPos,
+      };
+    }
   );
 
-  // ============================================================================
-  // Script Handlers
-  // ============================================================================
-
-  ipcMain.handle(IPC.script.run, async (_event, kernelId: string, request: ScriptRunRequest): Promise<ScriptRunResult> => {
-    console.log('[IPC] script:run', kernelId, request);
-
-    try {
-      const kernel = kernelManager.getKernel(kernelId);
-      if (!kernel) {
-        return { success: false, error: `Kernel not found: ${kernelId}` };
-      }
-
-      const scanner = getFileScanner();
-      const scriptNode = await resolveNodeByPath(scanner, request.scriptPath);
-
-      if (!scriptNode || !scriptNode._file_path) {
-        return { success: false, error: `Script not found: ${request.scriptPath}` };
-      }
-
-      const language = kernel.language;
-      const compatibilityError = getPythonFirstScriptCompatibilityError(scriptNode.language, language);
-      if (compatibilityError) {
-        return { success: false, error: compatibilityError };
-      }
-      let code = '';
-
-      if (language === 'python') {
-        const paramsJson = JSON.stringify(request.params || {});
-        const encoded = Buffer.from(paramsJson, 'utf-8').toString('base64');
-        code = [
-          'import json, base64',
-          `_params = json.loads(base64.b64decode("${encoded}").decode("utf-8"))`,
-          `tree.run_script("${request.scriptPath}", **_params)`,
-        ].join('\n');
-      } else {
-        return { success: false, error: `Unsupported language: ${language}` };
-      }
-
-      const startTime = Date.now();
-      const result = await kernelManager.execute(kernelId, { code });
-
-      if (result.error) {
-        return {
-          success: false,
-          error: result.error,
-          stdout: result.stdout,
-          stderr: result.stderr,
-          duration: Date.now() - startTime,
-        };
-      }
-
-      return {
-        success: true,
-        result: result.result,
-        stdout: result.stdout,
-        stderr: result.stderr,
-        duration: Date.now() - startTime,
+  // Handles kernels:inspect requests from the renderer.
+  // Input: kernelId (string), code (string), cursorPos (number).
+  // Returns: KernelInspectResult.
+  // On error: throws to renderer.
+  ipcMain.handle(
+    IPC.kernels.inspect,
+    async (_event, kernelId: string, code: string, cursorPos: number) => {
+      const inspectable = kernelManager as KernelManager & {
+        inspect?: (
+          id: string,
+          source: string,
+          pos: number
+        ) => Promise<KernelInspectResult>;
       };
-    } catch (error) {
-      return {
-        success: false,
-        error: error instanceof Error ? error.message : String(error),
+      if (inspectable.inspect) {
+        return inspectable.inspect(kernelId, code, cursorPos);
+      }
+      return { found: false };
+    }
+  );
+
+  // Handles kernels:validate requests from the renderer.
+  // Input: executablePath (string), language ('python' | 'julia').
+  // Returns: KernelValidateResult.
+  // On error: throws to renderer.
+  ipcMain.handle(
+    IPC.kernels.validate,
+    async (_event, executablePath: string, language: "python" | "julia") => {
+      const validatable = kernelManager as KernelManager & {
+        validate?: (
+          execPath: string,
+          lang: "python" | "julia"
+        ) => Promise<KernelValidateResult>;
       };
+      if (validatable.validate) {
+        return validatable.validate(executablePath, language);
+      }
+      if (!executablePath.trim()) {
+        return { valid: false, error: "Executable path is required" };
+      }
+      return { valid: true };
     }
-  });
+  );
 
-  ipcMain.handle(IPC.script.edit, async (_event, scriptPath: string) => {
-    console.log('[IPC] script:edit', scriptPath);
-
-    try {
-      const scanner = getFileScanner();
-      const scriptNode = await resolveNodeByPath(scanner, scriptPath);
-
-      if (!scriptNode || !scriptNode._file_path) {
-        return { success: false, error: `Script not found: ${scriptPath}` };
-      }
-
-      const filePath = scriptNode._file_path;
-      const language = scriptNode.language || 'python';
-
-      const editorResult = openInEditor(filePath, language);
-      if (!editorResult.success && editorResult.error) {
-        return { success: false, error: editorResult.error };
-      }
-      return { success: true };
-    } catch (error) {
-      return {
-        success: false,
-        error: error instanceof Error ? error.message : String(error),
-      };
+  // Handles tree:list requests from the renderer.
+  // Input: kernelId (string), path (string, optional).
+  // Returns: TreeNode[].
+  // On error: returns [] if kernel is absent; otherwise throws.
+  ipcMain.handle(IPC.tree.list, async (_event, kernelId: string, nodePath = "") => {
+    if (!kernelManager.getKernel(kernelId)) {
+      return [] as TreeNode[];
     }
-  });
-
-  ipcMain.handle(IPC.script.reload, async (_event, scriptPath: string) => {
-    console.log('[IPC] script:reload', scriptPath);
-    try {
-      const scanner = getFileScanner();
-      const scriptNode = await resolveNodeByPath(scanner, scriptPath);
-      if (!scriptNode || !scriptNode._file_path) {
-        return { success: false, error: `Script not found: ${scriptPath}` };
-      }
-
-      const kernels = await kernelManager.list();
-      const preferredLanguage = 'python';
-      const kernel = pickKernelForScriptReload(kernels, preferredLanguage);
-      if (!kernel) {
-        return { success: false, error: 'No active kernel available for reload' };
-      }
-
-      const compatibilityError = getPythonFirstScriptCompatibilityError(scriptNode.language, kernel.language);
-      if (compatibilityError) {
-        return { success: false, error: compatibilityError };
-      }
-
-      let code = '';
-      if (kernel.language === 'python') {
-        code = [
-          'from IPython.display import JSON as PDVJSON',
-          `PDVJSON(pdv_reload_script(${JSON.stringify(scriptPath)}))`,
-        ].join('\n');
-      } else {
-        return { success: false, error: `Unsupported kernel language: ${kernel.language}` };
-      }
-
-      const result = await kernelManager.execute(kernel.id, { code });
-      if (result.error) {
-        return { success: false, error: result.error };
-      }
-
-      const payload = parseJsonResult(result.result);
-      if (payload && typeof payload === 'object') {
-        const success = Boolean((payload as { success?: boolean }).success);
-        const message = (payload as { error?: unknown }).error;
-        const errorText =
-          typeof message === 'string' ? message : message !== undefined ? JSON.stringify(message) : undefined;
-        return success ? { success: true } : { success: false, error: errorText || 'Script reload failed' };
-      }
-
-      return { success: true };
-    } catch (error) {
-      return {
-        success: false,
-        error: error instanceof Error ? error.message : String(error),
-      };
-    }
-  });
-
-  ipcMain.handle(IPC.script.get_params, async (_event, scriptPath: string) => {
-    console.log('[IPC] script:get_params', scriptPath);
-
-    try {
-      const scanner = getFileScanner();
-      const scriptNode = await resolveNodeByPath(scanner, scriptPath);
-
-      if (!scriptNode || !scriptNode._file_path) {
-        return { success: false, error: `Script not found: ${scriptPath}` };
-      }
-
-      const content = await fs.promises.readFile(scriptNode._file_path, 'utf-8');
-      const language = scriptNode.language;
-
-      const params: ScriptParameter[] = [];
-
-      if (language === 'python') {
-        const match = content.match(/def\s+run\(([\s\S]*?)\)/);
-        if (match) {
-          const argsStr = match[1];
-          const args = argsStr.split(',').map((a) => a.trim()).filter(Boolean);
-
-          for (const arg of args) {
-            if (arg === 'tree' || arg === 'self') continue;
-
-            const [nameType, ...defaultParts] = arg.split('=');
-            const [namePart, typePart] = nameType.split(':');
-            const name = namePart.trim();
-            const typeHint = typePart ? typePart.trim() : undefined;
-            const defaultValue = defaultParts.length > 0 ? defaultParts.join('=').trim() : undefined;
-
-            if (name === 'tree') {
-              continue;
-            }
-
-            params.push({
-              name,
-              type: typeHint || 'unknown',
-              default: defaultValue !== undefined ? parseDefaultValue(defaultValue) : undefined,
-              required: defaultValue === undefined,
-            });
-          }
-        }
-      } else if (language === 'julia') {
-        const match = content.match(/function run\(([\s\S]*?)\)/);
-        if (match) {
-          const argsStr = match[1];
-          const args = argsStr.split(',').map((a) => a.trim()).filter(Boolean);
-
-          for (const arg of args) {
-            if (arg === 'tree') continue;
-
-            const [nameType, defaultValue] = arg.split('=').map((s) => s.trim());
-            const [namePart, typePart] = nameType.split('::');
-            const name = namePart.trim();
-            const typeHint = typePart ? typePart.trim() : undefined;
-
-            if (name === 'tree') {
-              continue;
-            }
-
-            params.push({
-              name,
-              type: typeHint || 'Any',
-              default: defaultValue !== undefined ? parseDefaultValue(defaultValue) : undefined,
-              required: defaultValue === undefined,
-            });
-          }
-        }
-      }
-
-      return { success: true, params };
-    } catch (error) {
-      return {
-        success: false,
-        error: error instanceof Error ? error.message : String(error),
-      };
-    }
-  });
-
-  // ============================================================================
-  // File Handlers (unchanged from Step 2)
-  // ============================================================================
-
-  ipcMain.handle(IPC.files.read, async (_event, filePath, options): Promise<FileReadResult | null> => {
-    console.log('[IPC] files:read', filePath, options);
-    const projectRoot = path.dirname(getTreeRoot());
-    const validPath = validateFilePath(filePath, projectRoot);
-    if (!validPath) {
-      console.error('[IPC] files:read rejected invalid path:', filePath);
-      return null;
-    }
-    try {
-      if (!fs.existsSync(validPath)) {
-        return null;
-      }
-      const stats = fs.statSync(validPath);
-      const content = fs.readFileSync(validPath, 'utf-8');
-      return {
-        content,
-        size: stats.size,
-        mtime: stats.mtime.getTime(),
-      };
-    } catch (error) {
-      console.error('[IPC] files:read error:', error);
-      return null;
-    }
-  });
-
-  ipcMain.handle(IPC.files.write, async (_event, filePath, content): Promise<boolean> => {
-    console.log('[IPC] files:write', filePath, typeof content === 'string' ? content.slice(0, 100) : '<binary>');
-    const projectRoot = path.dirname(getTreeRoot());
-    const validPath = validateFilePath(filePath, projectRoot);
-    if (!validPath) {
-      console.error('[IPC] files:write rejected invalid path:', filePath);
-      return false;
-    }
-    try {
-      // Ensure directory exists
-      const dir = path.dirname(validPath);
-      if (!fs.existsSync(dir)) {
-        fs.mkdirSync(dir, { recursive: true });
-      }
-      
-      if (typeof content === 'string') {
-        fs.writeFileSync(validPath, content, 'utf-8');
-      } else {
-        fs.writeFileSync(validPath, Buffer.from(content));
-      }
-      return true;
-    } catch (error) {
-      console.error('[IPC] files:write error:', error);
-      return false;
-    }
-  });
-
-  ipcMain.handle(IPC.files.pickExecutable, async (): Promise<string | null> => {
-    const result = await dialog.showOpenDialog({
-      properties: ['openFile'],
+    const response = await commRouter.request(PDVMessageType.TREE_LIST, {
+      path: nodePath,
     });
+    const nodes = (response.payload as { nodes?: unknown }).nodes;
+    return Array.isArray(nodes) ? (nodes as TreeNode[]) : [];
+  });
 
+  // Handles tree:get requests from the renderer.
+  // Input: kernelId (string), path (string).
+  // Returns: Payload object from pdv.tree.get.response.
+  // On error: throws to renderer.
+  ipcMain.handle(IPC.tree.get, async (_event, kernelId: string, nodePath: string) => {
+    if (!kernelManager.getKernel(kernelId)) {
+      throw new Error(`Kernel not found: ${kernelId}`);
+    }
+    const response = await commRouter.request(PDVMessageType.TREE_GET, {
+      path: nodePath,
+    });
+    return response.payload;
+  });
+
+  // Handles tree:createScript requests from the renderer.
+  // Input: kernelId (string), targetPath (string), scriptName (string).
+  // Returns: script creation result payload.
+  // On error: throws to renderer.
+  ipcMain.handle(
+    IPC.tree.createScript,
+    async (
+      _event,
+      kernelId: string,
+      targetPath: string,
+      scriptName: string
+    ): Promise<TreeCreateScriptResult> => {
+      if (!kernelManager.getKernel(kernelId)) {
+        throw new Error(`Kernel not found: ${kernelId}`);
+      }
+      let workingDir = kernelWorkingDirs.get(kernelId);
+      if (!workingDir) {
+        workingDir = await projectManager.createWorkingDir();
+        kernelWorkingDirs.set(kernelId, workingDir);
+      }
+      const safeName = sanitizeScriptName(scriptName);
+      const scriptNodeName = path.parse(safeName).name;
+      const scriptsDir = path.join(
+        workingDir,
+        ...targetPath.split(".").filter(Boolean)
+      );
+      await fs.mkdir(scriptsDir, { recursive: true });
+      const scriptPath = path.join(scriptsDir, safeName);
+      await ensureScriptFile(scriptPath);
+
+      await commRouter.request(PDVMessageType.SCRIPT_REGISTER, {
+        parent_path: targetPath,
+        name: scriptNodeName,
+        relative_path: scriptPath,
+        language: "python",
+      });
+      return { success: true, scriptPath };
+    }
+  );
+
+  // Handles namespace:query requests from the renderer.
+  // Input: kernelId (string), optional NamespaceQueryOptions.
+  // Returns: NamespaceVariable[].
+  // On error: throws to renderer.
+  ipcMain.handle(
+    IPC.namespace.query,
+    async (
+      _event,
+      kernelId: string,
+      options?: NamespaceQueryOptions
+    ): Promise<NamespaceVariable[]> => {
+      if (!kernelManager.getKernel(kernelId)) {
+        return [];
+      }
+      const response = await commRouter.request(
+        PDVMessageType.NAMESPACE_QUERY,
+        toNamespaceQueryPayload(options)
+      );
+      const variables = (response.payload as { variables?: unknown }).variables;
+      let normalized: NamespaceVariable[] = [];
+      if (Array.isArray(variables)) {
+        normalized = variables as NamespaceVariable[];
+      } else if (variables && typeof variables === "object") {
+        normalized = Object.entries(variables as Record<string, unknown>).map(
+          ([name, value]) => ({
+            name,
+            ...(typeof value === "object" && value !== null
+              ? (value as Record<string, unknown>)
+              : {}),
+          })
+        ) as NamespaceVariable[];
+      }
+      if (!normalized.some((entry) => entry.name === "pdv_tree")) {
+        normalized.unshift({
+          name: "pdv_tree",
+          type: "protected",
+          preview: "PDVTree (protected)",
+        });
+      }
+      if (!normalized.some((entry) => entry.name === "pdv")) {
+        normalized.unshift({
+          name: "pdv",
+          type: "protected",
+          preview: "PDV app object (protected)",
+        });
+      }
+      return normalized;
+    }
+  );
+
+  // Handles script:edit requests from the renderer.
+  // Input: scriptPath (string).
+  // Returns: ScriptOperationResult.
+  // On error: throws to renderer.
+  ipcMain.handle(IPC.script.edit, async (_event, kernelId: string, scriptPath: string) => {
+    const config = readConfig(configStore);
+    const editor = resolveEditorCommand(config);
+    const resolvedScriptPath = resolveScriptPath(kernelId, scriptPath, kernelWorkingDirs);
+    const parsed = parseCommand(editor);
+    const child = spawn(parsed.file, [...parsed.args, resolvedScriptPath], {
+      detached: true,
+      stdio: "ignore",
+    });
+    child.unref();
+    const result: ScriptOperationResult = { success: true };
+    return result;
+  });
+
+  // Handles script:reload requests from the renderer.
+  // Input: treePath (string) — dot-separated tree path for the script.
+  // Returns: ScriptOperationResult.
+  // On error: throws to renderer.
+  ipcMain.handle(IPC.script.reload, async (_event, treePath: string) => {
+    const lastDot = treePath.lastIndexOf(".");
+    const parentPath = lastDot >= 0 ? treePath.slice(0, lastDot) : "";
+    const name = lastDot >= 0 ? treePath.slice(lastDot + 1) : treePath;
+    await commRouter.request(PDVMessageType.SCRIPT_REGISTER, {
+      parent_path: parentPath,
+      name,
+      relative_path: treePath,
+      language: "python",
+      reload: true,
+    });
+    const result: ScriptOperationResult = { success: true };
+    return result;
+  });
+
+  // Handles project:save requests from the renderer.
+  // Input: saveDir (string), commandBoxes payload.
+  // Returns: true on success.
+  // On error: throws to renderer.
+  ipcMain.handle(
+    IPC.project.save,
+    async (_event, saveDir: string, commandBoxes: unknown) => {
+      await projectManager.save(saveDir, commandBoxes);
+      return true;
+    }
+  );
+
+  // Handles project:load requests from the renderer.
+  // Input: saveDir (string).
+  // Returns: command box payload loaded by ProjectManager.
+  // On error: throws to renderer.
+  ipcMain.handle(IPC.project.load, async (_event, saveDir: string) => {
+    return projectManager.load(saveDir);
+  });
+
+  // Handles project:new requests from the renderer.
+  // Input: none.
+  // Returns: true.
+  // On error: throws to renderer.
+  ipcMain.handle(IPC.project.new, async () => {
+    return true;
+  });
+
+  // Handles config:get requests from the renderer.
+  // Input: none.
+  // Returns: merged PDVConfig object.
+  // On error: throws to renderer.
+  ipcMain.handle(IPC.config.get, async () => {
+    return readConfig(configStore);
+  });
+
+  // Handles config:set requests from the renderer.
+  // Input: Partial<PDVConfig>.
+  // Returns: merged PDVConfig after persistence.
+  // On error: throws to renderer.
+  ipcMain.handle(IPC.config.set, async (_event, updates: Partial<PDVConfig>) => {
+    const writableStore = configStore as unknown as {
+      set(key: string, value: unknown): void;
+      getAll(): PDVConfig;
+    };
+
+    const current = readConfig(configStore);
+    const merged: PDVConfig = { ...current, ...updates };
+    const record = updates as Record<string, unknown>;
+    for (const key of Object.keys(record)) {
+      const value = record[key];
+      if (value !== undefined) {
+        writableStore.set(key, value);
+      }
+    }
+    return { ...merged, ...writableStore.getAll() };
+  });
+
+  // Handles themes:get requests from the renderer.
+  // Input: none.
+  // Returns: Theme[] currently saved in memory.
+  // On error: throws to renderer.
+  ipcMain.handle(IPC.themes.get, async () => {
+    return savedThemes;
+  });
+
+  // Handles themes:save requests from the renderer.
+  // Input: theme payload.
+  // Returns: true after save/replace.
+  // On error: throws to renderer.
+  ipcMain.handle(IPC.themes.save, async (_event, theme: Theme) => {
+    const existing = savedThemes.findIndex((entry) => entry.name === theme.name);
+    if (existing >= 0) {
+      savedThemes[existing] = theme;
+    } else {
+      savedThemes = [...savedThemes, theme];
+    }
+    return true;
+  });
+
+  // Handles commandBoxes:load requests from the renderer.
+  // Input: none.
+  // Returns: last saved command-box data or null.
+  // On error: throws to renderer.
+  ipcMain.handle(IPC.commandBoxes.load, async () => {
+    return savedCommandBoxes;
+  });
+
+  // Handles commandBoxes:save requests from the renderer.
+  // Input: command-box payload.
+  // Returns: true after save.
+  // On error: throws to renderer.
+  ipcMain.handle(IPC.commandBoxes.save, async (_event, data: CommandBoxData) => {
+    savedCommandBoxes = data;
+    return true;
+  });
+
+  // Handles menu:updateRecentProjects requests from the renderer.
+  // Input: string[] recent project directories.
+  // Returns: true after menu refresh.
+  // On error: throws to renderer.
+  ipcMain.handle(IPC.menu.updateRecentProjects, async (_event, paths: string[]) => {
+    updateRecentProjectsMenu(Array.isArray(paths) ? paths : []);
+    return true;
+  });
+
+  // Handles files:pickExecutable requests from the renderer.
+  // Input: none.
+  // Returns: selected executable file path or null when cancelled.
+  // On error: throws to renderer.
+  ipcMain.handle(IPC.files.pickExecutable, async () => {
+    const result = await dialog.showOpenDialog({
+      properties: ["openFile"],
+    });
     if (result.canceled || result.filePaths.length === 0) {
       return null;
     }
-
-    return result.filePaths[0];
+    return result.filePaths[0] ?? null;
   });
 
-  ipcMain.handle(IPC.files.watch, async (_event, watchPath: string) => {
-    const normalizedPath = normalizeWatchPath(watchPath);
-    if (!normalizedPath) {
-      return false;
-    }
-
-    const existing = fileWatchers.get(normalizedPath);
-    if (existing) {
-      return true;
-    }
-
-    try {
-      const watcher = fs.watch(normalizedPath, { persistent: false }, (eventType, filename) => {
-        // TODO: Wire watch events to renderer notifications when Step 8 hot-reload UX is implemented.
-        console.log('[IPC] files:watch event', normalizedPath, eventType, filename ?? '');
-      });
-
-      watcher.on('error', (error) => {
-        console.warn('[IPC] files:watch watcher error:', error);
-        try {
-          watcher.close();
-        } catch {
-          // ignore close errors
-        }
-        fileWatchers.delete(normalizedPath);
-      });
-
-      fileWatchers.set(normalizedPath, watcher);
-      return true;
-    } catch (error) {
-      console.warn('[IPC] files:watch failed:', error);
-      return false;
-    }
-  });
-
-  ipcMain.handle(IPC.files.unwatch, async (_event, watchPath: string) => {
-    const normalizedPath = normalizeWatchPath(watchPath);
-    if (!normalizedPath) {
-      return false;
-    }
-
-    const watcher = fileWatchers.get(normalizedPath);
-    if (!watcher) {
-      return false;
-    }
-
-    try {
-      watcher.close();
-    } catch (error) {
-      console.warn('[IPC] files:unwatch close error:', error);
-      fileWatchers.delete(normalizedPath);
-      return false;
-    }
-
-    fileWatchers.delete(normalizedPath);
-    return true;
-  });
-
-  // ============================================================================
-  // Config Handlers (unchanged from Step 2)
-  // ============================================================================
-
-  ipcMain.handle(IPC.config.get, async (): Promise<Config> => {
-    return currentConfig;
-  });
-
-  ipcMain.handle(IPC.config.set, async (_event, config): Promise<boolean> => {
-    console.log('[IPC] config:set', config);
-    currentConfig = updateConfig(config);
-    fileScanner = null;
-    return true;
-  });
-
-  ipcMain.handle(IPC.themes.get, async (): Promise<Theme[]> => {
-    return loadThemes();
-  });
-
-  ipcMain.handle(IPC.themes.save, async (_event, theme: Theme): Promise<boolean> => {
-    saveTheme(theme);
-    return true;
-  });
-
-  // ============================================================================
-  // Command Box Handlers
-  // ============================================================================
-
-  /**
-   * Get the command boxes file path.
-   * Command boxes are stored in the project directory (parent of tree root).
-   * Example: If tree is at /tmp/user/PDV-2026_02_19_15:37:46/tree,
-   * command boxes are at /tmp/user/PDV-2026_02_19_15:37:46/command-boxes.json
-   * 
-   * @returns The full path to command-boxes.json
-   */
-  function getCommandBoxesPath(): string {
-    const treeRoot = getTreeRoot();
-    const projectDir = path.dirname(treeRoot);
-    return path.join(projectDir, 'command-boxes.json');
-  }
-
-  ipcMain.handle(IPC.commandBoxes.load, async (): Promise<CommandBoxData | null> => {
-    console.log('[IPC] commandBoxes:load');
-    try {
-      const commandBoxesPath = getCommandBoxesPath();
-      console.log('[IPC] commandBoxes:load path:', commandBoxesPath);
-      
-      if (!fs.existsSync(commandBoxesPath)) {
-        console.log('[IPC] commandBoxes:load - file does not exist, returning null');
-        return null;
-      }
-      
-      const content = fs.readFileSync(commandBoxesPath, 'utf-8');
-      const data = safeJsonParse<CommandBoxData>(content);
-      if (!data) {
-        console.error('[IPC] commandBoxes:load - failed to parse JSON');
-        return null;
-      }
-      console.log('[IPC] commandBoxes:load - loaded', data.tabs.length, 'tabs');
-      return data;
-    } catch (error) {
-      console.error('[IPC] commandBoxes:load error:', error);
+  // Handles files:pickDirectory requests from the renderer.
+  // Input: none.
+  // Returns: selected directory path or null when cancelled.
+  // On error: throws to renderer.
+  ipcMain.handle(IPC.files.pickDirectory, async () => {
+    const result = await dialog.showOpenDialog({
+      properties: ["openDirectory", "createDirectory"],
+    });
+    if (result.canceled || result.filePaths.length === 0) {
       return null;
     }
+    return result.filePaths[0] ?? null;
   });
 
-  ipcMain.handle(IPC.commandBoxes.save, async (_event, data: CommandBoxData): Promise<boolean> => {
-    console.log('[IPC] commandBoxes:save', data.tabs.length, 'tabs');
-    try {
-      const commandBoxesPath = getCommandBoxesPath();
-      console.log('[IPC] commandBoxes:save path:', commandBoxesPath);
-      
-      // Ensure directory exists
-      const dir = path.dirname(commandBoxesPath);
-      if (!fs.existsSync(dir)) {
-        fs.mkdirSync(dir, { recursive: true });
-      }
-      
-      fs.writeFileSync(commandBoxesPath, JSON.stringify(data, null, 2), 'utf-8');
-      console.log('[IPC] commandBoxes:save - success');
-      return true;
-    } catch (error) {
-      console.error('[IPC] commandBoxes:save error:', error);
-      return false;
-    }
-  });
-
-  // ============================================================================
-
-  console.log('[main] IPC handlers registered');
-}
-
-async function resolveNodeByPath(scanner: FileScanner, targetPath: string): Promise<TreeNode | undefined> {
-  const parts = targetPath.split('.').filter(Boolean);
-  let nodes = await scanner.scanAll();
-  let currentNode: TreeNode | undefined;
-  let currentPath = '';
-
-  for (const part of parts) {
-    currentPath = currentPath ? `${currentPath}.${part}` : part;
-    currentNode = nodes.find((n) => n.path === currentPath);
-    if (!currentNode) {
-      return undefined;
-    }
-    if (currentPath !== targetPath && currentNode.hasChildren) {
-      nodes = await scanner.getChildren(currentNode.path);
-    }
-  }
-
-  return currentNode;
-}
-
-async function listTreeFromKernel(kernelId: string, path: string | undefined): Promise<TreeNode[]> {
-  if (!kernelId) {
-    return [];
-  }
-
-  const kernel = kernelManager.getKernel(kernelId);
-  if (!kernel || kernel.language !== 'python') {
-    return [];
-  }
-
-  const trySnapshot = async (code: string) => {
-    const result = await kernelManager.execute(kernelId, { code });
-    if (result.error) {
-      console.warn('[tree] Kernel returned error:', result.error);
-      return undefined;
-    }
-    return parseJsonResult(result.result);
-  };
-
-  try {
-    const primary = await trySnapshot(buildTreeQueryCode(path || ''));
-    const parsedPrimary = Array.isArray(primary) ? primary : undefined;
-
-    const fallback =
-      parsedPrimary ||
-      (await trySnapshot(buildTreeQueryFallback(path || ''))) ||
-      undefined;
-
-    if (!Array.isArray(fallback)) {
-      return [];
-    }
-
-    return fallback.map(normalizeTreeNode).filter(Boolean) as TreeNode[];
-  } catch (error) {
-    console.warn('[tree] Failed to list tree from kernel:', error);
-    return [];
-  }
-}
-
-function normalizeTreeNode(node: unknown): TreeNode | null {
-  if (!node || typeof node !== 'object') return null;
-  const base = node as Partial<TreeNode>;
-  if (!base.path || !base.key || !base.id) return null;
-  return {
-    preview: base.preview,
-    hasChildren: !!base.hasChildren,
-    type: base.type || 'unknown',
-    id: base.id,
-    key: base.key,
-    path: base.path,
-    sizeBytes: base.sizeBytes,
-    shape: base.shape,
-    dtype: base.dtype,
-    loaderHint: base.loaderHint,
-    actions: base.actions,
-    expandable: base.expandable,
-    lazy: base.lazy,
-    language: base.language,
-    _file_path: base._file_path,
-    _modified: base._modified,
-  };
-}
-
-function buildTreeQueryCode(path: string): string {
-  const safePath = JSON.stringify(path ?? '');
-  return ['from IPython.display import JSON as PDVJSON', `PDVJSON(pdv_tree_snapshot(${safePath}))`].join('\n');
-}
-
-function buildTreeQueryFallback(path: string): string {
-  const safePath = JSON.stringify(path ?? '');
-  return ['import json', `print(json.dumps(pdv_tree_snapshot(${safePath})))`].join('\n');
+  registerPushForwarding(win, commRouter);
 }
 
 /**
- * Normalize kernel results that may arrive as JSON objects or doubly-quoted strings.
- * Handles cases where kernels emit JSON strings wrapped in single/double quotes or
- * double-encoded JSON payloads, returning the parsed object when possible.
+ * Register kernel push forwarding from CommRouter to the renderer process.
+ *
+ * @param win - Main BrowserWindow.
+ * @param commRouter - Comm router instance.
+ * @returns Nothing.
  */
-function parseJsonResult(raw: unknown): any {
-  let namespaceData: unknown = raw;
-  if (typeof namespaceData === 'string') {
-    let serialized = namespaceData.trim();
-    if (
-      (serialized.startsWith("'") && serialized.endsWith("'")) ||
-      (serialized.startsWith('"') && serialized.endsWith('"'))
-    ) {
-      serialized = serialized.slice(1, -1);
-    }
-
-    const tryParse = (value: string) => {
-      try {
-        const cleaned = value.replace(/\\'/g, "'");
-        return JSON.parse(cleaned);
-      } catch {
-        return undefined;
-      }
+export function registerPushForwarding(
+  win: BrowserWindow,
+  commRouter: CommRouter
+): void {
+  const subscribe = (type: string, channel: string): void => {
+    const handler = (message: PDVMessage): void => {
+      win.webContents.send(channel, message.payload);
     };
-
-    const parsed = tryParse(serialized);
-    namespaceData = parsed !== undefined ? parsed : namespaceData;
-
-    if (typeof namespaceData === 'string') {
-      const nested = tryParse(namespaceData);
-      if (nested !== undefined) {
-        namespaceData = nested;
-      }
-    }
-  }
-  return namespaceData;
-}
-
-async function registerScriptInKernel(
-  kernelId: string,
-  targetPath: string,
-  scriptName: string,
-  filePath: string,
-): Promise<{ success: boolean; error?: string }> {
-  if (!kernelId) {
-    return { success: false, error: 'No kernel available' };
-  }
-  const kernel = kernelManager.getKernel(kernelId);
-  if (!kernel || kernel.language !== 'python') {
-    return { success: false, error: 'Kernel not available or not python' };
-  }
-
-  const args = {
-    parent: targetPath,
-    name: scriptName,
-    file_path: filePath,
+    commRouter.onPush(type, handler);
+    pushSubscriptions.push({ commRouter, type, handler });
   };
-  const encodedArgs = JSON.stringify(args);
-  const code = [
-    'import json',
-    `args = json.loads(${JSON.stringify(encodedArgs)})`,
-    'pdv_register_script(args.get("parent", ""), args.get("name"), args.get("file_path"))',
-    'from IPython.display import JSON as PDVJSON',
-    'PDVJSON({"ok": True})',
-  ].join('\n');
 
-  const result = await kernelManager.execute(kernelId, { code });
-  if (result.error) {
-    return { success: false, error: result.error };
-  }
-  return { success: true };
-}
-
-export function sanitizeScriptName(name: string): string | null {
-  if (!name) return null;
-  const trimmed = name.trim();
-  if (!trimmed || trimmed.includes('/') || trimmed.includes('\\')) return null;
-  if (/[<>:"|?*\r\n]/.test(trimmed)) return null;
-  if (trimmed.length > 200) return null;
-  const normalized = trimmed.replace(/\s+/g, '_');
-  if (!/^[A-Za-z0-9._-]+$/.test(normalized)) return null;
-  return normalized;
-}
-
-function openInEditor(filePath: string, language?: string): { success: boolean; error?: string } {
-  try {
-    const config = loadConfig();
-    const projectRoot = path.dirname(getTreeRoot());
-    const validPath = validateFilePath(filePath, projectRoot);
-    if (!validPath) {
-      return { success: false, error: 'Invalid file path' };
-    }
-    const editorCmd =
-      (language === 'python'
-        ? config.editors?.python
-        : language === 'julia'
-          ? config.editors?.julia
-          : undefined) || config.editors?.default || 'open %s';
-    const parts = editorCmd.match(/(?:[^\s"]+|"[^"]*")+/g) || [];
-    if (parts.length === 0) {
-      return { success: false, error: 'Invalid editor command' };
-    }
-    const cleaned = parts.map((part) => part.replace(/(^"|"$)/g, ''));
-    const [command, ...rawArgs] = cleaned;
-    const args = rawArgs.map((arg) => (arg === '%s' ? validPath : arg));
-    if (!rawArgs.some((arg) => arg === '%s')) {
-      args.push(validPath);
-    }
-
-    spawn(command, args, {
-      shell: false,
-      detached: true,
-      stdio: 'ignore',
-    }).unref();
-
-    return { success: true };
-  } catch (error) {
-    return { success: false, error: error instanceof Error ? error.message : String(error) };
-  }
-}
-
-export function parseDefaultValue(value: string): unknown {
-  const trimmed = value.trim();
-  if (trimmed === 'True' || trimmed === 'true') {
-    return true;
-  }
-  if (trimmed === 'False' || trimmed === 'false') {
-    return false;
-  }
-
-  const numberPattern = /^-?\d+(\.\d+)?$/;
-  if (numberPattern.test(trimmed)) {
-    return Number(trimmed);
-  }
-
-  if (
-    (trimmed.startsWith('"') && trimmed.endsWith('"')) ||
-    (trimmed.startsWith("'") && trimmed.endsWith("'"))
-  ) {
-    return trimmed.slice(1, -1);
-  }
-
-  return trimmed;
+  subscribe(PDVMessageType.TREE_CHANGED, IPC.push.treeChanged);
+  subscribe(PDVMessageType.PROJECT_LOADED, IPC.push.projectLoaded);
 }
 
 /**
- * Close all active file watchers and clear the watcher registry.
+ * Unregister every IPC handler and push subscription registered by this module.
+ *
+ * @returns Nothing.
  */
-function closeAllFileWatchers(): void {
-  const entries = Array.from(fileWatchers.entries());
-  for (const [watchPath, watcher] of entries) {
-    try {
-      watcher.close();
-    } catch (error) {
-      console.warn(`[IPC] Failed to close watcher ${watchPath}:`, error);
-    }
+export function unregisterIpcHandlers(): void {
+  for (const channel of REGISTERED_CHANNELS) {
+    ipcMain.removeHandler(channel);
   }
-  fileWatchers.clear();
-}
-
-export function normalizeWatchPath(watchPath: string): string | null {
-  if (typeof watchPath !== 'string') {
-    return null;
-  }
-  const trimmed = watchPath.trim();
-  if (!trimmed || /[\0-\x1F]/.test(trimmed)) {
-    return null;
-  }
-  const resolved = path.resolve(trimmed);
-  if (!fs.existsSync(resolved)) {
-    return null;
-  }
-  return resolved;
-}
-
-export function pickKernelForScriptReload(
-  kernels: KernelInfo[],
-  preferredLanguage?: 'python' | 'julia',
-): KernelInfo | null {
-  if (!Array.isArray(kernels) || kernels.length === 0) {
-    return null;
-  }
-
-  if (preferredLanguage) {
-    const match = kernels.find((kernel) => kernel.language === preferredLanguage);
-    if (match) {
-      return match;
-    }
-  }
-
-  return kernels[0];
-}
-
-export function getPythonFirstScriptCompatibilityError(
-  scriptLanguage: string | undefined,
-  kernelLanguage: 'python' | 'julia',
-): string | null {
-  if (kernelLanguage !== 'python') {
-    return 'Julia kernel execution is not yet supported. Please use a Python kernel.';
-  }
-  if (scriptLanguage && scriptLanguage !== 'python') {
-    return 'Julia scripts are not yet supported. Only Python scripts are currently supported.';
-  }
-  return null;
+  kernelWorkingDirs.clear();
+  clearPushSubscriptions();
 }

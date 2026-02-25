@@ -6,6 +6,7 @@ import type { CommandTab } from '../../types';
 export interface CommandBoxProps {
   tabs: (CommandTab & { onChange: (code: string) => void })[];
   activeTabId: number;
+  disabled?: boolean;
   onTabChange: (id: number) => void;
   onAddTab: () => void;
   onRemoveTab?: (id: number) => void;
@@ -18,6 +19,7 @@ export interface CommandBoxProps {
 export const CommandBox: React.FC<CommandBoxProps> = ({
   tabs,
   activeTabId,
+  disabled = false,
   onTabChange,
   onAddTab,
   onRemoveTab,
@@ -47,14 +49,14 @@ export const CommandBox: React.FC<CommandBoxProps> = ({
     editorRef.current = editor;
 
     editor.addCommand(monacoInstance.KeyMod.CtrlCmd | monacoInstance.KeyCode.Enter, () => {
-      if (!isExecutingRef.current && activeTabRef.current) {
+      if (!disabled && !isExecutingRef.current && activeTabRef.current) {
         onExecute(activeTabRef.current.code);
       }
     });
   };
 
   const handleExecute = () => {
-    if (!isExecuting && activeTab.code.trim()) {
+    if (!disabled && !isExecuting && activeTab.code.trim()) {
       onExecute(activeTab.code);
     }
   };
@@ -85,6 +87,7 @@ export const CommandBox: React.FC<CommandBoxProps> = ({
               key={tab.id}
               className={`tab ${tab.id === activeTabId ? 'active' : ''}`}
               onClick={() => onTabChange(tab.id)}
+              disabled={disabled}
             >
               {tab.id}
               {onRemoveTab && (
@@ -92,30 +95,30 @@ export const CommandBox: React.FC<CommandBoxProps> = ({
                   className="tab-close"
                   role="button"
                   aria-label={`Close tab ${tab.id}`}
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    onRemoveTab(tab.id);
-                  }}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      if (!disabled) onRemoveTab(tab.id);
+                    }}
                 >
                   ×
                 </span>
               )}
             </button>
           ))}
-          <button className="tab add" onClick={onAddTab}>
+          <button className="tab add" onClick={onAddTab} disabled={disabled}>
             +
           </button>
         </div>
 
         <div className="pane-actions">
-          <button
-            className="btn btn-primary"
-            onClick={handleExecute}
-            disabled={isExecuting || !activeTab.code.trim()}
-          >
-            {isExecuting ? 'Running...' : 'Execute'}
-          </button>
-          <button className="btn btn-secondary" onClick={isEmpty ? handleClose : handleClear} disabled={isExecuting}>
+            <button
+              className="btn btn-primary"
+              onClick={handleExecute}
+              disabled={disabled || isExecuting || !activeTab.code.trim()}
+            >
+              {isExecuting ? 'Running...' : 'Execute'}
+            </button>
+          <button className="btn btn-secondary" onClick={isEmpty ? handleClose : handleClear} disabled={disabled || isExecuting}>
             {isEmpty ? 'Close' : 'Clear'}
           </button>
         </div>
@@ -130,12 +133,40 @@ export const CommandBox: React.FC<CommandBoxProps> = ({
           onChange={(value) => activeTab.onChange(value || '')}
           onMount={handleEditorMount}
           options={{
+            readOnly: disabled,
+            // Layout
             minimap: { enabled: false },
-            fontSize: 13,
-            lineNumbers: 'on',
             automaticLayout: true,
             scrollBeyondLastLine: false,
+            overviewRulerLanes: 0,
+
+            // Typography
+            fontSize: 13,
             wordWrap: 'on',
+
+            // Gutter
+            lineNumbers: 'on',
+            folding: false,
+            glyphMargin: false,
+
+            // Indentation — enforce Python conventions, never infer from content
+            tabSize: 4,
+            insertSpaces: true,
+            detectIndentation: false,
+
+            // Suggestions — disabled in favour of future kernel-backed completions (see UPCOMING_FEATURES §13)
+            quickSuggestions: false,
+            suggestOnTriggerCharacters: false,
+            wordBasedSuggestions: 'off',
+            parameterHints: { enabled: false },
+
+            // Formatting — preserve user intent when pasting code
+            formatOnPaste: false,
+            formatOnType: false,
+
+            // Scroll / cursor
+            smoothScrolling: true,
+            cursorSurroundingLines: 3,
           }}
         />
       </div>
@@ -143,6 +174,11 @@ export const CommandBox: React.FC<CommandBoxProps> = ({
       {lastError && (
         <div className="command-error-bar">
           <span>{lastError}</span>
+        </div>
+      )}
+      {disabled && (
+        <div className="command-error-bar">
+          <span>Starting kernel...</span>
         </div>
       )}
     </section>

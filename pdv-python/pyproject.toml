@@ -1,0 +1,35 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "pdv-python"
+version = "1.0.0"
+description = "PDV kernel support package — implements the PDV comm protocol and data structures for Python kernels."
+requires-python = ">=3.10"
+dependencies = [
+    "ipykernel>=6.0",
+]
+
+[project.optional-dependencies]
+# Optional data format support — imported lazily inside serialization.py
+data = [
+    "numpy>=1.24",
+    "pandas>=2.0",
+    "pyarrow>=14.0",
+]
+dev = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.23",
+    "numpy>=1.24",
+    "pandas>=2.0",
+    "pyarrow>=14.0",
+]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["pdv_kernel*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"

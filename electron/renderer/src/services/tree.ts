@@ -1,4 +1,4 @@
-import type { TreeNode } from '../../../main/ipc';
+import type { NodeDescriptor } from '../types/pdv';
 import type { TreeNodeData } from '../types';
 
 class TreeService {
@@ -48,7 +48,7 @@ class TreeService {
       throw new Error(result.error || 'Failed to create script');
     }
     this.clearCache(kernelId);
-    return result.node ? this.enrichNode(result.node) : undefined;
+    return undefined;
   }
 
   clearCache(kernelId?: string | null): void {
@@ -65,8 +65,11 @@ class TreeService {
     }
   }
 
-  private enrichNode = (node: TreeNode): TreeNodeData => ({
+  private enrichNode = (node: NodeDescriptor): TreeNodeData => ({
     ...node,
+    hasChildren: Boolean(node.has_children),
+    parentPath: node.parent_path ?? null,
+    params: node.params,
     isExpanded: false,
     isLoading: false,
   });

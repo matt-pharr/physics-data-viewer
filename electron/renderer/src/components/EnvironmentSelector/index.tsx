@@ -25,29 +25,45 @@ export const EnvironmentSelector: React.FC<EnvironmentSelectorProps> = ({
   const handleValidate = async () => {
     setValidating(true);
     setErrors({});
-
-    const pythonValid = await window.pdv.kernels.validate(pythonPath, 'python');
-
-    const nextErrors: { python?: string; julia?: string } = {};
-    if (!pythonValid.valid) {
-      nextErrors.python = pythonValid.error || 'Unable to validate Python interpreter';
-    }
-    setErrors(nextErrors);
-    setValidating(false);
-
-    if (!nextErrors.python) {
-      onSave({ pythonPath, juliaPath: juliaPath || undefined });
+    try {
+      if (!window.pdv?.kernels) {
+        throw new Error('PDV preload API is unavailable. Open the Electron window, not localhost in a browser.');
+      }
+      const pythonValid = await window.pdv.kernels.validate(pythonPath, 'python');
+      const nextErrors: { python?: string; julia?: string } = {};
+      if (!pythonValid.valid) {
+        nextErrors.python = pythonValid.error || 'Unable to validate Python interpreter';
+      }
+      setErrors(nextErrors);
+      if (!nextErrors.python) {
+        onSave({ pythonPath, juliaPath: juliaPath || undefined });
+      }
+    } catch (error) {
+      setErrors({
+        python: error instanceof Error ? error.message : String(error),
+      });
+    } finally {
+      setValidating(false);
     }
   };
 
   const handleFilePicker = async (language: 'python' | 'julia') => {
-    const result = await window.pdv.files.pickExecutable();
-    if (result) {
-      if (language === 'python') {
-        setPythonPath(result);
-      } else {
-        setJuliaPath(result);
+    try {
+      if (!window.pdv?.files) {
+        throw new Error('PDV preload API is unavailable. Open the Electron window, not localhost in a browser.');
       }
+      const result = await window.pdv.files.pickExecutable();
+      if (result) {
+        if (language === 'python') {
+          setPythonPath(result);
+        } else {
+          setJuliaPath(result);
+        }
+      }
+    } catch (error) {
+      setErrors({
+        python: error instanceof Error ? error.message : String(error),
+      });
     }
   };
 

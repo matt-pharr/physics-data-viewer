@@ -1,157 +1,257 @@
 /**
- * KernelManager Unit Tests
+ * kernel-manager.test.ts — Integration tests for KernelManager.
+ *
+ * @slow — These tests spawn real Python kernel subprocesses and require
+ * `ipykernel` to be installed in the active Python environment. They are
+ * excluded from fast CI runs and should only be executed with:
+ *
+ *   cd electron && npm test -- --reporter=verbose kernel-manager
+ *
+ * Tests cover:
+ * 1. start() returns a KernelInfo with a valid id and status 'idle'.
+ * 2. execute() with '1 + 1' returns result: 2.
+ * 3. execute() with 'print("hello")' returns stdout: 'hello\n'.
+ * 4. execute() with 'raise ValueError("oops")' returns an error string
+ *    containing 'ValueError'.
+ * 5. stop() causes the kernel process to exit within 3 seconds.
+ * 6. shutdownAll() stops all running kernels.
+ * 7. Crash detection: killing the kernel externally emits 'kernel:crashed'.
+ *
+ * Reference: IMPLEMENTATION_STEPS.md Step 3
  */
 
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import * as crypto from 'crypto';
-import { KernelManager, getKernelManager, resetKernelManager, parseMessage, serializeMessage, safeJsonParse } from './kernel-manager';
+import {
+  describe,
+  it,
+  expect,
+  beforeEach,
+  afterEach,
+  vi,
+} from "vitest";
+import { KernelManager, KernelInfo } from "./kernel-manager";
 
-const hasRealKernel = process.env.PDV_ENABLE_REAL_KERNEL_TESTS === 'true' && process.env.CI !== 'true';
-const realIt = hasRealKernel ? it : it.skip;
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
 
-// ─── helpers ─────────────────────────────────────────────────────────────────
-
-function makeFrames(key: string, headerOverride?: object) {
-  const header = { msg_id: 'test-id', username: 'pdv', session: 'sess', msg_type: 'status', version: '5.3', date: new Date().toISOString(), ...headerOverride };
-  const parentHeader = {};
-  const metadata = {};
-  const content = { execution_state: 'idle' };
-
-  const hBuf = Buffer.from(JSON.stringify(header));
-  const phBuf = Buffer.from(JSON.stringify(parentHeader));
-  const mBuf = Buffer.from(JSON.stringify(metadata));
-  const cBuf = Buffer.from(JSON.stringify(content));
-
-  const hmac = crypto.createHmac('sha256', key);
-  hmac.update(hBuf);
-  hmac.update(phBuf);
-  hmac.update(mBuf);
-  hmac.update(cBuf);
-  const sig = hmac.digest('hex');
-
-  return [Buffer.from('<IDS|MSG>'), Buffer.from(sig), hBuf, phBuf, mBuf, cBuf];
+/** Create a fresh KernelManager and register cleanup. */
+function makeManager(): KernelManager {
+  return new KernelManager();
 }
 
-// ─── safeJsonParse ────────────────────────────────────────────────────────────
+// ---------------------------------------------------------------------------
+// @slow KernelManager tests — real ipykernel processes
+// ---------------------------------------------------------------------------
 
-describe('safeJsonParse', () => {
-  it('parses valid JSON', () => {
-    expect(safeJsonParse('{"a":1}')).toEqual({ a: 1 });
-  });
-
-  it('returns null for invalid JSON', () => {
-    expect(safeJsonParse('not-json')).toBeNull();
-  });
-
-  it('returns null when payload exceeds maxSize', () => {
-    const huge = 'x'.repeat(100);
-    expect(safeJsonParse(huge, 10)).toBeNull();
-  });
-
-  it('accepts Buffer input', () => {
-    expect(safeJsonParse(Buffer.from('"hello"'))).toBe('hello');
-  });
-});
-
-// ─── parseMessage / HMAC validation ──────────────────────────────────────────
-
-describe('parseMessage', () => {
-  const key = crypto.randomUUID();
-
-  it('parses a correctly signed message', () => {
-    const frames = makeFrames(key);
-    const msg = parseMessage(frames, key);
-    expect(msg).not.toBeNull();
-    expect(msg?.header.msg_type).toBe('status');
-  });
-
-  it('rejects a message with a wrong key', () => {
-    const frames = makeFrames(key);
-    const msg = parseMessage(frames, 'wrong-key');
-    expect(msg).toBeNull();
-  });
-
-  it('rejects a message with a tampered frame', () => {
-    const frames = makeFrames(key);
-    // Tamper with the content frame
-    frames[5] = Buffer.from(JSON.stringify({ execution_state: 'hacked' }));
-    const msg = parseMessage(frames, key);
-    expect(msg).toBeNull();
-  });
-
-  it('returns null when delimiter is missing', () => {
-    const frames = [Buffer.from('no-delimiter')];
-    expect(parseMessage(frames, key)).toBeNull();
-  });
-
-  it('returns null when too few frames follow delimiter', () => {
-    const frames = [Buffer.from('<IDS|MSG>'), Buffer.from('sig')]; // only 2 after delimiter
-    expect(parseMessage(frames, key)).toBeNull();
-  });
-
-  it('round-trips via serializeMessage', () => {
-    const session = crypto.randomUUID();
-    const msg = { header: { msg_id: 'x', username: 'u', session, msg_type: 'execute_reply', version: '5.3', date: '' }, parent_header: {}, metadata: {}, content: { status: 'ok' } };
-    const frames = serializeMessage(msg, key);
-    const parsed = parseMessage(frames, key);
-    expect(parsed?.header.msg_type).toBe('execute_reply');
-    expect((parsed?.content as any).status).toBe('ok');
-  });
-});
-
-// ─── KernelManager API ────────────────────────────────────────────────────────
-
-describe('KernelManager', () => {
-  let manager: KernelManager;
+describe("@slow KernelManager (real kernel process)", { timeout: 60_000 }, () => {
+  let km: KernelManager;
+  let startedKernelId: string | undefined;
 
   beforeEach(() => {
-    resetKernelManager();
-    manager = new KernelManager();
+    km = makeManager();
+    startedKernelId = undefined;
   });
 
-  afterEach(() => {
-    resetKernelManager();
+  afterEach(async () => {
+    // Always shut everything down even if a test failed partway through.
+    await km.shutdownAll();
   });
 
-  it('should start with no kernels', async () => {
-    const kernels = await manager.list();
-    expect(kernels).toHaveLength(0);
-  });
+  // -------------------------------------------------------------------------
+  // start()
+  // -------------------------------------------------------------------------
 
-  it('should handle stopping non-existent kernel', async () => {
-    const stopped = await manager.stop('non-existent');
-    expect(stopped).toBe(false);
-  });
+  describe("start()", () => {
+    it("returns KernelInfo with a valid id and status: 'idle'", async () => {
+      const info: KernelInfo = await km.start();
 
-  it('execute returns error for non-existent kernel', async () => {
-    const result = await manager.execute('no-such-id', { code: 'x' });
-    expect(result.error).toMatch(/Kernel not found/);
-  });
+      expect(typeof info.id).toBe("string");
+      expect(info.id.length).toBeGreaterThan(0);
+      expect(info.status).toBe("idle");
+      expect(info.language).toBe("python");
 
-  describe('Real kernels (skipped when unavailable)', () => {
-    realIt('starts a real Python kernel', async () => {
-      const kernel = await manager.start({ language: 'python' });
-      expect(kernel.id).toBeDefined();
-      expect(kernel.status === 'idle' || kernel.status === 'busy').toBe(true);
-      await manager.stop(kernel.id);
+      startedKernelId = info.id;
     });
 
-    realIt('executes real Python code', async () => {
-      const kernel = await manager.start({ language: 'python' });
-      const result = await manager.execute(kernel.id, { code: 'print("real!")' });
+    it("appears in list() after start()", async () => {
+      const info = await km.start();
+      startedKernelId = info.id;
+
+      const kernels = km.list();
+      expect(kernels.some((k) => k.id === info.id)).toBe(true);
+    });
+
+    it("getKernel() returns the KernelInfo for a started kernel", async () => {
+      const info = await km.start();
+      startedKernelId = info.id;
+
+      const found = km.getKernel(info.id);
+      expect(found).toBeDefined();
+      expect(found!.id).toBe(info.id);
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // execute()
+  // -------------------------------------------------------------------------
+
+  describe("execute()", () => {
+    it("returns result: 2 for code '1 + 1'", async () => {
+      const info = await km.start();
+      startedKernelId = info.id;
+
+      const result = await km.execute(info.id, { code: "1 + 1" });
 
       expect(result.error).toBeUndefined();
-      expect(result.stdout?.includes('real!')).toBe(true);
+      expect(result.result).toBe(2);
+    });
 
-      await manager.stop(kernel.id);
+    it("returns stdout: 'hello\\n' for print(\"hello\")", async () => {
+      const info = await km.start();
+      startedKernelId = info.id;
+
+      const result = await km.execute(info.id, { code: 'print("hello")' });
+
+      expect(result.error).toBeUndefined();
+      expect(result.stdout).toBe("hello\n");
+    });
+
+    it("returns error containing 'ValueError' for raise ValueError", async () => {
+      const info = await km.start();
+      startedKernelId = info.id;
+
+      const result = await km.execute(info.id, {
+        code: 'raise ValueError("oops")',
+      });
+
+      expect(result.error).toBeDefined();
+      expect(result.error).toContain("ValueError");
+    });
+
+    it("records duration in the result", async () => {
+      const info = await km.start();
+      startedKernelId = info.id;
+
+      const result = await km.execute(info.id, { code: "pass" });
+
+      expect(typeof result.duration).toBe("number");
+      expect(result.duration).toBeGreaterThanOrEqual(0);
     });
   });
 
-  describe('Singleton', () => {
-    it('should return same instance from getKernelManager', () => {
-      const instance1 = getKernelManager();
-      const instance2 = getKernelManager();
-      expect(instance1).toBe(instance2);
+  // -------------------------------------------------------------------------
+  // stop()
+  // -------------------------------------------------------------------------
+
+  describe("stop()", () => {
+    it("causes the kernel process to exit within 3 seconds", async () => {
+      const info = await km.start();
+      const kernel = km.getKernel(info.id);
+      expect(kernel).toBeDefined();
+
+      const before = Date.now();
+      await km.stop(info.id);
+      const elapsed = Date.now() - before;
+
+      // Should complete within the 3-second wait window (plus a small buffer).
+      expect(elapsed).toBeLessThan(5000);
+
+      // Kernel should no longer be in the list.
+      expect(km.getKernel(info.id)).toBeUndefined();
+    });
+
+    it("is a no-op for an unknown kernel id", async () => {
+      // Should resolve without throwing.
+      await expect(km.stop("nonexistent-id")).resolves.toBeUndefined();
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // shutdownAll()
+  // -------------------------------------------------------------------------
+
+  describe("shutdownAll()", () => {
+    it("stops all running kernels", async () => {
+      const [a, b] = await Promise.all([km.start(), km.start()]);
+
+      expect(km.list().length).toBe(2);
+
+      await km.shutdownAll();
+
+      expect(km.list().length).toBe(0);
+      expect(km.getKernel(a.id)).toBeUndefined();
+      expect(km.getKernel(b.id)).toBeUndefined();
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // Crash detection
+  // -------------------------------------------------------------------------
+
+  describe("crash detection", () => {
+    it("emits 'kernel:crashed' when the process is killed externally", async () => {
+      const info = await km.start();
+      startedKernelId = info.id;
+
+      // Grab the underlying ChildProcess via the private map by intercepting
+      // onIopubMessage (which also has kernel id) then using getKernel.
+      // Instead, read process.pid from the internal ManagedKernel by
+      // accessing the private kernels map via casting.
+      const managed = (km as unknown as { kernels: Map<string, { process: import("child_process").ChildProcess }> })
+        .kernels.get(info.id);
+      expect(managed).toBeDefined();
+
+      const crashPromise = new Promise<string>((resolve) => {
+        km.once("kernel:crashed", (id: string) => resolve(id));
+      });
+
+      // Mark as not-shuttingDown so the crash detection fires (it already is
+      // false by default; just ensure we didn't accidentally set it).
+      managed!.process.kill("SIGKILL");
+
+      const crashedId = await crashPromise;
+      expect(crashedId).toBe(info.id);
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // onIopubMessage()
+  // -------------------------------------------------------------------------
+
+  describe("onIopubMessage()", () => {
+    it("callback receives iopub messages during execution", async () => {
+      const info = await km.start();
+      startedKernelId = info.id;
+
+      const messages: string[] = [];
+      const unsub = km.onIopubMessage(info.id, (msg) => {
+        messages.push(msg.header.msg_type);
+      });
+
+      await km.execute(info.id, { code: 'print("iopub-test")' });
+      unsub();
+
+      // Should have received at least 'stream' and 'status' messages.
+      expect(messages).toContain("stream");
+      expect(messages).toContain("status");
+    });
+
+    it("returned unsubscribe function stops delivery", async () => {
+      const info = await km.start();
+      startedKernelId = info.id;
+
+      const received: string[] = [];
+      const unsub = km.onIopubMessage(info.id, (msg) => {
+        received.push(msg.header.msg_type);
+      });
+
+      // Unsubscribe immediately.
+      unsub();
+
+      await km.execute(info.id, { code: "pass" });
+
+      // Nothing should have been delivered after unsubscribe.
+      expect(received.length).toBe(0);
     });
   });
 });

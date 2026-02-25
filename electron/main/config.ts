@@ -1,304 +1,227 @@
-import { app } from 'electron';
-import * as fs from 'fs';
-import * as path from 'path';
-import * as os from 'os';
-import type { Config, Theme } from './ipc';
+/**
+ * config.ts — Persistent user preferences and per-workspace settings.
+ *
+ * Provides typed getters/setters for all PDV configuration keys and persists
+ * them to `${appDataDir}/config.json`.
+ *
+ * Configuration is stored in the user's app data directory and persists
+ * across sessions. Workspace-specific settings (e.g. last opened project)
+ * are scoped by the working directory path.
+ *
+ * See Also
+ * --------
+ * ARCHITECTURE.md §6 (working directory lifecycle — config stores working_dir)
+ * environment-detector.ts — reads pythonPath from config
+ */
 
-const DEFAULT_THEME_COLORS: Record<string, string> = {
-  'bg-primary': '#1e1e1e',
-  'bg-secondary': '#252526',
-  'bg-tertiary': '#2d2d30',
-  'bg-hover': '#3e3e42',
-  'border-color': '#3e3e42',
-  'text-primary': '#d4d4d4',
-  'text-secondary': '#858585',
-  accent: '#4ec9b0',
-  'accent-hover': '#5fd4be',
-  error: '#f48771',
-  warning: '#dcdcaa',
-  success: '#4ec9b0',
-};
+import * as fs from "fs";
+import * as path from "path";
 
-const DEFAULT_THEMES: Array<{ name: string; colors: Record<string, string> }> = [
-  { name: 'Dark', colors: DEFAULT_THEME_COLORS },
-  {
-    name: 'Light',
-    colors: {
-      'bg-primary': '#f3f3f3',
-      'bg-secondary': '#ffffff',
-      'bg-tertiary': '#f7f7f7',
-      'bg-hover': '#e6e6e6',
-      'border-color': '#d0d0d0',
-      'text-primary': '#1f1f1f',
-      'text-secondary': '#4f4f4f',
-      accent: '#0078d4',
-      'accent-hover': '#268be4',
-      error: '#a4262c',
-      warning: '#8a6f00',
-      success: '#107c10',
-    },
-  },
-];
+// ---------------------------------------------------------------------------
+// Schema
+// ---------------------------------------------------------------------------
 
 /**
- * Get or create the tree root directory in /tmp
- * Format: /tmp/{username}/PDV-YYYY_MM_DD_HH:MM:SS/tree
- * This creates a persistent location outside the repository to avoid Vite file watching
+ * Persisted PDV user configuration values.
+ *
+ * Stored by the main process and exposed to the renderer through typed IPC.
  */
-function formatTimestamp(date: Date): string {
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, '0');
-  const day = String(date.getDate()).padStart(2, '0');
-  const hours = String(date.getHours()).padStart(2, '0');
-  const minutes = String(date.getMinutes()).padStart(2, '0');
-  const seconds = String(date.getSeconds()).padStart(2, '0');
-  return `${year}_${month}_${day}_${hours}:${minutes}:${seconds}`;
+export interface PDVConfig {
+  /** User-configured Python executable path. Undefined = auto-detect. */
+  pythonPath?: string;
+  /** Last project directory opened. */
+  lastProjectDir?: string;
+  /** Whether to show private variables in the Namespace panel. */
+  showPrivateVariables: boolean;
+  /** Whether to show module variables in the Namespace panel. */
+  showModuleVariables: boolean;
+  /** Whether to show callable variables in the Namespace panel. */
+  showCallableVariables: boolean;
+  /** UI theme override. Undefined = follow system. */
+  theme?: "light" | "dark";
 }
 
-function getDefaultTreeRoot(): string {
-  // Sanitize username to be filesystem-safe
-  const rawUsername = os.userInfo().username || 'user';
-  const username = rawUsername.replace(/[^a-zA-Z0-9_-]/g, '_');
-  return path.join(os.tmpdir(), username, `PDV-${formatTimestamp(new Date())}`, 'tree');
-}
-
-function getLegacyTreeRoot(): string {
-  const rawUsername = os.userInfo().username || 'user';
-  const username = rawUsername.replace(/[^a-zA-Z0-9_-]/g, '_');
-  return path.join(os.tmpdir(), username, 'PDV', 'tree');
-}
-
-function isTimestampedDefaultTreeRoot(treeRoot: string | undefined): boolean {
-  if (!treeRoot) {
-    return false;
-  }
-  const rawUsername = os.userInfo().username || 'user';
-  const username = rawUsername.replace(/[^a-zA-Z0-9_-]/g, '_');
-  const expectedParent = path.join(os.tmpdir(), username);
-  const projectDir = path.dirname(treeRoot);
-  const parentDir = path.dirname(projectDir);
-  return parentDir === expectedParent && /^PDV-\d{4}_\d{2}_\d{2}_\d{2}:\d{2}:\d{2}$/.test(path.basename(projectDir));
-}
-
-/**
- * Ensure the tree root directory exists and has standard subdirectories
- */
-function ensureTreeRoot(treeRoot: string): void {
-  try {
-    // Ensure main tree root directory exists
-    if (!fs.existsSync(treeRoot)) {
-      fs.mkdirSync(treeRoot, { recursive: true });
-      console.log('[config] Created tree root at:', treeRoot);
-    }
-    
-    // Ensure subdirectories exist (even if tree root already existed)
-    const subdirs = ['data', 'scripts', 'results'];
-    subdirs.forEach(subdir => {
-      const subdirPath = path.join(treeRoot, subdir);
-      if (!fs.existsSync(subdirPath)) {
-        fs.mkdirSync(subdirPath, { recursive: true });
-      }
-    });
-  } catch (error) {
-    console.error('[config] Failed to create tree root:', error);
-  }
-}
-
-const DEFAULT_CONFIG: Config = {
-  kernelSpec: null,
-  plotMode: 'native',
-  cwd: process.cwd(),
-  trusted: false,
-  recentProjects: [],
-  customKernels: [],
-  pythonPath: 'python3',
-  juliaPath: 'julia',
-  editors: {
-    python: 'code %s',
-    julia: 'code %s',
-    default: 'open %s',
-  },
-  projectRoot: process.cwd(),
-  treeRoot: getDefaultTreeRoot(),
-  settings: {
-    shortcuts: {
-      openSettings: 'CommandOrControl+,',
-    },
-    appearance: {
-      themeName: 'Dark',
-      colors: DEFAULT_THEME_COLORS,
-    },
-  },
+const CONFIG_DEFAULTS: PDVConfig = {
+  showPrivateVariables: false,
+  showModuleVariables: false,
+  showCallableVariables: false,
 };
 
-function getSettingsPath(): string {
-  return path.join(getPdvDirectory(), 'settings');
-}
-
-function getThemesPath(): string {
-  return path.join(getThemeDirectoryBase(), 'themes');
-}
-
-function getThemeDirectoryBase(): string {
+// Parse and type-check config JSON loaded from disk.
+// Optional string fields may be null/undefined to explicitly clear them.
+function parseConfig(raw: string, filePath: string): Partial<PDVConfig> {
+  let parsed: unknown;
   try {
-    if (typeof app?.getPath === 'function') {
-      return path.join(app.getPath('home'), '.pdv');
+    parsed = JSON.parse(raw);
+  } catch {
+    throw new Error(`Invalid JSON in config file: ${filePath}`);
+  }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    throw new Error(`Config file must contain an object: ${filePath}`);
+  }
+  const obj = parsed as Record<string, unknown>;
+  const result: Partial<PDVConfig> = {};
+
+  if ("pythonPath" in obj) {
+    const pythonPath = obj.pythonPath;
+    if (pythonPath !== null && pythonPath !== undefined && typeof pythonPath !== "string") {
+      throw new Error(`Invalid config value for pythonPath in ${filePath}`);
     }
-  } catch (error) {
-    console.error('[config] Failed to resolve home path for themes, falling back to os.homedir:', error);
-  }
-  return path.join(os.homedir(), '.pdv');
-}
-
-function getPdvDirectory(): string {
-  try {
-    if (typeof app?.getPath === 'function') {
-      return path.join(app.getPath('home'), '.PDV');
+    if (typeof pythonPath === "string") {
+      result.pythonPath = pythonPath;
     }
-  } catch (error) {
-    console.error('[config] Failed to resolve home path, falling back to os.homedir:', error);
   }
-  return path.join(os.homedir(), '.PDV');
-}
-
-let cachedConfig: Config | null = null;
-
-export function loadConfig(): Config {
-  if (cachedConfig) {
-    return cachedConfig;
-  }
-
-  const configPath = getSettingsPath();
-
-  try {
-    if (fs.existsSync(configPath)) {
-      const parsed = JSON.parse(fs.readFileSync(configPath, 'utf-8')) as Partial<Config>;
-      const merged = { ...DEFAULT_CONFIG, ...parsed };
-      if (merged.treeRoot === getLegacyTreeRoot() || isTimestampedDefaultTreeRoot(merged.treeRoot)) {
-        merged.treeRoot = getDefaultTreeRoot();
-      }
-      ['pythonPath', 'juliaPath'].forEach((key) => {
-        if (!(key in parsed)) {
-          (merged as Record<string, unknown>)[key] = undefined;
-        }
-      });
-      // Ensure treeRoot exists
-      if (merged.treeRoot) {
-        ensureTreeRoot(merged.treeRoot);
-      }
-      cachedConfig = merged;
-      return cachedConfig;
+  if ("lastProjectDir" in obj) {
+    const lastProjectDir = obj.lastProjectDir;
+    if (
+      lastProjectDir !== null &&
+      lastProjectDir !== undefined &&
+      typeof lastProjectDir !== "string"
+    ) {
+      throw new Error(`Invalid config value for lastProjectDir in ${filePath}`);
     }
-    // If no config exists yet, trigger first-run flow by omitting executable paths.
-    const initialConfig = { ...DEFAULT_CONFIG, pythonPath: undefined, juliaPath: undefined };
-    // Ensure treeRoot exists
-    if (initialConfig.treeRoot) {
-      ensureTreeRoot(initialConfig.treeRoot);
+    if (typeof lastProjectDir === "string") {
+      result.lastProjectDir = lastProjectDir;
     }
-    cachedConfig = initialConfig;
-    return cachedConfig;
-  } catch (error) {
-    const message =
-      error instanceof SyntaxError
-        ? '[config] Invalid config format, using defaults:'
-        : '[config] Failed to load config, using defaults:';
-    console.error(message, error);
+  }
+  if ("showPrivateVariables" in obj) {
+    if (typeof obj.showPrivateVariables !== "boolean") {
+      throw new Error(`Invalid config value for showPrivateVariables in ${filePath}`);
+    }
+    result.showPrivateVariables = obj.showPrivateVariables;
+  }
+  if ("showModuleVariables" in obj) {
+    if (typeof obj.showModuleVariables !== "boolean") {
+      throw new Error(`Invalid config value for showModuleVariables in ${filePath}`);
+    }
+    result.showModuleVariables = obj.showModuleVariables;
+  }
+  if ("showCallableVariables" in obj) {
+    if (typeof obj.showCallableVariables !== "boolean") {
+      throw new Error(`Invalid config value for showCallableVariables in ${filePath}`);
+    }
+    result.showCallableVariables = obj.showCallableVariables;
+  }
+  if ("theme" in obj) {
+    const theme = obj.theme;
+    if (theme !== null && theme !== undefined && theme !== "light" && theme !== "dark") {
+      throw new Error(`Invalid config value for theme in ${filePath}`);
+    }
+    if (theme === "light" || theme === "dark") {
+      result.theme = theme;
+    }
   }
 
-  cachedConfig = { ...DEFAULT_CONFIG };
-  // Ensure treeRoot exists
-  if (cachedConfig.treeRoot) {
-    ensureTreeRoot(cachedConfig.treeRoot);
-  }
-  return cachedConfig;
+  return result;
 }
 
-export function saveConfig(config: Config): void {
-  const configPath = getSettingsPath();
-  try {
-    fs.mkdirSync(path.dirname(configPath), { recursive: true });
-    fs.writeFileSync(configPath, JSON.stringify(config, null, 2));
-    cachedConfig = config;
-  } catch (error) {
-    console.error('[config] Failed to save config:', error);
-  }
-}
+// ---------------------------------------------------------------------------
+// ConfigStore
+// ---------------------------------------------------------------------------
 
-export function updateConfig(partial: Partial<Config>): Config {
-  const current = loadConfig();
-  const next = { ...current, ...partial };
-  saveConfig(next);
-  return next;
-}
+/**
+ * Typed persistent configuration store for Electron main-process settings.
+ *
+ * Values are stored in `${appDataDir}/config.json` and loaded on startup.
+ */
+export class ConfigStore {
+  private readonly configPath: string;
+  private state: Partial<PDVConfig>;
 
-function toThemeFileName(name: string): string {
-  const slug = name
-    .trim()
-    .toLowerCase()
-    .replace(/[^a-z0-9_-]+/g, '-')
-    .replace(/^-+|-+$/g, '');
-  return `${slug || 'theme'}.json`;
-}
+  /**
+   * Construct a ConfigStore.
+   *
+   * @param appDataDir - Absolute path to the Electron app data directory
+   *   (``app.getPath('userData')`` in Electron main).
+   * @returns A new ConfigStore instance.
+   * @throws {Error} When the app data directory cannot be created.
+   */
+  constructor(private readonly appDataDir: string) {
+    fs.mkdirSync(this.appDataDir, { recursive: true });
+    this.configPath = path.join(this.appDataDir, "config.json");
+    this.state = this.loadState();
+  }
 
-function isTheme(value: unknown): value is Theme {
-  if (!value || typeof value !== 'object') {
-    return false;
+  /**
+   * Read one config value by key.
+   *
+   * @param key - Configuration key to read.
+   * @returns The stored value for `key`.
+   */
+  get<K extends keyof PDVConfig>(key: K): PDVConfig[K] {
+    return this.getAll()[key];
   }
-  const candidate = value as { name?: unknown; colors?: unknown };
-  if (typeof candidate.name !== 'string' || !candidate.colors || typeof candidate.colors !== 'object') {
-    return false;
-  }
-  const colors = candidate.colors as Record<string, unknown>;
-  if (Object.keys(colors).length === 0) {
-    return false;
-  }
-  return Object.values(colors).every((entry) => typeof entry === 'string');
-}
 
-function ensureDefaultThemes(): void {
-  const themesPath = getThemesPath();
-  if (!fs.existsSync(themesPath)) {
-    fs.mkdirSync(themesPath, { recursive: true });
+  /**
+   * Write one config value by key.
+   *
+   * @param key - Configuration key to update.
+   * @param value - New value for `key`.
+   * @returns Nothing.
+   * @throws {Error} When the update cannot be persisted to disk.
+   */
+  set<K extends keyof PDVConfig>(key: K, value: PDVConfig[K]): void {
+    this.state = { ...this.state, [key]: value };
+    this.persist();
   }
-  const themeFiles = fs.readdirSync(themesPath).filter((file) => file.endsWith('.json'));
-  if (themeFiles.length === 0) {
-    DEFAULT_THEMES.forEach((theme) => {
-      const filePath = path.join(themesPath, toThemeFileName(theme.name));
-      fs.writeFileSync(filePath, JSON.stringify(theme, null, 2), 'utf-8');
-    });
-  }
-}
 
-export function loadThemes(): Theme[] {
-  const themesPath = getThemesPath();
-  try {
-    ensureDefaultThemes();
-    const files = fs.readdirSync(themesPath).filter((file) => file.endsWith('.json'));
-    const loadedThemes: Theme[] = [];
-    files.forEach((file) => {
-      try {
-        const parsed = JSON.parse(fs.readFileSync(path.join(themesPath, file), 'utf-8')) as unknown;
-        if (isTheme(parsed)) {
-          loadedThemes.push(parsed);
-        }
-      } catch (error) {
-        console.error(`[config] Failed to parse theme file ${file}:`, error);
-      }
-    });
-    return loadedThemes.length > 0 ? loadedThemes : DEFAULT_THEMES;
-  } catch (error) {
-    console.error('[config] Failed to load themes:', error);
-    return DEFAULT_THEMES;
+  /**
+   * Return the full configuration snapshot (defaults included).
+   *
+   * @returns Complete PDVConfig object.
+   */
+  getAll(): PDVConfig {
+    return { ...CONFIG_DEFAULTS, ...this.state };
   }
-}
 
-export function saveTheme(theme: Theme): void {
-  const themesPath = getThemesPath();
-  try {
-    fs.mkdirSync(themesPath, { recursive: true });
-    const filePath = path.join(themesPath, toThemeFileName(theme.name));
-    fs.writeFileSync(filePath, JSON.stringify(theme, null, 2), 'utf-8');
-  } catch (error) {
-    console.error('[config] Failed to save theme:', error);
+  /**
+   * Reset every config value back to defaults.
+   *
+   * @returns Nothing.
+   * @throws {Error} When reset cannot be persisted to disk.
+   */
+  reset(): void {
+    this.state = {};
+    this.persist();
+  }
+
+  // Read config state from disk; on invalid/corrupt content, log and return defaults.
+  private loadState(): Partial<PDVConfig> {
+    if (!fs.existsSync(this.configPath)) {
+      return {};
+    }
+    try {
+      const raw = fs.readFileSync(this.configPath, "utf8");
+      return parseConfig(raw, this.configPath);
+    } catch (error) {
+      console.error(
+        `[ConfigStore] Failed to load config from ${this.configPath}; falling back to defaults.`,
+        error
+      );
+      this.backupUnreadableConfig();
+      return {};
+    }
+  }
+
+  // Move unreadable config aside so future boots are clean and data is preserved for debugging.
+  private backupUnreadableConfig(): void {
+    if (!fs.existsSync(this.configPath)) {
+      return;
+    }
+    const backupPath = `${this.configPath}.corrupted-${Date.now()}`;
+    try {
+      fs.renameSync(this.configPath, backupPath);
+      console.error(`[ConfigStore] Backed up unreadable config to ${backupPath}`);
+    } catch (error) {
+      console.error(
+        `[ConfigStore] Failed to back up unreadable config at ${this.configPath}.`,
+        error
+      );
+    }
+  }
+
+  // Persist current in-memory state to disk.
+  private persist(): void {
+    fs.writeFileSync(this.configPath, JSON.stringify(this.state, null, 2), "utf8");
   }
 }

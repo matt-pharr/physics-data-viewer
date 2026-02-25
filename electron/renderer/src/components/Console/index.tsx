@@ -76,7 +76,7 @@ const LogEntryView: React.FC<{ log: LogEntry; index: number }> = ({ log, index }
               key={`${log.id}-img-${idx}`}
               className="log-image"
               src={`data:${img.mime};base64,${img.data}`}
-              alt={`Result ${index} image ${idx + 1}`}
+              alt={`Plot ${index}.${idx + 1}`}
             />
           ))}
         </div>
