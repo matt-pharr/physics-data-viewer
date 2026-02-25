@@ -346,41 +346,107 @@ Specific assertions that must pass:
 
 ### Files modified
 ```
-electron/renderer/src/
-    components/
-        Tree/index.tsx              ← use window.pdv.tree.list, handle pdv.tree.changed push
-        NamespaceView/index.tsx     ← use window.pdv.namespace.query
-        CommandBox/index.tsx        ← use window.pdv.kernels.execute
-        Console/index.tsx           ← consume execution results
-        EnvironmentSelector/index.tsx ← use environment detection API
-    services/
-        tree.ts                     ← update to new TreeNode shape (remove FileScanner assumptions)
-    types/
-        pdv.d.ts                    ← update to match new ipc.ts types
+pdv-python/pdv_kernel/
+    tree.py                           ← add param extraction + ScriptParameter to PDVScript
+    handlers/tree.py                  ← include params in NodeDescriptor for script nodes
+
+electron/
+    main/
+        ipc.ts                        ← add files.pickExecutable IPC channel; add ScriptParameter +
+        |                               params field to NodeDescriptor; add PDVApi files entry
+        index.ts                      ← register files:pickExecutable ipcMain handler
+    preload.ts                        ← add window.pdv.files.pickExecutable bridge
+    renderer/src/
+        app/index.tsx                 ← kernel status state, push subscriptions, dead code removal,
+        |                               project save/load trigger handlers
+        components/
+            Tree/index.tsx            ← verify window.pdv.tree.list; driven by treeRefreshToken from App
+            NamespaceView/index.tsx   ← verify window.pdv.namespace.query; accept disabled prop
+            CommandBox/index.tsx      ← verify window.pdv.kernels.execute; accept disabled prop
+            Console/index.tsx         ← verify execution result consumption
+            EnvironmentSelector/index.tsx ← use window.pdv.files.pickExecutable for file picker
+            ScriptDialog/index.tsx    ← full rewrite: use NodeDescriptor.params; build kernels.execute
+        services/
+            tree.ts                   ← verify new TreeNode shape; remove FileScanner assumptions
+        types/
+            pdv.d.ts                  ← add ScriptParameter type; update NodeDescriptor to include
+                                        optional params field; all renderer types routed through here
 ```
 
 ### What is implemented
-- Tree panel: calls `window.pdv.tree.list(kernelId, path)` on expand; listens for `pdv.tree.changed` IPC push and re-fetches affected subtree
-- Namespace panel: calls `window.pdv.namespace.query(kernelId, options)` on refresh
-- Command Box: calls `window.pdv.kernels.execute(kernelId, request)` on run; output flows to Console
-- Environment Selector: calls environment detection IPC; shows install prompt if `pdv-python` is missing
-- All references to `FileScanner`, `pdv_tree_snapshot`, `pdv_namespace`, and code-string IPC patterns are removed
+
+**`pdv-python`: PDVScript parameter extraction (`tree.py`, `handlers/tree.py`)**
+- `PDVScript.__init__` inspects the script file's `run()` signature via `inspect.signature` at construction time. It extracts all parameters except the first (`pdv_tree`), producing a list of `ScriptParameter` dicts: `{ name, type, default, required }`. See ARCHITECTURE.md §5.7.
+- If the file doesn't exist yet or has a syntax error, `params` defaults to `[]` — registration still succeeds.
+- `handle_tree_list` in `handlers/tree.py` includes `params` in the node descriptor when `kind == 'script'`. Non-script nodes do not include a `params` field.
+
+**IPC surface additions/removals (`ipc.ts`, `index.ts`, `preload.ts`)**
+- `ScriptParameter` interface added to `ipc.ts`: `{ name: string; type: string; default: unknown; required: boolean }`.
+- `NodeDescriptor.params` optional field added: `ScriptParameter[] | undefined`, present only when `type === 'script'`.
+- `window.pdv.files.pickExecutable()` added: calls `dialog.showOpenDialog` in the main process, returns the selected file path as `string | null`. Used by both `EnvironmentSelector` and `SettingsDialog`.
+- `window.pdv.script.run()` does NOT exist and must NOT be added. Running a `PDVScript` from the renderer is always done via `window.pdv.kernels.execute(kernelId, { code: 'pdv_tree["path.to.script"].run(a=1)' })`. The `ScriptDialog` component builds this string. This keeps the IPC surface minimal and makes script execution appear identically to user-typed code in the Console and kernel logs.
+- `window.pdv.settings.onOpen()` does NOT exist and must NOT be added. Remove the stub call from `app/index.tsx`.
+
+**Kernel startup and `kernelStatus` state (`app/index.tsx`)**
+- Add `kernelStatus: 'idle' | 'starting' | 'ready' | 'error'` state (initially `'idle'`).
+- `startKernel()` sets `'starting'` before `await window.pdv.kernels.start(spec)`, then `'ready'` on success or `'error'` on rejection. See ARCHITECTURE.md §4.4.
+- All panels pass the locked state down: `Tree`, `NamespaceView`, and `CommandBox` all receive a `disabled` prop that is `true` when `kernelStatus !== 'ready'`. Disabled panels render a "Starting kernel…" overlay or are simply inert.
+- On rejection, set `lastError` with the error message.
+
+**Push subscriptions (`app/index.tsx`)**
+- A single `useEffect` keyed on `currentKernelId` owns all push subscriptions. See ARCHITECTURE.md §11.4 for the canonical pattern.
+- `window.pdv.tree.onChanged(...)` increments `treeRefreshToken`, propagated to `Tree` as a prop and triggering a re-fetch. This replaces the current behaviour where the token is only incremented manually after explicit user actions.
+- `window.pdv.project.onLoaded(...)` repopulates command box tabs from the loaded project state.
+- `useEffect` cleanup unsubscribes both; subscriptions are re-established when `currentKernelId` changes.
+
+**Project Save / Open UI (`app/index.tsx`)**
+- Two buttons added to the header: __Save Project__ and __Open Project__.
+- __Save Project__: calls `dialog.showSaveDialog` (via a new `window.pdv.files.pickDirectory()` call, or inline using Electron's `showOpenDialog` with `properties: ['openDirectory', 'createDirectory']`) to select/confirm the save directory, then calls `window.pdv.project.save(saveDir, commandBoxes)`.
+- __Open Project__: calls `dialog.showOpenDialog` (directory picker), then calls `window.pdv.project.load(saveDir)` and populates command box tabs from the result. The `pdv.project.onLoaded` push subscription then fires and refreshes the tree.
+- Both buttons are disabled when `kernelStatus !== 'ready'`.
+- `window.pdv.files.pickDirectory()` must be added to `ipc.ts`, `index.ts`, and `preload.ts` alongside `pickExecutable`. It wraps `dialog.showOpenDialog({ properties: ['openDirectory', 'createDirectory'] })` and returns `string | null`.
+
+**ScriptDialog rewrite (`components/ScriptDialog/index.tsx`)**
+- Remove the `window.pdv.script.getParams()` call and the `ScriptParameter` import from `../../../main/ipc`.
+- The component now receives the `NodeDescriptor` (which contains `params`) as a prop instead of fetching params via IPC.
+- On "Run", build the `kernels.execute` code string from the collected values:
+  ```ts
+  const args = Object.entries(values)
+    .map(([k, v]) => `${k}=${JSON.stringify(v)}`)
+    .join(', ');
+  const code = `pdv_tree[${JSON.stringify(node.path)}].run(${args})`;
+  await window.pdv.kernels.execute(kernelId, { code, capture: false });
+  ```
+- Log the generated code string to the Console so it's visible as user-runnable code.
+- `handleTreeAction` in `app/index.tsx` must pass the `TreeNodeData` (which now includes `params` from `NodeDescriptor`) to `ScriptDialog`.
+
+**Cross-boundary type imports (`types/pdv.d.ts`, all renderer files)**
+- `ScriptParameter` and the updated `NodeDescriptor` type (with `params`) must be re-exported from `types/pdv.d.ts`.
+- Renderer components must import shared types from `../types` or `../../types`, not from `../../../main/ipc` or `../../../../main/ipc`. Importing from `main/` crosses the process boundary in the type system and will break the TypeScript build once renderer and main have separate `tsconfig.json` roots.
 
 ### What is NOT changed in this step
 - Visual layout and styling — no UX changes
 - Component structure — only data flow is updated
+- No new panels or dialogs are added
 
 ### Tests to confirm completion
 There are no automated tests for the renderer in alpha. Confirmation is by manual smoke test:
 
 1. Launch app (`npm run dev` or equivalent)
-2. App detects Python environment and confirms `pdv-python` is installed (or prompts to install)
-3. Kernel starts; UI unlocks
-4. Tree panel shows empty tree (working directory root)
-5. Typing `pdv_tree['x'] = 42` in the Command Box and running it causes the tree panel to refresh and show node `x`
+2. All panels (Tree, Namespace, CommandBox) show a loading/disabled state while the kernel is starting; the Save and Open buttons in the header are also disabled
+3. App detects Python environment; if `pdv-python` is not installed, a prompt appears offering to install it; clicking "Browse" in either the environment selector or the Settings dialog opens a native file-picker dialog (`window.pdv.files.pickExecutable`)
+4. Kernel starts; UI fully unlocks; Tree panel shows an empty tree at the working directory root
+5. Typing `pdv_tree['x'] = 42` in the Command Box and running it causes the Tree panel to refresh **automatically** (via `pdv.tree.changed` push — NOT via a manual refresh button) and show node `x`
 6. Namespace panel shows `pdv_tree` and `pdv` as protected names, plus `x`
-7. File → Save Project saves to a chosen directory; `project.json`, `tree-index.json`, `command-boxes.json` are present in the directory
-8. Restart app, File → Open Project loads the directory; tree panel repopulates with node `x`, command box tabs are restored
+7. Right-clicking a folder node and selecting "New Script" creates a script file; the created script file follows the template:
+   ```python
+   def run(pdv_tree: dict, ) -> dict:
+       # add your code here
+       return {}
+   ```
+8. Right-clicking the script node and selecting "Run" opens `ScriptDialog`, which reads `params` from the `NodeDescriptor` (no IPC round-trip). If the script has no extra params beyond `pdv_tree`, the dialog shows no form fields and only a Run button. Clicking Run constructs and executes `pdv_tree["<path>"].run()` via `kernels.execute`; the generated code string appears in the Console exactly as user-typed code would, and the return value is logged
+9. Clicking __Save Project__ opens a directory picker; after selection, `project.json`, `tree-index.json`, and `command-boxes.json` are present in the chosen directory
+10. Restart app; click __Open Project__ and select the saved directory; the `pdv.project.onLoaded` push fires; the Tree panel repopulates with node `x`; command box tabs are restored from `command-boxes.json`
 
 ---
 

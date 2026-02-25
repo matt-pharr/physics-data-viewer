@@ -279,6 +279,24 @@ On kernel crash (process exits unexpectedly):
 3. Working directory is deleted
 4. App offers to restart the kernel (new session, empty tree)
 
+### 4.4 Renderer Startup Behavior
+
+The renderer is never aware of the low-level `pdv.ready → pdv.init → pdv.init.response` handshake. That exchange is entirely encapsulated inside the main process's `kernels.start()` IPC handler: the handler spawns the subprocess, runs the full handshake sequence, and only resolves its promise once `pdv.init.response` has been received with `status: 'ok'`.
+
+From the renderer's perspective, startup is simply:
+
+```tsx
+// Renderer (app/index.tsx)
+setKernelStatus('starting'); // locks UI — command box, tree, namespace all disabled
+const info = await window.pdv.kernels.start(spec);
+setCurrentKernelId(info.id);
+setKernelStatus('ready');   // unlocks UI
+```
+
+The renderer shows a loading / disabled state for all panels while `start()` is pending. On rejection (timeout or init error), the renderer displays the error string from the rejected promise.
+
+There is no separate push notification for "kernel ready" that the renderer must subscribe to. The resolved `KernelInfo` value IS the ready signal.
+
 ---
 
 ## 5. The pdv-python Package
@@ -359,10 +377,51 @@ All other `pdv_*` names in the namespace are an error. Internal implementation f
 
 ### 5.7 PDVScript Class
 
-A lightweight wrapper stored as a tree node value. Holds:
+A lightweight wrapper stored as a tree node value. Attributes:
 - `relative_path`: path of the script file relative to the project root
 - `language`: `'python'` (Julia deferred)
-- `doc`: first line of the script's docstring (for preview display)
+- `doc`: first line of the script's module docstring (for preview display)
+- `params`: list of `ScriptParameter` descriptors for the user-facing parameters (see below)
+
+`PDVScript.run(tree, **kwargs)` loads the module fresh (no import cache), calls `module.run(tree, **kwargs)`, and returns the result dict.
+
+#### Script File Format
+
+Every PDV script is a plain Python file with a module-level docstring and a single `run()` function:
+
+```python
+"""
+fit_model.py
+created by user on host at 14:32
+Description: Fit a Gaussian to the waveform data.
+"""
+def run(pdv_tree: dict, amplitude: float = 1.0, sigma: float = 0.1) -> dict:
+    # pdv_tree is injected by PDVScript.run() — never supplied by the caller
+    data = pdv_tree["waveforms.ch1"]
+    # ... analysis ...
+    return {"fit_amplitude": amplitude}
+```
+
+Rules:
+- The function **must** be named `run`.
+- The **first parameter must be `pdv_tree`** (type hint `dict` is recommended so the language server does not flag tree references as errors). This argument is always injected by `PDVScript.run()` and is never supplied by the user.
+- All remaining parameters become the user-facing script parameters surfaced in the `ScriptDialog`. They may have default values and type hints.
+- The return value must be a `dict` (or `None`). Non-dict returns are ignored.
+
+#### ScriptParameter Descriptor
+
+When a `PDVScript` is constructed (at registration time), `pdv_kernel` inspects the `run()` function's signature via `inspect.signature` and extracts all parameters except `pdv_tree`. Each becomes a `ScriptParameter` descriptor stored on the `PDVScript` and included in the `NodeDescriptor` returned by `pdv.tree.list.response`:
+
+```json
+{
+  "name": "amplitude",
+  "type": "float",
+  "default": 1.0,
+  "required": false
+}
+```
+
+A parameter is `required` if it has no default value. `type` is the string representation of the annotation (e.g. `"float"`, `"int"`, `"str"`), or `"any"` if unannotated. If the script file cannot be parsed (syntax error, `run()` missing), registration still succeeds but `params` is an empty list.
 
 `PDVScript.run(tree, **kwargs)` loads the module fresh (no cache), calls `module.run(tree, **kwargs)`, and returns the result.
 
@@ -497,8 +556,9 @@ The following node types are supported:
 
 ### 7.3 Node Descriptor (tree-index.json entry)
 
-Each node in `tree-index.json` is described by:
+Each node in `tree-index.json` is described by a `NodeDescriptor`. Most fields apply to all node types; a few are type-specific.
 
+**Common fields (all types):**
 ```json
 {
   "id": "data.waveforms.ch1",
@@ -508,8 +568,13 @@ Each node in `tree-index.json` is described by:
   "type": "ndarray",
   "has_children": false,
   "lazy": true,
-  "created_at": "<iso8601>",
-  "updated_at": "<iso8601>",
+  "preview": "float64 array (1024 × 4)"
+}
+```
+
+**Data node additional fields** (ndarray, dataframe, etc.):
+```json
+{
   "storage": {
     "backend": "local_file",
     "relative_path": "tree/data/waveforms/ch1.npy",
@@ -517,14 +582,24 @@ Each node in `tree-index.json` is described by:
   },
   "shape": [1024, 4],
   "dtype": "float64",
-  "size_bytes": 32768,
-  "preview": "float64 array (1024 × 4)",
-  "language": null,
-  "actions": []
+  "size_bytes": 32768
 }
 ```
 
 Scalar and small inline values use `"backend": "inline"` and store the value directly in `"value"` instead of `"relative_path"`.
+
+**Script node additional fields** (`"type": "script"`):
+```json
+{
+  "language": "python",
+  "params": [
+    { "name": "amplitude", "type": "float", "default": 1.0, "required": false },
+    { "name": "label",     "type": "str",   "default": null, "required": true }
+  ]
+}
+```
+
+`params` lists every parameter of the script's `run()` function except `pdv_tree` (which is always injected). The renderer uses this to build the `ScriptDialog` form. See §5.7 for the `ScriptParameter` descriptor shape and extraction rules.
 
 ### 7.4 Tree-Changed Push Notifications
 
@@ -662,15 +737,20 @@ All IPC channel names are defined as constants in `electron/main/ipc.ts`. This f
 
 The preload bridge exposes exactly the operations the renderer needs. It never exposes raw Node.js or Electron APIs. The API is fully typed (see `ipc.ts`).
 
-The API surface mirrors the PDV protocol domains:
-- `window.pdv.kernels.*` — kernel management (start, stop, execute, interrupt, restart, complete, inspect)
-- `window.pdv.tree.*` — tree operations (list, get, save, createScript)
-- `window.pdv.namespace.*` — namespace query
-- `window.pdv.script.*` — script operations (edit, reload)
-- `window.pdv.project.*` — project save, load, new
-- `window.pdv.config.*` — app config get/set
-- `window.pdv.themes.*` — theme get/save
-- `window.pdv.commandBoxes.*` — tab persistence
+The API surface:
+- `window.pdv.kernels.*` — kernel management: `start`, `stop`, `execute`, `interrupt`, `restart`, `complete`, `inspect`, `validate`
+- `window.pdv.tree.*` — tree operations: `list`, `get`, `createScript`; push: `onChanged(cb) → unsub`
+- `window.pdv.namespace.*` — namespace query: `query`
+- `window.pdv.script.*` — script tooling: `edit`, `reload` (open in external editor; re-register with kernel)
+- `window.pdv.project.*` — project lifecycle: `save`, `load`, `new`; push: `onLoaded(cb) → unsub`
+- `window.pdv.config.*` — app config: `get`, `set`
+- `window.pdv.themes.*` — theme persistence: `get`, `save`
+- `window.pdv.commandBoxes.*` — tab persistence: `load`, `save`
+- `window.pdv.files.*` — native OS dialogs: `pickExecutable() → string | null` (wraps Electron `dialog.showOpenDialog` for executables); `pickDirectory() → string | null` (wraps `dialog.showOpenDialog` with `properties: ['openDirectory', 'createDirectory']`, used for Save/Open project)
+
+**Design decision — running scripts via `kernels.execute`**: There is no `window.pdv.script.run()`. Running a `PDVScript` node from the renderer is always done by calling `window.pdv.kernels.execute()` with the appropriate Python code string (e.g. `pdv_tree["path.to.script"].run(a=1)`). This keeps the IPC surface minimal and the comm substrate readable — a script run looks identical to any other user execution in the console and in the kernel logs. The `ScriptDialog` component builds the execute call; it does not call a separate IPC channel.
+
+**Design decision — `settings.onOpen`**: There is no `window.pdv.settings.onOpen()`. The Settings dialog is opened by renderer-internal state only (e.g. clicking a toolbar button). Main-menu integration (File → Preferences triggering the dialog) is deferred to a future release and will be implemented as a `window.pdv.settings.*` push subscription at that time.
 
 ### 11.3 Comm Routing in the Main Process
 
@@ -680,6 +760,35 @@ The main process's kernel manager listens on the `iopub` socket for all incoming
 - If `in_reply_to` is null (push notification): forward to the renderer via `BrowserWindow.webContents.send()`
 
 This routing logic lives in a dedicated `CommRouter` class in `electron/main/comm-router.ts`.
+
+### 11.4 Renderer Push Subscription Lifecycle
+
+The renderer subscribes to all push channels in a single `useEffect` in the root `App` component, keyed on `currentKernelId`. This ensures subscriptions are established after a kernel becomes ready and are torn down and re-established whenever the kernel changes (restart, switch).
+
+```tsx
+useEffect(() => {
+  if (!currentKernelId) return;
+
+  const unsubTree = window.pdv.tree.onChanged(_payload => {
+    setTreeRefreshToken(t => t + 1);
+  });
+
+  const unsubProject = window.pdv.project.onLoaded(payload => {
+    // repopulate command box tabs from project
+  });
+
+  return () => {
+    unsubTree();
+    unsubProject();
+  };
+}, [currentKernelId]);
+```
+
+Rules:
+- **One owner**: Only `App` directly calls `onChanged` / `onLoaded`. Child components receive refresh tokens or data as props.
+- **Cleanup on every kernel change**: The `useEffect` cleanup runs before the next kernel's subscriptions are registered.
+- **No subscriptions when `currentKernelId` is null**: The early-return guard prevents stale listeners during startup or after kernel stop.
+- **No polling**: The renderer never polls for tree or project state. All proactive updates flow through these push subscriptions.
 
 ---
 
