@@ -96,6 +96,11 @@ export const IPC = {
     treeChanged: "pdv.tree.changed",
     projectLoaded: "pdv.project.loaded",
     kernelStatus: "pdv.kernel.status",
+    menuAction: "menu:action",
+  },
+  /** App menu synchronization channels. */
+  menu: {
+    updateRecentProjects: "menu:updateRecentProjects",
   },
   /** Native file/directory picker channels. */
   files: {
@@ -215,6 +220,20 @@ export interface ScriptOperationResult {
   success: boolean;
   /** Optional error message when `success` is false. */
   error?: string;
+}
+
+/**
+ * Payload delivered when the app menu triggers a renderer action.
+ */
+export interface MenuActionPayload {
+  /** Action identifier emitted by the File menu. */
+  action:
+    | "project:open"
+    | "project:openRecent"
+    | "project:save"
+    | "project:saveAs";
+  /** Project directory path for open-recent actions. */
+  path?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -528,5 +547,23 @@ export interface PDVApi {
      * @returns Selected directory path, or null if cancelled.
      */
     pickDirectory(): Promise<string | null>;
+  };
+
+  /** App menu integration. */
+  menu: {
+    /**
+     * Push the latest recent-project paths into the File → Open Recent submenu.
+     *
+     * @param paths - Recent project directories (most recent first).
+     * @returns True when the menu was updated.
+     */
+    updateRecentProjects(paths: string[]): Promise<boolean>;
+    /**
+     * Subscribe to app-menu action events.
+     *
+     * @param callback - Invoked for File-menu actions.
+     * @returns Unsubscribe function.
+     */
+    onAction(callback: (payload: MenuActionPayload) => void): () => void;
   };
 }

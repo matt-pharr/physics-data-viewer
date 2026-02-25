@@ -25,6 +25,7 @@ import { CommRouter } from "./comm-router";
 import { KernelManager, type KernelInfo } from "./kernel-manager";
 import { ProjectManager } from "./project-manager";
 import { ConfigStore } from "./config";
+import { updateRecentProjectsMenu } from "./menu";
 import {
   CommandBoxData,
   IPC,
@@ -76,6 +77,7 @@ const REGISTERED_CHANNELS: readonly string[] = [
   IPC.themes.save,
   IPC.commandBoxes.load,
   IPC.commandBoxes.save,
+  IPC.menu.updateRecentProjects,
   IPC.files.pickExecutable,
   IPC.files.pickDirectory,
 ];
@@ -708,6 +710,15 @@ export function registerIpcHandlers(
   // On error: throws to renderer.
   ipcMain.handle(IPC.commandBoxes.save, async (_event, data: CommandBoxData) => {
     savedCommandBoxes = data;
+    return true;
+  });
+
+  // Handles menu:updateRecentProjects requests from the renderer.
+  // Input: string[] recent project directories.
+  // Returns: true after menu refresh.
+  // On error: throws to renderer.
+  ipcMain.handle(IPC.menu.updateRecentProjects, async (_event, paths: string[]) => {
+    updateRecentProjectsMenu(Array.isArray(paths) ? paths : []);
     return true;
   });
 

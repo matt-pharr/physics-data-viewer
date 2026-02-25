@@ -18,6 +18,7 @@ import { CommRouter } from "./comm-router";
 import { ProjectManager } from "./project-manager";
 import { ConfigStore } from "./config";
 import { registerIpcHandlers } from "./index";
+import { initializeAppMenu } from "./menu";
 
 async function loadDevUrlWithRetry(
   win: BrowserWindow,
@@ -66,6 +67,7 @@ export async function createWindow(
   });
 
   registerIpcHandlers(win, kernelManager, commRouter, projectManager, configStore);
+  initializeAppMenu(win);
 
   const rendererIndexPath = path.join(
     __dirname,

@@ -1,6 +1,7 @@
 import type {
   Config,
   KernelExecuteResult,
+  MenuActionPayload,
   NamespaceQueryOptions,
   NamespaceVariable,
   NodeDescriptor,
@@ -11,6 +12,7 @@ import type {
 export type {
   Config,
   KernelExecuteResult,
+  MenuActionPayload,
   NamespaceQueryOptions,
   NamespaceVariable,
   NodeDescriptor,

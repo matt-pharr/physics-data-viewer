@@ -73,6 +73,11 @@ export interface CommandBoxData {
   activeTabId: number;
 }
 
+export interface MenuActionPayload {
+  action: "project:open" | "project:openRecent" | "project:save" | "project:saveAs";
+  path?: string;
+}
+
 export interface Config {
   kernelSpec?: string | null;
   cwd?: string;
@@ -162,6 +167,10 @@ export interface PDVApi {
   files: {
     pickExecutable(): Promise<string | null>;
     pickDirectory(): Promise<string | null>;
+  };
+  menu: {
+    updateRecentProjects(paths: string[]): Promise<boolean>;
+    onAction(callback: (payload: MenuActionPayload) => void): () => void;
   };
 }
 

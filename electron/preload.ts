@@ -94,6 +94,11 @@ const api: PDVApi = {
     pickExecutable: () => ipcRenderer.invoke(IPC.files.pickExecutable),
     pickDirectory: () => ipcRenderer.invoke(IPC.files.pickDirectory),
   },
+  menu: {
+    updateRecentProjects: (paths) =>
+      ipcRenderer.invoke(IPC.menu.updateRecentProjects, paths),
+    onAction: (callback) => onPush(IPC.push.menuAction, callback),
+  },
 };
 
 contextBridge.exposeInMainWorld("pdv", api);

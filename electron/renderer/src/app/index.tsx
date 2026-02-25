@@ -7,7 +7,7 @@ import { NamespaceView } from '../components/NamespaceView';
 import { ScriptDialog } from '../components/ScriptDialog';
 import { CreateScriptDialog } from '../components/Tree/CreateScriptDialog';
 import { SettingsDialog } from '../components/SettingsDialog';
-import type { CommandTab, Config, KernelExecuteResult, LogEntry, TreeNodeData } from '../types';
+import type { CommandTab, Config, KernelExecuteResult, LogEntry, MenuActionPayload, TreeNodeData } from '../types';
 
 type Tab = 'tree' | 'namespace' | 'modules';
 type KernelStatus = 'idle' | 'starting' | 'ready' | 'error';
@@ -41,6 +41,21 @@ function normalizeLoadedCommandBoxes(data: unknown): { tabs: CommandTab[]; activ
     ? requestedActive
     : normalizedTabs[0].id;
   return { tabs: normalizedTabs, activeTabId };
+}
+
+function normalizeRecentProjects(data: unknown): string[] {
+  if (!Array.isArray(data)) return [];
+  const unique = new Set<string>();
+  const next: string[] = [];
+  for (const entry of data) {
+    if (typeof entry !== 'string') continue;
+    const trimmed = entry.trim();
+    if (!trimmed || unique.has(trimmed)) continue;
+    unique.add(trimmed);
+    next.push(trimmed);
+    if (next.length >= 10) break;
+  }
+  return next;
 }
 
 function applyAppearanceColors(colors?: Record<string, string>): void {
@@ -79,6 +94,7 @@ const App: React.FC = () => {
   const [config, setConfig] = useState<Config | null>(null);
   const [showEnvSelector, setShowEnvSelector] = useState(false);
   const [scriptDialog, setScriptDialog] = useState<TreeNodeData | null>(null);
+  const [currentProjectDir, setCurrentProjectDir] = useState<string | null>(null);
   const initRef = useRef(false);
   const loadedProjectTabsRef = useRef<{ tabs: CommandTab[]; activeTabId: number } | null>(null);
   const [leftWidth, setLeftWidth] = useState(340);
@@ -159,6 +175,7 @@ const App: React.FC = () => {
         }
         const loaded = await window.pdv.config.get();
         setConfig(loaded);
+        setCurrentProjectDir(loaded.projectRoot ?? null);
         applyAppearanceColors(loaded.settings?.appearance?.colors);
 
         if (!loaded.pythonPath) {
@@ -189,6 +206,14 @@ const App: React.FC = () => {
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
+  }, [config]);
+
+  useEffect(() => {
+    if (!window.pdv?.menu) {
+      return;
+    }
+    const recentProjects = normalizeRecentProjects(config?.recentProjects);
+    void window.pdv.menu.updateRecentProjects(recentProjects);
   }, [config]);
 
   useEffect(() => {
@@ -255,6 +280,20 @@ const App: React.FC = () => {
     event.preventDefault();
     dragRef.current = 'horizontal';
   }, []);
+
+  const rememberRecentProject = useCallback(async (projectDir: string) => {
+    const recentProjects = normalizeRecentProjects(config?.recentProjects);
+    const nextRecentProjects = [projectDir, ...recentProjects.filter((entry) => entry !== projectDir)].slice(0, 10);
+    try {
+      const updated = await window.pdv.config.set({ recentProjects: nextRecentProjects, projectRoot: projectDir });
+      setConfig(updated);
+    } catch {
+      setConfig((prev) => (prev ? { ...prev, recentProjects: nextRecentProjects, projectRoot: projectDir } : prev));
+    }
+    if (window.pdv?.menu) {
+      await window.pdv.menu.updateRecentProjects(nextRecentProjects);
+    }
+  }, [config]);
 
   const startKernel = async (cfg: Config) => {
     setKernelStatus('starting');
@@ -483,12 +522,19 @@ const App: React.FC = () => {
     }
   };
 
-  const handleSaveProject = async () => {
+  const handleSaveProject = useCallback(async (options?: { saveAs?: boolean; directory?: string }) => {
     if (kernelStatus !== 'ready') {
       return;
     }
     try {
-      const saveDir = await window.pdv.files.pickDirectory();
+      let saveDir = options?.directory ?? null;
+      if (!saveDir) {
+        if (options?.saveAs || !currentProjectDir) {
+          saveDir = await window.pdv.files.pickDirectory();
+        } else {
+          saveDir = currentProjectDir;
+        }
+      }
       if (!saveDir) {
         return;
       }
@@ -496,17 +542,19 @@ const App: React.FC = () => {
         tabs: commandTabs,
         activeTabId: activeCommandTab,
       });
+      setCurrentProjectDir(saveDir);
+      await rememberRecentProject(saveDir);
     } catch (error) {
       setLastError(error instanceof Error ? error.message : String(error));
     }
-  };
+  }, [activeCommandTab, commandTabs, currentProjectDir, kernelStatus, rememberRecentProject]);
 
-  const handleOpenProject = async () => {
+  const handleOpenProject = useCallback(async (directory?: string) => {
     if (kernelStatus !== 'ready') {
       return;
     }
     try {
-      const saveDir = await window.pdv.files.pickDirectory();
+      const saveDir = directory ?? await window.pdv.files.pickDirectory();
       if (!saveDir) {
         return;
       }
@@ -515,11 +563,39 @@ const App: React.FC = () => {
       loadedProjectTabsRef.current = normalized;
       setCommandTabs(normalized.tabs);
       setActiveCommandTab(normalized.activeTabId);
+      setCurrentProjectDir(saveDir);
+      await rememberRecentProject(saveDir);
       setNamespaceRefreshToken((prev) => prev + 1);
     } catch (error) {
       setLastError(error instanceof Error ? error.message : String(error));
     }
-  };
+  }, [kernelStatus, rememberRecentProject]);
+
+  useEffect(() => {
+    if (!window.pdv?.menu) {
+      return;
+    }
+    const unsubscribe = window.pdv.menu.onAction((payload: MenuActionPayload) => {
+      if (payload.action === 'project:open') {
+        void handleOpenProject();
+        return;
+      }
+      if (payload.action === 'project:openRecent') {
+        if (payload.path) {
+          void handleOpenProject(payload.path);
+        }
+        return;
+      }
+      if (payload.action === 'project:save') {
+        void handleSaveProject();
+        return;
+      }
+      if (payload.action === 'project:saveAs') {
+        void handleSaveProject({ saveAs: true });
+      }
+    });
+    return () => unsubscribe();
+  }, [handleOpenProject, handleSaveProject]);
 
   return (
     <div className="app">
@@ -527,12 +603,6 @@ const App: React.FC = () => {
       <header className="app-header">
         <h1 className="app-title">Physics Data Viewer</h1>
          <div className="header-right">
-            <button className="btn btn-secondary" onClick={() => void handleSaveProject()} disabled={kernelStatus !== 'ready'}>
-              Save Project
-            </button>
-            <button className="btn btn-secondary" onClick={() => void handleOpenProject()} disabled={kernelStatus !== 'ready'}>
-              Open Project
-            </button>
             <button className="btn btn-secondary" onClick={() => setShowSettings(true)}>Settings</button>
             <span className={`connection-status ${kernelStatus === 'ready' ? 'connected' : ''}`}>
               ● {kernelStatus === 'ready' ? 'Connected' : kernelStatus === 'starting' ? 'Starting...' : 'Disconnected'}
