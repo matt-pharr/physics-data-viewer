@@ -82,6 +82,10 @@ export const IPC = {
     get: "config:get",
     set: "config:set",
   },
+  /** App info channels. */
+  about: {
+    getVersion: "about:getVersion",
+  },
   /** Theme persistence channels. */
   themes: {
     get: "themes:get",
@@ -511,6 +515,16 @@ export interface PDVApi {
      * @returns Updated merged config object.
      */
     set(updates: Partial<PDVConfig>): Promise<PDVConfig>;
+  };
+
+  /** App info accessors. */
+  about: {
+    /**
+     * Return the running app version string from package.json.
+     *
+     * @returns Version string, e.g. "0.0.2".
+     */
+    getVersion(): Promise<string>;
   };
 
   /** Theme persistence operations. */

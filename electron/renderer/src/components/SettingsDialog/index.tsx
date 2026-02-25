@@ -11,7 +11,7 @@ import {
 import type { Theme } from '../../types';
 import { loader } from '@monaco-editor/react';
 
-type SettingsTab = 'general' | 'shortcuts' | 'appearance' | 'runtime';
+type SettingsTab = 'general' | 'shortcuts' | 'appearance' | 'runtime' | 'about';
 
 const isMac = navigator.platform.toUpperCase().startsWith('MAC');
 const DEFAULT_FILE_MANAGER = isMac ? 'open {}' : 'xdg-open {}';
@@ -197,7 +197,9 @@ export const SettingsDialog: React.FC<SettingsDialogProps> = ({
   const [juliaEditorCmd, setJuliaEditorCmd] = useState('code {}');
   const [fileManagerCmd, setFileManagerCmd] = useState(DEFAULT_FILE_MANAGER);
 
-  // Editor settings state
+  // About tab state
+  const [appVersion, setAppVersion] = useState<string>('…');
+  const [updateStatus, setUpdateStatus] = useState<string | null>(null);
   const [editorFontSize, setEditorFontSize] = useState(13);
   const [editorTabSize, setEditorTabSize] = useState(4);
   const [editorWordWrap, setEditorWordWrap] = useState(true);
@@ -242,6 +244,7 @@ export const SettingsDialog: React.FC<SettingsDialogProps> = ({
       );
     };
     void load();
+    void window.pdv.about.getVersion().then(setAppVersion).catch(() => setAppVersion('unknown'));
   }, [config, shortcuts, isOpen, initialTab]);
 
   useEffect(() => {
@@ -419,6 +422,7 @@ export const SettingsDialog: React.FC<SettingsDialogProps> = ({
           <button className={`tab ${activeTab === 'shortcuts' ? 'active' : ''}`} onClick={() => setActiveTab('shortcuts')}>Keyboard Shortcuts</button>
           <button className={`tab ${activeTab === 'appearance' ? 'active' : ''}`} onClick={() => setActiveTab('appearance')}>Appearance</button>
           <button className={`tab ${activeTab === 'runtime' ? 'active' : ''}`} onClick={() => setActiveTab('runtime')}>Python Runtime</button>
+          <button className={`tab ${activeTab === 'about' ? 'active' : ''}`} onClick={() => setActiveTab('about')}>About</button>
         </div>
         <div className="dialog-body">
           {activeTab === 'general' ? (
@@ -501,6 +505,26 @@ export const SettingsDialog: React.FC<SettingsDialogProps> = ({
               onSave={onEnvSave}
               onRestart={onRestart}
             />
+          ) : activeTab === 'about' ? (
+            <div className="settings-about">
+              <div className="about-row">
+                <span className="about-label">Version</span>
+                <span className="about-value">v{appVersion}</span>
+              </div>
+              <div className="about-row">
+                <span className="about-label">Check for updates</span>
+                <div className="about-check-row">
+                  <button
+                    type="button"
+                    className="btn btn-secondary"
+                    onClick={() => setUpdateStatus('⚠ Update checking is not yet implemented.')}
+                  >
+                    Check now
+                  </button>
+                  {updateStatus && <span className="about-update-status">{updateStatus}</span>}
+                </div>
+              </div>
+            </div>
           ) : (
             <div className="settings-appearance">
 
@@ -700,7 +724,7 @@ export const SettingsDialog: React.FC<SettingsDialogProps> = ({
             </div>
           )}
         </div>
-        {activeTab !== 'runtime' && (
+        {activeTab !== 'runtime' && activeTab !== 'about' && (
           <div className="dialog-footer">
             <button className="btn btn-secondary" onClick={onClose}>Cancel</button>
             <button

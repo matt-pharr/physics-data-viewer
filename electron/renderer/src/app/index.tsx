@@ -91,7 +91,7 @@ const App: React.FC = () => {
   const [treeRefreshToken, setTreeRefreshToken] = useState(0);
   const [createScriptTarget, setCreateScriptTarget] = useState<string | null>(null);
   const [showSettings, setShowSettings] = useState(false);
-  const [settingsInitialTab, setSettingsInitialTab] = useState<'general' | 'shortcuts' | 'appearance' | 'runtime'>('shortcuts');
+  const [settingsInitialTab, setSettingsInitialTab] = useState<'general' | 'shortcuts' | 'appearance' | 'runtime' | 'about'>('shortcuts');
   const [monacoTheme, setMonacoTheme] = useState<string>('vs-dark');
   const [systemPrefersDark, setSystemPrefersDark] = useState(
     () => window.matchMedia('(prefers-color-scheme: dark)').matches,

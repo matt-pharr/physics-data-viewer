@@ -191,6 +191,9 @@ export interface PDVApi {
     get(): Promise<Config>;
     set(updates: Partial<Config>): Promise<Config>;
   };
+  about: {
+    getVersion(): Promise<string>;
+  };
   themes: {
     get(): Promise<Theme[]>;
     save(theme: Theme): Promise<boolean>;

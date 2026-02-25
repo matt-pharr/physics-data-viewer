@@ -15,7 +15,7 @@
  * ipc.ts — channel constants and API types
  */
 
-import { ipcMain, BrowserWindow, dialog } from "electron";
+import { ipcMain, BrowserWindow, dialog, app } from "electron";
 import { spawn } from "child_process";
 import * as fs from "fs/promises";
 import * as os from "os";
@@ -652,6 +652,11 @@ export function registerIpcHandlers(
   ipcMain.handle(IPC.config.get, async () => {
     return readConfig(configStore);
   });
+
+  // Handles about:getVersion — returns the running app version.
+  // Input: none.
+  // Returns: version string from package.json (via Electron app.getVersion()).
+  ipcMain.handle(IPC.about.getVersion, () => app.getVersion());
 
   // Handles config:set requests from the renderer.
   // Input: Partial<PDVConfig>.
