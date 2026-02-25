@@ -82,8 +82,14 @@ const App: React.FC = () => {
   const [currentProjectDir, setCurrentProjectDir] = useState<string | null>(null);
   const initRef = useRef(false);
   const loadedProjectTabsRef = useRef<{ tabs: CommandTab[]; activeTabId: number } | null>(null);
-  const [leftWidth, setLeftWidth] = useState(340);
-  const [consoleHeight, setConsoleHeight] = useState(260);
+  const [leftWidth, setLeftWidth] = useState(() => {
+    const saved = localStorage.getItem('pdv.pane.leftWidth');
+    return saved ? Number(saved) : 340;
+  });
+  const [consoleHeight, setConsoleHeight] = useState(() => {
+    const saved = localStorage.getItem('pdv.pane.consoleHeight');
+    return saved ? Number(saved) : 260;
+  });
   const dragRef = useRef<'vertical' | 'horizontal' | null>(null);
   const rightPaneRef = useRef<HTMLDivElement | null>(null);
   const [autoRefreshNamespace, setAutoRefreshNamespace] = useState(false);
@@ -184,6 +190,13 @@ const App: React.FC = () => {
     void initConfig();
   }, []);
 
+  useEffect(() => {
+    const projectName = currentProjectDir
+      ? currentProjectDir.split('/').filter(Boolean).pop() ?? 'Unsaved Project'
+      : 'Unsaved Project';
+    document.title = `PDV: ${projectName}`;
+  }, [currentProjectDir]);
+
   const addCommandTabRef = useRef<() => void>(null!);
   useEffect(() => {
     addCommandTabRef.current = addCommandTab;
@@ -263,6 +276,7 @@ const App: React.FC = () => {
         const max = Math.max(200, viewportWidth - 300);
         const next = Math.min(Math.max(event.clientX, 200), max);
         setLeftWidth(next);
+        localStorage.setItem('pdv.pane.leftWidth', String(next));
       } else if (dragRef.current === 'horizontal') {
         const bounds = rightPaneRef.current?.getBoundingClientRect();
         if (!bounds) return;
@@ -271,6 +285,7 @@ const App: React.FC = () => {
         const max = Math.max(min, bounds.height - 180);
         const next = Math.min(Math.max(relativeY, min), max);
         setConsoleHeight(next);
+        localStorage.setItem('pdv.pane.consoleHeight', String(next));
       }
     };
 
@@ -747,7 +762,7 @@ const App: React.FC = () => {
            >
              {config?.kernelSpec ?? 'python3'}
            </span>
-           <span className="status-item">~/projects</span>
+           <span className="status-item">{currentProjectDir ?? 'Unsaved Project'}</span>
          </div>
          <div className="status-right">
            <span className={`status-item ${kernelStatus === 'ready' ? 'status-connected' : kernelStatus === 'error' ? 'status-error' : ''}`}>
