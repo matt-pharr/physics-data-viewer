@@ -245,6 +245,22 @@ const App: React.FC = () => {
   }, [config]);
 
   useEffect(() => {
+    const unsubscribe = window.pdv.kernels.onOutput((chunk) => {
+      setLogs((prev) =>
+        prev.map((l) => {
+          if (l.id !== chunk.executionId) return l;
+          if (chunk.type === 'stdout') return { ...l, stdout: (l.stdout ?? '') + chunk.text! };
+          if (chunk.type === 'stderr') return { ...l, stderr: (l.stderr ?? '') + chunk.text! };
+          if (chunk.type === 'image') return { ...l, images: [...(l.images ?? []), chunk.image!] };
+          if (chunk.type === 'result') return { ...l, result: chunk.result };
+          return l;
+        })
+      );
+    });
+    return unsubscribe;
+  }, []);
+
+  useEffect(() => {
     if (!currentKernelId) {
       return;
     }
@@ -524,36 +540,39 @@ const App: React.FC = () => {
     setIsExecuting(true);
     setLastError(undefined);
 
-    const logEntry: LogEntry = {
-      id:
-        typeof crypto !== 'undefined' && 'randomUUID' in crypto
-          ? crypto.randomUUID()
-          : `log-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
-      timestamp: Date.now(),
-      code,
-    };
+    const executionId =
+      typeof crypto !== 'undefined' && 'randomUUID' in crypto
+        ? crypto.randomUUID()
+        : `log-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+
+    // Create the log entry immediately so output appears as it streams in.
+    setLogs((prev) => [...prev, { id: executionId, timestamp: Date.now(), code }]);
 
     try {
-      const result = await window.pdv.kernels.execute(currentKernelId, { code });
+      const result = await window.pdv.kernels.execute(currentKernelId, { code, executionId });
 
-      logEntry.stdout = result.stdout;
-      logEntry.stderr = result.stderr;
-      logEntry.result = result.result;
-      logEntry.error = result.error;
-      logEntry.duration = result.duration;
-      logEntry.images = result.images;
+      // Finalize the entry with duration and any error (stdout/stderr already streamed).
+      setLogs((prev) =>
+        prev.map((l) =>
+          l.id === executionId
+            ? { ...l, error: result.error, duration: result.duration }
+            : l
+        )
+      );
 
       if (result.error) {
         setLastError(result.error);
       }
-    } catch (error) {
-      logEntry.error = error instanceof Error ? error.message : String(error);
-      setLastError(logEntry.error);
-    } finally {
-      setLogs((prev) => [...prev, logEntry]);
-      if (typeof logEntry.duration === 'number') {
-        setLastDuration(logEntry.duration);
+      if (typeof result.duration === 'number') {
+        setLastDuration(result.duration);
       }
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : String(error);
+      setLogs((prev) =>
+        prev.map((l) => (l.id === executionId ? { ...l, error: msg } : l))
+      );
+      setLastError(msg);
+    } finally {
       setIsExecuting(false);
       setNamespaceRefreshToken((prev) => prev + 1);
     }

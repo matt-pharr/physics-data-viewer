@@ -36,6 +36,16 @@ export interface KernelSpec {
 export interface KernelExecuteRequest {
   code: string;
   silent?: boolean;
+  /** Caller-supplied ID to correlate streamed output chunks with this execution. */
+  executionId?: string;
+}
+
+export interface ExecuteOutputChunk {
+  executionId: string;
+  type: "stdout" | "stderr" | "image" | "result";
+  text?: string;
+  image?: { mime: string; data: string };
+  result?: unknown;
 }
 
 export interface KernelExecuteResult {
@@ -132,6 +142,7 @@ export interface PDVApi {
       executablePath: string,
       language: "python" | "julia"
     ): Promise<{ valid: boolean; error?: string }>;
+    onOutput(callback: (chunk: ExecuteOutputChunk) => void): () => void;
   };
   tree: {
     list(kernelId: string, path?: string): Promise<NodeDescriptor[]>;

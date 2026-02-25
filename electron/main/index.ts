@@ -348,10 +348,11 @@ export function registerIpcHandlers(
   // Input: kernelId (string), execute request payload.
   // Returns: KernelExecuteResult.
   // On error: throws to renderer.
-  ipcMain.handle(IPC.kernels.execute, async (_event, kernelId, request) => {
+  ipcMain.handle(IPC.kernels.execute, async (event, kernelId, request) => {
     return kernelManager.execute(
       kernelId as string,
-      request as Parameters<KernelManager["execute"]>[1]
+      request as Parameters<KernelManager["execute"]>[1],
+      (chunk) => event.sender.send(IPC.push.executeOutput, chunk)
     );
   });
 

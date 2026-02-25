@@ -20,6 +20,7 @@ import type {
   KernelExecuteResult,
   KernelInfo,
   KernelSpec,
+  ExecuteOutputChunk,
 } from "./kernel-manager";
 import type {
   NodeDescriptor,
@@ -97,6 +98,7 @@ export const IPC = {
     projectLoaded: "pdv.project.loaded",
     kernelStatus: "pdv.kernel.status",
     menuAction: "menu:action",
+    executeOutput: "pdv.execute.output",
   },
   /** App menu synchronization channels. */
   menu: {
@@ -108,6 +110,9 @@ export const IPC = {
     pickDirectory: "files:pickDirectory",
   },
 } as const;
+
+// Re-export for preload and renderer use.
+export type { ExecuteOutputChunk };
 
 // ---------------------------------------------------------------------------
 // Kernel request/response helper types
@@ -374,6 +379,13 @@ export interface PDVApi {
       executablePath: string,
       language: "python" | "julia"
     ): Promise<KernelValidateResult>;
+    /**
+     * Subscribe to streaming output chunks from any active execution.
+     *
+     * @param callback - Invoked for each chunk as it arrives from the kernel.
+     * @returns Unsubscribe function.
+     */
+    onOutput(callback: (chunk: ExecuteOutputChunk) => void): () => void;
   };
 
   /** Tree browsing and updates. */
