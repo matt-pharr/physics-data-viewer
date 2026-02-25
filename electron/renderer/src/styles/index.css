@@ -49,45 +49,6 @@ body {
   overflow: hidden;
 }
 
-/* ===== HEADER ===== */
-.app-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 8px 16px;
-  background-color: var(--bg-secondary);
-  border-bottom: 1px solid var(--border-color);
-  flex-shrink: 0;
-  height: 40px;
-}
-
-.app-title {
-  font-size: 15px;
-  font-weight: 600;
-  color: var(--text-primary);
-}
-
-.header-right {
-  display: flex;
-  align-items: center;
-  gap: 16px;
-}
-
-.connection-status {
-  font-size: 13px;
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
-
-.connection-status.connected {
-  color: var(--success);
-}
-
-.connection-status.disconnected {
-  color: var(--error);
-}
-
 /* ===== MAIN CONTENT ===== */
 .app-main {
   display: flex;
@@ -670,6 +631,14 @@ body {
 .status-clickable:hover {
   color: var(--accent);
   text-decoration: underline;
+}
+
+.status-connected {
+  color: var(--success);
+}
+
+.status-error {
+  color: var(--error);
 }
 
 .status-dot {

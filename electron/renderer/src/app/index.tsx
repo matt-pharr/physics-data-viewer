@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useRef, useCallback } from 'react';
+import React, { useEffect, useMemo, useState, useRef, useCallback } from 'react';
 import { CommandBox } from '../components/CommandBox';
 import { Console } from '../components/Console';
 import { Tree } from '../components/Tree';
@@ -8,10 +8,10 @@ import { ScriptDialog } from '../components/ScriptDialog';
 import { CreateScriptDialog } from '../components/Tree/CreateScriptDialog';
 import { SettingsDialog } from '../components/SettingsDialog';
 import type { CommandTab, Config, KernelExecuteResult, LogEntry, MenuActionPayload, TreeNodeData } from '../types';
+import { matchesShortcut, resolveShortcuts } from '../shortcuts';
 
 type Tab = 'tree' | 'namespace' | 'modules';
 type KernelStatus = 'idle' | 'starting' | 'ready' | 'error';
-const DEFAULT_OPEN_SETTINGS_SHORTCUT = 'CommandOrControl+,';
 
 function normalizeLoadedCommandBoxes(data: unknown): { tabs: CommandTab[]; activeTabId: number } {
   const rawTabs =
@@ -65,21 +65,6 @@ function applyAppearanceColors(colors?: Record<string, string>): void {
   });
 }
 
-function matchesShortcut(event: KeyboardEvent, shortcut: string): boolean {
-  const parts = shortcut.toLowerCase().replace(/\s+/g, '').split('+').filter(Boolean);
-  const keyPart = parts.pop();
-  if (!keyPart) return false;
-  const normalizedKey = keyPart === 'comma' ? ',' : keyPart;
-  if (event.key.toLowerCase() !== normalizedKey) return false;
-  return parts.every((part) => {
-    if (part === 'commandorcontrol') return event.metaKey || event.ctrlKey;
-    if (part === 'command' || part === 'cmd' || part === 'meta') return event.metaKey;
-    if (part === 'control' || part === 'ctrl') return event.ctrlKey;
-    if (part === 'alt' || part === 'option') return event.altKey;
-    if (part === 'shift') return event.shiftKey;
-    return false;
-  });
-}
 
 const App: React.FC = () => {
   const [activeTab, setActiveTab] = useState<Tab>('tree');
@@ -106,6 +91,8 @@ const App: React.FC = () => {
   const [treeRefreshToken, setTreeRefreshToken] = useState(0);
   const [createScriptTarget, setCreateScriptTarget] = useState<string | null>(null);
   const [showSettings, setShowSettings] = useState(false);
+
+  const shortcuts = useMemo(() => resolveShortcuts(config?.settings?.shortcuts), [config]);
 
   // Load command boxes from filesystem on startup
   useEffect(() => {
@@ -198,15 +185,14 @@ const App: React.FC = () => {
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
-      const openSettingsShortcut = config?.settings?.shortcuts?.openSettings ?? DEFAULT_OPEN_SETTINGS_SHORTCUT;
-      if (matchesShortcut(event, openSettingsShortcut)) {
+      if (matchesShortcut(event, shortcuts.openSettings)) {
         event.preventDefault();
         setShowSettings(true);
       }
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [config]);
+  }, [shortcuts]);
 
   useEffect(() => {
     if (!window.pdv?.menu) {
@@ -600,33 +586,22 @@ const App: React.FC = () => {
 
   return (
     <div className="app">
-      {/* Header */}
-      <header className="app-header">
-        <h1 className="app-title">Physics Data Viewer</h1>
-         <div className="header-right">
-            <button className="btn btn-secondary" onClick={() => setShowSettings(true)}>Settings</button>
-            <span className={`connection-status ${kernelStatus === 'ready' ? 'connected' : ''}`}>
-              ● {kernelStatus === 'ready' ? 'Connected' : kernelStatus === 'starting' ? 'Starting...' : 'Disconnected'}
-            </span>
-          </div>
-        </header>
-
       {/* Main content */}
       <main className="app-main">
         {/* Left pane:  Tree */}
         <aside className="left-pane" style={{ width: `${leftWidth}px` }}>
           <div className="pane-tabs">
             <button
-              className={`tab ${activeTab === 'namespace' ? 'active' : ''}`}
-              onClick={() => setActiveTab('namespace')}
-            >
-              Namespace
-            </button>
-            <button
               className={`tab ${activeTab === 'tree' ? 'active' : ''}`}
               onClick={() => setActiveTab('tree')}
             >
               Tree
+            </button>
+            <button
+              className={`tab ${activeTab === 'namespace' ? 'active' : ''}`}
+              onClick={() => setActiveTab('namespace')}
+            >
+              Namespace
             </button>
             <button
               className={`tab ${activeTab === 'modules' ? 'active' : ''}`}
@@ -653,6 +628,7 @@ const App: React.FC = () => {
                 disabled={kernelStatus !== 'ready'}
                 refreshToken={treeRefreshToken}
                 onAction={handleTreeAction}
+                shortcuts={shortcuts}
               />
             </div>
             <div className={`tree-panel ${activeTab === 'modules' ? 'active' : ''}`}>
@@ -687,6 +663,7 @@ const App: React.FC = () => {
             onClear={handleClearCommand}
             isExecuting={isExecuting}
             lastError={lastError}
+            shortcuts={shortcuts}
           />
         </div>
       </main>
@@ -738,6 +715,9 @@ const App: React.FC = () => {
            <span className="status-item">~/projects</span>
          </div>
          <div className="status-right">
+           <span className={`status-item ${kernelStatus === 'ready' ? 'status-connected' : kernelStatus === 'error' ? 'status-error' : ''}`}>
+             ● {kernelStatus === 'ready' ? 'Connected' : kernelStatus === 'starting' ? 'Starting...' : 'Disconnected'}
+           </span>
            <span className="status-item">
              Last: {lastDuration !== null ? `${Math.round(lastDuration)}ms` : '--'}
            </span>
@@ -757,6 +737,7 @@ const App: React.FC = () => {
        <SettingsDialog
          isOpen={showSettings}
          config={config}
+         shortcuts={shortcuts}
          onClose={() => setShowSettings(false)}
          onSave={handleSettingsSave}
        />

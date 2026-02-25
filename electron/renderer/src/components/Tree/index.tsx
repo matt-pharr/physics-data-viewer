@@ -2,12 +2,15 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { treeService, type TreeNodeData } from '../../services/tree';
 import { TreeNodeRow } from './TreeNodeRow';
 import { ContextMenu } from './ContextMenu';
+import type { Shortcuts } from '../../shortcuts';
+import { matchesShortcut } from '../../shortcuts';
 
 interface TreeProps {
   kernelId: string | null;
   disabled?: boolean;
   refreshToken?: number;
   onAction?: (action: string, node: TreeNodeData) => void;
+  shortcuts: Shortcuts;
 }
 
 interface ContextMenuState {
@@ -16,7 +19,7 @@ interface ContextMenuState {
   node: TreeNodeData;
 }
 
-export const Tree: React.FC<TreeProps> = ({ kernelId, disabled = false, refreshToken = 0, onAction }) => {
+export const Tree: React.FC<TreeProps> = ({ kernelId, disabled = false, refreshToken = 0, onAction, shortcuts }) => {
   const [nodes, setNodes] = useState<TreeNodeData[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | undefined>();
@@ -168,21 +171,22 @@ export const Tree: React.FC<TreeProps> = ({ kernelId, disabled = false, refreshT
 
   const handleKeyDown = async (event: React.KeyboardEvent<HTMLDivElement>) => {
     if (!selectedNode || disabled) return;
+    const nativeEvent = event.nativeEvent;
 
-    if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'c') {
+    if (matchesShortcut(nativeEvent, shortcuts.treeCopyPath)) {
       event.preventDefault();
       await navigator.clipboard.writeText(selectedNode.path);
       onAction?.('copy_path', selectedNode);
       return;
     }
 
-    if (selectedNode.type === 'script' && (event.key === ' ' || event.key.toLowerCase() === 'e')) {
+    if (selectedNode.type === 'script' && matchesShortcut(nativeEvent, shortcuts.treeEditScript)) {
       event.preventDefault();
       onAction?.('edit', selectedNode);
       return;
     }
 
-    if (event.key.toLowerCase() === 'p') {
+    if (matchesShortcut(nativeEvent, shortcuts.treePrint)) {
       event.preventDefault();
       onAction?.('print', selectedNode);
     }

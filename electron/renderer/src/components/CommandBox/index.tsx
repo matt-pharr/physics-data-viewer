@@ -2,6 +2,8 @@ import React, { useEffect, useMemo, useRef } from 'react';
 import Editor, { type OnMount } from '@monaco-editor/react';
 import type * as monaco from 'monaco-editor';
 import type { CommandTab } from '../../types';
+import type { Shortcuts } from '../../shortcuts';
+import { matchesShortcut } from '../../shortcuts';
 
 export interface CommandBoxProps {
   tabs: (CommandTab & { onChange: (code: string) => void })[];
@@ -14,6 +16,7 @@ export interface CommandBoxProps {
   onClear: () => void;
   isExecuting: boolean;
   lastError?: string;
+  shortcuts: Shortcuts;
 }
 
 export const CommandBox: React.FC<CommandBoxProps> = ({
@@ -27,11 +30,14 @@ export const CommandBox: React.FC<CommandBoxProps> = ({
   onClear,
   isExecuting,
   lastError,
+  shortcuts,
 }) => {
   const editorRef = useRef<monaco.editor.IStandaloneCodeEditor | null>(null);
   const activeTab = useMemo(() => tabs.find((tab) => tab.id === activeTabId), [tabs, activeTabId]);
   const activeTabRef = useRef(activeTab);
   const isExecutingRef = useRef(isExecuting);
+  const disabledRef = useRef(disabled);
+  const shortcutsRef = useRef(shortcuts);
 
   useEffect(() => {
     activeTabRef.current = activeTab;
@@ -41,16 +47,30 @@ export const CommandBox: React.FC<CommandBoxProps> = ({
     isExecutingRef.current = isExecuting;
   }, [isExecuting]);
 
+  useEffect(() => {
+    disabledRef.current = disabled;
+  }, [disabled]);
+
+  useEffect(() => {
+    shortcutsRef.current = shortcuts;
+  }, [shortcuts]);
+
   if (!activeTab) {
     return null;
   }
 
-  const handleEditorMount: OnMount = (editor, monacoInstance) => {
+  const handleEditorMount: OnMount = (editor) => {
     editorRef.current = editor;
 
-    editor.addCommand(monacoInstance.KeyMod.CtrlCmd | monacoInstance.KeyCode.Enter, () => {
-      if (!disabled && !isExecutingRef.current && activeTabRef.current) {
-        onExecute(activeTabRef.current.code);
+    editor.onKeyDown((e) => {
+      // Cast to the native KeyboardEvent shape that matchesShortcut expects
+      const nativeEvent = e.browserEvent;
+      if (matchesShortcut(nativeEvent, shortcutsRef.current.execute)) {
+        e.preventDefault();
+        e.stopPropagation();
+        if (!disabledRef.current && !isExecutingRef.current && activeTabRef.current) {
+          onExecute(activeTabRef.current.code);
+        }
       }
     });
   };

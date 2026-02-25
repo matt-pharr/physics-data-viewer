@@ -98,6 +98,10 @@ export interface Config {
   settings?: {
     shortcuts?: {
       openSettings?: string;
+      execute?: string;
+      treeCopyPath?: string;
+      treeEditScript?: string;
+      treePrint?: string;
     };
     appearance?: {
       themeName?: string;
