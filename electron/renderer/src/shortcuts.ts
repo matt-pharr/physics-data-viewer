@@ -25,6 +25,7 @@ export interface Shortcuts {
   treePrint: string;
 }
 
+/** Default shortcut bindings applied when user has no overrides. */
 export const DEFAULT_SHORTCUTS: Shortcuts = {
   openSettings: 'CommandOrControl+,',
   execute: 'CommandOrControl+Enter',

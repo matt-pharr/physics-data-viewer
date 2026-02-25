@@ -1,3 +1,10 @@
+/**
+ * tree.test.ts — unit tests for renderer tree service caching behavior.
+ *
+ * Uses a mocked preload API (`window.pdv.tree`) to validate cache semantics
+ * without requiring an Electron runtime.
+ */
+
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { NodeDescriptor } from '../types/pdv';
 import { treeService } from './tree';

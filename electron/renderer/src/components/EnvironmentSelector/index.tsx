@@ -1,3 +1,10 @@
+/**
+ * Environment selector dialog/panel for Python/Julia executable paths.
+ *
+ * Validates interpreter paths through `window.pdv.kernels.validate` and emits
+ * chosen values to the parent component for persistence/restart handling.
+ */
+
 import React, { useState } from 'react';
 
 interface EnvironmentSelectorProps {
@@ -10,6 +17,7 @@ interface EnvironmentSelectorProps {
   onCancel?: () => void;
 }
 
+/** Runtime executable configuration UI used on first-run and in Settings. */
 export const EnvironmentSelector: React.FC<EnvironmentSelectorProps> = ({
   isFirstRun,
   currentConfig,

@@ -1,3 +1,10 @@
+/**
+ * ContextMenu — right-click actions for tree nodes.
+ *
+ * Computes action sets by node type and displays associated shortcut hints from
+ * user-configured bindings.
+ */
+
 import React, { useEffect, useRef } from 'react';
 import type { TreeNodeData } from '../../types';
 import type { Shortcuts } from '../../shortcuts';
@@ -16,6 +23,7 @@ interface ContextMenuProps {
   onClose: () => void;
 }
 
+/** Floating context menu anchored to the pointer location. */
 export const ContextMenu: React.FC<ContextMenuProps> = ({ x, y, node, shortcuts, onAction, onClose }) => {
   const menuRef = useRef<HTMLDivElement>(null);
 
@@ -80,6 +88,7 @@ export const ContextMenu: React.FC<ContextMenuProps> = ({ x, y, node, shortcuts,
   );
 };
 
+/** Return menu actions allowed for the given node descriptor. */
 function getActionsForNode(node: TreeNodeData) {
   const actions: Array<{ id: string; label: string; disabled: boolean }> = [];
   const canCreateScript = node.type === 'dict' || node.type === 'folder' || node.type === 'root';

@@ -1,3 +1,11 @@
+/**
+ * CodeCell editor pane with tabbed Monaco instances.
+ *
+ * Renders tab chrome, Execute/Clear actions, and keyboard shortcut bindings
+ * for cell-level operations (execute/new/close). Execution itself is delegated
+ * to callbacks owned by `App`.
+ */
+
 import React, { useEffect, useMemo, useRef } from 'react';
 import Editor, { type OnMount, type BeforeMount } from '@monaco-editor/react';
 import type * as monaco from 'monaco-editor';
@@ -6,6 +14,7 @@ import type { Shortcuts } from '../../shortcuts';
 import { matchesShortcut } from '../../shortcuts';
 import { defineMonacoThemes } from '../../themes';
 
+/** Props for the tabbed code-cell editor pane. */
 export interface CodeCellProps {
   tabs: (CellTab & { onChange: (code: string) => void })[];
   activeTabId: number;
@@ -25,6 +34,7 @@ export interface CodeCellProps {
   editorWordWrap?: boolean;
 }
 
+/** Tabbed code-cell editor component used by the main workspace. */
 export const CodeCell: React.FC<CodeCellProps> = ({
   tabs,
   activeTabId,

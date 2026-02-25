@@ -40,11 +40,13 @@ export const CSS_VAR_GROUPS: { label: string; vars: { key: string; label: string
 /** All CSS variable keys managed by the theme system. */
 export const ALL_CSS_VARS: string[] = CSS_VAR_GROUPS.flatMap((g) => g.vars.map((v) => v.key));
 
+/** Built-in PDV theme entry with mapped Monaco theme id. */
 export interface BuiltinTheme extends Theme {
   /** Monaco editor theme identifier. */
   monacoTheme: string;
 }
 
+/** Built-in theme catalogue shown in Appearance settings. */
 export const BUILTIN_THEMES: BuiltinTheme[] = [
   {
     name: 'Dark+ (VSCode)',
@@ -139,6 +141,7 @@ export const BUILTIN_THEMES: BuiltinTheme[] = [
   },
 ];
 
+/** Fast lookup set for distinguishing built-in vs custom theme names. */
 export const BUILTIN_THEME_NAMES = new Set(BUILTIN_THEMES.map((t) => t.name));
 
 /**
@@ -152,6 +155,7 @@ export interface ThemePair {
   light: string;
 }
 
+/** Named dark/light pairings used for follow-system-theme mode. */
 export const THEME_PAIRS: ThemePair[] = [
   { name: 'VSCode', dark: 'Dark+ (VSCode)', light: 'Light+ (VSCode)' },
   { name: 'Xcode',  dark: 'Xcode Dark',     light: 'Xcode Light'     },

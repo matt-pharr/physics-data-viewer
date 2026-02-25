@@ -1,3 +1,10 @@
+/**
+ * SettingsDialog — consolidated settings editor UI.
+ *
+ * Hosts General, Keyboard Shortcuts, Appearance, Runtime, and About tabs and
+ * persists updates through `window.pdv.config.set` and related preload APIs.
+ */
+
 import React, { useEffect, useMemo, useState } from 'react';
 import type { Config } from '../../types';
 import { SHORTCUT_LABELS, DEFAULT_SHORTCUTS } from '../../shortcuts';
@@ -80,6 +87,7 @@ interface ShortcutCaptureProps {
   onChange: (v: string) => void;
 }
 
+/** Reusable row widget for viewing/recording a single shortcut binding. */
 const ShortcutCapture: React.FC<ShortcutCaptureProps> = ({
   label, value, defaultValue, conflictsWith, recordingKey, onStartRecording, onStopRecording, onChange,
 }) => {
@@ -167,6 +175,7 @@ interface SettingsDialogProps {
   onRestart?: () => void;
 }
 
+/** Top-level settings modal used by the App shell. */
 export const SettingsDialog: React.FC<SettingsDialogProps> = ({
   isOpen,
   initialTab = 'shortcuts',

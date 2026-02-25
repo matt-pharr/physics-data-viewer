@@ -1,3 +1,11 @@
+/**
+ * CommandBox (legacy) — prior tabbed code-cell implementation.
+ *
+ * This component mirrors `components/CodeCell` behavior and remains in-tree for
+ * compatibility during the frontend refactor. New integrations should use
+ * `CodeCell` unless explicitly migrating legacy paths.
+ */
+
 import React, { useEffect, useMemo, useRef } from 'react';
 import Editor, { type OnMount } from '@monaco-editor/react';
 import type * as monaco from 'monaco-editor';
@@ -5,6 +13,7 @@ import type { CellTab } from '../../types';
 import type { Shortcuts } from '../../shortcuts';
 import { matchesShortcut } from '../../shortcuts';
 
+/** Props accepted by the legacy CommandBox implementation. */
 export interface CodeCellProps {
   tabs: (CellTab & { onChange: (code: string) => void })[];
   activeTabId: number;
@@ -19,6 +28,7 @@ export interface CodeCellProps {
   shortcuts: Shortcuts;
 }
 
+/** Legacy code-cell component retained for transitional compatibility. */
 export const CodeCell: React.FC<CodeCellProps> = ({
   tabs,
   activeTabId,

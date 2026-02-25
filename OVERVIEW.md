@@ -57,6 +57,38 @@ Primary renderer components live under `electron/renderer/src/components`:
 
 The renderer entry orchestration is in `electron/renderer/src/app/index.tsx`.
 
+## Renderer API surface (`window.pdv`)
+
+The frontend interacts with the backend only via the preload bridge:
+
+- `kernels`: lifecycle, execute, completion/inspect, validation, streamed output subscription (`onOutput`)
+- `tree`: list/get/createScript + tree-change subscription (`onChanged`)
+- `namespace`: variable query
+- `script`: edit/reload
+- `project`: save/load/new + project-loaded subscription (`onLoaded`)
+- `config`: get/set
+- `about`: version read (`getVersion`)
+- `themes`: load/save custom themes
+- `codeCells`: load/save tab state
+- `files`: native pickers (executable/directory)
+- `menu`: recent-project sync and menu action subscription
+
+See `ARCHITECTURE.md` §11.2 for the canonical contract.
+
+## Branch delta (`frontend_refactor` vs `develop`)
+
+Notable differences currently documented in this branch:
+
+- Settings dialog expanded (General, Shortcuts, Appearance, Runtime, About).
+- Appearance includes VSCode/Xcode theme support, Monaco theme synchronization,
+  light/dark pairing, and configurable code/display fonts.
+- Code-cell UX includes browser-style tab shortcuts and global undo of
+  clear/close outside Monaco (`Cmd/Ctrl+Z`).
+- Main-process preferences moved to `~/.PDV/preferences.json`; custom themes and
+  code-cell persistence are stored under `~/.PDV/themes/` and `~/.PDV/state/`.
+- Preload API includes streamed execute output, About version endpoint, and menu
+  action subscription hooks used by the renderer shell.
+
 ## Developer setup
 
 Install and run from the repository root:

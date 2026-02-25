@@ -1,3 +1,10 @@
+/**
+ * main.tsx — React renderer entrypoint.
+ *
+ * Boots the root `<App />` component into the DOM and loads global styles.
+ * This file does not contain application business logic.
+ */
+
 import React from 'react';
 import ReactDOM from 'react-dom/client';
 import App from './app';

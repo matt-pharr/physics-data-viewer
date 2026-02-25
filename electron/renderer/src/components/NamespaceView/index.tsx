@@ -1,3 +1,10 @@
+/**
+ * NamespaceView — live table of kernel namespace variables.
+ *
+ * Queries `window.pdv.namespace.query` and provides client-side filtering,
+ * sorting, and optional interval refresh.
+ */
+
 import React, { useCallback, useEffect, useState } from 'react';
 import type { NamespaceQueryOptions, NamespaceVariable } from '../../types';
 
@@ -10,6 +17,7 @@ interface NamespaceViewProps {
   onToggleAutoRefresh?: (value: boolean) => void;
 }
 
+/** Kernel namespace browser panel. */
 export const NamespaceView: React.FC<NamespaceViewProps> = ({
   kernelId,
   disabled = false,

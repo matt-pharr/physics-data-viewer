@@ -22,6 +22,7 @@
 13. [TypeScript Documentation Standard](#13-typescript-documentation-standard)
 14. [Testing Strategy](#14-testing-strategy)
 15. [What is Explicitly Out of Scope (Alpha)](#15-what-is-explicitly-out-of-scope-alpha)
+16. [Current Branch Delta vs `develop`](#16-current-branch-delta-vs-develop)
 
 ---
 
@@ -524,6 +525,28 @@ When a user accesses a tree node whose data is in the save directory but not yet
 
 Files are only written to the working directory when data is newly created or modified in the current session.
 
+### 6.4 User Preferences Directory (`~/.PDV`)
+
+Renderer-facing preferences and UI persistence are stored in a dedicated user
+directory managed by the main process:
+
+```
+~/.PDV/
+    preferences.json        ← global app preferences (`config.get/set`)
+    themes/
+        *.json              ← custom themes (including user-dropped files)
+    state/
+        code-cells.json     ← renderer code-cell tab persistence
+```
+
+Rules:
+- `preferences.json` is authoritative for user configuration (`pythonPath`,
+  settings, shortcut overrides, appearance choices, etc.).
+- Theme files are loaded from `~/.PDV/themes/*.json`; malformed files are
+  ignored (non-fatal).
+- Code-cell persistence in `~/.PDV/state/code-cells.json` is separate from
+  project save snapshots (`<project>/code-cells.json`).
+
 ---
 
 ## 7. The Tree: Data Model and Authority
@@ -738,15 +761,17 @@ All IPC channel names are defined as constants in `electron/main/ipc.ts`. This f
 The preload bridge exposes exactly the operations the renderer needs. It never exposes raw Node.js or Electron APIs. The API is fully typed (see `ipc.ts`).
 
 The API surface:
-- `window.pdv.kernels.*` — kernel management: `start`, `stop`, `execute`, `interrupt`, `restart`, `complete`, `inspect`, `validate`
+- `window.pdv.kernels.*` — kernel lifecycle/execution: `list`, `start`, `stop`, `execute`, `interrupt`, `restart`, `complete`, `inspect`, `validate`; push subscription: `onOutput(cb) → unsub` for streamed execute chunks (`stdout`, `stderr`, images, execute-result fragments)
 - `window.pdv.tree.*` — tree operations: `list`, `get`, `createScript`; push: `onChanged(cb) → unsub`
 - `window.pdv.namespace.*` — namespace query: `query`
 - `window.pdv.script.*` — script tooling: `edit`, `reload` (open in external editor; re-register with kernel)
 - `window.pdv.project.*` — project lifecycle: `save`, `load`, `new`; push: `onLoaded(cb) → unsub`
 - `window.pdv.config.*` — app config: `get`, `set`
-- `window.pdv.themes.*` — theme persistence: `get`, `save`
-- `window.pdv.codeCells.*` — tab persistence: `load`, `save`
+- `window.pdv.about.*` — app metadata: `getVersion`
+- `window.pdv.themes.*` — theme persistence: `get`, `save` (stored under `~/.PDV/themes/`)
+- `window.pdv.codeCells.*` — tab persistence: `load`, `save` (stored under `~/.PDV/state/code-cells.json`)
 - `window.pdv.files.*` — native OS dialogs: `pickExecutable() → string | null` (wraps Electron `dialog.showOpenDialog` for executables); `pickDirectory() → string | null` (wraps `dialog.showOpenDialog` with `properties: ['openDirectory', 'createDirectory']`, used for Save/Open project)
+- `window.pdv.menu.*` — menu bridge: `updateRecentProjects(paths)`, `onAction(cb) → unsub` (for File menu actions routed to renderer state)
 
 **Design decision — running scripts via `kernels.execute`**: There is no `window.pdv.script.run()`. Running a `PDVScript` node from the renderer is always done by calling `window.pdv.kernels.execute()` with the appropriate Python code string (e.g. `pdv_tree["path.to.script"].run(a=1)`). This keeps the IPC surface minimal and the comm substrate readable — a script run looks identical to any other user execution in the console and in the kernel logs. The `ScriptDialog` component builds the execute call; it does not call a separate IPC channel.
 
@@ -763,7 +788,9 @@ This routing logic lives in a dedicated `CommRouter` class in `electron/main/com
 
 ### 11.4 Renderer Push Subscription Lifecycle
 
-The renderer subscribes to all push channels in a single `useEffect` in the root `App` component, keyed on `currentKernelId`. This ensures subscriptions are established after a kernel becomes ready and are torn down and re-established whenever the kernel changes (restart, switch).
+The renderer owns push subscriptions in the root `App` component, but they are split by lifecycle scope:
+- **Kernel-scoped** (`currentKernelId` keyed): `tree.onChanged`, `project.onLoaded`
+- **App-scoped** (always-on while renderer mounted): `kernels.onOutput`, `menu.onAction`
 
 ```tsx
 useEffect(() => {
@@ -782,13 +809,27 @@ useEffect(() => {
     unsubProject();
   };
 }, [currentKernelId]);
+
+useEffect(() => {
+  const unsubOutput = window.pdv.kernels.onOutput(chunk => {
+    // append streamed execute output to the matching log entry
+  });
+  return () => unsubOutput();
+}, []);
+
+useEffect(() => {
+  const unsubMenu = window.pdv.menu.onAction(payload => {
+    // open/save project actions routed from main menu
+  });
+  return () => unsubMenu();
+}, []);
 ```
 
 Rules:
-- **One owner**: Only `App` directly calls `onChanged` / `onLoaded`. Child components receive refresh tokens or data as props.
-- **Cleanup on every kernel change**: The `useEffect` cleanup runs before the next kernel's subscriptions are registered.
-- **No subscriptions when `currentKernelId` is null**: The early-return guard prevents stale listeners during startup or after kernel stop.
-- **No polling**: The renderer never polls for tree or project state. All proactive updates flow through these push subscriptions.
+- **One owner**: Only `App` directly registers push subscriptions. Child components receive state/refresh tokens as props.
+- **Kernel-scoped cleanup**: `tree.onChanged` and `project.onLoaded` are torn down/re-registered whenever kernel identity changes.
+- **App-scoped cleanup**: `kernels.onOutput` and `menu.onAction` are registered once and cleaned up on unmount.
+- **No polling**: Tree/project updates are push-driven; renderer does not poll these domains.
 
 ---
 
@@ -813,7 +854,18 @@ electron/
     init/
         (removed — replaced by pdv-python package)
     renderer/
-        ...                     ← React frontend (unchanged structure)
+        src/
+            app/index.tsx               ← root orchestration (kernel lifecycle, push subscriptions)
+            components/
+                CodeCell/               ← tabbed Monaco editor surface
+                Console/                ← streamed output and result rendering
+                Tree/                   ← tree browser + context menu actions
+                NamespaceView/          ← namespace table and filtering
+                SettingsDialog/         ← General/Shortcuts/Appearance/Runtime/About tabs
+            themes.ts                   ← builtin themes, Monaco theme definitions, font helpers
+            shortcuts.ts                ← canonical shortcut registry and matcher
+            services/tree.ts            ← renderer tree fetch/cache adapter
+            types/                      ← renderer view-model + preload API types
 ```
 
 Note: `file-scanner.ts` is removed entirely. Its functionality is superseded by the kernel's tree authority.
@@ -1031,6 +1083,48 @@ The following features are acknowledged as future work and must not influence th
 - **Modules system** — the Modules tab remains a placeholder stub
 - **Multiple simultaneous kernels** — architecture supports it (kernels have IDs) but UI exposes only one at a time
 - **R kernel support** — same deferral as Julia
+
+---
+
+## 16. Current Branch Delta vs `develop`
+
+This section tracks material differences in the current `frontend_refactor`
+branch so architecture readers can reconcile behavior with `develop`.
+
+### 16.1 Main/preload/API deltas
+
+- Preload API adds:
+  - `window.pdv.kernels.onOutput(cb)` for streamed execution chunks
+  - `window.pdv.about.getVersion()`
+  - `window.pdv.menu.onAction(cb)` and `window.pdv.menu.updateRecentProjects(paths)`
+- Config and UI persistence moved to `~/.PDV/`:
+  - `~/.PDV/preferences.json` for `config.get/set`
+  - `~/.PDV/themes/*.json` for custom/user-dropped themes
+  - `~/.PDV/state/code-cells.json` for code-cell state persistence
+- Script editing/file reveal commands support `{}` placeholder expansion for
+  external editor and file-manager command templates.
+
+### 16.2 Renderer/frontend deltas
+
+- Command editor surface is now **Code Cells** with browser-style tab behavior:
+  - Stable numeric tab labels by current left-to-right index
+  - Shortcut navigation (`Cmd/Ctrl+1..9`, `Cmd/Ctrl+0`)
+  - `Cmd/Ctrl+T` new tab and close semantics aligned with tabs UI
+  - Global `Cmd/Ctrl+Z` outside Monaco restores last clear/close action
+- Console supports ANSI control normalization and streamed output aggregation.
+- Settings dialog expanded to tabs:
+  - General (external editor commands)
+  - Keyboard Shortcuts (capture + conflict detection)
+  - Appearance (theme editing, system light/dark pairing, Monaco theme sync)
+  - Appearance → Fonts (detected code/display font families)
+  - Runtime and About (version + update-check stub)
+- Namespace view includes richer filtering/sorting controls and refresh toggles.
+- Tree context menu includes shortcut hints aligned with configurable bindings.
+
+### 16.3 Documentation deltas
+
+- `OVERVIEW.md` and this document now include branch-delta notes so readers can
+  map current behavior to this branch before merge to `develop`.
 
 ---
 

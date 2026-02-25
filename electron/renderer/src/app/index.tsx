@@ -1,3 +1,16 @@
+/**
+ * app/index.tsx — Root renderer orchestration component.
+ *
+ * Responsibilities:
+ * - Own kernel lifecycle from the renderer side (`window.pdv.kernels.*`)
+ * - Coordinate tree/namespace refresh triggers from push subscriptions
+ * - Manage code-cell tabs, console log state, and global dialogs
+ * - Apply appearance/font settings from persisted config
+ *
+ * Does NOT perform filesystem or kernel transport work directly; those stay
+ * behind the preload bridge (`window.pdv`) and main-process IPC handlers.
+ */
+
 import React, { useEffect, useMemo, useState, useRef, useCallback } from 'react';
 import { CodeCell } from '../components/CodeCell';
 import { Console } from '../components/Console';
@@ -14,6 +27,10 @@ import { BUILTIN_THEMES, applyThemeColors, applyFontSettings, getMonacoTheme, re
 type Tab = 'tree' | 'namespace' | 'modules';
 type KernelStatus = 'idle' | 'starting' | 'ready' | 'error';
 
+/**
+ * Normalize persisted code-cell payloads from config/project files into a safe
+ * runtime shape expected by the renderer.
+ */
 function normalizeLoadedCodeCells(data: unknown): { tabs: CellTab[]; activeTabId: number } {
   const rawTabs =
     Array.isArray(data)
@@ -44,6 +61,7 @@ function normalizeLoadedCodeCells(data: unknown): { tabs: CellTab[]; activeTabId
   return { tabs: normalizedTabs, activeTabId };
 }
 
+/** Normalize the recent-project list (unique, trimmed, max 10 entries). */
 function normalizeRecentProjects(data: unknown): string[] {
   if (!Array.isArray(data)) return [];
   const unique = new Set<string>();
@@ -60,6 +78,7 @@ function normalizeRecentProjects(data: unknown): string[] {
 }
 
 
+/** Root PDV application component rendered in the Electron renderer process. */
 const App: React.FC = () => {
   const [activeTab, setActiveTab] = useState<Tab>('tree');
   const [CellTabs, setCellTabs] = useState<CellTab[]>([{ id: 1, code: '' }]);
@@ -899,4 +918,5 @@ const App: React.FC = () => {
    );
  };
 
+/** Default export for renderer bootstrap (`main.tsx`). */
 export default App;

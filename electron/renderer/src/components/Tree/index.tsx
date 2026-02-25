@@ -1,3 +1,10 @@
+/**
+ * Tree panel — browsable view of `pdv_tree` descriptors.
+ *
+ * Fetches root/child nodes via `treeService`, preserves expansion/selection
+ * state in localStorage, and exposes context-menu actions back to `App`.
+ */
+
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { treeService, type TreeNodeData } from '../../services/tree';
 import { TreeNodeRow } from './TreeNodeRow';
@@ -19,6 +26,7 @@ interface ContextMenuState {
   node: TreeNodeData;
 }
 
+/** Tree browser component for node navigation and node actions. */
 export const Tree: React.FC<TreeProps> = ({ kernelId, disabled = false, refreshToken = 0, onAction, shortcuts }) => {
   const [nodes, setNodes] = useState<TreeNodeData[]>([]);
   const [loading, setLoading] = useState(true);

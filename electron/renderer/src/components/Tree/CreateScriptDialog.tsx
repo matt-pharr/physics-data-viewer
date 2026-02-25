@@ -1,3 +1,10 @@
+/**
+ * CreateScriptDialog — lightweight modal for new script node creation.
+ *
+ * Accepts a script name, normalizes it for path safety, and returns the final
+ * script key to the parent component.
+ */
+
 import React, { useEffect, useRef, useState } from 'react';
 
 interface CreateScriptDialogProps {
@@ -6,6 +13,7 @@ interface CreateScriptDialogProps {
   onCancel: () => void;
 }
 
+/** Modal used by the Tree context menu's "Create new script" action. */
 export const CreateScriptDialog: React.FC<CreateScriptDialogProps> = ({ parentPath, onCreate, onCancel }) => {
   const [name, setName] = useState('');
   const inputRef = useRef<HTMLInputElement | null>(null);
