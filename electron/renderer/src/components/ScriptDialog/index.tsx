@@ -57,7 +57,7 @@ export const ScriptDialog: React.FC<ScriptDialogProps> = ({ node, kernelId, onRu
         .join(', ');
       const invocation = args.length > 0 ? `(${args})` : '()';
       const code = `pdv_tree[${JSON.stringify(node.path)}].run${invocation}`;
-      const result = await window.pdv.kernels.execute(kernelId, { code, capture: false });
+      const result = await window.pdv.kernels.execute(kernelId, { code });
       onRun(code, result);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));

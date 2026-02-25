@@ -10,7 +10,6 @@ import { SettingsDialog } from '../components/SettingsDialog';
 import type { CommandTab, Config, KernelExecuteResult, LogEntry, TreeNodeData } from '../types';
 
 type Tab = 'tree' | 'namespace' | 'modules';
-type PlotMode = 'native' | 'capture';
 type KernelStatus = 'idle' | 'starting' | 'ready' | 'error';
 const DEFAULT_OPEN_SETTINGS_SHORTCUT = 'CommandOrControl+,';
 
@@ -69,7 +68,6 @@ function matchesShortcut(event: KeyboardEvent, shortcut: string): boolean {
 
 const App: React.FC = () => {
   const [activeTab, setActiveTab] = useState<Tab>('tree');
-  const [plotMode, setPlotMode] = useState<PlotMode>('native');
   const [commandTabs, setCommandTabs] = useState<CommandTab[]>([{ id: 1, code: '' }]);
   const [activeCommandTab, setActiveCommandTab] = useState(1);
   const [logs, setLogs] = useState<LogEntry[]>([]);
@@ -161,7 +159,6 @@ const App: React.FC = () => {
         }
         const loaded = await window.pdv.config.get();
         setConfig(loaded);
-        setPlotMode(loaded.plotMode ?? 'native');
         applyAppearanceColors(loaded.settings?.appearance?.colors);
 
         if (!loaded.pythonPath) {
@@ -294,7 +291,6 @@ const App: React.FC = () => {
   const handleEnvSave = async (paths: { pythonPath: string; juliaPath?: string }) => {
     const updatedConfig: Config = {
       kernelSpec: config?.kernelSpec ?? null,
-      plotMode: config?.plotMode ?? 'native',
       cwd: config?.cwd ?? '',
       trusted: config?.trusted ?? false,
       recentProjects: config?.recentProjects ?? [],
@@ -377,16 +373,6 @@ const App: React.FC = () => {
     setLastError(undefined);
   };
 
-  const handlePlotModeChange = async (mode: PlotMode) => {
-    setPlotMode(mode);
-    if (config) {
-      const next = { ...config, plotMode: mode };
-      setConfig(next);
-      await window.pdv.config.set({ plotMode: mode });
-      await startKernel(next);
-    }
-  };
-
   const handleSettingsSave = async (updates: Partial<Config>) => {
     if (updates.settings?.appearance?.colors) {
       applyAppearanceColors(updates.settings.appearance.colors);
@@ -457,7 +443,7 @@ const App: React.FC = () => {
     setScriptDialog(null);
   };
 
-  const handleExecute = async (code: string, options?: { capture?: boolean }) => {
+  const handleExecute = async (code: string) => {
     if (!currentKernelId || kernelStatus !== 'ready' || !code.trim()) return;
 
     setIsExecuting(true);
@@ -473,17 +459,13 @@ const App: React.FC = () => {
     };
 
     try {
-      const result = await window.pdv.kernels.execute(currentKernelId, {
-        code,
-        capture: options?.capture ?? (plotMode === 'capture'),
-      });
+      const result = await window.pdv.kernels.execute(currentKernelId, { code });
 
       logEntry.stdout = result.stdout;
       logEntry.stderr = result.stderr;
       logEntry.result = result.result;
       logEntry.error = result.error;
       logEntry.duration = result.duration;
-      logEntry.images = result.images;
 
       if (result.error) {
         setLastError(result.error);
@@ -685,21 +667,6 @@ const App: React.FC = () => {
            <span className="status-item">~/projects</span>
          </div>
          <div className="status-right">
-           <span className="status-item plot-toggle">
-             <span>Plot: </span>
-             <button
-               className={`toggle ${plotMode === 'native' ? 'active' : ''}`}
-               onClick={() => handlePlotModeChange('native')}
-             >
-               Native
-             </button>
-             <button
-               className={`toggle ${plotMode === 'capture' ? 'active' : ''}`}
-               onClick={() => handlePlotModeChange('capture')}
-             >
-               Capture
-             </button>
-           </span>
            <span className="status-item">
              Last: {lastDuration !== null ? `${Math.round(lastDuration)}ms` : '--'}
            </span>

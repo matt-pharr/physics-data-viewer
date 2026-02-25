@@ -35,7 +35,6 @@ export interface KernelSpec {
 
 export interface KernelExecuteRequest {
   code: string;
-  capture?: boolean;
   silent?: boolean;
 }
 
@@ -45,7 +44,6 @@ export interface KernelExecuteResult {
   result?: unknown;
   error?: string;
   duration?: number;
-  images?: Array<{ mime: string; data: string }>;
 }
 
 export interface NamespaceQueryOptions {
@@ -77,7 +75,6 @@ export interface CommandBoxData {
 
 export interface Config {
   kernelSpec?: string | null;
-  plotMode?: "native" | "capture";
   cwd?: string;
   trusted?: boolean;
   recentProjects?: string[];
