@@ -19,7 +19,7 @@
  * --------
  * ARCHITECTURE.md §4 (startup sequence)
  * comm-router.ts — subscribes to onIopubMessage; calls sendCommMsg
- * legacy/electron/main/kernel-manager.ts — reference for ZMQ wiring details
+ * pdv-protocol.ts — protocol envelope types used by CommRouter and IPC layers
  */
 
 import * as crypto from "crypto";

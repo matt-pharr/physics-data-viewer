@@ -43,8 +43,6 @@ pdv-python/              ← Python kernel package (pip install pdv-python)
         environment.py   ← working dir helpers, path safety checks
         handlers/        ← one file per PDV message domain (lifecycle, project, tree, ...)
     tests/
-
-legacy/                  ← OLD code kept for reference only. Do not import from here.
 ```
 
 ---
@@ -80,7 +78,7 @@ Renderer (React) ──window.pdv──► Preload ──ipcRenderer──► Ma
 
 8. **Scripts follow a fixed structure.** Every PDV script defines `run(pdv_tree: dict, **user_params) -> dict`. The `pdv_tree` argument is always injected by `PDVScript.run()` and is never supplied by the user — it is present in the signature so language servers don't flag tree references as errors.
 
-9. **`legacy/` is reference only.** Nothing in `electron/` or `pdv-python/` imports from `legacy/`. It will be deleted once the rewrite is complete.
+9. **Historical rewrite scaffolding is removed.** Do not add imports to deleted historical paths; use current architecture modules only.
 
 ---
 

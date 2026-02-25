@@ -1,286 +1,112 @@
-# Physics Data Viewer (PDV) — System Overview
+# Physics Data Viewer (PDV) — Overview
 
-> **This document describes the legacy (pre-rewrite) architecture.**
-> It is kept for historical reference only. Do not use it as a guide for new code.
->
-> **Current authoritative documents:**
-> - [`ARCHITECTURE.md`](ARCHITECTURE.md) — authoritative design specification for the rewrite
-> - [`IMPLEMENTATION_STEPS.md`](IMPLEMENTATION_STEPS.md) — step-by-step implementation plan
-> - [`legacy/README.md`](legacy/README.md) — explains why the old code was replaced
+PDV is an Electron desktop environment for computational and experimental physics workflows. Its core differentiator from a Jupyter notebook is the **Tree**: a typed, persistent, navigable data hierarchy that lives in the kernel and can be saved/loaded independently of ad hoc notebook cell state.
 
----
+## Process model
 
-## 1) Project Purpose (legacy context)
+PDV uses a strict three-process architecture:
 
-Physics Data Viewer (PDV) is an Electron desktop application intended to become a **hybrid notebook + data tree + workflow environment** for computational and experimental physics analysis.
+```
+Renderer (React) ──window.pdv──► Preload ──ipcRenderer──► Main (Node.js) ──ZeroMQ──► Kernel (Python)
+```
 
-The core goal is to combine:
-- A notebook-like command workflow (command tabs/cells)
-- A persistent project data model (the Tree)
-- Scripted and reusable analysis workflows (future Modules)
-- Eventually, local + remote execution and local + remote data access
+- **Renderer (`electron/renderer/src`)**: UI only (Tree panel, command editing, console, namespace view). No direct Node.js or filesystem access.
+- **Preload (`electron/preload.ts`)**: typed bridge exposing `window.pdv`.
+- **Main (`electron/main`)**: owns kernel lifecycle, ZeroMQ sockets, project/config filesystem access, and IPC handler registration.
+- **Kernel (`pdv-python/pdv_kernel`)**: owns `PDVTree`, namespace protection, serialization, and PDV protocol handlers.
 
-Conceptually, this is aligned with OMFIT-like usage patterns where researchers stitch together data and outputs from multiple codes and experiments, but with a modern desktop UI and explicit multi-language backend support.
+For authoritative architecture details, see `ARCHITECTURE.md` §2 and §11.
 
----
+## The PDV comm protocol
 
-## 2) Current Architecture (Implemented)
+Structured application data flows over the Jupyter comm channel target **`pdv.kernel`**. PDV internal operations (tree list/get, project save/load, namespace query, script registration) are exchanged as typed protocol messages rather than code strings sent through `execute_request`. This keeps responsibilities clear, improves type safety, and avoids code-string injection for core app operations.
 
-## 2.1 Process model
+Protocol details and message envelopes are specified in `ARCHITECTURE.md` §3.
 
-PDV is a standard Electron split architecture:
-- **Main process**: kernel lifecycle, IPC handlers, config/theme persistence, filesystem access
-- **Preload bridge**: strongly-typed `window.pdv` API
-- **Renderer**: React/TypeScript frontend (Tree, Command Box, Console, dialogs)
+## The Tree
 
-Key directories:
-- `electron/main`: backend process code
-- `electron/preload.ts`: renderer-safe bridge
-- `electron/renderer/src`: frontend UI
-- `electron/main/init`: kernel bootstrapping scripts for Python + Julia
+`PDVTree` in the kernel is the single source of truth for project data. The main process does not reconstruct or cache authoritative tree state by scanning files. The renderer always asks through protocol endpoints (for example, `pdv.tree.list`, `pdv.tree.get`) and receives descriptors/value payloads from the kernel.
 
-## 2.2 Kernel runtime model
+Tree nodes support lazy loading, so metadata can remain responsive while heavy payloads are deserialized only when requested.
 
-Kernel execution is implemented via **direct Jupyter kernel process launch** (no Jupyter server) using ZeroMQ channels.
+See `ARCHITECTURE.md` §7.
 
-Implemented capabilities:
-- Start/stop/restart/interruption of kernels
-- Execute code and capture stdout/stderr/errors
-- Collect completion and inspection responses
-- Capture rich display data (images + HTML)
-- Run kernel init cells on startup
+## `pdv-python` package
 
-Current behavior notes:
-- UI currently starts Python kernel by default (`pythonPath`-based command)
-- Julia plumbing exists in multiple places but UI and script execution are effectively Python-first
-- Basic request serialization exists (`waitForAvailability`) to avoid overlapping kernel reads
+`pdv-python` provides the kernel-side runtime:
 
-## 2.3 Tree model
+- `PDVTree`, `PDVScript`, lazy-load and serialization logic
+- comm target registration and dispatch
+- namespace protection (`pdv_tree` and `pdv` are protected bindings)
+- save/load, tree, script, lifecycle, and namespace handlers
 
-The Tree is intended as the central project data structure.
+On kernel startup, `bootstrap()` registers the comm target, injects `pdv_tree`/`pdv`, and emits readiness signaling used by main-process startup flow.
 
-Today, Tree behavior comes from two distinct mechanisms:
+See `ARCHITECTURE.md` §5.
 
-1. **Kernel tree snapshot** (current UI source of truth)
-- Renderer calls `tree:list`
-- Main asks Python kernel for `pdv_tree_snapshot(path)`
-- Python init defines `tree` as `PDVTree` and serializes nodes to JSON-like payloads
+## Renderer UI components
 
-2. **Filesystem scanning** (used by script-centric actions)
-- `FileScanner` traverses `tree/` folder, infers node types from file extensions, extracts script docstring previews
-- Used for script resolution and metadata in script handlers
+Primary renderer components live under `electron/renderer/src/components`:
 
-Important implication:
-- There is not yet one fully unified tree authority for all operations.
+- **CommandBox**: tabbed code editing and execution submission
+- **Console**: execution outputs, errors, and result display
+- **Tree**: hierarchical data navigation and node actions
+- **NamespaceView**: filtered namespace variable listing
+- **EnvironmentSelector**: runtime executable selection/validation UX
+- **SettingsDialog**: configuration editing and app preferences
 
-## 2.4 Frontend UX (implemented)
+The renderer entry orchestration is in `electron/renderer/src/app/index.tsx`.
 
-The renderer currently includes:
-- **Command Box**: tabbed Monaco editor tabs, execute button, keyboard execute (`Cmd/Ctrl+Enter`)
-- **Console**: chronological execution log with stdout/stderr/result/error/images
-- **Tree panel**: expandable rows, right-click context menu, script actions, persistent expansion/selection state
-- **Namespace panel**: variable listing, filtering, sorting, auto-refresh
-- **Environment selector**: configure Python executable (Julia path captured as deferred)
-- **Settings dialog**: shortcuts, themes/colors, runtime paths
-- **Modules tab**: currently a placeholder stub (“coming soon”)
+## Developer setup
 
-## 2.5 Persistence (implemented today)
+Install and run from the repository root:
 
-Current persisted state includes:
-- App config/settings in `~/.PDV/settings`
-- Themes in `~/.pdv/themes/*.json`
-- Tree root directory auto-created in `/tmp/<user>/PDV-<timestamp>/tree`
-- Command tabs persisted to `command-boxes.json` in project directory (parent of tree root)
+```bash
+# Install Python package (editable + dev deps)
+cd pdv-python
+python -m pip install -e ".[dev]"
 
-Current persistence constraints:
-- No single “project save/open” package format yet
-- No formal project metadata/index manifest versioning
-- Command box persistence is separate from tree lifecycle semantics
+# Install Electron dependencies
+cd ../electron
+npm install
+```
 
-## 2.6 Script workflow (implemented)
+Run tests:
 
-Implemented script functionality:
-- Create script file from Tree context menu (`Create new script`)
-- Open script in configured external editor command
-- Parse script parameters (regex-based)
-- Run script via `tree.run_script(...)` in kernel
-- Reload script in kernel (`pdv_reload_script`)
+```bash
+# Python tests
+cd pdv-python
+pytest tests/ -v --tb=short
 
-Python init provides:
-- `PDVTree` and `PDVScript`
-- Script registration / reload helpers
-- Namespace info and tree snapshot helpers
-- Plot capture helpers (`pdv_show`) and optional auto-capture behavior
+# TypeScript tests
+cd ../electron
+npm test -- --reporter=verbose
+```
 
-## 2.7 Testing status (implemented)
+Build and launch:
 
-There are tests for:
-- Main-process helper utilities
-- Tree service cache behavior in renderer
-- Config/theme and tree-root behavior
-- File scanner metadata extraction
-- Python backend script-runner behavior (pytest)
+```bash
+cd electron
+npm run build
+npm run dev
+```
 
-Current testing depth is strongest around utility and integration scaffolding, lighter on full end-to-end UI/kernel workflows.
+## Key design decisions before touching code
 
----
+- Main process must not send `execute_request` to call PDV internal protocol operations.
+- Main process must not build authoritative tree state from filesystem scanning.
+- Renderer accesses backend functionality only via `window.pdv.*` (not raw IPC channels).
+- `pdv_tree` is protected in kernel namespace and must not be reassignable by user code.
 
-## 3) Core Vision (Target Final Product)
-
-The long-term product vision should include all of the following major capabilities.
-
-## 3.1 Project-centric workflow
-
-A PDV project should fully capture:
-- Tree structure and all associated data assets
-- Command box tabs/cells and execution context history (at least code state)
-- Enabled modules and module-local settings/state
-- Runtime and environment metadata needed to reopen reproducibly
-
-It should support:
-- Save
-- Save As
-- Open
-- Recent projects
-- Crash-safe recovery where feasible
-
-## 3.2 Scalable data handling (lazy + large data)
-
-Given target workloads in the 100+ GB range, final design should support:
-- Lazy loading for large arrays/tables/files
-- Metadata-first tree browsing (shape, dtype, schema, preview windows)
-- Slice/chunk reads rather than full materialization
-- Backend-side handles/proxies for heavy objects
-- Optional memory mapping / chunk cache
-
-## 3.3 Dual-language kernel support (Python + Julia)
-
-The final product should allow project-level language selection and full parity where reasonable:
-- Start/use Python or Julia per project
-- Script create/run/reload in chosen language
-- Namespace introspection parity
-- Plot capture/native behavior parity
-- Compatible module hooks in both languages (or explicit module-language constraints)
-
-## 3.4 Modules framework
-
-Modules are planned as reusable community workflows combining:
-- Manifest metadata (UI bindings, actions, params, dependencies)
-- Python scripts (and possibly Julia scripts later)
-- Optional custom visualizations and scripted pipelines
-
-Expected module UX:
-- Discover/install/enable/disable modules
-- Module screen with button/action binding to scripts
-- Per-module configuration and validation
-- Version compatibility with PDV and project schema
-
-## 3.5 Embedded research artifacts in tree
-
-The tree should support non-code artifacts that belong to workflows:
-- Markdown notes
-- PDF references/reports
-- Potentially notebook-like narrative artifacts
-
-This enables reproducible “analysis + interpretation” in one project workspace.
-
-## 3.6 Remote execution and remote data
-
-Target capabilities include:
-- Remote kernel execution (similar to VS Code remote workflows)
-- Responsive local UI with compute offloaded to institutional resources
-- Remote data browsing/loading from servers and experiment data sources
-- Authentication/session management and reconnect behavior
-
-This is essential for large-scale simulation/experimental datasets and HPC workflows.
-
----
-
-## 4) What the Codebase Does Well Right Now
-
-Strengths already present:
-- Cleanly separated main/preload/renderer architecture
-- Typed IPC contract (`ipc.ts`) covering a broad API surface
-- Practical direct-kernel integration without full Jupyter server dependency
-- Good initial script workflow foundations
-- Real effort on safer path handling / script path validation
-- Config/theme persistence and runtime selector already in place
-
----
-
-## 5) Current Design Friction / Technical Debt to Track
-
-These are important to consider as part of roadmap planning:
-
-1. **Tree authority split**
-- Tree data in kernel memory and filesystem scanning are both used, creating consistency risk.
-
-2. **Project persistence is partial**
-- No single project package/schema capturing all persistent state and metadata.
-
-3. **Python-first assumptions leak into multiple layers**
-- UI startup, script execution, and compatibility checks explicitly gate toward Python.
-
-4. **Large-data strategy is not yet implemented end-to-end**
-- Type hints and API signatures suggest lazy data intentions, but concrete lazy loaders/chunk APIs are limited.
-
-5. **Some IPC methods are placeholders**
-- `tree:get` and `tree:save` are still stubs (returning `null` / `true`).
-
-6. **Script parameter parsing is regex-based**
-- Fragile for complex function signatures, decorators, multiline defaults, typing edge cases.
-
-7. **Watcher and reload UX is incomplete**
-- Watch APIs exist but renderer notification integration is TODO.
-
-8. **Security and trust model needs expansion for production-scale use**
-- Executable selection and script execution are practical today, but mature trust boundaries/auditability are future work.
-
----
-
-## 6) Suggested System Trajectory
-
-A practical trajectory toward the target product:
-
-1. Formalize a **project format** (manifest + data index + command box state + module state)
-2. Unify Tree into a **single coherent model** with clear kernel/filesystem synchronization semantics
-3. Implement true **lazy data adapters** for large datasets (HDF5/Zarr/Parquet/Numpy)
-4. Ship **module runtime + manifest schema** and bind Modules tab to real actions
-5. Add **Julia parity** gates and test matrix
-6. Add **remote execution/data connectors** behind a transport abstraction
-
----
-
-## 7) Current Product Decisions (Locked)
-
-The following design decisions are now explicit and should guide implementation:
-
-1. **Project persistence mode (near-term): directory-only**
-- Primary format is a project directory, not a monolithic archive.
-- This avoids unacceptable open-time costs for very large projects.
-- Random-access single-bundle packaging is deferred to a far-future phase.
-
-2. **Data authority model: Python kernel is primary**
-- GUI should obtain tree state and data operations through the Python kernel APIs.
-- Persisted tree-backed objects should carry project-relative file paths.
-- Frontend should remain thin and avoid owning complex data logic.
-- Runtime model is memory-primary with lazy disk-backed node loading.
-
-3. **Remote connector priority: SSH/SFTP first**
-- Remote data ingest/connectors should prioritize SSH/SFTP workflows.
-- Architecture should remain field-agnostic so additional connectors can be added.
-
-4. **Language roadmap: Python first, Julia guaranteed**
-- Python features are developed first.
-- Backend interfaces must avoid Python-only assumptions that block Julia parity later.
-
-5. **Writeback model: working directory + explicit project save**
-- Node updates may auto-write into a project working directory for speed/recovery.
-- User-facing Save/Save As should checkpoint/commit full project state.
-- Recovery snapshots may exist, but explicit Save remains the durable project boundary.
-
----
-
-## 8) Summary
-
-PDV already has a meaningful foundation: a working Electron shell, typed IPC, direct Jupyter-kernel integration, script workflows, and an interactive Tree/Namespace/Command UX. The major remaining work is to transform this from a local prototype into a robust, project-centric, scalable research platform: complete persistence, true lazy large-data handling, full module system, dual-language parity, and remote/HPC workflows.
+## Pointer map
+
+| If you want to understand... | Read... |
+|---|---|
+| Full architecture and invariants | `ARCHITECTURE.md` |
+| Comm protocol envelope/types/versioning | `ARCHITECTURE.md` §3 and `electron/main/pdv-protocol.ts` |
+| Kernel process lifecycle and execution | `electron/main/kernel-manager.ts`, `ARCHITECTURE.md` §4 |
+| IPC surface and renderer bridge | `electron/main/ipc.ts`, `electron/main/index.ts`, `electron/preload.ts` |
+| Tree model and save/load authority | `ARCHITECTURE.md` §7 and `pdv-python/pdv_kernel/tree.py` |
+| Kernel bootstrap and handlers | `pdv-python/pdv_kernel/comms.py`, `pdv-python/pdv_kernel/handlers/` |
+| Project-level implementation sequence | `IMPLEMENTATION_STEPS.md` |
+| Future roadmap items | `PLANNED_FEATURES.md` |
