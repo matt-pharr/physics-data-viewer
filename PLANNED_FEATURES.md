@@ -325,6 +325,51 @@ A `Cmd+Shift+P`-style command palette for discoverability. Scientists exploring 
 
 ---
 
+## B9) GitHub Copilot Integration
+
+### Goal
+Surface GitHub Copilot completions and chat inside the PDV code editor. PDV's Monaco-based code cells should feel like a first-class Copilot-enabled editor for physicists: inline ghost-text completions as you type, and a Copilot Chat panel for asking questions about data, scripts, and analysis.
+
+### Background
+GitHub Copilot is exposed to third-party editors through two mechanisms:
+- **Language Server Protocol (LSP)**: [copilot-language-server](https://github.com/github/copilot-language-server) is a standalone Node.js binary (distributed via npm) that speaks a Copilot-extended LSP protocol. Editors register with it to receive inline completions.
+- **GitHub Copilot Chat**: Requires the Copilot Chat API, currently gated behind GitHub's partner programme.
+
+### Planned work
+
+#### Authentication
+- The `copilot-language-server` handles GitHub OAuth itself (browser redirect to `github.com/login/device`). PDV's main process spawns the language server and opens the device-activation URL in the system browser.
+- Token storage: the language server manages its own token cache (`~/.config/github-copilot/`). PDV does not store credentials.
+
+#### Language server lifecycle
+- `copilot-ls.ts` (new main-process module): spawns `copilot-language-server --stdio` as a child process using the npm-installed binary; implements the LSP `initialize` / `initialized` handshake; forwards `textDocument/didOpen`, `textDocument/didChange`, and `getCompletions` over `stdin`/`stdout`.
+- Gracefully degrades: if the binary is not installed, Copilot features are silently absent (no hard dependency).
+
+#### Monaco inline completions
+- Register a Monaco `InlineCompletionsProvider` for `python` (and `julia` when Julia support lands).
+- On each completion trigger, send `getCompletions` to the language server via the `copilot:complete` IPC channel and return the results as `InlineCompletion` items.
+- Ghost text rendering uses Monaco's built-in inline completion UI — no custom rendering required.
+
+#### IPC surface
+- `copilot:status` — returns `'not-installed' | 'signed-out' | 'signed-in'`.
+- `copilot:signin` — triggers the device-flow OAuth sequence; returns the activation URL to display.
+- `copilot:complete` — forwards a completion request to the language server; returns `{ completions: string[] }`.
+
+#### Settings integration
+- Add a **Copilot** section to the General settings tab: enable/disable toggle, sign-in/sign-out button, status indicator.
+- Respect the `quickSuggestions: false` Monaco option — Copilot inline completions are a separate provider and are unaffected by that option.
+
+#### Copilot Chat (later)
+- Copilot Chat requires access to the GitHub Copilot Chat API. Gate this behind a separate feature flag until API access is confirmed.
+- If available: a collapsible chat panel alongside the namespace/tree panes, pre-seeded with the active cell's code and the current tree structure as context.
+
+### Notes
+- Inline completions do not require Copilot Business/Enterprise; a standard Copilot Individual subscription is sufficient.
+- The language server binary must be installed separately (`npm install -g @github/copilot-language-server` or bundled). Document both paths.
+- Do not block on this feature — item 5 (kernel-backed autocompletion) is the higher-priority completion path and should ship first.
+
+---
+
 ## 12) Known Design Tensions to Resolve
 
 These are architectural decisions in the current design that are correct for 0.0.2-alpha2 but will create friction as the system grows. They should be resolved before or during the Alpha Feature implementation phase.
@@ -370,7 +415,8 @@ Begin only after 0.1.0-beta1 is stable. Suggested order:
 5. B5 — Physical units and quantity metadata
 6. B6 — Per-node annotations
 7. B7 — Reproducible environment lockfiles
-8. B1 — R kernel support (last; requires Julia to be complete first)
+8. B9 — GitHub Copilot integration (inline completions; Chat if API access granted)
+9. B1 — R kernel support (last; requires Julia to be complete first)
 
 ---
 
