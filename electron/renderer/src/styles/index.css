@@ -398,18 +398,28 @@ body {
   font-size: 13px;
   font-weight: 600;
   color: var(--text-primary);
+  flex-shrink: 0;
 }
 
 .pane-actions {
   display: flex;
   gap: 8px;
-  margin-left: auto;
+  flex-shrink: 0;
 }
 
 .command-tabs {
   display: flex;
   gap: 4px;
   margin-left: 12px;
+  flex: 1;
+  min-width: 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: none;
+}
+
+.command-tabs::-webkit-scrollbar {
+  display: none;
 }
 
 .console-content {
@@ -802,6 +812,17 @@ body {
 
 .environment-selector h2 {
   margin-bottom: 8px;
+}
+
+.environment-selector-embedded {
+  padding: 8px 0;
+}
+
+.environment-selector-embedded h2 {
+  font-size: 14px;
+  font-weight: 600;
+  margin-bottom: 16px;
+  color: var(--text-primary);
 }
 
 .input-group {

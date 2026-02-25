@@ -38,6 +38,8 @@ export const CommandBox: React.FC<CommandBoxProps> = ({
   const isExecutingRef = useRef(isExecuting);
   const disabledRef = useRef(disabled);
   const shortcutsRef = useRef(shortcuts);
+  const onAddTabRef = useRef(onAddTab);
+  const onRemoveTabRef = useRef(onRemoveTab);
 
   useEffect(() => {
     activeTabRef.current = activeTab;
@@ -55,6 +57,14 @@ export const CommandBox: React.FC<CommandBoxProps> = ({
     shortcutsRef.current = shortcuts;
   }, [shortcuts]);
 
+  useEffect(() => {
+    onAddTabRef.current = onAddTab;
+  }, [onAddTab]);
+
+  useEffect(() => {
+    onRemoveTabRef.current = onRemoveTab;
+  }, [onRemoveTab]);
+
   if (!activeTab) {
     return null;
   }
@@ -71,6 +81,22 @@ export const CommandBox: React.FC<CommandBoxProps> = ({
         if (!disabledRef.current && !isExecutingRef.current && activeTabRef.current) {
           onExecute(activeTabRef.current.code);
         }
+      }
+      if (matchesShortcut(nativeEvent, shortcutsRef.current.newTab)) {
+        e.preventDefault();
+        e.stopPropagation();
+        onAddTabRef.current();
+      }
+      if (matchesShortcut(nativeEvent, shortcutsRef.current.closeTab)) {
+        e.preventDefault();
+        e.stopPropagation();
+        const tab = activeTabRef.current;
+        if (tab) onRemoveTabRef.current?.(tab.id);
+      }
+      if (matchesShortcut(nativeEvent, shortcutsRef.current.closeWindow)) {
+        e.preventDefault();
+        e.stopPropagation();
+        window.close();
       }
     });
   };

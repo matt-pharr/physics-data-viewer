@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import type { Config, Theme } from '../../types';
 import { SHORTCUT_LABELS, DEFAULT_SHORTCUTS } from '../../shortcuts';
 import type { Shortcuts } from '../../shortcuts';
+import { EnvironmentSelector } from '../EnvironmentSelector';
 
 type SettingsTab = 'shortcuts' | 'appearance' | 'runtime';
 const CUSTOM_THEME_PREFIX = 'Custom Theme';
@@ -16,26 +17,37 @@ function colorsEqual(a: Record<string, string>, b: Record<string, string>): bool
 
 interface SettingsDialogProps {
   isOpen: boolean;
+  initialTab?: SettingsTab;
   config: Config | null;
   shortcuts: Shortcuts;
+  currentKernelId?: string | null;
   onClose: () => void;
   onSave: (updates: Partial<Config>) => Promise<void>;
+  onEnvSave: (paths: { pythonPath: string; juliaPath?: string }) => Promise<void>;
+  onRestart?: () => void;
 }
 
-export const SettingsDialog: React.FC<SettingsDialogProps> = ({ isOpen, config, shortcuts, onClose, onSave }) => {
-  const [activeTab, setActiveTab] = useState<SettingsTab>('shortcuts');
+export const SettingsDialog: React.FC<SettingsDialogProps> = ({
+  isOpen,
+  initialTab = 'shortcuts',
+  config,
+  shortcuts,
+  currentKernelId,
+  onClose,
+  onSave,
+  onEnvSave,
+  onRestart,
+}) => {
+  const [activeTab, setActiveTab] = useState<SettingsTab>(initialTab);
   const [themes, setThemes] = useState<Theme[]>([]);
   const [editedShortcuts, setEditedShortcuts] = useState<Shortcuts>(shortcuts);
   const [selectedTheme, setSelectedTheme] = useState('Dark');
   const [themeName, setThemeName] = useState('Dark');
   const [colors, setColors] = useState<Record<string, string>>({});
-  const [pythonPath, setPythonPath] = useState('python3');
-  const [juliaPath, setJuliaPath] = useState('julia');
-  const [validating, setValidating] = useState(false);
-  const [runtimeErrors, setRuntimeErrors] = useState<{ python?: string; julia?: string }>({});
 
   useEffect(() => {
     if (!isOpen) return;
+    setActiveTab(initialTab);
     setEditedShortcuts(shortcuts);
     const loadThemes = async () => {
       const loadedThemes = await window.pdv.themes.get();
@@ -46,11 +58,17 @@ export const SettingsDialog: React.FC<SettingsDialogProps> = ({ isOpen, config, 
       setThemeName(currentThemeName);
       setColors(config?.settings?.appearance?.colors ?? selected?.colors ?? {});
     };
-    setPythonPath(config?.pythonPath ?? 'python3');
-    setJuliaPath(config?.juliaPath ?? 'julia');
-    setRuntimeErrors({});
     void loadThemes();
-  }, [config, shortcuts, isOpen]);
+  }, [config, shortcuts, isOpen, initialTab]);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose();
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [isOpen, onClose]);
 
   const selectedThemeColors = useMemo(
     () => themes.find((theme) => theme.name === selectedTheme)?.colors ?? {},
@@ -85,49 +103,11 @@ export const SettingsDialog: React.FC<SettingsDialogProps> = ({ isOpen, config, 
       ]),
     ) as typeof editedShortcuts;
     await onSave({
-      pythonPath,
-      juliaPath,
       settings: {
         shortcuts: savedShortcuts,
         appearance: { themeName: savedThemeName, colors },
       },
     });
-  };
-
-  const handleValidateRuntime = async () => {
-    setValidating(true);
-    setRuntimeErrors({});
-    try {
-      if (!window.pdv?.kernels) {
-        throw new Error('PDV preload API is unavailable. Open the Electron window, not localhost in a browser.');
-      }
-      const pythonValid = await window.pdv.kernels.validate(pythonPath, 'python');
-      const nextErrors: { python?: string; julia?: string } = {};
-      if (!pythonValid.valid) nextErrors.python = pythonValid.error || 'Unable to validate Python interpreter';
-      setRuntimeErrors(nextErrors);
-    } catch (error) {
-      setRuntimeErrors({
-        python: error instanceof Error ? error.message : String(error),
-      });
-    } finally {
-      setValidating(false);
-    }
-  };
-
-  const handlePickExecutable = async (language: 'python' | 'julia') => {
-    try {
-      if (!window.pdv?.files) {
-        throw new Error('PDV preload API is unavailable. Open the Electron window, not localhost in a browser.');
-      }
-      const selected = await window.pdv.files.pickExecutable();
-      if (!selected) return;
-      if (language === 'python') setPythonPath(selected);
-      if (language === 'julia') setJuliaPath(selected);
-    } catch (error) {
-      setRuntimeErrors({
-        python: error instanceof Error ? error.message : String(error),
-      });
-    }
   };
 
   return (
@@ -161,32 +141,14 @@ export const SettingsDialog: React.FC<SettingsDialogProps> = ({ isOpen, config, 
               ))}
             </div>
           ) : activeTab === 'runtime' ? (
-            <div className="settings-runtime">
-              <div className="settings-card">
-                <h4>Configure Python Runtime</h4>
-                <div className="input-group">
-                  <label>Python Executable</label>
-                  <div className="input-with-button">
-                    <input value={pythonPath} onChange={(event) => setPythonPath(event.target.value)} placeholder="/usr/bin/python3" />
-                    <button className="btn btn-secondary" onClick={() => void handlePickExecutable('python')}>Browse</button>
-                  </div>
-                  {runtimeErrors.python && <div className="error-text">{runtimeErrors.python}</div>}
-                </div>
-                <div className="input-group">
-                  <label>Julia Executable (deferred)</label>
-                  <div className="input-with-button">
-                    <input value={juliaPath} onChange={(event) => setJuliaPath(event.target.value)} placeholder="/usr/local/bin/julia" />
-                    <button className="btn btn-secondary" onClick={() => void handlePickExecutable('julia')}>Browse</button>
-                  </div>
-                  <div className="help-text">Julia runtime validation will be available in a future release.</div>
-                </div>
-                <div className="button-group">
-                  <button className="btn btn-secondary" onClick={() => void handleValidateRuntime()} disabled={validating}>
-                    {validating ? 'Validating...' : 'Validate Paths'}
-                  </button>
-                </div>
-              </div>
-            </div>
+            <EnvironmentSelector
+              embedded
+              isFirstRun={!config?.pythonPath}
+              currentConfig={config || undefined}
+              currentKernelId={currentKernelId}
+              onSave={onEnvSave}
+              onRestart={onRestart}
+            />
           ) : (
             <div className="settings-appearance-layout">
               <div className="settings-card">
@@ -236,10 +198,12 @@ export const SettingsDialog: React.FC<SettingsDialogProps> = ({ isOpen, config, 
             </div>
           )}
         </div>
-        <div className="dialog-footer">
-          <button className="btn btn-secondary" onClick={onClose}>Cancel</button>
-          <button className="btn btn-primary" onClick={() => void onSaveSettings()}>Save</button>
-        </div>
+        {activeTab !== 'runtime' && (
+          <div className="dialog-footer">
+            <button className="btn btn-secondary" onClick={onClose}>Cancel</button>
+            <button className="btn btn-primary" onClick={() => void onSaveSettings()}>Save</button>
+          </div>
+        )}
       </div>
     </div>
   );

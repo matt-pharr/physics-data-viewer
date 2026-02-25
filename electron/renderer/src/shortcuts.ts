@@ -11,6 +11,12 @@ export interface Shortcuts {
   openSettings: string;
   /** Execute the active command-box tab. */
   execute: string;
+  /** Add a new command-box tab. */
+  newTab: string;
+  /** Close the active command-box tab. */
+  closeTab: string;
+  /** Close the application window. */
+  closeWindow: string;
   /** Copy the focused tree node's dot path to the clipboard. */
   treeCopyPath: string;
   /** Open the focused script node in an external editor. */
@@ -22,6 +28,9 @@ export interface Shortcuts {
 export const DEFAULT_SHORTCUTS: Shortcuts = {
   openSettings: 'CommandOrControl+,',
   execute: 'CommandOrControl+Enter',
+  newTab: 'CommandOrControl+T',
+  closeTab: 'CommandOrControl+W',
+  closeWindow: 'CommandOrControl+Shift+W',
   treeCopyPath: 'CommandOrControl+C',
   treeEditScript: 'E',
   treePrint: 'P',
@@ -31,6 +40,9 @@ export const DEFAULT_SHORTCUTS: Shortcuts = {
 export const SHORTCUT_LABELS: Record<keyof Shortcuts, string> = {
   openSettings: 'Open Settings',
   execute: 'Execute Code',
+  newTab: 'New Command Tab',
+  closeTab: 'Close Command Tab',
+  closeWindow: 'Close Window',
   treeCopyPath: 'Copy Node Path',
   treeEditScript: 'Edit Script',
   treePrint: 'Print Node',

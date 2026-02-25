@@ -91,6 +91,7 @@ const App: React.FC = () => {
   const [treeRefreshToken, setTreeRefreshToken] = useState(0);
   const [createScriptTarget, setCreateScriptTarget] = useState<string | null>(null);
   const [showSettings, setShowSettings] = useState(false);
+  const [settingsInitialTab, setSettingsInitialTab] = useState<'shortcuts' | 'appearance' | 'runtime'>('shortcuts');
 
   const shortcuts = useMemo(() => resolveShortcuts(config?.settings?.shortcuts), [config]);
 
@@ -183,11 +184,39 @@ const App: React.FC = () => {
     void initConfig();
   }, []);
 
+  const addCommandTabRef = useRef<() => void>(null!);
+  useEffect(() => {
+    addCommandTabRef.current = addCommandTab;
+  });
+
+  const activeCommandTabRef = useRef(activeCommandTab);
+  useEffect(() => {
+    activeCommandTabRef.current = activeCommandTab;
+  }, [activeCommandTab]);
+
+  const removeCommandTabRef = useRef<(id: number) => void>(null!);
+  useEffect(() => {
+    removeCommandTabRef.current = handleRemoveCommandTab;
+  });
+
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
+      if (event.repeat) return;
       if (matchesShortcut(event, shortcuts.openSettings)) {
         event.preventDefault();
         setShowSettings(true);
+      }
+      if (matchesShortcut(event, shortcuts.newTab)) {
+        event.preventDefault();
+        addCommandTabRef.current();
+      }
+      if (matchesShortcut(event, shortcuts.closeTab)) {
+        event.preventDefault();
+        removeCommandTabRef.current(activeCommandTabRef.current);
+      }
+      if (matchesShortcut(event, shortcuts.closeWindow)) {
+        event.preventDefault();
+        window.close();
       }
     };
     window.addEventListener('keydown', onKeyDown);
@@ -357,9 +386,11 @@ const App: React.FC = () => {
   };
 
   const addCommandTab = () => {
-    const newId = Math.max(0, ...commandTabs.map((t) => t.id)) + 1;
-    setCommandTabs([...commandTabs, { id: newId, code: '' }]);
-    setActiveCommandTab(newId);
+    setCommandTabs((prev) => {
+      const newId = Math.max(0, ...prev.map((t) => t.id)) + 1;
+      setActiveCommandTab(newId);
+      return [...prev, { id: newId, code: '' }];
+    });
   };
 
   const handleTabChange = (id: number) => {
@@ -391,8 +422,12 @@ const App: React.FC = () => {
         setActiveCommandTab(fallback.id);
         return [fallback];
       }
-      const newActive = next.find((t) => t.id === activeCommandTab) || next[0];
-      setActiveCommandTab(newActive.id);
+      // If the closed tab was active, move to the tab to its left (or the first tab)
+      if (id === activeCommandTab) {
+        const closedIndex = prev.findIndex((t) => t.id === id);
+        const newActive = next[Math.max(0, closedIndex - 1)];
+        setActiveCommandTab(newActive.id);
+      }
       return next;
     });
     setLastError(undefined);
@@ -707,8 +742,8 @@ const App: React.FC = () => {
            </span>
            <span 
              className="status-item status-clickable" 
-             onClick={() => setShowEnvSelector(true)}
-             title="Click to change kernel"
+             onClick={() => { setSettingsInitialTab('runtime'); setShowSettings(true); }}
+             title="Click to change runtime"
            >
              {config?.kernelSpec ?? 'python3'}
            </span>
@@ -736,10 +771,14 @@ const App: React.FC = () => {
        )}
        <SettingsDialog
          isOpen={showSettings}
+         initialTab={settingsInitialTab}
          config={config}
          shortcuts={shortcuts}
+         currentKernelId={currentKernelId}
          onClose={() => setShowSettings(false)}
          onSave={handleSettingsSave}
+         onEnvSave={handleEnvSave}
+         onRestart={handleRestartKernel}
        />
      </div>
    );
