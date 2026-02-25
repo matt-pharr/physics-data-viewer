@@ -170,6 +170,11 @@ export const Tree: React.FC<TreeProps> = ({ kernelId, disabled = false, refreshT
   const selectedNode = selectedPath ? flatNodes.find((n) => n.path === selectedPath) : undefined;
 
   const handleKeyDown = async (event: React.KeyboardEvent<HTMLDivElement>) => {
+    // Prevent Space from triggering browser button-click on focused tree rows
+    if (event.key === ' ') {
+      event.preventDefault();
+      return;
+    }
     if (!selectedNode || disabled) return;
     const nativeEvent = event.nativeEvent;
 
@@ -233,6 +238,7 @@ export const Tree: React.FC<TreeProps> = ({ kernelId, disabled = false, refreshT
           x={contextMenu.x}
           y={contextMenu.y}
           node={contextMenu.node}
+          shortcuts={shortcuts}
           onAction={handleContextAction}
           onClose={() => setContextMenu(null)}
         />

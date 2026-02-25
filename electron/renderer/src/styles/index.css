@@ -305,7 +305,7 @@ body {
 
 /* ===== CONTEXT MENU ===== */
 .context-menu {
-  min-width: 180px;
+  min-width: 200px;
   background-color: var(--bg-secondary);
   border: 1px solid var(--border-color);
   border-radius: 4px;
@@ -323,12 +323,31 @@ body {
   text-align: left;
   font-size: 13px;
   cursor: pointer;
-  display: block;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.context-menu-label {
+  flex: 1;
+}
+
+.context-menu-shortcut {
+  font-size: 11px;
+  color: var(--text-hint);
+  font-family: ui-monospace, monospace;
+  flex-shrink: 0;
 }
 
 .context-menu-item:hover:not(:disabled) {
   background-color: var(--bg-hover);
   color: var(--accent);
+}
+
+.context-menu-item:hover:not(:disabled) .context-menu-shortcut {
+  color: var(--accent);
+  opacity: 0.7;
 }
 
 .context-menu-item:disabled {

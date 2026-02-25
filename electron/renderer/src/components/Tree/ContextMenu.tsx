@@ -1,7 +1,9 @@
 import React, { useEffect, useRef } from 'react';
 import type { TreeNodeData } from '../../types';
+import type { Shortcuts } from '../../shortcuts';
+import { formatShortcutHint } from '../../shortcuts';
 
-const MENU_WIDTH = 180;
+const MENU_WIDTH = 200;
 const MENU_ITEM_HEIGHT = 32;
 const DEFAULT_VIEWPORT = { width: 1024, height: 768 };
 
@@ -9,11 +11,12 @@ interface ContextMenuProps {
   x: number;
   y: number;
   node: TreeNodeData;
+  shortcuts: Shortcuts;
   onAction: (action: string, node: TreeNodeData) => void;
   onClose: () => void;
 }
 
-export const ContextMenu: React.FC<ContextMenuProps> = ({ x, y, node, onAction, onClose }) => {
+export const ContextMenu: React.FC<ContextMenuProps> = ({ x, y, node, shortcuts, onAction, onClose }) => {
   const menuRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -38,6 +41,12 @@ export const ContextMenu: React.FC<ContextMenuProps> = ({ x, y, node, onAction, 
     };
   }, [onClose]);
 
+  const actionShortcuts: Partial<Record<string, string>> = {
+    edit:      formatShortcutHint(shortcuts.treeEditScript),
+    print:     formatShortcutHint(shortcuts.treePrint),
+    copy_path: formatShortcutHint(shortcuts.treeCopyPath),
+  };
+
   const actions = getActionsForNode(node);
   const estimatedHeight = actions.length * MENU_ITEM_HEIGHT;
   const viewportWidth = typeof window !== 'undefined' ? window.innerWidth : DEFAULT_VIEWPORT.width;
@@ -61,7 +70,10 @@ export const ContextMenu: React.FC<ContextMenuProps> = ({ x, y, node, onAction, 
             onClose();
           }}
         >
-          {action.label}
+          <span className="context-menu-label">{action.label}</span>
+          {actionShortcuts[action.id] && (
+            <span className="context-menu-shortcut">{actionShortcuts[action.id]}</span>
+          )}
         </button>
       ))}
     </div>

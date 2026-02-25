@@ -57,6 +57,30 @@ export function resolveShortcuts(saved: Partial<Shortcuts> | undefined): Shortcu
 }
 
 /**
+ * Format a shortcut string into a compact human-readable hint for use in
+ * context menus, e.g. "CommandOrControl+C" → "⌘C", "E" → "E".
+ */
+export function formatShortcutHint(shortcut: string): string {
+  const isMac = typeof navigator !== 'undefined' && navigator.platform.toUpperCase().startsWith('MAC');
+  return shortcut
+    .replace(/\s+/g, '')
+    .split('+')
+    .map((token) => {
+      switch (token.toLowerCase()) {
+        case 'commandorcontrol': return isMac ? '⌘' : 'Ctrl+';
+        case 'command': case 'cmd': case 'meta': return '⌘';
+        case 'control': case 'ctrl': return 'Ctrl+';
+        case 'shift': return '⇧';
+        case 'alt': case 'option': return isMac ? '⌥' : 'Alt+';
+        case 'enter': return '↵';
+        case 'comma': return ',';
+        default: return token.toUpperCase();
+      }
+    })
+    .join('');
+}
+
+/**
  * Returns true when the keyboard event matches a shortcut string such as
  * "CommandOrControl+Enter", "E", or "CommandOrControl+,".
  *
