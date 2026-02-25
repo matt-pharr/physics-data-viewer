@@ -9,6 +9,7 @@ import { CreateScriptDialog } from '../components/Tree/CreateScriptDialog';
 import { SettingsDialog } from '../components/SettingsDialog';
 import type { CellTab, Config, KernelExecuteResult, LogEntry, MenuActionPayload, TreeNodeData } from '../types';
 import { matchesShortcut, resolveShortcuts } from '../shortcuts';
+import { BUILTIN_THEMES, applyThemeColors } from '../themes';
 
 type Tab = 'tree' | 'namespace' | 'modules';
 type KernelStatus = 'idle' | 'starting' | 'ready' | 'error';
@@ -60,9 +61,7 @@ function normalizeRecentProjects(data: unknown): string[] {
 
 function applyAppearanceColors(colors?: Record<string, string>): void {
   if (!colors) return;
-  Object.entries(colors).forEach(([key, value]) => {
-    document.documentElement.style.setProperty(`--${key}`, value);
-  });
+  applyThemeColors(colors);
 }
 
 

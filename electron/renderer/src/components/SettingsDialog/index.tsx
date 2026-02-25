@@ -1,11 +1,15 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import type { Config, Theme } from '../../types';
+import type { Config } from '../../types';
 import { SHORTCUT_LABELS, DEFAULT_SHORTCUTS } from '../../shortcuts';
 import type { Shortcuts } from '../../shortcuts';
 import { EnvironmentSelector } from '../EnvironmentSelector';
+import {
+  BUILTIN_THEMES, BUILTIN_THEME_NAMES, CSS_VAR_GROUPS,
+  applyThemeColors, colorsEqual,
+} from '../../themes';
+import type { Theme } from '../../types';
 
 type SettingsTab = 'shortcuts' | 'appearance' | 'runtime';
-const CUSTOM_THEME_PREFIX = 'Custom Theme';
 
 const isMac = navigator.platform.toUpperCase().startsWith('MAC');
 
@@ -147,13 +151,6 @@ const ShortcutCapture: React.FC<ShortcutCaptureProps> = ({
   );
 };
 
-function colorsEqual(a: Record<string, string>, b: Record<string, string>): boolean {
-  const keys = Object.keys(a);
-  if (keys.length !== Object.keys(b).length) {
-    return false;
-  }
-  return keys.every((key) => a[key] === b[key]);
-}
 
 interface SettingsDialogProps {
   isOpen: boolean;
@@ -179,27 +176,32 @@ export const SettingsDialog: React.FC<SettingsDialogProps> = ({
   onRestart,
 }) => {
   const [activeTab, setActiveTab] = useState<SettingsTab>(initialTab);
-  const [themes, setThemes] = useState<Theme[]>([]);
   const [editedShortcuts, setEditedShortcuts] = useState<Shortcuts>(shortcuts);
   const [recordingKey, setRecordingKey] = useState<string | null>(null);
-  const [selectedTheme, setSelectedTheme] = useState('Dark');
-  const [themeName, setThemeName] = useState('Dark');
-  const [colors, setColors] = useState<Record<string, string>>({});
+
+  // Appearance state
+  const [savedThemes, setSavedThemes] = useState<Theme[]>([]);
+  const [selectedThemeName, setSelectedThemeName] = useState<string>(BUILTIN_THEMES[0].name);
+  const [editedColors, setEditedColors] = useState<Record<string, string>>(BUILTIN_THEMES[0].colors);
 
   useEffect(() => {
     if (!isOpen) return;
     setActiveTab(initialTab);
     setEditedShortcuts(shortcuts);
-    const loadThemes = async () => {
-      const loadedThemes = await window.pdv.themes.get();
-      setThemes(loadedThemes);
-      const currentThemeName = config?.settings?.appearance?.themeName ?? loadedThemes[0]?.name ?? 'Dark';
-      const selected = loadedThemes.find((theme) => theme.name === currentThemeName) ?? loadedThemes[0];
-      setSelectedTheme(selected?.name ?? currentThemeName);
-      setThemeName(currentThemeName);
-      setColors(config?.settings?.appearance?.colors ?? selected?.colors ?? {});
+    const load = async () => {
+      const loaded = await window.pdv.themes.get();
+      setSavedThemes(loaded);
+      const allThemes = [...BUILTIN_THEMES, ...loaded];
+      const activeName = config?.settings?.appearance?.themeName ?? BUILTIN_THEMES[0].name;
+      const baseTheme = allThemes.find((t) => t.name === activeName) ?? BUILTIN_THEMES[0];
+      // Use persisted colors if available (they may differ from base if user edited)
+      const activeColors = config?.settings?.appearance?.colors ?? baseTheme.colors;
+      // Fill any missing keys from the base theme
+      const fullColors = { ...baseTheme.colors, ...activeColors };
+      setSelectedThemeName(activeName);
+      setEditedColors(fullColors);
     };
-    void loadThemes();
+    void load();
   }, [config, shortcuts, isOpen, initialTab]);
 
   useEffect(() => {
@@ -211,10 +213,13 @@ export const SettingsDialog: React.FC<SettingsDialogProps> = ({
     return () => window.removeEventListener('keydown', onKeyDown);
   }, [isOpen, onClose, recordingKey]);
 
-  const selectedThemeColors = useMemo(
-    () => themes.find((theme) => theme.name === selectedTheme)?.colors ?? {},
-    [selectedTheme, themes],
-  );
+  const allThemes = useMemo(() => [...BUILTIN_THEMES, ...savedThemes], [savedThemes]);
+
+  const baseColors = useMemo(() => {
+    return allThemes.find((t) => t.name === selectedThemeName)?.colors ?? BUILTIN_THEMES[0].colors;
+  }, [allThemes, selectedThemeName]);
+
+  const isDirty = useMemo(() => !colorsEqual(editedColors, baseColors), [editedColors, baseColors]);
 
   /** Map from shortcut key → label of the shortcut it conflicts with, or null. */
   const shortcutConflicts = useMemo(() => {
@@ -243,35 +248,69 @@ export const SettingsDialog: React.FC<SettingsDialogProps> = ({
 
   if (!isOpen) return null;
 
-  const onThemeChange = (name: string) => {
-    const theme = themes.find((entry) => entry.name === name);
-    setSelectedTheme(name);
-    setThemeName(name);
-    setColors(theme?.colors ?? {});
+  const handleThemeSelect = (name: string) => {
+    const theme = allThemes.find((t) => t.name === name);
+    if (!theme) return;
+    // Fill any missing vars from All_CSS_VARS with the current values
+    const full = { ...editedColors, ...theme.colors };
+    setSelectedThemeName(name);
+    setEditedColors(full);
+    applyThemeColors(full);
+  };
+
+  const handleColorChange = (key: string, value: string) => {
+    const next = { ...editedColors, [key]: value };
+    setEditedColors(next);
+    document.documentElement.style.setProperty(`--${key}`, value);
+  };
+
+  const handleHexInput = (key: string, raw: string) => {
+    // Accept partial input while typing; only apply when it looks like a valid hex color
+    setEditedColors((prev) => ({ ...prev, [key]: raw }));
+    if (/^#[0-9a-fA-F]{6}$/.test(raw)) {
+      document.documentElement.style.setProperty(`--${key}`, raw);
+    }
+  };
+
+  const handleReset = () => {
+    const full = { ...editedColors, ...baseColors };
+    setEditedColors(full);
+    applyThemeColors(full);
+  };
+
+  const handleDuplicate = async () => {
+    const name = `${selectedThemeName} (Custom)`;
+    const theme: Theme = { name, colors: { ...editedColors } };
+    await window.pdv.themes.save(theme);
+    const refreshed = await window.pdv.themes.get();
+    setSavedThemes(refreshed);
+    setSelectedThemeName(name);
   };
 
   const onSaveSettings = async () => {
-    const requestedThemeName = themeName.trim();
-    let savedThemeName = selectedTheme;
-    if (requestedThemeName !== selectedTheme || !colorsEqual(colors, selectedThemeColors)) {
-      const customThemeCount = themes.filter((theme) => theme.name.startsWith(CUSTOM_THEME_PREFIX)).length;
-      savedThemeName = requestedThemeName || `${CUSTOM_THEME_PREFIX} ${customThemeCount + 1}`;
-      await window.pdv.themes.save({ name: savedThemeName, colors });
-      const loadedThemes = await window.pdv.themes.get();
-      setThemes(loadedThemes);
-      setSelectedTheme(savedThemeName);
-    }
-    // Persist all shortcuts; fall back to defaults for any blank field
+    // Persist shortcuts
     const savedShortcuts = Object.fromEntries(
       (Object.keys(editedShortcuts) as Array<keyof typeof editedShortcuts>).map((key) => [
         key,
         editedShortcuts[key].trim() || DEFAULT_SHORTCUTS[key],
       ]),
     ) as typeof editedShortcuts;
+
+    // Persist theme: if dirty and based on a built-in, auto-save as custom first
+    let savedThemeName = selectedThemeName;
+    if (isDirty) {
+      const isBuiltin = BUILTIN_THEME_NAMES.has(selectedThemeName);
+      if (isBuiltin) savedThemeName = `${selectedThemeName} (Custom)`;
+      await window.pdv.themes.save({ name: savedThemeName, colors: editedColors });
+      const refreshed = await window.pdv.themes.get();
+      setSavedThemes(refreshed);
+      setSelectedThemeName(savedThemeName);
+    }
+
     await onSave({
       settings: {
         shortcuts: savedShortcuts,
-        appearance: { themeName: savedThemeName, colors },
+        appearance: { themeName: savedThemeName, colors: editedColors },
       },
     });
   };
@@ -328,50 +367,74 @@ export const SettingsDialog: React.FC<SettingsDialogProps> = ({
               onRestart={onRestart}
             />
           ) : (
-            <div className="settings-appearance-layout">
-              <div className="settings-card">
-                <h4>Theme Selection</h4>
-                <div className="settings-grid">
-                  <label htmlFor="settings-theme-select">Theme</label>
-                  <select id="settings-theme-select" value={selectedTheme} onChange={(event) => onThemeChange(event.target.value)}>
-                    {themes.map((theme) => (
-                      <option key={theme.name} value={theme.name}>
-                        {theme.name}
-                      </option>
-                    ))}
-                  </select>
-                  <label htmlFor="settings-theme-name">Theme Name</label>
-                  <input
-                    id="settings-theme-name"
-                    type="text"
-                    value={themeName}
-                    onChange={(event) => setThemeName(event.target.value)}
-                  />
-                </div>
-              </div>
-              <div className="settings-card">
-                <h4>Theme Colors</h4>
-                <div className="settings-color-grid">
-                  {Object.entries(colors).map(([name, value]) => (
-                    <div className="settings-color-row" key={name}>
-                      <label htmlFor={`settings-color-${name}`}>{name}</label>
-                      <div className="settings-color-input">
-                        <input
-                          id={`settings-color-${name}`}
-                          type="color"
-                          value={value}
-                          onChange={(event) =>
-                            setColors((prev) => ({
-                              ...prev,
-                              [name]: event.target.value,
-                            }))
-                          }
-                        />
-                        <span>{value}</span>
-                      </div>
-                    </div>
+            <div className="settings-appearance">
+              {/* Theme selector row */}
+              <div className="appearance-theme-row">
+                <label htmlFor="appearance-theme-select">Theme</label>
+                <select
+                  id="appearance-theme-select"
+                  value={selectedThemeName}
+                  onChange={(e) => handleThemeSelect(e.target.value)}
+                >
+                  {BUILTIN_THEMES.map((t) => (
+                    <option key={t.name} value={t.name}>{t.name}</option>
                   ))}
-                </div>
+                  {savedThemes.length > 0 && (
+                    <optgroup label="Custom">
+                      {savedThemes.map((t) => (
+                        <option key={t.name} value={t.name}>{t.name}</option>
+                      ))}
+                    </optgroup>
+                  )}
+                </select>
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  onClick={() => void handleDuplicate()}
+                  title="Save a copy of this theme for editing"
+                >
+                  Duplicate
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  onClick={handleReset}
+                  disabled={!isDirty}
+                  title="Reset colours to this theme's defaults"
+                >
+                  Reset
+                </button>
+              </div>
+
+              {/* Colour groups */}
+              <div className="appearance-colors">
+                {CSS_VAR_GROUPS.map((group) => (
+                  <div key={group.label} className="appearance-color-group">
+                    <div className="appearance-group-label">{group.label}</div>
+                    {group.vars.map(({ key, label }) => {
+                      const value = editedColors[key] ?? '#000000';
+                      return (
+                        <div key={key} className="appearance-color-row">
+                          <span className="appearance-color-label">{label}</span>
+                          <input
+                            type="color"
+                            className="appearance-color-swatch"
+                            value={/^#[0-9a-fA-F]{6}$/.test(value) ? value : '#000000'}
+                            onChange={(e) => handleColorChange(key, e.target.value)}
+                          />
+                          <input
+                            type="text"
+                            className="appearance-color-hex"
+                            value={value}
+                            maxLength={7}
+                            spellCheck={false}
+                            onChange={(e) => handleHexInput(key, e.target.value)}
+                          />
+                        </div>
+                      );
+                    })}
+                  </div>
+                ))}
               </div>
             </div>
           )}
