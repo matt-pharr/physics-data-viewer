@@ -94,4 +94,46 @@ def bootstrap(ip=None):
     if ip is not None:
         comms_mod.register_comm_target(ip)
 
+    # Configure a non-blocking interactive matplotlib backend so that
+    # plt.show() opens native windows rather than falling back to the
+    # ipykernel default (inline/Agg), which would silently swallow plots.
+    # This must run before any `import matplotlib.pyplot` in user code.
+    # Users can still override with %matplotlib <backend> after bootstrap.
+    _configure_matplotlib()
+
     comms_mod._bootstrapped = True
+
+
+def _configure_matplotlib() -> None:
+    """Set a sensible default matplotlib backend for native-mode PDV.
+
+    Tries platform-appropriate interactive backends in order, falling back
+    to Agg so that at minimum figures can be captured via ``pdv_show()``.
+    Silently skips if matplotlib is not installed.
+    """
+    import sys  # noqa: PLC0415
+
+    try:
+        import matplotlib  # noqa: PLC0415
+    except ImportError:
+        return
+
+    # If a backend was already set (e.g. user's matplotlibrc or a previous
+    # import of pyplot), respect it and do nothing.
+    current = matplotlib.get_backend().lower()
+    if current not in ("agg", "module://matplotlib_inline.backend_inline", ""):
+        return
+
+    if sys.platform == "darwin":
+        candidates = ["MacOSX", "TkAgg", "Agg"]
+    elif sys.platform.startswith("win"):
+        candidates = ["TkAgg", "Qt5Agg", "Agg"]
+    else:
+        candidates = ["Qt5Agg", "TkAgg", "GTK4Agg", "Agg"]
+
+    for backend in candidates:
+        try:
+            matplotlib.use(backend)
+            return
+        except Exception:
+            continue
