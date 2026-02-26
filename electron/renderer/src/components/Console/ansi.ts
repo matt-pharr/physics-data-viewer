@@ -36,7 +36,7 @@ const converter = new AnsiToHtml({
  *  - `[nF`       cursor to start of n lines up (pip uses this)
  *  - Other CSI   passed through (colour codes)
  */
-function applyTerminalControls(input: string): string {
+export function applyTerminalControls(input: string): string {
   const lines: string[] = [""];
   let row = 0;
   let i = 0;

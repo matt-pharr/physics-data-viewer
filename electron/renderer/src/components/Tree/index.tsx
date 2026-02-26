@@ -9,6 +9,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { treeService, type TreeNodeData } from '../../services/tree';
 import { TreeNodeRow } from './TreeNodeRow';
 import { ContextMenu } from './ContextMenu';
+import { findNode, flattenTree, updateNodeImmut } from './tree-utils';
 import type { Shortcuts } from '../../shortcuts';
 import { matchesShortcut } from '../../shortcuts';
 
@@ -255,19 +256,6 @@ export const Tree: React.FC<TreeProps> = ({ kernelId, disabled = false, refreshT
   );
 };
 
-function flattenTree(nodes: TreeNodeData[], depth = 0): Array<TreeNodeData & { depth: number }> {
-  const result: Array<TreeNodeData & { depth: number }> = [];
-
-  for (const node of nodes) {
-    result.push({ ...node, depth });
-    if (node.isExpanded && node.children) {
-      result.push(...flattenTree(node.children, depth + 1));
-    }
-  }
-
-  return result;
-}
-
 async function restoreExpandedTree(
   rootNodes: TreeNodeData[],
   expanded: Set<string>,
@@ -288,31 +276,4 @@ async function restoreExpandedTree(
   }
 
   return current;
-}
-
-function findNode(nodes: TreeNodeData[], path: string): TreeNodeData | undefined {
-  for (const node of nodes) {
-    if (node.path === path) return node;
-    if (node.children) {
-      const found = findNode(node.children, path);
-      if (found) return found;
-    }
-  }
-  return undefined;
-}
-
-function updateNodeImmut(
-  list: TreeNodeData[],
-  path: string,
-  updater: (n: TreeNodeData) => TreeNodeData,
-): TreeNodeData[] {
-  return list.map((node) => {
-    if (node.path === path) {
-      return updater(node);
-    }
-    if (node.children) {
-      return { ...node, children: updateNodeImmut(node.children, path, updater) };
-    }
-    return node;
-  });
 }

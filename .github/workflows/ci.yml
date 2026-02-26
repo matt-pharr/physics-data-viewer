@@ -48,8 +48,12 @@ jobs:
         working-directory: pdv-python
         run: pytest tests/ -v
 
-      - name: Node tests
+      - name: Node tests (main process)
         working-directory: electron
         env:
           PYTHON_PATH: python3
-        run: npm run test
+        run: npm run test -- --reporter=verbose main/
+
+      - name: Renderer tests
+        working-directory: electron
+        run: npm run test -- --reporter=verbose renderer/src/

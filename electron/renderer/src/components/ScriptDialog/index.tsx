@@ -16,7 +16,7 @@ interface ScriptDialogProps {
 }
 
 /** Map backend parameter type strings to renderer input kinds. */
-function getParamKind(type: string): 'string' | 'int' | 'float' | 'bool' {
+export function getParamKind(type: string): 'string' | 'int' | 'float' | 'bool' {
   const normalized = type.toLowerCase();
   if (normalized.includes('bool')) return 'bool';
   if (normalized.includes('int')) return 'int';
@@ -25,7 +25,7 @@ function getParamKind(type: string): 'string' | 'int' | 'float' | 'bool' {
 }
 
 /** Return true when a required parameter has a user-provided value. */
-function isValueProvided(param: ScriptParameter, values: Record<string, unknown>): boolean {
+export function isValueProvided(param: ScriptParameter, values: Record<string, unknown>): boolean {
   const value = values[param.name];
   if (value === undefined || value === null) return false;
   if (typeof value === 'string') return value.trim().length > 0;

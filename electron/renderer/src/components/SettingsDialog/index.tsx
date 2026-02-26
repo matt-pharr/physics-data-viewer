@@ -17,64 +17,17 @@ import {
 } from '../../themes';
 import type { Theme } from '../../types';
 import { loader } from '@monaco-editor/react';
+import {
+  IS_MAC,
+  tokenToLabel,
+  parseShortcutTokens,
+  buildShortcutString,
+  normalizeShortcut,
+} from './utils';
 
 type SettingsTab = 'general' | 'shortcuts' | 'appearance' | 'runtime' | 'about';
 
-const isMac = navigator.platform.toUpperCase().startsWith('MAC');
-const DEFAULT_FILE_MANAGER = isMac ? 'open {}' : 'xdg-open {}';
-
-/** Convert a stored shortcut token to a human-readable key badge label. */
-function tokenToLabel(token: string): string {
-  switch (token.toLowerCase()) {
-    case 'commandorcontrol': return isMac ? '⌘' : 'Ctrl';
-    case 'command': case 'cmd': case 'meta': return '⌘';
-    case 'control': case 'ctrl': return 'Ctrl';
-    case 'shift': return '⇧';
-    case 'alt': case 'option': return isMac ? '⌥' : 'Alt';
-    case 'enter': case 'return': return '↵';
-    case 'escape': case 'esc': return 'Esc';
-    case 'tab': return '⇥';
-    case 'backspace': return '⌫';
-    case 'delete': return '⌦';
-    case 'arrowup': return '↑';
-    case 'arrowdown': return '↓';
-    case 'arrowleft': return '←';
-    case 'arrowright': return '→';
-    case 'comma': return ',';
-    case 'space': return 'Space';
-    default: return token.length === 1 ? token.toUpperCase() : token;
-  }
-}
-
-/** Parse a stored shortcut string into display badge labels. */
-function parseShortcutTokens(shortcut: string): string[] {
-  return shortcut
-    .replace(/\s+/g, '')
-    .split('+')
-    .filter(Boolean)
-    .map(tokenToLabel);
-}
-
-/** Build a stored shortcut string from a KeyboardEvent. Returns '' if only modifiers. */
-function buildShortcutString(e: KeyboardEvent): string {
-  const modifiers: string[] = [];
-  if (e.metaKey || e.ctrlKey) modifiers.push('CommandOrControl');
-  if (e.altKey) modifiers.push('Alt');
-  if (e.shiftKey) modifiers.push('Shift');
-
-  const isModifierKey = ['Meta', 'Control', 'Shift', 'Alt'].includes(e.key);
-  if (isModifierKey) return modifiers.join('+');
-
-  const keyStr = e.key === ',' ? 'comma'
-    : e.key === ' ' ? 'Space'
-    : e.key;
-  return [...modifiers, keyStr].join('+');
-}
-
-/** Normalize a shortcut string for conflict comparison (case/whitespace-insensitive). */
-function normalizeShortcut(s: string): string {
-  return s.replace(/\s+/g, '').toLowerCase();
-}
+const DEFAULT_FILE_MANAGER = IS_MAC ? 'open {}' : 'xdg-open {}';
 
 interface ShortcutCaptureProps {
   label: string;

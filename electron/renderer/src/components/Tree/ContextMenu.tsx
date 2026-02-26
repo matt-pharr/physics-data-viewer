@@ -89,7 +89,7 @@ export const ContextMenu: React.FC<ContextMenuProps> = ({ x, y, node, shortcuts,
 };
 
 /** Return menu actions allowed for the given node descriptor. */
-function getActionsForNode(node: TreeNodeData) {
+export function getActionsForNode(node: TreeNodeData) {
   const actions: Array<{ id: string; label: string; disabled: boolean }> = [];
   const canCreateScript = node.type === 'dict' || node.type === 'folder' || node.type === 'root';
 
