@@ -28,6 +28,7 @@ import {
 type SettingsTab = 'general' | 'shortcuts' | 'appearance' | 'runtime' | 'about';
 
 const DEFAULT_FILE_MANAGER = IS_MAC ? 'open {}' : 'xdg-open {}';
+const DEFAULT_VSCODE_PAIR = THEME_PAIRS.find((pair) => pair.name === 'VSCode');
 
 interface ShortcutCaptureProps {
   label: string;
@@ -148,10 +149,12 @@ export const SettingsDialog: React.FC<SettingsDialogProps> = ({
   const [savedThemes, setSavedThemes] = useState<Theme[]>([]);
   const [selectedThemeName, setSelectedThemeName] = useState<string>(BUILTIN_THEMES[0].name);
   const [editedColors, setEditedColors] = useState<Record<string, string>>(BUILTIN_THEMES[0].colors);
-  const [followSystemTheme, setFollowSystemTheme] = useState(false);
-  const [darkThemeName, setDarkThemeName] = useState<string>(BUILTIN_THEMES[0].name);
+  const [followSystemTheme, setFollowSystemTheme] = useState(true);
+  const [darkThemeName, setDarkThemeName] = useState<string>(
+    DEFAULT_VSCODE_PAIR?.dark ?? BUILTIN_THEMES[0].name,
+  );
   const [lightThemeName, setLightThemeName] = useState<string>(
-    () => BUILTIN_THEMES.find((t) => t.monacoTheme === 'vs')?.name ?? BUILTIN_THEMES[0].name,
+    DEFAULT_VSCODE_PAIR?.light ?? BUILTIN_THEMES.find((t) => t.monacoTheme === 'vs')?.name ?? BUILTIN_THEMES[0].name,
   );
 
   // General settings state
@@ -199,10 +202,11 @@ export const SettingsDialog: React.FC<SettingsDialogProps> = ({
       const activeColors = app?.colors ?? baseTheme.colors;
       setSelectedThemeName(activeName);
       setEditedColors({ ...baseTheme.colors, ...activeColors });
-      setFollowSystemTheme(app?.followSystemTheme ?? false);
-      setDarkThemeName(app?.darkTheme ?? BUILTIN_THEMES[0].name);
+      setFollowSystemTheme(app?.followSystemTheme ?? true);
+      setDarkThemeName(app?.darkTheme ?? (DEFAULT_VSCODE_PAIR?.dark ?? BUILTIN_THEMES[0].name));
       setLightThemeName(
-        app?.lightTheme ?? (BUILTIN_THEMES.find((t) => t.monacoTheme === 'vs')?.name ?? BUILTIN_THEMES[0].name),
+        app?.lightTheme ??
+          (DEFAULT_VSCODE_PAIR?.light ?? BUILTIN_THEMES.find((t) => t.monacoTheme === 'vs')?.name ?? BUILTIN_THEMES[0].name),
       );
     };
     void load();

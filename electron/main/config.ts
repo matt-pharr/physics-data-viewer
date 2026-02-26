@@ -86,6 +86,14 @@ const CONFIG_DEFAULTS: PDVConfig = {
   showPrivateVariables: false,
   showModuleVariables: false,
   showCallableVariables: false,
+  settings: {
+    appearance: {
+      themeName: "Dark+ (VSCode)",
+      followSystemTheme: true,
+      darkTheme: "Dark+ (VSCode)",
+      lightTheme: "Light+ (VSCode)",
+    },
+  },
 };
 
 // Parse and type-check config JSON loaded from disk.
