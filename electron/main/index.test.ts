@@ -64,7 +64,12 @@ const mocks = vi.hoisted(() => {
     message: "Remote update checks are not implemented yet.",
   }));
   const moduleManagerResolveActionScripts = vi.fn(async () => [
-    { name: "run", scriptPath: "/tmp/demo-module/scripts/run.py" },
+    {
+      actionId: "run-action",
+      actionLabel: "Run",
+      name: "run",
+      scriptPath: "/tmp/demo-module/scripts/run.py",
+    },
   ]);
   return {
     handlers,
@@ -824,6 +829,7 @@ describe("Step 5 IPC handlers", () => {
       alias: string;
       version: string;
       revision?: string;
+      actions: Array<{ id: string; label: string; scriptName: string }>;
     }>;
 
     expect(result).toEqual([
@@ -833,8 +839,47 @@ describe("Step 5 IPC handlers", () => {
         alias: "demo-module",
         version: "1.0.0",
         revision: "abc123",
+        actions: [{ id: "run-action", label: "Run", scriptName: "run" }],
       },
     ]);
+  });
+
+  it("modules:runAction returns execution code for imported module action", async () => {
+    setup();
+    mocks.fsReadFile.mockResolvedValue(
+      JSON.stringify({
+        schema_version: "1.1",
+        saved_at: "2026-01-01T00:00:00.000Z",
+        pdv_version: "1.0",
+        tree_checksum: "",
+        modules: [
+          {
+            module_id: "demo-module",
+            alias: "demo-module",
+            version: "1.0.0",
+          },
+        ],
+        module_settings: {},
+      })
+    );
+    const start = getHandler(IPC.kernels.start);
+    const kernel = (await start({}, { language: "python" })) as { id: string };
+    const load = getHandler(IPC.project.load);
+    await load({}, "/tmp/project");
+
+    const runAction = getHandler(IPC.modules.runAction);
+    const result = (await runAction({}, {
+      kernelId: kernel.id,
+      moduleAlias: "demo-module",
+      actionId: "run-action",
+      params: { threshold: 5 },
+    })) as { success: boolean; status: string; executionCode?: string };
+
+    expect(result.success).toBe(true);
+    expect(result.status).toBe("queued");
+    expect(result.executionCode).toBe(
+      'pdv_tree["demo-module.scripts.run"].run(threshold=5)'
+    );
   });
 
   it("project:load binds imported module scripts when kernel is active", async () => {

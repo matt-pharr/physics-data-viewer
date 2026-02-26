@@ -57,6 +57,10 @@ interface ModuleManifestV1 {
  * One script binding derived from a module manifest action list.
  */
 export interface ModuleScriptBinding {
+  /** Stable action identifier from manifest. */
+  actionId: string;
+  /** User-facing action label from manifest. */
+  actionLabel: string;
   /** Script node name under `<alias>.scripts.<name>`. */
   name: string;
   /** Absolute path to the backing Python script file. */
@@ -230,6 +234,8 @@ export class ModuleManager {
       }
       usedNames.add(uniqueName);
       bindings.push({
+        actionId: action.id,
+        actionLabel: action.label,
         name: uniqueName,
         scriptPath,
       });

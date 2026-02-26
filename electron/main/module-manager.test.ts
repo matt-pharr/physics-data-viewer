@@ -227,10 +227,14 @@ describe("ModuleManager", () => {
     const bindings = await manager.resolveActionScripts("binding_mod");
     expect(bindings).toEqual([
       {
+        actionId: "run-a",
+        actionLabel: "Run A",
         name: "run",
         scriptPath: path.join(pdvDir, "modules", "packages", "binding_mod", "scripts", "run.py"),
       },
       {
+        actionId: "run-b",
+        actionLabel: "Run B",
         name: "run_1",
         scriptPath: path.join(pdvDir, "modules", "packages", "binding_mod", "alt", "run.py"),
       },

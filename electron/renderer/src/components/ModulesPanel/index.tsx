@@ -9,6 +9,9 @@ import type {
 interface ModulesPanelProps {
   projectDir: string | null;
   isActive: boolean;
+  kernelId: string | null;
+  kernelReady: boolean;
+  onExecute: (code: string) => Promise<void>;
 }
 
 /**
@@ -17,6 +20,9 @@ interface ModulesPanelProps {
 export const ModulesPanel: React.FC<ModulesPanelProps> = ({
   projectDir,
   isActive,
+  kernelId,
+  kernelReady,
+  onExecute,
 }) => {
   const [installed, setInstalled] = useState<ModuleDescriptor[]>([]);
   const [imported, setImported] = useState<ImportedModuleDescriptor[]>([]);
@@ -24,6 +30,8 @@ export const ModulesPanel: React.FC<ModulesPanelProps> = ({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [lastStatus, setLastStatus] = useState<string | null>(null);
+  const [runningActionKey, setRunningActionKey] = useState<string | null>(null);
+  const [actionParamsJson, setActionParamsJson] = useState<Record<string, string>>({});
 
   const refresh = useCallback(async () => {
     setLoading(true);
@@ -128,6 +136,43 @@ export const ModulesPanel: React.FC<ModulesPanelProps> = ({
     await refresh();
   };
 
+  const handleRunAction = async (actionId: string): Promise<void> => {
+    if (!selectedImported) return;
+    if (!kernelId || !kernelReady) {
+      setError("Start a ready kernel before running module actions.");
+      return;
+    }
+    const actionKey = `${selectedImported.alias}:${actionId}`;
+    setRunningActionKey(actionKey);
+    setError(null);
+    try {
+      const rawParams = (actionParamsJson[actionKey] ?? "").trim();
+      let params: Record<string, unknown> = {};
+      if (rawParams.length > 0) {
+        const parsed = JSON.parse(rawParams) as unknown;
+        if (!parsed || Array.isArray(parsed) || typeof parsed !== "object") {
+          throw new Error("Action parameters must be a JSON object.");
+        }
+        params = parsed as Record<string, unknown>;
+      }
+      const result = await window.pdv.modules.runAction({
+        kernelId,
+        moduleAlias: selectedImported.alias,
+        actionId,
+        params,
+      });
+      if (!result.success || !result.executionCode) {
+        throw new Error(result.error ?? `Failed to run action ${actionId}`);
+      }
+      await onExecute(result.executionCode);
+      setLastStatus(`Action queued: ${selectedImported.alias}.${actionId}`);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setRunningActionKey(null);
+    }
+  };
+
   return (
     <div className="modules-panel">
       <div className="modules-library">
@@ -195,9 +240,50 @@ export const ModulesPanel: React.FC<ModulesPanelProps> = ({
                 <div className="modules-meta">
                   id: {selectedImported.moduleId} · version: {selectedImported.version}
                 </div>
-                <div className="modules-inline-note">
-                  Declarative module action controls will be added in the next step.
-                </div>
+                {!kernelReady && (
+                  <div className="modules-inline-note">
+                    Start a ready kernel to run module actions.
+                  </div>
+                )}
+                {selectedImported.actions.length === 0 ? (
+                  <div className="modules-inline-note">This module defines no actions.</div>
+                ) : (
+                  <div className="modules-actions">
+                    {selectedImported.actions.map((action) => {
+                      const actionKey = `${selectedImported.alias}:${action.id}`;
+                      const isRunning = runningActionKey === actionKey;
+                      return (
+                        <div key={action.id} className="modules-action-row">
+                          <div className="modules-action-meta">
+                            <div className="modules-name">{action.label}</div>
+                            <div className="modules-meta">
+                              id: {action.id} · script: {action.scriptName}
+                            </div>
+                          </div>
+                          <input
+                            className="modules-action-params"
+                            type="text"
+                            value={actionParamsJson[actionKey] ?? ""}
+                            onChange={(event) =>
+                              setActionParamsJson((prev) => ({
+                                ...prev,
+                                [actionKey]: event.target.value,
+                              }))
+                            }
+                            placeholder='{"param": 1}'
+                            disabled={isRunning}
+                          />
+                          <button
+                            onClick={() => void handleRunAction(action.id)}
+                            disabled={isRunning || !kernelReady || !kernelId}
+                          >
+                            {isRunning ? "Running..." : "Run"}
+                          </button>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
               </div>
             )}
           </>

@@ -268,6 +268,13 @@ export interface ModuleImportResult {
   error?: string;
 }
 
+/** Declarative imported-module action descriptor for renderer controls. */
+export interface ImportedModuleActionDescriptor {
+  id: string;
+  label: string;
+  scriptName: string;
+}
+
 /** Project-scoped imported module descriptor. */
 export interface ImportedModuleDescriptor {
   moduleId: string;
@@ -275,6 +282,7 @@ export interface ImportedModuleDescriptor {
   alias: string;
   version: string;
   revision?: string;
+  actions: ImportedModuleActionDescriptor[];
 }
 
 /** Request payload for `modules.saveSettings`. */

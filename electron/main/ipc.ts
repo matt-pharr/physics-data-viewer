@@ -351,6 +351,18 @@ export interface ModuleImportResult {
 }
 
 /**
+ * Declarative imported-module action descriptor for renderer controls.
+ */
+export interface ImportedModuleActionDescriptor {
+  /** Stable action identifier from module manifest. */
+  id: string;
+  /** User-facing action label. */
+  label: string;
+  /** Bound script node name under `<alias>.scripts.<scriptName>`. */
+  scriptName: string;
+}
+
+/**
  * Project-scoped imported module descriptor.
  */
 export interface ImportedModuleDescriptor {
@@ -364,6 +376,8 @@ export interface ImportedModuleDescriptor {
   version: string;
   /** Optional pinned revision/hash. */
   revision?: string;
+  /** Declarative action descriptors bound for this imported module. */
+  actions: ImportedModuleActionDescriptor[];
 }
 
 /**

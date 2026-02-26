@@ -407,6 +407,29 @@ body {
   padding: 10px;
 }
 
+.modules-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.modules-action-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 180px) auto;
+  gap: 8px;
+  align-items: center;
+}
+
+.modules-action-meta {
+  min-width: 0;
+}
+
+.modules-action-params {
+  width: 100%;
+  min-width: 0;
+}
+
 /* ===== CONTEXT MENU ===== */
 .context-menu {
   min-width: 200px;

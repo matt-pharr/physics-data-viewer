@@ -913,13 +913,23 @@ export function registerIpcHandlers(
       const installedById = new Map(
         installedModules.map((entry) => [entry.id, entry] as const)
       );
-      return manifest.modules.map((entry) => ({
-        moduleId: entry.module_id,
-        name: installedById.get(entry.module_id)?.name ?? entry.module_id,
-        alias: entry.alias,
-        version: entry.version,
-        revision: entry.revision,
-      }));
+      return Promise.all(
+        manifest.modules.map(async (entry) => {
+          const actions = await moduleManager.resolveActionScripts(entry.module_id);
+          return {
+            moduleId: entry.module_id,
+            name: installedById.get(entry.module_id)?.name ?? entry.module_id,
+            alias: entry.alias,
+            version: entry.version,
+            revision: entry.revision,
+            actions: actions.map((action) => ({
+              id: action.actionId,
+              label: action.actionLabel,
+              scriptName: action.name,
+            })),
+          };
+        })
+      );
     }
   );
 
@@ -938,14 +948,55 @@ export function registerIpcHandlers(
 
   // Handles modules:runAction requests from the renderer.
   // Input: ModuleActionRequest.
-  // Returns: placeholder not-implemented result.
+  // Returns: generated execution code for one imported module action.
   ipcMain.handle(
     IPC.modules.runAction,
-    async (_event, _request: ModuleActionRequest): Promise<ModuleActionResult> => {
+    async (_event, request: ModuleActionRequest): Promise<ModuleActionResult> => {
+      if (!activeProjectDir) {
+        return {
+          success: false,
+          status: "error",
+          error: "No active project for module action execution",
+        };
+      }
+      if (!kernelManager.getKernel(request.kernelId)) {
+        return {
+          success: false,
+          status: "error",
+          error: `Kernel not found: ${request.kernelId}`,
+        };
+      }
+      const manifest = await ProjectManager.readManifest(activeProjectDir);
+      const imported = manifest.modules.find(
+        (entry) => entry.alias === request.moduleAlias
+      );
+      if (!imported) {
+        return {
+          success: false,
+          status: "error",
+          error: `Imported module alias not found: ${request.moduleAlias}`,
+        };
+      }
+      const actions = await moduleManager.resolveActionScripts(imported.module_id);
+      const action = actions.find((entry) => entry.actionId === request.actionId);
+      if (!action) {
+        return {
+          success: false,
+          status: "error",
+          error: `Module action not found: ${request.actionId}`,
+        };
+      }
+      const args = Object.entries(request.params ?? {})
+        .map(([key, value]) => `${key}=${JSON.stringify(value)}`)
+        .join(", ");
+      const invocation = args.length > 0 ? `(${args})` : "()";
+      const executionCode = `pdv_tree[${JSON.stringify(
+        `${request.moduleAlias}.scripts.${action.name}`
+      )}].run${invocation}`;
       return {
-        success: false,
-        status: "not_implemented",
-        error: MODULES_NOT_IMPLEMENTED_ERROR,
+        success: true,
+        status: "queued",
+        executionCode,
       };
     }
   );

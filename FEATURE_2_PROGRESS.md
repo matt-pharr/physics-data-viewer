@@ -152,6 +152,29 @@ Replaced the placeholder Modules view with a functional foundation UI:
 - Added renderer styling for modules UI in `renderer/src/styles/index.css`.
 - Updated renderer type barrel exports (`renderer/src/types/index.ts`) for module types used by the panel.
 
+### Step 8 — Declarative module controls and action execution
+
+Implemented manifest-driven action controls and execution wiring for imported modules:
+
+- Extended imported-module IPC payloads with declarative action metadata:
+  - Added `ImportedModuleActionDescriptor` to shared contracts
+  - `modules.listImported` now returns per-module actions (`id`, `label`, `scriptName`)
+- Extended action-script binding metadata in `ModuleManager.resolveActionScripts()`:
+  - each resolved binding now carries source action identity (`actionId`, `actionLabel`) plus canonical script node name
+- Implemented `modules.runAction` in `electron/main/index.ts`:
+  - validates active project, kernel id, imported module alias, and action id
+  - resolves action id to canonical script node name from module manifest/bindings
+  - builds and returns `executionCode` for `pdv_tree["<alias>.scripts.<name>"].run(...)`
+- Updated renderer `ModulesPanel` to render declarative per-action controls:
+  - one action row per imported module action
+  - optional JSON-object params input per action
+  - run button invokes `window.pdv.modules.runAction(...)` then executes returned code via app-level `handleExecute`
+  - action errors/statuses surfaced in panel, execution output remains in existing Console flow
+- Updated app wiring (`renderer/src/app/index.tsx`) to pass kernel state and execute callback to `ModulesPanel`.
+- Updated tests:
+  - `main/index.test.ts` verifies `modules.listImported` action descriptors and `modules.runAction` execution code generation
+  - `main/module-manager.test.ts` verifies resolved bindings include action identity metadata
+
 ## Verification
 
 - Baseline tests before changes:
@@ -180,7 +203,9 @@ Replaced the placeholder Modules view with a functional foundation UI:
   - `cd electron && npm test -- --reporter=verbose` (passed)
 - Full tests after Step 7 renderer foundation:
   - `cd electron && npm test -- --reporter=verbose` (passed)
+- Full tests after Step 8 controls/action wiring:
+  - `cd electron && npm test -- --reporter=verbose` (passed)
 
 ## Next
 
-- Step 8 — Render declarative per-module UI controls and execute module actions from those controls.
+- Step 9 — Persist and load module action settings (`modules.saveSettings`) using project `module_settings`.

@@ -799,6 +799,9 @@ const App: React.FC = () => {
               <ModulesPanel
                 projectDir={currentProjectDir}
                 isActive={activeTab === 'modules'}
+                kernelId={currentKernelId}
+                kernelReady={kernelStatus === 'ready'}
+                onExecute={handleExecute}
               />
             </div>
           </div>
