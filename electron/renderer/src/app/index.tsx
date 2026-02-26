@@ -17,6 +17,7 @@ import { Console } from '../components/Console';
 import { Tree } from '../components/Tree';
 import { EnvironmentSelector } from '../components/EnvironmentSelector';
 import { NamespaceView } from '../components/NamespaceView';
+import { ModulesPanel } from '../components/ModulesPanel';
 import { ScriptDialog } from '../components/ScriptDialog';
 import { CreateScriptDialog } from '../components/Tree/CreateScriptDialog';
 import { SettingsDialog } from '../components/SettingsDialog';
@@ -795,7 +796,10 @@ const App: React.FC = () => {
               />
             </div>
             <div className={`tree-panel ${activeTab === 'modules' ? 'active' : ''}`}>
-              <div className="tree-empty">Modules view (coming soon)</div>
+              <ModulesPanel
+                projectDir={currentProjectDir}
+                isActive={activeTab === 'modules'}
+              />
             </div>
           </div>
         </aside>

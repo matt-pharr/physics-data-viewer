@@ -211,6 +211,100 @@ export interface Config {
   };
 }
 
+/** Supported module install source kinds. */
+export type ModuleSourceType = "github" | "local";
+
+/** Canonical source reference for module install metadata. */
+export interface ModuleSourceReference {
+  type: ModuleSourceType;
+  location: string;
+}
+
+/** Global installed module descriptor returned by `modules.listInstalled`. */
+export interface ModuleDescriptor {
+  id: string;
+  name: string;
+  version: string;
+  description?: string;
+  source: ModuleSourceReference;
+  revision?: string;
+  installPath?: string;
+}
+
+/** Request payload for `modules.install`. */
+export interface ModuleInstallRequest {
+  source: ModuleSourceReference;
+}
+
+/** Result payload for `modules.install`. */
+export interface ModuleInstallResult {
+  success: boolean;
+  status: "installed" | "up_to_date" | "update_available" | "incompatible_update" | "not_implemented" | "error";
+  module?: ModuleDescriptor;
+  error?: string;
+}
+
+/** Result payload for `modules.checkUpdates`. */
+export interface ModuleUpdateResult {
+  moduleId: string;
+  status: "up_to_date" | "update_available" | "unknown" | "not_implemented";
+  currentVersion?: string;
+  availableVersion?: string;
+  message?: string;
+}
+
+/** Request payload for importing a module into the active project. */
+export interface ModuleImportRequest {
+  moduleId: string;
+  alias?: string;
+}
+
+/** Result payload for `modules.importToProject`. */
+export interface ModuleImportResult {
+  success: boolean;
+  status: "imported" | "conflict" | "not_implemented" | "error";
+  alias?: string;
+  suggestedAlias?: string;
+  error?: string;
+}
+
+/** Project-scoped imported module descriptor. */
+export interface ImportedModuleDescriptor {
+  moduleId: string;
+  name: string;
+  alias: string;
+  version: string;
+  revision?: string;
+}
+
+/** Request payload for `modules.saveSettings`. */
+export interface ModuleSettingsRequest {
+  moduleAlias: string;
+  values: Record<string, unknown>;
+}
+
+/** Result payload for `modules.saveSettings`. */
+export interface ModuleSettingsResult {
+  success: boolean;
+  error?: string;
+}
+
+/** Request payload for `modules.runAction`. */
+export interface ModuleActionRequest {
+  kernelId: string;
+  moduleAlias: string;
+  actionId: string;
+  params?: Record<string, unknown>;
+}
+
+/** Result payload for `modules.runAction`. */
+export interface ModuleActionResult {
+  success: boolean;
+  status: "queued" | "not_implemented" | "error";
+  executionCode?: string;
+  error?: string;
+}
+
 /** Complete preload API contract exposed as `window.pdv`. */
 export interface PDVApi {
   kernels: {
@@ -254,6 +348,15 @@ export interface PDVApi {
   script: {
     edit(kernelId: string, scriptPath: string): Promise<{ success: boolean; error?: string }>;
     reload(scriptPath: string): Promise<{ success: boolean; error?: string }>;
+  };
+  modules: {
+    listInstalled(): Promise<ModuleDescriptor[]>;
+    install(request: ModuleInstallRequest): Promise<ModuleInstallResult>;
+    checkUpdates(moduleId: string): Promise<ModuleUpdateResult>;
+    importToProject(request: ModuleImportRequest): Promise<ModuleImportResult>;
+    listImported(): Promise<ImportedModuleDescriptor[]>;
+    saveSettings(request: ModuleSettingsRequest): Promise<ModuleSettingsResult>;
+    runAction(request: ModuleActionRequest): Promise<ModuleActionResult>;
   };
   project: {
     save(saveDir: string, codeCells: unknown): Promise<boolean>;

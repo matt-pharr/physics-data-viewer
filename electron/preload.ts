@@ -72,6 +72,16 @@ const api: PDVApi = {
       ipcRenderer.invoke(IPC.script.edit, kernelId, scriptPath),
     reload: (scriptPath) => ipcRenderer.invoke(IPC.script.reload, scriptPath),
   },
+  modules: {
+    listInstalled: () => ipcRenderer.invoke(IPC.modules.listInstalled),
+    install: (request) => ipcRenderer.invoke(IPC.modules.install, request),
+    checkUpdates: (moduleId) => ipcRenderer.invoke(IPC.modules.checkUpdates, moduleId),
+    importToProject: (request) =>
+      ipcRenderer.invoke(IPC.modules.importToProject, request),
+    listImported: () => ipcRenderer.invoke(IPC.modules.listImported),
+    saveSettings: (request) => ipcRenderer.invoke(IPC.modules.saveSettings, request),
+    runAction: (request) => ipcRenderer.invoke(IPC.modules.runAction, request),
+  },
   project: {
     save: (saveDir, codeCells) =>
       ipcRenderer.invoke(IPC.project.save, saveDir, codeCells),

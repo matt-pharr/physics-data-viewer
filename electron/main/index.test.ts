@@ -42,7 +42,30 @@ const mocks = vi.hoisted(() => {
     throw err;
   });
   const fsWriteFile = vi.fn(async () => undefined);
+  const fsReadFile = vi.fn(async () => {
+    const err = Object.assign(new Error("ENOENT"), { code: "ENOENT" });
+    throw err;
+  });
   const dialogShowOpenDialog = vi.fn();
+  const moduleManagerListInstalled = vi.fn(async () => []);
+  const moduleManagerInstall = vi.fn(async () => ({
+    success: true,
+    status: "installed",
+    module: {
+      id: "demo-module",
+      name: "Demo Module",
+      version: "1.0.0",
+      source: { type: "local", location: "/tmp/demo-module" },
+    },
+  }));
+  const moduleManagerCheckUpdates = vi.fn(async (moduleId: string) => ({
+    moduleId,
+    status: "not_implemented",
+    message: "Remote update checks are not implemented yet.",
+  }));
+  const moduleManagerResolveActionScripts = vi.fn(async () => [
+    { name: "run", scriptPath: "/tmp/demo-module/scripts/run.py" },
+  ]);
   return {
     handlers,
     ipcHandle,
@@ -51,7 +74,12 @@ const mocks = vi.hoisted(() => {
     fsMkdir,
     fsStat,
     fsWriteFile,
+    fsReadFile,
     dialogShowOpenDialog,
+    moduleManagerListInstalled,
+    moduleManagerInstall,
+    moduleManagerCheckUpdates,
+    moduleManagerResolveActionScripts,
   };
 });
 
@@ -73,6 +101,16 @@ vi.mock("fs/promises", () => ({
   mkdir: mocks.fsMkdir,
   stat: mocks.fsStat,
   writeFile: mocks.fsWriteFile,
+  readFile: mocks.fsReadFile,
+}));
+
+vi.mock("./module-manager", () => ({
+  ModuleManager: vi.fn().mockImplementation(() => ({
+    listInstalled: mocks.moduleManagerListInstalled,
+    install: mocks.moduleManagerInstall,
+    checkUpdates: mocks.moduleManagerCheckUpdates,
+    resolveActionScripts: mocks.moduleManagerResolveActionScripts,
+  })),
 }));
 
 function getHandler(channel: string): InvokeHandler {
@@ -619,5 +657,220 @@ describe("Step 5 IPC handlers", () => {
 
     const afterSave = await load({});
     expect(afterSave).toEqual({ boxes: [{ id: "b1" }] });
+  });
+
+  it("modules:listInstalled delegates to ModuleManager.listInstalled", async () => {
+    setup();
+    const listInstalled = getHandler(IPC.modules.listInstalled);
+    const result = await listInstalled({});
+    expect(result).toEqual([]);
+    expect(mocks.moduleManagerListInstalled).toHaveBeenCalledOnce();
+  });
+
+  it("modules:install delegates to ModuleManager.install", async () => {
+    setup();
+    const install = getHandler(IPC.modules.install);
+    const request = {
+      source: {
+        type: "github",
+        location: "https://github.com/example/pdv-module",
+      },
+    };
+    const result = (await install({}, request)) as {
+      success: boolean;
+      status: string;
+      module?: { id: string };
+    };
+    expect(result.success).toBe(true);
+    expect(result.status).toBe("installed");
+    expect(result.module?.id).toBe("demo-module");
+    expect(mocks.moduleManagerInstall).toHaveBeenCalledWith(request);
+  });
+
+  it("modules:importToProject returns conflict when alias already exists", async () => {
+    setup();
+    const projectLoad = getHandler(IPC.project.load);
+    await projectLoad({}, "/tmp/project");
+
+    (mocks.moduleManagerListInstalled as unknown as ReturnType<typeof vi.fn>).mockResolvedValueOnce([
+      {
+        id: "demo-module",
+        name: "Demo Module",
+        version: "1.0.0",
+        source: { type: "local", location: "/tmp/demo-module" },
+      },
+    ]);
+    mocks.fsReadFile.mockResolvedValueOnce(
+      JSON.stringify({
+        schema_version: "1.1",
+        saved_at: "2026-01-01T00:00:00.000Z",
+        pdv_version: "1.0",
+        tree_checksum: "",
+        modules: [
+          {
+            module_id: "demo-module",
+            alias: "demo-module",
+            version: "1.0.0",
+          },
+        ],
+        module_settings: {},
+      })
+    );
+
+    const importToProject = getHandler(IPC.modules.importToProject);
+    const result = (await importToProject({}, {
+      moduleId: "demo-module",
+    })) as { success: boolean; status: string; suggestedAlias?: string };
+
+    expect(result.success).toBe(false);
+    expect(result.status).toBe("conflict");
+    expect(result.suggestedAlias).toBe("demo-module_1");
+  });
+
+  it("modules:importToProject persists manifest on successful import", async () => {
+    const { commRouter, webContentsSend } = setup();
+    const start = getHandler(IPC.kernels.start);
+    await start({}, { language: "python" });
+    const projectLoad = getHandler(IPC.project.load);
+    await projectLoad({}, "/tmp/project");
+
+    (mocks.moduleManagerListInstalled as unknown as ReturnType<typeof vi.fn>).mockResolvedValueOnce([
+      {
+        id: "demo-module",
+        name: "Demo Module",
+        version: "1.0.0",
+        revision: "abc123",
+        source: { type: "local", location: "/tmp/demo-module" },
+      },
+    ]);
+    mocks.fsReadFile.mockResolvedValueOnce(
+      JSON.stringify({
+        schema_version: "1.1",
+        saved_at: "2026-01-01T00:00:00.000Z",
+        pdv_version: "1.0",
+        tree_checksum: "",
+        modules: [],
+        module_settings: {},
+      })
+    );
+
+    const importToProject = getHandler(IPC.modules.importToProject);
+    const result = (await importToProject({}, {
+      moduleId: "demo-module",
+    })) as { success: boolean; status: string; alias?: string };
+
+    expect(result.success).toBe(true);
+    expect(result.status).toBe("imported");
+    expect(result.alias).toBe("demo-module");
+    expect(mocks.fsWriteFile).toHaveBeenCalledWith(
+      "/tmp/project/project.json",
+      expect.stringContaining('"module_id": "demo-module"'),
+      "utf8"
+    );
+    expect(mocks.moduleManagerResolveActionScripts).toHaveBeenCalledWith("demo-module");
+    expect(commRouter.request).toHaveBeenCalledWith(
+      PDVMessageType.SCRIPT_REGISTER,
+      expect.objectContaining({
+        parent_path: "demo-module.scripts",
+        name: "run",
+        relative_path: "/tmp/demo-module/scripts/run.py",
+        reload: true,
+      })
+    );
+    expect(webContentsSend).toHaveBeenCalledWith(
+      IPC.push.treeChanged,
+      expect.objectContaining({
+        changed_paths: ["demo-module"],
+        change_type: "updated",
+      })
+    );
+  });
+
+  it("modules:listImported returns project imports with installed names", async () => {
+    setup();
+    const projectLoad = getHandler(IPC.project.load);
+    await projectLoad({}, "/tmp/project");
+
+    (mocks.moduleManagerListInstalled as unknown as ReturnType<typeof vi.fn>).mockResolvedValueOnce([
+      {
+        id: "demo-module",
+        name: "Demo Module",
+        version: "1.0.0",
+        source: { type: "local", location: "/tmp/demo-module" },
+      },
+    ]);
+    mocks.fsReadFile.mockResolvedValueOnce(
+      JSON.stringify({
+        schema_version: "1.1",
+        saved_at: "2026-01-01T00:00:00.000Z",
+        pdv_version: "1.0",
+        tree_checksum: "",
+        modules: [
+          {
+            module_id: "demo-module",
+            alias: "demo-module",
+            version: "1.0.0",
+            revision: "abc123",
+          },
+        ],
+        module_settings: {},
+      })
+    );
+
+    const listImported = getHandler(IPC.modules.listImported);
+    const result = (await listImported({})) as Array<{
+      moduleId: string;
+      name: string;
+      alias: string;
+      version: string;
+      revision?: string;
+    }>;
+
+    expect(result).toEqual([
+      {
+        moduleId: "demo-module",
+        name: "Demo Module",
+        alias: "demo-module",
+        version: "1.0.0",
+        revision: "abc123",
+      },
+    ]);
+  });
+
+  it("project:load binds imported module scripts when kernel is active", async () => {
+    const { commRouter } = setup();
+    const start = getHandler(IPC.kernels.start);
+    await start({}, { language: "python" });
+
+    mocks.fsReadFile.mockResolvedValueOnce(
+      JSON.stringify({
+        schema_version: "1.1",
+        saved_at: "2026-01-01T00:00:00.000Z",
+        pdv_version: "1.0",
+        tree_checksum: "",
+        modules: [
+          {
+            module_id: "demo-module",
+            alias: "diagnosticA",
+            version: "1.0.0",
+          },
+        ],
+        module_settings: {},
+      })
+    );
+
+    const load = getHandler(IPC.project.load);
+    await load({}, "/tmp/project");
+
+    expect(mocks.moduleManagerResolveActionScripts).toHaveBeenCalledWith("demo-module");
+    expect(commRouter.request).toHaveBeenCalledWith(
+      PDVMessageType.SCRIPT_REGISTER,
+      expect.objectContaining({
+        parent_path: "diagnosticA.scripts",
+        name: "run",
+        relative_path: "/tmp/demo-module/scripts/run.py",
+        reload: true,
+      })
+    );
   });
 });

@@ -24,7 +24,8 @@ import * as path from "path";
 
 import { CommRouter } from "./comm-router";
 import { KernelManager, type KernelInfo } from "./kernel-manager";
-import { ProjectManager } from "./project-manager";
+import { ModuleManager } from "./module-manager";
+import { ProjectManager, type ProjectModuleImport } from "./project-manager";
 import { ConfigStore } from "./config";
 import { updateRecentProjectsMenu } from "./menu";
 import {
@@ -33,6 +34,17 @@ import {
   KernelCompleteResult,
   KernelInspectResult,
   KernelValidateResult,
+  ImportedModuleDescriptor,
+  ModuleActionRequest,
+  ModuleActionResult,
+  ModuleDescriptor,
+  ModuleImportRequest,
+  ModuleImportResult,
+  ModuleInstallRequest,
+  ModuleInstallResult,
+  ModuleSettingsRequest,
+  ModuleSettingsResult,
+  ModuleUpdateResult,
   NamespaceQueryOptions,
   NamespaceVariable,
   PDVConfig,
@@ -69,6 +81,13 @@ const REGISTERED_CHANNELS: readonly string[] = [
   IPC.namespace.query,
   IPC.script.edit,
   IPC.script.reload,
+  IPC.modules.listInstalled,
+  IPC.modules.install,
+  IPC.modules.checkUpdates,
+  IPC.modules.importToProject,
+  IPC.modules.listImported,
+  IPC.modules.saveSettings,
+  IPC.modules.runAction,
   IPC.project.save,
   IPC.project.load,
   IPC.project.new,
@@ -111,6 +130,9 @@ if _pdv_comms._comm is None:
     _pdv_comm.on_msg(_pdv_comms._on_comm_message)
     _pdv_comms.send_message("pdv.ready", {})
 `;
+
+const MODULES_NOT_IMPLEMENTED_ERROR =
+  "Modules system is not implemented yet (Feature 2 Step 1 scaffold).";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -245,6 +267,61 @@ function resolveScriptPath(
   return path.join(workingDir, ...parts.slice(0, -1), `${leaf}.py`);
 }
 
+function normalizeModuleAlias(rawAlias: string): string {
+  const trimmed = rawAlias.trim();
+  if (!trimmed) {
+    throw new Error("Module alias must be a non-empty string");
+  }
+  return trimmed.replace(/[./\\\s]+/g, "_");
+}
+
+function suggestModuleAlias(baseAlias: string, existingAliases: Set<string>): string {
+  let i = 1;
+  while (existingAliases.has(`${baseAlias}_${i}`)) {
+    i += 1;
+  }
+  return `${baseAlias}_${i}`;
+}
+
+async function bindImportedModuleScripts(
+  commRouter: CommRouter,
+  moduleManager: ModuleManager,
+  importedModule: ProjectModuleImport
+): Promise<void> {
+  const scriptBindings = await moduleManager.resolveActionScripts(
+    importedModule.module_id
+  );
+  const parentPath = `${importedModule.alias}.scripts`;
+  for (const binding of scriptBindings) {
+    await commRouter.request(PDVMessageType.SCRIPT_REGISTER, {
+      parent_path: parentPath,
+      name: binding.name,
+      relative_path: binding.scriptPath,
+      language: "python",
+      reload: true,
+    });
+  }
+}
+
+async function bindProjectModulesToTree(
+  kernelManager: KernelManager,
+  commRouter: CommRouter,
+  moduleManager: ModuleManager,
+  activeKernelId: string | null,
+  projectDir: string | null
+): Promise<void> {
+  if (!activeKernelId || !projectDir) {
+    return;
+  }
+  if (!kernelManager.getKernel(activeKernelId)) {
+    return;
+  }
+  const manifest = await ProjectManager.readManifest(projectDir);
+  for (const importedModule of manifest.modules) {
+    await bindImportedModuleScripts(commRouter, moduleManager, importedModule);
+  }
+}
+
 /**
  * Write a script stub if the file does not already exist.
  *
@@ -356,6 +433,9 @@ export function registerIpcHandlers(
   const themesDir = path.join(pdvDir, "themes");
   const stateDir  = path.join(pdvDir, "state");
   const codeCellsPath = path.join(stateDir, "code-cells.json");
+  const moduleManager = new ModuleManager(pdvDir);
+  let activeProjectDir: string | null = null;
+  let activeKernelId: string | null = null;
   fs.mkdir(themesDir, { recursive: true }).catch(() => {});
   fs.mkdir(stateDir,  { recursive: true }).catch(() => {});
 
@@ -412,6 +492,14 @@ export function registerIpcHandlers(
     );
     commRouter.attach(kernelManager, kernel.id);
     await initializeKernelSession(kernelManager, commRouter, projectManager, kernel.id);
+    activeKernelId = kernel.id;
+    await bindProjectModulesToTree(
+      kernelManager,
+      commRouter,
+      moduleManager,
+      activeKernelId,
+      activeProjectDir
+    );
     return kernel;
   });
 
@@ -425,6 +513,9 @@ export function registerIpcHandlers(
     if (workingDir) {
       await projectManager.deleteWorkingDir(workingDir);
       kernelWorkingDirs.delete(kernelId);
+    }
+    if (activeKernelId === kernelId) {
+      activeKernelId = null;
     }
     commRouter.detach();
     return true;
@@ -463,6 +554,14 @@ export function registerIpcHandlers(
       const restarted = await restartable.restart(kernelId);
       commRouter.attach(kernelManager, restarted.id);
       await initializeKernelSession(kernelManager, commRouter, projectManager, restarted.id);
+      activeKernelId = restarted.id;
+      await bindProjectModulesToTree(
+        kernelManager,
+        commRouter,
+        moduleManager,
+        activeKernelId,
+        activeProjectDir
+      );
       return restarted;
     }
     const current = kernelManager.getKernel(kernelId);
@@ -476,6 +575,14 @@ export function registerIpcHandlers(
     });
     commRouter.attach(kernelManager, restarted.id);
     await initializeKernelSession(kernelManager, commRouter, projectManager, restarted.id);
+    activeKernelId = restarted.id;
+    await bindProjectModulesToTree(
+      kernelManager,
+      commRouter,
+      moduleManager,
+      activeKernelId,
+      activeProjectDir
+    );
     return restarted;
   });
 
@@ -703,6 +810,146 @@ export function registerIpcHandlers(
     return result;
   });
 
+  // Handles modules:listInstalled requests from the renderer.
+  // Input: none.
+  // Returns: installed module descriptors (empty until ModuleManager is implemented).
+  ipcMain.handle(
+    IPC.modules.listInstalled,
+    async (): Promise<ModuleDescriptor[]> => moduleManager.listInstalled()
+  );
+
+  // Handles modules:install requests from the renderer.
+  // Input: ModuleInstallRequest.
+  // Returns: placeholder not-implemented result.
+  ipcMain.handle(
+    IPC.modules.install,
+    async (_event, request: ModuleInstallRequest): Promise<ModuleInstallResult> =>
+      moduleManager.install(request)
+  );
+
+  // Handles modules:checkUpdates requests from the renderer.
+  // Input: moduleId (string).
+  // Returns: placeholder not-implemented update status.
+  ipcMain.handle(
+    IPC.modules.checkUpdates,
+    async (_event, moduleId: string): Promise<ModuleUpdateResult> =>
+      moduleManager.checkUpdates(moduleId)
+  );
+
+  // Handles modules:importToProject requests from the renderer.
+  // Input: ModuleImportRequest.
+  // Returns: project-scoped import result with alias conflict handling.
+  ipcMain.handle(
+    IPC.modules.importToProject,
+    async (_event, request: ModuleImportRequest): Promise<ModuleImportResult> => {
+      if (!activeProjectDir) {
+        return {
+          success: false,
+          status: "error",
+          error: "No active project to import module into",
+        };
+      }
+      const installedModules = await moduleManager.listInstalled();
+      const installed = installedModules.find(
+        (entry) => entry.id === request.moduleId
+      );
+      if (!installed) {
+        return {
+          success: false,
+          status: "error",
+          error: `Installed module not found: ${request.moduleId}`,
+        };
+      }
+      const manifest = await ProjectManager.readManifest(activeProjectDir);
+      const existingAliases = new Set(manifest.modules.map((entry) => entry.alias));
+      const baseAlias = normalizeModuleAlias(request.alias ?? installed.id);
+      if (existingAliases.has(baseAlias)) {
+        return {
+          success: false,
+          status: "conflict",
+          alias: baseAlias,
+          suggestedAlias: suggestModuleAlias(baseAlias, existingAliases),
+          error: `Module alias already exists: ${baseAlias}`,
+        };
+      }
+      const importedModule: ProjectModuleImport = {
+        module_id: installed.id,
+        alias: baseAlias,
+        version: installed.version,
+        revision: installed.revision,
+      };
+      const updatedManifest = {
+        ...manifest,
+        modules: [...manifest.modules, importedModule],
+        module_settings: manifest.module_settings ?? {},
+      };
+      await ProjectManager.saveManifest(activeProjectDir, updatedManifest);
+      if (activeKernelId && kernelManager.getKernel(activeKernelId)) {
+        await bindImportedModuleScripts(commRouter, moduleManager, importedModule);
+      }
+      win.webContents.send(IPC.push.treeChanged, {
+        changed_paths: [baseAlias],
+        change_type: "updated",
+      });
+      return {
+        success: true,
+        status: "imported",
+        alias: baseAlias,
+      };
+    }
+  );
+
+  // Handles modules:listImported requests from the renderer.
+  // Input: none.
+  // Returns: imported modules for the active project.
+  ipcMain.handle(
+    IPC.modules.listImported,
+    async (): Promise<ImportedModuleDescriptor[]> => {
+      if (!activeProjectDir) {
+        return [];
+      }
+      const manifest = await ProjectManager.readManifest(activeProjectDir);
+      const installedModules = await moduleManager.listInstalled();
+      const installedById = new Map(
+        installedModules.map((entry) => [entry.id, entry] as const)
+      );
+      return manifest.modules.map((entry) => ({
+        moduleId: entry.module_id,
+        name: installedById.get(entry.module_id)?.name ?? entry.module_id,
+        alias: entry.alias,
+        version: entry.version,
+        revision: entry.revision,
+      }));
+    }
+  );
+
+  // Handles modules:saveSettings requests from the renderer.
+  // Input: ModuleSettingsRequest.
+  // Returns: placeholder not-implemented result.
+  ipcMain.handle(
+    IPC.modules.saveSettings,
+    async (_event, _request: ModuleSettingsRequest): Promise<ModuleSettingsResult> => {
+      return {
+        success: false,
+        error: MODULES_NOT_IMPLEMENTED_ERROR,
+      };
+    }
+  );
+
+  // Handles modules:runAction requests from the renderer.
+  // Input: ModuleActionRequest.
+  // Returns: placeholder not-implemented result.
+  ipcMain.handle(
+    IPC.modules.runAction,
+    async (_event, _request: ModuleActionRequest): Promise<ModuleActionResult> => {
+      return {
+        success: false,
+        status: "not_implemented",
+        error: MODULES_NOT_IMPLEMENTED_ERROR,
+      };
+    }
+  );
+
   // Handles project:save requests from the renderer.
   // Input: saveDir (string), codeCells payload.
   // Returns: true on success.
@@ -711,6 +958,7 @@ export function registerIpcHandlers(
     IPC.project.save,
     async (_event, saveDir: string, codeCells: unknown) => {
       await projectManager.save(saveDir, codeCells);
+      activeProjectDir = saveDir;
       return true;
     }
   );
@@ -720,7 +968,16 @@ export function registerIpcHandlers(
   // Returns: code cell payload loaded by ProjectManager.
   // On error: throws to renderer.
   ipcMain.handle(IPC.project.load, async (_event, saveDir: string) => {
-    return projectManager.load(saveDir);
+    const loaded = await projectManager.load(saveDir);
+    activeProjectDir = saveDir;
+    await bindProjectModulesToTree(
+      kernelManager,
+      commRouter,
+      moduleManager,
+      activeKernelId,
+      activeProjectDir
+    );
+    return loaded;
   });
 
   // Handles project:new requests from the renderer.
@@ -728,6 +985,7 @@ export function registerIpcHandlers(
   // Returns: true.
   // On error: throws to renderer.
   ipcMain.handle(IPC.project.new, async () => {
+    activeProjectDir = null;
     return true;
   });
 

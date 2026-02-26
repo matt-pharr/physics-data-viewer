@@ -8,7 +8,11 @@
 import type {
   Config,
   KernelExecuteResult,
+  ImportedModuleDescriptor,
   MenuActionPayload,
+  ModuleDescriptor,
+  ModuleImportResult,
+  ModuleInstallResult,
   NamespaceQueryOptions,
   NamespaceVariable,
   NodeDescriptor,
@@ -20,7 +24,11 @@ import type {
 export type {
   Config,
   KernelExecuteResult,
+  ImportedModuleDescriptor,
   MenuActionPayload,
+  ModuleDescriptor,
+  ModuleImportResult,
+  ModuleInstallResult,
   NamespaceQueryOptions,
   NamespaceVariable,
   NodeDescriptor,

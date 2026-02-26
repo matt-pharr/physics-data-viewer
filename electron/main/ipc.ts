@@ -71,6 +71,16 @@ export const IPC = {
     edit: "script:edit",
     reload: "script:reload",
   },
+  /** Modules system channels. */
+  modules: {
+    listInstalled: "modules:listInstalled",
+    install: "modules:install",
+    checkUpdates: "modules:checkUpdates",
+    importToProject: "modules:importToProject",
+    listImported: "modules:listImported",
+    saveSettings: "modules:saveSettings",
+    runAction: "modules:runAction",
+  },
   /** Project lifecycle channels. */
   project: {
     save: "project:save",
@@ -228,6 +238,179 @@ export interface ScriptOperationResult {
   /** True when the operation succeeded. */
   success: boolean;
   /** Optional error message when `success` is false. */
+  error?: string;
+}
+
+// ---------------------------------------------------------------------------
+// Modules system types
+// ---------------------------------------------------------------------------
+
+/**
+ * Supported module install source kinds.
+ */
+export type ModuleSourceType = "github" | "local";
+
+/**
+ * Canonical source reference for an installed module.
+ */
+export interface ModuleSourceReference {
+  /** Install source kind. */
+  type: ModuleSourceType;
+  /** Source location (GitHub URL or local path). */
+  location: string;
+}
+
+/**
+ * Normalized installed-module descriptor surfaced to the renderer.
+ */
+export interface ModuleDescriptor {
+  /** Stable module identifier from manifest. */
+  id: string;
+  /** Human-readable module name. */
+  name: string;
+  /** Installed semantic version. */
+  version: string;
+  /** Optional short module description. */
+  description?: string;
+  /** Install source reference. */
+  source: ModuleSourceReference;
+  /** Optional resolved revision hash/tag. */
+  revision?: string;
+  /** Optional absolute install path in module store. */
+  installPath?: string;
+}
+
+/**
+ * Request payload for `modules.install`.
+ */
+export interface ModuleInstallRequest {
+  /** Module source to install from. */
+  source: ModuleSourceReference;
+}
+
+/**
+ * Result payload for `modules.install`.
+ */
+export interface ModuleInstallResult {
+  /** True when installation/update succeeded. */
+  success: boolean;
+  /** Install outcome classification. */
+  status:
+    | "installed"
+    | "up_to_date"
+    | "update_available"
+    | "incompatible_update"
+    | "not_implemented"
+    | "error";
+  /** Installed/updated module metadata when available. */
+  module?: ModuleDescriptor;
+  /** Optional user-facing error message. */
+  error?: string;
+}
+
+/**
+ * Result payload for `modules.checkUpdates`.
+ */
+export interface ModuleUpdateResult {
+  /** Checked module ID. */
+  moduleId: string;
+  /** Update-check outcome classification. */
+  status: "up_to_date" | "update_available" | "unknown" | "not_implemented";
+  /** Currently installed version, when known. */
+  currentVersion?: string;
+  /** Latest available version, when known. */
+  availableVersion?: string;
+  /** Optional user-facing message. */
+  message?: string;
+}
+
+/**
+ * Request payload for `modules.importToProject`.
+ */
+export interface ModuleImportRequest {
+  /** Module ID to import into the active project. */
+  moduleId: string;
+  /** Optional project-local import alias override. */
+  alias?: string;
+}
+
+/**
+ * Result payload for `modules.importToProject`.
+ */
+export interface ModuleImportResult {
+  /** True when import succeeded. */
+  success: boolean;
+  /** Import outcome classification. */
+  status: "imported" | "conflict" | "not_implemented" | "error";
+  /** Resolved alias used for import when successful. */
+  alias?: string;
+  /** Suggested alias when conflict occurs. */
+  suggestedAlias?: string;
+  /** Optional user-facing error message. */
+  error?: string;
+}
+
+/**
+ * Project-scoped imported module descriptor.
+ */
+export interface ImportedModuleDescriptor {
+  /** Installed module ID. */
+  moduleId: string;
+  /** Installed module display name. */
+  name: string;
+  /** Project-local alias used in the tree. */
+  alias: string;
+  /** Imported version snapshot. */
+  version: string;
+  /** Optional pinned revision/hash. */
+  revision?: string;
+}
+
+/**
+ * Request payload for `modules.saveSettings`.
+ */
+export interface ModuleSettingsRequest {
+  /** Imported module alias settings belong to. */
+  moduleAlias: string;
+  /** Persisted setting values keyed by setting/control id. */
+  values: Record<string, unknown>;
+}
+
+/**
+ * Result payload for `modules.saveSettings`.
+ */
+export interface ModuleSettingsResult {
+  /** True when settings persistence succeeded. */
+  success: boolean;
+  /** Optional user-facing error message. */
+  error?: string;
+}
+
+/**
+ * Request payload for `modules.runAction`.
+ */
+export interface ModuleActionRequest {
+  /** Target kernel id used for action execution. */
+  kernelId: string;
+  /** Imported module alias owning the action. */
+  moduleAlias: string;
+  /** Module action identifier from manifest. */
+  actionId: string;
+  /** Optional action parameters provided by the user/UI. */
+  params?: Record<string, unknown>;
+}
+
+/**
+ * Result payload for `modules.runAction`.
+ */
+export interface ModuleActionResult {
+  /** True when action invocation succeeded. */
+  success: boolean;
+  /** Action invocation outcome classification. */
+  status: "queued" | "not_implemented" | "error";
+  /** Optional generated execution code for traceability. */
+  executionCode?: string;
+  /** Optional user-facing error message. */
   error?: string;
 }
 
@@ -466,6 +649,57 @@ export interface PDVApi {
      * @returns Operation status.
      */
     reload(scriptPath: string): Promise<ScriptOperationResult>;
+  };
+
+  /** Modules install/import/action operations. */
+  modules: {
+    /**
+     * List globally installed modules available to import.
+     *
+     * @returns Installed module descriptors.
+     */
+    listInstalled(): Promise<ModuleDescriptor[]>;
+    /**
+     * Install a module from GitHub URL or local path.
+     *
+     * @param request - Installation source payload.
+     * @returns Installation result payload.
+     */
+    install(request: ModuleInstallRequest): Promise<ModuleInstallResult>;
+    /**
+     * Check whether an installed module has an update available.
+     *
+     * @param moduleId - Installed module identifier.
+     * @returns Update-check result payload.
+     */
+    checkUpdates(moduleId: string): Promise<ModuleUpdateResult>;
+    /**
+     * Import an installed module into the active project.
+     *
+     * @param request - Project import request.
+     * @returns Import result payload.
+     */
+    importToProject(request: ModuleImportRequest): Promise<ModuleImportResult>;
+    /**
+     * List modules imported in the active project.
+     *
+     * @returns Imported module descriptors.
+     */
+    listImported(): Promise<ImportedModuleDescriptor[]>;
+    /**
+     * Persist project-scoped settings for an imported module.
+     *
+     * @param request - Settings payload.
+     * @returns Save result payload.
+     */
+    saveSettings(request: ModuleSettingsRequest): Promise<ModuleSettingsResult>;
+    /**
+     * Run one module action using manifest-bound script execution.
+     *
+     * @param request - Action invocation payload.
+     * @returns Action invocation result payload.
+     */
+    runAction(request: ModuleActionRequest): Promise<ModuleActionResult>;
   };
 
   /** Project save/load operations. */
