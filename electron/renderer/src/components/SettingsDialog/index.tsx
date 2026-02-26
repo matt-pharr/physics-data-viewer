@@ -324,6 +324,10 @@ export const SettingsDialog: React.FC<SettingsDialogProps> = ({
     setSelectedThemeName(name);
   };
 
+  const handleThemeDropdownFocus = () => {
+    void window.pdv.themes.get().then(setSavedThemes);
+  };
+
   const onSaveSettings = async () => {
     // Persist shortcuts
     const savedShortcuts = Object.fromEntries(
@@ -516,7 +520,7 @@ export const SettingsDialog: React.FC<SettingsDialogProps> = ({
                   ].map(({ label, value, onChange }) => (
                     <div key={label} className="appearance-theme-row">
                       <label>{label}</label>
-                      <select value={value} onChange={(e) => onChange(e.target.value)}>
+                      <select value={value} onChange={(e) => onChange(e.target.value)} onFocus={handleThemeDropdownFocus}>
                         {BUILTIN_THEMES.map((t) => (
                           <option key={t.name} value={t.name}>{t.name}</option>
                         ))}
@@ -555,6 +559,7 @@ export const SettingsDialog: React.FC<SettingsDialogProps> = ({
                       id="appearance-theme-select"
                       value={selectedThemeName}
                       onChange={(e) => handleThemeSelect(e.target.value)}
+                      onFocus={handleThemeDropdownFocus}
                     >
                       {BUILTIN_THEMES.map((t) => (
                         <option key={t.name} value={t.name}>{t.name}</option>

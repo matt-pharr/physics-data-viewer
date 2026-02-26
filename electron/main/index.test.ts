@@ -42,6 +42,8 @@ const mocks = vi.hoisted(() => {
     throw err;
   });
   const fsWriteFile = vi.fn(async () => undefined);
+  const fsReaddir = vi.fn(async (): Promise<string[]> => []);
+  const fsReadFile = vi.fn(async (): Promise<string> => "{}");
   const dialogShowOpenDialog = vi.fn();
   return {
     handlers,
@@ -51,6 +53,8 @@ const mocks = vi.hoisted(() => {
     fsMkdir,
     fsStat,
     fsWriteFile,
+    fsReaddir,
+    fsReadFile,
     dialogShowOpenDialog,
   };
 });
@@ -73,6 +77,8 @@ vi.mock("fs/promises", () => ({
   mkdir: mocks.fsMkdir,
   stat: mocks.fsStat,
   writeFile: mocks.fsWriteFile,
+  readdir: mocks.fsReaddir,
+  readFile: mocks.fsReadFile,
 }));
 
 function getHandler(channel: string): InvokeHandler {
@@ -597,16 +603,38 @@ describe("Step 5 IPC handlers", () => {
     expect(result).toEqual([{ id: "box1" }]);
   });
 
-  it("themes:get returns empty list initially, themes:save persists", async () => {
+  it("themes:get reads from disk on each call; themes:save writes new theme to disk", async () => {
     setup();
+    mocks.fsReaddir.mockResolvedValue([]);
+
     const get = getHandler(IPC.themes.get);
     expect(await get({})).toEqual([]);
 
     const save = getHandler(IPC.themes.save);
     await save({}, { name: "dark", colors: {} });
 
+    // Simulate the theme file now present on disk
+    mocks.fsReaddir.mockResolvedValue(["dark.json"]);
+    mocks.fsReadFile.mockResolvedValue(JSON.stringify({ name: "dark", colors: {} }));
+
     const afterSave = await get({});
     expect(afterSave).toEqual([{ name: "dark", colors: {} }]);
+  });
+
+  it("themes:get re-reads disk on every call so externally added files appear", async () => {
+    setup();
+    mocks.fsReaddir.mockResolvedValue([]);
+
+    const get = getHandler(IPC.themes.get);
+    expect(await get({})).toEqual([]);
+
+    // Simulate user dropping a theme file into ~/.PDV/themes/ externally
+    const externalTheme = { name: "Solarized", colors: { "bg-primary": "#002b36" } };
+    mocks.fsReaddir.mockResolvedValue(["Solarized.json"]);
+    mocks.fsReadFile.mockResolvedValue(JSON.stringify(externalTheme));
+
+    const afterExternalAdd = await get({});
+    expect(afterExternalAdd).toEqual([externalTheme]);
   });
 
   it("codeCells:load returns null initially, codeCells:save persists", async () => {

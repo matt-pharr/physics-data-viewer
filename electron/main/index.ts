@@ -359,31 +359,6 @@ export function registerIpcHandlers(
   fs.mkdir(themesDir, { recursive: true }).catch(() => {});
   fs.mkdir(stateDir,  { recursive: true }).catch(() => {});
 
-  // Populate savedThemes from disk on first call: load PDV-saved themes +
-  // any .json files the user has dropped in ~/.PDV/themes/.
-  if (savedThemes.length === 0) {
-    try {
-      const entries = fsSync.readdirSync(themesDir);
-      for (const entry of entries) {
-        if (!entry.endsWith(".json")) continue;
-        try {
-          const raw = fsSync.readFileSync(path.join(themesDir, entry), "utf8");
-          const parsed = JSON.parse(raw) as unknown;
-          if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
-            const obj = parsed as Record<string, unknown>;
-            if (typeof obj.name === "string" && obj.colors && typeof obj.colors === "object") {
-              savedThemes.push({ name: obj.name, colors: obj.colors as Record<string, string> });
-            }
-          }
-        } catch {
-          // skip malformed files
-        }
-      }
-    } catch {
-      // themes dir may not exist yet
-    }
-  }
-
   // Populate savedCodeCells from disk on first call.
   if (savedCodeCells === null) {
     try {
@@ -768,9 +743,32 @@ export function registerIpcHandlers(
 
   // Handles themes:get requests from the renderer.
   // Input: none.
-  // Returns: Theme[] currently saved in memory.
+  // Returns: Theme[] read fresh from ~/.PDV/themes/ on every call so that
+  //          theme files added or removed by the user are picked up at runtime.
   // On error: throws to renderer.
   ipcMain.handle(IPC.themes.get, async () => {
+    const loaded: Theme[] = [];
+    try {
+      const entries = await fs.readdir(themesDir);
+      for (const entry of entries) {
+        if (!entry.endsWith(".json")) continue;
+        try {
+          const raw = await fs.readFile(path.join(themesDir, entry), "utf8");
+          const parsed = JSON.parse(raw) as unknown;
+          if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+            const obj = parsed as Record<string, unknown>;
+            if (typeof obj.name === "string" && obj.colors && typeof obj.colors === "object") {
+              loaded.push({ name: obj.name, colors: obj.colors as Record<string, string> });
+            }
+          }
+        } catch {
+          // skip malformed files
+        }
+      }
+    } catch {
+      // themes dir may not exist yet
+    }
+    savedThemes = loaded;
     return savedThemes;
   });
 
