@@ -1,19 +1,20 @@
 /**
- * CommandBox (legacy) — prior tabbed code-cell implementation.
+ * CodeCell editor pane with tabbed Monaco instances.
  *
- * This component mirrors `components/CodeCell` behavior and remains in-tree for
- * compatibility during the frontend refactor. New integrations should use
- * `CodeCell` unless explicitly migrating legacy paths.
+ * Renders tab chrome, Execute/Clear actions, and keyboard shortcut bindings
+ * for cell-level operations (execute/new/close). Execution itself is delegated
+ * to callbacks owned by `App`.
  */
 
 import React, { useEffect, useMemo, useRef } from 'react';
-import Editor, { type OnMount } from '@monaco-editor/react';
+import Editor, { type OnMount, type BeforeMount } from '@monaco-editor/react';
 import type * as monaco from 'monaco-editor';
 import type { CellTab } from '../../types';
 import type { Shortcuts } from '../../shortcuts';
 import { matchesShortcut } from '../../shortcuts';
+import { defineMonacoThemes } from '../../themes';
 
-/** Props accepted by the legacy CommandBox implementation. */
+/** Props for the tabbed code-cell editor pane. */
 export interface CodeCellProps {
   tabs: (CellTab & { onChange: (code: string) => void })[];
   activeTabId: number;
@@ -26,9 +27,14 @@ export interface CodeCellProps {
   isExecuting: boolean;
   lastError?: string;
   shortcuts: Shortcuts;
+  monacoTheme?: string;
+  editorFontFamily?: string;
+  editorFontSize?: number;
+  editorTabSize?: number;
+  editorWordWrap?: boolean;
 }
 
-/** Legacy code-cell component retained for transitional compatibility. */
+/** Tabbed code-cell editor component used by the main workspace. */
 export const CodeCell: React.FC<CodeCellProps> = ({
   tabs,
   activeTabId,
@@ -41,6 +47,11 @@ export const CodeCell: React.FC<CodeCellProps> = ({
   isExecuting,
   lastError,
   shortcuts,
+  monacoTheme = 'vs-dark',
+  editorFontFamily,
+  editorFontSize,
+  editorTabSize,
+  editorWordWrap,
 }) => {
   const editorRef = useRef<monaco.editor.IStandaloneCodeEditor | null>(null);
   const activeTab = useMemo(() => tabs.find((tab) => tab.id === activeTabId), [tabs, activeTabId]);
@@ -50,6 +61,8 @@ export const CodeCell: React.FC<CodeCellProps> = ({
   const shortcutsRef = useRef(shortcuts);
   const onAddTabRef = useRef(onAddTab);
   const onRemoveTabRef = useRef(onRemoveTab);
+  const tabsRef = useRef(tabs);
+  const onTabChangeRef = useRef(onTabChange);
 
   useEffect(() => {
     activeTabRef.current = activeTab;
@@ -75,9 +88,21 @@ export const CodeCell: React.FC<CodeCellProps> = ({
     onRemoveTabRef.current = onRemoveTab;
   }, [onRemoveTab]);
 
+  useEffect(() => {
+    tabsRef.current = tabs;
+  }, [tabs]);
+
+  useEffect(() => {
+    onTabChangeRef.current = onTabChange;
+  }, [onTabChange]);
+
   if (!activeTab) {
     return null;
   }
+
+  const handleBeforeMount: BeforeMount = (monaco) => {
+    defineMonacoThemes(monaco);
+  };
 
   const handleEditorMount: OnMount = (editor) => {
     editorRef.current = editor;
@@ -107,6 +132,22 @@ export const CodeCell: React.FC<CodeCellProps> = ({
         e.preventDefault();
         e.stopPropagation();
         window.close();
+      }
+      // Cmd+1–9 → go to nth tab; Cmd+0 → go to last tab
+      if ((nativeEvent.metaKey || nativeEvent.ctrlKey) && !nativeEvent.shiftKey && !nativeEvent.altKey) {
+        const digit = nativeEvent.key;
+        if (digit >= '1' && digit <= '9') {
+          e.preventDefault();
+          e.stopPropagation();
+          const t = tabsRef.current;
+          const target = t[Math.min(Number(digit) - 1, t.length - 1)];
+          if (target) onTabChangeRef.current(target.id);
+        } else if (digit === '0') {
+          e.preventDefault();
+          e.stopPropagation();
+          const t = tabsRef.current;
+          if (t.length) onTabChangeRef.current(t[t.length - 1].id);
+        }
       }
     });
   };
@@ -138,29 +179,33 @@ export const CodeCell: React.FC<CodeCellProps> = ({
         <h2>Code Cells</h2>
 
         <div className="code-cell-tabs">
-          {tabs.map((tab) => (
-            <button
-              key={tab.id}
-              className={`tab ${tab.id === activeTabId ? 'active' : ''}`}
-              onClick={() => onTabChange(tab.id)}
-              disabled={disabled}
-            >
-              {tab.id}
-              {onRemoveTab && (
-                <span
-                  className="tab-close"
-                  role="button"
-                  aria-label={`Close tab ${tab.id}`}
+          {tabs.map((tab, i) => {
+            const label = tab.name ?? String(i + 1);
+            return (
+              <button
+                key={tab.id}
+                className={`tab ${tab.id === activeTabId ? 'active' : ''}`}
+                onClick={() => onTabChange(tab.id)}
+                disabled={disabled}
+                title={tab.name ? `Cell ${i + 1}: ${tab.name}` : `Cell ${i + 1}`}
+              >
+                {label}
+                {onRemoveTab && (
+                  <span
+                    className="tab-close"
+                    role="button"
+                    aria-label={`Close cell ${i + 1}`}
                     onClick={(e) => {
                       e.stopPropagation();
                       if (!disabled) onRemoveTab(tab.id);
                     }}
-                >
-                  ×
-                </span>
-              )}
-            </button>
-          ))}
+                  >
+                    ×
+                  </span>
+                )}
+              </button>
+            );
+          })}
           <button className="tab add" onClick={onAddTab} disabled={disabled}>
             +
           </button>
@@ -180,13 +225,14 @@ export const CodeCell: React.FC<CodeCellProps> = ({
         </div>
       </header>
 
-      <div className="command-content">
+      <div className="code-cell-content">
         <Editor
           height="100%"
-          theme="vs-dark"
+          theme={monacoTheme}
           language="python"
           value={activeTab.code}
           onChange={(value) => activeTab.onChange(value || '')}
+          beforeMount={handleBeforeMount}
           onMount={handleEditorMount}
           options={{
             readOnly: disabled,
@@ -197,8 +243,9 @@ export const CodeCell: React.FC<CodeCellProps> = ({
             overviewRulerLanes: 0,
 
             // Typography
-            fontSize: 13,
-            wordWrap: 'on',
+            fontSize: editorFontSize ?? 13,
+            fontFamily: editorFontFamily || undefined,
+            wordWrap: editorWordWrap === false ? 'off' : 'on',
 
             // Gutter
             lineNumbers: 'on',
@@ -206,7 +253,7 @@ export const CodeCell: React.FC<CodeCellProps> = ({
             glyphMargin: false,
 
             // Indentation — enforce Python conventions, never infer from content
-            tabSize: 4,
+            tabSize: editorTabSize ?? 4,
             insertSpaces: true,
             detectIndentation: false,
 

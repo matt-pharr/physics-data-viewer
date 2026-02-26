@@ -1,3 +1,10 @@
+/**
+ * NamespaceView — live table of kernel namespace variables.
+ *
+ * Queries `window.pdv.namespace.query` and provides client-side filtering,
+ * sorting, and optional interval refresh.
+ */
+
 import React, { useCallback, useEffect, useState } from 'react';
 import type { NamespaceQueryOptions, NamespaceVariable } from '../../types';
 
@@ -10,6 +17,7 @@ interface NamespaceViewProps {
   onToggleAutoRefresh?: (value: boolean) => void;
 }
 
+/** Kernel namespace browser panel. */
 export const NamespaceView: React.FC<NamespaceViewProps> = ({
   kernelId,
   disabled = false,
@@ -28,6 +36,16 @@ export const NamespaceView: React.FC<NamespaceViewProps> = ({
   });
   const [searchQuery, setSearchQuery] = useState('');
   const [sortBy, setSortBy] = useState<'name' | 'type' | 'size'>('name');
+  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc');
+
+  const handleSortClick = (col: 'name' | 'type' | 'size') => {
+    if (col === sortBy) {
+      setSortDir((d) => (d === 'asc' ? 'desc' : 'asc'));
+    } else {
+      setSortBy(col);
+      setSortDir(col === 'size' ? 'desc' : 'asc');
+    }
+  };
 
   const fetchNamespace = useCallback(async () => {
     if (!kernelId || disabled) {
@@ -71,10 +89,11 @@ export const NamespaceView: React.FC<NamespaceViewProps> = ({
   const filteredVariables = variables
     .filter((v) => v.name.toLowerCase().includes(searchQuery.toLowerCase()))
     .sort((a, b) => {
-      if (sortBy === 'name') return a.name.localeCompare(b.name);
-      if (sortBy === 'type') return a.type.localeCompare(b.type);
-      if (sortBy === 'size') return (b.size || 0) - (a.size || 0);
-      return 0;
+      let cmp = 0;
+      if (sortBy === 'name') cmp = a.name.localeCompare(b.name);
+      else if (sortBy === 'type') cmp = a.type.localeCompare(b.type);
+      else if (sortBy === 'size') cmp = (a.size || 0) - (b.size || 0);
+      return sortDir === 'asc' ? cmp : -cmp;
     });
 
   const handleDoubleClick = (variable: NamespaceVariable) => {
@@ -91,7 +110,7 @@ export const NamespaceView: React.FC<NamespaceViewProps> = ({
   const handleHeaderKeyDown = (sortKey: 'name' | 'type' | 'size') => (event: React.KeyboardEvent<HTMLTableCellElement>) => {
     if (event.key === 'Enter' || event.key === ' ') {
       event.preventDefault();
-      setSortBy(sortKey);
+      handleSortClick(sortKey);
     }
   };
 
@@ -193,33 +212,33 @@ export const NamespaceView: React.FC<NamespaceViewProps> = ({
               <th
                 scope="col"
                 tabIndex={0}
-                onClick={() => setSortBy('name')}
+                onClick={() => handleSortClick('name')}
                 onKeyDown={handleHeaderKeyDown('name')}
-                aria-sort={sortBy === 'name' ? 'ascending' : 'none'}
+                aria-sort={sortBy === 'name' ? (sortDir === 'asc' ? 'ascending' : 'descending') : 'none'}
                 style={{ cursor: 'pointer' }}
               >
-                Name {sortBy === 'name' && '▼'}
+                Name {sortBy === 'name' && (sortDir === 'asc' ? '▲' : '▼')}
               </th>
               <th
                 scope="col"
                 tabIndex={0}
-                onClick={() => setSortBy('type')}
+                onClick={() => handleSortClick('type')}
                 onKeyDown={handleHeaderKeyDown('type')}
-                aria-sort={sortBy === 'type' ? 'ascending' : 'none'}
+                aria-sort={sortBy === 'type' ? (sortDir === 'asc' ? 'ascending' : 'descending') : 'none'}
                 style={{ cursor: 'pointer' }}
               >
-                Type {sortBy === 'type' && '▼'}
+                Type {sortBy === 'type' && (sortDir === 'asc' ? '▲' : '▼')}
               </th>
               <th scope="col">Shape/Length</th>
               <th
                 scope="col"
                 tabIndex={0}
-                onClick={() => setSortBy('size')}
+                onClick={() => handleSortClick('size')}
                 onKeyDown={handleHeaderKeyDown('size')}
-                aria-sort={sortBy === 'size' ? 'descending' : 'none'}
+                aria-sort={sortBy === 'size' ? (sortDir === 'asc' ? 'ascending' : 'descending') : 'none'}
                 style={{ cursor: 'pointer' }}
               >
-                Size {sortBy === 'size' && '▼'}
+                Size {sortBy === 'size' && (sortDir === 'asc' ? '▲' : '▼')}
               </th>
               <th scope="col">Preview</th>
             </tr>
@@ -228,7 +247,10 @@ export const NamespaceView: React.FC<NamespaceViewProps> = ({
             {loading && (
               <tr>
                 <td colSpan={5} className="namespace-loading">
-                  Loading...
+                  <span className="spinner" role="status" aria-label="Loading">
+                    <span aria-hidden="true">⏳</span>
+                  </span>
+                  {' '}Loading...
                 </td>
               </tr>
             )}

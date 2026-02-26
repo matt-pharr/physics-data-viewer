@@ -1,12 +1,22 @@
+/**
+ * Console panel for execution history and streamed output rendering.
+ *
+ * Displays code, stdout/stderr, rich display images, and execution metadata
+ * emitted from kernel executions coordinated by `App`.
+ */
+
 import React, { useEffect, useMemo, useRef } from 'react';
 import type { LogEntry } from '../../types';
+import { ansiToHtml } from './ansi';
 
+/** Props for the execution console panel. */
 export interface ConsoleProps {
   logs: LogEntry[];
   onClear: () => void;
   onExport?: () => void;
 }
 
+/** Execution console component. */
 export const Console: React.FC<ConsoleProps> = ({ logs, onClear, onExport }) => {
   const contentRef = useRef<HTMLDivElement>(null);
 
@@ -48,6 +58,7 @@ export const Console: React.FC<ConsoleProps> = ({ logs, onClear, onExport }) => 
   );
 };
 
+/** Render one console history item with optional streams/result/images. */
 const LogEntryView: React.FC<{ log: LogEntry; index: number }> = ({ log, index }) => {
   const timestamp = useMemo(() => new Date(log.timestamp).toLocaleTimeString(), [log.timestamp]);
   const hasResult = log.result !== undefined;
@@ -65,8 +76,18 @@ const LogEntryView: React.FC<{ log: LogEntry; index: number }> = ({ log, index }
 
       <pre className="log-code">{log.code}</pre>
 
-      {log.stdout && <pre className="log-stdout">{log.stdout}</pre>}
-      {log.stderr && <pre className="log-stderr">{log.stderr}</pre>}
+      {log.stdout && (
+        <pre
+          className="log-stdout"
+          dangerouslySetInnerHTML={{ __html: ansiToHtml(log.stdout) }}
+        />
+      )}
+      {log.stderr && (
+        <pre
+          className="log-stderr"
+          dangerouslySetInnerHTML={{ __html: ansiToHtml(log.stderr) }}
+        />
+      )}
       {hasResult && <pre className="log-result">{formatResult(log.result)}</pre>}
       {log.error && <pre className="log-error">Error: {log.error}</pre>}
       {hasImages && (

@@ -15,9 +15,10 @@
  * ipc.ts — channel constants and API types
  */
 
-import { ipcMain, BrowserWindow, dialog } from "electron";
+import { ipcMain, BrowserWindow, dialog, app } from "electron";
 import { spawn } from "child_process";
 import * as fs from "fs/promises";
+import * as fsSync from "fs";
 import * as os from "os";
 import * as path from "path";
 
@@ -27,7 +28,7 @@ import { ProjectManager } from "./project-manager";
 import { ConfigStore } from "./config";
 import { updateRecentProjectsMenu } from "./menu";
 import {
-  CommandBoxData,
+  CodeCellData,
   IPC,
   KernelCompleteResult,
   KernelInspectResult,
@@ -75,15 +76,15 @@ const REGISTERED_CHANNELS: readonly string[] = [
   IPC.config.set,
   IPC.themes.get,
   IPC.themes.save,
-  IPC.commandBoxes.load,
-  IPC.commandBoxes.save,
+  IPC.codeCells.load,
+  IPC.codeCells.save,
   IPC.menu.updateRecentProjects,
   IPC.files.pickExecutable,
   IPC.files.pickDirectory,
 ];
 
 let savedThemes: Theme[] = [];
-let savedCommandBoxes: CommandBoxData | null = null;
+let savedCodeCells: CodeCellData | null = null;
 
 interface PushSubscription {
   commRouter: CommRouter;
@@ -127,27 +128,28 @@ function readConfig(configStore: ConfigStore): PDVConfig {
 }
 
 /**
- * Resolve an editor command for `script.edit`.
+ * Resolve and expand an editor command for a given file path.
  *
- * @param config - Current app config.
- * @returns Executable command string.
+ * The command string may contain `{}` as a placeholder for the file path.
+ * If no placeholder is present the path is appended as the last argument.
+ * Defaults to `"code {}"` (VS Code) when no command is configured.
+ *
+ * @param cmdString - Raw command string from config, e.g. `"nvim {}"`.
+ * @param filePath  - Absolute path to the file to open.
+ * @returns Object with the executable and expanded argument list.
  */
-function resolveEditorCommand(config: PDVConfig): string {
-  const configured = (
-    config as unknown as Record<string, unknown>
-  ).editorCommand;
-  if (typeof configured === "string" && configured.trim()) {
-    return configured.trim();
-  }
-  return "code";
-}
-
-function parseCommand(command: string): { file: string; args: string[] } {
-  const parts = command.trim().split(/\s+/).filter(Boolean);
-  if (parts.length === 0) {
-    return { file: "code", args: [] };
-  }
-  return { file: parts[0], args: parts.slice(1) };
+function buildEditorSpawn(
+  cmdString: string | undefined,
+  filePath: string,
+): { file: string; args: string[] } {
+  const raw = (cmdString ?? "code {}").trim() || "code {}";
+  const parts = raw.split(/\s+/).filter(Boolean);
+  const PLACEHOLDER = "{}";
+  const hasPlaceholder = parts.includes(PLACEHOLDER);
+  const expanded = hasPlaceholder
+    ? parts.map((p) => (p === PLACEHOLDER ? filePath : p))
+    : [...parts, filePath];
+  return { file: expanded[0], args: expanded.slice(1) };
 }
 
 /**
@@ -304,9 +306,52 @@ export function registerIpcHandlers(
   kernelManager: KernelManager,
   commRouter: CommRouter,
   projectManager: ProjectManager,
-  configStore: ConfigStore
+  configStore: ConfigStore,
+  pdvDir: string
 ): void {
   unregisterIpcHandlers();
+
+  // Derive per-purpose sub-directories within ~/.PDV
+  const themesDir = path.join(pdvDir, "themes");
+  const stateDir  = path.join(pdvDir, "state");
+  const codeCellsPath = path.join(stateDir, "code-cells.json");
+  fs.mkdir(themesDir, { recursive: true }).catch(() => {});
+  fs.mkdir(stateDir,  { recursive: true }).catch(() => {});
+
+  // Populate savedThemes from disk on first call: load PDV-saved themes +
+  // any .json files the user has dropped in ~/.PDV/themes/.
+  if (savedThemes.length === 0) {
+    try {
+      const entries = fsSync.readdirSync(themesDir);
+      for (const entry of entries) {
+        if (!entry.endsWith(".json")) continue;
+        try {
+          const raw = fsSync.readFileSync(path.join(themesDir, entry), "utf8");
+          const parsed = JSON.parse(raw) as unknown;
+          if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+            const obj = parsed as Record<string, unknown>;
+            if (typeof obj.name === "string" && obj.colors && typeof obj.colors === "object") {
+              savedThemes.push({ name: obj.name, colors: obj.colors as Record<string, string> });
+            }
+          }
+        } catch {
+          // skip malformed files
+        }
+      }
+    } catch {
+      // themes dir may not exist yet
+    }
+  }
+
+  // Populate savedCodeCells from disk on first call.
+  if (savedCodeCells === null) {
+    try {
+      const raw = fsSync.readFileSync(codeCellsPath, "utf8");
+      savedCodeCells = JSON.parse(raw) as CodeCellData;
+    } catch {
+      // file may not exist yet
+    }
+  }
 
   // Handles kernels:list requests from the renderer.
   // Input: none.
@@ -348,10 +393,11 @@ export function registerIpcHandlers(
   // Input: kernelId (string), execute request payload.
   // Returns: KernelExecuteResult.
   // On error: throws to renderer.
-  ipcMain.handle(IPC.kernels.execute, async (_event, kernelId, request) => {
+  ipcMain.handle(IPC.kernels.execute, async (event, kernelId, request) => {
     return kernelManager.execute(
       kernelId as string,
-      request as Parameters<KernelManager["execute"]>[1]
+      request as Parameters<KernelManager["execute"]>[1],
+      (chunk) => event.sender.send(IPC.push.executeOutput, chunk)
     );
   });
 
@@ -586,13 +632,11 @@ export function registerIpcHandlers(
   // On error: throws to renderer.
   ipcMain.handle(IPC.script.edit, async (_event, kernelId: string, scriptPath: string) => {
     const config = readConfig(configStore);
-    const editor = resolveEditorCommand(config);
     const resolvedScriptPath = resolveScriptPath(kernelId, scriptPath, kernelWorkingDirs);
-    const parsed = parseCommand(editor);
-    const child = spawn(parsed.file, [...parsed.args, resolvedScriptPath], {
-      detached: true,
-      stdio: "ignore",
-    });
+    const isJulia = resolvedScriptPath.endsWith(".jl");
+    const cmdString = isJulia ? config.juliaEditorCmd : config.pythonEditorCmd;
+    const { file, args } = buildEditorSpawn(cmdString, resolvedScriptPath);
+    const child = spawn(file, args, { detached: true, stdio: "ignore" });
     child.unref();
     const result: ScriptOperationResult = { success: true };
     return result;
@@ -618,20 +662,20 @@ export function registerIpcHandlers(
   });
 
   // Handles project:save requests from the renderer.
-  // Input: saveDir (string), commandBoxes payload.
+  // Input: saveDir (string), codeCells payload.
   // Returns: true on success.
   // On error: throws to renderer.
   ipcMain.handle(
     IPC.project.save,
-    async (_event, saveDir: string, commandBoxes: unknown) => {
-      await projectManager.save(saveDir, commandBoxes);
+    async (_event, saveDir: string, codeCells: unknown) => {
+      await projectManager.save(saveDir, codeCells);
       return true;
     }
   );
 
   // Handles project:load requests from the renderer.
   // Input: saveDir (string).
-  // Returns: command box payload loaded by ProjectManager.
+  // Returns: code cell payload loaded by ProjectManager.
   // On error: throws to renderer.
   ipcMain.handle(IPC.project.load, async (_event, saveDir: string) => {
     return projectManager.load(saveDir);
@@ -652,6 +696,11 @@ export function registerIpcHandlers(
   ipcMain.handle(IPC.config.get, async () => {
     return readConfig(configStore);
   });
+
+  // Handles about:getVersion — returns the running app version.
+  // Input: none.
+  // Returns: version string from package.json (via Electron app.getVersion()).
+  ipcMain.handle(IPC.about.getVersion, () => app.getVersion());
 
   // Handles config:set requests from the renderer.
   // Input: Partial<PDVConfig>.
@@ -694,23 +743,28 @@ export function registerIpcHandlers(
     } else {
       savedThemes = [...savedThemes, theme];
     }
+    // Persist to ~/.PDV/themes/<name>.json (sanitise name for filename)
+    const safeName = theme.name.replace(/[^a-zA-Z0-9_\-. ]/g, "_");
+    const filePath = path.join(themesDir, `${safeName}.json`);
+    await fs.writeFile(filePath, JSON.stringify(theme, null, 2), "utf8");
     return true;
   });
 
-  // Handles commandBoxes:load requests from the renderer.
+  // Handles codeCells:load requests from the renderer.
   // Input: none.
-  // Returns: last saved command-box data or null.
+  // Returns: last saved code-cell data or null.
   // On error: throws to renderer.
-  ipcMain.handle(IPC.commandBoxes.load, async () => {
-    return savedCommandBoxes;
+  ipcMain.handle(IPC.codeCells.load, async () => {
+    return savedCodeCells;
   });
 
-  // Handles commandBoxes:save requests from the renderer.
-  // Input: command-box payload.
+  // Handles codeCells:save requests from the renderer.
+  // Input: code-cell payload.
   // Returns: true after save.
   // On error: throws to renderer.
-  ipcMain.handle(IPC.commandBoxes.save, async (_event, data: CommandBoxData) => {
-    savedCommandBoxes = data;
+  ipcMain.handle(IPC.codeCells.save, async (_event, data: CodeCellData) => {
+    savedCodeCells = data;
+    await fs.writeFile(codeCellsPath, JSON.stringify(data, null, 2), "utf8");
     return true;
   });
 

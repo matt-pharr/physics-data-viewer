@@ -12,6 +12,7 @@
 
 import { BrowserWindow, app } from "electron";
 import * as path from "path";
+import * as os from "os";
 
 import { KernelManager } from "./kernel-manager";
 import { CommRouter } from "./comm-router";
@@ -67,7 +68,7 @@ export async function createWindow(
     },
   });
 
-  registerIpcHandlers(win, kernelManager, commRouter, projectManager, configStore);
+  registerIpcHandlers(win, kernelManager, commRouter, projectManager, configStore, path.join(os.homedir(), ".PDV"));
   initializeAppMenu(win);
 
   const rendererIndexPath = path.join(

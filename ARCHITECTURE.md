@@ -51,7 +51,7 @@ PDV uses the standard Electron three-process architecture:
 │  │ (Node.js)    │        │ (React / TypeScript)   │ │
 │  │              │        │                        │ │
 │  │ - Kernel mgmt│        │ - Tree panel           │ │
-│  │ - IPC handlers        │ - Command Box          │ │
+│  │ - IPC handlers        │ - Code Cell          │ │
 │  │ - Filesystem │        │ - Console              │ │
 │  │ - Config     │        │ - Namespace panel      │ │
 │  │ - Comm router│        │ - Settings / dialogs   │ │
@@ -78,7 +78,7 @@ PDV uses the standard Electron three-process architecture:
 
 ### 2.2 Renderer Process Responsibilities
 - Display and interact with the Tree panel
-- Display and interact with the Command Box (Monaco editor tabs)
+- Display and interact with the Code Cell (Monaco editor tabs)
 - Display the Console (chronological execution output log)
 - Display the Namespace panel
 - All UI state (expansion, selection, scroll position) lives here and is ephemeral unless saved as part of a project
@@ -233,7 +233,7 @@ App launches
     │       status: error → display error with message
     │
     └─► Kernel is ready. UI unlocks.
-            Command Box: active
+            Code Cell: active
             Tree panel: empty, showing working directory root
             Namespace panel: active
 ```
@@ -258,8 +258,8 @@ User selects a save directory
     ├─► App receives pdv.project.loaded:
     │       payload: { node_count: N, project_name: "...", saved_at: "..." }
     │
-    └─► App loads command-boxes.json from save directory
-            Populates Command Box tabs with saved code
+    └─► App loads code-cells.json from save directory
+            Populates Code Cell tabs with saved code
             Console: empty (output history is ephemeral)
             Tree panel: refreshes via pdv.tree.list
 ```
@@ -287,7 +287,7 @@ From the renderer's perspective, startup is simply:
 
 ```tsx
 // Renderer (app/index.tsx)
-setKernelStatus('starting'); // locks UI — command box, tree, namespace all disabled
+setKernelStatus('starting'); // locks UI — code cell, tree, namespace all disabled
 const info = await window.pdv.kernels.start(spec);
 setCurrentKernelId(info.id);
 setKernelStatus('ready');   // unlocks UI
@@ -478,7 +478,7 @@ A persistent, user-chosen directory that stores a complete saved snapshot of a P
 my-project/
     project.json              ← project manifest (owned by Electron main process)
     tree-index.json           ← tree node registry (owned by kernel, written at save time)
-    command-boxes.json        ← command box tab state (owned by Electron main process)
+    code-cells.json        ← code cell tab state (owned by Electron main process)
     tree/
         data/
             waveforms/
@@ -501,7 +501,7 @@ my-project/
   "saved_at": "<iso8601>",
   "language_mode": "python",
   "tree_index_file": "tree-index.json",
-  "command_boxes_file": "command-boxes.json",
+  "code_cells_file": "code-cells.json",
   "kernel": {
     "preferred_python": null,
     "preferred_julia": null
@@ -511,7 +511,7 @@ my-project/
 
 **`tree-index.json` schema**: Written by the kernel during save. Contains an array of node descriptors — one per tree node — with enough information to reconstruct the full tree structure and lazy-load registry without opening any data files. See Section 7.3 for node descriptor fields.
 
-**`command-boxes.json` schema**: Written by the Electron main process during save. Contains tab code and active tab ID.
+**`code-cells.json` schema**: Written by the Electron main process during save. Contains tab code and active tab ID.
 
 ### 6.3 Lazy Loading from Save to Working Directory
 
@@ -523,6 +523,28 @@ When a user accesses a tree node whose data is in the save directory but not yet
 5. Does **not** copy the file to the working directory unless the data is subsequently modified
 
 Files are only written to the working directory when data is newly created or modified in the current session.
+
+### 6.4 User Preferences Directory (`~/.PDV`)
+
+Renderer-facing preferences and UI persistence are stored in a dedicated user
+directory managed by the main process:
+
+```
+~/.PDV/
+    preferences.json        ← global app preferences (`config.get/set`)
+    themes/
+        *.json              ← custom themes (including user-dropped files)
+    state/
+        code-cells.json     ← renderer code-cell tab persistence
+```
+
+Rules:
+- `preferences.json` is authoritative for user configuration (`pythonPath`,
+  settings, shortcut overrides, appearance choices, etc.).
+- Theme files are loaded from `~/.PDV/themes/*.json`; malformed files are
+  ignored (non-fatal).
+- Code-cell persistence in `~/.PDV/state/code-cells.json` is separate from
+  project save snapshots (`<project>/code-cells.json`).
 
 ---
 
@@ -641,7 +663,7 @@ User triggers save
     │       3. Responds with pdv.project.save.response:
     │              payload: { node_count: N, checksum: "<sha256 of tree-index.json>" }
     │
-    ├─► App writes command-boxes.json to save directory
+    ├─► App writes code-cells.json to save directory
     │
     ├─► App writes project.json to save directory
     │       (only after both kernel and app state are flushed)
@@ -666,7 +688,7 @@ Every file in `tree/` must have a corresponding entry in `tree-index.json`. File
 ### 9.1 Execution Channel
 
 All user-initiated code execution goes through the standard Jupyter `execute_request` message on the shell socket. This includes:
-- Code typed in the Command Box and run via the execute button or Cmd+Enter
+- Code typed in the Code Cell and run via the execute button or Cmd+Enter
 - Script `run()` calls triggered by context menu actions in the tree panel
 
 This is the only code that the main process sends via `execute_request`. The main process never uses `execute_request` to call PDV internal functions.
@@ -738,15 +760,17 @@ All IPC channel names are defined as constants in `electron/main/ipc.ts`. This f
 The preload bridge exposes exactly the operations the renderer needs. It never exposes raw Node.js or Electron APIs. The API is fully typed (see `ipc.ts`).
 
 The API surface:
-- `window.pdv.kernels.*` — kernel management: `start`, `stop`, `execute`, `interrupt`, `restart`, `complete`, `inspect`, `validate`
+- `window.pdv.kernels.*` — kernel lifecycle/execution: `list`, `start`, `stop`, `execute`, `interrupt`, `restart`, `complete`, `inspect`, `validate`; push subscription: `onOutput(cb) → unsub` for streamed execute chunks (`stdout`, `stderr`, images, execute-result fragments)
 - `window.pdv.tree.*` — tree operations: `list`, `get`, `createScript`; push: `onChanged(cb) → unsub`
 - `window.pdv.namespace.*` — namespace query: `query`
 - `window.pdv.script.*` — script tooling: `edit`, `reload` (open in external editor; re-register with kernel)
 - `window.pdv.project.*` — project lifecycle: `save`, `load`, `new`; push: `onLoaded(cb) → unsub`
 - `window.pdv.config.*` — app config: `get`, `set`
-- `window.pdv.themes.*` — theme persistence: `get`, `save`
-- `window.pdv.commandBoxes.*` — tab persistence: `load`, `save`
+- `window.pdv.about.*` — app metadata: `getVersion`
+- `window.pdv.themes.*` — theme persistence: `get`, `save` (stored under `~/.PDV/themes/`)
+- `window.pdv.codeCells.*` — tab persistence: `load`, `save` (stored under `~/.PDV/state/code-cells.json`)
 - `window.pdv.files.*` — native OS dialogs: `pickExecutable() → string | null` (wraps Electron `dialog.showOpenDialog` for executables); `pickDirectory() → string | null` (wraps `dialog.showOpenDialog` with `properties: ['openDirectory', 'createDirectory']`, used for Save/Open project)
+- `window.pdv.menu.*` — menu bridge: `updateRecentProjects(paths)`, `onAction(cb) → unsub` (for File menu actions routed to renderer state)
 
 **Design decision — running scripts via `kernels.execute`**: There is no `window.pdv.script.run()`. Running a `PDVScript` node from the renderer is always done by calling `window.pdv.kernels.execute()` with the appropriate Python code string (e.g. `pdv_tree["path.to.script"].run(a=1)`). This keeps the IPC surface minimal and the comm substrate readable — a script run looks identical to any other user execution in the console and in the kernel logs. The `ScriptDialog` component builds the execute call; it does not call a separate IPC channel.
 
@@ -763,7 +787,9 @@ This routing logic lives in a dedicated `CommRouter` class in `electron/main/com
 
 ### 11.4 Renderer Push Subscription Lifecycle
 
-The renderer subscribes to all push channels in a single `useEffect` in the root `App` component, keyed on `currentKernelId`. This ensures subscriptions are established after a kernel becomes ready and are torn down and re-established whenever the kernel changes (restart, switch).
+The renderer owns push subscriptions in the root `App` component, but they are split by lifecycle scope:
+- **Kernel-scoped** (`currentKernelId` keyed): `tree.onChanged`, `project.onLoaded`
+- **App-scoped** (always-on while renderer mounted): `kernels.onOutput`, `menu.onAction`
 
 ```tsx
 useEffect(() => {
@@ -774,7 +800,7 @@ useEffect(() => {
   });
 
   const unsubProject = window.pdv.project.onLoaded(payload => {
-    // repopulate command box tabs from project
+    // repopulate code cell tabs from project
   });
 
   return () => {
@@ -782,13 +808,27 @@ useEffect(() => {
     unsubProject();
   };
 }, [currentKernelId]);
+
+useEffect(() => {
+  const unsubOutput = window.pdv.kernels.onOutput(chunk => {
+    // append streamed execute output to the matching log entry
+  });
+  return () => unsubOutput();
+}, []);
+
+useEffect(() => {
+  const unsubMenu = window.pdv.menu.onAction(payload => {
+    // open/save project actions routed from main menu
+  });
+  return () => unsubMenu();
+}, []);
 ```
 
 Rules:
-- **One owner**: Only `App` directly calls `onChanged` / `onLoaded`. Child components receive refresh tokens or data as props.
-- **Cleanup on every kernel change**: The `useEffect` cleanup runs before the next kernel's subscriptions are registered.
-- **No subscriptions when `currentKernelId` is null**: The early-return guard prevents stale listeners during startup or after kernel stop.
-- **No polling**: The renderer never polls for tree or project state. All proactive updates flow through these push subscriptions.
+- **One owner**: Only `App` directly registers push subscriptions. Child components receive state/refresh tokens as props.
+- **Kernel-scoped cleanup**: `tree.onChanged` and `project.onLoaded` are torn down/re-registered whenever kernel identity changes.
+- **App-scoped cleanup**: `kernels.onOutput` and `menu.onAction` are registered once and cleaned up on unmount.
+- **No polling**: Tree/project updates are push-driven; renderer does not poll these domains.
 
 ---
 
@@ -813,7 +853,18 @@ electron/
     init/
         (removed — replaced by pdv-python package)
     renderer/
-        ...                     ← React frontend (unchanged structure)
+        src/
+            app/index.tsx               ← root orchestration (kernel lifecycle, push subscriptions)
+            components/
+                CodeCell/               ← tabbed Monaco editor surface
+                Console/                ← streamed output and result rendering
+                Tree/                   ← tree browser + context menu actions
+                NamespaceView/          ← namespace table and filtering
+                SettingsDialog/         ← General/Shortcuts/Appearance/Runtime/About tabs
+            themes.ts                   ← builtin themes, Monaco theme definitions, font helpers
+            shortcuts.ts                ← canonical shortcut registry and matcher
+            services/tree.ts            ← renderer tree fetch/cache adapter
+            types/                      ← renderer view-model + preload API types
 ```
 
 Note: `file-scanner.ts` is removed entirely. Its functionality is superseded by the kernel's tree authority.
@@ -1031,6 +1082,8 @@ The following features are acknowledged as future work and must not influence th
 - **Modules system** — the Modules tab remains a placeholder stub
 - **Multiple simultaneous kernels** — architecture supports it (kernels have IDs) but UI exposes only one at a time
 - **R kernel support** — same deferral as Julia
+
+---
 
 ---
 

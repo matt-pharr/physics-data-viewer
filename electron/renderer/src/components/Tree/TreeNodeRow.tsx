@@ -1,3 +1,10 @@
+/**
+ * TreeNodeRow — presentational row for one tree node.
+ *
+ * Handles row click/double-click/context interactions and expand toggling while
+ * delegating all data mutations to parent callbacks.
+ */
+
 import React from 'react';
 import type { TreeNodeData } from '../../types';
 
@@ -32,6 +39,7 @@ interface TreeNodeRowProps {
   style?: React.CSSProperties;
 }
 
+/** Render one row in the tree table view. */
 export const TreeNodeRow: React.FC<TreeNodeRowProps> = ({
   node,
   onExpand,

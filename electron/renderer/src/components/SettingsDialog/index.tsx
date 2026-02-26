@@ -1,125 +1,376 @@
+/**
+ * SettingsDialog — consolidated settings editor UI.
+ *
+ * Hosts General, Keyboard Shortcuts, Appearance, Runtime, and About tabs and
+ * persists updates through `window.pdv.config.set` and related preload APIs.
+ */
+
 import React, { useEffect, useMemo, useState } from 'react';
-import type { Config, Theme } from '../../types';
+import type { Config } from '../../types';
+import { SHORTCUT_LABELS, DEFAULT_SHORTCUTS } from '../../shortcuts';
+import type { Shortcuts } from '../../shortcuts';
+import { EnvironmentSelector } from '../EnvironmentSelector';
+import {
+  BUILTIN_THEMES, BUILTIN_THEME_NAMES, CSS_VAR_GROUPS, THEME_PAIRS,
+  applyThemeColors, colorsEqual, defineMonacoThemes, getMonacoTheme, resolveThemeColors,
+  detectMonoFonts, detectDisplayFonts, applyFontSettings,
+} from '../../themes';
+import type { Theme } from '../../types';
+import { loader } from '@monaco-editor/react';
+import {
+  IS_MAC,
+  tokenToLabel,
+  parseShortcutTokens,
+  buildShortcutString,
+  normalizeShortcut,
+} from './utils';
 
-type SettingsTab = 'shortcuts' | 'appearance' | 'runtime';
-const DEFAULT_OPEN_SETTINGS_SHORTCUT = 'CommandOrControl+,';
-const CUSTOM_THEME_PREFIX = 'Custom Theme';
+type SettingsTab = 'general' | 'shortcuts' | 'appearance' | 'runtime' | 'about';
 
-function colorsEqual(a: Record<string, string>, b: Record<string, string>): boolean {
-  const keys = Object.keys(a);
-  if (keys.length !== Object.keys(b).length) {
-    return false;
-  }
-  return keys.every((key) => a[key] === b[key]);
+const DEFAULT_FILE_MANAGER = IS_MAC ? 'open {}' : 'xdg-open {}';
+
+interface ShortcutCaptureProps {
+  label: string;
+  value: string;
+  defaultValue: string;
+  conflictsWith: string | null;
+  recordingKey: string | null;
+  onStartRecording: (key: string) => void;
+  onStopRecording: () => void;
+  onChange: (v: string) => void;
 }
+
+/** Reusable row widget for viewing/recording a single shortcut binding. */
+const ShortcutCapture: React.FC<ShortcutCaptureProps> = ({
+  label, value, defaultValue, conflictsWith, recordingKey, onStartRecording, onStopRecording, onChange,
+}) => {
+  const isRecording = recordingKey === label;
+  const [livePreview, setLivePreview] = useState<string[]>([]);
+
+  useEffect(() => {
+    if (!isRecording) { setLivePreview([]); return; }
+
+    const onKeyDown = (e: KeyboardEvent) => {
+      e.preventDefault();
+      e.stopImmediatePropagation();
+
+      if (e.key === 'Escape') {
+        onStopRecording();
+        return;
+      }
+
+      const combo = buildShortcutString(e);
+      const badges = combo ? combo.replace(/\s+/g, '').split('+').filter(Boolean).map(tokenToLabel) : [];
+      setLivePreview(badges);
+
+      const isModifierKey = ['Meta', 'Control', 'Shift', 'Alt'].includes(e.key);
+      if (!isModifierKey && combo) {
+        onChange(combo);
+        onStopRecording();
+      }
+    };
+
+    window.addEventListener('keydown', onKeyDown, { capture: true });
+    return () => window.removeEventListener('keydown', onKeyDown, { capture: true });
+  }, [isRecording, onChange, onStopRecording]);
+
+  const badges = isRecording ? livePreview : parseShortcutTokens(value);
+  const isDefault = value === defaultValue;
+
+  return (
+    <>
+      <span>{label}</span>
+      <div className={`shortcut-keys${conflictsWith ? ' shortcut-conflict' : ''}`} aria-label={`Current shortcut: ${value}`}>
+        {isRecording && livePreview.length === 0 ? (
+          <span className="shortcut-recording-prompt">Press keys…</span>
+        ) : (
+          badges.map((badge, i) => (
+            <kbd key={i} className="shortcut-key-badge">{badge}</kbd>
+          ))
+        )}
+        {conflictsWith && !isRecording && (
+          <span className="shortcut-conflict-warning" title={`Conflicts with "${conflictsWith}"`}>⚠</span>
+        )}
+      </div>
+      <div className="shortcut-actions">
+        <button
+          type="button"
+          className={`btn-sm${isRecording ? ' recording' : ''}`}
+          onClick={() => isRecording ? onStopRecording() : onStartRecording(label)}
+        >
+          {isRecording ? 'Cancel' : 'Set'}
+        </button>
+        {!isDefault && !isRecording && (
+          <button
+            type="button"
+            className="btn-sm"
+            title="Reset to default"
+            onClick={() => onChange(defaultValue)}
+          >
+            ↺
+          </button>
+        )}
+      </div>
+    </>
+  );
+};
+
 
 interface SettingsDialogProps {
   isOpen: boolean;
+  initialTab?: SettingsTab;
   config: Config | null;
+  shortcuts: Shortcuts;
+  currentKernelId?: string | null;
   onClose: () => void;
   onSave: (updates: Partial<Config>) => Promise<void>;
+  onEnvSave: (paths: { pythonPath: string; juliaPath?: string }) => Promise<void>;
+  onRestart?: () => void;
 }
 
-export const SettingsDialog: React.FC<SettingsDialogProps> = ({ isOpen, config, onClose, onSave }) => {
-  const [activeTab, setActiveTab] = useState<SettingsTab>('shortcuts');
-  const [themes, setThemes] = useState<Theme[]>([]);
-  const [shortcut, setShortcut] = useState(DEFAULT_OPEN_SETTINGS_SHORTCUT);
-  const [selectedTheme, setSelectedTheme] = useState('Dark');
-  const [themeName, setThemeName] = useState('Dark');
-  const [colors, setColors] = useState<Record<string, string>>({});
-  const [pythonPath, setPythonPath] = useState('python3');
-  const [juliaPath, setJuliaPath] = useState('julia');
-  const [validating, setValidating] = useState(false);
-  const [runtimeErrors, setRuntimeErrors] = useState<{ python?: string; julia?: string }>({});
+/** Top-level settings modal used by the App shell. */
+export const SettingsDialog: React.FC<SettingsDialogProps> = ({
+  isOpen,
+  initialTab = 'shortcuts',
+  config,
+  shortcuts,
+  currentKernelId,
+  onClose,
+  onSave,
+  onEnvSave,
+  onRestart,
+}) => {
+  const [activeTab, setActiveTab] = useState<SettingsTab>(initialTab);
+  const [editedShortcuts, setEditedShortcuts] = useState<Shortcuts>(shortcuts);
+  const [recordingKey, setRecordingKey] = useState<string | null>(null);
+
+  // Appearance state
+  const [savedThemes, setSavedThemes] = useState<Theme[]>([]);
+  const [selectedThemeName, setSelectedThemeName] = useState<string>(BUILTIN_THEMES[0].name);
+  const [editedColors, setEditedColors] = useState<Record<string, string>>(BUILTIN_THEMES[0].colors);
+  const [followSystemTheme, setFollowSystemTheme] = useState(false);
+  const [darkThemeName, setDarkThemeName] = useState<string>(BUILTIN_THEMES[0].name);
+  const [lightThemeName, setLightThemeName] = useState<string>(
+    () => BUILTIN_THEMES.find((t) => t.monacoTheme === 'vs')?.name ?? BUILTIN_THEMES[0].name,
+  );
+
+  // General settings state
+  const [pythonEditorCmd, setPythonEditorCmd] = useState('code {}');
+  const [juliaEditorCmd, setJuliaEditorCmd] = useState('code {}');
+  const [fileManagerCmd, setFileManagerCmd] = useState(DEFAULT_FILE_MANAGER);
+
+  // About tab state
+  const [appVersion, setAppVersion] = useState<string>('…');
+  const [updateStatus, setUpdateStatus] = useState<string | null>(null);
+  const [editorFontSize, setEditorFontSize] = useState(13);
+  const [editorTabSize, setEditorTabSize] = useState(4);
+  const [editorWordWrap, setEditorWordWrap] = useState(true);
+
+  // Font settings state
+  const [codeFont, setCodeFont] = useState('');
+  const [displayFont, setDisplayFont] = useState('');
+  const [monoFonts, setMonoFonts] = useState<string[]>([]);
+  const [displayFonts, setDisplayFonts] = useState<string[]>([]);
 
   useEffect(() => {
     if (!isOpen) return;
-    const loadThemes = async () => {
-      const loadedThemes = await window.pdv.themes.get();
-      setThemes(loadedThemes);
-      const currentThemeName = config?.settings?.appearance?.themeName ?? loadedThemes[0]?.name ?? 'Dark';
-      const selected = loadedThemes.find((theme) => theme.name === currentThemeName) ?? loadedThemes[0];
-      setSelectedTheme(selected?.name ?? currentThemeName);
-      setThemeName(currentThemeName);
-      setColors(config?.settings?.appearance?.colors ?? selected?.colors ?? {});
+    setActiveTab(initialTab);
+    setEditedShortcuts(shortcuts);
+    setPythonEditorCmd(config?.pythonEditorCmd ?? 'code {}');
+    setJuliaEditorCmd(config?.juliaEditorCmd ?? 'code {}');
+    setFileManagerCmd(config?.fileManagerCmd ?? DEFAULT_FILE_MANAGER);
+    const ed = config?.settings?.editor;
+    setEditorFontSize(ed?.fontSize ?? 13);
+    setEditorTabSize(ed?.tabSize ?? 4);
+    setEditorWordWrap(ed?.wordWrap ?? true);
+    const fn = config?.settings?.fonts;
+    setCodeFont(fn?.codeFont ?? '');
+    setDisplayFont(fn?.displayFont ?? '');
+    // Detect installed fonts once per open
+    setMonoFonts(detectMonoFonts());
+    setDisplayFonts(detectDisplayFonts());
+    const load = async () => {
+      const loaded = await window.pdv.themes.get();
+      setSavedThemes(loaded);
+      const allThemes = [...BUILTIN_THEMES, ...loaded];
+      const app = config?.settings?.appearance;
+      const activeName = app?.themeName ?? BUILTIN_THEMES[0].name;
+      const baseTheme = allThemes.find((t) => t.name === activeName) ?? BUILTIN_THEMES[0];
+      const activeColors = app?.colors ?? baseTheme.colors;
+      setSelectedThemeName(activeName);
+      setEditedColors({ ...baseTheme.colors, ...activeColors });
+      setFollowSystemTheme(app?.followSystemTheme ?? false);
+      setDarkThemeName(app?.darkTheme ?? BUILTIN_THEMES[0].name);
+      setLightThemeName(
+        app?.lightTheme ?? (BUILTIN_THEMES.find((t) => t.monacoTheme === 'vs')?.name ?? BUILTIN_THEMES[0].name),
+      );
     };
-    setPythonPath(config?.pythonPath ?? 'python3');
-    setJuliaPath(config?.juliaPath ?? 'julia');
-    setRuntimeErrors({});
-    setShortcut(config?.settings?.shortcuts?.openSettings ?? DEFAULT_OPEN_SETTINGS_SHORTCUT);
-    void loadThemes();
-  }, [config, isOpen]);
+    void load();
+    void window.pdv.about.getVersion().then(setAppVersion).catch(() => setAppVersion('unknown'));
+  }, [config, shortcuts, isOpen, initialTab]);
 
-  const selectedThemeColors = useMemo(
-    () => themes.find((theme) => theme.name === selectedTheme)?.colors ?? {},
-    [selectedTheme, themes],
+  useEffect(() => {
+    if (!isOpen) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && !recordingKey) onClose();
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [isOpen, onClose, recordingKey]);
+
+  const allThemes = useMemo(() => [...BUILTIN_THEMES, ...savedThemes], [savedThemes]);
+
+  const baseColors = useMemo(() => {
+    return allThemes.find((t) => t.name === selectedThemeName)?.colors ?? BUILTIN_THEMES[0].colors;
+  }, [allThemes, selectedThemeName]);
+
+  const isDirty = useMemo(() => !colorsEqual(editedColors, baseColors), [editedColors, baseColors]);
+
+  /** Map from shortcut key → label of the shortcut it conflicts with, or null. */
+  const shortcutConflicts = useMemo(() => {
+    const keys = Object.keys(editedShortcuts) as Array<keyof Shortcuts>;
+    const seen = new Map<string, keyof Shortcuts>();
+    const result = new Map<keyof Shortcuts, string | null>();
+    keys.forEach((k) => result.set(k, null));
+    for (const k of keys) {
+      const norm = normalizeShortcut(editedShortcuts[k]);
+      if (!norm) continue;
+      if (seen.has(norm)) {
+        const other = seen.get(norm)!;
+        result.set(k, SHORTCUT_LABELS[other]);
+        result.set(other, SHORTCUT_LABELS[k]);
+      } else {
+        seen.set(norm, k);
+      }
+    }
+    return result;
+  }, [editedShortcuts]);
+
+  const hasConflicts = useMemo(
+    () => Array.from(shortcutConflicts.values()).some(Boolean),
+    [shortcutConflicts],
   );
 
   if (!isOpen) return null;
 
-  const onThemeChange = (name: string) => {
-    const theme = themes.find((entry) => entry.name === name);
-    setSelectedTheme(name);
-    setThemeName(name);
-    setColors(theme?.colors ?? {});
+  const applyMonacoThemeLive = (name: string) => {
+    const monacoThemeName = getMonacoTheme(name, BUILTIN_THEMES);
+    void loader.init().then((monaco) => {
+      defineMonacoThemes(monaco);
+      monaco.editor.setTheme(monacoThemeName);
+    });
+  };
+
+  const handleThemeSelect = (name: string) => {
+    const theme = allThemes.find((t) => t.name === name);
+    if (!theme) return;
+    const full = { ...editedColors, ...theme.colors };
+    setSelectedThemeName(name);
+    setEditedColors(full);
+    applyThemeColors(full);
+    applyMonacoThemeLive(name);
+  };
+
+  const handleDarkThemeSelect = (name: string) => {
+    setDarkThemeName(name);
+    // Live-preview only if system is currently dark
+    if (window.matchMedia('(prefers-color-scheme: dark)').matches) {
+      const colors = resolveThemeColors(name, savedThemes);
+      if (colors) applyThemeColors(colors);
+      applyMonacoThemeLive(name);
+    }
+  };
+
+  const handleLightThemeSelect = (name: string) => {
+    setLightThemeName(name);
+    // Live-preview only if system is currently light
+    if (!window.matchMedia('(prefers-color-scheme: dark)').matches) {
+      const colors = resolveThemeColors(name, savedThemes);
+      if (colors) applyThemeColors(colors);
+      applyMonacoThemeLive(name);
+    }
+  };
+
+  const handleColorChange = (key: string, value: string) => {
+    const next = { ...editedColors, [key]: value };
+    setEditedColors(next);
+    document.documentElement.style.setProperty(`--${key}`, value);
+  };
+
+  const handleHexInput = (key: string, raw: string) => {
+    // Accept partial input while typing; only apply when it looks like a valid hex color
+    setEditedColors((prev) => ({ ...prev, [key]: raw }));
+    if (/^#[0-9a-fA-F]{6}$/.test(raw)) {
+      document.documentElement.style.setProperty(`--${key}`, raw);
+    }
+  };
+
+  const handleReset = () => {
+    const full = { ...editedColors, ...baseColors };
+    setEditedColors(full);
+    applyThemeColors(full);
+  };
+
+  const handleDuplicate = async () => {
+    const name = `${selectedThemeName} (Custom)`;
+    const theme: Theme = { name, colors: { ...editedColors } };
+    await window.pdv.themes.save(theme);
+    const refreshed = await window.pdv.themes.get();
+    setSavedThemes(refreshed);
+    setSelectedThemeName(name);
   };
 
   const onSaveSettings = async () => {
-    const requestedThemeName = themeName.trim();
-    let savedThemeName = selectedTheme;
-    if (requestedThemeName !== selectedTheme || !colorsEqual(colors, selectedThemeColors)) {
-      const customThemeCount = themes.filter((theme) => theme.name.startsWith(CUSTOM_THEME_PREFIX)).length;
-      savedThemeName = requestedThemeName || `${CUSTOM_THEME_PREFIX} ${customThemeCount + 1}`;
-      await window.pdv.themes.save({ name: savedThemeName, colors });
-      const loadedThemes = await window.pdv.themes.get();
-      setThemes(loadedThemes);
-      setSelectedTheme(savedThemeName);
+    // Persist shortcuts
+    const savedShortcuts = Object.fromEntries(
+      (Object.keys(editedShortcuts) as Array<keyof typeof editedShortcuts>).map((key) => [
+        key,
+        editedShortcuts[key].trim() || DEFAULT_SHORTCUTS[key],
+      ]),
+    ) as unknown as Shortcuts;
+
+    // Persist theme: if dirty and based on a built-in, auto-save as custom first
+    let savedThemeName = selectedThemeName;
+    if (!followSystemTheme && isDirty) {
+      const isBuiltin = BUILTIN_THEME_NAMES.has(selectedThemeName);
+      if (isBuiltin) savedThemeName = `${selectedThemeName} (Custom)`;
+      await window.pdv.themes.save({ name: savedThemeName, colors: editedColors });
+      const refreshed = await window.pdv.themes.get();
+      setSavedThemes(refreshed);
+      setSelectedThemeName(savedThemeName);
     }
+
     await onSave({
-      pythonPath,
-      juliaPath,
+      pythonEditorCmd: pythonEditorCmd.trim() || 'code {}',
+      juliaEditorCmd:  juliaEditorCmd.trim()  || 'code {}',
+      fileManagerCmd:  fileManagerCmd.trim()  || DEFAULT_FILE_MANAGER,
       settings: {
-        shortcuts: { openSettings: shortcut.trim() || DEFAULT_OPEN_SETTINGS_SHORTCUT },
-        appearance: { themeName: savedThemeName, colors },
+        shortcuts: savedShortcuts,
+        appearance: {
+          themeName: savedThemeName,
+          colors: followSystemTheme ? undefined : editedColors,
+          followSystemTheme,
+          darkTheme: followSystemTheme ? darkThemeName : undefined,
+          lightTheme: followSystemTheme ? lightThemeName : undefined,
+        },
+        editor: {
+          fontSize: editorFontSize,
+          tabSize: editorTabSize,
+          wordWrap: editorWordWrap,
+        },
+        fonts: {
+          codeFont: codeFont || undefined,
+          displayFont: displayFont || undefined,
+        },
       },
     });
   };
 
-  const handleValidateRuntime = async () => {
-    setValidating(true);
-    setRuntimeErrors({});
-    try {
-      if (!window.pdv?.kernels) {
-        throw new Error('PDV preload API is unavailable. Open the Electron window, not localhost in a browser.');
-      }
-      const pythonValid = await window.pdv.kernels.validate(pythonPath, 'python');
-      const nextErrors: { python?: string; julia?: string } = {};
-      if (!pythonValid.valid) nextErrors.python = pythonValid.error || 'Unable to validate Python interpreter';
-      setRuntimeErrors(nextErrors);
-    } catch (error) {
-      setRuntimeErrors({
-        python: error instanceof Error ? error.message : String(error),
-      });
-    } finally {
-      setValidating(false);
-    }
-  };
-
-  const handlePickExecutable = async (language: 'python' | 'julia') => {
-    try {
-      if (!window.pdv?.files) {
-        throw new Error('PDV preload API is unavailable. Open the Electron window, not localhost in a browser.');
-      }
-      const selected = await window.pdv.files.pickExecutable();
-      if (!selected) return;
-      if (language === 'python') setPythonPath(selected);
-      if (language === 'julia') setJuliaPath(selected);
-    } catch (error) {
-      setRuntimeErrors({
-        python: error instanceof Error ? error.message : String(error),
-      });
-    }
-  };
+  const shortcutSections: { title: string; keys: Array<keyof Shortcuts> }[] = [
+    { title: 'General',     keys: ['openSettings', 'closeWindow'] },
+    { title: 'Code Cells', keys: ['execute', 'newTab', 'closeTab'] },
+    { title: 'Tree',        keys: ['treeCopyPath', 'treeEditScript', 'treePrint'] },
+  ];
 
   return (
     <div className="modal-overlay">
@@ -129,101 +380,325 @@ export const SettingsDialog: React.FC<SettingsDialogProps> = ({ isOpen, config, 
           <button className="close-btn" onClick={onClose} aria-label="Close settings">×</button>
         </div>
         <div className="settings-tabs">
+          <button className={`tab ${activeTab === 'general' ? 'active' : ''}`} onClick={() => setActiveTab('general')}>General</button>
           <button className={`tab ${activeTab === 'shortcuts' ? 'active' : ''}`} onClick={() => setActiveTab('shortcuts')}>Keyboard Shortcuts</button>
           <button className={`tab ${activeTab === 'appearance' ? 'active' : ''}`} onClick={() => setActiveTab('appearance')}>Appearance</button>
           <button className={`tab ${activeTab === 'runtime' ? 'active' : ''}`} onClick={() => setActiveTab('runtime')}>Python Runtime</button>
+          <button className={`tab ${activeTab === 'about' ? 'active' : ''}`} onClick={() => setActiveTab('about')}>About</button>
         </div>
         <div className="dialog-body">
-          {activeTab === 'shortcuts' ? (
-            <div className="settings-grid">
-              <label htmlFor="settings-open-shortcut">Open Settings Shortcut</label>
-              <input
-                id="settings-open-shortcut"
-                type="text"
-                value={shortcut}
-                onChange={(event) => setShortcut(event.target.value)}
-              />
+          {activeTab === 'general' ? (
+            <div className="settings-general">
+              <p className="settings-general-hint">
+                Use <code>{'{}'}</code> as the file-path placeholder in commands.
+                If omitted, the path is appended automatically.
+              </p>
+              <div className="settings-general-grid">
+                <label htmlFor="sg-python-editor">Python editor</label>
+                <input
+                  id="sg-python-editor"
+                  type="text"
+                  value={pythonEditorCmd}
+                  onChange={(e) => setPythonEditorCmd(e.target.value)}
+                  placeholder="code {}"
+                  spellCheck={false}
+                />
+                <div className="settings-general-desc">
+                  Used when opening Python scripts from the Tree (e.g. <code>code {'{}' }</code>, <code>nvim {'{}' }</code>).
+                </div>
+
+                <label htmlFor="sg-julia-editor">Julia editor</label>
+                <input
+                  id="sg-julia-editor"
+                  type="text"
+                  value={juliaEditorCmd}
+                  onChange={(e) => setJuliaEditorCmd(e.target.value)}
+                  placeholder="code {}"
+                  spellCheck={false}
+                />
+                <div className="settings-general-desc">
+                  Used when opening Julia scripts (not yet in use).
+                </div>
+
+                <label htmlFor="sg-file-manager">File manager</label>
+                <input
+                  id="sg-file-manager"
+                  type="text"
+                  value={fileManagerCmd}
+                  onChange={(e) => setFileManagerCmd(e.target.value)}
+                  placeholder={DEFAULT_FILE_MANAGER}
+                  spellCheck={false}
+                />
+                <div className="settings-general-desc">
+                  Used to reveal files in the OS file browser (e.g.{' '}
+                  <code>open {'{}' }</code> on macOS, <code>xdg-open {'{}' }</code> on Linux).
+                </div>
+              </div>
+            </div>
+          ) : activeTab === 'shortcuts' ? (
+            <div className="settings-shortcuts-grid">
+              {shortcutSections.map((section, si) => (
+                <React.Fragment key={section.title}>
+                  <div className={`shortcut-section-header${si > 0 ? ' shortcut-section-header--spaced' : ''}`}>
+                    {section.title}
+                  </div>
+                  {section.keys.map((key) => (
+                    <ShortcutCapture
+                      key={key}
+                      label={SHORTCUT_LABELS[key]}
+                      value={editedShortcuts[key]}
+                      defaultValue={DEFAULT_SHORTCUTS[key]}
+                      conflictsWith={shortcutConflicts.get(key) ?? null}
+                      recordingKey={recordingKey}
+                      onStartRecording={setRecordingKey}
+                      onStopRecording={() => setRecordingKey(null)}
+                      onChange={(v) => setEditedShortcuts((prev) => ({ ...prev, [key]: v }))}
+                    />
+                  ))}
+                </React.Fragment>
+              ))}
             </div>
           ) : activeTab === 'runtime' ? (
-            <div className="settings-runtime">
-              <div className="settings-card">
-                <h4>Configure Python Runtime</h4>
-                <div className="input-group">
-                  <label>Python Executable</label>
-                  <div className="input-with-button">
-                    <input value={pythonPath} onChange={(event) => setPythonPath(event.target.value)} placeholder="/usr/bin/python3" />
-                    <button className="btn btn-secondary" onClick={() => void handlePickExecutable('python')}>Browse</button>
-                  </div>
-                  {runtimeErrors.python && <div className="error-text">{runtimeErrors.python}</div>}
-                </div>
-                <div className="input-group">
-                  <label>Julia Executable (deferred)</label>
-                  <div className="input-with-button">
-                    <input value={juliaPath} onChange={(event) => setJuliaPath(event.target.value)} placeholder="/usr/local/bin/julia" />
-                    <button className="btn btn-secondary" onClick={() => void handlePickExecutable('julia')}>Browse</button>
-                  </div>
-                  <div className="help-text">Julia runtime validation will be available in a future release.</div>
-                </div>
-                <div className="button-group">
-                  <button className="btn btn-secondary" onClick={() => void handleValidateRuntime()} disabled={validating}>
-                    {validating ? 'Validating...' : 'Validate Paths'}
+            <EnvironmentSelector
+              embedded
+              isFirstRun={!config?.pythonPath}
+              currentConfig={config || undefined}
+              currentKernelId={currentKernelId}
+              onSave={onEnvSave}
+              onRestart={onRestart}
+            />
+          ) : activeTab === 'about' ? (
+            <div className="settings-about">
+              <div className="about-row">
+                <span className="about-label">Version</span>
+                <span className="about-value">v{appVersion}</span>
+              </div>
+              <div className="about-row">
+                <span className="about-label">Check for updates</span>
+                <div className="about-check-row">
+                  <button
+                    type="button"
+                    className="btn btn-secondary"
+                    onClick={() => setUpdateStatus('⚠ Update checking is not yet implemented.')}
+                  >
+                    Check now
                   </button>
+                  {updateStatus && <span className="about-update-status">{updateStatus}</span>}
                 </div>
               </div>
             </div>
           ) : (
-            <div className="settings-appearance-layout">
-              <div className="settings-card">
-                <h4>Theme Selection</h4>
-                <div className="settings-grid">
-                  <label htmlFor="settings-theme-select">Theme</label>
-                  <select id="settings-theme-select" value={selectedTheme} onChange={(event) => onThemeChange(event.target.value)}>
-                    {themes.map((theme) => (
-                      <option key={theme.name} value={theme.name}>
-                        {theme.name}
-                      </option>
-                    ))}
-                  </select>
-                  <label htmlFor="settings-theme-name">Theme Name</label>
-                  <input
-                    id="settings-theme-name"
-                    type="text"
-                    value={themeName}
-                    onChange={(event) => setThemeName(event.target.value)}
-                  />
-                </div>
-              </div>
-              <div className="settings-card">
-                <h4>Theme Colors</h4>
-                <div className="settings-color-grid">
-                  {Object.entries(colors).map(([name, value]) => (
-                    <div className="settings-color-row" key={name}>
-                      <label htmlFor={`settings-color-${name}`}>{name}</label>
-                      <div className="settings-color-input">
-                        <input
-                          id={`settings-color-${name}`}
-                          type="color"
-                          value={value}
-                          onChange={(event) =>
-                            setColors((prev) => ({
-                              ...prev,
-                              [name]: event.target.value,
-                            }))
-                          }
-                        />
-                        <span>{value}</span>
-                      </div>
+            <div className="settings-appearance">
+
+              {/* ── Theme section ── */}
+              <div className="appearance-section-header appearance-section-header--spaced">Theme</div>
+
+              {/* Follow system theme toggle */}
+              <label className="appearance-follow-row">
+                <input
+                  type="checkbox"
+                  checked={followSystemTheme}
+                  onChange={(e) => setFollowSystemTheme(e.target.checked)}
+                />
+                <span>Follow system light/dark preference</span>
+              </label>
+
+              {followSystemTheme ? (
+                /* Paired-theme selectors */
+                <div className="appearance-pair-selectors">
+                  {[
+                    { label: '🌙 Dark theme', value: darkThemeName, onChange: handleDarkThemeSelect },
+                    { label: '☀️ Light theme', value: lightThemeName, onChange: handleLightThemeSelect },
+                  ].map(({ label, value, onChange }) => (
+                    <div key={label} className="appearance-theme-row">
+                      <label>{label}</label>
+                      <select value={value} onChange={(e) => onChange(e.target.value)}>
+                        {BUILTIN_THEMES.map((t) => (
+                          <option key={t.name} value={t.name}>{t.name}</option>
+                        ))}
+                        {savedThemes.length > 0 && (
+                          <optgroup label="Custom">
+                            {savedThemes.map((t) => (
+                              <option key={t.name} value={t.name}>{t.name}</option>
+                            ))}
+                          </optgroup>
+                        )}
+                      </select>
                     </div>
                   ))}
+                  {THEME_PAIRS.length > 0 && (
+                    <div className="appearance-pair-hint">
+                      Suggested pairs:{' '}
+                      {THEME_PAIRS.map((p) => (
+                        <button
+                          key={p.name}
+                          type="button"
+                          className="btn btn-secondary btn-sm"
+                          onClick={() => { setDarkThemeName(p.dark); setLightThemeName(p.light); }}
+                        >
+                          {p.name}
+                        </button>
+                      ))}
+                    </div>
+                  )}
                 </div>
+              ) : (
+                <>
+                  {/* Single theme selector row */}
+                  <div className="appearance-theme-row">
+                    <label htmlFor="appearance-theme-select">Theme</label>
+                    <select
+                      id="appearance-theme-select"
+                      value={selectedThemeName}
+                      onChange={(e) => handleThemeSelect(e.target.value)}
+                    >
+                      {BUILTIN_THEMES.map((t) => (
+                        <option key={t.name} value={t.name}>{t.name}</option>
+                      ))}
+                      {savedThemes.length > 0 && (
+                        <optgroup label="Custom">
+                          {savedThemes.map((t) => (
+                            <option key={t.name} value={t.name}>{t.name}</option>
+                          ))}
+                        </optgroup>
+                      )}
+                    </select>
+                    <button
+                      type="button"
+                      className="btn btn-secondary"
+                      onClick={() => void handleDuplicate()}
+                      title="Save a copy of this theme for editing"
+                    >
+                      Duplicate
+                    </button>
+                    <button
+                      type="button"
+                      className="btn btn-secondary"
+                      onClick={handleReset}
+                      disabled={!isDirty}
+                      title="Reset colours to this theme's defaults"
+                    >
+                      Reset
+                    </button>
+                  </div>
+
+                  {/* Colour groups */}
+                  <div className="appearance-colors">
+                    {CSS_VAR_GROUPS.map((group) => (
+                      <div key={group.label} className="appearance-color-group">
+                        <div className="appearance-group-label">{group.label}</div>
+                        {group.vars.map(({ key, label }) => {
+                          const value = editedColors[key] ?? '#000000';
+                          return (
+                            <div key={key} className="appearance-color-row">
+                              <span className="appearance-color-label">{label}</span>
+                              <input
+                                type="color"
+                                className="appearance-color-swatch"
+                                value={/^#[0-9a-fA-F]{6}$/.test(value) ? value : '#000000'}
+                                onChange={(e) => handleColorChange(key, e.target.value)}
+                              />
+                              <input
+                                type="text"
+                                className="appearance-color-hex"
+                                value={value}
+                                maxLength={7}
+                                spellCheck={false}
+                                onChange={(e) => handleHexInput(key, e.target.value)}
+                              />
+                            </div>
+                          );
+                        })}
+                      </div>
+                    ))}
+                  </div>
+                </>
+              )}
+
+              {/* ── Fonts section ── */}
+              <div className="appearance-section-header">Fonts</div>
+              <div className="appearance-editor-grid">
+                <label htmlFor="ae-code-font">Code font</label>
+                <select
+                  id="ae-code-font"
+                  className="appearance-editor-select"
+                  value={codeFont}
+                  onChange={(e) => { setCodeFont(e.target.value); applyFontSettings(e.target.value || undefined, displayFont || undefined); }}
+                >
+                  <option value="">Default</option>
+                  {monoFonts.map((f) => <option key={f} value={f}>{f}</option>)}
+                </select>
+
+                <label htmlFor="ae-display-font">Display font</label>
+                <select
+                  id="ae-display-font"
+                  className="appearance-editor-select"
+                  value={displayFont}
+                  onChange={(e) => { setDisplayFont(e.target.value); applyFontSettings(codeFont || undefined, e.target.value || undefined); }}
+                >
+                  <option value="">Default</option>
+                  {displayFonts.map((f) => <option key={f} value={f}>{f}</option>)}
+                </select>
+              </div>
+
+              {/* ── Editor section ── */}
+              <div className="appearance-section-header appearance-section-header--spaced">Editor</div>
+              <div className="appearance-editor-grid">
+                <label htmlFor="ae-font-size">Font size</label>
+                <div className="appearance-editor-row">
+                  <input
+                    id="ae-font-size"
+                    type="number"
+                    className="appearance-editor-number"
+                    value={editorFontSize}
+                    min={8}
+                    max={32}
+                    onChange={(e) => setEditorFontSize(Number(e.target.value) || 13)}
+                  />
+                  <span className="appearance-editor-unit">px</span>
+                </div>
+
+                <label htmlFor="ae-tab-size">Tab size</label>
+                <div className="appearance-editor-row">
+                  <input
+                    id="ae-tab-size"
+                    type="number"
+                    className="appearance-editor-number"
+                    value={editorTabSize}
+                    min={1}
+                    max={8}
+                    onChange={(e) => setEditorTabSize(Number(e.target.value) || 4)}
+                  />
+                  <span className="appearance-editor-unit">spaces</span>
+                </div>
+
+                <label htmlFor="ae-word-wrap">Word wrap</label>
+                <label className="appearance-editor-check">
+                  <input
+                    id="ae-word-wrap"
+                    type="checkbox"
+                    checked={editorWordWrap}
+                    onChange={(e) => setEditorWordWrap(e.target.checked)}
+                  />
+                  <span>Enabled</span>
+                </label>
               </div>
             </div>
           )}
         </div>
-        <div className="dialog-footer">
-          <button className="btn btn-secondary" onClick={onClose}>Cancel</button>
-          <button className="btn btn-primary" onClick={() => void onSaveSettings()}>Save</button>
-        </div>
+        {activeTab !== 'runtime' && activeTab !== 'about' && (
+          <div className="dialog-footer">
+            <button className="btn btn-secondary" onClick={onClose}>Cancel</button>
+            <button
+              className="btn btn-primary"
+              onClick={() => void onSaveSettings()}
+              disabled={activeTab === 'shortcuts' && hasConflicts}
+              title={activeTab === 'shortcuts' && hasConflicts ? 'Resolve duplicate shortcuts before saving' : undefined}
+            >
+              Save
+            </button>
+          </div>
+        )}
       </div>
     </div>
   );

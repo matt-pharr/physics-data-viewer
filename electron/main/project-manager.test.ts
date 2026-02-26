@@ -6,11 +6,11 @@
  *
  * Tests cover:
  * 1. save() sends pdv.project.save comm and waits for response.
- * 2. save() writes command-boxes.json.
+ * 2. save() writes code-cells.json.
  * 3. save() writes project.json with correct checksum from kernel response.
  * 4. save() rolls back (does not write project.json) on comm error.
  * 5. load() sends pdv.project.load and waits for pdv.project.loaded push.
- * 6. load() reads command-boxes.json after push.
+ * 6. load() reads code-cells.json after push.
  * 7. readManifest() parses project.json correctly.
  * 8. readManifest() returns default manifest on missing project.json.
  * 9. readManifest() throws PDVSchemaVersionError on future schema major version.
@@ -143,7 +143,7 @@ describe("ProjectManager", () => {
       });
     });
 
-    it("writes command-boxes.json after the comm resolves", async () => {
+    it("writes code-cells.json after the comm resolves", async () => {
       const callOrder: string[] = [];
 
       const { router, requestMock } = makeMockRouter();
@@ -161,7 +161,7 @@ describe("ProjectManager", () => {
       expect(callOrder[0]).toBe("comm");
 
       const cbContent = await fs.readFile(
-        path.join(tmpDir, "command-boxes.json"),
+        path.join(tmpDir, "code-cells.json"),
         "utf8"
       );
       expect(JSON.parse(cbContent)).toEqual(boxes);
@@ -198,13 +198,13 @@ describe("ProjectManager", () => {
       ).rejects.toMatchObject({ code: "ENOENT" });
     });
 
-    it("writes comm, then command-boxes.json, then project.json — in that order", async () => {
+    it("writes comm, then code-cells.json, then project.json — in that order", async () => {
       const { router, requestMock } = makeMockRouter();
 
       // During the comm call neither output file should exist yet.
       requestMock.mockImplementation(async () => {
         await expect(
-          fs.stat(path.join(tmpDir, "command-boxes.json"))
+          fs.stat(path.join(tmpDir, "code-cells.json"))
         ).rejects.toMatchObject({ code: "ENOENT" });
         await expect(
           fs.stat(path.join(tmpDir, "project.json"))
@@ -217,14 +217,14 @@ describe("ProjectManager", () => {
 
       // After save both files must exist.
       await expect(
-        fs.stat(path.join(tmpDir, "command-boxes.json"))
+        fs.stat(path.join(tmpDir, "code-cells.json"))
       ).resolves.toBeDefined();
       await expect(
         fs.stat(path.join(tmpDir, "project.json"))
       ).resolves.toBeDefined();
 
-      // command-boxes.json must have been written before project.json.
-      const cbStat = await fs.stat(path.join(tmpDir, "command-boxes.json"));
+      // code-cells.json must have been written before project.json.
+      const cbStat = await fs.stat(path.join(tmpDir, "code-cells.json"));
       const pjStat = await fs.stat(path.join(tmpDir, "project.json"));
       expect(cbStat.birthtimeMs).toBeLessThanOrEqual(pjStat.birthtimeMs);
     });
@@ -275,10 +275,10 @@ describe("ProjectManager", () => {
       );
     });
 
-    it("reads command-boxes.json from the save directory", async () => {
+    it("reads code-cells.json from the save directory", async () => {
       const boxes = [{ id: 2, code: "x = 1" }];
       await fs.writeFile(
-        path.join(tmpDir, "command-boxes.json"),
+        path.join(tmpDir, "code-cells.json"),
         JSON.stringify(boxes),
         "utf8"
       );

@@ -1,0 +1,33 @@
+import { describe, expect, it } from 'vitest';
+import { getActionsForNode } from './ContextMenu';
+
+function actionIds(type: string): string[] {
+  const node = { type } as unknown as Parameters<typeof getActionsForNode>[0];
+  return getActionsForNode(node).map((action) => action.id);
+}
+
+describe('getActionsForNode', () => {
+  it('returns script actions for script nodes', () => {
+    const ids = actionIds('script');
+    expect(ids).toEqual(['run', 'edit', 'reload', 'view_source', 'print', 'copy_path', 'delete']);
+    expect(ids).not.toContain('create_script');
+  });
+
+  it('returns folder actions including create_script for folders', () => {
+    const ids = actionIds('folder');
+    expect(ids).toContain('refresh');
+    expect(ids).toContain('create_script');
+    expect(ids).toContain('view');
+  });
+
+  it('returns create_script for dict nodes but not ndarray nodes', () => {
+    expect(actionIds('dict')).toContain('create_script');
+    expect(actionIds('ndarray')).not.toContain('create_script');
+  });
+
+  it('always disables delete action', () => {
+    const node = { type: 'script' } as unknown as Parameters<typeof getActionsForNode>[0];
+    const deleteAction = getActionsForNode(node).find((action) => action.id === 'delete');
+    expect(deleteAction?.disabled).toBe(true);
+  });
+});

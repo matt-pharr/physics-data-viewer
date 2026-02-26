@@ -1,13 +1,24 @@
+/**
+ * Tree panel — browsable view of `pdv_tree` descriptors.
+ *
+ * Fetches root/child nodes via `treeService`, preserves expansion/selection
+ * state in localStorage, and exposes context-menu actions back to `App`.
+ */
+
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { treeService, type TreeNodeData } from '../../services/tree';
 import { TreeNodeRow } from './TreeNodeRow';
 import { ContextMenu } from './ContextMenu';
+import { findNode, flattenTree, updateNodeImmut } from './tree-utils';
+import type { Shortcuts } from '../../shortcuts';
+import { matchesShortcut } from '../../shortcuts';
 
 interface TreeProps {
   kernelId: string | null;
   disabled?: boolean;
   refreshToken?: number;
   onAction?: (action: string, node: TreeNodeData) => void;
+  shortcuts: Shortcuts;
 }
 
 interface ContextMenuState {
@@ -16,7 +27,8 @@ interface ContextMenuState {
   node: TreeNodeData;
 }
 
-export const Tree: React.FC<TreeProps> = ({ kernelId, disabled = false, refreshToken = 0, onAction }) => {
+/** Tree browser component for node navigation and node actions. */
+export const Tree: React.FC<TreeProps> = ({ kernelId, disabled = false, refreshToken = 0, onAction, shortcuts }) => {
   const [nodes, setNodes] = useState<TreeNodeData[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | undefined>();
@@ -167,22 +179,28 @@ export const Tree: React.FC<TreeProps> = ({ kernelId, disabled = false, refreshT
   const selectedNode = selectedPath ? flatNodes.find((n) => n.path === selectedPath) : undefined;
 
   const handleKeyDown = async (event: React.KeyboardEvent<HTMLDivElement>) => {
+    // Prevent Space from triggering browser button-click on focused tree rows
+    if (event.key === ' ') {
+      event.preventDefault();
+      return;
+    }
     if (!selectedNode || disabled) return;
+    const nativeEvent = event.nativeEvent;
 
-    if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'c') {
+    if (matchesShortcut(nativeEvent, shortcuts.treeCopyPath)) {
       event.preventDefault();
       await navigator.clipboard.writeText(selectedNode.path);
       onAction?.('copy_path', selectedNode);
       return;
     }
 
-    if (selectedNode.type === 'script' && (event.key === ' ' || event.key.toLowerCase() === 'e')) {
+    if (selectedNode.type === 'script' && matchesShortcut(nativeEvent, shortcuts.treeEditScript)) {
       event.preventDefault();
       onAction?.('edit', selectedNode);
       return;
     }
 
-    if (event.key.toLowerCase() === 'p') {
+    if (matchesShortcut(nativeEvent, shortcuts.treePrint)) {
       event.preventDefault();
       onAction?.('print', selectedNode);
     }
@@ -198,7 +216,14 @@ export const Tree: React.FC<TreeProps> = ({ kernelId, disabled = false, refreshT
 
       <div className="tree-content">
         {disabled && <div className="tree-loading">Starting kernel...</div>}
-        {!disabled && loading && <div className="tree-loading">Loading...</div>}
+        {!disabled && loading && (
+          <div className="tree-loading">
+            <span className="spinner" role="status" aria-label="Loading">
+              <span aria-hidden="true">⏳</span>
+            </span>
+            {' '}Loading...
+          </div>
+        )}
         {error && <div className="tree-error">{error}</div>}
         {!disabled && !loading && !error && flatNodes.length === 0 && <div className="tree-empty">No data</div>}
 
@@ -222,6 +247,7 @@ export const Tree: React.FC<TreeProps> = ({ kernelId, disabled = false, refreshT
           x={contextMenu.x}
           y={contextMenu.y}
           node={contextMenu.node}
+          shortcuts={shortcuts}
           onAction={handleContextAction}
           onClose={() => setContextMenu(null)}
         />
@@ -229,19 +255,6 @@ export const Tree: React.FC<TreeProps> = ({ kernelId, disabled = false, refreshT
     </div>
   );
 };
-
-function flattenTree(nodes: TreeNodeData[], depth = 0): Array<TreeNodeData & { depth: number }> {
-  const result: Array<TreeNodeData & { depth: number }> = [];
-
-  for (const node of nodes) {
-    result.push({ ...node, depth });
-    if (node.isExpanded && node.children) {
-      result.push(...flattenTree(node.children, depth + 1));
-    }
-  }
-
-  return result;
-}
 
 async function restoreExpandedTree(
   rootNodes: TreeNodeData[],
@@ -263,31 +276,4 @@ async function restoreExpandedTree(
   }
 
   return current;
-}
-
-function findNode(nodes: TreeNodeData[], path: string): TreeNodeData | undefined {
-  for (const node of nodes) {
-    if (node.path === path) return node;
-    if (node.children) {
-      const found = findNode(node.children, path);
-      if (found) return found;
-    }
-  }
-  return undefined;
-}
-
-function updateNodeImmut(
-  list: TreeNodeData[],
-  path: string,
-  updater: (n: TreeNodeData) => TreeNodeData,
-): TreeNodeData[] {
-  return list.map((node) => {
-    if (node.path === path) {
-      return updater(node);
-    }
-    if (node.children) {
-      return { ...node, children: updateNodeImmut(node.children, path, updater) };
-    }
-    return node;
-  });
 }
