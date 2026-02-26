@@ -222,6 +222,22 @@ Implemented non-blocking module health validation and warning display:
   - `main/module-manager.test.ts` verifies compatibility/dependency/missing-script warnings
   - `main/index.test.ts` verifies import/list warning behavior and missing-script non-blocking flow
 
+### Step 11 — UX for duplicate imports and updates
+
+Implemented duplicate/import update UX improvements in the Modules panel:
+
+- Improved duplicate import conflict prompt text to include current alias and suggested alias.
+- Added clearer cancel status messaging for duplicate import conflict flow.
+- Added update-state prompt UX for duplicate installs:
+  - when install returns `update_available` / `incompatible_update`, UI now shows current vs available version/revision context in a confirmation dialog
+  - flow remains non-destructive (no silent overwrite; no auto-apply update)
+- Added status badges in the Library list:
+  - `installed`
+  - `imported` (with multiplicity count when imported multiple times)
+  - `warning` (aggregated warning count from imported aliases)
+  - `update available` / `incompatible update` from recent install status
+- Updated import action button label to `Import Again` when module already imported in active project.
+
 ## Verification
 
 - Baseline tests before changes:
@@ -256,7 +272,9 @@ Implemented non-blocking module health validation and warning display:
   - `cd electron && npm test -- --reporter=verbose` (passed)
 - Full tests after Step 10 health checks/warnings:
   - `cd electron && npm test -- --reporter=verbose` (passed)
+- Full tests after Step 11 duplicate/update UX:
+  - `cd electron && npm test -- --reporter=verbose` (passed)
 
 ## Next
 
-- Step 11 — Implement UX for duplicate imports and update prompts/badges.
+- Step 12 — Expand automated coverage for remaining module flows.

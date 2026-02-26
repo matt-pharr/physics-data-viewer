@@ -367,6 +367,41 @@ body {
   color: var(--text-secondary);
 }
 
+.modules-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 6px;
+}
+
+.modules-badge {
+  font-size: 11px;
+  border-radius: 999px;
+  border: 1px solid var(--border-color);
+  padding: 1px 8px;
+  color: var(--text-secondary);
+  background: var(--bg-tertiary);
+}
+
+.modules-badge-installed {
+  color: var(--text-primary);
+}
+
+.modules-badge-imported {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+
+.modules-badge-warning {
+  color: var(--warning);
+  border-color: var(--warning);
+}
+
+.modules-badge-update {
+  color: #ff9d88;
+  border-color: #ff9d88;
+}
+
 .modules-inline-note {
   font-size: 12px;
   color: var(--text-secondary);

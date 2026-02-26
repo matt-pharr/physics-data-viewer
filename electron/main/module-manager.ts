@@ -608,7 +608,11 @@ export class ModuleManager {
     cwd?: string
   ): Promise<{ stdout: string; stderr: string }> {
     try {
-      return await execFileAsync("git", args, cwd ? { cwd } : undefined);
+      const output = await execFileAsync("git", args, cwd ? { cwd } : undefined);
+      return {
+        stdout: String(output.stdout),
+        stderr: String(output.stderr),
+      };
     } catch (error) {
       const err = error as {
         stdout?: string;

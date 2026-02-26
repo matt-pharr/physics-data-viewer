@@ -32,6 +32,9 @@ export const ModulesPanel: React.FC<ModulesPanelProps> = ({
   const [lastStatus, setLastStatus] = useState<string | null>(null);
   const [runningActionKey, setRunningActionKey] = useState<string | null>(null);
   const [actionParamsJson, setActionParamsJson] = useState<Record<string, string>>({});
+  const [installStatusByModuleId, setInstallStatusByModuleId] = useState<
+    Record<string, ModuleInstallResult["status"]>
+  >({});
   const [persistedSettingsByAlias, setPersistedSettingsByAlias] = useState<
     Record<string, Record<string, unknown>>
   >({});
@@ -62,6 +65,16 @@ export const ModulesPanel: React.FC<ModulesPanelProps> = ({
         }
       }
       setInstalled(installedModules);
+      setInstallStatusByModuleId((previous) => {
+        const next: Record<string, ModuleInstallResult["status"]> = {};
+        for (const moduleEntry of installedModules) {
+          const prior = previous[moduleEntry.id];
+          if (prior) {
+            next[moduleEntry.id] = prior;
+          }
+        }
+        return next;
+      });
       setImported(importedModules);
       setPersistedSettingsByAlias(settingsByAlias);
       setActionParamsJson(paramsByActionKey);
@@ -89,13 +102,57 @@ export const ModulesPanel: React.FC<ModulesPanelProps> = ({
     [imported, activeImportedAlias]
   );
 
+  const importedCountByModuleId = useMemo(() => {
+    const counts: Record<string, number> = {};
+    for (const importedModule of imported) {
+      counts[importedModule.moduleId] = (counts[importedModule.moduleId] ?? 0) + 1;
+    }
+    return counts;
+  }, [imported]);
+
+  const warningCountByModuleId = useMemo(() => {
+    const counts: Record<string, number> = {};
+    for (const importedModule of imported) {
+      if (importedModule.warnings.length === 0) continue;
+      counts[importedModule.moduleId] =
+        (counts[importedModule.moduleId] ?? 0) + importedModule.warnings.length;
+    }
+    return counts;
+  }, [imported]);
+
   const handleInstallResult = async (result: ModuleInstallResult): Promise<void> => {
     if (!result.success && result.error) {
       setError(result.error);
     } else {
       setError(null);
     }
-    setLastStatus(`Install status: ${result.status}`);
+    const installedModuleId = result.module?.id;
+    if (installedModuleId) {
+      setInstallStatusByModuleId((previous) => ({
+        ...previous,
+        [installedModuleId]: result.status,
+      }));
+    }
+    if (
+      result.module &&
+      (result.status === "update_available" || result.status === "incompatible_update")
+    ) {
+      const current = installed.find((entry) => entry.id === result.module?.id);
+      const currentVersion = current?.version ?? "unknown";
+      const availableVersion = result.module.version ?? "unknown";
+      const currentRevision = current?.revision ? ` (${current.revision.slice(0, 8)})` : "";
+      const availableRevision = result.module.revision
+        ? ` (${result.module.revision.slice(0, 8)})`
+        : "";
+      window.confirm(
+        `Module "${result.module.name}" already exists.\n\nCurrent: ${currentVersion}${currentRevision}\nAvailable: ${availableVersion}${availableRevision}\n\nPDV does not auto-apply updates yet; keep current installed version for now.`
+      );
+      setLastStatus(
+        `Install status: ${result.status} · current ${currentVersion} vs available ${availableVersion}`
+      );
+    } else {
+      setLastStatus(`Install status: ${result.status}`);
+    }
     await refresh();
   };
 
@@ -132,10 +189,10 @@ export const ModulesPanel: React.FC<ModulesPanelProps> = ({
     const result = await window.pdv.modules.importToProject({ moduleId });
     if (result.status === "conflict" && result.suggestedAlias) {
       const shouldImportSuggested = window.confirm(
-        `Alias already exists. Import as "${result.suggestedAlias}"?`
+        `Module "${moduleId}" is already imported as "${result.alias ?? moduleId}".\nImport another copy as "${result.suggestedAlias}"?`
       );
       if (!shouldImportSuggested) {
-        setLastStatus("Import cancelled due to alias conflict.");
+        setLastStatus(`Import cancelled for "${moduleId}" due to alias conflict.`);
         return;
       }
       const retried = await window.pdv.modules.importToProject({
@@ -282,12 +339,37 @@ export const ModulesPanel: React.FC<ModulesPanelProps> = ({
                   <div className="modules-meta">
                     {entry.id} · v{entry.version}
                   </div>
+                  <div className="modules-badges">
+                    <span className="modules-badge modules-badge-installed">installed</span>
+                    {(importedCountByModuleId[entry.id] ?? 0) > 0 && (
+                      <span className="modules-badge modules-badge-imported">
+                        imported
+                        {importedCountByModuleId[entry.id] > 1
+                          ? ` ×${importedCountByModuleId[entry.id]}`
+                          : ""}
+                      </span>
+                    )}
+                    {(warningCountByModuleId[entry.id] ?? 0) > 0 && (
+                      <span className="modules-badge modules-badge-warning">
+                        warning
+                        {warningCountByModuleId[entry.id] > 1
+                          ? ` ×${warningCountByModuleId[entry.id]}`
+                          : ""}
+                      </span>
+                    )}
+                    {installStatusByModuleId[entry.id] === "update_available" && (
+                      <span className="modules-badge modules-badge-update">update available</span>
+                    )}
+                    {installStatusByModuleId[entry.id] === "incompatible_update" && (
+                      <span className="modules-badge modules-badge-update">incompatible update</span>
+                    )}
+                  </div>
                 </div>
                 <button
                   onClick={() => void handleImport(entry.id)}
                   disabled={loading || !projectDir}
                 >
-                  Import
+                  {(importedCountByModuleId[entry.id] ?? 0) > 0 ? "Import Again" : "Import"}
                 </button>
               </li>
             ))}
