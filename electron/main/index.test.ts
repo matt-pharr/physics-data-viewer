@@ -8,6 +8,7 @@
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { BrowserWindow } from "electron";
+import os from "os";
 
 import { registerIpcHandlers, registerPushForwarding, unregisterIpcHandlers } from "./index";
 import {
@@ -159,7 +160,7 @@ function setup() {
     }),
   } as unknown as ConfigStore;
 
-  registerIpcHandlers(win, kernelManager, commRouter, projectManager, configStore);
+  registerIpcHandlers(win, kernelManager, commRouter, projectManager, configStore, os.tmpdir());
 
   return {
     webContentsSend,
@@ -415,7 +416,7 @@ describe("Step 5 IPC handlers", () => {
     const { kernelManager } = setup();
     const execute = getHandler(IPC.kernels.execute);
     const result = await execute({}, "kernel-1", { code: "1+1" });
-    expect(kernelManager.execute).toHaveBeenCalledWith("kernel-1", { code: "1+1" });
+    expect(kernelManager.execute).toHaveBeenCalledWith("kernel-1", { code: "1+1" }, expect.any(Function));
     expect(result).toEqual({ result: 2 });
   });
 
@@ -576,12 +577,12 @@ describe("Step 5 IPC handlers", () => {
     expect(afterSave).toEqual([{ name: "dark", colors: {} }]);
   });
 
-  it("commandBoxes:load returns null initially, commandBoxes:save persists", async () => {
+  it("codeCells:load returns null initially, codeCells:save persists", async () => {
     setup();
-    const load = getHandler(IPC.commandBoxes.load);
+    const load = getHandler(IPC.codeCells.load);
     expect(await load({})).toBeNull();
 
-    const save = getHandler(IPC.commandBoxes.save);
+    const save = getHandler(IPC.codeCells.save);
     await save({}, { boxes: [{ id: "b1" }] });
 
     const afterSave = await load({});

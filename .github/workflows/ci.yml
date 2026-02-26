@@ -10,7 +10,53 @@ on:
       - develop
 
 jobs:
-  build-and-test:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install Node dependencies
+        working-directory: electron
+        run: |
+          if [ -f package-lock.json ]; then
+            npm ci
+          else
+            npm install
+          fi
+
+      - name: Build
+        working-directory: electron
+        run: npm run build
+
+  python-tests:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install Python dependencies
+        run: pip install ipykernel "pdv-python/[dev]"
+
+      - name: Python tests
+        working-directory: pdv-python
+        run: pytest tests/ -v
+
+  node-main-tests:
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -40,16 +86,34 @@ jobs:
             npm install
           fi
 
-      - name: Build
-        working-directory: electron
-        run: npm run build
-
-      - name: Python tests
-        working-directory: pdv-python
-        run: pytest tests/ -v
-
-      - name: Node tests
+      - name: Node tests (main process)
         working-directory: electron
         env:
           PYTHON_PATH: python3
-        run: npm run test
+        run: npm run test -- --reporter=verbose main/
+
+  renderer-tests:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install Node dependencies
+        working-directory: electron
+        run: |
+          if [ -f package-lock.json ]; then
+            npm ci
+          else
+            npm install
+          fi
+
+      - name: Renderer tests
+        working-directory: electron
+        run: npm run test -- --reporter=verbose renderer/src/

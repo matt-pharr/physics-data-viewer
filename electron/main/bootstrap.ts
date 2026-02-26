@@ -5,6 +5,9 @@
  */
 
 import { app, BrowserWindow } from "electron";
+import * as os from "os";
+import * as path from "path";
+import * as fs from "fs";
 
 import { createWindow, wireAppEvents } from "./app";
 import { CommRouter } from "./comm-router";
@@ -33,7 +36,9 @@ async function openMainWindow(): Promise<void> {
       kernelManager = new KernelManager();
     }
     if (!configStore) {
-      configStore = new ConfigStore(app.getPath("userData"));
+      const pdvDir = path.join(os.homedir(), ".PDV");
+      fs.mkdirSync(pdvDir, { recursive: true });
+      configStore = new ConfigStore(pdvDir);
     }
     const win = await createWindow(
       kernelManager,

@@ -66,6 +66,18 @@ export interface KernelExecuteRequest {
   code: string;
   /** If true, suppress history storage in the kernel. */
   silent?: boolean;
+  /** Caller-supplied ID used to correlate streamed output chunks. */
+  executionId?: string;
+}
+
+/** A single streaming output chunk emitted during execution. */
+export interface ExecuteOutputChunk {
+  /** Matches the executionId passed in KernelExecuteRequest. */
+  executionId: string;
+  type: "stdout" | "stderr" | "image" | "result";
+  text?: string;
+  image?: { mime: string; data: string };
+  result?: unknown;
 }
 
 /** Output from KernelManager.execute(). */
@@ -521,11 +533,13 @@ export class KernelManager extends EventEmitter {
    *
    * @param id - Kernel ID.
    * @param request - Code and options.
+   * @param onChunk - Optional callback invoked for each output chunk as it arrives.
    * @returns Collected stdout, result, and any error.
    */
   async execute(
     id: string,
-    request: KernelExecuteRequest
+    request: KernelExecuteRequest,
+    onChunk?: (chunk: ExecuteOutputChunk) => void
   ): Promise<KernelExecuteResult> {
     const managed = this.kernels.get(id);
     if (!managed) {
@@ -534,6 +548,7 @@ export class KernelManager extends EventEmitter {
 
     const startTime = Date.now();
     const result: KernelExecuteResult = {};
+    const executionId = request.executionId ?? "";
 
     const msg = createMessage(
       "execute_request",
@@ -574,52 +589,47 @@ export class KernelManager extends EventEmitter {
 
         if (msgType === "stream") {
           if (content.name === "stdout") {
-            result.stdout = (result.stdout ?? "") + String(content.text ?? "");
+            const text = String(content.text ?? "");
+            result.stdout = (result.stdout ?? "") + text;
+            onChunk?.({ executionId, type: "stdout", text });
           } else if (content.name === "stderr") {
-            result.stderr = (result.stderr ?? "") + String(content.text ?? "");
+            const text = String(content.text ?? "");
+            result.stderr = (result.stderr ?? "") + text;
+            onChunk?.({ executionId, type: "stderr", text });
           }
         } else if (msgType === "execute_result") {
           const data = content.data as Record<string, unknown> | undefined;
+          let resultValue: unknown;
           if (data && "application/json" in data) {
-            result.result = data["application/json"];
+            resultValue = data["application/json"];
           } else {
             // Try to parse text/plain as JSON so that integers become numbers.
             const plain = data?.["text/plain"];
             if (typeof plain === "string") {
               try {
-                result.result = JSON.parse(plain);
+                resultValue = JSON.parse(plain);
               } catch {
-                result.result = plain;
+                resultValue = plain;
               }
             }
           }
-        } else if (msgType === "display_data" || msgType === "execute_result") {
+          result.result = resultValue;
+          onChunk?.({ executionId, type: "result", result: resultValue });
+        } else if (msgType === "display_data") {
           const data = content.data as Record<string, unknown> | undefined;
-          if (msgType === "display_data") {
-            // Collect inline images (Agg fallback or explicit IPython display())
-            const png = data?.["image/png"];
-            const svg = data?.["image/svg+xml"];
-            if (typeof png === "string") {
-              result.images = result.images ?? [];
-              result.images.push({ mime: "image/png", data: png });
-            } else if (typeof svg === "string") {
-              result.images = result.images ?? [];
-              result.images.push({ mime: "image/svg+xml", data: svg });
-            }
-          } else {
-            // execute_result — extract the return value
-            if (data && "application/json" in data) {
-              result.result = data["application/json"];
-            } else {
-              const plain = data?.["text/plain"];
-              if (typeof plain === "string") {
-                try {
-                  result.result = JSON.parse(plain);
-                } catch {
-                  result.result = plain;
-                }
-              }
-            }
+          // Collect inline images (Agg fallback or explicit IPython display())
+          const png = data?.["image/png"];
+          const svg = data?.["image/svg+xml"];
+          if (typeof png === "string") {
+            const image = { mime: "image/png", data: png };
+            result.images = result.images ?? [];
+            result.images.push(image);
+            onChunk?.({ executionId, type: "image", image });
+          } else if (typeof svg === "string") {
+            const image = { mime: "image/svg+xml", data: svg };
+            result.images = result.images ?? [];
+            result.images.push(image);
+            onChunk?.({ executionId, type: "image", image });
           }
         } else if (msgType === "error") {
           result.error = `${String(content.ename ?? "Error")}: ${String(

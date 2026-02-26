@@ -20,6 +20,7 @@ import type {
   KernelExecuteResult,
   KernelInfo,
   KernelSpec,
+  ExecuteOutputChunk,
 } from "./kernel-manager";
 import type {
   NodeDescriptor,
@@ -81,15 +82,19 @@ export const IPC = {
     get: "config:get",
     set: "config:set",
   },
+  /** App info channels. */
+  about: {
+    getVersion: "about:getVersion",
+  },
   /** Theme persistence channels. */
   themes: {
     get: "themes:get",
     save: "themes:save",
   },
-  /** Command-box persistence channels. */
-  commandBoxes: {
-    load: "commandBoxes:load",
-    save: "commandBoxes:save",
+  /** Code-cell persistence channels. */
+  codeCells: {
+    load: "codeCells:load",
+    save: "codeCells:save",
   },
   /** Main → renderer push channels forwarded from CommRouter push messages. */
   push: {
@@ -97,6 +102,7 @@ export const IPC = {
     projectLoaded: "pdv.project.loaded",
     kernelStatus: "pdv.kernel.status",
     menuAction: "menu:action",
+    executeOutput: "pdv.execute.output",
   },
   /** App menu synchronization channels. */
   menu: {
@@ -108,6 +114,9 @@ export const IPC = {
     pickDirectory: "files:pickDirectory",
   },
 } as const;
+
+// Re-export for preload and renderer use.
+export type { ExecuteOutputChunk };
 
 // ---------------------------------------------------------------------------
 // Kernel request/response helper types
@@ -237,7 +246,7 @@ export interface MenuActionPayload {
 }
 
 // ---------------------------------------------------------------------------
-// Theme and command-box persistence types
+// Theme and code-cell persistence types
 // ---------------------------------------------------------------------------
 
 /**
@@ -251,15 +260,17 @@ export interface Theme {
 }
 
 /**
- * Command-box tab model persisted by `commandBoxes.save`.
+ * Code-cell tab model persisted by `codeCells.save`.
  */
-export interface CommandBoxData {
+export interface CodeCellData {
   /** Tab list in display order. */
   tabs: Array<{
     /** Stable tab ID. */
     id: number;
     /** Code content in the tab editor. */
     code: string;
+    /** Optional user-defined name. When absent, the tab is labelled by its 1-based position. */
+    name?: string;
   }>;
   /** ID of the currently selected tab. */
   activeTabId: number;
@@ -374,6 +385,13 @@ export interface PDVApi {
       executablePath: string,
       language: "python" | "julia"
     ): Promise<KernelValidateResult>;
+    /**
+     * Subscribe to streaming output chunks from any active execution.
+     *
+     * @param callback - Invoked for each chunk as it arrives from the kernel.
+     * @returns Unsubscribe function.
+     */
+    onOutput(callback: (chunk: ExecuteOutputChunk) => void): () => void;
   };
 
   /** Tree browsing and updates. */
@@ -456,15 +474,15 @@ export interface PDVApi {
      * Save the current project.
      *
       * @param saveDir - Target save directory.
-      * @param commandBoxes - Command-box payload to persist.
+      * @param codeCells - Code-cell payload to persist.
       * @returns True when save request is accepted.
       */
-    save(saveDir: string, commandBoxes: unknown): Promise<boolean>;
+    save(saveDir: string, codeCells: unknown): Promise<boolean>;
     /**
      * Load an existing project.
      *
      * @param saveDir - Source save directory.
-      * @returns Loaded command-box state.
+      * @returns Loaded code-cell state.
       */
     load(saveDir: string): Promise<unknown>;
     /**
@@ -499,6 +517,16 @@ export interface PDVApi {
     set(updates: Partial<PDVConfig>): Promise<PDVConfig>;
   };
 
+  /** App info accessors. */
+  about: {
+    /**
+     * Return the running app version string from package.json.
+     *
+     * @returns Version string, e.g. "0.0.2".
+     */
+    getVersion(): Promise<string>;
+  };
+
   /** Theme persistence operations. */
   themes: {
     /**
@@ -516,21 +544,21 @@ export interface PDVApi {
     save(theme: Theme): Promise<boolean>;
   };
 
-  /** Command-box persistence operations. */
-  commandBoxes: {
+  /** Code-cell persistence operations. */
+  codeCells: {
     /**
-     * Load persisted command-box tab state.
+     * Load persisted code-cell tab state.
      *
      * @returns Last saved state or null if none exists.
      */
-    load(): Promise<CommandBoxData | null>;
+    load(): Promise<CodeCellData | null>;
     /**
-     * Save command-box tab state.
+     * Save code-cell tab state.
      *
      * @param data - State payload to persist.
      * @returns True when save succeeded.
      */
-    save(data: CommandBoxData): Promise<boolean>;
+    save(data: CodeCellData): Promise<boolean>;
   };
 
   /** Native file/directory pickers (main process dialog wrappers). */

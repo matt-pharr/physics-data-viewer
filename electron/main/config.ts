@@ -2,7 +2,7 @@
  * config.ts — Persistent user preferences and per-workspace settings.
  *
  * Provides typed getters/setters for all PDV configuration keys and persists
- * them to `${appDataDir}/config.json`.
+ * them to `${appDataDir}/preferences.json`.
  *
  * Configuration is stored in the user's app data directory and persists
  * across sessions. Workspace-specific settings (e.g. last opened project)
@@ -39,6 +39,47 @@ export interface PDVConfig {
   showCallableVariables: boolean;
   /** UI theme override. Undefined = follow system. */
   theme?: "light" | "dark";
+  /**
+   * External editor command for Python scripts.
+   * Use `{}` as the file-path placeholder, e.g. `"code {}"` or `"nvim {}"`.
+   * If `{}` is absent the path is appended as the last argument.
+   * Defaults to `"code {}"`.
+   */
+  pythonEditorCmd?: string;
+  /**
+   * External editor command for Julia scripts.
+   * Same `{}` placeholder convention as `pythonEditorCmd`.
+   */
+  juliaEditorCmd?: string;
+  /**
+   * File-manager command used to reveal a file or folder in the OS browser.
+   * Use `{}` as the placeholder, e.g. `"open {}"` (macOS) or `"xdg-open {}"` (Linux).
+   */
+  fileManagerCmd?: string;
+  /** Recently opened project paths for menu synchronization. */
+  recentProjects?: string[];
+  /** Current/last active project root directory. */
+  projectRoot?: string;
+  /** Renderer settings blob persisted by Settings dialog. */
+  settings?: {
+    shortcuts?: Record<string, string>;
+    appearance?: {
+      themeName?: string;
+      colors?: Record<string, string>;
+      followSystemTheme?: boolean;
+      darkTheme?: string;
+      lightTheme?: string;
+    };
+    editor?: {
+      fontSize?: number;
+      tabSize?: number;
+      wordWrap?: boolean;
+    };
+    fonts?: {
+      codeFont?: string;
+      displayFont?: string;
+    };
+  };
 }
 
 const CONFIG_DEFAULTS: PDVConfig = {
@@ -111,6 +152,49 @@ function parseConfig(raw: string, filePath: string): Partial<PDVConfig> {
       result.theme = theme;
     }
   }
+  for (const key of ["pythonEditorCmd", "juliaEditorCmd", "fileManagerCmd"] as const) {
+    if (key in obj) {
+      const val = obj[key];
+      if (val !== null && val !== undefined && typeof val !== "string") {
+        throw new Error(`Invalid config value for ${key} in ${filePath}`);
+      }
+      if (typeof val === "string") result[key] = val;
+    }
+  }
+  if ("projectRoot" in obj) {
+    const projectRoot = obj.projectRoot;
+    if (projectRoot !== null && projectRoot !== undefined && typeof projectRoot !== "string") {
+      throw new Error(`Invalid config value for projectRoot in ${filePath}`);
+    }
+    if (typeof projectRoot === "string") {
+      result.projectRoot = projectRoot;
+    }
+  }
+  if ("recentProjects" in obj) {
+    const recentProjects = obj.recentProjects;
+    if (recentProjects !== null && recentProjects !== undefined) {
+      if (
+        !Array.isArray(recentProjects) ||
+        !recentProjects.every((entry) => typeof entry === "string")
+      ) {
+        throw new Error(`Invalid config value for recentProjects in ${filePath}`);
+      }
+      result.recentProjects = recentProjects;
+    }
+  }
+  if ("settings" in obj) {
+    const settings = obj.settings;
+    if (
+      settings !== null &&
+      settings !== undefined &&
+      (typeof settings !== "object" || Array.isArray(settings))
+    ) {
+      throw new Error(`Invalid config value for settings in ${filePath}`);
+    }
+    if (settings && typeof settings === "object" && !Array.isArray(settings)) {
+      result.settings = settings as PDVConfig["settings"];
+    }
+  }
 
   return result;
 }
@@ -122,7 +206,9 @@ function parseConfig(raw: string, filePath: string): Partial<PDVConfig> {
 /**
  * Typed persistent configuration store for Electron main-process settings.
  *
- * Values are stored in `${appDataDir}/config.json` and loaded on startup.
+ * Values are stored in `${appDataDir}/preferences.json` and loaded on startup.
+ * If a legacy `config.json` is found in the same directory and `preferences.json`
+ * does not yet exist, its contents are migrated automatically.
  */
 export class ConfigStore {
   private readonly configPath: string;
@@ -138,7 +224,15 @@ export class ConfigStore {
    */
   constructor(private readonly appDataDir: string) {
     fs.mkdirSync(this.appDataDir, { recursive: true });
-    this.configPath = path.join(this.appDataDir, "config.json");
+    this.configPath = path.join(this.appDataDir, "preferences.json");
+    const legacyPath = path.join(this.appDataDir, "config.json");
+    if (!fs.existsSync(this.configPath) && fs.existsSync(legacyPath)) {
+      try {
+        fs.renameSync(legacyPath, this.configPath);
+      } catch {
+        // Migration is best-effort; if it fails we simply start fresh.
+      }
+    }
     this.state = this.loadState();
   }
 

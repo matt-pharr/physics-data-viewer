@@ -1,3 +1,10 @@
+/**
+ * ScriptDialog — parameter form and runner for `PDVScript` tree nodes.
+ *
+ * Builds a `pdv_tree["path"].run(...)` invocation from user-supplied
+ * parameter values and executes it through `window.pdv.kernels.execute`.
+ */
+
 import React, { useMemo, useState } from 'react';
 import type { KernelExecuteResult, ScriptParameter, TreeNodeData } from '../../types';
 
@@ -8,7 +15,8 @@ interface ScriptDialogProps {
   onCancel: () => void;
 }
 
-function getParamKind(type: string): 'string' | 'int' | 'float' | 'bool' {
+/** Map backend parameter type strings to renderer input kinds. */
+export function getParamKind(type: string): 'string' | 'int' | 'float' | 'bool' {
   const normalized = type.toLowerCase();
   if (normalized.includes('bool')) return 'bool';
   if (normalized.includes('int')) return 'int';
@@ -16,13 +24,15 @@ function getParamKind(type: string): 'string' | 'int' | 'float' | 'bool' {
   return 'string';
 }
 
-function isValueProvided(param: ScriptParameter, values: Record<string, unknown>): boolean {
+/** Return true when a required parameter has a user-provided value. */
+export function isValueProvided(param: ScriptParameter, values: Record<string, unknown>): boolean {
   const value = values[param.name];
   if (value === undefined || value === null) return false;
   if (typeof value === 'string') return value.trim().length > 0;
   return true;
 }
 
+/** Modal script-run dialog. */
 export const ScriptDialog: React.FC<ScriptDialogProps> = ({ node, kernelId, onRun, onCancel }) => {
   const params = useMemo(() => node.params ?? [], [node.params]);
   const [values, setValues] = useState<Record<string, unknown>>(() => {
