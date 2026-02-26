@@ -818,7 +818,11 @@ describe("Step 5 IPC handlers", () => {
             revision: "abc123",
           },
         ],
-        module_settings: {},
+        module_settings: {
+          "demo-module": {
+            "run-action": { threshold: 7 },
+          },
+        },
       })
     );
 
@@ -830,6 +834,7 @@ describe("Step 5 IPC handlers", () => {
       version: string;
       revision?: string;
       actions: Array<{ id: string; label: string; scriptName: string }>;
+      settings: Record<string, unknown>;
     }>;
 
     expect(result).toEqual([
@@ -840,8 +845,48 @@ describe("Step 5 IPC handlers", () => {
         version: "1.0.0",
         revision: "abc123",
         actions: [{ id: "run-action", label: "Run", scriptName: "run" }],
+        settings: {
+          "run-action": { threshold: 7 },
+        },
       },
     ]);
+  });
+
+  it("modules:saveSettings persists module settings for imported alias", async () => {
+    setup();
+    const projectLoad = getHandler(IPC.project.load);
+    await projectLoad({}, "/tmp/project");
+    mocks.fsReadFile.mockResolvedValueOnce(
+      JSON.stringify({
+        schema_version: "1.1",
+        saved_at: "2026-01-01T00:00:00.000Z",
+        pdv_version: "1.0",
+        tree_checksum: "",
+        modules: [
+          {
+            module_id: "demo-module",
+            alias: "demo-module",
+            version: "1.0.0",
+          },
+        ],
+        module_settings: {},
+      })
+    );
+
+    const saveSettings = getHandler(IPC.modules.saveSettings);
+    const result = (await saveSettings({}, {
+      moduleAlias: "demo-module",
+      values: {
+        "run-action": { threshold: 9 },
+      },
+    })) as { success: boolean };
+
+    expect(result.success).toBe(true);
+    expect(mocks.fsWriteFile).toHaveBeenCalledWith(
+      "/tmp/project/project.json",
+      expect.stringContaining('"threshold": 9'),
+      "utf8"
+    );
   });
 
   it("modules:runAction returns execution code for imported module action", async () => {

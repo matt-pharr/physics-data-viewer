@@ -131,9 +131,6 @@ if _pdv_comms._comm is None:
     _pdv_comms.send_message("pdv.ready", {})
 `;
 
-const MODULES_NOT_IMPLEMENTED_ERROR =
-  "Modules system is not implemented yet (Feature 2 Step 1 scaffold).";
-
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
@@ -927,6 +924,7 @@ export function registerIpcHandlers(
               label: action.actionLabel,
               scriptName: action.name,
             })),
+            settings: manifest.module_settings[entry.alias] ?? {},
           };
         })
       );
@@ -935,13 +933,42 @@ export function registerIpcHandlers(
 
   // Handles modules:saveSettings requests from the renderer.
   // Input: ModuleSettingsRequest.
-  // Returns: placeholder not-implemented result.
+  // Returns: success status after persisting project module settings.
   ipcMain.handle(
     IPC.modules.saveSettings,
-    async (_event, _request: ModuleSettingsRequest): Promise<ModuleSettingsResult> => {
+    async (_event, request: ModuleSettingsRequest): Promise<ModuleSettingsResult> => {
+      if (!activeProjectDir) {
+        return {
+          success: false,
+          error: "No active project for module settings persistence",
+        };
+      }
+      if (!request.values || typeof request.values !== "object" || Array.isArray(request.values)) {
+        return {
+          success: false,
+          error: "Module settings values must be an object",
+        };
+      }
+      const manifest = await ProjectManager.readManifest(activeProjectDir);
+      const imported = manifest.modules.find(
+        (entry) => entry.alias === request.moduleAlias
+      );
+      if (!imported) {
+        return {
+          success: false,
+          error: `Imported module alias not found: ${request.moduleAlias}`,
+        };
+      }
+      const updatedManifest = {
+        ...manifest,
+        module_settings: {
+          ...manifest.module_settings,
+          [request.moduleAlias]: request.values,
+        },
+      };
+      await ProjectManager.saveManifest(activeProjectDir, updatedManifest);
       return {
-        success: false,
-        error: MODULES_NOT_IMPLEMENTED_ERROR,
+        success: true,
       };
     }
   );

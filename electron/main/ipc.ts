@@ -378,6 +378,8 @@ export interface ImportedModuleDescriptor {
   revision?: string;
   /** Declarative action descriptors bound for this imported module. */
   actions: ImportedModuleActionDescriptor[];
+  /** Persisted per-module UI settings from project manifest. */
+  settings: Record<string, unknown>;
 }
 
 /**

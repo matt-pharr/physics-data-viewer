@@ -32,6 +32,9 @@ export const ModulesPanel: React.FC<ModulesPanelProps> = ({
   const [lastStatus, setLastStatus] = useState<string | null>(null);
   const [runningActionKey, setRunningActionKey] = useState<string | null>(null);
   const [actionParamsJson, setActionParamsJson] = useState<Record<string, string>>({});
+  const [persistedSettingsByAlias, setPersistedSettingsByAlias] = useState<
+    Record<string, Record<string, unknown>>
+  >({});
 
   const refresh = useCallback(async () => {
     setLoading(true);
@@ -41,8 +44,27 @@ export const ModulesPanel: React.FC<ModulesPanelProps> = ({
         window.pdv.modules.listInstalled(),
         window.pdv.modules.listImported(),
       ]);
+      const settingsByAlias: Record<string, Record<string, unknown>> = {};
+      const paramsByActionKey: Record<string, string> = {};
+      for (const moduleEntry of importedModules) {
+        const settings =
+          moduleEntry.settings &&
+          typeof moduleEntry.settings === "object" &&
+          !Array.isArray(moduleEntry.settings)
+            ? moduleEntry.settings
+            : {};
+        settingsByAlias[moduleEntry.alias] = settings;
+        for (const action of moduleEntry.actions) {
+          const value = settings[action.id];
+          if (value !== undefined) {
+            paramsByActionKey[`${moduleEntry.alias}:${action.id}`] = JSON.stringify(value);
+          }
+        }
+      }
       setInstalled(installedModules);
       setImported(importedModules);
+      setPersistedSettingsByAlias(settingsByAlias);
+      setActionParamsJson(paramsByActionKey);
       setActiveImportedAlias((current) => {
         if (importedModules.length === 0) return null;
         if (current && importedModules.some((entry) => entry.alias === current)) {
@@ -136,6 +158,60 @@ export const ModulesPanel: React.FC<ModulesPanelProps> = ({
     await refresh();
   };
 
+  const parseActionParams = (rawParams: string): Record<string, unknown> => {
+    const parsed = JSON.parse(rawParams) as unknown;
+    if (!parsed || Array.isArray(parsed) || typeof parsed !== "object") {
+      throw new Error("Action parameters must be a JSON object.");
+    }
+    return parsed as Record<string, unknown>;
+  };
+
+  const persistActionParams = useCallback(
+    async (
+      moduleAlias: string,
+      actionId: string,
+      params: Record<string, unknown> | null
+    ): Promise<void> => {
+      const nextAliasSettings = { ...(persistedSettingsByAlias[moduleAlias] ?? {}) };
+      if (params === null) {
+        delete nextAliasSettings[actionId];
+      } else {
+        nextAliasSettings[actionId] = params;
+      }
+      const result = await window.pdv.modules.saveSettings({
+        moduleAlias,
+        values: nextAliasSettings,
+      });
+      if (!result.success) {
+        throw new Error(result.error ?? "Failed to save module settings");
+      }
+      setPersistedSettingsByAlias((prev) => ({
+        ...prev,
+        [moduleAlias]: nextAliasSettings,
+      }));
+    },
+    [persistedSettingsByAlias]
+  );
+
+  const handlePersistActionDraft = async (
+    moduleAlias: string,
+    actionId: string
+  ): Promise<void> => {
+    const actionKey = `${moduleAlias}:${actionId}`;
+    const rawParams = (actionParamsJson[actionKey] ?? "").trim();
+    try {
+      if (rawParams.length === 0) {
+        await persistActionParams(moduleAlias, actionId, null);
+      } else {
+        await persistActionParams(moduleAlias, actionId, parseActionParams(rawParams));
+      }
+      setError(null);
+      setLastStatus(`Settings saved: ${moduleAlias}.${actionId}`);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    }
+  };
+
   const handleRunAction = async (actionId: string): Promise<void> => {
     if (!selectedImported) return;
     if (!kernelId || !kernelReady) {
@@ -149,12 +225,9 @@ export const ModulesPanel: React.FC<ModulesPanelProps> = ({
       const rawParams = (actionParamsJson[actionKey] ?? "").trim();
       let params: Record<string, unknown> = {};
       if (rawParams.length > 0) {
-        const parsed = JSON.parse(rawParams) as unknown;
-        if (!parsed || Array.isArray(parsed) || typeof parsed !== "object") {
-          throw new Error("Action parameters must be a JSON object.");
-        }
-        params = parsed as Record<string, unknown>;
+        params = parseActionParams(rawParams);
       }
+      await persistActionParams(selectedImported.alias, actionId, params);
       const result = await window.pdv.modules.runAction({
         kernelId,
         moduleAlias: selectedImported.alias,
@@ -269,6 +342,9 @@ export const ModulesPanel: React.FC<ModulesPanelProps> = ({
                                 ...prev,
                                 [actionKey]: event.target.value,
                               }))
+                            }
+                            onBlur={() =>
+                              void handlePersistActionDraft(selectedImported.alias, action.id)
                             }
                             placeholder='{"param": 1}'
                             disabled={isRunning}

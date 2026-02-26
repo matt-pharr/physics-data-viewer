@@ -175,6 +175,23 @@ Implemented manifest-driven action controls and execution wiring for imported mo
   - `main/index.test.ts` verifies `modules.listImported` action descriptors and `modules.runAction` execution code generation
   - `main/module-manager.test.ts` verifies resolved bindings include action identity metadata
 
+### Step 9 — Persist per-module settings
+
+Implemented project-backed settings persistence for module action controls:
+
+- Extended imported-module descriptors with `settings` so renderer can hydrate persisted control values.
+- Implemented `modules.saveSettings` in `electron/main/index.ts`:
+  - validates active project context and imported module alias
+  - persists `module_settings[moduleAlias]` through `ProjectManager.saveManifest`
+- Extended `modules.listImported` to include per-alias settings from `project.json` `module_settings`.
+- Updated `ModulesPanel` to persist and hydrate action parameter drafts:
+  - loads saved values into action inputs on refresh/tab display
+  - saves per-action settings on input blur and before action run
+  - preserves existing action execution path through app console logging
+- Updated tests in `electron/main/index.test.ts`:
+  - listImported includes `settings`
+  - saveSettings persists updated `module_settings` content
+
 ## Verification
 
 - Baseline tests before changes:
@@ -205,7 +222,9 @@ Implemented manifest-driven action controls and execution wiring for imported mo
   - `cd electron && npm test -- --reporter=verbose` (passed)
 - Full tests after Step 8 controls/action wiring:
   - `cd electron && npm test -- --reporter=verbose` (passed)
+- Full tests after Step 9 settings persistence:
+  - `cd electron && npm test -- --reporter=verbose` (passed)
 
 ## Next
 
-- Step 9 — Persist and load module action settings (`modules.saveSettings`) using project `module_settings`.
+- Step 10 — Add module health checks and warning surfacing for import/load flows.

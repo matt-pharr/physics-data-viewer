@@ -283,6 +283,7 @@ export interface ImportedModuleDescriptor {
   version: string;
   revision?: string;
   actions: ImportedModuleActionDescriptor[];
+  settings: Record<string, unknown>;
 }
 
 /** Request payload for `modules.saveSettings`. */
