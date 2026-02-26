@@ -56,6 +56,30 @@ export interface PDVConfig {
    * Use `{}` as the placeholder, e.g. `"open {}"` (macOS) or `"xdg-open {}"` (Linux).
    */
   fileManagerCmd?: string;
+  /** Recently opened project paths for menu synchronization. */
+  recentProjects?: string[];
+  /** Current/last active project root directory. */
+  projectRoot?: string;
+  /** Renderer settings blob persisted by Settings dialog. */
+  settings?: {
+    shortcuts?: Record<string, string>;
+    appearance?: {
+      themeName?: string;
+      colors?: Record<string, string>;
+      followSystemTheme?: boolean;
+      darkTheme?: string;
+      lightTheme?: string;
+    };
+    editor?: {
+      fontSize?: number;
+      tabSize?: number;
+      wordWrap?: boolean;
+    };
+    fonts?: {
+      codeFont?: string;
+      displayFont?: string;
+    };
+  };
 }
 
 const CONFIG_DEFAULTS: PDVConfig = {
@@ -135,6 +159,40 @@ function parseConfig(raw: string, filePath: string): Partial<PDVConfig> {
         throw new Error(`Invalid config value for ${key} in ${filePath}`);
       }
       if (typeof val === "string") result[key] = val;
+    }
+  }
+  if ("projectRoot" in obj) {
+    const projectRoot = obj.projectRoot;
+    if (projectRoot !== null && projectRoot !== undefined && typeof projectRoot !== "string") {
+      throw new Error(`Invalid config value for projectRoot in ${filePath}`);
+    }
+    if (typeof projectRoot === "string") {
+      result.projectRoot = projectRoot;
+    }
+  }
+  if ("recentProjects" in obj) {
+    const recentProjects = obj.recentProjects;
+    if (recentProjects !== null && recentProjects !== undefined) {
+      if (
+        !Array.isArray(recentProjects) ||
+        !recentProjects.every((entry) => typeof entry === "string")
+      ) {
+        throw new Error(`Invalid config value for recentProjects in ${filePath}`);
+      }
+      result.recentProjects = recentProjects;
+    }
+  }
+  if ("settings" in obj) {
+    const settings = obj.settings;
+    if (
+      settings !== null &&
+      settings !== undefined &&
+      (typeof settings !== "object" || Array.isArray(settings))
+    ) {
+      throw new Error(`Invalid config value for settings in ${filePath}`);
+    }
+    if (settings && typeof settings === "object" && !Array.isArray(settings)) {
+      result.settings = settings as PDVConfig["settings"];
     }
   }
 

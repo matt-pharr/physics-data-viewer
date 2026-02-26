@@ -54,10 +54,18 @@ describe("ConfigStore", () => {
       JSON.stringify(
         {
           pythonPath: "/usr/bin/python3",
+          projectRoot: "/tmp/project",
+          recentProjects: ["/tmp/project", "/tmp/other"],
           showPrivateVariables: true,
           showModuleVariables: true,
           showCallableVariables: false,
           theme: "dark",
+          settings: {
+            appearance: {
+              themeName: "Solarized Dark",
+              followSystemTheme: false,
+            },
+          },
         },
         null,
         2
@@ -68,10 +76,18 @@ describe("ConfigStore", () => {
     const store = new ConfigStore(appDataDir);
     expect(store.getAll()).toEqual({
       pythonPath: "/usr/bin/python3",
+      projectRoot: "/tmp/project",
+      recentProjects: ["/tmp/project", "/tmp/other"],
       showPrivateVariables: true,
       showModuleVariables: true,
       showCallableVariables: false,
       theme: "dark",
+      settings: {
+        appearance: {
+          themeName: "Solarized Dark",
+          followSystemTheme: false,
+        },
+      },
     });
   });
 
