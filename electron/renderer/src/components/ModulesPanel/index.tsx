@@ -154,7 +154,13 @@ export const ModulesPanel: React.FC<ModulesPanelProps> = ({
     } else {
       setError(null);
     }
-    setLastStatus(`Import status: ${result.status}${result.alias ? ` (${result.alias})` : ""}`);
+    const warningSuffix =
+      result.warnings && result.warnings.length > 0
+        ? ` · ${result.warnings.length} warning${result.warnings.length === 1 ? "" : "s"}`
+        : "";
+    setLastStatus(
+      `Import status: ${result.status}${result.alias ? ` (${result.alias})` : ""}${warningSuffix}`
+    );
     await refresh();
   };
 
@@ -304,6 +310,9 @@ export const ModulesPanel: React.FC<ModulesPanelProps> = ({
                   onClick={() => setActiveImportedAlias(entry.alias)}
                 >
                   {entry.alias}
+                  {entry.warnings.length > 0 && (
+                    <span className="modules-warning-badge">{entry.warnings.length}</span>
+                  )}
                 </button>
               ))}
             </div>
@@ -313,6 +322,15 @@ export const ModulesPanel: React.FC<ModulesPanelProps> = ({
                 <div className="modules-meta">
                   id: {selectedImported.moduleId} · version: {selectedImported.version}
                 </div>
+                {selectedImported.warnings.length > 0 && (
+                  <div className="modules-warning-block">
+                    {selectedImported.warnings.map((warning, index) => (
+                      <div key={`${warning.code}-${index}`} className="modules-warning-item">
+                        {warning.message}
+                      </div>
+                    ))}
+                  </div>
+                )}
                 {!kernelReady && (
                   <div className="modules-inline-note">
                     Start a ready kernel to run module actions.

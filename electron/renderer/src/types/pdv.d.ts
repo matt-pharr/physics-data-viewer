@@ -265,6 +265,7 @@ export interface ModuleImportResult {
   status: "imported" | "conflict" | "not_implemented" | "error";
   alias?: string;
   suggestedAlias?: string;
+  warnings?: ModuleHealthWarning[];
   error?: string;
 }
 
@@ -273,6 +274,18 @@ export interface ImportedModuleActionDescriptor {
   id: string;
   label: string;
   scriptName: string;
+}
+
+/** Non-blocking module health warning surfaced to the renderer. */
+export interface ModuleHealthWarning {
+  code:
+    | "pdv_version_incompatible"
+    | "python_version_incompatible"
+    | "python_version_unknown"
+    | "dependency_unverified"
+    | "missing_action_script"
+    | "module_source_missing";
+  message: string;
 }
 
 /** Project-scoped imported module descriptor. */
@@ -284,6 +297,7 @@ export interface ImportedModuleDescriptor {
   revision?: string;
   actions: ImportedModuleActionDescriptor[];
   settings: Record<string, unknown>;
+  warnings: ModuleHealthWarning[];
 }
 
 /** Request payload for `modules.saveSettings`. */

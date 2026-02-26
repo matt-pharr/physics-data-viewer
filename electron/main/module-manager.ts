@@ -23,6 +23,7 @@ import { promisify } from "util";
 
 import type {
   ModuleDescriptor,
+  ModuleHealthWarning,
   ModuleInstallRequest,
   ModuleInstallResult,
   ModuleSourceReference,
@@ -46,6 +47,18 @@ interface ModuleManifestV1 {
   name: string;
   version: string;
   description?: string;
+  compatibility?: {
+    pdv_min?: string;
+    pdv_max?: string;
+    python?: string;
+    python_min?: string;
+    python_max?: string;
+  };
+  dependencies?: Array<{
+    name: string;
+    version?: string;
+    marker?: string;
+  }>;
   actions: Array<{
     id: string;
     label: string;
@@ -241,6 +254,115 @@ export class ModuleManager {
       });
     }
     return bindings;
+  }
+
+  /**
+   * Evaluate non-blocking health warnings for one installed module.
+   *
+   * @param moduleId - Installed module identifier.
+   * @param context - Runtime compatibility context.
+   * @returns Warning list (empty when no issues detected).
+   * @throws {Error} When the manifest exists but is structurally invalid.
+   */
+  async evaluateHealth(
+    moduleId: string,
+    context: { pdvVersion: string; pythonVersion?: string }
+  ): Promise<ModuleHealthWarning[]> {
+    const index = await this.readIndex();
+    const module = index.modules[moduleId];
+    if (!module) {
+      return [
+        {
+          code: "module_source_missing",
+          message: `Installed module not found: ${moduleId}`,
+        },
+      ];
+    }
+    const moduleDir = module.installPath ?? path.join(this.packagesRoot, moduleId);
+    let manifest: ModuleManifestV1;
+    try {
+      manifest = await this.readAndValidateManifest(moduleDir);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      if (message.includes(`Missing ${MODULE_MANIFEST_FILE}`)) {
+        return [
+          {
+            code: "module_source_missing",
+            message: `Module manifest missing for "${moduleId}"`,
+          },
+        ];
+      }
+      throw error;
+    }
+
+    const warnings: ModuleHealthWarning[] = [];
+    const compatibility = manifest.compatibility;
+    if (compatibility?.pdv_min && isVersionLessThan(context.pdvVersion, compatibility.pdv_min)) {
+      warnings.push({
+        code: "pdv_version_incompatible",
+        message: `PDV ${context.pdvVersion} is below required minimum ${compatibility.pdv_min}`,
+      });
+    }
+    if (compatibility?.pdv_max && isVersionGreaterThan(context.pdvVersion, compatibility.pdv_max)) {
+      warnings.push({
+        code: "pdv_version_incompatible",
+        message: `PDV ${context.pdvVersion} is above supported maximum ${compatibility.pdv_max}`,
+      });
+    }
+
+    const hasPythonConstraint = Boolean(
+      compatibility?.python ||
+        compatibility?.python_min ||
+        compatibility?.python_max
+    );
+    if (hasPythonConstraint) {
+      if (!context.pythonVersion) {
+        warnings.push({
+          code: "python_version_unknown",
+          message:
+            "Unable to verify Python compatibility because no Python version is available",
+        });
+      } else if (!isPythonVersionCompatible(context.pythonVersion, compatibility ?? {})) {
+        warnings.push({
+          code: "python_version_incompatible",
+          message: `Python ${context.pythonVersion} is outside declared compatibility constraints`,
+        });
+      }
+    }
+
+    for (const dep of manifest.dependencies ?? []) {
+      if (dep.version && dep.version.trim().length > 0) {
+        warnings.push({
+          code: "dependency_unverified",
+          message: `Dependency requirement not auto-validated: ${dep.name} ${dep.version}`,
+        });
+      }
+    }
+
+    for (const action of manifest.actions) {
+      const scriptPath = path.resolve(moduleDir, action.script_path);
+      try {
+        const stat = await fs.stat(scriptPath);
+        if (!stat.isFile()) {
+          warnings.push({
+            code: "missing_action_script",
+            message: `Action script is not a file: ${action.script_path}`,
+          });
+        }
+      } catch (error) {
+        const err = error as NodeJS.ErrnoException;
+        if (err.code === "ENOENT") {
+          warnings.push({
+            code: "missing_action_script",
+            message: `Action script not found: ${action.script_path}`,
+          });
+          continue;
+        }
+        throw error;
+      }
+    }
+
+    return warnings;
   }
 
   /**
@@ -680,6 +802,8 @@ function validateModuleManifest(
   const name = requiredString(obj, "name", manifestPath);
   const version = requiredString(obj, "version", manifestPath);
   const description = optionalString(obj, "description", manifestPath);
+  const compatibility = optionalCompatibility(obj, manifestPath);
+  const dependencies = optionalDependencies(obj, manifestPath);
   const actionsRaw = obj.actions;
   if (!Array.isArray(actionsRaw)) {
     throw new Error(`"actions" must be an array in ${manifestPath}`);
@@ -706,6 +830,8 @@ function validateModuleManifest(
     name,
     version,
     description,
+    compatibility,
+    dependencies,
     actions,
   };
 }
@@ -757,6 +883,69 @@ function optionalString(
 }
 
 /**
+ * Parse optional `compatibility` object from a module manifest.
+ *
+ * @param obj - Source manifest object.
+ * @param filePath - Manifest path for diagnostics.
+ * @returns Parsed compatibility object or undefined.
+ */
+function optionalCompatibility(
+  obj: Record<string, unknown>,
+  filePath: string
+):
+  | {
+      pdv_min?: string;
+      pdv_max?: string;
+      python?: string;
+      python_min?: string;
+      python_max?: string;
+    }
+  | undefined {
+  const raw = obj.compatibility;
+  if (raw === undefined) return undefined;
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+    throw new Error(`"compatibility" must be an object in ${filePath}`);
+  }
+  const compat = raw as Record<string, unknown>;
+  return {
+    pdv_min: optionalString(compat, "pdv_min", filePath),
+    pdv_max: optionalString(compat, "pdv_max", filePath),
+    python: optionalString(compat, "python", filePath),
+    python_min: optionalString(compat, "python_min", filePath),
+    python_max: optionalString(compat, "python_max", filePath),
+  };
+}
+
+/**
+ * Parse optional `dependencies` list from a module manifest.
+ *
+ * @param obj - Source manifest object.
+ * @param filePath - Manifest path for diagnostics.
+ * @returns Parsed dependency list or undefined.
+ */
+function optionalDependencies(
+  obj: Record<string, unknown>,
+  filePath: string
+): Array<{ name: string; version?: string; marker?: string }> | undefined {
+  const raw = obj.dependencies;
+  if (raw === undefined) return undefined;
+  if (!Array.isArray(raw)) {
+    throw new Error(`"dependencies" must be an array in ${filePath}`);
+  }
+  return raw.map((entry, index) => {
+    if (!entry || typeof entry !== "object" || Array.isArray(entry)) {
+      throw new Error(`dependencies[${index}] must be an object in ${filePath}`);
+    }
+    const dep = entry as Record<string, unknown>;
+    return {
+      name: requiredString(dep, "name", filePath, `dependencies[${index}]`),
+      version: optionalString(dep, "version", filePath),
+      marker: optionalString(dep, "marker", filePath),
+    };
+  });
+}
+
+/**
  * Parse a semantic version string into numeric components.
  *
  * Accepts `major.minor.patch` with optional pre-release/build metadata suffixes.
@@ -776,6 +965,142 @@ function parseSemver(
     return null;
   }
   return { major, minor, patch };
+}
+
+/**
+ * Compare two semantic versions.
+ *
+ * @param left - Left-side semantic version.
+ * @param right - Right-side semantic version.
+ * @returns Negative when left < right, 0 when equal, positive when left > right.
+ */
+function compareSemver(left: string, right: string): number | null {
+  const l = parseLooseSemver(left);
+  const r = parseLooseSemver(right);
+  if (!l || !r) return null;
+  if (l.major !== r.major) return l.major - r.major;
+  if (l.minor !== r.minor) return l.minor - r.minor;
+  return l.patch - r.patch;
+}
+
+/**
+ * Parse a semantic version in `x.y` or `x.y.z` form.
+ *
+ * @param version - Version string candidate.
+ * @returns Parsed numeric version or null.
+ */
+function parseLooseSemver(
+  version: string
+): { major: number; minor: number; patch: number } | null {
+  const strict = parseSemver(version);
+  if (strict) return strict;
+  const match = version.trim().match(/^(\d+)\.(\d+)(?:[-+].*)?$/);
+  if (!match) return null;
+  const major = Number(match[1]);
+  const minor = Number(match[2]);
+  if (Number.isNaN(major) || Number.isNaN(minor)) {
+    return null;
+  }
+  return { major, minor, patch: 0 };
+}
+
+/**
+ * Return true when one version is semantically lower than another.
+ *
+ * Unparseable versions are treated as non-comparable and return false.
+ */
+function isVersionLessThan(left: string, right: string): boolean {
+  const compared = compareSemver(left, right);
+  return compared !== null && compared < 0;
+}
+
+/**
+ * Return true when one version is semantically greater than another.
+ *
+ * Unparseable versions are treated as non-comparable and return false.
+ */
+function isVersionGreaterThan(left: string, right: string): boolean {
+  const compared = compareSemver(left, right);
+  return compared !== null && compared > 0;
+}
+
+/**
+ * Validate a current Python version against compatibility constraints.
+ *
+ * Supports simple comparator expressions such as `>=3.10,<3.13`.
+ *
+ * @param currentVersion - Current Python version string.
+ * @param compatibility - Manifest compatibility object.
+ * @returns True when all parseable constraints are satisfied.
+ */
+function isPythonVersionCompatible(
+  currentVersion: string,
+  compatibility: {
+    python?: string;
+    python_min?: string;
+    python_max?: string;
+  }
+): boolean {
+  const normalized = extractVersionToken(currentVersion);
+  if (!normalized) return false;
+  if (compatibility.python) {
+    const constraints = compatibility.python
+      .split(",")
+      .map((entry) => entry.trim())
+      .filter((entry) => entry.length > 0);
+    for (const constraint of constraints) {
+      if (!evaluateSimpleConstraint(normalized, constraint)) {
+        return false;
+      }
+    }
+  }
+  if (compatibility.python_min && isVersionLessThan(normalized, compatibility.python_min)) {
+    return false;
+  }
+  if (compatibility.python_max && isVersionGreaterThan(normalized, compatibility.python_max)) {
+    return false;
+  }
+  return true;
+}
+
+/**
+ * Extract a comparable version token from a raw version string.
+ *
+ * @param value - Raw version text (e.g. `Python 3.11.7`).
+ * @returns Comparable token (e.g. `3.11.7`) or null.
+ */
+function extractVersionToken(value: string): string | null {
+  const trimmed = value.trim();
+  const direct = parseLooseSemver(trimmed);
+  if (direct) return `${direct.major}.${direct.minor}.${direct.patch}`;
+  const match = trimmed.match(/(\d+\.\d+(?:\.\d+)?)/);
+  if (!match) return null;
+  const parsed = parseLooseSemver(match[1]);
+  if (!parsed) return null;
+  return `${parsed.major}.${parsed.minor}.${parsed.patch}`;
+}
+
+/**
+ * Evaluate a simple comparator expression against a version token.
+ *
+ * @param current - Comparable current version token.
+ * @param constraint - One constraint, e.g. `>=3.10`.
+ * @returns True when satisfied or not parseable.
+ */
+function evaluateSimpleConstraint(current: string, constraint: string): boolean {
+  const match = constraint.match(/^(<=|>=|<|>|=)?\s*(\d+\.\d+(?:\.\d+)?)$/);
+  if (!match) {
+    return true;
+  }
+  const operator = match[1] ?? "=";
+  const target = match[2];
+  const compared = compareSemver(current, target);
+  if (compared === null) return true;
+  if (operator === "<") return compared < 0;
+  if (operator === "<=") return compared <= 0;
+  if (operator === ">") return compared > 0;
+  if (operator === ">=") return compared >= 0;
+  return compared === 0;
 }
 
 /**

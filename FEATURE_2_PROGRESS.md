@@ -192,6 +192,36 @@ Implemented project-backed settings persistence for module action controls:
   - listImported includes `settings`
   - saveSettings persists updated `module_settings` content
 
+### Step 10 — Health checks and warning surfacing
+
+Implemented non-blocking module health validation and warning display:
+
+- Extended module manifest parsing in `ModuleManager` to accept optional:
+  - `compatibility` (`pdv_min`/`pdv_max`, `python`, `python_min`/`python_max`)
+  - `dependencies` (`name`, optional `version`, optional `marker`)
+- Added `ModuleManager.evaluateHealth(moduleId, context)`:
+  - evaluates PDV compatibility range warnings
+  - evaluates Python compatibility range warnings
+  - emits warning-only dependency requirement notices (v1 no auto-validation/install)
+  - detects missing/non-file action script paths as warnings
+- Added warning-tolerant tree binding behavior for missing scripts:
+  - missing action script paths no longer block bind/load/import flows
+  - structurally invalid manifests still throw
+- Extended IPC types and payloads:
+  - new `ModuleHealthWarning` contract
+  - `ImportedModuleDescriptor.warnings`
+  - optional `ModuleImportResult.warnings`
+- Added import/load-time warning evaluation in main IPC:
+  - project load refreshes module warnings
+  - import returns immediate warning list for imported alias
+- Updated Modules UI to surface warnings:
+  - warning count badge on module tabs
+  - warning list in selected module tab content
+  - import status includes warning count when present
+- Updated tests:
+  - `main/module-manager.test.ts` verifies compatibility/dependency/missing-script warnings
+  - `main/index.test.ts` verifies import/list warning behavior and missing-script non-blocking flow
+
 ## Verification
 
 - Baseline tests before changes:
@@ -224,7 +254,9 @@ Implemented project-backed settings persistence for module action controls:
   - `cd electron && npm test -- --reporter=verbose` (passed)
 - Full tests after Step 9 settings persistence:
   - `cd electron && npm test -- --reporter=verbose` (passed)
+- Full tests after Step 10 health checks/warnings:
+  - `cd electron && npm test -- --reporter=verbose` (passed)
 
 ## Next
 
-- Step 10 — Add module health checks and warning surfacing for import/load flows.
+- Step 11 — Implement UX for duplicate imports and update prompts/badges.

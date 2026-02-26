@@ -36,6 +36,20 @@ const mocks = vi.hoisted(() => {
   const spawn = vi.fn(() => ({
     unref: vi.fn(),
   }));
+  const execFile = vi.fn(
+    (
+      _file: string,
+      _args: string[],
+      _options: { timeout?: number } | ((err: Error | null, stdout: string, stderr: string) => void),
+      callback?: (err: Error | null, stdout: string, stderr: string) => void
+    ) => {
+      const cb =
+        typeof _options === "function"
+          ? _options
+          : callback;
+      cb?.(null, "Python 3.11.6\n", "");
+    }
+  );
   const fsMkdir = vi.fn(async () => undefined);
   const fsStat = vi.fn(async () => {
     const err = Object.assign(new Error("ENOENT"), { code: "ENOENT" });
@@ -63,6 +77,7 @@ const mocks = vi.hoisted(() => {
     status: "not_implemented",
     message: "Remote update checks are not implemented yet.",
   }));
+  const moduleManagerEvaluateHealth = vi.fn(async () => []);
   const moduleManagerResolveActionScripts = vi.fn(async () => [
     {
       actionId: "run-action",
@@ -76,6 +91,7 @@ const mocks = vi.hoisted(() => {
     ipcHandle,
     ipcRemoveHandler,
     spawn,
+    execFile,
     fsMkdir,
     fsStat,
     fsWriteFile,
@@ -84,6 +100,7 @@ const mocks = vi.hoisted(() => {
     moduleManagerListInstalled,
     moduleManagerInstall,
     moduleManagerCheckUpdates,
+    moduleManagerEvaluateHealth,
     moduleManagerResolveActionScripts,
   };
 });
@@ -96,10 +113,14 @@ vi.mock("electron", () => ({
   dialog: {
     showOpenDialog: mocks.dialogShowOpenDialog,
   },
+  app: {
+    getVersion: () => "0.0.3",
+  },
 }));
 
 vi.mock("child_process", () => ({
   spawn: mocks.spawn,
+  execFile: mocks.execFile,
 }));
 
 vi.mock("fs/promises", () => ({
@@ -114,6 +135,7 @@ vi.mock("./module-manager", () => ({
     listInstalled: mocks.moduleManagerListInstalled,
     install: mocks.moduleManagerInstall,
     checkUpdates: mocks.moduleManagerCheckUpdates,
+    evaluateHealth: mocks.moduleManagerEvaluateHealth,
     resolveActionScripts: mocks.moduleManagerResolveActionScripts,
   })),
 }));
@@ -734,6 +756,9 @@ describe("Step 5 IPC handlers", () => {
 
   it("modules:importToProject persists manifest on successful import", async () => {
     const { commRouter, webContentsSend } = setup();
+    (mocks.moduleManagerEvaluateHealth as unknown as ReturnType<typeof vi.fn>).mockResolvedValueOnce([
+      { code: "dependency_unverified", message: "Dependency requirement not auto-validated: numpy >=1.26" },
+    ]);
     const start = getHandler(IPC.kernels.start);
     await start({}, { language: "python" });
     const projectLoad = getHandler(IPC.project.load);
@@ -762,11 +787,19 @@ describe("Step 5 IPC handlers", () => {
     const importToProject = getHandler(IPC.modules.importToProject);
     const result = (await importToProject({}, {
       moduleId: "demo-module",
-    })) as { success: boolean; status: string; alias?: string };
+    })) as {
+      success: boolean;
+      status: string;
+      alias?: string;
+      warnings?: Array<{ code: string; message: string }>;
+    };
 
     expect(result.success).toBe(true);
     expect(result.status).toBe("imported");
     expect(result.alias).toBe("demo-module");
+    expect(result.warnings).toEqual([
+      { code: "dependency_unverified", message: "Dependency requirement not auto-validated: numpy >=1.26" },
+    ]);
     expect(mocks.fsWriteFile).toHaveBeenCalledWith(
       "/tmp/project/project.json",
       expect.stringContaining('"module_id": "demo-module"'),
@@ -835,6 +868,7 @@ describe("Step 5 IPC handlers", () => {
       revision?: string;
       actions: Array<{ id: string; label: string; scriptName: string }>;
       settings: Record<string, unknown>;
+      warnings: Array<{ code: string; message: string }>;
     }>;
 
     expect(result).toEqual([
@@ -848,7 +882,47 @@ describe("Step 5 IPC handlers", () => {
         settings: {
           "run-action": { threshold: 7 },
         },
+        warnings: [],
       },
+    ]);
+  });
+
+  it("modules:listImported surfaces missing-script warnings without throwing", async () => {
+    setup();
+    (mocks.moduleManagerEvaluateHealth as unknown as ReturnType<typeof vi.fn>).mockResolvedValueOnce([
+      { code: "missing_action_script", message: "Action script not found: scripts/run.py" },
+    ]);
+    (mocks.moduleManagerResolveActionScripts as unknown as ReturnType<typeof vi.fn>).mockRejectedValueOnce(
+      new Error("Module action script does not exist: scripts/run.py (demo-module)")
+    );
+    mocks.fsReadFile.mockResolvedValue(
+      JSON.stringify({
+        schema_version: "1.1",
+        saved_at: "2026-01-01T00:00:00.000Z",
+        pdv_version: "1.0",
+        tree_checksum: "",
+        modules: [
+          {
+            module_id: "demo-module",
+            alias: "demo-module",
+            version: "1.0.0",
+          },
+        ],
+        module_settings: {},
+      })
+    );
+    const projectLoad = getHandler(IPC.project.load);
+    await projectLoad({}, "/tmp/project");
+
+    const listImported = getHandler(IPC.modules.listImported);
+    const result = (await listImported({})) as Array<{
+      actions: Array<{ id: string; label: string; scriptName: string }>;
+      warnings: Array<{ code: string; message: string }>;
+    }>;
+
+    expect(result[0]?.actions).toEqual([]);
+    expect(result[0]?.warnings).toEqual([
+      { code: "missing_action_script", message: "Action script not found: scripts/run.py" },
     ]);
   });
 

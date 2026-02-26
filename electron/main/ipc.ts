@@ -346,6 +346,8 @@ export interface ModuleImportResult {
   alias?: string;
   /** Suggested alias when conflict occurs. */
   suggestedAlias?: string;
+  /** Non-blocking warnings discovered during import-time health checks. */
+  warnings?: ModuleHealthWarning[];
   /** Optional user-facing error message. */
   error?: string;
 }
@@ -360,6 +362,22 @@ export interface ImportedModuleActionDescriptor {
   label: string;
   /** Bound script node name under `<alias>.scripts.<scriptName>`. */
   scriptName: string;
+}
+
+/**
+ * Non-blocking module health warning surfaced to the renderer.
+ */
+export interface ModuleHealthWarning {
+  /** Stable warning code for programmatic handling. */
+  code:
+    | "pdv_version_incompatible"
+    | "python_version_incompatible"
+    | "python_version_unknown"
+    | "dependency_unverified"
+    | "missing_action_script"
+    | "module_source_missing";
+  /** Human-readable warning detail. */
+  message: string;
 }
 
 /**
@@ -380,6 +398,8 @@ export interface ImportedModuleDescriptor {
   actions: ImportedModuleActionDescriptor[];
   /** Persisted per-module UI settings from project manifest. */
   settings: Record<string, unknown>;
+  /** Module health warnings evaluated at import/load time. */
+  warnings: ModuleHealthWarning[];
 }
 
 /**

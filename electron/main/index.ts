@@ -23,6 +23,7 @@ import * as os from "os";
 import * as path from "path";
 
 import { CommRouter } from "./comm-router";
+import { EnvironmentDetector } from "./environment-detector";
 import { KernelManager, type KernelInfo } from "./kernel-manager";
 import { ModuleManager } from "./module-manager";
 import { ProjectManager, type ProjectModuleImport } from "./project-manager";
@@ -42,6 +43,7 @@ import {
   ModuleImportResult,
   ModuleInstallRequest,
   ModuleInstallResult,
+  ModuleHealthWarning,
   ModuleSettingsRequest,
   ModuleSettingsResult,
   ModuleUpdateResult,
@@ -280,14 +282,30 @@ function suggestModuleAlias(baseAlias: string, existingAliases: Set<string>): st
   return `${baseAlias}_${i}`;
 }
 
+function isMissingActionScriptError(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error);
+  return (
+    message.includes("Module action script does not exist") ||
+    message.includes("Module action script is not a file")
+  );
+}
+
 async function bindImportedModuleScripts(
   commRouter: CommRouter,
   moduleManager: ModuleManager,
   importedModule: ProjectModuleImport
 ): Promise<void> {
-  const scriptBindings = await moduleManager.resolveActionScripts(
-    importedModule.module_id
-  );
+  let scriptBindings: Awaited<ReturnType<ModuleManager["resolveActionScripts"]>>;
+  try {
+    scriptBindings = await moduleManager.resolveActionScripts(
+      importedModule.module_id
+    );
+  } catch (error) {
+    if (isMissingActionScriptError(error)) {
+      return;
+    }
+    throw error;
+  }
   const parentPath = `${importedModule.alias}.scripts`;
   for (const binding of scriptBindings) {
     await commRouter.request(PDVMessageType.SCRIPT_REGISTER, {
@@ -305,7 +323,8 @@ async function bindProjectModulesToTree(
   commRouter: CommRouter,
   moduleManager: ModuleManager,
   activeKernelId: string | null,
-  projectDir: string | null
+  projectDir: string | null,
+  importedModules?: ProjectModuleImport[]
 ): Promise<void> {
   if (!activeKernelId || !projectDir) {
     return;
@@ -313,8 +332,9 @@ async function bindProjectModulesToTree(
   if (!kernelManager.getKernel(activeKernelId)) {
     return;
   }
-  const manifest = await ProjectManager.readManifest(projectDir);
-  for (const importedModule of manifest.modules) {
+  const modules =
+    importedModules ?? (await ProjectManager.readManifest(projectDir)).modules;
+  for (const importedModule of modules) {
     await bindImportedModuleScripts(commRouter, moduleManager, importedModule);
   }
 }
@@ -433,6 +453,37 @@ export function registerIpcHandlers(
   const moduleManager = new ModuleManager(pdvDir);
   let activeProjectDir: string | null = null;
   let activeKernelId: string | null = null;
+  const moduleHealthWarningsByAlias = new Map<string, ModuleHealthWarning[]>();
+
+  const detectPythonVersion = async (): Promise<string | undefined> => {
+    const config = readConfig(configStore);
+    try {
+      const detected = await EnvironmentDetector.detect(config.pythonPath);
+      return detected.pythonVersion;
+    } catch {
+      return undefined;
+    }
+  };
+
+  const refreshProjectModuleHealth = async (
+    projectDir: string | null
+  ): Promise<Awaited<ReturnType<typeof ProjectManager.readManifest>> | null> => {
+    moduleHealthWarningsByAlias.clear();
+    if (!projectDir) {
+      return null;
+    }
+    const manifest = await ProjectManager.readManifest(projectDir);
+    const pythonVersion = await detectPythonVersion();
+    for (const importedModule of manifest.modules) {
+      const warnings = await moduleManager.evaluateHealth(importedModule.module_id, {
+        pdvVersion: app.getVersion(),
+        pythonVersion,
+      });
+      moduleHealthWarningsByAlias.set(importedModule.alias, warnings);
+    }
+    return manifest;
+  };
+
   fs.mkdir(themesDir, { recursive: true }).catch(() => {});
   fs.mkdir(stateDir,  { recursive: true }).catch(() => {});
 
@@ -881,6 +932,12 @@ export function registerIpcHandlers(
         module_settings: manifest.module_settings ?? {},
       };
       await ProjectManager.saveManifest(activeProjectDir, updatedManifest);
+      const pythonVersion = await detectPythonVersion();
+      const warnings = await moduleManager.evaluateHealth(importedModule.module_id, {
+        pdvVersion: app.getVersion(),
+        pythonVersion,
+      });
+      moduleHealthWarningsByAlias.set(baseAlias, warnings);
       if (activeKernelId && kernelManager.getKernel(activeKernelId)) {
         await bindImportedModuleScripts(commRouter, moduleManager, importedModule);
       }
@@ -892,6 +949,7 @@ export function registerIpcHandlers(
         success: true,
         status: "imported",
         alias: baseAlias,
+        warnings,
       };
     }
   );
@@ -910,9 +968,19 @@ export function registerIpcHandlers(
       const installedById = new Map(
         installedModules.map((entry) => [entry.id, entry] as const)
       );
+      const pythonVersion = await detectPythonVersion();
       return Promise.all(
         manifest.modules.map(async (entry) => {
-          const actions = await moduleManager.resolveActionScripts(entry.module_id);
+          let actions: Awaited<ReturnType<ModuleManager["resolveActionScripts"]>>;
+          try {
+            actions = await moduleManager.resolveActionScripts(entry.module_id);
+          } catch (error) {
+            if (isMissingActionScriptError(error)) {
+              actions = [];
+            } else {
+              throw error;
+            }
+          }
           return {
             moduleId: entry.module_id,
             name: installedById.get(entry.module_id)?.name ?? entry.module_id,
@@ -925,6 +993,12 @@ export function registerIpcHandlers(
               scriptName: action.name,
             })),
             settings: manifest.module_settings[entry.alias] ?? {},
+            warnings:
+              moduleHealthWarningsByAlias.get(entry.alias) ??
+              (await moduleManager.evaluateHealth(entry.module_id, {
+                pdvVersion: app.getVersion(),
+                pythonVersion,
+              })),
           };
         })
       );
@@ -1037,6 +1111,7 @@ export function registerIpcHandlers(
     async (_event, saveDir: string, codeCells: unknown) => {
       await projectManager.save(saveDir, codeCells);
       activeProjectDir = saveDir;
+      await refreshProjectModuleHealth(activeProjectDir);
       return true;
     }
   );
@@ -1048,12 +1123,14 @@ export function registerIpcHandlers(
   ipcMain.handle(IPC.project.load, async (_event, saveDir: string) => {
     const loaded = await projectManager.load(saveDir);
     activeProjectDir = saveDir;
+    const manifest = await refreshProjectModuleHealth(activeProjectDir);
     await bindProjectModulesToTree(
       kernelManager,
       commRouter,
       moduleManager,
       activeKernelId,
-      activeProjectDir
+      activeProjectDir,
+      manifest?.modules
     );
     return loaded;
   });
@@ -1064,6 +1141,7 @@ export function registerIpcHandlers(
   // On error: throws to renderer.
   ipcMain.handle(IPC.project.new, async () => {
     activeProjectDir = null;
+    moduleHealthWarningsByAlias.clear();
     return true;
   });
 

@@ -30,7 +30,8 @@ async function writeModuleFixture(
       label: "Run",
       script_path: "scripts/run.py",
     },
-  ]
+  ],
+  extraManifestFields: Record<string, unknown> = {}
 ): Promise<void> {
   await fs.mkdir(rootDir, { recursive: true });
   const manifest = {
@@ -40,6 +41,7 @@ async function writeModuleFixture(
     version,
     description: "fixture module",
     actions,
+    ...extraManifestFields,
   };
   await fs.writeFile(
     path.join(rootDir, "pdv-module.json"),
@@ -239,5 +241,67 @@ describe("ModuleManager", () => {
         scriptPath: path.join(pdvDir, "modules", "packages", "binding_mod", "alt", "run.py"),
       },
     ]);
+  });
+
+  it("evaluates compatibility and dependency warnings", async () => {
+    const localSource = path.join(tmpDir, "health-source");
+    await writeModuleFixture(
+      localSource,
+      "health_mod",
+      "1.0.0",
+      [{ id: "run", label: "Run", script_path: "scripts/run.py" }],
+      {
+        compatibility: {
+          pdv_min: "2.0.0",
+          python_min: "3.12.0",
+        },
+        dependencies: [{ name: "numpy", version: ">=1.26" }],
+      }
+    );
+    await manager.install({
+      source: { type: "local", location: localSource },
+    });
+
+    const warnings = await manager.evaluateHealth("health_mod", {
+      pdvVersion: "1.0.0",
+      pythonVersion: "Python 3.11.6",
+    });
+
+    expect(warnings.map((entry) => entry.code)).toEqual(
+      expect.arrayContaining([
+        "pdv_version_incompatible",
+        "python_version_incompatible",
+        "dependency_unverified",
+      ])
+    );
+  });
+
+  it("reports missing action script as a warning", async () => {
+    const localSource = path.join(tmpDir, "missing-script-source");
+    await writeModuleFixture(localSource, "missing_script_mod", "1.0.0");
+    await manager.install({
+      source: { type: "local", location: localSource },
+    });
+
+    const installedScriptPath = path.join(
+      pdvDir,
+      "modules",
+      "packages",
+      "missing_script_mod",
+      "scripts",
+      "run.py"
+    );
+    await fs.rm(installedScriptPath, { force: true });
+
+    const warnings = await manager.evaluateHealth("missing_script_mod", {
+      pdvVersion: "1.0.0",
+      pythonVersion: "3.11.0",
+    });
+
+    expect(warnings).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ code: "missing_action_script" }),
+      ])
+    );
   });
 });
