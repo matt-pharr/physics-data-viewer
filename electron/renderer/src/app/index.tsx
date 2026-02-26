@@ -222,7 +222,7 @@ const App: React.FC = () => {
         }
         const loaded = await window.pdv.config.get();
         setConfig(loaded);  // theme applied by the reactive effect above
-        setCurrentProjectDir(loaded.projectRoot ?? null);
+        setCurrentProjectDir(null);
 
         if (!loaded.pythonPath) {
           setKernelStatus('idle');
@@ -419,10 +419,10 @@ const App: React.FC = () => {
     const recentProjects = normalizeRecentProjects(config?.recentProjects);
     const nextRecentProjects = [projectDir, ...recentProjects.filter((entry) => entry !== projectDir)].slice(0, 10);
     try {
-      const updated = await window.pdv.config.set({ recentProjects: nextRecentProjects, projectRoot: projectDir });
+      const updated = await window.pdv.config.set({ recentProjects: nextRecentProjects });
       setConfig(updated);
     } catch {
-      setConfig((prev) => (prev ? { ...prev, recentProjects: nextRecentProjects, projectRoot: projectDir } : prev));
+      setConfig((prev) => (prev ? { ...prev, recentProjects: nextRecentProjects } : prev));
     }
     if (window.pdv?.menu) {
       await window.pdv.menu.updateRecentProjects(nextRecentProjects);
@@ -471,7 +471,6 @@ const App: React.FC = () => {
       pythonPath: paths.pythonPath,
       juliaPath: paths.juliaPath ?? config?.juliaPath,
       editors: config?.editors,
-      projectRoot: config?.projectRoot,
       treeRoot: config?.treeRoot,
       settings: config?.settings,
     };

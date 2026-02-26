@@ -152,6 +152,47 @@ function buildEditorSpawn(
   return { file: expanded[0], args: expanded.slice(1) };
 }
 
+const TERMINAL_EDITORS = new Set([
+  "vi",
+  "vim",
+  "nvim",
+  "nano",
+  "pico",
+  "emacs",
+  "kak",
+  "hx",
+  "helix",
+]);
+
+function isTerminalEditorCommand(command: string): boolean {
+  const bin = path.basename(command).toLowerCase().replace(/\.exe$/, "");
+  return TERMINAL_EDITORS.has(bin);
+}
+
+function quoteShellArg(arg: string): string {
+  if (arg.length === 0) return "''";
+  return `'${arg.replace(/'/g, `'\\''`)}'`;
+}
+
+function resolveEditorSpawn(
+  command: string,
+  args: string[],
+): { file: string; args: string[] } {
+  if (process.platform === "darwin" && isTerminalEditorCommand(command)) {
+    const shellCommand = [command, ...args].map(quoteShellArg).join(" ");
+    return {
+      file: "osascript",
+      args: [
+        "-e",
+        `tell application "Terminal" to do script ${JSON.stringify(shellCommand)}`,
+        "-e",
+        'tell application "Terminal" to activate',
+      ],
+    };
+  }
+  return { file: command, args };
+}
+
 /**
  * Convert renderer namespace query filters to protocol payload keys.
  *
@@ -636,7 +677,8 @@ export function registerIpcHandlers(
     const isJulia = resolvedScriptPath.endsWith(".jl");
     const cmdString = isJulia ? config.juliaEditorCmd : config.pythonEditorCmd;
     const { file, args } = buildEditorSpawn(cmdString, resolvedScriptPath);
-    const child = spawn(file, args, { detached: true, stdio: "ignore" });
+    const spawnSpec = resolveEditorSpawn(file, args);
+    const child = spawn(spawnSpec.file, spawnSpec.args, { detached: true, stdio: "ignore" });
     child.unref();
     const result: ScriptOperationResult = { success: true };
     return result;

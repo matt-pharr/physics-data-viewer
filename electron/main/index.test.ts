@@ -301,6 +301,38 @@ describe("Step 5 IPC handlers", () => {
     );
   });
 
+  if (process.platform === "darwin") {
+    it("script:edit launches terminal editors through Terminal.app on macOS", async () => {
+      const { configStore } = setup();
+      (configStore.getAll as unknown as ReturnType<typeof vi.fn>).mockReturnValue({
+        showPrivateVariables: false,
+        showModuleVariables: false,
+        showCallableVariables: false,
+        pythonEditorCmd: "nvim {}",
+      });
+
+      const edit = getHandler(IPC.script.edit);
+      await edit({}, "kernel-1", "/tmp/script.py");
+
+      expect(mocks.spawn).toHaveBeenCalledWith(
+        "osascript",
+        expect.arrayContaining([
+          "-e",
+          expect.stringContaining(`tell application "Terminal" to do script`),
+        ]),
+        expect.objectContaining({
+          detached: true,
+          stdio: "ignore",
+        })
+      );
+      expect(mocks.spawn).toHaveBeenCalledWith(
+        "osascript",
+        expect.arrayContaining([expect.stringContaining("'nvim' '/tmp/script.py'")]),
+        expect.any(Object)
+      );
+    });
+  }
+
   it("config:get returns current config object", async () => {
     const { configStore } = setup();
     (configStore.getAll as unknown as ReturnType<typeof vi.fn>).mockReturnValue({
