@@ -2,7 +2,7 @@
  * config.ts — Persistent user preferences and per-workspace settings.
  *
  * Provides typed getters/setters for all PDV configuration keys and persists
- * them to `${appDataDir}/config.json`.
+ * them to `${appDataDir}/preferences.json`.
  *
  * Configuration is stored in the user's app data directory and persists
  * across sessions. Workspace-specific settings (e.g. last opened project)
@@ -148,7 +148,9 @@ function parseConfig(raw: string, filePath: string): Partial<PDVConfig> {
 /**
  * Typed persistent configuration store for Electron main-process settings.
  *
- * Values are stored in `${appDataDir}/config.json` and loaded on startup.
+ * Values are stored in `${appDataDir}/preferences.json` and loaded on startup.
+ * If a legacy `config.json` is found in the same directory and `preferences.json`
+ * does not yet exist, its contents are migrated automatically.
  */
 export class ConfigStore {
   private readonly configPath: string;
@@ -165,6 +167,14 @@ export class ConfigStore {
   constructor(private readonly appDataDir: string) {
     fs.mkdirSync(this.appDataDir, { recursive: true });
     this.configPath = path.join(this.appDataDir, "preferences.json");
+    const legacyPath = path.join(this.appDataDir, "config.json");
+    if (!fs.existsSync(this.configPath) && fs.existsSync(legacyPath)) {
+      try {
+        fs.renameSync(legacyPath, this.configPath);
+      } catch {
+        // Migration is best-effort; if it fails we simply start fresh.
+      }
+    }
     this.state = this.loadState();
   }
 

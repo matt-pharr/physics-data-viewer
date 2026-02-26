@@ -36,7 +36,7 @@ afterEach(() => {
 });
 
 describe("ConfigStore", () => {
-  it("loads defaults when config.json does not exist", () => {
+  it("loads defaults when preferences.json does not exist", () => {
     const appDataDir = makeTempDir();
     const store = new ConfigStore(appDataDir);
 
@@ -47,10 +47,10 @@ describe("ConfigStore", () => {
     });
   });
 
-  it("loads persisted values from a valid config.json", () => {
+  it("loads persisted values from a valid preferences.json", () => {
     const appDataDir = makeTempDir();
     fs.writeFileSync(
-      path.join(appDataDir, "config.json"),
+      path.join(appDataDir, "preferences.json"),
       JSON.stringify(
         {
           pythonPath: "/usr/bin/python3",
@@ -75,9 +75,9 @@ describe("ConfigStore", () => {
     });
   });
 
-  it("falls back to defaults and backs up a malformed config.json", () => {
+  it("falls back to defaults and backs up a malformed preferences.json", () => {
     const appDataDir = makeTempDir();
-    fs.writeFileSync(path.join(appDataDir, "config.json"), "{invalid-json", "utf8");
+    fs.writeFileSync(path.join(appDataDir, "preferences.json"), "{invalid-json", "utf8");
     const errorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined);
 
     const store = new ConfigStore(appDataDir);
@@ -88,14 +88,14 @@ describe("ConfigStore", () => {
     });
 
     const files = fs.readdirSync(appDataDir);
-    expect(files.some((name) => name.startsWith("config.json.corrupted-"))).toBe(true);
+    expect(files.some((name) => name.startsWith("preferences.json.corrupted-"))).toBe(true);
     expect(errorSpy).toHaveBeenCalled();
   });
 
   it("treats null optional fields as cleared values", () => {
     const appDataDir = makeTempDir();
     fs.writeFileSync(
-      path.join(appDataDir, "config.json"),
+      path.join(appDataDir, "preferences.json"),
       JSON.stringify(
         {
           pythonPath: null,
@@ -119,5 +119,19 @@ describe("ConfigStore", () => {
     expect(config.showPrivateVariables).toBe(true);
     expect(config.showModuleVariables).toBe(false);
     expect(config.showCallableVariables).toBe(true);
+  });
+
+  it("migrates a legacy config.json to preferences.json on first boot", () => {
+    const appDataDir = makeTempDir();
+    fs.writeFileSync(
+      path.join(appDataDir, "config.json"),
+      JSON.stringify({ theme: "dark", showPrivateVariables: true }, null, 2),
+      "utf8"
+    );
+
+    const store = new ConfigStore(appDataDir);
+    expect(store.getAll()).toMatchObject({ theme: "dark", showPrivateVariables: true });
+    expect(fs.existsSync(path.join(appDataDir, "preferences.json"))).toBe(true);
+    expect(fs.existsSync(path.join(appDataDir, "config.json"))).toBe(false);
   });
 });
