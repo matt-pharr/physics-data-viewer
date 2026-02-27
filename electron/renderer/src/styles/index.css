@@ -56,25 +56,121 @@ body {
   overflow: hidden;
 }
 
-/* ===== LEFT PANE (TREE) ===== */
-.left-pane {
-  width: 340px;
-  min-width: 200px;
-  max-width: 90%;
+/* ===== ACTIVITY BAR ===== */
+.activity-bar {
+  width: 48px;
+  flex-shrink: 0;
   display: flex;
   flex-direction: column;
   background-color: var(--bg-secondary);
-  border-right: none;
+  border-right: 1px solid var(--border-color);
+  padding: 4px 0;
+  user-select: none;
 }
 
-/* ===== TABS ===== */
-.pane-tabs {
+.activity-bar-top {
   display: flex;
+  flex-direction: column;
   gap: 2px;
-  padding: 8px;
+}
+
+.activity-bar-bottom {
+  margin-top: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding-bottom: 4px;
+}
+
+.activity-btn {
+  width: 40px;
+  height: 40px;
+  margin: 0 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: none;
+  border-left: 2px solid transparent;
+  border-radius: 4px;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: color 0.15s, background-color 0.15s;
+}
+
+.activity-btn:hover {
+  color: var(--text-primary);
+  background-color: var(--bg-hover);
+}
+
+.activity-btn.active {
+  color: var(--accent);
+  border-left-color: var(--accent);
+}
+
+/* ===== SIDEBARS ===== */
+.left-sidebar,
+.right-sidebar {
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  background-color: var(--bg-secondary);
+  overflow: hidden;
+}
+
+.left-sidebar {
+  min-width: 150px;
+  max-width: 70%;
+}
+
+.right-sidebar {
+  min-width: 150px;
+  max-width: 50%;
+}
+
+.sidebar-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 4px 8px 4px 12px;
   border-bottom: 1px solid var(--border-color);
   flex-shrink: 0;
+  height: 32px;
 }
+
+.sidebar-title {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-secondary);
+}
+
+.sidebar-collapse-btn {
+  background: transparent;
+  border: none;
+  color: var(--text-secondary);
+  cursor: pointer;
+  font-size: 16px;
+  padding: 2px 6px;
+  line-height: 1;
+  border-radius: 3px;
+}
+
+.sidebar-collapse-btn:hover {
+  color: var(--text-primary);
+  background-color: var(--bg-hover);
+}
+
+.sidebar-content {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+}
+
+/* ===== TABS (used by CodeCell) ===== */
 
 .tab {
   padding: 6px 12px;
@@ -122,25 +218,6 @@ body {
 }
 
 /* ===== TREE ===== */
-.tree-panels {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  min-height: 0;
-}
-
-.tree-panel {
-  flex: 1;
-  display: none;
-  min-height: 0;
-}
-
-.tree-panel.active {
-  display: flex;
-  flex-direction: column;
-  min-height: 0;
-}
-
 .tree-container {
   display: flex;
   flex-direction: column;
@@ -541,8 +618,8 @@ body {
   background-color: var(--accent);
 }
 
-/* ===== RIGHT PANE ===== */
-.right-pane {
+/* ===== CENTER COLUMN ===== */
+.center-column {
   flex: 1;
   display: flex;
   flex-direction: column;
@@ -552,17 +629,73 @@ body {
 
 /* ===== CONSOLE PANE ===== */
 .console-pane {
-  height: 100%;
-  min-height: 140px;
+  flex: 1;
+  min-height: 0;
   display: flex;
   flex-direction: column;
   background-color: var(--bg-secondary);
+  overflow: hidden;
 }
 
 .console-wrapper {
   flex: none;
   min-height: 140px;
   overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+/* ===== CONSOLE HEADER ===== */
+.console-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 4px 8px 4px 12px;
+  border-bottom: 1px solid var(--border-color);
+  flex-shrink: 0;
+  height: 32px;
+  background-color: var(--bg-secondary);
+}
+
+.console-header-title {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-secondary);
+}
+
+/* ===== COLLAPSED CONSOLE BAR ===== */
+.console-collapsed-bar {
+  height: 28px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 12px;
+  background-color: var(--bg-secondary);
+  border-top: 1px solid var(--border-color);
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-secondary);
+  cursor: pointer;
+  flex-shrink: 0;
+  user-select: none;
+}
+
+.console-collapsed-bar:hover {
+  background-color: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.console-collapsed-count {
+  padding: 1px 6px;
+  border-radius: 8px;
+  background-color: var(--bg-tertiary);
+  color: var(--accent);
+  font-size: 11px;
+  font-weight: 600;
 }
 
 .pane-header {
