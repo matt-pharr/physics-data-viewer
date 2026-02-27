@@ -1,0 +1,92 @@
+{
+  "schema_version": "1",
+  "id": "feature2_demo_module",
+  "name": "Feature 2 Demo Module",
+  "version": "1.0.0",
+  "description": "Local demo module that exercises install/import/actions/settings/warnings flows.",
+  "source": {
+    "type": "local",
+    "location": "./example-modules/feature2-demo-module"
+  },
+  "compatibility": {
+    "pdv_min": "0.0.2",
+    "pdv_max": "0.9.0",
+    "python": ">=3.10,<3.14"
+  },
+  "dependencies": [
+    {
+      "name": "numpy",
+      "version": ">=1.26"
+    },
+    {
+      "name": "pandas",
+      "version": ">=2.0",
+      "marker": "python_version >= '3.10'"
+    }
+  ],
+  "actions": [
+    {
+      "id": "seed_dataset",
+      "label": "Seed Demo Dataset",
+      "script_path": "actions/run.py"
+    },
+    {
+      "id": "summarize_dataset",
+      "label": "Summarize Demo Dataset",
+      "script_path": "analysis/run.py"
+    },
+    {
+      "id": "annotate_dataset",
+      "label": "Annotate Dataset",
+      "script_path": "actions/annotate.py"
+    }
+  ],
+  "ui": {
+    "sections": [
+      {
+        "id": "pipeline",
+        "label": "Demo Pipeline",
+        "controls": [
+          {
+            "type": "button",
+            "label": "Seed",
+            "action_id": "seed_dataset"
+          },
+          {
+            "type": "button",
+            "label": "Summarize",
+            "action_id": "summarize_dataset"
+          },
+          {
+            "type": "dropdown",
+            "label": "Annotate",
+            "action_id": "annotate_dataset",
+            "options": [
+              "checked",
+              "reviewed",
+              "approved"
+            ]
+          }
+        ]
+      }
+    ],
+    "forms": [
+      {
+        "id": "seed_form",
+        "action_id": "seed_dataset",
+        "fields": [
+          {
+            "name": "target_path",
+            "type": "string",
+            "default": "demo.dataset"
+          },
+          {
+            "name": "count",
+            "type": "int",
+            "default": 8
+          }
+        ]
+      }
+    ]
+  }
+}

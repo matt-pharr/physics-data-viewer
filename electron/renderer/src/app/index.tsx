@@ -675,7 +675,7 @@ const App: React.FC = () => {
 
   const handleSaveProject = useCallback(async (options?: { saveAs?: boolean; directory?: string }) => {
     if (kernelStatus !== 'ready') {
-      return;
+      return null;
     }
     try {
       let saveDir = options?.directory ?? null;
@@ -687,7 +687,7 @@ const App: React.FC = () => {
         }
       }
       if (!saveDir) {
-        return;
+        return null;
       }
       await window.pdv.project.save(saveDir, {
         tabs: CellTabs,
@@ -695,8 +695,10 @@ const App: React.FC = () => {
       });
       setCurrentProjectDir(saveDir);
       await rememberRecentProject(saveDir);
+      return saveDir;
     } catch (error) {
       setLastError(error instanceof Error ? error.message : String(error));
+      return null;
     }
   }, [activeCellTab, CellTabs, currentProjectDir, kernelStatus, rememberRecentProject]);
 

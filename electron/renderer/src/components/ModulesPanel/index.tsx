@@ -181,8 +181,8 @@ export const ModulesPanel: React.FC<ModulesPanelProps> = ({
   };
 
   const handleImport = async (moduleId: string): Promise<void> => {
-    if (!projectDir) {
-      setError("Open a project before importing modules.");
+    if (!projectDir && !kernelReady) {
+      setError("Start a kernel or open a project before importing modules.");
       return;
     }
     setError(null);
@@ -315,14 +315,28 @@ export const ModulesPanel: React.FC<ModulesPanelProps> = ({
         <div className="modules-library-header">
           <strong>Library</strong>
           <div className="modules-library-actions">
-            <button onClick={() => void refresh()} disabled={loading}>Refresh</button>
-            <button onClick={() => void handleInstallLocal()} disabled={loading}>Install Local</button>
-            <button onClick={() => void handleInstallGithub()} disabled={loading}>Install GitHub</button>
+            <button className="btn btn-secondary" onClick={() => void refresh()} disabled={loading}>
+              Refresh
+            </button>
+            <button
+              className="btn btn-secondary"
+              onClick={() => void handleInstallLocal()}
+              disabled={loading}
+            >
+              Install Local
+            </button>
+            <button
+              className="btn btn-secondary"
+              onClick={() => void handleInstallGithub()}
+              disabled={loading}
+            >
+              Install GitHub
+            </button>
           </div>
         </div>
         {!projectDir && (
           <div className="modules-inline-note">
-            Open a project to import installed modules.
+            Imports go to the active working project; save later to persist to a chosen folder.
           </div>
         )}
         {loading && <div className="modules-inline-note">Loading modules…</div>}
@@ -366,8 +380,9 @@ export const ModulesPanel: React.FC<ModulesPanelProps> = ({
                   </div>
                 </div>
                 <button
+                  className="btn btn-secondary"
                   onClick={() => void handleImport(entry.id)}
-                  disabled={loading || !projectDir}
+                  disabled={loading || (!projectDir && !kernelReady)}
                 >
                   {(importedCountByModuleId[entry.id] ?? 0) > 0 ? "Import Again" : "Import"}
                 </button>
@@ -450,6 +465,7 @@ export const ModulesPanel: React.FC<ModulesPanelProps> = ({
                             disabled={isRunning}
                           />
                           <button
+                            className="btn btn-primary"
                             onClick={() => void handleRunAction(action.id)}
                             disabled={isRunning || !kernelReady || !kernelId}
                           >

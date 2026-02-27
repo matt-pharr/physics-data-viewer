@@ -8,7 +8,7 @@ This document describes all features planned beyond the initial alpha release of
 |---|---|
 | **0.0.2-alpha2** | Completion of the backend refactor described in [`IMPLEMENTATION_STEPS.md`](IMPLEMENTATION_STEPS.md). Core architecture (PDV comm protocol, tree authority model, project save/load, IPC surface) is in place and all tests pass. This is the baseline from which all features below are additive. |
 | **0.1.0-beta1** | All Alpha Features (items 1–10 below) are implemented and stable. The application is suitable for active scientific use. |
-| **1.0.0** | All Beta Features (B1–B8 below, plus any added during beta) are implemented. The application is suitable for broad community distribution. |
+| **1.0.0** | All Beta Features (B1–B10 below, plus any added during beta) are implemented. The application is suitable for broad community distribution. |
 
 The alpha architecture is specified in [`ARCHITECTURE.md`](ARCHITECTURE.md). Everything in this document is additive to that foundation.
 
@@ -370,6 +370,21 @@ GitHub Copilot is exposed to third-party editors through two mechanisms:
 
 ---
 
+## B10) Module Manifest Editor
+
+### Goal
+Creating `pdv-module.json` files by hand is error-prone for users who primarily work in Python. PDV should provide a guided authoring flow so module manifests can be created and maintained without manual JSON editing.
+
+### Planned work
+- **GUI-first editor**: Add a manifest editor to the Modules tab with structured fields for name, version, description, actions, dependencies, and compatibility metadata.
+- **Schema-aware validation**: Validate required fields and value types inline before save, with clear error messages.
+- **Action editor UX**: Provide an action list/table editor for action name, script entrypoint, and parameter metadata.
+- **Round-trip editing**: Open existing `pdv-module.json`, edit in the UI, and save updated manifests from the same workflow.
+- **Preview and export**: Show the generated JSON before writing, and export canonical `pdv-module.json`.
+- **Alternative authoring path (later)**: Keep room for a TOML/YAML import or converter script, but treat this as secondary to the GUI path.
+
+---
+
 ## 12) Known Design Tensions to Resolve
 
 These are architectural decisions in the current design that are correct for 0.0.2-alpha2 but will create friction as the system grows. They should be resolved before or during the Alpha Feature implementation phase.
@@ -410,13 +425,14 @@ Begin only after 0.1.0-beta1 is stable. Suggested order:
 
 1. B3 — Tree search and filtering (cheap, high daily-use impact)
 2. B8 — Command palette (discoverability, especially for new users)
-3. B2 — Visualization panel
-4. B4 — Data ingest wizard
-5. B5 — Physical units and quantity metadata
-6. B6 — Per-node annotations
-7. B7 — Reproducible environment lockfiles
-8. B9 — GitHub Copilot integration (inline completions; Chat if API access granted)
-9. B1 — R kernel support (last; requires Julia to be complete first)
+3. B10 — Module manifest editor (reduce friction for module authoring)
+4. B2 — Visualization panel
+5. B4 — Data ingest wizard
+6. B5 — Physical units and quantity metadata
+7. B6 — Per-node annotations
+8. B7 — Reproducible environment lockfiles
+9. B9 — GitHub Copilot integration (inline completions; Chat if API access granted)
+10. B1 — R kernel support (last; requires Julia to be complete first)
 
 ---
 
@@ -446,6 +462,7 @@ PDV is ready to ship 1.0.0 when all of the following are additionally true:
 - A command palette surfaces all actions and is the primary discoverability mechanism
 - A visualization panel provides a persistent, interactive plot surface
 - A data ingest wizard supports importing CSV, HDF5, MATLAB, netCDF, and NumPy files without writing code
+- Module manifests can be authored and edited from a GUI flow without hand-writing JSON
 - Physical units are preserved through the tree for arrays and scalars where provided
 - Per-node annotations are supported and persisted in the project
 - Session environment is snapshotted at save time for reproducibility
