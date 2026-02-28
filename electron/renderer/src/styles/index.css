@@ -544,6 +544,79 @@ body {
   min-width: 0;
 }
 
+/* Step 11: status badges for installed modules */
+.modules-badge-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: 6px;
+  vertical-align: middle;
+}
+
+.modules-status-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 6px;
+  border-radius: 3px;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.modules-badge-imported {
+  background: var(--bg-tertiary);
+  color: var(--accent);
+  border: 1px solid var(--accent);
+}
+
+/* Step 11: in-panel prompt blocks for conflicts and updates */
+.modules-prompt-block {
+  margin: 8px 0;
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  background: var(--bg-secondary);
+  padding: 10px;
+}
+
+.modules-prompt-block.modules-prompt-warning {
+  border-color: var(--warning);
+}
+
+.modules-prompt-block.modules-prompt-error {
+  border-color: var(--error);
+}
+
+.modules-prompt-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin-bottom: 6px;
+}
+
+.modules-prompt-warning .modules-prompt-title {
+  color: var(--warning);
+}
+
+.modules-prompt-error .modules-prompt-title {
+  color: var(--error);
+}
+
+.modules-prompt-detail {
+  font-size: 12px;
+  color: var(--text-secondary);
+  margin-bottom: 2px;
+}
+
+.modules-prompt-caution {
+  color: var(--error);
+  margin-top: 4px;
+}
+
+.modules-prompt-actions {
+  display: flex;
+  gap: 6px;
+  margin-top: 8px;
+}
+
 /* ===== CONTEXT MENU ===== */
 .context-menu {
   min-width: 200px;

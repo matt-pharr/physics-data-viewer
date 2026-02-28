@@ -123,6 +123,7 @@ const App: React.FC = () => {
   const [autoRefreshNamespace, setAutoRefreshNamespace] = useState(false);
   const [namespaceRefreshToken, setNamespaceRefreshToken] = useState(0);
   const [treeRefreshToken, setTreeRefreshToken] = useState(0);
+  const [modulesRefreshToken, setModulesRefreshToken] = useState(0);
   const [createScriptTarget, setCreateScriptTarget] = useState<string | null>(null);
   const [showSettings, setShowSettings] = useState(false);
   const [settingsInitialTab, setSettingsInitialTab] = useState<'general' | 'shortcuts' | 'appearance' | 'runtime' | 'about'>('shortcuts');
@@ -381,8 +382,20 @@ const App: React.FC = () => {
       return;
     }
 
-    const unsubscribeTree = window.pdv.tree.onChanged(() => {
+    const unsubscribeTree = window.pdv.tree.onChanged((payload) => {
       setTreeRefreshToken((prev) => prev + 1);
+      // When a tree node is removed, check if it corresponds to an imported
+      // module alias and remove it from the modules manifest.
+      if (payload.change_type === "removed" && payload.changed_paths.length > 0) {
+        for (const removedPath of payload.changed_paths) {
+          // Module aliases are top-level tree paths (no dots).
+          if (!removedPath.includes(".")) {
+            void window.pdv.modules.removeImport(removedPath).then(() => {
+              setModulesRefreshToken((prev) => prev + 1);
+            });
+          }
+        }
+      }
     });
 
     const unsubscribeProject = window.pdv.project.onLoaded(() => {
@@ -758,6 +771,7 @@ const App: React.FC = () => {
         activeTabId: activeCellTab,
       });
       setCurrentProjectDir(saveDir);
+      setModulesRefreshToken((prev) => prev + 1);
       await rememberRecentProject(saveDir);
     } catch (error) {
       setLastError(error instanceof Error ? error.message : String(error));
@@ -779,6 +793,7 @@ const App: React.FC = () => {
       setCellTabs(normalized.tabs);
       setActiveCellTab(normalized.activeTabId);
       setCurrentProjectDir(saveDir);
+      setModulesRefreshToken((prev) => prev + 1);
       await rememberRecentProject(saveDir);
       setNamespaceRefreshToken((prev) => prev + 1);
     } catch (error) {
@@ -992,6 +1007,7 @@ const App: React.FC = () => {
                   kernelReady={kernelStatus === 'ready'}
                   onExecute={handleExecute}
                   view={rightPanel}
+                  refreshToken={modulesRefreshToken}
                 />
               </div>
             </aside>

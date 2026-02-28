@@ -178,13 +178,23 @@ export class ProjectManager {
     );
 
     // Step 3 — write project.json (only after both kernel and app state are flushed).
+    // Preserve existing module imports and settings from a prior manifest if present.
+    let existingModules: ProjectModuleImport[] = [];
+    let existingModuleSettings: Record<string, Record<string, unknown>> = {};
+    try {
+      const existing = await ProjectManager.readManifest(saveDir);
+      existingModules = existing.modules;
+      existingModuleSettings = existing.module_settings;
+    } catch {
+      // No prior manifest or unreadable — start fresh.
+    }
     const manifest: ProjectManifest = {
       schema_version: SCHEMA_VERSION,
       saved_at: new Date().toISOString(),
       pdv_version: "1.0",
       tree_checksum: checksum,
-      modules: [],
-      module_settings: {},
+      modules: existingModules,
+      module_settings: existingModuleSettings,
     };
     await fs.writeFile(
       path.join(saveDir, "project.json"),

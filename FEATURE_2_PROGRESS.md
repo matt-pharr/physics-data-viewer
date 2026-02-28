@@ -222,6 +222,69 @@ Implemented non-blocking module health validation and warning display:
   - `main/module-manager.test.ts` verifies compatibility/dependency/missing-script warnings
   - `main/index.test.ts` verifies import/list warning behavior and missing-script non-blocking flow
 
+### Step 11 — UX for duplicate imports and updates
+
+Implemented in-panel prompts, status badges, and version comparison display for duplicate/update flows:
+
+- Replaced `window.confirm()` import conflict dialog with in-panel conflict prompt:
+  - Shows existing alias and suggested alternative alias
+  - Accept button imports with suggested alias; Cancel dismisses
+  - Yellow border and warning-styled title for visibility
+- Replaced generic install status text with in-panel update/duplicate prompt:
+  - "Already up to date" — neutral styled, shows installed version
+  - "Update available" — warning-styled, shows current vs available version/revision
+  - "Incompatible update" — error-styled, shows major version change caution
+  - Dismissible via button
+- Added `currentVersion` and `currentRevision` fields to `ModuleInstallResult`:
+  - Updated `electron/main/ipc.ts` and `electron/renderer/src/types/pdv.d.ts`
+  - Updated `ModuleManager` to return current installed version info on duplicate installs
+- Enabled module import without a saved project (pre-save workflow):
+  - Import button is now always clickable (no longer disabled when no project dir exists)
+  - In-memory `pendingModuleImports` and `pendingModuleSettings` hold imports before first save
+  - `modules:importToProject`, `listImported`, `saveSettings`, `runAction` all work without `activeProjectDir`
+  - Pending imports/settings are merged into `project.json` on first `project:save`
+  - `project:load` and `project:new` clear pending state
+  - Fixed `ProjectManager.save()` to preserve existing modules from prior manifest (was always writing `modules: []`)
+- Added status badges on installed modules in the library view:
+  - "Imported" badge (teal accent border) when module is already imported in the active project
+  - Warning count badge (yellow pill) when imported module has health warnings
+- Added CSS for new UI elements:
+  - `.modules-status-badge`, `.modules-badge-imported` — status pill badges
+  - `.modules-badge-group` — badge container with gap spacing
+  - `.modules-prompt-block`, `.modules-prompt-warning`, `.modules-prompt-error` — prompt containers
+  - `.modules-prompt-title`, `.modules-prompt-detail`, `.modules-prompt-caution`, `.modules-prompt-actions` — prompt content styles
+- Updated tests in `module-manager.test.ts`:
+  - `update_available` result now asserts `currentVersion` field
+  - `incompatible_update` result now asserts `currentVersion` and candidate version
+  - `up_to_date` result now asserts `currentVersion` field
+
+### GUI Layout — Activity Bar and Collapsible Panes
+
+The renderer now uses a VS Code-style activity bar layout implemented in `electron/renderer/src/app/index.tsx`:
+
+- **Activity bar** (`.activity-bar`, 48px wide, always visible):
+  - Top section: 4 icon buttons for Tree, Namespace, Imported Modules, Module Library
+  - Bottom section: Settings gear button
+  - Active button highlighted with accent color + left border indicator
+  - Clicking active panel toggles its sidebar closed
+- **Left sidebar** (collapsible, default 340px, resizable via drag handle):
+  - Shows Tree or Namespace view based on activity bar selection
+  - `Cmd+B` keyboard shortcut toggles open/closed
+  - Width persisted to localStorage
+- **Center column** (flex: 1):
+  - Top: Console pane (scrollable, flex: 1)
+  - Bottom: Code editor (collapsible, default 260px, resizable via drag handle)
+  - `Cmd+J` keyboard shortcut toggles editor collapsed/expanded
+- **Right sidebar** (collapsible, default 280px, resizable via drag handle):
+  - Shows `ModulesPanel` with `view` prop switching between `'library'` and `'imported'`
+  - Width persisted to localStorage
+- **Status bar** (28px footer): kernel status, connection info
+- All pane states (open/closed, widths, heights) persist across sessions via localStorage
+
+The Modules panel is split across two activity bar buttons:
+- **Module Library** (`rightPanel = 'library'`): install, list, and import modules
+- **Imported Modules** (`rightPanel = 'imported'`): per-module tabs with actions, warnings, settings
+
 ## Verification
 
 - Baseline tests before changes:
@@ -256,7 +319,28 @@ Implemented non-blocking module health validation and warning display:
   - `cd electron && npm test -- --reporter=verbose` (passed)
 - Full tests after Step 10 health checks/warnings:
   - `cd electron && npm test -- --reporter=verbose` (passed)
+- Targeted tests after Step 11 UX changes:
+  - `cd electron && npm test -- --reporter=verbose main/module-manager.test.ts main/index.test.ts` (passed)
+- Full tests after Step 11:
+  - `cd electron && npm test -- --reporter=verbose` (passed, 196 tests)
+
+### Post-Step 11 fixes — Module panel refresh and tree-deletion unloading
+
+- **Modules panel now refreshes on project load/save:**
+  - Added `refreshToken` prop to `ModulesPanel`, incremented on project save, load, and tree changes
+  - Panel re-fetches installed and imported module lists whenever `refreshToken` changes
+  - Previously the panel only fetched once when `isActive` first became true
+
+- **Tree deletion unloads imported modules (`del pdv_tree["alias"]`):**
+  - Added `modules:removeImport` IPC channel, handler, preload bridge, and renderer type
+  - Handler removes the alias from disk manifest (if project is saved) or pending in-memory state
+  - App listens for `tree.onChanged` with `change_type === "removed"` and top-level paths
+  - Matching removed paths trigger `removeImport` + modules panel refresh
+  - Warning cache is cleaned up on removal
+
+- Full tests after fixes:
+  - `cd electron && npm test -- --reporter=verbose` (passed, 196 tests)
 
 ## Next
 
-- Step 11 — Implement UX for duplicate imports and update prompts/badges.
+- Step 12 — Automated testing (comprehensive test coverage across main + kernel integration).

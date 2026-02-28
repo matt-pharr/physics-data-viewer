@@ -90,6 +90,7 @@ const REGISTERED_CHANNELS: readonly string[] = [
   IPC.modules.listImported,
   IPC.modules.saveSettings,
   IPC.modules.runAction,
+  IPC.modules.removeImport,
   IPC.project.save,
   IPC.project.load,
   IPC.project.new,
@@ -454,6 +455,11 @@ export function registerIpcHandlers(
   let activeProjectDir: string | null = null;
   let activeKernelId: string | null = null;
   const moduleHealthWarningsByAlias = new Map<string, ModuleHealthWarning[]>();
+
+  // In-memory module state for imports made before the project is saved to disk.
+  // Merged into the manifest on first project:save, cleared on project:load/new.
+  let pendingModuleImports: ProjectModuleImport[] = [];
+  let pendingModuleSettings: Record<string, Record<string, unknown>> = {};
 
   const detectPythonVersion = async (): Promise<string | undefined> => {
     const config = readConfig(configStore);
@@ -887,16 +893,11 @@ export function registerIpcHandlers(
   // Handles modules:importToProject requests from the renderer.
   // Input: ModuleImportRequest.
   // Returns: project-scoped import result with alias conflict handling.
+  // Works both with a saved project (persists to disk) and without one
+  // (holds imports in memory until the next project:save).
   ipcMain.handle(
     IPC.modules.importToProject,
     async (_event, request: ModuleImportRequest): Promise<ModuleImportResult> => {
-      if (!activeProjectDir) {
-        return {
-          success: false,
-          status: "error",
-          error: "No active project to import module into",
-        };
-      }
       const installedModules = await moduleManager.listInstalled();
       const installed = installedModules.find(
         (entry) => entry.id === request.moduleId
@@ -908,8 +909,15 @@ export function registerIpcHandlers(
           error: `Installed module not found: ${request.moduleId}`,
         };
       }
-      const manifest = await ProjectManager.readManifest(activeProjectDir);
-      const existingAliases = new Set(manifest.modules.map((entry) => entry.alias));
+
+      // Build the combined alias set from disk manifest (if any) + pending in-memory imports.
+      let diskModules: ProjectModuleImport[] = [];
+      if (activeProjectDir) {
+        const manifest = await ProjectManager.readManifest(activeProjectDir);
+        diskModules = manifest.modules;
+      }
+      const allModules = [...diskModules, ...pendingModuleImports];
+      const existingAliases = new Set(allModules.map((entry) => entry.alias));
       const baseAlias = normalizeModuleAlias(request.alias ?? installed.id);
       if (existingAliases.has(baseAlias)) {
         return {
@@ -926,12 +934,21 @@ export function registerIpcHandlers(
         version: installed.version,
         revision: installed.revision,
       };
-      const updatedManifest = {
-        ...manifest,
-        modules: [...manifest.modules, importedModule],
-        module_settings: manifest.module_settings ?? {},
-      };
-      await ProjectManager.saveManifest(activeProjectDir, updatedManifest);
+
+      if (activeProjectDir) {
+        // Persist to disk immediately when a project directory exists.
+        const manifest = await ProjectManager.readManifest(activeProjectDir);
+        const updatedManifest = {
+          ...manifest,
+          modules: [...manifest.modules, importedModule],
+          module_settings: manifest.module_settings ?? {},
+        };
+        await ProjectManager.saveManifest(activeProjectDir, updatedManifest);
+      } else {
+        // No project saved yet — hold in memory until project:save.
+        pendingModuleImports.push(importedModule);
+      }
+
       const pythonVersion = await detectPythonVersion();
       const warnings = await moduleManager.evaluateHealth(importedModule.module_id, {
         pdvVersion: app.getVersion(),
@@ -956,21 +973,32 @@ export function registerIpcHandlers(
 
   // Handles modules:listImported requests from the renderer.
   // Input: none.
-  // Returns: imported modules for the active project.
+  // Returns: imported modules for the active project (disk + in-memory pending).
   ipcMain.handle(
     IPC.modules.listImported,
     async (): Promise<ImportedModuleDescriptor[]> => {
-      if (!activeProjectDir) {
+      // Combine disk-persisted imports (if project is saved) with pending in-memory imports.
+      let diskModules: ProjectModuleImport[] = [];
+      let diskSettings: Record<string, Record<string, unknown>> = {};
+      if (activeProjectDir) {
+        const manifest = await ProjectManager.readManifest(activeProjectDir);
+        diskModules = manifest.modules;
+        diskSettings = manifest.module_settings;
+      }
+      const allModules = [...diskModules, ...pendingModuleImports];
+      const allSettings = { ...diskSettings, ...pendingModuleSettings };
+
+      if (allModules.length === 0) {
         return [];
       }
-      const manifest = await ProjectManager.readManifest(activeProjectDir);
+
       const installedModules = await moduleManager.listInstalled();
       const installedById = new Map(
         installedModules.map((entry) => [entry.id, entry] as const)
       );
       const pythonVersion = await detectPythonVersion();
       return Promise.all(
-        manifest.modules.map(async (entry) => {
+        allModules.map(async (entry) => {
           let actions: Awaited<ReturnType<ModuleManager["resolveActionScripts"]>>;
           try {
             actions = await moduleManager.resolveActionScripts(entry.module_id);
@@ -992,7 +1020,7 @@ export function registerIpcHandlers(
               label: action.actionLabel,
               scriptName: action.name,
             })),
-            settings: manifest.module_settings[entry.alias] ?? {},
+            settings: allSettings[entry.alias] ?? {},
             warnings:
               moduleHealthWarningsByAlias.get(entry.alias) ??
               (await moduleManager.evaluateHealth(entry.module_id, {
@@ -1008,23 +1036,26 @@ export function registerIpcHandlers(
   // Handles modules:saveSettings requests from the renderer.
   // Input: ModuleSettingsRequest.
   // Returns: success status after persisting project module settings.
+  // Works both with a saved project (persists to disk) and without one
+  // (holds settings in memory until the next project:save).
   ipcMain.handle(
     IPC.modules.saveSettings,
     async (_event, request: ModuleSettingsRequest): Promise<ModuleSettingsResult> => {
-      if (!activeProjectDir) {
-        return {
-          success: false,
-          error: "No active project for module settings persistence",
-        };
-      }
       if (!request.values || typeof request.values !== "object" || Array.isArray(request.values)) {
         return {
           success: false,
           error: "Module settings values must be an object",
         };
       }
-      const manifest = await ProjectManager.readManifest(activeProjectDir);
-      const imported = manifest.modules.find(
+
+      // Check that the alias exists among disk imports + pending imports.
+      let diskModules: ProjectModuleImport[] = [];
+      if (activeProjectDir) {
+        const manifest = await ProjectManager.readManifest(activeProjectDir);
+        diskModules = manifest.modules;
+      }
+      const allModules = [...diskModules, ...pendingModuleImports];
+      const imported = allModules.find(
         (entry) => entry.alias === request.moduleAlias
       );
       if (!imported) {
@@ -1033,14 +1064,21 @@ export function registerIpcHandlers(
           error: `Imported module alias not found: ${request.moduleAlias}`,
         };
       }
-      const updatedManifest = {
-        ...manifest,
-        module_settings: {
-          ...manifest.module_settings,
-          [request.moduleAlias]: request.values,
-        },
-      };
-      await ProjectManager.saveManifest(activeProjectDir, updatedManifest);
+
+      if (activeProjectDir) {
+        const manifest = await ProjectManager.readManifest(activeProjectDir);
+        const updatedManifest = {
+          ...manifest,
+          module_settings: {
+            ...manifest.module_settings,
+            [request.moduleAlias]: request.values,
+          },
+        };
+        await ProjectManager.saveManifest(activeProjectDir, updatedManifest);
+      } else {
+        // Hold in memory until project:save.
+        pendingModuleSettings[request.moduleAlias] = request.values;
+      }
       return {
         success: true,
       };
@@ -1050,16 +1088,10 @@ export function registerIpcHandlers(
   // Handles modules:runAction requests from the renderer.
   // Input: ModuleActionRequest.
   // Returns: generated execution code for one imported module action.
+  // Works both with and without a saved project directory.
   ipcMain.handle(
     IPC.modules.runAction,
     async (_event, request: ModuleActionRequest): Promise<ModuleActionResult> => {
-      if (!activeProjectDir) {
-        return {
-          success: false,
-          status: "error",
-          error: "No active project for module action execution",
-        };
-      }
       if (!kernelManager.getKernel(request.kernelId)) {
         return {
           success: false,
@@ -1067,8 +1099,14 @@ export function registerIpcHandlers(
           error: `Kernel not found: ${request.kernelId}`,
         };
       }
-      const manifest = await ProjectManager.readManifest(activeProjectDir);
-      const imported = manifest.modules.find(
+      // Look up the imported module across disk + pending in-memory imports.
+      let diskModules: ProjectModuleImport[] = [];
+      if (activeProjectDir) {
+        const manifest = await ProjectManager.readManifest(activeProjectDir);
+        diskModules = manifest.modules;
+      }
+      const allModules = [...diskModules, ...pendingModuleImports];
+      const imported = allModules.find(
         (entry) => entry.alias === request.moduleAlias
       );
       if (!imported) {
@@ -1102,14 +1140,68 @@ export function registerIpcHandlers(
     }
   );
 
+  // Handles modules:removeImport requests from the renderer.
+  // Input: moduleAlias (string).
+  // Returns: success status after removing the import from project manifest or pending state.
+  ipcMain.handle(
+    IPC.modules.removeImport,
+    async (_event, moduleAlias: string): Promise<ModuleSettingsResult> => {
+      // Remove from pending in-memory imports.
+      const pendingIndex = pendingModuleImports.findIndex(
+        (entry) => entry.alias === moduleAlias
+      );
+      if (pendingIndex >= 0) {
+        pendingModuleImports.splice(pendingIndex, 1);
+        delete pendingModuleSettings[moduleAlias];
+        moduleHealthWarningsByAlias.delete(moduleAlias);
+        return { success: true };
+      }
+
+      // Remove from disk manifest if project is saved.
+      if (activeProjectDir) {
+        const manifest = await ProjectManager.readManifest(activeProjectDir);
+        const moduleIndex = manifest.modules.findIndex(
+          (entry) => entry.alias === moduleAlias
+        );
+        if (moduleIndex >= 0) {
+          manifest.modules.splice(moduleIndex, 1);
+          delete manifest.module_settings[moduleAlias];
+          await ProjectManager.saveManifest(activeProjectDir, manifest);
+          moduleHealthWarningsByAlias.delete(moduleAlias);
+          return { success: true };
+        }
+      }
+
+      return {
+        success: false,
+        error: `Imported module alias not found: ${moduleAlias}`,
+      };
+    }
+  );
+
   // Handles project:save requests from the renderer.
   // Input: saveDir (string), codeCells payload.
   // Returns: true on success.
   // On error: throws to renderer.
+  // Merges any pending in-memory module imports/settings into the saved manifest.
   ipcMain.handle(
     IPC.project.save,
     async (_event, saveDir: string, codeCells: unknown) => {
       await projectManager.save(saveDir, codeCells);
+
+      // Merge pending in-memory module imports/settings into the on-disk manifest.
+      if (pendingModuleImports.length > 0 || Object.keys(pendingModuleSettings).length > 0) {
+        const manifest = await ProjectManager.readManifest(saveDir);
+        const mergedManifest = {
+          ...manifest,
+          modules: [...manifest.modules, ...pendingModuleImports],
+          module_settings: { ...manifest.module_settings, ...pendingModuleSettings },
+        };
+        await ProjectManager.saveManifest(saveDir, mergedManifest);
+        pendingModuleImports = [];
+        pendingModuleSettings = {};
+      }
+
       activeProjectDir = saveDir;
       await refreshProjectModuleHealth(activeProjectDir);
       return true;
@@ -1123,6 +1215,8 @@ export function registerIpcHandlers(
   ipcMain.handle(IPC.project.load, async (_event, saveDir: string) => {
     const loaded = await projectManager.load(saveDir);
     activeProjectDir = saveDir;
+    pendingModuleImports = [];
+    pendingModuleSettings = {};
     const manifest = await refreshProjectModuleHealth(activeProjectDir);
     await bindProjectModulesToTree(
       kernelManager,
@@ -1141,6 +1235,8 @@ export function registerIpcHandlers(
   // On error: throws to renderer.
   ipcMain.handle(IPC.project.new, async () => {
     activeProjectDir = null;
+    pendingModuleImports = [];
+    pendingModuleSettings = {};
     moduleHealthWarningsByAlias.clear();
     return true;
   });

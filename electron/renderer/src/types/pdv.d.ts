@@ -241,6 +241,8 @@ export interface ModuleInstallResult {
   success: boolean;
   status: "installed" | "up_to_date" | "update_available" | "incompatible_update" | "not_implemented" | "error";
   module?: ModuleDescriptor;
+  currentVersion?: string;
+  currentRevision?: string;
   error?: string;
 }
 
@@ -380,6 +382,7 @@ export interface PDVApi {
     listImported(): Promise<ImportedModuleDescriptor[]>;
     saveSettings(request: ModuleSettingsRequest): Promise<ModuleSettingsResult>;
     runAction(request: ModuleActionRequest): Promise<ModuleActionResult>;
+    removeImport(moduleAlias: string): Promise<ModuleSettingsResult>;
   };
   project: {
     save(saveDir: string, codeCells: unknown): Promise<boolean>;

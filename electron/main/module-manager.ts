@@ -408,6 +408,8 @@ export class ModuleManager {
           success: true,
           status,
           module: status === "up_to_date" ? this.toDescriptor(previous) : descriptor,
+          currentVersion: previous.version,
+          currentRevision: previous.revision,
         };
       }
 
@@ -471,6 +473,8 @@ export class ModuleManager {
           success: true,
           status,
           module: status === "up_to_date" ? this.toDescriptor(previous) : descriptor,
+          currentVersion: previous.version,
+          currentRevision: previous.revision,
         };
       }
       this.upsertIndex(index, descriptor);
@@ -608,14 +612,15 @@ export class ModuleManager {
     cwd?: string
   ): Promise<{ stdout: string; stderr: string }> {
     try {
-      return await execFileAsync("git", args, cwd ? { cwd } : undefined);
+      const { stdout, stderr } = await execFileAsync("git", args, cwd ? { cwd } : undefined);
+      return { stdout: stdout.toString(), stderr: stderr.toString() };
     } catch (error) {
       const err = error as {
-        stdout?: string;
-        stderr?: string;
+        stdout?: string | Uint8Array;
+        stderr?: string | Uint8Array;
         message?: string;
       };
-      const output = [err.stdout, err.stderr, err.message]
+      const output = [err.stdout?.toString(), err.stderr?.toString(), err.message]
         .filter((value) => !!value)
         .join("\n");
       throw new Error(`git ${args.join(" ")} failed: ${output}`);

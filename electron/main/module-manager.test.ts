@@ -122,6 +122,7 @@ describe("ModuleManager", () => {
     expect(first.status).toBe("installed");
     expect(second.success).toBe(true);
     expect(second.status).toBe("up_to_date");
+    expect(second.currentVersion).toBe("2.0.0");
   });
 
   it("returns update_available for duplicate install with same major and newer version", async () => {
@@ -141,6 +142,7 @@ describe("ModuleManager", () => {
     expect(second.success).toBe(true);
     expect(second.status).toBe("update_available");
     expect(second.module?.version).toBe("1.1.0");
+    expect(second.currentVersion).toBe("1.0.0");
 
     const installed = await manager.listInstalled();
     expect(installed[0]?.version).toBe("1.0.0");
@@ -162,6 +164,8 @@ describe("ModuleManager", () => {
     expect(first.status).toBe("installed");
     expect(second.success).toBe(true);
     expect(second.status).toBe("incompatible_update");
+    expect(second.currentVersion).toBe("1.2.0");
+    expect(second.module?.version).toBe("2.0.0");
   });
 
   it("returns error for invalid manifest schema", async () => {

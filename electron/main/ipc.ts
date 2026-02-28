@@ -80,6 +80,7 @@ export const IPC = {
     listImported: "modules:listImported",
     saveSettings: "modules:saveSettings",
     runAction: "modules:runAction",
+    removeImport: "modules:removeImport",
   },
   /** Project lifecycle channels. */
   project: {
@@ -304,6 +305,10 @@ export interface ModuleInstallResult {
     | "error";
   /** Installed/updated module metadata when available. */
   module?: ModuleDescriptor;
+  /** Currently installed version when a duplicate is detected. */
+  currentVersion?: string;
+  /** Currently installed revision when a duplicate is detected. */
+  currentRevision?: string;
   /** Optional user-facing error message. */
   error?: string;
 }
@@ -736,6 +741,13 @@ export interface PDVApi {
      * @returns Action invocation result payload.
      */
     runAction(request: ModuleActionRequest): Promise<ModuleActionResult>;
+    /**
+     * Remove an imported module from the active project by alias.
+     *
+     * @param moduleAlias - The project-local alias to remove.
+     * @returns Removal result payload.
+     */
+    removeImport(moduleAlias: string): Promise<ModuleSettingsResult>;
   };
 
   /** Project save/load operations. */
