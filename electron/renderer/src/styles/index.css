@@ -391,13 +391,17 @@ body {
 .modules-library,
 .modules-imported {
   padding: 10px;
-  border-bottom: 1px solid var(--border-color);
+  border-bottom: none;
+}
+
+.modules-library {
+  flex: 1;
+  overflow: auto;
 }
 
 .modules-imported {
   flex: 1;
   overflow: auto;
-  border-bottom: none;
 }
 
 .modules-library-header,

@@ -260,9 +260,9 @@ export const ModulesPanel: React.FC<ModulesPanelProps> = ({
         <div className="modules-library-header">
           <strong>Library</strong>
           <div className="modules-library-actions">
-            <button onClick={() => void refresh()} disabled={loading}>Refresh</button>
-            <button onClick={() => void handleInstallLocal()} disabled={loading}>Install Local</button>
-            <button onClick={() => void handleInstallGithub()} disabled={loading}>Install GitHub</button>
+            <button className="btn btn-secondary" onClick={() => void refresh()} disabled={loading}>Refresh</button>
+            <button className="btn btn-secondary" onClick={() => void handleInstallLocal()} disabled={loading}>Install Local</button>
+            <button className="btn btn-secondary" onClick={() => void handleInstallGithub()} disabled={loading}>Install GitHub</button>
           </div>
         </div>
         {!projectDir && (
@@ -286,6 +286,7 @@ export const ModulesPanel: React.FC<ModulesPanelProps> = ({
                   </div>
                 </div>
                 <button
+                  className="btn btn-secondary"
                   onClick={() => void handleImport(entry.id)}
                   disabled={loading || !projectDir}
                 >
@@ -370,6 +371,7 @@ export const ModulesPanel: React.FC<ModulesPanelProps> = ({
                             disabled={isRunning}
                           />
                           <button
+                            className="btn btn-primary"
                             onClick={() => void handleRunAction(action.id)}
                             disabled={isRunning || !kernelReady || !kernelId}
                           >
