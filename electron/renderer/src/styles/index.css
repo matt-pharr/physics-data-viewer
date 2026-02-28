@@ -638,11 +638,43 @@ body {
 }
 
 .console-wrapper {
-  flex: none;
-  min-height: 140px;
+  flex: 1;
+  min-height: 0;
   overflow: hidden;
   display: flex;
   flex-direction: column;
+}
+
+/* ===== EDITOR WRAPPER (bottom, collapsible) ===== */
+.editor-wrapper {
+  flex: none;
+  min-height: 180px;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.editor-collapsed-bar {
+  height: 28px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 12px;
+  background-color: var(--bg-secondary);
+  border-top: 1px solid var(--border-color);
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-secondary);
+  cursor: pointer;
+  flex-shrink: 0;
+  user-select: none;
+}
+
+.editor-collapsed-bar:hover {
+  background-color: var(--bg-hover);
+  color: var(--text-primary);
 }
 
 /* ===== CONSOLE HEADER ===== */

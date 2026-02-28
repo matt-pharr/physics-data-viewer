@@ -84,7 +84,7 @@ const App: React.FC = () => {
   const [leftSidebarOpen, setLeftSidebarOpen] = useState(() => localStorage.getItem('pdv.layout.leftSidebarOpen') !== 'false');
   const [leftPanel, setLeftPanel] = useState<'tree' | 'namespace'>(() => (localStorage.getItem('pdv.layout.leftPanel') as 'tree' | 'namespace') || 'tree');
   const [rightSidebarOpen, setRightSidebarOpen] = useState(() => localStorage.getItem('pdv.layout.rightSidebar') !== 'false');
-  const [consoleCollapsed, setConsoleCollapsed] = useState(() => localStorage.getItem('pdv.layout.consoleCollapsed') === 'true');
+  const [editorCollapsed, setEditorCollapsed] = useState(() => localStorage.getItem('pdv.layout.editorCollapsed') === 'true');
 
   const [CellTabs, setCellTabs] = useState<CellTab[]>([{ id: 1, code: '' }]);
   const [activeCellTab, setActiveCellTab] = useState(1);
@@ -113,8 +113,8 @@ const App: React.FC = () => {
     const saved = localStorage.getItem('pdv.pane.rightWidth');
     return saved ? Number(saved) : 280;
   });
-  const [consoleHeight, setConsoleHeight] = useState(() => {
-    const saved = localStorage.getItem('pdv.pane.consoleHeight');
+  const [editorHeight, setEditorHeight] = useState(() => {
+    const saved = localStorage.getItem('pdv.pane.editorHeight');
     return saved ? Number(saved) : 260;
   });
   const dragRef = useRef<'vertical' | 'horizontal' | 'right-vertical' | null>(null);
@@ -323,12 +323,12 @@ const App: React.FC = () => {
           return next;
         });
       }
-      // Cmd+J: toggle console
+      // Cmd+J: toggle code editor
       if ((event.metaKey || event.ctrlKey) && !event.shiftKey && !event.altKey && event.key === 'j') {
         event.preventDefault();
-        setConsoleCollapsed(prev => {
+        setEditorCollapsed(prev => {
           const next = !prev;
-          localStorage.setItem('pdv.layout.consoleCollapsed', String(next));
+          localStorage.setItem('pdv.layout.editorCollapsed', String(next));
           return next;
         });
       }
@@ -411,13 +411,13 @@ const App: React.FC = () => {
       } else if (dragRef.current === 'horizontal') {
         const bounds = rightPaneRef.current?.getBoundingClientRect();
         if (!bounds) return;
-        // Console is at the bottom, so measure from the bottom of the center column
+        // Editor is at the bottom, so measure from the bottom of the center column
         const relativeY = bounds.bottom - event.clientY;
         const min = 140;
         const max = Math.max(min, bounds.height - 180);
         const next = Math.min(Math.max(relativeY, min), max);
-        setConsoleHeight(next);
-        localStorage.setItem('pdv.pane.consoleHeight', String(next));
+        setEditorHeight(next);
+        localStorage.setItem('pdv.pane.editorHeight', String(next));
       } else if (dragRef.current === 'right-vertical') {
         const viewportWidth = window.innerWidth || 1200;
         const min = 150;
@@ -907,52 +907,46 @@ const App: React.FC = () => {
           </>
         )}
 
-        {/* Center column: code editor on top, console at bottom */}
+        {/* Center column: console on top, code editor at bottom */}
         <div className="center-column" ref={rightPaneRef}>
-          <CodeCell
-            tabs={CellTabs.map((tab) => ({
-              ...tab,
-              onChange: (code: string) => handleCodeChange(tab.id, code),
-            }))}
-            activeTabId={activeCellTab}
-            disabled={kernelStatus !== 'ready'}
-            onTabChange={handleTabChange}
-            onAddTab={addCellTab}
-            onRemoveTab={handleRemoveCellTab}
-            onExecute={handleExecute}
-            onClear={handleClearCommand}
-            isExecuting={isExecuting}
-            lastError={lastError}
-            shortcuts={shortcuts}
-            monacoTheme={monacoTheme}
-            editorFontFamily={config?.settings?.fonts?.codeFont}
-            editorFontSize={config?.settings?.editor?.fontSize}
-            editorTabSize={config?.settings?.editor?.tabSize}
-            editorWordWrap={config?.settings?.editor?.wordWrap}
-          />
-          {consoleCollapsed ? (
+          <div className="console-wrapper">
+            <div className="console-header">
+              <span className="console-header-title">Console</span>
+            </div>
+            <Console logs={logs} onClear={handleClearConsole} />
+          </div>
+          {editorCollapsed ? (
             <div
-              className="console-collapsed-bar"
-              onClick={() => { setConsoleCollapsed(false); localStorage.setItem('pdv.layout.consoleCollapsed', 'false'); }}
+              className="editor-collapsed-bar"
+              onClick={() => { setEditorCollapsed(false); localStorage.setItem('pdv.layout.editorCollapsed', 'false'); }}
             >
-              <span>▲ Console</span>
-              {logs.length > 0 && <span className="console-collapsed-count">{logs.length}</span>}
+              ▲ Editor
             </div>
           ) : (
             <>
               <div className="horizontal-resizer" onMouseDown={startHorizontalDrag} />
-              <div className="console-wrapper" style={{ height: `${consoleHeight}px` }}>
-                <div className="console-header">
-                  <span className="console-header-title">Console</span>
-                  <button
-                    className="sidebar-collapse-btn"
-                    onClick={() => { setConsoleCollapsed(true); localStorage.setItem('pdv.layout.consoleCollapsed', 'true'); }}
-                    title="Collapse console"
-                  >
-                    ▼
-                  </button>
-                </div>
-                <Console logs={logs} onClear={handleClearConsole} />
+              <div className="editor-wrapper" style={{ height: `${editorHeight}px` }}>
+                <CodeCell
+                  tabs={CellTabs.map((tab) => ({
+                    ...tab,
+                    onChange: (code: string) => handleCodeChange(tab.id, code),
+                  }))}
+                  activeTabId={activeCellTab}
+                  disabled={kernelStatus !== 'ready'}
+                  onTabChange={handleTabChange}
+                  onAddTab={addCellTab}
+                  onRemoveTab={handleRemoveCellTab}
+                  onExecute={handleExecute}
+                  onClear={handleClearCommand}
+                  isExecuting={isExecuting}
+                  lastError={lastError}
+                  shortcuts={shortcuts}
+                  monacoTheme={monacoTheme}
+                  editorFontFamily={config?.settings?.fonts?.codeFont}
+                  editorFontSize={config?.settings?.editor?.fontSize}
+                  editorTabSize={config?.settings?.editor?.tabSize}
+                  editorWordWrap={config?.settings?.editor?.wordWrap}
+                />
               </div>
             </>
           )}
