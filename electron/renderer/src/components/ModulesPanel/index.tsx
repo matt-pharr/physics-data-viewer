@@ -12,6 +12,7 @@ interface ModulesPanelProps {
   kernelId: string | null;
   kernelReady: boolean;
   onExecute: (code: string) => Promise<void>;
+  view: 'library' | 'imported';
 }
 
 /**
@@ -23,6 +24,7 @@ export const ModulesPanel: React.FC<ModulesPanelProps> = ({
   kernelId,
   kernelReady,
   onExecute,
+  view,
 }) => {
   const [installed, setInstalled] = useState<ModuleDescriptor[]>([]);
   const [imported, setImported] = useState<ImportedModuleDescriptor[]>([]);
@@ -254,7 +256,7 @@ export const ModulesPanel: React.FC<ModulesPanelProps> = ({
 
   return (
     <div className="modules-panel">
-      <div className="modules-library">
+      {view === 'library' && <div className="modules-library">
         <div className="modules-library-header">
           <strong>Library</strong>
           <div className="modules-library-actions">
@@ -293,8 +295,8 @@ export const ModulesPanel: React.FC<ModulesPanelProps> = ({
             ))}
           </ul>
         )}
-      </div>
-      <div className="modules-imported">
+      </div>}
+      {view === 'imported' && <div className="modules-imported">
         <div className="modules-imported-header">
           <strong>Imported Modules</strong>
         </div>
@@ -382,7 +384,7 @@ export const ModulesPanel: React.FC<ModulesPanelProps> = ({
             )}
           </>
         )}
-      </div>
+      </div>}
     </div>
   );
 };

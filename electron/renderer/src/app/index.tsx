@@ -84,6 +84,7 @@ const App: React.FC = () => {
   const [leftSidebarOpen, setLeftSidebarOpen] = useState(() => localStorage.getItem('pdv.layout.leftSidebarOpen') !== 'false');
   const [leftPanel, setLeftPanel] = useState<'tree' | 'namespace'>(() => (localStorage.getItem('pdv.layout.leftPanel') as 'tree' | 'namespace') || 'tree');
   const [rightSidebarOpen, setRightSidebarOpen] = useState(() => localStorage.getItem('pdv.layout.rightSidebar') !== 'false');
+  const [rightPanel, setRightPanel] = useState<'library' | 'imported'>(() => (localStorage.getItem('pdv.layout.rightPanel') as 'library' | 'imported') || 'imported');
   const [editorCollapsed, setEditorCollapsed] = useState(() => localStorage.getItem('pdv.layout.editorCollapsed') === 'true');
 
   const [CellTabs, setCellTabs] = useState<CellTab[]>([{ id: 1, code: '' }]);
@@ -455,13 +456,17 @@ const App: React.FC = () => {
     dragRef.current = 'right-vertical';
   }, []);
 
-  const handleActivityBarClick = useCallback((panel: 'tree' | 'namespace' | 'modules') => {
-    if (panel === 'modules') {
-      setRightSidebarOpen(prev => {
-        const next = !prev;
-        localStorage.setItem('pdv.layout.rightSidebar', String(next));
-        return next;
-      });
+  const handleActivityBarClick = useCallback((panel: 'tree' | 'namespace' | 'library' | 'imported') => {
+    if (panel === 'library' || panel === 'imported') {
+      if (rightSidebarOpen && rightPanel === panel) {
+        setRightSidebarOpen(false);
+        localStorage.setItem('pdv.layout.rightSidebar', 'false');
+      } else {
+        setRightPanel(panel);
+        setRightSidebarOpen(true);
+        localStorage.setItem('pdv.layout.rightPanel', panel);
+        localStorage.setItem('pdv.layout.rightSidebar', 'true');
+      }
     } else {
       if (leftSidebarOpen && leftPanel === panel) {
         setLeftSidebarOpen(false);
@@ -473,7 +478,7 @@ const App: React.FC = () => {
         localStorage.setItem('pdv.layout.leftSidebarOpen', 'true');
       }
     }
-  }, [leftSidebarOpen, leftPanel]);
+  }, [leftSidebarOpen, leftPanel, rightSidebarOpen, rightPanel]);
 
   const rememberRecentProject = useCallback(async (projectDir: string) => {
     const recentProjects = normalizeRecentProjects(config?.recentProjects);
@@ -842,14 +847,26 @@ const App: React.FC = () => {
               </svg>
             </button>
             <button
-              className={`activity-btn${rightSidebarOpen ? ' active' : ''}`}
-              onClick={() => handleActivityBarClick('modules')}
+              className={`activity-btn${rightSidebarOpen && rightPanel === 'imported' ? ' active' : ''}`}
+              onClick={() => handleActivityBarClick('imported')}
               title="Modules"
             >
               <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
                 <polyline points="16,6.5 10,3.5 4,6.5 10,9.5 16,6.5" />
                 <polyline points="4,6.5 4,13.5 10,16.5 10,9.5" />
                 <polyline points="16,6.5 16,13.5 10,16.5" />
+              </svg>
+            </button>
+            <button
+              className={`activity-btn${rightSidebarOpen && rightPanel === 'library' ? ' active' : ''}`}
+              onClick={() => handleActivityBarClick('library')}
+              title="Module Library"
+            >
+              <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                <polyline points="4,11 4,16 16,16 16,11" />
+                <line x1="2" y1="11" x2="18" y2="11" />
+                <line x1="10" y1="3" x2="10" y2="9" />
+                <polyline points="7,6 10,9 13,6" />
               </svg>
             </button>
           </div>
@@ -958,7 +975,7 @@ const App: React.FC = () => {
             <div className="vertical-resizer" onMouseDown={startRightDrag} />
             <aside className="right-sidebar" style={{ width: `${rightWidth}px` }}>
               <div className="sidebar-header">
-                <span className="sidebar-title">Modules</span>
+                <span className="sidebar-title">{rightPanel === 'library' ? 'Module Library' : 'Modules'}</span>
                 <button
                   className="sidebar-collapse-btn"
                   onClick={() => { setRightSidebarOpen(false); localStorage.setItem('pdv.layout.rightSidebar', 'false'); }}
@@ -974,6 +991,7 @@ const App: React.FC = () => {
                   kernelId={currentKernelId}
                   kernelReady={kernelStatus === 'ready'}
                   onExecute={handleExecute}
+                  view={rightPanel}
                 />
               </div>
             </aside>
