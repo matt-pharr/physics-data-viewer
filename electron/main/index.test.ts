@@ -60,6 +60,7 @@ const mocks = vi.hoisted(() => {
     const err = Object.assign(new Error("ENOENT"), { code: "ENOENT" });
     throw err;
   });
+  const fsCopyFile = vi.fn(async () => undefined);
   const dialogShowOpenDialog = vi.fn();
   const moduleManagerListInstalled = vi.fn(async () => []);
   const moduleManagerInstall = vi.fn(async () => ({
@@ -96,6 +97,7 @@ const mocks = vi.hoisted(() => {
     fsStat,
     fsWriteFile,
     fsReadFile,
+    fsCopyFile,
     dialogShowOpenDialog,
     moduleManagerListInstalled,
     moduleManagerInstall,
@@ -128,6 +130,7 @@ vi.mock("fs/promises", () => ({
   stat: mocks.fsStat,
   writeFile: mocks.fsWriteFile,
   readFile: mocks.fsReadFile,
+  copyFile: mocks.fsCopyFile,
 }));
 
 vi.mock("./module-manager", () => ({
@@ -811,7 +814,7 @@ describe("Step 5 IPC handlers", () => {
       expect.objectContaining({
         parent_path: "demo-module.scripts",
         name: "run",
-        relative_path: "/tmp/demo-module/scripts/run.py",
+        relative_path: "/tmp/pdv-test/demo-module/scripts/run.py",
         reload: true,
       })
     );
@@ -1032,7 +1035,7 @@ describe("Step 5 IPC handlers", () => {
       expect.objectContaining({
         parent_path: "diagnosticA.scripts",
         name: "run",
-        relative_path: "/tmp/demo-module/scripts/run.py",
+        relative_path: "/tmp/pdv-test/diagnosticA/scripts/run.py",
         reload: true,
       })
     );

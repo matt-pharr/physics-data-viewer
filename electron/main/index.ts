@@ -294,7 +294,8 @@ function isMissingActionScriptError(error: unknown): boolean {
 async function bindImportedModuleScripts(
   commRouter: CommRouter,
   moduleManager: ModuleManager,
-  importedModule: ProjectModuleImport
+  importedModule: ProjectModuleImport,
+  workingDir: string | undefined
 ): Promise<void> {
   let scriptBindings: Awaited<ReturnType<ModuleManager["resolveActionScripts"]>>;
   try {
@@ -309,10 +310,26 @@ async function bindImportedModuleScripts(
   }
   const parentPath = `${importedModule.alias}.scripts`;
   for (const binding of scriptBindings) {
+    let registeredPath = binding.scriptPath;
+
+    // Copy the module script into the kernel working directory so that
+    // editing (press E) opens a working copy rather than the module store
+    // file under ~/.PDV.
+    if (workingDir) {
+      const destDir = path.join(
+        workingDir,
+        ...parentPath.split(".").filter(Boolean)
+      );
+      await fs.mkdir(destDir, { recursive: true });
+      const destPath = path.join(destDir, path.basename(binding.scriptPath));
+      await fs.copyFile(binding.scriptPath, destPath);
+      registeredPath = destPath;
+    }
+
     await commRouter.request(PDVMessageType.SCRIPT_REGISTER, {
       parent_path: parentPath,
       name: binding.name,
-      relative_path: binding.scriptPath,
+      relative_path: registeredPath,
       language: "python",
       reload: true,
     });
@@ -325,7 +342,8 @@ async function bindProjectModulesToTree(
   moduleManager: ModuleManager,
   activeKernelId: string | null,
   projectDir: string | null,
-  importedModules?: ProjectModuleImport[]
+  importedModules?: ProjectModuleImport[],
+  workingDir?: string
 ): Promise<void> {
   if (!activeKernelId || !projectDir) {
     return;
@@ -336,7 +354,7 @@ async function bindProjectModulesToTree(
   const modules =
     importedModules ?? (await ProjectManager.readManifest(projectDir)).modules;
   for (const importedModule of modules) {
-    await bindImportedModuleScripts(commRouter, moduleManager, importedModule);
+    await bindImportedModuleScripts(commRouter, moduleManager, importedModule, workingDir);
   }
 }
 
@@ -552,7 +570,9 @@ export function registerIpcHandlers(
       commRouter,
       moduleManager,
       activeKernelId,
-      activeProjectDir
+      activeProjectDir,
+      undefined,
+      kernelWorkingDirs.get(kernel.id)
     );
     return kernel;
   });
@@ -614,7 +634,9 @@ export function registerIpcHandlers(
         commRouter,
         moduleManager,
         activeKernelId,
-        activeProjectDir
+        activeProjectDir,
+        undefined,
+        kernelWorkingDirs.get(restarted.id)
       );
       return restarted;
     }
@@ -635,7 +657,9 @@ export function registerIpcHandlers(
       commRouter,
       moduleManager,
       activeKernelId,
-      activeProjectDir
+      activeProjectDir,
+      undefined,
+      kernelWorkingDirs.get(restarted.id)
     );
     return restarted;
   });
@@ -956,7 +980,10 @@ export function registerIpcHandlers(
       });
       moduleHealthWarningsByAlias.set(baseAlias, warnings);
       if (activeKernelId && kernelManager.getKernel(activeKernelId)) {
-        await bindImportedModuleScripts(commRouter, moduleManager, importedModule);
+        await bindImportedModuleScripts(
+          commRouter, moduleManager, importedModule,
+          kernelWorkingDirs.get(activeKernelId)
+        );
       }
       win.webContents.send(IPC.push.treeChanged, {
         changed_paths: [baseAlias],
@@ -1224,7 +1251,8 @@ export function registerIpcHandlers(
       moduleManager,
       activeKernelId,
       activeProjectDir,
-      manifest?.modules
+      manifest?.modules,
+      activeKernelId ? kernelWorkingDirs.get(activeKernelId) : undefined
     );
     return loaded;
   });

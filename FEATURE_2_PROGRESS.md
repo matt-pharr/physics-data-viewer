@@ -341,6 +341,20 @@ The Modules panel is split across two activity bar buttons:
 - Full tests after fixes:
   - `cd electron && npm test -- --reporter=verbose` (passed, 196 tests)
 
+### Module script paths — copy to working directory for editing
+
+- **Problem:** Imported module scripts were registered with their module store path (`~/.PDV/modules/packages/<id>/...`), so pressing E to edit opened the store file instead of a working copy.
+- **Fix:** `bindImportedModuleScripts()` now copies each module script file into the kernel's working directory (`<workingDir>/<alias>/scripts/<name>.py`) and registers that path with `SCRIPT_REGISTER`. This means:
+  - Pressing E opens a working copy that can be freely edited
+  - The module store remains unmodified (clean source of truth)
+  - On kernel restart, scripts are re-copied from the store
+- Updated `bindImportedModuleScripts()` signature to accept `workingDir` parameter
+- Updated `bindProjectModulesToTree()` to pass `workingDir` through
+- Updated all 5 call sites (kernel start, 2x kernel restart, project load, module import) to pass the kernel working directory
+- Updated test mocks (`fsCopyFile`) and assertions for new working-directory paths
+- Full tests after fix:
+  - `cd electron && npm test -- --reporter=verbose` (passed, 196 tests)
+
 ## Next
 
 - Step 12 — Automated testing (comprehensive test coverage across main + kernel integration).
