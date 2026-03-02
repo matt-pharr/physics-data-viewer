@@ -15,3 +15,5 @@ electron/out/
 electron/.cache/
 electron/package-lock.json
 electron/renderer/dist/
+electron/logs
+electron/.mcp.json
