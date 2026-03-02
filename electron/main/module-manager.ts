@@ -59,16 +59,37 @@ interface ModuleManifestV1 {
     version?: string;
     marker?: string;
   }>;
+  inputs?: Array<{
+    id: string;
+    label: string;
+    type?: string;
+    default?: string;
+  }>;
   actions: Array<{
     id: string;
     label: string;
     script_path: string;
+    inputs?: string[];
   }>;
 }
 
 /**
  * One script binding derived from a module manifest action list.
  */
+/**
+ * Declarative input field descriptor from a module manifest.
+ */
+export interface ModuleInputDescriptor {
+  /** Stable input identifier from manifest. */
+  id: string;
+  /** User-facing label. */
+  label: string;
+  /** Optional type hint (e.g. "int", "float", "str"). */
+  type?: string;
+  /** Optional default value as a string. */
+  default?: string;
+}
+
 export interface ModuleScriptBinding {
   /** Stable action identifier from manifest. */
   actionId: string;
@@ -78,6 +99,8 @@ export interface ModuleScriptBinding {
   name: string;
   /** Absolute path to the backing Python script file. */
   scriptPath: string;
+  /** Input IDs this action references (passed as kwargs on run). */
+  inputIds?: string[];
 }
 
 /**
@@ -251,9 +274,32 @@ export class ModuleManager {
         actionLabel: action.label,
         name: uniqueName,
         scriptPath,
+        inputIds: action.inputs,
       });
     }
     return bindings;
+  }
+
+  /**
+   * Return the declarative input descriptors for one installed module.
+   *
+   * @param moduleId - Installed module identifier.
+   * @returns Input descriptors from the manifest, or empty array.
+   */
+  async getModuleInputs(moduleId: string): Promise<ModuleInputDescriptor[]> {
+    const index = await this.readIndex();
+    const module = index.modules[moduleId];
+    if (!module) {
+      return [];
+    }
+    const moduleDir = module.installPath ?? path.join(this.packagesRoot, moduleId);
+    const manifest = await this.readAndValidateManifest(moduleDir);
+    return (manifest.inputs ?? []).map((input) => ({
+      id: input.id,
+      label: input.label,
+      type: input.type,
+      default: input.default,
+    }));
   }
 
   /**
@@ -809,6 +855,27 @@ function validateModuleManifest(
   const description = optionalString(obj, "description", manifestPath);
   const compatibility = optionalCompatibility(obj, manifestPath);
   const dependencies = optionalDependencies(obj, manifestPath);
+  // Parse optional inputs array.
+  const inputsRaw = obj.inputs;
+  let inputs: ModuleManifestV1["inputs"];
+  if (inputsRaw !== undefined) {
+    if (!Array.isArray(inputsRaw)) {
+      throw new Error(`"inputs" must be an array in ${manifestPath}`);
+    }
+    inputs = inputsRaw.map((inputValue, index) => {
+      if (!inputValue || typeof inputValue !== "object" || Array.isArray(inputValue)) {
+        throw new Error(`inputs[${index}] must be an object in ${manifestPath}`);
+      }
+      const inputObj = inputValue as Record<string, unknown>;
+      return {
+        id: requiredString(inputObj, "id", manifestPath, `inputs[${index}]`),
+        label: requiredString(inputObj, "label", manifestPath, `inputs[${index}]`),
+        type: optionalString(inputObj, "type", manifestPath),
+        default: optionalString(inputObj, "default", manifestPath),
+      };
+    });
+  }
+
   const actionsRaw = obj.actions;
   if (!Array.isArray(actionsRaw)) {
     throw new Error(`"actions" must be an array in ${manifestPath}`);
@@ -818,6 +885,14 @@ function validateModuleManifest(
       throw new Error(`actions[${index}] must be an object in ${manifestPath}`);
     }
     const actionObj = actionValue as Record<string, unknown>;
+    const actionInputsRaw = actionObj.inputs;
+    let actionInputs: string[] | undefined;
+    if (actionInputsRaw !== undefined) {
+      if (!Array.isArray(actionInputsRaw) || !actionInputsRaw.every((v) => typeof v === "string")) {
+        throw new Error(`actions[${index}].inputs must be an array of strings in ${manifestPath}`);
+      }
+      actionInputs = actionInputsRaw as string[];
+    }
     return {
       id: requiredString(actionObj, "id", manifestPath, `actions[${index}]`),
       label: requiredString(actionObj, "label", manifestPath, `actions[${index}]`),
@@ -827,6 +902,7 @@ function validateModuleManifest(
         manifestPath,
         `actions[${index}]`
       ),
+      inputs: actionInputs,
     };
   });
   return {
@@ -837,6 +913,7 @@ function validateModuleManifest(
     description,
     compatibility,
     dependencies,
+    inputs,
     actions,
   };
 }

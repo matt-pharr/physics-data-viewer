@@ -363,6 +363,20 @@ export interface ModuleImportResult {
 }
 
 /**
+ * Declarative input field descriptor surfaced to the renderer.
+ */
+export interface ModuleInputDescriptor {
+  /** Stable input identifier from module manifest. */
+  id: string;
+  /** User-facing label. */
+  label: string;
+  /** Optional type hint (e.g. "int", "float", "str"). */
+  type?: string;
+  /** Optional default value as a string. */
+  default?: string;
+}
+
+/**
  * Declarative imported-module action descriptor for renderer controls.
  */
 export interface ImportedModuleActionDescriptor {
@@ -372,6 +386,8 @@ export interface ImportedModuleActionDescriptor {
   label: string;
   /** Bound script node name under `<alias>.scripts.<scriptName>`. */
   scriptName: string;
+  /** Input IDs this action reads when run. */
+  inputIds?: string[];
 }
 
 /**
@@ -404,6 +420,8 @@ export interface ImportedModuleDescriptor {
   version: string;
   /** Optional pinned revision/hash. */
   revision?: string;
+  /** Declarative input field descriptors from module manifest. */
+  inputs: ModuleInputDescriptor[];
   /** Declarative action descriptors bound for this imported module. */
   actions: ImportedModuleActionDescriptor[];
   /** Persisted per-module UI settings from project manifest. */
@@ -442,8 +460,8 @@ export interface ModuleActionRequest {
   moduleAlias: string;
   /** Module action identifier from manifest. */
   actionId: string;
-  /** Raw Python expression(s) inserted into .run(...). e.g. "3" or "n_links=3". */
-  rawArgs?: string;
+  /** Input values keyed by input id (from the module's input fields). */
+  inputValues?: Record<string, string>;
 }
 
 /**

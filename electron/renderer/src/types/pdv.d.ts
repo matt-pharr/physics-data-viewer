@@ -271,11 +271,20 @@ export interface ModuleImportResult {
   error?: string;
 }
 
+/** Declarative input field descriptor from module manifest. */
+export interface ModuleInputDescriptor {
+  id: string;
+  label: string;
+  type?: string;
+  default?: string;
+}
+
 /** Declarative imported-module action descriptor for renderer controls. */
 export interface ImportedModuleActionDescriptor {
   id: string;
   label: string;
   scriptName: string;
+  inputIds?: string[];
 }
 
 /** Non-blocking module health warning surfaced to the renderer. */
@@ -297,6 +306,7 @@ export interface ImportedModuleDescriptor {
   alias: string;
   version: string;
   revision?: string;
+  inputs: ModuleInputDescriptor[];
   actions: ImportedModuleActionDescriptor[];
   settings: Record<string, unknown>;
   warnings: ModuleHealthWarning[];
@@ -319,8 +329,8 @@ export interface ModuleActionRequest {
   kernelId: string;
   moduleAlias: string;
   actionId: string;
-  /** Raw Python expression(s) inserted into .run(...). e.g. "3" or "n_links=3". */
-  rawArgs?: string;
+  /** Input values keyed by input id (from the module's input fields). */
+  inputValues?: Record<string, string>;
 }
 
 /** Result payload for `modules.runAction`. */

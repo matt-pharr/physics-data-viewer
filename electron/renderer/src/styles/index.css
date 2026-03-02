@@ -528,19 +528,38 @@ body {
   margin-top: 10px;
 }
 
+.modules-inputs {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 10px;
+}
+
+.modules-input-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.modules-input-label {
+  min-width: 120px;
+  font-size: 0.85em;
+  white-space: nowrap;
+}
+
+.modules-input-field {
+  flex: 1;
+  min-width: 0;
+}
+
 .modules-action-row {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 180px) auto;
+  display: flex;
   gap: 8px;
   align-items: center;
 }
 
 .modules-action-meta {
-  min-width: 0;
-}
-
-.modules-action-params {
-  width: 100%;
+  flex: 1;
   min-width: 0;
 }
 

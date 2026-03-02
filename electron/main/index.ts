@@ -1042,10 +1042,12 @@ export function registerIpcHandlers(
             alias: entry.alias,
             version: entry.version,
             revision: entry.revision,
-            actions: actions.map((action) => ({
+            inputs: await moduleManager.getModuleInputs(entry.module_id),
+          actions: actions.map((action) => ({
               id: action.actionId,
               label: action.actionLabel,
               scriptName: action.name,
+              inputIds: action.inputIds,
             })),
             settings: allSettings[entry.alias] ?? {},
             warnings:
@@ -1152,8 +1154,21 @@ export function registerIpcHandlers(
           error: `Module action not found: ${request.actionId}`,
         };
       }
-      const rawArgs = (request.rawArgs ?? "").trim();
-      const invocation = rawArgs.length > 0 ? `(${rawArgs})` : "()";
+      // Build kwargs from inputValues: { inputId: "value" } → kwarg pairs.
+      const kwargs: string[] = [];
+      if (request.inputValues) {
+        // Only include inputs that this action actually references.
+        const allowedIds = new Set(action.inputIds ?? []);
+        for (const [inputId, value] of Object.entries(request.inputValues)) {
+          if (allowedIds.size > 0 && !allowedIds.has(inputId)) continue;
+          const trimmed = value.trim();
+          if (trimmed.length > 0) {
+            kwargs.push(`${inputId}=${trimmed}`);
+          }
+        }
+      }
+
+      const invocation = kwargs.length > 0 ? `(${kwargs.join(", ")})` : "()";
       const executionCode = `pdv_tree[${JSON.stringify(
         `${request.moduleAlias}.scripts.${action.name}`
       )}].run${invocation}`;

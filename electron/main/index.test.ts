@@ -85,7 +85,11 @@ const mocks = vi.hoisted(() => {
       actionLabel: "Run",
       name: "run",
       scriptPath: "/tmp/demo-module/scripts/run.py",
+      inputIds: ["threshold"],
     },
+  ]);
+  const moduleManagerGetModuleInputs = vi.fn(async () => [
+    { id: "threshold", label: "Threshold", type: "int", default: "5" },
   ]);
   return {
     handlers,
@@ -140,6 +144,7 @@ vi.mock("./module-manager", () => ({
     checkUpdates: mocks.moduleManagerCheckUpdates,
     evaluateHealth: mocks.moduleManagerEvaluateHealth,
     resolveActionScripts: mocks.moduleManagerResolveActionScripts,
+    getModuleInputs: mocks.moduleManagerGetModuleInputs,
   })),
 }));
 
@@ -881,7 +886,8 @@ describe("Step 5 IPC handlers", () => {
         alias: "demo-module",
         version: "1.0.0",
         revision: "abc123",
-        actions: [{ id: "run-action", label: "Run", scriptName: "run" }],
+        inputs: [{ id: "threshold", label: "Threshold", type: "int", default: "5" }],
+        actions: [{ id: "run-action", label: "Run", scriptName: "run", inputIds: ["threshold"] }],
         settings: {
           "run-action": { threshold: 7 },
         },
@@ -994,7 +1000,7 @@ describe("Step 5 IPC handlers", () => {
       kernelId: kernel.id,
       moduleAlias: "demo-module",
       actionId: "run-action",
-      rawArgs: "threshold=5",
+      inputValues: { threshold: "5" },
     })) as { success: boolean; status: string; executionCode?: string };
 
     expect(result.success).toBe(true);

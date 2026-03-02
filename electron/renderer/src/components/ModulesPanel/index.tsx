@@ -52,7 +52,8 @@ export const ModulesPanel: React.FC<ModulesPanelProps> = ({
   const [error, setError] = useState<string | null>(null);
   const [lastStatus, setLastStatus] = useState<string | null>(null);
   const [runningActionKey, setRunningActionKey] = useState<string | null>(null);
-  const [actionParamsJson, setActionParamsJson] = useState<Record<string, string>>({});
+  /** Input field values keyed by `<alias>:<inputId>`. */
+  const [inputValues, setInputValues] = useState<Record<string, string>>({});
   const [persistedSettingsByAlias, setPersistedSettingsByAlias] = useState<
     Record<string, Record<string, unknown>>
   >({});
@@ -70,7 +71,7 @@ export const ModulesPanel: React.FC<ModulesPanelProps> = ({
         window.pdv.modules.listImported(),
       ]);
       const settingsByAlias: Record<string, Record<string, unknown>> = {};
-      const paramsByActionKey: Record<string, string> = {};
+      const valuesByKey: Record<string, string> = {};
       for (const moduleEntry of importedModules) {
         const settings =
           moduleEntry.settings &&
@@ -79,17 +80,30 @@ export const ModulesPanel: React.FC<ModulesPanelProps> = ({
             ? moduleEntry.settings
             : {};
         settingsByAlias[moduleEntry.alias] = settings;
-        for (const action of moduleEntry.actions) {
-          const value = settings[action.id];
-          if (value !== undefined) {
-            paramsByActionKey[`${moduleEntry.alias}:${action.id}`] = String(value);
+        // Restore persisted input values from settings.
+        for (const input of moduleEntry.inputs) {
+          const key = `${moduleEntry.alias}:${input.id}`;
+          const persisted = settings[input.id];
+          if (persisted !== undefined) {
+            valuesByKey[key] = String(persisted);
+          } else if (input.default !== undefined) {
+            valuesByKey[key] = input.default;
           }
         }
       }
       setInstalled(installedModules);
       setImported(importedModules);
       setPersistedSettingsByAlias(settingsByAlias);
-      setActionParamsJson(paramsByActionKey);
+      setInputValues((prev) => {
+        // Merge: keep user edits for keys that still exist, add new defaults.
+        const merged = { ...valuesByKey };
+        for (const [k, v] of Object.entries(prev)) {
+          if (k in merged) {
+            merged[k] = v; // keep user's in-progress edits
+          }
+        }
+        return merged;
+      });
       setActiveImportedAlias((current) => {
         if (importedModules.length === 0) return null;
         if (current && importedModules.some((entry) => entry.alias === current)) {
@@ -235,47 +249,35 @@ export const ModulesPanel: React.FC<ModulesPanelProps> = ({
     await refresh();
   };
 
-  const persistActionDraft = useCallback(
-    async (
-      moduleAlias: string,
-      actionId: string,
-      rawValue: string
-    ): Promise<void> => {
-      const nextAliasSettings = { ...(persistedSettingsByAlias[moduleAlias] ?? {}) };
-      const trimmed = rawValue.trim();
-      if (trimmed.length === 0) {
-        delete nextAliasSettings[actionId];
-      } else {
-        nextAliasSettings[actionId] = trimmed;
+  /** Persist all current input values for a module alias to settings. */
+  const persistInputValues = useCallback(
+    async (moduleAlias: string): Promise<void> => {
+      const mod = imported.find((entry) => entry.alias === moduleAlias);
+      if (!mod) return;
+      const nextSettings = { ...(persistedSettingsByAlias[moduleAlias] ?? {}) };
+      for (const input of mod.inputs) {
+        const key = `${moduleAlias}:${input.id}`;
+        const val = (inputValues[key] ?? "").trim();
+        if (val.length > 0) {
+          nextSettings[input.id] = val;
+        } else {
+          delete nextSettings[input.id];
+        }
       }
       const result = await window.pdv.modules.saveSettings({
         moduleAlias,
-        values: nextAliasSettings,
+        values: nextSettings,
       });
       if (!result.success) {
         throw new Error(result.error ?? "Failed to save module settings");
       }
       setPersistedSettingsByAlias((prev) => ({
         ...prev,
-        [moduleAlias]: nextAliasSettings,
+        [moduleAlias]: nextSettings,
       }));
     },
-    [persistedSettingsByAlias]
+    [imported, persistedSettingsByAlias, inputValues]
   );
-
-  const handlePersistActionDraft = async (
-    moduleAlias: string,
-    actionId: string
-  ): Promise<void> => {
-    const actionKey = `${moduleAlias}:${actionId}`;
-    const rawValue = actionParamsJson[actionKey] ?? "";
-    try {
-      await persistActionDraft(moduleAlias, actionId, rawValue);
-      setError(null);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
-    }
-  };
 
   const handleRunAction = async (actionId: string): Promise<void> => {
     if (!selectedImported) return;
@@ -284,16 +286,31 @@ export const ModulesPanel: React.FC<ModulesPanelProps> = ({
       return;
     }
     const actionKey = `${selectedImported.alias}:${actionId}`;
+    const action = selectedImported.actions.find((a) => a.id === actionId);
+    if (!action) return;
+
     setRunningActionKey(actionKey);
     setError(null);
     try {
-      const rawArgs = (actionParamsJson[actionKey] ?? "").trim();
-      await persistActionDraft(selectedImported.alias, actionId, rawArgs);
+      // Persist input values before running.
+      await persistInputValues(selectedImported.alias);
+
+      // Collect input values referenced by this action.
+      const actionInputValues: Record<string, string> = {};
+      const referencedIds = action.inputIds ?? [];
+      for (const inputId of referencedIds) {
+        const key = `${selectedImported.alias}:${inputId}`;
+        const val = (inputValues[key] ?? "").trim();
+        if (val.length > 0) {
+          actionInputValues[inputId] = val;
+        }
+      }
+
       const result = await window.pdv.modules.runAction({
         kernelId,
         moduleAlias: selectedImported.alias,
         actionId,
-        rawArgs: rawArgs.length > 0 ? rawArgs : undefined,
+        inputValues: Object.keys(actionInputValues).length > 0 ? actionInputValues : undefined,
       });
       if (!result.success || !result.executionCode) {
         throw new Error(result.error ?? `Failed to run action ${actionId}`);
@@ -479,6 +496,40 @@ export const ModulesPanel: React.FC<ModulesPanelProps> = ({
                     Start a ready kernel to run module actions.
                   </div>
                 )}
+
+                {/* Input fields */}
+                {selectedImported.inputs.length > 0 && (
+                  <div className="modules-inputs">
+                    {selectedImported.inputs.map((input) => {
+                      const key = `${selectedImported.alias}:${input.id}`;
+                      return (
+                        <div key={input.id} className="modules-input-row">
+                          <label className="modules-input-label" htmlFor={`input-${key}`}>
+                            {input.label}
+                          </label>
+                          <input
+                            id={`input-${key}`}
+                            className="modules-input-field"
+                            type="text"
+                            value={inputValues[key] ?? ""}
+                            onChange={(event) =>
+                              setInputValues((prev) => ({
+                                ...prev,
+                                [key]: event.target.value,
+                              }))
+                            }
+                            onBlur={() =>
+                              void persistInputValues(selectedImported.alias).catch(() => {})
+                            }
+                            placeholder={input.default ?? ""}
+                          />
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+
+                {/* Action buttons */}
                 {selectedImported.actions.length === 0 ? (
                   <div className="modules-inline-note">This module defines no actions.</div>
                 ) : (
@@ -491,25 +542,11 @@ export const ModulesPanel: React.FC<ModulesPanelProps> = ({
                           <div className="modules-action-meta">
                             <div className="modules-name">{action.label}</div>
                             <div className="modules-meta">
-                              id: {action.id} · script: {action.scriptName}
+                              {action.inputIds && action.inputIds.length > 0
+                                ? `inputs: ${action.inputIds.join(", ")}`
+                                : "no inputs"}
                             </div>
                           </div>
-                          <input
-                            className="modules-action-params"
-                            type="text"
-                            value={actionParamsJson[actionKey] ?? ""}
-                            onChange={(event) =>
-                              setActionParamsJson((prev) => ({
-                                ...prev,
-                                [actionKey]: event.target.value,
-                              }))
-                            }
-                            onBlur={() =>
-                              void handlePersistActionDraft(selectedImported.alias, action.id)
-                            }
-                            placeholder="value"
-                            disabled={isRunning}
-                          />
                           <button
                             className="btn btn-primary"
                             onClick={() => void handleRunAction(action.id)}
