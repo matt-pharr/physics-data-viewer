@@ -1024,6 +1024,7 @@ const App: React.FC = () => {
                   onAddTab={addCellTab}
                   onRemoveTab={handleRemoveCellTab}
                   onExecute={handleExecute}
+                  onInterrupt={currentKernelId ? () => { void window.pdv.kernels.interrupt(currentKernelId); } : undefined}
                   onClear={handleClearCommand}
                   isExecuting={isExecuting}
                   lastError={lastError}
