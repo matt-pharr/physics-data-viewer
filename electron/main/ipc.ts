@@ -124,6 +124,11 @@ export const IPC = {
     pickExecutable: "files:pickExecutable",
     pickDirectory: "files:pickDirectory",
   },
+  /** Window lifecycle channels (unsaved-changes flow). */
+  lifecycle: {
+    confirmClose: "lifecycle:confirmClose",
+    closeResponse: "lifecycle:closeResponse",
+  },
 } as const;
 
 // Re-export for preload and renderer use.
@@ -453,6 +458,14 @@ export interface ModuleActionResult {
   executionCode?: string;
   /** Optional user-facing error message. */
   error?: string;
+}
+
+/**
+ * Response from the renderer when the main process asks to confirm close.
+ */
+export interface ConfirmCloseResponse {
+  /** User's chosen action. */
+  action: "save" | "discard" | "cancel";
 }
 
 /**
@@ -857,6 +870,24 @@ export interface PDVApi {
      * @returns Selected directory path, or null if cancelled.
      */
     pickDirectory(): Promise<string | null>;
+  };
+
+  /** Window lifecycle (unsaved-changes flow). */
+  lifecycle: {
+    /**
+     * Subscribe to close-confirmation requests from the main process.
+     *
+     * @param callback - Invoked when the main process wants to close the window.
+     * @returns Unsubscribe function.
+     */
+    onConfirmClose(callback: () => void): () => void;
+    /**
+     * Send the user's close-confirmation decision back to the main process.
+     *
+     * @param response - The chosen action.
+     * @returns True when acknowledged.
+     */
+    respondClose(response: ConfirmCloseResponse): Promise<boolean>;
   };
 
   /** App menu integration. */

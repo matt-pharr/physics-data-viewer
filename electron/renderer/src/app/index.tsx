@@ -21,6 +21,7 @@ import { ModulesPanel } from '../components/ModulesPanel';
 import { ScriptDialog } from '../components/ScriptDialog';
 import { CreateScriptDialog } from '../components/Tree/CreateScriptDialog';
 import { SettingsDialog } from '../components/SettingsDialog';
+import { UnsavedChangesDialog } from '../components/UnsavedChangesDialog';
 import type { CellTab, Config, KernelExecuteResult, LogEntry, MenuActionPayload, TreeNodeData } from '../types';
 import { matchesShortcut, resolveShortcuts } from '../shortcuts';
 import { BUILTIN_THEMES, applyThemeColors, applyFontSettings, getMonacoTheme, resolveThemeColors } from '../themes';
@@ -131,6 +132,12 @@ const App: React.FC = () => {
   const [systemPrefersDark, setSystemPrefersDark] = useState(
     () => window.matchMedia('(prefers-color-scheme: dark)').matches,
   );
+
+  // Unsaved-changes dialog state.
+  // reason: 'close' = window/app close, 'open' = opening another project
+  const [unsavedDialogContext, setUnsavedDialogContext] = useState<
+    null | { reason: 'close' | 'open'; pendingPath?: string }
+  >(null);
 
   const shortcuts = useMemo(() => resolveShortcuts(config?.settings?.shortcuts), [config]);
 
@@ -778,7 +785,8 @@ const App: React.FC = () => {
     }
   }, [activeCellTab, CellTabs, currentProjectDir, kernelStatus, rememberRecentProject]);
 
-  const handleOpenProject = useCallback(async (directory?: string) => {
+  // Actually load a project (no confirmation — called after unsaved dialog resolves).
+  const executeOpenProject = useCallback(async (directory?: string) => {
     if (kernelStatus !== 'ready') {
       return;
     }
@@ -800,6 +808,53 @@ const App: React.FC = () => {
       setLastError(error instanceof Error ? error.message : String(error));
     }
   }, [kernelStatus, rememberRecentProject]);
+
+  // Prompt unsaved-changes dialog before opening a project.
+  const handleOpenProject = useCallback((directory?: string) => {
+    setUnsavedDialogContext({ reason: 'open', pendingPath: directory });
+  }, []);
+
+  // --- Unsaved-changes dialog action handlers ---
+
+  const handleUnsavedSave = useCallback(async () => {
+    const ctx = unsavedDialogContext;
+    setUnsavedDialogContext(null);
+    await handleSaveProject();
+    if (ctx?.reason === 'close') {
+      await window.pdv.lifecycle.respondClose({ action: 'save' });
+    } else if (ctx?.reason === 'open') {
+      await executeOpenProject(ctx.pendingPath);
+    }
+  }, [unsavedDialogContext, handleSaveProject, executeOpenProject]);
+
+  const handleUnsavedDiscard = useCallback(async () => {
+    const ctx = unsavedDialogContext;
+    setUnsavedDialogContext(null);
+    if (ctx?.reason === 'close') {
+      await window.pdv.lifecycle.respondClose({ action: 'discard' });
+    } else if (ctx?.reason === 'open') {
+      await executeOpenProject(ctx.pendingPath);
+    }
+  }, [unsavedDialogContext, executeOpenProject]);
+
+  const handleUnsavedCancel = useCallback(async () => {
+    const ctx = unsavedDialogContext;
+    setUnsavedDialogContext(null);
+    if (ctx?.reason === 'close') {
+      await window.pdv.lifecycle.respondClose({ action: 'cancel' });
+    }
+  }, [unsavedDialogContext]);
+
+  // Subscribe to main-process close-confirmation requests.
+  useEffect(() => {
+    if (!window.pdv?.lifecycle) {
+      return;
+    }
+    const unsubscribe = window.pdv.lifecycle.onConfirmClose(() => {
+      setUnsavedDialogContext({ reason: 'close' });
+    });
+    return () => unsubscribe();
+  }, []);
 
   useEffect(() => {
     if (!window.pdv?.menu) {
@@ -1015,6 +1070,14 @@ const App: React.FC = () => {
         )}
 
       </main>
+
+      {unsavedDialogContext && (
+        <UnsavedChangesDialog
+          onSave={() => void handleUnsavedSave()}
+          onDiscard={() => void handleUnsavedDiscard()}
+          onCancel={() => void handleUnsavedCancel()}
+        />
+      )}
 
       {scriptDialog && currentKernelId && (
         <ScriptDialog
