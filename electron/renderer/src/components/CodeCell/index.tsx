@@ -23,6 +23,7 @@ export interface CodeCellProps {
   onAddTab: () => void;
   onRemoveTab?: (id: number) => void;
   onExecute: (code: string) => void;
+  onInterrupt?: () => void;
   onClear: () => void;
   isExecuting: boolean;
   lastError?: string;
@@ -43,6 +44,7 @@ export const CodeCell: React.FC<CodeCellProps> = ({
   onAddTab,
   onRemoveTab,
   onExecute,
+  onInterrupt,
   onClear,
   isExecuting,
   lastError,
@@ -212,13 +214,23 @@ export const CodeCell: React.FC<CodeCellProps> = ({
         </div>
 
         <div className="pane-actions">
+          {isExecuting ? (
+            <button
+              className="btn btn-warning"
+              onClick={onInterrupt}
+              disabled={disabled || !onInterrupt}
+            >
+              Stop
+            </button>
+          ) : (
             <button
               className="btn btn-primary"
               onClick={handleExecute}
-              disabled={disabled || isExecuting || !activeTab.code.trim()}
+              disabled={disabled || !activeTab.code.trim()}
             >
-              {isExecuting ? 'Running...' : 'Execute'}
+              Execute
             </button>
+          )}
           <button className="btn btn-secondary" onClick={isEmpty ? handleClose : handleClear} disabled={disabled || isExecuting}>
             {isEmpty ? 'Close' : 'Clear'}
           </button>
