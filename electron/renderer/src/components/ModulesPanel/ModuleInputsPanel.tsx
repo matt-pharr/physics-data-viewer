@@ -62,6 +62,9 @@ export const ModuleInputsPanel: React.FC<ModuleInputsPanelProps> = ({
         .filter((value): value is string => value !== null)
     )
   );
+  const hasPythonTextInputs = tabInputs.some(
+    (input) => input.control === undefined || input.control === "text"
+  );
 
   const renderInputControl = (input: ModuleInputDescriptor): React.ReactNode => {
     const key = `${moduleAlias}:${input.id}`;
@@ -268,6 +271,11 @@ export const ModuleInputsPanel: React.FC<ModuleInputsPanelProps> = ({
 
       {tabInputs.length === 0 && (
         <div className="modules-inline-note">No visible inputs in this tab.</div>
+      )}
+      {hasPythonTextInputs && (
+        <div className="modules-inline-note">
+          Text inputs are evaluated as Python expressions; quote string literals.
+        </div>
       )}
     </div>
   );

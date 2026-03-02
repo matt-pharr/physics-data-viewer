@@ -757,9 +757,9 @@ const App: React.FC = () => {
     }
   };
 
-  const handleSaveProject = useCallback(async (options?: { saveAs?: boolean; directory?: string }) => {
+  const handleSaveProject = useCallback(async (options?: { saveAs?: boolean; directory?: string }): Promise<boolean> => {
     if (kernelStatus !== 'ready') {
-      return;
+      return false;
     }
     try {
       let saveDir = options?.directory ?? null;
@@ -771,7 +771,7 @@ const App: React.FC = () => {
         }
       }
       if (!saveDir) {
-        return;
+        return false;
       }
       await window.pdv.project.save(saveDir, {
         tabs: CellTabs,
@@ -780,8 +780,10 @@ const App: React.FC = () => {
       setCurrentProjectDir(saveDir);
       setModulesRefreshToken((prev) => prev + 1);
       await rememberRecentProject(saveDir);
+      return true;
     } catch (error) {
       setLastError(error instanceof Error ? error.message : String(error));
+      return false;
     }
   }, [activeCellTab, CellTabs, currentProjectDir, kernelStatus, rememberRecentProject]);
 
@@ -819,10 +821,10 @@ const App: React.FC = () => {
   const handleUnsavedSave = useCallback(async () => {
     const ctx = unsavedDialogContext;
     setUnsavedDialogContext(null);
-    await handleSaveProject();
+    const saved = await handleSaveProject();
     if (ctx?.reason === 'close') {
-      await window.pdv.lifecycle.respondClose({ action: 'save' });
-    } else if (ctx?.reason === 'open') {
+      await window.pdv.lifecycle.respondClose({ action: saved ? 'save' : 'cancel' });
+    } else if (ctx?.reason === 'open' && saved) {
       await executeOpenProject(ctx.pendingPath);
     }
   }, [unsavedDialogContext, handleSaveProject, executeOpenProject]);

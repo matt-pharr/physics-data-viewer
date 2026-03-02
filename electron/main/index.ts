@@ -297,7 +297,8 @@ function isMissingActionScriptError(error: unknown): boolean {
  * Convert one module input value into a Python argument expression.
  *
  * String values are treated as user-provided Python expressions for backward
- * compatibility with existing text inputs.
+ * compatibility with existing text inputs. Arbitrary unquoted strings are
+ * therefore interpreted as Python identifiers and may raise NameError.
  *
  * @param value - Raw value from module settings/UI state.
  * @returns Python expression string, or null when the value is empty.
@@ -536,6 +537,41 @@ export function registerIpcHandlers(
     return manifest;
   };
 
+  /**
+   * Read the active project manifest when a project is loaded.
+   *
+   * @returns Current active manifest, or null when no project is active.
+   */
+  const readActiveProjectManifest = async (): Promise<
+    Awaited<ReturnType<typeof ProjectManager.readManifest>> | null
+  > => {
+    if (!activeProjectDir) {
+      return null;
+    }
+    return ProjectManager.readManifest(activeProjectDir);
+  };
+
+  /**
+   * Bind active-project module scripts into one kernel working directory.
+   *
+   * @param kernelId - Kernel to bind module scripts for.
+   * @param importedModules - Optional already-loaded module imports.
+   */
+  const bindActiveProjectModules = async (
+    kernelId: string | null,
+    importedModules?: ProjectModuleImport[]
+  ): Promise<void> => {
+    await bindProjectModulesToTree(
+      kernelManager,
+      commRouter,
+      moduleManager,
+      kernelId,
+      activeProjectDir,
+      importedModules,
+      kernelId ? kernelWorkingDirs.get(kernelId) : undefined
+    );
+  };
+
   fs.mkdir(themesDir, { recursive: true }).catch(() => {});
   fs.mkdir(stateDir,  { recursive: true }).catch(() => {});
 
@@ -593,15 +629,7 @@ export function registerIpcHandlers(
     commRouter.attach(kernelManager, kernel.id);
     await initializeKernelSession(kernelManager, commRouter, projectManager, kernel.id);
     activeKernelId = kernel.id;
-    await bindProjectModulesToTree(
-      kernelManager,
-      commRouter,
-      moduleManager,
-      activeKernelId,
-      activeProjectDir,
-      undefined,
-      kernelWorkingDirs.get(kernel.id)
-    );
+    await bindActiveProjectModules(activeKernelId);
     return kernel;
   });
 
@@ -657,15 +685,7 @@ export function registerIpcHandlers(
       commRouter.attach(kernelManager, restarted.id);
       await initializeKernelSession(kernelManager, commRouter, projectManager, restarted.id);
       activeKernelId = restarted.id;
-      await bindProjectModulesToTree(
-        kernelManager,
-        commRouter,
-        moduleManager,
-        activeKernelId,
-        activeProjectDir,
-        undefined,
-        kernelWorkingDirs.get(restarted.id)
-      );
+      await bindActiveProjectModules(activeKernelId);
       return restarted;
     }
     const current = kernelManager.getKernel(kernelId);
@@ -680,15 +700,7 @@ export function registerIpcHandlers(
     commRouter.attach(kernelManager, restarted.id);
     await initializeKernelSession(kernelManager, commRouter, projectManager, restarted.id);
     activeKernelId = restarted.id;
-    await bindProjectModulesToTree(
-      kernelManager,
-      commRouter,
-      moduleManager,
-      activeKernelId,
-      activeProjectDir,
-      undefined,
-      kernelWorkingDirs.get(restarted.id)
-    );
+    await bindActiveProjectModules(activeKernelId);
     return restarted;
   });
 
@@ -963,11 +975,8 @@ export function registerIpcHandlers(
       }
 
       // Build the combined alias set from disk manifest (if any) + pending in-memory imports.
-      let diskModules: ProjectModuleImport[] = [];
-      if (activeProjectDir) {
-        const manifest = await ProjectManager.readManifest(activeProjectDir);
-        diskModules = manifest.modules;
-      }
+      const activeManifest = await readActiveProjectManifest();
+      const diskModules = activeManifest?.modules ?? [];
       const allModules = [...diskModules, ...pendingModuleImports];
       const existingAliases = new Set(allModules.map((entry) => entry.alias));
       const baseAlias = normalizeModuleAlias(request.alias ?? installed.id);
@@ -987,13 +996,12 @@ export function registerIpcHandlers(
         revision: installed.revision,
       };
 
-      if (activeProjectDir) {
+      if (activeProjectDir && activeManifest) {
         // Persist to disk immediately when a project directory exists.
-        const manifest = await ProjectManager.readManifest(activeProjectDir);
         const updatedManifest = {
-          ...manifest,
-          modules: [...manifest.modules, importedModule],
-          module_settings: manifest.module_settings ?? {},
+          ...activeManifest,
+          modules: [...activeManifest.modules, importedModule],
+          module_settings: activeManifest.module_settings ?? {},
         };
         await ProjectManager.saveManifest(activeProjectDir, updatedManifest);
       } else {
@@ -1107,11 +1115,8 @@ export function registerIpcHandlers(
       }
 
       // Check that the alias exists among disk imports + pending imports.
-      let diskModules: ProjectModuleImport[] = [];
-      if (activeProjectDir) {
-        const manifest = await ProjectManager.readManifest(activeProjectDir);
-        diskModules = manifest.modules;
-      }
+      const activeManifest = await readActiveProjectManifest();
+      const diskModules = activeManifest?.modules ?? [];
       const allModules = [...diskModules, ...pendingModuleImports];
       const imported = allModules.find(
         (entry) => entry.alias === request.moduleAlias
@@ -1123,12 +1128,11 @@ export function registerIpcHandlers(
         };
       }
 
-      if (activeProjectDir) {
-        const manifest = await ProjectManager.readManifest(activeProjectDir);
+      if (activeProjectDir && activeManifest) {
         const updatedManifest = {
-          ...manifest,
+          ...activeManifest,
           module_settings: {
-            ...manifest.module_settings,
+            ...activeManifest.module_settings,
             [request.moduleAlias]: request.values,
           },
         };
@@ -1287,15 +1291,7 @@ export function registerIpcHandlers(
     pendingModuleImports = [];
     pendingModuleSettings = {};
     const manifest = await refreshProjectModuleHealth(activeProjectDir);
-    await bindProjectModulesToTree(
-      kernelManager,
-      commRouter,
-      moduleManager,
-      activeKernelId,
-      activeProjectDir,
-      manifest?.modules,
-      activeKernelId ? kernelWorkingDirs.get(activeKernelId) : undefined
-    );
+    await bindActiveProjectModules(activeKernelId, manifest?.modules);
     return loaded;
   });
 

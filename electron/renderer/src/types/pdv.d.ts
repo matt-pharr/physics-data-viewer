@@ -353,7 +353,12 @@ export interface ModuleActionRequest {
   kernelId: string;
   moduleAlias: string;
   actionId: string;
-  /** Input values keyed by input id (from the module's input fields). */
+  /**
+   * Input values keyed by input id (from the module's input fields).
+   *
+   * Note: string values are sent as Python expression text; provide
+   * language-safe strings (quote string literals).
+   */
   inputValues?: Record<string, ModuleInputValue>;
 }
 

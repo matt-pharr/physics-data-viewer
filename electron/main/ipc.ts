@@ -506,7 +506,12 @@ export interface ModuleActionRequest {
   moduleAlias: string;
   /** Module action identifier from manifest. */
   actionId: string;
-  /** Input values keyed by input id (from the module's input fields). */
+  /**
+   * Input values keyed by input id (from the module's input fields).
+   *
+   * Note: string values are passed as Python expression text; callers should
+   * provide language-safe strings (e.g. quote string literals).
+   */
   inputValues?: Record<string, ModuleInputValue>;
 }
 
