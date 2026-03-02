@@ -1152,10 +1152,8 @@ export function registerIpcHandlers(
           error: `Module action not found: ${request.actionId}`,
         };
       }
-      const args = Object.entries(request.params ?? {})
-        .map(([key, value]) => `${key}=${JSON.stringify(value)}`)
-        .join(", ");
-      const invocation = args.length > 0 ? `(${args})` : "()";
+      const rawArgs = (request.rawArgs ?? "").trim();
+      const invocation = rawArgs.length > 0 ? `(${rawArgs})` : "()";
       const executionCode = `pdv_tree[${JSON.stringify(
         `${request.moduleAlias}.scripts.${action.name}`
       )}].run${invocation}`;

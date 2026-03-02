@@ -994,7 +994,7 @@ describe("Step 5 IPC handlers", () => {
       kernelId: kernel.id,
       moduleAlias: "demo-module",
       actionId: "run-action",
-      params: { threshold: 5 },
+      rawArgs: "threshold=5",
     })) as { success: boolean; status: string; executionCode?: string };
 
     expect(result.success).toBe(true);

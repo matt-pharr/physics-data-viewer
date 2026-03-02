@@ -319,7 +319,8 @@ export interface ModuleActionRequest {
   kernelId: string;
   moduleAlias: string;
   actionId: string;
-  params?: Record<string, unknown>;
+  /** Raw Python expression(s) inserted into .run(...). e.g. "3" or "n_links=3". */
+  rawArgs?: string;
 }
 
 /** Result payload for `modules.runAction`. */

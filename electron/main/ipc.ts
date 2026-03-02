@@ -442,8 +442,8 @@ export interface ModuleActionRequest {
   moduleAlias: string;
   /** Module action identifier from manifest. */
   actionId: string;
-  /** Optional action parameters provided by the user/UI. */
-  params?: Record<string, unknown>;
+  /** Raw Python expression(s) inserted into .run(...). e.g. "3" or "n_links=3". */
+  rawArgs?: string;
 }
 
 /**
