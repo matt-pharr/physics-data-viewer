@@ -908,6 +908,47 @@ describe("Step 5 IPC handlers", () => {
     ]);
   });
 
+  it("modules:listImported includes action tab metadata when provided", async () => {
+    setup();
+    (mocks.moduleManagerResolveActionScripts as unknown as ReturnType<typeof vi.fn>).mockResolvedValueOnce([
+      {
+        actionId: "run-action",
+        actionLabel: "Run",
+        name: "run",
+        scriptPath: "/tmp/demo-module/scripts/run.py",
+        inputIds: ["threshold"],
+        actionTab: "Run",
+      },
+    ]);
+    mocks.fsReadFile.mockResolvedValue(
+      JSON.stringify({
+        schema_version: "1.1",
+        saved_at: "2026-01-01T00:00:00.000Z",
+        pdv_version: "1.0",
+        tree_checksum: "",
+        modules: [
+          {
+            module_id: "demo-module",
+            alias: "demo-module",
+            version: "1.0.0",
+          },
+        ],
+        module_settings: {},
+      })
+    );
+    const projectLoad = getHandler(IPC.project.load);
+    await projectLoad({}, "/tmp/project");
+
+    const listImported = getHandler(IPC.modules.listImported);
+    const result = (await listImported({})) as Array<{
+      actions: Array<{ id: string; label: string; scriptName: string; inputIds?: string[]; tab?: string }>;
+    }>;
+
+    expect(result[0]?.actions).toEqual([
+      { id: "run-action", label: "Run", scriptName: "run", inputIds: ["threshold"], tab: "Run" },
+    ]);
+  });
+
   it("modules:listImported surfaces missing-script warnings without throwing", async () => {
     setup();
     (mocks.moduleManagerEvaluateHealth as unknown as ReturnType<typeof vi.fn>).mockResolvedValueOnce([

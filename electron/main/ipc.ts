@@ -432,6 +432,8 @@ export interface ImportedModuleActionDescriptor {
   scriptName: string;
   /** Input IDs this action reads when run. */
   inputIds?: string[];
+  /** Optional module-internal tab where this action should appear. */
+  tab?: string;
 }
 
 /**

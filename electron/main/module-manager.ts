@@ -85,12 +85,10 @@ interface ModuleManifestV1 {
     label: string;
     script_path: string;
     inputs?: string[];
+    tab?: string;
   }>;
 }
 
-/**
- * One script binding derived from a module manifest action list.
- */
 /**
  * Declarative input field descriptor from a module manifest.
  */
@@ -126,6 +124,9 @@ export interface ModuleInputDescriptor {
   fileMode?: "file" | "directory";
 }
 
+/**
+ * One canonical script binding derived from a module action descriptor.
+ */
 export interface ModuleScriptBinding {
   /** Stable action identifier from manifest. */
   actionId: string;
@@ -137,6 +138,8 @@ export interface ModuleScriptBinding {
   scriptPath: string;
   /** Input IDs this action references (passed as kwargs on run). */
   inputIds?: string[];
+  /** Optional module-internal tab where this action should appear. */
+  actionTab?: string;
 }
 
 /**
@@ -311,6 +314,7 @@ export class ModuleManager {
         name: uniqueName,
         scriptPath,
         inputIds: action.inputs,
+        ...(action.tab ? { actionTab: action.tab } : {}),
       });
     }
     return bindings;
@@ -971,6 +975,7 @@ function validateModuleManifest(
         `actions[${index}]`
       ),
       inputs: actionInputs,
+      tab: optionalString(actionObj, "tab", manifestPath, `actions[${index}]`),
     };
   });
   return {

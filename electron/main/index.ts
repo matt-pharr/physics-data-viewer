@@ -1071,11 +1071,12 @@ export function registerIpcHandlers(
             version: entry.version,
             revision: entry.revision,
             inputs: await moduleManager.getModuleInputs(entry.module_id),
-          actions: actions.map((action) => ({
+            actions: actions.map((action) => ({
               id: action.actionId,
               label: action.actionLabel,
               scriptName: action.name,
               inputIds: action.inputIds,
+              ...(action.actionTab ? { tab: action.actionTab } : {}),
             })),
             settings: allSettings[entry.alias] ?? {},
             warnings:

@@ -88,6 +88,8 @@ export async function createWindow(
   });
 
   // Renderer responds with user's decision via invoke.
+  // Guard against duplicate registration if the window is recreated.
+  ipcMain.removeHandler(IPC.lifecycle.closeResponse);
   ipcMain.handle(IPC.lifecycle.closeResponse, (_event, response: ConfirmCloseResponse) => {
     if (response.action === "cancel") {
       // User cancelled — reset quitting flag so Cmd+Q works again.
@@ -98,6 +100,9 @@ export async function createWindow(
     closeConfirmed = true;
     win.close();
     return true;
+  });
+  win.on("closed", () => {
+    ipcMain.removeHandler(IPC.lifecycle.closeResponse);
   });
 
   const rendererIndexPath = path.join(

@@ -308,6 +308,7 @@ export interface ImportedModuleActionDescriptor {
   label: string;
   scriptName: string;
   inputIds?: string[];
+  tab?: string;
 }
 
 /** Non-blocking module health warning surfaced to the renderer. */

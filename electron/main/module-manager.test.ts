@@ -24,7 +24,7 @@ async function writeModuleFixture(
   rootDir: string,
   moduleId: string,
   version = "1.0.0",
-  actions: Array<{ id: string; label: string; script_path: string }> = [
+  actions: Array<{ id: string; label: string; script_path: string; tab?: string }> = [
     {
       id: "run",
       label: "Run",
@@ -222,7 +222,7 @@ describe("ModuleManager", () => {
   it("resolves canonical script bindings from manifest actions", async () => {
     const localSource = path.join(tmpDir, "binding-source");
     await writeModuleFixture(localSource, "binding_mod", "1.0.0", [
-      { id: "run-a", label: "Run A", script_path: "scripts/run.py" },
+      { id: "run-a", label: "Run A", script_path: "scripts/run.py", tab: "General" },
       { id: "run-b", label: "Run B", script_path: "alt/run.py" },
     ]);
 
@@ -237,6 +237,7 @@ describe("ModuleManager", () => {
         actionLabel: "Run A",
         name: "run",
         scriptPath: path.join(pdvDir, "modules", "packages", "binding_mod", "scripts", "run.py"),
+        actionTab: "General",
       },
       {
         actionId: "run-b",
