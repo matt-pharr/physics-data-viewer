@@ -107,6 +107,7 @@ const api: PDVApi = {
   },
   files: {
     pickExecutable: () => ipcRenderer.invoke(IPC.files.pickExecutable),
+    pickFile: () => ipcRenderer.invoke(IPC.files.pickFile),
     pickDirectory: () => ipcRenderer.invoke(IPC.files.pickDirectory),
   },
   lifecycle: {

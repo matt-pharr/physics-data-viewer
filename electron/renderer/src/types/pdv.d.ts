@@ -271,12 +271,35 @@ export interface ModuleImportResult {
   error?: string;
 }
 
+export type ModuleInputValue = string | number | boolean;
+
+export interface ModuleInputOptionDescriptor {
+  label: string;
+  value: ModuleInputValue;
+}
+
+export interface ModuleInputVisibilityRule {
+  inputId: string;
+  equals: ModuleInputValue;
+}
+
 /** Declarative input field descriptor from module manifest. */
 export interface ModuleInputDescriptor {
   id: string;
   label: string;
   type?: string;
-  default?: string;
+  control?: "text" | "dropdown" | "slider" | "checkbox" | "file";
+  default?: ModuleInputValue;
+  options?: ModuleInputOptionDescriptor[];
+  min?: number;
+  max?: number;
+  step?: number;
+  tab?: string;
+  section?: string;
+  sectionCollapsed?: boolean;
+  tooltip?: string;
+  visibleIf?: ModuleInputVisibilityRule;
+  fileMode?: "file" | "directory";
 }
 
 /** Declarative imported-module action descriptor for renderer controls. */
@@ -330,7 +353,7 @@ export interface ModuleActionRequest {
   moduleAlias: string;
   actionId: string;
   /** Input values keyed by input id (from the module's input fields). */
-  inputValues?: Record<string, string>;
+  inputValues?: Record<string, ModuleInputValue>;
 }
 
 /** Result payload for `modules.runAction`. */
@@ -418,6 +441,7 @@ export interface PDVApi {
   };
   files: {
     pickExecutable(): Promise<string | null>;
+    pickFile(): Promise<string | null>;
     pickDirectory(): Promise<string | null>;
   };
   lifecycle: {

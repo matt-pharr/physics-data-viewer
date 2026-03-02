@@ -26,6 +26,7 @@ import type {
   ModuleHealthWarning,
   ModuleInstallRequest,
   ModuleInstallResult,
+  ModuleInputValue,
   ModuleSourceReference,
   ModuleUpdateResult,
 } from "./ipc";
@@ -63,7 +64,21 @@ interface ModuleManifestV1 {
     id: string;
     label: string;
     type?: string;
-    default?: string;
+    control?: "text" | "dropdown" | "slider" | "checkbox" | "file";
+    default?: ModuleInputValue;
+    options?: Array<{ label: string; value: ModuleInputValue }>;
+    min?: number;
+    max?: number;
+    step?: number;
+    tab?: string;
+    section?: string;
+    section_collapsed?: boolean;
+    tooltip?: string;
+    visible_if?: {
+      input_id: string;
+      equals: ModuleInputValue;
+    };
+    file_mode?: "file" | "directory";
   }>;
   actions: Array<{
     id: string;
@@ -84,10 +99,31 @@ export interface ModuleInputDescriptor {
   id: string;
   /** User-facing label. */
   label: string;
-  /** Optional type hint (e.g. "int", "float", "str"). */
+  /** Optional data type hint (e.g. "int", "float", "str"). */
   type?: string;
-  /** Optional default value as a string. */
-  default?: string;
+  /** UI control type rendered by the modules panel. */
+  control?: "text" | "dropdown" | "slider" | "checkbox" | "file";
+  /** Optional default value/state. */
+  default?: ModuleInputValue;
+  /** Optional dropdown options for `control: "dropdown"`. */
+  options?: Array<{ label: string; value: ModuleInputValue }>;
+  /** Optional slider metadata. */
+  min?: number;
+  max?: number;
+  step?: number;
+  /** Grouping metadata for module-internal tab/section layout. */
+  tab?: string;
+  section?: string;
+  sectionCollapsed?: boolean;
+  /** Optional hover tooltip. */
+  tooltip?: string;
+  /** Optional conditional visibility rule. */
+  visibleIf?: {
+    inputId: string;
+    equals: ModuleInputValue;
+  };
+  /** Optional file picker mode for `control: "file"`. */
+  fileMode?: "file" | "directory";
 }
 
 export interface ModuleScriptBinding {
@@ -298,7 +334,23 @@ export class ModuleManager {
       id: input.id,
       label: input.label,
       type: input.type,
+      control: input.control,
       default: input.default,
+      options: input.options,
+      min: input.min,
+      max: input.max,
+      step: input.step,
+      tab: input.tab,
+      section: input.section,
+      sectionCollapsed: input.section_collapsed,
+      tooltip: input.tooltip,
+      visibleIf: input.visible_if
+        ? {
+            inputId: input.visible_if.input_id,
+            equals: input.visible_if.equals,
+          }
+        : undefined,
+      fileMode: input.file_mode,
     }));
   }
 
@@ -870,8 +922,24 @@ function validateModuleManifest(
       return {
         id: requiredString(inputObj, "id", manifestPath, `inputs[${index}]`),
         label: requiredString(inputObj, "label", manifestPath, `inputs[${index}]`),
-        type: optionalString(inputObj, "type", manifestPath),
-        default: optionalString(inputObj, "default", manifestPath),
+        type: optionalString(inputObj, "type", manifestPath, `inputs[${index}]`),
+        control: optionalInputControl(inputObj, manifestPath, `inputs[${index}]`),
+        default: optionalPrimitive(inputObj, "default", manifestPath, `inputs[${index}]`),
+        options: optionalInputOptions(inputObj, manifestPath, `inputs[${index}]`),
+        min: optionalNumber(inputObj, "min", manifestPath, `inputs[${index}]`),
+        max: optionalNumber(inputObj, "max", manifestPath, `inputs[${index}]`),
+        step: optionalNumber(inputObj, "step", manifestPath, `inputs[${index}]`),
+        tab: optionalString(inputObj, "tab", manifestPath, `inputs[${index}]`),
+        section: optionalString(inputObj, "section", manifestPath, `inputs[${index}]`),
+        section_collapsed: optionalBoolean(
+          inputObj,
+          "section_collapsed",
+          manifestPath,
+          `inputs[${index}]`
+        ),
+        tooltip: optionalString(inputObj, "tooltip", manifestPath, `inputs[${index}]`),
+        visible_if: optionalVisibilityRule(inputObj, manifestPath, `inputs[${index}]`),
+        file_mode: optionalFileMode(inputObj, manifestPath, `inputs[${index}]`),
       };
     });
   }
@@ -954,14 +1022,213 @@ function requiredString(
 function optionalString(
   obj: Record<string, unknown>,
   key: string,
-  filePath: string
+  filePath: string,
+  prefix?: string
 ): string | undefined {
   const raw = obj[key];
   if (raw === undefined) return undefined;
+  const display = prefix ? `${prefix}.${key}` : key;
   if (typeof raw !== "string") {
-    throw new Error(`"${key}" must be a string in ${filePath}`);
+    throw new Error(`"${display}" must be a string in ${filePath}`);
   }
   return raw;
+}
+
+/**
+ * Read one optional primitive field from an object.
+ *
+ * @param obj - Source object.
+ * @param key - Optional field key.
+ * @param filePath - File path for diagnostics.
+ * @param prefix - Optional parent field prefix.
+ * @returns Primitive value when present, otherwise undefined.
+ * @throws {Error} When present but invalid.
+ */
+function optionalPrimitive(
+  obj: Record<string, unknown>,
+  key: string,
+  filePath: string,
+  prefix?: string
+): ModuleInputValue | undefined {
+  const raw = obj[key];
+  if (raw === undefined) return undefined;
+  const display = prefix ? `${prefix}.${key}` : key;
+  if (typeof raw === "string" || typeof raw === "number" || typeof raw === "boolean") {
+    return raw;
+  }
+  throw new Error(`"${display}" must be a string, number, or boolean in ${filePath}`);
+}
+
+/**
+ * Read one optional numeric field from an object.
+ *
+ * @param obj - Source object.
+ * @param key - Optional field key.
+ * @param filePath - File path for diagnostics.
+ * @param prefix - Optional parent field prefix.
+ * @returns Number value when present, otherwise undefined.
+ * @throws {Error} When present but invalid.
+ */
+function optionalNumber(
+  obj: Record<string, unknown>,
+  key: string,
+  filePath: string,
+  prefix?: string
+): number | undefined {
+  const raw = obj[key];
+  if (raw === undefined) return undefined;
+  const display = prefix ? `${prefix}.${key}` : key;
+  if (typeof raw !== "number" || Number.isNaN(raw)) {
+    throw new Error(`"${display}" must be a valid number in ${filePath}`);
+  }
+  return raw;
+}
+
+/**
+ * Read one optional boolean field from an object.
+ *
+ * @param obj - Source object.
+ * @param key - Optional field key.
+ * @param filePath - File path for diagnostics.
+ * @param prefix - Optional parent field prefix.
+ * @returns Boolean value when present, otherwise undefined.
+ * @throws {Error} When present but invalid.
+ */
+function optionalBoolean(
+  obj: Record<string, unknown>,
+  key: string,
+  filePath: string,
+  prefix?: string
+): boolean | undefined {
+  const raw = obj[key];
+  if (raw === undefined) return undefined;
+  const display = prefix ? `${prefix}.${key}` : key;
+  if (typeof raw !== "boolean") {
+    throw new Error(`"${display}" must be a boolean in ${filePath}`);
+  }
+  return raw;
+}
+
+/**
+ * Parse optional module input control type.
+ *
+ * @param obj - Source input object.
+ * @param filePath - File path for diagnostics.
+ * @param prefix - Optional parent field prefix.
+ * @returns Control type or undefined.
+ * @throws {Error} When present but unsupported.
+ */
+function optionalInputControl(
+  obj: Record<string, unknown>,
+  filePath: string,
+  prefix?: string
+): "text" | "dropdown" | "slider" | "checkbox" | "file" | undefined {
+  const value = optionalString(obj, "control", filePath, prefix);
+  if (value === undefined) return undefined;
+  if (
+    value === "text" ||
+    value === "dropdown" ||
+    value === "slider" ||
+    value === "checkbox" ||
+    value === "file"
+  ) {
+    return value;
+  }
+  const display = prefix ? `${prefix}.control` : "control";
+  throw new Error(
+    `"${display}" must be one of "text", "dropdown", "slider", "checkbox", or "file" in ${filePath}`
+  );
+}
+
+/**
+ * Parse optional module input file picker mode.
+ *
+ * @param obj - Source input object.
+ * @param filePath - File path for diagnostics.
+ * @param prefix - Optional parent field prefix.
+ * @returns Picker mode or undefined.
+ * @throws {Error} When present but unsupported.
+ */
+function optionalFileMode(
+  obj: Record<string, unknown>,
+  filePath: string,
+  prefix?: string
+): "file" | "directory" | undefined {
+  const value = optionalString(obj, "file_mode", filePath, prefix);
+  if (value === undefined) return undefined;
+  if (value === "file" || value === "directory") {
+    return value;
+  }
+  const display = prefix ? `${prefix}.file_mode` : "file_mode";
+  throw new Error(`"${display}" must be "file" or "directory" in ${filePath}`);
+}
+
+/**
+ * Parse optional dropdown options list.
+ *
+ * @param obj - Source input object.
+ * @param filePath - File path for diagnostics.
+ * @param prefix - Optional parent field prefix.
+ * @returns Parsed options list or undefined.
+ * @throws {Error} When present but invalid.
+ */
+function optionalInputOptions(
+  obj: Record<string, unknown>,
+  filePath: string,
+  prefix?: string
+): Array<{ label: string; value: ModuleInputValue }> | undefined {
+  const raw = obj.options;
+  if (raw === undefined) return undefined;
+  const display = prefix ? `${prefix}.options` : "options";
+  if (!Array.isArray(raw)) {
+    throw new Error(`"${display}" must be an array in ${filePath}`);
+  }
+  return raw.map((entry, index) => {
+    const optionPrefix = `${display}[${index}]`;
+    if (!entry || typeof entry !== "object" || Array.isArray(entry)) {
+      throw new Error(`"${optionPrefix}" must be an object in ${filePath}`);
+    }
+    const option = entry as Record<string, unknown>;
+    const value = optionalPrimitive(option, "value", filePath, optionPrefix);
+    if (value === undefined) {
+      throw new Error(`"${optionPrefix}.value" must be provided in ${filePath}`);
+    }
+    return {
+      label: requiredString(option, "label", filePath, optionPrefix),
+      value,
+    };
+  });
+}
+
+/**
+ * Parse optional conditional visibility rule.
+ *
+ * @param obj - Source input object.
+ * @param filePath - File path for diagnostics.
+ * @param prefix - Optional parent field prefix.
+ * @returns Parsed visibility rule or undefined.
+ * @throws {Error} When present but invalid.
+ */
+function optionalVisibilityRule(
+  obj: Record<string, unknown>,
+  filePath: string,
+  prefix?: string
+): { input_id: string; equals: ModuleInputValue } | undefined {
+  const raw = obj.visible_if;
+  if (raw === undefined) return undefined;
+  const display = prefix ? `${prefix}.visible_if` : "visible_if";
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+    throw new Error(`"${display}" must be an object in ${filePath}`);
+  }
+  const rule = raw as Record<string, unknown>;
+  const equals = optionalPrimitive(rule, "equals", filePath, display);
+  if (equals === undefined) {
+    throw new Error(`"${display}.equals" must be provided in ${filePath}`);
+  }
+  return {
+    input_id: requiredString(rule, "input_id", filePath, display),
+    equals,
+  };
 }
 
 /**

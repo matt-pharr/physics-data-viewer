@@ -43,6 +43,7 @@ import {
   ModuleImportResult,
   ModuleInstallRequest,
   ModuleInstallResult,
+  ModuleInputValue,
   ModuleHealthWarning,
   ModuleSettingsRequest,
   ModuleSettingsResult,
@@ -102,6 +103,7 @@ const REGISTERED_CHANNELS: readonly string[] = [
   IPC.codeCells.save,
   IPC.menu.updateRecentProjects,
   IPC.files.pickExecutable,
+  IPC.files.pickFile,
   IPC.files.pickDirectory,
 ];
 
@@ -289,6 +291,32 @@ function isMissingActionScriptError(error: unknown): boolean {
     message.includes("Module action script does not exist") ||
     message.includes("Module action script is not a file")
   );
+}
+
+/**
+ * Convert one module input value into a Python argument expression.
+ *
+ * String values are treated as user-provided Python expressions for backward
+ * compatibility with existing text inputs.
+ *
+ * @param value - Raw value from module settings/UI state.
+ * @returns Python expression string, or null when the value is empty.
+ */
+function toPythonArgumentValue(value: ModuleInputValue): string | null {
+  if (typeof value === "boolean") {
+    return value ? "True" : "False";
+  }
+  if (typeof value === "number") {
+    if (!Number.isFinite(value)) {
+      return null;
+    }
+    return String(value);
+  }
+  const trimmed = value.trim();
+  if (trimmed.length === 0) {
+    return null;
+  }
+  return trimmed;
 }
 
 async function bindImportedModuleScripts(
@@ -1154,16 +1182,16 @@ export function registerIpcHandlers(
           error: `Module action not found: ${request.actionId}`,
         };
       }
-      // Build kwargs from inputValues: { inputId: "value" } → kwarg pairs.
+      // Build kwargs from inputValues: { inputId: value } → kwarg pairs.
       const kwargs: string[] = [];
       if (request.inputValues) {
         // Only include inputs that this action actually references.
         const allowedIds = new Set(action.inputIds ?? []);
         for (const [inputId, value] of Object.entries(request.inputValues)) {
           if (allowedIds.size > 0 && !allowedIds.has(inputId)) continue;
-          const trimmed = value.trim();
-          if (trimmed.length > 0) {
-            kwargs.push(`${inputId}=${trimmed}`);
+          const expression = toPythonArgumentValue(value);
+          if (expression !== null) {
+            kwargs.push(`${inputId}=${expression}`);
           }
         }
       }
@@ -1375,6 +1403,20 @@ export function registerIpcHandlers(
   // Returns: selected executable file path or null when cancelled.
   // On error: throws to renderer.
   ipcMain.handle(IPC.files.pickExecutable, async () => {
+    const result = await dialog.showOpenDialog({
+      properties: ["openFile"],
+    });
+    if (result.canceled || result.filePaths.length === 0) {
+      return null;
+    }
+    return result.filePaths[0] ?? null;
+  });
+
+  // Handles files:pickFile requests from the renderer.
+  // Input: none.
+  // Returns: selected file path or null when cancelled.
+  // On error: throws to renderer.
+  ipcMain.handle(IPC.files.pickFile, async () => {
     const result = await dialog.showOpenDialog({
       properties: ["openFile"],
     });

@@ -43,6 +43,7 @@ Modules are domain-specific analysis pipeline packages that can be installed int
 - **Per-module settings**: Module manifest can declare user-configurable parameters that are persisted in `project.json`.
 - **Module health checks**: Version compatibility check at project load time; warning if a module action references a script that no longer exists.
 - **Modules tab**: Currently a placeholder stub. Becomes the primary UI for browsing, installing, and configuring modules.
+- **Namelist editor module (later in modules roadmap)**: Add a module GUI for editing simulation namelist files directly from a tree path. Initial support targets TOML and Fortran `*.in` namelists, auto-selected by file extension/content type. The editor should surface tooltip help from inline comments in the source file, optimize for rapid batch parameter editing, and save changes back through the Tree/project workflow.
 
 ---
 

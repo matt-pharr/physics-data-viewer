@@ -308,4 +308,95 @@ describe("ModuleManager", () => {
       ])
     );
   });
+
+  it("parses rich module input descriptors for GUI controls", async () => {
+    const localSource = path.join(tmpDir, "rich-input-source");
+    await writeModuleFixture(
+      localSource,
+      "rich_input_mod",
+      "1.0.0",
+      [{ id: "run", label: "Run", script_path: "scripts/run.py" }],
+      {
+        inputs: [
+          {
+            id: "solver",
+            label: "Solver",
+            control: "dropdown",
+            options: [
+              { label: "RK4", value: "rk4" },
+              { label: "Euler", value: "euler" },
+            ],
+            default: "rk4",
+            tab: "General",
+            tooltip: "Integration method",
+          },
+          {
+            id: "steps",
+            label: "Steps",
+            control: "slider",
+            min: 10,
+            max: 2000,
+            step: 10,
+            default: 200,
+            section: "Numerics",
+            section_collapsed: true,
+          },
+          {
+            id: "use_gpu",
+            label: "Use GPU",
+            control: "checkbox",
+            default: false,
+            visible_if: { input_id: "solver", equals: "rk4" },
+          },
+          {
+            id: "input_file",
+            label: "Input File",
+            control: "file",
+            file_mode: "file",
+          },
+        ],
+      }
+    );
+    await manager.install({
+      source: { type: "local", location: localSource },
+    });
+
+    const inputs = await manager.getModuleInputs("rich_input_mod");
+    expect(inputs).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: "solver",
+          control: "dropdown",
+          options: [
+            { label: "RK4", value: "rk4" },
+            { label: "Euler", value: "euler" },
+          ],
+          default: "rk4",
+          tab: "General",
+          tooltip: "Integration method",
+        }),
+        expect.objectContaining({
+          id: "steps",
+          control: "slider",
+          min: 10,
+          max: 2000,
+          step: 10,
+          default: 200,
+          section: "Numerics",
+          sectionCollapsed: true,
+        }),
+        expect.objectContaining({
+          id: "use_gpu",
+          control: "checkbox",
+          default: false,
+          visibleIf: { inputId: "solver", equals: "rk4" },
+        }),
+        expect.objectContaining({
+          id: "input_file",
+          control: "file",
+          fileMode: "file",
+        }),
+      ])
+    );
+  });
 });

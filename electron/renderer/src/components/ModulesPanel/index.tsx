@@ -33,6 +33,35 @@ interface InstallDuplicate {
   candidateRevision?: string;
 }
 
+type ModuleInputValue = string | number | boolean;
+type ModuleInputDescriptor = ImportedModuleDescriptor["inputs"][number];
+
+const DEFAULT_MODULE_TAB = "General";
+const ACTIVE_TAB_SETTING_KEY = "__ui_active_tab__";
+const SECTION_OPEN_SETTING_PREFIX = "__ui_section_open__:";
+
+function sectionSettingKey(tab: string, section: string): string {
+  return `${SECTION_OPEN_SETTING_PREFIX}${tab}::${section}`;
+}
+
+function isModuleInputValue(value: unknown): value is ModuleInputValue {
+  return (
+    typeof value === "string" ||
+    typeof value === "number" ||
+    typeof value === "boolean"
+  );
+}
+
+function getInputTabName(input: ModuleInputDescriptor): string {
+  return input.tab && input.tab.trim().length > 0 ? input.tab : DEFAULT_MODULE_TAB;
+}
+
+function getInputSectionName(input: ModuleInputDescriptor): string | null {
+  if (!input.section) return null;
+  const trimmed = input.section.trim();
+  return trimmed.length > 0 ? trimmed : null;
+}
+
 /**
  * Modules panel UI — Feature 2 Steps 7-11.
  */
@@ -53,9 +82,15 @@ export const ModulesPanel: React.FC<ModulesPanelProps> = ({
   const [lastStatus, setLastStatus] = useState<string | null>(null);
   const [runningActionKey, setRunningActionKey] = useState<string | null>(null);
   /** Input field values keyed by `<alias>:<inputId>`. */
-  const [inputValues, setInputValues] = useState<Record<string, string>>({});
+  const [inputValues, setInputValues] = useState<Record<string, ModuleInputValue>>({});
   const [persistedSettingsByAlias, setPersistedSettingsByAlias] = useState<
     Record<string, Record<string, unknown>>
+  >({});
+  const [activeModuleTabByAlias, setActiveModuleTabByAlias] = useState<
+    Record<string, string>
+  >({});
+  const [sectionOpenByAlias, setSectionOpenByAlias] = useState<
+    Record<string, Record<string, boolean>>
   >({});
 
   // Step 11: in-panel prompts for import conflicts and install duplicates.
@@ -71,7 +106,9 @@ export const ModulesPanel: React.FC<ModulesPanelProps> = ({
         window.pdv.modules.listImported(),
       ]);
       const settingsByAlias: Record<string, Record<string, unknown>> = {};
-      const valuesByKey: Record<string, string> = {};
+      const valuesByKey: Record<string, ModuleInputValue> = {};
+      const activeTabsByAlias: Record<string, string> = {};
+      const sectionStateByAlias: Record<string, Record<string, boolean>> = {};
       for (const moduleEntry of importedModules) {
         const settings =
           moduleEntry.settings &&
@@ -80,20 +117,44 @@ export const ModulesPanel: React.FC<ModulesPanelProps> = ({
             ? moduleEntry.settings
             : {};
         settingsByAlias[moduleEntry.alias] = settings;
-        // Restore persisted input values from settings.
+        const tabNames = Array.from(
+          new Set(moduleEntry.inputs.map((input) => getInputTabName(input)))
+        );
+        const savedTab = settings[ACTIVE_TAB_SETTING_KEY];
+        activeTabsByAlias[moduleEntry.alias] =
+          typeof savedTab === "string" && tabNames.includes(savedTab)
+            ? savedTab
+            : (tabNames[0] ?? DEFAULT_MODULE_TAB);
+
+        // Restore persisted input values and UI section state from settings.
+        const sectionOpenState: Record<string, boolean> = {};
         for (const input of moduleEntry.inputs) {
           const key = `${moduleEntry.alias}:${input.id}`;
           const persisted = settings[input.id];
-          if (persisted !== undefined) {
-            valuesByKey[key] = String(persisted);
+          if (isModuleInputValue(persisted)) {
+            valuesByKey[key] = persisted;
           } else if (input.default !== undefined) {
             valuesByKey[key] = input.default;
           }
+          const tabName = getInputTabName(input);
+          const sectionName = getInputSectionName(input);
+          if (!sectionName) continue;
+          const stateKey = `${tabName}::${sectionName}`;
+          if (sectionOpenState[stateKey] !== undefined) continue;
+          const savedOpen = settings[sectionSettingKey(tabName, sectionName)];
+          if (typeof savedOpen === "boolean") {
+            sectionOpenState[stateKey] = savedOpen;
+          } else {
+            sectionOpenState[stateKey] = !(input.sectionCollapsed ?? false);
+          }
         }
+        sectionStateByAlias[moduleEntry.alias] = sectionOpenState;
       }
       setInstalled(installedModules);
       setImported(importedModules);
       setPersistedSettingsByAlias(settingsByAlias);
+      setActiveModuleTabByAlias((prev) => ({ ...prev, ...activeTabsByAlias }));
+      setSectionOpenByAlias((prev) => ({ ...prev, ...sectionStateByAlias }));
       setInputValues((prev) => {
         // Merge: keep user edits for keys that still exist, add new defaults.
         const merged = { ...valuesByKey };
@@ -127,6 +188,11 @@ export const ModulesPanel: React.FC<ModulesPanelProps> = ({
     () => imported.find((entry) => entry.alias === activeImportedAlias) ?? null,
     [imported, activeImportedAlias]
   );
+
+  const selectedModuleTabs = useMemo(() => {
+    if (!selectedImported) return [] as string[];
+    return Array.from(new Set(selectedImported.inputs.map((input) => getInputTabName(input))));
+  }, [selectedImported]);
 
   // Compute which module IDs are already imported in the active project.
   const importedModuleIds = useMemo(
@@ -249,21 +315,8 @@ export const ModulesPanel: React.FC<ModulesPanelProps> = ({
     await refresh();
   };
 
-  /** Persist all current input values for a module alias to settings. */
-  const persistInputValues = useCallback(
-    async (moduleAlias: string): Promise<void> => {
-      const mod = imported.find((entry) => entry.alias === moduleAlias);
-      if (!mod) return;
-      const nextSettings = { ...(persistedSettingsByAlias[moduleAlias] ?? {}) };
-      for (const input of mod.inputs) {
-        const key = `${moduleAlias}:${input.id}`;
-        const val = (inputValues[key] ?? "").trim();
-        if (val.length > 0) {
-          nextSettings[input.id] = val;
-        } else {
-          delete nextSettings[input.id];
-        }
-      }
+  const persistModuleSettings = useCallback(
+    async (moduleAlias: string, nextSettings: Record<string, unknown>): Promise<void> => {
       const result = await window.pdv.modules.saveSettings({
         moduleAlias,
         values: nextSettings,
@@ -276,7 +329,136 @@ export const ModulesPanel: React.FC<ModulesPanelProps> = ({
         [moduleAlias]: nextSettings,
       }));
     },
-    [imported, persistedSettingsByAlias, inputValues]
+    []
+  );
+
+  /** Persist all current input values for a module alias to settings. */
+  const persistInputValues = useCallback(
+    async (moduleAlias: string): Promise<void> => {
+      const mod = imported.find((entry) => entry.alias === moduleAlias);
+      if (!mod) return;
+      const nextSettings = { ...(persistedSettingsByAlias[moduleAlias] ?? {}) };
+      for (const input of mod.inputs) {
+        const key = `${moduleAlias}:${input.id}`;
+        const val = inputValues[key];
+        if (typeof val === "string") {
+          const trimmed = val.trim();
+          if (trimmed.length > 0) {
+            nextSettings[input.id] = trimmed;
+          } else {
+            delete nextSettings[input.id];
+          }
+          continue;
+        }
+        if (typeof val === "number" || typeof val === "boolean") {
+          nextSettings[input.id] = val;
+          continue;
+        }
+        delete nextSettings[input.id];
+      }
+      await persistModuleSettings(moduleAlias, nextSettings);
+    },
+    [imported, inputValues, persistedSettingsByAlias, persistModuleSettings]
+  );
+
+  const setModuleInputValue = useCallback(
+    (moduleAlias: string, inputId: string, value: ModuleInputValue): void => {
+      const key = `${moduleAlias}:${inputId}`;
+      setInputValues((prev) => ({
+        ...prev,
+        [key]: value,
+      }));
+    },
+    []
+  );
+
+  const isInputVisible = useCallback(
+    (moduleAlias: string, input: ModuleInputDescriptor): boolean => {
+      if (!input.visibleIf) {
+        return true;
+      }
+      const dependencyKey = `${moduleAlias}:${input.visibleIf.inputId}`;
+      const dependencyValue = inputValues[dependencyKey];
+      return dependencyValue === input.visibleIf.equals;
+    },
+    [inputValues]
+  );
+
+  const setModuleTab = useCallback(
+    async (moduleAlias: string, tabName: string): Promise<void> => {
+      setActiveModuleTabByAlias((prev) => ({
+        ...prev,
+        [moduleAlias]: tabName,
+      }));
+      const nextSettings = {
+        ...(persistedSettingsByAlias[moduleAlias] ?? {}),
+        [ACTIVE_TAB_SETTING_KEY]: tabName,
+      };
+      await persistModuleSettings(moduleAlias, nextSettings);
+    },
+    [persistModuleSettings, persistedSettingsByAlias]
+  );
+
+  const setSectionOpenState = useCallback(
+    async (
+      moduleAlias: string,
+      tabName: string,
+      sectionName: string,
+      isOpen: boolean
+    ): Promise<void> => {
+      const stateKey = `${tabName}::${sectionName}`;
+      setSectionOpenByAlias((prev) => ({
+        ...prev,
+        [moduleAlias]: {
+          ...(prev[moduleAlias] ?? {}),
+          [stateKey]: isOpen,
+        },
+      }));
+      const nextSettings = {
+        ...(persistedSettingsByAlias[moduleAlias] ?? {}),
+        [sectionSettingKey(tabName, sectionName)]: isOpen,
+      };
+      await persistModuleSettings(moduleAlias, nextSettings);
+    },
+    [persistModuleSettings, persistedSettingsByAlias]
+  );
+
+  const toActionInputValue = useCallback(
+    (value: ModuleInputValue | undefined, input: ModuleInputDescriptor): ModuleInputValue | null => {
+      if (value === undefined) {
+        return null;
+      }
+      if (input.control === "checkbox") {
+        return Boolean(value);
+      }
+      if (input.control === "slider") {
+        if (typeof value === "number" && Number.isFinite(value)) {
+          return value;
+        }
+        if (typeof value === "string") {
+          const parsed = Number(value);
+          return Number.isFinite(parsed) ? parsed : null;
+        }
+        return null;
+      }
+      if (input.control === "file") {
+        if (typeof value !== "string") return null;
+        const trimmed = value.trim();
+        return trimmed.length > 0 ? JSON.stringify(trimmed) : null;
+      }
+      if (input.control === "dropdown") {
+        if (typeof value === "string") {
+          return JSON.stringify(value);
+        }
+        return value;
+      }
+      if (typeof value === "string") {
+        const trimmed = value.trim();
+        return trimmed.length > 0 ? trimmed : null;
+      }
+      return value;
+    },
+    []
   );
 
   const handleRunAction = async (actionId: string): Promise<void> => {
@@ -296,13 +478,16 @@ export const ModulesPanel: React.FC<ModulesPanelProps> = ({
       await persistInputValues(selectedImported.alias);
 
       // Collect input values referenced by this action.
-      const actionInputValues: Record<string, string> = {};
+      const actionInputValues: Record<string, ModuleInputValue> = {};
       const referencedIds = action.inputIds ?? [];
+      const inputById = new Map(selectedImported.inputs.map((input) => [input.id, input] as const));
       for (const inputId of referencedIds) {
         const key = `${selectedImported.alias}:${inputId}`;
-        const val = (inputValues[key] ?? "").trim();
-        if (val.length > 0) {
-          actionInputValues[inputId] = val;
+        const input = inputById.get(inputId);
+        if (!input) continue;
+        const value = toActionInputValue(inputValues[key], input);
+        if (value !== null) {
+          actionInputValues[inputId] = value;
         }
       }
 
@@ -500,32 +685,287 @@ export const ModulesPanel: React.FC<ModulesPanelProps> = ({
                 {/* Input fields */}
                 {selectedImported.inputs.length > 0 && (
                   <div className="modules-inputs">
-                    {selectedImported.inputs.map((input) => {
-                      const key = `${selectedImported.alias}:${input.id}`;
-                      return (
-                        <div key={input.id} className="modules-input-row">
-                          <label className="modules-input-label" htmlFor={`input-${key}`}>
-                            {input.label}
-                          </label>
+                    {selectedModuleTabs.length > 1 && (
+                      <div className="modules-input-tabs">
+                        {selectedModuleTabs.map((tabName) => {
+                          const activeTab =
+                            activeModuleTabByAlias[selectedImported.alias] ??
+                            selectedModuleTabs[0] ??
+                            DEFAULT_MODULE_TAB;
+                          return (
+                            <button
+                              key={tabName}
+                              className={`modules-tab ${tabName === activeTab ? "active" : ""}`}
+                              onClick={() =>
+                                void setModuleTab(selectedImported.alias, tabName).catch((err) => {
+                                  setError(err instanceof Error ? err.message : String(err));
+                                })
+                              }
+                              title={`Show ${tabName} settings`}
+                            >
+                              {tabName}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    )}
+                    {(() => {
+                      const activeTab =
+                        activeModuleTabByAlias[selectedImported.alias] ??
+                        selectedModuleTabs[0] ??
+                        DEFAULT_MODULE_TAB;
+                      const tabInputs = selectedImported.inputs.filter(
+                        (input) =>
+                          getInputTabName(input) === activeTab &&
+                          isInputVisible(selectedImported.alias, input)
+                      );
+                      const unsectioned = tabInputs.filter(
+                        (input) => getInputSectionName(input) === null
+                      );
+                      const sectionNames = Array.from(
+                        new Set(
+                          tabInputs
+                            .map((input) => getInputSectionName(input))
+                            .filter((value): value is string => value !== null)
+                        )
+                      );
+                      const renderInputControl = (input: ModuleInputDescriptor): React.ReactNode => {
+                        const key = `${selectedImported.alias}:${input.id}`;
+                        const value = inputValues[key];
+                        const inputId = `input-${key}`;
+                        const title = input.tooltip ?? "";
+                        if (input.control === "checkbox") {
+                          return (
+                            <input
+                              id={inputId}
+                              className="modules-input-checkbox"
+                              type="checkbox"
+                              checked={Boolean(value)}
+                              onChange={(event) =>
+                                setModuleInputValue(
+                                  selectedImported.alias,
+                                  input.id,
+                                  event.target.checked
+                                )
+                              }
+                              onBlur={() =>
+                                void persistInputValues(selectedImported.alias).catch((err) => {
+                                  setError(err instanceof Error ? err.message : String(err));
+                                })
+                              }
+                              title={title}
+                            />
+                          );
+                        }
+                        if (input.control === "dropdown") {
+                          const options = input.options ?? [];
+                          const selectedIndex = options.findIndex((option) => option.value === value);
+                          const selectValue = selectedIndex >= 0 ? String(selectedIndex) : "";
+                          return (
+                            <select
+                              id={inputId}
+                              className="modules-input-field"
+                              value={selectValue}
+                              onChange={(event) => {
+                                const index = Number(event.target.value);
+                                const option = Number.isInteger(index) ? options[index] : undefined;
+                                if (!option) return;
+                                setModuleInputValue(selectedImported.alias, input.id, option.value);
+                              }}
+                              onBlur={() =>
+                                void persistInputValues(selectedImported.alias).catch((err) => {
+                                  setError(err instanceof Error ? err.message : String(err));
+                                })
+                              }
+                              title={title}
+                            >
+                              <option value="" disabled>
+                                Select…
+                              </option>
+                              {options.map((option, index) => (
+                                <option key={`${input.id}-${index}`} value={String(index)}>
+                                  {option.label}
+                                </option>
+                              ))}
+                            </select>
+                          );
+                        }
+                        if (input.control === "slider") {
+                          const min = input.min ?? 0;
+                          const max = input.max ?? 100;
+                          const step = input.step ?? 1;
+                          const sliderValue =
+                            typeof value === "number"
+                              ? value
+                              : typeof value === "string" && value.trim().length > 0
+                                ? Number(value)
+                                : typeof input.default === "number"
+                                  ? input.default
+                                  : min;
+                          return (
+                            <div className="modules-slider-wrap">
+                              <input
+                                id={inputId}
+                                className="modules-input-field"
+                                type="range"
+                                min={min}
+                                max={max}
+                                step={step}
+                                value={Number.isFinite(sliderValue) ? sliderValue : min}
+                                onChange={(event) =>
+                                  setModuleInputValue(
+                                    selectedImported.alias,
+                                    input.id,
+                                    Number(event.target.value)
+                                  )
+                                }
+                                onMouseUp={() =>
+                                  void persistInputValues(selectedImported.alias).catch((err) => {
+                                    setError(err instanceof Error ? err.message : String(err));
+                                  })
+                                }
+                                onTouchEnd={() =>
+                                  void persistInputValues(selectedImported.alias).catch((err) => {
+                                    setError(err instanceof Error ? err.message : String(err));
+                                  })
+                                }
+                                title={title}
+                              />
+                              <span className="modules-slider-value">
+                                {Number.isFinite(sliderValue) ? sliderValue : min}
+                              </span>
+                            </div>
+                          );
+                        }
+                        if (input.control === "file") {
+                          const pathValue =
+                            typeof value === "string"
+                              ? value
+                              : typeof input.default === "string"
+                                ? input.default
+                                : "";
+                          return (
+                            <div className="modules-file-wrap">
+                              <input
+                                id={inputId}
+                                className="modules-input-field"
+                                type="text"
+                                value={pathValue}
+                                readOnly
+                                title={title}
+                              />
+                              <button
+                                className="btn btn-secondary"
+                                onClick={() =>
+                                  void (async () => {
+                                    const picked =
+                                      input.fileMode === "directory"
+                                        ? await window.pdv.files.pickDirectory()
+                                        : await window.pdv.files.pickFile();
+                                    if (!picked) return;
+                                    setModuleInputValue(selectedImported.alias, input.id, picked);
+                                    await persistInputValues(selectedImported.alias);
+                                  })().catch((err) => {
+                                    setError(err instanceof Error ? err.message : String(err));
+                                  })
+                                }
+                                title={title}
+                              >
+                                Browse…
+                              </button>
+                            </div>
+                          );
+                        }
+                        const textValue =
+                          typeof value === "string"
+                            ? value
+                            : value !== undefined
+                              ? String(value)
+                              : "";
+                        return (
                           <input
-                            id={`input-${key}`}
+                            id={inputId}
                             className="modules-input-field"
                             type="text"
-                            value={inputValues[key] ?? ""}
+                            value={textValue}
                             onChange={(event) =>
-                              setInputValues((prev) => ({
-                                ...prev,
-                                [key]: event.target.value,
-                              }))
+                              setModuleInputValue(selectedImported.alias, input.id, event.target.value)
                             }
                             onBlur={() =>
-                              void persistInputValues(selectedImported.alias).catch(() => {})
+                              void persistInputValues(selectedImported.alias).catch((err) => {
+                                setError(err instanceof Error ? err.message : String(err));
+                              })
                             }
-                            placeholder={input.default ?? ""}
+                            placeholder={typeof input.default === "string" ? input.default : undefined}
+                            title={title}
                           />
-                        </div>
+                        );
+                      };
+
+                      return (
+                        <>
+                          {unsectioned.map((input) => (
+                            <div key={input.id} className="modules-input-row">
+                              <label
+                                className="modules-input-label"
+                                htmlFor={`input-${selectedImported.alias}:${input.id}`}
+                                title={input.tooltip}
+                              >
+                                {input.label}
+                              </label>
+                              {renderInputControl(input)}
+                            </div>
+                          ))}
+                          {sectionNames.map((sectionName) => {
+                            const stateKey = `${activeTab}::${sectionName}`;
+                            const sectionInputs = tabInputs.filter(
+                              (input) => getInputSectionName(input) === sectionName
+                            );
+                            const defaultOpen = !(sectionInputs[0]?.sectionCollapsed ?? false);
+                            const isOpen =
+                              sectionOpenByAlias[selectedImported.alias]?.[stateKey] ?? defaultOpen;
+                            return (
+                              <details
+                                key={stateKey}
+                                className="modules-input-section"
+                                open={isOpen}
+                                onToggle={(event) =>
+                                  void setSectionOpenState(
+                                    selectedImported.alias,
+                                    activeTab,
+                                    sectionName,
+                                    (event.currentTarget as HTMLDetailsElement).open
+                                  ).catch((err) => {
+                                    setError(err instanceof Error ? err.message : String(err));
+                                  })
+                                }
+                              >
+                                <summary className="modules-input-section-summary">
+                                  {sectionName}
+                                </summary>
+                                <div className="modules-input-section-body">
+                                  {sectionInputs.map((input) => (
+                                    <div key={input.id} className="modules-input-row">
+                                      <label
+                                        className="modules-input-label"
+                                        htmlFor={`input-${selectedImported.alias}:${input.id}`}
+                                        title={input.tooltip}
+                                      >
+                                        {input.label}
+                                      </label>
+                                      {renderInputControl(input)}
+                                    </div>
+                                  ))}
+                                </div>
+                              </details>
+                            );
+                          })}
+                          {tabInputs.length === 0 && (
+                            <div className="modules-inline-note">No visible inputs in this tab.</div>
+                          )}
+                        </>
                       );
-                    })}
+                    })()}
                   </div>
                 )}
 

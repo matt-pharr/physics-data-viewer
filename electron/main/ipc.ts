@@ -122,6 +122,7 @@ export const IPC = {
   /** Native file/directory picker channels. */
   files: {
     pickExecutable: "files:pickExecutable",
+    pickFile: "files:pickFile",
     pickDirectory: "files:pickDirectory",
   },
   /** Window lifecycle channels (unsaved-changes flow). */
@@ -363,6 +364,31 @@ export interface ModuleImportResult {
 }
 
 /**
+ * Primitive value type accepted by module UI controls.
+ */
+export type ModuleInputValue = string | number | boolean;
+
+/**
+ * One selectable option for dropdown-style module inputs.
+ */
+export interface ModuleInputOptionDescriptor {
+  /** User-facing option label. */
+  label: string;
+  /** Raw option value persisted in project settings. */
+  value: ModuleInputValue;
+}
+
+/**
+ * Declarative visibility rule for module inputs/sections.
+ */
+export interface ModuleInputVisibilityRule {
+  /** Input ID this control depends on. */
+  inputId: string;
+  /** Value that must match for this control to be visible. */
+  equals: ModuleInputValue;
+}
+
+/**
  * Declarative input field descriptor surfaced to the renderer.
  */
 export interface ModuleInputDescriptor {
@@ -370,10 +396,28 @@ export interface ModuleInputDescriptor {
   id: string;
   /** User-facing label. */
   label: string;
-  /** Optional type hint (e.g. "int", "float", "str"). */
+  /** Optional data type hint (e.g. "int", "float", "str"). */
   type?: string;
-  /** Optional default value as a string. */
-  default?: string;
+  /** UI control type rendered by the modules panel. */
+  control?: "text" | "dropdown" | "slider" | "checkbox" | "file";
+  /** Optional default value/state. */
+  default?: ModuleInputValue;
+  /** Optional dropdown options for `control: "dropdown"`. */
+  options?: ModuleInputOptionDescriptor[];
+  /** Optional slider/file metadata. */
+  min?: number;
+  max?: number;
+  step?: number;
+  /** Grouping metadata for module-internal tab/section layout. */
+  tab?: string;
+  section?: string;
+  sectionCollapsed?: boolean;
+  /** Optional hover tooltip. */
+  tooltip?: string;
+  /** Optional conditional visibility rule. */
+  visibleIf?: ModuleInputVisibilityRule;
+  /** Optional file picker mode for `control: "file"`. */
+  fileMode?: "file" | "directory";
 }
 
 /**
@@ -461,7 +505,7 @@ export interface ModuleActionRequest {
   /** Module action identifier from manifest. */
   actionId: string;
   /** Input values keyed by input id (from the module's input fields). */
-  inputValues?: Record<string, string>;
+  inputValues?: Record<string, ModuleInputValue>;
 }
 
 /**
@@ -882,6 +926,12 @@ export interface PDVApi {
      * @returns Selected file path, or null if cancelled.
      */
     pickExecutable(): Promise<string | null>;
+    /**
+     * Open a native file picker.
+     *
+     * @returns Selected file path, or null if cancelled.
+     */
+    pickFile(): Promise<string | null>;
     /**
      * Open a native directory picker (with create-directory support).
      *

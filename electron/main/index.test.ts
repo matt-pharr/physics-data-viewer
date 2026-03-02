@@ -108,6 +108,7 @@ const mocks = vi.hoisted(() => {
     moduleManagerCheckUpdates,
     moduleManagerEvaluateHealth,
     moduleManagerResolveActionScripts,
+    moduleManagerGetModuleInputs,
   };
 });
 
@@ -629,6 +630,17 @@ describe("Step 5 IPC handlers", () => {
     const pickDirectory = getHandler(IPC.files.pickDirectory);
     const result = await pickDirectory({});
     expect(result).toBeNull();
+  });
+
+  it("files:pickFile returns selected file path", async () => {
+    setup();
+    mocks.dialogShowOpenDialog.mockResolvedValueOnce({
+      canceled: false,
+      filePaths: ["/tmp/config.toml"],
+    });
+    const pickFile = getHandler(IPC.files.pickFile);
+    const result = await pickFile({});
+    expect(result).toBe("/tmp/config.toml");
   });
 
   it("script:reload sends pdv.script.register with parent_path and name", async () => {
