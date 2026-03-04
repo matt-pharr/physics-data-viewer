@@ -22,6 +22,7 @@ import type { KernelInfo, KernelManager } from "./kernel-manager";
 import type { CommRouter } from "./comm-router";
 import type { ProjectManager } from "./project-manager";
 import type { ConfigStore } from "./config";
+import { EnvironmentDetector } from "./environment-detector";
 
 type InvokeHandler = (event: unknown, ...args: unknown[]) => unknown;
 
@@ -565,8 +566,13 @@ describe("Step 5 IPC handlers", () => {
     expect(result).toEqual({ found: false });
   });
 
-  it("kernels:validate returns valid for non-empty path when validate() is absent", async () => {
+  it("kernels:validate returns valid when pdv_kernel is installed", async () => {
     const { kernelManager: _ } = setup();
+    vi.spyOn(EnvironmentDetector, "checkPDVInstalled").mockResolvedValueOnce({
+      installed: true,
+      version: "1.0.0",
+      compatible: true,
+    });
     const validate = getHandler(IPC.kernels.validate);
     const result = (await validate({}, "/usr/bin/python3", "python")) as {
       valid: boolean;
@@ -583,6 +589,24 @@ describe("Step 5 IPC handlers", () => {
     };
     expect(result.valid).toBe(false);
     expect(result.error).toBeTruthy();
+  });
+
+  it("kernels:validate returns invalid when pdv_kernel is missing", async () => {
+    const { kernelManager: _ } = setup();
+    vi.spyOn(EnvironmentDetector, "checkPDVInstalled").mockResolvedValueOnce({
+      installed: false,
+      version: null,
+      compatible: false,
+    });
+
+    const validate = getHandler(IPC.kernels.validate);
+    const result = (await validate({}, "/usr/bin/python3", "python")) as {
+      valid: boolean;
+      error?: string;
+    };
+
+    expect(result.valid).toBe(false);
+    expect(result.error).toContain("pdv_kernel");
   });
 
   it("tree:createScript sends correct payload to kernel and returns scriptPath", async () => {
@@ -1061,6 +1085,21 @@ describe("Step 5 IPC handlers", () => {
     expect(result.executionCode).toBe(
       'pdv_tree["demo-module.scripts.run"].run(threshold=5)'
     );
+  });
+
+  it("kernels:start fails fast when selected runtime lacks pdv_kernel", async () => {
+    const { kernelManager } = setup();
+    vi.spyOn(EnvironmentDetector, "checkPDVInstalled").mockResolvedValueOnce({
+      installed: false,
+      version: null,
+      compatible: false,
+    });
+
+    const start = getHandler(IPC.kernels.start);
+    await expect(
+      start({}, { language: "python", env: { PYTHON_PATH: "/usr/bin/python3" } })
+    ).rejects.toThrow("pdv_kernel");
+    expect(kernelManager.start).not.toHaveBeenCalled();
   });
 
   it("project:load binds imported module scripts when kernel is active", async () => {

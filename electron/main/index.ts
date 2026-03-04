@@ -454,6 +454,8 @@ async function initializeKernelSession(
   kernelId: string
 ): Promise<void> {
   const readyPromise = waitForPush(commRouter, PDVMessageType.READY, 15_000);
+  // Avoid unhandled rejection warnings if bootstrap fails before pdv.ready.
+  void readyPromise.catch(() => undefined);
   const bootstrapResult = await kernelManager.execute(kernelId, {
     code: BOOTSTRAP_AND_OPEN_COMM,
     silent: true,
@@ -623,8 +625,20 @@ export function registerIpcHandlers(
   // Returns: KernelInfo for the started kernel.
   // On error: throws to renderer.
   ipcMain.handle(IPC.kernels.start, async (_event, spec) => {
+    const requestedSpec = spec as Parameters<KernelManager["start"]>[0];
+    const pythonPath =
+      requestedSpec?.env?.PYTHON_PATH ??
+      (Array.isArray(requestedSpec?.argv) ? requestedSpec.argv[0] : undefined);
+    if ((requestedSpec?.language ?? "python") === "python" && pythonPath) {
+      const installStatus = await EnvironmentDetector.checkPDVInstalled(pythonPath);
+      if (!installStatus.installed) {
+        throw new Error(
+          `Selected Python runtime is missing pdv_kernel. Install it with: cd pdv-python && ${pythonPath} -m pip install -e ".[dev]"`
+        );
+      }
+    }
     const kernel = await kernelManager.start(
-      spec as Parameters<KernelManager["start"]>[0]
+      requestedSpec
     );
     commRouter.attach(kernelManager, kernel.id);
     await initializeKernelSession(kernelManager, commRouter, projectManager, kernel.id);
@@ -768,6 +782,18 @@ export function registerIpcHandlers(
       }
       if (!executablePath.trim()) {
         return { valid: false, error: "Executable path is required" };
+      }
+      if (language === "python") {
+        const installStatus = await EnvironmentDetector.checkPDVInstalled(
+          executablePath.trim()
+        );
+        if (!installStatus.installed) {
+          return {
+            valid: false,
+            error:
+              'Missing pdv_kernel. Install it with: cd pdv-python && <python> -m pip install -e ".[dev]"',
+          };
+        }
       }
       return { valid: true };
     }
