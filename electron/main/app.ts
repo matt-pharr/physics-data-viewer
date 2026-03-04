@@ -81,7 +81,13 @@ export async function createWindow(
     }
   } catch { /* best-effort */ }
 
-  registerIpcHandlers(win, kernelManager, commRouter, projectManager, configStore, path.join(os.homedir(), ".PDV"));
+  const resetSessionState = registerIpcHandlers(win, kernelManager, commRouter, projectManager, configStore, path.join(os.homedir(), ".PDV"));
+
+  // Reset in-memory project state on every renderer load/reload so that stale
+  // module imports and project dirs from a previous session are cleared before
+  // the renderer makes any IPC calls (e.g. modules:listImported).
+  win.webContents.on("did-finish-load", resetSessionState);
+
   initializeAppMenu(win);
 
   // macOS document-edited indicator (red dot in traffic light buttons).

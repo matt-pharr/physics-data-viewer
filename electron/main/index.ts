@@ -595,7 +595,7 @@ export function registerIpcHandlers(
   projectManager: ProjectManager,
   configStore: ConfigStore,
   pdvDir: string
-): void {
+): () => void {
   activeKernelManagerRef = kernelManager;
   unregisterIpcHandlers();
 
@@ -1623,6 +1623,21 @@ export function registerIpcHandlers(
   });
 
   registerPushForwarding(win, commRouter);
+
+  /**
+   * Reset all in-session state. Called whenever the renderer reloads so that
+   * stale pending imports, project dirs, and health warnings from a previous
+   * renderer session don't leak into the new one.
+   */
+  function resetSessionState(): void {
+    activeProjectDir = null;
+    activeKernelId = null;
+    pendingModuleImports = [];
+    pendingModuleSettings = {};
+    moduleHealthWarningsByAlias.clear();
+  }
+
+  return resetSessionState;
 }
 
 /**
