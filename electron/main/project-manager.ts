@@ -236,7 +236,7 @@ export class ProjectManager {
     await pushPromise;
 
     // Step 4 — read code-cells.json.
-    return _readCodeCelles(saveDir);
+    return _readCodeCells(saveDir);
   }
 
   /**
@@ -426,7 +426,7 @@ function _parseModuleSettings(
  * @param saveDir - Absolute path to the project directory.
  * @returns Parsed code-cell array, or ``[]`` when the file is absent.
  */
-async function _readCodeCelles(saveDir: string): Promise<unknown> {
+async function _readCodeCells(saveDir: string): Promise<unknown> {
   const filePath = path.join(saveDir, "code-cells.json");
   try {
     const raw = await fs.readFile(filePath, "utf8");

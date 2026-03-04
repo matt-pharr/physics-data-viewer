@@ -3,7 +3,7 @@
  * when the current session has unsaved changes.
  */
 
-import React from 'react';
+import React, { useEffect } from 'react';
 
 interface UnsavedChangesDialogProps {
   onSave: () => void;
@@ -16,6 +16,19 @@ export const UnsavedChangesDialog: React.FC<UnsavedChangesDialogProps> = ({
   onDiscard,
   onCancel,
 }) => {
+  useEffect(() => {
+    const onDocumentKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape' || event.repeat) {
+        return;
+      }
+      event.preventDefault();
+      event.stopPropagation();
+      onCancel();
+    };
+    document.addEventListener('keydown', onDocumentKeyDown);
+    return () => document.removeEventListener('keydown', onDocumentKeyDown);
+  }, [onCancel]);
+
   return (
     <div className="modal-overlay" onClick={onCancel}>
       <div

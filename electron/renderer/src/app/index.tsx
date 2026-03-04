@@ -127,7 +127,7 @@ const App: React.FC = () => {
   const [modulesRefreshToken, setModulesRefreshToken] = useState(0);
   const [createScriptTarget, setCreateScriptTarget] = useState<string | null>(null);
   const [showSettings, setShowSettings] = useState(false);
-  const [settingsInitialTab, setSettingsInitialTab] = useState<'general' | 'shortcuts' | 'appearance' | 'runtime' | 'about'>('shortcuts');
+  const [settingsInitialTab, setSettingsInitialTab] = useState<'general' | 'shortcuts' | 'appearance' | 'runtime' | 'about'>('general');
   const [monacoTheme, setMonacoTheme] = useState<string>('vs-dark');
   const [systemPrefersDark, setSystemPrefersDark] = useState(
     () => window.matchMedia('(prefers-color-scheme: dark)').matches,
@@ -172,7 +172,7 @@ const App: React.FC = () => {
     applyFontSettings(fonts?.codeFont, fonts?.displayFont);
   }, [config]);
 
-  // Load code celles from filesystem on startup
+  // Load code cells from filesystem on startup
   useEffect(() => {
     if (!window.pdv?.codeCells) {
       return;
@@ -183,10 +183,10 @@ const App: React.FC = () => {
         if (data) {
           setCellTabs(data.tabs);
           setActiveCellTab(data.activeTabId);
-          console.log('[App] Loaded code celles from filesystem:', data.tabs.length, 'tabs');
+          console.log('[App] Loaded code cells from filesystem:', data.tabs.length, 'tabs');
         }
       } catch (error) {
-        console.error('[App] Failed to load code celles:', error);
+        console.error('[App] Failed to load code cells:', error);
       }
     };
     void loadCodeCells();
@@ -210,9 +210,9 @@ const App: React.FC = () => {
           tabs: CellTabs,
           activeTabId: activeCellTab,
         });
-        console.log('[App] Saved code celles to filesystem');
+        console.log('[App] Saved code cells to filesystem');
       } catch (error) {
-        console.error('[App] Failed to save code celles:', error);
+        console.error('[App] Failed to save code cells:', error);
       }
     }, 500);
 
@@ -309,6 +309,7 @@ const App: React.FC = () => {
 
       if (matchesShortcut(event, shortcuts.openSettings)) {
         event.preventDefault();
+        setSettingsInitialTab('general');
         setShowSettings(true);
       }
       if (matchesShortcut(event, shortcuts.newTab)) {
