@@ -61,6 +61,7 @@ export const IPC = {
     list: "tree:list",
     get: "tree:get",
     createScript: "tree:createScript",
+    addFile: "tree:addFile",
   },
   /** Namespace inspection channels. */
   namespace: {
@@ -236,6 +237,18 @@ export interface TreeCreateScriptResult {
   error?: string;
   /** Absolute path to the created script file. */
   scriptPath?: string;
+}
+
+/**
+ * Result returned by `tree.addFile`.
+ */
+export interface TreeAddFileResult {
+  /** True when the file was copied and registered successfully. */
+  success: boolean;
+  /** Optional error message when `success` is false. */
+  error?: string;
+  /** Absolute path to the copied file in the kernel working directory. */
+  workingDirPath?: string;
 }
 
 /**
@@ -731,6 +744,23 @@ export interface PDVApi {
       targetPath: string,
       scriptName: string
     ): Promise<TreeCreateScriptResult>;
+    /**
+     * Copy a file into the kernel working directory and register it as a tree node.
+     *
+     * @param kernelId - Target kernel ID.
+     * @param sourcePath - Absolute path to the source file to copy.
+     * @param targetTreePath - Dot-path of the parent tree node.
+     * @param nodeType - Node type classification for the file.
+     * @param filename - Physical filename with extension.
+     * @returns File addition result payload.
+     */
+    addFile(
+      kernelId: string,
+      sourcePath: string,
+      targetTreePath: string,
+      nodeType: "namelist" | "fortran" | "file",
+      filename: string
+    ): Promise<TreeAddFileResult>;
     /**
      * Subscribe to tree change push notifications.
      *

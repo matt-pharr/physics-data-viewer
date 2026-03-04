@@ -192,6 +192,8 @@ function setup() {
     interrupt: vi.fn(async () => undefined),
     getKernel: vi.fn(() => makeKernelInfo()),
     shutdownAll: vi.fn(async () => undefined),
+    on: vi.fn(),
+    removeListener: vi.fn(),
   } as unknown as KernelManager;
 
   const pushHandlers = new Map<string, Array<(message: PDVMessage) => void>>();
@@ -1107,6 +1109,9 @@ describe("Step 5 IPC handlers", () => {
     const start = getHandler(IPC.kernels.start);
     await start({}, { language: "python" });
 
+    // tree-index.json read (from copyFilesForLoad) → no file-backed nodes in test project
+    mocks.fsReadFile.mockRejectedValueOnce(Object.assign(new Error("ENOENT"), { code: "ENOENT" }));
+    // project.json read (from ProjectManager.readManifest inside refreshProjectModuleHealth)
     mocks.fsReadFile.mockResolvedValueOnce(
       JSON.stringify({
         schema_version: "1.1",

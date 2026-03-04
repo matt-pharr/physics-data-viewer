@@ -13,6 +13,7 @@
 import { BrowserWindow, app, ipcMain } from "electron";
 import * as path from "path";
 import * as os from "os";
+import * as fsSync from "fs";
 
 import { KernelManager } from "./kernel-manager";
 import { CommRouter } from "./comm-router";
@@ -68,6 +69,17 @@ export async function createWindow(
       sandbox: false,
     },
   });
+
+  // Clean up any orphaned pdv-* working dirs from a previous crash.
+  const tmpDir = os.tmpdir();
+  try {
+    const entries = fsSync.readdirSync(tmpDir);
+    for (const e of entries) {
+      if (/^pdv-/.test(e)) {
+        fsSync.rmSync(path.join(tmpDir, e), { recursive: true, force: true });
+      }
+    }
+  } catch { /* best-effort */ }
 
   registerIpcHandlers(win, kernelManager, commRouter, projectManager, configStore, path.join(os.homedir(), ".PDV"));
   initializeAppMenu(win);

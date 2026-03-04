@@ -40,6 +40,8 @@ export interface NodeDescriptor {
   language?: string | null;
   /** Script parameter descriptors when `type === "script"`. */
   params?: ScriptParameter[] | undefined;
+  /** Physical filename with extension for file-backed nodes (e.g. "run.nml"). Null for others. */
+  filename?: string | null;
 }
 
 /** Runtime kernel descriptor returned by `kernels.start/list/restart`. */
@@ -403,6 +405,13 @@ export interface PDVApi {
       targetPath: string,
       scriptName: string
     ): Promise<{ success: boolean; error?: string; scriptPath?: string }>;
+    addFile(
+      kernelId: string,
+      sourcePath: string,
+      targetTreePath: string,
+      nodeType: "namelist" | "fortran" | "file",
+      filename: string
+    ): Promise<{ success: boolean; error?: string; workingDirPath?: string }>;
     onChanged(
       callback: (payload: { changed_paths: string[]; change_type: "added" | "removed" | "updated" }) => void
     ): () => void;

@@ -53,10 +53,11 @@ import {
   PDVConfig,
   ScriptOperationResult,
   Theme,
+  TreeAddFileResult,
   TreeCreateScriptResult,
   TreeNode,
 } from "./ipc";
-import { PDVMessage, PDVMessageType } from "./pdv-protocol";
+import { PDVFileRegisterPayload, PDVMessage, PDVMessageType } from "./pdv-protocol";
 
 // ---------------------------------------------------------------------------
 // Internal state
@@ -81,6 +82,7 @@ const REGISTERED_CHANNELS: readonly string[] = [
   IPC.tree.list,
   IPC.tree.get,
   IPC.tree.createScript,
+  IPC.tree.addFile,
   IPC.namespace.query,
   IPC.script.edit,
   IPC.script.reload,
@@ -118,6 +120,8 @@ interface PushSubscription {
 
 const pushSubscriptions: PushSubscription[] = [];
 const kernelWorkingDirs = new Map<string, string>();
+const crashHandlers = new Map<string, (id: string) => void>();
+let activeKernelManagerRef: KernelManager | null = null;
 
 const BOOTSTRAP_AND_OPEN_COMM = `
 from IPython import get_ipython
@@ -135,6 +139,34 @@ if _pdv_comms._comm is None:
     _pdv_comm.on_msg(_pdv_comms._on_comm_message)
     _pdv_comms.send_message("pdv.ready", {})
 `;
+
+// ---------------------------------------------------------------------------
+// Working-directory helpers
+// ---------------------------------------------------------------------------
+
+/**
+ * Delete the working directory for a kernel and remove its crash handler.
+ *
+ * @param projectManager - Project manager used for deletion.
+ * @param kernelManager  - Kernel manager used to remove event listeners.
+ * @param kernelId       - Kernel whose working dir should be cleaned up.
+ */
+async function cleanupKernelWorkingDir(
+  projectManager: ProjectManager,
+  kernelManager: KernelManager,
+  kernelId: string
+): Promise<void> {
+  const oldDir = kernelWorkingDirs.get(kernelId);
+  if (oldDir) {
+    await projectManager.deleteWorkingDir(oldDir);
+    kernelWorkingDirs.delete(kernelId);
+  }
+  const handler = crashHandlers.get(kernelId);
+  if (handler) {
+    kernelManager.removeListener("kernel:crashed", handler);
+    crashHandlers.delete(kernelId);
+  }
+}
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -473,6 +505,76 @@ async function initializeKernelSession(
 }
 
 // ---------------------------------------------------------------------------
+// File-backed node save/load helpers (Phase 4)
+// ---------------------------------------------------------------------------
+
+/**
+ * Read tree-index.json from a directory and return entries that have a filename
+ * (i.e. file-backed nodes).
+ *
+ * @param dir - Directory containing tree-index.json.
+ * @returns Array of {path, filename} descriptors for file-backed nodes.
+ */
+async function readFileBackedEntries(
+  dir: string
+): Promise<Array<{ path: string; filename: string }>> {
+  try {
+    const raw = await fs.readFile(path.join(dir, "tree-index.json"), "utf8");
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    return (parsed as Array<Record<string, unknown>>)
+      .filter((e) => typeof e.filename === "string" && (e.filename as string).length > 0)
+      .map((e) => ({ path: String(e.path ?? ""), filename: e.filename as string }));
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Copy file-backed node files from the kernel working directory into the save directory.
+ *
+ * Called after the kernel has written tree-index.json to saveDir.
+ *
+ * @param workingDir - Kernel working directory (source).
+ * @param saveDir    - Project save directory (destination).
+ */
+async function copyFilesForSave(workingDir: string, saveDir: string): Promise<void> {
+  const nodes = await readFileBackedEntries(saveDir);
+  for (const { path: nodePath, filename } of nodes) {
+    const segs = nodePath.split(".").filter(Boolean);
+    const src = path.join(workingDir, ...segs, filename);
+    const destDir2 = path.join(saveDir, ...segs);
+    const dest = path.join(destDir2, filename);
+    await fs.mkdir(destDir2, { recursive: true });
+    await fs.copyFile(src, dest).catch(() =>
+      console.warn(`[pdv] save: could not copy ${src}`)
+    );
+  }
+}
+
+/**
+ * Copy file-backed node files from the save directory into the kernel working directory.
+ *
+ * Called before sending pdv.project.load so files exist when the kernel reads them.
+ *
+ * @param saveDir    - Project save directory (source).
+ * @param workingDir - Kernel working directory (destination).
+ */
+async function copyFilesForLoad(saveDir: string, workingDir: string): Promise<void> {
+  const nodes = await readFileBackedEntries(saveDir);
+  for (const { path: nodePath, filename } of nodes) {
+    const segs = nodePath.split(".").filter(Boolean);
+    const src = path.join(saveDir, ...segs, filename);
+    const destDir2 = path.join(workingDir, ...segs);
+    const dest = path.join(destDir2, filename);
+    await fs.mkdir(destDir2, { recursive: true });
+    await fs.copyFile(src, dest).catch(() =>
+      console.warn(`[pdv] load: could not copy ${src}`)
+    );
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Public registration API
 // ---------------------------------------------------------------------------
 
@@ -494,6 +596,7 @@ export function registerIpcHandlers(
   configStore: ConfigStore,
   pdvDir: string
 ): void {
+  activeKernelManagerRef = kernelManager;
   unregisterIpcHandlers();
 
   // Derive per-purpose sub-directories within ~/.PDV
@@ -644,6 +747,16 @@ export function registerIpcHandlers(
     await initializeKernelSession(kernelManager, commRouter, projectManager, kernel.id);
     activeKernelId = kernel.id;
     await bindActiveProjectModules(activeKernelId);
+
+    const onCrash = async (crashedId: string): Promise<void> => {
+      if (crashedId !== kernel.id) return;
+      await cleanupKernelWorkingDir(projectManager, kernelManager, crashedId);
+      if (activeKernelId === crashedId) activeKernelId = null;
+      win.webContents.send(IPC.push.kernelStatus, { kernelId: crashedId, status: "dead" });
+    };
+    crashHandlers.set(kernel.id, onCrash);
+    kernelManager.on("kernel:crashed", onCrash);
+
     return kernel;
   });
 
@@ -652,12 +765,8 @@ export function registerIpcHandlers(
   // Returns: true after stop completes.
   // On error: throws to renderer.
   ipcMain.handle(IPC.kernels.stop, async (_event, kernelId: string) => {
+    await cleanupKernelWorkingDir(projectManager, kernelManager, kernelId);
     await kernelManager.stop(kernelId);
-    const workingDir = kernelWorkingDirs.get(kernelId);
-    if (workingDir) {
-      await projectManager.deleteWorkingDir(workingDir);
-      kernelWorkingDirs.delete(kernelId);
-    }
     if (activeKernelId === kernelId) {
       activeKernelId = null;
     }
@@ -695,6 +804,7 @@ export function registerIpcHandlers(
       restart?: (id: string) => Promise<KernelInfo>;
     };
     if (restartable.restart) {
+      await cleanupKernelWorkingDir(projectManager, kernelManager, kernelId);
       const restarted = await restartable.restart(kernelId);
       commRouter.attach(kernelManager, restarted.id);
       await initializeKernelSession(kernelManager, commRouter, projectManager, restarted.id);
@@ -706,6 +816,7 @@ export function registerIpcHandlers(
     if (!current) {
       throw new Error(`Kernel not found: ${kernelId}`);
     }
+    await cleanupKernelWorkingDir(projectManager, kernelManager, kernelId);
     await kernelManager.stop(kernelId);
     const restarted = await kernelManager.start({
       name: current.name,
@@ -865,6 +976,42 @@ export function registerIpcHandlers(
         language: "python",
       });
       return { success: true, scriptPath };
+    }
+  );
+
+  // Handles tree:addFile requests from the renderer.
+  // Copies a source file into the kernel working directory and registers it with the kernel.
+  // Input: kernelId (string), sourcePath (string), targetTreePath (string),
+  //        nodeType ("namelist"|"fortran"|"file"), filename (string).
+  // Returns: TreeAddFileResult.
+  // On error: throws to renderer.
+  ipcMain.handle(
+    IPC.tree.addFile,
+    async (
+      _event,
+      kernelId: string,
+      sourcePath: string,
+      targetTreePath: string,
+      nodeType: "namelist" | "fortran" | "file",
+      filename: string
+    ): Promise<TreeAddFileResult> => {
+      if (!kernelManager.getKernel(kernelId)) throw new Error(`Kernel not found: ${kernelId}`);
+      const workingDir = kernelWorkingDirs.get(kernelId);
+      if (!workingDir) throw new Error(`Working dir not initialized: ${kernelId}`);
+
+      const segments = targetTreePath.split(".").filter(Boolean);
+      const destDir = segments.length > 0 ? path.join(workingDir, ...segments) : workingDir;
+      await fs.mkdir(destDir, { recursive: true });
+      const destPath = path.join(destDir, filename);
+      await fs.copyFile(sourcePath, destPath);
+
+      await commRouter.request(PDVMessageType.FILE_REGISTER, {
+        tree_path: targetTreePath,
+        filename,
+        node_type: nodeType,
+      } satisfies PDVFileRegisterPayload);
+
+      return { success: true, workingDirPath: destPath };
     }
   );
 
@@ -1301,6 +1448,12 @@ export function registerIpcHandlers(
         pendingModuleSettings = {};
       }
 
+      // Copy file-backed node files from working dir into save dir.
+      if (activeKernelId) {
+        const workingDir = kernelWorkingDirs.get(activeKernelId);
+        if (workingDir) await copyFilesForSave(workingDir, saveDir);
+      }
+
       activeProjectDir = saveDir;
       await refreshProjectModuleHealth(activeProjectDir);
       return true;
@@ -1312,6 +1465,12 @@ export function registerIpcHandlers(
   // Returns: code cell payload loaded by ProjectManager.
   // On error: throws to renderer.
   ipcMain.handle(IPC.project.load, async (_event, saveDir: string) => {
+    // Copy file-backed node files from save dir into working dir before kernel load.
+    if (activeKernelId) {
+      const workingDir = kernelWorkingDirs.get(activeKernelId);
+      if (workingDir) await copyFilesForLoad(saveDir, workingDir);
+    }
+
     const loaded = await projectManager.load(saveDir);
     activeProjectDir = saveDir;
     pendingModuleImports = [];
@@ -1498,6 +1657,12 @@ export function unregisterIpcHandlers(): void {
   for (const channel of REGISTERED_CHANNELS) {
     ipcMain.removeHandler(channel);
   }
+  for (const [id, dir] of kernelWorkingDirs) {
+    const handler = crashHandlers.get(id);
+    if (handler) activeKernelManagerRef?.removeListener("kernel:crashed", handler);
+    try { fsSync.rmSync(dir, { recursive: true, force: true }); } catch { /* ignored */ }
+  }
   kernelWorkingDirs.clear();
+  crashHandlers.clear();
   clearPushSubscriptions();
 }

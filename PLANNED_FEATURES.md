@@ -211,6 +211,32 @@ The alpha testing strategy (ARCHITECTURE.md §14) covers unit tests for Python a
 
 ---
 
+## 11) Kernel Reconnect on Renderer Reload
+
+### Goal
+When only the renderer reloads (Cmd+R, dev hot reload), the kernel and its working
+directory are still alive. Currently, the app always starts a fresh session on any
+reload. A reconnect path would preserve in-memory tree state and avoid unnecessary
+kernel restarts during development and crash recovery.
+
+### Planned work
+- **`session:getActive` IPC channel**: On renderer mount, query whether a live kernel
+  session exists rather than always starting fresh.
+- **`pdv.session.reconnect` comm message**: Let the kernel confirm it is in a valid
+  state without re-running `pdv.init`. Kernel responds with its current `working_dir`
+  and a state summary.
+- **Working directory validation**: Main process verifies the persisted `working_dir`
+  still exists and the kernel is responsive before committing to reconnect.
+- **Fallback**: If the kernel is dead or unresponsive within a timeout, fall back to
+  the current fresh-start path (clean up old dir, start new kernel).
+
+### Constraints
+- Requires a coordinated update to `pdv_kernel` (Python side).
+- Does not cover cross-process-restart reconnect (that requires remote kernel infra, item 4).
+- Must not change behavior on a fresh app launch with no prior session.
+
+---
+
 ---
 
 # Beta Features (Target: 1.0.0)
