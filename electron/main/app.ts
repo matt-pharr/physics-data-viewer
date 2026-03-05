@@ -174,7 +174,9 @@ export function wireAppEvents(
     }
   });
 
-  app.on("before-quit", (event) => {
+  // Run kernel shutdown during will-quit, after renderer close/save flows
+  // have completed, so save-on-quit can still reach the active kernel.
+  app.on("will-quit", (event) => {
     const kernelManager = getKernelManager();
     if (!kernelManager || isShuttingDownGlobal) {
       return;
