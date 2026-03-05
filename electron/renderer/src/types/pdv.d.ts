@@ -386,7 +386,12 @@ export interface PDVApi {
       kernelId: string,
       code: string,
       cursorPos: number
-    ): Promise<{ matches: string[]; cursor_start: number; cursor_end: number }>;
+    ): Promise<{
+      matches: string[];
+      cursor_start: number;
+      cursor_end: number;
+      metadata?: Record<string, unknown>;
+    }>;
     inspect(
       kernelId: string,
       code: string,

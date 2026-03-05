@@ -29,6 +29,7 @@ import * as os from "os";
 import * as path from "path";
 import { spawn, ChildProcess } from "child_process";
 import { EventEmitter } from "events";
+import type { KernelCompleteResult, KernelInspectResult } from "./ipc";
 
 // ---------------------------------------------------------------------------
 // Public types
@@ -158,6 +159,8 @@ interface ManagedKernel {
   shuttingDown: boolean;
   /** Promise that resolves when the background iopub loop exits. */
   iopubLoopDone: Promise<void>;
+  /** Serializes shell-socket operations to avoid concurrent socket access. */
+  shellQueue: Promise<void>;
 }
 
 // ---------------------------------------------------------------------------
@@ -421,6 +424,7 @@ export class KernelManager extends EventEmitter {
       lastActivity: Date.now(),
       shuttingDown: false,
       iopubLoopDone,
+      shellQueue: Promise.resolve(),
     };
 
     this.kernels.set(kernelId, managed);
@@ -648,13 +652,109 @@ export class KernelManager extends EventEmitter {
         finish();
       }, 30_000);
 
-      managed.shellSocket
-        .send(serializeMessage(msg, managed.connectionInfo.key))
+      this.enqueueShellOperation(managed, async () => {
+        await managed.shellSocket.send(
+          serializeMessage(msg, managed.connectionInfo.key)
+        );
+      })
         .catch((err: Error) => {
           result.error = err.message;
           finish();
         });
     });
+  }
+
+  /**
+   * Request code completions from the kernel at the given cursor position.
+   *
+   * @param id - Kernel ID.
+   * @param code - Full source text to complete against.
+   * @param cursorPos - Cursor offset in `code`.
+   * @returns Jupyter completion candidates and replacement span.
+   * @throws If the kernel is missing, the shell request fails, or times out.
+   */
+  async complete(
+    id: string,
+    code: string,
+    cursorPos: number
+  ): Promise<KernelCompleteResult> {
+    const managed = this.kernels.get(id);
+    if (!managed) throw new Error(`Kernel not found: ${id}`);
+
+    const reply = await this.sendShellRequest(
+      managed,
+      "complete_request",
+      { code, cursor_pos: cursorPos }
+    );
+    const content = reply.content;
+    if (content.status === "error") {
+      return {
+        matches: [],
+        cursor_start: cursorPos,
+        cursor_end: cursorPos,
+      };
+    }
+
+    const matches = Array.isArray(content.matches)
+      ? content.matches.filter((item): item is string => typeof item === "string")
+      : [];
+    const cursor_start =
+      typeof content.cursor_start === "number"
+        ? content.cursor_start
+        : cursorPos;
+    const cursor_end =
+      typeof content.cursor_end === "number" ? content.cursor_end : cursorPos;
+    const metadata =
+      typeof content.metadata === "object" &&
+      content.metadata !== null &&
+      !Array.isArray(content.metadata)
+        ? (content.metadata as Record<string, unknown>)
+        : undefined;
+
+    return {
+      matches,
+      cursor_start,
+      cursor_end,
+      metadata,
+    };
+  }
+
+  /**
+   * Request symbol/documentation inspection data from the kernel.
+   *
+   * @param id - Kernel ID.
+   * @param code - Full source text to inspect against.
+   * @param cursorPos - Cursor offset in `code`.
+   * @returns Inspection payload (`found`, optional MIME-keyed docs).
+   * @throws If the kernel is missing, the shell request fails, or times out.
+   */
+  async inspect(
+    id: string,
+    code: string,
+    cursorPos: number
+  ): Promise<KernelInspectResult> {
+    const managed = this.kernels.get(id);
+    if (!managed) throw new Error(`Kernel not found: ${id}`);
+
+    const reply = await this.sendShellRequest(
+      managed,
+      "inspect_request",
+      { code, cursor_pos: cursorPos, detail_level: 0 }
+    );
+    const content = reply.content;
+    if (content.status === "error" || content.found !== true) {
+      return { found: false };
+    }
+
+    const data: Record<string, string> = {};
+    if (typeof content.data === "object" && content.data !== null) {
+      for (const [key, value] of Object.entries(content.data)) {
+        if (typeof value === "string") {
+          data[key] = value;
+        }
+      }
+    }
+    return Object.keys(data).length > 0 ? { found: true, data } : { found: true };
   }
 
   /**
@@ -739,9 +839,11 @@ export class KernelManager extends EventEmitter {
       { comm_id: commId ?? "", data },
       managed.sessionId
     );
-    await managed.shellSocket.send(
-      serializeMessage(msg, managed.connectionInfo.key)
-    );
+    await this.enqueueShellOperation(managed, async () => {
+      await managed.shellSocket.send(
+        serializeMessage(msg, managed.connectionInfo.key)
+      );
+    });
   }
 
   // -------------------------------------------------------------------------
@@ -792,6 +894,81 @@ export class KernelManager extends EventEmitter {
   }
 
   /**
+   * Serialize shell-socket operations so only one async context touches the
+   * socket at a time.
+   *
+   * @param managed - Kernel whose shell queue should be used.
+   * @param operation - Shell operation to run exclusively.
+   * @returns Operation result.
+   * @throws Re-throws any operation error.
+   */
+  private async enqueueShellOperation<T>(
+    managed: ManagedKernel,
+    operation: () => Promise<T>
+  ): Promise<T> {
+    const previous = managed.shellQueue;
+    let release!: () => void;
+    managed.shellQueue = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    await previous;
+    try {
+      return await operation();
+    } finally {
+      release();
+    }
+  }
+
+  /**
+   * Send a shell-channel request and wait for the correlated shell reply.
+   *
+   * @param managed - Target running kernel.
+   * @param msgType - Request message type (e.g. complete_request).
+   * @param content - Request content object.
+   * @param timeoutMs - Maximum wait time for correlated reply.
+   * @returns Parsed correlated shell reply.
+   * @throws If no correlated reply arrives before timeout.
+   */
+  private async sendShellRequest(
+    managed: ManagedKernel,
+    msgType: string,
+    content: Record<string, unknown>,
+    timeoutMs = 5_000
+  ): Promise<JupyterMessage> {
+    return this.enqueueShellOperation(managed, async () => {
+      const request = createMessage(msgType, content, managed.sessionId);
+      const requestId = request.header.msg_id;
+
+      await managed.shellSocket.send(
+        serializeMessage(request, managed.connectionInfo.key)
+      );
+
+      (managed.shellSocket as unknown as { receiveTimeout: number }).receiveTimeout = 100;
+      const deadline = Date.now() + timeoutMs;
+
+      while (Date.now() < deadline) {
+        try {
+          const frames = await managed.shellSocket.receive();
+          const reply = parseMessage(frames as Buffer[], managed.connectionInfo.key);
+          if (!reply) continue;
+          const parentMsgId = (reply.parent_header as { msg_id?: unknown }).msg_id;
+          if (typeof parentMsgId === "string" && parentMsgId === requestId) {
+            return reply;
+          }
+        } catch (err: unknown) {
+          const error = err as { code?: string };
+          if (error.code === "EAGAIN") continue;
+          throw err;
+        }
+      }
+
+      throw new Error(
+        `Timed out waiting for shell reply to ${msgType} (${timeoutMs} ms)`
+      );
+    });
+  }
+
+  /**
    * Wait for the kernel to emit `status: idle` on iopub, which signals that
    * it has finished initializing and is ready to accept execute_request.
    *
@@ -837,8 +1014,11 @@ export class KernelManager extends EventEmitter {
           {},
           managed.sessionId
         );
-        managed.shellSocket
-          .send(serializeMessage(msg, managed.connectionInfo.key))
+        this.enqueueShellOperation(managed, async () => {
+          await managed.shellSocket.send(
+            serializeMessage(msg, managed.connectionInfo.key)
+          );
+        })
           .catch(() => {
             // Ignore send errors during startup.
           });

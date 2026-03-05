@@ -663,6 +663,7 @@ const App: React.FC = () => {
                     onChange: (code: string) => handleCodeChange(tab.id, code),
                   }))}
                   activeTabId={activeCellTab}
+                  kernelId={currentKernelId}
                   disabled={kernelStatus !== 'ready'}
                   onTabChange={handleTabChange}
                   onAddTab={addCellTab}

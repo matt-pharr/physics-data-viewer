@@ -140,6 +140,89 @@ describe("@slow KernelManager (real kernel process)", { timeout: 60_000 }, () =>
   });
 
   // -------------------------------------------------------------------------
+  // complete() / inspect()
+  // -------------------------------------------------------------------------
+
+  describe("complete() / inspect()", () => {
+    it("can send a shell request and receive kernel_info_reply", async () => {
+      const info = await km.start();
+      startedKernelId = info.id;
+
+      const managed = (km as unknown as {
+        kernels: Map<string, unknown>;
+      }).kernels.get(info.id);
+      expect(managed).toBeDefined();
+
+      const reply = await (
+        km as unknown as {
+          sendShellRequest: (
+            kernel: unknown,
+            msgType: string,
+            content: Record<string, unknown>
+          ) => Promise<{ header: { msg_type: string } }>;
+        }
+      ).sendShellRequest(managed, "kernel_info_request", {});
+
+      expect(reply.header.msg_type).toBe("kernel_info_reply");
+    });
+
+    it("returns completion matches for os.path.* symbols", async () => {
+      const info = await km.start();
+      startedKernelId = info.id;
+      await km.execute(info.id, { code: "import os" });
+
+      const result = await km.complete(info.id, "os.path.", 8);
+
+      expect(result.matches).toContain("join");
+      expect(result.cursor_start).toBeGreaterThanOrEqual(0);
+      expect(result.cursor_end).toBeGreaterThanOrEqual(result.cursor_start);
+    });
+
+    it("supports concurrent completion requests without socket errors", async () => {
+      const info = await km.start();
+      startedKernelId = info.id;
+      await km.execute(info.id, { code: "import os" });
+
+      const [a, b] = await Promise.all([
+        km.complete(info.id, "os.path.", 8),
+        km.complete(info.id, "os.path.", 8),
+      ]);
+
+      expect(Array.isArray(a.matches)).toBe(true);
+      expect(Array.isArray(b.matches)).toBe(true);
+    });
+
+    it("returns an empty completion list for missing variables", async () => {
+      const info = await km.start();
+      startedKernelId = info.id;
+
+      const result = await km.complete(info.id, "nonexistent_var.", 16);
+
+      expect(result.matches).toEqual([]);
+    });
+
+    it("returns inspect docs for os.path.join", async () => {
+      const info = await km.start();
+      startedKernelId = info.id;
+      await km.execute(info.id, { code: "import os" });
+
+      const result = await km.inspect(info.id, "os.path.join", 12);
+
+      expect(result.found).toBe(true);
+      expect(result.data?.["text/plain"]).toMatch(/join/i);
+    });
+
+    it("returns found=false for inspect misses", async () => {
+      const info = await km.start();
+      startedKernelId = info.id;
+
+      const result = await km.inspect(info.id, "nonexistent_symbol", 10);
+
+      expect(result.found).toBe(false);
+    });
+  });
+
+  // -------------------------------------------------------------------------
   // stop()
   // -------------------------------------------------------------------------
 

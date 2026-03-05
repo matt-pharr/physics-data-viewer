@@ -1,0 +1,194 @@
+// @vitest-environment jsdom
+
+import { cleanup, render } from '@testing-library/react';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { DEFAULT_SHORTCUTS } from '../../shortcuts';
+
+vi.mock('../../themes', () => ({
+  defineMonacoThemes: vi.fn(),
+}));
+
+vi.mock('@monaco-editor/react', async () => {
+  const ReactModule = await import('react');
+  return {
+    default: (props: {
+      beforeMount?: (monaco: unknown) => void;
+      onMount?: (editor: { onKeyDown: () => void }) => void;
+    }) => {
+      props.beforeMount?.((globalThis as { __testMonaco?: unknown }).__testMonaco);
+      props.onMount?.({ onKeyDown: () => undefined });
+      return ReactModule.createElement('div', { 'data-testid': 'mock-editor' });
+    },
+  };
+});
+
+type CompletionProvider = {
+  triggerCharacters?: string[];
+  provideCompletionItems: (model: MockModel, position: MockPosition) => Promise<{
+    suggestions: Array<{ label: string; insertText: string; kind: number }>;
+  }>;
+};
+
+type MockPosition = { lineNumber: number; column: number };
+type MockModel = {
+  getValue: () => string;
+  getOffsetAt: (position: MockPosition) => number;
+  getPositionAt: (offset: number) => MockPosition;
+};
+
+let completionProvider: CompletionProvider | null = null;
+const complete = vi.fn();
+const inspect = vi.fn();
+const registerCompletionItemProvider = vi.fn();
+
+beforeEach(() => {
+  completionProvider = null;
+  complete.mockReset();
+  inspect.mockReset();
+  registerCompletionItemProvider.mockReset();
+
+  registerCompletionItemProvider.mockImplementation((_language: string, provider: CompletionProvider) => {
+    completionProvider = provider;
+    return { dispose: vi.fn() };
+  });
+
+  (globalThis as { __testMonaco?: unknown }).__testMonaco = {
+    languages: {
+      registerCompletionItemProvider,
+      registerHoverProvider: vi.fn(() => ({ dispose: vi.fn() })),
+      CompletionItemKind: {
+        Function: 1,
+        Module: 2,
+        Class: 3,
+        Keyword: 4,
+        Property: 5,
+        Snippet: 6,
+        Variable: 7,
+      },
+    },
+    Range: class {
+      constructor(
+        public startLineNumber: number,
+        public startColumn: number,
+        public endLineNumber: number,
+        public endColumn: number
+      ) {}
+    },
+  };
+
+  Object.defineProperty(window, 'pdv', {
+    configurable: true,
+    value: {
+      kernels: {
+        complete,
+        inspect,
+      },
+    },
+  });
+});
+
+afterEach(() => {
+  cleanup();
+  vi.resetModules();
+});
+
+function makeModel(code: string): MockModel {
+  return {
+    getValue: () => code,
+    getOffsetAt: (position) => position.column - 1,
+    getPositionAt: (offset) => ({ lineNumber: 1, column: offset + 1 }),
+  };
+}
+
+async function renderCodeCell(kernelId: string | null): Promise<void> {
+  const { CodeCell } = await import('./index');
+  render(
+    <CodeCell
+      tabs={[{ id: 1, code: 'os.path.', onChange: vi.fn() }]}
+      activeTabId={1}
+      kernelId={kernelId}
+      onTabChange={vi.fn()}
+      onAddTab={vi.fn()}
+      onRemoveTab={vi.fn()}
+      onExecute={vi.fn()}
+      onInterrupt={vi.fn()}
+      onClear={vi.fn()}
+      isExecuting={false}
+      shortcuts={DEFAULT_SHORTCUTS}
+    />
+  );
+}
+
+describe('CodeCell completion provider', () => {
+  it('registers the completion provider only once', async () => {
+    await renderCodeCell('kernel-1');
+    await renderCodeCell('kernel-1');
+    expect(registerCompletionItemProvider).toHaveBeenCalledTimes(1);
+    const provider = registerCompletionItemProvider.mock.calls[0]?.[1] as CompletionProvider;
+    expect(provider.triggerCharacters).toEqual(['.', '[']);
+  });
+
+  it('returns no suggestions when there is no active kernel', async () => {
+    await renderCodeCell(null);
+    expect(completionProvider).toBeTruthy();
+    const result = await completionProvider!.provideCompletionItems(
+      makeModel('os.path.'),
+      { lineNumber: 1, column: 8 }
+    );
+    expect(result.suggestions).toEqual([]);
+    expect(complete).not.toHaveBeenCalled();
+  });
+
+  it('maps kernel completion results into Monaco suggestions', async () => {
+    complete.mockResolvedValue({
+      matches: ['join', 'exists'],
+      cursor_start: 3,
+      cursor_end: 8,
+      metadata: {
+        _jupyter_types_experimental: [{ text: 'join', type: 'function' }],
+      },
+    });
+    await renderCodeCell('kernel-1');
+
+    const result = await completionProvider!.provideCompletionItems(
+      makeModel('os.path.'),
+      { lineNumber: 1, column: 8 }
+    );
+
+    expect(complete).toHaveBeenCalledWith('kernel-1', 'os.path.', 7);
+    expect(result.suggestions.map((s) => s.label)).toEqual(['join', 'exists']);
+    expect(result.suggestions[0].insertText).toBe('join');
+    expect(result.suggestions[0].kind).toBe(1);
+    expect(result.suggestions[1].kind).toBe(7);
+  });
+
+  it('handles kernel completion failures gracefully', async () => {
+    complete.mockRejectedValue(new Error('completion failed'));
+    await renderCodeCell('kernel-1');
+
+    const result = await completionProvider!.provideCompletionItems(
+      makeModel('os.path.'),
+      { lineNumber: 1, column: 8 }
+    );
+
+    expect(result.suggestions).toEqual([]);
+  });
+
+  it('prioritizes pdv_tree for pdv* prefix completions', async () => {
+    complete.mockResolvedValue({
+      matches: ['pdv_kernel', 'pdv'],
+      cursor_start: 0,
+      cursor_end: 3,
+    });
+    await renderCodeCell('kernel-1');
+
+    const result = await completionProvider!.provideCompletionItems(
+      makeModel('pdv'),
+      { lineNumber: 1, column: 4 }
+    );
+
+    const labels = result.suggestions.map((s) => s.label);
+    expect(labels[0]).toBe('pdv_tree');
+    expect(labels).toEqual(expect.arrayContaining(['pdv_tree', 'pdv', 'pdv_kernel']));
+  });
+});

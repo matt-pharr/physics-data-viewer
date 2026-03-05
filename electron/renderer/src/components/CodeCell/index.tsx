@@ -14,10 +14,154 @@ import type { Shortcuts } from '../../shortcuts';
 import { matchesShortcut } from '../../shortcuts';
 import { defineMonacoThemes } from '../../themes';
 
+let completionProviderRegistered = false;
+let hoverProviderRegistered = false;
+let activeKernelIdRef: React.MutableRefObject<string | null> | null = null;
+
+function mapCompletionKind(
+  monacoInstance: typeof monaco,
+  rawType: string | undefined
+): monaco.languages.CompletionItemKind {
+  switch (rawType) {
+    case 'function':
+    case 'builtin_function_or_method':
+      return monacoInstance.languages.CompletionItemKind.Function;
+    case 'module':
+      return monacoInstance.languages.CompletionItemKind.Module;
+    case 'class':
+      return monacoInstance.languages.CompletionItemKind.Class;
+    case 'keyword':
+      return monacoInstance.languages.CompletionItemKind.Keyword;
+    case 'property':
+      return monacoInstance.languages.CompletionItemKind.Property;
+    case 'statement':
+      return monacoInstance.languages.CompletionItemKind.Snippet;
+    case 'instance':
+      return monacoInstance.languages.CompletionItemKind.Variable;
+    default:
+      return monacoInstance.languages.CompletionItemKind.Variable;
+  }
+}
+
+function registerKernelCompletionProvider(monacoInstance: typeof monaco): void {
+  if (completionProviderRegistered) return;
+  completionProviderRegistered = true;
+
+  monacoInstance.languages.registerCompletionItemProvider('python', {
+    triggerCharacters: ['.', '['],
+    async provideCompletionItems(model, position) {
+      const kernelId = activeKernelIdRef?.current ?? null;
+      if (!kernelId) return { suggestions: [] };
+
+      const code = model.getValue();
+      const offset = model.getOffsetAt(position);
+
+      try {
+        const result = await window.pdv.kernels.complete(kernelId, code, offset);
+        const textBeforeCursor = code.slice(0, offset);
+        const namePrefix = textBeforeCursor.match(/[A-Za-z_][A-Za-z0-9_]*$/)?.[0] ?? '';
+        let mergedMatches = [...result.matches];
+        // ipykernel completion can omit protected PDV locals from top-level name
+        // completion; ensure the two built-ins are always discoverable.
+        if (namePrefix) {
+          for (const builtin of ['pdv_tree', 'pdv']) {
+            if (builtin.startsWith(namePrefix) && !mergedMatches.includes(builtin)) {
+              mergedMatches.push(builtin);
+            }
+          }
+        }
+        if (namePrefix.startsWith('pdv')) {
+          const preferred = ['pdv_tree', 'pdv'];
+          const front = preferred.filter((item) => item.startsWith(namePrefix) && mergedMatches.includes(item));
+          const frontSet = new Set(front);
+          mergedMatches = [...front, ...mergedMatches.filter((item) => !frontSet.has(item))];
+        }
+        const startPosition = model.getPositionAt(result.cursor_start);
+        const endPosition = model.getPositionAt(result.cursor_end);
+        const range = new monacoInstance.Range(
+          startPosition.lineNumber,
+          startPosition.column,
+          endPosition.lineNumber,
+          endPosition.column
+        );
+
+        const kindByMatch = new Map<string, monaco.languages.CompletionItemKind>();
+        const experimental = result.metadata?._jupyter_types_experimental;
+        if (Array.isArray(experimental)) {
+          for (const item of experimental) {
+            if (
+              item &&
+              typeof item === 'object' &&
+              'text' in item &&
+              'type' in item &&
+              typeof item.text === 'string' &&
+              typeof item.type === 'string'
+            ) {
+              kindByMatch.set(item.text, mapCompletionKind(monacoInstance, item.type));
+            }
+          }
+        }
+
+        return {
+          suggestions: mergedMatches.map((match, index) => ({
+            label: match,
+            kind: kindByMatch.get(match) ?? monacoInstance.languages.CompletionItemKind.Variable,
+            insertText: match,
+            range,
+            sortText: String(index).padStart(5, '0'),
+          })),
+        };
+      } catch (error) {
+        console.warn('[CodeCell] Completion request failed', error);
+        return { suggestions: [] };
+      }
+    },
+  });
+}
+
+function registerKernelHoverProvider(monacoInstance: typeof monaco): void {
+  if (hoverProviderRegistered) return;
+  hoverProviderRegistered = true;
+
+  monacoInstance.languages.registerHoverProvider('python', {
+    async provideHover(model, position) {
+      const kernelId = activeKernelIdRef?.current ?? null;
+      if (!kernelId) return null;
+
+      try {
+        const code = model.getValue();
+        const offset = model.getOffsetAt(position);
+        const result = await window.pdv.kernels.inspect(kernelId, code, offset);
+        const doc = result.data?.['text/plain'];
+        if (!result.found || typeof doc !== 'string' || !doc.trim()) {
+          return null;
+        }
+
+        const word = model.getWordAtPosition(position);
+        return {
+          contents: [{ value: `\`\`\`text\n${doc}\n\`\`\`` }],
+          range: word
+            ? new monacoInstance.Range(
+              position.lineNumber,
+              word.startColumn,
+              position.lineNumber,
+              word.endColumn
+            )
+            : undefined,
+        };
+      } catch (error) {
+        console.warn('[CodeCell] Inspect request failed', error);
+        return null;
+      }
+    },
+  });
+}
+
 /** Props for the tabbed code-cell editor pane. */
 export interface CodeCellProps {
   tabs: (CellTab & { onChange: (code: string) => void })[];
   activeTabId: number;
+  kernelId?: string | null;
   disabled?: boolean;
   onTabChange: (id: number) => void;
   onAddTab: () => void;
@@ -39,6 +183,7 @@ export interface CodeCellProps {
 export const CodeCell: React.FC<CodeCellProps> = ({
   tabs,
   activeTabId,
+  kernelId = null,
   disabled = false,
   onTabChange,
   onAddTab,
@@ -65,6 +210,8 @@ export const CodeCell: React.FC<CodeCellProps> = ({
   const onRemoveTabRef = useRef(onRemoveTab);
   const tabsRef = useRef(tabs);
   const onTabChangeRef = useRef(onTabChange);
+  const kernelIdRef = useRef<string | null>(kernelId);
+  activeKernelIdRef = kernelIdRef;
 
   useEffect(() => {
     activeTabRef.current = activeTab;
@@ -98,12 +245,18 @@ export const CodeCell: React.FC<CodeCellProps> = ({
     onTabChangeRef.current = onTabChange;
   }, [onTabChange]);
 
+  useEffect(() => {
+    kernelIdRef.current = kernelId;
+  }, [kernelId]);
+
   if (!activeTab) {
     return null;
   }
 
   const handleBeforeMount: BeforeMount = (monaco) => {
     defineMonacoThemes(monaco);
+    registerKernelCompletionProvider(monaco);
+    registerKernelHoverProvider(monaco);
   };
 
   const handleEditorMount: OnMount = (editor) => {
@@ -269,9 +422,9 @@ export const CodeCell: React.FC<CodeCellProps> = ({
             insertSpaces: true,
             detectIndentation: false,
 
-            // Suggestions — disabled in favour of future kernel-backed completions (see UPCOMING_FEATURES §13)
-            quickSuggestions: false,
-            suggestOnTriggerCharacters: false,
+            // Suggestions — kernel-backed completions (PLANNED_FEATURES §5)
+            quickSuggestions: { other: true, comments: false, strings: false },
+            suggestOnTriggerCharacters: true,
             wordBasedSuggestions: 'off',
             parameterHints: { enabled: false },
 
