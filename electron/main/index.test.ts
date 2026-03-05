@@ -122,7 +122,7 @@ vi.mock("electron", () => ({
     showOpenDialog: mocks.dialogShowOpenDialog,
   },
   app: {
-    getVersion: () => "0.0.3",
+    getVersion: () => "0.0.4",
   },
 }));
 

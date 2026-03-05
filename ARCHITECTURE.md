@@ -111,7 +111,7 @@ Every PDV message — whether sent by the app or by the kernel — has the follo
 
 ```json
 {
-  "pdv_version": "0.0.1",
+  "pdv_version": "0.0.4",
   "msg_id": "<uuid-v4>",
   "in_reply_to": "<uuid-v4-or-null>",
   "type": "<message-type-string>",
@@ -122,7 +122,7 @@ Every PDV message — whether sent by the app or by the kernel — has the follo
 
 | Field | Type | Description |
 |---|---|---|
-| `pdv_version` | string | Protocol version. Currently `"0.0.1"` (alpha). The app rejects messages with an incompatible major version. |
+| `pdv_version` | string | Protocol version. Currently `"0.0.4"` (alpha). The app rejects messages with an incompatible major version. |
 | `msg_id` | string | UUID v4. Unique identifier for this message. |
 | `in_reply_to` | string \| null | The `msg_id` of the request this is responding to. `null` for unsolicited push messages. |
 | `type` | string | Dot-namespaced message type (see Section 3.4). |
