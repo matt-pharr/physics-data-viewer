@@ -42,6 +42,7 @@ export interface ModuleManifestV1 {
     control?: "text" | "dropdown" | "slider" | "checkbox" | "file";
     default?: ModuleInputValue;
     options?: Array<{ label: string; value: ModuleInputValue }>;
+    options_tree_path?: string;
     min?: number;
     max?: number;
     step?: number;
@@ -105,6 +106,12 @@ export function validateModuleManifest(
         control: optionalInputControl(inputObj, manifestPath, `inputs[${index}]`),
         default: optionalPrimitive(inputObj, "default", manifestPath, `inputs[${index}]`),
         options: optionalInputOptions(inputObj, manifestPath, `inputs[${index}]`),
+        options_tree_path: optionalString(
+          inputObj,
+          "options_tree_path",
+          manifestPath,
+          `inputs[${index}]`
+        ),
         min: optionalNumber(inputObj, "min", manifestPath, `inputs[${index}]`),
         max: optionalNumber(inputObj, "max", manifestPath, `inputs[${index}]`),
         step: optionalNumber(inputObj, "step", manifestPath, `inputs[${index}]`),

@@ -72,6 +72,30 @@ Define and validate a strict schema with at least:
   - menus/dropdowns
   - parameter forms and control-to-action bindings
 
+Example `pdv-module.json` input using tree-backed dropdown options:
+
+```json
+{
+  "schema_version": "1",
+  "id": "diagnostics",
+  "name": "Diagnostics",
+  "version": "1.0.0",
+  "actions": [
+    { "id": "plot", "label": "Plot", "script_path": "scripts/plot.py", "inputs": ["output_key"] }
+  ],
+  "inputs": [
+    {
+      "id": "output_key",
+      "label": "Output Dataset",
+      "control": "dropdown",
+      "options_tree_path": "results.run_outputs"
+    }
+  ]
+}
+```
+
+`options_tree_path` points to a folder-like tree path; each child key at that path becomes one dropdown option.
+
 ### 3.2 `project.json` extension (ProjectManifest v1.1)
 
 Extend `ProjectManager` manifest with:

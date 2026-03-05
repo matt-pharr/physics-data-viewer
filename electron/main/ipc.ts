@@ -417,6 +417,8 @@ export interface ModuleInputDescriptor {
   default?: ModuleInputValue;
   /** Optional dropdown options for `control: "dropdown"`. */
   options?: ModuleInputOptionDescriptor[];
+  /** Optional tree path used to populate dropdown options from child keys. */
+  optionsTreePath?: string;
   /** Optional slider/file metadata. */
   min?: number;
   max?: number;

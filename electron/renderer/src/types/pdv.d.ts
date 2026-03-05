@@ -293,6 +293,7 @@ export interface ModuleInputDescriptor {
   control?: "text" | "dropdown" | "slider" | "checkbox" | "file";
   default?: ModuleInputValue;
   options?: ModuleInputOptionDescriptor[];
+  optionsTreePath?: string;
   min?: number;
   max?: number;
   step?: number;

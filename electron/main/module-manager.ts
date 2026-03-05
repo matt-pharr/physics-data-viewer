@@ -64,6 +64,8 @@ export interface ModuleInputDescriptor {
   default?: ModuleInputValue;
   /** Optional dropdown options for `control: "dropdown"`. */
   options?: Array<{ label: string; value: ModuleInputValue }>;
+  /** Optional tree path used to populate dropdown options from child keys. */
+  optionsTreePath?: string;
   /** Optional slider metadata. */
   min?: number;
   max?: number;
@@ -300,6 +302,7 @@ export class ModuleManager {
       control: input.control,
       default: input.default,
       options: input.options,
+      optionsTreePath: input.options_tree_path,
       min: input.min,
       max: input.max,
       step: input.step,

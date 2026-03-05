@@ -43,6 +43,8 @@ export function useKernelSubscriptions({
 
     const unsubscribeTree = window.pdv.tree.onChanged((payload) => {
       setTreeRefreshToken((prev) => prev + 1);
+      // Keep module controls that depend on tree-backed options in sync.
+      setModulesRefreshToken((prev) => prev + 1);
       if (payload.change_type === "removed" && payload.changed_paths.length > 0) {
         for (const removedPath of payload.changed_paths) {
           if (!removedPath.includes(".")) {

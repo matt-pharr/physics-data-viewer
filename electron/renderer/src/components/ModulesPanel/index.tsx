@@ -81,6 +81,38 @@ export const ModulesPanel: React.FC<ModulesPanelProps> = ({
   const [importConflict, setImportConflict] = useState<ImportConflict | null>(null);
   const [installDuplicate, setInstallDuplicate] = useState<InstallDuplicate | null>(null);
 
+  const resolveTreeBackedDropdownOptions = useCallback(
+    async (
+      importedModules: ImportedModuleDescriptor[]
+    ): Promise<ImportedModuleDescriptor[]> => {
+      if (!kernelId || !kernelReady) {
+        return importedModules;
+      }
+      return Promise.all(
+        importedModules.map(async (moduleEntry) => ({
+          ...moduleEntry,
+          inputs: await Promise.all(
+            moduleEntry.inputs.map(async (input) => {
+              if (input.control !== "dropdown" || !input.optionsTreePath) {
+                return input;
+              }
+              const treePath = input.optionsTreePath.trim();
+              if (!treePath) {
+                return { ...input, options: [] };
+              }
+              const nodes = await window.pdv.tree.list(kernelId, treePath);
+              return {
+                ...input,
+                options: nodes.map((node) => ({ label: node.key, value: node.key })),
+              };
+            })
+          ),
+        }))
+      );
+    },
+    [kernelId, kernelReady]
+  );
+
   const refresh = useCallback(async () => {
     setLoading(true);
     setError(null);
@@ -89,11 +121,13 @@ export const ModulesPanel: React.FC<ModulesPanelProps> = ({
         window.pdv.modules.listInstalled(),
         window.pdv.modules.listImported(),
       ]);
+      const importedModulesWithResolvedOptions =
+        await resolveTreeBackedDropdownOptions(importedModules);
       const settingsByAlias: Record<string, Record<string, unknown>> = {};
       const valuesByKey: Record<string, ModuleInputValue> = {};
       const activeTabsByAlias: Record<string, string> = {};
       const sectionStateByAlias: Record<string, Record<string, boolean>> = {};
-      for (const moduleEntry of importedModules) {
+      for (const moduleEntry of importedModulesWithResolvedOptions) {
         const settings =
           moduleEntry.settings &&
           typeof moduleEntry.settings === "object" &&
@@ -138,7 +172,7 @@ export const ModulesPanel: React.FC<ModulesPanelProps> = ({
         sectionStateByAlias[moduleEntry.alias] = sectionOpenState;
       }
       setInstalled(installedModules);
-      setImported(importedModules);
+      setImported(importedModulesWithResolvedOptions);
       setPersistedSettingsByAlias(settingsByAlias);
       setActiveModuleTabByAlias((prev) => ({ ...prev, ...activeTabsByAlias }));
       setSectionOpenByAlias((prev) => ({ ...prev, ...sectionStateByAlias }));
@@ -153,18 +187,21 @@ export const ModulesPanel: React.FC<ModulesPanelProps> = ({
         return merged;
       });
       setActiveImportedAlias((current) => {
-        if (importedModules.length === 0) return null;
-        if (current && importedModules.some((entry) => entry.alias === current)) {
+        if (importedModulesWithResolvedOptions.length === 0) return null;
+        if (
+          current &&
+          importedModulesWithResolvedOptions.some((entry) => entry.alias === current)
+        ) {
           return current;
         }
-        return importedModules[0].alias;
+        return importedModulesWithResolvedOptions[0].alias;
       });
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [resolveTreeBackedDropdownOptions]);
 
   useEffect(() => {
     if (!isActive) return;
