@@ -57,6 +57,10 @@ interface RegisterModulesIpcHandlersOptions {
   getModuleHealthWarningsByAlias: () => Map<string, ModuleHealthWarning[]>;
   detectPythonVersion: () => Promise<string | undefined>;
   getPdvVersion: () => string;
+  runWithProjectManifestWriteLock: <T>(
+    projectDir: string,
+    task: () => Promise<T>
+  ) => Promise<T>;
 }
 
 /**
@@ -83,6 +87,7 @@ export function registerModulesIpcHandlers(
     getModuleHealthWarningsByAlias,
     detectPythonVersion,
     getPdvVersion,
+    runWithProjectManifestWriteLock,
   } = options;
 
   ipcMain.handle(
@@ -139,12 +144,35 @@ export function registerModulesIpcHandlers(
 
       const activeProjectDir = getActiveProjectDir();
       if (activeProjectDir && activeManifest) {
-        const updatedManifest = {
-          ...activeManifest,
-          modules: [...activeManifest.modules, importedModule],
-          module_settings: activeManifest.module_settings ?? {},
-        };
-        await ProjectManager.saveManifest(activeProjectDir, updatedManifest);
+        const persisted = await runWithProjectManifestWriteLock(
+          activeProjectDir,
+          async (): Promise<{ success: true } | { success: false; suggestedAlias: string }> => {
+            const latestManifest = await ProjectManager.readManifest(activeProjectDir);
+            const latestAliases = new Set(latestManifest.modules.map((entry) => entry.alias));
+            if (latestAliases.has(baseAlias)) {
+              return {
+                success: false,
+                suggestedAlias: suggestModuleAlias(baseAlias, latestAliases),
+              };
+            }
+            const updatedManifest = {
+              ...latestManifest,
+              modules: [...latestManifest.modules, importedModule],
+              module_settings: latestManifest.module_settings ?? {},
+            };
+            await ProjectManager.saveManifest(activeProjectDir, updatedManifest);
+            return { success: true };
+          }
+        );
+        if (!persisted.success) {
+          return {
+            success: false,
+            status: "conflict",
+            alias: baseAlias,
+            suggestedAlias: persisted.suggestedAlias,
+            error: `Module alias already exists: ${baseAlias}`,
+          };
+        }
       } else {
         pendingImports.push(importedModule);
       }
@@ -263,14 +291,31 @@ export function registerModulesIpcHandlers(
 
       const activeProjectDir = getActiveProjectDir();
       if (activeProjectDir && activeManifest) {
-        const updatedManifest = {
-          ...activeManifest,
-          module_settings: {
-            ...activeManifest.module_settings,
-            [request.moduleAlias]: request.values,
-          },
-        };
-        await ProjectManager.saveManifest(activeProjectDir, updatedManifest);
+        const persisted = await runWithProjectManifestWriteLock(
+          activeProjectDir,
+          async (): Promise<ModuleSettingsResult> => {
+            const latestManifest = await ProjectManager.readManifest(activeProjectDir);
+            const hasAlias = latestManifest.modules.some(
+              (entry) => entry.alias === request.moduleAlias
+            );
+            if (!hasAlias) {
+              return {
+                success: false,
+                error: `Imported module alias not found: ${request.moduleAlias}`,
+              };
+            }
+            const updatedManifest = {
+              ...latestManifest,
+              module_settings: {
+                ...latestManifest.module_settings,
+                [request.moduleAlias]: request.values,
+              },
+            };
+            await ProjectManager.saveManifest(activeProjectDir, updatedManifest);
+            return { success: true };
+          }
+        );
+        return persisted;
       } else {
         getPendingModuleSettings()[request.moduleAlias] = request.values;
       }
@@ -353,12 +398,23 @@ export function registerModulesIpcHandlers(
 
       const activeProjectDir = getActiveProjectDir();
       if (activeProjectDir) {
-        const manifest = await ProjectManager.readManifest(activeProjectDir);
-        const moduleIndex = manifest.modules.findIndex((entry) => entry.alias === moduleAlias);
-        if (moduleIndex >= 0) {
-          manifest.modules.splice(moduleIndex, 1);
-          delete manifest.module_settings[moduleAlias];
-          await ProjectManager.saveManifest(activeProjectDir, manifest);
+        const removed = await runWithProjectManifestWriteLock(
+          activeProjectDir,
+          async (): Promise<boolean> => {
+            const manifest = await ProjectManager.readManifest(activeProjectDir);
+            const moduleIndex = manifest.modules.findIndex(
+              (entry) => entry.alias === moduleAlias
+            );
+            if (moduleIndex < 0) {
+              return false;
+            }
+            manifest.modules.splice(moduleIndex, 1);
+            delete manifest.module_settings[moduleAlias];
+            await ProjectManager.saveManifest(activeProjectDir, manifest);
+            return true;
+          }
+        );
+        if (removed) {
           getModuleHealthWarningsByAlias().delete(moduleAlias);
           return { success: true };
         }

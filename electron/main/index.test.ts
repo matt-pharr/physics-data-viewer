@@ -1076,6 +1076,81 @@ describe("Step 5 IPC handlers", () => {
     );
   });
 
+  it("serializes manifest writes for concurrent import and settings updates", async () => {
+    setup();
+    let manifestState = {
+      schema_version: "1.1",
+      saved_at: "2026-01-01T00:00:00.000Z",
+      pdv_version: "1.0",
+      tree_checksum: "",
+      modules: [
+        {
+          module_id: "demo-module",
+          alias: "demo-module",
+          version: "1.0.0",
+        },
+      ],
+      module_settings: {},
+    };
+    mocks.fsReadFile.mockImplementation(async (filePath: string) => {
+      const normalized = String(filePath);
+      if (normalized.endsWith("tree-index.json")) {
+        const err = Object.assign(new Error("ENOENT"), { code: "ENOENT" });
+        throw err;
+      }
+      if (normalized.endsWith("project.json")) {
+        return JSON.stringify(manifestState);
+      }
+      const err = Object.assign(new Error("ENOENT"), { code: "ENOENT" });
+      throw err;
+    });
+    mocks.fsWriteFile.mockImplementation(async (filePath: string, content: string) => {
+      if (String(filePath).endsWith("project.json")) {
+        await new Promise((resolve) => setTimeout(resolve, 5));
+        manifestState = JSON.parse(content);
+      }
+    });
+    (mocks.moduleManagerListInstalled as unknown as ReturnType<typeof vi.fn>).mockResolvedValueOnce([
+      {
+        id: "new-module",
+        name: "New Module",
+        version: "1.0.0",
+        source: { type: "local", location: "/tmp/new-module" },
+      },
+    ]);
+
+    const projectLoad = getHandler(IPC.project.load);
+    await projectLoad({}, "/tmp/project");
+
+    const importToProject = getHandler(IPC.modules.importToProject);
+    const saveSettings = getHandler(IPC.modules.saveSettings);
+    const [importResult, saveResult] = await Promise.all([
+      importToProject({}, { moduleId: "new-module" }) as Promise<{ success: boolean }>,
+      saveSettings({}, {
+        moduleAlias: "demo-module",
+        values: {
+          "run-action": { threshold: 9 },
+        },
+      }) as Promise<{ success: boolean }>,
+    ]);
+
+    expect(importResult.success).toBe(true);
+    expect(saveResult.success).toBe(true);
+    expect(manifestState.modules).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ alias: "demo-module" }),
+        expect.objectContaining({ alias: "new-module" }),
+      ])
+    );
+    expect(manifestState.module_settings).toEqual(
+      expect.objectContaining({
+        "demo-module": {
+          "run-action": { threshold: 9 },
+        },
+      })
+    );
+  });
+
   it("modules:runAction returns execution code for imported module action", async () => {
     setup();
     mocks.fsReadFile.mockResolvedValue(
@@ -1111,6 +1186,44 @@ describe("Step 5 IPC handlers", () => {
     expect(result.status).toBe("queued");
     expect(result.executionCode).toBe(
       'pdv_tree["demo-module.scripts.run"].run(threshold=5)'
+    );
+  });
+
+  it("modules:runAction quotes unsafe string input values", async () => {
+    setup();
+    mocks.fsReadFile.mockResolvedValue(
+      JSON.stringify({
+        schema_version: "1.1",
+        saved_at: "2026-01-01T00:00:00.000Z",
+        pdv_version: "1.0",
+        tree_checksum: "",
+        modules: [
+          {
+            module_id: "demo-module",
+            alias: "demo-module",
+            version: "1.0.0",
+          },
+        ],
+        module_settings: {},
+      })
+    );
+    const start = getHandler(IPC.kernels.start);
+    const kernel = (await start({}, { language: "python" })) as { id: string };
+    const load = getHandler(IPC.project.load);
+    await load({}, "/tmp/project");
+
+    const runAction = getHandler(IPC.modules.runAction);
+    const result = (await runAction({}, {
+      kernelId: kernel.id,
+      moduleAlias: "demo-module",
+      actionId: "run-action",
+      inputValues: { threshold: "5); __import__('os').system('evil')#" },
+    })) as { success: boolean; status: string; executionCode?: string };
+
+    expect(result.success).toBe(true);
+    expect(result.status).toBe("queued");
+    expect(result.executionCode).toBe(
+      `pdv_tree["demo-module.scripts.run"].run(threshold="5); __import__('os').system('evil')#")`
     );
   });
 

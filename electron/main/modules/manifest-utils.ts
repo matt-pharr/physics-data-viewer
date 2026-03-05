@@ -14,6 +14,8 @@
 
 import type { ModuleInputValue } from "../ipc";
 
+const PYTHON_IDENTIFIER_PATTERN = /^[A-Za-z_][A-Za-z0-9_]*$/;
+
 /**
  * Raw module manifest shape accepted by v1 validation.
  */
@@ -142,10 +144,23 @@ export function validateModuleManifest(
     const actionInputsRaw = actionObj.inputs;
     let actionInputs: string[] | undefined;
     if (actionInputsRaw !== undefined) {
-      if (!Array.isArray(actionInputsRaw) || !actionInputsRaw.every((v) => typeof v === "string")) {
+      if (!Array.isArray(actionInputsRaw)) {
         throw new Error(`actions[${index}].inputs must be an array of strings in ${manifestPath}`);
       }
-      actionInputs = actionInputsRaw as string[];
+      actionInputs = actionInputsRaw.map((inputValue, inputIndex) => {
+        if (typeof inputValue !== "string" || inputValue.trim().length === 0) {
+          throw new Error(
+            `actions[${index}].inputs[${inputIndex}] must be a non-empty string in ${manifestPath}`
+          );
+        }
+        const normalized = inputValue.trim();
+        if (!PYTHON_IDENTIFIER_PATTERN.test(normalized)) {
+          throw new Error(
+            `actions[${index}].inputs[${inputIndex}] must be a valid Python identifier in ${manifestPath}`
+          );
+        }
+        return normalized;
+      });
     }
     return {
       id: requiredString(actionObj, "id", manifestPath, `actions[${index}]`),

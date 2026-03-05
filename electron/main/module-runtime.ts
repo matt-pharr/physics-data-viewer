@@ -69,8 +69,9 @@ export function isMissingActionScriptError(error: unknown): boolean {
 /**
  * Convert one module input value into a Python argument expression.
  *
- * String values are treated as user-provided Python expressions for backward
- * compatibility with existing text inputs.
+ * String values are treated as safe literals by default. Simple numeric and
+ * scalar tokens are preserved to maintain compatibility with existing numeric
+ * text inputs.
  *
  * @param value - Raw value from module settings/UI state.
  * @returns Python expression string, or null when the value is empty/invalid.
@@ -89,7 +90,13 @@ export function toPythonArgumentValue(value: ModuleInputValue): string | null {
   if (trimmed.length === 0) {
     return null;
   }
-  return trimmed;
+  if (/^[+-]?(?:(?:\d+\.\d*)|(?:\.\d+)|(?:\d+))(?:[eE][+-]?\d+)?$/.test(trimmed)) {
+    return trimmed;
+  }
+  if (trimmed === "True" || trimmed === "False" || trimmed === "None") {
+    return trimmed;
+  }
+  return JSON.stringify(trimmed);
 }
 
 /**

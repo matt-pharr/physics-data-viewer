@@ -24,7 +24,7 @@ async function writeModuleFixture(
   rootDir: string,
   moduleId: string,
   version = "1.0.0",
-  actions: Array<{ id: string; label: string; script_path: string; tab?: string }> = [
+  actions: Array<{ id: string; label: string; script_path: string; tab?: string; inputs?: string[] }> = [
     {
       id: "run",
       label: "Run",
@@ -192,6 +192,29 @@ describe("ModuleManager", () => {
     expect(result.success).toBe(false);
     expect(result.status).toBe("error");
     expect(result.error).toContain('"actions" must be an array');
+  });
+
+  it("returns error for action inputs with invalid Python identifiers", async () => {
+    const invalidSource = path.join(tmpDir, "invalid-action-input-id");
+    await writeModuleFixture(invalidSource, "broken-input-id", "0.0.1", [
+      {
+        id: "run",
+        label: "Run",
+        script_path: "scripts/run.py",
+        inputs: ["valid_name", "invalid-name"],
+      },
+    ]);
+
+    const result = await manager.install({
+      source: {
+        type: "local",
+        location: invalidSource,
+      },
+    });
+
+    expect(result.success).toBe(false);
+    expect(result.status).toBe("error");
+    expect(result.error).toContain("actions[0].inputs[1] must be a valid Python identifier");
   });
 
   it("installs from a git repository source and records revision", async () => {

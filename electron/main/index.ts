@@ -106,6 +106,7 @@ interface PushSubscription {
 const pushSubscriptions: PushSubscription[] = [];
 const kernelWorkingDirs = new Map<string, string>();
 const crashHandlers = new Map<string, (id: string) => void>();
+const projectManifestMutationQueue = new Map<string, Promise<void>>();
 let activeKernelManagerRef: KernelManager | null = null;
 
 // ---------------------------------------------------------------------------
@@ -166,6 +167,29 @@ function toNamespaceQueryPayload(
     include_modules: options.includeModules,
     include_callables: options.includeCallables,
   };
+}
+
+/**
+ * Serialize project-manifest read/modify/write tasks per project directory.
+ *
+ * @param projectDir - Project directory owning one `project.json`.
+ * @param task - Manifest mutation task to run after queued tasks complete.
+ * @returns Task result.
+ * @throws {Error} Re-throws task errors after preserving queue continuity.
+ */
+function runSerializedProjectManifestMutation<T>(
+  projectDir: string,
+  task: () => Promise<T>
+): Promise<T> {
+  const previous = projectManifestMutationQueue.get(projectDir) ?? Promise.resolve();
+  const current = previous.catch(() => undefined).then(task);
+  const completion = current.then(() => undefined, () => undefined);
+  projectManifestMutationQueue.set(projectDir, completion);
+  return current.finally(() => {
+    if (projectManifestMutationQueue.get(projectDir) === completion) {
+      projectManifestMutationQueue.delete(projectDir);
+    }
+  });
 }
 
 /**
@@ -605,6 +629,7 @@ export function registerIpcHandlers(
     getModuleHealthWarningsByAlias: () => moduleHealthWarningsByAlias,
     detectPythonVersion,
     getPdvVersion: () => app.getVersion(),
+    runWithProjectManifestWriteLock: runSerializedProjectManifestMutation,
   });
 
   // Handles project:save requests from the renderer.
@@ -619,13 +644,15 @@ export function registerIpcHandlers(
 
       // Merge pending in-memory module imports/settings into the on-disk manifest.
       if (pendingModuleImports.length > 0 || Object.keys(pendingModuleSettings).length > 0) {
-        const manifest = await ProjectManager.readManifest(saveDir);
-        const mergedManifest = {
-          ...manifest,
-          modules: [...manifest.modules, ...pendingModuleImports],
-          module_settings: { ...manifest.module_settings, ...pendingModuleSettings },
-        };
-        await ProjectManager.saveManifest(saveDir, mergedManifest);
+        await runSerializedProjectManifestMutation(saveDir, async () => {
+          const manifest = await ProjectManager.readManifest(saveDir);
+          const mergedManifest = {
+            ...manifest,
+            modules: [...manifest.modules, ...pendingModuleImports],
+            module_settings: { ...manifest.module_settings, ...pendingModuleSettings },
+          };
+          await ProjectManager.saveManifest(saveDir, mergedManifest);
+        });
         pendingModuleImports = [];
         pendingModuleSettings = {};
       }
