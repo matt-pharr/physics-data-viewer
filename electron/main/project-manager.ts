@@ -25,7 +25,7 @@
  */
 
 import { CommRouter } from "./comm-router";
-import { PDVMessageType } from "./pdv-protocol";
+import { PDVMessageType, PDV_PROTOCOL_VERSION } from "./pdv-protocol";
 import * as fs from "fs/promises";
 import * as path from "path";
 import * as os from "os";
@@ -78,7 +78,7 @@ const SCHEMA_VERSION = "1.1";
 const DEFAULT_MANIFEST: ProjectManifest = {
   schema_version: SCHEMA_VERSION,
   saved_at: new Date(0).toISOString(),
-  pdv_version: "1.0",
+  pdv_version: PDV_PROTOCOL_VERSION,
   tree_checksum: "",
   modules: [],
   module_settings: {},
@@ -191,7 +191,7 @@ export class ProjectManager {
     const manifest: ProjectManifest = {
       schema_version: SCHEMA_VERSION,
       saved_at: new Date().toISOString(),
-      pdv_version: "1.0",
+      pdv_version: PDV_PROTOCOL_VERSION,
       tree_checksum: checksum,
       modules: existingModules,
       module_settings: existingModuleSettings,

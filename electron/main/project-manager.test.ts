@@ -306,7 +306,7 @@ describe("ProjectManager", () => {
       const manifest = {
         schema_version: "1.0",
         saved_at: "2026-01-01T00:00:00.000Z",
-        pdv_version: "1.0",
+        pdv_version: PDV_PROTOCOL_VERSION,
         tree_checksum: "abc",
       };
       await fs.writeFile(
@@ -326,7 +326,7 @@ describe("ProjectManager", () => {
       const manifest = {
         schema_version: "1.1",
         saved_at: "2026-01-01T00:00:00.000Z",
-        pdv_version: "1.0",
+        pdv_version: PDV_PROTOCOL_VERSION,
         tree_checksum: "abc",
         modules: [
           {
@@ -376,7 +376,7 @@ describe("ProjectManager", () => {
       const manifest = {
         schema_version: "99.0",
         saved_at: "2099-01-01T00:00:00.000Z",
-        pdv_version: "1.0",
+        pdv_version: PDV_PROTOCOL_VERSION,
         tree_checksum: "",
       };
       await fs.writeFile(

@@ -17,7 +17,7 @@ import {
   type PDVConfig,
   type TreeNode,
 } from "./ipc";
-import { PDVMessageType, type PDVMessage } from "./pdv-protocol";
+import { PDVMessageType, PDV_PROTOCOL_VERSION, type PDVMessage } from "./pdv-protocol";
 import type { KernelInfo, KernelManager } from "./kernel-manager";
 import type { CommRouter } from "./comm-router";
 import type { ProjectManager } from "./project-manager";
@@ -122,7 +122,7 @@ vi.mock("electron", () => ({
     showOpenDialog: mocks.dialogShowOpenDialog,
   },
   app: {
-    getVersion: () => "0.0.4",
+    getVersion: () => (require("../package.json") as { version: string }).version,
   },
 }));
 
@@ -169,7 +169,7 @@ function makeKernelInfo(): KernelInfo {
 
 function makeMessage(payload: Record<string, unknown>): PDVMessage {
   return {
-    pdv_version: "1.0",
+    pdv_version: PDV_PROTOCOL_VERSION,
     msg_id: "msg-1",
     in_reply_to: "req-1",
     type: "response",
@@ -777,7 +777,7 @@ describe("Step 5 IPC handlers", () => {
       JSON.stringify({
         schema_version: "1.1",
         saved_at: "2026-01-01T00:00:00.000Z",
-        pdv_version: "1.0",
+        pdv_version: PDV_PROTOCOL_VERSION,
         tree_checksum: "",
         modules: [
           {
@@ -823,7 +823,7 @@ describe("Step 5 IPC handlers", () => {
       JSON.stringify({
         schema_version: "1.1",
         saved_at: "2026-01-01T00:00:00.000Z",
-        pdv_version: "1.0",
+        pdv_version: PDV_PROTOCOL_VERSION,
         tree_checksum: "",
         modules: [],
         module_settings: {},
@@ -889,7 +889,7 @@ describe("Step 5 IPC handlers", () => {
       JSON.stringify({
         schema_version: "1.1",
         saved_at: "2026-01-01T00:00:00.000Z",
-        pdv_version: "1.0",
+        pdv_version: PDV_PROTOCOL_VERSION,
         tree_checksum: "",
         modules: [
           {
@@ -967,7 +967,7 @@ describe("Step 5 IPC handlers", () => {
       JSON.stringify({
         schema_version: "1.1",
         saved_at: "2026-01-01T00:00:00.000Z",
-        pdv_version: "1.0",
+        pdv_version: PDV_PROTOCOL_VERSION,
         tree_checksum: "",
         modules: [
           {
@@ -1012,7 +1012,7 @@ describe("Step 5 IPC handlers", () => {
       JSON.stringify({
         schema_version: "1.1",
         saved_at: "2026-01-01T00:00:00.000Z",
-        pdv_version: "1.0",
+        pdv_version: PDV_PROTOCOL_VERSION,
         tree_checksum: "",
         modules: [
           {
@@ -1047,7 +1047,7 @@ describe("Step 5 IPC handlers", () => {
       JSON.stringify({
         schema_version: "1.1",
         saved_at: "2026-01-01T00:00:00.000Z",
-        pdv_version: "1.0",
+        pdv_version: PDV_PROTOCOL_VERSION,
         tree_checksum: "",
         modules: [
           {
@@ -1081,7 +1081,7 @@ describe("Step 5 IPC handlers", () => {
     let manifestState = {
       schema_version: "1.1",
       saved_at: "2026-01-01T00:00:00.000Z",
-      pdv_version: "1.0",
+      pdv_version: PDV_PROTOCOL_VERSION,
       tree_checksum: "",
       modules: [
         {
@@ -1157,7 +1157,7 @@ describe("Step 5 IPC handlers", () => {
       JSON.stringify({
         schema_version: "1.1",
         saved_at: "2026-01-01T00:00:00.000Z",
-        pdv_version: "1.0",
+        pdv_version: PDV_PROTOCOL_VERSION,
         tree_checksum: "",
         modules: [
           {
@@ -1195,7 +1195,7 @@ describe("Step 5 IPC handlers", () => {
       JSON.stringify({
         schema_version: "1.1",
         saved_at: "2026-01-01T00:00:00.000Z",
-        pdv_version: "1.0",
+        pdv_version: PDV_PROTOCOL_VERSION,
         tree_checksum: "",
         modules: [
           {
@@ -1254,7 +1254,7 @@ describe("Step 5 IPC handlers", () => {
       JSON.stringify({
         schema_version: "1.1",
         saved_at: "2026-01-01T00:00:00.000Z",
-        pdv_version: "1.0",
+        pdv_version: PDV_PROTOCOL_VERSION,
         tree_checksum: "",
         modules: [
           {
