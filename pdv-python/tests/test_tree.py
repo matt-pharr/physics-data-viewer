@@ -137,6 +137,22 @@ class TestLazyLoading:
         assert not reg.has('a')
         assert not reg.has('b')
 
+    def test_registry_entries_get_and_remove(self):
+        """Registry helper accessors expose and remove lazy entries."""
+        reg = LazyLoadRegistry()
+        reg.register('x', {'backend': 'inline', 'format': 'inline', 'value': 1})
+        assert reg.get_storage('x') == {'backend': 'inline', 'format': 'inline', 'value': 1}
+        assert ('x', {'backend': 'inline', 'format': 'inline', 'value': 1}) in reg.entries()
+        reg.remove('x')
+        assert reg.get_storage('x') is None
+
+    def test_tree_lazy_accessors(self, tree_with_comm):
+        """PDVTree exposes lazy lookup helpers for handler use."""
+        tree_with_comm._lazy_registry.register('a.b', {'backend': 'inline', 'format': 'inline', 'value': 1})
+        assert tree_with_comm.has_lazy_entry('a.b')
+        assert tree_with_comm.lazy_storage_for('a.b') == {'backend': 'inline', 'format': 'inline', 'value': 1}
+        assert ('a.b', {'backend': 'inline', 'format': 'inline', 'value': 1}) in tree_with_comm.iter_lazy_entries()
+
     def test_populate_from_index_registers_lazy_nodes(self, tmp_save_dir):
         """populate_from_index() registers exactly the nodes marked lazy=True."""
         reg = LazyLoadRegistry()

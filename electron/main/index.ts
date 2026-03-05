@@ -15,8 +15,7 @@
  * ipc.ts — channel constants and API types
  */
 
-import { ipcMain, BrowserWindow, dialog, app } from "electron";
-import { spawn } from "child_process";
+import { ipcMain, BrowserWindow, app } from "electron";
 import * as fs from "fs/promises";
 import * as fsSync from "fs";
 import * as os from "os";
@@ -28,9 +27,9 @@ import { KernelManager, type KernelInfo } from "./kernel-manager";
 import { ModuleManager } from "./module-manager";
 import { ProjectManager, type ProjectModuleImport } from "./project-manager";
 import { ConfigStore } from "./config";
-import { updateRecentProjectsMenu } from "./menu";
+import { registerAppStateIpcHandlers } from "./ipc-register-app-state";
+import { registerTreeNamespaceScriptIpcHandlers } from "./ipc-register-tree-namespace-script";
 import {
-  CodeCellData,
   IPC,
   KernelCompleteResult,
   KernelInspectResult,
@@ -45,19 +44,13 @@ import {
   ModuleInstallResult,
   ModuleInputValue,
   ModuleHealthWarning,
+  NamespaceQueryOptions,
   ModuleSettingsRequest,
   ModuleSettingsResult,
   ModuleUpdateResult,
-  NamespaceQueryOptions,
-  NamespaceVariable,
   PDVConfig,
-  ScriptOperationResult,
-  Theme,
-  TreeAddFileResult,
-  TreeCreateScriptResult,
-  TreeNode,
 } from "./ipc";
-import { PDVFileRegisterPayload, PDVMessage, PDVMessageType } from "./pdv-protocol";
+import { PDVMessage, PDVMessageType } from "./pdv-protocol";
 
 // ---------------------------------------------------------------------------
 // Internal state
@@ -108,9 +101,6 @@ const REGISTERED_CHANNELS: readonly string[] = [
   IPC.files.pickFile,
   IPC.files.pickDirectory,
 ];
-
-let savedThemes: Theme[] = [];
-let savedCodeCells: CodeCellData | null = null;
 
 interface PushSubscription {
   commRouter: CommRouter;
@@ -179,7 +169,7 @@ async function cleanupKernelWorkingDir(
  * @returns Current config snapshot.
  */
 function readConfig(configStore: ConfigStore): PDVConfig {
-  const raw = configStore.getAll() as unknown as Partial<PDVConfig>;
+  const raw = configStore.getAll();
   return { ...DEFAULT_CONFIG, ...raw };
 }
 
@@ -525,7 +515,11 @@ async function readFileBackedEntries(
     return (parsed as Array<Record<string, unknown>>)
       .filter((e) => typeof e.filename === "string" && (e.filename as string).length > 0)
       .map((e) => ({ path: String(e.path ?? ""), filename: e.filename as string }));
-  } catch {
+  } catch (error) {
+    console.warn(
+      `[pdv] could not read file-backed entries from ${dir}/tree-index.json`,
+      error
+    );
     return [];
   }
 }
@@ -546,9 +540,9 @@ async function copyFilesForSave(workingDir: string, saveDir: string): Promise<vo
     const destDir2 = path.join(saveDir, ...segs);
     const dest = path.join(destDir2, filename);
     await fs.mkdir(destDir2, { recursive: true });
-    await fs.copyFile(src, dest).catch(() =>
-      console.warn(`[pdv] save: could not copy ${src}`)
-    );
+    await fs.copyFile(src, dest).catch((error) => {
+      console.warn(`[pdv] save: could not copy ${src}`, error);
+    });
   }
 }
 
@@ -568,9 +562,9 @@ async function copyFilesForLoad(saveDir: string, workingDir: string): Promise<vo
     const destDir2 = path.join(workingDir, ...segs);
     const dest = path.join(destDir2, filename);
     await fs.mkdir(destDir2, { recursive: true });
-    await fs.copyFile(src, dest).catch(() =>
-      console.warn(`[pdv] load: could not copy ${src}`)
-    );
+    await fs.copyFile(src, dest).catch((error) => {
+      console.warn(`[pdv] load: could not copy ${src}`, error);
+    });
   }
 }
 
@@ -618,7 +612,8 @@ export function registerIpcHandlers(
     try {
       const detected = await EnvironmentDetector.detect(config.pythonPath);
       return detected.pythonVersion;
-    } catch {
+    } catch (error) {
+      console.warn("[pdv] unable to detect python version for module health", error);
       return undefined;
     }
   };
@@ -677,44 +672,6 @@ export function registerIpcHandlers(
     );
   };
 
-  fs.mkdir(themesDir, { recursive: true }).catch(() => {});
-  fs.mkdir(stateDir,  { recursive: true }).catch(() => {});
-
-  // Populate savedThemes from disk on first call: load PDV-saved themes +
-  // any .json files the user has dropped in ~/.PDV/themes/.
-  if (savedThemes.length === 0) {
-    try {
-      const entries = fsSync.readdirSync(themesDir);
-      for (const entry of entries) {
-        if (!entry.endsWith(".json")) continue;
-        try {
-          const raw = fsSync.readFileSync(path.join(themesDir, entry), "utf8");
-          const parsed = JSON.parse(raw) as unknown;
-          if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
-            const obj = parsed as Record<string, unknown>;
-            if (typeof obj.name === "string" && obj.colors && typeof obj.colors === "object") {
-              savedThemes.push({ name: obj.name, colors: obj.colors as Record<string, string> });
-            }
-          }
-        } catch {
-          // skip malformed files
-        }
-      }
-    } catch {
-      // themes dir may not exist yet
-    }
-  }
-
-  // Populate savedCodeCells from disk on first call.
-  if (savedCodeCells === null) {
-    try {
-      const raw = fsSync.readFileSync(codeCellsPath, "utf8");
-      savedCodeCells = JSON.parse(raw) as CodeCellData;
-    } catch {
-      // file may not exist yet
-    }
-  }
-
   // Handles kernels:list requests from the renderer.
   // Input: none.
   // Returns: KernelInfo[] snapshot.
@@ -740,6 +697,14 @@ export function registerIpcHandlers(
         );
       }
     }
+    // Starting a new kernel always means a new session — clear any in-memory
+    // project state from a previous session (pending imports, active project
+    // dir, health warnings) so they don't carry over.
+    activeProjectDir = null;
+    pendingModuleImports = [];
+    pendingModuleSettings = {};
+    moduleHealthWarningsByAlias.clear();
+
     const kernel = await kernelManager.start(
       requestedSpec
     );
@@ -800,6 +765,13 @@ export function registerIpcHandlers(
   // Returns: KernelInfo for the restarted kernel.
   // On error: throws to renderer.
   ipcMain.handle(IPC.kernels.restart, async (_event, kernelId: string) => {
+    // Restart clears the tree — reset in-memory project state so stale
+    // pending imports and project dir don't persist into the new session.
+    activeProjectDir = null;
+    pendingModuleImports = [];
+    pendingModuleSettings = {};
+    moduleHealthWarningsByAlias.clear();
+
     const restartable = kernelManager as KernelManager & {
       restart?: (id: string) => Promise<KernelInfo>;
     };
@@ -910,195 +882,19 @@ export function registerIpcHandlers(
     }
   );
 
-  // Handles tree:list requests from the renderer.
-  // Input: kernelId (string), path (string, optional).
-  // Returns: TreeNode[].
-  // On error: returns [] if kernel is absent; otherwise throws.
-  ipcMain.handle(IPC.tree.list, async (_event, kernelId: string, nodePath = "") => {
-    if (!kernelManager.getKernel(kernelId)) {
-      return [] as TreeNode[];
-    }
-    const response = await commRouter.request(PDVMessageType.TREE_LIST, {
-      path: nodePath,
-    });
-    const nodes = (response.payload as { nodes?: unknown }).nodes;
-    return Array.isArray(nodes) ? (nodes as TreeNode[]) : [];
-  });
-
-  // Handles tree:get requests from the renderer.
-  // Input: kernelId (string), path (string).
-  // Returns: Payload object from pdv.tree.get.response.
-  // On error: throws to renderer.
-  ipcMain.handle(IPC.tree.get, async (_event, kernelId: string, nodePath: string) => {
-    if (!kernelManager.getKernel(kernelId)) {
-      throw new Error(`Kernel not found: ${kernelId}`);
-    }
-    const response = await commRouter.request(PDVMessageType.TREE_GET, {
-      path: nodePath,
-    });
-    return response.payload;
-  });
-
-  // Handles tree:createScript requests from the renderer.
-  // Input: kernelId (string), targetPath (string), scriptName (string).
-  // Returns: script creation result payload.
-  // On error: throws to renderer.
-  ipcMain.handle(
-    IPC.tree.createScript,
-    async (
-      _event,
-      kernelId: string,
-      targetPath: string,
-      scriptName: string
-    ): Promise<TreeCreateScriptResult> => {
-      if (!kernelManager.getKernel(kernelId)) {
-        throw new Error(`Kernel not found: ${kernelId}`);
-      }
-      let workingDir = kernelWorkingDirs.get(kernelId);
-      if (!workingDir) {
-        workingDir = await projectManager.createWorkingDir();
-        kernelWorkingDirs.set(kernelId, workingDir);
-      }
-      const safeName = sanitizeScriptName(scriptName);
-      const scriptNodeName = path.parse(safeName).name;
-      const scriptsDir = path.join(
-        workingDir,
-        ...targetPath.split(".").filter(Boolean)
-      );
-      await fs.mkdir(scriptsDir, { recursive: true });
-      const scriptPath = path.join(scriptsDir, safeName);
-      await ensureScriptFile(scriptPath);
-
-      await commRouter.request(PDVMessageType.SCRIPT_REGISTER, {
-        parent_path: targetPath,
-        name: scriptNodeName,
-        relative_path: scriptPath,
-        language: "python",
-      });
-      return { success: true, scriptPath };
-    }
-  );
-
-  // Handles tree:addFile requests from the renderer.
-  // Copies a source file into the kernel working directory and registers it with the kernel.
-  // Input: kernelId (string), sourcePath (string), targetTreePath (string),
-  //        nodeType ("namelist"|"fortran"|"file"), filename (string).
-  // Returns: TreeAddFileResult.
-  // On error: throws to renderer.
-  ipcMain.handle(
-    IPC.tree.addFile,
-    async (
-      _event,
-      kernelId: string,
-      sourcePath: string,
-      targetTreePath: string,
-      nodeType: "namelist" | "fortran" | "file",
-      filename: string
-    ): Promise<TreeAddFileResult> => {
-      if (!kernelManager.getKernel(kernelId)) throw new Error(`Kernel not found: ${kernelId}`);
-      const workingDir = kernelWorkingDirs.get(kernelId);
-      if (!workingDir) throw new Error(`Working dir not initialized: ${kernelId}`);
-
-      const segments = targetTreePath.split(".").filter(Boolean);
-      const destDir = segments.length > 0 ? path.join(workingDir, ...segments) : workingDir;
-      await fs.mkdir(destDir, { recursive: true });
-      const destPath = path.join(destDir, filename);
-      await fs.copyFile(sourcePath, destPath);
-
-      await commRouter.request(PDVMessageType.FILE_REGISTER, {
-        tree_path: targetTreePath,
-        filename,
-        node_type: nodeType,
-      } satisfies PDVFileRegisterPayload);
-
-      return { success: true, workingDirPath: destPath };
-    }
-  );
-
-  // Handles namespace:query requests from the renderer.
-  // Input: kernelId (string), optional NamespaceQueryOptions.
-  // Returns: NamespaceVariable[].
-  // On error: throws to renderer.
-  ipcMain.handle(
-    IPC.namespace.query,
-    async (
-      _event,
-      kernelId: string,
-      options?: NamespaceQueryOptions
-    ): Promise<NamespaceVariable[]> => {
-      if (!kernelManager.getKernel(kernelId)) {
-        return [];
-      }
-      const response = await commRouter.request(
-        PDVMessageType.NAMESPACE_QUERY,
-        toNamespaceQueryPayload(options)
-      );
-      const variables = (response.payload as { variables?: unknown }).variables;
-      let normalized: NamespaceVariable[] = [];
-      if (Array.isArray(variables)) {
-        normalized = variables as NamespaceVariable[];
-      } else if (variables && typeof variables === "object") {
-        normalized = Object.entries(variables as Record<string, unknown>).map(
-          ([name, value]) => ({
-            name,
-            ...(typeof value === "object" && value !== null
-              ? (value as Record<string, unknown>)
-              : {}),
-          })
-        ) as NamespaceVariable[];
-      }
-      if (!normalized.some((entry) => entry.name === "pdv_tree")) {
-        normalized.unshift({
-          name: "pdv_tree",
-          type: "protected",
-          preview: "PDVTree (protected)",
-        });
-      }
-      if (!normalized.some((entry) => entry.name === "pdv")) {
-        normalized.unshift({
-          name: "pdv",
-          type: "protected",
-          preview: "PDV app object (protected)",
-        });
-      }
-      return normalized;
-    }
-  );
-
-  // Handles script:edit requests from the renderer.
-  // Input: scriptPath (string).
-  // Returns: ScriptOperationResult.
-  // On error: throws to renderer.
-  ipcMain.handle(IPC.script.edit, async (_event, kernelId: string, scriptPath: string) => {
-    const config = readConfig(configStore);
-    const resolvedScriptPath = resolveScriptPath(kernelId, scriptPath, kernelWorkingDirs);
-    const isJulia = resolvedScriptPath.endsWith(".jl");
-    const cmdString = isJulia ? config.juliaEditorCmd : config.pythonEditorCmd;
-    const { file, args } = buildEditorSpawn(cmdString, resolvedScriptPath);
-    const spawnSpec = resolveEditorSpawn(file, args);
-    const child = spawn(spawnSpec.file, spawnSpec.args, { detached: true, stdio: "ignore" });
-    child.unref();
-    const result: ScriptOperationResult = { success: true };
-    return result;
-  });
-
-  // Handles script:reload requests from the renderer.
-  // Input: treePath (string) — dot-separated tree path for the script.
-  // Returns: ScriptOperationResult.
-  // On error: throws to renderer.
-  ipcMain.handle(IPC.script.reload, async (_event, treePath: string) => {
-    const lastDot = treePath.lastIndexOf(".");
-    const parentPath = lastDot >= 0 ? treePath.slice(0, lastDot) : "";
-    const name = lastDot >= 0 ? treePath.slice(lastDot + 1) : treePath;
-    await commRouter.request(PDVMessageType.SCRIPT_REGISTER, {
-      parent_path: parentPath,
-      name,
-      relative_path: treePath,
-      language: "python",
-      reload: true,
-    });
-    const result: ScriptOperationResult = { success: true };
-    return result;
+  registerTreeNamespaceScriptIpcHandlers({
+    kernelManager,
+    commRouter,
+    projectManager,
+    configStore,
+    kernelWorkingDirs,
+    readConfig,
+    toNamespaceQueryPayload,
+    sanitizeScriptName,
+    ensureScriptFile,
+    resolveScriptPath,
+    buildEditorSpawn,
+    resolveEditorSpawn,
   });
 
   // Handles modules:listInstalled requests from the renderer.
@@ -1213,6 +1009,10 @@ export function registerIpcHandlers(
   ipcMain.handle(
     IPC.modules.listImported,
     async (): Promise<ImportedModuleDescriptor[]> => {
+      // The tree is the source of authority for what is in the project. If
+      // there is no active kernel there is no tree, so there are no imports.
+      if (!activeKernelId) return [];
+
       // Combine disk-persisted imports (if project is saved) with pending in-memory imports.
       let diskModules: ProjectModuleImport[] = [];
       let diskSettings: Record<string, Record<string, unknown>> = {};
@@ -1492,134 +1292,12 @@ export function registerIpcHandlers(
     return true;
   });
 
-  // Handles config:get requests from the renderer.
-  // Input: none.
-  // Returns: merged PDVConfig object.
-  // On error: throws to renderer.
-  ipcMain.handle(IPC.config.get, async () => {
-    return readConfig(configStore);
-  });
-
-  // Handles about:getVersion — returns the running app version.
-  // Input: none.
-  // Returns: version string from package.json (via Electron app.getVersion()).
-  ipcMain.handle(IPC.about.getVersion, () => app.getVersion());
-
-  // Handles config:set requests from the renderer.
-  // Input: Partial<PDVConfig>.
-  // Returns: merged PDVConfig after persistence.
-  // On error: throws to renderer.
-  ipcMain.handle(IPC.config.set, async (_event, updates: Partial<PDVConfig>) => {
-    const writableStore = configStore as unknown as {
-      set(key: string, value: unknown): void;
-      getAll(): PDVConfig;
-    };
-
-    const current = readConfig(configStore);
-    const merged: PDVConfig = { ...current, ...updates };
-    const record = updates as Record<string, unknown>;
-    for (const key of Object.keys(record)) {
-      const value = record[key];
-      if (value !== undefined) {
-        writableStore.set(key, value);
-      }
-    }
-    return { ...merged, ...writableStore.getAll() };
-  });
-
-  // Handles themes:get requests from the renderer.
-  // Input: none.
-  // Returns: Theme[] currently saved in memory.
-  // On error: throws to renderer.
-  ipcMain.handle(IPC.themes.get, async () => {
-    return savedThemes;
-  });
-
-  // Handles themes:save requests from the renderer.
-  // Input: theme payload.
-  // Returns: true after save/replace.
-  // On error: throws to renderer.
-  ipcMain.handle(IPC.themes.save, async (_event, theme: Theme) => {
-    const existing = savedThemes.findIndex((entry) => entry.name === theme.name);
-    if (existing >= 0) {
-      savedThemes[existing] = theme;
-    } else {
-      savedThemes = [...savedThemes, theme];
-    }
-    // Persist to ~/.PDV/themes/<name>.json (sanitise name for filename)
-    const safeName = theme.name.replace(/[^a-zA-Z0-9_\-. ]/g, "_");
-    const filePath = path.join(themesDir, `${safeName}.json`);
-    await fs.writeFile(filePath, JSON.stringify(theme, null, 2), "utf8");
-    return true;
-  });
-
-  // Handles codeCells:load requests from the renderer.
-  // Input: none.
-  // Returns: last saved code-cell data or null.
-  // On error: throws to renderer.
-  ipcMain.handle(IPC.codeCells.load, async () => {
-    return savedCodeCells;
-  });
-
-  // Handles codeCells:save requests from the renderer.
-  // Input: code-cell payload.
-  // Returns: true after save.
-  // On error: throws to renderer.
-  ipcMain.handle(IPC.codeCells.save, async (_event, data: CodeCellData) => {
-    savedCodeCells = data;
-    await fs.writeFile(codeCellsPath, JSON.stringify(data, null, 2), "utf8");
-    return true;
-  });
-
-  // Handles menu:updateRecentProjects requests from the renderer.
-  // Input: string[] recent project directories.
-  // Returns: true after menu refresh.
-  // On error: throws to renderer.
-  ipcMain.handle(IPC.menu.updateRecentProjects, async (_event, paths: string[]) => {
-    updateRecentProjectsMenu(Array.isArray(paths) ? paths : []);
-    return true;
-  });
-
-  // Handles files:pickExecutable requests from the renderer.
-  // Input: none.
-  // Returns: selected executable file path or null when cancelled.
-  // On error: throws to renderer.
-  ipcMain.handle(IPC.files.pickExecutable, async () => {
-    const result = await dialog.showOpenDialog({
-      properties: ["openFile"],
-    });
-    if (result.canceled || result.filePaths.length === 0) {
-      return null;
-    }
-    return result.filePaths[0] ?? null;
-  });
-
-  // Handles files:pickFile requests from the renderer.
-  // Input: none.
-  // Returns: selected file path or null when cancelled.
-  // On error: throws to renderer.
-  ipcMain.handle(IPC.files.pickFile, async () => {
-    const result = await dialog.showOpenDialog({
-      properties: ["openFile"],
-    });
-    if (result.canceled || result.filePaths.length === 0) {
-      return null;
-    }
-    return result.filePaths[0] ?? null;
-  });
-
-  // Handles files:pickDirectory requests from the renderer.
-  // Input: none.
-  // Returns: selected directory path or null when cancelled.
-  // On error: throws to renderer.
-  ipcMain.handle(IPC.files.pickDirectory, async () => {
-    const result = await dialog.showOpenDialog({
-      properties: ["openDirectory", "createDirectory"],
-    });
-    if (result.canceled || result.filePaths.length === 0) {
-      return null;
-    }
-    return result.filePaths[0] ?? null;
+  registerAppStateIpcHandlers({
+    configStore,
+    readConfig,
+    themesDir,
+    stateDir,
+    codeCellsPath,
   });
 
   registerPushForwarding(win, commRouter);
@@ -1675,7 +1353,11 @@ export function unregisterIpcHandlers(): void {
   for (const [id, dir] of kernelWorkingDirs) {
     const handler = crashHandlers.get(id);
     if (handler) activeKernelManagerRef?.removeListener("kernel:crashed", handler);
-    try { fsSync.rmSync(dir, { recursive: true, force: true }); } catch { /* ignored */ }
+    try {
+      fsSync.rmSync(dir, { recursive: true, force: true });
+    } catch (error) {
+      console.warn(`[pdv] failed to remove kernel working dir: ${dir}`, error);
+    }
   }
   kernelWorkingDirs.clear();
   crashHandlers.clear();

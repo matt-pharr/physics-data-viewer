@@ -51,7 +51,7 @@ PDV uses the standard Electron three-process architecture:
 │  │ (Node.js)    │        │ (React / TypeScript)   │ │
 │  │              │        │                        │ │
 │  │ - Kernel mgmt│        │ - Tree panel           │ │
-│  │ - IPC handlers        │ - Code Cell          │ │
+│  │ - IPC handlers        │ - Code Cell            │ │
 │  │ - Filesystem │        │ - Console              │ │
 │  │ - Config     │        │ - Namespace panel      │ │
 │  │ - Comm router│        │ - Settings / dialogs   │ │

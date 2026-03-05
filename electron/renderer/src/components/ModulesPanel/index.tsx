@@ -169,7 +169,7 @@ export const ModulesPanel: React.FC<ModulesPanelProps> = ({
   useEffect(() => {
     if (!isActive) return;
     void refresh();
-  }, [isActive, refresh, refreshToken]);
+  }, [isActive, refresh, refreshToken, kernelId]);
 
   const selectedImported = useMemo(
     () => imported.find((entry) => entry.alias === activeImportedAlias) ?? null,

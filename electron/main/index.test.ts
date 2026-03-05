@@ -872,6 +872,8 @@ describe("Step 5 IPC handlers", () => {
 
   it("modules:listImported returns project imports with installed names", async () => {
     setup();
+    const start = getHandler(IPC.kernels.start);
+    await start({}, { language: "python" });
     const projectLoad = getHandler(IPC.project.load);
     await projectLoad({}, "/tmp/project");
 
@@ -936,16 +938,31 @@ describe("Step 5 IPC handlers", () => {
 
   it("modules:listImported includes action tab metadata when provided", async () => {
     setup();
-    (mocks.moduleManagerResolveActionScripts as unknown as ReturnType<typeof vi.fn>).mockResolvedValueOnce([
-      {
-        actionId: "run-action",
-        actionLabel: "Run",
-        name: "run",
-        scriptPath: "/tmp/demo-module/scripts/run.py",
-        inputIds: ["threshold"],
-        actionTab: "Run",
-      },
-    ]);
+    const start = getHandler(IPC.kernels.start);
+    await start({}, { language: "python" });
+    // project:load's bindActiveProjectModules also calls resolveActionScripts — add an
+    // extra Once for that call, then the second Once (with actionTab) is for listImported.
+    (mocks.moduleManagerResolveActionScripts as unknown as ReturnType<typeof vi.fn>)
+      .mockResolvedValueOnce([
+        {
+          actionId: "run-action",
+          actionLabel: "Run",
+          name: "run",
+          scriptPath: "/tmp/demo-module/scripts/run.py",
+          inputIds: ["threshold"],
+          actionTab: "Run",
+        },
+      ])
+      .mockResolvedValueOnce([
+        {
+          actionId: "run-action",
+          actionLabel: "Run",
+          name: "run",
+          scriptPath: "/tmp/demo-module/scripts/run.py",
+          inputIds: ["threshold"],
+          actionTab: "Run",
+        },
+      ]);
     mocks.fsReadFile.mockResolvedValue(
       JSON.stringify({
         schema_version: "1.1",
@@ -977,12 +994,20 @@ describe("Step 5 IPC handlers", () => {
 
   it("modules:listImported surfaces missing-script warnings without throwing", async () => {
     setup();
+    const start = getHandler(IPC.kernels.start);
+    await start({}, { language: "python" });
     (mocks.moduleManagerEvaluateHealth as unknown as ReturnType<typeof vi.fn>).mockResolvedValueOnce([
       { code: "missing_action_script", message: "Action script not found: scripts/run.py" },
     ]);
-    (mocks.moduleManagerResolveActionScripts as unknown as ReturnType<typeof vi.fn>).mockRejectedValueOnce(
-      new Error("Module action script does not exist: scripts/run.py (demo-module)")
-    );
+    // project:load's bindActiveProjectModules calls resolveActionScripts first (caught, returns early),
+    // then listImported calls it again — both need to fail with MissingActionScriptError.
+    (mocks.moduleManagerResolveActionScripts as unknown as ReturnType<typeof vi.fn>)
+      .mockRejectedValueOnce(
+        new Error("Module action script does not exist: scripts/run.py (demo-module)")
+      )
+      .mockRejectedValueOnce(
+        new Error("Module action script does not exist: scripts/run.py (demo-module)")
+      );
     mocks.fsReadFile.mockResolvedValue(
       JSON.stringify({
         schema_version: "1.1",

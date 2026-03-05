@@ -25,6 +25,8 @@ import { UnsavedChangesDialog } from '../components/UnsavedChangesDialog';
 import type { CellTab, Config, KernelExecuteResult, LogEntry, MenuActionPayload, TreeNodeData } from '../types';
 import { matchesShortcut, resolveShortcuts } from '../shortcuts';
 import { BUILTIN_THEMES, applyThemeColors, applyFontSettings, getMonacoTheme, resolveThemeColors } from '../themes';
+import { useCodeCellsPersistence } from './useCodeCellsPersistence';
+import { useKernelSubscriptions } from './useKernelSubscriptions';
 
 type KernelStatus = 'idle' | 'starting' | 'ready' | 'error';
 
@@ -171,62 +173,12 @@ const App: React.FC = () => {
     const fonts = config?.settings?.fonts;
     applyFontSettings(fonts?.codeFont, fonts?.displayFont);
   }, [config]);
-
-  // Load code cells from filesystem on startup
-  useEffect(() => {
-    if (!window.pdv?.codeCells) {
-      return;
-    }
-    const loadCodeCells = async () => {
-      try {
-        const data = await window.pdv.codeCells.load();
-        if (data) {
-          setCellTabs(data.tabs);
-          setActiveCellTab(data.activeTabId);
-          console.log('[App] Loaded code cells from filesystem:', data.tabs.length, 'tabs');
-        }
-      } catch (error) {
-        console.error('[App] Failed to load code cells:', error);
-      }
-    };
-    void loadCodeCells();
-  }, []);
-
-  // Debounced save to filesystem
-  const saveTimeoutRef = useRef<NodeJS.Timeout | null>(null);
-  useEffect(() => {
-    if (!window.pdv?.codeCells) {
-      return;
-    }
-    // Clear any pending save
-    if (saveTimeoutRef.current) {
-      clearTimeout(saveTimeoutRef.current);
-    }
-
-    // Debounce saves by 500ms to avoid excessive file writes
-    saveTimeoutRef.current = setTimeout(async () => {
-      try {
-        await window.pdv.codeCells.save({
-          tabs: CellTabs,
-          activeTabId: activeCellTab,
-        });
-        console.log('[App] Saved code cells to filesystem');
-      } catch (error) {
-        console.error('[App] Failed to save code cells:', error);
-      }
-    }, 500);
-
-    return () => {
-      if (saveTimeoutRef.current) {
-        clearTimeout(saveTimeoutRef.current);
-        // Save immediately on cleanup to avoid data loss
-        void window.pdv.codeCells.save({
-          tabs: CellTabs,
-          activeTabId: activeCellTab,
-        });
-      }
-    };
-  }, [CellTabs, activeCellTab]);
+  useCodeCellsPersistence({
+    cellTabs: CellTabs,
+    activeCellTab,
+    setCellTabs,
+    setActiveCellTab,
+  });
 
   useEffect(() => {
     // Prevent double initialization in StrictMode
@@ -369,57 +321,15 @@ const App: React.FC = () => {
     void window.pdv.menu.updateRecentProjects(recentProjects);
   }, [config]);
 
-  useEffect(() => {
-    const unsubscribe = window.pdv.kernels.onOutput((chunk) => {
-      setLogs((prev) =>
-        prev.map((l) => {
-          if (l.id !== chunk.executionId) return l;
-          if (chunk.type === 'stdout') return { ...l, stdout: (l.stdout ?? '') + chunk.text! };
-          if (chunk.type === 'stderr') return { ...l, stderr: (l.stderr ?? '') + chunk.text! };
-          if (chunk.type === 'image') return { ...l, images: [...(l.images ?? []), chunk.image!] };
-          if (chunk.type === 'result') return { ...l, result: chunk.result };
-          return l;
-        })
-      );
-    });
-    return unsubscribe;
-  }, []);
-
-  useEffect(() => {
-    if (!currentKernelId) {
-      return;
-    }
-
-    const unsubscribeTree = window.pdv.tree.onChanged((payload) => {
-      setTreeRefreshToken((prev) => prev + 1);
-      // When a tree node is removed, check if it corresponds to an imported
-      // module alias and remove it from the modules manifest.
-      if (payload.change_type === "removed" && payload.changed_paths.length > 0) {
-        for (const removedPath of payload.changed_paths) {
-          // Module aliases are top-level tree paths (no dots).
-          if (!removedPath.includes(".")) {
-            void window.pdv.modules.removeImport(removedPath).then(() => {
-              setModulesRefreshToken((prev) => prev + 1);
-            });
-          }
-        }
-      }
-    });
-
-    const unsubscribeProject = window.pdv.project.onLoaded(() => {
-      if (loadedProjectTabsRef.current) {
-        const loaded = loadedProjectTabsRef.current;
-        setCellTabs(loaded.tabs);
-        setActiveCellTab(loaded.activeTabId);
-      }
-      setTreeRefreshToken((prev) => prev + 1);
-    });
-
-    return () => {
-      unsubscribeTree();
-      unsubscribeProject();
-    };
-  }, [currentKernelId]);
+  useKernelSubscriptions({
+    currentKernelId,
+    loadedProjectTabsRef,
+    setCellTabs,
+    setActiveCellTab,
+    setLogs,
+    setTreeRefreshToken,
+    setModulesRefreshToken,
+  });
 
   useEffect(() => {
     const handleMove = (event: MouseEvent) => {
