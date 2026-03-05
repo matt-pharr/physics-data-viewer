@@ -25,7 +25,7 @@
  */
 
 import { CommRouter } from "./comm-router";
-import { PDVMessageType } from "./pdv-protocol";
+import { PDVMessageType, PDV_PROTOCOL_VERSION } from "./pdv-protocol";
 import * as fs from "fs/promises";
 import * as path from "path";
 import * as os from "os";
@@ -40,6 +40,22 @@ import * as crypto from "crypto";
  *
  * See ARCHITECTURE.md §8.1 for the full field semantics.
  */
+export interface ProjectModuleImport {
+  /** Stable installed module identifier. */
+  module_id: string;
+  /** Project-local alias used for tree binding. */
+  alias: string;
+  /** Imported module version snapshot. */
+  version: string;
+  /** Optional imported revision hash. */
+  revision?: string;
+}
+
+/**
+ * Persisted metadata stored in ``project.json`` alongside ``code-cells.json``.
+ *
+ * Includes per-project module import activation and module settings.
+ */
 export interface ProjectManifest {
   /** Schema version of project.json. */
   schema_version: string;
@@ -49,17 +65,23 @@ export interface ProjectManifest {
   pdv_version: string;
   /** SHA-256 checksum of tree-index.json. */
   tree_checksum: string;
+  /** Imported modules active in this project. */
+  modules: ProjectModuleImport[];
+  /** Persisted per-module settings keyed by module alias. */
+  module_settings: Record<string, Record<string, unknown>>;
 }
 
 /** Current schema major version. Increment on breaking changes to project.json. */
-const SCHEMA_VERSION = "1.0";
+const SCHEMA_VERSION = "1.1";
 
 /** Default manifest returned when project.json is missing (ARCHITECTURE.md §8). */
 const DEFAULT_MANIFEST: ProjectManifest = {
   schema_version: SCHEMA_VERSION,
   saved_at: new Date(0).toISOString(),
-  pdv_version: "1.0",
+  pdv_version: PDV_PROTOCOL_VERSION,
   tree_checksum: "",
+  modules: [],
+  module_settings: {},
 };
 
 // ---------------------------------------------------------------------------
@@ -156,11 +178,23 @@ export class ProjectManager {
     );
 
     // Step 3 — write project.json (only after both kernel and app state are flushed).
+    // Preserve existing module imports and settings from a prior manifest if present.
+    let existingModules: ProjectModuleImport[] = [];
+    let existingModuleSettings: Record<string, Record<string, unknown>> = {};
+    try {
+      const existing = await ProjectManager.readManifest(saveDir);
+      existingModules = existing.modules;
+      existingModuleSettings = existing.module_settings;
+    } catch {
+      // No prior manifest or unreadable — start fresh.
+    }
     const manifest: ProjectManifest = {
       schema_version: SCHEMA_VERSION,
       saved_at: new Date().toISOString(),
-      pdv_version: "1.0",
+      pdv_version: PDV_PROTOCOL_VERSION,
       tree_checksum: checksum,
+      modules: existingModules,
+      module_settings: existingModuleSettings,
     };
     await fs.writeFile(
       path.join(saveDir, "project.json"),
@@ -202,7 +236,7 @@ export class ProjectManager {
     await pushPromise;
 
     // Step 4 — read code-cells.json.
-    return _readCodeCelles(saveDir);
+    return _readCodeCells(saveDir);
   }
 
   /**
@@ -248,6 +282,8 @@ export class ProjectManager {
       saved_at: String(obj.saved_at ?? DEFAULT_MANIFEST.saved_at),
       pdv_version: String(obj.pdv_version ?? DEFAULT_MANIFEST.pdv_version),
       tree_checksum: String(obj.tree_checksum ?? ""),
+      modules: _parseManifestModules(obj.modules, manifestPath),
+      module_settings: _parseModuleSettings(obj.module_settings, manifestPath),
     };
   }
 
@@ -288,6 +324,101 @@ function _assertCompatibleSchema(schemaVersion: string): void {
 }
 
 /**
+ * Parse `modules` from a project manifest payload.
+ *
+ * Missing field defaults to `[]` for backward compatibility.
+ *
+ * @param value - Raw `modules` field value.
+ * @param manifestPath - Source manifest path for diagnostics.
+ * @returns Parsed module import descriptors.
+ * @throws {Error} When `modules` is present but invalid.
+ */
+function _parseManifestModules(
+  value: unknown,
+  manifestPath: string
+): ProjectModuleImport[] {
+  if (value === undefined) {
+    return [];
+  }
+  if (!Array.isArray(value)) {
+    throw new Error(`project.json field "modules" must be an array: ${manifestPath}`);
+  }
+  return value.map((entry, index) => {
+    if (!entry || typeof entry !== "object" || Array.isArray(entry)) {
+      throw new Error(
+        `project.json field "modules[${index}]" must be an object: ${manifestPath}`
+      );
+    }
+    const obj = entry as Record<string, unknown>;
+    const moduleId = obj.module_id;
+    const alias = obj.alias;
+    const version = obj.version;
+    const revision = obj.revision;
+    if (typeof moduleId !== "string" || moduleId.trim().length === 0) {
+      throw new Error(
+        `project.json field "modules[${index}].module_id" must be a non-empty string: ${manifestPath}`
+      );
+    }
+    if (typeof alias !== "string" || alias.trim().length === 0) {
+      throw new Error(
+        `project.json field "modules[${index}].alias" must be a non-empty string: ${manifestPath}`
+      );
+    }
+    if (typeof version !== "string" || version.trim().length === 0) {
+      throw new Error(
+        `project.json field "modules[${index}].version" must be a non-empty string: ${manifestPath}`
+      );
+    }
+    if (revision !== undefined && typeof revision !== "string") {
+      throw new Error(
+        `project.json field "modules[${index}].revision" must be a string: ${manifestPath}`
+      );
+    }
+    return {
+      module_id: moduleId.trim(),
+      alias: alias.trim(),
+      version: version.trim(),
+      revision: typeof revision === "string" ? revision : undefined,
+    };
+  });
+}
+
+/**
+ * Parse `module_settings` from a project manifest payload.
+ *
+ * Missing field defaults to `{}` for backward compatibility.
+ *
+ * @param value - Raw `module_settings` field value.
+ * @param manifestPath - Source manifest path for diagnostics.
+ * @returns Parsed module settings map.
+ * @throws {Error} When `module_settings` is present but invalid.
+ */
+function _parseModuleSettings(
+  value: unknown,
+  manifestPath: string
+): Record<string, Record<string, unknown>> {
+  if (value === undefined) {
+    return {};
+  }
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error(
+      `project.json field "module_settings" must be an object: ${manifestPath}`
+    );
+  }
+  const settings = value as Record<string, unknown>;
+  const normalized: Record<string, Record<string, unknown>> = {};
+  for (const [alias, aliasSettings] of Object.entries(settings)) {
+    if (!aliasSettings || typeof aliasSettings !== "object" || Array.isArray(aliasSettings)) {
+      throw new Error(
+        `project.json field "module_settings.${alias}" must be an object: ${manifestPath}`
+      );
+    }
+    normalized[alias] = aliasSettings as Record<string, unknown>;
+  }
+  return normalized;
+}
+
+/**
  * Read and parse ``code-cells.json`` from a project directory.
  *
  * Returns an empty array if the file does not exist.
@@ -295,7 +426,7 @@ function _assertCompatibleSchema(schemaVersion: string): void {
  * @param saveDir - Absolute path to the project directory.
  * @returns Parsed code-cell array, or ``[]`` when the file is absent.
  */
-async function _readCodeCelles(saveDir: string): Promise<unknown> {
+async function _readCodeCells(saveDir: string): Promise<unknown> {
   const filePath = path.join(saveDir, "code-cells.json");
   try {
     const raw = await fs.readFile(filePath, "utf8");

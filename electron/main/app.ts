@@ -10,9 +10,10 @@
  * index.ts — IPC handler registration and push forwarding
  */
 
-import { BrowserWindow, app } from "electron";
+import { BrowserWindow, app, ipcMain } from "electron";
 import * as path from "path";
 import * as os from "os";
+import * as fsSync from "fs";
 
 import { KernelManager } from "./kernel-manager";
 import { CommRouter } from "./comm-router";
@@ -20,6 +21,7 @@ import { ProjectManager } from "./project-manager";
 import { ConfigStore } from "./config";
 import { registerIpcHandlers } from "./index";
 import { initializeAppMenu } from "./menu";
+import { IPC, type ConfirmCloseResponse } from "./ipc";
 
 async function loadDevUrlWithRetry(
   win: BrowserWindow,
@@ -68,8 +70,58 @@ export async function createWindow(
     },
   });
 
-  registerIpcHandlers(win, kernelManager, commRouter, projectManager, configStore, path.join(os.homedir(), ".PDV"));
+  // Clean up any orphaned pdv-* working dirs from a previous crash.
+  const tmpDir = os.tmpdir();
+  try {
+    const entries = fsSync.readdirSync(tmpDir);
+    for (const e of entries) {
+      if (/^pdv-/.test(e)) {
+        fsSync.rmSync(path.join(tmpDir, e), { recursive: true, force: true });
+      }
+    }
+  } catch { /* best-effort */ }
+
+  const resetSessionState = registerIpcHandlers(win, kernelManager, commRouter, projectManager, configStore, path.join(os.homedir(), ".PDV"));
+
+  // Reset in-memory project state on every renderer load/reload so that stale
+  // module imports and project dirs from a previous session are cleared before
+  // the renderer makes any IPC calls (e.g. modules:listImported).
+  win.webContents.on("did-finish-load", resetSessionState);
+
   initializeAppMenu(win);
+
+  // macOS document-edited indicator (red dot in traffic light buttons).
+  // Always on since we treat the session as dirty.
+  win.setDocumentEdited(true);
+
+  // Intercept window close to show unsaved-changes confirmation.
+  let closeConfirmed = false;
+  win.on("close", (event) => {
+    if (closeConfirmed) {
+      return; // Already confirmed — allow close to proceed.
+    }
+    event.preventDefault();
+    // Ask renderer to show the unsaved-changes dialog.
+    win.webContents.send(IPC.lifecycle.confirmClose);
+  });
+
+  // Renderer responds with user's decision via invoke.
+  // Guard against duplicate registration if the window is recreated.
+  ipcMain.removeHandler(IPC.lifecycle.closeResponse);
+  ipcMain.handle(IPC.lifecycle.closeResponse, (_event, response: ConfirmCloseResponse) => {
+    if (response.action === "cancel") {
+      // User cancelled — reset quitting flag so Cmd+Q works again.
+      quittingCancelled();
+      return true;
+    }
+    // "save" or "discard" — renderer handles saving before responding.
+    closeConfirmed = true;
+    win.close();
+    return true;
+  });
+  win.on("closed", () => {
+    ipcMain.removeHandler(IPC.lifecycle.closeResponse);
+  });
 
   const rendererIndexPath = path.join(
     __dirname,
@@ -98,6 +150,15 @@ export async function createWindow(
   return win;
 }
 
+// Module-level shutdown flag so that cancel from the unsaved-changes dialog
+// can reset it, allowing subsequent Cmd+Q to re-run kernel cleanup.
+let isShuttingDownGlobal = false;
+
+/** Called by close-response handler when user cancels the close. */
+function quittingCancelled(): void {
+  isShuttingDownGlobal = false;
+}
+
 /**
  * Register core Electron app events.
  *
@@ -113,18 +174,16 @@ export function wireAppEvents(
     }
   });
 
-  // Guard against re-entry: Electron fires `before-quit` again after we call
-  // `app.quit()` once async shutdown is complete.
-  let isShuttingDown = false;
-
-  app.on("before-quit", (event) => {
+  // Run kernel shutdown during will-quit, after renderer close/save flows
+  // have completed, so save-on-quit can still reach the active kernel.
+  app.on("will-quit", (event) => {
     const kernelManager = getKernelManager();
-    if (!kernelManager || isShuttingDown) {
+    if (!kernelManager || isShuttingDownGlobal) {
       return;
     }
     // Prevent the default quit so we can await async cleanup first.
     event.preventDefault();
-    isShuttingDown = true;
+    isShuttingDownGlobal = true;
     kernelManager
       .shutdownAll()
       .catch((error: unknown) => {

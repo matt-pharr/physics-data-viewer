@@ -40,6 +40,8 @@ export interface NodeDescriptor {
   language?: string | null;
   /** Script parameter descriptors when `type === "script"`. */
   params?: ScriptParameter[] | undefined;
+  /** Physical filename with extension for file-backed nodes (e.g. "run.nml"). Null for others. */
+  filename?: string | null;
 }
 
 /** Runtime kernel descriptor returned by `kernels.start/list/restart`. */
@@ -211,6 +213,166 @@ export interface Config {
   };
 }
 
+/** Supported module install source kinds. */
+export type ModuleSourceType = "github" | "local";
+
+/** Canonical source reference for module install metadata. */
+export interface ModuleSourceReference {
+  type: ModuleSourceType;
+  location: string;
+}
+
+/** Global installed module descriptor returned by `modules.listInstalled`. */
+export interface ModuleDescriptor {
+  id: string;
+  name: string;
+  version: string;
+  description?: string;
+  source: ModuleSourceReference;
+  revision?: string;
+  installPath?: string;
+}
+
+/** Request payload for `modules.install`. */
+export interface ModuleInstallRequest {
+  source: ModuleSourceReference;
+}
+
+/** Result payload for `modules.install`. */
+export interface ModuleInstallResult {
+  success: boolean;
+  status: "installed" | "up_to_date" | "update_available" | "incompatible_update" | "not_implemented" | "error";
+  module?: ModuleDescriptor;
+  currentVersion?: string;
+  currentRevision?: string;
+  error?: string;
+}
+
+/** Result payload for `modules.checkUpdates`. */
+export interface ModuleUpdateResult {
+  moduleId: string;
+  status: "up_to_date" | "update_available" | "unknown" | "not_implemented";
+  currentVersion?: string;
+  availableVersion?: string;
+  message?: string;
+}
+
+/** Request payload for importing a module into the active project. */
+export interface ModuleImportRequest {
+  moduleId: string;
+  alias?: string;
+}
+
+/** Result payload for `modules.importToProject`. */
+export interface ModuleImportResult {
+  success: boolean;
+  status: "imported" | "conflict" | "not_implemented" | "error";
+  alias?: string;
+  suggestedAlias?: string;
+  warnings?: ModuleHealthWarning[];
+  error?: string;
+}
+
+export type ModuleInputValue = string | number | boolean;
+
+export interface ModuleInputOptionDescriptor {
+  label: string;
+  value: ModuleInputValue;
+}
+
+export interface ModuleInputVisibilityRule {
+  inputId: string;
+  equals: ModuleInputValue;
+}
+
+/** Declarative input field descriptor from module manifest. */
+export interface ModuleInputDescriptor {
+  id: string;
+  label: string;
+  type?: string;
+  control?: "text" | "dropdown" | "slider" | "checkbox" | "file";
+  default?: ModuleInputValue;
+  options?: ModuleInputOptionDescriptor[];
+  optionsTreePath?: string;
+  min?: number;
+  max?: number;
+  step?: number;
+  tab?: string;
+  section?: string;
+  sectionCollapsed?: boolean;
+  tooltip?: string;
+  visibleIf?: ModuleInputVisibilityRule;
+  fileMode?: "file" | "directory";
+}
+
+/** Declarative imported-module action descriptor for renderer controls. */
+export interface ImportedModuleActionDescriptor {
+  id: string;
+  label: string;
+  scriptName: string;
+  inputIds?: string[];
+  tab?: string;
+}
+
+/** Non-blocking module health warning surfaced to the renderer. */
+export interface ModuleHealthWarning {
+  code:
+    | "pdv_version_incompatible"
+    | "python_version_incompatible"
+    | "python_version_unknown"
+    | "dependency_unverified"
+    | "missing_action_script"
+    | "module_source_missing";
+  message: string;
+}
+
+/** Project-scoped imported module descriptor. */
+export interface ImportedModuleDescriptor {
+  moduleId: string;
+  name: string;
+  alias: string;
+  version: string;
+  revision?: string;
+  inputs: ModuleInputDescriptor[];
+  actions: ImportedModuleActionDescriptor[];
+  settings: Record<string, unknown>;
+  warnings: ModuleHealthWarning[];
+}
+
+/** Request payload for `modules.saveSettings`. */
+export interface ModuleSettingsRequest {
+  moduleAlias: string;
+  values: Record<string, unknown>;
+}
+
+/** Result payload for `modules.saveSettings`. */
+export interface ModuleSettingsResult {
+  success: boolean;
+  error?: string;
+}
+
+/** Request payload for `modules.runAction`. */
+export interface ModuleActionRequest {
+  kernelId: string;
+  moduleAlias: string;
+  actionId: string;
+  /**
+   * Input values keyed by input id (from the module's input fields).
+   *
+   * Note: string values are sent as Python expression text; provide
+   * language-safe strings (quote string literals).
+   */
+  inputValues?: Record<string, ModuleInputValue>;
+}
+
+/** Result payload for `modules.runAction`. */
+export interface ModuleActionResult {
+  success: boolean;
+  status: "queued" | "not_implemented" | "error";
+  executionCode?: string;
+  error?: string;
+}
+
 /** Complete preload API contract exposed as `window.pdv`. */
 export interface PDVApi {
   kernels: {
@@ -244,6 +406,13 @@ export interface PDVApi {
       targetPath: string,
       scriptName: string
     ): Promise<{ success: boolean; error?: string; scriptPath?: string }>;
+    addFile(
+      kernelId: string,
+      sourcePath: string,
+      targetTreePath: string,
+      nodeType: "namelist" | "fortran" | "file",
+      filename: string
+    ): Promise<{ success: boolean; error?: string; workingDirPath?: string }>;
     onChanged(
       callback: (payload: { changed_paths: string[]; change_type: "added" | "removed" | "updated" }) => void
     ): () => void;
@@ -254,6 +423,16 @@ export interface PDVApi {
   script: {
     edit(kernelId: string, scriptPath: string): Promise<{ success: boolean; error?: string }>;
     reload(scriptPath: string): Promise<{ success: boolean; error?: string }>;
+  };
+  modules: {
+    listInstalled(): Promise<ModuleDescriptor[]>;
+    install(request: ModuleInstallRequest): Promise<ModuleInstallResult>;
+    checkUpdates(moduleId: string): Promise<ModuleUpdateResult>;
+    importToProject(request: ModuleImportRequest): Promise<ModuleImportResult>;
+    listImported(): Promise<ImportedModuleDescriptor[]>;
+    saveSettings(request: ModuleSettingsRequest): Promise<ModuleSettingsResult>;
+    runAction(request: ModuleActionRequest): Promise<ModuleActionResult>;
+    removeImport(moduleAlias: string): Promise<ModuleSettingsResult>;
   };
   project: {
     save(saveDir: string, codeCells: unknown): Promise<boolean>;
@@ -278,7 +457,12 @@ export interface PDVApi {
   };
   files: {
     pickExecutable(): Promise<string | null>;
+    pickFile(): Promise<string | null>;
     pickDirectory(): Promise<string | null>;
+  };
+  lifecycle: {
+    onConfirmClose(callback: () => void): () => void;
+    respondClose(response: { action: 'save' | 'discard' | 'cancel' }): Promise<boolean>;
   };
   menu: {
     updateRecentProjects(paths: string[]): Promise<boolean>;

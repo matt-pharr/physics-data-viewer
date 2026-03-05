@@ -15,31 +15,35 @@
  * ipc.ts — channel constants and API types
  */
 
-import { ipcMain, BrowserWindow, dialog, app } from "electron";
-import { spawn } from "child_process";
+import { ipcMain, BrowserWindow, app } from "electron";
 import * as fs from "fs/promises";
 import * as fsSync from "fs";
 import * as os from "os";
 import * as path from "path";
 
 import { CommRouter } from "./comm-router";
+import { EnvironmentDetector } from "./environment-detector";
+import { buildEditorSpawn, resolveEditorSpawn } from "./editor-spawn";
+import { registerModulesIpcHandlers } from "./ipc-register-modules";
 import { KernelManager, type KernelInfo } from "./kernel-manager";
-import { ProjectManager } from "./project-manager";
-import { ConfigStore } from "./config";
-import { updateRecentProjectsMenu } from "./menu";
+import { initializeKernelSession } from "./kernel-session";
+import { ModuleManager } from "./module-manager";
 import {
-  CodeCellData,
+  bindProjectModulesToTree,
+} from "./module-runtime";
+import { ProjectManager, type ProjectModuleImport } from "./project-manager";
+import { copyFilesForLoad, copyFilesForSave } from "./project-file-sync";
+import { ConfigStore } from "./config";
+import { registerAppStateIpcHandlers } from "./ipc-register-app-state";
+import { registerTreeNamespaceScriptIpcHandlers } from "./ipc-register-tree-namespace-script";
+import {
   IPC,
   KernelCompleteResult,
   KernelInspectResult,
   KernelValidateResult,
+  ModuleHealthWarning,
   NamespaceQueryOptions,
-  NamespaceVariable,
   PDVConfig,
-  ScriptOperationResult,
-  Theme,
-  TreeCreateScriptResult,
-  TreeNode,
 } from "./ipc";
 import { PDVMessage, PDVMessageType } from "./pdv-protocol";
 
@@ -66,9 +70,18 @@ const REGISTERED_CHANNELS: readonly string[] = [
   IPC.tree.list,
   IPC.tree.get,
   IPC.tree.createScript,
+  IPC.tree.addFile,
   IPC.namespace.query,
   IPC.script.edit,
   IPC.script.reload,
+  IPC.modules.listInstalled,
+  IPC.modules.install,
+  IPC.modules.checkUpdates,
+  IPC.modules.importToProject,
+  IPC.modules.listImported,
+  IPC.modules.saveSettings,
+  IPC.modules.runAction,
+  IPC.modules.removeImport,
   IPC.project.save,
   IPC.project.load,
   IPC.project.new,
@@ -80,11 +93,9 @@ const REGISTERED_CHANNELS: readonly string[] = [
   IPC.codeCells.save,
   IPC.menu.updateRecentProjects,
   IPC.files.pickExecutable,
+  IPC.files.pickFile,
   IPC.files.pickDirectory,
 ];
-
-let savedThemes: Theme[] = [];
-let savedCodeCells: CodeCellData | null = null;
 
 interface PushSubscription {
   commRouter: CommRouter;
@@ -94,23 +105,37 @@ interface PushSubscription {
 
 const pushSubscriptions: PushSubscription[] = [];
 const kernelWorkingDirs = new Map<string, string>();
+const crashHandlers = new Map<string, (id: string) => void>();
+const projectManifestMutationQueue = new Map<string, Promise<void>>();
+let activeKernelManagerRef: KernelManager | null = null;
 
-const BOOTSTRAP_AND_OPEN_COMM = `
-from IPython import get_ipython
-import pdv_kernel
-import pdv_kernel.comms as _pdv_comms
-try:
-    from ipykernel.comm import Comm
-except Exception:
-    from comm import Comm
-_ip = get_ipython()
-pdv_kernel.bootstrap(_ip)
-if _pdv_comms._comm is None:
-    _pdv_comm = Comm(target_name="pdv.kernel")
-    _pdv_comms._comm = _pdv_comm
-    _pdv_comm.on_msg(_pdv_comms._on_comm_message)
-    _pdv_comms.send_message("pdv.ready", {})
-`;
+// ---------------------------------------------------------------------------
+// Working-directory helpers
+// ---------------------------------------------------------------------------
+
+/**
+ * Delete the working directory for a kernel and remove its crash handler.
+ *
+ * @param projectManager - Project manager used for deletion.
+ * @param kernelManager  - Kernel manager used to remove event listeners.
+ * @param kernelId       - Kernel whose working dir should be cleaned up.
+ */
+async function cleanupKernelWorkingDir(
+  projectManager: ProjectManager,
+  kernelManager: KernelManager,
+  kernelId: string
+): Promise<void> {
+  const oldDir = kernelWorkingDirs.get(kernelId);
+  if (oldDir) {
+    await projectManager.deleteWorkingDir(oldDir);
+    kernelWorkingDirs.delete(kernelId);
+  }
+  const handler = crashHandlers.get(kernelId);
+  if (handler) {
+    kernelManager.removeListener("kernel:crashed", handler);
+    crashHandlers.delete(kernelId);
+  }
+}
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -123,33 +148,8 @@ if _pdv_comms._comm is None:
  * @returns Current config snapshot.
  */
 function readConfig(configStore: ConfigStore): PDVConfig {
-  const raw = configStore.getAll() as unknown as Partial<PDVConfig>;
+  const raw = configStore.getAll();
   return { ...DEFAULT_CONFIG, ...raw };
-}
-
-/**
- * Resolve and expand an editor command for a given file path.
- *
- * The command string may contain `{}` as a placeholder for the file path.
- * If no placeholder is present the path is appended as the last argument.
- * Defaults to `"code {}"` (VS Code) when no command is configured.
- *
- * @param cmdString - Raw command string from config, e.g. `"nvim {}"`.
- * @param filePath  - Absolute path to the file to open.
- * @returns Object with the executable and expanded argument list.
- */
-function buildEditorSpawn(
-  cmdString: string | undefined,
-  filePath: string,
-): { file: string; args: string[] } {
-  const raw = (cmdString ?? "code {}").trim() || "code {}";
-  const parts = raw.split(/\s+/).filter(Boolean);
-  const PLACEHOLDER = "{}";
-  const hasPlaceholder = parts.includes(PLACEHOLDER);
-  const expanded = hasPlaceholder
-    ? parts.map((p) => (p === PLACEHOLDER ? filePath : p))
-    : [...parts, filePath];
-  return { file: expanded[0], args: expanded.slice(1) };
 }
 
 /**
@@ -167,6 +167,29 @@ function toNamespaceQueryPayload(
     include_modules: options.includeModules,
     include_callables: options.includeCallables,
   };
+}
+
+/**
+ * Serialize project-manifest read/modify/write tasks per project directory.
+ *
+ * @param projectDir - Project directory owning one `project.json`.
+ * @param task - Manifest mutation task to run after queued tasks complete.
+ * @returns Task result.
+ * @throws {Error} Re-throws task errors after preserving queue continuity.
+ */
+function runSerializedProjectManifestMutation<T>(
+  projectDir: string,
+  task: () => Promise<T>
+): Promise<T> {
+  const previous = projectManifestMutationQueue.get(projectDir) ?? Promise.resolve();
+  const current = previous.catch(() => undefined).then(task);
+  const completion = current.then(() => undefined, () => undefined);
+  projectManifestMutationQueue.set(projectDir, completion);
+  return current.finally(() => {
+    if (projectManifestMutationQueue.get(projectDir) === completion) {
+      projectManifestMutationQueue.delete(projectDir);
+    }
+  });
 }
 
 /**
@@ -245,48 +268,6 @@ function clearPushSubscriptions(): void {
   pushSubscriptions.length = 0;
 }
 
-async function waitForPush(
-  commRouter: CommRouter,
-  type: string,
-  timeoutMs: number
-): Promise<void> {
-  await new Promise<void>((resolve, reject) => {
-    const timer = setTimeout(() => {
-      commRouter.offPush(type, handler);
-      reject(new Error(`Timed out waiting for push: ${type}`));
-    }, timeoutMs);
-    const handler = (): void => {
-      clearTimeout(timer);
-      commRouter.offPush(type, handler);
-      resolve();
-    };
-    commRouter.onPush(type, handler);
-  });
-}
-
-async function initializeKernelSession(
-  kernelManager: KernelManager,
-  commRouter: CommRouter,
-  projectManager: ProjectManager,
-  kernelId: string
-): Promise<void> {
-  const readyPromise = waitForPush(commRouter, PDVMessageType.READY, 15_000);
-  const bootstrapResult = await kernelManager.execute(kernelId, {
-    code: BOOTSTRAP_AND_OPEN_COMM,
-    silent: true,
-  });
-  if (bootstrapResult.error) {
-    throw new Error(bootstrapResult.error);
-  }
-  await readyPromise;
-  const workingDir = await projectManager.createWorkingDir();
-  await commRouter.request(PDVMessageType.INIT, {
-    working_dir: workingDir,
-    pdv_version: "1.0",
-  });
-  kernelWorkingDirs.set(kernelId, workingDir);
-}
-
 // ---------------------------------------------------------------------------
 // Public registration API
 // ---------------------------------------------------------------------------
@@ -308,50 +289,88 @@ export function registerIpcHandlers(
   projectManager: ProjectManager,
   configStore: ConfigStore,
   pdvDir: string
-): void {
+): () => void {
+  activeKernelManagerRef = kernelManager;
   unregisterIpcHandlers();
 
   // Derive per-purpose sub-directories within ~/.PDV
   const themesDir = path.join(pdvDir, "themes");
   const stateDir  = path.join(pdvDir, "state");
   const codeCellsPath = path.join(stateDir, "code-cells.json");
-  fs.mkdir(themesDir, { recursive: true }).catch(() => {});
-  fs.mkdir(stateDir,  { recursive: true }).catch(() => {});
+  const moduleManager = new ModuleManager(pdvDir);
+  let activeProjectDir: string | null = null;
+  let activeKernelId: string | null = null;
+  const moduleHealthWarningsByAlias = new Map<string, ModuleHealthWarning[]>();
 
-  // Populate savedThemes from disk on first call: load PDV-saved themes +
-  // any .json files the user has dropped in ~/.PDV/themes/.
-  if (savedThemes.length === 0) {
-    try {
-      const entries = fsSync.readdirSync(themesDir);
-      for (const entry of entries) {
-        if (!entry.endsWith(".json")) continue;
-        try {
-          const raw = fsSync.readFileSync(path.join(themesDir, entry), "utf8");
-          const parsed = JSON.parse(raw) as unknown;
-          if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
-            const obj = parsed as Record<string, unknown>;
-            if (typeof obj.name === "string" && obj.colors && typeof obj.colors === "object") {
-              savedThemes.push({ name: obj.name, colors: obj.colors as Record<string, string> });
-            }
-          }
-        } catch {
-          // skip malformed files
-        }
-      }
-    } catch {
-      // themes dir may not exist yet
-    }
-  }
+  // In-memory module state for imports made before the project is saved to disk.
+  // Merged into the manifest on first project:save, cleared on project:load/new.
+  let pendingModuleImports: ProjectModuleImport[] = [];
+  let pendingModuleSettings: Record<string, Record<string, unknown>> = {};
 
-  // Populate savedCodeCells from disk on first call.
-  if (savedCodeCells === null) {
+  const detectPythonVersion = async (): Promise<string | undefined> => {
+    const config = readConfig(configStore);
     try {
-      const raw = fsSync.readFileSync(codeCellsPath, "utf8");
-      savedCodeCells = JSON.parse(raw) as CodeCellData;
-    } catch {
-      // file may not exist yet
+      const detected = await EnvironmentDetector.detect(config.pythonPath);
+      return detected.pythonVersion;
+    } catch (error) {
+      console.warn("[pdv] unable to detect python version for module health", error);
+      return undefined;
     }
-  }
+  };
+
+  const refreshProjectModuleHealth = async (
+    projectDir: string | null
+  ): Promise<Awaited<ReturnType<typeof ProjectManager.readManifest>> | null> => {
+    moduleHealthWarningsByAlias.clear();
+    if (!projectDir) {
+      return null;
+    }
+    const manifest = await ProjectManager.readManifest(projectDir);
+    const pythonVersion = await detectPythonVersion();
+    for (const importedModule of manifest.modules) {
+      const warnings = await moduleManager.evaluateHealth(importedModule.module_id, {
+        pdvVersion: app.getVersion(),
+        pythonVersion,
+      });
+      moduleHealthWarningsByAlias.set(importedModule.alias, warnings);
+    }
+    return manifest;
+  };
+
+  /**
+   * Read the active project manifest when a project is loaded.
+   *
+   * @returns Current active manifest, or null when no project is active.
+   */
+  const readActiveProjectManifest = async (): Promise<
+    Awaited<ReturnType<typeof ProjectManager.readManifest>> | null
+  > => {
+    if (!activeProjectDir) {
+      return null;
+    }
+    return ProjectManager.readManifest(activeProjectDir);
+  };
+
+  /**
+   * Bind active-project module scripts into one kernel working directory.
+   *
+   * @param kernelId - Kernel to bind module scripts for.
+   * @param importedModules - Optional already-loaded module imports.
+   */
+  const bindActiveProjectModules = async (
+    kernelId: string | null,
+    importedModules?: ProjectModuleImport[]
+  ): Promise<void> => {
+    await bindProjectModulesToTree(
+      kernelManager,
+      commRouter,
+      moduleManager,
+      kernelId,
+      activeProjectDir,
+      importedModules,
+      kernelId ? kernelWorkingDirs.get(kernelId) : undefined
+    );
+  };
 
   // Handles kernels:list requests from the renderer.
   // Input: none.
@@ -366,11 +385,49 @@ export function registerIpcHandlers(
   // Returns: KernelInfo for the started kernel.
   // On error: throws to renderer.
   ipcMain.handle(IPC.kernels.start, async (_event, spec) => {
+    const requestedSpec = spec as Parameters<KernelManager["start"]>[0];
+    const pythonPath =
+      requestedSpec?.env?.PYTHON_PATH ??
+      (Array.isArray(requestedSpec?.argv) ? requestedSpec.argv[0] : undefined);
+    if ((requestedSpec?.language ?? "python") === "python" && pythonPath) {
+      const installStatus = await EnvironmentDetector.checkPDVInstalled(pythonPath);
+      if (!installStatus.installed) {
+        throw new Error(
+          `Selected Python runtime is missing pdv_kernel. Install it with: cd pdv-python && ${pythonPath} -m pip install -e ".[dev]"`
+        );
+      }
+    }
+    // Starting a new kernel always means a new session — clear any in-memory
+    // project state from a previous session (pending imports, active project
+    // dir, health warnings) so they don't carry over.
+    activeProjectDir = null;
+    pendingModuleImports = [];
+    pendingModuleSettings = {};
+    moduleHealthWarningsByAlias.clear();
+
     const kernel = await kernelManager.start(
-      spec as Parameters<KernelManager["start"]>[0]
+      requestedSpec
     );
     commRouter.attach(kernelManager, kernel.id);
-    await initializeKernelSession(kernelManager, commRouter, projectManager, kernel.id);
+    await initializeKernelSession(
+      kernelManager,
+      commRouter,
+      projectManager,
+      kernel.id,
+      kernelWorkingDirs
+    );
+    activeKernelId = kernel.id;
+    await bindActiveProjectModules(activeKernelId);
+
+    const onCrash = async (crashedId: string): Promise<void> => {
+      if (crashedId !== kernel.id) return;
+      await cleanupKernelWorkingDir(projectManager, kernelManager, crashedId);
+      if (activeKernelId === crashedId) activeKernelId = null;
+      win.webContents.send(IPC.push.kernelStatus, { kernelId: crashedId, status: "dead" });
+    };
+    crashHandlers.set(kernel.id, onCrash);
+    kernelManager.on("kernel:crashed", onCrash);
+
     return kernel;
   });
 
@@ -379,11 +436,10 @@ export function registerIpcHandlers(
   // Returns: true after stop completes.
   // On error: throws to renderer.
   ipcMain.handle(IPC.kernels.stop, async (_event, kernelId: string) => {
+    await cleanupKernelWorkingDir(projectManager, kernelManager, kernelId);
     await kernelManager.stop(kernelId);
-    const workingDir = kernelWorkingDirs.get(kernelId);
-    if (workingDir) {
-      await projectManager.deleteWorkingDir(workingDir);
-      kernelWorkingDirs.delete(kernelId);
+    if (activeKernelId === kernelId) {
+      activeKernelId = null;
     }
     commRouter.detach();
     return true;
@@ -415,26 +471,51 @@ export function registerIpcHandlers(
   // Returns: KernelInfo for the restarted kernel.
   // On error: throws to renderer.
   ipcMain.handle(IPC.kernels.restart, async (_event, kernelId: string) => {
+    // Restart clears the tree — reset in-memory project state so stale
+    // pending imports and project dir don't persist into the new session.
+    activeProjectDir = null;
+    pendingModuleImports = [];
+    pendingModuleSettings = {};
+    moduleHealthWarningsByAlias.clear();
+
     const restartable = kernelManager as KernelManager & {
       restart?: (id: string) => Promise<KernelInfo>;
     };
     if (restartable.restart) {
+      await cleanupKernelWorkingDir(projectManager, kernelManager, kernelId);
       const restarted = await restartable.restart(kernelId);
       commRouter.attach(kernelManager, restarted.id);
-      await initializeKernelSession(kernelManager, commRouter, projectManager, restarted.id);
+      await initializeKernelSession(
+        kernelManager,
+        commRouter,
+        projectManager,
+        restarted.id,
+        kernelWorkingDirs
+      );
+      activeKernelId = restarted.id;
+      await bindActiveProjectModules(activeKernelId);
       return restarted;
     }
     const current = kernelManager.getKernel(kernelId);
     if (!current) {
       throw new Error(`Kernel not found: ${kernelId}`);
     }
+    await cleanupKernelWorkingDir(projectManager, kernelManager, kernelId);
     await kernelManager.stop(kernelId);
     const restarted = await kernelManager.start({
       name: current.name,
       language: current.language,
     });
     commRouter.attach(kernelManager, restarted.id);
-    await initializeKernelSession(kernelManager, commRouter, projectManager, restarted.id);
+    await initializeKernelSession(
+      kernelManager,
+      commRouter,
+      projectManager,
+      restarted.id,
+      kernelWorkingDirs
+    );
+    activeKernelId = restarted.id;
+    await bindActiveProjectModules(activeKernelId);
     return restarted;
   });
 
@@ -503,172 +584,87 @@ export function registerIpcHandlers(
       if (!executablePath.trim()) {
         return { valid: false, error: "Executable path is required" };
       }
+      if (language === "python") {
+        const installStatus = await EnvironmentDetector.checkPDVInstalled(
+          executablePath.trim()
+        );
+        if (!installStatus.installed) {
+          return {
+            valid: false,
+            error:
+              'Missing pdv_kernel. Install it with: cd pdv-python && <python> -m pip install -e ".[dev]"',
+          };
+        }
+      }
       return { valid: true };
     }
   );
 
-  // Handles tree:list requests from the renderer.
-  // Input: kernelId (string), path (string, optional).
-  // Returns: TreeNode[].
-  // On error: returns [] if kernel is absent; otherwise throws.
-  ipcMain.handle(IPC.tree.list, async (_event, kernelId: string, nodePath = "") => {
-    if (!kernelManager.getKernel(kernelId)) {
-      return [] as TreeNode[];
-    }
-    const response = await commRouter.request(PDVMessageType.TREE_LIST, {
-      path: nodePath,
-    });
-    const nodes = (response.payload as { nodes?: unknown }).nodes;
-    return Array.isArray(nodes) ? (nodes as TreeNode[]) : [];
+  registerTreeNamespaceScriptIpcHandlers({
+    kernelManager,
+    commRouter,
+    projectManager,
+    configStore,
+    kernelWorkingDirs,
+    readConfig,
+    toNamespaceQueryPayload,
+    sanitizeScriptName,
+    ensureScriptFile,
+    resolveScriptPath,
+    buildEditorSpawn,
+    resolveEditorSpawn,
   });
 
-  // Handles tree:get requests from the renderer.
-  // Input: kernelId (string), path (string).
-  // Returns: Payload object from pdv.tree.get.response.
-  // On error: throws to renderer.
-  ipcMain.handle(IPC.tree.get, async (_event, kernelId: string, nodePath: string) => {
-    if (!kernelManager.getKernel(kernelId)) {
-      throw new Error(`Kernel not found: ${kernelId}`);
-    }
-    const response = await commRouter.request(PDVMessageType.TREE_GET, {
-      path: nodePath,
-    });
-    return response.payload;
-  });
-
-  // Handles tree:createScript requests from the renderer.
-  // Input: kernelId (string), targetPath (string), scriptName (string).
-  // Returns: script creation result payload.
-  // On error: throws to renderer.
-  ipcMain.handle(
-    IPC.tree.createScript,
-    async (
-      _event,
-      kernelId: string,
-      targetPath: string,
-      scriptName: string
-    ): Promise<TreeCreateScriptResult> => {
-      if (!kernelManager.getKernel(kernelId)) {
-        throw new Error(`Kernel not found: ${kernelId}`);
-      }
-      let workingDir = kernelWorkingDirs.get(kernelId);
-      if (!workingDir) {
-        workingDir = await projectManager.createWorkingDir();
-        kernelWorkingDirs.set(kernelId, workingDir);
-      }
-      const safeName = sanitizeScriptName(scriptName);
-      const scriptNodeName = path.parse(safeName).name;
-      const scriptsDir = path.join(
-        workingDir,
-        ...targetPath.split(".").filter(Boolean)
-      );
-      await fs.mkdir(scriptsDir, { recursive: true });
-      const scriptPath = path.join(scriptsDir, safeName);
-      await ensureScriptFile(scriptPath);
-
-      await commRouter.request(PDVMessageType.SCRIPT_REGISTER, {
-        parent_path: targetPath,
-        name: scriptNodeName,
-        relative_path: scriptPath,
-        language: "python",
-      });
-      return { success: true, scriptPath };
-    }
-  );
-
-  // Handles namespace:query requests from the renderer.
-  // Input: kernelId (string), optional NamespaceQueryOptions.
-  // Returns: NamespaceVariable[].
-  // On error: throws to renderer.
-  ipcMain.handle(
-    IPC.namespace.query,
-    async (
-      _event,
-      kernelId: string,
-      options?: NamespaceQueryOptions
-    ): Promise<NamespaceVariable[]> => {
-      if (!kernelManager.getKernel(kernelId)) {
-        return [];
-      }
-      const response = await commRouter.request(
-        PDVMessageType.NAMESPACE_QUERY,
-        toNamespaceQueryPayload(options)
-      );
-      const variables = (response.payload as { variables?: unknown }).variables;
-      let normalized: NamespaceVariable[] = [];
-      if (Array.isArray(variables)) {
-        normalized = variables as NamespaceVariable[];
-      } else if (variables && typeof variables === "object") {
-        normalized = Object.entries(variables as Record<string, unknown>).map(
-          ([name, value]) => ({
-            name,
-            ...(typeof value === "object" && value !== null
-              ? (value as Record<string, unknown>)
-              : {}),
-          })
-        ) as NamespaceVariable[];
-      }
-      if (!normalized.some((entry) => entry.name === "pdv_tree")) {
-        normalized.unshift({
-          name: "pdv_tree",
-          type: "protected",
-          preview: "PDVTree (protected)",
-        });
-      }
-      if (!normalized.some((entry) => entry.name === "pdv")) {
-        normalized.unshift({
-          name: "pdv",
-          type: "protected",
-          preview: "PDV app object (protected)",
-        });
-      }
-      return normalized;
-    }
-  );
-
-  // Handles script:edit requests from the renderer.
-  // Input: scriptPath (string).
-  // Returns: ScriptOperationResult.
-  // On error: throws to renderer.
-  ipcMain.handle(IPC.script.edit, async (_event, kernelId: string, scriptPath: string) => {
-    const config = readConfig(configStore);
-    const resolvedScriptPath = resolveScriptPath(kernelId, scriptPath, kernelWorkingDirs);
-    const isJulia = resolvedScriptPath.endsWith(".jl");
-    const cmdString = isJulia ? config.juliaEditorCmd : config.pythonEditorCmd;
-    const { file, args } = buildEditorSpawn(cmdString, resolvedScriptPath);
-    const child = spawn(file, args, { detached: true, stdio: "ignore" });
-    child.unref();
-    const result: ScriptOperationResult = { success: true };
-    return result;
-  });
-
-  // Handles script:reload requests from the renderer.
-  // Input: treePath (string) — dot-separated tree path for the script.
-  // Returns: ScriptOperationResult.
-  // On error: throws to renderer.
-  ipcMain.handle(IPC.script.reload, async (_event, treePath: string) => {
-    const lastDot = treePath.lastIndexOf(".");
-    const parentPath = lastDot >= 0 ? treePath.slice(0, lastDot) : "";
-    const name = lastDot >= 0 ? treePath.slice(lastDot + 1) : treePath;
-    await commRouter.request(PDVMessageType.SCRIPT_REGISTER, {
-      parent_path: parentPath,
-      name,
-      relative_path: treePath,
-      language: "python",
-      reload: true,
-    });
-    const result: ScriptOperationResult = { success: true };
-    return result;
+  registerModulesIpcHandlers({
+    win,
+    kernelManager,
+    commRouter,
+    moduleManager,
+    kernelWorkingDirs,
+    readActiveProjectManifest,
+    getActiveProjectDir: () => activeProjectDir,
+    getActiveKernelId: () => activeKernelId,
+    getPendingModuleImports: () => pendingModuleImports,
+    getPendingModuleSettings: () => pendingModuleSettings,
+    getModuleHealthWarningsByAlias: () => moduleHealthWarningsByAlias,
+    detectPythonVersion,
+    getPdvVersion: () => app.getVersion(),
+    runWithProjectManifestWriteLock: runSerializedProjectManifestMutation,
   });
 
   // Handles project:save requests from the renderer.
   // Input: saveDir (string), codeCells payload.
   // Returns: true on success.
   // On error: throws to renderer.
+  // Merges any pending in-memory module imports/settings into the saved manifest.
   ipcMain.handle(
     IPC.project.save,
     async (_event, saveDir: string, codeCells: unknown) => {
       await projectManager.save(saveDir, codeCells);
+
+      // Merge pending in-memory module imports/settings into the on-disk manifest.
+      if (pendingModuleImports.length > 0 || Object.keys(pendingModuleSettings).length > 0) {
+        await runSerializedProjectManifestMutation(saveDir, async () => {
+          const manifest = await ProjectManager.readManifest(saveDir);
+          const mergedManifest = {
+            ...manifest,
+            modules: [...manifest.modules, ...pendingModuleImports],
+            module_settings: { ...manifest.module_settings, ...pendingModuleSettings },
+          };
+          await ProjectManager.saveManifest(saveDir, mergedManifest);
+        });
+        pendingModuleImports = [];
+        pendingModuleSettings = {};
+      }
+
+      // Copy file-backed node files from working dir into save dir.
+      if (activeKernelId) {
+        const workingDir = kernelWorkingDirs.get(activeKernelId);
+        if (workingDir) await copyFilesForSave(workingDir, saveDir);
+      }
+
+      activeProjectDir = saveDir;
+      await refreshProjectModuleHealth(activeProjectDir);
       return true;
     }
   );
@@ -678,7 +674,19 @@ export function registerIpcHandlers(
   // Returns: code cell payload loaded by ProjectManager.
   // On error: throws to renderer.
   ipcMain.handle(IPC.project.load, async (_event, saveDir: string) => {
-    return projectManager.load(saveDir);
+    // Copy file-backed node files from save dir into working dir before kernel load.
+    if (activeKernelId) {
+      const workingDir = kernelWorkingDirs.get(activeKernelId);
+      if (workingDir) await copyFilesForLoad(saveDir, workingDir);
+    }
+
+    const loaded = await projectManager.load(saveDir);
+    activeProjectDir = saveDir;
+    pendingModuleImports = [];
+    pendingModuleSettings = {};
+    const manifest = await refreshProjectModuleHealth(activeProjectDir);
+    await bindActiveProjectModules(activeKernelId, manifest?.modules);
+    return loaded;
   });
 
   // Handles project:new requests from the renderer.
@@ -686,126 +694,37 @@ export function registerIpcHandlers(
   // Returns: true.
   // On error: throws to renderer.
   ipcMain.handle(IPC.project.new, async () => {
+    activeProjectDir = null;
+    pendingModuleImports = [];
+    pendingModuleSettings = {};
+    moduleHealthWarningsByAlias.clear();
     return true;
   });
 
-  // Handles config:get requests from the renderer.
-  // Input: none.
-  // Returns: merged PDVConfig object.
-  // On error: throws to renderer.
-  ipcMain.handle(IPC.config.get, async () => {
-    return readConfig(configStore);
-  });
-
-  // Handles about:getVersion — returns the running app version.
-  // Input: none.
-  // Returns: version string from package.json (via Electron app.getVersion()).
-  ipcMain.handle(IPC.about.getVersion, () => app.getVersion());
-
-  // Handles config:set requests from the renderer.
-  // Input: Partial<PDVConfig>.
-  // Returns: merged PDVConfig after persistence.
-  // On error: throws to renderer.
-  ipcMain.handle(IPC.config.set, async (_event, updates: Partial<PDVConfig>) => {
-    const writableStore = configStore as unknown as {
-      set(key: string, value: unknown): void;
-      getAll(): PDVConfig;
-    };
-
-    const current = readConfig(configStore);
-    const merged: PDVConfig = { ...current, ...updates };
-    const record = updates as Record<string, unknown>;
-    for (const key of Object.keys(record)) {
-      const value = record[key];
-      if (value !== undefined) {
-        writableStore.set(key, value);
-      }
-    }
-    return { ...merged, ...writableStore.getAll() };
-  });
-
-  // Handles themes:get requests from the renderer.
-  // Input: none.
-  // Returns: Theme[] currently saved in memory.
-  // On error: throws to renderer.
-  ipcMain.handle(IPC.themes.get, async () => {
-    return savedThemes;
-  });
-
-  // Handles themes:save requests from the renderer.
-  // Input: theme payload.
-  // Returns: true after save/replace.
-  // On error: throws to renderer.
-  ipcMain.handle(IPC.themes.save, async (_event, theme: Theme) => {
-    const existing = savedThemes.findIndex((entry) => entry.name === theme.name);
-    if (existing >= 0) {
-      savedThemes[existing] = theme;
-    } else {
-      savedThemes = [...savedThemes, theme];
-    }
-    // Persist to ~/.PDV/themes/<name>.json (sanitise name for filename)
-    const safeName = theme.name.replace(/[^a-zA-Z0-9_\-. ]/g, "_");
-    const filePath = path.join(themesDir, `${safeName}.json`);
-    await fs.writeFile(filePath, JSON.stringify(theme, null, 2), "utf8");
-    return true;
-  });
-
-  // Handles codeCells:load requests from the renderer.
-  // Input: none.
-  // Returns: last saved code-cell data or null.
-  // On error: throws to renderer.
-  ipcMain.handle(IPC.codeCells.load, async () => {
-    return savedCodeCells;
-  });
-
-  // Handles codeCells:save requests from the renderer.
-  // Input: code-cell payload.
-  // Returns: true after save.
-  // On error: throws to renderer.
-  ipcMain.handle(IPC.codeCells.save, async (_event, data: CodeCellData) => {
-    savedCodeCells = data;
-    await fs.writeFile(codeCellsPath, JSON.stringify(data, null, 2), "utf8");
-    return true;
-  });
-
-  // Handles menu:updateRecentProjects requests from the renderer.
-  // Input: string[] recent project directories.
-  // Returns: true after menu refresh.
-  // On error: throws to renderer.
-  ipcMain.handle(IPC.menu.updateRecentProjects, async (_event, paths: string[]) => {
-    updateRecentProjectsMenu(Array.isArray(paths) ? paths : []);
-    return true;
-  });
-
-  // Handles files:pickExecutable requests from the renderer.
-  // Input: none.
-  // Returns: selected executable file path or null when cancelled.
-  // On error: throws to renderer.
-  ipcMain.handle(IPC.files.pickExecutable, async () => {
-    const result = await dialog.showOpenDialog({
-      properties: ["openFile"],
-    });
-    if (result.canceled || result.filePaths.length === 0) {
-      return null;
-    }
-    return result.filePaths[0] ?? null;
-  });
-
-  // Handles files:pickDirectory requests from the renderer.
-  // Input: none.
-  // Returns: selected directory path or null when cancelled.
-  // On error: throws to renderer.
-  ipcMain.handle(IPC.files.pickDirectory, async () => {
-    const result = await dialog.showOpenDialog({
-      properties: ["openDirectory", "createDirectory"],
-    });
-    if (result.canceled || result.filePaths.length === 0) {
-      return null;
-    }
-    return result.filePaths[0] ?? null;
+  registerAppStateIpcHandlers({
+    configStore,
+    readConfig,
+    themesDir,
+    stateDir,
+    codeCellsPath,
   });
 
   registerPushForwarding(win, commRouter);
+
+  /**
+   * Reset all in-session state. Called whenever the renderer reloads so that
+   * stale pending imports, project dirs, and health warnings from a previous
+   * renderer session don't leak into the new one.
+   */
+  function resetSessionState(): void {
+    activeProjectDir = null;
+    activeKernelId = null;
+    pendingModuleImports = [];
+    pendingModuleSettings = {};
+    moduleHealthWarningsByAlias.clear();
+  }
+
+  return resetSessionState;
 }
 
 /**
@@ -840,6 +759,16 @@ export function unregisterIpcHandlers(): void {
   for (const channel of REGISTERED_CHANNELS) {
     ipcMain.removeHandler(channel);
   }
+  for (const [id, dir] of kernelWorkingDirs) {
+    const handler = crashHandlers.get(id);
+    if (handler) activeKernelManagerRef?.removeListener("kernel:crashed", handler);
+    try {
+      fsSync.rmSync(dir, { recursive: true, force: true });
+    } catch (error) {
+      console.warn(`[pdv] failed to remove kernel working dir: ${dir}`, error);
+    }
+  }
   kernelWorkingDirs.clear();
+  crashHandlers.clear();
   clearPushSubscriptions();
 }

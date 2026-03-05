@@ -44,6 +44,14 @@ describe("ConfigStore", () => {
       showPrivateVariables: false,
       showModuleVariables: false,
       showCallableVariables: false,
+      settings: {
+        appearance: {
+          themeName: "Dark+ (VSCode)",
+          followSystemTheme: true,
+          darkTheme: "Dark+ (VSCode)",
+          lightTheme: "Light+ (VSCode)",
+        },
+      },
     });
   });
 
@@ -101,6 +109,14 @@ describe("ConfigStore", () => {
       showPrivateVariables: false,
       showModuleVariables: false,
       showCallableVariables: false,
+      settings: {
+        appearance: {
+          themeName: "Dark+ (VSCode)",
+          followSystemTheme: true,
+          darkTheme: "Dark+ (VSCode)",
+          lightTheme: "Light+ (VSCode)",
+        },
+      },
     });
 
     const files = fs.readdirSync(appDataDir);

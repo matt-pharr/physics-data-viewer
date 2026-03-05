@@ -61,6 +61,7 @@ export const IPC = {
     list: "tree:list",
     get: "tree:get",
     createScript: "tree:createScript",
+    addFile: "tree:addFile",
   },
   /** Namespace inspection channels. */
   namespace: {
@@ -70,6 +71,17 @@ export const IPC = {
   script: {
     edit: "script:edit",
     reload: "script:reload",
+  },
+  /** Modules system channels. */
+  modules: {
+    listInstalled: "modules:listInstalled",
+    install: "modules:install",
+    checkUpdates: "modules:checkUpdates",
+    importToProject: "modules:importToProject",
+    listImported: "modules:listImported",
+    saveSettings: "modules:saveSettings",
+    runAction: "modules:runAction",
+    removeImport: "modules:removeImport",
   },
   /** Project lifecycle channels. */
   project: {
@@ -111,7 +123,13 @@ export const IPC = {
   /** Native file/directory picker channels. */
   files: {
     pickExecutable: "files:pickExecutable",
+    pickFile: "files:pickFile",
     pickDirectory: "files:pickDirectory",
+  },
+  /** Window lifecycle channels (unsaved-changes flow). */
+  lifecycle: {
+    confirmClose: "lifecycle:confirmClose",
+    closeResponse: "lifecycle:closeResponse",
   },
 } as const;
 
@@ -222,6 +240,18 @@ export interface TreeCreateScriptResult {
 }
 
 /**
+ * Result returned by `tree.addFile`.
+ */
+export interface TreeAddFileResult {
+  /** True when the file was copied and registered successfully. */
+  success: boolean;
+  /** Optional error message when `success` is false. */
+  error?: string;
+  /** Absolute path to the copied file in the kernel working directory. */
+  workingDirPath?: string;
+}
+
+/**
  * Result returned by `script.edit` and `script.reload`.
  */
 export interface ScriptOperationResult {
@@ -229,6 +259,297 @@ export interface ScriptOperationResult {
   success: boolean;
   /** Optional error message when `success` is false. */
   error?: string;
+}
+
+// ---------------------------------------------------------------------------
+// Modules system types
+// ---------------------------------------------------------------------------
+
+/**
+ * Supported module install source kinds.
+ */
+export type ModuleSourceType = "github" | "local";
+
+/**
+ * Canonical source reference for an installed module.
+ */
+export interface ModuleSourceReference {
+  /** Install source kind. */
+  type: ModuleSourceType;
+  /** Source location (GitHub URL or local path). */
+  location: string;
+}
+
+/**
+ * Normalized installed-module descriptor surfaced to the renderer.
+ */
+export interface ModuleDescriptor {
+  /** Stable module identifier from manifest. */
+  id: string;
+  /** Human-readable module name. */
+  name: string;
+  /** Installed semantic version. */
+  version: string;
+  /** Optional short module description. */
+  description?: string;
+  /** Install source reference. */
+  source: ModuleSourceReference;
+  /** Optional resolved revision hash/tag. */
+  revision?: string;
+  /** Optional absolute install path in module store. */
+  installPath?: string;
+}
+
+/**
+ * Request payload for `modules.install`.
+ */
+export interface ModuleInstallRequest {
+  /** Module source to install from. */
+  source: ModuleSourceReference;
+}
+
+/**
+ * Result payload for `modules.install`.
+ */
+export interface ModuleInstallResult {
+  /** True when installation/update succeeded. */
+  success: boolean;
+  /** Install outcome classification. */
+  status:
+    | "installed"
+    | "up_to_date"
+    | "update_available"
+    | "incompatible_update"
+    | "not_implemented"
+    | "error";
+  /** Installed/updated module metadata when available. */
+  module?: ModuleDescriptor;
+  /** Currently installed version when a duplicate is detected. */
+  currentVersion?: string;
+  /** Currently installed revision when a duplicate is detected. */
+  currentRevision?: string;
+  /** Optional user-facing error message. */
+  error?: string;
+}
+
+/**
+ * Result payload for `modules.checkUpdates`.
+ */
+export interface ModuleUpdateResult {
+  /** Checked module ID. */
+  moduleId: string;
+  /** Update-check outcome classification. */
+  status: "up_to_date" | "update_available" | "unknown" | "not_implemented";
+  /** Currently installed version, when known. */
+  currentVersion?: string;
+  /** Latest available version, when known. */
+  availableVersion?: string;
+  /** Optional user-facing message. */
+  message?: string;
+}
+
+/**
+ * Request payload for `modules.importToProject`.
+ */
+export interface ModuleImportRequest {
+  /** Module ID to import into the active project. */
+  moduleId: string;
+  /** Optional project-local import alias override. */
+  alias?: string;
+}
+
+/**
+ * Result payload for `modules.importToProject`.
+ */
+export interface ModuleImportResult {
+  /** True when import succeeded. */
+  success: boolean;
+  /** Import outcome classification. */
+  status: "imported" | "conflict" | "not_implemented" | "error";
+  /** Resolved alias used for import when successful. */
+  alias?: string;
+  /** Suggested alias when conflict occurs. */
+  suggestedAlias?: string;
+  /** Non-blocking warnings discovered during import-time health checks. */
+  warnings?: ModuleHealthWarning[];
+  /** Optional user-facing error message. */
+  error?: string;
+}
+
+/**
+ * Primitive value type accepted by module UI controls.
+ */
+export type ModuleInputValue = string | number | boolean;
+
+/**
+ * One selectable option for dropdown-style module inputs.
+ */
+export interface ModuleInputOptionDescriptor {
+  /** User-facing option label. */
+  label: string;
+  /** Raw option value persisted in project settings. */
+  value: ModuleInputValue;
+}
+
+/**
+ * Declarative visibility rule for module inputs/sections.
+ */
+export interface ModuleInputVisibilityRule {
+  /** Input ID this control depends on. */
+  inputId: string;
+  /** Value that must match for this control to be visible. */
+  equals: ModuleInputValue;
+}
+
+/**
+ * Declarative input field descriptor surfaced to the renderer.
+ */
+export interface ModuleInputDescriptor {
+  /** Stable input identifier from module manifest. */
+  id: string;
+  /** User-facing label. */
+  label: string;
+  /** Optional data type hint (e.g. "int", "float", "str"). */
+  type?: string;
+  /** UI control type rendered by the modules panel. */
+  control?: "text" | "dropdown" | "slider" | "checkbox" | "file";
+  /** Optional default value/state. */
+  default?: ModuleInputValue;
+  /** Optional dropdown options for `control: "dropdown"`. */
+  options?: ModuleInputOptionDescriptor[];
+  /** Optional tree path used to populate dropdown options from child keys. */
+  optionsTreePath?: string;
+  /** Optional slider/file metadata. */
+  min?: number;
+  max?: number;
+  step?: number;
+  /** Grouping metadata for module-internal tab/section layout. */
+  tab?: string;
+  section?: string;
+  sectionCollapsed?: boolean;
+  /** Optional hover tooltip. */
+  tooltip?: string;
+  /** Optional conditional visibility rule. */
+  visibleIf?: ModuleInputVisibilityRule;
+  /** Optional file picker mode for `control: "file"`. */
+  fileMode?: "file" | "directory";
+}
+
+/**
+ * Declarative imported-module action descriptor for renderer controls.
+ */
+export interface ImportedModuleActionDescriptor {
+  /** Stable action identifier from module manifest. */
+  id: string;
+  /** User-facing action label. */
+  label: string;
+  /** Bound script node name under `<alias>.scripts.<scriptName>`. */
+  scriptName: string;
+  /** Input IDs this action reads when run. */
+  inputIds?: string[];
+  /** Optional module-internal tab where this action should appear. */
+  tab?: string;
+}
+
+/**
+ * Non-blocking module health warning surfaced to the renderer.
+ */
+export interface ModuleHealthWarning {
+  /** Stable warning code for programmatic handling. */
+  code:
+    | "pdv_version_incompatible"
+    | "python_version_incompatible"
+    | "python_version_unknown"
+    | "dependency_unverified"
+    | "missing_action_script"
+    | "module_source_missing";
+  /** Human-readable warning detail. */
+  message: string;
+}
+
+/**
+ * Project-scoped imported module descriptor.
+ */
+export interface ImportedModuleDescriptor {
+  /** Installed module ID. */
+  moduleId: string;
+  /** Installed module display name. */
+  name: string;
+  /** Project-local alias used in the tree. */
+  alias: string;
+  /** Imported version snapshot. */
+  version: string;
+  /** Optional pinned revision/hash. */
+  revision?: string;
+  /** Declarative input field descriptors from module manifest. */
+  inputs: ModuleInputDescriptor[];
+  /** Declarative action descriptors bound for this imported module. */
+  actions: ImportedModuleActionDescriptor[];
+  /** Persisted per-module UI settings from project manifest. */
+  settings: Record<string, unknown>;
+  /** Module health warnings evaluated at import/load time. */
+  warnings: ModuleHealthWarning[];
+}
+
+/**
+ * Request payload for `modules.saveSettings`.
+ */
+export interface ModuleSettingsRequest {
+  /** Imported module alias settings belong to. */
+  moduleAlias: string;
+  /** Persisted setting values keyed by setting/control id. */
+  values: Record<string, unknown>;
+}
+
+/**
+ * Result payload for `modules.saveSettings`.
+ */
+export interface ModuleSettingsResult {
+  /** True when settings persistence succeeded. */
+  success: boolean;
+  /** Optional user-facing error message. */
+  error?: string;
+}
+
+/**
+ * Request payload for `modules.runAction`.
+ */
+export interface ModuleActionRequest {
+  /** Target kernel id used for action execution. */
+  kernelId: string;
+  /** Imported module alias owning the action. */
+  moduleAlias: string;
+  /** Module action identifier from manifest. */
+  actionId: string;
+  /**
+   * Input values keyed by input id (from the module's input fields).
+   *
+   * Note: string values are passed as Python expression text; callers should
+   * provide language-safe strings (e.g. quote string literals).
+   */
+  inputValues?: Record<string, ModuleInputValue>;
+}
+
+/**
+ * Result payload for `modules.runAction`.
+ */
+export interface ModuleActionResult {
+  /** True when action invocation succeeded. */
+  success: boolean;
+  /** Action invocation outcome classification. */
+  status: "queued" | "not_implemented" | "error";
+  /** Optional generated execution code for traceability. */
+  executionCode?: string;
+  /** Optional user-facing error message. */
+  error?: string;
+}
+
+/**
+ * Response from the renderer when the main process asks to confirm close.
+ */
+export interface ConfirmCloseResponse {
+  /** User's chosen action. */
+  action: "save" | "discard" | "cancel";
 }
 
 /**
@@ -426,6 +747,23 @@ export interface PDVApi {
       scriptName: string
     ): Promise<TreeCreateScriptResult>;
     /**
+     * Copy a file into the kernel working directory and register it as a tree node.
+     *
+     * @param kernelId - Target kernel ID.
+     * @param sourcePath - Absolute path to the source file to copy.
+     * @param targetTreePath - Dot-path of the parent tree node.
+     * @param nodeType - Node type classification for the file.
+     * @param filename - Physical filename with extension.
+     * @returns File addition result payload.
+     */
+    addFile(
+      kernelId: string,
+      sourcePath: string,
+      targetTreePath: string,
+      nodeType: "namelist" | "fortran" | "file",
+      filename: string
+    ): Promise<TreeAddFileResult>;
+    /**
      * Subscribe to tree change push notifications.
      *
      * @param callback - Invoked with each tree-changed payload.
@@ -466,6 +804,64 @@ export interface PDVApi {
      * @returns Operation status.
      */
     reload(scriptPath: string): Promise<ScriptOperationResult>;
+  };
+
+  /** Modules install/import/action operations. */
+  modules: {
+    /**
+     * List globally installed modules available to import.
+     *
+     * @returns Installed module descriptors.
+     */
+    listInstalled(): Promise<ModuleDescriptor[]>;
+    /**
+     * Install a module from GitHub URL or local path.
+     *
+     * @param request - Installation source payload.
+     * @returns Installation result payload.
+     */
+    install(request: ModuleInstallRequest): Promise<ModuleInstallResult>;
+    /**
+     * Check whether an installed module has an update available.
+     *
+     * @param moduleId - Installed module identifier.
+     * @returns Update-check result payload.
+     */
+    checkUpdates(moduleId: string): Promise<ModuleUpdateResult>;
+    /**
+     * Import an installed module into the active project.
+     *
+     * @param request - Project import request.
+     * @returns Import result payload.
+     */
+    importToProject(request: ModuleImportRequest): Promise<ModuleImportResult>;
+    /**
+     * List modules imported in the active project.
+     *
+     * @returns Imported module descriptors.
+     */
+    listImported(): Promise<ImportedModuleDescriptor[]>;
+    /**
+     * Persist project-scoped settings for an imported module.
+     *
+     * @param request - Settings payload.
+     * @returns Save result payload.
+     */
+    saveSettings(request: ModuleSettingsRequest): Promise<ModuleSettingsResult>;
+    /**
+     * Run one module action using manifest-bound script execution.
+     *
+     * @param request - Action invocation payload.
+     * @returns Action invocation result payload.
+     */
+    runAction(request: ModuleActionRequest): Promise<ModuleActionResult>;
+    /**
+     * Remove an imported module from the active project by alias.
+     *
+     * @param moduleAlias - The project-local alias to remove.
+     * @returns Removal result payload.
+     */
+    removeImport(moduleAlias: string): Promise<ModuleSettingsResult>;
   };
 
   /** Project save/load operations. */
@@ -570,11 +966,35 @@ export interface PDVApi {
      */
     pickExecutable(): Promise<string | null>;
     /**
+     * Open a native file picker.
+     *
+     * @returns Selected file path, or null if cancelled.
+     */
+    pickFile(): Promise<string | null>;
+    /**
      * Open a native directory picker (with create-directory support).
      *
      * @returns Selected directory path, or null if cancelled.
      */
     pickDirectory(): Promise<string | null>;
+  };
+
+  /** Window lifecycle (unsaved-changes flow). */
+  lifecycle: {
+    /**
+     * Subscribe to close-confirmation requests from the main process.
+     *
+     * @param callback - Invoked when the main process wants to close the window.
+     * @returns Unsubscribe function.
+     */
+    onConfirmClose(callback: () => void): () => void;
+    /**
+     * Send the user's close-confirmation decision back to the main process.
+     *
+     * @param response - The chosen action.
+     * @returns True when acknowledged.
+     */
+    respondClose(response: ConfirmCloseResponse): Promise<boolean>;
   };
 
   /** App menu integration. */

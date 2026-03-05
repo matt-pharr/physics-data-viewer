@@ -12,6 +12,11 @@ import type { TreeNodeData } from '../types';
 class TreeService {
   private cache: Map<string, TreeNodeData[]> = new Map();
 
+  private async listAndEnrich(kernelId: string, path: string): Promise<TreeNodeData[]> {
+    const nodes = await window.pdv.tree.list(kernelId, path);
+    return nodes.map(this.enrichNode);
+  }
+
   /** Build a stable cache key scoped to kernel and tree path. */
   private cacheKey(kernelId: string | null, path: string) {
     const safeKernel = kernelId ?? '__none__';
@@ -19,36 +24,55 @@ class TreeService {
   }
 
   /** Fetch and cache root-level tree nodes for the active kernel. */
-  async getRootNodes(kernelId: string | null): Promise<TreeNodeData[]> {
+  async getRootNodes(
+    kernelId: string | null,
+    options?: { force?: boolean }
+  ): Promise<TreeNodeData[]> {
     if (!kernelId) return [];
 
     const key = this.cacheKey(kernelId, '');
-    const cached = this.cache.get(key);
-    if (cached) {
-      return cached;
+    if (!options?.force) {
+      const cached = this.cache.get(key);
+      if (cached) {
+        return cached;
+      }
     }
 
-    const nodes = await window.pdv.tree.list(kernelId, '');
-    const enriched = nodes.map(this.enrichNode);
+    const enriched = await this.listAndEnrich(kernelId, '');
     this.cache.set(key, enriched);
     return enriched;
   }
 
   /** Fetch and cache children for one expanded parent node. */
-  async getChildren(node: TreeNodeData, kernelId: string | null): Promise<TreeNodeData[]> {
+  async getChildren(
+    node: TreeNodeData,
+    kernelId: string | null,
+    options?: { force?: boolean; eagerLoadLazy?: boolean }
+  ): Promise<TreeNodeData[]> {
     if (!kernelId) return [];
     if (!node.hasChildren) {
       return [];
     }
 
     const key = this.cacheKey(kernelId, node.path);
-    const cached = this.cache.get(key);
-    if (cached) {
-      return cached;
+    if (!options?.force) {
+      const cached = this.cache.get(key);
+      if (cached) {
+        return cached;
+      }
     }
 
-    const nodes = await window.pdv.tree.list(kernelId, node.path);
-    const enriched = nodes.map(this.enrichNode);
+    let enriched = await this.listAndEnrich(kernelId, node.path);
+    if (options?.eagerLoadLazy) {
+      const lazyChildren = enriched.filter((child) => child.lazy);
+      if (lazyChildren.length > 0) {
+        await Promise.all(
+          lazyChildren.map((child) => window.pdv.tree.get(kernelId, child.path))
+        );
+        this.clearCache(kernelId);
+        enriched = await this.listAndEnrich(kernelId, node.path);
+      }
+    }
     this.cache.set(key, enriched);
     return enriched;
   }

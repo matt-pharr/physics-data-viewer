@@ -1,6 +1,6 @@
 {
   "name": "physics-data-viewer",
-  "version": "0.0.3",
+  "version": "0.0.4",
   "private": true,
   "main": "dist/main/bootstrap.js",
   "electronmon": {
@@ -9,12 +9,12 @@
     ]
   },
   "scripts": {
-    "dev": "concurrently -k \"npm:dev:main\" \"npm:dev:renderer\"",
-    "dev:main": "cross-env NODE_ENV=development electronmon .",
-    "dev:renderer": "cd renderer && vite",
+    "dev": "node ./node_modules/concurrently/dist/bin/concurrently.js -k \"npm:dev:main\" \"npm:dev:renderer\"",
+    "dev:main": "node ./node_modules/cross-env/src/bin/cross-env.js NODE_ENV=development node ./node_modules/electronmon/bin/cli.js .",
+    "dev:renderer": "cd renderer && node ../node_modules/vite/bin/vite.js",
     "build": "npm run build:renderer && npm run build:main",
-    "build:renderer": "cd renderer && vite build",
-    "build:main": "tsc -p tsconfig.json",
+    "build:renderer": "cd renderer && node ../node_modules/vite/bin/vite.js build",
+    "build:main": "node ./node_modules/typescript/bin/tsc -p tsconfig.json",
     "test": "node ./node_modules/vitest/vitest.mjs run --pool=forks",
     "lint": "echo \"Add eslint if desired\""
   },

@@ -65,7 +65,7 @@ export const Tree: React.FC<TreeProps> = ({ kernelId, disabled = false, refreshT
       treeService.clearCache(kernelId);
     }
     try {
-      const rootNodes = await treeService.getRootNodes(kernelId);
+      const rootNodes = await treeService.getRootNodes(kernelId, { force });
       const restored = await restoreExpandedTree(rootNodes, expandedPathsRef.current, kernelId);
       setNodes(restored);
     } catch (err) {
@@ -129,7 +129,10 @@ export const Tree: React.FC<TreeProps> = ({ kernelId, disabled = false, refreshT
     expandedPathsRef.current.add(node.path);
     setNodes((prev) => updateNode(prev, node.path, (n) => ({ ...n, isLoading: true })));
     try {
-      const children = await treeService.getChildren(node, kernelId);
+      const children = await treeService.getChildren(node, kernelId, {
+        force: true,
+        eagerLoadLazy: true,
+      });
       expandedPathsRef.current.add(node.path);
       setNodes((prev) =>
         updateNode(prev, node.path, (n) => ({
@@ -139,6 +142,7 @@ export const Tree: React.FC<TreeProps> = ({ kernelId, disabled = false, refreshT
           children,
         })),
       );
+      void loadRoot(true);
     } catch (err) {
       console.error('[Tree] Failed to load children for', node.key, err);
       setError(`Failed to load children for ${node.key}`);
@@ -268,7 +272,10 @@ async function restoreExpandedTree(
     const target = findNode(current, path);
     if (!target) continue;
     try {
-      const children = await treeService.getChildren(target, kernelId);
+      const children = await treeService.getChildren(target, kernelId, {
+        force: true,
+        eagerLoadLazy: true,
+      });
       current = updateNodeImmut(current, path, (n) => ({ ...n, isExpanded: true, children }));
     } catch (error) {
       console.warn('[Tree] Failed to restore expanded path', path, error);

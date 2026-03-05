@@ -5,7 +5,7 @@
  * persists updates through `window.pdv.config.set` and related preload APIs.
  */
 
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useLayoutEffect, useMemo, useState } from 'react';
 import type { Config } from '../../types';
 import { SHORTCUT_LABELS, DEFAULT_SHORTCUTS } from '../../shortcuts';
 import type { Shortcuts } from '../../shortcuts';
@@ -28,6 +28,7 @@ import {
 type SettingsTab = 'general' | 'shortcuts' | 'appearance' | 'runtime' | 'about';
 
 const DEFAULT_FILE_MANAGER = IS_MAC ? 'open {}' : 'xdg-open {}';
+const DEFAULT_VSCODE_PAIR = THEME_PAIRS.find((pair) => pair.name === 'VSCode');
 
 interface ShortcutCaptureProps {
   label: string;
@@ -131,7 +132,7 @@ interface SettingsDialogProps {
 /** Top-level settings modal used by the App shell. */
 export const SettingsDialog: React.FC<SettingsDialogProps> = ({
   isOpen,
-  initialTab = 'shortcuts',
+  initialTab = 'general',
   config,
   shortcuts,
   currentKernelId,
@@ -148,10 +149,12 @@ export const SettingsDialog: React.FC<SettingsDialogProps> = ({
   const [savedThemes, setSavedThemes] = useState<Theme[]>([]);
   const [selectedThemeName, setSelectedThemeName] = useState<string>(BUILTIN_THEMES[0].name);
   const [editedColors, setEditedColors] = useState<Record<string, string>>(BUILTIN_THEMES[0].colors);
-  const [followSystemTheme, setFollowSystemTheme] = useState(false);
-  const [darkThemeName, setDarkThemeName] = useState<string>(BUILTIN_THEMES[0].name);
+  const [followSystemTheme, setFollowSystemTheme] = useState(true);
+  const [darkThemeName, setDarkThemeName] = useState<string>(
+    DEFAULT_VSCODE_PAIR?.dark ?? BUILTIN_THEMES[0].name,
+  );
   const [lightThemeName, setLightThemeName] = useState<string>(
-    () => BUILTIN_THEMES.find((t) => t.monacoTheme === 'vs')?.name ?? BUILTIN_THEMES[0].name,
+    DEFAULT_VSCODE_PAIR?.light ?? BUILTIN_THEMES.find((t) => t.monacoTheme === 'vs')?.name ?? BUILTIN_THEMES[0].name,
   );
 
   // General settings state
@@ -172,9 +175,13 @@ export const SettingsDialog: React.FC<SettingsDialogProps> = ({
   const [monoFonts, setMonoFonts] = useState<string[]>([]);
   const [displayFonts, setDisplayFonts] = useState<string[]>([]);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (!isOpen) return;
     setActiveTab(initialTab);
+  }, [isOpen, initialTab]);
+
+  useEffect(() => {
+    if (!isOpen) return;
     setEditedShortcuts(shortcuts);
     setPythonEditorCmd(config?.pythonEditorCmd ?? 'code {}');
     setJuliaEditorCmd(config?.juliaEditorCmd ?? 'code {}');
@@ -199,10 +206,11 @@ export const SettingsDialog: React.FC<SettingsDialogProps> = ({
       const activeColors = app?.colors ?? baseTheme.colors;
       setSelectedThemeName(activeName);
       setEditedColors({ ...baseTheme.colors, ...activeColors });
-      setFollowSystemTheme(app?.followSystemTheme ?? false);
-      setDarkThemeName(app?.darkTheme ?? BUILTIN_THEMES[0].name);
+      setFollowSystemTheme(app?.followSystemTheme ?? true);
+      setDarkThemeName(app?.darkTheme ?? (DEFAULT_VSCODE_PAIR?.dark ?? BUILTIN_THEMES[0].name));
       setLightThemeName(
-        app?.lightTheme ?? (BUILTIN_THEMES.find((t) => t.monacoTheme === 'vs')?.name ?? BUILTIN_THEMES[0].name),
+        app?.lightTheme ??
+          (DEFAULT_VSCODE_PAIR?.light ?? BUILTIN_THEMES.find((t) => t.monacoTheme === 'vs')?.name ?? BUILTIN_THEMES[0].name),
       );
     };
     void load();

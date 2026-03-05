@@ -17,14 +17,20 @@ import { Console } from '../components/Console';
 import { Tree } from '../components/Tree';
 import { EnvironmentSelector } from '../components/EnvironmentSelector';
 import { NamespaceView } from '../components/NamespaceView';
+import { ModulesPanel } from '../components/ModulesPanel';
 import { ScriptDialog } from '../components/ScriptDialog';
 import { CreateScriptDialog } from '../components/Tree/CreateScriptDialog';
 import { SettingsDialog } from '../components/SettingsDialog';
-import type { CellTab, Config, KernelExecuteResult, LogEntry, MenuActionPayload, TreeNodeData } from '../types';
+import { UnsavedChangesDialog } from '../components/UnsavedChangesDialog';
+import type { CellTab, Config, KernelExecuteResult, LogEntry, TreeNodeData } from '../types';
 import { matchesShortcut, resolveShortcuts } from '../shortcuts';
 import { BUILTIN_THEMES, applyThemeColors, applyFontSettings, getMonacoTheme, resolveThemeColors } from '../themes';
+import { useCodeCellsPersistence } from './useCodeCellsPersistence';
+import { useKernelLifecycle } from './useKernelLifecycle';
+import { useLayoutState } from './useLayoutState';
+import { useProjectWorkflow } from './useProjectWorkflow';
+import { useKernelSubscriptions } from './useKernelSubscriptions';
 
-type Tab = 'tree' | 'namespace' | 'modules';
 type KernelStatus = 'idle' | 'starting' | 'ready' | 'error';
 
 /**
@@ -80,7 +86,27 @@ function normalizeRecentProjects(data: unknown): string[] {
 
 /** Root PDV application component rendered in the Electron renderer process. */
 const App: React.FC = () => {
-  const [activeTab, setActiveTab] = useState<Tab>('tree');
+  const {
+    leftSidebarOpen,
+    leftPanel,
+    rightSidebarOpen,
+    rightPanel,
+    editorCollapsed,
+    leftWidth,
+    rightWidth,
+    editorHeight,
+    rightPaneRef,
+    startVerticalDrag,
+    startHorizontalDrag,
+    startRightDrag,
+    handleActivityBarClick,
+    toggleLeftSidebar,
+    toggleEditorCollapsed,
+    collapseLeftSidebar,
+    collapseRightSidebar,
+    expandEditor,
+  } = useLayoutState();
+
   const [CellTabs, setCellTabs] = useState<CellTab[]>([{ id: 1, code: '' }]);
   const [activeCellTab, setActiveCellTab] = useState(1);
   const [logs, setLogs] = useState<LogEntry[]>([]);
@@ -100,22 +126,13 @@ const App: React.FC = () => {
   // active tab id so a single Cmd+Z restores exactly what was destroyed.
   type CellSnapshot = { tabs: CellTab[]; activeTabId: number };
   const cellUndoStack = useRef<CellSnapshot[]>([]);
-  const [leftWidth, setLeftWidth] = useState(() => {
-    const saved = localStorage.getItem('pdv.pane.leftWidth');
-    return saved ? Number(saved) : 340;
-  });
-  const [consoleHeight, setConsoleHeight] = useState(() => {
-    const saved = localStorage.getItem('pdv.pane.consoleHeight');
-    return saved ? Number(saved) : 260;
-  });
-  const dragRef = useRef<'vertical' | 'horizontal' | null>(null);
-  const rightPaneRef = useRef<HTMLDivElement | null>(null);
   const [autoRefreshNamespace, setAutoRefreshNamespace] = useState(false);
   const [namespaceRefreshToken, setNamespaceRefreshToken] = useState(0);
   const [treeRefreshToken, setTreeRefreshToken] = useState(0);
+  const [modulesRefreshToken, setModulesRefreshToken] = useState(0);
   const [createScriptTarget, setCreateScriptTarget] = useState<string | null>(null);
   const [showSettings, setShowSettings] = useState(false);
-  const [settingsInitialTab, setSettingsInitialTab] = useState<'general' | 'shortcuts' | 'appearance' | 'runtime' | 'about'>('shortcuts');
+  const [settingsInitialTab, setSettingsInitialTab] = useState<'general' | 'shortcuts' | 'appearance' | 'runtime' | 'about'>('general');
   const [monacoTheme, setMonacoTheme] = useState<string>('vs-dark');
   const [systemPrefersDark, setSystemPrefersDark] = useState(
     () => window.matchMedia('(prefers-color-scheme: dark)').matches,
@@ -153,62 +170,12 @@ const App: React.FC = () => {
     const fonts = config?.settings?.fonts;
     applyFontSettings(fonts?.codeFont, fonts?.displayFont);
   }, [config]);
-
-  // Load code celles from filesystem on startup
-  useEffect(() => {
-    if (!window.pdv?.codeCells) {
-      return;
-    }
-    const loadCodeCells = async () => {
-      try {
-        const data = await window.pdv.codeCells.load();
-        if (data) {
-          setCellTabs(data.tabs);
-          setActiveCellTab(data.activeTabId);
-          console.log('[App] Loaded code celles from filesystem:', data.tabs.length, 'tabs');
-        }
-      } catch (error) {
-        console.error('[App] Failed to load code celles:', error);
-      }
-    };
-    void loadCodeCells();
-  }, []);
-
-  // Debounced save to filesystem
-  const saveTimeoutRef = useRef<NodeJS.Timeout | null>(null);
-  useEffect(() => {
-    if (!window.pdv?.codeCells) {
-      return;
-    }
-    // Clear any pending save
-    if (saveTimeoutRef.current) {
-      clearTimeout(saveTimeoutRef.current);
-    }
-    
-    // Debounce saves by 500ms to avoid excessive file writes
-    saveTimeoutRef.current = setTimeout(async () => {
-      try {
-        await window.pdv.codeCells.save({
-          tabs: CellTabs,
-          activeTabId: activeCellTab,
-        });
-        console.log('[App] Saved code celles to filesystem');
-      } catch (error) {
-        console.error('[App] Failed to save code celles:', error);
-      }
-    }, 500);
-
-    return () => {
-      if (saveTimeoutRef.current) {
-        clearTimeout(saveTimeoutRef.current);
-        // Save immediately on cleanup to avoid data loss
-        void window.pdv.codeCells.save({
-          tabs: CellTabs,
-          activeTabId: activeCellTab,
-        });
-      }
-    };
-  }, [CellTabs, activeCellTab]);
+  useCodeCellsPersistence({
+    cellTabs: CellTabs,
+    activeCellTab,
+    setCellTabs,
+    setActiveCellTab,
+  });
 
   useEffect(() => {
     // Prevent double initialization in StrictMode
@@ -222,7 +189,7 @@ const App: React.FC = () => {
         }
         const loaded = await window.pdv.config.get();
         setConfig(loaded);  // theme applied by the reactive effect above
-        setCurrentProjectDir(loaded.projectRoot ?? null);
+        setCurrentProjectDir(null);
 
         if (!loaded.pythonPath) {
           setKernelStatus('idle');
@@ -291,6 +258,7 @@ const App: React.FC = () => {
 
       if (matchesShortcut(event, shortcuts.openSettings)) {
         event.preventDefault();
+        setSettingsInitialTab('general');
         setShowSettings(true);
       }
       if (matchesShortcut(event, shortcuts.newTab)) {
@@ -304,6 +272,16 @@ const App: React.FC = () => {
       if (matchesShortcut(event, shortcuts.closeWindow)) {
         event.preventDefault();
         window.close();
+      }
+      // Cmd+B: toggle left sidebar
+      if ((event.metaKey || event.ctrlKey) && !event.shiftKey && !event.altKey && event.key === 'b') {
+        event.preventDefault();
+        toggleLeftSidebar();
+      }
+      // Cmd+J: toggle code editor
+      if ((event.metaKey || event.ctrlKey) && !event.shiftKey && !event.altKey && event.key === 'j') {
+        event.preventDefault();
+        toggleEditorCollapsed();
       }
       // Cmd+1–9 → go to nth tab; Cmd+0 → go to last tab
       if ((event.metaKey || event.ctrlKey) && !event.shiftKey && !event.altKey) {
@@ -322,7 +300,7 @@ const App: React.FC = () => {
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [shortcuts]);
+  }, [shortcuts, toggleEditorCollapsed, toggleLeftSidebar]);
 
   useEffect(() => {
     if (!window.pdv?.menu) {
@@ -332,177 +310,28 @@ const App: React.FC = () => {
     void window.pdv.menu.updateRecentProjects(recentProjects);
   }, [config]);
 
-  useEffect(() => {
-    const unsubscribe = window.pdv.kernels.onOutput((chunk) => {
-      setLogs((prev) =>
-        prev.map((l) => {
-          if (l.id !== chunk.executionId) return l;
-          if (chunk.type === 'stdout') return { ...l, stdout: (l.stdout ?? '') + chunk.text! };
-          if (chunk.type === 'stderr') return { ...l, stderr: (l.stderr ?? '') + chunk.text! };
-          if (chunk.type === 'image') return { ...l, images: [...(l.images ?? []), chunk.image!] };
-          if (chunk.type === 'result') return { ...l, result: chunk.result };
-          return l;
-        })
-      );
-    });
-    return unsubscribe;
-  }, []);
+  useKernelSubscriptions({
+    currentKernelId,
+    loadedProjectTabsRef,
+    setCellTabs,
+    setActiveCellTab,
+    setLogs,
+    setTreeRefreshToken,
+    setModulesRefreshToken,
+  });
 
-  useEffect(() => {
-    if (!currentKernelId) {
-      return;
-    }
-
-    const unsubscribeTree = window.pdv.tree.onChanged(() => {
-      setTreeRefreshToken((prev) => prev + 1);
-    });
-
-    const unsubscribeProject = window.pdv.project.onLoaded(() => {
-      if (loadedProjectTabsRef.current) {
-        const loaded = loadedProjectTabsRef.current;
-        setCellTabs(loaded.tabs);
-        setActiveCellTab(loaded.activeTabId);
-      }
-      setTreeRefreshToken((prev) => prev + 1);
-    });
-
-    return () => {
-      unsubscribeTree();
-      unsubscribeProject();
-    };
-  }, [currentKernelId]);
-
-  useEffect(() => {
-    const handleMove = (event: MouseEvent) => {
-      if (!dragRef.current) return;
-      if (dragRef.current === 'vertical') {
-        const viewportWidth = window.innerWidth || 1200;
-        const max = Math.max(200, viewportWidth - 300);
-        const next = Math.min(Math.max(event.clientX, 200), max);
-        setLeftWidth(next);
-        localStorage.setItem('pdv.pane.leftWidth', String(next));
-      } else if (dragRef.current === 'horizontal') {
-        const bounds = rightPaneRef.current?.getBoundingClientRect();
-        if (!bounds) return;
-        const relativeY = event.clientY - bounds.top;
-        const min = 140;
-        const max = Math.max(min, bounds.height - 180);
-        const next = Math.min(Math.max(relativeY, min), max);
-        setConsoleHeight(next);
-        localStorage.setItem('pdv.pane.consoleHeight', String(next));
-      }
-    };
-
-    const handleUp = () => {
-      dragRef.current = null;
-    };
-
-    window.addEventListener('mousemove', handleMove);
-    window.addEventListener('mouseup', handleUp);
-    return () => {
-      window.removeEventListener('mousemove', handleMove);
-      window.removeEventListener('mouseup', handleUp);
-    };
-  }, []);
-
-  const startVerticalDrag = useCallback((event: React.MouseEvent) => {
-    event.preventDefault();
-    dragRef.current = 'vertical';
-  }, []);
-
-  const startHorizontalDrag = useCallback((event: React.MouseEvent) => {
-    event.preventDefault();
-    dragRef.current = 'horizontal';
-  }, []);
-
-  const rememberRecentProject = useCallback(async (projectDir: string) => {
-    const recentProjects = normalizeRecentProjects(config?.recentProjects);
-    const nextRecentProjects = [projectDir, ...recentProjects.filter((entry) => entry !== projectDir)].slice(0, 10);
-    try {
-      const updated = await window.pdv.config.set({ recentProjects: nextRecentProjects, projectRoot: projectDir });
-      setConfig(updated);
-    } catch {
-      setConfig((prev) => (prev ? { ...prev, recentProjects: nextRecentProjects, projectRoot: projectDir } : prev));
-    }
-    if (window.pdv?.menu) {
-      await window.pdv.menu.updateRecentProjects(nextRecentProjects);
-    }
-  }, [config]);
-
-  const startKernel = async (cfg: Config) => {
-    setKernelStatus('starting');
-    setLastError(undefined);
-    try {
-      console.log('[App] Starting kernel with config:', cfg);
-      if (currentKernelId) {
-        console.log('[App] Stopping existing kernel:', currentKernelId);
-        await window.pdv.kernels.stop(currentKernelId);
-      }
-      
-      const spec = {
-        language: 'python' as const,
-        argv: cfg.pythonPath ? [cfg.pythonPath, '-m', 'ipykernel_launcher', '-f', '{connection_file}'] : undefined,
-        env: cfg.pythonPath ? { PYTHON_PATH: cfg.pythonPath } : undefined,
-      };
-      console.log('[App] Kernel spec:', spec);
-      
-      const kernel = await window.pdv.kernels.start(spec);
-      setCurrentKernelId(kernel.id);
-      setTreeRefreshToken((prev) => prev + 1);
-      setNamespaceRefreshToken((prev) => prev + 1);
-      setKernelStatus('ready');
-      console.log('[App] Kernel started successfully:', kernel);
-    } catch (error) {
-      console.error('[App] Failed to start kernel:', error);
-      setCurrentKernelId(null);
-      setKernelStatus('error');
-      setLastError(error instanceof Error ? error.message : String(error));
-      setShowEnvSelector(true);
-    }
-  };
-
-  const handleEnvSave = async (paths: { pythonPath: string; juliaPath?: string }) => {
-    const updatedConfig: Config = {
-      kernelSpec: config?.kernelSpec ?? null,
-      cwd: config?.cwd ?? '',
-      trusted: config?.trusted ?? false,
-      recentProjects: config?.recentProjects ?? [],
-      customKernels: config?.customKernels ?? [],
-      pythonPath: paths.pythonPath,
-      juliaPath: paths.juliaPath ?? config?.juliaPath,
-      editors: config?.editors,
-      projectRoot: config?.projectRoot,
-      treeRoot: config?.treeRoot,
-      settings: config?.settings,
-    };
-
-    await window.pdv.config.set(updatedConfig);
-    setConfig(updatedConfig);
-    setShowEnvSelector(false);
-    await startKernel(updatedConfig);
-  };
-
-  const handleRestartKernel = async () => {
-    if (!currentKernelId) return;
-    
-    try {
-      setKernelStatus('starting');
-      setLastError(undefined);
-      console.log('[App] Restarting kernel:', currentKernelId);
-      const newKernel = await window.pdv.kernels.restart(currentKernelId);
-      setCurrentKernelId(newKernel.id);
-      setKernelStatus('ready');
-      setShowEnvSelector(false);
-      setLogs([]);
-      setNamespaceRefreshToken((prev) => prev + 1);
-      setTreeRefreshToken((prev) => prev + 1);
-      console.log('[App] Kernel restarted successfully:', newKernel);
-    } catch (error) {
-      console.error('[App] Failed to restart kernel:', error);
-      setKernelStatus('error');
-      setLastError(error instanceof Error ? error.message : String(error));
-    }
-  };
+  const { startKernel, handleEnvSave, handleRestartKernel } = useKernelLifecycle({
+    config,
+    currentKernelId,
+    setCurrentKernelId,
+    setKernelStatus,
+    setLastError,
+    setShowEnvSelector,
+    setConfig,
+    setLogs,
+    setNamespaceRefreshToken,
+    setTreeRefreshToken,
+  });
 
   const addCellTab = () => {
     setCellTabs((prev) => {
@@ -673,169 +502,227 @@ const App: React.FC = () => {
     }
   };
 
-  const handleSaveProject = useCallback(async (options?: { saveAs?: boolean; directory?: string }) => {
-    if (kernelStatus !== 'ready') {
-      return;
-    }
-    try {
-      let saveDir = options?.directory ?? null;
-      if (!saveDir) {
-        if (options?.saveAs || !currentProjectDir) {
-          saveDir = await window.pdv.files.pickDirectory();
-        } else {
-          saveDir = currentProjectDir;
-        }
-      }
-      if (!saveDir) {
-        return;
-      }
-      await window.pdv.project.save(saveDir, {
-        tabs: CellTabs,
-        activeTabId: activeCellTab,
-      });
-      setCurrentProjectDir(saveDir);
-      await rememberRecentProject(saveDir);
-    } catch (error) {
-      setLastError(error instanceof Error ? error.message : String(error));
-    }
-  }, [activeCellTab, CellTabs, currentProjectDir, kernelStatus, rememberRecentProject]);
-
-  const handleOpenProject = useCallback(async (directory?: string) => {
-    if (kernelStatus !== 'ready') {
-      return;
-    }
-    try {
-      const saveDir = directory ?? await window.pdv.files.pickDirectory();
-      if (!saveDir) {
-        return;
-      }
-      const loaded = await window.pdv.project.load(saveDir);
-      const normalized = normalizeLoadedCodeCells(loaded);
-      loadedProjectTabsRef.current = normalized;
-      setCellTabs(normalized.tabs);
-      setActiveCellTab(normalized.activeTabId);
-      setCurrentProjectDir(saveDir);
-      await rememberRecentProject(saveDir);
-      setNamespaceRefreshToken((prev) => prev + 1);
-    } catch (error) {
-      setLastError(error instanceof Error ? error.message : String(error));
-    }
-  }, [kernelStatus, rememberRecentProject]);
-
-  useEffect(() => {
-    if (!window.pdv?.menu) {
-      return;
-    }
-    const unsubscribe = window.pdv.menu.onAction((payload: MenuActionPayload) => {
-      if (payload.action === 'project:open') {
-        void handleOpenProject();
-        return;
-      }
-      if (payload.action === 'project:openRecent') {
-        if (payload.path) {
-          void handleOpenProject(payload.path);
-        }
-        return;
-      }
-      if (payload.action === 'project:save') {
-        void handleSaveProject();
-        return;
-      }
-      if (payload.action === 'project:saveAs') {
-        void handleSaveProject({ saveAs: true });
-      }
-    });
-    return () => unsubscribe();
-  }, [handleOpenProject, handleSaveProject]);
+  const {
+    unsavedDialogContext,
+    handleSaveProject,
+    handleOpenProject,
+    handleUnsavedSave,
+    handleUnsavedDiscard,
+    handleUnsavedCancel,
+  } = useProjectWorkflow({
+    kernelStatus,
+    currentProjectDir,
+    cellTabs: CellTabs,
+    activeCellTab,
+    config,
+    setConfig,
+    setCurrentProjectDir,
+    setCellTabs,
+    setActiveCellTab,
+    setModulesRefreshToken,
+    setNamespaceRefreshToken,
+    setLastError,
+    loadedProjectTabsRef,
+    normalizeLoadedCodeCells,
+  });
 
   return (
     <div className="app">
       {/* Main content */}
       <main className="app-main">
-        {/* Left pane:  Tree */}
-        <aside className="left-pane" style={{ width: `${leftWidth}px` }}>
-          <div className="pane-tabs">
+
+        {/* Activity bar — always visible */}
+        <nav className="activity-bar">
+          <div className="activity-bar-top">
             <button
-              className={`tab ${activeTab === 'tree' ? 'active' : ''}`}
-              onClick={() => setActiveTab('tree')}
+              className={`activity-btn${leftSidebarOpen && leftPanel === 'tree' ? ' active' : ''}`}
+              onClick={() => handleActivityBarClick('tree')}
+              title="Tree (Cmd+B)"
             >
-              Tree
+              <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                <line x1="4" y1="3" x2="4" y2="17" />
+                <line x1="4" y1="6" x2="10" y2="6" />
+                <line x1="4" y1="11" x2="10" y2="11" />
+                <line x1="4" y1="16" x2="10" y2="16" />
+                <rect x="10" y="4" width="6" height="4" rx="1" />
+                <rect x="10" y="9" width="6" height="4" rx="1" />
+                <rect x="10" y="14" width="6" height="4" rx="1" />
+              </svg>
             </button>
             <button
-              className={`tab ${activeTab === 'namespace' ? 'active' : ''}`}
-              onClick={() => setActiveTab('namespace')}
+              className={`activity-btn${leftSidebarOpen && leftPanel === 'namespace' ? ' active' : ''}`}
+              onClick={() => handleActivityBarClick('namespace')}
+              title="Namespace"
             >
-              Namespace
+              <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M7 4C5.5 4 4.5 5 4.5 6.5v2C4.5 10 3.8 10.5 2 11c1.8 0.5 2.5 1 2.5 2.5v2C4.5 17 5.5 16 7 16" />
+                <path d="M13 4c1.5 0 2.5 1 2.5 2.5v2C15.5 10 16.2 10.5 18 11c-1.8 0.5-2.5 1-2.5 2.5v2C15.5 17 14.5 16 13 16" />
+                <circle cx="10" cy="11" r="1.5" fill="currentColor" stroke="none" />
+              </svg>
             </button>
             <button
-              className={`tab ${activeTab === 'modules' ? 'active' : ''}`}
-              onClick={() => setActiveTab('modules')}
+              className={`activity-btn${rightSidebarOpen && rightPanel === 'imported' ? ' active' : ''}`}
+              onClick={() => handleActivityBarClick('imported')}
+              title="Modules"
             >
-              Modules
+              <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                <polyline points="16,6.5 10,3.5 4,6.5 10,9.5 16,6.5" />
+                <polyline points="4,6.5 4,13.5 10,16.5 10,9.5" />
+                <polyline points="16,6.5 16,13.5 10,16.5" />
+              </svg>
+            </button>
+            <button
+              className={`activity-btn${rightSidebarOpen && rightPanel === 'library' ? ' active' : ''}`}
+              onClick={() => handleActivityBarClick('library')}
+              title="Module Library"
+            >
+              <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                <polyline points="4,11 4,16 16,16 16,11" />
+                <line x1="2" y1="11" x2="18" y2="11" />
+                <line x1="10" y1="3" x2="10" y2="9" />
+                <polyline points="7,6 10,9 13,6" />
+              </svg>
             </button>
           </div>
-
-          <div className="tree-panels">
-            <div className={`tree-panel ${activeTab === 'namespace' ? 'active' : ''}`}>
-              <NamespaceView
-                kernelId={currentKernelId}
-                disabled={kernelStatus !== 'ready'}
-                autoRefresh={autoRefreshNamespace}
-                refreshToken={namespaceRefreshToken}
-                refreshInterval={2000}
-                onToggleAutoRefresh={setAutoRefreshNamespace}
-              />
-            </div>
-            <div className={`tree-panel ${activeTab === 'tree' ? 'active' : ''}`}>
-              <Tree
-                kernelId={currentKernelId}
-                disabled={kernelStatus !== 'ready'}
-                refreshToken={treeRefreshToken}
-                onAction={handleTreeAction}
-                shortcuts={shortcuts}
-              />
-            </div>
-            <div className={`tree-panel ${activeTab === 'modules' ? 'active' : ''}`}>
-              <div className="tree-empty">Modules view (coming soon)</div>
-            </div>
+          <div className="activity-bar-bottom">
+            <button
+              className="activity-btn"
+              onClick={() => { setSettingsInitialTab('general'); setShowSettings(true); }}
+              title="Settings"
+            >
+              <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                <circle cx="10" cy="10" r="2.5" />
+                <path d="M10 2.5v1.5M10 16v1.5M2.5 10H4M16 10h1.5M4.4 4.4l1.1 1.1M14.5 14.5l1.1 1.1M4.4 15.6l1.1-1.1M14.5 5.5l1.1-1.1" />
+              </svg>
+            </button>
           </div>
-        </aside>
+        </nav>
 
-        {/* Vertical resizer */}
-        <div className="vertical-resizer" onMouseDown={startVerticalDrag} />
+        {/* Left sidebar — collapsible */}
+        {leftSidebarOpen && (
+          <>
+            <aside className="left-sidebar" style={{ width: `${leftWidth}px` }}>
+              <div className="sidebar-header">
+                <span className="sidebar-title">{leftPanel === 'tree' ? 'Tree' : 'Namespace'}</span>
+                <button
+                  className="sidebar-collapse-btn"
+                  onClick={collapseLeftSidebar}
+                  title="Collapse sidebar"
+                >
+                  ‹
+                </button>
+              </div>
+              <div className="sidebar-content">
+                {leftPanel === 'tree' && (
+                  <Tree
+                    kernelId={currentKernelId}
+                    disabled={kernelStatus !== 'ready'}
+                    refreshToken={treeRefreshToken}
+                    onAction={handleTreeAction}
+                    shortcuts={shortcuts}
+                  />
+                )}
+                {leftPanel === 'namespace' && (
+                  <NamespaceView
+                    kernelId={currentKernelId}
+                    disabled={kernelStatus !== 'ready'}
+                    autoRefresh={autoRefreshNamespace}
+                    refreshToken={namespaceRefreshToken}
+                    refreshInterval={2000}
+                    onToggleAutoRefresh={setAutoRefreshNamespace}
+                  />
+                )}
+              </div>
+            </aside>
+            <div className="vertical-resizer" onMouseDown={startVerticalDrag} />
+          </>
+        )}
 
-        {/* Right pane: Console + Code Cell */}
-        <div className="right-pane" ref={rightPaneRef}>
-          <div className="console-wrapper" style={{ height: `${consoleHeight}px` }}>
+        {/* Center column: console on top, code editor at bottom */}
+        <div className="center-column" ref={rightPaneRef}>
+          <div className="console-wrapper">
+            <div className="console-header">
+              <span className="console-header-title">Console</span>
+            </div>
             <Console logs={logs} onClear={handleClearConsole} />
           </div>
-
-          {/* Horizontal resizer */}
-          <div className="horizontal-resizer" onMouseDown={startHorizontalDrag} />
-
-          <CodeCell
-            tabs={CellTabs.map((tab) => ({
-              ...tab,
-              onChange: (code: string) => handleCodeChange(tab.id, code),
-            }))}
-            activeTabId={activeCellTab}
-            disabled={kernelStatus !== 'ready'}
-            onTabChange={handleTabChange}
-            onAddTab={addCellTab}
-            onRemoveTab={handleRemoveCellTab}
-            onExecute={handleExecute}
-            onClear={handleClearCommand}
-            isExecuting={isExecuting}
-            lastError={lastError}
-            shortcuts={shortcuts}
-            monacoTheme={monacoTheme}
-            editorFontFamily={config?.settings?.fonts?.codeFont}
-            editorFontSize={config?.settings?.editor?.fontSize}
-            editorTabSize={config?.settings?.editor?.tabSize}
-            editorWordWrap={config?.settings?.editor?.wordWrap}
-          />
+          {editorCollapsed ? (
+            <div
+              className="editor-collapsed-bar"
+              onClick={expandEditor}
+            >
+              ▲ Editor
+            </div>
+          ) : (
+            <>
+              <div className="horizontal-resizer" onMouseDown={startHorizontalDrag} />
+              <div className="editor-wrapper" style={{ height: `${editorHeight}px` }}>
+                <CodeCell
+                  tabs={CellTabs.map((tab) => ({
+                    ...tab,
+                    onChange: (code: string) => handleCodeChange(tab.id, code),
+                  }))}
+                  activeTabId={activeCellTab}
+                  disabled={kernelStatus !== 'ready'}
+                  onTabChange={handleTabChange}
+                  onAddTab={addCellTab}
+                  onRemoveTab={handleRemoveCellTab}
+                  onExecute={handleExecute}
+                  onInterrupt={currentKernelId ? () => { void window.pdv.kernels.interrupt(currentKernelId); } : undefined}
+                  onClear={handleClearCommand}
+                  isExecuting={isExecuting}
+                  lastError={lastError}
+                  shortcuts={shortcuts}
+                  monacoTheme={monacoTheme}
+                  editorFontFamily={config?.settings?.fonts?.codeFont}
+                  editorFontSize={config?.settings?.editor?.fontSize}
+                  editorTabSize={config?.settings?.editor?.tabSize}
+                  editorWordWrap={config?.settings?.editor?.wordWrap}
+                />
+              </div>
+            </>
+          )}
         </div>
+
+        {/* Right sidebar — collapsible (Modules) */}
+        {rightSidebarOpen && (
+          <>
+            <div className="vertical-resizer" onMouseDown={startRightDrag} />
+            <aside className="right-sidebar" style={{ width: `${rightWidth}px` }}>
+              <div className="sidebar-header">
+                <span className="sidebar-title">{rightPanel === 'library' ? 'Module Library' : 'Modules'}</span>
+                <button
+                  className="sidebar-collapse-btn"
+                  onClick={collapseRightSidebar}
+                  title="Collapse sidebar"
+                >
+                  ›
+                </button>
+              </div>
+              <div className="sidebar-content">
+                <ModulesPanel
+                  projectDir={currentProjectDir}
+                  isActive={rightSidebarOpen}
+                  kernelId={currentKernelId}
+                  kernelReady={kernelStatus === 'ready'}
+                  onExecute={handleExecute}
+                  view={rightPanel}
+                  refreshToken={modulesRefreshToken}
+                />
+              </div>
+            </aside>
+          </>
+        )}
+
       </main>
+
+      {unsavedDialogContext && (
+        <UnsavedChangesDialog
+          onSave={() => void handleUnsavedSave()}
+          onDiscard={() => void handleUnsavedDiscard()}
+          onCancel={() => void handleUnsavedCancel()}
+        />
+      )}
 
       {scriptDialog && currentKernelId && (
         <ScriptDialog
@@ -874,8 +761,8 @@ const App: React.FC = () => {
              <span className={`status-dot ${isExecuting ? 'busy' : 'idle'}`} />
              <span>{isExecuting ? 'Busy' : 'Idle'}</span>
            </span>
-           <span 
-             className="status-item status-clickable" 
+           <span
+             className="status-item status-clickable"
              onClick={() => { setSettingsInitialTab('runtime'); setShowSettings(true); }}
              title="Click to change runtime"
            >
@@ -916,7 +803,7 @@ const App: React.FC = () => {
        />
      </div>
    );
- };
+};
 
 /** Default export for renderer bootstrap (`main.tsx`). */
 export default App;

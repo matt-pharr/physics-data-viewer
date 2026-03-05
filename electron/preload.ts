@@ -61,6 +61,8 @@ const api: PDVApi = {
       ipcRenderer.invoke(IPC.tree.get, kernelId, nodePath),
     createScript: (kernelId, targetPath, scriptName) =>
       ipcRenderer.invoke(IPC.tree.createScript, kernelId, targetPath, scriptName),
+    addFile: (kernelId, sourcePath, targetTreePath, nodeType, filename) =>
+      ipcRenderer.invoke(IPC.tree.addFile, kernelId, sourcePath, targetTreePath, nodeType, filename),
     onChanged: (callback) => onPush(IPC.push.treeChanged, callback),
   },
   namespace: {
@@ -71,6 +73,17 @@ const api: PDVApi = {
     edit: (kernelId, scriptPath) =>
       ipcRenderer.invoke(IPC.script.edit, kernelId, scriptPath),
     reload: (scriptPath) => ipcRenderer.invoke(IPC.script.reload, scriptPath),
+  },
+  modules: {
+    listInstalled: () => ipcRenderer.invoke(IPC.modules.listInstalled),
+    install: (request) => ipcRenderer.invoke(IPC.modules.install, request),
+    checkUpdates: (moduleId) => ipcRenderer.invoke(IPC.modules.checkUpdates, moduleId),
+    importToProject: (request) =>
+      ipcRenderer.invoke(IPC.modules.importToProject, request),
+    listImported: () => ipcRenderer.invoke(IPC.modules.listImported),
+    saveSettings: (request) => ipcRenderer.invoke(IPC.modules.saveSettings, request),
+    runAction: (request) => ipcRenderer.invoke(IPC.modules.runAction, request),
+    removeImport: (moduleAlias) => ipcRenderer.invoke(IPC.modules.removeImport, moduleAlias),
   },
   project: {
     save: (saveDir, codeCells) =>
@@ -96,7 +109,13 @@ const api: PDVApi = {
   },
   files: {
     pickExecutable: () => ipcRenderer.invoke(IPC.files.pickExecutable),
+    pickFile: () => ipcRenderer.invoke(IPC.files.pickFile),
     pickDirectory: () => ipcRenderer.invoke(IPC.files.pickDirectory),
+  },
+  lifecycle: {
+    onConfirmClose: (callback) => onPush(IPC.lifecycle.confirmClose, callback),
+    respondClose: (response) =>
+      ipcRenderer.invoke(IPC.lifecycle.closeResponse, response),
   },
   menu: {
     updateRecentProjects: (paths) =>

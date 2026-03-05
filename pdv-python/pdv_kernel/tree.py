@@ -164,6 +164,41 @@ class LazyLoadRegistry:
         storage_ref = self._registry.pop(path)
         return deserialize_node(storage_ref, save_dir)
 
+    def get_storage(self, path: str) -> dict | None:
+        """Return the registered storage reference for a path, if present.
+
+        Parameters
+        ----------
+        path : str
+            Dot-separated tree path.
+
+        Returns
+        -------
+        dict | None
+            Storage reference dict when registered, else ``None``.
+        """
+        return self._registry.get(path)
+
+    def remove(self, path: str) -> None:
+        """Remove one registry entry if present.
+
+        Parameters
+        ----------
+        path : str
+            Dot-separated tree path to remove.
+        """
+        self._registry.pop(path, None)
+
+    def entries(self) -> list[tuple[str, dict]]:
+        """Return a snapshot of all lazy registry entries.
+
+        Returns
+        -------
+        list[tuple[str, dict]]
+            List of ``(path, storage_ref)`` pairs.
+        """
+        return list(self._registry.items())
+
     def clear(self) -> None:
         """Remove all registry entries (called when a new project is loaded)."""
         self._registry.clear()
@@ -624,10 +659,10 @@ class PDVTree(dict):
             if dict.__contains__(self, p):
                 dict.__delitem__(self, p)
             if in_registry:
-                self._lazy_registry._registry.pop(key, None)
+                self._lazy_registry.remove(key)
         else:
             if in_registry:
-                self._lazy_registry._registry.pop(key, None)
+                self._lazy_registry.remove(key)
             try:
                 parent: dict = self
                 for part in parts[:-1]:
@@ -664,6 +699,18 @@ class PDVTree(dict):
     # ------------------------------------------------------------------
     # Public API
     # ------------------------------------------------------------------
+
+    def has_lazy_entry(self, path: str) -> bool:
+        """Return whether a path is currently registered for lazy loading."""
+        return self._lazy_registry.has(path)
+
+    def lazy_storage_for(self, path: str) -> dict | None:
+        """Return the lazy storage reference for one path, if present."""
+        return self._lazy_registry.get_storage(path)
+
+    def iter_lazy_entries(self) -> list[tuple[str, dict]]:
+        """Return a snapshot of all currently registered lazy paths."""
+        return self._lazy_registry.entries()
 
     def run_script(self, script_path: str, **kwargs: Any) -> Any:
         """Execute a script stored in the tree.

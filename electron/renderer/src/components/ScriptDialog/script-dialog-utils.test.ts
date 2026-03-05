@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { ScriptParameter } from '../../types';
-import { getParamKind, isValueProvided } from './index';
+import { getParamKind, isValueProvided, serializeScriptArgValue } from './index';
 
 function requiredParam(name: string): ScriptParameter {
   return { name, type: 'any', default: null, required: true };
@@ -47,5 +47,22 @@ describe('isValueProvided', () => {
   it('returns true for falsy non-string values', () => {
     expect(isValueProvided(requiredParam('p'), { p: 0 })).toBe(true);
     expect(isValueProvided(requiredParam('p'), { p: false })).toBe(true);
+  });
+});
+
+describe('serializeScriptArgValue', () => {
+  it('serializes booleans as JSON booleans', () => {
+    expect(serializeScriptArgValue(true)).toBe(true);
+    expect(serializeScriptArgValue(false)).toBe(false);
+  });
+
+  it('serializes finite numbers and strings as JSON primitives', () => {
+    expect(serializeScriptArgValue(12.5)).toBe(12.5);
+    expect(serializeScriptArgValue('abc')).toBe('abc');
+  });
+
+  it('returns null for unsupported values', () => {
+    expect(serializeScriptArgValue(Number.NaN)).toBeNull();
+    expect(serializeScriptArgValue({ k: 1 })).toBeNull();
   });
 });
