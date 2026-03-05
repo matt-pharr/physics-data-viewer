@@ -140,5 +140,5 @@ npm run dev
 | IPC surface and renderer bridge | `electron/main/ipc.ts`, `electron/main/index.ts`, `electron/preload.ts` |
 | Tree model and save/load authority | `ARCHITECTURE.md` §7 and `pdv-python/pdv_kernel/tree.py` |
 | Kernel bootstrap and handlers | `pdv-python/pdv_kernel/comms.py`, `pdv-python/pdv_kernel/handlers/` |
-| Project-level modules implementation sequence | `FEATURE_2_IMPLEMENTATION_STEPS.md` |
+| Modules feature behavior and manifest syntax | `modules.md` |
 | Future roadmap items | `PLANNED_FEATURES.md` |
