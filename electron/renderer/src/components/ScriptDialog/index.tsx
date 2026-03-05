@@ -32,6 +32,14 @@ export function isValueProvided(param: ScriptParameter, values: Record<string, u
   return true;
 }
 
+/** Serialize one dialog value to a JSON-safe primitive. */
+export function serializeScriptArgValue(value: unknown): string | number | boolean | null {
+  if (typeof value === 'boolean') return value;
+  if (typeof value === 'number') return Number.isFinite(value) ? value : null;
+  if (typeof value === 'string') return value;
+  return null;
+}
+
 /** Modal script-run dialog. */
 export const ScriptDialog: React.FC<ScriptDialogProps> = ({ node, kernelId, onRun, onCancel }) => {
   const params = useMemo(() => node.params ?? [], [node.params]);
@@ -61,12 +69,17 @@ export const ScriptDialog: React.FC<ScriptDialogProps> = ({ node, kernelId, onRu
     setIsRunning(true);
     setError(undefined);
     try {
-      const args = Object.entries(values)
+      const argPayload = Object.fromEntries(
+        Object.entries(values)
         .filter(([, value]) => value !== undefined)
-        .map(([key, value]) => `${key}=${JSON.stringify(value)}`)
-        .join(', ');
-      const invocation = args.length > 0 ? `(${args})` : '()';
-      const code = `pdv_tree[${JSON.stringify(node.path)}].run${invocation}`;
+        .flatMap(([key, value]) => {
+          const serialized = serializeScriptArgValue(value);
+          return serialized === null ? [] : [[key, serialized] as const];
+        })
+      );
+      const code = `import json\npdv_tree[${JSON.stringify(node.path)}].run(**json.loads(${JSON.stringify(
+        JSON.stringify(argPayload)
+      )}))`;
       const result = await window.pdv.kernels.execute(kernelId, { code });
       onRun(code, result);
     } catch (err) {
