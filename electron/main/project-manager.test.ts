@@ -183,6 +183,8 @@ describe("ProjectManager", () => {
       const manifest = JSON.parse(raw);
       expect(manifest.tree_checksum).toBe("deadbeef1234");
       expect(manifest.schema_version).toBeDefined();
+      expect(manifest.modules).toEqual([]);
+      expect(manifest.module_settings).toEqual({});
     });
 
     it("does not write project.json when kernel returns error", async () => {
@@ -304,7 +306,7 @@ describe("ProjectManager", () => {
       const manifest = {
         schema_version: "1.0",
         saved_at: "2026-01-01T00:00:00.000Z",
-        pdv_version: "1.0",
+        pdv_version: PDV_PROTOCOL_VERSION,
         tree_checksum: "abc",
       };
       await fs.writeFile(
@@ -316,6 +318,49 @@ describe("ProjectManager", () => {
       const result = await ProjectManager.readManifest(tmpDir);
       expect(result.schema_version).toBe("1.0");
       expect(result.tree_checksum).toBe("abc");
+      expect(result.modules).toEqual([]);
+      expect(result.module_settings).toEqual({});
+    });
+
+    it("parses modules and module_settings when present", async () => {
+      const manifest = {
+        schema_version: "1.1",
+        saved_at: "2026-01-01T00:00:00.000Z",
+        pdv_version: PDV_PROTOCOL_VERSION,
+        tree_checksum: "abc",
+        modules: [
+          {
+            module_id: "mod1",
+            alias: "diagnosticA",
+            version: "1.2.0",
+            revision: "abc123",
+          },
+        ],
+        module_settings: {
+          diagnosticA: {
+            threshold: 4,
+            label: "shot-22",
+          },
+        },
+      };
+      await fs.writeFile(
+        path.join(tmpDir, "project.json"),
+        JSON.stringify(manifest),
+        "utf8"
+      );
+
+      const result = await ProjectManager.readManifest(tmpDir);
+      expect(result.modules).toEqual([
+        {
+          module_id: "mod1",
+          alias: "diagnosticA",
+          version: "1.2.0",
+          revision: "abc123",
+        },
+      ]);
+      expect(result.module_settings).toEqual({
+        diagnosticA: { threshold: 4, label: "shot-22" },
+      });
     });
 
     it("returns a default manifest when project.json is missing (does not throw)", async () => {
@@ -323,13 +368,15 @@ describe("ProjectManager", () => {
       const result = await ProjectManager.readManifest(tmpDir);
       expect(result).toBeDefined();
       expect(result.schema_version).toBeDefined();
+      expect(result.modules).toEqual([]);
+      expect(result.module_settings).toEqual({});
     });
 
     it("throws PDVSchemaVersionError on future schema major version", async () => {
       const manifest = {
         schema_version: "99.0",
         saved_at: "2099-01-01T00:00:00.000Z",
-        pdv_version: "1.0",
+        pdv_version: PDV_PROTOCOL_VERSION,
         tree_checksum: "",
       };
       await fs.writeFile(

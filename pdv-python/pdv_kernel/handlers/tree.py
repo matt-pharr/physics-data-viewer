@@ -88,7 +88,7 @@ def handle_tree_list(msg: dict) -> None:
         kind = detect_kind(value)
         preview = node_preview(value, kind)
         has_children = isinstance(value, dict) and bool(dict.keys(value))
-        lazy = tree._lazy_registry.has(child_path)
+        lazy = tree.has_lazy_entry(child_path)
         descriptor = {
             "id": child_path,
             "path": child_path,
@@ -104,13 +104,12 @@ def handle_tree_list(msg: dict) -> None:
         nodes.append(descriptor)
 
     # Also include lazy-only entries at this path level that are not yet in memory
-    for reg_path in list(tree._lazy_registry._registry.keys()):
+    for reg_path, storage in tree.iter_lazy_entries():
         parts = reg_path.split(".")
         parent = ".".join(parts[:-1])
         if parent == path:
             key = parts[-1]
             if not dict.__contains__(container, key):
-                storage = tree._lazy_registry._registry[reg_path]
                 nodes.append(
                     {
                         "id": reg_path,
@@ -182,8 +181,8 @@ def handle_tree_get(msg: dict) -> None:
 
     if mode == "metadata":
         # Return descriptor without loading lazy data from disk
-        lazy = tree._lazy_registry.has(path)
-        storage = tree._lazy_registry._registry.get(path, {}) if lazy else {}
+        lazy = tree.has_lazy_entry(path)
+        storage = tree.lazy_storage_for(path) if lazy else {}
         send_message(
             "pdv.tree.get.response",
             {"path": path, "lazy": lazy, "type": storage.get("format", "unknown"), "storage": storage},

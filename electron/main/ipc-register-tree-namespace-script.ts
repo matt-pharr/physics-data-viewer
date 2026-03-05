@@ -1,0 +1,261 @@
+/**
+ * ipc-register-tree-namespace-script.ts — Register tree/namespace/script IPC handlers.
+ *
+ * Responsibilities:
+ * - Register `tree:*`, `namespace:query`, and `script:*` ipcMain handlers.
+ * - Translate renderer requests into PDV comm requests and local filesystem ops.
+ *
+ * Non-responsibilities:
+ * - Kernel lifecycle handlers.
+ * - Project/modules/config/theme/file-picker handlers.
+ * - Push forwarding registration.
+ */
+
+import { spawn } from "child_process";
+import { ipcMain } from "electron";
+import * as fs from "fs/promises";
+import * as path from "path";
+
+import type { CommRouter } from "./comm-router";
+import type { ConfigStore, PDVConfig } from "./config";
+import { IPC, type NamespaceQueryOptions, type NamespaceVariable, type TreeAddFileResult, type TreeCreateScriptResult } from "./ipc";
+import type { KernelManager } from "./kernel-manager";
+import { PDVMessageType, type PDVFileRegisterPayload } from "./pdv-protocol";
+import type { ProjectManager } from "./project-manager";
+
+interface RegisterTreeNamespaceScriptIpcHandlersOptions {
+  kernelManager: KernelManager;
+  commRouter: CommRouter;
+  projectManager: ProjectManager;
+  configStore: ConfigStore;
+  kernelWorkingDirs: Map<string, string>;
+  readConfig: (configStore: ConfigStore) => PDVConfig;
+  toNamespaceQueryPayload: (
+    options?: NamespaceQueryOptions
+  ) => Record<string, unknown>;
+  sanitizeScriptName: (scriptName: string) => string;
+  ensureScriptFile: (scriptPath: string) => Promise<void>;
+  resolveScriptPath: (
+    kernelId: string,
+    scriptPath: string,
+    kernelWorkingDirs: Map<string, string>
+  ) => string;
+  buildEditorSpawn: (
+    cmdString: string | undefined,
+    filePath: string
+  ) => { file: string; args: string[] };
+  resolveEditorSpawn: (
+    command: string,
+    args: string[]
+  ) => { file: string; args: string[] };
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+function toNamespaceVariable(
+  name: string,
+  value: unknown
+): NamespaceVariable {
+  if (!isRecord(value)) {
+    return { name, type: "unknown" };
+  }
+  const descriptor: NamespaceVariable = {
+    name,
+    type: typeof value.type === "string" ? value.type : "unknown",
+  };
+  if (typeof value.module === "string") descriptor.module = value.module;
+  if (
+    Array.isArray(value.shape) &&
+    value.shape.every((entry) => typeof entry === "number")
+  ) {
+    descriptor.shape = value.shape;
+  }
+  if (typeof value.dtype === "string") descriptor.dtype = value.dtype;
+  if (typeof value.length === "number") descriptor.length = value.length;
+  if (typeof value.preview === "string") descriptor.preview = value.preview;
+  return descriptor;
+}
+
+function normalizeNamespaceVariables(rawVariables: unknown): NamespaceVariable[] {
+  if (Array.isArray(rawVariables)) {
+    return rawVariables as NamespaceVariable[];
+  }
+  if (isRecord(rawVariables)) {
+    return Object.entries(rawVariables).map(([name, value]) =>
+      toNamespaceVariable(name, value)
+    );
+  }
+  return [];
+}
+
+/**
+ * Register tree, namespace, and script IPC handlers.
+ *
+ * @param options - Dependency bag used by handler implementations.
+ * @returns Nothing.
+ * @throws {Error} Propagates handler execution errors to renderer callers.
+ */
+export function registerTreeNamespaceScriptIpcHandlers(
+  options: RegisterTreeNamespaceScriptIpcHandlersOptions
+): void {
+  const {
+    kernelManager,
+    commRouter,
+    projectManager,
+    configStore,
+    kernelWorkingDirs,
+    readConfig,
+    toNamespaceQueryPayload,
+    sanitizeScriptName,
+    ensureScriptFile,
+    resolveScriptPath,
+    buildEditorSpawn,
+    resolveEditorSpawn,
+  } = options;
+
+  ipcMain.handle(IPC.tree.list, async (_event, kernelId: string, nodePath = "") => {
+    if (!kernelManager.getKernel(kernelId)) {
+      return [];
+    }
+    const response = await commRouter.request(PDVMessageType.TREE_LIST, {
+      path: nodePath,
+    });
+    const nodes = (response.payload as { nodes?: unknown }).nodes;
+    return Array.isArray(nodes) ? nodes : [];
+  });
+
+  ipcMain.handle(IPC.tree.get, async (_event, kernelId: string, nodePath: string) => {
+    if (!kernelManager.getKernel(kernelId)) {
+      throw new Error(`Kernel not found: ${kernelId}`);
+    }
+    const response = await commRouter.request(PDVMessageType.TREE_GET, {
+      path: nodePath,
+    });
+    return response.payload;
+  });
+
+  ipcMain.handle(
+    IPC.tree.createScript,
+    async (
+      _event,
+      kernelId: string,
+      targetPath: string,
+      scriptName: string
+    ): Promise<TreeCreateScriptResult> => {
+      if (!kernelManager.getKernel(kernelId)) {
+        throw new Error(`Kernel not found: ${kernelId}`);
+      }
+      let workingDir = kernelWorkingDirs.get(kernelId);
+      if (!workingDir) {
+        workingDir = await projectManager.createWorkingDir();
+        kernelWorkingDirs.set(kernelId, workingDir);
+      }
+      const safeName = sanitizeScriptName(scriptName);
+      const scriptNodeName = path.parse(safeName).name;
+      const scriptsDir = path.join(workingDir, ...targetPath.split(".").filter(Boolean));
+      await fs.mkdir(scriptsDir, { recursive: true });
+      const scriptPath = path.join(scriptsDir, safeName);
+      await ensureScriptFile(scriptPath);
+
+      await commRouter.request(PDVMessageType.SCRIPT_REGISTER, {
+        parent_path: targetPath,
+        name: scriptNodeName,
+        relative_path: scriptPath,
+        language: "python",
+      });
+      return { success: true, scriptPath };
+    }
+  );
+
+  ipcMain.handle(
+    IPC.tree.addFile,
+    async (
+      _event,
+      kernelId: string,
+      sourcePath: string,
+      targetTreePath: string,
+      nodeType: "namelist" | "fortran" | "file",
+      filename: string
+    ): Promise<TreeAddFileResult> => {
+      if (!kernelManager.getKernel(kernelId)) throw new Error(`Kernel not found: ${kernelId}`);
+      const workingDir = kernelWorkingDirs.get(kernelId);
+      if (!workingDir) throw new Error(`Working dir not initialized: ${kernelId}`);
+
+      const segments = targetTreePath.split(".").filter(Boolean);
+      const destDir = segments.length > 0 ? path.join(workingDir, ...segments) : workingDir;
+      await fs.mkdir(destDir, { recursive: true });
+      const destPath = path.join(destDir, filename);
+      await fs.copyFile(sourcePath, destPath);
+
+      await commRouter.request(PDVMessageType.FILE_REGISTER, {
+        tree_path: targetTreePath,
+        filename,
+        node_type: nodeType,
+      } satisfies PDVFileRegisterPayload);
+
+      return { success: true, workingDirPath: destPath };
+    }
+  );
+
+  ipcMain.handle(
+    IPC.namespace.query,
+    async (
+      _event,
+      kernelId: string,
+      options?: NamespaceQueryOptions
+    ): Promise<NamespaceVariable[]> => {
+      if (!kernelManager.getKernel(kernelId)) {
+        return [];
+      }
+      const response = await commRouter.request(
+        PDVMessageType.NAMESPACE_QUERY,
+        toNamespaceQueryPayload(options)
+      );
+      const payload = isRecord(response.payload) ? response.payload : {};
+      const normalized = normalizeNamespaceVariables(payload.variables);
+      if (!normalized.some((entry) => entry.name === "pdv_tree")) {
+        normalized.unshift({
+          name: "pdv_tree",
+          type: "protected",
+          preview: "PDVTree (protected)",
+        });
+      }
+      if (!normalized.some((entry) => entry.name === "pdv")) {
+        normalized.unshift({
+          name: "pdv",
+          type: "protected",
+          preview: "PDV app object (protected)",
+        });
+      }
+      return normalized;
+    }
+  );
+
+  ipcMain.handle(IPC.script.edit, async (_event, kernelId: string, scriptPath: string) => {
+    const config = readConfig(configStore);
+    const resolvedScriptPath = resolveScriptPath(kernelId, scriptPath, kernelWorkingDirs);
+    const isJulia = resolvedScriptPath.endsWith(".jl");
+    const cmdString = isJulia ? config.juliaEditorCmd : config.pythonEditorCmd;
+    const { file, args } = buildEditorSpawn(cmdString, resolvedScriptPath);
+    const spawnSpec = resolveEditorSpawn(file, args);
+    const child = spawn(spawnSpec.file, spawnSpec.args, { detached: true, stdio: "ignore" });
+    child.unref();
+    return { success: true };
+  });
+
+  ipcMain.handle(IPC.script.reload, async (_event, treePath: string) => {
+    const lastDot = treePath.lastIndexOf(".");
+    const parentPath = lastDot >= 0 ? treePath.slice(0, lastDot) : "";
+    const name = lastDot >= 0 ? treePath.slice(lastDot + 1) : treePath;
+    await commRouter.request(PDVMessageType.SCRIPT_REGISTER, {
+      parent_path: parentPath,
+      name,
+      relative_path: treePath,
+      language: "python",
+      reload: true,
+    });
+    return { success: true };
+  });
+}

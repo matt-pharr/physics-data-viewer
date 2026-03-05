@@ -4,6 +4,7 @@ __pycache__/
 *.egg-info/
 *.egg
 .pytest_cache/
+/node_modules/
 
 # Tree directory (now stored in /tmp)
 /tree/
@@ -15,3 +16,5 @@ electron/out/
 electron/.cache/
 electron/package-lock.json
 electron/renderer/dist/
+electron/logs
+electron/.mcp.json

@@ -6,7 +6,7 @@ This document describes all features planned beyond the initial alpha release of
 
 | Release | Description |
 |---|---|
-| **0.0.2-alpha2** | Completion of the backend refactor described in [`IMPLEMENTATION_STEPS.md`](IMPLEMENTATION_STEPS.md). Core architecture (PDV comm protocol, tree authority model, project save/load, IPC surface) is in place and all tests pass. This is the baseline from which all features below are additive. |
+| **0.0.2-alpha2** | Completion of the backend refactor and current modules execution tracked in [`FEATURE_2_IMPLEMENTATION_STEPS.md`](FEATURE_2_IMPLEMENTATION_STEPS.md). Core architecture (PDV comm protocol, tree authority model, project save/load, IPC surface) is in place and all tests pass. This is the baseline from which all features below are additive. |
 | **0.1.0-beta1** | All Alpha Features (items 1–10 below) are implemented and stable. The application is suitable for active scientific use. |
 | **1.0.0** | All Beta Features (B1–B8 below, plus any added during beta) are implemented. The application is suitable for broad community distribution. |
 
@@ -43,6 +43,7 @@ Modules are domain-specific analysis pipeline packages that can be installed int
 - **Per-module settings**: Module manifest can declare user-configurable parameters that are persisted in `project.json`.
 - **Module health checks**: Version compatibility check at project load time; warning if a module action references a script that no longer exists.
 - **Modules tab**: Currently a placeholder stub. Becomes the primary UI for browsing, installing, and configuring modules.
+- **Namelist editor module (later in modules roadmap)**: Add a module GUI for editing simulation namelist files directly from a tree path. Initial support targets TOML and Fortran `*.in` namelists, auto-selected by file extension/content type. The editor should surface tooltip help from inline comments in the source file, optimize for rapid batch parameter editing, and save changes back through the Tree/project workflow.
 
 ---
 
@@ -207,6 +208,32 @@ The alpha testing strategy (ARCHITECTURE.md §14) covers unit tests for Python a
 - **Project schema migration tests**: When `project.json` schema versions increment, automated tests confirm that older project files are correctly migrated.
 - **Julia integration tests**: Parallel test suite to the Python pytest suite, run against a real Julia kernel.
 - **CI tagging**: Slow tests (those that spawn real kernel processes) are tagged `@slow` and run in nightly CI, not on every commit.
+
+---
+
+## 11) Kernel Reconnect on Renderer Reload
+
+### Goal
+When only the renderer reloads (Cmd+R, dev hot reload), the kernel and its working
+directory are still alive. Currently, the app always starts a fresh session on any
+reload. A reconnect path would preserve in-memory tree state and avoid unnecessary
+kernel restarts during development and crash recovery.
+
+### Planned work
+- **`session:getActive` IPC channel**: On renderer mount, query whether a live kernel
+  session exists rather than always starting fresh.
+- **`pdv.session.reconnect` comm message**: Let the kernel confirm it is in a valid
+  state without re-running `pdv.init`. Kernel responds with its current `working_dir`
+  and a state summary.
+- **Working directory validation**: Main process verifies the persisted `working_dir`
+  still exists and the kernel is responsive before committing to reconnect.
+- **Fallback**: If the kernel is dead or unresponsive within a timeout, fall back to
+  the current fresh-start path (clean up old dir, start new kernel).
+
+### Constraints
+- Requires a coordinated update to `pdv_kernel` (Python side).
+- Does not cover cross-process-restart reconnect (that requires remote kernel infra, item 4).
+- Must not change behavior on a fresh app launch with no prior session.
 
 ---
 

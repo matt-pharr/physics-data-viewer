@@ -74,6 +74,12 @@ export const PDVMessageType = {
   SCRIPT_REGISTER: "pdv.script.register",
   /** Kernel → app. Confirms script registration. */
   SCRIPT_REGISTER_RESPONSE: "pdv.script.register.response",
+
+  // File
+  /** App → kernel. Register a file-backed node (namelist, Fortran source, or opaque file). */
+  FILE_REGISTER: "pdv.file.register",
+  /** Kernel → app. Confirms file registration. */
+  FILE_REGISTER_RESPONSE: "pdv.file.register.response",
 } as const;
 
 /** Union of all PDV message type string values. */
@@ -224,6 +230,16 @@ export interface PDVScriptRegisterPayload {
   reload?: boolean;
 }
 
+/** Payload for pdv.file.register (app → kernel). */
+export interface PDVFileRegisterPayload {
+  /** Dot-path of the parent node; empty string for root. */
+  tree_path: string;
+  /** Physical filename with extension (e.g. "input.nml"). */
+  filename: string;
+  /** Node type classification for the file. */
+  node_type: "namelist" | "fortran" | "file";
+}
+
 // ---------------------------------------------------------------------------
 // Node descriptor (ARCHITECTURE.md §7.2, §7.3)
 // ---------------------------------------------------------------------------
@@ -241,6 +257,9 @@ export const NodeKind = {
   BINARY: "binary",
   FOLDER: "folder",
   UNKNOWN: "unknown",
+  NAMELIST: "namelist",
+  FORTRAN: "fortran",
+  FILE: "file",
 } as const;
 
 /** Union of all valid node `type` values in tree descriptors. */
@@ -284,6 +303,8 @@ export interface NodeDescriptor {
   language?: string | null;
   /** Script parameters for script nodes only. */
   params?: ScriptParameter[];
+  /** Physical filename with extension for file-backed nodes (e.g. "run.nml"). Null for others. */
+  filename?: string | null;
 }
 
 // ---------------------------------------------------------------------------

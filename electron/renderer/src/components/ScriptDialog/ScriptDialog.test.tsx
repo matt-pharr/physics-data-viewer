@@ -97,9 +97,38 @@ describe('ScriptDialog', () => {
     await user.click(screen.getByRole('button', { name: 'Run' }));
 
     await waitFor(() => {
-      expect(execute).toHaveBeenCalledWith('kernel-1', { code: 'pdv_tree["scripts.double"].run(x=5)' });
+      expect(execute).toHaveBeenCalledWith('kernel-1', {
+        code: 'import json\npdv_tree["scripts.double"].run(**json.loads("{\\"x\\":5}"))',
+      });
     });
-    expect(onRun).toHaveBeenCalledWith('pdv_tree["scripts.double"].run(x=5)', { result: { done: true } });
+    expect(onRun).toHaveBeenCalledWith(
+      'import json\npdv_tree["scripts.double"].run(**json.loads("{\\"x\\":5}"))',
+      { result: { done: true } }
+    );
+  });
+
+  it('serializes checkbox booleans via JSON payload decoding', async () => {
+    const execute = window.pdv.kernels.execute as unknown as ReturnType<typeof vi.fn<ExecuteFn>>;
+    execute.mockResolvedValue({ result: { done: true } });
+    const onRun = vi.fn();
+    const node = makeNode({
+      path: 'scripts.flags',
+      params: [{ name: 'flag', type: 'bool', required: false, default: false }],
+    });
+    render(<ScriptDialog node={node} kernelId="kernel-1" onRun={onRun} onCancel={vi.fn()} />);
+    const user = userEvent.setup();
+    await user.click(screen.getByRole('checkbox'));
+    await user.click(screen.getByRole('button', { name: 'Run' }));
+
+    await waitFor(() => {
+      expect(execute).toHaveBeenCalledWith('kernel-1', {
+        code: 'import json\npdv_tree["scripts.flags"].run(**json.loads("{\\"flag\\":true}"))',
+      });
+    });
+    expect(onRun).toHaveBeenCalledWith(
+      'import json\npdv_tree["scripts.flags"].run(**json.loads("{\\"flag\\":true}"))',
+      { result: { done: true } }
+    );
   });
 
   it('shows kernel error and does not call onRun', async () => {

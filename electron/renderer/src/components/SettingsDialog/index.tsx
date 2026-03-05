@@ -5,7 +5,7 @@
  * persists updates through `window.pdv.config.set` and related preload APIs.
  */
 
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useLayoutEffect, useMemo, useState } from 'react';
 import type { Config } from '../../types';
 import { SHORTCUT_LABELS, DEFAULT_SHORTCUTS } from '../../shortcuts';
 import type { Shortcuts } from '../../shortcuts';
@@ -132,7 +132,7 @@ interface SettingsDialogProps {
 /** Top-level settings modal used by the App shell. */
 export const SettingsDialog: React.FC<SettingsDialogProps> = ({
   isOpen,
-  initialTab = 'shortcuts',
+  initialTab = 'general',
   config,
   shortcuts,
   currentKernelId,
@@ -175,9 +175,13 @@ export const SettingsDialog: React.FC<SettingsDialogProps> = ({
   const [monoFonts, setMonoFonts] = useState<string[]>([]);
   const [displayFonts, setDisplayFonts] = useState<string[]>([]);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (!isOpen) return;
     setActiveTab(initialTab);
+  }, [isOpen, initialTab]);
+
+  useEffect(() => {
+    if (!isOpen) return;
     setEditedShortcuts(shortcuts);
     setPythonEditorCmd(config?.pythonEditorCmd ?? 'code {}');
     setJuliaEditorCmd(config?.juliaEditorCmd ?? 'code {}');

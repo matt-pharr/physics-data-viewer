@@ -60,6 +60,12 @@ async function openMainWindow(): Promise<void> {
   }
 }
 
+// Enable remote debugging in development so external tools (e.g. MCP
+// servers) can connect to the renderer via CDP.
+if (process.env.NODE_ENV === "development") {
+  app.commandLine.appendSwitch("remote-debugging-port", "9222");
+}
+
 const hasSingleInstanceLock = app.requestSingleInstanceLock();
 if (!hasSingleInstanceLock) {
   app.quit();

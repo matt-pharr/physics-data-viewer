@@ -51,7 +51,7 @@ PDV uses the standard Electron three-process architecture:
 │  │ (Node.js)    │        │ (React / TypeScript)   │ │
 │  │              │        │                        │ │
 │  │ - Kernel mgmt│        │ - Tree panel           │ │
-│  │ - IPC handlers        │ - Code Cell          │ │
+│  │ - IPC handlers        │ - Code Cell            │ │
 │  │ - Filesystem │        │ - Console              │ │
 │  │ - Config     │        │ - Namespace panel      │ │
 │  │ - Comm router│        │ - Settings / dialogs   │ │
@@ -111,7 +111,7 @@ Every PDV message — whether sent by the app or by the kernel — has the follo
 
 ```json
 {
-  "pdv_version": "0.0.1",
+  "pdv_version": "0.0.4",
   "msg_id": "<uuid-v4>",
   "in_reply_to": "<uuid-v4-or-null>",
   "type": "<message-type-string>",
@@ -122,7 +122,7 @@ Every PDV message — whether sent by the app or by the kernel — has the follo
 
 | Field | Type | Description |
 |---|---|---|
-| `pdv_version` | string | Protocol version. Currently `"0.0.1"` (alpha). The app rejects messages with an incompatible major version. |
+| `pdv_version` | string | Protocol version. Currently `"0.0.4"` (alpha). The app rejects messages with an incompatible major version. |
 | `msg_id` | string | UUID v4. Unique identifier for this message. |
 | `in_reply_to` | string \| null | The `msg_id` of the request this is responding to. `null` for unsolicited push messages. |
 | `type` | string | Dot-namespaced message type (see Section 3.4). |
@@ -1079,7 +1079,7 @@ The following features are acknowledged as future work and must not influence th
 - **Crash recovery** — working directory is deleted on close; future discussion required
 - **Remote execution** (SSH, HPC clusters) — no remote connector architecture in this version
 - **Autosave** — `.pdv-work/autosave/` directory is created but not used
-- **Modules system** — the Modules tab remains a placeholder stub
+- **Modules ecosystem hardening** — foundational Modules UI/IPC is implemented; deeper registry/trust/dependency features are deferred
 - **Multiple simultaneous kernels** — architecture supports it (kernels have IDs) but UI exposes only one at a time
 - **R kernel support** — same deferral as Julia
 
