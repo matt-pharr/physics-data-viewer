@@ -23,9 +23,16 @@ import * as path from "path";
 
 import { CommRouter } from "./comm-router";
 import { EnvironmentDetector } from "./environment-detector";
+import { buildEditorSpawn, resolveEditorSpawn } from "./editor-spawn";
+import { registerModulesIpcHandlers } from "./ipc-register-modules";
 import { KernelManager, type KernelInfo } from "./kernel-manager";
+import { initializeKernelSession } from "./kernel-session";
 import { ModuleManager } from "./module-manager";
+import {
+  bindProjectModulesToTree,
+} from "./module-runtime";
 import { ProjectManager, type ProjectModuleImport } from "./project-manager";
+import { copyFilesForLoad, copyFilesForSave } from "./project-file-sync";
 import { ConfigStore } from "./config";
 import { registerAppStateIpcHandlers } from "./ipc-register-app-state";
 import { registerTreeNamespaceScriptIpcHandlers } from "./ipc-register-tree-namespace-script";
@@ -34,20 +41,8 @@ import {
   KernelCompleteResult,
   KernelInspectResult,
   KernelValidateResult,
-  ImportedModuleDescriptor,
-  ModuleActionRequest,
-  ModuleActionResult,
-  ModuleDescriptor,
-  ModuleImportRequest,
-  ModuleImportResult,
-  ModuleInstallRequest,
-  ModuleInstallResult,
-  ModuleInputValue,
   ModuleHealthWarning,
   NamespaceQueryOptions,
-  ModuleSettingsRequest,
-  ModuleSettingsResult,
-  ModuleUpdateResult,
   PDVConfig,
 } from "./ipc";
 import { PDVMessage, PDVMessageType } from "./pdv-protocol";
@@ -113,23 +108,6 @@ const kernelWorkingDirs = new Map<string, string>();
 const crashHandlers = new Map<string, (id: string) => void>();
 let activeKernelManagerRef: KernelManager | null = null;
 
-const BOOTSTRAP_AND_OPEN_COMM = `
-from IPython import get_ipython
-import pdv_kernel
-import pdv_kernel.comms as _pdv_comms
-try:
-    from ipykernel.comm import Comm
-except Exception:
-    from comm import Comm
-_ip = get_ipython()
-pdv_kernel.bootstrap(_ip)
-if _pdv_comms._comm is None:
-    _pdv_comm = Comm(target_name="pdv.kernel")
-    _pdv_comms._comm = _pdv_comm
-    _pdv_comm.on_msg(_pdv_comms._on_comm_message)
-    _pdv_comms.send_message("pdv.ready", {})
-`;
-
 // ---------------------------------------------------------------------------
 // Working-directory helpers
 // ---------------------------------------------------------------------------
@@ -171,72 +149,6 @@ async function cleanupKernelWorkingDir(
 function readConfig(configStore: ConfigStore): PDVConfig {
   const raw = configStore.getAll();
   return { ...DEFAULT_CONFIG, ...raw };
-}
-
-/**
- * Resolve and expand an editor command for a given file path.
- *
- * The command string may contain `{}` as a placeholder for the file path.
- * If no placeholder is present the path is appended as the last argument.
- * Defaults to `"code {}"` (VS Code) when no command is configured.
- *
- * @param cmdString - Raw command string from config, e.g. `"nvim {}"`.
- * @param filePath  - Absolute path to the file to open.
- * @returns Object with the executable and expanded argument list.
- */
-function buildEditorSpawn(
-  cmdString: string | undefined,
-  filePath: string,
-): { file: string; args: string[] } {
-  const raw = (cmdString ?? "code {}").trim() || "code {}";
-  const parts = raw.split(/\s+/).filter(Boolean);
-  const PLACEHOLDER = "{}";
-  const hasPlaceholder = parts.includes(PLACEHOLDER);
-  const expanded = hasPlaceholder
-    ? parts.map((p) => (p === PLACEHOLDER ? filePath : p))
-    : [...parts, filePath];
-  return { file: expanded[0], args: expanded.slice(1) };
-}
-
-const TERMINAL_EDITORS = new Set([
-  "vi",
-  "vim",
-  "nvim",
-  "nano",
-  "pico",
-  "emacs",
-  "kak",
-  "hx",
-  "helix",
-]);
-
-function isTerminalEditorCommand(command: string): boolean {
-  const bin = path.basename(command).toLowerCase().replace(/\.exe$/, "");
-  return TERMINAL_EDITORS.has(bin);
-}
-
-function quoteShellArg(arg: string): string {
-  if (arg.length === 0) return "''";
-  return `'${arg.replace(/'/g, `'\\''`)}'`;
-}
-
-function resolveEditorSpawn(
-  command: string,
-  args: string[],
-): { file: string; args: string[] } {
-  if (process.platform === "darwin" && isTerminalEditorCommand(command)) {
-    const shellCommand = [command, ...args].map(quoteShellArg).join(" ");
-    return {
-      file: "osascript",
-      args: [
-        "-e",
-        `tell application "Terminal" to do script ${JSON.stringify(shellCommand)}`,
-        "-e",
-        'tell application "Terminal" to activate',
-      ],
-    };
-  }
-  return { file: command, args };
 }
 
 /**
@@ -291,124 +203,6 @@ function resolveScriptPath(
   return path.join(workingDir, ...parts.slice(0, -1), `${leaf}.py`);
 }
 
-function normalizeModuleAlias(rawAlias: string): string {
-  const trimmed = rawAlias.trim();
-  if (!trimmed) {
-    throw new Error("Module alias must be a non-empty string");
-  }
-  return trimmed.replace(/[./\\\s]+/g, "_");
-}
-
-function suggestModuleAlias(baseAlias: string, existingAliases: Set<string>): string {
-  let i = 1;
-  while (existingAliases.has(`${baseAlias}_${i}`)) {
-    i += 1;
-  }
-  return `${baseAlias}_${i}`;
-}
-
-function isMissingActionScriptError(error: unknown): boolean {
-  const message = error instanceof Error ? error.message : String(error);
-  return (
-    message.includes("Module action script does not exist") ||
-    message.includes("Module action script is not a file")
-  );
-}
-
-/**
- * Convert one module input value into a Python argument expression.
- *
- * String values are treated as user-provided Python expressions for backward
- * compatibility with existing text inputs. Arbitrary unquoted strings are
- * therefore interpreted as Python identifiers and may raise NameError.
- *
- * @param value - Raw value from module settings/UI state.
- * @returns Python expression string, or null when the value is empty.
- */
-function toPythonArgumentValue(value: ModuleInputValue): string | null {
-  if (typeof value === "boolean") {
-    return value ? "True" : "False";
-  }
-  if (typeof value === "number") {
-    if (!Number.isFinite(value)) {
-      return null;
-    }
-    return String(value);
-  }
-  const trimmed = value.trim();
-  if (trimmed.length === 0) {
-    return null;
-  }
-  return trimmed;
-}
-
-async function bindImportedModuleScripts(
-  commRouter: CommRouter,
-  moduleManager: ModuleManager,
-  importedModule: ProjectModuleImport,
-  workingDir: string | undefined
-): Promise<void> {
-  let scriptBindings: Awaited<ReturnType<ModuleManager["resolveActionScripts"]>>;
-  try {
-    scriptBindings = await moduleManager.resolveActionScripts(
-      importedModule.module_id
-    );
-  } catch (error) {
-    if (isMissingActionScriptError(error)) {
-      return;
-    }
-    throw error;
-  }
-  const parentPath = `${importedModule.alias}.scripts`;
-  for (const binding of scriptBindings) {
-    let registeredPath = binding.scriptPath;
-
-    // Copy the module script into the kernel working directory so that
-    // editing (press E) opens a working copy rather than the module store
-    // file under ~/.PDV.
-    if (workingDir) {
-      const destDir = path.join(
-        workingDir,
-        ...parentPath.split(".").filter(Boolean)
-      );
-      await fs.mkdir(destDir, { recursive: true });
-      const destPath = path.join(destDir, path.basename(binding.scriptPath));
-      await fs.copyFile(binding.scriptPath, destPath);
-      registeredPath = destPath;
-    }
-
-    await commRouter.request(PDVMessageType.SCRIPT_REGISTER, {
-      parent_path: parentPath,
-      name: binding.name,
-      relative_path: registeredPath,
-      language: "python",
-      reload: true,
-    });
-  }
-}
-
-async function bindProjectModulesToTree(
-  kernelManager: KernelManager,
-  commRouter: CommRouter,
-  moduleManager: ModuleManager,
-  activeKernelId: string | null,
-  projectDir: string | null,
-  importedModules?: ProjectModuleImport[],
-  workingDir?: string
-): Promise<void> {
-  if (!activeKernelId || !projectDir) {
-    return;
-  }
-  if (!kernelManager.getKernel(activeKernelId)) {
-    return;
-  }
-  const modules =
-    importedModules ?? (await ProjectManager.readManifest(projectDir)).modules;
-  for (const importedModule of modules) {
-    await bindImportedModuleScripts(commRouter, moduleManager, importedModule, workingDir);
-  }
-}
-
 /**
  * Write a script stub if the file does not already exist.
  *
@@ -448,124 +242,6 @@ function clearPushSubscriptions(): void {
     sub.commRouter.offPush(sub.type, sub.handler);
   }
   pushSubscriptions.length = 0;
-}
-
-async function waitForPush(
-  commRouter: CommRouter,
-  type: string,
-  timeoutMs: number
-): Promise<void> {
-  await new Promise<void>((resolve, reject) => {
-    const timer = setTimeout(() => {
-      commRouter.offPush(type, handler);
-      reject(new Error(`Timed out waiting for push: ${type}`));
-    }, timeoutMs);
-    const handler = (): void => {
-      clearTimeout(timer);
-      commRouter.offPush(type, handler);
-      resolve();
-    };
-    commRouter.onPush(type, handler);
-  });
-}
-
-async function initializeKernelSession(
-  kernelManager: KernelManager,
-  commRouter: CommRouter,
-  projectManager: ProjectManager,
-  kernelId: string
-): Promise<void> {
-  const readyPromise = waitForPush(commRouter, PDVMessageType.READY, 15_000);
-  // Avoid unhandled rejection warnings if bootstrap fails before pdv.ready.
-  void readyPromise.catch(() => undefined);
-  const bootstrapResult = await kernelManager.execute(kernelId, {
-    code: BOOTSTRAP_AND_OPEN_COMM,
-    silent: true,
-  });
-  if (bootstrapResult.error) {
-    throw new Error(bootstrapResult.error);
-  }
-  await readyPromise;
-  const workingDir = await projectManager.createWorkingDir();
-  await commRouter.request(PDVMessageType.INIT, {
-    working_dir: workingDir,
-    pdv_version: "1.0",
-  });
-  kernelWorkingDirs.set(kernelId, workingDir);
-}
-
-// ---------------------------------------------------------------------------
-// File-backed node save/load helpers (Phase 4)
-// ---------------------------------------------------------------------------
-
-/**
- * Read tree-index.json from a directory and return entries that have a filename
- * (i.e. file-backed nodes).
- *
- * @param dir - Directory containing tree-index.json.
- * @returns Array of {path, filename} descriptors for file-backed nodes.
- */
-async function readFileBackedEntries(
-  dir: string
-): Promise<Array<{ path: string; filename: string }>> {
-  try {
-    const raw = await fs.readFile(path.join(dir, "tree-index.json"), "utf8");
-    const parsed = JSON.parse(raw);
-    if (!Array.isArray(parsed)) return [];
-    return (parsed as Array<Record<string, unknown>>)
-      .filter((e) => typeof e.filename === "string" && (e.filename as string).length > 0)
-      .map((e) => ({ path: String(e.path ?? ""), filename: e.filename as string }));
-  } catch (error) {
-    console.warn(
-      `[pdv] could not read file-backed entries from ${dir}/tree-index.json`,
-      error
-    );
-    return [];
-  }
-}
-
-/**
- * Copy file-backed node files from the kernel working directory into the save directory.
- *
- * Called after the kernel has written tree-index.json to saveDir.
- *
- * @param workingDir - Kernel working directory (source).
- * @param saveDir    - Project save directory (destination).
- */
-async function copyFilesForSave(workingDir: string, saveDir: string): Promise<void> {
-  const nodes = await readFileBackedEntries(saveDir);
-  for (const { path: nodePath, filename } of nodes) {
-    const segs = nodePath.split(".").filter(Boolean);
-    const src = path.join(workingDir, ...segs, filename);
-    const destDir2 = path.join(saveDir, ...segs);
-    const dest = path.join(destDir2, filename);
-    await fs.mkdir(destDir2, { recursive: true });
-    await fs.copyFile(src, dest).catch((error) => {
-      console.warn(`[pdv] save: could not copy ${src}`, error);
-    });
-  }
-}
-
-/**
- * Copy file-backed node files from the save directory into the kernel working directory.
- *
- * Called before sending pdv.project.load so files exist when the kernel reads them.
- *
- * @param saveDir    - Project save directory (source).
- * @param workingDir - Kernel working directory (destination).
- */
-async function copyFilesForLoad(saveDir: string, workingDir: string): Promise<void> {
-  const nodes = await readFileBackedEntries(saveDir);
-  for (const { path: nodePath, filename } of nodes) {
-    const segs = nodePath.split(".").filter(Boolean);
-    const src = path.join(saveDir, ...segs, filename);
-    const destDir2 = path.join(workingDir, ...segs);
-    const dest = path.join(destDir2, filename);
-    await fs.mkdir(destDir2, { recursive: true });
-    await fs.copyFile(src, dest).catch((error) => {
-      console.warn(`[pdv] load: could not copy ${src}`, error);
-    });
-  }
 }
 
 // ---------------------------------------------------------------------------
@@ -709,7 +385,13 @@ export function registerIpcHandlers(
       requestedSpec
     );
     commRouter.attach(kernelManager, kernel.id);
-    await initializeKernelSession(kernelManager, commRouter, projectManager, kernel.id);
+    await initializeKernelSession(
+      kernelManager,
+      commRouter,
+      projectManager,
+      kernel.id,
+      kernelWorkingDirs
+    );
     activeKernelId = kernel.id;
     await bindActiveProjectModules(activeKernelId);
 
@@ -779,7 +461,13 @@ export function registerIpcHandlers(
       await cleanupKernelWorkingDir(projectManager, kernelManager, kernelId);
       const restarted = await restartable.restart(kernelId);
       commRouter.attach(kernelManager, restarted.id);
-      await initializeKernelSession(kernelManager, commRouter, projectManager, restarted.id);
+      await initializeKernelSession(
+        kernelManager,
+        commRouter,
+        projectManager,
+        restarted.id,
+        kernelWorkingDirs
+      );
       activeKernelId = restarted.id;
       await bindActiveProjectModules(activeKernelId);
       return restarted;
@@ -795,7 +483,13 @@ export function registerIpcHandlers(
       language: current.language,
     });
     commRouter.attach(kernelManager, restarted.id);
-    await initializeKernelSession(kernelManager, commRouter, projectManager, restarted.id);
+    await initializeKernelSession(
+      kernelManager,
+      commRouter,
+      projectManager,
+      restarted.id,
+      kernelWorkingDirs
+    );
     activeKernelId = restarted.id;
     await bindActiveProjectModules(activeKernelId);
     return restarted;
@@ -897,333 +591,21 @@ export function registerIpcHandlers(
     resolveEditorSpawn,
   });
 
-  // Handles modules:listInstalled requests from the renderer.
-  // Input: none.
-  // Returns: installed module descriptors (empty until ModuleManager is implemented).
-  ipcMain.handle(
-    IPC.modules.listInstalled,
-    async (): Promise<ModuleDescriptor[]> => moduleManager.listInstalled()
-  );
-
-  // Handles modules:install requests from the renderer.
-  // Input: ModuleInstallRequest.
-  // Returns: placeholder not-implemented result.
-  ipcMain.handle(
-    IPC.modules.install,
-    async (_event, request: ModuleInstallRequest): Promise<ModuleInstallResult> =>
-      moduleManager.install(request)
-  );
-
-  // Handles modules:checkUpdates requests from the renderer.
-  // Input: moduleId (string).
-  // Returns: placeholder not-implemented update status.
-  ipcMain.handle(
-    IPC.modules.checkUpdates,
-    async (_event, moduleId: string): Promise<ModuleUpdateResult> =>
-      moduleManager.checkUpdates(moduleId)
-  );
-
-  // Handles modules:importToProject requests from the renderer.
-  // Input: ModuleImportRequest.
-  // Returns: project-scoped import result with alias conflict handling.
-  // Works both with a saved project (persists to disk) and without one
-  // (holds imports in memory until the next project:save).
-  ipcMain.handle(
-    IPC.modules.importToProject,
-    async (_event, request: ModuleImportRequest): Promise<ModuleImportResult> => {
-      const installedModules = await moduleManager.listInstalled();
-      const installed = installedModules.find(
-        (entry) => entry.id === request.moduleId
-      );
-      if (!installed) {
-        return {
-          success: false,
-          status: "error",
-          error: `Installed module not found: ${request.moduleId}`,
-        };
-      }
-
-      // Build the combined alias set from disk manifest (if any) + pending in-memory imports.
-      const activeManifest = await readActiveProjectManifest();
-      const diskModules = activeManifest?.modules ?? [];
-      const allModules = [...diskModules, ...pendingModuleImports];
-      const existingAliases = new Set(allModules.map((entry) => entry.alias));
-      const baseAlias = normalizeModuleAlias(request.alias ?? installed.id);
-      if (existingAliases.has(baseAlias)) {
-        return {
-          success: false,
-          status: "conflict",
-          alias: baseAlias,
-          suggestedAlias: suggestModuleAlias(baseAlias, existingAliases),
-          error: `Module alias already exists: ${baseAlias}`,
-        };
-      }
-      const importedModule: ProjectModuleImport = {
-        module_id: installed.id,
-        alias: baseAlias,
-        version: installed.version,
-        revision: installed.revision,
-      };
-
-      if (activeProjectDir && activeManifest) {
-        // Persist to disk immediately when a project directory exists.
-        const updatedManifest = {
-          ...activeManifest,
-          modules: [...activeManifest.modules, importedModule],
-          module_settings: activeManifest.module_settings ?? {},
-        };
-        await ProjectManager.saveManifest(activeProjectDir, updatedManifest);
-      } else {
-        // No project saved yet — hold in memory until project:save.
-        pendingModuleImports.push(importedModule);
-      }
-
-      const pythonVersion = await detectPythonVersion();
-      const warnings = await moduleManager.evaluateHealth(importedModule.module_id, {
-        pdvVersion: app.getVersion(),
-        pythonVersion,
-      });
-      moduleHealthWarningsByAlias.set(baseAlias, warnings);
-      if (activeKernelId && kernelManager.getKernel(activeKernelId)) {
-        await bindImportedModuleScripts(
-          commRouter, moduleManager, importedModule,
-          kernelWorkingDirs.get(activeKernelId)
-        );
-      }
-      win.webContents.send(IPC.push.treeChanged, {
-        changed_paths: [baseAlias],
-        change_type: "updated",
-      });
-      return {
-        success: true,
-        status: "imported",
-        alias: baseAlias,
-        warnings,
-      };
-    }
-  );
-
-  // Handles modules:listImported requests from the renderer.
-  // Input: none.
-  // Returns: imported modules for the active project (disk + in-memory pending).
-  ipcMain.handle(
-    IPC.modules.listImported,
-    async (): Promise<ImportedModuleDescriptor[]> => {
-      // The tree is the source of authority for what is in the project. If
-      // there is no active kernel there is no tree, so there are no imports.
-      if (!activeKernelId) return [];
-
-      // Combine disk-persisted imports (if project is saved) with pending in-memory imports.
-      let diskModules: ProjectModuleImport[] = [];
-      let diskSettings: Record<string, Record<string, unknown>> = {};
-      if (activeProjectDir) {
-        const manifest = await ProjectManager.readManifest(activeProjectDir);
-        diskModules = manifest.modules;
-        diskSettings = manifest.module_settings;
-      }
-      const allModules = [...diskModules, ...pendingModuleImports];
-      const allSettings = { ...diskSettings, ...pendingModuleSettings };
-
-      if (allModules.length === 0) {
-        return [];
-      }
-
-      const installedModules = await moduleManager.listInstalled();
-      const installedById = new Map(
-        installedModules.map((entry) => [entry.id, entry] as const)
-      );
-      const pythonVersion = await detectPythonVersion();
-      return Promise.all(
-        allModules.map(async (entry) => {
-          let actions: Awaited<ReturnType<ModuleManager["resolveActionScripts"]>>;
-          try {
-            actions = await moduleManager.resolveActionScripts(entry.module_id);
-          } catch (error) {
-            if (isMissingActionScriptError(error)) {
-              actions = [];
-            } else {
-              throw error;
-            }
-          }
-          return {
-            moduleId: entry.module_id,
-            name: installedById.get(entry.module_id)?.name ?? entry.module_id,
-            alias: entry.alias,
-            version: entry.version,
-            revision: entry.revision,
-            inputs: await moduleManager.getModuleInputs(entry.module_id),
-            actions: actions.map((action) => ({
-              id: action.actionId,
-              label: action.actionLabel,
-              scriptName: action.name,
-              inputIds: action.inputIds,
-              ...(action.actionTab ? { tab: action.actionTab } : {}),
-            })),
-            settings: allSettings[entry.alias] ?? {},
-            warnings:
-              moduleHealthWarningsByAlias.get(entry.alias) ??
-              (await moduleManager.evaluateHealth(entry.module_id, {
-                pdvVersion: app.getVersion(),
-                pythonVersion,
-              })),
-          };
-        })
-      );
-    }
-  );
-
-  // Handles modules:saveSettings requests from the renderer.
-  // Input: ModuleSettingsRequest.
-  // Returns: success status after persisting project module settings.
-  // Works both with a saved project (persists to disk) and without one
-  // (holds settings in memory until the next project:save).
-  ipcMain.handle(
-    IPC.modules.saveSettings,
-    async (_event, request: ModuleSettingsRequest): Promise<ModuleSettingsResult> => {
-      if (!request.values || typeof request.values !== "object" || Array.isArray(request.values)) {
-        return {
-          success: false,
-          error: "Module settings values must be an object",
-        };
-      }
-
-      // Check that the alias exists among disk imports + pending imports.
-      const activeManifest = await readActiveProjectManifest();
-      const diskModules = activeManifest?.modules ?? [];
-      const allModules = [...diskModules, ...pendingModuleImports];
-      const imported = allModules.find(
-        (entry) => entry.alias === request.moduleAlias
-      );
-      if (!imported) {
-        return {
-          success: false,
-          error: `Imported module alias not found: ${request.moduleAlias}`,
-        };
-      }
-
-      if (activeProjectDir && activeManifest) {
-        const updatedManifest = {
-          ...activeManifest,
-          module_settings: {
-            ...activeManifest.module_settings,
-            [request.moduleAlias]: request.values,
-          },
-        };
-        await ProjectManager.saveManifest(activeProjectDir, updatedManifest);
-      } else {
-        // Hold in memory until project:save.
-        pendingModuleSettings[request.moduleAlias] = request.values;
-      }
-      return {
-        success: true,
-      };
-    }
-  );
-
-  // Handles modules:runAction requests from the renderer.
-  // Input: ModuleActionRequest.
-  // Returns: generated execution code for one imported module action.
-  // Works both with and without a saved project directory.
-  ipcMain.handle(
-    IPC.modules.runAction,
-    async (_event, request: ModuleActionRequest): Promise<ModuleActionResult> => {
-      if (!kernelManager.getKernel(request.kernelId)) {
-        return {
-          success: false,
-          status: "error",
-          error: `Kernel not found: ${request.kernelId}`,
-        };
-      }
-      // Look up the imported module across disk + pending in-memory imports.
-      let diskModules: ProjectModuleImport[] = [];
-      if (activeProjectDir) {
-        const manifest = await ProjectManager.readManifest(activeProjectDir);
-        diskModules = manifest.modules;
-      }
-      const allModules = [...diskModules, ...pendingModuleImports];
-      const imported = allModules.find(
-        (entry) => entry.alias === request.moduleAlias
-      );
-      if (!imported) {
-        return {
-          success: false,
-          status: "error",
-          error: `Imported module alias not found: ${request.moduleAlias}`,
-        };
-      }
-      const actions = await moduleManager.resolveActionScripts(imported.module_id);
-      const action = actions.find((entry) => entry.actionId === request.actionId);
-      if (!action) {
-        return {
-          success: false,
-          status: "error",
-          error: `Module action not found: ${request.actionId}`,
-        };
-      }
-      // Build kwargs from inputValues: { inputId: value } → kwarg pairs.
-      const kwargs: string[] = [];
-      if (request.inputValues) {
-        // Only include inputs that this action actually references.
-        const allowedIds = new Set(action.inputIds ?? []);
-        for (const [inputId, value] of Object.entries(request.inputValues)) {
-          if (allowedIds.size > 0 && !allowedIds.has(inputId)) continue;
-          const expression = toPythonArgumentValue(value);
-          if (expression !== null) {
-            kwargs.push(`${inputId}=${expression}`);
-          }
-        }
-      }
-
-      const invocation = kwargs.length > 0 ? `(${kwargs.join(", ")})` : "()";
-      const executionCode = `pdv_tree[${JSON.stringify(
-        `${request.moduleAlias}.scripts.${action.name}`
-      )}].run${invocation}`;
-      return {
-        success: true,
-        status: "queued",
-        executionCode,
-      };
-    }
-  );
-
-  // Handles modules:removeImport requests from the renderer.
-  // Input: moduleAlias (string).
-  // Returns: success status after removing the import from project manifest or pending state.
-  ipcMain.handle(
-    IPC.modules.removeImport,
-    async (_event, moduleAlias: string): Promise<ModuleSettingsResult> => {
-      // Remove from pending in-memory imports.
-      const pendingIndex = pendingModuleImports.findIndex(
-        (entry) => entry.alias === moduleAlias
-      );
-      if (pendingIndex >= 0) {
-        pendingModuleImports.splice(pendingIndex, 1);
-        delete pendingModuleSettings[moduleAlias];
-        moduleHealthWarningsByAlias.delete(moduleAlias);
-        return { success: true };
-      }
-
-      // Remove from disk manifest if project is saved.
-      if (activeProjectDir) {
-        const manifest = await ProjectManager.readManifest(activeProjectDir);
-        const moduleIndex = manifest.modules.findIndex(
-          (entry) => entry.alias === moduleAlias
-        );
-        if (moduleIndex >= 0) {
-          manifest.modules.splice(moduleIndex, 1);
-          delete manifest.module_settings[moduleAlias];
-          await ProjectManager.saveManifest(activeProjectDir, manifest);
-          moduleHealthWarningsByAlias.delete(moduleAlias);
-          return { success: true };
-        }
-      }
-
-      return {
-        success: false,
-        error: `Imported module alias not found: ${moduleAlias}`,
-      };
-    }
-  );
+  registerModulesIpcHandlers({
+    win,
+    kernelManager,
+    commRouter,
+    moduleManager,
+    kernelWorkingDirs,
+    readActiveProjectManifest,
+    getActiveProjectDir: () => activeProjectDir,
+    getActiveKernelId: () => activeKernelId,
+    getPendingModuleImports: () => pendingModuleImports,
+    getPendingModuleSettings: () => pendingModuleSettings,
+    getModuleHealthWarningsByAlias: () => moduleHealthWarningsByAlias,
+    detectPythonVersion,
+    getPdvVersion: () => app.getVersion(),
+  });
 
   // Handles project:save requests from the renderer.
   // Input: saveDir (string), codeCells payload.

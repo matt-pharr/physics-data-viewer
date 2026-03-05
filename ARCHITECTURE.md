@@ -1079,7 +1079,7 @@ The following features are acknowledged as future work and must not influence th
 - **Crash recovery** — working directory is deleted on close; future discussion required
 - **Remote execution** (SSH, HPC clusters) — no remote connector architecture in this version
 - **Autosave** — `.pdv-work/autosave/` directory is created but not used
-- **Modules system** — the Modules tab remains a placeholder stub
+- **Modules ecosystem hardening** — foundational Modules UI/IPC is implemented; deeper registry/trust/dependency features are deferred
 - **Multiple simultaneous kernels** — architecture supports it (kernels have IDs) but UI exposes only one at a time
 - **R kernel support** — same deferral as Julia
 

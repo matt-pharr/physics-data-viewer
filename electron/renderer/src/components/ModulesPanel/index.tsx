@@ -5,8 +5,8 @@ import type {
   ModuleImportResult,
   ModuleInstallResult,
 } from "../../types";
-import { ModuleActionsPanel } from "./ModuleActionsPanel";
-import { ModuleInputsPanel } from "./ModuleInputsPanel";
+import { ImportedModulesView } from "./ImportedModulesView";
+import { ModulesLibraryView } from "./ModulesLibraryView";
 import {
   ACTIVE_TAB_SETTING_KEY,
   DEFAULT_MODULE_TAB,
@@ -508,228 +508,54 @@ export const ModulesPanel: React.FC<ModulesPanelProps> = ({
     }
   };
 
-  /** Render a status badge for an installed module in the library view. */
-  const renderModuleBadges = (entry: ModuleDescriptor): React.ReactNode => {
-    const badges: React.ReactNode[] = [];
-    if (importedModuleIds.has(entry.id)) {
-      badges.push(
-        <span key="imported" className="modules-status-badge modules-badge-imported">
-          Imported
-        </span>
-      );
-    }
-    const warnCount = warningCountByModuleId.get(entry.id);
-    if (warnCount && warnCount > 0) {
-      badges.push(
-        <span key="warning" className="modules-warning-badge" title={`${warnCount} warning${warnCount === 1 ? "" : "s"}`}>
-          {warnCount}
-        </span>
-      );
-    }
-    return badges.length > 0 ? <span className="modules-badge-group">{badges}</span> : null;
-  };
-
-  /** Format a version/revision label for display. */
-  const formatVersionLabel = (version: string, revision?: string): string => {
-    if (revision) {
-      return `v${version} (${revision.slice(0, 8)})`;
-    }
-    return `v${version}`;
-  };
   const setErrorMessage = useCallback((message: string): void => {
     setError(message);
   }, []);
 
   return (
     <div className="modules-panel">
-      {view === 'library' && <div className="modules-library">
-        <div className="modules-library-header">
-          <strong>Library</strong>
-          <div className="modules-library-actions">
-            <button className="btn btn-secondary" onClick={() => void refresh()} disabled={loading}>Refresh</button>
-            <button className="btn btn-secondary" onClick={() => void handleInstallLocal()} disabled={loading}>Install Local</button>
-            <button className="btn btn-secondary" onClick={() => void handleInstallGithub()} disabled={loading}>Install GitHub</button>
-          </div>
-        </div>
-        {!projectDir && (
-          <div className="modules-inline-note">
-            Imported modules will be saved when the project is saved.
-          </div>
-        )}
-        {loading && <div className="modules-inline-note">Loading modules…</div>}
-        {error && <div className="modules-error">{error}</div>}
-        {lastStatus && <div className="modules-inline-note">{lastStatus}</div>}
-
-        {/* Step 11: In-panel install duplicate/update prompt. */}
-        {installDuplicate && (
-          <div className={`modules-prompt-block ${installDuplicate.status === "incompatible_update" ? "modules-prompt-error" : installDuplicate.status === "update_available" ? "modules-prompt-warning" : ""}`}>
-            <div className="modules-prompt-title">
-              {installDuplicate.status === "up_to_date" && "Already up to date"}
-              {installDuplicate.status === "update_available" && "Update available"}
-              {installDuplicate.status === "incompatible_update" && "Incompatible update"}
-            </div>
-            <div className="modules-prompt-detail">
-              <strong>{installDuplicate.moduleName}</strong>
-            </div>
-            <div className="modules-prompt-detail">
-              Installed: {formatVersionLabel(installDuplicate.currentVersion, installDuplicate.currentRevision)}
-            </div>
-            {installDuplicate.candidateVersion && installDuplicate.status !== "up_to_date" && (
-              <div className="modules-prompt-detail">
-                Available: {formatVersionLabel(installDuplicate.candidateVersion, installDuplicate.candidateRevision)}
-              </div>
-            )}
-            {installDuplicate.status === "incompatible_update" && (
-              <div className="modules-prompt-detail modules-prompt-caution">
-                Major version change detected. This update may break existing usage.
-              </div>
-            )}
-            <div className="modules-prompt-actions">
-              <button className="btn btn-secondary" onClick={() => setInstallDuplicate(null)}>
-                Dismiss
-              </button>
-            </div>
-          </div>
-        )}
-
-        {/* Step 11: In-panel import conflict prompt. */}
-        {importConflict && (
-          <div className="modules-prompt-block modules-prompt-warning">
-            <div className="modules-prompt-title">Import alias conflict</div>
-            <div className="modules-prompt-detail">
-              Alias <strong>"{importConflict.existingAlias}"</strong> is already in use.
-            </div>
-            <div className="modules-prompt-detail">
-              Import as <strong>"{importConflict.suggestedAlias}"</strong> instead?
-            </div>
-            <div className="modules-prompt-actions">
-              <button className="btn btn-primary" onClick={() => void handleConflictAccept()}>
-                Import as "{importConflict.suggestedAlias}"
-              </button>
-              <button className="btn btn-secondary" onClick={handleConflictCancel}>
-                Cancel
-              </button>
-            </div>
-          </div>
-        )}
-
-        {installed.length === 0 ? (
-          <div className="modules-inline-note">No installed modules.</div>
-        ) : (
-          <ul className="modules-list">
-            {installed.map((entry) => (
-              <li key={entry.id} className="modules-list-item">
-                <div>
-                  <div className="modules-name">
-                    {entry.name}
-                    {renderModuleBadges(entry)}
-                  </div>
-                  <div className="modules-meta">
-                    {entry.id} · v{entry.version}
-                    {entry.description && ` · ${entry.description}`}
-                  </div>
-                </div>
-                <button
-                  className="btn btn-secondary"
-                  onClick={() => void handleImport(entry.id)}
-                  disabled={loading}
-                >
-                  Import
-                </button>
-              </li>
-            ))}
-          </ul>
-        )}
-      </div>}
-      {view === 'imported' && <div className="modules-imported">
-        <div className="modules-imported-header">
-          <strong>Imported Modules</strong>
-        </div>
-        {imported.length === 0 ? (
-          <div className="modules-inline-note">No modules imported in this project.</div>
-        ) : (
-          <>
-            <div className="modules-tabs">
-              {imported.map((entry) => (
-                <button
-                  key={entry.alias}
-                  className={`modules-tab ${entry.alias === activeImportedAlias ? "active" : ""}`}
-                  onClick={() => setActiveImportedAlias(entry.alias)}
-                >
-                  {entry.alias}
-                  {entry.warnings.length > 0 && (
-                    <span className="modules-warning-badge">{entry.warnings.length}</span>
-                  )}
-                </button>
-              ))}
-            </div>
-            {selectedImported && (
-              <div className="modules-tab-content">
-                <div className="modules-name">{selectedImported.name}</div>
-                <div className="modules-meta">
-                  id: {selectedImported.moduleId} · version: {selectedImported.version}
-                </div>
-                {selectedImported.warnings.length > 0 && (
-                  <div className="modules-warning-block">
-                    {selectedImported.warnings.map((warning, index) => (
-                      <div key={`${warning.code}-${index}`} className="modules-warning-item">
-                        {warning.message}
-                      </div>
-                    ))}
-                  </div>
-                )}
-                {!kernelReady && (
-                  <div className="modules-inline-note">
-                    Start a ready kernel to run module actions.
-                  </div>
-                )}
-
-                {selectedModuleTabs.length > 1 && (
-                  <div className="modules-input-tabs">
-                    {selectedModuleTabs.map((tabName) => (
-                      <button
-                        key={tabName}
-                        className={`modules-tab ${tabName === activeSelectedTab ? "active" : ""}`}
-                        onClick={() =>
-                          void setModuleTab(selectedImported.alias, tabName).catch((err) => {
-                            setError(err instanceof Error ? err.message : String(err));
-                          })
-                        }
-                        title={`Show ${tabName} settings`}
-                      >
-                        {tabName}
-                      </button>
-                    ))}
-                  </div>
-                )}
-
-                <ModuleInputsPanel
-                  moduleAlias={selectedImported.alias}
-                  inputs={selectedImported.inputs}
-                  activeTab={activeSelectedTab}
-                  inputValues={inputValues}
-                  sectionOpenState={sectionOpenByAlias[selectedImported.alias]}
-                  isInputVisible={isInputVisible}
-                  setModuleInputValue={setModuleInputValue}
-                  persistInputValues={persistInputValues}
-                  setSectionOpenState={setSectionOpenState}
-                  onError={setErrorMessage}
-                />
-
-                <ModuleActionsPanel
-                  moduleAlias={selectedImported.alias}
-                  actions={selectedImported.actions}
-                  activeTab={activeSelectedTab}
-                  runningActionKey={runningActionKey}
-                  kernelReady={kernelReady}
-                  kernelId={kernelId}
-                  onRunAction={handleRunAction}
-                />
-              </div>
-            )}
-          </>
-        )}
-      </div>}
+      {view === 'library' && (
+        <ModulesLibraryView
+          projectDir={projectDir}
+          loading={loading}
+          error={error}
+          lastStatus={lastStatus}
+          installDuplicate={installDuplicate}
+          importConflict={importConflict}
+          installed={installed}
+          importedModuleIds={importedModuleIds}
+          warningCountByModuleId={warningCountByModuleId}
+          onRefresh={refresh}
+          onInstallLocal={handleInstallLocal}
+          onInstallGithub={handleInstallGithub}
+          onDismissInstallDuplicate={() => setInstallDuplicate(null)}
+          onConflictAccept={handleConflictAccept}
+          onConflictCancel={handleConflictCancel}
+          onImport={handleImport}
+        />
+      )}
+      {view === 'imported' && (
+        <ImportedModulesView
+          imported={imported}
+          activeImportedAlias={activeImportedAlias}
+          selectedImported={selectedImported}
+          selectedModuleTabs={selectedModuleTabs}
+          activeSelectedTab={activeSelectedTab}
+          kernelReady={kernelReady}
+          kernelId={kernelId}
+          runningActionKey={runningActionKey}
+          inputValues={inputValues}
+          sectionOpenByAlias={sectionOpenByAlias}
+          onSelectAlias={(alias) => setActiveImportedAlias(alias)}
+          onSetModuleTab={setModuleTab}
+          onSetError={setErrorMessage}
+          isInputVisible={isInputVisible}
+          setModuleInputValue={setModuleInputValue}
+          persistInputValues={persistInputValues}
+          setSectionOpenState={setSectionOpenState}
+          onRunAction={handleRunAction}
+        />
+      )}
     </div>
   );
 };

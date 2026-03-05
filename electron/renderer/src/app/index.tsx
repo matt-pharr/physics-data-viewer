@@ -22,10 +22,13 @@ import { ScriptDialog } from '../components/ScriptDialog';
 import { CreateScriptDialog } from '../components/Tree/CreateScriptDialog';
 import { SettingsDialog } from '../components/SettingsDialog';
 import { UnsavedChangesDialog } from '../components/UnsavedChangesDialog';
-import type { CellTab, Config, KernelExecuteResult, LogEntry, MenuActionPayload, TreeNodeData } from '../types';
+import type { CellTab, Config, KernelExecuteResult, LogEntry, TreeNodeData } from '../types';
 import { matchesShortcut, resolveShortcuts } from '../shortcuts';
 import { BUILTIN_THEMES, applyThemeColors, applyFontSettings, getMonacoTheme, resolveThemeColors } from '../themes';
 import { useCodeCellsPersistence } from './useCodeCellsPersistence';
+import { useKernelLifecycle } from './useKernelLifecycle';
+import { useLayoutState } from './useLayoutState';
+import { useProjectWorkflow } from './useProjectWorkflow';
 import { useKernelSubscriptions } from './useKernelSubscriptions';
 
 type KernelStatus = 'idle' | 'starting' | 'ready' | 'error';
@@ -83,12 +86,26 @@ function normalizeRecentProjects(data: unknown): string[] {
 
 /** Root PDV application component rendered in the Electron renderer process. */
 const App: React.FC = () => {
-  // Layout state — activity bar + collapsible sidebars
-  const [leftSidebarOpen, setLeftSidebarOpen] = useState(() => localStorage.getItem('pdv.layout.leftSidebarOpen') !== 'false');
-  const [leftPanel, setLeftPanel] = useState<'tree' | 'namespace'>(() => (localStorage.getItem('pdv.layout.leftPanel') as 'tree' | 'namespace') || 'tree');
-  const [rightSidebarOpen, setRightSidebarOpen] = useState(() => localStorage.getItem('pdv.layout.rightSidebar') !== 'false');
-  const [rightPanel, setRightPanel] = useState<'library' | 'imported'>(() => (localStorage.getItem('pdv.layout.rightPanel') as 'library' | 'imported') || 'imported');
-  const [editorCollapsed, setEditorCollapsed] = useState(() => localStorage.getItem('pdv.layout.editorCollapsed') === 'true');
+  const {
+    leftSidebarOpen,
+    leftPanel,
+    rightSidebarOpen,
+    rightPanel,
+    editorCollapsed,
+    leftWidth,
+    rightWidth,
+    editorHeight,
+    rightPaneRef,
+    startVerticalDrag,
+    startHorizontalDrag,
+    startRightDrag,
+    handleActivityBarClick,
+    toggleLeftSidebar,
+    toggleEditorCollapsed,
+    collapseLeftSidebar,
+    collapseRightSidebar,
+    expandEditor,
+  } = useLayoutState();
 
   const [CellTabs, setCellTabs] = useState<CellTab[]>([{ id: 1, code: '' }]);
   const [activeCellTab, setActiveCellTab] = useState(1);
@@ -109,20 +126,6 @@ const App: React.FC = () => {
   // active tab id so a single Cmd+Z restores exactly what was destroyed.
   type CellSnapshot = { tabs: CellTab[]; activeTabId: number };
   const cellUndoStack = useRef<CellSnapshot[]>([]);
-  const [leftWidth, setLeftWidth] = useState(() => {
-    const saved = localStorage.getItem('pdv.pane.leftWidth');
-    return saved ? Number(saved) : 340;
-  });
-  const [rightWidth, setRightWidth] = useState(() => {
-    const saved = localStorage.getItem('pdv.pane.rightWidth');
-    return saved ? Number(saved) : 280;
-  });
-  const [editorHeight, setEditorHeight] = useState(() => {
-    const saved = localStorage.getItem('pdv.pane.editorHeight');
-    return saved ? Number(saved) : 260;
-  });
-  const dragRef = useRef<'vertical' | 'horizontal' | 'right-vertical' | null>(null);
-  const rightPaneRef = useRef<HTMLDivElement | null>(null);
   const [autoRefreshNamespace, setAutoRefreshNamespace] = useState(false);
   const [namespaceRefreshToken, setNamespaceRefreshToken] = useState(0);
   const [treeRefreshToken, setTreeRefreshToken] = useState(0);
@@ -134,12 +137,6 @@ const App: React.FC = () => {
   const [systemPrefersDark, setSystemPrefersDark] = useState(
     () => window.matchMedia('(prefers-color-scheme: dark)').matches,
   );
-
-  // Unsaved-changes dialog state.
-  // reason: 'close' = window/app close, 'open' = opening another project
-  const [unsavedDialogContext, setUnsavedDialogContext] = useState<
-    null | { reason: 'close' | 'open'; pendingPath?: string }
-  >(null);
 
   const shortcuts = useMemo(() => resolveShortcuts(config?.settings?.shortcuts), [config]);
 
@@ -279,20 +276,12 @@ const App: React.FC = () => {
       // Cmd+B: toggle left sidebar
       if ((event.metaKey || event.ctrlKey) && !event.shiftKey && !event.altKey && event.key === 'b') {
         event.preventDefault();
-        setLeftSidebarOpen(prev => {
-          const next = !prev;
-          localStorage.setItem('pdv.layout.leftSidebarOpen', String(next));
-          return next;
-        });
+        toggleLeftSidebar();
       }
       // Cmd+J: toggle code editor
       if ((event.metaKey || event.ctrlKey) && !event.shiftKey && !event.altKey && event.key === 'j') {
         event.preventDefault();
-        setEditorCollapsed(prev => {
-          const next = !prev;
-          localStorage.setItem('pdv.layout.editorCollapsed', String(next));
-          return next;
-        });
+        toggleEditorCollapsed();
       }
       // Cmd+1–9 → go to nth tab; Cmd+0 → go to last tab
       if ((event.metaKey || event.ctrlKey) && !event.shiftKey && !event.altKey) {
@@ -311,7 +300,7 @@ const App: React.FC = () => {
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [shortcuts]);
+  }, [shortcuts, toggleEditorCollapsed, toggleLeftSidebar]);
 
   useEffect(() => {
     if (!window.pdv?.menu) {
@@ -331,173 +320,18 @@ const App: React.FC = () => {
     setModulesRefreshToken,
   });
 
-  useEffect(() => {
-    const handleMove = (event: MouseEvent) => {
-      if (!dragRef.current) return;
-      if (dragRef.current === 'vertical') {
-        const viewportWidth = window.innerWidth || 1200;
-        const max = Math.max(200, viewportWidth - 300);
-        const next = Math.min(Math.max(event.clientX, 200), max);
-        setLeftWidth(next);
-        localStorage.setItem('pdv.pane.leftWidth', String(next));
-      } else if (dragRef.current === 'horizontal') {
-        const bounds = rightPaneRef.current?.getBoundingClientRect();
-        if (!bounds) return;
-        // Editor is at the bottom, so measure from the bottom of the center column
-        const relativeY = bounds.bottom - event.clientY;
-        const min = 140;
-        const max = Math.max(min, bounds.height - 180);
-        const next = Math.min(Math.max(relativeY, min), max);
-        setEditorHeight(next);
-        localStorage.setItem('pdv.pane.editorHeight', String(next));
-      } else if (dragRef.current === 'right-vertical') {
-        const viewportWidth = window.innerWidth || 1200;
-        const min = 150;
-        const max = Math.max(min, viewportWidth - 400);
-        const next = Math.min(Math.max(viewportWidth - event.clientX, min), max);
-        setRightWidth(next);
-        localStorage.setItem('pdv.pane.rightWidth', String(next));
-      }
-    };
-
-    const handleUp = () => {
-      dragRef.current = null;
-    };
-
-    window.addEventListener('mousemove', handleMove);
-    window.addEventListener('mouseup', handleUp);
-    return () => {
-      window.removeEventListener('mousemove', handleMove);
-      window.removeEventListener('mouseup', handleUp);
-    };
-  }, []);
-
-  const startVerticalDrag = useCallback((event: React.MouseEvent) => {
-    event.preventDefault();
-    dragRef.current = 'vertical';
-  }, []);
-
-  const startHorizontalDrag = useCallback((event: React.MouseEvent) => {
-    event.preventDefault();
-    dragRef.current = 'horizontal';
-  }, []);
-
-  const startRightDrag = useCallback((event: React.MouseEvent) => {
-    event.preventDefault();
-    dragRef.current = 'right-vertical';
-  }, []);
-
-  const handleActivityBarClick = useCallback((panel: 'tree' | 'namespace' | 'library' | 'imported') => {
-    if (panel === 'library' || panel === 'imported') {
-      if (rightSidebarOpen && rightPanel === panel) {
-        setRightSidebarOpen(false);
-        localStorage.setItem('pdv.layout.rightSidebar', 'false');
-      } else {
-        setRightPanel(panel);
-        setRightSidebarOpen(true);
-        localStorage.setItem('pdv.layout.rightPanel', panel);
-        localStorage.setItem('pdv.layout.rightSidebar', 'true');
-      }
-    } else {
-      if (leftSidebarOpen && leftPanel === panel) {
-        setLeftSidebarOpen(false);
-        localStorage.setItem('pdv.layout.leftSidebarOpen', 'false');
-      } else {
-        setLeftPanel(panel);
-        setLeftSidebarOpen(true);
-        localStorage.setItem('pdv.layout.leftPanel', panel);
-        localStorage.setItem('pdv.layout.leftSidebarOpen', 'true');
-      }
-    }
-  }, [leftSidebarOpen, leftPanel, rightSidebarOpen, rightPanel]);
-
-  const rememberRecentProject = useCallback(async (projectDir: string) => {
-    const recentProjects = normalizeRecentProjects(config?.recentProjects);
-    const nextRecentProjects = [projectDir, ...recentProjects.filter((entry) => entry !== projectDir)].slice(0, 10);
-    try {
-      const updated = await window.pdv.config.set({ recentProjects: nextRecentProjects });
-      setConfig(updated);
-    } catch {
-      setConfig((prev) => (prev ? { ...prev, recentProjects: nextRecentProjects } : prev));
-    }
-    if (window.pdv?.menu) {
-      await window.pdv.menu.updateRecentProjects(nextRecentProjects);
-    }
-  }, [config]);
-
-  const startKernel = async (cfg: Config) => {
-    setKernelStatus('starting');
-    setLastError(undefined);
-    try {
-      console.log('[App] Starting kernel with config:', cfg);
-      if (currentKernelId) {
-        console.log('[App] Stopping existing kernel:', currentKernelId);
-        await window.pdv.kernels.stop(currentKernelId);
-      }
-
-      const spec = {
-        language: 'python' as const,
-        argv: cfg.pythonPath ? [cfg.pythonPath, '-m', 'ipykernel_launcher', '-f', '{connection_file}'] : undefined,
-        env: cfg.pythonPath ? { PYTHON_PATH: cfg.pythonPath } : undefined,
-      };
-      console.log('[App] Kernel spec:', spec);
-
-      const kernel = await window.pdv.kernels.start(spec);
-      setCurrentKernelId(kernel.id);
-      setTreeRefreshToken((prev) => prev + 1);
-      setNamespaceRefreshToken((prev) => prev + 1);
-      setKernelStatus('ready');
-      console.log('[App] Kernel started successfully:', kernel);
-    } catch (error) {
-      console.error('[App] Failed to start kernel:', error);
-      setCurrentKernelId(null);
-      setKernelStatus('error');
-      setLastError(error instanceof Error ? error.message : String(error));
-      setShowEnvSelector(true);
-    }
-  };
-
-  const handleEnvSave = async (paths: { pythonPath: string; juliaPath?: string }) => {
-    const updatedConfig: Config = {
-      kernelSpec: config?.kernelSpec ?? null,
-      cwd: config?.cwd ?? '',
-      trusted: config?.trusted ?? false,
-      recentProjects: config?.recentProjects ?? [],
-      customKernels: config?.customKernels ?? [],
-      pythonPath: paths.pythonPath,
-      juliaPath: paths.juliaPath ?? config?.juliaPath,
-      editors: config?.editors,
-      treeRoot: config?.treeRoot,
-      settings: config?.settings,
-    };
-
-    await window.pdv.config.set(updatedConfig);
-    setConfig(updatedConfig);
-    setShowEnvSelector(false);
-    await startKernel(updatedConfig);
-  };
-
-  const handleRestartKernel = async () => {
-    if (!currentKernelId) return;
-
-    try {
-      setKernelStatus('starting');
-      setLastError(undefined);
-      console.log('[App] Restarting kernel:', currentKernelId);
-      const newKernel = await window.pdv.kernels.restart(currentKernelId);
-      setCurrentKernelId(newKernel.id);
-      setKernelStatus('ready');
-      setShowEnvSelector(false);
-      setLogs([]);
-      setNamespaceRefreshToken((prev) => prev + 1);
-      setTreeRefreshToken((prev) => prev + 1);
-      console.log('[App] Kernel restarted successfully:', newKernel);
-    } catch (error) {
-      console.error('[App] Failed to restart kernel:', error);
-      setKernelStatus('error');
-      setLastError(error instanceof Error ? error.message : String(error));
-    }
-  };
+  const { startKernel, handleEnvSave, handleRestartKernel } = useKernelLifecycle({
+    config,
+    currentKernelId,
+    setCurrentKernelId,
+    setKernelStatus,
+    setLastError,
+    setShowEnvSelector,
+    setConfig,
+    setLogs,
+    setNamespaceRefreshToken,
+    setTreeRefreshToken,
+  });
 
   const addCellTab = () => {
     setCellTabs((prev) => {
@@ -668,132 +502,29 @@ const App: React.FC = () => {
     }
   };
 
-  const handleSaveProject = useCallback(async (options?: { saveAs?: boolean; directory?: string }): Promise<boolean> => {
-    if (kernelStatus !== 'ready') {
-      return false;
-    }
-    try {
-      let saveDir = options?.directory ?? null;
-      if (!saveDir) {
-        if (options?.saveAs || !currentProjectDir) {
-          saveDir = await window.pdv.files.pickDirectory();
-        } else {
-          saveDir = currentProjectDir;
-        }
-      }
-      if (!saveDir) {
-        return false;
-      }
-      await window.pdv.project.save(saveDir, {
-        tabs: CellTabs,
-        activeTabId: activeCellTab,
-      });
-      setCurrentProjectDir(saveDir);
-      setModulesRefreshToken((prev) => prev + 1);
-      await rememberRecentProject(saveDir);
-      return true;
-    } catch (error) {
-      setLastError(error instanceof Error ? error.message : String(error));
-      return false;
-    }
-  }, [activeCellTab, CellTabs, currentProjectDir, kernelStatus, rememberRecentProject]);
-
-  // Actually load a project (no confirmation — called after unsaved dialog resolves).
-  const executeOpenProject = useCallback(async (directory?: string) => {
-    if (kernelStatus !== 'ready') {
-      return;
-    }
-    try {
-      const saveDir = directory ?? await window.pdv.files.pickDirectory();
-      if (!saveDir) {
-        return;
-      }
-      const loaded = await window.pdv.project.load(saveDir);
-      const normalized = normalizeLoadedCodeCells(loaded);
-      loadedProjectTabsRef.current = normalized;
-      setCellTabs(normalized.tabs);
-      setActiveCellTab(normalized.activeTabId);
-      setCurrentProjectDir(saveDir);
-      setModulesRefreshToken((prev) => prev + 1);
-      await rememberRecentProject(saveDir);
-      setNamespaceRefreshToken((prev) => prev + 1);
-    } catch (error) {
-      setLastError(error instanceof Error ? error.message : String(error));
-    }
-  }, [kernelStatus, rememberRecentProject]);
-
-  // Prompt unsaved-changes dialog before opening a project.
-  const handleOpenProject = useCallback((directory?: string) => {
-    setUnsavedDialogContext({ reason: 'open', pendingPath: directory });
-  }, []);
-
-  // --- Unsaved-changes dialog action handlers ---
-
-  const handleUnsavedSave = useCallback(async () => {
-    const ctx = unsavedDialogContext;
-    setUnsavedDialogContext(null);
-    const saved = await handleSaveProject();
-    if (ctx?.reason === 'close') {
-      await window.pdv.lifecycle.respondClose({ action: saved ? 'save' : 'cancel' });
-    } else if (ctx?.reason === 'open' && saved) {
-      await executeOpenProject(ctx.pendingPath);
-    }
-  }, [unsavedDialogContext, handleSaveProject, executeOpenProject]);
-
-  const handleUnsavedDiscard = useCallback(async () => {
-    const ctx = unsavedDialogContext;
-    setUnsavedDialogContext(null);
-    if (ctx?.reason === 'close') {
-      await window.pdv.lifecycle.respondClose({ action: 'discard' });
-    } else if (ctx?.reason === 'open') {
-      await executeOpenProject(ctx.pendingPath);
-    }
-  }, [unsavedDialogContext, executeOpenProject]);
-
-  const handleUnsavedCancel = useCallback(async () => {
-    const ctx = unsavedDialogContext;
-    setUnsavedDialogContext(null);
-    if (ctx?.reason === 'close') {
-      await window.pdv.lifecycle.respondClose({ action: 'cancel' });
-    }
-  }, [unsavedDialogContext]);
-
-  // Subscribe to main-process close-confirmation requests.
-  useEffect(() => {
-    if (!window.pdv?.lifecycle) {
-      return;
-    }
-    const unsubscribe = window.pdv.lifecycle.onConfirmClose(() => {
-      setUnsavedDialogContext({ reason: 'close' });
-    });
-    return () => unsubscribe();
-  }, []);
-
-  useEffect(() => {
-    if (!window.pdv?.menu) {
-      return;
-    }
-    const unsubscribe = window.pdv.menu.onAction((payload: MenuActionPayload) => {
-      if (payload.action === 'project:open') {
-        void handleOpenProject();
-        return;
-      }
-      if (payload.action === 'project:openRecent') {
-        if (payload.path) {
-          void handleOpenProject(payload.path);
-        }
-        return;
-      }
-      if (payload.action === 'project:save') {
-        void handleSaveProject();
-        return;
-      }
-      if (payload.action === 'project:saveAs') {
-        void handleSaveProject({ saveAs: true });
-      }
-    });
-    return () => unsubscribe();
-  }, [handleOpenProject, handleSaveProject]);
+  const {
+    unsavedDialogContext,
+    handleSaveProject,
+    handleOpenProject,
+    handleUnsavedSave,
+    handleUnsavedDiscard,
+    handleUnsavedCancel,
+  } = useProjectWorkflow({
+    kernelStatus,
+    currentProjectDir,
+    cellTabs: CellTabs,
+    activeCellTab,
+    config,
+    setConfig,
+    setCurrentProjectDir,
+    setCellTabs,
+    setActiveCellTab,
+    setModulesRefreshToken,
+    setNamespaceRefreshToken,
+    setLastError,
+    loadedProjectTabsRef,
+    normalizeLoadedCodeCells,
+  });
 
   return (
     <div className="app">
@@ -875,7 +606,7 @@ const App: React.FC = () => {
                 <span className="sidebar-title">{leftPanel === 'tree' ? 'Tree' : 'Namespace'}</span>
                 <button
                   className="sidebar-collapse-btn"
-                  onClick={() => { setLeftSidebarOpen(false); localStorage.setItem('pdv.layout.leftSidebarOpen', 'false'); }}
+                  onClick={collapseLeftSidebar}
                   title="Collapse sidebar"
                 >
                   ‹
@@ -918,7 +649,7 @@ const App: React.FC = () => {
           {editorCollapsed ? (
             <div
               className="editor-collapsed-bar"
-              onClick={() => { setEditorCollapsed(false); localStorage.setItem('pdv.layout.editorCollapsed', 'false'); }}
+              onClick={expandEditor}
             >
               ▲ Editor
             </div>
@@ -962,7 +693,7 @@ const App: React.FC = () => {
                 <span className="sidebar-title">{rightPanel === 'library' ? 'Module Library' : 'Modules'}</span>
                 <button
                   className="sidebar-collapse-btn"
-                  onClick={() => { setRightSidebarOpen(false); localStorage.setItem('pdv.layout.rightSidebar', 'false'); }}
+                  onClick={collapseRightSidebar}
                   title="Collapse sidebar"
                 >
                   ›

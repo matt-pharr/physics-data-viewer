@@ -2,7 +2,9 @@
 
 Physics Data Viewer is an Electron desktop app for physics analysis workflows.
 The architecture is documented in [`ARCHITECTURE.md`](./ARCHITECTURE.md), and
-the implementation sequence is tracked in [`IMPLEMENTATION_STEPS.md`](./IMPLEMENTATION_STEPS.md).
+the current modules implementation plan/progress is tracked in
+[`FEATURE_2_IMPLEMENTATION_STEPS.md`](./FEATURE_2_IMPLEMENTATION_STEPS.md) and
+[`FEATURE_2_PROGRESS.md`](./FEATURE_2_PROGRESS.md).
 
 ## Developer setup
 

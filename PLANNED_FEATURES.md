@@ -6,7 +6,7 @@ This document describes all features planned beyond the initial alpha release of
 
 | Release | Description |
 |---|---|
-| **0.0.2-alpha2** | Completion of the backend refactor described in [`IMPLEMENTATION_STEPS.md`](IMPLEMENTATION_STEPS.md). Core architecture (PDV comm protocol, tree authority model, project save/load, IPC surface) is in place and all tests pass. This is the baseline from which all features below are additive. |
+| **0.0.2-alpha2** | Completion of the backend refactor and current modules execution tracked in [`FEATURE_2_IMPLEMENTATION_STEPS.md`](FEATURE_2_IMPLEMENTATION_STEPS.md). Core architecture (PDV comm protocol, tree authority model, project save/load, IPC surface) is in place and all tests pass. This is the baseline from which all features below are additive. |
 | **0.1.0-beta1** | All Alpha Features (items 1–10 below) are implemented and stable. The application is suitable for active scientific use. |
 | **1.0.0** | All Beta Features (B1–B8 below, plus any added during beta) are implemented. The application is suitable for broad community distribution. |
 
