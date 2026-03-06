@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react';
 
-export type LeftPanel = 'tree' | 'namespace';
-export type RightPanel = 'library' | 'imported';
+type LeftPanel = 'tree' | 'namespace';
+type RightPanel = 'library' | 'imported';
 type DragMode = 'vertical' | 'horizontal' | 'right-vertical' | null;
 
 export function useLayoutState() {

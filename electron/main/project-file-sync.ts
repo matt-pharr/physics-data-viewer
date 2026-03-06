@@ -29,7 +29,7 @@ interface FileBackedEntry {
  * @param dir - Directory containing tree-index.json.
  * @returns Array of file-backed node descriptors.
  */
-export async function readFileBackedEntries(dir: string): Promise<FileBackedEntry[]> {
+async function readFileBackedEntries(dir: string): Promise<FileBackedEntry[]> {
   try {
     const raw = await fs.readFile(path.join(dir, "tree-index.json"), "utf8");
     const parsed = JSON.parse(raw);

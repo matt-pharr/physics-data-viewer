@@ -35,7 +35,6 @@ export type {
   ModuleInstallResult,
   NamespaceQueryOptions,
   NamespaceVariable,
-  NodeDescriptor,
   ScriptParameter,
   Theme,
 };

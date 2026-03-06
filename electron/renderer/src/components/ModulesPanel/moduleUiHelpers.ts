@@ -4,7 +4,7 @@ import type { ImportedModuleDescriptor } from "../../types";
 export type ModuleInputValue = string | number | boolean;
 
 export type ModuleInputDescriptor = ImportedModuleDescriptor["inputs"][number];
-export type ModuleActionDescriptor = ImportedModuleDescriptor["actions"][number];
+type ModuleActionDescriptor = ImportedModuleDescriptor["actions"][number];
 
 export const DEFAULT_MODULE_TAB = "General";
 export const ACTIVE_TAB_SETTING_KEY = "__ui_active_tab__";

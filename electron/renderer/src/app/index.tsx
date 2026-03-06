@@ -30,13 +30,14 @@ import type {
   LogEntry,
   TreeNodeData,
 } from '../types';
-import { matchesShortcut, resolveShortcuts } from '../shortcuts';
-import { BUILTIN_THEMES, applyThemeColors, applyFontSettings, getMonacoTheme, resolveThemeColors } from '../themes';
+import { resolveShortcuts } from '../shortcuts';
 import { useCodeCellsPersistence } from './useCodeCellsPersistence';
+import { useKeyboardShortcuts } from './useKeyboardShortcuts';
 import { useKernelLifecycle } from './useKernelLifecycle';
 import { useLayoutState } from './useLayoutState';
 import { useProjectWorkflow } from './useProjectWorkflow';
 import { useKernelSubscriptions } from './useKernelSubscriptions';
+import { useThemeManager } from './useThemeManager';
 
 type KernelStatus = 'idle' | 'starting' | 'ready' | 'error';
 type CodeCellExecutionError = {
@@ -119,9 +120,12 @@ const App: React.FC = () => {
     expandEditor,
   } = useLayoutState();
 
+  // -- Editor state ----------------------------------------------------------
   const [CellTabs, setCellTabs] = useState<CellTab[]>([{ id: 1, code: '' }]);
   const [activeCellTab, setActiveCellTab] = useState(1);
   const [logs, setLogs] = useState<LogEntry[]>([]);
+
+  // -- Kernel state ---------------------------------------------------------
   const [currentKernelId, setCurrentKernelId] = useState<string | null>(null);
   const [kernelStatus, setKernelStatus] = useState<KernelStatus>('idle');
   const [isExecuting, setIsExecuting] = useState(false);
@@ -129,9 +133,9 @@ const App: React.FC = () => {
   const [codeCellExecutionError, setCodeCellExecutionError] =
     useState<CodeCellExecutionError | undefined>(undefined);
   const [lastDuration, setLastDuration] = useState<number | null>(null);
+
+  // -- App / config state ---------------------------------------------------
   const [config, setConfig] = useState<Config | null>(null);
-  const [showEnvSelector, setShowEnvSelector] = useState(false);
-  const [scriptDialog, setScriptDialog] = useState<TreeNodeData | null>(null);
   const [currentProjectDir, setCurrentProjectDir] = useState<string | null>(null);
   const initRef = useRef(false);
   const loadedProjectTabsRef = useRef<{ tabs: CellTab[]; activeTabId: number } | null>(null);
@@ -140,50 +144,24 @@ const App: React.FC = () => {
   // active tab id so a single Cmd+Z restores exactly what was destroyed.
   type CellSnapshot = { tabs: CellTab[]; activeTabId: number };
   const cellUndoStack = useRef<CellSnapshot[]>([]);
+
+  // -- Refresh tokens (bumped by push subscriptions to trigger re-fetches) --
   const [autoRefreshNamespace, setAutoRefreshNamespace] = useState(false);
   const [namespaceRefreshToken, setNamespaceRefreshToken] = useState(0);
   const [treeRefreshToken, setTreeRefreshToken] = useState(0);
   const [modulesRefreshToken, setModulesRefreshToken] = useState(0);
+
+  // -- Dialog visibility state ----------------------------------------------
+  const [showEnvSelector, setShowEnvSelector] = useState(false);
+  const [scriptDialog, setScriptDialog] = useState<TreeNodeData | null>(null);
   const [createScriptTarget, setCreateScriptTarget] = useState<string | null>(null);
   const [showSettings, setShowSettings] = useState(false);
   const [settingsInitialTab, setSettingsInitialTab] = useState<'general' | 'shortcuts' | 'appearance' | 'runtime' | 'about'>('general');
-  const [monacoTheme, setMonacoTheme] = useState<string>('vs-dark');
-  const [systemPrefersDark, setSystemPrefersDark] = useState(
-    () => window.matchMedia('(prefers-color-scheme: dark)').matches,
-  );
+
+  // -- Appearance state -----------------------------------------------------
+  const monacoTheme = useThemeManager({ config });
 
   const shortcuts = useMemo(() => resolveShortcuts(config?.settings?.shortcuts), [config]);
-
-  // Track system color-scheme changes
-  useEffect(() => {
-    const mq = window.matchMedia('(prefers-color-scheme: dark)');
-    const handler = (e: MediaQueryListEvent) => setSystemPrefersDark(e.matches);
-    mq.addEventListener('change', handler);
-    return () => mq.removeEventListener('change', handler);
-  }, []);
-
-  // Apply theme whenever config or system preference changes
-  useEffect(() => {
-    if (!config?.settings?.appearance) return;
-    const app = config.settings.appearance;
-    if (app.followSystemTheme) {
-      const themeName = systemPrefersDark ? app.darkTheme : app.lightTheme;
-      const colors = resolveThemeColors(themeName, []);
-      if (colors) {
-        applyThemeColors(colors);
-        setMonacoTheme(getMonacoTheme(themeName ?? '', BUILTIN_THEMES));
-      }
-    } else {
-      if (app.colors) applyThemeColors(app.colors);
-      setMonacoTheme(getMonacoTheme(app.themeName ?? '', BUILTIN_THEMES));
-    }
-  }, [config, systemPrefersDark]);
-
-  // Apply font settings whenever config changes
-  useEffect(() => {
-    const fonts = config?.settings?.fonts;
-    applyFontSettings(fonts?.codeFont, fonts?.displayFont);
-  }, [config]);
   useCodeCellsPersistence({
     cellTabs: CellTabs,
     activeCellTab,
@@ -229,92 +207,6 @@ const App: React.FC = () => {
       : 'Unsaved Project';
     document.title = `PDV: ${projectName}`;
   }, [currentProjectDir]);
-
-  const addCellTabRef = useRef<() => void>(null!);
-  useEffect(() => {
-    addCellTabRef.current = addCellTab;
-  });
-
-  const activeCellTabRef = useRef(activeCellTab);
-  useEffect(() => {
-    activeCellTabRef.current = activeCellTab;
-  }, [activeCellTab]);
-
-  const cellTabsRef = useRef(CellTabs);
-  useEffect(() => {
-    cellTabsRef.current = CellTabs;
-  }, [CellTabs]);
-
-  const removeCellTabRef = useRef<(id: number) => void>(null!);
-  useEffect(() => {
-    removeCellTabRef.current = handleRemoveCellTab;
-  });
-
-  useEffect(() => {
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.repeat) return;
-
-      // Cmd+Z outside Monaco → undo last cell clear/close
-      // Monaco sets its editor textarea as the active element; when it has focus
-      // it handles Cmd+Z itself before this listener sees it.
-      const isMonacoFocused = (document.activeElement as HTMLElement)
-        ?.closest('.monaco-editor') != null;
-      if (!isMonacoFocused && (event.metaKey || event.ctrlKey) && event.key === 'z' && !event.shiftKey && !event.altKey) {
-        const snapshot = cellUndoStack.current[cellUndoStack.current.length - 1];
-        if (snapshot) {
-          event.preventDefault();
-          cellUndoStack.current = cellUndoStack.current.slice(0, -1);
-          setCellTabs(snapshot.tabs);
-          setActiveCellTab(snapshot.activeTabId);
-        }
-        return;
-      }
-
-      if (matchesShortcut(event, shortcuts.openSettings)) {
-        event.preventDefault();
-        setSettingsInitialTab('general');
-        setShowSettings(true);
-      }
-      if (matchesShortcut(event, shortcuts.newTab)) {
-        event.preventDefault();
-        addCellTabRef.current();
-      }
-      if (matchesShortcut(event, shortcuts.closeTab)) {
-        event.preventDefault();
-        removeCellTabRef.current(activeCellTabRef.current);
-      }
-      if (matchesShortcut(event, shortcuts.closeWindow)) {
-        event.preventDefault();
-        window.close();
-      }
-      // Cmd+B: toggle left sidebar
-      if ((event.metaKey || event.ctrlKey) && !event.shiftKey && !event.altKey && event.key === 'b') {
-        event.preventDefault();
-        toggleLeftSidebar();
-      }
-      // Cmd+J: toggle code editor
-      if ((event.metaKey || event.ctrlKey) && !event.shiftKey && !event.altKey && event.key === 'j') {
-        event.preventDefault();
-        toggleEditorCollapsed();
-      }
-      // Cmd+1–9 → go to nth tab; Cmd+0 → go to last tab
-      if ((event.metaKey || event.ctrlKey) && !event.shiftKey && !event.altKey) {
-        const digit = event.key;
-        if (digit >= '1' && digit <= '9') {
-          event.preventDefault();
-          const t = cellTabsRef.current;
-          const target = t[Math.min(Number(digit) - 1, t.length - 1)];
-          if (target) setActiveCellTab(target.id);
-        } else if (digit === '0') {
-          event.preventDefault();
-          const t = cellTabsRef.current;
-          if (t.length) setActiveCellTab(t[t.length - 1].id);
-        }
-      }
-    };
-    window.addEventListener('keydown', onKeyDown);
-    return () => window.removeEventListener('keydown', onKeyDown);
-  }, [shortcuts, toggleEditorCollapsed, toggleLeftSidebar]);
 
   useEffect(() => {
     if (!window.pdv?.menu) {
@@ -414,6 +306,21 @@ const App: React.FC = () => {
     setLastError(undefined);
   };
 
+  useKeyboardShortcuts({
+    shortcuts,
+    cellTabs: CellTabs,
+    activeCellTab,
+    cellUndoStack,
+    setCellTabs,
+    setActiveCellTab,
+    setShowSettings,
+    setSettingsInitialTab,
+    toggleLeftSidebar,
+    toggleEditorCollapsed,
+    addCellTab,
+    removeCellTab: handleRemoveCellTab,
+  });
+
   const handleSettingsSave = async (updates: Partial<Config>) => {
     await window.pdv.config.set(updates);
     const mergedConfig = config ? { ...config, ...updates, settings: { ...config.settings, ...updates.settings, appearance: { ...config.settings?.appearance, ...updates.settings?.appearance } } } : null;
@@ -429,8 +336,6 @@ const App: React.FC = () => {
   };
 
   const handleTreeAction = async (action: string, node: TreeNodeData) => {
-    console.log('[App] Tree action:', action, node);
-
     if (action === 'create_script') {
       setCreateScriptTarget(node.path);
     } else if (action === 'run' && node.type === 'script') {

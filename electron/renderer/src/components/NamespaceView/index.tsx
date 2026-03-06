@@ -100,7 +100,6 @@ export const NamespaceView: React.FC<NamespaceViewProps> = ({
     if (navigator?.clipboard?.writeText) {
       void navigator.clipboard.writeText(variable.name);
     }
-    console.log('[Namespace] Copied to clipboard:', variable.name);
   };
 
   const handleRefresh = () => {

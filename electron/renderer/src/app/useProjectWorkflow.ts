@@ -6,20 +6,35 @@ interface UnsavedDialogContext {
   pendingPath?: string;
 }
 
+/** Options for {@link useProjectWorkflow}. Orchestrates save/load/new project flows. */
 interface UseProjectWorkflowOptions {
+  /** Current kernel status — project operations require 'ready'. */
   kernelStatus: 'idle' | 'starting' | 'ready' | 'error';
+  /** Path to the currently open project directory, or null for unsaved sessions. */
   currentProjectDir: string | null;
+  /** Current code cell tabs (serialized into code-cells.json on save). */
   cellTabs: CellTab[];
+  /** ID of the currently active editor tab. */
   activeCellTab: number;
+  /** App configuration (read for recentProjects, updated after save/load). */
   config: Config | null;
+  /** Persists updated recentProjects list after save/load. */
   setConfig: Dispatch<SetStateAction<Config | null>>;
+  /** Updates the active project directory path. */
   setCurrentProjectDir: Dispatch<SetStateAction<string | null>>;
+  /** Restores code cell tabs from project's code-cells.json on load. */
   setCellTabs: Dispatch<SetStateAction<CellTab[]>>;
+  /** Restores the active tab ID on project load. */
   setActiveCellTab: Dispatch<SetStateAction<number>>;
+  /** Bumps to trigger ModulesPanel refetch after project load. */
   setModulesRefreshToken: Dispatch<SetStateAction<number>>;
+  /** Bumps to trigger NamespaceView refetch after project load. */
   setNamespaceRefreshToken: Dispatch<SetStateAction<number>>;
+  /** Sets error message if save/load fails. */
   setLastError: Dispatch<SetStateAction<string | undefined>>;
+  /** Ref holding the tabs snapshot from project.onLoaded push (consumed once). */
   loadedProjectTabsRef: MutableRefObject<{ tabs: CellTab[]; activeTabId: number } | null>;
+  /** Validates and normalizes raw code-cells.json data into typed CellTab[]. */
   normalizeLoadedCodeCells: (data: unknown) => { tabs: CellTab[]; activeTabId: number };
 }
 

@@ -37,11 +37,8 @@ export const CSS_VAR_GROUPS: { label: string; vars: { key: string; label: string
   },
 ];
 
-/** All CSS variable keys managed by the theme system. */
-export const ALL_CSS_VARS: string[] = CSS_VAR_GROUPS.flatMap((g) => g.vars.map((v) => v.key));
-
 /** Built-in PDV theme entry with mapped Monaco theme id. */
-export interface BuiltinTheme extends Theme {
+interface BuiltinTheme extends Theme {
   /** Monaco editor theme identifier. */
   monacoTheme: string;
 }
@@ -148,7 +145,7 @@ export const BUILTIN_THEME_NAMES = new Set(BUILTIN_THEMES.map((t) => t.name));
  * A named pairing that associates a dark and light variant of the same theme family.
  * Used to enable automatic switching based on `prefers-color-scheme`.
  */
-export interface ThemePair {
+interface ThemePair {
   /** Human-readable name for the pair (shown in settings). */
   name: string;
   dark: string;
@@ -303,7 +300,7 @@ export function colorsEqual(a: Record<string, string>, b: Record<string, string>
 // ---------------------------------------------------------------------------
 
 /** Curated list of popular monospace fonts to probe for. */
-export const MONO_FONT_CANDIDATES = [
+const MONO_FONT_CANDIDATES = [
   'JetBrains Mono',
   'Fira Code',
   'Cascadia Code',
@@ -332,7 +329,7 @@ export const MONO_FONT_CANDIDATES = [
 ];
 
 /** Curated list of popular display/UI fonts to probe for. */
-export const DISPLAY_FONT_CANDIDATES = [
+const DISPLAY_FONT_CANDIDATES = [
   'Inter',
   'SF Pro Display',
   'SF Pro Text',

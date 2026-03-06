@@ -56,7 +56,7 @@ export interface ProjectModuleImport {
  *
  * Includes per-project module import activation and module settings.
  */
-export interface ProjectManifest {
+interface ProjectManifest {
   /** Schema version of project.json. */
   schema_version: string;
   /** ISO 8601 timestamp of last save. */

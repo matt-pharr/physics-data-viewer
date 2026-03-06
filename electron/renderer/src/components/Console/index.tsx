@@ -10,7 +10,7 @@ import type { LogEntry } from '../../types';
 import { ansiToHtml } from './ansi';
 
 /** Props for the execution console panel. */
-export interface ConsoleProps {
+interface ConsoleProps {
   logs: LogEntry[];
   onClear: () => void;
   onExport?: () => void;
