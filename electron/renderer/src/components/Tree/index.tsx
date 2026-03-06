@@ -150,8 +150,8 @@ export const Tree: React.FC<TreeProps> = ({ kernelId, disabled = false, refreshT
     }
   };
 
-  const handleDoubleClick = (node: TreeNodeData) => {
-    console.log('[Tree] Double-clicked:', node);
+  const handleDoubleClick = (_node: TreeNodeData) => {
+    // Reserved for future inline-edit or detail-panel feature.
   };
 
   const handleSelect = (node: TreeNodeData) => {

@@ -24,7 +24,7 @@ export function useCodeCellsPersistence({
         if (data) {
           setCellTabs(data.tabs);
           setActiveCellTab(data.activeTabId);
-          console.log('[App] Loaded code cells from filesystem:', data.tabs.length, 'tabs');
+
         }
       } catch (error) {
         console.error('[App] Failed to load code cells:', error);
@@ -48,7 +48,7 @@ export function useCodeCellsPersistence({
           tabs: cellTabs,
           activeTabId: activeCellTab,
         });
-        console.log('[App] Saved code cells to filesystem');
+
       } catch (error) {
         console.error('[App] Failed to save code cells:', error);
       }

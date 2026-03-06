@@ -34,9 +34,7 @@ export function useKernelLifecycle(options: UseKernelLifecycleOptions) {
     setKernelStatus('starting');
     setLastError(undefined);
     try {
-      console.log('[App] Starting kernel with config:', cfg);
       if (currentKernelId) {
-        console.log('[App] Stopping existing kernel:', currentKernelId);
         await window.pdv.kernels.stop(currentKernelId);
       }
 
@@ -45,14 +43,12 @@ export function useKernelLifecycle(options: UseKernelLifecycleOptions) {
         argv: cfg.pythonPath ? [cfg.pythonPath, '-m', 'ipykernel_launcher', '-f', '{connection_file}'] : undefined,
         env: cfg.pythonPath ? { PYTHON_PATH: cfg.pythonPath } : undefined,
       };
-      console.log('[App] Kernel spec:', spec);
 
       const kernel = await window.pdv.kernels.start(spec);
       setCurrentKernelId(kernel.id);
       setTreeRefreshToken((prev) => prev + 1);
       setNamespaceRefreshToken((prev) => prev + 1);
       setKernelStatus('ready');
-      console.log('[App] Kernel started successfully:', kernel);
     } catch (error) {
       console.error('[App] Failed to start kernel:', error);
       setCurrentKernelId(null);
@@ -96,7 +92,6 @@ export function useKernelLifecycle(options: UseKernelLifecycleOptions) {
     try {
       setKernelStatus('starting');
       setLastError(undefined);
-      console.log('[App] Restarting kernel:', currentKernelId);
       const newKernel = await window.pdv.kernels.restart(currentKernelId);
       setCurrentKernelId(newKernel.id);
       setKernelStatus('ready');
@@ -104,7 +99,6 @@ export function useKernelLifecycle(options: UseKernelLifecycleOptions) {
       setLogs([]);
       setNamespaceRefreshToken((prev) => prev + 1);
       setTreeRefreshToken((prev) => prev + 1);
-      console.log('[App] Kernel restarted successfully:', newKernel);
     } catch (error) {
       console.error('[App] Failed to restart kernel:', error);
       setKernelStatus('error');
