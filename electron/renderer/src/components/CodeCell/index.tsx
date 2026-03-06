@@ -264,6 +264,11 @@ function registerKernelHoverProvider(monacoInstance: typeof monaco): void {
 
 /** Props for the tabbed code-cell editor pane. */
 export interface CodeCellProps {
+  executionError?: {
+    tabId: number;
+    message: string;
+    location?: { line?: number; column?: number };
+  };
   tabs: (CellTab & { onChange: (code: string) => void })[];
   activeTabId: number;
   kernelId?: string | null;
@@ -286,6 +291,7 @@ export interface CodeCellProps {
 
 /** Tabbed code-cell editor component used by the main workspace. */
 export const CodeCell: React.FC<CodeCellProps> = ({
+  executionError,
   tabs,
   activeTabId,
   kernelId = null,
@@ -306,6 +312,7 @@ export const CodeCell: React.FC<CodeCellProps> = ({
   editorWordWrap,
 }) => {
   const editorRef = useRef<monaco.editor.IStandaloneCodeEditor | null>(null);
+  const monacoRef = useRef<typeof monaco | null>(null);
   const activeTab = useMemo(() => tabs.find((tab) => tab.id === activeTabId), [tabs, activeTabId]);
   const activeTabRef = useRef(activeTab);
   const isExecutingRef = useRef(isExecuting);
@@ -360,11 +367,69 @@ export const CodeCell: React.FC<CodeCellProps> = ({
     allTabsDataRef.current = tabs.map((t) => ({ id: t.id, code: t.code, active: t.id === activeTabId }));
   }, [tabs, activeTabId]);
 
+  useEffect(() => {
+    const editor = editorRef.current;
+    const monacoInstance = monacoRef.current;
+    if (!editor || !monacoInstance) return;
+    const model = editor.getModel();
+    if (!model) return;
+
+    const markerOwner = 'pdv-execution';
+    if (!executionError || executionError.tabId !== activeTabId) {
+      monacoInstance.editor.setModelMarkers(model, markerOwner, []);
+      return;
+    }
+
+    const lineCount = model.getLineCount();
+    const requestedLine = executionError.location?.line;
+    const lineNumber =
+      typeof requestedLine === 'number' && Number.isFinite(requestedLine)
+        ? Math.min(Math.max(Math.trunc(requestedLine), 1), lineCount)
+        : 1;
+    const lineContent = model.getLineContent(lineNumber);
+
+    let startColumn = 1;
+    let endColumn = Math.max(2, lineContent.length + 1);
+    const requestedColumn = executionError.location?.column;
+    if (typeof requestedColumn === 'number' && Number.isFinite(requestedColumn)) {
+      const clampedColumn = Math.min(
+        Math.max(Math.trunc(requestedColumn), 1),
+        Math.max(1, lineContent.length + 1),
+      );
+      const word = model.getWordAtPosition({ lineNumber, column: clampedColumn });
+      if (word) {
+        startColumn = word.startColumn;
+        endColumn = Math.max(word.endColumn, word.startColumn + 1);
+      } else {
+        startColumn = clampedColumn;
+        endColumn = Math.min(clampedColumn + 1, Math.max(2, lineContent.length + 1));
+      }
+    } else {
+      const firstVisible = lineContent.search(/\S/);
+      if (firstVisible >= 0) {
+        startColumn = firstVisible + 1;
+        endColumn = Math.max(startColumn + 1, lineContent.length + 1);
+      }
+    }
+
+    monacoInstance.editor.setModelMarkers(model, markerOwner, [
+      {
+        severity: monacoInstance.MarkerSeverity.Error,
+        message: executionError.message || 'Execution error',
+        startLineNumber: lineNumber,
+        startColumn,
+        endLineNumber: lineNumber,
+        endColumn,
+      },
+    ]);
+  }, [executionError, activeTabId, activeTab?.code]);
+
   if (!activeTab) {
     return null;
   }
 
   const handleBeforeMount: BeforeMount = (monaco) => {
+    monacoRef.current = monaco;
     defineMonacoThemes(monaco);
     registerKernelCompletionProvider(monaco);
     registerKernelHoverProvider(monaco);

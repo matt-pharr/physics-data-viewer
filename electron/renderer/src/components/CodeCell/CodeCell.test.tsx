@@ -10,13 +10,21 @@ vi.mock('../../themes', () => ({
 
 vi.mock('@monaco-editor/react', async () => {
   const ReactModule = await import('react');
+  const mockModel = {
+    getLineCount: () => 1,
+    getLineContent: () => 'os.path.',
+    getWordAtPosition: () => ({ startColumn: 1, endColumn: 8 }),
+  };
   return {
     default: (props: {
       beforeMount?: (monaco: unknown) => void;
-      onMount?: (editor: { onKeyDown: () => void }) => void;
+      onMount?: (editor: { onKeyDown: () => void; getModel: () => typeof mockModel }) => void;
     }) => {
       props.beforeMount?.((globalThis as { __testMonaco?: unknown }).__testMonaco);
-      props.onMount?.({ onKeyDown: () => undefined });
+      props.onMount?.({
+        onKeyDown: () => undefined,
+        getModel: () => ((globalThis as { __testEditorModel?: typeof mockModel }).__testEditorModel ?? mockModel),
+      });
       return ReactModule.createElement('div', { 'data-testid': 'mock-editor' });
     },
   };
@@ -45,6 +53,7 @@ const complete = vi.fn();
 const inspect = vi.fn();
 const treeList = vi.fn();
 const registerCompletionItemProvider = vi.fn();
+const setModelMarkers = vi.fn();
 
 beforeEach(() => {
   completionProvider = null;
@@ -52,6 +61,7 @@ beforeEach(() => {
   inspect.mockReset();
   treeList.mockReset();
   registerCompletionItemProvider.mockReset();
+  setModelMarkers.mockReset();
 
   registerCompletionItemProvider.mockImplementation((_language: string, provider: CompletionProvider) => {
     completionProvider = provider;
@@ -72,6 +82,12 @@ beforeEach(() => {
         Variable: 7,
       },
     },
+    MarkerSeverity: {
+      Error: 8,
+    },
+    editor: {
+      setModelMarkers,
+    },
     Range: class {
       constructor(
         public startLineNumber: number,
@@ -80,6 +96,11 @@ beforeEach(() => {
         public endColumn: number
       ) {}
     },
+  };
+  (globalThis as { __testEditorModel?: unknown }).__testEditorModel = {
+    getLineCount: () => 1,
+    getLineContent: () => 'os.path.',
+    getWordAtPosition: () => ({ startColumn: 1, endColumn: 8 }),
   };
 
   Object.defineProperty(window, 'pdv', {
@@ -258,5 +279,79 @@ describe('CodeCell completion provider', () => {
       'something',
       'somewhere',
     ]);
+  });
+});
+
+describe('CodeCell execution error markers', () => {
+  it('adds an error marker for the active tab execution error', async () => {
+    (globalThis as { __testEditorModel?: unknown }).__testEditorModel = {
+      getLineCount: () => 3,
+      getLineContent: (line: number) => (line === 3 ? 'np.linspace()' : ''),
+      getWordAtPosition: () => ({ startColumn: 1, endColumn: 12 }),
+    };
+    const { CodeCell } = await import('./index');
+    render(
+      <CodeCell
+        tabs={[{ id: 1, code: '\n\nnp.linspace()', onChange: vi.fn() }]}
+        activeTabId={1}
+        kernelId="kernel-1"
+        onTabChange={vi.fn()}
+        onAddTab={vi.fn()}
+        onRemoveTab={vi.fn()}
+        onExecute={vi.fn()}
+        onInterrupt={vi.fn()}
+        onClear={vi.fn()}
+        isExecuting={false}
+        executionError={{
+          tabId: 1,
+          message: 'linspace expected at least 2 arguments',
+          location: { line: 3 },
+        }}
+        shortcuts={DEFAULT_SHORTCUTS}
+      />
+    );
+
+    const markersCall = setModelMarkers.mock.calls[setModelMarkers.mock.calls.length - 1];
+    expect(markersCall?.[1]).toBe('pdv-execution');
+    expect(markersCall?.[2]).toEqual([
+      expect.objectContaining({
+        severity: 8,
+        message: 'linspace expected at least 2 arguments',
+        startLineNumber: 3,
+        startColumn: 1,
+        endLineNumber: 3,
+        endColumn: 14,
+      }),
+    ]);
+  });
+
+  it('clears markers when error belongs to a different tab', async () => {
+    const { CodeCell } = await import('./index');
+    render(
+      <CodeCell
+        tabs={[{ id: 1, code: 'print("ok")', onChange: vi.fn() }]}
+        activeTabId={1}
+        kernelId="kernel-1"
+        onTabChange={vi.fn()}
+        onAddTab={vi.fn()}
+        onRemoveTab={vi.fn()}
+        onExecute={vi.fn()}
+        onInterrupt={vi.fn()}
+        onClear={vi.fn()}
+        isExecuting={false}
+        executionError={{
+          tabId: 2,
+          message: 'other tab error',
+          location: { line: 1 },
+        }}
+        shortcuts={DEFAULT_SHORTCUTS}
+      />
+    );
+
+    expect(setModelMarkers).toHaveBeenCalledWith(
+      expect.anything(),
+      'pdv-execution',
+      []
+    );
   });
 });

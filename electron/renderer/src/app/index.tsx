@@ -39,6 +39,11 @@ import { useProjectWorkflow } from './useProjectWorkflow';
 import { useKernelSubscriptions } from './useKernelSubscriptions';
 
 type KernelStatus = 'idle' | 'starting' | 'ready' | 'error';
+type CodeCellExecutionError = {
+  tabId: number;
+  message: string;
+  location?: { line?: number; column?: number };
+};
 
 /**
  * Normalize persisted code-cell payloads from config/project files into a safe
@@ -121,6 +126,8 @@ const App: React.FC = () => {
   const [kernelStatus, setKernelStatus] = useState<KernelStatus>('idle');
   const [isExecuting, setIsExecuting] = useState(false);
   const [lastError, setLastError] = useState<string | undefined>(undefined);
+  const [codeCellExecutionError, setCodeCellExecutionError] =
+    useState<CodeCellExecutionError | undefined>(undefined);
   const [lastDuration, setLastDuration] = useState<number | null>(null);
   const [config, setConfig] = useState<Config | null>(null);
   const [showEnvSelector, setShowEnvSelector] = useState(false);
@@ -355,6 +362,9 @@ const App: React.FC = () => {
 
   const handleCodeChange = (id: number, code: string) => {
     setCellTabs((prev) => prev.map((tab) => (tab.id === id ? { ...tab, code } : tab)));
+    if (codeCellExecutionError?.tabId === id) {
+      setCodeCellExecutionError(undefined);
+    }
   };
 
   const handleClearConsole = () => {
@@ -371,6 +381,9 @@ const App: React.FC = () => {
     setCellTabs((prev) =>
       prev.map((tab) => (tab.id === activeCellTab ? { ...tab, code: '' } : tab)),
     );
+    if (codeCellExecutionError?.tabId === activeCellTab) {
+      setCodeCellExecutionError(undefined);
+    }
     setLastError(undefined);
   };
 
@@ -395,6 +408,9 @@ const App: React.FC = () => {
       }
       return next;
     });
+    if (codeCellExecutionError?.tabId === id) {
+      setCodeCellExecutionError(undefined);
+    }
     setLastError(undefined);
   };
 
@@ -483,6 +499,7 @@ const App: React.FC = () => {
 
     setIsExecuting(true);
     setLastError(undefined);
+    setCodeCellExecutionError(undefined);
 
     const executionId =
       typeof crypto !== 'undefined' && 'randomUUID' in crypto
@@ -529,6 +546,13 @@ const App: React.FC = () => {
 
       if (result.error) {
         setLastError(result.error);
+        if (origin.kind === 'code-cell' && typeof origin.tabId === 'number') {
+          setCodeCellExecutionError({
+            tabId: origin.tabId,
+            message: result.errorDetails?.message || result.error,
+            location: result.errorDetails?.location,
+          });
+        }
       }
       if (typeof result.duration === 'number') {
         setLastDuration(result.duration);
@@ -539,6 +563,7 @@ const App: React.FC = () => {
         prev.map((l) => (l.id === executionId ? { ...l, error: msg, origin } : l))
       );
       setLastError(msg);
+      setCodeCellExecutionError(undefined);
     } finally {
       setIsExecuting(false);
       setNamespaceRefreshToken((prev) => prev + 1);
@@ -716,6 +741,7 @@ const App: React.FC = () => {
                   onClear={handleClearCommand}
                   isExecuting={isExecuting}
                   lastError={lastError}
+                  executionError={codeCellExecutionError}
                   shortcuts={shortcuts}
                   monacoTheme={monacoTheme}
                   editorFontFamily={config?.settings?.fonts?.codeFont}
