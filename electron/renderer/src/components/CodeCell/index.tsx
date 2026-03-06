@@ -17,6 +17,73 @@ import { defineMonacoThemes } from '../../themes';
 let completionProviderRegistered = false;
 let hoverProviderRegistered = false;
 let activeKernelIdRef: React.MutableRefObject<string | null> | null = null;
+let allTabsRef: React.MutableRefObject<{ id: number; code: string; active: boolean }[]> | null = null;
+
+/** Returns a newline-terminated string of all non-active tabs' code to give jedi cross-cell import context. */
+function buildContextPrefix(): string {
+  const tabs = allTabsRef?.current ?? [];
+  const otherCode = tabs
+    .filter((t) => !t.active)
+    .map((t) => t.code.trim())
+    .filter(Boolean)
+    .join('\n');
+  return otherCode ? otherCode + '\n' : '';
+}
+
+interface TreePathCompletionContext {
+  ancestorSegments: string[];
+  typedSegment: string;
+  segmentStartOffset: number;
+}
+
+function extractTreePathCompletionContext(
+  code: string,
+  offset: number
+): TreePathCompletionContext | null {
+  const textBeforeCursor = code.slice(0, offset);
+  const match = /pdv_tree((?:\[\s*['"][^'"\\]*['"]\s*\])*)\[\s*['"]([^'"\\]*)$/.exec(
+    textBeforeCursor
+  );
+  if (!match) return null;
+  const completedSegments = match[1];
+  const typedSegment = match[2];
+  const ancestorSegments: string[] = [];
+  const segmentRegex = /\[\s*['"]([^'"\\]*)['"]\s*\]/g;
+  let segmentMatch: RegExpExecArray | null;
+  while ((segmentMatch = segmentRegex.exec(completedSegments)) !== null) {
+    ancestorSegments.push(segmentMatch[1]);
+  }
+  return {
+    ancestorSegments,
+    typedSegment,
+    segmentStartOffset: offset - typedSegment.length,
+  };
+}
+
+interface TreePathSuggestion {
+  label: string;
+  insertText: string;
+}
+
+async function getTreePathSuggestions(
+  kernelId: string,
+  context: TreePathCompletionContext
+): Promise<TreePathSuggestion[]> {
+  const typedParts = context.typedSegment.split('.');
+  const extraParentSegments =
+    typedParts.length > 1 ? typedParts.slice(0, -1).filter(Boolean) : [];
+  const keyPrefix = typedParts[typedParts.length - 1] ?? '';
+  const parentSegments = [...context.ancestorSegments, ...extraParentSegments];
+  const parentPath = parentSegments.join('.');
+  const nodes = await window.pdv.tree.list(kernelId, parentPath);
+  return nodes
+    .filter((node) => node.key.startsWith(keyPrefix))
+    .map((node) => ({
+      label: node.path,
+      insertText: [...extraParentSegments, node.key].join('.'),
+    }))
+    .sort((a, b) => a.label.localeCompare(b.label));
+}
 
 function mapCompletionKind(
   monacoInstance: typeof monaco,
@@ -48,16 +115,55 @@ function registerKernelCompletionProvider(monacoInstance: typeof monaco): void {
   completionProviderRegistered = true;
 
   monacoInstance.languages.registerCompletionItemProvider('python', {
-    triggerCharacters: ['.', '['],
-    async provideCompletionItems(model, position) {
+    triggerCharacters: ['.', '[', "'", '"'],
+    async provideCompletionItems(model, position, context) {
       const kernelId = activeKernelIdRef?.current ?? null;
       if (!kernelId) return { suggestions: [] };
 
       const code = model.getValue();
       const offset = model.getOffsetAt(position);
+      const treePathContext = extractTreePathCompletionContext(code, offset);
+      if (treePathContext) {
+        try {
+          const matches = await getTreePathSuggestions(
+            kernelId,
+            treePathContext
+          );
+          const startPosition = model.getPositionAt(treePathContext.segmentStartOffset);
+          const endPosition = model.getPositionAt(offset);
+          const range = new monacoInstance.Range(
+            startPosition.lineNumber,
+            startPosition.column,
+            endPosition.lineNumber,
+            endPosition.column
+          );
+          return {
+            suggestions: matches.map((match, index) => ({
+              label: match.label,
+              kind: monacoInstance.languages.CompletionItemKind.Variable,
+              insertText: match.insertText,
+              range,
+              sortText: String(index).padStart(5, '0'),
+            })),
+          };
+        } catch (error) {
+          console.warn('[CodeCell] Tree path completion request failed', error);
+          return { suggestions: [] };
+        }
+      }
+
+      if (
+        context?.triggerCharacter === "'" ||
+        context?.triggerCharacter === '"'
+      ) {
+        return { suggestions: [] };
+      }
 
       try {
-        const result = await window.pdv.kernels.complete(kernelId, code, offset);
+        const prefix = buildContextPrefix();
+        const prefixedCode = prefix + code;
+        const prefixedOffset = prefix.length + offset;
+        const result = await window.pdv.kernels.complete(kernelId, prefixedCode, prefixedOffset);
         const textBeforeCursor = code.slice(0, offset);
         const namePrefix = textBeforeCursor.match(/[A-Za-z_][A-Za-z0-9_]*$/)?.[0] ?? '';
         let mergedMatches = [...result.matches];
@@ -70,14 +176,10 @@ function registerKernelCompletionProvider(monacoInstance: typeof monaco): void {
             }
           }
         }
-        if (namePrefix.startsWith('pdv')) {
-          const preferred = ['pdv_tree', 'pdv'];
-          const front = preferred.filter((item) => item.startsWith(namePrefix) && mergedMatches.includes(item));
-          const frontSet = new Set(front);
-          mergedMatches = [...front, ...mergedMatches.filter((item) => !frontSet.has(item))];
-        }
-        const startPosition = model.getPositionAt(result.cursor_start);
-        const endPosition = model.getPositionAt(result.cursor_end);
+        const adjustedStart = Math.max(0, result.cursor_start - prefix.length);
+        const adjustedEnd = Math.max(0, result.cursor_end - prefix.length);
+        const startPosition = model.getPositionAt(adjustedStart);
+        const endPosition = model.getPositionAt(adjustedEnd);
         const range = new monacoInstance.Range(
           startPosition.lineNumber,
           startPosition.column,
@@ -130,12 +232,15 @@ function registerKernelHoverProvider(monacoInstance: typeof monaco): void {
 
       try {
         const code = model.getValue();
-        const offset = model.getOffsetAt(position);
-        const result = await window.pdv.kernels.inspect(kernelId, code, offset);
-        const doc = result.data?.['text/plain'];
-        if (!result.found || typeof doc !== 'string' || !doc.trim()) {
+        const prefix = buildContextPrefix();
+        const offset = prefix.length + model.getOffsetAt(position);
+        const result = await window.pdv.kernels.inspect(kernelId, prefix + code, offset);
+        const rawDoc = result.data?.['text/plain'];
+        if (!result.found || typeof rawDoc !== 'string' || !rawDoc.trim()) {
           return null;
         }
+        // Strip ANSI escape sequences (color/bold codes) that ipykernel injects for terminal display.
+        const doc = rawDoc.replace(/\x1b\[[0-9;]*[a-zA-Z]/g, '');
 
         const word = model.getWordAtPosition(position);
         return {
@@ -212,6 +317,8 @@ export const CodeCell: React.FC<CodeCellProps> = ({
   const onTabChangeRef = useRef(onTabChange);
   const kernelIdRef = useRef<string | null>(kernelId);
   activeKernelIdRef = kernelIdRef;
+  const allTabsDataRef = useRef(tabs.map((t) => ({ id: t.id, code: t.code, active: t.id === activeTabId })));
+  allTabsRef = allTabsDataRef;
 
   useEffect(() => {
     activeTabRef.current = activeTab;
@@ -248,6 +355,10 @@ export const CodeCell: React.FC<CodeCellProps> = ({
   useEffect(() => {
     kernelIdRef.current = kernelId;
   }, [kernelId]);
+
+  useEffect(() => {
+    allTabsDataRef.current = tabs.map((t) => ({ id: t.id, code: t.code, active: t.id === activeTabId }));
+  }, [tabs, activeTabId]);
 
   if (!activeTab) {
     return null;
@@ -421,6 +532,9 @@ export const CodeCell: React.FC<CodeCellProps> = ({
             tabSize: editorTabSize ?? 4,
             insertSpaces: true,
             detectIndentation: false,
+
+            // Hover — prefer showing below cursor so it's not clipped at the top of the editor
+            hover: { above: false },
 
             // Suggestions — kernel-backed completions (PLANNED_FEATURES §5)
             quickSuggestions: { other: true, comments: false, strings: false },

@@ -24,7 +24,11 @@ vi.mock('@monaco-editor/react', async () => {
 
 type CompletionProvider = {
   triggerCharacters?: string[];
-  provideCompletionItems: (model: MockModel, position: MockPosition) => Promise<{
+  provideCompletionItems: (
+    model: MockModel,
+    position: MockPosition,
+    context?: { triggerCharacter?: string }
+  ) => Promise<{
     suggestions: Array<{ label: string; insertText: string; kind: number }>;
   }>;
 };
@@ -39,12 +43,14 @@ type MockModel = {
 let completionProvider: CompletionProvider | null = null;
 const complete = vi.fn();
 const inspect = vi.fn();
+const treeList = vi.fn();
 const registerCompletionItemProvider = vi.fn();
 
 beforeEach(() => {
   completionProvider = null;
   complete.mockReset();
   inspect.mockReset();
+  treeList.mockReset();
   registerCompletionItemProvider.mockReset();
 
   registerCompletionItemProvider.mockImplementation((_language: string, provider: CompletionProvider) => {
@@ -82,6 +88,9 @@ beforeEach(() => {
       kernels: {
         complete,
         inspect,
+      },
+      tree: {
+        list: treeList,
       },
     },
   });
@@ -125,7 +134,7 @@ describe('CodeCell completion provider', () => {
     await renderCodeCell('kernel-1');
     expect(registerCompletionItemProvider).toHaveBeenCalledTimes(1);
     const provider = registerCompletionItemProvider.mock.calls[0]?.[1] as CompletionProvider;
-    expect(provider.triggerCharacters).toEqual(['.', '[']);
+    expect(provider.triggerCharacters).toEqual(['.', '[', "'", '"']);
   });
 
   it('returns no suggestions when there is no active kernel', async () => {
@@ -174,9 +183,9 @@ describe('CodeCell completion provider', () => {
     expect(result.suggestions).toEqual([]);
   });
 
-  it('prioritizes pdv_tree for pdv* prefix completions', async () => {
+  it('adds pdv_tree fallback for pdv* prefix completions', async () => {
     complete.mockResolvedValue({
-      matches: ['pdv_kernel', 'pdv'],
+      matches: ['%pdb', 'pdv_kernel', 'pdv'],
       cursor_start: 0,
       cursor_end: 3,
     });
@@ -187,8 +196,67 @@ describe('CodeCell completion provider', () => {
       { lineNumber: 1, column: 4 }
     );
 
-    const labels = result.suggestions.map((s) => s.label);
-    expect(labels[0]).toBe('pdv_tree');
-    expect(labels).toEqual(expect.arrayContaining(['pdv_tree', 'pdv', 'pdv_kernel']));
+    expect(result.suggestions.map((s) => s.label)).toEqual(
+      expect.arrayContaining(['pdv_tree', 'pdv', 'pdv_kernel', '%pdb'])
+    );
+  });
+
+  it('returns no suggestions on quote trigger outside pdv_tree key context', async () => {
+    await renderCodeCell('kernel-1');
+    const result = await completionProvider!.provideCompletionItems(
+      makeModel("'"),
+      { lineNumber: 1, column: 2 },
+      { triggerCharacter: "'" }
+    );
+    expect(result.suggestions).toEqual([]);
+    expect(complete).not.toHaveBeenCalled();
+    expect(treeList).not.toHaveBeenCalled();
+  });
+
+  it('suggests tree paths inside pdv_tree key quotes', async () => {
+    treeList.mockResolvedValue([
+      { key: 'raw', path: 'data.raw' },
+      { key: 'results', path: 'data.results' },
+      { key: 'other', path: 'analysis.other' },
+    ]);
+    await renderCodeCell('kernel-1');
+
+    const result = await completionProvider!.provideCompletionItems(
+      makeModel("pdv_tree['data.r"),
+      { lineNumber: 1, column: 17 },
+      { triggerCharacter: "'" }
+    );
+
+    expect(treeList).toHaveBeenCalledWith('kernel-1', 'data');
+    expect(complete).not.toHaveBeenCalled();
+    expect(result.suggestions.map((s) => s.label)).toEqual(['data.raw', 'data.results']);
+    expect(result.suggestions.map((s) => s.insertText)).toEqual(['data.raw', 'data.results']);
+  });
+
+  it('suggests valid child keys for chained pdv_tree bracket access', async () => {
+    treeList.mockResolvedValue([
+      { key: 'something', path: 'some.path.thatis.valid.something' },
+      { key: 'somewhere', path: 'some.path.thatis.valid.somewhere' },
+      { key: 'other', path: 'some.path.thatis.valid.other' },
+    ]);
+    await renderCodeCell('kernel-1');
+
+    const code = "pdv_tree['some']['path']['thatis']['valid']['som";
+    const result = await completionProvider!.provideCompletionItems(
+      makeModel(code),
+      { lineNumber: 1, column: code.length + 1 },
+      { triggerCharacter: "'" }
+    );
+
+    expect(treeList).toHaveBeenCalledWith('kernel-1', 'some.path.thatis.valid');
+    expect(complete).not.toHaveBeenCalled();
+    expect(result.suggestions.map((s) => s.label)).toEqual([
+      'some.path.thatis.valid.something',
+      'some.path.thatis.valid.somewhere',
+    ]);
+    expect(result.suggestions.map((s) => s.insertText)).toEqual([
+      'something',
+      'somewhere',
+    ]);
   });
 });
