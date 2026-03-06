@@ -1,10 +1,15 @@
 import { useEffect, useRef, type Dispatch, type SetStateAction } from 'react';
 import type { CellTab } from '../types';
 
+/** Options for {@link useCodeCellsPersistence}. Reads/writes code cell state to ~/.PDV/state/. */
 interface UseCodeCellsPersistenceOptions {
+  /** The current array of code editor tabs (code, title, id). */
   cellTabs: CellTab[];
+  /** The ID of the currently active editor tab. */
   activeCellTab: number;
+  /** Setter to restore persisted tabs on mount. */
   setCellTabs: Dispatch<SetStateAction<CellTab[]>>;
+  /** Setter to restore the persisted active tab on mount. */
   setActiveCellTab: Dispatch<SetStateAction<number>>;
 }
 

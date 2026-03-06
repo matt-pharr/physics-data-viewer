@@ -2,7 +2,9 @@ import { useEffect, useState } from 'react';
 import type { Config } from '../types';
 import { BUILTIN_THEMES, applyThemeColors, applyFontSettings, getMonacoTheme, resolveThemeColors } from '../themes';
 
+/** Options for {@link useThemeManager}. */
 interface UseThemeManagerOptions {
+  /** App configuration containing settings.appearance and settings.fonts. */
   config: Config | null;
 }
 

@@ -3,6 +3,8 @@
 **Date**: 2026-02-24  
 **Status**: Authoritative design specification. All new code must conform to this document. Deviations require updating this document first.
 
+> **New to PDV?** Start with [QUICK_START.md](QUICK_START.md) for setup instructions and a guided tour. This document is the comprehensive reference.
+
 ---
 
 ## Table of Contents
@@ -296,6 +298,99 @@ setKernelStatus('ready');   // unlocks UI
 The renderer shows a loading / disabled state for all panels while `start()` is pending. On rejection (timeout or init error), the renderer displays the error string from the rejected promise.
 
 There is no separate push notification for "kernel ready" that the renderer must subscribe to. The resolved `KernelInfo` value IS the ready signal.
+
+### 4.5 Sequence Diagrams
+
+#### Kernel Startup
+
+```mermaid
+sequenceDiagram
+    participant R as Renderer (React)
+    participant M as Main (Node.js)
+    participant K as Kernel (Python)
+
+    R->>M: window.pdv.kernels.start(spec)
+    Note over R: UI locked (kernelStatus = 'starting')
+
+    M->>K: spawn subprocess (ipykernel_launcher)
+    M->>K: open ZeroMQ sockets (shell, iopub, control, hb)
+
+    K-->>M: pdv.ready (comm_open on iopub)
+    M->>K: pdv.init { working_dir, pdv_version }
+    K-->>M: pdv.init.response { status: 'ok' }
+
+    M-->>R: resolve KernelInfo { id, language }
+    Note over R: UI unlocked (kernelStatus = 'ready')
+```
+
+#### Code Execution
+
+```mermaid
+sequenceDiagram
+    participant R as Renderer
+    participant M as Main
+    participant K as Kernel
+
+    R->>M: window.pdv.kernels.execute(kernelId, { code })
+    M->>K: execute_request (shell socket)
+
+    loop Streaming output
+        K-->>M: stream/display_data/execute_result (iopub)
+        M-->>R: kernels.onOutput push (chunk)
+        Note over R: Appends to Console log
+    end
+
+    opt Code modifies pdv_tree
+        K-->>M: pdv.tree.changed (comm_msg on iopub)
+        M-->>R: tree.onChanged push
+        Note over R: Bumps treeRefreshToken → Tree refetches
+    end
+
+    K-->>M: execute_reply (shell socket)
+    M-->>R: resolve execute result
+```
+
+#### Project Save
+
+```mermaid
+sequenceDiagram
+    participant R as Renderer
+    participant M as Main
+    participant K as Kernel
+
+    R->>M: window.pdv.project.save(dir, codeCells)
+
+    M->>K: pdv.project.save { save_dir }
+    K-->>M: pdv.project.save.response { node_count, checksum }
+
+    Note over M: Writes code-cells.json to save_dir
+    Note over M: Writes project.json to save_dir
+    Note over M: Updates config.recentProjects
+
+    M-->>R: resolve { success: true }
+    Note over R: Title bar updated, unsaved indicator cleared
+```
+
+#### Project Load
+
+```mermaid
+sequenceDiagram
+    participant R as Renderer
+    participant M as Main
+    participant K as Kernel
+
+    R->>M: window.pdv.project.load(dir)
+
+    M->>K: pdv.project.load { save_dir }
+    Note over K: Reads tree-index.json<br/>Rebuilds tree structure<br/>Registers lazy-load stubs
+
+    K-->>M: pdv.project.loaded (push)
+    M-->>R: project.onLoaded push { node_count, tabs }
+    Note over R: Restores code cell tabs from project
+
+    M-->>R: resolve { success: true }
+    Note over R: Tree/Namespace/Modules refetch
+```
 
 ---
 
@@ -787,11 +882,12 @@ This routing logic lives in a dedicated `CommRouter` class in `electron/main/com
 
 ### 11.4 Renderer Push Subscription Lifecycle
 
-The renderer owns push subscriptions in the root `App` component, but they are split by lifecycle scope:
-- **Kernel-scoped** (`currentKernelId` keyed): `tree.onChanged`, `project.onLoaded`
-- **App-scoped** (always-on while renderer mounted): `kernels.onOutput`, `menu.onAction`
+The renderer owns push subscriptions in the root `App` component via dedicated hooks (see `app/HOOKS.md`), split by lifecycle scope:
+- **Kernel-scoped** (`currentKernelId` keyed): `tree.onChanged`, `project.onLoaded` — managed by `useKernelSubscriptions`
+- **App-scoped** (always-on while renderer mounted): `kernels.onOutput` — managed by `useKernelSubscriptions`; `menu.onAction` — managed by `useProjectWorkflow`
 
 ```tsx
+// useKernelSubscriptions.ts — kernel-scoped subscriptions
 useEffect(() => {
   if (!currentKernelId) return;
 
@@ -809,6 +905,7 @@ useEffect(() => {
   };
 }, [currentKernelId]);
 
+// useKernelSubscriptions.ts — app-scoped subscription
 useEffect(() => {
   const unsubOutput = window.pdv.kernels.onOutput(chunk => {
     // append streamed execute output to the matching log entry
@@ -816,6 +913,7 @@ useEffect(() => {
   return () => unsubOutput();
 }, []);
 
+// useProjectWorkflow.ts — app-scoped menu subscription
 useEffect(() => {
   const unsubMenu = window.pdv.menu.onAction(payload => {
     // open/save project actions routed from main menu
@@ -825,10 +923,11 @@ useEffect(() => {
 ```
 
 Rules:
-- **One owner**: Only `App` directly registers push subscriptions. Child components receive state/refresh tokens as props.
+- **One owner**: Only `App` (via its hooks) directly registers push subscriptions. Child components receive state/refresh tokens as props.
 - **Kernel-scoped cleanup**: `tree.onChanged` and `project.onLoaded` are torn down/re-registered whenever kernel identity changes.
 - **App-scoped cleanup**: `kernels.onOutput` and `menu.onAction` are registered once and cleaned up on unmount.
 - **No polling**: Tree/project updates are push-driven; renderer does not poll these domains.
+- **Hook composition**: See `electron/renderer/src/app/HOOKS.md` for the full hook dependency graph and data flow documentation.
 
 ---
 
@@ -842,32 +941,52 @@ electron/
     tsconfig.json
     preload.ts                  ← window.pdv API bridge
     main/
-        index.ts                ← IPC handler registration (entry point)
+        bootstrap.ts            ← Electron app entry point and singleton guard
+        index.ts                ← IPC handler registration hub, push forwarding
         ipc.ts                  ← ALL IPC channel names and TypeScript types
         kernel-manager.ts       ← Kernel process lifecycle, ZeroMQ socket management
-        comm-router.ts          ← PDV comm message routing (new)
-        config.ts               ← App config persistence
-        app.ts                  ← Electron app lifecycle (BrowserWindow creation, etc.)
-        environment-detector.ts ← Python/Julia environment detection (new)
-        project-manager.ts      ← Project manifest read/write, save coordination (new)
-    init/
-        (removed — replaced by pdv-python package)
+        kernel-error-parser.ts  ← Traceback/error parsing for execution errors
+        comm-router.ts          ← PDV comm message routing
+        config.ts               ← App config persistence (~/.PDV/preferences.json)
+        app.ts                  ← Electron app lifecycle (BrowserWindow, menus)
+        environment-detector.ts ← Python/Julia environment detection
+        project-manager.ts      ← Project manifest read/write, save coordination
+        project-file-sync.ts    ← Tree file synchronization between working/save dirs
+        module-manager.ts       ← Module import/installation pipeline
+        ipc-register-kernels.ts           ← IPC handlers: kernel lifecycle + execution
+        ipc-register-project.ts           ← IPC handlers: project save/load/new
+        ipc-register-modules.ts           ← IPC handlers: module import/install
+        ipc-register-tree-namespace-script.ts ← IPC handlers: tree, namespace, script
+        ipc-register-app-state.ts         ← IPC handlers: config, themes, code cells, files, about
     renderer/
         src/
-            app/index.tsx               ← root orchestration (kernel lifecycle, push subscriptions)
+            app/
+                index.tsx               ← Root App component (state orchestration, 7 hooks)
+                HOOKS.md                ← Hook composition documentation
+                useLayoutState.ts       ← Sidebar/pane geometry (localStorage)
+                useThemeManager.ts      ← Theme colors, Monaco theme, font settings
+                useCodeCellsPersistence.ts ← Load/save code tabs to ~/.PDV/state/
+                useKernelSubscriptions.ts  ← Push subscription lifecycle
+                useKernelLifecycle.ts    ← Kernel start/restart/env-save callbacks
+                useKeyboardShortcuts.ts ← Global keyboard shortcut listener
+                useProjectWorkflow.ts   ← Project save/load/new + unsaved dialog
             components/
-                CodeCell/               ← tabbed Monaco editor surface
-                Console/                ← streamed output and result rendering
-                Tree/                   ← tree browser + context menu actions
-                NamespaceView/          ← namespace table and filtering
-                SettingsDialog/         ← General/Shortcuts/Appearance/Runtime/About tabs
-            themes.ts                   ← builtin themes, Monaco theme definitions, font helpers
-            shortcuts.ts                ← canonical shortcut registry and matcher
-            services/tree.ts            ← renderer tree fetch/cache adapter
-            types/                      ← renderer view-model + preload API types
+                CodeCell/
+                    index.tsx           ← Tabbed Monaco editor surface
+                    monaco-providers.ts ← Completion + hover provider logic
+                Console/                ← Streamed output and result rendering
+                Tree/                   ← Tree browser + context menu actions
+                NamespaceView/          ← Namespace table and filtering
+                SettingsDialog/
+                    index.tsx           ← Settings modal shell + General/Shortcuts/Runtime/About tabs
+                    AppearanceTab.tsx   ← Appearance tab (themes, fonts, colors)
+                    ShortcutCapture.tsx ← Reusable shortcut key-capture widget
+                ModulesPanel/           ← Module import/install UI
+            themes.ts                   ← Builtin themes, Monaco theme definitions, font helpers
+            shortcuts.ts                ← Canonical shortcut registry and matcher
+            services/tree.ts            ← Renderer tree fetch/cache adapter
+            types/                      ← Renderer view-model + preload API types
 ```
-
-Note: `file-scanner.ts` is removed entirely. Its functionality is superseded by the kernel's tree authority.
 
 ### 12.2 Python Package (separate repository or subdirectory)
 

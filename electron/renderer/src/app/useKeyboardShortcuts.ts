@@ -5,18 +5,31 @@ import { matchesShortcut } from '../shortcuts';
 
 type CellSnapshot = { tabs: CellTab[]; activeTabId: number };
 
+/** Options for {@link useKeyboardShortcuts}. Values accessed via internal refs to avoid re-registration. */
 interface UseKeyboardShortcutsOptions {
+  /** User-configurable shortcut bindings (from config.settings.shortcuts). */
   shortcuts: Shortcuts;
+  /** Current code cell tabs (read via ref for Cmd+1–9 navigation). */
   cellTabs: CellTab[];
+  /** Active tab ID (read via ref for close-tab shortcut). */
   activeCellTab: number;
+  /** Stack of tab snapshots for Cmd+Z cell undo (shared with App). */
   cellUndoStack: React.MutableRefObject<CellSnapshot[]>;
+  /** Setter for code cell tabs (used by Cmd+Z undo restore). */
   setCellTabs: Dispatch<SetStateAction<CellTab[]>>;
+  /** Setter for active tab (used by Cmd+Z undo and Cmd+1–9 navigation). */
   setActiveCellTab: Dispatch<SetStateAction<number>>;
+  /** Opens the SettingsDialog. */
   setShowSettings: Dispatch<SetStateAction<boolean>>;
+  /** Controls which tab the SettingsDialog opens to. */
   setSettingsInitialTab: Dispatch<SetStateAction<'general' | 'shortcuts' | 'appearance' | 'runtime' | 'about'>>;
+  /** Toggles the left sidebar panel (Cmd+B). */
   toggleLeftSidebar: () => void;
+  /** Toggles the code editor collapsed state (Cmd+J). */
   toggleEditorCollapsed: () => void;
+  /** Creates a new code cell tab (configurable shortcut). */
   addCellTab: () => void;
+  /** Closes the tab with the given ID (configurable shortcut). */
   removeCellTab: (id: number) => void;
 }
 

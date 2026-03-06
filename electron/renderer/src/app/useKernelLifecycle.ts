@@ -3,16 +3,27 @@ import type { Config, LogEntry } from '../types';
 
 type KernelStatus = 'idle' | 'starting' | 'ready' | 'error';
 
+/** Options for {@link useKernelLifecycle}. All setters correspond to App-level useState. */
 interface UseKernelLifecycleOptions {
+  /** Current app configuration (pythonPath, kernelSpec, etc.). */
   config: Config | null;
+  /** ID of the currently running kernel, or null if none is running. */
   currentKernelId: string | null;
+  /** Setter for the active kernel ID (null on stop/crash). */
   setCurrentKernelId: Dispatch<SetStateAction<string | null>>;
+  /** Setter for the kernel connection status shown in the status bar. */
   setKernelStatus: Dispatch<SetStateAction<KernelStatus>>;
+  /** Setter for the most recent error message (clears on successful start). */
   setLastError: Dispatch<SetStateAction<string | undefined>>;
+  /** Controls visibility of the EnvironmentSelector dialog. */
   setShowEnvSelector: Dispatch<SetStateAction<boolean>>;
+  /** Updates the persisted app configuration after environment changes. */
   setConfig: Dispatch<SetStateAction<Config | null>>;
+  /** Clears the console log entries on kernel restart. */
   setLogs: Dispatch<SetStateAction<LogEntry[]>>;
+  /** Bumps the token to trigger a NamespaceView refetch. */
   setNamespaceRefreshToken: Dispatch<SetStateAction<number>>;
+  /** Bumps the token to trigger a Tree panel refetch. */
   setTreeRefreshToken: Dispatch<SetStateAction<number>>;
 }
 
