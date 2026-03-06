@@ -51,7 +51,7 @@ const MODULE_MANIFEST_FILE = "pdv-module.json";
 /**
  * Declarative input field descriptor from a module manifest.
  */
-export interface ModuleInputDescriptor {
+interface ModuleInputDescriptor {
   /** Stable input identifier from manifest. */
   id: string;
   /** User-facing label. */
@@ -88,7 +88,7 @@ export interface ModuleInputDescriptor {
 /**
  * One canonical script binding derived from a module action descriptor.
  */
-export interface ModuleScriptBinding {
+interface ModuleScriptBinding {
   /** Stable action identifier from manifest. */
   actionId: string;
   /** User-facing action label from manifest. */

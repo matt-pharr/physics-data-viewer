@@ -12,5 +12,9 @@
   ],
   "ignoreDependencies": [
     "electronmon"
-  ]
+  ],
+  "ignore": [
+    "renderer/src/vite-env.d.ts"
+  ],
+  "ignoreExportsUsedInFile": true
 }

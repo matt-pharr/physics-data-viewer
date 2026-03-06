@@ -263,7 +263,7 @@ function registerKernelHoverProvider(monacoInstance: typeof monaco): void {
 }
 
 /** Props for the tabbed code-cell editor pane. */
-export interface CodeCellProps {
+interface CodeCellProps {
   executionError?: {
     tabId: number;
     message: string;

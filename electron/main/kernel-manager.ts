@@ -74,7 +74,7 @@ export interface KernelExecutionOrigin {
 }
 
 /** Best-effort parsed location metadata extracted from traceback text. */
-export interface KernelExecutionLocation {
+interface KernelExecutionLocation {
   /** Filename/path from traceback frames when present. */
   file?: string;
   /** 1-based line number when present. */
@@ -277,7 +277,7 @@ function serializeMessage(msg: JupyterMessage, key: string): Buffer[] {
  * @returns The parsed JupyterMessage, or null if frames are invalid or the
  *   signature check fails.
  */
-export function parseMessage(
+function parseMessage(
   frames: Buffer[],
   key: string
 ): JupyterMessage | null {

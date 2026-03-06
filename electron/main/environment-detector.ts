@@ -29,14 +29,14 @@ const execFileAsync = promisify(execFile);
 // ---------------------------------------------------------------------------
 
 /** Classifier for the origin of a detected Python environment. */
-export type EnvironmentKind = "conda" | "venv" | "system" | "configured";
+type EnvironmentKind = "conda" | "venv" | "system" | "configured";
 
 /**
  * A single Python environment discovered on the host machine.
  *
  * See ARCHITECTURE.md §10.1 for field semantics.
  */
-export interface DetectedEnvironment {
+interface DetectedEnvironment {
   kind: EnvironmentKind;
   pythonPath: string;
   /** Absolute path to the ``jupyter`` executable (or ``python -m jupyter``). */
@@ -52,7 +52,7 @@ export interface DetectedEnvironment {
  *
  * See ARCHITECTURE.md §10.3.
  */
-export interface PDVInstallStatus {
+interface PDVInstallStatus {
   /** True when ``pdv_kernel`` is importable in the given Python environment. */
   installed: boolean;
   /** The installed version string, or null when not installed. */
@@ -69,7 +69,7 @@ export interface PDVInstallStatus {
  *
  * See ARCHITECTURE.md §10.3.
  */
-export interface PDVInstallResult {
+interface PDVInstallResult {
   /** True when pip exited with code 0. */
   success: boolean;
   /** Combined stdout + stderr from the pip process. */

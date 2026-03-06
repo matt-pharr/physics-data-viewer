@@ -19,9 +19,9 @@
 // ---------------------------------------------------------------------------
 
 /** The PDV protocol version this build targets. */
-export const PDV_VERSION = "1.0" as const;
+const PDV_VERSION = "1.0" as const;
 
-/** Alias kept for backward compatibility with generated skeleton imports. */
+/** The version string imported by all production and test code. */
 export const PDV_PROTOCOL_VERSION = PDV_VERSION;
 
 /** Comm target name registered on the kernel (ARCHITECTURE.md §3.1). */
@@ -83,7 +83,7 @@ export const PDVMessageType = {
 } as const;
 
 /** Union of all PDV message type string values. */
-export type PDVMessageTypeValue =
+type PDVMessageTypeValue =
   (typeof PDVMessageType)[keyof typeof PDVMessageType];
 
 // ---------------------------------------------------------------------------
@@ -111,15 +111,14 @@ export interface PDVMessage {
   payload: Record<string, unknown>;
 }
 
-/** Alias kept so existing skeleton imports of PDVEnvelope still compile. */
-export type PDVEnvelope = PDVMessage;
+
 
 // ---------------------------------------------------------------------------
 // Error payload (status = "error", ARCHITECTURE.md §3.5)
 // ---------------------------------------------------------------------------
 
 /** Standard payload shape for protocol responses with `status: "error"`. */
-export interface PDVErrorPayload {
+interface PDVErrorPayload {
   /** Machine-readable dot-namespaced error code (e.g. "tree.path_not_found"). */
   code: string;
   /** Human-readable message suitable for display in the UI. */
@@ -131,7 +130,7 @@ export interface PDVErrorPayload {
 // ---------------------------------------------------------------------------
 
 /** Payload for pdv.init (app → kernel). */
-export interface PDVInitPayload {
+interface PDVInitPayload {
   /** Absolute path to the PDV working directory created by the app. */
   working_dir: string;
   /** PDV protocol version the app expects. */
@@ -139,7 +138,7 @@ export interface PDVInitPayload {
 }
 
 /** Payload for pdv.init.response (kernel → app). */
-export interface PDVInitResponsePayload {
+interface PDVInitResponsePayload {
   /** Absolute path the kernel accepted as working directory. */
   working_dir: string;
 }
@@ -149,7 +148,7 @@ export interface PDVInitResponsePayload {
 // ---------------------------------------------------------------------------
 
 /** Payload for pdv.project.load (app → kernel). */
-export interface PDVProjectLoadPayload {
+interface PDVProjectLoadPayload {
   /** Absolute path to the project save directory. */
   save_dir: string;
 }
@@ -165,13 +164,13 @@ export interface PDVProjectLoadedPayload {
 }
 
 /** Payload for pdv.project.save (app → kernel). */
-export interface PDVProjectSavePayload {
+interface PDVProjectSavePayload {
   /** Absolute path to the project save directory. */
   save_dir: string;
 }
 
 /** Payload for pdv.project.save.response (kernel → app). */
-export interface PDVProjectSaveResponsePayload {
+interface PDVProjectSaveResponsePayload {
   /** Total number of tree nodes serialized. */
   node_count: number;
   /** SHA-256 checksum of the written tree-index.json. */
@@ -183,13 +182,13 @@ export interface PDVProjectSaveResponsePayload {
 // ---------------------------------------------------------------------------
 
 /** Payload for pdv.tree.list (app → kernel). */
-export interface PDVTreeListPayload {
+interface PDVTreeListPayload {
   /** Dot-separated path to list, or "" / null for root. */
   path?: string | null;
 }
 
 /** Payload for pdv.tree.get (app → kernel). */
-export interface PDVTreeGetPayload {
+interface PDVTreeGetPayload {
   /** Dot-separated path of the node to retrieve. */
   path: string;
 }
@@ -207,7 +206,7 @@ export interface PDVTreeChangedPayload {
 // ---------------------------------------------------------------------------
 
 /** Payload for pdv.namespace.query (app → kernel). */
-export interface PDVNamespaceQueryPayload {
+interface PDVNamespaceQueryPayload {
   /** If true, include names starting with underscore. */
   include_private?: boolean;
   /** If true, include imported modules. */
@@ -221,7 +220,7 @@ export interface PDVNamespaceQueryPayload {
 // ---------------------------------------------------------------------------
 
 /** Payload for pdv.script.register (app → kernel). */
-export interface PDVScriptRegisterPayload {
+interface PDVScriptRegisterPayload {
   /** Dot-separated path where the script node should appear in the tree. */
   tree_path: string;
   /** Relative path to the script file from the project root. */
@@ -245,7 +244,7 @@ export interface PDVFileRegisterPayload {
 // ---------------------------------------------------------------------------
 
 /** Known node kind values. */
-export const NodeKind = {
+const NodeKind = {
   NDARRAY: "ndarray",
   DATAFRAME: "dataframe",
   SERIES: "series",
@@ -263,7 +262,7 @@ export const NodeKind = {
 } as const;
 
 /** Union of all valid node `type` values in tree descriptors. */
-export type NodeKindValue = (typeof NodeKind)[keyof typeof NodeKind];
+type NodeKindValue = (typeof NodeKind)[keyof typeof NodeKind];
 
 /** Script run() parameter descriptor extracted by pdv-python from function signatures. */
 export interface ScriptParameter {
@@ -331,18 +330,7 @@ export function isPDVMessage(data: unknown): data is PDVMessage {
   );
 }
 
-/** Alias for backwards compatibility with skeleton imports. */
-export const isPDVEnvelope = isPDVMessage;
 
-/**
- * Returns true when the given PDVMessage has status="error".
- *
- * @param msg - A validated PDVMessage.
- * @returns True when `msg.status` is exactly `"error"`.
- */
-export function isErrorEnvelope(msg: PDVMessage): boolean {
-  return msg.status === "error";
-}
 
 // ---------------------------------------------------------------------------
 // Version compatibility (ARCHITECTURE.md §3.6)

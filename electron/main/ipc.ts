@@ -384,7 +384,7 @@ export type ModuleInputValue = string | number | boolean;
 /**
  * One selectable option for dropdown-style module inputs.
  */
-export interface ModuleInputOptionDescriptor {
+interface ModuleInputOptionDescriptor {
   /** User-facing option label. */
   label: string;
   /** Raw option value persisted in project settings. */
@@ -394,7 +394,7 @@ export interface ModuleInputOptionDescriptor {
 /**
  * Declarative visibility rule for module inputs/sections.
  */
-export interface ModuleInputVisibilityRule {
+interface ModuleInputVisibilityRule {
   /** Input ID this control depends on. */
   inputId: string;
   /** Value that must match for this control to be visible. */
