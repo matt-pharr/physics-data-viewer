@@ -127,33 +127,54 @@ Round-trip latency to a local kernel subprocess is typically a few milliseconds 
 
 ---
 
-## 6) Rich Document Artifacts in the Tree
+## 6) Markdown Notes in the Tree
 
 ### Goal
-Analysis is not only code and data. Researchers need to attach interpretation, notes, figures, and report fragments to the same project — and ideally write manuscript drafts directly alongside the data that informs them. Saved plots, Markdown notes, and PDF documents should be first-class tree node types, giving a project a unified record of data, code, and narrative.
 
-### Planned work
+Researchers need to attach written documentation, derivations, and interpretation to a project — keeping notes, equations, and analysis together in one place. Markdown nodes are a first-class tree node type backed by `.md` files. They are created and edited inside PDV via a dedicated Write tab in the middle pane, which operates as a parallel tabbed editor surface alongside the existing Code tab.
 
-#### Figure nodes (saved plots)
-- **`figure` node type**: A first-class node type backed by a static image file (`.png`, `.svg`) or an interactive HTML bundle (`.html`, for Plotly/Bokeh output). Displayed inline in the tree panel's detail pane when selected.
-- **`pdv.save_figure(path, fig=None)`** convenience on the `pdv` app object: saves the current matplotlib figure (or a passed figure object) to the tree at the given path. Example: `pdv.save_figure('results.fit_plot')`. Under the hood, calls `plt.savefig()` and registers the output file as a `figure` node via a `pdv.tree.changed` push notification — no explicit user step required.
-- **Interactive figure support**: `display_data` output from Plotly and Bokeh produces an HTML bundle that can be captured as a `figure` node via a `pdv.save_figure()` variant accepting HTML strings.
-- **Figure nodes are lazy-loaded** like any other file-backed node: the image or HTML is not read into memory until the user selects the node.
+### The Write Tab
 
-#### Markdown nodes (notes and manuscript fragments)
-- **`text/markdown` node type**: Backed by a `.md` file in the working or save directory.
-- **Split editor/renderer panel**: Selecting a Markdown node opens a two-pane view — Monaco editor on the left, live-rendered Markdown on the right. The renderer supports LaTeX math (via KaTeX), code blocks with syntax highlighting, and image references to other tree nodes by path.
-- **`pdv.new_note(path, title=None)`** convenience: creates a Markdown node at the given path and opens it for editing in the split panel.
-- **Manuscript workflow**: A researcher can write a section of a paper directly in PDV, reference saved figures by tree path, and keep the writing alongside the data and code that produced it. The `.md` file is plain text in the project directory and is also editable in any external editor; changes are detected and hot-reloaded via the watcher mechanism (see item 7).
+The middle pane gains a second top-level tab: **Write**. This tab is entirely independent from the Code tab — each maintains its own set of open documents and its own active tab. Switching between Code and Write simply changes which editor surface is visible; neither affects the other's state.
 
-#### PDF nodes
-- **`application/pdf` node type**: Backed by a `.pdf` file. Renderer opens the PDF in a viewer panel (Electron renders PDFs natively via a `<webview>` or PDF.js embed).
-- **Import action**: User can drag a PDF into the tree panel or use a context menu action to import an existing PDF as a node. The file is copied into the project save directory.
-- **Document indexing**: Node descriptor `preview` field populated with the PDF title metadata or first-line text.
+Within the Write tab, open markdown documents are managed as individual tabs with the same open/close/unsaved-indicator behavior as code cells. A dot on the tab indicates unsaved changes; an × closes it.
 
-#### Cross-cutting
-- All document node types (figure, markdown, PDF) appear in the tree with type-specific icons and preview text.
-- `pdv.tree.list` responses include the `preview` field so the tree panel can show a useful label without loading the full content.
+A markdown node is opened in the Write tab by right-clicking it in the tree panel and selecting **Open**. The Write tab becomes active and a new tab opens for that document, or focuses it if already open. When no markdown documents are open, the Write tab shows a blank state prompting the user to open or create one.
+
+### Creating Markdown Nodes
+
+The user right-clicks any location in the tree panel and selects **New Note** — the same interaction pattern as **New Script**. This creates a `.md` file in the working directory, registers it as a `markdown` node in the tree at the chosen path, opens the Write tab, and opens a new editor tab for the file.
+
+There is also a `pdv.new_note(path, title=None)` convenience method on the `pdv` app object for users who prefer to create notes from the code cell.
+
+### Editing and Math Preview
+
+The Write tab editor is a Monaco instance opened to the backing `.md` file, filling the full width of the pane. The editor is plain markdown — no syntax transformation or block-level rendering is applied to the document structure.
+
+The exception is math. As the user types, all LaTeX math expressions are rendered live alongside the source using KaTeX:
+
+- **Inline math** (`$...$`): the rendered equation appears immediately after the closing delimiter, on the same line.
+- **Display math** (`$$...$$`): the rendered equation appears on the line below the closing delimiter, left-aligned.
+
+These previews are always visible regardless of cursor position — the user sees both the LaTeX source and the rendered output simultaneously. This is intentional: the target users are comfortable writing LaTeX and want to catch errors as they type, not after moving the cursor away.
+
+Math rendering is handled entirely in the renderer process. The editor model content is scanned for math delimiters on each change; matched ranges are rendered with KaTeX and attached as inline widgets anchored to their position in the document. No round-trip to the kernel is required.
+
+### Read Mode
+
+A toggle button in the Write tab toolbar switches between **Edit mode** (Monaco editor, with inline math previews as described above) and **Read mode** (full rendered view of the document). In Read mode, the Monaco editor is hidden and replaced with a scrollable HTML render of the complete document — prose, headings, code blocks, and math — produced by a Markdown-to-HTML pass followed by KaTeX rendering of all math expressions. The toggle is a per-session preference and resets to Edit mode on next launch.
+
+### Saving
+
+Markdown nodes are files in the temp directory, and should be automatically saved to disk on every change, similar to code cells. The project save/load workflow needs to both appropriately save the python representation of the markdown files similar to the script nodes, and also ensure that the `.md` files are copied into the project directory on save. On project load, the `.md` files are copied back into the temp working directory and re-registered as `markdown` nodes in the tree. 
+
+### Implementation notes
+
+- Add `markdown` to `detect_kind()` in `serialization.py` and to the node type enum. Backed by a `.md` file; treated as `text` for serialization purposes.
+- The `tree-index.json` node descriptor `preview` field should be populated with the first non-empty line of the file (typically the title).
+- Math rendering dependencies: `katex` and `marked-katex-extension` for the Read mode render pass. The inline editor widgets use the KaTeX browser bundle directly.
+- The Write tab is a sibling of the Code tab at the top level of the middle pane. It does not share tab state, scroll position, or history with the Code tab.
+- The Monaco instance in the Write tab uses the `markdown` language mode. `quickSuggestions`, `wordBasedSuggestions`, and other code-completion features should be disabled — this is a writing surface, not a code editor.
 
 ---
 
@@ -352,7 +373,7 @@ A `Cmd+Shift+P`-style command palette for discoverability. Scientists exploring 
 
 ---
 
-## B9) GitHub Copilot Integration
+## B9) GitHub Copilot and/or Claude Integration
 
 ### Goal
 Surface GitHub Copilot completions and chat inside the PDV code editor. PDV's Monaco-based code cells should feel like a first-class Copilot-enabled editor for physicists: inline ghost-text completions as you type, and a Copilot Chat panel for asking questions about data, scripts, and analysis.
@@ -376,6 +397,9 @@ GitHub Copilot is exposed to third-party editors through two mechanisms:
 - Register a Monaco `InlineCompletionsProvider` for `python` (and `julia` when Julia support lands).
 - On each completion trigger, send `getCompletions` to the language server via the `copilot:complete` IPC channel and return the results as `InlineCompletion` items.
 - Ghost text rendering uses Monaco's built-in inline completion UI — no custom rendering required.
+
+#### PDV MCP Server
+- The AI integration needs to have access to query the tree structure and the current code cell content. This should be discussed further before implementation.
 
 #### IPC surface
 - `copilot:status` — returns `'not-installed' | 'signed-out' | 'signed-in'`.

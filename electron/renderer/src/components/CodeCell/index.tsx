@@ -14,10 +14,264 @@ import type { Shortcuts } from '../../shortcuts';
 import { matchesShortcut } from '../../shortcuts';
 import { defineMonacoThemes } from '../../themes';
 
+let completionProviderRegistered = false;
+let hoverProviderRegistered = false;
+let activeKernelIdRef: React.MutableRefObject<string | null> | null = null;
+let allTabsRef: React.MutableRefObject<{ id: number; code: string; active: boolean }[]> | null = null;
+
+/** Returns a newline-terminated string of all non-active tabs' code to give jedi cross-cell import context. */
+function buildContextPrefix(): string {
+  const tabs = allTabsRef?.current ?? [];
+  const otherCode = tabs
+    .filter((t) => !t.active)
+    .map((t) => t.code.trim())
+    .filter(Boolean)
+    .join('\n');
+  return otherCode ? otherCode + '\n' : '';
+}
+
+interface TreePathCompletionContext {
+  ancestorSegments: string[];
+  typedSegment: string;
+  segmentStartOffset: number;
+}
+
+function extractTreePathCompletionContext(
+  code: string,
+  offset: number
+): TreePathCompletionContext | null {
+  const textBeforeCursor = code.slice(0, offset);
+  const match = /pdv_tree((?:\[\s*['"][^'"\\]*['"]\s*\])*)\[\s*['"]([^'"\\]*)$/.exec(
+    textBeforeCursor
+  );
+  if (!match) return null;
+  const completedSegments = match[1];
+  const typedSegment = match[2];
+  const ancestorSegments: string[] = [];
+  const segmentRegex = /\[\s*['"]([^'"\\]*)['"]\s*\]/g;
+  let segmentMatch: RegExpExecArray | null;
+  while ((segmentMatch = segmentRegex.exec(completedSegments)) !== null) {
+    ancestorSegments.push(segmentMatch[1]);
+  }
+  return {
+    ancestorSegments,
+    typedSegment,
+    segmentStartOffset: offset - typedSegment.length,
+  };
+}
+
+interface TreePathSuggestion {
+  label: string;
+  insertText: string;
+}
+
+async function getTreePathSuggestions(
+  kernelId: string,
+  context: TreePathCompletionContext
+): Promise<TreePathSuggestion[]> {
+  const typedParts = context.typedSegment.split('.');
+  const extraParentSegments =
+    typedParts.length > 1 ? typedParts.slice(0, -1).filter(Boolean) : [];
+  const keyPrefix = typedParts[typedParts.length - 1] ?? '';
+  const parentSegments = [...context.ancestorSegments, ...extraParentSegments];
+  const parentPath = parentSegments.join('.');
+  const nodes = await window.pdv.tree.list(kernelId, parentPath);
+  return nodes
+    .filter((node) => node.key.startsWith(keyPrefix))
+    .map((node) => ({
+      label: node.path,
+      insertText: [...extraParentSegments, node.key].join('.'),
+    }))
+    .sort((a, b) => a.label.localeCompare(b.label));
+}
+
+function mapCompletionKind(
+  monacoInstance: typeof monaco,
+  rawType: string | undefined
+): monaco.languages.CompletionItemKind {
+  switch (rawType) {
+    case 'function':
+    case 'builtin_function_or_method':
+      return monacoInstance.languages.CompletionItemKind.Function;
+    case 'module':
+      return monacoInstance.languages.CompletionItemKind.Module;
+    case 'class':
+      return monacoInstance.languages.CompletionItemKind.Class;
+    case 'keyword':
+      return monacoInstance.languages.CompletionItemKind.Keyword;
+    case 'property':
+      return monacoInstance.languages.CompletionItemKind.Property;
+    case 'statement':
+      return monacoInstance.languages.CompletionItemKind.Snippet;
+    case 'instance':
+      return monacoInstance.languages.CompletionItemKind.Variable;
+    default:
+      return monacoInstance.languages.CompletionItemKind.Variable;
+  }
+}
+
+function registerKernelCompletionProvider(monacoInstance: typeof monaco): void {
+  if (completionProviderRegistered) return;
+  completionProviderRegistered = true;
+
+  monacoInstance.languages.registerCompletionItemProvider('python', {
+    triggerCharacters: ['.', '[', "'", '"'],
+    async provideCompletionItems(model, position, context) {
+      const kernelId = activeKernelIdRef?.current ?? null;
+      if (!kernelId) return { suggestions: [] };
+
+      const code = model.getValue();
+      const offset = model.getOffsetAt(position);
+      const treePathContext = extractTreePathCompletionContext(code, offset);
+      if (treePathContext) {
+        try {
+          const matches = await getTreePathSuggestions(
+            kernelId,
+            treePathContext
+          );
+          const startPosition = model.getPositionAt(treePathContext.segmentStartOffset);
+          const endPosition = model.getPositionAt(offset);
+          const range = new monacoInstance.Range(
+            startPosition.lineNumber,
+            startPosition.column,
+            endPosition.lineNumber,
+            endPosition.column
+          );
+          return {
+            suggestions: matches.map((match, index) => ({
+              label: match.label,
+              kind: monacoInstance.languages.CompletionItemKind.Variable,
+              insertText: match.insertText,
+              range,
+              sortText: String(index).padStart(5, '0'),
+            })),
+          };
+        } catch (error) {
+          console.warn('[CodeCell] Tree path completion request failed', error);
+          return { suggestions: [] };
+        }
+      }
+
+      if (
+        context?.triggerCharacter === "'" ||
+        context?.triggerCharacter === '"'
+      ) {
+        return { suggestions: [] };
+      }
+
+      try {
+        const prefix = buildContextPrefix();
+        const prefixedCode = prefix + code;
+        const prefixedOffset = prefix.length + offset;
+        const result = await window.pdv.kernels.complete(kernelId, prefixedCode, prefixedOffset);
+        const textBeforeCursor = code.slice(0, offset);
+        const namePrefix = textBeforeCursor.match(/[A-Za-z_][A-Za-z0-9_]*$/)?.[0] ?? '';
+        let mergedMatches = [...result.matches];
+        // ipykernel completion can omit protected PDV locals from top-level name
+        // completion; ensure the two built-ins are always discoverable.
+        if (namePrefix) {
+          for (const builtin of ['pdv_tree', 'pdv']) {
+            if (builtin.startsWith(namePrefix) && !mergedMatches.includes(builtin)) {
+              mergedMatches.push(builtin);
+            }
+          }
+        }
+        const adjustedStart = Math.max(0, result.cursor_start - prefix.length);
+        const adjustedEnd = Math.max(0, result.cursor_end - prefix.length);
+        const startPosition = model.getPositionAt(adjustedStart);
+        const endPosition = model.getPositionAt(adjustedEnd);
+        const range = new monacoInstance.Range(
+          startPosition.lineNumber,
+          startPosition.column,
+          endPosition.lineNumber,
+          endPosition.column
+        );
+
+        const kindByMatch = new Map<string, monaco.languages.CompletionItemKind>();
+        const experimental = result.metadata?._jupyter_types_experimental;
+        if (Array.isArray(experimental)) {
+          for (const item of experimental) {
+            if (
+              item &&
+              typeof item === 'object' &&
+              'text' in item &&
+              'type' in item &&
+              typeof item.text === 'string' &&
+              typeof item.type === 'string'
+            ) {
+              kindByMatch.set(item.text, mapCompletionKind(monacoInstance, item.type));
+            }
+          }
+        }
+
+        return {
+          suggestions: mergedMatches.map((match, index) => ({
+            label: match,
+            kind: kindByMatch.get(match) ?? monacoInstance.languages.CompletionItemKind.Variable,
+            insertText: match,
+            range,
+            sortText: String(index).padStart(5, '0'),
+          })),
+        };
+      } catch (error) {
+        console.warn('[CodeCell] Completion request failed', error);
+        return { suggestions: [] };
+      }
+    },
+  });
+}
+
+function registerKernelHoverProvider(monacoInstance: typeof monaco): void {
+  if (hoverProviderRegistered) return;
+  hoverProviderRegistered = true;
+
+  monacoInstance.languages.registerHoverProvider('python', {
+    async provideHover(model, position) {
+      const kernelId = activeKernelIdRef?.current ?? null;
+      if (!kernelId) return null;
+
+      try {
+        const code = model.getValue();
+        const prefix = buildContextPrefix();
+        const offset = prefix.length + model.getOffsetAt(position);
+        const result = await window.pdv.kernels.inspect(kernelId, prefix + code, offset);
+        const rawDoc = result.data?.['text/plain'];
+        if (!result.found || typeof rawDoc !== 'string' || !rawDoc.trim()) {
+          return null;
+        }
+        // Strip ANSI escape sequences (color/bold codes) that ipykernel injects for terminal display.
+        const doc = rawDoc.replace(/\x1b\[[0-9;]*[a-zA-Z]/g, '');
+
+        const word = model.getWordAtPosition(position);
+        return {
+          contents: [{ value: `\`\`\`text\n${doc}\n\`\`\`` }],
+          range: word
+            ? new monacoInstance.Range(
+              position.lineNumber,
+              word.startColumn,
+              position.lineNumber,
+              word.endColumn
+            )
+            : undefined,
+        };
+      } catch (error) {
+        console.warn('[CodeCell] Inspect request failed', error);
+        return null;
+      }
+    },
+  });
+}
+
 /** Props for the tabbed code-cell editor pane. */
 export interface CodeCellProps {
+  executionError?: {
+    tabId: number;
+    message: string;
+    location?: { line?: number; column?: number };
+  };
   tabs: (CellTab & { onChange: (code: string) => void })[];
   activeTabId: number;
+  kernelId?: string | null;
   disabled?: boolean;
   onTabChange: (id: number) => void;
   onAddTab: () => void;
@@ -37,8 +291,10 @@ export interface CodeCellProps {
 
 /** Tabbed code-cell editor component used by the main workspace. */
 export const CodeCell: React.FC<CodeCellProps> = ({
+  executionError,
   tabs,
   activeTabId,
+  kernelId = null,
   disabled = false,
   onTabChange,
   onAddTab,
@@ -56,6 +312,7 @@ export const CodeCell: React.FC<CodeCellProps> = ({
   editorWordWrap,
 }) => {
   const editorRef = useRef<monaco.editor.IStandaloneCodeEditor | null>(null);
+  const monacoRef = useRef<typeof monaco | null>(null);
   const activeTab = useMemo(() => tabs.find((tab) => tab.id === activeTabId), [tabs, activeTabId]);
   const activeTabRef = useRef(activeTab);
   const isExecutingRef = useRef(isExecuting);
@@ -65,6 +322,10 @@ export const CodeCell: React.FC<CodeCellProps> = ({
   const onRemoveTabRef = useRef(onRemoveTab);
   const tabsRef = useRef(tabs);
   const onTabChangeRef = useRef(onTabChange);
+  const kernelIdRef = useRef<string | null>(kernelId);
+  activeKernelIdRef = kernelIdRef;
+  const allTabsDataRef = useRef(tabs.map((t) => ({ id: t.id, code: t.code, active: t.id === activeTabId })));
+  allTabsRef = allTabsDataRef;
 
   useEffect(() => {
     activeTabRef.current = activeTab;
@@ -98,12 +359,80 @@ export const CodeCell: React.FC<CodeCellProps> = ({
     onTabChangeRef.current = onTabChange;
   }, [onTabChange]);
 
+  useEffect(() => {
+    kernelIdRef.current = kernelId;
+  }, [kernelId]);
+
+  useEffect(() => {
+    allTabsDataRef.current = tabs.map((t) => ({ id: t.id, code: t.code, active: t.id === activeTabId }));
+  }, [tabs, activeTabId]);
+
+  useEffect(() => {
+    const editor = editorRef.current;
+    const monacoInstance = monacoRef.current;
+    if (!editor || !monacoInstance) return;
+    const model = editor.getModel();
+    if (!model) return;
+
+    const markerOwner = 'pdv-execution';
+    if (!executionError || executionError.tabId !== activeTabId) {
+      monacoInstance.editor.setModelMarkers(model, markerOwner, []);
+      return;
+    }
+
+    const lineCount = model.getLineCount();
+    const requestedLine = executionError.location?.line;
+    const lineNumber =
+      typeof requestedLine === 'number' && Number.isFinite(requestedLine)
+        ? Math.min(Math.max(Math.trunc(requestedLine), 1), lineCount)
+        : 1;
+    const lineContent = model.getLineContent(lineNumber);
+
+    let startColumn = 1;
+    let endColumn = Math.max(2, lineContent.length + 1);
+    const requestedColumn = executionError.location?.column;
+    if (typeof requestedColumn === 'number' && Number.isFinite(requestedColumn)) {
+      const clampedColumn = Math.min(
+        Math.max(Math.trunc(requestedColumn), 1),
+        Math.max(1, lineContent.length + 1),
+      );
+      const word = model.getWordAtPosition({ lineNumber, column: clampedColumn });
+      if (word) {
+        startColumn = word.startColumn;
+        endColumn = Math.max(word.endColumn, word.startColumn + 1);
+      } else {
+        startColumn = clampedColumn;
+        endColumn = Math.min(clampedColumn + 1, Math.max(2, lineContent.length + 1));
+      }
+    } else {
+      const firstVisible = lineContent.search(/\S/);
+      if (firstVisible >= 0) {
+        startColumn = firstVisible + 1;
+        endColumn = Math.max(startColumn + 1, lineContent.length + 1);
+      }
+    }
+
+    monacoInstance.editor.setModelMarkers(model, markerOwner, [
+      {
+        severity: monacoInstance.MarkerSeverity.Error,
+        message: executionError.message || 'Execution error',
+        startLineNumber: lineNumber,
+        startColumn,
+        endLineNumber: lineNumber,
+        endColumn,
+      },
+    ]);
+  }, [executionError, activeTabId, activeTab?.code]);
+
   if (!activeTab) {
     return null;
   }
 
   const handleBeforeMount: BeforeMount = (monaco) => {
+    monacoRef.current = monaco;
     defineMonacoThemes(monaco);
+    registerKernelCompletionProvider(monaco);
+    registerKernelHoverProvider(monaco);
   };
 
   const handleEditorMount: OnMount = (editor) => {
@@ -269,9 +598,12 @@ export const CodeCell: React.FC<CodeCellProps> = ({
             insertSpaces: true,
             detectIndentation: false,
 
-            // Suggestions — disabled in favour of future kernel-backed completions (see UPCOMING_FEATURES §13)
-            quickSuggestions: false,
-            suggestOnTriggerCharacters: false,
+            // Hover — prefer showing below cursor so it's not clipped at the top of the editor
+            hover: { above: false },
+
+            // Suggestions — kernel-backed completions (PLANNED_FEATURES §5)
+            quickSuggestions: { other: true, comments: false, strings: false },
+            suggestOnTriggerCharacters: true,
             wordBasedSuggestions: 'off',
             parameterHints: { enabled: false },
 

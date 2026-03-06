@@ -1,0 +1,16 @@
+{
+  "$schema": "https://unpkg.com/knip@5/schema.json",
+  "entry": [
+    "main/bootstrap.ts",
+    "preload.ts",
+    "renderer/src/main.tsx",
+    "renderer/vite.config.ts"
+  ],
+  "project": [
+    "main/**/*.ts",
+    "renderer/src/**/*.{ts,tsx}"
+  ],
+  "ignoreDependencies": [
+    "electronmon"
+  ]
+}

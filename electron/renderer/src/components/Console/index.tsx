@@ -63,6 +63,9 @@ const LogEntryView: React.FC<{ log: LogEntry; index: number }> = ({ log, index }
   const timestamp = useMemo(() => new Date(log.timestamp).toLocaleTimeString(), [log.timestamp]);
   const hasResult = log.result !== undefined;
   const hasImages = log.images && log.images.length > 0;
+  const sourceText = formatSourceLabel(log.errorDetails?.source ?? log.origin);
+  const locationText = formatLocationLabel(log.errorDetails?.location);
+  const tracebackText = log.errorDetails?.traceback?.join('\n') ?? '';
 
   return (
     <div className="log-entry">
@@ -72,6 +75,7 @@ const LogEntryView: React.FC<{ log: LogEntry; index: number }> = ({ log, index }
         {typeof log.duration === 'number' && (
           <span className="log-duration">{Math.round(log.duration)}ms</span>
         )}
+        {sourceText && <span className="log-source">{sourceText}</span>}
       </div>
 
       <pre className="log-code">{log.code}</pre>
@@ -90,6 +94,13 @@ const LogEntryView: React.FC<{ log: LogEntry; index: number }> = ({ log, index }
       )}
       {hasResult && <pre className="log-result">{formatResult(log.result)}</pre>}
       {log.error && <pre className="log-error">Error: {log.error}</pre>}
+      {log.error && locationText && <div className="log-error-context">{locationText}</div>}
+      {tracebackText && (
+        <pre
+          className="log-traceback"
+          dangerouslySetInnerHTML={{ __html: ansiToHtml(tracebackText) }}
+        />
+      )}
       {hasImages && (
         <div className="log-images">
           {log.images?.map((img, idx) => (
@@ -117,4 +128,38 @@ function formatResult(value: unknown): string {
     }
   }
   return String(value);
+}
+
+function formatSourceLabel(source: LogEntry['origin']): string | undefined {
+  if (!source) return undefined;
+  if (source.kind === 'code-cell') {
+    const numericTabId =
+      typeof source.tabId === 'number'
+        ? source.tabId
+        : source.label
+          ? Number.parseInt(source.label.replace(/\D+/g, ''), 10)
+          : Number.NaN;
+    return Number.isFinite(numericTabId) ? `Cell ${numericTabId}` : 'Cell';
+  }
+  if (source.kind === 'tree-script') {
+    return source.label ? `Script: ${source.label}` : 'Script';
+  }
+  return source.label ? `Execution: ${source.label}` : 'Execution';
+}
+
+function formatLocationLabel(
+  location: { file?: string; line?: number; column?: number } | undefined
+): string | undefined {
+  if (!location) return undefined;
+  const parts: string[] = [];
+  if (location.file) {
+    parts.push(`File ${location.file}`);
+  }
+  if (typeof location.line === 'number') {
+    parts.push(`line ${location.line}`);
+  }
+  if (typeof location.column === 'number') {
+    parts.push(`column ${location.column}`);
+  }
+  return parts.length > 0 ? parts.join(', ') : undefined;
 }

@@ -22,7 +22,14 @@ import { ScriptDialog } from '../components/ScriptDialog';
 import { CreateScriptDialog } from '../components/Tree/CreateScriptDialog';
 import { SettingsDialog } from '../components/SettingsDialog';
 import { UnsavedChangesDialog } from '../components/UnsavedChangesDialog';
-import type { CellTab, Config, KernelExecuteResult, LogEntry, TreeNodeData } from '../types';
+import type {
+  CellTab,
+  Config,
+  KernelExecuteResult,
+  KernelExecutionOrigin,
+  LogEntry,
+  TreeNodeData,
+} from '../types';
 import { matchesShortcut, resolveShortcuts } from '../shortcuts';
 import { BUILTIN_THEMES, applyThemeColors, applyFontSettings, getMonacoTheme, resolveThemeColors } from '../themes';
 import { useCodeCellsPersistence } from './useCodeCellsPersistence';
@@ -32,6 +39,11 @@ import { useProjectWorkflow } from './useProjectWorkflow';
 import { useKernelSubscriptions } from './useKernelSubscriptions';
 
 type KernelStatus = 'idle' | 'starting' | 'ready' | 'error';
+type CodeCellExecutionError = {
+  tabId: number;
+  message: string;
+  location?: { line?: number; column?: number };
+};
 
 /**
  * Normalize persisted code-cell payloads from config/project files into a safe
@@ -114,6 +126,8 @@ const App: React.FC = () => {
   const [kernelStatus, setKernelStatus] = useState<KernelStatus>('idle');
   const [isExecuting, setIsExecuting] = useState(false);
   const [lastError, setLastError] = useState<string | undefined>(undefined);
+  const [codeCellExecutionError, setCodeCellExecutionError] =
+    useState<CodeCellExecutionError | undefined>(undefined);
   const [lastDuration, setLastDuration] = useState<number | null>(null);
   const [config, setConfig] = useState<Config | null>(null);
   const [showEnvSelector, setShowEnvSelector] = useState(false);
@@ -348,6 +362,9 @@ const App: React.FC = () => {
 
   const handleCodeChange = (id: number, code: string) => {
     setCellTabs((prev) => prev.map((tab) => (tab.id === id ? { ...tab, code } : tab)));
+    if (codeCellExecutionError?.tabId === id) {
+      setCodeCellExecutionError(undefined);
+    }
   };
 
   const handleClearConsole = () => {
@@ -364,6 +381,9 @@ const App: React.FC = () => {
     setCellTabs((prev) =>
       prev.map((tab) => (tab.id === activeCellTab ? { ...tab, code: '' } : tab)),
     );
+    if (codeCellExecutionError?.tabId === activeCellTab) {
+      setCodeCellExecutionError(undefined);
+    }
     setLastError(undefined);
   };
 
@@ -388,6 +408,9 @@ const App: React.FC = () => {
       }
       return next;
     });
+    if (codeCellExecutionError?.tabId === id) {
+      setCodeCellExecutionError(undefined);
+    }
     setLastError(undefined);
   };
 
@@ -428,22 +451,35 @@ const App: React.FC = () => {
     } else if (action === 'print') {
       if (!currentKernelId) return;
       const target = JSON.stringify(node.path);
-      await handleExecute(`print(pdv_tree[${target}])`);
+      await handleExecute(`print(pdv_tree[${target}])`, {
+        kind: 'unknown',
+        label: `Tree print ${node.path}`,
+      });
     }
   };
 
-  const handleScriptRun = (code: string, result: KernelExecuteResult) => {
+  const handleScriptRun = ({
+    code,
+    executionId,
+    origin,
+    result,
+  }: {
+    code: string;
+    executionId: string;
+    origin: KernelExecutionOrigin;
+    result: KernelExecuteResult;
+  }) => {
+    const resolvedOrigin = result.errorDetails?.source ?? origin;
     const logEntry: LogEntry = {
-      id:
-        typeof crypto !== 'undefined' && 'randomUUID' in crypto
-          ? crypto.randomUUID()
-          : `log-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+      id: executionId,
       timestamp: Date.now(),
       code,
       stdout: result.stdout,
       stderr: result.stderr,
       result: result.result,
       error: result.error,
+      errorDetails: result.errorDetails,
+      origin: resolvedOrigin,
       duration: result.duration,
       images: result.images,
     };
@@ -458,34 +494,65 @@ const App: React.FC = () => {
     setScriptDialog(null);
   };
 
-  const handleExecute = async (code: string) => {
+  const handleExecute = async (code: string, originOverride?: KernelExecutionOrigin) => {
     if (!currentKernelId || kernelStatus !== 'ready' || !code.trim()) return;
 
     setIsExecuting(true);
     setLastError(undefined);
+    setCodeCellExecutionError(undefined);
 
     const executionId =
       typeof crypto !== 'undefined' && 'randomUUID' in crypto
         ? crypto.randomUUID()
         : `log-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+    const activeTab = CellTabs.find((tab) => tab.id === activeCellTab);
+    const origin: KernelExecutionOrigin = originOverride ?? {
+      kind: 'code-cell',
+      label: activeTab?.name?.trim() ? activeTab.name : `Tab ${activeCellTab}`,
+      tabId: activeCellTab,
+    };
 
     // Create the log entry immediately so output appears as it streams in.
-    setLogs((prev) => [...prev, { id: executionId, timestamp: Date.now(), code }]);
+    setLogs((prev) => [
+      ...prev,
+      { id: executionId, timestamp: Date.now(), code, origin },
+    ]);
 
     try {
-      const result = await window.pdv.kernels.execute(currentKernelId, { code, executionId });
+      const result = await window.pdv.kernels.execute(currentKernelId, {
+        code,
+        executionId,
+        origin,
+      });
 
       // Finalize the entry with duration and any error (stdout/stderr already streamed).
       setLogs((prev) =>
         prev.map((l) =>
           l.id === executionId
-            ? { ...l, error: result.error, duration: result.duration }
+            ? {
+                ...l,
+                stdout: l.stdout ?? result.stdout,
+                stderr: l.stderr ?? result.stderr,
+                result: l.result ?? result.result,
+                images: l.images ?? result.images,
+                error: result.error,
+                errorDetails: result.errorDetails,
+                origin: l.origin ?? origin,
+                duration: result.duration,
+              }
             : l
         )
       );
 
       if (result.error) {
         setLastError(result.error);
+        if (origin.kind === 'code-cell' && typeof origin.tabId === 'number') {
+          setCodeCellExecutionError({
+            tabId: origin.tabId,
+            message: result.errorDetails?.message || result.error,
+            location: result.errorDetails?.location,
+          });
+        }
       }
       if (typeof result.duration === 'number') {
         setLastDuration(result.duration);
@@ -493,9 +560,10 @@ const App: React.FC = () => {
     } catch (error) {
       const msg = error instanceof Error ? error.message : String(error);
       setLogs((prev) =>
-        prev.map((l) => (l.id === executionId ? { ...l, error: msg } : l))
+        prev.map((l) => (l.id === executionId ? { ...l, error: msg, origin } : l))
       );
       setLastError(msg);
+      setCodeCellExecutionError(undefined);
     } finally {
       setIsExecuting(false);
       setNamespaceRefreshToken((prev) => prev + 1);
@@ -663,6 +731,7 @@ const App: React.FC = () => {
                     onChange: (code: string) => handleCodeChange(tab.id, code),
                   }))}
                   activeTabId={activeCellTab}
+                  kernelId={currentKernelId}
                   disabled={kernelStatus !== 'ready'}
                   onTabChange={handleTabChange}
                   onAddTab={addCellTab}
@@ -672,6 +741,7 @@ const App: React.FC = () => {
                   onClear={handleClearCommand}
                   isExecuting={isExecuting}
                   lastError={lastError}
+                  executionError={codeCellExecutionError}
                   shortcuts={shortcuts}
                   monacoTheme={monacoTheme}
                   editorFontFamily={config?.settings?.fonts?.codeFont}

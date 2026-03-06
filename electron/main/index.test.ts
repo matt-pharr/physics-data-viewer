@@ -190,6 +190,15 @@ function setup() {
     stop: vi.fn(async () => undefined),
     execute: vi.fn(async () => ({ result: 2 })),
     interrupt: vi.fn(async () => undefined),
+    complete: vi.fn(async () => ({
+      matches: ["import"],
+      cursor_start: 0,
+      cursor_end: 6,
+    })),
+    inspect: vi.fn(async () => ({
+      found: true,
+      data: { "text/plain": "doc" },
+    })),
     getKernel: vi.fn(() => makeKernelInfo()),
     shutdownAll: vi.fn(async () => undefined),
     on: vi.fn(),
@@ -546,26 +555,31 @@ describe("Step 5 IPC handlers", () => {
     expect(result).toMatchObject({ id: expect.any(String), status: "idle" });
   });
 
-  it("kernels:complete returns empty matches when complete() is absent", async () => {
-    const { kernelManager: _ } = setup();
+  it("kernels:complete delegates to KernelManager.complete", async () => {
+    const { kernelManager } = setup();
     const complete = getHandler(IPC.kernels.complete);
     const result = (await complete({}, "kernel-1", "import ", 7)) as {
       matches: string[];
       cursor_start: number;
       cursor_end: number;
     };
+    expect(kernelManager.complete).toHaveBeenCalledWith("kernel-1", "import ", 7);
     expect(result).toEqual({
-      matches: [],
-      cursor_start: 7,
-      cursor_end: 7,
+      matches: ["import"],
+      cursor_start: 0,
+      cursor_end: 6,
     });
   });
 
-  it("kernels:inspect returns not-found when inspect() is absent", async () => {
-    const { kernelManager: _ } = setup();
+  it("kernels:inspect delegates to KernelManager.inspect", async () => {
+    const { kernelManager } = setup();
     const inspect = getHandler(IPC.kernels.inspect);
-    const result = (await inspect({}, "kernel-1", "x", 0)) as { found: boolean };
-    expect(result).toEqual({ found: false });
+    const result = (await inspect({}, "kernel-1", "x", 0)) as {
+      found: boolean;
+      data?: Record<string, string>;
+    };
+    expect(kernelManager.inspect).toHaveBeenCalledWith("kernel-1", "x", 0);
+    expect(result).toEqual({ found: true, data: { "text/plain": "doc" } });
   });
 
   it("kernels:validate returns valid when pdv_kernel is installed", async () => {

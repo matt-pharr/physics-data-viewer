@@ -29,6 +29,7 @@ import * as os from "os";
 import * as path from "path";
 import { spawn, ChildProcess } from "child_process";
 import { EventEmitter } from "events";
+import type { KernelCompleteResult, KernelInspectResult } from "./ipc";
 
 // ---------------------------------------------------------------------------
 // Public types
@@ -61,6 +62,44 @@ export interface KernelInfo {
 }
 
 /** Input to KernelManager.execute(). */
+export interface KernelExecutionOrigin {
+  /** High-level execution source category. */
+  kind: "code-cell" | "tree-script" | "unknown";
+  /** Human-readable source label (for example tab name or script path). */
+  label?: string;
+  /** Optional code-cell tab id when `kind === "code-cell"`. */
+  tabId?: number;
+  /** Optional script path when `kind === "tree-script"`. */
+  scriptPath?: string;
+}
+
+/** Best-effort parsed location metadata extracted from traceback text. */
+export interface KernelExecutionLocation {
+  /** Filename/path from traceback frames when present. */
+  file?: string;
+  /** 1-based line number when present. */
+  line?: number;
+  /** 1-based column number when present (typically syntax errors). */
+  column?: number;
+}
+
+/** Structured execution error details derived from iopub `error` payloads. */
+export interface KernelExecutionError {
+  /** Exception class name (for example `ValueError`). */
+  name: string;
+  /** Exception message string. */
+  message: string;
+  /** One-line user-facing summary with source + location context when available. */
+  summary: string;
+  /** Raw traceback lines (ANSI still present for fidelity). */
+  traceback: string[];
+  /** Parsed traceback location metadata when available. */
+  location?: KernelExecutionLocation;
+  /** Execution origin metadata forwarded from request context. */
+  source?: KernelExecutionOrigin;
+}
+
+/** Input to KernelManager.execute(). */
 export interface KernelExecuteRequest {
   /** Python (or Julia) source code to execute. */
   code: string;
@@ -68,6 +107,8 @@ export interface KernelExecuteRequest {
   silent?: boolean;
   /** Caller-supplied ID used to correlate streamed output chunks. */
   executionId?: string;
+  /** Optional execution-origin metadata used in error summaries. */
+  origin?: KernelExecutionOrigin;
 }
 
 /** A single streaming output chunk emitted during execution. */
@@ -90,6 +131,8 @@ export interface KernelExecuteResult {
   result?: unknown;
   /** Error string if execution raised an exception. */
   error?: string;
+  /** Structured error details (traceback/source/location) when available. */
+  errorDetails?: KernelExecutionError;
   /** Wall-clock execution duration in milliseconds. */
   duration?: number;
   /** Inline images emitted via display_data (e.g. matplotlib Agg fallback). */
@@ -158,6 +201,8 @@ interface ManagedKernel {
   shuttingDown: boolean;
   /** Promise that resolves when the background iopub loop exits. */
   iopubLoopDone: Promise<void>;
+  /** Serializes shell-socket operations to avoid concurrent socket access. */
+  shellQueue: Promise<void>;
 }
 
 // ---------------------------------------------------------------------------
@@ -284,6 +329,250 @@ export function parseMessage(
   } catch {
     return null;
   }
+}
+
+const ANSI_ESCAPE_RE = /\u001b\[[0-9;]*m/g;
+const TRACEBACK_FILE_LINE_RE = /^\s*File "([^"]+)", line (\d+)(?:, in .+)?$/;
+const TRACEBACK_FILE_LINE_BARE_RE = /^\s*File ([^,]+), line (\d+)(?:, in .+)?$/;
+const TRACEBACK_CELL_LINE_RE = /^\s*Cell In\[\d+\], line (\d+)(?:, in .+)?$/;
+const EVALUE_FILE_LINE_RE = /\(([^,()]+), line (\d+)\)/;
+
+function stripAnsi(line: string): string {
+  return line.replace(ANSI_ESCAPE_RE, "");
+}
+
+interface TracebackFrame {
+  file: string;
+  line: number;
+  column?: number;
+}
+
+function findCaretColumn(lines: string[], startIndex: number): number | undefined {
+  for (let offset = 1; offset <= 4; offset += 1) {
+    const line = lines[startIndex + offset];
+    if (!line) continue;
+    const caretIndex = line.indexOf("^");
+    if (caretIndex >= 0) {
+      return caretIndex + 1;
+    }
+  }
+  return undefined;
+}
+
+function parseTracebackFrames(traceback: string[]): TracebackFrame[] {
+  const cleanLines = traceback.map(stripAnsi);
+  const frames: TracebackFrame[] = [];
+
+  for (let index = 0; index < cleanLines.length; index += 1) {
+    const line = cleanLines[index];
+    const quotedFile = TRACEBACK_FILE_LINE_RE.exec(line);
+    const bareFile = TRACEBACK_FILE_LINE_BARE_RE.exec(line);
+    const cellFrame = TRACEBACK_CELL_LINE_RE.exec(line);
+
+    const fileValue = quotedFile?.[1] ?? bareFile?.[1] ?? (cellFrame ? "<ipython-cell>" : undefined);
+    const lineToken = quotedFile?.[2] ?? bareFile?.[2] ?? cellFrame?.[1];
+    if (!fileValue || !lineToken) continue;
+
+    const lineValue = Number.parseInt(lineToken, 10);
+    if (!Number.isFinite(lineValue)) continue;
+
+    const column = findCaretColumn(cleanLines, index);
+
+    frames.push({ file: fileValue.trim(), line: lineValue, column });
+  }
+
+  return frames;
+}
+
+function framePriority(frame: TracebackFrame): number {
+  if (frame.file.includes("/pdv_kernel/")) return 0;
+  if (frame.file.startsWith("<")) return 1;
+  return 2;
+}
+
+function selectBestFrame(frames: TracebackFrame[]): TracebackFrame | undefined {
+  let best: TracebackFrame | undefined;
+  let bestPriority = -1;
+
+  for (const frame of frames) {
+    const priority = framePriority(frame);
+    if (priority >= bestPriority) {
+      best = frame;
+      bestPriority = priority;
+    }
+  }
+
+  return best;
+}
+
+function parseLocationFromEvalue(evalue: string): KernelExecutionLocation | undefined {
+  const match = EVALUE_FILE_LINE_RE.exec(evalue);
+  if (!match) return undefined;
+  const line = Number.parseInt(match[2], 10);
+  if (!Number.isFinite(line)) return undefined;
+  return { file: match[1], line };
+}
+
+function parseFallbackLocationFromTraceback(
+  traceback: string[]
+): KernelExecutionLocation | undefined {
+  const cleanLines = traceback.map(stripAnsi);
+  let line: number | undefined;
+  let column: number | undefined;
+
+  for (const current of cleanLines) {
+    const lineMatch = /\bline (\d+)\b/.exec(current);
+    if (!lineMatch) continue;
+    const parsed = Number.parseInt(lineMatch[1], 10);
+    if (Number.isFinite(parsed)) {
+      line = parsed;
+      break;
+    }
+  }
+
+  if (line === undefined) {
+    for (const current of cleanLines) {
+      const lineMatch = /---->\s*(\d+)/.exec(current);
+      if (!lineMatch) continue;
+      const parsed = Number.parseInt(lineMatch[1], 10);
+      if (Number.isFinite(parsed)) {
+        line = parsed;
+        break;
+      }
+    }
+  }
+
+  for (const current of cleanLines) {
+    const caretIndex = current.indexOf("^");
+    if (caretIndex >= 0) {
+      column = caretIndex + 1;
+      break;
+    }
+  }
+
+  if (line === undefined && column === undefined) {
+    return undefined;
+  }
+  return { line, column };
+}
+
+function parseExecutionLocation(
+  traceback: string[],
+  evalue: string
+): KernelExecutionLocation | undefined {
+  const frame = selectBestFrame(parseTracebackFrames(traceback));
+  if (frame) {
+    return {
+      file: frame.file,
+      line: frame.line,
+      column: frame.column,
+    };
+  }
+  const evalueLocation = parseLocationFromEvalue(evalue);
+  const fallbackLocation = parseFallbackLocationFromTraceback(traceback);
+  if (evalueLocation || fallbackLocation) {
+    return {
+      ...(evalueLocation ?? {}),
+      ...(fallbackLocation ?? {}),
+    };
+  }
+  return undefined;
+}
+
+function countLeadingBlankLines(code: string): number {
+  const lines = code.split(/\r?\n/);
+  let count = 0;
+  for (const line of lines) {
+    if (line.trim().length > 0) break;
+    count += 1;
+  }
+  return count;
+}
+
+function adjustCellLocationForLeadingBlankLines(
+  location: KernelExecutionLocation | undefined,
+  source: KernelExecutionOrigin | undefined,
+  code: string
+): KernelExecutionLocation | undefined {
+  if (!location || source?.kind !== "code-cell") return location;
+  if (typeof location.line !== "number") return location;
+  if (location.file && !location.file.startsWith("<")) return location;
+  const leadingBlankLines = countLeadingBlankLines(code);
+  if (leadingBlankLines <= 0) return location;
+  return {
+    ...location,
+    line: location.line + leadingBlankLines,
+  };
+}
+
+function formatExecutionSource(source: KernelExecutionOrigin | undefined): string | undefined {
+  if (!source) return undefined;
+  const label = source.label?.trim();
+  if (source.kind === "code-cell") {
+    return label ? `Code cell "${label}"` : "Code cell";
+  }
+  if (source.kind === "tree-script") {
+    return label ? `Script "${label}"` : "Script";
+  }
+  return label ? `Execution "${label}"` : "Execution";
+}
+
+function formatExecutionLocation(
+  location: KernelExecutionLocation | undefined
+): string | undefined {
+  if (!location) return undefined;
+  const parts: string[] = [];
+  if (location.file && !location.file.startsWith("<")) {
+    parts.push(location.file);
+  }
+  if (typeof location.line === "number") {
+    parts.push(`line ${location.line}`);
+  }
+  if (typeof location.column === "number") {
+    parts.push(`column ${location.column}`);
+  }
+  if (parts.length === 0 && location.file) {
+    parts.push(location.file);
+  }
+  return parts.length > 0 ? parts.join(", ") : undefined;
+}
+
+function buildExecutionError(
+  name: string,
+  message: string,
+  traceback: string[],
+  source?: KernelExecutionOrigin,
+  code?: string
+): KernelExecutionError {
+  const normalizedName = name || "Error";
+  const normalizedMessage = message ?? "";
+  const parsedLocation = parseExecutionLocation(traceback, normalizedMessage);
+  const location = code
+    ? adjustCellLocationForLeadingBlankLines(parsedLocation, source, code)
+    : parsedLocation;
+  const sourceText = formatExecutionSource(source);
+  const locationText = formatExecutionLocation(location);
+  const base = normalizedMessage
+    ? `${normalizedName}: ${normalizedMessage}`
+    : normalizedName;
+
+  let summary = base;
+  if (sourceText && locationText) {
+    summary = `${sourceText} (${locationText}): ${base}`;
+  } else if (sourceText) {
+    summary = `${sourceText}: ${base}`;
+  } else if (locationText) {
+    summary = `${base} (${locationText})`;
+  }
+
+  return {
+    name: normalizedName,
+    message: normalizedMessage,
+    summary,
+    traceback,
+    location,
+    source,
+  };
 }
 
 async function loadZmq(): Promise<typeof import("zeromq")> {
@@ -421,6 +710,7 @@ export class KernelManager extends EventEmitter {
       lastActivity: Date.now(),
       shuttingDown: false,
       iopubLoopDone,
+      shellQueue: Promise.resolve(),
     };
 
     this.kernels.set(kernelId, managed);
@@ -543,7 +833,14 @@ export class KernelManager extends EventEmitter {
   ): Promise<KernelExecuteResult> {
     const managed = this.kernels.get(id);
     if (!managed) {
-      return { error: `Kernel not found: ${id}`, duration: 0 };
+      const errorDetails = buildExecutionError(
+        "KernelNotFoundError",
+        `Kernel not found: ${id}`,
+        [],
+        request.origin,
+        request.code
+      );
+      return { error: errorDetails.summary, errorDetails, duration: 0 };
     }
 
     const startTime = Date.now();
@@ -632,9 +929,20 @@ export class KernelManager extends EventEmitter {
             onChunk?.({ executionId, type: "image", image });
           }
         } else if (msgType === "error") {
-          result.error = `${String(content.ename ?? "Error")}: ${String(
-            content.evalue ?? ""
-          )}`;
+          const traceback = Array.isArray(content.traceback)
+            ? content.traceback.filter(
+                (line): line is string => typeof line === "string"
+              )
+            : [];
+          const errorDetails = buildExecutionError(
+            String(content.ename ?? "Error"),
+            String(content.evalue ?? ""),
+            traceback,
+            request.origin,
+            request.code
+          );
+          result.errorDetails = errorDetails;
+          result.error = errorDetails.summary;
         } else if (
           msgType === "status" &&
           content.execution_state === "idle"
@@ -644,17 +952,129 @@ export class KernelManager extends EventEmitter {
       });
 
       timer = setTimeout(() => {
-        result.error = "Execution timed out";
+        const errorDetails = buildExecutionError(
+          "TimeoutError",
+          "Execution timed out",
+          [],
+          request.origin,
+          request.code
+        );
+        result.errorDetails = errorDetails;
+        result.error = errorDetails.summary;
         finish();
       }, 30_000);
 
-      managed.shellSocket
-        .send(serializeMessage(msg, managed.connectionInfo.key))
+      this.enqueueShellOperation(managed, async () => {
+        await managed.shellSocket.send(
+          serializeMessage(msg, managed.connectionInfo.key)
+        );
+      })
         .catch((err: Error) => {
-          result.error = err.message;
+          const errorDetails = buildExecutionError(
+            "ExecutionError",
+            err.message,
+            [],
+            request.origin,
+            request.code
+          );
+          result.errorDetails = errorDetails;
+          result.error = errorDetails.summary;
           finish();
         });
     });
+  }
+
+  /**
+   * Request code completions from the kernel at the given cursor position.
+   *
+   * @param id - Kernel ID.
+   * @param code - Full source text to complete against.
+   * @param cursorPos - Cursor offset in `code`.
+   * @returns Jupyter completion candidates and replacement span.
+   * @throws If the kernel is missing, the shell request fails, or times out.
+   */
+  async complete(
+    id: string,
+    code: string,
+    cursorPos: number
+  ): Promise<KernelCompleteResult> {
+    const managed = this.kernels.get(id);
+    if (!managed) throw new Error(`Kernel not found: ${id}`);
+
+    const reply = await this.sendShellRequest(
+      managed,
+      "complete_request",
+      { code, cursor_pos: cursorPos }
+    );
+    const content = reply.content;
+    if (content.status === "error") {
+      return {
+        matches: [],
+        cursor_start: cursorPos,
+        cursor_end: cursorPos,
+      };
+    }
+
+    const matches = Array.isArray(content.matches)
+      ? content.matches.filter((item): item is string => typeof item === "string")
+      : [];
+    const cursor_start =
+      typeof content.cursor_start === "number"
+        ? content.cursor_start
+        : cursorPos;
+    const cursor_end =
+      typeof content.cursor_end === "number" ? content.cursor_end : cursorPos;
+    const metadata =
+      typeof content.metadata === "object" &&
+      content.metadata !== null &&
+      !Array.isArray(content.metadata)
+        ? (content.metadata as Record<string, unknown>)
+        : undefined;
+
+    return {
+      matches,
+      cursor_start,
+      cursor_end,
+      metadata,
+    };
+  }
+
+  /**
+   * Request symbol/documentation inspection data from the kernel.
+   *
+   * @param id - Kernel ID.
+   * @param code - Full source text to inspect against.
+   * @param cursorPos - Cursor offset in `code`.
+   * @returns Inspection payload (`found`, optional MIME-keyed docs).
+   * @throws If the kernel is missing, the shell request fails, or times out.
+   */
+  async inspect(
+    id: string,
+    code: string,
+    cursorPos: number
+  ): Promise<KernelInspectResult> {
+    const managed = this.kernels.get(id);
+    if (!managed) throw new Error(`Kernel not found: ${id}`);
+
+    const reply = await this.sendShellRequest(
+      managed,
+      "inspect_request",
+      { code, cursor_pos: cursorPos, detail_level: 0 }
+    );
+    const content = reply.content;
+    if (content.status === "error" || content.found !== true) {
+      return { found: false };
+    }
+
+    const data: Record<string, string> = {};
+    if (typeof content.data === "object" && content.data !== null) {
+      for (const [key, value] of Object.entries(content.data)) {
+        if (typeof value === "string") {
+          data[key] = value;
+        }
+      }
+    }
+    return Object.keys(data).length > 0 ? { found: true, data } : { found: true };
   }
 
   /**
@@ -739,9 +1159,11 @@ export class KernelManager extends EventEmitter {
       { comm_id: commId ?? "", data },
       managed.sessionId
     );
-    await managed.shellSocket.send(
-      serializeMessage(msg, managed.connectionInfo.key)
-    );
+    await this.enqueueShellOperation(managed, async () => {
+      await managed.shellSocket.send(
+        serializeMessage(msg, managed.connectionInfo.key)
+      );
+    });
   }
 
   // -------------------------------------------------------------------------
@@ -792,6 +1214,81 @@ export class KernelManager extends EventEmitter {
   }
 
   /**
+   * Serialize shell-socket operations so only one async context touches the
+   * socket at a time.
+   *
+   * @param managed - Kernel whose shell queue should be used.
+   * @param operation - Shell operation to run exclusively.
+   * @returns Operation result.
+   * @throws Re-throws any operation error.
+   */
+  private async enqueueShellOperation<T>(
+    managed: ManagedKernel,
+    operation: () => Promise<T>
+  ): Promise<T> {
+    const previous = managed.shellQueue;
+    let release!: () => void;
+    managed.shellQueue = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    await previous;
+    try {
+      return await operation();
+    } finally {
+      release();
+    }
+  }
+
+  /**
+   * Send a shell-channel request and wait for the correlated shell reply.
+   *
+   * @param managed - Target running kernel.
+   * @param msgType - Request message type (e.g. complete_request).
+   * @param content - Request content object.
+   * @param timeoutMs - Maximum wait time for correlated reply.
+   * @returns Parsed correlated shell reply.
+   * @throws If no correlated reply arrives before timeout.
+   */
+  private async sendShellRequest(
+    managed: ManagedKernel,
+    msgType: string,
+    content: Record<string, unknown>,
+    timeoutMs = 5_000
+  ): Promise<JupyterMessage> {
+    return this.enqueueShellOperation(managed, async () => {
+      const request = createMessage(msgType, content, managed.sessionId);
+      const requestId = request.header.msg_id;
+
+      await managed.shellSocket.send(
+        serializeMessage(request, managed.connectionInfo.key)
+      );
+
+      (managed.shellSocket as unknown as { receiveTimeout: number }).receiveTimeout = 100;
+      const deadline = Date.now() + timeoutMs;
+
+      while (Date.now() < deadline) {
+        try {
+          const frames = await managed.shellSocket.receive();
+          const reply = parseMessage(frames as Buffer[], managed.connectionInfo.key);
+          if (!reply) continue;
+          const parentMsgId = (reply.parent_header as { msg_id?: unknown }).msg_id;
+          if (typeof parentMsgId === "string" && parentMsgId === requestId) {
+            return reply;
+          }
+        } catch (err: unknown) {
+          const error = err as { code?: string };
+          if (error.code === "EAGAIN") continue;
+          throw err;
+        }
+      }
+
+      throw new Error(
+        `Timed out waiting for shell reply to ${msgType} (${timeoutMs} ms)`
+      );
+    });
+  }
+
+  /**
    * Wait for the kernel to emit `status: idle` on iopub, which signals that
    * it has finished initializing and is ready to accept execute_request.
    *
@@ -837,8 +1334,11 @@ export class KernelManager extends EventEmitter {
           {},
           managed.sessionId
         );
-        managed.shellSocket
-          .send(serializeMessage(msg, managed.connectionInfo.key))
+        this.enqueueShellOperation(managed, async () => {
+          await managed.shellSocket.send(
+            serializeMessage(msg, managed.connectionInfo.key)
+          );
+        })
           .catch(() => {
             // Ignore send errors during startup.
           });
