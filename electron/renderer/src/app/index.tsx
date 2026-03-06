@@ -22,7 +22,14 @@ import { ScriptDialog } from '../components/ScriptDialog';
 import { CreateScriptDialog } from '../components/Tree/CreateScriptDialog';
 import { SettingsDialog } from '../components/SettingsDialog';
 import { UnsavedChangesDialog } from '../components/UnsavedChangesDialog';
-import type { CellTab, Config, KernelExecuteResult, LogEntry, TreeNodeData } from '../types';
+import type {
+  CellTab,
+  Config,
+  KernelExecuteResult,
+  KernelExecutionOrigin,
+  LogEntry,
+  TreeNodeData,
+} from '../types';
 import { matchesShortcut, resolveShortcuts } from '../shortcuts';
 import { BUILTIN_THEMES, applyThemeColors, applyFontSettings, getMonacoTheme, resolveThemeColors } from '../themes';
 import { useCodeCellsPersistence } from './useCodeCellsPersistence';
@@ -428,22 +435,35 @@ const App: React.FC = () => {
     } else if (action === 'print') {
       if (!currentKernelId) return;
       const target = JSON.stringify(node.path);
-      await handleExecute(`print(pdv_tree[${target}])`);
+      await handleExecute(`print(pdv_tree[${target}])`, {
+        kind: 'unknown',
+        label: `Tree print ${node.path}`,
+      });
     }
   };
 
-  const handleScriptRun = (code: string, result: KernelExecuteResult) => {
+  const handleScriptRun = ({
+    code,
+    executionId,
+    origin,
+    result,
+  }: {
+    code: string;
+    executionId: string;
+    origin: KernelExecutionOrigin;
+    result: KernelExecuteResult;
+  }) => {
+    const resolvedOrigin = result.errorDetails?.source ?? origin;
     const logEntry: LogEntry = {
-      id:
-        typeof crypto !== 'undefined' && 'randomUUID' in crypto
-          ? crypto.randomUUID()
-          : `log-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+      id: executionId,
       timestamp: Date.now(),
       code,
       stdout: result.stdout,
       stderr: result.stderr,
       result: result.result,
       error: result.error,
+      errorDetails: result.errorDetails,
+      origin: resolvedOrigin,
       duration: result.duration,
       images: result.images,
     };
@@ -458,7 +478,7 @@ const App: React.FC = () => {
     setScriptDialog(null);
   };
 
-  const handleExecute = async (code: string) => {
+  const handleExecute = async (code: string, originOverride?: KernelExecutionOrigin) => {
     if (!currentKernelId || kernelStatus !== 'ready' || !code.trim()) return;
 
     setIsExecuting(true);
@@ -468,18 +488,41 @@ const App: React.FC = () => {
       typeof crypto !== 'undefined' && 'randomUUID' in crypto
         ? crypto.randomUUID()
         : `log-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+    const activeTab = CellTabs.find((tab) => tab.id === activeCellTab);
+    const origin: KernelExecutionOrigin = originOverride ?? {
+      kind: 'code-cell',
+      label: activeTab?.name?.trim() ? activeTab.name : `Tab ${activeCellTab}`,
+      tabId: activeCellTab,
+    };
 
     // Create the log entry immediately so output appears as it streams in.
-    setLogs((prev) => [...prev, { id: executionId, timestamp: Date.now(), code }]);
+    setLogs((prev) => [
+      ...prev,
+      { id: executionId, timestamp: Date.now(), code, origin },
+    ]);
 
     try {
-      const result = await window.pdv.kernels.execute(currentKernelId, { code, executionId });
+      const result = await window.pdv.kernels.execute(currentKernelId, {
+        code,
+        executionId,
+        origin,
+      });
 
       // Finalize the entry with duration and any error (stdout/stderr already streamed).
       setLogs((prev) =>
         prev.map((l) =>
           l.id === executionId
-            ? { ...l, error: result.error, duration: result.duration }
+            ? {
+                ...l,
+                stdout: l.stdout ?? result.stdout,
+                stderr: l.stderr ?? result.stderr,
+                result: l.result ?? result.result,
+                images: l.images ?? result.images,
+                error: result.error,
+                errorDetails: result.errorDetails,
+                origin: l.origin ?? origin,
+                duration: result.duration,
+              }
             : l
         )
       );
@@ -493,7 +536,7 @@ const App: React.FC = () => {
     } catch (error) {
       const msg = error instanceof Error ? error.message : String(error);
       setLogs((prev) =>
-        prev.map((l) => (l.id === executionId ? { ...l, error: msg } : l))
+        prev.map((l) => (l.id === executionId ? { ...l, error: msg, origin } : l))
       );
       setLastError(msg);
     } finally {

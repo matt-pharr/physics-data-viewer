@@ -7,6 +7,8 @@
 
 import type {
   Config,
+  KernelExecutionError,
+  KernelExecutionOrigin,
   KernelExecuteResult,
   ImportedModuleDescriptor,
   MenuActionPayload,
@@ -23,6 +25,8 @@ import type {
 /** Re-export core preload API contract types for renderer imports. */
 export type {
   Config,
+  KernelExecutionError,
+  KernelExecutionOrigin,
   KernelExecuteResult,
   ImportedModuleDescriptor,
   MenuActionPayload,
@@ -45,6 +49,8 @@ export interface LogEntry {
   stderr?: string;
   result?: unknown;
   error?: string;
+  errorDetails?: KernelExecutionError;
+  origin?: KernelExecutionOrigin;
   duration?: number;
   images?: Array<{ mime: string; data: string }>;
 }

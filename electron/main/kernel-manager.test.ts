@@ -128,6 +128,49 @@ describe("@slow KernelManager (real kernel process)", { timeout: 60_000 }, () =>
       expect(result.error).toContain("ValueError");
     });
 
+    it("preserves traceback details and parsed location metadata", async () => {
+      const info = await km.start();
+      startedKernelId = info.id;
+
+      const result = await km.execute(info.id, {
+        code: 'raise ValueError("oops")',
+        origin: { kind: "code-cell", label: "Tab 1", tabId: 1 },
+      });
+
+      expect(result.error).toContain('Code cell "Tab 1"');
+      expect(result.errorDetails).toBeDefined();
+      expect(result.errorDetails?.name).toBe("ValueError");
+      expect(result.errorDetails?.traceback.length).toBeGreaterThan(0);
+      expect(result.errorDetails?.location?.line).toBeGreaterThanOrEqual(1);
+    });
+
+    it("extracts syntax-error column metadata when caret info is present", async () => {
+      const info = await km.start();
+      startedKernelId = info.id;
+
+      const result = await km.execute(info.id, {
+        code: "x =",
+        origin: { kind: "code-cell", label: "Tab 2", tabId: 2 },
+      });
+
+      expect(result.error).toContain("SyntaxError");
+      expect(result.errorDetails?.location?.line).toBe(1);
+      expect(result.errorDetails?.location?.column).toBeGreaterThanOrEqual(1);
+    });
+
+    it("accounts for leading blank lines in code-cell location", async () => {
+      const info = await km.start();
+      startedKernelId = info.id;
+
+      const result = await km.execute(info.id, {
+        code: "\n\nraise ValueError('oops')",
+        origin: { kind: "code-cell", label: "Tab 1", tabId: 1 },
+      });
+
+      expect(result.error).toContain("line 3");
+      expect(result.errorDetails?.location?.line).toBe(3);
+    });
+
     it("records duration in the result", async () => {
       const info = await km.start();
       startedKernelId = info.id;

@@ -70,6 +70,31 @@ export interface KernelSpec {
   env?: Record<string, string>;
 }
 
+/** Execution source metadata attached to execute requests/results. */
+export interface KernelExecutionOrigin {
+  kind: "code-cell" | "tree-script" | "unknown";
+  label?: string;
+  tabId?: number;
+  scriptPath?: string;
+}
+
+/** Parsed traceback location metadata surfaced in execution errors. */
+export interface KernelExecutionLocation {
+  file?: string;
+  line?: number;
+  column?: number;
+}
+
+/** Structured execution error details returned by `kernels.execute`. */
+export interface KernelExecutionError {
+  name: string;
+  message: string;
+  summary: string;
+  traceback: string[];
+  location?: KernelExecutionLocation;
+  source?: KernelExecutionOrigin;
+}
+
 /** Execute request payload sent to `kernels.execute`. */
 export interface KernelExecuteRequest {
   /** User code string to execute in the active kernel. */
@@ -78,6 +103,8 @@ export interface KernelExecuteRequest {
   silent?: boolean;
   /** Caller-supplied ID to correlate streamed output chunks with this execution. */
   executionId?: string;
+  /** Optional execution-origin context used for traceback summaries. */
+  origin?: KernelExecutionOrigin;
 }
 
 /** Streamed output fragment delivered over `kernels.onOutput`. */
@@ -100,6 +127,7 @@ export interface KernelExecuteResult {
   stderr?: string;
   result?: unknown;
   error?: string;
+  errorDetails?: KernelExecutionError;
   duration?: number;
   /** Inline images captured from display_data iopub messages (Agg fallback). */
   images?: Array<{ mime: string; data: string }>;

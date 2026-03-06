@@ -7,7 +7,18 @@ import type { KernelExecuteResult } from '../../types';
 import type { TreeNodeData } from '../../types';
 import { ScriptDialog } from './index';
 
-type ExecuteFn = (kernelId: string, payload: { code: string }) => Promise<KernelExecuteResult>;
+type ExecuteFn = (
+  kernelId: string,
+  payload: {
+    code: string;
+    executionId?: string;
+    origin?: {
+      kind: 'code-cell' | 'tree-script' | 'unknown';
+      label?: string;
+      scriptPath?: string;
+    };
+  },
+) => Promise<KernelExecuteResult>;
 
 function makeNode(overrides: Partial<TreeNodeData> = {}): TreeNodeData {
   return {
@@ -97,14 +108,24 @@ describe('ScriptDialog', () => {
     await user.click(screen.getByRole('button', { name: 'Run' }));
 
     await waitFor(() => {
-      expect(execute).toHaveBeenCalledWith('kernel-1', {
+      expect(execute).toHaveBeenCalledWith('kernel-1', expect.objectContaining({
         code: 'import json\npdv_tree["scripts.double"].run(**json.loads("{\\"x\\":5}"))',
-      });
+        origin: {
+          kind: 'tree-script',
+          label: 'scripts.double',
+          scriptPath: 'scripts.double',
+        },
+      }));
     });
-    expect(onRun).toHaveBeenCalledWith(
-      'import json\npdv_tree["scripts.double"].run(**json.loads("{\\"x\\":5}"))',
-      { result: { done: true } }
-    );
+    expect(onRun).toHaveBeenCalledWith(expect.objectContaining({
+      code: 'import json\npdv_tree["scripts.double"].run(**json.loads("{\\"x\\":5}"))',
+      origin: {
+        kind: 'tree-script',
+        label: 'scripts.double',
+        scriptPath: 'scripts.double',
+      },
+      result: { result: { done: true } },
+    }));
   });
 
   it('serializes checkbox booleans via JSON payload decoding', async () => {
@@ -121,14 +142,24 @@ describe('ScriptDialog', () => {
     await user.click(screen.getByRole('button', { name: 'Run' }));
 
     await waitFor(() => {
-      expect(execute).toHaveBeenCalledWith('kernel-1', {
+      expect(execute).toHaveBeenCalledWith('kernel-1', expect.objectContaining({
         code: 'import json\npdv_tree["scripts.flags"].run(**json.loads("{\\"flag\\":true}"))',
-      });
+        origin: {
+          kind: 'tree-script',
+          label: 'scripts.flags',
+          scriptPath: 'scripts.flags',
+        },
+      }));
     });
-    expect(onRun).toHaveBeenCalledWith(
-      'import json\npdv_tree["scripts.flags"].run(**json.loads("{\\"flag\\":true}"))',
-      { result: { done: true } }
-    );
+    expect(onRun).toHaveBeenCalledWith(expect.objectContaining({
+      code: 'import json\npdv_tree["scripts.flags"].run(**json.loads("{\\"flag\\":true}"))',
+      origin: {
+        kind: 'tree-script',
+        label: 'scripts.flags',
+        scriptPath: 'scripts.flags',
+      },
+      result: { result: { done: true } },
+    }));
   });
 
   it('shows kernel error and does not call onRun', async () => {
