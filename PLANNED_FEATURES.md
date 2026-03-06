@@ -1,16 +1,24 @@
 # PDV Planned Features
 
-This document describes all features planned beyond the initial alpha release of PDV, organized by release milestone.
+This document describes all features planned beyond the current state of PDV, organized by release milestone. Features that have already been implemented are removed from this list as they ship.
 
 ## Release milestones
 
 | Release | Description |
 |---|---|
-| **0.0.2-alpha2** | Completion of the backend refactor and current modules execution tracked in [`modules.md`](modules.md). Core architecture (PDV comm protocol, tree authority model, project save/load, IPC surface) is in place and all tests pass. This is the baseline from which all features below are additive. |
-| **0.1.0-beta1** | All Alpha Features (items 1–10 below) are implemented and stable. The application is suitable for active scientific use. |
-| **1.0.0** | All Beta Features (B1–B8 below, plus any added during beta) are implemented. The application is suitable for broad community distribution. |
+| **0.0.4** | Current version. Backend refactor complete, modules system implemented, kernel-backed autocompletion and inspect working, E2E integration test infrastructure in place. |
+| **0.1.0-beta1** | All remaining Alpha Features (below) are implemented and stable. The application is suitable for active scientific use. |
+| **1.0.0** | All Beta Features (below, plus any added during beta) are implemented. The application is suitable for broad community distribution. |
 
-The alpha architecture is specified in [`ARCHITECTURE.md`](ARCHITECTURE.md). Everything in this document is additive to that foundation.
+The architecture is specified in [`ARCHITECTURE.md`](ARCHITECTURE.md). Everything in this document is additive to that foundation.
+
+### Implemented (removed from this document)
+
+The following planned features have been completed and are no longer tracked here:
+
+- ~~**Modules System**~~ — manifest, install, import, action binding, per-module settings, module health checks, UI (see [`modules.md`](modules.md))
+- ~~**Kernel-Backed Autocompletion**~~ — `complete_request`/`complete_reply`, Monaco completion provider, `inspect_request`/`inspect_reply` for hover info
+- ~~**E2E Testing Infrastructure**~~ — integration tests with real kernel processes, `@slow` tagging, fixture-based project tests
 
 ---
 
@@ -31,19 +39,10 @@ The alpha architecture includes a lazy-load registry that defers loading of file
 
 ---
 
-## 2) Modules System
+## 2) Modules System — Namelist Editor Extension
 
 ### Goal
-Modules are domain-specific analysis pipeline packages that can be installed into PDV, expose named actions, and be invoked from the UI. They are central to the community workflow vision: a researcher publishes a module for their diagnostic, others install it and run it on their own data without needing to understand the implementation.
-
-### Planned work
-- **Module manifest schema**: `pdv-module.json` with name, version, description, actions (name + script entrypoint), dependencies, and compatibility metadata.
-- **Module discovery and installation**: Local directory scan and a future remote registry. Single-step install via the UI.
-- **Action binding**: Module actions appear as buttons or context menu entries in the UI. Triggering an action calls `pdv_tree.run_script(path, **kwargs)` on the kernel (standard `execute_request` path — no special comm messages needed).
-- **Per-module settings**: Module manifest can declare user-configurable parameters that are persisted in `project.json`.
-- **Module health checks**: Version compatibility check at project load time; warning if a module action references a script that no longer exists.
-- **Modules tab**: Currently a placeholder stub. Becomes the primary UI for browsing, installing, and configuring modules.
-- **Namelist editor module (later in modules roadmap)**: Add a module GUI for editing simulation namelist files directly from a tree path. Initial support targets TOML and Fortran `*.in` namelists, auto-selected by file extension/content type. The editor should surface tooltip help from inline comments in the source file, optimize for rapid batch parameter editing, and save changes back through the Tree/project workflow.
+Add a module GUI for editing simulation namelist files directly from a tree path. Initial support targets TOML and Fortran `*.in` namelists, auto-selected by file extension/content type. The editor should surface tooltip help from inline comments in the source file, optimize for rapid batch parameter editing, and save changes back through the Tree/project workflow.
 
 ---
 
@@ -87,47 +86,7 @@ Per existing decisions: implement **remote data connectors** before remote kerne
 
 ---
 
-## 5) Kernel-Backed Autocompletion in the Code Cell
-
-### Goal
-Provide runtime-aware autocompletion in the Monaco editor code cell. Static language servers (Pylance, Pyright) are explicitly ruled out: they cannot see `pdv_tree` key paths, live namespace variables, or method chains on objects loaded in the current session. The running ipykernel uses jedi internally and introspects the live namespace — it produces exactly the completions that matter in a PDV workflow.
-
-### Planned work
-
-#### `KernelManager`: `complete_request` / `complete_reply`
-The Jupyter Messaging Protocol defines `complete_request` on the shell socket, which `KernelManager` already owns. Add:
-```ts
-complete(kernelId: string, code: string, cursorPos: number): Promise<CompleteResult>
-// CompleteResult: { matches: string[], cursorStart: number, cursorEnd: number }
-```
-
-#### IPC: `kernel:complete` channel
-Add a `kernel:complete` handler in `ipc.ts` (already listed in `window.pdv.kernels.*` surface, ARCHITECTURE.md §11.2) that proxies to `KernelManager.complete()`.
-
-#### `CodeCell`: Monaco completion provider
-Register a completion item provider for Python after the editor mounts:
-```ts
-monaco.languages.registerCompletionItemProvider('python', {
-  triggerCharacters: ['.', '[', "'", '"'],
-  async provideCompletionItems(model, position) {
-    const code = model.getValue();
-    const offset = model.getOffsetAt(position);
-    const result = await window.pdv.kernels.complete(kernelId, code, offset);
-    // convert result.matches → CompletionItem[]
-  }
-});
-```
-Round-trip latency to a local kernel subprocess is typically a few milliseconds — well within Monaco's default provider timeout.
-
-#### Implementation constraints
-- The provider must be registered once globally (outside the component render cycle), not on every mount, to avoid duplicate provider registration across tab switches.
-- If no kernel is running, `provideCompletionItems` returns `{ suggestions: [] }` rather than throwing.
-- Monaco's `quickSuggestions`, `suggestOnTriggerCharacters`, and `wordBasedSuggestions` remain disabled (current `CodeCell` config). The registered provider above replaces them entirely with kernel-backed suggestions.
-- When Julia support is added (item 3), register a separate provider for `julia` using the same IPC channel — `complete_request` is language-agnostic.
-
----
-
-## 6) Markdown Notes in the Tree
+## 5) Markdown Notes in the Tree
 
 ### Goal
 
@@ -178,7 +137,7 @@ Markdown nodes are files in the temp directory, and should be automatically save
 
 ---
 
-## 7) Tree Watchers and External Editor Hot Reload
+## 6) Tree Watchers and External Editor Hot Reload
 
 ### Goal
 Script nodes are designed to be edited in external editors (ARCHITECTURE.md §11.2, `script:edit` IPC handler). When a script file changes on disk, PDV should detect it and prompt the user to reload.
@@ -191,7 +150,7 @@ Script nodes are designed to be edited in external editors (ARCHITECTURE.md §11
 
 ---
 
-## 8) Session Restore and Execution History
+## 7) Session Restore and Execution History
 
 ### Goal
 Code cell tabs are already saved and restored as part of project save/load (ARCHITECTURE.md §8, `code-cells.json`). A future enhancement is optional capture of execution history so a session can be partially replayed or audited.
@@ -205,7 +164,7 @@ Note: Console output itself remains ephemeral by design (ARCHITECTURE.md §9.4).
 
 ---
 
-## 9) Security, Trust, and Operational Guardrails
+## 8) Security, Trust, and Operational Guardrails
 
 ### Goal
 As modules, remote execution, and community-shared projects arrive, the risk surface expands. A trust model is needed before these features go to production.
@@ -214,25 +173,11 @@ As modules, remote execution, and community-shared projects arrive, the risk sur
 - **Project trust levels**: A project loaded from an unknown or community source is "untrusted" by default. Untrusted projects cannot execute scripts automatically; user must explicitly approve.
 - **`trusted=True` gate**: The `unknown` node type (pickle-backed, ARCHITECTURE.md §7.2) is already gated on `trusted=True` in `serialization.py`. This flag should be surfaced in the UI and tied to the project trust level.
 - **Signed modules**: Optional code-signing for module manifests. Allowlist policy for institutional deployments.
-- **Execution audit trail**: Optionally record who ran what and when (user identity, script path, timestamp) for reproducibility in shared research environments. Complements item 8.
+- **Execution audit trail**: Optionally record who ran what and when (user identity, script path, timestamp) for reproducibility in shared research environments. Complements item 7.
 
 ---
 
-## 10) E2E Testing and Regression Infrastructure
-
-### Goal
-The alpha testing strategy (ARCHITECTURE.md §14) covers unit tests for Python and TypeScript in isolation. As the system matures, end-to-end tests across a real kernel process are needed.
-
-### Planned work
-- **E2E smoke tests**: Automated tests that spawn a real kernel, run the full startup sequence, execute code, modify the tree, save a project, and reload it. Confirms the full comm protocol path works end to end.
-- **Fixture projects**: A set of representative saved projects (with varied node types and sizes) used as regression fixtures for load/save compatibility.
-- **Project schema migration tests**: When `project.json` schema versions increment, automated tests confirm that older project files are correctly migrated.
-- **Julia integration tests**: Parallel test suite to the Python pytest suite, run against a real Julia kernel.
-- **CI tagging**: Slow tests (those that spawn real kernel processes) are tagged `@slow` and run in nightly CI, not on every commit.
-
----
-
-## 11) Kernel Reconnect on Renderer Reload
+## 9) Kernel Reconnect on Renderer Reload
 
 ### Goal
 When only the renderer reloads (Cmd+R, dev hot reload), the kernel and its working
@@ -276,7 +221,7 @@ R is widely used in experimental physics and statistics communities. The PDV com
 - **`pdv-r` package**: Implemented as an R package. Registers the `pdv.kernel` comm target with IRkernel, implements `PDVTree` as an R environment subclass, and handles all PDV message types. Serialization: Parquet via the `arrow` package; `.npy` exchange with Python requires a bridge (`reticulate` or a standalone reader).
 - **Project-level language selection**: `project.json` `language_mode` gains `"r"` as a valid value (schema already supports free strings, ARCHITECTURE.md §6.2).
 - **Script nodes**: `PDVScript` nodes in R projects use `.R` files. The `language` field in the node descriptor (ARCHITECTURE.md §7.3) is already a free string.
-- **Autocompletion**: `complete_request` is language-agnostic; register an R completion provider using the same IPC channel as Python and Julia (see item 5).
+- **Autocompletion**: `complete_request` is language-agnostic; register an R completion provider using the same IPC channel as Python and Julia.
 - **R integration tests**: Parity test suite run against a real IRkernel process.
 
 ### Notes
@@ -293,7 +238,7 @@ Matplotlib figures currently appear as static images in the Console via `display
 ### Planned work
 - **Plot panel**: A persistent dockable panel that displays the most recently emitted figure, separate from the text console. Keeps the console clean for text output.
 - **Interactive plot rendering**: Plotly and Bokeh output is HTML/JS; the plot panel renders it in a sandboxed `<webview>`, making interactive hover, zoom, and selection actually usable.
-- **Integration with figure nodes** (see item 6): `pdv.save_figure()` saves the current plot to the tree; the plot panel shows a live preview of the unsaved current figure. These are complementary — the panel is transient, the tree node is persistent.
+- **Integration with figure nodes**: `pdv.save_figure()` saves the current plot to the tree; the plot panel shows a live preview of the unsaved current figure. These are complementary — the panel is transient, the tree node is persistent.
 
 ---
 
@@ -367,7 +312,7 @@ A `Cmd+Shift+P`-style command palette for discoverability. Scientists exploring 
 
 ### Planned work
 - **Global keybinding**: `Cmd+Shift+P` (macOS) / `Ctrl+Shift+P` (Windows/Linux) opens the palette from anywhere in the UI.
-- **Command registry**: A central registry of all available commands with labels, descriptions, and keyboard shortcuts. Module actions (item 2) and script actions register entries here automatically.
+- **Command registry**: A central registry of all available commands with labels, descriptions, and keyboard shortcuts. Module actions and script actions register entries here automatically.
 - **Fuzzy search**: Type to filter commands by keyword. Recent commands shown at the top.
 - **Context sensitivity**: Commands that are not applicable in the current state (e.g., script actions when no script is selected) are greyed out rather than hidden, so users can discover them without confusion.
 
@@ -417,13 +362,13 @@ GitHub Copilot is exposed to third-party editors through two mechanisms:
 ### Notes
 - Inline completions do not require Copilot Business/Enterprise; a standard Copilot Individual subscription is sufficient.
 - The language server binary must be installed separately (`npm install -g @github/copilot-language-server` or bundled). Document both paths.
-- Do not block on this feature — item 5 (kernel-backed autocompletion) is the higher-priority completion path and should ship first.
+- Kernel-backed autocompletion is already implemented and ships separately from Copilot. This feature adds AI-powered ghost-text completions on top of the existing kernel completions.
 
 ---
 
-## 12) Known Design Tensions to Resolve
+## 10) Known Design Tensions to Resolve
 
-These are architectural decisions in the current design that are correct for 0.0.2-alpha2 but will create friction as the system grows. They should be resolved before or during the Alpha Feature implementation phase.
+These are architectural decisions in the current design that are correct for v0.0.4 but will create friction as the system grows. They should be resolved before or during the remaining Alpha Feature implementation.
 
 ### Dot-delimited tree paths and key collision
 `PDVTree` supports dot-separated path notation (`pdv_tree['data.waveforms.ch1']`). Keys that themselves contain dots are ambiguous — `pdv_tree['my.key']` is indistinguishable from `pdv_tree['my']['key']`. This is acceptable for alpha (physics variable names rarely contain dots) but needs a resolution before community use. Options: escape sequences, a separate `pdv_tree.at('my.key')` method for literal keys, or abandoning dot notation in favour of `pdv_tree['my']['key']` exclusively.
@@ -439,21 +384,20 @@ Console output is intentionally not persisted (ARCHITECTURE.md §9.4). If the op
 
 ---
 
-## 13) Suggested Implementation Sequence
+## 11) Suggested Implementation Sequence
 
-### Alpha Features → 0.1.0-beta1
+### Remaining Alpha Features → 0.1.0-beta1
 
-1. Modules system — manifest + install + action binding (item 2)
-2. Kernel-backed autocompletion (item 5) — high value, low scope, fits cleanly into existing IPC
-3. Rich document artifacts — figures, Markdown editor, PDF (item 6)
-4. Advanced lazy loading — chunked reads for HDF5/Zarr/Parquet (item 1)
-5. Tree watchers and hot reload (item 7)
-6. SSH/SFTP remote data connector (item 4, connector phase only)
-7. Julia parity + tests (item 3)
-8. Remote kernel execution — transport abstraction + SSH tunnel (item 4, execution phase)
-9. Security and trust model (item 9) — required before community module distribution
-10. Session restore and execution history (item 8)
-11. E2E test infrastructure expansion (item 10)
+1. Markdown notes in the tree — Write tab, KaTeX math (item 5)
+2. Advanced lazy loading — chunked reads for HDF5/Zarr/Parquet (item 1)
+3. Namelist editor module (item 2)
+4. Tree watchers and hot reload (item 6)
+5. SSH/SFTP remote data connector (item 4, connector phase only)
+6. Julia parity + tests (item 3)
+7. Remote kernel execution — transport abstraction + SSH tunnel (item 4, execution phase)
+8. Security and trust model (item 8) — required before community module distribution
+9. Session restore and execution history (item 7)
+10. Kernel reconnect on renderer reload (item 9)
 
 ### Beta Features → 1.0.0
 
@@ -471,23 +415,23 @@ Begin only after 0.1.0-beta1 is stable. Suggested order:
 
 ---
 
-## 14) Release Completion Criteria
+## 12) Release Completion Criteria
 
 ### 0.1.0-beta1 — Alpha Feature Complete
 
 PDV is ready to ship 0.1.0-beta1 when all of the following are true:
 
-- Projects open and save reliably with complete state; older project files load without data loss
+- ~~Projects open and save reliably with complete state; older project files load without data loss~~ ✅
 - Tree is persistent, scalable, and lazily browsable for large datasets (100GB+)
-- Code cell state is project-managed and recoverable
-- Kernel-backed autocompletion works in the code cell for Python (and Julia when supported)
-- Modules are installable and runnable via manifest-driven UI actions
-- Rich document artifacts (figures, Markdown notes, PDFs) are first-class tree nodes
+- ~~Code cell state is project-managed and recoverable~~ ✅
+- ~~Kernel-backed autocompletion works in the code cell for Python~~ ✅
+- ~~Modules are installable and runnable via manifest-driven UI actions~~ ✅
+- Markdown notes are first-class tree nodes with KaTeX math support
 - Python and Julia have practical parity for all core workflows
 - Remote data access (SSH/SFTP) is production-usable
 - Remote kernel execution is production-usable
 - A trust model governs untrusted projects and unsigned modules
-- E2E test coverage spans kernel startup, execution, tree save/load, and script execution
+- ~~E2E test coverage spans kernel startup, execution, tree save/load, and script execution~~ ✅
 
 ### 1.0.0 — Beta Feature Complete
 
