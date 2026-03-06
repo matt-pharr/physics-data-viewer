@@ -98,6 +98,16 @@ const CONFIG_DEFAULTS: PDVConfig = {
 
 // Parse and type-check config JSON loaded from disk.
 // Optional string fields may be null/undefined to explicitly clear them.
+//
+// Why manual validation instead of a schema library (e.g. zod)?
+// 1. The config shape is flat and stable — a library adds weight for little
+//    ergonomic benefit at this scale.
+// 2. Field-by-field checking lets us accept partial files gracefully: a user
+//    can have a config with only `pythonPath` set and everything else falls
+//    back to defaults. A schema library would need explicit `.partial()` on
+//    every nested level to achieve the same tolerance.
+// 3. Each field's error message names the exact key and file path, which is
+//    friendlier for end-user troubleshooting than generic validation errors.
 function parseConfig(raw: string, filePath: string): Partial<PDVConfig> {
   let parsed: unknown;
   try {

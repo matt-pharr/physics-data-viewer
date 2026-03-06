@@ -119,9 +119,12 @@ const App: React.FC = () => {
     expandEditor,
   } = useLayoutState();
 
+  // -- Editor state ----------------------------------------------------------
   const [CellTabs, setCellTabs] = useState<CellTab[]>([{ id: 1, code: '' }]);
   const [activeCellTab, setActiveCellTab] = useState(1);
   const [logs, setLogs] = useState<LogEntry[]>([]);
+
+  // -- Kernel state ---------------------------------------------------------
   const [currentKernelId, setCurrentKernelId] = useState<string | null>(null);
   const [kernelStatus, setKernelStatus] = useState<KernelStatus>('idle');
   const [isExecuting, setIsExecuting] = useState(false);
@@ -129,9 +132,9 @@ const App: React.FC = () => {
   const [codeCellExecutionError, setCodeCellExecutionError] =
     useState<CodeCellExecutionError | undefined>(undefined);
   const [lastDuration, setLastDuration] = useState<number | null>(null);
+
+  // -- App / config state ---------------------------------------------------
   const [config, setConfig] = useState<Config | null>(null);
-  const [showEnvSelector, setShowEnvSelector] = useState(false);
-  const [scriptDialog, setScriptDialog] = useState<TreeNodeData | null>(null);
   const [currentProjectDir, setCurrentProjectDir] = useState<string | null>(null);
   const initRef = useRef(false);
   const loadedProjectTabsRef = useRef<{ tabs: CellTab[]; activeTabId: number } | null>(null);
@@ -140,13 +143,21 @@ const App: React.FC = () => {
   // active tab id so a single Cmd+Z restores exactly what was destroyed.
   type CellSnapshot = { tabs: CellTab[]; activeTabId: number };
   const cellUndoStack = useRef<CellSnapshot[]>([]);
+
+  // -- Refresh tokens (bumped by push subscriptions to trigger re-fetches) --
   const [autoRefreshNamespace, setAutoRefreshNamespace] = useState(false);
   const [namespaceRefreshToken, setNamespaceRefreshToken] = useState(0);
   const [treeRefreshToken, setTreeRefreshToken] = useState(0);
   const [modulesRefreshToken, setModulesRefreshToken] = useState(0);
+
+  // -- Dialog visibility state ----------------------------------------------
+  const [showEnvSelector, setShowEnvSelector] = useState(false);
+  const [scriptDialog, setScriptDialog] = useState<TreeNodeData | null>(null);
   const [createScriptTarget, setCreateScriptTarget] = useState<string | null>(null);
   const [showSettings, setShowSettings] = useState(false);
   const [settingsInitialTab, setSettingsInitialTab] = useState<'general' | 'shortcuts' | 'appearance' | 'runtime' | 'about'>('general');
+
+  // -- Appearance state -----------------------------------------------------
   const [monacoTheme, setMonacoTheme] = useState<string>('vs-dark');
   const [systemPrefersDark, setSystemPrefersDark] = useState(
     () => window.matchMedia('(prefers-color-scheme: dark)').matches,

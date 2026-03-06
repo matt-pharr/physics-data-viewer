@@ -1,7 +1,30 @@
 /**
  * bootstrap.ts — Runtime entrypoint for the Electron main process.
  *
- * Creates process-wide service singletons and opens the BrowserWindow.
+ * Startup sequence (in order):
+ * 1. Enable remote debugging if `NODE_ENV=development` (CDP port 9222).
+ * 2. Request single-instance lock; quit immediately if denied.
+ * 3. Wire app lifecycle events (`ready`, `activate`, `second-instance`).
+ * 4. On `ready`: lazy-create `KernelManager` and `ConfigStore`, then open
+ *    the main `BrowserWindow` via {@link createWindow}.
+ * 5. On `second-instance`: focus existing window or open a new one.
+ *
+ * Singletons (module-level):
+ * - `commRouter`      — created once at import time; shared across windows.
+ * - `projectManager`  — created once at import time; uses `commRouter`.
+ * - `kernelManager`   — lazy-created on first window open so kernel infra
+ *                        is not allocated during unit tests or quick exits.
+ * - `configStore`     — lazy-created on first window open; reads/writes
+ *                        `~/.PDV/config.json`.
+ *
+ * The `openingWindow` promise acts as a mutex: concurrent calls to
+ * `openMainWindow()` (e.g. rapid `second-instance` events) coalesce into
+ * a single window creation.
+ *
+ * See Also
+ * --------
+ * app.ts — BrowserWindow lifecycle and renderer loading
+ * index.ts — IPC handler registration (called from {@link createWindow})
  */
 
 import { app, BrowserWindow } from "electron";
