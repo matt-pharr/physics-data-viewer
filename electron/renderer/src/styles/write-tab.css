@@ -48,6 +48,11 @@
   font-size: 15px;
   line-height: 1.6;
   color: var(--text-primary);
+  text-align: left;
+}
+
+.math-preview-zone .katex-display {
+  text-align: left;
 }
 
 .math-preview-inline {
@@ -55,24 +60,37 @@
   vertical-align: middle;
 }
 
-/* Edit / Read mode toggle */
+/* Edit / Read mode toggle — pill switch matching the Code/Write switcher */
 .write-mode-toggle {
   display: flex;
-  gap: 2px;
-  margin-right: 8px;
+  border-radius: 4px;
+  overflow: hidden;
+  border: 1px solid var(--border-color);
+  background-color: var(--bg-primary);
 }
 
-.btn-sm {
-  padding: 3px 10px;
+.write-mode-toggle .btn-sm {
+  padding: 2px 12px;
   font-size: 11px;
-  border-radius: 3px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  font-family: var(--font-sans);
+  border: none;
+  border-radius: 0;
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: background-color 0.15s, color 0.15s;
 }
 
-.btn-active {
+.write-mode-toggle .btn-sm:hover {
+  color: var(--text-primary);
+}
+
+.write-mode-toggle .btn-active {
   background-color: var(--accent);
   color: var(--bg-primary);
-  font-weight: 600;
-  border: none;
   cursor: default;
 }
 
@@ -170,31 +188,37 @@
   margin: 1.5em 0;
 }
 
-/* Pane switcher: Code / Write toggle above the editor area */
+/* Pane switcher: Code / Write segmented toggle */
 .pane-switcher {
   display: flex;
   align-items: center;
-  gap: 0;
   padding: 0 12px;
   border-bottom: 1px solid var(--border-color);
   background-color: var(--bg-secondary);
   flex-shrink: 0;
-  height: 30px;
+  height: 32px;
+}
+
+.pane-switcher-track {
+  display: flex;
+  border-radius: 4px;
+  overflow: hidden;
+  border: 1px solid var(--border-color);
+  background-color: var(--bg-primary);
 }
 
 .pane-switcher-btn {
-  padding: 4px 14px;
+  padding: 2px 14px;
   background: transparent;
   border: none;
-  border-bottom: 2px solid transparent;
   color: var(--text-secondary);
   cursor: pointer;
-  font-size: 12px;
+  font-size: 11px;
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.04em;
   font-family: var(--font-sans);
-  transition: color 0.15s, border-color 0.15s;
+  transition: background-color 0.15s, color 0.15s;
 }
 
 .pane-switcher-btn:hover {
@@ -202,8 +226,8 @@
 }
 
 .pane-switcher-btn.active {
-  color: var(--accent);
-  border-bottom-color: var(--accent);
+  background-color: var(--accent);
+  color: var(--bg-primary);
 }
 
 .pane-switcher-indicator {

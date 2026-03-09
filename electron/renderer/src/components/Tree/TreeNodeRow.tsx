@@ -9,6 +9,7 @@ import React from 'react';
 import type { TreeNodeData } from '../../types';
 
 const TYPE_ICONS: Record<string, string> = {
+  root: '🌳',
   folder: '📁',
   file: '📄',
   script: '📜',

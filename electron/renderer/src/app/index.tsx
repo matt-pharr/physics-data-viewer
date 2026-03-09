@@ -385,15 +385,18 @@ const App: React.FC = () => {
     } else if (action === 'reload' && node.type === 'script') {
       await window.pdv.script.reload(node.path);
     } else if (action === 'copy_path') {
-      await navigator.clipboard.writeText(
-        node.path.split('.').reduce((acc, part) => `${acc}["${part}"]`, 'pdv_tree'),
-      );
+      const pyExpr = node.path
+        ? node.path.split('.').reduce((acc, part) => `${acc}["${part}"]`, 'pdv_tree')
+        : 'pdv_tree';
+      await navigator.clipboard.writeText(pyExpr);
     } else if (action === 'print') {
       if (!currentKernelId) return;
-      const target = JSON.stringify(node.path);
-      await handleExecute(`print(pdv_tree[${target}])`, {
+      const pyExpr = node.path
+        ? `pdv_tree[${JSON.stringify(node.path)}]`
+        : 'pdv_tree';
+      await handleExecute(`print(${pyExpr})`, {
         kind: 'unknown',
-        label: `Tree print ${node.path}`,
+        label: `Tree print ${node.path || 'pdv_tree'}`,
       });
     }
   };
@@ -592,29 +595,28 @@ const App: React.FC = () => {
         {/* Center column: pane switcher at top, then Code (console + editor) or Write */}
         <div className="center-column" ref={rightPaneRef}>
           <div className="pane-switcher">
-            <button
-              className={`pane-switcher-btn ${activePane === 'code' ? 'active' : ''}`}
-              onClick={() => setActivePane('code')}
-            >
-              Code
-            </button>
-            <button
-              className={`pane-switcher-btn ${activePane === 'write' ? 'active' : ''}`}
-              onClick={() => setActivePane('write')}
-            >
-              Write
-              {noteTabs.some((t) => t.content !== t.savedContent) && (
-                <span className="pane-switcher-indicator">●</span>
-              )}
-            </button>
+            <div className="pane-switcher-track">
+              <button
+                className={`pane-switcher-btn ${activePane === 'code' ? 'active' : ''}`}
+                onClick={() => setActivePane('code')}
+              >
+                Code
+              </button>
+              <button
+                className={`pane-switcher-btn ${activePane === 'write' ? 'active' : ''}`}
+                onClick={() => setActivePane('write')}
+              >
+                Write
+                {noteTabs.some((t) => t.content !== t.savedContent) && (
+                  <span className="pane-switcher-indicator">●</span>
+                )}
+              </button>
+            </div>
           </div>
 
           {activePane === 'code' ? (
             <>
               <div className="console-wrapper">
-                <div className="console-header">
-                  <span className="console-header-title">Console</span>
-                </div>
                 <Console logs={logs} onClear={handleClearConsole} />
               </div>
               {editorCollapsed ? (
@@ -724,7 +726,7 @@ const App: React.FC = () => {
         />
       )}
 
-      {createScriptTarget && currentKernelId && (
+      {createScriptTarget !== null && currentKernelId && (
         <CreateScriptDialog
           parentPath={createScriptTarget}
           onCancel={() => setCreateScriptTarget(null)}
@@ -745,7 +747,7 @@ const App: React.FC = () => {
         />
       )}
 
-      {createNoteTarget && currentKernelId && (
+      {createNoteTarget !== null && currentKernelId && (
         <CreateNoteDialog
           parentPath={createNoteTarget}
           onCancel={() => setCreateNoteTarget(null)}

@@ -167,15 +167,6 @@ export const WriteTab: React.FC<WriteTabProps> = ({
               Read
             </button>
           </div>
-          {!readMode && (
-            <button
-              className="btn btn-primary"
-              onClick={() => { if (activeTabId) onSave(activeTabId); }}
-              disabled={disabled || !activeTab || activeTab.content === activeTab.savedContent}
-            >
-              Save
-            </button>
-          )}
         </div>
       </header>
 

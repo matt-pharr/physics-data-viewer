@@ -10,7 +10,7 @@
 
 .tree-header {
   display: flex;
-  padding: 8px 12px;
+  padding: 0 12px;
   background-color: var(--bg-tertiary);
   border-bottom: 1px solid var(--border-color);
   font-family: var(--font-mono);
@@ -21,6 +21,8 @@
   position: sticky;
   top: 0;
   z-index: 1;
+  height: 28px;
+  align-items: center;
 }
 
 .tree-col {
