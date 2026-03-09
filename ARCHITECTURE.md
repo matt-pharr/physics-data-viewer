@@ -763,7 +763,7 @@ User triggers save
     ├─► App writes project.json to save directory
     │       (only after both kernel and app state are flushed)
     │
-    └─► App updates title bar: "My Experiment" (no unsaved-changes indicator)
+    └─► App updates title bar: "My Experiment"
 ```
 
 If the kernel responds with `status: "error"`, the app aborts the save, does not write `project.json`, and displays the error message to the user.
