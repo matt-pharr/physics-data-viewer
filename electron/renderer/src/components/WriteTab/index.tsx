@@ -64,22 +64,9 @@ export const WriteTab: React.FC<WriteTabProps> = ({
     // Attach KaTeX math previews
     if (mathPreviewDisposeRef.current) mathPreviewDisposeRef.current();
     mathPreviewDisposeRef.current = attachMathPreview(editor, monacoInstance);
-
-    // Cmd+S / Ctrl+S saves immediately
-    editor.addCommand(
-      // eslint-disable-next-line no-bitwise
-      editor.getModel()
-        ? (window.navigator.platform.includes('Mac')
-            ? 2048 /* KeyMod.CtrlCmd */ | 49 /* KeyCode.KeyS */
-            : 2048 | 49)
-        : 0,
-      () => {
-        if (activeTabId) onSave(activeTabId);
-      },
-    );
   };
 
-  // Debounced auto-save: 800ms after last change
+  // Debounced auto-save: 5 seconds after last change
   const handleChange = useCallback(
     (value: string | undefined) => {
       if (!activeTabId) return;
@@ -89,7 +76,7 @@ export const WriteTab: React.FC<WriteTabProps> = ({
       if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
       saveTimerRef.current = setTimeout(() => {
         onSave(activeTabId);
-      }, 800);
+      }, 5000);
     },
     [activeTabId, onContentChange, onSave],
   );
@@ -126,7 +113,6 @@ export const WriteTab: React.FC<WriteTabProps> = ({
 
         <div className="code-cell-tabs">
           {tabs.map((tab) => {
-            const isDirty = tab.content !== tab.savedContent;
             return (
               <button
                 key={tab.id}
@@ -134,7 +120,6 @@ export const WriteTab: React.FC<WriteTabProps> = ({
                 onClick={() => onTabChange(tab.id)}
                 title={tab.id}
               >
-                {isDirty && <span className="tab-dirty">●</span>}
                 {tab.name}
                 <span
                   className="tab-close"

@@ -38,6 +38,8 @@ interface UseProjectWorkflowOptions {
   loadedProjectTabsRef: MutableRefObject<{ tabs: CellTab[]; activeTabId: number } | null>;
   /** Validates and normalizes raw code-cells.json data into typed CellTab[]. */
   normalizeLoadedCodeCells: (data: unknown) => { tabs: CellTab[]; activeTabId: number };
+  /** Flush all dirty markdown notes to disk before project save. */
+  flushDirtyNotes: () => Promise<void>;
 }
 
 export function useProjectWorkflow(options: UseProjectWorkflowOptions) {
@@ -56,6 +58,7 @@ export function useProjectWorkflow(options: UseProjectWorkflowOptions) {
     setLastError,
     loadedProjectTabsRef,
     normalizeLoadedCodeCells,
+    flushDirtyNotes,
   } = options;
 
   const [unsavedDialogContext, setUnsavedDialogContext] = useState<UnsavedDialogContext | null>(null);
@@ -90,6 +93,7 @@ export function useProjectWorkflow(options: UseProjectWorkflowOptions) {
       if (!saveDir) {
         return false;
       }
+      await flushDirtyNotes();
       await window.pdv.project.save(saveDir, {
         tabs: cellTabs,
         activeTabId: activeCellTab,
@@ -106,6 +110,7 @@ export function useProjectWorkflow(options: UseProjectWorkflowOptions) {
     activeCellTab,
     cellTabs,
     currentProjectDir,
+    flushDirtyNotes,
     kernelStatus,
     rememberRecentProject,
     setCurrentProjectDir,

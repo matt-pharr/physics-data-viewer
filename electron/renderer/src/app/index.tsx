@@ -353,6 +353,23 @@ const App: React.FC = () => {
     }
   };
 
+  const flushDirtyNotes = useCallback(async () => {
+    if (!currentKernelId) return;
+    const dirty = noteTabs.filter((t) => t.content !== t.savedContent);
+    await Promise.all(
+      dirty.map(async (tab) => {
+        try {
+          await window.pdv.note.save(currentKernelId, tab.id, tab.content);
+          setNoteTabs((prev) =>
+            prev.map((t) => (t.id === tab.id ? { ...t, savedContent: t.content } : t)),
+          );
+        } catch (error) {
+          console.error('[App] Failed to flush note:', error);
+        }
+      }),
+    );
+  }, [currentKernelId, noteTabs]);
+
   const handleNoteCloseTab = (id: string) => {
     setNoteTabs((prev) => {
       const updated = prev.filter((t) => t.id !== id);
@@ -541,6 +558,7 @@ const App: React.FC = () => {
     setLastError,
     loadedProjectTabsRef,
     normalizeLoadedCodeCells,
+    flushDirtyNotes,
   });
 
   return (
