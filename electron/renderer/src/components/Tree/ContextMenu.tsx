@@ -100,10 +100,15 @@ export function getActionsForNode(node: TreeNodeData) {
       { id: 'reload', label: 'Reload', disabled: false },
       { id: 'view_source', label: 'View Source', disabled: false },
     );
+  } else if (node.type === 'markdown') {
+    actions.push(
+      { id: 'open_note', label: 'Open', disabled: false },
+    );
   } else {
     actions.push({ id: 'refresh', label: 'Refresh', disabled: false });
     if (canCreateScript) {
       actions.push({ id: 'create_script', label: 'Create new script', disabled: false });
+      actions.push({ id: 'create_note', label: 'Create new note', disabled: false });
     }
     actions.push({ id: 'view', label: 'View', disabled: false });
   }

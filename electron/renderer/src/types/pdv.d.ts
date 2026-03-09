@@ -439,6 +439,11 @@ export interface PDVApi {
       targetPath: string,
       scriptName: string
     ): Promise<{ success: boolean; error?: string; scriptPath?: string }>;
+    createNote(
+      kernelId: string,
+      targetPath: string,
+      noteName: string
+    ): Promise<{ success: boolean; error?: string; notePath?: string; treePath?: string }>;
     addFile(
       kernelId: string,
       sourcePath: string,
@@ -456,6 +461,10 @@ export interface PDVApi {
   script: {
     edit(kernelId: string, scriptPath: string): Promise<{ success: boolean; error?: string }>;
     reload(scriptPath: string): Promise<{ success: boolean; error?: string }>;
+  };
+  note: {
+    save(kernelId: string, treePath: string, content: string): Promise<{ success: boolean; error?: string }>;
+    read(kernelId: string, treePath: string): Promise<{ success: boolean; content?: string; error?: string }>;
   };
   modules: {
     listInstalled(): Promise<ModuleDescriptor[]>;

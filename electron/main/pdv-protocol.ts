@@ -75,6 +75,12 @@ export const PDVMessageType = {
   /** Kernel → app. Confirms script registration. */
   SCRIPT_REGISTER_RESPONSE: "pdv.script.register.response",
 
+  // Note
+  /** App → kernel. Register a newly created markdown note as a tree node. */
+  NOTE_REGISTER: "pdv.note.register",
+  /** Kernel → app. Confirms note registration. */
+  NOTE_REGISTER_RESPONSE: "pdv.note.register.response",
+
   // File
   /** App → kernel. Register a file-backed node (namelist, Fortran source, or opaque file). */
   FILE_REGISTER: "pdv.file.register",

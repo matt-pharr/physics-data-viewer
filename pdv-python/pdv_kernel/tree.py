@@ -453,6 +453,85 @@ class PDVScript:
 
 
 # ---------------------------------------------------------------------------
+# PDVNote
+# ---------------------------------------------------------------------------
+
+class PDVNote:
+    """
+    Lightweight wrapper for a markdown file stored as a PDV tree node.
+
+    Stored as the value at a tree path (e.g. ``pdv_tree['notes.intro']``).
+    Backed by a ``.md`` file in the working directory.
+
+    Parameters
+    ----------
+    relative_path : str
+        Path to the ``.md`` file (absolute or relative to working dir).
+    title : str or None
+        Optional title for the note, used as a preview fallback. If None,
+        the first non-empty line of the file is used.
+
+    See Also
+    --------
+    ARCHITECTURE.md §7.2, PLANNED_FEATURES.md Feature 4
+    """
+
+    def __init__(self, relative_path: str, title: str | None = None) -> None:
+        self._relative_path = relative_path
+        self._title = title
+
+    @property
+    def relative_path(self) -> str:
+        """Path to the backing ``.md`` file.
+
+        Returns
+        -------
+        str
+            File path (absolute or relative to working dir).
+        """
+        return self._relative_path
+
+    @property
+    def title(self) -> str | None:
+        """Optional title for the note.
+
+        Returns
+        -------
+        str or None
+            Cached title, or None if not set.
+        """
+        return self._title
+
+    def preview(self) -> str:
+        """Return a short preview string for the tree panel.
+
+        Tries the cached title first, then reads the first non-empty
+        line of the ``.md`` file. Falls back to ``'Markdown note'``.
+
+        Returns
+        -------
+        str
+            A short preview string (≤100 characters).
+        """
+        if self._title:
+            return self._title[:100]
+        try:
+            path = self._relative_path
+            if os.path.exists(path):
+                with open(path, "r", encoding="utf-8") as fh:
+                    for line in fh:
+                        stripped = line.strip().lstrip("#").strip()
+                        if stripped:
+                            return stripped[:100]
+        except Exception:  # noqa: BLE001
+            pass
+        return "Markdown note"
+
+    def __repr__(self) -> str:
+        return f"PDVNote('{self._relative_path}')"
+
+
+# ---------------------------------------------------------------------------
 # PDVTree
 # ---------------------------------------------------------------------------
 

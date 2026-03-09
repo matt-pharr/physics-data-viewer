@@ -61,6 +61,18 @@ export interface CellTab {
   name?: string;
 }
 
+/** An open markdown note tab in the Write pane. */
+export interface NoteTab {
+  /** Tree path of the markdown node (unique identifier). */
+  id: string;
+  /** Current editor content. */
+  content: string;
+  /** Last-saved content (for dirty detection). */
+  savedContent: string;
+  /** Display name for the tab. */
+  name: string;
+}
+
 /** Tree node shape enriched with UI state used by the Tree component. */
 export interface TreeNodeData extends NodeDescriptor {
   hasChildren: boolean;

@@ -12,6 +12,7 @@ const TYPE_ICONS: Record<string, string> = {
   folder: '📁',
   file: '📄',
   script: '📜',
+  markdown: '📝',
   ndarray: '🔢',
   dataframe: '📊',
   series: '📈',
