@@ -1,0 +1,164 @@
+/* tree.css — Tree panel: header, rows, toggles, badges, spinner, empty states */
+
+/* ===== TREE ===== */
+.tree-container {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  overflow: hidden;
+}
+
+.tree-header {
+  display: flex;
+  padding: 8px 12px;
+  background-color: var(--bg-tertiary);
+  border-bottom: 1px solid var(--border-color);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  flex-shrink: 0;
+  position: sticky;
+  top: 0;
+  z-index: 1;
+}
+
+.tree-col {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  padding: 4px 8px;
+}
+
+.tree-col.key {
+  flex: 2;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.tree-col.type { flex: 1; }
+.tree-col.preview { flex: 2; color: var(--text-secondary); }
+
+.tree-content {
+  flex: 1;
+  overflow-y: auto;
+}
+
+.tree-loading,
+.tree-error,
+.tree-empty {
+  padding: 24px;
+  text-align: center;
+  color: var(--text-secondary);
+}
+
+.tree-error {
+  color: var(--error);
+}
+
+.tree-row {
+  display: flex;
+  align-items: center;
+  height: 32px;
+  padding: 0;
+  font-family: var(--font-mono);
+  font-size: 13px;
+  color: var(--text-primary);
+  cursor: default;
+  border-bottom: 1px solid var(--bg-primary);
+}
+
+.tree-row:hover {
+  background-color: var(--bg-hover);
+}
+
+.tree-row.selected {
+  background-color: var(--bg-tertiary);
+  border-left: 3px solid var(--accent);
+}
+
+.tree-toggle {
+  width: 16px;
+  height: 16px;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 10px;
+}
+
+.tree-toggle:hover:not(:disabled) {
+  color: var(--accent);
+}
+
+.tree-toggle:disabled {
+  cursor: default;
+  opacity: 0;
+}
+
+.tree-toggle.hidden {
+  visibility: hidden;
+}
+
+.tree-icon {
+  font-size: 14px;
+  line-height: 1;
+}
+
+.tree-key-text {
+  font-weight: 500;
+  color: var(--accent);
+}
+
+.tree-type-badge {
+  display: inline-block;
+  padding: 2px 6px;
+  background-color: var(--bg-tertiary);
+  border-radius: 3px;
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+.tree-type-badge + .tree-type-badge {
+  margin-left: 4px;
+}
+.tree-type-badge.subtle {
+  background-color: var(--bg-secondary);
+  color: var(--text-secondary);
+}
+
+.spinner {
+  display: inline-block;
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+.tree-empty,
+.console-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  color: var(--text-secondary);
+  text-align: center;
+  padding: 24px;
+}
+
+.tree-empty p,
+.console-empty p {
+  margin: 4px 0;
+}
+
+.hint {
+  font-size: 12px;
+  color: var(--text-hint);
+}

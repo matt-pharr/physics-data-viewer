@@ -33,7 +33,8 @@ import type {
   TreeNodeData,
 } from '../types';
 import { resolveShortcuts } from '../shortcuts';
-import { normalizeLoadedCodeCells, normalizeRecentProjects } from './app-utils';
+import { normalizeLoadedCodeCells, normalizeRecentProjects, mergeConfigUpdate } from './app-utils';
+import { CELL_UNDO_LIMIT, NAMESPACE_REFRESH_INTERVAL_MS } from './constants';
 import { useCodeCellsPersistence } from './useCodeCellsPersistence';
 import { useKeyboardShortcuts } from './useKeyboardShortcuts';
 import { useKernelLifecycle } from './useKernelLifecycle';
@@ -226,7 +227,7 @@ const App: React.FC = () => {
     cellUndoStack.current = [
       ...cellUndoStack.current,
       { tabs: cellTabs, activeTabId: activeCellTab },
-    ].slice(-20); // keep at most 20 levels
+    ].slice(-CELL_UNDO_LIMIT); // keep at most CELL_UNDO_LIMIT levels
     setCellTabs((prev) =>
       prev.map((tab) => (tab.id === activeCellTab ? { ...tab, code: '' } : tab)),
     );
@@ -241,7 +242,7 @@ const App: React.FC = () => {
     cellUndoStack.current = [
       ...cellUndoStack.current,
       { tabs: cellTabs, activeTabId: activeCellTab },
-    ].slice(-20);
+    ].slice(-CELL_UNDO_LIMIT);
     setCellTabs((prev) => {
       const next = prev.filter((t) => t.id !== id);
       if (next.length === 0) {
@@ -280,7 +281,7 @@ const App: React.FC = () => {
 
   const handleSettingsSave = async (updates: Partial<Config>) => {
     await window.pdv.config.set(updates);
-    const mergedConfig = config ? { ...config, ...updates, settings: { ...config.settings, ...updates.settings, appearance: { ...config.settings?.appearance, ...updates.settings?.appearance } } } : null;
+    const mergedConfig = config ? mergeConfigUpdate(config, updates) : null;
     setConfig(mergedConfig);  // reactive effect applies theme
     if (
       mergedConfig &&
@@ -501,7 +502,7 @@ const App: React.FC = () => {
                     disabled={kernelStatus !== 'ready'}
                     autoRefresh={autoRefreshNamespace}
                     refreshToken={namespaceRefreshToken}
-                    refreshInterval={2000}
+                    refreshInterval={NAMESPACE_REFRESH_INTERVAL_MS}
                     onToggleAutoRefresh={setAutoRefreshNamespace}
                   />
                 )}

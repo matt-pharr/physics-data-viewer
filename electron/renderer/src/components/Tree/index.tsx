@@ -10,6 +10,7 @@ import { treeService, type TreeNodeData } from '../../services/tree';
 import { TreeNodeRow } from './TreeNodeRow';
 import { ContextMenu } from './ContextMenu';
 import { findNode, flattenTree, updateNodeImmut } from './tree-utils';
+import { TREE_PERSIST_DEBOUNCE_MS } from '../../app/constants';
 import type { Shortcuts } from '../../shortcuts';
 import { matchesShortcut } from '../../shortcuts';
 
@@ -85,7 +86,7 @@ export const Tree: React.FC<TreeProps> = ({ kernelId, disabled = false, refreshT
       } catch (error) {
         console.warn('Failed to persist expanded paths:', error);
       }
-    }, 500); // Debounce saves to avoid excessive writes
+    }, TREE_PERSIST_DEBOUNCE_MS);
     
     return () => clearTimeout(timeoutId);
   }, [nodes]); // Save whenever nodes change (expand/collapse)

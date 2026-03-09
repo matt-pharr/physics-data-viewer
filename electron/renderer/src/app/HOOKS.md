@@ -70,7 +70,7 @@ Several hooks bump integer "refresh tokens" (e.g. `setTreeRefreshToken(t => t + 
 
 ### `useCodeCellsPersistence({ cellTabs, activeCellTab, setCellTabs, setActiveCellTab })`
 
-**Purpose**: Loads persisted code cell tabs from `~/.PDV/state/code-cells.json` on mount and saves them back on every change (debounced 500ms).
+**Purpose**: Loads persisted code cell tabs from `~/.PDV/state/code-cells.json` on mount and saves them back on every change (debounced by `CODE_CELL_SAVE_DEBOUNCE_MS`).
 
 **Takes**: Code editor state and setters.
 
@@ -189,5 +189,25 @@ Several hooks bump integer "refresh tokens" (e.g. `setTreeRefreshToken(t => t + 
 
 1. **No circular dependencies** — hooks receive state as props and only call provided setters; they never import or call each other.
 2. **One subscription owner** — only `useKernelSubscriptions` registers push subscriptions. Other hooks read state but don't subscribe.
-3. **Refresh tokens as triggers** — child components (Tree, NamespaceView, ModulesPanel) receive token props and refetch when they change. They don't subscribe to push events directly.
+3. **Refresh tokens as triggers** — child components (Tree, NamespaceView, ModulesPanel) receive token props and refetch when they change. They don't subscribe to push events directly. Incrementing a token (e.g. `setTreeRefreshToken(t => t + 1)`) causes any `useEffect` that lists it as a dependency to re-run, acting as a lightweight pub/sub without a state-management library.
 4. **Ref-based stability** — `useKeyboardShortcuts` stores frequently-changing values in refs to avoid re-registering the global listener on every render.
+
+---
+
+## Shared Utility Files
+
+### `app/constants.ts`
+
+Named constants for magic numbers used across hooks and components:
+- `CELL_UNDO_LIMIT` — max undo snapshots for cell clear/close
+- `CODE_CELL_SAVE_DEBOUNCE_MS` — persistence write delay
+- `TREE_PERSIST_DEBOUNCE_MS` — tree expansion persistence delay
+- `NAMESPACE_REFRESH_INTERVAL_MS` — auto-refresh polling interval
+- `MAX_RECENT_PROJECTS` — cap on remembered project paths
+
+### `app/app-utils.ts`
+
+Pure helper functions with no React dependency:
+- `normalizeLoadedCodeCells(data)` — validates raw JSON from project files into typed `CellTab[]`
+- `normalizeRecentProjects(data)` — deduplicates and caps the recent-project list
+- `mergeConfigUpdate(base, updates)` — deep-merges partial config updates (handles nested `settings.appearance`)

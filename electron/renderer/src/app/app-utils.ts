@@ -5,10 +5,8 @@
  * config merge helpers. These are side-effect-free and have no React dependency.
  */
 
-import type { CellTab } from '../types';
-
-/** Maximum recent projects to retain. */
-const MAX_RECENT_PROJECTS = 10;
+import type { CellTab, Config } from '../types';
+import { MAX_RECENT_PROJECTS } from './constants';
 
 /**
  * Normalize persisted code-cell payloads from config/project files into a safe
@@ -58,4 +56,25 @@ export function normalizeRecentProjects(data: unknown): string[] {
     if (next.length >= MAX_RECENT_PROJECTS) break;
   }
   return next;
+}
+
+/**
+ * Deep-merge a partial config update into the current config.
+ *
+ * Handles nested `settings` and `settings.appearance` without requiring
+ * callers to manually spread every level.
+ */
+export function mergeConfigUpdate(base: Config, updates: Partial<Config>): Config {
+  return {
+    ...base,
+    ...updates,
+    settings: {
+      ...base.settings,
+      ...updates.settings,
+      appearance: {
+        ...base.settings?.appearance,
+        ...updates.settings?.appearance,
+      },
+    },
+  };
 }

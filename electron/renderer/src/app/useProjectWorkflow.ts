@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState, type Dispatch, type MutableRefObject, type SetStateAction } from 'react';
 import type { CellTab, Config, MenuActionPayload } from '../types';
 import { normalizeRecentProjects } from './app-utils';
+import { MAX_RECENT_PROJECTS } from './constants';
 
 interface UnsavedDialogContext {
   reason: 'close' | 'open';
@@ -61,7 +62,7 @@ export function useProjectWorkflow(options: UseProjectWorkflowOptions) {
 
   const rememberRecentProject = useCallback(async (projectDir: string) => {
     const recentProjects = normalizeRecentProjects(config?.recentProjects);
-    const nextRecentProjects = [projectDir, ...recentProjects.filter((entry) => entry !== projectDir)].slice(0, 10);
+    const nextRecentProjects = [projectDir, ...recentProjects.filter((entry) => entry !== projectDir)].slice(0, MAX_RECENT_PROJECTS);
     try {
       const updated = await window.pdv.config.set({ recentProjects: nextRecentProjects });
       setConfig(updated);
