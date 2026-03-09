@@ -707,26 +707,6 @@ describe("Step 5 IPC handlers", () => {
     expect(result).toBe("/tmp/config.toml");
   });
 
-  it("script:reload sends pdv.script.register with parent_path and name", async () => {
-    const { commRouter } = setup();
-    (commRouter.request as unknown as ReturnType<typeof vi.fn>).mockResolvedValue(
-      makeMessage({})
-    );
-
-    const reload = getHandler(IPC.script.reload);
-    const result = (await reload({}, "scripts.analysis")) as { success: boolean };
-
-    expect(commRouter.request).toHaveBeenCalledWith(
-      PDVMessageType.SCRIPT_REGISTER,
-      expect.objectContaining({
-        parent_path: "scripts",
-        name: "analysis",
-        reload: true,
-      })
-    );
-    expect(result.success).toBe(true);
-  });
-
   it("project:save delegates to ProjectManager.save", async () => {
     const { projectManager } = setup();
     const save = getHandler(IPC.project.save);

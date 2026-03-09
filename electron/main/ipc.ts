@@ -71,7 +71,6 @@ export const IPC = {
   /** Script tooling channels. */
   script: {
     edit: "script:edit",
-    reload: "script:reload",
   },
   /** Markdown note channels. */
   note: {
@@ -830,13 +829,6 @@ export interface PDVApi {
      * @returns Operation status.
      */
     edit(kernelId: string, scriptPath: string): Promise<ScriptOperationResult>;
-    /**
-     * Re-register a script with reload semantics.
-     *
-     * @param scriptPath - Script path to reload.
-     * @returns Operation status.
-     */
-    reload(scriptPath: string): Promise<ScriptOperationResult>;
   };
 
   /** Markdown note operations. */

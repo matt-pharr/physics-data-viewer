@@ -163,6 +163,8 @@ export const Tree: React.FC<TreeProps> = ({ kernelId, disabled = false, refreshT
     if (disabled) return;
     if (node.type === 'markdown') {
       onAction?.('open_note', node);
+    } else if (node.type === 'script') {
+      onAction?.('run', node);
     }
   };
 

@@ -460,7 +460,6 @@ export interface PDVApi {
   };
   script: {
     edit(kernelId: string, scriptPath: string): Promise<{ success: boolean; error?: string }>;
-    reload(scriptPath: string): Promise<{ success: boolean; error?: string }>;
   };
   note: {
     save(kernelId: string, treePath: string, content: string): Promise<{ success: boolean; error?: string }>;

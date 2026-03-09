@@ -375,15 +375,21 @@ const App: React.FC = () => {
       await openNote(node);
     } else if (action === 'run' && node.type === 'script') {
       setScriptDialog(node);
-    } else if ((action === 'edit' || action === 'view_source') && node.type === 'script') {
+    } else if (action === 'run_defaults' && node.type === 'script') {
+      if (!currentKernelId) return;
+      const code = `pdv_tree[${JSON.stringify(node.path)}].run()`;
+      await handleExecute(code, {
+        kind: 'tree-script',
+        label: node.path,
+        scriptPath: node.path,
+      });
+    } else if (action === 'edit' && node.type === 'script') {
       try {
         if (!currentKernelId) return;
         await window.pdv.script.edit(currentKernelId, node.path);
       } catch (error) {
         console.error('[App] Failed to open editor:', error);
       }
-    } else if (action === 'reload' && node.type === 'script') {
-      await window.pdv.script.reload(node.path);
     } else if (action === 'copy_path') {
       const pyExpr = node.path
         ? node.path.split('.').reduce((acc, part) => `${acc}["${part}"]`, 'pdv_tree')

@@ -74,7 +74,6 @@ const api: PDVApi = {
   script: {
     edit: (kernelId, scriptPath) =>
       ipcRenderer.invoke(IPC.script.edit, kernelId, scriptPath),
-    reload: (scriptPath) => ipcRenderer.invoke(IPC.script.reload, scriptPath),
   },
   note: {
     save: (kernelId, treePath, content) =>

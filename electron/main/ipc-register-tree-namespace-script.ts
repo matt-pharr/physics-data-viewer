@@ -283,20 +283,6 @@ export function registerTreeNamespaceScriptIpcHandlers(
     return { success: true };
   });
 
-  ipcMain.handle(IPC.script.reload, async (_event, treePath: string) => {
-    const lastDot = treePath.lastIndexOf(".");
-    const parentPath = lastDot >= 0 ? treePath.slice(0, lastDot) : "";
-    const name = lastDot >= 0 ? treePath.slice(lastDot + 1) : treePath;
-    await commRouter.request(PDVMessageType.SCRIPT_REGISTER, {
-      parent_path: parentPath,
-      name,
-      relative_path: treePath,
-      language: "python",
-      reload: true,
-    });
-    return { success: true };
-  });
-
   ipcMain.handle(
     IPC.note.save,
     async (_event, kernelId: string, treePath: string, content: string) => {

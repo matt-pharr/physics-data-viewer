@@ -50,6 +50,7 @@ export const ContextMenu: React.FC<ContextMenuProps> = ({ x, y, node, shortcuts,
   }, [onClose]);
 
   const actionShortcuts: Partial<Record<string, string>> = {
+    run:       'Double-click',
     edit:      formatShortcutHint(shortcuts.treeEditScript),
     open_note: 'Double-click',
     print:     formatShortcutHint(shortcuts.treePrint),
@@ -97,9 +98,8 @@ export function getActionsForNode(node: TreeNodeData) {
   if (node.type === 'script') {
     actions.push(
       { id: 'run', label: 'Run...', disabled: false },
+      { id: 'run_defaults', label: 'Run defaults', disabled: false },
       { id: 'edit', label: 'Edit', disabled: false },
-      { id: 'reload', label: 'Reload', disabled: false },
-      { id: 'view_source', label: 'View Source', disabled: false },
     );
   } else if (node.type === 'markdown') {
     actions.push(
