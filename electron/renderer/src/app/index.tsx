@@ -15,6 +15,8 @@ import React, { useEffect, useMemo, useState, useRef, useCallback } from 'react'
 import { CodeCell } from '../components/CodeCell';
 import { Console } from '../components/Console';
 import { Tree } from '../components/Tree';
+import { ActivityBar } from '../components/ActivityBar';
+import { StatusBar } from '../components/StatusBar';
 import { EnvironmentSelector } from '../components/EnvironmentSelector';
 import { NamespaceView } from '../components/NamespaceView';
 import { ModulesPanel } from '../components/ModulesPanel';
@@ -31,6 +33,7 @@ import type {
   TreeNodeData,
 } from '../types';
 import { resolveShortcuts } from '../shortcuts';
+import { normalizeLoadedCodeCells, normalizeRecentProjects } from './app-utils';
 import { useCodeCellsPersistence } from './useCodeCellsPersistence';
 import { useKeyboardShortcuts } from './useKeyboardShortcuts';
 import { useKernelLifecycle } from './useKernelLifecycle';
@@ -45,56 +48,6 @@ type CodeCellExecutionError = {
   message: string;
   location?: { line?: number; column?: number };
 };
-
-/**
- * Normalize persisted code-cell payloads from config/project files into a safe
- * runtime shape expected by the renderer.
- */
-function normalizeLoadedCodeCells(data: unknown): { tabs: CellTab[]; activeTabId: number } {
-  const rawTabs =
-    Array.isArray(data)
-      ? data
-      : data && typeof data === 'object' && Array.isArray((data as { tabs?: unknown }).tabs)
-        ? ((data as { tabs: unknown[] }).tabs)
-        : [];
-
-  const tabs = rawTabs
-    .map((entry, index) => {
-      if (!entry || typeof entry !== 'object') {
-        return null;
-      }
-      const maybe = entry as Record<string, unknown>;
-      const code = typeof maybe.code === 'string' ? maybe.code : '';
-      const id = typeof maybe.id === 'number' ? maybe.id : index + 1;
-      return { id, code };
-    })
-    .filter((tab): tab is CellTab => tab !== null);
-  const normalizedTabs = tabs.length > 0 ? tabs : [{ id: 1, code: '' }];
-  const requestedActive =
-    data && typeof data === 'object' && typeof (data as { activeTabId?: unknown }).activeTabId === 'number'
-      ? (data as { activeTabId: number }).activeTabId
-      : normalizedTabs[0].id;
-  const activeTabId = normalizedTabs.some((tab) => tab.id === requestedActive)
-    ? requestedActive
-    : normalizedTabs[0].id;
-  return { tabs: normalizedTabs, activeTabId };
-}
-
-/** Normalize the recent-project list (unique, trimmed, max 10 entries). */
-function normalizeRecentProjects(data: unknown): string[] {
-  if (!Array.isArray(data)) return [];
-  const unique = new Set<string>();
-  const next: string[] = [];
-  for (const entry of data) {
-    if (typeof entry !== 'string') continue;
-    const trimmed = entry.trim();
-    if (!trimmed || unique.has(trimmed)) continue;
-    unique.add(trimmed);
-    next.push(trimmed);
-    if (next.length >= 10) break;
-  }
-  return next;
-}
 
 
 /** Root PDV application component rendered in the Electron renderer process. */
@@ -121,7 +74,7 @@ const App: React.FC = () => {
   } = useLayoutState();
 
   // -- Editor state ----------------------------------------------------------
-  const [CellTabs, setCellTabs] = useState<CellTab[]>([{ id: 1, code: '' }]);
+  const [cellTabs, setCellTabs] = useState<CellTab[]>([{ id: 1, code: '' }]);
   const [activeCellTab, setActiveCellTab] = useState(1);
   const [logs, setLogs] = useState<LogEntry[]>([]);
 
@@ -145,7 +98,11 @@ const App: React.FC = () => {
   type CellSnapshot = { tabs: CellTab[]; activeTabId: number };
   const cellUndoStack = useRef<CellSnapshot[]>([]);
 
-  // -- Refresh tokens (bumped by push subscriptions to trigger re-fetches) --
+  /**
+   * Refresh tokens — integer counters bumped to signal child components to re-fetch data.
+   * Incrementing a token causes any useEffect that lists it as a dependency to re-run.
+   * This is the renderer's lightweight alternative to a pub/sub or state-management library.
+   */
   const [autoRefreshNamespace, setAutoRefreshNamespace] = useState(false);
   const [namespaceRefreshToken, setNamespaceRefreshToken] = useState(0);
   const [treeRefreshToken, setTreeRefreshToken] = useState(0);
@@ -163,7 +120,7 @@ const App: React.FC = () => {
 
   const shortcuts = useMemo(() => resolveShortcuts(config?.settings?.shortcuts), [config]);
   useCodeCellsPersistence({
-    cellTabs: CellTabs,
+    cellTabs: cellTabs,
     activeCellTab,
     setCellTabs,
     setActiveCellTab,
@@ -268,7 +225,7 @@ const App: React.FC = () => {
     // Snapshot before clearing so Cmd+Z can restore
     cellUndoStack.current = [
       ...cellUndoStack.current,
-      { tabs: CellTabs, activeTabId: activeCellTab },
+      { tabs: cellTabs, activeTabId: activeCellTab },
     ].slice(-20); // keep at most 20 levels
     setCellTabs((prev) =>
       prev.map((tab) => (tab.id === activeCellTab ? { ...tab, code: '' } : tab)),
@@ -283,7 +240,7 @@ const App: React.FC = () => {
     // Snapshot before closing so Cmd+Z can restore
     cellUndoStack.current = [
       ...cellUndoStack.current,
-      { tabs: CellTabs, activeTabId: activeCellTab },
+      { tabs: cellTabs, activeTabId: activeCellTab },
     ].slice(-20);
     setCellTabs((prev) => {
       const next = prev.filter((t) => t.id !== id);
@@ -308,7 +265,7 @@ const App: React.FC = () => {
 
   useKeyboardShortcuts({
     shortcuts,
-    cellTabs: CellTabs,
+    cellTabs: cellTabs,
     activeCellTab,
     cellUndoStack,
     setCellTabs,
@@ -410,7 +367,7 @@ const App: React.FC = () => {
       typeof crypto !== 'undefined' && 'randomUUID' in crypto
         ? crypto.randomUUID()
         : `log-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
-    const activeTab = CellTabs.find((tab) => tab.id === activeCellTab);
+    const activeTab = cellTabs.find((tab) => tab.id === activeCellTab);
     const origin: KernelExecutionOrigin = originOverride ?? {
       kind: 'code-cell',
       label: activeTab?.name?.trim() ? activeTab.name : `Tab ${activeCellTab}`,
@@ -485,7 +442,7 @@ const App: React.FC = () => {
   } = useProjectWorkflow({
     kernelStatus,
     currentProjectDir,
-    cellTabs: CellTabs,
+    cellTabs: cellTabs,
     activeCellTab,
     config,
     setConfig,
@@ -505,71 +462,14 @@ const App: React.FC = () => {
       <main className="app-main">
 
         {/* Activity bar — always visible */}
-        <nav className="activity-bar">
-          <div className="activity-bar-top">
-            <button
-              className={`activity-btn${leftSidebarOpen && leftPanel === 'tree' ? ' active' : ''}`}
-              onClick={() => handleActivityBarClick('tree')}
-              title="Tree (Cmd+B)"
-            >
-              <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-                <line x1="4" y1="3" x2="4" y2="17" />
-                <line x1="4" y1="6" x2="10" y2="6" />
-                <line x1="4" y1="11" x2="10" y2="11" />
-                <line x1="4" y1="16" x2="10" y2="16" />
-                <rect x="10" y="4" width="6" height="4" rx="1" />
-                <rect x="10" y="9" width="6" height="4" rx="1" />
-                <rect x="10" y="14" width="6" height="4" rx="1" />
-              </svg>
-            </button>
-            <button
-              className={`activity-btn${leftSidebarOpen && leftPanel === 'namespace' ? ' active' : ''}`}
-              onClick={() => handleActivityBarClick('namespace')}
-              title="Namespace"
-            >
-              <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M7 4C5.5 4 4.5 5 4.5 6.5v2C4.5 10 3.8 10.5 2 11c1.8 0.5 2.5 1 2.5 2.5v2C4.5 17 5.5 16 7 16" />
-                <path d="M13 4c1.5 0 2.5 1 2.5 2.5v2C15.5 10 16.2 10.5 18 11c-1.8 0.5-2.5 1-2.5 2.5v2C15.5 17 14.5 16 13 16" />
-                <circle cx="10" cy="11" r="1.5" fill="currentColor" stroke="none" />
-              </svg>
-            </button>
-            <button
-              className={`activity-btn${rightSidebarOpen && rightPanel === 'imported' ? ' active' : ''}`}
-              onClick={() => handleActivityBarClick('imported')}
-              title="Modules"
-            >
-              <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-                <polyline points="16,6.5 10,3.5 4,6.5 10,9.5 16,6.5" />
-                <polyline points="4,6.5 4,13.5 10,16.5 10,9.5" />
-                <polyline points="16,6.5 16,13.5 10,16.5" />
-              </svg>
-            </button>
-            <button
-              className={`activity-btn${rightSidebarOpen && rightPanel === 'library' ? ' active' : ''}`}
-              onClick={() => handleActivityBarClick('library')}
-              title="Module Library"
-            >
-              <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-                <polyline points="4,11 4,16 16,16 16,11" />
-                <line x1="2" y1="11" x2="18" y2="11" />
-                <line x1="10" y1="3" x2="10" y2="9" />
-                <polyline points="7,6 10,9 13,6" />
-              </svg>
-            </button>
-          </div>
-          <div className="activity-bar-bottom">
-            <button
-              className="activity-btn"
-              onClick={() => { setSettingsInitialTab('general'); setShowSettings(true); }}
-              title="Settings"
-            >
-              <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-                <circle cx="10" cy="10" r="2.5" />
-                <path d="M10 2.5v1.5M10 16v1.5M2.5 10H4M16 10h1.5M4.4 4.4l1.1 1.1M14.5 14.5l1.1 1.1M4.4 15.6l1.1-1.1M14.5 5.5l1.1-1.1" />
-              </svg>
-            </button>
-          </div>
-        </nav>
+        <ActivityBar
+          leftSidebarOpen={leftSidebarOpen}
+          leftPanel={leftPanel}
+          rightSidebarOpen={rightSidebarOpen}
+          rightPanel={rightPanel}
+          onActivityBarClick={handleActivityBarClick}
+          onSettingsClick={() => { setSettingsInitialTab('general'); setShowSettings(true); }}
+        />
 
         {/* Left sidebar — collapsible */}
         {leftSidebarOpen && (
@@ -631,7 +531,7 @@ const App: React.FC = () => {
               <div className="horizontal-resizer" onMouseDown={startHorizontalDrag} />
               <div className="editor-wrapper" style={{ height: `${editorHeight}px` }}>
                 <CodeCell
-                  tabs={CellTabs.map((tab) => ({
+                  tabs={cellTabs.map((tab) => ({
                     ...tab,
                     onChange: (code: string) => handleCodeChange(tab.id, code),
                   }))}
@@ -730,30 +630,15 @@ const App: React.FC = () => {
       )}
 
       {/* Status bar */}
-        <footer className="status-bar">
-         <div className="status-left">
-           <span className="status-item">
-             <span className={`status-dot ${isExecuting ? 'busy' : 'idle'}`} />
-             <span>{isExecuting ? 'Busy' : 'Idle'}</span>
-           </span>
-           <span
-             className="status-item status-clickable"
-             onClick={() => { setSettingsInitialTab('runtime'); setShowSettings(true); }}
-             title="Click to change runtime"
-           >
-             {config?.pythonPath ?? config?.kernelSpec ?? 'python3'}
-           </span>
-           <span className="status-item">{currentProjectDir ?? 'Unsaved Project'}</span>
-         </div>
-         <div className="status-right">
-           <span className={`status-item ${kernelStatus === 'ready' ? 'status-connected' : kernelStatus === 'error' ? 'status-error' : ''}`}>
-             ● {kernelStatus === 'ready' ? 'Connected' : kernelStatus === 'starting' ? 'Starting...' : 'Disconnected'}
-           </span>
-           <span className="status-item">
-             Last: {lastDuration !== null ? `${Math.round(lastDuration)}ms` : '--'}
-           </span>
-         </div>
-       </footer>
+        <StatusBar
+          isExecuting={isExecuting}
+          pythonPath={config?.pythonPath}
+          kernelSpec={config?.kernelSpec}
+          currentProjectDir={currentProjectDir}
+          kernelStatus={kernelStatus}
+          lastDuration={lastDuration}
+          onRuntimeClick={() => { setSettingsInitialTab('runtime'); setShowSettings(true); }}
+        />
 
        {showEnvSelector && (
           <EnvironmentSelector

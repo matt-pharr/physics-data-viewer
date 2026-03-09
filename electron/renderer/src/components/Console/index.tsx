@@ -13,6 +13,7 @@ import { ansiToHtml } from './ansi';
 interface ConsoleProps {
   logs: LogEntry[];
   onClear: () => void;
+  /** Planned feature — not yet wired in App. */
   onExport?: () => void;
 }
 

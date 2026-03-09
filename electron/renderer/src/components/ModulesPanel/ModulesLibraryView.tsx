@@ -1,20 +1,6 @@
 import React from "react";
 import type { ModuleDescriptor } from "../../types";
-
-interface InstallDuplicate {
-  moduleName: string;
-  status: "up_to_date" | "update_available" | "incompatible_update";
-  currentVersion: string;
-  currentRevision?: string;
-  candidateVersion?: string;
-  candidateRevision?: string;
-}
-
-interface ImportConflict {
-  moduleId: string;
-  existingAlias: string;
-  suggestedAlias: string;
-}
+import type { ImportConflict, InstallDuplicate } from "./moduleUiHelpers";
 
 interface ModulesLibraryViewProps {
   projectDir: string | null;

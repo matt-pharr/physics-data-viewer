@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState, type Dispatch, type MutableRefObject, type SetStateAction } from 'react';
 import type { CellTab, Config, MenuActionPayload } from '../types';
+import { normalizeRecentProjects } from './app-utils';
 
 interface UnsavedDialogContext {
   reason: 'close' | 'open';
@@ -36,21 +37,6 @@ interface UseProjectWorkflowOptions {
   loadedProjectTabsRef: MutableRefObject<{ tabs: CellTab[]; activeTabId: number } | null>;
   /** Validates and normalizes raw code-cells.json data into typed CellTab[]. */
   normalizeLoadedCodeCells: (data: unknown) => { tabs: CellTab[]; activeTabId: number };
-}
-
-function normalizeRecentProjects(data: unknown): string[] {
-  if (!Array.isArray(data)) return [];
-  const unique = new Set<string>();
-  const next: string[] = [];
-  for (const entry of data) {
-    if (typeof entry !== 'string') continue;
-    const trimmed = entry.trim();
-    if (!trimmed || unique.has(trimmed)) continue;
-    unique.add(trimmed);
-    next.push(trimmed);
-    if (next.length >= 10) break;
-  }
-  return next;
 }
 
 export function useProjectWorkflow(options: UseProjectWorkflowOptions) {

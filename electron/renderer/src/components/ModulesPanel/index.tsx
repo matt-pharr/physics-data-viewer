@@ -15,6 +15,8 @@ import {
   getInputTabName,
   isModuleInputValue,
   sectionSettingKey,
+  type ImportConflict,
+  type InstallDuplicate,
   type ModuleInputDescriptor,
   type ModuleInputValue,
 } from "./moduleUiHelpers";
@@ -27,23 +29,6 @@ interface ModulesPanelProps {
   onExecute: (code: string) => Promise<void>;
   view: 'library' | 'imported';
   refreshToken?: number;
-}
-
-/** Pending import conflict awaiting user decision. */
-interface ImportConflict {
-  moduleId: string;
-  existingAlias: string;
-  suggestedAlias: string;
-}
-
-/** Pending install duplicate awaiting user acknowledgement. */
-interface InstallDuplicate {
-  moduleName: string;
-  status: "up_to_date" | "update_available" | "incompatible_update";
-  currentVersion: string;
-  currentRevision?: string;
-  candidateVersion?: string;
-  candidateRevision?: string;
 }
 
 /**
