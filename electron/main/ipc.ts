@@ -271,7 +271,7 @@ export interface TreeAddFileResult {
 }
 
 /**
- * Result returned by `script.edit` and `script.reload`.
+ * Result returned by `script.edit`.
  */
 export interface ScriptOperationResult {
   /** True when the operation succeeded. */
