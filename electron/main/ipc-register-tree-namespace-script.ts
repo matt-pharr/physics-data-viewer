@@ -186,7 +186,7 @@ export function registerTreeNamespaceScriptIpcHandlers(
         kernelWorkingDirs.set(kernelId, workingDir);
       }
       const safeName = noteName.trim().replace(/\s+/g, "_").replace(/[^a-zA-Z0-9_-]/g, "");
-      const noteDir = path.join(workingDir, ...targetPath.split(".").filter(Boolean));
+      const noteDir = path.join(workingDir, "tree", ...targetPath.split(".").filter(Boolean));
       await fs.mkdir(noteDir, { recursive: true });
       const notePath = path.join(noteDir, safeName + ".md");
 
@@ -306,8 +306,11 @@ export function registerTreeNamespaceScriptIpcHandlers(
         const segments = treePath.split(".").filter(Boolean);
         const lastSeg = segments.pop();
         if (!lastSeg) throw new Error("Invalid tree path");
-        const noteDir = segments.length > 0 ? path.join(workingDir, ...segments) : workingDir;
+        const noteDir = segments.length > 0
+          ? path.join(workingDir, "tree", ...segments)
+          : path.join(workingDir, "tree");
         const filePath = path.join(noteDir, lastSeg + ".md");
+        await fs.mkdir(noteDir, { recursive: true });
         await fs.writeFile(filePath, content, "utf-8");
         return { success: true };
       } catch (err) {
@@ -325,7 +328,9 @@ export function registerTreeNamespaceScriptIpcHandlers(
         const segments = treePath.split(".").filter(Boolean);
         const lastSeg = segments.pop();
         if (!lastSeg) throw new Error("Invalid tree path");
-        const noteDir = segments.length > 0 ? path.join(workingDir, ...segments) : workingDir;
+        const noteDir = segments.length > 0
+          ? path.join(workingDir, "tree", ...segments)
+          : path.join(workingDir, "tree");
         const filePath = path.join(noteDir, lastSeg + ".md");
         const content = await fs.readFile(filePath, "utf-8");
         return { success: true, content };

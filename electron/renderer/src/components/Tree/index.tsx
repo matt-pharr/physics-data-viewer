@@ -159,8 +159,11 @@ export const Tree: React.FC<TreeProps> = ({ kernelId, disabled = false, refreshT
     }
   };
 
-  const handleDoubleClick = (_node: TreeNodeData) => {
-    // Reserved for future inline-edit or detail-panel feature.
+  const handleDoubleClick = (node: TreeNodeData) => {
+    if (disabled) return;
+    if (node.type === 'markdown') {
+      onAction?.('open_note', node);
+    }
   };
 
   const handleSelect = (node: TreeNodeData) => {

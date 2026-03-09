@@ -51,6 +51,7 @@ export const ContextMenu: React.FC<ContextMenuProps> = ({ x, y, node, shortcuts,
 
   const actionShortcuts: Partial<Record<string, string>> = {
     edit:      formatShortcutHint(shortcuts.treeEditScript),
+    open_note: 'Double-click',
     print:     formatShortcutHint(shortcuts.treePrint),
     copy_path: formatShortcutHint(shortcuts.treeCopyPath),
   };
