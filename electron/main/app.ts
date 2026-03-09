@@ -21,7 +21,7 @@ import { ProjectManager } from "./project-manager";
 import { ConfigStore } from "./config";
 import { registerIpcHandlers } from "./index";
 import { initializeAppMenu } from "./menu";
-import { IPC, type ConfirmCloseResponse } from "./ipc";
+import { IPC } from "./ipc";
 
 async function loadDevUrlWithRetry(
   win: BrowserWindow,
@@ -90,46 +90,6 @@ export async function createWindow(
 
   initializeAppMenu(win);
 
-  // macOS document-edited indicator (red dot in traffic light buttons).
-  // Starts as false (pristine); renderer toggles via lifecycle.setDocumentEdited.
-  win.setDocumentEdited(false);
-
-  // Allow renderer to control the document-edited indicator.
-  ipcMain.removeHandler(IPC.lifecycle.setDocumentEdited);
-  ipcMain.handle(IPC.lifecycle.setDocumentEdited, (_event, edited: boolean) => {
-    win.setDocumentEdited(edited);
-  });
-
-  // Intercept window close to show unsaved-changes confirmation.
-  let closeConfirmed = false;
-  win.on("close", (event) => {
-    if (closeConfirmed) {
-      return; // Already confirmed — allow close to proceed.
-    }
-    event.preventDefault();
-    // Ask renderer to show the unsaved-changes dialog.
-    win.webContents.send(IPC.lifecycle.confirmClose);
-  });
-
-  // Renderer responds with user's decision via invoke.
-  // Guard against duplicate registration if the window is recreated.
-  ipcMain.removeHandler(IPC.lifecycle.closeResponse);
-  ipcMain.handle(IPC.lifecycle.closeResponse, (_event, response: ConfirmCloseResponse) => {
-    if (response.action === "cancel") {
-      // User cancelled — reset quitting flag so Cmd+Q works again.
-      quittingCancelled();
-      return true;
-    }
-    // "save" or "discard" — renderer handles saving before responding.
-    closeConfirmed = true;
-    win.close();
-    return true;
-  });
-  win.on("closed", () => {
-    ipcMain.removeHandler(IPC.lifecycle.closeResponse);
-    ipcMain.removeHandler(IPC.lifecycle.setDocumentEdited);
-  });
-
   const rendererIndexPath = path.join(
     __dirname,
     "..",
@@ -157,14 +117,8 @@ export async function createWindow(
   return win;
 }
 
-// Module-level shutdown flag so that cancel from the unsaved-changes dialog
-// can reset it, allowing subsequent Cmd+Q to re-run kernel cleanup.
+// Module-level shutdown flag to prevent re-entrant kernel cleanup during quit.
 let isShuttingDownGlobal = false;
-
-/** Called by close-response handler when user cancels the close. */
-function quittingCancelled(): void {
-  isShuttingDownGlobal = false;
-}
 
 /**
  * Register core Electron app events.

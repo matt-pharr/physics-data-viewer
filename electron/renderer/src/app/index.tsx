@@ -25,7 +25,6 @@ import { CreateScriptDialog } from '../components/Tree/CreateScriptDialog';
 import { CreateNoteDialog } from '../components/Tree/CreateNoteDialog';
 import { WriteTab } from '../components/WriteTab';
 import { SettingsDialog } from '../components/SettingsDialog';
-import { UnsavedChangesDialog } from '../components/UnsavedChangesDialog';
 import { WelcomeScreen } from '../components/WelcomeScreen';
 import type {
   CellTab,
@@ -538,19 +537,15 @@ const App: React.FC = () => {
     }
   };
 
-  // Whether the session has no unsaved work (no project, no code, no logs, no notes).
+  // Whether the session has no user work (no project, no code, no logs, no notes).
   const isPristine = currentProjectDir === null
     && cellTabs.every((t) => !t.code.trim())
     && logs.length === 0
     && noteTabs.length === 0;
 
   const {
-    unsavedDialogContext,
     handleSaveProject,
     handleOpenProject,
-    handleUnsavedSave,
-    handleUnsavedDiscard,
-    handleUnsavedCancel,
     executeOpenProject,
   } = useProjectWorkflow({
     kernelStatus,
@@ -568,15 +563,9 @@ const App: React.FC = () => {
     loadedProjectTabsRef,
     normalizeLoadedCodeCells,
     flushDirtyNotes,
-    isPristine,
   });
 
   // -- Welcome screen (pristine session) ------------------------------------
-
-  // Sync macOS document-edited indicator with pristine state.
-  useEffect(() => {
-    window.pdv?.lifecycle?.setDocumentEdited(!isPristine);
-  }, [isPristine]);
 
   const recentProjects = useMemo(
     () => normalizeRecentProjects(config?.recentProjects),
@@ -770,14 +759,6 @@ const App: React.FC = () => {
         )}
 
       </main>
-
-      {unsavedDialogContext && (
-        <UnsavedChangesDialog
-          onSave={() => void handleUnsavedSave()}
-          onDiscard={() => void handleUnsavedDiscard()}
-          onCancel={() => void handleUnsavedCancel()}
-        />
-      )}
 
       {scriptDialog && currentKernelId && (
         <ScriptDialog

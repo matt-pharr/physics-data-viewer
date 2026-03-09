@@ -1,4 +1,7 @@
 /* base.css — Reset, CSS custom properties, html/body defaults, scrollbar */
+/* Color variables are intentionally NOT set here. They are applied by the
+   blocking theme script in index.html (from localStorage cache or the Dark+
+   fallback) so that every paint uses a real theme — never stale defaults. */
 
 * {
   box-sizing: border-box;
@@ -7,20 +10,6 @@
 }
 
 :root {
-  --bg-primary: #1e1e1e;
-  --bg-secondary: #252526;
-  --bg-tertiary: #2d2d30;
-  --bg-hover: #3e3e42;
-  --border-color: #3e3e42;
-  --text-primary: #d4d4d4;
-  --text-secondary: #858585;
-  --text-hint: #6e6e6e;
-  --accent: #4ec9b0;
-  --accent-hover: #5fd4be;
-  --error: #f48771;
-  --warning: #dcdcaa;
-  --warning-hover: #e4e4b4;
-  --success: #4ec9b0;
   --font-mono: 'Consolas', 'Monaco', 'JetBrains Mono', 'Courier New', monospace;
   --font-sans: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
   --tree-indent-size: 20px;

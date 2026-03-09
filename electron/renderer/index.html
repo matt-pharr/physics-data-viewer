@@ -6,6 +6,60 @@
     <!-- <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self' ws://localhost:* http://localhost:*" /> -->
     <!-- The above line addresses a security warning in the html console but also breaks things. Is it because of the monaco editor? -->
     <title>Physics Data Viewer</title>
+    <style>
+      /* Safety-net background before the blocking script runs. */
+      html { background-color: #1e1e1e; }
+    </style>
+    <script>
+      // Apply theme colors synchronously before first paint.
+      // Uses the localStorage cache written by useThemeManager on every theme
+      // change. Falls back to Dark+ (VSCode) on first launch / empty cache.
+      (function () {
+        var DARK_PLUS = {
+          'bg-primary':   '#1e1e1e',
+          'bg-secondary': '#252526',
+          'bg-tertiary':  '#2d2d30',
+          'bg-hover':     '#2a2d2e',
+          'border-color': '#474747',
+          'text-primary':   '#d4d4d4',
+          'text-secondary': '#858585',
+          'text-hint':      '#5a5a5a',
+          'accent':       '#007acc',
+          'accent-hover': '#1a8fd1',
+          'error':        '#f48771',
+          'warning':      '#dcdcaa',
+          'warning-hover':'#e4e4b4',
+          'success':      '#4ec9b0'
+        };
+
+        function apply(colors) {
+          var root = document.documentElement;
+          for (var key in colors) {
+            if (Object.prototype.hasOwnProperty.call(colors, key)) {
+              root.style.setProperty('--' + key, colors[key]);
+            }
+          }
+          root.style.backgroundColor = colors['bg-primary'] || '#1e1e1e';
+        }
+
+        // Always lay down the default palette first so semantic variables
+        // (--warning, --success, etc.) are defined even when the cached
+        // theme omits them.
+        apply(DARK_PLUS);
+
+        try {
+          var raw = localStorage.getItem('pdv-theme-cache');
+          if (!raw) return;
+          var data = JSON.parse(raw);
+          var cached = data.colors;
+          if (data.followSystem) {
+            var prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+            cached = prefersDark ? data.darkColors : data.lightColors;
+          }
+          if (cached) apply(cached);
+        } catch (e) { /* ignore corrupt cache */ }
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>

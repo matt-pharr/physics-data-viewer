@@ -2,6 +2,9 @@ import { useEffect, useState } from 'react';
 import type { Config } from '../types';
 import { BUILTIN_THEMES, applyThemeColors, applyFontSettings, getMonacoTheme, resolveThemeColors } from '../themes';
 
+/** localStorage key used by the blocking theme script in index.html. */
+const THEME_CACHE_KEY = 'pdv-theme-cache';
+
 /** Options for {@link useThemeManager}. */
 interface UseThemeManagerOptions {
   /** App configuration containing settings.appearance and settings.fonts. */
@@ -13,6 +16,9 @@ interface UseThemeManagerOptions {
  *
  * Tracks `prefers-color-scheme` and applies the correct theme palette
  * whenever `config.settings.appearance` or the system preference changes.
+ * After every application, the resolved colors are written to localStorage
+ * so the blocking script in `index.html` can apply them before first paint
+ * on the next launch.
  *
  * @returns The Monaco theme name to pass to CodeCell.
  */
@@ -35,14 +41,21 @@ export function useThemeManager({ config }: UseThemeManagerOptions): string {
     if (!config?.settings?.appearance) return;
     const app = config.settings.appearance;
     if (app.followSystemTheme) {
-      const themeName = systemPrefersDark ? app.darkTheme : app.lightTheme;
-      const colors = resolveThemeColors(themeName, []);
+      const darkColors = resolveThemeColors(app.darkTheme, []);
+      const lightColors = resolveThemeColors(app.lightTheme, []);
+      const colors = systemPrefersDark ? darkColors : lightColors;
       if (colors) {
         applyThemeColors(colors);
-        setMonacoTheme(getMonacoTheme(themeName ?? '', BUILTIN_THEMES));
+        setMonacoTheme(getMonacoTheme(
+          (systemPrefersDark ? app.darkTheme : app.lightTheme) ?? '', BUILTIN_THEMES,
+        ));
       }
+      cacheTheme({ followSystem: true, darkColors, lightColors });
     } else {
-      if (app.colors) applyThemeColors(app.colors);
+      if (app.colors) {
+        applyThemeColors(app.colors);
+        cacheTheme({ followSystem: false, colors: app.colors });
+      }
       setMonacoTheme(getMonacoTheme(app.themeName ?? '', BUILTIN_THEMES));
     }
   }, [config, systemPrefersDark]);
@@ -54,4 +67,19 @@ export function useThemeManager({ config }: UseThemeManagerOptions): string {
   }, [config]);
 
   return monacoTheme;
+}
+
+/**
+ * Persist resolved theme colors to localStorage so the blocking script in
+ * `index.html` can apply them before first paint on the next launch.
+ */
+function cacheTheme(entry: {
+  followSystem: boolean;
+  colors?: Record<string, string>;
+  darkColors?: Record<string, string>;
+  lightColors?: Record<string, string>;
+}): void {
+  try {
+    localStorage.setItem(THEME_CACHE_KEY, JSON.stringify(entry));
+  } catch { /* storage full or unavailable — non-critical */ }
 }
