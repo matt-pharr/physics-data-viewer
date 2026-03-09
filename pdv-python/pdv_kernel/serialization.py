@@ -83,14 +83,16 @@ def detect_kind(value: Any) -> str:
     ndarray/dataframe/series values fall through to ``KIND_UNKNOWN``.
     """
     # Lazy import to avoid circular dependency and optional deps
-    from pdv_kernel.tree import PDVTree, PDVScript, PDVNote  # noqa: PLC0415
+    from pdv_kernel.tree import PDVTree, PDVScript, PDVNote, PDVFile  # noqa: PLC0415
 
     if isinstance(value, PDVTree):
         return KIND_FOLDER
-    if isinstance(value, PDVScript):
-        return KIND_SCRIPT
-    if isinstance(value, PDVNote):
-        return KIND_MARKDOWN
+    if isinstance(value, PDVFile):
+        if isinstance(value, PDVScript):
+            return KIND_SCRIPT
+        if isinstance(value, PDVNote):
+            return KIND_MARKDOWN
+        return KIND_UNKNOWN
     # bool must be checked before int (bool is a subclass of int)
     if isinstance(value, bool):
         return KIND_SCALAR
@@ -170,6 +172,13 @@ def serialize_node(
     import shutil
 
     from pdv_kernel.environment import ensure_parent, working_dir_tree_path  # noqa: PLC0415
+    from pdv_kernel.tree import PDVFile, PDVScript  # noqa: PLC0415
+
+    # File extension and format for each PDVFile subclass
+    _FILE_KIND_MAP: dict[str, tuple[str, str]] = {
+        KIND_SCRIPT:   (".py", FORMAT_PY_SCRIPT),
+        KIND_MARKDOWN: (".md", FORMAT_MARKDOWN),
+    }
 
     kind = detect_kind(value)
     now = datetime.datetime.now(datetime.timezone.utc).isoformat().replace("+00:00", "Z")
@@ -198,41 +207,25 @@ def serialize_node(
         descriptor["storage"] = {"backend": "none", "format": "none"}
         return descriptor
 
-    if kind == KIND_SCRIPT:
-        source_path = value.relative_path  # type: ignore[union-attr]
-        if not os.path.isabs(source_path):
-            source_path = os.path.join(working_dir, source_path)
+    # -- PDVFile subclasses (PDVScript, PDVNote, future file types) -----------
+    if kind in _FILE_KIND_MAP:
+        ext, fmt = _FILE_KIND_MAP[kind]
+        source_path = value.resolve_path(working_dir)  # type: ignore[union-attr]
         if not os.path.exists(source_path):
-            raise PDVSerializationError(f"Script file not found: {source_path}")
-        file_path = working_dir_tree_path(working_dir, tree_path, ".py")
+            raise PDVSerializationError(f"File not found: {source_path}")
+        file_path = working_dir_tree_path(working_dir, tree_path, ext)
         ensure_parent(file_path)
         if os.path.abspath(source_path) != os.path.abspath(file_path):
             shutil.copy2(source_path, file_path)
         rel_path = os.path.relpath(file_path, working_dir)
-        descriptor["language"] = value.language  # type: ignore[union-attr]
+        if isinstance(value, PDVScript):
+            descriptor["language"] = value.language
+        else:
+            descriptor["language"] = kind
         descriptor["storage"] = {
             "backend": "local_file",
             "relative_path": rel_path,
-            "format": FORMAT_PY_SCRIPT,
-        }
-        return descriptor
-
-    if kind == KIND_MARKDOWN:
-        source_path = value.relative_path  # type: ignore[union-attr]
-        if not os.path.isabs(source_path):
-            source_path = os.path.join(working_dir, source_path)
-        if not os.path.exists(source_path):
-            raise PDVSerializationError(f"Markdown file not found: {source_path}")
-        file_path = working_dir_tree_path(working_dir, tree_path, ".md")
-        ensure_parent(file_path)
-        if os.path.abspath(source_path) != os.path.abspath(file_path):
-            shutil.copy2(source_path, file_path)
-        rel_path = os.path.relpath(file_path, working_dir)
-        descriptor["language"] = "markdown"
-        descriptor["storage"] = {
-            "backend": "local_file",
-            "relative_path": rel_path,
-            "format": FORMAT_MARKDOWN,
+            "format": fmt,
         }
         return descriptor
 
@@ -455,10 +448,8 @@ def node_preview(value: Any, kind: str) -> str:
     try:
         if kind == KIND_FOLDER:
             return "folder"
-        if kind == KIND_SCRIPT:
-            return value.preview() if hasattr(value, "preview") else "PDV script"
-        if kind == KIND_MARKDOWN:
-            return value.preview() if hasattr(value, "preview") else "Markdown note"
+        if kind in (KIND_SCRIPT, KIND_MARKDOWN):
+            return value.preview() if hasattr(value, "preview") else kind
         if kind == KIND_SCALAR:
             return str(value)[:100]
         if kind == KIND_TEXT:
