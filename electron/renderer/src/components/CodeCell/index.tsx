@@ -78,6 +78,12 @@ export const CodeCell: React.FC<CodeCellProps> = ({
   const kernelIdRef = useRef<string | null>(kernelId);
   const allTabsDataRef = useRef(tabs.map((t) => ({ id: t.id, code: t.code, active: t.id === activeTabId })));
 
+  /**
+   * Ref-sync block: Monaco callbacks (onKeyDown, completions, etc.) capture
+   * closure state at mount time. We sync prop/state values into refs so those
+   * callbacks always see current values without requiring Monaco to be
+   * re-mounted on every state change.
+   */
   useEffect(() => {
     activeTabRef.current = activeTab;
   }, [activeTab]);

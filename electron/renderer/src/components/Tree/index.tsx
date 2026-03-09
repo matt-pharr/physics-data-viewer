@@ -10,6 +10,7 @@ import { treeService, type TreeNodeData } from '../../services/tree';
 import { TreeNodeRow } from './TreeNodeRow';
 import { ContextMenu } from './ContextMenu';
 import { findNode, flattenTree, updateNodeImmut } from './tree-utils';
+import { TREE_PERSIST_DEBOUNCE_MS } from '../../app/constants';
 import type { Shortcuts } from '../../shortcuts';
 import { matchesShortcut } from '../../shortcuts';
 
@@ -85,7 +86,7 @@ export const Tree: React.FC<TreeProps> = ({ kernelId, disabled = false, refreshT
       } catch (error) {
         console.warn('Failed to persist expanded paths:', error);
       }
-    }, 500); // Debounce saves to avoid excessive writes
+    }, TREE_PERSIST_DEBOUNCE_MS);
     
     return () => clearTimeout(timeoutId);
   }, [nodes]); // Save whenever nodes change (expand/collapse)
@@ -107,27 +108,16 @@ export const Tree: React.FC<TreeProps> = ({ kernelId, disabled = false, refreshT
     void loadRoot(true);
   }, [kernelId, refreshToken, disabled]);
 
-  const updateNode = (list: TreeNodeData[], path: string, updater: (n: TreeNodeData) => TreeNodeData) =>
-    list.map((node) => {
-      if (node.path === path) {
-        return updater(node);
-      }
-      if (node.children) {
-        return { ...node, children: updateNode(node.children, path, updater) };
-      }
-      return node;
-    });
-
   const handleExpand = async (node: TreeNodeData) => {
     if (!kernelId || disabled) return;
     if (node.isExpanded) {
-      setNodes((prev) => updateNode(prev, node.path, (n) => ({ ...n, isExpanded: false })));
+      setNodes((prev) => updateNodeImmut(prev, node.path, (n) => ({ ...n, isExpanded: false })));
       expandedPathsRef.current.delete(node.path);
       return;
     }
 
     expandedPathsRef.current.add(node.path);
-    setNodes((prev) => updateNode(prev, node.path, (n) => ({ ...n, isLoading: true })));
+    setNodes((prev) => updateNodeImmut(prev, node.path, (n) => ({ ...n, isLoading: true })));
     try {
       const children = await treeService.getChildren(node, kernelId, {
         force: true,
@@ -135,7 +125,7 @@ export const Tree: React.FC<TreeProps> = ({ kernelId, disabled = false, refreshT
       });
       expandedPathsRef.current.add(node.path);
       setNodes((prev) =>
-        updateNode(prev, node.path, (n) => ({
+        updateNodeImmut(prev, node.path, (n) => ({
           ...n,
           isExpanded: true,
           isLoading: false,
@@ -146,7 +136,7 @@ export const Tree: React.FC<TreeProps> = ({ kernelId, disabled = false, refreshT
     } catch (err) {
       console.error('[Tree] Failed to load children for', node.key, err);
       setError(`Failed to load children for ${node.key}`);
-      setNodes((prev) => updateNode(prev, node.path, (n) => ({ ...n, isLoading: false })));
+      setNodes((prev) => updateNodeImmut(prev, node.path, (n) => ({ ...n, isLoading: false })));
     }
   };
 
