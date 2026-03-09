@@ -111,6 +111,21 @@ export const WriteTab: React.FC<WriteTabProps> = ({
       <header className="pane-header">
         <h2>Notes</h2>
 
+        <div className="write-mode-toggle">
+          <button
+            className={`btn btn-sm ${!readMode ? 'btn-active' : 'btn-secondary'}`}
+            onClick={() => setReadMode(false)}
+          >
+            Edit
+          </button>
+          <button
+            className={`btn btn-sm ${readMode ? 'btn-active' : 'btn-secondary'}`}
+            onClick={() => setReadMode(true)}
+          >
+            Read
+          </button>
+        </div>
+
         <div className="code-cell-tabs">
           {tabs.map((tab) => {
             return (
@@ -135,23 +150,6 @@ export const WriteTab: React.FC<WriteTabProps> = ({
               </button>
             );
           })}
-        </div>
-
-        <div className="pane-actions">
-          <div className="write-mode-toggle">
-            <button
-              className={`btn btn-sm ${!readMode ? 'btn-active' : 'btn-secondary'}`}
-              onClick={() => setReadMode(false)}
-            >
-              Edit
-            </button>
-            <button
-              className={`btn btn-sm ${readMode ? 'btn-active' : 'btn-secondary'}`}
-              onClick={() => setReadMode(true)}
-            >
-              Read
-            </button>
-          </div>
         </div>
       </header>
 
