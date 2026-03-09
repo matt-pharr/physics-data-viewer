@@ -61,6 +61,7 @@ export const IPC = {
     list: "tree:list",
     get: "tree:get",
     createScript: "tree:createScript",
+    createNote: "tree:createNote",
     addFile: "tree:addFile",
   },
   /** Namespace inspection channels. */
@@ -70,7 +71,11 @@ export const IPC = {
   /** Script tooling channels. */
   script: {
     edit: "script:edit",
-    reload: "script:reload",
+  },
+  /** Markdown note channels. */
+  note: {
+    save: "note:save",
+    read: "note:read",
   },
   /** Modules system channels. */
   modules: {
@@ -240,6 +245,20 @@ export interface TreeCreateScriptResult {
 }
 
 /**
+ * Result returned by `tree.createNote`.
+ */
+export interface TreeCreateNoteResult {
+  /** True when note creation and registration succeeded. */
+  success: boolean;
+  /** Optional error message when `success` is false. */
+  error?: string;
+  /** Absolute path to the created markdown file. */
+  notePath?: string;
+  /** Dot-path of the created tree node. */
+  treePath?: string;
+}
+
+/**
  * Result returned by `tree.addFile`.
  */
 export interface TreeAddFileResult {
@@ -252,7 +271,7 @@ export interface TreeAddFileResult {
 }
 
 /**
- * Result returned by `script.edit` and `script.reload`.
+ * Result returned by `script.edit`.
  */
 export interface ScriptOperationResult {
   /** True when the operation succeeded. */
@@ -747,6 +766,19 @@ export interface PDVApi {
       scriptName: string
     ): Promise<TreeCreateScriptResult>;
     /**
+     * Create and register a new markdown note node.
+     *
+     * @param kernelId - Target kernel ID.
+     * @param targetPath - Dot-path under which to register the note.
+     * @param noteName - Note base name (without .md extension).
+     * @returns Note creation result payload.
+     */
+    createNote(
+      kernelId: string,
+      targetPath: string,
+      noteName: string
+    ): Promise<TreeCreateNoteResult>;
+    /**
      * Copy a file into the kernel working directory and register it as a tree node.
      *
      * @param kernelId - Target kernel ID.
@@ -797,13 +829,27 @@ export interface PDVApi {
      * @returns Operation status.
      */
     edit(kernelId: string, scriptPath: string): Promise<ScriptOperationResult>;
+  };
+
+  /** Markdown note operations. */
+  note: {
     /**
-     * Re-register a script with reload semantics.
+     * Save markdown note content to its backing file.
      *
-     * @param scriptPath - Script path to reload.
+     * @param kernelId - Target kernel ID (used to resolve working directory).
+     * @param treePath - Dot-delimited tree path of the note node.
+     * @param content - Full markdown content to write.
      * @returns Operation status.
      */
-    reload(scriptPath: string): Promise<ScriptOperationResult>;
+    save(kernelId: string, treePath: string, content: string): Promise<{ success: boolean; error?: string }>;
+    /**
+     * Read markdown note content from its backing file.
+     *
+     * @param kernelId - Target kernel ID (used to resolve working directory).
+     * @param treePath - Dot-delimited tree path of the note node.
+     * @returns File content.
+     */
+    read(kernelId: string, treePath: string): Promise<{ success: boolean; content?: string; error?: string }>;
   };
 
   /** Modules install/import/action operations. */

@@ -61,6 +61,8 @@ const api: PDVApi = {
       ipcRenderer.invoke(IPC.tree.get, kernelId, nodePath),
     createScript: (kernelId, targetPath, scriptName) =>
       ipcRenderer.invoke(IPC.tree.createScript, kernelId, targetPath, scriptName),
+    createNote: (kernelId, targetPath, noteName) =>
+      ipcRenderer.invoke(IPC.tree.createNote, kernelId, targetPath, noteName),
     addFile: (kernelId, sourcePath, targetTreePath, nodeType, filename) =>
       ipcRenderer.invoke(IPC.tree.addFile, kernelId, sourcePath, targetTreePath, nodeType, filename),
     onChanged: (callback) => onPush(IPC.push.treeChanged, callback),
@@ -72,7 +74,12 @@ const api: PDVApi = {
   script: {
     edit: (kernelId, scriptPath) =>
       ipcRenderer.invoke(IPC.script.edit, kernelId, scriptPath),
-    reload: (scriptPath) => ipcRenderer.invoke(IPC.script.reload, scriptPath),
+  },
+  note: {
+    save: (kernelId, treePath, content) =>
+      ipcRenderer.invoke(IPC.note.save, kernelId, treePath, content),
+    read: (kernelId, treePath) =>
+      ipcRenderer.invoke(IPC.note.read, kernelId, treePath),
   },
   modules: {
     listInstalled: () => ipcRenderer.invoke(IPC.modules.listInstalled),

@@ -68,7 +68,26 @@ export const Tree: React.FC<TreeProps> = ({ kernelId, disabled = false, refreshT
     try {
       const rootNodes = await treeService.getRootNodes(kernelId, { force });
       const restored = await restoreExpandedTree(rootNodes, expandedPathsRef.current, kernelId);
-      setNodes(restored);
+
+      // Wrap in a synthetic root node so there is always a right-clickable
+      // container even when the tree is empty.
+      const rootIsExpanded = expandedPathsRef.current.has('') || restored.length > 0;
+      if (rootIsExpanded) expandedPathsRef.current.add('');
+      const syntheticRoot: TreeNodeData = {
+        id: '__root__',
+        key: 'pdv_tree',
+        path: '',
+        parent_path: null,
+        type: 'root',
+        has_children: true,
+        lazy: false,
+        preview: '',
+        hasChildren: true,
+        parentPath: null,
+        isExpanded: rootIsExpanded,
+        children: restored,
+      };
+      setNodes([syntheticRoot]);
     } catch (err) {
       console.error('[Tree] Failed to load root nodes', err);
       setError('Failed to load tree');
@@ -140,8 +159,13 @@ export const Tree: React.FC<TreeProps> = ({ kernelId, disabled = false, refreshT
     }
   };
 
-  const handleDoubleClick = (_node: TreeNodeData) => {
-    // Reserved for future inline-edit or detail-panel feature.
+  const handleDoubleClick = (node: TreeNodeData) => {
+    if (disabled) return;
+    if (node.type === 'markdown') {
+      onAction?.('open_note', node);
+    } else if (node.type === 'script') {
+      onAction?.('run', node);
+    }
   };
 
   const handleSelect = (node: TreeNodeData) => {
@@ -219,7 +243,6 @@ export const Tree: React.FC<TreeProps> = ({ kernelId, disabled = false, refreshT
           </div>
         )}
         {error && <div className="tree-error">{error}</div>}
-        {!disabled && !loading && !error && flatNodes.length === 0 && <div className="tree-empty">No data</div>}
 
         {!disabled &&
           !loading &&

@@ -108,6 +108,46 @@ class PDVApp:
         except RuntimeError:
             print("PDV: No comm channel open. Cannot trigger save.")
 
+    def new_note(self, path: str, title: str | None = None) -> None:
+        """Create a markdown note in the tree.
+
+        Creates a ``.md`` file in the working directory and registers
+        it as a ``markdown`` node at the given tree path.
+
+        Parameters
+        ----------
+        path : str
+            Dot-separated tree path for the new note
+            (e.g. ``'notes.intro'``).
+        title : str or None
+            Optional title. If provided, the file is initialized with
+            a ``# Title`` heading. Otherwise the file starts empty.
+        """
+        import os  # noqa: PLC0415
+
+        from pdv_kernel.comms import get_pdv_tree  # noqa: PLC0415
+        from pdv_kernel.tree import PDVNote  # noqa: PLC0415
+
+        tree = get_pdv_tree()
+        if tree is None:
+            print("PDV: Tree is not initialized. Cannot create note.")
+            return
+
+        working_dir = getattr(tree, "_working_dir", None) or "."
+        segments = path.split(".")
+        file_dir = os.path.join(working_dir, *segments[:-1]) if len(segments) > 1 else working_dir
+        os.makedirs(file_dir, exist_ok=True)
+        file_path = os.path.join(file_dir, segments[-1] + ".md")
+
+        if not os.path.exists(file_path):
+            with open(file_path, "w", encoding="utf-8") as fh:
+                if title:
+                    fh.write(f"# {title}\n")
+
+        note = PDVNote(relative_path=file_path, title=title)
+        tree[path] = note
+        print(f"Created note at '{path}'")
+
     def help(self, topic: str | None = None) -> None:
         """Print PDV help.
 
@@ -125,6 +165,7 @@ class PDVApp:
                 "  pdv_tree['path']  — access or set a node by dot-path\n"
                 "  pdv_tree.run_script('path') — run a script node\n"
                 "  pdv.save()        — save the project\n"
+                "  pdv.new_note('path', title='My Note') — create a markdown note\n"
                 "  pdv.help('pdv_tree') — help on a specific topic\n"
             )
         else:

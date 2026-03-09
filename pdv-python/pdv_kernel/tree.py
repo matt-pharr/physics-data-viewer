@@ -1,5 +1,5 @@
 """
-pdv_kernel.tree — PDVTree and PDVScript data structures.
+pdv_kernel.tree — PDVTree, PDVFile, PDVScript, and PDVNote data structures.
 
 This module is the core of the pdv_kernel package. It implements:
 
@@ -8,8 +8,15 @@ This module is the core of the pdv_kernel package. It implements:
   the project save directory, and emits ``pdv.tree.changed`` push
   notifications on mutation (when a comm is attached).
 
+- :class:`PDVFile`: base class for file-backed tree nodes. Provides shared
+  ``relative_path`` storage and ``resolve_path()`` for consistent path
+  resolution across all file-backed node types.
+
 - :class:`PDVScript`: a lightweight wrapper for a script file stored as
-  a tree node.
+  a tree node. Subclass of ``PDVFile``.
+
+- :class:`PDVNote`: a lightweight wrapper for a markdown note file stored
+  as a tree node. Subclass of ``PDVFile``.
 
 - :class:`LazyLoadRegistry`: internal registry mapping tree paths to
   save-directory storage references. Not user-accessible.
@@ -294,7 +301,78 @@ def _extract_script_params(file_path: str) -> list[ScriptParameter]:
         )
     return extracted
 
-class PDVScript:
+# ---------------------------------------------------------------------------
+# PDVFile — base class for file-backed tree nodes
+# ---------------------------------------------------------------------------
+
+class PDVFile:
+    """
+    Base class for file-backed PDV tree nodes.
+
+    Provides shared ``relative_path`` storage and ``preview()`` interface
+    used by both :class:`PDVScript` and :class:`PDVNote`, and any future
+    file-backed node types (images, data files, etc.).
+
+    Parameters
+    ----------
+    relative_path : str
+        Path to the backing file (absolute or relative to working dir).
+
+    See Also
+    --------
+    ARCHITECTURE.md §5.7
+    """
+
+    def __init__(self, relative_path: str) -> None:
+        self._relative_path = relative_path
+
+    @property
+    def relative_path(self) -> str:
+        """Path to the backing file.
+
+        Returns
+        -------
+        str
+            File path (absolute or relative to working dir).
+        """
+        return self._relative_path
+
+    def resolve_path(self, working_dir: str | None = None) -> str:
+        """Resolve the backing file to an absolute path.
+
+        Parameters
+        ----------
+        working_dir : str or None
+            Working directory to resolve relative paths against.
+
+        Returns
+        -------
+        str
+            Absolute file path.
+        """
+        if os.path.isabs(self._relative_path):
+            return self._relative_path
+        if working_dir:
+            return os.path.join(working_dir, self._relative_path)
+        return self._relative_path
+
+    def preview(self) -> str:
+        """Return a short human-readable preview for the tree panel.
+
+        Returns
+        -------
+        str
+            Preview string. Subclasses should override for domain-specific
+            previews.
+        """
+        return os.path.basename(self._relative_path)
+
+    def __repr__(self) -> str:
+        cls = type(self).__name__
+        return f"{cls}('{self._relative_path}')"
+
+
+class PDVScript(PDVFile):
     """
     Lightweight wrapper for a script file stored as a PDV tree node.
 
@@ -318,21 +396,10 @@ class PDVScript:
     """
 
     def __init__(self, relative_path: str, language: str = "python", doc: str | None = None) -> None:
-        self._relative_path = relative_path
+        super().__init__(relative_path)
         self._language = language
         self._doc = doc
         self._params: list[ScriptParameter] = _extract_script_params(relative_path)
-
-    @property
-    def relative_path(self) -> str:
-        """Relative path from project root to the script file.
-
-        Returns
-        -------
-        str
-            Relative script file path.
-        """
-        return self._relative_path
 
     @property
     def language(self) -> str:
@@ -414,13 +481,8 @@ class PDVScript:
             if tree is None:
                 raise PDVScriptError("PDVTree is not initialized")
 
-        # Resolve file path: if absolute, use directly; otherwise join with working_dir
-        if os.path.isabs(self._relative_path):
-            file_path = self._relative_path
-        elif hasattr(tree, "_working_dir") and tree._working_dir:
-            file_path = os.path.join(tree._working_dir, self._relative_path)
-        else:
-            file_path = self._relative_path
+        working_dir = getattr(tree, "_working_dir", None)
+        file_path = self.resolve_path(working_dir)
 
         if not os.path.exists(file_path):
             raise FileNotFoundError(f"Script file not found: {file_path}")
@@ -450,6 +512,71 @@ class PDVScript:
 
     def __repr__(self) -> str:
         return f"PDVScript('{self._relative_path}', lang='{self._language}')"
+
+
+# ---------------------------------------------------------------------------
+# PDVNote
+# ---------------------------------------------------------------------------
+
+class PDVNote(PDVFile):
+    """
+    Lightweight wrapper for a markdown file stored as a PDV tree node.
+
+    Stored as the value at a tree path (e.g. ``pdv_tree['notes.intro']``).
+    Backed by a ``.md`` file in the working directory.
+
+    Parameters
+    ----------
+    relative_path : str
+        Path to the ``.md`` file (absolute or relative to working dir).
+    title : str or None
+        Optional title for the note, used as a preview fallback. If None,
+        the first non-empty line of the file is used.
+
+    See Also
+    --------
+    ARCHITECTURE.md §7.2, PLANNED_FEATURES.md Feature 4
+    """
+
+    def __init__(self, relative_path: str, title: str | None = None) -> None:
+        super().__init__(relative_path)
+        self._title = title
+
+    @property
+    def title(self) -> str | None:
+        """Optional title for the note.
+
+        Returns
+        -------
+        str or None
+            Cached title, or None if not set.
+        """
+        return self._title
+
+    def preview(self) -> str:
+        """Return a short preview string for the tree panel.
+
+        Tries the cached title first, then reads the first non-empty
+        line of the ``.md`` file. Falls back to ``'Markdown note'``.
+
+        Returns
+        -------
+        str
+            A short preview string (≤100 characters).
+        """
+        if self._title:
+            return self._title[:100]
+        try:
+            path = self._relative_path
+            if os.path.exists(path):
+                with open(path, "r", encoding="utf-8") as fh:
+                    for line in fh:
+                        stripped = line.strip().lstrip("#").strip()
+                        if stripped:
+                            return stripped[:100]
+        except Exception:  # noqa: BLE001
+            pass
+        return "Markdown note"
 
 
 # ---------------------------------------------------------------------------

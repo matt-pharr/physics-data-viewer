@@ -9,7 +9,7 @@ function actionIds(type: string): string[] {
 describe('getActionsForNode', () => {
   it('returns script actions for script nodes', () => {
     const ids = actionIds('script');
-    expect(ids).toEqual(['run', 'edit', 'reload', 'view_source', 'print', 'copy_path', 'delete']);
+    expect(ids).toEqual(['run', 'run_defaults', 'edit', 'print', 'copy_path', 'delete']);
     expect(ids).not.toContain('create_script');
   });
 

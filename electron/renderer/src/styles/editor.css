@@ -7,6 +7,17 @@
   background-color: var(--border-color);
   flex-shrink: 0;
   user-select: none;
+  position: relative;
+}
+
+/* Invisible wider grab area */
+.vertical-resizer::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: -4px;
+  right: -4px;
 }
 
 .vertical-resizer:hover {
@@ -142,16 +153,18 @@
   display: flex;
   align-items: center;
   gap: 12px;
-  padding: 8px 12px;
+  padding: 0 12px;
   border-bottom: 1px solid var(--border-color);
   flex-shrink: 0;
+  height: 28px;
 }
 
 .pane-header h2 {
-  font-size: 13px;
+  font-size: 12px;
   font-weight: 600;
   color: var(--text-primary);
   flex-shrink: 0;
+  margin: 0;
 }
 
 .pane-actions {

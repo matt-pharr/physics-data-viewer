@@ -13,6 +13,7 @@
 @import './modules.css';
 @import './context-menu.css';
 @import './editor.css';
+@import './write-tab.css';
 @import './command-pane.css';
 @import './buttons.css';
 @import './status-bar.css';

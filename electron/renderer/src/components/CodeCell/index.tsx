@@ -76,6 +76,7 @@ export const CodeCell: React.FC<CodeCellProps> = ({
   const tabsRef = useRef(tabs);
   const onTabChangeRef = useRef(onTabChange);
   const kernelIdRef = useRef<string | null>(kernelId);
+  const onExecuteRef = useRef(onExecute);
   const allTabsDataRef = useRef(tabs.map((t) => ({ id: t.id, code: t.code, active: t.id === activeTabId })));
 
   /**
@@ -119,6 +120,10 @@ export const CodeCell: React.FC<CodeCellProps> = ({
   useEffect(() => {
     kernelIdRef.current = kernelId;
   }, [kernelId]);
+
+  useEffect(() => {
+    onExecuteRef.current = onExecute;
+  }, [onExecute]);
 
   useEffect(() => {
     allTabsDataRef.current = tabs.map((t) => ({ id: t.id, code: t.code, active: t.id === activeTabId }));
@@ -202,7 +207,7 @@ export const CodeCell: React.FC<CodeCellProps> = ({
         e.preventDefault();
         e.stopPropagation();
         if (!disabledRef.current && !isExecutingRef.current && activeTabRef.current) {
-          onExecute(activeTabRef.current.code);
+          onExecuteRef.current(activeTabRef.current.code);
         }
       }
       if (matchesShortcut(nativeEvent, shortcutsRef.current.newTab)) {

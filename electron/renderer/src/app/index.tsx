@@ -22,6 +22,8 @@ import { NamespaceView } from '../components/NamespaceView';
 import { ModulesPanel } from '../components/ModulesPanel';
 import { ScriptDialog } from '../components/ScriptDialog';
 import { CreateScriptDialog } from '../components/Tree/CreateScriptDialog';
+import { CreateNoteDialog } from '../components/Tree/CreateNoteDialog';
+import { WriteTab } from '../components/WriteTab';
 import { SettingsDialog } from '../components/SettingsDialog';
 import { UnsavedChangesDialog } from '../components/UnsavedChangesDialog';
 import type {
@@ -30,6 +32,7 @@ import type {
   KernelExecuteResult,
   KernelExecutionOrigin,
   LogEntry,
+  NoteTab,
   TreeNodeData,
 } from '../types';
 import { resolveShortcuts } from '../shortcuts';
@@ -113,7 +116,13 @@ const App: React.FC = () => {
   const [showEnvSelector, setShowEnvSelector] = useState(false);
   const [scriptDialog, setScriptDialog] = useState<TreeNodeData | null>(null);
   const [createScriptTarget, setCreateScriptTarget] = useState<string | null>(null);
+  const [createNoteTarget, setCreateNoteTarget] = useState<string | null>(null);
   const [showSettings, setShowSettings] = useState(false);
+
+  // -- Write tab (markdown notes) state ------------------------------------
+  const [activePane, setActivePane] = useState<'code' | 'write'>('code');
+  const [noteTabs, setNoteTabs] = useState<NoteTab[]>([]);
+  const [activeNoteTabId, setActiveNoteTabId] = useState<string | null>(null);
   const [settingsInitialTab, setSettingsInitialTab] = useState<'general' | 'shortcuts' | 'appearance' | 'runtime' | 'about'>('general');
 
   // -- Appearance state -----------------------------------------------------
@@ -293,30 +302,124 @@ const App: React.FC = () => {
     setShowSettings(false);
   };
 
+  // -- Note (Write tab) helpers --------------------------------------------
+
+  /** Open a markdown node in the Write tab, reading its content from disk. */
+  const openNote = async (node: TreeNodeData) => {
+    // If already open, just switch to it
+    const existing = noteTabs.find((t) => t.id === node.path);
+    if (existing) {
+      setActiveNoteTabId(node.path);
+      setActivePane('write');
+      return;
+    }
+
+    if (!currentKernelId) return;
+
+    try {
+      const result = await window.pdv.note.read(currentKernelId, node.path);
+      const content = result.success && result.content ? result.content : '';
+      const newTab: NoteTab = {
+        id: node.path,
+        content,
+        savedContent: content,
+        name: node.key,
+      };
+      setNoteTabs((prev) => [...prev, newTab]);
+      setActiveNoteTabId(node.path);
+      setActivePane('write');
+    } catch (error) {
+      console.error('[App] Failed to read note:', error);
+      setLastError(error instanceof Error ? error.message : String(error));
+    }
+  };
+
+  const handleNoteContentChange = (id: string, content: string) => {
+    setNoteTabs((prev) =>
+      prev.map((tab) => (tab.id === id ? { ...tab, content } : tab)),
+    );
+  };
+
+  const handleNoteSave = async (id: string) => {
+    const tab = noteTabs.find((t) => t.id === id);
+    if (!tab || tab.content === tab.savedContent || !currentKernelId) return;
+    try {
+      await window.pdv.note.save(currentKernelId, tab.id, tab.content);
+      setNoteTabs((prev) =>
+        prev.map((t) => (t.id === id ? { ...t, savedContent: t.content } : t)),
+      );
+    } catch (error) {
+      console.error('[App] Failed to save note:', error);
+    }
+  };
+
+  const flushDirtyNotes = useCallback(async () => {
+    if (!currentKernelId) return;
+    const dirty = noteTabs.filter((t) => t.content !== t.savedContent);
+    await Promise.all(
+      dirty.map(async (tab) => {
+        try {
+          await window.pdv.note.save(currentKernelId, tab.id, tab.content);
+          setNoteTabs((prev) =>
+            prev.map((t) => (t.id === tab.id ? { ...t, savedContent: t.content } : t)),
+          );
+        } catch (error) {
+          console.error('[App] Failed to flush note:', error);
+        }
+      }),
+    );
+  }, [currentKernelId, noteTabs]);
+
+  const handleNoteCloseTab = (id: string) => {
+    setNoteTabs((prev) => {
+      const updated = prev.filter((t) => t.id !== id);
+      if (activeNoteTabId === id) {
+        setActiveNoteTabId(updated.length > 0 ? updated[updated.length - 1].id : null);
+      }
+      if (updated.length === 0) {
+        setActivePane('code');
+      }
+      return updated;
+    });
+  };
+
   const handleTreeAction = async (action: string, node: TreeNodeData) => {
     if (action === 'create_script') {
       setCreateScriptTarget(node.path);
+    } else if (action === 'create_note') {
+      setCreateNoteTarget(node.path);
+    } else if (action === 'open_note' && node.type === 'markdown') {
+      await openNote(node);
     } else if (action === 'run' && node.type === 'script') {
       setScriptDialog(node);
-    } else if ((action === 'edit' || action === 'view_source') && node.type === 'script') {
+    } else if (action === 'run_defaults' && node.type === 'script') {
+      if (!currentKernelId) return;
+      const code = `pdv_tree[${JSON.stringify(node.path)}].run()`;
+      await handleExecute(code, {
+        kind: 'tree-script',
+        label: node.path,
+        scriptPath: node.path,
+      });
+    } else if (action === 'edit' && node.type === 'script') {
       try {
         if (!currentKernelId) return;
         await window.pdv.script.edit(currentKernelId, node.path);
       } catch (error) {
         console.error('[App] Failed to open editor:', error);
       }
-    } else if (action === 'reload' && node.type === 'script') {
-      await window.pdv.script.reload(node.path);
     } else if (action === 'copy_path') {
-      await navigator.clipboard.writeText(
-        node.path.split('.').reduce((acc, part) => `${acc}["${part}"]`, 'pdv_tree'),
-      );
+      const pyExpr = node.path
+        ? node.path.split('.').reduce((acc, part) => `${acc}["${part}"]`, 'pdv_tree')
+        : 'pdv_tree';
+      await navigator.clipboard.writeText(pyExpr);
     } else if (action === 'print') {
       if (!currentKernelId) return;
-      const target = JSON.stringify(node.path);
-      await handleExecute(`print(pdv_tree[${target}])`, {
+      const pyExpr = node.path
+        ? `pdv_tree[${JSON.stringify(node.path)}]`
+        : 'pdv_tree';
+      await handleExecute(`print(${pyExpr})`, {
         kind: 'unknown',
-        label: `Tree print ${node.path}`,
+        label: `Tree print ${node.path || 'pdv_tree'}`,
       });
     }
   };
@@ -455,6 +558,7 @@ const App: React.FC = () => {
     setLastError,
     loadedProjectTabsRef,
     normalizeLoadedCodeCells,
+    flushDirtyNotes,
   });
 
   return (
@@ -512,51 +616,88 @@ const App: React.FC = () => {
           </>
         )}
 
-        {/* Center column: console on top, code editor at bottom */}
+        {/* Center column: pane switcher at top, then Code (console + editor) or Write */}
         <div className="center-column" ref={rightPaneRef}>
-          <div className="console-wrapper">
-            <div className="console-header">
-              <span className="console-header-title">Console</span>
+          <div className="pane-switcher">
+            <div className="pane-switcher-track">
+              <button
+                className={`pane-switcher-btn ${activePane === 'code' ? 'active' : ''}`}
+                onClick={() => setActivePane('code')}
+              >
+                Code
+              </button>
+              <button
+                className={`pane-switcher-btn ${activePane === 'write' ? 'active' : ''}`}
+                onClick={() => setActivePane('write')}
+              >
+                Write
+                {noteTabs.some((t) => t.content !== t.savedContent) && (
+                  <span className="pane-switcher-indicator">●</span>
+                )}
+              </button>
             </div>
-            <Console logs={logs} onClear={handleClearConsole} />
           </div>
-          {editorCollapsed ? (
-            <div
-              className="editor-collapsed-bar"
-              onClick={expandEditor}
-            >
-              ▲ Editor
-            </div>
-          ) : (
+
+          {activePane === 'code' ? (
             <>
-              <div className="horizontal-resizer" onMouseDown={startHorizontalDrag} />
-              <div className="editor-wrapper" style={{ height: `${editorHeight}px` }}>
-                <CodeCell
-                  tabs={cellTabs.map((tab) => ({
-                    ...tab,
-                    onChange: (code: string) => handleCodeChange(tab.id, code),
-                  }))}
-                  activeTabId={activeCellTab}
-                  kernelId={currentKernelId}
-                  disabled={kernelStatus !== 'ready'}
-                  onTabChange={handleTabChange}
-                  onAddTab={addCellTab}
-                  onRemoveTab={handleRemoveCellTab}
-                  onExecute={handleExecute}
-                  onInterrupt={currentKernelId ? () => { void window.pdv.kernels.interrupt(currentKernelId); } : undefined}
-                  onClear={handleClearCommand}
-                  isExecuting={isExecuting}
-                  lastError={lastError}
-                  executionError={codeCellExecutionError}
-                  shortcuts={shortcuts}
-                  monacoTheme={monacoTheme}
-                  editorFontFamily={config?.settings?.fonts?.codeFont}
-                  editorFontSize={config?.settings?.editor?.fontSize}
-                  editorTabSize={config?.settings?.editor?.tabSize}
-                  editorWordWrap={config?.settings?.editor?.wordWrap}
-                />
+              <div className="console-wrapper">
+                <Console logs={logs} onClear={handleClearConsole} />
               </div>
+              {editorCollapsed ? (
+                <div
+                  className="editor-collapsed-bar"
+                  onClick={expandEditor}
+                >
+                  ▲ Editor
+                </div>
+              ) : (
+                <>
+                  <div className="horizontal-resizer" onMouseDown={startHorizontalDrag} />
+                  <div className="editor-wrapper" style={{ height: `${editorHeight}px` }}>
+                    <CodeCell
+                      tabs={cellTabs.map((tab) => ({
+                        ...tab,
+                        onChange: (code: string) => handleCodeChange(tab.id, code),
+                      }))}
+                      activeTabId={activeCellTab}
+                      kernelId={currentKernelId}
+                      disabled={kernelStatus !== 'ready'}
+                      onTabChange={handleTabChange}
+                      onAddTab={addCellTab}
+                      onRemoveTab={handleRemoveCellTab}
+                      onExecute={handleExecute}
+                      onInterrupt={currentKernelId ? () => { void window.pdv.kernels.interrupt(currentKernelId); } : undefined}
+                      onClear={handleClearCommand}
+                      isExecuting={isExecuting}
+                      lastError={lastError}
+                      executionError={codeCellExecutionError}
+                      shortcuts={shortcuts}
+                      monacoTheme={monacoTheme}
+                      editorFontFamily={config?.settings?.fonts?.codeFont}
+                      editorFontSize={config?.settings?.editor?.fontSize}
+                      editorTabSize={config?.settings?.editor?.tabSize}
+                      editorWordWrap={config?.settings?.editor?.wordWrap}
+                    />
+                  </div>
+                </>
+              )}
             </>
+          ) : (
+            <div className="write-tab-fill">
+              <WriteTab
+                tabs={noteTabs}
+                activeTabId={activeNoteTabId}
+                disabled={kernelStatus !== 'ready'}
+                onTabChange={setActiveNoteTabId}
+                onCloseTab={handleNoteCloseTab}
+                onContentChange={handleNoteContentChange}
+                onSave={handleNoteSave}
+                monacoTheme={monacoTheme}
+                editorFontFamily={config?.settings?.fonts?.codeFont}
+                editorFontSize={config?.settings?.editor?.fontSize}
+                editorWordWrap={config?.settings?.editor?.wordWrap}
+              />
+            </div>
           )}
         </div>
 
@@ -609,7 +750,7 @@ const App: React.FC = () => {
         />
       )}
 
-      {createScriptTarget && currentKernelId && (
+      {createScriptTarget !== null && currentKernelId && (
         <CreateScriptDialog
           parentPath={createScriptTarget}
           onCancel={() => setCreateScriptTarget(null)}
@@ -625,6 +766,40 @@ const App: React.FC = () => {
               setLastError(error instanceof Error ? error.message : String(error));
             } finally {
               setCreateScriptTarget(null);
+            }
+          }}
+        />
+      )}
+
+      {createNoteTarget !== null && currentKernelId && (
+        <CreateNoteDialog
+          parentPath={createNoteTarget}
+          onCancel={() => setCreateNoteTarget(null)}
+          onCreate={async (name) => {
+            try {
+              const result = await window.pdv.tree.createNote(currentKernelId, createNoteTarget, name);
+              if (!result.success) {
+                setLastError(result.error);
+              } else if (result.treePath) {
+                setTreeRefreshToken((t) => t + 1);
+                const noteNode: TreeNodeData = {
+                  id: result.treePath,
+                  key: name,
+                  path: result.treePath,
+                  parent_path: createNoteTarget || null,
+                  type: 'markdown',
+                  has_children: false,
+                  lazy: false,
+                  preview: '',
+                  hasChildren: false,
+                  parentPath: createNoteTarget || null,
+                };
+                await openNote(noteNode);
+              }
+            } catch (error) {
+              setLastError(error instanceof Error ? error.message : String(error));
+            } finally {
+              setCreateNoteTarget(null);
             }
           }}
         />

@@ -650,6 +650,30 @@ describe("Step 5 IPC handlers", () => {
     expect(result.scriptPath).toBeTruthy();
   });
 
+  it("tree:createNote sends correct payload to kernel and returns notePath", async () => {
+    const { commRouter } = setup();
+    (commRouter.request as unknown as ReturnType<typeof vi.fn>).mockResolvedValue(
+      makeMessage({})
+    );
+
+    const createNote = getHandler(IPC.tree.createNote);
+    const result = (await createNote({}, "kernel-1", "notes", "derivation")) as {
+      success: boolean;
+      notePath: string;
+    };
+
+    expect(commRouter.request).toHaveBeenCalledWith(
+      PDVMessageType.NOTE_REGISTER,
+      expect.objectContaining({
+        parent_path: "notes",
+        name: "derivation",
+        relative_path: expect.stringMatching(/derivation\.md$/),
+      })
+    );
+    expect(result.success).toBe(true);
+    expect(result.notePath).toBeTruthy();
+  });
+
   it("files:pickExecutable returns selected file path", async () => {
     setup();
     mocks.dialogShowOpenDialog.mockResolvedValueOnce({
@@ -681,26 +705,6 @@ describe("Step 5 IPC handlers", () => {
     const pickFile = getHandler(IPC.files.pickFile);
     const result = await pickFile({});
     expect(result).toBe("/tmp/config.toml");
-  });
-
-  it("script:reload sends pdv.script.register with parent_path and name", async () => {
-    const { commRouter } = setup();
-    (commRouter.request as unknown as ReturnType<typeof vi.fn>).mockResolvedValue(
-      makeMessage({})
-    );
-
-    const reload = getHandler(IPC.script.reload);
-    const result = (await reload({}, "scripts.analysis")) as { success: boolean };
-
-    expect(commRouter.request).toHaveBeenCalledWith(
-      PDVMessageType.SCRIPT_REGISTER,
-      expect.objectContaining({
-        parent_path: "scripts",
-        name: "analysis",
-        reload: true,
-      })
-    );
-    expect(result.success).toBe(true);
   });
 
   it("project:save delegates to ProjectManager.save", async () => {
