@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState, type Dispatch, type MutableRefObject, type SetStateAction } from 'react';
+import { useCallback, useEffect, useRef, useState, type Dispatch, type MutableRefObject, type SetStateAction } from 'react';
 import type { CellTab, Config, MenuActionPayload } from '../types';
 import { normalizeRecentProjects } from './app-utils';
 import { MAX_RECENT_PROJECTS } from './constants';
@@ -40,6 +40,8 @@ interface UseProjectWorkflowOptions {
   normalizeLoadedCodeCells: (data: unknown) => { tabs: CellTab[]; activeTabId: number };
   /** Flush all dirty markdown notes to disk before project save. */
   flushDirtyNotes: () => Promise<void>;
+  /** Whether the session is pristine (no unsaved work). When true, window close skips the unsaved dialog. */
+  isPristine: boolean;
 }
 
 export function useProjectWorkflow(options: UseProjectWorkflowOptions) {
@@ -59,9 +61,21 @@ export function useProjectWorkflow(options: UseProjectWorkflowOptions) {
     loadedProjectTabsRef,
     normalizeLoadedCodeCells,
     flushDirtyNotes,
+    isPristine,
   } = options;
 
   const [unsavedDialogContext, setUnsavedDialogContext] = useState<UnsavedDialogContext | null>(null);
+
+  // Ref so the onConfirmClose callback always sees current pristine state.
+  const isPristineRef = useRef(isPristine);
+  useEffect(() => { isPristineRef.current = isPristine; }, [isPristine]);
+
+  // Refs so handleSaveProject always reads the latest cell state, even when
+  // called from memoised callbacks like handleUnsavedSave.
+  const cellTabsRef = useRef(cellTabs);
+  useEffect(() => { cellTabsRef.current = cellTabs; }, [cellTabs]);
+  const activeCellTabRef = useRef(activeCellTab);
+  useEffect(() => { activeCellTabRef.current = activeCellTab; }, [activeCellTab]);
 
   const rememberRecentProject = useCallback(async (projectDir: string) => {
     const recentProjects = normalizeRecentProjects(config?.recentProjects);
@@ -95,8 +109,8 @@ export function useProjectWorkflow(options: UseProjectWorkflowOptions) {
       }
       await flushDirtyNotes();
       await window.pdv.project.save(saveDir, {
-        tabs: cellTabs,
-        activeTabId: activeCellTab,
+        tabs: cellTabsRef.current,
+        activeTabId: activeCellTabRef.current,
       });
       setCurrentProjectDir(saveDir);
       setModulesRefreshToken((prev) => prev + 1);
@@ -107,8 +121,6 @@ export function useProjectWorkflow(options: UseProjectWorkflowOptions) {
       return false;
     }
   }, [
-    activeCellTab,
-    cellTabs,
     currentProjectDir,
     flushDirtyNotes,
     kernelStatus,
@@ -190,6 +202,11 @@ export function useProjectWorkflow(options: UseProjectWorkflowOptions) {
       return;
     }
     const unsubscribe = window.pdv.lifecycle.onConfirmClose(() => {
+      if (isPristineRef.current) {
+        // No unsaved work — close immediately without showing the dialog.
+        void window.pdv.lifecycle.respondClose({ action: 'discard' });
+        return;
+      }
       setUnsavedDialogContext({ reason: 'close' });
     });
     return () => unsubscribe();
@@ -228,5 +245,7 @@ export function useProjectWorkflow(options: UseProjectWorkflowOptions) {
     handleUnsavedSave,
     handleUnsavedDiscard,
     handleUnsavedCancel,
+    /** Opens a project directly without triggering the unsaved changes dialog. */
+    executeOpenProject,
   };
 }

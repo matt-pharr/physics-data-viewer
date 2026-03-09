@@ -504,6 +504,7 @@ export interface PDVApi {
   lifecycle: {
     onConfirmClose(callback: () => void): () => void;
     respondClose(response: { action: 'save' | 'discard' | 'cancel' }): Promise<boolean>;
+    setDocumentEdited(edited: boolean): void;
   };
   menu: {
     updateRecentProjects(paths: string[]): Promise<boolean>;

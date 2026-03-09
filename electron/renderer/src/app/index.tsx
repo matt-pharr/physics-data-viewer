@@ -26,6 +26,7 @@ import { CreateNoteDialog } from '../components/Tree/CreateNoteDialog';
 import { WriteTab } from '../components/WriteTab';
 import { SettingsDialog } from '../components/SettingsDialog';
 import { UnsavedChangesDialog } from '../components/UnsavedChangesDialog';
+import { WelcomeScreen } from '../components/WelcomeScreen';
 import type {
   CellTab,
   Config,
@@ -114,6 +115,7 @@ const App: React.FC = () => {
 
   // -- Dialog visibility state ----------------------------------------------
   const [showEnvSelector, setShowEnvSelector] = useState(false);
+  const [showWelcome, setShowWelcome] = useState(true);
   const [scriptDialog, setScriptDialog] = useState<TreeNodeData | null>(null);
   const [createScriptTarget, setCreateScriptTarget] = useState<string | null>(null);
   const [createNoteTarget, setCreateNoteTarget] = useState<string | null>(null);
@@ -536,6 +538,12 @@ const App: React.FC = () => {
     }
   };
 
+  // Whether the session has no unsaved work (no project, no code, no logs, no notes).
+  const isPristine = currentProjectDir === null
+    && cellTabs.every((t) => !t.code.trim())
+    && logs.length === 0
+    && noteTabs.length === 0;
+
   const {
     unsavedDialogContext,
     handleSaveProject,
@@ -543,6 +551,7 @@ const App: React.FC = () => {
     handleUnsavedSave,
     handleUnsavedDiscard,
     handleUnsavedCancel,
+    executeOpenProject,
   } = useProjectWorkflow({
     kernelStatus,
     currentProjectDir,
@@ -559,7 +568,36 @@ const App: React.FC = () => {
     loadedProjectTabsRef,
     normalizeLoadedCodeCells,
     flushDirtyNotes,
+    isPristine,
   });
+
+  // -- Welcome screen (pristine session) ------------------------------------
+
+  // Sync macOS document-edited indicator with pristine state.
+  useEffect(() => {
+    window.pdv?.lifecycle?.setDocumentEdited(!isPristine);
+  }, [isPristine]);
+
+  const recentProjects = useMemo(
+    () => normalizeRecentProjects(config?.recentProjects),
+    [config?.recentProjects],
+  );
+
+  const dismissWelcome = useCallback(() => setShowWelcome(false), []);
+
+  const handleWelcomeNewProject = useCallback(() => {
+    dismissWelcome();
+  }, [dismissWelcome]);
+
+  const handleWelcomeOpen = useCallback(() => {
+    dismissWelcome();
+    void executeOpenProject();
+  }, [dismissWelcome, executeOpenProject]);
+
+  const handleWelcomeOpenRecent = useCallback((path: string) => {
+    dismissWelcome();
+    void executeOpenProject(path);
+  }, [dismissWelcome, executeOpenProject]);
 
   return (
     <div className="app">
@@ -837,6 +875,16 @@ const App: React.FC = () => {
          onEnvSave={handleEnvSave}
          onRestart={handleRestartKernel}
        />
+
+       {showWelcome && isPristine && !showEnvSelector && (
+         <WelcomeScreen
+           recentProjects={recentProjects}
+           onNewProject={handleWelcomeNewProject}
+           onOpenProject={handleWelcomeOpen}
+           onOpenRecent={handleWelcomeOpenRecent}
+           kernelReady={kernelStatus === 'ready'}
+         />
+       )}
      </div>
    );
 };

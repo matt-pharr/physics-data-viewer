@@ -123,6 +123,8 @@ const api: PDVApi = {
     onConfirmClose: (callback) => onPush(IPC.lifecycle.confirmClose, callback),
     respondClose: (response) =>
       ipcRenderer.invoke(IPC.lifecycle.closeResponse, response),
+    setDocumentEdited: (edited) =>
+      ipcRenderer.invoke(IPC.lifecycle.setDocumentEdited, edited),
   },
   menu: {
     updateRecentProjects: (paths) =>

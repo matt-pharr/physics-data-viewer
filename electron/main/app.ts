@@ -91,8 +91,14 @@ export async function createWindow(
   initializeAppMenu(win);
 
   // macOS document-edited indicator (red dot in traffic light buttons).
-  // Always on since we treat the session as dirty.
-  win.setDocumentEdited(true);
+  // Starts as false (pristine); renderer toggles via lifecycle.setDocumentEdited.
+  win.setDocumentEdited(false);
+
+  // Allow renderer to control the document-edited indicator.
+  ipcMain.removeHandler(IPC.lifecycle.setDocumentEdited);
+  ipcMain.handle(IPC.lifecycle.setDocumentEdited, (_event, edited: boolean) => {
+    win.setDocumentEdited(edited);
+  });
 
   // Intercept window close to show unsaved-changes confirmation.
   let closeConfirmed = false;
@@ -121,6 +127,7 @@ export async function createWindow(
   });
   win.on("closed", () => {
     ipcMain.removeHandler(IPC.lifecycle.closeResponse);
+    ipcMain.removeHandler(IPC.lifecycle.setDocumentEdited);
   });
 
   const rendererIndexPath = path.join(

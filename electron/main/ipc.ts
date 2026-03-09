@@ -135,6 +135,7 @@ export const IPC = {
   lifecycle: {
     confirmClose: "lifecycle:confirmClose",
     closeResponse: "lifecycle:closeResponse",
+    setDocumentEdited: "lifecycle:setDocumentEdited",
   },
 } as const;
 
@@ -1041,6 +1042,13 @@ export interface PDVApi {
      * @returns True when acknowledged.
      */
     respondClose(response: ConfirmCloseResponse): Promise<boolean>;
+    /**
+     * Tell the main process whether the session has unsaved changes.
+     * Controls the macOS document-edited indicator (close button dot).
+     *
+     * @param edited - True if the session has unsaved changes.
+     */
+    setDocumentEdited(edited: boolean): void;
   };
 
   /** App menu integration. */
