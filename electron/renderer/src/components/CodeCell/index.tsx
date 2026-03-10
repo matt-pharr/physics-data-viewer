@@ -6,7 +6,7 @@
  * to callbacks owned by `App`.
  */
 
-import React, { useEffect, useMemo, useRef } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Editor, { type OnMount, type BeforeMount } from '@monaco-editor/react';
 import type * as monaco from 'monaco-editor';
 import type { CellTab } from '../../types';
@@ -29,6 +29,7 @@ interface CodeCellProps {
   onTabChange: (id: number) => void;
   onAddTab: () => void;
   onRemoveTab?: (id: number) => void;
+  onRenameTab?: (id: number, name: string | undefined) => void;
   onExecute: (code: string) => void;
   onInterrupt?: () => void;
   onClear: () => void;
@@ -52,6 +53,7 @@ export const CodeCell: React.FC<CodeCellProps> = ({
   onTabChange,
   onAddTab,
   onRemoveTab,
+  onRenameTab,
   onExecute,
   onInterrupt,
   onClear,
@@ -266,6 +268,63 @@ export const CodeCell: React.FC<CodeCellProps> = ({
 
   const isEmpty = !activeTab.code.trim();
 
+  // -- Tab context menu & inline rename state --------------------------------
+  const [contextMenu, setContextMenu] = useState<{ x: number; y: number; tabId: number } | null>(null);
+  const [renamingTabId, setRenamingTabId] = useState<number | null>(null);
+  const [renameValue, setRenameValue] = useState('');
+  const renameInputRef = useRef<HTMLInputElement>(null);
+  const contextMenuRef = useRef<HTMLDivElement>(null);
+
+  const handleTabContextMenu = useCallback((e: React.MouseEvent, tabId: number) => {
+    e.preventDefault();
+    setContextMenu({ x: e.clientX, y: e.clientY, tabId });
+  }, []);
+
+  // Close context menu on outside click or Escape
+  useEffect(() => {
+    if (!contextMenu) return;
+    const handleClickOutside = (e: MouseEvent) => {
+      if (contextMenuRef.current && e.target && !contextMenuRef.current.contains(e.target as Node)) {
+        setContextMenu(null);
+      }
+    };
+    const handleEscape = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setContextMenu(null);
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    document.addEventListener('keydown', handleEscape);
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+      document.removeEventListener('keydown', handleEscape);
+    };
+  }, [contextMenu]);
+
+  const startRename = useCallback((tabId: number) => {
+    const tab = tabs.find((t) => t.id === tabId);
+    setRenameValue(tab?.name ?? '');
+    setRenamingTabId(tabId);
+    setContextMenu(null);
+  }, [tabs]);
+
+  const commitRename = useCallback(() => {
+    if (renamingTabId == null || !onRenameTab) return;
+    const trimmed = renameValue.trim();
+    onRenameTab(renamingTabId, trimmed || undefined);
+    setRenamingTabId(null);
+  }, [renamingTabId, renameValue, onRenameTab]);
+
+  const cancelRename = useCallback(() => {
+    setRenamingTabId(null);
+  }, []);
+
+  // Auto-focus the rename input when it appears
+  useEffect(() => {
+    if (renamingTabId != null && renameInputRef.current) {
+      renameInputRef.current.focus();
+      renameInputRef.current.select();
+    }
+  }, [renamingTabId]);
+
   return (
     <section className="code-cell-pane">
       <header className="pane-header">
@@ -274,28 +333,35 @@ export const CodeCell: React.FC<CodeCellProps> = ({
         <div className="code-cell-tabs">
           {tabs.map((tab, i) => {
             const label = tab.name ?? String(i + 1);
+
+            if (renamingTabId === tab.id) {
+              return (
+                <input
+                  key={tab.id}
+                  ref={renameInputRef}
+                  className="tab-rename-input"
+                  value={renameValue}
+                  placeholder={String(i + 1)}
+                  onChange={(e) => setRenameValue(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') commitRename();
+                    if (e.key === 'Escape') cancelRename();
+                  }}
+                  onBlur={commitRename}
+                />
+              );
+            }
+
             return (
               <button
                 key={tab.id}
                 className={`tab ${tab.id === activeTabId ? 'active' : ''}`}
                 onClick={() => onTabChange(tab.id)}
+                onContextMenu={(e) => handleTabContextMenu(e, tab.id)}
                 disabled={disabled}
                 title={tab.name ? `Cell ${i + 1}: ${tab.name}` : `Cell ${i + 1}`}
               >
                 {label}
-                {onRemoveTab && (
-                  <span
-                    className="tab-close"
-                    role="button"
-                    aria-label={`Close cell ${i + 1}`}
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      if (!disabled) onRemoveTab(tab.id);
-                    }}
-                  >
-                    ×
-                  </span>
-                )}
               </button>
             );
           })}
@@ -303,6 +369,22 @@ export const CodeCell: React.FC<CodeCellProps> = ({
             +
           </button>
         </div>
+
+        {/* Tab context menu */}
+        {contextMenu && (
+          <div
+            ref={contextMenuRef}
+            className="context-menu"
+            style={{ position: 'fixed', top: contextMenu.y, left: contextMenu.x, zIndex: 1000 }}
+          >
+            <button
+              className="context-menu-item"
+              onClick={() => startRename(contextMenu.tabId)}
+            >
+              <span className="context-menu-label">Rename</span>
+            </button>
+          </div>
+        )}
 
         <div className="pane-actions">
           {isExecuting ? (

@@ -47,3 +47,17 @@
 .tab-close:hover {
   color: var(--text-primary);
 }
+
+/* Inline rename input shown when renaming a tab */
+.tab-rename-input {
+  padding: 3px 6px;
+  background-color: var(--bg-primary);
+  border: 1px solid var(--accent);
+  border-radius: 4px;
+  color: var(--text-primary);
+  font-size: 12px;
+  line-height: 1.1;
+  font-family: var(--font-sans);
+  width: 80px;
+  outline: none;
+}

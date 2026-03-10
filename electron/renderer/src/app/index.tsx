@@ -268,6 +268,10 @@ const App: React.FC = () => {
     setLastError(undefined);
   };
 
+  const handleRenameCellTab = (id: number, name: string | undefined) => {
+    setCellTabs((prev) => prev.map((tab) => (tab.id === id ? { ...tab, name } : tab)));
+  };
+
   useKeyboardShortcuts({
     shortcuts,
     cellTabs: cellTabs,
@@ -709,6 +713,7 @@ const App: React.FC = () => {
                       onTabChange={handleTabChange}
                       onAddTab={addCellTab}
                       onRemoveTab={handleRemoveCellTab}
+                      onRenameTab={handleRenameCellTab}
                       onExecute={handleExecute}
                       onInterrupt={currentKernelId ? () => { void window.pdv.kernels.interrupt(currentKernelId); } : undefined}
                       onClear={handleClearCommand}
