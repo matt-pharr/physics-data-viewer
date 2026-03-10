@@ -96,6 +96,8 @@ const App: React.FC = () => {
   const [currentProjectDir, setCurrentProjectDir] = useState<string | null>(null);
   const initRef = useRef(false);
   const loadedProjectTabsRef = useRef<{ tabs: CellTab[]; activeTabId: number } | null>(null);
+  /** Deferred project action to execute once the kernel becomes ready. */
+  const pendingProjectRef = useRef<{ type: 'open'; path?: string } | null>(null);
 
   // Undo stack for cell clear/close. Each entry captures the full tab list and
   // active tab id so a single Cmd+Z restores exactly what was destroyed.
@@ -150,19 +152,11 @@ const App: React.FC = () => {
         const loaded = await window.pdv.config.get();
         setConfig(loaded);  // theme applied by the reactive effect above
         setCurrentProjectDir(null);
-
-        if (!loaded.pythonPath) {
-          setKernelStatus('idle');
-          setShowEnvSelector(true);
-          return;
-        }
-
-        await startKernel(loaded);
+        // Kernel is NOT started here — it starts when the user picks a
+        // project action from the WelcomeScreen.
       } catch (error) {
         console.error('[App] Failed to load config:', error);
-        setKernelStatus('error');
         setLastError(error instanceof Error ? error.message : String(error));
-        setShowEnvSelector(true);
       }
     };
 
@@ -574,19 +568,42 @@ const App: React.FC = () => {
 
   const dismissWelcome = useCallback(() => setShowWelcome(false), []);
 
-  const handleWelcomeNewProject = useCallback(() => {
-    dismissWelcome();
-  }, [dismissWelcome]);
+  /**
+   * Starts the kernel for the current config, or shows the environment
+   * selector if no pythonPath is configured yet.
+   */
+  const ensureKernel = useCallback(async () => {
+    if (!config?.pythonPath) {
+      setShowEnvSelector(true);
+      return;
+    }
+    await startKernel(config);
+  }, [config, startKernel, setShowEnvSelector]);
 
-  const handleWelcomeOpen = useCallback(() => {
+  const handleWelcomeNewProject = useCallback(async () => {
     dismissWelcome();
-    void executeOpenProject();
-  }, [dismissWelcome, executeOpenProject]);
+    await ensureKernel();
+  }, [dismissWelcome, ensureKernel]);
 
-  const handleWelcomeOpenRecent = useCallback((path: string) => {
+  const handleWelcomeOpen = useCallback(async () => {
     dismissWelcome();
-    void executeOpenProject(path);
-  }, [dismissWelcome, executeOpenProject]);
+    pendingProjectRef.current = { type: 'open' };
+    await ensureKernel();
+  }, [dismissWelcome, ensureKernel]);
+
+  const handleWelcomeOpenRecent = useCallback(async (path: string) => {
+    dismissWelcome();
+    pendingProjectRef.current = { type: 'open', path };
+    await ensureKernel();
+  }, [dismissWelcome, ensureKernel]);
+
+  // Execute deferred project action once the kernel becomes ready.
+  useEffect(() => {
+    if (kernelStatus !== 'ready' || !pendingProjectRef.current) return;
+    const pending = pendingProjectRef.current;
+    pendingProjectRef.current = null;
+    void executeOpenProject(pending.path);
+  }, [kernelStatus, executeOpenProject]);
 
   return (
     <div className="app">
@@ -863,7 +880,6 @@ const App: React.FC = () => {
            onNewProject={handleWelcomeNewProject}
            onOpenProject={handleWelcomeOpen}
            onOpenRecent={handleWelcomeOpenRecent}
-           kernelReady={kernelStatus === 'ready'}
          />
        )}
      </div>

@@ -36,7 +36,8 @@ export const Tree: React.FC<TreeProps> = ({ kernelId, disabled = false, refreshT
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
   const [selectedPath, setSelectedPath] = useState<string | null>(() => {
     try {
-      return localStorage.getItem('pdv:selectedPath') || null;
+      const stored = localStorage.getItem('pdv:selectedPath');
+      return stored !== null ? stored : null;
     } catch {
       return null;
     }
@@ -113,7 +114,7 @@ export const Tree: React.FC<TreeProps> = ({ kernelId, disabled = false, refreshT
   // Persist selected path to localStorage
   useEffect(() => {
     try {
-      if (selectedPath) {
+      if (selectedPath !== null) {
         localStorage.setItem('pdv:selectedPath', selectedPath);
       } else {
         localStorage.removeItem('pdv:selectedPath');
@@ -194,7 +195,7 @@ export const Tree: React.FC<TreeProps> = ({ kernelId, disabled = false, refreshT
 
   const flatNodes = useMemo(() => flattenTree(nodes), [nodes]);
 
-  const selectedNode = selectedPath ? flatNodes.find((n) => n.path === selectedPath) : undefined;
+  const selectedNode = selectedPath !== null ? flatNodes.find((n) => n.path === selectedPath) : undefined;
 
   const handleKeyDown = async (event: React.KeyboardEvent<HTMLDivElement>) => {
     // Prevent Space from triggering browser button-click on focused tree rows

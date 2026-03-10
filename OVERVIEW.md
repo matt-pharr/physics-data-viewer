@@ -40,7 +40,7 @@ See `ARCHITECTURE.md` §7.
 - namespace protection (`pdv_tree` and `pdv` are protected bindings)
 - save/load, tree, script, lifecycle, and namespace handlers
 
-On kernel startup, `bootstrap()` registers the comm target, injects `pdv_tree`/`pdv`, and emits readiness signaling used by main-process startup flow.
+On kernel startup (triggered when the user selects an action from the WelcomeScreen), `bootstrap()` registers the comm target, injects `pdv_tree`/`pdv`, and emits readiness signaling used by the main-process handshake.
 
 See `ARCHITECTURE.md` §5.
 

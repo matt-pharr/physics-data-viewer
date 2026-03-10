@@ -210,12 +210,14 @@ Minor version differences are tolerated with a logged warning.
 
 ### 4.1 Startup Sequence
 
+The kernel is **not** started when the app launches. On startup, the renderer loads configuration and displays the WelcomeScreen. The kernel is started only when the user picks an action (New Project, Open Project, or a recent project).
+
 ```
-App launches
+User selects action on WelcomeScreen
     │
     ├─► Environment detection (see Section 10)
     │       Is pdv-python installed in the selected environment?
-    │       No → prompt user → install → retry
+    │       No → prompt user (EnvironmentSelector) → install → retry
     │
     ├─► App creates working directory (see Section 6.1)
     │
@@ -235,8 +237,9 @@ App launches
     │       status: error → display error with message
     │
     └─► Kernel is ready. UI unlocks.
+            If a project was selected, it is loaded now.
             Code Cell: active
-            Tree panel: empty, showing working directory root
+            Tree panel: empty (or populated from loaded project)
             Namespace panel: active
 ```
 
@@ -283,16 +286,21 @@ On kernel crash (process exits unexpectedly):
 
 ### 4.4 Renderer Startup Behavior
 
+On launch, the renderer loads configuration and displays the WelcomeScreen overlay. No kernel is started at this point — the WelcomeScreen buttons are immediately interactive.
+
+When the user picks an action (New Project, Open Project, or a recent project), the renderer dismisses the WelcomeScreen and starts the kernel. If the user chose to open a project, the project path is stored in a pending-action ref and executed automatically once the kernel becomes ready.
+
 The renderer is never aware of the low-level `pdv.ready → pdv.init → pdv.init.response` handshake. That exchange is entirely encapsulated inside the main process's `kernels.start()` IPC handler: the handler spawns the subprocess, runs the full handshake sequence, and only resolves its promise once `pdv.init.response` has been received with `status: 'ok'`.
 
-From the renderer's perspective, startup is simply:
+From the renderer's perspective, kernel startup is simply:
 
 ```tsx
-// Renderer (app/index.tsx)
+// Renderer (app/index.tsx) — triggered by WelcomeScreen action, not on mount
 setKernelStatus('starting'); // locks UI — code cell, tree, namespace all disabled
 const info = await window.pdv.kernels.start(spec);
 setCurrentKernelId(info.id);
 setKernelStatus('ready');   // unlocks UI
+// If a pending project action exists, it executes now
 ```
 
 The renderer shows a loading / disabled state for all panels while `start()` is pending. On rejection (timeout or init error), the renderer displays the error string from the rejected promise.
@@ -305,9 +313,14 @@ There is no separate push notification for "kernel ready" that the renderer must
 
 ```mermaid
 sequenceDiagram
+    participant U as User
     participant R as Renderer (React)
     participant M as Main (Node.js)
     participant K as Kernel (Python)
+
+    Note over R: WelcomeScreen displayed (no kernel running)
+    U->>R: Clicks New Project / Open Project / Recent
+    R->>R: dismissWelcome(), ensureKernel()
 
     R->>M: window.pdv.kernels.start(spec)
     Note over R: UI locked (kernelStatus = 'starting')
@@ -321,6 +334,7 @@ sequenceDiagram
 
     M-->>R: resolve KernelInfo { id, language }
     Note over R: UI unlocked (kernelStatus = 'ready')
+    Note over R: If pending project action, load project now
 ```
 
 #### Code Execution

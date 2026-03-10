@@ -3,11 +3,10 @@
  *
  * Displays a logo placeholder, recent projects list, and buttons to create a
  * new project or open an existing one. Auto-dismisses when the user takes any
- * action. Clicking a recent project opens it directly, skipping the unsaved
- * changes dialog since the session is pristine.
+ * action. Clicking a recent project opens it directly.
  *
- * Does NOT manage project state — all actions are delegated to callbacks
- * owned by `App`.
+ * The kernel is NOT started until the user picks an action here. All actions
+ * are delegated to callbacks owned by `App`.
  */
 
 import React from 'react';
@@ -21,8 +20,6 @@ interface WelcomeScreenProps {
   onOpenProject: () => void;
   /** Called when the user clicks a recent project entry. */
   onOpenRecent: (path: string) => void;
-  /** Whether the kernel is ready (buttons disabled until true). */
-  kernelReady: boolean;
 }
 
 /** Extracts the project folder name from an absolute path. */
@@ -42,7 +39,6 @@ export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({
   onNewProject,
   onOpenProject,
   onOpenRecent,
-  kernelReady,
 }) => {
   return (
     <div className="welcome-overlay">
@@ -57,14 +53,12 @@ export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({
           <button
             className="btn btn-primary welcome-action-btn"
             onClick={onNewProject}
-            disabled={!kernelReady}
           >
             New Project
           </button>
           <button
             className="btn btn-secondary welcome-action-btn"
             onClick={onOpenProject}
-            disabled={!kernelReady}
           >
             Open Project…
           </button>
@@ -79,7 +73,6 @@ export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({
                   <button
                     className="welcome-recent-item"
                     onClick={() => onOpenRecent(path)}
-                    disabled={!kernelReady}
                     title={path}
                   >
                     <span className="welcome-recent-name">{projectName(path)}</span>
@@ -89,10 +82,6 @@ export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({
               ))}
             </ul>
           </div>
-        )}
-
-        {!kernelReady && (
-          <p className="welcome-status">Starting kernel…</p>
         )}
       </div>
     </div>

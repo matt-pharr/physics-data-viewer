@@ -37,7 +37,7 @@ cd ../pdv-python && pip install -e ".[dev]"
 cd electron && npm run dev
 ```
 
-This starts the Electron main process and the Vite dev server concurrently. The app window will open and prompt you to select a Python environment on first launch.
+This starts the Electron main process and the Vite dev server concurrently. The app window will open to the WelcomeScreen where you can create a new project or open an existing one. On first launch, selecting a project action will prompt you to configure a Python environment before the kernel starts.
 
 ---
 
