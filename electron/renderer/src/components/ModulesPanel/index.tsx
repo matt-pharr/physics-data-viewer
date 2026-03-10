@@ -462,17 +462,8 @@ export const ModulesPanel: React.FC<ModulesPanelProps> = ({
         }
         return null;
       }
-      if (input.control === "file") {
-        if (typeof value !== "string") return null;
-        const trimmed = value.trim();
-        return trimmed.length > 0 ? JSON.stringify(trimmed) : null;
-      }
-      if (input.control === "dropdown") {
-        if (typeof value === "string") {
-          return JSON.stringify(value);
-        }
-        return value;
-      }
+      // File, dropdown, text — pass string values through as-is.
+      // Python quoting is handled by toPythonArgumentValue in the main process.
       if (typeof value === "string") {
         const trimmed = value.trim();
         return trimmed.length > 0 ? trimmed : null;

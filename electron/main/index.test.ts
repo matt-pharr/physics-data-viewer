@@ -1241,7 +1241,7 @@ describe("Step 5 IPC handlers", () => {
     expect(result.success).toBe(true);
     expect(result.status).toBe("queued");
     expect(result.executionCode).toBe(
-      `pdv_tree["demo-module.scripts.run"].run(threshold="5); __import__('os').system('evil')#")`
+      `pdv_tree["demo-module.scripts.run"].run(threshold='5); __import__(\\'os\\').system(\\'evil\\')#')`
     );
   });
 
