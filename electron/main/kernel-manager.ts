@@ -566,7 +566,10 @@ export class KernelManager extends EventEmitter {
    * Execute code in the named kernel and collect output.
    *
    * Resolves once the kernel reports `status: idle` on iopub (i.e. execution
-   * finished), or after a 30-second timeout.
+   * finished).  There is no execution timeout — user scripts may run for
+   * arbitrarily long periods (heavy computation, interactive plot windows,
+   * etc.).  Callers that need a deadline should layer their own timeout on
+   * the returned promise.
    *
    * @param id - Kernel ID.
    * @param request - Code and options.
@@ -583,6 +586,17 @@ export class KernelManager extends EventEmitter {
       const errorDetails = buildExecutionError(
         "KernelNotFoundError",
         `Kernel not found: ${id}`,
+        [],
+        request.origin,
+        request.code
+      );
+      return { error: errorDetails.summary, errorDetails, duration: 0 };
+    }
+
+    if (managed.info.status === "dead") {
+      const errorDetails = buildExecutionError(
+        "KernelCrashedError",
+        "Kernel process has exited",
         [],
         request.origin,
         request.code
@@ -609,13 +623,29 @@ export class KernelManager extends EventEmitter {
     const msgId = msg.header.msg_id;
 
     return new Promise<KernelExecuteResult>((resolve) => {
-      let timer: ReturnType<typeof setTimeout>;
       let done = false;
+
+      // If the kernel crashes while we're waiting for idle, resolve with
+      // an error instead of hanging forever.
+      const onCrash = (crashedId: string) => {
+        if (crashedId !== id) return;
+        const errorDetails = buildExecutionError(
+          "KernelCrashedError",
+          "Kernel process exited during execution",
+          [],
+          request.origin,
+          request.code
+        );
+        result.errorDetails = errorDetails;
+        result.error = errorDetails.summary;
+        finish();
+      };
+      this.once("kernel:crashed", onCrash);
 
       const finish = () => {
         if (done) return;
         done = true;
-        clearTimeout(timer);
+        this.removeListener("kernel:crashed", onCrash);
         cleanup();
         result.duration = Date.now() - startTime;
         if (result.stdout === "") delete result.stdout;
@@ -697,19 +727,6 @@ export class KernelManager extends EventEmitter {
           finish();
         }
       });
-
-      timer = setTimeout(() => {
-        const errorDetails = buildExecutionError(
-          "TimeoutError",
-          "Execution timed out",
-          [],
-          request.origin,
-          request.code
-        );
-        result.errorDetails = errorDetails;
-        result.error = errorDetails.summary;
-        finish();
-      }, 30_000);
 
       this.enqueueShellOperation(managed, async () => {
         await managed.shellSocket.send(
