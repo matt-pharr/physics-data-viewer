@@ -20,18 +20,23 @@ import { EnvironmentDetector } from "./environment-detector";
 import { IPC, type KernelValidateResult } from "./ipc";
 import { KernelManager, type KernelInfo } from "./kernel-manager";
 import { initializeKernelSession } from "./kernel-session";
-import type { ProjectManager } from "./project-manager";
+import type { ModuleManager } from "./module-manager";
+import { buildModulesSetupPayload } from "./module-runtime";
+import { PDVMessageType } from "./pdv-protocol";
+import { ProjectManager, type ProjectModuleImport } from "./project-manager";
 
 interface RegisterKernelIpcHandlersOptions {
   win: BrowserWindow;
   kernelManager: KernelManager;
   commRouter: CommRouter;
   projectManager: ProjectManager;
+  moduleManager: ModuleManager;
   kernelWorkingDirs: Map<string, string>;
   crashHandlers: Map<string, (id: string) => void>;
   resetProjectState: () => void;
   setActiveKernelId: (id: string | null) => void;
   getActiveKernelId: () => string | null;
+  getActiveProjectDir: () => string | null;
   bindActiveProjectModules: (kernelId: string | null) => Promise<void>;
 }
 
@@ -78,13 +83,35 @@ export function registerKernelIpcHandlers(
     kernelManager,
     commRouter,
     projectManager,
+    moduleManager,
     kernelWorkingDirs,
     crashHandlers,
     resetProjectState,
     setActiveKernelId,
     getActiveKernelId,
+    getActiveProjectDir,
     bindActiveProjectModules,
   } = options;
+
+  /**
+   * Send pdv.modules.setup to the kernel so module install paths are
+   * added to sys.path and entry points are executed.
+   */
+  async function setupModuleNamespaces(): Promise<void> {
+    const projectDir = getActiveProjectDir();
+    if (!projectDir) return;
+    let manifest: Awaited<ReturnType<typeof ProjectManager.readManifest>>;
+    try {
+      manifest = await ProjectManager.readManifest(projectDir);
+    } catch {
+      return;
+    }
+    if (!manifest.modules || manifest.modules.length === 0) return;
+    const payload = await buildModulesSetupPayload(moduleManager, manifest.modules);
+    if (payload.modules.length > 0) {
+      await commRouter.request(PDVMessageType.MODULES_SETUP, payload);
+    }
+  }
 
   ipcMain.handle(IPC.kernels.list, async () => {
     return kernelManager.list();
@@ -120,6 +147,7 @@ export function registerKernelIpcHandlers(
       kernelWorkingDirs
     );
     setActiveKernelId(kernel.id);
+    await setupModuleNamespaces();
     await bindActiveProjectModules(kernel.id);
 
     const onCrash = async (crashedId: string): Promise<void> => {
@@ -177,6 +205,7 @@ export function registerKernelIpcHandlers(
         kernelWorkingDirs
       );
       setActiveKernelId(restarted.id);
+      await setupModuleNamespaces();
       await bindActiveProjectModules(restarted.id);
       return restarted;
     }
@@ -199,6 +228,7 @@ export function registerKernelIpcHandlers(
       kernelWorkingDirs
     );
     setActiveKernelId(restarted.id);
+    await setupModuleNamespaces();
     await bindActiveProjectModules(restarted.id);
     return restarted;
   });

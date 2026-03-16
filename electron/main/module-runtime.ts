@@ -100,6 +100,49 @@ export function toPythonArgumentValue(value: ModuleInputValue): string | null {
 }
 
 /**
+ * Build the payload for the `pdv.modules.setup` comm message.
+ *
+ * Collects install paths and optional python_package/entry_point fields
+ * from each imported module's manifest.
+ *
+ * @param moduleManager - Module manager for manifest reads.
+ * @param importedModules - List of project-imported modules.
+ * @returns Payload object for pdv.modules.setup.
+ */
+export async function buildModulesSetupPayload(
+  moduleManager: ModuleManager,
+  importedModules: ProjectModuleImport[]
+): Promise<{
+  modules: Array<{
+    install_path: string;
+    python_package?: string;
+    entry_point?: string;
+  }>;
+}> {
+  const modules: Array<{
+    install_path: string;
+    python_package?: string;
+    entry_point?: string;
+  }> = [];
+  for (const imp of importedModules) {
+    try {
+      const info = await moduleManager.getModuleSetupInfo(imp.module_id);
+      modules.push({
+        install_path: info.installPath,
+        python_package: info.pythonPackage,
+        entry_point: info.entryPoint,
+      });
+    } catch (error) {
+      console.warn(
+        `[pdv] Failed to get module setup info for ${imp.module_id}:`,
+        error
+      );
+    }
+  }
+  return { modules };
+}
+
+/**
  * Bind one imported module's action scripts under `<alias>.scripts.<name>`.
  *
  * @param commRouter - Comm router used for SCRIPT_REGISTER messages.

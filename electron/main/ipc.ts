@@ -63,6 +63,7 @@ export const IPC = {
     createScript: "tree:createScript",
     createNote: "tree:createNote",
     addFile: "tree:addFile",
+    invokeHandler: "tree:invokeHandler",
   },
   /** Namespace inspection channels. */
   namespace: {
@@ -256,6 +257,16 @@ export interface TreeCreateNoteResult {
   notePath?: string;
   /** Dot-path of the created tree node. */
   treePath?: string;
+}
+
+/**
+ * Result returned by `tree.invokeHandler`.
+ */
+export interface HandlerInvokeResult {
+  /** True when the handler was found and dispatched. */
+  success: boolean;
+  /** Optional error message when dispatch failed. */
+  error?: string;
 }
 
 /**
@@ -795,6 +806,17 @@ export interface PDVApi {
       nodeType: "namelist" | "fortran" | "file",
       filename: string
     ): Promise<TreeAddFileResult>;
+    /**
+     * Invoke a registered custom handler for a tree node.
+     *
+     * @param kernelId - Target kernel ID.
+     * @param path - Dot-path of the tree node to handle.
+     * @returns Handler invocation result.
+     */
+    invokeHandler(
+      kernelId: string,
+      path: string
+    ): Promise<HandlerInvokeResult>;
     /**
      * Subscribe to tree change push notifications.
      *

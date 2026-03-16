@@ -123,6 +123,22 @@ class TestHandleTreeList:
         assert 'params' not in value_node
 
 
+    def test_nodes_include_python_type_and_has_handler(self, tree_with_comm):
+        """Node descriptors include python_type and has_handler fields."""
+        tree_with_comm['val'] = 42
+        mock_comm = _make_mock_comm()
+        msg = _make_msg('pdv.tree.list', {'path': ''})
+        with patch.object(comms_mod, '_comm', mock_comm), \
+             patch.object(comms_mod, '_pdv_tree', tree_with_comm):
+            handle_tree_list(msg)
+        response = mock_comm._sent[0]
+        node = response['payload']['nodes'][0]
+        assert 'python_type' in node
+        assert node['python_type'] == 'builtins.int'
+        assert 'has_handler' in node
+        assert node['has_handler'] is False
+
+
 class TestHandleTreeGet:
     def test_metadata_mode_no_lazy_trigger(self, tree_with_comm, tmp_save_dir):
         """mode='metadata' returns descriptor without fetching from disk."""

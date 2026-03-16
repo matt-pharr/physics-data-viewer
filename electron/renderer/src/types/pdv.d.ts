@@ -42,6 +42,10 @@ export interface NodeDescriptor {
   params?: ScriptParameter[] | undefined;
   /** Physical filename with extension for file-backed nodes (e.g. "run.nml"). Null for others. */
   filename?: string | null;
+  /** Fully qualified Python type string (e.g. "builtins.int"). */
+  python_type?: string;
+  /** True if a custom handler is registered for this node's type. */
+  has_handler?: boolean;
 }
 
 /** Runtime kernel descriptor returned by `kernels.start/list/restart`. */
@@ -451,6 +455,10 @@ export interface PDVApi {
       nodeType: "namelist" | "fortran" | "file",
       filename: string
     ): Promise<{ success: boolean; error?: string; workingDirPath?: string }>;
+    invokeHandler(
+      kernelId: string,
+      path: string
+    ): Promise<{ success: boolean; error?: string }>;
     onChanged(
       callback: (payload: { changed_paths: string[]; change_type: "added" | "removed" | "updated" }) => void
     ): () => void;

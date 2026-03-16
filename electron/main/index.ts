@@ -69,6 +69,7 @@ const REGISTERED_CHANNELS: readonly string[] = [
   IPC.tree.createScript,
   IPC.tree.createNote,
   IPC.tree.addFile,
+  IPC.tree.invokeHandler,
   IPC.namespace.query,
   IPC.script.edit,
   IPC.note.save,
@@ -348,6 +349,7 @@ export function registerIpcHandlers(
     kernelManager,
     commRouter,
     projectManager,
+    moduleManager,
     kernelWorkingDirs,
     crashHandlers,
     resetProjectState: () => {
@@ -358,6 +360,7 @@ export function registerIpcHandlers(
     },
     setActiveKernelId: (id) => { activeKernelId = id; },
     getActiveKernelId: () => activeKernelId,
+    getActiveProjectDir: () => activeProjectDir,
     bindActiveProjectModules,
   });
 

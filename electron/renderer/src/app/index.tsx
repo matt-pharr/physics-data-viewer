@@ -412,6 +412,12 @@ const App: React.FC = () => {
         ? node.path.split('.').reduce((acc, part) => `${acc}["${part}"]`, 'pdv_tree')
         : 'pdv_tree';
       await navigator.clipboard.writeText(pyExpr);
+    } else if (action === 'handle') {
+      if (!currentKernelId) return;
+      const result = await window.pdv.tree.invokeHandler(currentKernelId, node.path);
+      if (!result.success && result.error) {
+        console.error('[App] Handler failed:', result.error);
+      }
     } else if (action === 'print') {
       if (!currentKernelId) return;
       const pyExpr = node.path

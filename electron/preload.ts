@@ -65,6 +65,8 @@ const api: PDVApi = {
       ipcRenderer.invoke(IPC.tree.createNote, kernelId, targetPath, noteName),
     addFile: (kernelId, sourcePath, targetTreePath, nodeType, filename) =>
       ipcRenderer.invoke(IPC.tree.addFile, kernelId, sourcePath, targetTreePath, nodeType, filename),
+    invokeHandler: (kernelId, nodePath) =>
+      ipcRenderer.invoke(IPC.tree.invokeHandler, kernelId, nodePath),
     onChanged: (callback) => onPush(IPC.push.treeChanged, callback),
   },
   namespace: {

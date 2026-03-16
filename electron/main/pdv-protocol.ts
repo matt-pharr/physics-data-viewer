@@ -86,6 +86,16 @@ export const PDVMessageType = {
   FILE_REGISTER: "pdv.file.register",
   /** Kernel → app. Confirms file registration. */
   FILE_REGISTER_RESPONSE: "pdv.file.register.response",
+
+  // Modules
+  /** App → kernel. Setup module library namespaces (sys.path + entry points). */
+  MODULES_SETUP: "pdv.modules.setup",
+  /** Kernel → app. Confirms module setup; carries registered handler map. */
+  MODULES_SETUP_RESPONSE: "pdv.modules.setup.response",
+  /** App → kernel. Invoke a registered type handler for a tree node. */
+  HANDLER_INVOKE: "pdv.handler.invoke",
+  /** Kernel → app. Confirms handler invocation result. */
+  HANDLER_INVOKE_RESPONSE: "pdv.handler.invoke.response",
 } as const;
 
 /** Union of all PDV message type string values. */
@@ -310,6 +320,10 @@ export interface NodeDescriptor {
   params?: ScriptParameter[];
   /** Physical filename with extension for file-backed nodes (e.g. "run.nml"). Null for others. */
   filename?: string | null;
+  /** Fully qualified Python type string (e.g. "builtins.int"). */
+  python_type?: string;
+  /** True if a custom handler is registered for this node's type. */
+  has_handler?: boolean;
 }
 
 // ---------------------------------------------------------------------------

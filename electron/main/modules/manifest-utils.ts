@@ -65,6 +65,10 @@ export interface ModuleManifestV1 {
     inputs?: string[];
     tab?: string;
   }>;
+  /** Python package name exposed by this module for import. */
+  python_package?: string;
+  /** Python module to import on kernel start (entry point). */
+  entry_point?: string;
 }
 
 /**
@@ -175,6 +179,9 @@ export function validateModuleManifest(
       tab: optionalString(actionObj, "tab", manifestPath, `actions[${index}]`),
     };
   });
+  const python_package = optionalString(obj, "python_package", manifestPath);
+  const entry_point = optionalString(obj, "entry_point", manifestPath);
+
   return {
     schema_version: schemaVersion,
     id,
@@ -185,6 +192,8 @@ export function validateModuleManifest(
     dependencies,
     inputs,
     actions,
+    python_package,
+    entry_point,
   };
 }
 

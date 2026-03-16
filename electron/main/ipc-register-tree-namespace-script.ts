@@ -18,7 +18,7 @@ import * as path from "path";
 
 import type { CommRouter } from "./comm-router";
 import type { ConfigStore, PDVConfig } from "./config";
-import { IPC, type NamespaceQueryOptions, type NamespaceVariable, type TreeAddFileResult, type TreeCreateNoteResult, type TreeCreateScriptResult } from "./ipc";
+import { IPC, type HandlerInvokeResult, type NamespaceQueryOptions, type NamespaceVariable, type TreeAddFileResult, type TreeCreateNoteResult, type TreeCreateScriptResult } from "./ipc";
 import type { KernelManager } from "./kernel-manager";
 import { PDVMessageType, type PDVFileRegisterPayload } from "./pdv-protocol";
 import type { ProjectManager } from "./project-manager";
@@ -323,6 +323,24 @@ export function registerTreeNamespaceScriptIpcHandlers(
       } catch (err) {
         return { success: false, error: String(err) };
       }
+    }
+  );
+
+  ipcMain.handle(
+    IPC.tree.invokeHandler,
+    async (
+      _event,
+      kernelId: string,
+      nodePath: string
+    ): Promise<HandlerInvokeResult> => {
+      if (!kernelManager.getKernel(kernelId)) {
+        return { success: false, error: `Kernel not found: ${kernelId}` };
+      }
+      const response = await commRouter.request(PDVMessageType.HANDLER_INVOKE, {
+        path: nodePath,
+      });
+      const payload = response.payload as { dispatched: boolean; error?: string };
+      return { success: payload.dispatched, error: payload.error };
     }
   );
 }

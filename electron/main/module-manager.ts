@@ -430,6 +430,32 @@ export class ModuleManager {
   }
 
   /**
+   * Return module setup info for library namespace initialization.
+   *
+   * @param moduleId - Installed module identifier.
+   * @returns Install path and optional python_package/entry_point from manifest.
+   * @throws {Error} When module is not installed or manifest is invalid.
+   */
+  async getModuleSetupInfo(moduleId: string): Promise<{
+    installPath: string;
+    pythonPackage?: string;
+    entryPoint?: string;
+  }> {
+    const index = await this.readIndex();
+    const module = index.modules[moduleId];
+    if (!module) {
+      throw new Error(`Installed module not found: ${moduleId}`);
+    }
+    const moduleDir = module.installPath ?? path.join(this.packagesRoot, moduleId);
+    const manifest = await this.readAndValidateManifest(moduleDir);
+    return {
+      installPath: moduleDir,
+      pythonPackage: manifest.python_package,
+      entryPoint: manifest.entry_point,
+    };
+  }
+
+  /**
    * Install from a local folder path.
    *
    * @param source - Local source reference.

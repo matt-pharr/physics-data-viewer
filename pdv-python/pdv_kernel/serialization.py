@@ -63,6 +63,23 @@ FORMAT_MARKDOWN = "markdown"
 FORMAT_INLINE = "inline"
 
 
+def python_type_string(value: Any) -> str:
+    """Return ``'module.qualname'`` for any object.
+
+    Parameters
+    ----------
+    value : Any
+        Any Python object.
+
+    Returns
+    -------
+    str
+        Fully qualified type string, e.g. ``'builtins.int'``.
+    """
+    t = type(value)
+    return f"{t.__module__}.{t.__qualname__}"
+
+
 def detect_kind(value: Any) -> str:
     """Detect the node kind for a Python value.
 
