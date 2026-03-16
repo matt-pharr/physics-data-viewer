@@ -34,6 +34,7 @@ PDV is an Electron desktop application for computational and experimental physic
 - A **command workflow** (tabbed code editor + execution console)
 - A **persistent project data model** (the Tree — a live, hierarchical data object in a language kernel)
 - **Scripted, reusable analysis workflows** (scripts stored as tree nodes)
+- **Markdown notes** (first-class tree nodes with KaTeX math preview, edited in a dedicated Write tab)
 - **Multi-language backend support** (Python first; Julia deferred to beta)
 
 The defining characteristic that separates PDV from a Jupyter notebook is the **Tree**: a persistent, navigable, typed data hierarchy that lives in the kernel namespace and is the single authority on all project data. Users explore it via a graphical tree panel, store analysis results in it, attach scripts to it, and save/load it as part of a project.
@@ -81,6 +82,7 @@ PDV uses the standard Electron three-process architecture:
 ### 2.2 Renderer Process Responsibilities
 - Display and interact with the Tree panel
 - Display and interact with the Code Cell (Monaco editor tabs)
+- Display and interact with the Write tab (markdown note editor with KaTeX math preview)
 - Display the Console (chronological execution output log)
 - Display the Namespace panel
 - All UI state (expansion, selection, scroll position) lives here and is ephemeral unless saved as part of a project
@@ -181,6 +183,13 @@ All type strings are namespaced with `pdv.`. The convention is `pdv.<domain>.<ac
 |---|---|---|
 | `pdv.script.register` | app → kernel | Register a newly created script file as a node in the tree. |
 | `pdv.script.register.response` | kernel → app | Confirms registration. |
+
+#### Note Messages
+
+| Type | Direction | Description |
+|---|---|---|
+| `pdv.note.register` | app → kernel | Register a newly created markdown note file as a node in the tree. Payload: `{ parent_path, name, relative_path }`. |
+| `pdv.note.register.response` | kernel → app | Confirms registration. |
 
 ### 3.5 Error Payload
 
@@ -420,7 +429,7 @@ sequenceDiagram
 pdv_kernel/
     __init__.py          # Public API: bootstrap(), PDVTree, PDVScript
     comms.py             # Comm channel: register target, send/receive, dispatch
-    tree.py              # PDVTree class, PDVScript class, lazy-load registry
+    tree.py              # PDVTree class, PDVScript class, PDVFile, PDVNote, lazy-load registry
     namespace.py         # pdv_namespace() — variable inspection
     serialization.py     # Type detection, format writers (npy, parquet, json, etc.)
     environment.py       # Path utilities, working dir management, project root logic
@@ -431,6 +440,7 @@ pdv_kernel/
         tree.py          # pdv.tree.list, pdv.tree.get handlers
         namespace.py     # pdv.namespace.query handler
         script.py        # pdv.script.register handler
+        note.py          # pdv.note.register handler
 ```
 
 ### 5.3 Bootstrap
@@ -534,7 +544,18 @@ A parameter is `required` if it has no default value. `type` is the string repre
 
 `PDVScript.run(tree, **kwargs)` loads the module fresh (no cache), calls `module.run(tree, **kwargs)`, and returns the result.
 
-### 5.8 The Lazy-Load Registry
+### 5.8 PDVFile and PDVNote Classes
+
+`PDVFile` is a base class for tree nodes backed by on-disk files that are not data or scripts. `PDVNote` is its subclass for markdown notes.
+
+**PDVNote** attributes:
+- `relative_path`: path of the `.md` file relative to the working directory
+- `title`: optional display title
+- `preview()`: returns the title, or the first non-empty line of the file, or `"Markdown note"` as fallback
+
+Notes are created via `pdv.note.register` (app → kernel) which creates a `PDVNote` instance and attaches it to the tree. The `.md` file itself lives in `<workingDir>/tree/<path>/` and is read/written directly by the main process via `note:read` / `note:save` IPC channels — no kernel round-trip is needed for content editing. On project save, the kernel serializes the note entry to `tree-index.json` and the main process copies the `.md` file into the save directory. On project load, the `.md` file is copied back from the save directory to the working directory and re-registered as a `PDVNote` in the tree.
+
+### 5.9 The Lazy-Load Registry
 
 An internal dict (not user-accessible) mapping tree paths to save-directory storage references:
 
@@ -675,6 +696,7 @@ The following node types are supported:
 |---|---|---|
 | `folder` | A `PDVTree` sub-dict with no associated file | In-memory only |
 | `script` | A `PDVScript` object | `.py` file in working or save directory |
+| `markdown` | A `PDVNote` object | `.md` file in working or save directory |
 | `ndarray` | NumPy array | `.npy` file |
 | `dataframe` | Pandas DataFrame | `.parquet` file |
 | `series` | Pandas Series | `.parquet` file |
@@ -731,6 +753,20 @@ Scalar and small inline values use `"backend": "inline"` and store the value dir
 ```
 
 `params` lists every parameter of the script's `run()` function except `pdv_tree` (which is always injected). The renderer uses this to build the `ScriptDialog` form. See §5.7 for the `ScriptParameter` descriptor shape and extraction rules.
+
+**Markdown node additional fields** (`"type": "markdown"`):
+```json
+{
+  "language": "markdown",
+  "storage": {
+    "backend": "local_file",
+    "relative_path": "tree/notes/my_note.md",
+    "format": "markdown"
+  }
+}
+```
+
+The `preview` field is populated with the first non-empty line of the `.md` file (typically the title).
 
 ### 7.4 Tree-Changed Push Notifications
 
@@ -870,9 +906,10 @@ The preload bridge exposes exactly the operations the renderer needs. It never e
 
 The API surface:
 - `window.pdv.kernels.*` — kernel lifecycle/execution: `list`, `start`, `stop`, `execute`, `interrupt`, `restart`, `complete`, `inspect`, `validate`; push subscription: `onOutput(cb) → unsub` for streamed execute chunks (`stdout`, `stderr`, images, execute-result fragments)
-- `window.pdv.tree.*` — tree operations: `list`, `get`, `createScript`; push: `onChanged(cb) → unsub`
+- `window.pdv.tree.*` — tree operations: `list`, `get`, `createScript`, `createNote`; push: `onChanged(cb) → unsub`
 - `window.pdv.namespace.*` — namespace query: `query`
-- `window.pdv.script.*` — script tooling: `edit`, `reload` (open in external editor; re-register with kernel)
+- `window.pdv.note.*` — markdown note I/O: `save(kernelId, treePath, content)`, `read(kernelId, treePath)` — reads/writes `.md` files directly on the main process without a kernel round-trip
+- `window.pdv.script.*` — script tooling: `edit` (open in external editor)
 - `window.pdv.project.*` — project lifecycle: `save`, `load`, `new`; push: `onLoaded(cb) → unsub`
 - `window.pdv.config.*` — app config: `get`, `set`
 - `window.pdv.about.*` — app metadata: `getVersion`
@@ -988,6 +1025,10 @@ electron/
                 CodeCell/
                     index.tsx           ← Tabbed Monaco editor surface
                     monaco-providers.ts ← Completion + hover provider logic
+                WriteTab/
+                    index.tsx           ← Tabbed markdown editor (Edit/Read mode toggle)
+                    ReadView.tsx        ← Full rendered markdown view (marked + KaTeX)
+                    math-preview.ts     ← Inline KaTeX math preview in Monaco editor
                 Console/                ← Streamed output and result rendering
                 Tree/                   ← Tree browser + context menu actions
                 NamespaceView/          ← Namespace table and filtering
@@ -1021,6 +1062,7 @@ pdv-python/
             tree.py
             namespace.py
             script.py
+            note.py
     tests/
         test_tree.py
         test_serialization.py
