@@ -93,6 +93,7 @@ physics-data-viewer/
 │       │   └── ...
 │       ├── components/
 │       │   ├── CodeCell/        Tabbed Monaco editor
+│       │   ├── WriteTab/        Markdown note editor (KaTeX math, Edit/Read mode)
 │       │   ├── Console/         Execution output log
 │       │   ├── Tree/            Hierarchical data browser
 │       │   ├── NamespaceView/   Kernel variable inspector
@@ -104,11 +105,11 @@ physics-data-viewer/
 │
 └── pdv-python/              ← Python kernel package
     ├── pdv_kernel/
-    │   ├── tree.py              PDVTree (dict subclass), PDVScript
+    │   ├── tree.py              PDVTree (dict subclass), PDVScript, PDVNote
     │   ├── comms.py             Comm target registration, message dispatch
     │   ├── namespace.py         Protected kernel namespace
     │   ├── serialization.py     Type detection, format readers/writers
-    │   └── handlers/            One file per message domain
+    │   └── handlers/            One file per message domain (lifecycle, project, tree, namespace, script, note)
     └── tests/
 ```
 

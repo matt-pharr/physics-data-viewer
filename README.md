@@ -12,6 +12,7 @@ A desktop environment for computational and experimental physics analysis. PDV c
 - **Tabbed code editor** — multi-tab Monaco editor with syntax highlighting, autocomplete, and global undo
 - **Execution console** — real-time output streaming with inline error display
 - **Script system** — reusable analysis workflows stored as tree nodes with typed parameter binding
+- **Markdown notes** — first-class tree nodes with a dedicated Write tab, inline KaTeX math preview, and Edit/Read mode toggle
 - **Namespace inspector** — live view of all kernel variables with type, shape, and size
 - **Project save / load** — serialize the full analysis state (tree, scripts, code tabs) for reproducibility
 - **Module system** — import and manage reusable analysis packages

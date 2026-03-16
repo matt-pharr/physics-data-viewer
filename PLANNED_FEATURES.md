@@ -19,6 +19,7 @@ The following planned features have been completed and are no longer tracked her
 - ~~**Modules System**~~ — manifest, install, import, action binding, per-module settings, module health checks, UI (see [`modules.md`](modules.md))
 - ~~**Kernel-Backed Autocompletion**~~ — `complete_request`/`complete_reply`, Monaco completion provider, `inspect_request`/`inspect_reply` for hover info
 - ~~**E2E Testing Infrastructure**~~ — integration tests with real kernel processes, `@slow` tagging, fixture-based project tests
+- ~~**Markdown Notes in the Tree**~~ — `PDVNote` tree node type, Write tab with tabbed Monaco editor, KaTeX inline/display math preview, Edit/Read mode toggle, auto-save, project save/load of `.md` files
 
 ### Cut (removed from roadmap)
 
@@ -106,58 +107,7 @@ The renderer (GUI) executes locally while the main process and Python kernel run
 
 ---
 
-## 4) Markdown Notes in the Tree
-
-### Goal
-
-Researchers need to attach written documentation, derivations, and interpretation to a project — keeping notes, equations, and analysis together in one place. Markdown nodes are a first-class tree node type backed by `.md` files. They are created and edited inside PDV via a dedicated Write tab in the middle pane, which operates as a parallel tabbed editor surface alongside the existing Code tab.
-
-### The Write Tab
-
-The middle pane gains a second top-level tab: **Write**. This tab is entirely independent from the Code tab — each maintains its own set of open documents and its own active tab. Switching between Code and Write simply changes which editor surface is visible; neither affects the other's state.
-
-Within the Write tab, open markdown documents are managed as individual tabs with the same open/close/unsaved-indicator behavior as code cells. A dot on the tab indicates unsaved changes; an × closes it.
-
-A markdown node is opened in the Write tab by right-clicking it in the tree panel and selecting **Open**. The Write tab becomes active and a new tab opens for that document, or focuses it if already open. When no markdown documents are open, the Write tab shows a blank state prompting the user to open or create one.
-
-### Creating Markdown Nodes
-
-The user right-clicks any location in the tree panel and selects **New Note** — the same interaction pattern as **New Script**. This creates a `.md` file in the working directory, registers it as a `markdown` node in the tree at the chosen path, opens the Write tab, and opens a new editor tab for the file.
-
-There is also a `pdv.new_note(path, title=None)` convenience method on the `pdv` app object for users who prefer to create notes from the code cell.
-
-### Editing and Math Preview
-
-The Write tab editor is a Monaco instance opened to the backing `.md` file, filling the full width of the pane. The editor is plain markdown — no syntax transformation or block-level rendering is applied to the document structure.
-
-The exception is math. As the user types, all LaTeX math expressions are rendered live alongside the source using KaTeX:
-
-- **Inline math** (`$...$`): the rendered equation appears immediately after the closing delimiter, on the same line.
-- **Display math** (`$$...$$`): the rendered equation appears on the line below the closing delimiter, left-aligned.
-
-These previews are always visible regardless of cursor position — the user sees both the LaTeX source and the rendered output simultaneously. This is intentional: the target users are comfortable writing LaTeX and want to catch errors as they type, not after moving the cursor away.
-
-Math rendering is handled entirely in the renderer process. The editor model content is scanned for math delimiters on each change; matched ranges are rendered with KaTeX and attached as inline widgets anchored to their position in the document. No round-trip to the kernel is required.
-
-### Read Mode
-
-A toggle button in the Write tab toolbar switches between **Edit mode** (Monaco editor, with inline math previews as described above) and **Read mode** (full rendered view of the document). In Read mode, the Monaco editor is hidden and replaced with a scrollable HTML render of the complete document — prose, headings, code blocks, and math — produced by a Markdown-to-HTML pass followed by KaTeX rendering of all math expressions. The toggle is a per-session preference and resets to Edit mode on next launch.
-
-### Saving
-
-Markdown nodes are files in the temp directory, and should be automatically saved to disk on every change, similar to code cells. The project save/load workflow needs to both appropriately save the python representation of the markdown files similar to the script nodes, and also ensure that the `.md` files are copied into the project directory on save. On project load, the `.md` files are copied back into the temp working directory and re-registered as `markdown` nodes in the tree. 
-
-### Implementation notes
-
-- Add `markdown` to `detect_kind()` in `serialization.py` and to the node type enum. Backed by a `.md` file; treated as `text` for serialization purposes.
-- The `tree-index.json` node descriptor `preview` field should be populated with the first non-empty line of the file (typically the title).
-- Math rendering dependencies: `katex` and `marked-katex-extension` for the Read mode render pass. The inline editor widgets use the KaTeX browser bundle directly.
-- The Write tab is a sibling of the Code tab at the top level of the middle pane. It does not share tab state, scroll position, or history with the Code tab.
-- The Monaco instance in the Write tab uses the `markdown` language mode. `quickSuggestions`, `wordBasedSuggestions`, and other code-completion features should be disabled — this is a writing surface, not a code editor.
-
----
-
-## 5) Kernel Reconnect on Renderer Reload
+## 4) Kernel Reconnect on Renderer Reload
 
 ### Goal
 When only the renderer reloads (Cmd+R, dev hot reload), the kernel and its working
@@ -391,11 +341,10 @@ Console output is intentionally not persisted (ARCHITECTURE.md §9.4). This is b
 
 ### Remaining Alpha Features → 0.1.0-beta1
 
-1. Markdown notes in the tree — Write tab, KaTeX math (item 4)
-2. Module GUI layout refactor + manifest editor + namelist editor (item 1)
-3. Remote executable execution over SSH + job managers (item 3, beta1 scope)
-4. Kernel reconnect on renderer reload (item 5)
-5. Julia parity + tests (item 2)
+1. Module GUI layout refactor + manifest editor + namelist editor (item 1)
+2. Remote executable execution over SSH + job managers (item 3, beta1 scope)
+3. Kernel reconnect on renderer reload (item 4)
+4. Julia parity + tests (item 2)
 
 ### Beta Features → 1.0.0
 
@@ -426,7 +375,7 @@ PDV is ready to ship 0.1.0-beta1 when all of the following are true:
 - ~~Kernel-backed autocompletion works in the code cell for Python~~ ✅
 - ~~Modules are installable and runnable via manifest-driven UI actions~~ ✅
 - Module GUI supports relative layout, and a visual manifest editor is available
-- Markdown notes are first-class tree nodes with KaTeX math support
+- ~~Markdown notes are first-class tree nodes with KaTeX math support~~ ✅
 - Remote executable execution and job manager support (SLURM, task-spooler) are production-usable
 - Kernel reconnect works on renderer reload and is designed with remote abstraction
 - Python and Julia have practical parity for all core workflows
