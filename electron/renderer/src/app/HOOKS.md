@@ -13,7 +13,7 @@ App (index.tsx)
  ├── useKernelSubscriptions()   — push-subscription lifecycle
  ├── useKernelLifecycle()       — start / restart / env-save
  ├── useKeyboardShortcuts()     — global keydown listener
- └── useProjectWorkflow()       — save / load / new project + unsaved dialog
+ └── useProjectWorkflow()       — save / load / new project
 ```
 
 Hooks never call each other directly. They communicate through **shared state**: each hook receives the App-level `useState` values and setters it needs via an options object, and returns callbacks or derived values consumed by App or its children.
@@ -131,15 +131,14 @@ Several hooks bump integer "refresh tokens" (e.g. `setTreeRefreshToken(t => t + 
 
 ### `useProjectWorkflow({ kernelStatus, currentProjectDir, cellTabs, ... })`
 
-**Purpose**: Orchestrates project save/load/new flows, including the unsaved-changes confirmation dialog.
+**Purpose**: Orchestrates project save/load/new flows.
 
 **Takes**: Kernel status, project dir, cell tabs, config, and setters for all project-related state. Also takes `loadedProjectTabsRef` and `normalizeLoadedCodeCells` for processing loaded project data.
 
 **Returns**:
-- `unsavedDialogContext` — non-null when the unsaved-changes dialog should be shown
 - `handleSaveProject(options?)` — saves the current project (prompts for directory if needed)
 - `handleOpenProject(path)` — loads a project from the given path
-- `handleUnsavedSave()` / `handleUnsavedDiscard()` / `handleUnsavedCancel()` — dialog callbacks
+- `executeOpenProject(path)` — opens a project directly
 
 **Menu listener**: Subscribes to `window.pdv.menu.onAction()` for File menu actions (save, open, close, recent project).
 
@@ -181,7 +180,7 @@ Several hooks bump integer "refresh tokens" (e.g. `setTreeRefreshToken(t => t + 
                     ┌──────────────────┐
   kernelStatus ────►│useProjectWorkflow │──► handleSaveProject(),
   cellTabs ────────►│                  │    handleOpenProject(),
-  config ──────────►│                  │    unsavedDialogContext
+  config ──────────►│                  │    executeOpenProject()
                     └──────────────────┘
 ```
 

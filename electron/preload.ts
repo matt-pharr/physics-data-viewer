@@ -119,11 +119,6 @@ const api: PDVApi = {
     pickFile: () => ipcRenderer.invoke(IPC.files.pickFile),
     pickDirectory: () => ipcRenderer.invoke(IPC.files.pickDirectory),
   },
-  lifecycle: {
-    onConfirmClose: (callback) => onPush(IPC.lifecycle.confirmClose, callback),
-    respondClose: (response) =>
-      ipcRenderer.invoke(IPC.lifecycle.closeResponse, response),
-  },
   menu: {
     updateRecentProjects: (paths) =>
       ipcRenderer.invoke(IPC.menu.updateRecentProjects, paths),

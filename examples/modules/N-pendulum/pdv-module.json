@@ -126,7 +126,7 @@
       "id": "solve_output_key",
       "label": "Solve Output Key",
       "control": "text",
-      "default": "'result'",
+      "default": "result",
       "tab": "Solver",
       "section": "I/O",
       "tooltip": "Tree key to write solver outputs under n_pendulum.<key>."

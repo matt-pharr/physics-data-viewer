@@ -19,7 +19,7 @@ The following planned features have been completed and are no longer tracked her
 - ~~**Modules System**~~ — manifest, install, import, action binding, per-module settings, module health checks, UI (see [`modules.md`](modules.md))
 - ~~**Kernel-Backed Autocompletion**~~ — `complete_request`/`complete_reply`, Monaco completion provider, `inspect_request`/`inspect_reply` for hover info
 - ~~**E2E Testing Infrastructure**~~ — integration tests with real kernel processes, `@slow` tagging, fixture-based project tests
-- ~~**Markdown Notes in the Tree**~~ — `PDVNote` tree node type, Write tab with tabbed Monaco editor, KaTeX inline/display math preview, Edit/Read mode toggle, auto-save, project save/load of `.md` files
+- ~~**Markdown Notes in the Tree**~~ — Write tab with tabbed `.md` editor, KaTeX inline/display math preview, Read mode, tree context-menu creation, auto-save, project save/load support
 
 ### Cut (removed from roadmap)
 
@@ -319,34 +319,34 @@ GitHub Copilot is exposed to third-party editors through two mechanisms:
 
 ---
 
-## 6) Known Design Tensions to Resolve
+# Known Design Tensions to Resolve
 
 These are architectural decisions in the current design that are correct for v0.0.4 but will create friction as the system grows. They should be resolved before or during the remaining Alpha Feature implementation.
 
-### Dot-delimited tree paths and key collision
+## Dot-delimited tree paths and key collision
 `PDVTree` supports dot-separated path notation (`pdv_tree['data.waveforms.ch1']`). Keys that themselves contain dots are ambiguous — `pdv_tree['my.key']` is indistinguishable from `pdv_tree['my']['key']`. This is acceptable for alpha (physics variable names rarely contain dots) but needs a resolution before community use. Options: escape sequences, a separate `pdv_tree.at('my.key')` method for literal keys, or abandoning dot notation in favour of `pdv_tree['my']['key']` exclusively.
 
-### Working directory is local-only
+## Working directory is local-only
 By design, the working directory is a local temp path passed to the kernel via `pdv.init` (ARCHITECTURE.md §4.1, §6.1). This is correct for local execution but is the primary constraint for the full remote mode (see item 3, 1.0.0 scope). When remote execution is designed, this contract must be explicitly renegotiated.
 
-### Autosave is reserved but unimplemented
+## Autosave is reserved but unimplemented
 The working directory structure includes a `.pdv-work/autosave/` path (ARCHITECTURE.md §6.1). The autosave feature is not designed yet. This directory should not be used for other purposes.
 
-### Console history is ephemeral
+## Console history is ephemeral
 Console output is intentionally not persisted (ARCHITECTURE.md §9.4). This is by design — the console is a transient display surface, not a record.
 
 ---
 
-## 7) Suggested Implementation Sequence
+# Suggested Implementation Sequence
 
-### Remaining Alpha Features → 0.1.0-beta1
+## Remaining Alpha Features → 0.1.0-beta1
 
 1. Module GUI layout refactor + manifest editor + namelist editor (item 1)
 2. Remote executable execution over SSH + job managers (item 3, beta1 scope)
 3. Kernel reconnect on renderer reload (item 4)
 4. Julia parity + tests (item 2)
 
-### Beta Features → 1.0.0
+## Beta Features → 1.0.0
 
 Begin only after 0.1.0-beta1 is stable. Suggested order:
 
@@ -364,9 +364,9 @@ Begin only after 0.1.0-beta1 is stable. Suggested order:
 
 ---
 
-## 8) Release Completion Criteria
+# Release Completion Criteria
 
-### 0.1.0-beta1 — Alpha Feature Complete
+## 0.1.0-beta1 — Alpha Feature Complete
 
 PDV is ready to ship 0.1.0-beta1 when all of the following are true:
 
@@ -381,7 +381,7 @@ PDV is ready to ship 0.1.0-beta1 when all of the following are true:
 - Python and Julia have practical parity for all core workflows
 - ~~E2E test coverage spans kernel startup, execution, tree save/load, and script execution~~ ✅
 
-### 1.0.0 — Beta Feature Complete
+## 1.0.0 — Beta Feature Complete
 
 PDV is ready to ship 1.0.0 when all of the following are additionally true:
 

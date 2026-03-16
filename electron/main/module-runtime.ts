@@ -96,7 +96,11 @@ export function toPythonArgumentValue(value: ModuleInputValue): string | null {
   if (trimmed === "True" || trimmed === "False" || trimmed === "None") {
     return trimmed;
   }
-  return JSON.stringify(trimmed);
+  // Produce a Python string literal. Use single quotes so that double quotes
+  // inside the string don't need escaping (and vice-versa). Backslashes and
+  // the chosen quote character are escaped.
+  const escaped = trimmed.replace(/\\/g, "\\\\").replace(/'/g, "\\'");
+  return `'${escaped}'`;
 }
 
 /**
