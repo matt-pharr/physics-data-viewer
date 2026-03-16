@@ -20,8 +20,17 @@ describe("toPythonArgumentValue", () => {
 
   it("quotes string expressions to prevent code injection", () => {
     expect(toPythonArgumentValue("5); __import__('os').system('evil')#")).toBe(
-      "\"5); __import__('os').system('evil')#\""
+      "'5); __import__(\\'os\\').system(\\'evil\\')#'"
     );
+  });
+
+  it("produces valid Python string literals for plain strings", () => {
+    expect(toPythonArgumentValue("RK45")).toBe("'RK45'");
+    expect(toPythonArgumentValue("hello world")).toBe("'hello world'");
+  });
+
+  it("escapes backslashes in string values", () => {
+    expect(toPythonArgumentValue("path\\to\\file")).toBe("'path\\\\to\\\\file'");
   });
 
   it("returns null for empty string input", () => {

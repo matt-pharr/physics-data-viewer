@@ -147,8 +147,10 @@ def _configure_matplotlib() -> None:
     for backend in candidates:
         try:
             matplotlib.use(backend)
-            # Successfully switched to an interactive backend — native windows
-            # will be used and no patching is needed.
+            # Enable interactive mode so plt.show() is non-blocking — the
+            # plot window opens and the kernel returns to idle immediately.
+            import matplotlib.pyplot as _plt  # noqa: PLC0415
+            _plt.ion()
             return
         except Exception:
             continue

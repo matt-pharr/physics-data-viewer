@@ -509,10 +509,6 @@ export interface PDVApi {
     pickFile(): Promise<string | null>;
     pickDirectory(): Promise<string | null>;
   };
-  lifecycle: {
-    onConfirmClose(callback: () => void): () => void;
-    respondClose(response: { action: 'save' | 'discard' | 'cancel' }): Promise<boolean>;
-  };
   menu: {
     updateRecentProjects(paths: string[]): Promise<boolean>;
     onAction(callback: (payload: MenuActionPayload) => void): () => void;

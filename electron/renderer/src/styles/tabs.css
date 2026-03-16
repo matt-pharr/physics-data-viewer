@@ -3,13 +3,14 @@
 /* ===== TABS (used by CodeCell) ===== */
 
 .tab {
-  padding: 6px 12px;
+  padding: 4px 10px;
   background-color: var(--bg-tertiary);
   border: 1px solid transparent;
   border-radius: 4px;
   color: var(--text-secondary);
   cursor: pointer;
-  font-size: 13px;
+  font-size: 12px;
+  line-height: 1.1;
   font-family: var(--font-sans);
   transition: all 0.15s ease;
 }
@@ -26,7 +27,7 @@
 }
 
 .tab.add {
-  padding: 6px 10px;
+  padding: 4px 8px;
   font-weight: bold;
   color: var(--accent);
   background-color: transparent;
@@ -45,4 +46,18 @@
 
 .tab-close:hover {
   color: var(--text-primary);
+}
+
+/* Inline rename input shown when renaming a tab */
+.tab-rename-input {
+  padding: 3px 6px;
+  background-color: var(--bg-primary);
+  border: 1px solid var(--accent);
+  border-radius: 4px;
+  color: var(--text-primary);
+  font-size: 12px;
+  line-height: 1.1;
+  font-family: var(--font-sans);
+  width: 80px;
+  outline: none;
 }

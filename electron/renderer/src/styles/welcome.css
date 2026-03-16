@@ -1,0 +1,121 @@
+/* welcome.css — Full-screen welcome/splash overlay shown on pristine startup */
+
+.welcome-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background-color: var(--bg-primary);
+}
+
+.welcome-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 28px;
+  max-width: 440px;
+  width: 100%;
+  padding: 48px 40px;
+}
+
+/* Logo placeholder */
+.welcome-logo {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+}
+
+.welcome-logo-icon {
+  font-size: 48px;
+  line-height: 1;
+  opacity: 0.8;
+}
+
+.welcome-title {
+  font-size: 22px;
+  font-weight: 600;
+  color: var(--text-primary);
+  letter-spacing: 0.01em;
+}
+
+/* Action buttons */
+.welcome-actions {
+  display: flex;
+  gap: 12px;
+  width: 100%;
+}
+
+.welcome-action-btn {
+  flex: 1;
+  padding: 10px 16px !important;
+  font-size: 13px !important;
+  text-align: center;
+}
+
+/* Recent projects */
+.welcome-recent {
+  width: 100%;
+}
+
+.welcome-recent-heading {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-secondary);
+  margin-bottom: 8px;
+}
+
+.welcome-recent-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.welcome-recent-item {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  width: 100%;
+  padding: 8px 12px;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  cursor: pointer;
+  transition: background-color 0.12s ease;
+  text-align: left;
+}
+
+.welcome-recent-item:hover:not(:disabled) {
+  background-color: var(--bg-hover);
+}
+
+.welcome-recent-item:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.welcome-recent-name {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--accent);
+  font-family: var(--font-sans);
+}
+
+.welcome-recent-path {
+  font-size: 11px;
+  color: var(--text-secondary);
+  font-family: var(--font-mono);
+  margin-top: 2px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 100%;
+}
+

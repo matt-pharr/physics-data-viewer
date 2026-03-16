@@ -652,27 +652,3 @@
   padding: 16px 20px;
   border-top: 1px solid var(--border-color);
 }
-
-/* ===== UNSAVED CHANGES DIALOG ===== */
-
-.unsaved-changes-dialog {
-  background-color: var(--bg-secondary);
-  border: 1px solid var(--border-color);
-  border-radius: 8px;
-  width: 420px;
-  max-width: 90%;
-  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.4);
-  display: flex;
-  flex-direction: column;
-}
-
-.unsaved-changes-body {
-  padding: 16px 20px;
-  color: var(--text-primary);
-  font-size: 13px;
-  line-height: 1.5;
-}
-
-.unsaved-changes-body p {
-  margin: 0;
-}

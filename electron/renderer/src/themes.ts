@@ -33,6 +33,9 @@ export const CSS_VAR_GROUPS: { label: string; vars: { key: string; label: string
       { key: 'accent-hover', label: 'Accent Hover' },
       { key: 'border-color', label: 'Border' },
       { key: 'error',        label: 'Error' },
+      { key: 'warning',      label: 'Warning' },
+      { key: 'warning-hover',label: 'Warning Hover' },
+      { key: 'success',      label: 'Success' },
     ],
   },
 ];
@@ -49,40 +52,40 @@ export const BUILTIN_THEMES: BuiltinTheme[] = [
     name: 'Dark+ (VSCode)',
     monacoTheme: 'vs-dark',
     colors: {
-      // Backgrounds — based on VSCode Default Dark+
       'bg-primary':   '#1e1e1e',
       'bg-secondary': '#252526',
       'bg-tertiary':  '#2d2d30',
       'bg-hover':     '#2a2d2e',
-      // Text
       'text-primary':   '#d4d4d4',
       'text-secondary': '#858585',
       'text-hint':      '#5a5a5a',
-      // Accents & Borders
       'accent':       '#007acc',
       'accent-hover': '#1a8fd1',
       'border-color': '#474747',
       'error':        '#f48771',
+      'warning':      '#dcdcaa',
+      'warning-hover':'#e4e4b4',
+      'success':      '#4ec9b0',
     },
   },
   {
     name: 'Light+ (VSCode)',
     monacoTheme: 'vs',
     colors: {
-      // Backgrounds — based on VSCode Default Light+
       'bg-primary':   '#ffffff',
       'bg-secondary': '#f3f3f3',
       'bg-tertiary':  '#ebebeb',
       'bg-hover':     '#e8e8e8',
-      // Text
       'text-primary':   '#383838',
       'text-secondary': '#717171',
       'text-hint':      '#aaaaaa',
-      // Accents & Borders
       'accent':       '#007acc',
       'accent-hover': '#005a9e',
       'border-color': '#d4d4d4',
       'error':        '#e51400',
+      'warning':      '#bf8803',
+      'warning-hover':'#a67702',
+      'success':      '#16825d',
     },
   },
   {
@@ -100,6 +103,9 @@ export const BUILTIN_THEMES: BuiltinTheme[] = [
       'accent-hover': '#b8f040',
       'border-color': '#49483e',
       'error':        '#f92672',
+      'warning':      '#e6db74',
+      'warning-hover':'#f0e68c',
+      'success':      '#a6e22e',
     },
   },
   {
@@ -117,6 +123,9 @@ export const BUILTIN_THEMES: BuiltinTheme[] = [
       'accent-hover': '#0a70cc',
       'border-color': '#d9d6d7',
       'error':        '#ff0000',
+      'warning':      '#996800',
+      'warning-hover':'#7a5300',
+      'success':      '#008e00',
     },
   },
   {
@@ -134,6 +143,9 @@ export const BUILTIN_THEMES: BuiltinTheme[] = [
       'accent-hover': '#0a64ca',
       'border-color': '#1a191c',
       'error':        '#f44747',
+      'warning':      '#ffd60a',
+      'warning-hover':'#ffe54c',
+      'success':      '#32d74b',
     },
   },
 ];
