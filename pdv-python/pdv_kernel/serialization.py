@@ -52,6 +52,7 @@ KIND_MARKDOWN = "markdown"
 KIND_BINARY = "binary"
 KIND_MODULE = "module"
 KIND_GUI = "gui"
+KIND_NAMELIST = "namelist"
 KIND_UNKNOWN = "unknown"
 
 # Format strings — must match ARCHITECTURE.md §7.3 storage.format
@@ -65,6 +66,7 @@ FORMAT_MARKDOWN = "markdown"
 FORMAT_INLINE = "inline"
 FORMAT_GUI_JSON = "gui_json"
 FORMAT_MODULE_META = "module_meta"
+FORMAT_NAMELIST = "namelist"
 
 
 def python_type_string(value: Any) -> str:
@@ -104,7 +106,7 @@ def detect_kind(value: Any) -> str:
     ndarray/dataframe/series values fall through to ``KIND_UNKNOWN``.
     """
     # Lazy import to avoid circular dependency and optional deps
-    from pdv_kernel.tree import PDVTree, PDVScript, PDVNote, PDVFile, PDVModule, PDVGui  # noqa: PLC0415
+    from pdv_kernel.tree import PDVTree, PDVScript, PDVNote, PDVFile, PDVModule, PDVGui, PDVNamelist  # noqa: PLC0415
 
     if isinstance(value, PDVModule):
         return KIND_MODULE
@@ -117,6 +119,8 @@ def detect_kind(value: Any) -> str:
             return KIND_MARKDOWN
         if isinstance(value, PDVGui):
             return KIND_GUI
+        if isinstance(value, PDVNamelist):
+            return KIND_NAMELIST
         return KIND_UNKNOWN
     # bool must be checked before int (bool is a subclass of int)
     if isinstance(value, bool):
@@ -268,6 +272,25 @@ def serialize_node(
             "backend": "local_file",
             "relative_path": rel_path,
             "format": fmt,
+        }
+        return descriptor
+
+    if kind == KIND_NAMELIST:
+        ext = os.path.splitext(value.relative_path)[1] or ".nml"
+        source_path = value.resolve_path(working_dir)
+        if not os.path.exists(source_path):
+            raise PDVSerializationError(f"File not found: {source_path}")
+        file_path = working_dir_tree_path(working_dir, tree_path, ext)
+        ensure_parent(file_path)
+        if os.path.abspath(source_path) != os.path.abspath(file_path):
+            shutil.copy2(source_path, file_path)
+        rel_path = os.path.relpath(file_path, working_dir)
+        descriptor["language"] = "namelist"
+        descriptor["namelist_format"] = value.format
+        descriptor["storage"] = {
+            "backend": "local_file",
+            "relative_path": rel_path,
+            "format": FORMAT_NAMELIST,
         }
         return descriptor
 
@@ -494,7 +517,7 @@ def node_preview(value: Any, kind: str) -> str:
     try:
         if kind == KIND_FOLDER:
             return "folder"
-        if kind in (KIND_MODULE, KIND_GUI):
+        if kind in (KIND_MODULE, KIND_GUI, KIND_NAMELIST):
             return value.preview() if hasattr(value, "preview") else kind
         if kind in (KIND_SCRIPT, KIND_MARKDOWN):
             return value.preview() if hasattr(value, "preview") else kind

@@ -563,6 +563,67 @@ class PDVGui(PDVFile):
         return f"PDVGui('{self._relative_path}'{mid})"
 
 
+class PDVNamelist(PDVFile):
+    """
+    File-backed namelist node. Knows its format for parsing dispatch.
+
+    Stored as the value at a tree path (e.g. ``pdv_tree['module.solver_nml']``).
+    Backed by a Fortran ``.in``/``.nml`` or TOML file.
+
+    Parameters
+    ----------
+    relative_path : str
+        Path to the backing namelist file (absolute or relative to working dir).
+    format : str
+        Namelist format: ``'fortran'``, ``'toml'``, or ``'auto'`` (detect from extension).
+    module_id : str or None
+        Module identifier for module-owned namelists. None for user-created namelists.
+
+    See Also
+    --------
+    ARCHITECTURE.md §7.2
+    """
+
+    def __init__(self, relative_path: str, format: str = "auto",
+                 module_id: str | None = None) -> None:
+        super().__init__(relative_path)
+        self._format = format  # "fortran", "toml", "auto"
+        self._module_id = module_id
+
+    @property
+    def format(self) -> str:
+        """Namelist format: ``'fortran'``, ``'toml'``, or ``'auto'``.
+
+        Returns
+        -------
+        str
+        """
+        return self._format
+
+    @property
+    def module_id(self) -> str | None:
+        """Module identifier, or None for user-created namelists.
+
+        Returns
+        -------
+        str or None
+        """
+        return self._module_id
+
+    def preview(self) -> str:
+        """Return a short preview string for the tree panel.
+
+        Returns
+        -------
+        str
+        """
+        return f"Namelist ({self._format})"
+
+    def __repr__(self) -> str:
+        mid = f", module_id='{self._module_id}'" if self._module_id else ""
+        return f"PDVNamelist('{self._relative_path}', format='{self._format}'{mid})"
+
+
 class PDVModule(dict):
     """
     Module metadata node. Dict subclass so it can hold children naturally.

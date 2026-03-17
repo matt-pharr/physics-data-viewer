@@ -161,6 +161,143 @@
   background-color: var(--bg-hover, #2a2d2e);
 }
 
+/* Namelist editor */
+
+.namelist-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  font-size: 12px;
+}
+
+.namelist-loading,
+.namelist-error {
+  padding: 12px 8px;
+  color: var(--text-secondary, #858585);
+}
+
+.namelist-error {
+  color: var(--error, #f48771);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.namelist-retry-btn {
+  padding: 2px 8px;
+  font-size: 11px;
+  border: 1px solid var(--border-color, #474747);
+  border-radius: 3px;
+  background: transparent;
+  color: var(--text-primary, #d4d4d4);
+  cursor: pointer;
+}
+
+.namelist-group {
+  border: 1px solid var(--border-color, #474747);
+  border-radius: 4px;
+}
+
+.namelist-group-summary {
+  padding: 6px 8px;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-primary, #d4d4d4);
+  user-select: none;
+}
+
+.namelist-group-body {
+  padding: 4px 8px 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.namelist-key-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 2px 0;
+  border-left: 2px solid transparent;
+  padding-left: 6px;
+}
+
+.namelist-key-row.namelist-dirty {
+  border-left-color: var(--accent, #007acc);
+}
+
+.namelist-key-label {
+  flex: 0 0 140px;
+  font-size: 12px;
+  color: var(--text-primary, #d4d4d4);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.namelist-hint {
+  color: var(--text-secondary, #858585);
+  font-size: 10px;
+  cursor: help;
+}
+
+.namelist-key-value {
+  flex: 1;
+  min-width: 0;
+}
+
+.namelist-key-value input[type="text"],
+.namelist-key-value input[type="number"] {
+  width: 100%;
+  padding: 2px 4px;
+  font-size: 12px;
+  border: 1px solid var(--border-color, #474747);
+  border-radius: 3px;
+  background: var(--bg-secondary, #252526);
+  color: var(--text-primary, #d4d4d4);
+  box-sizing: border-box;
+}
+
+.namelist-key-value input[type="checkbox"] {
+  margin: 0;
+}
+
+.namelist-save-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 8px;
+  background: var(--bg-secondary, #252526);
+  border: 1px solid var(--border-color, #474747);
+  border-radius: 4px;
+}
+
+.namelist-dirty-count {
+  font-size: 11px;
+  color: var(--text-secondary, #858585);
+}
+
+.namelist-save-btn {
+  padding: 4px 12px;
+  font-size: 12px;
+  border: 1px solid var(--accent, #007acc);
+  border-radius: 3px;
+  background: var(--accent, #007acc);
+  color: #fff;
+  cursor: pointer;
+  transition: opacity 0.15s;
+}
+
+.namelist-save-btn:hover:not(:disabled) {
+  opacity: 0.85;
+}
+
+.namelist-save-btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
 /* Module window root */
 
 .module-window-root {

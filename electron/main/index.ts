@@ -84,6 +84,8 @@ const REGISTERED_CHANNELS: readonly string[] = [
   IPC.modules.saveSettings,
   IPC.modules.runAction,
   IPC.modules.removeImport,
+  IPC.namelist.read,
+  IPC.namelist.write,
   IPC.project.save,
   IPC.project.load,
   IPC.project.new,

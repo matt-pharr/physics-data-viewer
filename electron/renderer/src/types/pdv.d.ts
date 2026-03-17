@@ -382,6 +382,20 @@ export interface ModuleWindowContext {
   kernelId: string;
 }
 
+/** Result returned by `namelist.read`. */
+export interface NamelistReadResult {
+  groups: Record<string, Record<string, unknown>>;
+  hints: Record<string, Record<string, string>>;
+  types: Record<string, Record<string, string>>;
+  format: "fortran" | "toml";
+}
+
+/** Result returned by `namelist.write`. */
+export interface NamelistWriteResult {
+  success: boolean;
+  error?: string;
+}
+
 /** Reference to an input in the container layout. */
 export interface LayoutInputRef {
   type: "input";
@@ -402,8 +416,15 @@ export interface LayoutContainer {
   children: LayoutNode[];
 }
 
-/** A layout node is either an input reference, action reference, or a container. */
-export type LayoutNode = LayoutInputRef | LayoutActionRef | LayoutContainer;
+/** Reference to a namelist file in the tree, rendered as an inline editor. */
+export interface LayoutNamelistRef {
+  type: "namelist";
+  tree_path: string;
+  tree_path_input?: string;
+}
+
+/** A layout node is either an input reference, action reference, namelist reference, or a container. */
+export type LayoutNode = LayoutInputRef | LayoutActionRef | LayoutNamelistRef | LayoutContainer;
 
 /** Top-level GUI layout object in the module manifest. */
 export interface ModuleGuiLayout {
@@ -526,6 +547,10 @@ export interface PDVApi {
   note: {
     save(kernelId: string, treePath: string, content: string): Promise<{ success: boolean; error?: string }>;
     read(kernelId: string, treePath: string): Promise<{ success: boolean; content?: string; error?: string }>;
+  };
+  namelist: {
+    read(kernelId: string, treePath: string): Promise<NamelistReadResult>;
+    write(kernelId: string, treePath: string, data: Record<string, Record<string, unknown>>): Promise<NamelistWriteResult>;
   };
   modules: {
     listInstalled(): Promise<ModuleDescriptor[]>;

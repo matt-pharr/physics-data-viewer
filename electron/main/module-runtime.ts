@@ -265,7 +265,32 @@ export async function bindImportedModule(
     }
   }
 
-  // 4. Bind scripts as before
+  // 4. Copy module files (namelists, fortran sources, etc.) and register them
+  try {
+    const moduleFiles = await moduleManager.resolveModuleFiles(importedModule.module_id);
+    for (const file of moduleFiles) {
+      if (!workingDir) continue;
+      const segments = importedModule.alias.split(".").filter(Boolean);
+      const destDir = path.join(workingDir, ...segments);
+      await fs.mkdir(destDir, { recursive: true });
+      const destPath = path.join(destDir, path.basename(file.path));
+      await fs.copyFile(file.path, destPath);
+
+      await commRouter.request(PDVMessageType.FILE_REGISTER, {
+        tree_path: importedModule.alias,
+        filename: path.basename(file.path),
+        node_type: file.type,
+        name: file.name,
+      });
+    }
+  } catch (error) {
+    console.warn(
+      `[pdv] Failed to register module files for ${importedModule.module_id}:`,
+      error
+    );
+  }
+
+  // 5. Bind scripts as before
   await bindImportedModuleScripts(commRouter, moduleManager, importedModule, workingDir);
 }
 

@@ -21,5 +21,8 @@
   "scripts": [
     { "name": "solve", "path": "scripts/solve.py" },
     { "name": "animate", "path": "scripts/animate.py" }
+  ],
+  "files": [
+    { "name": "solver_nml", "path": "inputs/solver.nml", "type": "namelist" }
   ]
 }

@@ -89,6 +89,11 @@ export const IPC = {
     runAction: "modules:runAction",
     removeImport: "modules:removeImport",
   },
+  /** Namelist read/write channels. */
+  namelist: {
+    read: "namelist:read",
+    write: "namelist:write",
+  },
   /** Project lifecycle channels. */
   project: {
     save: "project:save",
@@ -282,6 +287,30 @@ export interface TreeAddFileResult {
   error?: string;
   /** Absolute path to the copied file in the kernel working directory. */
   workingDirPath?: string;
+}
+
+/**
+ * Result returned by `namelist.read`.
+ */
+export interface NamelistReadResult {
+  /** Parsed namelist groups keyed by group name. */
+  groups: Record<string, Record<string, unknown>>;
+  /** Comment hints keyed by group then key. */
+  hints: Record<string, Record<string, string>>;
+  /** Inferred value types keyed by group then key. */
+  types: Record<string, Record<string, string>>;
+  /** Detected file format. */
+  format: "fortran" | "toml";
+}
+
+/**
+ * Result returned by `namelist.write`.
+ */
+export interface NamelistWriteResult {
+  /** True when the write operation succeeded. */
+  success: boolean;
+  /** Optional error message when `success` is false. */
+  error?: string;
 }
 
 /**
@@ -666,9 +695,20 @@ export interface LayoutContainer {
 }
 
 /**
- * A layout node is either an input reference, action reference, or a container.
+ * Reference to a namelist file in the tree, rendered as an inline editor.
  */
-export type LayoutNode = LayoutInputRef | LayoutActionRef | LayoutContainer;
+export interface LayoutNamelistRef {
+  type: "namelist";
+  /** Dot-path to the PDVNamelist tree node. */
+  tree_path: string;
+  /** Optional input ID whose value overrides the tree path dynamically. */
+  tree_path_input?: string;
+}
+
+/**
+ * A layout node is either an input reference, action reference, namelist reference, or a container.
+ */
+export type LayoutNode = LayoutInputRef | LayoutActionRef | LayoutNamelistRef | LayoutContainer;
 
 /**
  * Top-level GUI layout object in the module manifest.
@@ -954,6 +994,27 @@ export interface PDVApi {
      * @returns File content.
      */
     read(kernelId: string, treePath: string): Promise<{ success: boolean; content?: string; error?: string }>;
+  };
+
+  /** Namelist read/write operations. */
+  namelist: {
+    /**
+     * Read and parse a namelist file from the tree.
+     *
+     * @param kernelId - Target kernel ID.
+     * @param treePath - Dot-path to the PDVNamelist tree node.
+     * @returns Parsed namelist data with hints and types.
+     */
+    read(kernelId: string, treePath: string): Promise<NamelistReadResult>;
+    /**
+     * Write edited namelist data back to the backing file.
+     *
+     * @param kernelId - Target kernel ID.
+     * @param treePath - Dot-path to the PDVNamelist tree node.
+     * @param data - Updated group data to write.
+     * @returns Write result payload.
+     */
+    write(kernelId: string, treePath: string, data: Record<string, Record<string, unknown>>): Promise<NamelistWriteResult>;
   };
 
   /** Modules install/import/action operations. */

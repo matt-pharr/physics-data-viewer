@@ -83,6 +83,12 @@ const api: PDVApi = {
     read: (kernelId, treePath) =>
       ipcRenderer.invoke(IPC.note.read, kernelId, treePath),
   },
+  namelist: {
+    read: (kernelId, treePath) =>
+      ipcRenderer.invoke(IPC.namelist.read, kernelId, treePath),
+    write: (kernelId, treePath, data) =>
+      ipcRenderer.invoke(IPC.namelist.write, kernelId, treePath, data),
+  },
   modules: {
     listInstalled: () => ipcRenderer.invoke(IPC.modules.listInstalled),
     install: (request) => ipcRenderer.invoke(IPC.modules.install, request),

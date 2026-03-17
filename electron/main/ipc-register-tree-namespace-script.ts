@@ -18,7 +18,7 @@ import * as path from "path";
 
 import type { CommRouter } from "./comm-router";
 import type { ConfigStore, PDVConfig } from "./config";
-import { IPC, type HandlerInvokeResult, type NamespaceQueryOptions, type NamespaceVariable, type TreeAddFileResult, type TreeCreateNoteResult, type TreeCreateScriptResult } from "./ipc";
+import { IPC, type HandlerInvokeResult, type NamelistReadResult, type NamelistWriteResult, type NamespaceQueryOptions, type NamespaceVariable, type TreeAddFileResult, type TreeCreateNoteResult, type TreeCreateScriptResult } from "./ipc";
 import type { KernelManager } from "./kernel-manager";
 import { PDVMessageType, type PDVFileRegisterPayload } from "./pdv-protocol";
 import type { ProjectManager } from "./project-manager";
@@ -341,6 +341,42 @@ export function registerTreeNamespaceScriptIpcHandlers(
       });
       const payload = response.payload as { dispatched: boolean; error?: string };
       return { success: payload.dispatched, error: payload.error };
+    }
+  );
+
+  ipcMain.handle(
+    IPC.namelist.read,
+    async (
+      _event,
+      kernelId: string,
+      treePath: string
+    ): Promise<NamelistReadResult> => {
+      if (!kernelManager.getKernel(kernelId)) {
+        throw new Error(`Kernel not found: ${kernelId}`);
+      }
+      const response = await commRouter.request(PDVMessageType.NAMELIST_READ, {
+        tree_path: treePath,
+      });
+      return response.payload as unknown as NamelistReadResult;
+    }
+  );
+
+  ipcMain.handle(
+    IPC.namelist.write,
+    async (
+      _event,
+      kernelId: string,
+      treePath: string,
+      data: Record<string, Record<string, unknown>>
+    ): Promise<NamelistWriteResult> => {
+      if (!kernelManager.getKernel(kernelId)) {
+        throw new Error(`Kernel not found: ${kernelId}`);
+      }
+      const response = await commRouter.request(PDVMessageType.NAMELIST_WRITE, {
+        tree_path: treePath,
+        data,
+      });
+      return response.payload as unknown as NamelistWriteResult;
     }
   );
 }

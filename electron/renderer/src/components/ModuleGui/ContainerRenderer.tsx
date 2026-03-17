@@ -9,11 +9,13 @@ import React, { useState } from "react";
 import type {
   ImportedModuleActionDescriptor,
   LayoutContainer,
+  LayoutNamelistRef,
   LayoutNode,
 } from "../../types/pdv";
 import type { ModuleInputDescriptor, ModuleInputValue } from "../ModulesPanel/moduleUiHelpers";
 import { InputControl } from "./InputControl";
 import { ActionButton } from "./ActionButton";
+import { NamelistEditor } from "./NamelistEditor";
 import "../../styles/module-gui.css";
 
 interface ContainerRendererProps {
@@ -70,6 +72,27 @@ export const ContainerRenderer: React.FC<ContainerRendererProps> = (props) => {
         kernelReady={props.kernelReady}
         kernelId={props.kernelId}
         onRunAction={props.onRunAction}
+      />
+    );
+  }
+
+  if (node.type === "namelist") {
+    const nml = node as LayoutNamelistRef;
+    let resolvedPath = nml.tree_path;
+    if (nml.tree_path_input) {
+      const key = `${props.moduleAlias}:${nml.tree_path_input}`;
+      const override = props.inputValues[key];
+      if (typeof override === "string" && override.trim()) {
+        resolvedPath = override;
+      }
+    }
+    return (
+      <NamelistEditor
+        treePath={resolvedPath}
+        kernelId={props.kernelId ?? ""}
+        moduleAlias={props.moduleAlias}
+        treePathInputId={nml.tree_path_input}
+        inputValues={props.inputValues}
       />
     );
   }

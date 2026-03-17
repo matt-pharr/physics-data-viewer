@@ -84,6 +84,8 @@ export interface ModuleManifestV1 {
   gui?: {
     layout: unknown;
   };
+  /** File declarations for module-owned files to copy on import. */
+  files?: Array<{ name: string; path: string; type: "namelist" | "fortran" | "file" }>;
   /** Python package name exposed by this module for import. */
   python_package?: string;
   /** Python module to import on kernel start (entry point). */
@@ -220,6 +222,29 @@ export function validateModuleManifest(
   const python_package = optionalString(obj, "python_package", manifestPath);
   const entry_point = optionalString(obj, "entry_point", manifestPath);
 
+  let files: ModuleManifestV1["files"];
+  const filesRaw = obj.files;
+  if (filesRaw !== undefined) {
+    if (!Array.isArray(filesRaw)) {
+      throw new Error(`"files" must be an array in ${manifestPath}`);
+    }
+    files = filesRaw.map((fileValue, index) => {
+      if (!fileValue || typeof fileValue !== "object" || Array.isArray(fileValue)) {
+        throw new Error(`files[${index}] must be an object in ${manifestPath}`);
+      }
+      const fileObj = fileValue as Record<string, unknown>;
+      const fileName = requiredString(fileObj, "name", manifestPath, `files[${index}]`);
+      const filePath = requiredString(fileObj, "path", manifestPath, `files[${index}]`);
+      const fileType = requiredString(fileObj, "type", manifestPath, `files[${index}]`);
+      if (fileType !== "namelist" && fileType !== "fortran" && fileType !== "file") {
+        throw new Error(
+          `files[${index}].type must be one of "namelist", "fortran", or "file" in ${manifestPath}`
+        );
+      }
+      return { name: fileName, path: filePath, type: fileType as "namelist" | "fortran" | "file" };
+    });
+  }
+
   return {
     schema_version: schemaVersion,
     id,
@@ -232,6 +257,7 @@ export function validateModuleManifest(
     actions,
     has_gui,
     gui,
+    files,
     python_package,
     entry_point,
   };
@@ -742,10 +768,20 @@ function validateLayoutNode(
     }
     return;
   }
+  if (type === "namelist") {
+    const treePath = obj.tree_path;
+    if (typeof treePath !== "string" || !treePath.trim()) {
+      throw new Error(`"${path}.tree_path" must be a non-empty string in ${filePath}`);
+    }
+    if (obj.tree_path_input !== undefined && typeof obj.tree_path_input !== "string") {
+      throw new Error(`"${path}.tree_path_input" must be a string in ${filePath}`);
+    }
+    return;
+  }
   const validContainerTypes = ["row", "column", "group", "tabs"];
   if (!validContainerTypes.includes(type)) {
     throw new Error(
-      `"${path}.type" must be one of "input", "action", "row", "column", "group", or "tabs" in ${filePath}`
+      `"${path}.type" must be one of "input", "action", "namelist", "row", "column", "group", or "tabs" in ${filePath}`
     );
   }
   const children = obj.children;

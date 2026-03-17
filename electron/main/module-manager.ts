@@ -496,6 +496,48 @@ export class ModuleManager {
   }
 
   /**
+   * Resolve declared module files from the manifest `files` array.
+   *
+   * @param moduleId - Installed module identifier.
+   * @returns Resolved file descriptors with absolute paths.
+   * @throws {Error} When module is not installed or a file doesn't exist.
+   */
+  async resolveModuleFiles(
+    moduleId: string
+  ): Promise<Array<{ name: string; path: string; type: "namelist" | "fortran" | "file" }>> {
+    const index = await this.readIndex();
+    const module = index.modules[moduleId];
+    if (!module) {
+      return [];
+    }
+    const moduleDir = module.installPath ?? path.join(this.packagesRoot, moduleId);
+    const manifest = await this.readAndValidateManifest(moduleDir);
+    if (!manifest.files || manifest.files.length === 0) {
+      return [];
+    }
+    const resolved: Array<{ name: string; path: string; type: "namelist" | "fortran" | "file" }> = [];
+    for (const file of manifest.files) {
+      const absPath = path.resolve(moduleDir, file.path);
+      try {
+        const stat = await fs.stat(absPath);
+        if (!stat.isFile()) {
+          console.warn(`[pdv] Module file is not a file: ${file.path} (${moduleId})`);
+          continue;
+        }
+      } catch {
+        console.warn(`[pdv] Module file not found: ${file.path} (${moduleId})`);
+        continue;
+      }
+      resolved.push({
+        name: file.name,
+        path: absPath,
+        type: file.type,
+      });
+    }
+    return resolved;
+  }
+
+  /**
    * Return module setup info for library namespace initialization.
    *
    * @param moduleId - Installed module identifier.

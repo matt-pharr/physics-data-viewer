@@ -97,6 +97,16 @@ export const PDVMessageType = {
   /** Kernel → app. Confirms GUI registration. */
   GUI_REGISTER_RESPONSE: "pdv.gui.register.response",
 
+  // Namelist
+  /** App → kernel. Read and parse a namelist file in the tree. */
+  NAMELIST_READ: "pdv.namelist.read",
+  /** Kernel → app. Parsed namelist data with hints and types. */
+  NAMELIST_READ_RESPONSE: "pdv.namelist.read.response",
+  /** App → kernel. Write edited namelist data back to file. */
+  NAMELIST_WRITE: "pdv.namelist.write",
+  /** Kernel → app. Confirms write success. */
+  NAMELIST_WRITE_RESPONSE: "pdv.namelist.write.response",
+
   // Modules
   /** App → kernel. Setup module library namespaces (sys.path + entry points). */
   MODULES_SETUP: "pdv.modules.setup",
@@ -263,6 +273,8 @@ export interface PDVFileRegisterPayload {
   filename: string;
   /** Node type classification for the file. */
   node_type: "namelist" | "fortran" | "file";
+  /** Optional explicit tree node name. When omitted the kernel derives it from filename. */
+  name?: string;
 }
 
 // ---------------------------------------------------------------------------

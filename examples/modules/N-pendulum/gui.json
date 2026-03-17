@@ -58,6 +58,13 @@
         },
         {
           "type": "column",
+          "label": "Namelist",
+          "children": [
+            { "type": "namelist", "tree_path": "n_pendulum.solver_nml" }
+          ]
+        },
+        {
+          "type": "column",
           "label": "Animate",
           "children": [
             {
