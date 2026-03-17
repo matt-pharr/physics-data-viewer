@@ -19,12 +19,13 @@ interface ContextMenuProps {
   y: number;
   node: TreeNodeData;
   shortcuts: Shortcuts;
+  importedAliases?: Set<string>;
   onAction: (action: string, node: TreeNodeData) => void;
   onClose: () => void;
 }
 
 /** Floating context menu anchored to the pointer location. */
-export const ContextMenu: React.FC<ContextMenuProps> = ({ x, y, node, shortcuts, onAction, onClose }) => {
+export const ContextMenu: React.FC<ContextMenuProps> = ({ x, y, node, shortcuts, importedAliases, onAction, onClose }) => {
   const menuRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -57,7 +58,7 @@ export const ContextMenu: React.FC<ContextMenuProps> = ({ x, y, node, shortcuts,
     copy_path: formatShortcutHint(shortcuts.treeCopyPath),
   };
 
-  const actions = getActionsForNode(node);
+  const actions = getActionsForNode(node, importedAliases);
   const estimatedHeight = actions.length * MENU_ITEM_HEIGHT;
   const viewportWidth = typeof window !== 'undefined' ? window.innerWidth : DEFAULT_VIEWPORT.width;
   const viewportHeight = typeof window !== 'undefined' ? window.innerHeight : DEFAULT_VIEWPORT.height;
@@ -91,9 +92,14 @@ export const ContextMenu: React.FC<ContextMenuProps> = ({ x, y, node, shortcuts,
 };
 
 /** Return menu actions allowed for the given node descriptor. */
-export function getActionsForNode(node: TreeNodeData) {
+export function getActionsForNode(node: TreeNodeData, importedAliases?: Set<string>) {
   const actions: Array<{ id: string; label: string; disabled: boolean }> = [];
   const canCreateScript = node.type === 'dict' || node.type === 'folder' || node.type === 'root';
+  const isModule = importedAliases?.has(node.key) ?? false;
+
+  if (isModule) {
+    actions.push({ id: 'open_gui', label: 'Open GUI', disabled: false });
+  }
 
   if (node.type === 'script') {
     actions.push(
@@ -110,6 +116,7 @@ export function getActionsForNode(node: TreeNodeData) {
     if (canCreateScript) {
       actions.push({ id: 'create_script', label: 'Create new script', disabled: false });
       actions.push({ id: 'create_note', label: 'Create new note', disabled: false });
+      actions.push({ id: 'new_gui', label: 'New GUI', disabled: true });
     }
     actions.push({ id: 'view', label: 'View', disabled: false });
   }

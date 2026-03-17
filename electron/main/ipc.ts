@@ -590,7 +590,8 @@ export interface MenuActionPayload {
     | "project:open"
     | "project:openRecent"
     | "project:save"
-    | "project:saveAs";
+    | "project:saveAs"
+    | "modules:import";
   /** Project directory path for open-recent actions. */
   path?: string;
 }

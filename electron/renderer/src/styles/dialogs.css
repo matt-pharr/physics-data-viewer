@@ -652,3 +652,51 @@
   padding: 16px 20px;
   border-top: 1px solid var(--border-color);
 }
+
+/* ===== IMPORT MODULE DIALOG ===== */
+.import-module-dialog {
+  background-color: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  width: 620px;
+  max-width: 92%;
+  max-height: 80vh;
+  display: flex;
+  flex-direction: column;
+  box-shadow: 0 16px 36px rgba(0, 0, 0, 0.45);
+}
+
+.import-module-dialog .dialog-body {
+  overflow-y: auto;
+}
+
+.import-module-actions {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 12px;
+}
+
+.import-module-section {
+  margin-top: 16px;
+}
+
+.import-module-section-header {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-secondary);
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--border-color);
+  margin-bottom: 8px;
+}
+
+.btn-danger-text {
+  color: var(--error);
+}
+
+.modules-badge-gui {
+  background: var(--bg-tertiary);
+  color: var(--text-secondary);
+  border: 1px solid var(--border-color);
+}

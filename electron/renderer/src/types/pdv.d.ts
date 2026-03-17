@@ -176,7 +176,7 @@ export interface CodeCellData {
 /** File-menu action event payload emitted by `menu.onAction`. */
 export interface MenuActionPayload {
   /** Discriminated menu action identifier. */
-  action: "project:open" | "project:openRecent" | "project:save" | "project:saveAs";
+  action: "project:open" | "project:openRecent" | "project:save" | "project:saveAs" | "modules:import";
   /** Optional path argument for path-bearing menu actions. */
   path?: string;
 }

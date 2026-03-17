@@ -19,12 +19,12 @@ import { ActivityBar } from '../components/ActivityBar';
 import { StatusBar } from '../components/StatusBar';
 import { EnvironmentSelector } from '../components/EnvironmentSelector';
 import { NamespaceView } from '../components/NamespaceView';
-import { ModulesPanel } from '../components/ModulesPanel';
 import { ScriptDialog } from '../components/ScriptDialog';
 import { CreateScriptDialog } from '../components/Tree/CreateScriptDialog';
 import { CreateNoteDialog } from '../components/Tree/CreateNoteDialog';
 import { WriteTab } from '../components/WriteTab';
 import { SettingsDialog } from '../components/SettingsDialog';
+import { ImportModuleDialog } from '../components/ImportModuleDialog';
 import { WelcomeScreen } from '../components/WelcomeScreen';
 import type {
   CellTab,
@@ -59,21 +59,16 @@ const App: React.FC = () => {
   const {
     leftSidebarOpen,
     leftPanel,
-    rightSidebarOpen,
-    rightPanel,
     editorCollapsed,
     leftWidth,
-    rightWidth,
     editorHeight,
     rightPaneRef,
     startVerticalDrag,
     startHorizontalDrag,
-    startRightDrag,
     handleActivityBarClick,
     toggleLeftSidebar,
     toggleEditorCollapsed,
     collapseLeftSidebar,
-    collapseRightSidebar,
     expandEditor,
   } = useLayoutState();
 
@@ -121,12 +116,40 @@ const App: React.FC = () => {
   const [createScriptTarget, setCreateScriptTarget] = useState<string | null>(null);
   const [createNoteTarget, setCreateNoteTarget] = useState<string | null>(null);
   const [showSettings, setShowSettings] = useState(false);
+  const [showImportModule, setShowImportModule] = useState(false);
 
   // -- Write tab (markdown notes) state ------------------------------------
   const [activePane, setActivePane] = useState<'code' | 'write'>('code');
   const [noteTabs, setNoteTabs] = useState<NoteTab[]>([]);
   const [activeNoteTabId, setActiveNoteTabId] = useState<string | null>(null);
   const [settingsInitialTab, setSettingsInitialTab] = useState<'general' | 'shortcuts' | 'appearance' | 'runtime' | 'about'>('general');
+
+  // -- Imported GUI modules for activity bar ---------------------------------
+  const [importedGuiModules, setImportedGuiModules] = useState<{ alias: string; name: string }[]>([]);
+
+  // Fetch GUI modules when kernel or modules refresh token changes
+  useEffect(() => {
+    if (!currentKernelId || kernelStatus !== 'ready') {
+      setImportedGuiModules([]);
+      return;
+    }
+    void (async () => {
+      try {
+        const imported = await window.pdv.modules.listImported();
+        setImportedGuiModules(
+          imported.filter((m) => m.hasGui).map((m) => ({ alias: m.alias, name: m.name }))
+        );
+      } catch {
+        setImportedGuiModules([]);
+      }
+    })();
+  }, [currentKernelId, kernelStatus, modulesRefreshToken]);
+
+  // Derive the set of imported module aliases for tree context menu matching
+  const importedAliases = useMemo(
+    () => new Set(importedGuiModules.map((m) => m.alias)),
+    [importedGuiModules],
+  );
 
   // -- Appearance state -----------------------------------------------------
   const monacoTheme = useThemeManager({ config });
@@ -177,6 +200,17 @@ const App: React.FC = () => {
     const recentProjects = normalizeRecentProjects(config?.recentProjects);
     void window.pdv.menu.updateRecentProjects(recentProjects);
   }, [config]);
+
+  // Listen for File > Import Module... menu action
+  useEffect(() => {
+    if (!window.pdv?.menu) return;
+    const unsub = window.pdv.menu.onAction((payload) => {
+      if (payload.action === 'modules:import') {
+        setShowImportModule(true);
+      }
+    });
+    return unsub;
+  }, []);
 
   useKernelSubscriptions({
     currentKernelId,
@@ -393,6 +427,15 @@ const App: React.FC = () => {
   };
 
   const handleTreeAction = async (action: string, node: TreeNodeData) => {
+    if (action === 'open_gui') {
+      if (!currentKernelId) return;
+      void window.pdv.moduleWindows.open({ alias: node.key, kernelId: currentKernelId });
+      return;
+    }
+    if (action === 'new_gui') {
+      // Stub — GUI editor is future work
+      return;
+    }
     if (action === 'create_script') {
       setCreateScriptTarget(node.path);
     } else if (action === 'create_note') {
@@ -634,10 +677,10 @@ const App: React.FC = () => {
         <ActivityBar
           leftSidebarOpen={leftSidebarOpen}
           leftPanel={leftPanel}
-          rightSidebarOpen={rightSidebarOpen}
-          rightPanel={rightPanel}
           onActivityBarClick={handleActivityBarClick}
           onSettingsClick={() => { setSettingsInitialTab('general'); setShowSettings(true); }}
+          guiModules={importedGuiModules}
+          kernelId={currentKernelId}
         />
 
         {/* Left sidebar — collapsible */}
@@ -662,6 +705,7 @@ const App: React.FC = () => {
                     refreshToken={treeRefreshToken}
                     onAction={handleTreeAction}
                     shortcuts={shortcuts}
+                    importedAliases={importedAliases}
                   />
                 )}
                 {leftPanel === 'namespace' && (
@@ -766,35 +810,6 @@ const App: React.FC = () => {
           )}
         </div>
 
-        {/* Right sidebar — collapsible (Modules) */}
-        {rightSidebarOpen && (
-          <>
-            <div className="vertical-resizer" onMouseDown={startRightDrag} />
-            <aside className="right-sidebar" style={{ width: `${rightWidth}px` }}>
-              <div className="sidebar-header">
-                <span className="sidebar-title">{rightPanel === 'library' ? 'Module Library' : 'Modules'}</span>
-                <button
-                  className="sidebar-collapse-btn"
-                  onClick={collapseRightSidebar}
-                  title="Collapse sidebar"
-                >
-                  ›
-                </button>
-              </div>
-              <div className="sidebar-content">
-                <ModulesPanel
-                  projectDir={currentProjectDir}
-                  isActive={rightSidebarOpen}
-                  kernelId={currentKernelId}
-                  kernelReady={kernelStatus === 'ready'}
-                  onExecute={handleExecute}
-                  view={rightPanel}
-                  refreshToken={modulesRefreshToken}
-                />
-              </div>
-            </aside>
-          </>
-        )}
 
       </main>
 
@@ -883,6 +898,13 @@ const App: React.FC = () => {
            onCancel={() => setShowEnvSelector(false)}
          />
        )}
+       <ImportModuleDialog
+         isOpen={showImportModule}
+         projectDir={currentProjectDir}
+         kernelReady={kernelStatus === 'ready'}
+         refreshToken={modulesRefreshToken}
+         onClose={() => setShowImportModule(false)}
+       />
        <SettingsDialog
          isOpen={showSettings}
          initialTab={settingsInitialTab}

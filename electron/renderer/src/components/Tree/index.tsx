@@ -20,6 +20,7 @@ interface TreeProps {
   refreshToken?: number;
   onAction?: (action: string, node: TreeNodeData) => void;
   shortcuts: Shortcuts;
+  importedAliases?: Set<string>;
 }
 
 interface ContextMenuState {
@@ -29,7 +30,7 @@ interface ContextMenuState {
 }
 
 /** Tree browser component for node navigation and node actions. */
-export const Tree: React.FC<TreeProps> = ({ kernelId, disabled = false, refreshToken = 0, onAction, shortcuts }) => {
+export const Tree: React.FC<TreeProps> = ({ kernelId, disabled = false, refreshToken = 0, onAction, shortcuts, importedAliases }) => {
   const [nodes, setNodes] = useState<TreeNodeData[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | undefined>();
@@ -162,6 +163,10 @@ export const Tree: React.FC<TreeProps> = ({ kernelId, disabled = false, refreshT
 
   const handleDoubleClick = (node: TreeNodeData) => {
     if (disabled) return;
+    if (importedAliases?.has(node.key)) {
+      onAction?.('open_gui', node);
+      return;
+    }
     if (node.has_handler) {
       onAction?.('handle', node);
     } else if (node.type === 'markdown') {
@@ -268,6 +273,7 @@ export const Tree: React.FC<TreeProps> = ({ kernelId, disabled = false, refreshT
           y={contextMenu.y}
           node={contextMenu.node}
           shortcuts={shortcuts}
+          importedAliases={importedAliases}
           onAction={handleContextAction}
           onClose={() => setContextMenu(null)}
         />

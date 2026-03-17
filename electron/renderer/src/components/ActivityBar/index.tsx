@@ -1,33 +1,32 @@
 /**
  * ActivityBar — Vertical icon strip along the left edge of the app.
  *
- * Controls which sidebar panel is visible (tree, namespace, modules, library)
- * and provides access to settings.
+ * Controls which left sidebar panel is visible (tree, namespace),
+ * shows dynamic icons for imported GUI modules, and provides access to settings.
  */
 
 import React from 'react';
-import { TreeIcon, NamespaceIcon, ModulesIcon, LibraryIcon, SettingsIcon } from '../Icons';
+import { TreeIcon, NamespaceIcon, SettingsIcon } from '../Icons';
 
 type LeftPanel = 'tree' | 'namespace';
-type RightPanel = 'imported' | 'library';
 
 interface ActivityBarProps {
   leftSidebarOpen: boolean;
   leftPanel: LeftPanel;
-  rightSidebarOpen: boolean;
-  rightPanel: RightPanel;
-  onActivityBarClick: (panel: LeftPanel | RightPanel) => void;
+  onActivityBarClick: (panel: LeftPanel) => void;
   onSettingsClick: () => void;
+  guiModules?: { alias: string; name: string }[];
+  kernelId: string | null;
 }
 
-/** Vertical activity bar with panel toggle buttons and settings. */
+/** Vertical activity bar with panel toggle buttons, module launchers, and settings. */
 export const ActivityBar: React.FC<ActivityBarProps> = ({
   leftSidebarOpen,
   leftPanel,
-  rightSidebarOpen,
-  rightPanel,
   onActivityBarClick,
   onSettingsClick,
+  guiModules = [],
+  kernelId,
 }) => (
   <nav className="activity-bar">
     <div className="activity-bar-top">
@@ -45,20 +44,26 @@ export const ActivityBar: React.FC<ActivityBarProps> = ({
       >
         <NamespaceIcon />
       </button>
-      <button
-        className={`activity-btn${rightSidebarOpen && rightPanel === 'imported' ? ' active' : ''}`}
-        onClick={() => onActivityBarClick('imported')}
-        title="Modules"
-      >
-        <ModulesIcon />
-      </button>
-      <button
-        className={`activity-btn${rightSidebarOpen && rightPanel === 'library' ? ' active' : ''}`}
-        onClick={() => onActivityBarClick('library')}
-        title="Module Library"
-      >
-        <LibraryIcon />
-      </button>
+      {guiModules.length > 0 && (
+        <>
+          <div className="activity-bar-divider" />
+          {guiModules.map((mod) => (
+            <button
+              key={mod.alias}
+              className="activity-btn activity-btn-module"
+              onClick={() => {
+                if (kernelId) {
+                  void window.pdv.moduleWindows.open({ alias: mod.alias, kernelId });
+                }
+              }}
+              disabled={!kernelId}
+              title={mod.name}
+            >
+              {mod.name.charAt(0).toUpperCase()}
+            </button>
+          ))}
+        </>
+      )}
     </div>
     <div className="activity-bar-bottom">
       <button
