@@ -1,0 +1,261 @@
+{
+  "has_gui": true,
+  "gui": {
+    "layout": {
+      "type": "tabs",
+      "children": [
+        {
+          "type": "column",
+          "label": "Solver",
+          "children": [
+            {
+              "type": "group",
+              "label": "Core Parameters",
+              "children": [
+                {
+                  "type": "row",
+                  "children": [
+                    { "type": "input", "id": "n_links" },
+                    { "type": "input", "id": "damping" }
+                  ]
+                },
+                {
+                  "type": "row",
+                  "children": [
+                    { "type": "input", "id": "t_end" },
+                    { "type": "input", "id": "n_steps" }
+                  ]
+                }
+              ]
+            },
+            {
+              "type": "group",
+              "label": "Advanced",
+              "collapsed": true,
+              "children": [
+                { "type": "input", "id": "integration_method" },
+                { "type": "input", "id": "strict_tolerances" },
+                {
+                  "type": "row",
+                  "children": [
+                    { "type": "input", "id": "rtol" },
+                    { "type": "input", "id": "atol" }
+                  ]
+                }
+              ]
+            },
+            {
+              "type": "group",
+              "label": "I/O",
+              "children": [
+                { "type": "input", "id": "init_state_file" },
+                { "type": "input", "id": "output_dir" },
+                { "type": "input", "id": "solve_output_key" }
+              ]
+            },
+            { "type": "action", "id": "solve" }
+          ]
+        },
+        {
+          "type": "column",
+          "label": "Animate",
+          "children": [
+            {
+              "type": "group",
+              "label": "Data",
+              "children": [
+                { "type": "input", "id": "animate_output_key" }
+              ]
+            },
+            {
+              "type": "group",
+              "label": "Rendering",
+              "children": [
+                { "type": "input", "id": "render_style" },
+                {
+                  "type": "row",
+                  "children": [
+                    { "type": "input", "id": "n_frames" },
+                    { "type": "input", "id": "trail_alpha" }
+                  ]
+                },
+                { "type": "input", "id": "show_legend" }
+              ]
+            },
+            { "type": "action", "id": "animate" }
+          ]
+        }
+      ]
+    }
+  },
+  "inputs": [
+    {
+      "id": "n_links",
+      "label": "Number of Links",
+      "type": "int",
+      "default": "2",
+      "tooltip": "Number of links in the chain."
+    },
+    {
+      "id": "damping",
+      "label": "Damping Factor",
+      "type": "float",
+      "default": "0.0",
+      "tooltip": "Joint damping constant."
+    },
+    {
+      "id": "t_end",
+      "label": "Integration Time (s)",
+      "type": "float",
+      "default": "20.0",
+      "tooltip": "Simulation duration."
+    },
+    {
+      "id": "n_steps",
+      "label": "Integration Steps",
+      "control": "slider",
+      "min": 200,
+      "max": 12000,
+      "step": 200,
+      "default": 4000,
+      "tooltip": "Number of solver output steps."
+    },
+    {
+      "id": "integration_method",
+      "label": "Integrator",
+      "control": "dropdown",
+      "options": [
+        { "label": "RK45", "value": "RK45" },
+        { "label": "DOP853", "value": "DOP853" },
+        { "label": "Radau", "value": "Radau" }
+      ],
+      "default": "RK45",
+      "tooltip": "solve_ivp method."
+    },
+    {
+      "id": "strict_tolerances",
+      "label": "Use strict tolerances",
+      "control": "checkbox",
+      "default": false,
+      "tooltip": "Enable custom rtol/atol settings."
+    },
+    {
+      "id": "rtol",
+      "label": "Relative tolerance",
+      "control": "text",
+      "default": "1e-10",
+      "visible_if": { "input_id": "strict_tolerances", "equals": true },
+      "tooltip": "Only used when strict tolerances are enabled."
+    },
+    {
+      "id": "atol",
+      "label": "Absolute tolerance",
+      "control": "text",
+      "default": "1e-12",
+      "visible_if": { "input_id": "strict_tolerances", "equals": true },
+      "tooltip": "Only used when strict tolerances are enabled."
+    },
+    {
+      "id": "init_state_file",
+      "label": "Initial state file",
+      "control": "file",
+      "file_mode": "file",
+      "default": "",
+      "tooltip": "Optional file path persisted in metadata."
+    },
+    {
+      "id": "output_dir",
+      "label": "Output directory",
+      "control": "file",
+      "file_mode": "directory",
+      "default": "",
+      "tooltip": "Optional output directory persisted in metadata."
+    },
+    {
+      "id": "solve_output_key",
+      "label": "Solve Output Key",
+      "control": "text",
+      "default": "result",
+      "tooltip": "Tree key to write solver outputs under n_pendulum.<key>."
+    },
+    {
+      "id": "animate_output_key",
+      "label": "Animate Output Key",
+      "control": "dropdown",
+      "options_tree_path": "n_pendulum",
+      "default": "result",
+      "tooltip": "Populate from current n_pendulum tree children."
+    },
+    {
+      "id": "render_style",
+      "label": "Render Style",
+      "control": "dropdown",
+      "options": [
+        { "label": "Trajectory + arms", "value": "trajectory" },
+        { "label": "Angles only", "value": "angles" }
+      ],
+      "default": "trajectory",
+      "tooltip": "Choose what to emphasize in the plot."
+    },
+    {
+      "id": "n_frames",
+      "label": "Frames",
+      "control": "slider",
+      "min": 50,
+      "max": 600,
+      "step": 10,
+      "default": 200,
+      "tooltip": "Number of sampled frames in overlay."
+    },
+    {
+      "id": "trail_alpha",
+      "label": "Trail Alpha",
+      "control": "slider",
+      "min": 0.05,
+      "max": 1.0,
+      "step": 0.05,
+      "default": 0.15,
+      "tooltip": "Opacity ramp for sampled arm trails."
+    },
+    {
+      "id": "show_legend",
+      "label": "Show legend",
+      "control": "checkbox",
+      "default": true,
+      "tooltip": "Toggle angle plot legend."
+    }
+  ],
+  "actions": [
+    {
+      "id": "solve",
+      "label": "Run ODE Solver",
+      "script_path": "scripts/solve.py",
+      "inputs": [
+        "n_links",
+        "damping",
+        "t_end",
+        "n_steps",
+        "integration_method",
+        "strict_tolerances",
+        "rtol",
+        "atol",
+        "init_state_file",
+        "output_dir",
+        "solve_output_key"
+      ]
+    },
+    {
+      "id": "animate",
+      "label": "Animate / Plot",
+      "script_path": "scripts/animate.py",
+      "inputs": [
+        "animate_output_key",
+        "render_style",
+        "n_frames",
+        "trail_alpha",
+        "show_legend",
+        "output_dir"
+      ]
+    }
+  ]
+}

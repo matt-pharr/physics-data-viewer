@@ -64,7 +64,7 @@ def _collect_nodes(tree: "Any", save_dir: str, prefix: str = "") -> list:
         List of node descriptor dicts.
     """
     from pdv_kernel.serialization import serialize_node  # noqa: PLC0415
-    from pdv_kernel.tree import PDVTree, PDVScript  # noqa: PLC0415
+    from pdv_kernel.tree import PDVTree, PDVModule  # noqa: PLC0415
 
     nodes = []
     for key in dict.keys(tree):
@@ -72,7 +72,7 @@ def _collect_nodes(tree: "Any", save_dir: str, prefix: str = "") -> list:
         value = dict.__getitem__(tree, key)
         descriptor = serialize_node(path, value, save_dir)
         nodes.append(descriptor)
-        if isinstance(value, PDVTree):
+        if isinstance(value, (PDVTree, PDVModule)):
             nodes.extend(_collect_nodes(value, save_dir, prefix=path))
     return nodes
 
@@ -101,7 +101,7 @@ def handle_project_load(msg: dict) -> None:
     import shutil
 
     from pdv_kernel.comms import get_pdv_tree, send_error, send_message  # noqa: PLC0415
-    from pdv_kernel.tree import PDVTree, PDVScript, PDVNote  # noqa: PLC0415
+    from pdv_kernel.tree import PDVTree, PDVScript, PDVNote, PDVModule, PDVGui  # noqa: PLC0415
 
     msg_id = msg.get("msg_id")
     payload = msg.get("payload", {})
@@ -204,6 +204,47 @@ def handle_project_load(msg: dict) -> None:
             if os.path.abspath(source_path) != os.path.abspath(target_path):
                 shutil.copy2(source_path, target_path)
             _set_tree_node(tree, path, PDVNote(relative_path=target_path))
+        elif node_type == "module":
+            # Inline metadata for PDVModule nodes
+            meta = storage.get("value", {})
+            module_node = PDVModule(
+                module_id=meta.get("module_id", ""),
+                name=meta.get("name", ""),
+                version=meta.get("version", ""),
+            )
+            _set_tree_node(tree, path, module_node)
+        elif node_type == "gui":
+            relative_path = storage.get("relative_path", "")
+            source_path = os.path.join(save_dir, relative_path) if relative_path else ""
+            if source_path and not os.path.isabs(source_path):
+                source_path = os.path.join(save_dir, source_path)
+            if not source_path or not os.path.exists(source_path):
+                send_error(
+                    "pdv.project.load.response",
+                    "project.missing_gui_file",
+                    f"GUI file not found for '{path}'",
+                    in_reply_to=msg_id,
+                )
+                return
+            target_relative = relative_path or os.path.join("tree", *path.split(".")) + ".gui.json"
+            working_dir = tree._working_dir or save_dir
+            target_path = os.path.join(working_dir, target_relative)
+            os.makedirs(os.path.dirname(target_path), exist_ok=True)
+            if os.path.abspath(source_path) != os.path.abspath(target_path):
+                shutil.copy2(source_path, target_path)
+            module_id = node.get("module_id")
+            gui_node = PDVGui(relative_path=target_path, module_id=module_id)
+            _set_tree_node(tree, path, gui_node)
+            # Attach gui reference to parent PDVModule if applicable
+            parts = path.split(".")
+            if len(parts) > 1:
+                parent_path = ".".join(parts[:-1])
+                try:
+                    parent = tree[parent_path]
+                    if isinstance(parent, PDVModule):
+                        parent.gui = gui_node
+                except Exception:  # noqa: BLE001
+                    pass
         elif backend == "inline":
             _set_tree_node(tree, path, storage.get("value"))
         elif node.get("lazy", False):

@@ -16,8 +16,43 @@ import type { ModuleInputValue } from "../ipc";
 
 const PYTHON_IDENTIFIER_PATTERN = /^[A-Za-z_][A-Za-z0-9_]*$/;
 
+/** Input descriptor type shared between module and GUI manifests. */
+export type ModuleInputEntry = {
+  id: string;
+  label: string;
+  type?: string;
+  control?: "text" | "dropdown" | "slider" | "checkbox" | "file";
+  default?: ModuleInputValue;
+  options?: Array<{ label: string; value: ModuleInputValue }>;
+  options_tree_path?: string;
+  min?: number;
+  max?: number;
+  step?: number;
+  tab?: string;
+  section?: string;
+  section_collapsed?: boolean;
+  tooltip?: string;
+  visible_if?: {
+    input_id: string;
+    equals: ModuleInputValue;
+  };
+  file_mode?: "file" | "directory";
+};
+
+/** Action descriptor type shared between module and GUI manifests. */
+export type ModuleActionEntry = {
+  id: string;
+  label: string;
+  script_path: string;
+  inputs?: string[];
+  tab?: string;
+};
+
 /**
- * Raw module manifest shape accepted by v1 validation.
+ * Raw module manifest shape accepted by v1/v2 validation.
+ *
+ * Schema v3 modules move inputs/actions/gui to a separate `gui.json` file.
+ * Identity fields (id, name, version, compatibility, dependencies) stay here.
  */
 export interface ModuleManifestV1 {
   schema_version: string;
@@ -37,37 +72,15 @@ export interface ModuleManifestV1 {
     version?: string;
     marker?: string;
   }>;
-  inputs?: Array<{
-    id: string;
-    label: string;
-    type?: string;
-    control?: "text" | "dropdown" | "slider" | "checkbox" | "file";
-    default?: ModuleInputValue;
-    options?: Array<{ label: string; value: ModuleInputValue }>;
-    options_tree_path?: string;
-    min?: number;
-    max?: number;
-    step?: number;
-    tab?: string;
-    section?: string;
-    section_collapsed?: boolean;
-    tooltip?: string;
-    visible_if?: {
-      input_id: string;
-      equals: ModuleInputValue;
-    };
-    file_mode?: "file" | "directory";
-  }>;
-  actions: Array<{
-    id: string;
-    label: string;
-    script_path: string;
-    inputs?: string[];
-    tab?: string;
-  }>;
-  /** Explicit flag to indicate whether this module has a GUI. */
+  /** Scripts list (v3 identity manifest). */
+  scripts?: Array<{ name: string; path: string }>;
+  /** @deprecated v2 — moved to gui.json in v3. */
+  inputs?: ModuleInputEntry[];
+  /** @deprecated v2 — moved to gui.json in v3. Required in v2, absent in v3. */
+  actions?: ModuleActionEntry[];
+  /** @deprecated v2 — moved to gui.json in v3. */
   has_gui?: boolean;
-  /** Container layout for the module GUI. */
+  /** @deprecated v2 — moved to gui.json in v3. */
   gui?: {
     layout: unknown;
   };
@@ -75,6 +88,16 @@ export interface ModuleManifestV1 {
   python_package?: string;
   /** Python module to import on kernel start (entry point). */
   entry_point?: string;
+}
+
+/**
+ * Standalone GUI manifest (gui.json) for schema v3 modules.
+ */
+export interface GuiManifestV1 {
+  inputs?: ModuleInputEntry[];
+  actions: ModuleActionEntry[];
+  gui?: { layout: unknown };
+  has_gui?: boolean;
 }
 
 /**
@@ -143,10 +166,17 @@ export function validateModuleManifest(
   }
 
   const actionsRaw = obj.actions;
-  if (!Array.isArray(actionsRaw)) {
-    throw new Error(`"actions" must be an array in ${manifestPath}`);
+  // In v3, actions live in gui.json and are absent from pdv-module.json.
+  if (schemaVersion === "3") {
+    if (actionsRaw !== undefined && !Array.isArray(actionsRaw)) {
+      throw new Error(`"actions" must be an array in ${manifestPath}`);
+    }
+  } else {
+    if (!Array.isArray(actionsRaw)) {
+      throw new Error(`"actions" must be an array in ${manifestPath}`);
+    }
   }
-  const actions = actionsRaw.map((actionValue, index) => {
+  const actions = (Array.isArray(actionsRaw) ? actionsRaw : []).map((actionValue, index) => {
     if (!actionValue || typeof actionValue !== "object" || Array.isArray(actionValue)) {
       throw new Error(`actions[${index}] must be an object in ${manifestPath}`);
     }
@@ -521,7 +551,138 @@ export function deriveHasGui(manifest: ModuleManifestV1): boolean {
   if (typeof manifest.has_gui === "boolean") {
     return manifest.has_gui;
   }
-  return (manifest.inputs?.length ?? 0) > 0 || manifest.actions.length > 0;
+  return (manifest.inputs?.length ?? 0) > 0 || (manifest.actions?.length ?? 0) > 0;
+}
+
+/**
+ * Validate a parsed `gui.json` payload.
+ *
+ * @param value - Parsed JSON value.
+ * @param filePath - File path used in error messages.
+ * @returns Strongly typed validated GUI manifest.
+ * @throws {Error} When required fields are missing or invalid.
+ */
+export function validateGuiManifest(
+  value: unknown,
+  filePath: string
+): GuiManifestV1 {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error(`Invalid GUI manifest object: ${filePath}`);
+  }
+  const obj = value as Record<string, unknown>;
+
+  // Parse inputs (optional)
+  const inputsRaw = obj.inputs;
+  let inputs: GuiManifestV1["inputs"];
+  if (inputsRaw !== undefined) {
+    if (!Array.isArray(inputsRaw)) {
+      throw new Error(`"inputs" must be an array in ${filePath}`);
+    }
+    inputs = inputsRaw.map((inputValue, index) => {
+      if (!inputValue || typeof inputValue !== "object" || Array.isArray(inputValue)) {
+        throw new Error(`inputs[${index}] must be an object in ${filePath}`);
+      }
+      const inputObj = inputValue as Record<string, unknown>;
+      return {
+        id: requiredString(inputObj, "id", filePath, `inputs[${index}]`),
+        label: requiredString(inputObj, "label", filePath, `inputs[${index}]`),
+        type: optionalString(inputObj, "type", filePath, `inputs[${index}]`),
+        control: optionalInputControl(inputObj, filePath, `inputs[${index}]`),
+        default: optionalPrimitive(inputObj, "default", filePath, `inputs[${index}]`),
+        options: optionalInputOptions(inputObj, filePath, `inputs[${index}]`),
+        options_tree_path: optionalString(inputObj, "options_tree_path", filePath, `inputs[${index}]`),
+        min: optionalNumber(inputObj, "min", filePath, `inputs[${index}]`),
+        max: optionalNumber(inputObj, "max", filePath, `inputs[${index}]`),
+        step: optionalNumber(inputObj, "step", filePath, `inputs[${index}]`),
+        tab: optionalString(inputObj, "tab", filePath, `inputs[${index}]`),
+        section: optionalString(inputObj, "section", filePath, `inputs[${index}]`),
+        section_collapsed: optionalBoolean(inputObj, "section_collapsed", filePath, `inputs[${index}]`),
+        tooltip: optionalString(inputObj, "tooltip", filePath, `inputs[${index}]`),
+        visible_if: optionalVisibilityRule(inputObj, filePath, `inputs[${index}]`),
+        file_mode: optionalFileMode(inputObj, filePath, `inputs[${index}]`),
+      };
+    });
+  }
+
+  // Parse actions (required)
+  const actionsRaw = obj.actions;
+  if (!Array.isArray(actionsRaw)) {
+    throw new Error(`"actions" must be an array in ${filePath}`);
+  }
+  const actions = actionsRaw.map((actionValue, index) => {
+    if (!actionValue || typeof actionValue !== "object" || Array.isArray(actionValue)) {
+      throw new Error(`actions[${index}] must be an object in ${filePath}`);
+    }
+    const actionObj = actionValue as Record<string, unknown>;
+    const actionInputsRaw = actionObj.inputs;
+    let actionInputs: string[] | undefined;
+    if (actionInputsRaw !== undefined) {
+      if (!Array.isArray(actionInputsRaw)) {
+        throw new Error(`actions[${index}].inputs must be an array of strings in ${filePath}`);
+      }
+      actionInputs = actionInputsRaw.map((iv, ii) => {
+        if (typeof iv !== "string" || iv.trim().length === 0) {
+          throw new Error(`actions[${index}].inputs[${ii}] must be a non-empty string in ${filePath}`);
+        }
+        const normalized = iv.trim();
+        if (!PYTHON_IDENTIFIER_PATTERN.test(normalized)) {
+          throw new Error(`actions[${index}].inputs[${ii}] must be a valid Python identifier in ${filePath}`);
+        }
+        return normalized;
+      });
+    }
+    return {
+      id: requiredString(actionObj, "id", filePath, `actions[${index}]`),
+      label: requiredString(actionObj, "label", filePath, `actions[${index}]`),
+      script_path: requiredString(actionObj, "script_path", filePath, `actions[${index}]`),
+      inputs: actionInputs,
+      tab: optionalString(actionObj, "tab", filePath, `actions[${index}]`),
+    };
+  });
+
+  const has_gui = optionalBoolean(obj, "has_gui", filePath);
+  const gui = optionalGuiLayout(obj, filePath, inputs, actions);
+
+  return { inputs, actions, gui, has_gui };
+}
+
+/**
+ * Read and validate `gui.json` from a module directory.
+ *
+ * @param moduleDir - Directory expected to contain `gui.json`.
+ * @returns Validated GUI manifest, or null if absent.
+ */
+export async function readGuiManifest(
+  moduleDir: string
+): Promise<GuiManifestV1 | null> {
+  const { promises: fs } = await import("fs");
+  const path = await import("path");
+  const guiPath = path.join(moduleDir, "gui.json");
+  let raw: string;
+  try {
+    raw = await fs.readFile(guiPath, "utf8");
+  } catch (error) {
+    const err = error as NodeJS.ErrnoException;
+    if (err.code === "ENOENT") return null;
+    throw error;
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    throw new Error(`Invalid JSON in ${guiPath}`);
+  }
+  return validateGuiManifest(parsed, guiPath);
+}
+
+/**
+ * Determine whether a module is v3 (split manifest) by schema_version field.
+ *
+ * @param manifest - Validated module manifest.
+ * @returns True when the module uses the v3 split format.
+ */
+export function isV3Manifest(manifest: ModuleManifestV1): boolean {
+  return manifest.schema_version === "3";
 }
 
 function optionalGuiLayout(
@@ -541,7 +702,7 @@ function optionalGuiLayout(
     throw new Error(`"gui.layout" must be a container object in ${filePath}`);
   }
   const inputIds = new Set((inputs ?? []).map((i) => i.id));
-  const actionIds = new Set(actions.map((a) => a.id));
+  const actionIds = new Set((actions ?? []).map((a) => a.id));
   validateLayoutNode(layoutRaw, filePath, "gui.layout", inputIds, actionIds);
   return { layout: layoutRaw };
 }

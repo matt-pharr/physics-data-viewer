@@ -50,6 +50,8 @@ KIND_MAPPING = "mapping"
 KIND_SEQUENCE = "sequence"
 KIND_MARKDOWN = "markdown"
 KIND_BINARY = "binary"
+KIND_MODULE = "module"
+KIND_GUI = "gui"
 KIND_UNKNOWN = "unknown"
 
 # Format strings — must match ARCHITECTURE.md §7.3 storage.format
@@ -61,6 +63,8 @@ FORMAT_PICKLE = "pickle"
 FORMAT_PY_SCRIPT = "py_script"
 FORMAT_MARKDOWN = "markdown"
 FORMAT_INLINE = "inline"
+FORMAT_GUI_JSON = "gui_json"
+FORMAT_MODULE_META = "module_meta"
 
 
 def python_type_string(value: Any) -> str:
@@ -100,8 +104,10 @@ def detect_kind(value: Any) -> str:
     ndarray/dataframe/series values fall through to ``KIND_UNKNOWN``.
     """
     # Lazy import to avoid circular dependency and optional deps
-    from pdv_kernel.tree import PDVTree, PDVScript, PDVNote, PDVFile  # noqa: PLC0415
+    from pdv_kernel.tree import PDVTree, PDVScript, PDVNote, PDVFile, PDVModule, PDVGui  # noqa: PLC0415
 
+    if isinstance(value, PDVModule):
+        return KIND_MODULE
     if isinstance(value, PDVTree):
         return KIND_FOLDER
     if isinstance(value, PDVFile):
@@ -109,6 +115,8 @@ def detect_kind(value: Any) -> str:
             return KIND_SCRIPT
         if isinstance(value, PDVNote):
             return KIND_MARKDOWN
+        if isinstance(value, PDVGui):
+            return KIND_GUI
         return KIND_UNKNOWN
     # bool must be checked before int (bool is a subclass of int)
     if isinstance(value, bool):
@@ -189,12 +197,13 @@ def serialize_node(
     import shutil
 
     from pdv_kernel.environment import ensure_parent, working_dir_tree_path  # noqa: PLC0415
-    from pdv_kernel.tree import PDVFile, PDVScript  # noqa: PLC0415
+    from pdv_kernel.tree import PDVFile, PDVScript, PDVModule  # noqa: PLC0415
 
     # File extension and format for each PDVFile subclass
     _FILE_KIND_MAP: dict[str, tuple[str, str]] = {
         KIND_SCRIPT:   (".py", FORMAT_PY_SCRIPT),
         KIND_MARKDOWN: (".md", FORMAT_MARKDOWN),
+        KIND_GUI:      (".gui.json", FORMAT_GUI_JSON),
     }
 
     kind = detect_kind(value)
@@ -222,6 +231,22 @@ def serialize_node(
     if kind == KIND_FOLDER:
         descriptor["has_children"] = True
         descriptor["storage"] = {"backend": "none", "format": "none"}
+        return descriptor
+
+    if kind == KIND_MODULE:
+        descriptor["has_children"] = True
+        descriptor["storage"] = {
+            "backend": "inline",
+            "format": FORMAT_MODULE_META,
+            "value": {
+                "module_id": value.module_id,
+                "name": value.name,
+                "version": value.version,
+            },
+        }
+        descriptor["module_id"] = value.module_id
+        descriptor["module_name"] = value.name
+        descriptor["module_version"] = value.version
         return descriptor
 
     # -- PDVFile subclasses (PDVScript, PDVNote, future file types) -----------
@@ -430,6 +455,10 @@ def deserialize_node(storage_ref: dict, save_dir: str, *, trusted: bool = False)
             with open(abs_path, "r", encoding="utf-8") as fh:
                 return json.load(fh)
 
+        if fmt == FORMAT_GUI_JSON:
+            with open(abs_path, "r", encoding="utf-8") as fh:
+                return json.load(fh)
+
         if fmt == "bin":
             with open(abs_path, "rb") as fh:
                 return fh.read()
@@ -465,6 +494,8 @@ def node_preview(value: Any, kind: str) -> str:
     try:
         if kind == KIND_FOLDER:
             return "folder"
+        if kind in (KIND_MODULE, KIND_GUI):
+            return value.preview() if hasattr(value, "preview") else kind
         if kind in (KIND_SCRIPT, KIND_MARKDOWN):
             return value.preview() if hasattr(value, "preview") else kind
         if kind == KIND_SCALAR:

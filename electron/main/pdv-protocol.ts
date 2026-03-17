@@ -87,6 +87,16 @@ export const PDVMessageType = {
   /** Kernel → app. Confirms file registration. */
   FILE_REGISTER_RESPONSE: "pdv.file.register.response",
 
+  // Module registration
+  /** App → kernel. Register a PDVModule node in the tree. */
+  MODULE_REGISTER: "pdv.module.register",
+  /** Kernel → app. Confirms module registration. */
+  MODULE_REGISTER_RESPONSE: "pdv.module.register.response",
+  /** App → kernel. Register a PDVGui node in the tree. */
+  GUI_REGISTER: "pdv.gui.register",
+  /** Kernel → app. Confirms GUI registration. */
+  GUI_REGISTER_RESPONSE: "pdv.gui.register.response",
+
   // Modules
   /** App → kernel. Setup module library namespaces (sys.path + entry points). */
   MODULES_SETUP: "pdv.modules.setup",
@@ -275,6 +285,8 @@ const NodeKind = {
   NAMELIST: "namelist",
   FORTRAN: "fortran",
   FILE: "file",
+  MODULE: "module",
+  GUI: "gui",
 } as const;
 
 /** Union of all valid node `type` values in tree descriptors. */
@@ -324,6 +336,12 @@ export interface NodeDescriptor {
   python_type?: string;
   /** True if a custom handler is registered for this node's type. */
   has_handler?: boolean;
+  /** Module identifier. Present when type is "module" or "gui". */
+  module_id?: string;
+  /** Module display name. Present when type is "module". */
+  module_name?: string;
+  /** Module version. Present when type is "module". */
+  module_version?: string;
 }
 
 // ---------------------------------------------------------------------------

@@ -19,6 +19,69 @@ import sys
 from pdv_kernel.handlers import register
 
 
+def handle_module_register(msg: dict) -> None:
+    """Handle the ``pdv.module.register`` message.
+
+    Creates a :class:`~pdv_kernel.tree.PDVModule` and attaches it to the
+    tree at the given alias path.
+
+    Expected payload
+    ----------------
+    .. code-block:: json
+
+        {
+            "path": "n_pendulum",
+            "module_id": "n_pendulum",
+            "name": "N-Pendulum",
+            "version": "2.0.0"
+        }
+
+    Response type: ``pdv.module.register.response``
+
+    Parameters
+    ----------
+    msg : dict
+        Parsed PDV message envelope.
+    """
+    from pdv_kernel.comms import get_pdv_tree, send_error, send_message  # noqa: PLC0415
+    from pdv_kernel.tree import PDVModule  # noqa: PLC0415
+
+    msg_id = msg.get("msg_id")
+    payload = msg.get("payload", {})
+    path = payload.get("path", "")
+    module_id = payload.get("module_id", "")
+    name = payload.get("name", "")
+    version = payload.get("version", "")
+
+    if not path or not module_id:
+        send_error(
+            "pdv.module.register.response",
+            "module.missing_fields",
+            "path and module_id are required in pdv.module.register payload",
+            in_reply_to=msg_id,
+        )
+        return
+
+    tree = get_pdv_tree()
+    if tree is None:
+        send_error(
+            "pdv.module.register.response",
+            "module.no_tree",
+            "PDVTree is not initialized",
+            in_reply_to=msg_id,
+        )
+        return
+
+    module_node = PDVModule(module_id=module_id, name=name, version=version)
+    tree[path] = module_node
+
+    send_message(
+        "pdv.module.register.response",
+        {"path": path, "module_id": module_id},
+        in_reply_to=msg_id,
+    )
+
+
 def handle_modules_setup(msg: dict) -> None:
     """Handle the ``pdv.modules.setup`` message.
 
@@ -147,5 +210,6 @@ def handle_handler_invoke(msg: dict) -> None:
     send_message("pdv.handler.invoke.response", result, in_reply_to=msg_id)
 
 
+register("pdv.module.register", handle_module_register)
 register("pdv.modules.setup", handle_modules_setup)
 register("pdv.handler.invoke", handle_handler_invoke)

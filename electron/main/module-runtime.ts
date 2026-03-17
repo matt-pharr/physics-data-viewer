@@ -202,6 +202,74 @@ export async function bindImportedModuleScripts(
 }
 
 /**
+ * Bind one imported module into the kernel tree with proper PDVModule/PDVGui nodes.
+ *
+ * 1. Sends MODULE_REGISTER to create a PDVModule node at the alias path.
+ * 2. If the module has a GUI: copies gui.json to working dir, sends GUI_REGISTER.
+ * 3. Binds scripts under `<alias>.scripts.<name>` as before.
+ *
+ * @param commRouter - Comm router used for comm messages.
+ * @param moduleManager - Module manager for manifest resolution.
+ * @param importedModule - Imported module entry (module id + alias).
+ * @param workingDir - Optional kernel working directory.
+ * @returns Nothing.
+ * @throws {Error} For structural module resolution errors.
+ */
+export async function bindImportedModule(
+  commRouter: CommRouter,
+  moduleManager: ModuleManager,
+  importedModule: ProjectModuleImport,
+  workingDir: string | undefined
+): Promise<void> {
+  // 1. Get module identity info
+  const installed = await moduleManager.listInstalled();
+  const moduleDesc = installed.find((m) => m.id === importedModule.module_id);
+  const moduleName = moduleDesc?.name ?? importedModule.module_id;
+  const moduleVersion = moduleDesc?.version ?? importedModule.version;
+
+  // 2. Register PDVModule node at the alias path
+  await commRouter.request(PDVMessageType.MODULE_REGISTER, {
+    path: importedModule.alias,
+    module_id: importedModule.module_id,
+    name: moduleName,
+    version: moduleVersion,
+  });
+
+  // 3. If module has a GUI, copy gui.json and register PDVGui node
+  let guiInfo: { hasGui: boolean };
+  try {
+    guiInfo = await moduleManager.getModuleGuiInfo(importedModule.module_id);
+  } catch {
+    guiInfo = { hasGui: false };
+  }
+  if (guiInfo.hasGui && typeof moduleManager.getModuleInstallPath === "function") {
+    const installPath = await moduleManager.getModuleInstallPath(importedModule.module_id);
+    if (installPath && workingDir) {
+      const sourceGuiPath = path.join(installPath, "gui.json");
+      try {
+        await fs.stat(sourceGuiPath);
+        const destDir = path.join(workingDir, importedModule.alias);
+        await fs.mkdir(destDir, { recursive: true });
+        const destGuiPath = path.join(destDir, "gui.gui.json");
+        await fs.copyFile(sourceGuiPath, destGuiPath);
+
+        await commRouter.request(PDVMessageType.GUI_REGISTER, {
+          parent_path: importedModule.alias,
+          name: "gui",
+          relative_path: destGuiPath,
+          module_id: importedModule.module_id,
+        });
+      } catch {
+        // gui.json may not exist for v2 modules — that's fine
+      }
+    }
+  }
+
+  // 4. Bind scripts as before
+  await bindImportedModuleScripts(commRouter, moduleManager, importedModule, workingDir);
+}
+
+/**
  * Bind all project-imported modules for the active project into the active kernel tree.
  *
  * @param kernelManager - Kernel manager used to verify kernel liveness.
@@ -232,6 +300,6 @@ export async function bindProjectModulesToTree(
   const modules =
     importedModules ?? (await ProjectManager.readManifest(projectDir)).modules;
   for (const importedModule of modules) {
-    await bindImportedModuleScripts(commRouter, moduleManager, importedModule, workingDir);
+    await bindImportedModule(commRouter, moduleManager, importedModule, workingDir);
   }
 }

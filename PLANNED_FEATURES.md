@@ -39,6 +39,9 @@ Extend the existing modules system with three capabilities: a richer GUI layout 
 
 ### Planned work
 
+#### PDVModule/PDVGui tree types and manifest split (done)
+Imported modules now create proper `PDVModule` tree nodes (dict subclass with metadata) and `PDVGui` nodes (file-backed `.gui.json`). Module manifests are split: `pdv-module.json` holds identity/compatibility, `gui.json` holds inputs/actions/layout. The renderer uses `node.type === 'module'` instead of alias-set matching.
+
 #### Module GUI layout refactor
 The current module rendering system displays GUI elements as a flat list. Refactor to support relative positioning and grouping — grid/flex layout, collapsible sections, and element dependencies — so modules can build structured, professional-looking interfaces.
 

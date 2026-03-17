@@ -44,7 +44,7 @@ def handle_tree_list(msg: dict) -> None:
     from pdv_kernel.comms import get_pdv_tree, send_error, send_message  # noqa: PLC0415
     from pdv_kernel.modules import has_handler_for  # noqa: PLC0415
     from pdv_kernel.serialization import detect_kind, node_preview, python_type_string  # noqa: PLC0415
-    from pdv_kernel.tree import PDVTree  # noqa: PLC0415
+    from pdv_kernel.tree import PDVTree, PDVModule, PDVGui  # noqa: PLC0415
 
     msg_id = msg.get("msg_id")
     path = msg.get("payload", {}).get("path", "")
@@ -104,6 +104,12 @@ def handle_tree_list(msg: dict) -> None:
         }
         if kind == "script":
             descriptor["params"] = getattr(value, "params", [])
+        if kind == "module" and isinstance(value, PDVModule):
+            descriptor["module_id"] = value.module_id
+            descriptor["module_name"] = value.name
+            descriptor["module_version"] = value.version
+        if kind == "gui" and isinstance(value, PDVGui):
+            descriptor["module_id"] = value.module_id
         nodes.append(descriptor)
 
     # Also include lazy-only entries at this path level that are not yet in memory

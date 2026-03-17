@@ -191,6 +191,15 @@ All type strings are namespaced with `pdv.`. The convention is `pdv.<domain>.<ac
 | `pdv.note.register` | app → kernel | Register a newly created markdown note file as a node in the tree. Payload: `{ parent_path, name, relative_path }`. |
 | `pdv.note.register.response` | kernel → app | Confirms registration. |
 
+#### Module Registration Messages
+
+| Type | Direction | Description |
+|---|---|---|
+| `pdv.module.register` | app → kernel | Register a `PDVModule` node at a tree path. Payload: `{ path, module_id, name, version }`. |
+| `pdv.module.register.response` | kernel → app | Confirms module registration. |
+| `pdv.gui.register` | app → kernel | Register a `PDVGui` node at a tree path. Payload: `{ parent_path, name, relative_path, module_id }`. |
+| `pdv.gui.register.response` | kernel → app | Confirms GUI registration. |
+
 ### 3.5 Error Payload
 
 When `status` is `"error"`, the payload always has this shape:
@@ -695,6 +704,8 @@ The following node types are supported:
 | Type | Description | Backed by |
 |---|---|---|
 | `folder` | A `PDVTree` sub-dict with no associated file | In-memory only |
+| `module` | A `PDVModule` dict subclass carrying module metadata | Inline metadata in tree-index.json |
+| `gui` | A `PDVGui` file-backed GUI definition node | `.gui.json` file in working or save directory |
 | `script` | A `PDVScript` object | `.py` file in working or save directory |
 | `markdown` | A `PDVNote` object | `.md` file in working or save directory |
 | `ndarray` | NumPy array | `.npy` file |

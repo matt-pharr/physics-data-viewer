@@ -20,6 +20,7 @@ interface TreeProps {
   refreshToken?: number;
   onAction?: (action: string, node: TreeNodeData) => void;
   shortcuts: Shortcuts;
+  /** @deprecated Use node.type === 'module' instead. Kept for transition. */
   importedAliases?: Set<string>;
 }
 
@@ -163,7 +164,7 @@ export const Tree: React.FC<TreeProps> = ({ kernelId, disabled = false, refreshT
 
   const handleDoubleClick = (node: TreeNodeData) => {
     if (disabled) return;
-    if (importedAliases?.has(node.key)) {
+    if (node.type === 'module' || node.type === 'gui') {
       onAction?.('open_gui', node);
       return;
     }

@@ -33,6 +33,7 @@ import {
 import { KernelManager } from "./kernel-manager";
 import { ModuleManager } from "./module-manager";
 import {
+  bindImportedModule,
   bindImportedModuleScripts,
   isMissingActionScriptError,
   normalizeModuleAlias,
@@ -185,7 +186,7 @@ export function registerModulesIpcHandlers(
       getModuleHealthWarningsByAlias().set(baseAlias, warnings);
       const activeKernelId = getActiveKernelId();
       if (activeKernelId && kernelManager.getKernel(activeKernelId)) {
-        await bindImportedModuleScripts(
+        await bindImportedModule(
           commRouter,
           moduleManager,
           importedModule,

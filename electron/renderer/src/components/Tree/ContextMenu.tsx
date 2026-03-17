@@ -25,7 +25,7 @@ interface ContextMenuProps {
 }
 
 /** Floating context menu anchored to the pointer location. */
-export const ContextMenu: React.FC<ContextMenuProps> = ({ x, y, node, shortcuts, importedAliases, onAction, onClose }) => {
+export const ContextMenu: React.FC<ContextMenuProps> = ({ x, y, node, shortcuts, onAction, onClose }) => {
   const menuRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -58,7 +58,7 @@ export const ContextMenu: React.FC<ContextMenuProps> = ({ x, y, node, shortcuts,
     copy_path: formatShortcutHint(shortcuts.treeCopyPath),
   };
 
-  const actions = getActionsForNode(node, importedAliases);
+  const actions = getActionsForNode(node);
   const estimatedHeight = actions.length * MENU_ITEM_HEIGHT;
   const viewportWidth = typeof window !== 'undefined' ? window.innerWidth : DEFAULT_VIEWPORT.width;
   const viewportHeight = typeof window !== 'undefined' ? window.innerHeight : DEFAULT_VIEWPORT.height;
@@ -92,12 +92,13 @@ export const ContextMenu: React.FC<ContextMenuProps> = ({ x, y, node, shortcuts,
 };
 
 /** Return menu actions allowed for the given node descriptor. */
-export function getActionsForNode(node: TreeNodeData, importedAliases?: Set<string>) {
+export function getActionsForNode(node: TreeNodeData) {
   const actions: Array<{ id: string; label: string; disabled: boolean }> = [];
   const canCreateScript = node.type === 'dict' || node.type === 'folder' || node.type === 'root';
-  const isModule = importedAliases?.has(node.key) ?? false;
+  const isModule = node.type === 'module';
+  const isGui = node.type === 'gui';
 
-  if (isModule) {
+  if (isModule || isGui) {
     actions.push({ id: 'open_gui', label: 'Open GUI', disabled: false });
   }
 

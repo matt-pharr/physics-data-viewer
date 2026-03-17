@@ -46,6 +46,12 @@ export interface NodeDescriptor {
   python_type?: string;
   /** True if a custom handler is registered for this node's type. */
   has_handler?: boolean;
+  /** Module identifier. Present when type is "module" or "gui". */
+  module_id?: string;
+  /** Module display name. Present when type is "module". */
+  module_name?: string;
+  /** Module version. Present when type is "module". */
+  module_version?: string;
 }
 
 /** Runtime kernel descriptor returned by `kernels.start/list/restart`. */

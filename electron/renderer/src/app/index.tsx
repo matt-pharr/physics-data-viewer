@@ -429,7 +429,9 @@ const App: React.FC = () => {
   const handleTreeAction = async (action: string, node: TreeNodeData) => {
     if (action === 'open_gui') {
       if (!currentKernelId) return;
-      void window.pdv.moduleWindows.open({ alias: node.key, kernelId: currentKernelId });
+      // For module nodes, the alias is the node key; for gui nodes, use parent path
+      const alias = node.type === 'gui' && node.parent_path ? node.parent_path : node.key;
+      void window.pdv.moduleWindows.open({ alias, kernelId: currentKernelId });
       return;
     }
     if (action === 'new_gui') {

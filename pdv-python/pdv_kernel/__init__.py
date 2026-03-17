@@ -23,14 +23,17 @@ Do not import comms, handlers, or namespace internals directly — they
 are implementation details and their interfaces may change.
 """
 
-from pdv_kernel.tree import PDVTree, PDVFile, PDVScript
+from pdv_kernel.tree import PDVTree, PDVFile, PDVScript, PDVGui, PDVModule
 from pdv_kernel.errors import PDVError
 from pdv_kernel.modules import handle
 
 __version__ = "1.0.0"
 __pdv_protocol_version__ = "1.0"
 
-__all__ = ["PDVTree", "PDVFile", "PDVScript", "PDVError", "bootstrap", "handle", "__version__"]
+__all__ = [
+    "PDVTree", "PDVFile", "PDVScript", "PDVGui", "PDVModule",
+    "PDVError", "bootstrap", "handle", "__version__",
+]
 
 
 def bootstrap(ip=None):

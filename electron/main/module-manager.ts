@@ -33,11 +33,14 @@ import type {
 import type { ModuleGuiLayout } from "./ipc";
 import {
   deriveHasGui,
+  isV3Manifest,
   isPythonVersionCompatible,
   isVersionGreaterThan,
   isVersionLessThan,
   ModuleManifestV1,
+  GuiManifestV1,
   parseSemver,
+  readGuiManifest,
   sanitizeScriptNodeName,
   validateModuleManifest,
 } from "./modules/manifest-utils";
@@ -240,9 +243,10 @@ export class ModuleManager {
     }
     const moduleDir = module.installPath ?? path.join(this.packagesRoot, moduleId);
     const manifest = await this.readAndValidateManifest(moduleDir);
+    const actions = await this.resolveActions(manifest, moduleDir);
     const usedNames = new Set<string>();
     const bindings: ModuleScriptBinding[] = [];
-    for (const action of manifest.actions) {
+    for (const action of actions) {
       const scriptPath = path.resolve(moduleDir, action.script_path);
       let scriptStat: Awaited<ReturnType<typeof fs.stat>>;
       try {
@@ -297,7 +301,8 @@ export class ModuleManager {
     }
     const moduleDir = module.installPath ?? path.join(this.packagesRoot, moduleId);
     const manifest = await this.readAndValidateManifest(moduleDir);
-    return (manifest.inputs ?? []).map((input) => ({
+    const inputs = await this.resolveInputs(manifest, moduleDir);
+    return inputs.map((input) => ({
       id: input.id,
       label: input.label,
       type: input.type,
@@ -339,6 +344,13 @@ export class ModuleManager {
     const moduleDir =
       module.installPath ?? path.join(this.packagesRoot, moduleId);
     const manifest = await this.readAndValidateManifest(moduleDir);
+    if (isV3Manifest(manifest)) {
+      const guiManifest = await readGuiManifest(moduleDir);
+      if (!guiManifest) return { hasGui: false };
+      const hasGui = guiManifest.has_gui ?? ((guiManifest.inputs?.length ?? 0) > 0 || guiManifest.actions.length > 0);
+      const gui = guiManifest.gui ? (guiManifest.gui as ModuleGuiLayout) : undefined;
+      return { hasGui, gui };
+    }
     const hasGui = deriveHasGui(manifest);
     const gui = manifest.gui
       ? (manifest.gui as ModuleGuiLayout)
@@ -429,7 +441,8 @@ export class ModuleManager {
       }
     }
 
-    for (const action of manifest.actions) {
+    const healthActions = await this.resolveActions(manifest, moduleDir);
+    for (const action of healthActions) {
       const scriptPath = path.resolve(moduleDir, action.script_path);
       try {
         const stat = await fs.stat(scriptPath);
@@ -453,6 +466,33 @@ export class ModuleManager {
     }
 
     return warnings;
+  }
+
+  /**
+   * Read and validate gui.json for one installed module.
+   *
+   * @param moduleId - Installed module identifier.
+   * @returns Validated GUI manifest, or null if absent.
+   */
+  async readAndValidateGuiManifest(moduleId: string): Promise<GuiManifestV1 | null> {
+    const index = await this.readIndex();
+    const module = index.modules[moduleId];
+    if (!module) return null;
+    const moduleDir = module.installPath ?? path.join(this.packagesRoot, moduleId);
+    return readGuiManifest(moduleDir);
+  }
+
+  /**
+   * Return the install path for one installed module.
+   *
+   * @param moduleId - Installed module identifier.
+   * @returns Absolute install path, or null if not installed.
+   */
+  async getModuleInstallPath(moduleId: string): Promise<string | null> {
+    const index = await this.readIndex();
+    const module = index.modules[moduleId];
+    if (!module) return null;
+    return module.installPath ?? path.join(this.packagesRoot, moduleId);
   }
 
   /**
@@ -685,6 +725,42 @@ export class ModuleManager {
       modules: {},
       history: [],
     };
+  }
+
+  /**
+   * Resolve the effective actions list for a module, reading from gui.json for v3.
+   *
+   * @param manifest - Validated module manifest.
+   * @param moduleDir - Module directory path.
+   * @returns Action entries from the appropriate source.
+   */
+  private async resolveActions(
+    manifest: ModuleManifestV1,
+    moduleDir: string
+  ): Promise<Array<{ id: string; label: string; script_path: string; inputs?: string[]; tab?: string }>> {
+    if (isV3Manifest(manifest)) {
+      const guiManifest = await readGuiManifest(moduleDir);
+      return guiManifest?.actions ?? [];
+    }
+    return manifest.actions ?? [];
+  }
+
+  /**
+   * Resolve the effective inputs list for a module, reading from gui.json for v3.
+   *
+   * @param manifest - Validated module manifest.
+   * @param moduleDir - Module directory path.
+   * @returns Input entries from the appropriate source.
+   */
+  private async resolveInputs(
+    manifest: ModuleManifestV1,
+    moduleDir: string
+  ): Promise<NonNullable<ModuleManifestV1["inputs"]>> {
+    if (isV3Manifest(manifest)) {
+      const guiManifest = await readGuiManifest(moduleDir);
+      return guiManifest?.inputs ?? [];
+    }
+    return manifest.inputs ?? [];
   }
 
   /**
