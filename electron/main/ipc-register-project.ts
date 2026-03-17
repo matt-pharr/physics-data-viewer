@@ -103,12 +103,17 @@ export function registerProjectIpcHandlers(
       if (workingDir) await copyFilesForLoad(saveDir, workingDir);
     }
 
-    const loaded = await projectManager.load(saveDir);
     setActiveProjectDir(saveDir);
     setPendingModuleImports([]);
     setPendingModuleSettings({});
     const manifest = await refreshProjectModuleHealth(saveDir);
-    await bindActiveProjectModules(activeKernelId, manifest?.modules);
+
+    // Pass module binding as a pre-push callback so that module nodes
+    // (scripts, gui, namelist) are registered in the kernel tree BEFORE
+    // the pdv.project.loaded push is forwarded to the renderer.
+    const loaded = await projectManager.load(saveDir, async () => {
+      await bindActiveProjectModules(activeKernelId, manifest?.modules);
+    });
     return loaded;
   });
 

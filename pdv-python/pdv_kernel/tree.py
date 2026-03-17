@@ -624,91 +624,6 @@ class PDVNamelist(PDVFile):
         return f"PDVNamelist('{self._relative_path}', format='{self._format}'{mid})"
 
 
-class PDVModule(dict):
-    """
-    Module metadata node. Dict subclass so it can hold children naturally.
-
-    Stored as the value at a tree path (e.g. ``pdv_tree['n_pendulum']``).
-    Contains child entries like scripts folder and gui node as regular dict items.
-
-    Parameters
-    ----------
-    module_id : str
-        Unique module identifier.
-    name : str
-        Human-readable module name.
-    version : str
-        Semantic version string.
-    gui : PDVGui or None
-        Optional GUI definition node attached to this module.
-    """
-
-    def __init__(self, module_id: str, name: str, version: str,
-                 gui: PDVGui | None = None) -> None:
-        super().__init__()
-        self._module_id = module_id
-        self._name = name
-        self._version = version
-        self._gui = gui
-
-    @property
-    def module_id(self) -> str:
-        """Unique module identifier.
-
-        Returns
-        -------
-        str
-        """
-        return self._module_id
-
-    @property
-    def name(self) -> str:
-        """Human-readable module name.
-
-        Returns
-        -------
-        str
-        """
-        return self._name
-
-    @property
-    def version(self) -> str:
-        """Semantic version string.
-
-        Returns
-        -------
-        str
-        """
-        return self._version
-
-    @property
-    def gui(self) -> PDVGui | None:
-        """Optional GUI definition node.
-
-        Returns
-        -------
-        PDVGui or None
-        """
-        return self._gui
-
-    @gui.setter
-    def gui(self, value: PDVGui | None) -> None:
-        self._gui = value
-
-    def preview(self) -> str:
-        """Return a short preview string for the tree panel.
-
-        Returns
-        -------
-        str
-            Module name and version.
-        """
-        return f"{self._name} v{self._version}"
-
-    def __repr__(self) -> str:
-        return f"PDVModule('{self._module_id}', '{self._name}', '{self._version}')"
-
-
 class PDVNote(PDVFile):
     """
     Lightweight wrapper for a markdown file stored as a PDV tree node.
@@ -1071,3 +986,89 @@ class PDVTree(dict):
     def __repr__(self) -> str:
         keys = list(dict.keys(self))
         return f"PDVTree({keys})"
+
+
+class PDVModule(PDVTree):
+    """
+    Module metadata node. PDVTree subclass so it can hold children naturally
+    and participate in dot-path access, lazy loading, and change notifications.
+
+    Stored as the value at a tree path (e.g. ``pdv_tree['n_pendulum']``).
+    Contains child entries like scripts folder and gui node as regular dict items.
+
+    Parameters
+    ----------
+    module_id : str
+        Unique module identifier.
+    name : str
+        Human-readable module name.
+    version : str
+        Semantic version string.
+    gui : PDVGui or None
+        Optional GUI definition node attached to this module.
+    """
+
+    def __init__(self, module_id: str, name: str, version: str,
+                 gui: PDVGui | None = None) -> None:
+        super().__init__()
+        self._module_id = module_id
+        self._name = name
+        self._version = version
+        self._gui = gui
+
+    @property
+    def module_id(self) -> str:
+        """Unique module identifier.
+
+        Returns
+        -------
+        str
+        """
+        return self._module_id
+
+    @property
+    def name(self) -> str:
+        """Human-readable module name.
+
+        Returns
+        -------
+        str
+        """
+        return self._name
+
+    @property
+    def version(self) -> str:
+        """Semantic version string.
+
+        Returns
+        -------
+        str
+        """
+        return self._version
+
+    @property
+    def gui(self) -> PDVGui | None:
+        """Optional GUI definition node.
+
+        Returns
+        -------
+        PDVGui or None
+        """
+        return self._gui
+
+    @gui.setter
+    def gui(self, value: PDVGui | None) -> None:
+        self._gui = value
+
+    def preview(self) -> str:
+        """Return a short preview string for the tree panel.
+
+        Returns
+        -------
+        str
+            Module name and version.
+        """
+        return f"{self._name} v{self._version}"
+
+    def __repr__(self) -> str:
+        return f"PDVModule('{self._module_id}', '{self._name}', '{self._version}')"

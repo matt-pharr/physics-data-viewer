@@ -72,8 +72,21 @@ def handle_module_register(msg: dict) -> None:
         )
         return
 
-    module_node = PDVModule(module_id=module_id, name=name, version=version)
-    tree[path] = module_node
+    # If a PDVModule already exists at this path (e.g. from project load),
+    # update its metadata in-place to preserve children (result data, gui, etc.).
+    existing = tree.get(path)
+    if isinstance(existing, PDVModule):
+        existing._module_id = module_id
+        existing._name = name
+        existing._version = version
+    elif isinstance(existing, dict) and len(existing) > 0:
+        # A plain dict/PDVTree with children — upgrade to PDVModule, keep children
+        module_node = PDVModule(module_id=module_id, name=name, version=version)
+        for k, v in existing.items():
+            dict.__setitem__(module_node, k, v)
+        tree[path] = module_node
+    else:
+        tree[path] = PDVModule(module_id=module_id, name=name, version=version)
 
     send_message(
         "pdv.module.register.response",

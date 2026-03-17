@@ -235,7 +235,10 @@ function setup() {
 
   const projectManager = {
     save: vi.fn(async () => undefined),
-    load: vi.fn(async () => []),
+    load: vi.fn(async (_saveDir: string, onBeforePush?: () => Promise<void>) => {
+      if (onBeforePush) await onBeforePush();
+      return [];
+    }),
     createWorkingDir: vi.fn(async () => "/tmp/pdv-test"),
     deleteWorkingDir: vi.fn(async () => undefined),
   } as unknown as ProjectManager;
@@ -728,7 +731,7 @@ describe("Step 5 IPC handlers", () => {
     ]);
     const load = getHandler(IPC.project.load);
     const result = await load({}, "/tmp/project");
-    expect(projectManager.load).toHaveBeenCalledWith("/tmp/project");
+    expect(projectManager.load).toHaveBeenCalledWith("/tmp/project", expect.any(Function));
     expect(result).toEqual([{ id: "box1" }]);
   });
 

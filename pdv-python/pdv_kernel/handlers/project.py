@@ -64,7 +64,7 @@ def _collect_nodes(tree: "Any", save_dir: str, prefix: str = "") -> list:
         List of node descriptor dicts.
     """
     from pdv_kernel.serialization import serialize_node  # noqa: PLC0415
-    from pdv_kernel.tree import PDVTree, PDVModule  # noqa: PLC0415
+    from pdv_kernel.tree import PDVTree  # noqa: PLC0415
 
     nodes = []
     for key in dict.keys(tree):
@@ -72,7 +72,7 @@ def _collect_nodes(tree: "Any", save_dir: str, prefix: str = "") -> list:
         value = dict.__getitem__(tree, key)
         descriptor = serialize_node(path, value, save_dir)
         nodes.append(descriptor)
-        if isinstance(value, (PDVTree, PDVModule)):
+        if isinstance(value, PDVTree):
             nodes.extend(_collect_nodes(value, save_dir, prefix=path))
     return nodes
 
