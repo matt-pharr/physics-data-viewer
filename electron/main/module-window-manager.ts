@@ -58,12 +58,13 @@ export class ModuleWindowManager {
     });
 
     const context: ModuleWindowContext = { alias, kernelId };
+    const webContentsId = child.webContents.id;
     this.windows.set(alias, child);
-    this.contexts.set(child.webContents.id, context);
+    this.contexts.set(webContentsId, context);
 
     child.on("closed", () => {
       this.windows.delete(alias);
-      this.contexts.delete(child.webContents.id);
+      this.contexts.delete(webContentsId);
     });
 
     const devServerUrl = process.env.VITE_DEV_SERVER_URL;
