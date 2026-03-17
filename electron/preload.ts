@@ -116,6 +116,13 @@ const api: PDVApi = {
     load: () => ipcRenderer.invoke(IPC.codeCells.load),
     save: (data) => ipcRenderer.invoke(IPC.codeCells.save, data),
   },
+  moduleWindows: {
+    open: (req) => ipcRenderer.invoke(IPC.moduleWindows.open, req),
+    close: (alias) => ipcRenderer.invoke(IPC.moduleWindows.close, alias),
+    context: () => ipcRenderer.invoke(IPC.moduleWindows.context),
+    executeInMain: (code) => ipcRenderer.invoke(IPC.moduleWindows.executeInMain, code),
+    onExecuteRequest: (cb) => onPush(IPC.push.moduleExecuteRequest, cb),
+  },
   files: {
     pickExecutable: () => ipcRenderer.invoke(IPC.files.pickExecutable),
     pickFile: () => ipcRenderer.invoke(IPC.files.pickFile),

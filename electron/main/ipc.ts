@@ -121,10 +121,18 @@ export const IPC = {
     kernelStatus: "pdv.kernel.status",
     menuAction: "menu:action",
     executeOutput: "pdv.execute.output",
+    moduleExecuteRequest: "pdv.moduleWindow.executeRequest",
   },
   /** App menu synchronization channels. */
   menu: {
     updateRecentProjects: "menu:updateRecentProjects",
+  },
+  /** Module popup window channels. */
+  moduleWindows: {
+    open: "moduleWindows:open",
+    close: "moduleWindows:close",
+    context: "moduleWindows:context",
+    executeInMain: "moduleWindows:executeInMain",
   },
   /** Native file/directory picker channels. */
   files: {
@@ -506,10 +514,14 @@ export interface ImportedModuleDescriptor {
   version: string;
   /** Optional pinned revision/hash. */
   revision?: string;
+  /** True when this module has a GUI (inputs or actions). */
+  hasGui: boolean;
   /** Declarative input field descriptors from module manifest. */
   inputs: ModuleInputDescriptor[];
   /** Declarative action descriptors bound for this imported module. */
   actions: ImportedModuleActionDescriptor[];
+  /** Optional container layout for the module GUI. */
+  gui?: ModuleGuiLayout;
   /** Persisted per-module UI settings from project manifest. */
   settings: Record<string, unknown>;
   /** Module health warnings evaluated at import/load time. */
@@ -581,6 +593,88 @@ export interface MenuActionPayload {
     | "project:saveAs";
   /** Project directory path for open-recent actions. */
   path?: string;
+}
+
+// ---------------------------------------------------------------------------
+// Module window types
+// ---------------------------------------------------------------------------
+
+/**
+ * Request payload for opening a module popup window.
+ */
+export interface ModuleWindowOpenRequest {
+  /** Project-local module alias identifying the imported module. */
+  alias: string;
+  /** Active kernel ID for the module window context. */
+  kernelId: string;
+}
+
+/**
+ * Result payload for `moduleWindows.open`.
+ */
+export interface ModuleWindowOpenResult {
+  /** True when the window was opened or focused successfully. */
+  success: boolean;
+  /** Optional error message when `success` is false. */
+  error?: string;
+}
+
+/**
+ * Context payload returned to a module popup window identifying its module.
+ */
+export interface ModuleWindowContext {
+  /** Project-local module alias. */
+  alias: string;
+  /** Active kernel ID. */
+  kernelId: string;
+}
+
+// ---------------------------------------------------------------------------
+// Container layout types
+// ---------------------------------------------------------------------------
+
+/**
+ * Reference to an input declared in the manifest `inputs[]` array.
+ */
+export interface LayoutInputRef {
+  type: "input";
+  /** References an entry in inputs[] by id. */
+  id: string;
+}
+
+/**
+ * Reference to an action declared in the manifest `actions[]` array.
+ */
+export interface LayoutActionRef {
+  type: "action";
+  /** References an entry in actions[] by id. */
+  id: string;
+}
+
+/**
+ * A layout container that arranges children visually.
+ */
+export interface LayoutContainer {
+  type: "row" | "column" | "group" | "tabs";
+  /** Display label (required for "group" and tab items). */
+  label?: string;
+  /** Initial collapsed state for "group" containers. */
+  collapsed?: boolean;
+  /** Nested layout nodes. */
+  children: LayoutNode[];
+}
+
+/**
+ * A layout node is either an input reference, action reference, or a container.
+ */
+export type LayoutNode = LayoutInputRef | LayoutActionRef | LayoutContainer;
+
+/**
+ * Top-level GUI layout object in the module manifest.
+ */
+export interface ModuleGuiLayout {
+  /** Root layout — typically a "tabs" container or a single "column". */
+  layout: LayoutContainer;
 }
 
 // ---------------------------------------------------------------------------
@@ -1010,6 +1104,43 @@ export interface PDVApi {
      * @returns True when save succeeded.
      */
     save(data: CodeCellData): Promise<boolean>;
+  };
+
+  /** Module popup window operations. */
+  moduleWindows: {
+    /**
+     * Open (or focus) a module GUI popup window.
+     *
+     * @param request - Module alias and kernel ID.
+     * @returns Open result payload.
+     */
+    open(request: ModuleWindowOpenRequest): Promise<ModuleWindowOpenResult>;
+    /**
+     * Close a module GUI popup window.
+     *
+     * @param alias - Module alias whose window to close.
+     * @returns True when a window was closed.
+     */
+    close(alias: string): Promise<boolean>;
+    /**
+     * Get the module context for the calling popup window.
+     *
+     * @returns Context payload, or null if called from the main window.
+     */
+    context(): Promise<ModuleWindowContext | null>;
+    /**
+     * Route code execution from a popup window to the main window console.
+     *
+     * @param code - Python code to execute.
+     */
+    executeInMain(code: string): Promise<void>;
+    /**
+     * Subscribe to execution requests from module popup windows.
+     *
+     * @param callback - Invoked with the code string to execute.
+     * @returns Unsubscribe function.
+     */
+    onExecuteRequest(callback: (code: string) => void): () => void;
   };
 
   /** Native file/directory pickers (main process dialog wrappers). */

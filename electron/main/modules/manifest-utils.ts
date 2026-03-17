@@ -65,6 +65,12 @@ export interface ModuleManifestV1 {
     inputs?: string[];
     tab?: string;
   }>;
+  /** Explicit flag to indicate whether this module has a GUI. */
+  has_gui?: boolean;
+  /** Container layout for the module GUI. */
+  gui?: {
+    layout: unknown;
+  };
   /** Python package name exposed by this module for import. */
   python_package?: string;
   /** Python module to import on kernel start (entry point). */
@@ -179,6 +185,8 @@ export function validateModuleManifest(
       tab: optionalString(actionObj, "tab", manifestPath, `actions[${index}]`),
     };
   });
+  const has_gui = optionalBoolean(obj, "has_gui", manifestPath);
+  const gui = optionalGuiLayout(obj, manifestPath, inputs, actions);
   const python_package = optionalString(obj, "python_package", manifestPath);
   const entry_point = optionalString(obj, "entry_point", manifestPath);
 
@@ -192,6 +200,8 @@ export function validateModuleManifest(
     dependencies,
     inputs,
     actions,
+    has_gui,
+    gui,
     python_package,
     entry_point,
   };
@@ -499,6 +509,91 @@ function optionalDependencies(
       marker: optionalString(dep, "marker", filePath),
     };
   });
+}
+
+/**
+ * Derive the effective `hasGui` flag for a manifest.
+ *
+ * @param manifest - Validated manifest.
+ * @returns True when the module should have a GUI.
+ */
+export function deriveHasGui(manifest: ModuleManifestV1): boolean {
+  if (typeof manifest.has_gui === "boolean") {
+    return manifest.has_gui;
+  }
+  return (manifest.inputs?.length ?? 0) > 0 || manifest.actions.length > 0;
+}
+
+function optionalGuiLayout(
+  obj: Record<string, unknown>,
+  filePath: string,
+  inputs: ModuleManifestV1["inputs"],
+  actions: ModuleManifestV1["actions"]
+): ModuleManifestV1["gui"] {
+  const raw = obj.gui;
+  if (raw === undefined) return undefined;
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+    throw new Error(`"gui" must be an object in ${filePath}`);
+  }
+  const guiObj = raw as Record<string, unknown>;
+  const layoutRaw = guiObj.layout;
+  if (!layoutRaw || typeof layoutRaw !== "object" || Array.isArray(layoutRaw)) {
+    throw new Error(`"gui.layout" must be a container object in ${filePath}`);
+  }
+  const inputIds = new Set((inputs ?? []).map((i) => i.id));
+  const actionIds = new Set(actions.map((a) => a.id));
+  validateLayoutNode(layoutRaw, filePath, "gui.layout", inputIds, actionIds);
+  return { layout: layoutRaw };
+}
+
+function validateLayoutNode(
+  node: unknown,
+  filePath: string,
+  path: string,
+  inputIds: Set<string>,
+  actionIds: Set<string>
+): void {
+  if (!node || typeof node !== "object" || Array.isArray(node)) {
+    throw new Error(`"${path}" must be a layout node object in ${filePath}`);
+  }
+  const obj = node as Record<string, unknown>;
+  const type = obj.type;
+  if (typeof type !== "string") {
+    throw new Error(`"${path}.type" must be a string in ${filePath}`);
+  }
+  if (type === "input") {
+    const id = obj.id;
+    if (typeof id !== "string" || !id.trim()) {
+      throw new Error(`"${path}.id" must be a non-empty string in ${filePath}`);
+    }
+    if (!inputIds.has(id)) {
+      throw new Error(`"${path}.id" references unknown input "${id}" in ${filePath}`);
+    }
+    return;
+  }
+  if (type === "action") {
+    const id = obj.id;
+    if (typeof id !== "string" || !id.trim()) {
+      throw new Error(`"${path}.id" must be a non-empty string in ${filePath}`);
+    }
+    if (!actionIds.has(id)) {
+      throw new Error(`"${path}.id" references unknown action "${id}" in ${filePath}`);
+    }
+    return;
+  }
+  const validContainerTypes = ["row", "column", "group", "tabs"];
+  if (!validContainerTypes.includes(type)) {
+    throw new Error(
+      `"${path}.type" must be one of "input", "action", "row", "column", "group", or "tabs" in ${filePath}`
+    );
+  }
+  const children = obj.children;
+  if (!Array.isArray(children)) {
+    throw new Error(`"${path}.children" must be an array in ${filePath}`);
+  }
+  for (let i = 0; i < children.length; i++) {
+    validateLayoutNode(children[i], filePath, `${path}.children[${i}]`, inputIds, actionIds);
+  }
 }
 
 function compareSemver(left: string, right: string): number | null {

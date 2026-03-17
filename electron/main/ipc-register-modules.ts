@@ -241,12 +241,14 @@ export function registerModulesIpcHandlers(
               throw error;
             }
           }
+          const guiInfo = await moduleManager.getModuleGuiInfo(entry.module_id);
           return {
             moduleId: entry.module_id,
             name: installedById.get(entry.module_id)?.name ?? entry.module_id,
             alias: entry.alias,
             version: entry.version,
             revision: entry.revision,
+            hasGui: guiInfo.hasGui,
             inputs: await moduleManager.getModuleInputs(entry.module_id),
             actions: actions.map((action) => ({
               id: action.actionId,
@@ -255,6 +257,7 @@ export function registerModulesIpcHandlers(
               inputIds: action.inputIds,
               ...(action.actionTab ? { tab: action.actionTab } : {}),
             })),
+            gui: guiInfo.gui,
             settings: allSettings[entry.alias] ?? {},
             warnings:
               warningsByAlias.get(entry.alias) ??

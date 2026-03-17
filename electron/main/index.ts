@@ -35,7 +35,9 @@ import {
 import { ProjectManager, type ProjectModuleImport } from "./project-manager";
 import { ConfigStore } from "./config";
 import { registerAppStateIpcHandlers } from "./ipc-register-app-state";
+import { registerModuleWindowIpcHandlers } from "./ipc-register-module-windows";
 import { registerTreeNamespaceScriptIpcHandlers } from "./ipc-register-tree-namespace-script";
+import { ModuleWindowManager } from "./module-window-manager";
 import {
   IPC,
   ModuleHealthWarning,
@@ -92,6 +94,10 @@ const REGISTERED_CHANNELS: readonly string[] = [
   IPC.codeCells.load,
   IPC.codeCells.save,
   IPC.menu.updateRecentProjects,
+  IPC.moduleWindows.open,
+  IPC.moduleWindows.close,
+  IPC.moduleWindows.context,
+  IPC.moduleWindows.executeInMain,
   IPC.files.pickExecutable,
   IPC.files.pickFile,
   IPC.files.pickDirectory,
@@ -357,6 +363,7 @@ export function registerIpcHandlers(
       pendingModuleImports = [];
       pendingModuleSettings = {};
       moduleHealthWarningsByAlias.clear();
+      moduleWindowManager.closeAll();
     },
     setActiveKernelId: (id) => { activeKernelId = id; },
     getActiveKernelId: () => activeKernelId,
@@ -419,7 +426,15 @@ export function registerIpcHandlers(
     codeCellsPath,
   });
 
-  registerPushForwarding(win, commRouter);
+  const preloadPath = path.join(__dirname, "..", "preload.js");
+  const moduleWindowManager = new ModuleWindowManager(win, preloadPath);
+
+  registerModuleWindowIpcHandlers({
+    moduleWindowManager,
+    mainWindow: win,
+  });
+
+  registerPushForwarding(win, commRouter, moduleWindowManager);
 
   /**
    * Reset all in-session state. Called whenever the renderer reloads so that
@@ -432,6 +447,7 @@ export function registerIpcHandlers(
     pendingModuleImports = [];
     pendingModuleSettings = {};
     moduleHealthWarningsByAlias.clear();
+    moduleWindowManager.closeAll();
   }
 
   return resetSessionState;
@@ -446,17 +462,21 @@ export function registerIpcHandlers(
  */
 export function registerPushForwarding(
   win: BrowserWindow,
-  commRouter: CommRouter
+  commRouter: CommRouter,
+  moduleWindowManager?: ModuleWindowManager
 ): void {
-  const subscribe = (type: string, channel: string): void => {
+  const subscribe = (type: string, channel: string, broadcast?: boolean): void => {
     const handler = (message: PDVMessage): void => {
       win.webContents.send(channel, message.payload);
+      if (broadcast && moduleWindowManager) {
+        moduleWindowManager.broadcastToAll(channel, message.payload);
+      }
     };
     commRouter.onPush(type, handler);
     pushSubscriptions.push({ commRouter, type, handler });
   };
 
-  subscribe(PDVMessageType.TREE_CHANGED, IPC.push.treeChanged);
+  subscribe(PDVMessageType.TREE_CHANGED, IPC.push.treeChanged, true);
   subscribe(PDVMessageType.PROJECT_LOADED, IPC.push.projectLoaded);
 }
 

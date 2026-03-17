@@ -358,6 +358,52 @@ export interface ModuleHealthWarning {
   message: string;
 }
 
+/** Request payload for opening a module popup window. */
+export interface ModuleWindowOpenRequest {
+  alias: string;
+  kernelId: string;
+}
+
+/** Result payload for `moduleWindows.open`. */
+export interface ModuleWindowOpenResult {
+  success: boolean;
+  error?: string;
+}
+
+/** Context payload identifying a module popup window. */
+export interface ModuleWindowContext {
+  alias: string;
+  kernelId: string;
+}
+
+/** Reference to an input in the container layout. */
+export interface LayoutInputRef {
+  type: "input";
+  id: string;
+}
+
+/** Reference to an action in the container layout. */
+export interface LayoutActionRef {
+  type: "action";
+  id: string;
+}
+
+/** A layout container that arranges children visually. */
+export interface LayoutContainer {
+  type: "row" | "column" | "group" | "tabs";
+  label?: string;
+  collapsed?: boolean;
+  children: LayoutNode[];
+}
+
+/** A layout node is either an input reference, action reference, or a container. */
+export type LayoutNode = LayoutInputRef | LayoutActionRef | LayoutContainer;
+
+/** Top-level GUI layout object in the module manifest. */
+export interface ModuleGuiLayout {
+  layout: LayoutContainer;
+}
+
 /** Project-scoped imported module descriptor. */
 export interface ImportedModuleDescriptor {
   moduleId: string;
@@ -365,8 +411,10 @@ export interface ImportedModuleDescriptor {
   alias: string;
   version: string;
   revision?: string;
+  hasGui: boolean;
   inputs: ModuleInputDescriptor[];
   actions: ImportedModuleActionDescriptor[];
+  gui?: ModuleGuiLayout;
   settings: Record<string, unknown>;
   warnings: ModuleHealthWarning[];
 }
@@ -503,6 +551,13 @@ export interface PDVApi {
   codeCells: {
     load(): Promise<CodeCellData | null>;
     save(data: CodeCellData): Promise<boolean>;
+  };
+  moduleWindows: {
+    open(request: ModuleWindowOpenRequest): Promise<ModuleWindowOpenResult>;
+    close(alias: string): Promise<boolean>;
+    context(): Promise<ModuleWindowContext | null>;
+    executeInMain(code: string): Promise<void>;
+    onExecuteRequest(callback: (code: string) => void): () => void;
   };
   files: {
     pickExecutable(): Promise<string | null>;

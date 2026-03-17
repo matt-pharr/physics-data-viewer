@@ -188,6 +188,16 @@ const App: React.FC = () => {
     setModulesRefreshToken,
   });
 
+  // Listen for execution requests from module popup windows
+  useEffect(() => {
+    if (!window.pdv?.moduleWindows) return;
+    const unsub = window.pdv.moduleWindows.onExecuteRequest((code: string) => {
+      if (!currentKernelId) return;
+      void handleExecute(code);
+    });
+    return unsub;
+  }, [currentKernelId]);
+
   const { startKernel, handleEnvSave, handleRestartKernel } = useKernelLifecycle({
     config,
     currentKernelId,

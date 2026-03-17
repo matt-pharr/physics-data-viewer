@@ -30,7 +30,9 @@ import type {
   ModuleSourceReference,
   ModuleUpdateResult,
 } from "./ipc";
+import type { ModuleGuiLayout } from "./ipc";
 import {
+  deriveHasGui,
   isPythonVersionCompatible,
   isVersionGreaterThan,
   isVersionLessThan,
@@ -318,6 +320,30 @@ export class ModuleManager {
         : undefined,
       fileMode: input.file_mode,
     }));
+  }
+
+  /**
+   * Return the `hasGui` flag and optional `gui` layout for one installed module.
+   *
+   * @param moduleId - Installed module identifier.
+   * @returns Object with `hasGui` boolean and optional `gui` layout.
+   */
+  async getModuleGuiInfo(
+    moduleId: string
+  ): Promise<{ hasGui: boolean; gui?: ModuleGuiLayout }> {
+    const index = await this.readIndex();
+    const module = index.modules[moduleId];
+    if (!module) {
+      return { hasGui: false };
+    }
+    const moduleDir =
+      module.installPath ?? path.join(this.packagesRoot, moduleId);
+    const manifest = await this.readAndValidateManifest(moduleDir);
+    const hasGui = deriveHasGui(manifest);
+    const gui = manifest.gui
+      ? (manifest.gui as ModuleGuiLayout)
+      : undefined;
+    return { hasGui, gui };
   }
 
   /**

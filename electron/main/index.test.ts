@@ -92,6 +92,10 @@ const mocks = vi.hoisted(() => {
   const moduleManagerGetModuleInputs = vi.fn(async () => [
     { id: "threshold", label: "Threshold", type: "int", default: "5" },
   ]);
+  const moduleManagerGetModuleGuiInfo = vi.fn(async () => ({
+    hasGui: true,
+    gui: undefined,
+  }));
   return {
     handlers,
     ipcHandle,
@@ -110,6 +114,7 @@ const mocks = vi.hoisted(() => {
     moduleManagerEvaluateHealth,
     moduleManagerResolveActionScripts,
     moduleManagerGetModuleInputs,
+    moduleManagerGetModuleGuiInfo,
   };
 });
 
@@ -147,6 +152,7 @@ vi.mock("./module-manager", () => ({
     evaluateHealth: mocks.moduleManagerEvaluateHealth,
     resolveActionScripts: mocks.moduleManagerResolveActionScripts,
     getModuleInputs: mocks.moduleManagerGetModuleInputs,
+    getModuleGuiInfo: mocks.moduleManagerGetModuleGuiInfo,
   })),
 }));
 
@@ -944,6 +950,7 @@ describe("Step 5 IPC handlers", () => {
         alias: "demo-module",
         version: "1.0.0",
         revision: "abc123",
+        hasGui: true,
         inputs: [{ id: "threshold", label: "Threshold", type: "int", default: "5" }],
         actions: [{ id: "run-action", label: "Run", scriptName: "run", inputIds: ["threshold"] }],
         settings: {
