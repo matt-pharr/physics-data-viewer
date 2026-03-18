@@ -53,6 +53,8 @@ KIND_BINARY = "binary"
 KIND_MODULE = "module"
 KIND_GUI = "gui"
 KIND_NAMELIST = "namelist"
+KIND_LIB = "lib"
+KIND_FILE = "file"
 KIND_UNKNOWN = "unknown"
 
 # Format strings — must match ARCHITECTURE.md §7.3 storage.format
@@ -67,6 +69,7 @@ FORMAT_INLINE = "inline"
 FORMAT_GUI_JSON = "gui_json"
 FORMAT_MODULE_META = "module_meta"
 FORMAT_NAMELIST = "namelist"
+FORMAT_PY_LIB = "py_lib"
 
 
 def python_type_string(value: Any) -> str:
@@ -106,7 +109,7 @@ def detect_kind(value: Any) -> str:
     ndarray/dataframe/series values fall through to ``KIND_UNKNOWN``.
     """
     # Lazy import to avoid circular dependency and optional deps
-    from pdv_kernel.tree import PDVTree, PDVScript, PDVNote, PDVFile, PDVModule, PDVGui, PDVNamelist  # noqa: PLC0415
+    from pdv_kernel.tree import PDVTree, PDVScript, PDVNote, PDVFile, PDVModule, PDVGui, PDVNamelist, PDVLib  # noqa: PLC0415
 
     if isinstance(value, PDVModule):
         return KIND_MODULE
@@ -121,7 +124,9 @@ def detect_kind(value: Any) -> str:
             return KIND_GUI
         if isinstance(value, PDVNamelist):
             return KIND_NAMELIST
-        return KIND_UNKNOWN
+        if isinstance(value, PDVLib):
+            return KIND_LIB
+        return KIND_FILE
     # bool must be checked before int (bool is a subclass of int)
     if isinstance(value, bool):
         return KIND_SCALAR
@@ -201,13 +206,14 @@ def serialize_node(
     import shutil
 
     from pdv_kernel.environment import ensure_parent, working_dir_tree_path  # noqa: PLC0415
-    from pdv_kernel.tree import PDVFile, PDVScript, PDVModule  # noqa: PLC0415
+    from pdv_kernel.tree import PDVFile, PDVScript, PDVModule, PDVLib  # noqa: PLC0415
 
     # File extension and format for each PDVFile subclass
     _FILE_KIND_MAP: dict[str, tuple[str, str]] = {
         KIND_SCRIPT:   (".py", FORMAT_PY_SCRIPT),
         KIND_MARKDOWN: (".md", FORMAT_MARKDOWN),
         KIND_GUI:      (".gui.json", FORMAT_GUI_JSON),
+        KIND_LIB:      (".py", FORMAT_PY_LIB),
     }
 
     kind = detect_kind(value)
@@ -273,6 +279,8 @@ def serialize_node(
             "relative_path": rel_path,
             "format": fmt,
         }
+        if isinstance(value, PDVLib) and value.module_id:
+            descriptor["module_id"] = value.module_id
         return descriptor
 
     if kind == KIND_NAMELIST:
@@ -517,7 +525,7 @@ def node_preview(value: Any, kind: str) -> str:
     try:
         if kind == KIND_FOLDER:
             return "folder"
-        if kind in (KIND_MODULE, KIND_GUI, KIND_NAMELIST):
+        if kind in (KIND_MODULE, KIND_GUI, KIND_NAMELIST, KIND_LIB):
             return value.preview() if hasattr(value, "preview") else kind
         if kind in (KIND_SCRIPT, KIND_MARKDOWN):
             return value.preview() if hasattr(value, "preview") else kind
@@ -547,6 +555,13 @@ def node_preview(value: Any, kind: str) -> str:
             return f"Series ({len(value)},)"
     except Exception:  # noqa: BLE001
         pass
+    # Custom types may provide a preview() method (e.g. module-defined types
+    # with registered handlers).
+    if hasattr(value, "preview") and callable(value.preview):
+        try:
+            return str(value.preview())[:100]
+        except Exception:  # noqa: BLE001
+            pass
     return "<unknown type>"
 
 

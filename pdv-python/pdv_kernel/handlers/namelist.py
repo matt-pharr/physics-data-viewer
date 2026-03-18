@@ -255,7 +255,7 @@ def handle_file_register(msg: dict) -> None:
     import os  # noqa: PLC0415
 
     from pdv_kernel.comms import get_pdv_tree, send_error, send_message  # noqa: PLC0415
-    from pdv_kernel.tree import PDVFile, PDVNamelist  # noqa: PLC0415
+    from pdv_kernel.tree import PDVFile, PDVLib, PDVNamelist  # noqa: PLC0415
 
     msg_id = msg.get("msg_id")
     payload = msg.get("payload", {})
@@ -263,6 +263,7 @@ def handle_file_register(msg: dict) -> None:
     filename = payload.get("filename", "")
     node_type = payload.get("node_type", "file")
     explicit_name = payload.get("name", "")
+    module_id = payload.get("module_id")
 
     if not filename:
         send_error(
@@ -304,6 +305,8 @@ def handle_file_register(msg: dict) -> None:
 
     if node_type == "namelist":
         node = PDVNamelist(relative_path=relative_path, format="auto")
+    elif node_type == "lib":
+        node = PDVLib(relative_path=relative_path, module_id=module_id)
     else:
         node = PDVFile(relative_path=relative_path)
 

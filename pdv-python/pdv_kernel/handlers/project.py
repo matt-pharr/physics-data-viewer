@@ -99,9 +99,10 @@ def handle_project_load(msg: dict) -> None:
     import json
     import os
     import shutil
+    import sys
 
     from pdv_kernel.comms import get_pdv_tree, send_error, send_message  # noqa: PLC0415
-    from pdv_kernel.tree import PDVTree, PDVScript, PDVNote, PDVModule, PDVGui, PDVNamelist  # noqa: PLC0415
+    from pdv_kernel.tree import PDVTree, PDVScript, PDVNote, PDVModule, PDVGui, PDVNamelist, PDVLib  # noqa: PLC0415
 
     msg_id = msg.get("msg_id")
     payload = msg.get("payload", {})
@@ -266,6 +267,31 @@ def handle_project_load(msg: dict) -> None:
                 shutil.copy2(source_path, target_path)
             namelist_format = node.get("namelist_format", "auto")
             _set_tree_node(tree, path, PDVNamelist(relative_path=target_path, format=namelist_format))
+        elif node_type == "lib":
+            relative_path = storage.get("relative_path", "")
+            source_path = os.path.join(save_dir, relative_path) if relative_path else ""
+            if source_path and not os.path.isabs(source_path):
+                source_path = os.path.join(save_dir, source_path)
+            if not source_path or not os.path.exists(source_path):
+                send_error(
+                    "pdv.project.load.response",
+                    "project.missing_lib_file",
+                    f"Library file not found for '{path}'",
+                    in_reply_to=msg_id,
+                )
+                return
+            target_relative = relative_path or os.path.join("tree", *path.split(".")) + ".py"
+            working_dir = tree._working_dir or save_dir
+            target_path = os.path.join(working_dir, target_relative)
+            os.makedirs(os.path.dirname(target_path), exist_ok=True)
+            if os.path.abspath(source_path) != os.path.abspath(target_path):
+                shutil.copy2(source_path, target_path)
+            module_id = node.get("module_id")
+            _set_tree_node(tree, path, PDVLib(relative_path=target_path, module_id=module_id))
+            # Add the parent directory to sys.path so the library is importable
+            parent_dir = os.path.dirname(target_path)
+            if parent_dir and parent_dir not in sys.path:
+                sys.path.insert(1, parent_dir)
         elif backend == "inline":
             _set_tree_node(tree, path, storage.get("value"))
         elif node.get("lazy", False):

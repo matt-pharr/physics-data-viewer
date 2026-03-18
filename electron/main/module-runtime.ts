@@ -106,34 +106,40 @@ export function toPythonArgumentValue(value: ModuleInputValue): string | null {
 /**
  * Build the payload for the `pdv.modules.setup` comm message.
  *
- * Collects install paths and optional python_package/entry_point fields
- * from each imported module's manifest.
+ * For each imported module, resolves the on-disk paths of lib/ Python files
+ * (already copied to the working directory by {@link bindImportedModuleLibFiles})
+ * and includes the optional entry_point from the manifest.
+ *
+ * The kernel adds the parent directory of each lib file path to `sys.path`,
+ * making the modules importable.  This replaces the old `install_path`-based
+ * approach and is forward-compatible with UUID-based file storage.
  *
  * @param moduleManager - Module manager for manifest reads.
  * @param importedModules - List of project-imported modules.
+ * @param workingDir - Kernel working directory where lib files were copied.
  * @returns Payload object for pdv.modules.setup.
  */
 export async function buildModulesSetupPayload(
   moduleManager: ModuleManager,
-  importedModules: ProjectModuleImport[]
+  importedModules: ProjectModuleImport[],
+  workingDir?: string
 ): Promise<{
   modules: Array<{
-    install_path: string;
-    python_package?: string;
+    lib_paths: string[];
     entry_point?: string;
   }>;
 }> {
   const modules: Array<{
-    install_path: string;
-    python_package?: string;
+    lib_paths: string[];
     entry_point?: string;
   }> = [];
   for (const imp of importedModules) {
     try {
       const info = await moduleManager.getModuleSetupInfo(imp.module_id);
+      const libPaths = await resolveLibFilePaths(moduleManager, imp, workingDir);
+      console.log("[pdv:setup] module:", imp.module_id, "libPaths:", libPaths, "entryPoint:", info.entryPoint);
       modules.push({
-        install_path: info.installPath,
-        python_package: info.pythonPackage,
+        lib_paths: libPaths,
         entry_point: info.entryPoint,
       });
     } catch (error) {
@@ -144,6 +150,129 @@ export async function buildModulesSetupPayload(
     }
   }
   return { modules };
+}
+
+/**
+ * Recursively collect all `.py` files under a directory, returning paths
+ * relative to that directory.
+ *
+ * @param dir - Root directory to scan.
+ * @returns Array of relative paths (e.g. `["n_pendulum.py"]` or `["pkg/utils.py"]`).
+ */
+async function collectPyFiles(dir: string): Promise<string[]> {
+  const results: string[] = [];
+  let entries: import("fs").Dirent[];
+  try {
+    entries = await fs.readdir(dir, { withFileTypes: true }) as unknown as import("fs").Dirent[];
+  } catch {
+    return results;
+  }
+  for (const entry of entries) {
+    const rel = entry.name;
+    if (entry.isFile() && rel.endsWith(".py")) {
+      results.push(rel);
+    } else if (entry.isDirectory()) {
+      const subFiles = await collectPyFiles(path.join(dir, rel));
+      for (const sub of subFiles) {
+        results.push(path.join(rel, sub));
+      }
+    }
+  }
+  return results;
+}
+
+/**
+ * Copy `lib/` Python files from an installed module into the working directory
+ * and register each as a PDVFile tree node under `<alias>.lib.<stem>`.
+ *
+ * At runtime the parent directory of each copied `.py` file is added to
+ * `sys.path` (via `pdv.modules.setup`), making the modules importable from
+ * scripts and entry points.  This is forward-compatible with UUID-based file
+ * storage where each file gets its own directory.
+ *
+ * @param commRouter - Comm router for FILE_REGISTER messages.
+ * @param moduleManager - Module manager for install path resolution.
+ * @param importedModule - Imported module entry (module id + alias).
+ * @param workingDir - Kernel working directory.
+ */
+export async function bindImportedModuleLibFiles(
+  commRouter: CommRouter,
+  moduleManager: ModuleManager,
+  importedModule: ProjectModuleImport,
+  workingDir: string | undefined
+): Promise<void> {
+  if (!workingDir) {
+    console.log("[pdv:lib] No workingDir, skipping lib files");
+    return;
+  }
+
+  const installPath = await moduleManager.getModuleInstallPath(importedModule.module_id);
+  console.log("[pdv:lib] installPath:", installPath);
+  if (!installPath) return;
+
+  const libDir = path.join(installPath, "lib");
+  console.log("[pdv:lib] libDir:", libDir);
+  const pyFiles = await collectPyFiles(libDir);
+  console.log("[pdv:lib] pyFiles:", pyFiles);
+  if (pyFiles.length === 0) return;
+
+  for (const relFile of pyFiles) {
+    const srcPath = path.join(libDir, relFile);
+    const destDir = path.join(
+      workingDir,
+      ...importedModule.alias.split(".").filter(Boolean),
+      "lib",
+      path.dirname(relFile)
+    );
+    await fs.mkdir(destDir, { recursive: true });
+    const destPath = path.join(destDir, path.basename(relFile));
+    await fs.copyFile(srcPath, destPath);
+
+    // Register as a PDVLib in the tree.  The tree path encodes the lib
+    // structure: e.g. "n_pendulum.lib.n_pendulum_py" for lib/n_pendulum.py.
+    const stem = relFile.replace(/\//g, "_").replace(/\.py$/, "_py");
+    await commRouter.request(PDVMessageType.FILE_REGISTER, {
+      tree_path: `${importedModule.alias}.lib`,
+      filename: path.basename(relFile),
+      node_type: "lib",
+      name: stem,
+      module_id: importedModule.module_id,
+    });
+  }
+}
+
+/**
+ * Resolve the on-disk paths of lib/ Python files for an imported module.
+ *
+ * These paths are sent to the kernel via `pdv.modules.setup` so that the
+ * parent directory of each file can be added to `sys.path`.
+ *
+ * @param moduleManager - Module manager for install path resolution.
+ * @param importedModule - Imported module entry.
+ * @param workingDir - Kernel working directory where lib files are copied.
+ * @returns Array of absolute on-disk paths to `.py` files in the working dir.
+ */
+export async function resolveLibFilePaths(
+  moduleManager: ModuleManager,
+  importedModule: ProjectModuleImport,
+  workingDir: string | undefined
+): Promise<string[]> {
+  if (!workingDir) return [];
+
+  const installPath = await moduleManager.getModuleInstallPath(importedModule.module_id);
+  if (!installPath) return [];
+
+  const libDir = path.join(installPath, "lib");
+  const pyFiles = await collectPyFiles(libDir);
+
+  return pyFiles.map((relFile) =>
+    path.join(
+      workingDir,
+      ...importedModule.alias.split(".").filter(Boolean),
+      "lib",
+      relFile
+    )
+  );
 }
 
 /**
@@ -290,7 +419,12 @@ export async function bindImportedModule(
     );
   }
 
-  // 5. Bind scripts as before
+  // 5. Copy lib/ Python files and register as PDVFile nodes.
+  // Each .py file in lib/ is copied to the working directory so its parent
+  // directory can be added to sys.path, making the module importable.
+  await bindImportedModuleLibFiles(commRouter, moduleManager, importedModule, workingDir);
+
+  // 6. Bind scripts as before
   await bindImportedModuleScripts(commRouter, moduleManager, importedModule, workingDir);
 }
 

@@ -35,11 +35,13 @@ import { ModuleManager } from "./module-manager";
 import {
   bindImportedModule,
   bindImportedModuleScripts,
+  buildModulesSetupPayload,
   isMissingActionScriptError,
   normalizeModuleAlias,
   suggestModuleAlias,
   toPythonArgumentValue,
 } from "./module-runtime";
+import { PDVMessageType } from "./pdv-protocol";
 import { ProjectManager, type ProjectModuleImport } from "./project-manager";
 
 type ProjectManifest = Awaited<ReturnType<typeof ProjectManager.readManifest>>;
@@ -192,6 +194,16 @@ export function registerModulesIpcHandlers(
           importedModule,
           kernelWorkingDirs.get(activeKernelId)
         );
+        // Send pdv.modules.setup so the kernel adds lib paths to sys.path
+        // and imports entry points for the newly imported module.
+        const setupPayload = await buildModulesSetupPayload(
+          moduleManager,
+          [importedModule],
+          kernelWorkingDirs.get(activeKernelId)
+        );
+        if (setupPayload.modules.length > 0) {
+          await commRouter.request(PDVMessageType.MODULES_SETUP, setupPayload);
+        }
       }
       win.webContents.send(IPC.push.treeChanged, {
         changed_paths: [baseAlias],

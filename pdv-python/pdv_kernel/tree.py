@@ -624,6 +624,54 @@ class PDVNamelist(PDVFile):
         return f"PDVNamelist('{self._relative_path}', format='{self._format}'{mid})"
 
 
+class PDVLib(PDVFile):
+    """
+    File-backed Python library file provided by a module.
+
+    Stored as the value at a tree path under ``<alias>.lib.*``.  The parent
+    directory of the on-disk file is added to ``sys.path`` so that the module
+    is importable from scripts and entry points.
+
+    Parameters
+    ----------
+    relative_path : str
+        Path to the ``.py`` file (absolute or relative to working dir).
+    module_id : str or None
+        Module identifier for the owning module.
+
+    See Also
+    --------
+    ARCHITECTURE.md §5.10, §7.2
+    """
+
+    def __init__(self, relative_path: str, module_id: str | None = None) -> None:
+        super().__init__(relative_path)
+        self._module_id = module_id
+
+    @property
+    def module_id(self) -> str | None:
+        """Module identifier, or None.
+
+        Returns
+        -------
+        str or None
+        """
+        return self._module_id
+
+    def preview(self) -> str:
+        """Return a short preview string for the tree panel.
+
+        Returns
+        -------
+        str
+        """
+        return f"Library ({os.path.basename(self._relative_path)})"
+
+    def __repr__(self) -> str:
+        mid = f", module_id='{self._module_id}'" if self._module_id else ""
+        return f"PDVLib('{self._relative_path}'{mid})"
+
+
 class PDVNote(PDVFile):
     """
     Lightweight wrapper for a markdown file stored as a PDV tree node.

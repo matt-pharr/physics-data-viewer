@@ -96,6 +96,11 @@ const mocks = vi.hoisted(() => {
     hasGui: true,
     gui: undefined,
   }));
+  const moduleManagerGetModuleInstallPath = vi.fn(async () => null);
+  const moduleManagerGetModuleSetupInfo = vi.fn(async () => ({
+    entryPoint: undefined,
+  }));
+  const moduleManagerResolveModuleFiles = vi.fn(async () => []);
   return {
     handlers,
     ipcHandle,
@@ -115,6 +120,9 @@ const mocks = vi.hoisted(() => {
     moduleManagerResolveActionScripts,
     moduleManagerGetModuleInputs,
     moduleManagerGetModuleGuiInfo,
+    moduleManagerGetModuleInstallPath,
+    moduleManagerGetModuleSetupInfo,
+    moduleManagerResolveModuleFiles,
   };
 });
 
@@ -153,6 +161,9 @@ vi.mock("./module-manager", () => ({
     resolveActionScripts: mocks.moduleManagerResolveActionScripts,
     getModuleInputs: mocks.moduleManagerGetModuleInputs,
     getModuleGuiInfo: mocks.moduleManagerGetModuleGuiInfo,
+    getModuleInstallPath: mocks.moduleManagerGetModuleInstallPath,
+    getModuleSetupInfo: mocks.moduleManagerGetModuleSetupInfo,
+    resolveModuleFiles: mocks.moduleManagerResolveModuleFiles,
   })),
 }));
 

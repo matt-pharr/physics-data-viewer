@@ -29,6 +29,7 @@ const TYPE_ICONS: Record<string, string> = {
   json: '{ }',
   python: '🐍',
   julia: '🔴',
+  lib: '📚',
   unknown: '❓',
 };
 

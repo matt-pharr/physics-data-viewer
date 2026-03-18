@@ -49,27 +49,27 @@ def _make_msg(msg_type, payload, msg_id=None):
 
 class TestHandleModulesSetup:
     def test_adds_to_sys_path(self):
-        """pdv.modules.setup should add install_path to sys.path."""
+        """pdv.modules.setup should add parent dirs of lib_paths to sys.path."""
         mock_comm = _make_mock_comm()
-        fake_path = "/tmp/fake-module-path-for-test"
+        fake_file = "/tmp/fake-module-path-for-test/n_pendulum.py"
+        expected_dir = "/tmp/fake-module-path-for-test"
         msg = _make_msg(
             "pdv.modules.setup",
-            {"modules": [{"install_path": fake_path}]},
+            {"modules": [{"lib_paths": [fake_file]}]},
         )
 
-        original_path = sys.path.copy()
         try:
             with patch.object(comms_mod, "_comm", mock_comm):
                 handle_modules_setup(msg)
 
-            assert fake_path in sys.path
+            assert expected_dir in sys.path
             response = mock_comm._sent[0]
             assert response["type"] == "pdv.modules.setup.response"
             assert response["status"] == "ok"
         finally:
             # Clean up sys.path
-            if fake_path in sys.path:
-                sys.path.remove(fake_path)
+            if expected_dir in sys.path:
+                sys.path.remove(expected_dir)
 
     def test_runs_entry_point(self):
         """pdv.modules.setup should import the entry_point module."""
@@ -79,7 +79,7 @@ class TestHandleModulesSetup:
             {
                 "modules": [
                     {
-                        "install_path": "/tmp/fake",
+                        "lib_paths": ["/tmp/fake/my_module.py"],
                         "entry_point": "pdv_kernel_test_fake_entry",
                     }
                 ]

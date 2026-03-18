@@ -98,8 +98,8 @@ def handle_module_register(msg: dict) -> None:
 def handle_modules_setup(msg: dict) -> None:
     """Handle the ``pdv.modules.setup`` message.
 
-    For each module in the payload, adds the install path to ``sys.path``
-    (after the first entry so the current directory stays first), then
+    For each module in the payload, adds the parent directories of the
+    module's ``lib_paths`` (on-disk ``.py`` files) to ``sys.path``, then
     imports the entry point module if specified.
 
     Expected payload
@@ -109,9 +109,8 @@ def handle_modules_setup(msg: dict) -> None:
         {
             "modules": [
                 {
-                    "install_path": "/path/to/module",
-                    "python_package": "my_module",
-                    "entry_point": "my_module.pdv_init"
+                    "lib_paths": ["/tmp/pdv-xxx/n_pendulum/lib/n_pendulum.py"],
+                    "entry_point": "n_pendulum"
                 }
             ]
         }
@@ -127,6 +126,8 @@ def handle_modules_setup(msg: dict) -> None:
     msg : dict
         Parsed PDV message envelope.
     """
+    import os  # noqa: PLC0415
+
     from pdv_kernel.comms import send_message  # noqa: PLC0415
     from pdv_kernel.modules import get_handler_registry  # noqa: PLC0415
 
@@ -135,12 +136,16 @@ def handle_modules_setup(msg: dict) -> None:
     modules = payload.get("modules", [])
 
     for mod_info in modules:
-        install_path = mod_info.get("install_path")
+        lib_paths = mod_info.get("lib_paths", [])
         entry_point = mod_info.get("entry_point")
 
-        if install_path and install_path not in sys.path:
-            # Insert after the first entry (usually '' or cwd)
-            sys.path.insert(1, install_path)
+        # Add the parent directory of each lib .py file to sys.path.
+        # This makes the modules importable.  Duplicate entries are
+        # harmless (and expected — multiple files in the same directory).
+        for file_path in lib_paths:
+            parent_dir = os.path.dirname(file_path)
+            if parent_dir and parent_dir not in sys.path:
+                sys.path.insert(1, parent_dir)
 
         if entry_point:
             try:

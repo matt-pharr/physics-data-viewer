@@ -199,7 +199,7 @@ All type strings are namespaced with `pdv.`. The convention is `pdv.<domain>.<ac
 | `pdv.module.register.response` | kernel → app | Confirms module registration. |
 | `pdv.gui.register` | app → kernel | Register a `PDVGui` node at a tree path. Payload: `{ parent_path, name, relative_path, module_id }`. |
 | `pdv.gui.register.response` | kernel → app | Confirms GUI registration. |
-| `pdv.modules.setup` | app → kernel | Send module install paths and entry points for `sys.path` injection. Payload: `{ modules: [{ install_path, python_package, entry_point }] }`. |
+| `pdv.modules.setup` | app → kernel | Add lib file parent directories to `sys.path` and import entry points. Payload: `{ modules: [{ lib_paths: string[], entry_point?: string }] }`. Sent after module import and on kernel start/restart. |
 | `pdv.modules.setup.response` | kernel → app | Confirms module setup with handler registry. |
 | `pdv.handler.invoke` | app → kernel | Dispatch a registered handler for a tree node. Payload: `{ path }`. |
 | `pdv.handler.invoke.response` | kernel → app | Returns handler dispatch result. |
@@ -212,7 +212,7 @@ All type strings are namespaced with `pdv.`. The convention is `pdv.<domain>.<ac
 | `pdv.namelist.read.response` | kernel → app | Parsed namelist data. |
 | `pdv.namelist.write` | app → kernel | Write structured data back to a `PDVNamelist` backing file. Payload: `{ tree_path, data }`. |
 | `pdv.namelist.write.response` | kernel → app | Confirms write success. |
-| `pdv.file.register` | app → kernel | Register a file-backed tree node (`PDVNamelist` or `PDVFile`). Payload: `{ tree_path, filename, node_type }`. |
+| `pdv.file.register` | app → kernel | Register a file-backed tree node (`PDVNamelist`, `PDVLib`, or `PDVFile`). Payload: `{ tree_path, filename, node_type, name?, module_id? }`. When `node_type` is `"lib"`, creates a `PDVLib` node. |
 | `pdv.file.register.response` | kernel → app | Confirms file registration with resulting path. |
 
 ### 3.5 Error Payload
@@ -453,9 +453,9 @@ sequenceDiagram
 pdv_kernel/
     __init__.py          # Public API: bootstrap(), PDVTree, PDVScript
     comms.py             # Comm channel: register target, send/receive, dispatch
-    tree.py              # PDVTree, PDVScript, PDVFile, PDVNote, PDVModule, PDVGui, PDVNamelist
+    tree.py              # PDVTree, PDVScript, PDVFile, PDVNote, PDVModule, PDVGui, PDVNamelist, PDVLib
     namespace.py         # pdv_namespace() — variable inspection
-    serialization.py     # Type detection, format writers (npy, parquet, json, module, gui, namelist)
+    serialization.py     # Type detection, format writers (npy, parquet, json, module, gui, namelist, lib)
     environment.py       # Path utilities, working dir management, project root logic
     handlers/
         __init__.py
@@ -638,6 +638,25 @@ Attributes:
 
 The namelist file is parsed and written by dedicated comm handlers (`pdv.namelist.read`, `pdv.namelist.write`) that run in the kernel, keeping all format-specific logic in Python. The renderer requests parsed data and sends structured edits back; it never reads or writes the raw namelist file directly.
 
+### 5.13 PDVLib Class
+
+`PDVLib` is a subclass of `PDVFile`. It represents a Python library file provided by a module's `lib/` directory that is importable by scripts and entry points.
+
+Attributes:
+- `relative_path` (inherited from `PDVFile`): path to the `.py` file relative to the working directory
+- `module_id` (read-only): the owning module's ID, or `None`
+
+`preview()` returns `"Library (<filename>)"`.
+
+**Module lib/ convention**: Module developers place importable `.py` files in `<module-root>/lib/`. When a module is imported into a project, the main process:
+1. Copies each `.py` file from the installed module's `lib/` directory into the working directory under `<alias>/lib/`.
+2. Registers each file as a `PDVLib` tree node via `pdv.file.register` (with `node_type: "lib"`).
+3. Sends `pdv.modules.setup` with `lib_paths` — the on-disk paths of the copied files. The kernel adds the parent directory of each path to `sys.path`.
+
+This design makes lib files visible and editable in the tree (users can modify libraries while working in PDV). It is forward-compatible with planned UUID-based file storage where each file gets its own directory — since `sys.path` is set per-file parent directory rather than per-module.
+
+On project load (deserialization), the `lib` node type is restored as a `PDVLib` and its parent directory is re-added to `sys.path`.
+
 ---
 
 ## 6. The Working Directory and Project Save Directory
@@ -764,6 +783,7 @@ The following node types are supported:
 | `module` | A `PDVModule` dict subclass carrying module metadata | Inline metadata in tree-index.json |
 | `gui` | A `PDVGui` file-backed GUI definition node | `.gui.json` file in working or save directory |
 | `namelist` | A `PDVNamelist` file-backed namelist definition | Namelist file in working or save directory |
+| `lib` | A `PDVLib` file-backed Python library provided by a module | `.py` file in working or save directory |
 | `script` | A `PDVScript` object | `.py` file in working or save directory |
 | `markdown` | A `PDVNote` object | `.md` file in working or save directory |
 | `ndarray` | NumPy array | `.npy` file |
@@ -1119,6 +1139,7 @@ electron/
         project-manager.ts      ← Project manifest read/write, save coordination
         project-file-sync.ts    ← Tree file synchronization between working/save dirs
         module-manager.ts       ← Module import/installation pipeline
+        module-runtime.ts       ← Module bind/setup helpers: lib file copy, sys.path setup, script registration
         module-window-manager.ts ← Module GUI popup BrowserWindow lifecycle
         ipc-register-kernels.ts           ← IPC handlers: kernel lifecycle + execution
         ipc-register-project.ts           ← IPC handlers: project save/load/new

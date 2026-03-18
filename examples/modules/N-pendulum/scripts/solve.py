@@ -22,6 +22,8 @@ The system is solved as  M * omega_dot = f  at each time step.
 import numpy as np
 from scipy.integrate import solve_ivp
 
+from n_pendulum import PendulumSolution
+
 
 # ---------------------------------------------------------------------------
 # Physics
@@ -190,14 +192,10 @@ def run(
         xs[i] = (xs[i - 1] if i > 0 else 0.0) + lengths[i] * np.sin(thetas[i])
         ys[i] = (ys[i - 1] if i > 0 else 0.0) - lengths[i] * np.cos(thetas[i])
 
-    # Store everything in the tree.
-    root = f"n_pendulum.{output_key}"
-    pdv_tree[f"{root}.t"] = t
-    pdv_tree[f"{root}.thetas"] = thetas   # (N, n_steps)
-    pdv_tree[f"{root}.omegas"] = omegas   # (N, n_steps)
-    pdv_tree[f"{root}.xs"] = xs           # (N, n_steps)
-    pdv_tree[f"{root}.ys"] = ys           # (N, n_steps)
-    pdv_tree[f"{root}.params"] = {
+    # Store the solution as a PendulumSolution object in the tree.
+    # Double-clicking this node in the tree triggers the registered handler
+    # which produces an overview plot (see n_pendulum/__init__.py).
+    params_dict = {
         "N": N, "masses": masses.tolist(), "lengths": lengths.tolist(),
         "g": g, "damping": damping, "t_end": t_end, "n_steps": n_steps,
         "theta0_deg": theta0_deg,
@@ -209,5 +207,11 @@ def run(
         "output_dir": output_dir,
     }
 
+    solution = PendulumSolution(
+        t=t, thetas=thetas, omegas=omegas, xs=xs, ys=ys, params=params_dict,
+    )
+    pdv_tree[f"n_pendulum.{output_key}"] = solution
+
     print(f"[N-Pendulum] Solved {n_steps} time steps ({t_end}s) successfully.")
+    print(f"[N-Pendulum] Double-click 'n_pendulum.{output_key}' in the tree to plot.")
     return {"status": "ok", "n_links": N, "n_steps": len(t)}

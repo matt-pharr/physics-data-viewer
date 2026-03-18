@@ -4,6 +4,7 @@
   "name": "N-Pendulum",
   "version": "2.0.0",
   "description": "A general N-link pendulum simulator. Supports double, triple, quadruple, and higher-order chaotic pendulums with ODE integration and animated visualization.",
+  "entry_point": "n_pendulum",
   "compatibility": {
     "pdv_min": "0.1.0",
     "pdv_max": "99.0.0",

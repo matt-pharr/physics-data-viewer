@@ -94,10 +94,10 @@ export function registerKernelIpcHandlers(
   } = options;
 
   /**
-   * Send pdv.modules.setup to the kernel so module install paths are
-   * added to sys.path and entry points are executed.
+   * Send pdv.modules.setup to the kernel so lib file paths are added to
+   * sys.path and entry points are executed.
    */
-  async function setupModuleNamespaces(): Promise<void> {
+  async function setupModuleNamespaces(kernelId: string): Promise<void> {
     const projectDir = getActiveProjectDir();
     if (!projectDir) return;
     let manifest: Awaited<ReturnType<typeof ProjectManager.readManifest>>;
@@ -107,7 +107,8 @@ export function registerKernelIpcHandlers(
       return;
     }
     if (!manifest.modules || manifest.modules.length === 0) return;
-    const payload = await buildModulesSetupPayload(moduleManager, manifest.modules);
+    const workingDir = kernelWorkingDirs.get(kernelId);
+    const payload = await buildModulesSetupPayload(moduleManager, manifest.modules, workingDir);
     if (payload.modules.length > 0) {
       await commRouter.request(PDVMessageType.MODULES_SETUP, payload);
     }
@@ -147,7 +148,7 @@ export function registerKernelIpcHandlers(
       kernelWorkingDirs
     );
     setActiveKernelId(kernel.id);
-    await setupModuleNamespaces();
+    await setupModuleNamespaces(kernel.id);
     await bindActiveProjectModules(kernel.id);
 
     const onCrash = async (crashedId: string): Promise<void> => {
@@ -205,7 +206,7 @@ export function registerKernelIpcHandlers(
         kernelWorkingDirs
       );
       setActiveKernelId(restarted.id);
-      await setupModuleNamespaces();
+      await setupModuleNamespaces(restarted.id);
       await bindActiveProjectModules(restarted.id);
       return restarted;
     }
@@ -228,7 +229,7 @@ export function registerKernelIpcHandlers(
       kernelWorkingDirs
     );
     setActiveKernelId(restarted.id);
-    await setupModuleNamespaces();
+    await setupModuleNamespaces(restarted.id);
     await bindActiveProjectModules(restarted.id);
     return restarted;
   });
