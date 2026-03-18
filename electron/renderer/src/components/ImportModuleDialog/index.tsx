@@ -160,9 +160,13 @@ export const ImportModuleDialog: React.FC<ImportModuleDialogProps> = ({
       result.warnings && result.warnings.length > 0
         ? ` · ${result.warnings.length} warning${result.warnings.length === 1 ? "" : "s"}`
         : "";
-    setLastStatus(
-      `Imported${result.alias ? ` as "${result.alias}"` : ""}${warningSuffix}`
-    );
+    if (result.success) {
+      setLastStatus(
+        `Imported${result.alias ? ` as "${result.alias}"` : ""}${warningSuffix}`
+      );
+    } else if (!result.error) {
+      setLastStatus("Import failed.");
+    }
     await refresh();
   };
 

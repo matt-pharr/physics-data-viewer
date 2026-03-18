@@ -100,21 +100,21 @@
       "id": "n_links",
       "label": "Number of Links",
       "type": "int",
-      "default": "2",
+      "default": 2,
       "tooltip": "Number of links in the chain."
     },
     {
       "id": "damping",
       "label": "Damping Factor",
       "type": "float",
-      "default": "0.0",
+      "default": 0.0,
       "tooltip": "Joint damping constant."
     },
     {
       "id": "t_end",
       "label": "Integration Time (s)",
       "type": "float",
-      "default": "20.0",
+      "default": 20.0,
       "tooltip": "Simulation duration."
     },
     {

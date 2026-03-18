@@ -222,16 +222,6 @@ const App: React.FC = () => {
     setModulesRefreshToken,
   });
 
-  // Listen for execution requests from module popup windows
-  useEffect(() => {
-    if (!window.pdv?.moduleWindows) return;
-    const unsub = window.pdv.moduleWindows.onExecuteRequest((code: string) => {
-      if (!currentKernelId) return;
-      void handleExecute(code);
-    });
-    return unsub;
-  }, [currentKernelId]);
-
   const { startKernel, handleEnvSave, handleRestartKernel } = useKernelLifecycle({
     config,
     currentKernelId,
@@ -520,7 +510,7 @@ const App: React.FC = () => {
     setScriptDialog(null);
   };
 
-  const handleExecute = async (code: string, originOverride?: KernelExecutionOrigin) => {
+  const handleExecute = useCallback(async (code: string, originOverride?: KernelExecutionOrigin) => {
     if (!currentKernelId || kernelStatus !== 'ready' || !code.trim()) return;
 
     setIsExecuting(true);
@@ -594,7 +584,17 @@ const App: React.FC = () => {
       setIsExecuting(false);
       setNamespaceRefreshToken((prev) => prev + 1);
     }
-  };
+  }, [currentKernelId, kernelStatus, cellTabs, activeCellTab, codeCellExecutionError]);
+
+  // Listen for execution requests from module popup windows
+  useEffect(() => {
+    if (!window.pdv?.moduleWindows) return;
+    const unsub = window.pdv.moduleWindows.onExecuteRequest((code: string) => {
+      if (!currentKernelId) return;
+      void handleExecute(code);
+    });
+    return unsub;
+  }, [currentKernelId, handleExecute]);
 
   // Whether the session has no user work (no project, no code, no logs, no notes).
   const isPristine = currentProjectDir === null

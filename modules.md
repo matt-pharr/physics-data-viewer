@@ -40,6 +40,15 @@ The Electron main process manages module storage and metadata:
 
 Installation validates `pdv-module.json`, copies the full module directory (including `lib/`, `scripts/`, `gui.json`, `inputs/`), and stores normalized metadata (`id`, `name`, `version`, source, revision when available).
 
+## Manifest split (schema v3)
+
+In schema v3, the module manifest is split across two files:
+
+- **`pdv-module.json`** retains identity (`id`, `name`, `version`, `schema_version`), `compatibility`, `scripts`, `files`, `lib`, `entry_point`, and `dependencies`.
+- **`gui.json`** holds `inputs`, `actions`, and the declarative `gui` layout. This file is optional — modules without a GUI omit it entirely.
+
+This separation keeps the identity/compatibility manifest lightweight and allows GUI definitions to evolve independently.
+
 ## Supported manifest functionality (`pdv-module.json`)
 
 PDV currently supports the following manifest capabilities:

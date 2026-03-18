@@ -99,7 +99,12 @@ export function toPythonArgumentValue(value: ModuleInputValue): string | null {
   // Produce a Python string literal. Use single quotes so that double quotes
   // inside the string don't need escaping (and vice-versa). Backslashes and
   // the chosen quote character are escaped.
-  const escaped = trimmed.replace(/\\/g, "\\\\").replace(/'/g, "\\'");
+  const escaped = trimmed
+    .replace(/\\/g, "\\\\")
+    .replace(/'/g, "\\'")
+    .replace(/\n/g, "\\n")
+    .replace(/\r/g, "\\r")
+    .replace(/\t/g, "\\t");
   return `'${escaped}'`;
 }
 
@@ -137,7 +142,6 @@ export async function buildModulesSetupPayload(
     try {
       const info = await moduleManager.getModuleSetupInfo(imp.module_id);
       const libPaths = await resolveLibFilePaths(moduleManager, imp, workingDir);
-      console.log("[pdv:setup] module:", imp.module_id, "libPaths:", libPaths, "entryPoint:", info.entryPoint);
       modules.push({
         lib_paths: libPaths,
         entry_point: info.entryPoint,
@@ -202,18 +206,14 @@ export async function bindImportedModuleLibFiles(
   workingDir: string | undefined
 ): Promise<void> {
   if (!workingDir) {
-    console.log("[pdv:lib] No workingDir, skipping lib files");
     return;
   }
 
   const installPath = await moduleManager.getModuleInstallPath(importedModule.module_id);
-  console.log("[pdv:lib] installPath:", installPath);
   if (!installPath) return;
 
   const libDir = path.join(installPath, "lib");
-  console.log("[pdv:lib] libDir:", libDir);
   const pyFiles = await collectPyFiles(libDir);
-  console.log("[pdv:lib] pyFiles:", pyFiles);
   if (pyFiles.length === 0) return;
 
   for (const relFile of pyFiles) {
@@ -230,7 +230,7 @@ export async function bindImportedModuleLibFiles(
 
     // Register as a PDVLib in the tree.  The tree path encodes the lib
     // structure: e.g. "n_pendulum.lib.n_pendulum_py" for lib/n_pendulum.py.
-    const stem = relFile.replace(/\//g, "_").replace(/\.py$/, "_py");
+    const stem = relFile.replace(/[/\\]/g, "_").replace(/\.py$/, "_py");
     await commRouter.request(PDVMessageType.FILE_REGISTER, {
       tree_path: `${importedModule.alias}.lib`,
       filename: path.basename(relFile),

@@ -18,6 +18,13 @@ import { ActionButton } from "./ActionButton";
 import { NamelistEditor } from "./NamelistEditor";
 import "../../styles/module-gui.css";
 
+function layoutNodeKey(node: LayoutNode, index: number): string {
+  if (node.type === "input") return `input-${(node as { id: string }).id}`;
+  if (node.type === "action") return `action-${(node as { id: string }).id}`;
+  if (node.type === "namelist") return `namelist-${(node as LayoutNamelistRef).tree_path}`;
+  return `${node.type}-${index}`;
+}
+
 interface ContainerRendererProps {
   node: LayoutNode;
   moduleAlias: string;
@@ -103,7 +110,7 @@ export const ContainerRenderer: React.FC<ContainerRendererProps> = (props) => {
     return (
       <div className="gui-row">
         {container.children.map((child, i) => (
-          <div key={i} className="gui-row-item">
+          <div key={layoutNodeKey(child, i)} className="gui-row-item">
             <ContainerRenderer {...props} node={child} />
           </div>
         ))}
@@ -115,7 +122,7 @@ export const ContainerRenderer: React.FC<ContainerRendererProps> = (props) => {
     return (
       <div className="gui-column">
         {container.children.map((child, i) => (
-          <ContainerRenderer key={i} {...props} node={child} />
+          <ContainerRenderer key={layoutNodeKey(child, i)} {...props} node={child} />
         ))}
       </div>
     );
@@ -132,7 +139,7 @@ export const ContainerRenderer: React.FC<ContainerRendererProps> = (props) => {
       >
         <div className="gui-column">
           {container.children.map((child, i) => (
-            <ContainerRenderer key={i} {...props} node={child} />
+            <ContainerRenderer key={layoutNodeKey(child, i)} {...props} node={child} />
           ))}
         </div>
       </CollapsibleGroup>
@@ -215,7 +222,7 @@ const TabContainer: React.FC<TabContainerProps> = ({ container, ...rest }) => {
       <div className="gui-tabs-header">
         {tabs.map((tab, i) => (
           <button
-            key={i}
+            key={layoutNodeKey(tab, i)}
             className={`gui-tabs-btn ${i === activeIndex ? "active" : ""}`}
             onClick={() => setActiveIndex(i)}
           >

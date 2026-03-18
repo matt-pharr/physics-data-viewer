@@ -304,7 +304,7 @@ def handle_file_register(msg: dict) -> None:
     full_path = f"{tree_path}.{node_name}" if tree_path else node_name
 
     if node_type == "namelist":
-        node = PDVNamelist(relative_path=relative_path, format="auto")
+        node = PDVNamelist(relative_path=relative_path, format="auto", module_id=module_id)
     elif node_type == "lib":
         node = PDVLib(relative_path=relative_path, module_id=module_id)
     else:

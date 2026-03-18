@@ -166,7 +166,7 @@ export const ModuleWindowRoot: React.FC = () => {
       })();
     });
     return unsub;
-  }, [context, descriptor?.alias]);
+  }, [context, descriptor]);
 
   const moduleTabs = useMemo(() => {
     if (!descriptor) return [];
