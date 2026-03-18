@@ -124,6 +124,9 @@ const App: React.FC = () => {
   const [activeNoteTabId, setActiveNoteTabId] = useState<string | null>(null);
   const [settingsInitialTab, setSettingsInitialTab] = useState<'general' | 'shortcuts' | 'appearance' | 'runtime' | 'about'>('general');
 
+  // -- Project reloading state (kernel restart with active project) ----------
+  const [projectReloading, setProjectReloading] = useState(false);
+
   // -- Imported GUI modules for activity bar ---------------------------------
   const [importedGuiModules, setImportedGuiModules] = useState<{ alias: string; name: string }[]>([]);
 
@@ -220,6 +223,7 @@ const App: React.FC = () => {
     setLogs,
     setTreeRefreshToken,
     setModulesRefreshToken,
+    setProjectReloading,
   });
 
   const { startKernel, handleEnvSave, handleRestartKernel } = useKernelLifecycle({
@@ -317,6 +321,7 @@ const App: React.FC = () => {
     setSettingsInitialTab,
     toggleLeftSidebar,
     toggleEditorCollapsed,
+    setShowImportModule,
     addCellTab,
     removeCellTab: handleRemoveCellTab,
   });
@@ -674,6 +679,13 @@ const App: React.FC = () => {
     <div className="app">
       {/* Main content */}
       <main className="app-main">
+
+        {/* Project reloading overlay — shown during kernel restart with active project */}
+        {projectReloading && (
+          <div className="project-reloading-overlay">
+            <div className="project-reloading-message">Reloading project...</div>
+          </div>
+        )}
 
         {/* Activity bar — always visible */}
         <ActivityBar

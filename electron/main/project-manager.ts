@@ -211,14 +211,14 @@ export class ProjectManager {
    * 2. Wait for the ``pdv.project.loaded`` push notification.
    * 3. Read ``code-cells.json`` from ``saveDir``.
    *
+   * The caller is responsible for copying files into the working directory
+   * before calling this method, and for running module setup after.
+   *
    * @param saveDir - Absolute path to the project directory.
    * @returns The code-cell state read from ``code-cells.json``.
    * @throws {PDVCommError} When the kernel responds with status='error'.
    */
-  async load(
-    saveDir: string,
-    onBeforeLoadedPush?: () => Promise<void>
-  ): Promise<unknown> {
+  async load(saveDir: string): Promise<unknown> {
     // Step 1 — register the push handler BEFORE sending the request so the
     // notification is never missed even if the kernel responds very quickly.
     const pushPromise = new Promise<void>((resolve) => {
@@ -234,14 +234,6 @@ export class ProjectManager {
     await this.commRouter.request(PDVMessageType.PROJECT_LOAD, {
       save_dir: saveDir,
     });
-
-    // Step 2.5 — run any pre-push work (e.g. module binding) BEFORE the
-    // pdv.project.loaded push is forwarded to the renderer.  This ensures
-    // module nodes (scripts, gui, namelist) are fully registered in the
-    // kernel tree before the renderer starts querying them.
-    if (onBeforeLoadedPush) {
-      await onBeforeLoadedPush();
-    }
 
     // Step 3 — wait for the pdv.project.loaded push notification.
     await pushPromise;

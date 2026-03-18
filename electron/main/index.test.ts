@@ -742,7 +742,7 @@ describe("Step 5 IPC handlers", () => {
     ]);
     const load = getHandler(IPC.project.load);
     const result = await load({}, "/tmp/project");
-    expect(projectManager.load).toHaveBeenCalledWith("/tmp/project", expect.any(Function));
+    expect(projectManager.load).toHaveBeenCalledWith("/tmp/project");
     expect(result).toEqual([{ id: "box1" }]);
   });
 
@@ -979,19 +979,8 @@ describe("Step 5 IPC handlers", () => {
     setup();
     const start = getHandler(IPC.kernels.start);
     await start({}, { language: "python" });
-    // project:load's bindActiveProjectModules also calls resolveActionScripts — add an
-    // extra Once for that call, then the second Once (with actionTab) is for listImported.
+    // listImported calls resolveActionScripts — provide the tab metadata.
     (mocks.moduleManagerResolveActionScripts as unknown as ReturnType<typeof vi.fn>)
-      .mockResolvedValueOnce([
-        {
-          actionId: "run-action",
-          actionLabel: "Run",
-          name: "run",
-          scriptPath: "/tmp/demo-module/scripts/run.py",
-          inputIds: ["threshold"],
-          actionTab: "Run",
-        },
-      ])
       .mockResolvedValueOnce([
         {
           actionId: "run-action",
@@ -1035,15 +1024,14 @@ describe("Step 5 IPC handlers", () => {
     setup();
     const start = getHandler(IPC.kernels.start);
     await start({}, { language: "python" });
-    (mocks.moduleManagerEvaluateHealth as unknown as ReturnType<typeof vi.fn>).mockResolvedValueOnce([
-      { code: "missing_action_script", message: "Action script not found: scripts/run.py" },
-    ]);
-    // project:load's bindActiveProjectModules calls resolveActionScripts first (caught, returns early),
-    // then listImported calls it again — both need to fail with MissingActionScriptError.
+    // evaluateHealth is called during refreshProjectModuleHealth (load).
+    // listImported reads health warnings from memory (moduleHealthWarningsByAlias).
+    (mocks.moduleManagerEvaluateHealth as unknown as ReturnType<typeof vi.fn>)
+      .mockResolvedValueOnce([
+        { code: "missing_action_script", message: "Action script not found: scripts/run.py" },
+      ]);
+    // listImported calls resolveActionScripts — needs to fail with MissingActionScriptError.
     (mocks.moduleManagerResolveActionScripts as unknown as ReturnType<typeof vi.fn>)
-      .mockRejectedValueOnce(
-        new Error("Module action script does not exist: scripts/run.py (demo-module)")
-      )
       .mockRejectedValueOnce(
         new Error("Module action script does not exist: scripts/run.py (demo-module)")
       );
@@ -1281,8 +1269,8 @@ describe("Step 5 IPC handlers", () => {
     expect(kernelManager.start).not.toHaveBeenCalled();
   });
 
-  it("project:load binds imported module scripts when kernel is active", async () => {
-    const { commRouter } = setup();
+  it("project:load no longer calls bindActiveProjectModules", async () => {
+    setup();
     const start = getHandler(IPC.kernels.start);
     await start({}, { language: "python" });
 
@@ -1309,15 +1297,8 @@ describe("Step 5 IPC handlers", () => {
     const load = getHandler(IPC.project.load);
     await load({}, "/tmp/project");
 
-    expect(mocks.moduleManagerResolveActionScripts).toHaveBeenCalledWith("demo-module");
-    expect(commRouter.request).toHaveBeenCalledWith(
-      PDVMessageType.SCRIPT_REGISTER,
-      expect.objectContaining({
-        parent_path: "diagnosticA.scripts",
-        name: "run",
-        relative_path: "/tmp/pdv-test/diagnosticA/scripts/run.py",
-        reload: true,
-      })
-    );
+    // resolveActionScripts should NOT be called during load
+    // (module binding is now handled by setupModuleNamespaces via pdv.modules.setup comm)
+    expect(mocks.moduleManagerResolveActionScripts).not.toHaveBeenCalled();
   });
 });

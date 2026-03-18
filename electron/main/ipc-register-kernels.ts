@@ -23,6 +23,7 @@ import { initializeKernelSession } from "./kernel-session";
 import type { ModuleManager } from "./module-manager";
 import { buildModulesSetupPayload } from "./module-runtime";
 import { PDVMessageType } from "./pdv-protocol";
+import { copyFilesForLoad } from "./project-file-sync";
 import { ProjectManager, type ProjectModuleImport } from "./project-manager";
 
 interface RegisterKernelIpcHandlersOptions {
@@ -34,6 +35,7 @@ interface RegisterKernelIpcHandlersOptions {
   kernelWorkingDirs: Map<string, string>;
   crashHandlers: Map<string, (id: string) => void>;
   resetProjectState: () => void;
+  resetKernelState: () => void;
   setActiveKernelId: (id: string | null) => void;
   getActiveKernelId: () => string | null;
   getActiveProjectDir: () => string | null;
@@ -87,6 +89,7 @@ export function registerKernelIpcHandlers(
     kernelWorkingDirs,
     crashHandlers,
     resetProjectState,
+    resetKernelState,
     setActiveKernelId,
     getActiveKernelId,
     getActiveProjectDir,
@@ -187,16 +190,40 @@ export function registerKernelIpcHandlers(
   });
 
   ipcMain.handle(IPC.kernels.restart, async (_event, kernelId: string) => {
-    // Restart clears the tree — reset in-memory project state so stale
-    // pending imports and project dir don't persist into the new session.
-    resetProjectState();
+    // Restart preserves activeProjectDir — only reset kernel-scoped state.
+    resetKernelState();
 
-    const restartable = kernelManager as KernelManager & {
-      restart?: (id: string) => Promise<KernelInfo>;
-    };
-    if (restartable.restart) {
+    /**
+     * Perform the kernel restart (stop + start or native restart).
+     * Returns the restarted KernelInfo.
+     */
+    async function doRestart(): Promise<KernelInfo> {
+      const restartable = kernelManager as KernelManager & {
+        restart?: (id: string) => Promise<KernelInfo>;
+      };
+      if (restartable.restart) {
+        await cleanupKernelWorkingDir(projectManager, kernelManager, kernelId, kernelWorkingDirs, crashHandlers);
+        const restarted = await restartable.restart(kernelId);
+        commRouter.attach(kernelManager, restarted.id);
+        await initializeKernelSession(
+          kernelManager,
+          commRouter,
+          projectManager,
+          restarted.id,
+          kernelWorkingDirs
+        );
+        return restarted;
+      }
+      const current = kernelManager.getKernel(kernelId);
+      if (!current) {
+        throw new Error(`Kernel not found: ${kernelId}`);
+      }
       await cleanupKernelWorkingDir(projectManager, kernelManager, kernelId, kernelWorkingDirs, crashHandlers);
-      const restarted = await restartable.restart(kernelId);
+      await kernelManager.stop(kernelId);
+      const restarted = await kernelManager.start({
+        name: current.name,
+        language: current.language,
+      });
       commRouter.attach(kernelManager, restarted.id);
       await initializeKernelSession(
         kernelManager,
@@ -205,32 +232,31 @@ export function registerKernelIpcHandlers(
         restarted.id,
         kernelWorkingDirs
       );
-      setActiveKernelId(restarted.id);
-      await setupModuleNamespaces(restarted.id);
-      await bindActiveProjectModules(restarted.id);
       return restarted;
     }
-    const current = kernelManager.getKernel(kernelId);
-    if (!current) {
-      throw new Error(`Kernel not found: ${kernelId}`);
-    }
-    await cleanupKernelWorkingDir(projectManager, kernelManager, kernelId, kernelWorkingDirs, crashHandlers);
-    await kernelManager.stop(kernelId);
-    const restarted = await kernelManager.start({
-      name: current.name,
-      language: current.language,
-    });
-    commRouter.attach(kernelManager, restarted.id);
-    await initializeKernelSession(
-      kernelManager,
-      commRouter,
-      projectManager,
-      restarted.id,
-      kernelWorkingDirs
-    );
+
+    const restarted = await doRestart();
     setActiveKernelId(restarted.id);
-    await setupModuleNamespaces(restarted.id);
+
+    // If a project was active, auto-reload it into the new kernel.
+    const activeProjectDir = getActiveProjectDir();
+    if (activeProjectDir) {
+      win.webContents.send(IPC.push.projectReloading, { status: "reloading" });
+      try {
+        const newWorkingDir = kernelWorkingDirs.get(restarted.id);
+        if (newWorkingDir) {
+          await copyFilesForLoad(activeProjectDir, newWorkingDir);
+        }
+        await projectManager.load(activeProjectDir);
+        await setupModuleNamespaces(restarted.id);
+      } finally {
+        win.webContents.send(IPC.push.projectReloading, { status: "ready" });
+      }
+    } else {
+      await setupModuleNamespaces(restarted.id);
+    }
     await bindActiveProjectModules(restarted.id);
+
     return restarted;
   });
 

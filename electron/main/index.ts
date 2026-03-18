@@ -367,6 +367,12 @@ export function registerIpcHandlers(
       moduleHealthWarningsByAlias.clear();
       moduleWindowManager.closeAll();
     },
+    resetKernelState: () => {
+      pendingModuleImports = [];
+      pendingModuleSettings = {};
+      moduleHealthWarningsByAlias.clear();
+      moduleWindowManager.closeAll();
+    },
     setActiveKernelId: (id) => { activeKernelId = id; },
     getActiveKernelId: () => activeKernelId,
     getActiveProjectDir: () => activeProjectDir,
@@ -416,7 +422,6 @@ export function registerIpcHandlers(
     setPendingModuleSettings: (settings) => { pendingModuleSettings = settings; },
     clearModuleHealthWarnings: () => moduleHealthWarningsByAlias.clear(),
     refreshProjectModuleHealth,
-    bindActiveProjectModules,
     runSerializedProjectManifestMutation,
   });
 

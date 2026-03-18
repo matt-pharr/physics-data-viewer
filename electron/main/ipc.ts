@@ -127,6 +127,7 @@ export const IPC = {
     menuAction: "menu:action",
     executeOutput: "pdv.execute.output",
     moduleExecuteRequest: "pdv.moduleWindow.executeRequest",
+    projectReloading: "pdv.project.reloading",
   },
   /** App menu synchronization channels. */
   menu: {
@@ -1105,6 +1106,13 @@ export interface PDVApi {
      * @returns Unsubscribe function.
      */
     onLoaded(callback: (payload: ProjectLoadedPayload) => void): () => void;
+    /**
+     * Subscribe to project-reloading status push notifications (during kernel restart).
+     *
+     * @param callback - Invoked with `{ status: "reloading" | "ready" }`.
+     * @returns Unsubscribe function.
+     */
+    onReloading(callback: (payload: { status: "reloading" | "ready" }) => void): () => void;
   };
 
   /** App configuration accessors. */

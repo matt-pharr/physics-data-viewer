@@ -18,13 +18,13 @@ import * as path from "path";
  * One file-backed tree entry resolved from `tree-index.json`.
  */
 interface FileBackedEntry {
-  path: string;
-  filename: string;
+  treePath: string;
+  relativePath: string;
 }
 
 /**
- * Read tree-index.json from a directory and return entries that have a filename
- * (i.e. file-backed nodes).
+ * Read tree-index.json from a directory and return entries that have a
+ * `storage.relative_path` (i.e. file-backed nodes).
  *
  * @param dir - Directory containing tree-index.json.
  * @returns Array of file-backed node descriptors.
@@ -35,11 +35,21 @@ async function readFileBackedEntries(dir: string): Promise<FileBackedEntry[]> {
     const parsed = JSON.parse(raw);
     if (!Array.isArray(parsed)) return [];
     return (parsed as Array<Record<string, unknown>>)
-      .filter((entry) => typeof entry.filename === "string" && entry.filename.length > 0)
-      .map((entry) => ({
-        path: String(entry.path ?? ""),
-        filename: entry.filename as string,
-      }));
+      .filter((entry) => {
+        const storage = entry.storage as Record<string, unknown> | undefined;
+        return (
+          storage?.backend === "local_file" &&
+          typeof storage?.relative_path === "string" &&
+          (storage.relative_path as string).length > 0
+        );
+      })
+      .map((entry) => {
+        const storage = entry.storage as Record<string, unknown>;
+        return {
+          treePath: String(entry.path ?? ""),
+          relativePath: storage.relative_path as string,
+        };
+      });
   } catch (error) {
     console.warn(
       `[pdv] could not read file-backed entries from ${dir}/tree-index.json`,
@@ -60,13 +70,11 @@ async function readFileBackedEntries(dir: string): Promise<FileBackedEntry[]> {
  * @throws {Error} When directory creation fails.
  */
 export async function copyFilesForSave(workingDir: string, saveDir: string): Promise<void> {
-  const nodes = await readFileBackedEntries(saveDir);
-  for (const { path: nodePath, filename } of nodes) {
-    const segs = nodePath.split(".").filter(Boolean);
-    const src = path.join(workingDir, ...segs, filename);
-    const destDir = path.join(saveDir, ...segs);
-    const dest = path.join(destDir, filename);
-    await fs.mkdir(destDir, { recursive: true });
+  const entries = await readFileBackedEntries(saveDir);
+  for (const { relativePath } of entries) {
+    const src = path.join(workingDir, relativePath);
+    const dest = path.join(saveDir, relativePath);
+    await fs.mkdir(path.dirname(dest), { recursive: true });
     await fs.copyFile(src, dest).catch((error) => {
       console.warn(`[pdv] save: could not copy ${src}`, error);
     });
@@ -84,13 +92,11 @@ export async function copyFilesForSave(workingDir: string, saveDir: string): Pro
  * @throws {Error} When directory creation fails.
  */
 export async function copyFilesForLoad(saveDir: string, workingDir: string): Promise<void> {
-  const nodes = await readFileBackedEntries(saveDir);
-  for (const { path: nodePath, filename } of nodes) {
-    const segs = nodePath.split(".").filter(Boolean);
-    const src = path.join(saveDir, ...segs, filename);
-    const destDir = path.join(workingDir, ...segs);
-    const dest = path.join(destDir, filename);
-    await fs.mkdir(destDir, { recursive: true });
+  const entries = await readFileBackedEntries(saveDir);
+  for (const { relativePath } of entries) {
+    const src = path.join(saveDir, relativePath);
+    const dest = path.join(workingDir, relativePath);
+    await fs.mkdir(path.dirname(dest), { recursive: true });
     await fs.copyFile(src, dest).catch((error) => {
       console.warn(`[pdv] load: could not copy ${src}`, error);
     });

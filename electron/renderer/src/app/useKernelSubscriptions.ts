@@ -17,6 +17,8 @@ interface UseKernelSubscriptionsOptions {
   setTreeRefreshToken: Dispatch<SetStateAction<number>>;
   /** Bumps the token to trigger ModulesPanel refetch on tree changes. */
   setModulesRefreshToken: Dispatch<SetStateAction<number>>;
+  /** Controls the project-reloading overlay shown during kernel restart with active project. */
+  setProjectReloading: Dispatch<SetStateAction<boolean>>;
 }
 
 export function useKernelSubscriptions({
@@ -27,6 +29,7 @@ export function useKernelSubscriptions({
   setLogs,
   setTreeRefreshToken,
   setModulesRefreshToken,
+  setProjectReloading,
 }: UseKernelSubscriptionsOptions): void {
   useEffect(() => {
     const unsubscribe = window.pdv.kernels.onOutput((chunk) => {
@@ -73,9 +76,20 @@ export function useKernelSubscriptions({
       setTreeRefreshToken((prev) => prev + 1);
     });
 
+    const unsubscribeReloading = window.pdv.project.onReloading((payload) => {
+      if (payload.status === 'reloading') {
+        setProjectReloading(true);
+      } else if (payload.status === 'ready') {
+        setProjectReloading(false);
+        setTreeRefreshToken((prev) => prev + 1);
+        setModulesRefreshToken((prev) => prev + 1);
+      }
+    });
+
     return () => {
       unsubscribeTree();
       unsubscribeProject();
+      unsubscribeReloading();
     };
   }, [
     currentKernelId,
@@ -83,6 +97,7 @@ export function useKernelSubscriptions({
     setActiveCellTab,
     setCellTabs,
     setModulesRefreshToken,
+    setProjectReloading,
     setTreeRefreshToken,
   ]);
 }

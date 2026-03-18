@@ -285,10 +285,10 @@ def handle_file_register(msg: dict) -> None:
         return
 
     # Build relative path: the file is expected under
-    # <working_dir>/<tree_path_segments>/<filename>
-    working_dir = tree._working_dir or ""
+    # <working_dir>/<tree_path_segments>/<filename>.
+    # Store as relative (not absolute) so serialize_node produces portable paths.
     segments = tree_path.split(".") if tree_path else []
-    relative_path = os.path.join(working_dir, *segments, filename) if working_dir else os.path.join(*segments, filename)
+    relative_path = os.path.join(*segments, filename) if segments else filename
 
     # Use explicit name if provided, otherwise derive from filename stem
     if explicit_name:

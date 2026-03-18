@@ -12,6 +12,9 @@
  * - Config/theme/file-picker handlers.
  */
 
+import * as crypto from "crypto";
+import * as fs from "fs/promises";
+import * as path from "path";
 import { ipcMain } from "electron";
 
 import { IPC } from "./ipc";
@@ -31,7 +34,6 @@ interface RegisterProjectIpcHandlersOptions {
   setPendingModuleSettings: (settings: Record<string, Record<string, unknown>>) => void;
   clearModuleHealthWarnings: () => void;
   refreshProjectModuleHealth: (dir: string | null) => Promise<ProjectManifest | null>;
-  bindActiveProjectModules: (kernelId: string | null, modules?: ProjectModuleImport[]) => Promise<void>;
   runSerializedProjectManifestMutation: <T>(dir: string, task: () => Promise<T>) => Promise<T>;
 }
 
@@ -56,7 +58,6 @@ export function registerProjectIpcHandlers(
     setPendingModuleSettings,
     clearModuleHealthWarnings,
     refreshProjectModuleHealth,
-    bindActiveProjectModules,
     runSerializedProjectManifestMutation,
   } = options;
 
@@ -106,14 +107,31 @@ export function registerProjectIpcHandlers(
     setActiveProjectDir(saveDir);
     setPendingModuleImports([]);
     setPendingModuleSettings({});
-    const manifest = await refreshProjectModuleHealth(saveDir);
+    await refreshProjectModuleHealth(saveDir);
 
-    // Pass module binding as a pre-push callback so that module nodes
-    // (scripts, gui, namelist) are registered in the kernel tree BEFORE
-    // the pdv.project.loaded push is forwarded to the renderer.
-    const loaded = await projectManager.load(saveDir, async () => {
-      await bindActiveProjectModules(activeKernelId, manifest?.modules);
-    });
+    // Checksum validation (warn-only)
+    try {
+      const manifest = await ProjectManager.readManifest(saveDir);
+      if (manifest.tree_checksum) {
+        const treeIndexRaw = await fs.readFile(
+          path.join(saveDir, "tree-index.json"),
+          "utf8"
+        );
+        const computed = crypto
+          .createHash("sha256")
+          .update(treeIndexRaw)
+          .digest("hex");
+        if (computed !== manifest.tree_checksum) {
+          console.warn(
+            `[pdv] tree-index.json checksum mismatch: expected ${manifest.tree_checksum}, got ${computed}`
+          );
+        }
+      }
+    } catch {
+      // Non-blocking — proceed with load even if validation fails
+    }
+
+    const loaded = await projectManager.load(saveDir);
     return loaded;
   });
 

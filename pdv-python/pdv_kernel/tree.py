@@ -169,7 +169,7 @@ class LazyLoadRegistry:
         from pdv_kernel.serialization import deserialize_node  # noqa: PLC0415
 
         storage_ref = self._registry.pop(path)
-        return deserialize_node(storage_ref, save_dir)
+        return deserialize_node(storage_ref, save_dir, trusted=True)
 
     def get_storage(self, path: str) -> dict | None:
         """Return the registered storage reference for a path, if present.
@@ -770,6 +770,7 @@ class PDVTree(dict):
         self._working_dir: str | None = None
         self._save_dir: str | None = None
         self._send_fn: Callable[[str, dict], None] | None = None
+        self._path_prefix: str = ""
 
     # ------------------------------------------------------------------
     # Internal state management (not user-facing)
@@ -842,19 +843,22 @@ class PDVTree(dict):
         """
         parts = _split_dot_path(key)
 
+        # Build the full registry key (accounts for sub-trees with a path prefix)
+        full_key = f"{self._path_prefix}.{key}" if self._path_prefix else key
+
         if len(parts) == 1:
             p = parts[0]
             if dict.__contains__(self, p):
                 return dict.__getitem__(self, p)
-            if self._lazy_registry.has(p):
-                val = self._lazy_registry.fetch(p, self._save_dir or "")
+            if self._lazy_registry.has(full_key):
+                val = self._lazy_registry.fetch(full_key, self._save_dir or "")
                 dict.__setitem__(self, p, val)
                 return val
             raise PDVKeyError(key)
 
         # Multi-part: check the full path in the lazy registry first
-        if self._lazy_registry.has(key):
-            val = self._lazy_registry.fetch(key, self._save_dir or "")
+        if self._lazy_registry.has(full_key):
+            val = self._lazy_registry.fetch(full_key, self._save_dir or "")
             # Store value at the leaf position in the nested structure
             parent = self
             for part in parts[:-1]:

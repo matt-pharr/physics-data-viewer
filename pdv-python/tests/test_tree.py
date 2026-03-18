@@ -153,6 +153,29 @@ class TestLazyLoading:
         assert tree_with_comm.lazy_storage_for('a.b') == {'backend': 'inline', 'format': 'inline', 'value': 1}
         assert ('a.b', {'backend': 'inline', 'format': 'inline', 'value': 1}) in tree_with_comm.iter_lazy_entries()
 
+    def test_subtree_lazy_load_uses_path_prefix(self, tmp_save_dir):
+        """A sub-tree with _path_prefix resolves lazy entries using full path."""
+        tree = PDVTree()
+        tree._set_save_dir(tmp_save_dir)
+
+        # Create a module subtree sharing the root's lazy registry
+        module = PDVTree()
+        module._lazy_registry = tree._lazy_registry
+        module._save_dir = tree._save_dir
+        module._path_prefix = "mod"
+        dict.__setitem__(tree, "mod", module)
+
+        # Register a lazy entry under the full path "mod.result"
+        tree._lazy_registry.register("mod.result", {
+            "backend": "inline", "format": "inline", "value": 42,
+        })
+
+        # Accessing "result" on the subtree should resolve via "mod.result"
+        result = module["result"]
+        assert result == 42
+        # And it should be cached in the subtree
+        assert dict.__contains__(module, "result")
+
     def test_populate_from_index_registers_lazy_nodes(self, tmp_save_dir):
         """populate_from_index() registers exactly the nodes marked lazy=True."""
         reg = LazyLoadRegistry()

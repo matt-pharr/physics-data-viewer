@@ -106,6 +106,7 @@ const api: PDVApi = {
     load: (saveDir) => ipcRenderer.invoke(IPC.project.load, saveDir),
     new: () => ipcRenderer.invoke(IPC.project.new),
     onLoaded: (callback) => onPush(IPC.push.projectLoaded, callback),
+    onReloading: (callback) => onPush(IPC.push.projectReloading, callback),
   },
   config: {
     get: () => ipcRenderer.invoke(IPC.config.get),

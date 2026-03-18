@@ -252,8 +252,10 @@ class TestSerializationSupport:
         descriptor = serialize_node("mod.solver_nml", node, working_dir)
 
         assert descriptor["type"] == KIND_NAMELIST
-        assert descriptor["language"] == "namelist"
-        assert descriptor["namelist_format"] == "fortran"
         assert descriptor["storage"]["format"] == FORMAT_NAMELIST
         assert descriptor["storage"]["backend"] == "local_file"
         assert "relative_path" in descriptor["storage"]
+        meta = descriptor["metadata"]
+        assert meta["language"] == "namelist"
+        assert meta["namelist_format"] == "fortran"
+        assert "preview" in meta
