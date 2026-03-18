@@ -199,6 +199,21 @@ All type strings are namespaced with `pdv.`. The convention is `pdv.<domain>.<ac
 | `pdv.module.register.response` | kernel → app | Confirms module registration. |
 | `pdv.gui.register` | app → kernel | Register a `PDVGui` node at a tree path. Payload: `{ parent_path, name, relative_path, module_id }`. |
 | `pdv.gui.register.response` | kernel → app | Confirms GUI registration. |
+| `pdv.modules.setup` | app → kernel | Send module install paths and entry points for `sys.path` injection. Payload: `{ modules: [{ install_path, python_package, entry_point }] }`. |
+| `pdv.modules.setup.response` | kernel → app | Confirms module setup with handler registry. |
+| `pdv.handler.invoke` | app → kernel | Dispatch a registered handler for a tree node. Payload: `{ path }`. |
+| `pdv.handler.invoke.response` | kernel → app | Returns handler dispatch result. |
+
+#### Namelist Messages
+
+| Type | Direction | Description |
+|---|---|---|
+| `pdv.namelist.read` | app → kernel | Parse a `PDVNamelist` backing file. Payload: `{ tree_path }`. Returns groups, hints, types, format. |
+| `pdv.namelist.read.response` | kernel → app | Parsed namelist data. |
+| `pdv.namelist.write` | app → kernel | Write structured data back to a `PDVNamelist` backing file. Payload: `{ tree_path, data }`. |
+| `pdv.namelist.write.response` | kernel → app | Confirms write success. |
+| `pdv.file.register` | app → kernel | Register a file-backed tree node (`PDVNamelist` or `PDVFile`). Payload: `{ tree_path, filename, node_type }`. |
+| `pdv.file.register.response` | kernel → app | Confirms file registration with resulting path. |
 
 ### 3.5 Error Payload
 
@@ -430,7 +445,7 @@ sequenceDiagram
 
 ### 5.1 Purpose
 
-`pdv-python` is a Python package (installable via `pip install pdv-python`) that implements the kernel side of the PDV comm protocol, the `PDVTree` and `PDVScript` data structures, the protected kernel namespace, and lazy data loading. It replaces the monolithic `python-init.py` file.
+`pdv-python` is a Python package (installable via `pip install pdv-python`) that implements the kernel side of the PDV comm protocol, the `PDVTree`, `PDVScript`, `PDVModule`, `PDVGui`, and `PDVNamelist` data structures, the protected kernel namespace, and lazy data loading. It replaces the monolithic `python-init.py` file.
 
 ### 5.2 Package Structure
 
@@ -438,9 +453,9 @@ sequenceDiagram
 pdv_kernel/
     __init__.py          # Public API: bootstrap(), PDVTree, PDVScript
     comms.py             # Comm channel: register target, send/receive, dispatch
-    tree.py              # PDVTree class, PDVScript class, PDVFile, PDVNote, lazy-load registry
+    tree.py              # PDVTree, PDVScript, PDVFile, PDVNote, PDVModule, PDVGui, PDVNamelist
     namespace.py         # pdv_namespace() — variable inspection
-    serialization.py     # Type detection, format writers (npy, parquet, json, etc.)
+    serialization.py     # Type detection, format writers (npy, parquet, json, module, gui, namelist)
     environment.py       # Path utilities, working dir management, project root logic
     handlers/
         __init__.py
@@ -450,6 +465,9 @@ pdv_kernel/
         namespace.py     # pdv.namespace.query handler
         script.py        # pdv.script.register handler
         note.py          # pdv.note.register handler
+        modules.py       # pdv.module.register, pdv.modules.setup, pdv.handler.invoke handlers
+        gui.py           # pdv.gui.register handler
+        namelist.py      # pdv.namelist.read, pdv.namelist.write, pdv.file.register handlers
 ```
 
 ### 5.3 Bootstrap
@@ -581,6 +599,45 @@ _lazy_registry = {
 
 Populated during `pdv.project.load`. Entries are removed once the data has been loaded into memory. The registry is never written to disk — it is reconstructed from `tree-index.json` each time a project is loaded.
 
+### 5.10 PDVModule Class
+
+`PDVModule` is a subclass of `PDVTree` (i.e. a dict subclass). It represents an imported module in the tree. Because it inherits from `PDVTree`, it holds children naturally — a module's sub-nodes (GUI, scripts, namelists) are direct dict entries.
+
+Attributes:
+- `module_id` (read-only): unique identifier string (e.g. `"n_pendulum"`)
+- `name` (read-only): human-readable display name (e.g. `"N-Pendulum"`)
+- `version` (read-only): semantic version string (e.g. `"2.0.0"`)
+- `gui` (read-write): optional reference to the child `PDVGui` node, or `None`
+
+`preview()` returns `"{name} v{version}"`.
+
+Created by the `pdv.module.register` handler, which receives `path`, `module_id`, `name`, and `version` from the main process and inserts the `PDVModule` into the tree at the given path.
+
+### 5.11 PDVGui Class
+
+`PDVGui` is a subclass of `PDVFile`. It represents a GUI definition file (`.gui.json`) that describes a module's user interface — inputs, actions, and layout.
+
+Attributes:
+- `relative_path` (inherited from `PDVFile`): path to the `.gui.json` file relative to the working directory
+- `module_id` (read-only): the owning module's ID, or `None` for standalone project GUIs
+
+`preview()` returns `"GUI"`.
+
+Created by the `pdv.gui.register` handler. For module GUIs, the `.gui.json` file is copied from the installed module directory into the working directory at import time. If the parent node is a `PDVModule`, the handler also sets the module's `.gui` attribute to point to this node.
+
+### 5.12 PDVNamelist Class
+
+`PDVNamelist` is a subclass of `PDVFile`. It represents a simulation namelist file that can be parsed and edited through the namelist editor widget.
+
+Attributes:
+- `relative_path` (inherited from `PDVFile`): path to the namelist file relative to the working directory
+- `format` (read-only): one of `"fortran"`, `"toml"`, or `"auto"` (auto-detected from file content)
+- `module_id` (read-only): the owning module's ID, or `None` for standalone namelists
+
+`preview()` returns `"Namelist ({format})"`.
+
+The namelist file is parsed and written by dedicated comm handlers (`pdv.namelist.read`, `pdv.namelist.write`) that run in the kernel, keeping all format-specific logic in Python. The renderer requests parsed data and sends structured edits back; it never reads or writes the raw namelist file directly.
+
 ---
 
 ## 6. The Working Directory and Project Save Directory
@@ -706,6 +763,7 @@ The following node types are supported:
 | `folder` | A `PDVTree` sub-dict with no associated file | In-memory only |
 | `module` | A `PDVModule` dict subclass carrying module metadata | Inline metadata in tree-index.json |
 | `gui` | A `PDVGui` file-backed GUI definition node | `.gui.json` file in working or save directory |
+| `namelist` | A `PDVNamelist` file-backed namelist definition | Namelist file in working or save directory |
 | `script` | A `PDVScript` object | `.py` file in working or save directory |
 | `markdown` | A `PDVNote` object | `.md` file in working or save directory |
 | `ndarray` | NumPy array | `.npy` file |
@@ -778,6 +836,50 @@ Scalar and small inline values use `"backend": "inline"` and store the value dir
 ```
 
 The `preview` field is populated with the first non-empty line of the `.md` file (typically the title).
+
+**Module node additional fields** (`"type": "module"`):
+```json
+{
+  "module_id": "n_pendulum",
+  "module_name": "N-Pendulum",
+  "module_version": "2.0.0",
+  "has_children": true,
+  "storage": {
+    "backend": "inline",
+    "format": "module_meta",
+    "value": {
+      "module_id": "n_pendulum",
+      "name": "N-Pendulum",
+      "version": "2.0.0"
+    }
+  }
+}
+```
+
+**GUI node additional fields** (`"type": "gui"`):
+```json
+{
+  "language": "gui",
+  "storage": {
+    "backend": "local_file",
+    "relative_path": "tree/n_pendulum/gui.gui.json",
+    "format": "gui_json"
+  }
+}
+```
+
+**Namelist node additional fields** (`"type": "namelist"`):
+```json
+{
+  "language": "namelist",
+  "storage": {
+    "backend": "local_file",
+    "relative_path": "tree/n_pendulum/solver.in",
+    "format": "namelist"
+  },
+  "namelist_format": "fortran"
+}
+```
 
 ### 7.4 Tree-Changed Push Notifications
 
@@ -927,7 +1029,9 @@ The API surface:
 - `window.pdv.themes.*` — theme persistence: `get`, `save` (stored under `~/.PDV/themes/`)
 - `window.pdv.codeCells.*` — tab persistence: `load`, `save` (stored under `~/.PDV/state/code-cells.json`)
 - `window.pdv.files.*` — native OS dialogs: `pickExecutable() → string | null` (wraps Electron `dialog.showOpenDialog` for executables); `pickDirectory() → string | null` (wraps `dialog.showOpenDialog` with `properties: ['openDirectory', 'createDirectory']`, used for Save/Open project)
-- `window.pdv.menu.*` — menu bridge: `updateRecentProjects(paths)`, `onAction(cb) → unsub` (for File menu actions routed to renderer state)
+- `window.pdv.modules.*` — module management: `listInstalled`, `install`, `importToProject`, `listImported`, `removeImport`, `saveSettings`, `runAction`, `checkUpdates`
+- `window.pdv.moduleWindows.*` — module GUI windows: `open`, `close`, `context`, `executeInMain`; push: `onExecuteRequest(cb) → unsub`
+- `window.pdv.menu.*` — menu bridge: `updateRecentProjects(paths)`, `onAction(cb) → unsub` (for File menu actions routed to renderer state, including `modules:import`)
 
 **Design decision — running scripts via `kernels.execute`**: There is no `window.pdv.script.run()`. Running a `PDVScript` node from the renderer is always done by calling `window.pdv.kernels.execute()` with the appropriate Python code string (e.g. `pdv_tree["path.to.script"].run(a=1)`). This keeps the IPC surface minimal and the comm substrate readable — a script run looks identical to any other user execution in the console and in the kernel logs. The `ScriptDialog` component builds the execute call; it does not call a separate IPC channel.
 
@@ -1015,11 +1119,15 @@ electron/
         project-manager.ts      ← Project manifest read/write, save coordination
         project-file-sync.ts    ← Tree file synchronization between working/save dirs
         module-manager.ts       ← Module import/installation pipeline
+        module-window-manager.ts ← Module GUI popup BrowserWindow lifecycle
         ipc-register-kernels.ts           ← IPC handlers: kernel lifecycle + execution
         ipc-register-project.ts           ← IPC handlers: project save/load/new
         ipc-register-modules.ts           ← IPC handlers: module import/install
+        ipc-register-module-windows.ts    ← IPC handlers: module GUI window open/close/context
         ipc-register-tree-namespace-script.ts ← IPC handlers: tree, namespace, script
         ipc-register-app-state.ts         ← IPC handlers: config, themes, code cells, files, about
+        modules/
+            manifest-utils.ts   ← Module manifest validation (v1/v2/v3), GUI manifest validation
     renderer/
         src/
             app/
@@ -1047,7 +1155,10 @@ electron/
                     index.tsx           ← Settings modal shell + General/Shortcuts/Runtime/About tabs
                     AppearanceTab.tsx   ← Appearance tab (themes, fonts, colors)
                     ShortcutCapture.tsx ← Reusable shortcut key-capture widget
-                ModulesPanel/           ← Module import/install UI
+                ImportModuleDialog/     ← File > Import Module... modal dialog
+                ModulesPanel/           ← Module actions and inputs panels (used inside module GUI)
+                ModuleGui/              ← Module GUI rendering: ContainerRenderer, InputControl, ActionButton, NamelistEditor
+            module-window/              ← Separate renderer entry for module GUI popup windows
             themes.ts                   ← Builtin themes, Monaco theme definitions, font helpers
             shortcuts.ts                ← Canonical shortcut registry and matcher
             services/tree.ts            ← Renderer tree fetch/cache adapter
@@ -1074,6 +1185,9 @@ pdv-python/
             namespace.py
             script.py
             note.py
+            modules.py
+            gui.py
+            namelist.py
     tests/
         test_tree.py
         test_serialization.py

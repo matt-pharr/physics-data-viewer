@@ -6,7 +6,7 @@ This document describes all features planned beyond the current state of PDV, or
 
 | Release | Description |
 |---|---|
-| **0.0.4** | Current version. Backend refactor complete, modules system implemented, kernel-backed autocompletion and inspect working, E2E integration test infrastructure in place. |
+| **0.0.4** | Current version. Backend refactor complete, modules UX redesign (activity bar icons, File > Import Module... dialog, tree context menu), PDVModule/PDVGui/PDVNamelist tree types, gui.json manifest split (v3), kernel-backed autocompletion and inspect working, E2E integration test infrastructure in place. |
 | **0.1.0-beta1** | All remaining Alpha Features (below) are implemented and stable. The application is suitable for active scientific use. |
 | **1.0.0** | All Beta Features (below, plus any added during beta) are implemented. The application is suitable for broad community distribution. |
 
@@ -43,13 +43,13 @@ Extend the existing modules system with three capabilities: a richer GUI layout 
 Imported modules now create proper `PDVModule` tree nodes (dict subclass with metadata) and `PDVGui` nodes (file-backed `.gui.json`). Module manifests are split: `pdv-module.json` holds identity/compatibility, `gui.json` holds inputs/actions/layout. The renderer uses `node.type === 'module'` instead of alias-set matching.
 
 #### Module GUI layout refactor
-The current module rendering system displays GUI elements as a flat list. Refactor to support relative positioning and grouping — grid/flex layout, collapsible sections, and element dependencies — so modules can build structured, professional-looking interfaces.
+Container-based layout (rows, columns, groups, tabs) is already implemented via `ContainerRenderer`. What remains is a visual GUI editor for creating and editing `gui.json` files without hand-writing JSON — drag-and-drop layout, input/action placement, and live preview.
 
 #### GUI-based module manifest editor
 A visual tool for creating and editing module manifests without hand-writing JSON. The editor surfaces all manifest fields (actions, parameters, types, defaults, descriptions) in an editable form, validates in real time, and writes the manifest file on save.
 
 #### Namelist editor module
-A first-class module for editing simulation namelist files directly from a tree path. Initial support targets TOML and Fortran `*.in` namelists, auto-selected by file extension/content type. The editor surfaces tooltip help from inline comments in the source file, optimizes for rapid batch parameter editing, and saves changes back through the Tree/project workflow.
+The `PDVNamelist` tree type and comm-based parsing (`pdv.namelist.read`/`pdv.namelist.write`) are implemented, supporting Fortran and TOML formats with auto-detection. What remains is the full editor widget: inline editing UI with tooltip help from source file comments, batch parameter editing, and dynamic path binding via dropdown for selecting which namelist to edit.
 
 ---
 
