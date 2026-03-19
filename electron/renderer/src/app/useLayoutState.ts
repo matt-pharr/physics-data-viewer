@@ -22,6 +22,7 @@ export function useLayoutState() {
     return saved ? Number(saved) : 260;
   });
   const dragRef = useRef<DragMode>(null);
+  const dragOffsetRef = useRef<number>(0);
   const rightPaneRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
@@ -30,7 +31,7 @@ export function useLayoutState() {
       if (dragRef.current === 'vertical') {
         const viewportWidth = window.innerWidth || 1200;
         const max = Math.max(200, viewportWidth - 300);
-        const next = Math.min(Math.max(event.clientX, 200), max);
+        const next = Math.min(Math.max(event.clientX - dragOffsetRef.current, 200), max);
         setLeftWidth(next);
         localStorage.setItem('pdv.pane.leftWidth', String(next));
       } else if (dragRef.current === 'horizontal') {
@@ -59,8 +60,9 @@ export function useLayoutState() {
 
   const startVerticalDrag = useCallback((event: ReactMouseEvent) => {
     event.preventDefault();
+    dragOffsetRef.current = event.clientX - leftWidth;
     dragRef.current = 'vertical';
-  }, []);
+  }, [leftWidth]);
 
   const startHorizontalDrag = useCallback((event: ReactMouseEvent) => {
     event.preventDefault();
