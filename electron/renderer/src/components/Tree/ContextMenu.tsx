@@ -19,7 +19,6 @@ interface ContextMenuProps {
   y: number;
   node: TreeNodeData;
   shortcuts: Shortcuts;
-  importedAliases?: Set<string>;
   onAction: (action: string, node: TreeNodeData) => void;
   onClose: () => void;
 }

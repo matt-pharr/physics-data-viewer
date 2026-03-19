@@ -103,6 +103,7 @@ const REGISTERED_CHANNELS: readonly string[] = [
   IPC.files.pickExecutable,
   IPC.files.pickFile,
   IPC.files.pickDirectory,
+  IPC.about.getVersion,
 ];
 
 interface PushSubscription {

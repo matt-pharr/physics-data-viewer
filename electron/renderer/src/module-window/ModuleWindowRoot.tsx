@@ -8,7 +8,7 @@
  * `window.pdv.moduleWindows.executeInMain()`.
  */
 
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type {
   ImportedModuleDescriptor,
   ModuleWindowContext,
@@ -31,6 +31,8 @@ import {
 export const ModuleWindowRoot: React.FC = () => {
   const [context, setContext] = useState<ModuleWindowContext | null>(null);
   const [descriptor, setDescriptor] = useState<ImportedModuleDescriptor | null>(null);
+  const descriptorRef = useRef(descriptor);
+  descriptorRef.current = descriptor;
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
@@ -140,13 +142,15 @@ export const ModuleWindowRoot: React.FC = () => {
 
   // Subscribe to tree changes for dropdown refresh
   useEffect(() => {
-    if (!context || !descriptor) return;
+    if (!context) return;
     const unsub = window.pdv.tree.onChanged(() => {
+      const currentDescriptor = descriptorRef.current;
+      if (!currentDescriptor) return;
       // Re-resolve tree-backed dropdowns
       (async () => {
         try {
           const resolvedInputs = await Promise.all(
-            descriptor.inputs.map(async (input) => {
+            currentDescriptor.inputs.map(async (input) => {
               if (input.control !== "dropdown" || !input.optionsTreePath) {
                 return input;
               }
@@ -166,7 +170,7 @@ export const ModuleWindowRoot: React.FC = () => {
       })();
     });
     return unsub;
-  }, [context, descriptor]);
+  }, [context]);
 
   const moduleTabs = useMemo(() => {
     if (!descriptor) return [];

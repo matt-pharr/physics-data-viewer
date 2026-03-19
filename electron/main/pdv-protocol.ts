@@ -88,7 +88,7 @@ export const PDVMessageType = {
   NOTE_REGISTER_RESPONSE: "pdv.note.register.response",
 
   // File
-  /** App → kernel. Register a file-backed node (namelist, Fortran source, or opaque file). */
+  /** App → kernel. Register a file-backed node (namelist, library, or opaque file). */
   FILE_REGISTER: "pdv.file.register",
   /** Kernel → app. Confirms file registration. */
   FILE_REGISTER_RESPONSE: "pdv.file.register.response",

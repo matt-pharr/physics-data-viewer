@@ -85,7 +85,7 @@ export interface ModuleManifestV1 {
     layout: unknown;
   };
   /** File declarations for module-owned files to copy on import. */
-  files?: Array<{ name: string; path: string; type: "namelist" | "fortran" | "file" }>;
+  files?: Array<{ name: string; path: string; type: "namelist" | "lib" | "file" }>;
   /** Python package name exposed by this module for import. */
   python_package?: string;
   /** Python module to import on kernel start (entry point). */
@@ -236,12 +236,12 @@ export function validateModuleManifest(
       const fileName = requiredString(fileObj, "name", manifestPath, `files[${index}]`);
       const filePath = requiredString(fileObj, "path", manifestPath, `files[${index}]`);
       const fileType = requiredString(fileObj, "type", manifestPath, `files[${index}]`);
-      if (fileType !== "namelist" && fileType !== "fortran" && fileType !== "file") {
+      if (fileType !== "namelist" && fileType !== "lib" && fileType !== "file") {
         throw new Error(
-          `files[${index}].type must be one of "namelist", "fortran", or "file" in ${manifestPath}`
+          `files[${index}].type must be one of "namelist", "lib", or "file" in ${manifestPath}`
         );
       }
-      return { name: fileName, path: filePath, type: fileType as "namelist" | "fortran" | "file" };
+      return { name: fileName, path: filePath, type: fileType as "namelist" | "lib" | "file" };
     });
   }
 

@@ -46,7 +46,10 @@ export const InputControl: React.FC<InputControlProps> = ({
           className="modules-input-checkbox"
           type="checkbox"
           checked={Boolean(value)}
-          onChange={(e) => setModuleInputValue(moduleAlias, input.id, e.target.checked)}
+          onChange={(e) => {
+            setModuleInputValue(moduleAlias, input.id, e.target.checked);
+            persistForAlias();
+          }}
           onBlur={persistForAlias}
           title={title}
         />

@@ -371,7 +371,7 @@ export async function bindImportedModule(
   } catch {
     guiInfo = { hasGui: false };
   }
-  if (guiInfo.hasGui && typeof moduleManager.getModuleInstallPath === "function") {
+  if (guiInfo.hasGui) {
     const installPath = await moduleManager.getModuleInstallPath(importedModule.module_id);
     if (installPath && workingDir) {
       const sourceGuiPath = path.join(installPath, "gui.json");
@@ -388,8 +388,8 @@ export async function bindImportedModule(
           relative_path: destGuiPath,
           module_id: importedModule.module_id,
         });
-      } catch {
-        // gui.json may not exist for v2 modules — that's fine
+      } catch (error) {
+        console.warn('[pdv] gui.json register failed:', error);
       }
     }
   }

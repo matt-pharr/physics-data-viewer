@@ -890,6 +890,13 @@ export interface PDVApi {
      * @returns Unsubscribe function.
      */
     onOutput(callback: (chunk: ExecuteOutputChunk) => void): () => void;
+    /**
+     * Subscribe to kernel status push notifications (e.g. crash detection).
+     *
+     * @param callback - Invoked with kernel ID and status when the kernel state changes.
+     * @returns Unsubscribe function.
+     */
+    onKernelStatus(callback: (payload: { kernelId: string; status: string }) => void): () => void;
   };
 
   /** Tree browsing and updates. */
@@ -950,7 +957,7 @@ export interface PDVApi {
       kernelId: string,
       sourcePath: string,
       targetTreePath: string,
-      nodeType: "namelist" | "fortran" | "file",
+      nodeType: "namelist" | "lib" | "file",
       filename: string
     ): Promise<TreeAddFileResult>;
     /**

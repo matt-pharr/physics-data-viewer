@@ -504,7 +504,7 @@ export class ModuleManager {
    */
   async resolveModuleFiles(
     moduleId: string
-  ): Promise<Array<{ name: string; path: string; type: "namelist" | "fortran" | "file" }>> {
+  ): Promise<Array<{ name: string; path: string; type: "namelist" | "lib" | "file" }>> {
     const index = await this.readIndex();
     const module = index.modules[moduleId];
     if (!module) {
@@ -515,7 +515,7 @@ export class ModuleManager {
     if (!manifest.files || manifest.files.length === 0) {
       return [];
     }
-    const resolved: Array<{ name: string; path: string; type: "namelist" | "fortran" | "file" }> = [];
+    const resolved: Array<{ name: string; path: string; type: "namelist" | "lib" | "file" }> = [];
     for (const file of manifest.files) {
       const absPath = path.resolve(moduleDir, file.path);
       try {

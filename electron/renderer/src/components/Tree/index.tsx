@@ -20,8 +20,6 @@ interface TreeProps {
   refreshToken?: number;
   onAction?: (action: string, node: TreeNodeData) => void;
   shortcuts: Shortcuts;
-  /** @deprecated Use node.type === 'module' instead. Kept for transition. */
-  importedAliases?: Set<string>;
 }
 
 interface ContextMenuState {
@@ -31,7 +29,7 @@ interface ContextMenuState {
 }
 
 /** Tree browser component for node navigation and node actions. */
-export const Tree: React.FC<TreeProps> = ({ kernelId, disabled = false, refreshToken = 0, onAction, shortcuts, importedAliases }) => {
+export const Tree: React.FC<TreeProps> = ({ kernelId, disabled = false, refreshToken = 0, onAction, shortcuts }) => {
   const [nodes, setNodes] = useState<TreeNodeData[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | undefined>();
@@ -276,7 +274,6 @@ export const Tree: React.FC<TreeProps> = ({ kernelId, disabled = false, refreshT
           y={contextMenu.y}
           node={contextMenu.node}
           shortcuts={shortcuts}
-          importedAliases={importedAliases}
           onAction={handleContextAction}
           onClose={() => setContextMenu(null)}
         />

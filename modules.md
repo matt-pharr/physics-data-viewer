@@ -74,7 +74,7 @@ PDV currently supports the following manifest capabilities:
 - `files[]` — module-provided input files to copy and register:
   - `name` — tree node name
   - `path` — relative path within the module directory
-  - `type` — `"namelist"`, `"fortran"`, or `"file"`
+  - `type` — `"namelist"`, `"lib"`, or `"file"`
 - `entry_point` — Python module name to import after `sys.path` setup (e.g. `"n_pendulum"`)
 - optional `compatibility` metadata:
   - `pdv_min`, `pdv_max`

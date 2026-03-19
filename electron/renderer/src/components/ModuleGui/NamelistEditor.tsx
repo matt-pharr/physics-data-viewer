@@ -90,13 +90,31 @@ export const NamelistEditor: React.FC<NamelistEditorProps> = ({
 
   // Save
   const handleSave = useCallback(async () => {
-    if (!kernelId || !effectivePath) return;
+    if (!kernelId || !effectivePath || !state) return;
     setSaving(true);
     try {
+      // Coerce any remaining string values to numbers based on type hints,
+      // in case the user clicked Save without blurring a numeric field.
+      const coerced: Record<string, Record<string, unknown>> = {};
+      for (const [group, fields] of Object.entries(editedValues)) {
+        coerced[group] = { ...fields };
+        for (const [key, value] of Object.entries(fields)) {
+          if (typeof value !== "string") continue;
+          const typeHint = state.types[group]?.[key];
+          if (typeHint === "int" || typeHint === "float") {
+            const raw = value.trim();
+            if (raw === "") continue;
+            const parsed = typeHint === "int" ? parseInt(raw, 10) : parseFloat(raw);
+            if (!Number.isNaN(parsed)) {
+              coerced[group][key] = parsed;
+            }
+          }
+        }
+      }
       const result = await window.pdv.namelist.write(
         kernelId,
         effectivePath,
-        editedValues
+        coerced
       );
       if (result.success) {
         setDirtyKeys(new Set());
@@ -108,7 +126,7 @@ export const NamelistEditor: React.FC<NamelistEditorProps> = ({
     } finally {
       setSaving(false);
     }
-  }, [kernelId, effectivePath, editedValues]);
+  }, [kernelId, effectivePath, editedValues, state]);
 
   if (loading) {
     return <div className="namelist-editor namelist-loading">Loading namelist...</div>;
@@ -248,7 +266,7 @@ const NamelistField: React.FC<NamelistFieldProps> = ({
           const parts = e.target.value
             .split(",")
             .map((s) => s.trim())
-            .filter(Boolean)
+            .filter((s) => s.length > 0)
             .map((s) => {
               const n = Number(s);
               return Number.isNaN(n) ? s : n;

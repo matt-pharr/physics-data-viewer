@@ -75,6 +75,10 @@ const App: React.FC = () => {
   // -- Editor state ----------------------------------------------------------
   const [cellTabs, setCellTabs] = useState<CellTab[]>([{ id: 1, code: '' }]);
   const [activeCellTab, setActiveCellTab] = useState(1);
+  const cellTabsRef = useRef(cellTabs);
+  cellTabsRef.current = cellTabs;
+  const activeCellTabRef = useRef(activeCellTab);
+  activeCellTabRef.current = activeCellTab;
   const [logs, setLogs] = useState<LogEntry[]>([]);
 
   // -- Kernel state ---------------------------------------------------------
@@ -121,6 +125,8 @@ const App: React.FC = () => {
   // -- Write tab (markdown notes) state ------------------------------------
   const [activePane, setActivePane] = useState<'code' | 'write'>('code');
   const [noteTabs, setNoteTabs] = useState<NoteTab[]>([]);
+  const noteTabsRef = useRef(noteTabs);
+  noteTabsRef.current = noteTabs;
   const [activeNoteTabId, setActiveNoteTabId] = useState<string | null>(null);
   const [settingsInitialTab, setSettingsInitialTab] = useState<'general' | 'shortcuts' | 'appearance' | 'runtime' | 'about'>('general');
 
@@ -147,12 +153,6 @@ const App: React.FC = () => {
       }
     })();
   }, [currentKernelId, kernelStatus, modulesRefreshToken]);
-
-  // Derive the set of imported module aliases for tree context menu matching
-  const importedAliases = useMemo(
-    () => new Set(importedGuiModules.map((m) => m.alias)),
-    [importedGuiModules],
-  );
 
   // -- Appearance state -----------------------------------------------------
   const monacoTheme = useThemeManager({ config });
@@ -215,6 +215,15 @@ const App: React.FC = () => {
     return unsub;
   }, []);
 
+  const currentKernelIdRef = useRef(currentKernelId);
+  currentKernelIdRef.current = currentKernelId;
+
+  const handleKernelCrash = useCallback((crashedKernelId: string) => {
+    if (crashedKernelId === currentKernelIdRef.current) {
+      setKernelStatus('error');
+    }
+  }, []);
+
   useKernelSubscriptions({
     currentKernelId,
     loadedProjectTabsRef,
@@ -224,6 +233,7 @@ const App: React.FC = () => {
     setTreeRefreshToken,
     setModulesRefreshToken,
     setProjectReloading,
+    onKernelCrash: handleKernelCrash,
   });
 
   const { startKernel, handleEnvSave, handleRestartKernel } = useKernelLifecycle({
@@ -393,7 +403,7 @@ const App: React.FC = () => {
 
   const flushDirtyNotes = useCallback(async () => {
     if (!currentKernelId) return;
-    const dirty = noteTabs.filter((t) => t.content !== t.savedContent);
+    const dirty = noteTabsRef.current.filter((t) => t.content !== t.savedContent);
     await Promise.all(
       dirty.map(async (tab) => {
         try {
@@ -406,7 +416,7 @@ const App: React.FC = () => {
         }
       }),
     );
-  }, [currentKernelId, noteTabs]);
+  }, [currentKernelId]);
 
   const handleNoteCloseTab = (id: string) => {
     setNoteTabs((prev) => {
@@ -526,11 +536,13 @@ const App: React.FC = () => {
       typeof crypto !== 'undefined' && 'randomUUID' in crypto
         ? crypto.randomUUID()
         : `log-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
-    const activeTab = cellTabs.find((tab) => tab.id === activeCellTab);
+    const currentCellTabs = cellTabsRef.current;
+    const currentActiveCellTab = activeCellTabRef.current;
+    const activeTab = currentCellTabs.find((tab) => tab.id === currentActiveCellTab);
     const origin: KernelExecutionOrigin = originOverride ?? {
       kind: 'code-cell',
-      label: activeTab?.name?.trim() ? activeTab.name : `Tab ${activeCellTab}`,
-      tabId: activeCellTab,
+      label: activeTab?.name?.trim() ? activeTab.name : `Tab ${currentActiveCellTab}`,
+      tabId: currentActiveCellTab,
     };
 
     // Create the log entry immediately so output appears as it streams in.
@@ -589,7 +601,7 @@ const App: React.FC = () => {
       setIsExecuting(false);
       setNamespaceRefreshToken((prev) => prev + 1);
     }
-  }, [currentKernelId, kernelStatus, cellTabs, activeCellTab]);
+  }, [currentKernelId, kernelStatus]);
 
   // Listen for execution requests from module popup windows
   useEffect(() => {
@@ -720,7 +732,7 @@ const App: React.FC = () => {
                     refreshToken={treeRefreshToken}
                     onAction={handleTreeAction}
                     shortcuts={shortcuts}
-                    importedAliases={importedAliases}
+
                   />
                 )}
                 {leftPanel === 'namespace' && (

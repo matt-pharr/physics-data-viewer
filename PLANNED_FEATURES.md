@@ -163,6 +163,7 @@ As modules, remote execution, and community-shared projects arrive, the risk sur
 - **Project trust levels**: A project loaded from an unknown or community source is "untrusted" by default. Untrusted projects cannot execute scripts automatically; user must explicitly approve.
 - **`trusted=True` gate**: The `unknown` node type (pickle-backed, ARCHITECTURE.md §7.2) is already gated on `trusted=True` in `serialization.py`. This flag should be surfaced in the UI and tied to the project trust level.
 - **Signed modules**: Optional code-signing for module manifests. Allowlist policy for institutional deployments.
+- **`moduleWindows:executeInMain` sender validation**: The IPC handler currently executes arbitrary code from any renderer window. Before remote kernel support, validate that the sender is an authorized module window (e.g. by checking `event.sender` against known module window webContents IDs).
 - **Execution audit trail**: Optionally record who ran what and when (user identity, script path, timestamp) for reproducibility in shared research environments.
 
 ---

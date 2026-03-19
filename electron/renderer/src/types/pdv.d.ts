@@ -529,6 +529,7 @@ export interface PDVApi {
       language: "python" | "julia"
     ): Promise<{ valid: boolean; error?: string }>;
     onOutput(callback: (chunk: ExecuteOutputChunk) => void): () => void;
+    onKernelStatus(callback: (payload: { kernelId: string; status: string }) => void): () => void;
   };
   tree: {
     list(kernelId: string, path?: string): Promise<NodeDescriptor[]>;
@@ -547,7 +548,7 @@ export interface PDVApi {
       kernelId: string,
       sourcePath: string,
       targetTreePath: string,
-      nodeType: "namelist" | "fortran" | "file",
+      nodeType: "namelist" | "lib" | "file",
       filename: string
     ): Promise<{ success: boolean; error?: string; workingDirPath?: string }>;
     invokeHandler(

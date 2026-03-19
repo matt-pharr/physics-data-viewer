@@ -101,48 +101,50 @@ export const ImportModuleDialog: React.FC<ImportModuleDialogProps> = ({
   };
 
   const handleInstallLocal = async (): Promise<void> => {
-    const localPath = await window.pdv.files.pickDirectory();
-    if (!localPath) return;
-    setInstallDuplicate(null);
-    const result = await window.pdv.modules.install({
-      source: { type: "local", location: localPath },
-    });
-    await handleInstallResult(result);
-  };
-
-  const handleInstallGithub = async (): Promise<void> => {
-    const url = window.prompt("GitHub repository URL");
-    if (!url || !url.trim()) return;
-    setInstallDuplicate(null);
-    const result = await window.pdv.modules.install({
-      source: { type: "github", location: url.trim() },
-    });
-    await handleInstallResult(result);
+    try {
+      const localPath = await window.pdv.files.pickDirectory();
+      if (!localPath) return;
+      setInstallDuplicate(null);
+      const result = await window.pdv.modules.install({
+        source: { type: "local", location: localPath },
+      });
+      await handleInstallResult(result);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    }
   };
 
   const handleImport = async (moduleId: string): Promise<void> => {
-    setError(null);
-    setImportConflict(null);
-    const result = await window.pdv.modules.importToProject({ moduleId });
-    if (result.status === "conflict" && result.suggestedAlias) {
-      setImportConflict({
-        moduleId,
-        existingAlias: result.alias ?? moduleId,
-        suggestedAlias: result.suggestedAlias,
-      });
-      return;
+    try {
+      setError(null);
+      setImportConflict(null);
+      const result = await window.pdv.modules.importToProject({ moduleId });
+      if (result.status === "conflict" && result.suggestedAlias) {
+        setImportConflict({
+          moduleId,
+          existingAlias: result.alias ?? moduleId,
+          suggestedAlias: result.suggestedAlias,
+        });
+        return;
+      }
+      await handleImportResult(result);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
     }
-    await handleImportResult(result);
   };
 
   const handleConflictAccept = async (): Promise<void> => {
-    if (!importConflict) return;
-    setImportConflict(null);
-    const retried = await window.pdv.modules.importToProject({
-      moduleId: importConflict.moduleId,
-      alias: importConflict.suggestedAlias,
-    });
-    await handleImportResult(retried);
+    try {
+      if (!importConflict) return;
+      setImportConflict(null);
+      const retried = await window.pdv.modules.importToProject({
+        moduleId: importConflict.moduleId,
+        alias: importConflict.suggestedAlias,
+      });
+      await handleImportResult(retried);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    }
   };
 
   const handleConflictCancel = (): void => {
@@ -171,14 +173,18 @@ export const ImportModuleDialog: React.FC<ImportModuleDialogProps> = ({
   };
 
   const handleRemoveImport = async (alias: string): Promise<void> => {
-    const result = await window.pdv.modules.removeImport(alias);
-    if (!result.success && result.error) {
-      setError(result.error);
-    } else {
-      setError(null);
-      setLastStatus(`Removed: ${alias}`);
+    try {
+      const result = await window.pdv.modules.removeImport(alias);
+      if (!result.success && result.error) {
+        setError(result.error);
+      } else {
+        setError(null);
+        setLastStatus(`Removed: ${alias}`);
+      }
+      await refresh();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
     }
-    await refresh();
   };
 
   const formatVersionLabel = (version: string, revision?: string): string => {
@@ -221,7 +227,7 @@ export const ImportModuleDialog: React.FC<ImportModuleDialogProps> = ({
           <div className="import-module-actions">
             <button className="btn btn-secondary" onClick={() => void refresh()} disabled={loading}>Refresh</button>
             <button className="btn btn-secondary" onClick={() => void handleInstallLocal()} disabled={loading}>Install Local</button>
-            <button className="btn btn-secondary" onClick={() => void handleInstallGithub()} disabled={loading}>Install GitHub</button>
+            <button className="btn btn-secondary" disabled title="Coming soon">Install GitHub</button>
           </div>
 
           {!projectDir && (
