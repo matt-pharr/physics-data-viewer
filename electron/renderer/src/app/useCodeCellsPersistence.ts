@@ -1,10 +1,16 @@
 import { useEffect, useRef, type Dispatch, type SetStateAction } from 'react';
 import type { CellTab } from '../types';
+import { CODE_CELL_SAVE_DEBOUNCE_MS } from './constants';
 
+/** Options for {@link useCodeCellsPersistence}. Reads/writes code cell state to ~/.PDV/state/. */
 interface UseCodeCellsPersistenceOptions {
+  /** The current array of code editor tabs (code, title, id). */
   cellTabs: CellTab[];
+  /** The ID of the currently active editor tab. */
   activeCellTab: number;
+  /** Setter to restore persisted tabs on mount. */
   setCellTabs: Dispatch<SetStateAction<CellTab[]>>;
+  /** Setter to restore the persisted active tab on mount. */
   setActiveCellTab: Dispatch<SetStateAction<number>>;
 }
 
@@ -24,7 +30,7 @@ export function useCodeCellsPersistence({
         if (data) {
           setCellTabs(data.tabs);
           setActiveCellTab(data.activeTabId);
-          console.log('[App] Loaded code cells from filesystem:', data.tabs.length, 'tabs');
+
         }
       } catch (error) {
         console.error('[App] Failed to load code cells:', error);
@@ -48,11 +54,11 @@ export function useCodeCellsPersistence({
           tabs: cellTabs,
           activeTabId: activeCellTab,
         });
-        console.log('[App] Saved code cells to filesystem');
+
       } catch (error) {
         console.error('[App] Failed to save code cells:', error);
       }
-    }, 500);
+    }, CODE_CELL_SAVE_DEBOUNCE_MS);
 
     return () => {
       if (saveTimeoutRef.current) {

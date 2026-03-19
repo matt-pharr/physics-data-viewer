@@ -15,73 +15,43 @@ import React, { useEffect, useMemo, useState, useRef, useCallback } from 'react'
 import { CodeCell } from '../components/CodeCell';
 import { Console } from '../components/Console';
 import { Tree } from '../components/Tree';
+import { ActivityBar } from '../components/ActivityBar';
+import { StatusBar } from '../components/StatusBar';
 import { EnvironmentSelector } from '../components/EnvironmentSelector';
 import { NamespaceView } from '../components/NamespaceView';
-import { ModulesPanel } from '../components/ModulesPanel';
 import { ScriptDialog } from '../components/ScriptDialog';
 import { CreateScriptDialog } from '../components/Tree/CreateScriptDialog';
+import { CreateNoteDialog } from '../components/Tree/CreateNoteDialog';
+import { WriteTab } from '../components/WriteTab';
 import { SettingsDialog } from '../components/SettingsDialog';
-import { UnsavedChangesDialog } from '../components/UnsavedChangesDialog';
-import type { CellTab, Config, KernelExecuteResult, LogEntry, TreeNodeData } from '../types';
-import { matchesShortcut, resolveShortcuts } from '../shortcuts';
-import { BUILTIN_THEMES, applyThemeColors, applyFontSettings, getMonacoTheme, resolveThemeColors } from '../themes';
+import { ImportModuleDialog } from '../components/ImportModuleDialog';
+import { WelcomeScreen } from '../components/WelcomeScreen';
+import type {
+  CellTab,
+  Config,
+  KernelExecuteResult,
+  KernelExecutionOrigin,
+  LogEntry,
+  NoteTab,
+  TreeNodeData,
+} from '../types';
+import { resolveShortcuts } from '../shortcuts';
+import { normalizeLoadedCodeCells, normalizeRecentProjects, mergeConfigUpdate } from './app-utils';
+import { CELL_UNDO_LIMIT, NAMESPACE_REFRESH_INTERVAL_MS } from './constants';
 import { useCodeCellsPersistence } from './useCodeCellsPersistence';
+import { useKeyboardShortcuts } from './useKeyboardShortcuts';
 import { useKernelLifecycle } from './useKernelLifecycle';
 import { useLayoutState } from './useLayoutState';
 import { useProjectWorkflow } from './useProjectWorkflow';
 import { useKernelSubscriptions } from './useKernelSubscriptions';
+import { useThemeManager } from './useThemeManager';
 
 type KernelStatus = 'idle' | 'starting' | 'ready' | 'error';
-
-/**
- * Normalize persisted code-cell payloads from config/project files into a safe
- * runtime shape expected by the renderer.
- */
-function normalizeLoadedCodeCells(data: unknown): { tabs: CellTab[]; activeTabId: number } {
-  const rawTabs =
-    Array.isArray(data)
-      ? data
-      : data && typeof data === 'object' && Array.isArray((data as { tabs?: unknown }).tabs)
-        ? ((data as { tabs: unknown[] }).tabs)
-        : [];
-
-  const tabs = rawTabs
-    .map((entry, index) => {
-      if (!entry || typeof entry !== 'object') {
-        return null;
-      }
-      const maybe = entry as Record<string, unknown>;
-      const code = typeof maybe.code === 'string' ? maybe.code : '';
-      const id = typeof maybe.id === 'number' ? maybe.id : index + 1;
-      return { id, code };
-    })
-    .filter((tab): tab is CellTab => tab !== null);
-  const normalizedTabs = tabs.length > 0 ? tabs : [{ id: 1, code: '' }];
-  const requestedActive =
-    data && typeof data === 'object' && typeof (data as { activeTabId?: unknown }).activeTabId === 'number'
-      ? (data as { activeTabId: number }).activeTabId
-      : normalizedTabs[0].id;
-  const activeTabId = normalizedTabs.some((tab) => tab.id === requestedActive)
-    ? requestedActive
-    : normalizedTabs[0].id;
-  return { tabs: normalizedTabs, activeTabId };
-}
-
-/** Normalize the recent-project list (unique, trimmed, max 10 entries). */
-function normalizeRecentProjects(data: unknown): string[] {
-  if (!Array.isArray(data)) return [];
-  const unique = new Set<string>();
-  const next: string[] = [];
-  for (const entry of data) {
-    if (typeof entry !== 'string') continue;
-    const trimmed = entry.trim();
-    if (!trimmed || unique.has(trimmed)) continue;
-    unique.add(trimmed);
-    next.push(trimmed);
-    if (next.length >= 10) break;
-  }
-  return next;
-}
+type CodeCellExecutionError = {
+  tabId: number;
+  message: string;
+  location?: { line?: number; column?: number };
+};
 
 
 /** Root PDV application component rendered in the Electron renderer process. */
@@ -89,89 +59,107 @@ const App: React.FC = () => {
   const {
     leftSidebarOpen,
     leftPanel,
-    rightSidebarOpen,
-    rightPanel,
     editorCollapsed,
     leftWidth,
-    rightWidth,
     editorHeight,
     rightPaneRef,
     startVerticalDrag,
     startHorizontalDrag,
-    startRightDrag,
     handleActivityBarClick,
     toggleLeftSidebar,
     toggleEditorCollapsed,
     collapseLeftSidebar,
-    collapseRightSidebar,
     expandEditor,
   } = useLayoutState();
 
-  const [CellTabs, setCellTabs] = useState<CellTab[]>([{ id: 1, code: '' }]);
+  // -- Editor state ----------------------------------------------------------
+  const [cellTabs, setCellTabs] = useState<CellTab[]>([{ id: 1, code: '' }]);
   const [activeCellTab, setActiveCellTab] = useState(1);
+  const cellTabsRef = useRef(cellTabs);
+  cellTabsRef.current = cellTabs;
+  const activeCellTabRef = useRef(activeCellTab);
+  activeCellTabRef.current = activeCellTab;
   const [logs, setLogs] = useState<LogEntry[]>([]);
+
+  // -- Kernel state ---------------------------------------------------------
   const [currentKernelId, setCurrentKernelId] = useState<string | null>(null);
   const [kernelStatus, setKernelStatus] = useState<KernelStatus>('idle');
   const [isExecuting, setIsExecuting] = useState(false);
   const [lastError, setLastError] = useState<string | undefined>(undefined);
+  const [codeCellExecutionError, setCodeCellExecutionError] =
+    useState<CodeCellExecutionError | undefined>(undefined);
   const [lastDuration, setLastDuration] = useState<number | null>(null);
+
+  // -- App / config state ---------------------------------------------------
   const [config, setConfig] = useState<Config | null>(null);
-  const [showEnvSelector, setShowEnvSelector] = useState(false);
-  const [scriptDialog, setScriptDialog] = useState<TreeNodeData | null>(null);
   const [currentProjectDir, setCurrentProjectDir] = useState<string | null>(null);
   const initRef = useRef(false);
   const loadedProjectTabsRef = useRef<{ tabs: CellTab[]; activeTabId: number } | null>(null);
+  /** Deferred project action to execute once the kernel becomes ready. */
+  const pendingProjectRef = useRef<{ type: 'open'; path?: string } | null>(null);
 
   // Undo stack for cell clear/close. Each entry captures the full tab list and
   // active tab id so a single Cmd+Z restores exactly what was destroyed.
   type CellSnapshot = { tabs: CellTab[]; activeTabId: number };
   const cellUndoStack = useRef<CellSnapshot[]>([]);
+
+  /**
+   * Refresh tokens — integer counters bumped to signal child components to re-fetch data.
+   * Incrementing a token causes any useEffect that lists it as a dependency to re-run.
+   * This is the renderer's lightweight alternative to a pub/sub or state-management library.
+   */
   const [autoRefreshNamespace, setAutoRefreshNamespace] = useState(false);
   const [namespaceRefreshToken, setNamespaceRefreshToken] = useState(0);
   const [treeRefreshToken, setTreeRefreshToken] = useState(0);
   const [modulesRefreshToken, setModulesRefreshToken] = useState(0);
+
+  // -- Dialog visibility state ----------------------------------------------
+  const [showEnvSelector, setShowEnvSelector] = useState(false);
+  const [showWelcome, setShowWelcome] = useState(true);
+  const [scriptDialog, setScriptDialog] = useState<TreeNodeData | null>(null);
   const [createScriptTarget, setCreateScriptTarget] = useState<string | null>(null);
+  const [createNoteTarget, setCreateNoteTarget] = useState<string | null>(null);
   const [showSettings, setShowSettings] = useState(false);
+  const [showImportModule, setShowImportModule] = useState(false);
+
+  // -- Write tab (markdown notes) state ------------------------------------
+  const [activePane, setActivePane] = useState<'code' | 'write'>('code');
+  const [noteTabs, setNoteTabs] = useState<NoteTab[]>([]);
+  const noteTabsRef = useRef(noteTabs);
+  noteTabsRef.current = noteTabs;
+  const [activeNoteTabId, setActiveNoteTabId] = useState<string | null>(null);
   const [settingsInitialTab, setSettingsInitialTab] = useState<'general' | 'shortcuts' | 'appearance' | 'runtime' | 'about'>('general');
-  const [monacoTheme, setMonacoTheme] = useState<string>('vs-dark');
-  const [systemPrefersDark, setSystemPrefersDark] = useState(
-    () => window.matchMedia('(prefers-color-scheme: dark)').matches,
-  );
+
+  // -- Project reloading state (kernel restart with active project) ----------
+  const [projectReloading, setProjectReloading] = useState(false);
+
+  // -- Imported GUI modules for activity bar ---------------------------------
+  const [importedGuiModules, setImportedGuiModules] = useState<{ alias: string; name: string }[]>([]);
+
+  // Fetch GUI modules when kernel or modules refresh token changes
+  useEffect(() => {
+    if (!currentKernelId || kernelStatus !== 'ready') {
+      setImportedGuiModules([]);
+      return;
+    }
+    void (async () => {
+      try {
+        const imported = await window.pdv.modules.listImported();
+        setImportedGuiModules(
+          imported.filter((m) => m.hasGui).map((m) => ({ alias: m.alias, name: m.name }))
+        );
+      } catch {
+        setImportedGuiModules([]);
+      }
+    })();
+  }, [currentKernelId, kernelStatus, modulesRefreshToken]);
+
+  // -- Appearance state -----------------------------------------------------
+  const monacoTheme = useThemeManager({ config });
 
   const shortcuts = useMemo(() => resolveShortcuts(config?.settings?.shortcuts), [config]);
-
-  // Track system color-scheme changes
-  useEffect(() => {
-    const mq = window.matchMedia('(prefers-color-scheme: dark)');
-    const handler = (e: MediaQueryListEvent) => setSystemPrefersDark(e.matches);
-    mq.addEventListener('change', handler);
-    return () => mq.removeEventListener('change', handler);
-  }, []);
-
-  // Apply theme whenever config or system preference changes
-  useEffect(() => {
-    if (!config?.settings?.appearance) return;
-    const app = config.settings.appearance;
-    if (app.followSystemTheme) {
-      const themeName = systemPrefersDark ? app.darkTheme : app.lightTheme;
-      const colors = resolveThemeColors(themeName, []);
-      if (colors) {
-        applyThemeColors(colors);
-        setMonacoTheme(getMonacoTheme(themeName ?? '', BUILTIN_THEMES));
-      }
-    } else {
-      if (app.colors) applyThemeColors(app.colors);
-      setMonacoTheme(getMonacoTheme(app.themeName ?? '', BUILTIN_THEMES));
-    }
-  }, [config, systemPrefersDark]);
-
-  // Apply font settings whenever config changes
-  useEffect(() => {
-    const fonts = config?.settings?.fonts;
-    applyFontSettings(fonts?.codeFont, fonts?.displayFont);
-  }, [config]);
   useCodeCellsPersistence({
-    cellTabs: CellTabs,
+    cellTabs: cellTabs,
     activeCellTab,
     setCellTabs,
     setActiveCellTab,
@@ -190,19 +178,11 @@ const App: React.FC = () => {
         const loaded = await window.pdv.config.get();
         setConfig(loaded);  // theme applied by the reactive effect above
         setCurrentProjectDir(null);
-
-        if (!loaded.pythonPath) {
-          setKernelStatus('idle');
-          setShowEnvSelector(true);
-          return;
-        }
-
-        await startKernel(loaded);
+        // Kernel is NOT started here — it starts when the user picks a
+        // project action from the WelcomeScreen.
       } catch (error) {
         console.error('[App] Failed to load config:', error);
-        setKernelStatus('error');
         setLastError(error instanceof Error ? error.message : String(error));
-        setShowEnvSelector(true);
       }
     };
 
@@ -216,92 +196,6 @@ const App: React.FC = () => {
     document.title = `PDV: ${projectName}`;
   }, [currentProjectDir]);
 
-  const addCellTabRef = useRef<() => void>(null!);
-  useEffect(() => {
-    addCellTabRef.current = addCellTab;
-  });
-
-  const activeCellTabRef = useRef(activeCellTab);
-  useEffect(() => {
-    activeCellTabRef.current = activeCellTab;
-  }, [activeCellTab]);
-
-  const cellTabsRef = useRef(CellTabs);
-  useEffect(() => {
-    cellTabsRef.current = CellTabs;
-  }, [CellTabs]);
-
-  const removeCellTabRef = useRef<(id: number) => void>(null!);
-  useEffect(() => {
-    removeCellTabRef.current = handleRemoveCellTab;
-  });
-
-  useEffect(() => {
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.repeat) return;
-
-      // Cmd+Z outside Monaco → undo last cell clear/close
-      // Monaco sets its editor textarea as the active element; when it has focus
-      // it handles Cmd+Z itself before this listener sees it.
-      const isMonacoFocused = (document.activeElement as HTMLElement)
-        ?.closest('.monaco-editor') != null;
-      if (!isMonacoFocused && (event.metaKey || event.ctrlKey) && event.key === 'z' && !event.shiftKey && !event.altKey) {
-        const snapshot = cellUndoStack.current[cellUndoStack.current.length - 1];
-        if (snapshot) {
-          event.preventDefault();
-          cellUndoStack.current = cellUndoStack.current.slice(0, -1);
-          setCellTabs(snapshot.tabs);
-          setActiveCellTab(snapshot.activeTabId);
-        }
-        return;
-      }
-
-      if (matchesShortcut(event, shortcuts.openSettings)) {
-        event.preventDefault();
-        setSettingsInitialTab('general');
-        setShowSettings(true);
-      }
-      if (matchesShortcut(event, shortcuts.newTab)) {
-        event.preventDefault();
-        addCellTabRef.current();
-      }
-      if (matchesShortcut(event, shortcuts.closeTab)) {
-        event.preventDefault();
-        removeCellTabRef.current(activeCellTabRef.current);
-      }
-      if (matchesShortcut(event, shortcuts.closeWindow)) {
-        event.preventDefault();
-        window.close();
-      }
-      // Cmd+B: toggle left sidebar
-      if ((event.metaKey || event.ctrlKey) && !event.shiftKey && !event.altKey && event.key === 'b') {
-        event.preventDefault();
-        toggleLeftSidebar();
-      }
-      // Cmd+J: toggle code editor
-      if ((event.metaKey || event.ctrlKey) && !event.shiftKey && !event.altKey && event.key === 'j') {
-        event.preventDefault();
-        toggleEditorCollapsed();
-      }
-      // Cmd+1–9 → go to nth tab; Cmd+0 → go to last tab
-      if ((event.metaKey || event.ctrlKey) && !event.shiftKey && !event.altKey) {
-        const digit = event.key;
-        if (digit >= '1' && digit <= '9') {
-          event.preventDefault();
-          const t = cellTabsRef.current;
-          const target = t[Math.min(Number(digit) - 1, t.length - 1)];
-          if (target) setActiveCellTab(target.id);
-        } else if (digit === '0') {
-          event.preventDefault();
-          const t = cellTabsRef.current;
-          if (t.length) setActiveCellTab(t[t.length - 1].id);
-        }
-      }
-    };
-    window.addEventListener('keydown', onKeyDown);
-    return () => window.removeEventListener('keydown', onKeyDown);
-  }, [shortcuts, toggleEditorCollapsed, toggleLeftSidebar]);
-
   useEffect(() => {
     if (!window.pdv?.menu) {
       return;
@@ -309,6 +203,26 @@ const App: React.FC = () => {
     const recentProjects = normalizeRecentProjects(config?.recentProjects);
     void window.pdv.menu.updateRecentProjects(recentProjects);
   }, [config]);
+
+  // Listen for File > Import Module... menu action
+  useEffect(() => {
+    if (!window.pdv?.menu) return;
+    const unsub = window.pdv.menu.onAction((payload) => {
+      if (payload.action === 'modules:import') {
+        setShowImportModule(true);
+      }
+    });
+    return unsub;
+  }, []);
+
+  const currentKernelIdRef = useRef(currentKernelId);
+  currentKernelIdRef.current = currentKernelId;
+
+  const handleKernelCrash = useCallback((crashedKernelId: string) => {
+    if (crashedKernelId === currentKernelIdRef.current) {
+      setKernelStatus('error');
+    }
+  }, []);
 
   useKernelSubscriptions({
     currentKernelId,
@@ -318,6 +232,8 @@ const App: React.FC = () => {
     setLogs,
     setTreeRefreshToken,
     setModulesRefreshToken,
+    setProjectReloading,
+    onKernelCrash: handleKernelCrash,
   });
 
   const { startKernel, handleEnvSave, handleRestartKernel } = useKernelLifecycle({
@@ -348,6 +264,9 @@ const App: React.FC = () => {
 
   const handleCodeChange = (id: number, code: string) => {
     setCellTabs((prev) => prev.map((tab) => (tab.id === id ? { ...tab, code } : tab)));
+    if (codeCellExecutionError?.tabId === id) {
+      setCodeCellExecutionError(undefined);
+    }
   };
 
   const handleClearConsole = () => {
@@ -359,11 +278,14 @@ const App: React.FC = () => {
     // Snapshot before clearing so Cmd+Z can restore
     cellUndoStack.current = [
       ...cellUndoStack.current,
-      { tabs: CellTabs, activeTabId: activeCellTab },
-    ].slice(-20); // keep at most 20 levels
+      { tabs: cellTabs, activeTabId: activeCellTab },
+    ].slice(-CELL_UNDO_LIMIT); // keep at most CELL_UNDO_LIMIT levels
     setCellTabs((prev) =>
       prev.map((tab) => (tab.id === activeCellTab ? { ...tab, code: '' } : tab)),
     );
+    if (codeCellExecutionError?.tabId === activeCellTab) {
+      setCodeCellExecutionError(undefined);
+    }
     setLastError(undefined);
   };
 
@@ -371,8 +293,8 @@ const App: React.FC = () => {
     // Snapshot before closing so Cmd+Z can restore
     cellUndoStack.current = [
       ...cellUndoStack.current,
-      { tabs: CellTabs, activeTabId: activeCellTab },
-    ].slice(-20);
+      { tabs: cellTabs, activeTabId: activeCellTab },
+    ].slice(-CELL_UNDO_LIMIT);
     setCellTabs((prev) => {
       const next = prev.filter((t) => t.id !== id);
       if (next.length === 0) {
@@ -388,12 +310,35 @@ const App: React.FC = () => {
       }
       return next;
     });
+    if (codeCellExecutionError?.tabId === id) {
+      setCodeCellExecutionError(undefined);
+    }
     setLastError(undefined);
   };
 
+  const handleRenameCellTab = (id: number, name: string | undefined) => {
+    setCellTabs((prev) => prev.map((tab) => (tab.id === id ? { ...tab, name } : tab)));
+  };
+
+  useKeyboardShortcuts({
+    shortcuts,
+    cellTabs: cellTabs,
+    activeCellTab,
+    cellUndoStack,
+    setCellTabs,
+    setActiveCellTab,
+    setShowSettings,
+    setSettingsInitialTab,
+    toggleLeftSidebar,
+    toggleEditorCollapsed,
+    setShowImportModule,
+    addCellTab,
+    removeCellTab: handleRemoveCellTab,
+  });
+
   const handleSettingsSave = async (updates: Partial<Config>) => {
     await window.pdv.config.set(updates);
-    const mergedConfig = config ? { ...config, ...updates, settings: { ...config.settings, ...updates.settings, appearance: { ...config.settings?.appearance, ...updates.settings?.appearance } } } : null;
+    const mergedConfig = config ? mergeConfigUpdate(config, updates) : null;
     setConfig(mergedConfig);  // reactive effect applies theme
     if (
       mergedConfig &&
@@ -405,45 +350,167 @@ const App: React.FC = () => {
     setShowSettings(false);
   };
 
-  const handleTreeAction = async (action: string, node: TreeNodeData) => {
-    console.log('[App] Tree action:', action, node);
+  // -- Note (Write tab) helpers --------------------------------------------
 
+  /** Open a markdown node in the Write tab, reading its content from disk. */
+  const openNote = async (node: TreeNodeData) => {
+    // If already open, just switch to it
+    const existing = noteTabs.find((t) => t.id === node.path);
+    if (existing) {
+      setActiveNoteTabId(node.path);
+      setActivePane('write');
+      return;
+    }
+
+    if (!currentKernelId) return;
+
+    try {
+      const result = await window.pdv.note.read(currentKernelId, node.path);
+      const content = result.success && result.content ? result.content : '';
+      const newTab: NoteTab = {
+        id: node.path,
+        content,
+        savedContent: content,
+        name: node.key,
+      };
+      setNoteTabs((prev) => [...prev, newTab]);
+      setActiveNoteTabId(node.path);
+      setActivePane('write');
+    } catch (error) {
+      console.error('[App] Failed to read note:', error);
+      setLastError(error instanceof Error ? error.message : String(error));
+    }
+  };
+
+  const handleNoteContentChange = (id: string, content: string) => {
+    setNoteTabs((prev) =>
+      prev.map((tab) => (tab.id === id ? { ...tab, content } : tab)),
+    );
+  };
+
+  const handleNoteSave = async (id: string) => {
+    const tab = noteTabs.find((t) => t.id === id);
+    if (!tab || tab.content === tab.savedContent || !currentKernelId) return;
+    try {
+      await window.pdv.note.save(currentKernelId, tab.id, tab.content);
+      setNoteTabs((prev) =>
+        prev.map((t) => (t.id === id ? { ...t, savedContent: t.content } : t)),
+      );
+    } catch (error) {
+      console.error('[App] Failed to save note:', error);
+    }
+  };
+
+  const flushDirtyNotes = useCallback(async () => {
+    if (!currentKernelId) return;
+    const dirty = noteTabsRef.current.filter((t) => t.content !== t.savedContent);
+    await Promise.all(
+      dirty.map(async (tab) => {
+        try {
+          await window.pdv.note.save(currentKernelId, tab.id, tab.content);
+          setNoteTabs((prev) =>
+            prev.map((t) => (t.id === tab.id ? { ...t, savedContent: t.content } : t)),
+          );
+        } catch (error) {
+          console.error('[App] Failed to flush note:', error);
+        }
+      }),
+    );
+  }, [currentKernelId]);
+
+  const handleNoteCloseTab = (id: string) => {
+    setNoteTabs((prev) => {
+      const updated = prev.filter((t) => t.id !== id);
+      if (activeNoteTabId === id) {
+        setActiveNoteTabId(updated.length > 0 ? updated[updated.length - 1].id : null);
+      }
+      if (updated.length === 0) {
+        setActivePane('code');
+      }
+      return updated;
+    });
+  };
+
+  const handleTreeAction = async (action: string, node: TreeNodeData) => {
+    if (action === 'open_gui') {
+      if (!currentKernelId) return;
+      // For module nodes, the alias is the node key; for gui nodes, use parent path
+      const alias = node.type === 'gui' && node.parent_path ? node.parent_path : node.key;
+      void window.pdv.moduleWindows.open({ alias, kernelId: currentKernelId });
+      return;
+    }
+    if (action === 'new_gui') {
+      // Stub — GUI editor is future work
+      return;
+    }
     if (action === 'create_script') {
       setCreateScriptTarget(node.path);
+    } else if (action === 'create_note') {
+      setCreateNoteTarget(node.path);
+    } else if (action === 'open_note' && node.type === 'markdown') {
+      await openNote(node);
     } else if (action === 'run' && node.type === 'script') {
       setScriptDialog(node);
-    } else if ((action === 'edit' || action === 'view_source') && node.type === 'script') {
+    } else if (action === 'run_defaults' && node.type === 'script') {
+      if (!currentKernelId) return;
+      const code = `pdv_tree[${JSON.stringify(node.path)}].run()`;
+      await handleExecute(code, {
+        kind: 'tree-script',
+        label: node.path,
+        scriptPath: node.path,
+      });
+    } else if (action === 'edit' && (node.type === 'script' || node.type === 'namelist' || node.type === 'lib')) {
       try {
         if (!currentKernelId) return;
         await window.pdv.script.edit(currentKernelId, node.path);
       } catch (error) {
         console.error('[App] Failed to open editor:', error);
       }
-    } else if (action === 'reload' && node.type === 'script') {
-      await window.pdv.script.reload(node.path);
     } else if (action === 'copy_path') {
-      await navigator.clipboard.writeText(
-        node.path.split('.').reduce((acc, part) => `${acc}["${part}"]`, 'pdv_tree'),
-      );
+      const pyExpr = node.path
+        ? node.path.split('.').reduce((acc, part) => `${acc}["${part}"]`, 'pdv_tree')
+        : 'pdv_tree';
+      await navigator.clipboard.writeText(pyExpr);
+    } else if (action === 'handle') {
+      if (!currentKernelId) return;
+      const result = await window.pdv.tree.invokeHandler(currentKernelId, node.path);
+      if (!result.success && result.error) {
+        console.error('[App] Handler failed:', result.error);
+      }
     } else if (action === 'print') {
       if (!currentKernelId) return;
-      const target = JSON.stringify(node.path);
-      await handleExecute(`print(pdv_tree[${target}])`);
+      const pyExpr = node.path
+        ? `pdv_tree[${JSON.stringify(node.path)}]`
+        : 'pdv_tree';
+      await handleExecute(`print(${pyExpr})`, {
+        kind: 'unknown',
+        label: `Tree print ${node.path || 'pdv_tree'}`,
+      });
     }
   };
 
-  const handleScriptRun = (code: string, result: KernelExecuteResult) => {
+  const handleScriptRun = ({
+    code,
+    executionId,
+    origin,
+    result,
+  }: {
+    code: string;
+    executionId: string;
+    origin: KernelExecutionOrigin;
+    result: KernelExecuteResult;
+  }) => {
+    const resolvedOrigin = result.errorDetails?.source ?? origin;
     const logEntry: LogEntry = {
-      id:
-        typeof crypto !== 'undefined' && 'randomUUID' in crypto
-          ? crypto.randomUUID()
-          : `log-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+      id: executionId,
       timestamp: Date.now(),
       code,
       stdout: result.stdout,
       stderr: result.stderr,
       result: result.result,
       error: result.error,
+      errorDetails: result.errorDetails,
+      origin: resolvedOrigin,
       duration: result.duration,
       images: result.images,
     };
@@ -458,34 +525,67 @@ const App: React.FC = () => {
     setScriptDialog(null);
   };
 
-  const handleExecute = async (code: string) => {
+  const handleExecute = useCallback(async (code: string, originOverride?: KernelExecutionOrigin) => {
     if (!currentKernelId || kernelStatus !== 'ready' || !code.trim()) return;
 
     setIsExecuting(true);
     setLastError(undefined);
+    setCodeCellExecutionError(undefined);
 
     const executionId =
       typeof crypto !== 'undefined' && 'randomUUID' in crypto
         ? crypto.randomUUID()
         : `log-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+    const currentCellTabs = cellTabsRef.current;
+    const currentActiveCellTab = activeCellTabRef.current;
+    const activeTab = currentCellTabs.find((tab) => tab.id === currentActiveCellTab);
+    const origin: KernelExecutionOrigin = originOverride ?? {
+      kind: 'code-cell',
+      label: activeTab?.name?.trim() ? activeTab.name : `Tab ${currentActiveCellTab}`,
+      tabId: currentActiveCellTab,
+    };
 
     // Create the log entry immediately so output appears as it streams in.
-    setLogs((prev) => [...prev, { id: executionId, timestamp: Date.now(), code }]);
+    setLogs((prev) => [
+      ...prev,
+      { id: executionId, timestamp: Date.now(), code, origin },
+    ]);
 
     try {
-      const result = await window.pdv.kernels.execute(currentKernelId, { code, executionId });
+      const result = await window.pdv.kernels.execute(currentKernelId, {
+        code,
+        executionId,
+        origin,
+      });
 
       // Finalize the entry with duration and any error (stdout/stderr already streamed).
       setLogs((prev) =>
         prev.map((l) =>
           l.id === executionId
-            ? { ...l, error: result.error, duration: result.duration }
+            ? {
+                ...l,
+                stdout: l.stdout ?? result.stdout,
+                stderr: l.stderr ?? result.stderr,
+                result: l.result ?? result.result,
+                images: l.images ?? result.images,
+                error: result.error,
+                errorDetails: result.errorDetails,
+                origin: l.origin ?? origin,
+                duration: result.duration,
+              }
             : l
         )
       );
 
       if (result.error) {
         setLastError(result.error);
+        if (origin.kind === 'code-cell' && typeof origin.tabId === 'number') {
+          setCodeCellExecutionError({
+            tabId: origin.tabId,
+            message: result.errorDetails?.message || result.error,
+            location: result.errorDetails?.location,
+          });
+        }
       }
       if (typeof result.duration === 'number') {
         setLastDuration(result.duration);
@@ -493,26 +593,40 @@ const App: React.FC = () => {
     } catch (error) {
       const msg = error instanceof Error ? error.message : String(error);
       setLogs((prev) =>
-        prev.map((l) => (l.id === executionId ? { ...l, error: msg } : l))
+        prev.map((l) => (l.id === executionId ? { ...l, error: msg, origin } : l))
       );
       setLastError(msg);
+      setCodeCellExecutionError(undefined);
     } finally {
       setIsExecuting(false);
       setNamespaceRefreshToken((prev) => prev + 1);
     }
-  };
+  }, [currentKernelId, kernelStatus]);
+
+  // Listen for execution requests from module popup windows
+  useEffect(() => {
+    if (!window.pdv?.moduleWindows) return;
+    const unsub = window.pdv.moduleWindows.onExecuteRequest((code: string) => {
+      if (!currentKernelId) return;
+      void handleExecute(code);
+    });
+    return unsub;
+  }, [currentKernelId, handleExecute]);
+
+  // Whether the session has no user work (no project, no code, no logs, no notes).
+  const isPristine = currentProjectDir === null
+    && cellTabs.every((t) => !t.code.trim())
+    && logs.length === 0
+    && noteTabs.length === 0;
 
   const {
-    unsavedDialogContext,
-    handleSaveProject,
-    handleOpenProject,
-    handleUnsavedSave,
-    handleUnsavedDiscard,
-    handleUnsavedCancel,
+    handleSaveProject: _handleSaveProject,
+    handleOpenProject: _handleOpenProject,
+    executeOpenProject,
   } = useProjectWorkflow({
     kernelStatus,
     currentProjectDir,
-    cellTabs: CellTabs,
+    cellTabs: cellTabs,
     activeCellTab,
     config,
     setConfig,
@@ -522,81 +636,79 @@ const App: React.FC = () => {
     setModulesRefreshToken,
     setNamespaceRefreshToken,
     setLastError,
+    setLogs,
     loadedProjectTabsRef,
     normalizeLoadedCodeCells,
+    flushDirtyNotes,
   });
+
+  // -- Welcome screen (pristine session) ------------------------------------
+
+  const recentProjects = useMemo(
+    () => normalizeRecentProjects(config?.recentProjects),
+    [config?.recentProjects],
+  );
+
+  const dismissWelcome = useCallback(() => setShowWelcome(false), []);
+
+  /**
+   * Starts the kernel for the current config, or shows the environment
+   * selector if no pythonPath is configured yet.
+   */
+  const ensureKernel = useCallback(async () => {
+    if (!config?.pythonPath) {
+      setShowEnvSelector(true);
+      return;
+    }
+    await startKernel(config);
+  }, [config, startKernel, setShowEnvSelector]);
+
+  const handleWelcomeNewProject = useCallback(async () => {
+    dismissWelcome();
+    await ensureKernel();
+  }, [dismissWelcome, ensureKernel]);
+
+  const handleWelcomeOpen = useCallback(async () => {
+    dismissWelcome();
+    pendingProjectRef.current = { type: 'open' };
+    await ensureKernel();
+  }, [dismissWelcome, ensureKernel]);
+
+  const handleWelcomeOpenRecent = useCallback(async (path: string) => {
+    dismissWelcome();
+    pendingProjectRef.current = { type: 'open', path };
+    await ensureKernel();
+  }, [dismissWelcome, ensureKernel]);
+
+  // Execute deferred project action once the kernel becomes ready.
+  useEffect(() => {
+    if (kernelStatus !== 'ready' || !pendingProjectRef.current) return;
+    const pending = pendingProjectRef.current;
+    pendingProjectRef.current = null;
+    void executeOpenProject(pending.path);
+  }, [kernelStatus, executeOpenProject]);
 
   return (
     <div className="app">
       {/* Main content */}
       <main className="app-main">
 
+        {/* Project reloading overlay — shown during kernel restart with active project */}
+        {projectReloading && (
+          <div className="project-reloading-overlay">
+            <div className="project-reloading-message">Reloading project...</div>
+          </div>
+        )}
+
         {/* Activity bar — always visible */}
-        <nav className="activity-bar">
-          <div className="activity-bar-top">
-            <button
-              className={`activity-btn${leftSidebarOpen && leftPanel === 'tree' ? ' active' : ''}`}
-              onClick={() => handleActivityBarClick('tree')}
-              title="Tree (Cmd+B)"
-            >
-              <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-                <line x1="4" y1="3" x2="4" y2="17" />
-                <line x1="4" y1="6" x2="10" y2="6" />
-                <line x1="4" y1="11" x2="10" y2="11" />
-                <line x1="4" y1="16" x2="10" y2="16" />
-                <rect x="10" y="4" width="6" height="4" rx="1" />
-                <rect x="10" y="9" width="6" height="4" rx="1" />
-                <rect x="10" y="14" width="6" height="4" rx="1" />
-              </svg>
-            </button>
-            <button
-              className={`activity-btn${leftSidebarOpen && leftPanel === 'namespace' ? ' active' : ''}`}
-              onClick={() => handleActivityBarClick('namespace')}
-              title="Namespace"
-            >
-              <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M7 4C5.5 4 4.5 5 4.5 6.5v2C4.5 10 3.8 10.5 2 11c1.8 0.5 2.5 1 2.5 2.5v2C4.5 17 5.5 16 7 16" />
-                <path d="M13 4c1.5 0 2.5 1 2.5 2.5v2C15.5 10 16.2 10.5 18 11c-1.8 0.5-2.5 1-2.5 2.5v2C15.5 17 14.5 16 13 16" />
-                <circle cx="10" cy="11" r="1.5" fill="currentColor" stroke="none" />
-              </svg>
-            </button>
-            <button
-              className={`activity-btn${rightSidebarOpen && rightPanel === 'imported' ? ' active' : ''}`}
-              onClick={() => handleActivityBarClick('imported')}
-              title="Modules"
-            >
-              <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-                <polyline points="16,6.5 10,3.5 4,6.5 10,9.5 16,6.5" />
-                <polyline points="4,6.5 4,13.5 10,16.5 10,9.5" />
-                <polyline points="16,6.5 16,13.5 10,16.5" />
-              </svg>
-            </button>
-            <button
-              className={`activity-btn${rightSidebarOpen && rightPanel === 'library' ? ' active' : ''}`}
-              onClick={() => handleActivityBarClick('library')}
-              title="Module Library"
-            >
-              <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-                <polyline points="4,11 4,16 16,16 16,11" />
-                <line x1="2" y1="11" x2="18" y2="11" />
-                <line x1="10" y1="3" x2="10" y2="9" />
-                <polyline points="7,6 10,9 13,6" />
-              </svg>
-            </button>
-          </div>
-          <div className="activity-bar-bottom">
-            <button
-              className="activity-btn"
-              onClick={() => { setSettingsInitialTab('general'); setShowSettings(true); }}
-              title="Settings"
-            >
-              <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-                <circle cx="10" cy="10" r="2.5" />
-                <path d="M10 2.5v1.5M10 16v1.5M2.5 10H4M16 10h1.5M4.4 4.4l1.1 1.1M14.5 14.5l1.1 1.1M4.4 15.6l1.1-1.1M14.5 5.5l1.1-1.1" />
-              </svg>
-            </button>
-          </div>
-        </nav>
+        <ActivityBar
+          leftSidebarOpen={leftSidebarOpen}
+          leftPanel={leftPanel}
+          onActivityBarClick={handleActivityBarClick}
+          onSettingsClick={() => { setSettingsInitialTab('general'); setShowSettings(true); }}
+          guiModules={importedGuiModules}
+          kernelId={currentKernelId}
+        />
 
         {/* Left sidebar — collapsible */}
         {leftSidebarOpen && (
@@ -620,6 +732,7 @@ const App: React.FC = () => {
                     refreshToken={treeRefreshToken}
                     onAction={handleTreeAction}
                     shortcuts={shortcuts}
+
                   />
                 )}
                 {leftPanel === 'namespace' && (
@@ -628,7 +741,7 @@ const App: React.FC = () => {
                     disabled={kernelStatus !== 'ready'}
                     autoRefresh={autoRefreshNamespace}
                     refreshToken={namespaceRefreshToken}
-                    refreshInterval={2000}
+                    refreshInterval={NAMESPACE_REFRESH_INTERVAL_MS}
                     onToggleAutoRefresh={setAutoRefreshNamespace}
                   />
                 )}
@@ -638,91 +751,94 @@ const App: React.FC = () => {
           </>
         )}
 
-        {/* Center column: console on top, code editor at bottom */}
+        {/* Center column: pane switcher at top, then Code (console + editor) or Write */}
         <div className="center-column" ref={rightPaneRef}>
-          <div className="console-wrapper">
-            <div className="console-header">
-              <span className="console-header-title">Console</span>
+          <div className="pane-switcher">
+            <div className="pane-switcher-track">
+              <button
+                className={`pane-switcher-btn ${activePane === 'code' ? 'active' : ''}`}
+                onClick={() => setActivePane('code')}
+              >
+                Code
+              </button>
+              <button
+                className={`pane-switcher-btn ${activePane === 'write' ? 'active' : ''}`}
+                onClick={() => setActivePane('write')}
+              >
+                Write
+                {noteTabs.some((t) => t.content !== t.savedContent) && (
+                  <span className="pane-switcher-indicator">●</span>
+                )}
+              </button>
             </div>
-            <Console logs={logs} onClear={handleClearConsole} />
           </div>
-          {editorCollapsed ? (
-            <div
-              className="editor-collapsed-bar"
-              onClick={expandEditor}
-            >
-              ▲ Editor
-            </div>
-          ) : (
+
+          {activePane === 'code' ? (
             <>
-              <div className="horizontal-resizer" onMouseDown={startHorizontalDrag} />
-              <div className="editor-wrapper" style={{ height: `${editorHeight}px` }}>
-                <CodeCell
-                  tabs={CellTabs.map((tab) => ({
-                    ...tab,
-                    onChange: (code: string) => handleCodeChange(tab.id, code),
-                  }))}
-                  activeTabId={activeCellTab}
-                  disabled={kernelStatus !== 'ready'}
-                  onTabChange={handleTabChange}
-                  onAddTab={addCellTab}
-                  onRemoveTab={handleRemoveCellTab}
-                  onExecute={handleExecute}
-                  onInterrupt={currentKernelId ? () => { void window.pdv.kernels.interrupt(currentKernelId); } : undefined}
-                  onClear={handleClearCommand}
-                  isExecuting={isExecuting}
-                  lastError={lastError}
-                  shortcuts={shortcuts}
-                  monacoTheme={monacoTheme}
-                  editorFontFamily={config?.settings?.fonts?.codeFont}
-                  editorFontSize={config?.settings?.editor?.fontSize}
-                  editorTabSize={config?.settings?.editor?.tabSize}
-                  editorWordWrap={config?.settings?.editor?.wordWrap}
-                />
+              <div className="console-wrapper">
+                <Console logs={logs} onClear={handleClearConsole} />
               </div>
+              {editorCollapsed ? (
+                <div
+                  className="editor-collapsed-bar"
+                  onClick={expandEditor}
+                >
+                  ▲ Editor
+                </div>
+              ) : (
+                <>
+                  <div className="horizontal-resizer" onMouseDown={startHorizontalDrag} />
+                  <div className="editor-wrapper" style={{ height: `${editorHeight}px` }}>
+                    <CodeCell
+                      tabs={cellTabs.map((tab) => ({
+                        ...tab,
+                        onChange: (code: string) => handleCodeChange(tab.id, code),
+                      }))}
+                      activeTabId={activeCellTab}
+                      kernelId={currentKernelId}
+                      disabled={kernelStatus !== 'ready'}
+                      onTabChange={handleTabChange}
+                      onAddTab={addCellTab}
+                      onRemoveTab={handleRemoveCellTab}
+                      onRenameTab={handleRenameCellTab}
+                      onExecute={handleExecute}
+                      onInterrupt={currentKernelId ? () => { void window.pdv.kernels.interrupt(currentKernelId); } : undefined}
+                      onClear={handleClearCommand}
+                      isExecuting={isExecuting}
+                      lastError={lastError}
+                      executionError={codeCellExecutionError}
+                      shortcuts={shortcuts}
+                      monacoTheme={monacoTheme}
+                      editorFontFamily={config?.settings?.fonts?.codeFont}
+                      editorFontSize={config?.settings?.editor?.fontSize}
+                      editorTabSize={config?.settings?.editor?.tabSize}
+                      editorWordWrap={config?.settings?.editor?.wordWrap}
+                    />
+                  </div>
+                </>
+              )}
             </>
+          ) : (
+            <div className="write-tab-fill">
+              <WriteTab
+                tabs={noteTabs}
+                activeTabId={activeNoteTabId}
+                disabled={kernelStatus !== 'ready'}
+                onTabChange={setActiveNoteTabId}
+                onCloseTab={handleNoteCloseTab}
+                onContentChange={handleNoteContentChange}
+                onSave={handleNoteSave}
+                monacoTheme={monacoTheme}
+                editorFontFamily={config?.settings?.fonts?.codeFont}
+                editorFontSize={config?.settings?.editor?.fontSize}
+                editorWordWrap={config?.settings?.editor?.wordWrap}
+              />
+            </div>
           )}
         </div>
 
-        {/* Right sidebar — collapsible (Modules) */}
-        {rightSidebarOpen && (
-          <>
-            <div className="vertical-resizer" onMouseDown={startRightDrag} />
-            <aside className="right-sidebar" style={{ width: `${rightWidth}px` }}>
-              <div className="sidebar-header">
-                <span className="sidebar-title">{rightPanel === 'library' ? 'Module Library' : 'Modules'}</span>
-                <button
-                  className="sidebar-collapse-btn"
-                  onClick={collapseRightSidebar}
-                  title="Collapse sidebar"
-                >
-                  ›
-                </button>
-              </div>
-              <div className="sidebar-content">
-                <ModulesPanel
-                  projectDir={currentProjectDir}
-                  isActive={rightSidebarOpen}
-                  kernelId={currentKernelId}
-                  kernelReady={kernelStatus === 'ready'}
-                  onExecute={handleExecute}
-                  view={rightPanel}
-                  refreshToken={modulesRefreshToken}
-                />
-              </div>
-            </aside>
-          </>
-        )}
 
       </main>
-
-      {unsavedDialogContext && (
-        <UnsavedChangesDialog
-          onSave={() => void handleUnsavedSave()}
-          onDiscard={() => void handleUnsavedDiscard()}
-          onCancel={() => void handleUnsavedCancel()}
-        />
-      )}
 
       {scriptDialog && currentKernelId && (
         <ScriptDialog
@@ -733,7 +849,7 @@ const App: React.FC = () => {
         />
       )}
 
-      {createScriptTarget && currentKernelId && (
+      {createScriptTarget !== null && currentKernelId && (
         <CreateScriptDialog
           parentPath={createScriptTarget}
           onCancel={() => setCreateScriptTarget(null)}
@@ -754,31 +870,50 @@ const App: React.FC = () => {
         />
       )}
 
+      {createNoteTarget !== null && currentKernelId && (
+        <CreateNoteDialog
+          parentPath={createNoteTarget}
+          onCancel={() => setCreateNoteTarget(null)}
+          onCreate={async (name) => {
+            try {
+              const result = await window.pdv.tree.createNote(currentKernelId, createNoteTarget, name);
+              if (!result.success) {
+                setLastError(result.error);
+              } else if (result.treePath) {
+                setTreeRefreshToken((t) => t + 1);
+                const noteNode: TreeNodeData = {
+                  id: result.treePath,
+                  key: name,
+                  path: result.treePath,
+                  parent_path: createNoteTarget || null,
+                  type: 'markdown',
+                  has_children: false,
+                  lazy: false,
+                  preview: '',
+                  hasChildren: false,
+                  parentPath: createNoteTarget || null,
+                };
+                await openNote(noteNode);
+              }
+            } catch (error) {
+              setLastError(error instanceof Error ? error.message : String(error));
+            } finally {
+              setCreateNoteTarget(null);
+            }
+          }}
+        />
+      )}
+
       {/* Status bar */}
-        <footer className="status-bar">
-         <div className="status-left">
-           <span className="status-item">
-             <span className={`status-dot ${isExecuting ? 'busy' : 'idle'}`} />
-             <span>{isExecuting ? 'Busy' : 'Idle'}</span>
-           </span>
-           <span
-             className="status-item status-clickable"
-             onClick={() => { setSettingsInitialTab('runtime'); setShowSettings(true); }}
-             title="Click to change runtime"
-           >
-             {config?.pythonPath ?? config?.kernelSpec ?? 'python3'}
-           </span>
-           <span className="status-item">{currentProjectDir ?? 'Unsaved Project'}</span>
-         </div>
-         <div className="status-right">
-           <span className={`status-item ${kernelStatus === 'ready' ? 'status-connected' : kernelStatus === 'error' ? 'status-error' : ''}`}>
-             ● {kernelStatus === 'ready' ? 'Connected' : kernelStatus === 'starting' ? 'Starting...' : 'Disconnected'}
-           </span>
-           <span className="status-item">
-             Last: {lastDuration !== null ? `${Math.round(lastDuration)}ms` : '--'}
-           </span>
-         </div>
-       </footer>
+        <StatusBar
+          isExecuting={isExecuting}
+          pythonPath={config?.pythonPath}
+          kernelSpec={config?.kernelSpec}
+          currentProjectDir={currentProjectDir}
+          kernelStatus={kernelStatus}
+          lastDuration={lastDuration}
+          onRuntimeClick={() => { setSettingsInitialTab('runtime'); setShowSettings(true); }}
+        />
 
        {showEnvSelector && (
           <EnvironmentSelector
@@ -790,6 +925,13 @@ const App: React.FC = () => {
            onCancel={() => setShowEnvSelector(false)}
          />
        )}
+       <ImportModuleDialog
+         isOpen={showImportModule}
+         projectDir={currentProjectDir}
+         kernelReady={kernelStatus === 'ready'}
+         refreshToken={modulesRefreshToken}
+         onClose={() => setShowImportModule(false)}
+       />
        <SettingsDialog
          isOpen={showSettings}
          initialTab={settingsInitialTab}
@@ -801,6 +943,15 @@ const App: React.FC = () => {
          onEnvSave={handleEnvSave}
          onRestart={handleRestartKernel}
        />
+
+       {showWelcome && isPristine && !showEnvSelector && (
+         <WelcomeScreen
+           recentProjects={recentProjects}
+           onNewProject={handleWelcomeNewProject}
+           onOpenProject={handleWelcomeOpen}
+           onOpenRecent={handleWelcomeOpenRecent}
+         />
+       )}
      </div>
    );
 };

@@ -1,8 +1,7 @@
 import { useCallback, useEffect, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react';
 
-export type LeftPanel = 'tree' | 'namespace';
-export type RightPanel = 'library' | 'imported';
-type DragMode = 'vertical' | 'horizontal' | 'right-vertical' | null;
+type LeftPanel = 'tree' | 'namespace';
+type DragMode = 'vertical' | 'horizontal' | null;
 
 export function useLayoutState() {
   const [leftSidebarOpen, setLeftSidebarOpen] = useState(
@@ -11,22 +10,12 @@ export function useLayoutState() {
   const [leftPanel, setLeftPanel] = useState<LeftPanel>(
     () => (localStorage.getItem('pdv.layout.leftPanel') as LeftPanel) || 'tree'
   );
-  const [rightSidebarOpen, setRightSidebarOpen] = useState(
-    () => localStorage.getItem('pdv.layout.rightSidebar') !== 'false'
-  );
-  const [rightPanel, setRightPanel] = useState<RightPanel>(
-    () => (localStorage.getItem('pdv.layout.rightPanel') as RightPanel) || 'imported'
-  );
   const [editorCollapsed, setEditorCollapsed] = useState(
     () => localStorage.getItem('pdv.layout.editorCollapsed') === 'true'
   );
   const [leftWidth, setLeftWidth] = useState(() => {
     const saved = localStorage.getItem('pdv.pane.leftWidth');
     return saved ? Number(saved) : 340;
-  });
-  const [rightWidth, setRightWidth] = useState(() => {
-    const saved = localStorage.getItem('pdv.pane.rightWidth');
-    return saved ? Number(saved) : 280;
   });
   const [editorHeight, setEditorHeight] = useState(() => {
     const saved = localStorage.getItem('pdv.pane.editorHeight');
@@ -53,13 +42,6 @@ export function useLayoutState() {
         const next = Math.min(Math.max(relativeY, min), max);
         setEditorHeight(next);
         localStorage.setItem('pdv.pane.editorHeight', String(next));
-      } else if (dragRef.current === 'right-vertical') {
-        const viewportWidth = window.innerWidth || 1200;
-        const min = 150;
-        const max = Math.max(min, viewportWidth - 400);
-        const next = Math.min(Math.max(viewportWidth - event.clientX, min), max);
-        setRightWidth(next);
-        localStorage.setItem('pdv.pane.rightWidth', String(next));
       }
     };
 
@@ -85,34 +67,17 @@ export function useLayoutState() {
     dragRef.current = 'horizontal';
   }, []);
 
-  const startRightDrag = useCallback((event: ReactMouseEvent) => {
-    event.preventDefault();
-    dragRef.current = 'right-vertical';
-  }, []);
-
-  const handleActivityBarClick = useCallback((panel: LeftPanel | RightPanel) => {
-    if (panel === 'library' || panel === 'imported') {
-      if (rightSidebarOpen && rightPanel === panel) {
-        setRightSidebarOpen(false);
-        localStorage.setItem('pdv.layout.rightSidebar', 'false');
-      } else {
-        setRightPanel(panel);
-        setRightSidebarOpen(true);
-        localStorage.setItem('pdv.layout.rightPanel', panel);
-        localStorage.setItem('pdv.layout.rightSidebar', 'true');
-      }
+  const handleActivityBarClick = useCallback((panel: LeftPanel) => {
+    if (leftSidebarOpen && leftPanel === panel) {
+      setLeftSidebarOpen(false);
+      localStorage.setItem('pdv.layout.leftSidebarOpen', 'false');
     } else {
-      if (leftSidebarOpen && leftPanel === panel) {
-        setLeftSidebarOpen(false);
-        localStorage.setItem('pdv.layout.leftSidebarOpen', 'false');
-      } else {
-        setLeftPanel(panel);
-        setLeftSidebarOpen(true);
-        localStorage.setItem('pdv.layout.leftPanel', panel);
-        localStorage.setItem('pdv.layout.leftSidebarOpen', 'true');
-      }
+      setLeftPanel(panel);
+      setLeftSidebarOpen(true);
+      localStorage.setItem('pdv.layout.leftPanel', panel);
+      localStorage.setItem('pdv.layout.leftSidebarOpen', 'true');
     }
-  }, [leftSidebarOpen, leftPanel, rightSidebarOpen, rightPanel]);
+  }, [leftSidebarOpen, leftPanel]);
 
   const toggleLeftSidebar = useCallback(() => {
     setLeftSidebarOpen((prev) => {
@@ -135,11 +100,6 @@ export function useLayoutState() {
     localStorage.setItem('pdv.layout.leftSidebarOpen', 'false');
   }, []);
 
-  const collapseRightSidebar = useCallback(() => {
-    setRightSidebarOpen(false);
-    localStorage.setItem('pdv.layout.rightSidebar', 'false');
-  }, []);
-
   const expandEditor = useCallback(() => {
     setEditorCollapsed(false);
     localStorage.setItem('pdv.layout.editorCollapsed', 'false');
@@ -148,21 +108,16 @@ export function useLayoutState() {
   return {
     leftSidebarOpen,
     leftPanel,
-    rightSidebarOpen,
-    rightPanel,
     editorCollapsed,
     leftWidth,
-    rightWidth,
     editorHeight,
     rightPaneRef,
     startVerticalDrag,
     startHorizontalDrag,
-    startRightDrag,
     handleActivityBarClick,
     toggleLeftSidebar,
     toggleEditorCollapsed,
     collapseLeftSidebar,
-    collapseRightSidebar,
     expandEditor,
   };
 }

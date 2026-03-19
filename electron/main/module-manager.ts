@@ -30,12 +30,17 @@ import type {
   ModuleSourceReference,
   ModuleUpdateResult,
 } from "./ipc";
+import type { ModuleGuiLayout } from "./ipc";
 import {
+  deriveHasGui,
+  isV3Manifest,
   isPythonVersionCompatible,
   isVersionGreaterThan,
   isVersionLessThan,
   ModuleManifestV1,
+  GuiManifestV1,
   parseSemver,
+  readGuiManifest,
   sanitizeScriptNodeName,
   validateModuleManifest,
 } from "./modules/manifest-utils";
@@ -51,7 +56,7 @@ const MODULE_MANIFEST_FILE = "pdv-module.json";
 /**
  * Declarative input field descriptor from a module manifest.
  */
-export interface ModuleInputDescriptor {
+interface ModuleInputDescriptor {
   /** Stable input identifier from manifest. */
   id: string;
   /** User-facing label. */
@@ -88,7 +93,7 @@ export interface ModuleInputDescriptor {
 /**
  * One canonical script binding derived from a module action descriptor.
  */
-export interface ModuleScriptBinding {
+interface ModuleScriptBinding {
   /** Stable action identifier from manifest. */
   actionId: string;
   /** User-facing action label from manifest. */
@@ -238,9 +243,10 @@ export class ModuleManager {
     }
     const moduleDir = module.installPath ?? path.join(this.packagesRoot, moduleId);
     const manifest = await this.readAndValidateManifest(moduleDir);
+    const actions = await this.resolveActions(manifest, moduleDir);
     const usedNames = new Set<string>();
     const bindings: ModuleScriptBinding[] = [];
-    for (const action of manifest.actions) {
+    for (const action of actions) {
       const scriptPath = path.resolve(moduleDir, action.script_path);
       let scriptStat: Awaited<ReturnType<typeof fs.stat>>;
       try {
@@ -295,7 +301,8 @@ export class ModuleManager {
     }
     const moduleDir = module.installPath ?? path.join(this.packagesRoot, moduleId);
     const manifest = await this.readAndValidateManifest(moduleDir);
-    return (manifest.inputs ?? []).map((input) => ({
+    const inputs = await this.resolveInputs(manifest, moduleDir);
+    return inputs.map((input) => ({
       id: input.id,
       label: input.label,
       type: input.type,
@@ -318,6 +325,37 @@ export class ModuleManager {
         : undefined,
       fileMode: input.file_mode,
     }));
+  }
+
+  /**
+   * Return the `hasGui` flag and optional `gui` layout for one installed module.
+   *
+   * @param moduleId - Installed module identifier.
+   * @returns Object with `hasGui` boolean and optional `gui` layout.
+   */
+  async getModuleGuiInfo(
+    moduleId: string
+  ): Promise<{ hasGui: boolean; gui?: ModuleGuiLayout }> {
+    const index = await this.readIndex();
+    const module = index.modules[moduleId];
+    if (!module) {
+      return { hasGui: false };
+    }
+    const moduleDir =
+      module.installPath ?? path.join(this.packagesRoot, moduleId);
+    const manifest = await this.readAndValidateManifest(moduleDir);
+    if (isV3Manifest(manifest)) {
+      const guiManifest = await readGuiManifest(moduleDir);
+      if (!guiManifest) return { hasGui: false };
+      const hasGui = guiManifest.has_gui ?? ((guiManifest.inputs?.length ?? 0) > 0 || guiManifest.actions.length > 0);
+      const gui = guiManifest.gui ? (guiManifest.gui as ModuleGuiLayout) : undefined;
+      return { hasGui, gui };
+    }
+    const hasGui = deriveHasGui(manifest);
+    const gui = manifest.gui
+      ? (manifest.gui as ModuleGuiLayout)
+      : undefined;
+    return { hasGui, gui };
   }
 
   /**
@@ -403,7 +441,8 @@ export class ModuleManager {
       }
     }
 
-    for (const action of manifest.actions) {
+    const healthActions = await this.resolveActions(manifest, moduleDir);
+    for (const action of healthActions) {
       const scriptPath = path.resolve(moduleDir, action.script_path);
       try {
         const stat = await fs.stat(scriptPath);
@@ -427,6 +466,101 @@ export class ModuleManager {
     }
 
     return warnings;
+  }
+
+  /**
+   * Read and validate gui.json for one installed module.
+   *
+   * @param moduleId - Installed module identifier.
+   * @returns Validated GUI manifest, or null if absent.
+   */
+  async readAndValidateGuiManifest(moduleId: string): Promise<GuiManifestV1 | null> {
+    const index = await this.readIndex();
+    const module = index.modules[moduleId];
+    if (!module) return null;
+    const moduleDir = module.installPath ?? path.join(this.packagesRoot, moduleId);
+    return readGuiManifest(moduleDir);
+  }
+
+  /**
+   * Return the install path for one installed module.
+   *
+   * @param moduleId - Installed module identifier.
+   * @returns Absolute install path, or null if not installed.
+   */
+  async getModuleInstallPath(moduleId: string): Promise<string | null> {
+    const index = await this.readIndex();
+    const module = index.modules[moduleId];
+    if (!module) return null;
+    return module.installPath ?? path.join(this.packagesRoot, moduleId);
+  }
+
+  /**
+   * Resolve declared module files from the manifest `files` array.
+   *
+   * @param moduleId - Installed module identifier.
+   * @returns Resolved file descriptors with absolute paths.
+   * @throws {Error} When module is not installed or a file doesn't exist.
+   */
+  async resolveModuleFiles(
+    moduleId: string
+  ): Promise<Array<{ name: string; path: string; type: "namelist" | "lib" | "file" }>> {
+    const index = await this.readIndex();
+    const module = index.modules[moduleId];
+    if (!module) {
+      return [];
+    }
+    const moduleDir = module.installPath ?? path.join(this.packagesRoot, moduleId);
+    const manifest = await this.readAndValidateManifest(moduleDir);
+    if (!manifest.files || manifest.files.length === 0) {
+      return [];
+    }
+    const resolved: Array<{ name: string; path: string; type: "namelist" | "lib" | "file" }> = [];
+    for (const file of manifest.files) {
+      const absPath = path.resolve(moduleDir, file.path);
+      try {
+        const stat = await fs.stat(absPath);
+        if (!stat.isFile()) {
+          console.warn(`[pdv] Module file is not a file: ${file.path} (${moduleId})`);
+          continue;
+        }
+      } catch {
+        console.warn(`[pdv] Module file not found: ${file.path} (${moduleId})`);
+        continue;
+      }
+      resolved.push({
+        name: file.name,
+        path: absPath,
+        type: file.type,
+      });
+    }
+    return resolved;
+  }
+
+  /**
+   * Return module setup info for library namespace initialization.
+   *
+   * @param moduleId - Installed module identifier.
+   * @returns Install path and optional python_package/entry_point from manifest.
+   * @throws {Error} When module is not installed or manifest is invalid.
+   */
+  async getModuleSetupInfo(moduleId: string): Promise<{
+    installPath: string;
+    pythonPackage?: string;
+    entryPoint?: string;
+  }> {
+    const index = await this.readIndex();
+    const module = index.modules[moduleId];
+    if (!module) {
+      throw new Error(`Installed module not found: ${moduleId}`);
+    }
+    const moduleDir = module.installPath ?? path.join(this.packagesRoot, moduleId);
+    const manifest = await this.readAndValidateManifest(moduleDir);
+    return {
+      installPath: moduleDir,
+      pythonPackage: manifest.python_package,
+      entryPoint: manifest.entry_point,
+    };
   }
 
   /**
@@ -633,6 +767,42 @@ export class ModuleManager {
       modules: {},
       history: [],
     };
+  }
+
+  /**
+   * Resolve the effective actions list for a module, reading from gui.json for v3.
+   *
+   * @param manifest - Validated module manifest.
+   * @param moduleDir - Module directory path.
+   * @returns Action entries from the appropriate source.
+   */
+  private async resolveActions(
+    manifest: ModuleManifestV1,
+    moduleDir: string
+  ): Promise<Array<{ id: string; label: string; script_path: string; inputs?: string[]; tab?: string }>> {
+    if (isV3Manifest(manifest)) {
+      const guiManifest = await readGuiManifest(moduleDir);
+      return guiManifest?.actions ?? [];
+    }
+    return manifest.actions ?? [];
+  }
+
+  /**
+   * Resolve the effective inputs list for a module, reading from gui.json for v3.
+   *
+   * @param manifest - Validated module manifest.
+   * @param moduleDir - Module directory path.
+   * @returns Input entries from the appropriate source.
+   */
+  private async resolveInputs(
+    manifest: ModuleManifestV1,
+    moduleDir: string
+  ): Promise<NonNullable<ModuleManifestV1["inputs"]>> {
+    if (isV3Manifest(manifest)) {
+      const guiManifest = await readGuiManifest(moduleDir);
+      return guiManifest?.inputs ?? [];
+    }
+    return manifest.inputs ?? [];
   }
 
   /**

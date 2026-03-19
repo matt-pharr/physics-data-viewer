@@ -24,23 +24,22 @@ import * as path from "path";
 import { CommRouter } from "./comm-router";
 import { EnvironmentDetector } from "./environment-detector";
 import { buildEditorSpawn, resolveEditorSpawn } from "./editor-spawn";
+import { registerKernelIpcHandlers } from "./ipc-register-kernels";
 import { registerModulesIpcHandlers } from "./ipc-register-modules";
-import { KernelManager, type KernelInfo } from "./kernel-manager";
-import { initializeKernelSession } from "./kernel-session";
+import { registerProjectIpcHandlers } from "./ipc-register-project";
+import { KernelManager } from "./kernel-manager";
 import { ModuleManager } from "./module-manager";
 import {
   bindProjectModulesToTree,
 } from "./module-runtime";
 import { ProjectManager, type ProjectModuleImport } from "./project-manager";
-import { copyFilesForLoad, copyFilesForSave } from "./project-file-sync";
 import { ConfigStore } from "./config";
 import { registerAppStateIpcHandlers } from "./ipc-register-app-state";
+import { registerModuleWindowIpcHandlers } from "./ipc-register-module-windows";
 import { registerTreeNamespaceScriptIpcHandlers } from "./ipc-register-tree-namespace-script";
+import { ModuleWindowManager } from "./module-window-manager";
 import {
   IPC,
-  KernelCompleteResult,
-  KernelInspectResult,
-  KernelValidateResult,
   ModuleHealthWarning,
   NamespaceQueryOptions,
   PDVConfig,
@@ -70,10 +69,13 @@ const REGISTERED_CHANNELS: readonly string[] = [
   IPC.tree.list,
   IPC.tree.get,
   IPC.tree.createScript,
+  IPC.tree.createNote,
   IPC.tree.addFile,
+  IPC.tree.invokeHandler,
   IPC.namespace.query,
   IPC.script.edit,
-  IPC.script.reload,
+  IPC.note.save,
+  IPC.note.read,
   IPC.modules.listInstalled,
   IPC.modules.install,
   IPC.modules.checkUpdates,
@@ -82,6 +84,8 @@ const REGISTERED_CHANNELS: readonly string[] = [
   IPC.modules.saveSettings,
   IPC.modules.runAction,
   IPC.modules.removeImport,
+  IPC.namelist.read,
+  IPC.namelist.write,
   IPC.project.save,
   IPC.project.load,
   IPC.project.new,
@@ -92,9 +96,14 @@ const REGISTERED_CHANNELS: readonly string[] = [
   IPC.codeCells.load,
   IPC.codeCells.save,
   IPC.menu.updateRecentProjects,
+  IPC.moduleWindows.open,
+  IPC.moduleWindows.close,
+  IPC.moduleWindows.context,
+  IPC.moduleWindows.executeInMain,
   IPC.files.pickExecutable,
   IPC.files.pickFile,
   IPC.files.pickDirectory,
+  IPC.about.getVersion,
 ];
 
 interface PushSubscription {
@@ -108,34 +117,6 @@ const kernelWorkingDirs = new Map<string, string>();
 const crashHandlers = new Map<string, (id: string) => void>();
 const projectManifestMutationQueue = new Map<string, Promise<void>>();
 let activeKernelManagerRef: KernelManager | null = null;
-
-// ---------------------------------------------------------------------------
-// Working-directory helpers
-// ---------------------------------------------------------------------------
-
-/**
- * Delete the working directory for a kernel and remove its crash handler.
- *
- * @param projectManager - Project manager used for deletion.
- * @param kernelManager  - Kernel manager used to remove event listeners.
- * @param kernelId       - Kernel whose working dir should be cleaned up.
- */
-async function cleanupKernelWorkingDir(
-  projectManager: ProjectManager,
-  kernelManager: KernelManager,
-  kernelId: string
-): Promise<void> {
-  const oldDir = kernelWorkingDirs.get(kernelId);
-  if (oldDir) {
-    await projectManager.deleteWorkingDir(oldDir);
-    kernelWorkingDirs.delete(kernelId);
-  }
-  const handler = crashHandlers.get(kernelId);
-  if (handler) {
-    kernelManager.removeListener("kernel:crashed", handler);
-    crashHandlers.delete(kernelId);
-  }
-}
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -372,233 +353,35 @@ export function registerIpcHandlers(
     );
   };
 
-  // Handles kernels:list requests from the renderer.
-  // Input: none.
-  // Returns: KernelInfo[] snapshot.
-  // On error: throws to renderer.
-  ipcMain.handle(IPC.kernels.list, async () => {
-    return kernelManager.list();
+  const preloadPath = path.join(__dirname, "..", "preload.js");
+  const moduleWindowManager = new ModuleWindowManager(win, preloadPath);
+
+  registerKernelIpcHandlers({
+    win,
+    kernelManager,
+    commRouter,
+    projectManager,
+    moduleManager,
+    kernelWorkingDirs,
+    crashHandlers,
+    resetProjectState: () => {
+      activeProjectDir = null;
+      pendingModuleImports = [];
+      pendingModuleSettings = {};
+      moduleHealthWarningsByAlias.clear();
+      moduleWindowManager.closeAll();
+    },
+    resetKernelState: () => {
+      pendingModuleImports = [];
+      pendingModuleSettings = {};
+      moduleHealthWarningsByAlias.clear();
+      moduleWindowManager.closeAll();
+    },
+    setActiveKernelId: (id) => { activeKernelId = id; },
+    getActiveKernelId: () => activeKernelId,
+    getActiveProjectDir: () => activeProjectDir,
+    bindActiveProjectModules,
   });
-
-  // Handles kernels:start requests from the renderer.
-  // Input: optional Partial<KernelSpec>.
-  // Returns: KernelInfo for the started kernel.
-  // On error: throws to renderer.
-  ipcMain.handle(IPC.kernels.start, async (_event, spec) => {
-    const requestedSpec = spec as Parameters<KernelManager["start"]>[0];
-    const pythonPath =
-      requestedSpec?.env?.PYTHON_PATH ??
-      (Array.isArray(requestedSpec?.argv) ? requestedSpec.argv[0] : undefined);
-    if ((requestedSpec?.language ?? "python") === "python" && pythonPath) {
-      const installStatus = await EnvironmentDetector.checkPDVInstalled(pythonPath);
-      if (!installStatus.installed) {
-        throw new Error(
-          `Selected Python runtime is missing pdv_kernel. Install it with: cd pdv-python && ${pythonPath} -m pip install -e ".[dev]"`
-        );
-      }
-    }
-    // Starting a new kernel always means a new session — clear any in-memory
-    // project state from a previous session (pending imports, active project
-    // dir, health warnings) so they don't carry over.
-    activeProjectDir = null;
-    pendingModuleImports = [];
-    pendingModuleSettings = {};
-    moduleHealthWarningsByAlias.clear();
-
-    const kernel = await kernelManager.start(
-      requestedSpec
-    );
-    commRouter.attach(kernelManager, kernel.id);
-    await initializeKernelSession(
-      kernelManager,
-      commRouter,
-      projectManager,
-      kernel.id,
-      kernelWorkingDirs
-    );
-    activeKernelId = kernel.id;
-    await bindActiveProjectModules(activeKernelId);
-
-    const onCrash = async (crashedId: string): Promise<void> => {
-      if (crashedId !== kernel.id) return;
-      await cleanupKernelWorkingDir(projectManager, kernelManager, crashedId);
-      if (activeKernelId === crashedId) activeKernelId = null;
-      win.webContents.send(IPC.push.kernelStatus, { kernelId: crashedId, status: "dead" });
-    };
-    crashHandlers.set(kernel.id, onCrash);
-    kernelManager.on("kernel:crashed", onCrash);
-
-    return kernel;
-  });
-
-  // Handles kernels:stop requests from the renderer.
-  // Input: kernelId (string).
-  // Returns: true after stop completes.
-  // On error: throws to renderer.
-  ipcMain.handle(IPC.kernels.stop, async (_event, kernelId: string) => {
-    await cleanupKernelWorkingDir(projectManager, kernelManager, kernelId);
-    await kernelManager.stop(kernelId);
-    if (activeKernelId === kernelId) {
-      activeKernelId = null;
-    }
-    commRouter.detach();
-    return true;
-  });
-
-  // Handles kernels:execute requests from the renderer.
-  // Input: kernelId (string), execute request payload.
-  // Returns: KernelExecuteResult.
-  // On error: throws to renderer.
-  ipcMain.handle(IPC.kernels.execute, async (event, kernelId, request) => {
-    return kernelManager.execute(
-      kernelId as string,
-      request as Parameters<KernelManager["execute"]>[1],
-      (chunk) => event.sender.send(IPC.push.executeOutput, chunk)
-    );
-  });
-
-  // Handles kernels:interrupt requests from the renderer.
-  // Input: kernelId (string).
-  // Returns: true after interrupt is sent.
-  // On error: throws to renderer.
-  ipcMain.handle(IPC.kernels.interrupt, async (_event, kernelId: string) => {
-    await kernelManager.interrupt(kernelId);
-    return true;
-  });
-
-  // Handles kernels:restart requests from the renderer.
-  // Input: kernelId (string).
-  // Returns: KernelInfo for the restarted kernel.
-  // On error: throws to renderer.
-  ipcMain.handle(IPC.kernels.restart, async (_event, kernelId: string) => {
-    // Restart clears the tree — reset in-memory project state so stale
-    // pending imports and project dir don't persist into the new session.
-    activeProjectDir = null;
-    pendingModuleImports = [];
-    pendingModuleSettings = {};
-    moduleHealthWarningsByAlias.clear();
-
-    const restartable = kernelManager as KernelManager & {
-      restart?: (id: string) => Promise<KernelInfo>;
-    };
-    if (restartable.restart) {
-      await cleanupKernelWorkingDir(projectManager, kernelManager, kernelId);
-      const restarted = await restartable.restart(kernelId);
-      commRouter.attach(kernelManager, restarted.id);
-      await initializeKernelSession(
-        kernelManager,
-        commRouter,
-        projectManager,
-        restarted.id,
-        kernelWorkingDirs
-      );
-      activeKernelId = restarted.id;
-      await bindActiveProjectModules(activeKernelId);
-      return restarted;
-    }
-    const current = kernelManager.getKernel(kernelId);
-    if (!current) {
-      throw new Error(`Kernel not found: ${kernelId}`);
-    }
-    await cleanupKernelWorkingDir(projectManager, kernelManager, kernelId);
-    await kernelManager.stop(kernelId);
-    const restarted = await kernelManager.start({
-      name: current.name,
-      language: current.language,
-    });
-    commRouter.attach(kernelManager, restarted.id);
-    await initializeKernelSession(
-      kernelManager,
-      commRouter,
-      projectManager,
-      restarted.id,
-      kernelWorkingDirs
-    );
-    activeKernelId = restarted.id;
-    await bindActiveProjectModules(activeKernelId);
-    return restarted;
-  });
-
-  // Handles kernels:complete requests from the renderer.
-  // Input: kernelId (string), code (string), cursorPos (number).
-  // Returns: KernelCompleteResult.
-  // On error: throws to renderer.
-  ipcMain.handle(
-    IPC.kernels.complete,
-    async (_event, kernelId: string, code: string, cursorPos: number) => {
-      const completable = kernelManager as KernelManager & {
-        complete?: (
-          id: string,
-          source: string,
-          pos: number
-        ) => Promise<KernelCompleteResult>;
-      };
-      if (completable.complete) {
-        return completable.complete(kernelId, code, cursorPos);
-      }
-      return {
-        matches: [],
-        cursor_start: cursorPos,
-        cursor_end: cursorPos,
-      };
-    }
-  );
-
-  // Handles kernels:inspect requests from the renderer.
-  // Input: kernelId (string), code (string), cursorPos (number).
-  // Returns: KernelInspectResult.
-  // On error: throws to renderer.
-  ipcMain.handle(
-    IPC.kernels.inspect,
-    async (_event, kernelId: string, code: string, cursorPos: number) => {
-      const inspectable = kernelManager as KernelManager & {
-        inspect?: (
-          id: string,
-          source: string,
-          pos: number
-        ) => Promise<KernelInspectResult>;
-      };
-      if (inspectable.inspect) {
-        return inspectable.inspect(kernelId, code, cursorPos);
-      }
-      return { found: false };
-    }
-  );
-
-  // Handles kernels:validate requests from the renderer.
-  // Input: executablePath (string), language ('python' | 'julia').
-  // Returns: KernelValidateResult.
-  // On error: throws to renderer.
-  ipcMain.handle(
-    IPC.kernels.validate,
-    async (_event, executablePath: string, language: "python" | "julia") => {
-      const validatable = kernelManager as KernelManager & {
-        validate?: (
-          execPath: string,
-          lang: "python" | "julia"
-        ) => Promise<KernelValidateResult>;
-      };
-      if (validatable.validate) {
-        return validatable.validate(executablePath, language);
-      }
-      if (!executablePath.trim()) {
-        return { valid: false, error: "Executable path is required" };
-      }
-      if (language === "python") {
-        const installStatus = await EnvironmentDetector.checkPDVInstalled(
-          executablePath.trim()
-        );
-        if (!installStatus.installed) {
-          return {
-            valid: false,
-            error:
-              'Missing pdv_kernel. Install it with: cd pdv-python && <python> -m pip install -e ".[dev]"',
-          };
-        }
-      }
-      return { valid: true };
-    }
-  );
 
   registerTreeNamespaceScriptIpcHandlers({
     kernelManager,
@@ -632,73 +415,18 @@ export function registerIpcHandlers(
     runWithProjectManifestWriteLock: runSerializedProjectManifestMutation,
   });
 
-  // Handles project:save requests from the renderer.
-  // Input: saveDir (string), codeCells payload.
-  // Returns: true on success.
-  // On error: throws to renderer.
-  // Merges any pending in-memory module imports/settings into the saved manifest.
-  ipcMain.handle(
-    IPC.project.save,
-    async (_event, saveDir: string, codeCells: unknown) => {
-      await projectManager.save(saveDir, codeCells);
-
-      // Merge pending in-memory module imports/settings into the on-disk manifest.
-      if (pendingModuleImports.length > 0 || Object.keys(pendingModuleSettings).length > 0) {
-        await runSerializedProjectManifestMutation(saveDir, async () => {
-          const manifest = await ProjectManager.readManifest(saveDir);
-          const mergedManifest = {
-            ...manifest,
-            modules: [...manifest.modules, ...pendingModuleImports],
-            module_settings: { ...manifest.module_settings, ...pendingModuleSettings },
-          };
-          await ProjectManager.saveManifest(saveDir, mergedManifest);
-        });
-        pendingModuleImports = [];
-        pendingModuleSettings = {};
-      }
-
-      // Copy file-backed node files from working dir into save dir.
-      if (activeKernelId) {
-        const workingDir = kernelWorkingDirs.get(activeKernelId);
-        if (workingDir) await copyFilesForSave(workingDir, saveDir);
-      }
-
-      activeProjectDir = saveDir;
-      await refreshProjectModuleHealth(activeProjectDir);
-      return true;
-    }
-  );
-
-  // Handles project:load requests from the renderer.
-  // Input: saveDir (string).
-  // Returns: code cell payload loaded by ProjectManager.
-  // On error: throws to renderer.
-  ipcMain.handle(IPC.project.load, async (_event, saveDir: string) => {
-    // Copy file-backed node files from save dir into working dir before kernel load.
-    if (activeKernelId) {
-      const workingDir = kernelWorkingDirs.get(activeKernelId);
-      if (workingDir) await copyFilesForLoad(saveDir, workingDir);
-    }
-
-    const loaded = await projectManager.load(saveDir);
-    activeProjectDir = saveDir;
-    pendingModuleImports = [];
-    pendingModuleSettings = {};
-    const manifest = await refreshProjectModuleHealth(activeProjectDir);
-    await bindActiveProjectModules(activeKernelId, manifest?.modules);
-    return loaded;
-  });
-
-  // Handles project:new requests from the renderer.
-  // Input: none.
-  // Returns: true.
-  // On error: throws to renderer.
-  ipcMain.handle(IPC.project.new, async () => {
-    activeProjectDir = null;
-    pendingModuleImports = [];
-    pendingModuleSettings = {};
-    moduleHealthWarningsByAlias.clear();
-    return true;
+  registerProjectIpcHandlers({
+    projectManager,
+    kernelWorkingDirs,
+    getActiveKernelId: () => activeKernelId,
+    setActiveProjectDir: (dir) => { activeProjectDir = dir; },
+    getPendingModuleImports: () => pendingModuleImports,
+    setPendingModuleImports: (imports) => { pendingModuleImports = imports; },
+    getPendingModuleSettings: () => pendingModuleSettings,
+    setPendingModuleSettings: (settings) => { pendingModuleSettings = settings; },
+    clearModuleHealthWarnings: () => moduleHealthWarningsByAlias.clear(),
+    refreshProjectModuleHealth,
+    runSerializedProjectManifestMutation,
   });
 
   registerAppStateIpcHandlers({
@@ -709,7 +437,12 @@ export function registerIpcHandlers(
     codeCellsPath,
   });
 
-  registerPushForwarding(win, commRouter);
+  registerModuleWindowIpcHandlers({
+    moduleWindowManager,
+    mainWindow: win,
+  });
+
+  registerPushForwarding(win, commRouter, moduleWindowManager);
 
   /**
    * Reset all in-session state. Called whenever the renderer reloads so that
@@ -722,6 +455,7 @@ export function registerIpcHandlers(
     pendingModuleImports = [];
     pendingModuleSettings = {};
     moduleHealthWarningsByAlias.clear();
+    moduleWindowManager.closeAll();
   }
 
   return resetSessionState;
@@ -736,17 +470,21 @@ export function registerIpcHandlers(
  */
 export function registerPushForwarding(
   win: BrowserWindow,
-  commRouter: CommRouter
+  commRouter: CommRouter,
+  moduleWindowManager?: ModuleWindowManager
 ): void {
-  const subscribe = (type: string, channel: string): void => {
+  const subscribe = (type: string, channel: string, broadcast?: boolean): void => {
     const handler = (message: PDVMessage): void => {
       win.webContents.send(channel, message.payload);
+      if (broadcast && moduleWindowManager) {
+        moduleWindowManager.broadcastToAll(channel, message.payload);
+      }
     };
     commRouter.onPush(type, handler);
     pushSubscriptions.push({ commRouter, type, handler });
   };
 
-  subscribe(PDVMessageType.TREE_CHANGED, IPC.push.treeChanged);
+  subscribe(PDVMessageType.TREE_CHANGED, IPC.push.treeChanged, true);
   subscribe(PDVMessageType.PROJECT_LOADED, IPC.push.projectLoaded);
 }
 

@@ -1,14 +1,26 @@
 import { useEffect, type Dispatch, type MutableRefObject, type SetStateAction } from 'react';
 import type { CellTab, LogEntry } from '../types';
 
+/** Options for {@link useKernelSubscriptions}. Manages push-subscription lifecycle. */
 interface UseKernelSubscriptionsOptions {
+  /** ID of the active kernel. Subscriptions are re-registered when this changes. */
   currentKernelId: string | null;
+  /** Ref holding project-loaded tabs snapshot; consumed by the onLoaded handler. */
   loadedProjectTabsRef: MutableRefObject<{ tabs: CellTab[]; activeTabId: number } | null>;
+  /** Setter for code cell tabs (updated on project load). */
   setCellTabs: Dispatch<SetStateAction<CellTab[]>>;
+  /** Setter for active tab ID (updated on project load). */
   setActiveCellTab: Dispatch<SetStateAction<number>>;
+  /** Appends streamed execution output (stdout, stderr, images) to console logs. */
   setLogs: Dispatch<SetStateAction<LogEntry[]>>;
+  /** Bumps the token to trigger Tree panel refetch on tree.changed pushes. */
   setTreeRefreshToken: Dispatch<SetStateAction<number>>;
+  /** Bumps the token to trigger ModulesPanel refetch on tree changes. */
   setModulesRefreshToken: Dispatch<SetStateAction<number>>;
+  /** Controls the project-reloading overlay shown during kernel restart with active project. */
+  setProjectReloading: Dispatch<SetStateAction<boolean>>;
+  /** Called when a kernel crash is detected via the push channel. */
+  onKernelCrash: (kernelId: string) => void;
 }
 
 export function useKernelSubscriptions({
@@ -19,6 +31,8 @@ export function useKernelSubscriptions({
   setLogs,
   setTreeRefreshToken,
   setModulesRefreshToken,
+  setProjectReloading,
+  onKernelCrash,
 }: UseKernelSubscriptionsOptions): void {
   useEffect(() => {
     const unsubscribe = window.pdv.kernels.onOutput((chunk) => {
@@ -65,16 +79,36 @@ export function useKernelSubscriptions({
       setTreeRefreshToken((prev) => prev + 1);
     });
 
+    const unsubscribeKernelStatus = window.pdv.kernels.onKernelStatus((payload) => {
+      if (payload.status === "dead") {
+        onKernelCrash(payload.kernelId);
+      }
+    });
+
+    const unsubscribeReloading = window.pdv.project.onReloading((payload) => {
+      if (payload.status === 'reloading') {
+        setProjectReloading(true);
+      } else if (payload.status === 'ready') {
+        setProjectReloading(false);
+        setTreeRefreshToken((prev) => prev + 1);
+        setModulesRefreshToken((prev) => prev + 1);
+      }
+    });
+
     return () => {
       unsubscribeTree();
       unsubscribeProject();
+      unsubscribeKernelStatus();
+      unsubscribeReloading();
     };
   }, [
     currentKernelId,
     loadedProjectTabsRef,
+    onKernelCrash,
     setActiveCellTab,
     setCellTabs,
     setModulesRefreshToken,
+    setProjectReloading,
     setTreeRefreshToken,
   ]);
 }

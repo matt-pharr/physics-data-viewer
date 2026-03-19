@@ -18,7 +18,7 @@ import * as path from "path";
 
 import type { CommRouter } from "./comm-router";
 import type { ConfigStore, PDVConfig } from "./config";
-import { IPC, type NamespaceQueryOptions, type NamespaceVariable, type TreeAddFileResult, type TreeCreateScriptResult } from "./ipc";
+import { IPC, type HandlerInvokeResult, type NamelistReadResult, type NamelistWriteResult, type NamespaceQueryOptions, type NamespaceVariable, type TreeAddFileResult, type TreeCreateNoteResult, type TreeCreateScriptResult } from "./ipc";
 import type { KernelManager } from "./kernel-manager";
 import { PDVMessageType, type PDVFileRegisterPayload } from "./pdv-protocol";
 import type { ProjectManager } from "./project-manager";
@@ -170,13 +170,51 @@ export function registerTreeNamespaceScriptIpcHandlers(
   );
 
   ipcMain.handle(
+    IPC.tree.createNote,
+    async (
+      _event,
+      kernelId: string,
+      targetPath: string,
+      noteName: string
+    ): Promise<TreeCreateNoteResult> => {
+      if (!kernelManager.getKernel(kernelId)) {
+        throw new Error(`Kernel not found: ${kernelId}`);
+      }
+      let workingDir = kernelWorkingDirs.get(kernelId);
+      if (!workingDir) {
+        workingDir = await projectManager.createWorkingDir();
+        kernelWorkingDirs.set(kernelId, workingDir);
+      }
+      const safeName = noteName.trim().replace(/\s+/g, "_").replace(/[^a-zA-Z0-9_-]/g, "");
+      const noteDir = path.join(workingDir, "tree", ...targetPath.split(".").filter(Boolean));
+      await fs.mkdir(noteDir, { recursive: true });
+      const notePath = path.join(noteDir, safeName + ".md");
+
+      // Create the .md file if it doesn't exist
+      try {
+        await fs.access(notePath);
+      } catch {
+        await fs.writeFile(notePath, "", "utf-8");
+      }
+
+      const treePath = targetPath ? `${targetPath}.${safeName}` : safeName;
+      await commRouter.request(PDVMessageType.NOTE_REGISTER, {
+        parent_path: targetPath,
+        name: safeName,
+        relative_path: notePath,
+      });
+      return { success: true, notePath, treePath };
+    }
+  );
+
+  ipcMain.handle(
     IPC.tree.addFile,
     async (
       _event,
       kernelId: string,
       sourcePath: string,
       targetTreePath: string,
-      nodeType: "namelist" | "fortran" | "file",
+      nodeType: "namelist" | "lib" | "file",
       filename: string
     ): Promise<TreeAddFileResult> => {
       if (!kernelManager.getKernel(kernelId)) throw new Error(`Kernel not found: ${kernelId}`);
@@ -235,27 +273,130 @@ export function registerTreeNamespaceScriptIpcHandlers(
 
   ipcMain.handle(IPC.script.edit, async (_event, kernelId: string, scriptPath: string) => {
     const config = readConfig(configStore);
-    const resolvedScriptPath = resolveScriptPath(kernelId, scriptPath, kernelWorkingDirs);
-    const isJulia = resolvedScriptPath.endsWith(".jl");
+
+    // Resolve the file path — try the kernel comm first (handles all
+    // PDVFile types including lib/namelist), fall back to the legacy
+    // tree-path-to-filesystem derivation for plain scripts.
+    let resolvedPath: string | undefined;
+    try {
+      const response = await commRouter.request(
+        PDVMessageType.TREE_RESOLVE_FILE,
+        { path: scriptPath }
+      );
+      const filePath = (response.payload as Record<string, unknown> | undefined)?.file_path;
+      if (typeof filePath === "string" && filePath.length > 0) {
+        resolvedPath = filePath;
+      }
+    } catch {
+      // Comm failed — fall through to legacy resolution
+    }
+    if (!resolvedPath) {
+      resolvedPath = resolveScriptPath(kernelId, scriptPath, kernelWorkingDirs);
+    }
+
+    const isJulia = resolvedPath.endsWith(".jl");
     const cmdString = isJulia ? config.juliaEditorCmd : config.pythonEditorCmd;
-    const { file, args } = buildEditorSpawn(cmdString, resolvedScriptPath);
+    const { file, args } = buildEditorSpawn(cmdString, resolvedPath);
     const spawnSpec = resolveEditorSpawn(file, args);
     const child = spawn(spawnSpec.file, spawnSpec.args, { detached: true, stdio: "ignore" });
     child.unref();
     return { success: true };
   });
 
-  ipcMain.handle(IPC.script.reload, async (_event, treePath: string) => {
-    const lastDot = treePath.lastIndexOf(".");
-    const parentPath = lastDot >= 0 ? treePath.slice(0, lastDot) : "";
-    const name = lastDot >= 0 ? treePath.slice(lastDot + 1) : treePath;
-    await commRouter.request(PDVMessageType.SCRIPT_REGISTER, {
-      parent_path: parentPath,
-      name,
-      relative_path: treePath,
-      language: "python",
-      reload: true,
-    });
-    return { success: true };
-  });
+  ipcMain.handle(
+    IPC.note.save,
+    async (_event, kernelId: string, treePath: string, content: string) => {
+      try {
+        const workingDir = kernelWorkingDirs.get(kernelId);
+        if (!workingDir) throw new Error(`Working dir not initialized: ${kernelId}`);
+        const segments = treePath.split(".").filter(Boolean);
+        const lastSeg = segments.pop();
+        if (!lastSeg) throw new Error("Invalid tree path");
+        const noteDir = segments.length > 0
+          ? path.join(workingDir, "tree", ...segments)
+          : path.join(workingDir, "tree");
+        const filePath = path.join(noteDir, lastSeg + ".md");
+        await fs.mkdir(noteDir, { recursive: true });
+        await fs.writeFile(filePath, content, "utf-8");
+        return { success: true };
+      } catch (err) {
+        return { success: false, error: String(err) };
+      }
+    }
+  );
+
+  ipcMain.handle(
+    IPC.note.read,
+    async (_event, kernelId: string, treePath: string) => {
+      try {
+        const workingDir = kernelWorkingDirs.get(kernelId);
+        if (!workingDir) throw new Error(`Working dir not initialized: ${kernelId}`);
+        const segments = treePath.split(".").filter(Boolean);
+        const lastSeg = segments.pop();
+        if (!lastSeg) throw new Error("Invalid tree path");
+        const noteDir = segments.length > 0
+          ? path.join(workingDir, "tree", ...segments)
+          : path.join(workingDir, "tree");
+        const filePath = path.join(noteDir, lastSeg + ".md");
+        const content = await fs.readFile(filePath, "utf-8");
+        return { success: true, content };
+      } catch (err) {
+        return { success: false, error: String(err) };
+      }
+    }
+  );
+
+  ipcMain.handle(
+    IPC.tree.invokeHandler,
+    async (
+      _event,
+      kernelId: string,
+      nodePath: string
+    ): Promise<HandlerInvokeResult> => {
+      if (!kernelManager.getKernel(kernelId)) {
+        return { success: false, error: `Kernel not found: ${kernelId}` };
+      }
+      const response = await commRouter.request(PDVMessageType.HANDLER_INVOKE, {
+        path: nodePath,
+      });
+      const payload = response.payload as { dispatched: boolean; error?: string };
+      return { success: payload.dispatched, error: payload.error };
+    }
+  );
+
+  ipcMain.handle(
+    IPC.namelist.read,
+    async (
+      _event,
+      kernelId: string,
+      treePath: string
+    ): Promise<NamelistReadResult> => {
+      if (!kernelManager.getKernel(kernelId)) {
+        throw new Error(`Kernel not found: ${kernelId}`);
+      }
+      const response = await commRouter.request(PDVMessageType.NAMELIST_READ, {
+        tree_path: treePath,
+      });
+      return response.payload as unknown as NamelistReadResult;
+    }
+  );
+
+  ipcMain.handle(
+    IPC.namelist.write,
+    async (
+      _event,
+      kernelId: string,
+      treePath: string,
+      data: Record<string, Record<string, unknown>>
+    ): Promise<NamelistWriteResult> => {
+      if (!kernelManager.getKernel(kernelId)) {
+        throw new Error(`Kernel not found: ${kernelId}`);
+      }
+      const response = await commRouter.request(PDVMessageType.NAMELIST_WRITE, {
+        tree_path: treePath,
+        data,
+      });
+      return response.payload as unknown as NamelistWriteResult;
+    }
+  );
 }

@@ -77,16 +77,6 @@ class TreeService {
     return enriched;
   }
 
-  /** Create a script node and invalidate relevant cached tree snapshots. */
-  async createScript(kernelId: string, targetPath: string, scriptName: string): Promise<TreeNodeData | undefined> {
-    const result = await window.pdv.tree.createScript(kernelId, targetPath, scriptName);
-    if (!result.success) {
-      throw new Error(result.error || 'Failed to create script');
-    }
-    this.clearCache(kernelId);
-    return undefined;
-  }
-
   /** Clear all cache entries, or only entries for a specific kernel id. */
   clearCache(kernelId?: string | null): void {
     if (!kernelId) {
@@ -108,6 +98,8 @@ class TreeService {
     hasChildren: Boolean(node.has_children),
     parentPath: node.parent_path ?? null,
     params: node.params,
+    python_type: node.python_type,
+    has_handler: node.has_handler,
     isExpanded: false,
     isLoading: false,
   });

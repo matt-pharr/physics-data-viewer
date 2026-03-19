@@ -33,9 +33,6 @@ import {
 } from "./pdv-protocol";
 import type { KernelManager, JupyterMessage } from "./kernel-manager";
 
-// Re-export PDVEnvelope alias so existing test imports still resolve.
-export type { PDVMessage as PDVEnvelope } from "./pdv-protocol";
-
 // ---------------------------------------------------------------------------
 // Error classes
 // ---------------------------------------------------------------------------
@@ -75,7 +72,7 @@ export class PDVCommTimeoutError extends Error {
  * Thrown (and logged) when an incoming message has an incompatible major
  * protocol version.
  */
-export class PDVVersionError extends Error {
+class PDVVersionError extends Error {
   constructor(public readonly incomingVersion: string) {
     super(
       `Incompatible PDV protocol version: received ${incomingVersion}, ` +
@@ -90,7 +87,7 @@ export class PDVVersionError extends Error {
 // ---------------------------------------------------------------------------
 
 /** Callback invoked when a push notification arrives (no in_reply_to). */
-export type PushHandler = (msg: PDVMessage) => void;
+type PushHandler = (msg: PDVMessage) => void;
 
 /** A pending request waiting for a matching in_reply_to on iopub. */
 interface PendingRequest {
@@ -379,7 +376,7 @@ export class CommRouter {
 
   /** Reject every pending request (used by detach() and reset()). */
   private _rejectAllPending(err: unknown): void {
-    for (const [msgId, pending] of this.pending) {
+    for (const [_msgId, pending] of this.pending) {
       clearTimeout(pending.timer);
       pending.reject(err);
     }

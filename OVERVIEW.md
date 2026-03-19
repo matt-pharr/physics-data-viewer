@@ -35,12 +35,12 @@ See `ARCHITECTURE.md` §7.
 
 `pdv-python` provides the kernel-side runtime:
 
-- `PDVTree`, `PDVScript`, lazy-load and serialization logic
+- `PDVTree`, `PDVScript`, `PDVNote`, lazy-load and serialization logic
 - comm target registration and dispatch
 - namespace protection (`pdv_tree` and `pdv` are protected bindings)
 - save/load, tree, script, lifecycle, and namespace handlers
 
-On kernel startup, `bootstrap()` registers the comm target, injects `pdv_tree`/`pdv`, and emits readiness signaling used by main-process startup flow.
+On kernel startup (triggered when the user selects an action from the WelcomeScreen), `bootstrap()` registers the comm target, injects `pdv_tree`/`pdv`, and emits readiness signaling used by the main-process handshake.
 
 See `ARCHITECTURE.md` §5.
 
@@ -49,6 +49,7 @@ See `ARCHITECTURE.md` §5.
 Primary renderer components live under `electron/renderer/src/components`:
 
 - **CodeCell**: tabbed code editing and execution submission
+- **WriteTab**: tabbed markdown note editor with inline KaTeX math preview, Edit/Read mode toggle, and auto-save
 - **Console**: execution outputs, errors, and result display
 - **Tree**: hierarchical data navigation and node actions
 - **NamespaceView**: filtered namespace variable listing
@@ -62,9 +63,10 @@ The renderer entry orchestration is in `electron/renderer/src/app/index.tsx`.
 The frontend interacts with the backend only via the preload bridge:
 
 - `kernels`: lifecycle, execute, completion/inspect, validation, streamed output subscription (`onOutput`)
-- `tree`: list/get/createScript + tree-change subscription (`onChanged`)
+- `tree`: list/get/createScript/createNote + tree-change subscription (`onChanged`)
 - `namespace`: variable query
-- `script`: edit/reload
+- `note`: save/read markdown note content (direct file I/O, no kernel round-trip)
+- `script`: edit
 - `project`: save/load/new + project-loaded subscription (`onLoaded`)
 - `config`: get/set
 - `about`: version read (`getVersion`)
@@ -74,6 +76,19 @@ The frontend interacts with the backend only via the preload bridge:
 - `menu`: recent-project sync and menu action subscription
 
 See `ARCHITECTURE.md` §11.2 for the canonical contract.
+
+## Markdown Notes
+
+PDV supports markdown notes as first-class tree nodes. Notes are backed by `.md` files and edited in a dedicated **Write tab** — a sibling of the Code tab in the middle pane. The Write tab provides:
+
+- **Tabbed editor**: Multiple notes can be open simultaneously, each in its own tab with unsaved-change indicators.
+- **Inline KaTeX math preview**: `$...$` (inline) and `$$...$$` (display) math expressions are rendered live alongside the LaTeX source using KaTeX.
+- **Edit/Read mode toggle**: Switch between the Monaco editor with inline math previews and a fully rendered markdown view (using `marked` + `marked-katex-extension`).
+- **Auto-save**: Content is saved to disk with a 5-second debounce after the last change.
+
+Notes are created via the tree panel context menu ("New Note") or programmatically via `pdv.new_note(path)`. On project save, `.md` files are copied into the save directory; on load, they are restored to the working directory and re-registered in the tree.
+
+See `ARCHITECTURE.md` §5.8 and §7.2 for the data model details.
 
 ## Branch delta (`frontend_refactor` vs `develop`)
 
@@ -140,5 +155,5 @@ npm run dev
 | IPC surface and renderer bridge | `electron/main/ipc.ts`, `electron/main/index.ts`, `electron/preload.ts` |
 | Tree model and save/load authority | `ARCHITECTURE.md` §7 and `pdv-python/pdv_kernel/tree.py` |
 | Kernel bootstrap and handlers | `pdv-python/pdv_kernel/comms.py`, `pdv-python/pdv_kernel/handlers/` |
-| Project-level modules implementation sequence | `FEATURE_2_IMPLEMENTATION_STEPS.md` |
+| Modules feature behavior and manifest syntax | `modules.md` |
 | Future roadmap items | `PLANNED_FEATURES.md` |

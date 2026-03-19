@@ -10,6 +10,7 @@ import { treeService, type TreeNodeData } from '../../services/tree';
 import { TreeNodeRow } from './TreeNodeRow';
 import { ContextMenu } from './ContextMenu';
 import { findNode, flattenTree, updateNodeImmut } from './tree-utils';
+import { TREE_PERSIST_DEBOUNCE_MS } from '../../app/constants';
 import type { Shortcuts } from '../../shortcuts';
 import { matchesShortcut } from '../../shortcuts';
 
@@ -35,7 +36,8 @@ export const Tree: React.FC<TreeProps> = ({ kernelId, disabled = false, refreshT
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
   const [selectedPath, setSelectedPath] = useState<string | null>(() => {
     try {
-      return localStorage.getItem('pdv:selectedPath') || null;
+      const stored = localStorage.getItem('pdv:selectedPath');
+      return stored !== null ? stored : null;
     } catch {
       return null;
     }
@@ -67,7 +69,26 @@ export const Tree: React.FC<TreeProps> = ({ kernelId, disabled = false, refreshT
     try {
       const rootNodes = await treeService.getRootNodes(kernelId, { force });
       const restored = await restoreExpandedTree(rootNodes, expandedPathsRef.current, kernelId);
-      setNodes(restored);
+
+      // Wrap in a synthetic root node so there is always a right-clickable
+      // container even when the tree is empty.
+      const rootIsExpanded = expandedPathsRef.current.has('') || restored.length > 0;
+      if (rootIsExpanded) expandedPathsRef.current.add('');
+      const syntheticRoot: TreeNodeData = {
+        id: '__root__',
+        key: 'pdv_tree',
+        path: '',
+        parent_path: null,
+        type: 'root',
+        has_children: true,
+        lazy: false,
+        preview: '',
+        hasChildren: true,
+        parentPath: null,
+        isExpanded: rootIsExpanded,
+        children: restored,
+      };
+      setNodes([syntheticRoot]);
     } catch (err) {
       console.error('[Tree] Failed to load root nodes', err);
       setError('Failed to load tree');
@@ -85,7 +106,7 @@ export const Tree: React.FC<TreeProps> = ({ kernelId, disabled = false, refreshT
       } catch (error) {
         console.warn('Failed to persist expanded paths:', error);
       }
-    }, 500); // Debounce saves to avoid excessive writes
+    }, TREE_PERSIST_DEBOUNCE_MS);
     
     return () => clearTimeout(timeoutId);
   }, [nodes]); // Save whenever nodes change (expand/collapse)
@@ -93,7 +114,7 @@ export const Tree: React.FC<TreeProps> = ({ kernelId, disabled = false, refreshT
   // Persist selected path to localStorage
   useEffect(() => {
     try {
-      if (selectedPath) {
+      if (selectedPath !== null) {
         localStorage.setItem('pdv:selectedPath', selectedPath);
       } else {
         localStorage.removeItem('pdv:selectedPath');
@@ -105,29 +126,19 @@ export const Tree: React.FC<TreeProps> = ({ kernelId, disabled = false, refreshT
 
   useEffect(() => {
     void loadRoot(true);
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- loadRoot is stable for given kernelId; real triggers are kernelId/refreshToken/disabled
   }, [kernelId, refreshToken, disabled]);
-
-  const updateNode = (list: TreeNodeData[], path: string, updater: (n: TreeNodeData) => TreeNodeData) =>
-    list.map((node) => {
-      if (node.path === path) {
-        return updater(node);
-      }
-      if (node.children) {
-        return { ...node, children: updateNode(node.children, path, updater) };
-      }
-      return node;
-    });
 
   const handleExpand = async (node: TreeNodeData) => {
     if (!kernelId || disabled) return;
     if (node.isExpanded) {
-      setNodes((prev) => updateNode(prev, node.path, (n) => ({ ...n, isExpanded: false })));
+      setNodes((prev) => updateNodeImmut(prev, node.path, (n) => ({ ...n, isExpanded: false })));
       expandedPathsRef.current.delete(node.path);
       return;
     }
 
     expandedPathsRef.current.add(node.path);
-    setNodes((prev) => updateNode(prev, node.path, (n) => ({ ...n, isLoading: true })));
+    setNodes((prev) => updateNodeImmut(prev, node.path, (n) => ({ ...n, isLoading: true })));
     try {
       const children = await treeService.getChildren(node, kernelId, {
         force: true,
@@ -135,7 +146,7 @@ export const Tree: React.FC<TreeProps> = ({ kernelId, disabled = false, refreshT
       });
       expandedPathsRef.current.add(node.path);
       setNodes((prev) =>
-        updateNode(prev, node.path, (n) => ({
+        updateNodeImmut(prev, node.path, (n) => ({
           ...n,
           isExpanded: true,
           isLoading: false,
@@ -146,12 +157,23 @@ export const Tree: React.FC<TreeProps> = ({ kernelId, disabled = false, refreshT
     } catch (err) {
       console.error('[Tree] Failed to load children for', node.key, err);
       setError(`Failed to load children for ${node.key}`);
-      setNodes((prev) => updateNode(prev, node.path, (n) => ({ ...n, isLoading: false })));
+      setNodes((prev) => updateNodeImmut(prev, node.path, (n) => ({ ...n, isLoading: false })));
     }
   };
 
   const handleDoubleClick = (node: TreeNodeData) => {
-    console.log('[Tree] Double-clicked:', node);
+    if (disabled) return;
+    if (node.type === 'module' || node.type === 'gui') {
+      onAction?.('open_gui', node);
+      return;
+    }
+    if (node.has_handler) {
+      onAction?.('handle', node);
+    } else if (node.type === 'markdown') {
+      onAction?.('open_note', node);
+    } else if (node.type === 'script') {
+      onAction?.('run', node);
+    }
   };
 
   const handleSelect = (node: TreeNodeData) => {
@@ -180,7 +202,7 @@ export const Tree: React.FC<TreeProps> = ({ kernelId, disabled = false, refreshT
 
   const flatNodes = useMemo(() => flattenTree(nodes), [nodes]);
 
-  const selectedNode = selectedPath ? flatNodes.find((n) => n.path === selectedPath) : undefined;
+  const selectedNode = selectedPath !== null ? flatNodes.find((n) => n.path === selectedPath) : undefined;
 
   const handleKeyDown = async (event: React.KeyboardEvent<HTMLDivElement>) => {
     // Prevent Space from triggering browser button-click on focused tree rows
@@ -198,7 +220,8 @@ export const Tree: React.FC<TreeProps> = ({ kernelId, disabled = false, refreshT
       return;
     }
 
-    if (selectedNode.type === 'script' && matchesShortcut(nativeEvent, shortcuts.treeEditScript)) {
+    const editableTypes = ['script', 'namelist', 'lib'];
+    if (editableTypes.includes(selectedNode.type) && matchesShortcut(nativeEvent, shortcuts.treeEditScript)) {
       event.preventDefault();
       onAction?.('edit', selectedNode);
       return;
@@ -229,7 +252,6 @@ export const Tree: React.FC<TreeProps> = ({ kernelId, disabled = false, refreshT
           </div>
         )}
         {error && <div className="tree-error">{error}</div>}
-        {!disabled && !loading && !error && flatNodes.length === 0 && <div className="tree-empty">No data</div>}
 
         {!disabled &&
           !loading &&

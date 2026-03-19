@@ -6,12 +6,19 @@
  */
 
 import React, { useMemo, useState } from 'react';
-import type { KernelExecuteResult, ScriptParameter, TreeNodeData } from '../../types';
+import type { KernelExecuteResult, KernelExecutionOrigin, ScriptParameter, TreeNodeData } from '../../types';
+
+interface ScriptRunPayload {
+  code: string;
+  executionId: string;
+  origin: KernelExecutionOrigin;
+  result: KernelExecuteResult;
+}
 
 interface ScriptDialogProps {
   node: TreeNodeData;
   kernelId: string;
-  onRun: (code: string, result: KernelExecuteResult) => void;
+  onRun: (payload: ScriptRunPayload) => void;
   onCancel: () => void;
 }
 
@@ -80,8 +87,21 @@ export const ScriptDialog: React.FC<ScriptDialogProps> = ({ node, kernelId, onRu
       const code = `import json\npdv_tree[${JSON.stringify(node.path)}].run(**json.loads(${JSON.stringify(
         JSON.stringify(argPayload)
       )}))`;
-      const result = await window.pdv.kernels.execute(kernelId, { code });
-      onRun(code, result);
+      const executionId =
+        typeof crypto !== 'undefined' && 'randomUUID' in crypto
+          ? crypto.randomUUID()
+          : `log-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+      const origin: KernelExecutionOrigin = {
+        kind: 'tree-script',
+        label: node.path,
+        scriptPath: node.path,
+      };
+      const result = await window.pdv.kernels.execute(kernelId, {
+        code,
+        executionId,
+        origin,
+      });
+      onRun({ code, executionId, origin, result });
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {

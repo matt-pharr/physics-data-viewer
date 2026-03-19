@@ -1,65 +1,60 @@
 # Physics Data Viewer (PDV)
 
-Physics Data Viewer is an Electron desktop app for physics analysis workflows.
-The architecture is documented in [`ARCHITECTURE.md`](./ARCHITECTURE.md), and
-the current modules implementation plan/progress is tracked in
-[`FEATURE_2_IMPLEMENTATION_STEPS.md`](./FEATURE_2_IMPLEMENTATION_STEPS.md) and
-[`FEATURE_2_PROGRESS.md`](./FEATURE_2_PROGRESS.md).
+A desktop environment for computational and experimental physics analysis. PDV combines a tabbed code editor with a persistent, typed data hierarchy — the **Tree** — that lives inside a Python kernel. Unlike Jupyter notebooks, the Tree gives you structured data management and reproducible analysis pipelines independent of cell-state transience.
 
-## Developer setup
+**Status**: Alpha (`v0.0.5`) — under active development.
 
-### 1) Install Python package in editable mode
+---
 
-```bash
-cd pdv-python
-python -m pip install -e ".[dev]"
-```
+## Features
 
-### 2) Install Electron dependencies
+- **Tree-based data management** — persistent hierarchical data model in the kernel with lazy loading for large datasets
+- **Tabbed code editor** — multi-tab Monaco editor with syntax highlighting, autocomplete, and global undo
+- **Execution console** — real-time output streaming with inline error display
+- **Script system** — reusable analysis workflows stored as tree nodes with typed parameter binding
+- **Markdown notes** — first-class tree nodes with a dedicated Write tab, inline KaTeX math preview, and Edit/Read mode toggle
+- **Namespace inspector** — live view of all kernel variables with type, shape, and size
+- **Project save / load** — serialize the full analysis state (tree, scripts, code tabs) for reproducibility
+- **Module system** — import and manage reusable analysis packages
+- **Themes and customization** — built-in light/dark themes, system-follow mode, configurable fonts and shortcuts
 
-```bash
-cd electron
-npm install
-```
+---
 
-## Running tests
+## Download
 
-### Python unit tests
+> Releases will be available here starting with `v0.1.0-beta1`.
 
-```bash
-cd pdv-python
-pytest tests/ -v --tb=short
-```
+---
 
-### Electron TypeScript tests
+## Documentation
 
-```bash
-cd electron
-npm test -- --reporter=verbose
-```
+| Document | Description |
+|----------|-------------|
+| [**QUICK_START.md**](./QUICK_START.md) | Developer setup, build commands, project structure, onboarding guide |
+| [**ARCHITECTURE.md**](./ARCHITECTURE.md) | Authoritative design specification — process model, protocols, data model |
+| [**OVERVIEW.md**](./OVERVIEW.md) | Feature overview and UI walkthrough |
+| [**modules.md**](./modules.md) | Module system documentation |
+| [**PLANNED_FEATURES.md**](./PLANNED_FEATURES.md) | Roadmap organized by release milestone |
 
-### Electron integration test (optional)
+---
 
-```bash
-cd electron
-PYTHON_PATH=/path/to/python npm test -- --reporter=verbose main/integration.test.ts
-```
-
-## Build and run
-
-### Build
+## Quick Dev Setup
 
 ```bash
-cd electron
-npm run build
+# Clone
+git clone <repo-url> && cd physics-data-viewer
+
+# Electron app
+cd electron && npm install
+
+# Python kernel package
+cd ../pdv-python && pip install -e ".[dev]"
+
+# Build & Run
+cd ../electron && npm run build && npm run dev
 ```
 
-### Run in development mode
-
-```bash
-cd electron
-npm run dev
-```
+See [QUICK_START.md](./QUICK_START.md) for the full guide including prerequisites, testing, and common development tasks.
 
 ---
 

@@ -37,6 +37,7 @@ describe('treeService', () => {
   });
 
   beforeEach(() => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- mock window.pdv for tests
     (globalThis.window as any).pdv = {
       tree: {
         list: vi.fn(async (_kernelId?: string, path?: string) => {
@@ -135,15 +136,6 @@ describe('treeService', () => {
     expect(children[0].lazy).toBe(false);
   });
 
-  it('creates script and clears cache', async () => {
-    const createMock = window.pdv.tree.createScript as unknown as ReturnType<typeof vi.fn>;
-    await treeService.getRootNodes('k1');
-    await treeService.createScript('k1', 'scripts', 'demo');
-
-    expect(createMock).toHaveBeenCalledWith('k1', 'scripts', 'demo');
-    const listMock = window.pdv.tree.list as unknown as ReturnType<typeof vi.fn>;
-    expect(listMock).toHaveBeenCalledTimes(1);
-  });
   afterAll(() => {
     Object.defineProperty(globalThis, 'window', {
       value: originalWindow,

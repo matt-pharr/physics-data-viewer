@@ -34,6 +34,15 @@ describe('Console', () => {
       stderr: 'err',
       result: { x: 1 },
       error: 'boom',
+      origin: { kind: 'code-cell', label: 'Tab 1', tabId: 1 },
+      errorDetails: {
+        name: 'ValueError',
+        message: 'boom',
+        summary: 'Code cell "Tab 1" (line 3, column 7): ValueError: boom',
+        traceback: ['Traceback (most recent call last):', 'ValueError: boom'],
+        location: { file: 'cell.py', line: 3, column: 7 },
+        source: { kind: 'code-cell', label: 'Tab 1', tabId: 1 },
+      },
       duration: 123.4,
       images: [{ mime: 'image/png', data: 'abcd' }],
     });
@@ -46,9 +55,28 @@ describe('Console', () => {
     expect(container.querySelector('.log-stderr')?.innerHTML).toContain('<span>err</span>');
     expect(container.querySelector('.log-result')?.textContent).toContain('"x": 1');
     expect(screen.getByText('Error: boom')).toBeTruthy();
+    expect(container.querySelector('.log-source')?.textContent).toBe('Cell 1');
+    expect(screen.getByText('File cell.py, line 3, column 7')).toBeTruthy();
+    expect(container.querySelector('.log-traceback')?.innerHTML).toContain('Traceback (most recent call last):');
 
     const image = screen.getByRole('img', { name: 'Plot 1.1' }) as HTMLImageElement;
     expect(image.src).toContain('data:image/png;base64,abcd');
+  });
+
+  it('shows source in header without bottom context for non-error logs', () => {
+    const { container } = render(
+      <Console
+        logs={[
+          makeLog({
+            origin: { kind: 'code-cell', label: 'Tab 1', tabId: 1 },
+            stdout: 'ok',
+          }),
+        ]}
+        onClear={vi.fn()}
+      />
+    );
+    expect(container.querySelector('.log-source')?.textContent).toBe('Cell 1');
+    expect(container.querySelector('.log-error-context')).toBeNull();
   });
 
   it('renders null result string', () => {

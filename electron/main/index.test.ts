@@ -92,6 +92,15 @@ const mocks = vi.hoisted(() => {
   const moduleManagerGetModuleInputs = vi.fn(async () => [
     { id: "threshold", label: "Threshold", type: "int", default: "5" },
   ]);
+  const moduleManagerGetModuleGuiInfo = vi.fn(async () => ({
+    hasGui: true,
+    gui: undefined,
+  }));
+  const moduleManagerGetModuleInstallPath = vi.fn(async () => null);
+  const moduleManagerGetModuleSetupInfo = vi.fn(async () => ({
+    entryPoint: undefined,
+  }));
+  const moduleManagerResolveModuleFiles = vi.fn(async () => []);
   return {
     handlers,
     ipcHandle,
@@ -110,6 +119,10 @@ const mocks = vi.hoisted(() => {
     moduleManagerEvaluateHealth,
     moduleManagerResolveActionScripts,
     moduleManagerGetModuleInputs,
+    moduleManagerGetModuleGuiInfo,
+    moduleManagerGetModuleInstallPath,
+    moduleManagerGetModuleSetupInfo,
+    moduleManagerResolveModuleFiles,
   };
 });
 
@@ -122,6 +135,7 @@ vi.mock("electron", () => ({
     showOpenDialog: mocks.dialogShowOpenDialog,
   },
   app: {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
     getVersion: () => (require("../package.json") as { version: string }).version,
   },
 }));
@@ -147,6 +161,10 @@ vi.mock("./module-manager", () => ({
     evaluateHealth: mocks.moduleManagerEvaluateHealth,
     resolveActionScripts: mocks.moduleManagerResolveActionScripts,
     getModuleInputs: mocks.moduleManagerGetModuleInputs,
+    getModuleGuiInfo: mocks.moduleManagerGetModuleGuiInfo,
+    getModuleInstallPath: mocks.moduleManagerGetModuleInstallPath,
+    getModuleSetupInfo: mocks.moduleManagerGetModuleSetupInfo,
+    resolveModuleFiles: mocks.moduleManagerResolveModuleFiles,
   })),
 }));
 
@@ -190,6 +208,15 @@ function setup() {
     stop: vi.fn(async () => undefined),
     execute: vi.fn(async () => ({ result: 2 })),
     interrupt: vi.fn(async () => undefined),
+    complete: vi.fn(async () => ({
+      matches: ["import"],
+      cursor_start: 0,
+      cursor_end: 6,
+    })),
+    inspect: vi.fn(async () => ({
+      found: true,
+      data: { "text/plain": "doc" },
+    })),
     getKernel: vi.fn(() => makeKernelInfo()),
     shutdownAll: vi.fn(async () => undefined),
     on: vi.fn(),
@@ -219,8 +246,11 @@ function setup() {
   } as unknown as CommRouter;
 
   const projectManager = {
-    save: vi.fn(async () => undefined),
-    load: vi.fn(async () => []),
+    save: vi.fn(async () => ({ checksum: "abc123", nodeCount: 0 })),
+    load: vi.fn(async (_saveDir: string, onBeforePush?: () => Promise<void>) => {
+      if (onBeforePush) await onBeforePush();
+      return [];
+    }),
     createWorkingDir: vi.fn(async () => "/tmp/pdv-test"),
     deleteWorkingDir: vi.fn(async () => undefined),
   } as unknown as ProjectManager;
@@ -546,26 +576,31 @@ describe("Step 5 IPC handlers", () => {
     expect(result).toMatchObject({ id: expect.any(String), status: "idle" });
   });
 
-  it("kernels:complete returns empty matches when complete() is absent", async () => {
-    const { kernelManager: _ } = setup();
+  it("kernels:complete delegates to KernelManager.complete", async () => {
+    const { kernelManager } = setup();
     const complete = getHandler(IPC.kernels.complete);
     const result = (await complete({}, "kernel-1", "import ", 7)) as {
       matches: string[];
       cursor_start: number;
       cursor_end: number;
     };
+    expect(kernelManager.complete).toHaveBeenCalledWith("kernel-1", "import ", 7);
     expect(result).toEqual({
-      matches: [],
-      cursor_start: 7,
-      cursor_end: 7,
+      matches: ["import"],
+      cursor_start: 0,
+      cursor_end: 6,
     });
   });
 
-  it("kernels:inspect returns not-found when inspect() is absent", async () => {
-    const { kernelManager: _ } = setup();
+  it("kernels:inspect delegates to KernelManager.inspect", async () => {
+    const { kernelManager } = setup();
     const inspect = getHandler(IPC.kernels.inspect);
-    const result = (await inspect({}, "kernel-1", "x", 0)) as { found: boolean };
-    expect(result).toEqual({ found: false });
+    const result = (await inspect({}, "kernel-1", "x", 0)) as {
+      found: boolean;
+      data?: Record<string, string>;
+    };
+    expect(kernelManager.inspect).toHaveBeenCalledWith("kernel-1", "x", 0);
+    expect(result).toEqual({ found: true, data: { "text/plain": "doc" } });
   });
 
   it("kernels:validate returns valid when pdv_kernel is installed", async () => {
@@ -636,6 +671,30 @@ describe("Step 5 IPC handlers", () => {
     expect(result.scriptPath).toBeTruthy();
   });
 
+  it("tree:createNote sends correct payload to kernel and returns notePath", async () => {
+    const { commRouter } = setup();
+    (commRouter.request as unknown as ReturnType<typeof vi.fn>).mockResolvedValue(
+      makeMessage({})
+    );
+
+    const createNote = getHandler(IPC.tree.createNote);
+    const result = (await createNote({}, "kernel-1", "notes", "derivation")) as {
+      success: boolean;
+      notePath: string;
+    };
+
+    expect(commRouter.request).toHaveBeenCalledWith(
+      PDVMessageType.NOTE_REGISTER,
+      expect.objectContaining({
+        parent_path: "notes",
+        name: "derivation",
+        relative_path: expect.stringMatching(/derivation\.md$/),
+      })
+    );
+    expect(result.success).toBe(true);
+    expect(result.notePath).toBeTruthy();
+  });
+
   it("files:pickExecutable returns selected file path", async () => {
     setup();
     mocks.dialogShowOpenDialog.mockResolvedValueOnce({
@@ -669,32 +728,12 @@ describe("Step 5 IPC handlers", () => {
     expect(result).toBe("/tmp/config.toml");
   });
 
-  it("script:reload sends pdv.script.register with parent_path and name", async () => {
-    const { commRouter } = setup();
-    (commRouter.request as unknown as ReturnType<typeof vi.fn>).mockResolvedValue(
-      makeMessage({})
-    );
-
-    const reload = getHandler(IPC.script.reload);
-    const result = (await reload({}, "scripts.analysis")) as { success: boolean };
-
-    expect(commRouter.request).toHaveBeenCalledWith(
-      PDVMessageType.SCRIPT_REGISTER,
-      expect.objectContaining({
-        parent_path: "scripts",
-        name: "analysis",
-        reload: true,
-      })
-    );
-    expect(result.success).toBe(true);
-  });
-
   it("project:save delegates to ProjectManager.save", async () => {
     const { projectManager } = setup();
     const save = getHandler(IPC.project.save);
     const result = await save({}, "/tmp/project", []);
     expect(projectManager.save).toHaveBeenCalledWith("/tmp/project", []);
-    expect(result).toBe(true);
+    expect(result).toEqual({ checksum: "abc123", nodeCount: 0 });
   });
 
   it("project:load delegates to ProjectManager.load", async () => {
@@ -705,7 +744,12 @@ describe("Step 5 IPC handlers", () => {
     const load = getHandler(IPC.project.load);
     const result = await load({}, "/tmp/project");
     expect(projectManager.load).toHaveBeenCalledWith("/tmp/project");
-    expect(result).toEqual([{ id: "box1" }]);
+    expect(result).toEqual({
+      codeCells: [{ id: "box1" }],
+      checksum: null,
+      checksumValid: null,
+      nodeCount: null,
+    });
   });
 
   it("themes:get returns empty list initially, themes:save persists", async () => {
@@ -926,6 +970,7 @@ describe("Step 5 IPC handlers", () => {
         alias: "demo-module",
         version: "1.0.0",
         revision: "abc123",
+        hasGui: true,
         inputs: [{ id: "threshold", label: "Threshold", type: "int", default: "5" }],
         actions: [{ id: "run-action", label: "Run", scriptName: "run", inputIds: ["threshold"] }],
         settings: {
@@ -940,19 +985,8 @@ describe("Step 5 IPC handlers", () => {
     setup();
     const start = getHandler(IPC.kernels.start);
     await start({}, { language: "python" });
-    // project:load's bindActiveProjectModules also calls resolveActionScripts — add an
-    // extra Once for that call, then the second Once (with actionTab) is for listImported.
+    // listImported calls resolveActionScripts — provide the tab metadata.
     (mocks.moduleManagerResolveActionScripts as unknown as ReturnType<typeof vi.fn>)
-      .mockResolvedValueOnce([
-        {
-          actionId: "run-action",
-          actionLabel: "Run",
-          name: "run",
-          scriptPath: "/tmp/demo-module/scripts/run.py",
-          inputIds: ["threshold"],
-          actionTab: "Run",
-        },
-      ])
       .mockResolvedValueOnce([
         {
           actionId: "run-action",
@@ -996,15 +1030,14 @@ describe("Step 5 IPC handlers", () => {
     setup();
     const start = getHandler(IPC.kernels.start);
     await start({}, { language: "python" });
-    (mocks.moduleManagerEvaluateHealth as unknown as ReturnType<typeof vi.fn>).mockResolvedValueOnce([
-      { code: "missing_action_script", message: "Action script not found: scripts/run.py" },
-    ]);
-    // project:load's bindActiveProjectModules calls resolveActionScripts first (caught, returns early),
-    // then listImported calls it again — both need to fail with MissingActionScriptError.
+    // evaluateHealth is called during refreshProjectModuleHealth (load).
+    // listImported reads health warnings from memory (moduleHealthWarningsByAlias).
+    (mocks.moduleManagerEvaluateHealth as unknown as ReturnType<typeof vi.fn>)
+      .mockResolvedValueOnce([
+        { code: "missing_action_script", message: "Action script not found: scripts/run.py" },
+      ]);
+    // listImported calls resolveActionScripts — needs to fail with MissingActionScriptError.
     (mocks.moduleManagerResolveActionScripts as unknown as ReturnType<typeof vi.fn>)
-      .mockRejectedValueOnce(
-        new Error("Module action script does not exist: scripts/run.py (demo-module)")
-      )
       .mockRejectedValueOnce(
         new Error("Module action script does not exist: scripts/run.py (demo-module)")
       );
@@ -1223,7 +1256,7 @@ describe("Step 5 IPC handlers", () => {
     expect(result.success).toBe(true);
     expect(result.status).toBe("queued");
     expect(result.executionCode).toBe(
-      `pdv_tree["demo-module.scripts.run"].run(threshold="5); __import__('os').system('evil')#")`
+      `pdv_tree["demo-module.scripts.run"].run(threshold='5); __import__(\\'os\\').system(\\'evil\\')#')`
     );
   });
 
@@ -1242,8 +1275,8 @@ describe("Step 5 IPC handlers", () => {
     expect(kernelManager.start).not.toHaveBeenCalled();
   });
 
-  it("project:load binds imported module scripts when kernel is active", async () => {
-    const { commRouter } = setup();
+  it("project:load no longer calls bindActiveProjectModules", async () => {
+    setup();
     const start = getHandler(IPC.kernels.start);
     await start({}, { language: "python" });
 
@@ -1270,15 +1303,8 @@ describe("Step 5 IPC handlers", () => {
     const load = getHandler(IPC.project.load);
     await load({}, "/tmp/project");
 
-    expect(mocks.moduleManagerResolveActionScripts).toHaveBeenCalledWith("demo-module");
-    expect(commRouter.request).toHaveBeenCalledWith(
-      PDVMessageType.SCRIPT_REGISTER,
-      expect.objectContaining({
-        parent_path: "diagnosticA.scripts",
-        name: "run",
-        relative_path: "/tmp/pdv-test/diagnosticA/scripts/run.py",
-        reload: true,
-      })
-    );
+    // resolveActionScripts should NOT be called during load
+    // (module binding is now handled by setupModuleNamespaces via pdv.modules.setup comm)
+    expect(mocks.moduleManagerResolveActionScripts).not.toHaveBeenCalled();
   });
 });

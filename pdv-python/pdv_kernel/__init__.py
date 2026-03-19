@@ -23,13 +23,17 @@ Do not import comms, handlers, or namespace internals directly — they
 are implementation details and their interfaces may change.
 """
 
-from pdv_kernel.tree import PDVTree, PDVScript
+from pdv_kernel.tree import PDVTree, PDVFile, PDVScript, PDVGui, PDVNamelist, PDVModule
 from pdv_kernel.errors import PDVError
+from pdv_kernel.modules import handle
 
 __version__ = "1.0.0"
 __pdv_protocol_version__ = "1.0"
 
-__all__ = ["PDVTree", "PDVScript", "PDVError", "bootstrap", "__version__"]
+__all__ = [
+    "PDVTree", "PDVFile", "PDVScript", "PDVGui", "PDVNamelist", "PDVModule",
+    "PDVError", "bootstrap", "handle", "__version__",
+]
 
 
 def bootstrap(ip=None):
@@ -70,9 +74,12 @@ def bootstrap(ip=None):
     from pdv_kernel.namespace import PDVApp, PDVNamespace  # noqa: PLC0415
     from pdv_kernel.tree import PDVTree  # noqa: PLC0415
 
+    from pdv_kernel.modules import handle as _handle_decorator  # noqa: PLC0415
+
     # Create the tree and app objects
     tree = PDVTree()
     app = PDVApp()
+    app.handle = _handle_decorator  # type: ignore[attr-defined]
 
     # Install the protected namespace and inject pdv_tree and pdv
     if ip is not None:
@@ -143,8 +150,10 @@ def _configure_matplotlib() -> None:
     for backend in candidates:
         try:
             matplotlib.use(backend)
-            # Successfully switched to an interactive backend — native windows
-            # will be used and no patching is needed.
+            # Enable interactive mode so plt.show() is non-blocking — the
+            # plot window opens and the kernel returns to idle immediately.
+            import matplotlib.pyplot as _plt  # noqa: PLC0415
+            _plt.ion()
             return
         except Exception:
             continue

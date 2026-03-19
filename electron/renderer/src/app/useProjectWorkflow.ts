@@ -1,41 +1,42 @@
-import { useCallback, useEffect, useState, type Dispatch, type MutableRefObject, type SetStateAction } from 'react';
-import type { CellTab, Config, MenuActionPayload } from '../types';
+import { useCallback, useEffect, useRef, type Dispatch, type MutableRefObject, type SetStateAction } from 'react';
+import type { CellTab, Config, LogEntry, MenuActionPayload } from '../types';
+import { normalizeRecentProjects } from './app-utils';
+import { MAX_RECENT_PROJECTS } from './constants';
 
-interface UnsavedDialogContext {
-  reason: 'close' | 'open';
-  pendingPath?: string;
-}
-
+/** Options for {@link useProjectWorkflow}. Orchestrates save/load/new project flows. */
 interface UseProjectWorkflowOptions {
+  /** Current kernel status — project operations require 'ready'. */
   kernelStatus: 'idle' | 'starting' | 'ready' | 'error';
+  /** Path to the currently open project directory, or null for unsaved sessions. */
   currentProjectDir: string | null;
+  /** Current code cell tabs (serialized into code-cells.json on save). */
   cellTabs: CellTab[];
+  /** ID of the currently active editor tab. */
   activeCellTab: number;
+  /** App configuration (read for recentProjects, updated after save/load). */
   config: Config | null;
+  /** Persists updated recentProjects list after save/load. */
   setConfig: Dispatch<SetStateAction<Config | null>>;
+  /** Updates the active project directory path. */
   setCurrentProjectDir: Dispatch<SetStateAction<string | null>>;
+  /** Restores code cell tabs from project's code-cells.json on load. */
   setCellTabs: Dispatch<SetStateAction<CellTab[]>>;
+  /** Restores the active tab ID on project load. */
   setActiveCellTab: Dispatch<SetStateAction<number>>;
+  /** Bumps to trigger ModulesPanel refetch after project load. */
   setModulesRefreshToken: Dispatch<SetStateAction<number>>;
+  /** Bumps to trigger NamespaceView refetch after project load. */
   setNamespaceRefreshToken: Dispatch<SetStateAction<number>>;
+  /** Sets error message if save/load fails. */
   setLastError: Dispatch<SetStateAction<string | undefined>>;
+  /** Appends entries to the console log. */
+  setLogs: Dispatch<SetStateAction<LogEntry[]>>;
+  /** Ref holding the tabs snapshot from project.onLoaded push (consumed once). */
   loadedProjectTabsRef: MutableRefObject<{ tabs: CellTab[]; activeTabId: number } | null>;
+  /** Validates and normalizes raw code-cells.json data into typed CellTab[]. */
   normalizeLoadedCodeCells: (data: unknown) => { tabs: CellTab[]; activeTabId: number };
-}
-
-function normalizeRecentProjects(data: unknown): string[] {
-  if (!Array.isArray(data)) return [];
-  const unique = new Set<string>();
-  const next: string[] = [];
-  for (const entry of data) {
-    if (typeof entry !== 'string') continue;
-    const trimmed = entry.trim();
-    if (!trimmed || unique.has(trimmed)) continue;
-    unique.add(trimmed);
-    next.push(trimmed);
-    if (next.length >= 10) break;
-  }
-  return next;
+  /** Flush all dirty markdown notes to disk before project save. */
+  flushDirtyNotes: () => Promise<void>;
 }
 
 export function useProjectWorkflow(options: UseProjectWorkflowOptions) {
@@ -52,15 +53,22 @@ export function useProjectWorkflow(options: UseProjectWorkflowOptions) {
     setModulesRefreshToken,
     setNamespaceRefreshToken,
     setLastError,
+    setLogs,
     loadedProjectTabsRef,
     normalizeLoadedCodeCells,
+    flushDirtyNotes,
   } = options;
 
-  const [unsavedDialogContext, setUnsavedDialogContext] = useState<UnsavedDialogContext | null>(null);
+  // Refs so handleSaveProject always reads the latest cell state, even when
+  // called from memoised callbacks.
+  const cellTabsRef = useRef(cellTabs);
+  useEffect(() => { cellTabsRef.current = cellTabs; }, [cellTabs]);
+  const activeCellTabRef = useRef(activeCellTab);
+  useEffect(() => { activeCellTabRef.current = activeCellTab; }, [activeCellTab]);
 
   const rememberRecentProject = useCallback(async (projectDir: string) => {
     const recentProjects = normalizeRecentProjects(config?.recentProjects);
-    const nextRecentProjects = [projectDir, ...recentProjects.filter((entry) => entry !== projectDir)].slice(0, 10);
+    const nextRecentProjects = [projectDir, ...recentProjects.filter((entry) => entry !== projectDir)].slice(0, MAX_RECENT_PROJECTS);
     try {
       const updated = await window.pdv.config.set({ recentProjects: nextRecentProjects });
       setConfig(updated);
@@ -88,26 +96,33 @@ export function useProjectWorkflow(options: UseProjectWorkflowOptions) {
       if (!saveDir) {
         return false;
       }
-      await window.pdv.project.save(saveDir, {
-        tabs: cellTabs,
-        activeTabId: activeCellTab,
+      await flushDirtyNotes();
+      const result = await window.pdv.project.save(saveDir, {
+        tabs: cellTabsRef.current,
+        activeTabId: activeCellTabRef.current,
       });
       setCurrentProjectDir(saveDir);
       setModulesRefreshToken((prev) => prev + 1);
       await rememberRecentProject(saveDir);
+      setLogs((prev) => [...prev, {
+        id: `save-${Date.now()}`,
+        timestamp: Date.now(),
+        code: '',
+        stdout: `Project saved (${result.nodeCount} nodes, checksum ${result.checksum})`,
+      }]);
       return true;
     } catch (error) {
       setLastError(error instanceof Error ? error.message : String(error));
       return false;
     }
   }, [
-    activeCellTab,
-    cellTabs,
     currentProjectDir,
+    flushDirtyNotes,
     kernelStatus,
     rememberRecentProject,
     setCurrentProjectDir,
     setLastError,
+    setLogs,
     setModulesRefreshToken,
   ]);
 
@@ -120,8 +135,8 @@ export function useProjectWorkflow(options: UseProjectWorkflowOptions) {
       if (!saveDir) {
         return;
       }
-      const loaded = await window.pdv.project.load(saveDir);
-      const normalized = normalizeLoadedCodeCells(loaded);
+      const result = await window.pdv.project.load(saveDir);
+      const normalized = normalizeLoadedCodeCells(result.codeCells);
       loadedProjectTabsRef.current = normalized;
       setCellTabs(normalized.tabs);
       setActiveCellTab(normalized.activeTabId);
@@ -129,6 +144,19 @@ export function useProjectWorkflow(options: UseProjectWorkflowOptions) {
       setModulesRefreshToken((prev) => prev + 1);
       await rememberRecentProject(saveDir);
       setNamespaceRefreshToken((prev) => prev + 1);
+      const parts = [`Project loaded`];
+      if (result.nodeCount != null) parts.push(`${result.nodeCount} nodes`);
+      if (result.checksum) {
+        parts.push(`checksum ${result.checksum}`);
+        if (result.checksumValid === false) parts.push('(MISMATCH)');
+      }
+      setLogs((prev) => [...prev, {
+        id: `load-${Date.now()}`,
+        timestamp: Date.now(),
+        code: '',
+        stdout: parts.length > 1 ? `${parts[0]} (${parts.slice(1).join(', ')})` : parts[0],
+        ...(result.checksumValid === false ? { stderr: 'Warning: tree-index.json checksum does not match the stored checksum' } : {}),
+      }]);
     } catch (error) {
       setLastError(error instanceof Error ? error.message : String(error));
     }
@@ -141,52 +169,14 @@ export function useProjectWorkflow(options: UseProjectWorkflowOptions) {
     setCellTabs,
     setCurrentProjectDir,
     setLastError,
+    setLogs,
     setModulesRefreshToken,
     setNamespaceRefreshToken,
   ]);
 
   const handleOpenProject = useCallback((directory?: string) => {
-    setUnsavedDialogContext({ reason: 'open', pendingPath: directory });
-  }, []);
-
-  const handleUnsavedSave = useCallback(async () => {
-    const ctx = unsavedDialogContext;
-    setUnsavedDialogContext(null);
-    const saved = await handleSaveProject();
-    if (ctx?.reason === 'close') {
-      await window.pdv.lifecycle.respondClose({ action: saved ? 'save' : 'cancel' });
-    } else if (ctx?.reason === 'open' && saved) {
-      await executeOpenProject(ctx.pendingPath);
-    }
-  }, [unsavedDialogContext, handleSaveProject, executeOpenProject]);
-
-  const handleUnsavedDiscard = useCallback(async () => {
-    const ctx = unsavedDialogContext;
-    setUnsavedDialogContext(null);
-    if (ctx?.reason === 'close') {
-      await window.pdv.lifecycle.respondClose({ action: 'discard' });
-    } else if (ctx?.reason === 'open') {
-      await executeOpenProject(ctx.pendingPath);
-    }
-  }, [unsavedDialogContext, executeOpenProject]);
-
-  const handleUnsavedCancel = useCallback(async () => {
-    const ctx = unsavedDialogContext;
-    setUnsavedDialogContext(null);
-    if (ctx?.reason === 'close') {
-      await window.pdv.lifecycle.respondClose({ action: 'cancel' });
-    }
-  }, [unsavedDialogContext]);
-
-  useEffect(() => {
-    if (!window.pdv?.lifecycle) {
-      return;
-    }
-    const unsubscribe = window.pdv.lifecycle.onConfirmClose(() => {
-      setUnsavedDialogContext({ reason: 'close' });
-    });
-    return () => unsubscribe();
-  }, []);
+    void executeOpenProject(directory);
+  }, [executeOpenProject]);
 
   useEffect(() => {
     if (!window.pdv?.menu) {
@@ -215,11 +205,8 @@ export function useProjectWorkflow(options: UseProjectWorkflowOptions) {
   }, [handleOpenProject, handleSaveProject]);
 
   return {
-    unsavedDialogContext,
     handleSaveProject,
     handleOpenProject,
-    handleUnsavedSave,
-    handleUnsavedDiscard,
-    handleUnsavedCancel,
+    executeOpenProject,
   };
 }

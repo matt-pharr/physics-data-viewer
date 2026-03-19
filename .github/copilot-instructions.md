@@ -29,19 +29,19 @@ electron/                ← Electron app (TypeScript)
     preload.ts           ← exposes window.pdv API to renderer via contextBridge
     renderer/src/        ← React frontend
         app/index.tsx    ← root component; orchestrates all kernel lifecycle and state
-        components/      ← Tree, CodeCell, Console, NamespaceView, EnvironmentSelector, ...
+        components/      ← Tree, CodeCell, WriteTab, Console, NamespaceView, EnvironmentSelector, ...
         services/        ← tree.ts data-fetching service
         types/pdv.d.ts   ← all types used by renderer; re-exports from ipc.ts
 
 pdv-python/              ← Python kernel package (pip install pdv-python)
     pdv_kernel/
         __init__.py
-        tree.py          ← PDVTree (dict subclass), PDVScript
+        tree.py          ← PDVTree (dict subclass), PDVScript, PDVFile, PDVNote
         comms.py         ← comm target registration, message dispatch, bootstrap()
         namespace.py     ← PDVNamespace (protected dict), PDVApp, pdv_namespace()
         serialization.py ← type detection, format readers/writers
         environment.py   ← working dir helpers, path safety checks
-        handlers/        ← one file per PDV message domain (lifecycle, project, tree, ...)
+        handlers/        ← one file per PDV message domain (lifecycle, project, tree, script, note, ...)
     tests/
 ```
 

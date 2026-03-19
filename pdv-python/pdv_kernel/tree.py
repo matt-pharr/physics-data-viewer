@@ -1,5 +1,5 @@
 """
-pdv_kernel.tree — PDVTree and PDVScript data structures.
+pdv_kernel.tree — PDVTree, PDVFile, PDVScript, PDVNote, PDVGui, and PDVModule data structures.
 
 This module is the core of the pdv_kernel package. It implements:
 
@@ -8,8 +8,15 @@ This module is the core of the pdv_kernel package. It implements:
   the project save directory, and emits ``pdv.tree.changed`` push
   notifications on mutation (when a comm is attached).
 
+- :class:`PDVFile`: base class for file-backed tree nodes. Provides shared
+  ``relative_path`` storage and ``resolve_path()`` for consistent path
+  resolution across all file-backed node types.
+
 - :class:`PDVScript`: a lightweight wrapper for a script file stored as
-  a tree node.
+  a tree node. Subclass of ``PDVFile``.
+
+- :class:`PDVNote`: a lightweight wrapper for a markdown note file stored
+  as a tree node. Subclass of ``PDVFile``.
 
 - :class:`LazyLoadRegistry`: internal registry mapping tree paths to
   save-directory storage references. Not user-accessible.
@@ -162,7 +169,7 @@ class LazyLoadRegistry:
         from pdv_kernel.serialization import deserialize_node  # noqa: PLC0415
 
         storage_ref = self._registry.pop(path)
-        return deserialize_node(storage_ref, save_dir)
+        return deserialize_node(storage_ref, save_dir, trusted=True)
 
     def get_storage(self, path: str) -> dict | None:
         """Return the registered storage reference for a path, if present.
@@ -294,7 +301,78 @@ def _extract_script_params(file_path: str) -> list[ScriptParameter]:
         )
     return extracted
 
-class PDVScript:
+# ---------------------------------------------------------------------------
+# PDVFile — base class for file-backed tree nodes
+# ---------------------------------------------------------------------------
+
+class PDVFile:
+    """
+    Base class for file-backed PDV tree nodes.
+
+    Provides shared ``relative_path`` storage and ``preview()`` interface
+    used by both :class:`PDVScript` and :class:`PDVNote`, and any future
+    file-backed node types (images, data files, etc.).
+
+    Parameters
+    ----------
+    relative_path : str
+        Path to the backing file (absolute or relative to working dir).
+
+    See Also
+    --------
+    ARCHITECTURE.md §5.7
+    """
+
+    def __init__(self, relative_path: str) -> None:
+        self._relative_path = relative_path
+
+    @property
+    def relative_path(self) -> str:
+        """Path to the backing file.
+
+        Returns
+        -------
+        str
+            File path (absolute or relative to working dir).
+        """
+        return self._relative_path
+
+    def resolve_path(self, working_dir: str | None = None) -> str:
+        """Resolve the backing file to an absolute path.
+
+        Parameters
+        ----------
+        working_dir : str or None
+            Working directory to resolve relative paths against.
+
+        Returns
+        -------
+        str
+            Absolute file path.
+        """
+        if os.path.isabs(self._relative_path):
+            return self._relative_path
+        if working_dir:
+            return os.path.join(working_dir, self._relative_path)
+        return self._relative_path
+
+    def preview(self) -> str:
+        """Return a short human-readable preview for the tree panel.
+
+        Returns
+        -------
+        str
+            Preview string. Subclasses should override for domain-specific
+            previews.
+        """
+        return os.path.basename(self._relative_path)
+
+    def __repr__(self) -> str:
+        cls = type(self).__name__
+        return f"{cls}('{self._relative_path}')"
+
+
+class PDVScript(PDVFile):
     """
     Lightweight wrapper for a script file stored as a PDV tree node.
 
@@ -318,21 +396,10 @@ class PDVScript:
     """
 
     def __init__(self, relative_path: str, language: str = "python", doc: str | None = None) -> None:
-        self._relative_path = relative_path
+        super().__init__(relative_path)
         self._language = language
         self._doc = doc
         self._params: list[ScriptParameter] = _extract_script_params(relative_path)
-
-    @property
-    def relative_path(self) -> str:
-        """Relative path from project root to the script file.
-
-        Returns
-        -------
-        str
-            Relative script file path.
-        """
-        return self._relative_path
 
     @property
     def language(self) -> str:
@@ -414,13 +481,8 @@ class PDVScript:
             if tree is None:
                 raise PDVScriptError("PDVTree is not initialized")
 
-        # Resolve file path: if absolute, use directly; otherwise join with working_dir
-        if os.path.isabs(self._relative_path):
-            file_path = self._relative_path
-        elif hasattr(tree, "_working_dir") and tree._working_dir:
-            file_path = os.path.join(tree._working_dir, self._relative_path)
-        else:
-            file_path = self._relative_path
+        working_dir = getattr(tree, "_working_dir", None)
+        file_path = self.resolve_path(working_dir)
 
         if not os.path.exists(file_path):
             raise FileNotFoundError(f"Script file not found: {file_path}")
@@ -450,6 +512,225 @@ class PDVScript:
 
     def __repr__(self) -> str:
         return f"PDVScript('{self._relative_path}', lang='{self._language}')"
+
+
+# ---------------------------------------------------------------------------
+# PDVNote
+# ---------------------------------------------------------------------------
+
+class PDVGui(PDVFile):
+    """
+    File-backed GUI definition node.
+
+    Stored as the value at a tree path (e.g. ``pdv_tree['my_module.gui']``).
+    Backed by a ``.gui.json`` file in the working directory.
+
+    Parameters
+    ----------
+    relative_path : str
+        Path to the ``.gui.json`` file (absolute or relative to working dir).
+    module_id : str or None
+        Module identifier for module-owned GUIs. None for user-created project GUIs.
+    """
+
+    def __init__(self, relative_path: str, module_id: str | None = None) -> None:
+        super().__init__(relative_path)
+        self._module_id = module_id
+
+    @property
+    def module_id(self) -> str | None:
+        """Module identifier, or None for project-level GUIs.
+
+        Returns
+        -------
+        str or None
+            The module id this GUI belongs to.
+        """
+        return self._module_id
+
+    def preview(self) -> str:
+        """Return a short preview string for the tree panel.
+
+        Returns
+        -------
+        str
+            Always ``'GUI'``.
+        """
+        return "GUI"
+
+    def __repr__(self) -> str:
+        mid = f", module_id='{self._module_id}'" if self._module_id else ""
+        return f"PDVGui('{self._relative_path}'{mid})"
+
+
+class PDVNamelist(PDVFile):
+    """
+    File-backed namelist node. Knows its format for parsing dispatch.
+
+    Stored as the value at a tree path (e.g. ``pdv_tree['module.solver_nml']``).
+    Backed by a Fortran ``.in``/``.nml`` or TOML file.
+
+    Parameters
+    ----------
+    relative_path : str
+        Path to the backing namelist file (absolute or relative to working dir).
+    format : str
+        Namelist format: ``'fortran'``, ``'toml'``, or ``'auto'`` (detect from extension).
+    module_id : str or None
+        Module identifier for module-owned namelists. None for user-created namelists.
+
+    See Also
+    --------
+    ARCHITECTURE.md §7.2
+    """
+
+    def __init__(self, relative_path: str, format: str = "auto",
+                 module_id: str | None = None) -> None:
+        super().__init__(relative_path)
+        self._format = format  # "fortran", "toml", "auto"
+        self._module_id = module_id
+
+    @property
+    def format(self) -> str:
+        """Namelist format: ``'fortran'``, ``'toml'``, or ``'auto'``.
+
+        Returns
+        -------
+        str
+        """
+        return self._format
+
+    @property
+    def module_id(self) -> str | None:
+        """Module identifier, or None for user-created namelists.
+
+        Returns
+        -------
+        str or None
+        """
+        return self._module_id
+
+    def preview(self) -> str:
+        """Return a short preview string for the tree panel.
+
+        Returns
+        -------
+        str
+        """
+        return f"Namelist ({self._format})"
+
+    def __repr__(self) -> str:
+        mid = f", module_id='{self._module_id}'" if self._module_id else ""
+        return f"PDVNamelist('{self._relative_path}', format='{self._format}'{mid})"
+
+
+class PDVLib(PDVFile):
+    """
+    File-backed Python library file provided by a module.
+
+    Stored as the value at a tree path under ``<alias>.lib.*``.  The parent
+    directory of the on-disk file is added to ``sys.path`` so that the module
+    is importable from scripts and entry points.
+
+    Parameters
+    ----------
+    relative_path : str
+        Path to the ``.py`` file (absolute or relative to working dir).
+    module_id : str or None
+        Module identifier for the owning module.
+
+    See Also
+    --------
+    ARCHITECTURE.md §5.10, §7.2
+    """
+
+    def __init__(self, relative_path: str, module_id: str | None = None) -> None:
+        super().__init__(relative_path)
+        self._module_id = module_id
+
+    @property
+    def module_id(self) -> str | None:
+        """Module identifier, or None.
+
+        Returns
+        -------
+        str or None
+        """
+        return self._module_id
+
+    def preview(self) -> str:
+        """Return a short preview string for the tree panel.
+
+        Returns
+        -------
+        str
+        """
+        return f"Library ({os.path.basename(self._relative_path)})"
+
+    def __repr__(self) -> str:
+        mid = f", module_id='{self._module_id}'" if self._module_id else ""
+        return f"PDVLib('{self._relative_path}'{mid})"
+
+
+class PDVNote(PDVFile):
+    """
+    Lightweight wrapper for a markdown file stored as a PDV tree node.
+
+    Stored as the value at a tree path (e.g. ``pdv_tree['notes.intro']``).
+    Backed by a ``.md`` file in the working directory.
+
+    Parameters
+    ----------
+    relative_path : str
+        Path to the ``.md`` file (absolute or relative to working dir).
+    title : str or None
+        Optional title for the note, used as a preview fallback. If None,
+        the first non-empty line of the file is used.
+
+    See Also
+    --------
+    ARCHITECTURE.md §7.2, PLANNED_FEATURES.md Feature 4
+    """
+
+    def __init__(self, relative_path: str, title: str | None = None) -> None:
+        super().__init__(relative_path)
+        self._title = title
+
+    @property
+    def title(self) -> str | None:
+        """Optional title for the note.
+
+        Returns
+        -------
+        str or None
+            Cached title, or None if not set.
+        """
+        return self._title
+
+    def preview(self) -> str:
+        """Return a short preview string for the tree panel.
+
+        Tries the cached title first, then reads the first non-empty
+        line of the ``.md`` file. Falls back to ``'Markdown note'``.
+
+        Returns
+        -------
+        str
+            A short preview string (≤100 characters).
+        """
+        if self._title:
+            return self._title[:100]
+        try:
+            path = self._relative_path
+            if os.path.exists(path):
+                with open(path, "r", encoding="utf-8") as fh:
+                    for line in fh:
+                        stripped = line.strip().lstrip("#").strip()
+                        if stripped:
+                            return stripped[:100]
+        except Exception:  # noqa: BLE001
+            pass
+        return "Markdown note"
 
 
 # ---------------------------------------------------------------------------
@@ -489,6 +770,7 @@ class PDVTree(dict):
         self._working_dir: str | None = None
         self._save_dir: str | None = None
         self._send_fn: Callable[[str, dict], None] | None = None
+        self._path_prefix: str = ""
 
     # ------------------------------------------------------------------
     # Internal state management (not user-facing)
@@ -561,19 +843,22 @@ class PDVTree(dict):
         """
         parts = _split_dot_path(key)
 
+        # Build the full registry key (accounts for sub-trees with a path prefix)
+        full_key = f"{self._path_prefix}.{key}" if self._path_prefix else key
+
         if len(parts) == 1:
             p = parts[0]
             if dict.__contains__(self, p):
                 return dict.__getitem__(self, p)
-            if self._lazy_registry.has(p):
-                val = self._lazy_registry.fetch(p, self._save_dir or "")
+            if self._lazy_registry.has(full_key):
+                val = self._lazy_registry.fetch(full_key, self._save_dir or "")
                 dict.__setitem__(self, p, val)
                 return val
             raise PDVKeyError(key)
 
         # Multi-part: check the full path in the lazy registry first
-        if self._lazy_registry.has(key):
-            val = self._lazy_registry.fetch(key, self._save_dir or "")
+        if self._lazy_registry.has(full_key):
+            val = self._lazy_registry.fetch(full_key, self._save_dir or "")
             # Store value at the leaf position in the nested structure
             parent = self
             for part in parts[:-1]:
@@ -753,3 +1038,89 @@ class PDVTree(dict):
     def __repr__(self) -> str:
         keys = list(dict.keys(self))
         return f"PDVTree({keys})"
+
+
+class PDVModule(PDVTree):
+    """
+    Module metadata node. PDVTree subclass so it can hold children naturally
+    and participate in dot-path access, lazy loading, and change notifications.
+
+    Stored as the value at a tree path (e.g. ``pdv_tree['n_pendulum']``).
+    Contains child entries like scripts folder and gui node as regular dict items.
+
+    Parameters
+    ----------
+    module_id : str
+        Unique module identifier.
+    name : str
+        Human-readable module name.
+    version : str
+        Semantic version string.
+    gui : PDVGui or None
+        Optional GUI definition node attached to this module.
+    """
+
+    def __init__(self, module_id: str, name: str, version: str,
+                 gui: PDVGui | None = None) -> None:
+        super().__init__()
+        self._module_id = module_id
+        self._name = name
+        self._version = version
+        self._gui = gui
+
+    @property
+    def module_id(self) -> str:
+        """Unique module identifier.
+
+        Returns
+        -------
+        str
+        """
+        return self._module_id
+
+    @property
+    def name(self) -> str:
+        """Human-readable module name.
+
+        Returns
+        -------
+        str
+        """
+        return self._name
+
+    @property
+    def version(self) -> str:
+        """Semantic version string.
+
+        Returns
+        -------
+        str
+        """
+        return self._version
+
+    @property
+    def gui(self) -> PDVGui | None:
+        """Optional GUI definition node.
+
+        Returns
+        -------
+        PDVGui or None
+        """
+        return self._gui
+
+    @gui.setter
+    def gui(self, value: PDVGui | None) -> None:
+        self._gui = value
+
+    def preview(self) -> str:
+        """Return a short preview string for the tree panel.
+
+        Returns
+        -------
+        str
+            Module name and version.
+        """
+        return f"{self._name} v{self._version}"
+
+    def __repr__(self) -> str:
+        return f"PDVModule('{self._module_id}', '{self._name}', '{self._version}')"

@@ -1,0 +1,310 @@
+/* editor.css — Resizers, center column, console pane, editor wrapper, console header, collapsed bars, log entries */
+
+/* ===== RESIZERS ===== */
+.vertical-resizer {
+  width: 1px;
+  cursor: col-resize;
+  background-color: var(--border-color);
+  flex-shrink: 0;
+  user-select: none;
+  position: relative;
+  z-index: 10;
+}
+
+/* Invisible wider grab area */
+.vertical-resizer::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: -4px;
+  right: -4px;
+}
+
+.vertical-resizer:hover {
+  background-color: var(--accent);
+}
+
+/* Visual highlight that expands without affecting layout */
+.vertical-resizer::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  pointer-events: none;
+}
+
+.vertical-resizer:hover::after {
+  left: -1px;
+  right: -1px;
+  background-color: var(--accent);
+}
+
+.horizontal-resizer {
+  height: 4px;
+  cursor: row-resize;
+  background-color: var(--bg-primary);
+  flex-shrink: 0;
+  user-select: none;
+}
+
+.horizontal-resizer:hover {
+  background-color: var(--accent);
+}
+
+/* ===== CENTER COLUMN ===== */
+.center-column {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  min-width: 300px;
+}
+
+/* ===== CONSOLE PANE ===== */
+.console-pane {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  background-color: var(--bg-secondary);
+  overflow: hidden;
+}
+
+.console-wrapper {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+/* ===== EDITOR WRAPPER (bottom, collapsible) ===== */
+.editor-wrapper {
+  flex: none;
+  min-height: 180px;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.editor-collapsed-bar {
+  height: 28px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 12px;
+  background-color: var(--bg-secondary);
+  border-top: 1px solid var(--border-color);
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-secondary);
+  cursor: pointer;
+  flex-shrink: 0;
+  user-select: none;
+}
+
+.editor-collapsed-bar:hover {
+  background-color: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+/* ===== CONSOLE HEADER ===== */
+.console-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 4px 8px 4px 12px;
+  border-bottom: 1px solid var(--border-color);
+  flex-shrink: 0;
+  height: 32px;
+  background-color: var(--bg-secondary);
+}
+
+.console-header-title {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-secondary);
+}
+
+/* ===== COLLAPSED CONSOLE BAR ===== */
+.console-collapsed-bar {
+  height: 28px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 12px;
+  background-color: var(--bg-secondary);
+  border-top: 1px solid var(--border-color);
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-secondary);
+  cursor: pointer;
+  flex-shrink: 0;
+  user-select: none;
+}
+
+.console-collapsed-bar:hover {
+  background-color: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.console-collapsed-count {
+  padding: 1px 6px;
+  border-radius: 8px;
+  background-color: var(--bg-tertiary);
+  color: var(--accent);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.pane-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 0 12px;
+  border-bottom: 1px solid var(--border-color);
+  flex-shrink: 0;
+  height: 28px;
+}
+
+.pane-header h2 {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-primary);
+  flex-shrink: 0;
+  margin: 0;
+}
+
+.pane-actions {
+  display: flex;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.pane-actions .btn {
+  padding: 3px 10px;
+  font-size: 11px;
+  line-height: 1.1;
+}
+
+.console-pane .pane-actions {
+  margin-left: auto;
+}
+
+.code-cell-tabs {
+  display: flex;
+  gap: 4px;
+  margin-left: 12px;
+  flex: 1;
+  min-width: 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: none;
+}
+
+.code-cell-tabs::-webkit-scrollbar {
+  display: none;
+}
+
+.console-content {
+  flex: 1;
+  overflow-y: auto;
+  padding: 12px;
+  font-family: var(--font-mono);
+  font-size: 13px;
+  background-color: var(--bg-primary);
+}
+
+.log-entry {
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--border-color);
+  background-color: var(--bg-primary);
+}
+
+.log-entry:nth-child(odd) {
+  background-color: var(--bg-secondary);
+}
+
+.log-entry-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--text-secondary);
+  margin-bottom: 6px;
+}
+
+.log-count {
+  padding: 2px 6px;
+  border-radius: 4px;
+  background-color: var(--bg-tertiary);
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.log-time,
+.log-duration {
+  color: var(--text-secondary);
+}
+
+.log-code,
+.log-stdout,
+.log-stderr,
+.log-result,
+.log-error {
+  margin: 0 0 6px;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-family: var(--font-mono);
+}
+
+.log-code {
+  padding: 8px;
+  border-radius: 4px;
+  background-color: var(--bg-tertiary);
+}
+
+.log-stdout {
+  color: var(--text-primary);
+}
+
+.log-stderr {
+  color: #ff9d88;
+}
+
+.log-result {
+  color: var(--warning);
+}
+
+.log-error {
+  color: var(--error);
+  font-weight: 600;
+}
+
+.log-images {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 6px 0;
+}
+
+.log-image {
+  width: auto;
+  max-width: min(100%, 720px);
+  max-height: 50vh;
+  height: auto;
+  object-fit: contain;
+  align-self: flex-start;
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  background-color: #111;
+}

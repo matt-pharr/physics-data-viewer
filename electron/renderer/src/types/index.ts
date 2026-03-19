@@ -7,15 +7,27 @@
 
 import type {
   Config,
+  KernelExecutionError,
+  KernelExecutionOrigin,
   KernelExecuteResult,
   ImportedModuleDescriptor,
+  LayoutActionRef,
+  LayoutContainer,
+  LayoutInputRef,
+  LayoutNode,
   MenuActionPayload,
   ModuleDescriptor,
+  ModuleGuiLayout,
   ModuleImportResult,
   ModuleInstallResult,
+  ModuleWindowContext,
+  ModuleWindowOpenRequest,
+  ModuleWindowOpenResult,
   NamespaceQueryOptions,
   NamespaceVariable,
   NodeDescriptor,
+  ProjectLoadResult,
+  ProjectSaveResult,
   ScriptParameter,
   Theme,
 } from './pdv';
@@ -23,15 +35,26 @@ import type {
 /** Re-export core preload API contract types for renderer imports. */
 export type {
   Config,
+  KernelExecutionError,
+  KernelExecutionOrigin,
   KernelExecuteResult,
   ImportedModuleDescriptor,
+  LayoutActionRef,
+  LayoutContainer,
+  LayoutInputRef,
+  LayoutNode,
   MenuActionPayload,
   ModuleDescriptor,
+  ModuleGuiLayout,
   ModuleImportResult,
   ModuleInstallResult,
+  ModuleWindowContext,
+  ModuleWindowOpenRequest,
+  ModuleWindowOpenResult,
   NamespaceQueryOptions,
   NamespaceVariable,
-  NodeDescriptor,
+  ProjectLoadResult,
+  ProjectSaveResult,
   ScriptParameter,
   Theme,
 };
@@ -45,6 +68,8 @@ export interface LogEntry {
   stderr?: string;
   result?: unknown;
   error?: string;
+  errorDetails?: KernelExecutionError;
+  origin?: KernelExecutionOrigin;
   duration?: number;
   images?: Array<{ mime: string; data: string }>;
 }
@@ -54,6 +79,18 @@ export interface CellTab {
   id: number;
   code: string;
   name?: string;
+}
+
+/** An open markdown note tab in the Write pane. */
+export interface NoteTab {
+  /** Tree path of the markdown node (unique identifier). */
+  id: string;
+  /** Current editor content. */
+  content: string;
+  /** Last-saved content (for dirty detection). */
+  savedContent: string;
+  /** Display name for the tab. */
+  name: string;
 }
 
 /** Tree node shape enriched with UI state used by the Tree component. */

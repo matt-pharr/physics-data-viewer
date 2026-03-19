@@ -53,6 +53,7 @@ const api: PDVApi = {
     validate: (executablePath, language) =>
       ipcRenderer.invoke(IPC.kernels.validate, executablePath, language),
     onOutput: (callback) => onPush(IPC.push.executeOutput, callback),
+    onKernelStatus: (callback) => onPush(IPC.push.kernelStatus, callback),
   },
   tree: {
     list: (kernelId, nodePath = "") =>
@@ -61,8 +62,12 @@ const api: PDVApi = {
       ipcRenderer.invoke(IPC.tree.get, kernelId, nodePath),
     createScript: (kernelId, targetPath, scriptName) =>
       ipcRenderer.invoke(IPC.tree.createScript, kernelId, targetPath, scriptName),
+    createNote: (kernelId, targetPath, noteName) =>
+      ipcRenderer.invoke(IPC.tree.createNote, kernelId, targetPath, noteName),
     addFile: (kernelId, sourcePath, targetTreePath, nodeType, filename) =>
       ipcRenderer.invoke(IPC.tree.addFile, kernelId, sourcePath, targetTreePath, nodeType, filename),
+    invokeHandler: (kernelId, nodePath) =>
+      ipcRenderer.invoke(IPC.tree.invokeHandler, kernelId, nodePath),
     onChanged: (callback) => onPush(IPC.push.treeChanged, callback),
   },
   namespace: {
@@ -72,7 +77,18 @@ const api: PDVApi = {
   script: {
     edit: (kernelId, scriptPath) =>
       ipcRenderer.invoke(IPC.script.edit, kernelId, scriptPath),
-    reload: (scriptPath) => ipcRenderer.invoke(IPC.script.reload, scriptPath),
+  },
+  note: {
+    save: (kernelId, treePath, content) =>
+      ipcRenderer.invoke(IPC.note.save, kernelId, treePath, content),
+    read: (kernelId, treePath) =>
+      ipcRenderer.invoke(IPC.note.read, kernelId, treePath),
+  },
+  namelist: {
+    read: (kernelId, treePath) =>
+      ipcRenderer.invoke(IPC.namelist.read, kernelId, treePath),
+    write: (kernelId, treePath, data) =>
+      ipcRenderer.invoke(IPC.namelist.write, kernelId, treePath, data),
   },
   modules: {
     listInstalled: () => ipcRenderer.invoke(IPC.modules.listInstalled),
@@ -91,6 +107,7 @@ const api: PDVApi = {
     load: (saveDir) => ipcRenderer.invoke(IPC.project.load, saveDir),
     new: () => ipcRenderer.invoke(IPC.project.new),
     onLoaded: (callback) => onPush(IPC.push.projectLoaded, callback),
+    onReloading: (callback) => onPush(IPC.push.projectReloading, callback),
   },
   config: {
     get: () => ipcRenderer.invoke(IPC.config.get),
@@ -107,15 +124,17 @@ const api: PDVApi = {
     load: () => ipcRenderer.invoke(IPC.codeCells.load),
     save: (data) => ipcRenderer.invoke(IPC.codeCells.save, data),
   },
+  moduleWindows: {
+    open: (req) => ipcRenderer.invoke(IPC.moduleWindows.open, req),
+    close: (alias) => ipcRenderer.invoke(IPC.moduleWindows.close, alias),
+    context: () => ipcRenderer.invoke(IPC.moduleWindows.context),
+    executeInMain: (code) => ipcRenderer.invoke(IPC.moduleWindows.executeInMain, code),
+    onExecuteRequest: (cb) => onPush(IPC.push.moduleExecuteRequest, cb),
+  },
   files: {
     pickExecutable: () => ipcRenderer.invoke(IPC.files.pickExecutable),
     pickFile: () => ipcRenderer.invoke(IPC.files.pickFile),
     pickDirectory: () => ipcRenderer.invoke(IPC.files.pickDirectory),
-  },
-  lifecycle: {
-    onConfirmClose: (callback) => onPush(IPC.lifecycle.confirmClose, callback),
-    respondClose: (response) =>
-      ipcRenderer.invoke(IPC.lifecycle.closeResponse, response),
   },
   menu: {
     updateRecentProjects: (paths) =>

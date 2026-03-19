@@ -38,6 +38,7 @@ describe('ContextMenu', () => {
     );
     expect(screen.getByRole('button', { name: /^Refresh/ })).toBeTruthy();
     expect(screen.getByRole('button', { name: /^Create new script/ })).toBeTruthy();
+    expect(screen.getByRole('button', { name: /^Create new note/ })).toBeTruthy();
 
     rerender(
       <ContextMenu
@@ -49,8 +50,25 @@ describe('ContextMenu', () => {
         onClose={vi.fn()}
       />,
     );
-    expect(screen.getByRole('button', { name: /^Run/ })).toBeTruthy();
+    expect(screen.getByRole('button', { name: /^Run\.\.\./ })).toBeTruthy();
+    expect(screen.getByRole('button', { name: /^Run defaults$/ })).toBeTruthy();
     expect(screen.getByRole('button', { name: /^Edit/ })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: /^Create new script/ })).toBeNull();
+    expect(screen.queryByRole('button', { name: /^Create new note/ })).toBeNull();
+  });
+
+  it('renders Open action for markdown nodes', () => {
+    render(
+      <ContextMenu
+        x={10}
+        y={10}
+        node={node('markdown')}
+        shortcuts={DEFAULT_SHORTCUTS}
+        onAction={vi.fn()}
+        onClose={vi.fn()}
+      />,
+    );
+    expect(screen.getByRole('button', { name: /^Open/ })).toBeTruthy();
     expect(screen.queryByRole('button', { name: /^Create new script/ })).toBeNull();
   });
 
@@ -126,6 +144,6 @@ describe('ContextMenu', () => {
 
     const menu = container.querySelector('.context-menu') as HTMLElement;
     expect(menu.style.left).toBe('100px');
-    expect(menu.style.top).toBe('28px');
+    expect(menu.style.top).toBe('0px');
   });
 });

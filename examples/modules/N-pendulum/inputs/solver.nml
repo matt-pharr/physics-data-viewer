@@ -1,0 +1,21 @@
+! N-Pendulum ODE solver configuration
+! This file is managed by the PDV namelist editor.
+
+&solver_params
+    dt        = 0.005   ! integration time step (s)
+    t_end     = 20.0    ! simulation end time (s)
+    n_steps   = 4000    ! number of output steps
+    method    = 'RK45'  ! integration method (RK45, DOP853, Radau)
+/
+
+&physics
+    n_links   = 2       ! number of pendulum links
+    damping   = 0.0     ! joint damping coefficient
+    g         = 9.81    ! gravitational acceleration (m/s^2)
+/
+
+&tolerances
+    rtol      = 1.0e-8  ! relative tolerance
+    atol      = 1.0e-10 ! absolute tolerance
+    use_strict = .false. ! use custom tolerances instead of defaults
+/

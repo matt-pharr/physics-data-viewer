@@ -11,7 +11,7 @@ import { SHORTCUT_LABELS, DEFAULT_SHORTCUTS } from '../../shortcuts';
 import type { Shortcuts } from '../../shortcuts';
 import { EnvironmentSelector } from '../EnvironmentSelector';
 import {
-  BUILTIN_THEMES, BUILTIN_THEME_NAMES, CSS_VAR_GROUPS, THEME_PAIRS,
+  BUILTIN_THEMES, BUILTIN_THEME_NAMES, THEME_PAIRS,
   applyThemeColors, colorsEqual, defineMonacoThemes, getMonacoTheme, resolveThemeColors,
   detectMonoFonts, detectDisplayFonts, applyFontSettings,
 } from '../../themes';
@@ -19,103 +19,15 @@ import type { Theme } from '../../types';
 import { loader } from '@monaco-editor/react';
 import {
   IS_MAC,
-  tokenToLabel,
-  parseShortcutTokens,
-  buildShortcutString,
   normalizeShortcut,
 } from './utils';
+import { ShortcutCapture } from './ShortcutCapture';
+import { AppearanceTab } from './AppearanceTab';
 
 type SettingsTab = 'general' | 'shortcuts' | 'appearance' | 'runtime' | 'about';
 
 const DEFAULT_FILE_MANAGER = IS_MAC ? 'open {}' : 'xdg-open {}';
 const DEFAULT_VSCODE_PAIR = THEME_PAIRS.find((pair) => pair.name === 'VSCode');
-
-interface ShortcutCaptureProps {
-  label: string;
-  value: string;
-  defaultValue: string;
-  conflictsWith: string | null;
-  recordingKey: string | null;
-  onStartRecording: (key: string) => void;
-  onStopRecording: () => void;
-  onChange: (v: string) => void;
-}
-
-/** Reusable row widget for viewing/recording a single shortcut binding. */
-const ShortcutCapture: React.FC<ShortcutCaptureProps> = ({
-  label, value, defaultValue, conflictsWith, recordingKey, onStartRecording, onStopRecording, onChange,
-}) => {
-  const isRecording = recordingKey === label;
-  const [livePreview, setLivePreview] = useState<string[]>([]);
-
-  useEffect(() => {
-    if (!isRecording) { setLivePreview([]); return; }
-
-    const onKeyDown = (e: KeyboardEvent) => {
-      e.preventDefault();
-      e.stopImmediatePropagation();
-
-      if (e.key === 'Escape') {
-        onStopRecording();
-        return;
-      }
-
-      const combo = buildShortcutString(e);
-      const badges = combo ? combo.replace(/\s+/g, '').split('+').filter(Boolean).map(tokenToLabel) : [];
-      setLivePreview(badges);
-
-      const isModifierKey = ['Meta', 'Control', 'Shift', 'Alt'].includes(e.key);
-      if (!isModifierKey && combo) {
-        onChange(combo);
-        onStopRecording();
-      }
-    };
-
-    window.addEventListener('keydown', onKeyDown, { capture: true });
-    return () => window.removeEventListener('keydown', onKeyDown, { capture: true });
-  }, [isRecording, onChange, onStopRecording]);
-
-  const badges = isRecording ? livePreview : parseShortcutTokens(value);
-  const isDefault = value === defaultValue;
-
-  return (
-    <>
-      <span>{label}</span>
-      <div className={`shortcut-keys${conflictsWith ? ' shortcut-conflict' : ''}`} aria-label={`Current shortcut: ${value}`}>
-        {isRecording && livePreview.length === 0 ? (
-          <span className="shortcut-recording-prompt">Press keys…</span>
-        ) : (
-          badges.map((badge, i) => (
-            <kbd key={i} className="shortcut-key-badge">{badge}</kbd>
-          ))
-        )}
-        {conflictsWith && !isRecording && (
-          <span className="shortcut-conflict-warning" title={`Conflicts with "${conflictsWith}"`}>⚠</span>
-        )}
-      </div>
-      <div className="shortcut-actions">
-        <button
-          type="button"
-          className={`btn-sm${isRecording ? ' recording' : ''}`}
-          onClick={() => isRecording ? onStopRecording() : onStartRecording(label)}
-        >
-          {isRecording ? 'Cancel' : 'Set'}
-        </button>
-        {!isDefault && !isRecording && (
-          <button
-            type="button"
-            className="btn-sm"
-            title="Reset to default"
-            onClick={() => onChange(defaultValue)}
-          >
-            ↺
-          </button>
-        )}
-      </div>
-    </>
-  );
-};
-
 
 interface SettingsDialogProps {
   isOpen: boolean;
@@ -177,11 +89,13 @@ export const SettingsDialog: React.FC<SettingsDialogProps> = ({
 
   useLayoutEffect(() => {
     if (!isOpen) return;
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- intentional sync from props on dialog open
     setActiveTab(initialTab);
   }, [isOpen, initialTab]);
 
   useEffect(() => {
     if (!isOpen) return;
+    /* eslint-disable react-hooks/set-state-in-effect -- intentional sync from props on dialog open */
     setEditedShortcuts(shortcuts);
     setPythonEditorCmd(config?.pythonEditorCmd ?? 'code {}');
     setJuliaEditorCmd(config?.juliaEditorCmd ?? 'code {}');
@@ -215,6 +129,7 @@ export const SettingsDialog: React.FC<SettingsDialogProps> = ({
     };
     void load();
     void window.pdv.about.getVersion().then(setAppVersion).catch(() => setAppVersion('unknown'));
+    /* eslint-enable react-hooks/set-state-in-effect */
   }, [config, shortcuts, isOpen, initialTab]);
 
   useEffect(() => {
@@ -326,6 +241,15 @@ export const SettingsDialog: React.FC<SettingsDialogProps> = ({
     const refreshed = await window.pdv.themes.get();
     setSavedThemes(refreshed);
     setSelectedThemeName(name);
+  };
+
+  const handleCodeFontChange = (font: string) => {
+    setCodeFont(font);
+    applyFontSettings(font || undefined, displayFont || undefined);
+  };
+  const handleDisplayFontChange = (font: string) => {
+    setDisplayFont(font);
+    applyFontSettings(codeFont || undefined, font || undefined);
   };
 
   const onSaveSettings = async () => {
@@ -496,202 +420,35 @@ export const SettingsDialog: React.FC<SettingsDialogProps> = ({
               </div>
             </div>
           ) : (
-            <div className="settings-appearance">
-
-              {/* ── Theme section ── */}
-              <div className="appearance-section-header appearance-section-header--spaced">Theme</div>
-
-              {/* Follow system theme toggle */}
-              <label className="appearance-follow-row">
-                <input
-                  type="checkbox"
-                  checked={followSystemTheme}
-                  onChange={(e) => setFollowSystemTheme(e.target.checked)}
-                />
-                <span>Follow system light/dark preference</span>
-              </label>
-
-              {followSystemTheme ? (
-                /* Paired-theme selectors */
-                <div className="appearance-pair-selectors">
-                  {[
-                    { label: '🌙 Dark theme', value: darkThemeName, onChange: handleDarkThemeSelect },
-                    { label: '☀️ Light theme', value: lightThemeName, onChange: handleLightThemeSelect },
-                  ].map(({ label, value, onChange }) => (
-                    <div key={label} className="appearance-theme-row">
-                      <label>{label}</label>
-                      <select value={value} onChange={(e) => onChange(e.target.value)}>
-                        {BUILTIN_THEMES.map((t) => (
-                          <option key={t.name} value={t.name}>{t.name}</option>
-                        ))}
-                        {savedThemes.length > 0 && (
-                          <optgroup label="Custom">
-                            {savedThemes.map((t) => (
-                              <option key={t.name} value={t.name}>{t.name}</option>
-                            ))}
-                          </optgroup>
-                        )}
-                      </select>
-                    </div>
-                  ))}
-                  {THEME_PAIRS.length > 0 && (
-                    <div className="appearance-pair-hint">
-                      Suggested pairs:{' '}
-                      {THEME_PAIRS.map((p) => (
-                        <button
-                          key={p.name}
-                          type="button"
-                          className="btn btn-secondary btn-sm"
-                          onClick={() => { setDarkThemeName(p.dark); setLightThemeName(p.light); }}
-                        >
-                          {p.name}
-                        </button>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              ) : (
-                <>
-                  {/* Single theme selector row */}
-                  <div className="appearance-theme-row">
-                    <label htmlFor="appearance-theme-select">Theme</label>
-                    <select
-                      id="appearance-theme-select"
-                      value={selectedThemeName}
-                      onChange={(e) => handleThemeSelect(e.target.value)}
-                    >
-                      {BUILTIN_THEMES.map((t) => (
-                        <option key={t.name} value={t.name}>{t.name}</option>
-                      ))}
-                      {savedThemes.length > 0 && (
-                        <optgroup label="Custom">
-                          {savedThemes.map((t) => (
-                            <option key={t.name} value={t.name}>{t.name}</option>
-                          ))}
-                        </optgroup>
-                      )}
-                    </select>
-                    <button
-                      type="button"
-                      className="btn btn-secondary"
-                      onClick={() => void handleDuplicate()}
-                      title="Save a copy of this theme for editing"
-                    >
-                      Duplicate
-                    </button>
-                    <button
-                      type="button"
-                      className="btn btn-secondary"
-                      onClick={handleReset}
-                      disabled={!isDirty}
-                      title="Reset colours to this theme's defaults"
-                    >
-                      Reset
-                    </button>
-                  </div>
-
-                  {/* Colour groups */}
-                  <div className="appearance-colors">
-                    {CSS_VAR_GROUPS.map((group) => (
-                      <div key={group.label} className="appearance-color-group">
-                        <div className="appearance-group-label">{group.label}</div>
-                        {group.vars.map(({ key, label }) => {
-                          const value = editedColors[key] ?? '#000000';
-                          return (
-                            <div key={key} className="appearance-color-row">
-                              <span className="appearance-color-label">{label}</span>
-                              <input
-                                type="color"
-                                className="appearance-color-swatch"
-                                value={/^#[0-9a-fA-F]{6}$/.test(value) ? value : '#000000'}
-                                onChange={(e) => handleColorChange(key, e.target.value)}
-                              />
-                              <input
-                                type="text"
-                                className="appearance-color-hex"
-                                value={value}
-                                maxLength={7}
-                                spellCheck={false}
-                                onChange={(e) => handleHexInput(key, e.target.value)}
-                              />
-                            </div>
-                          );
-                        })}
-                      </div>
-                    ))}
-                  </div>
-                </>
-              )}
-
-              {/* ── Fonts section ── */}
-              <div className="appearance-section-header">Fonts</div>
-              <div className="appearance-editor-grid">
-                <label htmlFor="ae-code-font">Code font</label>
-                <select
-                  id="ae-code-font"
-                  className="appearance-editor-select"
-                  value={codeFont}
-                  onChange={(e) => { setCodeFont(e.target.value); applyFontSettings(e.target.value || undefined, displayFont || undefined); }}
-                >
-                  <option value="">Default</option>
-                  {monoFonts.map((f) => <option key={f} value={f}>{f}</option>)}
-                </select>
-
-                <label htmlFor="ae-display-font">Display font</label>
-                <select
-                  id="ae-display-font"
-                  className="appearance-editor-select"
-                  value={displayFont}
-                  onChange={(e) => { setDisplayFont(e.target.value); applyFontSettings(codeFont || undefined, e.target.value || undefined); }}
-                >
-                  <option value="">Default</option>
-                  {displayFonts.map((f) => <option key={f} value={f}>{f}</option>)}
-                </select>
-              </div>
-
-              {/* ── Editor section ── */}
-              <div className="appearance-section-header appearance-section-header--spaced">Editor</div>
-              <div className="appearance-editor-grid">
-                <label htmlFor="ae-font-size">Font size</label>
-                <div className="appearance-editor-row">
-                  <input
-                    id="ae-font-size"
-                    type="number"
-                    className="appearance-editor-number"
-                    value={editorFontSize}
-                    min={8}
-                    max={32}
-                    onChange={(e) => setEditorFontSize(Number(e.target.value) || 13)}
-                  />
-                  <span className="appearance-editor-unit">px</span>
-                </div>
-
-                <label htmlFor="ae-tab-size">Tab size</label>
-                <div className="appearance-editor-row">
-                  <input
-                    id="ae-tab-size"
-                    type="number"
-                    className="appearance-editor-number"
-                    value={editorTabSize}
-                    min={1}
-                    max={8}
-                    onChange={(e) => setEditorTabSize(Number(e.target.value) || 4)}
-                  />
-                  <span className="appearance-editor-unit">spaces</span>
-                </div>
-
-                <label htmlFor="ae-word-wrap">Word wrap</label>
-                <label className="appearance-editor-check">
-                  <input
-                    id="ae-word-wrap"
-                    type="checkbox"
-                    checked={editorWordWrap}
-                    onChange={(e) => setEditorWordWrap(e.target.checked)}
-                  />
-                  <span>Enabled</span>
-                </label>
-              </div>
-            </div>
+            <AppearanceTab
+              followSystemTheme={followSystemTheme}
+              selectedThemeName={selectedThemeName}
+              editedColors={editedColors}
+              isDirty={isDirty}
+              darkThemeName={darkThemeName}
+              lightThemeName={lightThemeName}
+              savedThemes={savedThemes}
+              codeFont={codeFont}
+              displayFont={displayFont}
+              monoFonts={monoFonts}
+              displayFonts={displayFonts}
+              editorFontSize={editorFontSize}
+              editorTabSize={editorTabSize}
+              editorWordWrap={editorWordWrap}
+              onFollowSystemThemeChange={setFollowSystemTheme}
+              onThemeSelect={handleThemeSelect}
+              onDarkThemeSelect={handleDarkThemeSelect}
+              onLightThemeSelect={handleLightThemeSelect}
+              onColorChange={handleColorChange}
+              onHexInput={handleHexInput}
+              onReset={handleReset}
+              onDuplicate={handleDuplicate}
+              onCodeFontChange={handleCodeFontChange}
+              onDisplayFontChange={handleDisplayFontChange}
+              onFontSizeChange={setEditorFontSize}
+              onTabSizeChange={setEditorTabSize}
+              onWordWrapChange={setEditorWordWrap}
+            />
           )}
         </div>
         {activeTab !== 'runtime' && activeTab !== 'about' && (

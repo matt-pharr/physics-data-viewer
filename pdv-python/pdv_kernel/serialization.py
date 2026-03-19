@@ -48,7 +48,13 @@ KIND_SCALAR = "scalar"
 KIND_TEXT = "text"
 KIND_MAPPING = "mapping"
 KIND_SEQUENCE = "sequence"
+KIND_MARKDOWN = "markdown"
 KIND_BINARY = "binary"
+KIND_MODULE = "module"
+KIND_GUI = "gui"
+KIND_NAMELIST = "namelist"
+KIND_LIB = "lib"
+KIND_FILE = "file"
 KIND_UNKNOWN = "unknown"
 
 # Format strings — must match ARCHITECTURE.md §7.3 storage.format
@@ -58,7 +64,29 @@ FORMAT_JSON = "json"
 FORMAT_TXT = "txt"
 FORMAT_PICKLE = "pickle"
 FORMAT_PY_SCRIPT = "py_script"
+FORMAT_MARKDOWN = "markdown"
 FORMAT_INLINE = "inline"
+FORMAT_GUI_JSON = "gui_json"
+FORMAT_MODULE_META = "module_meta"
+FORMAT_NAMELIST = "namelist"
+FORMAT_PY_LIB = "py_lib"
+
+
+def python_type_string(value: Any) -> str:
+    """Return ``'module.qualname'`` for any object.
+
+    Parameters
+    ----------
+    value : Any
+        Any Python object.
+
+    Returns
+    -------
+    str
+        Fully qualified type string, e.g. ``'builtins.int'``.
+    """
+    t = type(value)
+    return f"{t.__module__}.{t.__qualname__}"
 
 
 def detect_kind(value: Any) -> str:
@@ -81,12 +109,24 @@ def detect_kind(value: Any) -> str:
     ndarray/dataframe/series values fall through to ``KIND_UNKNOWN``.
     """
     # Lazy import to avoid circular dependency and optional deps
-    from pdv_kernel.tree import PDVTree, PDVScript  # noqa: PLC0415
+    from pdv_kernel.tree import PDVTree, PDVScript, PDVNote, PDVFile, PDVModule, PDVGui, PDVNamelist, PDVLib  # noqa: PLC0415
 
+    if isinstance(value, PDVModule):
+        return KIND_MODULE
     if isinstance(value, PDVTree):
         return KIND_FOLDER
-    if isinstance(value, PDVScript):
-        return KIND_SCRIPT
+    if isinstance(value, PDVFile):
+        if isinstance(value, PDVScript):
+            return KIND_SCRIPT
+        if isinstance(value, PDVNote):
+            return KIND_MARKDOWN
+        if isinstance(value, PDVGui):
+            return KIND_GUI
+        if isinstance(value, PDVNamelist):
+            return KIND_NAMELIST
+        if isinstance(value, PDVLib):
+            return KIND_LIB
+        return KIND_FILE
     # bool must be checked before int (bool is a subclass of int)
     if isinstance(value, bool):
         return KIND_SCALAR
@@ -124,6 +164,7 @@ def serialize_node(
     working_dir: str,
     *,
     trusted: bool = False,
+    source_dir: str = "",
 ) -> dict:
     """Serialize a value to disk and return a node descriptor dict.
 
@@ -139,11 +180,16 @@ def serialize_node(
     value : Any
         The Python value to serialize.
     working_dir : str
-        Absolute path to the working directory. Data files are written
+        Absolute path to the output directory. Data files are written
         under ``<working_dir>/tree/``.
     trusted : bool
         If True, allows pickle serialization for unknown types. If False,
         unknown types raise :class:`PDVSerializationError`.
+    source_dir : str
+        Absolute path to the directory where existing source files
+        (scripts, libs, etc.) live. Defaults to ``working_dir`` when
+        empty. Needed when source files are in the kernel working dir
+        but output is written to a separate save dir.
 
     Returns
     -------
@@ -151,7 +197,8 @@ def serialize_node(
         Node descriptor dict as defined in ARCHITECTURE.md §7.3,
         including ``id``, ``path``, ``key``, ``type``, ``storage``,
         ``has_children``, ``lazy``, ``created_at``, ``updated_at``,
-        and type-specific metadata (``shape``, ``dtype``, ``preview``, etc.).
+        and a ``metadata`` sub-dict with type-specific fields
+        (``shape``, ``dtype``, ``preview``, ``module_id``, etc.).
 
     Raises
     ------
@@ -166,6 +213,17 @@ def serialize_node(
     import shutil
 
     from pdv_kernel.environment import ensure_parent, working_dir_tree_path  # noqa: PLC0415
+    from pdv_kernel.tree import PDVFile, PDVScript, PDVModule, PDVLib, PDVGui, PDVNote  # noqa: PLC0415
+
+    # File extension and format for each PDVFile subclass
+    _FILE_KIND_MAP: dict[str, tuple[str, str]] = {
+        KIND_SCRIPT:   (".py", FORMAT_PY_SCRIPT),
+        KIND_MARKDOWN: (".md", FORMAT_MARKDOWN),
+        KIND_GUI:      (".gui.json", FORMAT_GUI_JSON),
+        KIND_LIB:      (".py", FORMAT_PY_LIB),
+    }
+
+    _source_dir = source_dir or working_dir
 
     kind = detect_kind(value)
     now = datetime.datetime.now(datetime.timezone.utc).isoformat().replace("+00:00", "Z")
@@ -173,7 +231,8 @@ def serialize_node(
     key = parts[-1]
     parent_path = ".".join(parts[:-1]) if len(parts) > 1 else ""
 
-    # Base descriptor fields common to all node types
+    # Base descriptor fields common to all node types (universal top-level)
+    preview = node_preview(value, kind)
     descriptor: dict = {
         "id": tree_path,
         "path": tree_path,
@@ -184,32 +243,99 @@ def serialize_node(
         "lazy": False,
         "created_at": now,
         "updated_at": now,
-        "preview": node_preview(value, kind),
-        "language": None,
-        "actions": [],
     }
 
     if kind == KIND_FOLDER:
         descriptor["has_children"] = True
         descriptor["storage"] = {"backend": "none", "format": "none"}
+        descriptor["metadata"] = {"preview": preview}
         return descriptor
 
-    if kind == KIND_SCRIPT:
-        source_path = value.relative_path  # type: ignore[union-attr]
-        if not os.path.isabs(source_path):
-            source_path = os.path.join(working_dir, source_path)
+    if kind == KIND_MODULE:
+        descriptor["has_children"] = True
+        descriptor["storage"] = {
+            "backend": "inline",
+            "format": FORMAT_MODULE_META,
+            "value": {
+                "module_id": value.module_id,
+                "name": value.name,
+                "version": value.version,
+            },
+        }
+        descriptor["metadata"] = {
+            "module_id": value.module_id,
+            "name": value.name,
+            "version": value.version,
+            "preview": preview,
+        }
+        return descriptor
+
+    # -- PDVFile subclasses (PDVScript, PDVNote, future file types) -----------
+    if kind in _FILE_KIND_MAP:
+        ext, fmt = _FILE_KIND_MAP[kind]
+        source_path = value.resolve_path(_source_dir)  # type: ignore[union-attr]
         if not os.path.exists(source_path):
-            raise PDVSerializationError(f"Script file not found: {source_path}")
-        file_path = working_dir_tree_path(working_dir, tree_path, ".py")
+            raise PDVSerializationError(f"File not found: {source_path}")
+        if isinstance(value, PDVLib):
+            # Lib files keep their original filename so that the Python import
+            # name stays consistent (e.g. n_pendulum.py → import n_pendulum).
+            # working_dir_tree_path would derive the name from the tree key,
+            # which has been mangled (n_pendulum_py).
+            if os.path.isabs(value.relative_path):
+                rel_path = os.path.relpath(source_path, _source_dir)
+            else:
+                rel_path = value.relative_path
+        else:
+            file_path = working_dir_tree_path(working_dir, tree_path, ext)
+            ensure_parent(file_path)
+            if os.path.abspath(source_path) != os.path.abspath(file_path):
+                shutil.copy2(source_path, file_path)
+            rel_path = os.path.relpath(file_path, working_dir)
+        descriptor["storage"] = {
+            "backend": "local_file",
+            "relative_path": rel_path,
+            "format": fmt,
+        }
+        # Build type-specific metadata
+        meta: dict[str, Any] = {"preview": preview}
+        if isinstance(value, PDVScript):
+            meta["language"] = value.language
+            meta["doc"] = value.doc
+        elif isinstance(value, PDVLib):
+            meta["language"] = "python"
+            if value.module_id:
+                meta["module_id"] = value.module_id
+        elif kind == KIND_GUI:
+            if isinstance(value, PDVGui) and value.module_id:
+                meta["module_id"] = value.module_id
+            meta["language"] = "json"
+        elif kind == KIND_MARKDOWN:
+            meta["language"] = "markdown"
+            if isinstance(value, PDVNote) and value.title:
+                meta["title"] = value.title
+        descriptor["metadata"] = meta
+        return descriptor
+
+    if kind == KIND_NAMELIST:
+        ext = os.path.splitext(value.relative_path)[1] or ".nml"
+        source_path = value.resolve_path(_source_dir)
+        if not os.path.exists(source_path):
+            raise PDVSerializationError(f"File not found: {source_path}")
+        file_path = working_dir_tree_path(working_dir, tree_path, ext)
         ensure_parent(file_path)
         if os.path.abspath(source_path) != os.path.abspath(file_path):
             shutil.copy2(source_path, file_path)
         rel_path = os.path.relpath(file_path, working_dir)
-        descriptor["language"] = value.language  # type: ignore[union-attr]
         descriptor["storage"] = {
             "backend": "local_file",
             "relative_path": rel_path,
-            "format": FORMAT_PY_SCRIPT,
+            "format": FORMAT_NAMELIST,
+        }
+        descriptor["metadata"] = {
+            "module_id": value.module_id,
+            "namelist_format": value.format,
+            "language": "namelist",
+            "preview": preview,
         }
         return descriptor
 
@@ -226,9 +352,12 @@ def serialize_node(
             "relative_path": rel_path,
             "format": FORMAT_NPY,
         }
-        descriptor["shape"] = list(value.shape)
-        descriptor["dtype"] = str(value.dtype)
-        descriptor["size_bytes"] = value.nbytes
+        descriptor["metadata"] = {
+            "shape": list(value.shape),
+            "dtype": str(value.dtype),
+            "size_bytes": value.nbytes,
+            "preview": preview,
+        }
         return descriptor
 
     if kind in (KIND_DATAFRAME, KIND_SERIES):
@@ -243,9 +372,13 @@ def serialize_node(
             "format": FORMAT_PARQUET,
         }
         if kind == KIND_DATAFRAME:
-            descriptor["shape"] = list(value.shape)  # type: ignore[union-attr]
+            shape = list(value.shape)  # type: ignore[union-attr]
         else:
-            descriptor["shape"] = [len(value)]  # type: ignore[arg-type]
+            shape = [len(value)]  # type: ignore[arg-type]
+        descriptor["metadata"] = {
+            "shape": shape,
+            "preview": preview,
+        }
         return descriptor
 
     if kind == KIND_SCALAR:
@@ -254,6 +387,7 @@ def serialize_node(
             "format": FORMAT_INLINE,
             "value": value,
         }
+        descriptor["metadata"] = {"preview": preview}
         return descriptor
 
     if kind == KIND_TEXT:
@@ -276,6 +410,7 @@ def serialize_node(
                 "relative_path": rel_path,
                 "format": FORMAT_TXT,
             }
+        descriptor["metadata"] = {"preview": preview}
         return descriptor
 
     if kind in (KIND_MAPPING, KIND_SEQUENCE):
@@ -290,6 +425,7 @@ def serialize_node(
             "format": FORMAT_INLINE,
             "value": value,
         }
+        descriptor["metadata"] = {"preview": preview}
         return descriptor
 
     if kind == KIND_BINARY:
@@ -304,6 +440,7 @@ def serialize_node(
             "relative_path": rel_path,
             "format": "bin",
         }
+        descriptor["metadata"] = {"preview": preview}
         return descriptor
 
     # KIND_UNKNOWN
@@ -323,6 +460,7 @@ def serialize_node(
         "relative_path": rel_path,
         "format": FORMAT_PICKLE,
     }
+    descriptor["metadata"] = {"preview": preview}
     return descriptor
 
 
@@ -389,7 +527,15 @@ def deserialize_node(storage_ref: dict, save_dir: str, *, trusted: bool = False)
             with open(abs_path, "r", encoding="utf-8") as fh:
                 return fh.read()
 
+        if fmt == FORMAT_MARKDOWN:
+            with open(abs_path, "r", encoding="utf-8") as fh:
+                return fh.read()
+
         if fmt == FORMAT_JSON:
+            with open(abs_path, "r", encoding="utf-8") as fh:
+                return json.load(fh)
+
+        if fmt == FORMAT_GUI_JSON:
             with open(abs_path, "r", encoding="utf-8") as fh:
                 return json.load(fh)
 
@@ -428,8 +574,10 @@ def node_preview(value: Any, kind: str) -> str:
     try:
         if kind == KIND_FOLDER:
             return "folder"
-        if kind == KIND_SCRIPT:
-            return value.preview() if hasattr(value, "preview") else "PDV script"
+        if kind in (KIND_MODULE, KIND_GUI, KIND_NAMELIST, KIND_LIB):
+            return value.preview() if hasattr(value, "preview") else kind
+        if kind in (KIND_SCRIPT, KIND_MARKDOWN):
+            return value.preview() if hasattr(value, "preview") else kind
         if kind == KIND_SCALAR:
             return str(value)[:100]
         if kind == KIND_TEXT:
@@ -456,6 +604,13 @@ def node_preview(value: Any, kind: str) -> str:
             return f"Series ({len(value)},)"
     except Exception:  # noqa: BLE001
         pass
+    # Custom types may provide a preview() method (e.g. module-defined types
+    # with registered handlers).
+    if hasattr(value, "preview") and callable(value.preview):
+        try:
+            return str(value.preview())[:100]
+        except Exception:  # noqa: BLE001
+            pass
     return "<unknown type>"
 
 

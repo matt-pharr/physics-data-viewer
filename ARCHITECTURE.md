@@ -3,6 +3,8 @@
 **Date**: 2026-02-24  
 **Status**: Authoritative design specification. All new code must conform to this document. Deviations require updating this document first.
 
+> **New to PDV?** Start with [QUICK_START.md](QUICK_START.md) for setup instructions and a guided tour. This document is the comprehensive reference.
+
 ---
 
 ## Table of Contents
@@ -32,6 +34,7 @@ PDV is an Electron desktop application for computational and experimental physic
 - A **command workflow** (tabbed code editor + execution console)
 - A **persistent project data model** (the Tree — a live, hierarchical data object in a language kernel)
 - **Scripted, reusable analysis workflows** (scripts stored as tree nodes)
+- **Markdown notes** (first-class tree nodes with KaTeX math preview, edited in a dedicated Write tab)
 - **Multi-language backend support** (Python first; Julia deferred to beta)
 
 The defining characteristic that separates PDV from a Jupyter notebook is the **Tree**: a persistent, navigable, typed data hierarchy that lives in the kernel namespace and is the single authority on all project data. Users explore it via a graphical tree panel, store analysis results in it, attach scripts to it, and save/load it as part of a project.
@@ -79,6 +82,7 @@ PDV uses the standard Electron three-process architecture:
 ### 2.2 Renderer Process Responsibilities
 - Display and interact with the Tree panel
 - Display and interact with the Code Cell (Monaco editor tabs)
+- Display and interact with the Write tab (markdown note editor with KaTeX math preview)
 - Display the Console (chronological execution output log)
 - Display the Namespace panel
 - All UI state (expansion, selection, scroll position) lives here and is ephemeral unless saved as part of a project
@@ -111,7 +115,7 @@ Every PDV message — whether sent by the app or by the kernel — has the follo
 
 ```json
 {
-  "pdv_version": "0.0.4",
+  "pdv_version": "0.0.5",
   "msg_id": "<uuid-v4>",
   "in_reply_to": "<uuid-v4-or-null>",
   "type": "<message-type-string>",
@@ -122,7 +126,7 @@ Every PDV message — whether sent by the app or by the kernel — has the follo
 
 | Field | Type | Description |
 |---|---|---|
-| `pdv_version` | string | Protocol version. Currently `"0.0.4"` (alpha). The app rejects messages with an incompatible major version. |
+| `pdv_version` | string | Protocol version. Currently `"0.0.5"` (alpha). The app rejects messages with an incompatible major version. |
 | `msg_id` | string | UUID v4. Unique identifier for this message. |
 | `in_reply_to` | string \| null | The `msg_id` of the request this is responding to. `null` for unsolicited push messages. |
 | `type` | string | Dot-namespaced message type (see Section 3.4). |
@@ -180,6 +184,37 @@ All type strings are namespaced with `pdv.`. The convention is `pdv.<domain>.<ac
 | `pdv.script.register` | app → kernel | Register a newly created script file as a node in the tree. |
 | `pdv.script.register.response` | kernel → app | Confirms registration. |
 
+#### Note Messages
+
+| Type | Direction | Description |
+|---|---|---|
+| `pdv.note.register` | app → kernel | Register a newly created markdown note file as a node in the tree. Payload: `{ parent_path, name, relative_path }`. |
+| `pdv.note.register.response` | kernel → app | Confirms registration. |
+
+#### Module Registration Messages
+
+| Type | Direction | Description |
+|---|---|---|
+| `pdv.module.register` | app → kernel | Register a `PDVModule` node at a tree path. Payload: `{ path, module_id, name, version }`. |
+| `pdv.module.register.response` | kernel → app | Confirms module registration. |
+| `pdv.gui.register` | app → kernel | Register a `PDVGui` node at a tree path. Payload: `{ parent_path, name, relative_path, module_id }`. |
+| `pdv.gui.register.response` | kernel → app | Confirms GUI registration. |
+| `pdv.modules.setup` | app → kernel | Add lib file parent directories to `sys.path` and import entry points. Payload: `{ modules: [{ lib_paths: string[], entry_point?: string }] }`. Sent after module import and on kernel start/restart. |
+| `pdv.modules.setup.response` | kernel → app | Confirms module setup with handler registry. |
+| `pdv.handler.invoke` | app → kernel | Dispatch a registered handler for a tree node. Payload: `{ path }`. |
+| `pdv.handler.invoke.response` | kernel → app | Returns handler dispatch result. |
+
+#### Namelist Messages
+
+| Type | Direction | Description |
+|---|---|---|
+| `pdv.namelist.read` | app → kernel | Parse a `PDVNamelist` backing file. Payload: `{ tree_path }`. Returns groups, hints, types, format. |
+| `pdv.namelist.read.response` | kernel → app | Parsed namelist data. |
+| `pdv.namelist.write` | app → kernel | Write structured data back to a `PDVNamelist` backing file. Payload: `{ tree_path, data }`. |
+| `pdv.namelist.write.response` | kernel → app | Confirms write success. |
+| `pdv.file.register` | app → kernel | Register a file-backed tree node (`PDVNamelist`, `PDVLib`, or `PDVFile`). Payload: `{ tree_path, filename, node_type, name?, module_id? }`. When `node_type` is `"lib"`, creates a `PDVLib` node. |
+| `pdv.file.register.response` | kernel → app | Confirms file registration with resulting path. |
+
 ### 3.5 Error Payload
 
 When `status` is `"error"`, the payload always has this shape:
@@ -208,12 +243,14 @@ Minor version differences are tolerated with a logged warning.
 
 ### 4.1 Startup Sequence
 
+The kernel is **not** started when the app launches. On startup, the renderer loads configuration and displays the WelcomeScreen. The kernel is started only when the user picks an action (New Project, Open Project, or a recent project).
+
 ```
-App launches
+User selects action on WelcomeScreen
     │
     ├─► Environment detection (see Section 10)
     │       Is pdv-python installed in the selected environment?
-    │       No → prompt user → install → retry
+    │       No → prompt user (EnvironmentSelector) → install → retry
     │
     ├─► App creates working directory (see Section 6.1)
     │
@@ -233,8 +270,9 @@ App launches
     │       status: error → display error with message
     │
     └─► Kernel is ready. UI unlocks.
+            If a project was selected, it is loaded now.
             Code Cell: active
-            Tree panel: empty, showing working directory root
+            Tree panel: empty (or populated from loaded project)
             Namespace panel: active
 ```
 
@@ -281,21 +319,125 @@ On kernel crash (process exits unexpectedly):
 
 ### 4.4 Renderer Startup Behavior
 
+On launch, the renderer loads configuration and displays the WelcomeScreen overlay. No kernel is started at this point — the WelcomeScreen buttons are immediately interactive.
+
+When the user picks an action (New Project, Open Project, or a recent project), the renderer dismisses the WelcomeScreen and starts the kernel. If the user chose to open a project, the project path is stored in a pending-action ref and executed automatically once the kernel becomes ready.
+
 The renderer is never aware of the low-level `pdv.ready → pdv.init → pdv.init.response` handshake. That exchange is entirely encapsulated inside the main process's `kernels.start()` IPC handler: the handler spawns the subprocess, runs the full handshake sequence, and only resolves its promise once `pdv.init.response` has been received with `status: 'ok'`.
 
-From the renderer's perspective, startup is simply:
+From the renderer's perspective, kernel startup is simply:
 
 ```tsx
-// Renderer (app/index.tsx)
+// Renderer (app/index.tsx) — triggered by WelcomeScreen action, not on mount
 setKernelStatus('starting'); // locks UI — code cell, tree, namespace all disabled
 const info = await window.pdv.kernels.start(spec);
 setCurrentKernelId(info.id);
 setKernelStatus('ready');   // unlocks UI
+// If a pending project action exists, it executes now
 ```
 
 The renderer shows a loading / disabled state for all panels while `start()` is pending. On rejection (timeout or init error), the renderer displays the error string from the rejected promise.
 
 There is no separate push notification for "kernel ready" that the renderer must subscribe to. The resolved `KernelInfo` value IS the ready signal.
+
+### 4.5 Sequence Diagrams
+
+#### Kernel Startup
+
+```mermaid
+sequenceDiagram
+    participant U as User
+    participant R as Renderer (React)
+    participant M as Main (Node.js)
+    participant K as Kernel (Python)
+
+    Note over R: WelcomeScreen displayed (no kernel running)
+    U->>R: Clicks New Project / Open Project / Recent
+    R->>R: dismissWelcome(), ensureKernel()
+
+    R->>M: window.pdv.kernels.start(spec)
+    Note over R: UI locked (kernelStatus = 'starting')
+
+    M->>K: spawn subprocess (ipykernel_launcher)
+    M->>K: open ZeroMQ sockets (shell, iopub, control, hb)
+
+    K-->>M: pdv.ready (comm_open on iopub)
+    M->>K: pdv.init { working_dir, pdv_version }
+    K-->>M: pdv.init.response { status: 'ok' }
+
+    M-->>R: resolve KernelInfo { id, language }
+    Note over R: UI unlocked (kernelStatus = 'ready')
+    Note over R: If pending project action, load project now
+```
+
+#### Code Execution
+
+```mermaid
+sequenceDiagram
+    participant R as Renderer
+    participant M as Main
+    participant K as Kernel
+
+    R->>M: window.pdv.kernels.execute(kernelId, { code })
+    M->>K: execute_request (shell socket)
+
+    loop Streaming output
+        K-->>M: stream/display_data/execute_result (iopub)
+        M-->>R: kernels.onOutput push (chunk)
+        Note over R: Appends to Console log
+    end
+
+    opt Code modifies pdv_tree
+        K-->>M: pdv.tree.changed (comm_msg on iopub)
+        M-->>R: tree.onChanged push
+        Note over R: Bumps treeRefreshToken → Tree refetches
+    end
+
+    K-->>M: execute_reply (shell socket)
+    M-->>R: resolve execute result
+```
+
+#### Project Save
+
+```mermaid
+sequenceDiagram
+    participant R as Renderer
+    participant M as Main
+    participant K as Kernel
+
+    R->>M: window.pdv.project.save(dir, codeCells)
+
+    M->>K: pdv.project.save { save_dir }
+    K-->>M: pdv.project.save.response { node_count, checksum }
+
+    Note over M: Writes code-cells.json to save_dir
+    Note over M: Writes project.json to save_dir
+    Note over M: Updates config.recentProjects
+
+    M-->>R: resolve { success: true }
+    Note over R: Title bar updated, unsaved indicator cleared
+```
+
+#### Project Load
+
+```mermaid
+sequenceDiagram
+    participant R as Renderer
+    participant M as Main
+    participant K as Kernel
+
+    R->>M: window.pdv.project.load(dir)
+
+    M->>K: pdv.project.load { save_dir }
+    Note over K: Reads tree-index.json<br/>Rebuilds tree structure<br/>Registers lazy-load stubs
+
+    K-->>M: pdv.project.loaded (push)
+    M-->>R: project.onLoaded push { node_count, tabs }
+    Note over R: Restores code cell tabs from project
+
+    M-->>R: resolve { success: true }
+    Note over R: Tree/Namespace/Modules refetch
+```
 
 ---
 
@@ -303,7 +445,7 @@ There is no separate push notification for "kernel ready" that the renderer must
 
 ### 5.1 Purpose
 
-`pdv-python` is a Python package (installable via `pip install pdv-python`) that implements the kernel side of the PDV comm protocol, the `PDVTree` and `PDVScript` data structures, the protected kernel namespace, and lazy data loading. It replaces the monolithic `python-init.py` file.
+`pdv-python` is a Python package (installable via `pip install pdv-python`) that implements the kernel side of the PDV comm protocol, the `PDVTree`, `PDVScript`, `PDVModule`, `PDVGui`, and `PDVNamelist` data structures, the protected kernel namespace, and lazy data loading. It replaces the monolithic `python-init.py` file.
 
 ### 5.2 Package Structure
 
@@ -311,9 +453,9 @@ There is no separate push notification for "kernel ready" that the renderer must
 pdv_kernel/
     __init__.py          # Public API: bootstrap(), PDVTree, PDVScript
     comms.py             # Comm channel: register target, send/receive, dispatch
-    tree.py              # PDVTree class, PDVScript class, lazy-load registry
+    tree.py              # PDVTree, PDVScript, PDVFile, PDVNote, PDVModule, PDVGui, PDVNamelist, PDVLib
     namespace.py         # pdv_namespace() — variable inspection
-    serialization.py     # Type detection, format writers (npy, parquet, json, etc.)
+    serialization.py     # Type detection, format writers (npy, parquet, json, module, gui, namelist, lib)
     environment.py       # Path utilities, working dir management, project root logic
     handlers/
         __init__.py
@@ -322,6 +464,10 @@ pdv_kernel/
         tree.py          # pdv.tree.list, pdv.tree.get handlers
         namespace.py     # pdv.namespace.query handler
         script.py        # pdv.script.register handler
+        note.py          # pdv.note.register handler
+        modules.py       # pdv.module.register, pdv.modules.setup, pdv.handler.invoke handlers
+        gui.py           # pdv.gui.register handler
+        namelist.py      # pdv.namelist.read, pdv.namelist.write, pdv.file.register handlers
 ```
 
 ### 5.3 Bootstrap
@@ -425,7 +571,18 @@ A parameter is `required` if it has no default value. `type` is the string repre
 
 `PDVScript.run(tree, **kwargs)` loads the module fresh (no cache), calls `module.run(tree, **kwargs)`, and returns the result.
 
-### 5.8 The Lazy-Load Registry
+### 5.8 PDVFile and PDVNote Classes
+
+`PDVFile` is a base class for tree nodes backed by on-disk files that are not data or scripts. `PDVNote` is its subclass for markdown notes.
+
+**PDVNote** attributes:
+- `relative_path`: path of the `.md` file relative to the working directory
+- `title`: optional display title
+- `preview()`: returns the title, or the first non-empty line of the file, or `"Markdown note"` as fallback
+
+Notes are created via `pdv.note.register` (app → kernel) which creates a `PDVNote` instance and attaches it to the tree. The `.md` file itself lives in `<workingDir>/tree/<path>/` and is read/written directly by the main process via `note:read` / `note:save` IPC channels — no kernel round-trip is needed for content editing. On project save, the kernel serializes the note entry to `tree-index.json` and the main process copies the `.md` file into the save directory. On project load, the `.md` file is copied back from the save directory to the working directory and re-registered as a `PDVNote` in the tree.
+
+### 5.9 The Lazy-Load Registry
 
 An internal dict (not user-accessible) mapping tree paths to save-directory storage references:
 
@@ -441,6 +598,64 @@ _lazy_registry = {
 ```
 
 Populated during `pdv.project.load`. Entries are removed once the data has been loaded into memory. The registry is never written to disk — it is reconstructed from `tree-index.json` each time a project is loaded.
+
+### 5.10 PDVModule Class
+
+`PDVModule` is a subclass of `PDVTree` (i.e. a dict subclass). It represents an imported module in the tree. Because it inherits from `PDVTree`, it holds children naturally — a module's sub-nodes (GUI, scripts, namelists) are direct dict entries.
+
+Attributes:
+- `module_id` (read-only): unique identifier string (e.g. `"n_pendulum"`)
+- `name` (read-only): human-readable display name (e.g. `"N-Pendulum"`)
+- `version` (read-only): semantic version string (e.g. `"2.0.0"`)
+- `gui` (read-write): optional reference to the child `PDVGui` node, or `None`
+
+`preview()` returns `"{name} v{version}"`.
+
+Created by the `pdv.module.register` handler, which receives `path`, `module_id`, `name`, and `version` from the main process and inserts the `PDVModule` into the tree at the given path.
+
+### 5.11 PDVGui Class
+
+`PDVGui` is a subclass of `PDVFile`. It represents a GUI definition file (`.gui.json`) that describes a module's user interface — inputs, actions, and layout.
+
+Attributes:
+- `relative_path` (inherited from `PDVFile`): path to the `.gui.json` file relative to the working directory
+- `module_id` (read-only): the owning module's ID, or `None` for standalone project GUIs
+
+`preview()` returns `"GUI"`.
+
+Created by the `pdv.gui.register` handler. For module GUIs, the `.gui.json` file is copied from the installed module directory into the working directory at import time. If the parent node is a `PDVModule`, the handler also sets the module's `.gui` attribute to point to this node.
+
+### 5.12 PDVNamelist Class
+
+`PDVNamelist` is a subclass of `PDVFile`. It represents a simulation namelist file that can be parsed and edited through the namelist editor widget.
+
+Attributes:
+- `relative_path` (inherited from `PDVFile`): path to the namelist file relative to the working directory
+- `format` (read-only): one of `"fortran"`, `"toml"`, or `"auto"` (auto-detected from file content)
+- `module_id` (read-only): the owning module's ID, or `None` for standalone namelists
+
+`preview()` returns `"Namelist ({format})"`.
+
+The namelist file is parsed and written by dedicated comm handlers (`pdv.namelist.read`, `pdv.namelist.write`) that run in the kernel, keeping all format-specific logic in Python. The renderer requests parsed data and sends structured edits back; it never reads or writes the raw namelist file directly.
+
+### 5.13 PDVLib Class
+
+`PDVLib` is a subclass of `PDVFile`. It represents a Python library file provided by a module's `lib/` directory that is importable by scripts and entry points.
+
+Attributes:
+- `relative_path` (inherited from `PDVFile`): path to the `.py` file relative to the working directory
+- `module_id` (read-only): the owning module's ID, or `None`
+
+`preview()` returns `"Library (<filename>)"`.
+
+**Module lib/ convention**: Module developers place importable `.py` files in `<module-root>/lib/`. When a module is imported into a project, the main process:
+1. Copies each `.py` file from the installed module's `lib/` directory into the working directory under `<alias>/lib/`.
+2. Registers each file as a `PDVLib` tree node via `pdv.file.register` (with `node_type: "lib"`).
+3. Sends `pdv.modules.setup` with `lib_paths` — the on-disk paths of the copied files. The kernel adds the parent directory of each path to `sys.path`.
+
+This design makes lib files visible and editable in the tree (users can modify libraries while working in PDV). It is forward-compatible with planned UUID-based file storage where each file gets its own directory — since `sys.path` is set per-file parent directory rather than per-module.
+
+On project load (deserialization), the `lib` node type is restored as a `PDVLib` and its parent directory is re-added to `sys.path`.
 
 ---
 
@@ -565,7 +780,12 @@ The following node types are supported:
 | Type | Description | Backed by |
 |---|---|---|
 | `folder` | A `PDVTree` sub-dict with no associated file | In-memory only |
+| `module` | A `PDVModule` dict subclass carrying module metadata | Inline metadata in tree-index.json |
+| `gui` | A `PDVGui` file-backed GUI definition node | `.gui.json` file in working or save directory |
+| `namelist` | A `PDVNamelist` file-backed namelist definition | Namelist file in working or save directory |
+| `lib` | A `PDVLib` file-backed Python library provided by a module | `.py` file in working or save directory |
 | `script` | A `PDVScript` object | `.py` file in working or save directory |
+| `markdown` | A `PDVNote` object | `.md` file in working or save directory |
 | `ndarray` | NumPy array | `.npy` file |
 | `dataframe` | Pandas DataFrame | `.parquet` file |
 | `series` | Pandas Series | `.parquet` file |
@@ -623,6 +843,64 @@ Scalar and small inline values use `"backend": "inline"` and store the value dir
 
 `params` lists every parameter of the script's `run()` function except `pdv_tree` (which is always injected). The renderer uses this to build the `ScriptDialog` form. See §5.7 for the `ScriptParameter` descriptor shape and extraction rules.
 
+**Markdown node additional fields** (`"type": "markdown"`):
+```json
+{
+  "language": "markdown",
+  "storage": {
+    "backend": "local_file",
+    "relative_path": "tree/notes/my_note.md",
+    "format": "markdown"
+  }
+}
+```
+
+The `preview` field is populated with the first non-empty line of the `.md` file (typically the title).
+
+**Module node additional fields** (`"type": "module"`):
+```json
+{
+  "module_id": "n_pendulum",
+  "module_name": "N-Pendulum",
+  "module_version": "2.0.0",
+  "has_children": true,
+  "storage": {
+    "backend": "inline",
+    "format": "module_meta",
+    "value": {
+      "module_id": "n_pendulum",
+      "name": "N-Pendulum",
+      "version": "2.0.0"
+    }
+  }
+}
+```
+
+**GUI node additional fields** (`"type": "gui"`):
+```json
+{
+  "language": "gui",
+  "storage": {
+    "backend": "local_file",
+    "relative_path": "tree/n_pendulum/gui.gui.json",
+    "format": "gui_json"
+  }
+}
+```
+
+**Namelist node additional fields** (`"type": "namelist"`):
+```json
+{
+  "language": "namelist",
+  "storage": {
+    "backend": "local_file",
+    "relative_path": "tree/n_pendulum/solver.in",
+    "format": "namelist"
+  },
+  "namelist_format": "fortran"
+}
+```
+
 ### 7.4 Tree-Changed Push Notifications
 
 Whenever the tree structure changes — a node is added, deleted, or its value updated — the kernel emits a `pdv.tree.changed` push notification:
@@ -668,7 +946,7 @@ User triggers save
     ├─► App writes project.json to save directory
     │       (only after both kernel and app state are flushed)
     │
-    └─► App updates title bar: "My Experiment" (no unsaved-changes indicator)
+    └─► App updates title bar: "My Experiment"
 ```
 
 If the kernel responds with `status: "error"`, the app aborts the save, does not write `project.json`, and displays the error message to the user.
@@ -761,16 +1039,19 @@ The preload bridge exposes exactly the operations the renderer needs. It never e
 
 The API surface:
 - `window.pdv.kernels.*` — kernel lifecycle/execution: `list`, `start`, `stop`, `execute`, `interrupt`, `restart`, `complete`, `inspect`, `validate`; push subscription: `onOutput(cb) → unsub` for streamed execute chunks (`stdout`, `stderr`, images, execute-result fragments)
-- `window.pdv.tree.*` — tree operations: `list`, `get`, `createScript`; push: `onChanged(cb) → unsub`
+- `window.pdv.tree.*` — tree operations: `list`, `get`, `createScript`, `createNote`; push: `onChanged(cb) → unsub`
 - `window.pdv.namespace.*` — namespace query: `query`
-- `window.pdv.script.*` — script tooling: `edit`, `reload` (open in external editor; re-register with kernel)
+- `window.pdv.note.*` — markdown note I/O: `save(kernelId, treePath, content)`, `read(kernelId, treePath)` — reads/writes `.md` files directly on the main process without a kernel round-trip
+- `window.pdv.script.*` — script tooling: `edit` (open in external editor)
 - `window.pdv.project.*` — project lifecycle: `save`, `load`, `new`; push: `onLoaded(cb) → unsub`
 - `window.pdv.config.*` — app config: `get`, `set`
 - `window.pdv.about.*` — app metadata: `getVersion`
 - `window.pdv.themes.*` — theme persistence: `get`, `save` (stored under `~/.PDV/themes/`)
 - `window.pdv.codeCells.*` — tab persistence: `load`, `save` (stored under `~/.PDV/state/code-cells.json`)
 - `window.pdv.files.*` — native OS dialogs: `pickExecutable() → string | null` (wraps Electron `dialog.showOpenDialog` for executables); `pickDirectory() → string | null` (wraps `dialog.showOpenDialog` with `properties: ['openDirectory', 'createDirectory']`, used for Save/Open project)
-- `window.pdv.menu.*` — menu bridge: `updateRecentProjects(paths)`, `onAction(cb) → unsub` (for File menu actions routed to renderer state)
+- `window.pdv.modules.*` — module management: `listInstalled`, `install`, `importToProject`, `listImported`, `removeImport`, `saveSettings`, `runAction`, `checkUpdates`
+- `window.pdv.moduleWindows.*` — module GUI windows: `open`, `close`, `context`, `executeInMain`; push: `onExecuteRequest(cb) → unsub`
+- `window.pdv.menu.*` — menu bridge: `updateRecentProjects(paths)`, `onAction(cb) → unsub` (for File menu actions routed to renderer state, including `modules:import`)
 
 **Design decision — running scripts via `kernels.execute`**: There is no `window.pdv.script.run()`. Running a `PDVScript` node from the renderer is always done by calling `window.pdv.kernels.execute()` with the appropriate Python code string (e.g. `pdv_tree["path.to.script"].run(a=1)`). This keeps the IPC surface minimal and the comm substrate readable — a script run looks identical to any other user execution in the console and in the kernel logs. The `ScriptDialog` component builds the execute call; it does not call a separate IPC channel.
 
@@ -787,11 +1068,12 @@ This routing logic lives in a dedicated `CommRouter` class in `electron/main/com
 
 ### 11.4 Renderer Push Subscription Lifecycle
 
-The renderer owns push subscriptions in the root `App` component, but they are split by lifecycle scope:
-- **Kernel-scoped** (`currentKernelId` keyed): `tree.onChanged`, `project.onLoaded`
-- **App-scoped** (always-on while renderer mounted): `kernels.onOutput`, `menu.onAction`
+The renderer owns push subscriptions in the root `App` component via dedicated hooks (see `app/HOOKS.md`), split by lifecycle scope:
+- **Kernel-scoped** (`currentKernelId` keyed): `tree.onChanged`, `project.onLoaded` — managed by `useKernelSubscriptions`
+- **App-scoped** (always-on while renderer mounted): `kernels.onOutput` — managed by `useKernelSubscriptions`; `menu.onAction` — managed by `useProjectWorkflow`
 
 ```tsx
+// useKernelSubscriptions.ts — kernel-scoped subscriptions
 useEffect(() => {
   if (!currentKernelId) return;
 
@@ -809,6 +1091,7 @@ useEffect(() => {
   };
 }, [currentKernelId]);
 
+// useKernelSubscriptions.ts — app-scoped subscription
 useEffect(() => {
   const unsubOutput = window.pdv.kernels.onOutput(chunk => {
     // append streamed execute output to the matching log entry
@@ -816,6 +1099,7 @@ useEffect(() => {
   return () => unsubOutput();
 }, []);
 
+// useProjectWorkflow.ts — app-scoped menu subscription
 useEffect(() => {
   const unsubMenu = window.pdv.menu.onAction(payload => {
     // open/save project actions routed from main menu
@@ -825,10 +1109,11 @@ useEffect(() => {
 ```
 
 Rules:
-- **One owner**: Only `App` directly registers push subscriptions. Child components receive state/refresh tokens as props.
+- **One owner**: Only `App` (via its hooks) directly registers push subscriptions. Child components receive state/refresh tokens as props.
 - **Kernel-scoped cleanup**: `tree.onChanged` and `project.onLoaded` are torn down/re-registered whenever kernel identity changes.
 - **App-scoped cleanup**: `kernels.onOutput` and `menu.onAction` are registered once and cleaned up on unmount.
 - **No polling**: Tree/project updates are push-driven; renderer does not poll these domains.
+- **Hook composition**: See `electron/renderer/src/app/HOOKS.md` for the full hook dependency graph and data flow documentation.
 
 ---
 
@@ -842,32 +1127,64 @@ electron/
     tsconfig.json
     preload.ts                  ← window.pdv API bridge
     main/
-        index.ts                ← IPC handler registration (entry point)
+        bootstrap.ts            ← Electron app entry point and singleton guard
+        index.ts                ← IPC handler registration hub, push forwarding
         ipc.ts                  ← ALL IPC channel names and TypeScript types
         kernel-manager.ts       ← Kernel process lifecycle, ZeroMQ socket management
-        comm-router.ts          ← PDV comm message routing (new)
-        config.ts               ← App config persistence
-        app.ts                  ← Electron app lifecycle (BrowserWindow creation, etc.)
-        environment-detector.ts ← Python/Julia environment detection (new)
-        project-manager.ts      ← Project manifest read/write, save coordination (new)
-    init/
-        (removed — replaced by pdv-python package)
+        kernel-error-parser.ts  ← Traceback/error parsing for execution errors
+        comm-router.ts          ← PDV comm message routing
+        config.ts               ← App config persistence (~/.PDV/preferences.json)
+        app.ts                  ← Electron app lifecycle (BrowserWindow, menus)
+        environment-detector.ts ← Python/Julia environment detection
+        project-manager.ts      ← Project manifest read/write, save coordination
+        project-file-sync.ts    ← Tree file synchronization between working/save dirs
+        module-manager.ts       ← Module import/installation pipeline
+        module-runtime.ts       ← Module bind/setup helpers: lib file copy, sys.path setup, script registration
+        module-window-manager.ts ← Module GUI popup BrowserWindow lifecycle
+        ipc-register-kernels.ts           ← IPC handlers: kernel lifecycle + execution
+        ipc-register-project.ts           ← IPC handlers: project save/load/new
+        ipc-register-modules.ts           ← IPC handlers: module import/install
+        ipc-register-module-windows.ts    ← IPC handlers: module GUI window open/close/context
+        ipc-register-tree-namespace-script.ts ← IPC handlers: tree, namespace, script
+        ipc-register-app-state.ts         ← IPC handlers: config, themes, code cells, files, about
+        modules/
+            manifest-utils.ts   ← Module manifest validation (v1/v2/v3), GUI manifest validation
     renderer/
         src/
-            app/index.tsx               ← root orchestration (kernel lifecycle, push subscriptions)
+            app/
+                index.tsx               ← Root App component (state orchestration, 7 hooks)
+                HOOKS.md                ← Hook composition documentation
+                useLayoutState.ts       ← Sidebar/pane geometry (localStorage)
+                useThemeManager.ts      ← Theme colors, Monaco theme, font settings
+                useCodeCellsPersistence.ts ← Load/save code tabs to ~/.PDV/state/
+                useKernelSubscriptions.ts  ← Push subscription lifecycle
+                useKernelLifecycle.ts    ← Kernel start/restart/env-save callbacks
+                useKeyboardShortcuts.ts ← Global keyboard shortcut listener
+                useProjectWorkflow.ts   ← Project save/load/new + unsaved dialog
             components/
-                CodeCell/               ← tabbed Monaco editor surface
-                Console/                ← streamed output and result rendering
-                Tree/                   ← tree browser + context menu actions
-                NamespaceView/          ← namespace table and filtering
-                SettingsDialog/         ← General/Shortcuts/Appearance/Runtime/About tabs
-            themes.ts                   ← builtin themes, Monaco theme definitions, font helpers
-            shortcuts.ts                ← canonical shortcut registry and matcher
-            services/tree.ts            ← renderer tree fetch/cache adapter
-            types/                      ← renderer view-model + preload API types
+                CodeCell/
+                    index.tsx           ← Tabbed Monaco editor surface
+                    monaco-providers.ts ← Completion + hover provider logic
+                WriteTab/
+                    index.tsx           ← Tabbed markdown editor (Edit/Read mode toggle)
+                    ReadView.tsx        ← Full rendered markdown view (marked + KaTeX)
+                    math-preview.ts     ← Inline KaTeX math preview in Monaco editor
+                Console/                ← Streamed output and result rendering
+                Tree/                   ← Tree browser + context menu actions
+                NamespaceView/          ← Namespace table and filtering
+                SettingsDialog/
+                    index.tsx           ← Settings modal shell + General/Shortcuts/Runtime/About tabs
+                    AppearanceTab.tsx   ← Appearance tab (themes, fonts, colors)
+                    ShortcutCapture.tsx ← Reusable shortcut key-capture widget
+                ImportModuleDialog/     ← File > Import Module... modal dialog
+                ModulesPanel/           ← Module actions and inputs panels (used inside module GUI)
+                ModuleGui/              ← Module GUI rendering: ContainerRenderer, InputControl, ActionButton, NamelistEditor
+            module-window/              ← Separate renderer entry for module GUI popup windows
+            themes.ts                   ← Builtin themes, Monaco theme definitions, font helpers
+            shortcuts.ts                ← Canonical shortcut registry and matcher
+            services/tree.ts            ← Renderer tree fetch/cache adapter
+            types/                      ← Renderer view-model + preload API types
 ```
-
-Note: `file-scanner.ts` is removed entirely. Its functionality is superseded by the kernel's tree authority.
 
 ### 12.2 Python Package (separate repository or subdirectory)
 
@@ -888,6 +1205,10 @@ pdv-python/
             tree.py
             namespace.py
             script.py
+            note.py
+            modules.py
+            gui.py
+            namelist.py
     tests/
         test_tree.py
         test_serialization.py

@@ -4,7 +4,24 @@ import type { ImportedModuleDescriptor } from "../../types";
 export type ModuleInputValue = string | number | boolean;
 
 export type ModuleInputDescriptor = ImportedModuleDescriptor["inputs"][number];
-export type ModuleActionDescriptor = ImportedModuleDescriptor["actions"][number];
+type ModuleActionDescriptor = ImportedModuleDescriptor["actions"][number];
+
+/** Pending import conflict awaiting user decision. */
+export interface ImportConflict {
+  moduleId: string;
+  existingAlias: string;
+  suggestedAlias: string;
+}
+
+/** Pending install duplicate awaiting user acknowledgement. */
+export interface InstallDuplicate {
+  moduleName: string;
+  status: "up_to_date" | "update_available" | "incompatible_update";
+  currentVersion: string;
+  currentRevision?: string;
+  candidateVersion?: string;
+  candidateRevision?: string;
+}
 
 export const DEFAULT_MODULE_TAB = "General";
 export const ACTIVE_TAB_SETTING_KEY = "__ui_active_tab__";

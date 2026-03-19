@@ -6,22 +6,30 @@
  * to callbacks owned by `App`.
  */
 
-import React, { useEffect, useMemo, useRef } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Editor, { type OnMount, type BeforeMount } from '@monaco-editor/react';
 import type * as monaco from 'monaco-editor';
 import type { CellTab } from '../../types';
 import type { Shortcuts } from '../../shortcuts';
 import { matchesShortcut } from '../../shortcuts';
 import { defineMonacoThemes } from '../../themes';
+import { registerKernelCompletionProvider, registerKernelHoverProvider } from './monaco-providers';
 
 /** Props for the tabbed code-cell editor pane. */
-export interface CodeCellProps {
+interface CodeCellProps {
+  executionError?: {
+    tabId: number;
+    message: string;
+    location?: { line?: number; column?: number };
+  };
   tabs: (CellTab & { onChange: (code: string) => void })[];
   activeTabId: number;
+  kernelId?: string | null;
   disabled?: boolean;
   onTabChange: (id: number) => void;
   onAddTab: () => void;
   onRemoveTab?: (id: number) => void;
+  onRenameTab?: (id: number, name: string | undefined) => void;
   onExecute: (code: string) => void;
   onInterrupt?: () => void;
   onClear: () => void;
@@ -37,12 +45,15 @@ export interface CodeCellProps {
 
 /** Tabbed code-cell editor component used by the main workspace. */
 export const CodeCell: React.FC<CodeCellProps> = ({
+  executionError,
   tabs,
   activeTabId,
+  kernelId = null,
   disabled = false,
   onTabChange,
   onAddTab,
   onRemoveTab,
+  onRenameTab,
   onExecute,
   onInterrupt,
   onClear,
@@ -56,6 +67,7 @@ export const CodeCell: React.FC<CodeCellProps> = ({
   editorWordWrap,
 }) => {
   const editorRef = useRef<monaco.editor.IStandaloneCodeEditor | null>(null);
+  const monacoRef = useRef<typeof monaco | null>(null);
   const activeTab = useMemo(() => tabs.find((tab) => tab.id === activeTabId), [tabs, activeTabId]);
   const activeTabRef = useRef(activeTab);
   const isExecutingRef = useRef(isExecuting);
@@ -65,7 +77,16 @@ export const CodeCell: React.FC<CodeCellProps> = ({
   const onRemoveTabRef = useRef(onRemoveTab);
   const tabsRef = useRef(tabs);
   const onTabChangeRef = useRef(onTabChange);
+  const kernelIdRef = useRef<string | null>(kernelId);
+  const onExecuteRef = useRef(onExecute);
+  const allTabsDataRef = useRef(tabs.map((t) => ({ id: t.id, code: t.code, active: t.id === activeTabId })));
 
+  /**
+   * Ref-sync block: Monaco callbacks (onKeyDown, completions, etc.) capture
+   * closure state at mount time. We sync prop/state values into refs so those
+   * callbacks always see current values without requiring Monaco to be
+   * re-mounted on every state change.
+   */
   useEffect(() => {
     activeTabRef.current = activeTab;
   }, [activeTab]);
@@ -98,12 +119,142 @@ export const CodeCell: React.FC<CodeCellProps> = ({
     onTabChangeRef.current = onTabChange;
   }, [onTabChange]);
 
+  useEffect(() => {
+    kernelIdRef.current = kernelId;
+  }, [kernelId]);
+
+  useEffect(() => {
+    onExecuteRef.current = onExecute;
+  }, [onExecute]);
+
+  useEffect(() => {
+    allTabsDataRef.current = tabs.map((t) => ({ id: t.id, code: t.code, active: t.id === activeTabId }));
+  }, [tabs, activeTabId]);
+
+  useEffect(() => {
+    const editor = editorRef.current;
+    const monacoInstance = monacoRef.current;
+    if (!editor || !monacoInstance) return;
+    const model = editor.getModel();
+    if (!model) return;
+
+    const markerOwner = 'pdv-execution';
+    if (!executionError || executionError.tabId !== activeTabId) {
+      monacoInstance.editor.setModelMarkers(model, markerOwner, []);
+      return;
+    }
+
+    const lineCount = model.getLineCount();
+    const requestedLine = executionError.location?.line;
+    const lineNumber =
+      typeof requestedLine === 'number' && Number.isFinite(requestedLine)
+        ? Math.min(Math.max(Math.trunc(requestedLine), 1), lineCount)
+        : 1;
+    const lineContent = model.getLineContent(lineNumber);
+
+    let startColumn = 1;
+    let endColumn = Math.max(2, lineContent.length + 1);
+    const requestedColumn = executionError.location?.column;
+    if (typeof requestedColumn === 'number' && Number.isFinite(requestedColumn)) {
+      const clampedColumn = Math.min(
+        Math.max(Math.trunc(requestedColumn), 1),
+        Math.max(1, lineContent.length + 1),
+      );
+      const word = model.getWordAtPosition({ lineNumber, column: clampedColumn });
+      if (word) {
+        startColumn = word.startColumn;
+        endColumn = Math.max(word.endColumn, word.startColumn + 1);
+      } else {
+        startColumn = clampedColumn;
+        endColumn = Math.min(clampedColumn + 1, Math.max(2, lineContent.length + 1));
+      }
+    } else {
+      const firstVisible = lineContent.search(/\S/);
+      if (firstVisible >= 0) {
+        startColumn = firstVisible + 1;
+        endColumn = Math.max(startColumn + 1, lineContent.length + 1);
+      }
+    }
+
+    monacoInstance.editor.setModelMarkers(model, markerOwner, [
+      {
+        severity: monacoInstance.MarkerSeverity.Error,
+        message: executionError.message || 'Execution error',
+        startLineNumber: lineNumber,
+        startColumn,
+        endLineNumber: lineNumber,
+        endColumn,
+      },
+    ]);
+  }, [executionError, activeTabId, activeTab?.code]);
+
+  // -- Tab context menu & inline rename state --------------------------------
+  // These hooks must be called unconditionally (before any early return).
+  const [contextMenu, setContextMenu] = useState<{ x: number; y: number; tabId: number } | null>(null);
+  const [renamingTabId, setRenamingTabId] = useState<number | null>(null);
+  const [renameValue, setRenameValue] = useState('');
+  const renameInputRef = useRef<HTMLInputElement>(null);
+  const contextMenuRef = useRef<HTMLDivElement>(null);
+
+  const handleTabContextMenu = useCallback((e: React.MouseEvent, tabId: number) => {
+    e.preventDefault();
+    setContextMenu({ x: e.clientX, y: e.clientY, tabId });
+  }, []);
+
+  // Close context menu on outside click or Escape
+  useEffect(() => {
+    if (!contextMenu) return;
+    const handleClickOutside = (e: MouseEvent) => {
+      if (contextMenuRef.current && e.target && !contextMenuRef.current.contains(e.target as Node)) {
+        setContextMenu(null);
+      }
+    };
+    const handleEscape = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setContextMenu(null);
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    document.addEventListener('keydown', handleEscape);
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+      document.removeEventListener('keydown', handleEscape);
+    };
+  }, [contextMenu]);
+
+  const startRename = useCallback((tabId: number) => {
+    const tab = tabs.find((t) => t.id === tabId);
+    setRenameValue(tab?.name ?? '');
+    setRenamingTabId(tabId);
+    setContextMenu(null);
+  }, [tabs]);
+
+  const commitRename = useCallback(() => {
+    if (renamingTabId == null || !onRenameTab) return;
+    const trimmed = renameValue.trim();
+    onRenameTab(renamingTabId, trimmed || undefined);
+    setRenamingTabId(null);
+  }, [renamingTabId, renameValue, onRenameTab]);
+
+  const cancelRename = useCallback(() => {
+    setRenamingTabId(null);
+  }, []);
+
+  // Auto-focus the rename input when it appears
+  useEffect(() => {
+    if (renamingTabId != null && renameInputRef.current) {
+      renameInputRef.current.focus();
+      renameInputRef.current.select();
+    }
+  }, [renamingTabId]);
+
   if (!activeTab) {
     return null;
   }
 
   const handleBeforeMount: BeforeMount = (monaco) => {
+    monacoRef.current = monaco;
     defineMonacoThemes(monaco);
+    registerKernelCompletionProvider(monaco, kernelIdRef, allTabsDataRef);
+    registerKernelHoverProvider(monaco, kernelIdRef, allTabsDataRef);
   };
 
   const handleEditorMount: OnMount = (editor) => {
@@ -116,7 +267,7 @@ export const CodeCell: React.FC<CodeCellProps> = ({
         e.preventDefault();
         e.stopPropagation();
         if (!disabledRef.current && !isExecutingRef.current && activeTabRef.current) {
-          onExecute(activeTabRef.current.code);
+          onExecuteRef.current(activeTabRef.current.code);
         }
       }
       if (matchesShortcut(nativeEvent, shortcutsRef.current.newTab)) {
@@ -183,28 +334,35 @@ export const CodeCell: React.FC<CodeCellProps> = ({
         <div className="code-cell-tabs">
           {tabs.map((tab, i) => {
             const label = tab.name ?? String(i + 1);
+
+            if (renamingTabId === tab.id) {
+              return (
+                <input
+                  key={tab.id}
+                  ref={renameInputRef}
+                  className="tab-rename-input"
+                  value={renameValue}
+                  placeholder={String(i + 1)}
+                  onChange={(e) => setRenameValue(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') commitRename();
+                    if (e.key === 'Escape') cancelRename();
+                  }}
+                  onBlur={commitRename}
+                />
+              );
+            }
+
             return (
               <button
                 key={tab.id}
                 className={`tab ${tab.id === activeTabId ? 'active' : ''}`}
                 onClick={() => onTabChange(tab.id)}
+                onContextMenu={(e) => handleTabContextMenu(e, tab.id)}
                 disabled={disabled}
                 title={tab.name ? `Cell ${i + 1}: ${tab.name}` : `Cell ${i + 1}`}
               >
                 {label}
-                {onRemoveTab && (
-                  <span
-                    className="tab-close"
-                    role="button"
-                    aria-label={`Close cell ${i + 1}`}
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      if (!disabled) onRemoveTab(tab.id);
-                    }}
-                  >
-                    ×
-                  </span>
-                )}
               </button>
             );
           })}
@@ -212,6 +370,22 @@ export const CodeCell: React.FC<CodeCellProps> = ({
             +
           </button>
         </div>
+
+        {/* Tab context menu */}
+        {contextMenu && (
+          <div
+            ref={contextMenuRef}
+            className="context-menu"
+            style={{ position: 'fixed', top: contextMenu.y, left: contextMenu.x, zIndex: 1000 }}
+          >
+            <button
+              className="context-menu-item"
+              onClick={() => startRename(contextMenu.tabId)}
+            >
+              <span className="context-menu-label">Rename</span>
+            </button>
+          </div>
+        )}
 
         <div className="pane-actions">
           {isExecuting ? (
@@ -269,9 +443,13 @@ export const CodeCell: React.FC<CodeCellProps> = ({
             insertSpaces: true,
             detectIndentation: false,
 
-            // Suggestions — disabled in favour of future kernel-backed completions (see UPCOMING_FEATURES §13)
-            quickSuggestions: false,
-            suggestOnTriggerCharacters: false,
+            // Hover — prefer showing below cursor so it's not clipped at the top of the editor
+            hover: { above: false },
+
+            // Suggestions — kernel-backed completions (PLANNED_FEATURES §5)
+            quickSuggestions: { other: true, comments: false, strings: false },
+            suggestOnTriggerCharacters: true,
+            acceptSuggestionOnEnter: 'off',
             wordBasedSuggestions: 'off',
             parameterHints: { enabled: false },
 
