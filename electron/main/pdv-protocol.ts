@@ -60,6 +60,10 @@ export const PDVMessageType = {
   TREE_GET: "pdv.tree.get",
   /** Kernel → app. Returns node value (may be lazy-loaded). */
   TREE_GET_RESPONSE: "pdv.tree.get.response",
+  /** App → kernel. Resolve a file-backed tree node to its absolute path. */
+  TREE_RESOLVE_FILE: "pdv.tree.resolve_file",
+  /** Kernel → app. Returns the resolved absolute file path. */
+  TREE_RESOLVE_FILE_RESPONSE: "pdv.tree.resolve_file.response",
   /** Kernel → app (push). Tree structure changed. */
   TREE_CHANGED: "pdv.tree.changed",
 
@@ -272,9 +276,11 @@ export interface PDVFileRegisterPayload {
   /** Physical filename with extension (e.g. "input.nml"). */
   filename: string;
   /** Node type classification for the file. */
-  node_type: "namelist" | "fortran" | "file";
+  node_type: "namelist" | "lib" | "file";
   /** Optional explicit tree node name. When omitted the kernel derives it from filename. */
   name?: string;
+  /** Optional module ID that owns this file node. */
+  module_id?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -295,10 +301,11 @@ const NodeKind = {
   FOLDER: "folder",
   UNKNOWN: "unknown",
   NAMELIST: "namelist",
-  FORTRAN: "fortran",
   FILE: "file",
   MODULE: "module",
   GUI: "gui",
+  LIB: "lib",
+  MARKDOWN: "markdown",
 } as const;
 
 /** Union of all valid node `type` values in tree descriptors. */

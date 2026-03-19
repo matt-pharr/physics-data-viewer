@@ -449,7 +449,7 @@ const App: React.FC = () => {
         label: node.path,
         scriptPath: node.path,
       });
-    } else if (action === 'edit' && node.type === 'script') {
+    } else if (action === 'edit' && (node.type === 'script' || node.type === 'namelist' || node.type === 'lib')) {
       try {
         if (!currentKernelId) return;
         await window.pdv.script.edit(currentKernelId, node.path);

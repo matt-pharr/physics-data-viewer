@@ -108,6 +108,10 @@ export function getActionsForNode(node: TreeNodeData) {
       { id: 'run_defaults', label: 'Run defaults', disabled: false },
       { id: 'edit', label: 'Edit', disabled: false },
     );
+  } else if (node.type === 'namelist' || node.type === 'lib') {
+    actions.push(
+      { id: 'edit', label: 'Edit', disabled: false },
+    );
   } else if (node.type === 'markdown') {
     actions.push(
       { id: 'open_note', label: 'Open', disabled: false },

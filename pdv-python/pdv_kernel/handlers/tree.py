@@ -226,5 +226,73 @@ def handle_tree_get(msg: dict) -> None:
     )
 
 
+def handle_tree_resolve_file(msg: dict) -> None:
+    """Handle the ``pdv.tree.resolve_file`` message.
+
+    Returns the absolute file path for a file-backed tree node (PDVFile
+    subclass: PDVScript, PDVLib, PDVNamelist, PDVNote, etc.).
+
+    Expected payload
+    ----------------
+    .. code-block:: json
+
+        { "path": "n_pendulum.lib.n_pendulum_py" }
+
+    Response payload
+    ----------------
+    .. code-block:: json
+
+        { "path": "n_pendulum.lib.n_pendulum_py", "file_path": "/abs/path/to/n_pendulum.py" }
+
+    Parameters
+    ----------
+    msg : dict
+        Parsed PDV message envelope.
+    """
+    import os  # noqa: PLC0415
+
+    from pdv_kernel.comms import get_pdv_tree, send_error, send_message  # noqa: PLC0415
+    from pdv_kernel.tree import PDVFile  # noqa: PLC0415
+
+    msg_id = msg.get("msg_id")
+    payload = msg.get("payload", {})
+    path = payload.get("path", "")
+
+    tree = get_pdv_tree()
+    if tree is None:
+        send_error(
+            "pdv.tree.resolve_file.response", "tree.no_tree",
+            "PDVTree is not initialized", in_reply_to=msg_id,
+        )
+        return
+
+    if not path or path not in tree:
+        send_error(
+            "pdv.tree.resolve_file.response", "tree.path_not_found",
+            f"No node at path: '{path}'", in_reply_to=msg_id,
+        )
+        return
+
+    node = tree[path]
+    if not isinstance(node, PDVFile):
+        send_error(
+            "pdv.tree.resolve_file.response", "tree.not_a_file",
+            f"Node at '{path}' is not file-backed", in_reply_to=msg_id,
+        )
+        return
+
+    working_dir = tree._working_dir or ""
+    abs_path = node.resolve_path(working_dir)
+    if not os.path.isabs(abs_path):
+        abs_path = os.path.join(working_dir, abs_path)
+
+    send_message(
+        "pdv.tree.resolve_file.response",
+        {"path": path, "file_path": abs_path},
+        in_reply_to=msg_id,
+    )
+
+
 register("pdv.tree.list", handle_tree_list)
 register("pdv.tree.get", handle_tree_get)
+register("pdv.tree.resolve_file", handle_tree_resolve_file)

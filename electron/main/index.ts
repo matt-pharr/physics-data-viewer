@@ -352,6 +352,9 @@ export function registerIpcHandlers(
     );
   };
 
+  const preloadPath = path.join(__dirname, "..", "preload.js");
+  const moduleWindowManager = new ModuleWindowManager(win, preloadPath);
+
   registerKernelIpcHandlers({
     win,
     kernelManager,
@@ -432,9 +435,6 @@ export function registerIpcHandlers(
     stateDir,
     codeCellsPath,
   });
-
-  const preloadPath = path.join(__dirname, "..", "preload.js");
-  const moduleWindowManager = new ModuleWindowManager(win, preloadPath);
 
   registerModuleWindowIpcHandlers({
     moduleWindowManager,

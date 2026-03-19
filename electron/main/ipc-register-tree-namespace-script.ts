@@ -214,7 +214,7 @@ export function registerTreeNamespaceScriptIpcHandlers(
       kernelId: string,
       sourcePath: string,
       targetTreePath: string,
-      nodeType: "namelist" | "fortran" | "file",
+      nodeType: "namelist" | "lib" | "file",
       filename: string
     ): Promise<TreeAddFileResult> => {
       if (!kernelManager.getKernel(kernelId)) throw new Error(`Kernel not found: ${kernelId}`);
@@ -273,10 +273,30 @@ export function registerTreeNamespaceScriptIpcHandlers(
 
   ipcMain.handle(IPC.script.edit, async (_event, kernelId: string, scriptPath: string) => {
     const config = readConfig(configStore);
-    const resolvedScriptPath = resolveScriptPath(kernelId, scriptPath, kernelWorkingDirs);
-    const isJulia = resolvedScriptPath.endsWith(".jl");
+
+    // Resolve the file path — try the kernel comm first (handles all
+    // PDVFile types including lib/namelist), fall back to the legacy
+    // tree-path-to-filesystem derivation for plain scripts.
+    let resolvedPath: string | undefined;
+    try {
+      const response = await commRouter.request(
+        PDVMessageType.TREE_RESOLVE_FILE,
+        { path: scriptPath }
+      );
+      const filePath = (response.payload as Record<string, unknown> | undefined)?.file_path;
+      if (typeof filePath === "string" && filePath.length > 0) {
+        resolvedPath = filePath;
+      }
+    } catch {
+      // Comm failed — fall through to legacy resolution
+    }
+    if (!resolvedPath) {
+      resolvedPath = resolveScriptPath(kernelId, scriptPath, kernelWorkingDirs);
+    }
+
+    const isJulia = resolvedPath.endsWith(".jl");
     const cmdString = isJulia ? config.juliaEditorCmd : config.pythonEditorCmd;
-    const { file, args } = buildEditorSpawn(cmdString, resolvedScriptPath);
+    const { file, args } = buildEditorSpawn(cmdString, resolvedPath);
     const spawnSpec = resolveEditorSpawn(file, args);
     const child = spawn(spawnSpec.file, spawnSpec.args, { detached: true, stdio: "ignore" });
     child.unref();

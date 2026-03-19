@@ -221,7 +221,8 @@ export const Tree: React.FC<TreeProps> = ({ kernelId, disabled = false, refreshT
       return;
     }
 
-    if (selectedNode.type === 'script' && matchesShortcut(nativeEvent, shortcuts.treeEditScript)) {
+    const editableTypes = ['script', 'namelist', 'lib'];
+    if (editableTypes.includes(selectedNode.type) && matchesShortcut(nativeEvent, shortcuts.treeEditScript)) {
       event.preventDefault();
       onAction?.('edit', selectedNode);
       return;
