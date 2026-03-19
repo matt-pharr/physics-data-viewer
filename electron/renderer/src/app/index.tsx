@@ -908,7 +908,7 @@ const App: React.FC = () => {
         <StatusBar
           isExecuting={isExecuting}
           pythonPath={config?.pythonPath}
-          kernelSpec={config?.kernelSpec}
+          kernelSpec={config?.kernelSpec ?? undefined}
           currentProjectDir={currentProjectDir}
           kernelStatus={kernelStatus}
           lastDuration={lastDuration}

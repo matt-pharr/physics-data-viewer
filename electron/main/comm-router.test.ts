@@ -15,7 +15,7 @@
  * 9. A reply message is not forwarded to push handlers.
  * 10. reset() rejects all pending requests.
  *
- * Reference: IMPLEMENTATION_STEPS.md Step 4, ARCHITECTURE.md §3
+ * Reference: ARCHITECTURE.md §3
  */
 
 import { describe, it, expect, beforeEach, vi } from "vitest";

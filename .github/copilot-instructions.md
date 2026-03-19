@@ -4,7 +4,7 @@
 
 PDV (Physics Data Viewer) is an Electron desktop application for computational and experimental physics analysis. It provides a tabbed Python command editor, an execution console, and a persistent hierarchical data model called the **Tree** that lives inside a Jupyter kernel. The Tree is what distinguishes PDV from a Jupyter notebook — it is a typed, navigable, save/load-able data hierarchy that persists across sessions.
 
-The codebase is currently mid-way through a major backend rewrite. The authoritative design specification is **`ARCHITECTURE.md`** in the root directory. Read it before making non-trivial changes. `IMPLEMENTATION_STEPS.md` tracks the rewrite progress step by step.
+The authoritative design specification is **`ARCHITECTURE.md`** in the root directory. Read it before making non-trivial changes.
 
 ---
 
@@ -12,7 +12,6 @@ The codebase is currently mid-way through a major backend rewrite. The authorita
 
 ```
 ARCHITECTURE.md          ← authoritative design spec — always consult this first
-IMPLEMENTATION_STEPS.md  ← step-by-step rewrite plan; tracks what is done and what is next
 PLANNED_FEATURES.md      ← planned features organised by release milestone
 
 electron/                ← Electron app (TypeScript)
@@ -95,7 +94,7 @@ cd electron && npm test -- --reporter=verbose
 cd electron && PYTHON_PATH=/path/to/python npm test -- --reporter=verbose main/integration.test.ts
 ```
 
-There are no automated tests for the renderer. Step 7 of `IMPLEMENTATION_STEPS.md` is verified by manual smoke test.
+There are no automated tests for the renderer. The renderer is verified by manual smoke test.
 
 ---
 

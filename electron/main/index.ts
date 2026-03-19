@@ -163,7 +163,7 @@ function runSerializedProjectManifestMutation<T>(
   task: () => Promise<T>
 ): Promise<T> {
   const previous = projectManifestMutationQueue.get(projectDir) ?? Promise.resolve();
-  const current = previous.catch(() => undefined).then(task);
+  const current = previous.catch((err) => { console.warn("[pdv] manifest mutation queue: prior task failed", err); }).then(task);
   const completion = current.then(() => undefined, () => undefined);
   projectManifestMutationQueue.set(projectDir, completion);
   return current.finally(() => {

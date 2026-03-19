@@ -71,7 +71,7 @@ describe('treeService', () => {
   });
 
   it('returns empty array when node has no children', async () => {
-    const node = { ...childNodes[0], isExpanded: false, isLoading: false };
+    const node = { ...childNodes[0], hasChildren: childNodes[0].has_children, parentPath: childNodes[0].parent_path, isExpanded: false, isLoading: false };
     const result = await treeService.getChildren(node, 'k1');
 
     expect(result).toEqual([]);

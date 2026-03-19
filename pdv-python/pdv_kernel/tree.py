@@ -29,7 +29,6 @@ code. It can be imported and tested standalone.
 
 from __future__ import annotations
 
-import ast
 import inspect
 import importlib.util
 import os

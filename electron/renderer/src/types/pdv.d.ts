@@ -588,6 +588,7 @@ export interface PDVApi {
     load(saveDir: string): Promise<ProjectLoadResult>;
     new(): Promise<boolean>;
     onLoaded(callback: (payload: Record<string, unknown>) => void): () => void;
+    onReloading(callback: (payload: { status: "reloading" | "ready" }) => void): () => void;
   };
   config: {
     get(): Promise<Config>;

@@ -253,7 +253,7 @@ describe("EnvironmentDetector", () => {
 
   describe("detectEnvironments()", () => {
     it("returns array with at least the system Python", async () => {
-      // This mirrors the CI assertion from IMPLEMENTATION_STEPS.md Step 6.
+      // This mirrors the CI assertion for environment detection.
       mockExecPerCommand({
         python3: { stdout: "Python 3.9.7\n" },
         conda: { stdout: JSON.stringify({ envs: [] }) },
