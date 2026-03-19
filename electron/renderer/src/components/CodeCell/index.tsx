@@ -449,6 +449,7 @@ export const CodeCell: React.FC<CodeCellProps> = ({
             // Suggestions — kernel-backed completions (PLANNED_FEATURES §5)
             quickSuggestions: { other: true, comments: false, strings: false },
             suggestOnTriggerCharacters: true,
+            acceptSuggestionOnEnter: 'off',
             wordBasedSuggestions: 'off',
             parameterHints: { enabled: false },
 

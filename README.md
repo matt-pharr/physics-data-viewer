@@ -50,8 +50,8 @@ cd electron && npm install
 # Python kernel package
 cd ../pdv-python && pip install -e ".[dev]"
 
-# Run
-cd ../electron && npm run dev
+# Build & Run
+cd ../electron && npm run build && npm run dev
 ```
 
 See [QUICK_START.md](./QUICK_START.md) for the full guide including prerequisites, testing, and common development tasks.
