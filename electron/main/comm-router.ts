@@ -376,7 +376,7 @@ export class CommRouter {
 
   /** Reject every pending request (used by detach() and reset()). */
   private _rejectAllPending(err: unknown): void {
-    for (const [msgId, pending] of this.pending) {
+    for (const [_msgId, pending] of this.pending) {
       clearTimeout(pending.timer);
       pending.reject(err);
     }

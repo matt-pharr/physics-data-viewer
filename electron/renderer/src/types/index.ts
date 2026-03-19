@@ -26,6 +26,8 @@ import type {
   NamespaceQueryOptions,
   NamespaceVariable,
   NodeDescriptor,
+  ProjectLoadResult,
+  ProjectSaveResult,
   ScriptParameter,
   Theme,
 } from './pdv';
@@ -51,6 +53,8 @@ export type {
   ModuleWindowOpenResult,
   NamespaceQueryOptions,
   NamespaceVariable,
+  ProjectLoadResult,
+  ProjectSaveResult,
   ScriptParameter,
   Theme,
 };

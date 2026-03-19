@@ -128,6 +128,7 @@ export const Tree: React.FC<TreeProps> = ({ kernelId, disabled = false, refreshT
 
   useEffect(() => {
     void loadRoot(true);
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- loadRoot is stable for given kernelId; real triggers are kernelId/refreshToken/disabled
   }, [kernelId, refreshToken, disabled]);
 
   const handleExpand = async (node: TreeNodeData) => {

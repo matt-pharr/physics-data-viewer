@@ -34,7 +34,6 @@ import { KernelManager } from "./kernel-manager";
 import { ModuleManager } from "./module-manager";
 import {
   bindImportedModule,
-  bindImportedModuleScripts,
   buildModulesSetupPayload,
   isMissingActionScriptError,
   normalizeModuleAlias,

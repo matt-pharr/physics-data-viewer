@@ -182,7 +182,7 @@ export function registerKernelCompletionProvider(
         const result = await window.pdv.kernels.complete(kernelId, prefixedCode, prefixedOffset);
         const textBeforeCursor = code.slice(0, offset);
         const namePrefix = textBeforeCursor.match(/[A-Za-z_][A-Za-z0-9_]*$/)?.[0] ?? '';
-        let mergedMatches = [...result.matches];
+        const mergedMatches = [...result.matches];
         // ipykernel completion can omit protected PDV locals from top-level name
         // completion; ensure the two built-ins are always discoverable.
         if (namePrefix) {
@@ -266,6 +266,7 @@ export function registerKernelHoverProvider(
           return null;
         }
         // Strip ANSI escape sequences (color/bold codes) that ipykernel injects for terminal display.
+        // eslint-disable-next-line no-control-regex
         const doc = rawDoc.replace(/\x1b\[[0-9;]*[a-zA-Z]/g, '');
 
         const word = model.getWordAtPosition(position);

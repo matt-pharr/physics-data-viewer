@@ -21,7 +21,7 @@ interface ImportModuleDialogProps {
 export const ImportModuleDialog: React.FC<ImportModuleDialogProps> = ({
   isOpen,
   projectDir,
-  kernelReady,
+  kernelReady: _kernelReady,
   refreshToken,
   onClose,
 }) => {

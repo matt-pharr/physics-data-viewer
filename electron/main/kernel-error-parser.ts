@@ -39,6 +39,7 @@ export interface KernelExecutionLocation {
 // Regex constants
 // ---------------------------------------------------------------------------
 
+// eslint-disable-next-line no-control-regex
 const ANSI_ESCAPE_RE = /\u001b\[[0-9;]*m/g;
 const TRACEBACK_FILE_LINE_RE = /^\s*File "([^"]+)", line (\d+)(?:, in .+)?$/;
 const TRACEBACK_FILE_LINE_BARE_RE = /^\s*File ([^,]+), line (\d+)(?:, in .+)?$/;

@@ -589,7 +589,7 @@ const App: React.FC = () => {
       setIsExecuting(false);
       setNamespaceRefreshToken((prev) => prev + 1);
     }
-  }, [currentKernelId, kernelStatus, cellTabs, activeCellTab, codeCellExecutionError]);
+  }, [currentKernelId, kernelStatus, cellTabs, activeCellTab]);
 
   // Listen for execution requests from module popup windows
   useEffect(() => {
@@ -608,8 +608,8 @@ const App: React.FC = () => {
     && noteTabs.length === 0;
 
   const {
-    handleSaveProject,
-    handleOpenProject,
+    handleSaveProject: _handleSaveProject,
+    handleOpenProject: _handleOpenProject,
     executeOpenProject,
   } = useProjectWorkflow({
     kernelStatus,
@@ -624,6 +624,7 @@ const App: React.FC = () => {
     setModulesRefreshToken,
     setNamespaceRefreshToken,
     setLastError,
+    setLogs,
     loadedProjectTabsRef,
     normalizeLoadedCodeCells,
     flushDirtyNotes,

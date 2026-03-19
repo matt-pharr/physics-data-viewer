@@ -1074,7 +1074,7 @@ export class KernelManager extends EventEmitter {
         clearTimeout(timer);
         clearInterval(pingInterval);
         cleanup();
-        err ? reject(err) : resolve();
+        if (err) { reject(err); } else { resolve(); }
       };
 
       const cleanup = this.onIopubMessage(managed.info.id, (jupMsg) => {

@@ -232,7 +232,7 @@ export interface NamespaceVariable {
 /**
  * Script run() parameter descriptor surfaced in script node metadata.
  */
-export interface ScriptParameter extends PDVScriptParameter {}
+export type ScriptParameter = PDVScriptParameter;
 
 /**
  * Tree node shape returned to the renderer.
@@ -764,6 +764,30 @@ export type TreeChangedPayload = PDVTreeChangedPayload;
  */
 export type ProjectLoadedPayload = PDVProjectLoadedPayload;
 
+/**
+ * Result returned from `project.save()`.
+ */
+export interface ProjectSaveResult {
+  /** SHA-256 checksum of the serialized tree-index.json. */
+  checksum: string;
+  /** Number of tree nodes serialized. */
+  nodeCount: number;
+}
+
+/**
+ * Result returned from `project.load()`.
+ */
+export interface ProjectLoadResult {
+  /** Loaded code-cell state from code-cells.json. */
+  codeCells: unknown;
+  /** SHA-256 checksum stored in the project manifest, or null if absent. */
+  checksum: string | null;
+  /** Whether the stored checksum matches the computed checksum of tree-index.json. */
+  checksumValid: boolean | null;
+  /** Number of tree nodes loaded. */
+  nodeCount: number | null;
+}
+
 // ---------------------------------------------------------------------------
 // Preload API surface
 // ---------------------------------------------------------------------------
@@ -1085,14 +1109,14 @@ export interface PDVApi {
       * @param codeCells - Code-cell payload to persist.
       * @returns True when save request is accepted.
       */
-    save(saveDir: string, codeCells: unknown): Promise<boolean>;
+    save(saveDir: string, codeCells: unknown): Promise<ProjectSaveResult>;
     /**
      * Load an existing project.
      *
      * @param saveDir - Source save directory.
-      * @returns Loaded code-cell state.
+      * @returns Loaded code-cell state with checksum metadata.
       */
-    load(saveDir: string): Promise<unknown>;
+    load(saveDir: string): Promise<ProjectLoadResult>;
     /**
      * Start a new empty project session.
      *

@@ -14,6 +14,8 @@
  * Reference: ARCHITECTURE.md §3.2, §3.4, §7.2, §7.3
  */
 
+/* eslint-disable @typescript-eslint/no-unused-vars -- payload interfaces document the protocol schema (ARCHITECTURE.md §3.4) */
+
 // ---------------------------------------------------------------------------
 // Protocol version
 // ---------------------------------------------------------------------------

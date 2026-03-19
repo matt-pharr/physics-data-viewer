@@ -135,6 +135,7 @@ vi.mock("electron", () => ({
     showOpenDialog: mocks.dialogShowOpenDialog,
   },
   app: {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
     getVersion: () => (require("../package.json") as { version: string }).version,
   },
 }));
@@ -245,7 +246,7 @@ function setup() {
   } as unknown as CommRouter;
 
   const projectManager = {
-    save: vi.fn(async () => undefined),
+    save: vi.fn(async () => ({ checksum: "abc123", nodeCount: 0 })),
     load: vi.fn(async (_saveDir: string, onBeforePush?: () => Promise<void>) => {
       if (onBeforePush) await onBeforePush();
       return [];
@@ -732,7 +733,7 @@ describe("Step 5 IPC handlers", () => {
     const save = getHandler(IPC.project.save);
     const result = await save({}, "/tmp/project", []);
     expect(projectManager.save).toHaveBeenCalledWith("/tmp/project", []);
-    expect(result).toBe(true);
+    expect(result).toEqual({ checksum: "abc123", nodeCount: 0 });
   });
 
   it("project:load delegates to ProjectManager.load", async () => {
@@ -743,7 +744,12 @@ describe("Step 5 IPC handlers", () => {
     const load = getHandler(IPC.project.load);
     const result = await load({}, "/tmp/project");
     expect(projectManager.load).toHaveBeenCalledWith("/tmp/project");
-    expect(result).toEqual([{ id: "box1" }]);
+    expect(result).toEqual({
+      codeCells: [{ id: "box1" }],
+      checksum: null,
+      checksumValid: null,
+      nodeCount: null,
+    });
   });
 
   it("themes:get returns empty list initially, themes:save persists", async () => {

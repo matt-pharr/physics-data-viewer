@@ -138,5 +138,6 @@ export function useKeyboardShortcuts(options: UseKeyboardShortcutsOptions): void
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- remaining deps are stable React setters or refs; see comment at top of hook
   }, [shortcuts, toggleEditorCollapsed, toggleLeftSidebar, setShowImportModule]);
 }

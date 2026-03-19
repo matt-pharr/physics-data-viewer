@@ -187,6 +187,26 @@ export interface MenuActionPayload {
   path?: string;
 }
 
+/** Result returned from `project.save()`. */
+export interface ProjectSaveResult {
+  /** SHA-256 checksum of the serialized tree-index.json. */
+  checksum: string;
+  /** Number of tree nodes serialized. */
+  nodeCount: number;
+}
+
+/** Result returned from `project.load()`. */
+export interface ProjectLoadResult {
+  /** Loaded code-cell state from code-cells.json. */
+  codeCells: unknown;
+  /** SHA-256 checksum stored in the project manifest, or null if absent. */
+  checksum: string | null;
+  /** Whether the stored checksum matches the computed checksum of tree-index.json. */
+  checksumValid: boolean | null;
+  /** Number of tree nodes loaded. */
+  nodeCount: number | null;
+}
+
 /** Persisted user configuration payload returned by `config.get`. */
 export interface Config {
   /** Kernel spec name used for launch defaults. */
@@ -563,8 +583,8 @@ export interface PDVApi {
     removeImport(moduleAlias: string): Promise<ModuleSettingsResult>;
   };
   project: {
-    save(saveDir: string, codeCells: unknown): Promise<boolean>;
-    load(saveDir: string): Promise<unknown>;
+    save(saveDir: string, codeCells: unknown): Promise<ProjectSaveResult>;
+    load(saveDir: string): Promise<ProjectLoadResult>;
     new(): Promise<boolean>;
     onLoaded(callback: (payload: Record<string, unknown>) => void): () => void;
   };

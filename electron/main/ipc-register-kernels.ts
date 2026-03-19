@@ -24,7 +24,7 @@ import type { ModuleManager } from "./module-manager";
 import { buildModulesSetupPayload } from "./module-runtime";
 import { PDVMessageType } from "./pdv-protocol";
 import { copyFilesForLoad } from "./project-file-sync";
-import { ProjectManager, type ProjectModuleImport } from "./project-manager";
+import { ProjectManager } from "./project-manager";
 
 interface RegisterKernelIpcHandlersOptions {
   win: BrowserWindow;

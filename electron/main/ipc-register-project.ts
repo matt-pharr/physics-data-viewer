@@ -64,7 +64,7 @@ export function registerProjectIpcHandlers(
   ipcMain.handle(
     IPC.project.save,
     async (_event, saveDir: string, codeCells: unknown) => {
-      await projectManager.save(saveDir, codeCells);
+      const saveResult = await projectManager.save(saveDir, codeCells);
 
       // Merge pending in-memory module imports/settings into the on-disk manifest.
       const pendingModuleImports = getPendingModuleImports();
@@ -92,7 +92,7 @@ export function registerProjectIpcHandlers(
 
       setActiveProjectDir(saveDir);
       await refreshProjectModuleHealth(saveDir);
-      return true;
+      return { checksum: saveResult.checksum, nodeCount: saveResult.nodeCount };
     }
   );
 
@@ -110,9 +110,13 @@ export function registerProjectIpcHandlers(
     await refreshProjectModuleHealth(saveDir);
 
     // Checksum validation (warn-only)
+    let checksum: string | null = null;
+    let checksumValid: boolean | null = null;
+    let nodeCount: number | null = null;
     try {
       const manifest = await ProjectManager.readManifest(saveDir);
-      if (manifest.tree_checksum) {
+      checksum = manifest.tree_checksum || null;
+      if (checksum) {
         const treeIndexRaw = await fs.readFile(
           path.join(saveDir, "tree-index.json"),
           "utf8"
@@ -121,9 +125,10 @@ export function registerProjectIpcHandlers(
           .createHash("sha256")
           .update(treeIndexRaw)
           .digest("hex");
-        if (computed !== manifest.tree_checksum) {
+        checksumValid = computed === checksum;
+        if (!checksumValid) {
           console.warn(
-            `[pdv] tree-index.json checksum mismatch: expected ${manifest.tree_checksum}, got ${computed}`
+            `[pdv] tree-index.json checksum mismatch: expected ${checksum}, got ${computed}`
           );
         }
       }
@@ -132,7 +137,20 @@ export function registerProjectIpcHandlers(
     }
 
     const loaded = await projectManager.load(saveDir);
-    return loaded;
+
+    // Read node count from tree-index.json
+    try {
+      const treeIndexRaw = await fs.readFile(
+        path.join(saveDir, "tree-index.json"),
+        "utf8"
+      );
+      const nodes = JSON.parse(treeIndexRaw);
+      if (Array.isArray(nodes)) nodeCount = nodes.length;
+    } catch {
+      // Non-blocking
+    }
+
+    return { codeCells: loaded, checksum, checksumValid, nodeCount };
   });
 
   ipcMain.handle(IPC.project.new, async () => {
