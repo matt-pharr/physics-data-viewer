@@ -1,6 +1,6 @@
 {
   "name": "physics-data-viewer",
-  "version": "0.0.4",
+  "version": "0.0.5",
   "private": true,
   "main": "dist/main/bootstrap.js",
   "electronmon": {
@@ -16,10 +16,11 @@
     "build:renderer": "cd renderer && node ../node_modules/vite/bin/vite.js build",
     "build:main": "node ./node_modules/typescript/bin/tsc -p tsconfig.json",
     "test": "node ./node_modules/vitest/vitest.mjs run",
-    "lint": "echo \"Add eslint if desired\"",
+    "lint": "eslint .",
     "knip": "knip"
   },
   "devDependencies": {
+    "@eslint/js": "^9.39.4",
     "@testing-library/react": "^16.3.2",
     "@testing-library/user-event": "^14.6.1",
     "@types/katex": "^0.16.8",
@@ -31,9 +32,12 @@
     "cross-env": "^7.0.3",
     "electron": "^35.7.5",
     "electronmon": "^2.0.2",
+    "eslint": "^9.39.4",
+    "eslint-plugin-react-hooks": "^7.0.1",
     "jsdom": "^28.1.0",
     "knip": "^5.85.0",
     "typescript": "^5.3.0",
+    "typescript-eslint": "^8.57.1",
     "vite": "^6.2.0",
     "vitest": "^3.0.0"
   },

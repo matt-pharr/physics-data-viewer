@@ -33,7 +33,6 @@ export const ReadView: React.FC<ReadViewProps> = ({ content }) => {
   return (
     <div
       className="read-view-content"
-      // eslint-disable-next-line react/no-danger
       dangerouslySetInnerHTML={{ __html: html }}
     />
   );

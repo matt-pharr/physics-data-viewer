@@ -1,9 +1,10 @@
 {
-  "schema_version": "1",
+  "schema_version": "3",
   "id": "n_pendulum",
   "name": "N-Pendulum",
-  "version": "1.2.0",
+  "version": "2.0.0",
   "description": "A general N-link pendulum simulator. Supports double, triple, quadruple, and higher-order chaotic pendulums with ODE integration and animated visualization.",
+  "entry_point": "n_pendulum",
   "compatibility": {
     "pdv_min": "0.1.0",
     "pdv_max": "99.0.0",
@@ -18,210 +19,11 @@
     { "name": "PyQt6", "version": ">=6.5" },
     { "name": "ffmpeg", "marker": "optional external binary for video export" }
   ],
-  "inputs": [
-    {
-      "id": "n_links",
-      "label": "Number of Links",
-      "type": "int",
-      "default": "2",
-      "tab": "Solver",
-      "section": "Core",
-      "tooltip": "Number of links in the chain."
-    },
-    {
-      "id": "damping",
-      "label": "Damping Factor",
-      "type": "float",
-      "default": "0.0",
-      "tab": "Solver",
-      "section": "Core",
-      "tooltip": "Joint damping constant."
-    },
-    {
-      "id": "t_end",
-      "label": "Integration Time (s)",
-      "type": "float",
-      "default": "20.0",
-      "tab": "Solver",
-      "section": "Core",
-      "tooltip": "Simulation duration."
-    },
-    {
-      "id": "n_steps",
-      "label": "Integration Steps",
-      "control": "slider",
-      "min": 200,
-      "max": 12000,
-      "step": 200,
-      "default": 4000,
-      "tab": "Solver",
-      "section": "Core",
-      "tooltip": "Number of solver output steps."
-    },
-    {
-      "id": "integration_method",
-      "label": "Integrator",
-      "control": "dropdown",
-      "options": [
-        { "label": "RK45", "value": "RK45" },
-        { "label": "DOP853", "value": "DOP853" },
-        { "label": "Radau", "value": "Radau" }
-      ],
-      "default": "RK45",
-      "tab": "Solver",
-      "section": "Advanced",
-      "section_collapsed": true,
-      "tooltip": "solve_ivp method."
-    },
-    {
-      "id": "strict_tolerances",
-      "label": "Use strict tolerances",
-      "control": "checkbox",
-      "default": false,
-      "tab": "Solver",
-      "section": "Advanced",
-      "tooltip": "Enable custom rtol/atol settings."
-    },
-    {
-      "id": "rtol",
-      "label": "Relative tolerance",
-      "control": "text",
-      "default": "1e-10",
-      "tab": "Solver",
-      "section": "Advanced",
-      "visible_if": { "input_id": "strict_tolerances", "equals": true },
-      "tooltip": "Only used when strict tolerances are enabled."
-    },
-    {
-      "id": "atol",
-      "label": "Absolute tolerance",
-      "control": "text",
-      "default": "1e-12",
-      "tab": "Solver",
-      "section": "Advanced",
-      "visible_if": { "input_id": "strict_tolerances", "equals": true },
-      "tooltip": "Only used when strict tolerances are enabled."
-    },
-    {
-      "id": "init_state_file",
-      "label": "Initial state file",
-      "control": "file",
-      "file_mode": "file",
-      "default": "",
-      "tab": "Solver",
-      "section": "I/O",
-      "tooltip": "Optional file path persisted in metadata."
-    },
-    {
-      "id": "output_dir",
-      "label": "Output directory",
-      "control": "file",
-      "file_mode": "directory",
-      "default": "",
-      "tab": "Solver",
-      "section": "I/O",
-      "tooltip": "Optional output directory persisted in metadata."
-    },
-    {
-      "id": "solve_output_key",
-      "label": "Solve Output Key",
-      "control": "text",
-      "default": "result",
-      "tab": "Solver",
-      "section": "I/O",
-      "tooltip": "Tree key to write solver outputs under n_pendulum.<key>."
-    },
-    {
-      "id": "animate_output_key",
-      "label": "Animate Output Key",
-      "control": "dropdown",
-      "options_tree_path": "n_pendulum",
-      "default": "result",
-      "tab": "Animate",
-      "section": "Data",
-      "tooltip": "Populate from current n_pendulum tree children."
-    },
-    {
-      "id": "render_style",
-      "label": "Render Style",
-      "control": "dropdown",
-      "options": [
-        { "label": "Trajectory + arms", "value": "trajectory" },
-        { "label": "Angles only", "value": "angles" }
-      ],
-      "default": "trajectory",
-      "tab": "Animate",
-      "section": "Rendering",
-      "section_collapsed": false,
-      "tooltip": "Choose what to emphasize in the plot."
-    },
-    {
-      "id": "n_frames",
-      "label": "Frames",
-      "control": "slider",
-      "min": 50,
-      "max": 600,
-      "step": 10,
-      "default": 200,
-      "tab": "Animate",
-      "section": "Rendering",
-      "tooltip": "Number of sampled frames in overlay."
-    },
-    {
-      "id": "trail_alpha",
-      "label": "Trail Alpha",
-      "control": "slider",
-      "min": 0.05,
-      "max": 1.0,
-      "step": 0.05,
-      "default": 0.15,
-      "tab": "Animate",
-      "section": "Rendering",
-      "tooltip": "Opacity ramp for sampled arm trails."
-    },
-    {
-      "id": "show_legend",
-      "label": "Show legend",
-      "control": "checkbox",
-      "default": true,
-      "tab": "Animate",
-      "section": "Rendering",
-      "tooltip": "Toggle angle plot legend."
-    }
+  "scripts": [
+    { "name": "solve", "path": "scripts/solve.py" },
+    { "name": "animate", "path": "scripts/animate.py" }
   ],
-  "actions": [
-    {
-      "id": "solve",
-      "label": "Run ODE Solver",
-      "script_path": "scripts/solve.py",
-      "inputs": [
-        "n_links",
-        "damping",
-        "t_end",
-        "n_steps",
-        "integration_method",
-        "strict_tolerances",
-        "rtol",
-        "atol",
-        "init_state_file",
-        "output_dir",
-        "solve_output_key"
-      ],
-      "tab": "Solver"
-    },
-    {
-      "id": "animate",
-      "label": "Animate / Plot",
-      "script_path": "scripts/animate.py",
-      "inputs": [
-        "animate_output_key",
-        "render_style",
-        "n_frames",
-        "trail_alpha",
-        "show_legend",
-        "output_dir"
-      ],
-      "tab": "Animate"
-    }
+  "files": [
+    { "name": "solver_nml", "path": "inputs/solver.nml", "type": "namelist" }
   ]
 }

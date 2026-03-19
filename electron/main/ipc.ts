@@ -63,6 +63,7 @@ export const IPC = {
     createScript: "tree:createScript",
     createNote: "tree:createNote",
     addFile: "tree:addFile",
+    invokeHandler: "tree:invokeHandler",
   },
   /** Namespace inspection channels. */
   namespace: {
@@ -87,6 +88,11 @@ export const IPC = {
     saveSettings: "modules:saveSettings",
     runAction: "modules:runAction",
     removeImport: "modules:removeImport",
+  },
+  /** Namelist read/write channels. */
+  namelist: {
+    read: "namelist:read",
+    write: "namelist:write",
   },
   /** Project lifecycle channels. */
   project: {
@@ -120,10 +126,19 @@ export const IPC = {
     kernelStatus: "pdv.kernel.status",
     menuAction: "menu:action",
     executeOutput: "pdv.execute.output",
+    moduleExecuteRequest: "pdv.moduleWindow.executeRequest",
+    projectReloading: "pdv.project.reloading",
   },
   /** App menu synchronization channels. */
   menu: {
     updateRecentProjects: "menu:updateRecentProjects",
+  },
+  /** Module popup window channels. */
+  moduleWindows: {
+    open: "moduleWindows:open",
+    close: "moduleWindows:close",
+    context: "moduleWindows:context",
+    executeInMain: "moduleWindows:executeInMain",
   },
   /** Native file/directory picker channels. */
   files: {
@@ -217,7 +232,7 @@ export interface NamespaceVariable {
 /**
  * Script run() parameter descriptor surfaced in script node metadata.
  */
-export interface ScriptParameter extends PDVScriptParameter {}
+export type ScriptParameter = PDVScriptParameter;
 
 /**
  * Tree node shape returned to the renderer.
@@ -254,6 +269,16 @@ export interface TreeCreateNoteResult {
 }
 
 /**
+ * Result returned by `tree.invokeHandler`.
+ */
+export interface HandlerInvokeResult {
+  /** True when the handler was found and dispatched. */
+  success: boolean;
+  /** Optional error message when dispatch failed. */
+  error?: string;
+}
+
+/**
  * Result returned by `tree.addFile`.
  */
 export interface TreeAddFileResult {
@@ -263,6 +288,30 @@ export interface TreeAddFileResult {
   error?: string;
   /** Absolute path to the copied file in the kernel working directory. */
   workingDirPath?: string;
+}
+
+/**
+ * Result returned by `namelist.read`.
+ */
+export interface NamelistReadResult {
+  /** Parsed namelist groups keyed by group name. */
+  groups: Record<string, Record<string, unknown>>;
+  /** Comment hints keyed by group then key. */
+  hints: Record<string, Record<string, string>>;
+  /** Inferred value types keyed by group then key. */
+  types: Record<string, Record<string, string>>;
+  /** Detected file format. */
+  format: "fortran" | "toml";
+}
+
+/**
+ * Result returned by `namelist.write`.
+ */
+export interface NamelistWriteResult {
+  /** True when the write operation succeeded. */
+  success: boolean;
+  /** Optional error message when `success` is false. */
+  error?: string;
 }
 
 /**
@@ -495,10 +544,14 @@ export interface ImportedModuleDescriptor {
   version: string;
   /** Optional pinned revision/hash. */
   revision?: string;
+  /** True when this module has a GUI (inputs or actions). */
+  hasGui: boolean;
   /** Declarative input field descriptors from module manifest. */
   inputs: ModuleInputDescriptor[];
   /** Declarative action descriptors bound for this imported module. */
   actions: ImportedModuleActionDescriptor[];
+  /** Optional container layout for the module GUI. */
+  gui?: ModuleGuiLayout;
   /** Persisted per-module UI settings from project manifest. */
   settings: Record<string, unknown>;
   /** Module health warnings evaluated at import/load time. */
@@ -567,9 +620,103 @@ export interface MenuActionPayload {
     | "project:open"
     | "project:openRecent"
     | "project:save"
-    | "project:saveAs";
+    | "project:saveAs"
+    | "modules:import";
   /** Project directory path for open-recent actions. */
   path?: string;
+}
+
+// ---------------------------------------------------------------------------
+// Module window types
+// ---------------------------------------------------------------------------
+
+/**
+ * Request payload for opening a module popup window.
+ */
+export interface ModuleWindowOpenRequest {
+  /** Project-local module alias identifying the imported module. */
+  alias: string;
+  /** Active kernel ID for the module window context. */
+  kernelId: string;
+}
+
+/**
+ * Result payload for `moduleWindows.open`.
+ */
+export interface ModuleWindowOpenResult {
+  /** True when the window was opened or focused successfully. */
+  success: boolean;
+  /** Optional error message when `success` is false. */
+  error?: string;
+}
+
+/**
+ * Context payload returned to a module popup window identifying its module.
+ */
+export interface ModuleWindowContext {
+  /** Project-local module alias. */
+  alias: string;
+  /** Active kernel ID. */
+  kernelId: string;
+}
+
+// ---------------------------------------------------------------------------
+// Container layout types
+// ---------------------------------------------------------------------------
+
+/**
+ * Reference to an input declared in the manifest `inputs[]` array.
+ */
+export interface LayoutInputRef {
+  type: "input";
+  /** References an entry in inputs[] by id. */
+  id: string;
+}
+
+/**
+ * Reference to an action declared in the manifest `actions[]` array.
+ */
+export interface LayoutActionRef {
+  type: "action";
+  /** References an entry in actions[] by id. */
+  id: string;
+}
+
+/**
+ * A layout container that arranges children visually.
+ */
+export interface LayoutContainer {
+  type: "row" | "column" | "group" | "tabs";
+  /** Display label (required for "group" and tab items). */
+  label?: string;
+  /** Initial collapsed state for "group" containers. */
+  collapsed?: boolean;
+  /** Nested layout nodes. */
+  children: LayoutNode[];
+}
+
+/**
+ * Reference to a namelist file in the tree, rendered as an inline editor.
+ */
+export interface LayoutNamelistRef {
+  type: "namelist";
+  /** Dot-path to the PDVNamelist tree node. */
+  tree_path: string;
+  /** Optional input ID whose value overrides the tree path dynamically. */
+  tree_path_input?: string;
+}
+
+/**
+ * A layout node is either an input reference, action reference, namelist reference, or a container.
+ */
+export type LayoutNode = LayoutInputRef | LayoutActionRef | LayoutNamelistRef | LayoutContainer;
+
+/**
+ * Top-level GUI layout object in the module manifest.
+ */
+export interface ModuleGuiLayout {
+  /** Root layout — typically a "tabs" container or a single "column". */
+  layout: LayoutContainer;
 }
 
 // ---------------------------------------------------------------------------
@@ -616,6 +763,30 @@ export type TreeChangedPayload = PDVTreeChangedPayload;
  * Payload delivered on `IPC.push.projectLoaded`.
  */
 export type ProjectLoadedPayload = PDVProjectLoadedPayload;
+
+/**
+ * Result returned from `project.save()`.
+ */
+export interface ProjectSaveResult {
+  /** SHA-256 checksum of the serialized tree-index.json. */
+  checksum: string;
+  /** Number of tree nodes serialized. */
+  nodeCount: number;
+}
+
+/**
+ * Result returned from `project.load()`.
+ */
+export interface ProjectLoadResult {
+  /** Loaded code-cell state from code-cells.json. */
+  codeCells: unknown;
+  /** SHA-256 checksum stored in the project manifest, or null if absent. */
+  checksum: string | null;
+  /** Whether the stored checksum matches the computed checksum of tree-index.json. */
+  checksumValid: boolean | null;
+  /** Number of tree nodes loaded. */
+  nodeCount: number | null;
+}
 
 // ---------------------------------------------------------------------------
 // Preload API surface
@@ -719,6 +890,13 @@ export interface PDVApi {
      * @returns Unsubscribe function.
      */
     onOutput(callback: (chunk: ExecuteOutputChunk) => void): () => void;
+    /**
+     * Subscribe to kernel status push notifications (e.g. crash detection).
+     *
+     * @param callback - Invoked with kernel ID and status when the kernel state changes.
+     * @returns Unsubscribe function.
+     */
+    onKernelStatus(callback: (payload: { kernelId: string; status: string }) => void): () => void;
   };
 
   /** Tree browsing and updates. */
@@ -779,9 +957,20 @@ export interface PDVApi {
       kernelId: string,
       sourcePath: string,
       targetTreePath: string,
-      nodeType: "namelist" | "fortran" | "file",
+      nodeType: "namelist" | "lib" | "file",
       filename: string
     ): Promise<TreeAddFileResult>;
+    /**
+     * Invoke a registered custom handler for a tree node.
+     *
+     * @param kernelId - Target kernel ID.
+     * @param path - Dot-path of the tree node to handle.
+     * @returns Handler invocation result.
+     */
+    invokeHandler(
+      kernelId: string,
+      path: string
+    ): Promise<HandlerInvokeResult>;
     /**
      * Subscribe to tree change push notifications.
      *
@@ -837,6 +1026,27 @@ export interface PDVApi {
      * @returns File content.
      */
     read(kernelId: string, treePath: string): Promise<{ success: boolean; content?: string; error?: string }>;
+  };
+
+  /** Namelist read/write operations. */
+  namelist: {
+    /**
+     * Read and parse a namelist file from the tree.
+     *
+     * @param kernelId - Target kernel ID.
+     * @param treePath - Dot-path to the PDVNamelist tree node.
+     * @returns Parsed namelist data with hints and types.
+     */
+    read(kernelId: string, treePath: string): Promise<NamelistReadResult>;
+    /**
+     * Write edited namelist data back to the backing file.
+     *
+     * @param kernelId - Target kernel ID.
+     * @param treePath - Dot-path to the PDVNamelist tree node.
+     * @param data - Updated group data to write.
+     * @returns Write result payload.
+     */
+    write(kernelId: string, treePath: string, data: Record<string, Record<string, unknown>>): Promise<NamelistWriteResult>;
   };
 
   /** Modules install/import/action operations. */
@@ -906,14 +1116,14 @@ export interface PDVApi {
       * @param codeCells - Code-cell payload to persist.
       * @returns True when save request is accepted.
       */
-    save(saveDir: string, codeCells: unknown): Promise<boolean>;
+    save(saveDir: string, codeCells: unknown): Promise<ProjectSaveResult>;
     /**
      * Load an existing project.
      *
      * @param saveDir - Source save directory.
-      * @returns Loaded code-cell state.
+      * @returns Loaded code-cell state with checksum metadata.
       */
-    load(saveDir: string): Promise<unknown>;
+    load(saveDir: string): Promise<ProjectLoadResult>;
     /**
      * Start a new empty project session.
      *
@@ -927,6 +1137,13 @@ export interface PDVApi {
      * @returns Unsubscribe function.
      */
     onLoaded(callback: (payload: ProjectLoadedPayload) => void): () => void;
+    /**
+     * Subscribe to project-reloading status push notifications (during kernel restart).
+     *
+     * @param callback - Invoked with `{ status: "reloading" | "ready" }`.
+     * @returns Unsubscribe function.
+     */
+    onReloading(callback: (payload: { status: "reloading" | "ready" }) => void): () => void;
   };
 
   /** App configuration accessors. */
@@ -988,6 +1205,43 @@ export interface PDVApi {
      * @returns True when save succeeded.
      */
     save(data: CodeCellData): Promise<boolean>;
+  };
+
+  /** Module popup window operations. */
+  moduleWindows: {
+    /**
+     * Open (or focus) a module GUI popup window.
+     *
+     * @param request - Module alias and kernel ID.
+     * @returns Open result payload.
+     */
+    open(request: ModuleWindowOpenRequest): Promise<ModuleWindowOpenResult>;
+    /**
+     * Close a module GUI popup window.
+     *
+     * @param alias - Module alias whose window to close.
+     * @returns True when a window was closed.
+     */
+    close(alias: string): Promise<boolean>;
+    /**
+     * Get the module context for the calling popup window.
+     *
+     * @returns Context payload, or null if called from the main window.
+     */
+    context(): Promise<ModuleWindowContext | null>;
+    /**
+     * Route code execution from a popup window to the main window console.
+     *
+     * @param code - Python code to execute.
+     */
+    executeInMain(code: string): Promise<void>;
+    /**
+     * Subscribe to execution requests from module popup windows.
+     *
+     * @param callback - Invoked with the code string to execute.
+     * @returns Unsubscribe function.
+     */
+    onExecuteRequest(callback: (code: string) => void): () => void;
   };
 
   /** Native file/directory pickers (main process dialog wrappers). */

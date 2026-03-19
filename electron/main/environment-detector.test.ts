@@ -58,7 +58,7 @@ vi.mock("util", async (importOriginal) => {
  * @param stdout - Stdout string to resolve with.
  * @param stderr - Optional stderr string.
  */
-function mockExecSuccess(
+function _mockExecSuccess(
   executable: string,
   stdout: string,
   stderr = ""

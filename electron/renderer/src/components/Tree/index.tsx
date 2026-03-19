@@ -126,6 +126,7 @@ export const Tree: React.FC<TreeProps> = ({ kernelId, disabled = false, refreshT
 
   useEffect(() => {
     void loadRoot(true);
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- loadRoot is stable for given kernelId; real triggers are kernelId/refreshToken/disabled
   }, [kernelId, refreshToken, disabled]);
 
   const handleExpand = async (node: TreeNodeData) => {
@@ -162,7 +163,13 @@ export const Tree: React.FC<TreeProps> = ({ kernelId, disabled = false, refreshT
 
   const handleDoubleClick = (node: TreeNodeData) => {
     if (disabled) return;
-    if (node.type === 'markdown') {
+    if (node.type === 'module' || node.type === 'gui') {
+      onAction?.('open_gui', node);
+      return;
+    }
+    if (node.has_handler) {
+      onAction?.('handle', node);
+    } else if (node.type === 'markdown') {
       onAction?.('open_note', node);
     } else if (node.type === 'script') {
       onAction?.('run', node);
@@ -213,7 +220,8 @@ export const Tree: React.FC<TreeProps> = ({ kernelId, disabled = false, refreshT
       return;
     }
 
-    if (selectedNode.type === 'script' && matchesShortcut(nativeEvent, shortcuts.treeEditScript)) {
+    const editableTypes = ['script', 'namelist', 'lib'];
+    if (editableTypes.includes(selectedNode.type) && matchesShortcut(nativeEvent, shortcuts.treeEditScript)) {
       event.preventDefault();
       onAction?.('edit', selectedNode);
       return;

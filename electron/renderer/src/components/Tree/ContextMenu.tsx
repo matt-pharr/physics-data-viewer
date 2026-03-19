@@ -94,11 +94,21 @@ export const ContextMenu: React.FC<ContextMenuProps> = ({ x, y, node, shortcuts,
 export function getActionsForNode(node: TreeNodeData) {
   const actions: Array<{ id: string; label: string; disabled: boolean }> = [];
   const canCreateScript = node.type === 'dict' || node.type === 'folder' || node.type === 'root';
+  const isModule = node.type === 'module';
+  const isGui = node.type === 'gui';
+
+  if (isModule || isGui) {
+    actions.push({ id: 'open_gui', label: 'Open GUI', disabled: false });
+  }
 
   if (node.type === 'script') {
     actions.push(
       { id: 'run', label: 'Run...', disabled: false },
       { id: 'run_defaults', label: 'Run defaults', disabled: false },
+      { id: 'edit', label: 'Edit', disabled: false },
+    );
+  } else if (node.type === 'namelist' || node.type === 'lib') {
+    actions.push(
       { id: 'edit', label: 'Edit', disabled: false },
     );
   } else if (node.type === 'markdown') {
@@ -110,6 +120,7 @@ export function getActionsForNode(node: TreeNodeData) {
     if (canCreateScript) {
       actions.push({ id: 'create_script', label: 'Create new script', disabled: false });
       actions.push({ id: 'create_note', label: 'Create new note', disabled: false });
+      actions.push({ id: 'new_gui', label: 'New GUI', disabled: true });
     }
     actions.push({ id: 'view', label: 'View', disabled: false });
   }

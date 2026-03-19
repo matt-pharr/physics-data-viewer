@@ -6,7 +6,7 @@ This document describes all features planned beyond the current state of PDV, or
 
 | Release | Description |
 |---|---|
-| **0.0.4** | Current version. Backend refactor complete, modules system implemented, kernel-backed autocompletion and inspect working, E2E integration test infrastructure in place. |
+| **0.0.5** | Current version. Backend refactor complete, modules UX redesign (activity bar icons, File > Import Module... dialog, tree context menu), PDVModule/PDVGui/PDVNamelist tree types, gui.json manifest split (v3), kernel-backed autocompletion and inspect working, E2E integration test infrastructure in place. |
 | **0.1.0-beta1** | All remaining Alpha Features (below) are implemented and stable. The application is suitable for active scientific use. |
 | **1.0.0** | All Beta Features (below, plus any added during beta) are implemented. The application is suitable for broad community distribution. |
 
@@ -40,13 +40,10 @@ Extend the existing modules system with three capabilities: a richer GUI layout 
 ### Planned work
 
 #### Module GUI layout refactor
-The current module rendering system displays GUI elements as a flat list. Refactor to support relative positioning and grouping — grid/flex layout, collapsible sections, and element dependencies — so modules can build structured, professional-looking interfaces.
-
-#### GUI-based module manifest editor
-A visual tool for creating and editing module manifests without hand-writing JSON. The editor surfaces all manifest fields (actions, parameters, types, defaults, descriptions) in an editable form, validates in real time, and writes the manifest file on save.
+Container-based layout (rows, columns, groups, tabs) is already implemented via `ContainerRenderer`. What remains is a visual GUI editor for creating and editing `gui.json` files without hand-writing JSON — drag-and-drop layout, input/action placement, and live preview.
 
 #### Namelist editor module
-A first-class module for editing simulation namelist files directly from a tree path. Initial support targets TOML and Fortran `*.in` namelists, auto-selected by file extension/content type. The editor surfaces tooltip help from inline comments in the source file, optimizes for rapid batch parameter editing, and saves changes back through the Tree/project workflow.
+The `PDVNamelist` tree type and comm-based parsing (`pdv.namelist.read`/`pdv.namelist.write`) are implemented, supporting Fortran and TOML formats with auto-detection. What remains is the full editor widget: inline editing UI with tooltip help from source file comments, batch parameter editing, and dynamic path binding via dropdown for selecting which namelist to edit.
 
 ---
 
@@ -160,6 +157,7 @@ As modules, remote execution, and community-shared projects arrive, the risk sur
 - **Project trust levels**: A project loaded from an unknown or community source is "untrusted" by default. Untrusted projects cannot execute scripts automatically; user must explicitly approve.
 - **`trusted=True` gate**: The `unknown` node type (pickle-backed, ARCHITECTURE.md §7.2) is already gated on `trusted=True` in `serialization.py`. This flag should be surfaced in the UI and tied to the project trust level.
 - **Signed modules**: Optional code-signing for module manifests. Allowlist policy for institutional deployments.
+- **`moduleWindows:executeInMain` sender validation**: The IPC handler currently executes arbitrary code from any renderer window. Before remote kernel support, validate that the sender is an authorized module window (e.g. by checking `event.sender` against known module window webContents IDs).
 - **Execution audit trail**: Optionally record who ran what and when (user identity, script path, timestamp) for reproducibility in shared research environments.
 
 ---
@@ -321,7 +319,7 @@ GitHub Copilot is exposed to third-party editors through two mechanisms:
 
 # Known Design Tensions to Resolve
 
-These are architectural decisions in the current design that are correct for v0.0.4 but will create friction as the system grows. They should be resolved before or during the remaining Alpha Feature implementation.
+These are architectural decisions in the current design that are correct for v0.0.5 but will create friction as the system grows. They should be resolved before or during the remaining Alpha Feature implementation.
 
 ## Dot-delimited tree paths and key collision
 `PDVTree` supports dot-separated path notation (`pdv_tree['data.waveforms.ch1']`). Keys that themselves contain dots are ambiguous — `pdv_tree['my.key']` is indistinguishable from `pdv_tree['my']['key']`. This is acceptable for alpha (physics variable names rarely contain dots) but needs a resolution before community use. Options: escape sequences, a separate `pdv_tree.at('my.key')` method for literal keys, or abandoning dot notation in favour of `pdv_tree['my']['key']` exclusively.

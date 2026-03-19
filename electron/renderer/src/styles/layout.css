@@ -13,6 +13,28 @@
   display: flex;
   flex: 1;
   overflow: hidden;
+  position: relative;
+}
+
+/* ===== PROJECT RELOADING OVERLAY ===== */
+.project-reloading-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.45);
+  backdrop-filter: blur(2px);
+}
+
+.project-reloading-message {
+  color: var(--text-primary);
+  font-size: 14px;
+  padding: 12px 24px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
 }
 
 /* ===== ACTIVITY BAR ===== */
@@ -65,4 +87,16 @@
 .activity-btn.active {
   color: var(--accent);
   border-left-color: var(--accent);
+}
+
+.activity-bar-divider {
+  height: 1px;
+  margin: 4px 8px;
+  background-color: var(--border-color);
+}
+
+.activity-btn-module {
+  font-size: 14px;
+  font-weight: 700;
+  font-family: var(--font-mono);
 }

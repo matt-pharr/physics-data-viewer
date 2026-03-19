@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, type Dispatch, type MutableRefObject, type SetStateAction } from 'react';
-import type { CellTab, Config, MenuActionPayload } from '../types';
+import type { CellTab, Config, LogEntry, MenuActionPayload } from '../types';
 import { normalizeRecentProjects } from './app-utils';
 import { MAX_RECENT_PROJECTS } from './constants';
 
@@ -29,6 +29,8 @@ interface UseProjectWorkflowOptions {
   setNamespaceRefreshToken: Dispatch<SetStateAction<number>>;
   /** Sets error message if save/load fails. */
   setLastError: Dispatch<SetStateAction<string | undefined>>;
+  /** Appends entries to the console log. */
+  setLogs: Dispatch<SetStateAction<LogEntry[]>>;
   /** Ref holding the tabs snapshot from project.onLoaded push (consumed once). */
   loadedProjectTabsRef: MutableRefObject<{ tabs: CellTab[]; activeTabId: number } | null>;
   /** Validates and normalizes raw code-cells.json data into typed CellTab[]. */
@@ -51,6 +53,7 @@ export function useProjectWorkflow(options: UseProjectWorkflowOptions) {
     setModulesRefreshToken,
     setNamespaceRefreshToken,
     setLastError,
+    setLogs,
     loadedProjectTabsRef,
     normalizeLoadedCodeCells,
     flushDirtyNotes,
@@ -94,13 +97,19 @@ export function useProjectWorkflow(options: UseProjectWorkflowOptions) {
         return false;
       }
       await flushDirtyNotes();
-      await window.pdv.project.save(saveDir, {
+      const result = await window.pdv.project.save(saveDir, {
         tabs: cellTabsRef.current,
         activeTabId: activeCellTabRef.current,
       });
       setCurrentProjectDir(saveDir);
       setModulesRefreshToken((prev) => prev + 1);
       await rememberRecentProject(saveDir);
+      setLogs((prev) => [...prev, {
+        id: `save-${Date.now()}`,
+        timestamp: Date.now(),
+        code: '',
+        stdout: `Project saved (${result.nodeCount} nodes, checksum ${result.checksum})`,
+      }]);
       return true;
     } catch (error) {
       setLastError(error instanceof Error ? error.message : String(error));
@@ -113,6 +122,7 @@ export function useProjectWorkflow(options: UseProjectWorkflowOptions) {
     rememberRecentProject,
     setCurrentProjectDir,
     setLastError,
+    setLogs,
     setModulesRefreshToken,
   ]);
 
@@ -125,8 +135,8 @@ export function useProjectWorkflow(options: UseProjectWorkflowOptions) {
       if (!saveDir) {
         return;
       }
-      const loaded = await window.pdv.project.load(saveDir);
-      const normalized = normalizeLoadedCodeCells(loaded);
+      const result = await window.pdv.project.load(saveDir);
+      const normalized = normalizeLoadedCodeCells(result.codeCells);
       loadedProjectTabsRef.current = normalized;
       setCellTabs(normalized.tabs);
       setActiveCellTab(normalized.activeTabId);
@@ -134,6 +144,19 @@ export function useProjectWorkflow(options: UseProjectWorkflowOptions) {
       setModulesRefreshToken((prev) => prev + 1);
       await rememberRecentProject(saveDir);
       setNamespaceRefreshToken((prev) => prev + 1);
+      const parts = [`Project loaded`];
+      if (result.nodeCount != null) parts.push(`${result.nodeCount} nodes`);
+      if (result.checksum) {
+        parts.push(`checksum ${result.checksum}`);
+        if (result.checksumValid === false) parts.push('(MISMATCH)');
+      }
+      setLogs((prev) => [...prev, {
+        id: `load-${Date.now()}`,
+        timestamp: Date.now(),
+        code: '',
+        stdout: parts.length > 1 ? `${parts[0]} (${parts.slice(1).join(', ')})` : parts[0],
+        ...(result.checksumValid === false ? { stderr: 'Warning: tree-index.json checksum does not match the stored checksum' } : {}),
+      }]);
     } catch (error) {
       setLastError(error instanceof Error ? error.message : String(error));
     }
@@ -146,6 +169,7 @@ export function useProjectWorkflow(options: UseProjectWorkflowOptions) {
     setCellTabs,
     setCurrentProjectDir,
     setLastError,
+    setLogs,
     setModulesRefreshToken,
     setNamespaceRefreshToken,
   ]);

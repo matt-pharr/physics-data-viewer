@@ -188,6 +188,64 @@ export const CodeCell: React.FC<CodeCellProps> = ({
     ]);
   }, [executionError, activeTabId, activeTab?.code]);
 
+  // -- Tab context menu & inline rename state --------------------------------
+  // These hooks must be called unconditionally (before any early return).
+  const [contextMenu, setContextMenu] = useState<{ x: number; y: number; tabId: number } | null>(null);
+  const [renamingTabId, setRenamingTabId] = useState<number | null>(null);
+  const [renameValue, setRenameValue] = useState('');
+  const renameInputRef = useRef<HTMLInputElement>(null);
+  const contextMenuRef = useRef<HTMLDivElement>(null);
+
+  const handleTabContextMenu = useCallback((e: React.MouseEvent, tabId: number) => {
+    e.preventDefault();
+    setContextMenu({ x: e.clientX, y: e.clientY, tabId });
+  }, []);
+
+  // Close context menu on outside click or Escape
+  useEffect(() => {
+    if (!contextMenu) return;
+    const handleClickOutside = (e: MouseEvent) => {
+      if (contextMenuRef.current && e.target && !contextMenuRef.current.contains(e.target as Node)) {
+        setContextMenu(null);
+      }
+    };
+    const handleEscape = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setContextMenu(null);
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    document.addEventListener('keydown', handleEscape);
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+      document.removeEventListener('keydown', handleEscape);
+    };
+  }, [contextMenu]);
+
+  const startRename = useCallback((tabId: number) => {
+    const tab = tabs.find((t) => t.id === tabId);
+    setRenameValue(tab?.name ?? '');
+    setRenamingTabId(tabId);
+    setContextMenu(null);
+  }, [tabs]);
+
+  const commitRename = useCallback(() => {
+    if (renamingTabId == null || !onRenameTab) return;
+    const trimmed = renameValue.trim();
+    onRenameTab(renamingTabId, trimmed || undefined);
+    setRenamingTabId(null);
+  }, [renamingTabId, renameValue, onRenameTab]);
+
+  const cancelRename = useCallback(() => {
+    setRenamingTabId(null);
+  }, []);
+
+  // Auto-focus the rename input when it appears
+  useEffect(() => {
+    if (renamingTabId != null && renameInputRef.current) {
+      renameInputRef.current.focus();
+      renameInputRef.current.select();
+    }
+  }, [renamingTabId]);
+
   if (!activeTab) {
     return null;
   }
@@ -267,63 +325,6 @@ export const CodeCell: React.FC<CodeCellProps> = ({
   };
 
   const isEmpty = !activeTab.code.trim();
-
-  // -- Tab context menu & inline rename state --------------------------------
-  const [contextMenu, setContextMenu] = useState<{ x: number; y: number; tabId: number } | null>(null);
-  const [renamingTabId, setRenamingTabId] = useState<number | null>(null);
-  const [renameValue, setRenameValue] = useState('');
-  const renameInputRef = useRef<HTMLInputElement>(null);
-  const contextMenuRef = useRef<HTMLDivElement>(null);
-
-  const handleTabContextMenu = useCallback((e: React.MouseEvent, tabId: number) => {
-    e.preventDefault();
-    setContextMenu({ x: e.clientX, y: e.clientY, tabId });
-  }, []);
-
-  // Close context menu on outside click or Escape
-  useEffect(() => {
-    if (!contextMenu) return;
-    const handleClickOutside = (e: MouseEvent) => {
-      if (contextMenuRef.current && e.target && !contextMenuRef.current.contains(e.target as Node)) {
-        setContextMenu(null);
-      }
-    };
-    const handleEscape = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') setContextMenu(null);
-    };
-    document.addEventListener('mousedown', handleClickOutside);
-    document.addEventListener('keydown', handleEscape);
-    return () => {
-      document.removeEventListener('mousedown', handleClickOutside);
-      document.removeEventListener('keydown', handleEscape);
-    };
-  }, [contextMenu]);
-
-  const startRename = useCallback((tabId: number) => {
-    const tab = tabs.find((t) => t.id === tabId);
-    setRenameValue(tab?.name ?? '');
-    setRenamingTabId(tabId);
-    setContextMenu(null);
-  }, [tabs]);
-
-  const commitRename = useCallback(() => {
-    if (renamingTabId == null || !onRenameTab) return;
-    const trimmed = renameValue.trim();
-    onRenameTab(renamingTabId, trimmed || undefined);
-    setRenamingTabId(null);
-  }, [renamingTabId, renameValue, onRenameTab]);
-
-  const cancelRename = useCallback(() => {
-    setRenamingTabId(null);
-  }, []);
-
-  // Auto-focus the rename input when it appears
-  useEffect(() => {
-    if (renamingTabId != null && renameInputRef.current) {
-      renameInputRef.current.focus();
-      renameInputRef.current.select();
-    }
-  }, [renamingTabId]);
 
   return (
     <section className="code-cell-pane">

@@ -89,11 +89,13 @@ export const SettingsDialog: React.FC<SettingsDialogProps> = ({
 
   useLayoutEffect(() => {
     if (!isOpen) return;
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- intentional sync from props on dialog open
     setActiveTab(initialTab);
   }, [isOpen, initialTab]);
 
   useEffect(() => {
     if (!isOpen) return;
+    /* eslint-disable react-hooks/set-state-in-effect -- intentional sync from props on dialog open */
     setEditedShortcuts(shortcuts);
     setPythonEditorCmd(config?.pythonEditorCmd ?? 'code {}');
     setJuliaEditorCmd(config?.juliaEditorCmd ?? 'code {}');
@@ -127,6 +129,7 @@ export const SettingsDialog: React.FC<SettingsDialogProps> = ({
     };
     void load();
     void window.pdv.about.getVersion().then(setAppVersion).catch(() => setAppVersion('unknown'));
+    /* eslint-enable react-hooks/set-state-in-effect */
   }, [config, shortcuts, isOpen, initialTab]);
 
   useEffect(() => {

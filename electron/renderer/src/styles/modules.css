@@ -1,41 +1,4 @@
-/* modules.css — Modules panel, library view, imported view, prompt blocks */
-
-/* ===== MODULES PANEL ===== */
-.modules-panel {
-  display: flex;
-  flex-direction: column;
-  height: 100%;
-  overflow: hidden;
-}
-
-.modules-library,
-.modules-imported {
-  padding: 10px;
-  border-bottom: none;
-}
-
-.modules-library {
-  flex: 1;
-  overflow: auto;
-}
-
-.modules-imported {
-  flex: 1;
-  overflow: auto;
-}
-
-.modules-library-header,
-.modules-imported-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  margin-bottom: 8px;
-}
-
-.modules-library-actions {
-  display: flex;
-  gap: 6px;
-}
+/* modules.css — Module list items, badges, prompt blocks, input/action controls */
 
 .modules-list {
   list-style: none;

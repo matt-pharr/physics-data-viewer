@@ -42,8 +42,9 @@ def handle_tree_list(msg: dict) -> None:
         Parsed PDV message envelope.
     """
     from pdv_kernel.comms import get_pdv_tree, send_error, send_message  # noqa: PLC0415
-    from pdv_kernel.serialization import detect_kind, node_preview  # noqa: PLC0415
-    from pdv_kernel.tree import PDVTree  # noqa: PLC0415
+    from pdv_kernel.modules import has_handler_for  # noqa: PLC0415
+    from pdv_kernel.serialization import detect_kind, node_preview, python_type_string  # noqa: PLC0415
+    from pdv_kernel.tree import PDVTree, PDVModule, PDVGui  # noqa: PLC0415
 
     msg_id = msg.get("msg_id")
     path = msg.get("payload", {}).get("path", "")
@@ -98,9 +99,17 @@ def handle_tree_list(msg: dict) -> None:
             "has_children": has_children,
             "lazy": lazy,
             "preview": preview,
+            "python_type": python_type_string(value),
+            "has_handler": has_handler_for(value),
         }
         if kind == "script":
             descriptor["params"] = getattr(value, "params", [])
+        if kind == "module" and isinstance(value, PDVModule):
+            descriptor["module_id"] = value.module_id
+            descriptor["module_name"] = value.name
+            descriptor["module_version"] = value.version
+        if kind == "gui" and isinstance(value, PDVGui):
+            descriptor["module_id"] = value.module_id
         nodes.append(descriptor)
 
     # Also include lazy-only entries at this path level that are not yet in memory
@@ -120,6 +129,7 @@ def handle_tree_list(msg: dict) -> None:
                         "has_children": False,
                         "lazy": True,
                         "preview": "<lazy>",
+                        "has_handler": False,
                     }
                 )
 
@@ -150,7 +160,8 @@ def handle_tree_get(msg: dict) -> None:
         Parsed PDV message envelope.
     """
     from pdv_kernel.comms import get_pdv_tree, send_error, send_message  # noqa: PLC0415
-    from pdv_kernel.serialization import detect_kind, node_preview  # noqa: PLC0415
+    from pdv_kernel.modules import has_handler_for  # noqa: PLC0415
+    from pdv_kernel.serialization import detect_kind, node_preview, python_type_string  # noqa: PLC0415
 
     msg_id = msg.get("msg_id")
     payload = msg.get("payload", {})
@@ -203,10 +214,85 @@ def handle_tree_get(msg: dict) -> None:
     preview = node_preview(value, kind)
     send_message(
         "pdv.tree.get.response",
-        {"path": path, "type": kind, "preview": preview, "value": repr(value)},
+        {
+            "path": path,
+            "type": kind,
+            "preview": preview,
+            "value": repr(value),
+            "python_type": python_type_string(value),
+            "has_handler": has_handler_for(value),
+        },
+        in_reply_to=msg_id,
+    )
+
+
+def handle_tree_resolve_file(msg: dict) -> None:
+    """Handle the ``pdv.tree.resolve_file`` message.
+
+    Returns the absolute file path for a file-backed tree node (PDVFile
+    subclass: PDVScript, PDVLib, PDVNamelist, PDVNote, etc.).
+
+    Expected payload
+    ----------------
+    .. code-block:: json
+
+        { "path": "n_pendulum.lib.n_pendulum_py" }
+
+    Response payload
+    ----------------
+    .. code-block:: json
+
+        { "path": "n_pendulum.lib.n_pendulum_py", "file_path": "/abs/path/to/n_pendulum.py" }
+
+    Parameters
+    ----------
+    msg : dict
+        Parsed PDV message envelope.
+    """
+    import os  # noqa: PLC0415
+
+    from pdv_kernel.comms import get_pdv_tree, send_error, send_message  # noqa: PLC0415
+    from pdv_kernel.tree import PDVFile  # noqa: PLC0415
+
+    msg_id = msg.get("msg_id")
+    payload = msg.get("payload", {})
+    path = payload.get("path", "")
+
+    tree = get_pdv_tree()
+    if tree is None:
+        send_error(
+            "pdv.tree.resolve_file.response", "tree.no_tree",
+            "PDVTree is not initialized", in_reply_to=msg_id,
+        )
+        return
+
+    if not path or path not in tree:
+        send_error(
+            "pdv.tree.resolve_file.response", "tree.path_not_found",
+            f"No node at path: '{path}'", in_reply_to=msg_id,
+        )
+        return
+
+    node = tree[path]
+    if not isinstance(node, PDVFile):
+        send_error(
+            "pdv.tree.resolve_file.response", "tree.not_a_file",
+            f"Node at '{path}' is not file-backed", in_reply_to=msg_id,
+        )
+        return
+
+    working_dir = tree._working_dir or ""
+    abs_path = node.resolve_path(working_dir)
+    if not os.path.isabs(abs_path):
+        abs_path = os.path.join(working_dir, abs_path)
+
+    send_message(
+        "pdv.tree.resolve_file.response",
+        {"path": path, "file_path": abs_path},
         in_reply_to=msg_id,
     )
 
 
 register("pdv.tree.list", handle_tree_list)
 register("pdv.tree.get", handle_tree_get)
+register("pdv.tree.resolve_file", handle_tree_resolve_file)

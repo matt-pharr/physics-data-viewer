@@ -33,6 +33,12 @@ describe("toPythonArgumentValue", () => {
     expect(toPythonArgumentValue("path\\to\\file")).toBe("'path\\\\to\\\\file'");
   });
 
+  it("escapes newlines, carriage returns, and tabs in string values", () => {
+    expect(toPythonArgumentValue("line1\nline2")).toBe("'line1\\nline2'");
+    expect(toPythonArgumentValue("col1\tcol2")).toBe("'col1\\tcol2'");
+    expect(toPythonArgumentValue("a\r\nb")).toBe("'a\\r\\nb'");
+  });
+
   it("returns null for empty string input", () => {
     expect(toPythonArgumentValue("   ")).toBeNull();
   });

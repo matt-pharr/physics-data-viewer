@@ -2,7 +2,7 @@
 
 A desktop environment for computational and experimental physics analysis. PDV combines a tabbed code editor with a persistent, typed data hierarchy — the **Tree** — that lives inside a Python kernel. Unlike Jupyter notebooks, the Tree gives you structured data management and reproducible analysis pipelines independent of cell-state transience.
 
-**Status**: Alpha (`v0.0.4`) — under active development.
+**Status**: Alpha (`v0.0.5`) — under active development.
 
 ---
 

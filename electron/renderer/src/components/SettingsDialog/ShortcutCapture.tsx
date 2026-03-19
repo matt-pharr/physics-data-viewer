@@ -26,6 +26,7 @@ export const ShortcutCapture: React.FC<ShortcutCaptureProps> = ({
   const [livePreview, setLivePreview] = useState<string[]>([]);
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- intentional reset on recording stop
     if (!isRecording) { setLivePreview([]); return; }
 
     const onKeyDown = (e: KeyboardEvent) => {

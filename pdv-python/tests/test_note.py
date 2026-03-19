@@ -135,7 +135,7 @@ class TestSerializeMarkdown:
         descriptor = serialize_node("notes.intro", note, str(tmp_path))
 
         assert descriptor["type"] == KIND_MARKDOWN
-        assert descriptor["language"] == "markdown"
+        assert descriptor["metadata"]["language"] == "markdown"
         assert descriptor["storage"]["backend"] == "local_file"
         assert descriptor["storage"]["format"] == FORMAT_MARKDOWN
         assert descriptor["storage"]["relative_path"].endswith(".md")
@@ -170,7 +170,7 @@ class TestSerializeMarkdown:
         note = PDVNote(relative_path=str(source))
 
         descriptor = serialize_node("notes.physics", note, str(tmp_path))
-        assert descriptor["preview"] == "Physics Notes"
+        assert descriptor["metadata"]["preview"] == "Physics Notes"
 
 
 class TestDeserializeMarkdown:

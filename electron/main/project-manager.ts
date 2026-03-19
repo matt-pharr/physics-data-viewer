@@ -29,7 +29,7 @@ import { PDVMessageType, PDV_PROTOCOL_VERSION } from "./pdv-protocol";
 import * as fs from "fs/promises";
 import * as path from "path";
 import * as os from "os";
-import * as crypto from "crypto";
+
 
 // ---------------------------------------------------------------------------
 // Types
@@ -161,14 +161,15 @@ export class ProjectManager {
    * @param codeCells - The current code-cell state from the renderer.
    * @throws {PDVCommError} When the kernel responds with status='error'.
    */
-  async save(saveDir: string, codeCells: unknown): Promise<void> {
+  async save(saveDir: string, codeCells: unknown): Promise<{ checksum: string; nodeCount: number }> {
     // Step 1 — send pdv.project.save comm; throws PDVCommError on error status.
     const response = await this.commRouter.request(PDVMessageType.PROJECT_SAVE, {
       save_dir: saveDir,
     });
 
-    const payload = response.payload as { checksum?: string };
+    const payload = response.payload as { checksum?: string; node_count?: number };
     const checksum = payload.checksum ?? "";
+    const nodeCount = payload.node_count ?? 0;
 
     // Step 2 — write code-cells.json.
     await fs.writeFile(
@@ -201,6 +202,8 @@ export class ProjectManager {
       JSON.stringify(manifest, null, 2),
       "utf8"
     );
+
+    return { checksum, nodeCount };
   }
 
   /**
@@ -210,6 +213,9 @@ export class ProjectManager {
    * 1. Send ``pdv.project.load`` comm with ``save_dir``.
    * 2. Wait for the ``pdv.project.loaded`` push notification.
    * 3. Read ``code-cells.json`` from ``saveDir``.
+   *
+   * The caller is responsible for copying files into the working directory
+   * before calling this method, and for running module setup after.
    *
    * @param saveDir - Absolute path to the project directory.
    * @returns The code-cell state read from ``code-cells.json``.

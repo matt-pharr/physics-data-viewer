@@ -12,11 +12,14 @@
  * - Config/theme/file-picker handlers.
  */
 
+import * as crypto from "crypto";
+import * as fs from "fs/promises";
+import * as path from "path";
 import { ipcMain } from "electron";
 
 import { IPC } from "./ipc";
 import { ProjectManager, type ProjectModuleImport } from "./project-manager";
-import { copyFilesForLoad, copyFilesForSave } from "./project-file-sync";
+import { copyFilesForLoad } from "./project-file-sync";
 
 type ProjectManifest = Awaited<ReturnType<typeof ProjectManager.readManifest>>;
 
@@ -31,7 +34,6 @@ interface RegisterProjectIpcHandlersOptions {
   setPendingModuleSettings: (settings: Record<string, Record<string, unknown>>) => void;
   clearModuleHealthWarnings: () => void;
   refreshProjectModuleHealth: (dir: string | null) => Promise<ProjectManifest | null>;
-  bindActiveProjectModules: (kernelId: string | null, modules?: ProjectModuleImport[]) => Promise<void>;
   runSerializedProjectManifestMutation: <T>(dir: string, task: () => Promise<T>) => Promise<T>;
 }
 
@@ -56,14 +58,13 @@ export function registerProjectIpcHandlers(
     setPendingModuleSettings,
     clearModuleHealthWarnings,
     refreshProjectModuleHealth,
-    bindActiveProjectModules,
     runSerializedProjectManifestMutation,
   } = options;
 
   ipcMain.handle(
     IPC.project.save,
     async (_event, saveDir: string, codeCells: unknown) => {
-      await projectManager.save(saveDir, codeCells);
+      const saveResult = await projectManager.save(saveDir, codeCells);
 
       // Merge pending in-memory module imports/settings into the on-disk manifest.
       const pendingModuleImports = getPendingModuleImports();
@@ -82,16 +83,13 @@ export function registerProjectIpcHandlers(
         setPendingModuleSettings({});
       }
 
-      // Copy file-backed node files from working dir into save dir.
-      const activeKernelId = getActiveKernelId();
-      if (activeKernelId) {
-        const workingDir = kernelWorkingDirs.get(activeKernelId);
-        if (workingDir) await copyFilesForSave(workingDir, saveDir);
-      }
+      // NOTE: file-backed nodes are already copied to saveDir/tree/ by the
+      // Python serializer (serialize_node writes directly to save_dir).
+      // No additional copy step is needed here.
 
       setActiveProjectDir(saveDir);
       await refreshProjectModuleHealth(saveDir);
-      return true;
+      return { checksum: saveResult.checksum, nodeCount: saveResult.nodeCount };
     }
   );
 
@@ -103,13 +101,53 @@ export function registerProjectIpcHandlers(
       if (workingDir) await copyFilesForLoad(saveDir, workingDir);
     }
 
-    const loaded = await projectManager.load(saveDir);
     setActiveProjectDir(saveDir);
     setPendingModuleImports([]);
     setPendingModuleSettings({});
-    const manifest = await refreshProjectModuleHealth(saveDir);
-    await bindActiveProjectModules(activeKernelId, manifest?.modules);
-    return loaded;
+    await refreshProjectModuleHealth(saveDir);
+
+    // Checksum validation (warn-only)
+    let checksum: string | null = null;
+    let checksumValid: boolean | null = null;
+    let nodeCount: number | null = null;
+    try {
+      const manifest = await ProjectManager.readManifest(saveDir);
+      checksum = manifest.tree_checksum || null;
+      if (checksum) {
+        const treeIndexRaw = await fs.readFile(
+          path.join(saveDir, "tree-index.json"),
+          "utf8"
+        );
+        const computed = crypto
+          .createHash("sha256")
+          .update(treeIndexRaw)
+          .digest("hex");
+        checksumValid = computed === checksum;
+        if (!checksumValid) {
+          console.warn(
+            `[pdv] tree-index.json checksum mismatch: expected ${checksum}, got ${computed}`
+          );
+        }
+      }
+    } catch {
+      // Non-blocking — proceed with load even if validation fails
+    }
+
+    const loaded = await projectManager.load(saveDir);
+
+    // Read node count from tree-index.json
+    try {
+      const treeIndexRaw = await fs.readFile(
+        path.join(saveDir, "tree-index.json"),
+        "utf8"
+      );
+      const nodes = JSON.parse(treeIndexRaw);
+      if (Array.isArray(nodes)) nodeCount = nodes.length;
+    } catch {
+      // Non-blocking
+    }
+
+    return { codeCells: loaded, checksum, checksumValid, nodeCount };
   });
 
   ipcMain.handle(IPC.project.new, async () => {

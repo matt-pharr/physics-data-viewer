@@ -92,6 +92,15 @@ const mocks = vi.hoisted(() => {
   const moduleManagerGetModuleInputs = vi.fn(async () => [
     { id: "threshold", label: "Threshold", type: "int", default: "5" },
   ]);
+  const moduleManagerGetModuleGuiInfo = vi.fn(async () => ({
+    hasGui: true,
+    gui: undefined,
+  }));
+  const moduleManagerGetModuleInstallPath = vi.fn(async () => null);
+  const moduleManagerGetModuleSetupInfo = vi.fn(async () => ({
+    entryPoint: undefined,
+  }));
+  const moduleManagerResolveModuleFiles = vi.fn(async () => []);
   return {
     handlers,
     ipcHandle,
@@ -110,6 +119,10 @@ const mocks = vi.hoisted(() => {
     moduleManagerEvaluateHealth,
     moduleManagerResolveActionScripts,
     moduleManagerGetModuleInputs,
+    moduleManagerGetModuleGuiInfo,
+    moduleManagerGetModuleInstallPath,
+    moduleManagerGetModuleSetupInfo,
+    moduleManagerResolveModuleFiles,
   };
 });
 
@@ -122,6 +135,7 @@ vi.mock("electron", () => ({
     showOpenDialog: mocks.dialogShowOpenDialog,
   },
   app: {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
     getVersion: () => (require("../package.json") as { version: string }).version,
   },
 }));
@@ -147,6 +161,10 @@ vi.mock("./module-manager", () => ({
     evaluateHealth: mocks.moduleManagerEvaluateHealth,
     resolveActionScripts: mocks.moduleManagerResolveActionScripts,
     getModuleInputs: mocks.moduleManagerGetModuleInputs,
+    getModuleGuiInfo: mocks.moduleManagerGetModuleGuiInfo,
+    getModuleInstallPath: mocks.moduleManagerGetModuleInstallPath,
+    getModuleSetupInfo: mocks.moduleManagerGetModuleSetupInfo,
+    resolveModuleFiles: mocks.moduleManagerResolveModuleFiles,
   })),
 }));
 
@@ -228,8 +246,11 @@ function setup() {
   } as unknown as CommRouter;
 
   const projectManager = {
-    save: vi.fn(async () => undefined),
-    load: vi.fn(async () => []),
+    save: vi.fn(async () => ({ checksum: "abc123", nodeCount: 0 })),
+    load: vi.fn(async (_saveDir: string, onBeforePush?: () => Promise<void>) => {
+      if (onBeforePush) await onBeforePush();
+      return [];
+    }),
     createWorkingDir: vi.fn(async () => "/tmp/pdv-test"),
     deleteWorkingDir: vi.fn(async () => undefined),
   } as unknown as ProjectManager;
@@ -712,7 +733,7 @@ describe("Step 5 IPC handlers", () => {
     const save = getHandler(IPC.project.save);
     const result = await save({}, "/tmp/project", []);
     expect(projectManager.save).toHaveBeenCalledWith("/tmp/project", []);
-    expect(result).toBe(true);
+    expect(result).toEqual({ checksum: "abc123", nodeCount: 0 });
   });
 
   it("project:load delegates to ProjectManager.load", async () => {
@@ -723,7 +744,12 @@ describe("Step 5 IPC handlers", () => {
     const load = getHandler(IPC.project.load);
     const result = await load({}, "/tmp/project");
     expect(projectManager.load).toHaveBeenCalledWith("/tmp/project");
-    expect(result).toEqual([{ id: "box1" }]);
+    expect(result).toEqual({
+      codeCells: [{ id: "box1" }],
+      checksum: null,
+      checksumValid: null,
+      nodeCount: null,
+    });
   });
 
   it("themes:get returns empty list initially, themes:save persists", async () => {
@@ -944,6 +970,7 @@ describe("Step 5 IPC handlers", () => {
         alias: "demo-module",
         version: "1.0.0",
         revision: "abc123",
+        hasGui: true,
         inputs: [{ id: "threshold", label: "Threshold", type: "int", default: "5" }],
         actions: [{ id: "run-action", label: "Run", scriptName: "run", inputIds: ["threshold"] }],
         settings: {
@@ -958,19 +985,8 @@ describe("Step 5 IPC handlers", () => {
     setup();
     const start = getHandler(IPC.kernels.start);
     await start({}, { language: "python" });
-    // project:load's bindActiveProjectModules also calls resolveActionScripts — add an
-    // extra Once for that call, then the second Once (with actionTab) is for listImported.
+    // listImported calls resolveActionScripts — provide the tab metadata.
     (mocks.moduleManagerResolveActionScripts as unknown as ReturnType<typeof vi.fn>)
-      .mockResolvedValueOnce([
-        {
-          actionId: "run-action",
-          actionLabel: "Run",
-          name: "run",
-          scriptPath: "/tmp/demo-module/scripts/run.py",
-          inputIds: ["threshold"],
-          actionTab: "Run",
-        },
-      ])
       .mockResolvedValueOnce([
         {
           actionId: "run-action",
@@ -1014,15 +1030,14 @@ describe("Step 5 IPC handlers", () => {
     setup();
     const start = getHandler(IPC.kernels.start);
     await start({}, { language: "python" });
-    (mocks.moduleManagerEvaluateHealth as unknown as ReturnType<typeof vi.fn>).mockResolvedValueOnce([
-      { code: "missing_action_script", message: "Action script not found: scripts/run.py" },
-    ]);
-    // project:load's bindActiveProjectModules calls resolveActionScripts first (caught, returns early),
-    // then listImported calls it again — both need to fail with MissingActionScriptError.
+    // evaluateHealth is called during refreshProjectModuleHealth (load).
+    // listImported reads health warnings from memory (moduleHealthWarningsByAlias).
+    (mocks.moduleManagerEvaluateHealth as unknown as ReturnType<typeof vi.fn>)
+      .mockResolvedValueOnce([
+        { code: "missing_action_script", message: "Action script not found: scripts/run.py" },
+      ]);
+    // listImported calls resolveActionScripts — needs to fail with MissingActionScriptError.
     (mocks.moduleManagerResolveActionScripts as unknown as ReturnType<typeof vi.fn>)
-      .mockRejectedValueOnce(
-        new Error("Module action script does not exist: scripts/run.py (demo-module)")
-      )
       .mockRejectedValueOnce(
         new Error("Module action script does not exist: scripts/run.py (demo-module)")
       );
@@ -1260,8 +1275,8 @@ describe("Step 5 IPC handlers", () => {
     expect(kernelManager.start).not.toHaveBeenCalled();
   });
 
-  it("project:load binds imported module scripts when kernel is active", async () => {
-    const { commRouter } = setup();
+  it("project:load no longer calls bindActiveProjectModules", async () => {
+    setup();
     const start = getHandler(IPC.kernels.start);
     await start({}, { language: "python" });
 
@@ -1288,15 +1303,8 @@ describe("Step 5 IPC handlers", () => {
     const load = getHandler(IPC.project.load);
     await load({}, "/tmp/project");
 
-    expect(mocks.moduleManagerResolveActionScripts).toHaveBeenCalledWith("demo-module");
-    expect(commRouter.request).toHaveBeenCalledWith(
-      PDVMessageType.SCRIPT_REGISTER,
-      expect.objectContaining({
-        parent_path: "diagnosticA.scripts",
-        name: "run",
-        relative_path: "/tmp/pdv-test/diagnosticA/scripts/run.py",
-        reload: true,
-      })
-    );
+    // resolveActionScripts should NOT be called during load
+    // (module binding is now handled by setupModuleNamespaces via pdv.modules.setup comm)
+    expect(mocks.moduleManagerResolveActionScripts).not.toHaveBeenCalled();
   });
 });

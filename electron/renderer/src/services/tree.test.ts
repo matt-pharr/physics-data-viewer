@@ -37,6 +37,7 @@ describe('treeService', () => {
   });
 
   beforeEach(() => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- mock window.pdv for tests
     (globalThis.window as any).pdv = {
       tree: {
         list: vi.fn(async (_kernelId?: string, path?: string) => {

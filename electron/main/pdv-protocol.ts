@@ -14,6 +14,8 @@
  * Reference: ARCHITECTURE.md §3.2, §3.4, §7.2, §7.3
  */
 
+/* eslint-disable @typescript-eslint/no-unused-vars -- payload interfaces document the protocol schema (ARCHITECTURE.md §3.4) */
+
 // ---------------------------------------------------------------------------
 // Protocol version
 // ---------------------------------------------------------------------------
@@ -60,6 +62,10 @@ export const PDVMessageType = {
   TREE_GET: "pdv.tree.get",
   /** Kernel → app. Returns node value (may be lazy-loaded). */
   TREE_GET_RESPONSE: "pdv.tree.get.response",
+  /** App → kernel. Resolve a file-backed tree node to its absolute path. */
+  TREE_RESOLVE_FILE: "pdv.tree.resolve_file",
+  /** Kernel → app. Returns the resolved absolute file path. */
+  TREE_RESOLVE_FILE_RESPONSE: "pdv.tree.resolve_file.response",
   /** Kernel → app (push). Tree structure changed. */
   TREE_CHANGED: "pdv.tree.changed",
 
@@ -82,10 +88,40 @@ export const PDVMessageType = {
   NOTE_REGISTER_RESPONSE: "pdv.note.register.response",
 
   // File
-  /** App → kernel. Register a file-backed node (namelist, Fortran source, or opaque file). */
+  /** App → kernel. Register a file-backed node (namelist, library, or opaque file). */
   FILE_REGISTER: "pdv.file.register",
   /** Kernel → app. Confirms file registration. */
   FILE_REGISTER_RESPONSE: "pdv.file.register.response",
+
+  // Module registration
+  /** App → kernel. Register a PDVModule node in the tree. */
+  MODULE_REGISTER: "pdv.module.register",
+  /** Kernel → app. Confirms module registration. */
+  MODULE_REGISTER_RESPONSE: "pdv.module.register.response",
+  /** App → kernel. Register a PDVGui node in the tree. */
+  GUI_REGISTER: "pdv.gui.register",
+  /** Kernel → app. Confirms GUI registration. */
+  GUI_REGISTER_RESPONSE: "pdv.gui.register.response",
+
+  // Namelist
+  /** App → kernel. Read and parse a namelist file in the tree. */
+  NAMELIST_READ: "pdv.namelist.read",
+  /** Kernel → app. Parsed namelist data with hints and types. */
+  NAMELIST_READ_RESPONSE: "pdv.namelist.read.response",
+  /** App → kernel. Write edited namelist data back to file. */
+  NAMELIST_WRITE: "pdv.namelist.write",
+  /** Kernel → app. Confirms write success. */
+  NAMELIST_WRITE_RESPONSE: "pdv.namelist.write.response",
+
+  // Modules
+  /** App → kernel. Setup module library namespaces (sys.path + entry points). */
+  MODULES_SETUP: "pdv.modules.setup",
+  /** Kernel → app. Confirms module setup; carries registered handler map. */
+  MODULES_SETUP_RESPONSE: "pdv.modules.setup.response",
+  /** App → kernel. Invoke a registered type handler for a tree node. */
+  HANDLER_INVOKE: "pdv.handler.invoke",
+  /** Kernel → app. Confirms handler invocation result. */
+  HANDLER_INVOKE_RESPONSE: "pdv.handler.invoke.response",
 } as const;
 
 /** Union of all PDV message type string values. */
@@ -242,7 +278,11 @@ export interface PDVFileRegisterPayload {
   /** Physical filename with extension (e.g. "input.nml"). */
   filename: string;
   /** Node type classification for the file. */
-  node_type: "namelist" | "fortran" | "file";
+  node_type: "namelist" | "lib" | "file";
+  /** Optional explicit tree node name. When omitted the kernel derives it from filename. */
+  name?: string;
+  /** Optional module ID that owns this file node. */
+  module_id?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -263,8 +303,11 @@ const NodeKind = {
   FOLDER: "folder",
   UNKNOWN: "unknown",
   NAMELIST: "namelist",
-  FORTRAN: "fortran",
   FILE: "file",
+  MODULE: "module",
+  GUI: "gui",
+  LIB: "lib",
+  MARKDOWN: "markdown",
 } as const;
 
 /** Union of all valid node `type` values in tree descriptors. */
@@ -310,6 +353,16 @@ export interface NodeDescriptor {
   params?: ScriptParameter[];
   /** Physical filename with extension for file-backed nodes (e.g. "run.nml"). Null for others. */
   filename?: string | null;
+  /** Fully qualified Python type string (e.g. "builtins.int"). */
+  python_type?: string;
+  /** True if a custom handler is registered for this node's type. */
+  has_handler?: boolean;
+  /** Module identifier. Present when type is "module" or "gui". */
+  module_id?: string;
+  /** Module display name. Present when type is "module". */
+  module_name?: string;
+  /** Module version. Present when type is "module". */
+  module_version?: string;
 }
 
 // ---------------------------------------------------------------------------

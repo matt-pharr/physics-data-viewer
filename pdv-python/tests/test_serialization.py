@@ -7,6 +7,7 @@ Tests cover:
 3. deserialize_node() round-trips for each format.
 4. node_preview() for representative values.
 5. extract_docstring_preview() from Python files.
+6. metadata sub-dict present and correct for all node kinds.
 
 Reference: ARCHITECTURE.md §7.2, §7.3
 """
@@ -28,6 +29,12 @@ from pdv_kernel.serialization import (
     KIND_MAPPING,
     KIND_SEQUENCE,
     KIND_FOLDER,
+    KIND_SCRIPT,
+    KIND_MARKDOWN,
+    KIND_MODULE,
+    KIND_GUI,
+    KIND_NAMELIST,
+    KIND_LIB,
     KIND_UNKNOWN,
 )
 from pdv_kernel.errors import PDVSerializationError
@@ -173,14 +180,15 @@ class TestSerializeAndDeserialize:
             deserialize_node(descriptor['storage'], tmp_working_dir, trusted=False)
 
     def test_descriptor_fields_present(self, tmp_working_dir):
-        """Returned descriptor contains all required ARCHITECTURE.md §7.3 fields."""
+        """Returned descriptor contains all required fields including metadata."""
         descriptor = serialize_node('my.node', 123, tmp_working_dir)
         required = {'id', 'path', 'key', 'parent_path', 'type', 'has_children',
-                    'lazy', 'created_at', 'updated_at', 'storage', 'preview'}
+                    'lazy', 'created_at', 'updated_at', 'storage', 'metadata'}
         assert required.issubset(descriptor.keys())
         assert descriptor['id'] == 'my.node'
         assert descriptor['key'] == 'node'
         assert descriptor['parent_path'] == 'my'
+        assert 'preview' in descriptor['metadata']
 
 
 class TestNodePreview:
@@ -232,3 +240,107 @@ class TestExtractDocstringPreview:
     def test_missing_file_returns_none(self, tmp_path):
         result = extract_docstring_preview(str(tmp_path / 'nonexistent.py'))
         assert result is None
+
+
+class TestMetadataSubDict:
+    """Tests that all descriptors contain a metadata sub-dict with type-specific fields."""
+
+    def test_module_descriptor_metadata(self, tmp_working_dir):
+        from pdv_kernel.tree import PDVModule
+        mod = PDVModule(module_id="test_mod", name="Test Module", version="1.0.0")
+        desc = serialize_node('mymod', mod, tmp_working_dir)
+        assert 'metadata' in desc
+        meta = desc['metadata']
+        assert meta['module_id'] == 'test_mod'
+        assert meta['name'] == 'Test Module'
+        assert meta['version'] == '1.0.0'
+        assert 'preview' in meta
+
+    def test_gui_descriptor_metadata(self, tmp_working_dir):
+        from pdv_kernel.tree import PDVGui
+        gui_file = os.path.join(tmp_working_dir, 'tree', 'mod', 'gui.gui.json')
+        os.makedirs(os.path.dirname(gui_file), exist_ok=True)
+        with open(gui_file, 'w') as f:
+            f.write('{}')
+        gui = PDVGui(relative_path=gui_file, module_id="test_mod")
+        desc = serialize_node('mod.gui', gui, tmp_working_dir)
+        assert 'metadata' in desc
+        meta = desc['metadata']
+        assert meta['module_id'] == 'test_mod'
+        assert 'preview' in meta
+
+    def test_namelist_descriptor_metadata(self, tmp_working_dir):
+        from pdv_kernel.tree import PDVNamelist
+        nml_file = os.path.join(tmp_working_dir, 'tree', 'mod', 'solver.nml')
+        os.makedirs(os.path.dirname(nml_file), exist_ok=True)
+        with open(nml_file, 'w') as f:
+            f.write('&solver /\n')
+        nml = PDVNamelist(relative_path=nml_file, format='fortran', module_id='test_mod')
+        desc = serialize_node('mod.solver', nml, tmp_working_dir)
+        assert 'metadata' in desc
+        meta = desc['metadata']
+        assert meta['module_id'] == 'test_mod'
+        assert meta['namelist_format'] == 'fortran'
+        assert 'preview' in meta
+
+    def test_lib_descriptor_metadata(self, tmp_working_dir):
+        from pdv_kernel.tree import PDVLib
+        lib_file = os.path.join(tmp_working_dir, 'tree', 'mod', 'lib', 'helpers.py')
+        os.makedirs(os.path.dirname(lib_file), exist_ok=True)
+        with open(lib_file, 'w') as f:
+            f.write('# helpers\n')
+        lib = PDVLib(relative_path=lib_file, module_id='test_mod')
+        desc = serialize_node('mod.lib.helpers', lib, tmp_working_dir)
+        assert 'metadata' in desc
+        meta = desc['metadata']
+        assert meta['module_id'] == 'test_mod'
+        assert meta['language'] == 'python'
+        assert 'preview' in meta
+
+    def test_script_descriptor_metadata(self, tmp_working_dir):
+        from pdv_kernel.tree import PDVScript
+        script_file = os.path.join(tmp_working_dir, 'tree', 'run.py')
+        os.makedirs(os.path.dirname(script_file), exist_ok=True)
+        with open(script_file, 'w') as f:
+            f.write('"""My script."""\ndef run(pdv_tree: dict):\n    return {}\n')
+        script = PDVScript(relative_path=script_file, language='python', doc='My script.')
+        desc = serialize_node('run', script, tmp_working_dir)
+        assert 'metadata' in desc
+        meta = desc['metadata']
+        assert meta['language'] == 'python'
+        assert meta['doc'] == 'My script.'
+        assert 'preview' in meta
+
+    def test_all_descriptors_have_metadata(self, tmp_working_dir):
+        """Every kind produces a descriptor with a metadata key."""
+        from pdv_kernel.tree import PDVTree, PDVScript, PDVModule, PDVNote
+        values = [
+            ('folder', PDVTree()),
+            ('scalar', 42),
+            ('text', 'hello'),
+            ('mapping', {'a': 1}),
+            ('sequence', [1, 2]),
+        ]
+        for name, value in values:
+            desc = serialize_node(name, value, tmp_working_dir)
+            assert 'metadata' in desc, f"Missing metadata for kind={desc['type']}"
+            assert 'preview' in desc['metadata'], f"Missing preview for kind={desc['type']}"
+
+    def test_ndarray_metadata(self, tmp_working_dir):
+        numpy = pytest.importorskip('numpy')
+        arr = numpy.array([[1.0, 2.0], [3.0, 4.0]])
+        desc = serialize_node('data.arr', arr, tmp_working_dir)
+        meta = desc['metadata']
+        assert meta['shape'] == [2, 2]
+        assert meta['dtype'] == 'float64'
+        assert meta['size_bytes'] == arr.nbytes
+        assert 'preview' in meta
+
+    def test_dataframe_metadata(self, tmp_working_dir):
+        pandas = pytest.importorskip('pandas')
+        pytest.importorskip('pyarrow')
+        df = pandas.DataFrame({'a': [1, 2], 'b': [3, 4]})
+        desc = serialize_node('data.df', df, tmp_working_dir)
+        meta = desc['metadata']
+        assert meta['shape'] == [2, 2]
+        assert 'preview' in meta

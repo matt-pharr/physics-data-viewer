@@ -27,6 +27,8 @@ interface UseKeyboardShortcutsOptions {
   toggleLeftSidebar: () => void;
   /** Toggles the code editor collapsed state (Cmd+J). */
   toggleEditorCollapsed: () => void;
+  /** Opens the Import Module dialog (Cmd+I). */
+  setShowImportModule: Dispatch<SetStateAction<boolean>>;
   /** Creates a new code cell tab (configurable shortcut). */
   addCellTab: () => void;
   /** Closes the tab with the given ID (configurable shortcut). */
@@ -53,6 +55,7 @@ export function useKeyboardShortcuts(options: UseKeyboardShortcutsOptions): void
     setSettingsInitialTab,
     toggleLeftSidebar,
     toggleEditorCollapsed,
+    setShowImportModule,
   } = options;
 
   // Refs to avoid re-registering the listener when these values change
@@ -103,6 +106,11 @@ export function useKeyboardShortcuts(options: UseKeyboardShortcutsOptions): void
         event.preventDefault();
         window.close();
       }
+      // Cmd+I: open Import Module dialog
+      if ((event.metaKey || event.ctrlKey) && !event.shiftKey && !event.altKey && event.key === 'i') {
+        event.preventDefault();
+        setShowImportModule(true);
+      }
       // Cmd+B: toggle left sidebar
       if ((event.metaKey || event.ctrlKey) && !event.shiftKey && !event.altKey && event.key === 'b') {
         event.preventDefault();
@@ -130,5 +138,6 @@ export function useKeyboardShortcuts(options: UseKeyboardShortcutsOptions): void
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [shortcuts, toggleEditorCollapsed, toggleLeftSidebar]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- remaining deps are stable React setters or refs; see comment at top of hook
+  }, [shortcuts, toggleEditorCollapsed, toggleLeftSidebar, setShowImportModule]);
 }

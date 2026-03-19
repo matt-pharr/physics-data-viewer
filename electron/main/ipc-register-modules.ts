@@ -33,12 +33,14 @@ import {
 import { KernelManager } from "./kernel-manager";
 import { ModuleManager } from "./module-manager";
 import {
-  bindImportedModuleScripts,
+  bindImportedModule,
+  buildModulesSetupPayload,
   isMissingActionScriptError,
   normalizeModuleAlias,
   suggestModuleAlias,
   toPythonArgumentValue,
 } from "./module-runtime";
+import { PDVMessageType } from "./pdv-protocol";
 import { ProjectManager, type ProjectModuleImport } from "./project-manager";
 
 type ProjectManifest = Awaited<ReturnType<typeof ProjectManager.readManifest>>;
@@ -185,12 +187,22 @@ export function registerModulesIpcHandlers(
       getModuleHealthWarningsByAlias().set(baseAlias, warnings);
       const activeKernelId = getActiveKernelId();
       if (activeKernelId && kernelManager.getKernel(activeKernelId)) {
-        await bindImportedModuleScripts(
+        await bindImportedModule(
           commRouter,
           moduleManager,
           importedModule,
           kernelWorkingDirs.get(activeKernelId)
         );
+        // Send pdv.modules.setup so the kernel adds lib paths to sys.path
+        // and imports entry points for the newly imported module.
+        const setupPayload = await buildModulesSetupPayload(
+          moduleManager,
+          [importedModule],
+          kernelWorkingDirs.get(activeKernelId)
+        );
+        if (setupPayload.modules.length > 0) {
+          await commRouter.request(PDVMessageType.MODULES_SETUP, setupPayload);
+        }
       }
       win.webContents.send(IPC.push.treeChanged, {
         changed_paths: [baseAlias],
@@ -241,12 +253,14 @@ export function registerModulesIpcHandlers(
               throw error;
             }
           }
+          const guiInfo = await moduleManager.getModuleGuiInfo(entry.module_id);
           return {
             moduleId: entry.module_id,
             name: installedById.get(entry.module_id)?.name ?? entry.module_id,
             alias: entry.alias,
             version: entry.version,
             revision: entry.revision,
+            hasGui: guiInfo.hasGui,
             inputs: await moduleManager.getModuleInputs(entry.module_id),
             actions: actions.map((action) => ({
               id: action.actionId,
@@ -255,6 +269,7 @@ export function registerModulesIpcHandlers(
               inputIds: action.inputIds,
               ...(action.actionTab ? { tab: action.actionTab } : {}),
             })),
+            gui: guiInfo.gui,
             settings: allSettings[entry.alias] ?? {},
             warnings:
               warningsByAlias.get(entry.alias) ??

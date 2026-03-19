@@ -74,6 +74,11 @@ function buildTemplate(): MenuItemConstructorOptions[] {
           click: () => sendMenuAction({ action: "project:saveAs" }),
         },
         { type: "separator" },
+        {
+          label: "Import Module...",
+          click: () => sendMenuAction({ action: "modules:import" }),
+        },
+        { type: "separator" },
         process.platform === "darwin" ? { role: "close" } : { role: "quit" },
       ],
     },

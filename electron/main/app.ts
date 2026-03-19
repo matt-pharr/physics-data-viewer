@@ -10,7 +10,7 @@
  * index.ts — IPC handler registration and push forwarding
  */
 
-import { BrowserWindow, app, ipcMain } from "electron";
+import { BrowserWindow, app } from "electron";
 import * as path from "path";
 import * as os from "os";
 import * as fsSync from "fs";
@@ -21,7 +21,7 @@ import { ProjectManager } from "./project-manager";
 import { ConfigStore } from "./config";
 import { registerIpcHandlers } from "./index";
 import { initializeAppMenu } from "./menu";
-import { IPC } from "./ipc";
+
 
 async function loadDevUrlWithRetry(
   win: BrowserWindow,

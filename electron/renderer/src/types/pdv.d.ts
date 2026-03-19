@@ -42,6 +42,16 @@ export interface NodeDescriptor {
   params?: ScriptParameter[] | undefined;
   /** Physical filename with extension for file-backed nodes (e.g. "run.nml"). Null for others. */
   filename?: string | null;
+  /** Fully qualified Python type string (e.g. "builtins.int"). */
+  python_type?: string;
+  /** True if a custom handler is registered for this node's type. */
+  has_handler?: boolean;
+  /** Module identifier. Present when type is "module" or "gui". */
+  module_id?: string;
+  /** Module display name. Present when type is "module". */
+  module_name?: string;
+  /** Module version. Present when type is "module". */
+  module_version?: string;
 }
 
 /** Runtime kernel descriptor returned by `kernels.start/list/restart`. */
@@ -172,9 +182,29 @@ export interface CodeCellData {
 /** File-menu action event payload emitted by `menu.onAction`. */
 export interface MenuActionPayload {
   /** Discriminated menu action identifier. */
-  action: "project:open" | "project:openRecent" | "project:save" | "project:saveAs";
+  action: "project:open" | "project:openRecent" | "project:save" | "project:saveAs" | "modules:import";
   /** Optional path argument for path-bearing menu actions. */
   path?: string;
+}
+
+/** Result returned from `project.save()`. */
+export interface ProjectSaveResult {
+  /** SHA-256 checksum of the serialized tree-index.json. */
+  checksum: string;
+  /** Number of tree nodes serialized. */
+  nodeCount: number;
+}
+
+/** Result returned from `project.load()`. */
+export interface ProjectLoadResult {
+  /** Loaded code-cell state from code-cells.json. */
+  codeCells: unknown;
+  /** SHA-256 checksum stored in the project manifest, or null if absent. */
+  checksum: string | null;
+  /** Whether the stored checksum matches the computed checksum of tree-index.json. */
+  checksumValid: boolean | null;
+  /** Number of tree nodes loaded. */
+  nodeCount: number | null;
 }
 
 /** Persisted user configuration payload returned by `config.get`. */
@@ -354,6 +384,73 @@ export interface ModuleHealthWarning {
   message: string;
 }
 
+/** Request payload for opening a module popup window. */
+export interface ModuleWindowOpenRequest {
+  alias: string;
+  kernelId: string;
+}
+
+/** Result payload for `moduleWindows.open`. */
+export interface ModuleWindowOpenResult {
+  success: boolean;
+  error?: string;
+}
+
+/** Context payload identifying a module popup window. */
+export interface ModuleWindowContext {
+  alias: string;
+  kernelId: string;
+}
+
+/** Result returned by `namelist.read`. */
+export interface NamelistReadResult {
+  groups: Record<string, Record<string, unknown>>;
+  hints: Record<string, Record<string, string>>;
+  types: Record<string, Record<string, string>>;
+  format: "fortran" | "toml";
+}
+
+/** Result returned by `namelist.write`. */
+export interface NamelistWriteResult {
+  success: boolean;
+  error?: string;
+}
+
+/** Reference to an input in the container layout. */
+export interface LayoutInputRef {
+  type: "input";
+  id: string;
+}
+
+/** Reference to an action in the container layout. */
+export interface LayoutActionRef {
+  type: "action";
+  id: string;
+}
+
+/** A layout container that arranges children visually. */
+export interface LayoutContainer {
+  type: "row" | "column" | "group" | "tabs";
+  label?: string;
+  collapsed?: boolean;
+  children: LayoutNode[];
+}
+
+/** Reference to a namelist file in the tree, rendered as an inline editor. */
+export interface LayoutNamelistRef {
+  type: "namelist";
+  tree_path: string;
+  tree_path_input?: string;
+}
+
+/** A layout node is either an input reference, action reference, namelist reference, or a container. */
+export type LayoutNode = LayoutInputRef | LayoutActionRef | LayoutNamelistRef | LayoutContainer;
+
+/** Top-level GUI layout object in the module manifest. */
+export interface ModuleGuiLayout {
+  layout: LayoutContainer;
+}
+
 /** Project-scoped imported module descriptor. */
 export interface ImportedModuleDescriptor {
   moduleId: string;
@@ -361,8 +458,10 @@ export interface ImportedModuleDescriptor {
   alias: string;
   version: string;
   revision?: string;
+  hasGui: boolean;
   inputs: ModuleInputDescriptor[];
   actions: ImportedModuleActionDescriptor[];
+  gui?: ModuleGuiLayout;
   settings: Record<string, unknown>;
   warnings: ModuleHealthWarning[];
 }
@@ -430,6 +529,7 @@ export interface PDVApi {
       language: "python" | "julia"
     ): Promise<{ valid: boolean; error?: string }>;
     onOutput(callback: (chunk: ExecuteOutputChunk) => void): () => void;
+    onKernelStatus(callback: (payload: { kernelId: string; status: string }) => void): () => void;
   };
   tree: {
     list(kernelId: string, path?: string): Promise<NodeDescriptor[]>;
@@ -448,9 +548,13 @@ export interface PDVApi {
       kernelId: string,
       sourcePath: string,
       targetTreePath: string,
-      nodeType: "namelist" | "fortran" | "file",
+      nodeType: "namelist" | "lib" | "file",
       filename: string
     ): Promise<{ success: boolean; error?: string; workingDirPath?: string }>;
+    invokeHandler(
+      kernelId: string,
+      path: string
+    ): Promise<{ success: boolean; error?: string }>;
     onChanged(
       callback: (payload: { changed_paths: string[]; change_type: "added" | "removed" | "updated" }) => void
     ): () => void;
@@ -465,6 +569,10 @@ export interface PDVApi {
     save(kernelId: string, treePath: string, content: string): Promise<{ success: boolean; error?: string }>;
     read(kernelId: string, treePath: string): Promise<{ success: boolean; content?: string; error?: string }>;
   };
+  namelist: {
+    read(kernelId: string, treePath: string): Promise<NamelistReadResult>;
+    write(kernelId: string, treePath: string, data: Record<string, Record<string, unknown>>): Promise<NamelistWriteResult>;
+  };
   modules: {
     listInstalled(): Promise<ModuleDescriptor[]>;
     install(request: ModuleInstallRequest): Promise<ModuleInstallResult>;
@@ -476,8 +584,8 @@ export interface PDVApi {
     removeImport(moduleAlias: string): Promise<ModuleSettingsResult>;
   };
   project: {
-    save(saveDir: string, codeCells: unknown): Promise<boolean>;
-    load(saveDir: string): Promise<unknown>;
+    save(saveDir: string, codeCells: unknown): Promise<ProjectSaveResult>;
+    load(saveDir: string): Promise<ProjectLoadResult>;
     new(): Promise<boolean>;
     onLoaded(callback: (payload: Record<string, unknown>) => void): () => void;
   };
@@ -495,6 +603,13 @@ export interface PDVApi {
   codeCells: {
     load(): Promise<CodeCellData | null>;
     save(data: CodeCellData): Promise<boolean>;
+  };
+  moduleWindows: {
+    open(request: ModuleWindowOpenRequest): Promise<ModuleWindowOpenResult>;
+    close(alias: string): Promise<boolean>;
+    context(): Promise<ModuleWindowContext | null>;
+    executeInMain(code: string): Promise<void>;
+    onExecuteRequest(callback: (code: string) => void): () => void;
   };
   files: {
     pickExecutable(): Promise<string | null>;

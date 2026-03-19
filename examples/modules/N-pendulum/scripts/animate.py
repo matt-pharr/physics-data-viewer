@@ -45,14 +45,15 @@ def run(
         raise ValueError("trail_alpha must be between 0.0 and 1.0")
     root = f"n_pendulum.{output_key}"
     try:
-        t      = pdv_tree[f"{root}.t"]
-        xs     = pdv_tree[f"{root}.xs"]      # (N, n_steps)
-        ys     = pdv_tree[f"{root}.ys"]      # (N, n_steps)
-        thetas = pdv_tree[f"{root}.thetas"]   # (N, n_steps)
-        params = pdv_tree[f"{root}.params"]
-    except (KeyError, Exception):
+        sol = pdv_tree[root]
+        t      = sol.t
+        xs     = sol.xs        # (N, n_steps)
+        ys     = sol.ys        # (N, n_steps)
+        thetas = sol.thetas    # (N, n_steps)
+        params = sol.params
+    except (KeyError, AttributeError):
         raise RuntimeError(
-            f"No solution data found at '{root}'. Run the ODE solver first."
+            f"No PendulumSolution found at '{root}'. Run the ODE solver first."
         )
 
     N = int(params["N"])

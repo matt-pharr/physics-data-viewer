@@ -46,6 +46,7 @@ export function useThemeManager({ config }: UseThemeManagerOptions): string {
       const colors = systemPrefersDark ? darkColors : lightColors;
       if (colors) {
         applyThemeColors(colors);
+        // eslint-disable-next-line react-hooks/set-state-in-effect -- deriving Monaco theme from config on change
         setMonacoTheme(getMonacoTheme(
           (systemPrefersDark ? app.darkTheme : app.lightTheme) ?? '', BUILTIN_THEMES,
         ));

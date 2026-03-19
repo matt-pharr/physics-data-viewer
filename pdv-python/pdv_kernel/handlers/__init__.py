@@ -80,4 +80,4 @@ def dispatch(msg: dict) -> None:
 
 # Register all handlers by importing submodules.
 # These imports must come AFTER the register() function is defined.
-from pdv_kernel.handlers import lifecycle, project, tree, namespace, script, note  # noqa: E402, F401
+from pdv_kernel.handlers import lifecycle, project, tree, namespace, script, note, modules, gui, namelist  # noqa: E402, F401
