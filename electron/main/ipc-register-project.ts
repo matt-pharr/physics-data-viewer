@@ -19,7 +19,7 @@ import { ipcMain } from "electron";
 
 import { IPC } from "./ipc";
 import { ProjectManager, type ProjectModuleImport } from "./project-manager";
-import { copyFilesForLoad, copyFilesForSave } from "./project-file-sync";
+import { copyFilesForLoad } from "./project-file-sync";
 
 type ProjectManifest = Awaited<ReturnType<typeof ProjectManager.readManifest>>;
 
@@ -83,12 +83,9 @@ export function registerProjectIpcHandlers(
         setPendingModuleSettings({});
       }
 
-      // Copy file-backed node files from working dir into save dir.
-      const activeKernelId = getActiveKernelId();
-      if (activeKernelId) {
-        const workingDir = kernelWorkingDirs.get(activeKernelId);
-        if (workingDir) await copyFilesForSave(workingDir, saveDir);
-      }
+      // NOTE: file-backed nodes are already copied to saveDir/tree/ by the
+      // Python serializer (serialize_node writes directly to save_dir).
+      // No additional copy step is needed here.
 
       setActiveProjectDir(saveDir);
       await refreshProjectModuleHealth(saveDir);

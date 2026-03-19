@@ -60,28 +60,6 @@ async function readFileBackedEntries(dir: string): Promise<FileBackedEntry[]> {
 }
 
 /**
- * Copy file-backed node files from the kernel working directory into the save directory.
- *
- * Called after the kernel has written tree-index.json to saveDir.
- *
- * @param workingDir - Kernel working directory (source).
- * @param saveDir - Project save directory (destination).
- * @returns Nothing.
- * @throws {Error} When directory creation fails.
- */
-export async function copyFilesForSave(workingDir: string, saveDir: string): Promise<void> {
-  const entries = await readFileBackedEntries(saveDir);
-  for (const { relativePath } of entries) {
-    const src = path.join(workingDir, relativePath);
-    const dest = path.join(saveDir, relativePath);
-    await fs.mkdir(path.dirname(dest), { recursive: true });
-    await fs.copyFile(src, dest).catch((error) => {
-      console.warn(`[pdv] save: could not copy ${src}`, error);
-    });
-  }
-}
-
-/**
  * Copy file-backed node files from the save directory into the kernel working directory.
  *
  * Called before sending pdv.project.load so files exist when the kernel reads them.
