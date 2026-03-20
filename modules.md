@@ -6,8 +6,8 @@ This document describes the currently implemented **Modules** feature in PDV: ho
 
 A module is a directory containing:
 
-- **`pdv-module.json`** — the module manifest (identity, actions, inputs, compatibility)
-- **`scripts/`** — one or more Python action scripts referenced by the manifest
+- **`pdv-module.json`** — the module manifest (identity, compatibility, scripts listing, files, entry point)
+- **`scripts/`** — one or more Python action scripts referenced by `actions[]` in `gui.json` (or in `pdv-module.json` for schema v1/v2)
 - **`lib/`** (optional) — importable Python files (`.py`) available to scripts and entry points
 - **`gui.json`** (optional) — declarative GUI layout for a module window
 - **`inputs/`** (optional) — input files (namelists, data files) declared in the manifest `files` array
@@ -25,8 +25,8 @@ See the example module:
 PDV separates module lifecycle into two steps:
 
 1. **Install** into a global module store (`~/.PDV/modules/...`), from:
-   - a local folder path, or
-   - a GitHub repository URL.
+   - a local folder path (implemented), or
+   - a GitHub repository URL (scaffolded — UI shows "Coming soon").
 2. **Import** an installed module into the current project with a project-local alias.
 
 Installed modules are globally available; imported modules are project-specific.
@@ -49,28 +49,15 @@ In schema v3, the module manifest is split across two files:
 
 This separation keeps the identity/compatibility manifest lightweight and allows GUI definitions to evolve independently.
 
-## Supported manifest functionality (`pdv-module.json`)
+## Supported manifest functionality
 
-PDV currently supports the following manifest capabilities:
+In schema v3, functionality is split across `pdv-module.json` and `gui.json`.
+
+### `pdv-module.json` (identity manifest)
 
 - Required module identity fields (`schema_version`, `id`, `name`, `version`)
 - `description`
-- `actions[]` with:
-  - `id`
-  - `label`
-  - `script_path`
-  - optional `inputs` (input IDs consumed by the action)
-  - optional `tab` (module-internal UI tab grouping)
-- `inputs[]` with declarative controls:
-  - `control`: `text`, `dropdown`, `slider`, `checkbox`, `file`
-  - `default`, `type`, `label`, `tooltip`
-  - grouping: `tab`, `section`, `section_collapsed`
-  - conditional visibility: `visible_if`
-  - slider metadata: `min`, `max`, `step`
-  - file picker mode: `file_mode` (`file`/`directory`)
-  - dropdown options:
-    - static `options`
-    - dynamic `options_tree_path` (populate from tree children)
+- `scripts[]` — informational listing of action scripts: `{ name, path }`
 - `files[]` — module-provided input files to copy and register:
   - `name` — tree node name
   - `path` — relative path within the module directory
@@ -79,13 +66,40 @@ PDV currently supports the following manifest capabilities:
 - optional `compatibility` metadata:
   - `pdv_min`, `pdv_max`
   - `python`, `python_min`, `python_max`
-- optional `dependencies[]` (warn-only in v1)
+- optional `dependencies[]` (warn-only)
 
-For concrete syntax examples, use the N-pendulum manifest:
+### `gui.json` (GUI and interaction manifest)
 
+- `has_gui` — boolean flag
+- `actions[]` with:
+  - `id`
+  - `label`
+  - `script_path`
+  - optional `inputs` (input IDs consumed by the action)
+  - optional `tab` (module-internal UI tab grouping)
+- `inputs[]` with declarative controls:
+  - `control`: `text`, `dropdown`, `slider`, `checkbox`, `file` (omitting `control` defaults to `text`)
+  - `default`, `type`, `label`, `tooltip`
+  - grouping: `tab`, `section`, `section_collapsed`
+  - conditional visibility: `visible_if` with `{ input_id, equals }`
+  - slider metadata: `min`, `max`, `step`
+  - file picker mode: `file_mode` (`file`/`directory`)
+  - dropdown options:
+    - static `options` array of `{ label, value }`
+    - dynamic `options_tree_path` (populate from tree children at that path)
+- `gui` — declarative layout (see "Module GUI windows" below)
+
+For concrete syntax examples, see the N-pendulum module:
+
+- `pdv-module.json`: [`examples/modules/N-pendulum/pdv-module.json`](examples/modules/N-pendulum/pdv-module.json)
+- `gui.json`: [`examples/modules/N-pendulum/gui.json`](examples/modules/N-pendulum/gui.json)
+
+Key patterns demonstrated:
 - dropdown with dynamic tree options: `options_tree_path`
 - conditional input visibility with `visible_if`
 - action-to-input wiring via `actions[].inputs`
+- collapsible group containers with `collapsed: true`
+- namelist editor widget with `tree_path` binding
 
 ## Duplicate install/update semantics
 
@@ -205,13 +219,28 @@ Binding is idempotent across reload/restart. Script files are copied into the ke
 
 Modules with a `gui.json` get a dedicated GUI button in the activity bar (showing the first letter of the module name). Clicking it opens a separate Electron `BrowserWindow` rendering the declarative GUI layout.
 
-The GUI layout supports:
-- Container-based layout (`hbox`, `vbox`, `tabs`)
-- Input controls bound to manifest `inputs[]`
-- Action buttons bound to manifest `actions[]`
-- Namelist editor widgets bound to `PDVNamelist` tree nodes
+### Layout container types
 
-GUI windows communicate with the main window kernel through `window.pdv.moduleWindows.*`.
+The `gui.layout` object is a recursive tree of container and leaf nodes. Container types:
+
+| Type | Description |
+|---|---|
+| `row` | Horizontal flexbox — children side by side |
+| `column` | Vertical flexbox — children stacked. When used as a direct child of `tabs`, the `label` property becomes the tab title. |
+| `group` | Collapsible section with a `label` header. `collapsed: true` starts it folded. |
+| `tabs` | Tabbed container — each direct child (typically `column`) becomes a tab. |
+
+### Leaf node types
+
+| Type | Description |
+|---|---|
+| `input` | Renders the input control matching `id` from `inputs[]`. |
+| `action` | Renders the action button matching `id` from `actions[]`. |
+| `namelist` | Inline namelist editor bound to a `PDVNamelist` tree node via `tree_path`. Optionally uses `tree_path_input` to dynamically override the path from a dropdown input. |
+
+### Communication
+
+GUI windows communicate with the main window kernel through `window.pdv.moduleWindows.*`. Each module window calls `context()` on mount to learn its alias and kernel ID, and uses `executeInMain(code)` to run code in the main window's kernel.
 
 ## Modules UI functionality
 
@@ -219,7 +248,7 @@ The renderer provides two module views:
 
 1. **Module Library**
    - list installed modules
-   - install from local folder or GitHub URL
+   - install from local folder (GitHub URL scaffolded but not yet functional)
    - import installed module into project
    - show status badges (imported, warning count)
    - show duplicate/update prompts
@@ -243,12 +272,15 @@ This keeps module actions transparent and consistent with normal script executio
 
 ## Health checks and warnings
 
-PDV evaluates non-blocking module health warnings at import/load time, including:
+PDV evaluates non-blocking module health warnings at import/load time. Warning codes:
 
-- PDV version compatibility
-- Python version compatibility
-- dependency requirement awareness (warn-only)
-- missing action scripts
-- missing module source
+| Code | Trigger |
+|---|---|
+| `module_source_missing` | Installed module directory no longer exists on disk |
+| `pdv_version_incompatible` | Current PDV version is below `pdv_min` or above `pdv_max` |
+| `python_version_unknown` | Could not detect the active Python version |
+| `python_version_incompatible` | Active Python version is outside `python_min`–`python_max` |
+| `dependency_unverified` | A declared dependency could not be verified (warn-only) |
+| `missing_action_script` | A script file referenced by an action does not exist |
 
 Warnings are surfaced in module UI tabs and import results.

@@ -17,7 +17,7 @@
  * 6. shutdownAll() stops all running kernels.
  * 7. Crash detection: killing the kernel externally emits 'kernel:crashed'.
  *
- * Reference: IMPLEMENTATION_STEPS.md Step 3
+ * Reference: ARCHITECTURE.md §2
  */
 
 import {

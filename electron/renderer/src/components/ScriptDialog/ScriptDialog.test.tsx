@@ -189,7 +189,7 @@ describe('ScriptDialog', () => {
     const user = userEvent.setup();
     await user.click(screen.getByRole('button', { name: 'Run' }));
     expect(screen.getByRole('button', { name: 'Running...' })).toBeTruthy();
-    resolveExecute?.({});
+    resolveExecute!({});
     await waitFor(() => {
       expect(screen.getByRole('button', { name: 'Run' })).toBeTruthy();
     });
