@@ -32,18 +32,26 @@ The following planned features have been completed and are no longer tracked her
 
 ---
 
-## 1) Modules System — Namelist Editor, GUI Layout, and Manifest Editor
+## 1) Modules System — Visual Manifest Editor
 
 ### Goal
-Extend the existing modules system with three capabilities: a richer GUI layout engine for module UIs, a visual manifest editor, and a first-class namelist editor module.
+Complete the modules system with a visual editor for creating and editing `gui.json` + `pdv-module.json` files, so that module authors (physicists) never need to hand-write JSON.
 
-### Planned work
+### Already implemented
+- **GUI layout engine**: Container-based layout (`row`, `column`, `group`, `tabs`) is fully implemented via `ContainerRenderer`, `InputControl`, `ActionButton`. Module GUIs render in dedicated popup windows with full input/action/namelist support.
+- **Namelist editor widget**: Inline editing UI with typed field controls, collapsible groups, batch save, and tooltip hints extracted from source file comments. Supports Fortran and TOML formats with auto-detection.
+- **Dynamic namelist path binding**: `NamelistEditor` component accepts a `treePathInputId` prop; `ContainerRenderer` passes `tree_path_input` from gui.json layout nodes. Fully wired.
 
-#### Module GUI layout refactor
-Container-based layout (rows, columns, groups, tabs) is already implemented via `ContainerRenderer`. What remains is a visual GUI editor for creating and editing `gui.json` files without hand-writing JSON — drag-and-drop layout, input/action placement, and live preview.
+### Remaining work
 
-#### Namelist editor module
-The `PDVNamelist` tree type and comm-based parsing (`pdv.namelist.read`/`pdv.namelist.write`) are implemented, supporting Fortran and TOML formats with auto-detection. What remains is the full editor widget: inline editing UI with tooltip help from source file comments, batch parameter editing, and dynamic path binding via dropdown for selecting which namelist to edit.
+#### Visual manifest editor
+A GUI tool for creating and editing module manifests (`pdv-module.json` + `gui.json`) without hand-writing JSON. This is the key UX improvement over OMFIT's Tkinter-based approach — module authors should be able to build module GUIs visually.
+
+- **Layout canvas**: Drag-and-drop placement of containers (row, column, group, tabs) and leaf nodes (input, action, namelist). WYSIWYG preview of the resulting module GUI.
+- **Input/action property editor**: Select a placed element and configure its properties (label, control type, default value, visibility rules, slider range, etc.) in a side panel.
+- **Manifest identity editor**: Form UI for module identity fields (id, name, version, description), compatibility constraints, dependencies, scripts listing, and files.
+- **Import/export**: Load an existing `gui.json` + `pdv-module.json` for editing; export to disk. Round-trip fidelity with hand-written manifests.
+- **Live preview**: Side-by-side rendered preview of the module GUI as the user edits the layout.
 
 ---
 
@@ -55,7 +63,7 @@ The PDV comm protocol is designed to be language-agnostic (ARCHITECTURE.md §3).
 ### Planned work
 - **Kernel startup**: Add Julia kernel launch path to `KernelManager`. Connection file creation and ZeroMQ socket management are identical to Python.
 - **`pdv-julia` package**: Julia equivalent of `pdv-python` — implements `bootstrap()`, `PDVTree`, the `pdv.kernel` comm target, and all message handlers. Serialization formats overlap with Python (`.npy`, `.parquet` are cross-language).
-- **Project-level language selection**: `project.json` `language_mode` field (already in schema) drives kernel choice at open time.
+- **Project-level language selection**: Add a `language_mode` field to `project.json` (not currently in schema) to drive kernel choice at open time.
 - **Script parity**: `PDVScript` nodes in Julia projects use `.jl` files. Script editor, create/reload actions, and `run_script()` all need language-aware dispatch.
 - **Julia integration tests**: Parity test suite comparable to the Python pytest suite.
 - **Kernel-backed autocompletion**: The `complete_request` Jupyter protocol message is language-agnostic; the Julia completion provider is registered using the same IPC channel as Python (already implemented for Python).
@@ -170,7 +178,7 @@ R is widely used in experimental physics and statistics communities. The PDV com
 ### Planned work
 - **IRkernel**: R support in Jupyter uses [IRkernel](https://irkernel.github.io/). `KernelManager` kernel launch and ZeroMQ socket management are identical to Python and Julia — no transport changes needed.
 - **`pdv-r` package**: Implemented as an R package. Registers the `pdv.kernel` comm target with IRkernel, implements `PDVTree` as an R environment subclass, and handles all PDV message types. Serialization: Parquet via the `arrow` package; `.npy` exchange with Python requires a bridge (`reticulate` or a standalone reader).
-- **Project-level language selection**: `project.json` `language_mode` gains `"r"` as a valid value (schema already supports free strings, ARCHITECTURE.md §6.2).
+- **Project-level language selection**: `project.json` `language_mode` field (added for Julia, item 2) gains `"r"` as a valid value.
 - **Script nodes**: `PDVScript` nodes in R projects use `.R` files. The `language` field in the node descriptor (ARCHITECTURE.md §7.3) is already a free string.
 - **Autocompletion**: `complete_request` is language-agnostic; register an R completion provider using the same IPC channel as Python and Julia.
 - **R integration tests**: Parity test suite run against a real IRkernel process.
@@ -339,10 +347,17 @@ Console output is intentionally not persisted (ARCHITECTURE.md §9.4). This is b
 
 ## Remaining Alpha Features → 0.1.0-beta1
 
-1. Module GUI layout refactor + manifest editor + namelist editor (item 1)
-2. Remote executable execution over SSH + job managers (item 3, beta1 scope)
-3. Kernel reconnect on renderer reload (item 4)
-4. Julia parity + tests (item 2)
+The primary beta use case is a Julia module for a specific simulation code running on a remote cluster. Items 2→3→4 form a sequential dependency chain; item 1 is independent and can be built in parallel.
+
+### Track A: Remote Julia stack (sequential)
+
+1. **Julia parity + tests (item 2)** — Foundation. Port `pdv-python` to Julia, implement `pdv-julia` package with full protocol support. Enables building the target Julia simulation module.
+2. **Remote execution over SSH + job managers (item 3, beta1 scope)** — Builds on Julia. SSH connection management, file upload/download, SLURM/task-spooler integration. The target workflow: configure simulation in GUI, submit to cluster, collect results into tree.
+3. **Kernel reconnect / remote session persistence (item 4)** — Capstone. Remote kernel outlives SSH connection. PDV reconnects, queries kernel state, rebuilds tree and GUI. Hardest piece — touches kernel lifecycle, comm protocol, and renderer state reconstruction.
+
+### Track B: Visual manifest editor (parallel)
+
+4. **Visual manifest editor (item 1)** — Purely renderer-side, no kernel/protocol changes. Can be built in parallel with Track A. Benefits from having a working Julia module to dog-food against.
 
 ## Beta Features → 1.0.0
 
@@ -372,7 +387,7 @@ PDV is ready to ship 0.1.0-beta1 when all of the following are true:
 - ~~Code cell state is project-managed and recoverable~~ ✅
 - ~~Kernel-backed autocompletion works in the code cell for Python~~ ✅
 - ~~Modules are installable and runnable via manifest-driven UI actions~~ ✅
-- Module GUI supports relative layout, and a visual manifest editor is available
+- ~~Module GUI supports relative layout~~ ✅ — and a visual manifest editor is available
 - ~~Markdown notes are first-class tree nodes with KaTeX math support~~ ✅
 - Remote executable execution and job manager support (SLURM, task-spooler) are production-usable
 - Kernel reconnect works on renderer reload and is designed with remote abstraction
