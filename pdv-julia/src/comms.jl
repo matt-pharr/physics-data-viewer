@@ -71,13 +71,27 @@ function check_version(msg::Dict)
 end
 
 """
-    on_comm_message(msg::Dict)
+    on_comm_message(msg)
 
 Handle an incoming comm message from the app.
+Accepts both a raw Dict and an IJulia.Msg object (which has a `.content` field).
 """
-function on_comm_message(msg::Dict)
-    # Extract the PDV envelope from the IJulia message structure
-    data = get(get(msg, "content", Dict()), "data", msg)
+function on_comm_message(msg)
+    # Extract the PDV envelope from the message.
+    # IJulia passes an IJulia.Msg object whose .content["data"] holds our payload.
+    # Direct Dict callers (e.g. tests) may pass the envelope directly.
+    local data::Dict
+    if msg isa Dict
+        data = get(get(msg, "content", Dict()), "data", msg)
+    else
+        # IJulia.Msg — access .content field
+        content = try
+            msg.content
+        catch
+            Dict()
+        end
+        data = get(content, "data", content isa Dict ? content : Dict())
+    end
 
     try
         check_version(data)
@@ -131,12 +145,12 @@ function _send_comm_data(data::Dict)
     if comm === nothing
         throw(ErrorException("No comm channel is open"))
     end
-    # IJulia comm send
-    if applicable(comm.send, data)
-        comm.send(data)
+    # Use IJulia's CommManager.send_comm to send data on the open comm channel.
+    ijulia = _get_ijulia()
+    if ijulia !== nothing
+        ijulia.CommManager.send_comm(comm, data)
     else
-        # Fallback: try send as JSON
-        send(comm, JSON.json(data))
+        throw(ErrorException("IJulia is not available; cannot send comm data"))
     end
 end
 

@@ -82,6 +82,7 @@ const App: React.FC = () => {
   const [logs, setLogs] = useState<LogEntry[]>([]);
 
   // -- Kernel state ---------------------------------------------------------
+  const [activeLanguage, setActiveLanguage] = useState<'python' | 'julia'>('python');
   const [currentKernelId, setCurrentKernelId] = useState<string | null>(null);
   const [kernelStatus, setKernelStatus] = useState<KernelStatus>('idle');
   const [isExecuting, setIsExecuting] = useState(false);
@@ -96,7 +97,7 @@ const App: React.FC = () => {
   const initRef = useRef(false);
   const loadedProjectTabsRef = useRef<{ tabs: CellTab[]; activeTabId: number } | null>(null);
   /** Deferred project action to execute once the kernel becomes ready. */
-  const pendingProjectRef = useRef<{ type: 'open'; path?: string } | null>(null);
+  const pendingProjectRef = useRef<{ type: 'open'; path?: string; language?: 'python' | 'julia' } | null>(null);
 
   // Undo stack for cell clear/close. Each entry captures the full tab list and
   // active tab id so a single Cmd+Z restores exactly what was destroyed.
@@ -345,7 +346,7 @@ const App: React.FC = () => {
       ((updates.pythonPath && updates.pythonPath !== config?.pythonPath) ||
         (updates.juliaPath && updates.juliaPath !== config?.juliaPath))
     ) {
-      await startKernel(mergedConfig);
+      await startKernel(mergedConfig, activeLanguage);
     }
     setShowSettings(false);
   };
@@ -644,28 +645,41 @@ const App: React.FC = () => {
 
   // -- Welcome screen (pristine session) ------------------------------------
 
-  const recentProjects = useMemo(
+  const recentProjectPaths = useMemo(
     () => normalizeRecentProjects(config?.recentProjects),
     [config?.recentProjects],
+  );
+
+  /** Build RecentProject[] with language metadata for the WelcomeScreen. */
+  const recentProjects = useMemo(
+    () => recentProjectPaths.map((p) => ({ path: p, language: undefined as "python" | "julia" | undefined })),
+    [recentProjectPaths],
   );
 
   const dismissWelcome = useCallback(() => setShowWelcome(false), []);
 
   /**
    * Starts the kernel for the current config, or shows the environment
-   * selector if no pythonPath is configured yet.
+   * selector if no interpreter path is configured for the given language.
    */
-  const ensureKernel = useCallback(async () => {
-    if (!config?.pythonPath) {
-      setShowEnvSelector(true);
-      return;
+  const ensureKernel = useCallback(async (language: 'python' | 'julia' = 'python') => {
+    setActiveLanguage(language);
+    if (language === 'julia') {
+      // Julia doesn't require a pre-configured path — auto-detect is fine.
+      // Only show selector if Julia isn't found at all.
+      await startKernel(config ?? {} as Config, 'julia');
+    } else {
+      if (!config?.pythonPath) {
+        setShowEnvSelector(true);
+        return;
+      }
+      await startKernel(config, 'python');
     }
-    await startKernel(config);
   }, [config, startKernel, setShowEnvSelector]);
 
-  const handleWelcomeNewProject = useCallback(async () => {
+  const handleWelcomeNewProject = useCallback(async (language: 'python' | 'julia') => {
     dismissWelcome();
-    await ensureKernel();
+    await ensureKernel(language);
   }, [dismissWelcome, ensureKernel]);
 
   const handleWelcomeOpen = useCallback(async () => {
@@ -674,10 +688,10 @@ const App: React.FC = () => {
     await ensureKernel();
   }, [dismissWelcome, ensureKernel]);
 
-  const handleWelcomeOpenRecent = useCallback(async (path: string) => {
+  const handleWelcomeOpenRecent = useCallback(async (path: string, language?: 'python' | 'julia') => {
     dismissWelcome();
-    pendingProjectRef.current = { type: 'open', path };
-    await ensureKernel();
+    pendingProjectRef.current = { type: 'open', path, language };
+    await ensureKernel(language ?? 'python');
   }, [dismissWelcome, ensureKernel]);
 
   // Execute deferred project action once the kernel becomes ready.
@@ -907,7 +921,9 @@ const App: React.FC = () => {
       {/* Status bar */}
         <StatusBar
           isExecuting={isExecuting}
+          activeLanguage={activeLanguage}
           pythonPath={config?.pythonPath}
+          juliaPath={config?.juliaPath}
           kernelSpec={config?.kernelSpec ?? undefined}
           currentProjectDir={currentProjectDir}
           kernelStatus={kernelStatus}
@@ -917,7 +933,8 @@ const App: React.FC = () => {
 
        {showEnvSelector && (
           <EnvironmentSelector
-            isFirstRun={!config?.pythonPath}
+            isFirstRun={activeLanguage === 'julia' ? !config?.juliaPath : !config?.pythonPath}
+            activeLanguage={activeLanguage}
             currentConfig={config || undefined}
             currentKernelId={currentKernelId}
             onSave={handleEnvSave}
@@ -935,6 +952,7 @@ const App: React.FC = () => {
        <SettingsDialog
          isOpen={showSettings}
          initialTab={settingsInitialTab}
+         activeLanguage={activeLanguage}
          config={config}
          shortcuts={shortcuts}
          currentKernelId={currentKernelId}

@@ -29,6 +29,8 @@ import * as path from "path";
 export interface PDVConfig {
   /** User-configured Python executable path. Undefined = auto-detect. */
   pythonPath?: string;
+  /** User-configured Julia executable path. Undefined = auto-detect. */
+  juliaPath?: string;
   /** Last project directory opened. */
   lastProjectDir?: string;
   /** Whether to show private variables in the Namespace panel. */
@@ -128,6 +130,15 @@ function parseConfig(raw: string, filePath: string): Partial<PDVConfig> {
     }
     if (typeof pythonPath === "string") {
       result.pythonPath = pythonPath;
+    }
+  }
+  if ("juliaPath" in obj) {
+    const juliaPath = obj.juliaPath;
+    if (juliaPath !== null && juliaPath !== undefined && typeof juliaPath !== "string") {
+      throw new Error(`Invalid config value for juliaPath in ${filePath}`);
+    }
+    if (typeof juliaPath === "string") {
+      result.juliaPath = juliaPath;
     }
   }
   if ("lastProjectDir" in obj) {

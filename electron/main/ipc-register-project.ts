@@ -18,10 +18,8 @@ import * as path from "path";
 import { ipcMain } from "electron";
 
 import { IPC } from "./ipc";
-import { ProjectManager, type ProjectModuleImport } from "./project-manager";
+import { ProjectManager, type ProjectManifest, type ProjectModuleImport } from "./project-manager";
 import { copyFilesForLoad } from "./project-file-sync";
-
-type ProjectManifest = Awaited<ReturnType<typeof ProjectManager.readManifest>>;
 
 interface RegisterProjectIpcHandlersOptions {
   projectManager: ProjectManager;

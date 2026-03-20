@@ -56,7 +56,7 @@ export interface ProjectModuleImport {
  *
  * Includes per-project module import activation and module settings.
  */
-interface ProjectManifest {
+export interface ProjectManifest {
   /** Schema version of project.json. */
   schema_version: string;
   /** ISO 8601 timestamp of last save. */
@@ -65,6 +65,10 @@ interface ProjectManifest {
   pdv_version: string;
   /** SHA-256 checksum of tree-index.json. */
   tree_checksum: string;
+  /** Kernel language used by this project ("python" or "julia"). */
+  language: "python" | "julia";
+  /** Absolute path to the interpreter executable used when last saved. */
+  interpreter_path?: string;
   /** Imported modules active in this project. */
   modules: ProjectModuleImport[];
   /** Persisted per-module settings keyed by module alias. */
@@ -80,6 +84,7 @@ const DEFAULT_MANIFEST: ProjectManifest = {
   saved_at: new Date(0).toISOString(),
   pdv_version: PDV_PROTOCOL_VERSION,
   tree_checksum: "",
+  language: "python",
   modules: [],
   module_settings: {},
 };
@@ -161,7 +166,11 @@ export class ProjectManager {
    * @param codeCells - The current code-cell state from the renderer.
    * @throws {PDVCommError} When the kernel responds with status='error'.
    */
-  async save(saveDir: string, codeCells: unknown): Promise<{ checksum: string; nodeCount: number }> {
+  async save(
+    saveDir: string,
+    codeCells: unknown,
+    options?: { language?: "python" | "julia"; interpreterPath?: string }
+  ): Promise<{ checksum: string; nodeCount: number }> {
     // Step 1 — send pdv.project.save comm; throws PDVCommError on error status.
     const response = await this.commRouter.request(PDVMessageType.PROJECT_SAVE, {
       save_dir: saveDir,
@@ -194,6 +203,8 @@ export class ProjectManager {
       saved_at: new Date().toISOString(),
       pdv_version: PDV_PROTOCOL_VERSION,
       tree_checksum: checksum,
+      language: options?.language ?? "python",
+      interpreter_path: options?.interpreterPath,
       modules: existingModules,
       module_settings: existingModuleSettings,
     };
@@ -283,11 +294,19 @@ export class ProjectManager {
     const schemaVersion = String(obj.schema_version ?? "1.0");
     _assertCompatibleSchema(schemaVersion);
 
+    const rawLanguage = obj.language;
+    const language: "python" | "julia" =
+      rawLanguage === "julia" ? "julia" : "python";
+    const interpreterPath =
+      typeof obj.interpreter_path === "string" ? obj.interpreter_path : undefined;
+
     return {
       schema_version: schemaVersion,
       saved_at: String(obj.saved_at ?? DEFAULT_MANIFEST.saved_at),
       pdv_version: String(obj.pdv_version ?? DEFAULT_MANIFEST.pdv_version),
       tree_checksum: String(obj.tree_checksum ?? ""),
+      language,
+      interpreter_path: interpreterPath,
       modules: _parseManifestModules(obj.modules, manifestPath),
       module_settings: _parseModuleSettings(obj.module_settings, manifestPath),
     };

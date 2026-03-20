@@ -400,9 +400,23 @@ export class KernelManager extends EventEmitter {
     fs.writeFileSync(connectionFile, JSON.stringify(connectionInfo, null, 2));
 
     // Build the argv for the kernel process.
-    const pythonExec = spec?.env?.PYTHON_PATH ?? "python3";
-    let argv: string[] =
-      spec?.argv ?? [pythonExec, "-m", "ipykernel_launcher", "-f", connectionFile];
+    let argv: string[];
+    if (spec?.argv) {
+      argv = spec.argv;
+    } else if (language === "julia") {
+      const juliaExec = spec?.env?.JULIA_PATH ?? "julia";
+      argv = [
+        juliaExec,
+        "-i",
+        "--color=yes",
+        "-e",
+        "import IJulia; IJulia.run_kernel()",
+        connectionFile,
+      ];
+    } else {
+      const pythonExec = spec?.env?.PYTHON_PATH ?? "python3";
+      argv = [pythonExec, "-m", "ipykernel_launcher", "-f", connectionFile];
+    }
     argv = argv.map((a) => a.replace("{connection_file}", connectionFile));
 
     const kernelProcess = spawn(argv[0], argv.slice(1), {
