@@ -67,6 +67,19 @@ function stripAnsi(line: string): string {
   return line.replace(ANSI_ESCAPE_RE, "");
 }
 
+/**
+ * Decode literal backslash-escape sequences that appear in Julia's
+ * repr/show output for nested error messages (e.g. `\"` → `"`, `\n` → newline).
+ * Order matters: `\\` must be last to avoid double-processing.
+ */
+function decodeEscapeLiterals(s: string): string {
+  return s
+    .replace(/\\"/g, '"')
+    .replace(/\\n/g, "\n")
+    .replace(/\\t/g, "\t")
+    .replace(/\\\\/g, "\\");
+}
+
 function findCaretColumn(lines: string[], startIndex: number): number | undefined {
   for (let offset = 1; offset <= 4; offset += 1) {
     const line = lines[startIndex + offset];
@@ -305,8 +318,9 @@ export function buildExecutionError(
     : parsedLocation;
   const sourceText = formatExecutionSource(source);
   const locationText = formatExecutionLocation(location);
-  const base = normalizedMessage
-    ? `${normalizedName}: ${normalizedMessage}`
+  const displayMessage = decodeEscapeLiterals(normalizedMessage);
+  const base = displayMessage
+    ? `${normalizedName}: ${displayMessage}`
     : normalizedName;
 
   let summary = base;

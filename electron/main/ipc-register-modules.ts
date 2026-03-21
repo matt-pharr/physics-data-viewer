@@ -35,10 +35,12 @@ import { ModuleManager } from "./module-manager";
 import {
   bindImportedModule,
   buildModulesSetupPayload,
+  buildModuleActionCode,
   isMissingActionScriptError,
   normalizeModuleAlias,
   suggestModuleAlias,
   toPythonArgumentValue,
+  toJuliaArgumentValue,
 } from "./module-runtime";
 import { PDVMessageType } from "./pdv-protocol";
 import { ProjectManager, type ProjectModuleImport } from "./project-manager";
@@ -375,22 +377,28 @@ export function registerModulesIpcHandlers(
           error: `Module action not found: ${request.actionId}`,
         };
       }
+      const kernel = kernelManager.getKernel(request.kernelId);
+      const language = kernel?.language ?? "python";
+      const toArgValue = language === "julia" ? toJuliaArgumentValue : toPythonArgumentValue;
+
       const kwargs: string[] = [];
       if (request.inputValues) {
         const allowedIds = new Set(action.inputIds ?? []);
         for (const [inputId, value] of Object.entries(request.inputValues)) {
           if (allowedIds.size > 0 && !allowedIds.has(inputId)) continue;
-          const expression = toPythonArgumentValue(value);
+          const expression = toArgValue(value);
           if (expression !== null) {
             kwargs.push(`${inputId}=${expression}`);
           }
         }
       }
 
-      const invocation = kwargs.length > 0 ? `(${kwargs.join(", ")})` : "()";
-      const executionCode = `pdv_tree[${JSON.stringify(
-        `${request.moduleAlias}.scripts.${action.name}`
-      )}].run${invocation}`;
+      const executionCode = buildModuleActionCode(
+        request.moduleAlias,
+        action.name,
+        kwargs,
+        language
+      );
       return {
         success: true,
         status: "queued",

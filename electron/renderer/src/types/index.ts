@@ -30,6 +30,7 @@ import type {
   ProjectLoadResult,
   ProjectSaveResult,
   ScriptParameter,
+  ScriptRunResult,
   Theme,
 } from './pdv';
 
@@ -58,6 +59,7 @@ export type {
   ProjectLoadResult,
   ProjectSaveResult,
   ScriptParameter,
+  ScriptRunResult,
   Theme,
 };
 

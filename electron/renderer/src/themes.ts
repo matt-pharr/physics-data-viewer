@@ -148,6 +148,46 @@ export const BUILTIN_THEMES: BuiltinTheme[] = [
       'success':      '#32d74b',
     },
   },
+  {
+    name: 'Dark Modern (VSCode)',
+    monacoTheme: 'pdv-dark-modern',
+    colors: {
+      'bg-primary':   '#1f1f1f',
+      'bg-secondary': '#181818',
+      'bg-tertiary':  '#202020',
+      'bg-hover':     '#2a2d2e',
+      'text-primary':   '#cccccc',
+      'text-secondary': '#9d9d9d',
+      'text-hint':      '#6e7681',
+      'accent':       '#0078d4',
+      'accent-hover': '#026ec1',
+      'border-color': '#2b2b2b',
+      'error':        '#f85149',
+      'warning':      '#cca700',
+      'warning-hover':'#d4af00',
+      'success':      '#4ec9b0',
+    },
+  },
+  {
+    name: 'Light Modern (VSCode)',
+    monacoTheme: 'pdv-light-modern',
+    colors: {
+      'bg-primary':   '#ffffff',
+      'bg-secondary': '#f8f8f8',
+      'bg-tertiary':  '#e8e8e8',
+      'bg-hover':     '#f2f2f2',
+      'text-primary':   '#3b3b3b',
+      'text-secondary': '#868686',
+      'text-hint':      '#6e7681',
+      'accent':       '#005fb8',
+      'accent-hover': '#0258a8',
+      'border-color': '#e5e5e5',
+      'error':        '#e51400',
+      'warning':      '#bf8803',
+      'warning-hover':'#a67702',
+      'success':      '#2ea043',
+    },
+  },
 ];
 
 /** Fast lookup set for distinguishing built-in vs custom theme names. */
@@ -166,8 +206,9 @@ interface ThemePair {
 
 /** Named dark/light pairings used for follow-system-theme mode. */
 export const THEME_PAIRS: ThemePair[] = [
-  { name: 'VSCode', dark: 'Dark+ (VSCode)', light: 'Light+ (VSCode)' },
-  { name: 'Xcode',  dark: 'Xcode Dark',     light: 'Xcode Light'     },
+  { name: 'VSCode',        dark: 'Dark+ (VSCode)',        light: 'Light+ (VSCode)'        },
+  { name: 'VSCode Modern', dark: 'Dark Modern (VSCode)',  light: 'Light Modern (VSCode)'  },
+  { name: 'Xcode',         dark: 'Xcode Dark',            light: 'Xcode Light'            },
 ];
 
 /**
@@ -245,6 +286,72 @@ export function defineMonacoThemes(monaco: {
       'editorCursor.foreground':        '#000000',
       'editorLineNumber.foreground':    '#bbbbbb',
       'editorLineNumber.activeForeground': '#666666',
+    },
+  });
+
+  monaco.editor.defineTheme('pdv-dark-modern', {
+    base: 'vs-dark',
+    inherit: true,
+    rules: [
+      { token: 'comment',                  foreground: '6A9955' },
+      { token: 'keyword',                  foreground: '569CD6' },
+      { token: 'keyword.operator',         foreground: 'D4D4D4' },
+      { token: 'keyword.operator.wordlike',foreground: '569CD6' },
+      { token: 'number',                   foreground: 'B5CEA8' },
+      { token: 'string',                   foreground: 'CE9178' },
+      { token: 'string.escape',            foreground: 'CE9178' },
+      { token: 'string.regexp',            foreground: 'D16969' },
+      { token: 'constant.language',        foreground: '569CD6' },
+      { token: 'variable',                 foreground: '9CDCFE' },
+      { token: 'variable.language',        foreground: '569CD6' },
+      { token: 'type',                     foreground: '4EC9B0' },
+      { token: 'type.identifier',          foreground: '4EC9B0' },
+      { token: 'function',                 foreground: 'DCDCAA' },
+      { token: 'support.function',         foreground: 'DCDCAA' },
+      { token: 'keyword.control',          foreground: 'C586C0' },
+    ],
+    colors: {
+      'editor.background':              '#1f1f1f',
+      'editor.foreground':              '#cccccc',
+      'editor.selectionBackground':     '#264f78',
+      'editor.lineHighlightBackground': '#2a2d2e',
+      'editorCursor.foreground':        '#aeafad',
+      'editorLineNumber.foreground':    '#6e7681',
+      'editorLineNumber.activeForeground': '#cccccc',
+      'editorIndentGuide.background1': '#404040',
+    },
+  });
+
+  monaco.editor.defineTheme('pdv-light-modern', {
+    base: 'vs',
+    inherit: true,
+    rules: [
+      { token: 'comment',                  foreground: '008000' },
+      { token: 'keyword',                  foreground: '0000FF' },
+      { token: 'keyword.operator',         foreground: '000000' },
+      { token: 'keyword.operator.wordlike',foreground: '0000FF' },
+      { token: 'number',                   foreground: '098658' },
+      { token: 'string',                   foreground: 'A31515' },
+      { token: 'string.escape',            foreground: 'A31515' },
+      { token: 'string.regexp',            foreground: '811F3F' },
+      { token: 'constant.language',        foreground: '0000FF' },
+      { token: 'variable',                 foreground: '001080' },
+      { token: 'variable.language',        foreground: '0000FF' },
+      { token: 'type',                     foreground: '267F99' },
+      { token: 'type.identifier',          foreground: '267F99' },
+      { token: 'function',                 foreground: '795E26' },
+      { token: 'support.function',         foreground: '795E26' },
+      { token: 'keyword.control',          foreground: 'AF00DB' },
+    ],
+    colors: {
+      'editor.background':              '#ffffff',
+      'editor.foreground':              '#3b3b3b',
+      'editor.selectionBackground':     '#add6ff',
+      'editor.lineHighlightBackground': '#f2f2f2',
+      'editorCursor.foreground':        '#000000',
+      'editorLineNumber.foreground':    '#6e7681',
+      'editorLineNumber.activeForeground': '#171184',
+      'editorIndentGuide.background1': '#d3d3d3',
     },
   });
 

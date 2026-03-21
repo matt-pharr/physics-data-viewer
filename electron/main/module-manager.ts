@@ -594,6 +594,7 @@ export class ModuleManager {
         name: manifest.name,
         version: manifest.version,
         description: manifest.description,
+        language: manifest.language,
         source: normalizedSource,
         installPath: moduleDir,
       };
@@ -659,6 +660,7 @@ export class ModuleManager {
         name: manifest.name,
         version: manifest.version,
         description: manifest.description,
+        language: manifest.language,
         source: normalizedSource,
         revision,
         installPath: moduleDir,
@@ -963,6 +965,7 @@ export class ModuleManager {
       name: record.name,
       version: record.version,
       description: record.description,
+      language: record.language,
       source: record.source,
       revision: record.revision,
       installPath: record.installPath,

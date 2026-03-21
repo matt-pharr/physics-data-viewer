@@ -18,6 +18,7 @@
 import type {
   KernelExecuteRequest,
   KernelExecuteResult,
+  KernelExecutionOrigin,
   KernelInfo,
   KernelSpec,
   ExecuteOutputChunk,
@@ -72,6 +73,7 @@ export const IPC = {
   /** Script tooling channels. */
   script: {
     edit: "script:edit",
+    run: "script:run",
   },
   /** Markdown note channels. */
   note: {
@@ -324,6 +326,38 @@ export interface ScriptOperationResult {
   error?: string;
 }
 
+/**
+ * Request payload for `script.run`.
+ *
+ * The main process uses the target kernel's language to build the
+ * appropriate invocation string — no language-specific code belongs
+ * in the renderer.
+ */
+export interface ScriptRunRequest {
+  /** Dot-delimited tree path of the PDVScript node. */
+  treePath: string;
+  /** Serialised parameter values keyed by parameter name. */
+  params: Record<string, string | number | boolean>;
+  /** Caller-supplied execution ID for output correlation. */
+  executionId: string;
+  /** Execution origin metadata used in error summaries and the console. */
+  origin: KernelExecutionOrigin;
+}
+
+/**
+ * Result returned by `script.run`.
+ */
+export interface ScriptRunResult {
+  /** The exact code string that was sent to the kernel (for console display). */
+  code: string;
+  /** Echo of the caller-supplied execution ID. */
+  executionId: string;
+  /** Echo of the caller-supplied origin metadata. */
+  origin: KernelExecutionOrigin;
+  /** Structured execution result from the kernel. */
+  result: KernelExecuteResult;
+}
+
 // ---------------------------------------------------------------------------
 // Modules system types
 // ---------------------------------------------------------------------------
@@ -355,6 +389,8 @@ export interface ModuleDescriptor {
   version: string;
   /** Optional short module description. */
   description?: string;
+  /** Target language for this module ("python" when absent). */
+  language?: "python" | "julia";
   /** Install source reference. */
   source: ModuleSourceReference;
   /** Optional resolved revision hash/tag. */
@@ -997,6 +1033,19 @@ export interface PDVApi {
 
   /** Script tooling operations. */
   script: {
+    /**
+     * Run a PDVScript tree node in the target kernel.
+     *
+     * The main process builds the language-appropriate invocation code
+     * (Python or Julia) and executes it via the kernel, returning both
+     * the code string and the execution result so the renderer can
+     * display the run in the console.
+     *
+     * @param kernelId - Target kernel ID.
+     * @param request - Script run request payload.
+     * @returns Execution result including the generated code string.
+     */
+    run(kernelId: string, request: ScriptRunRequest): Promise<ScriptRunResult>;
     /**
      * Open a script path in the configured external editor.
      *

@@ -14,6 +14,7 @@ interface ImportModuleDialogProps {
   isOpen: boolean;
   projectDir: string | null;
   kernelReady: boolean;
+  activeLanguage: "python" | "julia";
   refreshToken?: number;
   onClose: () => void;
 }
@@ -22,6 +23,7 @@ export const ImportModuleDialog: React.FC<ImportModuleDialogProps> = ({
   isOpen,
   projectDir,
   kernelReady: _kernelReady,
+  activeLanguage,
   refreshToken,
   onClose,
 }) => {
@@ -36,6 +38,11 @@ export const ImportModuleDialog: React.FC<ImportModuleDialogProps> = ({
   const importedModuleIds = React.useMemo(
     () => new Set(imported.map((entry) => entry.moduleId)),
     [imported]
+  );
+
+  const eligibleInstalled = React.useMemo(
+    () => installed.filter((m) => (m.language ?? "python") === activeLanguage),
+    [installed, activeLanguage]
   );
 
   const warningCountByModuleId = React.useMemo(() => {
@@ -325,14 +332,18 @@ export const ImportModuleDialog: React.FC<ImportModuleDialogProps> = ({
             </div>
           )}
 
-          {/* Installed modules (library) section */}
+          {/* Installed modules (library) section — filtered by active language */}
           <div className="import-module-section">
             <div className="import-module-section-header">Library</div>
-            {installed.length === 0 ? (
-              <div className="modules-inline-note">No installed modules.</div>
+            {eligibleInstalled.length === 0 ? (
+              <div className="modules-inline-note">
+                {installed.length === 0
+                  ? "No installed modules."
+                  : `No ${activeLanguage} modules installed.`}
+              </div>
             ) : (
               <ul className="modules-list">
-                {installed.map((entry) => (
+                {eligibleInstalled.map((entry) => (
                   <li key={entry.id} className="modules-list-item">
                     <div>
                       <div className="modules-name">

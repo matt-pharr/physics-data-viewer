@@ -33,6 +33,7 @@ import type {
   KernelExecutionOrigin,
   LogEntry,
   NoteTab,
+  ScriptRunResult,
   TreeNodeData,
 } from '../types';
 import { resolveShortcuts } from '../shortcuts';
@@ -454,12 +455,22 @@ const App: React.FC = () => {
       setScriptDialog(node);
     } else if (action === 'run_defaults' && node.type === 'script') {
       if (!currentKernelId) return;
-      const code = `pdv_tree[${JSON.stringify(node.path)}].run()`;
-      await handleExecute(code, {
+      const executionId =
+        typeof crypto !== 'undefined' && 'randomUUID' in crypto
+          ? crypto.randomUUID()
+          : `log-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+      const origin: KernelExecutionOrigin = {
         kind: 'tree-script',
         label: node.path,
         scriptPath: node.path,
+      };
+      const runResult = await window.pdv.script.run(currentKernelId, {
+        treePath: node.path,
+        params: {},
+        executionId,
+        origin,
       });
+      handleScriptRun(runResult);
     } else if (action === 'edit' && (node.type === 'script' || node.type === 'namelist' || node.type === 'lib')) {
       try {
         if (!currentKernelId) return;
@@ -495,12 +506,7 @@ const App: React.FC = () => {
     executionId,
     origin,
     result,
-  }: {
-    code: string;
-    executionId: string;
-    origin: KernelExecutionOrigin;
-    result: KernelExecuteResult;
-  }) => {
+  }: ScriptRunResult) => {
     const resolvedOrigin = result.errorDetails?.source ?? origin;
     const logEntry: LogEntry = {
       id: executionId,
@@ -946,6 +952,7 @@ const App: React.FC = () => {
          isOpen={showImportModule}
          projectDir={currentProjectDir}
          kernelReady={kernelStatus === 'ready'}
+         activeLanguage={activeLanguage}
          refreshToken={modulesRefreshToken}
          onClose={() => setShowImportModule(false)}
        />

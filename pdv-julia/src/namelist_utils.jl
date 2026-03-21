@@ -155,7 +155,7 @@ function _read_fortran(file_path::String)::Dict{String,Any}
     return result
 end
 
-function _parse_fortran_value(val_str::String)
+function _parse_fortran_value(val_str::AbstractString)
     s = strip(val_str)
     if isempty(s)
         return ""

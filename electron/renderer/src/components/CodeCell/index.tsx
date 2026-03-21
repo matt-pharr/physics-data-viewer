@@ -13,6 +13,7 @@ import type { CellTab } from '../../types';
 import type { Shortcuts } from '../../shortcuts';
 import { matchesShortcut } from '../../shortcuts';
 import { defineMonacoThemes } from '../../themes';
+import { ansiToHtml } from '../Console/ansi';
 import { registerKernelCompletionProvider, registerKernelHoverProvider } from './monaco-providers';
 
 /** Props for the tabbed code-cell editor pane. */
@@ -466,7 +467,7 @@ export const CodeCell: React.FC<CodeCellProps> = ({
 
       {lastError && (
         <div className="code-cell-error-bar">
-          <span>{lastError}</span>
+          <span dangerouslySetInnerHTML={{ __html: ansiToHtml(lastError) }} />
         </div>
       )}
       {disabled && (

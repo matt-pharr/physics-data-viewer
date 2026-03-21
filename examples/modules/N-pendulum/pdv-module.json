@@ -3,6 +3,7 @@
   "id": "n_pendulum",
   "name": "N-Pendulum",
   "version": "2.0.0",
+  "language": "python",
   "description": "A general N-link pendulum simulator. Supports double, triple, quadruple, and higher-order chaotic pendulums with ODE integration and animated visualization.",
   "entry_point": "n_pendulum",
   "compatibility": {

@@ -109,6 +109,66 @@ export function toPythonArgumentValue(value: ModuleInputValue): string | null {
 }
 
 /**
+ * Convert one module input value into a Julia argument expression.
+ *
+ * Mirrors {@link toPythonArgumentValue} but emits Julia syntax:
+ * - booleans → `true` / `false`
+ * - numeric strings → passed through as-is
+ * - Julia keywords (`true`, `false`, `nothing`) → passed through
+ * - other strings → JSON-encoded double-quoted literals
+ *
+ * @param value - Raw value from module settings/UI state.
+ * @returns Julia expression string, or null when the value is empty/invalid.
+ */
+export function toJuliaArgumentValue(value: ModuleInputValue): string | null {
+  if (typeof value === "boolean") {
+    return value ? "true" : "false";
+  }
+  if (typeof value === "number") {
+    if (!Number.isFinite(value)) {
+      return null;
+    }
+    return String(value);
+  }
+  const trimmed = value.trim();
+  if (trimmed.length === 0) {
+    return null;
+  }
+  if (/^[+-]?(?:(?:\d+\.\d*)|(?:\.\d+)|(?:\d+))(?:[eE][+-]?\d+)?$/.test(trimmed)) {
+    return trimmed;
+  }
+  if (trimmed === "true" || trimmed === "false" || trimmed === "nothing") {
+    return trimmed;
+  }
+  // JSON.stringify produces a safe, double-quoted Julia string literal.
+  return JSON.stringify(trimmed);
+}
+
+/**
+ * Build the kernel invocation code for a module action script.
+ *
+ * @param moduleAlias - Imported module alias.
+ * @param scriptName - Action script name.
+ * @param kwargs - Pre-formatted keyword argument strings (e.g. `["n=2", "tol=1e-8"]`).
+ * @param language - Target kernel language.
+ * @returns Kernel code string ready for execution.
+ */
+export function buildModuleActionCode(
+  moduleAlias: string,
+  scriptName: string,
+  kwargs: string[],
+  language: "python" | "julia"
+): string {
+  const treePath = JSON.stringify(`${moduleAlias}.scripts.${scriptName}`);
+  if (language === "julia") {
+    const argStr = kwargs.length > 0 ? `; ${kwargs.join(", ")}` : "";
+    return `PDVKernel.run_tree_script(pdv_tree, ${treePath}${argStr})`;
+  }
+  const argStr = kwargs.length > 0 ? `(${kwargs.join(", ")})` : "()";
+  return `pdv_tree[${treePath}].run${argStr}`;
+}
+
+/**
  * Build the payload for the `pdv.modules.setup` comm message.
  *
  * For each imported module, resolves the on-disk paths of lib/ Python files

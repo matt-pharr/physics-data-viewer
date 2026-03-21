@@ -286,6 +286,7 @@ export interface ModuleDescriptor {
   name: string;
   version: string;
   description?: string;
+  language?: "python" | "julia";
   source: ModuleSourceReference;
   revision?: string;
   installPath?: string;
@@ -414,6 +415,30 @@ export interface NamelistReadResult {
 export interface NamelistWriteResult {
   success: boolean;
   error?: string;
+}
+
+/** Request payload for `script.run`. */
+export interface ScriptRunRequest {
+  /** Dot-delimited tree path of the PDVScript node. */
+  treePath: string;
+  /** Serialised parameter values keyed by parameter name. */
+  params: Record<string, string | number | boolean>;
+  /** Caller-supplied execution ID for output correlation. */
+  executionId: string;
+  /** Execution origin metadata used in error summaries and the console. */
+  origin: KernelExecutionOrigin;
+}
+
+/** Result returned by `script.run`. */
+export interface ScriptRunResult {
+  /** The exact code string sent to the kernel (for console display). */
+  code: string;
+  /** Echo of the caller-supplied execution ID. */
+  executionId: string;
+  /** Echo of the caller-supplied origin metadata. */
+  origin: KernelExecutionOrigin;
+  /** Structured execution result from the kernel. */
+  result: KernelExecuteResult;
 }
 
 /** Reference to an input in the container layout. */
@@ -563,6 +588,7 @@ export interface PDVApi {
     query(kernelId: string, options?: NamespaceQueryOptions): Promise<NamespaceVariable[]>;
   };
   script: {
+    run(kernelId: string, request: ScriptRunRequest): Promise<ScriptRunResult>;
     edit(kernelId: string, scriptPath: string): Promise<{ success: boolean; error?: string }>;
   };
   note: {

@@ -55,6 +55,22 @@ _pdv_comms.send_message("pdv.ready", {})
 const JULIA_BOOTSTRAP = `
 using PDVKernel
 PDVKernel.bootstrap()
+
+# Open the comm from the kernel side (like Python does).
+import IJulia
+if PDVKernel._comm[] === nothing
+    _pdv_comm = IJulia.CommManager.Comm(PDVKernel.PDV_COMM_TARGET)
+    _pdv_comm.on_msg = PDVKernel.on_comm_message
+    PDVKernel._comm[] = _pdv_comm
+    IJulia.CommManager.send_comm(_pdv_comm, Dict{String,Any}(
+        "pdv_version" => PDVKernel.__pdv_protocol_version__,
+        "msg_id" => string(PDVKernel.UUIDs.uuid4()),
+        "in_reply_to" => nothing,
+        "type" => "pdv.ready",
+        "status" => "ok",
+        "payload" => Dict{String,Any}(),
+    ))
+end
 `;
 
 // ---------------------------------------------------------------------------

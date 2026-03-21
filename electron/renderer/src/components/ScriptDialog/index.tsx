@@ -1,24 +1,18 @@
 /**
  * ScriptDialog — parameter form and runner for `PDVScript` tree nodes.
  *
- * Builds a `pdv_tree["path"].run(...)` invocation from user-supplied
- * parameter values and executes it through `window.pdv.kernels.execute`.
+ * Collects user-supplied parameter values and dispatches a `script.run`
+ * IPC request. The main process is responsible for building the
+ * language-appropriate kernel invocation.
  */
 
 import React, { useMemo, useState } from 'react';
-import type { KernelExecuteResult, KernelExecutionOrigin, ScriptParameter, TreeNodeData } from '../../types';
-
-interface ScriptRunPayload {
-  code: string;
-  executionId: string;
-  origin: KernelExecutionOrigin;
-  result: KernelExecuteResult;
-}
+import type { KernelExecutionOrigin, ScriptParameter, ScriptRunResult, TreeNodeData } from '../../types';
 
 interface ScriptDialogProps {
   node: TreeNodeData;
   kernelId: string;
-  onRun: (payload: ScriptRunPayload) => void;
+  onRun: (payload: ScriptRunResult) => void;
   onCancel: () => void;
 }
 
@@ -76,7 +70,7 @@ export const ScriptDialog: React.FC<ScriptDialogProps> = ({ node, kernelId, onRu
     setIsRunning(true);
     setError(undefined);
     try {
-      const argPayload = Object.fromEntries(
+      const params = Object.fromEntries(
         Object.entries(values)
         .filter(([, value]) => value !== undefined)
         .flatMap(([key, value]) => {
@@ -84,9 +78,6 @@ export const ScriptDialog: React.FC<ScriptDialogProps> = ({ node, kernelId, onRu
           return serialized === null ? [] : [[key, serialized] as const];
         })
       );
-      const code = `import json\npdv_tree[${JSON.stringify(node.path)}].run(**json.loads(${JSON.stringify(
-        JSON.stringify(argPayload)
-      )}))`;
       const executionId =
         typeof crypto !== 'undefined' && 'randomUUID' in crypto
           ? crypto.randomUUID()
@@ -96,12 +87,13 @@ export const ScriptDialog: React.FC<ScriptDialogProps> = ({ node, kernelId, onRu
         label: node.path,
         scriptPath: node.path,
       };
-      const result = await window.pdv.kernels.execute(kernelId, {
-        code,
+      const runResult = await window.pdv.script.run(kernelId, {
+        treePath: node.path,
+        params,
         executionId,
         origin,
       });
-      onRun({ code, executionId, origin, result });
+      onRun(runResult);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {

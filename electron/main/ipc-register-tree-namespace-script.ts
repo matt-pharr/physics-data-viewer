@@ -18,7 +18,7 @@ import * as path from "path";
 
 import type { CommRouter } from "./comm-router";
 import type { ConfigStore, PDVConfig } from "./config";
-import { IPC, type HandlerInvokeResult, type NamelistReadResult, type NamelistWriteResult, type NamespaceQueryOptions, type NamespaceVariable, type TreeAddFileResult, type TreeCreateNoteResult, type TreeCreateScriptResult } from "./ipc";
+import { IPC, type HandlerInvokeResult, type NamelistReadResult, type NamelistWriteResult, type NamespaceQueryOptions, type NamespaceVariable, type ScriptRunRequest, type ScriptRunResult, type TreeAddFileResult, type TreeCreateNoteResult, type TreeCreateScriptResult } from "./ipc";
 import type { KernelManager } from "./kernel-manager";
 import { PDVMessageType, type PDVFileRegisterPayload } from "./pdv-protocol";
 import type { ProjectManager } from "./project-manager";
@@ -270,6 +270,37 @@ export function registerTreeNamespaceScriptIpcHandlers(
       return normalized;
     }
   );
+
+  ipcMain.handle(IPC.script.run, async (_event, kernelId: string, request: ScriptRunRequest): Promise<ScriptRunResult> => {
+    const kernel = kernelManager.getKernel(kernelId);
+    if (!kernel) throw new Error(`Kernel not found: ${kernelId}`);
+
+    const { treePath, params, executionId, origin } = request;
+    let code: string;
+
+    if (kernel.language === "julia") {
+      const kwargs = Object.entries(params)
+        .map(([key, value]) => {
+          if (typeof value === "string") return `${key}=${JSON.stringify(value)}`;
+          if (typeof value === "boolean") return `${key}=${value ? "true" : "false"}`;
+          return `${key}=${value}`;
+        })
+        .join(", ");
+      const pathStr = JSON.stringify(treePath);
+      code = kwargs
+        ? `PDVKernel.run_tree_script(pdv_tree, ${pathStr}; ${kwargs})`
+        : `PDVKernel.run_tree_script(pdv_tree, ${pathStr})`;
+    } else {
+      // Python
+      const jsonArgs = JSON.stringify(JSON.stringify(params));
+      code = Object.keys(params).length > 0
+        ? `import json\npdv_tree[${JSON.stringify(treePath)}].run(**json.loads(${jsonArgs}))`
+        : `pdv_tree[${JSON.stringify(treePath)}].run()`;
+    }
+
+    const result = await kernelManager.execute(kernelId, { code, executionId, origin });
+    return { code, executionId, origin, result };
+  });
 
   ipcMain.handle(IPC.script.edit, async (_event, kernelId: string, scriptPath: string) => {
     const config = readConfig(configStore);
