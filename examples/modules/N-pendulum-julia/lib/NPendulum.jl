@@ -5,7 +5,7 @@ Defines the `PendulumSolution` struct stored as a tree node by `solve.jl`.
 """
 module NPendulum
 
-export PendulumSolution
+export PendulumSolution, n_links, n_steps, preview
 
 """
     PendulumSolution

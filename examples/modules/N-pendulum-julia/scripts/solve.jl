@@ -20,15 +20,8 @@ where C_i = sum_{k=i}^{N} m_k (the "tail mass" from link i onward).
 using DifferentialEquations
 using LinearAlgebra
 
-# Load NPendulum module if not already available
-if !isdefined(Main, :NPendulum)
-    try
-        include(joinpath(@__DIR__, "..", "lib", "NPendulum.jl"))
-    catch e
-        @warn "Could not load NPendulum module" exception=e
-    end
-end
-using .NPendulum: PendulumSolution
+# NPendulum exports (e.g. PendulumSolution) are made available by the PDV
+# framework from the module's lib branch — no manual include/using needed.
 
 
 # ---------------------------------------------------------------------------
@@ -237,7 +230,7 @@ function run(pdv_tree;
     )
 
     solution = PendulumSolution(t_out, thetas, omegas, xs, ys, params_dict)
-    pdv_tree["n_pendulum_julia.$output_key"] = solution
+    pdv_tree["n_pendulum_julia.outputs.$output_key"] = solution
 
     println("[N-Pendulum] Solved $n_out time steps ($(t_end)s) successfully.")
     println("[N-Pendulum] Double-click 'n_pendulum_julia.$output_key' in the tree to plot.")

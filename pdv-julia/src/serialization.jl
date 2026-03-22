@@ -187,21 +187,12 @@ function serialize_node(tree_path::String, value, working_dir::String;
         if !isfile(source_path)
             throw(PDVSerializationError("File not found: $source_path"))
         end
-        if value isa PDVLib
-            rp = relative_path(value)
-            if isabspath(rp)
-                rel_path = relpath(source_path, using_source_dir)
-            else
-                rel_path = rp
-            end
-        else
-            file_path = working_dir_tree_path(working_dir, tree_path, ext)
-            ensure_parent(file_path)
-            if abspath(source_path) != abspath(file_path)
-                cp(source_path, file_path; force=true)
-            end
-            rel_path = relpath(file_path, working_dir)
+        file_path = working_dir_tree_path(working_dir, tree_path, ext)
+        ensure_parent(file_path)
+        if abspath(source_path) != abspath(file_path)
+            cp(source_path, file_path; force=true)
         end
+        rel_path = relpath(file_path, working_dir)
         descriptor["storage"] = Dict{String,Any}(
             "backend" => "local_file",
             "relative_path" => rel_path,

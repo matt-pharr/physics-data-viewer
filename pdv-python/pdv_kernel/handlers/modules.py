@@ -25,8 +25,13 @@ def handle_module_register(msg: dict) -> None:
     Creates a :class:`~pdv_kernel.tree.PDVModule` and attaches it to the
     tree at the given alias path.
 
-    Expected payload
-    ----------------
+    For v4 modules, an optional ``module_index`` array may be included in the
+    payload.  When present the kernel reconstructs the module's subtree from the
+    index using the same two-pass logic as project load, mounting all nodes under
+    the alias path.
+
+    Expected payload (minimal)
+    --------------------------
     .. code-block:: json
 
         {
@@ -36,6 +41,18 @@ def handle_module_register(msg: dict) -> None:
             "version": "2.0.0"
         }
 
+    Expected payload (v4 with index)
+    ---------------------------------
+    .. code-block:: json
+
+        {
+            "path": "n_pendulum",
+            "module_id": "n_pendulum",
+            "name": "N-Pendulum",
+            "version": "2.0.0",
+            "module_index": [ ... ]
+        }
+
     Response type: ``pdv.module.register.response``
 
     Parameters
@@ -43,17 +60,21 @@ def handle_module_register(msg: dict) -> None:
     msg : dict
         Parsed PDV message envelope.
     """
+    import os  # noqa: PLC0415
+    import sys  # noqa: PLC0415
+
     from pdv_kernel.comms import get_pdv_tree, send_error, send_message  # noqa: PLC0415
-    from pdv_kernel.tree import PDVModule  # noqa: PLC0415
+    from pdv_kernel.tree import PDVModule, PDVTree, PDVScript, PDVNote, PDVGui, PDVNamelist, PDVLib  # noqa: PLC0415
 
     msg_id = msg.get("msg_id")
     payload = msg.get("payload", {})
-    path = payload.get("path", "")
+    alias = payload.get("path", "")
     module_id = payload.get("module_id", "")
     name = payload.get("name", "")
     version = payload.get("version", "")
+    module_index = payload.get("module_index")
 
-    if not path or not module_id:
+    if not alias or not module_id:
         send_error(
             "pdv.module.register.response",
             "module.missing_fields",
@@ -72,25 +93,121 @@ def handle_module_register(msg: dict) -> None:
         )
         return
 
-    # If a PDVModule already exists at this path (e.g. from project load),
-    # update its metadata in-place to preserve children (result data, gui, etc.).
-    existing = tree.get(path)
+    working_dir = tree._working_dir or ""
+
+    # Create the root PDVModule node at the alias path.
+    # If a PDVModule already exists (e.g. from project load), update in-place
+    # to preserve any existing children (result data, etc.).
+    existing = tree.get(alias)
     if isinstance(existing, PDVModule):
         existing._module_id = module_id
         existing._name = name
         existing._version = version
     elif isinstance(existing, dict) and len(existing) > 0:
-        # A plain dict/PDVTree with children — upgrade to PDVModule, keep children
         module_node = PDVModule(module_id=module_id, name=name, version=version)
         for k, v in existing.items():
             dict.__setitem__(module_node, k, v)
-        tree[path] = module_node
+        tree[alias] = module_node
     else:
-        tree[path] = PDVModule(module_id=module_id, name=name, version=version)
+        tree[alias] = PDVModule(module_id=module_id, name=name, version=version)
+
+    # v4: mount subtree from module_index (same two-pass logic as project load)
+    if module_index:
+        from pdv_kernel.handlers.project import _set_tree_node  # noqa: PLC0415
+
+        # Pass 1: containers (folder, module)
+        for node in module_index:
+            node_path_rel = node.get("path", "")
+            node_type = node.get("type", "")
+            meta = node.get("metadata", {})
+            if not node_path_rel:
+                continue
+            full_path = f"{alias}.{node_path_rel}"
+
+            if node_type == "folder":
+                folder = PDVTree()
+                folder._lazy_registry = tree._lazy_registry
+                folder._working_dir = tree._working_dir
+                folder._save_dir = tree._save_dir
+                folder._path_prefix = full_path
+                _set_tree_node(tree, full_path, folder)
+            elif node_type == "module":
+                storage = node.get("storage", {})
+                old_meta = storage.get("value", {})
+                mod = PDVModule(
+                    module_id=meta.get("module_id", old_meta.get("module_id", module_id)),
+                    name=meta.get("name", old_meta.get("name", name)),
+                    version=meta.get("version", old_meta.get("version", version)),
+                )
+                mod._lazy_registry = tree._lazy_registry
+                mod._working_dir = tree._working_dir
+                mod._save_dir = tree._save_dir
+                mod._path_prefix = full_path
+                _set_tree_node(tree, full_path, mod)
+
+        # Pass 2: leaves
+        for node in module_index:
+            node_path_rel = node.get("path", "")
+            node_type = node.get("type", "")
+            storage = node.get("storage", {})
+            backend = storage.get("backend", "")
+            meta = node.get("metadata", {})
+            if not node_path_rel or node_type in ("folder", "module"):
+                continue
+            full_path = f"{alias}.{node_path_rel}"
+            rel_path = storage.get("relative_path", "")
+
+            if node_type == "script":
+                language = meta.get("language", node.get("language", "python"))
+                doc = meta.get("doc")
+                _set_tree_node(tree, full_path, PDVScript(
+                    relative_path=rel_path,
+                    language=language,
+                    doc=doc,
+                ))
+            elif node_type == "markdown":
+                title = meta.get("title")
+                _set_tree_node(tree, full_path, PDVNote(
+                    relative_path=rel_path,
+                    title=title,
+                ))
+            elif node_type == "gui":
+                mod_id = meta.get("module_id", module_id)
+                gui_node = PDVGui(relative_path=rel_path, module_id=mod_id)
+                _set_tree_node(tree, full_path, gui_node)
+                parts = full_path.split(".")
+                if len(parts) > 1:
+                    parent_path = ".".join(parts[:-1])
+                    try:
+                        parent = tree[parent_path]
+                        if isinstance(parent, PDVModule):
+                            parent.gui = gui_node
+                    except Exception:  # noqa: BLE001
+                        pass
+            elif node_type == "namelist":
+                mod_id = meta.get("module_id", module_id)
+                namelist_format = meta.get("namelist_format", node.get("namelist_format", "auto"))
+                _set_tree_node(tree, full_path, PDVNamelist(
+                    relative_path=rel_path,
+                    format=namelist_format,
+                    module_id=mod_id,
+                ))
+            elif node_type == "lib":
+                mod_id = meta.get("module_id", module_id)
+                _set_tree_node(tree, full_path, PDVLib(
+                    relative_path=rel_path,
+                    module_id=mod_id,
+                ))
+                # lib_dir sys.path injection is handled separately in
+                # handle_modules_setup via the lib_dir field
+            elif backend == "inline":
+                _set_tree_node(tree, full_path, storage.get("value"))
+            else:
+                tree._lazy_registry.register(full_path, storage)
 
     send_message(
         "pdv.module.register.response",
-        {"path": path, "module_id": module_id},
+        {"path": alias, "module_id": module_id},
         in_reply_to=msg_id,
     )
 
@@ -98,12 +215,31 @@ def handle_module_register(msg: dict) -> None:
 def handle_modules_setup(msg: dict) -> None:
     """Handle the ``pdv.modules.setup`` message.
 
-    For each module in the payload, adds the parent directories of the
-    module's ``lib_paths`` (on-disk ``.py`` files) to ``sys.path``, then
-    imports the entry point module if specified.
+    For each module in the payload, adds library directories to ``sys.path``
+    and imports the entry point module if specified.
 
-    Expected payload
-    ----------------
+    Supports two path styles:
+
+    - ``lib_dir`` (v4): absolute path to a library directory; added directly.
+    - ``lib_paths`` (v1/v2/v3 legacy): list of individual ``.py`` file paths;
+      the parent directory of each is added.
+
+    Expected payload (v4)
+    ---------------------
+    .. code-block:: json
+
+        {
+            "modules": [
+                {
+                    "lib_paths": [],
+                    "lib_dir": "/tmp/pdv-xxx/n_pendulum/lib",
+                    "entry_point": "n_pendulum"
+                }
+            ]
+        }
+
+    Expected payload (legacy)
+    -------------------------
     .. code-block:: json
 
         {
@@ -137,11 +273,14 @@ def handle_modules_setup(msg: dict) -> None:
 
     for mod_info in modules:
         lib_paths = mod_info.get("lib_paths", [])
+        lib_dir = mod_info.get("lib_dir")
         entry_point = mod_info.get("entry_point")
 
-        # Add the parent directory of each lib .py file to sys.path.
-        # This makes the modules importable.  Duplicate entries are
-        # harmless (and expected — multiple files in the same directory).
+        # v4: add lib_dir directly to sys.path
+        if lib_dir and os.path.isdir(lib_dir) and lib_dir not in sys.path:
+            sys.path.insert(1, lib_dir)
+
+        # Legacy: add parent directory of each lib .py file to sys.path.
         for file_path in lib_paths:
             parent_dir = os.path.dirname(file_path)
             if parent_dir and parent_dir not in sys.path:

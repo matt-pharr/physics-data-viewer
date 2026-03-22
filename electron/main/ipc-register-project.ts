@@ -25,6 +25,7 @@ interface RegisterProjectIpcHandlersOptions {
   projectManager: ProjectManager;
   kernelWorkingDirs: Map<string, string>;
   getActiveKernelId: () => string | null;
+  getActiveKernelLanguage: () => "python" | "julia";
   setActiveProjectDir: (dir: string | null) => void;
   getPendingModuleImports: () => ProjectModuleImport[];
   setPendingModuleImports: (imports: ProjectModuleImport[]) => void;
@@ -49,6 +50,7 @@ export function registerProjectIpcHandlers(
     projectManager,
     kernelWorkingDirs,
     getActiveKernelId,
+    getActiveKernelLanguage,
     setActiveProjectDir,
     getPendingModuleImports,
     setPendingModuleImports,
@@ -62,7 +64,9 @@ export function registerProjectIpcHandlers(
   ipcMain.handle(
     IPC.project.save,
     async (_event, saveDir: string, codeCells: unknown) => {
-      const saveResult = await projectManager.save(saveDir, codeCells);
+      const saveResult = await projectManager.save(saveDir, codeCells, {
+        language: getActiveKernelLanguage(),
+      });
 
       // Merge pending in-memory module imports/settings into the on-disk manifest.
       const pendingModuleImports = getPendingModuleImports();

@@ -34,6 +34,7 @@ import type { ModuleGuiLayout } from "./ipc";
 import {
   deriveHasGui,
   isV3Manifest,
+  isV4Manifest,
   isPythonVersionCompatible,
   isVersionGreaterThan,
   isVersionLessThan,
@@ -44,6 +45,7 @@ import {
   sanitizeScriptNodeName,
   validateModuleManifest,
 } from "./modules/manifest-utils";
+import type { NodeDescriptor } from "./pdv-protocol";
 
 const execFileAsync = promisify(execFile);
 
@@ -243,6 +245,7 @@ export class ModuleManager {
     }
     const moduleDir = module.installPath ?? path.join(this.packagesRoot, moduleId);
     const manifest = await this.readAndValidateManifest(moduleDir);
+
     const actions = await this.resolveActions(manifest, moduleDir);
     const usedNames = new Set<string>();
     const bindings: ModuleScriptBinding[] = [];
@@ -344,6 +347,14 @@ export class ModuleManager {
     const moduleDir =
       module.installPath ?? path.join(this.packagesRoot, moduleId);
     const manifest = await this.readAndValidateManifest(moduleDir);
+    if (isV4Manifest(manifest)) {
+      if (!manifest.default_gui) return { hasGui: false };
+      const guiManifest = await readGuiManifest(moduleDir);
+      if (!guiManifest) return { hasGui: false };
+      const hasGui = guiManifest.has_gui ?? ((guiManifest.inputs?.length ?? 0) > 0 || guiManifest.actions.length > 0);
+      const gui = guiManifest.gui ? (guiManifest.gui as ModuleGuiLayout) : undefined;
+      return { hasGui, gui };
+    }
     if (isV3Manifest(manifest)) {
       const guiManifest = await readGuiManifest(moduleDir);
       if (!guiManifest) return { hasGui: false };
@@ -441,6 +452,38 @@ export class ModuleManager {
       }
     }
 
+    if (isV4Manifest(manifest)) {
+      // v4: check all local_file backend paths in module-index.json
+      const moduleIndex = await this.readModuleIndex(moduleDir);
+      for (const node of moduleIndex) {
+        const storage = (node as unknown as Record<string, unknown>).storage as Record<string, unknown> | undefined;
+        if (storage?.backend !== "local_file") continue;
+        const relPath = typeof storage?.relative_path === "string" ? storage.relative_path : "";
+        if (!relPath) continue;
+        const absPath = path.resolve(moduleDir, relPath);
+        try {
+          const stat = await fs.stat(absPath);
+          if (!stat.isFile()) {
+            warnings.push({
+              code: "missing_action_script",
+              message: `Module file is not a file: ${relPath}`,
+            });
+          }
+        } catch (error) {
+          const err = error as NodeJS.ErrnoException;
+          if (err.code === "ENOENT") {
+            warnings.push({
+              code: "missing_action_script",
+              message: `Module file not found: ${relPath}`,
+            });
+            continue;
+          }
+          throw error;
+        }
+      }
+      return warnings;
+    }
+
     const healthActions = await this.resolveActions(manifest, moduleDir);
     for (const action of healthActions) {
       const scriptPath = path.resolve(moduleDir, action.script_path);
@@ -496,6 +539,54 @@ export class ModuleManager {
   }
 
   /**
+   * Return true when an installed module uses the v4 module-index.json format.
+   *
+   * @param moduleId - Installed module identifier.
+   * @returns True when the module manifest has schema_version "4".
+   */
+  async isV4Module(moduleId: string): Promise<boolean> {
+    const index = await this.readIndex();
+    const module = index.modules[moduleId];
+    if (!module) return false;
+    const moduleDir = module.installPath ?? path.join(this.packagesRoot, moduleId);
+    try {
+      const manifest = await this.readAndValidateManifest(moduleDir);
+      return isV4Manifest(manifest);
+    } catch {
+      return false;
+    }
+  }
+
+  /**
+   * Read and parse `module-index.json` from an installed module directory.
+   *
+   * @param moduleDir - Absolute path to the module directory.
+   * @returns Array of node descriptors, or empty array when the file is absent.
+   * @throws {Error} When the file exists but contains invalid JSON.
+   */
+  async readModuleIndex(moduleDir: string): Promise<NodeDescriptor[]> {
+    const indexPath = path.join(moduleDir, "module-index.json");
+    let raw: string;
+    try {
+      raw = await fs.readFile(indexPath, "utf8");
+    } catch (error) {
+      const err = error as NodeJS.ErrnoException;
+      if (err.code === "ENOENT") return [];
+      throw error;
+    }
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(raw);
+    } catch {
+      throw new Error(`Invalid JSON in ${indexPath}`);
+    }
+    if (!Array.isArray(parsed)) {
+      throw new Error(`module-index.json must be an array in ${indexPath}`);
+    }
+    return parsed as NodeDescriptor[];
+  }
+
+  /**
    * Resolve declared module files from the manifest `files` array.
    *
    * @param moduleId - Installed module identifier.
@@ -548,6 +639,7 @@ export class ModuleManager {
     installPath: string;
     pythonPackage?: string;
     entryPoint?: string;
+    libDir?: string;
   }> {
     const index = await this.readIndex();
     const module = index.modules[moduleId];
@@ -560,6 +652,7 @@ export class ModuleManager {
       installPath: moduleDir,
       pythonPackage: manifest.python_package,
       entryPoint: manifest.entry_point,
+      libDir: manifest.lib_dir,
     };
   }
 
@@ -782,7 +875,7 @@ export class ModuleManager {
     manifest: ModuleManifestV1,
     moduleDir: string
   ): Promise<Array<{ id: string; label: string; script_path: string; inputs?: string[]; tab?: string }>> {
-    if (isV3Manifest(manifest)) {
+    if (isV3Manifest(manifest) || isV4Manifest(manifest)) {
       const guiManifest = await readGuiManifest(moduleDir);
       return guiManifest?.actions ?? [];
     }
@@ -790,7 +883,7 @@ export class ModuleManager {
   }
 
   /**
-   * Resolve the effective inputs list for a module, reading from gui.json for v3.
+   * Resolve the effective inputs list for a module, reading from gui.json for v3/v4.
    *
    * @param manifest - Validated module manifest.
    * @param moduleDir - Module directory path.
@@ -800,7 +893,7 @@ export class ModuleManager {
     manifest: ModuleManifestV1,
     moduleDir: string
   ): Promise<NonNullable<ModuleManifestV1["inputs"]>> {
-    if (isV3Manifest(manifest)) {
+    if (isV3Manifest(manifest) || isV4Manifest(manifest)) {
       const guiManifest = await readGuiManifest(moduleDir);
       return guiManifest?.inputs ?? [];
     }

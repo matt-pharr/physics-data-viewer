@@ -11,15 +11,8 @@ Uses CairoMakie for rendering.
 
 using CairoMakie
 
-# Load NPendulum module if not already available
-if !isdefined(Main, :NPendulum)
-    try
-        include(joinpath(@__DIR__, "..", "lib", "NPendulum.jl"))
-    catch e
-        @warn "Could not load NPendulum module" exception=e
-    end
-end
-using .NPendulum: PendulumSolution, n_links, n_steps
+# NPendulum exports (e.g. PendulumSolution) are made available by the PDV
+# framework from the module's lib branch — no manual include/using needed.
 
 
 # ---------------------------------------------------------------------------
@@ -56,7 +49,7 @@ function run(pdv_tree;
     # ------------------------------------------------------------------
     # Pull solution data from tree
     # ------------------------------------------------------------------
-    root = "n_pendulum_julia.$output_key"
+    root = "n_pendulum_julia.outputs.$output_key"
     local sol::PendulumSolution
     try
         sol = pdv_tree[root]

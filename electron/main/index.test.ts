@@ -101,6 +101,8 @@ const mocks = vi.hoisted(() => {
     entryPoint: undefined,
   }));
   const moduleManagerResolveModuleFiles = vi.fn(async () => []);
+  const moduleManagerIsV4Module = vi.fn(async () => false);
+  const moduleManagerReadModuleIndex = vi.fn(async () => []);
   return {
     handlers,
     ipcHandle,
@@ -123,6 +125,8 @@ const mocks = vi.hoisted(() => {
     moduleManagerGetModuleInstallPath,
     moduleManagerGetModuleSetupInfo,
     moduleManagerResolveModuleFiles,
+    moduleManagerIsV4Module,
+    moduleManagerReadModuleIndex,
   };
 });
 
@@ -165,6 +169,8 @@ vi.mock("./module-manager", () => ({
     getModuleInstallPath: mocks.moduleManagerGetModuleInstallPath,
     getModuleSetupInfo: mocks.moduleManagerGetModuleSetupInfo,
     resolveModuleFiles: mocks.moduleManagerResolveModuleFiles,
+    isV4Module: mocks.moduleManagerIsV4Module,
+    readModuleIndex: mocks.moduleManagerReadModuleIndex,
   })),
 }));
 
@@ -732,7 +738,9 @@ describe("Step 5 IPC handlers", () => {
     const { projectManager } = setup();
     const save = getHandler(IPC.project.save);
     const result = await save({}, "/tmp/project", []);
-    expect(projectManager.save).toHaveBeenCalledWith("/tmp/project", []);
+    expect(projectManager.save).toHaveBeenCalledWith("/tmp/project", [], {
+      language: "python",
+    });
     expect(result).toEqual({ checksum: "abc123", nodeCount: 0 });
   });
 

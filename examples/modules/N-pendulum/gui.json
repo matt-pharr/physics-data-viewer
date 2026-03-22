@@ -60,7 +60,7 @@
           "type": "column",
           "label": "Namelist",
           "children": [
-            { "type": "namelist", "tree_path": "n_pendulum.solver_nml" }
+            { "type": "namelist", "tree_path": "n_pendulum.inputs.solver_nml" }
           ]
         },
         {
@@ -189,7 +189,7 @@
       "id": "animate_output_key",
       "label": "Animate Output Key",
       "control": "dropdown",
-      "options_tree_path": "n_pendulum",
+      "options_tree_path": "n_pendulum.outputs",
       "default": "result",
       "tooltip": "Populate from current n_pendulum tree children."
     },

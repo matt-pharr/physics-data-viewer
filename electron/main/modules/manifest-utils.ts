@@ -49,9 +49,11 @@ export type ModuleActionEntry = {
 };
 
 /**
- * Raw module manifest shape accepted by v1/v2 validation.
+ * Raw module manifest shape accepted by v1/v2/v3 validation.
  *
  * Schema v3 modules move inputs/actions/gui to a separate `gui.json` file.
+ * Schema v4 modules replace scripts[]/files[] with a module-index.json file
+ * and add lib_dir / default_gui fields.
  * Identity fields (id, name, version, compatibility, dependencies) stay here.
  */
 export interface ModuleManifestV1 {
@@ -72,7 +74,7 @@ export interface ModuleManifestV1 {
     version?: string;
     marker?: string;
   }>;
-  /** Scripts list (v3 identity manifest). */
+  /** Scripts list (v3 identity manifest). Not present in v4. */
   scripts?: Array<{ name: string; path: string }>;
   /** @deprecated v2 — moved to gui.json in v3. */
   inputs?: ModuleInputEntry[];
@@ -84,7 +86,7 @@ export interface ModuleManifestV1 {
   gui?: {
     layout: unknown;
   };
-  /** File declarations for module-owned files to copy on import. */
+  /** File declarations for module-owned files to copy on import. Not present in v4. */
   files?: Array<{ name: string; path: string; type: "namelist" | "lib" | "file" }>;
   /** Target language for this module. Defaults to "python" when absent. */
   language?: "python" | "julia";
@@ -92,6 +94,10 @@ export interface ModuleManifestV1 {
   python_package?: string;
   /** Python module to import on kernel start (entry point). */
   entry_point?: string;
+  /** v4: Relative path to library directory added to sys.path/LOAD_PATH. */
+  lib_dir?: string;
+  /** v4: Relative path to default gui.json for the ModulesPanel UI. */
+  default_gui?: string;
 }
 
 /**
@@ -170,8 +176,8 @@ export function validateModuleManifest(
   }
 
   const actionsRaw = obj.actions;
-  // In v3, actions live in gui.json and are absent from pdv-module.json.
-  if (schemaVersion === "3") {
+  // In v3 and v4, actions live in gui.json and are absent from pdv-module.json.
+  if (schemaVersion === "3" || schemaVersion === "4") {
     if (actionsRaw !== undefined && !Array.isArray(actionsRaw)) {
       throw new Error(`"actions" must be an array in ${manifestPath}`);
     }
@@ -231,6 +237,8 @@ export function validateModuleManifest(
   }
   const python_package = optionalString(obj, "python_package", manifestPath);
   const entry_point = optionalString(obj, "entry_point", manifestPath);
+  const lib_dir = optionalString(obj, "lib_dir", manifestPath);
+  const default_gui = optionalString(obj, "default_gui", manifestPath);
 
   let files: ModuleManifestV1["files"];
   const filesRaw = obj.files;
@@ -271,6 +279,8 @@ export function validateModuleManifest(
     language,
     python_package,
     entry_point,
+    lib_dir,
+    default_gui,
   };
 }
 
@@ -720,6 +730,19 @@ export async function readGuiManifest(
  */
 export function isV3Manifest(manifest: ModuleManifestV1): boolean {
   return manifest.schema_version === "3";
+}
+
+/**
+ * Determine whether a module is v4 (module-index.json) by schema_version field.
+ *
+ * v4 modules replace scripts[]/files[] with a module-index.json tree index
+ * and support arbitrary tree data, lib_dir, and default_gui.
+ *
+ * @param manifest - Validated module manifest.
+ * @returns True when the module uses the v4 module-index format.
+ */
+export function isV4Manifest(manifest: ModuleManifestV1): boolean {
+  return manifest.schema_version === "4";
 }
 
 function optionalGuiLayout(

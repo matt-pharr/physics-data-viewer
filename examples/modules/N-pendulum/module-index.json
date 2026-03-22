@@ -1,0 +1,131 @@
+[
+  {
+    "id": "scripts",
+    "path": "scripts",
+    "key": "scripts",
+    "parent_path": "",
+    "type": "folder",
+    "has_children": true,
+    "lazy": false,
+    "storage": { "backend": "none", "format": "none" }
+  },
+  {
+    "id": "scripts.solve",
+    "path": "scripts.solve",
+    "key": "solve",
+    "parent_path": "scripts",
+    "type": "script",
+    "has_children": false,
+    "lazy": false,
+    "storage": {
+      "backend": "local_file",
+      "relative_path": "scripts/solve.py",
+      "format": "py_script"
+    },
+    "metadata": {
+      "language": "python",
+      "doc": "Integrate the general N-link pendulum equations of motion."
+    }
+  },
+  {
+    "id": "scripts.animate",
+    "path": "scripts.animate",
+    "key": "animate",
+    "parent_path": "scripts",
+    "type": "script",
+    "has_children": false,
+    "lazy": false,
+    "storage": {
+      "backend": "local_file",
+      "relative_path": "scripts/animate.py",
+      "format": "py_script"
+    },
+    "metadata": {
+      "language": "python",
+      "doc": "Visualise the N-link pendulum solution."
+    }
+  },
+  {
+    "id": "lib",
+    "path": "lib",
+    "key": "lib",
+    "parent_path": "",
+    "type": "folder",
+    "has_children": true,
+    "lazy": false,
+    "storage": { "backend": "none", "format": "none" }
+  },
+  {
+    "id": "lib.n_pendulum",
+    "path": "lib.n_pendulum",
+    "key": "n_pendulum",
+    "parent_path": "lib",
+    "type": "lib",
+    "has_children": false,
+    "lazy": false,
+    "storage": {
+      "backend": "local_file",
+      "relative_path": "lib/n_pendulum.py",
+      "format": "py_lib"
+    },
+    "metadata": {
+      "language": "python",
+      "module_id": "n_pendulum"
+    }
+  },
+  {
+    "id": "gui",
+    "path": "gui",
+    "key": "gui",
+    "parent_path": "",
+    "type": "gui",
+    "has_children": false,
+    "lazy": false,
+    "storage": {
+      "backend": "local_file",
+      "relative_path": "gui.json",
+      "format": "gui_json"
+    },
+    "metadata": {
+      "module_id": "n_pendulum"
+    }
+  },
+  {
+    "id": "inputs",
+    "path": "inputs",
+    "key": "inputs",
+    "parent_path": "",
+    "type": "folder",
+    "has_children": true,
+    "lazy": false,
+    "storage": { "backend": "none", "format": "none" }
+  },
+  {
+    "id": "inputs.solver_nml",
+    "path": "inputs.solver_nml",
+    "key": "solver_nml",
+    "parent_path": "inputs",
+    "type": "namelist",
+    "has_children": false,
+    "lazy": false,
+    "storage": {
+      "backend": "local_file",
+      "relative_path": "inputs/solver.nml",
+      "format": "namelist"
+    },
+    "metadata": {
+      "module_id": "n_pendulum",
+      "namelist_format": "fortran"
+    }
+  },
+  {
+    "id": "outputs",
+    "path": "outputs",
+    "key": "outputs",
+    "parent_path": "",
+    "type": "folder",
+    "has_children": true,
+    "lazy": false,
+    "storage": { "backend": "none", "format": "none" }
+  }
+]

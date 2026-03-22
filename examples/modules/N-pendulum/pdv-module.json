@@ -1,11 +1,13 @@
 {
-  "schema_version": "3",
+  "schema_version": "4",
   "id": "n_pendulum",
   "name": "N-Pendulum",
   "version": "2.0.0",
   "language": "python",
   "description": "A general N-link pendulum simulator. Supports double, triple, quadruple, and higher-order chaotic pendulums with ODE integration and animated visualization.",
   "entry_point": "n_pendulum",
+  "lib_dir": "lib",
+  "default_gui": "gui.json",
   "compatibility": {
     "pdv_min": "0.1.0",
     "pdv_max": "99.0.0",
@@ -19,12 +21,5 @@
     { "name": "matplotlib", "version": ">=3.7" },
     { "name": "PyQt6", "version": ">=6.5" },
     { "name": "ffmpeg", "marker": "optional external binary for video export" }
-  ],
-  "scripts": [
-    { "name": "solve", "path": "scripts/solve.py" },
-    { "name": "animate", "path": "scripts/animate.py" }
-  ],
-  "files": [
-    { "name": "solver_nml", "path": "inputs/solver.nml", "type": "namelist" }
   ]
 }

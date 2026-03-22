@@ -83,8 +83,8 @@ function remove_entry!(reg::LazyLoadRegistry, path::String)
     return nothing
 end
 
-function entries(reg::LazyLoadRegistry)::Vector{Tuple{String,Dict{String,Any}}}
-    return collect(reg._registry)
+function entries(reg::LazyLoadRegistry)
+    return [(k, v) for (k, v) in reg._registry]
 end
 
 function clear_registry!(reg::LazyLoadRegistry)
@@ -204,12 +204,19 @@ function file_preview(s::PDVScript)::String
 end
 
 """
-    run_script(script::PDVScript, tree; kwargs...)
+    run_script(script::PDVScript, tree; script_path="", kwargs...)
 
 Load and execute the script, calling its `run()` function.
 Loads the module fresh on every call (no cache).
+
+When `script_path` is provided (dot-separated tree path), the function
+walks up to find a parent `PDVModule` and pre-includes any `PDVLib` nodes
+from its `lib` branch into the script's execution module. This lets
+scripts use `using .LibName` without manual `include()` calls, and is
+forward-compatible with UUID-based file storage where filesystem paths
+between scripts and libs are not predictable.
 """
-function run_script(script::PDVScript, tree; kwargs...)
+function run_script(script::PDVScript, tree; script_path::String="", kwargs...)
     working_dir = get_tree_working_dir(tree)
     file_path = resolve_file_path(script, working_dir)
 
@@ -217,8 +224,14 @@ function run_script(script::PDVScript, tree; kwargs...)
         throw(PDVScriptError("Script file not found: $file_path"))
     end
 
-    # Create a fresh anonymous module and include the script
-    mod = Module(gensym("pdv_script"))
+    # Create a fresh module within Main so it has access to Base (include, using, etc).
+    # A bare Module(gensym()) is too isolated — it lacks even `include`.
+    mod_name = gensym("pdv_script")
+    mod = Core.eval(Main, :(module $mod_name end))
+
+    # Pre-include module library files so scripts can `using .LibName`.
+    _include_module_libs!(mod, tree, script_path, working_dir)
+
     try
         Base.include(mod, file_path)
     catch e
@@ -229,10 +242,118 @@ function run_script(script::PDVScript, tree; kwargs...)
         throw(PDVScriptError("Script '$(script._relative_path)' does not define a run() function"))
     end
 
+    # JSON cannot distinguish 0 from 0.0 — coerce numeric kwargs to match
+    # the script's declared keyword argument types. Re-extract params from
+    # the resolved file_path since script._params may be empty (the relative
+    # path doesn't exist at PDVScript construction time).
+    script_params = extract_script_params(file_path)
+    coerced = _coerce_kwargs(script_params, kwargs)
+
     try
-        return Base.invokelatest(mod.run, tree; kwargs...)
+        return Base.invokelatest(mod.run, tree; coerced...)
     catch e
         throw(PDVScriptError("Script '$(script._relative_path)' raised during run(): $e"))
+    end
+end
+
+# Map of type-annotation strings to Julia types for JSON numeric coercion.
+const _FLOAT_TYPES = Set(["Float64", "Float32", "Float16", "AbstractFloat"])
+const _INT_TYPES   = Set(["Int", "Int64", "Int32", "Int16", "Int8",
+                          "UInt", "UInt64", "UInt32", "UInt16", "UInt8", "Integer"])
+
+"""
+    _coerce_kwargs(params, kwargs) -> pairs
+
+Coerce kwargs whose values are integers but whose declared script parameter
+type is a float (or vice versa). This compensates for the JSON boundary
+where `0` and `0.0` are indistinguishable.
+"""
+function _coerce_kwargs(params::Vector{ScriptParameter}, kwargs)
+    isempty(params) && return kwargs
+
+    # Build name → declared-type lookup
+    type_map = Dict{Symbol,String}()
+    for p in params
+        type_map[Symbol(p.name)] = p.type
+    end
+
+    result = Dict{Symbol,Any}()
+    for (k, v) in kwargs
+        declared = get(type_map, k, "")
+        if v isa Integer && declared in _FLOAT_TYPES
+            result[k] = Float64(v)
+        elseif v isa AbstractFloat && declared in _INT_TYPES
+            result[k] = Int(v)
+        else
+            result[k] = v
+        end
+    end
+
+    return pairs(result)
+end
+
+"""
+    _include_module_libs!(mod::Module, tree, script_path::String, working_dir::String)
+
+Walk up from `script_path` to find a parent PDVModule, then make all
+PDVLib modules available in the script's execution module `mod`.
+
+Libs are included into Main once (so types like PendulumSolution are
+shared across script executions), then imported into the script module
+via `using Main.LibName`. Scripts can use exported names directly or
+qualify with `LibName.func`.
+"""
+function _include_module_libs!(mod::Module, tree, script_path::String, working_dir::String)
+    isempty(script_path) && return
+
+    # Walk up dot-path segments to find the parent PDVModule
+    parts = split(script_path, ".")
+    module_path = ""
+    for i in length(parts)-1:-1:1
+        candidate = join(parts[1:i], ".")
+        try
+            node = tree[candidate]
+            if node isa PDVModule
+                module_path = candidate
+                break
+            end
+        catch
+        end
+    end
+    isempty(module_path) && return
+
+    # Look for the lib branch: <module_path>.lib
+    lib_path = "$(module_path).lib"
+    lib_branch = try tree[lib_path] catch; return end
+    if !(lib_branch isa AbstractDict)
+        return
+    end
+
+    # Include each PDVLib file into Main (once) then import into script module
+    for (_, node) in lib_branch
+        node isa PDVLib || continue
+        lib_file = resolve_file_path(node, working_dir)
+        isfile(lib_file) || continue
+
+        # Determine the module name defined by the lib file (filename without .jl)
+        lib_mod_name = Symbol(replace(basename(lib_file), r"\.jl$" => ""))
+
+        # Include into Main once so types are shared across script runs
+        if !isdefined(Main, lib_mod_name)
+            try
+                Base.include(Main, lib_file)
+            catch e
+                @warn "Failed to include lib '$(relative_path(node))' into Main: $e"
+                continue
+            end
+        end
+
+        # Import the lib's exports into the script module
+        try
+            Core.eval(mod, :(using Main.$lib_mod_name))
+        catch e
+            @warn "Failed to import Main.$lib_mod_name into script module: $e"
+        end
     end
 end
 
@@ -265,7 +386,7 @@ function extract_script_params(file_path::String)::Vector{ScriptParameter}
 end
 
 function _extract_from_funcdef(expr)::Union{Vector{ScriptParameter},Nothing}
-    # Match `function run(pdv_tree; kwargs...)` or `function run(pdv_tree::AbstractDict; kwargs...)`
+    # Match `function run(pdv_tree; kwargs...)` or `run(...) = ...`
     if !(expr isa Expr)
         return nothing
     end
@@ -277,6 +398,16 @@ function _extract_from_funcdef(expr)::Union{Vector{ScriptParameter},Nothing}
             fname = call_expr.args[1]
             if fname === :run || (fname isa Expr && fname.head === :(.) && fname.args[end] === QuoteNode(:run))
                 return _parse_run_params(call_expr)
+            end
+        end
+    end
+
+    # Recurse into macrocall (e.g. docstring @doc wrapping a function def)
+    if expr.head === :macrocall
+        for arg in expr.args
+            result = _extract_from_funcdef(arg)
+            if result !== nothing
+                return result
             end
         end
     end
@@ -552,12 +683,50 @@ function emit_changed!(tree::PDVTree, path::String, change_type::String)
     end
 end
 
-# AbstractDict interface
-Base.length(t::PDVTree) = length(t._data)
-Base.iterate(t::PDVTree) = iterate(t._data)
-Base.iterate(t::PDVTree, state) = iterate(t._data, state)
-Base.keys(t::PDVTree) = keys(t._data)
-Base.values(t::PDVTree) = values(t._data)
+# AbstractDict interface — includes lazy entries at this tree level.
+
+function _lazy_child_keys(t::PDVTree)::Vector{String}
+    prefix = t._path_prefix
+    result = String[]
+    for (reg_path, _) in entries(t._lazy_registry)
+        parts = split(reg_path, ".")
+        if isempty(prefix)
+            # Root tree: direct children have exactly 1 part
+            if length(parts) == 1 && !haskey(t._data, parts[1])
+                push!(result, parts[1])
+            end
+        else
+            # Subtree: entries that start with prefix and have exactly one more segment
+            pp = split(prefix, ".")
+            if length(parts) == length(pp) + 1 && join(parts[1:length(pp)], ".") == prefix
+                k = String(parts[end])
+                if !haskey(t._data, k)
+                    push!(result, k)
+                end
+            end
+        end
+    end
+    return result
+end
+
+function Base.keys(t::PDVTree)
+    materialized = collect(keys(t._data))
+    lazy = _lazy_child_keys(t)
+    isempty(lazy) ? materialized : vcat(materialized, lazy)
+end
+
+Base.length(t::PDVTree) = length(keys(t))
+Base.iterate(t::PDVTree) = _iterate_tree(t, nothing)
+Base.iterate(t::PDVTree, state) = _iterate_tree(t, state)
+Base.values(t::PDVTree) = [t[k] for k in keys(t)]
+
+function _iterate_tree(t::PDVTree, state)
+    ks = keys(t)
+    idx = state === nothing ? 1 : state
+    idx > length(ks) && return nothing
+    k = ks[idx]
+    return (k => t[k], idx + 1)
+end
 
 function Base.haskey(t::PDVTree, key::String)::Bool
     parts = try
@@ -642,21 +811,35 @@ function Base.setindex!(t::PDVTree, value, key::String)
     else
         current = t
         for part in parts[1:end-1]
-            if !haskey(current._data, part)
-                new_node = PDVTree()
-                new_node._lazy_registry = t._lazy_registry
-                current._data[part] = new_node
+            if current isa PDVTree
+                data = current._data
+            elseif current isa PDVModule
+                data = current._children._data
+            else
+                error("Cannot set child '$part' on non-dict node $(typeof(current))")
             end
-            node = current._data[part]
-            if !(node isa PDVTree)
+
+            if !haskey(data, part)
                 new_node = PDVTree()
                 new_node._lazy_registry = t._lazy_registry
-                current._data[part] = new_node
+                data[part] = new_node
+            end
+            node = data[part]
+            if !(node isa Union{PDVTree, PDVModule})
+                new_node = PDVTree()
+                new_node._lazy_registry = t._lazy_registry
+                data[part] = new_node
                 node = new_node
             end
             current = node
         end
-        current._data[parts[end]] = value
+
+        # Set the leaf value
+        if current isa PDVTree
+            current._data[parts[end]] = value
+        elseif current isa PDVModule
+            current._children._data[parts[end]] = value
+        end
     end
 
     emit_changed!(t, key, change_type)
@@ -733,7 +916,7 @@ function run_tree_script(tree::PDVTree, script_path::String; kwargs...)
     if !(node isa PDVScript)
         throw(TypeError("Node at '$script_path' is not a PDVScript (got $(typeof(node)))"))
     end
-    return run_script(node, tree; kwargs...)
+    return run_script(node, tree; script_path=script_path, kwargs...)
 end
 
 function Base.show(io::IO, t::PDVTree)

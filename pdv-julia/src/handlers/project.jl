@@ -4,18 +4,23 @@
 # - pdv.project.load: load a project from a save directory.
 # - pdv.project.save: serialize the current tree to a save directory.
 
+"""Return the internal OrderedDict for a PDVTree or PDVModule (via its _children)."""
+_node_data(t::PDVTree) = t._data
+_node_data(m::PDVModule) = children_tree(m)._data
+
 function _set_tree_node_silent!(tree::PDVTree, path::String, value)
     parts = split(path, ".")
     current = tree
     for part in parts[1:end-1]
-        if !haskey(current._data, String(part))
+        d = _node_data(current)
+        if !haskey(d, String(part))
             new_node = PDVTree()
             new_node._lazy_registry = tree._lazy_registry
-            current._data[String(part)] = new_node
+            d[String(part)] = new_node
         end
-        current = current._data[String(part)]
+        current = d[String(part)]
     end
-    current._data[String(parts[end])] = value
+    _node_data(current)[String(parts[end])] = value
 end
 
 function _collect_nodes(tree::PDVTree, save_dir::String;

@@ -419,6 +419,13 @@ export function registerIpcHandlers(
     projectManager,
     kernelWorkingDirs,
     getActiveKernelId: () => activeKernelId,
+    getActiveKernelLanguage: () => {
+      if (activeKernelId) {
+        const kernel = kernelManager.getKernel(activeKernelId);
+        if (kernel) return kernel.language;
+      }
+      return "python";
+    },
     setActiveProjectDir: (dir) => { activeProjectDir = dir; },
     getPendingModuleImports: () => pendingModuleImports,
     setPendingModuleImports: (imports) => { pendingModuleImports = imports; },
