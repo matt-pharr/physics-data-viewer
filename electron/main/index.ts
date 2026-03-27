@@ -89,6 +89,7 @@ const REGISTERED_CHANNELS: readonly string[] = [
   IPC.project.save,
   IPC.project.load,
   IPC.project.new,
+  IPC.project.peekLanguages,
   IPC.config.get,
   IPC.config.set,
   IPC.themes.get,

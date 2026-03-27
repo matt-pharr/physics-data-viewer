@@ -492,7 +492,17 @@ function node_preview(value, kind::String)::String
         end
     catch
     end
-    # Custom types with preview method
+    # Custom types with pdv_preview method (module-defined types)
+    if has_preview_for(value)
+        try
+            s = pdv_preview(value)
+            if !isempty(s)
+                return string(s)[1:min(end, 100)]
+            end
+        catch
+        end
+    end
+    # Legacy: custom types with file_preview method
     if applicable(file_preview, value)
         try
             return string(file_preview(value))[1:min(end, 100)]

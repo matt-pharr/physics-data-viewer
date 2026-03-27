@@ -159,4 +159,22 @@ export function registerProjectIpcHandlers(
     clearModuleHealthWarnings();
     return true;
   });
+
+  ipcMain.handle(
+    IPC.project.peekLanguages,
+    async (_event, paths: string[]): Promise<Record<string, "python" | "julia">> => {
+      const result: Record<string, "python" | "julia"> = {};
+      await Promise.all(
+        paths.map(async (dir) => {
+          try {
+            const manifest = await ProjectManager.readManifest(dir);
+            result[dir] = manifest.language;
+          } catch {
+            result[dir] = "python";
+          }
+        })
+      );
+      return result;
+    }
+  );
 }

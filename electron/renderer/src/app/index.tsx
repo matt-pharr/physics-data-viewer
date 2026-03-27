@@ -25,7 +25,7 @@ import { CreateNoteDialog } from '../components/Tree/CreateNoteDialog';
 import { WriteTab } from '../components/WriteTab';
 import { SettingsDialog } from '../components/SettingsDialog';
 import { ImportModuleDialog } from '../components/ImportModuleDialog';
-import { WelcomeScreen } from '../components/WelcomeScreen';
+import { WelcomeScreen, type RecentProject } from '../components/WelcomeScreen';
 import type {
   CellTab,
   Config,
@@ -656,11 +656,23 @@ const App: React.FC = () => {
     [config?.recentProjects],
   );
 
-  /** Build RecentProject[] with language metadata for the WelcomeScreen. */
-  const recentProjects = useMemo(
-    () => recentProjectPaths.map((p) => ({ path: p, language: undefined as "python" | "julia" | undefined })),
-    [recentProjectPaths],
-  );
+  /** Build RecentProject[] with language metadata from project.json files. */
+  const [recentProjects, setRecentProjects] = useState<RecentProject[]>([]);
+  useEffect(() => {
+    if (recentProjectPaths.length === 0) {
+      setRecentProjects([]);
+      return;
+    }
+    let cancelled = false;
+    window.pdv.project.peekLanguages(recentProjectPaths).then((langMap) => {
+      if (cancelled) return;
+      setRecentProjects(recentProjectPaths.map((p) => ({ path: p, language: langMap[p] })));
+    }).catch(() => {
+      if (cancelled) return;
+      setRecentProjects(recentProjectPaths.map((p) => ({ path: p })));
+    });
+    return () => { cancelled = true; };
+  }, [recentProjectPaths]);
 
   const dismissWelcome = useCallback(() => setShowWelcome(false), []);
 

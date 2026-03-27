@@ -101,6 +101,7 @@ export const IPC = {
     save: "project:save",
     load: "project:load",
     new: "project:new",
+    peekLanguages: "project:peekLanguages",
   },
   /** App configuration channels. */
   config: {
@@ -1179,6 +1180,16 @@ export interface PDVApi {
      * @returns True when a new project was created/reset.
      */
     new: () => Promise<boolean>;
+    /**
+     * Peek at the language field of project.json for each given directory.
+     *
+     * Reads only the manifest — does not load the project into the kernel.
+     * Directories without a valid project.json default to "python".
+     *
+     * @param paths - Project directory paths to inspect.
+     * @returns Map of path → language.
+     */
+    peekLanguages(paths: string[]): Promise<Record<string, "python" | "julia">>;
     /**
      * Subscribe to project-loaded push notifications.
      *

@@ -613,6 +613,7 @@ export interface PDVApi {
     save(saveDir: string, codeCells: unknown): Promise<ProjectSaveResult>;
     load(saveDir: string): Promise<ProjectLoadResult>;
     new(): Promise<boolean>;
+    peekLanguages(paths: string[]): Promise<Record<string, "python" | "julia">>;
     onLoaded(callback: (payload: Record<string, unknown>) => void): () => void;
     onReloading(callback: (payload: { status: "reloading" | "ready" }) => void): () => void;
   };

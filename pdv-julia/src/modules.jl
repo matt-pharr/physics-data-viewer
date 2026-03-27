@@ -1,10 +1,12 @@
-# PDVKernel modules — Handler registry using Julia's multiple dispatch.
+# PDVKernel modules — Handler and preview registry using Julia's multiple dispatch.
 #
 # Module developers define:
 #   PDVKernel.pdv_handle(obj::MyType, path::String, tree::PDVTree) = ...
+#   PDVKernel.pdv_preview(obj::MyType) = "short description"
 #
-# A default fallback for `Any` returns dispatched=false.
-# has_handler_for() checks whether the resolved method is the Any fallback.
+# Default fallbacks for `Any` return nothing / "".
+# has_handler_for() / has_preview_for() check whether the resolved method
+# is the Any fallback.
 
 """
     pdv_handle(obj, path::String, tree)
@@ -16,6 +18,30 @@ The default fallback (for `Any`) returns nothing and signals no handler.
 """
 function pdv_handle(obj, path::String, tree)
     return nothing  # Fallback: no handler
+end
+
+"""
+    pdv_preview(obj) -> String
+
+Return a short (≤100 char) human-readable preview for a custom tree node.
+Module developers override this for their custom types.
+
+The default fallback returns "" (empty string), signalling no custom preview.
+"""
+function pdv_preview(obj)::String
+    return ""  # Fallback: no custom preview
+end
+
+"""
+    has_preview_for(obj) -> Bool
+
+Check whether any registered preview matches `obj`'s type.
+Returns true if the resolved pdv_preview method is NOT the default Any fallback.
+"""
+function has_preview_for(obj)::Bool
+    m = which(pdv_preview, Tuple{typeof(obj)})
+    fallback = which(pdv_preview, Tuple{Any})
+    return m !== fallback
 end
 
 """

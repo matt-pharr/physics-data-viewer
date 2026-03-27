@@ -29,10 +29,10 @@ const __pdv_protocol_version__ = "1.0"
 include("errors.jl")
 include("environment.jl")
 include("tree.jl")
+include("modules.jl")
 include("serialization.jl")
 include("comms.jl")
 include("namespace.jl")
-include("modules.jl")
 include("namelist_utils.jl")
 
 # Handler dispatch table
@@ -149,7 +149,7 @@ end
 # Exports
 export PDVTree, PDVFile, PDVScript, PDVNote, PDVGui, PDVNamelist, PDVLib, PDVModule, PDVHDF5
 export PDVError, PDVPathError, PDVKeyError, PDVSerializationError, PDVScriptError
-export bootstrap, pdv_handle
+export bootstrap, pdv_handle, pdv_preview
 export run_script, run_tree_script
 export file_preview, relative_path, resolve_file_path
 

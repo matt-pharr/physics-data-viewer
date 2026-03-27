@@ -30,8 +30,10 @@ interface WelcomeScreenProps {
 
 /** Short language badge for the recent projects list. */
 function languageBadge(language?: "python" | "julia"): string {
-  if (language === "julia") return "Jl";
-  return "Py";
+  if (language === "julia") return "Julia";
+  // return "Python";
+  if (language === "python") return "Python";
+  else return String(language);
 }
 
 /** Extracts the project folder name from an absolute path. */
@@ -72,7 +74,7 @@ export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({
             className="btn btn-primary welcome-action-btn"
             onClick={() => onNewProject("julia")}
           >
-            New Julia Project
+            New Julia Project (experimental)
           </button>
           <button
             className="btn btn-secondary welcome-action-btn"

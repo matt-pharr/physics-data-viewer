@@ -35,6 +35,15 @@ function loadThemesFromDisk(themesDir: string): void {
   if (savedThemes.length > 0) {
     return;
   }
+  if (!fsSync.existsSync(themesDir)) {
+    try {
+      fsSync.mkdirSync(themesDir, { recursive: true });
+      console.log(`[ipc-register-app-state] No themes directory found, created ${themesDir}`);
+    } catch (mkdirErr) {
+      console.warn(`[ipc-register-app-state] Unable to create themes directory: ${themesDir}`, mkdirErr);
+    }
+    return;
+  }
   try {
     const entries = fsSync.readdirSync(themesDir);
     for (const entry of entries) {
