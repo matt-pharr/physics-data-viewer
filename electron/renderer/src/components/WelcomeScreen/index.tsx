@@ -31,9 +31,7 @@ interface WelcomeScreenProps {
 /** Short language badge for the recent projects list. */
 function languageBadge(language?: "python" | "julia"): string {
   if (language === "julia") return "Julia";
-  // return "Python";
-  if (language === "python") return "Python";
-  else return String(language);
+  return "Python";
 }
 
 /** Extracts the project folder name from an absolute path. */

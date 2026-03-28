@@ -33,12 +33,13 @@ interface RegisterTreeNamespaceScriptIpcHandlersOptions {
   toNamespaceQueryPayload: (
     options?: NamespaceQueryOptions
   ) => Record<string, unknown>;
-  sanitizeScriptName: (scriptName: string) => string;
-  ensureScriptFile: (scriptPath: string) => Promise<void>;
+  sanitizeScriptName: (scriptName: string, language?: "python" | "julia") => string;
+  ensureScriptFile: (scriptPath: string, language?: "python" | "julia") => Promise<void>;
   resolveScriptPath: (
     kernelId: string,
     scriptPath: string,
-    kernelWorkingDirs: Map<string, string>
+    kernelWorkingDirs: Map<string, string>,
+    language?: "python" | "julia"
   ) => string;
   buildEditorSpawn: (
     cmdString: string | undefined,
@@ -144,26 +145,28 @@ export function registerTreeNamespaceScriptIpcHandlers(
       targetPath: string,
       scriptName: string
     ): Promise<TreeCreateScriptResult> => {
-      if (!kernelManager.getKernel(kernelId)) {
+      const kernel = kernelManager.getKernel(kernelId);
+      if (!kernel) {
         throw new Error(`Kernel not found: ${kernelId}`);
       }
+      const language = kernel.language;
       let workingDir = kernelWorkingDirs.get(kernelId);
       if (!workingDir) {
         workingDir = await projectManager.createWorkingDir();
         kernelWorkingDirs.set(kernelId, workingDir);
       }
-      const safeName = sanitizeScriptName(scriptName);
+      const safeName = sanitizeScriptName(scriptName, language);
       const scriptNodeName = path.parse(safeName).name;
       const scriptsDir = path.join(workingDir, ...targetPath.split(".").filter(Boolean));
       await fs.mkdir(scriptsDir, { recursive: true });
       const scriptPath = path.join(scriptsDir, safeName);
-      await ensureScriptFile(scriptPath);
+      await ensureScriptFile(scriptPath, language);
 
       await commRouter.request(PDVMessageType.SCRIPT_REGISTER, {
         parent_path: targetPath,
         name: scriptNodeName,
         relative_path: scriptPath,
-        language: "python",
+        language,
       });
       return { success: true, scriptPath };
     }
@@ -322,7 +325,9 @@ export function registerTreeNamespaceScriptIpcHandlers(
       // Comm failed — fall through to legacy resolution
     }
     if (!resolvedPath) {
-      resolvedPath = resolveScriptPath(kernelId, scriptPath, kernelWorkingDirs);
+      const kernel = kernelManager.getKernel(kernelId);
+      const language = kernel?.language ?? "python";
+      resolvedPath = resolveScriptPath(kernelId, scriptPath, kernelWorkingDirs, language);
     }
 
     const isJulia = resolvedPath.endsWith(".jl");

@@ -74,6 +74,7 @@ const REGISTERED_CHANNELS: readonly string[] = [
   IPC.tree.invokeHandler,
   IPC.namespace.query,
   IPC.script.edit,
+  IPC.script.run,
   IPC.note.save,
   IPC.note.read,
   IPC.modules.listInstalled,
@@ -175,21 +176,24 @@ function runSerializedProjectManifestMutation<T>(
 }
 
 /**
- * Ensure script names are safe and end with `.py`.
+ * Ensure script names are safe and end with the correct language extension.
  *
  * @param scriptName - User-provided script name.
+ * @param language - Target language (determines file extension).
  * @returns Sanitized filename.
  */
-function sanitizeScriptName(scriptName: string): string {
+function sanitizeScriptName(scriptName: string, language: "python" | "julia" = "python"): string {
+  const ext = language === "julia" ? ".jl" : ".py";
   const trimmed = scriptName.trim() || "script";
-  const withExt = trimmed.endsWith(".py") ? trimmed : `${trimmed}.py`;
+  const withExt = trimmed.endsWith(ext) ? trimmed : `${trimmed}${ext}`;
   return withExt.replace(/[\\/]/g, "_");
 }
 
 function resolveScriptPath(
   kernelId: string,
   scriptPath: string,
-  kernelWorkingDirs: Map<string, string>
+  kernelWorkingDirs: Map<string, string>,
+  language: "python" | "julia" = "python"
 ): string {
   if (path.isAbsolute(scriptPath)) {
     return scriptPath;
@@ -205,16 +209,18 @@ function resolveScriptPath(
   if (parts.length === 0) {
     throw new Error("Invalid script path");
   }
+  const ext = language === "julia" ? ".jl" : ".py";
   const leaf = parts[parts.length - 1];
-  return path.join(workingDir, ...parts.slice(0, -1), `${leaf}.py`);
+  return path.join(workingDir, ...parts.slice(0, -1), `${leaf}${ext}`);
 }
 
 /**
  * Write a script stub if the file does not already exist.
  *
  * @param scriptPath - Absolute target script path.
+ * @param language - Target language (determines template syntax).
  */
-async function ensureScriptFile(scriptPath: string): Promise<void> {
+async function ensureScriptFile(scriptPath: string, language: "python" | "julia" = "python"): Promise<void> {
   try {
     await fs.stat(scriptPath);
     return;
@@ -228,15 +234,24 @@ async function ensureScriptFile(scriptPath: string): Promise<void> {
   const user = process.env.USER ?? process.env.USERNAME ?? "user";
   const host = os.hostname();
   const filename = path.basename(scriptPath);
-  const template =
-    '"""\n' +
-    `${filename}\n` +
-    `created by ${user} on ${host} on ${date} at ${time}\n` +
-    "Description: add your script description here.\n" +
-    '"""\n\n' +
-    "def run(pdv_tree: dict, ) -> dict:\n" +
-    "    # add your code here\n" +
-    "    return {}\n";
+  const template = language === "julia"
+    ? "#=\n" +
+      `  ${filename}\n` +
+      `  created by ${user} on ${host} on ${date} at ${time}\n` +
+      "  Description: add your script description here.\n" +
+      "=#\n\n" +
+      "function run(pdv_tree::Dict)\n" +
+      "    # add your code here\n" +
+      "    return Dict()\n" +
+      "end\n"
+    : '"""\n' +
+      `${filename}\n` +
+      `created by ${user} on ${host} on ${date} at ${time}\n` +
+      "Description: add your script description here.\n" +
+      '"""\n\n' +
+      "def run(pdv_tree: dict, ) -> dict:\n" +
+      "    # add your code here\n" +
+      "    return {}\n";
   await fs.writeFile(scriptPath, template, "utf8");
 }
 
