@@ -1,11 +1,10 @@
 """
 pdv-python/tests/test_tree.py — Unit tests for PDVTree and PDVScript.
 
-Tests are organized around three areas:
+Tests are organized around two areas:
 
 1. Dot-path access: set, get, delete, contains via nested paths.
-2. Lazy loading: registry population, transparent fetch, cache eviction.
-3. Change notification: mutations emit pdv.tree.changed with correct diff.
+2. Change notification: mutations emit pdv.tree.changed with correct diff.
 
 Reference: ARCHITECTURE.md §5.6, §5.7, §5.8, §7.1
 """
@@ -13,7 +12,7 @@ Reference: ARCHITECTURE.md §5.6, §5.7, §5.8, §7.1
 import os
 
 import pytest
-from pdv_kernel.tree import PDVTree, PDVScript, LazyLoadRegistry
+from pdv_kernel.tree import PDVTree, PDVScript
 from pdv_kernel.errors import PDVKeyError, PDVPathError, PDVScriptError
 
 
@@ -71,129 +70,6 @@ class TestDotPathAccess:
         """A path with an empty segment raises PDVPathError."""
         with pytest.raises(PDVPathError):
             _ = tree_with_comm['a..b']
-
-
-class TestLazyLoading:
-    """Tests for the LazyLoadRegistry and transparent lazy fetching."""
-
-    def test_registry_register_and_has(self):
-        """Registering a path sets has() to True."""
-        reg = LazyLoadRegistry()
-        reg.register('x', {'backend': 'inline', 'format': 'inline', 'value': 1})
-        assert reg.has('x')
-        assert not reg.has('y')
-
-    def test_registry_fetch_removes_entry(self, tmp_save_dir):
-        """Fetching a path removes it from the registry."""
-        reg = LazyLoadRegistry()
-        reg.register('x', {'backend': 'inline', 'format': 'inline', 'value': 42})
-        result = reg.fetch('x', tmp_save_dir)
-        assert result == 42
-        assert not reg.has('x')
-
-    def test_tree_get_triggers_lazy_load(self, tree_with_comm, tmp_save_dir):
-        """Getting a key absent from memory but in registry triggers lazy load."""
-        numpy = pytest.importorskip('numpy')
-        arr = numpy.array([1.0, 2.0, 3.0])
-        tree_dir = os.path.join(tmp_save_dir, 'tree')
-        os.makedirs(tree_dir, exist_ok=True)
-        numpy.save(os.path.join(tree_dir, 'x.npy'), arr)
-
-        tree_with_comm._lazy_registry.register('x', {
-            'backend': 'local_file',
-            'relative_path': 'tree/x.npy',
-            'format': 'npy',
-        })
-        tree_with_comm._set_save_dir(tmp_save_dir)
-        result = tree_with_comm['x']
-        assert numpy.array_equal(result, arr)
-
-    def test_lazy_load_caches_result(self, tree_with_comm, tmp_save_dir):
-        """After lazy load, second access returns cached value (no second disk read)."""
-        numpy = pytest.importorskip('numpy')
-        arr = numpy.array([7.0])
-        tree_dir = os.path.join(tmp_save_dir, 'tree')
-        os.makedirs(tree_dir, exist_ok=True)
-        numpy.save(os.path.join(tree_dir, 'y.npy'), arr)
-
-        tree_with_comm._lazy_registry.register('y', {
-            'backend': 'local_file',
-            'relative_path': 'tree/y.npy',
-            'format': 'npy',
-        })
-        tree_with_comm._set_save_dir(tmp_save_dir)
-        r1 = tree_with_comm['y']
-        # After first access, entry is removed from registry
-        assert not tree_with_comm._lazy_registry.has('y')
-        r2 = tree_with_comm['y']  # served from in-memory cache now
-        assert numpy.array_equal(r1, r2)
-
-    def test_registry_clear_clears_all(self):
-        """clear() removes all entries."""
-        reg = LazyLoadRegistry()
-        reg.register('a', {'backend': 'inline', 'format': 'inline', 'value': 1})
-        reg.register('b', {'backend': 'inline', 'format': 'inline', 'value': 2})
-        reg.clear()
-        assert not reg.has('a')
-        assert not reg.has('b')
-
-    def test_registry_entries_get_and_remove(self):
-        """Registry helper accessors expose and remove lazy entries."""
-        reg = LazyLoadRegistry()
-        reg.register('x', {'backend': 'inline', 'format': 'inline', 'value': 1})
-        assert reg.get_storage('x') == {'backend': 'inline', 'format': 'inline', 'value': 1}
-        assert ('x', {'backend': 'inline', 'format': 'inline', 'value': 1}) in reg.entries()
-        reg.remove('x')
-        assert reg.get_storage('x') is None
-
-    def test_tree_lazy_accessors(self, tree_with_comm):
-        """PDVTree exposes lazy lookup helpers for handler use."""
-        tree_with_comm._lazy_registry.register('a.b', {'backend': 'inline', 'format': 'inline', 'value': 1})
-        assert tree_with_comm.has_lazy_entry('a.b')
-        assert tree_with_comm.lazy_storage_for('a.b') == {'backend': 'inline', 'format': 'inline', 'value': 1}
-        assert ('a.b', {'backend': 'inline', 'format': 'inline', 'value': 1}) in tree_with_comm.iter_lazy_entries()
-
-    def test_subtree_lazy_load_uses_path_prefix(self, tmp_save_dir):
-        """A sub-tree with _path_prefix resolves lazy entries using full path."""
-        tree = PDVTree()
-        tree._set_save_dir(tmp_save_dir)
-
-        # Create a module subtree sharing the root's lazy registry
-        module = PDVTree()
-        module._lazy_registry = tree._lazy_registry
-        module._save_dir = tree._save_dir
-        module._path_prefix = "mod"
-        dict.__setitem__(tree, "mod", module)
-
-        # Register a lazy entry under the full path "mod.result"
-        tree._lazy_registry.register("mod.result", {
-            "backend": "inline", "format": "inline", "value": 42,
-        })
-
-        # Accessing "result" on the subtree should resolve via "mod.result"
-        result = module["result"]
-        assert result == 42
-        # And it should be cached in the subtree
-        assert dict.__contains__(module, "result")
-
-    def test_populate_from_index_registers_lazy_nodes(self, tmp_save_dir):
-        """populate_from_index() registers exactly the nodes marked lazy=True."""
-        reg = LazyLoadRegistry()
-        nodes = [
-            {'path': 'x', 'lazy': True, 'storage': {
-                'backend': 'local_file', 'relative_path': 'tree/x.npy', 'format': 'npy'
-            }},
-            {'path': 'y', 'lazy': False, 'storage': {
-                'backend': 'inline', 'format': 'inline', 'value': 1
-            }},
-            {'path': 'z', 'type': 'folder', 'lazy': False, 'storage': {
-                'backend': 'none', 'format': 'none'
-            }},
-        ]
-        reg.populate_from_index(nodes)
-        assert reg.has('x')
-        assert not reg.has('y')
-        assert not reg.has('z')
 
 
 class TestChangeNotification:

@@ -138,7 +138,6 @@ def handle_module_register(msg: dict) -> None:
 
             if node_type == "folder":
                 folder = PDVTree()
-                folder._lazy_registry = tree._lazy_registry
                 folder._working_dir = tree._working_dir
                 folder._save_dir = tree._save_dir
                 folder._path_prefix = full_path
@@ -151,7 +150,6 @@ def handle_module_register(msg: dict) -> None:
                     name=meta.get("name", old_meta.get("name", name)),
                     version=meta.get("version", old_meta.get("version", version)),
                 )
-                mod._lazy_registry = tree._lazy_registry
                 mod._working_dir = tree._working_dir
                 mod._save_dir = tree._save_dir
                 mod._path_prefix = full_path

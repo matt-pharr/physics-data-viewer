@@ -6,13 +6,12 @@ Tests cover:
 2. pdv.tree.list at nested path returns correct children.
 3. pdv.tree.list at invalid path sends error.
 4. pdv.tree.get mode='metadata' returns descriptor without loading data.
-5. pdv.tree.get mode='value' triggers lazy load and returns value.
+5. pdv.tree.get mode='value' returns value.
 6. pdv.tree.get at missing path sends error.
 
 Reference: ARCHITECTURE.md §3.4, §7
 """
 
-import os
 import uuid
 import pytest
 from unittest.mock import MagicMock, patch
@@ -150,22 +149,11 @@ class TestHandleTreeGet:
             handle_tree_get(msg)
         response = mock_comm._sent[0]
         assert response['status'] == 'ok'
-        assert response['payload']['lazy'] is False
         assert response['payload']['type'] == 'scalar'
 
-    def test_value_mode_triggers_lazy_load(self, tree_with_comm, tmp_save_dir):
-        """mode='value' fetches lazy node from disk."""
-        numpy = pytest.importorskip('numpy')
-        arr = numpy.array([5.0, 6.0])
-        tree_dir = os.path.join(tmp_save_dir, 'tree')
-        os.makedirs(tree_dir, exist_ok=True)
-        numpy.save(os.path.join(tree_dir, 'ch1.npy'), arr)
-        tree_with_comm._lazy_registry.register('ch1', {
-            'backend': 'local_file',
-            'relative_path': 'tree/ch1.npy',
-            'format': 'npy',
-        })
-        tree_with_comm._set_save_dir(tmp_save_dir)
+    def test_value_mode_returns_value(self, tree_with_comm):
+        """mode='value' returns the node value."""
+        tree_with_comm['ch1'] = 42
         mock_comm = _make_mock_comm()
         msg = _make_msg('pdv.tree.get', {'path': 'ch1', 'mode': 'value'})
         with patch.object(comms_mod, '_comm', mock_comm), \
@@ -174,8 +162,6 @@ class TestHandleTreeGet:
         response = mock_comm._sent[0]
         assert response['status'] == 'ok'
         assert response['payload']['path'] == 'ch1'
-        # After value fetch, entry removed from registry
-        assert not tree_with_comm._lazy_registry.has('ch1')
 
     def test_get_missing_path_sends_error(self, tree_with_comm):
         """pdv.tree.get for a non-existent path sends status=error."""

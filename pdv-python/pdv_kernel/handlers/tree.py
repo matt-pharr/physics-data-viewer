@@ -96,7 +96,6 @@ def handle_tree_list(msg: dict) -> None:
             "parent_path": path,
             "type": kind,
             "has_children": has_children,
-            "lazy": False,
             "preview": preview,
             "python_type": python_type_string(value),
             "has_handler": has_handler_for(value),
@@ -117,8 +116,7 @@ def handle_tree_list(msg: dict) -> None:
 def handle_tree_get(msg: dict) -> None:
     """Handle the ``pdv.tree.get`` message.
 
-    Returns the value or metadata for a specific tree node. If the node
-    is lazy, this triggers a transparent load from the save directory.
+    Returns the value or metadata for a specific tree node.
 
     Expected payload
     ----------------
@@ -173,7 +171,7 @@ def handle_tree_get(msg: dict) -> None:
         kind = detect_kind(value)
         send_message(
             "pdv.tree.get.response",
-            {"path": path, "lazy": False, "type": kind, "storage": {}},
+            {"path": path, "type": kind, "storage": {}},
             in_reply_to=msg_id,
         )
         return

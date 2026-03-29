@@ -165,12 +165,10 @@ describe("@slow Cross-boundary integration (Python + Electron)", { timeout: 120_
     expect(response.status).toBe("ok");
     const payload = response.payload as {
       path?: unknown;
-      lazy?: unknown;
       type?: unknown;
       value?: unknown;
     };
     expect(payload.path).toBe("x");
-    expect(payload.lazy).toBe(false);
     expect(payload.type).toBe("scalar");
     expect(payload.value).toBeUndefined();
   });

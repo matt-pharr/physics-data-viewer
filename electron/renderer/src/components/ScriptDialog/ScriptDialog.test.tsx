@@ -29,7 +29,6 @@ function makeNode(overrides: Partial<TreeNodeData> = {}): TreeNodeData {
     parent_path: 'scripts',
     type: 'script',
     has_children: false,
-    lazy: false,
     hasChildren: false,
     parentPath: 'scripts',
     params: [],

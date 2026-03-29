@@ -12,7 +12,7 @@
  *
  * Load coordination (ARCHITECTURE.md §8.2):
  * 1. App sends ``pdv.project.load`` comm with save_dir.
- * 2. Kernel reads tree-index.json, populates lazy registry.
+ * 2. Kernel reads tree-index.json, rebuilds the in-memory tree.
  * 3. Kernel pushes ``pdv.project.loaded`` notification.
  * 4. App reads code-cells.json.
  * 5. UI is unlocked.

@@ -955,7 +955,6 @@ const App: React.FC = () => {
                   parent_path: createNoteTarget || null,
                   type: 'markdown',
                   has_children: false,
-                  lazy: false,
                   preview: '',
                   hasChildren: false,
                   parentPath: createNoteTarget || null,

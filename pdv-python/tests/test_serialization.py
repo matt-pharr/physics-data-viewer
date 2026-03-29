@@ -145,7 +145,6 @@ class TestSerializeAndDeserialize:
         descriptor = serialize_node('data.arr', arr, tmp_working_dir)
         assert descriptor['type'] == KIND_NDARRAY
         assert descriptor['storage']['format'] == 'npy'
-        assert descriptor['lazy'] is False
         value = deserialize_node(descriptor['storage'], tmp_working_dir)
         assert numpy.array_equal(value, arr)
 
@@ -183,7 +182,7 @@ class TestSerializeAndDeserialize:
         """Returned descriptor contains all required fields including metadata."""
         descriptor = serialize_node('my.node', 123, tmp_working_dir)
         required = {'id', 'path', 'key', 'parent_path', 'type', 'has_children',
-                    'lazy', 'created_at', 'updated_at', 'storage', 'metadata'}
+                    'created_at', 'updated_at', 'storage', 'metadata'}
         assert required.issubset(descriptor.keys())
         assert descriptor['id'] == 'my.node'
         assert descriptor['key'] == 'node'

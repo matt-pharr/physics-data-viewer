@@ -17,7 +17,6 @@ function makeNode(overrides: Partial<TreeNodeData & { depth: number; selected?: 
     parent_path: 'data',
     type: 'folder',
     has_children: true,
-    lazy: false,
     hasChildren: true,
     parentPath: 'data',
     depth: 0,

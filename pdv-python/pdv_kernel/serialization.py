@@ -196,7 +196,7 @@ def serialize_node(
     dict
         Node descriptor dict as defined in ARCHITECTURE.md §7.3,
         including ``id``, ``path``, ``key``, ``type``, ``storage``,
-        ``has_children``, ``lazy``, ``created_at``, ``updated_at``,
+        ``has_children``, ``created_at``, ``updated_at``,
         and a ``metadata`` sub-dict with type-specific fields
         (``shape``, ``dtype``, ``preview``, ``module_id``, etc.).
 
@@ -240,7 +240,6 @@ def serialize_node(
         "parent_path": parent_path,
         "type": kind,
         "has_children": False,
-        "lazy": False,
         "created_at": now,
         "updated_at": now,
     }

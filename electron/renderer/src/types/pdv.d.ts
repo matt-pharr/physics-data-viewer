@@ -32,8 +32,6 @@ export interface NodeDescriptor {
   type: string;
   /** True if node has children that can be listed/expanded. */
   has_children: boolean;
-  /** True if file-backed value is lazy-loaded in kernel. */
-  lazy: boolean;
   /** Human-readable preview text for compact table display. */
   preview?: string;
   /** Optional language hint for script/code nodes. */
