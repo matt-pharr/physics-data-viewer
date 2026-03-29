@@ -117,6 +117,7 @@ export const IPC = {
   themes: {
     get: "themes:get",
     save: "themes:save",
+    openDir: "themes:openDir",
   },
   /** Code-cell persistence channels. */
   codeCells: {
@@ -1268,6 +1269,12 @@ export interface PDVApi {
      * @returns True when save succeeded.
      */
     save(theme: Theme): Promise<boolean>;
+    /**
+     * Open the themes directory in the system file manager.
+     *
+     * @returns The error string from shell.openPath, or empty string on success.
+     */
+    openDir(): Promise<string>;
   };
 
   /** Code-cell persistence operations. */

@@ -665,6 +665,16 @@ export class KernelManager extends EventEmitter {
         if (result.stdout === "") delete result.stdout;
         if (result.stderr === "") delete result.stderr;
         if (result.images?.length === 0) delete result.images;
+        // When streaming via onChunk, stdout/stderr/images were already pushed
+        // to the renderer in real-time. Including them in the resolved result
+        // causes a race: if the promise resolves before React commits the
+        // streamed state updates, the renderer sets stdout from the result,
+        // then the stream events append again — doubling the output.
+        if (onChunk) {
+          delete result.stdout;
+          delete result.stderr;
+          delete result.images;
+        }
         resolve(result);
       };
 

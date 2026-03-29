@@ -125,6 +125,7 @@ const api: PDVApi = {
   themes: {
     get: () => ipcRenderer.invoke(IPC.themes.get),
     save: (theme) => ipcRenderer.invoke(IPC.themes.save, theme),
+    openDir: () => ipcRenderer.invoke(IPC.themes.openDir),
   },
   codeCells: {
     load: () => ipcRenderer.invoke(IPC.codeCells.load),

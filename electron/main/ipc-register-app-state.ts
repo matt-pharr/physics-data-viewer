@@ -10,7 +10,7 @@
  * - Push forwarding between comm router and renderer.
  */
 
-import { app, dialog, ipcMain } from "electron";
+import { app, dialog, ipcMain, shell } from "electron";
 import * as fs from "fs/promises";
 import * as fsSync from "fs";
 import * as path from "path";
@@ -146,6 +146,11 @@ export function registerAppStateIpcHandlers(
     const filePath = path.join(themesDir, `${safeName}.json`);
     await fs.writeFile(filePath, JSON.stringify(theme, null, 2), "utf8");
     return true;
+  });
+
+  ipcMain.handle(IPC.themes.openDir, async () => {
+    await fs.mkdir(themesDir, { recursive: true });
+    return shell.openPath(themesDir);
   });
 
   ipcMain.handle(IPC.codeCells.load, async () => savedCodeCells);

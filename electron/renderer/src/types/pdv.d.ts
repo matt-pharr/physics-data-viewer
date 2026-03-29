@@ -631,6 +631,7 @@ export interface PDVApi {
   themes: {
     get(): Promise<Theme[]>;
     save(theme: Theme): Promise<boolean>;
+    openDir(): Promise<string>;
   };
   codeCells: {
     load(): Promise<CodeCellData | null>;
