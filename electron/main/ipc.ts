@@ -135,6 +135,7 @@ export const IPC = {
   /** App menu synchronization channels. */
   menu: {
     updateRecentProjects: "menu:updateRecentProjects",
+    updateEnabled: "menu:updateEnabled",
   },
   /** Module popup window channels. */
   moduleWindows: {
@@ -661,6 +662,16 @@ export interface MenuActionPayload {
     | "modules:import";
   /** Project directory path for open-recent actions. */
   path?: string;
+}
+
+/**
+ * Partial map of menu item IDs to enabled/disabled state.
+ * Items not present in the map default to enabled.
+ */
+export interface MenuEnabledState {
+  "project:save"?: boolean;
+  "project:saveAs"?: boolean;
+  "modules:import"?: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -1335,6 +1346,13 @@ export interface PDVApi {
      * @returns True when the menu was updated.
      */
     updateRecentProjects(paths: string[]): Promise<boolean>;
+    /**
+     * Update enabled/disabled state for File-menu items.
+     *
+     * @param state - Partial map of menu-item IDs to enabled booleans.
+     * @returns True when the menu was updated.
+     */
+    updateEnabled(state: MenuEnabledState): Promise<boolean>;
     /**
      * Subscribe to app-menu action events.
      *

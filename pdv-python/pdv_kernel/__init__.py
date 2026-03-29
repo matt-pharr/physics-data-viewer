@@ -32,8 +32,31 @@ __pdv_protocol_version__ = "1.0"
 
 __all__ = [
     "PDVTree", "PDVFile", "PDVScript", "PDVNote", "PDVGui", "PDVNamelist", "PDVModule", "PDVLib",
-    "PDVError", "bootstrap", "handle", "__version__",
+    "PDVError", "bootstrap", "handle", "log", "__version__",
 ]
+
+
+def log(*args, **kwargs) -> None:
+    """Print a debug message directly to stderr, bypassing ipykernel's stdout capture.
+
+    Output appears in the Electron terminal prefixed with ``[kernel:<id>]``.
+    Accepts the same arguments as the built-in ``print()``.
+    """
+    import io as _io  # noqa: PLC0415
+    import os as _os  # noqa: PLC0415
+
+    # ipykernel replaces sys.stderr with its own stream, so we write
+    # directly to file descriptor 2 to guarantee output reaches the
+    # spawned process's piped stderr.
+    _real_stderr = _io.TextIOWrapper(
+        _io.FileIO(_os.dup(2), mode="w", closefd=True),
+        encoding="utf-8",
+        line_buffering=True,
+    )
+    kwargs.setdefault("file", _real_stderr)
+    kwargs.setdefault("flush", True)
+    print(*args, **kwargs)
+    _real_stderr.close()
 
 
 def bootstrap(ip=None):

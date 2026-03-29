@@ -74,13 +74,18 @@ class TestHandleProjectLoad:
         # Inline value should be accessible
         assert tree_with_comm['data.x'] == 42
 
-    def test_lazy_nodes_registered(self, tree_with_comm, tmp_save_dir):
-        """Lazy nodes from tree-index.json are registered in the lazy-load registry."""
+    def test_file_backed_nodes_eagerly_loaded(self, tree_with_comm, tmp_save_dir):
+        """File-backed nodes from tree-index.json are eagerly deserialized into the tree."""
+        numpy = pytest.importorskip('numpy')
+        arr = numpy.array([1.0, 2.0, 3.0])
+        tree_dir = os.path.join(tree_with_comm._working_dir, 'tree')
+        os.makedirs(tree_dir, exist_ok=True)
+        numpy.save(os.path.join(tree_dir, 'arr.npy'), arr)
         nodes = [
             {
                 'path': 'arr',
                 'type': 'ndarray',
-                'lazy': True,
+                'lazy': False,
                 'storage': {
                     'backend': 'local_file',
                     'relative_path': 'tree/arr.npy',
@@ -94,7 +99,8 @@ class TestHandleProjectLoad:
         with patch.object(comms_mod, '_comm', mock_comm), \
              patch.object(comms_mod, '_pdv_tree', tree_with_comm):
             handle_project_load(msg)
-        assert tree_with_comm._lazy_registry.has('arr')
+        assert not tree_with_comm._lazy_registry.has('arr')
+        assert numpy.array_equal(dict.__getitem__(tree_with_comm, 'arr'), arr)
 
     def test_sends_project_loaded_push(self, tree_with_comm, tmp_save_dir):
         """After loading, pdv.project.loaded push notification is sent."""

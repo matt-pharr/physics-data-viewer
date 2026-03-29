@@ -187,6 +187,13 @@ export interface MenuActionPayload {
   path?: string;
 }
 
+/** Partial map of menu item IDs to enabled/disabled state. */
+export interface MenuEnabledState {
+  "project:save"?: boolean;
+  "project:saveAs"?: boolean;
+  "modules:import"?: boolean;
+}
+
 /** Result returned from `project.save()`. */
 export interface ProjectSaveResult {
   /** SHA-256 checksum of the serialized tree-index.json. */
@@ -646,6 +653,7 @@ export interface PDVApi {
   };
   menu: {
     updateRecentProjects(paths: string[]): Promise<boolean>;
+    updateEnabled(state: MenuEnabledState): Promise<boolean>;
     onAction(callback: (payload: MenuActionPayload) => void): () => void;
   };
 }

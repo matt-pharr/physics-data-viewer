@@ -111,7 +111,11 @@ def handle_module_register(msg: dict) -> None:
     else:
         tree[alias] = PDVModule(module_id=module_id, name=name, version=version)
 
-    # v4: mount subtree from module_index (same two-pass logic as project load)
+    # v4: mount subtree from module_index (same two-pass logic as project load).
+    # When loading a saved project the tree is already populated from
+    # tree-index.json before MODULE_REGISTER runs.  Skip nodes that already
+    # exist so that user data (e.g. result objects under "outputs") is not
+    # overwritten by empty default containers.
     if module_index:
         from pdv_kernel.handlers.project import _set_tree_node  # noqa: PLC0415
 
@@ -123,6 +127,14 @@ def handle_module_register(msg: dict) -> None:
             if not node_path_rel:
                 continue
             full_path = f"{alias}.{node_path_rel}"
+
+            # Skip if this node already exists (e.g. from project load)
+            try:
+                existing_node = tree[full_path]
+                if existing_node is not None:
+                    continue
+            except (KeyError, TypeError):
+                pass
 
             if node_type == "folder":
                 folder = PDVTree()
@@ -155,6 +167,14 @@ def handle_module_register(msg: dict) -> None:
             if not node_path_rel or node_type in ("folder", "module"):
                 continue
             full_path = f"{alias}.{node_path_rel}"
+
+            # Skip if this node already exists (e.g. from project load)
+            try:
+                existing_node = tree[full_path]
+                if existing_node is not None:
+                    continue
+            except (KeyError, TypeError):
+                pass
             rel_path = storage.get("relative_path", "")
 
             if node_type == "script":
@@ -202,8 +222,10 @@ def handle_module_register(msg: dict) -> None:
                 # handle_modules_setup via the lib_dir field
             elif backend == "inline":
                 _set_tree_node(tree, full_path, storage.get("value"))
-            else:
-                tree._lazy_registry.register(full_path, storage)
+            elif backend == "local_file":
+                from pdv_kernel.serialization import deserialize_node  # noqa: PLC0415
+                value = deserialize_node(storage, tree._working_dir or "", trusted=True)
+                _set_tree_node(tree, full_path, value)
 
     send_message(
         "pdv.module.register.response",
@@ -276,8 +298,11 @@ def handle_modules_setup(msg: dict) -> None:
         lib_dir = mod_info.get("lib_dir")
         entry_point = mod_info.get("entry_point")
 
-        # v4: add lib_dir directly to sys.path
-        if lib_dir and os.path.isdir(lib_dir) and lib_dir not in sys.path:
+        # v4: add lib_dir directly to sys.path.
+        # Do not gate on os.path.isdir — the directory may not exist yet when
+        # pdv.modules.setup runs before bindActiveProjectModules copies files.
+        # Python handles non-existent sys.path entries gracefully.
+        if lib_dir and lib_dir not in sys.path:
             sys.path.insert(1, lib_dir)
 
         # Legacy: add parent directory of each lib .py file to sys.path.

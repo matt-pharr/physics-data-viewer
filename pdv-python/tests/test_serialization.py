@@ -145,7 +145,7 @@ class TestSerializeAndDeserialize:
         descriptor = serialize_node('data.arr', arr, tmp_working_dir)
         assert descriptor['type'] == KIND_NDARRAY
         assert descriptor['storage']['format'] == 'npy'
-        assert descriptor['lazy'] is True
+        assert descriptor['lazy'] is False
         value = deserialize_node(descriptor['storage'], tmp_working_dir)
         assert numpy.array_equal(value, arr)
 

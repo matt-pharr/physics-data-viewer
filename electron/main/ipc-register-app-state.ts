@@ -18,7 +18,7 @@ import * as path from "path";
 import type { ConfigStore, PDVConfig } from "./config";
 import type { CodeCellData, Theme } from "./ipc";
 import { IPC } from "./ipc";
-import { updateRecentProjectsMenu } from "./menu";
+import { updateMenuEnabled, updateRecentProjectsMenu } from "./menu";
 
 let savedThemes: Theme[] = [];
 let savedCodeCells: CodeCellData | null = null;
@@ -158,6 +158,11 @@ export function registerAppStateIpcHandlers(
 
   ipcMain.handle(IPC.menu.updateRecentProjects, async (_event, paths: string[]) => {
     updateRecentProjectsMenu(Array.isArray(paths) ? paths : []);
+    return true;
+  });
+
+  ipcMain.handle(IPC.menu.updateEnabled, async (_event, state: Record<string, boolean>) => {
+    updateMenuEnabled(state);
     return true;
   });
 

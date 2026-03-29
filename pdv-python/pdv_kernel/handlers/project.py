@@ -16,6 +16,7 @@ ARCHITECTURE.md §4.2 (project load sequence), §8 (save and load)
 from __future__ import annotations
 
 from pdv_kernel.handlers import register
+from pdv_kernel import log
 
 
 def _set_tree_node(tree: "Any", path: str, value: "Any") -> None:
@@ -203,7 +204,6 @@ def handle_project_load(msg: dict) -> None:
         storage = node.get("storage", {})
         backend = storage.get("backend", "")
         meta = node.get("metadata", {})
-
         if node_type in ("folder", "module"):
             continue  # Already handled in pass 1
 
@@ -259,11 +259,10 @@ def handle_project_load(msg: dict) -> None:
                     sys.path.insert(1, parent_dir)
         elif backend == "inline":
             _set_tree_node(tree, node_path, storage.get("value"))
-        elif node.get("lazy", False):
-            tree._lazy_registry.register(node_path, storage)
-        else:
-            # Non-lazy file-backed node — register for lazy loading anyway
-            tree._lazy_registry.register(node_path, storage)
+        elif backend == "local_file":
+            from pdv_kernel.serialization import deserialize_node  # noqa: PLC0415
+            value = deserialize_node(storage, working_dir, trusted=True)
+            _set_tree_node(tree, node_path, value)
 
     node_count = len(nodes)
     send_message(

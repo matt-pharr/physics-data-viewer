@@ -171,7 +171,7 @@ describe("@slow Cross-boundary integration (Python + Electron)", { timeout: 120_
     };
     expect(payload.path).toBe("x");
     expect(payload.lazy).toBe(false);
-    expect(payload.type).toBe("unknown");
+    expect(payload.type).toBe("scalar");
     expect(payload.value).toBeUndefined();
   });
 

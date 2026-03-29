@@ -89,7 +89,6 @@ def handle_tree_list(msg: dict) -> None:
         kind = detect_kind(value)
         preview = node_preview(value, kind)
         has_children = isinstance(value, dict) and bool(dict.keys(value))
-        lazy = tree.has_lazy_entry(child_path)
         descriptor = {
             "id": child_path,
             "path": child_path,
@@ -97,7 +96,7 @@ def handle_tree_list(msg: dict) -> None:
             "parent_path": path,
             "type": kind,
             "has_children": has_children,
-            "lazy": lazy,
+            "lazy": False,
             "preview": preview,
             "python_type": python_type_string(value),
             "has_handler": has_handler_for(value),
@@ -111,27 +110,6 @@ def handle_tree_list(msg: dict) -> None:
         if kind == "gui" and isinstance(value, PDVGui):
             descriptor["module_id"] = value.module_id
         nodes.append(descriptor)
-
-    # Also include lazy-only entries at this path level that are not yet in memory
-    for reg_path, storage in tree.iter_lazy_entries():
-        parts = reg_path.split(".")
-        parent = ".".join(parts[:-1])
-        if parent == path:
-            key = parts[-1]
-            if not dict.__contains__(container, key):
-                nodes.append(
-                    {
-                        "id": reg_path,
-                        "path": reg_path,
-                        "key": key,
-                        "parent_path": path,
-                        "type": storage.get("format", "unknown"),
-                        "has_children": False,
-                        "lazy": True,
-                        "preview": "<lazy>",
-                        "has_handler": False,
-                    }
-                )
 
     send_message("pdv.tree.list.response", {"nodes": nodes}, in_reply_to=msg_id)
 
@@ -191,17 +169,16 @@ def handle_tree_get(msg: dict) -> None:
         return
 
     if mode == "metadata":
-        # Return descriptor without loading lazy data from disk
-        lazy = tree.has_lazy_entry(path)
-        storage = tree.lazy_storage_for(path) if lazy else {}
+        value = tree[path]
+        kind = detect_kind(value)
         send_message(
             "pdv.tree.get.response",
-            {"path": path, "lazy": lazy, "type": storage.get("format", "unknown"), "storage": storage},
+            {"path": path, "lazy": False, "type": kind, "storage": {}},
             in_reply_to=msg_id,
         )
         return
 
-    # mode == 'value' or 'preview': load value (triggers lazy fetch if needed)
+    # mode == 'value' or 'preview': load value
     try:
         value = tree[path]
     except Exception as exc:

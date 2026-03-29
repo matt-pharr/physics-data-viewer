@@ -3,22 +3,23 @@
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { KernelExecuteResult } from '../../types';
+import type { ScriptRunResult } from '../../types';
 import type { TreeNodeData } from '../../types';
 import { ScriptDialog } from './index';
 
-type ExecuteFn = (
+type ScriptRunFn = (
   kernelId: string,
-  payload: {
-    code: string;
-    executionId?: string;
-    origin?: {
+  request: {
+    treePath: string;
+    params: Record<string, string | number | boolean>;
+    executionId: string;
+    origin: {
       kind: 'code-cell' | 'tree-script' | 'unknown';
       label?: string;
       scriptPath?: string;
     };
   },
-) => Promise<KernelExecuteResult>;
+) => Promise<ScriptRunResult>;
 
 function makeNode(overrides: Partial<TreeNodeData> = {}): TreeNodeData {
   return {
@@ -40,8 +41,13 @@ beforeEach(() => {
   Object.defineProperty(window, 'pdv', {
     configurable: true,
     value: {
-      kernels: {
-        execute: vi.fn(async () => ({ stdout: 'ok' })),
+      script: {
+        run: vi.fn(async () => ({
+          code: '',
+          executionId: 'test-id',
+          origin: { kind: 'tree-script' },
+          result: {},
+        })),
       },
     },
   });
@@ -94,9 +100,15 @@ describe('ScriptDialog', () => {
     expect(textboxes.length).toBe(1);
   });
 
-  it('executes generated code and calls onRun', async () => {
-    const execute = window.pdv.kernels.execute as unknown as ReturnType<typeof vi.fn<ExecuteFn>>;
-    execute.mockResolvedValue({ result: { done: true } });
+  it('calls script.run with correct payload and forwards result to onRun', async () => {
+    const scriptRun = window.pdv.script.run as unknown as ReturnType<typeof vi.fn<ScriptRunFn>>;
+    const mockResult: ScriptRunResult = {
+      code: 'generated-code',
+      executionId: 'exec-1',
+      origin: { kind: 'tree-script', label: 'scripts.double', scriptPath: 'scripts.double' },
+      result: { result: { done: true } },
+    };
+    scriptRun.mockResolvedValue(mockResult);
     const onRun = vi.fn();
     const node = makeNode({
       path: 'scripts.double',
@@ -108,8 +120,9 @@ describe('ScriptDialog', () => {
     await user.click(screen.getByRole('button', { name: 'Run' }));
 
     await waitFor(() => {
-      expect(execute).toHaveBeenCalledWith('kernel-1', expect.objectContaining({
-        code: 'import json\npdv_tree["scripts.double"].run(**json.loads("{\\"x\\":5}"))',
+      expect(scriptRun).toHaveBeenCalledWith('kernel-1', expect.objectContaining({
+        treePath: 'scripts.double',
+        params: { x: 5 },
         origin: {
           kind: 'tree-script',
           label: 'scripts.double',
@@ -117,20 +130,17 @@ describe('ScriptDialog', () => {
         },
       }));
     });
-    expect(onRun).toHaveBeenCalledWith(expect.objectContaining({
-      code: 'import json\npdv_tree["scripts.double"].run(**json.loads("{\\"x\\":5}"))',
-      origin: {
-        kind: 'tree-script',
-        label: 'scripts.double',
-        scriptPath: 'scripts.double',
-      },
-      result: { result: { done: true } },
-    }));
+    expect(onRun).toHaveBeenCalledWith(mockResult);
   });
 
-  it('serializes checkbox booleans via JSON payload decoding', async () => {
-    const execute = window.pdv.kernels.execute as unknown as ReturnType<typeof vi.fn<ExecuteFn>>;
-    execute.mockResolvedValue({ result: { done: true } });
+  it('serializes checkbox booleans in params', async () => {
+    const scriptRun = window.pdv.script.run as unknown as ReturnType<typeof vi.fn<ScriptRunFn>>;
+    scriptRun.mockResolvedValue({
+      code: '',
+      executionId: 'exec-2',
+      origin: { kind: 'tree-script', label: 'scripts.flags', scriptPath: 'scripts.flags' },
+      result: { result: { done: true } },
+    });
     const onRun = vi.fn();
     const node = makeNode({
       path: 'scripts.flags',
@@ -142,8 +152,9 @@ describe('ScriptDialog', () => {
     await user.click(screen.getByRole('button', { name: 'Run' }));
 
     await waitFor(() => {
-      expect(execute).toHaveBeenCalledWith('kernel-1', expect.objectContaining({
-        code: 'import json\npdv_tree["scripts.flags"].run(**json.loads("{\\"flag\\":true}"))',
+      expect(scriptRun).toHaveBeenCalledWith('kernel-1', expect.objectContaining({
+        treePath: 'scripts.flags',
+        params: { flag: true },
         origin: {
           kind: 'tree-script',
           label: 'scripts.flags',
@@ -151,20 +162,12 @@ describe('ScriptDialog', () => {
         },
       }));
     });
-    expect(onRun).toHaveBeenCalledWith(expect.objectContaining({
-      code: 'import json\npdv_tree["scripts.flags"].run(**json.loads("{\\"flag\\":true}"))',
-      origin: {
-        kind: 'tree-script',
-        label: 'scripts.flags',
-        scriptPath: 'scripts.flags',
-      },
-      result: { result: { done: true } },
-    }));
+    expect(onRun).toHaveBeenCalled();
   });
 
   it('shows kernel error and does not call onRun', async () => {
-    const execute = window.pdv.kernels.execute as unknown as ReturnType<typeof vi.fn<ExecuteFn>>;
-    execute.mockRejectedValue(new Error('kernel failed'));
+    const scriptRun = window.pdv.script.run as unknown as ReturnType<typeof vi.fn<ScriptRunFn>>;
+    scriptRun.mockRejectedValue(new Error('kernel failed'));
     const onRun = vi.fn();
     render(<ScriptDialog node={makeNode()} kernelId="k1" onRun={onRun} onCancel={vi.fn()} />);
     const user = userEvent.setup();
@@ -177,19 +180,24 @@ describe('ScriptDialog', () => {
   });
 
   it('shows running state while execute is in flight', async () => {
-    let resolveExecute: ((value: KernelExecuteResult) => void) | null = null;
-    const execute = window.pdv.kernels.execute as unknown as ReturnType<typeof vi.fn<ExecuteFn>>;
-    execute.mockImplementation(
+    let resolveRun: ((value: ScriptRunResult) => void) | null = null;
+    const scriptRun = window.pdv.script.run as unknown as ReturnType<typeof vi.fn<ScriptRunFn>>;
+    scriptRun.mockImplementation(
       () =>
-        new Promise<KernelExecuteResult>((resolve) => {
-          resolveExecute = resolve;
+        new Promise<ScriptRunResult>((resolve) => {
+          resolveRun = resolve;
         }),
     );
     render(<ScriptDialog node={makeNode()} kernelId="k1" onRun={vi.fn()} onCancel={vi.fn()} />);
     const user = userEvent.setup();
     await user.click(screen.getByRole('button', { name: 'Run' }));
     expect(screen.getByRole('button', { name: 'Running...' })).toBeTruthy();
-    resolveExecute!({});
+    resolveRun!({
+      code: '',
+      executionId: 'test',
+      origin: { kind: 'tree-script' },
+      result: {},
+    });
     await waitFor(() => {
       expect(screen.getByRole('button', { name: 'Run' })).toBeTruthy();
     });

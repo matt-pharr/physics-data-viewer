@@ -143,6 +143,8 @@ const api: PDVApi = {
   menu: {
     updateRecentProjects: (paths) =>
       ipcRenderer.invoke(IPC.menu.updateRecentProjects, paths),
+    updateEnabled: (state) =>
+      ipcRenderer.invoke(IPC.menu.updateEnabled, state),
     onAction: (callback) => onPush(IPC.push.menuAction, callback),
   },
 };

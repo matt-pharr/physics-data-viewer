@@ -217,6 +217,17 @@ const App: React.FC = () => {
     return unsub;
   }, []);
 
+  // Sync File-menu enabled state: disable Save/SaveAs/Import when kernel isn't ready.
+  const kernelReady = kernelStatus === 'ready';
+  useEffect(() => {
+    if (!window.pdv?.menu?.updateEnabled) return;
+    void window.pdv.menu.updateEnabled({
+      'project:save': kernelReady,
+      'project:saveAs': kernelReady,
+      'modules:import': kernelReady,
+    });
+  }, [kernelReady]);
+
   const currentKernelIdRef = useRef(currentKernelId);
   currentKernelIdRef.current = currentKernelId;
 
@@ -334,9 +345,26 @@ const App: React.FC = () => {
     toggleLeftSidebar,
     toggleEditorCollapsed,
     setShowImportModule,
+    kernelReady,
     addCellTab,
     removeCellTab: handleRemoveCellTab,
   });
+
+  // Global Escape handler — closes the topmost open dialog/overlay.
+  // SettingsDialog handles its own Escape (needs to suppress while recording shortcuts).
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return;
+      // Close in priority order (topmost first)
+      if (showImportModule) { setShowImportModule(false); return; }
+      if (scriptDialog) { setScriptDialog(null); return; }
+      if (createScriptTarget) { setCreateScriptTarget(null); return; }
+      if (createNoteTarget) { setCreateNoteTarget(null); return; }
+      if (showEnvSelector) { setShowEnvSelector(false); return; }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [showImportModule, scriptDialog, createScriptTarget, createNoteTarget, showEnvSelector]);
 
   const handleSettingsSave = async (updates: Partial<Config>) => {
     await window.pdv.config.set(updates);
@@ -701,9 +729,16 @@ const App: React.FC = () => {
   }, [dismissWelcome, ensureKernel]);
 
   const handleWelcomeOpen = useCallback(async () => {
+    // Pick the directory first (while still on the splash screen) so we can
+    // detect which language kernel to start before leaving the welcome screen.
+    const dir = await window.pdv.files.pickDirectory();
+    if (!dir) return; // user cancelled — stay on splash
+    // Detect language from the saved project
+    const langMap = await window.pdv.project.peekLanguages([dir]);
+    const language = langMap[dir] ?? 'python';
     dismissWelcome();
-    pendingProjectRef.current = { type: 'open' };
-    await ensureKernel();
+    pendingProjectRef.current = { type: 'open', path: dir, language };
+    await ensureKernel(language);
   }, [dismissWelcome, ensureKernel]);
 
   const handleWelcomeOpenRecent = useCallback(async (path: string, language?: 'python' | 'julia') => {

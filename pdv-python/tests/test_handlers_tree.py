@@ -140,25 +140,18 @@ class TestHandleTreeList:
 
 
 class TestHandleTreeGet:
-    def test_metadata_mode_no_lazy_trigger(self, tree_with_comm, tmp_save_dir):
-        """mode='metadata' returns descriptor without fetching from disk."""
-        # Register a lazy entry but don't put the file on disk
-        tree_with_comm._lazy_registry.register('lazy_val', {
-            'backend': 'local_file',
-            'relative_path': 'tree/lazy_val.npy',
-            'format': 'npy',
-        })
-        tree_with_comm._set_save_dir(tmp_save_dir)
+    def test_metadata_mode_returns_kind(self, tree_with_comm):
+        """mode='metadata' returns type info for an in-memory node."""
+        tree_with_comm['meta_val'] = 42
         mock_comm = _make_mock_comm()
-        msg = _make_msg('pdv.tree.get', {'path': 'lazy_val', 'mode': 'metadata'})
+        msg = _make_msg('pdv.tree.get', {'path': 'meta_val', 'mode': 'metadata'})
         with patch.object(comms_mod, '_comm', mock_comm), \
              patch.object(comms_mod, '_pdv_tree', tree_with_comm):
             handle_tree_get(msg)
         response = mock_comm._sent[0]
         assert response['status'] == 'ok'
-        assert response['payload']['lazy'] is True
-        # Registry entry should still be present (not fetched)
-        assert tree_with_comm._lazy_registry.has('lazy_val')
+        assert response['payload']['lazy'] is False
+        assert response['payload']['type'] == 'scalar'
 
     def test_value_mode_triggers_lazy_load(self, tree_with_comm, tmp_save_dir):
         """mode='value' fetches lazy node from disk."""
