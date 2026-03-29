@@ -87,7 +87,6 @@ class TreeService {
     ...node,
     hasChildren: Boolean(node.has_children),
     parentPath: node.parent_path ?? null,
-    params: node.params,
     python_type: node.python_type,
     has_handler: node.has_handler,
     isExpanded: false,

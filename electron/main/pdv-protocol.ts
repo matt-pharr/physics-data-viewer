@@ -80,6 +80,10 @@ export const PDVMessageType = {
   SCRIPT_REGISTER: "pdv.script.register",
   /** Kernel → app. Confirms script registration. */
   SCRIPT_REGISTER_RESPONSE: "pdv.script.register.response",
+  /** App → kernel. Extract current run() parameters from a script file. */
+  SCRIPT_PARAMS: "pdv.script.params",
+  /** Kernel → app. Returns array of script parameter descriptors. */
+  SCRIPT_PARAMS_RESPONSE: "pdv.script.params.response",
 
   // Note
   /** App → kernel. Register a newly created markdown note as a tree node. */
@@ -347,8 +351,6 @@ export interface NodeDescriptor {
   preview?: string;
   /** Script language for script nodes. */
   language?: string | null;
-  /** Script parameters for script nodes only. */
-  params?: ScriptParameter[];
   /** Physical filename with extension for file-backed nodes (e.g. "run.nml"). Null for others. */
   filename?: string | null;
   /** Fully qualified Python type string (e.g. "builtins.int"). */

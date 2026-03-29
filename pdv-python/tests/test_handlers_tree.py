@@ -98,8 +98,8 @@ class TestHandleTreeList:
             assert 'key' in node
             assert 'type' in node
 
-    def test_script_nodes_include_params_only_for_scripts(self, tree_with_comm, tmp_path):
-        """Script nodes include params while non-script nodes do not."""
+    def test_script_nodes_do_not_include_params(self, tree_with_comm, tmp_path):
+        """Script node descriptors from tree.list do not include params (fetched on demand)."""
         script_file = tmp_path / 'fit_model.py'
         script_file.write_text('def run(pdv_tree: dict, sigma: float = 0.1):\n    return {}\n')
         tree_with_comm['script_node'] = PDVScript(relative_path=str(script_file))
@@ -116,9 +116,7 @@ class TestHandleTreeList:
         value_node = next(node for node in nodes if node['key'] == 'value_node')
 
         assert script_node['type'] == 'script'
-        assert script_node['params'] == [
-            {'name': 'sigma', 'type': 'float', 'default': 0.1, 'required': False}
-        ]
+        assert 'params' not in script_node
         assert 'params' not in value_node
 
 

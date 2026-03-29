@@ -101,7 +101,6 @@ export interface NoteTab {
 export interface TreeNodeData extends NodeDescriptor {
   hasChildren: boolean;
   parentPath: string | null;
-  params?: ScriptParameter[] | undefined;
   children?: TreeNodeData[];
   isExpanded?: boolean;
   isLoading?: boolean;

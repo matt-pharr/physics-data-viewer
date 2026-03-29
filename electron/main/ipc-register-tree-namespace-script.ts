@@ -18,7 +18,7 @@ import * as path from "path";
 
 import type { CommRouter } from "./comm-router";
 import type { ConfigStore, PDVConfig } from "./config";
-import { IPC, type HandlerInvokeResult, type NamelistReadResult, type NamelistWriteResult, type NamespaceQueryOptions, type NamespaceVariable, type ScriptRunRequest, type ScriptRunResult, type TreeAddFileResult, type TreeCreateNoteResult, type TreeCreateScriptResult } from "./ipc";
+import { IPC, type HandlerInvokeResult, type NamelistReadResult, type NamelistWriteResult, type NamespaceQueryOptions, type NamespaceVariable, type ScriptParameter, type ScriptRunRequest, type ScriptRunResult, type TreeAddFileResult, type TreeCreateNoteResult, type TreeCreateScriptResult } from "./ipc";
 import type { KernelManager } from "./kernel-manager";
 import { PDVMessageType, type PDVFileRegisterPayload } from "./pdv-protocol";
 import type { ProjectManager } from "./project-manager";
@@ -295,9 +295,15 @@ export function registerTreeNamespaceScriptIpcHandlers(
         : `PDVKernel.run_tree_script(pdv_tree, ${pathStr})`;
     } else {
       // Python
-      const jsonArgs = JSON.stringify(JSON.stringify(params));
-      code = Object.keys(params).length > 0
-        ? `import json\npdv_tree[${JSON.stringify(treePath)}].run(**json.loads(${jsonArgs}))`
+      const kwargs = Object.entries(params)
+        .map(([key, value]) => {
+          if (typeof value === "string") return `${key}=${JSON.stringify(value)}`;
+          if (typeof value === "boolean") return `${key}=${value ? "True" : "False"}`;
+          return `${key}=${value}`;
+        })
+        .join(", ");
+      code = kwargs
+        ? `pdv_tree[${JSON.stringify(treePath)}].run(${kwargs})`
         : `pdv_tree[${JSON.stringify(treePath)}].run()`;
     }
 
@@ -338,6 +344,17 @@ export function registerTreeNamespaceScriptIpcHandlers(
     child.unref();
     return { success: true };
   });
+
+  ipcMain.handle(
+    IPC.script.getParams,
+    async (_event, kernelId: string, treePath: string): Promise<ScriptParameter[]> => {
+      const response = await commRouter.request(PDVMessageType.SCRIPT_PARAMS, {
+        path: treePath,
+      });
+      const params = (response.payload as Record<string, unknown> | undefined)?.params;
+      return Array.isArray(params) ? (params as ScriptParameter[]) : [];
+    }
+  );
 
   ipcMain.handle(
     IPC.note.save,

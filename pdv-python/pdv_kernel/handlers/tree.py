@@ -100,8 +100,6 @@ def handle_tree_list(msg: dict) -> None:
             "python_type": python_type_string(value),
             "has_handler": has_handler_for(value),
         }
-        if kind == "script":
-            descriptor["params"] = getattr(value, "params", [])
         if kind == "module" and isinstance(value, PDVModule):
             descriptor["module_id"] = value.module_id
             descriptor["module_name"] = value.name

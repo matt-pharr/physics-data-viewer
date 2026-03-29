@@ -160,26 +160,25 @@ class TestPDVScript:
         result = tree_with_comm.run_script('s')
         assert result == 100
 
-    def test_params_extracted_from_run_signature(self, tmp_path):
-        """PDVScript extracts user-facing params from run() signature."""
+    def test_extract_script_params_from_run_signature(self, tmp_path):
+        """_extract_script_params extracts user-facing params from run() signature."""
+        from pdv_kernel.tree import _extract_script_params
         script_file = tmp_path / 'param_script.py'
         script_file.write_text(
             'def run(pdv_tree: dict, required_count: int, scale: float = 1.5, label=None):\n'
             '    return {}\n'
         )
-        script = PDVScript(relative_path=str(script_file))
-        assert script.params == [
+        assert _extract_script_params(str(script_file)) == [
             {'name': 'required_count', 'type': 'int', 'default': None, 'required': True},
             {'name': 'scale', 'type': 'float', 'default': 1.5, 'required': False},
             {'name': 'label', 'type': 'any', 'default': None, 'required': False},
         ]
 
-    def test_params_empty_when_script_is_missing_or_invalid(self, tmp_path):
+    def test_extract_script_params_empty_when_missing_or_invalid(self, tmp_path):
         """Missing or invalid script files produce an empty params list."""
-        missing = PDVScript(relative_path=str(tmp_path / 'does_not_exist.py'))
-        assert missing.params == []
+        from pdv_kernel.tree import _extract_script_params
+        assert _extract_script_params(str(tmp_path / 'does_not_exist.py')) == []
 
         invalid_file = tmp_path / 'invalid.py'
         invalid_file.write_text('def run(pdv_tree,\n')
-        invalid = PDVScript(relative_path=str(invalid_file))
-        assert invalid.params == []
+        assert _extract_script_params(str(invalid_file)) == []

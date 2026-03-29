@@ -318,6 +318,72 @@ describe("@slow Cross-boundary integration (Python + Electron)", { timeout: 120_
     expect(scriptNode?.type).toBe("script");
   });
 
+  it("pdv.script.params returns params on demand for relative-path scripts", async () => {
+    // Write a script with parameters into the working directory
+    const scriptRelDir = path.join(initialWorkingDir, "scripts");
+    await fs.mkdir(scriptRelDir, { recursive: true });
+    await fs.writeFile(
+      path.join(scriptRelDir, "solve.py"),
+      [
+        "def run(pdv_tree: dict, n: int = 3, dt: float = 0.01, method: str = 'rk4'):",
+        "    return {'result': n}",
+        "",
+      ].join("\n"),
+      "utf8"
+    );
+
+    // Register the script with a relative path (relative to working_dir)
+    const changedPromise = waitForPush(router, PDVMessageType.TREE_CHANGED);
+    const response = await router.request(PDVMessageType.SCRIPT_REGISTER, {
+      parent_path: "scripts",
+      name: "solve",
+      relative_path: "scripts/solve.py",
+      language: "python",
+    });
+    expect(response.status).toBe("ok");
+    await changedPromise;
+
+    // Fetch params on demand via pdv.script.params
+    const paramsResponse = await router.request(PDVMessageType.SCRIPT_PARAMS, {
+      path: "scripts.solve",
+    });
+    expect(paramsResponse.status).toBe("ok");
+    const params = (paramsResponse.payload as { params?: Array<{ name: string; type: string; default?: unknown; required?: boolean }> }).params ?? [];
+    expect(params.length).toBe(3);
+
+    const paramNames = params.map((p) => p.name);
+    expect(paramNames).toContain("n");
+    expect(paramNames).toContain("dt");
+    expect(paramNames).toContain("method");
+
+    const nParam = params.find((p) => p.name === "n");
+    expect(nParam?.default).toBe(3);
+    expect(nParam?.required).toBe(false);
+  });
+
+  it("pdv.script.params reflects file edits without re-registering", async () => {
+    // The script from the previous test already exists — edit it to add a param
+    const scriptPath = path.join(initialWorkingDir, "scripts", "solve.py");
+    await fs.writeFile(
+      scriptPath,
+      [
+        "def run(pdv_tree: dict, n: int = 3, dt: float = 0.01, method: str = 'rk4', verbose: bool = False):",
+        "    return {'result': n}",
+        "",
+      ].join("\n"),
+      "utf8"
+    );
+
+    // Fetch params again — should reflect the edit
+    const paramsResponse = await router.request(PDVMessageType.SCRIPT_PARAMS, {
+      path: "scripts.solve",
+    });
+    expect(paramsResponse.status).toBe("ok");
+    const params = (paramsResponse.payload as { params?: Array<{ name: string; type: string; default?: unknown; required?: boolean }> }).params ?? [];
+    expect(params.length).toBe(4);
+    expect(params.map((p) => p.name)).toContain("verbose");
+  });
+
   it("streaming iopub output arrives before execution completes", async () => {
     const streamTexts: string[] = [];
     const unsubscribe = km.onIopubMessage(kernelId, (msg) => {

@@ -74,6 +74,7 @@ export const IPC = {
   script: {
     edit: "script:edit",
     run: "script:run",
+    getParams: "script:getParams",
   },
   /** Markdown note channels. */
   note: {
@@ -241,10 +242,7 @@ export type ScriptParameter = PDVScriptParameter;
 /**
  * Tree node shape returned to the renderer.
  */
-export interface TreeNode extends NodeDescriptor {
-  /** Present only when type === 'script'. */
-  params?: ScriptParameter[] | undefined;
-}
+export interface TreeNode extends NodeDescriptor {}
 
 /**
  * Result returned by `tree.createScript`.
@@ -1066,6 +1064,17 @@ export interface PDVApi {
      * @returns Operation status.
      */
     edit(kernelId: string, scriptPath: string): Promise<ScriptOperationResult>;
+    /**
+     * Fetch the current run() parameters for a script node.
+     *
+     * Reads the script file fresh from disk each time so edits are
+     * reflected immediately.
+     *
+     * @param kernelId - Target kernel ID.
+     * @param treePath - Dot-delimited tree path of the script node.
+     * @returns Array of parameter descriptors.
+     */
+    getParams(kernelId: string, treePath: string): Promise<ScriptParameter[]>;
   };
 
   /** Markdown note operations. */

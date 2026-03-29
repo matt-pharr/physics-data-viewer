@@ -36,8 +36,6 @@ export interface NodeDescriptor {
   preview?: string;
   /** Optional language hint for script/code nodes. */
   language?: string | null;
-  /** Script parameter descriptors when `type === "script"`. */
-  params?: ScriptParameter[] | undefined;
   /** Physical filename with extension for file-backed nodes (e.g. "run.nml"). Null for others. */
   filename?: string | null;
   /** Fully qualified Python type string (e.g. "builtins.int"). */
@@ -595,6 +593,7 @@ export interface PDVApi {
   script: {
     run(kernelId: string, request: ScriptRunRequest): Promise<ScriptRunResult>;
     edit(kernelId: string, scriptPath: string): Promise<{ success: boolean; error?: string }>;
+    getParams(kernelId: string, treePath: string): Promise<ScriptParameter[]>;
   };
   note: {
     save(kernelId: string, treePath: string, content: string): Promise<{ success: boolean; error?: string }>;

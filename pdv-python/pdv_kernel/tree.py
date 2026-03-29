@@ -266,7 +266,6 @@ class PDVScript(PDVFile):
         super().__init__(relative_path)
         self._language = language
         self._doc = doc
-        self._params: list[ScriptParameter] = _extract_script_params(relative_path)
 
     @property
     def language(self) -> str:
@@ -289,17 +288,6 @@ class PDVScript(PDVFile):
             Cached script doc preview line.
         """
         return self._doc
-
-    @property
-    def params(self) -> list[ScriptParameter]:
-        """User-facing run() parameters (excluding pdv_tree).
-
-        Returns
-        -------
-        list[ScriptParameter]
-            Extracted script parameter descriptors.
-        """
-        return self._params
 
     def preview(self) -> str:
         """Return a short human-readable preview string for the tree panel.

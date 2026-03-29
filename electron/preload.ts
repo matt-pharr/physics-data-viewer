@@ -79,6 +79,8 @@ const api: PDVApi = {
       ipcRenderer.invoke(IPC.script.run, kernelId, request),
     edit: (kernelId, scriptPath) =>
       ipcRenderer.invoke(IPC.script.edit, kernelId, scriptPath),
+    getParams: (kernelId, treePath) =>
+      ipcRenderer.invoke(IPC.script.getParams, kernelId, treePath),
   },
   note: {
     save: (kernelId, treePath, content) =>
