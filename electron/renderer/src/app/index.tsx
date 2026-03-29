@@ -29,7 +29,6 @@ import { WelcomeScreen, type RecentProject } from '../components/WelcomeScreen';
 import type {
   CellTab,
   Config,
-  KernelExecuteResult,
   KernelExecutionOrigin,
   LogEntry,
   NoteTab,
