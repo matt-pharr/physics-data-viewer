@@ -18,7 +18,6 @@ function node(type: string): TreeNodeData {
     parent_path: 'data',
     type,
     has_children: false,
-    lazy: false,
     hasChildren: false,
     parentPath: 'data',
   };

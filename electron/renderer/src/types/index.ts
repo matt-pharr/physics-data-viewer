@@ -10,6 +10,7 @@ import type {
   KernelExecutionError,
   KernelExecutionOrigin,
   KernelExecuteResult,
+  KernelSpec,
   ImportedModuleDescriptor,
   LayoutActionRef,
   LayoutContainer,
@@ -29,6 +30,7 @@ import type {
   ProjectLoadResult,
   ProjectSaveResult,
   ScriptParameter,
+  ScriptRunResult,
   Theme,
 } from './pdv';
 
@@ -38,6 +40,7 @@ export type {
   KernelExecutionError,
   KernelExecutionOrigin,
   KernelExecuteResult,
+  KernelSpec,
   ImportedModuleDescriptor,
   LayoutActionRef,
   LayoutContainer,
@@ -56,6 +59,7 @@ export type {
   ProjectLoadResult,
   ProjectSaveResult,
   ScriptParameter,
+  ScriptRunResult,
   Theme,
 };
 

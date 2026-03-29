@@ -75,6 +75,8 @@ const api: PDVApi = {
       ipcRenderer.invoke(IPC.namespace.query, kernelId, options),
   },
   script: {
+    run: (kernelId, request) =>
+      ipcRenderer.invoke(IPC.script.run, kernelId, request),
     edit: (kernelId, scriptPath) =>
       ipcRenderer.invoke(IPC.script.edit, kernelId, scriptPath),
   },
@@ -106,6 +108,8 @@ const api: PDVApi = {
       ipcRenderer.invoke(IPC.project.save, saveDir, codeCells),
     load: (saveDir) => ipcRenderer.invoke(IPC.project.load, saveDir),
     new: () => ipcRenderer.invoke(IPC.project.new),
+    peekLanguages: (paths) =>
+      ipcRenderer.invoke(IPC.project.peekLanguages, paths),
     onLoaded: (callback) => onPush(IPC.push.projectLoaded, callback),
     onReloading: (callback) => onPush(IPC.push.projectReloading, callback),
   },
@@ -139,6 +143,8 @@ const api: PDVApi = {
   menu: {
     updateRecentProjects: (paths) =>
       ipcRenderer.invoke(IPC.menu.updateRecentProjects, paths),
+    updateEnabled: (state) =>
+      ipcRenderer.invoke(IPC.menu.updateEnabled, state),
     onAction: (callback) => onPush(IPC.push.menuAction, callback),
   },
 };

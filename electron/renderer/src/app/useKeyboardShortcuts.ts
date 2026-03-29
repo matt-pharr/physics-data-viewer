@@ -29,6 +29,8 @@ interface UseKeyboardShortcutsOptions {
   toggleEditorCollapsed: () => void;
   /** Opens the Import Module dialog (Cmd+I). */
   setShowImportModule: Dispatch<SetStateAction<boolean>>;
+  /** Whether the kernel is ready (guards shortcuts that require a running kernel). */
+  kernelReady: boolean;
   /** Creates a new code cell tab (configurable shortcut). */
   addCellTab: () => void;
   /** Closes the tab with the given ID (configurable shortcut). */
@@ -57,6 +59,9 @@ export function useKeyboardShortcuts(options: UseKeyboardShortcutsOptions): void
     toggleEditorCollapsed,
     setShowImportModule,
   } = options;
+
+  const kernelReadyRef = useRef(options.kernelReady);
+  useEffect(() => { kernelReadyRef.current = options.kernelReady; }, [options.kernelReady]);
 
   // Refs to avoid re-registering the listener when these values change
   const addCellTabRef = useRef(options.addCellTab);
@@ -106,10 +111,10 @@ export function useKeyboardShortcuts(options: UseKeyboardShortcutsOptions): void
         event.preventDefault();
         window.close();
       }
-      // Cmd+I: open Import Module dialog
+      // Cmd+I: open Import Module dialog (only when kernel is ready)
       if ((event.metaKey || event.ctrlKey) && !event.shiftKey && !event.altKey && event.key === 'i') {
         event.preventDefault();
-        setShowImportModule(true);
+        if (kernelReadyRef.current) setShowImportModule(true);
       }
       // Cmd+B: toggle left sidebar
       if ((event.metaKey || event.ctrlKey) && !event.shiftKey && !event.altKey && event.key === 'b') {

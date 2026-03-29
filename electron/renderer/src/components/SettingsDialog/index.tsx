@@ -32,12 +32,13 @@ const DEFAULT_VSCODE_PAIR = THEME_PAIRS.find((pair) => pair.name === 'VSCode');
 interface SettingsDialogProps {
   isOpen: boolean;
   initialTab?: SettingsTab;
+  activeLanguage?: 'python' | 'julia';
   config: Config | null;
   shortcuts: Shortcuts;
   currentKernelId?: string | null;
   onClose: () => void;
   onSave: (updates: Partial<Config>) => Promise<void>;
-  onEnvSave: (paths: { pythonPath: string; juliaPath?: string }) => Promise<void>;
+  onEnvSave: (paths: { pythonPath?: string; juliaPath?: string; language?: 'python' | 'julia' }) => Promise<void>;
   onRestart?: () => void;
 }
 
@@ -45,6 +46,7 @@ interface SettingsDialogProps {
 export const SettingsDialog: React.FC<SettingsDialogProps> = ({
   isOpen,
   initialTab = 'general',
+  activeLanguage = 'python',
   config,
   shortcuts,
   currentKernelId,
@@ -315,7 +317,7 @@ export const SettingsDialog: React.FC<SettingsDialogProps> = ({
           <button className={`tab ${activeTab === 'general' ? 'active' : ''}`} onClick={() => setActiveTab('general')}>General</button>
           <button className={`tab ${activeTab === 'shortcuts' ? 'active' : ''}`} onClick={() => setActiveTab('shortcuts')}>Keyboard Shortcuts</button>
           <button className={`tab ${activeTab === 'appearance' ? 'active' : ''}`} onClick={() => setActiveTab('appearance')}>Appearance</button>
-          <button className={`tab ${activeTab === 'runtime' ? 'active' : ''}`} onClick={() => setActiveTab('runtime')}>Python Runtime</button>
+          <button className={`tab ${activeTab === 'runtime' ? 'active' : ''}`} onClick={() => setActiveTab('runtime')}>Runtime</button>
           <button className={`tab ${activeTab === 'about' ? 'active' : ''}`} onClick={() => setActiveTab('about')}>About</button>
         </div>
         <div className="dialog-body">
@@ -393,7 +395,8 @@ export const SettingsDialog: React.FC<SettingsDialogProps> = ({
           ) : activeTab === 'runtime' ? (
             <EnvironmentSelector
               embedded
-              isFirstRun={!config?.pythonPath}
+              isFirstRun={activeLanguage === 'julia' ? !config?.juliaPath : !config?.pythonPath}
+              activeLanguage={activeLanguage}
               currentConfig={config || undefined}
               currentKernelId={currentKernelId}
               onSave={onEnvSave}

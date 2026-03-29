@@ -210,8 +210,8 @@ def run(
     solution = PendulumSolution(
         t=t, thetas=thetas, omegas=omegas, xs=xs, ys=ys, params=params_dict,
     )
-    pdv_tree[f"n_pendulum.{output_key}"] = solution
+    pdv_tree[f"n_pendulum.outputs.{output_key}"] = solution
 
     print(f"[N-Pendulum] Solved {n_steps} time steps ({t_end}s) successfully.")
-    print(f"[N-Pendulum] Double-click 'n_pendulum.{output_key}' in the tree to plot.")
+    print(f"[N-Pendulum] Double-click 'n_pendulum.outputs.{output_key}' in the tree to plot.")
     return {"status": "ok", "n_links": N, "n_steps": len(t)}

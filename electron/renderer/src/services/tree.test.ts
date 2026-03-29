@@ -10,8 +10,8 @@ import type { NodeDescriptor } from '../types/pdv';
 import { treeService } from './tree';
 
 const rootNodes: NodeDescriptor[] = [
-  { id: 'data', key: 'data', path: 'data', parent_path: null, type: 'folder', has_children: true, lazy: false },
-  { id: 'scripts', key: 'scripts', path: 'scripts', parent_path: null, type: 'folder', has_children: true, lazy: false },
+  { id: 'data', key: 'data', path: 'data', parent_path: null, type: 'folder', has_children: true },
+  { id: 'scripts', key: 'scripts', path: 'scripts', parent_path: null, type: 'folder', has_children: true },
 ];
 
 const childNodes: NodeDescriptor[] = [
@@ -22,7 +22,6 @@ const childNodes: NodeDescriptor[] = [
     parent_path: 'data',
     type: 'ndarray',
     has_children: false,
-    lazy: false,
   },
 ];
 
@@ -49,7 +48,6 @@ describe('treeService', () => {
           }
           return [];
         }),
-        get: vi.fn(async () => ({ path: 'data.lazy', value: 'loaded' })),
         createScript: vi.fn(async () => ({ success: true })),
       },
     };
@@ -99,41 +97,6 @@ describe('treeService', () => {
 
     const listMock = (window.pdv.tree.list as unknown as ReturnType<typeof vi.fn>);
     expect(listMock).toHaveBeenCalledTimes(2);
-  });
-
-  it('eager-loads lazy children and refreshes listing', async () => {
-    const listMock = window.pdv.tree.list as unknown as ReturnType<typeof vi.fn>;
-    const getMock = window.pdv.tree.get as unknown as ReturnType<typeof vi.fn>;
-    const parent = { ...rootNodes[0], hasChildren: true, parentPath: null };
-    listMock.mockImplementation(async (_kernelId?: string, path?: string) => {
-      if (path === 'data') {
-        if (getMock.mock.calls.length === 0) {
-          return [
-            {
-              id: 'data.lazy',
-              key: 'lazy',
-              path: 'data.lazy',
-              parent_path: 'data',
-              type: 'unknown',
-              has_children: false,
-              lazy: true,
-            },
-          ];
-        }
-        return childNodes;
-      }
-      return [];
-    });
-
-    const children = await treeService.getChildren(parent, 'k1', {
-      force: true,
-      eagerLoadLazy: true,
-    });
-
-    expect(getMock).toHaveBeenCalledWith('k1', 'data.lazy');
-    expect(listMock).toHaveBeenCalledTimes(2);
-    expect(children[0].path).toBe('data.array1');
-    expect(children[0].lazy).toBe(false);
   });
 
   afterAll(() => {

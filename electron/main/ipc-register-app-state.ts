@@ -18,7 +18,7 @@ import * as path from "path";
 import type { ConfigStore, PDVConfig } from "./config";
 import type { CodeCellData, Theme } from "./ipc";
 import { IPC } from "./ipc";
-import { updateRecentProjectsMenu } from "./menu";
+import { updateMenuEnabled, updateRecentProjectsMenu } from "./menu";
 
 let savedThemes: Theme[] = [];
 let savedCodeCells: CodeCellData | null = null;
@@ -33,6 +33,15 @@ interface RegisterAppStateIpcHandlersOptions {
 
 function loadThemesFromDisk(themesDir: string): void {
   if (savedThemes.length > 0) {
+    return;
+  }
+  if (!fsSync.existsSync(themesDir)) {
+    try {
+      fsSync.mkdirSync(themesDir, { recursive: true });
+      console.log(`[ipc-register-app-state] No themes directory found, created ${themesDir}`);
+    } catch (mkdirErr) {
+      console.warn(`[ipc-register-app-state] Unable to create themes directory: ${themesDir}`, mkdirErr);
+    }
     return;
   }
   try {
@@ -149,6 +158,11 @@ export function registerAppStateIpcHandlers(
 
   ipcMain.handle(IPC.menu.updateRecentProjects, async (_event, paths: string[]) => {
     updateRecentProjectsMenu(Array.isArray(paths) ? paths : []);
+    return true;
+  });
+
+  ipcMain.handle(IPC.menu.updateEnabled, async (_event, state: Record<string, boolean>) => {
+    updateMenuEnabled(state);
     return true;
   });
 

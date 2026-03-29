@@ -16,7 +16,7 @@ import { KernelManager } from "./kernel-manager";
 import { PDVMessageType, PDV_PROTOCOL_VERSION } from "./pdv-protocol";
 import { ProjectManager } from "./project-manager";
 
-const BOOTSTRAP_AND_OPEN_COMM = `
+const PYTHON_BOOTSTRAP = `
 from IPython import get_ipython
 import pdv_kernel
 import pdv_kernel.comms as _pdv_comms
@@ -31,6 +31,28 @@ if _pdv_comms._comm is None:
     _pdv_comms._comm = _pdv_comm
     _pdv_comm.on_msg(_pdv_comms._on_comm_message)
     _pdv_comms.send_message("pdv.ready", {})
+`;
+
+const JULIA_BOOTSTRAP = `
+using PDVKernel
+PDVKernel.bootstrap()
+
+# Open the comm from the kernel side (like Python does).
+# Comm(target) with primary=true (default) sends comm_open on iopub automatically.
+import IJulia
+if PDVKernel._comm[] === nothing
+    _pdv_comm = IJulia.CommManager.Comm(PDVKernel.PDV_COMM_TARGET)
+    _pdv_comm.on_msg = PDVKernel.on_comm_message
+    PDVKernel._comm[] = _pdv_comm
+    IJulia.CommManager.send_comm(_pdv_comm, Dict{String,Any}(
+        "pdv_version" => PDVKernel.__pdv_protocol_version__,
+        "msg_id" => string(PDVKernel.UUIDs.uuid4()),
+        "in_reply_to" => nothing,
+        "type" => "pdv.ready",
+        "status" => "ok",
+        "payload" => Dict{String,Any}(),
+    ))
+end
 `;
 
 async function waitForPush(
@@ -70,11 +92,17 @@ export async function initializeKernelSession(
   kernelId: string,
   kernelWorkingDirs: Map<string, string>
 ): Promise<void> {
-  const readyPromise = waitForPush(commRouter, PDVMessageType.READY, 15_000);
+  const kernel = kernelManager.getKernel(kernelId);
+  const language = kernel?.language ?? "python";
+  const bootstrapCode = language === "julia" ? JULIA_BOOTSTRAP : PYTHON_BOOTSTRAP;
+  // Julia JIT compilation can be slow on first load; allow more time.
+  const readyTimeoutMs = language === "julia" ? 60_000 : 15_000;
+
+  const readyPromise = waitForPush(commRouter, PDVMessageType.READY, readyTimeoutMs);
   // Avoid unhandled rejection warnings if bootstrap fails before pdv.ready.
   void readyPromise.catch(() => undefined);
   const bootstrapResult = await kernelManager.execute(kernelId, {
-    code: BOOTSTRAP_AND_OPEN_COMM,
+    code: bootstrapCode,
     silent: true,
   });
   if (bootstrapResult.error) {

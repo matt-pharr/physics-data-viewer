@@ -32,8 +32,6 @@ export interface NodeDescriptor {
   type: string;
   /** True if node has children that can be listed/expanded. */
   has_children: boolean;
-  /** True if file-backed value is lazy-loaded in kernel. */
-  lazy: boolean;
   /** Human-readable preview text for compact table display. */
   preview?: string;
   /** Optional language hint for script/code nodes. */
@@ -187,6 +185,13 @@ export interface MenuActionPayload {
   path?: string;
 }
 
+/** Partial map of menu item IDs to enabled/disabled state. */
+export interface MenuEnabledState {
+  "project:save"?: boolean;
+  "project:saveAs"?: boolean;
+  "modules:import"?: boolean;
+}
+
 /** Result returned from `project.save()`. */
 export interface ProjectSaveResult {
   /** SHA-256 checksum of the serialized tree-index.json. */
@@ -286,6 +291,7 @@ export interface ModuleDescriptor {
   name: string;
   version: string;
   description?: string;
+  language?: "python" | "julia";
   source: ModuleSourceReference;
   revision?: string;
   installPath?: string;
@@ -414,6 +420,30 @@ export interface NamelistReadResult {
 export interface NamelistWriteResult {
   success: boolean;
   error?: string;
+}
+
+/** Request payload for `script.run`. */
+export interface ScriptRunRequest {
+  /** Dot-delimited tree path of the PDVScript node. */
+  treePath: string;
+  /** Serialised parameter values keyed by parameter name. */
+  params: Record<string, string | number | boolean>;
+  /** Caller-supplied execution ID for output correlation. */
+  executionId: string;
+  /** Execution origin metadata used in error summaries and the console. */
+  origin: KernelExecutionOrigin;
+}
+
+/** Result returned by `script.run`. */
+export interface ScriptRunResult {
+  /** The exact code string sent to the kernel (for console display). */
+  code: string;
+  /** Echo of the caller-supplied execution ID. */
+  executionId: string;
+  /** Echo of the caller-supplied origin metadata. */
+  origin: KernelExecutionOrigin;
+  /** Structured execution result from the kernel. */
+  result: KernelExecuteResult;
 }
 
 /** Reference to an input in the container layout. */
@@ -563,6 +593,7 @@ export interface PDVApi {
     query(kernelId: string, options?: NamespaceQueryOptions): Promise<NamespaceVariable[]>;
   };
   script: {
+    run(kernelId: string, request: ScriptRunRequest): Promise<ScriptRunResult>;
     edit(kernelId: string, scriptPath: string): Promise<{ success: boolean; error?: string }>;
   };
   note: {
@@ -587,6 +618,7 @@ export interface PDVApi {
     save(saveDir: string, codeCells: unknown): Promise<ProjectSaveResult>;
     load(saveDir: string): Promise<ProjectLoadResult>;
     new(): Promise<boolean>;
+    peekLanguages(paths: string[]): Promise<Record<string, "python" | "julia">>;
     onLoaded(callback: (payload: Record<string, unknown>) => void): () => void;
     onReloading(callback: (payload: { status: "reloading" | "ready" }) => void): () => void;
   };
@@ -619,6 +651,7 @@ export interface PDVApi {
   };
   menu: {
     updateRecentProjects(paths: string[]): Promise<boolean>;
+    updateEnabled(state: MenuEnabledState): Promise<boolean>;
     onAction(callback: (payload: MenuActionPayload) => void): () => void;
   };
 }

@@ -15,10 +15,11 @@
 
 import { app, BrowserWindow, Menu, type MenuItemConstructorOptions } from "electron";
 
-import { IPC, type MenuActionPayload } from "./ipc";
+import { IPC, type MenuActionPayload, type MenuEnabledState } from "./ipc";
 
 let currentWindow: BrowserWindow | null = null;
 let recentProjects: string[] = [];
+let menuEnabledState: MenuEnabledState = {};
 
 // Forward a menu action to the renderer when a window is available.
 function sendMenuAction(payload: MenuActionPayload): void {
@@ -49,11 +50,16 @@ function buildTemplate(): MenuItemConstructorOptions[] {
   if (process.platform === "darwin") {
     template.push({ role: "appMenu" });
   }
+  /** Resolve enabled state for a menu item, defaulting to true. */
+  const isEnabled = (id: keyof MenuEnabledState): boolean =>
+    menuEnabledState[id] !== false;
+
   template.push(
     {
       label: "File",
       submenu: [
         {
+          id: "project:open",
           label: "Open...",
           accelerator: "CmdOrCtrl+O",
           click: () => sendMenuAction({ action: "project:open" }),
@@ -64,22 +70,31 @@ function buildTemplate(): MenuItemConstructorOptions[] {
         },
         { type: "separator" },
         {
+          id: "project:save",
           label: "Save",
           accelerator: "CmdOrCtrl+S",
+          enabled: isEnabled("project:save"),
           click: () => sendMenuAction({ action: "project:save" }),
         },
         {
+          id: "project:saveAs",
           label: "Save As...",
           accelerator: "CmdOrCtrl+Shift+S",
+          enabled: isEnabled("project:saveAs"),
           click: () => sendMenuAction({ action: "project:saveAs" }),
         },
         { type: "separator" },
         {
+          id: "modules:import",
           label: "Import Module...",
+          accelerator: "CmdOrCtrl+I",
+          enabled: isEnabled("modules:import"),
           click: () => sendMenuAction({ action: "modules:import" }),
         },
         { type: "separator" },
-        process.platform === "darwin" ? { role: "close" } : { role: "quit" },
+        process.platform === "darwin"
+          ? { role: "close" as const, accelerator: "CmdOrCtrl+Shift+W" }
+          : { role: "quit" as const, accelerator: "CmdOrCtrl+Shift+W" },
       ],
     },
     { role: "editMenu" },
@@ -109,6 +124,19 @@ export function initializeAppMenu(win: BrowserWindow): void {
     }
   });
   applyMenu();
+}
+
+/**
+ * Update enabled/disabled state for specific menu items and refresh the menu.
+ *
+ * @param state - Partial map of menu-item IDs to enabled booleans.
+ * @returns Nothing.
+ */
+export function updateMenuEnabled(state: MenuEnabledState): void {
+  menuEnabledState = { ...menuEnabledState, ...state };
+  if (app.isReady()) {
+    applyMenu();
+  }
 }
 
 /**

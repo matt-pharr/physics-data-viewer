@@ -69,7 +69,7 @@ Renderer (React) ──window.pdv──► Preload ──ipcRenderer──► Ma
 
 4. **Renderer types come from `types/pdv.d.ts`, never from `../../main/ipc`.** Importing across the process boundary in the type system breaks the build when tsconfig roots are separated.
 
-5. **No `window.pdv.script.run()`.** Script execution from the renderer always goes through `window.pdv.kernels.execute(kernelId, { code: 'pdv_tree["path"].run(...)' })`. This keeps the IPC surface minimal and makes script runs visible in the console as ordinary code.
+5. **Script execution goes through `window.pdv.script.run()`.** The renderer dispatches `{ treePath, params, executionId, origin }` to the main process; the main process builds the language-appropriate invocation string (Python or Julia), calls `kernels.execute`, and returns `{ code, executionId, origin, result }` so the renderer can log the run in the console. No Python or Julia code strings belong in the renderer.
 
 6. **`kernels.start()` encapsulates the full handshake.** The `pdv.ready → pdv.init → pdv.init.response` sequence is entirely inside the main process's `kernels.start()` handler. The renderer only `await`s it.
 

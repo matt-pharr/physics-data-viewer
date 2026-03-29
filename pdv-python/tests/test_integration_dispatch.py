@@ -7,6 +7,7 @@ PDVTree and mocked comm transport.
 
 from __future__ import annotations
 
+import json
 import os
 import uuid
 from types import SimpleNamespace
@@ -128,6 +129,20 @@ class TestIntegrationDispatch:
 
         fresh_tree = PDVTree()
         fresh_tree._set_working_dir(tmp_working_dir)
+        # Simulate TypeScript's copyFilesForLoad: copy file-backed nodes to working dir
+        import shutil
+        tree_index_path = os.path.join(tmp_save_dir, "tree-index.json")
+        with open(tree_index_path, "r", encoding="utf-8") as fh:
+            index_nodes = json.loads(fh.read())
+        for node in index_nodes:
+            storage = node.get("storage", {})
+            rel = storage.get("relative_path", "")
+            if storage.get("backend") == "local_file" and rel:
+                src = os.path.join(tmp_save_dir, rel)
+                dst = os.path.join(tmp_working_dir, rel)
+                os.makedirs(os.path.dirname(dst), exist_ok=True)
+                if os.path.exists(src):
+                    shutil.copy2(src, dst)
         load_comm = _make_mock_comm()
         with patch.object(comms_mod, "_comm", load_comm), patch.object(comms_mod, "_pdv_tree", fresh_tree):
             comms_mod._on_comm_message(_make_msg("pdv.project.load", {"save_dir": tmp_save_dir}))

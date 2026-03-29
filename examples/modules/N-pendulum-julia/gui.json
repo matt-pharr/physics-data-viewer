@@ -60,7 +60,7 @@
           "type": "column",
           "label": "Namelist",
           "children": [
-            { "type": "namelist", "tree_path": "n_pendulum.inputs.solver_nml" }
+            { "type": "namelist", "tree_path": "n_pendulum_julia.inputs.solver_nml" }
           ]
         },
         {
@@ -132,12 +132,12 @@
       "label": "Integrator",
       "control": "dropdown",
       "options": [
-        { "label": "RK45", "value": "RK45" },
-        { "label": "DOP853", "value": "DOP853" },
-        { "label": "Radau", "value": "Radau" }
+        { "label": "Tsit5", "value": "Tsit5" },
+        { "label": "Vern7", "value": "Vern7" },
+        { "label": "Rodas5P", "value": "Rodas5P" }
       ],
-      "default": "RK45",
-      "tooltip": "solve_ivp method."
+      "default": "Tsit5",
+      "tooltip": "DifferentialEquations.jl solver algorithm."
     },
     {
       "id": "strict_tolerances",
@@ -183,15 +183,15 @@
       "label": "Solve Output Key",
       "control": "text",
       "default": "result",
-      "tooltip": "Tree key to write solver outputs under n_pendulum.<key>."
+      "tooltip": "Tree key to write solver outputs under n_pendulum_julia.outputs.<key>."
     },
     {
       "id": "animate_output_key",
       "label": "Animate Output Key",
       "control": "dropdown",
-      "options_tree_path": "n_pendulum.outputs",
+      "options_tree_path": "n_pendulum_julia.outputs",
       "default": "result",
-      "tooltip": "Populate from current n_pendulum tree children."
+      "tooltip": "Populate from current n_pendulum_julia.outputs tree children."
     },
     {
       "id": "render_style",
@@ -236,7 +236,7 @@
     {
       "id": "solve",
       "label": "Run ODE Solver",
-      "script_path": "scripts/solve.py",
+      "script_path": "scripts/solve.jl",
       "inputs": [
         "n_links",
         "damping",
@@ -254,7 +254,7 @@
     {
       "id": "animate",
       "label": "Animate / Plot",
-      "script_path": "scripts/animate.py",
+      "script_path": "scripts/animate.jl",
       "inputs": [
         "animate_output_key",
         "render_style",

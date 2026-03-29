@@ -43,7 +43,7 @@ def run(
         raise ValueError("n_frames must be at least 1")
     if trail_alpha < 0.0 or trail_alpha > 1.0:
         raise ValueError("trail_alpha must be between 0.0 and 1.0")
-    root = f"n_pendulum.{output_key}"
+    root = f"n_pendulum.outputs.{output_key}"
     try:
         sol = pdv_tree[root]
         t      = sol.t

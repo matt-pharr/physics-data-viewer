@@ -18,15 +18,14 @@ import * as path from "path";
 import { ipcMain } from "electron";
 
 import { IPC } from "./ipc";
-import { ProjectManager, type ProjectModuleImport } from "./project-manager";
+import { ProjectManager, type ProjectManifest, type ProjectModuleImport } from "./project-manager";
 import { copyFilesForLoad } from "./project-file-sync";
-
-type ProjectManifest = Awaited<ReturnType<typeof ProjectManager.readManifest>>;
 
 interface RegisterProjectIpcHandlersOptions {
   projectManager: ProjectManager;
   kernelWorkingDirs: Map<string, string>;
   getActiveKernelId: () => string | null;
+  getActiveKernelLanguage: () => "python" | "julia";
   setActiveProjectDir: (dir: string | null) => void;
   getPendingModuleImports: () => ProjectModuleImport[];
   setPendingModuleImports: (imports: ProjectModuleImport[]) => void;
@@ -51,6 +50,7 @@ export function registerProjectIpcHandlers(
     projectManager,
     kernelWorkingDirs,
     getActiveKernelId,
+    getActiveKernelLanguage,
     setActiveProjectDir,
     getPendingModuleImports,
     setPendingModuleImports,
@@ -64,7 +64,9 @@ export function registerProjectIpcHandlers(
   ipcMain.handle(
     IPC.project.save,
     async (_event, saveDir: string, codeCells: unknown) => {
-      const saveResult = await projectManager.save(saveDir, codeCells);
+      const saveResult = await projectManager.save(saveDir, codeCells, {
+        language: getActiveKernelLanguage(),
+      });
 
       // Merge pending in-memory module imports/settings into the on-disk manifest.
       const pendingModuleImports = getPendingModuleImports();
@@ -157,4 +159,22 @@ export function registerProjectIpcHandlers(
     clearModuleHealthWarnings();
     return true;
   });
+
+  ipcMain.handle(
+    IPC.project.peekLanguages,
+    async (_event, paths: string[]): Promise<Record<string, "python" | "julia">> => {
+      const result: Record<string, "python" | "julia"> = {};
+      await Promise.all(
+        paths.map(async (dir) => {
+          try {
+            const manifest = await ProjectManager.readManifest(dir);
+            result[dir] = manifest.language;
+          } catch {
+            result[dir] = "python";
+          }
+        })
+      );
+      return result;
+    }
+  );
 }

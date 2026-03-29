@@ -587,24 +587,7 @@ A parameter is `required` if it has no default value. `type` is the string repre
 
 Notes are created via `pdv.note.register` (app → kernel) which creates a `PDVNote` instance and attaches it to the tree. The `.md` file itself lives in `<workingDir>/tree/<path>/` and is read/written directly by the main process via `note:read` / `note:save` IPC channels — no kernel round-trip is needed for content editing. On project save, the kernel serializes the note entry to `tree-index.json` and the main process copies the `.md` file into the save directory. On project load, the `.md` file is copied back from the save directory to the working directory and re-registered as a `PDVNote` in the tree.
 
-### 5.9 The Lazy-Load Registry
-
-An internal dict (not user-accessible) mapping tree paths to save-directory storage references:
-
-```python
-# Internal structure, not user-facing
-_lazy_registry = {
-    "data.waveforms.ch1": {
-        "save_dir": "/path/to/project",
-        "relative_path": "tree/data/waveforms/ch1.npy",
-        "format": "npy"
-    }
-}
-```
-
-Populated during `pdv.project.load`. Entries are removed once the data has been loaded into memory. The registry is never written to disk — it is reconstructed from `tree-index.json` each time a project is loaded.
-
-### 5.10 PDVModule Class
+### 5.9 PDVModule Class
 
 `PDVModule` is a subclass of `PDVTree` (i.e. a dict subclass). It represents an imported module in the tree. Because it inherits from `PDVTree`, it holds children naturally — a module's sub-nodes (GUI, scripts, namelists) are direct dict entries.
 
@@ -618,7 +601,7 @@ Attributes:
 
 Created by the `pdv.module.register` handler, which receives `path`, `module_id`, `name`, and `version` from the main process and inserts the `PDVModule` into the tree at the given path.
 
-### 5.11 PDVGui Class
+### 5.10 PDVGui Class
 
 `PDVGui` is a subclass of `PDVFile`. It represents a GUI definition file (`.gui.json`) that describes a module's user interface — inputs, actions, and layout.
 
@@ -630,7 +613,7 @@ Attributes:
 
 Created by the `pdv.gui.register` handler. For module GUIs, the `.gui.json` file is copied from the installed module directory into the working directory at import time. If the parent node is a `PDVModule`, the handler also sets the module's `.gui` attribute to point to this node.
 
-### 5.12 PDVNamelist Class
+### 5.11 PDVNamelist Class
 
 `PDVNamelist` is a subclass of `PDVFile`. It represents a simulation namelist file that can be parsed and edited through the namelist editor widget.
 
@@ -643,7 +626,7 @@ Attributes:
 
 The namelist file is parsed and written by dedicated comm handlers (`pdv.namelist.read`, `pdv.namelist.write`) that run in the kernel, keeping all format-specific logic in Python. The renderer requests parsed data and sends structured edits back; it never reads or writes the raw namelist file directly.
 
-### 5.13 PDVLib Class
+### 5.12 PDVLib Class
 
 `PDVLib` is a subclass of `PDVFile`. It represents a Python library file provided by a module's `lib/` directory that is importable by scripts and entry points.
 

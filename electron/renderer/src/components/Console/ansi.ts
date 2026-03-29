@@ -104,6 +104,18 @@ export function applyTerminalControls(input: string): string {
       continue;
     }
 
+    // OSC sequence (e.g. \x1b]8;;...\x1b\\ for hyperlinks) — strip entirely
+    if (ch === "\x1b" && input[i + 1] === "]") {
+      i += 2;
+      // Consume until ST (\x1b\\ or \x07)
+      while (i < input.length) {
+        if (input[i] === "\x07") { i++; break; }
+        if (input[i] === "\x1b" && input[i + 1] === "\\") { i += 2; break; }
+        i++;
+      }
+      continue;
+    }
+
     // Ordinary character — strip lone ESC bytes that aren't CSI sequences
     if (ch === "\x1b") {
       i++;

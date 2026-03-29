@@ -60,7 +60,7 @@ export const PDVMessageType = {
   TREE_LIST_RESPONSE: "pdv.tree.list.response",
   /** App → kernel. Request data value for a specific node. */
   TREE_GET: "pdv.tree.get",
-  /** Kernel → app. Returns node value (may be lazy-loaded). */
+  /** Kernel → app. Returns node value. */
   TREE_GET_RESPONSE: "pdv.tree.get.response",
   /** App → kernel. Resolve a file-backed tree node to its absolute path. */
   TREE_RESOLVE_FILE: "pdv.tree.resolve_file",
@@ -339,8 +339,6 @@ export interface NodeDescriptor {
   type: NodeKindValue;
   /** True if this node has child nodes. */
   has_children: boolean;
-  /** True if the data has not yet been loaded from the save directory. */
-  lazy: boolean;
   /** ISO 8601 creation timestamp. */
   created_at?: string;
   /** ISO 8601 last-modification timestamp. */

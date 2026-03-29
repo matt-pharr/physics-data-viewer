@@ -1,12 +1,12 @@
 /**
- * kernel-error-parser.ts — Parses Python tracebacks into structured error metadata.
+ * kernel-error-parser.ts — Parses Python and Julia tracebacks into structured error metadata.
  *
  * Responsible for:
- * 1. Stripping ANSI escape codes from raw traceback text.
- * 2. Extracting file/line/column locations from traceback frames, caret lines,
- *    and evalue strings using regex matching.
+ * 1. Stripping ANSI escape codes (SGR, OSC 8 hyperlinks) from raw traceback text.
+ * 2. Extracting file/line/column locations from Python traceback frames, Julia
+ *    `In[N]:line:col` references, `@ file:line` frames, caret lines, and evalue strings.
  * 3. Ranking candidate traceback frames so that user code is preferred over
- *    internal pdv_kernel frames or synthetic `<ipython-cell>` paths.
+ *    internal pdv_kernel/PDVJulia frames or synthetic cell paths.
  * 4. Adjusting line numbers for leading blank lines in code-cell submissions.
  * 5. Building a single `KernelExecutionError` object with a human-readable
  *    summary that includes source context and location when available.
@@ -40,11 +40,14 @@ export interface KernelExecutionLocation {
 // ---------------------------------------------------------------------------
 
 // eslint-disable-next-line no-control-regex
-const ANSI_ESCAPE_RE = /\u001b\[[0-9;]*m/g;
+const ANSI_ESCAPE_RE = /\u001b\[[0-9;]*m|\u001b\]8;[^\u0007\u001b]*(?:\u0007|\u001b\\)/g;
 const TRACEBACK_FILE_LINE_RE = /^\s*File "([^"]+)", line (\d+)(?:, in .+)?$/;
 const TRACEBACK_FILE_LINE_BARE_RE = /^\s*File ([^,]+), line (\d+)(?:, in .+)?$/;
 const TRACEBACK_CELL_LINE_RE = /^\s*Cell In\[\d+\], line (\d+)(?:, in .+)?$/;
 const EVALUE_FILE_LINE_RE = /\(([^,()]+), line (\d+)\)/;
+// Julia: "In[10]:1:20" or "@ file.jl:42" or "@ ./file.jl:42"
+const JULIA_CELL_LINE_RE = /In\[\d+\]:(\d+)(?::(\d+))?/;
+const JULIA_AT_FILE_LINE_RE = /@ ([^\s:]+):(\d+)/;
 
 // ---------------------------------------------------------------------------
 // Internal types
@@ -62,6 +65,19 @@ interface TracebackFrame {
 
 function stripAnsi(line: string): string {
   return line.replace(ANSI_ESCAPE_RE, "");
+}
+
+/**
+ * Decode literal backslash-escape sequences that appear in Julia's
+ * repr/show output for nested error messages (e.g. `\"` → `"`, `\n` → newline).
+ * Order matters: `\\` must be last to avoid double-processing.
+ */
+function decodeEscapeLiterals(s: string): string {
+  return s
+    .replace(/\\"/g, '"')
+    .replace(/\\n/g, "\n")
+    .replace(/\\t/g, "\t")
+    .replace(/\\\\/g, "\\");
 }
 
 function findCaretColumn(lines: string[], startIndex: number): number | undefined {
@@ -82,18 +98,32 @@ function parseTracebackFrames(traceback: string[]): TracebackFrame[] {
 
   for (let index = 0; index < cleanLines.length; index += 1) {
     const line = cleanLines[index];
+
+    // Python: File "...", line N / Cell In[N], line N
     const quotedFile = TRACEBACK_FILE_LINE_RE.exec(line);
     const bareFile = TRACEBACK_FILE_LINE_BARE_RE.exec(line);
     const cellFrame = TRACEBACK_CELL_LINE_RE.exec(line);
 
-    const fileValue = quotedFile?.[1] ?? bareFile?.[1] ?? (cellFrame ? "<ipython-cell>" : undefined);
-    const lineToken = quotedFile?.[2] ?? bareFile?.[2] ?? cellFrame?.[1];
+    // Julia: In[N]:line:col or @ file.jl:line
+    const juliaCell = JULIA_CELL_LINE_RE.exec(line);
+    const juliaAt = JULIA_AT_FILE_LINE_RE.exec(line);
+
+    const fileValue = quotedFile?.[1] ?? bareFile?.[1]
+      ?? (cellFrame ? "<ipython-cell>" : undefined)
+      ?? (juliaCell ? "<julia-cell>" : undefined)
+      ?? juliaAt?.[1];
+    const lineToken = quotedFile?.[2] ?? bareFile?.[2] ?? cellFrame?.[1]
+      ?? juliaCell?.[1] ?? juliaAt?.[2];
     if (!fileValue || !lineToken) continue;
 
     const lineValue = Number.parseInt(lineToken, 10);
     if (!Number.isFinite(lineValue)) continue;
 
-    const column = findCaretColumn(cleanLines, index);
+    // Julia cell frames can include column inline (In[N]:line:col)
+    let column = juliaCell?.[2] ? Number.parseInt(juliaCell[2], 10) : undefined;
+    if (column === undefined || !Number.isFinite(column)) {
+      column = findCaretColumn(cleanLines, index);
+    }
 
     frames.push({ file: fileValue.trim(), line: lineValue, column });
   }
@@ -102,7 +132,7 @@ function parseTracebackFrames(traceback: string[]): TracebackFrame[] {
 }
 
 function framePriority(frame: TracebackFrame): number {
-  if (frame.file.includes("/pdv_kernel/")) return 0;
+  if (frame.file.includes("/pdv_kernel/") || frame.file.includes("/PDVJulia/")) return 0;
   if (frame.file.startsWith("<")) return 1;
   return 2;
 }
@@ -288,8 +318,9 @@ export function buildExecutionError(
     : parsedLocation;
   const sourceText = formatExecutionSource(source);
   const locationText = formatExecutionLocation(location);
-  const base = normalizedMessage
-    ? `${normalizedName}: ${normalizedMessage}`
+  const displayMessage = decodeEscapeLiterals(normalizedMessage);
+  const base = displayMessage
+    ? `${normalizedName}: ${displayMessage}`
     : normalizedName;
 
   let summary = base;
