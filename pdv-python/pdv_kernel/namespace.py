@@ -291,10 +291,11 @@ def describe_namespace_value(
     expression: str,
 ) -> dict[str, Any]:
     """Build a renderer-facing descriptor for one namespace value."""
+    kind = namespace_kind(value)
     descriptor: dict[str, Any] = {
         "name": name,
-        "kind": namespace_kind(value),
-        "type": namespace_type_label(value),
+        "kind": kind,
+        "type": kind,
         "preview": namespace_preview(value),
         "path": path,
         "expression": expression,
@@ -342,18 +343,6 @@ def namespace_kind(value: Any) -> str:
     if kind == "unknown" and value_has_object_children(value):
         return "object"
     return kind
-
-
-def namespace_type_label(value: Any) -> str:
-    """Return the short runtime type label shown in the namespace panel."""
-    if value is None:
-        return "NoneType"
-    try:
-        return type(value).__name__
-    except Exception:  # noqa: BLE001
-        return "unknown"
-
-
 def namespace_preview(value: Any, max_length: int = 120) -> str:
     """Return a rich but bounded preview string for a namespace value."""
     kind = namespace_kind(value)
@@ -397,7 +386,7 @@ def namespace_preview(value: Any, max_length: int = 120) -> str:
             return f"bytes ({len(value)} bytes)"
         if kind == "object":
             attrs = list(iter_object_attributes(value).keys())
-            summary = f"{namespace_type_label(value)}({', '.join(attrs[:3])}"
+            summary = f"{type(value).__name__}({', '.join(attrs[:3])}"
             if len(attrs) > 3:
                 summary += ", ..."
             summary += ")"
