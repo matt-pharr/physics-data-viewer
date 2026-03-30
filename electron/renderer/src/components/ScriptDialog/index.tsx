@@ -44,6 +44,7 @@ export function serializeScriptArgValue(value: unknown): string | number | boole
 export const ScriptDialog: React.FC<ScriptDialogProps> = ({ node, kernelId, onRun, onCancel }) => {
   const [params, setParams] = useState<ScriptParameter[]>([]);
   const [isLoadingParams, setIsLoadingParams] = useState(true);
+  const [paramLoadFailed, setParamLoadFailed] = useState(false);
   const [values, setValues] = useState<Record<string, unknown>>({});
   const [isRunning, setIsRunning] = useState(false);
   const [error, setError] = useState<string | undefined>(undefined);
@@ -51,6 +52,8 @@ export const ScriptDialog: React.FC<ScriptDialogProps> = ({ node, kernelId, onRu
   useEffect(() => {
     let cancelled = false;
     setIsLoadingParams(true);
+    setParamLoadFailed(false);
+    setError(undefined);
     window.pdv.script.getParams(kernelId, node.path).then((fetched) => {
       if (cancelled) return;
       setParams(fetched);
@@ -62,8 +65,11 @@ export const ScriptDialog: React.FC<ScriptDialogProps> = ({ node, kernelId, onRu
       }
       setValues(defaults);
       setIsLoadingParams(false);
-    }).catch(() => {
-      if (!cancelled) setIsLoadingParams(false);
+    }).catch((err) => {
+      if (cancelled) return;
+      setParamLoadFailed(true);
+      setError(err instanceof Error ? err.message : String(err));
+      setIsLoadingParams(false);
     });
     return () => { cancelled = true; };
   }, [kernelId, node.path]);
@@ -72,7 +78,7 @@ export const ScriptDialog: React.FC<ScriptDialogProps> = ({ node, kernelId, onRu
     setValues((prev) => ({ ...prev, [paramName]: value }));
   };
 
-  const canRun = !isLoadingParams && params.every((param) => !param.required || isValueProvided(param, values));
+  const canRun = !isLoadingParams && !paramLoadFailed && params.every((param) => !param.required || isValueProvided(param, values));
 
   const handleRun = async () => {
     if (!canRun || isRunning) {
@@ -131,9 +137,9 @@ export const ScriptDialog: React.FC<ScriptDialogProps> = ({ node, kernelId, onRu
 
           {isLoadingParams && <div className="dialog-info-text">Loading parameters...</div>}
 
-          {!isLoadingParams && params.length === 0 && <div className="dialog-info-text">This script has no parameters</div>}
+          {!isLoadingParams && !paramLoadFailed && params.length === 0 && <div className="dialog-info-text">This script has no parameters</div>}
 
-          {!isLoadingParams && params.length > 0 && (
+          {!isLoadingParams && !paramLoadFailed && params.length > 0 && (
             <div className="param-list">
               {params.map((param) => {
                 const kind = getParamKind(param.type);

@@ -718,6 +718,7 @@ const App: React.FC = () => {
     setActiveCellTab,
     setModulesRefreshToken,
     setNamespaceRefreshToken,
+    setProgress,
     setLastError,
     setLogs,
     loadedProjectTabsRef,

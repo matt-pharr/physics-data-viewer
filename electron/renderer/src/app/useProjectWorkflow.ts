@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, type Dispatch, type MutableRefObject, type SetStateAction } from 'react';
 import type { CellTab, Config, LogEntry, MenuActionPayload } from '../types';
+import type { ProgressPayload } from '../types/pdv';
 import { normalizeRecentProjects } from './app-utils';
 import { MAX_RECENT_PROJECTS } from './constants';
 
@@ -27,6 +28,8 @@ interface UseProjectWorkflowOptions {
   setModulesRefreshToken: Dispatch<SetStateAction<number>>;
   /** Bumps to trigger NamespaceView refetch after project load. */
   setNamespaceRefreshToken: Dispatch<SetStateAction<number>>;
+  /** Clears or updates save/load progress state. */
+  setProgress: Dispatch<SetStateAction<ProgressPayload | null>>;
   /** Sets error message if save/load fails. */
   setLastError: Dispatch<SetStateAction<string | undefined>>;
   /** Appends entries to the console log. */
@@ -52,6 +55,7 @@ export function useProjectWorkflow(options: UseProjectWorkflowOptions) {
     setActiveCellTab,
     setModulesRefreshToken,
     setNamespaceRefreshToken,
+    setProgress,
     setLastError,
     setLogs,
     loadedProjectTabsRef,
@@ -112,6 +116,7 @@ export function useProjectWorkflow(options: UseProjectWorkflowOptions) {
       }]);
       return true;
     } catch (error) {
+      setProgress(null);
       setLastError(error instanceof Error ? error.message : String(error));
       return false;
     }
@@ -121,6 +126,7 @@ export function useProjectWorkflow(options: UseProjectWorkflowOptions) {
     kernelStatus,
     rememberRecentProject,
     setCurrentProjectDir,
+    setProgress,
     setLastError,
     setLogs,
     setModulesRefreshToken,
@@ -158,6 +164,7 @@ export function useProjectWorkflow(options: UseProjectWorkflowOptions) {
         ...(result.checksumValid === false ? { stderr: 'Warning: tree-index.json checksum does not match the stored checksum' } : {}),
       }]);
     } catch (error) {
+      setProgress(null);
       setLastError(error instanceof Error ? error.message : String(error));
     }
   }, [
@@ -168,6 +175,7 @@ export function useProjectWorkflow(options: UseProjectWorkflowOptions) {
     setActiveCellTab,
     setCellTabs,
     setCurrentProjectDir,
+    setProgress,
     setLastError,
     setLogs,
     setModulesRefreshToken,

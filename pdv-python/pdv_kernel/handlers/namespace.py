@@ -81,11 +81,19 @@ def handle_namespace_inspect(msg: dict) -> None:
     ip = get_ip()
     ns = ip.user_ns if ip is not None else {}
 
-    response_payload = inspect_namespace(
-        ns,
-        root_name=root_name,
-        path=path,
-    )
+    try:
+        response_payload = inspect_namespace(
+            ns,
+            root_name=root_name,
+            path=path,
+        )
+    except Exception as exc:  # noqa: BLE001
+        send_message(
+            "pdv.namespace.inspect.response",
+            {"error": str(exc), "children": [], "truncated": False},
+            in_reply_to=msg_id,
+        )
+        return
 
     send_message("pdv.namespace.inspect.response", response_payload, in_reply_to=msg_id)
 

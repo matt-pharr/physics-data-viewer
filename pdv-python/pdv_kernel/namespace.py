@@ -499,7 +499,7 @@ def resolve_namespace_target(
             value = getattr(value, str(raw))
             continue
         if kind == "column":
-            value = value[str(raw)]
+            value = value[raw]
             continue
         if kind == "index":
             value = resolve_index_child(value, raw)
