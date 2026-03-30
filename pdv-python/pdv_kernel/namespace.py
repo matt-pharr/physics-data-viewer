@@ -295,7 +295,7 @@ def describe_namespace_value(
     descriptor: dict[str, Any] = {
         "name": name,
         "kind": kind,
-        "type": kind,
+        "type": type(value).__name__ if value is not None else "NoneType",
         "preview": namespace_preview(value),
         "path": path,
         "expression": expression,
