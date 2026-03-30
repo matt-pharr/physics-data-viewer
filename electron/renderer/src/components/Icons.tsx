@@ -33,29 +33,50 @@ export const NamespaceIcon: React.FC<IconProps> = (props) => (
   </svg>
 );
 
-/** Stacked-layers / imported modules icon. */
-export const ModulesIcon: React.FC<IconProps> = (props) => (
-  <svg {...defaults} {...props}>
-    <polyline points="16,6.5 10,3.5 4,6.5 10,9.5 16,6.5" />
-    <polyline points="4,6.5 4,13.5 10,16.5 10,9.5" />
-    <polyline points="16,6.5 16,13.5 10,16.5" />
-  </svg>
-);
+// /** Stacked-layers / imported modules icon. */
+// export const ModulesIcon: React.FC<IconProps> = (props) => (
+//   <svg {...defaults} {...props}>
+//     <polyline points="16,6.5 10,3.5 4,6.5 10,9.5 16,6.5" />
+//     <polyline points="4,6.5 4,13.5 10,16.5 10,9.5" />
+//     <polyline points="16,6.5 16,13.5 10,16.5" />
+//   </svg>
+// );
 
-/** Download-to-shelf / module library icon. */
-export const LibraryIcon: React.FC<IconProps> = (props) => (
-  <svg {...defaults} {...props}>
-    <polyline points="4,11 4,16 16,16 16,11" />
-    <line x1="2" y1="11" x2="18" y2="11" />
-    <line x1="10" y1="3" x2="10" y2="9" />
-    <polyline points="7,6 10,9 13,6" />
-  </svg>
-);
+// /** Download-to-shelf / module library icon. */
+// export const LibraryIcon: React.FC<IconProps> = (props) => (
+//   <svg {...defaults} {...props}>
+//     <polyline points="4,11 4,16 16,16 16,11" />
+//     <line x1="2" y1="11" x2="18" y2="11" />
+//     <line x1="10" y1="3" x2="10" y2="9" />
+//     <polyline points="7,6 10,9 13,6" />
+//   </svg>
+// );
 
 /** Gear / settings icon. */
 export const SettingsIcon: React.FC<IconProps> = (props) => (
-  <svg {...defaults} {...props}>
-    <circle cx="10" cy="10" r="2.5" />
-    <path d="M10 2.5v1.5M10 16v1.5M2.5 10H4M16 10h1.5M4.4 4.4l1.1 1.1M14.5 14.5l1.1 1.1M4.4 15.6l1.1-1.1M14.5 5.5l1.1-1.1" />
+  <svg viewBox="0 0 20 20" fill="currentColor" width="20" height="20" {...props}>
+    <path
+      fillRule="evenodd"
+      d="
+        M10 3.8
+        a6.2 6.2 0 1 0 0 12.4
+        a6.2 6.2 0 1 0 0-12.4
+
+        M10 7.7
+        a2.3 2.3 0 1 1 0 4.6
+        a2.3 2.3 0 1 1 0-4.6
+      "
+    />
+
+    <g transform="translate(10,10)">
+      <rect x="-1.2" y="-8" width="2.4" height="3" rx="0.6" />
+      <rect x="-1.2" y="-8" width="2.4" height="3" rx="0.6" transform="rotate(45)" />
+      <rect x="-1.2" y="-8" width="2.4" height="3" rx="0.6" transform="rotate(90)" />
+      <rect x="-1.2" y="-8" width="2.4" height="3" rx="0.6" transform="rotate(135)" />
+      <rect x="-1.2" y="-8" width="2.4" height="3" rx="0.6" transform="rotate(180)" />
+      <rect x="-1.2" y="-8" width="2.4" height="3" rx="0.6" transform="rotate(225)" />
+      <rect x="-1.2" y="-8" width="2.4" height="3" rx="0.6" transform="rotate(270)" />
+      <rect x="-1.2" y="-8" width="2.4" height="3" rx="0.6" transform="rotate(315)" />
+    </g>
   </svg>
 );
