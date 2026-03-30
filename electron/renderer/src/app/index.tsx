@@ -1049,12 +1049,11 @@ const App: React.FC = () => {
           <EnvironmentSelector
             isFirstRun={activeLanguage === 'julia' ? !config?.juliaPath : !config?.pythonPath}
             activeLanguage={activeLanguage}
-            currentConfig={config || undefined}
-            currentKernelId={currentKernelId}
-            onSave={handleEnvSave}
-           onRestart={handleRestartKernel}
-           onCancel={() => setShowEnvSelector(false)}
-         />
+            currentPythonPath={config?.pythonPath}
+            currentJuliaPath={config?.juliaPath}
+            onSelect={handleEnvSave}
+            onCancel={() => setShowEnvSelector(false)}
+          />
        )}
        <ImportModuleDialog
          isOpen={showImportModule}
@@ -1070,11 +1069,9 @@ const App: React.FC = () => {
          activeLanguage={activeLanguage}
          config={config}
          shortcuts={shortcuts}
-         currentKernelId={currentKernelId}
          onClose={() => setShowSettings(false)}
          onSave={handleSettingsSave}
          onEnvSave={handleEnvSave}
-         onRestart={handleRestartKernel}
        />
 
        {showWelcome && isPristine && !showEnvSelector && (

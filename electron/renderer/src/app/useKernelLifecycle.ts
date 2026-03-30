@@ -85,8 +85,8 @@ export function useKernelLifecycle(options: UseKernelLifecycleOptions) {
     setTreeRefreshToken,
   ]);
 
-  const handleEnvSave = useCallback(async (paths: { pythonPath?: string; juliaPath?: string; language?: 'python' | 'julia' }) => {
-    const language = paths.language ?? 'python';
+  const handleEnvSave = useCallback(async (paths: { pythonPath?: string; juliaPath?: string }) => {
+    const language = paths.juliaPath && !paths.pythonPath ? 'julia' : 'python';
     const updatedConfig: Config = {
       kernelSpec: config?.kernelSpec ?? null,
       cwd: config?.cwd ?? '',

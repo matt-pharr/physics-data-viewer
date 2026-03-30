@@ -96,6 +96,13 @@ const api: PDVApi = {
     write: (kernelId, treePath, data) =>
       ipcRenderer.invoke(IPC.namelist.write, kernelId, treePath, data),
   },
+  environment: {
+    list: () => ipcRenderer.invoke(IPC.environment.list),
+    check: (pythonPath) => ipcRenderer.invoke(IPC.environment.check, pythonPath),
+    install: (pythonPath) => ipcRenderer.invoke(IPC.environment.install, pythonPath),
+    refresh: () => ipcRenderer.invoke(IPC.environment.refresh),
+    onInstallOutput: (callback) => onPush(IPC.push.installOutput, callback),
+  },
   modules: {
     listInstalled: () => ipcRenderer.invoke(IPC.modules.listInstalled),
     install: (request) => ipcRenderer.invoke(IPC.modules.install, request),

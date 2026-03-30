@@ -582,6 +582,31 @@ export interface ModuleActionResult {
   error?: string;
 }
 
+/** Enriched environment descriptor with package installation status. */
+export interface EnvironmentInfo {
+  kind: "conda" | "venv" | "pyenv" | "system" | "configured";
+  pythonPath: string;
+  label: string;
+  pythonVersion: string;
+  pdvInstalled: boolean;
+  pdvVersion: string | null;
+  pdvCompatible: boolean;
+  pdvUpgradeAvailable: boolean;
+  ipykernelInstalled: boolean;
+}
+
+/** Result of a streaming pip install operation. */
+export interface EnvironmentInstallResult {
+  success: boolean;
+  output: string;
+}
+
+/** A single streaming output chunk from a pip install operation. */
+export interface InstallOutputChunk {
+  stream: "stdout" | "stderr";
+  data: string;
+}
+
 /** Complete preload API contract exposed as `window.pdv`. */
 export interface PDVApi {
   kernels: {
@@ -657,6 +682,13 @@ export interface PDVApi {
   namelist: {
     read(kernelId: string, treePath: string): Promise<NamelistReadResult>;
     write(kernelId: string, treePath: string, data: Record<string, Record<string, unknown>>): Promise<NamelistWriteResult>;
+  };
+  environment: {
+    list(): Promise<EnvironmentInfo[]>;
+    check(pythonPath: string): Promise<EnvironmentInfo | null>;
+    install(pythonPath: string): Promise<EnvironmentInstallResult>;
+    refresh(): Promise<EnvironmentInfo[]>;
+    onInstallOutput(callback: (chunk: InstallOutputChunk) => void): () => void;
   };
   modules: {
     listInstalled(): Promise<ModuleDescriptor[]>;
