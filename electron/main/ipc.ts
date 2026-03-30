@@ -130,6 +130,7 @@ export const IPC = {
     projectLoaded: "pdv.project.loaded",
     kernelStatus: "pdv.kernel.status",
     menuAction: "menu:action",
+    chromeStateChanged: "chrome:stateChanged",
     executeOutput: "pdv.execute.output",
     moduleExecuteRequest: "pdv.moduleWindow.executeRequest",
     projectReloading: "pdv.project.reloading",
@@ -138,6 +139,15 @@ export const IPC = {
   menu: {
     updateRecentProjects: "menu:updateRecentProjects",
     updateEnabled: "menu:updateEnabled",
+    getModel: "menu:getModel",
+    popup: "menu:popup",
+  },
+  /** Window-chrome integration channels. */
+  chrome: {
+    getInfo: "chrome:getInfo",
+    minimize: "chrome:minimize",
+    toggleMaximize: "chrome:toggleMaximize",
+    close: "chrome:close",
   },
   /** Module popup window channels. */
   moduleWindows: {
@@ -671,6 +681,31 @@ export interface MenuEnabledState {
   "project:save"?: boolean;
   "project:saveAs"?: boolean;
   "modules:import"?: boolean;
+}
+
+/** Renderer-facing top-level menu button metadata. */
+export interface AppMenuTopLevel {
+  /** Stable top-level menu id used for popup requests. */
+  id: "file" | "edit" | "view" | "window";
+  /** User-visible label rendered in the custom Linux menubar. */
+  label: string;
+}
+
+/** Platform-specific window chrome mode surfaced to the renderer. */
+export type WindowChromePlatform = "macos" | "linux" | "windows";
+
+/** Main-window chrome state consumed by the renderer title-bar shell. */
+export interface WindowChromeInfo {
+  /** Current host platform mapped into renderer-friendly naming. */
+  platform: WindowChromePlatform;
+  /** True when the renderer should draw the visible title bar area. */
+  showCustomTitleBar: boolean;
+  /** True when the renderer should show the integrated top-level menu strip. */
+  showMenuBar: boolean;
+  /** True when the renderer should show custom window controls. */
+  showWindowControls: boolean;
+  /** True when the main window is currently maximized. */
+  isMaximized: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -1370,11 +1405,63 @@ export interface PDVApi {
      */
     updateEnabled(state: MenuEnabledState): Promise<boolean>;
     /**
+     * Return the top-level menu structure for the custom Linux menubar.
+     *
+     * @returns Ordered top-level menu button metadata.
+     */
+    getModel(): Promise<AppMenuTopLevel[]>;
+    /**
+     * Open one native submenu popup anchored to the given window coordinates.
+     *
+     * Coordinates are relative to the content area of the main window.
+     *
+     * @param menuId - Top-level menu id to display.
+     * @param x - Left anchor coordinate in window CSS pixels.
+     * @param y - Top anchor coordinate in window CSS pixels.
+     * @returns True when a matching submenu was opened.
+     */
+    popup(menuId: AppMenuTopLevel["id"], x: number, y: number): Promise<boolean>;
+    /**
      * Subscribe to app-menu action events.
      *
      * @param callback - Invoked for File-menu actions.
      * @returns Unsubscribe function.
      */
     onAction(callback: (payload: MenuActionPayload) => void): () => void;
+  };
+
+  /** Window chrome integration and title-bar controls. */
+  chrome: {
+    /**
+     * Return platform-specific window-chrome settings for the renderer shell.
+     *
+     * @returns Current main-window chrome configuration and state.
+     */
+    getInfo(): Promise<WindowChromeInfo>;
+    /**
+     * Minimize the main window when supported.
+     *
+     * @returns True when the request was accepted.
+     */
+    minimize(): Promise<boolean>;
+    /**
+     * Maximize or restore the main window depending on current state.
+     *
+     * @returns Updated maximize state.
+     */
+    toggleMaximize(): Promise<boolean>;
+    /**
+     * Close the main window.
+     *
+     * @returns True when the request was accepted.
+     */
+    close(): Promise<boolean>;
+    /**
+     * Subscribe to maximize/fullscreen state changes for the main window.
+     *
+     * @param callback - Invoked with the latest chrome info snapshot.
+     * @returns Unsubscribe function.
+     */
+    onStateChanged(callback: (info: WindowChromeInfo) => void): () => void;
   };
 }

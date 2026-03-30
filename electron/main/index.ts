@@ -98,6 +98,13 @@ const REGISTERED_CHANNELS: readonly string[] = [
   IPC.codeCells.load,
   IPC.codeCells.save,
   IPC.menu.updateRecentProjects,
+  IPC.menu.updateEnabled,
+  IPC.menu.getModel,
+  IPC.menu.popup,
+  IPC.chrome.getInfo,
+  IPC.chrome.minimize,
+  IPC.chrome.toggleMaximize,
+  IPC.chrome.close,
   IPC.moduleWindows.open,
   IPC.moduleWindows.close,
   IPC.moduleWindows.context,
@@ -453,6 +460,7 @@ export function registerIpcHandlers(
   });
 
   registerAppStateIpcHandlers({
+    win,
     configStore,
     readConfig,
     themesDir,

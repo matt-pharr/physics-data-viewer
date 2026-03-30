@@ -22,6 +22,7 @@ import { NamespaceView } from '../components/NamespaceView';
 import { ScriptDialog } from '../components/ScriptDialog';
 import { CreateScriptDialog } from '../components/Tree/CreateScriptDialog';
 import { CreateNoteDialog } from '../components/Tree/CreateNoteDialog';
+import { TitleBar } from '../components/TitleBar';
 import { WriteTab } from '../components/WriteTab';
 import { SettingsDialog } from '../components/SettingsDialog';
 import { ImportModuleDialog } from '../components/ImportModuleDialog';
@@ -29,11 +30,13 @@ import { WelcomeScreen, type RecentProject } from '../components/WelcomeScreen';
 import type {
   CellTab,
   Config,
+  AppMenuTopLevel,
   KernelExecutionOrigin,
   LogEntry,
   NoteTab,
   ScriptRunResult,
   TreeNodeData,
+  WindowChromeInfo,
 } from '../types';
 import { resolveShortcuts } from '../shortcuts';
 import { normalizeLoadedCodeCells, normalizeRecentProjects, mergeConfigUpdate } from './app-utils';
@@ -122,6 +125,8 @@ const App: React.FC = () => {
   const [createNoteTarget, setCreateNoteTarget] = useState<string | null>(null);
   const [showSettings, setShowSettings] = useState(false);
   const [showImportModule, setShowImportModule] = useState(false);
+  const [chromeInfo, setChromeInfo] = useState<WindowChromeInfo | null>(null);
+  const [menuModel, setMenuModel] = useState<AppMenuTopLevel[]>([]);
 
   // -- Write tab (markdown notes) state ------------------------------------
   const [activePane, setActivePane] = useState<'code' | 'write'>('code');
@@ -189,6 +194,46 @@ const App: React.FC = () => {
 
     void initConfig();
   }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    void window.pdv.chrome.getInfo().then((info) => {
+      if (!cancelled) {
+        setChromeInfo(info);
+      }
+    }).catch(() => {
+      if (!cancelled) {
+        setChromeInfo(null);
+      }
+    });
+    const unsubscribe = window.pdv.chrome.onStateChanged((info) => {
+      setChromeInfo(info);
+    });
+    return () => {
+      cancelled = true;
+      unsubscribe();
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!chromeInfo?.showMenuBar) {
+      setMenuModel([]);
+      return;
+    }
+    let cancelled = false;
+    void window.pdv.menu.getModel().then((model) => {
+      if (!cancelled) {
+        setMenuModel(model);
+      }
+    }).catch(() => {
+      if (!cancelled) {
+        setMenuModel([]);
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [chromeInfo?.showMenuBar]);
 
   useEffect(() => {
     const projectName = currentProjectDir
@@ -754,8 +799,20 @@ const App: React.FC = () => {
     void executeOpenProject(pending.path);
   }, [kernelStatus, executeOpenProject]);
 
+  const projectTitle = currentProjectDir
+    ? currentProjectDir.split('/').filter(Boolean).pop() ?? 'Unsaved Project'
+    : 'Unsaved Project';
+
   return (
     <div className="app">
+      {chromeInfo?.showCustomTitleBar && (
+        <TitleBar
+          chromeInfo={chromeInfo}
+          menuModel={menuModel}
+          title={projectTitle}
+        />
+      )}
+
       {/* Main content */}
       <main className="app-main">
 

@@ -10,7 +10,7 @@
  * index.ts — IPC handler registration and push forwarding
  */
 
-import { BrowserWindow, app } from "electron";
+import { BrowserWindow, app, type BrowserWindowConstructorOptions } from "electron";
 import * as path from "path";
 import * as os from "os";
 import * as fsSync from "fs";
@@ -22,6 +22,19 @@ import { ConfigStore } from "./config";
 import { registerIpcHandlers } from "./index";
 import { initializeAppMenu } from "./menu";
 
+function getWindowChromeOptions(): BrowserWindowConstructorOptions {
+  if (process.platform === "darwin") {
+    return {
+      titleBarStyle: "hiddenInset",
+    };
+  }
+  if (process.platform === "linux") {
+    return {
+      frame: false,
+    };
+  }
+  return {};
+}
 
 async function loadDevUrlWithRetry(
   win: BrowserWindow,
@@ -62,6 +75,7 @@ export async function createWindow(
     width: 1440,
     height: 960,
     show: false,
+    ...getWindowChromeOptions(),
     webPreferences: {
       preload: path.join(__dirname, "..", "preload.js"),
       contextIsolation: true,

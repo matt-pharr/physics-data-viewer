@@ -190,6 +190,24 @@ export interface MenuEnabledState {
   "modules:import"?: boolean;
 }
 
+/** Top-level menu metadata used by the Linux integrated menubar. */
+export interface AppMenuTopLevel {
+  id: "file" | "edit" | "view" | "window";
+  label: string;
+}
+
+/** Platform string used by the renderer title-bar shell. */
+export type WindowChromePlatform = "macos" | "linux" | "windows";
+
+/** Main-window chrome information returned by the preload bridge. */
+export interface WindowChromeInfo {
+  platform: WindowChromePlatform;
+  showCustomTitleBar: boolean;
+  showMenuBar: boolean;
+  showWindowControls: boolean;
+  isMaximized: boolean;
+}
+
 /** Result returned from `project.save()`. */
 export interface ProjectSaveResult {
   /** SHA-256 checksum of the serialized tree-index.json. */
@@ -652,7 +670,16 @@ export interface PDVApi {
   menu: {
     updateRecentProjects(paths: string[]): Promise<boolean>;
     updateEnabled(state: MenuEnabledState): Promise<boolean>;
+    getModel(): Promise<AppMenuTopLevel[]>;
+    popup(menuId: AppMenuTopLevel["id"], x: number, y: number): Promise<boolean>;
     onAction(callback: (payload: MenuActionPayload) => void): () => void;
+  };
+  chrome: {
+    getInfo(): Promise<WindowChromeInfo>;
+    minimize(): Promise<boolean>;
+    toggleMaximize(): Promise<boolean>;
+    close(): Promise<boolean>;
+    onStateChanged(callback: (info: WindowChromeInfo) => void): () => void;
   };
 }
 

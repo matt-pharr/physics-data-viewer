@@ -148,7 +148,16 @@ const api: PDVApi = {
       ipcRenderer.invoke(IPC.menu.updateRecentProjects, paths),
     updateEnabled: (state) =>
       ipcRenderer.invoke(IPC.menu.updateEnabled, state),
+    getModel: () => ipcRenderer.invoke(IPC.menu.getModel),
+    popup: (menuId, x, y) => ipcRenderer.invoke(IPC.menu.popup, menuId, x, y),
     onAction: (callback) => onPush(IPC.push.menuAction, callback),
+  },
+  chrome: {
+    getInfo: () => ipcRenderer.invoke(IPC.chrome.getInfo),
+    minimize: () => ipcRenderer.invoke(IPC.chrome.minimize),
+    toggleMaximize: () => ipcRenderer.invoke(IPC.chrome.toggleMaximize),
+    close: () => ipcRenderer.invoke(IPC.chrome.close),
+    onStateChanged: (callback) => onPush(IPC.push.chromeStateChanged, callback),
   },
 };
 

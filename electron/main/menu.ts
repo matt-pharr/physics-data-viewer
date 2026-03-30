@@ -15,7 +15,7 @@
 
 import { app, BrowserWindow, Menu, type MenuItemConstructorOptions } from "electron";
 
-import { IPC, type MenuActionPayload, type MenuEnabledState } from "./ipc";
+import { type AppMenuTopLevel, IPC, type MenuActionPayload, type MenuEnabledState } from "./ipc";
 
 let currentWindow: BrowserWindow | null = null;
 let recentProjects: string[] = [];
@@ -56,6 +56,7 @@ function buildTemplate(): MenuItemConstructorOptions[] {
 
   template.push(
     {
+      id: "file",
       label: "File",
       submenu: [
         {
@@ -97,11 +98,21 @@ function buildTemplate(): MenuItemConstructorOptions[] {
           : { role: "quit" as const, accelerator: "CmdOrCtrl+Shift+W" },
       ],
     },
-    { role: "editMenu" },
-    { role: "viewMenu" },
-    { role: "windowMenu" }
+    { id: "edit", role: "editMenu" },
+    { id: "view", role: "viewMenu" },
+    { id: "window", role: "windowMenu" }
   );
   return template;
+}
+
+// Extract the top-level menus rendered inside the Linux title bar.
+function buildTopLevelMenuModel(): AppMenuTopLevel[] {
+  return [
+    { id: "file", label: "File" },
+    { id: "edit", label: "Edit" },
+    { id: "view", label: "View" },
+    { id: "window", label: "Window" },
+  ];
 }
 
 // Rebuild and apply the current application menu.
@@ -124,6 +135,10 @@ export function initializeAppMenu(win: BrowserWindow): void {
     }
   });
   applyMenu();
+  if (process.platform === "linux") {
+    win.setAutoHideMenuBar(true);
+    win.setMenuBarVisibility(false);
+  }
 }
 
 /**
@@ -160,4 +175,44 @@ export function updateRecentProjectsMenu(paths: string[]): void {
   if (app.isReady()) {
     applyMenu();
   }
+}
+
+/**
+ * Return the top-level menus used by the integrated Linux title bar.
+ *
+ * @returns Ordered list of top-level menu buttons.
+ */
+export function getTopLevelMenuModel(): AppMenuTopLevel[] {
+  return buildTopLevelMenuModel();
+}
+
+/**
+ * Open one native submenu popup for the selected top-level menu.
+ *
+ * @param menuId - Top-level menu identifier.
+ * @param x - Horizontal anchor coordinate in window CSS pixels.
+ * @param y - Vertical anchor coordinate in window CSS pixels.
+ * @returns True when a matching submenu was opened.
+ */
+export function popupTopLevelMenu(
+  menuId: AppMenuTopLevel["id"],
+  x: number,
+  y: number
+): boolean {
+  if (!currentWindow || currentWindow.isDestroyed()) {
+    return false;
+  }
+  const templateEntry = buildTemplate().find(
+    (entry) => entry.id === menuId && Array.isArray(entry.submenu)
+  );
+  if (!templateEntry || !Array.isArray(templateEntry.submenu)) {
+    return false;
+  }
+  const menu = Menu.buildFromTemplate(templateEntry.submenu);
+  menu.popup({
+    window: currentWindow,
+    x: Math.round(x),
+    y: Math.round(y),
+  });
+  return true;
 }
