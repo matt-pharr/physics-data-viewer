@@ -40,6 +40,7 @@ import { registerTreeNamespaceScriptIpcHandlers } from "./ipc-register-tree-name
 import { ModuleWindowManager } from "./module-window-manager";
 import {
   IPC,
+  NamespaceInspectTarget,
   ModuleHealthWarning,
   NamespaceQueryOptions,
   PDVConfig,
@@ -73,8 +74,10 @@ const REGISTERED_CHANNELS: readonly string[] = [
   IPC.tree.addFile,
   IPC.tree.invokeHandler,
   IPC.namespace.query,
+  IPC.namespace.inspect,
   IPC.script.edit,
   IPC.script.run,
+  IPC.script.getParams,
   IPC.note.save,
   IPC.note.read,
   IPC.modules.listInstalled,
@@ -95,9 +98,17 @@ const REGISTERED_CHANNELS: readonly string[] = [
   IPC.config.set,
   IPC.themes.get,
   IPC.themes.save,
+  IPC.themes.openDir,
   IPC.codeCells.load,
   IPC.codeCells.save,
   IPC.menu.updateRecentProjects,
+  IPC.menu.updateEnabled,
+  IPC.menu.getModel,
+  IPC.menu.popup,
+  IPC.chrome.getInfo,
+  IPC.chrome.minimize,
+  IPC.chrome.toggleMaximize,
+  IPC.chrome.close,
   IPC.moduleWindows.open,
   IPC.moduleWindows.close,
   IPC.moduleWindows.context,
@@ -149,6 +160,21 @@ function toNamespaceQueryPayload(
     include_private: options.includePrivate,
     include_modules: options.includeModules,
     include_callables: options.includeCallables,
+  };
+}
+
+/**
+ * Convert renderer namespace inspect targets to protocol payload keys.
+ *
+ * @param target - Renderer inspect target.
+ * @returns Protocol payload object for `pdv.namespace.inspect`.
+ */
+function toNamespaceInspectPayload(
+  target: NamespaceInspectTarget
+): Record<string, unknown> {
+  return {
+    root_name: target.rootName,
+    path: target.path,
   };
 }
 
@@ -407,6 +433,7 @@ export function registerIpcHandlers(
     kernelWorkingDirs,
     readConfig,
     toNamespaceQueryPayload,
+    toNamespaceInspectPayload,
     sanitizeScriptName,
     ensureScriptFile,
     resolveScriptPath,
@@ -450,9 +477,11 @@ export function registerIpcHandlers(
     clearModuleHealthWarnings: () => moduleHealthWarningsByAlias.clear(),
     refreshProjectModuleHealth,
     runSerializedProjectManifestMutation,
+    getMainWindow: () => win,
   });
 
   registerAppStateIpcHandlers({
+    win,
     configStore,
     readConfig,
     themesDir,
@@ -509,6 +538,7 @@ export function registerPushForwarding(
 
   subscribe(PDVMessageType.TREE_CHANGED, IPC.push.treeChanged, true);
   subscribe(PDVMessageType.PROJECT_LOADED, IPC.push.projectLoaded);
+  subscribe(PDVMessageType.PROGRESS, IPC.push.progress);
 }
 
 /**

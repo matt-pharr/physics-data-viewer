@@ -1,9 +1,11 @@
 """
-pdv_kernel.handlers.script — Handler for PDV script registration messages.
+pdv_kernel.handlers.script — Handlers for PDV script messages.
 
 Handles:
 - ``pdv.script.register``: attach a :class:`PDVScript` node to the tree
   at the specified parent path and name.
+- ``pdv.script.params``: extract the current ``run()`` parameters from a
+  script file on disk.
 
 See Also
 --------
@@ -86,3 +88,80 @@ def handle_script_register(msg: dict) -> None:
 
 
 register("pdv.script.register", handle_script_register)
+
+
+def handle_script_params(msg: dict) -> None:
+    """Handle the ``pdv.script.params`` message.
+
+    Extracts the current ``run()`` parameters from a script file on disk.
+    Always reads the file fresh so edits are reflected immediately.
+
+    Expected payload
+    ----------------
+    .. code-block:: json
+
+        {
+            "path": "scripts.analysis.fit_model"
+        }
+
+    Response type: ``pdv.script.params.response``
+
+    Parameters
+    ----------
+    msg : dict
+        Parsed PDV message envelope.
+    """
+    from pdv_kernel.comms import get_pdv_tree, send_error, send_message  # noqa: PLC0415
+    from pdv_kernel.tree import PDVScript, _extract_script_params  # noqa: PLC0415
+
+    msg_id = msg.get("msg_id")
+    payload = msg.get("payload", {})
+    tree_path = payload.get("path", "")
+
+    if not tree_path:
+        send_error(
+            "pdv.script.params.response",
+            "script.missing_path",
+            "path is required in pdv.script.params payload",
+            in_reply_to=msg_id,
+        )
+        return
+
+    tree = get_pdv_tree()
+    if tree is None:
+        send_error(
+            "pdv.script.params.response",
+            "script.no_tree",
+            "PDVTree is not initialized",
+            in_reply_to=msg_id,
+        )
+        return
+
+    try:
+        node = tree[tree_path]
+    except (KeyError, TypeError):
+        send_error(
+            "pdv.script.params.response",
+            "script.not_found",
+            f"No node at path: {tree_path}",
+            in_reply_to=msg_id,
+        )
+        return
+
+    if not isinstance(node, PDVScript):
+        send_error(
+            "pdv.script.params.response",
+            "script.not_a_script",
+            f"Node at {tree_path} is not a PDVScript",
+            in_reply_to=msg_id,
+        )
+        return
+
+    working_dir = getattr(tree, "_working_dir", None)
+    resolved_path = node.resolve_path(working_dir)
+    params = _extract_script_params(resolved_path)
+
+    send_message("pdv.script.params.response", {"params": params}, in_reply_to=msg_id)
+
+
+register("pdv.script.params", handle_script_params)

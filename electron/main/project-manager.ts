@@ -172,9 +172,10 @@ export class ProjectManager {
     options?: { language?: "python" | "julia"; interpreterPath?: string }
   ): Promise<{ checksum: string; nodeCount: number }> {
     // Step 1 — send pdv.project.save comm; throws PDVCommError on error status.
+    // Use progress pushes as keep-alive to prevent timeout during large saves.
     const response = await this.commRouter.request(PDVMessageType.PROJECT_SAVE, {
       save_dir: saveDir,
-    });
+    }, { keepAlivePushType: PDVMessageType.PROGRESS });
 
     const payload = response.payload as { checksum?: string; node_count?: number };
     const checksum = payload.checksum ?? "";
@@ -245,9 +246,10 @@ export class ProjectManager {
 
     // Step 2 — send pdv.project.load comm.
     // The request resolves when the kernel sends pdv.project.load.response.
+    // Use progress pushes as keep-alive to prevent timeout during large loads.
     await this.commRouter.request(PDVMessageType.PROJECT_LOAD, {
       save_dir: saveDir,
-    });
+    }, { keepAlivePushType: PDVMessageType.PROGRESS });
 
     // Step 3 — wait for the pdv.project.loaded push notification.
     await pushPromise;

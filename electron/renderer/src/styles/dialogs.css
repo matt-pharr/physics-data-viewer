@@ -244,6 +244,21 @@
   margin-top: 8px;
 }
 
+.appearance-header-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: 12px;
+}
+
+.appearance-import-warning {
+  font-size: 12px;
+  color: var(--warning);
+  text-transform: none;
+  letter-spacing: normal;
+  font-weight: normal;
+}
+
 .appearance-editor-grid {
   display: grid;
   grid-template-columns: 110px 1fr;

@@ -210,8 +210,6 @@ def pdv_namespace(
     """
     import types  # noqa: PLC0415
 
-    from pdv_kernel.serialization import detect_kind, node_preview  # noqa: PLC0415
-
     _INTERNAL: frozenset[str] = frozenset({"pdv_tree", "pdv"})
     result: dict = {}
 
@@ -232,34 +230,527 @@ def pdv_namespace(
         if not include_callables and callable(value) and not isinstance(value, type):
             continue
 
-        try:
-            kind = detect_kind(value)
-            preview = node_preview(value, kind)
-        except Exception:  # noqa: BLE001
-            kind = "unknown"
-            preview = "<unknown>"
-
-        descriptor: dict = {"type": kind, "preview": preview}
-
-        # Add extra metadata for common types
-        try:
-            import numpy as np  # noqa: PLC0415
-
-            if isinstance(value, np.ndarray):
-                descriptor["shape"] = list(value.shape)
-                descriptor["dtype"] = str(value.dtype)
-        except ImportError:
-            pass
-        try:
-            import pandas as pd  # noqa: PLC0415
-
-            if isinstance(value, pd.DataFrame):
-                descriptor["shape"] = list(value.shape)
-            elif isinstance(value, pd.Series):
-                descriptor["shape"] = [len(value)]
-        except ImportError:
-            pass
-
-        result[name] = descriptor
+        result[name] = describe_namespace_value(
+            value,
+            name=name,
+            path=[],
+            expression=name,
+        )
 
     return result
+
+
+def inspect_namespace(
+    ns: dict,
+    *,
+    root_name: str,
+    path: list[dict[str, Any]] | None = None,
+    max_children: int = 50,
+) -> dict[str, Any]:
+    """Inspect one namespace value and return one level of child descriptors.
+
+    Parameters
+    ----------
+    ns : dict
+        Kernel namespace dictionary.
+    root_name : str
+        Top-level namespace variable to inspect.
+    path : list of dict, optional
+        Selector chain from the root variable to the current node.
+    max_children : int
+        Maximum number of child rows to return.
+
+    Returns
+    -------
+    dict
+        Response payload with ``children``, ``truncated``, and optional
+        ``total_children``.
+    """
+    value = resolve_namespace_target(ns, root_name=root_name, path=path or [])
+    children, total_children = describe_namespace_children(
+        value,
+        root_name=root_name,
+        path=path or [],
+        expression=build_namespace_expression(root_name, path or []),
+        max_children=max_children,
+    )
+    payload: dict[str, Any] = {
+        "children": children,
+        "truncated": total_children > len(children),
+    }
+    if total_children >= 0:
+        payload["total_children"] = total_children
+    return payload
+
+
+def describe_namespace_value(
+    value: Any,
+    *,
+    name: str,
+    path: list[dict[str, Any]],
+    expression: str,
+) -> dict[str, Any]:
+    """Build a renderer-facing descriptor for one namespace value."""
+    kind = namespace_kind(value)
+    descriptor: dict[str, Any] = {
+        "name": name,
+        "kind": kind,
+        "type": type(value).__name__ if value is not None else "NoneType",
+        "preview": namespace_preview(value),
+        "path": path,
+        "expression": expression,
+    }
+
+    try:
+        import numpy as np  # noqa: PLC0415
+
+        if isinstance(value, np.ndarray):
+            descriptor["shape"] = list(value.shape)
+            descriptor["dtype"] = str(value.dtype)
+            descriptor["size"] = int(value.nbytes)
+    except ImportError:
+        pass
+
+    try:
+        import pandas as pd  # noqa: PLC0415
+
+        if isinstance(value, pd.DataFrame):
+            descriptor["shape"] = list(value.shape)
+        elif isinstance(value, pd.Series):
+            descriptor["shape"] = [len(value)]
+            descriptor["length"] = len(value)
+    except ImportError:
+        pass
+
+    if isinstance(value, (list, tuple, dict, str, bytes, bytearray)):
+        try:
+            descriptor["length"] = len(value)
+        except Exception:  # noqa: BLE001
+            pass
+
+    child_count = namespace_child_count(value)
+    descriptor["has_children"] = child_count > 0
+    if child_count >= 0:
+        descriptor["child_count"] = child_count
+    return descriptor
+
+
+def namespace_kind(value: Any) -> str:
+    """Return the canonical namespace inspector kind for a value."""
+    from pdv_kernel.serialization import detect_kind  # noqa: PLC0415
+
+    kind = detect_kind(value)
+    if kind == "unknown" and value_has_object_children(value):
+        return "object"
+    return kind
+def namespace_preview(value: Any, max_length: int = 120) -> str:
+    """Return a rich but bounded preview string for a namespace value."""
+    kind = namespace_kind(value)
+
+    try:
+        if kind == "ndarray":
+            import numpy as np  # noqa: PLC0415
+
+            body = np.array2string(
+                value,
+                threshold=10,
+                edgeitems=3,
+                separator=", ",
+            )
+            return trim_preview(
+                f"array({body})",
+                max_length=max_length,
+            )
+        if kind == "dataframe":
+            columns = [str(col) for col in value.columns[:3]]
+            more = ", ..." if len(value.columns) > 3 else ""
+            return trim_preview(
+                f"DataFrame[{value.shape[0]} x {value.shape[1]}] columns=[{', '.join(columns)}{more}]",
+                max_length=max_length,
+            )
+        if kind == "series":
+            import numpy as np  # noqa: PLC0415
+
+            body = np.array2string(value.to_numpy(), threshold=10, edgeitems=3, separator=", ")
+            return trim_preview(
+                f"Series({body})",
+                max_length=max_length,
+            )
+        if kind == "mapping":
+            return trim_preview(repr(value), max_length=max_length)
+        if kind == "sequence":
+            return trim_preview(repr(value), max_length=max_length)
+        if kind == "text":
+            return trim_preview(repr(value), max_length=max_length)
+        if kind == "binary":
+            return f"bytes ({len(value)} bytes)"
+        if kind == "object":
+            attrs = list(iter_object_attributes(value).keys())
+            summary = f"{type(value).__name__}({', '.join(attrs[:3])}"
+            if len(attrs) > 3:
+                summary += ", ..."
+            summary += ")"
+            return trim_preview(summary, max_length=max_length)
+    except Exception:  # noqa: BLE001
+        pass
+
+    return trim_preview(safe_repr(value), max_length=max_length)
+
+
+def safe_repr(value: Any) -> str:
+    """Return ``repr(value)`` without letting repr failures escape."""
+    try:
+        return repr(value)
+    except Exception:  # noqa: BLE001
+        return "<unrepresentable>"
+
+
+def trim_preview(text: str, *, max_length: int = 120) -> str:
+    """Trim preview text to the configured display bound."""
+    if len(text) <= max_length:
+        return text
+    return text[: max_length - 3] + "..."
+
+
+def value_has_object_children(value: Any) -> bool:
+    """Return True when a custom object exposes inspectable attributes."""
+    return len(iter_object_attributes(value)) > 0
+
+
+def iter_object_attributes(value: Any) -> dict[str, Any]:
+    """Return a stable attribute mapping for object inspection."""
+    try:
+        from dataclasses import fields, is_dataclass  # noqa: PLC0415
+
+        if is_dataclass(value):
+            return {field.name: getattr(value, field.name) for field in fields(value)}
+    except Exception:  # noqa: BLE001
+        pass
+
+    raw_dict = getattr(value, "__dict__", None)
+    if isinstance(raw_dict, dict):
+        return {
+            key: raw_dict[key]
+            for key in sorted(raw_dict.keys())
+            if not str(key).startswith("_")
+        }
+    return {}
+
+
+def namespace_child_count(value: Any) -> int:
+    """Return child count for expandable values, or ``0`` for leaves."""
+    kind = namespace_kind(value)
+    if kind in {"mapping", "sequence", "text", "binary"}:
+        try:
+            return len(value)
+        except Exception:  # noqa: BLE001
+            return 0
+    if kind == "ndarray":
+        try:
+            if value.ndim == 0:
+                return 0
+            return int(value.shape[0])
+        except Exception:  # noqa: BLE001
+            return 0
+    if kind == "dataframe":
+        try:
+            return int(len(value.columns))
+        except Exception:  # noqa: BLE001
+            return 0
+    if kind == "series":
+        try:
+            return int(len(value))
+        except Exception:  # noqa: BLE001
+            return 0
+    if kind == "object":
+        return len(iter_object_attributes(value))
+    return 0
+
+
+def build_namespace_expression(root_name: str, path: list[dict[str, Any]]) -> str:
+    """Build a user-facing expression string from a selector path."""
+    expression = root_name
+    for segment in path:
+        kind = segment.get("kind")
+        value = segment.get("value")
+        if kind == "attr":
+            expression += f".{value}"
+        elif kind == "column":
+            expression += f"[{value!r}]"
+        else:
+            expression += f"[{value!r}]"
+    return expression
+
+
+def resolve_namespace_target(
+    ns: dict,
+    *,
+    root_name: str,
+    path: list[dict[str, Any]],
+) -> Any:
+    """Resolve a lazy-inspection target inside the namespace."""
+    if root_name not in ns:
+        raise KeyError(f"Namespace variable not found: {root_name}")
+    value = ns[root_name]
+    for segment in path:
+        kind = segment.get("kind")
+        raw = segment.get("value")
+        if kind == "attr":
+            value = getattr(value, str(raw))
+            continue
+        if kind == "column":
+            value = value[raw]
+            continue
+        if kind == "index":
+            value = resolve_index_child(value, raw)
+            continue
+        if kind == "key":
+            value = value[raw]
+            continue
+        raise KeyError(f"Unsupported namespace selector kind: {kind}")
+    return value
+
+
+def resolve_index_child(value: Any, raw_index: Any) -> Any:
+    """Resolve one positional child for arrays, sequences, and Series."""
+    index = int(raw_index)
+    try:
+        import pandas as pd  # noqa: PLC0415
+
+        if isinstance(value, pd.Series):
+            return value.iloc[index]
+    except ImportError:
+        pass
+    return value[index]
+
+
+def describe_namespace_children(
+    value: Any,
+    *,
+    root_name: str,
+    path: list[dict[str, Any]],
+    expression: str,
+    max_children: int,
+) -> tuple[list[dict[str, Any]], int]:
+    """Describe one level of children for an expandable namespace value."""
+    kind = namespace_kind(value)
+    if kind == "mapping":
+        return describe_mapping_children(
+            value,
+            root_name=root_name,
+            path=path,
+            expression=expression,
+            max_children=max_children,
+        )
+    if kind == "sequence":
+        return describe_sequence_children(
+            value,
+            root_name=root_name,
+            path=path,
+            expression=expression,
+            max_children=max_children,
+        )
+    if kind == "ndarray":
+        return describe_ndarray_children(
+            value,
+            root_name=root_name,
+            path=path,
+            expression=expression,
+            max_children=max_children,
+        )
+    if kind == "dataframe":
+        return describe_dataframe_children(
+            value,
+            root_name=root_name,
+            path=path,
+            expression=expression,
+            max_children=max_children,
+        )
+    if kind == "series":
+        return describe_series_children(
+            value,
+            root_name=root_name,
+            path=path,
+            expression=expression,
+            max_children=max_children,
+        )
+    if kind == "object":
+        return describe_object_children(
+            value,
+            root_name=root_name,
+            path=path,
+            expression=expression,
+            max_children=max_children,
+        )
+    return [], 0
+
+
+def describe_mapping_children(
+    value: dict[Any, Any],
+    *,
+    root_name: str,
+    path: list[dict[str, Any]],
+    expression: str,
+    max_children: int,
+) -> tuple[list[dict[str, Any]], int]:
+    """Describe one level of mapping entries."""
+    items = list(value.items())
+    children: list[dict[str, Any]] = []
+    for key, child in items[:max_children]:
+        is_supported, segment_value = primitive_namespace_value(key)
+        child_path = [*path, {"kind": "key", "value": segment_value}]
+        child_expression = f"{expression}[{key!r}]"
+        descriptor = describe_namespace_value(
+            child,
+            name=repr(key),
+            path=child_path,
+            expression=child_expression,
+        )
+        if not is_supported:
+            descriptor["has_children"] = False
+            descriptor["child_count"] = 0
+            descriptor["preview"] = trim_preview(
+                f"{descriptor.get('preview', '<unknown>')} (non-serializable key)",
+            )
+        children.append(descriptor)
+    return children, len(items)
+
+
+def describe_sequence_children(
+    value: list[Any] | tuple[Any, ...],
+    *,
+    root_name: str,
+    path: list[dict[str, Any]],
+    expression: str,
+    max_children: int,
+) -> tuple[list[dict[str, Any]], int]:
+    """Describe one level of sequence items."""
+    children = []
+    total = len(value)
+    for index, child in enumerate(value[:max_children]):
+        child_path = [*path, {"kind": "index", "value": index}]
+        children.append(
+            describe_namespace_value(
+                child,
+                name=f"[{index}]",
+                path=child_path,
+                expression=f"{expression}[{index}]",
+            )
+        )
+    return children, total
+
+
+def describe_ndarray_children(
+    value: Any,
+    *,
+    root_name: str,
+    path: list[dict[str, Any]],
+    expression: str,
+    max_children: int,
+) -> tuple[list[dict[str, Any]], int]:
+    """Describe one level of ndarray children."""
+    if getattr(value, "ndim", 0) == 0:
+        return [], 0
+    total = int(value.shape[0])
+    children = []
+    limit = min(total, max_children)
+    for index in range(limit):
+        child = value[index]
+        child_path = [*path, {"kind": "index", "value": index}]
+        children.append(
+            describe_namespace_value(
+                child,
+                name=f"[{index}]",
+                path=child_path,
+                expression=f"{expression}[{index}]",
+            )
+        )
+    return children, total
+
+
+def describe_dataframe_children(
+    value: Any,
+    *,
+    root_name: str,
+    path: list[dict[str, Any]],
+    expression: str,
+    max_children: int,
+) -> tuple[list[dict[str, Any]], int]:
+    """Describe one level of DataFrame column children."""
+    columns = list(value.columns)
+    children = []
+    for column in columns[:max_children]:
+        is_supported, segment_value = primitive_namespace_value(column)
+        child = value[column]
+        child_path = [*path, {"kind": "column", "value": segment_value}]
+        child_expression = f"{expression}[{column!r}]"
+        descriptor = describe_namespace_value(
+            child,
+            name=str(column),
+            path=child_path,
+            expression=child_expression,
+        )
+        if not is_supported:
+            descriptor["has_children"] = False
+            descriptor["child_count"] = 0
+        children.append(descriptor)
+    return children, len(columns)
+
+
+def describe_series_children(
+    value: Any,
+    *,
+    root_name: str,
+    path: list[dict[str, Any]],
+    expression: str,
+    max_children: int,
+) -> tuple[list[dict[str, Any]], int]:
+    """Describe one level of Series positional children."""
+    total = len(value)
+    children = []
+    limit = min(total, max_children)
+    for index in range(limit):
+        child = value.iloc[index]
+        child_path = [*path, {"kind": "index", "value": index}]
+        label = f"[{index}]"
+        children.append(
+            describe_namespace_value(
+                child,
+                name=label,
+                path=child_path,
+                expression=f"{expression}[{index}]",
+            )
+        )
+    return children, total
+
+
+def describe_object_children(
+    value: Any,
+    *,
+    root_name: str,
+    path: list[dict[str, Any]],
+    expression: str,
+    max_children: int,
+) -> tuple[list[dict[str, Any]], int]:
+    """Describe one level of object attribute children."""
+    attrs = iter_object_attributes(value)
+    names = list(attrs.keys())
+    children = []
+    for attr_name in names[:max_children]:
+        child_path = [*path, {"kind": "attr", "value": attr_name}]
+        children.append(
+            describe_namespace_value(
+                attrs[attr_name],
+                name=attr_name,
+                path=child_path,
+                expression=f"{expression}.{attr_name}",
+            )
+        )
+    return children, len(names)
+
+
+def primitive_namespace_value(value: Any) -> tuple[bool, str | int | float | bool | None]:
+    """Return a JSON-safe selector value, with support flag."""
+    if value is None or isinstance(value, (str, int, float, bool)):
+        return True, value
+    return False, safe_repr(value)

@@ -104,14 +104,27 @@ def bootstrap(ip=None):
     app = PDVApp()
     app.handle = _handle_decorator  # type: ignore[attr-defined]
 
-    # Install the protected namespace and inject pdv_tree and pdv
+    # Install the protected namespace and inject pdv_tree and pdv.
+    # IPython uses user_module.__dict__ as globals and user_ns as locals
+    # in exec(). They must be the same object so that top-level assignments
+    # are visible inside nested functions. We call prepare_user_module()
+    # which rebuilds user_module so its __dict__ returns our PDVNamespace,
+    # keeping globals and locals in sync.
     if ip is not None:
         existing = dict(ip.user_ns)
         protected_ns = PDVNamespace(existing)
         # Bypass protection to inject PDV names (bootstrap is the only caller)
         dict.__setitem__(protected_ns, "pdv_tree", tree)
         dict.__setitem__(protected_ns, "pdv", app)
-        ip.user_ns = protected_ns
+        try:
+            from IPython.core.interactiveshell import InteractiveShell  # noqa: PLC0415
+            is_real_shell = isinstance(ip, InteractiveShell)
+        except ImportError:
+            is_real_shell = False
+        if is_real_shell:
+            ip.user_module, ip.user_ns = ip.prepare_user_module(user_ns=protected_ns)
+        else:
+            ip.user_ns = protected_ns
 
     # Store references in comms module for handler use
     comms_mod._pdv_tree = tree

@@ -74,7 +74,7 @@ class TestIntegrationDispatch:
         assert namespace["status"] == "ok"
         variables = namespace["payload"].get("variables", {})
         assert "x" in variables
-        assert variables["x"]["type"] == "scalar"
+        assert variables["x"]["type"] == "int"
 
         project_save = _latest_by_type(mock_comm._sent, "pdv.project.save.response")
         assert project_save["status"] == "ok"

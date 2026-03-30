@@ -1,12 +1,11 @@
 /**
  * ScriptDialog — parameter form and runner for `PDVScript` tree nodes.
  *
- * Collects user-supplied parameter values and dispatches a `script.run`
- * IPC request. The main process is responsible for building the
- * language-appropriate kernel invocation.
+ * Fetches the script's current run() parameters on demand when the dialog
+ * opens, so edits to the script file are always reflected.
  */
 
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import type { KernelExecutionOrigin, ScriptParameter, ScriptRunResult, TreeNodeData } from '../../types';
 
 interface ScriptDialogProps {
@@ -43,24 +42,43 @@ export function serializeScriptArgValue(value: unknown): string | number | boole
 
 /** Modal script-run dialog. */
 export const ScriptDialog: React.FC<ScriptDialogProps> = ({ node, kernelId, onRun, onCancel }) => {
-  const params = useMemo(() => node.params ?? [], [node.params]);
-  const [values, setValues] = useState<Record<string, unknown>>(() => {
-    const defaults: Record<string, unknown> = {};
-    for (const param of params) {
-      if (param.default !== undefined && param.default !== null) {
-        defaults[param.name] = param.default;
-      }
-    }
-    return defaults;
-  });
+  const [params, setParams] = useState<ScriptParameter[]>([]);
+  const [isLoadingParams, setIsLoadingParams] = useState(true);
+  const [paramLoadFailed, setParamLoadFailed] = useState(false);
+  const [values, setValues] = useState<Record<string, unknown>>({});
   const [isRunning, setIsRunning] = useState(false);
   const [error, setError] = useState<string | undefined>(undefined);
+
+  useEffect(() => {
+    let cancelled = false;
+    setIsLoadingParams(true);
+    setParamLoadFailed(false);
+    setError(undefined);
+    window.pdv.script.getParams(kernelId, node.path).then((fetched) => {
+      if (cancelled) return;
+      setParams(fetched);
+      const defaults: Record<string, unknown> = {};
+      for (const param of fetched) {
+        if (param.default !== undefined && param.default !== null) {
+          defaults[param.name] = param.default;
+        }
+      }
+      setValues(defaults);
+      setIsLoadingParams(false);
+    }).catch((err) => {
+      if (cancelled) return;
+      setParamLoadFailed(true);
+      setError(err instanceof Error ? err.message : String(err));
+      setIsLoadingParams(false);
+    });
+    return () => { cancelled = true; };
+  }, [kernelId, node.path]);
 
   const handleChange = (paramName: string, value: unknown) => {
     setValues((prev) => ({ ...prev, [paramName]: value }));
   };
 
-  const canRun = params.every((param) => !param.required || isValueProvided(param, values));
+  const canRun = !isLoadingParams && !paramLoadFailed && params.every((param) => !param.required || isValueProvided(param, values));
 
   const handleRun = async () => {
     if (!canRun || isRunning) {
@@ -117,9 +135,11 @@ export const ScriptDialog: React.FC<ScriptDialogProps> = ({ node, kernelId, onRu
             <span className="script-path">{node.path}</span>
           </div>
 
-          {params.length === 0 && <div className="dialog-info-text">This script has no parameters</div>}
+          {isLoadingParams && <div className="dialog-info-text">Loading parameters...</div>}
 
-          {params.length > 0 && (
+          {!isLoadingParams && !paramLoadFailed && params.length === 0 && <div className="dialog-info-text">This script has no parameters</div>}
+
+          {!isLoadingParams && !paramLoadFailed && params.length > 0 && (
             <div className="param-list">
               {params.map((param) => {
                 const kind = getParamKind(param.type);

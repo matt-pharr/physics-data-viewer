@@ -18,7 +18,7 @@ import * as path from "path";
 
 import type { CommRouter } from "./comm-router";
 import type { ConfigStore, PDVConfig } from "./config";
-import { IPC, type HandlerInvokeResult, type NamelistReadResult, type NamelistWriteResult, type NamespaceQueryOptions, type NamespaceVariable, type ScriptRunRequest, type ScriptRunResult, type TreeAddFileResult, type TreeCreateNoteResult, type TreeCreateScriptResult } from "./ipc";
+import { IPC, type HandlerInvokeResult, type NamelistReadResult, type NamelistWriteResult, type NamespaceInspectResult, type NamespaceInspectTarget, type NamespaceInspectorNode, type NamespaceQueryOptions, type NamespaceVariable, type ScriptParameter, type ScriptRunRequest, type ScriptRunResult, type TreeAddFileResult, type TreeCreateNoteResult, type TreeCreateScriptResult } from "./ipc";
 import type { KernelManager } from "./kernel-manager";
 import { PDVMessageType, type PDVFileRegisterPayload } from "./pdv-protocol";
 import type { ProjectManager } from "./project-manager";
@@ -32,6 +32,9 @@ interface RegisterTreeNamespaceScriptIpcHandlersOptions {
   readConfig: (configStore: ConfigStore) => PDVConfig;
   toNamespaceQueryPayload: (
     options?: NamespaceQueryOptions
+  ) => Record<string, unknown>;
+  toNamespaceInspectPayload: (
+    target: NamespaceInspectTarget
   ) => Record<string, unknown>;
   sanitizeScriptName: (scriptName: string, language?: "python" | "julia") => string;
   ensureScriptFile: (scriptPath: string, language?: "python" | "julia") => Promise<void>;
@@ -60,11 +63,20 @@ function toNamespaceVariable(
   value: unknown
 ): NamespaceVariable {
   if (!isRecord(value)) {
-    return { name, type: "unknown" };
+    return {
+      name,
+      kind: "unknown",
+      type: "unknown",
+      path: [],
+      expression: name,
+    };
   }
   const descriptor: NamespaceVariable = {
     name,
+    kind: typeof value.kind === "string" ? value.kind : "unknown",
     type: typeof value.type === "string" ? value.type : "unknown",
+    path: Array.isArray(value.path) ? value.path as NamespaceVariable["path"] : [],
+    expression: typeof value.expression === "string" ? value.expression : name,
   };
   if (typeof value.module === "string") descriptor.module = value.module;
   if (
@@ -75,7 +87,46 @@ function toNamespaceVariable(
   }
   if (typeof value.dtype === "string") descriptor.dtype = value.dtype;
   if (typeof value.length === "number") descriptor.length = value.length;
+  if (typeof value.size === "number") descriptor.size = value.size;
   if (typeof value.preview === "string") descriptor.preview = value.preview;
+  if (typeof value.has_children === "boolean") descriptor.hasChildren = value.has_children;
+  if (typeof value.child_count === "number") descriptor.childCount = value.child_count;
+  return descriptor;
+}
+
+function toNamespaceInspectorNode(value: unknown): NamespaceInspectorNode {
+  if (!isRecord(value)) {
+    return {
+      name: "<unknown>",
+      kind: "unknown",
+      type: "unknown",
+      path: [],
+      expression: "<unknown>",
+    };
+  }
+  const descriptor: NamespaceInspectorNode = {
+    name: typeof value.name === "string" ? value.name : "<unknown>",
+    kind: typeof value.kind === "string" ? value.kind : "unknown",
+    type: typeof value.type === "string" ? value.type : "unknown",
+    path: Array.isArray(value.path) ? value.path as NamespaceInspectorNode["path"] : [],
+    expression:
+      typeof value.expression === "string"
+        ? value.expression
+        : (typeof value.name === "string" ? value.name : "<unknown>"),
+  };
+  if (typeof value.module === "string") descriptor.module = value.module;
+  if (
+    Array.isArray(value.shape) &&
+    value.shape.every((entry) => typeof entry === "number")
+  ) {
+    descriptor.shape = value.shape;
+  }
+  if (typeof value.dtype === "string") descriptor.dtype = value.dtype;
+  if (typeof value.length === "number") descriptor.length = value.length;
+  if (typeof value.size === "number") descriptor.size = value.size;
+  if (typeof value.preview === "string") descriptor.preview = value.preview;
+  if (typeof value.has_children === "boolean") descriptor.hasChildren = value.has_children;
+  if (typeof value.child_count === "number") descriptor.childCount = value.child_count;
   return descriptor;
 }
 
@@ -89,6 +140,19 @@ function normalizeNamespaceVariables(rawVariables: unknown): NamespaceVariable[]
     );
   }
   return [];
+}
+
+function normalizeNamespaceInspectResult(rawPayload: unknown): NamespaceInspectResult {
+  const payload = isRecord(rawPayload) ? rawPayload : {};
+  const rawChildren = Array.isArray(payload.children) ? payload.children : [];
+  const result: NamespaceInspectResult = {
+    children: rawChildren.map((child) => toNamespaceInspectorNode(child)),
+    truncated: payload.truncated === true,
+  };
+  if (typeof payload.total_children === "number") {
+    result.totalChildren = payload.total_children;
+  }
+  return result;
 }
 
 /**
@@ -109,6 +173,7 @@ export function registerTreeNamespaceScriptIpcHandlers(
     kernelWorkingDirs,
     readConfig,
     toNamespaceQueryPayload,
+    toNamespaceInspectPayload,
     sanitizeScriptName,
     ensureScriptFile,
     resolveScriptPath,
@@ -259,18 +324,42 @@ export function registerTreeNamespaceScriptIpcHandlers(
       if (!normalized.some((entry) => entry.name === "pdv_tree")) {
         normalized.unshift({
           name: "pdv_tree",
+          kind: "protected",
           type: "protected",
           preview: "PDVTree (protected)",
+          path: [],
+          expression: "pdv_tree",
         });
       }
       if (!normalized.some((entry) => entry.name === "pdv")) {
         normalized.unshift({
           name: "pdv",
+          kind: "protected",
           type: "protected",
           preview: "PDV app object (protected)",
+          path: [],
+          expression: "pdv",
         });
       }
       return normalized;
+    }
+  );
+
+  ipcMain.handle(
+    IPC.namespace.inspect,
+    async (
+      _event,
+      kernelId: string,
+      target: NamespaceInspectTarget
+    ): Promise<NamespaceInspectResult> => {
+      if (!kernelManager.getKernel(kernelId)) {
+        return { children: [], truncated: false };
+      }
+      const response = await commRouter.request(
+        PDVMessageType.NAMESPACE_INSPECT,
+        toNamespaceInspectPayload(target)
+      );
+      return normalizeNamespaceInspectResult(response.payload);
     }
   );
 
@@ -295,9 +384,15 @@ export function registerTreeNamespaceScriptIpcHandlers(
         : `PDVKernel.run_tree_script(pdv_tree, ${pathStr})`;
     } else {
       // Python
-      const jsonArgs = JSON.stringify(JSON.stringify(params));
-      code = Object.keys(params).length > 0
-        ? `import json\npdv_tree[${JSON.stringify(treePath)}].run(**json.loads(${jsonArgs}))`
+      const kwargs = Object.entries(params)
+        .map(([key, value]) => {
+          if (typeof value === "string") return `${key}=${JSON.stringify(value)}`;
+          if (typeof value === "boolean") return `${key}=${value ? "True" : "False"}`;
+          return `${key}=${value}`;
+        })
+        .join(", ");
+      code = kwargs
+        ? `pdv_tree[${JSON.stringify(treePath)}].run(${kwargs})`
         : `pdv_tree[${JSON.stringify(treePath)}].run()`;
     }
 
@@ -338,6 +433,17 @@ export function registerTreeNamespaceScriptIpcHandlers(
     child.unref();
     return { success: true };
   });
+
+  ipcMain.handle(
+    IPC.script.getParams,
+    async (_event, kernelId: string, treePath: string): Promise<ScriptParameter[]> => {
+      const response = await commRouter.request(PDVMessageType.SCRIPT_PARAMS, {
+        path: treePath,
+      });
+      const params = (response.payload as Record<string, unknown> | undefined)?.params;
+      return Array.isArray(params) ? (params as ScriptParameter[]) : [];
+    }
+  );
 
   ipcMain.handle(
     IPC.note.save,

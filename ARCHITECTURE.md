@@ -1,5 +1,5 @@
 # PDV Architecture Document
-**Version**: 0.0.5
+**Version**: 0.0.6
 **Date**: 2026-03-19
 **Status**: Authoritative design specification. All new code must conform to this document. Deviations require updating this document first.
 
@@ -178,6 +178,8 @@ All type strings are namespaced with `pdv.`. The convention is `pdv.<domain>.<ac
 |---|---|---|
 | `pdv.namespace.query` | app → kernel | Request a snapshot of the kernel namespace (excluding internal PDV names). |
 | `pdv.namespace.query.response` | kernel → app | Returns array of variable descriptors. |
+| `pdv.namespace.inspect` | app → kernel | Lazily inspect one namespace value. Payload: `{ root_name, path }` where `path` is an array of selector segments. |
+| `pdv.namespace.inspect.response` | kernel → app | Returns one level of child descriptors for the requested namespace value, plus truncation metadata. |
 
 #### Script Messages
 

@@ -5,7 +5,7 @@
  * All state and mutation handlers are owned by the parent SettingsDialog.
  */
 
-import React from 'react';
+import React, { useState } from 'react';
 import type { Theme } from '../../types';
 import { BUILTIN_THEMES, CSS_VAR_GROUPS, THEME_PAIRS } from '../../themes';
 
@@ -73,11 +73,35 @@ export const AppearanceTab: React.FC<AppearanceTabProps> = ({
   onFontSizeChange,
   onTabSizeChange,
   onWordWrapChange,
-}) => (
+}) => {
+  const [importWarning, setImportWarning] = useState('');
+
+  return (
   <div className="settings-appearance">
 
     {/* ── Theme section ── */}
-    <div className="appearance-section-header appearance-section-header--spaced">Theme</div>
+    <div className="appearance-section-header appearance-section-header--spaced">
+      Theme
+      <span className="appearance-header-actions">
+        <button
+          type="button"
+          className="btn btn-secondary btn-sm"
+          onClick={() => window.pdv.themes.openDir()}
+          title="Open themes directory in file manager"
+        >
+          Open themes directory
+        </button>
+        <button
+          type="button"
+          className="btn btn-secondary btn-sm"
+          onClick={() => setImportWarning('⚠ VS Code theme import is not yet implemented.')}
+          title="Import a VS Code colour theme"
+        >
+          Import VS Code theme
+        </button>
+        {importWarning && <span className="appearance-import-warning">{importWarning}</span>}
+      </span>
+    </div>
 
     {/* Follow system theme toggle */}
     <label className="appearance-follow-row">
@@ -270,4 +294,5 @@ export const AppearanceTab: React.FC<AppearanceTabProps> = ({
       </label>
     </div>
   </div>
-);
+  );
+};

@@ -22,6 +22,7 @@ import { NamespaceView } from '../components/NamespaceView';
 import { ScriptDialog } from '../components/ScriptDialog';
 import { CreateScriptDialog } from '../components/Tree/CreateScriptDialog';
 import { CreateNoteDialog } from '../components/Tree/CreateNoteDialog';
+import { TitleBar } from '../components/TitleBar';
 import { WriteTab } from '../components/WriteTab';
 import { SettingsDialog } from '../components/SettingsDialog';
 import { ImportModuleDialog } from '../components/ImportModuleDialog';
@@ -29,12 +30,13 @@ import { WelcomeScreen, type RecentProject } from '../components/WelcomeScreen';
 import type {
   CellTab,
   Config,
-  KernelExecuteResult,
+  AppMenuTopLevel,
   KernelExecutionOrigin,
   LogEntry,
   NoteTab,
   ScriptRunResult,
   TreeNodeData,
+  WindowChromeInfo,
 } from '../types';
 import { resolveShortcuts } from '../shortcuts';
 import { normalizeLoadedCodeCells, normalizeRecentProjects, mergeConfigUpdate } from './app-utils';
@@ -123,6 +125,8 @@ const App: React.FC = () => {
   const [createNoteTarget, setCreateNoteTarget] = useState<string | null>(null);
   const [showSettings, setShowSettings] = useState(false);
   const [showImportModule, setShowImportModule] = useState(false);
+  const [chromeInfo, setChromeInfo] = useState<WindowChromeInfo | null>(null);
+  const [menuModel, setMenuModel] = useState<AppMenuTopLevel[]>([]);
 
   // -- Write tab (markdown notes) state ------------------------------------
   const [activePane, setActivePane] = useState<'code' | 'write'>('code');
@@ -134,6 +138,9 @@ const App: React.FC = () => {
 
   // -- Project reloading state (kernel restart with active project) ----------
   const [projectReloading, setProjectReloading] = useState(false);
+
+  // -- Save/load progress state -----------------------------------------------
+  const [progress, setProgress] = useState<import('../types/pdv').ProgressPayload | null>(null);
 
   // -- Imported GUI modules for activity bar ---------------------------------
   const [importedGuiModules, setImportedGuiModules] = useState<{ alias: string; name: string }[]>([]);
@@ -192,6 +199,46 @@ const App: React.FC = () => {
   }, []);
 
   useEffect(() => {
+    let cancelled = false;
+    void window.pdv.chrome.getInfo().then((info) => {
+      if (!cancelled) {
+        setChromeInfo(info);
+      }
+    }).catch(() => {
+      if (!cancelled) {
+        setChromeInfo(null);
+      }
+    });
+    const unsubscribe = window.pdv.chrome.onStateChanged((info) => {
+      setChromeInfo(info);
+    });
+    return () => {
+      cancelled = true;
+      unsubscribe();
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!chromeInfo?.showMenuBar) {
+      setMenuModel([]);
+      return;
+    }
+    let cancelled = false;
+    void window.pdv.menu.getModel().then((model) => {
+      if (!cancelled) {
+        setMenuModel(model);
+      }
+    }).catch(() => {
+      if (!cancelled) {
+        setMenuModel([]);
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [chromeInfo?.showMenuBar]);
+
+  useEffect(() => {
     const projectName = currentProjectDir
       ? currentProjectDir.split('/').filter(Boolean).pop() ?? 'Unsaved Project'
       : 'Unsaved Project';
@@ -246,6 +293,7 @@ const App: React.FC = () => {
     setTreeRefreshToken,
     setModulesRefreshToken,
     setProjectReloading,
+    setProgress,
     onKernelCrash: handleKernelCrash,
   });
 
@@ -670,6 +718,7 @@ const App: React.FC = () => {
     setActiveCellTab,
     setModulesRefreshToken,
     setNamespaceRefreshToken,
+    setProgress,
     setLastError,
     setLogs,
     loadedProjectTabsRef,
@@ -755,8 +804,20 @@ const App: React.FC = () => {
     void executeOpenProject(pending.path);
   }, [kernelStatus, executeOpenProject]);
 
+  const projectTitle = currentProjectDir
+    ? currentProjectDir.split('/').filter(Boolean).pop() ?? 'Unsaved Project'
+    : 'Unsaved Project';
+
   return (
     <div className="app">
+      {chromeInfo?.showCustomTitleBar && (
+        <TitleBar
+          chromeInfo={chromeInfo}
+          menuModel={menuModel}
+          title={projectTitle}
+        />
+      )}
+
       {/* Main content */}
       <main className="app-main">
 
@@ -980,6 +1041,7 @@ const App: React.FC = () => {
           currentProjectDir={currentProjectDir}
           kernelStatus={kernelStatus}
           lastDuration={lastDuration}
+          progress={progress}
           onRuntimeClick={() => { setSettingsInitialTab('runtime'); setShowSettings(true); }}
         />
 

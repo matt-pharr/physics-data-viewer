@@ -2,6 +2,7 @@
 
 /* ===== STATUS BAR ===== */
 .status-bar {
+  position: relative;
   display: flex;
   justify-content: space-between;
   align-items: center;
@@ -11,6 +12,22 @@
   font-size: 12px;
   flex-shrink: 0;
   height: 28px;
+}
+
+/* ===== PROGRESS BAR ===== */
+.status-progress-track {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background-color: var(--border-color);
+}
+
+.status-progress-fill {
+  height: 100%;
+  background-color: var(--accent);
+  transition: width 0.15s ease;
 }
 
 .status-left, .status-right {

@@ -63,6 +63,7 @@ const mocks = vi.hoisted(() => {
   });
   const fsCopyFile = vi.fn(async () => undefined);
   const dialogShowOpenDialog = vi.fn();
+  const shellOpenPath = vi.fn(async () => "");
   const moduleManagerListInstalled = vi.fn(async () => []);
   const moduleManagerInstall = vi.fn(async () => ({
     success: true,
@@ -115,6 +116,7 @@ const mocks = vi.hoisted(() => {
     fsReadFile,
     fsCopyFile,
     dialogShowOpenDialog,
+    shellOpenPath,
     moduleManagerListInstalled,
     moduleManagerInstall,
     moduleManagerCheckUpdates,
@@ -137,6 +139,9 @@ vi.mock("electron", () => ({
   },
   dialog: {
     showOpenDialog: mocks.dialogShowOpenDialog,
+  },
+  shell: {
+    openPath: mocks.shellOpenPath,
   },
   app: {
     // eslint-disable-next-line @typescript-eslint/no-require-imports
@@ -206,6 +211,14 @@ function setup() {
   const webContentsSend = vi.fn();
   const win = {
     webContents: { send: webContentsSend },
+    on: vi.fn(),
+    isDestroyed: vi.fn(() => false),
+    isMaximized: vi.fn(() => false),
+    isFullScreen: vi.fn(() => false),
+    minimize: vi.fn(),
+    maximize: vi.fn(),
+    unmaximize: vi.fn(),
+    close: vi.fn(),
   } as unknown as BrowserWindow;
 
   const kernelManager = {
@@ -368,7 +381,14 @@ describe("Step 5 IPC handlers", () => {
 
   it("namespace:query sends pdv.namespace.query and returns variables", async () => {
     const { commRouter } = setup();
-    const variables: NamespaceVariable[] = [{ name: "x", type: "int", preview: "42" }];
+    const variables: NamespaceVariable[] = [{
+      name: "x",
+      kind: "scalar",
+      type: "int",
+      preview: "42",
+      path: [],
+      expression: "x",
+    }];
     (commRouter.request as unknown as ReturnType<typeof vi.fn>).mockResolvedValue(
       makeMessage({ variables })
     );
@@ -389,6 +409,51 @@ describe("Step 5 IPC handlers", () => {
       }
     );
     expect(result).toEqual(variables);
+  });
+
+  it("namespace:inspect sends pdv.namespace.inspect and returns child rows", async () => {
+    const { commRouter } = setup();
+    const payload = {
+      children: [{
+        name: "[0]",
+        kind: "scalar",
+        type: "int",
+        preview: "1",
+        path: [{ kind: "index", value: 0 }],
+        expression: "arr[0]",
+      }],
+      truncated: false,
+      total_children: 1,
+    };
+    (commRouter.request as unknown as ReturnType<typeof vi.fn>).mockResolvedValue(
+      makeMessage(payload)
+    );
+
+    const inspect = getHandler(IPC.namespace.inspect);
+    const result = await inspect({}, "kernel-1", {
+      rootName: "arr",
+      path: [],
+    });
+
+    expect(commRouter.request).toHaveBeenCalledWith(
+      PDVMessageType.NAMESPACE_INSPECT,
+      {
+        root_name: "arr",
+        path: [],
+      }
+    );
+    expect(result).toEqual({
+      children: [{
+        name: "[0]",
+        kind: "scalar",
+        type: "int",
+        preview: "1",
+        path: [{ kind: "index", value: 0 }],
+        expression: "arr[0]",
+      }],
+      truncated: false,
+      totalChildren: 1,
+    });
   });
 
   it("script:edit spawns the configured external editor process", async () => {
@@ -769,6 +834,42 @@ describe("Step 5 IPC handlers", () => {
 
     const afterSave = await get({});
     expect(afterSave).toEqual([{ name: "dark", colors: {} }]);
+  });
+
+  it("menu:getModel returns the Linux-integrated top-level menus", async () => {
+    setup();
+    const getModel = getHandler(IPC.menu.getModel);
+
+    const result = await getModel({});
+
+    expect(result).toEqual([
+      { id: "file", label: "File" },
+      { id: "edit", label: "Edit" },
+      { id: "view", label: "View" },
+      { id: "window", label: "Window" },
+    ]);
+  });
+
+  it("chrome:getInfo returns platform-specific title-bar metadata", async () => {
+    const { kernelManager } = setup();
+    expect(kernelManager).toBeDefined();
+    const getInfo = getHandler(IPC.chrome.getInfo);
+
+    const result = await getInfo({});
+
+    const platform =
+      process.platform === "darwin"
+        ? "macos"
+        : process.platform === "linux"
+          ? "linux"
+          : "windows";
+    expect(result).toEqual({
+      platform,
+      showCustomTitleBar: platform === "macos" || platform === "linux",
+      showMenuBar: platform === "linux",
+      showWindowControls: platform === "linux",
+      isMaximized: false,
+    });
   });
 
   it("codeCells:load returns null initially, codeCells:save persists", async () => {

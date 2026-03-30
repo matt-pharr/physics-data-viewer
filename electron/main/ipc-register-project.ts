@@ -15,7 +15,7 @@
 import * as crypto from "crypto";
 import * as fs from "fs/promises";
 import * as path from "path";
-import { ipcMain } from "electron";
+import { ipcMain, type BrowserWindow } from "electron";
 
 import { IPC } from "./ipc";
 import { ProjectManager, type ProjectManifest, type ProjectModuleImport } from "./project-manager";
@@ -34,6 +34,7 @@ interface RegisterProjectIpcHandlersOptions {
   clearModuleHealthWarnings: () => void;
   refreshProjectModuleHealth: (dir: string | null) => Promise<ProjectManifest | null>;
   runSerializedProjectManifestMutation: <T>(dir: string, task: () => Promise<T>) => Promise<T>;
+  getMainWindow: () => BrowserWindow | null;
 }
 
 /**
@@ -59,6 +60,7 @@ export function registerProjectIpcHandlers(
     clearModuleHealthWarnings,
     refreshProjectModuleHealth,
     runSerializedProjectManifestMutation,
+    getMainWindow,
   } = options;
 
   ipcMain.handle(
@@ -100,7 +102,17 @@ export function registerProjectIpcHandlers(
     const activeKernelId = getActiveKernelId();
     if (activeKernelId) {
       const workingDir = kernelWorkingDirs.get(activeKernelId);
-      if (workingDir) await copyFilesForLoad(saveDir, workingDir);
+      if (workingDir) {
+        const win = getMainWindow();
+        await copyFilesForLoad(saveDir, workingDir, win ? (current, total) => {
+          win.webContents.send(IPC.push.progress, {
+            operation: "load",
+            phase: "Copying files",
+            current,
+            total,
+          });
+        } : undefined);
+      }
     }
 
     setActiveProjectDir(saveDir);

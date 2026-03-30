@@ -6,6 +6,7 @@
  */
 
 import React from 'react';
+import type { ProgressPayload } from '../../types/pdv';
 
 interface StatusBarProps {
   isExecuting: boolean;
@@ -16,6 +17,7 @@ interface StatusBarProps {
   currentProjectDir: string | null;
   kernelStatus: 'idle' | 'starting' | 'ready' | 'error';
   lastDuration: number | null;
+  progress: ProgressPayload | null;
   onRuntimeClick: () => void;
 }
 
@@ -29,18 +31,37 @@ export const StatusBar: React.FC<StatusBarProps> = ({
   currentProjectDir,
   kernelStatus,
   lastDuration,
+  progress,
   onRuntimeClick,
 }) => {
   const runtimeLabel = activeLanguage === 'julia'
     ? (juliaPath ?? 'julia')
     : (pythonPath ?? kernelSpec ?? 'python3');
 
+  const progressPct = progress ? Math.round((progress.current / progress.total) * 100) : 0;
+
   return (
     <footer className="status-bar">
+      {progress && (
+        <div className="status-progress-track">
+          <div className="status-progress-fill" style={{ width: `${progressPct}%` }} />
+        </div>
+      )}
       <div className="status-left">
         <span className="status-item">
-          <span className={`status-dot ${isExecuting ? 'busy' : 'idle'}`} />
-          <span>{isExecuting ? 'Busy' : 'Idle'}</span>
+          {progress ? (
+            <>
+              <span className="status-dot busy" />
+              <span>
+                {progress.phase} {progress.current}/{progress.total}
+              </span>
+            </>
+          ) : (
+            <>
+              <span className={`status-dot ${isExecuting ? 'busy' : 'idle'}`} />
+              <span>{isExecuting ? 'Busy' : 'Idle'}</span>
+            </>
+          )}
         </span>
         <span
           className="status-item status-clickable"
