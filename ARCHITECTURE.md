@@ -1,5 +1,5 @@
 # PDV Architecture Document
-**Version**: 0.0.5
+**Version**: 0.0.6
 **Date**: 2026-03-19
 **Status**: Authoritative design specification. All new code must conform to this document. Deviations require updating this document first.
 
