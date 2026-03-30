@@ -208,6 +208,15 @@ export interface WindowChromeInfo {
   isMaximized: boolean;
 }
 
+/** Progress update payload pushed during save/load operations. */
+export interface ProgressPayload {
+  operation: "save" | "load";
+  /** Short human-readable phase label (e.g. "Serializing", "Copying files"). */
+  phase: string;
+  current: number;
+  total: number;
+}
+
 /** Result returned from `project.save()`. */
 export interface ProjectSaveResult {
   /** SHA-256 checksum of the serialized tree-index.json. */
@@ -638,6 +647,9 @@ export interface PDVApi {
     peekLanguages(paths: string[]): Promise<Record<string, "python" | "julia">>;
     onLoaded(callback: (payload: Record<string, unknown>) => void): () => void;
     onReloading(callback: (payload: { status: "reloading" | "ready" }) => void): () => void;
+  };
+  progress: {
+    onProgress(callback: (payload: ProgressPayload) => void): () => void;
   };
   config: {
     get(): Promise<Config>;

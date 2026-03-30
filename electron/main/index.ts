@@ -457,6 +457,7 @@ export function registerIpcHandlers(
     clearModuleHealthWarnings: () => moduleHealthWarningsByAlias.clear(),
     refreshProjectModuleHealth,
     runSerializedProjectManifestMutation,
+    getMainWindow: () => win,
   });
 
   registerAppStateIpcHandlers({
@@ -517,6 +518,7 @@ export function registerPushForwarding(
 
   subscribe(PDVMessageType.TREE_CHANGED, IPC.push.treeChanged, true);
   subscribe(PDVMessageType.PROJECT_LOADED, IPC.push.projectLoaded);
+  subscribe(PDVMessageType.PROGRESS, IPC.push.progress);
 }
 
 /**

@@ -97,6 +97,20 @@ interface PendingRequest {
   type: string;
 }
 
+/** Options for {@link CommRouter.request}. */
+interface CommRequestOptions {
+  /** Rejection timeout in milliseconds (default 30 000). */
+  timeoutMs?: number;
+  /**
+   * Push message type that resets the timeout timer on each arrival.
+   *
+   * When set, receiving a push of this type while the request is pending
+   * resets the timeout clock, preventing timeout during long-running
+   * operations that report progress via push notifications.
+   */
+  keepAlivePushType?: string;
+}
+
 // ---------------------------------------------------------------------------
 // CommRouter class
 // ---------------------------------------------------------------------------
@@ -194,9 +208,13 @@ export class CommRouter {
    * matching in_reply_to arrives on iopub, or rejects on timeout or when
    * the response has status='error'.
    *
+   * When `keepAlivePushType` is set, receiving a push of that type resets
+   * the timeout clock, preventing timeout during long-running operations
+   * that report progress via push notifications.
+   *
    * @param type - PDV message type string (e.g. 'pdv.tree.list').
    * @param payload - Arbitrary message payload.
-   * @param timeoutMs - Rejection timeout in milliseconds (default 30 000).
+   * @param options - Optional timeout and keep-alive configuration.
    * @returns The response PDVMessage.
    * @throws {PDVCommError} when the response has status='error'.
    * @throws {PDVCommTimeoutError} when no response arrives within timeoutMs.
@@ -204,8 +222,15 @@ export class CommRouter {
   request(
     type: string,
     payload: Record<string, unknown> = {},
-    timeoutMs = 30_000
+    options: CommRequestOptions | number = {}
   ): Promise<PDVMessage> {
+    // Support legacy call signature: request(type, payload, timeoutMs)
+    const opts: CommRequestOptions = typeof options === "number"
+      ? { timeoutMs: options }
+      : options;
+    const timeoutMs = opts.timeoutMs ?? 30_000;
+    const { keepAlivePushType } = opts;
+
     if (!this.kernelManager || !this.kernelId) {
       return Promise.reject(
         new Error("CommRouter is not attached to a kernel")
@@ -215,12 +240,38 @@ export class CommRouter {
     const msgId = crypto.randomUUID();
 
     return new Promise<PDVMessage>((resolve, reject) => {
-      const timer = setTimeout(() => {
-        this.pending.delete(msgId);
-        reject(new PDVCommTimeoutError(`PDV request timed out: ${type}`, type));
-      }, timeoutMs);
+      const createTimer = (): ReturnType<typeof setTimeout> =>
+        setTimeout(() => {
+          if (keepAliveHandler) this.offPush(keepAlivePushType!, keepAliveHandler);
+          this.pending.delete(msgId);
+          reject(new PDVCommTimeoutError(`PDV request timed out: ${type}`, type));
+        }, timeoutMs);
 
-      this.pending.set(msgId, { resolve, reject, timer, type });
+      let timer = createTimer();
+
+      // Keep-alive: reset the timeout whenever a matching push arrives.
+      let keepAliveHandler: PushHandler | undefined;
+      if (keepAlivePushType) {
+        keepAliveHandler = () => {
+          clearTimeout(timer);
+          timer = createTimer();
+          // Update the timer reference in the pending entry so cleanup works.
+          const pending = this.pending.get(msgId);
+          if (pending) pending.timer = timer;
+        };
+        this.onPush(keepAlivePushType, keepAliveHandler);
+      }
+
+      const cleanup = (): void => {
+        if (keepAliveHandler) this.offPush(keepAlivePushType!, keepAliveHandler);
+      };
+
+      this.pending.set(msgId, {
+        resolve: (msg) => { cleanup(); resolve(msg); },
+        reject: (err) => { cleanup(); reject(err); },
+        timer,
+        type,
+      });
 
       const envelope: Record<string, unknown> = {
         pdv_version: PDV_PROTOCOL_VERSION,
@@ -233,6 +284,7 @@ export class CommRouter {
       this.kernelManager!
         .sendCommMsg(this.kernelId!, this.commId, envelope)
         .catch((err) => {
+          cleanup();
           this.pending.delete(msgId);
           clearTimeout(timer);
           reject(err);

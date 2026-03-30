@@ -134,6 +134,7 @@ export const IPC = {
     executeOutput: "pdv.execute.output",
     moduleExecuteRequest: "pdv.moduleWindow.executeRequest",
     projectReloading: "pdv.project.reloading",
+    progress: "pdv.progress",
   },
   /** App menu synchronization channels. */
   menu: {
@@ -870,6 +871,20 @@ export interface ProjectLoadResult {
   nodeCount: number | null;
 }
 
+/**
+ * Progress update payload pushed during save/load operations.
+ */
+export interface ProgressPayload {
+  /** The operation in progress. */
+  operation: "save" | "load";
+  /** Short human-readable phase label (e.g. "Serializing", "Copying files"). */
+  phase: string;
+  /** Nodes processed so far. */
+  current: number;
+  /** Total node count. */
+  total: number;
+}
+
 // ---------------------------------------------------------------------------
 // Preload API surface
 // ---------------------------------------------------------------------------
@@ -1260,6 +1275,17 @@ export interface PDVApi {
      * @returns Unsubscribe function.
      */
     onReloading(callback: (payload: { status: "reloading" | "ready" }) => void): () => void;
+  };
+
+  /** Save/load progress push subscription. */
+  progress: {
+    /**
+     * Subscribe to progress updates during save/load operations.
+     *
+     * @param callback - Invoked with each progress payload.
+     * @returns Unsubscribe function.
+     */
+    onProgress(callback: (payload: ProgressPayload) => void): () => void;
   };
 
   /** App configuration accessors. */

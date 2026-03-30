@@ -52,6 +52,8 @@ export const PDVMessageType = {
   PROJECT_SAVE: "pdv.project.save",
   /** Kernel → app. Confirms save; includes node_count and checksum. */
   PROJECT_SAVE_RESPONSE: "pdv.project.save.response",
+  /** Kernel → app (push). Progress update during save/load operations. */
+  PROGRESS: "pdv.progress",
 
   // Tree
   /** App → kernel. Request tree nodes at a given path. */

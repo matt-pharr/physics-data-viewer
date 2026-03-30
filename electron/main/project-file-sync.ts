@@ -69,14 +69,23 @@ async function readFileBackedEntries(dir: string): Promise<FileBackedEntry[]> {
  * @returns Nothing.
  * @throws {Error} When directory creation fails.
  */
-export async function copyFilesForLoad(saveDir: string, workingDir: string): Promise<void> {
+export async function copyFilesForLoad(
+  saveDir: string,
+  workingDir: string,
+  onProgress?: (current: number, total: number) => void
+): Promise<void> {
   const entries = await readFileBackedEntries(saveDir);
-  for (const { relativePath } of entries) {
+  const total = entries.length;
+  for (let i = 0; i < total; i++) {
+    const { relativePath } = entries[i];
     const src = path.join(saveDir, relativePath);
     const dest = path.join(workingDir, relativePath);
     await fs.mkdir(path.dirname(dest), { recursive: true });
     await fs.copyFile(src, dest).catch((error) => {
       console.warn(`[pdv] load: could not copy ${src}`, error);
     });
+    if (onProgress && (i % 5 === 0 || i === total - 1)) {
+      onProgress(i + 1, total);
+    }
   }
 }

@@ -139,6 +139,9 @@ const App: React.FC = () => {
   // -- Project reloading state (kernel restart with active project) ----------
   const [projectReloading, setProjectReloading] = useState(false);
 
+  // -- Save/load progress state -----------------------------------------------
+  const [progress, setProgress] = useState<import('../types/pdv').ProgressPayload | null>(null);
+
   // -- Imported GUI modules for activity bar ---------------------------------
   const [importedGuiModules, setImportedGuiModules] = useState<{ alias: string; name: string }[]>([]);
 
@@ -290,6 +293,7 @@ const App: React.FC = () => {
     setTreeRefreshToken,
     setModulesRefreshToken,
     setProjectReloading,
+    setProgress,
     onKernelCrash: handleKernelCrash,
   });
 
@@ -1036,6 +1040,7 @@ const App: React.FC = () => {
           currentProjectDir={currentProjectDir}
           kernelStatus={kernelStatus}
           lastDuration={lastDuration}
+          progress={progress}
           onRuntimeClick={() => { setSettingsInitialTab('runtime'); setShowSettings(true); }}
         />
 
