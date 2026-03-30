@@ -10,20 +10,21 @@
  * - Push forwarding between comm router and renderer.
  */
 
-import { app, dialog, ipcMain } from "electron";
+import { app, dialog, ipcMain, shell, type BrowserWindow } from "electron";
 import * as fs from "fs/promises";
 import * as fsSync from "fs";
 import * as path from "path";
 
 import type { ConfigStore, PDVConfig } from "./config";
-import type { CodeCellData, Theme } from "./ipc";
+import type { CodeCellData, Theme, WindowChromeInfo, WindowChromePlatform } from "./ipc";
 import { IPC } from "./ipc";
-import { updateRecentProjectsMenu } from "./menu";
+import { getTopLevelMenuModel, popupTopLevelMenu, updateMenuEnabled, updateRecentProjectsMenu } from "./menu";
 
 let savedThemes: Theme[] = [];
 let savedCodeCells: CodeCellData | null = null;
 
 interface RegisterAppStateIpcHandlersOptions {
+  win: BrowserWindow;
   configStore: ConfigStore;
   readConfig: (configStore: ConfigStore) => PDVConfig;
   themesDir: string;
@@ -31,8 +32,34 @@ interface RegisterAppStateIpcHandlersOptions {
   codeCellsPath: string;
 }
 
+function getWindowChromePlatform(): WindowChromePlatform {
+  if (process.platform === "darwin") return "macos";
+  if (process.platform === "linux") return "linux";
+  return "windows";
+}
+
+function buildWindowChromeInfo(win: BrowserWindow): WindowChromeInfo {
+  const platform = getWindowChromePlatform();
+  return {
+    platform,
+    showCustomTitleBar: platform === "macos" || platform === "linux",
+    showMenuBar: platform === "linux",
+    showWindowControls: platform === "linux",
+    isMaximized: win.isMaximized() || win.isFullScreen(),
+  };
+}
+
 function loadThemesFromDisk(themesDir: string): void {
   if (savedThemes.length > 0) {
+    return;
+  }
+  if (!fsSync.existsSync(themesDir)) {
+    try {
+      fsSync.mkdirSync(themesDir, { recursive: true });
+      console.log(`[ipc-register-app-state] No themes directory found, created ${themesDir}`);
+    } catch (mkdirErr) {
+      console.warn(`[ipc-register-app-state] Unable to create themes directory: ${themesDir}`, mkdirErr);
+    }
     return;
   }
   try {
@@ -91,7 +118,7 @@ function loadCodeCellsFromDisk(codeCellsPath: string): void {
 export function registerAppStateIpcHandlers(
   options: RegisterAppStateIpcHandlersOptions
 ): void {
-  const { configStore, readConfig, themesDir, stateDir, codeCellsPath } = options;
+  const { win, configStore, readConfig, themesDir, stateDir, codeCellsPath } = options;
 
   fs.mkdir(themesDir, { recursive: true }).catch((error) => {
     console.warn(
@@ -107,6 +134,17 @@ export function registerAppStateIpcHandlers(
   });
   loadThemesFromDisk(themesDir);
   loadCodeCellsFromDisk(codeCellsPath);
+
+  const pushWindowChromeState = (): void => {
+    if (win.isDestroyed()) {
+      return;
+    }
+    win.webContents.send(IPC.push.chromeStateChanged, buildWindowChromeInfo(win));
+  };
+  win.on("maximize", pushWindowChromeState);
+  win.on("unmaximize", pushWindowChromeState);
+  win.on("enter-full-screen", pushWindowChromeState);
+  win.on("leave-full-screen", pushWindowChromeState);
 
   ipcMain.handle(IPC.config.get, async () => readConfig(configStore));
 
@@ -139,6 +177,11 @@ export function registerAppStateIpcHandlers(
     return true;
   });
 
+  ipcMain.handle(IPC.themes.openDir, async () => {
+    await fs.mkdir(themesDir, { recursive: true });
+    return shell.openPath(themesDir);
+  });
+
   ipcMain.handle(IPC.codeCells.load, async () => savedCodeCells);
 
   ipcMain.handle(IPC.codeCells.save, async (_event, data: CodeCellData) => {
@@ -149,6 +192,38 @@ export function registerAppStateIpcHandlers(
 
   ipcMain.handle(IPC.menu.updateRecentProjects, async (_event, paths: string[]) => {
     updateRecentProjectsMenu(Array.isArray(paths) ? paths : []);
+    return true;
+  });
+
+  ipcMain.handle(IPC.menu.updateEnabled, async (_event, state: Record<string, boolean>) => {
+    updateMenuEnabled(state);
+    return true;
+  });
+
+  ipcMain.handle(IPC.menu.getModel, async () => getTopLevelMenuModel());
+
+  ipcMain.handle(IPC.menu.popup, async (_event, menuId: "file" | "edit" | "view" | "window", x: number, y: number) =>
+    popupTopLevelMenu(menuId, x, y)
+  );
+
+  ipcMain.handle(IPC.chrome.getInfo, async () => buildWindowChromeInfo(win));
+
+  ipcMain.handle(IPC.chrome.minimize, async () => {
+    win.minimize();
+    return true;
+  });
+
+  ipcMain.handle(IPC.chrome.toggleMaximize, async () => {
+    if (win.isMaximized()) {
+      win.unmaximize();
+    } else {
+      win.maximize();
+    }
+    return win.isMaximized();
+  });
+
+  ipcMain.handle(IPC.chrome.close, async () => {
+    win.close();
     return true;
   });
 

@@ -1,5 +1,6 @@
 import { useEffect, type Dispatch, type MutableRefObject, type SetStateAction } from 'react';
 import type { CellTab, LogEntry } from '../types';
+import type { ProgressPayload } from '../types/pdv';
 
 /** Options for {@link useKernelSubscriptions}. Manages push-subscription lifecycle. */
 interface UseKernelSubscriptionsOptions {
@@ -19,6 +20,8 @@ interface UseKernelSubscriptionsOptions {
   setModulesRefreshToken: Dispatch<SetStateAction<number>>;
   /** Controls the project-reloading overlay shown during kernel restart with active project. */
   setProjectReloading: Dispatch<SetStateAction<boolean>>;
+  /** Updates the progress state for save/load operations. */
+  setProgress: Dispatch<SetStateAction<ProgressPayload | null>>;
   /** Called when a kernel crash is detected via the push channel. */
   onKernelCrash: (kernelId: string) => void;
 }
@@ -32,6 +35,7 @@ export function useKernelSubscriptions({
   setTreeRefreshToken,
   setModulesRefreshToken,
   setProjectReloading,
+  setProgress,
   onKernelCrash,
 }: UseKernelSubscriptionsOptions): void {
   useEffect(() => {
@@ -85,6 +89,15 @@ export function useKernelSubscriptions({
       }
     });
 
+    const unsubscribeProgress = window.pdv.progress.onProgress((payload) => {
+      if (payload.current >= payload.total) {
+        // Clear after a short delay so the bar visually reaches 100%
+        setTimeout(() => setProgress(null), 400);
+      } else {
+        setProgress(payload);
+      }
+    });
+
     const unsubscribeReloading = window.pdv.project.onReloading((payload) => {
       if (payload.status === 'reloading') {
         setProjectReloading(true);
@@ -99,6 +112,7 @@ export function useKernelSubscriptions({
       unsubscribeTree();
       unsubscribeProject();
       unsubscribeKernelStatus();
+      unsubscribeProgress();
       unsubscribeReloading();
     };
   }, [
@@ -108,6 +122,7 @@ export function useKernelSubscriptions({
     setActiveCellTab,
     setCellTabs,
     setModulesRefreshToken,
+    setProgress,
     setProjectReloading,
     setTreeRefreshToken,
   ]);

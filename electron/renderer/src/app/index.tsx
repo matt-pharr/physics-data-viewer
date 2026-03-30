@@ -22,18 +22,21 @@ import { NamespaceView } from '../components/NamespaceView';
 import { ScriptDialog } from '../components/ScriptDialog';
 import { CreateScriptDialog } from '../components/Tree/CreateScriptDialog';
 import { CreateNoteDialog } from '../components/Tree/CreateNoteDialog';
+import { TitleBar } from '../components/TitleBar';
 import { WriteTab } from '../components/WriteTab';
 import { SettingsDialog } from '../components/SettingsDialog';
 import { ImportModuleDialog } from '../components/ImportModuleDialog';
-import { WelcomeScreen } from '../components/WelcomeScreen';
+import { WelcomeScreen, type RecentProject } from '../components/WelcomeScreen';
 import type {
   CellTab,
   Config,
-  KernelExecuteResult,
+  AppMenuTopLevel,
   KernelExecutionOrigin,
   LogEntry,
   NoteTab,
+  ScriptRunResult,
   TreeNodeData,
+  WindowChromeInfo,
 } from '../types';
 import { resolveShortcuts } from '../shortcuts';
 import { normalizeLoadedCodeCells, normalizeRecentProjects, mergeConfigUpdate } from './app-utils';
@@ -82,6 +85,7 @@ const App: React.FC = () => {
   const [logs, setLogs] = useState<LogEntry[]>([]);
 
   // -- Kernel state ---------------------------------------------------------
+  const [activeLanguage, setActiveLanguage] = useState<'python' | 'julia'>('python');
   const [currentKernelId, setCurrentKernelId] = useState<string | null>(null);
   const [kernelStatus, setKernelStatus] = useState<KernelStatus>('idle');
   const [isExecuting, setIsExecuting] = useState(false);
@@ -96,7 +100,7 @@ const App: React.FC = () => {
   const initRef = useRef(false);
   const loadedProjectTabsRef = useRef<{ tabs: CellTab[]; activeTabId: number } | null>(null);
   /** Deferred project action to execute once the kernel becomes ready. */
-  const pendingProjectRef = useRef<{ type: 'open'; path?: string } | null>(null);
+  const pendingProjectRef = useRef<{ type: 'open'; path?: string; language?: 'python' | 'julia' } | null>(null);
 
   // Undo stack for cell clear/close. Each entry captures the full tab list and
   // active tab id so a single Cmd+Z restores exactly what was destroyed.
@@ -121,6 +125,8 @@ const App: React.FC = () => {
   const [createNoteTarget, setCreateNoteTarget] = useState<string | null>(null);
   const [showSettings, setShowSettings] = useState(false);
   const [showImportModule, setShowImportModule] = useState(false);
+  const [chromeInfo, setChromeInfo] = useState<WindowChromeInfo | null>(null);
+  const [menuModel, setMenuModel] = useState<AppMenuTopLevel[]>([]);
 
   // -- Write tab (markdown notes) state ------------------------------------
   const [activePane, setActivePane] = useState<'code' | 'write'>('code');
@@ -132,6 +138,9 @@ const App: React.FC = () => {
 
   // -- Project reloading state (kernel restart with active project) ----------
   const [projectReloading, setProjectReloading] = useState(false);
+
+  // -- Save/load progress state -----------------------------------------------
+  const [progress, setProgress] = useState<import('../types/pdv').ProgressPayload | null>(null);
 
   // -- Imported GUI modules for activity bar ---------------------------------
   const [importedGuiModules, setImportedGuiModules] = useState<{ alias: string; name: string }[]>([]);
@@ -190,6 +199,46 @@ const App: React.FC = () => {
   }, []);
 
   useEffect(() => {
+    let cancelled = false;
+    void window.pdv.chrome.getInfo().then((info) => {
+      if (!cancelled) {
+        setChromeInfo(info);
+      }
+    }).catch(() => {
+      if (!cancelled) {
+        setChromeInfo(null);
+      }
+    });
+    const unsubscribe = window.pdv.chrome.onStateChanged((info) => {
+      setChromeInfo(info);
+    });
+    return () => {
+      cancelled = true;
+      unsubscribe();
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!chromeInfo?.showMenuBar) {
+      setMenuModel([]);
+      return;
+    }
+    let cancelled = false;
+    void window.pdv.menu.getModel().then((model) => {
+      if (!cancelled) {
+        setMenuModel(model);
+      }
+    }).catch(() => {
+      if (!cancelled) {
+        setMenuModel([]);
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [chromeInfo?.showMenuBar]);
+
+  useEffect(() => {
     const projectName = currentProjectDir
       ? currentProjectDir.split('/').filter(Boolean).pop() ?? 'Unsaved Project'
       : 'Unsaved Project';
@@ -215,6 +264,17 @@ const App: React.FC = () => {
     return unsub;
   }, []);
 
+  // Sync File-menu enabled state: disable Save/SaveAs/Import when kernel isn't ready.
+  const kernelReady = kernelStatus === 'ready';
+  useEffect(() => {
+    if (!window.pdv?.menu?.updateEnabled) return;
+    void window.pdv.menu.updateEnabled({
+      'project:save': kernelReady,
+      'project:saveAs': kernelReady,
+      'modules:import': kernelReady,
+    });
+  }, [kernelReady]);
+
   const currentKernelIdRef = useRef(currentKernelId);
   currentKernelIdRef.current = currentKernelId;
 
@@ -233,6 +293,7 @@ const App: React.FC = () => {
     setTreeRefreshToken,
     setModulesRefreshToken,
     setProjectReloading,
+    setProgress,
     onKernelCrash: handleKernelCrash,
   });
 
@@ -332,9 +393,26 @@ const App: React.FC = () => {
     toggleLeftSidebar,
     toggleEditorCollapsed,
     setShowImportModule,
+    kernelReady,
     addCellTab,
     removeCellTab: handleRemoveCellTab,
   });
+
+  // Global Escape handler — closes the topmost open dialog/overlay.
+  // SettingsDialog handles its own Escape (needs to suppress while recording shortcuts).
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return;
+      // Close in priority order (topmost first)
+      if (showImportModule) { setShowImportModule(false); return; }
+      if (scriptDialog) { setScriptDialog(null); return; }
+      if (createScriptTarget) { setCreateScriptTarget(null); return; }
+      if (createNoteTarget) { setCreateNoteTarget(null); return; }
+      if (showEnvSelector) { setShowEnvSelector(false); return; }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [showImportModule, scriptDialog, createScriptTarget, createNoteTarget, showEnvSelector]);
 
   const handleSettingsSave = async (updates: Partial<Config>) => {
     await window.pdv.config.set(updates);
@@ -345,7 +423,7 @@ const App: React.FC = () => {
       ((updates.pythonPath && updates.pythonPath !== config?.pythonPath) ||
         (updates.juliaPath && updates.juliaPath !== config?.juliaPath))
     ) {
-      await startKernel(mergedConfig);
+      await startKernel(mergedConfig, activeLanguage);
     }
     setShowSettings(false);
   };
@@ -453,12 +531,22 @@ const App: React.FC = () => {
       setScriptDialog(node);
     } else if (action === 'run_defaults' && node.type === 'script') {
       if (!currentKernelId) return;
-      const code = `pdv_tree[${JSON.stringify(node.path)}].run()`;
-      await handleExecute(code, {
+      const executionId =
+        typeof crypto !== 'undefined' && 'randomUUID' in crypto
+          ? crypto.randomUUID()
+          : `log-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+      const origin: KernelExecutionOrigin = {
         kind: 'tree-script',
         label: node.path,
         scriptPath: node.path,
+      };
+      const runResult = await window.pdv.script.run(currentKernelId, {
+        treePath: node.path,
+        params: {},
+        executionId,
+        origin,
       });
+      handleScriptRun(runResult);
     } else if (action === 'edit' && (node.type === 'script' || node.type === 'namelist' || node.type === 'lib')) {
       try {
         if (!currentKernelId) return;
@@ -494,12 +582,7 @@ const App: React.FC = () => {
     executionId,
     origin,
     result,
-  }: {
-    code: string;
-    executionId: string;
-    origin: KernelExecutionOrigin;
-    result: KernelExecuteResult;
-  }) => {
+  }: ScriptRunResult) => {
     const resolvedOrigin = result.errorDetails?.source ?? origin;
     const logEntry: LogEntry = {
       id: executionId,
@@ -635,6 +718,7 @@ const App: React.FC = () => {
     setActiveCellTab,
     setModulesRefreshToken,
     setNamespaceRefreshToken,
+    setProgress,
     setLastError,
     setLogs,
     loadedProjectTabsRef,
@@ -644,40 +728,72 @@ const App: React.FC = () => {
 
   // -- Welcome screen (pristine session) ------------------------------------
 
-  const recentProjects = useMemo(
+  const recentProjectPaths = useMemo(
     () => normalizeRecentProjects(config?.recentProjects),
     [config?.recentProjects],
   );
+
+  /** Build RecentProject[] with language metadata from project.json files. */
+  const [recentProjects, setRecentProjects] = useState<RecentProject[]>([]);
+  useEffect(() => {
+    if (recentProjectPaths.length === 0) {
+      setRecentProjects([]);
+      return;
+    }
+    let cancelled = false;
+    window.pdv.project.peekLanguages(recentProjectPaths).then((langMap) => {
+      if (cancelled) return;
+      setRecentProjects(recentProjectPaths.map((p) => ({ path: p, language: langMap[p] })));
+    }).catch(() => {
+      if (cancelled) return;
+      setRecentProjects(recentProjectPaths.map((p) => ({ path: p })));
+    });
+    return () => { cancelled = true; };
+  }, [recentProjectPaths]);
 
   const dismissWelcome = useCallback(() => setShowWelcome(false), []);
 
   /**
    * Starts the kernel for the current config, or shows the environment
-   * selector if no pythonPath is configured yet.
+   * selector if no interpreter path is configured for the given language.
    */
-  const ensureKernel = useCallback(async () => {
-    if (!config?.pythonPath) {
-      setShowEnvSelector(true);
-      return;
+  const ensureKernel = useCallback(async (language: 'python' | 'julia' = 'python') => {
+    setActiveLanguage(language);
+    if (language === 'julia') {
+      // Julia doesn't require a pre-configured path — auto-detect is fine.
+      // Only show selector if Julia isn't found at all.
+      await startKernel(config ?? {} as Config, 'julia');
+    } else {
+      if (!config?.pythonPath) {
+        setShowEnvSelector(true);
+        return;
+      }
+      await startKernel(config, 'python');
     }
-    await startKernel(config);
   }, [config, startKernel, setShowEnvSelector]);
 
-  const handleWelcomeNewProject = useCallback(async () => {
+  const handleWelcomeNewProject = useCallback(async (language: 'python' | 'julia') => {
     dismissWelcome();
-    await ensureKernel();
+    await ensureKernel(language);
   }, [dismissWelcome, ensureKernel]);
 
   const handleWelcomeOpen = useCallback(async () => {
+    // Pick the directory first (while still on the splash screen) so we can
+    // detect which language kernel to start before leaving the welcome screen.
+    const dir = await window.pdv.files.pickDirectory();
+    if (!dir) return; // user cancelled — stay on splash
+    // Detect language from the saved project
+    const langMap = await window.pdv.project.peekLanguages([dir]);
+    const language = langMap[dir] ?? 'python';
     dismissWelcome();
-    pendingProjectRef.current = { type: 'open' };
-    await ensureKernel();
+    pendingProjectRef.current = { type: 'open', path: dir, language };
+    await ensureKernel(language);
   }, [dismissWelcome, ensureKernel]);
 
-  const handleWelcomeOpenRecent = useCallback(async (path: string) => {
+  const handleWelcomeOpenRecent = useCallback(async (path: string, language?: 'python' | 'julia') => {
     dismissWelcome();
-    pendingProjectRef.current = { type: 'open', path };
-    await ensureKernel();
+    pendingProjectRef.current = { type: 'open', path, language };
+    await ensureKernel(language ?? 'python');
   }, [dismissWelcome, ensureKernel]);
 
   // Execute deferred project action once the kernel becomes ready.
@@ -688,8 +804,20 @@ const App: React.FC = () => {
     void executeOpenProject(pending.path);
   }, [kernelStatus, executeOpenProject]);
 
+  const projectTitle = currentProjectDir
+    ? currentProjectDir.split('/').filter(Boolean).pop() ?? 'Unsaved Project'
+    : 'Unsaved Project';
+
   return (
     <div className="app">
+      {chromeInfo?.showCustomTitleBar && (
+        <TitleBar
+          chromeInfo={chromeInfo}
+          menuModel={menuModel}
+          title={projectTitle}
+        />
+      )}
+
       {/* Main content */}
       <main className="app-main">
 
@@ -888,7 +1016,6 @@ const App: React.FC = () => {
                   parent_path: createNoteTarget || null,
                   type: 'markdown',
                   has_children: false,
-                  lazy: false,
                   preview: '',
                   hasChildren: false,
                   parentPath: createNoteTarget || null,
@@ -907,17 +1034,21 @@ const App: React.FC = () => {
       {/* Status bar */}
         <StatusBar
           isExecuting={isExecuting}
+          activeLanguage={activeLanguage}
           pythonPath={config?.pythonPath}
-          kernelSpec={config?.kernelSpec}
+          juliaPath={config?.juliaPath}
+          kernelSpec={config?.kernelSpec ?? undefined}
           currentProjectDir={currentProjectDir}
           kernelStatus={kernelStatus}
           lastDuration={lastDuration}
+          progress={progress}
           onRuntimeClick={() => { setSettingsInitialTab('runtime'); setShowSettings(true); }}
         />
 
        {showEnvSelector && (
           <EnvironmentSelector
-            isFirstRun={!config?.pythonPath}
+            isFirstRun={activeLanguage === 'julia' ? !config?.juliaPath : !config?.pythonPath}
+            activeLanguage={activeLanguage}
             currentConfig={config || undefined}
             currentKernelId={currentKernelId}
             onSave={handleEnvSave}
@@ -929,12 +1060,14 @@ const App: React.FC = () => {
          isOpen={showImportModule}
          projectDir={currentProjectDir}
          kernelReady={kernelStatus === 'ready'}
+         activeLanguage={activeLanguage}
          refreshToken={modulesRefreshToken}
          onClose={() => setShowImportModule(false)}
        />
        <SettingsDialog
          isOpen={showSettings}
          initialTab={settingsInitialTab}
+         activeLanguage={activeLanguage}
          config={config}
          shortcuts={shortcuts}
          currentKernelId={currentKernelId}

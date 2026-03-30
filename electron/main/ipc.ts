@@ -18,6 +18,7 @@
 import type {
   KernelExecuteRequest,
   KernelExecuteResult,
+  KernelExecutionOrigin,
   KernelInfo,
   KernelSpec,
   ExecuteOutputChunk,
@@ -68,10 +69,13 @@ export const IPC = {
   /** Namespace inspection channels. */
   namespace: {
     query: "namespace:query",
+    inspect: "namespace:inspect",
   },
   /** Script tooling channels. */
   script: {
     edit: "script:edit",
+    run: "script:run",
+    getParams: "script:getParams",
   },
   /** Markdown note channels. */
   note: {
@@ -99,6 +103,7 @@ export const IPC = {
     save: "project:save",
     load: "project:load",
     new: "project:new",
+    peekLanguages: "project:peekLanguages",
   },
   /** App configuration channels. */
   config: {
@@ -113,6 +118,7 @@ export const IPC = {
   themes: {
     get: "themes:get",
     save: "themes:save",
+    openDir: "themes:openDir",
   },
   /** Code-cell persistence channels. */
   codeCells: {
@@ -125,13 +131,25 @@ export const IPC = {
     projectLoaded: "pdv.project.loaded",
     kernelStatus: "pdv.kernel.status",
     menuAction: "menu:action",
+    chromeStateChanged: "chrome:stateChanged",
     executeOutput: "pdv.execute.output",
     moduleExecuteRequest: "pdv.moduleWindow.executeRequest",
     projectReloading: "pdv.project.reloading",
+    progress: "pdv.progress",
   },
   /** App menu synchronization channels. */
   menu: {
     updateRecentProjects: "menu:updateRecentProjects",
+    updateEnabled: "menu:updateEnabled",
+    getModel: "menu:getModel",
+    popup: "menu:popup",
+  },
+  /** Window-chrome integration channels. */
+  chrome: {
+    getInfo: "chrome:getInfo",
+    minimize: "chrome:minimize",
+    toggleMaximize: "chrome:toggleMaximize",
+    close: "chrome:close",
   },
   /** Module popup window channels. */
   moduleWindows: {
@@ -205,12 +223,30 @@ export interface NamespaceQueryOptions {
   includeCallables?: boolean;
 }
 
+/** Serializable selector used to drill into a namespace value. */
+export interface NamespaceAccessSegment {
+  /** Access mode used to resolve the next child. */
+  kind: "attr" | "index" | "key" | "column";
+  /** Primitive selector value used by the kernel resolver. */
+  value: string | number | boolean | null;
+}
+
+/** Target value for lazy namespace inspection. */
+export interface NamespaceInspectTarget {
+  /** Top-level namespace variable name. */
+  rootName: string;
+  /** Selector chain from the root variable to the current node. */
+  path: NamespaceAccessSegment[];
+}
+
 /**
  * Descriptor for a single variable in the namespace panel.
  */
-export interface NamespaceVariable {
-  /** Variable name in the user namespace. */
+export interface NamespaceInspectorNode {
+  /** Display name for this row within the namespace inspector. */
   name: string;
+  /** Canonical inspector kind used for branching/rendering. */
+  kind: string;
   /** Runtime type label (e.g., `int`, `DataFrame`, `ndarray`). */
   type: string;
   /** Optional module the value originates from. */
@@ -221,8 +257,33 @@ export interface NamespaceVariable {
   dtype?: string;
   /** Optional length for sequence-like values. */
   length?: number;
+  /** Optional byte-size estimate for sorting/display. */
+  size?: number;
   /** Optional short UI preview string. */
   preview?: string;
+  /** Whether this row can be expanded for child inspection. */
+  hasChildren?: boolean;
+  /** Known child count when cheap to determine. */
+  childCount?: number;
+  /** Selector chain from the root variable to this node. */
+  path: NamespaceAccessSegment[];
+  /** Full user-facing expression for copy/tooltip actions. */
+  expression: string;
+}
+
+/**
+ * Descriptor for a single top-level variable in the namespace panel.
+ */
+export interface NamespaceVariable extends NamespaceInspectorNode {}
+
+/** Response payload returned from `namespace.inspect`. */
+export interface NamespaceInspectResult {
+  /** Child rows for the inspected node. */
+  children: NamespaceInspectorNode[];
+  /** Whether child results were truncated by inspection limits. */
+  truncated: boolean;
+  /** Total child count before truncation when known. */
+  totalChildren?: number;
 }
 
 // ---------------------------------------------------------------------------
@@ -237,10 +298,7 @@ export type ScriptParameter = PDVScriptParameter;
 /**
  * Tree node shape returned to the renderer.
  */
-export interface TreeNode extends NodeDescriptor {
-  /** Present only when type === 'script'. */
-  params?: ScriptParameter[] | undefined;
-}
+export interface TreeNode extends NodeDescriptor {}
 
 /**
  * Result returned by `tree.createScript`.
@@ -324,6 +382,38 @@ export interface ScriptOperationResult {
   error?: string;
 }
 
+/**
+ * Request payload for `script.run`.
+ *
+ * The main process uses the target kernel's language to build the
+ * appropriate invocation string — no language-specific code belongs
+ * in the renderer.
+ */
+export interface ScriptRunRequest {
+  /** Dot-delimited tree path of the PDVScript node. */
+  treePath: string;
+  /** Serialised parameter values keyed by parameter name. */
+  params: Record<string, string | number | boolean>;
+  /** Caller-supplied execution ID for output correlation. */
+  executionId: string;
+  /** Execution origin metadata used in error summaries and the console. */
+  origin: KernelExecutionOrigin;
+}
+
+/**
+ * Result returned by `script.run`.
+ */
+export interface ScriptRunResult {
+  /** The exact code string that was sent to the kernel (for console display). */
+  code: string;
+  /** Echo of the caller-supplied execution ID. */
+  executionId: string;
+  /** Echo of the caller-supplied origin metadata. */
+  origin: KernelExecutionOrigin;
+  /** Structured execution result from the kernel. */
+  result: KernelExecuteResult;
+}
+
 // ---------------------------------------------------------------------------
 // Modules system types
 // ---------------------------------------------------------------------------
@@ -355,6 +445,8 @@ export interface ModuleDescriptor {
   version: string;
   /** Optional short module description. */
   description?: string;
+  /** Target language for this module ("python" when absent). */
+  language?: "python" | "julia";
   /** Install source reference. */
   source: ModuleSourceReference;
   /** Optional resolved revision hash/tag. */
@@ -626,6 +718,41 @@ export interface MenuActionPayload {
   path?: string;
 }
 
+/**
+ * Partial map of menu item IDs to enabled/disabled state.
+ * Items not present in the map default to enabled.
+ */
+export interface MenuEnabledState {
+  "project:save"?: boolean;
+  "project:saveAs"?: boolean;
+  "modules:import"?: boolean;
+}
+
+/** Renderer-facing top-level menu button metadata. */
+export interface AppMenuTopLevel {
+  /** Stable top-level menu id used for popup requests. */
+  id: "file" | "edit" | "view" | "window";
+  /** User-visible label rendered in the custom Linux menubar. */
+  label: string;
+}
+
+/** Platform-specific window chrome mode surfaced to the renderer. */
+export type WindowChromePlatform = "macos" | "linux" | "windows";
+
+/** Main-window chrome state consumed by the renderer title-bar shell. */
+export interface WindowChromeInfo {
+  /** Current host platform mapped into renderer-friendly naming. */
+  platform: WindowChromePlatform;
+  /** True when the renderer should draw the visible title bar area. */
+  showCustomTitleBar: boolean;
+  /** True when the renderer should show the integrated top-level menu strip. */
+  showMenuBar: boolean;
+  /** True when the renderer should show custom window controls. */
+  showWindowControls: boolean;
+  /** True when the main window is currently maximized. */
+  isMaximized: boolean;
+}
+
 // ---------------------------------------------------------------------------
 // Module window types
 // ---------------------------------------------------------------------------
@@ -786,6 +913,20 @@ export interface ProjectLoadResult {
   checksumValid: boolean | null;
   /** Number of tree nodes loaded. */
   nodeCount: number | null;
+}
+
+/**
+ * Progress update payload pushed during save/load operations.
+ */
+export interface ProgressPayload {
+  /** The operation in progress. */
+  operation: "save" | "load";
+  /** Short human-readable phase label (e.g. "Serializing", "Copying files"). */
+  phase: string;
+  /** Nodes processed so far. */
+  current: number;
+  /** Total node count. */
+  total: number;
 }
 
 // ---------------------------------------------------------------------------
@@ -993,10 +1134,34 @@ export interface PDVApi {
       kernelId: string,
       options?: NamespaceQueryOptions
     ): Promise<NamespaceVariable[]>;
+    /**
+     * Lazily inspect the children of one namespace value.
+     *
+     * @param kernelId - Target kernel ID.
+     * @param target - Root variable plus selector path to inspect.
+     * @returns One-level child inspector rows.
+     */
+    inspect(
+      kernelId: string,
+      target: NamespaceInspectTarget
+    ): Promise<NamespaceInspectResult>;
   };
 
   /** Script tooling operations. */
   script: {
+    /**
+     * Run a PDVScript tree node in the target kernel.
+     *
+     * The main process builds the language-appropriate invocation code
+     * (Python or Julia) and executes it via the kernel, returning both
+     * the code string and the execution result so the renderer can
+     * display the run in the console.
+     *
+     * @param kernelId - Target kernel ID.
+     * @param request - Script run request payload.
+     * @returns Execution result including the generated code string.
+     */
+    run(kernelId: string, request: ScriptRunRequest): Promise<ScriptRunResult>;
     /**
      * Open a script path in the configured external editor.
      *
@@ -1005,6 +1170,17 @@ export interface PDVApi {
      * @returns Operation status.
      */
     edit(kernelId: string, scriptPath: string): Promise<ScriptOperationResult>;
+    /**
+     * Fetch the current run() parameters for a script node.
+     *
+     * Reads the script file fresh from disk each time so edits are
+     * reflected immediately.
+     *
+     * @param kernelId - Target kernel ID.
+     * @param treePath - Dot-delimited tree path of the script node.
+     * @returns Array of parameter descriptors.
+     */
+    getParams(kernelId: string, treePath: string): Promise<ScriptParameter[]>;
   };
 
   /** Markdown note operations. */
@@ -1131,6 +1307,16 @@ export interface PDVApi {
      */
     new: () => Promise<boolean>;
     /**
+     * Peek at the language field of project.json for each given directory.
+     *
+     * Reads only the manifest — does not load the project into the kernel.
+     * Directories without a valid project.json default to "python".
+     *
+     * @param paths - Project directory paths to inspect.
+     * @returns Map of path → language.
+     */
+    peekLanguages(paths: string[]): Promise<Record<string, "python" | "julia">>;
+    /**
      * Subscribe to project-loaded push notifications.
      *
      * @param callback - Invoked with each project-loaded payload.
@@ -1144,6 +1330,17 @@ export interface PDVApi {
      * @returns Unsubscribe function.
      */
     onReloading(callback: (payload: { status: "reloading" | "ready" }) => void): () => void;
+  };
+
+  /** Save/load progress push subscription. */
+  progress: {
+    /**
+     * Subscribe to progress updates during save/load operations.
+     *
+     * @param callback - Invoked with each progress payload.
+     * @returns Unsubscribe function.
+     */
+    onProgress(callback: (payload: ProgressPayload) => void): () => void;
   };
 
   /** App configuration accessors. */
@@ -1188,6 +1385,12 @@ export interface PDVApi {
      * @returns True when save succeeded.
      */
     save(theme: Theme): Promise<boolean>;
+    /**
+     * Open the themes directory in the system file manager.
+     *
+     * @returns The error string from shell.openPath, or empty string on success.
+     */
+    openDir(): Promise<string>;
   };
 
   /** Code-cell persistence operations. */
@@ -1276,11 +1479,70 @@ export interface PDVApi {
      */
     updateRecentProjects(paths: string[]): Promise<boolean>;
     /**
+     * Update enabled/disabled state for File-menu items.
+     *
+     * @param state - Partial map of menu-item IDs to enabled booleans.
+     * @returns True when the menu was updated.
+     */
+    updateEnabled(state: MenuEnabledState): Promise<boolean>;
+    /**
+     * Return the top-level menu structure for the custom Linux menubar.
+     *
+     * @returns Ordered top-level menu button metadata.
+     */
+    getModel(): Promise<AppMenuTopLevel[]>;
+    /**
+     * Open one native submenu popup anchored to the given window coordinates.
+     *
+     * Coordinates are relative to the content area of the main window.
+     *
+     * @param menuId - Top-level menu id to display.
+     * @param x - Left anchor coordinate in window CSS pixels.
+     * @param y - Top anchor coordinate in window CSS pixels.
+     * @returns True when a matching submenu was opened.
+     */
+    popup(menuId: AppMenuTopLevel["id"], x: number, y: number): Promise<boolean>;
+    /**
      * Subscribe to app-menu action events.
      *
      * @param callback - Invoked for File-menu actions.
      * @returns Unsubscribe function.
      */
     onAction(callback: (payload: MenuActionPayload) => void): () => void;
+  };
+
+  /** Window chrome integration and title-bar controls. */
+  chrome: {
+    /**
+     * Return platform-specific window-chrome settings for the renderer shell.
+     *
+     * @returns Current main-window chrome configuration and state.
+     */
+    getInfo(): Promise<WindowChromeInfo>;
+    /**
+     * Minimize the main window when supported.
+     *
+     * @returns True when the request was accepted.
+     */
+    minimize(): Promise<boolean>;
+    /**
+     * Maximize or restore the main window depending on current state.
+     *
+     * @returns Updated maximize state.
+     */
+    toggleMaximize(): Promise<boolean>;
+    /**
+     * Close the main window.
+     *
+     * @returns True when the request was accepted.
+     */
+    close(): Promise<boolean>;
+    /**
+     * Subscribe to maximize/fullscreen state changes for the main window.
+     *
+     * @param callback - Invoked with the latest chrome info snapshot.
+     * @returns Unsubscribe function.
+     */
+    onStateChanged(callback: (info: WindowChromeInfo) => void): () => void;
   };
 }

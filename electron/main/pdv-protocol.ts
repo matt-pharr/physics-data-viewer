@@ -52,6 +52,8 @@ export const PDVMessageType = {
   PROJECT_SAVE: "pdv.project.save",
   /** Kernel → app. Confirms save; includes node_count and checksum. */
   PROJECT_SAVE_RESPONSE: "pdv.project.save.response",
+  /** Kernel → app (push). Progress update during save/load operations. */
+  PROGRESS: "pdv.progress",
 
   // Tree
   /** App → kernel. Request tree nodes at a given path. */
@@ -60,7 +62,7 @@ export const PDVMessageType = {
   TREE_LIST_RESPONSE: "pdv.tree.list.response",
   /** App → kernel. Request data value for a specific node. */
   TREE_GET: "pdv.tree.get",
-  /** Kernel → app. Returns node value (may be lazy-loaded). */
+  /** Kernel → app. Returns node value. */
   TREE_GET_RESPONSE: "pdv.tree.get.response",
   /** App → kernel. Resolve a file-backed tree node to its absolute path. */
   TREE_RESOLVE_FILE: "pdv.tree.resolve_file",
@@ -74,12 +76,20 @@ export const PDVMessageType = {
   NAMESPACE_QUERY: "pdv.namespace.query",
   /** Kernel → app. Returns array of variable descriptors. */
   NAMESPACE_QUERY_RESPONSE: "pdv.namespace.query.response",
+  /** App → kernel. Inspect one namespace value lazily. */
+  NAMESPACE_INSPECT: "pdv.namespace.inspect",
+  /** Kernel → app. Returns child descriptors for one namespace value. */
+  NAMESPACE_INSPECT_RESPONSE: "pdv.namespace.inspect.response",
 
   // Script
   /** App → kernel. Register a newly created script file as a tree node. */
   SCRIPT_REGISTER: "pdv.script.register",
   /** Kernel → app. Confirms script registration. */
   SCRIPT_REGISTER_RESPONSE: "pdv.script.register.response",
+  /** App → kernel. Extract current run() parameters from a script file. */
+  SCRIPT_PARAMS: "pdv.script.params",
+  /** Kernel → app. Returns array of script parameter descriptors. */
+  SCRIPT_PARAMS_RESPONSE: "pdv.script.params.response",
 
   // Note
   /** App → kernel. Register a newly created markdown note as a tree node. */
@@ -257,6 +267,22 @@ interface PDVNamespaceQueryPayload {
   include_callables?: boolean;
 }
 
+/** Selector used to drill into a namespace value. */
+export interface PDVNamespaceAccessSegment {
+  /** Access mode used at one step in the selector chain. */
+  kind: "attr" | "index" | "key" | "column";
+  /** Primitive selector value used to resolve the next child. */
+  value: string | number | boolean | null;
+}
+
+/** Payload for pdv.namespace.inspect (app → kernel). */
+export interface PDVNamespaceInspectPayload {
+  /** Top-level namespace variable name. */
+  root_name: string;
+  /** Selector chain from the root variable to the current node. */
+  path?: PDVNamespaceAccessSegment[];
+}
+
 // ---------------------------------------------------------------------------
 // Script message payloads
 // ---------------------------------------------------------------------------
@@ -339,8 +365,6 @@ export interface NodeDescriptor {
   type: NodeKindValue;
   /** True if this node has child nodes. */
   has_children: boolean;
-  /** True if the data has not yet been loaded from the save directory. */
-  lazy: boolean;
   /** ISO 8601 creation timestamp. */
   created_at?: string;
   /** ISO 8601 last-modification timestamp. */
@@ -349,8 +373,6 @@ export interface NodeDescriptor {
   preview?: string;
   /** Script language for script nodes. */
   language?: string | null;
-  /** Script parameters for script nodes only. */
-  params?: ScriptParameter[];
   /** Physical filename with extension for file-backed nodes (e.g. "run.nml"). Null for others. */
   filename?: string | null;
   /** Fully qualified Python type string (e.g. "builtins.int"). */

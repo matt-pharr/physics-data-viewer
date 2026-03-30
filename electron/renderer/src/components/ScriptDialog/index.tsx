@@ -1,24 +1,17 @@
 /**
  * ScriptDialog — parameter form and runner for `PDVScript` tree nodes.
  *
- * Builds a `pdv_tree["path"].run(...)` invocation from user-supplied
- * parameter values and executes it through `window.pdv.kernels.execute`.
+ * Fetches the script's current run() parameters on demand when the dialog
+ * opens, so edits to the script file are always reflected.
  */
 
-import React, { useMemo, useState } from 'react';
-import type { KernelExecuteResult, KernelExecutionOrigin, ScriptParameter, TreeNodeData } from '../../types';
-
-interface ScriptRunPayload {
-  code: string;
-  executionId: string;
-  origin: KernelExecutionOrigin;
-  result: KernelExecuteResult;
-}
+import React, { useEffect, useMemo, useState } from 'react';
+import type { KernelExecutionOrigin, ScriptParameter, ScriptRunResult, TreeNodeData } from '../../types';
 
 interface ScriptDialogProps {
   node: TreeNodeData;
   kernelId: string;
-  onRun: (payload: ScriptRunPayload) => void;
+  onRun: (payload: ScriptRunResult) => void;
   onCancel: () => void;
 }
 
@@ -49,24 +42,43 @@ export function serializeScriptArgValue(value: unknown): string | number | boole
 
 /** Modal script-run dialog. */
 export const ScriptDialog: React.FC<ScriptDialogProps> = ({ node, kernelId, onRun, onCancel }) => {
-  const params = useMemo(() => node.params ?? [], [node.params]);
-  const [values, setValues] = useState<Record<string, unknown>>(() => {
-    const defaults: Record<string, unknown> = {};
-    for (const param of params) {
-      if (param.default !== undefined && param.default !== null) {
-        defaults[param.name] = param.default;
-      }
-    }
-    return defaults;
-  });
+  const [params, setParams] = useState<ScriptParameter[]>([]);
+  const [isLoadingParams, setIsLoadingParams] = useState(true);
+  const [paramLoadFailed, setParamLoadFailed] = useState(false);
+  const [values, setValues] = useState<Record<string, unknown>>({});
   const [isRunning, setIsRunning] = useState(false);
   const [error, setError] = useState<string | undefined>(undefined);
+
+  useEffect(() => {
+    let cancelled = false;
+    setIsLoadingParams(true);
+    setParamLoadFailed(false);
+    setError(undefined);
+    window.pdv.script.getParams(kernelId, node.path).then((fetched) => {
+      if (cancelled) return;
+      setParams(fetched);
+      const defaults: Record<string, unknown> = {};
+      for (const param of fetched) {
+        if (param.default !== undefined && param.default !== null) {
+          defaults[param.name] = param.default;
+        }
+      }
+      setValues(defaults);
+      setIsLoadingParams(false);
+    }).catch((err) => {
+      if (cancelled) return;
+      setParamLoadFailed(true);
+      setError(err instanceof Error ? err.message : String(err));
+      setIsLoadingParams(false);
+    });
+    return () => { cancelled = true; };
+  }, [kernelId, node.path]);
 
   const handleChange = (paramName: string, value: unknown) => {
     setValues((prev) => ({ ...prev, [paramName]: value }));
   };
 
-  const canRun = params.every((param) => !param.required || isValueProvided(param, values));
+  const canRun = !isLoadingParams && !paramLoadFailed && params.every((param) => !param.required || isValueProvided(param, values));
 
   const handleRun = async () => {
     if (!canRun || isRunning) {
@@ -76,7 +88,7 @@ export const ScriptDialog: React.FC<ScriptDialogProps> = ({ node, kernelId, onRu
     setIsRunning(true);
     setError(undefined);
     try {
-      const argPayload = Object.fromEntries(
+      const params = Object.fromEntries(
         Object.entries(values)
         .filter(([, value]) => value !== undefined)
         .flatMap(([key, value]) => {
@@ -84,9 +96,6 @@ export const ScriptDialog: React.FC<ScriptDialogProps> = ({ node, kernelId, onRu
           return serialized === null ? [] : [[key, serialized] as const];
         })
       );
-      const code = `import json\npdv_tree[${JSON.stringify(node.path)}].run(**json.loads(${JSON.stringify(
-        JSON.stringify(argPayload)
-      )}))`;
       const executionId =
         typeof crypto !== 'undefined' && 'randomUUID' in crypto
           ? crypto.randomUUID()
@@ -96,12 +105,13 @@ export const ScriptDialog: React.FC<ScriptDialogProps> = ({ node, kernelId, onRu
         label: node.path,
         scriptPath: node.path,
       };
-      const result = await window.pdv.kernels.execute(kernelId, {
-        code,
+      const runResult = await window.pdv.script.run(kernelId, {
+        treePath: node.path,
+        params,
         executionId,
         origin,
       });
-      onRun({ code, executionId, origin, result });
+      onRun(runResult);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -125,9 +135,11 @@ export const ScriptDialog: React.FC<ScriptDialogProps> = ({ node, kernelId, onRu
             <span className="script-path">{node.path}</span>
           </div>
 
-          {params.length === 0 && <div className="dialog-info-text">This script has no parameters</div>}
+          {isLoadingParams && <div className="dialog-info-text">Loading parameters...</div>}
 
-          {params.length > 0 && (
+          {!isLoadingParams && !paramLoadFailed && params.length === 0 && <div className="dialog-info-text">This script has no parameters</div>}
+
+          {!isLoadingParams && !paramLoadFailed && params.length > 0 && (
             <div className="param-list">
               {params.map((param) => {
                 const kind = getParamKind(param.type);

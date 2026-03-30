@@ -73,10 +73,16 @@ const api: PDVApi = {
   namespace: {
     query: (kernelId, options) =>
       ipcRenderer.invoke(IPC.namespace.query, kernelId, options),
+    inspect: (kernelId, target) =>
+      ipcRenderer.invoke(IPC.namespace.inspect, kernelId, target),
   },
   script: {
+    run: (kernelId, request) =>
+      ipcRenderer.invoke(IPC.script.run, kernelId, request),
     edit: (kernelId, scriptPath) =>
       ipcRenderer.invoke(IPC.script.edit, kernelId, scriptPath),
+    getParams: (kernelId, treePath) =>
+      ipcRenderer.invoke(IPC.script.getParams, kernelId, treePath),
   },
   note: {
     save: (kernelId, treePath, content) =>
@@ -106,8 +112,13 @@ const api: PDVApi = {
       ipcRenderer.invoke(IPC.project.save, saveDir, codeCells),
     load: (saveDir) => ipcRenderer.invoke(IPC.project.load, saveDir),
     new: () => ipcRenderer.invoke(IPC.project.new),
+    peekLanguages: (paths) =>
+      ipcRenderer.invoke(IPC.project.peekLanguages, paths),
     onLoaded: (callback) => onPush(IPC.push.projectLoaded, callback),
     onReloading: (callback) => onPush(IPC.push.projectReloading, callback),
+  },
+  progress: {
+    onProgress: (callback) => onPush(IPC.push.progress, callback),
   },
   config: {
     get: () => ipcRenderer.invoke(IPC.config.get),
@@ -119,6 +130,7 @@ const api: PDVApi = {
   themes: {
     get: () => ipcRenderer.invoke(IPC.themes.get),
     save: (theme) => ipcRenderer.invoke(IPC.themes.save, theme),
+    openDir: () => ipcRenderer.invoke(IPC.themes.openDir),
   },
   codeCells: {
     load: () => ipcRenderer.invoke(IPC.codeCells.load),
@@ -139,7 +151,18 @@ const api: PDVApi = {
   menu: {
     updateRecentProjects: (paths) =>
       ipcRenderer.invoke(IPC.menu.updateRecentProjects, paths),
+    updateEnabled: (state) =>
+      ipcRenderer.invoke(IPC.menu.updateEnabled, state),
+    getModel: () => ipcRenderer.invoke(IPC.menu.getModel),
+    popup: (menuId, x, y) => ipcRenderer.invoke(IPC.menu.popup, menuId, x, y),
     onAction: (callback) => onPush(IPC.push.menuAction, callback),
+  },
+  chrome: {
+    getInfo: () => ipcRenderer.invoke(IPC.chrome.getInfo),
+    minimize: () => ipcRenderer.invoke(IPC.chrome.minimize),
+    toggleMaximize: () => ipcRenderer.invoke(IPC.chrome.toggleMaximize),
+    close: () => ipcRenderer.invoke(IPC.chrome.close),
+    onStateChanged: (callback) => onPush(IPC.push.chromeStateChanged, callback),
   },
 };
 

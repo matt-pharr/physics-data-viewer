@@ -15,18 +15,17 @@
 import * as crypto from "crypto";
 import * as fs from "fs/promises";
 import * as path from "path";
-import { ipcMain } from "electron";
+import { ipcMain, type BrowserWindow } from "electron";
 
 import { IPC } from "./ipc";
-import { ProjectManager, type ProjectModuleImport } from "./project-manager";
+import { ProjectManager, type ProjectManifest, type ProjectModuleImport } from "./project-manager";
 import { copyFilesForLoad } from "./project-file-sync";
-
-type ProjectManifest = Awaited<ReturnType<typeof ProjectManager.readManifest>>;
 
 interface RegisterProjectIpcHandlersOptions {
   projectManager: ProjectManager;
   kernelWorkingDirs: Map<string, string>;
   getActiveKernelId: () => string | null;
+  getActiveKernelLanguage: () => "python" | "julia";
   setActiveProjectDir: (dir: string | null) => void;
   getPendingModuleImports: () => ProjectModuleImport[];
   setPendingModuleImports: (imports: ProjectModuleImport[]) => void;
@@ -35,6 +34,7 @@ interface RegisterProjectIpcHandlersOptions {
   clearModuleHealthWarnings: () => void;
   refreshProjectModuleHealth: (dir: string | null) => Promise<ProjectManifest | null>;
   runSerializedProjectManifestMutation: <T>(dir: string, task: () => Promise<T>) => Promise<T>;
+  getMainWindow: () => BrowserWindow | null;
 }
 
 /**
@@ -51,6 +51,7 @@ export function registerProjectIpcHandlers(
     projectManager,
     kernelWorkingDirs,
     getActiveKernelId,
+    getActiveKernelLanguage,
     setActiveProjectDir,
     getPendingModuleImports,
     setPendingModuleImports,
@@ -59,12 +60,15 @@ export function registerProjectIpcHandlers(
     clearModuleHealthWarnings,
     refreshProjectModuleHealth,
     runSerializedProjectManifestMutation,
+    getMainWindow,
   } = options;
 
   ipcMain.handle(
     IPC.project.save,
     async (_event, saveDir: string, codeCells: unknown) => {
-      const saveResult = await projectManager.save(saveDir, codeCells);
+      const saveResult = await projectManager.save(saveDir, codeCells, {
+        language: getActiveKernelLanguage(),
+      });
 
       // Merge pending in-memory module imports/settings into the on-disk manifest.
       const pendingModuleImports = getPendingModuleImports();
@@ -98,7 +102,17 @@ export function registerProjectIpcHandlers(
     const activeKernelId = getActiveKernelId();
     if (activeKernelId) {
       const workingDir = kernelWorkingDirs.get(activeKernelId);
-      if (workingDir) await copyFilesForLoad(saveDir, workingDir);
+      if (workingDir) {
+        const win = getMainWindow();
+        await copyFilesForLoad(saveDir, workingDir, win ? (current, total) => {
+          win.webContents.send(IPC.push.progress, {
+            operation: "load",
+            phase: "Copying files",
+            current,
+            total,
+          });
+        } : undefined);
+      }
     }
 
     setActiveProjectDir(saveDir);
@@ -157,4 +171,22 @@ export function registerProjectIpcHandlers(
     clearModuleHealthWarnings();
     return true;
   });
+
+  ipcMain.handle(
+    IPC.project.peekLanguages,
+    async (_event, paths: string[]): Promise<Record<string, "python" | "julia">> => {
+      const result: Record<string, "python" | "julia"> = {};
+      await Promise.all(
+        paths.map(async (dir) => {
+          try {
+            const manifest = await ProjectManager.readManifest(dir);
+            result[dir] = manifest.language;
+          } catch {
+            result[dir] = "python";
+          }
+        })
+      );
+      return result;
+    }
+  );
 }

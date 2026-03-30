@@ -3,13 +3,56 @@
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { NamespaceVariable } from '../../types';
+import type { NamespaceInspectorNode, NamespaceVariable } from '../../types';
 import { NamespaceView } from './index';
 
 function makeVars(): NamespaceVariable[] {
   return [
-    { name: 'alpha', type: 'int', size: 10, preview: '1' },
-    { name: 'beta', type: 'str', size: 5, preview: 'text' },
+    {
+      name: 'alpha',
+      kind: 'scalar',
+      type: 'int',
+      size: 10,
+      preview: '1',
+      path: [],
+      expression: 'alpha',
+      hasChildren: false,
+    },
+    {
+      name: 'arr',
+      kind: 'ndarray',
+      type: 'ndarray',
+      preview: 'array([1, 2, 3])',
+      path: [],
+      expression: 'arr',
+      hasChildren: true,
+      childCount: 3,
+      shape: [3],
+    },
+    {
+      name: 'beta',
+      kind: 'text',
+      type: 'str',
+      size: 5,
+      preview: "'text'",
+      path: [],
+      expression: 'beta',
+      hasChildren: false,
+    },
+  ];
+}
+
+function makeChildren(): NamespaceInspectorNode[] {
+  return [
+    {
+      name: '[0]',
+      kind: 'scalar',
+      type: 'int64',
+      preview: '1',
+      path: [{ kind: 'index', value: 0 }],
+      expression: 'arr[0]',
+      hasChildren: false,
+    },
   ];
 }
 
@@ -19,6 +62,10 @@ beforeEach(() => {
     value: {
       namespace: {
         query: vi.fn(async () => makeVars()),
+        inspect: vi.fn(async () => ({
+          children: makeChildren(),
+          truncated: false,
+        })),
       },
     },
   });
@@ -87,7 +134,7 @@ describe('NamespaceView', () => {
     );
   });
 
-  it('sorts by column header clicks and reacts to refreshToken changes', async () => {
+  it('sorts top-level rows by column header clicks and reacts to refreshToken changes', async () => {
     const query = window.pdv.namespace.query as unknown as ReturnType<typeof vi.fn>;
     const { rerender } = render(<NamespaceView kernelId="k1" refreshToken={0} />);
     await waitFor(() => {
@@ -96,10 +143,24 @@ describe('NamespaceView', () => {
 
     fireEvent.click(screen.getByText(/Name/));
     const rows = document.querySelectorAll('.namespace-row');
-    expect(rows[0].textContent).toContain('beta');
+    expect(rows[0]?.textContent).toContain('beta');
 
     rerender(<NamespaceView kernelId="k1" refreshToken={1} />);
     await waitFor(() => expect(query.mock.calls.length).toBeGreaterThanOrEqual(2));
+  });
+
+  it('expands nodes lazily through namespace.inspect', async () => {
+    const inspect = window.pdv.namespace.inspect as unknown as ReturnType<typeof vi.fn>;
+    render(<NamespaceView kernelId="k1" />);
+
+    await waitFor(() => expect(screen.getByText('arr')).toBeTruthy());
+    fireEvent.click(screen.getByRole('button', { name: /Expand arr/i }));
+
+    await waitFor(() => expect(inspect).toHaveBeenCalledWith('k1', {
+      rootName: 'arr',
+      path: [],
+    }));
+    await waitFor(() => expect(screen.getByText('[0]')).toBeTruthy());
   });
 
   it('auto-refresh triggers interval-based re-queries', async () => {

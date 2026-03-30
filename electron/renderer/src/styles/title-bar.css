@@ -1,0 +1,104 @@
+/* title-bar.css — Renderer-drawn window chrome for macOS/Linux */
+
+.title-bar {
+  height: 36px;
+  flex-shrink: 0;
+  background: var(--bg-secondary);
+  border-bottom: 1px solid var(--border-color);
+  color: var(--text-primary);
+  user-select: none;
+}
+
+.title-bar-drag-region {
+  height: 100%;
+  display: flex;
+  align-items: stretch;
+  gap: 8px;
+  padding-left: 8px;
+  -webkit-app-region: drag;
+}
+
+.title-bar--macos .title-bar-drag-region {
+  padding-left: 0;
+  padding-right: 12px;
+}
+
+.title-bar-macos-spacer {
+  width: 84px;
+  flex-shrink: 0;
+}
+
+.title-bar-menu {
+  display: flex;
+  align-items: stretch;
+  gap: 2px;
+  -webkit-app-region: no-drag;
+}
+
+.title-bar-menu-button,
+.title-bar-window-button {
+  border: none;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+  -webkit-app-region: no-drag;
+}
+
+.title-bar-menu-button {
+  padding: 0 10px;
+  min-width: 52px;
+  color: var(--text-secondary);
+}
+
+.title-bar-menu-button:hover,
+.title-bar-menu-button.active {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.title-bar-title {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 12px;
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 500;
+  letter-spacing: 0.01em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.title-bar--linux .title-bar-title {
+  justify-content: flex-start;
+}
+
+.title-bar-window-controls {
+  display: flex;
+  align-items: stretch;
+  margin-left: auto;
+  -webkit-app-region: no-drag;
+}
+
+.title-bar-window-button {
+  width: 44px;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-secondary);
+}
+
+.title-bar-window-button:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.title-bar-window-button--close:hover {
+  background: #c42b1c;
+  color: #ffffff;
+}

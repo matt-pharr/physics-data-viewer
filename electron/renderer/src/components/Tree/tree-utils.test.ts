@@ -15,7 +15,6 @@ function makeNode(
     parent_path: parent,
     type: 'folder',
     has_children: false,
-    lazy: false,
     hasChildren: false,
     parentPath: parent,
     ...overrides,

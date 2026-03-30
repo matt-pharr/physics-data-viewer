@@ -4,7 +4,7 @@
 
 PDV (Physics Data Viewer) is an Electron desktop application for computational and experimental physics analysis. It provides a tabbed Python command editor, an execution console, and a persistent hierarchical data model called the **Tree** that lives inside a Jupyter kernel. The Tree is what distinguishes PDV from a Jupyter notebook — it is a typed, navigable, save/load-able data hierarchy that persists across sessions.
 
-The codebase is currently mid-way through a major backend rewrite. The authoritative design specification is **`ARCHITECTURE.md`** in the root directory. Read it before making non-trivial changes. `IMPLEMENTATION_STEPS.md` tracks the rewrite progress step by step.
+The authoritative design specification is **`ARCHITECTURE.md`** in the root directory. Read it before making non-trivial changes.
 
 ---
 
@@ -12,7 +12,6 @@ The codebase is currently mid-way through a major backend rewrite. The authorita
 
 ```
 ARCHITECTURE.md          ← authoritative design spec — always consult this first
-IMPLEMENTATION_STEPS.md  ← step-by-step rewrite plan; tracks what is done and what is next
 PLANNED_FEATURES.md      ← planned features organised by release milestone
 
 electron/                ← Electron app (TypeScript)
@@ -70,7 +69,7 @@ Renderer (React) ──window.pdv──► Preload ──ipcRenderer──► Ma
 
 4. **Renderer types come from `types/pdv.d.ts`, never from `../../main/ipc`.** Importing across the process boundary in the type system breaks the build when tsconfig roots are separated.
 
-5. **No `window.pdv.script.run()`.** Script execution from the renderer always goes through `window.pdv.kernels.execute(kernelId, { code: 'pdv_tree["path"].run(...)' })`. This keeps the IPC surface minimal and makes script runs visible in the console as ordinary code.
+5. **Script execution goes through `window.pdv.script.run()`.** The renderer dispatches `{ treePath, params, executionId, origin }` to the main process; the main process builds the language-appropriate invocation string (Python or Julia), calls `kernels.execute`, and returns `{ code, executionId, origin, result }` so the renderer can log the run in the console. No Python or Julia code strings belong in the renderer.
 
 6. **`kernels.start()` encapsulates the full handshake.** The `pdv.ready → pdv.init → pdv.init.response` sequence is entirely inside the main process's `kernels.start()` handler. The renderer only `await`s it.
 
@@ -95,7 +94,7 @@ cd electron && npm test -- --reporter=verbose
 cd electron && PYTHON_PATH=/path/to/python npm test -- --reporter=verbose main/integration.test.ts
 ```
 
-There are no automated tests for the renderer. Step 7 of `IMPLEMENTATION_STEPS.md` is verified by manual smoke test.
+There are no automated tests for the renderer. The renderer is verified by manual smoke test.
 
 ---
 

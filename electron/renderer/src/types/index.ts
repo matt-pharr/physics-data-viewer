@@ -10,11 +10,13 @@ import type {
   KernelExecutionError,
   KernelExecutionOrigin,
   KernelExecuteResult,
+  KernelSpec,
   ImportedModuleDescriptor,
   LayoutActionRef,
   LayoutContainer,
   LayoutInputRef,
   LayoutNode,
+  AppMenuTopLevel,
   MenuActionPayload,
   ModuleDescriptor,
   ModuleGuiLayout,
@@ -23,13 +25,19 @@ import type {
   ModuleWindowContext,
   ModuleWindowOpenRequest,
   ModuleWindowOpenResult,
+  NamespaceAccessSegment,
+  NamespaceInspectorNode,
+  NamespaceInspectResult,
+  NamespaceInspectTarget,
   NamespaceQueryOptions,
   NamespaceVariable,
   NodeDescriptor,
   ProjectLoadResult,
   ProjectSaveResult,
   ScriptParameter,
+  ScriptRunResult,
   Theme,
+  WindowChromeInfo,
 } from './pdv';
 
 /** Re-export core preload API contract types for renderer imports. */
@@ -38,11 +46,13 @@ export type {
   KernelExecutionError,
   KernelExecutionOrigin,
   KernelExecuteResult,
+  KernelSpec,
   ImportedModuleDescriptor,
   LayoutActionRef,
   LayoutContainer,
   LayoutInputRef,
   LayoutNode,
+  AppMenuTopLevel,
   MenuActionPayload,
   ModuleDescriptor,
   ModuleGuiLayout,
@@ -51,12 +61,18 @@ export type {
   ModuleWindowContext,
   ModuleWindowOpenRequest,
   ModuleWindowOpenResult,
+  NamespaceAccessSegment,
+  NamespaceInspectorNode,
+  NamespaceInspectResult,
+  NamespaceInspectTarget,
   NamespaceQueryOptions,
   NamespaceVariable,
   ProjectLoadResult,
   ProjectSaveResult,
   ScriptParameter,
+  ScriptRunResult,
   Theme,
+  WindowChromeInfo,
 };
 
 /** One execution-history entry rendered in the Console panel. */
@@ -97,7 +113,6 @@ export interface NoteTab {
 export interface TreeNodeData extends NodeDescriptor {
   hasChildren: boolean;
   parentPath: string | null;
-  params?: ScriptParameter[] | undefined;
   children?: TreeNodeData[];
   isExpanded?: boolean;
   isLoading?: boolean;

@@ -32,14 +32,10 @@ export interface NodeDescriptor {
   type: string;
   /** True if node has children that can be listed/expanded. */
   has_children: boolean;
-  /** True if file-backed value is lazy-loaded in kernel. */
-  lazy: boolean;
   /** Human-readable preview text for compact table display. */
   preview?: string;
   /** Optional language hint for script/code nodes. */
   language?: string | null;
-  /** Script parameter descriptors when `type === "script"`. */
-  params?: ScriptParameter[] | undefined;
   /** Physical filename with extension for file-backed nodes (e.g. "run.nml"). Null for others. */
   filename?: string | null;
   /** Fully qualified Python type string (e.g. "builtins.int"). */
@@ -153,9 +149,22 @@ export interface NamespaceQueryOptions {
   includeCallables?: boolean;
 }
 
+/** Serializable selector used to drill into a namespace value. */
+export interface NamespaceAccessSegment {
+  kind: "attr" | "index" | "key" | "column";
+  value: string | number | boolean | null;
+}
+
+/** Target value for lazy namespace inspection. */
+export interface NamespaceInspectTarget {
+  rootName: string;
+  path: NamespaceAccessSegment[];
+}
+
 /** One row in the Namespace panel. */
-export interface NamespaceVariable {
+export interface NamespaceInspectorNode {
   name: string;
+  kind: string;
   type: string;
   module?: string;
   shape?: number[];
@@ -163,6 +172,20 @@ export interface NamespaceVariable {
   length?: number;
   size?: number;
   preview?: string;
+  hasChildren?: boolean;
+  childCount?: number;
+  path: NamespaceAccessSegment[];
+  expression: string;
+}
+
+/** One top-level row in the Namespace panel. */
+export interface NamespaceVariable extends NamespaceInspectorNode {}
+
+/** Lazy child-inspection response for a namespace node. */
+export interface NamespaceInspectResult {
+  children: NamespaceInspectorNode[];
+  truncated: boolean;
+  totalChildren?: number;
 }
 
 /** Custom appearance theme payload persisted through `themes.*` API. */
@@ -185,6 +208,40 @@ export interface MenuActionPayload {
   action: "project:open" | "project:openRecent" | "project:save" | "project:saveAs" | "modules:import";
   /** Optional path argument for path-bearing menu actions. */
   path?: string;
+}
+
+/** Partial map of menu item IDs to enabled/disabled state. */
+export interface MenuEnabledState {
+  "project:save"?: boolean;
+  "project:saveAs"?: boolean;
+  "modules:import"?: boolean;
+}
+
+/** Top-level menu metadata used by the Linux integrated menubar. */
+export interface AppMenuTopLevel {
+  id: "file" | "edit" | "view" | "window";
+  label: string;
+}
+
+/** Platform string used by the renderer title-bar shell. */
+export type WindowChromePlatform = "macos" | "linux" | "windows";
+
+/** Main-window chrome information returned by the preload bridge. */
+export interface WindowChromeInfo {
+  platform: WindowChromePlatform;
+  showCustomTitleBar: boolean;
+  showMenuBar: boolean;
+  showWindowControls: boolean;
+  isMaximized: boolean;
+}
+
+/** Progress update payload pushed during save/load operations. */
+export interface ProgressPayload {
+  operation: "save" | "load";
+  /** Short human-readable phase label (e.g. "Serializing", "Copying files"). */
+  phase: string;
+  current: number;
+  total: number;
 }
 
 /** Result returned from `project.save()`. */
@@ -286,6 +343,7 @@ export interface ModuleDescriptor {
   name: string;
   version: string;
   description?: string;
+  language?: "python" | "julia";
   source: ModuleSourceReference;
   revision?: string;
   installPath?: string;
@@ -414,6 +472,30 @@ export interface NamelistReadResult {
 export interface NamelistWriteResult {
   success: boolean;
   error?: string;
+}
+
+/** Request payload for `script.run`. */
+export interface ScriptRunRequest {
+  /** Dot-delimited tree path of the PDVScript node. */
+  treePath: string;
+  /** Serialised parameter values keyed by parameter name. */
+  params: Record<string, string | number | boolean>;
+  /** Caller-supplied execution ID for output correlation. */
+  executionId: string;
+  /** Execution origin metadata used in error summaries and the console. */
+  origin: KernelExecutionOrigin;
+}
+
+/** Result returned by `script.run`. */
+export interface ScriptRunResult {
+  /** The exact code string sent to the kernel (for console display). */
+  code: string;
+  /** Echo of the caller-supplied execution ID. */
+  executionId: string;
+  /** Echo of the caller-supplied origin metadata. */
+  origin: KernelExecutionOrigin;
+  /** Structured execution result from the kernel. */
+  result: KernelExecuteResult;
 }
 
 /** Reference to an input in the container layout. */
@@ -561,9 +643,12 @@ export interface PDVApi {
   };
   namespace: {
     query(kernelId: string, options?: NamespaceQueryOptions): Promise<NamespaceVariable[]>;
+    inspect(kernelId: string, target: NamespaceInspectTarget): Promise<NamespaceInspectResult>;
   };
   script: {
+    run(kernelId: string, request: ScriptRunRequest): Promise<ScriptRunResult>;
     edit(kernelId: string, scriptPath: string): Promise<{ success: boolean; error?: string }>;
+    getParams(kernelId: string, treePath: string): Promise<ScriptParameter[]>;
   };
   note: {
     save(kernelId: string, treePath: string, content: string): Promise<{ success: boolean; error?: string }>;
@@ -587,7 +672,12 @@ export interface PDVApi {
     save(saveDir: string, codeCells: unknown): Promise<ProjectSaveResult>;
     load(saveDir: string): Promise<ProjectLoadResult>;
     new(): Promise<boolean>;
+    peekLanguages(paths: string[]): Promise<Record<string, "python" | "julia">>;
     onLoaded(callback: (payload: Record<string, unknown>) => void): () => void;
+    onReloading(callback: (payload: { status: "reloading" | "ready" }) => void): () => void;
+  };
+  progress: {
+    onProgress(callback: (payload: ProgressPayload) => void): () => void;
   };
   config: {
     get(): Promise<Config>;
@@ -599,6 +689,7 @@ export interface PDVApi {
   themes: {
     get(): Promise<Theme[]>;
     save(theme: Theme): Promise<boolean>;
+    openDir(): Promise<string>;
   };
   codeCells: {
     load(): Promise<CodeCellData | null>;
@@ -618,7 +709,17 @@ export interface PDVApi {
   };
   menu: {
     updateRecentProjects(paths: string[]): Promise<boolean>;
+    updateEnabled(state: MenuEnabledState): Promise<boolean>;
+    getModel(): Promise<AppMenuTopLevel[]>;
+    popup(menuId: AppMenuTopLevel["id"], x: number, y: number): Promise<boolean>;
     onAction(callback: (payload: MenuActionPayload) => void): () => void;
+  };
+  chrome: {
+    getInfo(): Promise<WindowChromeInfo>;
+    minimize(): Promise<boolean>;
+    toggleMaximize(): Promise<boolean>;
+    close(): Promise<boolean>;
+    onStateChanged(callback: (info: WindowChromeInfo) => void): () => void;
   };
 }
 

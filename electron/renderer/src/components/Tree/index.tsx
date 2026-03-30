@@ -81,7 +81,6 @@ export const Tree: React.FC<TreeProps> = ({ kernelId, disabled = false, refreshT
         parent_path: null,
         type: 'root',
         has_children: true,
-        lazy: false,
         preview: '',
         hasChildren: true,
         parentPath: null,
@@ -142,7 +141,6 @@ export const Tree: React.FC<TreeProps> = ({ kernelId, disabled = false, refreshT
     try {
       const children = await treeService.getChildren(node, kernelId, {
         force: true,
-        eagerLoadLazy: true,
       });
       expandedPathsRef.current.add(node.path);
       setNodes((prev) =>
@@ -296,7 +294,6 @@ async function restoreExpandedTree(
     try {
       const children = await treeService.getChildren(target, kernelId, {
         force: true,
-        eagerLoadLazy: true,
       });
       current = updateNodeImmut(current, path, (n) => ({ ...n, isExpanded: true, children }));
     } catch (error) {

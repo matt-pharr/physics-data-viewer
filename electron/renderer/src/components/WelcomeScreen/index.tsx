@@ -11,15 +11,27 @@
 
 import React from 'react';
 
+/** Entry in the recent projects list with optional language metadata. */
+export interface RecentProject {
+  path: string;
+  language?: "python" | "julia";
+}
+
 interface WelcomeScreenProps {
-  /** Recently opened project directory paths (most recent first). */
-  recentProjects: string[];
-  /** Called when the user clicks "New Project". */
-  onNewProject: () => void;
+  /** Recently opened projects (most recent first). */
+  recentProjects: RecentProject[];
+  /** Called when the user clicks a "New Project" button. Receives the chosen language. */
+  onNewProject: (language: "python" | "julia") => void;
   /** Called when the user clicks "Open Project" (shows file picker). */
   onOpenProject: () => void;
   /** Called when the user clicks a recent project entry. */
-  onOpenRecent: (path: string) => void;
+  onOpenRecent: (path: string, language?: "python" | "julia") => void;
+}
+
+/** Short language badge for the recent projects list. */
+function languageBadge(language?: "python" | "julia"): string {
+  if (language === "julia") return "Julia";
+  return "Python";
 }
 
 /** Extracts the project folder name from an absolute path. */
@@ -52,9 +64,15 @@ export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({
         <div className="welcome-actions">
           <button
             className="btn btn-primary welcome-action-btn"
-            onClick={onNewProject}
+            onClick={() => onNewProject("python")}
           >
-            New Project
+            New Python Project
+          </button>
+          <button
+            className="btn btn-primary welcome-action-btn"
+            onClick={() => onNewProject("julia")}
+          >
+            New Julia Project (experimental)
           </button>
           <button
             className="btn btn-secondary welcome-action-btn"
@@ -68,15 +86,16 @@ export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({
           <div className="welcome-recent">
             <h2 className="welcome-recent-heading">Recent Projects</h2>
             <ul className="welcome-recent-list">
-              {recentProjects.map((path) => (
-                <li key={path}>
+              {recentProjects.map((entry) => (
+                <li key={entry.path}>
                   <button
                     className="welcome-recent-item"
-                    onClick={() => onOpenRecent(path)}
-                    title={path}
+                    onClick={() => onOpenRecent(entry.path, entry.language)}
+                    title={entry.path}
                   >
-                    <span className="welcome-recent-name">{projectName(path)}</span>
-                    <span className="welcome-recent-path">{projectDir(path)}</span>
+                    <span className="welcome-recent-badge">[{languageBadge(entry.language)}]</span>
+                    <span className="welcome-recent-name">{projectName(entry.path)}</span>
+                    <span className="welcome-recent-path">{projectDir(entry.path)}</span>
                   </button>
                 </li>
               ))}

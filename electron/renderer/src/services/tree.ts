@@ -47,7 +47,7 @@ class TreeService {
   async getChildren(
     node: TreeNodeData,
     kernelId: string | null,
-    options?: { force?: boolean; eagerLoadLazy?: boolean }
+    options?: { force?: boolean }
   ): Promise<TreeNodeData[]> {
     if (!kernelId) return [];
     if (!node.hasChildren) {
@@ -62,17 +62,7 @@ class TreeService {
       }
     }
 
-    let enriched = await this.listAndEnrich(kernelId, node.path);
-    if (options?.eagerLoadLazy) {
-      const lazyChildren = enriched.filter((child) => child.lazy);
-      if (lazyChildren.length > 0) {
-        await Promise.all(
-          lazyChildren.map((child) => window.pdv.tree.get(kernelId, child.path))
-        );
-        this.clearCache(kernelId);
-        enriched = await this.listAndEnrich(kernelId, node.path);
-      }
-    }
+    const enriched = await this.listAndEnrich(kernelId, node.path);
     this.cache.set(key, enriched);
     return enriched;
   }
@@ -97,7 +87,6 @@ class TreeService {
     ...node,
     hasChildren: Boolean(node.has_children),
     parentPath: node.parent_path ?? null,
-    params: node.params,
     python_type: node.python_type,
     has_handler: node.has_handler,
     isExpanded: false,

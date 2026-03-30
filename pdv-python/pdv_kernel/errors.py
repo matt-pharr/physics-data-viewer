@@ -16,7 +16,7 @@ class PDVPathError(PDVError):
 
 
 class PDVKeyError(PDVError, KeyError):
-    """Raised when a tree path does not exist and has no lazy-load entry."""
+    """Raised when a tree path does not exist."""
 
 
 class PDVProtectedNameError(PDVError):

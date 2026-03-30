@@ -94,7 +94,7 @@ const LogEntryView: React.FC<{ log: LogEntry; index: number }> = ({ log, index }
         />
       )}
       {hasResult && <pre className="log-result">{formatResult(log.result)}</pre>}
-      {log.error && <pre className="log-error">Error: {log.error}</pre>}
+      {log.error && <pre className="log-error" dangerouslySetInnerHTML={{ __html: 'Error: ' + ansiToHtml(log.error) }} />}
       {log.error && locationText && <div className="log-error-context">{locationText}</div>}
       {tracebackText && (
         <pre

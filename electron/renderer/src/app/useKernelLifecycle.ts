@@ -41,7 +41,7 @@ export function useKernelLifecycle(options: UseKernelLifecycleOptions) {
     setTreeRefreshToken,
   } = options;
 
-  const startKernel = useCallback(async (cfg: Config) => {
+  const startKernel = useCallback(async (cfg: Config, language: 'python' | 'julia' = 'python') => {
     setKernelStatus('starting');
     setLastError(undefined);
     try {
@@ -49,11 +49,19 @@ export function useKernelLifecycle(options: UseKernelLifecycleOptions) {
         await window.pdv.kernels.stop(currentKernelId);
       }
 
-      const spec = {
-        language: 'python' as const,
-        argv: cfg.pythonPath ? [cfg.pythonPath, '-m', 'ipykernel_launcher', '-f', '{connection_file}'] : undefined,
-        env: cfg.pythonPath ? { PYTHON_PATH: cfg.pythonPath } : undefined,
-      };
+      let spec: import('../types').KernelSpec;
+      if (language === 'julia') {
+        spec = {
+          language: 'julia' as const,
+          env: cfg.juliaPath ? { JULIA_PATH: cfg.juliaPath } : undefined,
+        };
+      } else {
+        spec = {
+          language: 'python' as const,
+          argv: cfg.pythonPath ? [cfg.pythonPath, '-m', 'ipykernel_launcher', '-f', '{connection_file}'] : undefined,
+          env: cfg.pythonPath ? { PYTHON_PATH: cfg.pythonPath } : undefined,
+        };
+      }
 
       const kernel = await window.pdv.kernels.start(spec);
       setCurrentKernelId(kernel.id);
@@ -77,14 +85,15 @@ export function useKernelLifecycle(options: UseKernelLifecycleOptions) {
     setTreeRefreshToken,
   ]);
 
-  const handleEnvSave = useCallback(async (paths: { pythonPath: string; juliaPath?: string }) => {
+  const handleEnvSave = useCallback(async (paths: { pythonPath?: string; juliaPath?: string; language?: 'python' | 'julia' }) => {
+    const language = paths.language ?? 'python';
     const updatedConfig: Config = {
       kernelSpec: config?.kernelSpec ?? null,
       cwd: config?.cwd ?? '',
       trusted: config?.trusted ?? false,
       recentProjects: config?.recentProjects ?? [],
       customKernels: config?.customKernels ?? [],
-      pythonPath: paths.pythonPath,
+      pythonPath: paths.pythonPath ?? config?.pythonPath,
       juliaPath: paths.juliaPath ?? config?.juliaPath,
       editors: config?.editors,
       treeRoot: config?.treeRoot,
@@ -94,7 +103,7 @@ export function useKernelLifecycle(options: UseKernelLifecycleOptions) {
     await window.pdv.config.set(updatedConfig);
     setConfig(updatedConfig);
     setShowEnvSelector(false);
-    await startKernel(updatedConfig);
+    await startKernel(updatedConfig, language);
   }, [config, setConfig, setShowEnvSelector, startKernel]);
 
   const handleRestartKernel = useCallback(async () => {

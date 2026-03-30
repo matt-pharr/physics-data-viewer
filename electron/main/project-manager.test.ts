@@ -140,7 +140,7 @@ describe("ProjectManager", () => {
       expect(requestMock).toHaveBeenCalledOnce();
       expect(requestMock).toHaveBeenCalledWith(PDVMessageType.PROJECT_SAVE, {
         save_dir: tmpDir,
-      });
+      }, { keepAlivePushType: PDVMessageType.PROGRESS });
     });
 
     it("writes code-cells.json after the comm resolves", async () => {
@@ -249,7 +249,7 @@ describe("ProjectManager", () => {
       expect(requestMock).toHaveBeenCalledOnce();
       expect(requestMock).toHaveBeenCalledWith(PDVMessageType.PROJECT_LOAD, {
         save_dir: tmpDir,
-      });
+      }, { keepAlivePushType: PDVMessageType.PROGRESS });
     });
 
     it("waits for pdv.project.loaded push notification", async () => {

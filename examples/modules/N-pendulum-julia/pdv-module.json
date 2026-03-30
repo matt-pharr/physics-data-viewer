@@ -1,0 +1,21 @@
+{
+  "schema_version": "4",
+  "id": "n_pendulum_julia",
+  "name": "N-Pendulum (Julia)",
+  "version": "2.0.0",
+  "language": "julia",
+  "description": "A general N-link pendulum simulator in Julia. Supports double, triple, quadruple, and higher-order chaotic pendulums with ODE integration and animated visualization.",
+  "entry_point": "NPendulum",
+  "lib_dir": "lib",
+  "default_gui": "gui.json",
+  "compatibility": {
+    "pdv_min": "0.1.0",
+    "pdv_max": "99.0.0",
+    "julia": ">=1.10"
+  },
+  "dependencies": [
+    { "name": "DifferentialEquations", "version": ">=7.0" },
+    { "name": "LinearAlgebra", "marker": "stdlib" },
+    { "name": "CairoMakie", "version": ">=0.10", "marker": "optional, for plotting" }
+  ]
+}

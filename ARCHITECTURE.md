@@ -1,6 +1,6 @@
 # PDV Architecture Document
-**Version**: 0.0.0 (pre-rewrite)  
-**Date**: 2026-02-24  
+**Version**: 0.0.6
+**Date**: 2026-03-19
 **Status**: Authoritative design specification. All new code must conform to this document. Deviations require updating this document first.
 
 > **New to PDV?** Start with [QUICK_START.md](QUICK_START.md) for setup instructions and a guided tour. This document is the comprehensive reference.
@@ -115,7 +115,7 @@ Every PDV message — whether sent by the app or by the kernel — has the follo
 
 ```json
 {
-  "pdv_version": "0.0.5",
+  "pdv_version": "1.0",
   "msg_id": "<uuid-v4>",
   "in_reply_to": "<uuid-v4-or-null>",
   "type": "<message-type-string>",
@@ -126,7 +126,7 @@ Every PDV message — whether sent by the app or by the kernel — has the follo
 
 | Field | Type | Description |
 |---|---|---|
-| `pdv_version` | string | Protocol version. Currently `"0.0.5"` (alpha). The app rejects messages with an incompatible major version. |
+| `pdv_version` | string | Protocol version. Currently `"1.0"` (alpha). The app rejects messages with an incompatible major version. |
 | `msg_id` | string | UUID v4. Unique identifier for this message. |
 | `in_reply_to` | string \| null | The `msg_id` of the request this is responding to. `null` for unsolicited push messages. |
 | `type` | string | Dot-namespaced message type (see Section 3.4). |
@@ -168,6 +168,8 @@ All type strings are namespaced with `pdv.`. The convention is `pdv.<domain>.<ac
 | `pdv.tree.list.response` | kernel → app | Returns array of node metadata objects. |
 | `pdv.tree.get` | app → kernel | Request data value for a specific node. |
 | `pdv.tree.get.response` | kernel → app | Returns node value (may be lazy-loaded from save directory). |
+| `pdv.tree.resolve_file` | app → kernel | Resolve a file-backed tree node (PDVFile subclass) to its absolute filesystem path. Payload: `{ path }`. |
+| `pdv.tree.resolve_file.response` | kernel → app | Returns `{ path, file_path }` where `file_path` is the absolute path on disk. |
 | `pdv.tree.changed` | kernel → app | Push notification. Sent whenever the tree structure changes (node added, removed, or modified). No `in_reply_to`. |
 
 #### Namespace Messages
@@ -176,6 +178,8 @@ All type strings are namespaced with `pdv.`. The convention is `pdv.<domain>.<ac
 |---|---|---|
 | `pdv.namespace.query` | app → kernel | Request a snapshot of the kernel namespace (excluding internal PDV names). |
 | `pdv.namespace.query.response` | kernel → app | Returns array of variable descriptors. |
+| `pdv.namespace.inspect` | app → kernel | Lazily inspect one namespace value. Payload: `{ root_name, path }` where `path` is an array of selector segments. |
+| `pdv.namespace.inspect.response` | kernel → app | Returns one level of child descriptors for the requested namespace value, plus truncation metadata. |
 
 #### Script Messages
 
@@ -451,17 +455,20 @@ sequenceDiagram
 
 ```
 pdv_kernel/
-    __init__.py          # Public API: bootstrap(), PDVTree, PDVScript
+    __init__.py          # Public API: bootstrap(), PDVTree, PDVScript, handle()
     comms.py             # Comm channel: register target, send/receive, dispatch
     tree.py              # PDVTree, PDVScript, PDVFile, PDVNote, PDVModule, PDVGui, PDVNamelist, PDVLib
-    namespace.py         # pdv_namespace() — variable inspection
+    namespace.py         # PDVNamespace (protected dict), PDVApp, pdv_namespace()
     serialization.py     # Type detection, format writers (npy, parquet, json, module, gui, namelist, lib)
     environment.py       # Path utilities, working dir management, project root logic
+    errors.py            # Exception hierarchy (PDVError, PDVPathError, PDVCommError, etc.)
+    modules.py           # Custom type handler registry and dispatch (@pdv.handle() decorator)
+    namelist_utils.py    # Fortran namelist and TOML parsing utilities
     handlers/
         __init__.py
         lifecycle.py     # pdv.init, pdv.ready handlers
         project.py       # pdv.project.load, pdv.project.save handlers
-        tree.py          # pdv.tree.list, pdv.tree.get handlers
+        tree.py          # pdv.tree.list, pdv.tree.get, pdv.tree.resolve_file handlers
         namespace.py     # pdv.namespace.query handler
         script.py        # pdv.script.register handler
         note.py          # pdv.note.register handler
@@ -582,24 +589,7 @@ A parameter is `required` if it has no default value. `type` is the string repre
 
 Notes are created via `pdv.note.register` (app → kernel) which creates a `PDVNote` instance and attaches it to the tree. The `.md` file itself lives in `<workingDir>/tree/<path>/` and is read/written directly by the main process via `note:read` / `note:save` IPC channels — no kernel round-trip is needed for content editing. On project save, the kernel serializes the note entry to `tree-index.json` and the main process copies the `.md` file into the save directory. On project load, the `.md` file is copied back from the save directory to the working directory and re-registered as a `PDVNote` in the tree.
 
-### 5.9 The Lazy-Load Registry
-
-An internal dict (not user-accessible) mapping tree paths to save-directory storage references:
-
-```python
-# Internal structure, not user-facing
-_lazy_registry = {
-    "data.waveforms.ch1": {
-        "save_dir": "/path/to/project",
-        "relative_path": "tree/data/waveforms/ch1.npy",
-        "format": "npy"
-    }
-}
-```
-
-Populated during `pdv.project.load`. Entries are removed once the data has been loaded into memory. The registry is never written to disk — it is reconstructed from `tree-index.json` each time a project is loaded.
-
-### 5.10 PDVModule Class
+### 5.9 PDVModule Class
 
 `PDVModule` is a subclass of `PDVTree` (i.e. a dict subclass). It represents an imported module in the tree. Because it inherits from `PDVTree`, it holds children naturally — a module's sub-nodes (GUI, scripts, namelists) are direct dict entries.
 
@@ -613,7 +603,7 @@ Attributes:
 
 Created by the `pdv.module.register` handler, which receives `path`, `module_id`, `name`, and `version` from the main process and inserts the `PDVModule` into the tree at the given path.
 
-### 5.11 PDVGui Class
+### 5.10 PDVGui Class
 
 `PDVGui` is a subclass of `PDVFile`. It represents a GUI definition file (`.gui.json`) that describes a module's user interface — inputs, actions, and layout.
 
@@ -625,7 +615,7 @@ Attributes:
 
 Created by the `pdv.gui.register` handler. For module GUIs, the `.gui.json` file is copied from the installed module directory into the working directory at import time. If the parent node is a `PDVModule`, the handler also sets the module's `.gui` attribute to point to this node.
 
-### 5.12 PDVNamelist Class
+### 5.11 PDVNamelist Class
 
 `PDVNamelist` is a subclass of `PDVFile`. It represents a simulation namelist file that can be parsed and edited through the namelist editor widget.
 
@@ -638,7 +628,7 @@ Attributes:
 
 The namelist file is parsed and written by dedicated comm handlers (`pdv.namelist.read`, `pdv.namelist.write`) that run in the kernel, keeping all format-specific logic in Python. The renderer requests parsed data and sends structured edits back; it never reads or writes the raw namelist file directly.
 
-### 5.13 PDVLib Class
+### 5.12 PDVLib Class
 
 `PDVLib` is a subclass of `PDVFile`. It represents a Python library file provided by a module's `lib/` directory that is importable by scripts and entry points.
 
@@ -709,19 +699,34 @@ my-project/
 **`project.json` schema**:
 ```json
 {
-  "pdv_version": "1.0",
-  "project_id": "<uuid>",
-  "project_name": "My Experiment",
-  "created_at": "<iso8601>",
+  "schema_version": "1.1",
   "saved_at": "<iso8601>",
-  "language_mode": "python",
-  "tree_index_file": "tree-index.json",
-  "code_cells_file": "code-cells.json",
-  "kernel": {
-    "preferred_python": null,
-    "preferred_julia": null
+  "pdv_version": "1.0",
+  "tree_checksum": "<sha256 of tree-index.json>",
+  "modules": [
+    {
+      "module_id": "n_pendulum",
+      "alias": "n_pendulum",
+      "version": "2.0.0",
+      "revision": "<optional hash>"
+    }
+  ],
+  "module_settings": {
+    "n_pendulum": { "key": "value" }
   }
 }
+```
+
+| Field | Type | Description |
+|---|---|---|
+| `schema_version` | string | Semantic version of the project.json format. The app rejects manifests with an incompatible major version. Currently `"1.1"`. |
+| `saved_at` | string | ISO 8601 timestamp of last save. |
+| `pdv_version` | string | PDV protocol version used when saving (e.g. `"1.0"`). |
+| `tree_checksum` | string | SHA-256 checksum of `tree-index.json` for integrity verification. |
+| `modules` | array | Imported modules active in this project. Each entry has `module_id`, `alias`, `version`, and optional `revision`. |
+| `module_settings` | object | Persisted per-module user settings keyed by module alias. |
+
+`tree-index.json` and `code-cells.json` are always stored alongside `project.json` with those exact filenames (not configurable).
 ```
 
 **`tree-index.json` schema**: Written by the kernel during save. Contains an array of node descriptors — one per tree node — with enough information to reconstruct the full tree structure and lazy-load registry without opening any data files. See Section 7.3 for node descriptor fields.
@@ -750,16 +755,18 @@ directory managed by the main process:
     themes/
         *.json              ← custom themes (including user-dropped files)
     state/
-        code-cells.json     ← renderer code-cell tab persistence
+        code-cells.json     ← renderer code-cell tab persistence (between sessions)
 ```
+
+Both `themes/` and `state/` directories are created by the main process on startup if they do not exist.
 
 Rules:
 - `preferences.json` is authoritative for user configuration (`pythonPath`,
-  settings, shortcut overrides, appearance choices, etc.).
+  settings, shortcut overrides, appearance choices, etc.). Migrated automatically from legacy `config.json` if present.
 - Theme files are loaded from `~/.PDV/themes/*.json`; malformed files are
   ignored (non-fatal).
 - Code-cell persistence in `~/.PDV/state/code-cells.json` is separate from
-  project save snapshots (`<project>/code-cells.json`).
+  project save snapshots (`<project>/code-cells.json`). The `state/` directory stores session-level renderer state that is not tied to any project.
 
 ---
 
@@ -796,9 +803,13 @@ The following node types are supported:
 | `binary` | bytes / bytearray | `.bin` file |
 | `unknown` | Unrecognized type | `.pickle` file (only if trusted=True) |
 
-### 7.3 Node Descriptor (tree-index.json entry)
+### 7.3 Node Descriptors
 
-Each node in `tree-index.json` is described by a `NodeDescriptor`. Most fields apply to all node types; a few are type-specific.
+There are two related but distinct descriptor formats: one for **`tree-index.json`** (written by `serialize_node` during project save) and one for **`pdv.tree.list` responses** (constructed at runtime by the tree list handler). Both share the same base fields but diverge on type-specific data.
+
+#### 7.3.1 `tree-index.json` Entry (Serialized Descriptor)
+
+Each node in `tree-index.json` is produced by `serialization.serialize_node()`. Type-specific data lives in a nested `metadata` dict, and a `storage` dict describes where the data lives on disk.
 
 **Common fields (all types):**
 ```json
@@ -809,96 +820,157 @@ Each node in `tree-index.json` is described by a `NodeDescriptor`. Most fields a
   "parent_path": "data.waveforms",
   "type": "ndarray",
   "has_children": false,
-  "lazy": true,
-  "preview": "float64 array (1024 × 4)"
+  "lazy": false,
+  "created_at": "<iso8601>",
+  "updated_at": "<iso8601>",
+  "storage": { },
+  "metadata": { "preview": "..." }
 }
 ```
 
-**Data node additional fields** (ndarray, dataframe, etc.):
+| Field | Type | Description |
+|---|---|---|
+| `id` / `path` | string | Dot-separated tree path (identical values). |
+| `key` | string | The node's own key (last segment of the path). |
+| `parent_path` | string | Dot-separated parent path. Empty string `""` for top-level nodes. |
+| `type` | string | One of the kind strings from §7.2 (e.g. `"ndarray"`, `"script"`, `"module"`). |
+| `has_children` | boolean | `true` for folder and module nodes that contain children. |
+| `lazy` | boolean | `true` for data nodes (ndarray, dataframe, series, large text) that are loaded on-demand. |
+| `created_at` | string | ISO 8601 timestamp of when the node was serialized. |
+| `updated_at` | string | ISO 8601 timestamp (same as `created_at` on first save). |
+| `storage` | object | Describes where the data lives. See below. |
+| `metadata` | object | Type-specific metadata. Always contains at least `"preview"`. |
+
+**Storage object** — one of two backends:
+- File-backed: `{ "backend": "local_file", "relative_path": "tree/.../file.ext", "format": "<format>" }`
+- Inline: `{ "backend": "inline", "format": "<format>", "value": <json-value> }`
+- Folder: `{ "backend": "none", "format": "none" }`
+
+Scalar and small inline values use `"backend": "inline"` and store the value directly in `"value"`.
+
+**ndarray metadata:**
 ```json
 {
-  "storage": {
-    "backend": "local_file",
-    "relative_path": "tree/data/waveforms/ch1.npy",
-    "format": "npy"
-  },
-  "shape": [1024, 4],
-  "dtype": "float64",
-  "size_bytes": 32768
-}
-```
-
-Scalar and small inline values use `"backend": "inline"` and store the value directly in `"value"` instead of `"relative_path"`.
-
-**Script node additional fields** (`"type": "script"`):
-```json
-{
-  "language": "python",
-  "params": [
-    { "name": "amplitude", "type": "float", "default": 1.0, "required": false },
-    { "name": "label",     "type": "str",   "default": null, "required": true }
-  ]
-}
-```
-
-`params` lists every parameter of the script's `run()` function except `pdv_tree` (which is always injected). The renderer uses this to build the `ScriptDialog` form. See §5.7 for the `ScriptParameter` descriptor shape and extraction rules.
-
-**Markdown node additional fields** (`"type": "markdown"`):
-```json
-{
-  "language": "markdown",
-  "storage": {
-    "backend": "local_file",
-    "relative_path": "tree/notes/my_note.md",
-    "format": "markdown"
+  "metadata": {
+    "shape": [1024, 4],
+    "dtype": "float64",
+    "size_bytes": 32768,
+    "preview": "float64 array (1024 × 4)"
   }
 }
 ```
 
-The `preview` field is populated with the first non-empty line of the `.md` file (typically the title).
-
-**Module node additional fields** (`"type": "module"`):
+**dataframe / series metadata:**
 ```json
 {
-  "module_id": "n_pendulum",
-  "module_name": "N-Pendulum",
-  "module_version": "2.0.0",
-  "has_children": true,
-  "storage": {
-    "backend": "inline",
-    "format": "module_meta",
-    "value": {
-      "module_id": "n_pendulum",
-      "name": "N-Pendulum",
-      "version": "2.0.0"
-    }
+  "metadata": {
+    "shape": [100, 5],
+    "preview": "DataFrame (100 × 5)"
   }
 }
 ```
 
-**GUI node additional fields** (`"type": "gui"`):
+**Script metadata:**
 ```json
 {
-  "language": "gui",
-  "storage": {
-    "backend": "local_file",
-    "relative_path": "tree/n_pendulum/gui.gui.json",
-    "format": "gui_json"
+  "metadata": {
+    "language": "python",
+    "doc": "Fit a Gaussian to the waveform data.",
+    "preview": "Fit a Gaussian to the waveform data."
   }
 }
 ```
 
-**Namelist node additional fields** (`"type": "namelist"`):
+Note: `params` (the `ScriptParameter` array) is NOT stored in `tree-index.json` metadata. It is re-extracted from the script's `run()` signature at registration time and included only in `pdv.tree.list` responses. See §5.7 for the `ScriptParameter` descriptor shape.
+
+**Markdown metadata:**
 ```json
 {
-  "language": "namelist",
-  "storage": {
-    "backend": "local_file",
-    "relative_path": "tree/n_pendulum/solver.in",
-    "format": "namelist"
-  },
-  "namelist_format": "fortran"
+  "metadata": {
+    "language": "markdown",
+    "title": "My Note Title",
+    "preview": "My Note Title"
+  }
 }
+```
+
+**Module metadata:**
+```json
+{
+  "metadata": {
+    "module_id": "n_pendulum",
+    "name": "N-Pendulum",
+    "version": "2.0.0",
+    "preview": "N-Pendulum v2.0.0"
+  }
+}
+```
+
+Module `storage` uses inline backend with `format: "module_meta"` and `value: { module_id, name, version }`.
+
+**GUI metadata:**
+```json
+{
+  "metadata": {
+    "language": "json",
+    "module_id": "n_pendulum",
+    "preview": "GUI"
+  }
+}
+```
+
+**Namelist metadata:**
+```json
+{
+  "metadata": {
+    "module_id": "n_pendulum",
+    "namelist_format": "fortran",
+    "language": "namelist",
+    "preview": "Namelist (fortran)"
+  }
+}
+```
+
+**Lib metadata:**
+```json
+{
+  "metadata": {
+    "language": "python",
+    "module_id": "n_pendulum",
+    "preview": "Library (n_pendulum.py)"
+  }
+}
+```
+
+#### 7.3.2 `pdv.tree.list` Response Descriptor (Runtime)
+
+The `pdv.tree.list` handler builds descriptors on-the-fly from live tree state. These are simpler — no `storage`, `metadata`, `created_at`, or `updated_at`. Type-specific fields are at top level alongside common fields.
+
+```json
+{
+  "id": "data.waveforms.ch1",
+  "path": "data.waveforms.ch1",
+  "key": "ch1",
+  "parent_path": "data.waveforms",
+  "type": "ndarray",
+  "has_children": false,
+  "lazy": false,
+  "preview": "float64 array (1024 × 4)",
+  "python_type": "numpy.ndarray",
+  "has_handler": false
+}
+```
+
+Additional fields present at top level for specific types:
+- **Scripts**: `"params": [{ name, type, default, required }, ...]` — the `ScriptParameter` array built from `run()` signature inspection.
+- **Modules**: `"module_id"`, `"module_name"`, `"module_version"` — module identity fields.
+- **GUIs**: `"module_id"` — owning module identifier.
+
+| Field | Type | Description |
+|---|---|---|
+| `preview` | string | Human-readable summary of the node value. |
+| `python_type` | string | Fully-qualified Python type name (e.g. `"numpy.ndarray"`). |
+| `has_handler` | boolean | `true` if a custom `@pdv.handle()` handler is registered for this node's type. |
 ```
 
 ### 7.4 Tree-Changed Push Notifications
@@ -1001,9 +1073,10 @@ Users (including students unfamiliar with Python environments) must be able to o
 
 At startup, the app attempts to detect available Python environments in this order:
 1. **Previously configured** (`pythonPath` in app config) — validate that `pdv-python` is still installed
-2. **conda environments** — read `conda env list` output
-3. **uv-managed environments** — check for `.venv` in the workspace
-4. **System Python / venv** — fallback
+2. **Active conda environment** — check `CONDA_PREFIX` environment variable
+3. **Active virtualenv** — check `VIRTUAL_ENV` environment variable (covers venv, virtualenv, uv-managed `.venv`, etc.)
+4. **Listed conda environments** — parse `conda env list --json` output (excludes already-added active conda)
+5. **System Python fallback** — probe `python3` then `python` on PATH
 
 Detected environments are presented in the Environment Selector UI. The user selects one.
 
@@ -1038,17 +1111,18 @@ All IPC channel names are defined as constants in `electron/main/ipc.ts`. This f
 The preload bridge exposes exactly the operations the renderer needs. It never exposes raw Node.js or Electron APIs. The API is fully typed (see `ipc.ts`).
 
 The API surface:
-- `window.pdv.kernels.*` — kernel lifecycle/execution: `list`, `start`, `stop`, `execute`, `interrupt`, `restart`, `complete`, `inspect`, `validate`; push subscription: `onOutput(cb) → unsub` for streamed execute chunks (`stdout`, `stderr`, images, execute-result fragments)
-- `window.pdv.tree.*` — tree operations: `list`, `get`, `createScript`, `createNote`; push: `onChanged(cb) → unsub`
+- `window.pdv.kernels.*` — kernel lifecycle/execution: `list`, `start`, `stop`, `execute`, `interrupt`, `restart`, `complete`, `inspect`, `validate`; push subscriptions: `onOutput(cb) → unsub` for streamed execute chunks (`stdout`, `stderr`, images, execute-result fragments), `onKernelStatus(cb) → unsub` for kernel status changes (e.g. crash detection)
+- `window.pdv.tree.*` — tree operations: `list`, `get`, `createScript`, `createNote`, `addFile`, `invokeHandler`; push: `onChanged(cb) → unsub`
 - `window.pdv.namespace.*` — namespace query: `query`
 - `window.pdv.note.*` — markdown note I/O: `save(kernelId, treePath, content)`, `read(kernelId, treePath)` — reads/writes `.md` files directly on the main process without a kernel round-trip
+- `window.pdv.namelist.*` — namelist I/O: `read(kernelId, treePath)`, `write(kernelId, treePath, data)` — reads/writes namelist files via kernel comm (parsing stays in Python)
 - `window.pdv.script.*` — script tooling: `edit` (open in external editor)
-- `window.pdv.project.*` — project lifecycle: `save`, `load`, `new`; push: `onLoaded(cb) → unsub`
+- `window.pdv.project.*` — project lifecycle: `save`, `load`, `new`; push: `onLoaded(cb) → unsub`, `onReloading(cb) → unsub` (for project reload overlay during kernel restart)
 - `window.pdv.config.*` — app config: `get`, `set`
 - `window.pdv.about.*` — app metadata: `getVersion`
 - `window.pdv.themes.*` — theme persistence: `get`, `save` (stored under `~/.PDV/themes/`)
 - `window.pdv.codeCells.*` — tab persistence: `load`, `save` (stored under `~/.PDV/state/code-cells.json`)
-- `window.pdv.files.*` — native OS dialogs: `pickExecutable() → string | null` (wraps Electron `dialog.showOpenDialog` for executables); `pickDirectory() → string | null` (wraps `dialog.showOpenDialog` with `properties: ['openDirectory', 'createDirectory']`, used for Save/Open project)
+- `window.pdv.files.*` — native OS dialogs: `pickExecutable() → string | null` (wraps Electron `dialog.showOpenDialog` for executables); `pickFile() → string | null` (general file picker); `pickDirectory() → string | null` (wraps `dialog.showOpenDialog` with `properties: ['openDirectory', 'createDirectory']`, used for Save/Open project)
 - `window.pdv.modules.*` — module management: `listInstalled`, `install`, `importToProject`, `listImported`, `removeImport`, `saveSettings`, `runAction`, `checkUpdates`
 - `window.pdv.moduleWindows.*` — module GUI windows: `open`, `close`, `context`, `executeInMain`; push: `onExecuteRequest(cb) → unsub`
 - `window.pdv.menu.*` — menu bridge: `updateRecentProjects(paths)`, `onAction(cb) → unsub` (for File menu actions routed to renderer state, including `modules:import`)
@@ -1069,10 +1143,18 @@ This routing logic lives in a dedicated `CommRouter` class in `electron/main/com
 ### 11.4 Renderer Push Subscription Lifecycle
 
 The renderer owns push subscriptions in the root `App` component via dedicated hooks (see `app/HOOKS.md`), split by lifecycle scope:
-- **Kernel-scoped** (`currentKernelId` keyed): `tree.onChanged`, `project.onLoaded` — managed by `useKernelSubscriptions`
+- **Kernel-scoped** (`currentKernelId` keyed): `tree.onChanged`, `project.onLoaded`, `kernels.onKernelStatus`, `project.onReloading` — managed by `useKernelSubscriptions`
 - **App-scoped** (always-on while renderer mounted): `kernels.onOutput` — managed by `useKernelSubscriptions`; `menu.onAction` — managed by `useProjectWorkflow`
 
 ```tsx
+// useKernelSubscriptions.ts — app-scoped subscription
+useEffect(() => {
+  const unsubOutput = window.pdv.kernels.onOutput(chunk => {
+    // append streamed execute output to the matching log entry
+  });
+  return () => unsubOutput();
+}, []);
+
 // useKernelSubscriptions.ts — kernel-scoped subscriptions
 useEffect(() => {
   if (!currentKernelId) return;
@@ -1085,19 +1167,21 @@ useEffect(() => {
     // repopulate code cell tabs from project
   });
 
+  const unsubKernelStatus = window.pdv.kernels.onKernelStatus(payload => {
+    // detect kernel crash (status === 'dead')
+  });
+
+  const unsubReloading = window.pdv.project.onReloading(payload => {
+    // show/hide project-reloading overlay during kernel restart
+  });
+
   return () => {
     unsubTree();
     unsubProject();
+    unsubKernelStatus();
+    unsubReloading();
   };
 }, [currentKernelId]);
-
-// useKernelSubscriptions.ts — app-scoped subscription
-useEffect(() => {
-  const unsubOutput = window.pdv.kernels.onOutput(chunk => {
-    // append streamed execute output to the matching log entry
-  });
-  return () => unsubOutput();
-}, []);
 
 // useProjectWorkflow.ts — app-scoped menu subscription
 useEffect(() => {
@@ -1110,7 +1194,7 @@ useEffect(() => {
 
 Rules:
 - **One owner**: Only `App` (via its hooks) directly registers push subscriptions. Child components receive state/refresh tokens as props.
-- **Kernel-scoped cleanup**: `tree.onChanged` and `project.onLoaded` are torn down/re-registered whenever kernel identity changes.
+- **Kernel-scoped cleanup**: `tree.onChanged`, `project.onLoaded`, `kernels.onKernelStatus`, and `project.onReloading` are torn down/re-registered whenever kernel identity changes.
 - **App-scoped cleanup**: `kernels.onOutput` and `menu.onAction` are registered once and cleaned up on unmount.
 - **No polling**: Tree/project updates are push-driven; renderer does not poll these domains.
 - **Hook composition**: See `electron/renderer/src/app/HOOKS.md` for the full hook dependency graph and data flow documentation.
@@ -1130,11 +1214,15 @@ electron/
         bootstrap.ts            ← Electron app entry point and singleton guard
         index.ts                ← IPC handler registration hub, push forwarding
         ipc.ts                  ← ALL IPC channel names and TypeScript types
+        pdv-protocol.ts         ← PDV comm protocol envelope types, message type constants, version checks
         kernel-manager.ts       ← Kernel process lifecycle, ZeroMQ socket management
+        kernel-session.ts       ← Kernel bootstrap/init handshake helpers (pdv.ready → pdv.init)
         kernel-error-parser.ts  ← Traceback/error parsing for execution errors
         comm-router.ts          ← PDV comm message routing
         config.ts               ← App config persistence (~/.PDV/preferences.json)
         app.ts                  ← Electron app lifecycle (BrowserWindow, menus)
+        menu.ts                 ← Native app menu construction and action forwarding to renderer
+        editor-spawn.ts         ← External editor command expansion and terminal adapter
         environment-detector.ts ← Python/Julia environment detection
         project-manager.ts      ← Project manifest read/write, save coordination
         project-file-sync.ts    ← Tree file synchronization between working/save dirs
@@ -1176,6 +1264,11 @@ electron/
                     index.tsx           ← Settings modal shell + General/Shortcuts/Runtime/About tabs
                     AppearanceTab.tsx   ← Appearance tab (themes, fonts, colors)
                     ShortcutCapture.tsx ← Reusable shortcut key-capture widget
+                ScriptDialog/           ← Script execution dialog with parameter form
+                WelcomeScreen/          ← Welcome overlay shown on launch (no kernel running)
+                EnvironmentSelector/    ← Python environment selection dialog
+                ActivityBar/            ← Sidebar activity bar with panel selection
+                StatusBar/              ← Status bar with kernel and project info
                 ImportModuleDialog/     ← File > Import Module... modal dialog
                 ModulesPanel/           ← Module actions and inputs panels (used inside module GUI)
                 ModuleGui/              ← Module GUI rendering: ContainerRenderer, InputControl, ActionButton, NamelistEditor
@@ -1198,6 +1291,9 @@ pdv-python/
         namespace.py
         serialization.py
         environment.py
+        errors.py
+        modules.py
+        namelist_utils.py
         handlers/
             __init__.py
             lifecycle.py
@@ -1210,11 +1306,24 @@ pdv-python/
             gui.py
             namelist.py
     tests/
+        conftest.py
         test_tree.py
         test_serialization.py
+        test_serialization_errors.py
         test_comms.py
         test_namespace.py
-        conftest.py
+        test_environment.py
+        test_note.py
+        test_namelist.py
+        test_modules.py
+        test_handlers_lifecycle.py
+        test_handlers_tree.py
+        test_handlers_namespace.py
+        test_handlers_script.py
+        test_handlers_project.py
+        test_handlers_modules.py
+        test_integration_bootstrap.py
+        test_integration_dispatch.py
 ```
 
 ### 12.3 Tests

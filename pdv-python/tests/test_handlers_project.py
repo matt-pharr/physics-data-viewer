@@ -2,7 +2,7 @@
 pdv-python/tests/test_handlers_project.py — Tests for project save/load handlers.
 
 Tests cover:
-1. pdv.project.load: reads tree-index.json, populates lazy registry, builds tree.
+1. pdv.project.load: reads tree-index.json, builds tree.
 2. pdv.project.load: nonexistent save_dir sends error.
 3. pdv.project.load: pushes pdv.project.loaded notification.
 4. pdv.project.save: writes tree-index.json, writes data files.
@@ -53,14 +53,12 @@ class TestHandleProjectLoad:
             {
                 'path': 'data',
                 'type': 'folder',
-                'lazy': False,
                 'storage': {'backend': 'none', 'format': 'none'},
                 'metadata': {'preview': 'folder'},
             },
             {
                 'path': 'data.x',
                 'type': 'scalar',
-                'lazy': False,
                 'storage': {'backend': 'inline', 'format': 'inline', 'value': 42},
                 'metadata': {'preview': '42'},
             },
@@ -74,13 +72,17 @@ class TestHandleProjectLoad:
         # Inline value should be accessible
         assert tree_with_comm['data.x'] == 42
 
-    def test_lazy_nodes_registered(self, tree_with_comm, tmp_save_dir):
-        """Lazy nodes from tree-index.json are registered in the lazy-load registry."""
+    def test_file_backed_nodes_eagerly_loaded(self, tree_with_comm, tmp_save_dir):
+        """File-backed nodes from tree-index.json are eagerly deserialized into the tree."""
+        numpy = pytest.importorskip('numpy')
+        arr = numpy.array([1.0, 2.0, 3.0])
+        tree_dir = os.path.join(tree_with_comm._working_dir, 'tree')
+        os.makedirs(tree_dir, exist_ok=True)
+        numpy.save(os.path.join(tree_dir, 'arr.npy'), arr)
         nodes = [
             {
                 'path': 'arr',
                 'type': 'ndarray',
-                'lazy': True,
                 'storage': {
                     'backend': 'local_file',
                     'relative_path': 'tree/arr.npy',
@@ -94,7 +96,7 @@ class TestHandleProjectLoad:
         with patch.object(comms_mod, '_comm', mock_comm), \
              patch.object(comms_mod, '_pdv_tree', tree_with_comm):
             handle_project_load(msg)
-        assert tree_with_comm._lazy_registry.has('arr')
+        assert numpy.array_equal(dict.__getitem__(tree_with_comm, 'arr'), arr)
 
     def test_sends_project_loaded_push(self, tree_with_comm, tmp_save_dir):
         """After loading, pdv.project.loaded push notification is sent."""
@@ -122,14 +124,12 @@ class TestHandleProjectLoad:
             {
                 'path': 'scripts',
                 'type': 'folder',
-                'lazy': False,
                 'storage': {'backend': 'none', 'format': 'none'},
                 'metadata': {'preview': 'folder'},
             },
             {
                 'path': 'scripts.demo',
                 'type': 'script',
-                'lazy': False,
                 'storage': {
                     'backend': 'local_file',
                     'relative_path': script_rel,
@@ -268,7 +268,6 @@ class TestTwoPassLoading:
             {
                 'path': 'mymod.gui',
                 'type': 'gui',
-                'lazy': False,
                 'storage': {'backend': 'local_file', 'relative_path': gui_rel, 'format': 'gui_json'},
                 'metadata': {'module_id': 'test_mod', 'preview': 'GUI'},
             },
@@ -276,7 +275,6 @@ class TestTwoPassLoading:
                 'path': 'mymod',
                 'type': 'module',
                 'has_children': True,
-                'lazy': False,
                 'storage': {'backend': 'inline', 'format': 'module_meta', 'value': {
                     'module_id': 'test_mod', 'name': 'Test', 'version': '1.0',
                 }},
@@ -385,7 +383,6 @@ class TestTwoPassLoading:
             {
                 'path': 'demo',
                 'type': 'script',
-                'lazy': False,
                 'storage': {'backend': 'local_file', 'relative_path': script_rel, 'format': 'py_script'},
                 'metadata': {'language': 'python', 'preview': 'script'},
             },
@@ -401,14 +398,13 @@ class TestTwoPassLoading:
         assert not os.path.isabs(script.relative_path)
         assert script.relative_path == script_rel
 
-    def test_lazy_registry_propagated_to_module(self, tree_with_comm, tmp_save_dir):
-        """After load, PDVModule subtree nodes share the root lazy_registry."""
+    def test_module_working_dir_propagated(self, tree_with_comm, tmp_save_dir):
+        """After load, PDVModule subtree nodes share the root working dir."""
         nodes = [
             {
                 'path': 'mymod',
                 'type': 'module',
                 'has_children': True,
-                'lazy': False,
                 'storage': {'backend': 'inline', 'format': 'module_meta', 'value': {
                     'module_id': 'prop_test', 'name': 'PropTest', 'version': '1.0',
                 }},
@@ -423,5 +419,4 @@ class TestTwoPassLoading:
             handle_project_load(msg)
         mod = tree_with_comm['mymod']
         assert isinstance(mod, PDVModule)
-        assert mod._lazy_registry is tree_with_comm._lazy_registry
         assert mod._working_dir == tree_with_comm._working_dir

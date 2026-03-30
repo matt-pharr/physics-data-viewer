@@ -23,7 +23,7 @@ Do not import comms, handlers, or namespace internals directly — they
 are implementation details and their interfaces may change.
 """
 
-from pdv_kernel.tree import PDVTree, PDVFile, PDVScript, PDVGui, PDVNamelist, PDVModule
+from pdv_kernel.tree import PDVTree, PDVFile, PDVScript, PDVNote, PDVGui, PDVNamelist, PDVModule, PDVLib
 from pdv_kernel.errors import PDVError
 from pdv_kernel.modules import handle
 
@@ -31,9 +31,32 @@ __version__ = "1.0.0"
 __pdv_protocol_version__ = "1.0"
 
 __all__ = [
-    "PDVTree", "PDVFile", "PDVScript", "PDVGui", "PDVNamelist", "PDVModule",
-    "PDVError", "bootstrap", "handle", "__version__",
+    "PDVTree", "PDVFile", "PDVScript", "PDVNote", "PDVGui", "PDVNamelist", "PDVModule", "PDVLib",
+    "PDVError", "bootstrap", "handle", "log", "__version__",
 ]
+
+
+def log(*args, **kwargs) -> None:
+    """Print a debug message directly to stderr, bypassing ipykernel's stdout capture.
+
+    Output appears in the Electron terminal prefixed with ``[kernel:<id>]``.
+    Accepts the same arguments as the built-in ``print()``.
+    """
+    import io as _io  # noqa: PLC0415
+    import os as _os  # noqa: PLC0415
+
+    # ipykernel replaces sys.stderr with its own stream, so we write
+    # directly to file descriptor 2 to guarantee output reaches the
+    # spawned process's piped stderr.
+    _real_stderr = _io.TextIOWrapper(
+        _io.FileIO(_os.dup(2), mode="w", closefd=True),
+        encoding="utf-8",
+        line_buffering=True,
+    )
+    kwargs.setdefault("file", _real_stderr)
+    kwargs.setdefault("flush", True)
+    print(*args, **kwargs)
+    _real_stderr.close()
 
 
 def bootstrap(ip=None):
@@ -81,14 +104,27 @@ def bootstrap(ip=None):
     app = PDVApp()
     app.handle = _handle_decorator  # type: ignore[attr-defined]
 
-    # Install the protected namespace and inject pdv_tree and pdv
+    # Install the protected namespace and inject pdv_tree and pdv.
+    # IPython uses user_module.__dict__ as globals and user_ns as locals
+    # in exec(). They must be the same object so that top-level assignments
+    # are visible inside nested functions. We call prepare_user_module()
+    # which rebuilds user_module so its __dict__ returns our PDVNamespace,
+    # keeping globals and locals in sync.
     if ip is not None:
         existing = dict(ip.user_ns)
         protected_ns = PDVNamespace(existing)
         # Bypass protection to inject PDV names (bootstrap is the only caller)
         dict.__setitem__(protected_ns, "pdv_tree", tree)
         dict.__setitem__(protected_ns, "pdv", app)
-        ip.user_ns = protected_ns
+        try:
+            from IPython.core.interactiveshell import InteractiveShell  # noqa: PLC0415
+            is_real_shell = isinstance(ip, InteractiveShell)
+        except ImportError:
+            is_real_shell = False
+        if is_real_shell:
+            ip.user_module, ip.user_ns = ip.prepare_user_module(user_ns=protected_ns)
+        else:
+            ip.user_ns = protected_ns
 
     # Store references in comms module for handler use
     comms_mod._pdv_tree = tree

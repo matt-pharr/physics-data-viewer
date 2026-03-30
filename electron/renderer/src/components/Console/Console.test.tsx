@@ -54,7 +54,7 @@ describe('Console', () => {
     expect(container.querySelector('.log-stdout')?.innerHTML).toContain('<span>out</span>');
     expect(container.querySelector('.log-stderr')?.innerHTML).toContain('<span>err</span>');
     expect(container.querySelector('.log-result')?.textContent).toContain('"x": 1');
-    expect(screen.getByText('Error: boom')).toBeTruthy();
+    expect(container.querySelector('.log-error')?.textContent).toBe('Error: boom');
     expect(container.querySelector('.log-source')?.textContent).toBe('Cell 1');
     expect(screen.getByText('File cell.py, line 3, column 7')).toBeTruthy();
     expect(container.querySelector('.log-traceback')?.innerHTML).toContain('Traceback (most recent call last):');

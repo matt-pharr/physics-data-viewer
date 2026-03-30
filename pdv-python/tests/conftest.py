@@ -15,7 +15,7 @@ Provides fixtures used across all pdv_kernel test modules:
 See Also
 --------
 ARCHITECTURE.md §5 (package structure overview)
-IMPLEMENTATION_STEPS.md Step 1 (unit tests)
+ARCHITECTURE.md §5 (unit tests)
 """
 
 import os

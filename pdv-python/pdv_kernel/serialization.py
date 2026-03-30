@@ -196,7 +196,7 @@ def serialize_node(
     dict
         Node descriptor dict as defined in ARCHITECTURE.md §7.3,
         including ``id``, ``path``, ``key``, ``type``, ``storage``,
-        ``has_children``, ``lazy``, ``created_at``, ``updated_at``,
+        ``has_children``, ``created_at``, ``updated_at``,
         and a ``metadata`` sub-dict with type-specific fields
         (``shape``, ``dtype``, ``preview``, ``module_id``, etc.).
 
@@ -240,7 +240,6 @@ def serialize_node(
         "parent_path": parent_path,
         "type": kind,
         "has_children": False,
-        "lazy": False,
         "created_at": now,
         "updated_at": now,
     }
@@ -285,6 +284,11 @@ def serialize_node(
                 rel_path = os.path.relpath(source_path, _source_dir)
             else:
                 rel_path = value.relative_path
+            # Copy lib file to save dir so it persists with the project
+            dest_path = os.path.join(working_dir, rel_path)
+            if os.path.abspath(source_path) != os.path.abspath(dest_path):
+                ensure_parent(dest_path)
+                shutil.copy2(source_path, dest_path)
         else:
             file_path = working_dir_tree_path(working_dir, tree_path, ext)
             ensure_parent(file_path)
@@ -346,7 +350,6 @@ def serialize_node(
         ensure_parent(file_path)
         np.save(file_path, value)
         rel_path = os.path.relpath(file_path, working_dir)
-        descriptor["lazy"] = True
         descriptor["storage"] = {
             "backend": "local_file",
             "relative_path": rel_path,
@@ -365,7 +368,6 @@ def serialize_node(
         ensure_parent(file_path)
         value.to_parquet(file_path)  # type: ignore[union-attr]
         rel_path = os.path.relpath(file_path, working_dir)
-        descriptor["lazy"] = True
         descriptor["storage"] = {
             "backend": "local_file",
             "relative_path": rel_path,
@@ -404,7 +406,6 @@ def serialize_node(
             with open(file_path, "w", encoding="utf-8") as fh:
                 fh.write(value)  # type: ignore[arg-type]
             rel_path = os.path.relpath(file_path, working_dir)
-            descriptor["lazy"] = True
             descriptor["storage"] = {
                 "backend": "local_file",
                 "relative_path": rel_path,
@@ -434,7 +435,6 @@ def serialize_node(
         with open(file_path, "wb") as fh:
             fh.write(value)  # type: ignore[arg-type]
         rel_path = os.path.relpath(file_path, working_dir)
-        descriptor["lazy"] = True
         descriptor["storage"] = {
             "backend": "local_file",
             "relative_path": rel_path,
@@ -454,7 +454,6 @@ def serialize_node(
     with open(file_path, "wb") as fh:
         pickle.dump(value, fh)
     rel_path = os.path.relpath(file_path, working_dir)
-    descriptor["lazy"] = True
     descriptor["storage"] = {
         "backend": "local_file",
         "relative_path": rel_path,

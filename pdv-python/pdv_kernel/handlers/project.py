@@ -3,8 +3,8 @@ pdv_kernel.handlers.project — Handlers for PDV project messages.
 
 Handles:
 - ``pdv.project.load``: load a project from a save directory. Reads
-  ``tree-index.json``, populates the lazy-load registry, rebuilds the
-  in-memory tree structure, sends ``pdv.project.loaded`` push.
+  ``tree-index.json``, rebuilds the in-memory tree structure, sends
+  ``pdv.project.loaded`` push.
 - ``pdv.project.save``: serialize the current tree to a save directory.
   Sends ``pdv.project.save.response`` with node count and checksum.
 
@@ -16,6 +16,7 @@ ARCHITECTURE.md §4.2 (project load sequence), §8 (save and load)
 from __future__ import annotations
 
 from pdv_kernel.handlers import register
+from pdv_kernel import log
 
 
 def _set_tree_node(tree: "Any", path: str, value: "Any") -> None:
@@ -33,21 +34,39 @@ def _set_tree_node(tree: "Any", path: str, value: "Any") -> None:
     value : Any
         The value to set at the path.
     """
-    from pdv_kernel.tree import PDVTree, PDVScript, PDVNote  # noqa: PLC0415
+    from pdv_kernel.tree import PDVTree  # noqa: PLC0415
 
     parts = path.split(".")
     current = tree
     for part in parts[:-1]:
         if not dict.__contains__(current, part):
             new_node: PDVTree = PDVTree()
-            new_node._lazy_registry = tree._lazy_registry
             dict.__setitem__(current, part, new_node)
         current = dict.__getitem__(current, part)
     dict.__setitem__(current, parts[-1], value)
 
 
+def _count_nodes(tree: "Any") -> int:
+    """Count total nodes in a tree recursively (no I/O)."""
+    from pdv_kernel.tree import PDVTree  # noqa: PLC0415
+
+    count = 0
+    for key in dict.keys(tree):
+        count += 1
+        value = dict.__getitem__(tree, key)
+        if isinstance(value, PDVTree):
+            count += _count_nodes(value)
+    return count
+
+
 def _collect_nodes(
-    tree: "Any", save_dir: str, prefix: str = "", *, working_dir: str = ""
+    tree: "Any",
+    save_dir: str,
+    prefix: str = "",
+    *,
+    working_dir: str = "",
+    on_progress: "Callable[[int], None] | None" = None,
+    counter: "list[int] | None" = None,
 ) -> list:
     """Recursively serialize tree nodes and return descriptor list.
 
@@ -61,6 +80,10 @@ def _collect_nodes(
         The dot-separated path prefix for the current subtree.
     working_dir : str
         The kernel working directory where source files live.
+    on_progress : callable, optional
+        Called with current node count after each node is serialized.
+    counter : list, optional
+        Mutable single-element list tracking the running count across recursion.
 
     Returns
     -------
@@ -70,6 +93,9 @@ def _collect_nodes(
     from pdv_kernel.serialization import serialize_node  # noqa: PLC0415
     from pdv_kernel.tree import PDVTree  # noqa: PLC0415
 
+    if counter is None:
+        counter = [0]
+
     nodes = []
     for key in dict.keys(tree):
         path = f"{prefix}.{key}" if prefix else key
@@ -78,9 +104,15 @@ def _collect_nodes(
             path, value, save_dir, trusted=True, source_dir=working_dir or save_dir,
         )
         nodes.append(descriptor)
+        counter[0] += 1
+        if on_progress is not None:
+            on_progress(counter[0])
         if isinstance(value, PDVTree):
             nodes.extend(
-                _collect_nodes(value, save_dir, prefix=path, working_dir=working_dir)
+                _collect_nodes(
+                    value, save_dir, prefix=path, working_dir=working_dir,
+                    on_progress=on_progress, counter=counter,
+                )
             )
     return nodes
 
@@ -156,10 +188,9 @@ def handle_project_load(msg: dict) -> None:
         )
         return
 
-    # Clear existing in-memory tree and registry
+    # Clear existing in-memory tree
     for k in list(dict.keys(tree)):
         dict.__delitem__(tree, k)
-    tree._lazy_registry.clear()
     tree._set_save_dir(save_dir)
 
     working_dir = tree._working_dir or save_dir
@@ -173,7 +204,6 @@ def handle_project_load(msg: dict) -> None:
 
         if node_type == "folder":
             folder = PDVTree()
-            folder._lazy_registry = tree._lazy_registry
             folder._working_dir = tree._working_dir
             folder._save_dir = tree._save_dir
             folder._path_prefix = node_path
@@ -188,7 +218,6 @@ def handle_project_load(msg: dict) -> None:
                 name=meta.get("name", old_meta.get("name", "")),
                 version=meta.get("version", old_meta.get("version", "")),
             )
-            mod._lazy_registry = tree._lazy_registry
             mod._working_dir = tree._working_dir
             mod._save_dir = tree._save_dir
             mod._path_prefix = node_path
@@ -197,13 +226,22 @@ def handle_project_load(msg: dict) -> None:
     # -- Pass 2: Leaves (all non-container nodes) -----------------------------
     # Files are assumed to already exist in the working directory (TypeScript
     # copies them before sending pdv.project.load).
+    load_total = len(nodes)
+    load_current = 0
     for node in nodes:
         node_path = node.get("path", "")
         node_type = node.get("type", "")
         storage = node.get("storage", {})
         backend = storage.get("backend", "")
         meta = node.get("metadata", {})
-
+        load_current += 1
+        if load_current % 5 == 0 or load_current == load_total:
+            send_message("pdv.progress", {
+                "operation": "load",
+                "phase": "Rebuilding tree",
+                "current": load_current,
+                "total": load_total,
+            })
         if node_type in ("folder", "module"):
             continue  # Already handled in pass 1
 
@@ -259,11 +297,10 @@ def handle_project_load(msg: dict) -> None:
                     sys.path.insert(1, parent_dir)
         elif backend == "inline":
             _set_tree_node(tree, node_path, storage.get("value"))
-        elif node.get("lazy", False):
-            tree._lazy_registry.register(node_path, storage)
-        else:
-            # Non-lazy file-backed node — register for lazy loading anyway
-            tree._lazy_registry.register(node_path, storage)
+        elif backend == "local_file":
+            from pdv_kernel.serialization import deserialize_node  # noqa: PLC0415
+            value = deserialize_node(storage, working_dir, trusted=True)
+            _set_tree_node(tree, node_path, value)
 
     node_count = len(nodes)
     send_message(
@@ -335,8 +372,22 @@ def handle_project_save(msg: dict) -> None:
 
     working_dir = tree._working_dir or save_dir
 
+    total = _count_nodes(tree)
+
+    def _emit_save_progress(current: int) -> None:
+        if current % 5 == 0 or current == total:
+            send_message("pdv.progress", {
+                "operation": "save",
+                "phase": "Serializing",
+                "current": current,
+                "total": total,
+            })
+
     try:
-        nodes = _collect_nodes(tree, save_dir, working_dir=working_dir)
+        nodes = _collect_nodes(
+            tree, save_dir, working_dir=working_dir,
+            on_progress=_emit_save_progress,
+        )
     except Exception as exc:  # noqa: BLE001
         send_error(
             "pdv.project.save.response",

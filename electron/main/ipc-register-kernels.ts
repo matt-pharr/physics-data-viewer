@@ -126,12 +126,24 @@ export function registerKernelIpcHandlers(
     const pythonPath =
       requestedSpec?.env?.PYTHON_PATH ??
       (Array.isArray(requestedSpec?.argv) ? requestedSpec.argv[0] : undefined);
-    if ((requestedSpec?.language ?? "python") === "python" && pythonPath) {
+    const requestedLanguage = requestedSpec?.language ?? "python";
+    if (requestedLanguage === "python" && pythonPath) {
       const installStatus = await EnvironmentDetector.checkPDVInstalled(pythonPath);
       if (!installStatus.installed) {
         throw new Error(
           `Selected Python runtime is missing pdv_kernel. Install it with: cd pdv-python && ${pythonPath} -m pip install -e ".[dev]"`
         );
+      }
+    } else if (requestedLanguage === "julia") {
+      const juliaPath = requestedSpec?.env?.JULIA_PATH ??
+        (Array.isArray(requestedSpec?.argv) ? requestedSpec.argv[0] : undefined);
+      if (juliaPath) {
+        const installStatus = await EnvironmentDetector.checkJuliaPDVInstalled(juliaPath);
+        if (!installStatus.installed) {
+          throw new Error(
+            `Selected Julia runtime is missing PDVKernel. Install it with: cd pdv-julia && julia --project=. -e 'using Pkg; Pkg.instantiate()'`
+          );
+        }
       }
     }
     // Starting a new kernel always means a new session — clear any in-memory
@@ -298,6 +310,17 @@ export function registerKernelIpcHandlers(
             valid: false,
             error:
               'Missing pdv_kernel. Install it with: cd pdv-python && <python> -m pip install -e ".[dev]"',
+          };
+        }
+      } else if (language === "julia") {
+        const installStatus = await EnvironmentDetector.checkJuliaPDVInstalled(
+          executablePath.trim()
+        );
+        if (!installStatus.installed) {
+          return {
+            valid: false,
+            error:
+              'Missing PDVKernel.jl. Install it with: cd pdv-julia && julia --project=. -e \'using Pkg; Pkg.instantiate()\'',
           };
         }
       }

@@ -6,6 +6,7 @@
  */
 
 @import './base.css';
+@import './title-bar.css';
 @import './layout.css';
 @import './sidebar.css';
 @import './tabs.css';

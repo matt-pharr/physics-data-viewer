@@ -4,8 +4,7 @@ pdv_kernel.tree — PDVTree, PDVFile, PDVScript, PDVNote, PDVGui, and PDVModule 
 This module is the core of the pdv_kernel package. It implements:
 
 - :class:`PDVTree`: a dict subclass that is the live project data tree.
-  It supports dot-path access, a lazy-load registry for data backed by
-  the project save directory, and emits ``pdv.tree.changed`` push
+  It supports dot-path access and emits ``pdv.tree.changed`` push
   notifications on mutation (when a comm is attached).
 
 - :class:`PDVFile`: base class for file-backed tree nodes. Provides shared
@@ -18,9 +17,6 @@ This module is the core of the pdv_kernel package. It implements:
 - :class:`PDVNote`: a lightweight wrapper for a markdown note file stored
   as a tree node. Subclass of ``PDVFile``.
 
-- :class:`LazyLoadRegistry`: internal registry mapping tree paths to
-  save-directory storage references. Not user-accessible.
-
 Design decisions recorded in ARCHITECTURE.md §5.6, §5.7, §5.8, §7.
 
 This module has NO dependency on IPython, comms, or any Electron-facing
@@ -29,7 +25,6 @@ code. It can be imported and tested standalone.
 
 from __future__ import annotations
 
-import ast
 import inspect
 import importlib.util
 import os
@@ -94,134 +89,6 @@ def _resolve_nested(obj: dict, parts: list[str]) -> Any:
             raise KeyError(part)
         current = dict.__getitem__(current, part)
     return current
-
-
-# ---------------------------------------------------------------------------
-# LazyLoadRegistry
-# ---------------------------------------------------------------------------
-
-class LazyLoadRegistry:
-    """
-    Internal registry mapping tree paths to save-directory storage references.
-
-    Populated when a project is loaded from disk (``pdv.project.load``).
-    Entries are removed once data has been fetched into memory.
-    Never written to disk — reconstructed from ``tree-index.json`` each load.
-
-    Not user-accessible. Used only by :class:`PDVTree.__getitem__`.
-
-    See Also
-    --------
-    ARCHITECTURE.md §5.8
-    """
-
-    def __init__(self) -> None:
-        self._registry: dict[str, dict] = {}
-
-    def register(self, path: str, storage_ref: dict) -> None:
-        """Register a lazy-load entry for a tree path.
-
-        Parameters
-        ----------
-        path : str
-            Dot-separated tree path (e.g. ``'data.waveforms.ch1'``).
-        storage_ref : dict
-            Storage reference dict as defined in ARCHITECTURE.md §7.3.
-            Must contain at least ``backend``, ``relative_path``, and ``format``.
-        """
-        self._registry[path] = storage_ref
-
-    def has(self, path: str) -> bool:
-        """Return whether a lazy-load entry exists for a path.
-
-        Parameters
-        ----------
-        path : str
-            Dot-separated tree path.
-
-        Returns
-        -------
-        bool
-            True when the path is currently registered for lazy loading.
-        """
-        return path in self._registry
-
-    def fetch(self, path: str, save_dir: str) -> Any:
-        """Load data from the save directory for this path and remove the registry entry.
-
-        Parameters
-        ----------
-        path : str
-            Dot-separated tree path.
-        save_dir : str
-            Absolute path to the project save directory.
-
-        Returns
-        -------
-        Any
-            Deserialized value.
-
-        Raises
-        ------
-        PDVSerializationError
-            If the file cannot be read or deserialized.
-        """
-        from pdv_kernel.serialization import deserialize_node  # noqa: PLC0415
-
-        storage_ref = self._registry.pop(path)
-        return deserialize_node(storage_ref, save_dir, trusted=True)
-
-    def get_storage(self, path: str) -> dict | None:
-        """Return the registered storage reference for a path, if present.
-
-        Parameters
-        ----------
-        path : str
-            Dot-separated tree path.
-
-        Returns
-        -------
-        dict | None
-            Storage reference dict when registered, else ``None``.
-        """
-        return self._registry.get(path)
-
-    def remove(self, path: str) -> None:
-        """Remove one registry entry if present.
-
-        Parameters
-        ----------
-        path : str
-            Dot-separated tree path to remove.
-        """
-        self._registry.pop(path, None)
-
-    def entries(self) -> list[tuple[str, dict]]:
-        """Return a snapshot of all lazy registry entries.
-
-        Returns
-        -------
-        list[tuple[str, dict]]
-            List of ``(path, storage_ref)`` pairs.
-        """
-        return list(self._registry.items())
-
-    def clear(self) -> None:
-        """Remove all registry entries (called when a new project is loaded)."""
-        self._registry.clear()
-
-    def populate_from_index(self, nodes: list[dict]) -> None:
-        """Populate the registry from a tree-index node list.
-
-        Parameters
-        ----------
-        nodes : list[dict]
-            Node descriptor dicts as defined in ARCHITECTURE.md §7.3.
-            Only nodes with ``lazy: true`` are registered.
-        """
-        for node in nodes:
-            if node.get("lazy", False) and node.get("storage", {}).get("backend") == "local_file":
-                self.register(node["path"], node["storage"])
 
 
 # ---------------------------------------------------------------------------
@@ -399,7 +266,6 @@ class PDVScript(PDVFile):
         super().__init__(relative_path)
         self._language = language
         self._doc = doc
-        self._params: list[ScriptParameter] = _extract_script_params(relative_path)
 
     @property
     def language(self) -> str:
@@ -422,17 +288,6 @@ class PDVScript(PDVFile):
             Cached script doc preview line.
         """
         return self._doc
-
-    @property
-    def params(self) -> list[ScriptParameter]:
-        """User-facing run() parameters (excluding pdv_tree).
-
-        Returns
-        -------
-        list[ScriptParameter]
-            Extracted script parameter descriptors.
-        """
-        return self._params
 
     def preview(self) -> str:
         """Return a short human-readable preview string for the tree panel.
@@ -744,9 +599,6 @@ class PDVTree(dict):
     A dict subclass that supports:
 
     - Dot-path access: ``pdv_tree['data.waveforms.ch1']``
-    - Lazy loading: if a key is absent from memory but present in the
-      :class:`LazyLoadRegistry`, the data is fetched from the save
-      directory transparently.
     - Change notification: mutations emit a ``pdv.tree.changed`` comm
       push notification (when a comm is attached via ``_attach_comm``).
     - Script execution: ``pdv_tree.run_script('scripts.analysis.fit', x=1)``
@@ -766,7 +618,6 @@ class PDVTree(dict):
 
     def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
-        self._lazy_registry: LazyLoadRegistry = LazyLoadRegistry()
         self._working_dir: str | None = None
         self._save_dir: str | None = None
         self._send_fn: Callable[[str, dict], None] | None = None
@@ -822,9 +673,6 @@ class PDVTree(dict):
     def __getitem__(self, key: str) -> Any:
         """Get a value by key or dot-separated path.
 
-        If the key is not in memory but is in the lazy-load registry,
-        fetches the data from the save directory transparently.
-
         Parameters
         ----------
         key : str
@@ -839,38 +687,16 @@ class PDVTree(dict):
         Raises
         ------
         PDVKeyError
-            If the key is absent from memory and from the lazy-load registry.
+            If the key does not exist.
         """
         parts = _split_dot_path(key)
-
-        # Build the full registry key (accounts for sub-trees with a path prefix)
-        full_key = f"{self._path_prefix}.{key}" if self._path_prefix else key
 
         if len(parts) == 1:
             p = parts[0]
             if dict.__contains__(self, p):
                 return dict.__getitem__(self, p)
-            if self._lazy_registry.has(full_key):
-                val = self._lazy_registry.fetch(full_key, self._save_dir or "")
-                dict.__setitem__(self, p, val)
-                return val
             raise PDVKeyError(key)
 
-        # Multi-part: check the full path in the lazy registry first
-        if self._lazy_registry.has(full_key):
-            val = self._lazy_registry.fetch(full_key, self._save_dir or "")
-            # Store value at the leaf position in the nested structure
-            parent = self
-            for part in parts[:-1]:
-                if not dict.__contains__(parent, part):
-                    new_node: PDVTree = PDVTree()
-                    new_node._lazy_registry = self._lazy_registry
-                    dict.__setitem__(parent, part, new_node)
-                parent = dict.__getitem__(parent, part)
-            dict.__setitem__(parent, parts[-1], val)
-            return val
-
-        # Navigate through nested dicts
         try:
             return _resolve_nested(self, parts)
         except KeyError:
@@ -904,13 +730,11 @@ class PDVTree(dict):
             for part in parts[:-1]:
                 if not dict.__contains__(current, part):
                     new_node = PDVTree()
-                    new_node._lazy_registry = self._lazy_registry
                     dict.__setitem__(current, part, new_node)
                 node = dict.__getitem__(current, part)
                 if not isinstance(node, dict):
                     # Replace non-dict node with a PDVTree
                     new_node = PDVTree()
-                    new_node._lazy_registry = self._lazy_registry
                     dict.__setitem__(current, part, new_node)
                     node = new_node
                 current = node  # type: ignore[assignment]
@@ -921,7 +745,6 @@ class PDVTree(dict):
     def __delitem__(self, key: str) -> None:
         """Delete a value by key or dot-separated path.
 
-        Removes from both in-memory storage and the lazy-load registry.
         Emits a ``pdv.tree.changed`` push notification.
 
         Parameters
@@ -932,39 +755,30 @@ class PDVTree(dict):
         Raises
         ------
         PDVKeyError
-            If the key does not exist in memory or in the lazy-load registry.
+            If the key does not exist.
         """
         parts = _split_dot_path(key)
-        in_registry = self._lazy_registry.has(key)
 
         if len(parts) == 1:
             p = parts[0]
-            if not dict.__contains__(self, p) and not in_registry:
+            if not dict.__contains__(self, p):
                 raise PDVKeyError(key)
-            if dict.__contains__(self, p):
-                dict.__delitem__(self, p)
-            if in_registry:
-                self._lazy_registry.remove(key)
+            dict.__delitem__(self, p)
         else:
-            if in_registry:
-                self._lazy_registry.remove(key)
             try:
                 parent: dict = self
                 for part in parts[:-1]:
                     parent = dict.__getitem__(parent, part)
                 if not dict.__contains__(parent, parts[-1]):
-                    if not in_registry:
-                        raise PDVKeyError(key)
-                else:
-                    dict.__delitem__(parent, parts[-1])
-            except KeyError:
-                if not in_registry:
                     raise PDVKeyError(key)
+                dict.__delitem__(parent, parts[-1])
+            except KeyError:
+                raise PDVKeyError(key)
 
         self._emit_changed(key, "removed")
 
     def __contains__(self, key: object) -> bool:
-        """Return True if key exists in memory or in the lazy-load registry."""
+        """Return True if key exists in the tree."""
         if not isinstance(key, str):
             return False
         try:
@@ -972,9 +786,7 @@ class PDVTree(dict):
         except PDVPathError:
             return False
         if len(parts) == 1:
-            return dict.__contains__(self, key) or self._lazy_registry.has(key)
-        if self._lazy_registry.has(key):
-            return True
+            return dict.__contains__(self, key)
         try:
             _resolve_nested(self, parts)
             return True
@@ -984,18 +796,6 @@ class PDVTree(dict):
     # ------------------------------------------------------------------
     # Public API
     # ------------------------------------------------------------------
-
-    def has_lazy_entry(self, path: str) -> bool:
-        """Return whether a path is currently registered for lazy loading."""
-        return self._lazy_registry.has(path)
-
-    def lazy_storage_for(self, path: str) -> dict | None:
-        """Return the lazy storage reference for one path, if present."""
-        return self._lazy_registry.get_storage(path)
-
-    def iter_lazy_entries(self) -> list[tuple[str, dict]]:
-        """Return a snapshot of all currently registered lazy paths."""
-        return self._lazy_registry.entries()
 
     def run_script(self, script_path: str, **kwargs: Any) -> Any:
         """Execute a script stored in the tree.
@@ -1043,7 +843,7 @@ class PDVTree(dict):
 class PDVModule(PDVTree):
     """
     Module metadata node. PDVTree subclass so it can hold children naturally
-    and participate in dot-path access, lazy loading, and change notifications.
+    and participate in dot-path access and change notifications.
 
     Stored as the value at a tree path (e.g. ``pdv_tree['n_pendulum']``).
     Contains child entries like scripts folder and gui node as regular dict items.

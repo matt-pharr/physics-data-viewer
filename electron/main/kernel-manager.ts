@@ -400,9 +400,23 @@ export class KernelManager extends EventEmitter {
     fs.writeFileSync(connectionFile, JSON.stringify(connectionInfo, null, 2));
 
     // Build the argv for the kernel process.
-    const pythonExec = spec?.env?.PYTHON_PATH ?? "python3";
-    let argv: string[] =
-      spec?.argv ?? [pythonExec, "-m", "ipykernel_launcher", "-f", connectionFile];
+    let argv: string[];
+    if (spec?.argv) {
+      argv = spec.argv;
+    } else if (language === "julia") {
+      const juliaExec = spec?.env?.JULIA_PATH ?? "julia";
+      argv = [
+        juliaExec,
+        "-i",
+        "--color=yes",
+        "-e",
+        "import IJulia; IJulia.run_kernel()",
+        connectionFile,
+      ];
+    } else {
+      const pythonExec = spec?.env?.PYTHON_PATH ?? "python3";
+      argv = [pythonExec, "-m", "ipykernel_launcher", "-f", connectionFile];
+    }
     argv = argv.map((a) => a.replace("{connection_file}", connectionFile));
 
     const kernelProcess = spawn(argv[0], argv.slice(1), {
@@ -651,6 +665,16 @@ export class KernelManager extends EventEmitter {
         if (result.stdout === "") delete result.stdout;
         if (result.stderr === "") delete result.stderr;
         if (result.images?.length === 0) delete result.images;
+        // When streaming via onChunk, stdout/stderr/images were already pushed
+        // to the renderer in real-time. Including them in the resolved result
+        // causes a race: if the promise resolves before React commits the
+        // streamed state updates, the renderer sets stdout from the result,
+        // then the stream events append again — doubling the output.
+        if (onChunk) {
+          delete result.stdout;
+          delete result.stderr;
+          delete result.images;
+        }
         resolve(result);
       };
 
