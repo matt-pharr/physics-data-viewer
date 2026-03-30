@@ -12,6 +12,7 @@
     "dev": "node ./node_modules/concurrently/dist/bin/concurrently.js -k \"npm:dev:main\" \"npm:dev:renderer\"",
     "dev:main": "node ./node_modules/cross-env/src/bin/cross-env.js NODE_ENV=development node ./node_modules/electronmon/bin/cli.js .",
     "dev:renderer": "cd renderer && node ../node_modules/vite/bin/vite.js",
+    "generate:icon:mac": "sh ./scripts/generate-mac-icon.sh",
     "build": "npm run build:renderer && npm run build:main",
     "build:renderer": "cd renderer && node ../node_modules/vite/bin/vite.js build",
     "build:main": "node ./node_modules/typescript/bin/tsc -p tsconfig.json",

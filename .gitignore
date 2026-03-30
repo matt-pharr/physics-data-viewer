@@ -6,6 +6,8 @@ __pycache__/
 .pytest_cache/
 /node_modules/
 .DS_Store
+pdv-icon.iconset
+*.icns
 
 # Tree directory (now stored in /tmp)
 /tree/

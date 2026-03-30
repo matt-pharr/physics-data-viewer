@@ -1,33 +1,52 @@
 <svg width="512" height="512" viewBox="0 0 512 512" xmlns="http://www.w3.org/2000/svg">
   <defs>
-    <!-- Subtle gradients -->
-    <radialGradient id="redGradTop" gradientUnits="userSpaceOnUse" cx="236" cy="166" fx="236" fy="166" r="80">
-      <stop offset="0%" stop-color="#FFC1C1"/>
-      <stop offset="100%" stop-color="#FF8A8A"/>
+    <!-- Shared lighting direction (top-left) -->
+    <radialGradient id="proton" cx="35%" cy="30%" r="70%">
+      <stop offset="0%" stop-color="#FF6B5E"/>
+      <stop offset="60%" stop-color="#FF3B30"/>
+      <stop offset="100%" stop-color="#8B1A1A"/>
     </radialGradient>
-    <radialGradient id="redGradBottom" gradientUnits="userSpaceOnUse" cx="236" cy="306" fx="236" fy="306" r="80">
-      <stop offset="0%" stop-color="#FFC1C1"/>
-      <stop offset="100%" stop-color="#FF8A8A"/>
+
+    <radialGradient id="neutron" cx="35%" cy="30%" r="70%">
+      <stop offset="0%" stop-color="#9FB3C8"/>
+      <stop offset="60%" stop-color="#5A6C7F"/>
+      <stop offset="100%" stop-color="#2C3440"/>
     </radialGradient>
-    <radialGradient id="blueGradLeft" gradientUnits="userSpaceOnUse" cx="181" cy="236" fx="181" fy="236" r="80">
-      <stop offset="0%" stop-color="#C7DAFF"/>
-      <stop offset="100%" stop-color="#7FAEFF"/>
-    </radialGradient>
-    <radialGradient id="blueGradRight" gradientUnits="userSpaceOnUse" cx="291" cy="236" fx="291" fy="236" r="80">
-      <stop offset="0%" stop-color="#C7DAFF"/>
-      <stop offset="100%" stop-color="#7FAEFF"/>
-    </radialGradient>
+
+    <!-- Soft inner shadow for depth -->
+    <filter id="innerShadow" x="-50%" y="-50%" width="200%" height="200%">
+      <feOffset dx="0" dy="2"/>
+      <feGaussianBlur stdDeviation="4" result="offset-blur"/>
+      <feComposite operator="out" in="SourceGraphic" in2="offset-blur" result="inverse"/>
+      <feFlood flood-color="#000000" flood-opacity="0.25"/>
+      <feComposite operator="in" in="flood" in2="inverse"/>
+      <feComposite operator="over" in="SourceGraphic"/>
+    </filter>
+
+    <!-- Subtle drop shadow -->
+    <filter id="drop" x="-50%" y="-50%" width="200%" height="200%">
+      <feDropShadow dx="0" dy="10" stdDeviation="12" flood-opacity="0.15"/>
+    </filter>
   </defs>
 
-  <!-- Background -->
-  <rect width="512" height="512" rx="120" fill="#F5F7FB"/>
+  <!-- Background (Tahoe-style: slightly richer than flat gray) -->
+  <rect width="512" height="512" rx="120" fill="#F2F4F8"/>
 
-  <!-- Alpha particle cluster -->
-  <circle cx="256" cy="175" r="80" fill="url(#redGradTop)"/>
-  <circle cx="256" cy="337" r="80" fill="url(#redGradBottom)"/>
-  <circle cx="185" cy="256" r="80" fill="url(#blueGradLeft)"/>
-  <circle cx="327" cy="256" r="80" fill="url(#blueGradRight)"/>
+  <!-- Cluster -->
+  <g filter="url(#drop)">
+    <!-- Protons -->
+    <circle cx="256" cy="180" r="78" fill="url(#proton)" filter="url(#innerShadow)"/>
+    <circle cx="256" cy="332" r="78" fill="url(#proton)" filter="url(#innerShadow)"/>
 
-  <!-- Soft outer ring -->
-  <circle cx="256" cy="256" r="200" fill="none" stroke="#000000" stroke-opacity="0.05" stroke-width="20"/>
+    <!-- Neutrons -->
+    <circle cx="180" cy="256" r="78" fill="url(#neutron)" filter="url(#innerShadow)"/>
+    <circle cx="332" cy="256" r="78" fill="url(#neutron)" filter="url(#innerShadow)"/>
+  </g>
+
+  <!-- Subtle highlight ring (more intentional than before) -->
+  <circle cx="256" cy="256" r="200"
+          fill="none"
+          stroke="#FFFFFF"
+          stroke-opacity="0.25"
+          stroke-width="6"/>
 </svg>
