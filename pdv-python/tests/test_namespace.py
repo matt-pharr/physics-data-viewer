@@ -9,6 +9,8 @@ Tests cover:
 Reference: ARCHITECTURE.md §5.4, §5.5
 """
 
+from dataclasses import dataclass
+
 import pytest
 from pdv_kernel.namespace import PDVNamespace, pdv_namespace
 from pdv_kernel.errors import PDVProtectedNameError
@@ -99,3 +101,28 @@ class TestPDVNamespaceSnapshot:
         dict.__setitem__(fresh_namespace, 'result_data', [1, 2, 3])
         result = pdv_namespace(fresh_namespace)
         assert 'result_data' in result
+
+    def test_ndarray_descriptor_has_children_and_preview(self, fresh_namespace):
+        """ndarrays expose lazy-inspection metadata and sampled previews."""
+        numpy = pytest.importorskip('numpy')
+        dict.__setitem__(fresh_namespace, 'arr', numpy.array([1, 2, 3]))
+        result = pdv_namespace(fresh_namespace)
+        desc = result['arr']
+        assert desc['kind'] == 'ndarray'
+        assert desc['has_children'] is True
+        assert desc['child_count'] == 3
+        assert 'array' in desc['preview']
+
+    def test_custom_object_uses_object_kind_and_attribute_count(self, fresh_namespace):
+        """Custom objects with attributes inspect as object nodes."""
+        @dataclass
+        class Sample:
+            alpha: int
+            beta: int
+
+        dict.__setitem__(fresh_namespace, 'sample', Sample(alpha=1, beta=2))
+        result = pdv_namespace(fresh_namespace)
+        desc = result['sample']
+        assert desc['kind'] == 'object'
+        assert desc['has_children'] is True
+        assert desc['child_count'] == 2

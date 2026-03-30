@@ -40,6 +40,7 @@ import { registerTreeNamespaceScriptIpcHandlers } from "./ipc-register-tree-name
 import { ModuleWindowManager } from "./module-window-manager";
 import {
   IPC,
+  NamespaceInspectTarget,
   ModuleHealthWarning,
   NamespaceQueryOptions,
   PDVConfig,
@@ -73,6 +74,7 @@ const REGISTERED_CHANNELS: readonly string[] = [
   IPC.tree.addFile,
   IPC.tree.invokeHandler,
   IPC.namespace.query,
+  IPC.namespace.inspect,
   IPC.script.edit,
   IPC.script.run,
   IPC.note.save,
@@ -156,6 +158,21 @@ function toNamespaceQueryPayload(
     include_private: options.includePrivate,
     include_modules: options.includeModules,
     include_callables: options.includeCallables,
+  };
+}
+
+/**
+ * Convert renderer namespace inspect targets to protocol payload keys.
+ *
+ * @param target - Renderer inspect target.
+ * @returns Protocol payload object for `pdv.namespace.inspect`.
+ */
+function toNamespaceInspectPayload(
+  target: NamespaceInspectTarget
+): Record<string, unknown> {
+  return {
+    root_name: target.rootName,
+    path: target.path,
   };
 }
 
@@ -414,6 +431,7 @@ export function registerIpcHandlers(
     kernelWorkingDirs,
     readConfig,
     toNamespaceQueryPayload,
+    toNamespaceInspectPayload,
     sanitizeScriptName,
     ensureScriptFile,
     resolveScriptPath,

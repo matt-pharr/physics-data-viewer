@@ -125,6 +125,11 @@
   cursor: pointer;
 }
 
+.namespace-row-notice,
+.namespace-row-error {
+  cursor: default;
+}
+
 .namespace-table td {
   padding: 6px 12px;
   color: var(--text-primary);
@@ -139,8 +144,61 @@
   color: var(--accent);
 }
 
+.namespace-name-cell {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.namespace-toggle {
+  width: 18px;
+  height: 18px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+  padding: 0;
+  flex-shrink: 0;
+}
+
+.namespace-toggle:hover:not(:disabled) {
+  color: var(--accent);
+}
+
+.namespace-toggle.hidden {
+  visibility: hidden;
+  cursor: default;
+}
+
+.namespace-name-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 .namespace-type {
   color: var(--text-secondary);
+}
+
+.namespace-type-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 6px;
+  margin-right: 4px;
+  border-radius: 999px;
+  background-color: var(--bg-tertiary);
+  color: var(--text-secondary);
+  font-size: 11px;
+  line-height: 1.2;
+}
+
+.namespace-type-badge.subtle {
+  background-color: transparent;
+  border: 1px solid var(--border-color);
 }
 
 .namespace-shape {
@@ -168,6 +226,16 @@
 }
 
 .namespace-error {
+  color: var(--error);
+}
+
+.namespace-message-row {
+  padding-left: 28px;
+  color: var(--text-secondary);
+  font-style: italic;
+}
+
+.namespace-message-error {
   color: var(--error);
 }
 

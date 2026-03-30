@@ -73,6 +73,8 @@ const api: PDVApi = {
   namespace: {
     query: (kernelId, options) =>
       ipcRenderer.invoke(IPC.namespace.query, kernelId, options),
+    inspect: (kernelId, target) =>
+      ipcRenderer.invoke(IPC.namespace.inspect, kernelId, target),
   },
   script: {
     run: (kernelId, request) =>

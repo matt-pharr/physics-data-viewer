@@ -69,6 +69,7 @@ export const IPC = {
   /** Namespace inspection channels. */
   namespace: {
     query: "namespace:query",
+    inspect: "namespace:inspect",
   },
   /** Script tooling channels. */
   script: {
@@ -222,12 +223,30 @@ export interface NamespaceQueryOptions {
   includeCallables?: boolean;
 }
 
+/** Serializable selector used to drill into a namespace value. */
+export interface NamespaceAccessSegment {
+  /** Access mode used to resolve the next child. */
+  kind: "attr" | "index" | "key" | "column";
+  /** Primitive selector value used by the kernel resolver. */
+  value: string | number | boolean | null;
+}
+
+/** Target value for lazy namespace inspection. */
+export interface NamespaceInspectTarget {
+  /** Top-level namespace variable name. */
+  rootName: string;
+  /** Selector chain from the root variable to the current node. */
+  path: NamespaceAccessSegment[];
+}
+
 /**
  * Descriptor for a single variable in the namespace panel.
  */
-export interface NamespaceVariable {
-  /** Variable name in the user namespace. */
+export interface NamespaceInspectorNode {
+  /** Display name for this row within the namespace inspector. */
   name: string;
+  /** Canonical inspector kind used for branching/rendering. */
+  kind: string;
   /** Runtime type label (e.g., `int`, `DataFrame`, `ndarray`). */
   type: string;
   /** Optional module the value originates from. */
@@ -238,8 +257,33 @@ export interface NamespaceVariable {
   dtype?: string;
   /** Optional length for sequence-like values. */
   length?: number;
+  /** Optional byte-size estimate for sorting/display. */
+  size?: number;
   /** Optional short UI preview string. */
   preview?: string;
+  /** Whether this row can be expanded for child inspection. */
+  hasChildren?: boolean;
+  /** Known child count when cheap to determine. */
+  childCount?: number;
+  /** Selector chain from the root variable to this node. */
+  path: NamespaceAccessSegment[];
+  /** Full user-facing expression for copy/tooltip actions. */
+  expression: string;
+}
+
+/**
+ * Descriptor for a single top-level variable in the namespace panel.
+ */
+export interface NamespaceVariable extends NamespaceInspectorNode {}
+
+/** Response payload returned from `namespace.inspect`. */
+export interface NamespaceInspectResult {
+  /** Child rows for the inspected node. */
+  children: NamespaceInspectorNode[];
+  /** Whether child results were truncated by inspection limits. */
+  truncated: boolean;
+  /** Total child count before truncation when known. */
+  totalChildren?: number;
 }
 
 // ---------------------------------------------------------------------------
@@ -1090,6 +1134,17 @@ export interface PDVApi {
       kernelId: string,
       options?: NamespaceQueryOptions
     ): Promise<NamespaceVariable[]>;
+    /**
+     * Lazily inspect the children of one namespace value.
+     *
+     * @param kernelId - Target kernel ID.
+     * @param target - Root variable plus selector path to inspect.
+     * @returns One-level child inspector rows.
+     */
+    inspect(
+      kernelId: string,
+      target: NamespaceInspectTarget
+    ): Promise<NamespaceInspectResult>;
   };
 
   /** Script tooling operations. */

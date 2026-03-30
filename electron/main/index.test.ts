@@ -381,7 +381,14 @@ describe("Step 5 IPC handlers", () => {
 
   it("namespace:query sends pdv.namespace.query and returns variables", async () => {
     const { commRouter } = setup();
-    const variables: NamespaceVariable[] = [{ name: "x", type: "int", preview: "42" }];
+    const variables: NamespaceVariable[] = [{
+      name: "x",
+      kind: "scalar",
+      type: "int",
+      preview: "42",
+      path: [],
+      expression: "x",
+    }];
     (commRouter.request as unknown as ReturnType<typeof vi.fn>).mockResolvedValue(
       makeMessage({ variables })
     );
@@ -402,6 +409,51 @@ describe("Step 5 IPC handlers", () => {
       }
     );
     expect(result).toEqual(variables);
+  });
+
+  it("namespace:inspect sends pdv.namespace.inspect and returns child rows", async () => {
+    const { commRouter } = setup();
+    const payload = {
+      children: [{
+        name: "[0]",
+        kind: "scalar",
+        type: "int",
+        preview: "1",
+        path: [{ kind: "index", value: 0 }],
+        expression: "arr[0]",
+      }],
+      truncated: false,
+      total_children: 1,
+    };
+    (commRouter.request as unknown as ReturnType<typeof vi.fn>).mockResolvedValue(
+      makeMessage(payload)
+    );
+
+    const inspect = getHandler(IPC.namespace.inspect);
+    const result = await inspect({}, "kernel-1", {
+      rootName: "arr",
+      path: [],
+    });
+
+    expect(commRouter.request).toHaveBeenCalledWith(
+      PDVMessageType.NAMESPACE_INSPECT,
+      {
+        root_name: "arr",
+        path: [],
+      }
+    );
+    expect(result).toEqual({
+      children: [{
+        name: "[0]",
+        kind: "scalar",
+        type: "int",
+        preview: "1",
+        path: [{ kind: "index", value: 0 }],
+        expression: "arr[0]",
+      }],
+      truncated: false,
+      totalChildren: 1,
+    });
   });
 
   it("script:edit spawns the configured external editor process", async () => {

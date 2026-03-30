@@ -4,6 +4,8 @@ pdv_kernel.handlers.namespace — Handler for PDV namespace query messages.
 Handles:
 - ``pdv.namespace.query``: return a snapshot of the kernel user
   namespace for the Namespace panel.
+- ``pdv.namespace.inspect``: lazily inspect one namespace value and
+  return a single level of children.
 
 See Also
 --------
@@ -66,4 +68,27 @@ def handle_namespace_query(msg: dict) -> None:
     send_message("pdv.namespace.query.response", {"variables": variables}, in_reply_to=msg_id)
 
 
+def handle_namespace_inspect(msg: dict) -> None:
+    """Handle the ``pdv.namespace.inspect`` message."""
+    from pdv_kernel.comms import get_ip, send_message  # noqa: PLC0415
+    from pdv_kernel.namespace import inspect_namespace  # noqa: PLC0415
+
+    msg_id = msg.get("msg_id")
+    payload = msg.get("payload", {})
+    root_name = payload.get("root_name", "")
+    path = payload.get("path", [])
+
+    ip = get_ip()
+    ns = ip.user_ns if ip is not None else {}
+
+    response_payload = inspect_namespace(
+        ns,
+        root_name=root_name,
+        path=path,
+    )
+
+    send_message("pdv.namespace.inspect.response", response_payload, in_reply_to=msg_id)
+
+
 register("pdv.namespace.query", handle_namespace_query)
+register("pdv.namespace.inspect", handle_namespace_inspect)

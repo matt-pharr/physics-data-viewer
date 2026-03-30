@@ -228,8 +228,27 @@ describe("@slow Cross-boundary integration (Python + Electron)", { timeout: 120_
       .variables;
     expect(variables).toBeDefined();
     expect(variables?.x).toBeDefined();
-    expect(variables?.x.type).toBe("scalar");
+    expect(variables?.x.type).toBe("int");
+    expect(variables?.x.kind).toBe("scalar");
     expect(String(variables?.x.preview)).toContain("42");
+  });
+
+  it("send pdv.namespace.inspect -> Python returns child namespace values", async () => {
+    const seedResult = await km.execute(kernelId, { code: "arr = [1, 2, 3]" });
+    expect(seedResult.error).toBeUndefined();
+
+    const response = await router.request(PDVMessageType.NAMESPACE_INSPECT, {
+      root_name: "arr",
+      path: [],
+    });
+    expect(response.status).toBe("ok");
+    const payload = response.payload as {
+      children?: Array<{ name?: string; expression?: string }>;
+      truncated?: boolean;
+    };
+    expect(payload.truncated).toBe(false);
+    expect(payload.children?.[0]?.name).toBe("[0]");
+    expect(payload.children?.[0]?.expression).toBe("arr[0]");
   });
 
   it("send pdv.project.save -> tree-index.json written to disk", async () => {

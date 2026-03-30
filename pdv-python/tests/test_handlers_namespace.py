@@ -1,15 +1,16 @@
 """
-pdv-python/tests/test_handlers_namespace.py — Tests for pdv.namespace.query handler.
+pdv-python/tests/test_handlers_namespace.py — Tests for namespace handlers.
 """
 
 import math
 import uuid
+from dataclasses import dataclass
 from unittest.mock import MagicMock, patch
 
 import pytest
 
 import pdv_kernel.comms as comms_mod
-from pdv_kernel.handlers.namespace import handle_namespace_query
+from pdv_kernel.handlers.namespace import handle_namespace_inspect, handle_namespace_query
 
 
 def _make_mock_comm():
@@ -26,6 +27,16 @@ def _make_msg(payload=None, msg_id=None):
         'msg_id': msg_id or str(uuid.uuid4()),
         'in_reply_to': None,
         'type': 'pdv.namespace.query',
+        'payload': payload or {},
+    }
+
+
+def _make_inspect_msg(payload=None, msg_id=None):
+    return {
+        'pdv_version': comms_mod.PDV_PROTOCOL_VERSION,
+        'msg_id': msg_id or str(uuid.uuid4()),
+        'in_reply_to': None,
+        'type': 'pdv.namespace.inspect',
         'payload': payload or {},
     }
 
@@ -101,5 +112,39 @@ class TestHandleNamespaceQuery:
 
         arr_desc = mock_comm._sent[0]['payload']['variables']['arr']
         assert arr_desc['type'] == 'ndarray'
+        assert arr_desc['kind'] == 'ndarray'
         assert arr_desc['shape'] == [2, 2]
         assert 'int64' in arr_desc['dtype']
+
+
+class TestHandleNamespaceInspect:
+    def test_inspect_array_returns_index_children(self):
+        numpy = pytest.importorskip('numpy')
+        ip = MagicMock()
+        ip.user_ns = {'arr': numpy.array([1, 2, 3])}
+        mock_comm = _make_mock_comm()
+        msg = _make_inspect_msg({'root_name': 'arr', 'path': []})
+        with patch.object(comms_mod, '_comm', mock_comm), patch.object(comms_mod, '_ip', ip):
+            handle_namespace_inspect(msg)
+
+        response = mock_comm._sent[0]
+        assert response['type'] == 'pdv.namespace.inspect.response'
+        children = response['payload']['children']
+        assert children[0]['name'] == '[0]'
+        assert children[0]['expression'] == 'arr[0]'
+
+    def test_inspect_object_returns_attribute_children(self):
+        @dataclass
+        class Sample:
+            alpha: int
+            beta: int
+
+        ip = MagicMock()
+        ip.user_ns = {'sample': Sample(alpha=1, beta=2)}
+        mock_comm = _make_mock_comm()
+        msg = _make_inspect_msg({'root_name': 'sample', 'path': []})
+        with patch.object(comms_mod, '_comm', mock_comm), patch.object(comms_mod, '_ip', ip):
+            handle_namespace_inspect(msg)
+
+        children = mock_comm._sent[0]['payload']['children']
+        assert {child['name'] for child in children} == {'alpha', 'beta'}

@@ -149,9 +149,22 @@ export interface NamespaceQueryOptions {
   includeCallables?: boolean;
 }
 
+/** Serializable selector used to drill into a namespace value. */
+export interface NamespaceAccessSegment {
+  kind: "attr" | "index" | "key" | "column";
+  value: string | number | boolean | null;
+}
+
+/** Target value for lazy namespace inspection. */
+export interface NamespaceInspectTarget {
+  rootName: string;
+  path: NamespaceAccessSegment[];
+}
+
 /** One row in the Namespace panel. */
-export interface NamespaceVariable {
+export interface NamespaceInspectorNode {
   name: string;
+  kind: string;
   type: string;
   module?: string;
   shape?: number[];
@@ -159,6 +172,20 @@ export interface NamespaceVariable {
   length?: number;
   size?: number;
   preview?: string;
+  hasChildren?: boolean;
+  childCount?: number;
+  path: NamespaceAccessSegment[];
+  expression: string;
+}
+
+/** One top-level row in the Namespace panel. */
+export interface NamespaceVariable extends NamespaceInspectorNode {}
+
+/** Lazy child-inspection response for a namespace node. */
+export interface NamespaceInspectResult {
+  children: NamespaceInspectorNode[];
+  truncated: boolean;
+  totalChildren?: number;
 }
 
 /** Custom appearance theme payload persisted through `themes.*` API. */
@@ -616,6 +643,7 @@ export interface PDVApi {
   };
   namespace: {
     query(kernelId: string, options?: NamespaceQueryOptions): Promise<NamespaceVariable[]>;
+    inspect(kernelId: string, target: NamespaceInspectTarget): Promise<NamespaceInspectResult>;
   };
   script: {
     run(kernelId: string, request: ScriptRunRequest): Promise<ScriptRunResult>;
