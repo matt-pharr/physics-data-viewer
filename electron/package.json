@@ -2,11 +2,20 @@
   "name": "physics-data-viewer",
   "version": "0.0.6",
   "private": true,
+  "author": {
+    "name": "Matthew Pharr",
+    "email": "m.pharr@protonmail.com",
+    "url": "https://github.com/matt-pharr"
+  },
+  "homepage": "https://github.com/matt-pharr/physics-data-viewer",
   "main": "dist/main/bootstrap.js",
   "electronmon": {
     "patterns": [
       "!dist/**"
     ]
+  },
+  "repository": {
+    "url": "https://github.com/matt-pharr/physics-data-viewer"
   },
   "scripts": {
     "dev": "node ./node_modules/concurrently/dist/bin/concurrently.js -k \"npm:dev:main\" \"npm:dev:renderer\"",
