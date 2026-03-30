@@ -16,6 +16,10 @@
     "build": "npm run build:renderer && npm run build:main",
     "build:renderer": "cd renderer && node ../node_modules/vite/bin/vite.js build",
     "build:main": "node ./node_modules/typescript/bin/tsc -p tsconfig.json",
+    "pack": "npm run build && electron-builder --dir",
+    "dist": "npm run build && electron-builder",
+    "dist:mac": "npm run build && electron-builder --mac",
+    "dist:linux": "npm run build && electron-builder --linux",
     "test": "node ./node_modules/vitest/vitest.mjs run",
     "lint": "eslint .",
     "knip": "knip"
@@ -32,6 +36,7 @@
     "concurrently": "^8.2.0",
     "cross-env": "^7.0.3",
     "electron": "^35.7.5",
+    "electron-builder": "^26.8.1",
     "electronmon": "^2.0.2",
     "eslint": "^9.39.4",
     "eslint-plugin-react-hooks": "^7.0.1",

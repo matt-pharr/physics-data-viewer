@@ -8,6 +8,7 @@ __pycache__/
 .DS_Store
 pdv-icon.iconset
 *.icns
+electron/release/
 
 # Tree directory (now stored in /tmp)
 /tree/
