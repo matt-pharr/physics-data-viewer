@@ -324,7 +324,9 @@ export const EnvironmentSelector: React.FC<EnvironmentSelectorProps> = ({
           {/* Streaming output */}
           {(installOutput.length > 0 || installResult) && (
             <pre className="env-install-output" ref={outputRef}>
-              {installOutput.join('')}
+              {installOutput.length > 0
+                ? installOutput.join('')
+                : installResult?.output ?? ''}
             </pre>
           )}
 
@@ -333,7 +335,7 @@ export const EnvironmentSelector: React.FC<EnvironmentSelectorProps> = ({
             <div className={installResult.success ? 'env-install-success' : 'error-text'}>
               {installResult.success
                 ? 'Installation complete.'
-                : 'Installation failed. Check the output above for details.'}
+                : 'Installation failed.'}
             </div>
           )}
         </div>

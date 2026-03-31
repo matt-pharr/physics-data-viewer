@@ -606,35 +606,37 @@ export class EnvironmentDetector {
       });
     }
 
-    // macOS App Translocation: when the app runs directly from a DMG or
-    // the Downloads folder, macOS moves it to a random read-only path
-    // under /private/var/folders/.../AppTranslocation/. pip cannot write
-    // build artifacts (egg-info) into a read-only source tree.
-    if (bundledPath.includes("AppTranslocation")) {
-      return Promise.resolve({
-        success: false,
-        output:
-          "PDV is running from a read-only disk image or temporary location.\n\n" +
-          "Please move PDV.app to your Applications folder (or another permanent location) and relaunch it before installing packages.",
-      });
-    }
-
-    // Pre-check: verify the bundled source directory is writable (pip needs
-    // to create egg-info during the build step).
+    // pip needs to write build artifacts (egg-info) into the source tree.
+    // When the bundled source is read-only (macOS App Translocation, Linux
+    // dpkg install to /opt, etc.), copy it to a temp directory first.
+    let installPath = bundledPath;
+    let tempDir: string | null = null;
+    const probeFile = path.join(bundledPath, ".pdv-write-test");
+    let needsCopy = false;
     try {
-      fs.accessSync(bundledPath, fs.constants.W_OK);
+      fs.writeFileSync(probeFile, "", { flag: "wx" });
+      fs.unlinkSync(probeFile);
     } catch {
-      return Promise.resolve({
-        success: false,
-        output:
-          "The bundled pdv-python source directory is read-only.\n\n" +
-          "If you are running PDV from a disk image, please move PDV.app to your Applications folder and relaunch.",
-      });
+      needsCopy = true;
+    }
+    if (needsCopy) {
+      try {
+        tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "pdv-install-"));
+        const tempPdvPython = path.join(tempDir, "pdv-python");
+        fs.cpSync(bundledPath, tempPdvPython, { recursive: true });
+        installPath = tempPdvPython;
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        return Promise.resolve({
+          success: false,
+          output: `Failed to copy bundled source to a temporary directory: ${msg}`,
+        });
+      }
     }
 
     return new Promise((resolve) => {
       const chunks: string[] = [];
-      const proc = spawn(pythonPath, ["-m", "pip", "install", "--no-color", bundledPath], {
+      const proc = spawn(pythonPath, ["-m", "pip", "install", "--no-color", installPath], {
         stdio: ["ignore", "pipe", "pipe"],
         timeout: 120_000,
       });
@@ -649,7 +651,14 @@ export class EnvironmentDetector {
       proc.stdout?.on("data", (buf: Buffer) => sendChunk("stdout", buf.toString()));
       proc.stderr?.on("data", (buf: Buffer) => sendChunk("stderr", buf.toString()));
 
+      const cleanup = (): void => {
+        if (tempDir) {
+          try { fs.rmSync(tempDir, { recursive: true, force: true }); } catch { /* best-effort */ }
+        }
+      };
+
       proc.on("close", (code) => {
+        cleanup();
         resolve({
           success: code === 0,
           output: chunks.join(""),
@@ -657,6 +666,7 @@ export class EnvironmentDetector {
       });
 
       proc.on("error", (err) => {
+        cleanup();
         sendChunk("stderr", err.message);
         resolve({ success: false, output: chunks.join("") });
       });
