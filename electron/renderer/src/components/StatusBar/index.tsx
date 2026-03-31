@@ -19,6 +19,8 @@ interface StatusBarProps {
   lastDuration: number | null;
   progress: ProgressPayload | null;
   onRuntimeClick: () => void;
+  lastChecksum: string | null;
+  checksumMismatch: boolean;
 }
 
 /** Application status bar at the bottom of the window. */
@@ -33,6 +35,8 @@ export const StatusBar: React.FC<StatusBarProps> = ({
   lastDuration,
   progress,
   onRuntimeClick,
+  lastChecksum,
+  checksumMismatch,
 }) => {
   const runtimeLabel = activeLanguage === 'julia'
     ? (juliaPath ?? 'julia')
@@ -73,6 +77,14 @@ export const StatusBar: React.FC<StatusBarProps> = ({
         <span className="status-item">{currentProjectDir ?? 'Unsaved Project'}</span>
       </div>
       <div className="status-right">
+        {lastChecksum && (
+          <span
+            className={`status-item ${checksumMismatch ? 'status-warning' : ''}`}
+            title={checksumMismatch ? 'Checksum mismatch — data may have changed since last save' : 'Project checksum'}
+          >
+            {checksumMismatch ? '⚠' : '◆'} {lastChecksum}
+          </span>
+        )}
         <span className={`status-item ${kernelStatus === 'ready' ? 'status-connected' : kernelStatus === 'error' ? 'status-error' : ''}`}>
           ● {kernelStatus === 'ready' ? 'Connected' : kernelStatus === 'starting' ? 'Starting...' : 'Disconnected'}
         </span>
