@@ -13,6 +13,8 @@ ARCHITECTURE.md §4.1 (startup sequence), §3.4 (lifecycle messages)
 
 from __future__ import annotations
 
+import os
+
 from pdv_kernel.handlers import register
 
 
@@ -73,6 +75,7 @@ def handle_init(msg: dict) -> None:
     if tree is not None:
         tree._set_working_dir(validated)
 
+    os.chdir(os.path.expanduser("~"))
     send_message("pdv.init.response", {}, in_reply_to=msg_id)
 
 
