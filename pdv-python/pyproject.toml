@@ -9,6 +9,7 @@ description = "PDV kernel support package — implements the PDV comm protocol a
 requires-python = ">=3.10"
 dependencies = [
     "ipykernel>=6.0",
+    "xxhash>=3.0",
 ]
 
 [project.optional-dependencies]

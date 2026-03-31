@@ -61,6 +61,10 @@
   color: var(--error);
 }
 
+.status-warning {
+  color: var(--warning);
+}
+
 .status-dot {
   width: 8px;
   height: 8px;

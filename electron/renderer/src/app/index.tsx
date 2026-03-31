@@ -93,6 +93,8 @@ const App: React.FC = () => {
   const [codeCellExecutionError, setCodeCellExecutionError] =
     useState<CodeCellExecutionError | undefined>(undefined);
   const [lastDuration, setLastDuration] = useState<number | null>(null);
+  const [lastChecksum, setLastChecksum] = useState<string | null>(null);
+  const [checksumMismatch, setChecksumMismatch] = useState<boolean>(false);
 
   // -- App / config state ---------------------------------------------------
   const [config, setConfig] = useState<Config | null>(null);
@@ -721,6 +723,8 @@ const App: React.FC = () => {
     setProgress,
     setLastError,
     setLogs,
+    setLastChecksum,
+    setChecksumMismatch,
     loadedProjectTabsRef,
     normalizeLoadedCodeCells,
     flushDirtyNotes,
@@ -1043,6 +1047,8 @@ const App: React.FC = () => {
           lastDuration={lastDuration}
           progress={progress}
           onRuntimeClick={() => { setSettingsInitialTab('runtime'); setShowSettings(true); }}
+          lastChecksum={lastChecksum}
+          checksumMismatch={checksumMismatch}
         />
 
        {showEnvSelector && (

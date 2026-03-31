@@ -810,9 +810,10 @@ describe("Step 5 IPC handlers", () => {
 
   it("project:load delegates to ProjectManager.load", async () => {
     const { projectManager } = setup();
-    (projectManager.load as unknown as ReturnType<typeof vi.fn>).mockResolvedValue([
-      { id: "box1" },
-    ]);
+    (projectManager.load as unknown as ReturnType<typeof vi.fn>).mockResolvedValue({
+      codeCells: [{ id: "box1" }],
+      postLoadChecksum: null,
+    });
     const load = getHandler(IPC.project.load);
     const result = await load({}, "/tmp/project");
     expect(projectManager.load).toHaveBeenCalledWith("/tmp/project");

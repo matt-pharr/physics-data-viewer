@@ -304,9 +304,13 @@ def handle_project_load(msg: dict) -> None:
 
     os.chdir(os.path.expanduser("~"))
     node_count = len(nodes)
+
+    from pdv_kernel.checksum import tree_checksum  # noqa: PLC0415
+    post_load_checksum = tree_checksum(tree)
+
     send_message(
         "pdv.project.load.response",
-        {"node_count": node_count},
+        {"node_count": node_count, "post_load_checksum": post_load_checksum},
         in_reply_to=msg_id,
     )
     # Send pdv.project.loaded push notification (no in_reply_to)
@@ -340,7 +344,6 @@ def handle_project_save(msg: dict) -> None:
     msg : dict
         Parsed PDV message envelope.
     """
-    import hashlib
     import json
     import os
 
@@ -403,7 +406,8 @@ def handle_project_save(msg: dict) -> None:
     with open(index_path, "w", encoding="utf-8") as fh:
         fh.write(index_data)
 
-    checksum = hashlib.sha256(index_data.encode("utf-8")).hexdigest()
+    from pdv_kernel.checksum import tree_checksum  # noqa: PLC0415
+    checksum = tree_checksum(tree)
 
     send_message(
         "pdv.project.save.response",

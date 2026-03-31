@@ -293,7 +293,7 @@ describe("ProjectManager", () => {
       triggerPush(PDVMessageType.PROJECT_LOADED);
       const result = await loadPromise;
 
-      expect(result).toEqual(boxes);
+      expect(result.codeCells).toEqual(boxes);
     });
   });
 

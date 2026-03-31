@@ -70,7 +70,7 @@ dmg:
 # ---------------------------------------------------------------------------
 linux:
   category: Science
-  icon: assets/pdv-icon.svg
+  icon: assets/pdv-icon-linux.svg
   target:
     - target: AppImage
       arch:
