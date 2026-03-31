@@ -605,6 +605,33 @@ export class EnvironmentDetector {
         output: "Could not locate bundled pdv-python source directory.",
       });
     }
+
+    // macOS App Translocation: when the app runs directly from a DMG or
+    // the Downloads folder, macOS moves it to a random read-only path
+    // under /private/var/folders/.../AppTranslocation/. pip cannot write
+    // build artifacts (egg-info) into a read-only source tree.
+    if (bundledPath.includes("AppTranslocation")) {
+      return Promise.resolve({
+        success: false,
+        output:
+          "PDV is running from a read-only disk image or temporary location.\n\n" +
+          "Please move PDV.app to your Applications folder (or another permanent location) and relaunch it before installing packages.",
+      });
+    }
+
+    // Pre-check: verify the bundled source directory is writable (pip needs
+    // to create egg-info during the build step).
+    try {
+      fs.accessSync(bundledPath, fs.constants.W_OK);
+    } catch {
+      return Promise.resolve({
+        success: false,
+        output:
+          "The bundled pdv-python source directory is read-only.\n\n" +
+          "If you are running PDV from a disk image, please move PDV.app to your Applications folder and relaunch.",
+      });
+    }
+
     return new Promise((resolve) => {
       const chunks: string[] = [];
       const proc = spawn(pythonPath, ["-m", "pip", "install", "--no-color", bundledPath], {

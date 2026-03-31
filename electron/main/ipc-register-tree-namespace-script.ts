@@ -429,9 +429,20 @@ export function registerTreeNamespaceScriptIpcHandlers(
     const cmdString = isJulia ? config.juliaEditorCmd : config.pythonEditorCmd;
     const { file, args } = buildEditorSpawn(cmdString, resolvedPath);
     const spawnSpec = resolveEditorSpawn(file, args);
-    const child = spawn(spawnSpec.file, spawnSpec.args, { detached: true, stdio: "ignore" });
-    child.unref();
-    return { success: true };
+    try {
+      const child = spawn(spawnSpec.file, spawnSpec.args, { detached: true, stdio: "ignore" });
+      child.on("error", (err) => {
+        const msg = err && (err as NodeJS.ErrnoException).code === "ENOENT"
+          ? `Editor command not found: "${spawnSpec.file}". Configure your editor in Settings → General.`
+          : `Failed to launch editor: ${err.message}`;
+        console.error("[pdv] editor spawn error:", msg);
+      });
+      child.unref();
+      return { success: true };
+    } catch (err) {
+      const error = err instanceof Error ? err.message : String(err);
+      return { success: false, error: `Failed to launch editor: ${error}` };
+    }
   });
 
   ipcMain.handle(
