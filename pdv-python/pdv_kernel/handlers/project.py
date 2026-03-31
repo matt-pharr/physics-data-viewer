@@ -302,6 +302,7 @@ def handle_project_load(msg: dict) -> None:
             value = deserialize_node(storage, working_dir, trusted=True)
             _set_tree_node(tree, node_path, value)
 
+    os.chdir(os.path.expanduser("~"))
     node_count = len(nodes)
     send_message(
         "pdv.project.load.response",
