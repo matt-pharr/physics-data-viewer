@@ -25,7 +25,7 @@
  */
 
 import { CommRouter } from "./comm-router";
-import { PDVMessageType, PDV_PROTOCOL_VERSION } from "./pdv-protocol";
+import { PDVMessageType, PDV_PROTOCOL_VERSION, type PDVProjectLoadResponsePayload } from "./pdv-protocol";
 import * as fs from "fs/promises";
 import * as path from "path";
 import * as os from "os";
@@ -230,10 +230,10 @@ export class ProjectManager {
    * before calling this method, and for running module setup after.
    *
    * @param saveDir - Absolute path to the project directory.
-   * @returns The code-cell state read from ``code-cells.json``.
+   * @returns The code-cell state and post-load checksum from the kernel.
    * @throws {PDVCommError} When the kernel responds with status='error'.
    */
-  async load(saveDir: string): Promise<unknown> {
+  async load(saveDir: string): Promise<{ codeCells: unknown; postLoadChecksum: string | null }> {
     // Step 1 — register the push handler BEFORE sending the request so the
     // notification is never missed even if the kernel responds very quickly.
     const pushPromise = new Promise<void>((resolve) => {
@@ -247,15 +247,19 @@ export class ProjectManager {
     // Step 2 — send pdv.project.load comm.
     // The request resolves when the kernel sends pdv.project.load.response.
     // Use progress pushes as keep-alive to prevent timeout during large loads.
-    await this.commRouter.request(PDVMessageType.PROJECT_LOAD, {
+    const response = await this.commRouter.request(PDVMessageType.PROJECT_LOAD, {
       save_dir: saveDir,
     }, { keepAlivePushType: PDVMessageType.PROGRESS });
+
+    const loadPayload = response.payload as unknown as PDVProjectLoadResponsePayload;
+    const postLoadChecksum = loadPayload?.post_load_checksum ?? null;
 
     // Step 3 — wait for the pdv.project.loaded push notification.
     await pushPromise;
 
     // Step 4 — read code-cells.json.
-    return _readCodeCells(saveDir);
+    const codeCells = await _readCodeCells(saveDir);
+    return { codeCells, postLoadChecksum };
   }
 
   /**

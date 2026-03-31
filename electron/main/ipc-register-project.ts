@@ -12,7 +12,6 @@
  * - Config/theme/file-picker handlers.
  */
 
-import * as crypto from "crypto";
 import * as fs from "fs/promises";
 import * as path from "path";
 import { ipcMain, type BrowserWindow } from "electron";
@@ -120,34 +119,29 @@ export function registerProjectIpcHandlers(
     setPendingModuleSettings({});
     await refreshProjectModuleHealth(saveDir);
 
-    // Checksum validation (warn-only)
+    // Read the manifest checksum (the value stored at save time).
     let checksum: string | null = null;
-    let checksumValid: boolean | null = null;
     let nodeCount: number | null = null;
     try {
       const manifest = await ProjectManager.readManifest(saveDir);
       checksum = manifest.tree_checksum || null;
-      if (checksum) {
-        const treeIndexRaw = await fs.readFile(
-          path.join(saveDir, "tree-index.json"),
-          "utf8"
-        );
-        const computed = crypto
-          .createHash("sha256")
-          .update(treeIndexRaw)
-          .digest("hex");
-        checksumValid = computed === checksum;
-        if (!checksumValid) {
-          console.warn(
-            `[pdv] tree-index.json checksum mismatch: expected ${checksum}, got ${computed}`
-          );
-        }
-      }
     } catch {
-      // Non-blocking — proceed with load even if validation fails
+      // Non-blocking — proceed with load even if manifest read fails
     }
 
-    const loaded = await projectManager.load(saveDir);
+    const { codeCells, postLoadChecksum } = await projectManager.load(saveDir);
+
+    // Validate: compare the kernel's post-load checksum against the stored one.
+    const checksumValid =
+      postLoadChecksum != null && checksum != null
+        ? postLoadChecksum === checksum
+        : null;
+
+    if (checksumValid === false) {
+      console.warn(
+        `[pdv] tree checksum mismatch after load: expected ${checksum}, got ${postLoadChecksum}`
+      );
+    }
 
     // Read node count from tree-index.json
     try {
@@ -161,7 +155,7 @@ export function registerProjectIpcHandlers(
       // Non-blocking
     }
 
-    return { codeCells: loaded, checksum, checksumValid, nodeCount };
+    return { codeCells, checksum, checksumValid, nodeCount };
   });
 
   ipcMain.handle(IPC.project.new, async () => {

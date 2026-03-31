@@ -215,6 +215,14 @@ export interface PDVProjectLoadedPayload {
   saved_at: string;
 }
 
+/** Payload for pdv.project.load.response (kernel → app). */
+export interface PDVProjectLoadResponsePayload {
+  /** Total number of tree nodes loaded from the project. */
+  node_count: number;
+  /** Content-based SHA-256 checksum of the reconstructed in-memory tree. */
+  post_load_checksum: string;
+}
+
 /** Payload for pdv.project.save (app → kernel). */
 interface PDVProjectSavePayload {
   /** Absolute path to the project save directory. */
