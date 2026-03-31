@@ -63,7 +63,7 @@ export interface ProjectManifest {
   saved_at: string;
   /** PDV protocol version used when saving. */
   pdv_version: string;
-  /** SHA-256 checksum of tree-index.json. */
+  /** XXH3-128 content-based checksum of the tree. */
   tree_checksum: string;
   /** Kernel language used by this project ("python" or "julia"). */
   language: "python" | "julia";

@@ -1,7 +1,7 @@
 """
 pdv_kernel.checksum — Content-based Merkle-tree checksum for PDVTree.
 
-Computes a canonical, content-based SHA-256 checksum directly from the
+Computes a canonical, content-based XXH3-128 checksum directly from the
 in-memory PDVTree. The checksum is:
 - Independent of serialization order and timestamps
 - Recursively callable on any sub-tree (Merkle-tree structure)
@@ -10,6 +10,9 @@ in-memory PDVTree. The checksum is:
 File-backed nodes (PDVScript, PDVNote, PDVGui, PDVNamelist, PDVLib) are
 hashed including their file content. Missing files feed a sentinel value
 rather than raising, so partial sub-tree hashes work during debugging.
+
+XXH3-128 is a non-cryptographic hash used purely for change detection.
+It is not suitable for security purposes.
 
 This module has NO dependency on IPython, comms, or any Electron-facing
 code. It can be imported and tested standalone.
@@ -21,13 +24,14 @@ ARCHITECTURE.md §7.2 (node types)
 
 from __future__ import annotations
 
-import hashlib
 import struct
 from typing import Any
 
+import xxhash
+
 
 def tree_checksum(node: Any, working_dir: str | None = None) -> str:
-    """Return a 64-character hex SHA-256 digest for a PDVTree node or any
+    """Return a 32-character hex XXH3-128 digest for a PDVTree node or any
     sub-tree node.
 
     If ``node`` is a PDVTree and ``working_dir`` is None, ``node._working_dir``
@@ -52,13 +56,13 @@ def tree_checksum(node: Any, working_dir: str | None = None) -> str:
     Returns
     -------
     str
-        64-character lowercase hex SHA-256 digest.
+        32-character lowercase hex XXH3-128 digest.
     """
     from pdv_kernel.tree import PDVTree  # noqa: PLC0415
 
     if working_dir is None and isinstance(node, PDVTree):
         working_dir = getattr(node, "_working_dir", None)
-    h = hashlib.sha256()
+    h = xxhash.xxh3_128()
     _feed_node(h, node, working_dir)
     return h.hexdigest()
 
@@ -80,14 +84,14 @@ def _node_digest(node: Any, working_dir: str | None) -> bytes:
     Returns
     -------
     bytes
-        32-byte raw digest.
+        16-byte raw digest.
     """
-    h = hashlib.sha256()
+    h = xxhash.xxh3_128()
     _feed_node(h, node, working_dir)
     return h.digest()
 
 
-def _feed_node(h: "hashlib._Hash", node: Any, working_dir: str | None) -> None:  # type: ignore[name-defined]
+def _feed_node(h: xxhash.xxh3_128, node: Any, working_dir: str | None) -> None:
     """Feed the canonical byte representation of ``node`` into hasher ``h``.
 
     Dispatches on ``detect_kind(node)``. Every branch begins with a
@@ -171,30 +175,38 @@ def _feed_node(h: "hashlib._Hash", node: Any, working_dir: str | None) -> None: 
             _feed_node(h, item, working_dir)
 
     elif kind == KIND_NDARRAY:
+        import numpy as np  # noqa: PLC0415
         h.update(b"ndarray\x00")
         _feed_str(h, str(node.dtype))
         h.update(struct.pack("<Q", len(node.shape)))
         for d in node.shape:
             h.update(struct.pack("<Q", d))
-        h.update(node.tobytes())
+        # Feed array data directly via the buffer protocol — avoids a full
+        # tobytes() copy. np.ascontiguousarray is a zero-allocation no-op for
+        # arrays that are already C-contiguous (the typical case).
+        h.update(np.ascontiguousarray(node))
 
     elif kind == KIND_DATAFRAME:
+        import numpy as np  # noqa: PLC0415
         h.update(b"dataframe\x00")
         cols = list(node.columns)
         h.update(struct.pack("<Q", len(cols)))
         for col in cols:
             _feed_str(h, col)
-            _feed_str(h, str(node[col].dtype))
-            if node[col].dtype.kind in ("f", "i", "u", "c", "b"):
-                h.update(node[col].values.tobytes())
+            col_vals = node[col].values
+            _feed_str(h, str(col_vals.dtype))
+            if col_vals.dtype.kind in ("f", "i", "u", "c", "b"):
+                h.update(np.ascontiguousarray(col_vals))
             else:
                 _feed_str(h, repr(node[col].tolist()))
 
     elif kind == KIND_SERIES:
+        import numpy as np  # noqa: PLC0415
         h.update(b"series\x00")
-        _feed_str(h, str(node.dtype))
-        if node.dtype.kind in ("f", "i", "u", "c", "b"):
-            h.update(node.values.tobytes())
+        series_vals = node.values
+        _feed_str(h, str(series_vals.dtype))
+        if series_vals.dtype.kind in ("f", "i", "u", "c", "b"):
+            h.update(np.ascontiguousarray(series_vals))
         else:
             _feed_str(h, repr(node.tolist()))
 
@@ -230,7 +242,7 @@ def _feed_node(h: "hashlib._Hash", node: Any, working_dir: str | None) -> None: 
         _feed_str(h, repr(node))
 
 
-def _feed_str(h: "hashlib._Hash", s: str) -> None:  # type: ignore[name-defined]
+def _feed_str(h: xxhash.xxh3_128, s: str) -> None:
     """Feed a length-prefixed UTF-8 string into ``h``.
 
     Parameters
@@ -246,7 +258,7 @@ def _feed_str(h: "hashlib._Hash", s: str) -> None:  # type: ignore[name-defined]
 
 
 def _feed_file_content(
-    h: "hashlib._Hash",  # type: ignore[name-defined]
+    h: xxhash.xxh3_128,
     node: Any,
     working_dir: str | None,
 ) -> None:

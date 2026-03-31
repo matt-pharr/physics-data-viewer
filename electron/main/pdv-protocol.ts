@@ -219,7 +219,7 @@ export interface PDVProjectLoadedPayload {
 export interface PDVProjectLoadResponsePayload {
   /** Total number of tree nodes loaded from the project. */
   node_count: number;
-  /** Content-based SHA-256 checksum of the reconstructed in-memory tree. */
+  /** Content-based XXH3-128 checksum of the reconstructed in-memory tree. */
   post_load_checksum: string;
 }
 

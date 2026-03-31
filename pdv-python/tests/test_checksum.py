@@ -56,7 +56,7 @@ class TestEmptyTreeIsStable:
         d1 = tree_checksum(tree)
         d2 = tree_checksum(tree)
         assert d1 == d2
-        assert len(d1) == 64
+        assert len(d1) == 32
         assert all(c in "0123456789abcdef" for c in d1)
 
 
@@ -153,7 +153,7 @@ class TestFileBackedNodeContentSensitivity:
 
         # Should not raise
         checksum = tree_checksum(tree)
-        assert len(checksum) == 64
+        assert len(checksum) == 32
 
 
 class TestRoundtrip:
