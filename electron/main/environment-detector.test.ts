@@ -266,6 +266,134 @@ describe("EnvironmentDetector", () => {
     });
   });
 
+  describe("resolveBundledPDVPath()", () => {
+    it("finds pdv-python by walking up from __dirname", () => {
+      const result = EnvironmentDetector.resolveBundledPDVPath();
+      // In the test environment, __dirname is electron/main/ and pdv-python/
+      // is at the repo root — the walk-up should find it.
+      expect(result).not.toBeNull();
+      expect(result!).toMatch(/pdv-python$/);
+    });
+  });
+
+  describe("getBundledPDVVersion()", () => {
+    it("reads the version from pyproject.toml", () => {
+      const bundledPath = EnvironmentDetector.resolveBundledPDVPath();
+      expect(bundledPath).not.toBeNull();
+      const version = EnvironmentDetector.getBundledPDVVersion(bundledPath);
+      expect(version).toMatch(/^\d+\.\d+\.\d+/);
+    });
+
+    it("returns null for a nonexistent path", () => {
+      const version = EnvironmentDetector.getBundledPDVVersion("/nonexistent");
+      expect(version).toBeNull();
+    });
+  });
+
+  describe("checkIpykernelInstalled()", () => {
+    it("returns true when ipykernel is importable", async () => {
+      mockExecPerCommand({
+        "/usr/bin/python3": { stdout: "" },
+      });
+      const result = await EnvironmentDetector.checkIpykernelInstalled("/usr/bin/python3");
+      expect(result).toBe(true);
+    });
+
+    it("returns false when import fails", async () => {
+      mockExecAlwaysFail();
+      const result = await EnvironmentDetector.checkIpykernelInstalled("/bad/python");
+      expect(result).toBe(false);
+    });
+  });
+
+  describe("enrichEnvironment()", () => {
+    it("returns enriched info with pdv and ipykernel status", async () => {
+      // Mock: python --version succeeds, pdv_kernel import succeeds, ipykernel import succeeds
+      mockExecPerCommand({
+        "/usr/bin/python3": { stdout: "1.0.0\n" },
+      });
+
+      const baseEnv = {
+        kind: "system" as const,
+        pythonPath: "/usr/bin/python3",
+        jupyterPath: "jupyter",
+        label: "System — Python 3.11.0",
+        pythonVersion: "3.11.0",
+      };
+
+      const info = await EnvironmentDetector.enrichEnvironment(baseEnv, "1.0.0");
+
+      expect(info.kind).toBe("system");
+      expect(info.pythonPath).toBe("/usr/bin/python3");
+      expect(info.pdvInstalled).toBe(true);
+      expect(info.pdvVersion).toBe("1.0.0");
+      expect(info.pdvCompatible).toBe(true);
+      expect(info.pdvUpgradeAvailable).toBe(false);
+      expect(info.ipykernelInstalled).toBe(true);
+    });
+
+    it("flags upgrade available when bundled version is newer", async () => {
+      mockExecPerCommand({
+        "/usr/bin/python3": { stdout: "0.9.0\n" },
+      });
+
+      const baseEnv = {
+        kind: "system" as const,
+        pythonPath: "/usr/bin/python3",
+        jupyterPath: "jupyter",
+        label: "System — Python 3.11.0",
+        pythonVersion: "3.11.0",
+      };
+
+      const info = await EnvironmentDetector.enrichEnvironment(baseEnv, "1.0.0");
+
+      expect(info.pdvInstalled).toBe(true);
+      expect(info.pdvVersion).toBe("0.9.0");
+      expect(info.pdvUpgradeAvailable).toBe(true);
+    });
+  });
+
+  describe("detectEnvironments() with conda filesystem fallback", () => {
+    it("discovers conda envs from well-known paths when conda command is unavailable", async () => {
+      // The conda command will fail (mocked to always fail).
+      // But if ~/miniconda3 or similar exists on this machine,
+      // the filesystem fallback should pick it up.
+      mockExecPerCommand({
+        conda: new Error("command not found"),
+        python3: { stdout: "Python 3.9.7\n" },
+      });
+
+      // We need to also handle the python --version probes for any discovered envs.
+      // Override with a per-command handler that succeeds for any python path.
+      mocks.execFileMock.mockImplementation(
+        (
+          cmd: string,
+          args: string[],
+          _opts: unknown,
+          cb: (err: Error | null, stdout?: string, stderr?: string) => void
+        ) => {
+          if (cmd === "conda") {
+            cb(new Error("command not found"));
+          } else if (cmd.endsWith("/python") || cmd === "python3" || cmd === "python") {
+            if (args[0] === "--version") {
+              cb(null, "Python 3.11.0\n", "");
+            } else {
+              // import checks
+              cb(null, "1.0.0\n", "");
+            }
+          } else {
+            cb(new Error(`unexpected: ${cmd}`));
+          }
+        }
+      );
+
+      const envs = await EnvironmentDetector.detectEnvironments();
+      // We can't guarantee conda exists on every dev machine, but the code path
+      // should at least run without error and return the system Python fallback.
+      expect(envs.length).toBeGreaterThan(0);
+    });
+  });
+
   describe("clearCache()", () => {
     it("forces re-detection on next call", async () => {
       mockExecPerCommand({

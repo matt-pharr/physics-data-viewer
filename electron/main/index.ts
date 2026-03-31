@@ -117,6 +117,10 @@ const REGISTERED_CHANNELS: readonly string[] = [
   IPC.files.pickFile,
   IPC.files.pickDirectory,
   IPC.about.getVersion,
+  IPC.environment.list,
+  IPC.environment.check,
+  IPC.environment.install,
+  IPC.environment.refresh,
 ];
 
 interface PushSubscription {
@@ -494,6 +498,8 @@ export function registerIpcHandlers(
     mainWindow: win,
   });
 
+  registerEnvironmentIpcHandlers(win, configStore);
+
   registerPushForwarding(win, commRouter, moduleWindowManager);
 
   /**
@@ -511,6 +517,33 @@ export function registerIpcHandlers(
   }
 
   return resetSessionState;
+}
+
+/**
+ * Register IPC handlers for Python environment discovery and installation.
+ *
+ * @param win - Main BrowserWindow for streaming install output.
+ */
+function registerEnvironmentIpcHandlers(win: BrowserWindow, configStore: ConfigStore): void {
+
+  ipcMain.handle(IPC.environment.list, async () => {
+    const config = configStore.getAll();
+    return EnvironmentDetector.listEnvironmentInfo(config.pythonPath);
+  });
+
+  ipcMain.handle(IPC.environment.check, async (_event, pythonPath: string) => {
+    return EnvironmentDetector.checkEnvironment(pythonPath);
+  });
+
+  ipcMain.handle(IPC.environment.install, async (_event, pythonPath: string) => {
+    return EnvironmentDetector.installPDVFromBundle(pythonPath, win, IPC.push.installOutput);
+  });
+
+  ipcMain.handle(IPC.environment.refresh, async () => {
+    EnvironmentDetector.clearCache();
+    const config = configStore.getAll();
+    return EnvironmentDetector.listEnvironmentInfo(config.pythonPath);
+  });
 }
 
 /**

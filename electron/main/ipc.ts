@@ -30,8 +30,14 @@ import type {
   PDVTreeChangedPayload,
 } from "./pdv-protocol";
 import type { PDVConfig } from "./config";
+import type {
+  EnvironmentInfo,
+  EnvironmentInstallResult,
+  InstallOutputChunk,
+} from "./environment-detector";
 
 export type { PDVConfig } from "./config";
+export type { EnvironmentInfo, EnvironmentInstallResult, InstallOutputChunk } from "./environment-detector";
 
 // ---------------------------------------------------------------------------
 // IPC channel catalogue
@@ -136,6 +142,7 @@ export const IPC = {
     moduleExecuteRequest: "pdv.moduleWindow.executeRequest",
     projectReloading: "pdv.project.reloading",
     progress: "pdv.progress",
+    installOutput: "pdv.environment.installOutput",
   },
   /** App menu synchronization channels. */
   menu: {
@@ -157,6 +164,13 @@ export const IPC = {
     close: "moduleWindows:close",
     context: "moduleWindows:context",
     executeInMain: "moduleWindows:executeInMain",
+  },
+  /** Python environment discovery and installation channels. */
+  environment: {
+    list: "environment:list",
+    check: "environment:check",
+    install: "environment:install",
+    refresh: "environment:refresh",
   },
   /** Native file/directory picker channels. */
   files: {
@@ -1341,6 +1355,49 @@ export interface PDVApi {
      * @returns Unsubscribe function.
      */
     onProgress(callback: (payload: ProgressPayload) => void): () => void;
+  };
+
+  /** Python environment discovery and installation. */
+  environment: {
+    /**
+     * List all detected Python environments with package installation status.
+     *
+     * @returns Enriched environment info array, ordered by priority.
+     */
+    list(): Promise<EnvironmentInfo[]>;
+    /**
+     * Re-probe a single Python path and return its current status.
+     *
+     * Bypasses the cache — useful for refreshing a selected environment
+     * after the user installs packages externally.
+     *
+     * @param pythonPath - Path to the Python executable to check.
+     * @returns Enriched environment info, or null if the path is invalid.
+     */
+    check(pythonPath: string): Promise<EnvironmentInfo | null>;
+    /**
+     * Install pdv-python from the bundled source into a Python environment.
+     *
+     * Streams pip output via the `installOutput` push channel. Subscribe
+     * to `onInstallOutput` before calling this method to receive live chunks.
+     *
+     * @param pythonPath - Target Python executable.
+     * @returns Install result with success flag and full output.
+     */
+    install(pythonPath: string): Promise<EnvironmentInstallResult>;
+    /**
+     * Clear the environment detection cache and re-discover all environments.
+     *
+     * @returns Freshly detected environment info array.
+     */
+    refresh(): Promise<EnvironmentInfo[]>;
+    /**
+     * Subscribe to streaming pip install output chunks.
+     *
+     * @param callback - Invoked with each output chunk as it arrives.
+     * @returns Unsubscribe function.
+     */
+    onInstallOutput(callback: (chunk: InstallOutputChunk) => void): () => void;
   };
 
   /** App configuration accessors. */

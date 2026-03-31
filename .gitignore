@@ -6,16 +6,18 @@ __pycache__/
 .pytest_cache/
 /node_modules/
 .DS_Store
-
-# Tree directory (now stored in /tmp)
-/tree/
+pdv-python/build/
 
 # Electron
 electron/node_modules/
 electron/dist/
+electron/release/
 electron/out/
 electron/.cache/
 electron/package-lock.json
 electron/renderer/dist/
 electron/logs
 electron/.mcp.json
+
+pdv-icon.iconset
+*.icns

@@ -1,228 +1,400 @@
 /**
- * Environment selector dialog/panel for Python/Julia executable paths.
+ * EnvironmentSelector — Python environment discovery picker with auto-install.
  *
- * Validates interpreter paths through `window.pdv.kernels.validate` and emits
- * chosen values to the parent component for persistence/restart handling.
- * Adapts its UI based on which kernel language is currently active.
+ * In Python mode: discovers conda, venv, pyenv, and system Python environments,
+ * shows package status badges, and offers one-click pdv-python installation from
+ * the bundled source with streaming pip output.
+ *
+ * In Julia mode: shows a stub with manual path input (discovery not yet implemented).
  */
 
-import React, { useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
+import type { EnvironmentInfo, InstallOutputChunk } from '../../types';
+
+// ---------------------------------------------------------------------------
+// Props
+// ---------------------------------------------------------------------------
 
 interface EnvironmentSelectorProps {
+  /** True when no interpreter has been configured yet. */
   isFirstRun: boolean;
-  activeLanguage?: 'python' | 'julia';
-  currentConfig?: { pythonPath?: string; juliaPath?: string };
-  currentKernelId?: string | null;
+  /** Which language runtime the picker should target. */
+  activeLanguage: 'python' | 'julia';
+  /** Currently configured Python path (to highlight in the list). */
+  currentPythonPath?: string;
+  /** Currently configured Julia path (for the Julia stub input). */
+  currentJuliaPath?: string;
+  /** When true, renders inline (no modal overlay). Used in Settings → Runtime. */
   embedded?: boolean;
-  onSave: (config: { pythonPath?: string; juliaPath?: string; language?: 'python' | 'julia' }) => void;
-  onRestart?: () => void;
+  /** Called when the user selects an environment. */
+  onSelect: (config: { pythonPath?: string; juliaPath?: string }) => void;
+  /** Called when the user cancels (not shown on first run). */
   onCancel?: () => void;
 }
 
-/** Runtime executable configuration UI used on first-run and in Settings. */
+// ---------------------------------------------------------------------------
+// Kind icons (text-based, no emoji)
+// ---------------------------------------------------------------------------
+
+const KIND_ICONS: Record<string, string> = {
+  conda: 'C',
+  venv: 'V',
+  pyenv: 'P',
+  system: 'S',
+  configured: '*',
+};
+
+// ---------------------------------------------------------------------------
+// Component
+// ---------------------------------------------------------------------------
+
 export const EnvironmentSelector: React.FC<EnvironmentSelectorProps> = ({
   isFirstRun,
-  activeLanguage = 'python',
-  currentConfig,
-  currentKernelId,
+  activeLanguage,
+  currentPythonPath,
+  currentJuliaPath,
   embedded = false,
-  onSave,
-  onRestart,
+  onSelect,
   onCancel,
 }) => {
-  const [pythonPath, setPythonPath] = useState(currentConfig?.pythonPath || 'python3');
-  const [juliaPath, setJuliaPath] = useState(currentConfig?.juliaPath || 'julia');
-  const [validating, setValidating] = useState(false);
-  const [errors, setErrors] = useState<{ python?: string; julia?: string }>({});
+  // -- Python discovery state ------------------------------------------------
+  const [environments, setEnvironments] = useState<EnvironmentInfo[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [selectedPath, setSelectedPath] = useState<string | null>(null);
+  const [selectedInfo, setSelectedInfo] = useState<EnvironmentInfo | null>(null);
 
-  const handleValidate = async () => {
-    setValidating(true);
-    setErrors({});
+  // -- Install state ---------------------------------------------------------
+  const [installing, setInstalling] = useState(false);
+  const [installOutput, setInstallOutput] = useState<string[]>([]);
+  const [installResult, setInstallResult] = useState<{ success: boolean; output: string } | null>(null);
+  const outputRef = useRef<HTMLPreElement>(null);
+
+  // -- Julia stub state ------------------------------------------------------
+  const [juliaPath, setJuliaPath] = useState(currentJuliaPath || 'julia');
+
+  // -- Load environments on mount --------------------------------------------
+  const loadEnvironments = useCallback(async () => {
+    setLoading(true);
+    setError(null);
     try {
-      if (!window.pdv?.kernels) {
-        throw new Error('PDV preload API is unavailable. Open the Electron window, not localhost in a browser.');
-      }
-
-      const nextErrors: { python?: string; julia?: string } = {};
-
-      if (activeLanguage === 'julia') {
-        const juliaValid = await window.pdv.kernels.validate(juliaPath, 'julia');
-        if (!juliaValid.valid) {
-          nextErrors.julia = juliaValid.error || 'Unable to validate Julia environment';
-        }
-      } else {
-        const pythonValid = await window.pdv.kernels.validate(pythonPath, 'python');
-        if (!pythonValid.valid) {
-          nextErrors.python = pythonValid.error || 'Unable to validate Python interpreter';
+      const envs = await window.pdv.environment.list();
+      setEnvironments(envs);
+      // Auto-select the currently configured environment, or the first one.
+      if (!selectedPath) {
+        const current = envs.find((e) => e.pythonPath === currentPythonPath);
+        if (current) {
+          setSelectedPath(current.pythonPath);
+          setSelectedInfo(current);
         }
       }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setLoading(false);
+    }
+  }, [currentPythonPath, selectedPath]);
 
-      setErrors(nextErrors);
-      if (!nextErrors.python && !nextErrors.julia) {
-        if (activeLanguage === 'julia') {
-          onSave({ juliaPath: juliaPath || undefined, language: 'julia' });
-        } else {
-          onSave({ pythonPath, language: 'python' });
+  useEffect(() => {
+    if (activeLanguage === 'python') {
+      void loadEnvironments();
+    }
+  }, [activeLanguage, loadEnvironments]);
+
+  // -- Select an environment -------------------------------------------------
+  const handleSelect = useCallback(async (env: EnvironmentInfo) => {
+    setSelectedPath(env.pythonPath);
+    setSelectedInfo(env);
+    setInstallResult(null);
+    setInstallOutput([]);
+
+    // Re-probe to get fresh status
+    try {
+      const fresh = await window.pdv.environment.check(env.pythonPath);
+      if (fresh) {
+        setSelectedInfo(fresh);
+        // Update the environment in the list too
+        setEnvironments((prev) =>
+          prev.map((e) => (e.pythonPath === fresh.pythonPath ? fresh : e))
+        );
+      }
+    } catch {
+      // Keep stale info on probe failure
+    }
+  }, []);
+
+  // -- Refresh environments --------------------------------------------------
+  const handleRefresh = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    setSelectedPath(null);
+    setSelectedInfo(null);
+    try {
+      const envs = await window.pdv.environment.refresh();
+      setEnvironments(envs);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  // -- Install pdv-python ----------------------------------------------------
+  const handleInstall = useCallback(async () => {
+    if (!selectedPath) return;
+    setInstalling(true);
+    setInstallOutput([]);
+    setInstallResult(null);
+
+    // Subscribe to streaming output
+    const unsubscribe = window.pdv.environment.onInstallOutput((chunk: InstallOutputChunk) => {
+      setInstallOutput((prev) => [...prev, chunk.data]);
+    });
+
+    try {
+      const result = await window.pdv.environment.install(selectedPath);
+      setInstallResult(result);
+
+      if (result.success) {
+        // Re-probe the environment to update badges
+        const fresh = await window.pdv.environment.check(selectedPath);
+        if (fresh) {
+          setSelectedInfo(fresh);
+          setEnvironments((prev) =>
+            prev.map((e) => (e.pythonPath === fresh.pythonPath ? fresh : e))
+          );
         }
       }
-    } catch (error) {
-      const key = activeLanguage === 'julia' ? 'julia' : 'python';
-      setErrors({
-        [key]: error instanceof Error ? error.message : String(error),
+    } catch (err) {
+      setInstallResult({
+        success: false,
+        output: err instanceof Error ? err.message : String(err),
       });
     } finally {
-      setValidating(false);
+      unsubscribe();
+      setInstalling(false);
     }
-  };
+  }, [selectedPath]);
 
-  const handleSaveWithoutValidation = () => {
-    if (activeLanguage === 'julia') {
-      onSave({ juliaPath: juliaPath || undefined, language: 'julia' });
-    } else {
-      onSave({ pythonPath, language: 'python' });
+  // Auto-scroll install output
+  useEffect(() => {
+    if (outputRef.current) {
+      outputRef.current.scrollTop = outputRef.current.scrollHeight;
     }
-  };
+  }, [installOutput]);
 
-  const handleFilePicker = async (language: 'python' | 'julia') => {
+  // -- Browse for executable -------------------------------------------------
+  const handleBrowse = useCallback(async () => {
     try {
-      if (!window.pdv?.files) {
-        throw new Error('PDV preload API is unavailable. Open the Electron window, not localhost in a browser.');
+      const filePath = await window.pdv.files.pickExecutable();
+      if (!filePath) return;
+
+      // Probe the selected path
+      const info = await window.pdv.environment.check(filePath);
+      if (info) {
+        setSelectedPath(info.pythonPath);
+        setSelectedInfo(info);
+        // Add to list if not already there
+        setEnvironments((prev) => {
+          if (prev.some((e) => e.pythonPath === info.pythonPath)) {
+            return prev.map((e) => (e.pythonPath === info.pythonPath ? info : e));
+          }
+          return [info, ...prev];
+        });
+      } else {
+        setError(`Could not detect a valid Python at: ${filePath}`);
       }
-      const result = await window.pdv.files.pickExecutable();
-      if (result) {
-        if (language === 'python') {
-          setPythonPath(result);
-        } else {
-          setJuliaPath(result);
-        }
-      }
-    } catch (error) {
-      const key = language === 'julia' ? 'julia' : 'python';
-      setErrors({
-        [key]: error instanceof Error ? error.message : String(error),
-      });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
     }
-  };
+  }, []);
 
-  const isPython = activeLanguage === 'python';
-  const isJulia = activeLanguage === 'julia';
+  // -- Confirm selection -----------------------------------------------------
+  const handleConfirm = useCallback(() => {
+    if (selectedPath && selectedInfo) {
+      onSelect({ pythonPath: selectedPath });
+    }
+  }, [selectedPath, selectedInfo, onSelect]);
 
-  const content = (
+  // -- Julia browse ----------------------------------------------------------
+  const handleJuliaBrowse = useCallback(async () => {
+    try {
+      const filePath = await window.pdv.files.pickExecutable();
+      if (filePath) setJuliaPath(filePath);
+    } catch { /* ignore */ }
+  }, []);
+
+  const handleJuliaConfirm = useCallback(() => {
+    onSelect({ juliaPath });
+  }, [juliaPath, onSelect]);
+
+  // -- Can the user confirm selection? ---------------------------------------
+  const canConfirm = selectedInfo?.pdvInstalled && selectedInfo?.pdvCompatible;
+
+  // -- Render ----------------------------------------------------------------
+
+  const pythonContent = (
     <>
-      <h2>Configure {isPython ? 'Python' : 'Julia'} Runtime</h2>
+      <h2>Select Python Environment</h2>
 
       {isFirstRun && (
         <p className="help-text">
-          {isPython
-            ? 'Please specify a Python executable with ipykernel installed.'
-            : 'Please specify a Julia executable with PDVJulia installed.'}
+          PDV needs a Python environment with ipykernel to run. Select one below
+          and we'll install everything automatically.
         </p>
       )}
 
-      {/* Primary language section */}
-      {isPython && (
-        <div className="input-group">
-          <label>Python Executable</label>
-          <div className="input-with-button">
-            <input
-              type="text"
-              value={pythonPath}
-              onChange={(e) => setPythonPath(e.target.value)}
-              placeholder="/usr/bin/python3"
-            />
-            <button className="btn btn-secondary" onClick={() => handleFilePicker('python')}>
-              Browse
-            </button>
-          </div>
-          {errors.python && <div className="error-text">{errors.python}</div>}
-          <div className="help-text">
-            Requires ipykernel: <code>pip install ipykernel</code>
-          </div>
-        </div>
-      )}
+      {/* Environment list */}
+      <div className="env-list">
+        {loading && <div className="env-list-loading">Detecting Python environments...</div>}
 
-      {isJulia && (
-        <div className="input-group">
-          <label>Julia Executable</label>
-          <div className="input-with-button">
-            <input
-              type="text"
-              value={juliaPath}
-              onChange={(e) => setJuliaPath(e.target.value)}
-              placeholder="/usr/local/bin/julia"
-            />
-            <button className="btn btn-secondary" onClick={() => handleFilePicker('julia')}>
-              Browse
-            </button>
-          </div>
-          {errors.julia && <div className="error-text">{errors.julia}</div>}
-          <div className="help-text">
-            Requires PDVJulia: <code>] add PDVJulia</code>
-          </div>
-        </div>
-      )}
+        {!loading && error && <div className="error-text">{error}</div>}
 
-      {/* Secondary language section (collapsed, for reference) */}
-      {isPython && (
-        <div className="input-group">
-          <label>Julia Executable</label>
-          <div className="input-with-button">
-            <input
-              type="text"
-              value={juliaPath}
-              onChange={(e) => setJuliaPath(e.target.value)}
-              placeholder="/usr/local/bin/julia"
-            />
-            <button className="btn btn-secondary" onClick={() => handleFilePicker('julia')}>
-              Browse
-            </button>
+        {!loading && !error && environments.length === 0 && (
+          <div className="env-list-empty">
+            No Python environments found. Use Browse to locate a Python executable.
           </div>
-          <div className="help-text">
-            Used when starting Julia kernels. Requires PDVJulia: <code>] add PDVJulia</code>
-          </div>
-        </div>
-      )}
-
-      {isJulia && (
-        <div className="input-group">
-          <label>Python Executable</label>
-          <div className="input-with-button">
-            <input
-              type="text"
-              value={pythonPath}
-              onChange={(e) => setPythonPath(e.target.value)}
-              placeholder="/usr/bin/python3"
-            />
-            <button className="btn btn-secondary" onClick={() => handleFilePicker('python')}>
-              Browse
-            </button>
-          </div>
-          <div className="help-text">
-            Used when starting Python kernels. Requires ipykernel: <code>pip install ipykernel</code>
-          </div>
-        </div>
-      )}
-
-      <div className="button-group">
-        <button className="btn btn-primary" onClick={handleValidate} disabled={validating}>
-          {validating ? 'Validating...' : 'Test & Save'}
-        </button>
-        <button className="btn btn-secondary" onClick={handleSaveWithoutValidation} disabled={validating}>
-          Save Without Validation
-        </button>
-        {!isFirstRun && currentKernelId && onRestart && (
-          <button className="btn btn-warning" onClick={onRestart} disabled={validating}>
-            Restart Kernel
-          </button>
         )}
+
+        {!loading && environments.map((env) => (
+          <button
+            key={env.pythonPath}
+            className={`env-row ${selectedPath === env.pythonPath ? 'env-row--selected' : ''}`}
+            onClick={() => handleSelect(env)}
+            type="button"
+          >
+            <span className={`env-kind-badge env-kind-badge--${env.kind}`}>
+              {KIND_ICONS[env.kind] ?? '?'}
+            </span>
+            <span className="env-row-info">
+              <span className="env-row-label">{env.label}</span>
+              <span className="env-row-path">{env.pythonPath}</span>
+            </span>
+            <span className="env-row-badges">
+              {env.pdvInstalled ? (
+                env.pdvUpgradeAvailable ? (
+                  <span className="env-badge env-badge--warning" title={`Upgrade available: ${env.pdvVersion}`}>pdv {env.pdvVersion}</span>
+                ) : (
+                  <span className="env-badge env-badge--ok" title={`pdv-python ${env.pdvVersion}`}>pdv</span>
+                )
+              ) : (
+                <span className="env-badge env-badge--missing" title="pdv-python not installed">pdv</span>
+              )}
+              {env.ipykernelInstalled ? (
+                <span className="env-badge env-badge--ok" title="ipykernel installed">ipy</span>
+              ) : (
+                <span className="env-badge env-badge--missing" title="ipykernel not installed">ipy</span>
+              )}
+            </span>
+          </button>
+        ))}
+      </div>
+
+      {/* Action bar: Browse + Refresh */}
+      <div className="env-actions">
+        <button className="btn btn-secondary" onClick={handleBrowse} type="button">
+          Browse...
+        </button>
+        <button className="btn btn-secondary" onClick={handleRefresh} disabled={loading} type="button">
+          {loading ? 'Scanning...' : 'Refresh'}
+        </button>
+      </div>
+
+      {/* Install panel — visible when selected env needs pdv-python */}
+      {selectedInfo && (!selectedInfo.pdvInstalled || selectedInfo.pdvUpgradeAvailable) && (
+        <div className="env-install-panel">
+          <div className="env-install-header">
+            {selectedInfo.pdvUpgradeAvailable
+              ? `pdv-python ${selectedInfo.pdvVersion} is installed — a newer version is bundled with this app.`
+              : 'pdv-python is not installed in this environment.'}
+          </div>
+          <button
+            className="btn btn-primary"
+            onClick={handleInstall}
+            disabled={installing}
+            type="button"
+          >
+            {installing
+              ? 'Installing...'
+              : selectedInfo.pdvUpgradeAvailable
+                ? 'Upgrade pdv-python'
+                : 'Install pdv-python'}
+          </button>
+
+          {/* Streaming output */}
+          {(installOutput.length > 0 || installResult) && (
+            <pre className="env-install-output" ref={outputRef}>
+              {installOutput.length > 0
+                ? installOutput.join('')
+                : installResult?.output ?? ''}
+            </pre>
+          )}
+
+          {/* Result message */}
+          {installResult && (
+            <div className={installResult.success ? 'env-install-success' : 'error-text'}>
+              {installResult.success
+                ? 'Installation complete.'
+                : 'Installation failed.'}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Confirm / Cancel */}
+      <div className="button-group">
+        <button
+          className="btn btn-primary"
+          onClick={handleConfirm}
+          disabled={!canConfirm}
+          type="button"
+          title={canConfirm ? undefined : 'Install pdv-python first'}
+        >
+          Select Environment
+        </button>
         {!isFirstRun && onCancel && (
-          <button className="btn btn-secondary" onClick={onCancel} disabled={validating}>
+          <button className="btn btn-secondary" onClick={onCancel} type="button">
             Cancel
           </button>
         )}
       </div>
     </>
   );
+
+  const juliaContent = (
+    <>
+      <h2>Configure Julia Runtime</h2>
+      <p className="help-text">
+        Julia environment discovery is not yet available. Enter a Julia executable path below.
+      </p>
+      <div className="input-group">
+        <label>Julia Executable</label>
+        <div className="input-with-button">
+          <input
+            type="text"
+            value={juliaPath}
+            onChange={(e) => setJuliaPath(e.target.value)}
+            placeholder="/usr/local/bin/julia"
+          />
+          <button className="btn btn-secondary" onClick={handleJuliaBrowse} type="button">
+            Browse
+          </button>
+        </div>
+      </div>
+      <div className="button-group">
+        <button className="btn btn-primary" onClick={handleJuliaConfirm} type="button">
+          Save
+        </button>
+        {!isFirstRun && onCancel && (
+          <button className="btn btn-secondary" onClick={onCancel} type="button">
+            Cancel
+          </button>
+        )}
+      </div>
+    </>
+  );
+
+  const content = activeLanguage === 'python' ? pythonContent : juliaContent;
 
   if (embedded) {
     return <div className="environment-selector-embedded">{content}</div>;

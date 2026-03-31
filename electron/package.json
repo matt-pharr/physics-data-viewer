@@ -2,19 +2,33 @@
   "name": "physics-data-viewer",
   "version": "0.0.6",
   "private": true,
+  "author": {
+    "name": "Matthew Pharr",
+    "email": "m.pharr@protonmail.com",
+    "url": "https://github.com/matt-pharr"
+  },
+  "homepage": "https://github.com/matt-pharr/physics-data-viewer",
   "main": "dist/main/bootstrap.js",
   "electronmon": {
     "patterns": [
       "!dist/**"
     ]
   },
+  "repository": {
+    "url": "https://github.com/matt-pharr/physics-data-viewer"
+  },
   "scripts": {
     "dev": "node ./node_modules/concurrently/dist/bin/concurrently.js -k \"npm:dev:main\" \"npm:dev:renderer\"",
     "dev:main": "node ./node_modules/cross-env/src/bin/cross-env.js NODE_ENV=development node ./node_modules/electronmon/bin/cli.js .",
     "dev:renderer": "cd renderer && node ../node_modules/vite/bin/vite.js",
+    "generate:icon:mac": "sh ./scripts/generate-mac-icon.sh",
     "build": "npm run build:renderer && npm run build:main",
     "build:renderer": "cd renderer && node ../node_modules/vite/bin/vite.js build",
     "build:main": "node ./node_modules/typescript/bin/tsc -p tsconfig.json",
+    "pack": "npm run build && electron-builder --dir",
+    "dist": "npm run build && electron-builder",
+    "dist:mac": "npm run build && electron-builder --mac",
+    "dist:linux": "npm run build && electron-builder --linux",
     "test": "node ./node_modules/vitest/vitest.mjs run",
     "lint": "eslint .",
     "knip": "knip"
@@ -31,6 +45,7 @@
     "concurrently": "^8.2.0",
     "cross-env": "^7.0.3",
     "electron": "^35.7.5",
+    "electron-builder": "^26.8.1",
     "electronmon": "^2.0.2",
     "eslint": "^9.39.4",
     "eslint-plugin-react-hooks": "^7.0.1",
