@@ -15,8 +15,6 @@ interface UseKernelLifecycleOptions {
   setKernelStatus: Dispatch<SetStateAction<KernelStatus>>;
   /** Setter for the most recent error message (clears on successful start). */
   setLastError: Dispatch<SetStateAction<string | undefined>>;
-  /** Controls visibility of the EnvironmentSelector dialog. */
-  setShowEnvSelector: Dispatch<SetStateAction<boolean>>;
   /** Updates the persisted app configuration after environment changes. */
   setConfig: Dispatch<SetStateAction<Config | null>>;
   /** Clears the console log entries on kernel restart. */
@@ -34,14 +32,14 @@ export function useKernelLifecycle(options: UseKernelLifecycleOptions) {
     setCurrentKernelId,
     setKernelStatus,
     setLastError,
-    setShowEnvSelector,
     setConfig,
     setLogs,
     setNamespaceRefreshToken,
     setTreeRefreshToken,
   } = options;
 
-  const startKernel = useCallback(async (cfg: Config, language: 'python' | 'julia' = 'python') => {
+  /** Start (or restart) a kernel. Returns `true` on success, `false` on failure. */
+  const startKernel = useCallback(async (cfg: Config, language: 'python' | 'julia' = 'python'): Promise<boolean> => {
     setKernelStatus('starting');
     setLastError(undefined);
     try {
@@ -68,24 +66,24 @@ export function useKernelLifecycle(options: UseKernelLifecycleOptions) {
       setTreeRefreshToken((prev) => prev + 1);
       setNamespaceRefreshToken((prev) => prev + 1);
       setKernelStatus('ready');
+      return true;
     } catch (error) {
       console.error('[App] Failed to start kernel:', error);
       setCurrentKernelId(null);
       setKernelStatus('error');
       setLastError(error instanceof Error ? error.message : String(error));
-      setShowEnvSelector(true);
+      return false;
     }
   }, [
     currentKernelId,
     setCurrentKernelId,
     setKernelStatus,
     setLastError,
-    setShowEnvSelector,
     setNamespaceRefreshToken,
     setTreeRefreshToken,
   ]);
 
-  const handleEnvSave = useCallback(async (paths: { pythonPath?: string; juliaPath?: string }) => {
+  const handleEnvSave = useCallback(async (paths: { pythonPath?: string; juliaPath?: string }): Promise<boolean> => {
     const language = paths.juliaPath && !paths.pythonPath ? 'julia' : 'python';
     const updatedConfig: Config = {
       kernelSpec: config?.kernelSpec ?? null,
@@ -102,9 +100,8 @@ export function useKernelLifecycle(options: UseKernelLifecycleOptions) {
 
     await window.pdv.config.set(updatedConfig);
     setConfig(updatedConfig);
-    setShowEnvSelector(false);
-    await startKernel(updatedConfig, language);
-  }, [config, setConfig, setShowEnvSelector, startKernel]);
+    return startKernel(updatedConfig, language);
+  }, [config, setConfig, startKernel]);
 
   const handleRestartKernel = useCallback(async () => {
     if (!currentKernelId) return;
@@ -115,7 +112,6 @@ export function useKernelLifecycle(options: UseKernelLifecycleOptions) {
       const newKernel = await window.pdv.kernels.restart(currentKernelId);
       setCurrentKernelId(newKernel.id);
       setKernelStatus('ready');
-      setShowEnvSelector(false);
       setLogs([]);
       setNamespaceRefreshToken((prev) => prev + 1);
       setTreeRefreshToken((prev) => prev + 1);
@@ -129,7 +125,6 @@ export function useKernelLifecycle(options: UseKernelLifecycleOptions) {
     setCurrentKernelId,
     setKernelStatus,
     setLastError,
-    setShowEnvSelector,
     setLogs,
     setNamespaceRefreshToken,
     setTreeRefreshToken,

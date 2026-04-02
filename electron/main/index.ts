@@ -45,7 +45,12 @@ import {
   NamespaceQueryOptions,
   PDVConfig,
 } from "./ipc";
-import { PDVMessage, PDVMessageType } from "./pdv-protocol";
+import { PDVMessage, PDVMessageType, setAppVersion } from "./pdv-protocol";
+
+// ---------------------------------------------------------------------------
+// Unified version — set once before any handler uses getAppVersion()
+// ---------------------------------------------------------------------------
+setAppVersion(app.getVersion());
 
 // ---------------------------------------------------------------------------
 // Internal state
@@ -94,6 +99,7 @@ const REGISTERED_CHANNELS: readonly string[] = [
   IPC.project.load,
   IPC.project.new,
   IPC.project.peekLanguages,
+  IPC.project.peekManifest,
   IPC.config.get,
   IPC.config.set,
   IPC.themes.get,
@@ -482,6 +488,13 @@ export function registerIpcHandlers(
     refreshProjectModuleHealth,
     runSerializedProjectManifestMutation,
     getMainWindow: () => win,
+    getInterpreterPath: () => {
+      const config = readConfig(configStore);
+      const lang = activeKernelId
+        ? (kernelManager.getKernel(activeKernelId)?.language ?? "python")
+        : "python";
+      return lang === "julia" ? config.juliaPath : config.pythonPath;
+    },
   });
 
   registerAppStateIpcHandlers({

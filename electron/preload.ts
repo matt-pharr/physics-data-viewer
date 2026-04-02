@@ -121,6 +121,8 @@ const api: PDVApi = {
     new: () => ipcRenderer.invoke(IPC.project.new),
     peekLanguages: (paths) =>
       ipcRenderer.invoke(IPC.project.peekLanguages, paths),
+    peekManifest: (dir) =>
+      ipcRenderer.invoke(IPC.project.peekManifest, dir),
     onLoaded: (callback) => onPush(IPC.push.projectLoaded, callback),
     onReloading: (callback) => onPush(IPC.push.projectReloading, callback),
   },

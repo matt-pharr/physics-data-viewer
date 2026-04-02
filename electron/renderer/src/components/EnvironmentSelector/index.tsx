@@ -24,6 +24,8 @@ interface EnvironmentSelectorProps {
   currentPythonPath?: string;
   /** Currently configured Julia path (for the Julia stub input). */
   currentJuliaPath?: string;
+  /** Warning message to display (e.g. when a saved interpreter is unavailable). */
+  warning?: string | null;
   /** When true, renders inline (no modal overlay). Used in Settings → Runtime. */
   embedded?: boolean;
   /** Called when the user selects an environment. */
@@ -53,10 +55,17 @@ export const EnvironmentSelector: React.FC<EnvironmentSelectorProps> = ({
   activeLanguage,
   currentPythonPath,
   currentJuliaPath,
+  warning,
   embedded = false,
   onSelect,
   onCancel,
 }) => {
+  // -- App version (unified — same as bundled pdv-python version) -----------
+  const [appVersion, setAppVersion] = useState<string | null>(null);
+  useEffect(() => {
+    void window.pdv.about.getVersion().then(setAppVersion);
+  }, []);
+
   // -- Python discovery state ------------------------------------------------
   const [environments, setEnvironments] = useState<EnvironmentInfo[]>([]);
   const [loading, setLoading] = useState(true);
@@ -237,6 +246,10 @@ export const EnvironmentSelector: React.FC<EnvironmentSelectorProps> = ({
     <>
       <h2>Select Python Environment</h2>
 
+      {warning && (
+        <p className="error-text">{warning}</p>
+      )}
+
       {isFirstRun && (
         <p className="help-text">
           PDV needs a Python environment with ipykernel to run. Select one below
@@ -272,8 +285,8 @@ export const EnvironmentSelector: React.FC<EnvironmentSelectorProps> = ({
             </span>
             <span className="env-row-badges">
               {env.pdvInstalled ? (
-                env.pdvUpgradeAvailable ? (
-                  <span className="env-badge env-badge--warning" title={`Upgrade available: ${env.pdvVersion}`}>pdv {env.pdvVersion}</span>
+                env.pdvVersionMismatch ? (
+                  <span className="env-badge env-badge--warning" title={`Version mismatch: ${env.pdvVersion} (app: ${appVersion ?? '?'})`}>pdv {env.pdvVersion}</span>
                 ) : (
                   <span className="env-badge env-badge--ok" title={`pdv-python ${env.pdvVersion}`}>pdv</span>
                 )
@@ -301,11 +314,11 @@ export const EnvironmentSelector: React.FC<EnvironmentSelectorProps> = ({
       </div>
 
       {/* Install panel — visible when selected env needs pdv-python */}
-      {selectedInfo && (!selectedInfo.pdvInstalled || selectedInfo.pdvUpgradeAvailable) && (
+      {selectedInfo && (!selectedInfo.pdvInstalled || selectedInfo.pdvVersionMismatch) && (
         <div className="env-install-panel">
           <div className="env-install-header">
-            {selectedInfo.pdvUpgradeAvailable
-              ? `pdv-python ${selectedInfo.pdvVersion} is installed — a newer version is bundled with this app.`
+            {selectedInfo.pdvVersionMismatch
+              ? `pdv-python ${selectedInfo.pdvVersion} installed — v${appVersion ?? 'latest'} required.`
               : 'pdv-python is not installed in this environment.'}
           </div>
           <button
@@ -316,8 +329,8 @@ export const EnvironmentSelector: React.FC<EnvironmentSelectorProps> = ({
           >
             {installing
               ? 'Installing...'
-              : selectedInfo.pdvUpgradeAvailable
-                ? 'Upgrade pdv-python'
+              : selectedInfo.pdvVersionMismatch
+                ? `Install pdv-python ${appVersion ?? 'latest'}`
                 : 'Install pdv-python'}
           </button>
 

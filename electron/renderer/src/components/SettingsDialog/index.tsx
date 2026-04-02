@@ -37,7 +37,8 @@ interface SettingsDialogProps {
   shortcuts: Shortcuts;
   onClose: () => void;
   onSave: (updates: Partial<Config>) => Promise<void>;
-  onEnvSave: (paths: { pythonPath?: string; juliaPath?: string }) => Promise<void>;
+  onEnvSave: (paths: { pythonPath?: string; juliaPath?: string }) => void | Promise<void>;
+  envWarning?: string | null;
 }
 
 /** Top-level settings modal used by the App shell. */
@@ -50,6 +51,7 @@ export const SettingsDialog: React.FC<SettingsDialogProps> = ({
   onClose,
   onSave,
   onEnvSave,
+  envWarning,
 }) => {
   const [activeTab, setActiveTab] = useState<SettingsTab>(initialTab);
   const [editedShortcuts, setEditedShortcuts] = useState<Shortcuts>(shortcuts);
@@ -395,6 +397,7 @@ export const SettingsDialog: React.FC<SettingsDialogProps> = ({
               activeLanguage={activeLanguage}
               currentPythonPath={config?.pythonPath}
               currentJuliaPath={config?.juliaPath}
+              warning={envWarning}
               onSelect={onEnvSave}
             />
           ) : activeTab === 'about' ? (

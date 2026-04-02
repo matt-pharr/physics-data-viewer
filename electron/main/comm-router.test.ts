@@ -20,7 +20,7 @@
 
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { CommRouter, PDVCommError, PDVCommTimeoutError } from "./comm-router";
-import { PDVMessage, PDV_PROTOCOL_VERSION } from "./pdv-protocol";
+import { PDVMessage, getAppVersion, setAppVersion } from "./pdv-protocol";
 import type { IopubCallback, JupyterMessage } from "./kernel-manager";
 
 // ---------------------------------------------------------------------------
@@ -113,7 +113,7 @@ function makeEnvelope(
   overrides: Partial<PDVMessage> & { type: string }
 ): PDVMessage {
   return {
-    pdv_version: PDV_PROTOCOL_VERSION,
+    pdv_version: getAppVersion(),
     msg_id: crypto.randomUUID(),
     in_reply_to: null,
     status: "ok",
@@ -131,6 +131,7 @@ describe("CommRouter", () => {
   let router: CommRouter;
 
   beforeEach(() => {
+    setAppVersion("0.0.6");
     mock = new MockKernelManager();
     router = new CommRouter();
     router.attach(mock as unknown as Parameters<CommRouter["attach"]>[0], KERNEL_ID);
@@ -363,7 +364,7 @@ describe("CommRouter", () => {
       mock.simulateIopub(
         KERNEL_ID,
         makeEnvelope({
-          pdv_version: "1.99",
+          pdv_version: "0.99.0",
           type: "pdv.tree.list.response",
           in_reply_to: id,
           status: "ok",

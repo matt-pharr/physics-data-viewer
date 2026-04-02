@@ -38,6 +38,8 @@ interface UseProjectWorkflowOptions {
   setLastChecksum: Dispatch<SetStateAction<string | null>>;
   /** Sets whether the last load produced a checksum mismatch. */
   setChecksumMismatch: Dispatch<SetStateAction<boolean>>;
+  /** Sets the PDV version the loaded project was saved with (for status bar warning). */
+  setSavedPdvVersion: Dispatch<SetStateAction<string | null>>;
   /** Ref holding the tabs snapshot from project.onLoaded push (consumed once). */
   loadedProjectTabsRef: MutableRefObject<{ tabs: CellTab[]; activeTabId: number } | null>;
   /** Validates and normalizes raw code-cells.json data into typed CellTab[]. */
@@ -64,6 +66,7 @@ export function useProjectWorkflow(options: UseProjectWorkflowOptions) {
     setLogs,
     setLastChecksum,
     setChecksumMismatch,
+    setSavedPdvVersion,
     loadedProjectTabsRef,
     normalizeLoadedCodeCells,
     flushDirtyNotes,
@@ -115,6 +118,7 @@ export function useProjectWorkflow(options: UseProjectWorkflowOptions) {
       setModulesRefreshToken((prev) => prev + 1);
       setLastChecksum(result.checksum.slice(0, 6));
       setChecksumMismatch(false);
+      setSavedPdvVersion(null); // Just saved with current version — no mismatch
       await rememberRecentProject(saveDir);
       setLogs((prev) => [...prev, {
         id: `save-${Date.now()}`,
@@ -162,6 +166,7 @@ export function useProjectWorkflow(options: UseProjectWorkflowOptions) {
       setNamespaceRefreshToken((prev) => prev + 1);
       setLastChecksum(result.checksum ? result.checksum.slice(0, 6) : null);
       setChecksumMismatch(result.checksumValid === false);
+      setSavedPdvVersion(result.savedPdvVersion ?? null);
       const nodeCountMsg = result.nodeCount != null ? ` (${result.nodeCount} nodes)` : '';
       setLogs((prev) => [...prev, {
         id: `load-${Date.now()}`,
@@ -181,6 +186,7 @@ export function useProjectWorkflow(options: UseProjectWorkflowOptions) {
     setActiveCellTab,
     setCellTabs,
     setChecksumMismatch,
+    setSavedPdvVersion,
     setCurrentProjectDir,
     setLastChecksum,
     setProgress,

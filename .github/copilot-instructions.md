@@ -79,6 +79,8 @@ Renderer (React) ──window.pdv──► Preload ──ipcRenderer──► Ma
 
 9. **Historical rewrite scaffolding is removed.** Do not add imports to deleted historical paths; use current architecture modules only.
 
+10. **Unified version number.** `electron/package.json` version and `pdv-python/pyproject.toml` version must always match. This single version is used as the protocol version in comm messages, stored in project manifests, and checked by the environment detector. When bumping the version, update both files.
+
 ---
 
 ## Testing

@@ -13,7 +13,7 @@
 
 import { CommRouter } from "./comm-router";
 import { KernelManager } from "./kernel-manager";
-import { PDVMessageType, PDV_PROTOCOL_VERSION } from "./pdv-protocol";
+import { PDVMessageType, getAppVersion } from "./pdv-protocol";
 import { ProjectManager } from "./project-manager";
 
 const PYTHON_BOOTSTRAP = `
@@ -112,7 +112,7 @@ export async function initializeKernelSession(
   const workingDir = await projectManager.createWorkingDir();
   await commRouter.request(PDVMessageType.INIT, {
     working_dir: workingDir,
-    pdv_version: PDV_PROTOCOL_VERSION,
+    pdv_version: getAppVersion(),
   });
   kernelWorkingDirs.set(kernelId, workingDir);
 }
