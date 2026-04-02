@@ -110,6 +110,7 @@ export const IPC = {
     load: "project:load",
     new: "project:new",
     peekLanguages: "project:peekLanguages",
+    peekManifest: "project:peekManifest",
   },
   /** App configuration channels. */
   config: {
@@ -927,6 +928,20 @@ export interface ProjectLoadResult {
   checksumValid: boolean | null;
   /** Number of tree nodes loaded. */
   nodeCount: number | null;
+  /** PDV version stored in the project manifest, or null if absent. */
+  savedPdvVersion: string | null;
+}
+
+/**
+ * Lightweight manifest peek returned before kernel start.
+ */
+export interface ProjectManifestPeek {
+  /** Kernel language used by this project. */
+  language: "python" | "julia";
+  /** Interpreter path saved with the project, if any. */
+  interpreterPath?: string;
+  /** PDV version the project was saved with. */
+  pdvVersion?: string;
 }
 
 /**
@@ -1330,6 +1345,14 @@ export interface PDVApi {
      * @returns Map of path → language.
      */
     peekLanguages(paths: string[]): Promise<Record<string, "python" | "julia">>;
+    /**
+     * Read lightweight manifest data from a project directory without starting
+     * a kernel. Returns language, interpreter path, and PDV version.
+     *
+     * @param dir - Absolute path to the project directory.
+     * @returns Manifest peek data.
+     */
+    peekManifest(dir: string): Promise<ProjectManifestPeek>;
     /**
      * Subscribe to project-loaded push notifications.
      *

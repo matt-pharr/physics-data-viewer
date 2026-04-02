@@ -20,11 +20,31 @@
 // Protocol version
 // ---------------------------------------------------------------------------
 
-/** The PDV protocol version this build targets. */
-const PDV_VERSION = "1.0" as const;
+/**
+ * Unified app version. Set once at startup via {@link setAppVersion} with the
+ * value of `app.getVersion()` (from package.json). All comm messages and
+ * project manifests use this version.
+ */
+let _appVersion = "0.0.0";
 
-/** The version string imported by all production and test code. */
-export const PDV_PROTOCOL_VERSION = PDV_VERSION;
+/**
+ * Set the app version. Must be called once during startup before any comm
+ * routing or project operations.
+ *
+ * @param version - The version string from package.json (e.g. "0.0.6").
+ */
+export function setAppVersion(version: string): void {
+  _appVersion = version;
+}
+
+/**
+ * Get the current unified app version.
+ *
+ * @returns The version string set at startup.
+ */
+export function getAppVersion(): string {
+  return _appVersion;
+}
 
 /** Comm target name registered on the kernel (ARCHITECTURE.md §3.1). */
 export const PDV_COMM_TARGET = "pdv.kernel" as const;
@@ -429,8 +449,8 @@ export function isPDVMessage(data: unknown): data is PDVMessage {
  * Check whether an incoming message's protocol version is compatible with
  * the version this build of the app expects.
  *
- * - `'ok'`: Major and minor versions both match.
- * - `'minor_mismatch'`: Major matches; minor differs (tolerated, warn only).
+ * - `'ok'`: Versions match exactly (major.minor.patch).
+ * - `'minor_mismatch'`: Major matches; minor or patch differs (tolerated, warn only).
  * - `'major_mismatch'`: Major versions differ (incompatible; reject message).
  *
  * @param msg - The incoming PDVMessage.
@@ -439,15 +459,17 @@ export function isPDVMessage(data: unknown): data is PDVMessage {
 export function checkVersionCompatibility(
   msg: PDVMessage
 ): "ok" | "major_mismatch" | "minor_mismatch" {
-  const myParts = PDV_VERSION.split(".").map(Number);
+  const myParts = _appVersion.split(".").map(Number);
   const myMajor = myParts[0] ?? 0;
   const myMinor = myParts[1] ?? 0;
+  const myPatch = myParts[2] ?? 0;
 
-  const inParts = (msg.pdv_version ?? "0.0").split(".").map(Number);
+  const inParts = (msg.pdv_version ?? "0.0.0").split(".").map(Number);
   const inMajor = inParts[0] ?? 0;
   const inMinor = inParts[1] ?? 0;
+  const inPatch = inParts[2] ?? 0;
 
   if (inMajor !== myMajor) return "major_mismatch";
-  if (inMinor !== myMinor) return "minor_mismatch";
+  if (inMinor !== myMinor || inPatch !== myPatch) return "minor_mismatch";
   return "ok";
 }

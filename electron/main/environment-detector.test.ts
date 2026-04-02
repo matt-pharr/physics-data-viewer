@@ -17,6 +17,7 @@
 
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { EnvironmentDetector } from "./environment-detector";
+import { setAppVersion } from "./pdv-protocol";
 
 // ---------------------------------------------------------------------------
 // Mock child_process.execFile
@@ -130,6 +131,7 @@ function mockExecPerCommand(
 
 describe("EnvironmentDetector", () => {
   beforeEach(() => {
+    setAppVersion("0.0.6");
     EnvironmentDetector.clearCache();
     vi.clearAllMocks();
     // Remove env vars that might bleed between tests.
@@ -194,14 +196,14 @@ describe("EnvironmentDetector", () => {
   describe("checkPDVInstalled()", () => {
     it("returns { installed: true } when pdv_kernel is installed", async () => {
       mockExecPerCommand({
-        "/usr/bin/python3": { stdout: "1.0.0\n" },
+        "/usr/bin/python3": { stdout: "0.0.6\n" },
       });
 
       const status =
         await EnvironmentDetector.checkPDVInstalled("/usr/bin/python3");
 
       expect(status.installed).toBe(true);
-      expect(status.version).toBe("1.0.0");
+      expect(status.version).toBe("0.0.6");
       expect(status.compatible).toBe(true);
     });
 
@@ -220,7 +222,7 @@ describe("EnvironmentDetector", () => {
   describe("hasPDVKernel()", () => {
     it("returns true when pdv_kernel is installed", async () => {
       mockExecPerCommand({
-        "/usr/bin/python3": { stdout: "1.2.3\n" },
+        "/usr/bin/python3": { stdout: "0.0.6\n" },
       });
 
       const result = await EnvironmentDetector.hasPDVKernel("/usr/bin/python3");
@@ -310,7 +312,7 @@ describe("EnvironmentDetector", () => {
     it("returns enriched info with pdv and ipykernel status", async () => {
       // Mock: python --version succeeds, pdv_kernel import succeeds, ipykernel import succeeds
       mockExecPerCommand({
-        "/usr/bin/python3": { stdout: "1.0.0\n" },
+        "/usr/bin/python3": { stdout: "0.0.6\n" },
       });
 
       const baseEnv = {
@@ -321,20 +323,20 @@ describe("EnvironmentDetector", () => {
         pythonVersion: "3.11.0",
       };
 
-      const info = await EnvironmentDetector.enrichEnvironment(baseEnv, "1.0.0");
+      const info = await EnvironmentDetector.enrichEnvironment(baseEnv);
 
       expect(info.kind).toBe("system");
       expect(info.pythonPath).toBe("/usr/bin/python3");
       expect(info.pdvInstalled).toBe(true);
-      expect(info.pdvVersion).toBe("1.0.0");
+      expect(info.pdvVersion).toBe("0.0.6");
       expect(info.pdvCompatible).toBe(true);
       expect(info.pdvUpgradeAvailable).toBe(false);
       expect(info.ipykernelInstalled).toBe(true);
     });
 
-    it("flags upgrade available when bundled version is newer", async () => {
+    it("flags upgrade available when installed version differs from app version", async () => {
       mockExecPerCommand({
-        "/usr/bin/python3": { stdout: "0.9.0\n" },
+        "/usr/bin/python3": { stdout: "0.0.5\n" },
       });
 
       const baseEnv = {
@@ -345,10 +347,10 @@ describe("EnvironmentDetector", () => {
         pythonVersion: "3.11.0",
       };
 
-      const info = await EnvironmentDetector.enrichEnvironment(baseEnv, "1.0.0");
+      const info = await EnvironmentDetector.enrichEnvironment(baseEnv);
 
       expect(info.pdvInstalled).toBe(true);
-      expect(info.pdvVersion).toBe("0.9.0");
+      expect(info.pdvVersion).toBe("0.0.5");
       expect(info.pdvUpgradeAvailable).toBe(true);
     });
   });

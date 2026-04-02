@@ -17,7 +17,7 @@ import { Console } from '../components/Console';
 import { Tree } from '../components/Tree';
 import { ActivityBar } from '../components/ActivityBar';
 import { StatusBar } from '../components/StatusBar';
-import { EnvironmentSelector } from '../components/EnvironmentSelector';
+
 import { NamespaceView } from '../components/NamespaceView';
 import { ScriptDialog } from '../components/ScriptDialog';
 import { CreateScriptDialog } from '../components/Tree/CreateScriptDialog';
@@ -95,6 +95,9 @@ const App: React.FC = () => {
   const [lastDuration, setLastDuration] = useState<number | null>(null);
   const [lastChecksum, setLastChecksum] = useState<string | null>(null);
   const [checksumMismatch, setChecksumMismatch] = useState<boolean>(false);
+  const [savedPdvVersion, setSavedPdvVersion] = useState<string | null>(null);
+  const [runningPdvVersion, setRunningPdvVersion] = useState<string | null>(null);
+  const [interpreterWarning, setInterpreterWarning] = useState<string | null>(null);
 
   // -- App / config state ---------------------------------------------------
   const [config, setConfig] = useState<Config | null>(null);
@@ -120,7 +123,7 @@ const App: React.FC = () => {
   const [modulesRefreshToken, setModulesRefreshToken] = useState(0);
 
   // -- Dialog visibility state ----------------------------------------------
-  const [showEnvSelector, setShowEnvSelector] = useState(false);
+
   const [showWelcome, setShowWelcome] = useState(true);
   const [scriptDialog, setScriptDialog] = useState<TreeNodeData | null>(null);
   const [createScriptTarget, setCreateScriptTarget] = useState<string | null>(null);
@@ -198,6 +201,7 @@ const App: React.FC = () => {
     };
 
     void initConfig();
+    void window.pdv.about.getVersion().then(setRunningPdvVersion).catch(() => {});
   }, []);
 
   useEffect(() => {
@@ -305,7 +309,6 @@ const App: React.FC = () => {
     setCurrentKernelId,
     setKernelStatus,
     setLastError,
-    setShowEnvSelector,
     setConfig,
     setLogs,
     setNamespaceRefreshToken,
@@ -410,11 +413,10 @@ const App: React.FC = () => {
       if (scriptDialog) { setScriptDialog(null); return; }
       if (createScriptTarget) { setCreateScriptTarget(null); return; }
       if (createNoteTarget) { setCreateNoteTarget(null); return; }
-      if (showEnvSelector) { setShowEnvSelector(false); return; }
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [showImportModule, scriptDialog, createScriptTarget, createNoteTarget, showEnvSelector]);
+  }, [showImportModule, scriptDialog, createScriptTarget, createNoteTarget]);
 
   const handleSettingsSave = async (updates: Partial<Config>) => {
     await window.pdv.config.set(updates);
@@ -725,6 +727,7 @@ const App: React.FC = () => {
     setLogs,
     setLastChecksum,
     setChecksumMismatch,
+    setSavedPdvVersion,
     loadedProjectTabsRef,
     normalizeLoadedCodeCells,
     flushDirtyNotes,
@@ -761,44 +764,90 @@ const App: React.FC = () => {
    * Starts the kernel for the current config, or shows the environment
    * selector if no interpreter path is configured for the given language.
    */
+  const openEnvSettings = useCallback((warning?: string) => {
+    if (warning) setInterpreterWarning(warning);
+    setSettingsInitialTab('runtime');
+    setShowSettings(true);
+  }, []);
+
   const ensureKernel = useCallback(async (language: 'python' | 'julia' = 'python') => {
     setActiveLanguage(language);
     if (language === 'julia') {
-      // Julia doesn't require a pre-configured path — auto-detect is fine.
-      // Only show selector if Julia isn't found at all.
       await startKernel(config ?? {} as Config, 'julia');
     } else {
       if (!config?.pythonPath) {
-        setShowEnvSelector(true);
+        openEnvSettings();
         return;
+      }
+      // Pre-flight: check that the configured interpreter has a compatible pdv-python.
+      try {
+        const envInfo = await window.pdv.environment.check(config.pythonPath);
+        if (envInfo && (!envInfo.pdvInstalled || !envInfo.pdvCompatible)) {
+          const msg = envInfo.pdvInstalled
+            ? `pdv-python ${envInfo.pdvVersion} is installed but v${runningPdvVersion ?? 'latest'} is required. Please update.`
+            : 'pdv-python is not installed in the configured environment.';
+          openEnvSettings(msg);
+          return;
+        }
+      } catch {
+        // Probe failed — try starting anyway
       }
       await startKernel(config, 'python');
     }
-  }, [config, startKernel, setShowEnvSelector]);
+  }, [config, runningPdvVersion, startKernel, openEnvSettings]);
 
   const handleWelcomeNewProject = useCallback(async (language: 'python' | 'julia') => {
     dismissWelcome();
     await ensureKernel(language);
   }, [dismissWelcome, ensureKernel]);
 
-  const handleWelcomeOpen = useCallback(async () => {
-    // Pick the directory first (while still on the splash screen) so we can
-    // detect which language kernel to start before leaving the welcome screen.
-    const dir = await window.pdv.files.pickDirectory();
-    if (!dir) return; // user cancelled — stay on splash
-    // Detect language from the saved project
-    const langMap = await window.pdv.project.peekLanguages([dir]);
-    const language = langMap[dir] ?? 'python';
+  /**
+   * Open a project from the welcome screen. Peeks at the manifest to detect
+   * language and saved interpreter path, then starts the kernel with the
+   * saved interpreter if available, or opens the env selector if not.
+   */
+  const openProjectFromWelcome = useCallback(async (dir: string) => {
+    const peek = await window.pdv.project.peekManifest(dir);
+    const language = peek.language ?? 'python';
     dismissWelcome();
+    setInterpreterWarning(null);
     pendingProjectRef.current = { type: 'open', path: dir, language };
-    await ensureKernel(language);
-  }, [dismissWelcome, ensureKernel]);
 
-  const handleWelcomeOpenRecent = useCallback(async (path: string, language?: 'python' | 'julia') => {
-    dismissWelcome();
-    pendingProjectRef.current = { type: 'open', path, language };
-    await ensureKernel(language ?? 'python');
-  }, [dismissWelcome, ensureKernel]);
+    // If the project saved an interpreter path, try to use it.
+    if (peek.interpreterPath && language === 'python') {
+      try {
+        const envInfo = await window.pdv.environment.check(peek.interpreterPath);
+        if (envInfo && envInfo.pdvInstalled && envInfo.pdvCompatible) {
+          // Use the project's saved interpreter
+          setActiveLanguage(language);
+          const overrideConfig: Config = {
+            ...config ?? {} as Config,
+            pythonPath: peek.interpreterPath,
+          };
+          await startKernel(overrideConfig, language);
+          return;
+        }
+      } catch {
+        // Probe failed — fall through to env selector
+      }
+      // Saved interpreter unavailable — warn and open settings
+      setActiveLanguage(language);
+      openEnvSettings(`The interpreter saved with this project (${peek.interpreterPath}) is no longer available.`);
+      return;
+    }
+
+    await ensureKernel(language);
+  }, [config, dismissWelcome, ensureKernel, openEnvSettings, startKernel]);
+
+  const handleWelcomeOpen = useCallback(async () => {
+    const dir = await window.pdv.files.pickDirectory();
+    if (!dir) return;
+    await openProjectFromWelcome(dir);
+  }, [openProjectFromWelcome]);
+
+  const handleWelcomeOpenRecent = useCallback(async (path: string, _language?: 'python' | 'julia') => {
+    await openProjectFromWelcome(path);
+  }, [openProjectFromWelcome]);
 
   // Execute deferred project action once the kernel becomes ready.
   useEffect(() => {
@@ -1049,18 +1098,10 @@ const App: React.FC = () => {
           onRuntimeClick={() => { setSettingsInitialTab('runtime'); setShowSettings(true); }}
           lastChecksum={lastChecksum}
           checksumMismatch={checksumMismatch}
+          savedPdvVersion={savedPdvVersion}
+          runningPdvVersion={runningPdvVersion}
         />
 
-       {showEnvSelector && (
-          <EnvironmentSelector
-            isFirstRun={activeLanguage === 'julia' ? !config?.juliaPath : !config?.pythonPath}
-            activeLanguage={activeLanguage}
-            currentPythonPath={config?.pythonPath}
-            currentJuliaPath={config?.juliaPath}
-            onSelect={handleEnvSave}
-            onCancel={() => setShowEnvSelector(false)}
-          />
-       )}
        <ImportModuleDialog
          isOpen={showImportModule}
          projectDir={currentProjectDir}
@@ -1077,10 +1118,11 @@ const App: React.FC = () => {
          shortcuts={shortcuts}
          onClose={() => setShowSettings(false)}
          onSave={handleSettingsSave}
-         onEnvSave={handleEnvSave}
+         onEnvSave={(paths) => { setShowSettings(false); setInterpreterWarning(null); handleEnvSave(paths); }}
+         envWarning={interpreterWarning}
        />
 
-       {showWelcome && isPristine && !showEnvSelector && (
+       {showWelcome && isPristine && !showSettings && (
          <WelcomeScreen
            recentProjects={recentProjects}
            onNewProject={handleWelcomeNewProject}

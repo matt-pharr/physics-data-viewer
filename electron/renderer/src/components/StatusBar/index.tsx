@@ -21,6 +21,8 @@ interface StatusBarProps {
   onRuntimeClick: () => void;
   lastChecksum: string | null;
   checksumMismatch: boolean;
+  savedPdvVersion: string | null;
+  runningPdvVersion: string | null;
 }
 
 /** Application status bar at the bottom of the window. */
@@ -37,6 +39,8 @@ export const StatusBar: React.FC<StatusBarProps> = ({
   onRuntimeClick,
   lastChecksum,
   checksumMismatch,
+  savedPdvVersion,
+  runningPdvVersion,
 }) => {
   const runtimeLabel = activeLanguage === 'julia'
     ? (juliaPath ?? 'julia')
@@ -77,6 +81,14 @@ export const StatusBar: React.FC<StatusBarProps> = ({
         <span className="status-item">{currentProjectDir ?? 'Unsaved Project'}</span>
       </div>
       <div className="status-right">
+        {savedPdvVersion && runningPdvVersion && savedPdvVersion !== runningPdvVersion && (
+          <span
+            className="status-item status-warning"
+            title="Project was saved with a different PDV version"
+          >
+            Saved: v{savedPdvVersion} | Running: v{runningPdvVersion}
+          </span>
+        )}
         {lastChecksum && (
           <span
             className={`status-item ${checksumMismatch ? 'status-warning' : ''}`}

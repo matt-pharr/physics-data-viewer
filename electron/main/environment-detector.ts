@@ -23,6 +23,7 @@ import * as path from "path";
 import * as os from "os";
 import * as fs from "fs";
 import { BrowserWindow } from "electron";
+import { getAppVersion } from "./pdv-protocol";
 
 const execFileAsync = promisify(execFile);
 
@@ -305,9 +306,8 @@ export class EnvironmentDetector {
         { timeout: PROBE_TIMEOUT_MS }
       );
       const version = stdout.trim();
-      // Major version compatibility: must match "1" for PDV protocol 1.x.
-      const major = version.split(".")[0];
-      const compatible = major === "1";
+      // Compatible when the installed version exactly matches the app version.
+      const compatible = version === getAppVersion();
       return { installed: true, version, compatible };
     } catch {
       return { installed: false, version: null, compatible: false };
@@ -525,17 +525,17 @@ export class EnvironmentDetector {
    * @returns Enriched environment info.
    */
   static async enrichEnvironment(
-    env: DetectedEnvironment,
-    bundledVersion: string | null
+    env: DetectedEnvironment
   ): Promise<EnvironmentInfo> {
     const [pdvStatus, ipykernelInstalled] = await Promise.all([
       EnvironmentDetector.checkPDVInstalled(env.pythonPath),
       EnvironmentDetector.checkIpykernelInstalled(env.pythonPath),
     ]);
 
+    const appVersion = getAppVersion();
     let pdvUpgradeAvailable = false;
-    if (pdvStatus.installed && pdvStatus.version && bundledVersion) {
-      pdvUpgradeAvailable = _isNewerVersion(bundledVersion, pdvStatus.version);
+    if (pdvStatus.installed && pdvStatus.version && appVersion) {
+      pdvUpgradeAvailable = pdvStatus.version !== appVersion;
     }
 
     return {
@@ -561,9 +561,8 @@ export class EnvironmentDetector {
     configuredPath?: string
   ): Promise<EnvironmentInfo[]> {
     const envs = await EnvironmentDetector.detectEnvironments(configuredPath);
-    const bundledVersion = EnvironmentDetector.getBundledPDVVersion();
     return Promise.all(
-      envs.map((env) => EnvironmentDetector.enrichEnvironment(env, bundledVersion))
+      envs.map((env) => EnvironmentDetector.enrichEnvironment(env))
     );
   }
 
@@ -580,8 +579,7 @@ export class EnvironmentDetector {
   ): Promise<EnvironmentInfo | null> {
     const env = await _probeEnv(pythonPath, "configured");
     if (!env) return null;
-    const bundledVersion = EnvironmentDetector.getBundledPDVVersion();
-    return EnvironmentDetector.enrichEnvironment(env, bundledVersion);
+    return EnvironmentDetector.enrichEnvironment(env);
   }
 
   /**

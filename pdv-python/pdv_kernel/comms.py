@@ -28,7 +28,7 @@ from typing import Any, Callable
 
 from pdv_kernel.errors import PDVVersionError
 
-PDV_PROTOCOL_VERSION = "1.0"
+from pdv_kernel import __version__ as PDV_PROTOCOL_VERSION
 PDV_COMM_TARGET = "pdv.kernel"
 
 # The single global comm instance (set on bootstrap, None before that).
@@ -129,15 +129,25 @@ def check_version(msg: dict) -> None:
     ------
     PDVVersionError
         If the major version component of ``msg['pdv_version']`` differs
-        from :data:`PDV_PROTOCOL_VERSION`. See ARCHITECTURE.md §3.6.
+        from :data:`PDV_PROTOCOL_VERSION`. A minor/patch mismatch is
+        logged but tolerated. See ARCHITECTURE.md §3.6.
     """
     incoming = str(msg.get("pdv_version", ""))
-    expected_major = PDV_PROTOCOL_VERSION.split(".")[0]
-    incoming_major = incoming.split(".")[0] if incoming else ""
+    expected_parts = PDV_PROTOCOL_VERSION.split(".")
+    incoming_parts = incoming.split(".") if incoming else []
+    expected_major = expected_parts[0] if expected_parts else "0"
+    incoming_major = incoming_parts[0] if incoming_parts else ""
     if incoming_major != expected_major:
         raise PDVVersionError(
-            f"Incompatible PDV protocol version: got '{incoming}', "
+            f"Incompatible PDV version: got '{incoming}', "
             f"expected major version '{expected_major}'"
+        )
+    if incoming != PDV_PROTOCOL_VERSION:
+        import sys  # noqa: PLC0415
+        print(
+            f"[PDV] version mismatch: kernel={PDV_PROTOCOL_VERSION}, app={incoming}",
+            file=sys.stderr,
+            flush=True,
         )
 
 

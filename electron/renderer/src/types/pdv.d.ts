@@ -262,6 +262,18 @@ export interface ProjectLoadResult {
   checksumValid: boolean | null;
   /** Number of tree nodes loaded. */
   nodeCount: number | null;
+  /** PDV version stored in the project manifest, or null if absent. */
+  savedPdvVersion: string | null;
+}
+
+/** Lightweight manifest peek returned before kernel start. */
+export interface ProjectManifestPeek {
+  /** Kernel language used by this project. */
+  language: "python" | "julia";
+  /** Interpreter path saved with the project, if any. */
+  interpreterPath?: string;
+  /** PDV version the project was saved with. */
+  pdvVersion?: string;
 }
 
 /** Persisted user configuration payload returned by `config.get`. */
@@ -705,6 +717,7 @@ export interface PDVApi {
     load(saveDir: string): Promise<ProjectLoadResult>;
     new(): Promise<boolean>;
     peekLanguages(paths: string[]): Promise<Record<string, "python" | "julia">>;
+    peekManifest(dir: string): Promise<ProjectManifestPeek>;
     onLoaded(callback: (payload: Record<string, unknown>) => void): () => void;
     onReloading(callback: (payload: { status: "reloading" | "ready" }) => void): () => void;
   };

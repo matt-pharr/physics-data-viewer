@@ -10,7 +10,7 @@ import * as os from "os";
 import * as path from "path";
 import { KernelManager } from "./kernel-manager";
 import { CommRouter } from "./comm-router";
-import { PDVMessage, PDVMessageType, PDV_PROTOCOL_VERSION } from "./pdv-protocol";
+import { PDVMessage, PDVMessageType, getAppVersion, setAppVersion } from "./pdv-protocol";
 
 const PYTHON_PACKAGE_DIR = path.resolve(__dirname, "../../pdv-python");
 const TEST_PYTHON_EXECUTABLE = process.env.PYTHON_PATH ?? "python3";
@@ -84,7 +84,7 @@ async function bootstrapAndInit(
   tempDirs.push(workingDir);
   const initResponse = await router.request(PDVMessageType.INIT, {
     working_dir: workingDir,
-    pdv_version: PDV_PROTOCOL_VERSION,
+    pdv_version: getAppVersion(),
   });
 
   return { ready, initResponse, workingDir };
@@ -100,6 +100,7 @@ describe("@slow Cross-boundary integration (Python + Electron)", { timeout: 120_
   const tempDirs: string[] = [];
 
   beforeAll(async () => {
+    setAppVersion("0.0.6");
     km = new KernelManager();
     router = new CommRouter();
 
