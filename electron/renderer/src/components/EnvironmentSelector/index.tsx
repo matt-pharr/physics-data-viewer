@@ -285,8 +285,8 @@ export const EnvironmentSelector: React.FC<EnvironmentSelectorProps> = ({
             </span>
             <span className="env-row-badges">
               {env.pdvInstalled ? (
-                env.pdvUpgradeAvailable ? (
-                  <span className="env-badge env-badge--warning" title={`Upgrade available: ${env.pdvVersion}`}>pdv {env.pdvVersion}</span>
+                env.pdvVersionMismatch ? (
+                  <span className="env-badge env-badge--warning" title={`Version mismatch: ${env.pdvVersion} (app: ${appVersion ?? '?'})`}>pdv {env.pdvVersion}</span>
                 ) : (
                   <span className="env-badge env-badge--ok" title={`pdv-python ${env.pdvVersion}`}>pdv</span>
                 )
@@ -314,11 +314,11 @@ export const EnvironmentSelector: React.FC<EnvironmentSelectorProps> = ({
       </div>
 
       {/* Install panel — visible when selected env needs pdv-python */}
-      {selectedInfo && (!selectedInfo.pdvInstalled || selectedInfo.pdvUpgradeAvailable) && (
+      {selectedInfo && (!selectedInfo.pdvInstalled || selectedInfo.pdvVersionMismatch) && (
         <div className="env-install-panel">
           <div className="env-install-header">
-            {selectedInfo.pdvUpgradeAvailable
-              ? `pdv-python ${selectedInfo.pdvVersion} installed — v${appVersion ?? 'latest'} available.`
+            {selectedInfo.pdvVersionMismatch
+              ? `pdv-python ${selectedInfo.pdvVersion} installed — v${appVersion ?? 'latest'} required.`
               : 'pdv-python is not installed in this environment.'}
           </div>
           <button
@@ -329,8 +329,8 @@ export const EnvironmentSelector: React.FC<EnvironmentSelectorProps> = ({
           >
             {installing
               ? 'Installing...'
-              : selectedInfo.pdvUpgradeAvailable
-                ? `Update pdv-python to ${appVersion ?? 'latest'}`
+              : selectedInfo.pdvVersionMismatch
+                ? `Install pdv-python ${appVersion ?? 'latest'}`
                 : 'Install pdv-python'}
           </button>
 

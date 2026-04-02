@@ -67,7 +67,11 @@ export interface ProjectManifest {
   tree_checksum: string;
   /** Kernel language used by this project ("python" or "julia"). */
   language: "python" | "julia";
-  /** Absolute path to the interpreter executable used when last saved. */
+  /**
+   * Absolute path to the interpreter executable used when last saved.
+   * Populated at save time so that re-opening the project can pre-select
+   * the same environment without requiring the user to reconfigure.
+   */
   interpreter_path?: string;
   /** Imported modules active in this project. */
   modules: ProjectModuleImport[];

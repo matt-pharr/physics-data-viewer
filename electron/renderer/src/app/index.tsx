@@ -773,7 +773,8 @@ const App: React.FC = () => {
   const ensureKernel = useCallback(async (language: 'python' | 'julia' = 'python') => {
     setActiveLanguage(language);
     if (language === 'julia') {
-      await startKernel(config ?? {} as Config, 'julia');
+      const ok = await startKernel(config ?? {} as Config, 'julia');
+      if (!ok) openEnvSettings('Kernel failed to start.');
     } else {
       if (!config?.pythonPath) {
         openEnvSettings();
@@ -792,7 +793,8 @@ const App: React.FC = () => {
       } catch {
         // Probe failed — try starting anyway
       }
-      await startKernel(config, 'python');
+      const ok = await startKernel(config, 'python');
+      if (!ok) openEnvSettings('Kernel failed to start.');
     }
   }, [config, runningPdvVersion, startKernel, openEnvSettings]);
 
@@ -814,6 +816,7 @@ const App: React.FC = () => {
     pendingProjectRef.current = { type: 'open', path: dir, language };
 
     // If the project saved an interpreter path, try to use it.
+    // TODO: Add Julia interpreter validation once Julia supports saved interpreter paths.
     if (peek.interpreterPath && language === 'python') {
       try {
         const envInfo = await window.pdv.environment.check(peek.interpreterPath);
@@ -1118,7 +1121,14 @@ const App: React.FC = () => {
          shortcuts={shortcuts}
          onClose={() => setShowSettings(false)}
          onSave={handleSettingsSave}
-         onEnvSave={(paths) => { setShowSettings(false); setInterpreterWarning(null); handleEnvSave(paths); }}
+         onEnvSave={async (paths) => {
+           setShowSettings(false);
+           setInterpreterWarning(null);
+           const ok = await handleEnvSave(paths);
+           if (!ok) {
+             openEnvSettings('Kernel failed to start with the selected environment.');
+           }
+         }}
          envWarning={interpreterWarning}
        />
 

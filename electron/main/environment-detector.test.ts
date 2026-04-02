@@ -330,11 +330,11 @@ describe("EnvironmentDetector", () => {
       expect(info.pdvInstalled).toBe(true);
       expect(info.pdvVersion).toBe("0.0.6");
       expect(info.pdvCompatible).toBe(true);
-      expect(info.pdvUpgradeAvailable).toBe(false);
+      expect(info.pdvVersionMismatch).toBe(false);
       expect(info.ipykernelInstalled).toBe(true);
     });
 
-    it("flags upgrade available when installed version differs from app version", async () => {
+    it("flags version mismatch when installed version differs from app version", async () => {
       mockExecPerCommand({
         "/usr/bin/python3": { stdout: "0.0.5\n" },
       });
@@ -351,7 +351,7 @@ describe("EnvironmentDetector", () => {
 
       expect(info.pdvInstalled).toBe(true);
       expect(info.pdvVersion).toBe("0.0.5");
-      expect(info.pdvUpgradeAvailable).toBe(true);
+      expect(info.pdvVersionMismatch).toBe(true);
     });
   });
 

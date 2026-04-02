@@ -26,7 +26,7 @@
  * value of `app.getVersion()` (from package.json). All comm messages and
  * project manifests use this version.
  */
-let _appVersion = "0.0.0";
+let _appVersion = "";
 
 /**
  * Set the app version. Must be called once during startup before any comm
@@ -44,6 +44,10 @@ export function setAppVersion(version: string): void {
  * @returns The version string set at startup.
  */
 export function getAppVersion(): string {
+  if (!_appVersion) {
+    console.warn("[pdv-protocol] getAppVersion() called before setAppVersion() — returning '0.0.0'");
+    return "0.0.0";
+  }
   return _appVersion;
 }
 
@@ -473,6 +477,8 @@ export function checkVersionCompatibility(
   if (inMajor !== myMajor) return "major_mismatch";
   // During 0.x development, any minor/patch difference is flagged.
   // Post-1.0, consider relaxing to tolerate patch-level differences.
+  // NOTE: Same version policy is enforced in environment-detector.ts
+  // (checkPDVInstalled) and pdv_kernel/comms.py (check_version).
   if (inMinor !== myMinor || inPatch !== myPatch) return "minor_mismatch";
   return "ok";
 }

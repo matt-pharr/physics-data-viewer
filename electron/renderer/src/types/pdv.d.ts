@@ -603,7 +603,7 @@ export interface EnvironmentInfo {
   pdvInstalled: boolean;
   pdvVersion: string | null;
   pdvCompatible: boolean;
-  pdvUpgradeAvailable: boolean;
+  pdvVersionMismatch: boolean;
   ipykernelInstalled: boolean;
 }
 

@@ -27,10 +27,10 @@ from pdv_kernel.tree import PDVTree, PDVFile, PDVScript, PDVNote, PDVGui, PDVNam
 from pdv_kernel.errors import PDVError
 from pdv_kernel.modules import handle
 
-from importlib.metadata import version as _pkg_version
+from importlib.metadata import version as _pkg_version, PackageNotFoundError as _PkgNotFound
 try:
     __version__ = _pkg_version("pdv-python")
-except Exception:
+except _PkgNotFound:
     __version__ = "0.0.0"
 
 __all__ = [

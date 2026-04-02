@@ -23,6 +23,7 @@ ARCHITECTURE.md §5.3 (bootstrap)
 
 from __future__ import annotations
 
+import sys
 import uuid
 from typing import Any, Callable
 
@@ -137,13 +138,16 @@ def check_version(msg: dict) -> None:
     incoming_parts = incoming.split(".") if incoming else []
     expected_major = expected_parts[0] if expected_parts else "0"
     incoming_major = incoming_parts[0] if incoming_parts else ""
+    # During 0.x, major mismatch rejects; minor/patch mismatch warns.
+    # Post-1.0, consider relaxing to tolerate patch-level differences.
+    # NOTE: Same version policy is enforced in pdv-protocol.ts
+    # (checkVersionCompatibility) and environment-detector.ts (checkPDVInstalled).
     if incoming_major != expected_major:
         raise PDVVersionError(
             f"Incompatible PDV version: got '{incoming}', "
             f"expected major version '{expected_major}'"
         )
     if incoming != PDV_PROTOCOL_VERSION:
-        import sys  # noqa: PLC0415
         print(
             f"[PDV] version mismatch: kernel={PDV_PROTOCOL_VERSION}, app={incoming}",
             file=sys.stderr,

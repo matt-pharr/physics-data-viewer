@@ -112,8 +112,8 @@ export interface EnvironmentInfo {
   pdvVersion: string | null;
   /** True when the installed version is protocol-compatible. */
   pdvCompatible: boolean;
-  /** True when the bundled version is newer than the installed version. */
-  pdvUpgradeAvailable: boolean;
+  /** True when the installed pdv-python version differs from the app version. */
+  pdvVersionMismatch: boolean;
   /** True when ``ipykernel`` is importable. */
   ipykernelInstalled: boolean;
 }
@@ -308,6 +308,8 @@ export class EnvironmentDetector {
       const version = stdout.trim();
       // During 0.x, require an exact version match. Post-1.0 this could
       // relax to major-version compatibility.
+      // NOTE: Same version policy is enforced in pdv-protocol.ts
+      // (checkVersionCompatibility) and pdv_kernel/comms.py (check_version).
       const compatible = version === getAppVersion();
       return { installed: true, version, compatible };
     } catch {
@@ -522,7 +524,6 @@ export class EnvironmentDetector {
    * by probing pdv-python and ipykernel installation status.
    *
    * @param env - Base detected environment.
-   * @param bundledVersion - Bundled pdv-python version for upgrade comparison.
    * @returns Enriched environment info.
    */
   static async enrichEnvironment(
@@ -534,9 +535,9 @@ export class EnvironmentDetector {
     ]);
 
     const appVersion = getAppVersion();
-    let pdvUpgradeAvailable = false;
+    let pdvVersionMismatch = false;
     if (pdvStatus.installed && pdvStatus.version && appVersion) {
-      pdvUpgradeAvailable = pdvStatus.version !== appVersion;
+      pdvVersionMismatch = pdvStatus.version !== appVersion;
     }
 
     return {
@@ -547,7 +548,7 @@ export class EnvironmentDetector {
       pdvInstalled: pdvStatus.installed,
       pdvVersion: pdvStatus.version,
       pdvCompatible: pdvStatus.compatible,
-      pdvUpgradeAvailable,
+      pdvVersionMismatch,
       ipykernelInstalled,
     };
   }
