@@ -2,8 +2,9 @@
  * pdv-protocol.ts — TypeScript types for the PDV comm protocol envelope.
  *
  * All PDV messages sent over the Jupyter comm channel conform to the
- * envelope defined here. Contains ONLY type definitions (interfaces, type
- * aliases, const maps) and pure functions — no side effects.
+ * envelope defined here. Contains type definitions (interfaces, type
+ * aliases, const maps), pure functions, and the unified app version state
+ * (set once at startup via {@link setAppVersion}).
  *
  * These types are consumed by:
  * - comm-router.ts  — parses raw comm data into typed messages
@@ -470,6 +471,8 @@ export function checkVersionCompatibility(
   const inPatch = inParts[2] ?? 0;
 
   if (inMajor !== myMajor) return "major_mismatch";
+  // During 0.x development, any minor/patch difference is flagged.
+  // Post-1.0, consider relaxing to tolerate patch-level differences.
   if (inMinor !== myMinor || inPatch !== myPatch) return "minor_mismatch";
   return "ok";
 }

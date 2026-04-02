@@ -306,7 +306,8 @@ export class EnvironmentDetector {
         { timeout: PROBE_TIMEOUT_MS }
       );
       const version = stdout.trim();
-      // Compatible when the installed version exactly matches the app version.
+      // During 0.x, require an exact version match. Post-1.0 this could
+      // relax to major-version compatibility.
       const compatible = version === getAppVersion();
       return { installed: true, version, compatible };
     } catch {

@@ -37,7 +37,7 @@ interface SettingsDialogProps {
   shortcuts: Shortcuts;
   onClose: () => void;
   onSave: (updates: Partial<Config>) => Promise<void>;
-  onEnvSave: (paths: { pythonPath?: string; juliaPath?: string }) => void;
+  onEnvSave: (paths: { pythonPath?: string; juliaPath?: string }) => void | Promise<void>;
   envWarning?: string | null;
 }
 

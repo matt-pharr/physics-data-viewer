@@ -784,7 +784,7 @@ const App: React.FC = () => {
         const envInfo = await window.pdv.environment.check(config.pythonPath);
         if (envInfo && (!envInfo.pdvInstalled || !envInfo.pdvCompatible)) {
           const msg = envInfo.pdvInstalled
-            ? `pdv-python ${envInfo.pdvVersion} is installed but v${runningPdvVersion ?? 'latest'} is required. Please update.`
+            ? `pdv-python ${envInfo.pdvVersion} is installed but ${runningPdvVersion ? `v${runningPdvVersion}` : 'a compatible version'} is required. Please update.`
             : 'pdv-python is not installed in the configured environment.';
           openEnvSettings(msg);
           return;
@@ -845,7 +845,7 @@ const App: React.FC = () => {
     await openProjectFromWelcome(dir);
   }, [openProjectFromWelcome]);
 
-  const handleWelcomeOpenRecent = useCallback(async (path: string, _language?: 'python' | 'julia') => {
+  const handleWelcomeOpenRecent = useCallback(async (path: string) => {
     await openProjectFromWelcome(path);
   }, [openProjectFromWelcome]);
 
