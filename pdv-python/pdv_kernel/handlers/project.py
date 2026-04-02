@@ -316,7 +316,7 @@ def handle_project_load(msg: dict) -> None:
     # Send pdv.project.loaded push notification (no in_reply_to)
     send_message(
         "pdv.project.loaded",
-        {"node_count": node_count, "project_name": "", "saved_at": ""},
+        {"node_count": node_count},
     )
 
 
