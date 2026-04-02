@@ -35,8 +35,11 @@ import {
 import { ProjectManager, type ProjectModuleImport } from "./project-manager";
 import { ConfigStore } from "./config";
 import { registerAppStateIpcHandlers } from "./ipc-register-app-state";
+import { registerGuiEditorIpcHandlers } from "./ipc-register-gui-editor";
 import { registerModuleWindowIpcHandlers } from "./ipc-register-module-windows";
 import { registerTreeNamespaceScriptIpcHandlers } from "./ipc-register-tree-namespace-script";
+import { GuiEditorWindowManager } from "./gui-editor-window-manager";
+import { GuiViewerWindowManager } from "./gui-viewer-window-manager";
 import { ModuleWindowManager } from "./module-window-manager";
 import {
   IPC,
@@ -119,6 +122,12 @@ const REGISTERED_CHANNELS: readonly string[] = [
   IPC.moduleWindows.close,
   IPC.moduleWindows.context,
   IPC.moduleWindows.executeInMain,
+  IPC.guiEditor.open,
+  IPC.guiEditor.openViewer,
+  IPC.guiEditor.context,
+  IPC.guiEditor.read,
+  IPC.guiEditor.save,
+  IPC.tree.createGui,
   IPC.files.pickExecutable,
   IPC.files.pickFile,
   IPC.files.pickDirectory,
@@ -407,6 +416,8 @@ export function registerIpcHandlers(
 
   const preloadPath = path.join(__dirname, "..", "preload.js");
   const moduleWindowManager = new ModuleWindowManager(win, preloadPath);
+  const guiEditorWindowManager = new GuiEditorWindowManager(win, preloadPath);
+  const guiViewerWindowManager = new GuiViewerWindowManager(win, preloadPath);
 
   registerKernelIpcHandlers({
     win,
@@ -422,12 +433,16 @@ export function registerIpcHandlers(
       pendingModuleSettings = {};
       moduleHealthWarningsByAlias.clear();
       moduleWindowManager.closeAll();
+      guiEditorWindowManager.closeAll();
+      guiViewerWindowManager.closeAll();
     },
     resetKernelState: () => {
       pendingModuleImports = [];
       pendingModuleSettings = {};
       moduleHealthWarningsByAlias.clear();
       moduleWindowManager.closeAll();
+      guiEditorWindowManager.closeAll();
+      guiViewerWindowManager.closeAll();
     },
     setActiveKernelId: (id) => { activeKernelId = id; },
     getActiveKernelId: () => activeKernelId,
@@ -511,9 +526,15 @@ export function registerIpcHandlers(
     mainWindow: win,
   });
 
+  registerGuiEditorIpcHandlers({
+    guiEditorWindowManager,
+    guiViewerWindowManager,
+    commRouter,
+  });
+
   registerEnvironmentIpcHandlers(win, configStore);
 
-  registerPushForwarding(win, commRouter, moduleWindowManager);
+  registerPushForwarding(win, commRouter, moduleWindowManager, guiEditorWindowManager, guiViewerWindowManager);
 
   /**
    * Reset all in-session state. Called whenever the renderer reloads so that
@@ -527,6 +548,8 @@ export function registerIpcHandlers(
     pendingModuleSettings = {};
     moduleHealthWarningsByAlias.clear();
     moduleWindowManager.closeAll();
+    guiEditorWindowManager.closeAll();
+    guiViewerWindowManager.closeAll();
   }
 
   return resetSessionState;
@@ -569,13 +592,17 @@ function registerEnvironmentIpcHandlers(win: BrowserWindow, configStore: ConfigS
 export function registerPushForwarding(
   win: BrowserWindow,
   commRouter: CommRouter,
-  moduleWindowManager?: ModuleWindowManager
+  moduleWindowManager?: ModuleWindowManager,
+  guiEditorWindowManager?: GuiEditorWindowManager,
+  guiViewerWindowManager?: GuiViewerWindowManager
 ): void {
   const subscribe = (type: string, channel: string, broadcast?: boolean): void => {
     const handler = (message: PDVMessage): void => {
       win.webContents.send(channel, message.payload);
-      if (broadcast && moduleWindowManager) {
-        moduleWindowManager.broadcastToAll(channel, message.payload);
+      if (broadcast) {
+        moduleWindowManager?.broadcastToAll(channel, message.payload);
+        guiEditorWindowManager?.broadcastToAll(channel, message.payload);
+        guiViewerWindowManager?.broadcastToAll(channel, message.payload);
       }
     };
     commRouter.onPush(type, handler);

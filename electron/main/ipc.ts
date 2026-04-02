@@ -70,6 +70,7 @@ export const IPC = {
     createScript: "tree:createScript",
     createNote: "tree:createNote",
     addFile: "tree:addFile",
+    createGui: "tree:createGui",
     invokeHandler: "tree:invokeHandler",
   },
   /** Namespace inspection channels. */
@@ -165,6 +166,14 @@ export const IPC = {
     close: "moduleWindows:close",
     context: "moduleWindows:context",
     executeInMain: "moduleWindows:executeInMain",
+  },
+  /** GUI editor popup window channels. */
+  guiEditor: {
+    open: "guiEditor:open",
+    openViewer: "guiEditor:openViewer",
+    context: "guiEditor:context",
+    read: "guiEditor:read",
+    save: "guiEditor:save",
   },
   /** Python environment discovery and installation channels. */
   environment: {
@@ -803,6 +812,118 @@ export interface ModuleWindowContext {
 }
 
 // ---------------------------------------------------------------------------
+// GUI editor types
+// ---------------------------------------------------------------------------
+
+/**
+ * Action descriptor as stored on disk in gui.json.
+ *
+ * Distinct from {@link ImportedModuleActionDescriptor} which uses `scriptName`
+ * (the resolved tree key after module import). This type uses `script_path`
+ * (the raw relative path from the manifest).
+ */
+export interface GuiActionDescriptor {
+  /** Stable action identifier. */
+  id: string;
+  /** User-facing action label. */
+  label: string;
+  /** Script path relative to the GUI node's parent in the tree. */
+  script_path: string;
+  /** Input IDs this action reads when run. */
+  inputs?: string[];
+}
+
+/**
+ * Complete GUI manifest as stored in `.gui.json` files.
+ */
+export interface GuiManifestV1 {
+  /** Whether this manifest defines a renderable GUI. */
+  has_gui: boolean;
+  /** Container layout definition. */
+  gui?: ModuleGuiLayout;
+  /** Declarative input field descriptors. */
+  inputs: ModuleInputDescriptor[];
+  /** Declarative action descriptors. */
+  actions: GuiActionDescriptor[];
+}
+
+/**
+ * Request payload for opening a GUI editor window.
+ */
+export interface GuiEditorOpenRequest {
+  /** Dot-delimited tree path of the PDVGui node to edit. */
+  treePath: string;
+  /** Active kernel ID. */
+  kernelId: string;
+}
+
+/**
+ * Result payload for `guiEditor.open`.
+ */
+export interface GuiEditorOpenResult {
+  /** True when the editor window was opened or focused successfully. */
+  success: boolean;
+  /** Optional error message when `success` is false. */
+  error?: string;
+}
+
+/**
+ * Context payload returned to a GUI editor window identifying its target.
+ */
+export interface GuiEditorContext {
+  /** Dot-delimited tree path of the PDVGui node being edited. */
+  treePath: string;
+  /** Active kernel ID. */
+  kernelId: string;
+}
+
+/**
+ * Result payload for `guiEditor.read`.
+ */
+export interface GuiEditorReadResult {
+  /** True when the manifest was read successfully. */
+  success: boolean;
+  /** Parsed GUI manifest content. */
+  manifest?: GuiManifestV1;
+  /** Optional error message when `success` is false. */
+  error?: string;
+}
+
+/**
+ * Request payload for `guiEditor.save`.
+ */
+export interface GuiEditorSaveRequest {
+  /** Dot-delimited tree path of the PDVGui node to write. */
+  treePath: string;
+  /** Updated manifest content to persist. */
+  manifest: GuiManifestV1;
+}
+
+/**
+ * Result payload for `guiEditor.save`.
+ */
+export interface GuiEditorSaveResult {
+  /** True when the manifest was written successfully. */
+  success: boolean;
+  /** Optional error message when `success` is false. */
+  error?: string;
+}
+
+/**
+ * Result returned by `tree.createGui`.
+ */
+export interface TreeCreateGuiResult {
+  /** True when GUI creation and registration succeeded. */
+  success: boolean;
+  /** Optional error message when `success` is false. */
+  error?: string;
+  /** Absolute path to the created .gui.json file. */
+  guiPath?: string;
+  /** Dot-path of the created tree node. */
+  treePath?: string;
+}
+
+// ---------------------------------------------------------------------------
 // Container layout types
 // ---------------------------------------------------------------------------
 
@@ -1113,6 +1234,19 @@ export interface PDVApi {
       targetPath: string,
       noteName: string
     ): Promise<TreeCreateNoteResult>;
+    /**
+     * Create and register a new GUI node.
+     *
+     * @param kernelId - Target kernel ID.
+     * @param targetPath - Dot-path under which to register the GUI.
+     * @param guiName - GUI base name (without .gui.json extension).
+     * @returns GUI creation result payload.
+     */
+    createGui(
+      kernelId: string,
+      targetPath: string,
+      guiName: string
+    ): Promise<TreeCreateGuiResult>;
     /**
      * Copy a file into the kernel working directory and register it as a tree node.
      *
@@ -1525,6 +1659,44 @@ export interface PDVApi {
      * @returns Unsubscribe function.
      */
     onExecuteRequest(callback: (code: string) => void): () => void;
+  };
+
+  /** GUI editor popup window operations. */
+  guiEditor: {
+    /**
+     * Open (or focus) a GUI editor window for a PDVGui tree node.
+     *
+     * @param request - Tree path and kernel ID.
+     * @returns Open result payload.
+     */
+    open(request: GuiEditorOpenRequest): Promise<GuiEditorOpenResult>;
+    /**
+     * Open (or focus) a standalone GUI viewer window for a PDVGui tree node.
+     *
+     * @param request - Tree path and kernel ID.
+     * @returns Open result payload.
+     */
+    openViewer(request: GuiEditorOpenRequest): Promise<GuiEditorOpenResult>;
+    /**
+     * Get the editor/viewer context for the calling window.
+     *
+     * @returns Context payload, or null if called from a non-editor/viewer window.
+     */
+    context(): Promise<GuiEditorContext | null>;
+    /**
+     * Read the gui.json manifest backing a PDVGui tree node.
+     *
+     * @param treePath - Dot-path of the PDVGui node.
+     * @returns Parsed manifest content.
+     */
+    read(treePath: string): Promise<GuiEditorReadResult>;
+    /**
+     * Write an updated gui.json manifest back to the PDVGui backing file.
+     *
+     * @param request - Tree path and updated manifest.
+     * @returns Save result payload.
+     */
+    save(request: GuiEditorSaveRequest): Promise<GuiEditorSaveResult>;
   };
 
   /** Native file/directory pickers (main process dialog wrappers). */

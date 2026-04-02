@@ -99,6 +99,7 @@ export function getActionsForNode(node: TreeNodeData) {
 
   if (isModule || isGui) {
     actions.push({ id: 'open_gui', label: 'Open GUI', disabled: false });
+    actions.push({ id: 'edit_gui', label: 'Edit GUI', disabled: false });
   }
 
   if (node.type === 'script') {
@@ -120,7 +121,7 @@ export function getActionsForNode(node: TreeNodeData) {
     if (canCreateScript) {
       actions.push({ id: 'create_script', label: 'Create new script', disabled: false });
       actions.push({ id: 'create_note', label: 'Create new note', disabled: false });
-      actions.push({ id: 'new_gui', label: 'New GUI', disabled: true });
+      actions.push({ id: 'new_gui', label: 'New GUI', disabled: false });
     }
     actions.push({ id: 'view', label: 'View', disabled: false });
   }

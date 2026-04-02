@@ -545,6 +545,67 @@ export interface ModuleGuiLayout {
   layout: LayoutContainer;
 }
 
+/** Action descriptor as stored on disk in gui.json. */
+export interface GuiActionDescriptor {
+  id: string;
+  label: string;
+  script_path: string;
+  inputs?: string[];
+}
+
+/** Complete GUI manifest as stored in .gui.json files. */
+export interface GuiManifestV1 {
+  has_gui: boolean;
+  gui?: ModuleGuiLayout;
+  inputs: ModuleInputDescriptor[];
+  actions: GuiActionDescriptor[];
+}
+
+/** Request payload for opening a GUI editor window. */
+export interface GuiEditorOpenRequest {
+  treePath: string;
+  kernelId: string;
+}
+
+/** Result payload for `guiEditor.open`. */
+export interface GuiEditorOpenResult {
+  success: boolean;
+  error?: string;
+}
+
+/** Context payload identifying a GUI editor window. */
+export interface GuiEditorContext {
+  treePath: string;
+  kernelId: string;
+}
+
+/** Result payload for `guiEditor.read`. */
+export interface GuiEditorReadResult {
+  success: boolean;
+  manifest?: GuiManifestV1;
+  error?: string;
+}
+
+/** Request payload for `guiEditor.save`. */
+export interface GuiEditorSaveRequest {
+  treePath: string;
+  manifest: GuiManifestV1;
+}
+
+/** Result payload for `guiEditor.save`. */
+export interface GuiEditorSaveResult {
+  success: boolean;
+  error?: string;
+}
+
+/** Result returned by `tree.createGui`. */
+export interface TreeCreateGuiResult {
+  success: boolean;
+  error?: string;
+  guiPath?: string;
+  treePath?: string;
+}
+
 /** Project-scoped imported module descriptor. */
 export interface ImportedModuleDescriptor {
   moduleId: string;
@@ -663,6 +724,11 @@ export interface PDVApi {
       targetPath: string,
       noteName: string
     ): Promise<{ success: boolean; error?: string; notePath?: string; treePath?: string }>;
+    createGui(
+      kernelId: string,
+      targetPath: string,
+      guiName: string
+    ): Promise<TreeCreateGuiResult>;
     addFile(
       kernelId: string,
       sourcePath: string,
@@ -746,6 +812,13 @@ export interface PDVApi {
     context(): Promise<ModuleWindowContext | null>;
     executeInMain(code: string): Promise<void>;
     onExecuteRequest(callback: (code: string) => void): () => void;
+  };
+  guiEditor: {
+    open(request: GuiEditorOpenRequest): Promise<GuiEditorOpenResult>;
+    openViewer(request: GuiEditorOpenRequest): Promise<GuiEditorOpenResult>;
+    context(): Promise<GuiEditorContext | null>;
+    read(treePath: string): Promise<GuiEditorReadResult>;
+    save(request: GuiEditorSaveRequest): Promise<GuiEditorSaveResult>;
   };
   files: {
     pickExecutable(): Promise<string | null>;

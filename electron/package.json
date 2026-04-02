@@ -32,7 +32,7 @@
     "test": "node ./node_modules/vitest/vitest.mjs run",
     "lint": "eslint .",
     "knip": "knip",
-    "clean": "rm -rf dist renderer/dist release"
+    "clean": "rm -rf dist renderer/dist release node_modules renderer/node_modules"
   },
   "devDependencies": {
     "@eslint/js": "^9.39.4",
