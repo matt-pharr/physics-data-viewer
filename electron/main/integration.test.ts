@@ -187,7 +187,8 @@ describe("@slow Cross-boundary integration (Python + Electron)", { timeout: 120_
       changed_paths?: unknown;
       change_type?: unknown;
     };
-    expect(payload.change_type).toBe("added");
+    // Debounced notifications arrive as "batch" change_type.
+    expect(payload.change_type).toBe("batch");
     expect(payload.changed_paths).toContain(changedPath);
   });
 
@@ -211,7 +212,8 @@ describe("@slow Cross-boundary integration (Python + Electron)", { timeout: 120_
       changed_paths?: unknown;
       change_type?: unknown;
     };
-    expect(payload.change_type).toBe("removed");
+    // Debounced notifications arrive as "batch" change_type.
+    expect(payload.change_type).toBe("batch");
     expect(payload.changed_paths).toContain(changedPath);
   });
 
@@ -325,7 +327,7 @@ describe("@slow Cross-boundary integration (Python + Electron)", { timeout: 120_
       changed_paths?: unknown;
       change_type?: unknown;
     };
-    expect(changedPayload.change_type).toBe("added");
+    expect(changedPayload.change_type).toBe("batch");
     expect(changedPayload.changed_paths).toContain("scripts.analysis.fit_model");
 
     const listResponse = await router.request(PDVMessageType.TREE_LIST, {

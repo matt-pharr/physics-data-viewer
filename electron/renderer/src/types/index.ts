@@ -121,5 +121,5 @@ export interface TreeNodeData extends NodeDescriptor {
 /** Describes a tree change pushed from the kernel. */
 export interface TreeChangeInfo {
   changed_paths: string[];
-  change_type: 'added' | 'removed' | 'updated';
+  change_type: 'added' | 'removed' | 'updated' | 'batch';
 }

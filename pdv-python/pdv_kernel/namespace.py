@@ -213,7 +213,7 @@ def pdv_namespace(
     _INTERNAL: frozenset[str] = frozenset({"pdv_tree", "pdv"})
     result: dict = {}
 
-    for name, value in ns.items():
+    for name, value in list(ns.items()):
         # Always exclude PDV internals
         if name in _INTERNAL:
             continue

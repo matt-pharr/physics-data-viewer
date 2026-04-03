@@ -83,8 +83,11 @@ def handle_tree_list(msg: dict) -> None:
         container = tree
 
     nodes = []
-    for key in dict.keys(container):
-        value = dict.__getitem__(container, key)
+    for key in list(dict.keys(container)):
+        try:
+            value = dict.__getitem__(container, key)
+        except KeyError:
+            continue  # key deleted concurrently by another thread
         child_path = f"{path}.{key}" if path else key
         kind = detect_kind(value)
         preview = node_preview(value, kind)

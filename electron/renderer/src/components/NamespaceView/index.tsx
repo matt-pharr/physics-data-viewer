@@ -84,8 +84,9 @@ export const NamespaceView: React.FC<NamespaceViewProps> = ({
       return;
     }
 
-    setLoading(true);
     setError(undefined);
+    // Show spinner only if the fetch takes longer than 1s to avoid flashing.
+    const loadingTimer = setTimeout(() => setLoading(true), 1000);
 
     try {
       const result = await window.pdv.namespace.query(kernelId, filters);
@@ -96,6 +97,7 @@ export const NamespaceView: React.FC<NamespaceViewProps> = ({
       setVariables([]);
       resetInspectionState();
     } finally {
+      clearTimeout(loadingTimer);
       setLoading(false);
     }
   }, [kernelId, filters, disabled, resetInspectionState]);

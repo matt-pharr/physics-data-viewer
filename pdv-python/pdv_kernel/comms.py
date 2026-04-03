@@ -24,6 +24,7 @@ ARCHITECTURE.md §5.3 (bootstrap)
 from __future__ import annotations
 
 import sys
+import threading
 import uuid
 from typing import Any, Callable
 
@@ -41,6 +42,13 @@ _bootstrapped: bool = False
 # Reference to the PDVTree and IPython shell (set by bootstrap).
 _pdv_tree: Any = None
 _ip: Any = None
+
+# Reference to the query server (set on init, None before that).
+_query_server: Any = None
+
+# Thread-local storage for the query thread's response sink.
+# When set, send_message() routes the envelope to the sink instead of the comm.
+_thread_local = threading.local()
 
 
 def send_message(
@@ -72,11 +80,6 @@ def send_message(
     RuntimeError
         If called before bootstrap (no comm is open).
     """
-    global _comm
-    if _comm is None:
-        raise RuntimeError(
-            "No PDV comm channel is open. Was bootstrap() called before send_message()?"
-        )
     envelope = {
         "pdv_version": PDV_PROTOCOL_VERSION,
         "msg_id": str(uuid.uuid4()),
@@ -85,6 +88,17 @@ def send_message(
         "status": status,
         "payload": payload,
     }
+    # If running on the query thread, route through the thread-local sink
+    # instead of the comm channel.
+    sink = getattr(_thread_local, "response_sink", None)
+    if sink is not None:
+        sink(envelope)
+        return
+    global _comm
+    if _comm is None:
+        raise RuntimeError(
+            "No PDV comm channel is open. Was bootstrap() called before send_message()?"
+        )
     _comm.send(data=envelope)
 
 

@@ -103,6 +103,7 @@ class TestHandleScriptRegister:
         )
         with patch.object(comms_mod, '_comm', mock_comm), patch.object(comms_mod, '_pdv_tree', tree):
             handle_script_register(msg)
+            tree._flush_changes()
 
         types = [envelope['type'] for envelope in mock_comm._sent]
         assert 'pdv.tree.changed' in types

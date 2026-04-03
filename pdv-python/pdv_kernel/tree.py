@@ -29,6 +29,7 @@ import inspect
 import importlib.util
 import os
 import sys
+import threading
 from typing import Any, Callable, TypedDict
 
 from pdv_kernel.errors import PDVKeyError, PDVPathError, PDVScriptError
@@ -616,12 +617,17 @@ class PDVTree(dict):
     ARCHITECTURE.md §5.6, §7.1
     """
 
+    _DEBOUNCE_INTERVAL = 0.1  # seconds
+
     def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
         self._working_dir: str | None = None
         self._save_dir: str | None = None
         self._send_fn: Callable[[str, dict], None] | None = None
         self._path_prefix: str = ""
+        self._pending_changes: list[tuple[str, str]] = []
+        self._debounce_timer: threading.Timer | None = None
+        self._debounce_lock = threading.Lock()
 
     # ------------------------------------------------------------------
     # Internal state management (not user-facing)
@@ -651,7 +657,11 @@ class PDVTree(dict):
         self._send_fn = None
 
     def _emit_changed(self, path: str, change_type: str) -> None:
-        """Emit a pdv.tree.changed push notification if a comm is attached.
+        """Queue a change notification and schedule a debounced flush.
+
+        Notifications are accumulated and sent as a single batch after
+        ``_DEBOUNCE_INTERVAL`` seconds of inactivity.  This prevents
+        flooding the comm channel during tight mutation loops.
 
         Parameters
         ----------
@@ -660,11 +670,39 @@ class PDVTree(dict):
         change_type : str
             One of ``'added'``, ``'removed'``, or ``'updated'``.
         """
-        if self._send_fn is not None:
-            self._send_fn(
-                "pdv.tree.changed",
-                {"changed_paths": [path], "change_type": change_type},
+        if self._send_fn is None:
+            return
+        with self._debounce_lock:
+            self._pending_changes.append((path, change_type))
+            if self._debounce_timer is not None:
+                self._debounce_timer.cancel()
+            self._debounce_timer = threading.Timer(
+                self._DEBOUNCE_INTERVAL, self._flush_changes
             )
+            self._debounce_timer.daemon = True
+            self._debounce_timer.start()
+
+    def _flush_changes(self) -> None:
+        """Send all pending change notifications as a single batch.
+
+        Deduplicates by path, keeping the last change_type per path.
+        Called automatically by the debounce timer, or manually in tests.
+        """
+        with self._debounce_lock:
+            pending = self._pending_changes
+            self._pending_changes = []
+            self._debounce_timer = None
+            send_fn = self._send_fn  # capture under lock to avoid race with _detach_comm
+        if not pending or send_fn is None:
+            return
+        # Deduplicate: last change_type per path wins.
+        seen: dict[str, str] = {}
+        for path, change_type in pending:
+            seen[path] = change_type
+        send_fn(
+            "pdv.tree.changed",
+            {"changed_paths": list(seen.keys()), "change_type": "batch"},
+        )
 
     # ------------------------------------------------------------------
     # dict overrides

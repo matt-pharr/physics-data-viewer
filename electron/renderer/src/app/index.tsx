@@ -616,6 +616,7 @@ const App: React.FC = () => {
       setLastDuration(result.duration);
     }
     setNamespaceRefreshToken((prev) => prev + 1);
+    setTreeRefreshToken((prev) => prev + 1);
     setScriptDialog(null);
   };
 
@@ -694,6 +695,7 @@ const App: React.FC = () => {
     } finally {
       setIsExecuting(false);
       setNamespaceRefreshToken((prev) => prev + 1);
+      setTreeRefreshToken((prev) => prev + 1);
     }
   }, [currentKernelId, kernelStatus]);
 

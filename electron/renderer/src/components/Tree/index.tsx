@@ -10,9 +10,8 @@ import { List, type ListImperativeAPI, type RowComponentProps } from 'react-wind
 import { treeService, type TreeNodeData } from '../../services/tree';
 import { TreeNodeRow } from './TreeNodeRow';
 import { ContextMenu } from './ContextMenu';
-import { findNode, flattenTree, removeNodeImmut, updateNodeImmut } from './tree-utils';
+import { flattenTree, findNode, removeNodeImmut, updateNodeImmut } from './tree-utils';
 import type { TreeChangeInfo } from '../../types';
-import { TREE_PERSIST_DEBOUNCE_MS } from '../../app/constants';
 import type { Shortcuts } from '../../shortcuts';
 import { matchesShortcut } from '../../shortcuts';
 
@@ -29,7 +28,7 @@ interface VirtualRowProps {
 }
 
 /** Module-level row renderer for react-window v2. */
-const VirtualRow = React.memo(({ index, style, flatNodes, selectedPath, onExpand, onDoubleClick, onRightClick, onClick }: RowComponentProps<VirtualRowProps>) => {
+const VirtualRow = React.memo(({ index, style, ariaAttributes, flatNodes, selectedPath, onExpand, onDoubleClick, onRightClick, onClick }: RowComponentProps<VirtualRowProps>) => {
   const node = flatNodes[index];
   return (
     <TreeNodeRow
@@ -40,6 +39,7 @@ const VirtualRow = React.memo(({ index, style, flatNodes, selectedPath, onExpand
       onRightClick={onRightClick}
       onClick={onClick}
       style={style}
+      ariaAttributes={ariaAttributes}
     />
   );
 });
@@ -77,16 +77,7 @@ export const Tree: React.FC<TreeProps> = ({ kernelId, disabled = false, refreshT
     }
   });
   
-  const getInitialExpandedPaths = (): Set<string> => {
-    try {
-      const stored = localStorage.getItem('pdv:expandedPaths');
-      return stored ? new Set(JSON.parse(stored)) : new Set();
-    } catch {
-      return new Set();
-    }
-  };
-  
-  const expandedPathsRef = useRef<Set<string>>(getInitialExpandedPaths());
+  const expandedPathsRef = useRef<Set<string>>(new Set());
   const listRef = useRef<ListImperativeAPI>(null);
 
   const loadRoot = async (force?: boolean) => {
@@ -103,12 +94,10 @@ export const Tree: React.FC<TreeProps> = ({ kernelId, disabled = false, refreshT
     }
     try {
       const rootNodes = await treeService.getRootNodes(kernelId, { force });
-      const restored = await restoreExpandedTree(rootNodes, expandedPathsRef.current, kernelId);
 
       // Wrap in a synthetic root node so there is always a right-clickable
       // container even when the tree is empty.
-      const rootIsExpanded = expandedPathsRef.current.has('') || restored.length > 0;
-      if (rootIsExpanded) expandedPathsRef.current.add('');
+      expandedPathsRef.current = new Set(['']);
       const syntheticRoot: TreeNodeData = {
         id: '__root__',
         key: 'pdv_tree',
@@ -119,8 +108,8 @@ export const Tree: React.FC<TreeProps> = ({ kernelId, disabled = false, refreshT
         preview: '',
         hasChildren: true,
         parentPath: null,
-        isExpanded: rootIsExpanded,
-        children: restored,
+        isExpanded: true,
+        children: rootNodes,
       };
       setNodes([syntheticRoot]);
     } catch (err) {
@@ -130,20 +119,6 @@ export const Tree: React.FC<TreeProps> = ({ kernelId, disabled = false, refreshT
       setLoading(false);
     }
   };
-
-  // Persist expanded paths to localStorage whenever they change
-  // We trigger this by watching nodes, but use a ref callback to debounce
-  useEffect(() => {
-    const timeoutId = setTimeout(() => {
-      try {
-        localStorage.setItem('pdv:expandedPaths', JSON.stringify(Array.from(expandedPathsRef.current)));
-      } catch (error) {
-        console.warn('Failed to persist expanded paths:', error);
-      }
-    }, TREE_PERSIST_DEBOUNCE_MS);
-    
-    return () => clearTimeout(timeoutId);
-  }, [nodes]); // Save whenever nodes change (expand/collapse)
 
   // Persist selected path to localStorage
   useEffect(() => {
@@ -182,9 +157,12 @@ export const Tree: React.FC<TreeProps> = ({ kernelId, disabled = false, refreshT
       for (const changedPath of changed_paths) {
         const dotIdx = changedPath.lastIndexOf('.');
         const parentPath = dotIdx > 0 ? changedPath.substring(0, dotIdx) : '';
-        if (change_type === 'removed') {
+        // Invalidate cache for removed paths and batch (which may contain removals).
+        if (change_type === 'removed' || change_type === 'batch') {
           treeService.invalidatePath(kernelId, parentPath);
-        } else {
+        }
+        // For batch, added, or updated: re-fetch the parent.
+        if (change_type !== 'removed') {
           parentsToRefresh.add(parentPath);
         }
       }
@@ -233,17 +211,27 @@ export const Tree: React.FC<TreeProps> = ({ kernelId, disabled = false, refreshT
   const handleExpand = useCallback(async (node: TreeNodeData) => {
     if (!kernelId || disabled) return;
     if (node.isExpanded) {
-      setNodes((prev) => updateNodeImmut(prev, node.path, (n) => ({ ...n, isExpanded: false })));
-      expandedPathsRef.current.delete(node.path);
+      // Collapse: discard children and clear all descendant expanded paths.
+      setNodes((prev) => updateNodeImmut(prev, node.path, (n) => ({ ...n, isExpanded: false, children: undefined })));
+      const prefix = node.path ? node.path + '.' : '';
+      for (const p of Array.from(expandedPathsRef.current)) {
+        if (p === node.path || (prefix && p.startsWith(prefix))) {
+          expandedPathsRef.current.delete(p);
+        }
+      }
       return;
     }
 
     expandedPathsRef.current.add(node.path);
-    setNodes((prev) => updateNodeImmut(prev, node.path, (n) => ({ ...n, isLoading: true })));
+    // Show spinner only if the fetch takes longer than 1s to avoid flashing.
+    const loadingTimer = setTimeout(() => {
+      setNodes((prev) => updateNodeImmut(prev, node.path, (n) => ({ ...n, isLoading: true })));
+    }, 1000);
     try {
       const children = await treeService.getChildren(node, kernelId, {
         force: true,
       });
+      clearTimeout(loadingTimer);
       expandedPathsRef.current.add(node.path);
       setNodes((prev) =>
         updateNodeImmut(prev, node.path, (n) => ({
@@ -254,6 +242,7 @@ export const Tree: React.FC<TreeProps> = ({ kernelId, disabled = false, refreshT
         })),
       );
     } catch (err) {
+      clearTimeout(loadingTimer);
       console.error('[Tree] Failed to load children for', node.key, err);
       setError(`Failed to load children for ${node.key}`);
       setNodes((prev) => updateNodeImmut(prev, node.path, (n) => ({ ...n, isLoading: false })));
@@ -311,15 +300,19 @@ export const Tree: React.FC<TreeProps> = ({ kernelId, disabled = false, refreshT
     onClick: handleSelect,
   }), [flatNodes, selectedPath, handleExpand, handleDoubleClick, handleRightClick, handleSelect]);
 
-  // Scroll the virtualised list to keep the selected node visible.
+  // Scroll the virtualised list to keep the selected node visible
+  // when selection changes (but not on expand/collapse).
+  const prevSelectedPath = useRef(selectedPath);
   useEffect(() => {
-    if (selectedPath && listRef.current) {
+    if (selectedPath && selectedPath !== prevSelectedPath.current && listRef.current) {
       const idx = flatNodes.findIndex((n) => n.path === selectedPath);
       if (idx >= 0) {
         listRef.current.scrollToRow({ index: idx, align: 'smart' });
       }
     }
-  }, [selectedPath, flatNodes]);
+    prevSelectedPath.current = selectedPath;
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- only scroll on selection change, not on flatNodes change
+  }, [selectedPath]);
 
   const selectedNode = selectedPath !== null ? flatNodes.find((n) => n.path === selectedPath) : undefined;
 
@@ -399,26 +392,3 @@ export const Tree: React.FC<TreeProps> = ({ kernelId, disabled = false, refreshT
   );
 };
 
-async function restoreExpandedTree(
-  rootNodes: TreeNodeData[],
-  expanded: Set<string>,
-  kernelId: string,
-): Promise<TreeNodeData[]> {
-  let current = rootNodes;
-  const paths = Array.from(expanded).sort((a, b) => a.split('.').length - b.split('.').length);
-
-  for (const path of paths) {
-    const target = findNode(current, path);
-    if (!target) continue;
-    try {
-      const children = await treeService.getChildren(target, kernelId, {
-        force: true,
-      });
-      current = updateNodeImmut(current, path, (n) => ({ ...n, isExpanded: true, children }));
-    } catch (error) {
-      console.warn('[Tree] Failed to restore expanded path', path, error);
-    }
-  }
-
-  return current;
-}

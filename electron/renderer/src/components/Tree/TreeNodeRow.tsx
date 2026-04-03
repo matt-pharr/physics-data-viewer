@@ -41,6 +41,7 @@ interface TreeNodeRowProps {
   onRightClick: (node: TreeNodeData, event: React.MouseEvent) => void;
   onClick: (node: TreeNodeData) => void;
   style?: React.CSSProperties;
+  ariaAttributes?: Record<string, unknown>;
 }
 
 /** Render one row in the tree table view. */
@@ -52,6 +53,7 @@ const TreeNodeRowInner: React.FC<TreeNodeRowProps> = ({
   onRightClick,
   onClick,
   style,
+  ariaAttributes,
 }) => {
   const icon = TYPE_ICONS[node.type] || TYPE_ICONS.unknown;
   const toggleLabel = node.hasChildren
@@ -72,6 +74,7 @@ const TreeNodeRowInner: React.FC<TreeNodeRowProps> = ({
     <div
       className={`tree-row ${selected ? 'selected' : ''}`}
       style={style}
+      {...ariaAttributes}
       onDoubleClick={() => onDoubleClick(node)}
       onClick={() => onClick(node)}
       onContextMenu={(e) => {

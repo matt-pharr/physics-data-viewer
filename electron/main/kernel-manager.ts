@@ -145,6 +145,7 @@ interface ConnectionInfo {
   stdin_port: number;
   control_port: number;
   hb_port: number;
+  query_port: number;
   signature_scheme: string;
   key: string;
 }
@@ -185,6 +186,10 @@ interface ManagedKernel {
   iopubSocket: import("zeromq").Subscriber;
   /** Control socket (Dealer). */
   controlSocket: import("zeromq").Dealer;
+  /** Query socket (Request) — dedicated channel for read-only queries. */
+  querySocket: import("zeromq").Request;
+  /** Serializes query-socket operations to avoid concurrent socket access. */
+  queryQueue: Promise<void>;
   sessionId: string;
   startedAt: number;
   lastActivity: number;
@@ -371,9 +376,10 @@ export class KernelManager extends EventEmitter {
       status: "starting",
     };
 
-    // Allocate 5 ports before writing the connection file.
-    const [shellPort, iopubPort, stdinPort, controlPort, hbPort] =
+    // Allocate 6 ports before writing the connection file.
+    const [shellPort, iopubPort, stdinPort, controlPort, hbPort, queryPort] =
       await Promise.all([
+        findAvailablePort(),
         findAvailablePort(),
         findAvailablePort(),
         findAvailablePort(),
@@ -394,6 +400,7 @@ export class KernelManager extends EventEmitter {
       stdin_port: stdinPort,
       control_port: controlPort,
       hb_port: hbPort,
+      query_port: queryPort,
       signature_scheme: "hmac-sha256",
       key,
     };
@@ -435,16 +442,22 @@ export class KernelManager extends EventEmitter {
     const shellSocket = new zmq.Dealer();
     const iopubSocket = new zmq.Subscriber();
     const controlSocket = new zmq.Dealer();
+    const querySocket = new zmq.Request();
 
     // linger=0 so sockets close immediately without waiting to flush.
     shellSocket.linger = 0;
     iopubSocket.linger = 0;
     controlSocket.linger = 0;
+    querySocket.linger = 0;
+    // receiveTimeout prevents receive() from blocking forever if the kernel
+    // dies mid-request.  The sendQueryRequest queue would deadlock otherwise.
+    (querySocket as unknown as { receiveTimeout: number }).receiveTimeout = 10_000;
 
     const base = `${connectionInfo.transport}://${connectionInfo.ip}`;
     await shellSocket.connect(`${base}:${shellPort}`);
     await iopubSocket.connect(`${base}:${iopubPort}`);
     await controlSocket.connect(`${base}:${controlPort}`);
+    await querySocket.connect(`${base}:${queryPort}`);
     iopubSocket.subscribe(); // subscribe to all topics
 
     // Deferred that resolves when the background iopub loop exits.
@@ -466,6 +479,8 @@ export class KernelManager extends EventEmitter {
       shellSocket,
       iopubSocket,
       controlSocket,
+      querySocket,
+      queryQueue: Promise.resolve(),
       sessionId,
       startedAt: Date.now(),
       lastActivity: Date.now(),
@@ -540,6 +555,7 @@ export class KernelManager extends EventEmitter {
       managed.shellSocket,
       managed.iopubSocket,
       managed.controlSocket,
+      managed.querySocket,
     ] as unknown as Array<{ close(): Promise<void> | void }>) {
       try {
         await Promise.resolve(sock.close());
@@ -952,6 +968,55 @@ export class KernelManager extends EventEmitter {
         serializeMessage(msg, managed.connectionInfo.key)
       );
     });
+  }
+
+  /**
+   * Return the query port for a kernel (used to pass to ``pdv.init``).
+   *
+   * @param id - Kernel ID.
+   * @returns The TCP port allocated for the query socket.
+   */
+  getQueryPort(id: string): number {
+    const managed = this.kernels.get(id);
+    if (!managed) throw new Error(`Kernel not found: ${id}`);
+    return managed.connectionInfo.query_port;
+  }
+
+  /**
+   * Send a raw JSON request on the kernel's dedicated query socket and
+   * wait for the reply.  The query socket uses ZMQ REQ/REP, so exactly
+   * one reply is expected per request.
+   *
+   * Operations are serialized through ``queryQueue`` to prevent concurrent
+   * sends on the REQ socket.
+   *
+   * @param id - Kernel ID.
+   * @param data - PDV protocol envelope to send (will be JSON-stringified).
+   * @returns Parsed JSON response envelope.
+   * @throws Error on timeout (10 s) or socket error.
+   */
+  async sendQueryRequest(
+    id: string,
+    data: Record<string, unknown>,
+  ): Promise<Record<string, unknown>> {
+    const managed = this.kernels.get(id);
+    if (!managed) throw new Error(`Kernel not found: ${id}`);
+
+    // Serialize through the query queue.  The socket's receiveTimeout (10s)
+    // ensures receive() throws EAGAIN instead of blocking forever.
+    const result = new Promise<Record<string, unknown>>((resolve, reject) => {
+      managed.queryQueue = managed.queryQueue.then(async () => {
+        try {
+          const payload = JSON.stringify(data);
+          await managed.querySocket.send(Buffer.from(payload, "utf-8"));
+          const [reply] = await managed.querySocket.receive();
+          resolve(JSON.parse(reply.toString("utf-8")));
+        } catch (err) {
+          reject(err);
+        }
+      });
+    });
+    return result;
   }
 
   // -------------------------------------------------------------------------

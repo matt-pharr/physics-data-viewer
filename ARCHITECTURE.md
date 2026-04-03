@@ -103,11 +103,13 @@ PDV uses the standard Electron three-process architecture:
 
 ### 3.1 Transport
 
-PDV uses the **Jupyter comm mechanism** over the existing ZeroMQ `iopub` and `shell` sockets. This requires no additional sockets or processes. Comms are part of the standard Jupyter Messaging Protocol and are supported by all ipykernel-based kernels.
+PDV uses two complementary ZeroMQ channels:
 
-A **comm** is opened by the kernel at startup (when `pdv-python` initializes). The Electron main process listens for `comm_open`, `comm_msg`, and `comm_close` messages on the `iopub` socket. The main process sends requests to the kernel as `comm_info_request` / `comm_msg` messages on the `shell` socket.
+1. **Jupyter comm channel** — The standard Jupyter comm mechanism over the existing `iopub` and `shell` sockets. A comm with target name `pdv.kernel` is opened by the kernel at startup. The main process listens for `comm_open`, `comm_msg`, and `comm_close` messages on `iopub`, and sends requests on `shell`. All write operations (script execution, project save/load, tree mutations) go through this channel.
 
-The comm target name is `pdv.kernel`. This is the single comm channel for all PDV protocol traffic.
+2. **Query channel** — A dedicated ZeroMQ REQ/REP socket for read-only tree and namespace queries. The main process allocates a `query_port` alongside the standard Jupyter ports and passes it to the kernel in the `pdv.init` payload. The kernel starts a daemon thread (`QueryServer`) that serves requests on this port. Because the query thread runs independently of the main execution thread, tree browsing and namespace inspection work even while user code is executing. The query channel uses raw JSON (not the Jupyter wire protocol) and does not require HMAC signing. Only these message types are accepted on the query channel: `pdv.tree.list`, `pdv.tree.get`, `pdv.tree.resolve_file`, `pdv.namespace.query`, `pdv.namespace.inspect`.
+
+The main process's `QueryRouter` tries the query channel first; if it fails (e.g. during startup before the query server is ready), it falls back to the comm channel transparently.
 
 ### 3.2 Message Envelope
 
@@ -148,7 +150,7 @@ All type strings are namespaced with `pdv.`. The convention is `pdv.<domain>.<ac
 | Type | Direction | Description |
 |---|---|---|
 | `pdv.ready` | kernel → app | Sent once when the `pdv-python` package has fully initialized and the comm channel is open. No `in_reply_to`. |
-| `pdv.init` | app → kernel | Sent by the app immediately after receiving `pdv.ready`. Contains the working directory path and initial configuration. |
+| `pdv.init` | app → kernel | Sent by the app immediately after receiving `pdv.ready`. Contains the working directory path, protocol version, and `query_port` (TCP port for the read-only query socket). The kernel starts the QueryServer daemon thread on this port. |
 | `pdv.init.response` | kernel → app | Confirms working directory was accepted and the kernel is fully operational. |
 
 #### Project Messages
@@ -170,7 +172,7 @@ All type strings are namespaced with `pdv.`. The convention is `pdv.<domain>.<ac
 | `pdv.tree.get.response` | kernel → app | Returns node value (may be lazy-loaded from save directory). |
 | `pdv.tree.resolve_file` | app → kernel | Resolve a file-backed tree node (PDVFile subclass) to its absolute filesystem path. Payload: `{ path }`. |
 | `pdv.tree.resolve_file.response` | kernel → app | Returns `{ path, file_path }` where `file_path` is the absolute path on disk. |
-| `pdv.tree.changed` | kernel → app | Push notification. Sent whenever the tree structure changes (node added, removed, or modified). No `in_reply_to`. |
+| `pdv.tree.changed` | kernel → app | Push notification. Sent when tree structure changes. Payload: `{ changed_paths: string[], change_type: "added" \| "removed" \| "updated" \| "batch" }`. Notifications are **debounced** (100ms): rapid mutations are batched into a single notification with `change_type: "batch"` and all affected paths. No `in_reply_to`. |
 
 #### Namespace Messages
 
@@ -270,16 +272,20 @@ User selects action on WelcomeScreen
     │       argv: [python, -m, ipykernel_launcher, -f, <connection-file>]
     │       env:  standard env (no PDV env vars — config comes via pdv.init)
     │
-    ├─► App opens ZeroMQ sockets (shell, iopub, control, hb)
+    ├─► App opens ZeroMQ sockets (shell, iopub, control, hb, query)
     │
     ├─► App waits for pdv.ready comm (timeout: 15 seconds)
     │       Timeout → display error: "Kernel did not start. Is pdv-python installed?"
     │
     ├─► App sends pdv.init comm:
-    │       payload: { working_dir: "/tmp/pdv-<uuid>", pdv_version: "<app-version>" }
+    │       payload: { working_dir: "/tmp/pdv-<uuid>", pdv_version: "<app-version>",
+    │                  query_port: <allocated-port> }
+    │       The kernel starts the QueryServer daemon thread on the given port.
     │
     ├─► App waits for pdv.init.response (timeout: 30 seconds, the comm default)
     │       status: error → display error with message
+    │
+    ├─► App attaches QueryRouter to kernel's query socket
     │
     └─► Kernel is ready. UI unlocks.
             If a project was selected, it is loaded now.
@@ -464,8 +470,9 @@ sequenceDiagram
 ```
 pdv_kernel/
     __init__.py          # Public API: bootstrap(), PDVTree, PDVScript, PDVFile, PDVNote, PDVGui, PDVNamelist, PDVModule, PDVLib, PDVError, handle(), log, __version__
-    comms.py             # Comm channel: register target, send/receive, dispatch
-    tree.py              # PDVTree, PDVScript, PDVFile, PDVNote, PDVModule, PDVGui, PDVNamelist, PDVLib
+    comms.py             # Comm channel: register target, send/receive, dispatch, thread-local response sink
+    tree.py              # PDVTree (debounced _emit_changed), PDVScript, PDVFile, PDVNote, PDVModule, PDVGui, PDVNamelist, PDVLib
+    query_server.py      # QueryServer: ZMQ REP daemon thread for read-only queries during execution
     namespace.py         # PDVNamespace (protected dict), PDVApp, pdv_namespace()
     serialization.py     # Type detection, format writers (npy, parquet, json, module, gui, namelist, lib)
     environment.py       # Path utilities, working dir management, project root logic
@@ -790,9 +797,26 @@ Rules:
 
 **The `PDVTree` object in the kernel is the sole authority on all project data.** No other component — not the Electron main process, not the renderer, not the filesystem — may be treated as a source of truth for what nodes exist or what their values are.
 
-- The renderer always fetches tree state via `pdv.tree.list` / `pdv.tree.get` comms
+- The renderer always fetches tree state via `pdv.tree.list` / `pdv.tree.get` (routed through the query channel when available)
 - The main process never caches tree state
 - The filesystem layout is a persistence artifact, not an authority
+
+### 7.1.1 Tree Panel Rendering
+
+The tree panel uses **virtualized rendering** (`react-window` `List` component) to efficiently handle trees with thousands of nodes. Only the visible rows (~30-40) are rendered as DOM elements regardless of total tree size. Key design decisions:
+
+- `TreeNodeRow` is wrapped in `React.memo` with stable props to prevent unnecessary re-renders
+- Expand/collapse discards children (no expansion state persistence across sessions). Re-expanding a node always fetches fresh children from the kernel.
+- After code cell or script execution completes, the tree does a full refresh via `refreshToken` bump
+- Incremental updates from `pdv.tree.changed` push notifications update only affected subtrees (selective parent re-fetch)
+
+### 7.1.2 Change Notification Debouncing
+
+`PDVTree._emit_changed()` uses a **100ms debounce timer**. Rapid mutations (e.g. a script adding 1000 nodes in a loop) are batched into a single `pdv.tree.changed` notification with `change_type: "batch"` and all affected paths. This prevents flooding the ZeroMQ comm channel with thousands of individual notifications.
+
+All mutating `dict` methods are overridden to emit notifications: `__setitem__`, `__delitem__`, `pop`, `update`, `clear`, `setdefault`, `popitem`, `__ior__` (the `|=` operator). The standard `dict.fromkeys()` classmethod is not overridden because new instances have no comm attached.
+
+**Nested dict limitation**: Only the root `PDVTree` (which has `_send_fn` attached) emits notifications. Sub-dicts accessed via `pdv_tree['path']` are `PDVTree` instances without a comm. Mutations on sub-dicts are silent. The recommended pattern is dot-path access through the root: `pdv_tree.pop('parent.child')` rather than `pdv_tree['parent'].pop('child')`.
 
 ### 7.2 Node Types
 
@@ -1157,14 +1181,17 @@ The API surface:
 
 **Design decision — `settings.onOpen`**: There is no `window.pdv.settings.onOpen()`. The Settings dialog is opened by renderer-internal state only (e.g. clicking a toolbar button). Main-menu integration (File → Preferences triggering the dialog) is deferred to a future release and will be implemented as a `window.pdv.settings.*` push subscription at that time.
 
-### 11.3 Comm Routing in the Main Process
+### 11.3 Message Routing in the Main Process
 
-The main process's kernel manager listens on the `iopub` socket for all incoming messages. When a message is a `comm_msg` of type `pdv.kernel`, the kernel manager routes it:
+The main process uses two routers to communicate with the kernel:
 
+**CommRouter** (`comm-router.ts`) — handles all write operations and push notifications over the Jupyter comm channel. Listens on `iopub` for incoming messages:
 - If `in_reply_to` matches a pending request: resolve that request's promise
 - If `in_reply_to` is null (push notification): forward to the renderer via `BrowserWindow.webContents.send()`
 
-This routing logic lives in a dedicated `CommRouter` class in `electron/main/comm-router.ts`.
+**QueryRouter** (`query-router.ts`) — handles read-only tree and namespace queries over the dedicated query socket (ZMQ REQ/REP). Provides a `request()` method with the same PDV envelope format as CommRouter. IPC handlers for `tree:list`, `tree:get`, `namespace:query`, `namespace:inspect`, and `tree.resolve_file` try the QueryRouter first and fall back to CommRouter on failure. This allows tree browsing and namespace inspection during script execution.
+
+The query socket is serialized through a queue (`queryQueue`) to prevent concurrent REQ sends on the ZMQ Request socket.
 
 ### 11.4 Renderer Push Subscription Lifecycle
 
@@ -1272,7 +1299,8 @@ electron/
         kernel-manager.ts       ← Kernel process lifecycle, ZeroMQ socket management
         kernel-session.ts       ← Kernel bootstrap/init handshake helpers (pdv.ready → pdv.init)
         kernel-error-parser.ts  ← Traceback/error parsing for execution errors
-        comm-router.ts          ← PDV comm message routing
+        comm-router.ts          ← PDV comm message routing (write ops + push notifications)
+        query-router.ts         ← Read-only query routing via dedicated ZMQ socket
         config.ts               ← App config persistence (~/.PDV/preferences.json)
         app.ts                  ← Electron app lifecycle (BrowserWindow, menus)
         menu.ts                 ← Native app menu construction and action forwarding to renderer
@@ -1350,6 +1378,7 @@ pdv-python/
         __init__.py
         comms.py
         tree.py
+        query_server.py
         namespace.py
         serialization.py
         environment.py

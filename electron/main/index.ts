@@ -22,6 +22,7 @@ import * as os from "os";
 import * as path from "path";
 
 import { CommRouter } from "./comm-router";
+import { QueryRouter } from "./query-router";
 import { EnvironmentDetector } from "./environment-detector";
 import { buildEditorSpawn, resolveEditorSpawn } from "./editor-spawn";
 import { registerKernelIpcHandlers } from "./ipc-register-kernels";
@@ -319,6 +320,7 @@ export function registerIpcHandlers(
   win: BrowserWindow,
   kernelManager: KernelManager,
   commRouter: CommRouter,
+  queryRouter: QueryRouter,
   projectManager: ProjectManager,
   configStore: ConfigStore,
   pdvDir: string
@@ -412,6 +414,7 @@ export function registerIpcHandlers(
     win,
     kernelManager,
     commRouter,
+    queryRouter,
     projectManager,
     moduleManager,
     kernelWorkingDirs,
@@ -438,6 +441,7 @@ export function registerIpcHandlers(
   registerTreeNamespaceScriptIpcHandlers({
     kernelManager,
     commRouter,
+    queryRouter,
     projectManager,
     configStore,
     kernelWorkingDirs,

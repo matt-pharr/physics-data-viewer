@@ -34,6 +34,7 @@ import * as fs from "fs";
 
 import { createWindow, wireAppEvents } from "./app";
 import { CommRouter } from "./comm-router";
+import { QueryRouter } from "./query-router";
 import { ConfigStore } from "./config";
 import { KernelManager } from "./kernel-manager";
 import { ProjectManager } from "./project-manager";
@@ -44,6 +45,7 @@ let openingWindow: Promise<void> | null = null;
 let configStore: ConfigStore | null = null;
 
 const commRouter = new CommRouter();
+const queryRouter = new QueryRouter();
 const projectManager = new ProjectManager(commRouter);
 
 async function openMainWindow(): Promise<void> {
@@ -66,6 +68,7 @@ async function openMainWindow(): Promise<void> {
     const win = await createWindow(
       kernelManager,
       commRouter,
+      queryRouter,
       projectManager,
       configStore,
     );
