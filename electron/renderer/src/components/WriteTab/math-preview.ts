@@ -203,12 +203,6 @@ interface ActiveViewZone {
   endLine: number;
 }
 
-interface ActiveContentWidget {
-  widget: monaco.editor.IContentWidget;
-  endLine: number;
-  endCol: number;
-}
-
 /**
  * Attach math preview rendering to a Monaco editor instance.
  * Returns a dispose function that cleans up all widgets and zones.
@@ -218,7 +212,6 @@ export function attachMathPreview(
   monacoModule: typeof monaco,
 ): () => void {
   let activeZones: ActiveViewZone[] = [];
-  let activeWidgets: ActiveContentWidget[] = [];
   let debounceTimer: ReturnType<typeof setTimeout> | null = null;
 
   const refresh = () => {
@@ -227,74 +220,81 @@ export function attachMathPreview(
     const text = model.getValue();
     const regions = scanMathRegions(text);
 
-    // Remove existing zones and widgets
+    // Remove existing zones
     editor.changeViewZones((accessor) => {
       for (const zone of activeZones) {
         accessor.removeZone(zone.id);
       }
     });
-    for (const cw of activeWidgets) {
-      editor.removeContentWidget(cw.widget);
-    }
     activeZones = [];
-    activeWidgets = [];
 
     // Create new zones/widgets for each region
     for (const region of regions) {
       const html = renderLatex(region.latex, region.displayMode);
 
       if (region.displayMode) {
-        // Display math: ViewZone below the closing $$ line
-        editor.changeViewZones((accessor) => {
-          const domNode = document.createElement('div');
-          domNode.className = 'math-preview-zone';
-          domNode.innerHTML = html;
-          domNode.style.padding = '4px 16px';
-          domNode.style.opacity = '0.9';
-          domNode.style.textAlign = 'center';
+        // Display math: ViewZone below the closing $$ line.
+        // Pre-measure the rendered height so Monaco allocates the right
+        // amount of space and the preview doesn't overlap editor text.
+        const domNode = document.createElement('div');
+        domNode.className = 'math-preview-zone';
+        domNode.innerHTML = html;
+        domNode.style.padding = '4px 16px';
+        domNode.style.opacity = '0.9';
+        domNode.style.textAlign = 'left';
 
+        // Measure off-screen: attach to the editor's DOM container so
+        // inherited fonts / sizing are accurate, then read the height.
+        const container = editor.getDomNode();
+        if (!container) continue;
+        domNode.style.position = 'absolute';
+        domNode.style.visibility = 'hidden';
+        container.appendChild(domNode);
+        const measuredHeight = domNode.getBoundingClientRect().height || 40;
+        container.removeChild(domNode);
+        domNode.style.position = '';
+        domNode.style.visibility = '';
+
+        editor.changeViewZones((accessor) => {
           const id = accessor.addZone({
             afterLineNumber: region.endLine,
-            heightInPx: 0, // will auto-size
+            heightInPx: measuredHeight,
             domNode,
             afterColumn: 0,
             suppressMouseDown: true,
-            onDomNodeTop: () => {
-              // Auto-size: measure after render
-              const h = domNode.getBoundingClientRect().height;
-              if (h > 0) {
-                domNode.parentElement?.style.setProperty('height', `${h}px`);
-              }
-            },
           });
           activeZones.push({ id, endLine: region.endLine });
         });
       } else {
-        // Inline math: ContentWidget at end of the math region
-        const widgetId = `math-inline-${region.startLine}-${region.startCol}`;
-        const domNode = document.createElement('span');
-        domNode.className = 'math-preview-inline';
+        // Inline math: ViewZone below the source line (same pre-measure
+        // approach as display math, but rendered at inline size).
+        const domNode = document.createElement('div');
+        domNode.className = 'math-preview-zone math-preview-inline-zone';
         domNode.innerHTML = html;
-        domNode.style.marginLeft = '8px';
+        domNode.style.padding = '2px 16px';
         domNode.style.opacity = '0.85';
-        domNode.style.pointerEvents = 'none';
+        domNode.style.textAlign = 'left';
 
-        const position: monaco.editor.IContentWidgetPosition = {
-          position: {
-            lineNumber: region.endLine,
-            column: region.endCol,
-          },
-          preference: [monacoModule.editor.ContentWidgetPositionPreference.EXACT],
-        };
+        const container = editor.getDomNode();
+        if (!container) continue;
+        domNode.style.position = 'absolute';
+        domNode.style.visibility = 'hidden';
+        container.appendChild(domNode);
+        const measuredHeight = domNode.getBoundingClientRect().height || 24;
+        container.removeChild(domNode);
+        domNode.style.position = '';
+        domNode.style.visibility = '';
 
-        const widget: monaco.editor.IContentWidget = {
-          getId: () => widgetId,
-          getDomNode: () => domNode,
-          getPosition: () => position,
-        };
-
-        editor.addContentWidget(widget);
-        activeWidgets.push({ widget, endLine: region.endLine, endCol: region.endCol });
+        editor.changeViewZones((accessor) => {
+          const id = accessor.addZone({
+            afterLineNumber: region.endLine,
+            heightInPx: measuredHeight,
+            domNode,
+            afterColumn: 0,
+            suppressMouseDown: true,
+          });
+          activeZones.push({ id, endLine: region.endLine });
+        });
       }
     }
   };
@@ -319,10 +319,6 @@ export function attachMathPreview(
         accessor.removeZone(zone.id);
       }
     });
-    for (const cw of activeWidgets) {
-      editor.removeContentWidget(cw.widget);
-    }
     activeZones = [];
-    activeWidgets = [];
   };
 }

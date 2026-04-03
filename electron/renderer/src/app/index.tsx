@@ -1178,7 +1178,7 @@ const App: React.FC = () => {
          envWarning={interpreterWarning}
        />
 
-       {showWelcome && isPristine && !showSettings && (
+       {showWelcome && isPristine && (
          <WelcomeScreen
            recentProjects={recentProjects}
            onNewProject={handleWelcomeNewProject}

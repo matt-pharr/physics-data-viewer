@@ -219,7 +219,7 @@ export interface MenuEnabledState {
 
 /** Top-level menu metadata used by the Linux integrated menubar. */
 export interface AppMenuTopLevel {
-  id: "file" | "edit" | "view" | "window";
+  id: "file" | "edit" | "view" | "window" | "help";
   label: string;
 }
 

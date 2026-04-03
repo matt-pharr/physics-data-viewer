@@ -157,6 +157,12 @@ export const WriteTab: React.FC<WriteTabProps> = ({
         {activeTab && readMode ? (
           <ReadView content={activeTab.content} />
         ) : activeTab ? (
+          <>
+          {!activeTab.content && (
+            <div className="write-tab-placeholder">
+              Write in Markdown with LaTeX math — use <code>$...$</code> for inline and <code>$$...$$</code> for display equations
+            </div>
+          )}
           <Editor
             key={activeTab.id}
             height="100%"
@@ -197,6 +203,7 @@ export const WriteTab: React.FC<WriteTabProps> = ({
               padding: { top: 12, bottom: 12 },
             }}
           />
+          </>
         ) : null}
       </div>
     </section>

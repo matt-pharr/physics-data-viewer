@@ -756,7 +756,7 @@ export interface MenuEnabledState {
 /** Renderer-facing top-level menu button metadata. */
 export interface AppMenuTopLevel {
   /** Stable top-level menu id used for popup requests. */
-  id: "file" | "edit" | "view" | "window";
+  id: "file" | "edit" | "view" | "window" | "help";
   /** User-visible label rendered in the custom Linux menubar. */
   label: string;
 }

@@ -13,7 +13,7 @@
  * ipc.ts — menu action payload types and push channel names
  */
 
-import { app, BrowserWindow, Menu, type MenuItemConstructorOptions } from "electron";
+import { app, BrowserWindow, Menu, shell, type MenuItemConstructorOptions } from "electron";
 
 import { type AppMenuTopLevel, IPC, type MenuActionPayload, type MenuEnabledState } from "./ipc";
 
@@ -112,7 +112,27 @@ function buildTemplate(): MenuItemConstructorOptions[] {
     },
     { id: "edit", role: "editMenu" },
     { id: "view", role: "viewMenu" },
-    { id: "window", role: "windowMenu" }
+    { id: "window", role: "windowMenu" },
+    // TODO: Once versioned docs are published, replace "/dev/" with the
+    // correct version slug (e.g. "/v0.5.0/") derived from the app version.
+    {
+      id: "help",
+      label: "Help",
+      submenu: [
+        {
+          label: "Getting Started",
+          click: () => void shell.openExternal("https://matt-pharr.github.io/physics-data-viewer/dev/getting-started/"),
+        },
+        {
+          label: "User Guide",
+          click: () => void shell.openExternal("https://matt-pharr.github.io/physics-data-viewer/dev/user-guide/"),
+        },
+        {
+          label: "API Docs",
+          click: () => void shell.openExternal("https://matt-pharr.github.io/physics-data-viewer/dev/api-reference/"),
+        },
+      ],
+    }
   );
   return template;
 }
@@ -124,6 +144,7 @@ function buildTopLevelMenuModel(): AppMenuTopLevel[] {
     { id: "edit", label: "Edit" },
     { id: "view", label: "View" },
     { id: "window", label: "Window" },
+    { id: "help", label: "Help" },
   ];
 }
 

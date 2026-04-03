@@ -36,6 +36,27 @@
   opacity: 0.7;
 }
 
+/* Watermark hint shown over empty note editors */
+.write-tab-placeholder {
+  position: absolute;
+  top: 12px;
+  left: 20px;
+  pointer-events: none;
+  color: var(--text-secondary);
+  opacity: 0.45;
+  font-size: 13px;
+  font-family: var(--font-sans);
+  z-index: 1;
+}
+
+.write-tab-placeholder code {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  background: var(--bg-tertiary);
+  padding: 1px 4px;
+  border-radius: 3px;
+}
+
 /* Dirty indicator dot */
 .tab-dirty {
   color: var(--accent);
@@ -51,13 +72,13 @@
   text-align: left;
 }
 
-.math-preview-zone .katex-display {
+.math-preview-zone .katex-display,
+.math-preview-zone .katex-display > .katex {
   text-align: left;
 }
 
-.math-preview-inline {
-  font-size: 13px;
-  vertical-align: middle;
+.math-preview-inline-zone {
+  font-size: 15px;
 }
 
 /* Read mode rendered markdown view */
