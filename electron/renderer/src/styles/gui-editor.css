@@ -2,7 +2,9 @@
 
 .gui-editor-root {
   display: grid;
-  grid-template-columns: 220px 1fr 280px;
+  /* 5 columns: palette | resizer | center | resizer | properties */
+  /* widths set dynamically via inline style */
+  grid-template-columns: 220px 4px 1fr 4px 280px;
   grid-template-rows: 40px 1fr;
   height: 100vh;
   overflow: hidden;
@@ -16,6 +18,7 @@
 
 .gui-editor-toolbar {
   grid-column: 1 / -1;
+  grid-row: 1;
   display: flex;
   align-items: center;
   gap: 12px;
@@ -64,12 +67,39 @@
   color: var(--success, #4ec9b0);
 }
 
+/* ── Column resizers ── */
+
+.gui-editor-col-resizer {
+  grid-row: 2;
+  width: 4px;
+  cursor: col-resize;
+  background: var(--border-color, #474747);
+  transition: background 0.1s;
+}
+
+.gui-editor-col-resizer:hover {
+  background: var(--accent, #007acc);
+}
+
+/* ── Row resizer (canvas / preview split) ── */
+
+.gui-editor-row-resizer {
+  height: 4px;
+  cursor: row-resize;
+  background: var(--border-color, #474747);
+  flex-shrink: 0;
+  transition: background 0.1s;
+}
+
+.gui-editor-row-resizer:hover {
+  background: var(--accent, #007acc);
+}
+
 /* ── Element Palette (left) ── */
 
 .gui-editor-palette {
   grid-row: 2;
   overflow-y: auto;
-  border-right: 1px solid var(--border-color, #474747);
   background: var(--bg-secondary, #252526);
   padding: 8px;
 }
@@ -269,26 +299,12 @@
   outline-offset: -2px;
 }
 
-/* ── Resizer ── */
-
-.gui-editor-resizer {
-  height: 4px;
-  background: var(--border-color, #474747);
-  cursor: row-resize;
-  flex-shrink: 0;
-}
-
-.gui-editor-resizer:hover {
-  background: var(--accent, #007acc);
-}
-
 /* ── Live Preview (bottom center) ── */
 
 .gui-editor-preview {
   flex: 1;
   overflow-y: auto;
-  border-top: 1px solid var(--border-color, #474747);
-  min-height: 100px;
+  min-height: 0;
 }
 
 .gui-editor-preview-header {
@@ -323,7 +339,6 @@
 .gui-editor-properties {
   grid-row: 2;
   overflow-y: auto;
-  border-left: 1px solid var(--border-color, #474747);
   background: var(--bg-secondary, #252526);
   padding: 8px;
 }
@@ -476,4 +491,32 @@
 
 .gui-editor-error {
   color: var(--error, #f48771);
+}
+
+/* ── Validation warnings ── */
+
+.gui-editor-prop-warning {
+  border-color: var(--warning, #dcdcaa) !important;
+}
+
+.gui-editor-prop-warning-text {
+  font-size: 11px;
+  color: var(--warning, #dcdcaa);
+  margin-top: 2px;
+  padding: 0 2px;
+}
+
+.gui-editor-prop-hint {
+  font-size: 11px;
+  color: var(--text-hint, #5a5a5a);
+  margin-bottom: 8px;
+  padding: 0 4px;
+  line-height: 1.4;
+}
+
+.canvas-node-warning {
+  color: var(--warning, #dcdcaa);
+  font-size: 12px;
+  margin-left: 4px;
+  cursor: help;
 }

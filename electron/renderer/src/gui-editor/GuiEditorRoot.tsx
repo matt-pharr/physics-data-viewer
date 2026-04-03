@@ -6,12 +6,33 @@
  */
 
 import React, { useEffect, useState, useCallback } from "react";
-import type { GuiEditorContext } from "../types/pdv.d";
+import type { GuiEditorContext, GuiManifestV1, LayoutNode, LayoutContainer } from "../types/pdv.d";
 import { EditorStateProvider, useEditorState, useEditorDispatch } from "./editor-state";
 import { ElementPalette } from "./ElementPalette";
 import { LayoutCanvas } from "./LayoutCanvas";
 import { PropertyEditor } from "./PropertyEditor";
 import { LivePreview } from "./LivePreview";
+
+/** Collect validation warnings from the manifest. */
+function validateManifest(manifest: GuiManifestV1): string[] {
+  const warnings: string[] = [];
+  for (const act of manifest.actions) {
+    if (!act.script_path.trim()) {
+      warnings.push(`Action "${act.label || act.id}" has no script path — its button won't do anything.`);
+    }
+  }
+  // Walk layout for namelist nodes without tree_path
+  function walkLayout(node: LayoutNode): void {
+    if (node.type === "namelist" && !node.tree_path.trim()) {
+      warnings.push("A namelist editor has no tree path — it won't display any content.");
+    }
+    if ("children" in node) {
+      for (const child of (node as LayoutContainer).children) walkLayout(child);
+    }
+  }
+  if (manifest.gui?.layout) walkLayout(manifest.gui.layout);
+  return warnings;
+}
 
 function EditorToolbar() {
   const state = useEditorState();
@@ -19,6 +40,17 @@ function EditorToolbar() {
   const [saveStatus, setSaveStatus] = useState<string | null>(null);
 
   const handleSave = useCallback(async () => {
+    // Check for validation warnings
+    const warnings = validateManifest(state.manifest);
+    if (warnings.length > 0) {
+      const proceed = window.confirm(
+        "The following issues were found:\n\n" +
+        warnings.map((w) => `• ${w}`).join("\n") +
+        "\n\nSave anyway?"
+      );
+      if (!proceed) return;
+    }
+
     try {
       const result = await window.pdv.guiEditor.save({
         treePath: state.treePath,
@@ -77,15 +109,94 @@ function EditorToolbar() {
   );
 }
 
+/** Vertical drag handle between two side-by-side panels. */
+function ColumnResizer({ onDrag }: { onDrag: (deltaX: number) => void }) {
+  const handleMouseDown = useCallback((e: React.MouseEvent) => {
+    e.preventDefault();
+    const startX = e.clientX;
+    const onMove = (ev: MouseEvent) => onDrag(ev.clientX - startX);
+    const onUp = () => {
+      document.removeEventListener("mousemove", onMove);
+      document.removeEventListener("mouseup", onUp);
+      document.body.style.cursor = "";
+      document.body.style.userSelect = "";
+    };
+    document.body.style.cursor = "col-resize";
+    document.body.style.userSelect = "none";
+    document.addEventListener("mousemove", onMove);
+    document.addEventListener("mouseup", onUp);
+  }, [onDrag]);
+
+  return <div className="gui-editor-col-resizer" onMouseDown={handleMouseDown} />;
+}
+
+/** Horizontal drag handle between canvas and preview. */
+function RowResizer({ onDrag }: { onDrag: (deltaY: number) => void }) {
+  const handleMouseDown = useCallback((e: React.MouseEvent) => {
+    e.preventDefault();
+    const startY = e.clientY;
+    const onMove = (ev: MouseEvent) => onDrag(ev.clientY - startY);
+    const onUp = () => {
+      document.removeEventListener("mousemove", onMove);
+      document.removeEventListener("mouseup", onUp);
+      document.body.style.cursor = "";
+      document.body.style.userSelect = "";
+    };
+    document.body.style.cursor = "row-resize";
+    document.body.style.userSelect = "none";
+    document.addEventListener("mousemove", onMove);
+    document.addEventListener("mouseup", onUp);
+  }, [onDrag]);
+
+  return <div className="gui-editor-row-resizer" onMouseDown={handleMouseDown} />;
+}
+
+const MIN_COL = 140;
+const MIN_ROW = 80;
+
 function EditorContent() {
+  const [paletteWidth, setPaletteWidth] = useState(220);
+  const [propsWidth, setPropsWidth] = useState(280);
+  const [canvasFraction, setCanvasFraction] = useState(0.5); // fraction of center height
+
+  const centerRef = React.useRef<HTMLDivElement>(null);
+
+  const handlePaletteResize = useCallback((delta: number) => {
+    setPaletteWidth((prev) => Math.max(MIN_COL, prev + delta));
+  }, []);
+
+  const handlePropsResize = useCallback((delta: number) => {
+    setPropsWidth((prev) => Math.max(MIN_COL, prev - delta));
+  }, []);
+
+  const handleRowResize = useCallback((delta: number) => {
+    const el = centerRef.current;
+    if (!el) return;
+    const totalHeight = el.clientHeight;
+    if (totalHeight <= 0) return;
+    const canvasHeight = totalHeight * canvasFraction + delta;
+    const clamped = Math.max(MIN_ROW, Math.min(totalHeight - MIN_ROW, canvasHeight));
+    setCanvasFraction(clamped / totalHeight);
+  }, [canvasFraction]);
+
   return (
-    <div className="gui-editor-root">
+    <div
+      className="gui-editor-root"
+      style={{ gridTemplateColumns: `${paletteWidth}px 4px 1fr 4px ${propsWidth}px` }}
+    >
       <EditorToolbar />
       <ElementPalette />
-      <div className="gui-editor-center">
-        <LayoutCanvas />
-        <LivePreview />
+      <ColumnResizer onDrag={handlePaletteResize} />
+      <div className="gui-editor-center" ref={centerRef}>
+        <div style={{ flex: canvasFraction, minHeight: MIN_ROW, overflow: "auto" }}>
+          <LayoutCanvas />
+        </div>
+        <RowResizer onDrag={handleRowResize} />
+        <div style={{ flex: 1 - canvasFraction, minHeight: MIN_ROW, overflow: "auto" }}>
+          <LivePreview />
+        </div>
       </div>
+      <ColumnResizer onDrag={handlePropsResize} />
       <PropertyEditor />
     </div>
   );

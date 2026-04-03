@@ -104,7 +104,7 @@ export const ELEMENT_REGISTRY: ElementTypeDefinition[] = [
     type: "input",
     category: "leaf",
     label: "Input",
-    description: "User input (text, slider, dropdown, checkbox, file)",
+    description: "User-configurable value (text, slider, dropdown, checkbox, or file picker)",
     icon: "i",
     factory: (manifest) => {
       const id = generateId("input", allIds(manifest));
@@ -118,7 +118,7 @@ export const ELEMENT_REGISTRY: ElementTypeDefinition[] = [
     type: "action",
     category: "leaf",
     label: "Action Button",
-    description: "Button that runs a script",
+    description: "Button that runs a script with input values as arguments",
     icon: "\u25B6",
     factory: (manifest) => {
       const id = generateId("action", allIds(manifest));
@@ -132,7 +132,7 @@ export const ELEMENT_REGISTRY: ElementTypeDefinition[] = [
     type: "namelist",
     category: "leaf",
     label: "Namelist Editor",
-    description: "Inline editor for namelist files in the tree",
+    description: "Inline editor for Fortran namelist or TOML configuration files",
     icon: "N",
     factory: () => ({
       node: { type: "namelist", tree_path: "" },

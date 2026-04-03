@@ -21,6 +21,7 @@ function PaletteItem({ def }: { def: ElementTypeDefinition }) {
       className="gui-editor-palette-item"
       draggable
       onDragStart={handleDragStart}
+      title={`Drag to add: ${def.description}`}
     >
       <div className="gui-editor-palette-icon">{def.icon}</div>
       <div className="gui-editor-palette-info">

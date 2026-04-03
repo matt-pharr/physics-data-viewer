@@ -11,6 +11,11 @@
   min-width: 0;
 }
 
+.gui-row-item + .gui-row-item {
+  border-left: 1px solid var(--border-color, #474747);
+  padding-left: 8px;
+}
+
 .gui-column {
   display: flex;
   flex-direction: column;

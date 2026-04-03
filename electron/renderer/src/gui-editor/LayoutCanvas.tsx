@@ -6,7 +6,7 @@
  */
 
 import React, { useState, useCallback } from "react";
-import type { LayoutNode, LayoutContainer } from "../types/pdv.d";
+import type { LayoutNode, LayoutContainer, GuiManifestV1 } from "../types/pdv.d";
 import { useEditorState, useEditorDispatch, getNodeAtPath } from "./editor-state";
 import { ELEMENT_REGISTRY, getElementDef } from "./element-registry";
 
@@ -14,19 +14,36 @@ const DRAG_MIME = "application/pdv-element";
 const CANVAS_DRAG_MIME = "application/pdv-canvas-path";
 
 /** Get a display label for a layout node. */
-function nodeDisplayLabel(node: LayoutNode): string {
+function nodeDisplayLabel(node: LayoutNode, manifest: GuiManifestV1): string {
   if ("children" in node) {
     const c = node as LayoutContainer;
     if (c.label) return `${c.type}: "${c.label}"`;
     return c.type;
   }
-  if (node.type === "input" || node.type === "action") {
-    return `${node.type}: ${node.id}`;
+  if (node.type === "input" && "id" in node) {
+    const inp = manifest.inputs.find((i) => i.id === node.id);
+    return inp ? `${inp.label} (${node.id})` : `input: ${node.id}`;
+  }
+  if (node.type === "action" && "id" in node) {
+    const act = manifest.actions.find((a) => a.id === node.id);
+    return act ? `${act.label} (${node.id})` : `action: ${node.id}`;
   }
   if (node.type === "namelist") {
     return `namelist: ${node.tree_path || "(no path)"}`;
   }
   return node.type;
+}
+
+/** Get a validation warning for a node, if any. */
+function nodeWarning(node: LayoutNode, manifest: GuiManifestV1): string | null {
+  if (node.type === "action" && "id" in node) {
+    const act = manifest.actions.find((a) => a.id === node.id);
+    if (act && !act.script_path.trim()) return "No script path set";
+  }
+  if (node.type === "namelist" && !node.tree_path.trim()) {
+    return "No tree path set";
+  }
+  return null;
 }
 
 /** Get icon for a node from registry. */
@@ -90,6 +107,7 @@ function CanvasNode({ node, path, onDrop }: CanvasNodeProps) {
   const isContainer = "children" in node;
   const isSelected = state.selectedNodePath === path;
   const children = isContainer ? (node as LayoutContainer).children : [];
+  const warning = nodeWarning(node, state.manifest);
 
   const handleClick = (e: React.MouseEvent) => {
     e.stopPropagation();
@@ -160,7 +178,10 @@ function CanvasNode({ node, path, onDrop }: CanvasNodeProps) {
           </button>
         )}
         <div className="canvas-node-icon">{nodeIcon(node)}</div>
-        <div className="canvas-node-label">{nodeDisplayLabel(node)}</div>
+        <div className="canvas-node-label">
+          {nodeDisplayLabel(node, state.manifest)}
+          {warning && <span className="canvas-node-warning" title={warning}> &#x26A0;</span>}
+        </div>
         <button className="canvas-node-delete" onClick={handleDelete} title="Delete">&times;</button>
       </div>
       {isContainer && !collapsed && (
