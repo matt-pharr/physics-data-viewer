@@ -35,6 +35,7 @@ import type {
   LogEntry,
   NoteTab,
   ScriptRunResult,
+  TreeChangeInfo,
   TreeNodeData,
   WindowChromeInfo,
 } from '../types';
@@ -120,6 +121,7 @@ const App: React.FC = () => {
   const [autoRefreshNamespace, setAutoRefreshNamespace] = useState(false);
   const [namespaceRefreshToken, setNamespaceRefreshToken] = useState(0);
   const [treeRefreshToken, setTreeRefreshToken] = useState(0);
+  const [pendingTreeChanges, setPendingTreeChanges] = useState<TreeChangeInfo[]>([]);
   const [modulesRefreshToken, setModulesRefreshToken] = useState(0);
 
   // -- Dialog visibility state ----------------------------------------------
@@ -290,6 +292,10 @@ const App: React.FC = () => {
     }
   }, []);
 
+  const handleTreeChanged = useCallback((info: TreeChangeInfo) => {
+    setPendingTreeChanges((prev) => [...prev, info]);
+  }, []);
+
   useKernelSubscriptions({
     currentKernelId,
     loadedProjectTabsRef,
@@ -301,6 +307,7 @@ const App: React.FC = () => {
     setProjectReloading,
     setProgress,
     onKernelCrash: handleKernelCrash,
+    onTreeChanged: handleTreeChanged,
   });
 
   const { startKernel, handleEnvSave, handleRestartKernel } = useKernelLifecycle({
@@ -914,6 +921,8 @@ const App: React.FC = () => {
                     kernelId={currentKernelId}
                     disabled={kernelStatus !== 'ready'}
                     refreshToken={treeRefreshToken}
+                    pendingChanges={pendingTreeChanges}
+                    onChangesConsumed={() => setPendingTreeChanges([])}
                     onAction={handleTreeAction}
                     shortcuts={shortcuts}
 

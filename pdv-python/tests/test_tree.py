@@ -103,6 +103,97 @@ class TestChangeNotification:
         assert 'my_key' in payload.get('changed_paths', [])
 
 
+class TestMutatingDictMethods:
+    """Tests for dict methods that must emit change notifications."""
+
+    def test_pop_emits_notification(self, tree_with_comm, mock_send):
+        tree_with_comm['x'] = 1
+        mock_send.reset_mock()
+        val = tree_with_comm.pop('x')
+        assert val == 1
+        mock_send.assert_called_once()
+        _, payload = mock_send.call_args[0]
+        assert payload['change_type'] == 'removed'
+        assert 'x' in payload['changed_paths']
+
+    def test_pop_nested_path(self, tree_with_comm, mock_send):
+        tree_with_comm['a.b'] = 42
+        mock_send.reset_mock()
+        val = tree_with_comm.pop('a.b')
+        assert val == 42
+        mock_send.assert_called_once()
+        _, payload = mock_send.call_args[0]
+        assert payload['change_type'] == 'removed'
+
+    def test_pop_missing_with_default(self, tree_with_comm, mock_send):
+        mock_send.reset_mock()
+        result = tree_with_comm.pop('missing', 'fallback')
+        assert result == 'fallback'
+        mock_send.assert_not_called()
+
+    def test_pop_missing_raises(self, tree_with_comm):
+        with pytest.raises(PDVKeyError):
+            tree_with_comm.pop('missing')
+
+    def test_update_emits_notifications(self, tree_with_comm, mock_send):
+        mock_send.reset_mock()
+        tree_with_comm.update({'a': 1, 'b': 2})
+        assert mock_send.call_count == 2
+
+    def test_update_with_kwargs(self, tree_with_comm, mock_send):
+        mock_send.reset_mock()
+        tree_with_comm.update(c=3)
+        mock_send.assert_called_once()
+        assert tree_with_comm['c'] == 3
+
+    def test_clear_emits_notifications(self, tree_with_comm, mock_send):
+        tree_with_comm['a'] = 1
+        tree_with_comm['b'] = 2
+        mock_send.reset_mock()
+        tree_with_comm.clear()
+        assert mock_send.call_count == 2
+        assert len(tree_with_comm) == 0
+
+    def test_setdefault_existing_no_notification(self, tree_with_comm, mock_send):
+        tree_with_comm['x'] = 10
+        mock_send.reset_mock()
+        result = tree_with_comm.setdefault('x', 99)
+        assert result == 10
+        mock_send.assert_not_called()
+
+    def test_setdefault_missing_emits_notification(self, tree_with_comm, mock_send):
+        mock_send.reset_mock()
+        result = tree_with_comm.setdefault('new_key', 42)
+        assert result == 42
+        mock_send.assert_called_once()
+
+    def test_update_with_iterable_of_pairs(self, tree_with_comm, mock_send):
+        mock_send.reset_mock()
+        tree_with_comm.update([('x', 10), ('y', 20)])
+        assert tree_with_comm['x'] == 10
+        assert tree_with_comm['y'] == 20
+        assert mock_send.call_count == 2
+
+    def test_update_rejects_extra_positional_args(self, tree_with_comm):
+        with pytest.raises(TypeError):
+            tree_with_comm.update({'a': 1}, {'b': 2})
+
+    def test_ior_emits_notifications(self, tree_with_comm, mock_send):
+        mock_send.reset_mock()
+        tree_with_comm |= {'p': 1, 'q': 2}
+        assert tree_with_comm['p'] == 1
+        assert mock_send.call_count == 2
+
+    def test_popitem_emits_notification(self, tree_with_comm, mock_send):
+        tree_with_comm['only'] = 1
+        mock_send.reset_mock()
+        key, val = tree_with_comm.popitem()
+        assert key == 'only' and val == 1
+        mock_send.assert_called_once()
+        _, payload = mock_send.call_args[0]
+        assert payload['change_type'] == 'removed'
+
+
 class TestPDVScript:
     """Tests for PDVScript."""
 

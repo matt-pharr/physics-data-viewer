@@ -9,7 +9,7 @@ afterEach(() => {
   cleanup();
 });
 
-function makeNode(overrides: Partial<TreeNodeData & { depth: number; selected?: boolean }> = {}) {
+function makeNode(overrides: Partial<TreeNodeData & { depth: number }> = {}) {
   return {
     id: 'data.x',
     key: 'x',
@@ -24,7 +24,7 @@ function makeNode(overrides: Partial<TreeNodeData & { depth: number; selected?: 
     isLoading: false,
     preview: 'preview',
     ...overrides,
-  } as TreeNodeData & { depth: number; selected?: boolean };
+  } as TreeNodeData & { depth: number };
 }
 
 describe('TreeNodeRow', () => {
@@ -70,7 +70,8 @@ describe('TreeNodeRow', () => {
   it('applies selected class and hidden expand button for leaf nodes', () => {
     const { container } = render(
       <TreeNodeRow
-        node={makeNode({ selected: true, hasChildren: false, has_children: false })}
+        node={makeNode({ hasChildren: false, has_children: false })}
+        selected={true}
         onExpand={vi.fn()}
         onDoubleClick={vi.fn()}
         onRightClick={vi.fn()}

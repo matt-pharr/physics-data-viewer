@@ -117,3 +117,9 @@ export interface TreeNodeData extends NodeDescriptor {
   isExpanded?: boolean;
   isLoading?: boolean;
 }
+
+/** Describes a tree change pushed from the kernel. */
+export interface TreeChangeInfo {
+  changed_paths: string[];
+  change_type: 'added' | 'removed' | 'updated';
+}

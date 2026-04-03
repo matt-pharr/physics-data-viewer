@@ -34,7 +34,8 @@ const TYPE_ICONS: Record<string, string> = {
 };
 
 interface TreeNodeRowProps {
-  node: TreeNodeData & { depth: number; selected?: boolean };
+  node: TreeNodeData & { depth: number };
+  selected?: boolean;
   onExpand: (node: TreeNodeData) => void;
   onDoubleClick: (node: TreeNodeData) => void;
   onRightClick: (node: TreeNodeData, event: React.MouseEvent) => void;
@@ -43,8 +44,9 @@ interface TreeNodeRowProps {
 }
 
 /** Render one row in the tree table view. */
-export const TreeNodeRow: React.FC<TreeNodeRowProps> = ({
+const TreeNodeRowInner: React.FC<TreeNodeRowProps> = ({
   node,
+  selected,
   onExpand,
   onDoubleClick,
   onRightClick,
@@ -68,7 +70,7 @@ export const TreeNodeRow: React.FC<TreeNodeRowProps> = ({
 
   return (
     <div
-      className={`tree-row ${node.selected ? 'selected' : ''}`}
+      className={`tree-row ${selected ? 'selected' : ''}`}
       style={style}
       onDoubleClick={() => onDoubleClick(node)}
       onClick={() => onClick(node)}
@@ -108,3 +110,5 @@ export const TreeNodeRow: React.FC<TreeNodeRowProps> = ({
     </div>
   );
 };
+
+export const TreeNodeRow = React.memo(TreeNodeRowInner);

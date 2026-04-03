@@ -794,6 +794,90 @@ class PDVTree(dict):
             return False
 
     # ------------------------------------------------------------------
+    # Mutating dict methods — route through overrides to emit notifications
+    # ------------------------------------------------------------------
+    # Note: these only emit notifications when called on the *root* PDVTree
+    # (which has a _send_fn attached).  Sub-dicts accessed via
+    # ``pdv_tree['path']`` are plain PDVTree instances without a comm, so
+    # mutations on them are silent.  The recommended pattern is always to
+    # use dot-path access through the root, e.g. ``pdv_tree.pop('a.b')``.
+
+    def pop(self, key: str, *args: Any) -> Any:
+        """Remove and return value at *key*, emitting a change notification.
+
+        Supports dot-separated paths.  Accepts an optional default that is
+        returned (without notification) when *key* is missing.
+        """
+        if len(args) > 1:
+            raise TypeError(
+                f"pop expected at most 2 arguments, got {1 + len(args)}"
+            )
+        parts = _split_dot_path(key)
+        if len(parts) == 1:
+            if not dict.__contains__(self, key):
+                if args:
+                    return args[0]
+                raise PDVKeyError(key)
+            value = dict.pop(self, key)
+        else:
+            try:
+                parent: dict = self
+                for part in parts[:-1]:
+                    parent = dict.__getitem__(parent, part)
+                if not dict.__contains__(parent, parts[-1]):
+                    if args:
+                        return args[0]
+                    raise PDVKeyError(key)
+                value = dict.pop(parent, parts[-1])
+            except KeyError:
+                if args:
+                    return args[0]
+                raise PDVKeyError(key)
+        self._emit_changed(key, "removed")
+        return value
+
+    def update(self, *args: Any, **kwargs: Any) -> None:  # type: ignore[override]
+        """Merge key/value pairs, emitting a notification for each key."""
+        if len(args) > 1:
+            raise TypeError(
+                f"update expected at most 1 argument, got {len(args)}"
+            )
+        if args:
+            other = args[0]
+            if hasattr(other, "keys"):
+                for k in other.keys():
+                    self[k] = other[k]
+            else:
+                for k, v in other:
+                    self[k] = v
+        for k, v in kwargs.items():
+            self[k] = v
+
+    def clear(self) -> None:
+        """Remove all keys, emitting a removal notification for each."""
+        keys = list(dict.keys(self))
+        dict.clear(self)
+        for key in keys:
+            self._emit_changed(key, "removed")
+
+    def setdefault(self, key: str, default: Any = None) -> Any:
+        """Get *key* if present, otherwise set it to *default* and notify."""
+        if key not in self:
+            self[key] = default  # routes through __setitem__
+        return self[key]
+
+    def __ior__(self, other: Any) -> "PDVTree":
+        """Support ``tree |= other`` with change notifications (Python 3.9+)."""
+        self.update(other)
+        return self
+
+    def popitem(self) -> tuple:
+        """Remove and return an arbitrary ``(key, value)`` pair with notification."""
+        key, value = dict.popitem(self)
+        self._emit_changed(key, "removed")
+        return key, value
+
+    # ------------------------------------------------------------------
     # Public API
     # ------------------------------------------------------------------
 

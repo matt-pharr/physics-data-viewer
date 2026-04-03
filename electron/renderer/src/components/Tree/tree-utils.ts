@@ -36,6 +36,33 @@ export function findNode(nodes: TreeNodeData[], path: string): TreeNodeData | un
   return undefined;
 }
 
+/** Immutably remove a node by path from a tree collection. */
+export function removeNodeImmut(
+  list: TreeNodeData[],
+  path: string,
+): TreeNodeData[] {
+  let changed = false;
+  const result: TreeNodeData[] = [];
+
+  for (const node of list) {
+    if (node.path === path) {
+      changed = true;
+      continue; // skip this node (remove it)
+    }
+    if (node.children) {
+      const updatedChildren = removeNodeImmut(node.children, path);
+      if (updatedChildren !== node.children) {
+        result.push({ ...node, children: updatedChildren });
+        changed = true;
+        continue;
+      }
+    }
+    result.push(node);
+  }
+
+  return changed ? result : list;
+}
+
 /** Immutably update one node by path while preserving unrelated references. */
 export function updateNodeImmut(
   list: TreeNodeData[],
@@ -47,7 +74,10 @@ export function updateNodeImmut(
       return updater(node);
     }
     if (node.children) {
-      return { ...node, children: updateNodeImmut(node.children, path, updater) };
+      const updatedChildren = updateNodeImmut(node.children, path, updater);
+      if (updatedChildren !== node.children) {
+        return { ...node, children: updatedChildren };
+      }
     }
     return node;
   });

@@ -5,19 +5,51 @@
  * state in localStorage, and exposes context-menu actions back to `App`.
  */
 
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { List, type ListImperativeAPI, type RowComponentProps } from 'react-window';
 import { treeService, type TreeNodeData } from '../../services/tree';
 import { TreeNodeRow } from './TreeNodeRow';
 import { ContextMenu } from './ContextMenu';
-import { findNode, flattenTree, updateNodeImmut } from './tree-utils';
+import { findNode, flattenTree, removeNodeImmut, updateNodeImmut } from './tree-utils';
+import type { TreeChangeInfo } from '../../types';
 import { TREE_PERSIST_DEBOUNCE_MS } from '../../app/constants';
 import type { Shortcuts } from '../../shortcuts';
 import { matchesShortcut } from '../../shortcuts';
+
+const ROW_HEIGHT = 32;
+
+/** Props passed to VirtualRow via react-window's rowProps. */
+interface VirtualRowProps {
+  flatNodes: Array<TreeNodeData & { depth: number }>;
+  selectedPath: string | null;
+  onExpand: (node: TreeNodeData) => void;
+  onDoubleClick: (node: TreeNodeData) => void;
+  onRightClick: (node: TreeNodeData, event: React.MouseEvent) => void;
+  onClick: (node: TreeNodeData) => void;
+}
+
+/** Module-level row renderer for react-window v2. */
+const VirtualRow = React.memo(({ index, style, flatNodes, selectedPath, onExpand, onDoubleClick, onRightClick, onClick }: RowComponentProps<VirtualRowProps>) => {
+  const node = flatNodes[index];
+  return (
+    <TreeNodeRow
+      node={node}
+      selected={node.path === selectedPath}
+      onExpand={onExpand}
+      onDoubleClick={onDoubleClick}
+      onRightClick={onRightClick}
+      onClick={onClick}
+      style={style}
+    />
+  );
+});
 
 interface TreeProps {
   kernelId: string | null;
   disabled?: boolean;
   refreshToken?: number;
+  pendingChanges?: TreeChangeInfo[];
+  onChangesConsumed?: () => void;
   onAction?: (action: string, node: TreeNodeData) => void;
   shortcuts: Shortcuts;
 }
@@ -29,8 +61,10 @@ interface ContextMenuState {
 }
 
 /** Tree browser component for node navigation and node actions. */
-export const Tree: React.FC<TreeProps> = ({ kernelId, disabled = false, refreshToken = 0, onAction, shortcuts }) => {
+export const Tree: React.FC<TreeProps> = ({ kernelId, disabled = false, refreshToken = 0, pendingChanges, onChangesConsumed, onAction, shortcuts }) => {
   const [nodes, setNodes] = useState<TreeNodeData[]>([]);
+  const nodesRef = useRef(nodes);
+  nodesRef.current = nodes;
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | undefined>();
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
@@ -53,6 +87,7 @@ export const Tree: React.FC<TreeProps> = ({ kernelId, disabled = false, refreshT
   };
   
   const expandedPathsRef = useRef<Set<string>>(getInitialExpandedPaths());
+  const listRef = useRef<ListImperativeAPI>(null);
 
   const loadRoot = async (force?: boolean) => {
     setLoading(nodes.length === 0);
@@ -128,7 +163,74 @@ export const Tree: React.FC<TreeProps> = ({ kernelId, disabled = false, refreshT
   // eslint-disable-next-line react-hooks/exhaustive-deps -- loadRoot is stable for given kernelId; real triggers are kernelId/refreshToken/disabled
   }, [kernelId, refreshToken, disabled]);
 
-  const handleExpand = async (node: TreeNodeData) => {
+  // Incremental tree update from push notifications — avoids full reload.
+  // Processes a queue of changes so rapid successive updates are not lost.
+  useEffect(() => {
+    if (!pendingChanges || pendingChanges.length === 0 || !kernelId || disabled) return;
+    // Consume the entire queue in one pass.
+    const changes = pendingChanges;
+    onChangesConsumed?.();
+
+    // Collect all removals and parent paths to refresh across the batch.
+    const removals: string[] = [];
+    const parentsToRefresh = new Set<string>();
+
+    for (const { changed_paths, change_type } of changes) {
+      if (change_type === 'removed') {
+        removals.push(...changed_paths);
+      }
+      for (const changedPath of changed_paths) {
+        const dotIdx = changedPath.lastIndexOf('.');
+        const parentPath = dotIdx > 0 ? changedPath.substring(0, dotIdx) : '';
+        if (change_type === 'removed') {
+          treeService.invalidatePath(kernelId, parentPath);
+        } else {
+          parentsToRefresh.add(parentPath);
+        }
+      }
+    }
+
+    // Apply removals synchronously.
+    if (removals.length > 0) {
+      setNodes((prev) => {
+        let updated = prev;
+        for (const path of removals) {
+          updated = removeNodeImmut(updated, path);
+        }
+        return updated;
+      });
+    }
+
+    // Re-fetch parents of added/updated paths (only if expanded).
+    if (parentsToRefresh.size > 0) {
+      const refreshParents = async () => {
+        for (const parentPath of parentsToRefresh) {
+          if (parentPath !== '' && !expandedPathsRef.current.has(parentPath)) continue;
+
+          // Read current nodes via ref to avoid stale closure.
+          const parentNode = parentPath === '' ? null : findNode(nodesRef.current, parentPath);
+          let children: TreeNodeData[];
+          if (parentPath === '') {
+            children = await treeService.getRootNodes(kernelId, { force: true });
+          } else if (parentNode) {
+            children = await treeService.getChildren(parentNode, kernelId, { force: true });
+          } else {
+            continue;
+          }
+
+          if (parentPath === '') {
+            setNodes((prev) => updateNodeImmut(prev, '', (n) => ({ ...n, children })));
+          } else {
+            setNodes((prev) => updateNodeImmut(prev, parentPath, (n) => ({ ...n, children, isExpanded: true })));
+          }
+        }
+      };
+      void refreshParents();
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- nodesRef used instead of nodes to avoid re-triggering
+  }, [pendingChanges, kernelId, disabled, onChangesConsumed]);
+
+  const handleExpand = useCallback(async (node: TreeNodeData) => {
     if (!kernelId || disabled) return;
     if (node.isExpanded) {
       setNodes((prev) => updateNodeImmut(prev, node.path, (n) => ({ ...n, isExpanded: false })));
@@ -151,15 +253,15 @@ export const Tree: React.FC<TreeProps> = ({ kernelId, disabled = false, refreshT
           children,
         })),
       );
-      void loadRoot(true);
     } catch (err) {
       console.error('[Tree] Failed to load children for', node.key, err);
       setError(`Failed to load children for ${node.key}`);
       setNodes((prev) => updateNodeImmut(prev, node.path, (n) => ({ ...n, isLoading: false })));
     }
-  };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [kernelId, disabled]);
 
-  const handleDoubleClick = (node: TreeNodeData) => {
+  const handleDoubleClick = useCallback((node: TreeNodeData) => {
     if (disabled) return;
     if (node.type === 'module' || node.type === 'gui') {
       onAction?.('open_gui', node);
@@ -172,21 +274,21 @@ export const Tree: React.FC<TreeProps> = ({ kernelId, disabled = false, refreshT
     } else if (node.type === 'script') {
       onAction?.('run', node);
     }
-  };
+  }, [disabled, onAction]);
 
-  const handleSelect = (node: TreeNodeData) => {
+  const handleSelect = useCallback((node: TreeNodeData) => {
     if (disabled) return;
     setSelectedPath(node.path);
-  };
+  }, [disabled]);
 
-  const handleRightClick = (node: TreeNodeData, event: React.MouseEvent) => {
+  const handleRightClick = useCallback((node: TreeNodeData, event: React.MouseEvent) => {
     if (disabled) return;
     setContextMenu({
       x: event.clientX,
       y: event.clientY,
       node,
     });
-  };
+  }, [disabled]);
 
   const handleContextAction = (action: string, node: TreeNodeData) => {
     if (disabled) return;
@@ -199,6 +301,25 @@ export const Tree: React.FC<TreeProps> = ({ kernelId, disabled = false, refreshT
   };
 
   const flatNodes = useMemo(() => flattenTree(nodes), [nodes]);
+
+  const rowProps = useMemo<VirtualRowProps>(() => ({
+    flatNodes,
+    selectedPath,
+    onExpand: handleExpand,
+    onDoubleClick: handleDoubleClick,
+    onRightClick: handleRightClick,
+    onClick: handleSelect,
+  }), [flatNodes, selectedPath, handleExpand, handleDoubleClick, handleRightClick, handleSelect]);
+
+  // Scroll the virtualised list to keep the selected node visible.
+  useEffect(() => {
+    if (selectedPath && listRef.current) {
+      const idx = flatNodes.findIndex((n) => n.path === selectedPath);
+      if (idx >= 0) {
+        listRef.current.scrollToRow({ index: idx, align: 'smart' });
+      }
+    }
+  }, [selectedPath, flatNodes]);
 
   const selectedNode = selectedPath !== null ? flatNodes.find((n) => n.path === selectedPath) : undefined;
 
@@ -251,19 +372,17 @@ export const Tree: React.FC<TreeProps> = ({ kernelId, disabled = false, refreshT
         )}
         {error && <div className="tree-error">{error}</div>}
 
-        {!disabled &&
-          !loading &&
-          !error &&
-          flatNodes.map((node) => (
-              <TreeNodeRow
-                key={node.id}
-                node={{ ...node, selected: node.path === selectedPath }}
-                onExpand={handleExpand}
-                onDoubleClick={handleDoubleClick}
-                onRightClick={handleRightClick}
-                onClick={handleSelect}
-              />
-            ))}
+        {!disabled && !loading && !error && flatNodes.length > 0 && (
+          <List
+            listRef={listRef}
+            rowComponent={VirtualRow}
+            rowCount={flatNodes.length}
+            rowHeight={ROW_HEIGHT}
+            rowProps={rowProps}
+            overscanCount={5}
+            style={{ flex: 1 }}
+          />
+        )}
       </div>
 
       {contextMenu && (
