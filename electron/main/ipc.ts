@@ -733,10 +733,12 @@ export interface ModuleActionResult {
 export interface MenuActionPayload {
   /** Action identifier emitted by the File menu. */
   action:
+    | "project:new"
     | "project:open"
     | "project:openRecent"
     | "project:save"
     | "project:saveAs"
+    | "recentProjects:clear"
     | "modules:import"
     | "settings:open";
   /** Project directory path for open-recent actions. */
