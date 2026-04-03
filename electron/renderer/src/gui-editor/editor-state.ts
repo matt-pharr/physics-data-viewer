@@ -123,17 +123,38 @@ function adjustPathAfterRemoval(targetParent: string, targetIndex: number, remov
   const removedIndices = parsePath(removedPath);
   const targetParentIndices = parsePath(targetParent);
 
-  // If removed node is a sibling earlier in the same parent, decrement index
-  if (removedIndices.length === targetParentIndices.length + 1) {
-    const removedParent = removedIndices.slice(0, -1);
-    const removedIdx = removedIndices[removedIndices.length - 1];
-    const sameParent = removedParent.length === targetParentIndices.length &&
-      removedParent.every((v, i) => v === targetParentIndices[i]);
-    if (sameParent && removedIdx < targetIndex) {
-      return { parentPath: targetParent, index: targetIndex - 1 };
+  // Adjust ancestor indices in the target parent path.
+  // At each depth level, if the removed node is a sibling of the target's
+  // ancestor at that level (same parent prefix) and comes before it, we
+  // must decrement the target ancestor index at that level.
+  const adjustedParentIndices = [...targetParentIndices];
+  for (let depth = 0; depth < adjustedParentIndices.length; depth++) {
+    // The removed node must be at this depth (length = depth + 1) to be
+    // a sibling of the target's ancestor at this depth.
+    if (removedIndices.length !== depth + 1) continue;
+    // Check that the parents above this depth are the same
+    const sameAncestors = removedIndices.slice(0, depth).every(
+      (v, i) => v === targetParentIndices[i],
+    );
+    if (sameAncestors && removedIndices[depth] < adjustedParentIndices[depth]) {
+      adjustedParentIndices[depth]--;
     }
   }
-  return { parentPath: targetParent, index: targetIndex };
+
+  // Adjust the target index itself: the removed node must be a direct child
+  // of the (adjusted) target parent.
+  let adjustedIndex = targetIndex;
+  if (removedIndices.length === adjustedParentIndices.length + 1) {
+    const sameParent = removedIndices.slice(0, -1).every(
+      (v, i) => v === adjustedParentIndices[i],
+    );
+    if (sameParent && removedIndices[removedIndices.length - 1] < targetIndex) {
+      adjustedIndex--;
+    }
+  }
+
+  const adjustedParentPath = adjustedParentIndices.join('.');
+  return { parentPath: adjustedParentPath, index: adjustedIndex };
 }
 
 /** Recursively collect all input and action IDs from a subtree. */
