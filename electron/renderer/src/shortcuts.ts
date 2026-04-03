@@ -119,12 +119,35 @@ export function matchesShortcut(event: KeyboardEvent, shortcut: string): boolean
   if (!keyPart) return false;
   const normalizedKey = keyPart === 'comma' ? ',' : keyPart;
   if (event.key.toLowerCase() !== normalizedKey) return false;
-  return parts.every((part) => {
-    if (part === 'commandorcontrol') return event.metaKey || event.ctrlKey;
-    if (part === 'command' || part === 'cmd' || part === 'meta') return event.metaKey;
-    if (part === 'control' || part === 'ctrl') return event.ctrlKey;
-    if (part === 'alt' || part === 'option') return event.altKey;
-    if (part === 'shift') return event.shiftKey;
-    return false;
-  });
+
+  // Determine which modifiers are required by the shortcut
+  let needsMeta = false;
+  let needsCtrl = false;
+  let needsAlt = false;
+  let needsShift = false;
+  let needsCommandOrControl = false;
+
+  for (const part of parts) {
+    if (part === 'commandorcontrol') needsCommandOrControl = true;
+    else if (part === 'command' || part === 'cmd' || part === 'meta') needsMeta = true;
+    else if (part === 'control' || part === 'ctrl') needsCtrl = true;
+    else if (part === 'alt' || part === 'option') needsAlt = true;
+    else if (part === 'shift') needsShift = true;
+    else return false;
+  }
+
+  // Check required modifiers are present
+  if (needsCommandOrControl && !(event.metaKey || event.ctrlKey)) return false;
+  if (needsMeta && !event.metaKey) return false;
+  if (needsCtrl && !event.ctrlKey) return false;
+  if (needsAlt && !event.altKey) return false;
+  if (needsShift && !event.shiftKey) return false;
+
+  // Reject extra modifiers not required by the shortcut
+  if (event.metaKey && !needsMeta && !needsCommandOrControl) return false;
+  if (event.ctrlKey && !needsCtrl && !needsCommandOrControl) return false;
+  if (event.altKey && !needsAlt) return false;
+  if (event.shiftKey && !needsShift) return false;
+
+  return true;
 }

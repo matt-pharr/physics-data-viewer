@@ -62,6 +62,18 @@ describe('matchesShortcut', () => {
   it('never matches an empty shortcut string', () => {
     expect(matchesShortcut(fakeKeyEvent('E'), '')).toBe(false);
   });
+
+  it('does not match single-key shortcuts when extra modifiers are held', () => {
+    expect(matchesShortcut(fakeKeyEvent('e', { ctrlKey: true }), 'E')).toBe(false);
+    expect(matchesShortcut(fakeKeyEvent('e', { metaKey: true }), 'E')).toBe(false);
+    expect(matchesShortcut(fakeKeyEvent('e', { altKey: true }), 'E')).toBe(false);
+    expect(matchesShortcut(fakeKeyEvent('p', { ctrlKey: true }), 'P')).toBe(false);
+  });
+
+  it('does not match modifier shortcuts when extra modifiers are held', () => {
+    const event = fakeKeyEvent('Enter', { ctrlKey: true, altKey: true });
+    expect(matchesShortcut(event, 'CommandOrControl+Enter')).toBe(false);
+  });
 });
 
 describe('formatShortcutHint', () => {
