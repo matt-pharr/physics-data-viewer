@@ -118,7 +118,7 @@ describe("ProjectManager", () => {
   let tmpDir: string;
 
   beforeEach(async () => {
-    setAppVersion("0.0.6");
+    setAppVersion("0.0.7");
     tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "pdv-pm-test-"));
   });
 

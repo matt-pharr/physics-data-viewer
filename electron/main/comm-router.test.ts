@@ -131,7 +131,7 @@ describe("CommRouter", () => {
   let router: CommRouter;
 
   beforeEach(() => {
-    setAppVersion("0.0.6");
+    setAppVersion("0.0.7");
     mock = new MockKernelManager();
     router = new CommRouter();
     router.attach(mock as unknown as Parameters<CommRouter["attach"]>[0], KERNEL_ID);
