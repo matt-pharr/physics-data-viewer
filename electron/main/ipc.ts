@@ -737,7 +737,8 @@ export interface MenuActionPayload {
     | "project:openRecent"
     | "project:save"
     | "project:saveAs"
-    | "modules:import";
+    | "modules:import"
+    | "settings:open";
   /** Project directory path for open-recent actions. */
   path?: string;
 }

@@ -52,6 +52,7 @@ export const ContextMenu: React.FC<ContextMenuProps> = ({ x, y, node, shortcuts,
   const actionShortcuts: Partial<Record<string, string>> = {
     run:       'Double-click',
     edit:      formatShortcutHint(shortcuts.treeEditScript),
+    open_gui:  'Double-click',
     open_note: 'Double-click',
     print:     formatShortcutHint(shortcuts.treePrint),
     copy_path: formatShortcutHint(shortcuts.treeCopyPath),
@@ -93,9 +94,11 @@ export const ContextMenu: React.FC<ContextMenuProps> = ({ x, y, node, shortcuts,
 /** Return menu actions allowed for the given node descriptor. */
 export function getActionsForNode(node: TreeNodeData) {
   const actions: Array<{ id: string; label: string; disabled: boolean }> = [];
-  const canCreateScript = node.type === 'dict' || node.type === 'folder' || node.type === 'root';
+  const isContainer = node.type === 'dict' || node.type === 'folder' || node.type === 'root';
   const isModule = node.type === 'module';
   const isGui = node.type === 'gui';
+
+  // ── Primary actions (type-specific) ──
 
   if (isModule || isGui) {
     actions.push({ id: 'open_gui', label: 'Open GUI', disabled: false });
@@ -109,22 +112,24 @@ export function getActionsForNode(node: TreeNodeData) {
       { id: 'edit', label: 'Edit', disabled: false },
     );
   } else if (node.type === 'namelist' || node.type === 'lib') {
-    actions.push(
-      { id: 'edit', label: 'Edit', disabled: false },
-    );
+    actions.push({ id: 'edit', label: 'Edit', disabled: false });
   } else if (node.type === 'markdown') {
-    actions.push(
-      { id: 'open_note', label: 'Open', disabled: false },
-    );
-  } else {
-    actions.push({ id: 'refresh', label: 'Refresh', disabled: false });
-    if (canCreateScript) {
-      actions.push({ id: 'create_script', label: 'Create new script', disabled: false });
-      actions.push({ id: 'create_note', label: 'Create new note', disabled: false });
-      actions.push({ id: 'new_gui', label: 'New GUI', disabled: false });
-    }
-    actions.push({ id: 'view', label: 'View', disabled: false });
+    actions.push({ id: 'open_note', label: 'Open', disabled: false });
   }
+
+  // ── Refresh (all nodes) ──
+
+  actions.push({ id: 'refresh', label: 'Refresh', disabled: false });
+
+  // ── Creation actions (containers only) ──
+
+  if (isContainer) {
+    actions.push({ id: 'create_script', label: 'Create new script', disabled: false });
+    actions.push({ id: 'create_note', label: 'Create new note', disabled: false });
+    actions.push({ id: 'new_gui', label: 'Create new GUI', disabled: false });
+  }
+
+  // ── Common actions (all nodes) ──
 
   actions.push(
     { id: 'print', label: 'Print', disabled: false },

@@ -105,6 +105,7 @@ function CanvasNode({ node, path, onDrop }: CanvasNodeProps) {
   const [dropTarget, setDropTarget] = useState(false);
 
   const isContainer = "children" in node;
+  const isRoot = path === "";
   const isSelected = state.selectedNodePath === path;
   const children = isContainer ? (node as LayoutContainer).children : [];
   const warning = nodeWarning(node, state.manifest);
@@ -162,8 +163,8 @@ function CanvasNode({ node, path, onDrop }: CanvasNodeProps) {
         className={`canvas-node-row${isSelected ? " selected" : ""}${dropTarget ? " drop-target" : ""}`}
         onClick={handleClick}
         onKeyDown={handleKeyDown}
-        draggable
-        onDragStart={handleDragStart}
+        draggable={!isRoot}
+        onDragStart={isRoot ? undefined : handleDragStart}
         onDragOver={isContainer ? handleContainerDragOver : undefined}
         onDragLeave={isContainer ? handleContainerDragLeave : undefined}
         onDrop={isContainer ? handleContainerDrop : undefined}
@@ -182,7 +183,7 @@ function CanvasNode({ node, path, onDrop }: CanvasNodeProps) {
           {nodeDisplayLabel(node, state.manifest)}
           {warning && <span className="canvas-node-warning" title={warning}> &#x26A0;</span>}
         </div>
-        <button className="canvas-node-delete" onClick={handleDelete} title="Delete">&times;</button>
+        {!isRoot && <button className="canvas-node-delete" onClick={handleDelete} title="Delete">&times;</button>}
       </div>
       {isContainer && !collapsed && (
         <div className="canvas-node-children">

@@ -1,22 +1,44 @@
 /**
- * Central registry for all PDV keyboard shortcuts.
+ * Central registry for user-customizable keyboard shortcuts.
  *
- * Components read shortcuts from this module (defaults) or from the resolved
- * value that App derives from config.settings.shortcuts. Nothing outside this
- * file should hardcode shortcut strings or define matchesShortcut.
+ * PDV has two kinds of keyboard shortcuts:
+ *
+ * 1. **Fixed menu accelerators** — Shortcuts for actions that appear in the
+ *    native app menu (File > Open, Save, Settings, Close Window, etc.). These
+ *    are defined as Electron `accelerator` strings in `menu.ts` and are NOT
+ *    user-customizable. They follow platform conventions (Cmd+S, Cmd+O, Cmd+,)
+ *    and the menu always displays the correct hint.
+ *
+ * 2. **Customizable shortcuts** (this file) — Shortcuts for actions that do NOT
+ *    appear in the native menu: code cell operations, tree actions, etc. These
+ *    are handled by the renderer via `useKeyboardShortcuts` and
+ *    `matchesShortcut()`. Users can rebind them in Settings > Keyboard Shortcuts.
+ *
+ * 3. **Monaco editor shortcuts** — Monaco intercepts keyboard events before they
+ *    reach the document-level listener. Customizable shortcuts that must work
+ *    while the code editor is focused (execute, new tab, close tab, tab
+ *    switching) are duplicated in `CodeCell`'s `editor.onKeyDown` handler using
+ *    `matchesShortcut()` on the native browser event. This ensures they respond
+ *    to user-customized bindings even when Monaco has focus.
+ *
+ * 4. **Tree panel shortcuts** — The Tree component has its own `onKeyDown`
+ *    handler that listens for tree-specific shortcuts (Copy Path, Edit Script,
+ *    Print Node) when the tree panel is focused. These are single-key or
+ *    modifier shortcuts (e.g. `E`, `P`, `Cmd+C`) that only fire when the tree
+ *    has focus, avoiding conflicts with the code editor.
+ *
+ * This separation exists because Electron's native menu accelerators cannot be
+ * updated at runtime. If a shortcut appears in a menu, it must be fixed so the
+ * displayed hint stays accurate.
  */
 
 export interface Shortcuts {
-  /** Open the Settings dialog. */
-  openSettings: string;
   /** Execute the active code-cell tab. */
   execute: string;
   /** Add a new code-cell tab. */
   newTab: string;
   /** Close the active code-cell tab. */
   closeTab: string;
-  /** Close the application window. */
-  closeWindow: string;
   /** Copy the focused tree node's dot path to the clipboard. */
   treeCopyPath: string;
   /** Open the focused script node in an external editor. */
@@ -27,11 +49,9 @@ export interface Shortcuts {
 
 /** Default shortcut bindings applied when user has no overrides. */
 export const DEFAULT_SHORTCUTS: Shortcuts = {
-  openSettings: 'CommandOrControl+,',
   execute: 'CommandOrControl+Enter',
   newTab: 'CommandOrControl+T',
   closeTab: 'CommandOrControl+W',
-  closeWindow: 'CommandOrControl+Shift+W',
   treeCopyPath: 'CommandOrControl+C',
   treeEditScript: 'E',
   treePrint: 'P',
@@ -39,11 +59,9 @@ export const DEFAULT_SHORTCUTS: Shortcuts = {
 
 /** Human-readable labels shown in the Settings → Keyboard Shortcuts tab. */
 export const SHORTCUT_LABELS: Record<keyof Shortcuts, string> = {
-  openSettings: 'Open Settings',
   execute: 'Execute Code',
   newTab: 'New Command Tab',
   closeTab: 'Close Command Tab',
-  closeWindow: 'Close Window',
   treeCopyPath: 'Copy Node Path',
   treeEditScript: 'Edit Script',
   treePrint: 'Print Node',

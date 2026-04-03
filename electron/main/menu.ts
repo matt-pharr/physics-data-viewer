@@ -45,6 +45,11 @@ function buildOpenRecentSubmenu(): MenuItemConstructorOptions[] {
 }
 
 // Build the full platform-aware application menu template.
+//
+// Menu accelerators are FIXED — they cannot be user-customized because Electron
+// cannot update native menu accelerators at runtime. User-customizable shortcuts
+// live in the renderer's shortcuts.ts and are handled by useKeyboardShortcuts.
+// See ARCHITECTURE.md for the full distinction.
 function buildTemplate(): MenuItemConstructorOptions[] {
   const template: MenuItemConstructorOptions[] = [];
   if (process.platform === "darwin") {
@@ -91,6 +96,13 @@ function buildTemplate(): MenuItemConstructorOptions[] {
           accelerator: "CmdOrCtrl+I",
           enabled: isEnabled("modules:import"),
           click: () => sendMenuAction({ action: "modules:import" }),
+        },
+        { type: "separator" },
+        {
+          id: "settings:open",
+          label: "Settings",
+          accelerator: "CmdOrCtrl+,",
+          click: () => sendMenuAction({ action: "settings:open" }),
         },
         { type: "separator" },
         process.platform === "darwin"

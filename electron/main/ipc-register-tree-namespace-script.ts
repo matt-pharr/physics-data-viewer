@@ -292,6 +292,9 @@ export function registerTreeNamespaceScriptIpcHandlers(
         kernelWorkingDirs.set(kernelId, workingDir);
       }
       const safeName = guiName.trim().replace(/\s+/g, "_").replace(/[^a-zA-Z0-9_-]/g, "");
+      if (!safeName) {
+        return { success: false, error: "GUI name must contain at least one alphanumeric character" };
+      }
       const guiDir = path.join(workingDir, "tree", ...targetPath.split(".").filter(Boolean));
       await fs.mkdir(guiDir, { recursive: true });
       const guiPath = path.join(guiDir, safeName + ".gui.json");

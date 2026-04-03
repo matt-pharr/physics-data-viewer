@@ -267,6 +267,9 @@ const App: React.FC = () => {
     const unsub = window.pdv.menu.onAction((payload) => {
       if (payload.action === 'modules:import') {
         setShowImportModule(true);
+      } else if (payload.action === 'settings:open') {
+        setSettingsInitialTab('general');
+        setShowSettings(true);
       }
     });
     return unsub;
@@ -395,8 +398,6 @@ const App: React.FC = () => {
     cellUndoStack,
     setCellTabs,
     setActiveCellTab,
-    setShowSettings,
-    setSettingsInitialTab,
     toggleLeftSidebar,
     toggleEditorCollapsed,
     setShowImportModule,

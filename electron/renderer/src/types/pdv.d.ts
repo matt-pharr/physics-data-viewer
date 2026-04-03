@@ -205,7 +205,7 @@ export interface CodeCellData {
 /** File-menu action event payload emitted by `menu.onAction`. */
 export interface MenuActionPayload {
   /** Discriminated menu action identifier. */
-  action: "project:open" | "project:openRecent" | "project:save" | "project:saveAs" | "modules:import";
+  action: "project:open" | "project:openRecent" | "project:save" | "project:saveAs" | "modules:import" | "settings:open";
   /** Optional path argument for path-bearing menu actions. */
   path?: string;
 }
@@ -315,8 +315,9 @@ export interface Config {
   settings?: {
     /** Keyboard shortcut overrides. */
     shortcuts?: {
-      openSettings?: string;
       execute?: string;
+      newTab?: string;
+      closeTab?: string;
       treeCopyPath?: string;
       treeEditScript?: string;
       treePrint?: string;

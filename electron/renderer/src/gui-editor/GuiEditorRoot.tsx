@@ -111,10 +111,17 @@ function EditorToolbar() {
 
 /** Vertical drag handle between two side-by-side panels. */
 function ColumnResizer({ onDrag }: { onDrag: (deltaX: number) => void }) {
+  const onDragRef = React.useRef(onDrag);
+  onDragRef.current = onDrag;
+
   const handleMouseDown = useCallback((e: React.MouseEvent) => {
     e.preventDefault();
-    const startX = e.clientX;
-    const onMove = (ev: MouseEvent) => onDrag(ev.clientX - startX);
+    let lastX = e.clientX;
+    const onMove = (ev: MouseEvent) => {
+      const dx = ev.clientX - lastX;
+      lastX = ev.clientX;
+      onDragRef.current(dx);
+    };
     const onUp = () => {
       document.removeEventListener("mousemove", onMove);
       document.removeEventListener("mouseup", onUp);
@@ -125,17 +132,24 @@ function ColumnResizer({ onDrag }: { onDrag: (deltaX: number) => void }) {
     document.body.style.userSelect = "none";
     document.addEventListener("mousemove", onMove);
     document.addEventListener("mouseup", onUp);
-  }, [onDrag]);
+  }, []);
 
   return <div className="gui-editor-col-resizer" onMouseDown={handleMouseDown} />;
 }
 
 /** Horizontal drag handle between canvas and preview. */
 function RowResizer({ onDrag }: { onDrag: (deltaY: number) => void }) {
+  const onDragRef = React.useRef(onDrag);
+  onDragRef.current = onDrag;
+
   const handleMouseDown = useCallback((e: React.MouseEvent) => {
     e.preventDefault();
-    const startY = e.clientY;
-    const onMove = (ev: MouseEvent) => onDrag(ev.clientY - startY);
+    let lastY = e.clientY;
+    const onMove = (ev: MouseEvent) => {
+      const dy = ev.clientY - lastY;
+      lastY = ev.clientY;
+      onDragRef.current(dy);
+    };
     const onUp = () => {
       document.removeEventListener("mousemove", onMove);
       document.removeEventListener("mouseup", onUp);
@@ -146,7 +160,7 @@ function RowResizer({ onDrag }: { onDrag: (deltaY: number) => void }) {
     document.body.style.userSelect = "none";
     document.addEventListener("mousemove", onMove);
     document.addEventListener("mouseup", onUp);
-  }, [onDrag]);
+  }, []);
 
   return <div className="gui-editor-row-resizer" onMouseDown={handleMouseDown} />;
 }
