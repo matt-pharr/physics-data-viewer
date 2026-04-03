@@ -854,6 +854,7 @@ describe("Step 5 IPC handlers", () => {
       { id: "edit", label: "Edit" },
       { id: "view", label: "View" },
       { id: "window", label: "Window" },
+      { id: "help", label: "Help" },
     ]);
   });
 

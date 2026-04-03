@@ -87,6 +87,7 @@ beforeEach(() => {
     },
     editor: {
       setModelMarkers,
+      getModels: () => [],
     },
     Range: class {
       constructor(
