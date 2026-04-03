@@ -14,6 +14,8 @@ export default defineConfig({
       input: {
         main: resolve(__dirname, 'index.html'),
         moduleWindow: resolve(__dirname, 'module-window.html'),
+        guiEditor: resolve(__dirname, 'gui-editor.html'),
+        guiViewer: resolve(__dirname, 'gui-viewer.html'),
       },
     },
   },

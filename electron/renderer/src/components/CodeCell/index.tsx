@@ -282,11 +282,6 @@ export const CodeCell: React.FC<CodeCellProps> = ({
         const tab = activeTabRef.current;
         if (tab) onRemoveTabRef.current?.(tab.id);
       }
-      if (matchesShortcut(nativeEvent, shortcutsRef.current.closeWindow)) {
-        e.preventDefault();
-        e.stopPropagation();
-        window.close();
-      }
       // Cmd+1–9 → go to nth tab; Cmd+0 → go to last tab
       if ((nativeEvent.metaKey || nativeEvent.ctrlKey) && !nativeEvent.shiftKey && !nativeEvent.altKey) {
         const digit = nativeEvent.key;

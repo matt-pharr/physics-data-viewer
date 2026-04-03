@@ -9,7 +9,7 @@ function actionIds(type: string): string[] {
 describe('getActionsForNode', () => {
   it('returns script actions for script nodes', () => {
     const ids = actionIds('script');
-    expect(ids).toEqual(['run', 'run_defaults', 'edit', 'print', 'copy_path', 'delete']);
+    expect(ids).toEqual(['run', 'run_defaults', 'edit', 'refresh', 'print', 'copy_path', 'delete']);
     expect(ids).not.toContain('create_script');
   });
 
@@ -17,7 +17,8 @@ describe('getActionsForNode', () => {
     const ids = actionIds('folder');
     expect(ids).toContain('refresh');
     expect(ids).toContain('create_script');
-    expect(ids).toContain('view');
+    expect(ids).toContain('new_gui');
+    expect(ids).not.toContain('view');
   });
 
   it('returns create_script for dict nodes but not ndarray nodes', () => {

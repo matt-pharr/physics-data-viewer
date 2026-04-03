@@ -1112,11 +1112,11 @@ The preload bridge exposes exactly the operations the renderer needs. It never e
 
 The API surface:
 - `window.pdv.kernels.*` — kernel lifecycle/execution: `list`, `start`, `stop`, `execute`, `interrupt`, `restart`, `complete`, `inspect`, `validate`; push subscriptions: `onOutput(cb) → unsub` for streamed execute chunks (`stdout`, `stderr`, images, execute-result fragments), `onKernelStatus(cb) → unsub` for kernel status changes (e.g. crash detection)
-- `window.pdv.tree.*` — tree operations: `list`, `get`, `createScript`, `createNote`, `addFile`, `invokeHandler`; push: `onChanged(cb) → unsub`
+- `window.pdv.tree.*` — tree operations: `list`, `get`, `createScript`, `createNote`, `createGui`, `addFile`, `invokeHandler`; push: `onChanged(cb) → unsub`
 - `window.pdv.namespace.*` — namespace query: `query`
 - `window.pdv.note.*` — markdown note I/O: `save(kernelId, treePath, content)`, `read(kernelId, treePath)` — reads/writes `.md` files directly on the main process without a kernel round-trip
 - `window.pdv.namelist.*` — namelist I/O: `read(kernelId, treePath)`, `write(kernelId, treePath, data)` — reads/writes namelist files via kernel comm (parsing stays in Python)
-- `window.pdv.script.*` — script tooling: `edit` (open in external editor)
+- `window.pdv.script.*` — script tooling: `run`, `edit` (open in external editor), `getParams`
 - `window.pdv.project.*` — project lifecycle: `save`, `load`, `new`; push: `onLoaded(cb) → unsub`, `onReloading(cb) → unsub` (for project reload overlay during kernel restart)
 - `window.pdv.config.*` — app config: `get`, `set`
 - `window.pdv.about.*` — app metadata: `getVersion`
@@ -1125,13 +1125,26 @@ The API surface:
 - `window.pdv.files.*` — native OS dialogs: `pickExecutable() → string | null` (wraps Electron `dialog.showOpenDialog` for executables); `pickFile() → string | null` (general file picker); `pickDirectory() → string | null` (wraps `dialog.showOpenDialog` with `properties: ['openDirectory', 'createDirectory']`, used for Save/Open project)
 - `window.pdv.modules.*` — module management: `listInstalled`, `install`, `importToProject`, `listImported`, `removeImport`, `saveSettings`, `runAction`, `checkUpdates`
 - `window.pdv.moduleWindows.*` — module GUI windows: `open`, `close`, `context`, `executeInMain`; push: `onExecuteRequest(cb) → unsub`
+- `window.pdv.guiEditor.*` — GUI editor and viewer windows: `open` (editor), `openViewer` (standalone GUI viewer), `context`, `read`, `save`
 - `window.pdv.menu.*` — menu bridge: `updateRecentProjects(paths)`, `onAction(cb) → unsub` (for File menu actions routed to renderer state, including `modules:import`)
 
-**Design decision — running scripts via `kernels.execute`**: There is no `window.pdv.script.run()`. Running a `PDVScript` node from the renderer is always done by calling `window.pdv.kernels.execute()` with the appropriate Python code string (e.g. `pdv_tree["path.to.script"].run(a=1)`). This keeps the IPC surface minimal and the comm substrate readable — a script run looks identical to any other user execution in the console and in the kernel logs. The `ScriptDialog` component builds the execute call; it does not call a separate IPC channel.
+**Design decision — Settings**: The Settings dialog is opened by renderer-internal state (toolbar button, status bar click, or File → Settings menu action via `menu.onAction`). There is no dedicated `window.pdv.settings.*` IPC namespace; the menu action is forwarded as a `settings:open` payload through the existing `menu.onAction` push channel.
 
-**Design decision — `settings.onOpen`**: There is no `window.pdv.settings.onOpen()`. The Settings dialog is opened by renderer-internal state only (e.g. clicking a toolbar button). Main-menu integration (File → Preferences triggering the dialog) is deferred to a future release and will be implemented as a `window.pdv.settings.*` push subscription at that time.
+### 11.3 Keyboard Shortcuts
 
-### 11.3 Comm Routing in the Main Process
+PDV has two distinct shortcut systems:
+
+1. **Fixed menu accelerators** (`menu.ts`): Shortcuts for actions in the native app menu — Open (`Cmd+O`), Save (`Cmd+S`), Save As (`Cmd+Shift+S`), Import Module (`Cmd+I`), Settings (`Cmd+,`), Close Window (`Cmd+Shift+W`). These are Electron-native `accelerator` strings and are **not user-customizable**. They follow platform conventions and the menu always displays the correct hint.
+
+2. **Customizable shortcuts** (`shortcuts.ts`): Shortcuts for renderer-only actions that do not appear in any menu — Execute (`Cmd+Enter`), New Tab (`Cmd+T`), Close Tab (`Cmd+W`), Copy Node Path (`Cmd+C`), Edit Script (`E`), Print Node (`P`). Users can rebind these in Settings → Keyboard Shortcuts. They are handled by `useKeyboardShortcuts` in the renderer via `matchesShortcut()`.
+
+There is a third layer: **Monaco editor shortcuts**. Monaco intercepts keyboard events before they reach the document-level listener in `useKeyboardShortcuts`. Customizable shortcuts that must work while the code editor is focused (execute, new tab, close tab, tab switching) are duplicated in `CodeCell`'s `editor.onKeyDown` handler using `matchesShortcut()` on the native browser event. This ensures they respond to user-customized bindings even when Monaco has focus. Fixed menu accelerators (Cmd+S, Cmd+O, etc.) do not need this treatment because Electron handles them at the OS level before Monaco sees the event.
+
+A fourth layer is **tree panel shortcuts**. The Tree component has its own `onKeyDown` handler that listens for tree-specific shortcuts (Copy Path `Cmd+C`, Edit Script `E`, Print Node `P`) when the tree panel is focused. These are single-key or modifier shortcuts that only fire when the tree has focus, avoiding conflicts with the code editor where `E` and `P` are normal text input.
+
+This separation exists because Electron's native menu accelerators cannot be updated at runtime. If a customizable shortcut were shown in a menu, the displayed hint would become stale when the user changes the binding. By keeping menu shortcuts fixed and renderer shortcuts customizable, both systems stay correct.
+
+### 11.4 Comm Routing in the Main Process
 
 The main process's kernel manager listens on the `iopub` socket for all incoming messages. When a message is a `comm_msg` of type `pdv.kernel`, the kernel manager routes it:
 
@@ -1140,7 +1153,7 @@ The main process's kernel manager listens on the `iopub` socket for all incoming
 
 This routing logic lives in a dedicated `CommRouter` class in `electron/main/comm-router.ts`.
 
-### 11.4 Renderer Push Subscription Lifecycle
+### 11.5 Renderer Push Subscription Lifecycle
 
 The renderer owns push subscriptions in the root `App` component via dedicated hooks (see `app/HOOKS.md`), split by lifecycle scope:
 - **Kernel-scoped** (`currentKernelId` keyed): `tree.onChanged`, `project.onLoaded`, `kernels.onKernelStatus`, `project.onReloading` — managed by `useKernelSubscriptions`
@@ -1229,10 +1242,13 @@ electron/
         module-manager.ts       ← Module import/installation pipeline
         module-runtime.ts       ← Module bind/setup helpers: lib file copy, sys.path setup, script registration
         module-window-manager.ts ← Module GUI popup BrowserWindow lifecycle
+        gui-editor-window-manager.ts  ← GUI editor popup BrowserWindow lifecycle
+        gui-viewer-window-manager.ts  ← Standalone GUI viewer BrowserWindow lifecycle
         ipc-register-kernels.ts           ← IPC handlers: kernel lifecycle + execution
         ipc-register-project.ts           ← IPC handlers: project save/load/new
         ipc-register-modules.ts           ← IPC handlers: module import/install
         ipc-register-module-windows.ts    ← IPC handlers: module GUI window open/close/context
+        ipc-register-gui-editor.ts        ← IPC handlers: GUI editor/viewer window open/context/read/save
         ipc-register-tree-namespace-script.ts ← IPC handlers: tree, namespace, script
         ipc-register-app-state.ts         ← IPC handlers: config, themes, code cells, files, about
         modules/
@@ -1273,6 +1289,8 @@ electron/
                 ModulesPanel/           ← Module actions and inputs panels (used inside module GUI)
                 ModuleGui/              ← Module GUI rendering: ContainerRenderer, InputControl, ActionButton, NamelistEditor
             module-window/              ← Separate renderer entry for module GUI popup windows
+            gui-editor/                 ← GUI editor: drag-and-drop layout canvas, property editor, live preview
+            gui-viewer/                 ← Standalone GUI viewer for project GUIs (non-module)
             themes.ts                   ← Builtin themes, Monaco theme definitions, font helpers
             shortcuts.ts                ← Canonical shortcut registry and matcher
             services/tree.ts            ← Renderer tree fetch/cache adapter

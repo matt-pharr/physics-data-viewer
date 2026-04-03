@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>GUI</title>
+    <style>
+      html { background-color: #1e1e1e; }
+    </style>
+    <script>
+      (function () {
+        var DARK_PLUS = {
+          'bg-primary':   '#1e1e1e',
+          'bg-secondary': '#252526',
+          'bg-tertiary':  '#2d2d30',
+          'bg-hover':     '#2a2d2e',
+          'border-color': '#474747',
+          'text-primary':   '#d4d4d4',
+          'text-secondary': '#858585',
+          'text-hint':      '#5a5a5a',
+          'accent':       '#007acc',
+          'accent-hover': '#1a8fd1',
+          'error':        '#f48771',
+          'warning':      '#dcdcaa',
+          'warning-hover':'#e4e4b4',
+          'success':      '#4ec9b0'
+        };
+
+        function apply(colors) {
+          var root = document.documentElement;
+          for (var key in colors) {
+            if (Object.prototype.hasOwnProperty.call(colors, key)) {
+              root.style.setProperty('--' + key, colors[key]);
+            }
+          }
+          root.style.backgroundColor = colors['bg-primary'] || '#1e1e1e';
+        }
+
+        apply(DARK_PLUS);
+
+        try {
+          var raw = localStorage.getItem('pdv-theme-cache');
+          if (!raw) return;
+          var data = JSON.parse(raw);
+          var cached = data.colors;
+          if (data.followSystem) {
+            var prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+            cached = prefersDark ? data.darkColors : data.lightColors;
+          }
+          if (cached) apply(cached);
+        } catch (e) { /* ignore corrupt cache */ }
+      })();
+    </script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/gui-viewer-main.tsx"></script>
+  </body>
+</html>

@@ -21,6 +21,7 @@ import { StatusBar } from '../components/StatusBar';
 import { NamespaceView } from '../components/NamespaceView';
 import { ScriptDialog } from '../components/ScriptDialog';
 import { CreateScriptDialog } from '../components/Tree/CreateScriptDialog';
+import { CreateGuiDialog } from '../components/Tree/CreateGuiDialog';
 import { CreateNoteDialog } from '../components/Tree/CreateNoteDialog';
 import { TitleBar } from '../components/TitleBar';
 import { WriteTab } from '../components/WriteTab';
@@ -128,6 +129,7 @@ const App: React.FC = () => {
   const [scriptDialog, setScriptDialog] = useState<TreeNodeData | null>(null);
   const [createScriptTarget, setCreateScriptTarget] = useState<string | null>(null);
   const [createNoteTarget, setCreateNoteTarget] = useState<string | null>(null);
+  const [createGuiTarget, setCreateGuiTarget] = useState<string | null>(null);
   const [showSettings, setShowSettings] = useState(false);
   const [showImportModule, setShowImportModule] = useState(false);
   const [chromeInfo, setChromeInfo] = useState<WindowChromeInfo | null>(null);
@@ -265,6 +267,9 @@ const App: React.FC = () => {
     const unsub = window.pdv.menu.onAction((payload) => {
       if (payload.action === 'modules:import') {
         setShowImportModule(true);
+      } else if (payload.action === 'settings:open') {
+        setSettingsInitialTab('general');
+        setShowSettings(true);
       }
     });
     return unsub;
@@ -393,8 +398,6 @@ const App: React.FC = () => {
     cellUndoStack,
     setCellTabs,
     setActiveCellTab,
-    setShowSettings,
-    setSettingsInitialTab,
     toggleLeftSidebar,
     toggleEditorCollapsed,
     setShowImportModule,
@@ -413,10 +416,11 @@ const App: React.FC = () => {
       if (scriptDialog) { setScriptDialog(null); return; }
       if (createScriptTarget) { setCreateScriptTarget(null); return; }
       if (createNoteTarget) { setCreateNoteTarget(null); return; }
+      if (createGuiTarget) { setCreateGuiTarget(null); return; }
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [showImportModule, scriptDialog, createScriptTarget, createNoteTarget]);
+  }, [showImportModule, scriptDialog, createScriptTarget, createNoteTarget, createGuiTarget]);
 
   const handleSettingsSave = async (updates: Partial<Config>) => {
     await window.pdv.config.set(updates);
@@ -516,13 +520,22 @@ const App: React.FC = () => {
   const handleTreeAction = async (action: string, node: TreeNodeData) => {
     if (action === 'open_gui') {
       if (!currentKernelId) return;
-      // For module nodes, the alias is the node key; for gui nodes, use parent path
-      const alias = node.type === 'gui' && node.parent_path ? node.parent_path : node.key;
-      void window.pdv.moduleWindows.open({ alias, kernelId: currentKernelId });
+      // Module-owned GUIs use the module window system; standalone GUIs use the viewer
+      if (node.module_id) {
+        const alias = node.type === 'gui' && node.parent_path ? node.parent_path : node.key;
+        void window.pdv.moduleWindows.open({ alias, kernelId: currentKernelId });
+      } else {
+        void window.pdv.guiEditor.openViewer({ treePath: node.path, kernelId: currentKernelId });
+      }
+      return;
+    }
+    if (action === 'edit_gui') {
+      if (!currentKernelId) return;
+      void window.pdv.guiEditor.open({ treePath: node.path, kernelId: currentKernelId });
       return;
     }
     if (action === 'new_gui') {
-      // Stub — GUI editor is future work
+      setCreateGuiTarget(node.path);
       return;
     }
     if (action === 'create_script') {
@@ -1082,6 +1095,28 @@ const App: React.FC = () => {
               setLastError(error instanceof Error ? error.message : String(error));
             } finally {
               setCreateNoteTarget(null);
+            }
+          }}
+        />
+      )}
+
+      {createGuiTarget !== null && currentKernelId && (
+        <CreateGuiDialog
+          parentPath={createGuiTarget}
+          onCancel={() => setCreateGuiTarget(null)}
+          onCreate={async (name) => {
+            try {
+              const result = await window.pdv.tree.createGui(currentKernelId, createGuiTarget, name);
+              if (!result.success) {
+                setLastError(result.error);
+              } else if (result.treePath) {
+                setTreeRefreshToken((t) => t + 1);
+                void window.pdv.guiEditor.open({ treePath: result.treePath, kernelId: currentKernelId });
+              }
+            } catch (error) {
+              setLastError(error instanceof Error ? error.message : String(error));
+            } finally {
+              setCreateGuiTarget(null);
             }
           }}
         />

@@ -33,11 +33,9 @@ describe('resolveShortcuts', () => {
 
   it('accepts full override object', () => {
     const override = {
-      openSettings: 'A',
       execute: 'B',
       newTab: 'C',
       closeTab: 'D',
-      closeWindow: 'E',
       treeCopyPath: 'F',
       treeEditScript: 'G',
       treePrint: 'H',
