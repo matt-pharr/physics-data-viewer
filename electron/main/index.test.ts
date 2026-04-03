@@ -17,9 +17,10 @@ import {
   type PDVConfig,
   type TreeNode,
 } from "./ipc";
-import { PDVMessageType, PDV_PROTOCOL_VERSION, type PDVMessage } from "./pdv-protocol";
+import { PDVMessageType, getAppVersion, setAppVersion, type PDVMessage } from "./pdv-protocol";
 import type { KernelInfo, KernelManager } from "./kernel-manager";
 import type { CommRouter } from "./comm-router";
+import { QueryRouter } from "./query-router";
 import type { ProjectManager } from "./project-manager";
 import type { ConfigStore } from "./config";
 import { EnvironmentDetector } from "./environment-detector";
@@ -198,7 +199,7 @@ function makeKernelInfo(): KernelInfo {
 
 function makeMessage(payload: Record<string, unknown>): PDVMessage {
   return {
-    pdv_version: PDV_PROTOCOL_VERSION,
+    pdv_version: getAppVersion(),
     msg_id: "msg-1",
     in_reply_to: "req-1",
     type: "response",
@@ -237,6 +238,7 @@ function setup() {
       data: { "text/plain": "doc" },
     })),
     getKernel: vi.fn(() => makeKernelInfo()),
+    getQueryPort: vi.fn(() => 12345),
     shutdownAll: vi.fn(async () => undefined),
     on: vi.fn(),
     removeListener: vi.fn(),
@@ -286,7 +288,8 @@ function setup() {
     }),
   } as unknown as ConfigStore;
 
-  registerIpcHandlers(win, kernelManager, commRouter, projectManager, configStore, os.tmpdir());
+  const queryRouter = new QueryRouter();
+  registerIpcHandlers(win, kernelManager, commRouter, queryRouter, projectManager, configStore, os.tmpdir());
 
   return {
     webContentsSend,
@@ -299,6 +302,7 @@ function setup() {
 
 describe("Step 5 IPC handlers", () => {
   beforeEach(() => {
+    setAppVersion("0.0.7");
     mocks.handlers.clear();
     vi.clearAllMocks();
     unregisterIpcHandlers();
@@ -804,15 +808,17 @@ describe("Step 5 IPC handlers", () => {
     const result = await save({}, "/tmp/project", []);
     expect(projectManager.save).toHaveBeenCalledWith("/tmp/project", [], {
       language: "python",
+      interpreterPath: undefined,
     });
     expect(result).toEqual({ checksum: "abc123", nodeCount: 0 });
   });
 
   it("project:load delegates to ProjectManager.load", async () => {
     const { projectManager } = setup();
-    (projectManager.load as unknown as ReturnType<typeof vi.fn>).mockResolvedValue([
-      { id: "box1" },
-    ]);
+    (projectManager.load as unknown as ReturnType<typeof vi.fn>).mockResolvedValue({
+      codeCells: [{ id: "box1" }],
+      postLoadChecksum: null,
+    });
     const load = getHandler(IPC.project.load);
     const result = await load({}, "/tmp/project");
     expect(projectManager.load).toHaveBeenCalledWith("/tmp/project");
@@ -821,6 +827,7 @@ describe("Step 5 IPC handlers", () => {
       checksum: null,
       checksumValid: null,
       nodeCount: null,
+      savedPdvVersion: "0.0.7",
     });
   });
 
@@ -847,6 +854,7 @@ describe("Step 5 IPC handlers", () => {
       { id: "edit", label: "Edit" },
       { id: "view", label: "View" },
       { id: "window", label: "Window" },
+      { id: "help", label: "Help" },
     ]);
   });
 
@@ -929,7 +937,7 @@ describe("Step 5 IPC handlers", () => {
       JSON.stringify({
         schema_version: "1.1",
         saved_at: "2026-01-01T00:00:00.000Z",
-        pdv_version: PDV_PROTOCOL_VERSION,
+        pdv_version: getAppVersion(),
         tree_checksum: "",
         modules: [
           {
@@ -975,7 +983,7 @@ describe("Step 5 IPC handlers", () => {
       JSON.stringify({
         schema_version: "1.1",
         saved_at: "2026-01-01T00:00:00.000Z",
-        pdv_version: PDV_PROTOCOL_VERSION,
+        pdv_version: getAppVersion(),
         tree_checksum: "",
         modules: [],
         module_settings: {},
@@ -1041,7 +1049,7 @@ describe("Step 5 IPC handlers", () => {
       JSON.stringify({
         schema_version: "1.1",
         saved_at: "2026-01-01T00:00:00.000Z",
-        pdv_version: PDV_PROTOCOL_VERSION,
+        pdv_version: getAppVersion(),
         tree_checksum: "",
         modules: [
           {
@@ -1109,7 +1117,7 @@ describe("Step 5 IPC handlers", () => {
       JSON.stringify({
         schema_version: "1.1",
         saved_at: "2026-01-01T00:00:00.000Z",
-        pdv_version: PDV_PROTOCOL_VERSION,
+        pdv_version: getAppVersion(),
         tree_checksum: "",
         modules: [
           {
@@ -1153,7 +1161,7 @@ describe("Step 5 IPC handlers", () => {
       JSON.stringify({
         schema_version: "1.1",
         saved_at: "2026-01-01T00:00:00.000Z",
-        pdv_version: PDV_PROTOCOL_VERSION,
+        pdv_version: getAppVersion(),
         tree_checksum: "",
         modules: [
           {
@@ -1188,7 +1196,7 @@ describe("Step 5 IPC handlers", () => {
       JSON.stringify({
         schema_version: "1.1",
         saved_at: "2026-01-01T00:00:00.000Z",
-        pdv_version: PDV_PROTOCOL_VERSION,
+        pdv_version: getAppVersion(),
         tree_checksum: "",
         modules: [
           {
@@ -1222,7 +1230,7 @@ describe("Step 5 IPC handlers", () => {
     let manifestState = {
       schema_version: "1.1",
       saved_at: "2026-01-01T00:00:00.000Z",
-      pdv_version: PDV_PROTOCOL_VERSION,
+      pdv_version: getAppVersion(),
       tree_checksum: "",
       modules: [
         {
@@ -1298,7 +1306,7 @@ describe("Step 5 IPC handlers", () => {
       JSON.stringify({
         schema_version: "1.1",
         saved_at: "2026-01-01T00:00:00.000Z",
-        pdv_version: PDV_PROTOCOL_VERSION,
+        pdv_version: getAppVersion(),
         tree_checksum: "",
         modules: [
           {
@@ -1336,7 +1344,7 @@ describe("Step 5 IPC handlers", () => {
       JSON.stringify({
         schema_version: "1.1",
         saved_at: "2026-01-01T00:00:00.000Z",
-        pdv_version: PDV_PROTOCOL_VERSION,
+        pdv_version: getAppVersion(),
         tree_checksum: "",
         modules: [
           {
@@ -1395,7 +1403,7 @@ describe("Step 5 IPC handlers", () => {
       JSON.stringify({
         schema_version: "1.1",
         saved_at: "2026-01-01T00:00:00.000Z",
-        pdv_version: PDV_PROTOCOL_VERSION,
+        pdv_version: getAppVersion(),
         tree_checksum: "",
         modules: [
           {

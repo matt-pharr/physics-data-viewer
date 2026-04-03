@@ -1,0 +1,80 @@
+appId: com.pdv.physics-data-viewer
+productName: PDV
+copyright: Copyright © 2026
+
+directories:
+  output: release
+  buildResources: build
+
+# What goes into the app bundle (inside app.asar)
+# Note: renderer/dist/ is in .gitignore (it's a build artifact), but we need
+# it in the packaged app. The "filter" form with explicit includes overrides
+# .gitignore exclusions.
+files:
+  - from: "."
+    to: "."
+    filter:
+      - dist/**/*
+      - renderer/dist/**/*
+      - package.json
+      - node_modules/**/*
+      - "!node_modules/**/*.{ts,map,md}"
+      - "!node_modules/**/{test,tests,__tests__}/**"
+
+# Native modules (.node binaries) cannot be loaded from inside an asar
+# archive. This extracts zeromq to app.asar.unpacked/ alongside the asar.
+asarUnpack:
+  - "node_modules/zeromq/**"
+
+# pdv-python source is placed into the app's Resources directory
+# (Contents/Resources/ on macOS, resources/ on Linux).
+# Not inside the asar — it needs to be pip-installable from disk.
+extraResources:
+  - from: ../pdv-python
+    to: pdv-python
+    filter:
+      - "**/*"
+      - "!**/__pycache__/**"
+      - "!**/*.pyc"
+      - "!**/tests/**"
+      - "!**/.pytest_cache/**"
+      - "!**/.git/**"
+
+# ---------------------------------------------------------------------------
+# macOS
+# ---------------------------------------------------------------------------
+mac:
+  category: public.app-category.developer-tools
+  icon: assets/pdv-icon.icns
+  target:
+    - target: dmg
+      arch:
+        - arm64
+        - x64
+    - target: zip
+      arch:
+        - arm64
+        - x64
+
+dmg:
+  contents:
+    - x: 130
+      y: 220
+    - x: 410
+      y: 220
+      type: link
+      path: /Applications
+
+# ---------------------------------------------------------------------------
+# Linux
+# ---------------------------------------------------------------------------
+linux:
+  category: Science
+  icon: assets/pdv-icon-linux.svg
+  target:
+    - target: AppImage
+      arch:
+        - x64
+    - target: deb
+      arch:
+        - x64

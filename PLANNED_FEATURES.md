@@ -6,7 +6,7 @@ This document describes all features planned beyond the current state of PDV, or
 
 | Release | Description |
 |---|---|
-| **0.0.6** | Current version. Backend refactor complete, modules UX redesign (activity bar icons, File > Import Module... dialog, tree context menu), PDVModule/PDVGui/PDVNamelist tree types, gui.json manifest split (v3), kernel-backed autocompletion and inspect working, E2E integration test infrastructure in place. |
+| **0.0.7** | Current version. Backend refactor complete, modules UX redesign (activity bar icons, File > Import Module... dialog, tree context menu), PDVModule/PDVGui/PDVNamelist tree types, gui.json manifest split (v3), kernel-backed autocompletion and inspect working, E2E integration test infrastructure in place. |
 | **0.1.0-beta1** | All remaining Alpha Features (below) are implemented and stable. The application is suitable for active scientific use. |
 | **1.0.0** | All Beta Features (below, plus any added during beta) are implemented. The application is suitable for broad community distribution. |
 
@@ -20,6 +20,7 @@ The following planned features have been completed and are no longer tracked her
 - ~~**Kernel-Backed Autocompletion**~~ — `complete_request`/`complete_reply`, Monaco completion provider, `inspect_request`/`inspect_reply` for hover info
 - ~~**E2E Testing Infrastructure**~~ — integration tests with real kernel processes, `@slow` tagging, fixture-based project tests
 - ~~**Markdown Notes in the Tree**~~ — Write tab with tabbed `.md` editor, KaTeX inline/display math preview, Read mode, tree context-menu creation, auto-save, project save/load support
+- ~~**Visual GUI Editor**~~ — Drag-and-drop WYSIWYG editor for `gui.json` manifests with element palette, layout canvas, property editor, and live preview. Standalone project GUIs (not tied to modules) with dedicated viewer window. Tree context-menu creation ("Create new GUI") and editing ("Edit GUI").
 
 ### Cut (removed from roadmap)
 
@@ -35,23 +36,23 @@ The following planned features have been completed and are no longer tracked her
 ## 1) Modules System — Visual Manifest Editor
 
 ### Goal
-Complete the modules system with a visual editor for creating and editing `gui.json` + `pdv-module.json` files, so that module authors (physicists) never need to hand-write JSON.
+Complete the modules system with a visual editor for creating and editing `gui.json` files, so that module authors and project users never need to hand-write JSON.
 
 ### Already implemented
 - **GUI layout engine**: Container-based layout (`row`, `column`, `group`, `tabs`) is fully implemented via `ContainerRenderer`, `InputControl`, `ActionButton`. Module GUIs render in dedicated popup windows with full input/action/namelist support.
 - **Namelist editor widget**: Inline editing UI with typed field controls, collapsible groups, batch save, and tooltip hints extracted from source file comments. Supports Fortran and TOML formats with auto-detection.
 - **Dynamic namelist path binding**: `NamelistEditor` component accepts a `treePathInputId` prop; `ContainerRenderer` passes `tree_path_input` from gui.json layout nodes. Fully wired.
+- **Visual GUI editor**: Drag-and-drop WYSIWYG editor for `gui.json` manifests. Three-panel layout with element palette, layout canvas, and property editor. Side-by-side live preview using the existing `ContainerRenderer`. Supports all element types (containers: row, column, group, tabs; leaves: input, action, namelist). Extensible via element registry. Tooltips and validation warnings throughout. Resizable panels.
+- **Standalone project GUIs**: Users can create project-level GUIs via tree context menu ("Create new GUI") that are not tied to any module. These open in a dedicated viewer window with full input state and script execution support.
+- **GUI node lifecycle**: Right-click → "Open GUI" (double-click) opens the viewer, "Edit GUI" opens the editor. Works for both module GUIs and standalone GUIs.
 
 ### Remaining work
 
-#### Visual manifest editor
-A GUI tool for creating and editing module manifests (`pdv-module.json` + `gui.json`) without hand-writing JSON. This is the key UX improvement over OMFIT's Tkinter-based approach — module authors should be able to build module GUIs visually.
+#### Module manifest identity editor
+A form UI for editing `pdv-module.json` identity fields (id, name, version, description, compatibility, dependencies, scripts) is not yet implemented. Module authors must still hand-edit `pdv-module.json`. The GUI layout editor (`gui.json`) is complete; only the module identity/packaging side remains.
 
-- **Layout canvas**: Drag-and-drop placement of containers (row, column, group, tabs) and leaf nodes (input, action, namelist). WYSIWYG preview of the resulting module GUI.
-- **Input/action property editor**: Select a placed element and configure its properties (label, control type, default value, visibility rules, slider range, etc.) in a side panel.
-- **Manifest identity editor**: Form UI for module identity fields (id, name, version, description), compatibility constraints, dependencies, scripts listing, and files.
-- **Import/export**: Load an existing `gui.json` + `pdv-module.json` for editing; export to disk. Round-trip fidelity with hand-written manifests.
-- **Live preview**: Side-by-side rendered preview of the module GUI as the user edits the layout.
+#### Module creation workflow
+There is no way to create an empty module from within PDV and export it to `~/.PDV/modules/`. The GUI editor can create and edit `gui.json` files, but packaging a tree subtree into a distributable module (with `pdv-module.json`, scripts, and `gui.json`) requires a dedicated export flow. See GitHub issue #140.
 
 ---
 
@@ -327,7 +328,7 @@ GitHub Copilot is exposed to third-party editors through two mechanisms:
 
 # Known Design Tensions to Resolve
 
-These are architectural decisions in the current design that are correct for v0.0.6 but will create friction as the system grows. They should be resolved before or during the remaining Alpha Feature implementation.
+These are architectural decisions in the current design that are correct for v0.0.7 but will create friction as the system grows. They should be resolved before or during the remaining Alpha Feature implementation.
 
 ## Dot-delimited tree paths and key collision
 `PDVTree` supports dot-separated path notation (`pdv_tree['data.waveforms.ch1']`). Keys that themselves contain dots are ambiguous — `pdv_tree['my.key']` is indistinguishable from `pdv_tree['my']['key']`. This is acceptable for alpha (physics variable names rarely contain dots) but needs a resolution before community use. Options: escape sequences, a separate `pdv_tree.at('my.key')` method for literal keys, or abandoning dot notation in favour of `pdv_tree['my']['key']` exclusively.
@@ -355,9 +356,9 @@ The primary beta use case is a Julia module for a specific simulation code runni
 2. **Remote execution over SSH + job managers (item 3, beta1 scope)** — Builds on Julia. SSH connection management, file upload/download, SLURM/task-spooler integration. The target workflow: configure simulation in GUI, submit to cluster, collect results into tree.
 3. **Kernel reconnect / remote session persistence (item 4)** — Capstone. Remote kernel outlives SSH connection. PDV reconnects, queries kernel state, rebuilds tree and GUI. Hardest piece — touches kernel lifecycle, comm protocol, and renderer state reconstruction.
 
-### Track B: Visual manifest editor (parallel)
+### Track B: Visual manifest editor (complete)
 
-4. **Visual manifest editor (item 1)** — Purely renderer-side, no kernel/protocol changes. Can be built in parallel with Track A. Benefits from having a working Julia module to dog-food against.
+4. ~~**Visual manifest editor (item 1)**~~ ✅ — GUI editor and standalone GUI viewer implemented. Remaining work (module identity editor, module creation/export workflow) tracked in item 1 above.
 
 ## Beta Features → 1.0.0
 
@@ -387,7 +388,7 @@ PDV is ready to ship 0.1.0-beta1 when all of the following are true:
 - ~~Code cell state is project-managed and recoverable~~ ✅
 - ~~Kernel-backed autocompletion works in the code cell for Python~~ ✅
 - ~~Modules are installable and runnable via manifest-driven UI actions~~ ✅
-- ~~Module GUI supports relative layout~~ ✅ — and a visual manifest editor is available
+- ~~Module GUI supports relative layout~~ ✅ — ~~and a visual manifest editor is available~~ ✅
 - ~~Markdown notes are first-class tree nodes with KaTeX math support~~ ✅
 - Remote executable execution and job manager support (SLURM, task-spooler) are production-usable
 - Kernel reconnect works on renderer reload and is designed with remote abstraction

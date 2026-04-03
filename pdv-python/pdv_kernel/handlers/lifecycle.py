@@ -13,6 +13,8 @@ ARCHITECTURE.md §4.1 (startup sequence), §3.4 (lifecycle messages)
 
 from __future__ import annotations
 
+import os
+
 from pdv_kernel.handlers import register
 
 
@@ -73,6 +75,20 @@ def handle_init(msg: dict) -> None:
     if tree is not None:
         tree._set_working_dir(validated)
 
+    # Start the query server if a query_port was provided.
+    query_port = payload.get("query_port")
+    if query_port is not None:
+        import pdv_kernel.comms as comms_mod  # noqa: PLC0415
+        from pdv_kernel.query_server import QueryServer  # noqa: PLC0415
+
+        # Stop any existing server (e.g. on kernel restart with new init).
+        if comms_mod._query_server is not None:
+            comms_mod._query_server.stop()
+        server = QueryServer(int(query_port))
+        server.start()
+        comms_mod._query_server = server
+
+    os.chdir(os.path.expanduser("~"))
     send_message("pdv.init.response", {}, in_reply_to=msg_id)
 
 

@@ -22,6 +22,7 @@ import * as os from "os";
 import * as path from "path";
 
 import { CommRouter } from "./comm-router";
+import { QueryRouter } from "./query-router";
 import { EnvironmentDetector } from "./environment-detector";
 import { buildEditorSpawn, resolveEditorSpawn } from "./editor-spawn";
 import { registerKernelIpcHandlers } from "./ipc-register-kernels";
@@ -35,8 +36,11 @@ import {
 import { ProjectManager, type ProjectModuleImport } from "./project-manager";
 import { ConfigStore } from "./config";
 import { registerAppStateIpcHandlers } from "./ipc-register-app-state";
+import { registerGuiEditorIpcHandlers } from "./ipc-register-gui-editor";
 import { registerModuleWindowIpcHandlers } from "./ipc-register-module-windows";
 import { registerTreeNamespaceScriptIpcHandlers } from "./ipc-register-tree-namespace-script";
+import { GuiEditorWindowManager } from "./gui-editor-window-manager";
+import { GuiViewerWindowManager } from "./gui-viewer-window-manager";
 import { ModuleWindowManager } from "./module-window-manager";
 import {
   IPC,
@@ -45,7 +49,12 @@ import {
   NamespaceQueryOptions,
   PDVConfig,
 } from "./ipc";
-import { PDVMessage, PDVMessageType } from "./pdv-protocol";
+import { PDVMessage, PDVMessageType, setAppVersion } from "./pdv-protocol";
+
+// ---------------------------------------------------------------------------
+// Unified version — set once before any handler uses getAppVersion()
+// ---------------------------------------------------------------------------
+setAppVersion(app.getVersion());
 
 // ---------------------------------------------------------------------------
 // Internal state
@@ -94,6 +103,7 @@ const REGISTERED_CHANNELS: readonly string[] = [
   IPC.project.load,
   IPC.project.new,
   IPC.project.peekLanguages,
+  IPC.project.peekManifest,
   IPC.config.get,
   IPC.config.set,
   IPC.themes.get,
@@ -113,10 +123,20 @@ const REGISTERED_CHANNELS: readonly string[] = [
   IPC.moduleWindows.close,
   IPC.moduleWindows.context,
   IPC.moduleWindows.executeInMain,
+  IPC.guiEditor.open,
+  IPC.guiEditor.openViewer,
+  IPC.guiEditor.context,
+  IPC.guiEditor.read,
+  IPC.guiEditor.save,
+  IPC.tree.createGui,
   IPC.files.pickExecutable,
   IPC.files.pickFile,
   IPC.files.pickDirectory,
   IPC.about.getVersion,
+  IPC.environment.list,
+  IPC.environment.check,
+  IPC.environment.install,
+  IPC.environment.refresh,
 ];
 
 interface PushSubscription {
@@ -309,6 +329,7 @@ export function registerIpcHandlers(
   win: BrowserWindow,
   kernelManager: KernelManager,
   commRouter: CommRouter,
+  queryRouter: QueryRouter,
   projectManager: ProjectManager,
   configStore: ConfigStore,
   pdvDir: string
@@ -397,11 +418,14 @@ export function registerIpcHandlers(
 
   const preloadPath = path.join(__dirname, "..", "preload.js");
   const moduleWindowManager = new ModuleWindowManager(win, preloadPath);
+  const guiEditorWindowManager = new GuiEditorWindowManager(win, preloadPath);
+  const guiViewerWindowManager = new GuiViewerWindowManager(win, preloadPath);
 
   registerKernelIpcHandlers({
     win,
     kernelManager,
     commRouter,
+    queryRouter,
     projectManager,
     moduleManager,
     kernelWorkingDirs,
@@ -412,12 +436,16 @@ export function registerIpcHandlers(
       pendingModuleSettings = {};
       moduleHealthWarningsByAlias.clear();
       moduleWindowManager.closeAll();
+      guiEditorWindowManager.closeAll();
+      guiViewerWindowManager.closeAll();
     },
     resetKernelState: () => {
       pendingModuleImports = [];
       pendingModuleSettings = {};
       moduleHealthWarningsByAlias.clear();
       moduleWindowManager.closeAll();
+      guiEditorWindowManager.closeAll();
+      guiViewerWindowManager.closeAll();
     },
     setActiveKernelId: (id) => { activeKernelId = id; },
     getActiveKernelId: () => activeKernelId,
@@ -428,6 +456,7 @@ export function registerIpcHandlers(
   registerTreeNamespaceScriptIpcHandlers({
     kernelManager,
     commRouter,
+    queryRouter,
     projectManager,
     configStore,
     kernelWorkingDirs,
@@ -478,6 +507,13 @@ export function registerIpcHandlers(
     refreshProjectModuleHealth,
     runSerializedProjectManifestMutation,
     getMainWindow: () => win,
+    getInterpreterPath: () => {
+      const config = readConfig(configStore);
+      const lang = activeKernelId
+        ? (kernelManager.getKernel(activeKernelId)?.language ?? "python")
+        : "python";
+      return lang === "julia" ? config.juliaPath : config.pythonPath;
+    },
   });
 
   registerAppStateIpcHandlers({
@@ -494,7 +530,15 @@ export function registerIpcHandlers(
     mainWindow: win,
   });
 
-  registerPushForwarding(win, commRouter, moduleWindowManager);
+  registerGuiEditorIpcHandlers({
+    guiEditorWindowManager,
+    guiViewerWindowManager,
+    commRouter,
+  });
+
+  registerEnvironmentIpcHandlers(win, configStore);
+
+  registerPushForwarding(win, commRouter, moduleWindowManager, guiEditorWindowManager, guiViewerWindowManager);
 
   /**
    * Reset all in-session state. Called whenever the renderer reloads so that
@@ -508,9 +552,38 @@ export function registerIpcHandlers(
     pendingModuleSettings = {};
     moduleHealthWarningsByAlias.clear();
     moduleWindowManager.closeAll();
+    guiEditorWindowManager.closeAll();
+    guiViewerWindowManager.closeAll();
   }
 
   return resetSessionState;
+}
+
+/**
+ * Register IPC handlers for Python environment discovery and installation.
+ *
+ * @param win - Main BrowserWindow for streaming install output.
+ */
+function registerEnvironmentIpcHandlers(win: BrowserWindow, configStore: ConfigStore): void {
+
+  ipcMain.handle(IPC.environment.list, async () => {
+    const config = configStore.getAll();
+    return EnvironmentDetector.listEnvironmentInfo(config.pythonPath);
+  });
+
+  ipcMain.handle(IPC.environment.check, async (_event, pythonPath: string) => {
+    return EnvironmentDetector.checkEnvironment(pythonPath);
+  });
+
+  ipcMain.handle(IPC.environment.install, async (_event, pythonPath: string) => {
+    return EnvironmentDetector.installPDVFromBundle(pythonPath, win, IPC.push.installOutput);
+  });
+
+  ipcMain.handle(IPC.environment.refresh, async () => {
+    EnvironmentDetector.clearCache();
+    const config = configStore.getAll();
+    return EnvironmentDetector.listEnvironmentInfo(config.pythonPath);
+  });
 }
 
 /**
@@ -523,13 +596,17 @@ export function registerIpcHandlers(
 export function registerPushForwarding(
   win: BrowserWindow,
   commRouter: CommRouter,
-  moduleWindowManager?: ModuleWindowManager
+  moduleWindowManager?: ModuleWindowManager,
+  guiEditorWindowManager?: GuiEditorWindowManager,
+  guiViewerWindowManager?: GuiViewerWindowManager
 ): void {
   const subscribe = (type: string, channel: string, broadcast?: boolean): void => {
     const handler = (message: PDVMessage): void => {
       win.webContents.send(channel, message.payload);
-      if (broadcast && moduleWindowManager) {
-        moduleWindowManager.broadcastToAll(channel, message.payload);
+      if (broadcast) {
+        moduleWindowManager?.broadcastToAll(channel, message.payload);
+        guiEditorWindowManager?.broadcastToAll(channel, message.payload);
+        guiViewerWindowManager?.broadcastToAll(channel, message.payload);
       }
     };
     commRouter.onPush(type, handler);

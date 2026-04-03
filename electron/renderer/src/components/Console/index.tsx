@@ -79,7 +79,7 @@ const LogEntryView: React.FC<{ log: LogEntry; index: number }> = ({ log, index }
         {sourceText && <span className="log-source">{sourceText}</span>}
       </div>
 
-      <pre className="log-code">{log.code}</pre>
+      {log.code && <pre className="log-code">{log.code}</pre>}
 
       {log.stdout && (
         <pre

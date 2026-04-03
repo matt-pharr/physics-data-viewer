@@ -12,8 +12,9 @@
  */
 
 import { CommRouter } from "./comm-router";
+import { QueryRouter } from "./query-router";
 import { KernelManager } from "./kernel-manager";
-import { PDVMessageType, PDV_PROTOCOL_VERSION } from "./pdv-protocol";
+import { PDVMessageType, getAppVersion } from "./pdv-protocol";
 import { ProjectManager } from "./project-manager";
 
 const PYTHON_BOOTSTRAP = `
@@ -88,6 +89,7 @@ async function waitForPush(
 export async function initializeKernelSession(
   kernelManager: KernelManager,
   commRouter: CommRouter,
+  queryRouter: QueryRouter,
   projectManager: ProjectManager,
   kernelId: string,
   kernelWorkingDirs: Map<string, string>
@@ -112,7 +114,9 @@ export async function initializeKernelSession(
   const workingDir = await projectManager.createWorkingDir();
   await commRouter.request(PDVMessageType.INIT, {
     working_dir: workingDir,
-    pdv_version: PDV_PROTOCOL_VERSION,
+    pdv_version: getAppVersion(),
+    query_port: kernelManager.getQueryPort(kernelId),
   });
+  queryRouter.attach(kernelManager, kernelId);
   kernelWorkingDirs.set(kernelId, workingDir);
 }

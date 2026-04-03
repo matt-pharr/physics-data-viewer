@@ -205,7 +205,7 @@ export interface CodeCellData {
 /** File-menu action event payload emitted by `menu.onAction`. */
 export interface MenuActionPayload {
   /** Discriminated menu action identifier. */
-  action: "project:open" | "project:openRecent" | "project:save" | "project:saveAs" | "modules:import";
+  action: "project:open" | "project:openRecent" | "project:save" | "project:saveAs" | "modules:import" | "settings:open";
   /** Optional path argument for path-bearing menu actions. */
   path?: string;
 }
@@ -219,7 +219,7 @@ export interface MenuEnabledState {
 
 /** Top-level menu metadata used by the Linux integrated menubar. */
 export interface AppMenuTopLevel {
-  id: "file" | "edit" | "view" | "window";
+  id: "file" | "edit" | "view" | "window" | "help";
   label: string;
 }
 
@@ -262,6 +262,18 @@ export interface ProjectLoadResult {
   checksumValid: boolean | null;
   /** Number of tree nodes loaded. */
   nodeCount: number | null;
+  /** PDV version stored in the project manifest, or null if absent. */
+  savedPdvVersion: string | null;
+}
+
+/** Lightweight manifest peek returned before kernel start. */
+export interface ProjectManifestPeek {
+  /** Kernel language used by this project. */
+  language: "python" | "julia";
+  /** Interpreter path saved with the project, if any. */
+  interpreterPath?: string;
+  /** PDV version the project was saved with. */
+  pdvVersion?: string;
 }
 
 /** Persisted user configuration payload returned by `config.get`. */
@@ -303,8 +315,9 @@ export interface Config {
   settings?: {
     /** Keyboard shortcut overrides. */
     shortcuts?: {
-      openSettings?: string;
       execute?: string;
+      newTab?: string;
+      closeTab?: string;
       treeCopyPath?: string;
       treeEditScript?: string;
       treePrint?: string;
@@ -533,6 +546,67 @@ export interface ModuleGuiLayout {
   layout: LayoutContainer;
 }
 
+/** Action descriptor as stored on disk in gui.json. */
+export interface GuiActionDescriptor {
+  id: string;
+  label: string;
+  script_path: string;
+  inputs?: string[];
+}
+
+/** Complete GUI manifest as stored in .gui.json files. */
+export interface GuiManifestV1 {
+  has_gui: boolean;
+  gui?: ModuleGuiLayout;
+  inputs: ModuleInputDescriptor[];
+  actions: GuiActionDescriptor[];
+}
+
+/** Request payload for opening a GUI editor window. */
+export interface GuiEditorOpenRequest {
+  treePath: string;
+  kernelId: string;
+}
+
+/** Result payload for `guiEditor.open`. */
+export interface GuiEditorOpenResult {
+  success: boolean;
+  error?: string;
+}
+
+/** Context payload identifying a GUI editor window. */
+export interface GuiEditorContext {
+  treePath: string;
+  kernelId: string;
+}
+
+/** Result payload for `guiEditor.read`. */
+export interface GuiEditorReadResult {
+  success: boolean;
+  manifest?: GuiManifestV1;
+  error?: string;
+}
+
+/** Request payload for `guiEditor.save`. */
+export interface GuiEditorSaveRequest {
+  treePath: string;
+  manifest: GuiManifestV1;
+}
+
+/** Result payload for `guiEditor.save`. */
+export interface GuiEditorSaveResult {
+  success: boolean;
+  error?: string;
+}
+
+/** Result returned by `tree.createGui`. */
+export interface TreeCreateGuiResult {
+  success: boolean;
+  error?: string;
+  guiPath?: string;
+  treePath?: string;
+}
+
 /** Project-scoped imported module descriptor. */
 export interface ImportedModuleDescriptor {
   moduleId: string;
@@ -582,6 +656,31 @@ export interface ModuleActionResult {
   error?: string;
 }
 
+/** Enriched environment descriptor with package installation status. */
+export interface EnvironmentInfo {
+  kind: "conda" | "venv" | "pyenv" | "system" | "configured";
+  pythonPath: string;
+  label: string;
+  pythonVersion: string;
+  pdvInstalled: boolean;
+  pdvVersion: string | null;
+  pdvCompatible: boolean;
+  pdvVersionMismatch: boolean;
+  ipykernelInstalled: boolean;
+}
+
+/** Result of a streaming pip install operation. */
+export interface EnvironmentInstallResult {
+  success: boolean;
+  output: string;
+}
+
+/** A single streaming output chunk from a pip install operation. */
+export interface InstallOutputChunk {
+  stream: "stdout" | "stderr";
+  data: string;
+}
+
 /** Complete preload API contract exposed as `window.pdv`. */
 export interface PDVApi {
   kernels: {
@@ -626,6 +725,11 @@ export interface PDVApi {
       targetPath: string,
       noteName: string
     ): Promise<{ success: boolean; error?: string; notePath?: string; treePath?: string }>;
+    createGui(
+      kernelId: string,
+      targetPath: string,
+      guiName: string
+    ): Promise<TreeCreateGuiResult>;
     addFile(
       kernelId: string,
       sourcePath: string,
@@ -658,6 +762,13 @@ export interface PDVApi {
     read(kernelId: string, treePath: string): Promise<NamelistReadResult>;
     write(kernelId: string, treePath: string, data: Record<string, Record<string, unknown>>): Promise<NamelistWriteResult>;
   };
+  environment: {
+    list(): Promise<EnvironmentInfo[]>;
+    check(pythonPath: string): Promise<EnvironmentInfo | null>;
+    install(pythonPath: string): Promise<EnvironmentInstallResult>;
+    refresh(): Promise<EnvironmentInfo[]>;
+    onInstallOutput(callback: (chunk: InstallOutputChunk) => void): () => void;
+  };
   modules: {
     listInstalled(): Promise<ModuleDescriptor[]>;
     install(request: ModuleInstallRequest): Promise<ModuleInstallResult>;
@@ -673,6 +784,7 @@ export interface PDVApi {
     load(saveDir: string): Promise<ProjectLoadResult>;
     new(): Promise<boolean>;
     peekLanguages(paths: string[]): Promise<Record<string, "python" | "julia">>;
+    peekManifest(dir: string): Promise<ProjectManifestPeek>;
     onLoaded(callback: (payload: Record<string, unknown>) => void): () => void;
     onReloading(callback: (payload: { status: "reloading" | "ready" }) => void): () => void;
   };
@@ -701,6 +813,13 @@ export interface PDVApi {
     context(): Promise<ModuleWindowContext | null>;
     executeInMain(code: string): Promise<void>;
     onExecuteRequest(callback: (code: string) => void): () => void;
+  };
+  guiEditor: {
+    open(request: GuiEditorOpenRequest): Promise<GuiEditorOpenResult>;
+    openViewer(request: GuiEditorOpenRequest): Promise<GuiEditorOpenResult>;
+    context(): Promise<GuiEditorContext | null>;
+    read(treePath: string): Promise<GuiEditorReadResult>;
+    save(request: GuiEditorSaveRequest): Promise<GuiEditorSaveResult>;
   };
   files: {
     pickExecutable(): Promise<string | null>;

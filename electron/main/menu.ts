@@ -13,7 +13,7 @@
  * ipc.ts — menu action payload types and push channel names
  */
 
-import { app, BrowserWindow, Menu, type MenuItemConstructorOptions } from "electron";
+import { app, BrowserWindow, Menu, shell, type MenuItemConstructorOptions } from "electron";
 
 import { type AppMenuTopLevel, IPC, type MenuActionPayload, type MenuEnabledState } from "./ipc";
 
@@ -45,6 +45,11 @@ function buildOpenRecentSubmenu(): MenuItemConstructorOptions[] {
 }
 
 // Build the full platform-aware application menu template.
+//
+// Menu accelerators are FIXED — they cannot be user-customized because Electron
+// cannot update native menu accelerators at runtime. User-customizable shortcuts
+// live in the renderer's shortcuts.ts and are handled by useKeyboardShortcuts.
+// See ARCHITECTURE.md for the full distinction.
 function buildTemplate(): MenuItemConstructorOptions[] {
   const template: MenuItemConstructorOptions[] = [];
   if (process.platform === "darwin") {
@@ -93,6 +98,13 @@ function buildTemplate(): MenuItemConstructorOptions[] {
           click: () => sendMenuAction({ action: "modules:import" }),
         },
         { type: "separator" },
+        {
+          id: "settings:open",
+          label: "Settings",
+          accelerator: "CmdOrCtrl+,",
+          click: () => sendMenuAction({ action: "settings:open" }),
+        },
+        { type: "separator" },
         process.platform === "darwin"
           ? { role: "close" as const, accelerator: "CmdOrCtrl+Shift+W" }
           : { role: "quit" as const, accelerator: "CmdOrCtrl+Shift+W" },
@@ -100,7 +112,27 @@ function buildTemplate(): MenuItemConstructorOptions[] {
     },
     { id: "edit", role: "editMenu" },
     { id: "view", role: "viewMenu" },
-    { id: "window", role: "windowMenu" }
+    { id: "window", role: "windowMenu" },
+    // TODO: Once versioned docs are published, replace "/dev/" with the
+    // correct version slug (e.g. "/v0.5.0/") derived from the app version.
+    {
+      id: "help",
+      label: "Help",
+      submenu: [
+        {
+          label: "Getting Started",
+          click: () => void shell.openExternal("https://matt-pharr.github.io/physics-data-viewer/dev/getting-started/"),
+        },
+        {
+          label: "User Guide",
+          click: () => void shell.openExternal("https://matt-pharr.github.io/physics-data-viewer/dev/user-guide/"),
+        },
+        {
+          label: "API Docs",
+          click: () => void shell.openExternal("https://matt-pharr.github.io/physics-data-viewer/dev/api-reference/"),
+        },
+      ],
+    }
   );
   return template;
 }
@@ -112,6 +144,7 @@ function buildTopLevelMenuModel(): AppMenuTopLevel[] {
     { id: "edit", label: "Edit" },
     { id: "view", label: "View" },
     { id: "window", label: "Window" },
+    { id: "help", label: "Help" },
   ];
 }
 

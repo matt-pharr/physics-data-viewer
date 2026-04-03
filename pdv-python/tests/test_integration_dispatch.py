@@ -92,14 +92,17 @@ class TestIntegrationDispatch:
         with patch.object(comms_mod, "_comm", mock_comm), patch.object(comms_mod, "_pdv_tree", tree):
             tree._attach_comm(lambda msg_type, payload: comms_mod.send_message(msg_type, payload))
             tree["probe"] = 1
+            tree._flush_changes()
             tree["probe"] = 2
+            tree._flush_changes()
             del tree["probe"]
+            tree._flush_changes()
 
         changed_pushes = [env for env in mock_comm._sent if env.get("type") == "pdv.tree.changed"]
         assert len(changed_pushes) >= 3
-        assert changed_pushes[1]["payload"]["change_type"] == "updated"
-        assert changed_pushes[2]["payload"]["change_type"] == "removed"
-        assert changed_pushes[2]["payload"]["changed_paths"] == ["probe"]
+        # Each flush produces a batch notification; check the paths are correct.
+        assert "probe" in changed_pushes[0]["payload"]["changed_paths"]
+        assert "probe" in changed_pushes[2]["payload"]["changed_paths"]
 
     def test_project_save_load_roundtrip_with_multiple_node_types(
         self, tmp_working_dir: str, tmp_save_dir: str, tmp_path
@@ -185,6 +188,7 @@ class TestIntegrationDispatch:
                     },
                 )
             )
+            tree._flush_changes()
 
         response = _latest_by_type(mock_comm._sent, "pdv.script.register.response")
         assert response["status"] == "ok"

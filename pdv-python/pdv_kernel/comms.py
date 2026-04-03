@@ -23,12 +23,14 @@ ARCHITECTURE.md §5.3 (bootstrap)
 
 from __future__ import annotations
 
+import sys
+import threading
 import uuid
 from typing import Any, Callable
 
 from pdv_kernel.errors import PDVVersionError
 
-PDV_PROTOCOL_VERSION = "1.0"
+from pdv_kernel import __version__ as PDV_PROTOCOL_VERSION
 PDV_COMM_TARGET = "pdv.kernel"
 
 # The single global comm instance (set on bootstrap, None before that).
@@ -40,6 +42,13 @@ _bootstrapped: bool = False
 # Reference to the PDVTree and IPython shell (set by bootstrap).
 _pdv_tree: Any = None
 _ip: Any = None
+
+# Reference to the query server (set on init, None before that).
+_query_server: Any = None
+
+# Thread-local storage for the query thread's response sink.
+# When set, send_message() routes the envelope to the sink instead of the comm.
+_thread_local = threading.local()
 
 
 def send_message(
@@ -71,11 +80,6 @@ def send_message(
     RuntimeError
         If called before bootstrap (no comm is open).
     """
-    global _comm
-    if _comm is None:
-        raise RuntimeError(
-            "No PDV comm channel is open. Was bootstrap() called before send_message()?"
-        )
     envelope = {
         "pdv_version": PDV_PROTOCOL_VERSION,
         "msg_id": str(uuid.uuid4()),
@@ -84,6 +88,17 @@ def send_message(
         "status": status,
         "payload": payload,
     }
+    # If running on the query thread, route through the thread-local sink
+    # instead of the comm channel.
+    sink = getattr(_thread_local, "response_sink", None)
+    if sink is not None:
+        sink(envelope)
+        return
+    global _comm
+    if _comm is None:
+        raise RuntimeError(
+            "No PDV comm channel is open. Was bootstrap() called before send_message()?"
+        )
     _comm.send(data=envelope)
 
 
@@ -129,15 +144,28 @@ def check_version(msg: dict) -> None:
     ------
     PDVVersionError
         If the major version component of ``msg['pdv_version']`` differs
-        from :data:`PDV_PROTOCOL_VERSION`. See ARCHITECTURE.md §3.6.
+        from :data:`PDV_PROTOCOL_VERSION`. A minor/patch mismatch is
+        logged but tolerated. See ARCHITECTURE.md §3.6.
     """
     incoming = str(msg.get("pdv_version", ""))
-    expected_major = PDV_PROTOCOL_VERSION.split(".")[0]
-    incoming_major = incoming.split(".")[0] if incoming else ""
+    expected_parts = PDV_PROTOCOL_VERSION.split(".")
+    incoming_parts = incoming.split(".") if incoming else []
+    expected_major = expected_parts[0] if expected_parts else "0"
+    incoming_major = incoming_parts[0] if incoming_parts else ""
+    # During 0.x, major mismatch rejects; minor/patch mismatch warns.
+    # Post-1.0, consider relaxing to tolerate patch-level differences.
+    # NOTE: Same version policy is enforced in pdv-protocol.ts
+    # (checkVersionCompatibility) and environment-detector.ts (checkPDVInstalled).
     if incoming_major != expected_major:
         raise PDVVersionError(
-            f"Incompatible PDV protocol version: got '{incoming}', "
+            f"Incompatible PDV version: got '{incoming}', "
             f"expected major version '{expected_major}'"
+        )
+    if incoming != PDV_PROTOCOL_VERSION:
+        print(
+            f"[PDV] version mismatch: kernel={PDV_PROTOCOL_VERSION}, app={incoming}",
+            file=sys.stderr,
+            flush=True,
         )
 
 

@@ -215,7 +215,7 @@ class TestHandleProjectSave:
             handle_project_save(msg)
         response = mock_comm._sent[-1]
         assert 'checksum' in response['payload']
-        assert len(response['payload']['checksum']) == 64  # SHA-256 hex
+        assert len(response['payload']['checksum']) == 32  # XXH3-128 hex
 
     def test_save_load_roundtrip(self, tree_with_comm, tmp_save_dir):
         """Save then load produces an isomorphic tree."""

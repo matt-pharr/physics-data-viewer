@@ -6,6 +6,7 @@
   flex-direction: column;
   height: 100%;
   overflow: hidden;
+  user-select: none;
 }
 
 .tree-header {
@@ -44,7 +45,9 @@
 
 .tree-content {
   flex: 1;
-  overflow-y: auto;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
 }
 
 .tree-loading,

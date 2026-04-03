@@ -1,5 +1,5 @@
 import { useEffect, type Dispatch, type MutableRefObject, type SetStateAction } from 'react';
-import type { CellTab, LogEntry } from '../types';
+import type { CellTab, LogEntry, TreeChangeInfo } from '../types';
 import type { ProgressPayload } from '../types/pdv';
 
 /** Options for {@link useKernelSubscriptions}. Manages push-subscription lifecycle. */
@@ -14,7 +14,7 @@ interface UseKernelSubscriptionsOptions {
   setActiveCellTab: Dispatch<SetStateAction<number>>;
   /** Appends streamed execution output (stdout, stderr, images) to console logs. */
   setLogs: Dispatch<SetStateAction<LogEntry[]>>;
-  /** Bumps the token to trigger Tree panel refetch on tree.changed pushes. */
+  /** Bumps the token to trigger Tree panel full refetch (project load, reload, etc.). */
   setTreeRefreshToken: Dispatch<SetStateAction<number>>;
   /** Bumps the token to trigger ModulesPanel refetch on tree changes. */
   setModulesRefreshToken: Dispatch<SetStateAction<number>>;
@@ -24,6 +24,8 @@ interface UseKernelSubscriptionsOptions {
   setProgress: Dispatch<SetStateAction<ProgressPayload | null>>;
   /** Called when a kernel crash is detected via the push channel. */
   onKernelCrash: (kernelId: string) => void;
+  /** Called on incremental tree changes so the Tree can update selectively. */
+  onTreeChanged: (info: TreeChangeInfo) => void;
 }
 
 export function useKernelSubscriptions({
@@ -37,6 +39,7 @@ export function useKernelSubscriptions({
   setProjectReloading,
   setProgress,
   onKernelCrash,
+  onTreeChanged,
 }: UseKernelSubscriptionsOptions): void {
   useEffect(() => {
     const unsubscribe = window.pdv.kernels.onOutput((chunk) => {
@@ -60,7 +63,11 @@ export function useKernelSubscriptions({
     }
 
     const unsubscribeTree = window.pdv.tree.onChanged((payload) => {
-      setTreeRefreshToken((prev) => prev + 1);
+      // Notify Tree for selective (incremental) update instead of a full reload.
+      onTreeChanged({
+        changed_paths: payload.changed_paths,
+        change_type: payload.change_type,
+      });
       // Keep module controls that depend on tree-backed options in sync.
       setModulesRefreshToken((prev) => prev + 1);
       if (payload.change_type === "removed" && payload.changed_paths.length > 0) {
@@ -125,5 +132,6 @@ export function useKernelSubscriptions({
     setProgress,
     setProjectReloading,
     setTreeRefreshToken,
+    onTreeChanged,
   ]);
 }

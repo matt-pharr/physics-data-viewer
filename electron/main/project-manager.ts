@@ -25,7 +25,7 @@
  */
 
 import { CommRouter } from "./comm-router";
-import { PDVMessageType, PDV_PROTOCOL_VERSION } from "./pdv-protocol";
+import { PDVMessageType, getAppVersion, type PDVProjectLoadResponsePayload } from "./pdv-protocol";
 import * as fs from "fs/promises";
 import * as path from "path";
 import * as os from "os";
@@ -63,11 +63,15 @@ export interface ProjectManifest {
   saved_at: string;
   /** PDV protocol version used when saving. */
   pdv_version: string;
-  /** SHA-256 checksum of tree-index.json. */
+  /** XXH3-128 content-based checksum of the tree. */
   tree_checksum: string;
   /** Kernel language used by this project ("python" or "julia"). */
   language: "python" | "julia";
-  /** Absolute path to the interpreter executable used when last saved. */
+  /**
+   * Absolute path to the interpreter executable used when last saved.
+   * Populated at save time so that re-opening the project can pre-select
+   * the same environment without requiring the user to reconfigure.
+   */
   interpreter_path?: string;
   /** Imported modules active in this project. */
   modules: ProjectModuleImport[];
@@ -79,15 +83,17 @@ export interface ProjectManifest {
 const SCHEMA_VERSION = "1.1";
 
 /** Default manifest returned when project.json is missing (ARCHITECTURE.md §8). */
-const DEFAULT_MANIFEST: ProjectManifest = {
-  schema_version: SCHEMA_VERSION,
-  saved_at: new Date(0).toISOString(),
-  pdv_version: PDV_PROTOCOL_VERSION,
-  tree_checksum: "",
-  language: "python",
-  modules: [],
-  module_settings: {},
-};
+function defaultManifest(): ProjectManifest {
+  return {
+    schema_version: SCHEMA_VERSION,
+    saved_at: new Date(0).toISOString(),
+    pdv_version: getAppVersion(),
+    tree_checksum: "",
+    language: "python",
+    modules: [],
+    module_settings: {},
+  };
+}
 
 // ---------------------------------------------------------------------------
 // Error classes
@@ -202,7 +208,7 @@ export class ProjectManager {
     const manifest: ProjectManifest = {
       schema_version: SCHEMA_VERSION,
       saved_at: new Date().toISOString(),
-      pdv_version: PDV_PROTOCOL_VERSION,
+      pdv_version: getAppVersion(),
       tree_checksum: checksum,
       language: options?.language ?? "python",
       interpreter_path: options?.interpreterPath,
@@ -230,10 +236,10 @@ export class ProjectManager {
    * before calling this method, and for running module setup after.
    *
    * @param saveDir - Absolute path to the project directory.
-   * @returns The code-cell state read from ``code-cells.json``.
+   * @returns The code-cell state and post-load checksum from the kernel.
    * @throws {PDVCommError} When the kernel responds with status='error'.
    */
-  async load(saveDir: string): Promise<unknown> {
+  async load(saveDir: string): Promise<{ codeCells: unknown; postLoadChecksum: string | null }> {
     // Step 1 — register the push handler BEFORE sending the request so the
     // notification is never missed even if the kernel responds very quickly.
     const pushPromise = new Promise<void>((resolve) => {
@@ -247,15 +253,19 @@ export class ProjectManager {
     // Step 2 — send pdv.project.load comm.
     // The request resolves when the kernel sends pdv.project.load.response.
     // Use progress pushes as keep-alive to prevent timeout during large loads.
-    await this.commRouter.request(PDVMessageType.PROJECT_LOAD, {
+    const response = await this.commRouter.request(PDVMessageType.PROJECT_LOAD, {
       save_dir: saveDir,
     }, { keepAlivePushType: PDVMessageType.PROGRESS });
+
+    const loadPayload = response.payload as unknown as PDVProjectLoadResponsePayload;
+    const postLoadChecksum = loadPayload?.post_load_checksum ?? null;
 
     // Step 3 — wait for the pdv.project.loaded push notification.
     await pushPromise;
 
     // Step 4 — read code-cells.json.
-    return _readCodeCells(saveDir);
+    const codeCells = await _readCodeCells(saveDir);
+    return { codeCells, postLoadChecksum };
   }
 
   /**
@@ -263,7 +273,7 @@ export class ProjectManager {
    *
    * Does NOT send any comm messages or interact with the kernel.
    *
-   * - If ``project.json`` is absent, returns {@link DEFAULT_MANIFEST} (no throw).
+   * - If ``project.json`` is absent, returns a default manifest (no throw).
    * - If the schema major version is greater than this app supports, throws
    *   {@link PDVSchemaVersionError}.
    *
@@ -280,7 +290,7 @@ export class ProjectManager {
     } catch (err) {
       const e = err as NodeJS.ErrnoException;
       if (e.code === "ENOENT") {
-        return { ...DEFAULT_MANIFEST };
+        return { ...defaultManifest() };
       }
       throw err;
     }
@@ -304,8 +314,8 @@ export class ProjectManager {
 
     return {
       schema_version: schemaVersion,
-      saved_at: String(obj.saved_at ?? DEFAULT_MANIFEST.saved_at),
-      pdv_version: String(obj.pdv_version ?? DEFAULT_MANIFEST.pdv_version),
+      saved_at: String(obj.saved_at ?? new Date(0).toISOString()),
+      pdv_version: String(obj.pdv_version ?? getAppVersion()),
       tree_checksum: String(obj.tree_checksum ?? ""),
       language,
       interpreter_path: interpreterPath,

@@ -17,8 +17,9 @@ import * as fs from "fs/promises";
 import * as path from "path";
 
 import type { CommRouter } from "./comm-router";
+import type { QueryRouter } from "./query-router";
 import type { ConfigStore, PDVConfig } from "./config";
-import { IPC, type HandlerInvokeResult, type NamelistReadResult, type NamelistWriteResult, type NamespaceInspectResult, type NamespaceInspectTarget, type NamespaceInspectorNode, type NamespaceQueryOptions, type NamespaceVariable, type ScriptParameter, type ScriptRunRequest, type ScriptRunResult, type TreeAddFileResult, type TreeCreateNoteResult, type TreeCreateScriptResult } from "./ipc";
+import { IPC, type HandlerInvokeResult, type NamelistReadResult, type NamelistWriteResult, type NamespaceInspectResult, type NamespaceInspectTarget, type NamespaceInspectorNode, type NamespaceQueryOptions, type NamespaceVariable, type ScriptParameter, type ScriptRunRequest, type ScriptRunResult, type TreeAddFileResult, type TreeCreateGuiResult, type TreeCreateNoteResult, type TreeCreateScriptResult } from "./ipc";
 import type { KernelManager } from "./kernel-manager";
 import { PDVMessageType, type PDVFileRegisterPayload } from "./pdv-protocol";
 import type { ProjectManager } from "./project-manager";
@@ -26,6 +27,7 @@ import type { ProjectManager } from "./project-manager";
 interface RegisterTreeNamespaceScriptIpcHandlersOptions {
   kernelManager: KernelManager;
   commRouter: CommRouter;
+  queryRouter: QueryRouter;
   projectManager: ProjectManager;
   configStore: ConfigStore;
   kernelWorkingDirs: Map<string, string>;
@@ -168,6 +170,7 @@ export function registerTreeNamespaceScriptIpcHandlers(
   const {
     kernelManager,
     commRouter,
+    queryRouter,
     projectManager,
     configStore,
     kernelWorkingDirs,
@@ -181,11 +184,23 @@ export function registerTreeNamespaceScriptIpcHandlers(
     resolveEditorSpawn,
   } = options;
 
+  /** Try query socket first (works during execution); fall back to comm. */
+  const queryRequest = async (type: string, payload: Record<string, unknown>) => {
+    if (queryRouter.isAttached()) {
+      try {
+        return await queryRouter.request(type, payload);
+      } catch {
+        // Fall through to comm router.
+      }
+    }
+    return await commRouter.request(type, payload);
+  };
+
   ipcMain.handle(IPC.tree.list, async (_event, kernelId: string, nodePath = "") => {
     if (!kernelManager.getKernel(kernelId)) {
       return [];
     }
-    const response = await commRouter.request(PDVMessageType.TREE_LIST, {
+    const response = await queryRequest(PDVMessageType.TREE_LIST, {
       path: nodePath,
     });
     const nodes = (response.payload as { nodes?: unknown }).nodes;
@@ -196,7 +211,7 @@ export function registerTreeNamespaceScriptIpcHandlers(
     if (!kernelManager.getKernel(kernelId)) {
       throw new Error(`Kernel not found: ${kernelId}`);
     }
-    const response = await commRouter.request(PDVMessageType.TREE_GET, {
+    const response = await queryRequest(PDVMessageType.TREE_GET, {
       path: nodePath,
     });
     return response.payload;
@@ -276,6 +291,55 @@ export function registerTreeNamespaceScriptIpcHandlers(
   );
 
   ipcMain.handle(
+    IPC.tree.createGui,
+    async (
+      _event,
+      kernelId: string,
+      targetPath: string,
+      guiName: string
+    ): Promise<TreeCreateGuiResult> => {
+      if (!kernelManager.getKernel(kernelId)) {
+        throw new Error(`Kernel not found: ${kernelId}`);
+      }
+      let workingDir = kernelWorkingDirs.get(kernelId);
+      if (!workingDir) {
+        workingDir = await projectManager.createWorkingDir();
+        kernelWorkingDirs.set(kernelId, workingDir);
+      }
+      const safeName = guiName.trim().replace(/\s+/g, "_").replace(/[^a-zA-Z0-9_-]/g, "");
+      if (!safeName) {
+        return { success: false, error: "GUI name must contain at least one alphanumeric character" };
+      }
+      const guiDir = path.join(workingDir, "tree", ...targetPath.split(".").filter(Boolean));
+      await fs.mkdir(guiDir, { recursive: true });
+      const guiPath = path.join(guiDir, safeName + ".gui.json");
+
+      const defaultManifest = {
+        has_gui: true,
+        gui: { layout: { type: "column", children: [] } },
+        inputs: [],
+        actions: [],
+      };
+
+      // Create the .gui.json file if it doesn't exist
+      try {
+        await fs.access(guiPath);
+      } catch {
+        await fs.writeFile(guiPath, JSON.stringify(defaultManifest, null, 2) + "\n", "utf-8");
+      }
+
+      const treePath = targetPath ? `${targetPath}.${safeName}` : safeName;
+      await commRouter.request(PDVMessageType.GUI_REGISTER, {
+        parent_path: targetPath,
+        name: safeName,
+        relative_path: guiPath,
+        module_id: null,
+      });
+      return { success: true, guiPath, treePath };
+    }
+  );
+
+  ipcMain.handle(
     IPC.tree.addFile,
     async (
       _event,
@@ -315,7 +379,7 @@ export function registerTreeNamespaceScriptIpcHandlers(
       if (!kernelManager.getKernel(kernelId)) {
         return [];
       }
-      const response = await commRouter.request(
+      const response = await queryRequest(
         PDVMessageType.NAMESPACE_QUERY,
         toNamespaceQueryPayload(options)
       );
@@ -355,7 +419,7 @@ export function registerTreeNamespaceScriptIpcHandlers(
       if (!kernelManager.getKernel(kernelId)) {
         return { children: [], truncated: false };
       }
-      const response = await commRouter.request(
+      const response = await queryRequest(
         PDVMessageType.NAMESPACE_INSPECT,
         toNamespaceInspectPayload(target)
       );
@@ -408,7 +472,7 @@ export function registerTreeNamespaceScriptIpcHandlers(
     // tree-path-to-filesystem derivation for plain scripts.
     let resolvedPath: string | undefined;
     try {
-      const response = await commRouter.request(
+      const response = await queryRequest(
         PDVMessageType.TREE_RESOLVE_FILE,
         { path: scriptPath }
       );
@@ -429,9 +493,20 @@ export function registerTreeNamespaceScriptIpcHandlers(
     const cmdString = isJulia ? config.juliaEditorCmd : config.pythonEditorCmd;
     const { file, args } = buildEditorSpawn(cmdString, resolvedPath);
     const spawnSpec = resolveEditorSpawn(file, args);
-    const child = spawn(spawnSpec.file, spawnSpec.args, { detached: true, stdio: "ignore" });
-    child.unref();
-    return { success: true };
+    try {
+      const child = spawn(spawnSpec.file, spawnSpec.args, { detached: true, stdio: "ignore" });
+      child.on("error", (err) => {
+        const msg = err && (err as NodeJS.ErrnoException).code === "ENOENT"
+          ? `Editor command not found: "${spawnSpec.file}". Configure your editor in Settings → General.`
+          : `Failed to launch editor: ${err.message}`;
+        console.error("[pdv] editor spawn error:", msg);
+      });
+      child.unref();
+      return { success: true };
+    } catch (err) {
+      const error = err instanceof Error ? err.message : String(err);
+      return { success: false, error: `Failed to launch editor: ${error}` };
+    }
   });
 
   ipcMain.handle(

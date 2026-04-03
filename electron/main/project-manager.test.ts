@@ -27,7 +27,7 @@ import * as path from "path";
 import type { CommRouter } from "./comm-router";
 import { PDVCommError } from "./comm-router";
 import { ProjectManager, PDVSchemaVersionError } from "./project-manager";
-import { PDVMessageType, PDV_PROTOCOL_VERSION } from "./pdv-protocol";
+import { PDVMessageType, getAppVersion, setAppVersion } from "./pdv-protocol";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -41,7 +41,7 @@ import { PDVMessageType, PDV_PROTOCOL_VERSION } from "./pdv-protocol";
  */
 function makeOkResponse(payload: Record<string, unknown> = {}) {
   return {
-    pdv_version: PDV_PROTOCOL_VERSION,
+    pdv_version: getAppVersion(),
     msg_id: "resp-1",
     in_reply_to: "req-1",
     type: "response",
@@ -59,7 +59,7 @@ function makeOkResponse(payload: Record<string, unknown> = {}) {
  */
 function makeCommError(code = "save.failed", message = "kernel error") {
   const errResponse = {
-    pdv_version: PDV_PROTOCOL_VERSION,
+    pdv_version: getAppVersion(),
     msg_id: "resp-err",
     in_reply_to: "req-1",
     type: "error",
@@ -118,6 +118,7 @@ describe("ProjectManager", () => {
   let tmpDir: string;
 
   beforeEach(async () => {
+    setAppVersion("0.0.7");
     tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "pdv-pm-test-"));
   });
 
@@ -293,7 +294,7 @@ describe("ProjectManager", () => {
       triggerPush(PDVMessageType.PROJECT_LOADED);
       const result = await loadPromise;
 
-      expect(result).toEqual(boxes);
+      expect(result.codeCells).toEqual(boxes);
     });
   });
 
@@ -306,7 +307,7 @@ describe("ProjectManager", () => {
       const manifest = {
         schema_version: "1.0",
         saved_at: "2026-01-01T00:00:00.000Z",
-        pdv_version: PDV_PROTOCOL_VERSION,
+        pdv_version: getAppVersion(),
         tree_checksum: "abc",
       };
       await fs.writeFile(
@@ -326,7 +327,7 @@ describe("ProjectManager", () => {
       const manifest = {
         schema_version: "1.1",
         saved_at: "2026-01-01T00:00:00.000Z",
-        pdv_version: PDV_PROTOCOL_VERSION,
+        pdv_version: getAppVersion(),
         tree_checksum: "abc",
         modules: [
           {
@@ -376,7 +377,7 @@ describe("ProjectManager", () => {
       const manifest = {
         schema_version: "99.0",
         saved_at: "2099-01-01T00:00:00.000Z",
-        pdv_version: PDV_PROTOCOL_VERSION,
+        pdv_version: getAppVersion(),
         tree_checksum: "",
       };
       await fs.writeFile(

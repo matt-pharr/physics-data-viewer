@@ -7,12 +7,15 @@ export default defineConfig({
   server: {
     port: 5173,
   },
+  base: './',
   build: {
     outDir: 'dist',
     rollupOptions: {
       input: {
         main: resolve(__dirname, 'index.html'),
         moduleWindow: resolve(__dirname, 'module-window.html'),
+        guiEditor: resolve(__dirname, 'gui-editor.html'),
+        guiViewer: resolve(__dirname, 'gui-viewer.html'),
       },
     },
   },

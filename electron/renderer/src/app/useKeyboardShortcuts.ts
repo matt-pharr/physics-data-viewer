@@ -19,10 +19,6 @@ interface UseKeyboardShortcutsOptions {
   setCellTabs: Dispatch<SetStateAction<CellTab[]>>;
   /** Setter for active tab (used by Cmd+Z undo and Cmd+1–9 navigation). */
   setActiveCellTab: Dispatch<SetStateAction<number>>;
-  /** Opens the SettingsDialog. */
-  setShowSettings: Dispatch<SetStateAction<boolean>>;
-  /** Controls which tab the SettingsDialog opens to. */
-  setSettingsInitialTab: Dispatch<SetStateAction<'general' | 'shortcuts' | 'appearance' | 'runtime' | 'about'>>;
   /** Toggles the left sidebar panel (Cmd+B). */
   toggleLeftSidebar: () => void;
   /** Toggles the code editor collapsed state (Cmd+J). */
@@ -53,8 +49,6 @@ export function useKeyboardShortcuts(options: UseKeyboardShortcutsOptions): void
     cellUndoStack,
     setCellTabs,
     setActiveCellTab,
-    setShowSettings,
-    setSettingsInitialTab,
     toggleLeftSidebar,
     toggleEditorCollapsed,
     setShowImportModule,
@@ -94,11 +88,6 @@ export function useKeyboardShortcuts(options: UseKeyboardShortcutsOptions): void
         return;
       }
 
-      if (matchesShortcut(event, shortcuts.openSettings)) {
-        event.preventDefault();
-        setSettingsInitialTab('general');
-        setShowSettings(true);
-      }
       if (matchesShortcut(event, shortcuts.newTab)) {
         event.preventDefault();
         addCellTabRef.current();
@@ -106,10 +95,6 @@ export function useKeyboardShortcuts(options: UseKeyboardShortcutsOptions): void
       if (matchesShortcut(event, shortcuts.closeTab)) {
         event.preventDefault();
         removeCellTabRef.current(activeCellTabRef.current);
-      }
-      if (matchesShortcut(event, shortcuts.closeWindow)) {
-        event.preventDefault();
-        window.close();
       }
       // Cmd+I: open Import Module dialog (only when kernel is ready)
       if ((event.metaKey || event.ctrlKey) && !event.shiftKey && !event.altKey && event.key === 'i') {

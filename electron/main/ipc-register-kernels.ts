@@ -16,6 +16,7 @@
 import { BrowserWindow, ipcMain } from "electron";
 
 import { CommRouter } from "./comm-router";
+import { QueryRouter } from "./query-router";
 import { EnvironmentDetector } from "./environment-detector";
 import { IPC, type KernelValidateResult } from "./ipc";
 import { KernelManager, type KernelInfo } from "./kernel-manager";
@@ -30,6 +31,7 @@ interface RegisterKernelIpcHandlersOptions {
   win: BrowserWindow;
   kernelManager: KernelManager;
   commRouter: CommRouter;
+  queryRouter: QueryRouter;
   projectManager: ProjectManager;
   moduleManager: ModuleManager;
   kernelWorkingDirs: Map<string, string>;
@@ -84,6 +86,7 @@ export function registerKernelIpcHandlers(
     win,
     kernelManager,
     commRouter,
+    queryRouter,
     projectManager,
     moduleManager,
     kernelWorkingDirs,
@@ -117,11 +120,20 @@ export function registerKernelIpcHandlers(
     }
   }
 
+  // Serialize kernel start/restart so concurrent calls cannot race on
+  // the shared commRouter (which causes "CommRouter detached" rejections).
+  let startMutex: Promise<unknown> = Promise.resolve();
+
   ipcMain.handle(IPC.kernels.list, async () => {
     return kernelManager.list();
   });
 
   ipcMain.handle(IPC.kernels.start, async (_event, spec) => {
+    const previous = startMutex;
+    let release!: () => void;
+    startMutex = new Promise<void>((r) => { release = r; });
+    await previous.catch(() => {});
+    try {
     const requestedSpec = spec as Parameters<KernelManager["start"]>[0];
     const pythonPath =
       requestedSpec?.env?.PYTHON_PATH ??
@@ -155,9 +167,11 @@ export function registerKernelIpcHandlers(
       requestedSpec
     );
     commRouter.attach(kernelManager, kernel.id);
+    queryRouter.detach();
     await initializeKernelSession(
       kernelManager,
       commRouter,
+      queryRouter,
       projectManager,
       kernel.id,
       kernelWorkingDirs
@@ -168,6 +182,7 @@ export function registerKernelIpcHandlers(
 
     const onCrash = async (crashedId: string): Promise<void> => {
       if (crashedId !== kernel.id) return;
+      queryRouter.detach();
       await cleanupKernelWorkingDir(projectManager, kernelManager, crashedId, kernelWorkingDirs, crashHandlers);
       if (getActiveKernelId() === crashedId) setActiveKernelId(null);
       win.webContents.send(IPC.push.kernelStatus, { kernelId: crashedId, status: "dead" });
@@ -176,6 +191,9 @@ export function registerKernelIpcHandlers(
     kernelManager.on("kernel:crashed", onCrash);
 
     return kernel;
+    } finally {
+      release();
+    }
   });
 
   ipcMain.handle(IPC.kernels.stop, async (_event, kernelId: string) => {
@@ -185,6 +203,7 @@ export function registerKernelIpcHandlers(
       setActiveKernelId(null);
     }
     commRouter.detach();
+    queryRouter.detach();
     return true;
   });
 
@@ -202,6 +221,11 @@ export function registerKernelIpcHandlers(
   });
 
   ipcMain.handle(IPC.kernels.restart, async (_event, kernelId: string) => {
+    const previous = startMutex;
+    let release!: () => void;
+    startMutex = new Promise<void>((r) => { release = r; });
+    await previous.catch(() => {});
+    try {
     // Restart preserves activeProjectDir — only reset kernel-scoped state.
     resetKernelState();
 
@@ -217,9 +241,11 @@ export function registerKernelIpcHandlers(
         await cleanupKernelWorkingDir(projectManager, kernelManager, kernelId, kernelWorkingDirs, crashHandlers);
         const restarted = await restartable.restart(kernelId);
         commRouter.attach(kernelManager, restarted.id);
+        queryRouter.detach();
         await initializeKernelSession(
           kernelManager,
           commRouter,
+          queryRouter,
           projectManager,
           restarted.id,
           kernelWorkingDirs
@@ -237,9 +263,11 @@ export function registerKernelIpcHandlers(
         language: current.language,
       });
       commRouter.attach(kernelManager, restarted.id);
+      queryRouter.detach();
       await initializeKernelSession(
         kernelManager,
         commRouter,
+        queryRouter,
         projectManager,
         restarted.id,
         kernelWorkingDirs
@@ -270,6 +298,9 @@ export function registerKernelIpcHandlers(
     await bindActiveProjectModules(restarted.id);
 
     return restarted;
+    } finally {
+      release();
+    }
   });
 
   ipcMain.handle(

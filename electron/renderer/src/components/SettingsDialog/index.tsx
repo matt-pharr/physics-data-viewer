@@ -35,11 +35,10 @@ interface SettingsDialogProps {
   activeLanguage?: 'python' | 'julia';
   config: Config | null;
   shortcuts: Shortcuts;
-  currentKernelId?: string | null;
   onClose: () => void;
   onSave: (updates: Partial<Config>) => Promise<void>;
-  onEnvSave: (paths: { pythonPath?: string; juliaPath?: string; language?: 'python' | 'julia' }) => Promise<void>;
-  onRestart?: () => void;
+  onEnvSave: (paths: { pythonPath?: string; juliaPath?: string }) => void | Promise<void>;
+  envWarning?: string | null;
 }
 
 /** Top-level settings modal used by the App shell. */
@@ -49,11 +48,10 @@ export const SettingsDialog: React.FC<SettingsDialogProps> = ({
   activeLanguage = 'python',
   config,
   shortcuts,
-  currentKernelId,
   onClose,
   onSave,
   onEnvSave,
-  onRestart,
+  envWarning,
 }) => {
   const [activeTab, setActiveTab] = useState<SettingsTab>(initialTab);
   const [editedShortcuts, setEditedShortcuts] = useState<Shortcuts>(shortcuts);
@@ -301,7 +299,6 @@ export const SettingsDialog: React.FC<SettingsDialogProps> = ({
   };
 
   const shortcutSections: { title: string; keys: Array<keyof Shortcuts> }[] = [
-    { title: 'General',     keys: ['openSettings', 'closeWindow'] },
     { title: 'Code Cells', keys: ['execute', 'newTab', 'closeTab'] },
     { title: 'Tree',        keys: ['treeCopyPath', 'treeEditScript', 'treePrint'] },
   ];
@@ -397,10 +394,10 @@ export const SettingsDialog: React.FC<SettingsDialogProps> = ({
               embedded
               isFirstRun={activeLanguage === 'julia' ? !config?.juliaPath : !config?.pythonPath}
               activeLanguage={activeLanguage}
-              currentConfig={config || undefined}
-              currentKernelId={currentKernelId}
-              onSave={onEnvSave}
-              onRestart={onRestart}
+              currentPythonPath={config?.pythonPath}
+              currentJuliaPath={config?.juliaPath}
+              warning={envWarning}
+              onSelect={onEnvSave}
             />
           ) : activeTab === 'about' ? (
             <div className="settings-about">

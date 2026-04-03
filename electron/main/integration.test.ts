@@ -10,7 +10,7 @@ import * as os from "os";
 import * as path from "path";
 import { KernelManager } from "./kernel-manager";
 import { CommRouter } from "./comm-router";
-import { PDVMessage, PDVMessageType, PDV_PROTOCOL_VERSION } from "./pdv-protocol";
+import { PDVMessage, PDVMessageType, getAppVersion, setAppVersion } from "./pdv-protocol";
 
 const PYTHON_PACKAGE_DIR = path.resolve(__dirname, "../../pdv-python");
 const TEST_PYTHON_EXECUTABLE = process.env.PYTHON_PATH ?? "python3";
@@ -84,7 +84,7 @@ async function bootstrapAndInit(
   tempDirs.push(workingDir);
   const initResponse = await router.request(PDVMessageType.INIT, {
     working_dir: workingDir,
-    pdv_version: PDV_PROTOCOL_VERSION,
+    pdv_version: getAppVersion(),
   });
 
   return { ready, initResponse, workingDir };
@@ -100,6 +100,7 @@ describe("@slow Cross-boundary integration (Python + Electron)", { timeout: 120_
   const tempDirs: string[] = [];
 
   beforeAll(async () => {
+    setAppVersion("0.0.7");
     km = new KernelManager();
     router = new CommRouter();
 
@@ -186,7 +187,8 @@ describe("@slow Cross-boundary integration (Python + Electron)", { timeout: 120_
       changed_paths?: unknown;
       change_type?: unknown;
     };
-    expect(payload.change_type).toBe("added");
+    // Debounced notifications arrive as "batch" change_type.
+    expect(payload.change_type).toBe("batch");
     expect(payload.changed_paths).toContain(changedPath);
   });
 
@@ -210,7 +212,8 @@ describe("@slow Cross-boundary integration (Python + Electron)", { timeout: 120_
       changed_paths?: unknown;
       change_type?: unknown;
     };
-    expect(payload.change_type).toBe("removed");
+    // Debounced notifications arrive as "batch" change_type.
+    expect(payload.change_type).toBe("batch");
     expect(payload.changed_paths).toContain(changedPath);
   });
 
@@ -324,7 +327,7 @@ describe("@slow Cross-boundary integration (Python + Electron)", { timeout: 120_
       changed_paths?: unknown;
       change_type?: unknown;
     };
-    expect(changedPayload.change_type).toBe("added");
+    expect(changedPayload.change_type).toBe("batch");
     expect(changedPayload.changed_paths).toContain("scripts.analysis.fit_model");
 
     const listResponse = await router.request(PDVMessageType.TREE_LIST, {

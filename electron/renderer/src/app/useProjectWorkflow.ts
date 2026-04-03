@@ -34,6 +34,12 @@ interface UseProjectWorkflowOptions {
   setLastError: Dispatch<SetStateAction<string | undefined>>;
   /** Appends entries to the console log. */
   setLogs: Dispatch<SetStateAction<LogEntry[]>>;
+  /** Updates the short checksum shown in the status bar (first 6 hex chars). */
+  setLastChecksum: Dispatch<SetStateAction<string | null>>;
+  /** Sets whether the last load produced a checksum mismatch. */
+  setChecksumMismatch: Dispatch<SetStateAction<boolean>>;
+  /** Sets the PDV version the loaded project was saved with (for status bar warning). */
+  setSavedPdvVersion: Dispatch<SetStateAction<string | null>>;
   /** Ref holding the tabs snapshot from project.onLoaded push (consumed once). */
   loadedProjectTabsRef: MutableRefObject<{ tabs: CellTab[]; activeTabId: number } | null>;
   /** Validates and normalizes raw code-cells.json data into typed CellTab[]. */
@@ -58,6 +64,9 @@ export function useProjectWorkflow(options: UseProjectWorkflowOptions) {
     setProgress,
     setLastError,
     setLogs,
+    setLastChecksum,
+    setChecksumMismatch,
+    setSavedPdvVersion,
     loadedProjectTabsRef,
     normalizeLoadedCodeCells,
     flushDirtyNotes,
@@ -107,12 +116,15 @@ export function useProjectWorkflow(options: UseProjectWorkflowOptions) {
       });
       setCurrentProjectDir(saveDir);
       setModulesRefreshToken((prev) => prev + 1);
+      setLastChecksum(result.checksum.slice(0, 6));
+      setChecksumMismatch(false);
+      setSavedPdvVersion(null); // Just saved with current version — no mismatch
       await rememberRecentProject(saveDir);
       setLogs((prev) => [...prev, {
         id: `save-${Date.now()}`,
         timestamp: Date.now(),
         code: '',
-        stdout: `Project saved (${result.nodeCount} nodes, checksum ${result.checksum})`,
+        stdout: `Project saved (${result.nodeCount} nodes)`,
       }]);
       return true;
     } catch (error) {
@@ -125,7 +137,9 @@ export function useProjectWorkflow(options: UseProjectWorkflowOptions) {
     flushDirtyNotes,
     kernelStatus,
     rememberRecentProject,
+    setChecksumMismatch,
     setCurrentProjectDir,
+    setLastChecksum,
     setProgress,
     setLastError,
     setLogs,
@@ -150,18 +164,15 @@ export function useProjectWorkflow(options: UseProjectWorkflowOptions) {
       setModulesRefreshToken((prev) => prev + 1);
       await rememberRecentProject(saveDir);
       setNamespaceRefreshToken((prev) => prev + 1);
-      const parts = [`Project loaded`];
-      if (result.nodeCount != null) parts.push(`${result.nodeCount} nodes`);
-      if (result.checksum) {
-        parts.push(`checksum ${result.checksum}`);
-        if (result.checksumValid === false) parts.push('(MISMATCH)');
-      }
+      setLastChecksum(result.checksum ? result.checksum.slice(0, 6) : null);
+      setChecksumMismatch(result.checksumValid === false);
+      setSavedPdvVersion(result.savedPdvVersion ?? null);
+      const nodeCountMsg = result.nodeCount != null ? ` (${result.nodeCount} nodes)` : '';
       setLogs((prev) => [...prev, {
         id: `load-${Date.now()}`,
         timestamp: Date.now(),
         code: '',
-        stdout: parts.length > 1 ? `${parts[0]} (${parts.slice(1).join(', ')})` : parts[0],
-        ...(result.checksumValid === false ? { stderr: 'Warning: tree-index.json checksum does not match the stored checksum' } : {}),
+        stdout: `Project loaded${nodeCountMsg}`,
       }]);
     } catch (error) {
       setProgress(null);
@@ -174,7 +185,10 @@ export function useProjectWorkflow(options: UseProjectWorkflowOptions) {
     rememberRecentProject,
     setActiveCellTab,
     setCellTabs,
+    setChecksumMismatch,
+    setSavedPdvVersion,
     setCurrentProjectDir,
+    setLastChecksum,
     setProgress,
     setLastError,
     setLogs,

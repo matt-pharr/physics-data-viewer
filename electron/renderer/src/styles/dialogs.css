@@ -16,7 +16,7 @@
   border: 1px solid var(--border-color);
   border-radius: 8px;
   padding: 24px;
-  width: 480px;
+  width: 560px;
   max-width: 90%;
   box-shadow: 0 12px 30px rgba(0, 0, 0, 0.4);
 }
@@ -27,6 +27,9 @@
   border-radius: 8px;
   width: 760px;
   max-width: 92%;
+  /* Fixed height so the dialog (and its tab bar / footer) stays put
+     regardless of which tab is active. */
+  height: 86vh;
   max-height: 86vh;
   display: flex;
   flex-direction: column;
@@ -463,12 +466,207 @@
   border-color: var(--accent);
 }
 
+/* ===== ENVIRONMENT SELECTOR (discovery picker) ===== */
+
 .environment-selector h2 {
   margin-bottom: 8px;
 }
 
+/* -- Environment list -- */
+.env-list {
+  max-height: 260px;
+  overflow-y: auto;
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  margin-top: 12px;
+  background: var(--bg-primary);
+}
+
+/* When embedded in the settings dialog, let the env-list fill the
+   available vertical space instead of capping at 260px. */
+.environment-selector-embedded .env-list {
+  max-height: none;
+  flex: 1;
+  min-height: 0;
+}
+
+.env-list-loading,
+.env-list-empty {
+  padding: 20px;
+  text-align: center;
+  color: var(--text-secondary);
+  font-size: 13px;
+}
+
+.env-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 8px 12px;
+  border: none;
+  border-bottom: 1px solid var(--border-color);
+  background: transparent;
+  color: var(--text-primary);
+  cursor: pointer;
+  text-align: left;
+  font-family: inherit;
+  font-size: 13px;
+}
+
+.env-row:last-child {
+  border-bottom: none;
+}
+
+.env-row:hover {
+  background: var(--bg-tertiary);
+}
+
+.env-row--selected {
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  border-left: 3px solid var(--accent);
+  padding-left: 9px;
+}
+
+.env-row--selected:hover {
+  background: color-mix(in srgb, var(--accent) 18%, transparent);
+}
+
+/* Kind badge (single letter) */
+.env-kind-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 700;
+  flex-shrink: 0;
+  background: var(--bg-tertiary);
+  color: var(--text-secondary);
+  border: 1px solid var(--border-color);
+}
+
+.env-kind-badge--conda { color: var(--success, #4ec9b0); border-color: var(--success, #4ec9b0); }
+.env-kind-badge--venv { color: var(--accent); border-color: var(--accent); }
+.env-kind-badge--pyenv { color: var(--warning, #cca700); border-color: var(--warning, #cca700); }
+
+/* Row info (label + path) */
+.env-row-info {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+  flex: 1;
+}
+
+.env-row-label {
+  font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.env-row-path {
+  font-size: 11px;
+  color: var(--text-secondary);
+  font-family: var(--font-mono);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Status badges */
+.env-row-badges {
+  display: flex;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.env-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 6px;
+  border-radius: 3px;
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  border: 1px solid;
+}
+
+.env-badge--ok {
+  color: var(--success, #4ec9b0);
+  border-color: var(--success, #4ec9b0);
+  background: color-mix(in srgb, var(--success, #4ec9b0) 10%, transparent);
+}
+
+.env-badge--missing {
+  color: var(--text-secondary);
+  border-color: var(--border-color);
+  background: transparent;
+  opacity: 0.6;
+}
+
+.env-badge--warning {
+  color: var(--warning, #cca700);
+  border-color: var(--warning, #cca700);
+  background: color-mix(in srgb, var(--warning, #cca700) 10%, transparent);
+}
+
+/* Action bar */
+.env-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+/* Install panel */
+.env-install-panel {
+  margin-top: 14px;
+  padding: 12px;
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  background: var(--bg-tertiary);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.env-install-header {
+  font-size: 13px;
+  color: var(--text-primary);
+}
+
+.env-install-output {
+  max-height: 160px;
+  overflow-y: auto;
+  padding: 8px;
+  border-radius: 4px;
+  background: var(--bg-primary);
+  border: 1px solid var(--border-color);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-secondary);
+  white-space: pre-wrap;
+  word-break: break-all;
+  margin: 0;
+}
+
+.env-install-success {
+  color: var(--success, #4ec9b0);
+  font-size: 13px;
+  font-weight: 500;
+}
+
 .environment-selector-embedded {
   padding: 8px 0;
+  display: flex;
+  flex-direction: column;
+  /* Fill the dialog-body so the env-list can flex into remaining space. */
+  flex: 1;
+  min-height: 0;
 }
 
 .environment-selector-embedded h2 {
@@ -564,8 +762,11 @@
 
 .dialog-body {
   flex: 1;
+  min-height: 0;
   padding: 20px;
   overflow-y: auto;
+  display: flex;
+  flex-direction: column;
 }
 
 .script-info {

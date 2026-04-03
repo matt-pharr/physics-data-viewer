@@ -253,6 +253,12 @@ export const CodeCell: React.FC<CodeCellProps> = ({
 
   const handleBeforeMount: BeforeMount = (monaco) => {
     monacoRef.current = monaco;
+    // Dispose any stale models left over from a previous session (e.g.
+    // macOS window restoration in the packaged app can preserve the
+    // renderer process, keeping old Monaco models alive).
+    for (const model of monaco.editor.getModels()) {
+      model.dispose();
+    }
     defineMonacoThemes(monaco);
     registerKernelCompletionProvider(monaco, kernelIdRef, allTabsDataRef);
     registerKernelHoverProvider(monaco, kernelIdRef, allTabsDataRef);
@@ -281,11 +287,6 @@ export const CodeCell: React.FC<CodeCellProps> = ({
         e.stopPropagation();
         const tab = activeTabRef.current;
         if (tab) onRemoveTabRef.current?.(tab.id);
-      }
-      if (matchesShortcut(nativeEvent, shortcutsRef.current.closeWindow)) {
-        e.preventDefault();
-        e.stopPropagation();
-        window.close();
       }
       // Cmd+1–9 → go to nth tab; Cmd+0 → go to last tab
       if ((nativeEvent.metaKey || nativeEvent.ctrlKey) && !nativeEvent.shiftKey && !nativeEvent.altKey) {

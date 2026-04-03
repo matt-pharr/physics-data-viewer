@@ -26,7 +26,7 @@
 import * as crypto from "crypto";
 import {
   PDVMessage,
-  PDV_PROTOCOL_VERSION,
+  getAppVersion,
   PDV_COMM_TARGET,
   isPDVMessage,
   checkVersionCompatibility,
@@ -76,7 +76,7 @@ class PDVVersionError extends Error {
   constructor(public readonly incomingVersion: string) {
     super(
       `Incompatible PDV protocol version: received ${incomingVersion}, ` +
-        `expected major version ${PDV_PROTOCOL_VERSION.split(".")[0]}`
+        `expected major version ${getAppVersion().split(".")[0]}`
     );
     this.name = "PDVVersionError";
   }
@@ -186,7 +186,7 @@ export class CommRouter {
       "CommRouter detached",
       "comm.detached",
       {
-        pdv_version: PDV_PROTOCOL_VERSION,
+        pdv_version: getAppVersion(),
         msg_id: "",
         in_reply_to: null,
         type: "",
@@ -274,7 +274,7 @@ export class CommRouter {
       });
 
       const envelope: Record<string, unknown> = {
-        pdv_version: PDV_PROTOCOL_VERSION,
+        pdv_version: getAppVersion(),
         msg_id: msgId,
         in_reply_to: null,
         type,
@@ -379,7 +379,7 @@ export class CommRouter {
     if (compat === "minor_mismatch") {
       console.warn(
         `[CommRouter] Minor version mismatch: received ${msg.pdv_version}, ` +
-          `expected ${PDV_PROTOCOL_VERSION}`
+          `expected ${getAppVersion()}`
       );
     }
 
@@ -446,7 +446,7 @@ export class CommRouter {
         "CommRouter reset",
         "comm.reset",
         {
-          pdv_version: PDV_PROTOCOL_VERSION,
+          pdv_version: getAppVersion(),
           msg_id: "",
           in_reply_to: null,
           type: "",
