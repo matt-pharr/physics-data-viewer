@@ -64,6 +64,8 @@ const api: PDVApi = {
       ipcRenderer.invoke(IPC.tree.createScript, kernelId, targetPath, scriptName),
     createNote: (kernelId, targetPath, noteName) =>
       ipcRenderer.invoke(IPC.tree.createNote, kernelId, targetPath, noteName),
+    createGui: (kernelId, targetPath, guiName) =>
+      ipcRenderer.invoke(IPC.tree.createGui, kernelId, targetPath, guiName),
     addFile: (kernelId, sourcePath, targetTreePath, nodeType, filename) =>
       ipcRenderer.invoke(IPC.tree.addFile, kernelId, sourcePath, targetTreePath, nodeType, filename),
     invokeHandler: (kernelId, nodePath) =>
@@ -151,6 +153,13 @@ const api: PDVApi = {
     context: () => ipcRenderer.invoke(IPC.moduleWindows.context),
     executeInMain: (code) => ipcRenderer.invoke(IPC.moduleWindows.executeInMain, code),
     onExecuteRequest: (cb) => onPush(IPC.push.moduleExecuteRequest, cb),
+  },
+  guiEditor: {
+    open: (req) => ipcRenderer.invoke(IPC.guiEditor.open, req),
+    openViewer: (req) => ipcRenderer.invoke(IPC.guiEditor.openViewer, req),
+    context: () => ipcRenderer.invoke(IPC.guiEditor.context),
+    read: (treePath) => ipcRenderer.invoke(IPC.guiEditor.read, treePath),
+    save: (req) => ipcRenderer.invoke(IPC.guiEditor.save, req),
   },
   files: {
     pickExecutable: () => ipcRenderer.invoke(IPC.files.pickExecutable),

@@ -1,0 +1,522 @@
+/* gui-editor.css — Layout styles for the GUI editor window. */
+
+.gui-editor-root {
+  display: grid;
+  /* 5 columns: palette | resizer | center | resizer | properties */
+  /* widths set dynamically via inline style */
+  grid-template-columns: 220px 4px 1fr 4px 280px;
+  grid-template-rows: 40px 1fr;
+  height: 100vh;
+  overflow: hidden;
+  background: var(--bg-primary, #1e1e1e);
+  color: var(--text-primary, #d4d4d4);
+  font-family: var(--font-display, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif);
+  font-size: 13px;
+}
+
+/* ── Toolbar ── */
+
+.gui-editor-toolbar {
+  grid-column: 1 / -1;
+  grid-row: 1;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 0 12px;
+  background: var(--bg-secondary, #252526);
+  border-bottom: 1px solid var(--border-color, #474747);
+  user-select: none;
+}
+
+.gui-editor-toolbar-title {
+  flex: 1;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-secondary, #858585);
+}
+
+.gui-editor-toolbar-title .dirty-indicator {
+  color: var(--warning, #dcdcaa);
+  margin-left: 4px;
+}
+
+.gui-editor-save-btn {
+  padding: 4px 14px;
+  border: none;
+  border-radius: 3px;
+  background: var(--accent, #007acc);
+  color: #fff;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.gui-editor-save-btn:hover {
+  background: var(--accent-hover, #1a8fd1);
+}
+
+.gui-editor-save-btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.gui-editor-save-status {
+  font-size: 11px;
+  color: var(--success, #4ec9b0);
+}
+
+/* ── Column resizers ── */
+
+.gui-editor-col-resizer {
+  grid-row: 2;
+  width: 4px;
+  cursor: col-resize;
+  background: var(--border-color, #474747);
+  transition: background 0.1s;
+}
+
+.gui-editor-col-resizer:hover {
+  background: var(--accent, #007acc);
+}
+
+/* ── Row resizer (canvas / preview split) ── */
+
+.gui-editor-row-resizer {
+  height: 4px;
+  cursor: row-resize;
+  background: var(--border-color, #474747);
+  flex-shrink: 0;
+  transition: background 0.1s;
+}
+
+.gui-editor-row-resizer:hover {
+  background: var(--accent, #007acc);
+}
+
+/* ── Element Palette (left) ── */
+
+.gui-editor-palette {
+  grid-row: 2;
+  overflow-y: auto;
+  background: var(--bg-secondary, #252526);
+  padding: 8px;
+}
+
+.gui-editor-palette-section {
+  margin-bottom: 12px;
+}
+
+.gui-editor-palette-section-title {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-secondary, #858585);
+  margin-bottom: 6px;
+  padding: 0 4px;
+}
+
+.gui-editor-palette-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  border-radius: 4px;
+  cursor: grab;
+  user-select: none;
+  transition: background 0.1s;
+}
+
+.gui-editor-palette-item:hover {
+  background: var(--bg-hover, #2a2d2e);
+}
+
+.gui-editor-palette-item:active {
+  cursor: grabbing;
+}
+
+.gui-editor-palette-icon {
+  width: 22px;
+  height: 22px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 3px;
+  background: var(--bg-tertiary, #2d2d30);
+  font-size: 12px;
+  flex-shrink: 0;
+}
+
+.gui-editor-palette-info {
+  min-width: 0;
+}
+
+.gui-editor-palette-label {
+  font-weight: 500;
+  font-size: 12px;
+}
+
+.gui-editor-palette-desc {
+  font-size: 11px;
+  color: var(--text-secondary, #858585);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ── Center column ── */
+
+.gui-editor-center {
+  grid-row: 2;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+/* ── Layout Canvas (top center) ── */
+
+.gui-editor-canvas {
+  flex: 1;
+  overflow-y: auto;
+  padding: 8px;
+  min-height: 120px;
+}
+
+.gui-editor-canvas-empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  color: var(--text-hint, #5a5a5a);
+  font-style: italic;
+  text-align: center;
+  padding: 24px;
+}
+
+/* Canvas tree node row */
+.canvas-node {
+  border-radius: 3px;
+  user-select: none;
+}
+
+.canvas-node-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 6px;
+  border-radius: 3px;
+  cursor: pointer;
+  min-height: 26px;
+}
+
+.canvas-node-row:hover {
+  background: var(--bg-hover, #2a2d2e);
+}
+
+.canvas-node-row.selected {
+  background: rgba(0, 122, 204, 0.2);
+  outline: 1px solid var(--accent, #007acc);
+}
+
+.canvas-node-icon {
+  width: 18px;
+  height: 18px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
+  flex-shrink: 0;
+  border-radius: 2px;
+  background: var(--bg-tertiary, #2d2d30);
+}
+
+.canvas-node-label {
+  font-size: 12px;
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.canvas-node-type {
+  font-size: 11px;
+  color: var(--text-secondary, #858585);
+}
+
+.canvas-node-delete {
+  opacity: 0;
+  border: none;
+  background: none;
+  color: var(--error, #f48771);
+  cursor: pointer;
+  font-size: 14px;
+  padding: 0 2px;
+  line-height: 1;
+}
+
+.canvas-node-row:hover .canvas-node-delete {
+  opacity: 0.6;
+}
+
+.canvas-node-delete:hover {
+  opacity: 1 !important;
+}
+
+.canvas-node-children {
+  padding-left: 16px;
+}
+
+.canvas-node-toggle {
+  width: 14px;
+  font-size: 10px;
+  cursor: pointer;
+  color: var(--text-secondary, #858585);
+  background: none;
+  border: none;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* Drop indicators */
+.canvas-drop-zone {
+  height: 2px;
+  margin: 0 6px;
+  border-radius: 1px;
+  transition: height 0.1s, background 0.1s;
+}
+
+.canvas-drop-zone.active {
+  height: 4px;
+  background: var(--accent, #007acc);
+}
+
+.canvas-node-row.drop-target {
+  outline: 2px dashed var(--accent, #007acc);
+  outline-offset: -2px;
+}
+
+/* ── Live Preview (bottom center) ── */
+
+.gui-editor-preview {
+  flex: 1;
+  overflow-y: auto;
+  min-height: 0;
+}
+
+.gui-editor-preview-header {
+  display: flex;
+  align-items: center;
+  padding: 4px 12px;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-secondary, #858585);
+  background: var(--bg-secondary, #252526);
+  border-bottom: 1px solid var(--border-color, #474747);
+  user-select: none;
+}
+
+.gui-editor-preview-body {
+  padding: 12px;
+}
+
+.gui-editor-preview-empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 80px;
+  color: var(--text-hint, #5a5a5a);
+  font-style: italic;
+}
+
+/* ── Property Editor (right) ── */
+
+.gui-editor-properties {
+  grid-row: 2;
+  overflow-y: auto;
+  background: var(--bg-secondary, #252526);
+  padding: 8px;
+}
+
+.gui-editor-properties-header {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-secondary, #858585);
+  margin-bottom: 8px;
+  padding: 0 4px;
+}
+
+.gui-editor-properties-empty {
+  color: var(--text-hint, #5a5a5a);
+  font-style: italic;
+  font-size: 12px;
+  padding: 12px 4px;
+}
+
+.gui-editor-prop-group {
+  margin-bottom: 10px;
+}
+
+.gui-editor-prop-label {
+  font-size: 11px;
+  color: var(--text-secondary, #858585);
+  margin-bottom: 3px;
+  padding: 0 2px;
+}
+
+.gui-editor-prop-input {
+  width: 100%;
+  padding: 4px 6px;
+  border: 1px solid var(--border-color, #474747);
+  border-radius: 3px;
+  background: var(--bg-primary, #1e1e1e);
+  color: var(--text-primary, #d4d4d4);
+  font-size: 12px;
+  font-family: inherit;
+  box-sizing: border-box;
+}
+
+.gui-editor-prop-input:focus {
+  outline: none;
+  border-color: var(--accent, #007acc);
+}
+
+.gui-editor-prop-select {
+  width: 100%;
+  padding: 4px 6px;
+  border: 1px solid var(--border-color, #474747);
+  border-radius: 3px;
+  background: var(--bg-primary, #1e1e1e);
+  color: var(--text-primary, #d4d4d4);
+  font-size: 12px;
+  font-family: inherit;
+  box-sizing: border-box;
+}
+
+.gui-editor-prop-select:focus {
+  outline: none;
+  border-color: var(--accent, #007acc);
+}
+
+.gui-editor-prop-checkbox {
+  margin-right: 6px;
+}
+
+.gui-editor-prop-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/* Options editor for dropdown inputs */
+.gui-editor-options-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.gui-editor-option-row {
+  display: flex;
+  gap: 4px;
+  align-items: center;
+}
+
+.gui-editor-option-row input {
+  flex: 1;
+  padding: 3px 5px;
+  border: 1px solid var(--border-color, #474747);
+  border-radius: 3px;
+  background: var(--bg-primary, #1e1e1e);
+  color: var(--text-primary, #d4d4d4);
+  font-size: 11px;
+  font-family: inherit;
+}
+
+.gui-editor-option-remove {
+  border: none;
+  background: none;
+  color: var(--error, #f48771);
+  cursor: pointer;
+  font-size: 14px;
+  padding: 0 2px;
+  line-height: 1;
+}
+
+.gui-editor-option-add {
+  border: none;
+  background: none;
+  color: var(--accent, #007acc);
+  cursor: pointer;
+  font-size: 12px;
+  padding: 2px 4px;
+  text-align: left;
+}
+
+.gui-editor-option-add:hover {
+  text-decoration: underline;
+}
+
+/* Input bindings checkboxes for actions */
+.gui-editor-input-bindings {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 4px 0;
+}
+
+.gui-editor-input-binding {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+}
+
+/* Loading/error states */
+.gui-editor-loading,
+.gui-editor-error {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100vh;
+  text-align: center;
+  padding: 24px;
+}
+
+.gui-editor-error {
+  color: var(--error, #f48771);
+}
+
+/* ── Validation warnings ── */
+
+.gui-editor-prop-warning {
+  border-color: var(--warning, #dcdcaa) !important;
+}
+
+.gui-editor-prop-warning-text {
+  font-size: 11px;
+  color: var(--warning, #dcdcaa);
+  margin-top: 2px;
+  padding: 0 2px;
+}
+
+.gui-editor-prop-hint {
+  font-size: 11px;
+  color: var(--text-hint, #5a5a5a);
+  margin-bottom: 8px;
+  padding: 0 4px;
+  line-height: 1.4;
+}
+
+.canvas-node-warning {
+  color: var(--warning, #dcdcaa);
+  font-size: 12px;
+  margin-left: 4px;
+  cursor: help;
+}

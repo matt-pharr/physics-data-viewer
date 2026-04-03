@@ -7,6 +7,7 @@ __pycache__/
 /node_modules/
 .DS_Store
 pdv-python/build/
+.playwright-mcp/
 
 # Electron
 electron/node_modules/

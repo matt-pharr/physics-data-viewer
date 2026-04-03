@@ -19,7 +19,7 @@ import * as path from "path";
 import type { CommRouter } from "./comm-router";
 import type { QueryRouter } from "./query-router";
 import type { ConfigStore, PDVConfig } from "./config";
-import { IPC, type HandlerInvokeResult, type NamelistReadResult, type NamelistWriteResult, type NamespaceInspectResult, type NamespaceInspectTarget, type NamespaceInspectorNode, type NamespaceQueryOptions, type NamespaceVariable, type ScriptParameter, type ScriptRunRequest, type ScriptRunResult, type TreeAddFileResult, type TreeCreateNoteResult, type TreeCreateScriptResult } from "./ipc";
+import { IPC, type HandlerInvokeResult, type NamelistReadResult, type NamelistWriteResult, type NamespaceInspectResult, type NamespaceInspectTarget, type NamespaceInspectorNode, type NamespaceQueryOptions, type NamespaceVariable, type ScriptParameter, type ScriptRunRequest, type ScriptRunResult, type TreeAddFileResult, type TreeCreateGuiResult, type TreeCreateNoteResult, type TreeCreateScriptResult } from "./ipc";
 import type { KernelManager } from "./kernel-manager";
 import { PDVMessageType, type PDVFileRegisterPayload } from "./pdv-protocol";
 import type { ProjectManager } from "./project-manager";
@@ -287,6 +287,55 @@ export function registerTreeNamespaceScriptIpcHandlers(
         relative_path: notePath,
       });
       return { success: true, notePath, treePath };
+    }
+  );
+
+  ipcMain.handle(
+    IPC.tree.createGui,
+    async (
+      _event,
+      kernelId: string,
+      targetPath: string,
+      guiName: string
+    ): Promise<TreeCreateGuiResult> => {
+      if (!kernelManager.getKernel(kernelId)) {
+        throw new Error(`Kernel not found: ${kernelId}`);
+      }
+      let workingDir = kernelWorkingDirs.get(kernelId);
+      if (!workingDir) {
+        workingDir = await projectManager.createWorkingDir();
+        kernelWorkingDirs.set(kernelId, workingDir);
+      }
+      const safeName = guiName.trim().replace(/\s+/g, "_").replace(/[^a-zA-Z0-9_-]/g, "");
+      if (!safeName) {
+        return { success: false, error: "GUI name must contain at least one alphanumeric character" };
+      }
+      const guiDir = path.join(workingDir, "tree", ...targetPath.split(".").filter(Boolean));
+      await fs.mkdir(guiDir, { recursive: true });
+      const guiPath = path.join(guiDir, safeName + ".gui.json");
+
+      const defaultManifest = {
+        has_gui: true,
+        gui: { layout: { type: "column", children: [] } },
+        inputs: [],
+        actions: [],
+      };
+
+      // Create the .gui.json file if it doesn't exist
+      try {
+        await fs.access(guiPath);
+      } catch {
+        await fs.writeFile(guiPath, JSON.stringify(defaultManifest, null, 2) + "\n", "utf-8");
+      }
+
+      const treePath = targetPath ? `${targetPath}.${safeName}` : safeName;
+      await commRouter.request(PDVMessageType.GUI_REGISTER, {
+        parent_path: targetPath,
+        name: safeName,
+        relative_path: guiPath,
+        module_id: null,
+      });
+      return { success: true, guiPath, treePath };
     }
   );
 
