@@ -234,10 +234,6 @@ interface PDVProjectLoadPayload {
 export interface PDVProjectLoadedPayload {
   /** Total number of tree nodes loaded from the project. */
   node_count: number;
-  /** Human-readable project name from project.json. */
-  project_name: string;
-  /** ISO 8601 timestamp of when the project was last saved. */
-  saved_at: string;
 }
 
 /** Payload for pdv.project.load.response (kernel → app). */

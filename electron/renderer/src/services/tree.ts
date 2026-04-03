@@ -67,6 +67,12 @@ class TreeService {
     return enriched;
   }
 
+  /** Invalidate the cache entry for a single path (leaves other entries intact). */
+  invalidatePath(kernelId: string, path: string): void {
+    const key = this.cacheKey(kernelId, path);
+    this.cache.delete(key);
+  }
+
   /** Clear all cache entries, or only entries for a specific kernel id. */
   clearCache(kernelId?: string | null): void {
     if (!kernelId) {

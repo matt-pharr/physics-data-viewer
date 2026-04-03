@@ -16,6 +16,7 @@
 import { BrowserWindow, ipcMain } from "electron";
 
 import { CommRouter } from "./comm-router";
+import { QueryRouter } from "./query-router";
 import { EnvironmentDetector } from "./environment-detector";
 import { IPC, type KernelValidateResult } from "./ipc";
 import { KernelManager, type KernelInfo } from "./kernel-manager";
@@ -30,6 +31,7 @@ interface RegisterKernelIpcHandlersOptions {
   win: BrowserWindow;
   kernelManager: KernelManager;
   commRouter: CommRouter;
+  queryRouter: QueryRouter;
   projectManager: ProjectManager;
   moduleManager: ModuleManager;
   kernelWorkingDirs: Map<string, string>;
@@ -84,6 +86,7 @@ export function registerKernelIpcHandlers(
     win,
     kernelManager,
     commRouter,
+    queryRouter,
     projectManager,
     moduleManager,
     kernelWorkingDirs,
@@ -155,9 +158,11 @@ export function registerKernelIpcHandlers(
       requestedSpec
     );
     commRouter.attach(kernelManager, kernel.id);
+    queryRouter.detach();
     await initializeKernelSession(
       kernelManager,
       commRouter,
+      queryRouter,
       projectManager,
       kernel.id,
       kernelWorkingDirs
@@ -168,6 +173,7 @@ export function registerKernelIpcHandlers(
 
     const onCrash = async (crashedId: string): Promise<void> => {
       if (crashedId !== kernel.id) return;
+      queryRouter.detach();
       await cleanupKernelWorkingDir(projectManager, kernelManager, crashedId, kernelWorkingDirs, crashHandlers);
       if (getActiveKernelId() === crashedId) setActiveKernelId(null);
       win.webContents.send(IPC.push.kernelStatus, { kernelId: crashedId, status: "dead" });
@@ -185,6 +191,7 @@ export function registerKernelIpcHandlers(
       setActiveKernelId(null);
     }
     commRouter.detach();
+    queryRouter.detach();
     return true;
   });
 
@@ -217,9 +224,11 @@ export function registerKernelIpcHandlers(
         await cleanupKernelWorkingDir(projectManager, kernelManager, kernelId, kernelWorkingDirs, crashHandlers);
         const restarted = await restartable.restart(kernelId);
         commRouter.attach(kernelManager, restarted.id);
+        queryRouter.detach();
         await initializeKernelSession(
           kernelManager,
           commRouter,
+          queryRouter,
           projectManager,
           restarted.id,
           kernelWorkingDirs
@@ -237,9 +246,11 @@ export function registerKernelIpcHandlers(
         language: current.language,
       });
       commRouter.attach(kernelManager, restarted.id);
+      queryRouter.detach();
       await initializeKernelSession(
         kernelManager,
         commRouter,
+        queryRouter,
         projectManager,
         restarted.id,
         kernelWorkingDirs

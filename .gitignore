@@ -22,3 +22,6 @@ electron/.mcp.json
 
 pdv-icon.iconset
 *.icns
+
+# Docs
+site/

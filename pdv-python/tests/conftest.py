@@ -64,13 +64,19 @@ def mock_send() -> MagicMock:
 
 @pytest.fixture()
 def tree_with_comm(tmp_working_dir, mock_send):
-    """Return a PDVTree attached to mock_send, with working_dir set."""
+    """Return a PDVTree attached to mock_send, with working_dir set.
+
+    Flushes pending debounced notifications on teardown to prevent
+    timer threads from firing after the test exits.
+    """
     from pdv_kernel.tree import PDVTree
 
     tree = PDVTree()
     tree._set_working_dir(tmp_working_dir)
     tree._attach_comm(mock_send)
-    return tree
+    yield tree
+    tree._flush_changes()
+    tree._detach_comm()
 
 
 @pytest.fixture()

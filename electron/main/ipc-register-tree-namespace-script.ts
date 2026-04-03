@@ -17,6 +17,7 @@ import * as fs from "fs/promises";
 import * as path from "path";
 
 import type { CommRouter } from "./comm-router";
+import type { QueryRouter } from "./query-router";
 import type { ConfigStore, PDVConfig } from "./config";
 import { IPC, type HandlerInvokeResult, type NamelistReadResult, type NamelistWriteResult, type NamespaceInspectResult, type NamespaceInspectTarget, type NamespaceInspectorNode, type NamespaceQueryOptions, type NamespaceVariable, type ScriptParameter, type ScriptRunRequest, type ScriptRunResult, type TreeAddFileResult, type TreeCreateGuiResult, type TreeCreateNoteResult, type TreeCreateScriptResult } from "./ipc";
 import type { KernelManager } from "./kernel-manager";
@@ -26,6 +27,7 @@ import type { ProjectManager } from "./project-manager";
 interface RegisterTreeNamespaceScriptIpcHandlersOptions {
   kernelManager: KernelManager;
   commRouter: CommRouter;
+  queryRouter: QueryRouter;
   projectManager: ProjectManager;
   configStore: ConfigStore;
   kernelWorkingDirs: Map<string, string>;
@@ -168,6 +170,7 @@ export function registerTreeNamespaceScriptIpcHandlers(
   const {
     kernelManager,
     commRouter,
+    queryRouter,
     projectManager,
     configStore,
     kernelWorkingDirs,
@@ -181,11 +184,23 @@ export function registerTreeNamespaceScriptIpcHandlers(
     resolveEditorSpawn,
   } = options;
 
+  /** Try query socket first (works during execution); fall back to comm. */
+  const queryRequest = async (type: string, payload: Record<string, unknown>) => {
+    if (queryRouter.isAttached()) {
+      try {
+        return await queryRouter.request(type, payload);
+      } catch {
+        // Fall through to comm router.
+      }
+    }
+    return await commRouter.request(type, payload);
+  };
+
   ipcMain.handle(IPC.tree.list, async (_event, kernelId: string, nodePath = "") => {
     if (!kernelManager.getKernel(kernelId)) {
       return [];
     }
-    const response = await commRouter.request(PDVMessageType.TREE_LIST, {
+    const response = await queryRequest(PDVMessageType.TREE_LIST, {
       path: nodePath,
     });
     const nodes = (response.payload as { nodes?: unknown }).nodes;
@@ -196,7 +211,7 @@ export function registerTreeNamespaceScriptIpcHandlers(
     if (!kernelManager.getKernel(kernelId)) {
       throw new Error(`Kernel not found: ${kernelId}`);
     }
-    const response = await commRouter.request(PDVMessageType.TREE_GET, {
+    const response = await queryRequest(PDVMessageType.TREE_GET, {
       path: nodePath,
     });
     return response.payload;
@@ -364,7 +379,7 @@ export function registerTreeNamespaceScriptIpcHandlers(
       if (!kernelManager.getKernel(kernelId)) {
         return [];
       }
-      const response = await commRouter.request(
+      const response = await queryRequest(
         PDVMessageType.NAMESPACE_QUERY,
         toNamespaceQueryPayload(options)
       );
@@ -404,7 +419,7 @@ export function registerTreeNamespaceScriptIpcHandlers(
       if (!kernelManager.getKernel(kernelId)) {
         return { children: [], truncated: false };
       }
-      const response = await commRouter.request(
+      const response = await queryRequest(
         PDVMessageType.NAMESPACE_INSPECT,
         toNamespaceInspectPayload(target)
       );
@@ -457,7 +472,7 @@ export function registerTreeNamespaceScriptIpcHandlers(
     // tree-path-to-filesystem derivation for plain scripts.
     let resolvedPath: string | undefined;
     try {
-      const response = await commRouter.request(
+      const response = await queryRequest(
         PDVMessageType.TREE_RESOLVE_FILE,
         { path: scriptPath }
       );

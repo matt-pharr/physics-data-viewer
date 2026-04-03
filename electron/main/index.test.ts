@@ -20,6 +20,7 @@ import {
 import { PDVMessageType, getAppVersion, setAppVersion, type PDVMessage } from "./pdv-protocol";
 import type { KernelInfo, KernelManager } from "./kernel-manager";
 import type { CommRouter } from "./comm-router";
+import { QueryRouter } from "./query-router";
 import type { ProjectManager } from "./project-manager";
 import type { ConfigStore } from "./config";
 import { EnvironmentDetector } from "./environment-detector";
@@ -237,6 +238,7 @@ function setup() {
       data: { "text/plain": "doc" },
     })),
     getKernel: vi.fn(() => makeKernelInfo()),
+    getQueryPort: vi.fn(() => 12345),
     shutdownAll: vi.fn(async () => undefined),
     on: vi.fn(),
     removeListener: vi.fn(),
@@ -286,7 +288,8 @@ function setup() {
     }),
   } as unknown as ConfigStore;
 
-  registerIpcHandlers(win, kernelManager, commRouter, projectManager, configStore, os.tmpdir());
+  const queryRouter = new QueryRouter();
+  registerIpcHandlers(win, kernelManager, commRouter, queryRouter, projectManager, configStore, os.tmpdir());
 
   return {
     webContentsSend,

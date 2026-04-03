@@ -73,20 +73,23 @@ class TestDotPathAccess:
 
 
 class TestChangeNotification:
-    """Tests for pdv.tree.changed push notifications."""
+    """Tests for pdv.tree.changed push notifications (debounced)."""
 
     def test_set_emits_notification(self, tree_with_comm, mock_send):
-        """Setting a value emits pdv.tree.changed."""
+        """Setting a value emits pdv.tree.changed after flush."""
         tree_with_comm['a'] = 1
+        tree_with_comm._flush_changes()
         mock_send.assert_called()
         msg_type, _ = mock_send.call_args[0]
         assert msg_type == 'pdv.tree.changed'
 
     def test_delete_emits_notification(self, tree_with_comm, mock_send):
-        """Deleting a value emits pdv.tree.changed."""
+        """Deleting a value emits pdv.tree.changed after flush."""
         tree_with_comm['a'] = 1
+        tree_with_comm._flush_changes()
         mock_send.reset_mock()
         del tree_with_comm['a']
+        tree_with_comm._flush_changes()
         mock_send.assert_called()
         msg_type, _ = mock_send.call_args[0]
         assert msg_type == 'pdv.tree.changed'
@@ -99,8 +102,141 @@ class TestChangeNotification:
     def test_notification_payload_contains_path(self, tree_with_comm, mock_send):
         """pdv.tree.changed payload includes the changed path."""
         tree_with_comm['my_key'] = 42
+        tree_with_comm._flush_changes()
         _, payload = mock_send.call_args[0]
         assert 'my_key' in payload.get('changed_paths', [])
+
+    def test_debounce_batches_multiple_mutations(self, tree_with_comm, mock_send):
+        """Multiple rapid mutations produce one batched notification."""
+        tree_with_comm['a'] = 1
+        tree_with_comm['b'] = 2
+        tree_with_comm['c'] = 3
+        tree_with_comm._flush_changes()
+        mock_send.assert_called_once()
+        _, payload = mock_send.call_args[0]
+        assert payload['change_type'] == 'batch'
+        assert set(payload['changed_paths']) == {'a', 'b', 'c'}
+
+    def test_debounce_deduplicates_paths(self, tree_with_comm, mock_send):
+        """Same path mutated multiple times appears once in batch."""
+        tree_with_comm['x'] = 1
+        tree_with_comm['x'] = 2
+        tree_with_comm['x'] = 3
+        tree_with_comm._flush_changes()
+        _, payload = mock_send.call_args[0]
+        assert payload['changed_paths'] == ['x']
+
+
+class TestMutatingDictMethods:
+    """Tests for dict methods that must emit change notifications."""
+
+    def test_pop_emits_notification(self, tree_with_comm, mock_send):
+        tree_with_comm['x'] = 1
+        tree_with_comm._flush_changes()
+        mock_send.reset_mock()
+        val = tree_with_comm.pop('x')
+        assert val == 1
+        tree_with_comm._flush_changes()
+        mock_send.assert_called_once()
+        _, payload = mock_send.call_args[0]
+        assert 'x' in payload['changed_paths']
+
+    def test_pop_nested_path(self, tree_with_comm, mock_send):
+        tree_with_comm['a.b'] = 42
+        tree_with_comm._flush_changes()
+        mock_send.reset_mock()
+        val = tree_with_comm.pop('a.b')
+        assert val == 42
+        tree_with_comm._flush_changes()
+        mock_send.assert_called_once()
+
+    def test_pop_missing_with_default(self, tree_with_comm, mock_send):
+        tree_with_comm._flush_changes()
+        mock_send.reset_mock()
+        result = tree_with_comm.pop('missing', 'fallback')
+        assert result == 'fallback'
+        tree_with_comm._flush_changes()
+        mock_send.assert_not_called()
+
+    def test_pop_missing_raises(self, tree_with_comm):
+        with pytest.raises(PDVKeyError):
+            tree_with_comm.pop('missing')
+
+    def test_update_emits_notification(self, tree_with_comm, mock_send):
+        tree_with_comm._flush_changes()
+        mock_send.reset_mock()
+        tree_with_comm.update({'a': 1, 'b': 2})
+        tree_with_comm._flush_changes()
+        mock_send.assert_called_once()  # batched into one
+        _, payload = mock_send.call_args[0]
+        assert set(payload['changed_paths']) == {'a', 'b'}
+
+    def test_update_with_kwargs(self, tree_with_comm, mock_send):
+        tree_with_comm._flush_changes()
+        mock_send.reset_mock()
+        tree_with_comm.update(c=3)
+        tree_with_comm._flush_changes()
+        mock_send.assert_called_once()
+        assert tree_with_comm['c'] == 3
+
+    def test_clear_emits_notification(self, tree_with_comm, mock_send):
+        tree_with_comm['a'] = 1
+        tree_with_comm['b'] = 2
+        tree_with_comm._flush_changes()
+        mock_send.reset_mock()
+        tree_with_comm.clear()
+        tree_with_comm._flush_changes()
+        mock_send.assert_called_once()  # batched into one
+        _, payload = mock_send.call_args[0]
+        assert set(payload['changed_paths']) == {'a', 'b'}
+        assert len(tree_with_comm) == 0
+
+    def test_setdefault_existing_no_notification(self, tree_with_comm, mock_send):
+        tree_with_comm['x'] = 10
+        tree_with_comm._flush_changes()
+        mock_send.reset_mock()
+        result = tree_with_comm.setdefault('x', 99)
+        assert result == 10
+        tree_with_comm._flush_changes()
+        mock_send.assert_not_called()
+
+    def test_setdefault_missing_emits_notification(self, tree_with_comm, mock_send):
+        tree_with_comm._flush_changes()
+        mock_send.reset_mock()
+        result = tree_with_comm.setdefault('new_key', 42)
+        assert result == 42
+        tree_with_comm._flush_changes()
+        mock_send.assert_called_once()
+
+    def test_update_with_iterable_of_pairs(self, tree_with_comm, mock_send):
+        tree_with_comm._flush_changes()
+        mock_send.reset_mock()
+        tree_with_comm.update([('x', 10), ('y', 20)])
+        assert tree_with_comm['x'] == 10
+        assert tree_with_comm['y'] == 20
+        tree_with_comm._flush_changes()
+        mock_send.assert_called_once()
+
+    def test_update_rejects_extra_positional_args(self, tree_with_comm):
+        with pytest.raises(TypeError):
+            tree_with_comm.update({'a': 1}, {'b': 2})
+
+    def test_ior_emits_notification(self, tree_with_comm, mock_send):
+        tree_with_comm._flush_changes()
+        mock_send.reset_mock()
+        tree_with_comm |= {'p': 1, 'q': 2}
+        assert tree_with_comm['p'] == 1
+        tree_with_comm._flush_changes()
+        mock_send.assert_called_once()
+
+    def test_popitem_emits_notification(self, tree_with_comm, mock_send):
+        tree_with_comm['only'] = 1
+        tree_with_comm._flush_changes()
+        mock_send.reset_mock()
+        key, val = tree_with_comm.popitem()
+        assert key == 'only' and val == 1
+        tree_with_comm._flush_changes()
+        mock_send.assert_called_once()
 
 
 class TestPDVScript:

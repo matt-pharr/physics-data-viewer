@@ -17,6 +17,7 @@ import * as fsSync from "fs";
 
 import { KernelManager } from "./kernel-manager";
 import { CommRouter } from "./comm-router";
+import { QueryRouter } from "./query-router";
 import { ProjectManager } from "./project-manager";
 import { ConfigStore } from "./config";
 import { registerIpcHandlers } from "./index";
@@ -68,6 +69,7 @@ async function loadDevUrlWithRetry(
 export async function createWindow(
   kernelManager: KernelManager,
   commRouter: CommRouter,
+  queryRouter: QueryRouter,
   projectManager: ProjectManager,
   configStore: ConfigStore
 ): Promise<BrowserWindow> {
@@ -95,7 +97,7 @@ export async function createWindow(
     }
   } catch { /* best-effort */ }
 
-  const resetSessionState = registerIpcHandlers(win, kernelManager, commRouter, projectManager, configStore, path.join(os.homedir(), ".PDV"));
+  const resetSessionState = registerIpcHandlers(win, kernelManager, commRouter, queryRouter, projectManager, configStore, path.join(os.homedir(), ".PDV"));
 
   // Reset in-memory project state on every renderer load/reload so that stale
   // module imports and project dirs from a previous session are cleared before
