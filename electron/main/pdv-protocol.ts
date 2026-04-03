@@ -32,7 +32,7 @@ let _appVersion = "";
  * Set the app version. Must be called once during startup before any comm
  * routing or project operations.
  *
- * @param version - The version string from package.json (e.g. "0.0.6").
+ * @param version - The version string from package.json (e.g. "0.0.7").
  */
 export function setAppVersion(version: string): void {
   _appVersion = version;

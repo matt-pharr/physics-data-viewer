@@ -131,7 +131,7 @@ function mockExecPerCommand(
 
 describe("EnvironmentDetector", () => {
   beforeEach(() => {
-    setAppVersion("0.0.6");
+    setAppVersion("0.0.7");
     EnvironmentDetector.clearCache();
     vi.clearAllMocks();
     // Remove env vars that might bleed between tests.
@@ -196,14 +196,14 @@ describe("EnvironmentDetector", () => {
   describe("checkPDVInstalled()", () => {
     it("returns { installed: true } when pdv_kernel is installed", async () => {
       mockExecPerCommand({
-        "/usr/bin/python3": { stdout: "0.0.6\n" },
+        "/usr/bin/python3": { stdout: "0.0.7\n" },
       });
 
       const status =
         await EnvironmentDetector.checkPDVInstalled("/usr/bin/python3");
 
       expect(status.installed).toBe(true);
-      expect(status.version).toBe("0.0.6");
+      expect(status.version).toBe("0.0.7");
       expect(status.compatible).toBe(true);
     });
 
@@ -222,7 +222,7 @@ describe("EnvironmentDetector", () => {
   describe("hasPDVKernel()", () => {
     it("returns true when pdv_kernel is installed", async () => {
       mockExecPerCommand({
-        "/usr/bin/python3": { stdout: "0.0.6\n" },
+        "/usr/bin/python3": { stdout: "0.0.7\n" },
       });
 
       const result = await EnvironmentDetector.hasPDVKernel("/usr/bin/python3");
@@ -312,7 +312,7 @@ describe("EnvironmentDetector", () => {
     it("returns enriched info with pdv and ipykernel status", async () => {
       // Mock: python --version succeeds, pdv_kernel import succeeds, ipykernel import succeeds
       mockExecPerCommand({
-        "/usr/bin/python3": { stdout: "0.0.6\n" },
+        "/usr/bin/python3": { stdout: "0.0.7\n" },
       });
 
       const baseEnv = {
@@ -328,7 +328,7 @@ describe("EnvironmentDetector", () => {
       expect(info.kind).toBe("system");
       expect(info.pythonPath).toBe("/usr/bin/python3");
       expect(info.pdvInstalled).toBe(true);
-      expect(info.pdvVersion).toBe("0.0.6");
+      expect(info.pdvVersion).toBe("0.0.7");
       expect(info.pdvCompatible).toBe(true);
       expect(info.pdvVersionMismatch).toBe(false);
       expect(info.ipykernelInstalled).toBe(true);

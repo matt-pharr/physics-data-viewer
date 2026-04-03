@@ -27,6 +27,9 @@
   border-radius: 8px;
   width: 760px;
   max-width: 92%;
+  /* Fixed height so the dialog (and its tab bar / footer) stays put
+     regardless of which tab is active. */
+  height: 86vh;
   max-height: 86vh;
   display: flex;
   flex-direction: column;
@@ -479,6 +482,14 @@
   background: var(--bg-primary);
 }
 
+/* When embedded in the settings dialog, let the env-list fill the
+   available vertical space instead of capping at 260px. */
+.environment-selector-embedded .env-list {
+  max-height: none;
+  flex: 1;
+  min-height: 0;
+}
+
 .env-list-loading,
 .env-list-empty {
   padding: 20px;
@@ -651,6 +662,11 @@
 
 .environment-selector-embedded {
   padding: 8px 0;
+  display: flex;
+  flex-direction: column;
+  /* Fill the dialog-body so the env-list can flex into remaining space. */
+  flex: 1;
+  min-height: 0;
 }
 
 .environment-selector-embedded h2 {
@@ -746,8 +762,11 @@
 
 .dialog-body {
   flex: 1;
+  min-height: 0;
   padding: 20px;
   overflow-y: auto;
+  display: flex;
+  flex-direction: column;
 }
 
 .script-info {

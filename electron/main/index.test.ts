@@ -302,7 +302,7 @@ function setup() {
 
 describe("Step 5 IPC handlers", () => {
   beforeEach(() => {
-    setAppVersion("0.0.6");
+    setAppVersion("0.0.7");
     mocks.handlers.clear();
     vi.clearAllMocks();
     unregisterIpcHandlers();
@@ -827,7 +827,7 @@ describe("Step 5 IPC handlers", () => {
       checksum: null,
       checksumValid: null,
       nodeCount: null,
-      savedPdvVersion: "0.0.6",
+      savedPdvVersion: "0.0.7",
     });
   });
 
@@ -854,6 +854,7 @@ describe("Step 5 IPC handlers", () => {
       { id: "edit", label: "Edit" },
       { id: "view", label: "View" },
       { id: "window", label: "Window" },
+      { id: "help", label: "Help" },
     ]);
   });
 

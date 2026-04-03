@@ -5,9 +5,10 @@
   inset: 0;
   z-index: 100;
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: center;
   background-color: var(--bg-primary);
+  overflow-y: auto;
 }
 
 .welcome-card {
@@ -17,7 +18,9 @@
   gap: 28px;
   max-width: 440px;
   width: 100%;
-  padding: 48px 40px;
+  /* Fixed top padding keeps the logo + buttons stable regardless of
+     whether the recent-projects list has loaded below them. */
+  padding: 18vh 40px 48px;
 }
 
 /* Logo placeholder */
@@ -29,8 +32,7 @@
 }
 
 .welcome-logo-icon {
-  font-size: 48px;
-  line-height: 1;
+  color: var(--text-secondary);
   opacity: 0.8;
 }
 
@@ -58,6 +60,8 @@
 /* Recent projects */
 .welcome-recent {
   width: 100%;
+  min-height: 0;
+  overflow-y: auto;
 }
 
 .welcome-recent-heading {
@@ -99,6 +103,11 @@
 .welcome-recent-item:disabled {
   opacity: 0.5;
   cursor: not-allowed;
+}
+
+.welcome-recent-badge {
+  font-size: 11px;
+  color: var(--text-secondary);
 }
 
 .welcome-recent-name {

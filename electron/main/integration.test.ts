@@ -100,7 +100,7 @@ describe("@slow Cross-boundary integration (Python + Electron)", { timeout: 120_
   const tempDirs: string[] = [];
 
   beforeAll(async () => {
-    setAppVersion("0.0.6");
+    setAppVersion("0.0.7");
     km = new KernelManager();
     router = new CommRouter();
 

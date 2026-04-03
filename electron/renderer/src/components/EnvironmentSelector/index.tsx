@@ -89,25 +89,28 @@ export const EnvironmentSelector: React.FC<EnvironmentSelectorProps> = ({
     try {
       const envs = await window.pdv.environment.list();
       setEnvironments(envs);
-      // Auto-select the currently configured environment, or the first one.
-      if (!selectedPath) {
-        const current = envs.find((e) => e.pythonPath === currentPythonPath);
-        if (current) {
-          setSelectedPath(current.pythonPath);
-          setSelectedInfo(current);
-        }
-      }
+      return envs;
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
+      return null;
     } finally {
       setLoading(false);
     }
-  }, [currentPythonPath, selectedPath]);
+  }, []);
 
   useEffect(() => {
-    if (activeLanguage === 'python') {
-      void loadEnvironments();
-    }
+    if (activeLanguage !== 'python') return;
+    void loadEnvironments().then((envs) => {
+      if (!envs) return;
+      // Auto-select the currently configured environment on first load.
+      const current = envs.find((e) => e.pythonPath === currentPythonPath);
+      if (current) {
+        setSelectedPath(current.pythonPath);
+        setSelectedInfo(current);
+      }
+    });
+  // Only run on mount / language change — not when currentPythonPath changes.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeLanguage, loadEnvironments]);
 
   // -- Select an environment -------------------------------------------------

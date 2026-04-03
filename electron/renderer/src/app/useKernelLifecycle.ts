@@ -1,4 +1,4 @@
-import { useCallback, type Dispatch, type SetStateAction } from 'react';
+import { useCallback, useRef, type Dispatch, type SetStateAction } from 'react';
 import type { Config, LogEntry } from '../types';
 
 type KernelStatus = 'idle' | 'starting' | 'ready' | 'error';
@@ -38,8 +38,13 @@ export function useKernelLifecycle(options: UseKernelLifecycleOptions) {
     setTreeRefreshToken,
   } = options;
 
-  /** Start (or restart) a kernel. Returns `true` on success, `false` on failure. */
-  const startKernel = useCallback(async (cfg: Config, language: 'python' | 'julia' = 'python'): Promise<boolean> => {
+  // Serializes startKernel calls so only one runs at a time.
+  // A second call while one is in-flight queues and replaces any
+  // previously queued call (only the latest queued call runs).
+  const startQueueRef = useRef<Promise<boolean>>(Promise.resolve(false));
+  const pendingStartRef = useRef<{ cfg: Config; language: 'python' | 'julia'; resolve: (v: boolean) => void } | null>(null);
+
+  const doStartKernel = useCallback(async (cfg: Config, language: 'python' | 'julia' = 'python'): Promise<boolean> => {
     setKernelStatus('starting');
     setLastError(undefined);
     try {
@@ -82,6 +87,34 @@ export function useKernelLifecycle(options: UseKernelLifecycleOptions) {
     setNamespaceRefreshToken,
     setTreeRefreshToken,
   ]);
+
+  /** Start (or restart) a kernel. Returns `true` on success, `false` on failure. */
+  const startKernel = useCallback((cfg: Config, language: 'python' | 'julia' = 'python'): Promise<boolean> => {
+    // If a start is already in-flight, queue this call (replacing any
+    // previously queued call — only the latest wins).
+    const prev = pendingStartRef.current;
+    if (prev) prev.resolve(false);
+
+    return new Promise<boolean>((resolve) => {
+      pendingStartRef.current = { cfg, language, resolve };
+      // Chain onto the current start so it runs after completion.
+      startQueueRef.current = startQueueRef.current
+        .catch(() => {})
+        .then(() => {
+          const queued = pendingStartRef.current;
+          if (!queued || queued.resolve !== resolve) {
+            // A newer call replaced us in the queue.
+            resolve(false);
+            return false;
+          }
+          pendingStartRef.current = null;
+          return doStartKernel(queued.cfg, queued.language).then((ok) => {
+            queued.resolve(ok);
+            return ok;
+          });
+        });
+    });
+  }, [doStartKernel]);
 
   const handleEnvSave = useCallback(async (paths: { pythonPath?: string; juliaPath?: string }): Promise<boolean> => {
     const language = paths.juliaPath && !paths.pythonPath ? 'julia' : 'python';

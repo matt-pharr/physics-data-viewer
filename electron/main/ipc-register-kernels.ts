@@ -120,11 +120,20 @@ export function registerKernelIpcHandlers(
     }
   }
 
+  // Serialize kernel start/restart so concurrent calls cannot race on
+  // the shared commRouter (which causes "CommRouter detached" rejections).
+  let startMutex: Promise<unknown> = Promise.resolve();
+
   ipcMain.handle(IPC.kernels.list, async () => {
     return kernelManager.list();
   });
 
   ipcMain.handle(IPC.kernels.start, async (_event, spec) => {
+    const previous = startMutex;
+    let release!: () => void;
+    startMutex = new Promise<void>((r) => { release = r; });
+    await previous.catch(() => {});
+    try {
     const requestedSpec = spec as Parameters<KernelManager["start"]>[0];
     const pythonPath =
       requestedSpec?.env?.PYTHON_PATH ??
@@ -182,6 +191,9 @@ export function registerKernelIpcHandlers(
     kernelManager.on("kernel:crashed", onCrash);
 
     return kernel;
+    } finally {
+      release();
+    }
   });
 
   ipcMain.handle(IPC.kernels.stop, async (_event, kernelId: string) => {
@@ -209,6 +221,11 @@ export function registerKernelIpcHandlers(
   });
 
   ipcMain.handle(IPC.kernels.restart, async (_event, kernelId: string) => {
+    const previous = startMutex;
+    let release!: () => void;
+    startMutex = new Promise<void>((r) => { release = r; });
+    await previous.catch(() => {});
+    try {
     // Restart preserves activeProjectDir — only reset kernel-scoped state.
     resetKernelState();
 
@@ -281,6 +298,9 @@ export function registerKernelIpcHandlers(
     await bindActiveProjectModules(restarted.id);
 
     return restarted;
+    } finally {
+      release();
+    }
   });
 
   ipcMain.handle(
