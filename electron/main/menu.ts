@@ -13,7 +13,7 @@
  * ipc.ts — menu action payload types and push channel names
  */
 
-import { app, BrowserWindow, Menu, shell, type MenuItemConstructorOptions } from "electron";
+import { app, BrowserWindow, dialog, Menu, shell, type MenuItemConstructorOptions } from "electron";
 
 import { type AppMenuTopLevel, IPC, type MenuActionPayload, type MenuEnabledState } from "./ipc";
 
@@ -34,7 +34,7 @@ function buildOpenRecentSubmenu(): MenuItemConstructorOptions[] {
   if (recentProjects.length === 0) {
     return [{ label: "No Recent Projects", enabled: false }];
   }
-  return recentProjects.map((projectPath) => ({
+  const items: MenuItemConstructorOptions[] = recentProjects.map((projectPath) => ({
     label: projectPath,
     click: () =>
       sendMenuAction({
@@ -42,6 +42,14 @@ function buildOpenRecentSubmenu(): MenuItemConstructorOptions[] {
         path: projectPath,
       }),
   }));
+  items.push(
+    { type: "separator" },
+    {
+      label: "Clear Menu",
+      click: () => sendMenuAction({ action: "recentProjects:clear" }),
+    }
+  );
+  return items;
 }
 
 // Build the full platform-aware application menu template.
@@ -64,6 +72,12 @@ function buildTemplate(): MenuItemConstructorOptions[] {
       id: "file",
       label: "File",
       submenu: [
+        {
+          id: "project:new",
+          label: "New Project",
+          accelerator: "CmdOrCtrl+N",
+          click: () => sendMenuAction({ action: "project:new" }),
+        },
         {
           id: "project:open",
           label: "Open...",
@@ -131,6 +145,23 @@ function buildTemplate(): MenuItemConstructorOptions[] {
           label: "API Docs",
           click: () => void shell.openExternal("https://matt-pharr.github.io/physics-data-viewer/dev/api-reference/"),
         },
+        ...(process.platform !== "darwin"
+          ? [
+              { type: "separator" as const },
+              {
+                label: "About Physics Data Viewer",
+                click: () => {
+                  void dialog.showMessageBox({
+                    type: "info",
+                    title: "About Physics Data Viewer",
+                    message: `Physics Data Viewer v${app.getVersion()}`,
+                    detail: "A desktop application for computational and experimental physics analysis.",
+                    buttons: ["OK"],
+                  });
+                },
+              },
+            ]
+          : []),
       ],
     }
   );

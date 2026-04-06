@@ -205,7 +205,7 @@ export interface CodeCellData {
 /** File-menu action event payload emitted by `menu.onAction`. */
 export interface MenuActionPayload {
   /** Discriminated menu action identifier. */
-  action: "project:open" | "project:openRecent" | "project:save" | "project:saveAs" | "modules:import" | "settings:open";
+  action: "project:new" | "project:open" | "project:openRecent" | "project:save" | "project:saveAs" | "recentProjects:clear" | "modules:import" | "settings:open";
   /** Optional path argument for path-bearing menu actions. */
   path?: string;
 }

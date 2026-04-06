@@ -128,6 +128,7 @@ const App: React.FC = () => {
   // -- Dialog visibility state ----------------------------------------------
 
   const [showWelcome, setShowWelcome] = useState(true);
+  const [forceWelcome, setForceWelcome] = useState(false);
   const [scriptDialog, setScriptDialog] = useState<TreeNodeData | null>(null);
   const [createScriptTarget, setCreateScriptTarget] = useState<string | null>(null);
   const [createNoteTarget, setCreateNoteTarget] = useState<string | null>(null);
@@ -263,7 +264,7 @@ const App: React.FC = () => {
     void window.pdv.menu.updateRecentProjects(recentProjects);
   }, [config]);
 
-  // Listen for File > Import Module... menu action
+  // Listen for File-menu actions handled at the App level.
   useEffect(() => {
     if (!window.pdv?.menu) return;
     const unsub = window.pdv.menu.onAction((payload) => {
@@ -272,6 +273,13 @@ const App: React.FC = () => {
       } else if (payload.action === 'settings:open') {
         setSettingsInitialTab('general');
         setShowSettings(true);
+      } else if (payload.action === 'project:new') {
+        setForceWelcome(true);
+      } else if (payload.action === 'recentProjects:clear') {
+        void window.pdv.config.set({ recentProjects: [] }).then((updated) => {
+          if (updated) setConfig((prev) => (prev ? { ...prev, recentProjects: [] } : prev));
+        });
+        void window.pdv.menu.updateRecentProjects([]);
       }
     });
     return unsub;
@@ -780,7 +788,10 @@ const App: React.FC = () => {
     return () => { cancelled = true; };
   }, [recentProjectPaths]);
 
-  const dismissWelcome = useCallback(() => setShowWelcome(false), []);
+  const dismissWelcome = useCallback(() => {
+    setShowWelcome(false);
+    setForceWelcome(false);
+  }, []);
 
   /**
    * Starts the kernel for the current config, or shows the environment
@@ -1178,7 +1189,7 @@ const App: React.FC = () => {
          envWarning={interpreterWarning}
        />
 
-       {showWelcome && isPristine && (
+       {((showWelcome && isPristine) || forceWelcome) && (
          <WelcomeScreen
            recentProjects={recentProjects}
            onNewProject={handleWelcomeNewProject}
