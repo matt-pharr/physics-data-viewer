@@ -1,0 +1,6 @@
+<svg viewBox="0 0 56 56" xmlns="http://www.w3.org/2000/svg">
+  <circle cx="23" cy="23" r="10" fill="#7F77DD"/>
+  <circle cx="33" cy="23" r="10" fill="#AFA9EC"/>
+  <circle cx="23" cy="33" r="10" fill="#AFA9EC"/>
+  <circle cx="33" cy="33" r="10" fill="#7F77DD"/>
+</svg>

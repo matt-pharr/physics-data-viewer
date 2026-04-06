@@ -2,9 +2,9 @@
 # Compile PDV.icon into Assets.car using actool (requires Xcode).
 set -euo pipefail
 
-REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-ICON_PATH="$REPO_ROOT/electron/assets/pdv-macicon.icon"
-OUTPUT_PATH="$REPO_ROOT/electron/assets"
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+ICON_PATH="$SCRIPT_DIR/../assets/pdv-macicon.icon"
+OUTPUT_PATH="$SCRIPT_DIR/../assets"
 PLIST_PATH="$OUTPUT_PATH/assetcatalog_generated_info.plist"
 
 if [ ! -e "$ICON_PATH" ]; then

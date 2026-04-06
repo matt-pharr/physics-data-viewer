@@ -16,7 +16,7 @@ try:
 except ImportError:
     raise SystemExit("Pillow is required: pip install Pillow")
 
-OUTPUT_DIR = Path(__file__).resolve().parent.parent / "electron" / "assets" / "icon-layers"
+OUTPUT_DIR = Path(__file__).resolve().parent.parent / "assets" / "icon-layers"
 SIZE = 1024
 SCALE = SIZE / 56  # 56 → 1024
 
