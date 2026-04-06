@@ -299,12 +299,17 @@ async function bindImportedModuleV4(
     })
   );
 
+  const dependencies = await moduleManager.getModuleDependencies(
+    importedModule.module_id, projectDir,
+  );
+
   await commRouter.request(PDVMessageType.MODULE_REGISTER, {
     path: importedModule.alias,
     module_id: importedModule.module_id,
     name: moduleName,
     version: moduleVersion,
     module_index: remappedIndex,
+    dependencies,
   });
 }
 
@@ -347,11 +352,15 @@ export async function bindImportedModule(
   const installPath = await resolveModulePath(moduleManager, importedModule.module_id, projectDir);
 
   // 2. Register PDVModule node at the alias path
+  const dependencies = await moduleManager.getModuleDependencies(
+    importedModule.module_id, projectDir,
+  );
   await commRouter.request(PDVMessageType.MODULE_REGISTER, {
     path: importedModule.alias,
     module_id: importedModule.module_id,
     name: moduleName,
     version: moduleVersion,
+    dependencies,
   });
 
   // 3. If module has a GUI, copy gui.json and register PDVGui node

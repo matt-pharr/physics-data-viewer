@@ -798,6 +798,28 @@ export class ModuleManager {
   }
 
   /**
+   * Return the declared dependencies for one module from its manifest.
+   *
+   * @param moduleId - Module identifier.
+   * @param projectDir - Optional project directory for local resolution.
+   * @returns Dependency array from the manifest, or empty array.
+   */
+  async getModuleDependencies(
+    moduleId: string,
+    projectDir?: string | null,
+  ): Promise<Array<{ name: string; version?: string; marker?: string }>> {
+    const module = await this.resolveModuleRecord(moduleId, projectDir);
+    if (!module) return [];
+    const moduleDir = module.installPath ?? path.join(this.packagesRoot, moduleId);
+    try {
+      const manifest = await this.readAndValidateManifest(moduleDir);
+      return manifest.dependencies ?? [];
+    } catch {
+      return [];
+    }
+  }
+
+  /**
    * Return true when an installed module uses the v4 module-index.json format.
    *
    * @param moduleId - Installed module identifier.

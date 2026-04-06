@@ -105,6 +105,9 @@ const mocks = vi.hoisted(() => {
   const moduleManagerResolveModuleFiles = vi.fn(async () => []);
   const moduleManagerIsV4Module = vi.fn(async () => false);
   const moduleManagerReadModuleIndex = vi.fn(async () => []);
+  const moduleManagerGetModuleDependencies = vi.fn(async () => []);
+  const moduleManagerUninstall = vi.fn(async () => ({ success: true }));
+  const moduleManagerUpdate = vi.fn(async () => ({ success: true, status: "installed" }));
   return {
     handlers,
     ipcHandle,
@@ -130,6 +133,9 @@ const mocks = vi.hoisted(() => {
     moduleManagerResolveModuleFiles,
     moduleManagerIsV4Module,
     moduleManagerReadModuleIndex,
+    moduleManagerGetModuleDependencies,
+    moduleManagerUninstall,
+    moduleManagerUpdate,
   };
 });
 
@@ -177,6 +183,9 @@ vi.mock("./module-manager", () => ({
     resolveModuleFiles: mocks.moduleManagerResolveModuleFiles,
     isV4Module: mocks.moduleManagerIsV4Module,
     readModuleIndex: mocks.moduleManagerReadModuleIndex,
+    getModuleDependencies: mocks.moduleManagerGetModuleDependencies,
+    uninstall: mocks.moduleManagerUninstall,
+    update: mocks.moduleManagerUpdate,
   })),
 }));
 
