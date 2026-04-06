@@ -143,7 +143,8 @@ export class ModuleManager {
   private readonly modulesRoot: string;
   private readonly packagesRoot: string;
   private readonly indexPath: string;
-  private readonly bundledModulesDir: string | null;
+  /** Lazily resolved bundled modules directory. `undefined` = not yet resolved. */
+  private _bundledModulesDir: string | null | undefined = undefined;
 
   /**
    * @param pdvDir - PDV application data root (e.g. `~/.PDV`).
@@ -152,7 +153,14 @@ export class ModuleManager {
     this.modulesRoot = path.join(this.pdvDir, "modules");
     this.packagesRoot = path.join(this.modulesRoot, "packages");
     this.indexPath = path.join(this.modulesRoot, "index.json");
-    this.bundledModulesDir = ModuleManager.resolveBundledModulesDir();
+  }
+
+  /** Lazily resolve and cache the bundled modules directory. */
+  private get bundledModulesDir(): string | null {
+    if (this._bundledModulesDir === undefined) {
+      this._bundledModulesDir = ModuleManager.resolveBundledModulesDir();
+    }
+    return this._bundledModulesDir;
   }
 
   /**
@@ -289,7 +297,7 @@ export class ModuleManager {
         if (stat.isDirectory()) return localPath;
       } catch { /* fall through */ }
     }
-    const record = await this.resolveModuleRecord(moduleId);
+    const record = await this.resolveModuleRecord(moduleId, projectDir);
     if (!record) return null;
     return record.installPath ?? path.join(this.packagesRoot, moduleId);
   }
@@ -462,29 +470,48 @@ export class ModuleManager {
       return { success: false, status: "error", error: "No upstream URL configured" };
     }
     const upstream = entry.upstream;
-    // Remove from index so installFromGithubSource treats it as a fresh install.
-    delete index.modules[moduleId];
-    await this.writeIndex(index);
+    // Clone to a staging directory, validate, then atomically replace.
+    // The old module directory and index entry remain untouched until
+    // the new version is fully staged and validated.
+    await this.ensureStoreDirs();
+    const stagingDir = path.join(
+      this.packagesRoot,
+      `stage-update-${moduleId}-${Date.now()}`
+    );
     try {
-      const result = await this.installFromGithubSource({
-        type: "github",
-        location: upstream,
-      });
-      // Preserve the upstream field in the updated record.
-      if (result.success && result.module) {
-        const updatedIndex = await this.readIndex();
-        const record = updatedIndex.modules[result.module.id];
-        if (record) {
-          record.upstream = upstream;
-          await this.writeIndex(updatedIndex);
-        }
-      }
-      return result;
+      await this.runGit(["clone", "--depth", "1", upstream, stagingDir]);
+      const manifest = await this.readAndValidateManifest(stagingDir);
+      const moduleDir = path.join(this.packagesRoot, manifest.id);
+      await this.replaceDirectory(stagingDir, moduleDir);
+
+      // Update the index with the new version.
+      const freshIndex = await this.readIndex();
+      const { stdout: revStdout } = await this.runGit(
+        ["-C", moduleDir, "rev-parse", "--short", "HEAD"]
+      ).catch(() => ({ stdout: "" }));
+      const revision = revStdout.trim() || undefined;
+      freshIndex.modules[manifest.id] = {
+        ...freshIndex.modules[manifest.id],
+        id: manifest.id,
+        name: manifest.name,
+        version: manifest.version,
+        description: manifest.description,
+        language: manifest.language,
+        source: { type: "github", location: upstream },
+        revision,
+        installPath: moduleDir,
+        upstream,
+        updated_at: new Date().toISOString(),
+      };
+      await this.writeIndex(freshIndex);
+      return {
+        success: true,
+        status: "installed",
+        module: this.toDescriptor(freshIndex.modules[manifest.id]!),
+      };
     } catch (error) {
-      // Re-insert the original entry on failure.
-      const fallbackIndex = await this.readIndex();
-      fallbackIndex.modules[moduleId] = entry;
-      await this.writeIndex(fallbackIndex);
+      // Clean up staging directory on failure; original module is untouched.
+      await fs.rm(stagingDir, { recursive: true, force: true }).catch(() => {});
       return {
         success: false,
         status: "error",

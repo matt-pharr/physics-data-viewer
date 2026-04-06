@@ -169,32 +169,6 @@ export function buildModuleActionCode(
 }
 
 /**
- * Resolve the on-disk path for a module, preferring the project-local copy.
- *
- * When a project directory is provided, checks `<projectDir>/modules/<moduleId>/`
- * first. Falls back to the global module store via {@link ModuleManager}.
- *
- * @param moduleManager - Module manager for global store lookups.
- * @param moduleId - Module identifier.
- * @param projectDir - Active project directory, if any.
- * @returns Absolute module directory path, or null when not found.
- */
-async function resolveModulePath(
-  moduleManager: ModuleManager,
-  moduleId: string,
-  projectDir?: string | null,
-): Promise<string | null> {
-  if (projectDir) {
-    const localPath = path.join(projectDir, "modules", moduleId);
-    try {
-      const stat = await fs.stat(localPath);
-      if (stat.isDirectory()) return localPath;
-    } catch { /* fall through to global store */ }
-  }
-  return moduleManager.getModuleInstallPath(moduleId);
-}
-
-/**
  * Build the payload for the `pdv.modules.setup` comm message.
  *
  * For each imported module, resolves the lib directory path (already copied
@@ -271,7 +245,7 @@ async function bindImportedModuleV4(
   moduleVersion: string,
   projectDir?: string | null,
 ): Promise<void> {
-  const installPath = await resolveModulePath(moduleManager, importedModule.module_id, projectDir);
+  const installPath = await moduleManager.resolveModuleDir(importedModule.module_id, projectDir);
   if (!installPath) return;
 
   const moduleIndex = await moduleManager.readModuleIndex(installPath);
@@ -349,7 +323,7 @@ export async function bindImportedModule(
     return;
   }
 
-  const installPath = await resolveModulePath(moduleManager, importedModule.module_id, projectDir);
+  const installPath = await moduleManager.resolveModuleDir(importedModule.module_id, projectDir);
 
   // 2. Register PDVModule node at the alias path
   const dependencies = await moduleManager.getModuleDependencies(
@@ -436,7 +410,7 @@ async function bindImportedModuleLibFilesLegacy(
 ): Promise<void> {
   if (!workingDir) return;
 
-  const installPath = await resolveModulePath(moduleManager, importedModule.module_id, projectDir);
+  const installPath = await moduleManager.resolveModuleDir(importedModule.module_id, projectDir);
   if (!installPath) return;
 
   const libDir = path.join(installPath, "lib");
@@ -499,11 +473,11 @@ async function bindImportedModuleScriptsLegacy(
   moduleManager: ModuleManager,
   importedModule: ProjectModuleImport,
   workingDir: string | undefined,
-  _projectDir?: string | null,
+  projectDir?: string | null,
 ): Promise<void> {
   let scriptBindings: Awaited<ReturnType<ModuleManager["resolveActionScripts"]>>;
   try {
-    scriptBindings = await moduleManager.resolveActionScripts(importedModule.module_id);
+    scriptBindings = await moduleManager.resolveActionScripts(importedModule.module_id, projectDir);
   } catch (error) {
     if (isMissingActionScriptError(error)) return;
     throw error;

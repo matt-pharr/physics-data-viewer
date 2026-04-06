@@ -106,6 +106,7 @@ const mocks = vi.hoisted(() => {
   const moduleManagerIsV4Module = vi.fn(async () => false);
   const moduleManagerReadModuleIndex = vi.fn(async () => []);
   const moduleManagerGetModuleDependencies = vi.fn(async () => []);
+  const moduleManagerResolveModuleDir = vi.fn(async () => null);
   const moduleManagerUninstall = vi.fn(async () => ({ success: true }));
   const moduleManagerUpdate = vi.fn(async () => ({ success: true, status: "installed" }));
   return {
@@ -134,6 +135,7 @@ const mocks = vi.hoisted(() => {
     moduleManagerIsV4Module,
     moduleManagerReadModuleIndex,
     moduleManagerGetModuleDependencies,
+    moduleManagerResolveModuleDir,
     moduleManagerUninstall,
     moduleManagerUpdate,
   };
@@ -184,6 +186,7 @@ vi.mock("./module-manager", () => ({
     isV4Module: mocks.moduleManagerIsV4Module,
     readModuleIndex: mocks.moduleManagerReadModuleIndex,
     getModuleDependencies: mocks.moduleManagerGetModuleDependencies,
+    resolveModuleDir: mocks.moduleManagerResolveModuleDir,
     uninstall: mocks.moduleManagerUninstall,
     update: mocks.moduleManagerUpdate,
   })),
@@ -1020,7 +1023,7 @@ describe("Step 5 IPC handlers", () => {
       expect.stringContaining('"module_id": "demo-module"'),
       "utf8"
     );
-    expect(mocks.moduleManagerResolveActionScripts).toHaveBeenCalledWith("demo-module");
+    expect(mocks.moduleManagerResolveActionScripts).toHaveBeenCalledWith("demo-module", "/tmp/project");
     expect(commRouter.request).toHaveBeenCalledWith(
       PDVMessageType.SCRIPT_REGISTER,
       expect.objectContaining({

@@ -26,7 +26,9 @@ code. It can be imported and tested standalone.
 from __future__ import annotations
 
 import inspect
+import importlib.metadata
 import importlib.util
+import re
 import os
 import sys
 import threading
@@ -304,6 +306,37 @@ class PDVScript(PDVFile):
             return self._doc.split("\n")[0]
         return "PDV script"
 
+    # Regex matching PEP 508 "extra ==" markers (used to declare optional deps).
+    _EXTRA_MARKER_RE = re.compile(r'extra\s*==')
+
+    @staticmethod
+    def _resolve_import_name(dist_name: str) -> str:
+        """Map a pip distribution name to its top-level importable module name.
+
+        Uses ``importlib.metadata`` when the package is installed, falling
+        back to a small hardcoded map for well-known exceptions and then to
+        the simple ``name.replace("-", "_")`` heuristic.
+        """
+        # Well-known exceptions where dist name diverges from import name.
+        _known: dict[str, str] = {
+            "pillow": "PIL",
+            "scikit-learn": "sklearn",
+            "opencv-python": "cv2",
+            "pyyaml": "yaml",
+        }
+        key = dist_name.lower()
+        if key in _known:
+            return _known[key]
+        try:
+            top_level = importlib.metadata.distribution(dist_name).read_text("top_level.txt")
+            if top_level:
+                first = top_level.strip().split()[0]
+                if first:
+                    return first
+        except (importlib.metadata.PackageNotFoundError, FileNotFoundError):
+            pass
+        return dist_name.replace("-", "_")
+
     def _check_module_dependencies(self, tree: "PDVTree") -> None:
         """Verify that the parent module's declared dependencies are importable.
 
@@ -316,16 +349,6 @@ class PDVScript(PDVFile):
         PDVScriptError
             When one or more required packages are missing.
         """
-        # Mapping from pip package names to importable module names.
-        _import_name_map: dict[str, str] = {
-            "pyqt6": "PyQt6",
-            "pyqt5": "PyQt5",
-            "pillow": "PIL",
-            "scikit-learn": "sklearn",
-            "opencv-python": "cv2",
-            "pyyaml": "yaml",
-        }
-
         parent_module: PDVModule | None = None
         for value in dict.values(tree):
             if isinstance(value, PDVModule) and value.module_id == self._module_id:
@@ -338,9 +361,12 @@ class PDVScript(PDVFile):
         for dep in parent_module._dependencies:
             name = dep.get("name", "")
             marker = dep.get("marker", "")
-            if not name or "optional" in marker.lower():
+            if not name:
                 continue
-            import_name = _import_name_map.get(name.lower(), name)
+            # Skip optional dependencies: PEP 508 uses "extra == ..." markers.
+            if marker and self._EXTRA_MARKER_RE.search(marker):
+                continue
+            import_name = self._resolve_import_name(name)
             if importlib.util.find_spec(import_name) is None:
                 missing.append(name)
 

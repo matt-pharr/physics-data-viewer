@@ -187,6 +187,7 @@ export function registerModulesIpcHandlers(
         if (moduleInstallPath) {
           const dest = path.join(activeProjectDir, "modules", installed.id);
           await fs.mkdir(path.join(activeProjectDir, "modules"), { recursive: true });
+          // Overwrites any existing copy from a previous import (intentional).
           await fs.cp(moduleInstallPath, dest, { recursive: true });
         }
       } else {

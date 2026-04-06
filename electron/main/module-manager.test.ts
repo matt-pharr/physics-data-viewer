@@ -332,6 +332,38 @@ describe("ModuleManager", () => {
     );
   });
 
+  it("includes bundled modules in listInstalled", async () => {
+    const bundledDir = path.join(tmpDir, "bundled-modules");
+    const bundledModDir = path.join(bundledDir, "example_mod");
+    await writeModuleFixture(bundledModDir, "example_mod", "1.0.0");
+
+    // Override the lazy bundled modules directory to point at our fixture.
+    (manager as unknown as Record<string, unknown>)._bundledModulesDir = bundledDir;
+
+    const installed = await manager.listInstalled();
+    const bundled = installed.find((m) => m.id === "example_mod");
+    expect(bundled).toBeDefined();
+    expect(bundled?.source.type).toBe("bundled");
+  });
+
+  it("user-installed module takes precedence over bundled with same id", async () => {
+    const bundledDir = path.join(tmpDir, "bundled-modules");
+    const bundledModDir = path.join(bundledDir, "override_mod");
+    await writeModuleFixture(bundledModDir, "override_mod", "1.0.0");
+    (manager as unknown as Record<string, unknown>)._bundledModulesDir = bundledDir;
+
+    // Install a user version of the same module.
+    const localSource = path.join(tmpDir, "local-override");
+    await writeModuleFixture(localSource, "override_mod", "2.0.0");
+    await manager.install({ source: { type: "local", location: localSource } });
+
+    const installed = await manager.listInstalled();
+    const matches = installed.filter((m) => m.id === "override_mod");
+    expect(matches).toHaveLength(1);
+    expect(matches[0]?.version).toBe("2.0.0");
+    expect(matches[0]?.source.type).toBe("local");
+  });
+
   it("parses rich module input descriptors for GUI controls", async () => {
     const localSource = path.join(tmpDir, "rich-input-source");
     await writeModuleFixture(

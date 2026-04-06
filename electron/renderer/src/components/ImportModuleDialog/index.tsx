@@ -36,6 +36,7 @@ export const ImportModuleDialog: React.FC<ImportModuleDialogProps> = ({
   const [installDuplicate, setInstallDuplicate] = useState<InstallDuplicate | null>(null);
   const [githubUrl, setGithubUrl] = useState("");
   const [installing, setInstalling] = useState(false);
+  const [pendingUninstall, setPendingUninstall] = useState<string | null>(null);
 
   const importedModuleIds = React.useMemo(
     () => new Set(imported.map((entry) => entry.moduleId)),
@@ -214,7 +215,14 @@ export const ImportModuleDialog: React.FC<ImportModuleDialogProps> = ({
     }
   };
 
-  const handleUninstall = async (moduleId: string): Promise<void> => {
+  const handleUninstall = (moduleId: string): void => {
+    setPendingUninstall(moduleId);
+  };
+
+  const handleUninstallConfirm = async (): Promise<void> => {
+    if (!pendingUninstall) return;
+    const moduleId = pendingUninstall;
+    setPendingUninstall(null);
     try {
       const result = await window.pdv.modules.uninstall(moduleId);
       if (!result.success && result.error) {
@@ -383,6 +391,23 @@ export const ImportModuleDialog: React.FC<ImportModuleDialogProps> = ({
             </div>
           )}
 
+          {pendingUninstall && (
+            <div className="modules-prompt-block modules-prompt-warning">
+              <div className="modules-prompt-title">Confirm uninstall</div>
+              <div className="modules-prompt-detail">
+                Remove <strong>{pendingUninstall}</strong> from the module library? This cannot be undone.
+              </div>
+              <div className="modules-prompt-actions">
+                <button className="btn btn-secondary btn-danger-text" onClick={() => void handleUninstallConfirm()}>
+                  Uninstall
+                </button>
+                <button className="btn btn-secondary" onClick={() => setPendingUninstall(null)}>
+                  Cancel
+                </button>
+              </div>
+            </div>
+          )}
+
           {/* Imported modules section */}
           {imported.length > 0 && (
             <div className="import-module-section">
@@ -462,7 +487,7 @@ export const ImportModuleDialog: React.FC<ImportModuleDialogProps> = ({
                       {entry.source.type !== "bundled" && (
                         <button
                           className="btn btn-secondary btn-danger-text"
-                          onClick={() => void handleUninstall(entry.id)}
+                          onClick={() => handleUninstall(entry.id)}
                           disabled={loading || importedModuleIds.has(entry.id)}
                           title={importedModuleIds.has(entry.id) ? "Remove import before uninstalling" : "Uninstall from library"}
                         >
