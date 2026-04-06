@@ -103,8 +103,7 @@ describe("ModuleManager", () => {
     expect(result.module?.source.location).toBe(path.resolve(localSource));
 
     const installed = await manager.listInstalled();
-    expect(installed).toHaveLength(1);
-    expect(installed[0]?.id).toBe("local_mod");
+    expect(installed.find((m) => m.id === "local_mod")).toBeDefined();
   });
 
   it("returns up_to_date when reinstalling unchanged local module", async () => {

@@ -889,7 +889,27 @@
 .import-module-actions {
   display: flex;
   gap: 6px;
+  margin-bottom: 8px;
+}
+
+.import-module-github-row {
+  display: flex;
+  gap: 6px;
   margin-bottom: 12px;
+}
+
+.import-module-github-input {
+  flex: 1;
+  padding: 4px 8px;
+  font-size: 12px;
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  background: var(--input-bg);
+  color: var(--text-color);
+}
+
+.import-module-github-input::placeholder {
+  color: var(--text-muted);
 }
 
 .import-module-section {

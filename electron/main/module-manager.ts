@@ -28,6 +28,7 @@ import type {
   ModuleInstallResult,
   ModuleInputValue,
   ModuleSourceReference,
+  ModuleUninstallResult,
   ModuleUpdateResult,
 } from "./ipc";
 import type { ModuleGuiLayout } from "./ipc";
@@ -142,6 +143,7 @@ export class ModuleManager {
   private readonly modulesRoot: string;
   private readonly packagesRoot: string;
   private readonly indexPath: string;
+  private readonly bundledModulesDir: string | null;
 
   /**
    * @param pdvDir - PDV application data root (e.g. `~/.PDV`).
@@ -150,19 +152,172 @@ export class ModuleManager {
     this.modulesRoot = path.join(this.pdvDir, "modules");
     this.packagesRoot = path.join(this.modulesRoot, "packages");
     this.indexPath = path.join(this.modulesRoot, "index.json");
+    this.bundledModulesDir = ModuleManager.resolveBundledModulesDir();
   }
 
   /**
-   * List installed modules from the persisted metadata index.
+   * Locate the bundled example modules directory.
    *
-   * @returns Installed module descriptors sorted by name then id.
+   * In packaged builds the examples are in ``process.resourcesPath``.
+   * In development ``__dirname`` is ``electron/dist/main``; walk upward to
+   * find the repo-root ``examples/modules/`` directory.
+   *
+   * @returns Absolute path, or null when not found.
+   */
+  private static resolveBundledModulesDir(): string | null {
+    if (process.resourcesPath) {
+      const candidate = path.join(process.resourcesPath, "examples", "modules");
+      try {
+        const stat = require("fs").statSync(candidate);
+        if (stat.isDirectory()) return candidate;
+      } catch { /* fall through */ }
+    }
+    for (let dir = __dirname; dir !== path.dirname(dir); dir = path.dirname(dir)) {
+      const candidate = path.join(dir, "examples", "modules");
+      try {
+        const stat = require("fs").statSync(candidate);
+        if (stat.isDirectory()) return candidate;
+      } catch { /* continue */ }
+    }
+    return null;
+  }
+
+  /**
+   * List bundled example modules from the app resources directory.
+   *
+   * @returns Bundled module descriptors (read-only, not in global store).
+   */
+  private async listBundledModules(): Promise<ModuleDescriptor[]> {
+    if (!this.bundledModulesDir) return [];
+    let entries: string[];
+    try {
+      entries = await fs.readdir(this.bundledModulesDir);
+    } catch {
+      return [];
+    }
+    const descriptors: ModuleDescriptor[] = [];
+    for (const entry of entries) {
+      const entryDir = path.join(this.bundledModulesDir, entry);
+      try {
+        const stat = await fs.stat(entryDir);
+        if (!stat.isDirectory()) continue;
+        const manifest = await this.readAndValidateManifest(entryDir);
+        descriptors.push({
+          id: manifest.id,
+          name: manifest.name,
+          version: manifest.version,
+          description: manifest.description,
+          language: manifest.language,
+          source: { type: "bundled", location: entryDir },
+          installPath: entryDir,
+          upstream: manifest.upstream,
+        });
+      } catch {
+        // Skip invalid bundled modules silently.
+      }
+    }
+    return descriptors;
+  }
+
+  /**
+   * Resolve a module record by id, checking the store index first then
+   * falling back to bundled example modules.
+   *
+   * @param moduleId - Module identifier.
+   * @returns Stored record (or a synthetic one for bundled modules), or null.
+   */
+  private async resolveModuleRecord(
+    moduleId: string,
+    projectDir?: string | null,
+  ): Promise<StoredModuleRecord | null> {
+    // Check project-local modules directory first.
+    if (projectDir) {
+      const localPath = path.join(projectDir, "modules", moduleId);
+      try {
+        const stat = await fs.stat(localPath);
+        if (stat.isDirectory()) {
+          const manifest = await this.readAndValidateManifest(localPath);
+          const now = new Date().toISOString();
+          return {
+            id: manifest.id,
+            name: manifest.name,
+            version: manifest.version,
+            description: manifest.description,
+            language: manifest.language,
+            source: { type: "local", location: localPath },
+            installPath: localPath,
+            upstream: manifest.upstream,
+            installed_at: now,
+            updated_at: now,
+          };
+        }
+      } catch { /* fall through */ }
+    }
+
+    const index = await this.readIndex();
+    const record = index.modules[moduleId];
+    if (record) return record;
+
+    // Fall back to bundled modules.
+    const bundled = await this.listBundledModules();
+    const match = bundled.find((m) => m.id === moduleId);
+    if (!match) return null;
+    const now = new Date().toISOString();
+    return {
+      ...match,
+      installed_at: now,
+      updated_at: now,
+    };
+  }
+
+  /**
+   * Resolve the on-disk directory for a module, checking a project-local
+   * ``modules/`` directory first, then the global store and bundled modules.
+   *
+   * @param moduleId - Module identifier.
+   * @param projectDir - Active project directory (optional).
+   * @returns Absolute directory path, or null when not found.
+   */
+  async resolveModuleDir(
+    moduleId: string,
+    projectDir?: string | null,
+  ): Promise<string | null> {
+    if (projectDir) {
+      const localPath = path.join(projectDir, "modules", moduleId);
+      try {
+        const stat = await fs.stat(localPath);
+        if (stat.isDirectory()) return localPath;
+      } catch { /* fall through */ }
+    }
+    const record = await this.resolveModuleRecord(moduleId);
+    if (!record) return null;
+    return record.installPath ?? path.join(this.packagesRoot, moduleId);
+  }
+
+  /**
+   * List installed modules from the persisted metadata index,
+   * merged with bundled example modules.
+   *
+   * User-installed modules with the same ID take precedence over bundled.
+   *
+   * @returns Module descriptors sorted by name then id.
    * @throws {Error} When the metadata index exists but is invalid.
    */
   async listInstalled(): Promise<ModuleDescriptor[]> {
     const index = await this.readIndex();
+    const indexIds = new Set(Object.keys(index.modules));
     const descriptors = Object.values(index.modules).map((record) =>
       this.toDescriptor(record)
     );
+
+    // Merge bundled modules that are not overridden by user-installed ones.
+    const bundled = await this.listBundledModules();
+    for (const bm of bundled) {
+      if (!indexIds.has(bm.id)) {
+        descriptors.push(bm);
+      }
+    }
+
     descriptors.sort((a, b) => {
       const byName = a.name.localeCompare(b.name);
       if (byName !== 0) return byName;
@@ -205,9 +360,35 @@ export class ModuleManager {
   }
 
   /**
-   * Check updates for one installed module.
+   * Uninstall a module from the global store.
    *
-   * v1 currently returns a not-implemented status and does not query remotes.
+   * Removes the module directory and its metadata from the index.
+   * Bundled modules cannot be uninstalled.
+   *
+   * @param moduleId - Module identifier to uninstall.
+   * @returns Uninstall result payload.
+   */
+  async uninstall(moduleId: string): Promise<ModuleUninstallResult> {
+    const index = await this.readIndex();
+    const module = index.modules[moduleId];
+    if (!module) {
+      return { success: false, error: `Module not installed: ${moduleId}` };
+    }
+    if (module.source.type === "bundled") {
+      return { success: false, error: "Cannot uninstall bundled modules" };
+    }
+    const moduleDir = module.installPath ?? path.join(this.packagesRoot, moduleId);
+    await fs.rm(moduleDir, { recursive: true, force: true });
+    delete index.modules[moduleId];
+    await this.writeIndex(index);
+    return { success: true };
+  }
+
+  /**
+   * Check if an update is available for one installed module.
+   *
+   * Uses ``git ls-remote --tags`` against the module's ``upstream`` URL to
+   * discover the latest release tag without cloning the repository.
    *
    * @param moduleId - Installed module id.
    * @returns Update status payload.
@@ -222,12 +403,94 @@ export class ModuleManager {
         message: `Module not installed: ${moduleId}`,
       };
     }
-    return {
-      moduleId,
-      status: "not_implemented",
-      currentVersion: entry.version,
-      message: "Remote update checks are not implemented yet.",
-    };
+    const upstream = entry.upstream;
+    if (!upstream) {
+      return {
+        moduleId,
+        status: "not_implemented",
+        currentVersion: entry.version,
+        message: "No upstream URL configured for this module.",
+      };
+    }
+    try {
+      const { stdout } = await this.runGit(["ls-remote", "--tags", upstream]);
+      const latestTag = this.parseLatestTagFromLsRemote(stdout);
+      if (!latestTag) {
+        return {
+          moduleId,
+          status: "up_to_date",
+          currentVersion: entry.version,
+          message: "No release tags found in upstream repository.",
+        };
+      }
+      if (!isVersionGreaterThan(latestTag, entry.version)) {
+        return {
+          moduleId,
+          status: "up_to_date",
+          currentVersion: entry.version,
+        };
+      }
+      return {
+        moduleId,
+        status: "update_available",
+        currentVersion: entry.version,
+        availableVersion: latestTag,
+      };
+    } catch (error) {
+      return {
+        moduleId,
+        status: "unknown",
+        currentVersion: entry.version,
+        message: `Failed to check upstream: ${error instanceof Error ? error.message : String(error)}`,
+      };
+    }
+  }
+
+  /**
+   * Update an installed module from its upstream source.
+   *
+   * Re-clones from the ``upstream`` URL and replaces the module in the
+   * global store. Projects must re-import to pick up changes.
+   *
+   * @param moduleId - Module identifier to update.
+   * @returns Install result reflecting the update outcome.
+   */
+  async update(moduleId: string): Promise<ModuleInstallResult> {
+    const index = await this.readIndex();
+    const entry = index.modules[moduleId];
+    if (!entry?.upstream) {
+      return { success: false, status: "error", error: "No upstream URL configured" };
+    }
+    const upstream = entry.upstream;
+    // Remove from index so installFromGithubSource treats it as a fresh install.
+    delete index.modules[moduleId];
+    await this.writeIndex(index);
+    try {
+      const result = await this.installFromGithubSource({
+        type: "github",
+        location: upstream,
+      });
+      // Preserve the upstream field in the updated record.
+      if (result.success && result.module) {
+        const updatedIndex = await this.readIndex();
+        const record = updatedIndex.modules[result.module.id];
+        if (record) {
+          record.upstream = upstream;
+          await this.writeIndex(updatedIndex);
+        }
+      }
+      return result;
+    } catch (error) {
+      // Re-insert the original entry on failure.
+      const fallbackIndex = await this.readIndex();
+      fallbackIndex.modules[moduleId] = entry;
+      await this.writeIndex(fallbackIndex);
+      return {
+        success: false,
+        status: "error",
+        error: error instanceof Error ? error.message : String(error),
+      };
+    }
   }
 
   /**
@@ -237,9 +500,8 @@ export class ModuleManager {
    * @returns Canonical script bindings derived from manifest actions.
    * @throws {Error} When the module or any referenced script path is invalid.
    */
-  async resolveActionScripts(moduleId: string): Promise<ModuleScriptBinding[]> {
-    const index = await this.readIndex();
-    const module = index.modules[moduleId];
+  async resolveActionScripts(moduleId: string, projectDir?: string | null): Promise<ModuleScriptBinding[]> {
+    const module = await this.resolveModuleRecord(moduleId, projectDir);
     if (!module) {
       throw new Error(`Installed module not found: ${moduleId}`);
     }
@@ -296,9 +558,8 @@ export class ModuleManager {
    * @param moduleId - Installed module identifier.
    * @returns Input descriptors from the manifest, or empty array.
    */
-  async getModuleInputs(moduleId: string): Promise<ModuleInputDescriptor[]> {
-    const index = await this.readIndex();
-    const module = index.modules[moduleId];
+  async getModuleInputs(moduleId: string, projectDir?: string | null): Promise<ModuleInputDescriptor[]> {
+    const module = await this.resolveModuleRecord(moduleId, projectDir);
     if (!module) {
       return [];
     }
@@ -337,10 +598,10 @@ export class ModuleManager {
    * @returns Object with `hasGui` boolean and optional `gui` layout.
    */
   async getModuleGuiInfo(
-    moduleId: string
+    moduleId: string,
+    projectDir?: string | null,
   ): Promise<{ hasGui: boolean; gui?: ModuleGuiLayout }> {
-    const index = await this.readIndex();
-    const module = index.modules[moduleId];
+    const module = await this.resolveModuleRecord(moduleId, projectDir);
     if (!module) {
       return { hasGui: false };
     }
@@ -379,10 +640,10 @@ export class ModuleManager {
    */
   async evaluateHealth(
     moduleId: string,
-    context: { pdvVersion: string; pythonVersion?: string }
+    context: { pdvVersion: string; pythonVersion?: string },
+    projectDir?: string | null,
   ): Promise<ModuleHealthWarning[]> {
-    const index = await this.readIndex();
-    const module = index.modules[moduleId];
+    const module = await this.resolveModuleRecord(moduleId, projectDir);
     if (!module) {
       return [
         {
@@ -518,8 +779,7 @@ export class ModuleManager {
    * @returns Validated GUI manifest, or null if absent.
    */
   async readAndValidateGuiManifest(moduleId: string): Promise<GuiManifestV1 | null> {
-    const index = await this.readIndex();
-    const module = index.modules[moduleId];
+    const module = await this.resolveModuleRecord(moduleId);
     if (!module) return null;
     const moduleDir = module.installPath ?? path.join(this.packagesRoot, moduleId);
     return readGuiManifest(moduleDir);
@@ -531,9 +791,8 @@ export class ModuleManager {
    * @param moduleId - Installed module identifier.
    * @returns Absolute install path, or null if not installed.
    */
-  async getModuleInstallPath(moduleId: string): Promise<string | null> {
-    const index = await this.readIndex();
-    const module = index.modules[moduleId];
+  async getModuleInstallPath(moduleId: string, projectDir?: string | null): Promise<string | null> {
+    const module = await this.resolveModuleRecord(moduleId, projectDir);
     if (!module) return null;
     return module.installPath ?? path.join(this.packagesRoot, moduleId);
   }
@@ -544,9 +803,8 @@ export class ModuleManager {
    * @param moduleId - Installed module identifier.
    * @returns True when the module manifest has schema_version "4".
    */
-  async isV4Module(moduleId: string): Promise<boolean> {
-    const index = await this.readIndex();
-    const module = index.modules[moduleId];
+  async isV4Module(moduleId: string, projectDir?: string | null): Promise<boolean> {
+    const module = await this.resolveModuleRecord(moduleId, projectDir);
     if (!module) return false;
     const moduleDir = module.installPath ?? path.join(this.packagesRoot, moduleId);
     try {
@@ -594,10 +852,10 @@ export class ModuleManager {
    * @throws {Error} When module is not installed or a file doesn't exist.
    */
   async resolveModuleFiles(
-    moduleId: string
+    moduleId: string,
+    projectDir?: string | null,
   ): Promise<Array<{ name: string; path: string; type: "namelist" | "lib" | "file" }>> {
-    const index = await this.readIndex();
-    const module = index.modules[moduleId];
+    const module = await this.resolveModuleRecord(moduleId, projectDir);
     if (!module) {
       return [];
     }
@@ -635,14 +893,13 @@ export class ModuleManager {
    * @returns Install path and optional python_package/entry_point from manifest.
    * @throws {Error} When module is not installed or manifest is invalid.
    */
-  async getModuleSetupInfo(moduleId: string): Promise<{
+  async getModuleSetupInfo(moduleId: string, projectDir?: string | null): Promise<{
     installPath: string;
     pythonPackage?: string;
     entryPoint?: string;
     libDir?: string;
   }> {
-    const index = await this.readIndex();
-    const module = index.modules[moduleId];
+    const module = await this.resolveModuleRecord(moduleId, projectDir);
     if (!module) {
       throw new Error(`Installed module not found: ${moduleId}`);
     }
@@ -690,6 +947,7 @@ export class ModuleManager {
         language: manifest.language,
         source: normalizedSource,
         installPath: moduleDir,
+        upstream: manifest.upstream,
       };
       const previous = index.modules[manifest.id];
       if (previous) {
@@ -757,6 +1015,7 @@ export class ModuleManager {
         source: normalizedSource,
         revision,
         installPath: moduleDir,
+        upstream: manifest.upstream ?? normalizedSource.location,
       };
       if (previous) {
         const status = this.duplicateInstallStatus(previous, descriptor);
@@ -1062,6 +1321,7 @@ export class ModuleManager {
       source: record.source,
       revision: record.revision,
       installPath: record.installPath,
+      upstream: record.upstream,
     };
   }
 
@@ -1113,5 +1373,31 @@ export class ModuleManager {
       return "incompatible_update";
     }
     return "update_available";
+  }
+
+  /**
+   * Parse ``git ls-remote --tags`` output and return the latest semver tag.
+   *
+   * @param stdout - Raw stdout from git ls-remote.
+   * @returns Latest semver version string (without leading ``v``), or null.
+   */
+  private parseLatestTagFromLsRemote(stdout: string): string | null {
+    let latest: string | null = null;
+    for (const line of stdout.split("\n")) {
+      // Each line: "<sha>\trefs/tags/<tagname>"
+      const match = line.match(/refs\/tags\/v?(\d+\.\d+\.\d+.*)$/);
+      if (!match) continue;
+      let tag = match[1];
+      // Skip dereferenced tag objects (^{})
+      if (tag.endsWith("^{}")) {
+        tag = tag.slice(0, -3);
+      }
+      const semver = parseSemver(tag);
+      if (!semver) continue;
+      if (latest === null || isVersionGreaterThan(tag, latest)) {
+        latest = tag;
+      }
+    }
+    return latest;
   }
 }

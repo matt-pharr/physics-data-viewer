@@ -39,6 +39,12 @@ extraResources:
       - "!**/tests/**"
       - "!**/.pytest_cache/**"
       - "!**/.git/**"
+  - from: ../examples/modules
+    to: examples/modules
+    filter:
+      - "**/*"
+      - "!**/__pycache__/**"
+      - "!**/*.pyc"
 
 # ---------------------------------------------------------------------------
 # macOS
