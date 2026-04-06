@@ -98,6 +98,8 @@ export interface ModuleManifestV1 {
   lib_dir?: string;
   /** v4: Relative path to default gui.json for the ModulesPanel UI. */
   default_gui?: string;
+  /** Git-cloneable upstream URL for update checks. */
+  upstream?: string;
 }
 
 /**
@@ -239,6 +241,7 @@ export function validateModuleManifest(
   const entry_point = optionalString(obj, "entry_point", manifestPath);
   const lib_dir = optionalString(obj, "lib_dir", manifestPath);
   const default_gui = optionalString(obj, "default_gui", manifestPath);
+  const upstream = optionalString(obj, "upstream", manifestPath);
 
   let files: ModuleManifestV1["files"];
   const filesRaw = obj.files;
@@ -281,6 +284,7 @@ export function validateModuleManifest(
     entry_point,
     lib_dir,
     default_gui,
+    upstream,
   };
 }
 

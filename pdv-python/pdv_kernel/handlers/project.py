@@ -250,10 +250,12 @@ def handle_project_load(msg: dict) -> None:
         if node_type == "script":
             language = meta.get("language", node.get("language", "python"))
             doc = meta.get("doc")
+            mod_id = meta.get("module_id", "")
             _set_tree_node(tree, node_path, PDVScript(
                 relative_path=rel_path,
                 language=language,
                 doc=doc,
+                module_id=mod_id,
             ))
         elif node_type == "markdown":
             title = meta.get("title")

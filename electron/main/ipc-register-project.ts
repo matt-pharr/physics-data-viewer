@@ -17,11 +17,13 @@ import * as path from "path";
 import { ipcMain, type BrowserWindow } from "electron";
 
 import { IPC } from "./ipc";
+import { ModuleManager } from "./module-manager";
 import { ProjectManager, type ProjectManifest, type ProjectModuleImport } from "./project-manager";
 import { copyFilesForLoad } from "./project-file-sync";
 
 interface RegisterProjectIpcHandlersOptions {
   projectManager: ProjectManager;
+  moduleManager: ModuleManager;
   kernelWorkingDirs: Map<string, string>;
   getActiveKernelId: () => string | null;
   getActiveKernelLanguage: () => "python" | "julia";
@@ -49,6 +51,7 @@ export function registerProjectIpcHandlers(
 ): void {
   const {
     projectManager,
+    moduleManager,
     kernelWorkingDirs,
     getActiveKernelId,
     getActiveKernelLanguage,
@@ -76,6 +79,16 @@ export function registerProjectIpcHandlers(
       const pendingModuleImports = getPendingModuleImports();
       const pendingModuleSettings = getPendingModuleSettings();
       if (pendingModuleImports.length > 0 || Object.keys(pendingModuleSettings).length > 0) {
+        // Copy pending module contents into the project-local modules directory.
+        for (const pendingModule of pendingModuleImports) {
+          const installPath = await moduleManager.getModuleInstallPath(pendingModule.module_id);
+          if (installPath) {
+            const dest = path.join(saveDir, "modules", pendingModule.module_id);
+            await fs.mkdir(path.join(saveDir, "modules"), { recursive: true });
+            // Overwrites any existing copy from a previous import (intentional).
+            await fs.cp(installPath, dest, { recursive: true });
+          }
+        }
         await runSerializedProjectManifestMutation(saveDir, async () => {
           const manifest = await ProjectManager.readManifest(saveDir);
           const mergedManifest = {

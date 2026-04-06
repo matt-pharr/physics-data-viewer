@@ -34,6 +34,9 @@ export const ImportModuleDialog: React.FC<ImportModuleDialogProps> = ({
   const [lastStatus, setLastStatus] = useState<string | null>(null);
   const [importConflict, setImportConflict] = useState<ImportConflict | null>(null);
   const [installDuplicate, setInstallDuplicate] = useState<InstallDuplicate | null>(null);
+  const [githubUrl, setGithubUrl] = useState("");
+  const [installing, setInstalling] = useState(false);
+  const [pendingUninstall, setPendingUninstall] = useState<string | null>(null);
 
   const importedModuleIds = React.useMemo(
     () => new Set(imported.map((entry) => entry.moduleId)),
@@ -121,6 +124,24 @@ export const ImportModuleDialog: React.FC<ImportModuleDialogProps> = ({
     }
   };
 
+  const handleInstallGithub = async (): Promise<void> => {
+    const url = githubUrl.trim();
+    if (!url) return;
+    try {
+      setInstalling(true);
+      setInstallDuplicate(null);
+      const result = await window.pdv.modules.install({
+        source: { type: "github", location: url },
+      });
+      await handleInstallResult(result);
+      if (result.success) setGithubUrl("");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setInstalling(false);
+    }
+  };
+
   const handleImport = async (moduleId: string): Promise<void> => {
     try {
       setError(null);
@@ -194,6 +215,55 @@ export const ImportModuleDialog: React.FC<ImportModuleDialogProps> = ({
     }
   };
 
+  const handleUninstall = (moduleId: string): void => {
+    setPendingUninstall(moduleId);
+  };
+
+  const handleUninstallConfirm = async (): Promise<void> => {
+    if (!pendingUninstall) return;
+    const moduleId = pendingUninstall;
+    setPendingUninstall(null);
+    try {
+      const result = await window.pdv.modules.uninstall(moduleId);
+      if (!result.success && result.error) {
+        setError(result.error);
+      } else {
+        setError(null);
+        setLastStatus(`Uninstalled: ${moduleId}`);
+      }
+      await refresh();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    }
+  };
+
+  const handleUpdate = async (moduleId: string): Promise<void> => {
+    try {
+      setLoading(true);
+      setError(null);
+      const checkResult = await window.pdv.modules.checkUpdates(moduleId);
+      if (checkResult.status !== "update_available") {
+        setLastStatus(
+          checkResult.status === "up_to_date"
+            ? `${moduleId} is up to date (v${checkResult.currentVersion})`
+            : checkResult.message ?? "Unable to check for updates."
+        );
+        return;
+      }
+      const updateResult = await window.pdv.modules.update(moduleId);
+      if (updateResult.success && updateResult.module) {
+        setLastStatus(`Updated ${updateResult.module.name} to v${updateResult.module.version}`);
+      } else if (updateResult.error) {
+        setError(updateResult.error);
+      }
+      await refresh();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const formatVersionLabel = (version: string, revision?: string): string => {
     if (revision) {
       return `v${version} (${revision.slice(0, 8)})`;
@@ -203,6 +273,13 @@ export const ImportModuleDialog: React.FC<ImportModuleDialogProps> = ({
 
   const renderModuleBadges = (entry: ModuleDescriptor): React.ReactNode => {
     const badges: React.ReactNode[] = [];
+    if (entry.source.type === "bundled") {
+      badges.push(
+        <span key="bundled" className="modules-status-badge modules-badge-bundled">
+          Bundled
+        </span>
+      );
+    }
     if (importedModuleIds.has(entry.id)) {
       badges.push(
         <span key="imported" className="modules-status-badge modules-badge-imported">
@@ -234,7 +311,24 @@ export const ImportModuleDialog: React.FC<ImportModuleDialogProps> = ({
           <div className="import-module-actions">
             <button className="btn btn-secondary" onClick={() => void refresh()} disabled={loading}>Refresh</button>
             <button className="btn btn-secondary" onClick={() => void handleInstallLocal()} disabled={loading}>Install Local</button>
-            <button className="btn btn-secondary" disabled title="Coming soon">Install GitHub</button>
+          </div>
+          <div className="import-module-github-row">
+            <input
+              type="text"
+              className="import-module-github-input"
+              placeholder="https://github.com/user/repo"
+              value={githubUrl}
+              onChange={(e) => setGithubUrl(e.target.value)}
+              onKeyDown={(e) => { if (e.key === "Enter") void handleInstallGithub(); }}
+              disabled={loading || installing}
+            />
+            <button
+              className="btn btn-secondary"
+              onClick={() => void handleInstallGithub()}
+              disabled={loading || installing || !githubUrl.trim()}
+            >
+              {installing ? "Installing..." : "Install GitHub"}
+            </button>
           </div>
 
           {!projectDir && (
@@ -291,6 +385,23 @@ export const ImportModuleDialog: React.FC<ImportModuleDialogProps> = ({
                   Import as "{importConflict.suggestedAlias}"
                 </button>
                 <button className="btn btn-secondary" onClick={handleConflictCancel}>
+                  Cancel
+                </button>
+              </div>
+            </div>
+          )}
+
+          {pendingUninstall && (
+            <div className="modules-prompt-block modules-prompt-warning">
+              <div className="modules-prompt-title">Confirm uninstall</div>
+              <div className="modules-prompt-detail">
+                Remove <strong>{pendingUninstall}</strong> from the module library? This cannot be undone.
+              </div>
+              <div className="modules-prompt-actions">
+                <button className="btn btn-secondary btn-danger-text" onClick={() => void handleUninstallConfirm()}>
+                  Uninstall
+                </button>
+                <button className="btn btn-secondary" onClick={() => setPendingUninstall(null)}>
                   Cancel
                 </button>
               </div>
@@ -355,13 +466,35 @@ export const ImportModuleDialog: React.FC<ImportModuleDialogProps> = ({
                         {entry.description && ` · ${entry.description}`}
                       </div>
                     </div>
-                    <button
-                      className="btn btn-secondary"
-                      onClick={() => void handleImport(entry.id)}
-                      disabled={loading}
-                    >
-                      Import
-                    </button>
+                    <div className="modules-list-item-actions">
+                      <button
+                        className="btn btn-secondary"
+                        onClick={() => void handleImport(entry.id)}
+                        disabled={loading}
+                      >
+                        Import
+                      </button>
+                      {entry.upstream && (
+                        <button
+                          className="btn btn-secondary"
+                          onClick={() => void handleUpdate(entry.id)}
+                          disabled={loading}
+                          title="Check for updates and install latest version"
+                        >
+                          Update
+                        </button>
+                      )}
+                      {entry.source.type !== "bundled" && (
+                        <button
+                          className="btn btn-secondary btn-danger-text"
+                          onClick={() => handleUninstall(entry.id)}
+                          disabled={loading || importedModuleIds.has(entry.id)}
+                          title={importedModuleIds.has(entry.id) ? "Remove import before uninstalling" : "Uninstall from library"}
+                        >
+                          Uninstall
+                        </button>
+                      )}
+                    </div>
                   </li>
                 ))}
               </ul>

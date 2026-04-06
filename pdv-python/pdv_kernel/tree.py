@@ -26,7 +26,9 @@ code. It can be imported and tested standalone.
 from __future__ import annotations
 
 import inspect
+import importlib.metadata
 import importlib.util
+import re
 import os
 import sys
 import threading
@@ -263,10 +265,12 @@ class PDVScript(PDVFile):
     ARCHITECTURE.md §5.7
     """
 
-    def __init__(self, relative_path: str, language: str = "python", doc: str | None = None) -> None:
+    def __init__(self, relative_path: str, language: str = "python",
+                 doc: str | None = None, module_id: str = "") -> None:
         super().__init__(relative_path)
         self._language = language
         self._doc = doc
+        self._module_id = module_id
 
     @property
     def language(self) -> str:
@@ -301,6 +305,76 @@ class PDVScript(PDVFile):
         if self._doc:
             return self._doc.split("\n")[0]
         return "PDV script"
+
+    # Regex matching PEP 508 "extra ==" markers (used to declare optional deps).
+    _EXTRA_MARKER_RE = re.compile(r'extra\s*==')
+
+    @staticmethod
+    def _resolve_import_name(dist_name: str) -> str:
+        """Map a pip distribution name to its top-level importable module name.
+
+        Uses ``importlib.metadata`` when the package is installed, falling
+        back to a small hardcoded map for well-known exceptions and then to
+        the simple ``name.replace("-", "_")`` heuristic.
+        """
+        # Well-known exceptions where dist name diverges from import name.
+        _known: dict[str, str] = {
+            "pillow": "PIL",
+            "scikit-learn": "sklearn",
+            "opencv-python": "cv2",
+            "pyyaml": "yaml",
+        }
+        key = dist_name.lower()
+        if key in _known:
+            return _known[key]
+        try:
+            top_level = importlib.metadata.distribution(dist_name).read_text("top_level.txt")
+            if top_level:
+                first = top_level.strip().split()[0]
+                if first:
+                    return first
+        except (importlib.metadata.PackageNotFoundError, FileNotFoundError):
+            pass
+        return dist_name.replace("-", "_")
+
+    def _check_module_dependencies(self, tree: "PDVTree") -> None:
+        """Verify that the parent module's declared dependencies are importable.
+
+        Searches top-level tree values for a :class:`PDVModule` whose
+        ``module_id`` matches this script's ``_module_id``, then checks each
+        non-optional dependency with :func:`importlib.util.find_spec`.
+
+        Raises
+        ------
+        PDVScriptError
+            When one or more required packages are missing.
+        """
+        parent_module: PDVModule | None = None
+        for value in dict.values(tree):
+            if isinstance(value, PDVModule) and value.module_id == self._module_id:
+                parent_module = value
+                break
+        if parent_module is None or not parent_module._dependencies:
+            return
+
+        missing: list[str] = []
+        for dep in parent_module._dependencies:
+            name = dep.get("name", "")
+            marker = dep.get("marker", "")
+            if not name:
+                continue
+            # Skip optional dependencies: PEP 508 uses "extra == ..." markers.
+            if marker and self._EXTRA_MARKER_RE.search(marker):
+                continue
+            import_name = self._resolve_import_name(name)
+            if importlib.util.find_spec(import_name) is None:
+                missing.append(name)
+
+        if missing:
+            raise PDVScriptError(
+                f"Module '{parent_module.name}' requires packages not installed "
+                f"in the active environment: {', '.join(missing)}"
+            )
 
     def run(self, tree: "PDVTree" | None = None, **kwargs: Any) -> Any:
         """Load and execute the script, calling its ``run()`` function.
@@ -342,6 +416,13 @@ class PDVScript(PDVFile):
 
         if not os.path.exists(file_path):
             raise FileNotFoundError(f"Script file not found: {file_path}")
+
+        # Pre-flight dependency check: if this script belongs to a module
+        # with declared dependencies, verify they are importable before
+        # running. This catches missing-package errors early with a clear
+        # message instead of a cryptic ImportError mid-execution.
+        if self._module_id and tree is not None:
+            self._check_module_dependencies(tree)
 
         module_name = f"_pdv_script_{abs(hash(file_path))}"
         if module_name in sys.modules:
@@ -983,12 +1064,14 @@ class PDVModule(PDVTree):
     """
 
     def __init__(self, module_id: str, name: str, version: str,
-                 gui: PDVGui | None = None) -> None:
+                 gui: PDVGui | None = None,
+                 dependencies: list[dict[str, str]] | None = None) -> None:
         super().__init__()
         self._module_id = module_id
         self._name = name
         self._version = version
         self._gui = gui
+        self._dependencies: list[dict[str, str]] = dependencies or []
 
     @property
     def module_id(self) -> str:

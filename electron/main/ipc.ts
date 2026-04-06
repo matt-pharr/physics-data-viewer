@@ -99,6 +99,8 @@ export const IPC = {
     saveSettings: "modules:saveSettings",
     runAction: "modules:runAction",
     removeImport: "modules:removeImport",
+    uninstall: "modules:uninstall",
+    update: "modules:update",
   },
   /** Namelist read/write channels. */
   namelist: {
@@ -445,7 +447,7 @@ export interface ScriptRunResult {
 /**
  * Supported module install source kinds.
  */
-export type ModuleSourceType = "github" | "local";
+export type ModuleSourceType = "github" | "local" | "bundled";
 
 /**
  * Canonical source reference for an installed module.
@@ -477,6 +479,8 @@ export interface ModuleDescriptor {
   revision?: string;
   /** Optional absolute install path in module store. */
   installPath?: string;
+  /** Optional git-cloneable upstream URL for update checks. */
+  upstream?: string;
 }
 
 /**
@@ -723,6 +727,16 @@ export interface ModuleActionResult {
   status: "queued" | "not_implemented" | "error";
   /** Optional generated execution code for traceability. */
   executionCode?: string;
+  /** Optional user-facing error message. */
+  error?: string;
+}
+
+/**
+ * Result payload for `modules.uninstall`.
+ */
+export interface ModuleUninstallResult {
+  /** True when uninstall succeeded. */
+  success: boolean;
   /** Optional user-facing error message. */
   error?: string;
 }
@@ -1447,6 +1461,20 @@ export interface PDVApi {
      * @returns Removal result payload.
      */
     removeImport(moduleAlias: string): Promise<ModuleSettingsResult>;
+    /**
+     * Uninstall a module from the global store.
+     *
+     * @param moduleId - Module identifier to uninstall.
+     * @returns Uninstall result payload.
+     */
+    uninstall(moduleId: string): Promise<ModuleUninstallResult>;
+    /**
+     * Update an installed module from its upstream source.
+     *
+     * @param moduleId - Module identifier to update.
+     * @returns Install result payload reflecting the update outcome.
+     */
+    update(moduleId: string): Promise<ModuleInstallResult>;
   };
 
   /** Project save/load operations. */

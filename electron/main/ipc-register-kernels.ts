@@ -114,7 +114,7 @@ export function registerKernelIpcHandlers(
     }
     if (!manifest.modules || manifest.modules.length === 0) return;
     const workingDir = kernelWorkingDirs.get(kernelId);
-    const payload = await buildModulesSetupPayload(moduleManager, manifest.modules, workingDir);
+    const payload = await buildModulesSetupPayload(moduleManager, manifest.modules, workingDir, projectDir);
     if (payload.modules.length > 0) {
       await commRouter.request(PDVMessageType.MODULES_SETUP, payload);
     }

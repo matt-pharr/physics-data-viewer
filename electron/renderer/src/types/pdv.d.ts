@@ -342,7 +342,7 @@ export interface Config {
 }
 
 /** Supported module install source kinds. */
-export type ModuleSourceType = "github" | "local";
+export type ModuleSourceType = "github" | "local" | "bundled";
 
 /** Canonical source reference for module install metadata. */
 export interface ModuleSourceReference {
@@ -360,6 +360,7 @@ export interface ModuleDescriptor {
   source: ModuleSourceReference;
   revision?: string;
   installPath?: string;
+  upstream?: string;
 }
 
 /** Request payload for `modules.install`. */
@@ -399,6 +400,12 @@ export interface ModuleImportResult {
   alias?: string;
   suggestedAlias?: string;
   warnings?: ModuleHealthWarning[];
+  error?: string;
+}
+
+/** Result payload for `modules.uninstall`. */
+export interface ModuleUninstallResult {
+  success: boolean;
   error?: string;
 }
 
@@ -778,6 +785,8 @@ export interface PDVApi {
     saveSettings(request: ModuleSettingsRequest): Promise<ModuleSettingsResult>;
     runAction(request: ModuleActionRequest): Promise<ModuleActionResult>;
     removeImport(moduleAlias: string): Promise<ModuleSettingsResult>;
+    uninstall(moduleId: string): Promise<ModuleUninstallResult>;
+    update(moduleId: string): Promise<ModuleInstallResult>;
   };
   project: {
     save(saveDir: string, codeCells: unknown): Promise<ProjectSaveResult>;

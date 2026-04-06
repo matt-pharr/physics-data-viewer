@@ -115,6 +115,8 @@ const api: PDVApi = {
     saveSettings: (request) => ipcRenderer.invoke(IPC.modules.saveSettings, request),
     runAction: (request) => ipcRenderer.invoke(IPC.modules.runAction, request),
     removeImport: (moduleAlias) => ipcRenderer.invoke(IPC.modules.removeImport, moduleAlias),
+    uninstall: (moduleId) => ipcRenderer.invoke(IPC.modules.uninstall, moduleId),
+    update: (moduleId) => ipcRenderer.invoke(IPC.modules.update, moduleId),
   },
   project: {
     save: (saveDir, codeCells) =>
