@@ -46,6 +46,11 @@ extraResources:
 mac:
   category: public.app-category.developer-tools
   icon: assets/pdv-icon.icns
+  extraResources:
+    - from: assets/Assets.car
+      to: Assets.car
+  extendInfo:
+    CFBundleIconName: pdv-macicon
   target:
     - target: dmg
       arch:
