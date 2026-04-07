@@ -72,6 +72,7 @@ export const IPC = {
     addFile: "tree:addFile",
     createGui: "tree:createGui",
     invokeHandler: "tree:invokeHandler",
+    delete: "tree:delete",
   },
   /** Namespace inspection channels. */
   namespace: {

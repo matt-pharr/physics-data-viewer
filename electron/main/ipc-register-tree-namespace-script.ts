@@ -582,6 +582,28 @@ export function registerTreeNamespaceScriptIpcHandlers(
   );
 
   ipcMain.handle(
+    IPC.tree.delete,
+    async (
+      _event,
+      kernelId: string,
+      treePath: string
+    ): Promise<{ success: boolean; error?: string }> => {
+      if (!kernelManager.getKernel(kernelId)) {
+        return { success: false, error: `Kernel not found: ${kernelId}` };
+      }
+      try {
+        await commRouter.request(PDVMessageType.TREE_DELETE, {
+          path: treePath,
+        });
+        return { success: true };
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        return { success: false, error: message };
+      }
+    }
+  );
+
+  ipcMain.handle(
     IPC.namelist.read,
     async (
       _event,

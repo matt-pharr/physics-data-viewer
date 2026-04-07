@@ -754,8 +754,12 @@ export interface PDVApi {
       kernelId: string,
       path: string
     ): Promise<{ success: boolean; error?: string }>;
+    delete(
+      kernelId: string,
+      treePath: string
+    ): Promise<{ success: boolean; error?: string }>;
     onChanged(
-      callback: (payload: { changed_paths: string[]; change_type: "added" | "removed" | "updated" }) => void
+      callback: (payload: { changed_paths: string[]; change_type: "added" | "removed" | "updated" | "batch" }) => void
     ): () => void;
   };
   namespace: {

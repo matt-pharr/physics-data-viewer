@@ -18,3 +18,6 @@ export const NAMESPACE_REFRESH_INTERVAL_MS = 2000;
 
 /** Maximum recent projects to retain. */
 export const MAX_RECENT_PROJECTS = 10;
+
+/** Maximum console log entries before oldest are dropped. */
+export const MAX_LOG_ENTRIES = 2000;

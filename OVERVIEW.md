@@ -90,20 +90,6 @@ Notes are created via the tree panel context menu ("New Note") or programmatical
 
 See `ARCHITECTURE.md` §5.8 and §7.2 for the data model details.
 
-## Branch delta (`frontend_refactor` vs `develop`)
-
-Notable differences currently documented in this branch:
-
-- Settings dialog expanded (General, Shortcuts, Appearance, Runtime, About).
-- Appearance includes VSCode/Xcode theme support, Monaco theme synchronization,
-  light/dark pairing, and configurable code/display fonts.
-- Code-cell UX includes browser-style tab shortcuts and global undo of
-  clear/close outside Monaco (`Cmd/Ctrl+Z`).
-- Main-process preferences moved to `~/.PDV/preferences.json`; custom themes and
-  code-cell persistence are stored under `~/.PDV/themes/` and `~/.PDV/state/`.
-- Preload API includes streamed execute output, About version endpoint, and menu
-  action subscription hooks used by the renderer shell.
-
 ## Developer setup
 
 Install and run from the repository root:
