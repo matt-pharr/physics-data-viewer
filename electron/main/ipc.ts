@@ -1300,6 +1300,17 @@ export interface PDVApi {
       path: string
     ): Promise<HandlerInvokeResult>;
     /**
+     * Delete a tree node by dot-path.
+     *
+     * @param kernelId - Target kernel ID.
+     * @param treePath - Dot-separated path of the node to delete.
+     * @returns Success/error result.
+     */
+    delete(
+      kernelId: string,
+      treePath: string
+    ): Promise<{ success: boolean; error?: string }>;
+    /**
      * Subscribe to tree change push notifications.
      *
      * @param callback - Invoked with each tree-changed payload.
