@@ -9,7 +9,7 @@
   "lib_dir": "lib",
   "default_gui": "gui.json",
   "compatibility": {
-    "pdv_min": "0.1.0",
+    "pdv_min": "0.0.8",
     "pdv_max": "99.0.0",
     "julia": ">=1.10"
   },

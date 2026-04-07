@@ -72,6 +72,7 @@ export const IPC = {
     addFile: "tree:addFile",
     createGui: "tree:createGui",
     invokeHandler: "tree:invokeHandler",
+    delete: "tree:delete",
   },
   /** Namespace inspection channels. */
   namespace: {
@@ -1298,6 +1299,17 @@ export interface PDVApi {
       kernelId: string,
       path: string
     ): Promise<HandlerInvokeResult>;
+    /**
+     * Delete a tree node by dot-path.
+     *
+     * @param kernelId - Target kernel ID.
+     * @param treePath - Dot-separated path of the node to delete.
+     * @returns Success/error result.
+     */
+    delete(
+      kernelId: string,
+      treePath: string
+    ): Promise<{ success: boolean; error?: string }>;
     /**
      * Subscribe to tree change push notifications.
      *

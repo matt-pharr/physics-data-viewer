@@ -900,25 +900,6 @@ function _listPyenvVersions(): string[] {
 }
 
 /**
- * Compare two semver-like version strings.
- *
- * @param newer - Candidate newer version.
- * @param older - Candidate older version.
- * @returns True when ``newer`` is strictly greater than ``older``.
- */
-function _isNewerVersion(newer: string, older: string): boolean {
-  const a = newer.split(".").map(Number);
-  const b = older.split(".").map(Number);
-  for (let i = 0; i < Math.max(a.length, b.length); i++) {
-    const av = a[i] ?? 0;
-    const bv = b[i] ?? 0;
-    if (av > bv) return true;
-    if (av < bv) return false;
-  }
-  return false;
-}
-
-/**
  * Probe a Julia executable and return a {@link DetectedJuliaEnvironment} if valid.
  *
  * Runs ``julia --version`` with {@link PROBE_TIMEOUT_MS}.

@@ -43,7 +43,7 @@ import type {
 } from '../types';
 import { resolveShortcuts } from '../shortcuts';
 import { normalizeLoadedCodeCells, normalizeRecentProjects, mergeConfigUpdate } from './app-utils';
-import { CELL_UNDO_LIMIT, NAMESPACE_REFRESH_INTERVAL_MS } from './constants';
+import { CELL_UNDO_LIMIT, MAX_LOG_ENTRIES, NAMESPACE_REFRESH_INTERVAL_MS } from './constants';
 import { useCodeCellsPersistence } from './useCodeCellsPersistence';
 import { useKeyboardShortcuts } from './useKeyboardShortcuts';
 import { useKernelLifecycle } from './useKernelLifecycle';
@@ -611,6 +611,16 @@ const App: React.FC = () => {
       if (!result.success && result.error) {
         console.error('[App] Handler failed:', result.error);
       }
+    } else if (action === 'delete') {
+      if (!currentKernelId || !node.path) return;
+      const confirmed = window.confirm(
+        `Delete "${node.path}" from the tree?\n\nThis cannot be undone.`
+      );
+      if (!confirmed) return;
+      const result = await window.pdv.tree.delete(currentKernelId, node.path);
+      if (!result.success) {
+        console.error('[App] Delete failed:', result.error);
+      }
     } else if (action === 'print') {
       if (!currentKernelId) return;
       const pyExpr = node.path
@@ -643,7 +653,10 @@ const App: React.FC = () => {
       duration: result.duration,
       images: result.images,
     };
-    setLogs((prev) => [...prev, logEntry]);
+    setLogs((prev) => {
+      const next = [...prev, logEntry];
+      return next.length > MAX_LOG_ENTRIES ? next.slice(next.length - MAX_LOG_ENTRIES) : next;
+    });
     if (result.error) {
       setLastError(result.error);
     }
@@ -676,10 +689,13 @@ const App: React.FC = () => {
     };
 
     // Create the log entry immediately so output appears as it streams in.
-    setLogs((prev) => [
-      ...prev,
-      { id: executionId, timestamp: Date.now(), code, origin },
-    ]);
+    setLogs((prev) => {
+      const next = [
+        ...prev,
+        { id: executionId, timestamp: Date.now(), code, origin },
+      ];
+      return next.length > MAX_LOG_ENTRIES ? next.slice(next.length - MAX_LOG_ENTRIES) : next;
+    });
 
     try {
       const result = await window.pdv.kernels.execute(currentKernelId, {

@@ -93,6 +93,10 @@ export const PDVMessageType = {
   TREE_RESOLVE_FILE: "pdv.tree.resolve_file",
   /** Kernel → app. Returns the resolved absolute file path. */
   TREE_RESOLVE_FILE_RESPONSE: "pdv.tree.resolve_file.response",
+  /** App → kernel. Delete a node from the tree by path. */
+  TREE_DELETE: "pdv.tree.delete",
+  /** Kernel → app. Confirms node deletion. */
+  TREE_DELETE_RESPONSE: "pdv.tree.delete.response",
   /** Kernel → app (push). Tree structure changed. */
   TREE_CHANGED: "pdv.tree.changed",
 
@@ -279,7 +283,7 @@ export interface PDVTreeChangedPayload {
   /** Dot-paths of changed nodes. */
   changed_paths: string[];
   /** Type of change. */
-  change_type: "added" | "removed" | "updated";
+  change_type: "added" | "removed" | "updated" | "batch";
 }
 
 // ---------------------------------------------------------------------------

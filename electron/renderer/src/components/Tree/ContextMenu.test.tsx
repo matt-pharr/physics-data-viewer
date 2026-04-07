@@ -107,7 +107,7 @@ describe('ContextMenu', () => {
     expect(onClose).toHaveBeenCalledTimes(2);
   });
 
-  it('shows disabled delete action and shortcut hints', () => {
+  it('shows enabled delete action and shortcut hints', () => {
     render(
       <ContextMenu
         x={10}
@@ -120,7 +120,7 @@ describe('ContextMenu', () => {
     );
 
     const deleteButton = screen.getByRole('button', { name: /^Delete/ }) as HTMLButtonElement;
-    expect(deleteButton.disabled).toBe(true);
+    expect(deleteButton.disabled).toBe(false);
     expect(screen.getByText('E')).toBeTruthy();
     expect(screen.getByText('P')).toBeTruthy();
     expect(screen.getByText(/Ctrl\+C|⌘C/)).toBeTruthy();
