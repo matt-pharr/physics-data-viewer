@@ -222,9 +222,10 @@ export class EnvironmentDetector {
       }
     };
 
-    // 1. User-configured path.
+    // 1. User-configured path — infer the real kind so it gets the correct
+    //    badge and label instead of always showing "Configured *".
     if (configuredPath) {
-      const env = await _probeEnv(configuredPath, "configured");
+      const env = await _probeEnv(configuredPath, _inferKind(configuredPath));
       if (env) add(env);
     }
 
@@ -579,7 +580,7 @@ export class EnvironmentDetector {
   static async checkEnvironment(
     pythonPath: string
   ): Promise<EnvironmentInfo | null> {
-    const env = await _probeEnv(pythonPath, "configured");
+    const env = await _probeEnv(pythonPath, _inferKind(pythonPath));
     if (!env) return null;
     return EnvironmentDetector.enrichEnvironment(env);
   }
@@ -689,6 +690,32 @@ function _pythonInPrefix(prefix: string): string {
   return process.platform === "win32"
     ? path.join(prefix, "python.exe")
     : path.join(prefix, "bin", "python");
+}
+
+/**
+ * Infer the environment kind from a Python executable path by checking whether
+ * it lives inside a conda prefix, virtualenv, pyenv version directory, etc.
+ *
+ * Falls back to ``"configured"`` when no known layout matches.
+ *
+ * @param pythonPath - Absolute path to a Python executable.
+ * @returns The inferred {@link EnvironmentKind}.
+ */
+function _inferKind(pythonPath: string): EnvironmentKind {
+  const resolved = path.resolve(pythonPath);
+
+  // pyenv: ~/.pyenv/versions/<name>/bin/python
+  const pyenvRoot = path.join(os.homedir(), ".pyenv", "versions");
+  if (resolved.startsWith(pyenvRoot + path.sep)) return "pyenv";
+
+  // conda: check if the prefix contains conda-meta/
+  const prefix = path.dirname(path.dirname(resolved)); // strip bin/python
+  if (fs.existsSync(path.join(prefix, "conda-meta"))) return "conda";
+
+  // venv: check for pyvenv.cfg in the prefix
+  if (fs.existsSync(path.join(prefix, "pyvenv.cfg"))) return "venv";
+
+  return "configured";
 }
 
 /**

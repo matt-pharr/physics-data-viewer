@@ -46,6 +46,14 @@ const KIND_ICONS: Record<string, string> = {
   configured: '*',
 };
 
+const KIND_TOOLTIPS: Record<string, string> = {
+  conda: 'Conda environment',
+  venv: 'Virtual environment',
+  pyenv: 'pyenv environment',
+  system: 'System Python',
+  configured: 'Manually configured',
+};
+
 // ---------------------------------------------------------------------------
 // Component
 // ---------------------------------------------------------------------------
@@ -279,7 +287,7 @@ export const EnvironmentSelector: React.FC<EnvironmentSelectorProps> = ({
             onClick={() => handleSelect(env)}
             type="button"
           >
-            <span className={`env-kind-badge env-kind-badge--${env.kind}`}>
+            <span className={`env-kind-badge env-kind-badge--${env.kind}`} title={KIND_TOOLTIPS[env.kind] ?? 'Unknown'}>
               {KIND_ICONS[env.kind] ?? '?'}
             </span>
             <span className="env-row-info">
