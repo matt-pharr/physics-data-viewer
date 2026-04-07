@@ -102,16 +102,14 @@ def _write_parquet(value: Any, path: str) -> None:
     engine = _parquet_engine()
     try:
         value.to_parquet(path, engine=engine)
-    except Exception:
+    except Exception as primary_err:
         # pyarrow can raise extension-type conflicts on repeated writes
         # in the same process.  Fall back to the other engine if possible.
         fallback = "fastparquet" if engine == "pyarrow" else "pyarrow"
         try:
             value.to_parquet(path, engine=fallback)
         except ImportError:
-            raise  # re-raise original if fallback isn't installed
-        except Exception:
-            raise  # re-raise fallback error
+            raise primary_err from primary_err
 
 
 def _read_parquet(path: str) -> Any:
@@ -125,14 +123,12 @@ def _read_parquet(path: str) -> Any:
     engine = _parquet_engine()
     try:
         return pd.read_parquet(path, engine=engine)
-    except Exception:
+    except Exception as primary_err:
         fallback = "fastparquet" if engine == "pyarrow" else "pyarrow"
         try:
             return pd.read_parquet(path, engine=fallback)
         except ImportError:
-            raise
-        except Exception:
-            raise
+            raise primary_err from primary_err
 
 
 def python_type_string(value: Any) -> str:

@@ -35,7 +35,6 @@ export const SaveAsDialog: React.FC<SaveAsDialogProps> = ({
 }) => {
   const [name, setName] = useState(defaultName ?? '');
   const [location, setLocation] = useState(defaultLocation ?? '');
-  const [error, setError] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
@@ -50,13 +49,11 @@ export const SaveAsDialog: React.FC<SaveAsDialogProps> = ({
     const picked = await window.pdv.files.pickDirectory(location || undefined);
     if (picked) {
       setLocation(picked);
-      setError(null);
     }
   };
 
   const handleSubmit = () => {
     if (!canSave) return;
-    setError(null);
     // Build the full save directory path: <location>/<sanitizedName>
     const sep = location.endsWith('/') || location.endsWith('\\') ? '' : '/';
     const saveDir = `${location}${sep}${sanitized}`;
@@ -80,7 +77,7 @@ export const SaveAsDialog: React.FC<SaveAsDialogProps> = ({
               ref={inputRef}
               type="text"
               value={name}
-              onChange={(e) => { setName(e.target.value); setError(null); }}
+              onChange={(e) => setName(e.target.value)}
               onKeyDown={(e) => {
                 if (e.key === 'Enter') {
                   e.preventDefault();
@@ -121,7 +118,6 @@ export const SaveAsDialog: React.FC<SaveAsDialogProps> = ({
             </div>
           )}
 
-          {error && <div className="save-as-error">{error}</div>}
         </div>
 
         <div className="dialog-footer">

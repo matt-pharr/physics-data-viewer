@@ -752,7 +752,6 @@ const App: React.FC = () => {
 
   const {
     handleSaveProject: _handleSaveProject,
-    handleOpenProject: _handleOpenProject,
     executeOpenProject,
   } = useProjectWorkflow({
     kernelStatus,

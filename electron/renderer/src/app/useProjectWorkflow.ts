@@ -107,7 +107,9 @@ export function useProjectWorkflow(options: UseProjectWorkflowOptions) {
     // instead of the native directory picker.
     if (options?.saveAs || (!options?.directory && !currentProjectDir)) {
       setShowSaveAsDialog(true);
-      return false; // Dialog will call back with directory + projectName.
+      // Returns false — not an error. The dialog will invoke handleSaveProject
+      // again with { directory, projectName } once the user confirms.
+      return false;
     }
     try {
       const saveDir = options?.directory ?? currentProjectDir;
@@ -215,10 +217,6 @@ export function useProjectWorkflow(options: UseProjectWorkflowOptions) {
     setNamespaceRefreshToken,
   ]);
 
-  const handleOpenProject = useCallback((directory?: string) => {
-    void executeOpenProject(directory);
-  }, [executeOpenProject]);
-
   useEffect(() => {
     if (!window.pdv?.menu) {
       return;
@@ -239,7 +237,6 @@ export function useProjectWorkflow(options: UseProjectWorkflowOptions) {
 
   return {
     handleSaveProject,
-    handleOpenProject,
     executeOpenProject,
   };
 }
