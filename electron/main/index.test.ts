@@ -840,6 +840,7 @@ describe("Step 5 IPC handlers", () => {
       checksumValid: null,
       nodeCount: null,
       savedPdvVersion: "0.0.7",
+      projectName: null,
     });
   });
 

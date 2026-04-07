@@ -73,6 +73,12 @@ export interface ProjectManifest {
    * the same environment without requiring the user to reconfigure.
    */
   interpreter_path?: string;
+  /**
+   * Human-readable project name chosen by the user at save time.
+   * Used in the title bar and recent projects list. Falls back to the
+   * directory name when absent (backward compatibility with older saves).
+   */
+  project_name?: string;
   /** Imported modules active in this project. */
   modules: ProjectModuleImport[];
   /** Persisted per-module settings keyed by module alias. */
@@ -175,8 +181,12 @@ export class ProjectManager {
   async save(
     saveDir: string,
     codeCells: unknown,
-    options?: { language?: "python" | "julia"; interpreterPath?: string }
+    options?: { language?: "python" | "julia"; interpreterPath?: string; projectName?: string }
   ): Promise<{ checksum: string; nodeCount: number }> {
+    // Ensure the save directory exists (creates it when the user enters a new project name
+    // via the Save As dialog, so the folder hasn't been created yet).
+    await fs.mkdir(saveDir, { recursive: true });
+
     // Step 1 — send pdv.project.save comm; throws PDVCommError on error status.
     // Use progress pushes as keep-alive to prevent timeout during large saves.
     const response = await this.commRouter.request(PDVMessageType.PROJECT_SAVE, {
@@ -198,10 +208,15 @@ export class ProjectManager {
     // Preserve existing module imports and settings from a prior manifest if present.
     let existingModules: ProjectModuleImport[] = [];
     let existingModuleSettings: Record<string, Record<string, unknown>> = {};
+    let projectName = options?.projectName;
     try {
       const existing = await ProjectManager.readManifest(saveDir);
       existingModules = existing.modules;
       existingModuleSettings = existing.module_settings;
+      // Preserve existing project_name unless a new one is explicitly provided.
+      if (projectName === undefined) {
+        projectName = existing.project_name;
+      }
     } catch {
       // No prior manifest or unreadable — start fresh.
     }
@@ -212,6 +227,7 @@ export class ProjectManager {
       tree_checksum: checksum,
       language: options?.language ?? "python",
       interpreter_path: options?.interpreterPath,
+      project_name: projectName,
       modules: existingModules,
       module_settings: existingModuleSettings,
     };
@@ -311,6 +327,8 @@ export class ProjectManager {
       rawLanguage === "julia" ? "julia" : "python";
     const interpreterPath =
       typeof obj.interpreter_path === "string" ? obj.interpreter_path : undefined;
+    const projectName =
+      typeof obj.project_name === "string" ? obj.project_name : undefined;
 
     return {
       schema_version: schemaVersion,
@@ -319,6 +337,7 @@ export class ProjectManager {
       tree_checksum: String(obj.tree_checksum ?? ""),
       language,
       interpreter_path: interpreterPath,
+      project_name: projectName,
       modules: _parseManifestModules(obj.modules, manifestPath),
       module_settings: _parseModuleSettings(obj.module_settings, manifestPath),
     };

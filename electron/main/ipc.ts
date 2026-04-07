@@ -114,6 +114,7 @@ export const IPC = {
     new: "project:new",
     peekLanguages: "project:peekLanguages",
     peekManifest: "project:peekManifest",
+    resolveDir: "project:resolveDir",
   },
   /** App configuration channels. */
   config: {
@@ -1052,6 +1053,8 @@ export interface ProjectSaveResult {
   checksum: string;
   /** Number of tree nodes serialized. */
   nodeCount: number;
+  /** Project name stored in the manifest (may be absent for older projects). */
+  projectName?: string;
 }
 
 /**
@@ -1068,6 +1071,8 @@ export interface ProjectLoadResult {
   nodeCount: number | null;
   /** PDV version stored in the project manifest, or null if absent. */
   savedPdvVersion: string | null;
+  /** Project name stored in the manifest, or null if absent. */
+  projectName: string | null;
 }
 
 /**
@@ -1080,6 +1085,8 @@ export interface ProjectManifestPeek {
   interpreterPath?: string;
   /** PDV version the project was saved with. */
   pdvVersion?: string;
+  /** Project name stored in the manifest. */
+  projectName?: string;
 }
 
 /**
@@ -1486,7 +1493,7 @@ export interface PDVApi {
       * @param codeCells - Code-cell payload to persist.
       * @returns True when save request is accepted.
       */
-    save(saveDir: string, codeCells: unknown): Promise<ProjectSaveResult>;
+    save(saveDir: string, codeCells: unknown, projectName?: string): Promise<ProjectSaveResult>;
     /**
      * Load an existing project.
      *
@@ -1518,6 +1525,18 @@ export interface PDVApi {
      * @returns Manifest peek data.
      */
     peekManifest(dir: string): Promise<ProjectManifestPeek>;
+    /**
+     * Resolve a user-selected directory to a valid PDV project directory.
+     *
+     * If `dir` contains `project.json`, returns it as-is. If not, checks
+     * immediate children for a single subfolder containing `project.json`
+     * and returns that. Returns `null` if no project is found or if
+     * multiple project children exist (ambiguous).
+     *
+     * @param dir - Absolute path to the directory chosen by the user.
+     * @returns Resolved project directory, or `null` if not resolvable.
+     */
+    resolveDir(dir: string): Promise<string | null>;
     /**
      * Subscribe to project-loaded push notifications.
      *
@@ -1749,7 +1768,7 @@ export interface PDVApi {
      *
      * @returns Selected directory path, or null if cancelled.
      */
-    pickDirectory(): Promise<string | null>;
+    pickDirectory(defaultPath?: string): Promise<string | null>;
   };
 
   /** App menu integration. */

@@ -27,6 +27,7 @@ import { TitleBar } from '../components/TitleBar';
 import { WriteTab } from '../components/WriteTab';
 import { SettingsDialog } from '../components/SettingsDialog';
 import { ImportModuleDialog } from '../components/ImportModuleDialog';
+import { SaveAsDialog } from '../components/SaveAsDialog';
 import { WelcomeScreen, type RecentProject } from '../components/WelcomeScreen';
 import type {
   CellTab,
@@ -135,6 +136,8 @@ const App: React.FC = () => {
   const [createGuiTarget, setCreateGuiTarget] = useState<string | null>(null);
   const [showSettings, setShowSettings] = useState(false);
   const [showImportModule, setShowImportModule] = useState(false);
+  const [showSaveAsDialog, setShowSaveAsDialog] = useState(false);
+  const [currentProjectName, setCurrentProjectName] = useState<string | null>(null);
   const [chromeInfo, setChromeInfo] = useState<WindowChromeInfo | null>(null);
   const [menuModel, setMenuModel] = useState<AppMenuTopLevel[]>([]);
 
@@ -250,11 +253,12 @@ const App: React.FC = () => {
   }, [chromeInfo?.showMenuBar]);
 
   useEffect(() => {
-    const projectName = currentProjectDir
-      ? currentProjectDir.split('/').filter(Boolean).pop() ?? 'Unsaved Project'
-      : 'Unsaved Project';
+    const projectName = currentProjectName
+      ?? (currentProjectDir
+        ? currentProjectDir.split('/').filter(Boolean).pop() ?? 'Unsaved Project'
+        : 'Unsaved Project');
     document.title = `PDV: ${projectName}`;
-  }, [currentProjectDir]);
+  }, [currentProjectDir, currentProjectName]);
 
   useEffect(() => {
     if (!window.pdv?.menu) {
@@ -274,6 +278,7 @@ const App: React.FC = () => {
         setSettingsInitialTab('general');
         setShowSettings(true);
       } else if (payload.action === 'project:new') {
+        setCurrentProjectName(null);
         setForceWelcome(true);
       } else if (payload.action === 'recentProjects:clear') {
         void window.pdv.config.set({ recentProjects: [] }).then((updated) => {
@@ -427,6 +432,7 @@ const App: React.FC = () => {
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.key !== 'Escape') return;
       // Close in priority order (topmost first)
+      if (showSaveAsDialog) { setShowSaveAsDialog(false); return; }
       if (showImportModule) { setShowImportModule(false); return; }
       if (scriptDialog) { setScriptDialog(null); return; }
       if (createScriptTarget) { setCreateScriptTarget(null); return; }
@@ -435,7 +441,7 @@ const App: React.FC = () => {
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [showImportModule, scriptDialog, createScriptTarget, createNoteTarget, createGuiTarget]);
+  }, [showSaveAsDialog, showImportModule, scriptDialog, createScriptTarget, createNoteTarget, createGuiTarget]);
 
   const handleSettingsSave = async (updates: Partial<Config>) => {
     await window.pdv.config.set(updates);
@@ -758,6 +764,8 @@ const App: React.FC = () => {
     setLastChecksum,
     setChecksumMismatch,
     setSavedPdvVersion,
+    setCurrentProjectName,
+    setShowSaveAsDialog,
     loadedProjectTabsRef,
     normalizeLoadedCodeCells,
     flushDirtyNotes,
@@ -770,7 +778,7 @@ const App: React.FC = () => {
     [config?.recentProjects],
   );
 
-  /** Build RecentProject[] with language metadata from project.json files. */
+  /** Build RecentProject[] with language and name metadata from project.json files. */
   const [recentProjects, setRecentProjects] = useState<RecentProject[]>([]);
   useEffect(() => {
     if (recentProjectPaths.length === 0) {
@@ -778,12 +786,17 @@ const App: React.FC = () => {
       return;
     }
     let cancelled = false;
-    window.pdv.project.peekLanguages(recentProjectPaths).then((langMap) => {
-      if (cancelled) return;
-      setRecentProjects(recentProjectPaths.map((p) => ({ path: p, language: langMap[p] })));
-    }).catch(() => {
-      if (cancelled) return;
-      setRecentProjects(recentProjectPaths.map((p) => ({ path: p })));
+    Promise.all(
+      recentProjectPaths.map(async (p) => {
+        try {
+          const peek = await window.pdv.project.peekManifest(p);
+          return { path: p, language: peek.language, name: peek.projectName } as RecentProject;
+        } catch {
+          return { path: p } as RecentProject;
+        }
+      })
+    ).then((results) => {
+      if (!cancelled) setRecentProjects(results);
     });
     return () => { cancelled = true; };
   }, [recentProjectPaths]);
@@ -893,9 +906,10 @@ const App: React.FC = () => {
     void executeOpenProject(pending.path);
   }, [kernelStatus, executeOpenProject]);
 
-  const projectTitle = currentProjectDir
-    ? currentProjectDir.split('/').filter(Boolean).pop() ?? 'Unsaved Project'
-    : 'Unsaved Project';
+  const projectTitle = currentProjectName
+    ?? (currentProjectDir
+      ? currentProjectDir.split('/').filter(Boolean).pop() ?? 'Unsaved Project'
+      : 'Unsaved Project');
 
   return (
     <div className="app">
@@ -1170,6 +1184,19 @@ const App: React.FC = () => {
          refreshToken={modulesRefreshToken}
          onClose={() => setShowImportModule(false)}
        />
+       {showSaveAsDialog && (
+         <SaveAsDialog
+           defaultLocation={currentProjectDir
+             ? currentProjectDir.replace(/\/[^/]+\/?$/, '')
+             : null}
+           defaultName={currentProjectName ?? undefined}
+           onSave={async (projectName, saveDir) => {
+             setShowSaveAsDialog(false);
+             await _handleSaveProject({ directory: saveDir, projectName });
+           }}
+           onCancel={() => setShowSaveAsDialog(false)}
+         />
+       )}
        <SettingsDialog
          isOpen={showSettings}
          initialTab={settingsInitialTab}

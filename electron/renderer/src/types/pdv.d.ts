@@ -250,6 +250,8 @@ export interface ProjectSaveResult {
   checksum: string;
   /** Number of tree nodes serialized. */
   nodeCount: number;
+  /** Project name stored in the manifest (may be absent for older projects). */
+  projectName?: string;
 }
 
 /** Result returned from `project.load()`. */
@@ -264,6 +266,8 @@ export interface ProjectLoadResult {
   nodeCount: number | null;
   /** PDV version stored in the project manifest, or null if absent. */
   savedPdvVersion: string | null;
+  /** Project name stored in the manifest, or null if absent. */
+  projectName: string | null;
 }
 
 /** Lightweight manifest peek returned before kernel start. */
@@ -274,6 +278,8 @@ export interface ProjectManifestPeek {
   interpreterPath?: string;
   /** PDV version the project was saved with. */
   pdvVersion?: string;
+  /** Project name stored in the manifest. */
+  projectName?: string;
 }
 
 /** Persisted user configuration payload returned by `config.get`. */
@@ -789,11 +795,12 @@ export interface PDVApi {
     update(moduleId: string): Promise<ModuleInstallResult>;
   };
   project: {
-    save(saveDir: string, codeCells: unknown): Promise<ProjectSaveResult>;
+    save(saveDir: string, codeCells: unknown, projectName?: string): Promise<ProjectSaveResult>;
     load(saveDir: string): Promise<ProjectLoadResult>;
     new(): Promise<boolean>;
     peekLanguages(paths: string[]): Promise<Record<string, "python" | "julia">>;
     peekManifest(dir: string): Promise<ProjectManifestPeek>;
+    resolveDir(dir: string): Promise<string | null>;
     onLoaded(callback: (payload: Record<string, unknown>) => void): () => void;
     onReloading(callback: (payload: { status: "reloading" | "ready" }) => void): () => void;
   };
@@ -833,7 +840,7 @@ export interface PDVApi {
   files: {
     pickExecutable(): Promise<string | null>;
     pickFile(): Promise<string | null>;
-    pickDirectory(): Promise<string | null>;
+    pickDirectory(defaultPath?: string): Promise<string | null>;
   };
   menu: {
     updateRecentProjects(paths: string[]): Promise<boolean>;

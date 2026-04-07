@@ -719,6 +719,7 @@ my-project/
   "schema_version": "1.1",
   "saved_at": "<iso8601>",
   "pdv_version": "<app-version>",
+  "project_name": "My Project",
   "language": "python",
   "interpreter_path": "/path/to/python3",
   "tree_checksum": "<sha256 of tree-index.json>",
@@ -741,6 +742,7 @@ my-project/
 | `schema_version` | string | Semantic version of the project.json format. The app rejects manifests with an incompatible major version. Currently `"1.1"`. |
 | `saved_at` | string | ISO 8601 timestamp of last save. |
 | `pdv_version` | string | PDV app version used when saving (e.g. `"0.0.7"`). |
+| `project_name` | string? | Optional human-readable project name chosen by the user. Displayed in the title bar and recent projects list. Falls back to the directory name when absent (backward compat). |
 | `language` | string | Kernel language: `"python"` or `"julia"`. |
 | `interpreter_path` | string? | Optional path to the interpreter used at save time. |
 | `tree_checksum` | string | SHA-256 checksum of `tree-index.json` for integrity verification. |
@@ -1037,10 +1039,15 @@ The renderer subscribes to these notifications and refreshes the relevant subtre
 
 Triggered by user action (File → Save / Cmd+S). The app coordinates.
 
+**Save As dialog**: When saving for the first time or via File → Save As (Cmd+Shift+S), a custom Save As dialog is shown. The user enters a project name and chooses a parent directory; the app creates `<parent>/<sanitized-name>/` and saves into it. The project name is stored in `project.json` as `project_name` and displayed in the title bar and recent projects list. Subsequent saves (Cmd+S) go directly to the same directory without a dialog.
+
+**Open dialog**: File → Open (Cmd+O) opens a native directory picker. If the user selects a folder that doesn't contain `project.json` but has exactly one child folder that does, the app auto-selects that child ("smart open"). The picker defaults to the parent of the current project directory.
+
 ```
 User triggers save
     │
-    ├─► App prompts for save directory if not previously set (File → Save As flow)
+    ├─► App shows Save As dialog if no project directory set
+    │       (user enters project name + picks parent location)
     │
     ├─► App sends pdv.project.save comm:
     │       payload: { save_dir: "/path/to/project" }
