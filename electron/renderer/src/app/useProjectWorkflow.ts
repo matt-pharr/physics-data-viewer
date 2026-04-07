@@ -230,16 +230,8 @@ export function useProjectWorkflow(options: UseProjectWorkflowOptions) {
       return;
     }
     const unsubscribe = window.pdv.menu.onAction((payload: MenuActionPayload) => {
-      if (payload.action === 'project:open') {
-        void handleOpenProject();
-        return;
-      }
-      if (payload.action === 'project:openRecent') {
-        if (payload.path) {
-          void handleOpenProject(payload.path);
-        }
-        return;
-      }
+      // project:open and project:openRecent are handled in App's menu listener
+      // so they can route through openProjectFromWelcome when the kernel isn't ready.
       if (payload.action === 'project:save') {
         void handleSaveProject();
         return;
@@ -249,7 +241,7 @@ export function useProjectWorkflow(options: UseProjectWorkflowOptions) {
       }
     });
     return () => unsubscribe();
-  }, [handleOpenProject, handleSaveProject]);
+  }, [handleSaveProject]);
 
   return {
     handleSaveProject,

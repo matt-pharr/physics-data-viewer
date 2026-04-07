@@ -269,10 +269,18 @@ const App: React.FC = () => {
   }, [config]);
 
   // Listen for File-menu actions handled at the App level.
+  // project:open and project:openRecent are dispatched via refs so this effect
+  // doesn't re-subscribe on every kernelStatus change (handlers defined later).
+  const handleOpenWithPickerRef = useRef<() => Promise<void>>();
+  const handleOpenRecentRef = useRef<(path: string) => Promise<void>>();
   useEffect(() => {
     if (!window.pdv?.menu) return;
     const unsub = window.pdv.menu.onAction((payload) => {
-      if (payload.action === 'modules:import') {
+      if (payload.action === 'project:open') {
+        void handleOpenWithPickerRef.current?.();
+      } else if (payload.action === 'project:openRecent') {
+        if (payload.path) void handleOpenRecentRef.current?.(payload.path);
+      } else if (payload.action === 'modules:import') {
         setShowImportModule(true);
       } else if (payload.action === 'settings:open') {
         setSettingsInitialTab('general');
@@ -888,15 +896,40 @@ const App: React.FC = () => {
     await ensureKernel(language);
   }, [config, dismissWelcome, ensureKernel, openEnvSettings, startKernel]);
 
-  const handleWelcomeOpen = useCallback(async () => {
-    const dir = await window.pdv.files.pickDirectory();
+  /**
+   * Open a project via the file picker, with smart-open resolution.
+   * Works both from the welcome screen (kernel not ready) and after kernel start.
+   */
+  const handleOpenWithPicker = useCallback(async () => {
+    const defaultPath = currentProjectDir
+      ? currentProjectDir.replace(/\/[^/]+\/?$/, '')
+      : undefined;
+    const dir = await window.pdv.files.pickDirectory(defaultPath);
     if (!dir) return;
-    await openProjectFromWelcome(dir);
-  }, [openProjectFromWelcome]);
+    // Smart open: resolve the selected directory to a valid project folder.
+    const resolved = await window.pdv.project.resolveDir(dir);
+    if (!resolved) {
+      setLastError(`No PDV project found in "${dir}". Select a folder containing project.json.`);
+      return;
+    }
+    if (kernelStatus === 'ready') {
+      void executeOpenProject(resolved);
+    } else {
+      await openProjectFromWelcome(resolved);
+    }
+  }, [currentProjectDir, kernelStatus, executeOpenProject, openProjectFromWelcome, setLastError]);
 
-  const handleWelcomeOpenRecent = useCallback(async (path: string) => {
-    await openProjectFromWelcome(path);
-  }, [openProjectFromWelcome]);
+  const handleOpenRecent = useCallback(async (path: string) => {
+    if (kernelStatus === 'ready') {
+      void executeOpenProject(path);
+    } else {
+      await openProjectFromWelcome(path);
+    }
+  }, [kernelStatus, executeOpenProject, openProjectFromWelcome]);
+
+  // Keep refs in sync so the menu-action effect (subscribed once) calls the latest handlers.
+  handleOpenWithPickerRef.current = handleOpenWithPicker;
+  handleOpenRecentRef.current = handleOpenRecent;
 
   // Execute deferred project action once the kernel becomes ready.
   useEffect(() => {
@@ -1220,8 +1253,8 @@ const App: React.FC = () => {
          <WelcomeScreen
            recentProjects={recentProjects}
            onNewProject={handleWelcomeNewProject}
-           onOpenProject={handleWelcomeOpen}
-           onOpenRecent={handleWelcomeOpenRecent}
+           onOpenProject={handleOpenWithPicker}
+           onOpenRecent={handleOpenRecent}
          />
        )}
      </div>
