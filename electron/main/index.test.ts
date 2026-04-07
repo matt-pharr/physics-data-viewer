@@ -249,6 +249,7 @@ function setup() {
       found: true,
       data: { "text/plain": "doc" },
     })),
+    ping: vi.fn(async () => undefined),
     getKernel: vi.fn(() => makeKernelInfo()),
     getQueryPort: vi.fn(() => 12345),
     shutdownAll: vi.fn(async () => undefined),
@@ -1205,22 +1206,23 @@ describe("Step 5 IPC handlers", () => {
     setup();
     const projectLoad = getHandler(IPC.project.load);
     await projectLoad({}, "/tmp/project");
-    mocks.fsReadFile.mockResolvedValueOnce(
-      JSON.stringify({
-        schema_version: "1.1",
-        saved_at: "2026-01-01T00:00:00.000Z",
-        pdv_version: getAppVersion(),
-        tree_checksum: "",
-        modules: [
-          {
-            module_id: "demo-module",
-            alias: "demo-module",
-            version: "1.0.0",
-          },
-        ],
-        module_settings: {},
-      })
-    );
+    const manifestJson = JSON.stringify({
+      schema_version: "1.1",
+      saved_at: "2026-01-01T00:00:00.000Z",
+      pdv_version: getAppVersion(),
+      tree_checksum: "",
+      modules: [
+        {
+          module_id: "demo-module",
+          alias: "demo-module",
+          version: "1.0.0",
+        },
+      ],
+      module_settings: {},
+    });
+    // Two reads: readActiveProjectManifest + re-read inside runWithProjectManifestWriteLock
+    mocks.fsReadFile.mockResolvedValueOnce(manifestJson);
+    mocks.fsReadFile.mockResolvedValueOnce(manifestJson);
 
     const saveSettings = getHandler(IPC.modules.saveSettings);
     const result = (await saveSettings({}, {
