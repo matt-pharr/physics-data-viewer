@@ -11,10 +11,12 @@
 
 import React from 'react';
 
-/** Entry in the recent projects list with optional language metadata. */
+/** Entry in the recent projects list with optional language and name metadata. */
 export interface RecentProject {
   path: string;
   language?: "python" | "julia";
+  /** Project name from the manifest (falls back to folder name when absent). */
+  name?: string;
 }
 
 interface WelcomeScreenProps {
@@ -100,7 +102,7 @@ export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({
                     title={entry.path}
                   >
                     <span className="welcome-recent-badge">[{languageBadge(entry.language)}]</span>
-                    <span className="welcome-recent-name">{projectName(entry.path)}</span>
+                    <span className="welcome-recent-name">{entry.name ?? projectName(entry.path)}</span>
                     <span className="welcome-recent-path">{projectDir(entry.path)}</span>
                   </button>
                 </li>

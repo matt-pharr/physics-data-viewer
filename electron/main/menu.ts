@@ -34,14 +34,19 @@ function buildOpenRecentSubmenu(): MenuItemConstructorOptions[] {
   if (recentProjects.length === 0) {
     return [{ label: "No Recent Projects", enabled: false }];
   }
-  const items: MenuItemConstructorOptions[] = recentProjects.map((projectPath) => ({
-    label: projectPath,
-    click: () =>
-      sendMenuAction({
-        action: "project:openRecent",
-        path: projectPath,
-      }),
-  }));
+  const items: MenuItemConstructorOptions[] = recentProjects.map((projectPath) => {
+    // Show the folder name as the label, with the full path as a sublabel.
+    const folderName = projectPath.split("/").filter(Boolean).pop() ?? projectPath;
+    return {
+      label: folderName,
+      sublabel: projectPath,
+      click: () =>
+        sendMenuAction({
+          action: "project:openRecent",
+          path: projectPath,
+        }),
+    };
+  });
   items.push(
     { type: "separator" },
     {

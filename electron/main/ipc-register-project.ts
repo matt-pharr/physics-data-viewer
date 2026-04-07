@@ -69,10 +69,11 @@ export function registerProjectIpcHandlers(
 
   ipcMain.handle(
     IPC.project.save,
-    async (_event, saveDir: string, codeCells: unknown) => {
+    async (_event, saveDir: string, codeCells: unknown, projectName?: string) => {
       const saveResult = await projectManager.save(saveDir, codeCells, {
         language: getActiveKernelLanguage(),
         interpreterPath: getInterpreterPath(),
+        projectName,
       });
 
       // Merge pending in-memory module imports/settings into the on-disk manifest.
@@ -108,7 +109,16 @@ export function registerProjectIpcHandlers(
 
       setActiveProjectDir(saveDir);
       await refreshProjectModuleHealth(saveDir);
-      return { checksum: saveResult.checksum, nodeCount: saveResult.nodeCount };
+
+      // Read back the project name from the manifest (may have been preserved from prior save).
+      let savedProjectName: string | undefined;
+      try {
+        const manifest = await ProjectManager.readManifest(saveDir);
+        savedProjectName = manifest.project_name;
+      } catch {
+        // Non-blocking
+      }
+      return { checksum: saveResult.checksum, nodeCount: saveResult.nodeCount, projectName: savedProjectName };
     }
   );
 
@@ -138,11 +148,13 @@ export function registerProjectIpcHandlers(
     // Read the manifest checksum and version (the values stored at save time).
     let checksum: string | null = null;
     let savedPdvVersion: string | null = null;
+    let projectName: string | null = null;
     let nodeCount: number | null = null;
     try {
       const manifest = await ProjectManager.readManifest(saveDir);
       checksum = manifest.tree_checksum || null;
       savedPdvVersion = manifest.pdv_version || null;
+      projectName = manifest.project_name ?? null;
     } catch {
       // Non-blocking — proceed with load even if manifest read fails
     }
@@ -173,7 +185,7 @@ export function registerProjectIpcHandlers(
       // Non-blocking
     }
 
-    return { codeCells, checksum, checksumValid, nodeCount, savedPdvVersion };
+    return { codeCells, checksum, checksumValid, nodeCount, savedPdvVersion, projectName };
   });
 
   ipcMain.handle(IPC.project.new, async () => {
@@ -211,6 +223,7 @@ export function registerProjectIpcHandlers(
           language: manifest.language,
           interpreterPath: manifest.interpreter_path,
           pdvVersion: manifest.pdv_version,
+          projectName: manifest.project_name,
         };
       } catch {
         return { language: "python" as const };

@@ -1052,6 +1052,8 @@ export interface ProjectSaveResult {
   checksum: string;
   /** Number of tree nodes serialized. */
   nodeCount: number;
+  /** Project name stored in the manifest (may be absent for older projects). */
+  projectName?: string;
 }
 
 /**
@@ -1068,6 +1070,8 @@ export interface ProjectLoadResult {
   nodeCount: number | null;
   /** PDV version stored in the project manifest, or null if absent. */
   savedPdvVersion: string | null;
+  /** Project name stored in the manifest, or null if absent. */
+  projectName: string | null;
 }
 
 /**
@@ -1080,6 +1084,8 @@ export interface ProjectManifestPeek {
   interpreterPath?: string;
   /** PDV version the project was saved with. */
   pdvVersion?: string;
+  /** Project name stored in the manifest. */
+  projectName?: string;
 }
 
 /**
@@ -1486,7 +1492,7 @@ export interface PDVApi {
       * @param codeCells - Code-cell payload to persist.
       * @returns True when save request is accepted.
       */
-    save(saveDir: string, codeCells: unknown): Promise<ProjectSaveResult>;
+    save(saveDir: string, codeCells: unknown, projectName?: string): Promise<ProjectSaveResult>;
     /**
      * Load an existing project.
      *
@@ -1749,7 +1755,7 @@ export interface PDVApi {
      *
      * @returns Selected directory path, or null if cancelled.
      */
-    pickDirectory(): Promise<string | null>;
+    pickDirectory(defaultPath?: string): Promise<string | null>;
   };
 
   /** App menu integration. */

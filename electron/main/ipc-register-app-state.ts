@@ -243,9 +243,10 @@ export function registerAppStateIpcHandlers(
     return result.filePaths[0] ?? null;
   });
 
-  ipcMain.handle(IPC.files.pickDirectory, async () => {
+  ipcMain.handle(IPC.files.pickDirectory, async (_event, defaultPath?: string) => {
     const result = await dialog.showOpenDialog({
       properties: ["openDirectory", "createDirectory"],
+      defaultPath: defaultPath || undefined,
     });
     if (result.canceled || result.filePaths.length === 0) {
       return null;

@@ -203,7 +203,7 @@ All type strings are namespaced with `pdv.`. The convention is `pdv.<domain>.<ac
 
 | Type | Direction | Description |
 |---|---|---|
-| `pdv.module.register` | app → kernel | Register a `PDVModule` node at a tree path. Payload: `{ path, module_id, name, version }`. |
+| `pdv.module.register` | app → kernel | Register a `PDVModule` node at a tree path. Payload: `{ path, module_id, name, version, dependencies?, module_index? }`. When `module_index` is provided, child nodes (scripts, GUIs, namelists) are mounted from the index using the same two-pass logic as project load. |
 | `pdv.module.register.response` | kernel → app | Confirms module registration. |
 | `pdv.gui.register` | app → kernel | Register a `PDVGui` node at a tree path. Payload: `{ parent_path, name, relative_path, module_id }`. |
 | `pdv.gui.register.response` | kernel → app | Confirms GUI registration. |
@@ -615,10 +615,11 @@ Attributes:
 - `name` (read-only): human-readable display name (e.g. `"N-Pendulum"`)
 - `version` (read-only): semantic version string (e.g. `"2.0.0"`)
 - `gui` (read-write): optional reference to the child `PDVGui` node, or `None`
+- `dependencies` (read-only): list of dependency dicts (e.g. `[{"name": "numpy"}]`), or empty list
 
 `preview()` returns `"{name} v{version}"`.
 
-Created by the `pdv.module.register` handler, which receives `path`, `module_id`, `name`, and `version` from the main process and inserts the `PDVModule` into the tree at the given path.
+Created by the `pdv.module.register` handler, which receives `path`, `module_id`, `name`, `version`, optional `dependencies`, and optional `module_index` from the main process and inserts the `PDVModule` into the tree at the given path. If a `PDVModule` already exists at that path (e.g. from project load), the handler updates it in place to preserve existing children.
 
 ### 5.10 PDVGui Class
 
@@ -664,6 +665,28 @@ This design makes lib files visible and editable in the tree (users can modify l
 
 On project load (deserialization), the `lib` node type is restored as a `PDVLib` and its parent directory is re-added to `sys.path`.
 
+### 5.13 Module Storage and Resolution
+
+PDV has three tiers of module storage:
+
+1. **Project-local** (`<saveDir>/modules/<module-id>/`): When a module is imported into a project, its full content is copied into the project's save directory. This makes projects fully portable — zip a project folder and send it to someone who has never seen the module.
+2. **Global store** (`~/.PDV/modules/packages/`): A catalog of installed modules. Modules can be installed from local directories or GitHub URLs. The global store determines what is available to import, but projects never read from it at runtime.
+3. **Bundled examples** (`examples/modules/` in the app resources): Read-only example modules shipped with the application (e.g. N-Pendulum for Python and Julia). Surfaced in the module library with a "Bundled" badge, filtered by active kernel language. Cannot be uninstalled.
+
+**Resolution order**: When the main process needs to resolve a module's on-disk directory, it checks project-local `modules/` first, then the global store, then bundled examples. The first match wins.
+
+**Installation sources**: Modules can be installed from:
+- **Local directory**: User selects a directory containing a `pdv-module.json` manifest.
+- **GitHub URL**: User pastes a git-cloneable URL. The module is shallow-cloned (`git clone --depth 1`) into the global store.
+
+**`upstream` field**: An optional git-cloneable URL in `pdv-module.json`. Automatically set when installing from GitHub, or declared manually. Enables update checks via `git ls-remote --tags` (no clone needed) and one-click re-install from upstream.
+
+**Uninstall**: Removes a module from the global store. Bundled modules cannot be uninstalled. Existing projects are unaffected since they carry their own local copies.
+
+**Update**: Modules with an `upstream` URL can check for newer tags and re-install from upstream. Users must re-import into a project to pick up changes.
+
+**Dependency pre-flight**: Before executing a module action, the main process reads the module's `dependencies` list from `pdv-module.json` and sends them to the kernel for validation. Missing dependencies are reported to the user before execution proceeds.
+
 ---
 
 ## 6. The Working Directory and Project Save Directory
@@ -701,6 +724,11 @@ my-project/
     project.json              ← project manifest (owned by Electron main process)
     tree-index.json           ← tree node registry (owned by kernel, written at save time)
     code-cells.json        ← code cell tab state (owned by Electron main process)
+    modules/                  ← project-local module copies (one subdir per module_id)
+        n_pendulum/
+            pdv-module.json
+            scripts/
+            lib/
     tree/
         data/
             waveforms/
@@ -719,6 +747,7 @@ my-project/
   "schema_version": "1.1",
   "saved_at": "<iso8601>",
   "pdv_version": "<app-version>",
+  "project_name": "My Project",
   "language": "python",
   "interpreter_path": "/path/to/python3",
   "tree_checksum": "<sha256 of tree-index.json>",
@@ -741,6 +770,7 @@ my-project/
 | `schema_version` | string | Semantic version of the project.json format. The app rejects manifests with an incompatible major version. Currently `"1.1"`. |
 | `saved_at` | string | ISO 8601 timestamp of last save. |
 | `pdv_version` | string | PDV app version used when saving (e.g. `"0.0.7"`). |
+| `project_name` | string? | Optional human-readable project name chosen by the user. Displayed in the title bar and recent projects list. Falls back to the directory name when absent (backward compat). |
 | `language` | string | Kernel language: `"python"` or `"julia"`. |
 | `interpreter_path` | string? | Optional path to the interpreter used at save time. |
 | `tree_checksum` | string | SHA-256 checksum of `tree-index.json` for integrity verification. |
@@ -1037,10 +1067,15 @@ The renderer subscribes to these notifications and refreshes the relevant subtre
 
 Triggered by user action (File → Save / Cmd+S). The app coordinates.
 
+**Save As dialog**: When saving for the first time or via File → Save As (Cmd+Shift+S), a custom Save As dialog is shown. The user enters a project name and chooses a parent directory; the app creates `<parent>/<sanitized-name>/` and saves into it. The project name is stored in `project.json` as `project_name` and displayed in the title bar and recent projects list. Subsequent saves (Cmd+S) go directly to the same directory without a dialog.
+
+**Open dialog**: File → Open (Cmd+O) opens a native directory picker defaulting to the parent of the current project directory.
+
 ```
 User triggers save
     │
-    ├─► App prompts for save directory if not previously set (File → Save As flow)
+    ├─► App shows Save As dialog if no project directory set
+    │       (user enters project name + picks parent location)
     │
     ├─► App sends pdv.project.save comm:
     │       payload: { save_dir: "/path/to/project" }
@@ -1172,7 +1207,7 @@ The API surface:
 - `window.pdv.themes.*` — theme persistence: `get`, `save`, `openDir` (open `~/.PDV/themes/` in OS file manager)
 - `window.pdv.codeCells.*` — tab persistence: `load`, `save` (stored under `~/.PDV/state/code-cells.json`)
 - `window.pdv.files.*` — native OS dialogs: `pickExecutable() → string | null` (wraps Electron `dialog.showOpenDialog` for executables); `pickFile() → string | null` (general file picker); `pickDirectory() → string | null` (wraps `dialog.showOpenDialog` with `properties: ['openDirectory', 'createDirectory']`, used for Save/Open project)
-- `window.pdv.modules.*` — module management: `listInstalled`, `install`, `importToProject`, `listImported`, `removeImport`, `saveSettings`, `runAction`, `checkUpdates`
+- `window.pdv.modules.*` — module management: `listInstalled`, `install`, `importToProject`, `listImported`, `removeImport`, `saveSettings`, `runAction`, `checkUpdates`, `uninstall`, `update`
 - `window.pdv.moduleWindows.*` — module GUI windows: `open`, `close`, `context`, `executeInMain`; push: `onExecuteRequest(cb) → unsub`
 - `window.pdv.guiEditor.*` — GUI editor and viewer windows: `open` (editor), `openViewer` (standalone GUI viewer), `context`, `read`, `save`
 - `window.pdv.environment.*` — Python environment management: `list`, `check`, `install`, `refresh`; push: `onInstallOutput(cb) → unsub`
@@ -1387,6 +1422,10 @@ electron/
             shortcuts.ts                ← Canonical shortcut registry and matcher
             services/tree.ts            ← Renderer tree fetch/cache adapter
             types/                      ← Renderer view-model + preload API types
+examples/
+    modules/
+        N-pendulum/                     ← Bundled Python example module
+        N-pendulum-julia/               ← Bundled Julia example module
 ```
 
 ### 12.2 Python Package (separate repository or subdirectory)
@@ -1622,7 +1661,7 @@ The following features are acknowledged as future work and must not influence th
 - **Crash recovery** — working directory is deleted on close; future discussion required
 - **Remote execution** (SSH, HPC clusters) — no remote connector architecture in this version
 - **Autosave** — `.pdv-work/autosave/` directory is created but not used
-- **Modules ecosystem hardening** — foundational Modules UI/IPC is implemented; deeper registry/trust/dependency features are deferred
+- **Modules ecosystem hardening** — core module lifecycle is implemented (install from disk/GitHub, import, uninstall, update, bundled examples, project-local storage); deeper registry/trust features are deferred
 - **Multiple simultaneous kernels** — architecture supports it (kernels have IDs) but UI exposes only one at a time
 - **R kernel support** — same deferral as Julia
 
