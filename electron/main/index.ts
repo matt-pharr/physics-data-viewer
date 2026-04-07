@@ -82,6 +82,7 @@ const REGISTERED_CHANNELS: readonly string[] = [
   IPC.tree.createNote,
   IPC.tree.addFile,
   IPC.tree.invokeHandler,
+  IPC.tree.delete,
   IPC.namespace.query,
   IPC.namespace.inspect,
   IPC.script.edit,
@@ -97,6 +98,8 @@ const REGISTERED_CHANNELS: readonly string[] = [
   IPC.modules.saveSettings,
   IPC.modules.runAction,
   IPC.modules.removeImport,
+  IPC.modules.uninstall,
+  IPC.modules.update,
   IPC.namelist.read,
   IPC.namelist.write,
   IPC.project.save,
@@ -489,6 +492,7 @@ export function registerIpcHandlers(
 
   registerProjectIpcHandlers({
     projectManager,
+    moduleManager,
     kernelWorkingDirs,
     getActiveKernelId: () => activeKernelId,
     getActiveKernelLanguage: () => {

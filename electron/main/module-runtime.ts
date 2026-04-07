@@ -186,7 +186,8 @@ export function buildModuleActionCode(
 export async function buildModulesSetupPayload(
   moduleManager: ModuleManager,
   importedModules: ProjectModuleImport[],
-  workingDir?: string
+  workingDir?: string,
+  projectDir?: string | null,
 ): Promise<{
   modules: Array<{
     lib_paths: string[];
@@ -201,7 +202,7 @@ export async function buildModulesSetupPayload(
   }> = [];
   for (const imp of importedModules) {
     try {
-      const info = await moduleManager.getModuleSetupInfo(imp.module_id);
+      const info = await moduleManager.getModuleSetupInfo(imp.module_id, projectDir);
       let libDir: string | undefined;
       if (workingDir && info.libDir) {
         libDir = path.join(workingDir, imp.alias, info.libDir);
@@ -241,9 +242,10 @@ async function bindImportedModuleV4(
   importedModule: ProjectModuleImport,
   workingDir: string | undefined,
   moduleName: string,
-  moduleVersion: string
+  moduleVersion: string,
+  projectDir?: string | null,
 ): Promise<void> {
-  const installPath = await moduleManager.getModuleInstallPath(importedModule.module_id);
+  const installPath = await moduleManager.resolveModuleDir(importedModule.module_id, projectDir);
   if (!installPath) return;
 
   const moduleIndex = await moduleManager.readModuleIndex(installPath);
@@ -271,12 +273,17 @@ async function bindImportedModuleV4(
     })
   );
 
+  const dependencies = await moduleManager.getModuleDependencies(
+    importedModule.module_id, projectDir,
+  );
+
   await commRouter.request(PDVMessageType.MODULE_REGISTER, {
     path: importedModule.alias,
     module_id: importedModule.module_id,
     name: moduleName,
     version: moduleVersion,
     module_index: remappedIndex,
+    dependencies,
   });
 }
 
@@ -300,7 +307,8 @@ export async function bindImportedModule(
   commRouter: CommRouter,
   moduleManager: ModuleManager,
   importedModule: ProjectModuleImport,
-  workingDir: string | undefined
+  workingDir: string | undefined,
+  projectDir?: string | null,
 ): Promise<void> {
   // 1. Get module identity info
   const installed = await moduleManager.listInstalled();
@@ -309,26 +317,30 @@ export async function bindImportedModule(
   const moduleVersion = moduleDesc?.version ?? importedModule.version;
 
   // Check if this is a v4 module (uses module-index.json)
-  const isV4 = await moduleManager.isV4Module(importedModule.module_id);
+  const isV4 = await moduleManager.isV4Module(importedModule.module_id, projectDir);
   if (isV4) {
-    await bindImportedModuleV4(commRouter, moduleManager, importedModule, workingDir, moduleName, moduleVersion);
+    await bindImportedModuleV4(commRouter, moduleManager, importedModule, workingDir, moduleName, moduleVersion, projectDir);
     return;
   }
 
-  const installPath = await moduleManager.getModuleInstallPath(importedModule.module_id);
+  const installPath = await moduleManager.resolveModuleDir(importedModule.module_id, projectDir);
 
   // 2. Register PDVModule node at the alias path
+  const dependencies = await moduleManager.getModuleDependencies(
+    importedModule.module_id, projectDir,
+  );
   await commRouter.request(PDVMessageType.MODULE_REGISTER, {
     path: importedModule.alias,
     module_id: importedModule.module_id,
     name: moduleName,
     version: moduleVersion,
+    dependencies,
   });
 
   // 3. If module has a GUI, copy gui.json and register PDVGui node
   let guiInfo: { hasGui: boolean };
   try {
-    guiInfo = await moduleManager.getModuleGuiInfo(importedModule.module_id);
+    guiInfo = await moduleManager.getModuleGuiInfo(importedModule.module_id, projectDir);
   } catch {
     guiInfo = { hasGui: false };
   }
@@ -356,7 +368,7 @@ export async function bindImportedModule(
 
   // 4. Copy module files (namelists, fortran sources, etc.) and register them
   try {
-    const moduleFiles = await moduleManager.resolveModuleFiles(importedModule.module_id);
+    const moduleFiles = await moduleManager.resolveModuleFiles(importedModule.module_id, projectDir);
     for (const file of moduleFiles) {
       if (!workingDir) continue;
       const segments = importedModule.alias.split(".").filter(Boolean);
@@ -380,10 +392,10 @@ export async function bindImportedModule(
   }
 
   // 5. Copy lib/ Python files and register as PDVFile nodes.
-  await bindImportedModuleLibFilesLegacy(commRouter, moduleManager, importedModule, workingDir);
+  await bindImportedModuleLibFilesLegacy(commRouter, moduleManager, importedModule, workingDir, projectDir);
 
   // 6. Bind scripts
-  await bindImportedModuleScriptsLegacy(commRouter, moduleManager, importedModule, workingDir);
+  await bindImportedModuleScriptsLegacy(commRouter, moduleManager, importedModule, workingDir, projectDir);
 }
 
 /**
@@ -393,11 +405,12 @@ async function bindImportedModuleLibFilesLegacy(
   commRouter: CommRouter,
   moduleManager: ModuleManager,
   importedModule: ProjectModuleImport,
-  workingDir: string | undefined
+  workingDir: string | undefined,
+  projectDir?: string | null,
 ): Promise<void> {
   if (!workingDir) return;
 
-  const installPath = await moduleManager.getModuleInstallPath(importedModule.module_id);
+  const installPath = await moduleManager.resolveModuleDir(importedModule.module_id, projectDir);
   if (!installPath) return;
 
   const libDir = path.join(installPath, "lib");
@@ -459,11 +472,12 @@ async function bindImportedModuleScriptsLegacy(
   commRouter: CommRouter,
   moduleManager: ModuleManager,
   importedModule: ProjectModuleImport,
-  workingDir: string | undefined
+  workingDir: string | undefined,
+  projectDir?: string | null,
 ): Promise<void> {
   let scriptBindings: Awaited<ReturnType<ModuleManager["resolveActionScripts"]>>;
   try {
-    scriptBindings = await moduleManager.resolveActionScripts(importedModule.module_id);
+    scriptBindings = await moduleManager.resolveActionScripts(importedModule.module_id, projectDir);
   } catch (error) {
     if (isMissingActionScriptError(error)) return;
     throw error;
@@ -519,6 +533,6 @@ export async function bindProjectModulesToTree(
   const modules =
     importedModules ?? (await ProjectManager.readManifest(projectDir)).modules;
   for (const importedModule of modules) {
-    await bindImportedModule(commRouter, moduleManager, importedModule, workingDir);
+    await bindImportedModule(commRouter, moduleManager, importedModule, workingDir, projectDir);
   }
 }

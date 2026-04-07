@@ -28,7 +28,8 @@ export function normalizeLoadedCodeCells(data: unknown): { tabs: CellTab[]; acti
       const maybe = entry as Record<string, unknown>;
       const code = typeof maybe.code === 'string' ? maybe.code : '';
       const id = typeof maybe.id === 'number' ? maybe.id : index + 1;
-      return { id, code };
+      const name = typeof maybe.name === 'string' ? maybe.name : undefined;
+      return name ? { id, code, name } : { id, code };
     })
     .filter((tab): tab is CellTab => tab !== null);
   const normalizedTabs = tabs.length > 0 ? tabs : [{ id: 1, code: '' }];

@@ -114,7 +114,7 @@ export function registerKernelIpcHandlers(
     }
     if (!manifest.modules || manifest.modules.length === 0) return;
     const workingDir = kernelWorkingDirs.get(kernelId);
-    const payload = await buildModulesSetupPayload(moduleManager, manifest.modules, workingDir);
+    const payload = await buildModulesSetupPayload(moduleManager, manifest.modules, workingDir, projectDir);
     if (payload.modules.length > 0) {
       await commRouter.request(PDVMessageType.MODULES_SETUP, payload);
     }
@@ -182,6 +182,7 @@ export function registerKernelIpcHandlers(
 
     const onCrash = async (crashedId: string): Promise<void> => {
       if (crashedId !== kernel.id) return;
+      commRouter.detach();
       queryRouter.detach();
       await cleanupKernelWorkingDir(projectManager, kernelManager, crashedId, kernelWorkingDirs, crashHandlers);
       if (getActiveKernelId() === crashedId) setActiveKernelId(null);
@@ -197,14 +198,22 @@ export function registerKernelIpcHandlers(
   });
 
   ipcMain.handle(IPC.kernels.stop, async (_event, kernelId: string) => {
-    await cleanupKernelWorkingDir(projectManager, kernelManager, kernelId, kernelWorkingDirs, crashHandlers);
-    await kernelManager.stop(kernelId);
-    if (getActiveKernelId() === kernelId) {
-      setActiveKernelId(null);
+    const previous = startMutex;
+    let release!: () => void;
+    startMutex = new Promise<void>((r) => { release = r; });
+    await previous.catch(() => {});
+    try {
+      await cleanupKernelWorkingDir(projectManager, kernelManager, kernelId, kernelWorkingDirs, crashHandlers);
+      await kernelManager.stop(kernelId);
+      if (getActiveKernelId() === kernelId) {
+        setActiveKernelId(null);
+      }
+      commRouter.detach();
+      queryRouter.detach();
+      return true;
+    } finally {
+      release();
     }
-    commRouter.detach();
-    queryRouter.detach();
-    return true;
   });
 
   ipcMain.handle(IPC.kernels.execute, async (event, kernelId, request) => {

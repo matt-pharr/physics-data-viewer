@@ -134,7 +134,7 @@ export function getActionsForNode(node: TreeNodeData) {
   actions.push(
     { id: 'print', label: 'Print', disabled: false },
     { id: 'copy_path', label: 'Copy Path', disabled: false },
-    { id: 'delete', label: 'Delete', disabled: true },
+    { id: 'delete', label: 'Delete', disabled: false },
   );
 
   return actions;

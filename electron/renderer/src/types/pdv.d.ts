@@ -205,7 +205,7 @@ export interface CodeCellData {
 /** File-menu action event payload emitted by `menu.onAction`. */
 export interface MenuActionPayload {
   /** Discriminated menu action identifier. */
-  action: "project:open" | "project:openRecent" | "project:save" | "project:saveAs" | "modules:import" | "settings:open";
+  action: "project:new" | "project:open" | "project:openRecent" | "project:save" | "project:saveAs" | "recentProjects:clear" | "modules:import" | "settings:open";
   /** Optional path argument for path-bearing menu actions. */
   path?: string;
 }
@@ -250,6 +250,8 @@ export interface ProjectSaveResult {
   checksum: string;
   /** Number of tree nodes serialized. */
   nodeCount: number;
+  /** Project name stored in the manifest (may be absent for older projects). */
+  projectName?: string;
 }
 
 /** Result returned from `project.load()`. */
@@ -264,6 +266,8 @@ export interface ProjectLoadResult {
   nodeCount: number | null;
   /** PDV version stored in the project manifest, or null if absent. */
   savedPdvVersion: string | null;
+  /** Project name stored in the manifest, or null if absent. */
+  projectName: string | null;
 }
 
 /** Lightweight manifest peek returned before kernel start. */
@@ -274,6 +278,8 @@ export interface ProjectManifestPeek {
   interpreterPath?: string;
   /** PDV version the project was saved with. */
   pdvVersion?: string;
+  /** Project name stored in the manifest. */
+  projectName?: string;
 }
 
 /** Persisted user configuration payload returned by `config.get`. */
@@ -342,7 +348,7 @@ export interface Config {
 }
 
 /** Supported module install source kinds. */
-export type ModuleSourceType = "github" | "local";
+export type ModuleSourceType = "github" | "local" | "bundled";
 
 /** Canonical source reference for module install metadata. */
 export interface ModuleSourceReference {
@@ -360,6 +366,7 @@ export interface ModuleDescriptor {
   source: ModuleSourceReference;
   revision?: string;
   installPath?: string;
+  upstream?: string;
 }
 
 /** Request payload for `modules.install`. */
@@ -399,6 +406,12 @@ export interface ModuleImportResult {
   alias?: string;
   suggestedAlias?: string;
   warnings?: ModuleHealthWarning[];
+  error?: string;
+}
+
+/** Result payload for `modules.uninstall`. */
+export interface ModuleUninstallResult {
+  success: boolean;
   error?: string;
 }
 
@@ -741,8 +754,12 @@ export interface PDVApi {
       kernelId: string,
       path: string
     ): Promise<{ success: boolean; error?: string }>;
+    delete(
+      kernelId: string,
+      treePath: string
+    ): Promise<{ success: boolean; error?: string }>;
     onChanged(
-      callback: (payload: { changed_paths: string[]; change_type: "added" | "removed" | "updated" }) => void
+      callback: (payload: { changed_paths: string[]; change_type: "added" | "removed" | "updated" | "batch" }) => void
     ): () => void;
   };
   namespace: {
@@ -778,9 +795,11 @@ export interface PDVApi {
     saveSettings(request: ModuleSettingsRequest): Promise<ModuleSettingsResult>;
     runAction(request: ModuleActionRequest): Promise<ModuleActionResult>;
     removeImport(moduleAlias: string): Promise<ModuleSettingsResult>;
+    uninstall(moduleId: string): Promise<ModuleUninstallResult>;
+    update(moduleId: string): Promise<ModuleInstallResult>;
   };
   project: {
-    save(saveDir: string, codeCells: unknown): Promise<ProjectSaveResult>;
+    save(saveDir: string, codeCells: unknown, projectName?: string): Promise<ProjectSaveResult>;
     load(saveDir: string): Promise<ProjectLoadResult>;
     new(): Promise<boolean>;
     peekLanguages(paths: string[]): Promise<Record<string, "python" | "julia">>;
@@ -824,7 +843,7 @@ export interface PDVApi {
   files: {
     pickExecutable(): Promise<string | null>;
     pickFile(): Promise<string | null>;
-    pickDirectory(): Promise<string | null>;
+    pickDirectory(defaultPath?: string): Promise<string | null>;
   };
   menu: {
     updateRecentProjects(paths: string[]): Promise<boolean>;

@@ -71,7 +71,11 @@ export function registerModuleWindowIpcHandlers(
 
   ipcMain.handle(
     IPC.moduleWindows.executeInMain,
-    async (_event, code: string): Promise<void> => {
+    async (event, code: string): Promise<void> => {
+      const context = moduleWindowManager.getContextForSender(event.sender.id);
+      if (!context) {
+        throw new Error("Unauthorized: sender is not a known module window");
+      }
       if (!mainWindow.isDestroyed()) {
         mainWindow.webContents.send(IPC.push.moduleExecuteRequest, code);
       }

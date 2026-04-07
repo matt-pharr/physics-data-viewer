@@ -111,6 +111,14 @@ export async function initializeKernelSession(
     throw new Error(bootstrapResult.error);
   }
   await readyPromise;
+  // Ping the shell channel before sending pdv.init.  The bootstrap
+  // execute leaves unread kernel_info_reply / execute_reply frames in the
+  // DEALER socket's receive buffer.  Sending a kernel_info_request and
+  // reading the correlated reply drains those stale frames and confirms
+  // the kernel's shell thread is ready to accept the next message.
+  // Without this, pdv.init (a comm_msg) can be silently lost on the
+  // ROUTER socket under ipykernel ≥ 7.
+  await kernelManager.ping(kernelId);
   const workingDir = await projectManager.createWorkingDir();
   await commRouter.request(PDVMessageType.INIT, {
     working_dir: workingDir,

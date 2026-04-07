@@ -250,10 +250,12 @@ def handle_project_load(msg: dict) -> None:
         if node_type == "script":
             language = meta.get("language", node.get("language", "python"))
             doc = meta.get("doc")
+            mod_id = meta.get("module_id", "")
             _set_tree_node(tree, node_path, PDVScript(
                 relative_path=rel_path,
                 language=language,
                 doc=doc,
+                module_id=mod_id,
             ))
         elif node_type == "markdown":
             title = meta.get("title")
@@ -403,8 +405,10 @@ def handle_project_save(msg: dict) -> None:
 
     index_data = json.dumps(nodes, indent=2, default=str)
     index_path = os.path.join(save_dir, "tree-index.json")
-    with open(index_path, "w", encoding="utf-8") as fh:
+    tmp_path = index_path + ".tmp"
+    with open(tmp_path, "w", encoding="utf-8") as fh:
         fh.write(index_data)
+    os.replace(tmp_path, index_path)
 
     from pdv_kernel.checksum import tree_checksum  # noqa: PLC0415
     checksum = tree_checksum(tree)

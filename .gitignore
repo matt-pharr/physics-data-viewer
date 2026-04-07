@@ -15,13 +15,14 @@ electron/dist/
 electron/release/
 electron/out/
 electron/.cache/
-electron/package-lock.json
 electron/renderer/dist/
 electron/logs
 electron/.mcp.json
+package-lock.json
 
 pdv-icon.iconset
 *.icns
+Assets.car
 
 # Docs
 site/

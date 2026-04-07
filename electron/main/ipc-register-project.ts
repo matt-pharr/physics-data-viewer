@@ -17,11 +17,13 @@ import * as path from "path";
 import { ipcMain, type BrowserWindow } from "electron";
 
 import { IPC } from "./ipc";
+import { ModuleManager } from "./module-manager";
 import { ProjectManager, type ProjectManifest, type ProjectModuleImport } from "./project-manager";
 import { copyFilesForLoad } from "./project-file-sync";
 
 interface RegisterProjectIpcHandlersOptions {
   projectManager: ProjectManager;
+  moduleManager: ModuleManager;
   kernelWorkingDirs: Map<string, string>;
   getActiveKernelId: () => string | null;
   getActiveKernelLanguage: () => "python" | "julia";
@@ -49,6 +51,7 @@ export function registerProjectIpcHandlers(
 ): void {
   const {
     projectManager,
+    moduleManager,
     kernelWorkingDirs,
     getActiveKernelId,
     getActiveKernelLanguage,
@@ -66,16 +69,27 @@ export function registerProjectIpcHandlers(
 
   ipcMain.handle(
     IPC.project.save,
-    async (_event, saveDir: string, codeCells: unknown) => {
+    async (_event, saveDir: string, codeCells: unknown, projectName?: string) => {
       const saveResult = await projectManager.save(saveDir, codeCells, {
         language: getActiveKernelLanguage(),
         interpreterPath: getInterpreterPath(),
+        projectName,
       });
 
       // Merge pending in-memory module imports/settings into the on-disk manifest.
       const pendingModuleImports = getPendingModuleImports();
       const pendingModuleSettings = getPendingModuleSettings();
       if (pendingModuleImports.length > 0 || Object.keys(pendingModuleSettings).length > 0) {
+        // Copy pending module contents into the project-local modules directory.
+        for (const pendingModule of pendingModuleImports) {
+          const installPath = await moduleManager.getModuleInstallPath(pendingModule.module_id);
+          if (installPath) {
+            const dest = path.join(saveDir, "modules", pendingModule.module_id);
+            await fs.mkdir(path.join(saveDir, "modules"), { recursive: true });
+            // Overwrites any existing copy from a previous import (intentional).
+            await fs.cp(installPath, dest, { recursive: true });
+          }
+        }
         await runSerializedProjectManifestMutation(saveDir, async () => {
           const manifest = await ProjectManager.readManifest(saveDir);
           const mergedManifest = {
@@ -95,7 +109,16 @@ export function registerProjectIpcHandlers(
 
       setActiveProjectDir(saveDir);
       await refreshProjectModuleHealth(saveDir);
-      return { checksum: saveResult.checksum, nodeCount: saveResult.nodeCount };
+
+      // Read back the project name from the manifest (may have been preserved from prior save).
+      let savedProjectName: string | undefined;
+      try {
+        const manifest = await ProjectManager.readManifest(saveDir);
+        savedProjectName = manifest.project_name;
+      } catch {
+        // Non-blocking
+      }
+      return { checksum: saveResult.checksum, nodeCount: saveResult.nodeCount, projectName: savedProjectName };
     }
   );
 
@@ -125,11 +148,13 @@ export function registerProjectIpcHandlers(
     // Read the manifest checksum and version (the values stored at save time).
     let checksum: string | null = null;
     let savedPdvVersion: string | null = null;
+    let projectName: string | null = null;
     let nodeCount: number | null = null;
     try {
       const manifest = await ProjectManager.readManifest(saveDir);
       checksum = manifest.tree_checksum || null;
       savedPdvVersion = manifest.pdv_version || null;
+      projectName = manifest.project_name ?? null;
     } catch {
       // Non-blocking — proceed with load even if manifest read fails
     }
@@ -160,7 +185,7 @@ export function registerProjectIpcHandlers(
       // Non-blocking
     }
 
-    return { codeCells, checksum, checksumValid, nodeCount, savedPdvVersion };
+    return { codeCells, checksum, checksumValid, nodeCount, savedPdvVersion, projectName };
   });
 
   ipcMain.handle(IPC.project.new, async () => {
@@ -198,6 +223,7 @@ export function registerProjectIpcHandlers(
           language: manifest.language,
           interpreterPath: manifest.interpreter_path,
           pdvVersion: manifest.pdv_version,
+          projectName: manifest.project_name,
         };
       } catch {
         return { language: "python" as const };

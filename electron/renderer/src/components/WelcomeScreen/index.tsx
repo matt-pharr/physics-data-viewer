@@ -11,10 +11,12 @@
 
 import React from 'react';
 
-/** Entry in the recent projects list with optional language metadata. */
+/** Entry in the recent projects list with optional language and name metadata. */
 export interface RecentProject {
   path: string;
   language?: "python" | "julia";
+  /** Project name from the manifest (falls back to folder name when absent). */
+  name?: string;
 }
 
 interface WelcomeScreenProps {
@@ -57,12 +59,12 @@ export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({
       <div className="welcome-card">
         {/* Logo */}
         <div className="welcome-logo">
-          <svg className="welcome-logo-icon" width="72" height="72" viewBox="0 0 500 500" xmlns="http://www.w3.org/2000/svg">
-            <path fill="none" stroke="currentColor" strokeWidth="6" d="M 467.78 245.78 C 467.78 368.39 368.39 467.78 245.78 467.78 C 123.17 467.78 23.78 368.39 23.78 245.78 C 23.78 123.17 123.17 23.78 245.78 23.78 C 368.39 23.78 467.78 123.17 467.78 245.78 Z"/>
-            <path fill="currentColor" stroke="none" d="M 312.45 397.15 C 270.19 415.82 220.8 396.69 202.14 354.43 C 183.47 312.18 202.6 262.79 244.86 244.12 C 287.12 225.46 336.5 244.59 355.17 286.84 C 373.83 329.1 354.71 378.49 312.45 397.15 Z"/>
-            <path fill="currentColor" stroke="none" d="M 246.59 248.05 C 204.33 266.71 154.95 247.59 136.28 205.33 C 117.62 163.07 136.74 113.68 179 95.02 C 221.26 76.35 270.65 95.48 289.31 137.74 C 307.98 180 288.85 229.38 246.59 248.05 Z"/>
-            <path fill="none" stroke="currentColor" strokeWidth="29" d="M 354.07 289.67 C 311.82 308.34 262.43 289.21 243.76 246.95 C 225.1 204.7 244.23 155.31 286.48 136.64 C 328.74 117.98 378.13 137.11 396.79 179.36 C 415.46 221.62 396.33 271.01 354.07 289.67 Z"/>
-            <path fill="none" stroke="currentColor" strokeWidth="29" d="M 204.97 355.53 C 162.71 374.19 113.32 355.07 94.66 312.81 C 75.99 270.55 95.12 221.16 137.38 202.5 C 179.64 183.84 229.02 202.96 247.69 245.22 C 266.35 287.48 247.23 336.87 204.97 355.53 Z"/>
+          <svg className="welcome-logo-icon" width="72" height="72" viewBox="0 0 80 80" xmlns="http://www.w3.org/2000/svg">
+            <circle cx="40" cy="40" r="36" fill="none" stroke="var(--text-secondary)" strokeWidth="2" opacity=".2"/>
+            <circle cx="33" cy="33" r="14" fill="var(--accent)"/>
+            <circle cx="47" cy="33" r="14" fill="var(--text-secondary)"/>
+            <circle cx="33" cy="47" r="14" fill="var(--text-secondary)"/>
+            <circle cx="47" cy="47" r="14" fill="var(--accent)"/>
           </svg>
           <h1 className="welcome-title">Physics Data Viewer</h1>
         </div>
@@ -100,7 +102,7 @@ export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({
                     title={entry.path}
                   >
                     <span className="welcome-recent-badge">[{languageBadge(entry.language)}]</span>
-                    <span className="welcome-recent-name">{projectName(entry.path)}</span>
+                    <span className="welcome-recent-name">{entry.name ?? projectName(entry.path)}</span>
                     <span className="welcome-recent-path">{projectDir(entry.path)}</span>
                   </button>
                 </li>

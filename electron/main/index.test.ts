@@ -105,6 +105,10 @@ const mocks = vi.hoisted(() => {
   const moduleManagerResolveModuleFiles = vi.fn(async () => []);
   const moduleManagerIsV4Module = vi.fn(async () => false);
   const moduleManagerReadModuleIndex = vi.fn(async () => []);
+  const moduleManagerGetModuleDependencies = vi.fn(async () => []);
+  const moduleManagerResolveModuleDir = vi.fn(async () => null);
+  const moduleManagerUninstall = vi.fn(async () => ({ success: true }));
+  const moduleManagerUpdate = vi.fn(async () => ({ success: true, status: "installed" }));
   return {
     handlers,
     ipcHandle,
@@ -130,6 +134,10 @@ const mocks = vi.hoisted(() => {
     moduleManagerResolveModuleFiles,
     moduleManagerIsV4Module,
     moduleManagerReadModuleIndex,
+    moduleManagerGetModuleDependencies,
+    moduleManagerResolveModuleDir,
+    moduleManagerUninstall,
+    moduleManagerUpdate,
   };
 });
 
@@ -177,6 +185,10 @@ vi.mock("./module-manager", () => ({
     resolveModuleFiles: mocks.moduleManagerResolveModuleFiles,
     isV4Module: mocks.moduleManagerIsV4Module,
     readModuleIndex: mocks.moduleManagerReadModuleIndex,
+    getModuleDependencies: mocks.moduleManagerGetModuleDependencies,
+    resolveModuleDir: mocks.moduleManagerResolveModuleDir,
+    uninstall: mocks.moduleManagerUninstall,
+    update: mocks.moduleManagerUpdate,
   })),
 }));
 
@@ -237,6 +249,7 @@ function setup() {
       found: true,
       data: { "text/plain": "doc" },
     })),
+    ping: vi.fn(async () => undefined),
     getKernel: vi.fn(() => makeKernelInfo()),
     getQueryPort: vi.fn(() => 12345),
     shutdownAll: vi.fn(async () => undefined),
@@ -828,6 +841,7 @@ describe("Step 5 IPC handlers", () => {
       checksumValid: null,
       nodeCount: null,
       savedPdvVersion: "0.0.7",
+      projectName: null,
     });
   });
 
@@ -1011,7 +1025,7 @@ describe("Step 5 IPC handlers", () => {
       expect.stringContaining('"module_id": "demo-module"'),
       "utf8"
     );
-    expect(mocks.moduleManagerResolveActionScripts).toHaveBeenCalledWith("demo-module");
+    expect(mocks.moduleManagerResolveActionScripts).toHaveBeenCalledWith("demo-module", "/tmp/project");
     expect(commRouter.request).toHaveBeenCalledWith(
       PDVMessageType.SCRIPT_REGISTER,
       expect.objectContaining({
@@ -1192,22 +1206,23 @@ describe("Step 5 IPC handlers", () => {
     setup();
     const projectLoad = getHandler(IPC.project.load);
     await projectLoad({}, "/tmp/project");
-    mocks.fsReadFile.mockResolvedValueOnce(
-      JSON.stringify({
-        schema_version: "1.1",
-        saved_at: "2026-01-01T00:00:00.000Z",
-        pdv_version: getAppVersion(),
-        tree_checksum: "",
-        modules: [
-          {
-            module_id: "demo-module",
-            alias: "demo-module",
-            version: "1.0.0",
-          },
-        ],
-        module_settings: {},
-      })
-    );
+    const manifestJson = JSON.stringify({
+      schema_version: "1.1",
+      saved_at: "2026-01-01T00:00:00.000Z",
+      pdv_version: getAppVersion(),
+      tree_checksum: "",
+      modules: [
+        {
+          module_id: "demo-module",
+          alias: "demo-module",
+          version: "1.0.0",
+        },
+      ],
+      module_settings: {},
+    });
+    // Two reads: readActiveProjectManifest + re-read inside runWithProjectManifestWriteLock
+    mocks.fsReadFile.mockResolvedValueOnce(manifestJson);
+    mocks.fsReadFile.mockResolvedValueOnce(manifestJson);
 
     const saveSettings = getHandler(IPC.modules.saveSettings);
     const result = (await saveSettings({}, {

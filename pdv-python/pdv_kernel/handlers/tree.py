@@ -269,6 +269,58 @@ def handle_tree_resolve_file(msg: dict) -> None:
     )
 
 
+def handle_tree_delete(msg: dict) -> None:
+    """Handle ``pdv.tree.delete`` — remove a node from the tree by path.
+
+    Payload
+    -------
+    path : str
+        Dot-separated tree path of the node to delete.
+    """
+    from pdv_kernel.comms import send_message, send_error, get_pdv_tree  # noqa: PLC0415
+
+    msg_id = msg.get("msg_id")
+    payload = msg.get("payload", {})
+    path = payload.get("path", "")
+
+    tree = get_pdv_tree()
+    if tree is None:
+        send_error(
+            "pdv.tree.delete.response",
+            "tree.not_initialized",
+            "PDVTree is not initialized.",
+            in_reply_to=msg_id,
+        )
+        return
+
+    if not path:
+        send_error(
+            "pdv.tree.delete.response",
+            "tree.invalid_path",
+            "Cannot delete the root tree.",
+            in_reply_to=msg_id,
+        )
+        return
+
+    try:
+        del tree[path]
+    except KeyError:
+        send_error(
+            "pdv.tree.delete.response",
+            "tree.path_not_found",
+            f"No node exists at path: {path}",
+            in_reply_to=msg_id,
+        )
+        return
+
+    send_message(
+        "pdv.tree.delete.response",
+        {"path": path, "deleted": True},
+        in_reply_to=msg_id,
+    )
+
+
 register("pdv.tree.list", handle_tree_list)
 register("pdv.tree.get", handle_tree_get)
 register("pdv.tree.resolve_file", handle_tree_resolve_file)
+register("pdv.tree.delete", handle_tree_delete)

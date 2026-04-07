@@ -435,6 +435,11 @@ export class CommRouter {
     this.pending.clear();
   }
 
+  /** Return the current comm_id (for diagnostics). */
+  getCommId(): string | null {
+    return this.commId;
+  }
+
   /**
    * Reject all pending request promises and clear push handlers.
    *

@@ -27,6 +27,7 @@ import { TitleBar } from '../components/TitleBar';
 import { WriteTab } from '../components/WriteTab';
 import { SettingsDialog } from '../components/SettingsDialog';
 import { ImportModuleDialog } from '../components/ImportModuleDialog';
+import { SaveAsDialog } from '../components/SaveAsDialog';
 import { WelcomeScreen, type RecentProject } from '../components/WelcomeScreen';
 import type {
   CellTab,
@@ -42,7 +43,7 @@ import type {
 } from '../types';
 import { resolveShortcuts } from '../shortcuts';
 import { normalizeLoadedCodeCells, normalizeRecentProjects, mergeConfigUpdate } from './app-utils';
-import { CELL_UNDO_LIMIT, NAMESPACE_REFRESH_INTERVAL_MS } from './constants';
+import { CELL_UNDO_LIMIT, MAX_LOG_ENTRIES, NAMESPACE_REFRESH_INTERVAL_MS } from './constants';
 import { useCodeCellsPersistence } from './useCodeCellsPersistence';
 import { useKeyboardShortcuts } from './useKeyboardShortcuts';
 import { useKernelLifecycle } from './useKernelLifecycle';
@@ -128,12 +129,15 @@ const App: React.FC = () => {
   // -- Dialog visibility state ----------------------------------------------
 
   const [showWelcome, setShowWelcome] = useState(true);
+  const [forceWelcome, setForceWelcome] = useState(false);
   const [scriptDialog, setScriptDialog] = useState<TreeNodeData | null>(null);
   const [createScriptTarget, setCreateScriptTarget] = useState<string | null>(null);
   const [createNoteTarget, setCreateNoteTarget] = useState<string | null>(null);
   const [createGuiTarget, setCreateGuiTarget] = useState<string | null>(null);
   const [showSettings, setShowSettings] = useState(false);
   const [showImportModule, setShowImportModule] = useState(false);
+  const [showSaveAsDialog, setShowSaveAsDialog] = useState(false);
+  const [currentProjectName, setCurrentProjectName] = useState<string | null>(null);
   const [chromeInfo, setChromeInfo] = useState<WindowChromeInfo | null>(null);
   const [menuModel, setMenuModel] = useState<AppMenuTopLevel[]>([]);
 
@@ -249,11 +253,12 @@ const App: React.FC = () => {
   }, [chromeInfo?.showMenuBar]);
 
   useEffect(() => {
-    const projectName = currentProjectDir
-      ? currentProjectDir.split('/').filter(Boolean).pop() ?? 'Unsaved Project'
-      : 'Unsaved Project';
+    const projectName = currentProjectName
+      ?? (currentProjectDir
+        ? currentProjectDir.split('/').filter(Boolean).pop() ?? 'Unsaved Project'
+        : 'Unsaved Project');
     document.title = `PDV: ${projectName}`;
-  }, [currentProjectDir]);
+  }, [currentProjectDir, currentProjectName]);
 
   useEffect(() => {
     if (!window.pdv?.menu) {
@@ -263,15 +268,31 @@ const App: React.FC = () => {
     void window.pdv.menu.updateRecentProjects(recentProjects);
   }, [config]);
 
-  // Listen for File > Import Module... menu action
+  // Listen for File-menu actions handled at the App level.
+  // project:open and project:openRecent are dispatched via refs so this effect
+  // doesn't re-subscribe on every kernelStatus change (handlers defined later).
+  const handleOpenWithPickerRef = useRef<() => Promise<void>>();
+  const handleOpenRecentRef = useRef<(path: string) => Promise<void>>();
   useEffect(() => {
     if (!window.pdv?.menu) return;
     const unsub = window.pdv.menu.onAction((payload) => {
-      if (payload.action === 'modules:import') {
+      if (payload.action === 'project:open') {
+        void handleOpenWithPickerRef.current?.();
+      } else if (payload.action === 'project:openRecent') {
+        if (payload.path) void handleOpenRecentRef.current?.(payload.path);
+      } else if (payload.action === 'modules:import') {
         setShowImportModule(true);
       } else if (payload.action === 'settings:open') {
         setSettingsInitialTab('general');
         setShowSettings(true);
+      } else if (payload.action === 'project:new') {
+        setCurrentProjectName(null);
+        setForceWelcome(true);
+      } else if (payload.action === 'recentProjects:clear') {
+        void window.pdv.config.set({ recentProjects: [] }).then((updated) => {
+          if (updated) setConfig((prev) => (prev ? { ...prev, recentProjects: [] } : prev));
+        });
+        void window.pdv.menu.updateRecentProjects([]);
       }
     });
     return unsub;
@@ -419,6 +440,7 @@ const App: React.FC = () => {
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.key !== 'Escape') return;
       // Close in priority order (topmost first)
+      if (showSaveAsDialog) { setShowSaveAsDialog(false); return; }
       if (showImportModule) { setShowImportModule(false); return; }
       if (scriptDialog) { setScriptDialog(null); return; }
       if (createScriptTarget) { setCreateScriptTarget(null); return; }
@@ -427,7 +449,7 @@ const App: React.FC = () => {
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [showImportModule, scriptDialog, createScriptTarget, createNoteTarget, createGuiTarget]);
+  }, [showSaveAsDialog, showImportModule, scriptDialog, createScriptTarget, createNoteTarget, createGuiTarget]);
 
   const handleSettingsSave = async (updates: Partial<Config>) => {
     await window.pdv.config.set(updates);
@@ -589,6 +611,16 @@ const App: React.FC = () => {
       if (!result.success && result.error) {
         console.error('[App] Handler failed:', result.error);
       }
+    } else if (action === 'delete') {
+      if (!currentKernelId || !node.path) return;
+      const confirmed = window.confirm(
+        `Delete "${node.path}" from the tree?\n\nThis cannot be undone.`
+      );
+      if (!confirmed) return;
+      const result = await window.pdv.tree.delete(currentKernelId, node.path);
+      if (!result.success) {
+        console.error('[App] Delete failed:', result.error);
+      }
     } else if (action === 'print') {
       if (!currentKernelId) return;
       const pyExpr = node.path
@@ -621,7 +653,10 @@ const App: React.FC = () => {
       duration: result.duration,
       images: result.images,
     };
-    setLogs((prev) => [...prev, logEntry]);
+    setLogs((prev) => {
+      const next = [...prev, logEntry];
+      return next.length > MAX_LOG_ENTRIES ? next.slice(next.length - MAX_LOG_ENTRIES) : next;
+    });
     if (result.error) {
       setLastError(result.error);
     }
@@ -654,10 +689,13 @@ const App: React.FC = () => {
     };
 
     // Create the log entry immediately so output appears as it streams in.
-    setLogs((prev) => [
-      ...prev,
-      { id: executionId, timestamp: Date.now(), code, origin },
-    ]);
+    setLogs((prev) => {
+      const next = [
+        ...prev,
+        { id: executionId, timestamp: Date.now(), code, origin },
+      ];
+      return next.length > MAX_LOG_ENTRIES ? next.slice(next.length - MAX_LOG_ENTRIES) : next;
+    });
 
     try {
       const result = await window.pdv.kernels.execute(currentKernelId, {
@@ -730,7 +768,6 @@ const App: React.FC = () => {
 
   const {
     handleSaveProject: _handleSaveProject,
-    handleOpenProject: _handleOpenProject,
     executeOpenProject,
   } = useProjectWorkflow({
     kernelStatus,
@@ -750,6 +787,8 @@ const App: React.FC = () => {
     setLastChecksum,
     setChecksumMismatch,
     setSavedPdvVersion,
+    setCurrentProjectName,
+    setShowSaveAsDialog,
     loadedProjectTabsRef,
     normalizeLoadedCodeCells,
     flushDirtyNotes,
@@ -762,7 +801,7 @@ const App: React.FC = () => {
     [config?.recentProjects],
   );
 
-  /** Build RecentProject[] with language metadata from project.json files. */
+  /** Build RecentProject[] with language and name metadata from project.json files. */
   const [recentProjects, setRecentProjects] = useState<RecentProject[]>([]);
   useEffect(() => {
     if (recentProjectPaths.length === 0) {
@@ -770,17 +809,25 @@ const App: React.FC = () => {
       return;
     }
     let cancelled = false;
-    window.pdv.project.peekLanguages(recentProjectPaths).then((langMap) => {
-      if (cancelled) return;
-      setRecentProjects(recentProjectPaths.map((p) => ({ path: p, language: langMap[p] })));
-    }).catch(() => {
-      if (cancelled) return;
-      setRecentProjects(recentProjectPaths.map((p) => ({ path: p })));
+    Promise.all(
+      recentProjectPaths.map(async (p) => {
+        try {
+          const peek = await window.pdv.project.peekManifest(p);
+          return { path: p, language: peek.language, name: peek.projectName } as RecentProject;
+        } catch {
+          return { path: p } as RecentProject;
+        }
+      })
+    ).then((results) => {
+      if (!cancelled) setRecentProjects(results);
     });
     return () => { cancelled = true; };
   }, [recentProjectPaths]);
 
-  const dismissWelcome = useCallback(() => setShowWelcome(false), []);
+  const dismissWelcome = useCallback(() => {
+    setShowWelcome(false);
+    setForceWelcome(false);
+  }, []);
 
   /**
    * Starts the kernel for the current config, or shows the environment
@@ -864,15 +911,34 @@ const App: React.FC = () => {
     await ensureKernel(language);
   }, [config, dismissWelcome, ensureKernel, openEnvSettings, startKernel]);
 
-  const handleWelcomeOpen = useCallback(async () => {
-    const dir = await window.pdv.files.pickDirectory();
+  /**
+   * Open a project via the file picker, with smart-open resolution.
+   * Works both from the welcome screen (kernel not ready) and after kernel start.
+   */
+  const handleOpenWithPicker = useCallback(async () => {
+    const defaultPath = currentProjectDir
+      ? currentProjectDir.replace(/\/[^/]+\/?$/, '')
+      : undefined;
+    const dir = await window.pdv.files.pickDirectory(defaultPath);
     if (!dir) return;
-    await openProjectFromWelcome(dir);
-  }, [openProjectFromWelcome]);
+    if (kernelStatus === 'ready') {
+      void executeOpenProject(dir);
+    } else {
+      await openProjectFromWelcome(dir);
+    }
+  }, [currentProjectDir, kernelStatus, executeOpenProject, openProjectFromWelcome]);
 
-  const handleWelcomeOpenRecent = useCallback(async (path: string) => {
-    await openProjectFromWelcome(path);
-  }, [openProjectFromWelcome]);
+  const handleOpenRecent = useCallback(async (path: string) => {
+    if (kernelStatus === 'ready') {
+      void executeOpenProject(path);
+    } else {
+      await openProjectFromWelcome(path);
+    }
+  }, [kernelStatus, executeOpenProject, openProjectFromWelcome]);
+
+  // Keep refs in sync so the menu-action effect (subscribed once) calls the latest handlers.
+  handleOpenWithPickerRef.current = handleOpenWithPicker;
+  handleOpenRecentRef.current = handleOpenRecent;
 
   // Execute deferred project action once the kernel becomes ready.
   useEffect(() => {
@@ -882,9 +948,10 @@ const App: React.FC = () => {
     void executeOpenProject(pending.path);
   }, [kernelStatus, executeOpenProject]);
 
-  const projectTitle = currentProjectDir
-    ? currentProjectDir.split('/').filter(Boolean).pop() ?? 'Unsaved Project'
-    : 'Unsaved Project';
+  const projectTitle = currentProjectName
+    ?? (currentProjectDir
+      ? currentProjectDir.split('/').filter(Boolean).pop() ?? 'Unsaved Project'
+      : 'Unsaved Project');
 
   return (
     <div className="app">
@@ -1159,6 +1226,19 @@ const App: React.FC = () => {
          refreshToken={modulesRefreshToken}
          onClose={() => setShowImportModule(false)}
        />
+       {showSaveAsDialog && (
+         <SaveAsDialog
+           defaultLocation={currentProjectDir
+             ? currentProjectDir.replace(/\/[^/]+\/?$/, '')
+             : null}
+           defaultName={currentProjectName ?? undefined}
+           onSave={async (projectName, saveDir) => {
+             setShowSaveAsDialog(false);
+             await _handleSaveProject({ directory: saveDir, projectName });
+           }}
+           onCancel={() => setShowSaveAsDialog(false)}
+         />
+       )}
        <SettingsDialog
          isOpen={showSettings}
          initialTab={settingsInitialTab}
@@ -1178,12 +1258,12 @@ const App: React.FC = () => {
          envWarning={interpreterWarning}
        />
 
-       {showWelcome && isPristine && (
+       {((showWelcome && isPristine) || forceWelcome) && (
          <WelcomeScreen
            recentProjects={recentProjects}
            onNewProject={handleWelcomeNewProject}
-           onOpenProject={handleWelcomeOpen}
-           onOpenRecent={handleWelcomeOpenRecent}
+           onOpenProject={handleOpenWithPicker}
+           onOpenRecent={handleOpenRecent}
          />
        )}
      </div>

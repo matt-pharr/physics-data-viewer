@@ -26,9 +26,9 @@ describe('getActionsForNode', () => {
     expect(actionIds('ndarray')).not.toContain('create_script');
   });
 
-  it('always disables delete action', () => {
+  it('enables delete action', () => {
     const node = { type: 'script' } as unknown as Parameters<typeof getActionsForNode>[0];
     const deleteAction = getActionsForNode(node).find((action) => action.id === 'delete');
-    expect(deleteAction?.disabled).toBe(true);
+    expect(deleteAction?.disabled).toBe(false);
   });
 });

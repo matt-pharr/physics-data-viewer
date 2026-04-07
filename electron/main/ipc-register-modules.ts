@@ -12,6 +12,8 @@
  * - Project save/load/new IPC handlers.
  */
 
+import * as fs from "fs/promises";
+import * as path from "path";
 import { BrowserWindow, ipcMain } from "electron";
 
 import { CommRouter } from "./comm-router";
@@ -28,6 +30,7 @@ import {
   ModuleInstallResult,
   ModuleSettingsRequest,
   ModuleSettingsResult,
+  ModuleUninstallResult,
   ModuleUpdateResult,
 } from "./ipc";
 import { KernelManager } from "./kernel-manager";
@@ -177,6 +180,16 @@ export function registerModulesIpcHandlers(
             error: `Module alias already exists: ${baseAlias}`,
           };
         }
+
+        // Copy module content into the project-local modules directory.
+        const moduleInstallPath = installed.installPath
+          ?? await moduleManager.getModuleInstallPath(installed.id);
+        if (moduleInstallPath) {
+          const dest = path.join(activeProjectDir, "modules", installed.id);
+          await fs.mkdir(path.join(activeProjectDir, "modules"), { recursive: true });
+          // Overwrites any existing copy from a previous import (intentional).
+          await fs.cp(moduleInstallPath, dest, { recursive: true });
+        }
       } else {
         pendingImports.push(importedModule);
       }
@@ -193,14 +206,16 @@ export function registerModulesIpcHandlers(
           commRouter,
           moduleManager,
           importedModule,
-          kernelWorkingDirs.get(activeKernelId)
+          kernelWorkingDirs.get(activeKernelId),
+          activeProjectDir,
         );
         // Send pdv.modules.setup so the kernel adds lib paths to sys.path
         // and imports entry points for the newly imported module.
         const setupPayload = await buildModulesSetupPayload(
           moduleManager,
           [importedModule],
-          kernelWorkingDirs.get(activeKernelId)
+          kernelWorkingDirs.get(activeKernelId),
+          activeProjectDir,
         );
         if (setupPayload.modules.length > 0) {
           await commRouter.request(PDVMessageType.MODULES_SETUP, setupPayload);
@@ -247,7 +262,7 @@ export function registerModulesIpcHandlers(
         allModules.map(async (entry) => {
           let actions: Awaited<ReturnType<ModuleManager["resolveActionScripts"]>>;
           try {
-            actions = await moduleManager.resolveActionScripts(entry.module_id);
+            actions = await moduleManager.resolveActionScripts(entry.module_id, activeProjectDir);
           } catch (error) {
             if (isMissingActionScriptError(error)) {
               actions = [];
@@ -255,7 +270,7 @@ export function registerModulesIpcHandlers(
               throw error;
             }
           }
-          const guiInfo = await moduleManager.getModuleGuiInfo(entry.module_id);
+          const guiInfo = await moduleManager.getModuleGuiInfo(entry.module_id, activeProjectDir);
           return {
             moduleId: entry.module_id,
             name: installedById.get(entry.module_id)?.name ?? entry.module_id,
@@ -263,7 +278,7 @@ export function registerModulesIpcHandlers(
             version: entry.version,
             revision: entry.revision,
             hasGui: guiInfo.hasGui,
-            inputs: await moduleManager.getModuleInputs(entry.module_id),
+            inputs: await moduleManager.getModuleInputs(entry.module_id, activeProjectDir),
             actions: actions.map((action) => ({
               id: action.actionId,
               label: action.actionLabel,
@@ -278,7 +293,7 @@ export function registerModulesIpcHandlers(
               (await moduleManager.evaluateHealth(entry.module_id, {
                 pdvVersion: getPdvVersion(),
                 pythonVersion,
-              })),
+              }, activeProjectDir)),
           };
         })
       );
@@ -368,7 +383,7 @@ export function registerModulesIpcHandlers(
           error: `Imported module alias not found: ${request.moduleAlias}`,
         };
       }
-      const actions = await moduleManager.resolveActionScripts(imported.module_id);
+      const actions = await moduleManager.resolveActionScripts(imported.module_id, activeProjectDir);
       const action = actions.find((entry) => entry.actionId === request.actionId);
       if (!action) {
         return {
@@ -448,5 +463,17 @@ export function registerModulesIpcHandlers(
         error: `Imported module alias not found: ${moduleAlias}`,
       };
     }
+  );
+
+  ipcMain.handle(
+    IPC.modules.uninstall,
+    async (_event, moduleId: string): Promise<ModuleUninstallResult> =>
+      moduleManager.uninstall(moduleId)
+  );
+
+  ipcMain.handle(
+    IPC.modules.update,
+    async (_event, moduleId: string): Promise<ModuleInstallResult> =>
+      moduleManager.update(moduleId)
   );
 }

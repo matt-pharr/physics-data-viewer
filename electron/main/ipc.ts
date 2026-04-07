@@ -72,6 +72,7 @@ export const IPC = {
     addFile: "tree:addFile",
     createGui: "tree:createGui",
     invokeHandler: "tree:invokeHandler",
+    delete: "tree:delete",
   },
   /** Namespace inspection channels. */
   namespace: {
@@ -99,6 +100,8 @@ export const IPC = {
     saveSettings: "modules:saveSettings",
     runAction: "modules:runAction",
     removeImport: "modules:removeImport",
+    uninstall: "modules:uninstall",
+    update: "modules:update",
   },
   /** Namelist read/write channels. */
   namelist: {
@@ -445,7 +448,7 @@ export interface ScriptRunResult {
 /**
  * Supported module install source kinds.
  */
-export type ModuleSourceType = "github" | "local";
+export type ModuleSourceType = "github" | "local" | "bundled";
 
 /**
  * Canonical source reference for an installed module.
@@ -477,6 +480,8 @@ export interface ModuleDescriptor {
   revision?: string;
   /** Optional absolute install path in module store. */
   installPath?: string;
+  /** Optional git-cloneable upstream URL for update checks. */
+  upstream?: string;
 }
 
 /**
@@ -728,15 +733,27 @@ export interface ModuleActionResult {
 }
 
 /**
+ * Result payload for `modules.uninstall`.
+ */
+export interface ModuleUninstallResult {
+  /** True when uninstall succeeded. */
+  success: boolean;
+  /** Optional user-facing error message. */
+  error?: string;
+}
+
+/**
  * Payload delivered when the app menu triggers a renderer action.
  */
 export interface MenuActionPayload {
   /** Action identifier emitted by the File menu. */
   action:
+    | "project:new"
     | "project:open"
     | "project:openRecent"
     | "project:save"
     | "project:saveAs"
+    | "recentProjects:clear"
     | "modules:import"
     | "settings:open";
   /** Project directory path for open-recent actions. */
@@ -1036,6 +1053,8 @@ export interface ProjectSaveResult {
   checksum: string;
   /** Number of tree nodes serialized. */
   nodeCount: number;
+  /** Project name stored in the manifest (may be absent for older projects). */
+  projectName?: string;
 }
 
 /**
@@ -1052,6 +1071,8 @@ export interface ProjectLoadResult {
   nodeCount: number | null;
   /** PDV version stored in the project manifest, or null if absent. */
   savedPdvVersion: string | null;
+  /** Project name stored in the manifest, or null if absent. */
+  projectName: string | null;
 }
 
 /**
@@ -1064,6 +1085,8 @@ export interface ProjectManifestPeek {
   interpreterPath?: string;
   /** PDV version the project was saved with. */
   pdvVersion?: string;
+  /** Project name stored in the manifest. */
+  projectName?: string;
 }
 
 /**
@@ -1277,6 +1300,17 @@ export interface PDVApi {
       path: string
     ): Promise<HandlerInvokeResult>;
     /**
+     * Delete a tree node by dot-path.
+     *
+     * @param kernelId - Target kernel ID.
+     * @param treePath - Dot-separated path of the node to delete.
+     * @returns Success/error result.
+     */
+    delete(
+      kernelId: string,
+      treePath: string
+    ): Promise<{ success: boolean; error?: string }>;
+    /**
      * Subscribe to tree change push notifications.
      *
      * @param callback - Invoked with each tree-changed payload.
@@ -1445,6 +1479,20 @@ export interface PDVApi {
      * @returns Removal result payload.
      */
     removeImport(moduleAlias: string): Promise<ModuleSettingsResult>;
+    /**
+     * Uninstall a module from the global store.
+     *
+     * @param moduleId - Module identifier to uninstall.
+     * @returns Uninstall result payload.
+     */
+    uninstall(moduleId: string): Promise<ModuleUninstallResult>;
+    /**
+     * Update an installed module from its upstream source.
+     *
+     * @param moduleId - Module identifier to update.
+     * @returns Install result payload reflecting the update outcome.
+     */
+    update(moduleId: string): Promise<ModuleInstallResult>;
   };
 
   /** Project save/load operations. */
@@ -1456,7 +1504,7 @@ export interface PDVApi {
       * @param codeCells - Code-cell payload to persist.
       * @returns True when save request is accepted.
       */
-    save(saveDir: string, codeCells: unknown): Promise<ProjectSaveResult>;
+    save(saveDir: string, codeCells: unknown, projectName?: string): Promise<ProjectSaveResult>;
     /**
      * Load an existing project.
      *
@@ -1719,7 +1767,7 @@ export interface PDVApi {
      *
      * @returns Selected directory path, or null if cancelled.
      */
-    pickDirectory(): Promise<string | null>;
+    pickDirectory(defaultPath?: string): Promise<string | null>;
   };
 
   /** App menu integration. */

@@ -40,6 +40,10 @@ interface UseProjectWorkflowOptions {
   setChecksumMismatch: Dispatch<SetStateAction<boolean>>;
   /** Sets the PDV version the loaded project was saved with (for status bar warning). */
   setSavedPdvVersion: Dispatch<SetStateAction<string | null>>;
+  /** Updates the project name displayed in the title bar. */
+  setCurrentProjectName: Dispatch<SetStateAction<string | null>>;
+  /** Shows or hides the Save As dialog. */
+  setShowSaveAsDialog: Dispatch<SetStateAction<boolean>>;
   /** Ref holding the tabs snapshot from project.onLoaded push (consumed once). */
   loadedProjectTabsRef: MutableRefObject<{ tabs: CellTab[]; activeTabId: number } | null>;
   /** Validates and normalizes raw code-cells.json data into typed CellTab[]. */
@@ -67,6 +71,8 @@ export function useProjectWorkflow(options: UseProjectWorkflowOptions) {
     setLastChecksum,
     setChecksumMismatch,
     setSavedPdvVersion,
+    setCurrentProjectName,
+    setShowSaveAsDialog,
     loadedProjectTabsRef,
     normalizeLoadedCodeCells,
     flushDirtyNotes,
@@ -93,19 +99,20 @@ export function useProjectWorkflow(options: UseProjectWorkflowOptions) {
     }
   }, [config, setConfig]);
 
-  const handleSaveProject = useCallback(async (options?: { saveAs?: boolean; directory?: string }): Promise<boolean> => {
+  const handleSaveProject = useCallback(async (options?: { saveAs?: boolean; directory?: string; projectName?: string }): Promise<boolean> => {
     if (kernelStatus !== 'ready') {
       return false;
     }
+    // If Save As is requested or no project is open yet, show the SaveAs dialog
+    // instead of the native directory picker.
+    if (options?.saveAs || (!options?.directory && !currentProjectDir)) {
+      setShowSaveAsDialog(true);
+      // Returns false — not an error. The dialog will invoke handleSaveProject
+      // again with { directory, projectName } once the user confirms.
+      return false;
+    }
     try {
-      let saveDir = options?.directory ?? null;
-      if (!saveDir) {
-        if (options?.saveAs || !currentProjectDir) {
-          saveDir = await window.pdv.files.pickDirectory();
-        } else {
-          saveDir = currentProjectDir;
-        }
-      }
+      const saveDir = options?.directory ?? currentProjectDir;
       if (!saveDir) {
         return false;
       }
@@ -113,8 +120,9 @@ export function useProjectWorkflow(options: UseProjectWorkflowOptions) {
       const result = await window.pdv.project.save(saveDir, {
         tabs: cellTabsRef.current,
         activeTabId: activeCellTabRef.current,
-      });
+      }, options?.projectName);
       setCurrentProjectDir(saveDir);
+      setCurrentProjectName(result.projectName ?? options?.projectName ?? null);
       setModulesRefreshToken((prev) => prev + 1);
       setLastChecksum(result.checksum.slice(0, 6));
       setChecksumMismatch(false);
@@ -139,11 +147,13 @@ export function useProjectWorkflow(options: UseProjectWorkflowOptions) {
     rememberRecentProject,
     setChecksumMismatch,
     setCurrentProjectDir,
+    setCurrentProjectName,
     setLastChecksum,
     setProgress,
     setLastError,
     setLogs,
     setModulesRefreshToken,
+    setShowSaveAsDialog,
   ]);
 
   const executeOpenProject = useCallback(async (directory?: string) => {
@@ -151,16 +161,25 @@ export function useProjectWorkflow(options: UseProjectWorkflowOptions) {
       return;
     }
     try {
-      const saveDir = directory ?? await window.pdv.files.pickDirectory();
-      if (!saveDir) {
+      // If no directory given, open a native picker starting at the parent of the current project.
+      let pickedDir = directory;
+      if (!pickedDir) {
+        const defaultPath = currentProjectDir
+          ? currentProjectDir.replace(/\/[^/]+\/?$/, '')
+          : undefined;
+        pickedDir = await window.pdv.files.pickDirectory(defaultPath) ?? undefined;
+      }
+      if (!pickedDir) {
         return;
       }
+      const saveDir = pickedDir;
       const result = await window.pdv.project.load(saveDir);
       const normalized = normalizeLoadedCodeCells(result.codeCells);
       loadedProjectTabsRef.current = normalized;
       setCellTabs(normalized.tabs);
       setActiveCellTab(normalized.activeTabId);
       setCurrentProjectDir(saveDir);
+      setCurrentProjectName(result.projectName ?? null);
       setModulesRefreshToken((prev) => prev + 1);
       await rememberRecentProject(saveDir);
       setNamespaceRefreshToken((prev) => prev + 1);
@@ -179,6 +198,7 @@ export function useProjectWorkflow(options: UseProjectWorkflowOptions) {
       setLastError(error instanceof Error ? error.message : String(error));
     }
   }, [
+    currentProjectDir,
     kernelStatus,
     loadedProjectTabsRef,
     normalizeLoadedCodeCells,
@@ -186,8 +206,9 @@ export function useProjectWorkflow(options: UseProjectWorkflowOptions) {
     setActiveCellTab,
     setCellTabs,
     setChecksumMismatch,
-    setSavedPdvVersion,
     setCurrentProjectDir,
+    setCurrentProjectName,
+    setSavedPdvVersion,
     setLastChecksum,
     setProgress,
     setLastError,
@@ -196,25 +217,13 @@ export function useProjectWorkflow(options: UseProjectWorkflowOptions) {
     setNamespaceRefreshToken,
   ]);
 
-  const handleOpenProject = useCallback((directory?: string) => {
-    void executeOpenProject(directory);
-  }, [executeOpenProject]);
-
   useEffect(() => {
     if (!window.pdv?.menu) {
       return;
     }
     const unsubscribe = window.pdv.menu.onAction((payload: MenuActionPayload) => {
-      if (payload.action === 'project:open') {
-        void handleOpenProject();
-        return;
-      }
-      if (payload.action === 'project:openRecent') {
-        if (payload.path) {
-          void handleOpenProject(payload.path);
-        }
-        return;
-      }
+      // project:open and project:openRecent are handled in App's menu listener
+      // so they can route through openProjectFromWelcome when the kernel isn't ready.
       if (payload.action === 'project:save') {
         void handleSaveProject();
         return;
@@ -224,11 +233,10 @@ export function useProjectWorkflow(options: UseProjectWorkflowOptions) {
       }
     });
     return () => unsubscribe();
-  }, [handleOpenProject, handleSaveProject]);
+  }, [handleSaveProject]);
 
   return {
     handleSaveProject,
-    handleOpenProject,
     executeOpenProject,
   };
 }

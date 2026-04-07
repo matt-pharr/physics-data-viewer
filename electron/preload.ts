@@ -70,6 +70,8 @@ const api: PDVApi = {
       ipcRenderer.invoke(IPC.tree.addFile, kernelId, sourcePath, targetTreePath, nodeType, filename),
     invokeHandler: (kernelId, nodePath) =>
       ipcRenderer.invoke(IPC.tree.invokeHandler, kernelId, nodePath),
+    delete: (kernelId, treePath) =>
+      ipcRenderer.invoke(IPC.tree.delete, kernelId, treePath),
     onChanged: (callback) => onPush(IPC.push.treeChanged, callback),
   },
   namespace: {
@@ -115,10 +117,12 @@ const api: PDVApi = {
     saveSettings: (request) => ipcRenderer.invoke(IPC.modules.saveSettings, request),
     runAction: (request) => ipcRenderer.invoke(IPC.modules.runAction, request),
     removeImport: (moduleAlias) => ipcRenderer.invoke(IPC.modules.removeImport, moduleAlias),
+    uninstall: (moduleId) => ipcRenderer.invoke(IPC.modules.uninstall, moduleId),
+    update: (moduleId) => ipcRenderer.invoke(IPC.modules.update, moduleId),
   },
   project: {
-    save: (saveDir, codeCells) =>
-      ipcRenderer.invoke(IPC.project.save, saveDir, codeCells),
+    save: (saveDir, codeCells, projectName) =>
+      ipcRenderer.invoke(IPC.project.save, saveDir, codeCells, projectName),
     load: (saveDir) => ipcRenderer.invoke(IPC.project.load, saveDir),
     new: () => ipcRenderer.invoke(IPC.project.new),
     peekLanguages: (paths) =>
@@ -164,7 +168,7 @@ const api: PDVApi = {
   files: {
     pickExecutable: () => ipcRenderer.invoke(IPC.files.pickExecutable),
     pickFile: () => ipcRenderer.invoke(IPC.files.pickFile),
-    pickDirectory: () => ipcRenderer.invoke(IPC.files.pickDirectory),
+    pickDirectory: (defaultPath) => ipcRenderer.invoke(IPC.files.pickDirectory, defaultPath),
   },
   menu: {
     updateRecentProjects: (paths) =>

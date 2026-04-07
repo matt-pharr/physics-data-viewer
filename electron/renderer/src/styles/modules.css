@@ -20,6 +20,12 @@
   background: var(--bg-secondary);
 }
 
+.modules-list-item-actions {
+  display: flex;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
 .modules-name {
   font-size: 13px;
   font-weight: 600;
@@ -224,6 +230,12 @@
   background: var(--bg-tertiary);
   color: var(--accent);
   border: 1px solid var(--accent);
+}
+
+.modules-badge-bundled {
+  background: var(--bg-tertiary);
+  color: var(--text-secondary);
+  border: 1px solid var(--border-color);
 }
 
 /* Step 11: in-panel prompt blocks for conflicts and updates */
