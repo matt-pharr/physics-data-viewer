@@ -170,13 +170,7 @@ export function useProjectWorkflow(options: UseProjectWorkflowOptions) {
       if (!pickedDir) {
         return;
       }
-      // Smart open: resolve the selected directory to a valid project folder.
-      const resolvedDir = await window.pdv.project.resolveDir(pickedDir);
-      if (!resolvedDir) {
-        setLastError(`No PDV project found in "${pickedDir}". Select a folder containing project.json.`);
-        return;
-      }
-      const saveDir = resolvedDir;
+      const saveDir = pickedDir;
       const result = await window.pdv.project.load(saveDir);
       const normalized = normalizeLoadedCodeCells(result.codeCells);
       loadedProjectTabsRef.current = normalized;

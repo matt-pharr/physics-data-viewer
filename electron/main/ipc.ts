@@ -114,7 +114,6 @@ export const IPC = {
     new: "project:new",
     peekLanguages: "project:peekLanguages",
     peekManifest: "project:peekManifest",
-    resolveDir: "project:resolveDir",
   },
   /** App configuration channels. */
   config: {
@@ -1525,18 +1524,6 @@ export interface PDVApi {
      * @returns Manifest peek data.
      */
     peekManifest(dir: string): Promise<ProjectManifestPeek>;
-    /**
-     * Resolve a user-selected directory to a valid PDV project directory.
-     *
-     * If `dir` contains `project.json`, returns it as-is. If not, checks
-     * immediate children for a single subfolder containing `project.json`
-     * and returns that. Returns `null` if no project is found or if
-     * multiple project children exist (ambiguous).
-     *
-     * @param dir - Absolute path to the directory chosen by the user.
-     * @returns Resolved project directory, or `null` if not resolvable.
-     */
-    resolveDir(dir: string): Promise<string | null>;
     /**
      * Subscribe to project-loaded push notifications.
      *

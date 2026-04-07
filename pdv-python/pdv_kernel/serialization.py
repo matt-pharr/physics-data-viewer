@@ -7,7 +7,7 @@ file representations.
 Supported formats
 -----------------
 - **npy** — NumPy arrays (requires numpy)
-- **parquet** — Pandas DataFrame and Series (requires pandas + pyarrow)
+- **parquet** — Pandas DataFrame and Series (requires pandas + pyarrow or fastparquet)
 - **json** — JSON-native scalars, lists, dicts
 - **txt** — Plain text strings
 - **pickle** — Fallback for unknown types (only when ``trusted=True``)
@@ -70,6 +70,69 @@ FORMAT_GUI_JSON = "gui_json"
 FORMAT_MODULE_META = "module_meta"
 FORMAT_NAMELIST = "namelist"
 FORMAT_PY_LIB = "py_lib"
+
+
+def _parquet_engine() -> str:
+    """Return the best available parquet engine name.
+
+    Prefers ``'pyarrow'`` when importable, falls back to ``'fastparquet'``.
+    Raises :class:`ImportError` if neither is available.
+    """
+    try:
+        import pyarrow  # noqa: F401, PLC0415
+        return "pyarrow"
+    except ImportError:
+        pass
+    try:
+        import fastparquet  # noqa: F401, PLC0415
+        return "fastparquet"
+    except ImportError:
+        pass
+    raise ImportError(
+        "No parquet engine available. Install pyarrow or fastparquet."
+    )
+
+
+def _write_parquet(value: Any, path: str) -> None:
+    """Write a DataFrame or Series to a parquet file.
+
+    Uses an explicit engine to avoid pyarrow extension-type registration
+    conflicts that occur when ``to_parquet()`` is called without one.
+    """
+    engine = _parquet_engine()
+    try:
+        value.to_parquet(path, engine=engine)
+    except Exception:
+        # pyarrow can raise extension-type conflicts on repeated writes
+        # in the same process.  Fall back to the other engine if possible.
+        fallback = "fastparquet" if engine == "pyarrow" else "pyarrow"
+        try:
+            value.to_parquet(path, engine=fallback)
+        except ImportError:
+            raise  # re-raise original if fallback isn't installed
+        except Exception:
+            raise  # re-raise fallback error
+
+
+def _read_parquet(path: str) -> Any:
+    """Read a parquet file into a DataFrame.
+
+    Uses an explicit engine to avoid pyarrow extension-type registration
+    conflicts.
+    """
+    import pandas as pd  # noqa: PLC0415
+
+    engine = _parquet_engine()
+    try:
+        return pd.read_parquet(path, engine=engine)
+    except Exception:
+        fallback = "fastparquet" if engine == "pyarrow" else "pyarrow"
+        try:
+            return pd.read_parquet(path, engine=fallback)
+        except ImportError:
+            raise
+        except Exception:
+            raise
 
 
 def python_type_string(value: Any) -> str:
@@ -366,7 +429,7 @@ def serialize_node(
     if kind in (KIND_DATAFRAME, KIND_SERIES):
         file_path = working_dir_tree_path(working_dir, tree_path, ".parquet")
         ensure_parent(file_path)
-        value.to_parquet(file_path)  # type: ignore[union-attr]
+        _write_parquet(value, file_path)
         rel_path = os.path.relpath(file_path, working_dir)
         descriptor["storage"] = {
             "backend": "local_file",
@@ -518,9 +581,7 @@ def deserialize_node(storage_ref: dict, save_dir: str, *, trusted: bool = False)
             return np.load(abs_path, allow_pickle=False)
 
         if fmt == FORMAT_PARQUET:
-            import pandas as pd  # noqa: PLC0415
-
-            return pd.read_parquet(abs_path)
+            return _read_parquet(abs_path)
 
         if fmt == FORMAT_TXT:
             with open(abs_path, "r", encoding="utf-8") as fh:

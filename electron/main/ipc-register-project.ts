@@ -215,37 +215,6 @@ export function registerProjectIpcHandlers(
   );
 
   ipcMain.handle(
-    IPC.project.resolveDir,
-    async (_event, dir: string): Promise<string | null> => {
-      // Check if the selected directory itself is a project.
-      try {
-        await fs.access(path.join(dir, "project.json"));
-        return dir;
-      } catch {
-        // Not a project directory — check children.
-      }
-      try {
-        const entries = await fs.readdir(dir, { withFileTypes: true });
-        const childProjects: string[] = [];
-        for (const entry of entries) {
-          if (!entry.isDirectory()) continue;
-          const childDir = path.join(dir, entry.name);
-          try {
-            await fs.access(path.join(childDir, "project.json"));
-            childProjects.push(childDir);
-          } catch {
-            // Not a project — skip.
-          }
-          if (childProjects.length > 1) break; // Ambiguous — stop early.
-        }
-        return childProjects.length === 1 ? childProjects[0] : null;
-      } catch {
-        return null;
-      }
-    }
-  );
-
-  ipcMain.handle(
     IPC.project.peekManifest,
     async (_event, dir: string) => {
       try {

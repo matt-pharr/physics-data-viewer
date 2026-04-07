@@ -800,7 +800,6 @@ export interface PDVApi {
     new(): Promise<boolean>;
     peekLanguages(paths: string[]): Promise<Record<string, "python" | "julia">>;
     peekManifest(dir: string): Promise<ProjectManifestPeek>;
-    resolveDir(dir: string): Promise<string | null>;
     onLoaded(callback: (payload: Record<string, unknown>) => void): () => void;
     onReloading(callback: (payload: { status: "reloading" | "ready" }) => void): () => void;
   };

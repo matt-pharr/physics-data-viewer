@@ -1069,7 +1069,7 @@ Triggered by user action (File → Save / Cmd+S). The app coordinates.
 
 **Save As dialog**: When saving for the first time or via File → Save As (Cmd+Shift+S), a custom Save As dialog is shown. The user enters a project name and chooses a parent directory; the app creates `<parent>/<sanitized-name>/` and saves into it. The project name is stored in `project.json` as `project_name` and displayed in the title bar and recent projects list. Subsequent saves (Cmd+S) go directly to the same directory without a dialog.
 
-**Open dialog**: File → Open (Cmd+O) opens a native directory picker. If the user selects a folder that doesn't contain `project.json` but has exactly one child folder that does, the app auto-selects that child ("smart open"). The picker defaults to the parent of the current project directory.
+**Open dialog**: File → Open (Cmd+O) opens a native directory picker defaulting to the parent of the current project directory.
 
 ```
 User triggers save

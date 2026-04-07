@@ -906,18 +906,12 @@ const App: React.FC = () => {
       : undefined;
     const dir = await window.pdv.files.pickDirectory(defaultPath);
     if (!dir) return;
-    // Smart open: resolve the selected directory to a valid project folder.
-    const resolved = await window.pdv.project.resolveDir(dir);
-    if (!resolved) {
-      setLastError(`No PDV project found in "${dir}". Select a folder containing project.json.`);
-      return;
-    }
     if (kernelStatus === 'ready') {
-      void executeOpenProject(resolved);
+      void executeOpenProject(dir);
     } else {
-      await openProjectFromWelcome(resolved);
+      await openProjectFromWelcome(dir);
     }
-  }, [currentProjectDir, kernelStatus, executeOpenProject, openProjectFromWelcome, setLastError]);
+  }, [currentProjectDir, kernelStatus, executeOpenProject, openProjectFromWelcome]);
 
   const handleOpenRecent = useCallback(async (path: string) => {
     if (kernelStatus === 'ready') {
