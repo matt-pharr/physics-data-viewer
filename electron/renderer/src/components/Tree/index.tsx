@@ -95,9 +95,40 @@ export const Tree: React.FC<TreeProps> = ({ kernelId, disabled = false, refreshT
     try {
       const rootNodes = await treeService.getRootNodes(kernelId, { force });
 
+      // Preserve the set of previously expanded paths so the tree doesn't
+      // collapse on every refresh. Paths that no longer exist in the new tree
+      // are pruned after re-expansion.
+      const previouslyExpanded = expandedPathsRef.current;
+      const newExpanded = new Set(['']);
+
+      // Re-expand previously open nodes by depth (parents before children)
+      // so each level's children are available for the next level.
+      const sortedPaths = Array.from(previouslyExpanded)
+        .filter((p) => p !== '')
+        .sort((a, b) => a.split('.').length - b.split('.').length);
+
+      // Build a lookup from path → node for the freshly-fetched root children.
+      const nodeMap = new Map<string, TreeNodeData>();
+      for (const n of rootNodes) nodeMap.set(n.path, n);
+
+      for (const expandPath of sortedPaths) {
+        const target = nodeMap.get(expandPath);
+        if (!target || !target.hasChildren) continue;
+        try {
+          const children = await treeService.getChildren(target, kernelId, { force });
+          target.isExpanded = true;
+          target.children = children;
+          newExpanded.add(expandPath);
+          for (const child of children) nodeMap.set(child.path, child);
+        } catch {
+          // Node may have been removed — skip silently.
+        }
+      }
+
+      expandedPathsRef.current = newExpanded;
+
       // Wrap in a synthetic root node so there is always a right-clickable
       // container even when the tree is empty.
-      expandedPathsRef.current = new Set(['']);
       const syntheticRoot: TreeNodeData = {
         id: '__root__',
         key: 'pdv_tree',
