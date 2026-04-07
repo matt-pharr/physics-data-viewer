@@ -1093,6 +1093,22 @@ export class KernelManager extends EventEmitter {
   }
 
   /**
+   * Send a kernel_info_request and wait for the reply.
+   *
+   * Drains any stale replies from the shell socket in the process.
+   * Used to confirm the shell channel is responsive before sending
+   * comm messages.
+   *
+   * @param id - Kernel ID.
+   * @param timeoutMs - Maximum wait time (default 5 s).
+   */
+  async ping(id: string, timeoutMs = 5_000): Promise<void> {
+    const managed = this.kernels.get(id);
+    if (!managed) throw new Error(`Kernel not found: ${id}`);
+    await this.sendShellRequest(managed, "kernel_info_request", {}, timeoutMs);
+  }
+
+  /**
    * Send a shell-channel request and wait for the correlated shell reply.
    *
    * @param managed - Target running kernel.
