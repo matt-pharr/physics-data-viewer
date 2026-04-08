@@ -3,32 +3,5 @@
     "version": "dev",
     "title": "dev",
     "aliases": []
-  },
-  {
-    "version": "0.0.9",
-    "title": "0.0.9",
-    "aliases": []
-  },
-  {
-    "version": "0.0.9.0",
-    "title": "0.0.9.0",
-    "aliases": []
-  },
-  {
-    "version": "0.0.9-alpha9",
-    "title": "0.0.9-alpha9",
-    "aliases": [
-      "latest"
-    ]
-  },
-  {
-    "version": "0.0.8-alpha8",
-    "title": "0.0.8-alpha8",
-    "aliases": []
-  },
-  {
-    "version": "0.0.7-alpha7",
-    "title": "0.0.7-alpha7",
-    "aliases": []
   }
 ]
