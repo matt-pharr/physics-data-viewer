@@ -112,7 +112,9 @@ function EditorToolbar() {
 /** Vertical drag handle between two side-by-side panels. */
 function ColumnResizer({ onDrag }: { onDrag: (deltaX: number) => void }) {
   const onDragRef = React.useRef(onDrag);
-  onDragRef.current = onDrag;
+  useEffect(() => {
+    onDragRef.current = onDrag;
+  });
 
   const handleMouseDown = useCallback((e: React.MouseEvent) => {
     e.preventDefault();
@@ -140,7 +142,9 @@ function ColumnResizer({ onDrag }: { onDrag: (deltaX: number) => void }) {
 /** Horizontal drag handle between canvas and preview. */
 function RowResizer({ onDrag }: { onDrag: (deltaY: number) => void }) {
   const onDragRef = React.useRef(onDrag);
-  onDragRef.current = onDrag;
+  useEffect(() => {
+    onDragRef.current = onDrag;
+  });
 
   const handleMouseDown = useCallback((e: React.MouseEvent) => {
     e.preventDefault();

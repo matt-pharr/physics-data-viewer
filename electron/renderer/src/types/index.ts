@@ -7,6 +7,8 @@
 
 import type {
   Config,
+  EnvironmentInfo,
+  InstallOutputChunk,
   KernelExecutionError,
   KernelExecutionOrigin,
   KernelExecuteResult,
@@ -44,6 +46,8 @@ import type {
 /** Re-export core preload API contract types for renderer imports. */
 export type {
   Config,
+  EnvironmentInfo,
+  InstallOutputChunk,
   KernelExecutionError,
   KernelExecutionOrigin,
   KernelExecuteResult,

@@ -27,8 +27,13 @@ interface VirtualRowProps {
   onClick: (node: TreeNodeData) => void;
 }
 
-/** Module-level row renderer for react-window v2. */
-const VirtualRow = React.memo(({ index, style, ariaAttributes, flatNodes, selectedPath, onExpand, onDoubleClick, onRightClick, onClick }: RowComponentProps<VirtualRowProps>) => {
+/** Module-level row renderer for react-window v2.
+ *
+ * Wrapped in `React.memo` for runtime memoization, but exposed as a plain
+ * function type because `react-window`'s `rowComponent` prop is typed as
+ * `(props) => ReactElement | null`, not a `MemoExoticComponent`.
+ */
+const VirtualRowImpl = ({ index, style, ariaAttributes, flatNodes, selectedPath, onExpand, onDoubleClick, onRightClick, onClick }: RowComponentProps<VirtualRowProps>): React.ReactElement => {
   const node = flatNodes[index];
   return (
     <TreeNodeRow
@@ -42,7 +47,8 @@ const VirtualRow = React.memo(({ index, style, ariaAttributes, flatNodes, select
       ariaAttributes={ariaAttributes}
     />
   );
-});
+};
+const VirtualRow = React.memo(VirtualRowImpl) as unknown as typeof VirtualRowImpl;
 
 interface TreeProps {
   kernelId: string | null;

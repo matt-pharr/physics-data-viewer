@@ -24,6 +24,8 @@ interface SaveAsDialogProps {
 
 /** Sanitize a project name for use as a directory name. */
 function sanitizeName(raw: string): string {
+  // Strip filesystem-reserved characters and ASCII control codes (\x00-\x1f).
+  // eslint-disable-next-line no-control-regex
   return raw.trim().replace(/[<>:"/\\|?*\x00-\x1f]/g, '_');
 }
 
