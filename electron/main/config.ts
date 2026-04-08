@@ -39,6 +39,8 @@ export interface PDVConfig {
   showModuleVariables: boolean;
   /** Whether to show callable variables in the Namespace panel. */
   showCallableVariables: boolean;
+  /** Whether the Namespace panel auto-refreshes on a polling interval. */
+  autoRefreshNamespace: boolean;
   /** UI theme override. Undefined = follow system. */
   theme?: "light" | "dark";
   /**
@@ -90,6 +92,7 @@ const CONFIG_DEFAULTS: PDVConfig = {
   showPrivateVariables: false,
   showModuleVariables: false,
   showCallableVariables: false,
+  autoRefreshNamespace: false,
   settings: {
     appearance: {
       themeName: "Dark+ (VSCode)",
@@ -173,6 +176,12 @@ function parseConfig(raw: string, filePath: string): Partial<PDVConfig> {
       throw new Error(`Invalid config value for showCallableVariables in ${filePath}`);
     }
     result.showCallableVariables = obj.showCallableVariables;
+  }
+  if ("autoRefreshNamespace" in obj) {
+    if (typeof obj.autoRefreshNamespace !== "boolean") {
+      throw new Error(`Invalid config value for autoRefreshNamespace in ${filePath}`);
+    }
+    result.autoRefreshNamespace = obj.autoRefreshNamespace;
   }
   if ("theme" in obj) {
     const theme = obj.theme;

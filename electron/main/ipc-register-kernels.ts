@@ -124,15 +124,32 @@ export function registerKernelIpcHandlers(
   // the shared commRouter (which causes "CommRouter detached" rejections).
   let startMutex: Promise<unknown> = Promise.resolve();
 
+  /**
+   * Wait for the previous mutex-serialized operation to settle. Errors from
+   * the prior operation are logged (with the operation name) but NOT
+   * propagated, so the next operation can still run on a serialized turn.
+   * Without this log, prior failures would silently disappear via
+   * `previous.catch(() => {})`.
+   */
+  async function awaitPreviousMutex(operation: string): Promise<void> {
+    try {
+      await startMutex;
+    } catch (err) {
+      console.warn(
+        `[ipc-register-kernels] Prior kernel-mutex operation rejected before ${operation}:`,
+        err
+      );
+    }
+  }
+
   ipcMain.handle(IPC.kernels.list, async () => {
     return kernelManager.list();
   });
 
   ipcMain.handle(IPC.kernels.start, async (_event, spec) => {
-    const previous = startMutex;
+    await awaitPreviousMutex("kernels.start");
     let release!: () => void;
     startMutex = new Promise<void>((r) => { release = r; });
-    await previous.catch(() => {});
     try {
     const requestedSpec = spec as Parameters<KernelManager["start"]>[0];
     const pythonPath =
@@ -186,7 +203,7 @@ export function registerKernelIpcHandlers(
       queryRouter.detach();
       await cleanupKernelWorkingDir(projectManager, kernelManager, crashedId, kernelWorkingDirs, crashHandlers);
       if (getActiveKernelId() === crashedId) setActiveKernelId(null);
-      win.webContents.send(IPC.push.kernelStatus, { kernelId: crashedId, status: "dead" });
+      win.webContents.send(IPC.push.kernelCrashed, { kernelId: crashedId });
     };
     crashHandlers.set(kernel.id, onCrash);
     kernelManager.on("kernel:crashed", onCrash);
@@ -198,10 +215,9 @@ export function registerKernelIpcHandlers(
   });
 
   ipcMain.handle(IPC.kernels.stop, async (_event, kernelId: string) => {
-    const previous = startMutex;
+    await awaitPreviousMutex("kernels.stop");
     let release!: () => void;
     startMutex = new Promise<void>((r) => { release = r; });
-    await previous.catch(() => {});
     try {
       await cleanupKernelWorkingDir(projectManager, kernelManager, kernelId, kernelWorkingDirs, crashHandlers);
       await kernelManager.stop(kernelId);
@@ -230,10 +246,9 @@ export function registerKernelIpcHandlers(
   });
 
   ipcMain.handle(IPC.kernels.restart, async (_event, kernelId: string) => {
-    const previous = startMutex;
+    await awaitPreviousMutex("kernels.restart");
     let release!: () => void;
     startMutex = new Promise<void>((r) => { release = r; });
-    await previous.catch(() => {});
     try {
     // Restart preserves activeProjectDir — only reset kernel-scoped state.
     resetKernelState();

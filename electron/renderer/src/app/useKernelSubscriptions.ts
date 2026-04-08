@@ -90,10 +90,8 @@ export function useKernelSubscriptions({
       setTreeRefreshToken((prev) => prev + 1);
     });
 
-    const unsubscribeKernelStatus = window.pdv.kernels.onKernelStatus((payload) => {
-      if (payload.status === "dead") {
-        onKernelCrash(payload.kernelId);
-      }
+    const unsubscribeKernelCrashed = window.pdv.kernels.onKernelCrashed((payload) => {
+      onKernelCrash(payload.kernelId);
     });
 
     const unsubscribeProgress = window.pdv.progress.onProgress((payload) => {
@@ -118,7 +116,7 @@ export function useKernelSubscriptions({
     return () => {
       unsubscribeTree();
       unsubscribeProject();
-      unsubscribeKernelStatus();
+      unsubscribeKernelCrashed();
       unsubscribeProgress();
       unsubscribeReloading();
     };

@@ -213,7 +213,11 @@ class PDVFile:
         Parameters
         ----------
         working_dir : str or None
-            Working directory to resolve relative paths against.
+            Working directory to resolve relative paths against. When the
+            stored ``relative_path`` is itself absolute this argument is
+            ignored. When it is relative and ``working_dir`` is falsy, the
+            current process working directory (``os.getcwd()``) is used as
+            a last-resort base so the returned path is always absolute.
 
         Returns
         -------
@@ -222,9 +226,8 @@ class PDVFile:
         """
         if os.path.isabs(self._relative_path):
             return self._relative_path
-        if working_dir:
-            return os.path.join(working_dir, self._relative_path)
-        return self._relative_path
+        base = working_dir or os.getcwd()
+        return os.path.join(base, self._relative_path)
 
     def preview(self) -> str:
         """Return a short human-readable preview for the tree panel.

@@ -156,7 +156,14 @@ export const IPC = {
   push: {
     treeChanged: "pdv.tree.changed",
     projectLoaded: "pdv.project.loaded",
-    kernelStatus: "pdv.kernel.status",
+    /**
+     * Fires when the kernel subprocess exits unexpectedly. There is no
+     * corresponding `pdv.kernel.crashed` wire message; the channel is
+     * emitted by the main process from its kernel-crash handler in
+     * `ipc-register-kernels.ts`. Renderers should treat receipt as an
+     * unrecoverable session loss.
+     */
+    kernelCrashed: "pdv.kernel.crashed",
     menuAction: "menu:action",
     chromeStateChanged: "chrome:stateChanged",
     executeOutput: "pdv.execute.output",
@@ -1228,12 +1235,13 @@ export interface PDVApi {
      */
     onOutput(callback: (chunk: ExecuteOutputChunk) => void): () => void;
     /**
-     * Subscribe to kernel status push notifications (e.g. crash detection).
+     * Subscribe to kernel crash push notifications. Fires only when the
+     * kernel subprocess exits unexpectedly.
      *
-     * @param callback - Invoked with kernel ID and status when the kernel state changes.
+     * @param callback - Invoked with the crashed kernel ID.
      * @returns Unsubscribe function.
      */
-    onKernelStatus(callback: (payload: { kernelId: string; status: string }) => void): () => void;
+    onKernelCrashed(callback: (payload: { kernelId: string }) => void): () => void;
   };
 
   /** Tree browsing and updates. */

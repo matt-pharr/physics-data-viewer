@@ -264,6 +264,8 @@ export interface Config {
   showModuleVariables?: boolean;
   /** Namespace visibility toggle for callables. */
   showCallableVariables?: boolean;
+  /** Whether the Namespace panel auto-refreshes on a polling interval. */
+  autoRefreshNamespace?: boolean;
   /** Coarse light/dark mode override. */
   theme?: "light" | "dark";
   /** External editor command for Python scripts. Uses `{}` as file-path placeholder. */
@@ -677,7 +679,7 @@ export interface PDVApi {
       language: "python" | "julia"
     ): Promise<{ valid: boolean; error?: string }>;
     onOutput(callback: (chunk: ExecuteOutputChunk) => void): () => void;
-    onKernelStatus(callback: (payload: { kernelId: string; status: string }) => void): () => void;
+    onKernelCrashed(callback: (payload: { kernelId: string }) => void): () => void;
   };
   tree: {
     list(kernelId: string, path?: string): Promise<NodeDescriptor[]>;

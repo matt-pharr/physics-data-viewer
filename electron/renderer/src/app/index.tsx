@@ -212,6 +212,9 @@ const App: React.FC = () => {
         }
         const loaded = await window.pdv.config.get();
         setConfig(loaded);  // theme applied by the reactive effect above
+        if (typeof loaded.autoRefreshNamespace === 'boolean') {
+          setAutoRefreshNamespace(loaded.autoRefreshNamespace);
+        }
         setCurrentProjectDir(null);
         // Kernel is NOT started here — it starts when the user picks a
         // project action from the WelcomeScreen.
@@ -803,7 +806,7 @@ const App: React.FC = () => {
     && noteTabs.length === 0;
 
   const {
-    handleSaveProject: _handleSaveProject,
+    handleSaveProject,
     executeOpenProject,
   } = useProjectWorkflow({
     kernelStatus,
@@ -832,10 +835,10 @@ const App: React.FC = () => {
 
   // Subscribe to main-process close requests (title-bar X, OS close, Cmd+Q)
   // and route them through the same dirty-action guard. The latest
-  // `_handleSaveProject` is captured via a ref so the listener doesn't need to
+  // `handleSaveProject` is captured via a ref so the listener doesn't need to
   // re-subscribe on every render.
-  const handleSaveProjectRef = useRef(_handleSaveProject);
-  handleSaveProjectRef.current = _handleSaveProject;
+  const handleSaveProjectRef = useRef(handleSaveProject);
+  handleSaveProjectRef.current = handleSaveProject;
   const guardDirtyRef = useRef(guardDirty);
   guardDirtyRef.current = guardDirty;
   useEffect(() => {
@@ -1070,7 +1073,12 @@ const App: React.FC = () => {
                     autoRefresh={autoRefreshNamespace}
                     refreshToken={namespaceRefreshToken}
                     refreshInterval={NAMESPACE_REFRESH_INTERVAL_MS}
-                    onToggleAutoRefresh={setAutoRefreshNamespace}
+                    onToggleAutoRefresh={(next) => {
+                      setAutoRefreshNamespace(next);
+                      void window.pdv.config.set({ autoRefreshNamespace: next }).then((updated) => {
+                        if (updated) setConfig((prev) => (prev ? { ...prev, autoRefreshNamespace: next } : prev));
+                      });
+                    }}
                   />
                 )}
               </div>
@@ -1286,7 +1294,7 @@ const App: React.FC = () => {
            defaultName={currentProjectName ?? undefined}
            onSave={async (projectName, saveDir) => {
              setShowSaveAsDialog(false);
-             await _handleSaveProject({ directory: saveDir, projectName });
+             await handleSaveProject({ directory: saveDir, projectName });
            }}
            onCancel={() => setShowSaveAsDialog(false)}
          />
@@ -1333,7 +1341,7 @@ const App: React.FC = () => {
            onSave={async () => {
              const action = pendingDirtyAction.run;
              setPendingDirtyAction(null);
-             const saved = await _handleSaveProject();
+             const saved = await handleSaveProject();
              if (saved) {
                action();
              }

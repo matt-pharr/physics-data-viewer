@@ -257,10 +257,7 @@ def handle_tree_resolve_file(msg: dict) -> None:
         )
         return
 
-    working_dir = tree._working_dir or ""
-    abs_path = node.resolve_path(working_dir)
-    if not os.path.isabs(abs_path):
-        abs_path = os.path.join(working_dir, abs_path)
+    abs_path = node.resolve_path(tree._working_dir)
 
     send_message(
         "pdv.tree.resolve_file.response",
