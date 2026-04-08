@@ -164,7 +164,7 @@ export const PDVMessageType = {
 } as const;
 
 /** Union of all PDV message type string values. */
-type PDVMessageTypeValue =
+export type PDVMessageTypeValue =
   (typeof PDVMessageType)[keyof typeof PDVMessageType];
 
 // ---------------------------------------------------------------------------
@@ -199,7 +199,7 @@ export interface PDVMessage {
 // ---------------------------------------------------------------------------
 
 /** Standard payload shape for protocol responses with `status: "error"`. */
-interface PDVErrorPayload {
+export interface PDVErrorPayload {
   /** Machine-readable dot-namespaced error code (e.g. "tree.path_not_found"). */
   code: string;
   /** Human-readable message suitable for display in the UI. */
@@ -211,7 +211,7 @@ interface PDVErrorPayload {
 // ---------------------------------------------------------------------------
 
 /** Payload for pdv.init (app → kernel). */
-interface PDVInitPayload {
+export interface PDVInitPayload {
   /** Absolute path to the PDV working directory created by the app. */
   working_dir: string;
   /** PDV protocol version the app expects. */
@@ -219,7 +219,7 @@ interface PDVInitPayload {
 }
 
 /** Payload for pdv.init.response (kernel → app). */
-interface PDVInitResponsePayload {
+export interface PDVInitResponsePayload {
   /** Absolute path the kernel accepted as working directory. */
   working_dir: string;
 }
@@ -229,7 +229,7 @@ interface PDVInitResponsePayload {
 // ---------------------------------------------------------------------------
 
 /** Payload for pdv.project.load (app → kernel). */
-interface PDVProjectLoadPayload {
+export interface PDVProjectLoadPayload {
   /** Absolute path to the project save directory. */
   save_dir: string;
 }
@@ -249,13 +249,13 @@ export interface PDVProjectLoadResponsePayload {
 }
 
 /** Payload for pdv.project.save (app → kernel). */
-interface PDVProjectSavePayload {
+export interface PDVProjectSavePayload {
   /** Absolute path to the project save directory. */
   save_dir: string;
 }
 
 /** Payload for pdv.project.save.response (kernel → app). */
-interface PDVProjectSaveResponsePayload {
+export interface PDVProjectSaveResponsePayload {
   /** Total number of tree nodes serialized. */
   node_count: number;
   /** SHA-256 checksum of the written tree-index.json. */
@@ -267,13 +267,13 @@ interface PDVProjectSaveResponsePayload {
 // ---------------------------------------------------------------------------
 
 /** Payload for pdv.tree.list (app → kernel). */
-interface PDVTreeListPayload {
+export interface PDVTreeListPayload {
   /** Dot-separated path to list, or "" / null for root. */
   path?: string | null;
 }
 
 /** Payload for pdv.tree.get (app → kernel). */
-interface PDVTreeGetPayload {
+export interface PDVTreeGetPayload {
   /** Dot-separated path of the node to retrieve. */
   path: string;
 }
@@ -291,7 +291,7 @@ export interface PDVTreeChangedPayload {
 // ---------------------------------------------------------------------------
 
 /** Payload for pdv.namespace.query (app → kernel). */
-interface PDVNamespaceQueryPayload {
+export interface PDVNamespaceQueryPayload {
   /** If true, include names starting with underscore. */
   include_private?: boolean;
   /** If true, include imported modules. */
@@ -321,7 +321,7 @@ export interface PDVNamespaceInspectPayload {
 // ---------------------------------------------------------------------------
 
 /** Payload for pdv.script.register (app → kernel). */
-interface PDVScriptRegisterPayload {
+export interface PDVScriptRegisterPayload {
   /** Dot-separated path where the script node should appear in the tree. */
   tree_path: string;
   /** Relative path to the script file from the project root. */
@@ -370,7 +370,7 @@ const NodeKind = {
 } as const;
 
 /** Union of all valid node `type` values in tree descriptors. */
-type NodeKindValue = (typeof NodeKind)[keyof typeof NodeKind];
+export type NodeKindValue = (typeof NodeKind)[keyof typeof NodeKind];
 
 /** Script run() parameter descriptor extracted by pdv-python from function signatures. */
 export interface ScriptParameter {

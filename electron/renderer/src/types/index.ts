@@ -115,8 +115,16 @@ export interface NoteTab {
   name: string;
 }
 
-/** Tree node shape enriched with UI state used by the Tree component. */
-export interface TreeNodeData extends NodeDescriptor {
+/**
+ * Tree node shape enriched with UI state used by the Tree component.
+ *
+ * Widens `type` from the wire-canonical {@link NodeDescriptor.type} union
+ * (`NodeKindValue`) to also accept the synthetic `'root'` value used by the
+ * Tree panel for the always-visible root container row. All real wire nodes
+ * still satisfy `NodeKindValue`.
+ */
+export interface TreeNodeData extends Omit<NodeDescriptor, 'type'> {
+  type: NodeDescriptor['type'] | 'root';
   hasChildren: boolean;
   parentPath: string | null;
   children?: TreeNodeData[];

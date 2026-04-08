@@ -20,7 +20,7 @@ function node(type: string): TreeNodeData {
     has_children: false,
     hasChildren: false,
     parentPath: 'data',
-  };
+  } as unknown as TreeNodeData;
 }
 
 describe('ContextMenu', () => {

@@ -4,6 +4,11 @@
  * Declares the typed `window.pdv` surface exposed by `electron/preload.ts`.
  * Renderer code imports from this file (via `types/index.ts`) and never imports
  * directly from main-process modules.
+ *
+ * This file MAY use `import type` from `../../../main/ipc` (and transitively
+ * `pdv-protocol.ts`) to keep wire/IPC types in lockstep with the main-process
+ * source of truth. Type-only imports erase at compile time and do not create
+ * any runtime cross-process boundary violation.
  */
 
 /** Auto-update status pushed from the main process. */
@@ -16,49 +21,15 @@ export interface UpdateStatus {
   canAutoUpdate?: boolean;
 }
 
-/** Script `run(...)` parameter metadata returned for script tree nodes. */
-export interface ScriptParameter {
-  /** Parameter name as declared in script function signature. */
-  name: string;
-  /** Backend-normalized type label (e.g. "int", "float", "str"). */
-  type: string;
-  /** Default value extracted from script signature, when present. */
-  default: unknown;
-  /** True when this parameter must be provided by the caller. */
-  required: boolean;
-}
+// ---------------------------------------------------------------------------
+// Wire types re-exported from main/ipc.ts (canonical source: pdv-protocol.ts)
+// ---------------------------------------------------------------------------
 
-/** Tree node descriptor returned by `pdv.tree.list`. */
-export interface NodeDescriptor {
-  /** Stable node identifier. */
-  id: string;
-  /** Dot-delimited logical path in PDV tree namespace. */
-  path: string;
-  /** Node key (final path segment). */
-  key: string;
-  /** Parent path, or null for root-level nodes. */
-  parent_path: string | null;
-  /** Node kind (script, ndarray, dict, folder, ...). */
-  type: string;
-  /** True if node has children that can be listed/expanded. */
-  has_children: boolean;
-  /** Human-readable preview text for compact table display. */
-  preview?: string;
-  /** Optional language hint for script/code nodes. */
-  language?: string | null;
-  /** Physical filename with extension for file-backed nodes (e.g. "run.nml"). Null for others. */
-  filename?: string | null;
-  /** Fully qualified Python type string (e.g. "builtins.int"). */
-  python_type?: string;
-  /** True if a custom handler is registered for this node's type. */
-  has_handler?: boolean;
-  /** Module identifier. Present when type is "module" or "gui". */
-  module_id?: string;
-  /** Module display name. Present when type is "module". */
-  module_name?: string;
-  /** Module version. Present when type is "module". */
-  module_version?: string;
-}
+/** Script `run(...)` parameter metadata. Canonical: `pdv-protocol.ts`. */
+export type { ScriptParameter } from '../../../main/ipc';
+
+/** Tree node descriptor returned by `pdv.tree.list`. Canonical: `pdv-protocol.ts`. */
+export type { NodeDescriptor } from '../../../main/ipc';
 
 /** Runtime kernel descriptor returned by `kernels.start/list/restart`. */
 export interface KernelInfo {
@@ -149,54 +120,27 @@ export interface KernelExecuteResult {
   images?: Array<{ mime: string; data: string }>;
 }
 
+// ---------------------------------------------------------------------------
+// Namespace inspector types re-exported from main/ipc.ts.
+// ---------------------------------------------------------------------------
+
 /** Filters accepted by namespace query requests. */
-export interface NamespaceQueryOptions {
-  /** Include `_private` variable names when true. */
-  includePrivate?: boolean;
-  /** Include module objects in results when true. */
-  includeModules?: boolean;
-  /** Include callable values (functions/classes) when true. */
-  includeCallables?: boolean;
-}
+export type { NamespaceQueryOptions } from '../../../main/ipc';
 
 /** Serializable selector used to drill into a namespace value. */
-export interface NamespaceAccessSegment {
-  kind: "attr" | "index" | "key" | "column";
-  value: string | number | boolean | null;
-}
+export type { NamespaceAccessSegment } from '../../../main/ipc';
 
 /** Target value for lazy namespace inspection. */
-export interface NamespaceInspectTarget {
-  rootName: string;
-  path: NamespaceAccessSegment[];
-}
+export type { NamespaceInspectTarget } from '../../../main/ipc';
 
 /** One row in the Namespace panel. */
-export interface NamespaceInspectorNode {
-  name: string;
-  kind: string;
-  type: string;
-  module?: string;
-  shape?: number[];
-  dtype?: string;
-  length?: number;
-  size?: number;
-  preview?: string;
-  hasChildren?: boolean;
-  childCount?: number;
-  path: NamespaceAccessSegment[];
-  expression: string;
-}
+export type { NamespaceInspectorNode } from '../../../main/ipc';
 
 /** One top-level row in the Namespace panel. */
-export type NamespaceVariable = NamespaceInspectorNode;
+export type { NamespaceVariable } from '../../../main/ipc';
 
 /** Lazy child-inspection response for a namespace node. */
-export interface NamespaceInspectResult {
-  children: NamespaceInspectorNode[];
-  truncated: boolean;
-  totalChildren?: number;
-}
+export type { NamespaceInspectResult } from '../../../main/ipc';
 
 /** Custom appearance theme payload persisted through `themes.*` API. */
 export interface Theme {

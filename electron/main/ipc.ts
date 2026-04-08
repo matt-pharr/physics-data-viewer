@@ -29,6 +29,13 @@ import type {
   ScriptParameter as PDVScriptParameter,
   PDVTreeChangedPayload,
 } from "./pdv-protocol";
+
+/**
+ * Re-export the wire-canonical {@link NodeDescriptor} so renderer-facing
+ * type files (`renderer/src/types/pdv.d.ts`) can consume a single source
+ * of truth via type-only imports.
+ */
+export type { NodeDescriptor } from "./pdv-protocol";
 import type { PDVConfig } from "./config";
 import type {
   EnvironmentInfo,

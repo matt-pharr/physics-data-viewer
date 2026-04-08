@@ -9,7 +9,9 @@ afterEach(() => {
   cleanup();
 });
 
-function makeNode(overrides: Partial<TreeNodeData & { depth: number }> = {}) {
+// Tests use arbitrary `type` strings to exercise icon fallback rendering;
+// makeNode therefore accepts a wider type than TreeNodeData['type'].
+function makeNode(overrides: Record<string, unknown> = {}): TreeNodeData & { depth: number } {
   return {
     id: 'data.x',
     key: 'x',
@@ -57,7 +59,7 @@ describe('TreeNodeRow', () => {
 
     render(
       <TreeNodeRow
-        node={makeNode({ type: 'mystery' as string, key: 'mystery' })}
+        node={makeNode({ type: 'mystery', key: 'mystery' })}
         onExpand={onExpand}
         onDoubleClick={onDoubleClick}
         onRightClick={onRightClick}
