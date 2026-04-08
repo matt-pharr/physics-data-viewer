@@ -21,7 +21,6 @@ electron/.mcp.json
 package-lock.json
 
 pdv-icon.iconset
-*.icns
 
 # Docs
 site/
