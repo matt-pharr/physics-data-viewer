@@ -19,9 +19,11 @@ import type { GuiEditorContext } from "./ipc";
  * Manages standalone GUI viewer popup BrowserWindows keyed by tree path.
  *
  * Reuses {@link GuiEditorContext} as the context type since the viewer
- * needs the same information (treePath + kernelId). The viewer's IPC
- * calls are routed through the guiEditor context/read channels registered
- * in ipc-register-gui-editor.ts.
+ * needs the same information (treePath + kernelId). The viewer renders
+ * a read-only PDVGui manifest using the same renderer pipeline as the
+ * editor. Per-window IPC dispatch is handled by `getContextForSender`
+ * (called from each handler that resolves a context for a sender) — the
+ * viewer does not delegate to ipc-register-gui-editor.ts.
  */
 export class GuiViewerWindowManager {
   private windows = new Map<string, BrowserWindow>();

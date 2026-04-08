@@ -168,6 +168,13 @@ export const IPC = {
     chromeStateChanged: "chrome:stateChanged",
     executeOutput: "pdv.execute.output",
     moduleExecuteRequest: "pdv.moduleWindow.executeRequest",
+    /**
+     * Main → renderer. Emitted by the kernel-restart handler in
+     * `ipc-register-kernels.ts` to bracket the project re-load that follows
+     * a restart. The kernel itself never sends a `pdv.project.reloading`
+     * comm message; the channel name is namespaced for symmetry with the
+     * other `pdv.*` push channels but the source is purely main-side.
+     */
     projectReloading: "pdv.project.reloading",
     progress: "pdv.progress",
     installOutput: "pdv.environment.installOutput",

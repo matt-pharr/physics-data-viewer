@@ -89,7 +89,16 @@ export const PDVMessageType = {
   TREE_GET: "pdv.tree.get",
   /** Kernel → app. Returns node value. */
   TREE_GET_RESPONSE: "pdv.tree.get.response",
-  /** App → kernel. Resolve a file-backed tree node to its absolute path. */
+  /**
+   * App → kernel. Resolve a file-backed tree node to its absolute path.
+   *
+   * Used internally by main-process handlers (e.g.
+   * `ipc-register-gui-editor.ts` and `ipc-register-tree-namespace-script.ts`)
+   * via `commRouter.request()` directly. There is no `window.pdv.tree.*`
+   * bridge for this message because the renderer never needs raw filesystem
+   * paths — file content always flows through dedicated read/save handlers.
+   * The asymmetry is intentional, not an oversight.
+   */
   TREE_RESOLVE_FILE: "pdv.tree.resolve_file",
   /** Kernel → app. Returns the resolved absolute file path. */
   TREE_RESOLVE_FILE_RESPONSE: "pdv.tree.resolve_file.response",

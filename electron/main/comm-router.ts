@@ -12,9 +12,11 @@
  * 2. **Push notifications** (CommRouter.onPush) — registers listeners for
  *    unsolicited kernel-initiated messages (e.g. pdv.tree.changed).
  *
- * CommRouter is stateless between attach() / detach() cycles. Call attach()
- * once per kernel session and detach() before discarding the router or when
- * the kernel dies.
+ * CommRouter retains pending-request and push-handler state across the
+ * lifetime of the instance. Call attach() once per kernel session to bind
+ * to a kernel's iopub stream and detach() before discarding the router or
+ * when the kernel dies. Pending requests are rejected on detach to avoid
+ * dangling promises.
  *
  * See Also
  * --------

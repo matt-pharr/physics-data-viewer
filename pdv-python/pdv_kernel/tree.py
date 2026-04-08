@@ -455,7 +455,7 @@ class PDVScript(PDVFile):
 
 
 # ---------------------------------------------------------------------------
-# PDVNote
+# PDVGui
 # ---------------------------------------------------------------------------
 
 class PDVGui(PDVFile):
@@ -823,6 +823,42 @@ class PDVTree(dict):
         except KeyError:
             raise PDVKeyError(key)
 
+    def set_quiet(self, key: str, value: Any) -> None:
+        """Set a value at a dot-path without emitting notifications.
+
+        Used by bulk loaders (project load, module register) to populate the
+        tree without flooding the comm channel with per-node ``pdv.tree.changed``
+        events. Uses the same dot-path traversal and "replace non-dict
+        intermediate" branch as :meth:`__setitem__`.
+
+        After bulk loading completes, callers typically emit a single
+        ``pdv.project.loaded`` push so renderers know to refetch.
+
+        Parameters
+        ----------
+        key : str
+            A plain key or dot-separated path.
+        value : Any
+            The value to store.
+        """
+        parts = _split_dot_path(key)
+        if len(parts) == 1:
+            dict.__setitem__(self, key, value)
+            return
+        current: PDVTree = self
+        for part in parts[:-1]:
+            if not dict.__contains__(current, part):
+                new_node = PDVTree()
+                dict.__setitem__(current, part, new_node)
+            node = dict.__getitem__(current, part)
+            if not isinstance(node, dict):
+                # Replace non-dict node with a PDVTree
+                new_node = PDVTree()
+                dict.__setitem__(current, part, new_node)
+                node = new_node
+            current = node  # type: ignore[assignment]
+        dict.__setitem__(current, parts[-1], value)
+
     def __setitem__(self, key: str, value: Any) -> None:
         """Set a value by key or dot-separated path.
 
@@ -836,31 +872,13 @@ class PDVTree(dict):
         value : Any
             The value to store.
         """
-        parts = _split_dot_path(key)
         # Determine change_type before modifying
         try:
             exists = key in self
         except Exception:
             exists = False
         change_type = "updated" if exists else "added"
-
-        if len(parts) == 1:
-            dict.__setitem__(self, key, value)
-        else:
-            current: PDVTree = self
-            for part in parts[:-1]:
-                if not dict.__contains__(current, part):
-                    new_node = PDVTree()
-                    dict.__setitem__(current, part, new_node)
-                node = dict.__getitem__(current, part)
-                if not isinstance(node, dict):
-                    # Replace non-dict node with a PDVTree
-                    new_node = PDVTree()
-                    dict.__setitem__(current, part, new_node)
-                    node = new_node
-                current = node  # type: ignore[assignment]
-            dict.__setitem__(current, parts[-1], value)
-
+        self.set_quiet(key, value)
         self._emit_changed(key, change_type)
 
     def __delitem__(self, key: str) -> None:

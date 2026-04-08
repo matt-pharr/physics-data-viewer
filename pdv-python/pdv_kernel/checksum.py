@@ -72,7 +72,7 @@ def tree_checksum(node: Any, working_dir: str | None = None) -> str:
 # ---------------------------------------------------------------------------
 
 def _node_digest(node: Any, working_dir: str | None) -> bytes:
-    """Return the 32-byte SHA-256 digest for one node.
+    """Return the 16-byte XXH3-128 digest for one node.
 
     Parameters
     ----------

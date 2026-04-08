@@ -231,6 +231,12 @@ def serialize_node(
     writes the data file, and returns a node descriptor matching
     ARCHITECTURE.md §7.3.
 
+    The ``source_dir`` argument is only consulted by file-backed kinds
+    (PDVScript, PDVMarkdown, PDVGui, PDVLib, PDVNamelist). For these kinds,
+    the source file lives in ``source_dir`` (typically the kernel working
+    directory) while serialized output is written to a separate save dir.
+    Defaults to ``working_dir`` when omitted.
+
     Parameters
     ----------
     tree_path : str
@@ -535,7 +541,12 @@ def deserialize_node(storage_ref: dict, save_dir: str, *, trusted: bool = False)
         for session-local files).
     trusted : bool
         If True, allows pickle deserialization. If False, pickle files
-        raise :class:`PDVSerializationError`.
+        raise :class:`PDVSerializationError`. Production project-load and
+        module-import handlers always pass ``trusted=True`` (the on-disk
+        pickle was written by this same process). The ``trusted=False``
+        path exists for tests and any future user-facing import flow that
+        wants to surface untrusted pickles as errors instead of executing
+        them.
 
     Returns
     -------

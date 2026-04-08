@@ -340,6 +340,25 @@ async function loadZmq(): Promise<typeof import("zeromq")> {
  *
  * Emits:
  * - `'kernel:crashed'` — `(kernelId: string)` when a kernel exits unexpectedly.
+ *
+ * Unknown-kernel-id guard policy
+ * ------------------------------
+ * Different methods react to a missing/unknown `kernelId` in different ways
+ * by design — there is no single "correct" response. The split is:
+ *
+ * - **Throws** for query-style operations where the caller needs a real
+ *   answer and a missing kernel makes the call meaningless:
+ *   {@link complete}, {@link inspect}, {@link getQueryPort}, {@link ping}.
+ *
+ * - **Returns silently** for signal-style operations that are idempotent
+ *   on a missing kernel (asking a non-existent kernel to stop is a no-op):
+ *   {@link stop}, {@link interrupt}.
+ *
+ * - **Returns a structured error** for {@link execute}, where the caller
+ *   (the renderer's code-cell pipeline) needs a typed failure to surface
+ *   to the user instead of an exception that would crash the IPC handler.
+ *
+ * Callers should not normalize this — the variation is intentional.
  */
 export class KernelManager extends EventEmitter {
   private readonly kernels = new Map<string, ManagedKernel>();
