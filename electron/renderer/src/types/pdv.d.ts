@@ -189,7 +189,7 @@ export interface NamespaceInspectorNode {
 }
 
 /** One top-level row in the Namespace panel. */
-export interface NamespaceVariable extends NamespaceInspectorNode {}
+export type NamespaceVariable = NamespaceInspectorNode;
 
 /** Lazy child-inspection response for a namespace node. */
 export interface NamespaceInspectResult {

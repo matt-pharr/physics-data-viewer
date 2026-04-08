@@ -13,7 +13,6 @@ import {
 interface ImportModuleDialogProps {
   isOpen: boolean;
   projectDir: string | null;
-  kernelReady: boolean;
   activeLanguage: "python" | "julia";
   refreshToken?: number;
   onClose: () => void;
@@ -22,7 +21,6 @@ interface ImportModuleDialogProps {
 export const ImportModuleDialog: React.FC<ImportModuleDialogProps> = ({
   isOpen,
   projectDir,
-  kernelReady: _kernelReady,
   activeLanguage,
   refreshToken,
   onClose,

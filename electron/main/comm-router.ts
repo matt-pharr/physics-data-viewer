@@ -462,31 +462,4 @@ export class CommRouter {
     );
     this.pushHandlers.clear();
   }
-
-  /**
-   * Handle a raw incoming comm message from the Jupyter client.
-   *
-   * @deprecated Use attach() / _handleIopubMessage() instead.
-   *   This method is kept for backward compatibility with the original skeleton
-   *   interface but delegates to _handleIopubMessage() after wrapping the data.
-   *
-   * @param data - Raw data payload from the Jupyter comm channel.
-   */
-  handleIncoming(data: unknown): void {
-    // Wrap in a synthetic comm_msg JupyterMessage for _handleIopubMessage.
-    const synthetic: JupyterMessage = {
-      header: {
-        msg_id: crypto.randomUUID(),
-        username: "pdv",
-        session: "",
-        msg_type: "comm_msg",
-        version: "5.3",
-        date: new Date().toISOString(),
-      },
-      parent_header: {},
-      metadata: {},
-      content: { comm_id: this.commId ?? "", data },
-    };
-    this._handleIopubMessage(synthetic);
-  }
 }

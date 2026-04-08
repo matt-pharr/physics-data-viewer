@@ -206,7 +206,6 @@ def handle_project_load(msg: dict) -> None:
             folder = PDVTree()
             folder._working_dir = tree._working_dir
             folder._save_dir = tree._save_dir
-            folder._path_prefix = node_path
             _set_tree_node(tree, node_path, folder)
         elif node_type == "module":
             # Read module metadata from metadata dict (new format) or
@@ -220,7 +219,6 @@ def handle_project_load(msg: dict) -> None:
             )
             mod._working_dir = tree._working_dir
             mod._save_dir = tree._save_dir
-            mod._path_prefix = node_path
             _set_tree_node(tree, node_path, mod)
 
     # -- Pass 2: Leaves (all non-container nodes) -----------------------------

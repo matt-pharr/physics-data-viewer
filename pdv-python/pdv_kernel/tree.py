@@ -705,7 +705,6 @@ class PDVTree(dict):
         self._working_dir: str | None = None
         self._save_dir: str | None = None
         self._send_fn: Callable[[str, dict], None] | None = None
-        self._path_prefix: str = ""
         self._pending_changes: list[tuple[str, str]] = []
         self._debounce_timer: threading.Timer | None = None
         self._debounce_lock = threading.Lock()

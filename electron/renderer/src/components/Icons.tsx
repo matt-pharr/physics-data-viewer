@@ -33,25 +33,6 @@ export const NamespaceIcon: React.FC<IconProps> = (props) => (
   </svg>
 );
 
-// /** Stacked-layers / imported modules icon. */
-// export const ModulesIcon: React.FC<IconProps> = (props) => (
-//   <svg {...defaults} {...props}>
-//     <polyline points="16,6.5 10,3.5 4,6.5 10,9.5 16,6.5" />
-//     <polyline points="4,6.5 4,13.5 10,16.5 10,9.5" />
-//     <polyline points="16,6.5 16,13.5 10,16.5" />
-//   </svg>
-// );
-
-// /** Download-to-shelf / module library icon. */
-// export const LibraryIcon: React.FC<IconProps> = (props) => (
-//   <svg {...defaults} {...props}>
-//     <polyline points="4,11 4,16 16,16 16,11" />
-//     <line x1="2" y1="11" x2="18" y2="11" />
-//     <line x1="10" y1="3" x2="10" y2="9" />
-//     <polyline points="7,6 10,9 13,6" />
-//   </svg>
-// );
-
 /** Gear / settings icon. */
 export const SettingsIcon: React.FC<IconProps> = (props) => (
   <svg viewBox="0 0 20 20" fill="currentColor" width="20" height="20" {...props}>

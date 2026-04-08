@@ -209,7 +209,7 @@ interface ActiveViewZone {
  */
 export function attachMathPreview(
   editor: monaco.editor.IStandaloneCodeEditor,
-  monacoModule: typeof monaco,
+  _monacoModule: typeof monaco,
 ): () => void {
   let activeZones: ActiveViewZone[] = [];
   let debounceTimer: ReturnType<typeof setTimeout> | null = null;

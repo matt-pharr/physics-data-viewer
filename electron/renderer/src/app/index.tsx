@@ -372,7 +372,7 @@ const App: React.FC = () => {
     onTreeChanged: handleTreeChanged,
   });
 
-  const { startKernel, handleEnvSave, handleRestartKernel } = useKernelLifecycle({
+  const { startKernel, handleEnvSave } = useKernelLifecycle({
     config,
     currentKernelId,
     setCurrentKernelId,
@@ -1274,7 +1274,6 @@ const App: React.FC = () => {
        <ImportModuleDialog
          isOpen={showImportModule}
          projectDir={currentProjectDir}
-         kernelReady={kernelStatus === 'ready'}
          activeLanguage={activeLanguage}
          refreshToken={modulesRefreshToken}
          onClose={() => setShowImportModule(false)}

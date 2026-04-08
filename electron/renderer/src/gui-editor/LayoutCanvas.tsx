@@ -7,7 +7,7 @@
 
 import React, { useState, useCallback } from "react";
 import type { LayoutNode, LayoutContainer, GuiManifestV1 } from "../types/pdv.d";
-import { useEditorState, useEditorDispatch, getNodeAtPath } from "./editor-state";
+import { useEditorState, useEditorDispatch } from "./editor-state";
 import { ELEMENT_REGISTRY, getElementDef } from "./element-registry";
 
 const DRAG_MIME = "application/pdv-element";

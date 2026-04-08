@@ -236,7 +236,6 @@ export const Tree: React.FC<TreeProps> = ({ kernelId, disabled = false, refreshT
       };
       void refreshParents();
     }
-  // eslint-disable-next-line react-hooks/exhaustive-deps -- nodesRef used instead of nodes to avoid re-triggering
   }, [pendingChanges, kernelId, disabled, onChangesConsumed]);
 
   const handleExpand = useCallback(async (node: TreeNodeData) => {
@@ -278,7 +277,6 @@ export const Tree: React.FC<TreeProps> = ({ kernelId, disabled = false, refreshT
       setError(`Failed to load children for ${node.key}`);
       setNodes((prev) => updateNodeImmut(prev, node.path, (n) => ({ ...n, isLoading: false })));
     }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [kernelId, disabled]);
 
   const handleDoubleClick = useCallback((node: TreeNodeData) => {

@@ -316,7 +316,7 @@ export interface NamespaceInspectorNode {
 /**
  * Descriptor for a single top-level variable in the namespace panel.
  */
-export interface NamespaceVariable extends NamespaceInspectorNode {}
+export type NamespaceVariable = NamespaceInspectorNode;
 
 /** Response payload returned from `namespace.inspect`. */
 export interface NamespaceInspectResult {
@@ -340,7 +340,7 @@ export type ScriptParameter = PDVScriptParameter;
 /**
  * Tree node shape returned to the renderer.
  */
-export interface TreeNode extends NodeDescriptor {}
+export type TreeNode = NodeDescriptor;
 
 /**
  * Result returned by `tree.createScript`.

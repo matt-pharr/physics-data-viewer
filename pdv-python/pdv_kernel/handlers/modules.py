@@ -144,7 +144,6 @@ def handle_module_register(msg: dict) -> None:
                 folder = PDVTree()
                 folder._working_dir = tree._working_dir
                 folder._save_dir = tree._save_dir
-                folder._path_prefix = full_path
                 _set_tree_node(tree, full_path, folder)
             elif node_type == "module":
                 storage = node.get("storage", {})
@@ -156,7 +155,6 @@ def handle_module_register(msg: dict) -> None:
                 )
                 mod._working_dir = tree._working_dir
                 mod._save_dir = tree._save_dir
-                mod._path_prefix = full_path
                 _set_tree_node(tree, full_path, mod)
 
         # Pass 2: leaves

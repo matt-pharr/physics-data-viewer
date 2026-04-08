@@ -18,7 +18,7 @@ import { BrowserWindow, ipcMain } from "electron";
 import { CommRouter } from "./comm-router";
 import { QueryRouter } from "./query-router";
 import { EnvironmentDetector } from "./environment-detector";
-import { IPC, type KernelValidateResult } from "./ipc";
+import { IPC } from "./ipc";
 import { KernelManager, type KernelInfo } from "./kernel-manager";
 import { initializeKernelSession } from "./kernel-session";
 import type { ModuleManager } from "./module-manager";
@@ -239,28 +239,10 @@ export function registerKernelIpcHandlers(
     resetKernelState();
 
     /**
-     * Perform the kernel restart (stop + start or native restart).
+     * Perform the kernel restart (stop + start).
      * Returns the restarted KernelInfo.
      */
     async function doRestart(): Promise<KernelInfo> {
-      const restartable = kernelManager as KernelManager & {
-        restart?: (id: string) => Promise<KernelInfo>;
-      };
-      if (restartable.restart) {
-        await cleanupKernelWorkingDir(projectManager, kernelManager, kernelId, kernelWorkingDirs, crashHandlers);
-        const restarted = await restartable.restart(kernelId);
-        commRouter.attach(kernelManager, restarted.id);
-        queryRouter.detach();
-        await initializeKernelSession(
-          kernelManager,
-          commRouter,
-          queryRouter,
-          projectManager,
-          restarted.id,
-          kernelWorkingDirs
-        );
-        return restarted;
-      }
       const current = kernelManager.getKernel(kernelId);
       if (!current) {
         throw new Error(`Kernel not found: ${kernelId}`);
@@ -329,15 +311,6 @@ export function registerKernelIpcHandlers(
   ipcMain.handle(
     IPC.kernels.validate,
     async (_event, executablePath: string, language: "python" | "julia") => {
-      const validatable = kernelManager as KernelManager & {
-        validate?: (
-          execPath: string,
-          lang: "python" | "julia"
-        ) => Promise<KernelValidateResult>;
-      };
-      if (validatable.validate) {
-        return validatable.validate(executablePath, language);
-      }
       if (!executablePath.trim()) {
         return { valid: false, error: "Executable path is required" };
       }

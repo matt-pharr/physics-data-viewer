@@ -6,7 +6,7 @@
  */
 
 import React, { useEffect, useState, useCallback } from "react";
-import type { GuiEditorContext, GuiManifestV1, LayoutNode, LayoutContainer } from "../types/pdv.d";
+import type { GuiManifestV1, LayoutNode, LayoutContainer } from "../types/pdv.d";
 import { EditorStateProvider, useEditorState, useEditorDispatch } from "./editor-state";
 import { ElementPalette } from "./ElementPalette";
 import { LayoutCanvas } from "./LayoutCanvas";
@@ -219,7 +219,6 @@ function EditorContent() {
 export function GuiEditorRoot() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [context, setContext] = useState<GuiEditorContext | null>(null);
 
   return (
     <EditorStateProvider>
@@ -228,8 +227,6 @@ export function GuiEditorRoot() {
         setLoading={setLoading}
         error={error}
         setError={setError}
-        context={context}
-        setContext={setContext}
       />
     </EditorStateProvider>
   );
@@ -243,15 +240,11 @@ function GuiEditorLoader({
   setLoading,
   error,
   setError,
-  context,
-  setContext,
 }: {
   loading: boolean;
   setLoading: (v: boolean) => void;
   error: string | null;
   setError: (v: string | null) => void;
-  context: GuiEditorContext | null;
-  setContext: (v: GuiEditorContext | null) => void;
 }) {
   const dispatch = useEditorDispatch();
 
@@ -267,7 +260,6 @@ function GuiEditorLoader({
           setLoading(false);
           return;
         }
-        setContext(ctx);
         document.title = `GUI Editor: ${ctx.treePath}`;
 
         const result = await window.pdv.guiEditor.read(ctx.treePath);
@@ -294,7 +286,7 @@ function GuiEditorLoader({
 
     void init();
     return () => { cancelled = true; };
-  }, [dispatch, setContext, setError, setLoading]);
+  }, [dispatch, setError, setLoading]);
 
   if (loading) {
     return <div className="gui-editor-loading">Loading GUI editor...</div>;
