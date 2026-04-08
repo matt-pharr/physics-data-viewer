@@ -37,6 +37,7 @@ import type {
   ScriptParameter,
   ScriptRunResult,
   Theme,
+  UpdateStatus,
   WindowChromeInfo,
 } from './pdv';
 
@@ -72,6 +73,7 @@ export type {
   ScriptParameter,
   ScriptRunResult,
   Theme,
+  UpdateStatus,
   WindowChromeInfo,
 };
 

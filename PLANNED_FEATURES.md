@@ -6,7 +6,7 @@ This document describes all features planned beyond the current state of PDV, or
 
 | Release | Description |
 |---|---|
-| **0.0.8** | Current version. Backend refactor complete, modules UX redesign (activity bar icons, File > Import Module... dialog, tree context menu), PDVModule/PDVGui/PDVNamelist tree types, gui.json manifest split (v3), kernel-backed autocompletion and inspect working, E2E integration test infrastructure in place, visual GUI editor, standalone project GUIs, markdown notes with KaTeX. |
+| **0.0.9** | Current version. Backend refactor complete, modules UX redesign (activity bar icons, File > Import Module... dialog, tree context menu), PDVModule/PDVGui/PDVNamelist tree types, gui.json manifest split (v3), kernel-backed autocompletion and inspect working, E2E integration test infrastructure in place, visual GUI editor, standalone project GUIs, markdown notes with KaTeX. |
 | **0.1.0-beta1** | All remaining Alpha Features (below) are implemented and stable. The application is suitable for active scientific use. |
 | **1.0.0** | All Beta Features (below, plus any added during beta) are implemented. The application is suitable for broad community distribution. |
 

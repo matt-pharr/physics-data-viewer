@@ -19,6 +19,7 @@ import type { ConfigStore, PDVConfig } from "./config";
 import type { CodeCellData, Theme, WindowChromeInfo, WindowChromePlatform } from "./ipc";
 import { IPC } from "./ipc";
 import { getTopLevelMenuModel, popupTopLevelMenu, updateMenuEnabled, updateRecentProjectsMenu } from "./menu";
+import { initAutoUpdater, checkForUpdates, downloadUpdate, installUpdate, openReleasesPage } from "./auto-updater";
 
 let savedThemes: Theme[] = [];
 let savedCodeCells: CodeCellData | null = null;
@@ -149,6 +150,13 @@ export function registerAppStateIpcHandlers(
   ipcMain.handle(IPC.config.get, async () => readConfig(configStore));
 
   ipcMain.handle(IPC.about.getVersion, () => app.getVersion());
+
+  // Auto-updater
+  initAutoUpdater(win, configStore);
+  ipcMain.handle(IPC.updater.checkForUpdates, async () => { await checkForUpdates(configStore); });
+  ipcMain.handle(IPC.updater.downloadUpdate, async () => { await downloadUpdate(); });
+  ipcMain.handle(IPC.updater.installUpdate, async () => { installUpdate(); });
+  ipcMain.handle(IPC.updater.openReleasesPage, async () => { await openReleasesPage(); });
 
   ipcMain.handle(IPC.config.set, async (_event, updates: Partial<PDVConfig>) => {
     const current = readConfig(configStore);

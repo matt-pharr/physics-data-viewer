@@ -6,7 +6,7 @@
  */
 
 import React, { useEffect, useLayoutEffect, useMemo, useState } from 'react';
-import type { Config } from '../../types';
+import type { Config, UpdateStatus } from '../../types';
 import { SHORTCUT_LABELS, DEFAULT_SHORTCUTS } from '../../shortcuts';
 import type { Shortcuts } from '../../shortcuts';
 import { EnvironmentSelector } from '../EnvironmentSelector';
@@ -76,7 +76,7 @@ export const SettingsDialog: React.FC<SettingsDialogProps> = ({
 
   // About tab state
   const [appVersion, setAppVersion] = useState<string>('…');
-  const [updateStatus, setUpdateStatus] = useState<string | null>(null);
+  const [updateInfo, setUpdateInfo] = useState<UpdateStatus>({ state: 'idle' });
   const [editorFontSize, setEditorFontSize] = useState(13);
   const [editorTabSize, setEditorTabSize] = useState(4);
   const [editorWordWrap, setEditorWordWrap] = useState(true);
@@ -131,6 +131,12 @@ export const SettingsDialog: React.FC<SettingsDialogProps> = ({
     void window.pdv.about.getVersion().then(setAppVersion).catch(() => setAppVersion('unknown'));
     /* eslint-enable react-hooks/set-state-in-effect */
   }, [config, shortcuts, isOpen, initialTab]);
+
+  // Subscribe to auto-update status pushes while the dialog is open.
+  useEffect(() => {
+    if (!isOpen) return;
+    return window.pdv.updater.onUpdateStatus(setUpdateInfo);
+  }, [isOpen]);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -406,16 +412,78 @@ export const SettingsDialog: React.FC<SettingsDialogProps> = ({
                 <span className="about-value">v{appVersion}</span>
               </div>
               <div className="about-row">
-                <span className="about-label">Check for updates</span>
+                <span className="about-label">Updates</span>
                 <div className="about-check-row">
-                  <button
-                    type="button"
-                    className="btn btn-secondary"
-                    onClick={() => setUpdateStatus('⚠ Update checking is not yet implemented.')}
-                  >
-                    Check now
-                  </button>
-                  {updateStatus && <span className="about-update-status">{updateStatus}</span>}
+                  {updateInfo.state === 'idle' && (
+                    <button
+                      type="button"
+                      className="btn btn-secondary"
+                      onClick={() => void window.pdv.updater.checkForUpdates()}
+                    >
+                      Check now
+                    </button>
+                  )}
+                  {updateInfo.state === 'checking' && (
+                    <span className="about-update-status">Checking for updates...</span>
+                  )}
+                  {updateInfo.state === 'not-available' && (
+                    <span className="about-update-status about-update-status--success">Up to date</span>
+                  )}
+                  {updateInfo.state === 'available' && (
+                    <>
+                      <span className="about-update-status">v{updateInfo.version} available</span>
+                      {updateInfo.canAutoUpdate !== false ? (
+                        <button
+                          type="button"
+                          className="btn btn-primary"
+                          onClick={() => void window.pdv.updater.downloadUpdate()}
+                        >
+                          Download
+                        </button>
+                      ) : (
+                        <button
+                          type="button"
+                          className="btn btn-secondary"
+                          onClick={() => void window.pdv.updater.openReleasesPage()}
+                        >
+                          View on GitHub
+                        </button>
+                      )}
+                    </>
+                  )}
+                  {updateInfo.state === 'downloading' && (
+                    <span className="about-update-status about-progress">
+                      Downloading... {updateInfo.progress != null ? `${updateInfo.progress}%` : ''}
+                    </span>
+                  )}
+                  {updateInfo.state === 'downloaded' && (
+                    <>
+                      <span className="about-update-status about-update-status--success">
+                        v{updateInfo.version} ready
+                      </span>
+                      <button
+                        type="button"
+                        className="btn btn-primary"
+                        onClick={() => window.pdv.updater.installUpdate()}
+                      >
+                        Restart to update
+                      </button>
+                    </>
+                  )}
+                  {updateInfo.state === 'error' && (
+                    <>
+                      <span className="about-update-status about-update-status--error">
+                        {updateInfo.error ?? 'Update check failed'}
+                      </span>
+                      <button
+                        type="button"
+                        className="btn btn-secondary"
+                        onClick={() => void window.pdv.updater.checkForUpdates()}
+                      >
+                        Retry
+                      </button>
+                    </>
+                  )}
                 </div>
               </div>
             </div>
