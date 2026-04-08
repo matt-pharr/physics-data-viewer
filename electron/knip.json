@@ -17,7 +17,8 @@
     "electronmon"
   ],
   "ignore": [
-    "renderer/src/vite-env.d.ts"
+    "renderer/src/vite-env.d.ts",
+    "main/pdv-protocol.ts"
   ],
   "ignoreExportsUsedInFile": true
 }

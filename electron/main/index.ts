@@ -460,9 +460,9 @@ export function registerIpcHandlers(
   };
 
   const preloadPath = path.join(__dirname, "..", "preload.js");
-  const moduleWindowManager = new ModuleWindowManager(win, preloadPath);
-  const guiEditorWindowManager = new GuiEditorWindowManager(win, preloadPath);
-  const guiViewerWindowManager = new GuiViewerWindowManager(win, preloadPath);
+  const moduleWindowManager = new ModuleWindowManager(preloadPath);
+  const guiEditorWindowManager = new GuiEditorWindowManager(preloadPath);
+  const guiViewerWindowManager = new GuiViewerWindowManager(preloadPath);
 
   registerKernelIpcHandlers({
     win,

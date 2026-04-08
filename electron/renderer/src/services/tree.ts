@@ -54,7 +54,24 @@ class TreeService {
       return [];
     }
 
-    const key = this.cacheKey(kernelId, node.path);
+    return this.listByPath(kernelId, node.path, options);
+  }
+
+  /**
+   * Fetch and cache children for an arbitrary tree path string.
+   *
+   * Use this when the caller has a path but no `TreeNodeData` (e.g.
+   * Monaco autocomplete, module-window dropdown population). All cache
+   * semantics match {@link getChildren}.
+   */
+  async listByPath(
+    kernelId: string | null,
+    path: string,
+    options?: { force?: boolean }
+  ): Promise<TreeNodeData[]> {
+    if (!kernelId) return [];
+
+    const key = this.cacheKey(kernelId, path);
     if (!options?.force) {
       const cached = this.cache.get(key);
       if (cached) {
@@ -62,7 +79,7 @@ class TreeService {
       }
     }
 
-    const enriched = await this.listAndEnrich(kernelId, node.path);
+    const enriched = await this.listAndEnrich(kernelId, path);
     this.cache.set(key, enriched);
     return enriched;
   }
