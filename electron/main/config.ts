@@ -62,6 +62,8 @@ export interface PDVConfig {
   recentProjects?: string[];
   /** Current/last active project root directory. */
   projectRoot?: string;
+  /** Timestamp (ms since epoch) of last auto-update check. Internal use only. */
+  lastUpdateCheck?: number;
   /** Renderer settings blob persisted by Settings dialog. */
   settings?: {
     shortcuts?: Record<string, string>;

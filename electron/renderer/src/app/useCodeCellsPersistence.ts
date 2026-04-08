@@ -12,6 +12,8 @@ interface UseCodeCellsPersistenceOptions {
   setCellTabs: Dispatch<SetStateAction<CellTab[]>>;
   /** Setter to restore the persisted active tab on mount. */
   setActiveCellTab: Dispatch<SetStateAction<number>>;
+  /** Current project directory — cells are only persisted/restored when a project is open. */
+  currentProjectDir: string | null;
 }
 
 export function useCodeCellsPersistence({
@@ -19,9 +21,13 @@ export function useCodeCellsPersistence({
   activeCellTab,
   setCellTabs,
   setActiveCellTab,
+  currentProjectDir,
 }: UseCodeCellsPersistenceOptions): void {
+  const hasProjectRef = useRef(currentProjectDir);
+  hasProjectRef.current = currentProjectDir;
+
   useEffect(() => {
-    if (!window.pdv?.codeCells) {
+    if (!window.pdv?.codeCells || !currentProjectDir) {
       return;
     }
     const loadCodeCells = async () => {
@@ -30,18 +36,17 @@ export function useCodeCellsPersistence({
         if (data) {
           setCellTabs(data.tabs);
           setActiveCellTab(data.activeTabId);
-
         }
       } catch (error) {
         console.error('[App] Failed to load code cells:', error);
       }
     };
     void loadCodeCells();
-  }, [setActiveCellTab, setCellTabs]);
+  }, [setActiveCellTab, setCellTabs, currentProjectDir]);
 
   const saveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(() => {
-    if (!window.pdv?.codeCells) {
+    if (!window.pdv?.codeCells || !currentProjectDir) {
       return;
     }
     if (saveTimeoutRef.current) {
@@ -54,7 +59,6 @@ export function useCodeCellsPersistence({
           tabs: cellTabs,
           activeTabId: activeCellTab,
         });
-
       } catch (error) {
         console.error('[App] Failed to save code cells:', error);
       }
@@ -63,11 +67,13 @@ export function useCodeCellsPersistence({
     return () => {
       if (saveTimeoutRef.current) {
         clearTimeout(saveTimeoutRef.current);
-        void window.pdv.codeCells.save({
-          tabs: cellTabs,
-          activeTabId: activeCellTab,
-        });
+        if (hasProjectRef.current) {
+          void window.pdv.codeCells.save({
+            tabs: cellTabs,
+            activeTabId: activeCellTab,
+          });
+        }
       }
     };
-  }, [activeCellTab, cellTabs]);
+  }, [activeCellTab, cellTabs, currentProjectDir]);
 }
