@@ -28,6 +28,7 @@ import { WriteTab } from '../components/WriteTab';
 import { SettingsDialog } from '../components/SettingsDialog';
 import { ImportModuleDialog } from '../components/ImportModuleDialog';
 import { SaveAsDialog } from '../components/SaveAsDialog';
+import { UnsavedChangesDialog } from '../components/UnsavedChangesDialog';
 import { WelcomeScreen, type RecentProject } from '../components/WelcomeScreen';
 import type {
   CellTab,
@@ -151,6 +152,17 @@ const App: React.FC = () => {
 
   // -- Project reloading state (kernel restart with active project) ----------
   const [projectReloading, setProjectReloading] = useState(false);
+
+  // -- Unsaved-changes guard --------------------------------------------------
+  // Conservative first cut: the project is considered dirty as soon as the
+  // kernel reaches `ready` and is never cleared (not even by Save). All six
+  // destructive actions in issue #156 consult this single boolean through the
+  // `guardDirty` helper, so a future PR can refine the heuristic by changing
+  // only where/how `setProjectDirty` is called.
+  const [projectDirty, setProjectDirty] = useState(false);
+  const [pendingDirtyAction, setPendingDirtyAction] = useState<
+    { label: string; run: () => void } | null
+  >(null);
 
   // -- Save/load progress state -----------------------------------------------
   const [progress, setProgress] = useState<import('../types/pdv').ProgressPayload | null>(null);
@@ -318,6 +330,29 @@ const App: React.FC = () => {
       setKernelStatus('error');
     }
   }, []);
+
+  // Mark the project dirty as soon as the kernel is ready. The flag is never
+  // cleared in this conservative first cut — see issue #156.
+  useEffect(() => {
+    if (kernelStatus === 'ready') {
+      setProjectDirty(true);
+    }
+  }, [kernelStatus]);
+
+  /**
+   * Guard a destructive action against unsaved project changes.
+   *
+   * If the project is not dirty, runs `action` immediately. Otherwise stores
+   * it as a pending action and shows the unsaved-changes modal; the modal's
+   * Save / Don't Save buttons run the pending action when the user resolves.
+   */
+  const guardDirty = useCallback((label: string, action: () => void) => {
+    if (!projectDirty) {
+      action();
+      return;
+    }
+    setPendingDirtyAction({ label, run: action });
+  }, [projectDirty]);
 
   const handleTreeChanged = useCallback((info: TreeChangeInfo) => {
     setPendingTreeChanges((prev) => [...prev, info]);
@@ -795,6 +830,23 @@ const App: React.FC = () => {
     flushDirtyNotes,
   });
 
+  // Subscribe to main-process close requests (title-bar X, OS close, Cmd+Q)
+  // and route them through the same dirty-action guard. The latest
+  // `_handleSaveProject` is captured via a ref so the listener doesn't need to
+  // re-subscribe on every render.
+  const handleSaveProjectRef = useRef(_handleSaveProject);
+  handleSaveProjectRef.current = _handleSaveProject;
+  const guardDirtyRef = useRef(guardDirty);
+  guardDirtyRef.current = guardDirty;
+  useEffect(() => {
+    if (!window.pdv?.app) return;
+    return window.pdv.app.onRequestClose(() => {
+      guardDirtyRef.current('close PDV', () => {
+        void window.pdv.app.confirmClose();
+      });
+    });
+  }, []);
+
   // -- Welcome screen (pristine session) ------------------------------------
 
   const recentProjectPaths = useMemo(
@@ -923,19 +975,19 @@ const App: React.FC = () => {
     const dir = await window.pdv.files.pickDirectory(defaultPath);
     if (!dir) return;
     if (kernelStatus === 'ready') {
-      void executeOpenProject(dir);
+      guardDirty('open another project', () => { void executeOpenProject(dir); });
     } else {
       await openProjectFromWelcome(dir);
     }
-  }, [currentProjectDir, kernelStatus, executeOpenProject, openProjectFromWelcome]);
+  }, [currentProjectDir, kernelStatus, executeOpenProject, openProjectFromWelcome, guardDirty]);
 
   const handleOpenRecent = useCallback(async (path: string) => {
     if (kernelStatus === 'ready') {
-      void executeOpenProject(path);
+      guardDirty('open another project', () => { void executeOpenProject(path); });
     } else {
       await openProjectFromWelcome(path);
     }
-  }, [kernelStatus, executeOpenProject, openProjectFromWelcome]);
+  }, [kernelStatus, executeOpenProject, openProjectFromWelcome, guardDirty]);
 
   // Keep refs in sync so the menu-action effect (subscribed once) calls the latest handlers.
   handleOpenWithPickerRef.current = handleOpenWithPicker;
@@ -1248,13 +1300,21 @@ const App: React.FC = () => {
          shortcuts={shortcuts}
          onClose={() => setShowSettings(false)}
          onSave={handleSettingsSave}
-         onEnvSave={async (paths) => {
-           setShowSettings(false);
-           setInterpreterWarning(null);
-           const ok = await handleEnvSave(paths);
-           if (!ok) {
-             openEnvSettings('Kernel failed to start with the selected environment.');
-           }
+         onEnvSave={(paths) => {
+           guardDirty('change the interpreter', () => {
+             setShowSettings(false);
+             setInterpreterWarning(null);
+             void handleEnvSave(paths).then((ok) => {
+               if (!ok) {
+                 openEnvSettings('Kernel failed to start with the selected environment.');
+               }
+             });
+           });
+         }}
+         onInstallUpdate={() => {
+           guardDirty('install the update and restart', () => {
+             void window.pdv.updater.installUpdate();
+           });
          }}
          envWarning={interpreterWarning}
        />
@@ -1265,6 +1325,26 @@ const App: React.FC = () => {
            onNewProject={handleWelcomeNewProject}
            onOpenProject={handleOpenWithPicker}
            onOpenRecent={handleOpenRecent}
+         />
+       )}
+
+       {pendingDirtyAction && (
+         <UnsavedChangesDialog
+           actionLabel={pendingDirtyAction.label}
+           onSave={async () => {
+             const action = pendingDirtyAction.run;
+             setPendingDirtyAction(null);
+             const saved = await _handleSaveProject();
+             if (saved) {
+               action();
+             }
+           }}
+           onDiscard={() => {
+             const action = pendingDirtyAction.run;
+             setPendingDirtyAction(null);
+             action();
+           }}
+           onCancel={() => setPendingDirtyAction(null)}
          />
        )}
      </div>

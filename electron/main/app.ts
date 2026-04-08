@@ -22,6 +22,7 @@ import { ProjectManager } from "./project-manager";
 import { ConfigStore } from "./config";
 import { registerIpcHandlers } from "./index";
 import { initializeAppMenu } from "./menu";
+import { IPC } from "./ipc";
 
 function getWindowChromeOptions(): BrowserWindowConstructorOptions {
   if (process.platform === "darwin") {
@@ -97,12 +98,43 @@ export async function createWindow(
     }
   } catch { /* best-effort */ }
 
-  const resetSessionState = registerIpcHandlers(win, kernelManager, commRouter, queryRouter, projectManager, configStore, path.join(os.homedir(), ".PDV"));
+  // `allowClose` gates the close intercept below. The renderer flips it via
+  // `IPC.app.confirmClose` after the user resolves the unsaved-changes prompt.
+  let allowClose = false;
+  const setAllowClose = (allow: boolean): void => {
+    allowClose = allow;
+  };
+
+  const resetSessionState = registerIpcHandlers(
+    win,
+    kernelManager,
+    commRouter,
+    queryRouter,
+    projectManager,
+    configStore,
+    path.join(os.homedir(), ".PDV"),
+    setAllowClose,
+  );
+
+  // Intercept window close (title-bar X, OS close, Cmd+Q) so the renderer can
+  // prompt the user about unsaved changes before the window goes away.
+  win.on("close", (event) => {
+    if (allowClose || win.webContents.isDestroyed()) {
+      return;
+    }
+    event.preventDefault();
+    win.webContents.send(IPC.push.requestClose);
+  });
 
   // Reset in-memory project state on every renderer load/reload so that stale
   // module imports and project dirs from a previous session are cleared before
   // the renderer makes any IPC calls (e.g. modules:listImported).
-  win.webContents.on("did-finish-load", resetSessionState);
+  win.webContents.on("did-finish-load", () => {
+    // Re-arm the close guard after a renderer reload so a stale `allowClose`
+    // from a prior close attempt cannot leak into the next one.
+    allowClose = false;
+    resetSessionState();
+  });
 
   initializeAppMenu(win);
 

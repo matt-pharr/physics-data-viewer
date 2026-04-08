@@ -158,6 +158,11 @@ export const IPC = {
     progress: "pdv.progress",
     installOutput: "pdv.environment.installOutput",
     updateStatus: "pdv.updater.status",
+    requestClose: "pdv.app.requestClose",
+  },
+  /** App-level lifecycle channels (close confirmation, etc.). */
+  app: {
+    confirmClose: "app:confirmClose",
   },
   /** App menu synchronization channels. */
   menu: {
@@ -1834,6 +1839,29 @@ export interface PDVApi {
      * @returns Unsubscribe function.
      */
     onAction(callback: (payload: MenuActionPayload) => void): () => void;
+  };
+
+  /** App-level lifecycle controls (window close confirmation, etc.). */
+  app: {
+    /**
+     * Confirm that the renderer has approved closing the main window.
+     *
+     * Called from the renderer after the user resolves the unsaved-changes
+     * prompt. Sets the main-process "allow close" flag and re-issues
+     * `BrowserWindow.close()` so the OS-level close proceeds.
+     *
+     * @returns Resolves when the close has been re-issued.
+     */
+    confirmClose(): Promise<void>;
+    /**
+     * Subscribe to "user is trying to close" notifications from the main
+     * process. Fired both for the title-bar close button and for OS-level
+     * window close (Cmd+Q on macOS, Alt+F4, etc.).
+     *
+     * @param callback - Invoked once per close attempt.
+     * @returns Unsubscribe function.
+     */
+    onRequestClose(callback: () => void): () => void;
   };
 
   /** Window chrome integration and title-bar controls. */

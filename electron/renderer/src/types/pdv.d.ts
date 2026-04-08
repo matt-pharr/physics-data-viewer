@@ -876,6 +876,15 @@ export interface PDVApi {
     close(): Promise<boolean>;
     onStateChanged(callback: (info: WindowChromeInfo) => void): () => void;
   };
+  app: {
+    /** Confirm the renderer has approved closing the main window. */
+    confirmClose(): Promise<void>;
+    /**
+     * Subscribe to "user is trying to close" notifications. Fires for both
+     * the title-bar close button and OS-level window close (Cmd+Q, Alt+F4).
+     */
+    onRequestClose(callback: () => void): () => void;
+  };
 }
 
 declare global {

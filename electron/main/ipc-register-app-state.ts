@@ -31,6 +31,8 @@ interface RegisterAppStateIpcHandlersOptions {
   themesDir: string;
   stateDir: string;
   codeCellsPath: string;
+  /** Flips the close-guard flag in `app.ts` so the next `win.close()` proceeds. */
+  setAllowClose: (allow: boolean) => void;
 }
 
 function getWindowChromePlatform(): WindowChromePlatform {
@@ -119,7 +121,7 @@ function loadCodeCellsFromDisk(codeCellsPath: string): void {
 export function registerAppStateIpcHandlers(
   options: RegisterAppStateIpcHandlersOptions
 ): void {
-  const { win, configStore, readConfig, themesDir, stateDir, codeCellsPath } = options;
+  const { win, configStore, readConfig, themesDir, stateDir, codeCellsPath, setAllowClose } = options;
 
   fs.mkdir(themesDir, { recursive: true }).catch((error) => {
     console.warn(
@@ -231,8 +233,21 @@ export function registerAppStateIpcHandlers(
   });
 
   ipcMain.handle(IPC.chrome.close, async () => {
-    win.close();
+    // Route through the same close-confirmation flow as the OS-level close
+    // (`win.on('close')` in app.ts) so the title-bar X also prompts about
+    // unsaved changes. The renderer will call `IPC.app.confirmClose` once
+    // the user resolves the prompt.
+    if (!win.isDestroyed()) {
+      win.webContents.send(IPC.push.requestClose);
+    }
     return true;
+  });
+
+  ipcMain.handle(IPC.app.confirmClose, async () => {
+    setAllowClose(true);
+    if (!win.isDestroyed()) {
+      win.close();
+    }
   });
 
   ipcMain.handle(IPC.files.pickExecutable, async () => {

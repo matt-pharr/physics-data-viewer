@@ -122,6 +122,7 @@ const REGISTERED_CHANNELS: readonly string[] = [
   IPC.chrome.minimize,
   IPC.chrome.toggleMaximize,
   IPC.chrome.close,
+  IPC.app.confirmClose,
   IPC.moduleWindows.open,
   IPC.moduleWindows.close,
   IPC.moduleWindows.context,
@@ -339,7 +340,8 @@ export function registerIpcHandlers(
   queryRouter: QueryRouter,
   projectManager: ProjectManager,
   configStore: ConfigStore,
-  pdvDir: string
+  pdvDir: string,
+  setAllowClose: (allow: boolean) => void
 ): () => void {
   activeKernelManagerRef = kernelManager;
   unregisterIpcHandlers();
@@ -531,6 +533,7 @@ export function registerIpcHandlers(
     themesDir,
     stateDir,
     codeCellsPath,
+    setAllowClose,
   });
 
   registerModuleWindowIpcHandlers({
