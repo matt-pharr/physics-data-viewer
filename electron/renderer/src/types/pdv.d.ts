@@ -6,6 +6,16 @@
  * directly from main-process modules.
  */
 
+/** Auto-update status pushed from the main process. */
+export interface UpdateStatus {
+  state: "idle" | "checking" | "available" | "not-available" | "downloading" | "downloaded" | "error";
+  version?: string;
+  progress?: number;
+  error?: string;
+  releaseUrl?: string;
+  canAutoUpdate?: boolean;
+}
+
 /** Script `run(...)` parameter metadata returned for script tree nodes. */
 export interface ScriptParameter {
   /** Parameter name as declared in script function signature. */
@@ -816,6 +826,13 @@ export interface PDVApi {
   };
   about: {
     getVersion(): Promise<string>;
+  };
+  updater: {
+    checkForUpdates(): Promise<void>;
+    downloadUpdate(): Promise<void>;
+    installUpdate(): Promise<void>;
+    openReleasesPage(): Promise<void>;
+    onUpdateStatus(callback: (status: UpdateStatus) => void): () => void;
   };
   themes: {
     get(): Promise<Theme[]>;

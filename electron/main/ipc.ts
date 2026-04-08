@@ -37,6 +37,8 @@ import type {
 } from "./environment-detector";
 
 export type { PDVConfig } from "./config";
+import type { UpdateStatus } from "./auto-updater";
+export type { UpdateStatus } from "./auto-updater";
 export type { EnvironmentInfo, EnvironmentInstallResult, InstallOutputChunk } from "./environment-detector";
 
 // ---------------------------------------------------------------------------
@@ -125,6 +127,13 @@ export const IPC = {
   about: {
     getVersion: "about:getVersion",
   },
+  /** App auto-update channels. */
+  updater: {
+    checkForUpdates: "updater:checkForUpdates",
+    downloadUpdate: "updater:downloadUpdate",
+    installUpdate: "updater:installUpdate",
+    openReleasesPage: "updater:openReleasesPage",
+  },
   /** Theme persistence channels. */
   themes: {
     get: "themes:get",
@@ -148,6 +157,7 @@ export const IPC = {
     projectReloading: "pdv.project.reloading",
     progress: "pdv.progress",
     installOutput: "pdv.environment.installOutput",
+    updateStatus: "pdv.updater.status",
   },
   /** App menu synchronization channels. */
   menu: {
@@ -1631,6 +1641,20 @@ export interface PDVApi {
      * @returns Version string, e.g. "0.0.2".
      */
     getVersion(): Promise<string>;
+  };
+
+  /** App auto-update operations. */
+  updater: {
+    /** Trigger an update check against GitHub Releases. */
+    checkForUpdates(): Promise<void>;
+    /** Download the available update. */
+    downloadUpdate(): Promise<void>;
+    /** Quit and install the downloaded update. */
+    installUpdate(): Promise<void>;
+    /** Open the GitHub Releases page in the system browser. */
+    openReleasesPage(): Promise<void>;
+    /** Subscribe to update status push notifications. */
+    onUpdateStatus(callback: (status: UpdateStatus) => void): () => void;
   };
 
   /** Theme persistence operations. */

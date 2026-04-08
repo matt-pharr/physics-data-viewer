@@ -142,6 +142,13 @@ const api: PDVApi = {
   about: {
     getVersion: () => ipcRenderer.invoke(IPC.about.getVersion),
   },
+  updater: {
+    checkForUpdates: () => ipcRenderer.invoke(IPC.updater.checkForUpdates),
+    downloadUpdate: () => ipcRenderer.invoke(IPC.updater.downloadUpdate),
+    installUpdate: () => ipcRenderer.invoke(IPC.updater.installUpdate),
+    openReleasesPage: () => ipcRenderer.invoke(IPC.updater.openReleasesPage),
+    onUpdateStatus: (cb) => onPush(IPC.push.updateStatus, cb),
+  },
   themes: {
     get: () => ipcRenderer.invoke(IPC.themes.get),
     save: (theme) => ipcRenderer.invoke(IPC.themes.save, theme),

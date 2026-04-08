@@ -185,6 +185,7 @@ const App: React.FC = () => {
     activeCellTab,
     setCellTabs,
     setActiveCellTab,
+    currentProjectDir,
   });
 
   useEffect(() => {

@@ -1,13 +1,16 @@
-name: Build Distributables
+name: Build and Publish Release
 
 on:
+  push:
+    tags:
+      - 'v*'
   workflow_dispatch:
 
 jobs:
   dist-mac:
     runs-on: macos-latest
     permissions:
-      contents: read
+      contents: write
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -26,23 +29,21 @@ jobs:
             npm install
           fi
 
-      - name: Build and package
+      - name: Build and publish
         working-directory: electron
-        run: npm run dist:mac
-
-      - name: Upload artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: dist-mac
-          path: |
-            electron/release/*.dmg
-            electron/release/*.zip
-          if-no-files-found: warn
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CSC_LINK: ${{ secrets.CSC_LINK }}
+          CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: npm run build && npx electron-builder --mac --publish always
 
   dist-linux:
     runs-on: ubuntu-latest
     permissions:
-      contents: read
+      contents: write
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -61,16 +62,20 @@ jobs:
             npm install
           fi
 
-      - name: Build and package
+      - name: Build and publish
         working-directory: electron
-        run: npm run dist:linux
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: npm run build && npx electron-builder --linux --publish always
 
-      - name: Upload artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: dist-linux
-          path: |
-            electron/release/*.AppImage
-            electron/release/*.deb
-            electron/release/*.snap
-          if-no-files-found: warn
+  publish-release:
+    needs: [dist-mac, dist-linux]
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/v')
+    permissions:
+      contents: write
+    steps:
+      - name: Publish draft release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release edit "${{ github.ref_name }}" --repo "${{ github.repository }}" --draft=false
