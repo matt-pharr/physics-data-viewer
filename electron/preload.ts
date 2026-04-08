@@ -193,6 +193,10 @@ const api: PDVApi = {
     close: () => ipcRenderer.invoke(IPC.chrome.close),
     onStateChanged: (callback) => onPush(IPC.push.chromeStateChanged, callback),
   },
+  app: {
+    confirmClose: () => ipcRenderer.invoke(IPC.app.confirmClose),
+    onRequestClose: (callback) => onPush<void>(IPC.push.requestClose, callback),
+  },
 };
 
 contextBridge.exposeInMainWorld("pdv", api);
