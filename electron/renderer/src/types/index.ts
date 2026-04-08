@@ -118,15 +118,39 @@ export interface NoteTab {
 /**
  * Tree node shape enriched with UI state used by the Tree component.
  *
- * Widens `type` from the wire-canonical {@link NodeDescriptor.type} union
- * (`NodeKindValue`) to also accept the synthetic `'root'` value used by the
- * Tree panel for the always-visible root container row. All real wire nodes
- * still satisfy `NodeKindValue`.
+ * The wire-canonical {@link NodeDescriptor} uses snake_case field names
+ * (matching the kernel's JSON output). The renderer convention is camelCase,
+ * so this view-model omits the snake_case wire fields and re-exposes the
+ * same data under camelCase keys via {@link enrichNode}.
+ *
+ * Widens `type` from `NodeKindValue` to also accept the synthetic `'root'`
+ * value used by the Tree panel for the always-visible root container row;
+ * all real wire nodes still satisfy `NodeKindValue`.
  */
-export interface TreeNodeData extends Omit<NodeDescriptor, 'type'> {
+export interface TreeNodeData
+  extends Omit<
+    NodeDescriptor,
+    | 'type'
+    | 'parent_path'
+    | 'has_children'
+    | 'python_type'
+    | 'has_handler'
+    | 'created_at'
+    | 'updated_at'
+    | 'module_id'
+    | 'module_name'
+    | 'module_version'
+  > {
   type: NodeDescriptor['type'] | 'root';
-  hasChildren: boolean;
   parentPath: string | null;
+  hasChildren: boolean;
+  pythonType?: string;
+  hasHandler?: boolean;
+  createdAt?: string;
+  updatedAt?: string;
+  moduleId?: string;
+  moduleName?: string;
+  moduleVersion?: string;
   children?: TreeNodeData[];
   isExpanded?: boolean;
   isLoading?: boolean;

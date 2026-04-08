@@ -88,16 +88,41 @@ class TreeService {
     }
   }
 
-  /** Convert backend node descriptor fields to renderer-friendly shape. */
-  private enrichNode = (node: NodeDescriptor): TreeNodeData => ({
-    ...node,
-    hasChildren: Boolean(node.has_children),
-    parentPath: node.parent_path ?? null,
-    python_type: node.python_type,
-    has_handler: node.has_handler,
-    isExpanded: false,
-    isLoading: false,
-  });
+  /**
+   * Convert a wire-format {@link NodeDescriptor} (snake_case) into the
+   * renderer-facing {@link TreeNodeData} shape (camelCase) and tag it with
+   * default UI state. All wire fields are mapped — adding a new field to
+   * `NodeDescriptor` requires updating both this mapper and the
+   * `TreeNodeData` declaration in `types/index.ts`.
+   */
+  private enrichNode = (node: NodeDescriptor): TreeNodeData => {
+    const {
+      parent_path,
+      has_children,
+      python_type,
+      has_handler,
+      created_at,
+      updated_at,
+      module_id,
+      module_name,
+      module_version,
+      ...rest
+    } = node;
+    return {
+      ...rest,
+      parentPath: parent_path ?? null,
+      hasChildren: Boolean(has_children),
+      pythonType: python_type,
+      hasHandler: has_handler,
+      createdAt: created_at,
+      updatedAt: updated_at,
+      moduleId: module_id,
+      moduleName: module_name,
+      moduleVersion: module_version,
+      isExpanded: false,
+      isLoading: false,
+    };
+  };
 }
 
 /** Singleton tree service used by tree-related renderer components. */

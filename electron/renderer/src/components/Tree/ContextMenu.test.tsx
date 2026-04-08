@@ -15,9 +15,7 @@ function node(type: string): TreeNodeData {
     id: 'data.x',
     key: 'x',
     path: 'data.x',
-    parent_path: 'data',
     type,
-    has_children: false,
     hasChildren: false,
     parentPath: 'data',
   } as unknown as TreeNodeData;

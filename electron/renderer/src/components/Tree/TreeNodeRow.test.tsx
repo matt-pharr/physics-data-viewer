@@ -16,9 +16,7 @@ function makeNode(overrides: Record<string, unknown> = {}): TreeNodeData & { dep
     id: 'data.x',
     key: 'x',
     path: 'data.x',
-    parent_path: 'data',
     type: 'folder',
-    has_children: true,
     hasChildren: true,
     parentPath: 'data',
     depth: 0,
@@ -72,7 +70,7 @@ describe('TreeNodeRow', () => {
   it('applies selected class and hidden expand button for leaf nodes', () => {
     const { container } = render(
       <TreeNodeRow
-        node={makeNode({ hasChildren: false, has_children: false })}
+        node={makeNode({ hasChildren: false })}
         selected={true}
         onExpand={vi.fn()}
         onDoubleClick={vi.fn()}

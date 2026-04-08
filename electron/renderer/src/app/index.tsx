@@ -589,8 +589,8 @@ const App: React.FC = () => {
     if (action === 'open_gui') {
       if (!currentKernelId) return;
       // Module-owned GUIs use the module window system; standalone GUIs use the viewer
-      if (node.module_id) {
-        const alias = node.type === 'gui' && node.parent_path ? node.parent_path : node.key;
+      if (node.moduleId) {
+        const alias = node.type === 'gui' && node.parentPath ? node.parentPath : node.key;
         void window.pdv.moduleWindows.open({ alias, kernelId: currentKernelId });
       } else {
         void window.pdv.guiEditor.openViewer({ treePath: node.path, kernelId: currentKernelId });
@@ -1221,9 +1221,7 @@ const App: React.FC = () => {
                   id: result.treePath,
                   key: name,
                   path: result.treePath,
-                  parent_path: createNoteTarget || null,
                   type: 'markdown',
-                  has_children: false,
                   preview: '',
                   hasChildren: false,
                   parentPath: createNoteTarget || null,

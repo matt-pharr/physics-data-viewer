@@ -139,9 +139,7 @@ export const Tree: React.FC<TreeProps> = ({ kernelId, disabled = false, refreshT
         id: '__root__',
         key: 'pdv_tree',
         path: '',
-        parent_path: null,
         type: 'root',
-        has_children: true,
         preview: '',
         hasChildren: true,
         parentPath: null,
@@ -291,7 +289,7 @@ export const Tree: React.FC<TreeProps> = ({ kernelId, disabled = false, refreshT
       onAction?.('open_gui', node);
       return;
     }
-    if (node.has_handler) {
+    if (node.hasHandler) {
       onAction?.('handle', node);
     } else if (node.type === 'markdown') {
       onAction?.('open_note', node);

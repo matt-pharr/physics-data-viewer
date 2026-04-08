@@ -119,6 +119,34 @@ def _annotation_to_type_name(annotation: Any) -> str:
     return str(annotation)
 
 
+def _reset_script_module_cache(prefix: str, file_path: str) -> str:
+    """Build a unique synthetic module name and clear any stale cache entry.
+
+    Used by both :func:`_extract_script_params` and :meth:`PDVScript.run` to
+    re-import a script file fresh, bypassing Python's import cache so that
+    in-place edits to the script file are always reflected.
+
+    Parameters
+    ----------
+    prefix : str
+        Internal prefix used to namespace the synthetic module names so
+        that signature-extraction and execution caches do not collide
+        (``"_pdv_script_params"`` vs ``"_pdv_script"``).
+    file_path : str
+        Absolute path to the script file. Hashed to derive a stable
+        per-file module name.
+
+    Returns
+    -------
+    str
+        The synthetic module name to use with ``importlib.util``.
+    """
+    module_name = f"{prefix}_{abs(hash(file_path))}"
+    if module_name in sys.modules:
+        del sys.modules[module_name]
+    return module_name
+
+
 def _extract_script_params(file_path: str) -> list[ScriptParameter]:
     """Extract user-facing run() params from a script file.
 
@@ -128,9 +156,7 @@ def _extract_script_params(file_path: str) -> list[ScriptParameter]:
     if not os.path.exists(file_path):
         return []
 
-    module_name = f"_pdv_script_params_{abs(hash(file_path))}"
-    if module_name in sys.modules:
-        del sys.modules[module_name]
+    module_name = _reset_script_module_cache("_pdv_script_params", file_path)
 
     spec = importlib.util.spec_from_file_location(module_name, file_path)
     if spec is None or spec.loader is None:
@@ -427,9 +453,7 @@ class PDVScript(PDVFile):
         if self._module_id and tree is not None:
             self._check_module_dependencies(tree)
 
-        module_name = f"_pdv_script_{abs(hash(file_path))}"
-        if module_name in sys.modules:
-            del sys.modules[module_name]
+        module_name = _reset_script_module_cache("_pdv_script", file_path)
 
         spec = importlib.util.spec_from_file_location(module_name, file_path)
         if spec is None or spec.loader is None:

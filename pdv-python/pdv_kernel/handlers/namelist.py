@@ -36,54 +36,14 @@ def handle_namelist_read(msg: dict) -> None:
     msg : dict
         Parsed PDV message envelope.
     """
-    from pdv_kernel.comms import get_pdv_tree, send_error, send_message  # noqa: PLC0415
-    from pdv_kernel.tree import PDVNamelist  # noqa: PLC0415
+    from pdv_kernel.comms import send_error, send_message  # noqa: PLC0415
+    from pdv_kernel.handlers._helpers import resolve_namelist_node  # noqa: PLC0415
 
     msg_id = msg.get("msg_id")
-    payload = msg.get("payload", {})
-    tree_path = payload.get("tree_path", "")
-
-    if not tree_path:
-        send_error(
-            "pdv.namelist.read.response",
-            "namelist.missing_tree_path",
-            "tree_path is required in pdv.namelist.read payload",
-            in_reply_to=msg_id,
-        )
+    resolved = resolve_namelist_node(msg, "pdv.namelist.read.response")
+    if resolved is None:
         return
-
-    tree = get_pdv_tree()
-    if tree is None:
-        send_error(
-            "pdv.namelist.read.response",
-            "namelist.no_tree",
-            "PDVTree is not initialized",
-            in_reply_to=msg_id,
-        )
-        return
-
-    try:
-        node = tree[tree_path]
-    except KeyError:
-        send_error(
-            "pdv.namelist.read.response",
-            "namelist.path_not_found",
-            f"Tree path not found: '{tree_path}'",
-            in_reply_to=msg_id,
-        )
-        return
-
-    if not isinstance(node, PDVNamelist):
-        send_error(
-            "pdv.namelist.read.response",
-            "namelist.wrong_type",
-            f"Node at '{tree_path}' is not a PDVNamelist (got {type(node).__name__})",
-            in_reply_to=msg_id,
-        )
-        return
-
-    working_dir = tree._working_dir
-    file_path = node.resolve_path(working_dir)
+    _tree, node, file_path, _payload = resolved
 
     try:
         from pdv_kernel.namelist_utils import (  # noqa: PLC0415
@@ -151,55 +111,15 @@ def handle_namelist_write(msg: dict) -> None:
     msg : dict
         Parsed PDV message envelope.
     """
-    from pdv_kernel.comms import get_pdv_tree, send_error, send_message  # noqa: PLC0415
-    from pdv_kernel.tree import PDVNamelist  # noqa: PLC0415
+    from pdv_kernel.comms import send_error, send_message  # noqa: PLC0415
+    from pdv_kernel.handlers._helpers import resolve_namelist_node  # noqa: PLC0415
 
     msg_id = msg.get("msg_id")
-    payload = msg.get("payload", {})
-    tree_path = payload.get("tree_path", "")
+    resolved = resolve_namelist_node(msg, "pdv.namelist.write.response")
+    if resolved is None:
+        return
+    _tree, node, file_path, payload = resolved
     data = payload.get("data", {})
-
-    if not tree_path:
-        send_error(
-            "pdv.namelist.write.response",
-            "namelist.missing_tree_path",
-            "tree_path is required in pdv.namelist.write payload",
-            in_reply_to=msg_id,
-        )
-        return
-
-    tree = get_pdv_tree()
-    if tree is None:
-        send_error(
-            "pdv.namelist.write.response",
-            "namelist.no_tree",
-            "PDVTree is not initialized",
-            in_reply_to=msg_id,
-        )
-        return
-
-    try:
-        node = tree[tree_path]
-    except KeyError:
-        send_error(
-            "pdv.namelist.write.response",
-            "namelist.path_not_found",
-            f"Tree path not found: '{tree_path}'",
-            in_reply_to=msg_id,
-        )
-        return
-
-    if not isinstance(node, PDVNamelist):
-        send_error(
-            "pdv.namelist.write.response",
-            "namelist.wrong_type",
-            f"Node at '{tree_path}' is not a PDVNamelist (got {type(node).__name__})",
-            in_reply_to=msg_id,
-        )
-        return
-
-    working_dir = tree._working_dir
-    file_path = node.resolve_path(working_dir)
 
     try:
         from pdv_kernel.namelist_utils import write_namelist  # noqa: PLC0415
