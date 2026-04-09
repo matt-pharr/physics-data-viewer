@@ -476,12 +476,14 @@ pdv_kernel/
     namespace.py         # PDVNamespace (protected dict), PDVApp, pdv_namespace()
     serialization.py     # Type detection, format writers (npy, parquet, json, module, gui, namelist, lib)
     environment.py       # Path utilities, working dir management, project root logic
-    errors.py            # PDVError, PDVPathError, PDVKeyError, PDVProtectedNameError, PDVSerializationError, PDVScriptError, PDVCommError, PDVVersionError, PDVSchemaError
+    errors.py            # PDVError, PDVPathError, PDVKeyError, PDVProtectedNameError, PDVSerializationError, PDVScriptError, PDVVersionError
     modules.py           # Custom type handler registry and dispatch (@pdv.handle() decorator)
     namelist_utils.py    # Fortran namelist and TOML parsing utilities
     checksum.py          # Content-based XXH3-128 Merkle-tree checksum for PDVTree (tree_checksum())
+    tree_loader.py       # Shared two-pass tree-index loader used by project.load and module.register handlers
     handlers/
         __init__.py
+        _helpers.py      # Shared register-validation, namelist resolution, and gui-attach helpers
         lifecycle.py     # pdv.init, pdv.ready handlers
         project.py       # pdv.project.load, pdv.project.save handlers
         tree.py          # pdv.tree.list, pdv.tree.get, pdv.tree.resolve_file handlers
@@ -539,6 +541,7 @@ All other `pdv_*` names in the namespace are an error. Internal implementation f
 - **`__getitem__(key)`**: If key is not in the in-memory dict, consults the lazy-load registry. If the key exists in the registry (i.e., it was populated from a save directory), fetches the data file from the save directory into the working directory and loads it into memory. Then returns the value. If neither in-memory nor in the registry, raises `KeyError`.
 - **`__setitem__(key, value)`**: Sets the value in the in-memory dict. Emits `pdv.tree.changed` push notification.
 - **`__delitem__(key)`**: Removes from in-memory dict and from the lazy-load registry. Emits `pdv.tree.changed`.
+- **`set_quiet(key, value)`**: Same dot-path traversal as `__setitem__` (creating intermediate `PDVTree` containers as needed) but bypasses the change notification. Used by bulk loaders (`pdv.project.load`, `pdv.module.register`) to populate the tree without flooding the comm channel — callers typically emit a single `pdv.project.loaded` push when bulk load completes.
 - **Path notation**: Both `pdv_tree['key']` and `pdv_tree['parent.child.grandchild']` are supported as a convenience. Dot-separated paths are resolved recursively.
 - **`run_script(path, **kwargs)`**: Loads and executes the script at `path`, passing `pdv_tree` and `**kwargs` to its `run()` function.
 
@@ -1360,9 +1363,10 @@ electron/
         project-file-sync.ts    ← Tree file synchronization between working/save dirs
         module-manager.ts       ← Module import/installation pipeline
         module-runtime.ts       ← Module bind/setup helpers: lib file copy, sys.path setup, script registration
-        module-window-manager.ts ← Module GUI popup BrowserWindow lifecycle
-        gui-editor-window-manager.ts  ← GUI editor popup BrowserWindow lifecycle
-        gui-viewer-window-manager.ts  ← Standalone GUI viewer BrowserWindow lifecycle
+        base-window-manager.ts    ← Generic per-key BrowserWindow lifecycle base class shared by the three popup managers
+        module-window-manager.ts  ← Module GUI popup BrowserWindow (subclass of BaseWindowManager)
+        gui-editor-window-manager.ts  ← GUI editor popup BrowserWindow (subclass of BaseWindowManager)
+        gui-viewer-window-manager.ts  ← Standalone GUI viewer BrowserWindow (subclass of BaseWindowManager)
         ipc-register-kernels.ts           ← IPC handlers: kernel lifecycle + execution
         ipc-register-project.ts           ← IPC handlers: project save/load/new
         ipc-register-modules.ts           ← IPC handlers: module import/install
