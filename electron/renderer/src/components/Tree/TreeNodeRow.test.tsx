@@ -35,10 +35,10 @@ describe('TreeNodeRow', () => {
     const onClick = vi.fn();
 
     const iconCases: Array<[string, string]> = [
-      ['folder', '📁'], ['file', '📄'], ['script', '📜'], ['ndarray', '🔢'], ['dataframe', '📊'],
-      ['series', '📈'], ['dict', '🗂️'], ['list', '🧾'], ['tuple', '🧾'], ['set', '🧾'],
-      ['string', '🔤'], ['number', '#️⃣'], ['boolean', '✔️'], ['none', '∅'], ['image', '🖼️'],
-      ['json', '{ }'], ['python', '🐍'], ['julia', '🔴'], ['unknown', '❓'],
+      ['root', '🌳'], ['folder', '📁'], ['file', '📄'], ['script', '📜'], ['markdown', '📝'],
+      ['ndarray', '🔢'], ['dataframe', '📊'], ['series', '📈'], ['mapping', '🗂️'],
+      ['sequence', '🧾'], ['text', '🔤'], ['scalar', '#️⃣'], ['binary', '🧬'],
+      ['namelist', '📋'], ['module', '📦'], ['gui', '🖼️'], ['lib', '📚'], ['unknown', '❓'],
     ];
 
     for (const [type, icon] of iconCases) {
