@@ -7,6 +7,8 @@
 
 import type {
   Config,
+  EnvironmentInfo,
+  InstallOutputChunk,
   KernelExecutionError,
   KernelExecutionOrigin,
   KernelExecuteResult,
@@ -44,6 +46,8 @@ import type {
 /** Re-export core preload API contract types for renderer imports. */
 export type {
   Config,
+  EnvironmentInfo,
+  InstallOutputChunk,
   KernelExecutionError,
   KernelExecutionOrigin,
   KernelExecuteResult,
@@ -111,10 +115,42 @@ export interface NoteTab {
   name: string;
 }
 
-/** Tree node shape enriched with UI state used by the Tree component. */
-export interface TreeNodeData extends NodeDescriptor {
-  hasChildren: boolean;
+/**
+ * Tree node shape enriched with UI state used by the Tree component.
+ *
+ * The wire-canonical {@link NodeDescriptor} uses snake_case field names
+ * (matching the kernel's JSON output). The renderer convention is camelCase,
+ * so this view-model omits the snake_case wire fields and re-exposes the
+ * same data under camelCase keys via {@link enrichNode}.
+ *
+ * Widens `type` from `NodeKindValue` to also accept the synthetic `'root'`
+ * value used by the Tree panel for the always-visible root container row;
+ * all real wire nodes still satisfy `NodeKindValue`.
+ */
+export interface TreeNodeData
+  extends Omit<
+    NodeDescriptor,
+    | 'type'
+    | 'parent_path'
+    | 'has_children'
+    | 'python_type'
+    | 'has_handler'
+    | 'created_at'
+    | 'updated_at'
+    | 'module_id'
+    | 'module_name'
+    | 'module_version'
+  > {
+  type: NodeDescriptor['type'] | 'root';
   parentPath: string | null;
+  hasChildren: boolean;
+  pythonType?: string;
+  hasHandler?: boolean;
+  createdAt?: string;
+  updatedAt?: string;
+  moduleId?: string;
+  moduleName?: string;
+  moduleVersion?: string;
   children?: TreeNodeData[];
   isExpanded?: boolean;
   isLoading?: boolean;

@@ -44,6 +44,7 @@ describe("ConfigStore", () => {
       showPrivateVariables: false,
       showModuleVariables: false,
       showCallableVariables: false,
+      autoRefreshNamespace: false,
       settings: {
         appearance: {
           themeName: "Dark+ (VSCode)",
@@ -89,6 +90,7 @@ describe("ConfigStore", () => {
       showPrivateVariables: true,
       showModuleVariables: true,
       showCallableVariables: false,
+      autoRefreshNamespace: false,
       theme: "dark",
       settings: {
         appearance: {
@@ -109,6 +111,7 @@ describe("ConfigStore", () => {
       showPrivateVariables: false,
       showModuleVariables: false,
       showCallableVariables: false,
+      autoRefreshNamespace: false,
       settings: {
         appearance: {
           themeName: "Dark+ (VSCode)",

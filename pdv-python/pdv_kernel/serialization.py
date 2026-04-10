@@ -231,6 +231,12 @@ def serialize_node(
     writes the data file, and returns a node descriptor matching
     ARCHITECTURE.md §7.3.
 
+    The ``source_dir`` argument is only consulted by file-backed kinds
+    (PDVScript, PDVMarkdown, PDVGui, PDVLib, PDVNamelist). For these kinds,
+    the source file lives in ``source_dir`` (typically the kernel working
+    directory) while serialized output is written to a separate save dir.
+    Defaults to ``working_dir`` when omitted.
+
     Parameters
     ----------
     tree_path : str
@@ -535,7 +541,12 @@ def deserialize_node(storage_ref: dict, save_dir: str, *, trusted: bool = False)
         for session-local files).
     trusted : bool
         If True, allows pickle deserialization. If False, pickle files
-        raise :class:`PDVSerializationError`.
+        raise :class:`PDVSerializationError`. Production project-load and
+        module-import handlers always pass ``trusted=True`` (the on-disk
+        pickle was written by this same process). The ``trusted=False``
+        path exists for tests and any future user-facing import flow that
+        wants to surface untrusted pickles as errors instead of executing
+        them.
 
     Returns
     -------
@@ -670,28 +681,3 @@ def node_preview(value: Any, kind: str) -> str:
     return "<unknown type>"
 
 
-def extract_docstring_preview(file_path: str) -> str | None:
-    """Extract the first line of a Python file's module docstring.
-
-    Parameters
-    ----------
-    file_path : str
-        Absolute path to a Python script file.
-
-    Returns
-    -------
-    str or None
-        First line of the module docstring, or None if absent or unreadable.
-    """
-    import ast
-
-    try:
-        with open(file_path, "r", encoding="utf-8") as fh:
-            source = fh.read()
-        tree = ast.parse(source)
-        doc = ast.get_docstring(tree)
-        if doc:
-            return doc.strip().splitlines()[0].strip()
-    except Exception:  # noqa: BLE001
-        pass
-    return None

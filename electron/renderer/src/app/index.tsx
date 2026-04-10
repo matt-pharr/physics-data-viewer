@@ -212,6 +212,9 @@ const App: React.FC = () => {
         }
         const loaded = await window.pdv.config.get();
         setConfig(loaded);  // theme applied by the reactive effect above
+        if (typeof loaded.autoRefreshNamespace === 'boolean') {
+          setAutoRefreshNamespace(loaded.autoRefreshNamespace);
+        }
         setCurrentProjectDir(null);
         // Kernel is NOT started here — it starts when the user picks a
         // project action from the WelcomeScreen.
@@ -372,7 +375,7 @@ const App: React.FC = () => {
     onTreeChanged: handleTreeChanged,
   });
 
-  const { startKernel, handleEnvSave, handleRestartKernel } = useKernelLifecycle({
+  const { startKernel, handleEnvSave } = useKernelLifecycle({
     config,
     currentKernelId,
     setCurrentKernelId,
@@ -586,8 +589,8 @@ const App: React.FC = () => {
     if (action === 'open_gui') {
       if (!currentKernelId) return;
       // Module-owned GUIs use the module window system; standalone GUIs use the viewer
-      if (node.module_id) {
-        const alias = node.type === 'gui' && node.parent_path ? node.parent_path : node.key;
+      if (node.moduleId) {
+        const alias = node.type === 'gui' && node.parentPath ? node.parentPath : node.key;
         void window.pdv.moduleWindows.open({ alias, kernelId: currentKernelId });
       } else {
         void window.pdv.guiEditor.openViewer({ treePath: node.path, kernelId: currentKernelId });
@@ -803,7 +806,7 @@ const App: React.FC = () => {
     && noteTabs.length === 0;
 
   const {
-    handleSaveProject: _handleSaveProject,
+    handleSaveProject,
     executeOpenProject,
   } = useProjectWorkflow({
     kernelStatus,
@@ -832,10 +835,10 @@ const App: React.FC = () => {
 
   // Subscribe to main-process close requests (title-bar X, OS close, Cmd+Q)
   // and route them through the same dirty-action guard. The latest
-  // `_handleSaveProject` is captured via a ref so the listener doesn't need to
+  // `handleSaveProject` is captured via a ref so the listener doesn't need to
   // re-subscribe on every render.
-  const handleSaveProjectRef = useRef(_handleSaveProject);
-  handleSaveProjectRef.current = _handleSaveProject;
+  const handleSaveProjectRef = useRef(handleSaveProject);
+  handleSaveProjectRef.current = handleSaveProject;
   const guardDirtyRef = useRef(guardDirty);
   guardDirtyRef.current = guardDirty;
   useEffect(() => {
@@ -1070,7 +1073,12 @@ const App: React.FC = () => {
                     autoRefresh={autoRefreshNamespace}
                     refreshToken={namespaceRefreshToken}
                     refreshInterval={NAMESPACE_REFRESH_INTERVAL_MS}
-                    onToggleAutoRefresh={setAutoRefreshNamespace}
+                    onToggleAutoRefresh={(next) => {
+                      setAutoRefreshNamespace(next);
+                      void window.pdv.config.set({ autoRefreshNamespace: next }).then((updated) => {
+                        if (updated) setConfig((prev) => (prev ? { ...prev, autoRefreshNamespace: next } : prev));
+                      });
+                    }}
                   />
                 )}
               </div>
@@ -1213,9 +1221,7 @@ const App: React.FC = () => {
                   id: result.treePath,
                   key: name,
                   path: result.treePath,
-                  parent_path: createNoteTarget || null,
                   type: 'markdown',
-                  has_children: false,
                   preview: '',
                   hasChildren: false,
                   parentPath: createNoteTarget || null,
@@ -1274,7 +1280,6 @@ const App: React.FC = () => {
        <ImportModuleDialog
          isOpen={showImportModule}
          projectDir={currentProjectDir}
-         kernelReady={kernelStatus === 'ready'}
          activeLanguage={activeLanguage}
          refreshToken={modulesRefreshToken}
          onClose={() => setShowImportModule(false)}
@@ -1287,7 +1292,7 @@ const App: React.FC = () => {
            defaultName={currentProjectName ?? undefined}
            onSave={async (projectName, saveDir) => {
              setShowSaveAsDialog(false);
-             await _handleSaveProject({ directory: saveDir, projectName });
+             await handleSaveProject({ directory: saveDir, projectName });
            }}
            onCancel={() => setShowSaveAsDialog(false)}
          />
@@ -1334,7 +1339,7 @@ const App: React.FC = () => {
            onSave={async () => {
              const action = pendingDirtyAction.run;
              setPendingDirtyAction(null);
-             const saved = await _handleSaveProject();
+             const saved = await handleSaveProject();
              if (saved) {
                action();
              }

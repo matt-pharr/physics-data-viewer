@@ -13,12 +13,10 @@ import { ansiToHtml } from './ansi';
 interface ConsoleProps {
   logs: LogEntry[];
   onClear: () => void;
-  /** Planned feature — not yet wired in App. */
-  onExport?: () => void;
 }
 
 /** Execution console component. */
-export const Console: React.FC<ConsoleProps> = ({ logs, onClear, onExport }) => {
+export const Console: React.FC<ConsoleProps> = ({ logs, onClear }) => {
   const contentRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -32,11 +30,6 @@ export const Console: React.FC<ConsoleProps> = ({ logs, onClear, onExport }) => 
       <header className="pane-header">
         <h2>Console</h2>
         <div className="pane-actions">
-          {onExport && (
-            <button className="btn btn-secondary" onClick={onExport}>
-              Export
-            </button>
-          )}
           <button className="btn btn-secondary" onClick={onClear}>
             Clear
           </button>

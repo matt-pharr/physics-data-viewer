@@ -12,9 +12,11 @@
  * 2. **Push notifications** (CommRouter.onPush) — registers listeners for
  *    unsolicited kernel-initiated messages (e.g. pdv.tree.changed).
  *
- * CommRouter is stateless between attach() / detach() cycles. Call attach()
- * once per kernel session and detach() before discarding the router or when
- * the kernel dies.
+ * CommRouter retains pending-request and push-handler state across the
+ * lifetime of the instance. Call attach() once per kernel session to bind
+ * to a kernel's iopub stream and detach() before discarding the router or
+ * when the kernel dies. Pending requests are rejected on detach to avoid
+ * dangling promises.
  *
  * See Also
  * --------
@@ -26,6 +28,7 @@
 import * as crypto from "crypto";
 import {
   PDVMessage,
+  PDVErrorPayload,
   getAppVersion,
   PDV_COMM_TARGET,
   isPDVMessage,
@@ -51,6 +54,45 @@ export class PDVCommError extends Error {
     super(message);
     this.name = "PDVCommError";
   }
+}
+
+/**
+ * Validate and narrow an error response payload to {@link PDVErrorPayload}.
+ *
+ * ARCHITECTURE.md §3.5 specifies that every error envelope must carry both
+ * `code` and `message` as strings. Earlier code defaulted missing fields to
+ * `"unknown"` / `"PDV error"`, which silently masked malformed errors. This
+ * validator surfaces them as a typed PDVCommError with a synthetic
+ * `protocol.malformed_error` code and the raw payload preview in the message,
+ * so contract violations are visible during development.
+ *
+ * @param raw - Untyped payload from a status='error' PDVMessage.
+ * @param msg - The full enclosing PDVMessage (used as the error response).
+ * @returns A validated PDVErrorPayload, or a synthetic one describing the
+ *   malformed payload when validation fails.
+ */
+function parsePDVErrorPayload(raw: unknown, msg: PDVMessage): PDVErrorPayload {
+  if (
+    raw !== null &&
+    typeof raw === "object" &&
+    typeof (raw as { code?: unknown }).code === "string" &&
+    typeof (raw as { message?: unknown }).message === "string"
+  ) {
+    return raw as PDVErrorPayload;
+  }
+  let preview: string;
+  try {
+    preview = JSON.stringify(raw);
+  } catch {
+    preview = String(raw);
+  }
+  console.error(
+    `[CommRouter] Malformed error payload on ${msg.type} (msg_id=${msg.msg_id}): ${preview}`
+  );
+  return {
+    code: "protocol.malformed_error",
+    message: `Malformed error payload received from kernel (${msg.type}): ${preview}`,
+  };
 }
 
 /**
@@ -400,14 +442,8 @@ export class CommRouter {
     clearTimeout(pending.timer);
 
     if (msg.status === "error") {
-      const payload = msg.payload as { code?: string; message?: string };
-      pending.reject(
-        new PDVCommError(
-          payload.message ?? "PDV error",
-          payload.code ?? "unknown",
-          msg
-        )
-      );
+      const payload = parsePDVErrorPayload(msg.payload, msg);
+      pending.reject(new PDVCommError(payload.message, payload.code, msg));
     } else {
       pending.resolve(msg);
     }
@@ -461,32 +497,5 @@ export class CommRouter {
       )
     );
     this.pushHandlers.clear();
-  }
-
-  /**
-   * Handle a raw incoming comm message from the Jupyter client.
-   *
-   * @deprecated Use attach() / _handleIopubMessage() instead.
-   *   This method is kept for backward compatibility with the original skeleton
-   *   interface but delegates to _handleIopubMessage() after wrapping the data.
-   *
-   * @param data - Raw data payload from the Jupyter comm channel.
-   */
-  handleIncoming(data: unknown): void {
-    // Wrap in a synthetic comm_msg JupyterMessage for _handleIopubMessage.
-    const synthetic: JupyterMessage = {
-      header: {
-        msg_id: crypto.randomUUID(),
-        username: "pdv",
-        session: "",
-        msg_type: "comm_msg",
-        version: "5.3",
-        date: new Date().toISOString(),
-      },
-      parent_header: {},
-      metadata: {},
-      content: { comm_id: this.commId ?? "", data },
-    };
-    this._handleIopubMessage(synthetic);
   }
 }

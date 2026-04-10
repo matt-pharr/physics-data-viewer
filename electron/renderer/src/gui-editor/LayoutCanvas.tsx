@@ -7,7 +7,7 @@
 
 import React, { useState, useCallback } from "react";
 import type { LayoutNode, LayoutContainer, GuiManifestV1 } from "../types/pdv.d";
-import { useEditorState, useEditorDispatch, getNodeAtPath } from "./editor-state";
+import { useEditorState, useEditorDispatch } from "./editor-state";
 import { ELEMENT_REGISTRY, getElementDef } from "./element-registry";
 
 const DRAG_MIME = "application/pdv-element";
@@ -31,7 +31,8 @@ function nodeDisplayLabel(node: LayoutNode, manifest: GuiManifestV1): string {
   if (node.type === "namelist") {
     return `namelist: ${node.tree_path || "(no path)"}`;
   }
-  return node.type;
+  // Exhaustiveness fallthrough — all LayoutNode variants handled above.
+  return "unknown";
 }
 
 /** Get a validation warning for a node, if any. */

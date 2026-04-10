@@ -21,8 +21,8 @@ describe('getActionsForNode', () => {
     expect(ids).not.toContain('view');
   });
 
-  it('returns create_script for dict nodes but not ndarray nodes', () => {
-    expect(actionIds('dict')).toContain('create_script');
+  it('returns create_script for mapping nodes but not ndarray nodes', () => {
+    expect(actionIds('mapping')).toContain('create_script');
     expect(actionIds('ndarray')).not.toContain('create_script');
   });
 

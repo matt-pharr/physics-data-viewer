@@ -27,8 +27,13 @@ interface VirtualRowProps {
   onClick: (node: TreeNodeData) => void;
 }
 
-/** Module-level row renderer for react-window v2. */
-const VirtualRow = React.memo(({ index, style, ariaAttributes, flatNodes, selectedPath, onExpand, onDoubleClick, onRightClick, onClick }: RowComponentProps<VirtualRowProps>) => {
+/** Module-level row renderer for react-window v2.
+ *
+ * Wrapped in `React.memo` for runtime memoization, but exposed as a plain
+ * function type because `react-window`'s `rowComponent` prop is typed as
+ * `(props) => ReactElement | null`, not a `MemoExoticComponent`.
+ */
+const VirtualRowImpl = ({ index, style, ariaAttributes, flatNodes, selectedPath, onExpand, onDoubleClick, onRightClick, onClick }: RowComponentProps<VirtualRowProps>): React.ReactElement => {
   const node = flatNodes[index];
   return (
     <TreeNodeRow
@@ -42,7 +47,8 @@ const VirtualRow = React.memo(({ index, style, ariaAttributes, flatNodes, select
       ariaAttributes={ariaAttributes}
     />
   );
-});
+};
+const VirtualRow = React.memo(VirtualRowImpl) as unknown as typeof VirtualRowImpl;
 
 interface TreeProps {
   kernelId: string | null;
@@ -133,9 +139,7 @@ export const Tree: React.FC<TreeProps> = ({ kernelId, disabled = false, refreshT
         id: '__root__',
         key: 'pdv_tree',
         path: '',
-        parent_path: null,
         type: 'root',
-        has_children: true,
         preview: '',
         hasChildren: true,
         parentPath: null,
@@ -236,7 +240,6 @@ export const Tree: React.FC<TreeProps> = ({ kernelId, disabled = false, refreshT
       };
       void refreshParents();
     }
-  // eslint-disable-next-line react-hooks/exhaustive-deps -- nodesRef used instead of nodes to avoid re-triggering
   }, [pendingChanges, kernelId, disabled, onChangesConsumed]);
 
   const handleExpand = useCallback(async (node: TreeNodeData) => {
@@ -278,7 +281,6 @@ export const Tree: React.FC<TreeProps> = ({ kernelId, disabled = false, refreshT
       setError(`Failed to load children for ${node.key}`);
       setNodes((prev) => updateNodeImmut(prev, node.path, (n) => ({ ...n, isLoading: false })));
     }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [kernelId, disabled]);
 
   const handleDoubleClick = useCallback((node: TreeNodeData) => {
@@ -287,7 +289,7 @@ export const Tree: React.FC<TreeProps> = ({ kernelId, disabled = false, refreshT
       onAction?.('open_gui', node);
       return;
     }
-    if (node.has_handler) {
+    if (node.hasHandler) {
       onAction?.('handle', node);
     } else if (node.type === 'markdown') {
       onAction?.('open_note', node);

@@ -40,47 +40,23 @@ def handle_note_register(msg: dict) -> None:
     msg : dict
         Parsed PDV message envelope.
     """
-    from pdv_kernel.comms import get_pdv_tree, send_error, send_message  # noqa: PLC0415
+    from pdv_kernel.comms import send_message  # noqa: PLC0415
     from pdv_kernel.tree import PDVNote  # noqa: PLC0415
+    from pdv_kernel.handlers._helpers import validate_register_request  # noqa: PLC0415
 
-    msg_id = msg.get("msg_id")
-    payload = msg.get("payload", {})
+    validated = validate_register_request(msg, "pdv.note.register.response", "note")
+    if validated is None:
+        return
+    tree, payload = validated
     parent_path = payload.get("parent_path", "")
     name = payload.get("name", "")
     relative_path = payload.get("relative_path", "")
-
-    if not name:
-        send_error(
-            "pdv.note.register.response",
-            "note.missing_name",
-            "name is required in pdv.note.register payload",
-            in_reply_to=msg_id,
-        )
-        return
-    if not relative_path:
-        send_error(
-            "pdv.note.register.response",
-            "note.missing_relative_path",
-            "relative_path is required in pdv.note.register payload",
-            in_reply_to=msg_id,
-        )
-        return
-
-    tree = get_pdv_tree()
-    if tree is None:
-        send_error(
-            "pdv.note.register.response",
-            "note.no_tree",
-            "PDVTree is not initialized",
-            in_reply_to=msg_id,
-        )
-        return
 
     note = PDVNote(relative_path=relative_path)
     full_path = f"{parent_path}.{name}" if parent_path else name
     tree[full_path] = note
 
-    send_message("pdv.note.register.response", {"path": full_path}, in_reply_to=msg_id)
+    send_message("pdv.note.register.response", {"path": full_path}, in_reply_to=msg.get("msg_id"))
 
 
 register("pdv.note.register", handle_note_register)

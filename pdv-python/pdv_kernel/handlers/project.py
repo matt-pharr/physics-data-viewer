@@ -19,33 +19,6 @@ from pdv_kernel.handlers import register
 from pdv_kernel import log
 
 
-def _set_tree_node(tree: "Any", path: str, value: "Any") -> None:
-    """Set a value at a dot-path in the tree bypassing notifications.
-
-    Creates intermediate PDVTree nodes as needed without triggering
-    push notifications (used during bulk project load).
-
-    Parameters
-    ----------
-    tree : PDVTree
-        The root tree to set the value in.
-    path : str
-        Dot-separated path to the target node.
-    value : Any
-        The value to set at the path.
-    """
-    from pdv_kernel.tree import PDVTree  # noqa: PLC0415
-
-    parts = path.split(".")
-    current = tree
-    for part in parts[:-1]:
-        if not dict.__contains__(current, part):
-            new_node: PDVTree = PDVTree()
-            dict.__setitem__(current, part, new_node)
-        current = dict.__getitem__(current, part)
-    dict.__setitem__(current, parts[-1], value)
-
-
 def _count_nodes(tree: "Any") -> int:
     """Count total nodes in a tree recursively (no I/O)."""
     from pdv_kernel.tree import PDVTree  # noqa: PLC0415
@@ -138,10 +111,8 @@ def handle_project_load(msg: dict) -> None:
     """
     import json
     import os
-    import sys
 
     from pdv_kernel.comms import get_pdv_tree, send_error, send_message  # noqa: PLC0415
-    from pdv_kernel.tree import PDVTree, PDVScript, PDVNote, PDVModule, PDVGui, PDVNamelist, PDVLib  # noqa: PLC0415
 
     msg_id = msg.get("msg_id")
     payload = msg.get("payload", {})
@@ -195,114 +166,25 @@ def handle_project_load(msg: dict) -> None:
 
     working_dir = tree._working_dir or save_dir
 
-    # -- Pass 1: Containers (folder, module) ----------------------------------
-    # Create all container nodes first so children always have parents.
-    for node in nodes:
-        node_path = node.get("path", "")
-        node_type = node.get("type", "")
-        meta = node.get("metadata", {})
+    from pdv_kernel.tree_loader import load_tree_index  # noqa: PLC0415
 
-        if node_type == "folder":
-            folder = PDVTree()
-            folder._working_dir = tree._working_dir
-            folder._save_dir = tree._save_dir
-            folder._path_prefix = node_path
-            _set_tree_node(tree, node_path, folder)
-        elif node_type == "module":
-            # Read module metadata from metadata dict (new format) or
-            # fall back to storage.value (old format)
-            storage = node.get("storage", {})
-            old_meta = storage.get("value", {})
-            mod = PDVModule(
-                module_id=meta.get("module_id", old_meta.get("module_id", "")),
-                name=meta.get("name", old_meta.get("name", "")),
-                version=meta.get("version", old_meta.get("version", "")),
-            )
-            mod._working_dir = tree._working_dir
-            mod._save_dir = tree._save_dir
-            mod._path_prefix = node_path
-            _set_tree_node(tree, node_path, mod)
-
-    # -- Pass 2: Leaves (all non-container nodes) -----------------------------
-    # Files are assumed to already exist in the working directory (TypeScript
-    # copies them before sending pdv.project.load).
-    load_total = len(nodes)
-    load_current = 0
-    for node in nodes:
-        node_path = node.get("path", "")
-        node_type = node.get("type", "")
-        storage = node.get("storage", {})
-        backend = storage.get("backend", "")
-        meta = node.get("metadata", {})
-        load_current += 1
-        if load_current % 5 == 0 or load_current == load_total:
+    def _emit_load_progress(current: int, total: int) -> None:
+        if current % 5 == 0 or current == total:
             send_message("pdv.progress", {
                 "operation": "load",
                 "phase": "Rebuilding tree",
-                "current": load_current,
-                "total": load_total,
+                "current": current,
+                "total": total,
             })
-        if node_type in ("folder", "module"):
-            continue  # Already handled in pass 1
 
-        rel_path = storage.get("relative_path", "")
-
-        if node_type == "script":
-            language = meta.get("language", node.get("language", "python"))
-            doc = meta.get("doc")
-            mod_id = meta.get("module_id", "")
-            _set_tree_node(tree, node_path, PDVScript(
-                relative_path=rel_path,
-                language=language,
-                doc=doc,
-                module_id=mod_id,
-            ))
-        elif node_type == "markdown":
-            title = meta.get("title")
-            _set_tree_node(tree, node_path, PDVNote(
-                relative_path=rel_path,
-                title=title,
-            ))
-        elif node_type == "gui":
-            module_id = meta.get("module_id", node.get("module_id"))
-            gui_node = PDVGui(relative_path=rel_path, module_id=module_id)
-            _set_tree_node(tree, node_path, gui_node)
-            # Attach gui reference to parent PDVModule if applicable
-            parts = node_path.split(".")
-            if len(parts) > 1:
-                parent_path = ".".join(parts[:-1])
-                try:
-                    parent = tree[parent_path]
-                    if isinstance(parent, PDVModule):
-                        parent.gui = gui_node
-                except Exception:  # noqa: BLE001
-                    pass
-        elif node_type == "namelist":
-            module_id = meta.get("module_id", node.get("module_id"))
-            namelist_format = meta.get("namelist_format", node.get("namelist_format", "auto"))
-            _set_tree_node(tree, node_path, PDVNamelist(
-                relative_path=rel_path,
-                format=namelist_format,
-                module_id=module_id,
-            ))
-        elif node_type == "lib":
-            module_id = meta.get("module_id", node.get("module_id"))
-            _set_tree_node(tree, node_path, PDVLib(
-                relative_path=rel_path,
-                module_id=module_id,
-            ))
-            # Add the parent directory to sys.path so the library is importable
-            abs_path = os.path.join(working_dir, rel_path) if rel_path else ""
-            if abs_path:
-                parent_dir = os.path.dirname(abs_path)
-                if parent_dir and parent_dir not in sys.path:
-                    sys.path.insert(1, parent_dir)
-        elif backend == "inline":
-            _set_tree_node(tree, node_path, storage.get("value"))
-        elif backend == "local_file":
-            from pdv_kernel.serialization import deserialize_node  # noqa: PLC0415
-            value = deserialize_node(storage, working_dir, trusted=True)
-            _set_tree_node(tree, node_path, value)
+    load_tree_index(
+        tree,
+        nodes,
+        on_progress=_emit_load_progress,
+        conflict_strategy="replace",
+        working_dir=working_dir,
+        inject_lib_sys_path=True,
+    )
 
     os.chdir(os.path.expanduser("~"))
     node_count = len(nodes)

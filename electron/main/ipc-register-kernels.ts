@@ -18,7 +18,7 @@ import { BrowserWindow, ipcMain } from "electron";
 import { CommRouter } from "./comm-router";
 import { QueryRouter } from "./query-router";
 import { EnvironmentDetector } from "./environment-detector";
-import { IPC, type KernelValidateResult } from "./ipc";
+import { IPC } from "./ipc";
 import { KernelManager, type KernelInfo } from "./kernel-manager";
 import { initializeKernelSession } from "./kernel-session";
 import type { ModuleManager } from "./module-manager";
@@ -124,15 +124,32 @@ export function registerKernelIpcHandlers(
   // the shared commRouter (which causes "CommRouter detached" rejections).
   let startMutex: Promise<unknown> = Promise.resolve();
 
+  /**
+   * Wait for the previous mutex-serialized operation to settle. Errors from
+   * the prior operation are logged (with the operation name) but NOT
+   * propagated, so the next operation can still run on a serialized turn.
+   * Without this log, prior failures would silently disappear via
+   * `previous.catch(() => {})`.
+   */
+  async function awaitPreviousMutex(operation: string): Promise<void> {
+    try {
+      await startMutex;
+    } catch (err) {
+      console.warn(
+        `[ipc-register-kernels] Prior kernel-mutex operation rejected before ${operation}:`,
+        err
+      );
+    }
+  }
+
   ipcMain.handle(IPC.kernels.list, async () => {
     return kernelManager.list();
   });
 
   ipcMain.handle(IPC.kernels.start, async (_event, spec) => {
-    const previous = startMutex;
+    await awaitPreviousMutex("kernels.start");
     let release!: () => void;
     startMutex = new Promise<void>((r) => { release = r; });
-    await previous.catch(() => {});
     try {
     const requestedSpec = spec as Parameters<KernelManager["start"]>[0];
     const pythonPath =
@@ -186,7 +203,7 @@ export function registerKernelIpcHandlers(
       queryRouter.detach();
       await cleanupKernelWorkingDir(projectManager, kernelManager, crashedId, kernelWorkingDirs, crashHandlers);
       if (getActiveKernelId() === crashedId) setActiveKernelId(null);
-      win.webContents.send(IPC.push.kernelStatus, { kernelId: crashedId, status: "dead" });
+      win.webContents.send(IPC.push.kernelCrashed, { kernelId: crashedId });
     };
     crashHandlers.set(kernel.id, onCrash);
     kernelManager.on("kernel:crashed", onCrash);
@@ -198,10 +215,9 @@ export function registerKernelIpcHandlers(
   });
 
   ipcMain.handle(IPC.kernels.stop, async (_event, kernelId: string) => {
-    const previous = startMutex;
+    await awaitPreviousMutex("kernels.stop");
     let release!: () => void;
     startMutex = new Promise<void>((r) => { release = r; });
-    await previous.catch(() => {});
     try {
       await cleanupKernelWorkingDir(projectManager, kernelManager, kernelId, kernelWorkingDirs, crashHandlers);
       await kernelManager.stop(kernelId);
@@ -230,37 +246,18 @@ export function registerKernelIpcHandlers(
   });
 
   ipcMain.handle(IPC.kernels.restart, async (_event, kernelId: string) => {
-    const previous = startMutex;
+    await awaitPreviousMutex("kernels.restart");
     let release!: () => void;
     startMutex = new Promise<void>((r) => { release = r; });
-    await previous.catch(() => {});
     try {
     // Restart preserves activeProjectDir — only reset kernel-scoped state.
     resetKernelState();
 
     /**
-     * Perform the kernel restart (stop + start or native restart).
+     * Perform the kernel restart (stop + start).
      * Returns the restarted KernelInfo.
      */
     async function doRestart(): Promise<KernelInfo> {
-      const restartable = kernelManager as KernelManager & {
-        restart?: (id: string) => Promise<KernelInfo>;
-      };
-      if (restartable.restart) {
-        await cleanupKernelWorkingDir(projectManager, kernelManager, kernelId, kernelWorkingDirs, crashHandlers);
-        const restarted = await restartable.restart(kernelId);
-        commRouter.attach(kernelManager, restarted.id);
-        queryRouter.detach();
-        await initializeKernelSession(
-          kernelManager,
-          commRouter,
-          queryRouter,
-          projectManager,
-          restarted.id,
-          kernelWorkingDirs
-        );
-        return restarted;
-      }
       const current = kernelManager.getKernel(kernelId);
       if (!current) {
         throw new Error(`Kernel not found: ${kernelId}`);
@@ -329,15 +326,6 @@ export function registerKernelIpcHandlers(
   ipcMain.handle(
     IPC.kernels.validate,
     async (_event, executablePath: string, language: "python" | "julia") => {
-      const validatable = kernelManager as KernelManager & {
-        validate?: (
-          execPath: string,
-          lang: "python" | "julia"
-        ) => Promise<KernelValidateResult>;
-      };
-      if (validatable.validate) {
-        return validatable.validate(executablePath, language);
-      }
       if (!executablePath.trim()) {
         return { valid: false, error: "Executable path is required" };
       }

@@ -18,6 +18,7 @@
 
 import { execFile } from "child_process";
 import * as fs from "fs/promises";
+import { statSync } from "fs";
 import * as path from "path";
 import { promisify } from "util";
 
@@ -176,14 +177,14 @@ export class ModuleManager {
     if (process.resourcesPath) {
       const candidate = path.join(process.resourcesPath, "examples", "modules");
       try {
-        const stat = require("fs").statSync(candidate);
+        const stat = statSync(candidate);
         if (stat.isDirectory()) return candidate;
       } catch { /* fall through */ }
     }
     for (let dir = __dirname; dir !== path.dirname(dir); dir = path.dirname(dir)) {
       const candidate = path.join(dir, "examples", "modules");
       try {
-        const stat = require("fs").statSync(candidate);
+        const stat = statSync(candidate);
         if (stat.isDirectory()) return candidate;
       } catch { /* continue */ }
     }

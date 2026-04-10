@@ -119,6 +119,34 @@ def _annotation_to_type_name(annotation: Any) -> str:
     return str(annotation)
 
 
+def _reset_script_module_cache(prefix: str, file_path: str) -> str:
+    """Build a unique synthetic module name and clear any stale cache entry.
+
+    Used by both :func:`_extract_script_params` and :meth:`PDVScript.run` to
+    re-import a script file fresh, bypassing Python's import cache so that
+    in-place edits to the script file are always reflected.
+
+    Parameters
+    ----------
+    prefix : str
+        Internal prefix used to namespace the synthetic module names so
+        that signature-extraction and execution caches do not collide
+        (``"_pdv_script_params"`` vs ``"_pdv_script"``).
+    file_path : str
+        Absolute path to the script file. Hashed to derive a stable
+        per-file module name.
+
+    Returns
+    -------
+    str
+        The synthetic module name to use with ``importlib.util``.
+    """
+    module_name = f"{prefix}_{abs(hash(file_path))}"
+    if module_name in sys.modules:
+        del sys.modules[module_name]
+    return module_name
+
+
 def _extract_script_params(file_path: str) -> list[ScriptParameter]:
     """Extract user-facing run() params from a script file.
 
@@ -128,9 +156,7 @@ def _extract_script_params(file_path: str) -> list[ScriptParameter]:
     if not os.path.exists(file_path):
         return []
 
-    module_name = f"_pdv_script_params_{abs(hash(file_path))}"
-    if module_name in sys.modules:
-        del sys.modules[module_name]
+    module_name = _reset_script_module_cache("_pdv_script_params", file_path)
 
     spec = importlib.util.spec_from_file_location(module_name, file_path)
     if spec is None or spec.loader is None:
@@ -213,7 +239,11 @@ class PDVFile:
         Parameters
         ----------
         working_dir : str or None
-            Working directory to resolve relative paths against.
+            Working directory to resolve relative paths against. When the
+            stored ``relative_path`` is itself absolute this argument is
+            ignored. When it is relative and ``working_dir`` is falsy, the
+            current process working directory (``os.getcwd()``) is used as
+            a last-resort base so the returned path is always absolute.
 
         Returns
         -------
@@ -222,9 +252,8 @@ class PDVFile:
         """
         if os.path.isabs(self._relative_path):
             return self._relative_path
-        if working_dir:
-            return os.path.join(working_dir, self._relative_path)
-        return self._relative_path
+        base = working_dir or os.getcwd()
+        return os.path.join(base, self._relative_path)
 
     def preview(self) -> str:
         """Return a short human-readable preview for the tree panel.
@@ -424,9 +453,7 @@ class PDVScript(PDVFile):
         if self._module_id and tree is not None:
             self._check_module_dependencies(tree)
 
-        module_name = f"_pdv_script_{abs(hash(file_path))}"
-        if module_name in sys.modules:
-            del sys.modules[module_name]
+        module_name = _reset_script_module_cache("_pdv_script", file_path)
 
         spec = importlib.util.spec_from_file_location(module_name, file_path)
         if spec is None or spec.loader is None:
@@ -452,7 +479,7 @@ class PDVScript(PDVFile):
 
 
 # ---------------------------------------------------------------------------
-# PDVNote
+# PDVGui
 # ---------------------------------------------------------------------------
 
 class PDVGui(PDVFile):
@@ -705,7 +732,6 @@ class PDVTree(dict):
         self._working_dir: str | None = None
         self._save_dir: str | None = None
         self._send_fn: Callable[[str, dict], None] | None = None
-        self._path_prefix: str = ""
         self._pending_changes: list[tuple[str, str]] = []
         self._debounce_timer: threading.Timer | None = None
         self._debounce_lock = threading.Lock()
@@ -821,6 +847,42 @@ class PDVTree(dict):
         except KeyError:
             raise PDVKeyError(key)
 
+    def set_quiet(self, key: str, value: Any) -> None:
+        """Set a value at a dot-path without emitting notifications.
+
+        Used by bulk loaders (project load, module register) to populate the
+        tree without flooding the comm channel with per-node ``pdv.tree.changed``
+        events. Uses the same dot-path traversal and "replace non-dict
+        intermediate" branch as :meth:`__setitem__`.
+
+        After bulk loading completes, callers typically emit a single
+        ``pdv.project.loaded`` push so renderers know to refetch.
+
+        Parameters
+        ----------
+        key : str
+            A plain key or dot-separated path.
+        value : Any
+            The value to store.
+        """
+        parts = _split_dot_path(key)
+        if len(parts) == 1:
+            dict.__setitem__(self, key, value)
+            return
+        current: PDVTree = self
+        for part in parts[:-1]:
+            if not dict.__contains__(current, part):
+                new_node = PDVTree()
+                dict.__setitem__(current, part, new_node)
+            node = dict.__getitem__(current, part)
+            if not isinstance(node, dict):
+                # Replace non-dict node with a PDVTree
+                new_node = PDVTree()
+                dict.__setitem__(current, part, new_node)
+                node = new_node
+            current = node  # type: ignore[assignment]
+        dict.__setitem__(current, parts[-1], value)
+
     def __setitem__(self, key: str, value: Any) -> None:
         """Set a value by key or dot-separated path.
 
@@ -834,31 +896,13 @@ class PDVTree(dict):
         value : Any
             The value to store.
         """
-        parts = _split_dot_path(key)
         # Determine change_type before modifying
         try:
             exists = key in self
         except Exception:
             exists = False
         change_type = "updated" if exists else "added"
-
-        if len(parts) == 1:
-            dict.__setitem__(self, key, value)
-        else:
-            current: PDVTree = self
-            for part in parts[:-1]:
-                if not dict.__contains__(current, part):
-                    new_node = PDVTree()
-                    dict.__setitem__(current, part, new_node)
-                node = dict.__getitem__(current, part)
-                if not isinstance(node, dict):
-                    # Replace non-dict node with a PDVTree
-                    new_node = PDVTree()
-                    dict.__setitem__(current, part, new_node)
-                    node = new_node
-                current = node  # type: ignore[assignment]
-            dict.__setitem__(current, parts[-1], value)
-
+        self.set_quiet(key, value)
         self._emit_changed(key, change_type)
 
     def __delitem__(self, key: str) -> None:

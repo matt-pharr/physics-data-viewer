@@ -10,9 +10,6 @@ export const CELL_UNDO_LIMIT = 20;
 /** Debounce delay (ms) for code-cell persistence writes. */
 export const CODE_CELL_SAVE_DEBOUNCE_MS = 500;
 
-/** Debounce delay (ms) for tree expanded-paths persistence. */
-export const TREE_PERSIST_DEBOUNCE_MS = 500;
-
 /** Default namespace auto-refresh interval (ms). */
 export const NAMESPACE_REFRESH_INTERVAL_MS = 2000;
 

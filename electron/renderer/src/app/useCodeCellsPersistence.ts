@@ -24,7 +24,9 @@ export function useCodeCellsPersistence({
   currentProjectDir,
 }: UseCodeCellsPersistenceOptions): void {
   const hasProjectRef = useRef(currentProjectDir);
-  hasProjectRef.current = currentProjectDir;
+  useEffect(() => {
+    hasProjectRef.current = currentProjectDir;
+  });
 
   useEffect(() => {
     if (!window.pdv?.codeCells || !currentProjectDir) {

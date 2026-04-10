@@ -31,13 +31,5 @@ class PDVScriptError(PDVError):
     """Raised when a script fails to load or its run() function raises."""
 
 
-class PDVCommError(PDVError):
-    """Raised when a PDV comm message response has status='error'."""
-
-
 class PDVVersionError(PDVError):
     """Raised when the app's expected protocol version is incompatible with this package."""
-
-
-class PDVSchemaError(PDVError):
-    """Raised when a project manifest or tree-index has an unsupported schema version."""

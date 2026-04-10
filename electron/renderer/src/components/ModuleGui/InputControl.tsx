@@ -6,6 +6,7 @@
 
 import React from "react";
 import type { ModuleInputDescriptor, ModuleInputValue } from "../ModulesPanel/moduleUiHelpers";
+import { captureError } from "../../utils/errors";
 
 interface InputControlProps {
   moduleAlias: string;
@@ -24,12 +25,10 @@ export const InputControl: React.FC<InputControlProps> = ({
   persistInputValues,
   onError,
 }) => {
-  const captureError = (error: unknown): void => {
-    onError(error instanceof Error ? error.message : String(error));
-  };
+  const onCaughtError = captureError(onError);
 
   const persistForAlias = (): void => {
-    void persistInputValues(moduleAlias).catch(captureError);
+    void persistInputValues(moduleAlias).catch(onCaughtError);
   };
 
   const inputId = `input-${moduleAlias}:${input.id}`;
@@ -159,7 +158,7 @@ export const InputControl: React.FC<InputControlProps> = ({
                 if (!picked) return;
                 setModuleInputValue(moduleAlias, input.id, picked);
                 await persistInputValues(moduleAlias);
-              })().catch(captureError)
+              })().catch(onCaughtError)
             }
             title={title}
           >

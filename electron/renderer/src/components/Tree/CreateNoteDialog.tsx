@@ -6,6 +6,7 @@
  */
 
 import React, { useEffect, useRef, useState } from 'react';
+import { useModalKeyboard } from '../../hooks/useModalKeyboard';
 
 interface CreateNoteDialogProps {
   parentPath: string;
@@ -30,6 +31,8 @@ export const CreateNoteDialog: React.FC<CreateNoteDialogProps> = ({ parentPath, 
     onCreate(sanitized);
   };
 
+  const handleKeyDown = useModalKeyboard({ onSubmit: handleSubmit, onCancel });
+
   return (
     <div className="modal-overlay" onClick={onCancel}>
       <div className="script-dialog" onClick={(e) => e.stopPropagation()}>
@@ -52,15 +55,7 @@ export const CreateNoteDialog: React.FC<CreateNoteDialogProps> = ({ parentPath, 
               type="text"
               value={name}
               onChange={(e) => setName(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter') {
-                  e.preventDefault();
-                  handleSubmit();
-                } else if (e.key === 'Escape') {
-                  e.preventDefault();
-                  onCancel();
-                }
-              }}
+              onKeyDown={handleKeyDown}
               placeholder="my_note"
             />
           </label>

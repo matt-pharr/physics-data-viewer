@@ -132,8 +132,8 @@ function buildTemplate(): MenuItemConstructorOptions[] {
     { id: "edit", role: "editMenu" },
     { id: "view", role: "viewMenu" },
     { id: "window", role: "windowMenu" },
-    // TODO: Once versioned docs are published, replace "/dev/" with the
-    // correct version slug (e.g. "/v0.5.0/") derived from the app version.
+    // The "/dev/" path is the canonical pre-1.0 docs URL slug. Once versioned
+    // docs are published post-1.0, derive the slug from `app.getVersion()`.
     {
       id: "help",
       label: "Help",
