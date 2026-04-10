@@ -84,16 +84,12 @@ describe('Console', () => {
     expect(container.querySelector('.log-result')?.textContent).toBe('null');
   });
 
-  it('wires clear/export actions and export visibility', () => {
+  it('wires clear action', () => {
     const onClear = vi.fn();
-    const onExport = vi.fn();
-    const { rerender } = render(<Console logs={[makeLog()]} onClear={onClear} />);
+    render(<Console logs={[makeLog()]} onClear={onClear} />);
     expect(screen.queryByRole('button', { name: 'Export' })).toBeNull();
 
-    rerender(<Console logs={[makeLog()]} onClear={onClear} onExport={onExport} />);
-    fireEvent.click(screen.getByRole('button', { name: 'Export' }));
     fireEvent.click(screen.getByRole('button', { name: 'Clear' }));
-    expect(onExport).toHaveBeenCalledTimes(1);
     expect(onClear).toHaveBeenCalledTimes(1);
   });
 });

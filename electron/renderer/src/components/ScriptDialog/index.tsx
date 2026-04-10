@@ -5,7 +5,7 @@
  * opens, so edits to the script file are always reflected.
  */
 
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import type { KernelExecutionOrigin, ScriptParameter, ScriptRunResult, TreeNodeData } from '../../types';
 
 interface ScriptDialogProps {

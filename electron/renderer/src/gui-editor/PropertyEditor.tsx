@@ -5,9 +5,7 @@
  * a container, input, action, or namelist.
  */
 
-import React from "react";
 import type {
-  LayoutNode,
   LayoutContainer,
   ModuleInputDescriptor,
   GuiActionDescriptor,

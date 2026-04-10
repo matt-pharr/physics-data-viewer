@@ -4,6 +4,9 @@
     "main/bootstrap.ts",
     "preload.ts",
     "renderer/src/main.tsx",
+    "renderer/src/module-window-main.tsx",
+    "renderer/src/gui-editor-main.tsx",
+    "renderer/src/gui-viewer-main.tsx",
     "renderer/vite.config.ts"
   ],
   "project": [
@@ -14,7 +17,8 @@
     "electronmon"
   ],
   "ignore": [
-    "renderer/src/vite-env.d.ts"
+    "renderer/src/vite-env.d.ts",
+    "main/pdv-protocol.ts"
   ],
   "ignoreExportsUsedInFile": true
 }

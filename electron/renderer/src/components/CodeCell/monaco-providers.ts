@@ -12,6 +12,7 @@
 
 import type * as monaco from 'monaco-editor';
 import type React from 'react';
+import { treeService } from '../../services/tree';
 
 // Registration guards — Monaco providers are page-level singletons.
 let completionProviderRegistered = false;
@@ -81,7 +82,7 @@ async function getTreePathSuggestions(
   const keyPrefix = typedParts[typedParts.length - 1] ?? '';
   const parentSegments = [...context.ancestorSegments, ...extraParentSegments];
   const parentPath = parentSegments.join('.');
-  const nodes = await window.pdv.tree.list(kernelId, parentPath);
+  const nodes = await treeService.listByPath(kernelId, parentPath);
   return nodes
     .filter((node) => node.key.startsWith(keyPrefix))
     .map((node) => ({

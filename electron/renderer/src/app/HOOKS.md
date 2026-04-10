@@ -200,7 +200,6 @@ Several hooks bump integer "refresh tokens" (e.g. `setTreeRefreshToken(t => t + 
 Named constants for magic numbers used across hooks and components:
 - `CELL_UNDO_LIMIT` — max undo snapshots for cell clear/close
 - `CODE_CELL_SAVE_DEBOUNCE_MS` — persistence write delay
-- `TREE_PERSIST_DEBOUNCE_MS` — tree expansion persistence delay
 - `NAMESPACE_REFRESH_INTERVAL_MS` — auto-refresh polling interval
 - `MAX_RECENT_PROJECTS` — cap on remembered project paths
 

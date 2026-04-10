@@ -64,6 +64,7 @@ const DEFAULT_CONFIG: PDVConfig = {
   showPrivateVariables: false,
   showModuleVariables: false,
   showCallableVariables: false,
+  autoRefreshNamespace: false,
 };
 
 const REGISTERED_CHANNELS: readonly string[] = [
@@ -122,6 +123,7 @@ const REGISTERED_CHANNELS: readonly string[] = [
   IPC.chrome.minimize,
   IPC.chrome.toggleMaximize,
   IPC.chrome.close,
+  IPC.app.confirmClose,
   IPC.moduleWindows.open,
   IPC.moduleWindows.close,
   IPC.moduleWindows.context,
@@ -174,6 +176,46 @@ function readConfig(configStore: ConfigStore): PDVConfig {
 }
 
 /**
+ * Map a camelCase object to a snake_case payload using a typed key map.
+ *
+ * The key map must satisfy `Record<keyof T, string>`, so adding a new field
+ * to `T` without updating the map is a compile-time error. Undefined values
+ * are dropped from the output.
+ */
+function mapKeysToPayload<T extends object>(
+  source: T,
+  keymap: Record<keyof T, string>
+): Record<string, unknown> {
+  const result: Record<string, unknown> = {};
+  for (const key of Object.keys(keymap) as Array<keyof T>) {
+    const value = source[key];
+    if (value !== undefined) {
+      result[keymap[key]] = value;
+    }
+  }
+  return result;
+}
+
+/**
+ * Wire-format key map for {@link NamespaceQueryOptions}. The `satisfies` clause
+ * forces this map to enumerate every key in the type, so adding a new option
+ * fails to compile until the map is updated.
+ */
+const NAMESPACE_QUERY_KEYMAP = {
+  includePrivate: "include_private",
+  includeModules: "include_modules",
+  includeCallables: "include_callables",
+} as const satisfies Record<keyof NamespaceQueryOptions, string>;
+
+/**
+ * Wire-format key map for {@link NamespaceInspectTarget}.
+ */
+const NAMESPACE_INSPECT_KEYMAP = {
+  rootName: "root_name",
+  path: "path",
+} as const satisfies Record<keyof NamespaceInspectTarget, string>;
+
+/**
  * Convert renderer namespace query filters to protocol payload keys.
  *
  * @param options - Renderer query options.
@@ -183,11 +225,7 @@ function toNamespaceQueryPayload(
   options?: NamespaceQueryOptions
 ): Record<string, unknown> {
   if (!options) return {};
-  return {
-    include_private: options.includePrivate,
-    include_modules: options.includeModules,
-    include_callables: options.includeCallables,
-  };
+  return mapKeysToPayload(options, NAMESPACE_QUERY_KEYMAP);
 }
 
 /**
@@ -199,10 +237,7 @@ function toNamespaceQueryPayload(
 function toNamespaceInspectPayload(
   target: NamespaceInspectTarget
 ): Record<string, unknown> {
-  return {
-    root_name: target.rootName,
-    path: target.path,
-  };
+  return mapKeysToPayload(target, NAMESPACE_INSPECT_KEYMAP);
 }
 
 /**
@@ -339,7 +374,8 @@ export function registerIpcHandlers(
   queryRouter: QueryRouter,
   projectManager: ProjectManager,
   configStore: ConfigStore,
-  pdvDir: string
+  pdvDir: string,
+  setAllowClose: (allow: boolean) => void
 ): () => void {
   activeKernelManagerRef = kernelManager;
   unregisterIpcHandlers();
@@ -424,9 +460,9 @@ export function registerIpcHandlers(
   };
 
   const preloadPath = path.join(__dirname, "..", "preload.js");
-  const moduleWindowManager = new ModuleWindowManager(win, preloadPath);
-  const guiEditorWindowManager = new GuiEditorWindowManager(win, preloadPath);
-  const guiViewerWindowManager = new GuiViewerWindowManager(win, preloadPath);
+  const moduleWindowManager = new ModuleWindowManager(preloadPath);
+  const guiEditorWindowManager = new GuiEditorWindowManager(preloadPath);
+  const guiViewerWindowManager = new GuiViewerWindowManager(preloadPath);
 
   registerKernelIpcHandlers({
     win,
@@ -531,6 +567,7 @@ export function registerIpcHandlers(
     themesDir,
     stateDir,
     codeCellsPath,
+    setAllowClose,
   });
 
   registerModuleWindowIpcHandlers({
@@ -546,7 +583,7 @@ export function registerIpcHandlers(
 
   registerEnvironmentIpcHandlers(win, configStore);
 
-  registerPushForwarding(win, commRouter, moduleWindowManager, guiEditorWindowManager, guiViewerWindowManager);
+  registerCommPushForwarding(win, commRouter, moduleWindowManager, guiEditorWindowManager, guiViewerWindowManager);
 
   /**
    * Reset all in-session state. Called whenever the renderer reloads so that
@@ -595,13 +632,33 @@ function registerEnvironmentIpcHandlers(win: BrowserWindow, configStore: ConfigS
 }
 
 /**
- * Register kernel push forwarding from CommRouter to the renderer process.
+ * Forward kernel-originated push events from the CommRouter to the renderer
+ * process via `webContents.send`.
+ *
+ * This function bridges PDV protocol push messages (kernel → app, with no
+ * `in_reply_to`) onto IPC push channels. Only messages that originate from
+ * the comm router go through here:
+ *
+ * - {@link PDVMessageType.TREE_CHANGED} → `IPC.push.treeChanged`
+ * - {@link PDVMessageType.PROJECT_LOADED} → `IPC.push.projectLoaded`
+ * - {@link PDVMessageType.PROGRESS} → `IPC.push.progress`
+ *
+ * Other `IPC.push.*` channels (`menuAction`, `installOutput`, `updateStatus`,
+ * `kernelCrashed`, `executeOutput`, `moduleExecuteRequest`, `projectReloading`,
+ * `chromeStateChanged`, `requestClose`) are emitted directly by the main
+ * process from their respective handlers (menu, environment installer,
+ * auto-updater, kernel crash watcher, execute streamer, etc.) — they have no
+ * comm-router source, so routing them through this function would be a
+ * misnomer. The split is intentional, not abandoned scaffolding.
  *
  * @param win - Main BrowserWindow.
  * @param commRouter - Comm router instance.
+ * @param moduleWindowManager - Optional module-window manager for broadcasts.
+ * @param guiEditorWindowManager - Optional GUI editor window manager.
+ * @param guiViewerWindowManager - Optional GUI viewer window manager.
  * @returns Nothing.
  */
-export function registerPushForwarding(
+export function registerCommPushForwarding(
   win: BrowserWindow,
   commRouter: CommRouter,
   moduleWindowManager?: ModuleWindowManager,

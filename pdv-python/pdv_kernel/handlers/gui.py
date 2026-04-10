@@ -41,60 +41,31 @@ def handle_gui_register(msg: dict) -> None:
     msg : dict
         Parsed PDV message envelope.
     """
-    from pdv_kernel.comms import get_pdv_tree, send_error, send_message  # noqa: PLC0415
-    from pdv_kernel.tree import PDVGui, PDVModule  # noqa: PLC0415
+    from pdv_kernel.comms import send_message  # noqa: PLC0415
+    from pdv_kernel.tree import PDVGui  # noqa: PLC0415
+    from pdv_kernel.handlers._helpers import (  # noqa: PLC0415
+        attach_gui_to_module,
+        validate_register_request,
+    )
 
-    msg_id = msg.get("msg_id")
-    payload = msg.get("payload", {})
+    validated = validate_register_request(msg, "pdv.gui.register.response", "gui")
+    if validated is None:
+        return
+    tree, payload = validated
     parent_path = payload.get("parent_path", "")
     name = payload.get("name", "")
     relative_path = payload.get("relative_path", "")
     module_id = payload.get("module_id")
 
-    if not name:
-        send_error(
-            "pdv.gui.register.response",
-            "gui.missing_name",
-            "name is required in pdv.gui.register payload",
-            in_reply_to=msg_id,
-        )
-        return
-    if not relative_path:
-        send_error(
-            "pdv.gui.register.response",
-            "gui.missing_relative_path",
-            "relative_path is required in pdv.gui.register payload",
-            in_reply_to=msg_id,
-        )
-        return
-
-    tree = get_pdv_tree()
-    if tree is None:
-        send_error(
-            "pdv.gui.register.response",
-            "gui.no_tree",
-            "PDVTree is not initialized",
-            in_reply_to=msg_id,
-        )
-        return
-
     gui_node = PDVGui(relative_path=relative_path, module_id=module_id)
     full_path = f"{parent_path}.{name}" if parent_path else name
     tree[full_path] = gui_node
-
-    # If the parent is a PDVModule, attach the gui reference
-    if parent_path:
-        try:
-            parent = tree[parent_path]
-            if isinstance(parent, PDVModule):
-                parent.gui = gui_node
-        except Exception:  # noqa: BLE001
-            pass
+    attach_gui_to_module(tree, parent_path, gui_node)
 
     send_message(
         "pdv.gui.register.response",
         {"path": full_path},
-        in_reply_to=msg_id,
+        in_reply_to=msg.get("msg_id"),
     )
 
 

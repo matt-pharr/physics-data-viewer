@@ -60,11 +60,8 @@ def handle_module_register(msg: dict) -> None:
     msg : dict
         Parsed PDV message envelope.
     """
-    import os  # noqa: PLC0415
-    import sys  # noqa: PLC0415
-
     from pdv_kernel.comms import get_pdv_tree, send_error, send_message  # noqa: PLC0415
-    from pdv_kernel.tree import PDVModule, PDVTree, PDVScript, PDVNote, PDVGui, PDVNamelist, PDVLib  # noqa: PLC0415
+    from pdv_kernel.tree import PDVModule  # noqa: PLC0415
 
     msg_id = msg.get("msg_id")
     payload = msg.get("payload", {})
@@ -119,121 +116,22 @@ def handle_module_register(msg: dict) -> None:
     # When loading a saved project the tree is already populated from
     # tree-index.json before MODULE_REGISTER runs.  Skip nodes that already
     # exist so that user data (e.g. result objects under "outputs") is not
-    # overwritten by empty default containers.
+    # overwritten by empty default containers. lib sys.path injection is
+    # handled separately in handle_modules_setup via the lib_dir field, so
+    # the loader is told not to touch sys.path here.
     if module_index:
-        from pdv_kernel.handlers.project import _set_tree_node  # noqa: PLC0415
+        from pdv_kernel.tree_loader import load_tree_index  # noqa: PLC0415
 
-        # Pass 1: containers (folder, module)
-        for node in module_index:
-            node_path_rel = node.get("path", "")
-            node_type = node.get("type", "")
-            meta = node.get("metadata", {})
-            if not node_path_rel:
-                continue
-            full_path = f"{alias}.{node_path_rel}"
-
-            # Skip if this node already exists (e.g. from project load)
-            try:
-                existing_node = tree[full_path]
-                if existing_node is not None:
-                    continue
-            except (KeyError, TypeError):
-                pass
-
-            if node_type == "folder":
-                folder = PDVTree()
-                folder._working_dir = tree._working_dir
-                folder._save_dir = tree._save_dir
-                folder._path_prefix = full_path
-                _set_tree_node(tree, full_path, folder)
-            elif node_type == "module":
-                storage = node.get("storage", {})
-                old_meta = storage.get("value", {})
-                mod = PDVModule(
-                    module_id=meta.get("module_id", old_meta.get("module_id", module_id)),
-                    name=meta.get("name", old_meta.get("name", name)),
-                    version=meta.get("version", old_meta.get("version", version)),
-                )
-                mod._working_dir = tree._working_dir
-                mod._save_dir = tree._save_dir
-                mod._path_prefix = full_path
-                _set_tree_node(tree, full_path, mod)
-
-        # Pass 2: leaves
-        for node in module_index:
-            node_path_rel = node.get("path", "")
-            node_type = node.get("type", "")
-            storage = node.get("storage", {})
-            backend = storage.get("backend", "")
-            meta = node.get("metadata", {})
-            if not node_path_rel or node_type in ("folder", "module"):
-                continue
-            full_path = f"{alias}.{node_path_rel}"
-
-            # Skip if this node already exists (e.g. from project load),
-            # but patch module_id onto existing scripts so that the
-            # dependency pre-flight check in PDVScript.run() can find
-            # the parent PDVModule.
-            try:
-                existing_node = tree[full_path]
-                if existing_node is not None:
-                    if node_type == "script" and isinstance(existing_node, PDVScript):
-                        existing_node._module_id = module_id
-                    continue
-            except (KeyError, TypeError):
-                pass
-            rel_path = storage.get("relative_path", "")
-
-            if node_type == "script":
-                language = meta.get("language", node.get("language", "python"))
-                doc = meta.get("doc")
-                _set_tree_node(tree, full_path, PDVScript(
-                    relative_path=rel_path,
-                    language=language,
-                    doc=doc,
-                    module_id=module_id,
-                ))
-            elif node_type == "markdown":
-                title = meta.get("title")
-                _set_tree_node(tree, full_path, PDVNote(
-                    relative_path=rel_path,
-                    title=title,
-                ))
-            elif node_type == "gui":
-                mod_id = meta.get("module_id", module_id)
-                gui_node = PDVGui(relative_path=rel_path, module_id=mod_id)
-                _set_tree_node(tree, full_path, gui_node)
-                parts = full_path.split(".")
-                if len(parts) > 1:
-                    parent_path = ".".join(parts[:-1])
-                    try:
-                        parent = tree[parent_path]
-                        if isinstance(parent, PDVModule):
-                            parent.gui = gui_node
-                    except Exception:  # noqa: BLE001
-                        pass
-            elif node_type == "namelist":
-                mod_id = meta.get("module_id", module_id)
-                namelist_format = meta.get("namelist_format", node.get("namelist_format", "auto"))
-                _set_tree_node(tree, full_path, PDVNamelist(
-                    relative_path=rel_path,
-                    format=namelist_format,
-                    module_id=mod_id,
-                ))
-            elif node_type == "lib":
-                mod_id = meta.get("module_id", module_id)
-                _set_tree_node(tree, full_path, PDVLib(
-                    relative_path=rel_path,
-                    module_id=mod_id,
-                ))
-                # lib_dir sys.path injection is handled separately in
-                # handle_modules_setup via the lib_dir field
-            elif backend == "inline":
-                _set_tree_node(tree, full_path, storage.get("value"))
-            elif backend == "local_file":
-                from pdv_kernel.serialization import deserialize_node  # noqa: PLC0415
-                value = deserialize_node(storage, tree._working_dir or "", trusted=True)
-                _set_tree_node(tree, full_path, value)
+        load_tree_index(
+            tree,
+            module_index,
+            alias_prefix=alias,
+            conflict_strategy="skip",
+            patch_module_id_on_skip=module_id,
+            module_id_default=module_id,
+            working_dir=working_dir,
+            inject_lib_sys_path=False,
+        )
 
     send_message(
         "pdv.module.register.response",
@@ -248,14 +146,16 @@ def handle_modules_setup(msg: dict) -> None:
     For each module in the payload, adds library directories to ``sys.path``
     and imports the entry point module if specified.
 
-    Supports two path styles:
+    Either or both path-style fields are accepted on the same payload — the
+    body iterates each unconditionally:
 
-    - ``lib_dir`` (v4): absolute path to a library directory; added directly.
-    - ``lib_paths`` (v1/v2/v3 legacy): list of individual ``.py`` file paths;
-      the parent directory of each is added.
+    - ``lib_dir``: absolute path to a library directory; added directly to
+      ``sys.path``.
+    - ``lib_paths``: list of individual ``.py`` file paths; the parent
+      directory of each is added.
 
-    Expected payload (v4)
-    ---------------------
+    Expected payload
+    ----------------
     .. code-block:: json
 
         {
@@ -263,19 +163,6 @@ def handle_modules_setup(msg: dict) -> None:
                 {
                     "lib_paths": [],
                     "lib_dir": "/tmp/pdv-xxx/n_pendulum/lib",
-                    "entry_point": "n_pendulum"
-                }
-            ]
-        }
-
-    Expected payload (legacy)
-    -------------------------
-    .. code-block:: json
-
-        {
-            "modules": [
-                {
-                    "lib_paths": ["/tmp/pdv-xxx/n_pendulum/lib/n_pendulum.py"],
                     "entry_point": "n_pendulum"
                 }
             ]

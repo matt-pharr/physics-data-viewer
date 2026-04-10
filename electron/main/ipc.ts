@@ -29,6 +29,13 @@ import type {
   ScriptParameter as PDVScriptParameter,
   PDVTreeChangedPayload,
 } from "./pdv-protocol";
+
+/**
+ * Re-export the wire-canonical {@link NodeDescriptor} so renderer-facing
+ * type files (`renderer/src/types/pdv.d.ts`) can consume a single source
+ * of truth via type-only imports.
+ */
+export type { NodeDescriptor } from "./pdv-protocol";
 import type { PDVConfig } from "./config";
 import type {
   EnvironmentInfo,
@@ -149,15 +156,34 @@ export const IPC = {
   push: {
     treeChanged: "pdv.tree.changed",
     projectLoaded: "pdv.project.loaded",
-    kernelStatus: "pdv.kernel.status",
+    /**
+     * Fires when the kernel subprocess exits unexpectedly. There is no
+     * corresponding `pdv.kernel.crashed` wire message; the channel is
+     * emitted by the main process from its kernel-crash handler in
+     * `ipc-register-kernels.ts`. Renderers should treat receipt as an
+     * unrecoverable session loss.
+     */
+    kernelCrashed: "pdv.kernel.crashed",
     menuAction: "menu:action",
     chromeStateChanged: "chrome:stateChanged",
     executeOutput: "pdv.execute.output",
     moduleExecuteRequest: "pdv.moduleWindow.executeRequest",
+    /**
+     * Main → renderer. Emitted by the kernel-restart handler in
+     * `ipc-register-kernels.ts` to bracket the project re-load that follows
+     * a restart. The kernel itself never sends a `pdv.project.reloading`
+     * comm message; the channel name is namespaced for symmetry with the
+     * other `pdv.*` push channels but the source is purely main-side.
+     */
     projectReloading: "pdv.project.reloading",
     progress: "pdv.progress",
     installOutput: "pdv.environment.installOutput",
     updateStatus: "pdv.updater.status",
+    requestClose: "pdv.app.requestClose",
+  },
+  /** App-level lifecycle channels (close confirmation, etc.). */
+  app: {
+    confirmClose: "app:confirmClose",
   },
   /** App menu synchronization channels. */
   menu: {
@@ -311,7 +337,7 @@ export interface NamespaceInspectorNode {
 /**
  * Descriptor for a single top-level variable in the namespace panel.
  */
-export interface NamespaceVariable extends NamespaceInspectorNode {}
+export type NamespaceVariable = NamespaceInspectorNode;
 
 /** Response payload returned from `namespace.inspect`. */
 export interface NamespaceInspectResult {
@@ -335,7 +361,7 @@ export type ScriptParameter = PDVScriptParameter;
 /**
  * Tree node shape returned to the renderer.
  */
-export interface TreeNode extends NodeDescriptor {}
+export type TreeNode = NodeDescriptor;
 
 /**
  * Result returned by `tree.createScript`.
@@ -1216,12 +1242,13 @@ export interface PDVApi {
      */
     onOutput(callback: (chunk: ExecuteOutputChunk) => void): () => void;
     /**
-     * Subscribe to kernel status push notifications (e.g. crash detection).
+     * Subscribe to kernel crash push notifications. Fires only when the
+     * kernel subprocess exits unexpectedly.
      *
-     * @param callback - Invoked with kernel ID and status when the kernel state changes.
+     * @param callback - Invoked with the crashed kernel ID.
      * @returns Unsubscribe function.
      */
-    onKernelStatus(callback: (payload: { kernelId: string; status: string }) => void): () => void;
+    onKernelCrashed(callback: (payload: { kernelId: string }) => void): () => void;
   };
 
   /** Tree browsing and updates. */
@@ -1834,6 +1861,29 @@ export interface PDVApi {
      * @returns Unsubscribe function.
      */
     onAction(callback: (payload: MenuActionPayload) => void): () => void;
+  };
+
+  /** App-level lifecycle controls (window close confirmation, etc.). */
+  app: {
+    /**
+     * Confirm that the renderer has approved closing the main window.
+     *
+     * Called from the renderer after the user resolves the unsaved-changes
+     * prompt. Sets the main-process "allow close" flag and re-issues
+     * `BrowserWindow.close()` so the OS-level close proceeds.
+     *
+     * @returns Resolves when the close has been re-issued.
+     */
+    confirmClose(): Promise<void>;
+    /**
+     * Subscribe to "user is trying to close" notifications from the main
+     * process. Fired both for the title-bar close button and for OS-level
+     * window close (Cmd+Q on macOS, Alt+F4, etc.).
+     *
+     * @param callback - Invoked once per close attempt.
+     * @returns Unsubscribe function.
+     */
+    onRequestClose(callback: () => void): () => void;
   };
 
   /** Window chrome integration and title-bar controls. */

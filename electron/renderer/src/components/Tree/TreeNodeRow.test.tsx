@@ -9,14 +9,14 @@ afterEach(() => {
   cleanup();
 });
 
-function makeNode(overrides: Partial<TreeNodeData & { depth: number }> = {}) {
+// Tests use arbitrary `type` strings to exercise icon fallback rendering;
+// makeNode therefore accepts a wider type than TreeNodeData['type'].
+function makeNode(overrides: Record<string, unknown> = {}): TreeNodeData & { depth: number } {
   return {
     id: 'data.x',
     key: 'x',
     path: 'data.x',
-    parent_path: 'data',
     type: 'folder',
-    has_children: true,
     hasChildren: true,
     parentPath: 'data',
     depth: 0,
@@ -35,10 +35,10 @@ describe('TreeNodeRow', () => {
     const onClick = vi.fn();
 
     const iconCases: Array<[string, string]> = [
-      ['folder', '📁'], ['file', '📄'], ['script', '📜'], ['ndarray', '🔢'], ['dataframe', '📊'],
-      ['series', '📈'], ['dict', '🗂️'], ['list', '🧾'], ['tuple', '🧾'], ['set', '🧾'],
-      ['string', '🔤'], ['number', '#️⃣'], ['boolean', '✔️'], ['none', '∅'], ['image', '🖼️'],
-      ['json', '{ }'], ['python', '🐍'], ['julia', '🔴'], ['unknown', '❓'],
+      ['root', '🌳'], ['folder', '📁'], ['file', '📄'], ['script', '📜'], ['markdown', '📝'],
+      ['ndarray', '🔢'], ['dataframe', '📊'], ['series', '📈'], ['mapping', '🗂️'],
+      ['sequence', '🧾'], ['text', '🔤'], ['scalar', '#️⃣'], ['binary', '🧬'],
+      ['namelist', '📋'], ['module', '📦'], ['gui', '🖼️'], ['lib', '📚'], ['unknown', '❓'],
     ];
 
     for (const [type, icon] of iconCases) {
@@ -57,7 +57,7 @@ describe('TreeNodeRow', () => {
 
     render(
       <TreeNodeRow
-        node={makeNode({ type: 'mystery' as string, key: 'mystery' })}
+        node={makeNode({ type: 'mystery', key: 'mystery' })}
         onExpand={onExpand}
         onDoubleClick={onDoubleClick}
         onRightClick={onRightClick}
@@ -70,7 +70,7 @@ describe('TreeNodeRow', () => {
   it('applies selected class and hidden expand button for leaf nodes', () => {
     const { container } = render(
       <TreeNodeRow
-        node={makeNode({ hasChildren: false, has_children: false })}
+        node={makeNode({ hasChildren: false })}
         selected={true}
         onExpand={vi.fn()}
         onDoubleClick={vi.fn()}

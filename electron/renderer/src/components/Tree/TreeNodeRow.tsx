@@ -8,6 +8,9 @@
 import React from 'react';
 import type { TreeNodeData } from '../../types';
 
+// Keys must match the canonical NodeKindValue union from pdv-protocol.ts
+// (`mapping`, `sequence`, `text`, `scalar`, `binary`, etc.). The 'root' key
+// is the synthetic Tree-panel root row. Anything else falls back to 'unknown'.
 const TYPE_ICONS: Record<string, string> = {
   root: '🌳',
   folder: '📁',
@@ -17,18 +20,14 @@ const TYPE_ICONS: Record<string, string> = {
   ndarray: '🔢',
   dataframe: '📊',
   series: '📈',
-  dict: '🗂️',
-  list: '🧾',
-  tuple: '🧾',
-  set: '🧾',
-  string: '🔤',
-  number: '#️⃣',
-  boolean: '✔️',
-  none: '∅',
-  image: '🖼️',
-  json: '{ }',
-  python: '🐍',
-  julia: '🔴',
+  mapping: '🗂️',
+  sequence: '🧾',
+  text: '🔤',
+  scalar: '#️⃣',
+  binary: '🧬',
+  namelist: '📋',
+  module: '📦',
+  gui: '🖼️',
   lib: '📚',
   unknown: '❓',
 };

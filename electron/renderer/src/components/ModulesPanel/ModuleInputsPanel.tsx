@@ -1,6 +1,7 @@
 import React from "react";
 
 import type { ImportedModuleDescriptor } from "../../types";
+import { captureError } from "../../utils/errors";
 import {
   getInputSectionName,
   getInputTabName,
@@ -43,12 +44,10 @@ export const ModuleInputsPanel: React.FC<ModuleInputsPanelProps> = ({
   setSectionOpenState,
   onError,
 }) => {
-  const captureError = (error: unknown): void => {
-    onError(error instanceof Error ? error.message : String(error));
-  };
+  const onCaughtError = captureError(onError);
 
   const persistForAlias = (): void => {
-    void persistInputValues(moduleAlias).catch(captureError);
+    void persistInputValues(moduleAlias).catch(onCaughtError);
   };
 
   const tabInputs = inputs.filter(
@@ -182,7 +181,7 @@ export const ModuleInputsPanel: React.FC<ModuleInputsPanelProps> = ({
                 if (!picked) return;
                 setModuleInputValue(moduleAlias, input.id, picked);
                 await persistInputValues(moduleAlias);
-              })().catch(captureError)
+              })().catch(onCaughtError)
             }
             title={title}
           >
@@ -247,7 +246,7 @@ export const ModuleInputsPanel: React.FC<ModuleInputsPanelProps> = ({
                 activeTab,
                 sectionName,
                 (event.currentTarget as HTMLDetailsElement).open
-              ).catch(captureError)
+              ).catch(onCaughtError)
             }
           >
             <summary className="modules-input-section-summary">{sectionName}</summary>

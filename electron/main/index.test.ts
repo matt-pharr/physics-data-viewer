@@ -10,7 +10,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { BrowserWindow } from "electron";
 import os from "os";
 
-import { registerIpcHandlers, registerPushForwarding, unregisterIpcHandlers } from "./index";
+import { registerIpcHandlers, registerCommPushForwarding, unregisterIpcHandlers } from "./index";
 import {
   IPC,
   type NamespaceVariable,
@@ -533,6 +533,7 @@ describe("Step 5 IPC handlers", () => {
       showPrivateVariables: true,
       showModuleVariables: false,
       showCallableVariables: true,
+      autoRefreshNamespace: false,
       theme: "dark",
     } satisfies PDVConfig);
 
@@ -543,6 +544,7 @@ describe("Step 5 IPC handlers", () => {
       showPrivateVariables: true,
       showModuleVariables: false,
       showCallableVariables: true,
+      autoRefreshNamespace: false,
       theme: "dark",
     });
   });
@@ -553,6 +555,7 @@ describe("Step 5 IPC handlers", () => {
       showPrivateVariables: false,
       showModuleVariables: false,
       showCallableVariables: false,
+      autoRefreshNamespace: false,
       theme: "light",
     };
     (configStore.getAll as unknown as ReturnType<typeof vi.fn>).mockImplementation(
@@ -576,13 +579,14 @@ describe("Step 5 IPC handlers", () => {
       showPrivateVariables: true,
       showModuleVariables: false,
       showCallableVariables: false,
+      autoRefreshNamespace: false,
       theme: "dark",
     });
   });
 
   it("forwards pdv.tree.changed pushes to renderer via webContents.send", () => {
     const { commRouter, webContentsSend } = setup();
-    registerPushForwarding(
+    registerCommPushForwarding(
       { webContents: { send: webContentsSend } } as unknown as BrowserWindow,
       commRouter
     );

@@ -7,7 +7,7 @@
  * not available for arbitrary script paths in the editor).
  */
 
-import React, { useState, useCallback } from "react";
+import { useState, useCallback } from "react";
 import type {
   ImportedModuleActionDescriptor,
   ModuleInputDescriptor,

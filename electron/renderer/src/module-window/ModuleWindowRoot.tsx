@@ -16,6 +16,7 @@ import type {
 import { ModuleInputsPanel } from "../components/ModulesPanel/ModuleInputsPanel";
 import { ModuleActionsPanel } from "../components/ModulesPanel/ModuleActionsPanel";
 import { ContainerRenderer } from "../components/ModuleGui/ContainerRenderer";
+import { treeService } from "../services/tree";
 import {
   ACTIVE_TAB_SETTING_KEY,
   DEFAULT_MODULE_TAB,
@@ -70,7 +71,7 @@ export const ModuleWindowRoot: React.FC = () => {
             }
             const treePath = input.optionsTreePath.trim();
             if (!treePath) return { ...input, options: [] };
-            const nodes = await window.pdv.tree.list(ctx.kernelId, treePath);
+            const nodes = await treeService.listByPath(ctx.kernelId, treePath);
             return {
               ...input,
               options: nodes.map((node) => ({ label: node.key, value: node.key })),
@@ -156,7 +157,7 @@ export const ModuleWindowRoot: React.FC = () => {
               }
               const treePath = input.optionsTreePath.trim();
               if (!treePath) return { ...input, options: [] };
-              const nodes = await window.pdv.tree.list(context.kernelId, treePath);
+              const nodes = await treeService.listByPath(context.kernelId, treePath, { force: true });
               return {
                 ...input,
                 options: nodes.map((node) => ({ label: node.key, value: node.key })),

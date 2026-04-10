@@ -153,6 +153,7 @@ export function useProjectWorkflow(options: UseProjectWorkflowOptions) {
     setLastError,
     setLogs,
     setModulesRefreshToken,
+    setSavedPdvVersion,
     setShowSaveAsDialog,
   ]);
 

@@ -10,6 +10,7 @@
  */
 
 import React, { useEffect, useRef, useState } from 'react';
+import { useModalKeyboard } from '../../hooks/useModalKeyboard';
 
 interface SaveAsDialogProps {
   /** Default parent directory shown when the dialog opens (e.g. parent of currentProjectDir). */
@@ -24,6 +25,8 @@ interface SaveAsDialogProps {
 
 /** Sanitize a project name for use as a directory name. */
 function sanitizeName(raw: string): string {
+  // Strip filesystem-reserved characters and ASCII control codes (\x00-\x1f).
+  // eslint-disable-next-line no-control-regex
   return raw.trim().replace(/[<>:"/\\|?*\x00-\x1f]/g, '_');
 }
 
@@ -60,6 +63,8 @@ export const SaveAsDialog: React.FC<SaveAsDialogProps> = ({
     onSave(name.trim(), saveDir);
   };
 
+  const handleKeyDown = useModalKeyboard({ onSubmit: handleSubmit, onCancel });
+
   return (
     <div className="modal-overlay" onClick={onCancel}>
       <div className="save-as-dialog" onClick={(e) => e.stopPropagation()}>
@@ -78,15 +83,7 @@ export const SaveAsDialog: React.FC<SaveAsDialogProps> = ({
               type="text"
               value={name}
               onChange={(e) => setName(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter') {
-                  e.preventDefault();
-                  handleSubmit();
-                } else if (e.key === 'Escape') {
-                  e.preventDefault();
-                  onCancel();
-                }
-              }}
+              onKeyDown={handleKeyDown}
               placeholder="My Project"
             />
           </label>

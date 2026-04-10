@@ -53,6 +53,9 @@ jobs:
         with:
           node-version: 20
 
+      - name: Install rpm tooling
+        run: sudo apt-get update && sudo apt-get install -y rpm
+
       - name: Install dependencies
         working-directory: electron
         run: |
@@ -75,7 +78,21 @@ jobs:
     permissions:
       contents: write
     steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Generate release notes
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ github.ref_name }}
+          REPO: ${{ github.repository }}
+        run: bash .github/scripts/generate-release-notes.sh
+
       - name: Publish draft release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: gh release edit "${{ github.ref_name }}" --repo "${{ github.repository }}" --draft=false
+        run: |
+          gh release edit "${{ github.ref_name }}" \
+            --repo "${{ github.repository }}" \
+            --draft=false \
+            --notes-file release-notes.md

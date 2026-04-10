@@ -6,8 +6,7 @@ Tests cover:
 2. serialize_node() for each format: npy, parquet, json, txt, pickle.
 3. deserialize_node() round-trips for each format.
 4. node_preview() for representative values.
-5. extract_docstring_preview() from Python files.
-6. metadata sub-dict present and correct for all node kinds.
+5. metadata sub-dict present and correct for all node kinds.
 
 Reference: ARCHITECTURE.md §7.2, §7.3
 """
@@ -20,7 +19,6 @@ from pdv_kernel.serialization import (
     serialize_node,
     deserialize_node,
     node_preview,
-    extract_docstring_preview,
     KIND_NDARRAY,
     KIND_DATAFRAME,
     KIND_SERIES,
@@ -219,26 +217,6 @@ class TestNodePreview:
     def test_sequence_preview(self):
         preview = node_preview([1, 2, 3], KIND_SEQUENCE)
         assert 'list' in preview.lower()
-
-
-class TestExtractDocstringPreview:
-    """Tests for extract_docstring_preview()."""
-
-    def test_extracts_first_line(self, tmp_path):
-        script = tmp_path / 'myscript.py'
-        script.write_text('"""My script docstring.\n\nMore details here.\n"""\n\nx = 1\n')
-        result = extract_docstring_preview(str(script))
-        assert result == 'My script docstring.'
-
-    def test_no_docstring_returns_none(self, tmp_path):
-        script = tmp_path / 'nodoc.py'
-        script.write_text('x = 1\n')
-        result = extract_docstring_preview(str(script))
-        assert result is None
-
-    def test_missing_file_returns_none(self, tmp_path):
-        result = extract_docstring_preview(str(tmp_path / 'nonexistent.py'))
-        assert result is None
 
 
 class TestMetadataSubDict:

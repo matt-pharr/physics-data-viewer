@@ -2,7 +2,7 @@
 
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { ScriptParameter, ScriptRunResult } from '../../types';
 import type { TreeNodeData } from '../../types';
 import { ScriptDialog } from './index';
@@ -26,9 +26,7 @@ function makeNode(overrides: Partial<TreeNodeData> = {}): TreeNodeData {
     id: 'scripts.demo',
     key: 'demo',
     path: 'scripts.demo',
-    parent_path: 'scripts',
     type: 'script',
-    has_children: false,
     hasChildren: false,
     parentPath: 'scripts',
     ...overrides,

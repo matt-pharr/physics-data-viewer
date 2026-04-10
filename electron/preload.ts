@@ -53,7 +53,7 @@ const api: PDVApi = {
     validate: (executablePath, language) =>
       ipcRenderer.invoke(IPC.kernels.validate, executablePath, language),
     onOutput: (callback) => onPush(IPC.push.executeOutput, callback),
-    onKernelStatus: (callback) => onPush(IPC.push.kernelStatus, callback),
+    onKernelCrashed: (callback) => onPush(IPC.push.kernelCrashed, callback),
   },
   tree: {
     list: (kernelId, nodePath = "") =>
@@ -192,6 +192,10 @@ const api: PDVApi = {
     toggleMaximize: () => ipcRenderer.invoke(IPC.chrome.toggleMaximize),
     close: () => ipcRenderer.invoke(IPC.chrome.close),
     onStateChanged: (callback) => onPush(IPC.push.chromeStateChanged, callback),
+  },
+  app: {
+    confirmClose: () => ipcRenderer.invoke(IPC.app.confirmClose),
+    onRequestClose: (callback) => onPush<void>(IPC.push.requestClose, callback),
   },
 };
 

@@ -210,12 +210,11 @@ def pdv_namespace(
     """
     import types  # noqa: PLC0415
 
-    _INTERNAL: frozenset[str] = frozenset({"pdv_tree", "pdv"})
     result: dict = {}
 
     for name, value in list(ns.items()):
         # Always exclude PDV internals
-        if name in _INTERNAL:
+        if name in _PROTECTED_NAMES:
             continue
         # Exclude internal PDV names starting with _pdv
         if name.startswith("_pdv"):

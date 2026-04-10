@@ -38,6 +38,9 @@ interface SettingsDialogProps {
   onClose: () => void;
   onSave: (updates: Partial<Config>) => Promise<void>;
   onEnvSave: (paths: { pythonPath?: string; juliaPath?: string }) => void | Promise<void>;
+  /** Triggered by the "Restart to update" button. Wraps installUpdate so the
+   *  caller can prompt about unsaved changes before the app restarts. */
+  onInstallUpdate?: () => void;
   envWarning?: string | null;
 }
 
@@ -51,6 +54,7 @@ export const SettingsDialog: React.FC<SettingsDialogProps> = ({
   onClose,
   onSave,
   onEnvSave,
+  onInstallUpdate,
   envWarning,
 }) => {
   const [activeTab, setActiveTab] = useState<SettingsTab>(initialTab);
@@ -464,7 +468,13 @@ export const SettingsDialog: React.FC<SettingsDialogProps> = ({
                       <button
                         type="button"
                         className="btn btn-primary"
-                        onClick={() => window.pdv.updater.installUpdate()}
+                        onClick={() => {
+                          if (onInstallUpdate) {
+                            onInstallUpdate();
+                          } else {
+                            void window.pdv.updater.installUpdate();
+                          }
+                        }}
                       >
                         Restart to update
                       </button>
