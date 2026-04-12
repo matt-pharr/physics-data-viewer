@@ -508,11 +508,38 @@ def serialize_node(
         descriptor["metadata"] = {"preview": preview}
         return descriptor
 
-    # KIND_UNKNOWN
+    # KIND_UNKNOWN — try a registered custom serializer before falling back to pickle.
+    from pdv_kernel import serializers as _serializers  # noqa: PLC0415
+
+    custom = _serializers.find_for_value(value)
+    if custom is not None:
+        file_path = working_dir_tree_path(working_dir, tree_path, custom.extension)
+        ensure_parent(file_path)
+        try:
+            custom.save(value, file_path)
+        except Exception as exc:  # noqa: BLE001
+            raise PDVSerializationError(
+                f"Custom serializer '{custom.class_name}' failed to save "
+                f"value at '{tree_path}': {exc}"
+            ) from exc
+        rel_path = os.path.relpath(file_path, working_dir)
+        descriptor["storage"] = {
+            "backend": "local_file",
+            "relative_path": rel_path,
+            "format": custom.format,
+        }
+        descriptor["metadata"] = {
+            "preview": preview,
+            "python_type": python_type_string(value),
+            "serializer": custom.class_name,
+        }
+        return descriptor
+
     if not trusted:
         raise PDVSerializationError(
             f"Cannot serialize value of type '{type(value).__name__}' at path "
-            f"'{tree_path}'. Pass trusted=True to allow pickle serialization."
+            f"'{tree_path}'. Register a custom serializer with "
+            f"pdv.register_serializer(), or pass trusted=True to allow pickle."
         )
     file_path = working_dir_tree_path(working_dir, tree_path, ".pickle")
     ensure_parent(file_path)
@@ -618,7 +645,23 @@ def deserialize_node(storage_ref: dict, save_dir: str, *, trusted: bool = False)
             with open(abs_path, "rb") as fh:
                 return pickle.load(fh)  # noqa: S301
 
-        raise PDVSerializationError(f"Unsupported storage format: '{fmt}'")
+        from pdv_kernel import serializers as _serializers  # noqa: PLC0415
+
+        custom = _serializers.find_for_format(fmt)
+        if custom is not None:
+            try:
+                return custom.load(abs_path)
+            except Exception as exc:  # noqa: BLE001
+                raise PDVSerializationError(
+                    f"Custom serializer '{custom.class_name}' failed to load "
+                    f"'{abs_path}': {exc}"
+                ) from exc
+
+        raise PDVSerializationError(
+            f"Unsupported storage format: '{fmt}'. If this format was written "
+            f"by a custom serializer, import the module that registered it "
+            f"before loading the project."
+        )
 
     raise PDVSerializationError(f"Unsupported storage backend: '{backend}'")
 
@@ -669,6 +712,15 @@ def node_preview(value: Any, kind: str) -> str:
             return f"DataFrame ({rows} × {cols})"
         if kind == KIND_SERIES:
             return f"Series ({len(value)},)"
+    except Exception:  # noqa: BLE001
+        pass
+    # Prefer a registered serializer's preview callback for unknown types.
+    try:
+        from pdv_kernel import serializers as _serializers  # noqa: PLC0415
+
+        entry = _serializers.find_for_value(value)
+        if entry is not None and entry.preview is not None:
+            return str(entry.preview(value))[:100]
     except Exception:  # noqa: BLE001
         pass
     # Custom types may provide a preview() method (e.g. module-defined types

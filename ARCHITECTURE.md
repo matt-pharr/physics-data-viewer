@@ -873,7 +873,19 @@ The following node types are supported:
 | `mapping` | Plain Python dict (not PDVTree) | Inline JSON |
 | `sequence` | Python list or tuple | Inline JSON |
 | `binary` | bytes / bytearray | `.bin` file |
-| `unknown` | Unrecognized type | `.pickle` file (only if trusted=True) |
+| `unknown` | Unrecognized type | Custom serializer file (if a module registered one for the type), otherwise `.pickle` (only if `trusted=True`) |
+
+**Custom serializer hook.** Module developers can register save/load
+callbacks for a class via `pdv.register_serializer(MyClass, format="my_fmt",
+extension=".h5", save=..., load=...)`. PDV chooses the on-disk filename and
+passes the absolute path to the callbacks; the module just reads or writes
+that file. Lookup walks `type(value).__mro__` so subclasses inherit. The
+node's `type` field stays `"unknown"`, but `storage.format` carries the
+registered name and `metadata` records `python_type` and `serializer`. Format
+names must be unique and must not collide with builtin formats. The module
+that registered the serializer must be imported before a project that
+contains nodes of that format is loaded; otherwise load fails with a clear
+error. Implementation lives in `pdv_kernel/serializers.py`.
 
 ### 7.3 Node Descriptors
 
