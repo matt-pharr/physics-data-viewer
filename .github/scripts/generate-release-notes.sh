@@ -3,7 +3,7 @@
 # Generates release-notes.md for a published release.
 #
 # Required environment variables:
-#   TAG       - the release tag (e.g. v0.0.10)
+#   TAG       - the release tag (e.g. v0.0.11)
 #   REPO      - "owner/repo"
 #   GH_TOKEN  - GitHub token with read access
 #

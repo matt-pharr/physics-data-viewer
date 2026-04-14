@@ -9,7 +9,7 @@
   "lib_dir": "lib",
   "default_gui": "gui.json",
   "compatibility": {
-    "pdv_min": "0.0.10",
+    "pdv_min": "0.0.11",
     "pdv_max": "99.0.0",
     "python": ">=3.10,<3.14",
     "python_min": "3.10.0",
