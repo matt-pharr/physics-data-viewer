@@ -123,6 +123,8 @@ class TreeService {
       module_id,
       module_name,
       module_version,
+      module_description,
+      module_language,
       ...rest
     } = node;
     return {
@@ -136,6 +138,8 @@ class TreeService {
       moduleId: module_id,
       moduleName: module_name,
       moduleVersion: module_version,
+      moduleDescription: module_description,
+      moduleLanguage: module_language,
       isExpanded: false,
       isLoading: false,
     };

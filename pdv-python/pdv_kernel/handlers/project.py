@@ -91,6 +91,271 @@ def _collect_nodes(
 
 
 
+def _collect_module_owned_files(
+    tree: "Any",
+    working_dir: str,
+    *,
+    current_module_id: str = "",
+) -> list:
+    """Walk the tree and return file-backed nodes that belong to a PDVModule.
+
+    Used by the ``pdv.project.save`` handler to let the main process mirror
+    edited working-dir files back into ``<saveDir>/modules/<id>/<source_rel_path>``.
+    See ARCHITECTURE.md §5.13 and the #140 module editing workflow plan §3.
+
+    A node is emitted only when all three conditions hold:
+
+    1. It is a :class:`~pdv_kernel.tree.PDVFile` (script, lib, gui, namelist).
+    2. Its ``source_rel_path`` attribute is non-empty.
+    3. It lives beneath a :class:`~pdv_kernel.tree.PDVModule` ancestor
+       (so ``current_module_id`` is known), or its own ``module_id``
+       attribute identifies a module.
+
+    Parameters
+    ----------
+    tree : PDVTree
+        Subtree to walk.
+    working_dir : str
+        Kernel working directory — used to resolve each node's absolute
+        on-disk path so the main process can open the file directly.
+    current_module_id : str
+        Module id inherited from the nearest ancestor ``PDVModule`` during
+        the recursive walk. Empty at the tree root.
+
+    Returns
+    -------
+    list of dict
+        Entries of the form
+        ``{"module_id": ..., "source_rel_path": ..., "workdir_path": ...}``.
+    """
+    from pdv_kernel.tree import PDVFile, PDVModule, PDVTree  # noqa: PLC0415
+
+    import os  # noqa: PLC0415
+
+    results: list = []
+    for key in dict.keys(tree):
+        value = dict.__getitem__(tree, key)
+        if isinstance(value, PDVModule):
+            # Entering a module subtree — children inherit this module's id.
+            child_mod_id = value.module_id
+            results.extend(
+                _collect_module_owned_files(
+                    value, working_dir, current_module_id=child_mod_id,
+                )
+            )
+        elif isinstance(value, PDVTree):
+            results.extend(
+                _collect_module_owned_files(
+                    value, working_dir, current_module_id=current_module_id,
+                )
+            )
+        elif isinstance(value, PDVFile):
+            source_rel = getattr(value, "source_rel_path", None)
+            if not source_rel:
+                continue
+            # Prefer the nearest ancestor PDVModule's id over the node's
+            # own module_id field — the ancestor is the authority on which
+            # module directory the file should land in.
+            mod_id = current_module_id or getattr(value, "_module_id", "") or ""
+            if not mod_id:
+                continue
+            workdir_path = value.resolve_path(working_dir)
+            if not os.path.isabs(workdir_path):
+                workdir_path = os.path.join(working_dir, workdir_path)
+            results.append({
+                "module_id": mod_id,
+                "source_rel_path": source_rel,
+                "workdir_path": workdir_path,
+            })
+    return results
+
+
+def _collect_module_manifests(tree: "Any") -> list:
+    """Walk the top of the tree and emit one manifest entry per PDVModule.
+
+    Each entry carries the module's identity metadata plus a list of
+    ``module-index.json``-style descriptors describing the module's
+    subtree content. The main process consumes this list at save time
+    (``ipc-register-project.ts``) to write ``pdv-module.json`` and
+    ``module-index.json`` into ``<saveDir>/modules/<id>/``.
+
+    Why we rebuild descriptors instead of reusing ``tree-index.json``
+    entries: tree-index.json stores paths **prefixed with the module
+    alias** (e.g. ``toy.scripts.hello``) and workdir-rooted storage
+    paths (e.g. ``toy/scripts/hello.py``). A reloadable module-index
+    needs paths **relative to the module root** (``scripts.hello`` and
+    ``scripts/hello.py``) so that ``bindImportedModule`` can re-prefix
+    them at the next import time under whatever alias the user picks.
+
+    See ARCHITECTURE.md §5.13 and the #140 workflow plan §7.
+
+    Parameters
+    ----------
+    tree : PDVTree
+        Root tree — only top-level ``PDVModule`` children are considered.
+
+    Returns
+    -------
+    list of dict
+        One entry per module::
+
+            {
+                "module_id": "toy",
+                "name": "Toy",
+                "version": "0.1.0",
+                "description": "...",
+                "language": "python",
+                "dependencies": [...],
+                "entries": [<node descriptor>, ...],
+            }
+    """
+    from pdv_kernel.serialization import (  # noqa: PLC0415
+        node_preview,
+        detect_kind,
+        KIND_FOLDER,
+        KIND_MODULE,
+    )
+    from pdv_kernel.tree import PDVFile, PDVModule, PDVTree  # noqa: PLC0415
+
+    def _descriptor_for(
+        rel_path: str, key: str, parent_rel: str, value: "Any",
+    ) -> dict:
+        """Build a single module-rooted node descriptor.
+
+        For file-backed children we re-use the file's ``source_rel_path``
+        (set by the bind path / ``tree:create*`` handlers) as the
+        descriptor's ``storage.relative_path``, so on reload the
+        bindImportedModule v4 remap loop can re-prefix it with the new
+        alias.
+        """
+        kind = detect_kind(value)
+        preview = node_preview(value, kind)
+        descriptor: dict = {
+            "id": rel_path,
+            "path": rel_path,
+            "key": key,
+            "parent_path": parent_rel,
+            "type": kind,
+            "has_children": isinstance(value, PDVTree),
+            "lazy": False,
+        }
+
+        if isinstance(value, PDVModule):
+            descriptor["storage"] = {
+                "backend": "inline",
+                "format": "module_meta",
+                "value": {
+                    "module_id": value.module_id,
+                    "name": value.name,
+                    "version": value.version,
+                },
+            }
+            descriptor["metadata"] = {
+                "module_id": value.module_id,
+                "name": value.name,
+                "version": value.version,
+                "preview": preview,
+            }
+            return descriptor
+
+        if isinstance(value, PDVTree):
+            descriptor["storage"] = {"backend": "none", "format": "none"}
+            descriptor["metadata"] = {"preview": preview}
+            return descriptor
+
+        if isinstance(value, PDVFile):
+            # Module-root-relative path is authoritative here — it's the
+            # one we care about on reload. Fall back to the stored
+            # relative_path when ``source_rel_path`` hasn't been set
+            # (shouldn't happen for module-owned files under workflow
+            # A/B, but keep the flow robust).
+            rel_storage = (
+                getattr(value, "source_rel_path", None) or value.relative_path
+            )
+            format_map = {
+                "script": "py_script",
+                "lib": "py_lib",
+                "gui": "gui_json",
+                "namelist": "namelist",
+                "markdown": "markdown",
+            }
+            storage = {
+                "backend": "local_file",
+                "relative_path": rel_storage,
+                "format": format_map.get(kind, "file"),
+            }
+            meta: dict = {"preview": preview}
+            # Carry the authoring-time ``source_rel_path`` on the
+            # descriptor too (for symmetry with how the bind path
+            # re-injects it). See tree_loader.py.
+            if getattr(value, "source_rel_path", None):
+                descriptor["source_rel_path"] = value.source_rel_path
+            # Per-kind metadata so the reload path can reconstruct the
+            # right subclass via load_tree_index.
+            if kind == "script":
+                meta["language"] = getattr(value, "language", "python")
+                meta["doc"] = getattr(value, "doc", None)
+                if getattr(value, "_module_id", None):
+                    meta["module_id"] = value._module_id
+            elif kind == "lib":
+                meta["language"] = "python"
+                if getattr(value, "module_id", None):
+                    meta["module_id"] = value.module_id
+            elif kind == "gui":
+                meta["language"] = "json"
+                if getattr(value, "module_id", None):
+                    meta["module_id"] = value.module_id
+            elif kind == "namelist":
+                meta["language"] = "namelist"
+                meta["namelist_format"] = getattr(value, "format", "auto")
+                if getattr(value, "module_id", None):
+                    meta["module_id"] = value.module_id
+            descriptor["storage"] = storage
+            descriptor["metadata"] = meta
+            return descriptor
+
+        # Generic / data nodes — pass through a minimal descriptor.
+        # Workflow B's data-packaging path (serializing ndarray/dataframe
+        # values under a module into module-local tree/data files) is a
+        # later enhancement; for this pass we emit the node with a
+        # folder-like shape so bindImportedModule doesn't choke.
+        descriptor["storage"] = {"backend": "none", "format": "none"}
+        descriptor["metadata"] = {"preview": preview}
+        return descriptor
+
+    def _walk(
+        subtree: "Any", parent_rel: str, entries: list,
+    ) -> None:
+        for child_key in dict.keys(subtree):
+            child_value = dict.__getitem__(subtree, child_key)
+            child_rel = f"{parent_rel}.{child_key}" if parent_rel else child_key
+            entries.append(
+                _descriptor_for(child_rel, child_key, parent_rel, child_value)
+            )
+            if isinstance(child_value, PDVTree) and not isinstance(
+                child_value, PDVModule
+            ):
+                _walk(child_value, child_rel, entries)
+
+    results: list = []
+    for key in dict.keys(tree):
+        value = dict.__getitem__(tree, key)
+        if not isinstance(value, PDVModule):
+            continue
+        entries: list = []
+        _walk(value, "", entries)
+        results.append({
+            "module_id": value.module_id,
+            "name": value.name,
+            "version": value.version,
+            "description": getattr(value, "description", ""),
+            "language": getattr(value, "language", "python"),
+            "dependencies": list(getattr(value, "_dependencies", []) or []),
+            "entries": entries,
+        })
+    return results
+
+
 def handle_project_load(msg: dict) -> None:
     """Handle the ``pdv.project.load`` message.
 
@@ -295,9 +560,22 @@ def handle_project_save(msg: dict) -> None:
     from pdv_kernel.checksum import tree_checksum  # noqa: PLC0415
     checksum = tree_checksum(tree)
 
+    # Enumerate module-owned files so the main process can mirror their
+    # working-dir contents back into <saveDir>/modules/<id>/<source_rel_path>.
+    # See ARCHITECTURE.md §5.13 and the #140 workflow plan §3.
+    module_owned_files = _collect_module_owned_files(tree, working_dir)
+    # Collect per-module manifests for writing pdv-module.json +
+    # module-index.json into <saveDir>/modules/<id>/. See plan §7.
+    module_manifests = _collect_module_manifests(tree)
+
     send_message(
         "pdv.project.save.response",
-        {"node_count": len(nodes), "checksum": checksum},
+        {
+            "node_count": len(nodes),
+            "checksum": checksum,
+            "module_owned_files": module_owned_files,
+            "module_manifests": module_manifests,
+        },
         in_reply_to=msg_id,
     )
 

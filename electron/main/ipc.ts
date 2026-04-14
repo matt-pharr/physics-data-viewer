@@ -80,6 +80,12 @@ export const IPC = {
     createNote: "tree:createNote",
     addFile: "tree:addFile",
     createGui: "tree:createGui",
+    /**
+     * Create a new PDVLib node (`.py` file) inside a module's `lib/`
+     * subtree. Used by workflow B of #140 — only valid when the target
+     * path is under a known module alias.
+     */
+    createLib: "tree:createLib",
     invokeHandler: "tree:invokeHandler",
     delete: "tree:delete",
   },
@@ -111,6 +117,24 @@ export const IPC = {
     removeImport: "modules:removeImport",
     uninstall: "modules:uninstall",
     update: "modules:update",
+    /**
+     * Create a brand-new empty PDVModule inside the active project
+     * (workflow B of issue #140). Seeds the tree with a top-level
+     * PDVModule and three conventional empty subtrees (scripts, lib,
+     * plots) plus working-dir scaffolding. The user populates content
+     * via the existing tree:create* handlers afterwards.
+     */
+    createEmpty: "modules:createEmpty",
+    /** Patch mutable metadata fields (name, version, description). */
+    updateMetadata: "modules:updateMetadata",
+    /**
+     * Publish the active-project copy of a module to the global store
+     * at ``~/.PDV/modules/packages/<id>/`` so other projects can import
+     * it. Used by workflow A (push edits back) and workflow B (publish
+     * a newly-authored module). See plan §9 and the follow-up #182 for
+     * the eventual "commit + push to GitHub upstream" flow.
+     */
+    exportFromProject: "modules:exportFromProject",
   },
   /** Namelist read/write channels. */
   namelist: {
@@ -597,6 +621,95 @@ export interface ModuleImportResult {
 }
 
 /**
+ * Request payload for `modules.createEmpty` (workflow B).
+ */
+export interface ModuleCreateEmptyRequest {
+  /** Stable module id — also used as the top-level tree alias. */
+  id: string;
+  /** Human-readable display name. */
+  name: string;
+  /** Initial semver string. */
+  version: string;
+  /** Optional longer description. */
+  description?: string;
+  /** Kernel language — defaults to the active kernel language if omitted. */
+  language?: "python" | "julia";
+}
+
+/**
+ * Result payload for `modules.createEmpty`.
+ */
+export interface ModuleCreateEmptyResult {
+  /** True when the module was created. */
+  success: boolean;
+  /** Created module alias (equals the request id on success). */
+  alias?: string;
+  /** Outcome classification on failure. */
+  status?: "created" | "conflict" | "error";
+  /** Alternate alias suggestion when the requested id already exists. */
+  suggestedAlias?: string;
+  /** Optional user-facing error message. */
+  error?: string;
+}
+
+/**
+ * Request payload for `modules.exportFromProject`.
+ */
+export interface ModuleExportRequest {
+  /** Project-local module alias to export. */
+  alias: string;
+  /**
+   * If true, overwrite any existing global-store copy without prompting.
+   * Defaults to false — the handler shows a confirm dialog before
+   * overwriting an existing module.
+   */
+  overwrite?: boolean;
+}
+
+/**
+ * Result payload for `modules.exportFromProject`.
+ */
+export interface ModuleExportResult {
+  /** True when the module was published to the global store. */
+  success: boolean;
+  /** Outcome classification. */
+  status?: "exported" | "cancelled" | "not_saved" | "error";
+  /** Absolute destination directory on success. */
+  destination?: string;
+  /** User-facing error message when the operation fails. */
+  error?: string;
+}
+
+/**
+ * Request payload for `modules.updateMetadata` (workflow B metadata editor).
+ */
+export interface ModuleUpdateMetadataRequest {
+  /** Target module alias — must refer to an existing PDVModule. */
+  alias: string;
+  /** New name, or omit to leave unchanged. */
+  name?: string;
+  /** New version, or omit to leave unchanged. */
+  version?: string;
+  /** New description, or omit to leave unchanged. */
+  description?: string;
+}
+
+/**
+ * Result payload for `modules.updateMetadata`.
+ */
+export interface ModuleUpdateMetadataResult {
+  /** True when the update succeeded. */
+  success: boolean;
+  /** Echoed current metadata after the update. */
+  alias?: string;
+  name?: string;
+  version?: string;
+  description?: string;
+  /** Optional user-facing error message. */
+  error?: string;
+}
+
+/**
  * Primitive value type accepted by module UI controls.
  */
 export type ModuleInputValue = string | number | boolean;
@@ -791,6 +904,7 @@ export interface MenuActionPayload {
     | "project:saveAs"
     | "recentProjects:clear"
     | "modules:import"
+    | "modules:newEmpty"
     | "settings:open";
   /** Project directory path for open-recent actions. */
   path?: string;
@@ -804,6 +918,7 @@ export interface MenuEnabledState {
   "project:save"?: boolean;
   "project:saveAs"?: boolean;
   "modules:import"?: boolean;
+  "modules:newEmpty"?: boolean;
 }
 
 /** Renderer-facing top-level menu button metadata. */
@@ -974,6 +1089,25 @@ export interface TreeCreateGuiResult {
   /** Absolute path to the created .gui.json file. */
   guiPath?: string;
   /** Dot-path of the created tree node. */
+  treePath?: string;
+}
+
+/**
+ * Result returned by `tree.createLib`.
+ *
+ * ``tree:createLib`` is workflow-B-only: it creates a new ``.py`` file
+ * under ``<module_alias>.lib`` (or a nested sub-path thereof). When the
+ * target does not live inside a known module alias, the handler returns
+ * ``{ success: false, error }``.
+ */
+export interface TreeCreateLibResult {
+  /** True when the lib file was created and the node was registered. */
+  success: boolean;
+  /** Optional error message when `success` is false. */
+  error?: string;
+  /** Absolute working-dir path to the created .py file. */
+  libPath?: string;
+  /** Dot-path of the created PDVLib tree node. */
   treePath?: string;
 }
 
@@ -1309,6 +1443,26 @@ export interface PDVApi {
       guiName: string
     ): Promise<TreeCreateGuiResult>;
     /**
+     * Create a new PDVLib (`.py`) node inside a module's `lib` subtree.
+     *
+     * Workflow B only — ``targetPath`` must live under a known module
+     * alias. Writes an empty ``<stem>.py`` to
+     * ``<workdir>/<alias>/.../<stem>.py`` and registers the node via
+     * ``pdv.file.register`` with ``source_rel_path`` set so §3's
+     * save-time sync mirrors future edits back to
+     * ``<saveDir>/modules/<alias>/.../<stem>.py``.
+     *
+     * @param kernelId - Target kernel ID.
+     * @param targetPath - Dot-path under which to register the lib.
+     * @param libName - Lib base name (optional ``.py`` suffix is stripped).
+     * @returns Lib creation result payload.
+     */
+    createLib(
+      kernelId: string,
+      targetPath: string,
+      libName: string
+    ): Promise<TreeCreateLibResult>;
+    /**
      * Copy a file into the kernel working directory and register it as a tree node.
      *
      * @param kernelId - Target kernel ID.
@@ -1530,6 +1684,28 @@ export interface PDVApi {
      * @returns Install result payload reflecting the update outcome.
      */
     update(moduleId: string): Promise<ModuleInstallResult>;
+    /**
+     * Create a brand-new empty PDVModule in the active project
+     * (workflow B of issue #140).
+     *
+     * @param request - Module identity + initial metadata.
+     * @returns Create result payload.
+     */
+    createEmpty(request: ModuleCreateEmptyRequest): Promise<ModuleCreateEmptyResult>;
+    /**
+     * Patch mutable metadata fields on an existing PDVModule.
+     *
+     * @param request - Partial metadata payload — omitted fields are left unchanged.
+     * @returns Update result payload.
+     */
+    updateMetadata(request: ModuleUpdateMetadataRequest): Promise<ModuleUpdateMetadataResult>;
+    /**
+     * Publish the project-local copy of a module to the global store.
+     *
+     * @param request - Export request payload (alias + overwrite flag).
+     * @returns Export result payload.
+     */
+    exportFromProject(request: ModuleExportRequest): Promise<ModuleExportResult>;
   };
 
   /** Project save/load operations. */

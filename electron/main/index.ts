@@ -503,6 +503,19 @@ export function registerIpcHandlers(
     projectManager,
     configStore,
     kernelWorkingDirs,
+    // Aggregate module aliases from the active on-disk manifest plus any
+    // in-memory pending imports (the latter carries in-session modules
+    // created by modules:createEmpty before the first save). The tree
+    // create* handlers use this to route module-owned files through the
+    // ``<workdir>/<alias>/...`` layout with source_rel_path set.
+    getKnownModuleAliases: async (): Promise<Set<string>> => {
+      const manifest = await readActiveProjectManifest();
+      const disk = manifest?.modules ?? [];
+      return new Set([
+        ...disk.map((m) => m.alias),
+        ...pendingModuleImports.map((m) => m.alias),
+      ]);
+    },
     readConfig,
     toNamespaceQueryPayload,
     toNamespaceInspectPayload,

@@ -184,6 +184,7 @@ def handle_file_register(msg: dict) -> None:
     node_type = payload.get("node_type", "file")
     explicit_name = payload.get("name", "")
     module_id = payload.get("module_id")
+    source_rel_path = payload.get("source_rel_path")
 
     if not filename:
         send_error(
@@ -224,11 +225,23 @@ def handle_file_register(msg: dict) -> None:
     full_path = f"{tree_path}.{node_name}" if tree_path else node_name
 
     if node_type == "namelist":
-        node = PDVNamelist(relative_path=relative_path, format="auto", module_id=module_id)
+        node = PDVNamelist(
+            relative_path=relative_path,
+            format="auto",
+            module_id=module_id,
+            source_rel_path=source_rel_path,
+        )
     elif node_type == "lib":
-        node = PDVLib(relative_path=relative_path, module_id=module_id)
+        node = PDVLib(
+            relative_path=relative_path,
+            module_id=module_id,
+            source_rel_path=source_rel_path,
+        )
     else:
-        node = PDVFile(relative_path=relative_path)
+        node = PDVFile(
+            relative_path=relative_path,
+            source_rel_path=source_rel_path,
+        )
 
     tree[full_path] = node
 

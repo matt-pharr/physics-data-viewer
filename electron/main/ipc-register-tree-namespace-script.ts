@@ -19,7 +19,7 @@ import * as path from "path";
 import type { CommRouter } from "./comm-router";
 import type { QueryRouter } from "./query-router";
 import type { ConfigStore, PDVConfig } from "./config";
-import { IPC, type HandlerInvokeResult, type NamelistReadResult, type NamelistWriteResult, type NamespaceInspectResult, type NamespaceInspectTarget, type NamespaceInspectorNode, type NamespaceQueryOptions, type NamespaceVariable, type ScriptParameter, type ScriptRunRequest, type ScriptRunResult, type TreeAddFileResult, type TreeCreateGuiResult, type TreeCreateNoteResult, type TreeCreateScriptResult } from "./ipc";
+import { IPC, type HandlerInvokeResult, type NamelistReadResult, type NamelistWriteResult, type NamespaceInspectResult, type NamespaceInspectTarget, type NamespaceInspectorNode, type NamespaceQueryOptions, type NamespaceVariable, type ScriptParameter, type ScriptRunRequest, type ScriptRunResult, type TreeAddFileResult, type TreeCreateGuiResult, type TreeCreateLibResult, type TreeCreateNoteResult, type TreeCreateScriptResult } from "./ipc";
 import type { KernelManager } from "./kernel-manager";
 import { PDVMessageType, type PDVFileRegisterPayload } from "./pdv-protocol";
 import type { ProjectManager } from "./project-manager";
@@ -31,6 +31,18 @@ interface RegisterTreeNamespaceScriptIpcHandlersOptions {
   projectManager: ProjectManager;
   configStore: ConfigStore;
   kernelWorkingDirs: Map<string, string>;
+  /**
+   * Returns the set of currently-known module aliases (active project
+   * manifest ∪ pending-imports). Used by ``tree:createScript`` /
+   * ``tree:createGui`` / ``tree:createLib`` to decide whether a new
+   * file lives inside a module subtree — in which case it needs
+   * ``source_rel_path`` set so the save-time sync (§3) can mirror it
+   * back to ``<saveDir>/modules/<id>/`` and its on-disk location must
+   * match the ``<workdir>/<alias>/...`` layout used by the module bind
+   * path rather than the ``<workdir>/tree/...`` layout used for plain
+   * project files.
+   */
+  getKnownModuleAliases: () => Promise<Set<string>>;
   readConfig: (configStore: ConfigStore) => PDVConfig;
   toNamespaceQueryPayload: (
     options?: NamespaceQueryOptions
@@ -58,6 +70,41 @@ interface RegisterTreeNamespaceScriptIpcHandlersOptions {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+/**
+ * Analyse a target tree path against a set of known module aliases.
+ *
+ * When the first dot-segment of ``targetPath`` matches an alias, the
+ * returned descriptor tells the caller:
+ *
+ * - ``moduleAlias`` — the owning module's alias (first segment).
+ * - ``sourceRelDir`` — the remaining tree segments joined with ``/``,
+ *   which becomes the directory portion of ``source_rel_path`` for any
+ *   file authored here (e.g. ``targetPath = "toy.scripts.helpers"``
+ *   inside module ``toy`` yields ``sourceRelDir = "scripts/helpers"``).
+ *   Empty when the target equals the module root.
+ * - ``workingDirSegments`` — the filesystem path segments relative to
+ *   the kernel working directory. For module-owned targets this is
+ *   ``[alias, ...rest]`` (no ``tree/`` prefix) so the on-disk layout
+ *   matches what ``bindImportedModule`` produces in §2.
+ *
+ * Returns ``null`` when ``targetPath`` is not inside any known module,
+ * in which case the caller should use its legacy ``tree/`` layout.
+ */
+function analyseModuleTarget(
+  targetPath: string,
+  knownAliases: Set<string>,
+): { moduleAlias: string; sourceRelDir: string; workingDirSegments: string[] } | null {
+  const segments = targetPath.split(".").filter(Boolean);
+  if (segments.length === 0) return null;
+  const [alias, ...rest] = segments;
+  if (!knownAliases.has(alias)) return null;
+  return {
+    moduleAlias: alias,
+    sourceRelDir: rest.join("/"),
+    workingDirSegments: [alias, ...rest],
+  };
 }
 
 function toNamespaceVariable(
@@ -174,6 +221,7 @@ export function registerTreeNamespaceScriptIpcHandlers(
     projectManager,
     configStore,
     kernelWorkingDirs,
+    getKnownModuleAliases,
     readConfig,
     toNamespaceQueryPayload,
     toNamespaceInspectPayload,
@@ -237,7 +285,27 @@ export function registerTreeNamespaceScriptIpcHandlers(
       }
       const safeName = sanitizeScriptName(scriptName, language);
       const scriptNodeName = path.parse(safeName).name;
-      const scriptsDir = path.join(workingDir, ...targetPath.split(".").filter(Boolean));
+
+      // Module-owned scripts live under ``<workdir>/<alias>/<...>/<file>``
+      // and carry ``source_rel_path`` so the save-time sync (§3) mirrors
+      // edits to ``<saveDir>/modules/<id>/<source_rel_path>``. Plain
+      // project scripts keep the pre-existing
+      // ``<workdir>/<...targetPath>/<file>`` layout.
+      const knownAliases = await getKnownModuleAliases();
+      const moduleInfo = analyseModuleTarget(targetPath, knownAliases);
+
+      let scriptsDir: string;
+      let sourceRelPath: string | undefined;
+      let moduleId: string | undefined;
+      if (moduleInfo) {
+        scriptsDir = path.join(workingDir, ...moduleInfo.workingDirSegments);
+        sourceRelPath = moduleInfo.sourceRelDir
+          ? `${moduleInfo.sourceRelDir}/${safeName}`
+          : safeName;
+        moduleId = moduleInfo.moduleAlias;
+      } else {
+        scriptsDir = path.join(workingDir, ...targetPath.split(".").filter(Boolean));
+      }
       await fs.mkdir(scriptsDir, { recursive: true });
       const scriptPath = path.join(scriptsDir, safeName);
       await ensureScriptFile(scriptPath, language);
@@ -247,6 +315,8 @@ export function registerTreeNamespaceScriptIpcHandlers(
         name: scriptNodeName,
         relative_path: scriptPath,
         language,
+        module_id: moduleId,
+        source_rel_path: sourceRelPath,
       });
       return { success: true, scriptPath };
     }
@@ -310,9 +380,28 @@ export function registerTreeNamespaceScriptIpcHandlers(
       if (!safeName) {
         return { success: false, error: "GUI name must contain at least one alphanumeric character" };
       }
-      const guiDir = path.join(workingDir, "tree", ...targetPath.split(".").filter(Boolean));
+
+      // Module-owned GUIs live under ``<workdir>/<alias>/<...>/<file>``
+      // (no ``tree/`` prefix) to match the bind path; project GUIs stay
+      // under ``<workdir>/tree/<...>`` per the existing convention.
+      const knownAliases = await getKnownModuleAliases();
+      const moduleInfo = analyseModuleTarget(targetPath, knownAliases);
+
+      const guiFilename = safeName + ".gui.json";
+      let guiDir: string;
+      let sourceRelPath: string | undefined;
+      let moduleId: string | null = null;
+      if (moduleInfo) {
+        guiDir = path.join(workingDir, ...moduleInfo.workingDirSegments);
+        sourceRelPath = moduleInfo.sourceRelDir
+          ? `${moduleInfo.sourceRelDir}/${guiFilename}`
+          : guiFilename;
+        moduleId = moduleInfo.moduleAlias;
+      } else {
+        guiDir = path.join(workingDir, "tree", ...targetPath.split(".").filter(Boolean));
+      }
       await fs.mkdir(guiDir, { recursive: true });
-      const guiPath = path.join(guiDir, safeName + ".gui.json");
+      const guiPath = path.join(guiDir, guiFilename);
 
       const defaultManifest = {
         has_gui: true,
@@ -321,7 +410,6 @@ export function registerTreeNamespaceScriptIpcHandlers(
         actions: [],
       };
 
-      // Create the .gui.json file if it doesn't exist
       try {
         await fs.access(guiPath);
       } catch {
@@ -333,10 +421,80 @@ export function registerTreeNamespaceScriptIpcHandlers(
         parent_path: targetPath,
         name: safeName,
         relative_path: guiPath,
-        module_id: null,
+        module_id: moduleId,
+        source_rel_path: sourceRelPath,
       });
       return { success: true, guiPath, treePath };
     }
+  );
+
+  ipcMain.handle(
+    IPC.tree.createLib,
+    async (
+      _event,
+      kernelId: string,
+      targetPath: string,
+      libName: string,
+    ): Promise<TreeCreateLibResult> => {
+      if (!kernelManager.getKernel(kernelId)) {
+        throw new Error(`Kernel not found: ${kernelId}`);
+      }
+      let workingDir = kernelWorkingDirs.get(kernelId);
+      if (!workingDir) {
+        workingDir = await projectManager.createWorkingDir();
+        kernelWorkingDirs.set(kernelId, workingDir);
+      }
+      // Sanitize the filename — Python libs need their stem to be a valid
+      // import name, so we keep the usual alphanumeric-plus-underscore
+      // convention and guarantee a ``.py`` extension.
+      const rawName = libName.trim();
+      const stem = rawName.replace(/\.py$/i, "").replace(/\s+/g, "_").replace(/[^a-zA-Z0-9_]/g, "");
+      if (!stem) {
+        return {
+          success: false,
+          error: "Lib name must contain at least one alphanumeric character",
+        };
+      }
+      const filename = `${stem}.py`;
+
+      // Libs are workflow-A/B territory — only allow creation when the
+      // target sits under a known module alias. Free-floating project
+      // libs are out of scope for this pass (and for v4 modules lib/
+      // is the only supported location).
+      const knownAliases = await getKnownModuleAliases();
+      const moduleInfo = analyseModuleTarget(targetPath, knownAliases);
+      if (!moduleInfo) {
+        return {
+          success: false,
+          error: `tree:createLib target must live inside a known module — got ${JSON.stringify(targetPath)}`,
+        };
+      }
+
+      const libDir = path.join(workingDir, ...moduleInfo.workingDirSegments);
+      await fs.mkdir(libDir, { recursive: true });
+      const libPath = path.join(libDir, filename);
+      try {
+        await fs.access(libPath);
+      } catch {
+        await fs.writeFile(libPath, "", "utf-8");
+      }
+
+      const sourceRelPath = moduleInfo.sourceRelDir
+        ? `${moduleInfo.sourceRelDir}/${filename}`
+        : filename;
+
+      await commRouter.request(PDVMessageType.FILE_REGISTER, {
+        tree_path: targetPath,
+        filename,
+        node_type: "lib",
+        name: stem,
+        module_id: moduleInfo.moduleAlias,
+        source_rel_path: sourceRelPath,
+      } satisfies PDVFileRegisterPayload);
+
+      const treePath = targetPath ? `${targetPath}.${stem}` : stem;
+      return { success: true, libPath, treePath };
+    },
   );
 
   ipcMain.handle(
@@ -432,6 +590,25 @@ export function registerTreeNamespaceScriptIpcHandlers(
     if (!kernel) throw new Error(`Kernel not found: ${kernelId}`);
 
     const { treePath, params, executionId, origin } = request;
+
+    // Lib reload preflight: if this looks like a module-owned script (its
+    // tree path has at least one dot), ask the kernel to importlib.reload
+    // any lib files under ``<workdir>/<alias>/lib/`` so edits take effect
+    // on the next run. The kernel short-circuits when the first segment
+    // is not actually a PDVModule, so this is cheap for plain project
+    // scripts. Errors are swallowed — a reload failure must not block a
+    // script run; the error will surface again when the script actually
+    // imports the broken lib. See the #140 workflow plan §4.
+    const firstDot = treePath.indexOf(".");
+    if (firstDot > 0) {
+      const alias = treePath.slice(0, firstDot);
+      try {
+        await commRouter.request(PDVMessageType.MODULE_RELOAD_LIBS, { alias });
+      } catch (error) {
+        console.warn(`[pdv] reload_libs preflight failed for ${alias}:`, error);
+      }
+    }
+
     let code: string;
 
     if (kernel.language === "julia") {

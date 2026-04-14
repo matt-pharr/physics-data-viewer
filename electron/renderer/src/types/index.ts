@@ -140,6 +140,8 @@ export interface TreeNodeData
     | 'module_id'
     | 'module_name'
     | 'module_version'
+    | 'module_description'
+    | 'module_language'
   > {
   type: NodeDescriptor['type'] | 'root';
   parentPath: string | null;
@@ -151,6 +153,8 @@ export interface TreeNodeData
   moduleId?: string;
   moduleName?: string;
   moduleVersion?: string;
+  moduleDescription?: string;
+  moduleLanguage?: 'python' | 'julia';
   children?: TreeNodeData[];
   isExpanded?: boolean;
   isLoading?: boolean;

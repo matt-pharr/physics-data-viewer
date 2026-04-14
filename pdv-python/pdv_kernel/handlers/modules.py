@@ -223,6 +223,317 @@ def handle_modules_setup(msg: dict) -> None:
     )
 
 
+def handle_module_create_empty(msg: dict) -> None:
+    """Handle the ``pdv.module.create_empty`` message.
+
+    Creates a bare :class:`~pdv_kernel.tree.PDVModule` at the top of the
+    tree and seeds it with three conventional empty ``PDVTree`` children
+    (``scripts``, ``lib``, ``plots``). Used by workflow B of issue #140:
+    a user starts a new module from scratch inside the app, populates its
+    contents via ``tree:createScript`` / ``tree:createLib`` / ``tree:createGui``,
+    and exports the result to the global store at save time.
+
+    Intentionally side-effect-free on disk — the main process owns the
+    working-dir scaffolding and the project-local ``<saveDir>/modules/<id>/``
+    write path. This handler only mutates the in-memory tree.
+
+    Expected payload
+    ----------------
+    .. code-block:: json
+
+        {
+            "id": "toy",
+            "name": "Toy",
+            "version": "0.1.0",
+            "description": "",
+            "language": "python"
+        }
+
+    Response payload
+    ----------------
+    .. code-block:: json
+
+        { "path": "toy" }
+
+    Parameters
+    ----------
+    msg : dict
+        Parsed PDV message envelope.
+    """
+    from pdv_kernel.comms import get_pdv_tree, send_error, send_message  # noqa: PLC0415
+    from pdv_kernel.tree import PDVModule, PDVTree  # noqa: PLC0415
+
+    msg_id = msg.get("msg_id")
+    payload = msg.get("payload", {})
+    module_id = payload.get("id", "")
+    name = payload.get("name", "") or module_id
+    version = payload.get("version", "0.1.0")
+    description = payload.get("description", "") or ""
+    language = payload.get("language", "python") or "python"
+
+    if not module_id:
+        send_error(
+            "pdv.module.create_empty.response",
+            "module.missing_id",
+            "id is required in pdv.module.create_empty payload",
+            in_reply_to=msg_id,
+        )
+        return
+
+    tree = get_pdv_tree()
+    if tree is None:
+        send_error(
+            "pdv.module.create_empty.response",
+            "module.no_tree",
+            "PDVTree is not initialized",
+            in_reply_to=msg_id,
+        )
+        return
+
+    # Reject collisions with any existing top-level tree key — not just
+    # PDVModule nodes, since a data/folder node would also block access.
+    try:
+        _existing = tree[module_id]
+        send_error(
+            "pdv.module.create_empty.response",
+            "module.alias_exists",
+            f"Tree path already occupied: {module_id!r}",
+            in_reply_to=msg_id,
+        )
+        return
+    except (KeyError, TypeError):
+        pass
+
+    module = PDVModule(
+        module_id=module_id,
+        name=name,
+        version=version,
+        description=description,
+        language=language,
+    )
+    module._working_dir = tree._working_dir
+    module._save_dir = tree._save_dir
+    # Seed the three conventional subtrees. These are plain PDVTree
+    # containers — the names are a UI convention documented in the
+    # workflow B plan; the kernel does not enforce their shape.
+    for child_key in ("scripts", "lib", "plots"):
+        child = PDVTree()
+        child._working_dir = tree._working_dir
+        child._save_dir = tree._save_dir
+        module[child_key] = child
+
+    tree[module_id] = module
+
+    send_message(
+        "pdv.module.create_empty.response",
+        {"path": module_id},
+        in_reply_to=msg_id,
+    )
+
+
+def handle_module_update(msg: dict) -> None:
+    """Handle the ``pdv.module.update`` message.
+
+    Patches mutable fields (``name``, ``version``, ``description``) on an
+    existing :class:`~pdv_kernel.tree.PDVModule`. Any field omitted from
+    the payload is left unchanged. ``module_id`` and ``language`` are
+    read-only — creating a new module is the right way to change those.
+
+    Expected payload
+    ----------------
+    .. code-block:: json
+
+        {
+            "alias": "toy",
+            "name": "Toy (renamed)",
+            "version": "0.2.0",
+            "description": "A toy example"
+        }
+
+    Parameters
+    ----------
+    msg : dict
+        Parsed PDV message envelope.
+    """
+    from pdv_kernel.comms import get_pdv_tree, send_error, send_message  # noqa: PLC0415
+    from pdv_kernel.tree import PDVModule  # noqa: PLC0415
+
+    msg_id = msg.get("msg_id")
+    payload = msg.get("payload", {})
+    alias = payload.get("alias", "")
+
+    if not alias:
+        send_error(
+            "pdv.module.update.response",
+            "module.missing_alias",
+            "alias is required in pdv.module.update payload",
+            in_reply_to=msg_id,
+        )
+        return
+
+    tree = get_pdv_tree()
+    if tree is None:
+        send_error(
+            "pdv.module.update.response",
+            "module.no_tree",
+            "PDVTree is not initialized",
+            in_reply_to=msg_id,
+        )
+        return
+
+    try:
+        node = tree[alias]
+    except (KeyError, TypeError):
+        send_error(
+            "pdv.module.update.response",
+            "module.not_found",
+            f"No node at path: {alias!r}",
+            in_reply_to=msg_id,
+        )
+        return
+
+    if not isinstance(node, PDVModule):
+        send_error(
+            "pdv.module.update.response",
+            "module.not_a_module",
+            f"Node at {alias!r} is not a PDVModule",
+            in_reply_to=msg_id,
+        )
+        return
+
+    if "name" in payload and payload["name"] is not None:
+        node.name = str(payload["name"])
+    if "version" in payload and payload["version"] is not None:
+        node.version = str(payload["version"])
+    if "description" in payload and payload["description"] is not None:
+        node.description = str(payload["description"])
+
+    send_message(
+        "pdv.module.update.response",
+        {
+            "alias": alias,
+            "name": node.name,
+            "version": node.version,
+            "description": node.description,
+        },
+        in_reply_to=msg_id,
+    )
+
+
+def handle_module_reload_libs(msg: dict) -> None:
+    """Handle the ``pdv.module.reload_libs`` message.
+
+    Reloads every Python module whose ``__file__`` sits under the working
+    directory's ``<alias>/lib/`` folder, so that edits to module library
+    files are picked up on the next script run without restarting the
+    kernel. Called as a preflight before ``script:run`` on a module-owned
+    script; see the #140 module editing workflow plan §4.
+
+    Individual ``importlib.reload()`` failures are swallowed and logged
+    — a broken lib file should surface at script-run time with a proper
+    traceback, not at reload time with a cryptic message.
+
+    Expected payload
+    ----------------
+    .. code-block:: json
+
+        { "alias": "n_pendulum" }
+
+    Response payload
+    ----------------
+    .. code-block:: json
+
+        { "reloaded": ["n_pendulum", "..."], "errors": {"bad_lib": "..."} }
+
+    Parameters
+    ----------
+    msg : dict
+        Parsed PDV message envelope.
+    """
+    import os  # noqa: PLC0415
+
+    from pdv_kernel.comms import get_pdv_tree, send_error, send_message  # noqa: PLC0415
+
+    msg_id = msg.get("msg_id")
+    payload = msg.get("payload", {})
+    alias = payload.get("alias", "")
+
+    if not alias:
+        send_error(
+            "pdv.module.reload_libs.response",
+            "module.missing_alias",
+            "alias is required in pdv.module.reload_libs payload",
+            in_reply_to=msg_id,
+        )
+        return
+
+    from pdv_kernel.tree import PDVModule  # noqa: PLC0415
+
+    tree = get_pdv_tree()
+    working_dir = getattr(tree, "_working_dir", "") if tree is not None else ""
+
+    # Short-circuit if the caller's alias does not correspond to an actual
+    # PDVModule in the tree. The ``script:run`` preflight fires this for every
+    # run, including plain project scripts, so we must be cheap in the
+    # non-module case.
+    is_module = False
+    if tree is not None:
+        try:
+            node = tree[alias]
+            is_module = isinstance(node, PDVModule)
+        except (KeyError, TypeError):
+            is_module = False
+
+    # ``<workdir>/<alias>/lib/`` is where bindImportedModule places lib files
+    # for v4 modules. For modules authored in-session (workflow B), the same
+    # convention applies because the empty-module creation handler seeds the
+    # working dir with ``<alias>/{scripts,lib,plots}/``.
+    #
+    # Use realpath on both sides of the comparison: on macOS, ``/var`` is a
+    # symlink to ``/private/var``, and a module's ``__file__`` can come back
+    # as the un-prefixed form while ``_working_dir`` is the fully-resolved
+    # ``/private/var/...`` path (or vice versa). A literal ``startswith``
+    # check would fail to match files that live at the same physical path.
+    lib_prefix = ""
+    if is_module and working_dir:
+        try:
+            lib_prefix = os.path.realpath(os.path.join(working_dir, alias, "lib"))
+        except Exception:  # noqa: BLE001
+            lib_prefix = ""
+
+    reloaded: list[str] = []
+    errors: dict[str, str] = {}
+
+    if lib_prefix:
+        # Snapshot sys.modules — reload() mutates it and we don't want to
+        # iterate over a live dict that grows during traversal.
+        items = list(sys.modules.items())
+        for mod_name, mod in items:
+            try:
+                mod_file = getattr(mod, "__file__", None)
+            except Exception:  # noqa: BLE001
+                continue
+            if not mod_file:
+                continue
+            try:
+                mod_file_abs = os.path.realpath(mod_file)
+            except Exception:  # noqa: BLE001
+                continue
+            if not mod_file_abs.startswith(lib_prefix + os.sep):
+                continue
+            try:
+                importlib.reload(mod)
+                reloaded.append(mod_name)
+            except Exception as exc:  # noqa: BLE001
+                errors[mod_name] = f"{type(exc).__name__}: {exc}"
+
+    send_message(
+        "pdv.module.reload_libs.response",
+        {"reloaded": reloaded, "errors": errors},
+        in_reply_to=msg_id,
+    )
+
+
 def handle_handler_invoke(msg: dict) -> None:
     """Handle the ``pdv.handler.invoke`` message.
 
@@ -288,5 +599,8 @@ def handle_handler_invoke(msg: dict) -> None:
 
 
 register("pdv.module.register", handle_module_register)
+register("pdv.module.create_empty", handle_module_create_empty)
+register("pdv.module.update", handle_module_update)
 register("pdv.modules.setup", handle_modules_setup)
+register("pdv.module.reload_libs", handle_module_reload_libs)
 register("pdv.handler.invoke", handle_handler_invoke)

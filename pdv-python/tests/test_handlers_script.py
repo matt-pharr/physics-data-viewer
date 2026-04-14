@@ -51,6 +51,32 @@ class TestHandleScriptRegister:
         assert response['status'] == 'ok'
         assert response['payload']['path'] == 'scripts.analysis.fit_model'
 
+    def test_register_with_source_rel_path_persists_on_node(self):
+        """source_rel_path from payload is stored on the PDVScript node.
+
+        Regression guard for workflow A/B: module-owned scripts created
+        via pdv.script.register must remember where they belong inside
+        <saveDir>/modules/<id>/ so the save-time sync can mirror edits.
+        """
+        tree = PDVTree()
+        mock_comm = _make_mock_comm()
+        msg = _make_msg(
+            {
+                'parent_path': 'my_mod.scripts',
+                'name': 'solve',
+                'relative_path': 'my_mod/scripts/solve.py',
+                'language': 'python',
+                'module_id': 'my_mod',
+                'source_rel_path': 'scripts/solve.py',
+            }
+        )
+        with patch.object(comms_mod, '_comm', mock_comm), patch.object(comms_mod, '_pdv_tree', tree):
+            handle_script_register(msg)
+
+        node = tree['my_mod.scripts.solve']
+        assert isinstance(node, PDVScript)
+        assert node.source_rel_path == 'scripts/solve.py'
+
     def test_register_missing_name_sends_error(self):
         tree = PDVTree()
         mock_comm = _make_mock_comm()

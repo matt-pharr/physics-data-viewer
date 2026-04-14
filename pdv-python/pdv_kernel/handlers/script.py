@@ -55,8 +55,15 @@ def handle_script_register(msg: dict) -> None:
     name = payload.get("name", "")
     relative_path = payload.get("relative_path", "")
     language = payload.get("language", "python")
+    source_rel_path = payload.get("source_rel_path")
+    module_id = payload.get("module_id", "")
 
-    script = PDVScript(relative_path=relative_path, language=language)
+    script = PDVScript(
+        relative_path=relative_path,
+        language=language,
+        module_id=module_id,
+        source_rel_path=source_rel_path,
+    )
     full_path = f"{parent_path}.{name}" if parent_path else name
     tree[full_path] = script
 

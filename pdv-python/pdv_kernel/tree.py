@@ -213,14 +213,27 @@ class PDVFile:
     ----------
     relative_path : str
         Path to the backing file (absolute or relative to working dir).
+    source_rel_path : str or None
+        For module-owned files, the path of this file relative to the
+        **module root** (e.g. ``"scripts/run.py"`` or ``"lib/helpers.py"``)
+        as it exists inside the pristine ``<saveDir>/modules/<id>/``
+        directory. Used by the save-time sync step in
+        ``handle_project_save`` so edits made in the working directory can
+        be mirrored back to the project-local module copy. ``None`` for
+        non-module files (ordinary project scripts, notes, etc.).
 
     See Also
     --------
-    ARCHITECTURE.md §5.7
+    ARCHITECTURE.md §5.7, §5.13
     """
 
-    def __init__(self, relative_path: str) -> None:
+    def __init__(
+        self,
+        relative_path: str,
+        source_rel_path: str | None = None,
+    ) -> None:
         self._relative_path = relative_path
+        self._source_rel_path = source_rel_path
 
     @property
     def relative_path(self) -> str:
@@ -232,6 +245,19 @@ class PDVFile:
             File path (absolute or relative to working dir).
         """
         return self._relative_path
+
+    @property
+    def source_rel_path(self) -> str | None:
+        """Path relative to the owning module's root, or ``None``.
+
+        Returns
+        -------
+        str or None
+            For module-owned files, the rel-path inside
+            ``<saveDir>/modules/<id>/``. ``None`` for files that do not
+            belong to a module.
+        """
+        return self._source_rel_path
 
     def resolve_path(self, working_dir: str | None = None) -> str:
         """Resolve the backing file to an absolute path.
@@ -295,8 +321,9 @@ class PDVScript(PDVFile):
     """
 
     def __init__(self, relative_path: str, language: str = "python",
-                 doc: str | None = None, module_id: str = "") -> None:
-        super().__init__(relative_path)
+                 doc: str | None = None, module_id: str = "",
+                 source_rel_path: str | None = None) -> None:
+        super().__init__(relative_path, source_rel_path=source_rel_path)
         self._language = language
         self._doc = doc
         self._module_id = module_id
@@ -497,8 +524,9 @@ class PDVGui(PDVFile):
         Module identifier for module-owned GUIs. None for user-created project GUIs.
     """
 
-    def __init__(self, relative_path: str, module_id: str | None = None) -> None:
-        super().__init__(relative_path)
+    def __init__(self, relative_path: str, module_id: str | None = None,
+                 source_rel_path: str | None = None) -> None:
+        super().__init__(relative_path, source_rel_path=source_rel_path)
         self._module_id = module_id
 
     @property
@@ -549,8 +577,9 @@ class PDVNamelist(PDVFile):
     """
 
     def __init__(self, relative_path: str, format: str = "auto",
-                 module_id: str | None = None) -> None:
-        super().__init__(relative_path)
+                 module_id: str | None = None,
+                 source_rel_path: str | None = None) -> None:
+        super().__init__(relative_path, source_rel_path=source_rel_path)
         self._format = format  # "fortran", "toml", "auto"
         self._module_id = module_id
 
@@ -608,8 +637,9 @@ class PDVLib(PDVFile):
     ARCHITECTURE.md §5.10, §7.2
     """
 
-    def __init__(self, relative_path: str, module_id: str | None = None) -> None:
-        super().__init__(relative_path)
+    def __init__(self, relative_path: str, module_id: str | None = None,
+                 source_rel_path: str | None = None) -> None:
+        super().__init__(relative_path, source_rel_path=source_rel_path)
         self._module_id = module_id
 
     @property
@@ -1105,17 +1135,31 @@ class PDVModule(PDVTree):
         Semantic version string.
     gui : PDVGui or None
         Optional GUI definition node attached to this module.
+    description : str, optional
+        Longer human-readable description. Persisted into ``pdv-module.json``
+        at export time for workflow B (create empty → author → export).
+    language : str, optional
+        Kernel language (``"python"`` or ``"julia"``). Defaults to
+        ``"python"``. Also persisted into ``pdv-module.json`` at export.
+
+    See Also
+    --------
+    ARCHITECTURE.md §5.9, and the #140 module editing workflow plan §5.
     """
 
     def __init__(self, module_id: str, name: str, version: str,
                  gui: PDVGui | None = None,
-                 dependencies: list[dict[str, str]] | None = None) -> None:
+                 dependencies: list[dict[str, str]] | None = None,
+                 description: str = "",
+                 language: str = "python") -> None:
         super().__init__()
         self._module_id = module_id
         self._name = name
         self._version = version
         self._gui = gui
         self._dependencies: list[dict[str, str]] = dependencies or []
+        self._description = description
+        self._language = language
 
     @property
     def module_id(self) -> str:
@@ -1137,6 +1181,15 @@ class PDVModule(PDVTree):
         """
         return self._name
 
+    @name.setter
+    def name(self, value: str) -> None:
+        """Update the human-readable module name.
+
+        Workflow B exposes this via the in-app metadata editor so users
+        can rename a freshly-created empty module without editing JSON.
+        """
+        self._name = value
+
     @property
     def version(self) -> str:
         """Semantic version string.
@@ -1146,6 +1199,39 @@ class PDVModule(PDVTree):
         str
         """
         return self._version
+
+    @version.setter
+    def version(self, value: str) -> None:
+        """Update the module's semver string.
+
+        Mutable so the in-app metadata editor can bump versions.
+        """
+        self._version = value
+
+    @property
+    def description(self) -> str:
+        """Longer human-readable description, or empty string.
+
+        Returns
+        -------
+        str
+        """
+        return self._description
+
+    @description.setter
+    def description(self, value: str) -> None:
+        self._description = value
+
+    @property
+    def language(self) -> str:
+        """Kernel language used by this module.
+
+        Returns
+        -------
+        str
+            ``"python"`` or ``"julia"``.
+        """
+        return self._language
 
     @property
     def gui(self) -> PDVGui | None:
