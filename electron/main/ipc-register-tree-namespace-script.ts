@@ -52,6 +52,11 @@ interface RegisterTreeNamespaceScriptIpcHandlersOptions {
   ) => Record<string, unknown>;
   sanitizeScriptName: (scriptName: string, language?: "python" | "julia") => string;
   ensureScriptFile: (scriptPath: string, language?: "python" | "julia") => Promise<void>;
+  ensureLibFile: (
+    libPath: string,
+    language: "python" | "julia",
+    moduleAlias: string,
+  ) => Promise<void>;
   resolveScriptPath: (
     kernelId: string,
     scriptPath: string,
@@ -235,6 +240,7 @@ export function registerTreeNamespaceScriptIpcHandlers(
     toNamespaceInspectPayload,
     sanitizeScriptName,
     ensureScriptFile,
+    ensureLibFile,
     resolveScriptPath,
     buildEditorSpawn,
     resolveEditorSpawn,
@@ -462,9 +468,11 @@ export function registerTreeNamespaceScriptIpcHandlers(
       targetPath: string,
       libName: string,
     ): Promise<TreeCreateLibResult> => {
-      if (!kernelManager.getKernel(kernelId)) {
+      const kernel = kernelManager.getKernel(kernelId);
+      if (!kernel) {
         throw new Error(`Kernel not found: ${kernelId}`);
       }
+      const language = kernel.language;
       let workingDir = kernelWorkingDirs.get(kernelId);
       if (!workingDir) {
         workingDir = await projectManager.createWorkingDir();
@@ -499,11 +507,7 @@ export function registerTreeNamespaceScriptIpcHandlers(
       const libDir = path.join(workingDir, ...moduleInfo.workingDirSegments);
       await fs.mkdir(libDir, { recursive: true });
       const libPath = path.join(libDir, filename);
-      try {
-        await fs.access(libPath);
-      } catch {
-        await fs.writeFile(libPath, "", "utf-8");
-      }
+      await ensureLibFile(libPath, language, moduleInfo.moduleAlias);
 
       const sourceRelPath = moduleInfo.sourceRelDir
         ? `${moduleInfo.sourceRelDir}/${filename}`

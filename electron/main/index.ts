@@ -344,6 +344,61 @@ async function ensureScriptFile(scriptPath: string, language: "python" | "julia"
 }
 
 /**
+ * Seed a newly-created PDVLib file with a starter stub when it doesn't
+ * already exist. Unlike PDVScript, libs have no ``run()`` contract —
+ * they're plain importable modules — so the stub is just a docstring
+ * header plus a commented-out example so users can see where to add
+ * their own helpers.
+ *
+ * @param libPath - Absolute path to the target ``.py`` / ``.jl`` file.
+ * @param language - Active kernel language (only Python is actually
+ *   supported by the ``tree:createLib`` handler today; Julia falls back
+ *   to a block-comment equivalent for future-proofing).
+ * @param moduleAlias - Top-level tree alias of the owning PDVModule, so
+ *   the stub can reference it in the header.
+ */
+async function ensureLibFile(
+  libPath: string,
+  language: "python" | "julia",
+  moduleAlias: string
+): Promise<void> {
+  try {
+    await fs.stat(libPath);
+    return;
+  } catch (error) {
+    const err = error as NodeJS.ErrnoException;
+    if (err.code !== "ENOENT") throw error;
+  }
+  const now = new Date();
+  const date = `${now.getFullYear()}/${String(now.getMonth() + 1).padStart(2, "0")}/${String(now.getDate()).padStart(2, "0")}`;
+  const time = `${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}`;
+  const user = process.env.USER ?? process.env.USERNAME ?? "user";
+  const host = os.hostname();
+  const filename = path.basename(libPath);
+  const template = language === "julia"
+    ? "#=\n" +
+      `  ${filename}\n` +
+      `  Library module for PDVModule "${moduleAlias}"\n` +
+      `  created by ${user} on ${host} on ${date} at ${time}\n` +
+      "=#\n\n" +
+      "# Define helper functions below — they will be importable from\n" +
+      `# sibling scripts as \`using ${path.parse(filename).name}\`.\n\n` +
+      "# function example(x)\n" +
+      "#     return x\n" +
+      "# end\n"
+    : '"""\n' +
+      `${filename}\n` +
+      `Library module for PDVModule "${moduleAlias}"\n` +
+      `created by ${user} on ${host} on ${date} at ${time}\n` +
+      '"""\n\n' +
+      "# Define helper functions below — they will be importable from\n" +
+      `# sibling scripts as \`from ${path.parse(filename).name} import ...\`.\n\n` +
+      "# def example(x):\n" +
+      "#     return x\n";
+  await fs.writeFile(libPath, template, "utf8");
+}
+
+/**
  * Remove all registered push subscriptions.
  */
 function clearPushSubscriptions(): void {
@@ -521,6 +576,7 @@ export function registerIpcHandlers(
     toNamespaceInspectPayload,
     sanitizeScriptName,
     ensureScriptFile,
+    ensureLibFile,
     resolveScriptPath,
     buildEditorSpawn,
     resolveEditorSpawn,
