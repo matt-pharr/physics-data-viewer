@@ -194,6 +194,11 @@ def load_tree_index(
                 continue
 
         rel_path = storage.get("relative_path", "")
+        # source_rel_path is the path of this file relative to its owning
+        # module root (e.g. "scripts/run.py"). Set by the module bind path
+        # for module-owned files and re-read here so it survives
+        # save/load cycles. See ARCHITECTURE.md §5.13.
+        src_rel = node.get("source_rel_path")
 
         if node_type == "script":
             language = meta.get("language", node.get("language", "python"))
@@ -204,6 +209,7 @@ def load_tree_index(
                 language=language,
                 doc=doc,
                 module_id=mod_id,
+                source_rel_path=src_rel,
             ))
         elif node_type == "markdown":
             title = meta.get("title")
@@ -213,7 +219,11 @@ def load_tree_index(
             ))
         elif node_type == "gui":
             mod_id = meta.get("module_id", node.get("module_id", module_id_default))
-            gui_node = PDVGui(relative_path=rel_path, module_id=mod_id)
+            gui_node = PDVGui(
+                relative_path=rel_path,
+                module_id=mod_id,
+                source_rel_path=src_rel,
+            )
             tree.set_quiet(full_path, gui_node)
             # Attach gui reference to parent PDVModule if applicable.
             parts = full_path.split(".")
@@ -234,12 +244,14 @@ def load_tree_index(
                 relative_path=rel_path,
                 format=namelist_format,
                 module_id=mod_id,
+                source_rel_path=src_rel,
             ))
         elif node_type == "lib":
             mod_id = meta.get("module_id", node.get("module_id", module_id_default))
             tree.set_quiet(full_path, PDVLib(
                 relative_path=rel_path,
                 module_id=mod_id,
+                source_rel_path=src_rel,
             ))
             if inject_lib_sys_path:
                 abs_path = os.path.join(working_dir, rel_path) if rel_path else ""

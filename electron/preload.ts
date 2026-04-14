@@ -66,6 +66,8 @@ const api: PDVApi = {
       ipcRenderer.invoke(IPC.tree.createNote, kernelId, targetPath, noteName),
     createGui: (kernelId, targetPath, guiName) =>
       ipcRenderer.invoke(IPC.tree.createGui, kernelId, targetPath, guiName),
+    createLib: (kernelId, targetPath, libName) =>
+      ipcRenderer.invoke(IPC.tree.createLib, kernelId, targetPath, libName),
     addFile: (kernelId, sourcePath, targetTreePath, nodeType, filename) =>
       ipcRenderer.invoke(IPC.tree.addFile, kernelId, sourcePath, targetTreePath, nodeType, filename),
     invokeHandler: (kernelId, nodePath) =>
@@ -119,6 +121,9 @@ const api: PDVApi = {
     removeImport: (moduleAlias) => ipcRenderer.invoke(IPC.modules.removeImport, moduleAlias),
     uninstall: (moduleId) => ipcRenderer.invoke(IPC.modules.uninstall, moduleId),
     update: (moduleId) => ipcRenderer.invoke(IPC.modules.update, moduleId),
+    createEmpty: (request) => ipcRenderer.invoke(IPC.modules.createEmpty, request),
+    updateMetadata: (request) => ipcRenderer.invoke(IPC.modules.updateMetadata, request),
+    exportFromProject: (request) => ipcRenderer.invoke(IPC.modules.exportFromProject, request),
   },
   project: {
     save: (saveDir, codeCells, projectName) =>

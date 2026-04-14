@@ -210,31 +210,38 @@ def _feed_node(h: xxhash.xxh3_128, node: Any, working_dir: str | None) -> None:
         else:
             _feed_str(h, repr(node.tolist()))
 
+    # ------------------------------------------------------------------
+    # File-backed nodes intentionally do NOT hash ``relative_path``:
+    # it is a storage-layout detail that drifts across save/load cycles
+    # (serialize_node writes PDVScript/PDVNote/PDVGui/PDVNamelist files
+    # under ``<save_dir>/tree/...`` but does not mutate the in-memory
+    # node, so the post-load ``relative_path`` gains a ``tree/`` prefix
+    # the pre-save one lacks). File content is still fed in full via
+    # ``_feed_file_content``, and the parent folder's key iteration
+    # already folds the tree path into the digest, so the checksum
+    # stays sensitive to everything that actually defines node
+    # identity — just not to where on disk the backing file lives.
+    # ------------------------------------------------------------------
     elif kind == KIND_SCRIPT:
         h.update(b"script\x00")
-        _feed_str(h, node.relative_path)
         _feed_str(h, node.language)
         _feed_file_content(h, node, working_dir)
 
     elif kind == KIND_MARKDOWN:
         h.update(b"note\x00")
-        _feed_str(h, node.relative_path)
         _feed_file_content(h, node, working_dir)
 
     elif kind == KIND_GUI:
         h.update(b"gui\x00")
-        _feed_str(h, node.relative_path)
         _feed_file_content(h, node, working_dir)
 
     elif kind == KIND_NAMELIST:
         h.update(b"namelist\x00")
-        _feed_str(h, node.relative_path)
         _feed_str(h, node.format)
         _feed_file_content(h, node, working_dir)
 
     elif kind == KIND_LIB:
         h.update(b"lib\x00")
-        _feed_str(h, node.relative_path)
         _feed_file_content(h, node, working_dir)
 
     else:  # KIND_UNKNOWN (and KIND_FILE base class, if encountered)

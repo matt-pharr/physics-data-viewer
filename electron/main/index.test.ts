@@ -9,6 +9,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { BrowserWindow } from "electron";
 import os from "os";
+import path from "path";
 
 import { registerIpcHandlers, registerCommPushForwarding, unregisterIpcHandlers } from "./index";
 import {
@@ -63,7 +64,9 @@ const mocks = vi.hoisted(() => {
     throw err;
   });
   const fsCopyFile = vi.fn(async () => undefined);
+  const fsCp = vi.fn(async () => undefined);
   const dialogShowOpenDialog = vi.fn();
+  const dialogShowMessageBox = vi.fn(async () => ({ response: 0 }));
   const shellOpenPath = vi.fn(async () => "");
   const moduleManagerListInstalled = vi.fn(async () => []);
   const moduleManagerInstall = vi.fn(async () => ({
@@ -99,11 +102,18 @@ const mocks = vi.hoisted(() => {
     gui: undefined,
   }));
   const moduleManagerGetModuleInstallPath = vi.fn(async () => null);
+  const moduleManagerGetGlobalStorePath = vi.fn((moduleId: string) => `/tmp/pdv-global/modules/packages/${moduleId}`);
+  const moduleManagerRegisterInGlobalStore = vi.fn(async (moduleDir: string) => ({
+    id: "toy",
+    name: "Toy",
+    version: "0.1.0",
+    source: { type: "local" as const, location: moduleDir },
+    installPath: moduleDir,
+  }));
   const moduleManagerGetModuleSetupInfo = vi.fn(async () => ({
     entryPoint: undefined,
   }));
-  const moduleManagerResolveModuleFiles = vi.fn(async () => []);
-  const moduleManagerIsV4Module = vi.fn(async () => false);
+  const moduleManagerIsV4Module = vi.fn(async () => true);
   const moduleManagerReadModuleIndex = vi.fn(async () => []);
   const moduleManagerGetModuleDependencies = vi.fn(async () => []);
   const moduleManagerResolveModuleDir = vi.fn(async () => null);
@@ -120,7 +130,9 @@ const mocks = vi.hoisted(() => {
     fsWriteFile,
     fsReadFile,
     fsCopyFile,
+    fsCp,
     dialogShowOpenDialog,
+    dialogShowMessageBox,
     shellOpenPath,
     moduleManagerListInstalled,
     moduleManagerInstall,
@@ -130,8 +142,9 @@ const mocks = vi.hoisted(() => {
     moduleManagerGetModuleInputs,
     moduleManagerGetModuleGuiInfo,
     moduleManagerGetModuleInstallPath,
+    moduleManagerGetGlobalStorePath,
+    moduleManagerRegisterInGlobalStore,
     moduleManagerGetModuleSetupInfo,
-    moduleManagerResolveModuleFiles,
     moduleManagerIsV4Module,
     moduleManagerReadModuleIndex,
     moduleManagerGetModuleDependencies,
@@ -148,6 +161,7 @@ vi.mock("electron", () => ({
   },
   dialog: {
     showOpenDialog: mocks.dialogShowOpenDialog,
+    showMessageBox: mocks.dialogShowMessageBox,
   },
   shell: {
     openPath: mocks.shellOpenPath,
@@ -169,6 +183,7 @@ vi.mock("fs/promises", () => ({
   writeFile: mocks.fsWriteFile,
   readFile: mocks.fsReadFile,
   copyFile: mocks.fsCopyFile,
+  cp: mocks.fsCp,
 }));
 
 vi.mock("./module-manager", () => ({
@@ -181,8 +196,9 @@ vi.mock("./module-manager", () => ({
     getModuleInputs: mocks.moduleManagerGetModuleInputs,
     getModuleGuiInfo: mocks.moduleManagerGetModuleGuiInfo,
     getModuleInstallPath: mocks.moduleManagerGetModuleInstallPath,
+    getGlobalStorePath: mocks.moduleManagerGetGlobalStorePath,
+    registerInGlobalStore: mocks.moduleManagerRegisterInGlobalStore,
     getModuleSetupInfo: mocks.moduleManagerGetModuleSetupInfo,
-    resolveModuleFiles: mocks.moduleManagerResolveModuleFiles,
     isV4Module: mocks.moduleManagerIsV4Module,
     readModuleIndex: mocks.moduleManagerReadModuleIndex,
     getModuleDependencies: mocks.moduleManagerGetModuleDependencies,
@@ -280,7 +296,12 @@ function setup() {
   } as unknown as CommRouter;
 
   const projectManager = {
-    save: vi.fn(async () => ({ checksum: "abc123", nodeCount: 0 })),
+    save: vi.fn(async () => ({
+      checksum: "abc123",
+      nodeCount: 0,
+      moduleOwnedFiles: [],
+      moduleManifests: [],
+    })),
     load: vi.fn(async (_saveDir: string, onBeforePush?: () => Promise<void>) => {
       if (onBeforePush) await onBeforePush();
       return [];
@@ -642,6 +663,72 @@ describe("Step 5 IPC handlers", () => {
     expect(result).toBe(true);
   });
 
+  it("script:run fires pdv.module.reload_libs preflight for module-owned scripts", async () => {
+    const { kernelManager, commRouter } = setup();
+    (commRouter.request as unknown as ReturnType<typeof vi.fn>).mockClear();
+    (commRouter.request as unknown as ReturnType<typeof vi.fn>).mockResolvedValue({
+      payload: { reloaded: [], errors: {} },
+    });
+
+    const run = getHandler(IPC.script.run);
+    await run({}, "kernel-1", {
+      treePath: "n_pendulum.scripts.solve",
+      params: {},
+      executionId: "exec-reload-1",
+      origin: "test",
+    });
+
+    expect(commRouter.request).toHaveBeenCalledWith(
+      PDVMessageType.MODULE_RELOAD_LIBS,
+      { alias: "n_pendulum" },
+    );
+    expect(kernelManager.execute).toHaveBeenCalled();
+  });
+
+  it("script:run skips reload_libs preflight for non-nested scripts", async () => {
+    const { commRouter } = setup();
+    (commRouter.request as unknown as ReturnType<typeof vi.fn>).mockClear();
+    (commRouter.request as unknown as ReturnType<typeof vi.fn>).mockResolvedValue({
+      payload: { result: null },
+    });
+
+    const run = getHandler(IPC.script.run);
+    await run({}, "kernel-1", {
+      treePath: "my_script",
+      params: {},
+      executionId: "exec-reload-2",
+      origin: "test",
+    });
+
+    const calls = (commRouter.request as unknown as ReturnType<typeof vi.fn>).mock.calls;
+    const reloadCalls = calls.filter((c: unknown[]) => c[0] === PDVMessageType.MODULE_RELOAD_LIBS);
+    expect(reloadCalls).toHaveLength(0);
+  });
+
+  it("script:run swallows reload_libs errors and still runs the script", async () => {
+    const { kernelManager, commRouter } = setup();
+    (commRouter.request as unknown as ReturnType<typeof vi.fn>).mockClear();
+    (commRouter.request as unknown as ReturnType<typeof vi.fn>).mockImplementation(
+      async (type: string) => {
+        if (type === PDVMessageType.MODULE_RELOAD_LIBS) {
+          throw new Error("reload exploded");
+        }
+        return { payload: {} };
+      }
+    );
+
+    const run = getHandler(IPC.script.run);
+    await expect(
+      run({}, "kernel-1", {
+        treePath: "n_pendulum.scripts.solve",
+        params: {},
+        executionId: "exec-reload-3",
+        origin: "test",
+      })
+    ).resolves.toBeDefined();
+    expect(kernelManager.execute).toHaveBeenCalled();
+  });
+
   it("kernels:execute delegates to KernelManager.execute", async () => {
     const { kernelManager } = setup();
     const execute = getHandler(IPC.kernels.execute);
@@ -762,6 +849,92 @@ describe("Step 5 IPC handlers", () => {
     expect(result.scriptPath).toBeTruthy();
   });
 
+  it("tree:createScript inside a module subtree sets source_rel_path + module_id", async () => {
+    const { commRouter } = setup();
+    const start = getHandler(IPC.kernels.start);
+    await start({}, { language: "python" });
+    // Register a pending in-session module so the handler's
+    // getKnownModuleAliases helper sees "toy" as a known alias.
+    await (getHandler(IPC.modules.createEmpty) as unknown as (
+      e: Record<string, never>,
+      req: { id: string; name: string; version: string },
+    ) => Promise<unknown>)({}, { id: "toy", name: "Toy", version: "0.1.0" });
+    (commRouter.request as unknown as ReturnType<typeof vi.fn>).mockClear();
+    (commRouter.request as unknown as ReturnType<typeof vi.fn>).mockResolvedValue(
+      makeMessage({})
+    );
+
+    const createScript = getHandler(IPC.tree.createScript);
+    await createScript({}, "kernel-1", "toy.scripts", "hello");
+
+    const scriptRegisterCalls = (commRouter.request as unknown as ReturnType<typeof vi.fn>).mock.calls
+      .filter((c: unknown[]) => c[0] === PDVMessageType.SCRIPT_REGISTER);
+    expect(scriptRegisterCalls.length).toBeGreaterThanOrEqual(1);
+    const payload = scriptRegisterCalls[scriptRegisterCalls.length - 1][1];
+    expect(payload).toEqual(
+      expect.objectContaining({
+        parent_path: "toy.scripts",
+        name: "hello",
+        module_id: "toy",
+        source_rel_path: "scripts/hello.py",
+        relative_path: expect.stringMatching(/toy\/scripts\/hello\.py$/),
+      }),
+    );
+  });
+
+  it("tree:createLib writes a .py lib inside a module and registers with source_rel_path", async () => {
+    const { commRouter } = setup();
+    const start = getHandler(IPC.kernels.start);
+    await start({}, { language: "python" });
+    await (getHandler(IPC.modules.createEmpty) as unknown as (
+      e: Record<string, never>,
+      req: { id: string; name: string; version: string },
+    ) => Promise<unknown>)({}, { id: "toy", name: "Toy", version: "0.1.0" });
+    (commRouter.request as unknown as ReturnType<typeof vi.fn>).mockClear();
+    (commRouter.request as unknown as ReturnType<typeof vi.fn>).mockResolvedValue(
+      makeMessage({})
+    );
+
+    const createLib = getHandler(IPC.tree.createLib);
+    const result = (await createLib({}, "kernel-1", "toy.lib", "helpers")) as {
+      success: boolean;
+      libPath?: string;
+      treePath?: string;
+    };
+
+    expect(result.success).toBe(true);
+    expect(result.libPath).toMatch(/toy\/lib\/helpers\.py$/);
+    expect(result.treePath).toBe("toy.lib.helpers");
+
+    const fileRegisterCalls = (commRouter.request as unknown as ReturnType<typeof vi.fn>).mock.calls
+      .filter((c: unknown[]) => c[0] === PDVMessageType.FILE_REGISTER);
+    expect(fileRegisterCalls.length).toBeGreaterThanOrEqual(1);
+    const payload = fileRegisterCalls[fileRegisterCalls.length - 1][1];
+    expect(payload).toEqual(
+      expect.objectContaining({
+        tree_path: "toy.lib",
+        filename: "helpers.py",
+        node_type: "lib",
+        module_id: "toy",
+        source_rel_path: "lib/helpers.py",
+      }),
+    );
+  });
+
+  it("tree:createLib rejects targets that are not inside a known module", async () => {
+    setup();
+    const start = getHandler(IPC.kernels.start);
+    await start({}, { language: "python" });
+
+    const createLib = getHandler(IPC.tree.createLib);
+    const result = (await createLib({}, "kernel-1", "free_floating", "helpers")) as {
+      success: boolean;
+      error?: string;
+    };
+    expect(result.success).toBe(false);
+    expect(result.error).toContain("must live inside a known module");
+  });
+
   it("tree:createNote sends correct payload to kernel and returns notePath", async () => {
     const { commRouter } = setup();
     (commRouter.request as unknown as ReturnType<typeof vi.fn>).mockResolvedValue(
@@ -828,6 +1001,106 @@ describe("Step 5 IPC handlers", () => {
       interpreterPath: undefined,
     });
     expect(result).toEqual({ checksum: "abc123", nodeCount: 0 });
+  });
+
+  it("project:save mirrors module-owned files into saveDir/modules/<id>/<source_rel_path>", async () => {
+    const { projectManager } = setup();
+    (projectManager.save as unknown as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+      checksum: "abc123",
+      nodeCount: 1,
+      moduleOwnedFiles: [
+        {
+          module_id: "my_mod",
+          source_rel_path: "scripts/run.py",
+          workdir_path: "/tmp/pdv-test/my_mod/scripts/run.py",
+        },
+        {
+          module_id: "my_mod",
+          source_rel_path: "lib/helpers.py",
+          workdir_path: "/tmp/pdv-test/my_mod/lib/helpers.py",
+        },
+      ],
+    });
+    const save = getHandler(IPC.project.save);
+    await save({}, "/tmp/project", []);
+
+    const scriptsDest = path.join("/tmp/project", "modules", "my_mod", "scripts/run.py");
+    const libDest = path.join("/tmp/project", "modules", "my_mod", "lib/helpers.py");
+    expect(mocks.fsMkdir).toHaveBeenCalledWith(path.dirname(scriptsDest), { recursive: true });
+    expect(mocks.fsMkdir).toHaveBeenCalledWith(path.dirname(libDest), { recursive: true });
+    expect(mocks.fsCopyFile).toHaveBeenCalledWith(
+      path.resolve("/tmp/pdv-test/my_mod/scripts/run.py"),
+      path.resolve(scriptsDest),
+    );
+    expect(mocks.fsCopyFile).toHaveBeenCalledWith(
+      path.resolve("/tmp/pdv-test/my_mod/lib/helpers.py"),
+      path.resolve(libDest),
+    );
+  });
+
+  it("project:save writes pdv-module.json + module-index.json per module", async () => {
+    const { projectManager } = setup();
+    (projectManager.save as unknown as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+      checksum: "abc",
+      nodeCount: 5,
+      moduleOwnedFiles: [],
+      moduleManifests: [
+        {
+          module_id: "toy",
+          name: "Toy",
+          version: "0.1.0",
+          description: "smoke",
+          language: "python",
+          entries: [
+            {
+              id: "scripts",
+              path: "scripts",
+              key: "scripts",
+              parent_path: "",
+              type: "folder",
+              storage: { backend: "none", format: "none" },
+              metadata: { preview: "folder" },
+            },
+          ],
+        },
+      ],
+    });
+    const save = getHandler(IPC.project.save);
+    await save({}, "/tmp/project", []);
+
+    const manifestWrites = (mocks.fsWriteFile as unknown as ReturnType<typeof vi.fn>).mock.calls
+      .filter((c: unknown[]) => String(c[0]).includes("modules/toy/"));
+    const paths = manifestWrites.map((c) => String((c as unknown[])[0]));
+    expect(paths.some((p) => p.endsWith("pdv-module.json"))).toBe(true);
+    expect(paths.some((p) => p.endsWith("module-index.json"))).toBe(true);
+    const manifestBody = String(
+      (manifestWrites.find((c) => String((c as unknown[])[0]).endsWith("pdv-module.json")) as unknown[])[1],
+    );
+    expect(manifestBody).toContain('"schema_version": "4"');
+    expect(manifestBody).toContain('"id": "toy"');
+    expect(manifestBody).toContain('"description": "smoke"');
+  });
+
+  it("project:save swallows ENOENT from missing working-dir files during sync", async () => {
+    const { projectManager } = setup();
+    (projectManager.save as unknown as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+      checksum: "abc123",
+      nodeCount: 1,
+      moduleOwnedFiles: [
+        {
+          module_id: "my_mod",
+          source_rel_path: "scripts/gone.py",
+          workdir_path: "/tmp/pdv-test/my_mod/scripts/gone.py",
+        },
+      ],
+    });
+    (mocks.fsCopyFile as unknown as ReturnType<typeof vi.fn>).mockImplementationOnce(() => {
+      const err = Object.assign(new Error("ENOENT"), { code: "ENOENT" });
+      return Promise.reject(err);
+    });
+    const save = getHandler(IPC.project.save);
+    // Handler must not throw when a module-owned file disappeared mid-save.
+    await expect(save({}, "/tmp/project", [])).resolves.toBeDefined();
   });
 
   it("project:load delegates to ProjectManager.load", async () => {
@@ -988,7 +1261,7 @@ describe("Step 5 IPC handlers", () => {
     const projectLoad = getHandler(IPC.project.load);
     await projectLoad({}, "/tmp/project");
 
-    (mocks.moduleManagerListInstalled as unknown as ReturnType<typeof vi.fn>).mockResolvedValueOnce([
+    (mocks.moduleManagerListInstalled as unknown as ReturnType<typeof vi.fn>).mockResolvedValue([
       {
         id: "demo-module",
         name: "Demo Module",
@@ -1007,6 +1280,26 @@ describe("Step 5 IPC handlers", () => {
         module_settings: {},
       })
     );
+    (mocks.moduleManagerResolveModuleDir as unknown as ReturnType<typeof vi.fn>)
+      .mockResolvedValue("/tmp/demo-module");
+    (mocks.moduleManagerReadModuleIndex as unknown as ReturnType<typeof vi.fn>)
+      .mockResolvedValueOnce([
+        {
+          id: "scripts.run",
+          path: "scripts.run",
+          key: "run",
+          parent_path: "scripts",
+          type: "script",
+          has_children: false,
+          lazy: false,
+          storage: {
+            backend: "local_file",
+            relative_path: "scripts/run.py",
+            format: "py_script",
+          },
+          metadata: { language: "python" },
+        },
+      ]);
 
     const importToProject = getHandler(IPC.modules.importToProject);
     const result = (await importToProject({}, {
@@ -1029,14 +1322,25 @@ describe("Step 5 IPC handlers", () => {
       expect.stringContaining('"module_id": "demo-module"'),
       "utf8"
     );
-    expect(mocks.moduleManagerResolveActionScripts).toHaveBeenCalledWith("demo-module", "/tmp/project");
     expect(commRouter.request).toHaveBeenCalledWith(
-      PDVMessageType.SCRIPT_REGISTER,
+      PDVMessageType.MODULE_REGISTER,
       expect.objectContaining({
-        parent_path: "demo-module.scripts",
-        name: "run",
-        relative_path: "/tmp/pdv-test/demo-module/scripts/run.py",
-        reload: true,
+        path: "demo-module",
+        module_id: "demo-module",
+        name: "Demo Module",
+        version: "1.0.0",
+        module_index: expect.arrayContaining([
+          expect.objectContaining({
+            id: "scripts.run",
+            // Option A: module-owned files live under
+            // <workdir>/tree/<alias>/<src_rel_path> so the stored
+            // relative_path gains the canonical ``tree/`` prefix.
+            storage: expect.objectContaining({
+              backend: "local_file",
+              relative_path: path.join("tree", "demo-module", "scripts/run.py"),
+            }),
+          }),
+        ]),
       })
     );
     expect(webContentsSend).toHaveBeenCalledWith(
@@ -1045,6 +1349,259 @@ describe("Step 5 IPC handlers", () => {
         changed_paths: ["demo-module"],
         change_type: "updated",
       })
+    );
+  });
+
+  it("modules:createEmpty seeds workdir + calls MODULE_CREATE_EMPTY comm", async () => {
+    const { commRouter } = setup();
+    const start = getHandler(IPC.kernels.start);
+    await start({}, { language: "python" });
+    // No active project dir — exercise the in-memory pending-imports branch.
+    (mocks.fsReadFile as unknown as ReturnType<typeof vi.fn>).mockRejectedValue(
+      Object.assign(new Error("ENOENT"), { code: "ENOENT" }),
+    );
+    (commRouter.request as unknown as ReturnType<typeof vi.fn>).mockClear();
+    (commRouter.request as unknown as ReturnType<typeof vi.fn>).mockResolvedValue({
+      payload: { path: "toy" },
+    });
+
+    const create = getHandler(IPC.modules.createEmpty);
+    const result = (await create({}, {
+      id: "toy",
+      name: "Toy",
+      version: "0.1.0",
+      description: "a toy",
+      language: "python",
+    })) as { success: boolean; status?: string; alias?: string };
+
+    expect(result.success).toBe(true);
+    expect(result.alias).toBe("toy");
+    // Working-dir scaffolding created for scripts/lib/plots.
+    expect(mocks.fsMkdir).toHaveBeenCalledWith(
+      expect.stringMatching(/toy\/scripts$/),
+      { recursive: true },
+    );
+    expect(mocks.fsMkdir).toHaveBeenCalledWith(
+      expect.stringMatching(/toy\/lib$/),
+      { recursive: true },
+    );
+    expect(mocks.fsMkdir).toHaveBeenCalledWith(
+      expect.stringMatching(/toy\/plots$/),
+      { recursive: true },
+    );
+    expect(commRouter.request).toHaveBeenCalledWith(
+      PDVMessageType.MODULE_CREATE_EMPTY,
+      expect.objectContaining({
+        id: "toy",
+        name: "Toy",
+        version: "0.1.0",
+        description: "a toy",
+        language: "python",
+      }),
+    );
+  });
+
+  it("modules:createEmpty returns conflict when the alias already exists", async () => {
+    setup();
+    const start = getHandler(IPC.kernels.start);
+    await start({}, { language: "python" });
+    const projectLoad = getHandler(IPC.project.load);
+    await projectLoad({}, "/tmp/project");
+    // Pre-populate the manifest with an existing "toy" module so the
+    // create handler's collision check fires.
+    mocks.fsReadFile.mockResolvedValueOnce(
+      JSON.stringify({
+        schema_version: "1.1",
+        saved_at: "2026-01-01T00:00:00.000Z",
+        pdv_version: getAppVersion(),
+        tree_checksum: "",
+        modules: [{ module_id: "toy", alias: "toy", version: "0.1.0" }],
+        module_settings: {},
+      }),
+    );
+
+    const create = getHandler(IPC.modules.createEmpty);
+    const result = (await create({}, {
+      id: "toy",
+      name: "Toy",
+      version: "0.1.0",
+    })) as { success: boolean; status?: string; suggestedAlias?: string };
+
+    expect(result.success).toBe(false);
+    expect(result.status).toBe("conflict");
+    expect(result.suggestedAlias).toBe("toy_1");
+  });
+
+  it("modules:exportFromProject copies saveDir/modules/<id> to the global store", async () => {
+    setup();
+    const start = getHandler(IPC.kernels.start);
+    await start({}, { language: "python" });
+    const projectLoad = getHandler(IPC.project.load);
+    await projectLoad({}, "/tmp/project");
+    mocks.fsReadFile.mockResolvedValue(
+      JSON.stringify({
+        schema_version: "1.1",
+        saved_at: "2026-01-01T00:00:00.000Z",
+        pdv_version: getAppVersion(),
+        tree_checksum: "",
+        modules: [
+          {
+            module_id: "toy",
+            alias: "toy",
+            version: "0.1.0",
+            origin: "in_session",
+          },
+        ],
+        module_settings: {},
+      }),
+    );
+    // First fs.stat resolves the source dir successfully; second (for the
+    // destination) throws ENOENT so the handler skips the overwrite prompt.
+    (mocks.fsStat as unknown as ReturnType<typeof vi.fn>)
+      .mockResolvedValueOnce({ isDirectory: () => true })
+      .mockRejectedValueOnce(
+        Object.assign(new Error("ENOENT"), { code: "ENOENT" }),
+      );
+
+    const exportFromProject = getHandler(IPC.modules.exportFromProject);
+    const result = (await exportFromProject({}, { alias: "toy" })) as {
+      success: boolean;
+      status?: string;
+      destination?: string;
+    };
+
+    expect(result.success).toBe(true);
+    expect(result.status).toBe("exported");
+    expect(result.destination).toBe("/tmp/pdv-global/modules/packages/toy");
+    expect(mocks.fsCp).toHaveBeenCalledWith(
+      "/tmp/project/modules/toy",
+      "/tmp/pdv-global/modules/packages/toy",
+      { recursive: true, force: true },
+    );
+    // The freshly-copied directory must be registered in the global-store
+    // index so listInstalled picks it up on the next call — otherwise the
+    // Import dialog won't see what the user just exported.
+    expect(mocks.moduleManagerRegisterInGlobalStore).toHaveBeenCalledWith(
+      "/tmp/pdv-global/modules/packages/toy",
+    );
+    // No confirm prompt when the destination didn't exist.
+    expect(mocks.dialogShowMessageBox).not.toHaveBeenCalled();
+  });
+
+  it("modules:exportFromProject prompts to overwrite when global store already has the module", async () => {
+    setup();
+    const start = getHandler(IPC.kernels.start);
+    await start({}, { language: "python" });
+    const projectLoad = getHandler(IPC.project.load);
+    await projectLoad({}, "/tmp/project");
+    mocks.fsReadFile.mockResolvedValue(
+      JSON.stringify({
+        schema_version: "1.1",
+        saved_at: "2026-01-01T00:00:00.000Z",
+        pdv_version: getAppVersion(),
+        tree_checksum: "",
+        modules: [
+          { module_id: "toy", alias: "toy", version: "0.1.0" },
+        ],
+        module_settings: {},
+      }),
+    );
+    (mocks.fsStat as unknown as ReturnType<typeof vi.fn>)
+      .mockResolvedValueOnce({ isDirectory: () => true }) // source exists
+      .mockResolvedValueOnce({ isDirectory: () => true }); // destination exists
+    (mocks.dialogShowMessageBox as unknown as ReturnType<typeof vi.fn>)
+      .mockResolvedValueOnce({ response: 0 }); // user picks "Overwrite"
+
+    const exportFromProject = getHandler(IPC.modules.exportFromProject);
+    const result = (await exportFromProject({}, { alias: "toy" })) as {
+      success: boolean;
+      status?: string;
+    };
+
+    expect(mocks.dialogShowMessageBox).toHaveBeenCalled();
+    expect(result.success).toBe(true);
+    expect(result.status).toBe("exported");
+    expect(mocks.fsCp).toHaveBeenCalled();
+  });
+
+  it("modules:exportFromProject returns cancelled when the user declines overwrite", async () => {
+    setup();
+    const start = getHandler(IPC.kernels.start);
+    await start({}, { language: "python" });
+    const projectLoad = getHandler(IPC.project.load);
+    await projectLoad({}, "/tmp/project");
+    mocks.fsReadFile.mockResolvedValue(
+      JSON.stringify({
+        schema_version: "1.1",
+        saved_at: "2026-01-01T00:00:00.000Z",
+        pdv_version: getAppVersion(),
+        tree_checksum: "",
+        modules: [{ module_id: "toy", alias: "toy", version: "0.1.0" }],
+        module_settings: {},
+      }),
+    );
+    (mocks.fsStat as unknown as ReturnType<typeof vi.fn>)
+      .mockResolvedValueOnce({ isDirectory: () => true })
+      .mockResolvedValueOnce({ isDirectory: () => true });
+    (mocks.dialogShowMessageBox as unknown as ReturnType<typeof vi.fn>)
+      .mockResolvedValueOnce({ response: 1 }); // user cancels
+    (mocks.fsCp as unknown as ReturnType<typeof vi.fn>).mockClear();
+
+    const exportFromProject = getHandler(IPC.modules.exportFromProject);
+    const result = (await exportFromProject({}, { alias: "toy" })) as {
+      success: boolean;
+      status?: string;
+    };
+
+    expect(result.success).toBe(false);
+    expect(result.status).toBe("cancelled");
+    expect(mocks.fsCp).not.toHaveBeenCalled();
+  });
+
+  it("modules:exportFromProject rejects when no project directory is active", async () => {
+    setup();
+    const start = getHandler(IPC.kernels.start);
+    await start({}, { language: "python" });
+    // Intentionally skip project:load so activeProjectDir stays null.
+
+    const exportFromProject = getHandler(IPC.modules.exportFromProject);
+    const result = (await exportFromProject({}, { alias: "toy" })) as {
+      success: boolean;
+      status?: string;
+      error?: string;
+    };
+
+    expect(result.success).toBe(false);
+    expect(result.status).toBe("not_saved");
+  });
+
+  it("modules:updateMetadata forwards to MODULE_UPDATE comm", async () => {
+    const { commRouter } = setup();
+    const start = getHandler(IPC.kernels.start);
+    await start({}, { language: "python" });
+    (commRouter.request as unknown as ReturnType<typeof vi.fn>).mockClear();
+    (commRouter.request as unknown as ReturnType<typeof vi.fn>).mockResolvedValue({
+      payload: {
+        alias: "toy",
+        name: "Toy (renamed)",
+        version: "0.2.0",
+        description: "new",
+      },
+    });
+
+    const update = getHandler(IPC.modules.updateMetadata);
+    const result = (await update({}, {
+      alias: "toy",
+      name: "Toy (renamed)",
+      version: "0.2.0",
+      description: "new",
+    })) as { success: boolean; version?: string };
+
+    expect(result.success).toBe(true);
+    expect(result.version).toBe("0.2.0");
+    expect(commRouter.request).toHaveBeenCalledWith(
+      PDVMessageType.MODULE_UPDATE,
+      expect.objectContaining({ alias: "toy", version: "0.2.0" }),
     );
   });
 

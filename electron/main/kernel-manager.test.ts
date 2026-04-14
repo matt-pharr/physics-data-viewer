@@ -48,10 +48,13 @@ describe("@slow KernelManager (real kernel process)", { timeout: 60_000 }, () =>
     km = makeManager();
   });
 
+  // Bump the hook timeout to 20s (up from vitest's 10s default) because
+  // real-kernel shutdown can hang briefly while zmq sockets close on a
+  // busy CI runner. Test timeout is already 60s via the describe options.
   afterEach(async () => {
     // Always shut everything down even if a test failed partway through.
     await km.shutdownAll();
-  });
+  }, 20_000);
 
   // -------------------------------------------------------------------------
   // start()

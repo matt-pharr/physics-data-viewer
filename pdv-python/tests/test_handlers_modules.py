@@ -17,7 +17,13 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 import pdv_kernel.comms as comms_mod
-from pdv_kernel.handlers.modules import handle_handler_invoke, handle_modules_setup
+from pdv_kernel.handlers.modules import (
+    handle_handler_invoke,
+    handle_module_create_empty,
+    handle_module_reload_libs,
+    handle_module_update,
+    handle_modules_setup,
+)
 from pdv_kernel.modules import clear_handlers, handle
 
 
@@ -139,3 +145,234 @@ class TestHandleHandlerInvoke:
         response = mock_comm._sent[0]
         assert response["payload"]["dispatched"] is False
         assert "error" in response["payload"]
+
+
+class TestHandleModuleReloadLibs:
+    """Tests for pdv.module.reload_libs — the script:run preflight that
+    importlib.reloads modules whose __file__ is under <workdir>/<alias>/lib/.
+    See the #140 workflow plan §4.
+    """
+
+    def test_reloads_lib_file_under_alias(self, tree_with_comm, tmp_path):
+        """A lib file edited on disk is observably reloaded in sys.modules."""
+        import importlib
+        import os
+
+        from pdv_kernel.tree import PDVModule
+
+        # Arrange: working-dir/tree/<alias>/lib/<libname>.py — the
+        # ``tree/`` prefix is the canonical working-dir subdir for
+        # file-backed nodes after the Option-A layout fix.
+        alias = "my_mod"
+        lib_dir = tmp_path / "tree" / alias / "lib"
+        lib_dir.mkdir(parents=True)
+        lib_file = lib_dir / "helpers_reload_v1.py"
+        lib_file.write_text("VALUE = 1\n")
+        sys.path.insert(0, str(lib_dir))
+
+        # Force the working dir for this test's tree.
+        tree_with_comm._working_dir = str(tmp_path)
+
+        # Install a PDVModule at the alias so the handler's is_module
+        # check passes.
+        tree_with_comm[alias] = PDVModule(
+            module_id=alias, name="My", version="0.1.0",
+        )
+
+        try:
+            import helpers_reload_v1  # noqa: PLC0415
+            assert helpers_reload_v1.VALUE == 1
+
+            # Edit the file on disk — simulates an external editor save.
+            lib_file.write_text("VALUE = 42\n")
+
+            # Call the reload handler.
+            mock_comm = _make_mock_comm()
+            msg = _make_msg("pdv.module.reload_libs", {"alias": alias})
+            with (
+                patch.object(comms_mod, "_comm", mock_comm),
+                patch.object(comms_mod, "_pdv_tree", tree_with_comm),
+            ):
+                handle_module_reload_libs(msg)
+
+            # Assert: the new value is observable and the response lists the reload.
+            assert helpers_reload_v1.VALUE == 42
+            response = mock_comm._sent[-1]
+            assert response["type"] == "pdv.module.reload_libs.response"
+            assert "helpers_reload_v1" in response["payload"]["reloaded"]
+            assert response["payload"]["errors"] == {}
+        finally:
+            sys.path.remove(str(lib_dir))
+            sys.modules.pop("helpers_reload_v1", None)
+
+    def test_short_circuits_when_alias_is_not_a_module(self, tree_with_comm):
+        """Handler must be cheap when the first tree-path segment is not a PDVModule.
+
+        script:run fires the preflight for every run — reload_libs is called
+        with e.g. alias="scripts" for a plain project script. The handler
+        should return empty lists immediately without walking sys.modules.
+        """
+        mock_comm = _make_mock_comm()
+        # No node at this path at all.
+        msg = _make_msg("pdv.module.reload_libs", {"alias": "nonexistent"})
+        with (
+            patch.object(comms_mod, "_comm", mock_comm),
+            patch.object(comms_mod, "_pdv_tree", tree_with_comm),
+        ):
+            handle_module_reload_libs(msg)
+
+        response = mock_comm._sent[-1]
+        assert response["payload"]["reloaded"] == []
+        assert response["payload"]["errors"] == {}
+
+    def test_missing_alias_sends_error_reload(self, tree_with_comm):
+        """Empty alias in payload yields a structured error response."""
+        mock_comm = _make_mock_comm()
+        msg = _make_msg("pdv.module.reload_libs", {})
+        with (
+            patch.object(comms_mod, "_comm", mock_comm),
+            patch.object(comms_mod, "_pdv_tree", tree_with_comm),
+        ):
+            handle_module_reload_libs(msg)
+
+        response = mock_comm._sent[-1]
+        assert response["status"] == "error"
+        assert response["payload"]["code"] == "module.missing_alias"
+
+
+class TestHandleModuleCreateEmpty:
+    """Tests for pdv.module.create_empty — workflow B empty-module creation."""
+
+    def test_creates_module_with_default_subtrees(self, tree_with_comm):
+        """An empty module lands with scripts/lib/plots PDVTree children."""
+        from pdv_kernel.tree import PDVModule, PDVTree
+
+        mock_comm = _make_mock_comm()
+        msg = _make_msg(
+            "pdv.module.create_empty",
+            {"id": "toy", "name": "Toy", "version": "0.1.0", "description": "a toy"},
+        )
+        with (
+            patch.object(comms_mod, "_comm", mock_comm),
+            patch.object(comms_mod, "_pdv_tree", tree_with_comm),
+        ):
+            handle_module_create_empty(msg)
+
+        mod = tree_with_comm["toy"]
+        assert isinstance(mod, PDVModule)
+        assert mod.module_id == "toy"
+        assert mod.name == "Toy"
+        assert mod.version == "0.1.0"
+        assert mod.description == "a toy"
+        assert isinstance(tree_with_comm["toy.scripts"], PDVTree)
+        assert isinstance(tree_with_comm["toy.lib"], PDVTree)
+        assert isinstance(tree_with_comm["toy.plots"], PDVTree)
+        response = mock_comm._sent[-1]
+        assert response["type"] == "pdv.module.create_empty.response"
+        assert response["payload"]["path"] == "toy"
+
+    def test_rejects_existing_alias(self, tree_with_comm):
+        """Cannot create a module at a path already occupied in the tree."""
+        tree_with_comm["toy"] = 42  # something already at that key
+        mock_comm = _make_mock_comm()
+        msg = _make_msg(
+            "pdv.module.create_empty",
+            {"id": "toy", "name": "Toy", "version": "0.1.0"},
+        )
+        with (
+            patch.object(comms_mod, "_comm", mock_comm),
+            patch.object(comms_mod, "_pdv_tree", tree_with_comm),
+        ):
+            handle_module_create_empty(msg)
+
+        response = mock_comm._sent[-1]
+        assert response["status"] == "error"
+        assert response["payload"]["code"] == "module.alias_exists"
+
+    def test_requires_id(self, tree_with_comm):
+        """Missing id → structured error."""
+        mock_comm = _make_mock_comm()
+        msg = _make_msg("pdv.module.create_empty", {"name": "Toy"})
+        with (
+            patch.object(comms_mod, "_comm", mock_comm),
+            patch.object(comms_mod, "_pdv_tree", tree_with_comm),
+        ):
+            handle_module_create_empty(msg)
+
+        response = mock_comm._sent[-1]
+        assert response["status"] == "error"
+        assert response["payload"]["code"] == "module.missing_id"
+
+
+class TestHandleModuleUpdate:
+    """Tests for pdv.module.update — metadata editor patch handler."""
+
+    def test_updates_mutable_fields(self, tree_with_comm):
+        from pdv_kernel.tree import PDVModule
+
+        tree_with_comm["toy"] = PDVModule(
+            module_id="toy", name="Toy", version="0.1.0", description="old",
+        )
+
+        mock_comm = _make_mock_comm()
+        msg = _make_msg(
+            "pdv.module.update",
+            {
+                "alias": "toy",
+                "name": "Toy (renamed)",
+                "version": "0.2.0",
+                "description": "new",
+            },
+        )
+        with (
+            patch.object(comms_mod, "_comm", mock_comm),
+            patch.object(comms_mod, "_pdv_tree", tree_with_comm),
+        ):
+            handle_module_update(msg)
+
+        mod = tree_with_comm["toy"]
+        assert mod.name == "Toy (renamed)"
+        assert mod.version == "0.2.0"
+        assert mod.description == "new"
+        response = mock_comm._sent[-1]
+        assert response["type"] == "pdv.module.update.response"
+        assert response["payload"]["version"] == "0.2.0"
+
+    def test_omitted_fields_left_alone(self, tree_with_comm):
+        """Only provided fields are updated; omitted fields are untouched."""
+        from pdv_kernel.tree import PDVModule
+
+        tree_with_comm["toy"] = PDVModule(
+            module_id="toy", name="Toy", version="0.1.0", description="orig",
+        )
+        mock_comm = _make_mock_comm()
+        msg = _make_msg(
+            "pdv.module.update",
+            {"alias": "toy", "version": "0.2.0"},
+        )
+        with (
+            patch.object(comms_mod, "_comm", mock_comm),
+            patch.object(comms_mod, "_pdv_tree", tree_with_comm),
+        ):
+            handle_module_update(msg)
+        mod = tree_with_comm["toy"]
+        assert mod.name == "Toy"
+        assert mod.version == "0.2.0"
+        assert mod.description == "orig"
+
+    def test_rejects_non_module_target(self, tree_with_comm):
+        """Updating a path that isn't a PDVModule returns an error."""
+        tree_with_comm["plain"] = 42
+        mock_comm = _make_mock_comm()
+        msg = _make_msg(
+            "pdv.module.update",
+            {"alias": "plain", "name": "x"},
+        )
+        with (
+            patch.object(comms_mod, "_comm", mock_comm),
+            patch.object(comms_mod, "_pdv_tree", tree_with_comm),
+        ):
+            handle_module_update(msg)
+        response = mock_comm._sent[-1]
+        assert response["status"] == "error"
+        assert response["payload"]["code"] == "module.not_a_module"

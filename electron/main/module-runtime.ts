@@ -205,7 +205,11 @@ export async function buildModulesSetupPayload(
       const info = await moduleManager.getModuleSetupInfo(imp.module_id, projectDir);
       let libDir: string | undefined;
       if (workingDir && info.libDir) {
-        libDir = path.join(workingDir, imp.alias, info.libDir);
+        // Module-owned files live under ``<workdir>/tree/<alias>/...``
+        // post-Option-A (see bindImportedModule above); the lib dir
+        // passed to the kernel's ``pdv.modules.setup`` handler follows
+        // that same layout so ``sys.path`` points at the right place.
+        libDir = path.join(workingDir, "tree", imp.alias, info.libDir);
       }
       modules.push({
         lib_paths: [],
@@ -223,35 +227,71 @@ export async function buildModulesSetupPayload(
 }
 
 /**
- * Bind one imported v4 module into the kernel tree using module-index.json.
+ * Bind one imported module into the kernel tree.
  *
- * Reads `module-index.json`, copies all `local_file` backend files to the
- * working directory, remaps storage paths, and sends a single MODULE_REGISTER
- * message with the full `module_index` for the kernel to reconstruct the tree.
+ * v4-only: reads `module-index.json`, copies every `local_file` backend file
+ * to the working directory under `<alias>/<relative_path>`, remaps the storage
+ * paths, and sends a single MODULE_REGISTER message with the full remapped
+ * module_index so the kernel can reconstruct the subtree in one pass.
  *
- * @param commRouter - Comm router for MODULE_REGISTER.
- * @param moduleManager - Module manager for install path and index reads.
- * @param importedModule - Imported module entry.
+ * Non-v4 modules (no `module-index.json`) are rejected with a clear error.
+ * The legacy (v1/v2/v3) per-node registration flow was removed as part of
+ * the #140 module editing workflow — see the plan at
+ * ~/.claude/plans/parsed-mapping-creek.md §1.
+ *
+ * @param commRouter - Comm router used for comm messages.
+ * @param moduleManager - Module manager for manifest resolution.
+ * @param importedModule - Imported module entry (module id + alias).
  * @param workingDir - Optional kernel working directory.
- * @param moduleName - Display name for the module.
- * @param moduleVersion - Version string for the module.
+ * @returns Nothing.
+ * @throws {Error} When the module is not a v4 module, or when install path
+ *   resolution / index reading / file copies fail.
  */
-async function bindImportedModuleV4(
+export async function bindImportedModule(
   commRouter: CommRouter,
   moduleManager: ModuleManager,
   importedModule: ProjectModuleImport,
   workingDir: string | undefined,
-  moduleName: string,
-  moduleVersion: string,
   projectDir?: string | null,
 ): Promise<void> {
+  const installed = await moduleManager.listInstalled();
+  const moduleDesc = installed.find((m) => m.id === importedModule.module_id);
+  const moduleName = moduleDesc?.name ?? importedModule.module_id;
+  const moduleVersion = moduleDesc?.version ?? importedModule.version;
+
+  const isV4 = await moduleManager.isV4Module(importedModule.module_id, projectDir);
+  if (!isV4) {
+    throw new Error(
+      `Module ${importedModule.module_id} is not a v4 module (no module-index.json). ` +
+        `Non-v4 modules are no longer supported — reinstall from an updated source.`,
+    );
+  }
+
   const installPath = await moduleManager.resolveModuleDir(importedModule.module_id, projectDir);
-  if (!installPath) return;
+  if (!installPath) {
+    throw new Error(`Could not resolve install directory for module ${importedModule.module_id}`);
+  }
 
   const moduleIndex = await moduleManager.readModuleIndex(installPath);
 
-  // Copy all local_file backend files to workingDir/<alias>/<relative_path>
-  // and build a remapped index with updated relative_paths.
+  // Copy each local_file backend file to
+  // ``<workdir>/tree/<alias>/<relative_path>`` and build a remapped
+  // index with updated ``relative_paths``. The ``tree/`` prefix is the
+  // canonical working-dir/save-dir subdir for file-backed nodes
+  // (ARCHITECTURE.md §6.1/§6.2): ``serialize_node`` writes there,
+  // ``copyFilesForLoad`` mirrors from there, and the Option A fix in
+  // the #140 PR aligns every file-backed-node creation path on the
+  // same layout so in-memory ``relative_path`` stays stable across
+  // save/load cycles.
+  //
+  // Each remapped entry also carries ``source_rel_path`` — the
+  // original module-rooted rel-path (e.g. ``scripts/run.py``) — so
+  // the save-time sync step (§3) can mirror working-dir edits back
+  // into ``<saveDir>/modules/<id>/<source_rel_path>``.
+  //
+  // TODO(UUID): once the UUID-based file storage redesign lands this
+  // layout becomes ``tree/<uuid>/<filename>``; source_rel_path is
+  // unaffected because it is intentionally tree-path-agnostic.
   const remappedIndex = await Promise.all(
     moduleIndex.map(async (node) => {
       const nodeAny = node as unknown as Record<string, unknown>;
@@ -261,7 +301,7 @@ async function bindImportedModuleV4(
       if (!relPath || !workingDir) return node;
 
       const srcPath = path.join(installPath, relPath);
-      const destRelPath = path.join(importedModule.alias, relPath);
+      const destRelPath = path.join("tree", importedModule.alias, relPath);
       const destPath = path.join(workingDir, destRelPath);
       await fs.mkdir(path.dirname(destPath), { recursive: true });
       await fs.copyFile(srcPath, destPath);
@@ -269,12 +309,14 @@ async function bindImportedModuleV4(
       return {
         ...node,
         storage: { ...storage, relative_path: destRelPath },
+        source_rel_path: relPath,
       };
-    })
+    }),
   );
 
   const dependencies = await moduleManager.getModuleDependencies(
-    importedModule.module_id, projectDir,
+    importedModule.module_id,
+    projectDir,
   );
 
   await commRouter.request(PDVMessageType.MODULE_REGISTER, {
@@ -285,221 +327,6 @@ async function bindImportedModuleV4(
     module_index: remappedIndex,
     dependencies,
   });
-}
-
-/**
- * Bind one imported module into the kernel tree.
- *
- * For v4 modules: reads module-index.json, copies files, sends MODULE_REGISTER
- * with the full tree index so the kernel reconstructs the subtree in one pass.
- *
- * For v1/v2/v3 modules: uses the legacy per-node registration flow
- * (MODULE_REGISTER → GUI_REGISTER → FILE_REGISTER → SCRIPT_REGISTER).
- *
- * @param commRouter - Comm router used for comm messages.
- * @param moduleManager - Module manager for manifest resolution.
- * @param importedModule - Imported module entry (module id + alias).
- * @param workingDir - Optional kernel working directory.
- * @returns Nothing.
- * @throws {Error} For structural module resolution errors.
- */
-export async function bindImportedModule(
-  commRouter: CommRouter,
-  moduleManager: ModuleManager,
-  importedModule: ProjectModuleImport,
-  workingDir: string | undefined,
-  projectDir?: string | null,
-): Promise<void> {
-  // 1. Get module identity info
-  const installed = await moduleManager.listInstalled();
-  const moduleDesc = installed.find((m) => m.id === importedModule.module_id);
-  const moduleName = moduleDesc?.name ?? importedModule.module_id;
-  const moduleVersion = moduleDesc?.version ?? importedModule.version;
-
-  // Check if this is a v4 module (uses module-index.json)
-  const isV4 = await moduleManager.isV4Module(importedModule.module_id, projectDir);
-  if (isV4) {
-    await bindImportedModuleV4(commRouter, moduleManager, importedModule, workingDir, moduleName, moduleVersion, projectDir);
-    return;
-  }
-
-  const installPath = await moduleManager.resolveModuleDir(importedModule.module_id, projectDir);
-
-  // 2. Register PDVModule node at the alias path
-  const dependencies = await moduleManager.getModuleDependencies(
-    importedModule.module_id, projectDir,
-  );
-  await commRouter.request(PDVMessageType.MODULE_REGISTER, {
-    path: importedModule.alias,
-    module_id: importedModule.module_id,
-    name: moduleName,
-    version: moduleVersion,
-    dependencies,
-  });
-
-  // 3. If module has a GUI, copy gui.json and register PDVGui node
-  let guiInfo: { hasGui: boolean };
-  try {
-    guiInfo = await moduleManager.getModuleGuiInfo(importedModule.module_id, projectDir);
-  } catch {
-    guiInfo = { hasGui: false };
-  }
-  if (guiInfo.hasGui) {
-    if (installPath && workingDir) {
-      const sourceGuiPath = path.join(installPath, "gui.json");
-      try {
-        await fs.stat(sourceGuiPath);
-        const destDir = path.join(workingDir, importedModule.alias);
-        await fs.mkdir(destDir, { recursive: true });
-        const destGuiPath = path.join(destDir, "gui.gui.json");
-        await fs.copyFile(sourceGuiPath, destGuiPath);
-
-        await commRouter.request(PDVMessageType.GUI_REGISTER, {
-          parent_path: importedModule.alias,
-          name: "gui",
-          relative_path: destGuiPath,
-          module_id: importedModule.module_id,
-        });
-      } catch (error) {
-        console.warn('[pdv] gui.json register failed:', error);
-      }
-    }
-  }
-
-  // 4. Copy module files (namelists, fortran sources, etc.) and register them
-  try {
-    const moduleFiles = await moduleManager.resolveModuleFiles(importedModule.module_id, projectDir);
-    for (const file of moduleFiles) {
-      if (!workingDir) continue;
-      const segments = importedModule.alias.split(".").filter(Boolean);
-      const destDir = path.join(workingDir, ...segments);
-      await fs.mkdir(destDir, { recursive: true });
-      const destPath = path.join(destDir, path.basename(file.path));
-      await fs.copyFile(file.path, destPath);
-
-      await commRouter.request(PDVMessageType.FILE_REGISTER, {
-        tree_path: importedModule.alias,
-        filename: path.basename(file.path),
-        node_type: file.type,
-        name: file.name,
-      });
-    }
-  } catch (error) {
-    console.warn(
-      `[pdv] Failed to register module files for ${importedModule.module_id}:`,
-      error
-    );
-  }
-
-  // 5. Copy lib/ Python files and register as PDVFile nodes.
-  await bindImportedModuleLibFilesLegacy(commRouter, moduleManager, importedModule, workingDir, projectDir);
-
-  // 6. Bind scripts
-  await bindImportedModuleScriptsLegacy(commRouter, moduleManager, importedModule, workingDir, projectDir);
-}
-
-/**
- * Legacy (v1/v2/v3): Copy lib/ Python files and register as PDVFile nodes.
- */
-async function bindImportedModuleLibFilesLegacy(
-  commRouter: CommRouter,
-  moduleManager: ModuleManager,
-  importedModule: ProjectModuleImport,
-  workingDir: string | undefined,
-  projectDir?: string | null,
-): Promise<void> {
-  if (!workingDir) return;
-
-  const installPath = await moduleManager.resolveModuleDir(importedModule.module_id, projectDir);
-  if (!installPath) return;
-
-  const libDir = path.join(installPath, "lib");
-  const pyFiles = await collectPyFilesLegacy(libDir);
-  if (pyFiles.length === 0) return;
-
-  for (const relFile of pyFiles) {
-    const srcPath = path.join(libDir, relFile);
-    const destDir = path.join(
-      workingDir,
-      ...importedModule.alias.split(".").filter(Boolean),
-      "lib",
-      path.dirname(relFile)
-    );
-    await fs.mkdir(destDir, { recursive: true });
-    const destPath = path.join(destDir, path.basename(relFile));
-    await fs.copyFile(srcPath, destPath);
-
-    const stem = relFile.replace(/[/\\]/g, "_").replace(/\.py$/, "_py");
-    await commRouter.request(PDVMessageType.FILE_REGISTER, {
-      tree_path: `${importedModule.alias}.lib`,
-      filename: path.basename(relFile),
-      node_type: "lib",
-      name: stem,
-      module_id: importedModule.module_id,
-    });
-  }
-}
-
-/**
- * Legacy (v1/v2/v3): Recursively collect all `.py` files under a directory.
- */
-async function collectPyFilesLegacy(dir: string): Promise<string[]> {
-  const results: string[] = [];
-  let entries: import("fs").Dirent[];
-  try {
-    entries = await fs.readdir(dir, { withFileTypes: true }) as unknown as import("fs").Dirent[];
-  } catch {
-    return results;
-  }
-  for (const entry of entries) {
-    const rel = entry.name;
-    if (entry.isFile() && rel.endsWith(".py")) {
-      results.push(rel);
-    } else if (entry.isDirectory()) {
-      const subFiles = await collectPyFilesLegacy(path.join(dir, rel));
-      for (const sub of subFiles) {
-        results.push(path.join(rel, sub));
-      }
-    }
-  }
-  return results;
-}
-
-/**
- * Legacy (v1/v2/v3): Bind action scripts under `<alias>.scripts.<name>`.
- */
-async function bindImportedModuleScriptsLegacy(
-  commRouter: CommRouter,
-  moduleManager: ModuleManager,
-  importedModule: ProjectModuleImport,
-  workingDir: string | undefined,
-  projectDir?: string | null,
-): Promise<void> {
-  let scriptBindings: Awaited<ReturnType<ModuleManager["resolveActionScripts"]>>;
-  try {
-    scriptBindings = await moduleManager.resolveActionScripts(importedModule.module_id, projectDir);
-  } catch (error) {
-    if (isMissingActionScriptError(error)) return;
-    throw error;
-  }
-  const parentPath = `${importedModule.alias}.scripts`;
-  for (const binding of scriptBindings) {
-    let registeredPath = binding.scriptPath;
-    if (workingDir) {
-      const destDir = path.join(workingDir, ...parentPath.split(".").filter(Boolean));
-      await fs.mkdir(destDir, { recursive: true });
-      const destPath = path.join(destDir, path.basename(binding.scriptPath));
-      await fs.copyFile(binding.scriptPath, destPath);
-      registeredPath = destPath;
-    }
-    await commRouter.request(PDVMessageType.SCRIPT_REGISTER, {
-      parent_path: parentPath,
-      name: binding.name,
-      relative_path: registeredPath,
-      language: "python",
-      reload: true,
-    });
-  }
 }
 
 /**

@@ -26,6 +26,7 @@ are implementation details and their interfaces may change.
 from pdv_kernel.tree import PDVTree, PDVFile, PDVScript, PDVNote, PDVGui, PDVNamelist, PDVModule, PDVLib
 from pdv_kernel.errors import PDVError
 from pdv_kernel.modules import handle
+from pdv_kernel.serializers import register as register_serializer
 
 from importlib.metadata import version as _pkg_version, PackageNotFoundError as _PkgNotFound
 try:
@@ -35,7 +36,7 @@ except _PkgNotFound:
 
 __all__ = [
     "PDVTree", "PDVFile", "PDVScript", "PDVNote", "PDVGui", "PDVNamelist", "PDVModule", "PDVLib",
-    "PDVError", "bootstrap", "handle", "log", "__version__",
+    "PDVError", "bootstrap", "handle", "register_serializer", "log", "__version__",
 ]
 
 
@@ -101,11 +102,13 @@ def bootstrap(ip=None):
     from pdv_kernel.tree import PDVTree  # noqa: PLC0415
 
     from pdv_kernel.modules import handle as _handle_decorator  # noqa: PLC0415
+    from pdv_kernel.serializers import register as _register_serializer  # noqa: PLC0415
 
     # Create the tree and app objects
     tree = PDVTree()
     app = PDVApp()
     app.handle = _handle_decorator  # type: ignore[attr-defined]
+    app.register_serializer = _register_serializer  # type: ignore[attr-defined]
 
     # Install the protected namespace and inject pdv_tree and pdv.
     # IPython uses user_module.__dict__ as globals and user_ns as locals

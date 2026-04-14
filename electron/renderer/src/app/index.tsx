@@ -21,7 +21,10 @@ import { StatusBar } from '../components/StatusBar';
 import { NamespaceView } from '../components/NamespaceView';
 import { ScriptDialog } from '../components/ScriptDialog';
 import { CreateScriptDialog } from '../components/Tree/CreateScriptDialog';
+import { CreateLibDialog } from '../components/Tree/CreateLibDialog';
 import { CreateGuiDialog } from '../components/Tree/CreateGuiDialog';
+import { NewModuleDialog } from '../components/NewModuleDialog';
+import { ModuleMetadataDialog } from '../components/ModuleMetadataDialog';
 import { CreateNoteDialog } from '../components/Tree/CreateNoteDialog';
 import { TitleBar } from '../components/TitleBar';
 import { WriteTab } from '../components/WriteTab';
@@ -135,6 +138,11 @@ const App: React.FC = () => {
   const [createScriptTarget, setCreateScriptTarget] = useState<string | null>(null);
   const [createNoteTarget, setCreateNoteTarget] = useState<string | null>(null);
   const [createGuiTarget, setCreateGuiTarget] = useState<string | null>(null);
+  const [createLibTarget, setCreateLibTarget] = useState<string | null>(null);
+  const [showNewModuleDialog, setShowNewModuleDialog] = useState(false);
+  const [moduleMetadataTarget, setModuleMetadataTarget] = useState<
+    { alias: string; name: string; version: string; description?: string; language?: 'python' | 'julia' } | null
+  >(null);
   const [showSettings, setShowSettings] = useState(false);
   const [showImportModule, setShowImportModule] = useState(false);
   const [showSaveAsDialog, setShowSaveAsDialog] = useState(false);
@@ -298,6 +306,8 @@ const App: React.FC = () => {
         if (payload.path) void handleOpenRecentRef.current?.(payload.path);
       } else if (payload.action === 'modules:import') {
         setShowImportModule(true);
+      } else if (payload.action === 'modules:newEmpty') {
+        setShowNewModuleDialog(true);
       } else if (payload.action === 'settings:open') {
         setSettingsInitialTab('general');
         setShowSettings(true);
@@ -322,6 +332,7 @@ const App: React.FC = () => {
       'project:save': kernelReady,
       'project:saveAs': kernelReady,
       'modules:import': kernelReady,
+      'modules:newEmpty': kernelReady,
     });
   }, [kernelReady]);
 
@@ -485,10 +496,13 @@ const App: React.FC = () => {
       if (createScriptTarget) { setCreateScriptTarget(null); return; }
       if (createNoteTarget) { setCreateNoteTarget(null); return; }
       if (createGuiTarget) { setCreateGuiTarget(null); return; }
+      if (createLibTarget) { setCreateLibTarget(null); return; }
+      if (showNewModuleDialog) { setShowNewModuleDialog(false); return; }
+      if (moduleMetadataTarget) { setModuleMetadataTarget(null); return; }
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [showSaveAsDialog, showImportModule, scriptDialog, createScriptTarget, createNoteTarget, createGuiTarget]);
+  }, [showSaveAsDialog, showImportModule, scriptDialog, createScriptTarget, createNoteTarget, createGuiTarget, createLibTarget, showNewModuleDialog, moduleMetadataTarget]);
 
   const handleSettingsSave = async (updates: Partial<Config>) => {
     await window.pdv.config.set(updates);
@@ -608,6 +622,33 @@ const App: React.FC = () => {
     }
     if (action === 'create_script') {
       setCreateScriptTarget(node.path);
+    } else if (action === 'create_lib') {
+      setCreateLibTarget(node.path);
+    } else if (action === 'edit_module_metadata' && node.type === 'module') {
+      setModuleMetadataTarget({
+        alias: node.path || node.key,
+        name: node.moduleName ?? node.key,
+        version: node.moduleVersion ?? '0.1.0',
+        description: node.moduleDescription,
+        language: node.moduleLanguage,
+      });
+    } else if (action === 'export_module' && node.type === 'module') {
+      try {
+        const result = await window.pdv.modules.exportFromProject({
+          alias: node.path || node.key,
+        });
+        if (!result.success) {
+          if (result.status !== 'cancelled') {
+            setLastError(result.error ?? 'Failed to export module');
+          }
+        } else {
+          // Trigger an installed-modules refresh so the Import dialog
+          // picks up the newly-published module for future imports.
+          setModulesRefreshToken((t) => t + 1);
+        }
+      } catch (error) {
+        setLastError(error instanceof Error ? error.message : String(error));
+      }
     } else if (action === 'create_note') {
       setCreateNoteTarget(node.path);
     } else if (action === 'open_note' && node.type === 'markdown') {
@@ -1255,6 +1296,58 @@ const App: React.FC = () => {
             } finally {
               setCreateGuiTarget(null);
             }
+          }}
+        />
+      )}
+
+      {createLibTarget !== null && currentKernelId && (
+        <CreateLibDialog
+          parentPath={createLibTarget}
+          onCancel={() => setCreateLibTarget(null)}
+          onCreate={async (name) => {
+            try {
+              const result = await window.pdv.tree.createLib(currentKernelId, createLibTarget, name);
+              if (!result.success) {
+                setLastError(result.error);
+              } else if (result.libPath) {
+                setTreeRefreshToken((t) => t + 1);
+                // Open the new lib in the external editor so the user can
+                // start typing right away — same UX as new script.
+                await window.pdv.script.edit(currentKernelId, result.libPath);
+              }
+            } catch (error) {
+              setLastError(error instanceof Error ? error.message : String(error));
+            } finally {
+              setCreateLibTarget(null);
+            }
+          }}
+        />
+      )}
+
+      <NewModuleDialog
+        isOpen={showNewModuleDialog}
+        defaultLanguage={activeLanguage === 'julia' ? 'julia' : 'python'}
+        onCancel={() => setShowNewModuleDialog(false)}
+        onCreated={() => {
+          setShowNewModuleDialog(false);
+          setTreeRefreshToken((t) => t + 1);
+        }}
+      />
+
+      {moduleMetadataTarget && (
+        <ModuleMetadataDialog
+          isOpen={true}
+          alias={moduleMetadataTarget.alias}
+          initial={{
+            name: moduleMetadataTarget.name,
+            version: moduleMetadataTarget.version,
+            description: moduleMetadataTarget.description,
+            language: moduleMetadataTarget.language,
+          }}
+          onCancel={() => setModuleMetadataTarget(null)}
+          onSaved={() => {
+            setModuleMetadataTarget(null);
+            setTreeRefreshToken((t) => t + 1);
           }}
         />
       )}

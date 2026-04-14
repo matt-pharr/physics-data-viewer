@@ -11,7 +11,10 @@ via the ``entry_point`` field in ``pdv-module.json``.
 
 from __future__ import annotations
 
+import json
+
 import numpy as np
+from pdv_kernel import register_serializer
 from pdv_kernel.modules import handle
 
 
@@ -72,6 +75,46 @@ class PendulumSolution:
             f"PendulumSolution(n_links={self.n_links}, "
             f"n_steps={self.n_steps}, t_end={self.t[-1]:.1f}s)"
         )
+
+
+def _save_pendulum_solution(sol: "PendulumSolution", path: str) -> None:
+    """Write a PendulumSolution to a single ``.npz`` file.
+
+    Demonstrates the ``pdv.register_serializer`` hook: PDV chooses ``path``
+    and this callback only has to dump the object's state into it.
+    """
+    np.savez(
+        path,
+        t=sol.t,
+        thetas=sol.thetas,
+        omegas=sol.omegas,
+        xs=sol.xs,
+        ys=sol.ys,
+        params_json=np.array(json.dumps(sol.params)),
+    )
+
+
+def _load_pendulum_solution(path: str) -> "PendulumSolution":
+    """Reconstruct a PendulumSolution from the ``.npz`` written above."""
+    data = np.load(path, allow_pickle=False)
+    return PendulumSolution(
+        t=data["t"],
+        thetas=data["thetas"],
+        omegas=data["omegas"],
+        xs=data["xs"],
+        ys=data["ys"],
+        params=json.loads(str(data["params_json"])),
+    )
+
+
+register_serializer(
+    PendulumSolution,
+    format="n_pendulum_solution_v1",
+    extension=".npz",
+    save=_save_pendulum_solution,
+    load=_load_pendulum_solution,
+    preview=lambda sol: sol.preview(),
+)
 
 
 @handle(PendulumSolution)

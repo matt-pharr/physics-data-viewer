@@ -287,6 +287,74 @@ class TestMetadataSubDict:
         assert meta['language'] == 'python'
         assert meta['doc'] == 'My script.'
         assert 'preview' in meta
+        # Non-module scripts do not carry source_rel_path.
+        assert 'source_rel_path' not in desc
+
+    def test_module_owned_script_carries_source_rel_path(self, tmp_working_dir):
+        """PDVScript with source_rel_path set round-trips through serialize_node."""
+        from pdv_kernel.tree import PDVScript
+        script_file = os.path.join(tmp_working_dir, 'my_mod', 'scripts', 'run.py')
+        os.makedirs(os.path.dirname(script_file), exist_ok=True)
+        with open(script_file, 'w') as f:
+            f.write('"""Module script."""\ndef run(pdv_tree: dict):\n    return {}\n')
+        script = PDVScript(
+            relative_path=script_file,
+            language='python',
+            doc='Module script.',
+            module_id='my_mod',
+            source_rel_path='scripts/run.py',
+        )
+        desc = serialize_node('my_mod.scripts.run', script, tmp_working_dir)
+        assert desc['source_rel_path'] == 'scripts/run.py'
+
+    def test_source_rel_path_round_trip_through_tree_loader(self, tmp_working_dir):
+        """serialize_node + load_tree_index preserve source_rel_path across save/load."""
+        from pdv_kernel.tree import PDVLib, PDVModule, PDVScript, PDVTree
+        from pdv_kernel.tree_loader import load_tree_index
+
+        mod_root = os.path.join(tmp_working_dir, 'my_mod')
+        scripts_dir = os.path.join(mod_root, 'scripts')
+        lib_dir = os.path.join(mod_root, 'lib')
+        os.makedirs(scripts_dir, exist_ok=True)
+        os.makedirs(lib_dir, exist_ok=True)
+        script_file = os.path.join(scripts_dir, 'run.py')
+        with open(script_file, 'w') as f:
+            f.write('def run(pdv_tree: dict):\n    return {}\n')
+        lib_file = os.path.join(lib_dir, 'helpers.py')
+        with open(lib_file, 'w') as f:
+            f.write('VALUE = 1\n')
+
+        script = PDVScript(
+            relative_path=script_file,
+            module_id='my_mod',
+            source_rel_path='scripts/run.py',
+        )
+        lib = PDVLib(
+            relative_path=lib_file,
+            module_id='my_mod',
+            source_rel_path='lib/helpers.py',
+        )
+        module = PDVModule(module_id='my_mod', name='My Mod', version='0.1.0')
+
+        descriptors = [
+            serialize_node('my_mod', module, tmp_working_dir),
+            serialize_node('my_mod.scripts', PDVTree(), tmp_working_dir),
+            serialize_node('my_mod.scripts.run', script, tmp_working_dir),
+            serialize_node('my_mod.lib', PDVTree(), tmp_working_dir),
+            serialize_node('my_mod.lib.helpers', lib, tmp_working_dir),
+        ]
+
+        # Rehydrate into a fresh tree.
+        fresh = PDVTree()
+        fresh._working_dir = tmp_working_dir
+        load_tree_index(fresh, descriptors, conflict_strategy='replace')
+
+        loaded_script = fresh['my_mod.scripts.run']
+        loaded_lib = fresh['my_mod.lib.helpers']
+        assert isinstance(loaded_script, PDVScript)
+        assert isinstance(loaded_lib, PDVLib)
+        assert loaded_script.source_rel_path == 'scripts/run.py'
+        assert loaded_lib.source_rel_path == 'lib/helpers.py'
 
     def test_all_descriptors_have_metadata(self, tmp_working_dir):
         """Every kind produces a descriptor with a metadata key."""

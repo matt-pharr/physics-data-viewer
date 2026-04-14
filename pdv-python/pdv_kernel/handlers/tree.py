@@ -107,6 +107,10 @@ def handle_tree_list(msg: dict) -> None:
             descriptor["module_id"] = value.module_id
             descriptor["module_name"] = value.name
             descriptor["module_version"] = value.version
+            if getattr(value, "description", ""):
+                descriptor["module_description"] = value.description
+            if getattr(value, "language", ""):
+                descriptor["module_language"] = value.language
         if kind == "gui" and isinstance(value, PDVGui):
             descriptor["module_id"] = value.module_id
         nodes.append(descriptor)

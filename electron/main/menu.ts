@@ -116,6 +116,13 @@ function buildTemplate(): MenuItemConstructorOptions[] {
           enabled: isEnabled("modules:import"),
           click: () => sendMenuAction({ action: "modules:import" }),
         },
+        {
+          id: "modules:newEmpty",
+          label: "New Module...",
+          accelerator: "CmdOrCtrl+Shift+M",
+          enabled: isEnabled("modules:newEmpty"),
+          click: () => sendMenuAction({ action: "modules:newEmpty" }),
+        },
         { type: "separator" },
         {
           id: "settings:open",

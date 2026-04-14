@@ -160,7 +160,7 @@ All type strings are namespaced with `pdv.`. The convention is `pdv.<domain>.<ac
 | `pdv.project.load` | app → kernel | Instructs the kernel to load a project from a save directory. |
 | `pdv.project.loaded` | kernel → app | Sent after the tree is fully populated from a project load. No `in_reply_to` (push notification). |
 | `pdv.project.save` | app → kernel | Instructs the kernel to serialize the tree to the save directory. |
-| `pdv.project.save.response` | kernel → app | Confirms save completed, includes node count and checksum. |
+| `pdv.project.save.response` | kernel → app | Confirms save completed. Payload: `{ node_count, checksum, module_owned_files, module_manifests }`. `module_owned_files` lists every file-backed node that belongs to a `PDVModule` (see §5.9) so the main process can mirror working-dir edits into `<saveDir>/modules/<id>/<source_rel_path>`. `module_manifests` carries per-module metadata + module-root-relative node descriptors for writing `pdv-module.json` and `module-index.json` under each module dir. Both fields are empty arrays when the tree contains no `PDVModule` nodes. |
 
 #### Tree Messages
 
@@ -187,7 +187,7 @@ All type strings are namespaced with `pdv.`. The convention is `pdv.<domain>.<ac
 
 | Type | Direction | Description |
 |---|---|---|
-| `pdv.script.register` | app → kernel | Register a newly created script file as a node in the tree. |
+| `pdv.script.register` | app → kernel | Register a newly created script file as a node in the tree. Payload: `{ parent_path, name, relative_path, language?, module_id?, source_rel_path? }`. `source_rel_path` is set when the script lives inside a known module alias (workflow A/B, §5.13). |
 | `pdv.script.register.response` | kernel → app | Confirms registration. |
 | `pdv.script.params` | app → kernel | Extract `run()` function parameters from a script file. Payload: `{ tree_path }`. |
 | `pdv.script.params.response` | kernel → app | Returns `ScriptParameter[]` array built from the script's `run()` signature. |
@@ -203,11 +203,17 @@ All type strings are namespaced with `pdv.`. The convention is `pdv.<domain>.<ac
 
 | Type | Direction | Description |
 |---|---|---|
-| `pdv.module.register` | app → kernel | Register a `PDVModule` node at a tree path. Payload: `{ path, module_id, name, version, dependencies?, module_index? }`. When `module_index` is provided, child nodes (scripts, GUIs, namelists) are mounted from the index using the same two-pass logic as project load. |
+| `pdv.module.register` | app → kernel | Register a `PDVModule` node at a tree path. Payload: `{ path, module_id, name, version, dependencies?, module_index? }`. v4-only: if `module_index` is absent the kernel rejects the request. Child nodes (scripts, GUIs, namelists, libs) are mounted from the index using the same two-pass logic as project load, with each file-backed entry carrying its module-root-relative `source_rel_path` (see §5.13). |
 | `pdv.module.register.response` | kernel → app | Confirms module registration. |
-| `pdv.gui.register` | app → kernel | Register a `PDVGui` node at a tree path. Payload: `{ parent_path, name, relative_path, module_id }`. |
+| `pdv.module.create_empty` | app → kernel | Create a brand-new empty `PDVModule` with seeded `scripts` / `lib` / `plots` subtrees. Payload: `{ id, name, version, description?, language? }`. Used by workflow B (authoring a new module from scratch inside the app) — see the §5.9 and #140 workflow plan. |
+| `pdv.module.create_empty.response` | kernel → app | Confirms creation. Payload: `{ path }`. |
+| `pdv.module.update` | app → kernel | Patch mutable metadata on an existing `PDVModule`. Payload: `{ alias, name?, version?, description? }`. Omitted fields are left unchanged. `module_id` and `language` are immutable. |
+| `pdv.module.update.response` | kernel → app | Echoes the post-update metadata. |
+| `pdv.module.reload_libs` | app → kernel | Fired as a preflight before `script:run` on a module-owned script. Payload: `{ alias }`. Walks `sys.modules` and `importlib.reload()`s every module whose `__file__` sits under `<workdir>/<alias>/lib/` so edits to module libs take effect on the next run without restarting the kernel. Short-circuits when `alias` is not a `PDVModule`. |
+| `pdv.module.reload_libs.response` | kernel → app | Returns `{ reloaded: string[], errors: { [name]: string } }`. Per-module reload failures are captured rather than thrown so a broken lib surfaces at script-run time with a proper traceback. |
+| `pdv.gui.register` | app → kernel | Register a `PDVGui` node at a tree path. Payload: `{ parent_path, name, relative_path, module_id?, source_rel_path? }`. |
 | `pdv.gui.register.response` | kernel → app | Confirms GUI registration. |
-| `pdv.modules.setup` | app → kernel | Add lib file parent directories to `sys.path` and import entry points. Payload: `{ modules: [{ lib_paths: string[], entry_point?: string }] }`. Sent after module import and on kernel start/restart. |
+| `pdv.modules.setup` | app → kernel | Add lib file parent directories to `sys.path` and import entry points. Payload: `{ modules: [{ lib_paths: string[], lib_dir?: string, entry_point?: string }] }`. Sent after module import and on kernel start/restart. |
 | `pdv.modules.setup.response` | kernel → app | Confirms module setup with handler registry. |
 | `pdv.handler.invoke` | app → kernel | Dispatch a registered handler for a tree node. Payload: `{ path }`. |
 | `pdv.handler.invoke.response` | kernel → app | Returns handler dispatch result. |
@@ -220,7 +226,7 @@ All type strings are namespaced with `pdv.`. The convention is `pdv.<domain>.<ac
 | `pdv.namelist.read.response` | kernel → app | Parsed namelist data. |
 | `pdv.namelist.write` | app → kernel | Write structured data back to a `PDVNamelist` backing file. Payload: `{ tree_path, data }`. |
 | `pdv.namelist.write.response` | kernel → app | Confirms write success. |
-| `pdv.file.register` | app → kernel | Register a file-backed tree node (`PDVNamelist`, `PDVLib`, or `PDVFile`). Payload: `{ tree_path, filename, node_type, name?, module_id? }`. When `node_type` is `"lib"`, creates a `PDVLib` node. |
+| `pdv.file.register` | app → kernel | Register a file-backed tree node (`PDVNamelist`, `PDVLib`, or `PDVFile`). Payload: `{ tree_path, filename, node_type, name?, module_id?, source_rel_path? }`. When `node_type` is `"lib"`, creates a `PDVLib` node. `source_rel_path` is set by the module bind path and by `tree:createLib` / `tree:createScript` / `tree:createGui` when the target lives inside a known module alias; see §5.13. |
 | `pdv.file.register.response` | kernel → app | Confirms file registration with resulting path. |
 
 #### Progress Messages
@@ -611,18 +617,25 @@ Notes are created via `pdv.note.register` (app → kernel) which creates a `PDVN
 
 ### 5.9 PDVModule Class
 
-`PDVModule` is a subclass of `PDVTree` (i.e. a dict subclass). It represents an imported module in the tree. Because it inherits from `PDVTree`, it holds children naturally — a module's sub-nodes (GUI, scripts, namelists) are direct dict entries.
+`PDVModule` is a subclass of `PDVTree` (i.e. a dict subclass). It represents a module in the tree — either imported from the global store or authored in-session via workflow B (#140). Because it inherits from `PDVTree`, it holds children naturally — a module's sub-nodes (GUI, scripts, libs, namelists, plots) are direct dict entries.
 
 Attributes:
-- `module_id` (read-only): unique identifier string (e.g. `"n_pendulum"`)
-- `name` (read-only): human-readable display name (e.g. `"N-Pendulum"`)
-- `version` (read-only): semantic version string (e.g. `"2.0.0"`)
-- `gui` (read-write): optional reference to the child `PDVGui` node, or `None`
-- `dependencies` (read-only): list of dependency dicts (e.g. `[{"name": "numpy"}]`), or empty list
+- `module_id` (read-only): unique identifier string (e.g. `"n_pendulum"`). Immutable identity — changing it would require rebinding the subtree.
+- `name` (read-write): human-readable display name (e.g. `"N-Pendulum"`). Mutable via `pdv.module.update`.
+- `version` (read-write): semantic version string (e.g. `"2.0.0"`). Mutable via `pdv.module.update`.
+- `description` (read-write): longer human-readable description, or empty string. Persisted into `pdv-module.json` at save time.
+- `language` (read-only): kernel language (`"python"` or `"julia"`). Also persisted into `pdv-module.json`.
+- `gui` (read-write): optional reference to the child `PDVGui` node, or `None`.
+- `dependencies` (read-only): list of dependency dicts (e.g. `[{"name": "numpy"}]`), or empty list.
 
 `preview()` returns `"{name} v{version}"`.
 
-Created by the `pdv.module.register` handler, which receives `path`, `module_id`, `name`, `version`, optional `dependencies`, and optional `module_index` from the main process and inserts the `PDVModule` into the tree at the given path. If a `PDVModule` already exists at that path (e.g. from project load), the handler updates it in place to preserve existing children.
+Two creation paths:
+
+- `pdv.module.register` — used by the module bind path after the main process copies an imported module's v4 `module-index.json` entries into the working directory. Receives `path`, `module_id`, `name`, `version`, optional `dependencies`, and optional `module_index` and inserts the `PDVModule` into the tree at the given path. If a `PDVModule` already exists at that path (e.g. from project load), the handler updates it in place to preserve existing children.
+- `pdv.module.create_empty` — used by **workflow B** (authoring a new module from scratch inside the app). Takes `{ id, name, version, description?, language? }`, constructs a `PDVModule` at the top of the tree, and seeds it with three empty `PDVTree` children (`scripts`, `lib`, `plots`). Consumers then populate content via the existing `tree:createScript` / `tree:createLib` / `tree:createGui` handlers. The project-local module directory (`<saveDir>/modules/<id>/`) doesn't exist yet for in-session modules — it is created on first `project:save` via §5.13's save-time sync.
+
+Projects track in-session modules via an `origin: "in_session"` field on the `ProjectModuleImport` manifest entry, distinct from the default `"imported"` origin. On project load, in-session modules are rebound via the same v4 bind path used for imported modules — the `<saveDir>/modules/<id>/` directory functions as the authoritative source.
 
 ### 5.10 PDVGui Class
 
@@ -655,32 +668,48 @@ The namelist file is parsed and written by dedicated comm handlers (`pdv.namelis
 
 Attributes:
 - `relative_path` (inherited from `PDVFile`): path to the `.py` file relative to the working directory
+- `source_rel_path` (inherited from `PDVFile`): path relative to the owning module's root, e.g. `"lib/helpers.py"`. Set for module-owned libs; `None` for project-level libs. Used by §5.13's save-time sync.
 - `module_id` (read-only): the owning module's ID, or `None`
 
 `preview()` returns `"Library (<filename>)"`.
 
-**Module lib/ convention**: Module developers place importable `.py` files in `<module-root>/lib/`. When a module is imported into a project, the main process:
-1. Copies each `.py` file from the installed module's `lib/` directory into the working directory under `<alias>/lib/`.
-2. Registers each file as a `PDVLib` tree node via `pdv.file.register` (with `node_type: "lib"`).
-3. Sends `pdv.modules.setup` with `lib_paths` — the on-disk paths of the copied files. The kernel adds the parent directory of each path to `sys.path`.
+**Module lib/ convention**: Module developers place importable `.py` files in `<module-root>/lib/`. When a v4 module is imported into a project, the main process:
+1. Reads `module-index.json` and copies each `local_file`-backed entry (including libs under `lib/`) into the working directory under `<alias>/<relative_path>`.
+2. Sends `pdv.module.register` with the remapped `module_index` so the kernel reconstructs the subtree and creates `PDVLib` nodes via `load_tree_index`.
+3. Sends `pdv.modules.setup` with `lib_dir: "<workdir>/<alias>/lib"`. The kernel adds that directory to `sys.path` so scripts can `import helpers` etc.
 
-This design makes lib files visible and editable in the tree (users can modify libraries while working in PDV). It is forward-compatible with planned UUID-based file storage where each file gets its own directory — since `sys.path` is set per-file parent directory rather than per-module.
+In-session modules (workflow B) follow the same convention: `tree:createLib` writes new `.py` files under `<workdir>/<alias>/lib/`, sets `source_rel_path = "lib/<filename>"`, and §7's `pdv-module.json` writer stamps `lib_dir: "lib"` so the next project load's `setupModuleNamespaces` injects the path automatically.
 
-On project load (deserialization), the `lib` node type is restored as a `PDVLib` and its parent directory is re-added to `sys.path`.
+**Live lib reload**: Before every `script:run` on a module-owned script, the main process fires a `pdv.module.reload_libs` preflight (§3.4). The kernel walks `sys.modules`, finds modules whose `__file__` sits under `<workdir>/<alias>/lib/`, and `importlib.reload()`s them so edits take effect without restarting the kernel. Reload failures are captured per-module and never block the script run itself — broken libs surface at import time inside the user's own traceback. The handler uses `os.path.realpath` on both sides of the prefix comparison so macOS's `/var` → `/private/var` symlink doesn't defeat the path match.
+
+On project load (deserialization), the `lib` node type is restored as a `PDVLib` and its `source_rel_path` is re-injected from the stored descriptor.
 
 ### 5.13 Module Storage and Resolution
 
 PDV has three tiers of module storage:
 
-1. **Project-local** (`<saveDir>/modules/<module-id>/`): When a module is imported into a project, its full content is copied into the project's save directory. This makes projects fully portable — zip a project folder and send it to someone who has never seen the module.
-2. **Global store** (`~/.PDV/modules/packages/`): A catalog of installed modules. Modules can be installed from local directories or GitHub URLs. The global store determines what is available to import, but projects never read from it at runtime.
+1. **Project-local** (`<saveDir>/modules/<module-id>/`): Every module — imported or in-session — has an authoritative copy here. On import, the main process copies the installed module's content into this directory. For in-session modules (workflow B) the directory is created on first `project:save` by §7's manifest writer. This makes projects fully portable — zip a project folder and send it to someone who has never seen the module.
+2. **Global store** (`~/.PDV/modules/packages/`): A catalog of installed modules. Modules can be installed from local directories, GitHub URLs, or **exported back from an active project** via `modules:exportFromProject` (workflow A/B §9). The global store determines what is available to import, but projects never read from it at runtime.
 3. **Bundled examples** (`examples/modules/` in the app resources): Read-only example modules shipped with the application (e.g. N-Pendulum for Python and Julia). Surfaced in the module library with a "Bundled" badge, filtered by active kernel language. Cannot be uninstalled.
 
+**v4-only**: As of the #140 module editing workflow pass, the legacy (v1/v2/v3) module bind paths are gone. Every module must ship a `module-index.json`; attempts to import non-v4 modules fail with a clear error and a prompt to reinstall from an updated source. Bundled example modules were updated to v4 before the legacy removal.
+
 **Resolution order**: When the main process needs to resolve a module's on-disk directory, it checks project-local `modules/` first, then the global store, then bundled examples. The first match wins.
+
+**`source_rel_path`**: Every module-owned `PDVFile` node (script, lib, gui, namelist) carries a `source_rel_path` attribute recording its location relative to the module root (e.g. `"scripts/run.py"`, `"lib/helpers.py"`). The field is:
+- Set at bind time by the v4 `bindImportedModule` remap loop for imported modules.
+- Set by `tree:createScript` / `tree:createLib` / `tree:createGui` when the target is inside a known module alias.
+- Round-tripped through `tree-index.json` (for project-level save/load) and `module-index.json` (for module-level save/load and export).
+- Consumed by §7's save-time sync (below) to know where each file belongs inside `<saveDir>/modules/<id>/`.
+
+**Save-time sync** (ARCHITECTURE §8.1 step 4): After `_collect_nodes` writes each node's data files into `<saveDir>/tree/`, the kernel's `project:save` handler also emits a `module_owned_files` list. The main process iterates this list and `fs.copyFile`s each entry from the working-dir location to `<saveDir>/modules/<module_id>/<source_rel_path>`, overwriting whatever was there. This is how edits (whether made via the external editor on an imported module's scripts, or via `tree:create*` for authored content on an in-session module) end up mirrored into the project-local copy so they survive a save → reopen cycle. Deletion propagation is tracked under #182.
+
+**Per-module manifest writer**: At the tail of `project:save`, the main process also writes `pdv-module.json` (v4 schema) and `module-index.json` into each `<saveDir>/modules/<id>/` directory, built from the `module_manifests` payload the kernel emits. The manifest carries `id`, `name`, `version`, `description`, `language`, and `lib_dir: "lib"`; the index carries module-root-relative node descriptors so a fresh `bindImportedModule` at project-load time can re-prefix them with the chosen alias. This is what makes in-session modules (workflow B) reloadable at all.
 
 **Installation sources**: Modules can be installed from:
 - **Local directory**: User selects a directory containing a `pdv-module.json` manifest.
 - **GitHub URL**: User pastes a git-cloneable URL. The module is shallow-cloned (`git clone --depth 1`) into the global store.
+- **Export from active project**: `modules:exportFromProject` copies `<activeProjectDir>/modules/<id>/` to `~/.PDV/modules/packages/<id>/`, prompting to overwrite when a global-store entry already exists. Used by workflow A (publish edits to an imported module) and workflow B (publish a newly-authored module). A TODO(#182) in the handler tracks the follow-up "commit and push to upstream GitHub" flow for modules with an `upstream` URL.
 
 **`upstream` field**: An optional git-cloneable URL in `pdv-module.json`. Automatically set when installing from GitHub, or declared manually. Enables update checks via `git ls-remote --tags` (no clone needed) and one-click re-install from upstream.
 
@@ -726,12 +755,17 @@ A persistent, user-chosen directory that stores a complete saved snapshot of a P
 my-project/
     project.json              ← project manifest (owned by Electron main process)
     tree-index.json           ← tree node registry (owned by kernel, written at save time)
-    code-cells.json        ← code cell tab state (owned by Electron main process)
+    code-cells.json           ← code cell tab state (owned by Electron main process)
     modules/                  ← project-local module copies (one subdir per module_id)
         n_pendulum/
-            pdv-module.json
+            pdv-module.json       ← v4 manifest (written by main process, §5.13)
+            module-index.json     ← module-root-relative node descriptors
             scripts/
+                solve.py
+                animate.py
             lib/
+                n_pendulum.py
+            gui.json
     tree/
         data/
             waveforms/
@@ -743,6 +777,8 @@ my-project/
         results/
             fit_output.parquet
 ```
+
+Each `modules/<id>/` subdirectory is maintained authoritatively by `project:save`: §5.13's save-time sync copies edited files from the working directory into it, then the manifest writer stamps `pdv-module.json` and `module-index.json` from the current in-memory `PDVModule` state. In-session modules (workflow B, origin `"in_session"` in the manifest) get their directory created on first save; imported modules get it at import time and updated on every subsequent save.
 
 **`project.json` schema**:
 ```json
@@ -777,7 +813,7 @@ my-project/
 | `language` | string | Kernel language: `"python"` or `"julia"`. |
 | `interpreter_path` | string? | Optional path to the interpreter used at save time. |
 | `tree_checksum` | string | SHA-256 checksum of `tree-index.json` for integrity verification. |
-| `modules` | array | Imported modules active in this project. Each entry has `module_id`, `alias`, `version`, and optional `revision`. |
+| `modules` | array | Modules active in this project. Each entry has `module_id`, `alias`, `version`, optional `revision`, and optional `origin` (`"imported"` default, or `"in_session"` for modules authored via workflow B — see §5.9). |
 | `module_settings` | object | Persisted per-module user settings keyed by module alias. |
 
 `tree-index.json` and `code-cells.json` are always stored alongside `project.json` with those exact filenames (not configurable).
@@ -873,7 +909,19 @@ The following node types are supported:
 | `mapping` | Plain Python dict (not PDVTree) | Inline JSON |
 | `sequence` | Python list or tuple | Inline JSON |
 | `binary` | bytes / bytearray | `.bin` file |
-| `unknown` | Unrecognized type | `.pickle` file (only if trusted=True) |
+| `unknown` | Unrecognized type | Custom serializer file (if a module registered one for the type), otherwise `.pickle` (only if `trusted=True`) |
+
+**Custom serializer hook.** Module developers can register save/load
+callbacks for a class via `pdv.register_serializer(MyClass, format="my_fmt",
+extension=".h5", save=..., load=...)`. PDV chooses the on-disk filename and
+passes the absolute path to the callbacks; the module just reads or writes
+that file. Lookup walks `type(value).__mro__` so subclasses inherit. The
+node's `type` field stays `"unknown"`, but `storage.format` carries the
+registered name and `metadata` records `python_type` and `serializer`. Format
+names must be unique and must not collide with builtin formats. The module
+that registered the serializer must be imported before a project that
+contains nodes of that format is loaded; otherwise load fails with a clear
+error. Implementation lives in `pdv_kernel/serializers.py`.
 
 ### 7.3 Node Descriptors
 
@@ -1086,19 +1134,41 @@ User triggers save
     ├─► Kernel:
     │       1. Serializes all tree nodes to the save directory
     │          (data files + scripts, mirroring tree hierarchy)
-    │       2. Writes tree-index.json
-    │       3. Responds with pdv.project.save.response:
-    │              payload: { node_count: N, checksum: "<sha256 of tree-index.json>" }
+    │       2. Writes tree-index.json (with `source_rel_path` on every
+    │          module-owned PDVFile so load can re-inject it)
+    │       3. Walks the tree collecting module_owned_files (every
+    │          file-backed node under a PDVModule with source_rel_path)
+    │          and module_manifests (per-module metadata + module-root-
+    │          relative node descriptors for pdv-module.json /
+    │          module-index.json writing)
+    │       4. Responds with pdv.project.save.response:
+    │              payload: {
+    │                node_count, checksum,
+    │                module_owned_files, module_manifests,
+    │              }
     │
     ├─► App writes code-cells.json to save directory
     │
+    ├─► App syncs module-owned file contents from the working dir
+    │       into <saveDir>/modules/<id>/<source_rel_path> (§5.13).
+    │       Missing source files are swallowed (ENOENT logged, not
+    │       thrown) so a mid-save deletion doesn't abort the save.
+    │
+    ├─► App stamps pdv-module.json + module-index.json into each
+    │       <saveDir>/modules/<id>/ from module_manifests (§7). This
+    │       makes in-session modules reloadable on the next project
+    │       load via the same v4 bind path used for imported modules.
+    │
     ├─► App writes project.json to save directory
-    │       (only after both kernel and app state are flushed)
+    │       (only after kernel serialization, code-cells, module sync,
+    │        and manifest writing have all flushed)
     │
     └─► App updates title bar: "My Experiment"
 ```
 
 If the kernel responds with `status: "error"`, the app aborts the save, does not write `project.json`, and displays the error message to the user.
+
+The module-owned file sync and the per-module manifest writer are both best-effort: errors are logged but never thrown, because by the time they run the kernel-side serialization (the authoritative part) has already succeeded and aborting would leave the save dir in a confusing half-saved state. A follow-up pass (#182) will move deletion propagation and overall robustness into the same lock.
 
 ### 8.2 Load Sequence
 

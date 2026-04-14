@@ -56,8 +56,13 @@ def handle_gui_register(msg: dict) -> None:
     name = payload.get("name", "")
     relative_path = payload.get("relative_path", "")
     module_id = payload.get("module_id")
+    source_rel_path = payload.get("source_rel_path")
 
-    gui_node = PDVGui(relative_path=relative_path, module_id=module_id)
+    gui_node = PDVGui(
+        relative_path=relative_path,
+        module_id=module_id,
+        source_rel_path=source_rel_path,
+    )
     full_path = f"{parent_path}.{name}" if parent_path else name
     tree[full_path] = gui_node
     attach_gui_to_module(tree, parent_path, gui_node)
