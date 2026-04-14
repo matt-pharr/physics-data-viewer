@@ -160,9 +160,11 @@ class TestHandleModuleReloadLibs:
 
         from pdv_kernel.tree import PDVModule
 
-        # Arrange: working-dir/<alias>/lib/<libname>.py
+        # Arrange: working-dir/tree/<alias>/lib/<libname>.py — the
+        # ``tree/`` prefix is the canonical working-dir subdir for
+        # file-backed nodes after the Option-A layout fix.
         alias = "my_mod"
-        lib_dir = tmp_path / alias / "lib"
+        lib_dir = tmp_path / "tree" / alias / "lib"
         lib_dir.mkdir(parents=True)
         lib_file = lib_dir / "helpers_reload_v1.py"
         lib_file.write_text("VALUE = 1\n")

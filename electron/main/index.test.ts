@@ -1332,9 +1332,12 @@ describe("Step 5 IPC handlers", () => {
         module_index: expect.arrayContaining([
           expect.objectContaining({
             id: "scripts.run",
+            // Option A: module-owned files live under
+            // <workdir>/tree/<alias>/<src_rel_path> so the stored
+            // relative_path gains the canonical ``tree/`` prefix.
             storage: expect.objectContaining({
               backend: "local_file",
-              relative_path: path.join("demo-module", "scripts/run.py"),
+              relative_path: path.join("tree", "demo-module", "scripts/run.py"),
             }),
           }),
         ]),

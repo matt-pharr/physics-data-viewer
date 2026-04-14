@@ -283,15 +283,17 @@ export function registerModulesIpcHandlers(
       }
       const workingDir = kernelWorkingDirs.get(activeKernelId);
 
-      // Seed working-dir scaffolding so the kernel's PDVFile resolve_path
-      // calls and subsequent tree:createScript / tree:createLib hits have
-      // somewhere to land. ``modules/<id>/{scripts,lib,plots}/`` mirrors the
-      // layout that bindImportedModule would have created for an imported
-      // module, keeping the save-time sync (§3) and export (§9) code paths
-      // uniform across workflow A and workflow B.
+      // Seed working-dir scaffolding under the canonical
+      // ``<workdir>/tree/<alias>/{scripts,lib,plots}/`` layout so
+      // subsequent ``tree:createScript`` / ``tree:createLib`` hits land
+      // at paths that match where ``bindImportedModule`` would have
+      // placed an imported v4 module's files — see the Option A
+      // canonical-layout fix and ARCHITECTURE.md §6.1/§6.2.
       if (workingDir) {
         for (const child of ["scripts", "lib", "plots"]) {
-          await fs.mkdir(path.join(workingDir, baseAlias, child), { recursive: true });
+          await fs.mkdir(path.join(workingDir, "tree", baseAlias, child), {
+            recursive: true,
+          });
         }
       }
 

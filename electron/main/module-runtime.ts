@@ -205,7 +205,11 @@ export async function buildModulesSetupPayload(
       const info = await moduleManager.getModuleSetupInfo(imp.module_id, projectDir);
       let libDir: string | undefined;
       if (workingDir && info.libDir) {
-        libDir = path.join(workingDir, imp.alias, info.libDir);
+        // Module-owned files live under ``<workdir>/tree/<alias>/...``
+        // post-Option-A (see bindImportedModule above); the lib dir
+        // passed to the kernel's ``pdv.modules.setup`` handler follows
+        // that same layout so ``sys.path`` points at the right place.
+        libDir = path.join(workingDir, "tree", imp.alias, info.libDir);
       }
       modules.push({
         lib_paths: [],
@@ -270,12 +274,24 @@ export async function bindImportedModule(
 
   const moduleIndex = await moduleManager.readModuleIndex(installPath);
 
-  // Copy each local_file backend file to workingDir/<alias>/<relative_path>
-  // and build a remapped index with updated relative_paths. Each remapped
-  // entry also carries `source_rel_path` — the original module-rooted
-  // rel-path (e.g. "scripts/run.py") — so the save-time sync step can
-  // mirror working-dir edits back into <saveDir>/modules/<id>/. See
-  // ARCHITECTURE.md §5.13.
+  // Copy each local_file backend file to
+  // ``<workdir>/tree/<alias>/<relative_path>`` and build a remapped
+  // index with updated ``relative_paths``. The ``tree/`` prefix is the
+  // canonical working-dir/save-dir subdir for file-backed nodes
+  // (ARCHITECTURE.md §6.1/§6.2): ``serialize_node`` writes there,
+  // ``copyFilesForLoad`` mirrors from there, and the Option A fix in
+  // the #140 PR aligns every file-backed-node creation path on the
+  // same layout so in-memory ``relative_path`` stays stable across
+  // save/load cycles.
+  //
+  // Each remapped entry also carries ``source_rel_path`` — the
+  // original module-rooted rel-path (e.g. ``scripts/run.py``) — so
+  // the save-time sync step (§3) can mirror working-dir edits back
+  // into ``<saveDir>/modules/<id>/<source_rel_path>``.
+  //
+  // TODO(UUID): once the UUID-based file storage redesign lands this
+  // layout becomes ``tree/<uuid>/<filename>``; source_rel_path is
+  // unaffected because it is intentionally tree-path-agnostic.
   const remappedIndex = await Promise.all(
     moduleIndex.map(async (node) => {
       const nodeAny = node as unknown as Record<string, unknown>;
@@ -285,7 +301,7 @@ export async function bindImportedModule(
       if (!relPath || !workingDir) return node;
 
       const srcPath = path.join(installPath, relPath);
-      const destRelPath = path.join(importedModule.alias, relPath);
+      const destRelPath = path.join("tree", importedModule.alias, relPath);
       const destPath = path.join(workingDir, destRelPath);
       await fs.mkdir(path.dirname(destPath), { recursive: true });
       await fs.copyFile(srcPath, destPath);

@@ -206,10 +206,15 @@ def handle_file_register(msg: dict) -> None:
         return
 
     # Build relative path: the file is expected under
-    # <working_dir>/<tree_path_segments>/<filename>.
-    # Store as relative (not absolute) so serialize_node produces portable paths.
+    # ``<working_dir>/tree/<tree_path_segments>/<filename>``.
+    # The ``tree/`` prefix is the canonical working-dir/save-dir subdir
+    # for every file-backed tree node (ARCHITECTURE.md §6.1/§6.2) —
+    # ``serialize_node`` writes into it and ``copyFilesForLoad`` mirrors
+    # from it, so keeping the in-memory rel-path prefixed here ensures
+    # the value stays stable across save/load cycles. See the #140 PR's
+    # Option-A canonical-layout fix.
     segments = tree_path.split(".") if tree_path else []
-    relative_path = os.path.join(*segments, filename) if segments else filename
+    relative_path = os.path.join("tree", *segments, filename)
 
     # Use explicit name if provided, otherwise derive from filename stem
     if explicit_name:

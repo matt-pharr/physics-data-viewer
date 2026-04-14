@@ -484,10 +484,14 @@ def handle_module_reload_libs(msg: dict) -> None:
         except (KeyError, TypeError):
             is_module = False
 
-    # ``<workdir>/<alias>/lib/`` is where bindImportedModule places lib files
-    # for v4 modules. For modules authored in-session (workflow B), the same
-    # convention applies because the empty-module creation handler seeds the
-    # working dir with ``<alias>/{scripts,lib,plots}/``.
+    # ``<workdir>/tree/<alias>/lib/`` is where bindImportedModule places
+    # lib files for v4 modules. For modules authored in-session
+    # (workflow B), the same convention applies because the empty-
+    # module creation handler seeds the working dir with
+    # ``tree/<alias>/{scripts,lib,plots}/``. The ``tree/`` prefix is
+    # the canonical working-dir/save-dir subdir documented in
+    # ARCHITECTURE.md §6.1/§6.2 — every file-backed tree node lives
+    # there so ``relative_path`` stays stable across save/load.
     #
     # Use realpath on both sides of the comparison: on macOS, ``/var`` is a
     # symlink to ``/private/var``, and a module's ``__file__`` can come back
@@ -497,7 +501,9 @@ def handle_module_reload_libs(msg: dict) -> None:
     lib_prefix = ""
     if is_module and working_dir:
         try:
-            lib_prefix = os.path.realpath(os.path.join(working_dir, alias, "lib"))
+            lib_prefix = os.path.realpath(
+                os.path.join(working_dir, "tree", alias, "lib")
+            )
         except Exception:  # noqa: BLE001
             lib_prefix = ""
 

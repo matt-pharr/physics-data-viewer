@@ -85,12 +85,17 @@ function isRecord(value: unknown): value is Record<string, unknown> {
  *   inside module ``toy`` yields ``sourceRelDir = "scripts/helpers"``).
  *   Empty when the target equals the module root.
  * - ``workingDirSegments`` — the filesystem path segments relative to
- *   the kernel working directory. For module-owned targets this is
- *   ``[alias, ...rest]`` (no ``tree/`` prefix) so the on-disk layout
- *   matches what ``bindImportedModule`` produces in §2.
+ *   the kernel working directory, *including* the canonical ``tree/``
+ *   subdirectory prefix. Module-owned files live at
+ *   ``<workdir>/tree/<alias>/<rest>`` so the on-disk layout matches
+ *   what ``serialize_node`` produces at save time, which keeps
+ *   ``relative_path`` stable across save/load cycles. The forthcoming
+ *   UUID-based storage redesign will replace the content of the
+ *   per-node rel path but keep this single-canonical-layout contract.
  *
  * Returns ``null`` when ``targetPath`` is not inside any known module,
- * in which case the caller should use its legacy ``tree/`` layout.
+ * in which case the caller routes through the standard ``tree/<path>``
+ * layout for project-level files.
  */
 function analyseModuleTarget(
   targetPath: string,
@@ -103,7 +108,10 @@ function analyseModuleTarget(
   return {
     moduleAlias: alias,
     sourceRelDir: rest.join("/"),
-    workingDirSegments: [alias, ...rest],
+    // TODO(UUID): replace with ``["tree", "<uuid>"]`` once the UUID-
+    // based file storage redesign lands — the tree-path-to-filesystem
+    // mapping goes away and file locations become identity-stable.
+    workingDirSegments: ["tree", alias, ...rest],
   };
 }
 
@@ -286,11 +294,15 @@ export function registerTreeNamespaceScriptIpcHandlers(
       const safeName = sanitizeScriptName(scriptName, language);
       const scriptNodeName = path.parse(safeName).name;
 
-      // Module-owned scripts live under ``<workdir>/<alias>/<...>/<file>``
-      // and carry ``source_rel_path`` so the save-time sync (§3) mirrors
-      // edits to ``<saveDir>/modules/<id>/<source_rel_path>``. Plain
-      // project scripts keep the pre-existing
-      // ``<workdir>/<...targetPath>/<file>`` layout.
+      // Every file-backed tree node lives under the canonical
+      // ``<workdir>/tree/...`` subdirectory so the in-memory
+      // ``relative_path`` matches what ``serialize_node`` emits at save
+      // time and what ``copyFilesForLoad`` mirrors on reload. The
+      // pre-Option-A layout that dropped the ``tree/`` prefix for
+      // ``tree:createScript`` produced a rel-path drift across
+      // save/load (see the #140 PR's follow-up discussion on the
+      // checksum fix). Module-owned files also get the prefix via
+      // ``analyseModuleTarget``.
       const knownAliases = await getKnownModuleAliases();
       const moduleInfo = analyseModuleTarget(targetPath, knownAliases);
 
@@ -304,16 +316,26 @@ export function registerTreeNamespaceScriptIpcHandlers(
           : safeName;
         moduleId = moduleInfo.moduleAlias;
       } else {
-        scriptsDir = path.join(workingDir, ...targetPath.split(".").filter(Boolean));
+        scriptsDir = path.join(
+          workingDir,
+          "tree",
+          ...targetPath.split(".").filter(Boolean),
+        );
       }
       await fs.mkdir(scriptsDir, { recursive: true });
       const scriptPath = path.join(scriptsDir, safeName);
       await ensureScriptFile(scriptPath, language);
 
+      // Register with a workdir-relative path so the in-memory
+      // ``relative_path`` matches the ``tree-index.json`` entry post
+      // save/load. ``scriptPath`` (absolute) is still returned to the
+      // renderer because the external-editor spawn needs an absolute
+      // path.
+      const registeredRelPath = path.relative(workingDir, scriptPath);
       await commRouter.request(PDVMessageType.SCRIPT_REGISTER, {
         parent_path: targetPath,
         name: scriptNodeName,
-        relative_path: scriptPath,
+        relative_path: registeredRelPath,
         language,
         module_id: moduleId,
         source_rel_path: sourceRelPath,
@@ -351,10 +373,13 @@ export function registerTreeNamespaceScriptIpcHandlers(
       }
 
       const treePath = targetPath ? `${targetPath}.${safeName}` : safeName;
+      // Register with a workdir-relative path so the in-memory
+      // ``relative_path`` matches what ``serialize_node`` emits at save
+      // time (see the Option A canonical-layout commit).
       await commRouter.request(PDVMessageType.NOTE_REGISTER, {
         parent_path: targetPath,
         name: safeName,
-        relative_path: notePath,
+        relative_path: path.relative(workingDir, notePath),
       });
       return { success: true, notePath, treePath };
     }
@@ -381,9 +406,10 @@ export function registerTreeNamespaceScriptIpcHandlers(
         return { success: false, error: "GUI name must contain at least one alphanumeric character" };
       }
 
-      // Module-owned GUIs live under ``<workdir>/<alias>/<...>/<file>``
-      // (no ``tree/`` prefix) to match the bind path; project GUIs stay
-      // under ``<workdir>/tree/<...>`` per the existing convention.
+      // Every file-backed node lives under ``<workdir>/tree/...`` so the
+      // in-memory ``relative_path`` stays stable across save/load.
+      // ``analyseModuleTarget`` already bakes the ``tree/`` prefix into
+      // its ``workingDirSegments`` result for module-owned targets.
       const knownAliases = await getKnownModuleAliases();
       const moduleInfo = analyseModuleTarget(targetPath, knownAliases);
 
@@ -420,7 +446,7 @@ export function registerTreeNamespaceScriptIpcHandlers(
       await commRouter.request(PDVMessageType.GUI_REGISTER, {
         parent_path: targetPath,
         name: safeName,
-        relative_path: guiPath,
+        relative_path: path.relative(workingDir, guiPath),
         module_id: moduleId,
         source_rel_path: sourceRelPath,
       });
@@ -511,8 +537,12 @@ export function registerTreeNamespaceScriptIpcHandlers(
       const workingDir = kernelWorkingDirs.get(kernelId);
       if (!workingDir) throw new Error(`Working dir not initialized: ${kernelId}`);
 
+      // File-backed nodes live under the canonical ``<workdir>/tree/...``
+      // subdirectory so the in-memory ``relative_path`` matches what
+      // ``serialize_node`` writes at save time and what
+      // ``copyFilesForLoad`` mirrors on reload.
       const segments = targetTreePath.split(".").filter(Boolean);
-      const destDir = segments.length > 0 ? path.join(workingDir, ...segments) : workingDir;
+      const destDir = path.join(workingDir, "tree", ...segments);
       await fs.mkdir(destDir, { recursive: true });
       const destPath = path.join(destDir, filename);
       await fs.copyFile(sourcePath, destPath);
