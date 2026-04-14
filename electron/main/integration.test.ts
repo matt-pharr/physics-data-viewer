@@ -99,6 +99,11 @@ describe("@slow Cross-boundary integration (Python + Electron)", { timeout: 120_
   let initialWorkingDir = "";
   const tempDirs: string[] = [];
 
+  // Bump the hook timeout to 20s (up from vitest's 10s default). On a
+  // busy CI runner the real ipykernel subprocess + comm bootstrap can
+  // take noticeably longer than local, and we'd rather give it breathing
+  // room than chase flakes. The test timeout is already 120s via the
+  // describe options above.
   beforeAll(async () => {
     setAppVersion("0.0.7");
     km = new KernelManager();
@@ -118,7 +123,7 @@ describe("@slow Cross-boundary integration (Python + Electron)", { timeout: 120_
     readyMessage = session.ready;
     initResponse = session.initResponse;
     initialWorkingDir = session.workingDir;
-  });
+  }, 20_000);
 
   afterAll(async () => {
     router.detach();
@@ -126,7 +131,7 @@ describe("@slow Cross-boundary integration (Python + Electron)", { timeout: 120_
     await Promise.all(
       tempDirs.map((dir) => fs.rm(dir, { recursive: true, force: true }))
     );
-  });
+  }, 20_000);
 
   it("start kernel -> bootstrap -> pdv.ready then pdv.init.response", async () => {
     expect(readyMessage).not.toBeNull();
