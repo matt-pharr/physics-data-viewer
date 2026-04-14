@@ -49,6 +49,17 @@ export interface ProjectModuleImport {
   version: string;
   /** Optional imported revision hash. */
   revision?: string;
+  /**
+   * How this module entered the project.
+   *
+   * - ``"imported"`` (default): copied from the global store via
+   *   ``modules:importToProject``.
+   * - ``"in_session"``: authored in-app via ``modules:createEmpty``
+   *   (workflow B of the #140 module editing workflow). On project load,
+   *   in-session modules are restored from ``<saveDir>/modules/<id>/``
+   *   since they have no upstream install path to fall back to.
+   */
+  origin?: "imported" | "in_session";
 }
 
 /**
@@ -83,6 +94,47 @@ export interface ProjectManifest {
   modules: ProjectModuleImport[];
   /** Persisted per-module settings keyed by module alias. */
   module_settings: Record<string, Record<string, unknown>>;
+}
+
+/**
+ * A file-backed tree node that belongs to a ``PDVModule`` and therefore
+ * needs to be mirrored from the working directory back into
+ * ``<saveDir>/modules/<module_id>/<source_rel_path>`` during save.
+ *
+ * Emitted by the kernel's ``handle_project_save`` in the save response,
+ * consumed by the project:save IPC handler. See ARCHITECTURE.md §5.13
+ * and the #140 module editing workflow plan §3.
+ */
+export interface ModuleOwnedFile {
+  /** Owning module's stable id (matches ``<saveDir>/modules/<id>/``). */
+  module_id: string;
+  /** Path of the file relative to its module root, e.g. ``scripts/run.py``. */
+  source_rel_path: string;
+  /** Absolute on-disk path of the file as it currently exists in the working directory. */
+  workdir_path: string;
+}
+
+/**
+ * Per-module manifest bundle emitted by the kernel's ``project:save`` handler.
+ *
+ * Used by ``ipc-register-project.ts`` to write ``pdv-module.json`` and
+ * ``module-index.json`` into ``<saveDir>/modules/<module_id>/`` so that
+ * an in-session module can be rebound at project-load time via the
+ * existing v4 bind path, and so that a subsequent export (§9) can
+ * publish the module to the global store. See the #140 workflow plan §7.
+ */
+export interface ModuleManifestBundle {
+  module_id: string;
+  name: string;
+  version: string;
+  description?: string;
+  language?: "python" | "julia";
+  dependencies?: Array<Record<string, unknown>>;
+  /**
+   * Module-root-relative node descriptors — the same shape used in the
+   * v4 ``module-index.json`` format consumed by ``bindImportedModule``.
+   */
+  entries: Array<Record<string, unknown>>;
 }
 
 /** Current schema major version. Increment on breaking changes to project.json. */
@@ -182,7 +234,12 @@ export class ProjectManager {
     saveDir: string,
     codeCells: unknown,
     options?: { language?: "python" | "julia"; interpreterPath?: string; projectName?: string }
-  ): Promise<{ checksum: string; nodeCount: number }> {
+  ): Promise<{
+    checksum: string;
+    nodeCount: number;
+    moduleOwnedFiles: ModuleOwnedFile[];
+    moduleManifests: ModuleManifestBundle[];
+  }> {
     // Ensure the save directory exists (creates it when the user enters a new project name
     // via the Save As dialog, so the folder hasn't been created yet).
     await fs.mkdir(saveDir, { recursive: true });
@@ -193,9 +250,20 @@ export class ProjectManager {
       save_dir: saveDir,
     }, { keepAlivePushType: PDVMessageType.PROGRESS });
 
-    const payload = response.payload as { checksum?: string; node_count?: number };
+    const payload = response.payload as {
+      checksum?: string;
+      node_count?: number;
+      module_owned_files?: ModuleOwnedFile[];
+      module_manifests?: ModuleManifestBundle[];
+    };
     const checksum = payload.checksum ?? "";
     const nodeCount = payload.node_count ?? 0;
+    const moduleOwnedFiles = Array.isArray(payload.module_owned_files)
+      ? payload.module_owned_files
+      : [];
+    const moduleManifests = Array.isArray(payload.module_manifests)
+      ? payload.module_manifests
+      : [];
 
     // Step 2 — write code-cells.json.
     await fs.writeFile(
@@ -237,7 +305,7 @@ export class ProjectManager {
       "utf8"
     );
 
-    return { checksum, nodeCount };
+    return { checksum, nodeCount, moduleOwnedFiles, moduleManifests };
   }
 
   /**

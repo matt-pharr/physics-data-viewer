@@ -146,6 +146,21 @@ export const PDVMessageType = {
   MODULE_REGISTER: "pdv.module.register",
   /** Kernel → app. Confirms module registration. */
   MODULE_REGISTER_RESPONSE: "pdv.module.register.response",
+  /**
+   * App → kernel. Create an empty PDVModule at the top of the tree
+   * with three conventional subtrees (``scripts``, ``lib``, ``plots``).
+   * Used by workflow B of the #140 module editing plan.
+   */
+  MODULE_CREATE_EMPTY: "pdv.module.create_empty",
+  /** Kernel → app. Confirms empty-module creation. */
+  MODULE_CREATE_EMPTY_RESPONSE: "pdv.module.create_empty.response",
+  /**
+   * App → kernel. Patch mutable metadata fields (name, version, description)
+   * on an existing PDVModule. module_id and language are read-only.
+   */
+  MODULE_UPDATE: "pdv.module.update",
+  /** Kernel → app. Confirms module metadata update; echoes the new values. */
+  MODULE_UPDATE_RESPONSE: "pdv.module.update.response",
   /** App → kernel. Register a PDVGui node in the tree. */
   GUI_REGISTER: "pdv.gui.register",
   /** Kernel → app. Confirms GUI registration. */
@@ -166,6 +181,15 @@ export const PDVMessageType = {
   MODULES_SETUP: "pdv.modules.setup",
   /** Kernel → app. Confirms module setup; carries registered handler map. */
   MODULES_SETUP_RESPONSE: "pdv.modules.setup.response",
+  /**
+   * App → kernel. importlib.reload every Python module whose ``__file__``
+   * sits under ``<workdir>/<alias>/lib/``. Called as a preflight before
+   * ``script:run`` on a module-owned script so lib edits take effect on
+   * the next run without restarting the kernel. See the #140 workflow plan §4.
+   */
+  MODULE_RELOAD_LIBS: "pdv.module.reload_libs",
+  /** Kernel → app. Lists reloaded module names and any per-module errors. */
+  MODULE_RELOAD_LIBS_RESPONSE: "pdv.module.reload_libs.response",
   /** App → kernel. Invoke a registered type handler for a tree node. */
   HANDLER_INVOKE: "pdv.handler.invoke",
   /** Kernel → app. Confirms handler invocation result. */
@@ -351,6 +375,13 @@ export interface PDVFileRegisterPayload {
   name?: string;
   /** Optional module ID that owns this file node. */
   module_id?: string;
+  /**
+   * Optional path relative to the owning module's root
+   * (e.g. ``"lib/helpers.py"``). Set by ``tree:createLib`` /
+   * module bind path for workflow A/B save-time sync. See
+   * ARCHITECTURE.md §5.13.
+   */
+  source_rel_path?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -427,6 +458,10 @@ export interface NodeDescriptor {
   module_name?: string;
   /** Module version. Present when type is "module". */
   module_version?: string;
+  /** Module description. Present when type is "module" and a description is set. */
+  module_description?: string;
+  /** Module kernel language. Present when type is "module". */
+  module_language?: "python" | "julia";
 }
 
 // ---------------------------------------------------------------------------

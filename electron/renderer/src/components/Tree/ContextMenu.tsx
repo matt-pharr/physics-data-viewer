@@ -105,6 +105,11 @@ export function getActionsForNode(node: TreeNodeData) {
     actions.push({ id: 'edit_gui', label: 'Edit GUI', disabled: false });
   }
 
+  if (isModule) {
+    actions.push({ id: 'edit_module_metadata', label: 'Edit metadata...', disabled: false });
+    actions.push({ id: 'export_module', label: 'Export to global store...', disabled: false });
+  }
+
   if (node.type === 'script') {
     actions.push(
       { id: 'run', label: 'Run...', disabled: false },
@@ -123,10 +128,14 @@ export function getActionsForNode(node: TreeNodeData) {
 
   // ── Creation actions (containers only) ──
 
-  if (isContainer) {
+  if (isContainer || isModule) {
     actions.push({ id: 'create_script', label: 'Create new script', disabled: false });
     actions.push({ id: 'create_note', label: 'Create new note', disabled: false });
     actions.push({ id: 'new_gui', label: 'Create new GUI', disabled: false });
+    // Lib creation is meaningful only inside a module's subtree. The app
+    // handler validates this at IPC time; we surface the option whenever
+    // the user is right-clicking a container so it's discoverable.
+    actions.push({ id: 'create_lib', label: 'Create new lib', disabled: false });
   }
 
   // ── Common actions (all nodes) ──

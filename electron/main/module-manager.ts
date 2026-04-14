@@ -826,6 +826,60 @@ export class ModuleManager {
   }
 
   /**
+   * Return the canonical global-store directory for a module id.
+   *
+   * Unlike {@link getModuleInstallPath}, this method always returns the
+   * packages-root path ``<~/.PDV/modules/packages/<moduleId>>`` regardless
+   * of whether the module is currently installed there. Used by
+   * ``modules:exportFromProject`` (workflow A/B §9) to decide where to
+   * publish an edited or in-session module.
+   *
+   * @param moduleId - Module identifier.
+   * @returns Absolute directory path where the module would live in the
+   *   global store, or null when the module id is empty/invalid.
+   */
+  getGlobalStorePath(moduleId: string): string | null {
+    if (!moduleId) return null;
+    return path.join(this.packagesRoot, moduleId);
+  }
+
+  /**
+   * Register (or refresh) a module directory in the global-store index.
+   *
+   * Used by ``modules:exportFromProject`` after the directory has been
+   * copied into ``<~/.PDV/modules/packages/<id>/>``. Reads the manifest
+   * from the freshly-placed copy, builds a {@link ModuleDescriptor},
+   * and upserts it into the store index so ``listInstalled()`` — and
+   * therefore the Import dialog — immediately see the new entry.
+   *
+   * The ``source`` field is set to a synthetic ``{ type: "local" }``
+   * pointing at the global-store directory itself, since an exported
+   * module has no natural upstream source (users can set ``upstream``
+   * in ``pdv-module.json`` separately if they want to track a git repo).
+   *
+   * @param moduleDir - Absolute directory inside the global store.
+   * @returns The descriptor that was upserted into the index.
+   * @throws {Error} When the manifest at ``moduleDir`` is invalid.
+   */
+  async registerInGlobalStore(moduleDir: string): Promise<ModuleDescriptor> {
+    const manifest = await this.readAndValidateManifest(moduleDir);
+    const descriptor: ModuleDescriptor = {
+      id: manifest.id,
+      name: manifest.name,
+      version: manifest.version,
+      description: manifest.description,
+      language: manifest.language,
+      source: { type: "local", location: moduleDir },
+      installPath: moduleDir,
+      upstream: manifest.upstream,
+    };
+    const index = await this.readIndex();
+    this.upsertIndex(index, descriptor);
+    await this.writeIndex(index);
+    return descriptor;
+  }
+
+  /**
    * Return the declared dependencies for one module from its manifest.
    *
    * @param moduleId - Module identifier.
@@ -892,48 +946,6 @@ export class ModuleManager {
       throw new Error(`module-index.json must be an array in ${indexPath}`);
     }
     return parsed as NodeDescriptor[];
-  }
-
-  /**
-   * Resolve declared module files from the manifest `files` array.
-   *
-   * @param moduleId - Installed module identifier.
-   * @returns Resolved file descriptors with absolute paths.
-   * @throws {Error} When module is not installed or a file doesn't exist.
-   */
-  async resolveModuleFiles(
-    moduleId: string,
-    projectDir?: string | null,
-  ): Promise<Array<{ name: string; path: string; type: "namelist" | "lib" | "file" }>> {
-    const module = await this.resolveModuleRecord(moduleId, projectDir);
-    if (!module) {
-      return [];
-    }
-    const moduleDir = module.installPath ?? path.join(this.packagesRoot, moduleId);
-    const manifest = await this.readAndValidateManifest(moduleDir);
-    if (!manifest.files || manifest.files.length === 0) {
-      return [];
-    }
-    const resolved: Array<{ name: string; path: string; type: "namelist" | "lib" | "file" }> = [];
-    for (const file of manifest.files) {
-      const absPath = path.resolve(moduleDir, file.path);
-      try {
-        const stat = await fs.stat(absPath);
-        if (!stat.isFile()) {
-          console.warn(`[pdv] Module file is not a file: ${file.path} (${moduleId})`);
-          continue;
-        }
-      } catch {
-        console.warn(`[pdv] Module file not found: ${file.path} (${moduleId})`);
-        continue;
-      }
-      resolved.push({
-        name: file.name,
-        path: absPath,
-        type: file.type,
-      });
-    }
-    return resolved;
   }
 
   /**

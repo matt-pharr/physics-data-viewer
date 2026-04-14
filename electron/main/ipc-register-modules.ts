@@ -14,7 +14,7 @@
 
 import * as fs from "fs/promises";
 import * as path from "path";
-import { BrowserWindow, ipcMain } from "electron";
+import { BrowserWindow, dialog, ipcMain } from "electron";
 
 import { CommRouter } from "./comm-router";
 import {
@@ -22,7 +22,11 @@ import {
   IPC,
   ModuleActionRequest,
   ModuleActionResult,
+  ModuleCreateEmptyRequest,
+  ModuleCreateEmptyResult,
   ModuleDescriptor,
+  ModuleExportRequest,
+  ModuleExportResult,
   ModuleHealthWarning,
   ModuleImportRequest,
   ModuleImportResult,
@@ -31,6 +35,8 @@ import {
   ModuleSettingsRequest,
   ModuleSettingsResult,
   ModuleUninstallResult,
+  ModuleUpdateMetadataRequest,
+  ModuleUpdateMetadataResult,
   ModuleUpdateResult,
 } from "./ipc";
 import { KernelManager } from "./kernel-manager";
@@ -232,6 +238,310 @@ export function registerModulesIpcHandlers(
         warnings,
       };
     }
+  );
+
+  ipcMain.handle(
+    IPC.modules.createEmpty,
+    async (_event, request: ModuleCreateEmptyRequest): Promise<ModuleCreateEmptyResult> => {
+      // Normalize and validate the requested id. Collision detection mirrors
+      // the importToProject flow: any existing on-disk OR pending module alias
+      // blocks creation and the response suggests the next available id.
+      let baseAlias: string;
+      try {
+        baseAlias = normalizeModuleAlias(request.id ?? "");
+      } catch (error) {
+        return {
+          success: false,
+          status: "error",
+          error: `Invalid module id: ${(error as Error).message}`,
+        };
+      }
+
+      const activeManifest = await readActiveProjectManifest();
+      const diskModules = activeManifest?.modules ?? [];
+      const pendingImports = getPendingModuleImports();
+      const existingAliases = new Set(
+        [...diskModules, ...pendingImports].map((m) => m.alias),
+      );
+      if (existingAliases.has(baseAlias)) {
+        return {
+          success: false,
+          status: "conflict",
+          alias: baseAlias,
+          suggestedAlias: suggestModuleAlias(baseAlias, existingAliases),
+          error: `Module alias already exists: ${baseAlias}`,
+        };
+      }
+
+      const activeKernelId = getActiveKernelId();
+      if (!activeKernelId || !kernelManager.getKernel(activeKernelId)) {
+        return {
+          success: false,
+          status: "error",
+          error: "No running kernel — start one before creating a module.",
+        };
+      }
+      const workingDir = kernelWorkingDirs.get(activeKernelId);
+
+      // Seed working-dir scaffolding under the canonical
+      // ``<workdir>/tree/<alias>/{scripts,lib,plots}/`` layout so
+      // subsequent ``tree:createScript`` / ``tree:createLib`` hits land
+      // at paths that match where ``bindImportedModule`` would have
+      // placed an imported v4 module's files — see the Option A
+      // canonical-layout fix and ARCHITECTURE.md §6.1/§6.2.
+      if (workingDir) {
+        for (const child of ["scripts", "lib", "plots"]) {
+          await fs.mkdir(path.join(workingDir, "tree", baseAlias, child), {
+            recursive: true,
+          });
+        }
+      }
+
+      const language =
+        request.language ??
+        (activeManifest?.language as "python" | "julia" | undefined) ??
+        "python";
+
+      try {
+        await commRouter.request(PDVMessageType.MODULE_CREATE_EMPTY, {
+          id: baseAlias,
+          name: request.name || baseAlias,
+          version: request.version || "0.1.0",
+          description: request.description ?? "",
+          language,
+        });
+      } catch (error) {
+        return {
+          success: false,
+          status: "error",
+          error: `Kernel rejected create_empty: ${(error as Error).message}`,
+        };
+      }
+
+      // Record the new module in the pending-imports list so it survives
+      // until the first project:save, at which point §3's manifest flush
+      // writes it into project.json. Marking origin="in_session" lets the
+      // project load path know to read from <saveDir>/modules/<id>/ rather
+      // than expecting a global-store install entry.
+      pendingImports.push({
+        module_id: baseAlias,
+        alias: baseAlias,
+        version: request.version || "0.1.0",
+        origin: "in_session",
+      });
+
+      // If a project directory is already set, persist the manifest entry
+      // immediately so a mid-session reload (without a project:save) still
+      // sees the new module. Match the import handler's write-lock pattern.
+      const activeProjectDir = getActiveProjectDir();
+      if (activeProjectDir && activeManifest) {
+        await runWithProjectManifestWriteLock(activeProjectDir, async () => {
+          const latest = await ProjectManager.readManifest(activeProjectDir);
+          const latestAliases = new Set(latest.modules.map((m) => m.alias));
+          if (latestAliases.has(baseAlias)) {
+            return;
+          }
+          const updated = {
+            ...latest,
+            modules: [
+              ...latest.modules,
+              {
+                module_id: baseAlias,
+                alias: baseAlias,
+                version: request.version || "0.1.0",
+                origin: "in_session" as const,
+              },
+            ],
+            module_settings: latest.module_settings ?? {},
+          };
+          await ProjectManager.saveManifest(activeProjectDir, updated);
+        });
+        // Drop the pending entry now that it's on disk — otherwise §3's
+        // pending flush would try to fs.cp an install path that doesn't
+        // exist for in-session modules and push a duplicate manifest entry.
+        const idx = pendingImports.findIndex((m) => m.alias === baseAlias);
+        if (idx >= 0) pendingImports.splice(idx, 1);
+      }
+
+      win.webContents.send(IPC.push.treeChanged, {
+        changed_paths: [baseAlias],
+        change_type: "updated",
+      });
+
+      return { success: true, status: "created", alias: baseAlias };
+    },
+  );
+
+  ipcMain.handle(
+    IPC.modules.updateMetadata,
+    async (_event, request: ModuleUpdateMetadataRequest): Promise<ModuleUpdateMetadataResult> => {
+      if (!request?.alias) {
+        return { success: false, error: "alias is required" };
+      }
+      const activeKernelId = getActiveKernelId();
+      if (!activeKernelId || !kernelManager.getKernel(activeKernelId)) {
+        return { success: false, error: "No running kernel" };
+      }
+      try {
+        const response = await commRouter.request(PDVMessageType.MODULE_UPDATE, {
+          alias: request.alias,
+          name: request.name,
+          version: request.version,
+          description: request.description,
+        });
+        const payload = response.payload as {
+          alias?: string;
+          name?: string;
+          version?: string;
+          description?: string;
+        };
+        win.webContents.send(IPC.push.treeChanged, {
+          changed_paths: [request.alias],
+          change_type: "updated",
+        });
+        return {
+          success: true,
+          alias: payload.alias,
+          name: payload.name,
+          version: payload.version,
+          description: payload.description,
+        };
+      } catch (error) {
+        return {
+          success: false,
+          error: `Kernel rejected update: ${(error as Error).message}`,
+        };
+      }
+    },
+  );
+
+  ipcMain.handle(
+    IPC.modules.exportFromProject,
+    async (_event, request: ModuleExportRequest): Promise<ModuleExportResult> => {
+      if (!request?.alias) {
+        return { success: false, status: "error", error: "alias is required" };
+      }
+      const activeProjectDir = getActiveProjectDir();
+      if (!activeProjectDir) {
+        return {
+          success: false,
+          status: "not_saved",
+          error: "Save the project before exporting a module.",
+        };
+      }
+      const manifest = await readActiveProjectManifest();
+      const imported = manifest?.modules ?? [];
+      const entry = imported.find((m) => m.alias === request.alias);
+      if (!entry) {
+        return {
+          success: false,
+          status: "error",
+          error: `No imported or in-session module with alias: ${request.alias}`,
+        };
+      }
+      // The project-local module copy at <saveDir>/modules/<module_id>/
+      // is always the authoritative source for export: §3's sync step
+      // has mirrored edits into it, and §7's manifest writer has
+      // stamped pdv-module.json + module-index.json there. For in-session
+      // modules (origin="in_session") this path only exists after at
+      // least one project:save has completed.
+      const srcDir = path.join(activeProjectDir, "modules", entry.module_id);
+      try {
+        const srcStat = await fs.stat(srcDir);
+        if (!srcStat.isDirectory()) {
+          return {
+            success: false,
+            status: "not_saved",
+            error: `Module source is not a directory: ${srcDir}`,
+          };
+        }
+      } catch {
+        return {
+          success: false,
+          status: "not_saved",
+          error:
+            "Module is not present in the project save directory. " +
+            "Run File → Save Project before exporting.",
+        };
+      }
+
+      const destDir = moduleManager.getGlobalStorePath(entry.module_id);
+      if (!destDir) {
+        return {
+          success: false,
+          status: "error",
+          error: "Could not resolve global store path.",
+        };
+      }
+
+      // Confirm overwrite for an existing global-store entry — the
+      // user might be publishing changes (expected) or blowing away
+      // an unrelated module that happens to share the id (not expected
+      // but worth a safety check). Skip the prompt when the renderer
+      // passes overwrite: true (future scripted flows).
+      let destExists = false;
+      try {
+        await fs.stat(destDir);
+        destExists = true;
+      } catch {
+        // destination doesn't exist yet — fresh publish, no prompt needed.
+      }
+      if (destExists && !request.overwrite) {
+        const confirmResult = await dialog.showMessageBox(win, {
+          type: "question",
+          buttons: ["Overwrite", "Cancel"],
+          defaultId: 0,
+          cancelId: 1,
+          title: "Overwrite existing module?",
+          message: `A module named "${entry.module_id}" already exists in the global store.`,
+          detail:
+            `Publishing will overwrite ${destDir}. Other projects that ` +
+            `import this module will pick up the changes on their next ` +
+            `import. Bundled example modules cannot be overwritten here.`,
+        });
+        if (confirmResult.response !== 0) {
+          return { success: false, status: "cancelled" };
+        }
+      }
+
+      try {
+        await fs.mkdir(path.dirname(destDir), { recursive: true });
+        await fs.cp(srcDir, destDir, { recursive: true, force: true });
+      } catch (error) {
+        return {
+          success: false,
+          status: "error",
+          error: `Failed to copy module to global store: ${(error as Error).message}`,
+        };
+      }
+
+      // Register the freshly-copied directory in the global store
+      // index so listInstalled() (and therefore the Import dialog)
+      // picks it up immediately. Without this step, fs.cp alone puts
+      // the files in place but leaves the index stale, so users can't
+      // import what they just exported.
+      try {
+        await moduleManager.registerInGlobalStore(destDir);
+      } catch (error) {
+        return {
+          success: false,
+          status: "error",
+          error: `Copied module to ${destDir} but failed to register it: ${(error as Error).message}`,
+        };
+      }
+
+      // TODO(#182): if pdv-module.json at destDir has an ``upstream`` git
+      // URL, offer to commit and push the changes instead of (or in
+      // addition to) writing to the global store. Track deletion
+      // propagation for that flow as well — see the ENOENT swallow in
+      // ipc-register-project.ts's sync step.
+
+      return {
+        success: true,
+        status: "exported",
+        destination: destDir,
+      };
+    },
   );
 
   ipcMain.handle(

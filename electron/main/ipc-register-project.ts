@@ -18,8 +18,18 @@ import { ipcMain, type BrowserWindow } from "electron";
 
 import { IPC } from "./ipc";
 import { ModuleManager } from "./module-manager";
-import { ProjectManager, type ProjectManifest, type ProjectModuleImport } from "./project-manager";
+import {
+  ProjectManager,
+  type ModuleManifestBundle,
+  type ModuleOwnedFile,
+  type ProjectManifest,
+  type ProjectModuleImport,
+} from "./project-manager";
 import { copyFilesForLoad } from "./project-file-sync";
+import {
+  writeModuleIndex,
+  writeModuleManifest,
+} from "./module-manifest-writer";
 
 interface RegisterProjectIpcHandlersOptions {
   projectManager: ProjectManager;
@@ -37,6 +47,110 @@ interface RegisterProjectIpcHandlersOptions {
   runSerializedProjectManifestMutation: <T>(dir: string, task: () => Promise<T>) => Promise<T>;
   getMainWindow: () => BrowserWindow | null;
   getInterpreterPath: () => string | undefined;
+}
+
+/**
+ * Mirror each module-owned file's working-dir copy into the project-local
+ * module directory (``<saveDir>/modules/<module_id>/<source_rel_path>``).
+ *
+ * Called at the tail of ``IPC.project.save`` so that edits made to imported
+ * or in-session module files (scripts, libs, guis, namelists) survive a
+ * save → close → reopen cycle and can be exported back to the global
+ * store later. Skips entries whose ``workdir_path`` no longer exists
+ * (e.g. files deleted from the tree between serialization and this copy).
+ *
+ * Same-file short-circuit: when the working dir and save dir resolve to
+ * the same inode (mostly a test fixture scenario), ``fs.copyFile`` would
+ * fail with EBUSY — we detect and skip that case explicitly.
+ *
+ * @param saveDir - Absolute project save directory.
+ * @param moduleOwnedFiles - Entries from the kernel's save response.
+ * @returns Nothing. Errors are logged but do not fail the save — the
+ *   kernel-side serialization (the authoritative part) has already
+ *   succeeded by the time this runs.
+ */
+async function syncModuleOwnedFilesToSaveDir(
+  saveDir: string,
+  moduleOwnedFiles: ModuleOwnedFile[] | undefined,
+): Promise<void> {
+  if (!moduleOwnedFiles || moduleOwnedFiles.length === 0) return;
+  for (const entry of moduleOwnedFiles) {
+    if (!entry.module_id || !entry.source_rel_path || !entry.workdir_path) {
+      continue;
+    }
+    const dest = path.join(
+      saveDir,
+      "modules",
+      entry.module_id,
+      entry.source_rel_path,
+    );
+    try {
+      const srcResolved = path.resolve(entry.workdir_path);
+      const destResolved = path.resolve(dest);
+      if (srcResolved === destResolved) {
+        continue;
+      }
+      await fs.mkdir(path.dirname(dest), { recursive: true });
+      await fs.copyFile(srcResolved, destResolved);
+    } catch (error) {
+      const code = (error as NodeJS.ErrnoException)?.code;
+      if (code === "ENOENT") {
+        // Working-dir file vanished between serialization and sync —
+        // harmless, just skip it.
+        continue;
+      }
+      console.warn(
+        `[pdv] failed to sync module file ${entry.module_id}/${entry.source_rel_path} to save dir:`,
+        error,
+      );
+    }
+  }
+}
+
+/**
+ * Stamp ``pdv-module.json`` + ``module-index.json`` into
+ * ``<saveDir>/modules/<module_id>/`` for every module in the tree.
+ *
+ * Called at project-save time after the file-sync step (§3) has already
+ * placed each module-owned file's contents at the right on-disk
+ * location. The writer is authoritative on the schema shape; we just
+ * pipe the kernel-emitted bundle through. Errors are logged but never
+ * thrown — a manifest write failure must not block the save (the tree
+ * content itself is already persisted by the time we get here).
+ *
+ * @param saveDir - Active project save directory.
+ * @param bundles - Per-module manifest bundles from the save response.
+ * @returns Nothing.
+ */
+async function writeModuleManifestsToSaveDir(
+  saveDir: string,
+  bundles: ModuleManifestBundle[] | undefined,
+): Promise<void> {
+  if (!bundles || bundles.length === 0) return;
+  for (const bundle of bundles) {
+    if (!bundle.module_id) continue;
+    const moduleDir = path.join(saveDir, "modules", bundle.module_id);
+    try {
+      await writeModuleManifest(moduleDir, {
+        id: bundle.module_id,
+        name: bundle.name,
+        version: bundle.version,
+        description: bundle.description,
+        language: bundle.language,
+        dependencies: bundle.dependencies,
+        // Default lib_dir for v4 modules — matches the convention used
+        // by bundled example modules and read by buildModulesSetupPayload
+        // at kernel init / project-load time.
+        libDir: "lib",
+      });
+      await writeModuleIndex(moduleDir, bundle.entries ?? []);
+    } catch (error) {
+      console.warn(
+        `[pdv] failed to write module manifest for ${bundle.module_id}:`,
+        error,
+      );
+    }
+  }
 }
 
 /**
@@ -106,6 +220,18 @@ export function registerProjectIpcHandlers(
       // NOTE: file-backed nodes are already copied to saveDir/tree/ by the
       // Python serializer (serialize_node writes directly to save_dir).
       // No additional copy step is needed here.
+
+      // Mirror edited working-dir copies of module-owned files back into
+      // <saveDir>/modules/<id>/<source_rel_path>. See ARCHITECTURE.md §5.13
+      // and the #140 module editing workflow plan §3.
+      // TODO(#182): propagate deletions — if a module-owned file was removed
+      // from the tree, the pristine copy under <saveDir>/modules/<id>/ is
+      // left behind. Safe lacuna for now; fix alongside the GitHub push flow.
+      await syncModuleOwnedFilesToSaveDir(saveDir, saveResult.moduleOwnedFiles);
+      // Now that the file contents are in place, stamp pdv-module.json and
+      // module-index.json for every module in the tree so a fresh project
+      // reload can rebind them via the existing v4 bind path. See plan §7.
+      await writeModuleManifestsToSaveDir(saveDir, saveResult.moduleManifests);
 
       setActiveProjectDir(saveDir);
       await refreshProjectModuleHealth(saveDir);

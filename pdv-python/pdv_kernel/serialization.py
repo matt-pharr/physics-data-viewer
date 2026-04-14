@@ -308,6 +308,11 @@ def serialize_node(
         "created_at": now,
         "updated_at": now,
     }
+    # Module-owned file nodes carry the rel-path inside their owning
+    # module's root so the save-time sync step can mirror working-dir
+    # edits back to <saveDir>/modules/<id>/. See ARCHITECTURE.md §5.13.
+    if isinstance(value, PDVFile) and getattr(value, "source_rel_path", None):
+        descriptor["source_rel_path"] = value.source_rel_path
 
     if kind == KIND_FOLDER:
         descriptor["has_children"] = True

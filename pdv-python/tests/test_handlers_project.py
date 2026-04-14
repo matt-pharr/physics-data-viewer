@@ -250,6 +250,170 @@ class TestHandleProjectSave:
             assert 'metadata' in node, f"Missing metadata for {node['path']}"
             assert 'preview' in node['metadata']
 
+    def test_save_response_includes_module_owned_files(self, tree_with_comm, tmp_save_dir):
+        """Module-owned PDVFile nodes surface in the save response so the main
+        process can mirror them into <saveDir>/modules/<id>/<source_rel_path>."""
+        working_dir = tree_with_comm._working_dir
+        # Place a script file and a lib file under the working-dir alias.
+        scripts_dir = os.path.join(working_dir, 'my_mod', 'scripts')
+        lib_dir = os.path.join(working_dir, 'my_mod', 'lib')
+        os.makedirs(scripts_dir, exist_ok=True)
+        os.makedirs(lib_dir, exist_ok=True)
+        script_path = os.path.join(scripts_dir, 'run.py')
+        with open(script_path, 'w') as f:
+            f.write('def run(pdv_tree: dict):\n    return {}\n')
+        lib_path = os.path.join(lib_dir, 'helpers.py')
+        with open(lib_path, 'w') as f:
+            f.write('VALUE = 1\n')
+
+        # Build a PDVModule containing both.
+        module = PDVModule(module_id='my_mod', name='My', version='0.1.0')
+        module['scripts'] = PDVTree()
+        module['scripts.run'] = PDVScript(
+            relative_path=script_path,
+            module_id='my_mod',
+            source_rel_path='scripts/run.py',
+        )
+        module['lib'] = PDVTree()
+        module['lib.helpers'] = PDVLib(
+            relative_path=lib_path,
+            module_id='my_mod',
+            source_rel_path='lib/helpers.py',
+        )
+        tree_with_comm['my_mod'] = module
+
+        mock_comm = _make_mock_comm()
+        msg = _make_msg('pdv.project.save', {'save_dir': tmp_save_dir})
+        with patch.object(comms_mod, '_comm', mock_comm), \
+             patch.object(comms_mod, '_pdv_tree', tree_with_comm):
+            handle_project_save(msg)
+
+        # Find the save response among the sent messages.
+        response = next(
+            m for m in mock_comm._sent
+            if m.get('type') == 'pdv.project.save.response'
+        )
+        owned = response['payload'].get('module_owned_files', [])
+        # Should contain entries for both the script and the lib.
+        by_rel = {entry['source_rel_path']: entry for entry in owned}
+        assert 'scripts/run.py' in by_rel
+        assert 'lib/helpers.py' in by_rel
+        assert by_rel['scripts/run.py']['module_id'] == 'my_mod'
+        assert by_rel['lib/helpers.py']['module_id'] == 'my_mod'
+        # workdir_path must be absolute so the main process can open it directly.
+        assert os.path.isabs(by_rel['scripts/run.py']['workdir_path'])
+        assert os.path.isabs(by_rel['lib/helpers.py']['workdir_path'])
+
+    def test_save_response_includes_module_manifests(self, tree_with_comm, tmp_save_dir):
+        """Each PDVModule surfaces a full manifest bundle with module-root-relative descriptors."""
+        working_dir = tree_with_comm._working_dir
+        scripts_dir = os.path.join(working_dir, 'toy', 'scripts')
+        lib_dir = os.path.join(working_dir, 'toy', 'lib')
+        os.makedirs(scripts_dir, exist_ok=True)
+        os.makedirs(lib_dir, exist_ok=True)
+        script_path = os.path.join(scripts_dir, 'hello.py')
+        with open(script_path, 'w') as f:
+            f.write('def run(pdv_tree: dict):\n    return {}\n')
+        lib_path = os.path.join(lib_dir, 'helpers.py')
+        with open(lib_path, 'w') as f:
+            f.write('VALUE = 1\n')
+
+        from pdv_kernel.tree import PDVLib, PDVScript, PDVTree
+
+        module = PDVModule(
+            module_id='toy',
+            name='Toy',
+            version='0.1.0',
+            description='a toy',
+            language='python',
+        )
+        module['scripts'] = PDVTree()
+        module['scripts.hello'] = PDVScript(
+            relative_path=script_path,
+            module_id='toy',
+            source_rel_path='scripts/hello.py',
+        )
+        module['lib'] = PDVTree()
+        module['lib.helpers'] = PDVLib(
+            relative_path=lib_path,
+            module_id='toy',
+            source_rel_path='lib/helpers.py',
+        )
+        module['plots'] = PDVTree()
+        tree_with_comm['toy'] = module
+
+        mock_comm = _make_mock_comm()
+        msg = _make_msg('pdv.project.save', {'save_dir': tmp_save_dir})
+        with patch.object(comms_mod, '_comm', mock_comm), \
+             patch.object(comms_mod, '_pdv_tree', tree_with_comm):
+            handle_project_save(msg)
+
+        response = next(
+            m for m in mock_comm._sent
+            if m.get('type') == 'pdv.project.save.response'
+        )
+        manifests = response['payload'].get('module_manifests', [])
+        assert len(manifests) == 1
+        bundle = manifests[0]
+        assert bundle['module_id'] == 'toy'
+        assert bundle['name'] == 'Toy'
+        assert bundle['version'] == '0.1.0'
+        assert bundle['description'] == 'a toy'
+        assert bundle['language'] == 'python'
+
+        by_path = {e['path']: e for e in bundle['entries']}
+        # Three container entries (scripts, lib, plots) and two leaves
+        # — all rooted at the module, not prefixed with "toy.".
+        assert 'scripts' in by_path
+        assert 'lib' in by_path
+        assert 'plots' in by_path
+        assert by_path['scripts']['type'] == 'folder'
+        assert 'scripts.hello' in by_path
+        assert by_path['scripts.hello']['type'] == 'script'
+        assert by_path['scripts.hello']['storage']['relative_path'] == 'scripts/hello.py'
+        assert by_path['scripts.hello']['parent_path'] == 'scripts'
+        assert 'lib.helpers' in by_path
+        assert by_path['lib.helpers']['storage']['relative_path'] == 'lib/helpers.py'
+        assert by_path['lib.helpers']['type'] == 'lib'
+
+    def test_save_response_has_empty_manifests_when_no_modules(self, tree_with_comm, tmp_save_dir):
+        """Projects without PDVModule nodes emit an empty module_manifests list."""
+        tree_with_comm['score'] = 99
+        mock_comm = _make_mock_comm()
+        msg = _make_msg('pdv.project.save', {'save_dir': tmp_save_dir})
+        with patch.object(comms_mod, '_comm', mock_comm), \
+             patch.object(comms_mod, '_pdv_tree', tree_with_comm):
+            handle_project_save(msg)
+        response = next(
+            m for m in mock_comm._sent
+            if m.get('type') == 'pdv.project.save.response'
+        )
+        assert response['payload'].get('module_manifests', []) == []
+
+    def test_save_response_excludes_non_module_files(self, tree_with_comm, tmp_save_dir):
+        """Scripts outside any PDVModule subtree do not appear in module_owned_files."""
+        working_dir = tree_with_comm._working_dir
+        scripts_dir = os.path.join(working_dir, 'project_scripts')
+        os.makedirs(scripts_dir, exist_ok=True)
+        script_path = os.path.join(scripts_dir, 'plain.py')
+        with open(script_path, 'w') as f:
+            f.write('def run(pdv_tree: dict):\n    return {}\n')
+        # Plain PDVScript with no module context and no source_rel_path.
+        tree_with_comm['scripts'] = PDVTree()
+        tree_with_comm['scripts.plain'] = PDVScript(relative_path=script_path)
+
+        mock_comm = _make_mock_comm()
+        msg = _make_msg('pdv.project.save', {'save_dir': tmp_save_dir})
+        with patch.object(comms_mod, '_comm', mock_comm), \
+             patch.object(comms_mod, '_pdv_tree', tree_with_comm):
+            handle_project_save(msg)
+
+        response = next(
+            m for m in mock_comm._sent
+            if m.get('type') == 'pdv.project.save.response'
+        )
+        assert response['payload'].get('module_owned_files', []) == []
+
 
 class TestTwoPassLoading:
     """Tests for two-pass load ordering and metadata preservation."""

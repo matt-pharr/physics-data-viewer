@@ -159,7 +159,7 @@ export interface CodeCellData {
 /** File-menu action event payload emitted by `menu.onAction`. */
 export interface MenuActionPayload {
   /** Discriminated menu action identifier. */
-  action: "project:new" | "project:open" | "project:openRecent" | "project:save" | "project:saveAs" | "recentProjects:clear" | "modules:import" | "settings:open";
+  action: "project:new" | "project:open" | "project:openRecent" | "project:save" | "project:saveAs" | "recentProjects:clear" | "modules:import" | "modules:newEmpty" | "settings:open";
   /** Optional path argument for path-bearing menu actions. */
   path?: string;
 }
@@ -169,6 +169,7 @@ export interface MenuEnabledState {
   "project:save"?: boolean;
   "project:saveAs"?: boolean;
   "modules:import"?: boolean;
+  "modules:newEmpty"?: boolean;
 }
 
 /** Top-level menu metadata used by the Linux integrated menubar. */
@@ -699,6 +700,11 @@ export interface PDVApi {
       targetPath: string,
       guiName: string
     ): Promise<TreeCreateGuiResult>;
+    createLib(
+      kernelId: string,
+      targetPath: string,
+      libName: string
+    ): Promise<{ success: boolean; error?: string; libPath?: string; treePath?: string }>;
     addFile(
       kernelId: string,
       sourcePath: string,
@@ -753,6 +759,41 @@ export interface PDVApi {
     removeImport(moduleAlias: string): Promise<ModuleSettingsResult>;
     uninstall(moduleId: string): Promise<ModuleUninstallResult>;
     update(moduleId: string): Promise<ModuleInstallResult>;
+    createEmpty(request: {
+      id: string;
+      name: string;
+      version: string;
+      description?: string;
+      language?: "python" | "julia";
+    }): Promise<{
+      success: boolean;
+      alias?: string;
+      status?: "created" | "conflict" | "error";
+      suggestedAlias?: string;
+      error?: string;
+    }>;
+    updateMetadata(request: {
+      alias: string;
+      name?: string;
+      version?: string;
+      description?: string;
+    }): Promise<{
+      success: boolean;
+      alias?: string;
+      name?: string;
+      version?: string;
+      description?: string;
+      error?: string;
+    }>;
+    exportFromProject(request: {
+      alias: string;
+      overwrite?: boolean;
+    }): Promise<{
+      success: boolean;
+      status?: "exported" | "cancelled" | "not_saved" | "error";
+      destination?: string;
+      error?: string;
+    }>;
   };
   project: {
     save(saveDir: string, codeCells: unknown, projectName?: string): Promise<ProjectSaveResult>;
