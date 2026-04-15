@@ -48,9 +48,20 @@ plugins:
         python:
           paths: [pdv-python]
           options:
-            show_source: true
+            docstring_style: numpy
+            show_source: false
             show_root_heading: true
+            show_root_full_path: false
+            show_symbol_type_heading: true
+            show_symbol_type_toc: true
+            separate_signature: true
+            show_signature_annotations: true
+            signature_crossrefs: true
+            merge_init_into_class: true
             members_order: source
+            heading_level: 2
+            filters:
+              - "!^_"
   - git-revision-date-localized:
       enable_creation_date: true
       fallback_to_build_date: true
@@ -69,7 +80,10 @@ markdown_extensions:
   - pymdownx.inlinehilite
   - pymdownx.tabbed:
       alternate_style: true
-  - pymdownx.snippets
+  - pymdownx.snippets:
+      base_path:
+        - .
+        - docs
   - pymdownx.arithmatex:
       generic: true
   - attr_list
@@ -84,7 +98,6 @@ nav:
   - Home: index.md
   - Getting Started:
       - Installation: getting-started/installation.md
-      - Quick Start: getting-started/quickstart.md
   - User Guide:
       - Overview: user-guide/index.md
       - The Tree: user-guide/tree.md
@@ -95,9 +108,11 @@ nav:
       - Modules: user-guide/modules.md
   - API Reference:
       - Overview: api-reference/index.md
-      - pdv_kernel: api-reference/pdv-kernel.md
-      - PDVTree: api-reference/tree.md
-      - Serialization: api-reference/serialization.md
+      - The Tree (pdv_tree): api-reference/tree.md
+      - Tree Node Types: api-reference/nodes.md
+      - The App Object (pdv): api-reference/app.md
+      - Module API: api-reference/module-api.md
+      - Exceptions: api-reference/errors.md
   - Module Development:
       - Overview: modules/index.md
       - Manifest Format: modules/manifest.md
@@ -106,6 +121,7 @@ nav:
       - Entry Points: modules/entry-points.md
   - Developer Guide:
       - Architecture: developer/architecture.md
+      - Developer Quick Start: developer/developer-quickstart.md
       - Contributing: developer/contributing.md
       - Development Setup: developer/setup.md
       - Testing: developer/testing.md

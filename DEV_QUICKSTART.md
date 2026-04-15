@@ -66,7 +66,7 @@ All three should pass before opening a PR.
 ```
 physics-data-viewer/
 ├── ARCHITECTURE.md          ← Start here — authoritative design spec
-├── QUICK_START.md           ← You are here
+├── DEV_QUICKSTART.md        ← You are here
 ├── OVERVIEW.md              ← Feature overview
 │
 ├── electron/                ← Electron desktop app (TypeScript)

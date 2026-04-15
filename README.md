@@ -47,7 +47,7 @@ After installing the app, you'll be prompted to install the `pdv-python` kernel 
 
 ## Contributing
 
-PDV welcomes contributions. See the [contributor guide](./QUICK_START.md) for full setup instructions.
+PDV welcomes contributions. See the [contributor guide](./DEV_QUICKSTART.md) for full setup instructions.
 
 ### Quick Dev Setup
 

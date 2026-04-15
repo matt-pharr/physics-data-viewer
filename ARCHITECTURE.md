@@ -3,7 +3,7 @@
 **Date**: 2026-04-07
 **Status**: Authoritative design specification. All new code must conform to this document. Deviations require updating this document first.
 
-> **New to PDV?** Start with [QUICK_START.md](QUICK_START.md) for setup instructions and a guided tour. This document is the comprehensive reference.
+> **New to PDV?** Start with `DEV_QUICKSTART.md` for setup instructions and a guided tour. This document is the comprehensive reference.
 
 ---
 
@@ -1251,8 +1251,8 @@ After an environment is selected:
 1. App runs `<python> -c "import pdv_kernel; print(pdv_kernel.__version__)"` (non-interactive, timeout 5s)
 2. If this fails (import error or timeout): app shows a dialog:
    > "PDV kernel support is not installed in this environment. Install it now?"
-   > [Install] [Not now]
-3. On [Install]: app runs `<python> -m pip install pdv-python` in a subprocess with visible progress output
+   > `[Install]` `[Not now]`
+3. On `[Install]`: app runs `<python> -m pip install pdv-python` in a subprocess with visible progress output
 4. On success: proceed to startup sequence (Section 4.1)
 5. On failure: display pip output as a diagnostic and offer to select a different environment
 
