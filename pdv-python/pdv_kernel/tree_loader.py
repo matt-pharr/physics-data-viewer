@@ -149,6 +149,13 @@ def load_tree_index(
             folder._working_dir = tree._working_dir
             folder._save_dir = tree._save_dir
             tree.set_quiet(full_path, folder)
+        elif node_type == "mapping" and meta.get("composite"):
+            # Composite mapping: the user assigned a plain dict containing
+            # non-JSON-native leaves (e.g. ndarrays). Reconstruct as a plain
+            # dict — NOT a PDVTree — so type(value) is dict on load, matching
+            # what the user originally stored. Children are populated in
+            # Pass 2 via set_quiet, which traverses through plain dicts.
+            tree.set_quiet(full_path, {})
         elif node_type == "module":
             storage = node.get("storage", {})
             old_meta = storage.get("value", {})
@@ -172,7 +179,14 @@ def load_tree_index(
                 on_progress(index, total)
             continue
         node_type = node.get("type", "")
+        meta = node.get("metadata", {})
         if node_type in ("folder", "module"):
+            if on_progress is not None:
+                on_progress(index, total)
+            continue
+        if node_type == "mapping" and meta.get("composite"):
+            # Composite mapping container was created in Pass 1; children
+            # will be inserted into it by subsequent Pass 2 iterations.
             if on_progress is not None:
                 on_progress(index, total)
             continue
@@ -180,7 +194,6 @@ def load_tree_index(
         full_path = _full_path(node_path_rel)
         storage = node.get("storage", {})
         backend = storage.get("backend", "")
-        meta = node.get("metadata", {})
 
         if conflict_strategy == "skip":
             exists, existing_value = _node_exists(full_path)

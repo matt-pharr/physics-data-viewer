@@ -413,3 +413,47 @@ class TestMetadataSubDict:
         meta = desc["metadata"]
         assert meta["shape"] == [2, 2]
         assert "preview" in meta
+
+
+class TestCompositeMappingSerialize:
+    """Unit tests for the composite-mapping branch of serialize_node."""
+
+    def test_dict_with_ndarray_emits_composite_descriptor(
+        self, tmp_working_dir
+    ):
+        numpy = pytest.importorskip("numpy")
+        data = {"arr": numpy.array([1, 2]), "label": "x"}
+        desc = serialize_node("m", data, tmp_working_dir)
+        assert desc["type"] == KIND_MAPPING
+        assert desc["has_children"] is True
+        assert desc["storage"] == {"backend": "none", "format": "none"}
+        assert desc["metadata"]["composite"] is True
+
+    def test_json_native_dict_stays_inline(self, tmp_working_dir):
+        desc = serialize_node("m", {"a": 1, "b": [1, 2]}, tmp_working_dir)
+        assert desc["storage"]["backend"] == "inline"
+        assert not desc["metadata"].get("composite")
+
+    def test_sequence_with_ndarray_raises_helpful_error(self, tmp_working_dir):
+        numpy = pytest.importorskip("numpy")
+        with pytest.raises(PDVSerializationError, match="wrap"):
+            serialize_node(
+                "s", [numpy.array([1, 2]), numpy.array([3, 4])], tmp_working_dir
+            )
+
+    def test_pickle_fallback_node_writes_file(self, tmp_working_dir):
+        from pdv_kernel.serialization import pickle_fallback_node
+
+        obj = WeirdPicklable()
+        desc = pickle_fallback_node("u", obj, tmp_working_dir)
+        assert desc["storage"]["backend"] == "local_file"
+        assert desc["storage"]["format"] == "pickle"
+        assert desc["metadata"]["fallback"] == "pickle"
+        assert "python_type" in desc["metadata"]
+        rel = desc["storage"]["relative_path"]
+        assert os.path.exists(os.path.join(tmp_working_dir, rel))
+        # Round-trips via deserialize_node with trusted=True.
+        restored = deserialize_node(
+            desc["storage"], tmp_working_dir, trusted=True
+        )
+        assert isinstance(restored, WeirdPicklable)

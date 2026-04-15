@@ -676,3 +676,190 @@ class TestTwoPassLoading:
         mod = tree_with_comm["mymod"]
         assert isinstance(mod, PDVModule)
         assert mod._working_dir == tree_with_comm._working_dir
+
+
+class TestCompositeMapping:
+    """Save/load round-trips for dicts containing non-JSON-native leaves.
+
+    Reference: plan at /Users/pharr/.claude/plans/replicated-stirring-newt.md
+    """
+
+    def test_dict_of_ndarrays_save_load_roundtrip(
+        self, tree_with_comm, tmp_save_dir
+    ):
+        """The exact audit repro: dict with ndarray values must save and load."""
+        numpy = pytest.importorskip("numpy")
+        arr_t = numpy.linspace(0, 1, 10)
+        arr_x = numpy.sin(arr_t)
+        arr_v = numpy.cos(arr_t)
+        tree_with_comm["runs"] = PDVTree()
+        tree_with_comm["runs.last"] = {
+            "t": arr_t,
+            "x": arr_x,
+            "v": arr_v,
+            "amplitude": 3.0,
+        }
+
+        mock_comm = _make_mock_comm()
+        msg_save = _make_msg("pdv.project.save", {"save_dir": tmp_save_dir})
+        with (
+            patch.object(comms_mod, "_comm", mock_comm),
+            patch.object(comms_mod, "_pdv_tree", tree_with_comm),
+        ):
+            handle_project_save(msg_save)
+        response = mock_comm._sent[-1]
+        assert response["status"] == "ok", (
+            f"save failed: {response.get('payload')}"
+        )
+
+        fresh_tree = PDVTree()
+        mock_comm2 = _make_mock_comm()
+        msg_load = _make_msg("pdv.project.load", {"save_dir": tmp_save_dir})
+        with (
+            patch.object(comms_mod, "_comm", mock_comm2),
+            patch.object(comms_mod, "_pdv_tree", fresh_tree),
+        ):
+            handle_project_load(msg_load)
+
+        loaded = fresh_tree["runs.last"]
+        assert type(loaded) is dict, (
+            f"expected plain dict, got {type(loaded).__name__}"
+        )
+        assert set(loaded.keys()) == {"t", "x", "v", "amplitude"}
+        assert numpy.array_equal(loaded["t"], arr_t)
+        assert numpy.array_equal(loaded["x"], arr_x)
+        assert numpy.array_equal(loaded["v"], arr_v)
+        assert loaded["amplitude"] == 3.0
+
+    def test_composite_dict_with_raising_leaf_falls_back_per_leaf(
+        self, tree_with_comm, tmp_save_dir
+    ):
+        """Per-leaf pickle fallback inside a composite dict: if one child makes
+        serialize_node raise, only that child gets pickled. Siblings keep their
+        fast paths. Uses a nested list-of-ndarrays (which raises by design) as
+        the raising leaf."""
+        numpy = pytest.importorskip("numpy")
+        arr = numpy.array([1.0, 2.0, 3.0])
+        raising_leaf = [numpy.array([1, 2]), numpy.array([3, 4])]
+        tree_with_comm["data"] = {
+            "arr": arr,
+            "raising": raising_leaf,
+            "scalar": 7,
+        }
+
+        mock_comm = _make_mock_comm()
+        msg_save = _make_msg("pdv.project.save", {"save_dir": tmp_save_dir})
+        with (
+            patch.object(comms_mod, "_comm", mock_comm),
+            patch.object(comms_mod, "_pdv_tree", tree_with_comm),
+        ):
+            handle_project_save(msg_save)
+        response = mock_comm._sent[-1]
+        assert response["status"] == "ok"
+
+        with open(os.path.join(tmp_save_dir, "tree-index.json")) as f:
+            nodes = json.load(f)
+        by_path = {n["path"]: n for n in nodes}
+        # Siblings take their native fast paths.
+        assert by_path["data.arr"]["storage"]["format"] == "npy"
+        assert by_path["data.scalar"]["storage"]["backend"] == "inline"
+        # The raising leaf falls back to pickle via the walker.
+        assert by_path["data.raising"]["storage"]["format"] == "pickle"
+        assert by_path["data.raising"]["metadata"]["fallback"] == "pickle"
+
+        fresh_tree = PDVTree()
+        mock_comm2 = _make_mock_comm()
+        msg_load = _make_msg("pdv.project.load", {"save_dir": tmp_save_dir})
+        with (
+            patch.object(comms_mod, "_comm", mock_comm2),
+            patch.object(comms_mod, "_pdv_tree", fresh_tree),
+        ):
+            handle_project_load(msg_load)
+        loaded = fresh_tree["data"]
+        assert type(loaded) is dict
+        assert numpy.array_equal(loaded["arr"], arr)
+        assert loaded["scalar"] == 7
+        assert len(loaded["raising"]) == 2
+        assert numpy.array_equal(loaded["raising"][0], numpy.array([1, 2]))
+
+    def test_nested_composite_mapping_roundtrip(
+        self, tree_with_comm, tmp_save_dir
+    ):
+        """A dict-in-dict with ndarray at the innermost level round-trips."""
+        numpy = pytest.importorskip("numpy")
+        arr = numpy.arange(5)
+        tree_with_comm["outer"] = {"inner": {"arr": arr, "tag": "hello"}}
+
+        mock_comm = _make_mock_comm()
+        with (
+            patch.object(comms_mod, "_comm", mock_comm),
+            patch.object(comms_mod, "_pdv_tree", tree_with_comm),
+        ):
+            handle_project_save(
+                _make_msg("pdv.project.save", {"save_dir": tmp_save_dir})
+            )
+
+        fresh_tree = PDVTree()
+        mock_comm2 = _make_mock_comm()
+        with (
+            patch.object(comms_mod, "_comm", mock_comm2),
+            patch.object(comms_mod, "_pdv_tree", fresh_tree),
+        ):
+            handle_project_load(
+                _make_msg("pdv.project.load", {"save_dir": tmp_save_dir})
+            )
+        loaded = fresh_tree["outer"]
+        assert type(loaded) is dict
+        assert type(loaded["inner"]) is dict
+        assert numpy.array_equal(loaded["inner"]["arr"], arr)
+        assert loaded["inner"]["tag"] == "hello"
+
+    def test_json_native_mapping_still_inline(
+        self, tree_with_comm, tmp_save_dir
+    ):
+        """Regression: a pure JSON dict stays on the fast inline path."""
+        tree_with_comm["meta"] = {"author": "Matt", "count": 3, "ok": True}
+        mock_comm = _make_mock_comm()
+        with (
+            patch.object(comms_mod, "_comm", mock_comm),
+            patch.object(comms_mod, "_pdv_tree", tree_with_comm),
+        ):
+            handle_project_save(
+                _make_msg("pdv.project.save", {"save_dir": tmp_save_dir})
+            )
+        with open(os.path.join(tmp_save_dir, "tree-index.json")) as f:
+            nodes = json.load(f)
+        meta_node = next(n for n in nodes if n["path"] == "meta")
+        assert meta_node["storage"]["backend"] == "inline"
+        assert meta_node["storage"]["value"] == {
+            "author": "Matt",
+            "count": 3,
+            "ok": True,
+        }
+        assert not meta_node["metadata"].get("composite")
+        # No child descriptors emitted for a JSON-native dict.
+        child_paths = [n["path"] for n in nodes if n["path"].startswith("meta.")]
+        assert child_paths == []
+
+    def test_sequence_with_ndarray_falls_back_to_pickle_via_walker(
+        self, tree_with_comm, tmp_save_dir
+    ):
+        """serialize_node raises a helpful error for list-of-ndarrays, but the
+        walker's pickle fallback catches it so project.save still succeeds."""
+        numpy = pytest.importorskip("numpy")
+        tree_with_comm["seq"] = [numpy.array([1, 2]), numpy.array([3, 4])]
+        mock_comm = _make_mock_comm()
+        with (
+            patch.object(comms_mod, "_comm", mock_comm),
+            patch.object(comms_mod, "_pdv_tree", tree_with_comm),
+        ):
+            handle_project_save(
+                _make_msg("pdv.project.save", {"save_dir": tmp_save_dir})
+            )
+        response = mock_comm._sent[-1]
+        assert response["status"] == "ok"
+        with open(os.path.join(tmp_save_dir, "tree-index.json")) as f:
+            nodes = json.load(f)
+        seq_node = next(n for n in nodes if n["path"] == "seq")
+        assert seq_node["storage"]["format"] == "pickle"
+        assert seq_node["metadata"]["fallback"] == "pickle"

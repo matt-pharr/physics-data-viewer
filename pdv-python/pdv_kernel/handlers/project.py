@@ -64,8 +64,15 @@ def _collect_nodes(
     list
         List of node descriptor dicts.
     """
-    from pdv_kernel.serialization import serialize_node  # noqa: PLC0415
+    from pdv_kernel.errors import PDVSerializationError  # noqa: PLC0415
+    from pdv_kernel.serialization import (  # noqa: PLC0415
+        pickle_fallback_node,
+        serialize_node,
+    )
     from pdv_kernel.tree import PDVTree  # noqa: PLC0415
+    import logging  # noqa: PLC0415
+
+    log = logging.getLogger("pdv_kernel")
 
     if counter is None:
         counter = [0]
@@ -74,18 +81,45 @@ def _collect_nodes(
     for key in dict.keys(tree):
         path = f"{prefix}.{key}" if prefix else key
         value = dict.__getitem__(tree, key)
-        descriptor = serialize_node(
-            path,
-            value,
-            save_dir,
-            trusted=True,
-            source_dir=working_dir or save_dir,
-        )
+        # Super-fallback: if serialize_node refuses this value for any reason,
+        # fall back to an unconditional pickle so project.save never fails on
+        # a single unrepresentable leaf. See plan §2a and pickle_fallback_node.
+        try:
+            descriptor = serialize_node(
+                path,
+                value,
+                save_dir,
+                trusted=True,
+                source_dir=working_dir or save_dir,
+            )
+        except PDVSerializationError as exc:
+            log.warning(
+                "project.save: falling back to pickle for node '%s' (%s): %s",
+                path,
+                type(value).__name__,
+                exc,
+            )
+            descriptor = pickle_fallback_node(path, value, save_dir)
         nodes.append(descriptor)
         counter[0] += 1
         if on_progress is not None:
             on_progress(counter[0])
         if isinstance(value, PDVTree):
+            nodes.extend(
+                _collect_nodes(
+                    value,
+                    save_dir,
+                    prefix=path,
+                    working_dir=working_dir,
+                    on_progress=on_progress,
+                    counter=counter,
+                )
+            )
+        elif descriptor.get("metadata", {}).get("composite") and isinstance(value, dict):
+            # Composite plain dict (not a PDVTree): recurse to emit per-leaf
+            # descriptors. The recursive call accepts any dict-like because
+            # it iterates via dict.keys(), and per-leaf fallback applies to
+            # children too.
             nodes.extend(
                 _collect_nodes(
                     value,
