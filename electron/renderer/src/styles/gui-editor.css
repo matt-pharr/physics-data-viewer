@@ -216,7 +216,7 @@
 }
 
 .canvas-node-row.selected {
-  background: rgba(0, 122, 204, 0.2);
+  background: color-mix(in srgb, var(--accent) 20%, transparent);
   outline: 1px solid var(--accent, #007acc);
 }
 
