@@ -1399,6 +1399,23 @@ describe("Step 5 IPC handlers", () => {
         language: "python",
       }),
     );
+    // A MODULES_SETUP must follow MODULE_CREATE_EMPTY so the kernel walker
+    // establishes sys.path for the fresh in-session module. The payload
+    // must identify the module by alias only — no pre-computed lib_dir.
+    const requestCalls = (
+      commRouter.request as unknown as ReturnType<typeof vi.fn>
+    ).mock.calls;
+    const createIdx = requestCalls.findIndex(
+      ([type]) => type === PDVMessageType.MODULE_CREATE_EMPTY,
+    );
+    const setupIdx = requestCalls.findIndex(
+      ([type]) => type === PDVMessageType.MODULES_SETUP,
+    );
+    expect(createIdx).toBeGreaterThanOrEqual(0);
+    expect(setupIdx).toBeGreaterThan(createIdx);
+    expect(requestCalls[setupIdx][1]).toEqual({
+      modules: [{ alias: "toy" }],
+    });
   });
 
   it("modules:createEmpty returns conflict when the alias already exists", async () => {

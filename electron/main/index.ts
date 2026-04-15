@@ -602,6 +602,7 @@ export function registerIpcHandlers(
   registerProjectIpcHandlers({
     projectManager,
     moduleManager,
+    commRouter,
     kernelWorkingDirs,
     getActiveKernelId: () => activeKernelId,
     getActiveKernelLanguage: () => {

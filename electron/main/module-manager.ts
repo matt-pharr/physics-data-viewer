@@ -959,7 +959,6 @@ export class ModuleManager {
     installPath: string;
     pythonPackage?: string;
     entryPoint?: string;
-    libDir?: string;
   }> {
     const module = await this.resolveModuleRecord(moduleId, projectDir);
     if (!module) {
@@ -971,7 +970,6 @@ export class ModuleManager {
       installPath: moduleDir,
       pythonPackage: manifest.python_package,
       entryPoint: manifest.entry_point,
-      libDir: manifest.lib_dir,
     };
   }
 

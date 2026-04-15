@@ -1236,6 +1236,7 @@ const App: React.FC = () => {
               if (!result.success) {
                 setLastError(result.error);
               } else if (result.scriptPath) {
+                setTreeRefreshToken((t) => t + 1);
                 await window.pdv.script.edit(currentKernelId, result.scriptPath);
               }
             } catch (error) {

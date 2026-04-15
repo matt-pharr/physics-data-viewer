@@ -16,8 +16,10 @@ import * as fs from "fs/promises";
 import * as path from "path";
 import { ipcMain, type BrowserWindow } from "electron";
 
+import type { CommRouter } from "./comm-router";
 import { IPC } from "./ipc";
 import { ModuleManager } from "./module-manager";
+import { setupProjectModuleNamespaces } from "./module-runtime";
 import {
   ProjectManager,
   type ModuleManifestBundle,
@@ -34,6 +36,7 @@ import {
 interface RegisterProjectIpcHandlersOptions {
   projectManager: ProjectManager;
   moduleManager: ModuleManager;
+  commRouter: CommRouter;
   kernelWorkingDirs: Map<string, string>;
   getActiveKernelId: () => string | null;
   getActiveKernelLanguage: () => "python" | "julia";
@@ -138,9 +141,11 @@ async function writeModuleManifestsToSaveDir(
         description: bundle.description,
         language: bundle.language,
         dependencies: bundle.dependencies,
-        // Default lib_dir for v4 modules — matches the convention used
-        // by bundled example modules and read by buildModulesSetupPayload
-        // at kernel init / project-load time.
+        // Default lib_dir for the v4 manifest. Kept for external tooling
+        // that reads the on-disk manifest; the TS/kernel setup path no
+        // longer consumes this field — the kernel walker in
+        // handle_modules_setup derives sys.path entries directly from
+        // the live PDVModule subtree.
         libDir: "lib",
       });
       await writeModuleIndex(moduleDir, bundle.entries ?? []);
@@ -166,6 +171,7 @@ export function registerProjectIpcHandlers(
   const {
     projectManager,
     moduleManager,
+    commRouter,
     kernelWorkingDirs,
     getActiveKernelId,
     getActiveKernelLanguage,
@@ -286,6 +292,12 @@ export function registerProjectIpcHandlers(
     }
 
     const { codeCells, postLoadChecksum } = await projectManager.load(saveDir);
+
+    // Now that the kernel tree has been repopulated from tree-index.json,
+    // wire each module's lib parent dirs into sys.path. The kernel walker
+    // in handle_modules_setup is the sole owner of this, so project load
+    // must trigger a setup pass whenever it repopulates the tree.
+    await setupProjectModuleNamespaces(commRouter, moduleManager, saveDir);
 
     // Validate: compare the kernel's post-load checksum against the stored one.
     const checksumValid =

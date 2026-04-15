@@ -116,11 +116,11 @@ def handle_module_register(msg: dict) -> None:
 
     # v4: mount subtree from module_index (same two-pass logic as project load).
     # When loading a saved project the tree is already populated from
-    # tree-index.json before MODULE_REGISTER runs.  Skip nodes that already
+    # tree-index.json before MODULE_REGISTER runs. Skip nodes that already
     # exist so that user data (e.g. result objects under "outputs") is not
-    # overwritten by empty default containers. lib sys.path injection is
-    # handled separately in handle_modules_setup via the lib_dir field, so
-    # the loader is told not to touch sys.path here.
+    # overwritten by empty default containers. sys.path for lib files is
+    # derived inside handle_modules_setup by walking the PDVModule subtree —
+    # the loader does not touch sys.path at all.
     if module_index:
         from pdv_kernel.tree_loader import load_tree_index  # noqa: PLC0415
 
@@ -132,7 +132,6 @@ def handle_module_register(msg: dict) -> None:
             patch_module_id_on_skip=module_id,
             module_id_default=module_id,
             working_dir=working_dir,
-            inject_lib_sys_path=False,
         )
 
     send_message(
@@ -142,19 +141,40 @@ def handle_module_register(msg: dict) -> None:
     )
 
 
+def _iter_pdv_libs(container: object):
+    """Yield every ``PDVLib`` descendant of ``container``.
+
+    Walks ``PDVTree``, ``PDVModule``, and plain ``dict`` containers
+    recursively. The walker deliberately does not assume libs live at any
+    particular sub-key (e.g. ``module.lib``) — it finds every ``PDVLib`` in
+    the subtree regardless of shape, which keeps it forward-compatible with
+    future storage layouts.
+    """
+    from pdv_kernel.tree import PDVLib  # noqa: PLC0415
+
+    if isinstance(container, PDVLib):
+        yield container
+        return
+    if not isinstance(container, dict):
+        return
+    for child in container.values():
+        yield from _iter_pdv_libs(child)
+
+
 def handle_modules_setup(msg: dict) -> None:
     """Handle the ``pdv.modules.setup`` message.
 
-    For each module in the payload, adds library directories to ``sys.path``
-    and imports the entry point module if specified.
+    For each module alias in the payload, walks the corresponding
+    :class:`~pdv_kernel.tree.PDVModule` subtree in the live tree, collects
+    the parent directory of every :class:`~pdv_kernel.tree.PDVLib`
+    descendant, dedupes, and inserts each unique parent into ``sys.path``.
+    Then imports any specified entry point.
 
-    Either or both path-style fields are accepted on the same payload — the
-    body iterates each unconditionally:
-
-    - ``lib_dir``: absolute path to a library directory; added directly to
-      ``sys.path``.
-    - ``lib_paths``: list of individual ``.py`` file paths; the parent
-      directory of each is added.
+    This is the single owner of module-related ``sys.path`` wiring. Main
+    process code must not pre-compute lib directories — the kernel derives
+    them from the in-memory tree, which keeps filesystem layout knowledge
+    on the side that owns the tree and keeps the setup contract stable
+    across storage-layout redesigns.
 
     Expected payload
     ----------------
@@ -162,11 +182,8 @@ def handle_modules_setup(msg: dict) -> None:
 
         {
             "modules": [
-                {
-                    "lib_paths": [],
-                    "lib_dir": "/tmp/pdv-xxx/n_pendulum/lib",
-                    "entry_point": "n_pendulum"
-                }
+                { "alias": "n_pendulum", "entry_point": "n_pendulum" },
+                { "alias": "ddho" }
             ]
         }
 
@@ -182,38 +199,51 @@ def handle_modules_setup(msg: dict) -> None:
         Parsed PDV message envelope.
     """
     import os  # noqa: PLC0415
+    import warnings  # noqa: PLC0415
 
-    from pdv_kernel.comms import send_message  # noqa: PLC0415
+    from pdv_kernel.comms import get_pdv_tree, send_message  # noqa: PLC0415
     from pdv_kernel.modules import get_handler_registry  # noqa: PLC0415
+    from pdv_kernel.tree import PDVModule  # noqa: PLC0415
 
     msg_id = msg.get("msg_id")
     payload = msg.get("payload", {})
     modules = payload.get("modules", [])
 
+    tree = get_pdv_tree()
+    working_dir = getattr(tree, "_working_dir", None) if tree is not None else None
+
     for mod_info in modules:
-        lib_paths = mod_info.get("lib_paths", [])
-        lib_dir = mod_info.get("lib_dir")
+        alias = mod_info.get("alias")
         entry_point = mod_info.get("entry_point")
 
-        # v4: add lib_dir directly to sys.path.
-        # Do not gate on os.path.isdir — the directory may not exist yet when
-        # pdv.modules.setup runs before bindActiveProjectModules copies files.
-        # Python handles non-existent sys.path entries gracefully.
-        if lib_dir and lib_dir not in sys.path:
-            sys.path.insert(1, lib_dir)
+        if not alias:
+            warnings.warn("pdv.modules.setup entry missing 'alias'; skipping")
+            continue
 
-        # Legacy: add parent directory of each lib .py file to sys.path.
-        for file_path in lib_paths:
-            parent_dir = os.path.dirname(file_path)
-            if parent_dir and parent_dir not in sys.path:
-                sys.path.insert(1, parent_dir)
+        module_node = tree.get(alias) if tree is not None else None
+        if not isinstance(module_node, PDVModule):
+            warnings.warn(
+                f"pdv.modules.setup: no PDVModule at alias '{alias}'; skipping"
+            )
+        else:
+            seen: set[str] = set()
+            for lib in _iter_pdv_libs(module_node):
+                abs_path = lib.resolve_path(working_dir)
+                parent_dir = os.path.dirname(abs_path)
+                if not parent_dir or parent_dir in seen:
+                    continue
+                seen.add(parent_dir)
+                # Do not gate on os.path.isdir — the directory may not
+                # exist yet when pdv.modules.setup runs before main-side
+                # file copies complete. Python handles non-existent
+                # sys.path entries gracefully.
+                if parent_dir not in sys.path:
+                    sys.path.insert(1, parent_dir)
 
         if entry_point:
             try:
                 importlib.import_module(entry_point)
             except Exception as exc:  # noqa: BLE001
-                import warnings  # noqa: PLC0415
-
                 warnings.warn(
                     f"Failed to import module entry point '{entry_point}': {exc}"
                 )

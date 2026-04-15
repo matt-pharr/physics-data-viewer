@@ -502,7 +502,6 @@ def handle_project_load(msg: dict) -> None:
         on_progress=_emit_load_progress,
         conflict_strategy="replace",
         working_dir=working_dir,
-        inject_lib_sys_path=True,
     )
 
     os.chdir(os.path.expanduser("~"))
