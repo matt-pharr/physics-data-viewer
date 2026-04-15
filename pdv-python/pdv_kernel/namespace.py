@@ -20,9 +20,10 @@ ARCHITECTURE.md §5.4 (protected namespace), §5.5 (user-facing names)
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 
-from pdv_kernel.errors import PDVProtectedNameError
+from pdv_kernel.errors import PDVError, PDVProtectedNameError
 
 # Names that must never be reassigned by user code.
 _PROTECTED_NAMES: frozenset[str] = frozenset({"pdv_tree", "pdv"})
@@ -94,6 +95,34 @@ class PDVApp:
     --------
     ARCHITECTURE.md §5.5
     """
+
+    @property
+    def working_dir(self) -> Path:
+        """Filesystem path to the current kernel working directory.
+
+        This is the on-disk root that PDV uses to store scripts, files,
+        and other tree-backed content for the current session. It is the
+        per-session temp dir until the project is saved, and stays stable
+        for the lifetime of the kernel. Use it to locate data files that
+        should live alongside the tree::
+
+            np.loadtxt(pdv.working_dir / "data.csv")
+
+        The kernel's own ``os.getcwd()`` defaults to the user's home
+        directory and is never changed by PDV, so relative paths in
+        ``open()`` do **not** resolve here unless the user explicitly
+        ``os.chdir``s. Files written under ``pdv.working_dir`` are
+        scratch unless attached to the tree as ``PDVFile`` nodes — the
+        tree is the only persistent surface.
+        """
+        from pdv_kernel.comms import get_pdv_tree  # noqa: PLC0415
+
+        tree = get_pdv_tree()
+        if tree is None or not getattr(tree, "_working_dir", None):
+            raise PDVError(
+                "pdv.working_dir is not available: kernel has not received pdv.init"
+            )
+        return Path(tree._working_dir)
 
     def save(self) -> None:
         """Trigger a project save. Equivalent to File -> Save in the UI.
@@ -168,6 +197,7 @@ class PDVApp:
                 "  pdv_tree          — the project data tree (dict-like)\n"
                 "  pdv_tree['path']  — access or set a node by dot-path\n"
                 "  pdv_tree.run_script('path') — run a script node\n"
+                "  pdv.working_dir   — Path to the session working dir (for data files)\n"
                 "  pdv.save()        — save the project\n"
                 "  pdv.new_note('path', title='My Note') — create a markdown note\n"
                 "  pdv.help('pdv_tree') — help on a specific topic\n"

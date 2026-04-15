@@ -10,10 +10,13 @@ Reference: ARCHITECTURE.md §5.4, §5.5
 """
 
 from dataclasses import dataclass
+from pathlib import Path
 
 import pytest
-from pdv_kernel.namespace import PDVNamespace, pdv_namespace
-from pdv_kernel.errors import PDVProtectedNameError
+from pdv_kernel import comms
+from pdv_kernel.namespace import PDVApp, PDVNamespace, pdv_namespace
+from pdv_kernel.errors import PDVError, PDVProtectedNameError
+from pdv_kernel.tree import PDVTree
 
 
 class TestPDVNamespace:
@@ -55,6 +58,25 @@ class TestPDVNamespace:
         # Bootstrap uses dict.__setitem__ to bypass the guard
         dict.__setitem__(ns, "pdv_tree", object())
         assert "pdv_tree" in ns
+
+
+class TestPDVAppWorkingDir:
+    def test_working_dir_returns_tree_working_dir(self, tmp_path, monkeypatch):
+        tree = PDVTree()
+        tree._set_working_dir(str(tmp_path))
+        monkeypatch.setattr(comms, "_pdv_tree", tree)
+        assert PDVApp().working_dir == Path(str(tmp_path))
+
+    def test_working_dir_raises_before_init(self, monkeypatch):
+        monkeypatch.setattr(comms, "_pdv_tree", None)
+        with pytest.raises(PDVError):
+            _ = PDVApp().working_dir
+
+    def test_working_dir_raises_when_unset(self, monkeypatch):
+        tree = PDVTree()
+        monkeypatch.setattr(comms, "_pdv_tree", tree)
+        with pytest.raises(PDVError):
+            _ = PDVApp().working_dir
 
 
 class TestPDVNamespaceSnapshot:
