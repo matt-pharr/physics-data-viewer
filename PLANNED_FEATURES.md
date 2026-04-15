@@ -43,6 +43,11 @@ Expose the active project's tree, cells, scripts, notes, kernel, and console to 
 
 Design discussed in detail in [issue #180](https://github.com/matt-pharr/physics-data-viewer/issues/180). Inline ghost-text completions are a separate later-beta follow-up, not part of this work.
 
+## Environments track
+
+### Per-project environment management
+Each project can declare and manage its own Python environment, isolated from PDV's own runtime and from other projects. Replaces the idea of session environment snapshots — this is the more complete version. Design: **ARCHITECTURE.md §10.5**. Summary: `uv`-managed venvs keyed on a manifest `project_id`, venvs stored outside the project under `<user-data>/pdv/envs/<project-id>/`, a `pyproject.toml` + `uv.lock` pair committed inside the project as the portable source of truth, `pdv-python` installed as an app-managed dep (not listed in the user's pyproject), bundled `uv` binary per platform, and a "Project Packages" UI layered over `uv add`/`uv remove`. The existing shared-environment flow (§10.2) remains the default and the fallback for conda users. Independent of the remote and agents tracks; can be developed in parallel.
+
 ---
 
 # 0.3.0-beta3 — Full Julia Support
@@ -67,9 +72,6 @@ These are the items that should land before 1.0.0 but whose internal ordering is
 
 ### Trust and security model
 A trust level for projects (trusted / untrusted) that gates MCP write tools, raw `kernel_execute`, and the existing `unknown`/pickle node type. Needed before 1.0.0 because of community-shared projects and agent access. May need a minimal version earlier if MCP write tools prove too sharp without it.
-
-### Per-project environment management
-Each project can declare and manage its own Python environment, isolated from PDV's own runtime and from other projects. Replaces the idea of session environment snapshots — this is the more complete version. Design: **ARCHITECTURE.md §10.5**. Summary: `uv`-managed venvs keyed on a manifest `project_id`, venvs stored outside the project under `<user-data>/pdv/envs/<project-id>/`, a `pyproject.toml` + `uv.lock` pair committed inside the project as the portable source of truth, `pdv-python` installed as an app-managed dep (not listed in the user's pyproject), bundled `uv` binary per platform, and a "Project Packages" UI layered over `uv add`/`uv remove`. The existing shared-environment flow (§10.2) remains the default and the fallback for conda users.
 
 ### Multi-window and session abstraction
 Support multiple top-level windows sharing or isolating project state. Tracked in [#167](https://github.com/matt-pharr/physics-data-viewer/issues/167). Blocked on remote mode because the session abstraction needs to cover both local and remote kernels in one design.
