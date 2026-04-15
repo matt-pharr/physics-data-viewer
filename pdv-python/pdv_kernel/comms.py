@@ -31,6 +31,7 @@ from typing import Any, Callable
 from pdv_kernel.errors import PDVVersionError
 
 from pdv_kernel import __version__ as PDV_PROTOCOL_VERSION
+
 PDV_COMM_TARGET = "pdv.kernel"
 
 # The single global comm instance (set on bootstrap, None before that).
@@ -229,7 +230,9 @@ def register_comm_target(ip: Any) -> None:
     comm_manager = getattr(ip, "comm_manager", None)
     if comm_manager is None or not hasattr(comm_manager, "register_target"):
         kernel = getattr(ip, "kernel", None)
-        comm_manager = getattr(kernel, "comm_manager", None) if kernel is not None else None
+        comm_manager = (
+            getattr(kernel, "comm_manager", None) if kernel is not None else None
+        )
     if comm_manager is None or not hasattr(comm_manager, "register_target"):
         raise AttributeError(
             "IPython shell has no comm_manager; tried ip.comm_manager and ip.kernel.comm_manager"

@@ -103,14 +103,16 @@ def handle_module_register(msg: dict) -> None:
         existing._version = version
         existing._dependencies = dependencies or []
     elif isinstance(existing, dict) and len(existing) > 0:
-        module_node = PDVModule(module_id=module_id, name=name, version=version,
-                                dependencies=dependencies)
+        module_node = PDVModule(
+            module_id=module_id, name=name, version=version, dependencies=dependencies
+        )
         for k, v in existing.items():
             dict.__setitem__(module_node, k, v)
         tree[alias] = module_node
     else:
-        tree[alias] = PDVModule(module_id=module_id, name=name, version=version,
-                                dependencies=dependencies)
+        tree[alias] = PDVModule(
+            module_id=module_id, name=name, version=version, dependencies=dependencies
+        )
 
     # v4: mount subtree from module_index (same two-pass logic as project load).
     # When loading a saved project the tree is already populated from

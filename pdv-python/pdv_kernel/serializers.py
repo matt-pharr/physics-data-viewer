@@ -54,22 +54,24 @@ _format_index: dict[str, SerializerEntry] = {}
 # Listed inline (rather than imported) to avoid a circular import — the
 # constants in serialization.py are the source of truth and these strings
 # must stay in sync.
-_RESERVED_FORMATS: frozenset[str] = frozenset({
-    "npy",
-    "parquet",
-    "json",
-    "txt",
-    "pickle",
-    "py_script",
-    "markdown",
-    "inline",
-    "gui_json",
-    "module_meta",
-    "namelist",
-    "py_lib",
-    "bin",
-    "none",
-})
+_RESERVED_FORMATS: frozenset[str] = frozenset(
+    {
+        "npy",
+        "parquet",
+        "json",
+        "txt",
+        "pickle",
+        "py_script",
+        "markdown",
+        "inline",
+        "gui_json",
+        "module_meta",
+        "namelist",
+        "py_lib",
+        "bin",
+        "none",
+    }
+)
 
 
 def register(

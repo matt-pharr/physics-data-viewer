@@ -122,7 +122,9 @@ class QueryServer:
                 else:
                     # Capture the handler's response via thread-local sink.
                     captured: list[dict] = []
-                    comms_mod._thread_local.response_sink = lambda env: captured.append(env)
+                    comms_mod._thread_local.response_sink = lambda env: captured.append(
+                        env
+                    )
                     try:
                         dispatch(envelope)
                     finally:

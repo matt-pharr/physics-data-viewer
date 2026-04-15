@@ -74,7 +74,11 @@ def _collect_nodes(
         path = f"{prefix}.{key}" if prefix else key
         value = dict.__getitem__(tree, key)
         descriptor = serialize_node(
-            path, value, save_dir, trusted=True, source_dir=working_dir or save_dir,
+            path,
+            value,
+            save_dir,
+            trusted=True,
+            source_dir=working_dir or save_dir,
         )
         nodes.append(descriptor)
         counter[0] += 1
@@ -83,12 +87,15 @@ def _collect_nodes(
         if isinstance(value, PDVTree):
             nodes.extend(
                 _collect_nodes(
-                    value, save_dir, prefix=path, working_dir=working_dir,
-                    on_progress=on_progress, counter=counter,
+                    value,
+                    save_dir,
+                    prefix=path,
+                    working_dir=working_dir,
+                    on_progress=on_progress,
+                    counter=counter,
                 )
             )
     return nodes
-
 
 
 def _collect_module_owned_files(
@@ -140,13 +147,17 @@ def _collect_module_owned_files(
             child_mod_id = value.module_id
             results.extend(
                 _collect_module_owned_files(
-                    value, working_dir, current_module_id=child_mod_id,
+                    value,
+                    working_dir,
+                    current_module_id=child_mod_id,
                 )
             )
         elif isinstance(value, PDVTree):
             results.extend(
                 _collect_module_owned_files(
-                    value, working_dir, current_module_id=current_module_id,
+                    value,
+                    working_dir,
+                    current_module_id=current_module_id,
                 )
             )
         elif isinstance(value, PDVFile):
@@ -162,11 +173,13 @@ def _collect_module_owned_files(
             workdir_path = value.resolve_path(working_dir)
             if not os.path.isabs(workdir_path):
                 workdir_path = os.path.join(working_dir, workdir_path)
-            results.append({
-                "module_id": mod_id,
-                "source_rel_path": source_rel,
-                "workdir_path": workdir_path,
-            })
+            results.append(
+                {
+                    "module_id": mod_id,
+                    "source_rel_path": source_rel,
+                    "workdir_path": workdir_path,
+                }
+            )
     return results
 
 
@@ -218,7 +231,10 @@ def _collect_module_manifests(tree: "Any") -> list:
     from pdv_kernel.tree import PDVFile, PDVModule, PDVTree  # noqa: PLC0415
 
     def _descriptor_for(
-        rel_path: str, key: str, parent_rel: str, value: "Any",
+        rel_path: str,
+        key: str,
+        parent_rel: str,
+        value: "Any",
     ) -> dict:
         """Build a single module-rooted node descriptor.
 
@@ -269,9 +285,7 @@ def _collect_module_manifests(tree: "Any") -> list:
             # relative_path when ``source_rel_path`` hasn't been set
             # (shouldn't happen for module-owned files under workflow
             # A/B, but keep the flow robust).
-            rel_storage = (
-                getattr(value, "source_rel_path", None) or value.relative_path
-            )
+            rel_storage = getattr(value, "source_rel_path", None) or value.relative_path
             format_map = {
                 "script": "py_script",
                 "lib": "py_lib",
@@ -324,7 +338,9 @@ def _collect_module_manifests(tree: "Any") -> list:
         return descriptor
 
     def _walk(
-        subtree: "Any", parent_rel: str, entries: list,
+        subtree: "Any",
+        parent_rel: str,
+        entries: list,
     ) -> None:
         for child_key in dict.keys(subtree):
             child_value = dict.__getitem__(subtree, child_key)
@@ -344,15 +360,17 @@ def _collect_module_manifests(tree: "Any") -> list:
             continue
         entries: list = []
         _walk(value, "", entries)
-        results.append({
-            "module_id": value.module_id,
-            "name": value.name,
-            "version": value.version,
-            "description": getattr(value, "description", ""),
-            "language": getattr(value, "language", "python"),
-            "dependencies": list(getattr(value, "_dependencies", []) or []),
-            "entries": entries,
-        })
+        results.append(
+            {
+                "module_id": value.module_id,
+                "name": value.name,
+                "version": value.version,
+                "description": getattr(value, "description", ""),
+                "language": getattr(value, "language", "python"),
+                "dependencies": list(getattr(value, "_dependencies", []) or []),
+                "entries": entries,
+            }
+        )
     return results
 
 
@@ -435,12 +453,15 @@ def handle_project_load(msg: dict) -> None:
 
     def _emit_load_progress(current: int, total: int) -> None:
         if current % 5 == 0 or current == total:
-            send_message("pdv.progress", {
-                "operation": "load",
-                "phase": "Rebuilding tree",
-                "current": current,
-                "total": total,
-            })
+            send_message(
+                "pdv.progress",
+                {
+                    "operation": "load",
+                    "phase": "Rebuilding tree",
+                    "current": current,
+                    "total": total,
+                },
+            )
 
     load_tree_index(
         tree,
@@ -455,6 +476,7 @@ def handle_project_load(msg: dict) -> None:
     node_count = len(nodes)
 
     from pdv_kernel.checksum import tree_checksum  # noqa: PLC0415
+
     post_load_checksum = tree_checksum(tree)
 
     send_message(
@@ -529,16 +551,21 @@ def handle_project_save(msg: dict) -> None:
 
     def _emit_save_progress(current: int) -> None:
         if current % 5 == 0 or current == total:
-            send_message("pdv.progress", {
-                "operation": "save",
-                "phase": "Serializing",
-                "current": current,
-                "total": total,
-            })
+            send_message(
+                "pdv.progress",
+                {
+                    "operation": "save",
+                    "phase": "Serializing",
+                    "current": current,
+                    "total": total,
+                },
+            )
 
     try:
         nodes = _collect_nodes(
-            tree, save_dir, working_dir=working_dir,
+            tree,
+            save_dir,
+            working_dir=working_dir,
             on_progress=_emit_save_progress,
         )
     except Exception as exc:  # noqa: BLE001
@@ -558,6 +585,7 @@ def handle_project_save(msg: dict) -> None:
     os.replace(tmp_path, index_path)
 
     from pdv_kernel.checksum import tree_checksum  # noqa: PLC0415
+
     checksum = tree_checksum(tree)
 
     # Enumerate module-owned files so the main process can mirror their

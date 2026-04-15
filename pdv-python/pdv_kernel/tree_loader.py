@@ -153,7 +153,9 @@ def load_tree_index(
             storage = node.get("storage", {})
             old_meta = storage.get("value", {})
             mod = PDVModule(
-                module_id=meta.get("module_id", old_meta.get("module_id", module_id_default)),
+                module_id=meta.get(
+                    "module_id", old_meta.get("module_id", module_id_default)
+                ),
                 name=meta.get("name", old_meta.get("name", "")),
                 version=meta.get("version", old_meta.get("version", "")),
             )
@@ -204,19 +206,25 @@ def load_tree_index(
             language = meta.get("language", node.get("language", "python"))
             doc = meta.get("doc")
             mod_id = meta.get("module_id", module_id_default)
-            tree.set_quiet(full_path, PDVScript(
-                relative_path=rel_path,
-                language=language,
-                doc=doc,
-                module_id=mod_id,
-                source_rel_path=src_rel,
-            ))
+            tree.set_quiet(
+                full_path,
+                PDVScript(
+                    relative_path=rel_path,
+                    language=language,
+                    doc=doc,
+                    module_id=mod_id,
+                    source_rel_path=src_rel,
+                ),
+            )
         elif node_type == "markdown":
             title = meta.get("title")
-            tree.set_quiet(full_path, PDVNote(
-                relative_path=rel_path,
-                title=title,
-            ))
+            tree.set_quiet(
+                full_path,
+                PDVNote(
+                    relative_path=rel_path,
+                    title=title,
+                ),
+            )
         elif node_type == "gui":
             mod_id = meta.get("module_id", node.get("module_id", module_id_default))
             gui_node = PDVGui(
@@ -240,19 +248,25 @@ def load_tree_index(
             namelist_format = meta.get(
                 "namelist_format", node.get("namelist_format", "auto")
             )
-            tree.set_quiet(full_path, PDVNamelist(
-                relative_path=rel_path,
-                format=namelist_format,
-                module_id=mod_id,
-                source_rel_path=src_rel,
-            ))
+            tree.set_quiet(
+                full_path,
+                PDVNamelist(
+                    relative_path=rel_path,
+                    format=namelist_format,
+                    module_id=mod_id,
+                    source_rel_path=src_rel,
+                ),
+            )
         elif node_type == "lib":
             mod_id = meta.get("module_id", node.get("module_id", module_id_default))
-            tree.set_quiet(full_path, PDVLib(
-                relative_path=rel_path,
-                module_id=mod_id,
-                source_rel_path=src_rel,
-            ))
+            tree.set_quiet(
+                full_path,
+                PDVLib(
+                    relative_path=rel_path,
+                    module_id=mod_id,
+                    source_rel_path=src_rel,
+                ),
+            )
             if inject_lib_sys_path:
                 abs_path = os.path.join(working_dir, rel_path) if rel_path else ""
                 if abs_path:

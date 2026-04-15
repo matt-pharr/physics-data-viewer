@@ -67,7 +67,11 @@ def handle_script_register(msg: dict) -> None:
     full_path = f"{parent_path}.{name}" if parent_path else name
     tree[full_path] = script
 
-    send_message("pdv.script.register.response", {"path": full_path}, in_reply_to=msg.get("msg_id"))
+    send_message(
+        "pdv.script.register.response",
+        {"path": full_path},
+        in_reply_to=msg.get("msg_id"),
+    )
 
 
 register("pdv.script.register", handle_script_register)

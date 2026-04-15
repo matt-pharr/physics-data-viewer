@@ -59,6 +59,7 @@ def handle_namelist_read(msg: dict) -> None:
         # Determine effective format (resolve "auto")
         if fmt == "auto":
             from pdv_kernel.namelist_utils import detect_namelist_format  # noqa: PLC0415
+
             fmt = detect_namelist_format(file_path)
     except ImportError as exc:
         send_error(

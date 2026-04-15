@@ -152,13 +152,19 @@ def handle_tree_get(msg: dict) -> None:
     tree = get_pdv_tree()
     if tree is None:
         send_error(
-            "pdv.tree.get.response", "tree.no_tree", "PDVTree is not initialized", in_reply_to=msg_id
+            "pdv.tree.get.response",
+            "tree.no_tree",
+            "PDVTree is not initialized",
+            in_reply_to=msg_id,
         )
         return
 
     if not path:
         send_error(
-            "pdv.tree.get.response", "tree.missing_path", "path is required", in_reply_to=msg_id
+            "pdv.tree.get.response",
+            "tree.missing_path",
+            "path is required",
+            in_reply_to=msg_id,
         )
         return
 
@@ -241,23 +247,29 @@ def handle_tree_resolve_file(msg: dict) -> None:
     tree = get_pdv_tree()
     if tree is None:
         send_error(
-            "pdv.tree.resolve_file.response", "tree.no_tree",
-            "PDVTree is not initialized", in_reply_to=msg_id,
+            "pdv.tree.resolve_file.response",
+            "tree.no_tree",
+            "PDVTree is not initialized",
+            in_reply_to=msg_id,
         )
         return
 
     if not path or path not in tree:
         send_error(
-            "pdv.tree.resolve_file.response", "tree.path_not_found",
-            f"No node at path: '{path}'", in_reply_to=msg_id,
+            "pdv.tree.resolve_file.response",
+            "tree.path_not_found",
+            f"No node at path: '{path}'",
+            in_reply_to=msg_id,
         )
         return
 
     node = tree[path]
     if not isinstance(node, PDVFile):
         send_error(
-            "pdv.tree.resolve_file.response", "tree.not_a_file",
-            f"Node at '{path}' is not file-backed", in_reply_to=msg_id,
+            "pdv.tree.resolve_file.response",
+            "tree.not_a_file",
+            f"Node at '{path}' is not file-backed",
+            in_reply_to=msg_id,
         )
         return
 
