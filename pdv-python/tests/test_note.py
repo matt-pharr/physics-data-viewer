@@ -37,6 +37,7 @@ from pdv_kernel.tree import PDVNote, PDVTree
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 def _make_mock_comm():
     sent = []
     mock_comm = MagicMock()
@@ -58,6 +59,7 @@ def _make_msg(payload, msg_id=None):
 # ---------------------------------------------------------------------------
 # PDVNote class
 # ---------------------------------------------------------------------------
+
 
 class TestPDVNote:
     """Tests for the PDVNote wrapper class."""
@@ -112,6 +114,7 @@ class TestPDVNote:
 # ---------------------------------------------------------------------------
 # Serialization
 # ---------------------------------------------------------------------------
+
 
 class TestDetectKindMarkdown:
     """Tests for detect_kind() with PDVNote."""
@@ -221,19 +224,24 @@ class TestNodePreviewMarkdown:
 # Handler
 # ---------------------------------------------------------------------------
 
+
 class TestHandleNoteRegister:
     """Tests for the pdv.note.register handler."""
 
     def test_valid_register_attaches_note_to_tree(self):
         tree = PDVTree()
         mock_comm = _make_mock_comm()
-        msg = _make_msg({
-            "parent_path": "notes",
-            "name": "introduction",
-            "relative_path": "notes/introduction.md",
-        })
-        with patch.object(comms_mod, "_comm", mock_comm), \
-             patch.object(comms_mod, "_pdv_tree", tree):
+        msg = _make_msg(
+            {
+                "parent_path": "notes",
+                "name": "introduction",
+                "relative_path": "notes/introduction.md",
+            }
+        )
+        with (
+            patch.object(comms_mod, "_comm", mock_comm),
+            patch.object(comms_mod, "_pdv_tree", tree),
+        ):
             handle_note_register(msg)
 
         node = tree["notes.introduction"]
@@ -248,8 +256,10 @@ class TestHandleNoteRegister:
         tree = PDVTree()
         mock_comm = _make_mock_comm()
         msg = _make_msg({"parent_path": "notes", "relative_path": "notes/x.md"})
-        with patch.object(comms_mod, "_comm", mock_comm), \
-             patch.object(comms_mod, "_pdv_tree", tree):
+        with (
+            patch.object(comms_mod, "_comm", mock_comm),
+            patch.object(comms_mod, "_pdv_tree", tree),
+        ):
             handle_note_register(msg)
 
         response = mock_comm._sent[0]
@@ -260,8 +270,10 @@ class TestHandleNoteRegister:
         tree = PDVTree()
         mock_comm = _make_mock_comm()
         msg = _make_msg({"parent_path": "notes", "name": "x"})
-        with patch.object(comms_mod, "_comm", mock_comm), \
-             patch.object(comms_mod, "_pdv_tree", tree):
+        with (
+            patch.object(comms_mod, "_comm", mock_comm),
+            patch.object(comms_mod, "_pdv_tree", tree),
+        ):
             handle_note_register(msg)
 
         response = mock_comm._sent[0]
@@ -271,28 +283,38 @@ class TestHandleNoteRegister:
     def test_register_at_root_path(self):
         tree = PDVTree()
         mock_comm = _make_mock_comm()
-        msg = _make_msg({
-            "parent_path": "",
-            "name": "readme",
-            "relative_path": "readme.md",
-        })
-        with patch.object(comms_mod, "_comm", mock_comm), \
-             patch.object(comms_mod, "_pdv_tree", tree):
+        msg = _make_msg(
+            {
+                "parent_path": "",
+                "name": "readme",
+                "relative_path": "readme.md",
+            }
+        )
+        with (
+            patch.object(comms_mod, "_comm", mock_comm),
+            patch.object(comms_mod, "_pdv_tree", tree),
+        ):
             handle_note_register(msg)
 
         assert isinstance(tree["readme"], PDVNote)
 
     def test_register_emits_tree_changed_notification(self):
         tree = PDVTree()
-        tree._attach_comm(lambda msg_type, payload: comms_mod.send_message(msg_type, payload))
+        tree._attach_comm(
+            lambda msg_type, payload: comms_mod.send_message(msg_type, payload)
+        )
         mock_comm = _make_mock_comm()
-        msg = _make_msg({
-            "parent_path": "notes",
-            "name": "new_note",
-            "relative_path": "notes/new_note.md",
-        })
-        with patch.object(comms_mod, "_comm", mock_comm), \
-             patch.object(comms_mod, "_pdv_tree", tree):
+        msg = _make_msg(
+            {
+                "parent_path": "notes",
+                "name": "new_note",
+                "relative_path": "notes/new_note.md",
+            }
+        )
+        with (
+            patch.object(comms_mod, "_comm", mock_comm),
+            patch.object(comms_mod, "_pdv_tree", tree),
+        ):
             handle_note_register(msg)
             tree._flush_changes()
 
@@ -305,6 +327,7 @@ class TestHandleNoteRegister:
 # PDVApp.new_note()
 # ---------------------------------------------------------------------------
 
+
 class TestPDVAppNewNote:
     """Tests for pdv.new_note() convenience method."""
 
@@ -314,8 +337,10 @@ class TestPDVAppNewNote:
         mock_comm = _make_mock_comm()
         app = PDVApp()
 
-        with patch.object(comms_mod, "_comm", mock_comm), \
-             patch.object(comms_mod, "_pdv_tree", tree):
+        with (
+            patch.object(comms_mod, "_comm", mock_comm),
+            patch.object(comms_mod, "_pdv_tree", tree),
+        ):
             app.new_note("notes.intro", title="Introduction")
 
         node = tree["notes.intro"]
@@ -332,8 +357,10 @@ class TestPDVAppNewNote:
         mock_comm = _make_mock_comm()
         app = PDVApp()
 
-        with patch.object(comms_mod, "_comm", mock_comm), \
-             patch.object(comms_mod, "_pdv_tree", tree):
+        with (
+            patch.object(comms_mod, "_comm", mock_comm),
+            patch.object(comms_mod, "_pdv_tree", tree),
+        ):
             app.new_note("scratch")
 
         node = tree["scratch"]
@@ -351,8 +378,10 @@ class TestPDVAppNewNote:
         md_file = tmp_path / "existing.md"
         md_file.write_text("Existing content")
 
-        with patch.object(comms_mod, "_comm", mock_comm), \
-             patch.object(comms_mod, "_pdv_tree", tree):
+        with (
+            patch.object(comms_mod, "_comm", mock_comm),
+            patch.object(comms_mod, "_pdv_tree", tree),
+        ):
             app.new_note("existing", title="New Title")
 
         content = open(tree["existing"].relative_path, "r").read()
@@ -362,6 +391,7 @@ class TestPDVAppNewNote:
 # ---------------------------------------------------------------------------
 # Serialization round-trip
 # ---------------------------------------------------------------------------
+
 
 class TestMarkdownRoundTrip:
     """Tests for serialize → deserialize round-trip with markdown nodes."""

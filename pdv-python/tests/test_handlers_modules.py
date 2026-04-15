@@ -176,11 +176,14 @@ class TestHandleModuleReloadLibs:
         # Install a PDVModule at the alias so the handler's is_module
         # check passes.
         tree_with_comm[alias] = PDVModule(
-            module_id=alias, name="My", version="0.1.0",
+            module_id=alias,
+            name="My",
+            version="0.1.0",
         )
 
         try:
             import helpers_reload_v1  # noqa: PLC0415
+
             assert helpers_reload_v1.VALUE == 1
 
             # Edit the file on disk — simulates an external editor save.
@@ -311,7 +314,10 @@ class TestHandleModuleUpdate:
         from pdv_kernel.tree import PDVModule
 
         tree_with_comm["toy"] = PDVModule(
-            module_id="toy", name="Toy", version="0.1.0", description="old",
+            module_id="toy",
+            name="Toy",
+            version="0.1.0",
+            description="old",
         )
 
         mock_comm = _make_mock_comm()
@@ -343,7 +349,10 @@ class TestHandleModuleUpdate:
         from pdv_kernel.tree import PDVModule
 
         tree_with_comm["toy"] = PDVModule(
-            module_id="toy", name="Toy", version="0.1.0", description="orig",
+            module_id="toy",
+            name="Toy",
+            version="0.1.0",
+            description="orig",
         )
         mock_comm = _make_mock_comm()
         msg = _make_msg(

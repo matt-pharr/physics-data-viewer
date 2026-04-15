@@ -34,12 +34,12 @@ class TestValidateWorkingDir:
     def test_nonexistent_dir_raises(self, tmp_path):
         """A path that does not exist raises PDVPathError."""
         with pytest.raises(PDVPathError):
-            validate_working_dir(str(tmp_path / 'nonexistent'))
+            validate_working_dir(str(tmp_path / "nonexistent"))
 
     def test_not_a_directory_raises(self, tmp_path):
         """A path that is a file (not a directory) raises PDVPathError."""
-        f = tmp_path / 'afile.txt'
-        f.write_text('data')
+        f = tmp_path / "afile.txt"
+        f.write_text("data")
         with pytest.raises(PDVPathError):
             validate_working_dir(str(f))
 
@@ -47,31 +47,31 @@ class TestValidateWorkingDir:
 class TestResolveProjectPath:
     def test_simple_relative_path(self, tmp_save_dir):
         """A simple relative path resolves correctly."""
-        result = resolve_project_path('subdir/file.txt', tmp_save_dir)
+        result = resolve_project_path("subdir/file.txt", tmp_save_dir)
         assert result.startswith(tmp_save_dir)
-        assert result.endswith('file.txt')
+        assert result.endswith("file.txt")
 
     def test_nested_relative_path(self, tmp_save_dir):
         """A nested relative path resolves correctly."""
-        result = resolve_project_path('a/b/c.npy', tmp_save_dir)
+        result = resolve_project_path("a/b/c.npy", tmp_save_dir)
         assert result.startswith(tmp_save_dir)
-        assert 'a' in result and 'b' in result
+        assert "a" in result and "b" in result
 
     def test_traversal_rejected(self, tmp_save_dir):
         """A path with '../' must raise PDVPathError."""
         with pytest.raises(PDVPathError):
-            resolve_project_path('../escape.txt', tmp_save_dir)
+            resolve_project_path("../escape.txt", tmp_save_dir)
 
     def test_absolute_path_rejected(self, tmp_save_dir):
         """An absolute path must raise PDVPathError."""
         with pytest.raises(PDVPathError):
-            resolve_project_path('/etc/passwd', tmp_save_dir)
+            resolve_project_path("/etc/passwd", tmp_save_dir)
 
 
 class TestPathIsSafe:
     def test_inside_root(self, tmp_path):
         """A path inside root is safe."""
-        child = str(tmp_path / 'subdir' / 'file.txt')
+        child = str(tmp_path / "subdir" / "file.txt")
         assert path_is_safe(child, str(tmp_path)) is True
 
     def test_is_root(self, tmp_path):
@@ -92,34 +92,34 @@ class TestPathIsSafe:
     def test_traversal_attempt_not_safe(self, tmp_path):
         """A path built with .. that escapes the root is not safe."""
         # Construct a path that would escape via traversal before realpath
-        attempt = os.path.join(str(tmp_path), '..', 'outside')
+        attempt = os.path.join(str(tmp_path), "..", "outside")
         assert path_is_safe(attempt, str(tmp_path)) is False
 
 
 class TestWorkingDirTreePath:
     def test_simple_path(self, tmp_working_dir):
         """A simple one-part tree path maps correctly."""
-        result = working_dir_tree_path(tmp_working_dir, 'x', '.npy')
-        assert result == os.path.join(tmp_working_dir, 'tree', 'x.npy')
+        result = working_dir_tree_path(tmp_working_dir, "x", ".npy")
+        assert result == os.path.join(tmp_working_dir, "tree", "x.npy")
 
     def test_nested_path(self, tmp_working_dir):
         """A three-part tree path maps to the correct nested structure."""
-        result = working_dir_tree_path(tmp_working_dir, 'data.waveforms.ch1', '.npy')
-        expected = os.path.join(tmp_working_dir, 'tree', 'data', 'waveforms', 'ch1.npy')
+        result = working_dir_tree_path(tmp_working_dir, "data.waveforms.ch1", ".npy")
+        expected = os.path.join(tmp_working_dir, "tree", "data", "waveforms", "ch1.npy")
         assert result == expected
 
 
 class TestEnsureParent:
     def test_creates_parent(self, tmp_path):
         """ensure_parent() creates the parent directory if it does not exist."""
-        target = str(tmp_path / 'new_dir' / 'nested' / 'file.txt')
+        target = str(tmp_path / "new_dir" / "nested" / "file.txt")
         result = ensure_parent(target)
         assert result == target
         assert os.path.isdir(os.path.dirname(target))
 
     def test_existing_parent_no_error(self, tmp_path):
         """ensure_parent() does not raise if the parent already exists."""
-        target = str(tmp_path / 'file.txt')
+        target = str(tmp_path / "file.txt")
         result = ensure_parent(target)
         assert result == target
 
@@ -134,9 +134,9 @@ class TestMakeWorkingDir:
     def test_prefix_is_pdv(self, tmp_path):
         """Created directory name starts with 'pdv-'."""
         result = make_working_dir(str(tmp_path))
-        assert os.path.basename(result).startswith('pdv-')
+        assert os.path.basename(result).startswith("pdv-")
 
     def test_nonexistent_base_raises(self, tmp_path):
         """A non-existent base directory raises PDVPathError."""
         with pytest.raises(PDVPathError):
-            make_working_dir(str(tmp_path / 'nonexistent'))
+            make_working_dir(str(tmp_path / "nonexistent"))

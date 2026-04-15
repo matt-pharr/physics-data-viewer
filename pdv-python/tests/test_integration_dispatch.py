@@ -27,7 +27,9 @@ def _make_mock_comm() -> MagicMock:
     return mock_comm
 
 
-def _make_msg(msg_type: str, payload: dict[str, Any], msg_id: str | None = None) -> dict[str, Any]:
+def _make_msg(
+    msg_type: str, payload: dict[str, Any], msg_id: str | None = None
+) -> dict[str, Any]:
     return {
         "pdv_version": comms_mod.PDV_PROTOCOL_VERSION,
         "msg_id": msg_id or str(uuid.uuid4()),
@@ -53,13 +55,19 @@ class TestIntegrationDispatch:
         mock_comm = _make_mock_comm()
         ip = SimpleNamespace(user_ns={"pdv_tree": tree, "pdv": PDVApp(), "x": 42})
 
-        with patch.object(comms_mod, "_comm", mock_comm), patch.object(
-            comms_mod, "_pdv_tree", tree
-        ), patch.object(comms_mod, "_ip", ip):
+        with (
+            patch.object(comms_mod, "_comm", mock_comm),
+            patch.object(comms_mod, "_pdv_tree", tree),
+            patch.object(comms_mod, "_ip", ip),
+        ):
             comms_mod._on_comm_message(_make_msg("pdv.tree.list", {"path": ""}))
-            comms_mod._on_comm_message(_make_msg("pdv.tree.get", {"path": "alpha", "mode": "value"}))
+            comms_mod._on_comm_message(
+                _make_msg("pdv.tree.get", {"path": "alpha", "mode": "value"})
+            )
             comms_mod._on_comm_message(_make_msg("pdv.namespace.query", {}))
-            comms_mod._on_comm_message(_make_msg("pdv.project.save", {"save_dir": tmp_save_dir}))
+            comms_mod._on_comm_message(
+                _make_msg("pdv.project.save", {"save_dir": tmp_save_dir})
+            )
             comms_mod._on_comm_message(_make_msg("pdv.not.real", {}))
 
         tree_list = _latest_by_type(mock_comm._sent, "pdv.tree.list.response")
@@ -84,13 +92,20 @@ class TestIntegrationDispatch:
         assert unknown["status"] == "error"
         assert unknown["payload"]["code"] == "protocol.unknown_type"
 
-    def test_tree_changed_emits_updated_and_removed_change_types(self, tmp_working_dir: str) -> None:
+    def test_tree_changed_emits_updated_and_removed_change_types(
+        self, tmp_working_dir: str
+    ) -> None:
         tree = PDVTree()
         tree._set_working_dir(tmp_working_dir)
         mock_comm = _make_mock_comm()
 
-        with patch.object(comms_mod, "_comm", mock_comm), patch.object(comms_mod, "_pdv_tree", tree):
-            tree._attach_comm(lambda msg_type, payload: comms_mod.send_message(msg_type, payload))
+        with (
+            patch.object(comms_mod, "_comm", mock_comm),
+            patch.object(comms_mod, "_pdv_tree", tree),
+        ):
+            tree._attach_comm(
+                lambda msg_type, payload: comms_mod.send_message(msg_type, payload)
+            )
             tree["probe"] = 1
             tree._flush_changes()
             tree["probe"] = 2
@@ -98,7 +113,9 @@ class TestIntegrationDispatch:
             del tree["probe"]
             tree._flush_changes()
 
-        changed_pushes = [env for env in mock_comm._sent if env.get("type") == "pdv.tree.changed"]
+        changed_pushes = [
+            env for env in mock_comm._sent if env.get("type") == "pdv.tree.changed"
+        ]
         assert len(changed_pushes) >= 3
         # Each flush produces a batch notification; check the paths are correct.
         assert "probe" in changed_pushes[0]["payload"]["changed_paths"]
@@ -108,7 +125,9 @@ class TestIntegrationDispatch:
         self, tmp_working_dir: str, tmp_save_dir: str, tmp_path
     ) -> None:
         script_file = tmp_path / "roundtrip_script.py"
-        script_file.write_text("def run(pdv_tree: dict):\n    return {'ok': True}\n", encoding="utf-8")
+        script_file.write_text(
+            "def run(pdv_tree: dict):\n    return {'ok': True}\n", encoding="utf-8"
+        )
 
         tree = PDVTree()
         tree._set_working_dir(tmp_working_dir)
@@ -125,8 +144,13 @@ class TestIntegrationDispatch:
             expect_numpy = False
 
         save_comm = _make_mock_comm()
-        with patch.object(comms_mod, "_comm", save_comm), patch.object(comms_mod, "_pdv_tree", tree):
-            comms_mod._on_comm_message(_make_msg("pdv.project.save", {"save_dir": tmp_save_dir}))
+        with (
+            patch.object(comms_mod, "_comm", save_comm),
+            patch.object(comms_mod, "_pdv_tree", tree),
+        ):
+            comms_mod._on_comm_message(
+                _make_msg("pdv.project.save", {"save_dir": tmp_save_dir})
+            )
         save_response = _latest_by_type(save_comm._sent, "pdv.project.save.response")
         assert save_response["status"] == "ok"
 
@@ -134,6 +158,7 @@ class TestIntegrationDispatch:
         fresh_tree._set_working_dir(tmp_working_dir)
         # Simulate TypeScript's copyFilesForLoad: copy file-backed nodes to working dir
         import shutil
+
         tree_index_path = os.path.join(tmp_save_dir, "tree-index.json")
         with open(tree_index_path, "r", encoding="utf-8") as fh:
             index_nodes = json.loads(fh.read())
@@ -147,8 +172,13 @@ class TestIntegrationDispatch:
                 if os.path.exists(src):
                     shutil.copy2(src, dst)
         load_comm = _make_mock_comm()
-        with patch.object(comms_mod, "_comm", load_comm), patch.object(comms_mod, "_pdv_tree", fresh_tree):
-            comms_mod._on_comm_message(_make_msg("pdv.project.load", {"save_dir": tmp_save_dir}))
+        with (
+            patch.object(comms_mod, "_comm", load_comm),
+            patch.object(comms_mod, "_pdv_tree", fresh_tree),
+        ):
+            comms_mod._on_comm_message(
+                _make_msg("pdv.project.load", {"save_dir": tmp_save_dir})
+            )
         load_response = _latest_by_type(load_comm._sent, "pdv.project.load.response")
         assert load_response["status"] == "ok"
 
@@ -161,7 +191,9 @@ class TestIntegrationDispatch:
         else:
             assert fresh_tree["arr"] == [1.0, 2.0, 3.0]
 
-    def test_script_register_then_run_pipeline(self, tmp_working_dir: str, tmp_path) -> None:
+    def test_script_register_then_run_pipeline(
+        self, tmp_working_dir: str, tmp_path
+    ) -> None:
         script_file = tmp_path / "double.py"
         script_file.write_text(
             "def run(pdv_tree: dict, x: int = 1):\n    return {'result': x * 2}\n",
@@ -173,10 +205,14 @@ class TestIntegrationDispatch:
         mock_comm = _make_mock_comm()
         ip = SimpleNamespace(user_ns={"pdv_tree": tree, "pdv": PDVApp()})
 
-        with patch.object(comms_mod, "_comm", mock_comm), patch.object(
-            comms_mod, "_pdv_tree", tree
-        ), patch.object(comms_mod, "_ip", ip):
-            tree._attach_comm(lambda msg_type, payload: comms_mod.send_message(msg_type, payload))
+        with (
+            patch.object(comms_mod, "_comm", mock_comm),
+            patch.object(comms_mod, "_pdv_tree", tree),
+            patch.object(comms_mod, "_ip", ip),
+        ):
+            tree._attach_comm(
+                lambda msg_type, payload: comms_mod.send_message(msg_type, payload)
+            )
             comms_mod._on_comm_message(
                 _make_msg(
                     "pdv.script.register",

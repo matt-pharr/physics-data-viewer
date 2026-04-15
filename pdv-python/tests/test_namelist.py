@@ -15,6 +15,7 @@ from pdv_kernel.tree import PDVNamelist
 # PDVNamelist class tests
 # ---------------------------------------------------------------------------
 
+
 class TestPDVNamelistClass:
     def test_construction_defaults(self):
         node = PDVNamelist("path/to/input.nml")
@@ -51,21 +52,26 @@ class TestPDVNamelistClass:
 # Format detection
 # ---------------------------------------------------------------------------
 
+
 class TestDetectFormat:
     def test_fortran_nml(self):
         from pdv_kernel.namelist_utils import detect_namelist_format
+
         assert detect_namelist_format("solver.nml") == "fortran"
 
     def test_fortran_in(self):
         from pdv_kernel.namelist_utils import detect_namelist_format
+
         assert detect_namelist_format("input.in") == "fortran"
 
     def test_toml(self):
         from pdv_kernel.namelist_utils import detect_namelist_format
+
         assert detect_namelist_format("config.toml") == "toml"
 
     def test_unknown(self):
         from pdv_kernel.namelist_utils import detect_namelist_format
+
         with pytest.raises(ValueError):
             detect_namelist_format("data.csv")
 
@@ -73,6 +79,7 @@ class TestDetectFormat:
 # ---------------------------------------------------------------------------
 # Fortran namelist read/write (requires f90nml)
 # ---------------------------------------------------------------------------
+
 
 @pytest.fixture
 def fortran_file(tmp_path):
@@ -134,6 +141,7 @@ class TestFortranNamelist:
 # TOML read/write
 # ---------------------------------------------------------------------------
 
+
 @pytest.fixture
 def toml_file(tmp_path):
     content = textwrap.dedent("""\
@@ -184,6 +192,7 @@ class TestTomlNamelist:
 # Type inference
 # ---------------------------------------------------------------------------
 
+
 class TestInferTypes:
     def test_infer_types(self):
         from pdv_kernel.namelist_utils import infer_types
@@ -209,6 +218,7 @@ class TestInferTypes:
 # Percent keys (Fortran derived types)
 # ---------------------------------------------------------------------------
 
+
 class TestPercentKeys:
     @pytest.fixture(autouse=True)
     def _check_f90nml(self):
@@ -224,6 +234,7 @@ class TestPercentKeys:
         path.write_text(content)
 
         from pdv_kernel.namelist_utils import extract_hints
+
         hints = extract_hints(str(path), format="fortran")
         assert "params" in hints
         assert hints["params"]["mesh%resolution"] == "grid resolution"
@@ -233,6 +244,7 @@ class TestPercentKeys:
 # Serialization: detect_kind and serialize_node
 # ---------------------------------------------------------------------------
 
+
 class TestSerializationSupport:
     def test_detect_kind_namelist(self):
         from pdv_kernel.serialization import detect_kind, KIND_NAMELIST
@@ -241,7 +253,11 @@ class TestSerializationSupport:
         assert detect_kind(node) == KIND_NAMELIST
 
     def test_serialize_namelist_node(self, tmp_path):
-        from pdv_kernel.serialization import serialize_node, KIND_NAMELIST, FORMAT_NAMELIST
+        from pdv_kernel.serialization import (
+            serialize_node,
+            KIND_NAMELIST,
+            FORMAT_NAMELIST,
+        )
 
         # Create a source file
         source = tmp_path / "input.nml"

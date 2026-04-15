@@ -27,6 +27,7 @@ from pdv_kernel.tree import PDVTree, PDVScript
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 def _make_tree(**items) -> PDVTree:
     t = PDVTree()
     for k, v in items.items():
@@ -36,6 +37,7 @@ def _make_tree(**items) -> PDVTree:
 
 def _make_msg(msg_type, payload):
     import uuid
+
     return {
         "pdv_version": comms_mod.PDV_PROTOCOL_VERSION,
         "msg_id": str(uuid.uuid4()),
@@ -48,6 +50,7 @@ def _make_msg(msg_type, payload):
 # ---------------------------------------------------------------------------
 # Tests
 # ---------------------------------------------------------------------------
+
 
 class TestEmptyTreeIsStable:
     def test_empty_tree_is_stable(self):
@@ -102,6 +105,7 @@ class TestSubtreeDigestMatchesRoot:
 
         # Compute digest of child via the root traversal
         from pdv_kernel.checksum import _node_digest
+
         child_via_root = _node_digest(child, None).hex()
 
         # Compute directly
@@ -138,7 +142,9 @@ class TestFileBackedNodeContentSensitivity:
         checksum_before = tree_checksum(tree)
 
         # Modify the file content
-        script_file.write_text("def run(pdv_tree):\n    return {'x': 1}\n", encoding="utf-8")
+        script_file.write_text(
+            "def run(pdv_tree):\n    return {'x': 1}\n", encoding="utf-8"
+        )
 
         checksum_after = tree_checksum(tree)
 
@@ -243,8 +249,10 @@ class TestRoundtrip:
         sent: list = []
         mock_comm.send.side_effect = lambda data: sent.append(data)
         save_msg = _make_msg("pdv.project.save", {"save_dir": save_dir})
-        with patch.object(comms_mod, "_comm", mock_comm), \
-             patch.object(comms_mod, "_pdv_tree", tree):
+        with (
+            patch.object(comms_mod, "_comm", mock_comm),
+            patch.object(comms_mod, "_pdv_tree", tree),
+        ):
             handle_project_save(save_msg)
 
         # Confirm save emitted a response with a checksum
@@ -259,10 +267,13 @@ class TestRoundtrip:
         # before calling pdv.project.load so the rehydrated PDVFile nodes
         # can resolve their new tree-prefixed relative paths on disk.
         import shutil
+
         save_tree = os.path.join(save_dir, "tree")
         if os.path.exists(save_tree):
             shutil.copytree(
-                save_tree, os.path.join(working_dir, "tree"), dirs_exist_ok=True,
+                save_tree,
+                os.path.join(working_dir, "tree"),
+                dirs_exist_ok=True,
             )
 
         # ---- load into a fresh tree ----
@@ -271,8 +282,10 @@ class TestRoundtrip:
 
         sent.clear()
         load_msg = _make_msg("pdv.project.load", {"save_dir": save_dir})
-        with patch.object(comms_mod, "_comm", mock_comm), \
-             patch.object(comms_mod, "_pdv_tree", fresh_tree):
+        with (
+            patch.object(comms_mod, "_comm", mock_comm),
+            patch.object(comms_mod, "_pdv_tree", fresh_tree),
+        ):
             handle_project_load(load_msg)
 
         # The post-load response should carry the same checksum

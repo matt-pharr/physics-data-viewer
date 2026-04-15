@@ -157,7 +157,9 @@ def test_serialize_roundtrip_with_custom_serializer(tmp_path):
 
 
 def test_serialize_unknown_without_serializer_still_requires_trusted(tmp_path):
-    with pytest.raises(PDVSerializationError, match="register a custom serializer|trusted=True"):
+    with pytest.raises(
+        PDVSerializationError, match="register a custom serializer|trusted=True"
+    ):
         serialize_node("data.solver", _Unpicklable({}), str(tmp_path))
 
 
