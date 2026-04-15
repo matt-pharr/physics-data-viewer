@@ -756,6 +756,8 @@ my-project/
     project.json              ← project manifest (owned by Electron main process)
     tree-index.json           ← tree node registry (owned by kernel, written at save time)
     code-cells.json           ← code cell tab state (owned by Electron main process)
+    pyproject.toml            ← (optional) per-project deps, only when environment.mode == "project" (§10.5)
+    uv.lock                   ← (optional) uv lock file, only when environment.mode == "project" (§10.5)
     modules/                  ← project-local module copies (one subdir per module_id)
         n_pendulum/
             pdv-module.json       ← v4 manifest (written by main process, §5.13)
@@ -780,15 +782,19 @@ my-project/
 
 Each `modules/<id>/` subdirectory is maintained authoritatively by `project:save`: §5.13's save-time sync copies edited files from the working directory into it, then the manifest writer stamps `pdv-module.json` and `module-index.json` from the current in-memory `PDVModule` state. In-session modules (workflow B, origin `"in_session"` in the manifest) get their directory created on first save; imported modules get it at import time and updated on every subsequent save.
 
-**`project.json` schema**:
+**`project.json` schema** (current version `"1.2"`; `"1.1"` manifests remain readable and are upgraded in place on next save — see §10.5.5):
 ```json
 {
-  "schema_version": "1.1",
+  "schema_version": "1.2",
+  "project_id": "<uuid>",
   "saved_at": "<iso8601>",
   "pdv_version": "<app-version>",
   "project_name": "My Project",
   "language": "python",
   "interpreter_path": "/path/to/python3",
+  "environment": {
+    "mode": "shared"
+  },
   "tree_checksum": "<sha256 of tree-index.json>",
   "modules": [
     {
@@ -806,12 +812,14 @@ Each `modules/<id>/` subdirectory is maintained authoritatively by `project:save
 
 | Field | Type | Description |
 |---|---|---|
-| `schema_version` | string | Semantic version of the project.json format. The app rejects manifests with an incompatible major version. Currently `"1.1"`. |
+| `schema_version` | string | Semantic version of the project.json format. The app rejects manifests with an incompatible major version. Currently `"1.2"`. |
+| `project_id` | string | UUIDv4 assigned on first save under schema 1.2. Stable across renames and moves. Used by per-project environment bookkeeping (§10.5). 1.1 manifests without this field get one assigned on upgrade. |
 | `saved_at` | string | ISO 8601 timestamp of last save. |
 | `pdv_version` | string | PDV app version used when saving (e.g. `"0.0.10"`). |
 | `project_name` | string? | Optional human-readable project name chosen by the user. Displayed in the title bar and recent projects list. Falls back to the directory name when absent (backward compat). |
 | `language` | string | Kernel language: `"python"` or `"julia"`. |
-| `interpreter_path` | string? | Optional path to the interpreter used at save time. |
+| `interpreter_path` | string? | Optional path to the interpreter used at save time. Used for pre-selection when `environment.mode == "shared"`; ignored when `environment.mode == "project"`. |
+| `environment` | object? | Environment configuration; see §10.5.5. Absent or `{"mode": "shared"}` means use the app-wide selected environment (§10.2). |
 | `tree_checksum` | string | SHA-256 checksum of `tree-index.json` for integrity verification. |
 | `modules` | array | Modules active in this project. Each entry has `module_id`, `alias`, `version`, optional `revision`, and optional `origin` (`"imported"` default, or `"in_session"` for modules authored via workflow B — see §5.9). |
 | `module_settings` | object | Persisted per-module user settings keyed by module alias. |
@@ -1252,6 +1260,159 @@ After an environment is selected:
 
 If `pdv_kernel.__version__` is installed but incompatible with the app's expected protocol version (major version mismatch), the app shows:
 > "Your pdv-python package is outdated. Please update it: `pip install --upgrade pdv-python`"
+
+### 10.5 Per-Project Environments (uv-managed)
+
+A project can opt in to owning its own isolated Python environment, managed by [`uv`](https://docs.astral.sh/uv/). This is distinct from the shared-environment flow in §10.2–10.4 and exists so that (a) different projects can pin incompatible dependency sets, (b) projects are reproducible across machines, and (c) students can open a shared project without knowing what a virtual environment is.
+
+Per-project environments are opt-in. Projects that do not declare a project environment continue to use the app-wide selected environment exactly as described in §10.2.
+
+#### 10.5.1 Goal
+
+Opening a project whose manifest declares a project environment must produce a working kernel with all declared dependencies installed, without the user running any shell commands, on a machine that has never opened that project before.
+
+#### 10.5.2 Modes
+
+The manifest's `environment.mode` field determines which flow is used:
+
+| Mode | Meaning |
+|---|---|
+| `"shared"` | Use the app-wide environment selected in the Environment Selector (§10.2). Default for projects that have never been configured otherwise. Old `schema_version: "1.1"` manifests are treated as `"shared"` for backward compatibility. |
+| `"project"` | Use an isolated per-project environment materialized by `uv` from a `pyproject.toml` next to `project.json`. |
+
+Mode switching is an explicit user action in the project's settings UI. It is never implicit.
+
+#### 10.5.3 Source of Truth
+
+For `mode: "project"`, the authoritative dependency specification lives in two files inside the project save directory:
+
+```
+my-project/
+    project.json
+    pyproject.toml        ← user-owned dependency spec (PEP 621 + [tool.uv])
+    uv.lock               ← uv-generated lock file for reproducibility
+    ...
+```
+
+- **`pyproject.toml`** is user-owned. PDV writes to it only through explicit actions ("Add package", "Remove package") and never rewrites fields it did not author. Users who maintain it by hand are supported.
+- **`uv.lock`** is generated and owned by `uv`. PDV never edits it directly. It is committed alongside `project.json` so reproducing the environment on another machine is deterministic.
+- **`pdv-python` is not listed in `pyproject.toml`.** It is an app-managed dependency (see §10.5.6).
+
+#### 10.5.4 Environment Location
+
+Project venvs live **outside** the project save directory:
+
+```
+<user-data-dir>/pdv/envs/<project-id>/.venv/
+```
+
+where `<user-data-dir>` is Electron's `app.getPath('userData')` and `<project-id>` is a stable identifier stored in `project.json` (a UUID assigned on first conversion to `mode: "project"`).
+
+Rationale:
+- Venvs are not portable across operating systems; keeping them outside the project avoids polluting git/Dropbox/cloud-synced project trees with machine-specific binaries.
+- The `pyproject.toml` + `uv.lock` pair travels with the project; the venv is regenerated from them on first open on any machine.
+- PDV can garbage-collect orphaned envs by comparing `<project-id>` directories against known project paths in the recent-projects list.
+
+The manifest does **not** store an absolute path to the venv. The venv directory is derived from `project_id`.
+
+#### 10.5.5 Manifest Additions
+
+`project.json` gains an `environment` object and a `project_id`, and the schema version bumps to `"1.2"`:
+
+```json
+{
+  "schema_version": "1.2",
+  "project_id": "<uuid>",
+  "environment": {
+    "mode": "project",
+    "python_version": "3.12",
+    "uv_manifest": "pyproject.toml",
+    "uv_lock": "uv.lock"
+  },
+  ...
+}
+```
+
+| Field | Type | Description |
+|---|---|---|
+| `project_id` | string | UUIDv4 assigned when a project first opts into `mode: "project"`. Stable across renames and moves. Required for 1.2 manifests. |
+| `environment.mode` | string | `"shared"` or `"project"`. |
+| `environment.python_version` | string? | Requested Python version (e.g. `"3.12"`). If absent, uv picks the newest interpreter it can find or install. |
+| `environment.uv_manifest` | string? | Relative path to the pyproject file. Always `"pyproject.toml"` in 1.2; reserved for future flexibility. |
+| `environment.uv_lock` | string? | Relative path to the lock file. Always `"uv.lock"` in 1.2. |
+
+A 1.1 manifest opened by a 1.2-capable app is upgraded in place on next save: `schema_version` becomes `"1.2"`, a `project_id` is assigned, and `environment.mode` defaults to `"shared"`. No `pyproject.toml` is created unless the user switches modes.
+
+The legacy top-level `interpreter_path` field from §6.2 is retained for `mode: "shared"` (it records which env was used at last save so it can be pre-selected on reopen) and is ignored for `mode: "project"`.
+
+#### 10.5.6 `pdv-python` Handling
+
+In `mode: "project"`, `pdv-python` is installed into the project venv by PDV itself, **not** via the user's `pyproject.toml`. Rationale:
+
+- `pdv-python` version is determined by the app version, not the project. Coupling the user's dep graph to PDV's internal version would make every app update a merge conflict in every project.
+- The existing version-match check from §10.4 remains authoritative: PDV always installs the exact version matching the running app into the project venv.
+
+Concretely, after every successful `uv sync`, PDV runs:
+```
+uv pip install --python <venv>/bin/python pdv-python==<app-version>
+```
+This is idempotent and fast (cached) when the version is already present.
+
+#### 10.5.7 Bootstrap Flow on Project Open
+
+When the main process receives `project.load` for a project whose manifest has `environment.mode: "project"`:
+
+1. Resolve the venv path from `project_id`.
+2. If the venv directory exists **and** `uv.lock` has not changed since the venv's recorded lock hash → skip to step 6.
+3. Acquire a per-project lock (file lock under `<user-data-dir>/pdv/envs/<project-id>/.lock`) to prevent concurrent syncs from two windows.
+4. Run `uv sync --project <save-dir> --python <requested-version>` in a subprocess, streaming stdout/stderr to a reused "environment activity" panel in the renderer (same UI plumbing as §10.3's install progress). The lock file is updated on success.
+5. Run the `pdv-python` install step from §10.5.6.
+6. Launch the kernel with `spec.env.PYTHON_PATH = <venv>/bin/python` (or the platform equivalent). From here, §4.1's startup sequence proceeds unchanged.
+
+On any failure in steps 3–5 the app surfaces the uv output verbatim and offers three actions: **Retry**, **Open as shared environment** (falls back to §10.2 for this session without rewriting the manifest), or **Cancel**.
+
+#### 10.5.8 Package Management UI
+
+Adding and removing dependencies is surfaced as a "Project Packages" panel in the project settings. It is a friendly face over `uv add <pkg>` / `uv remove <pkg>`, run against the project save directory. Users are not required to see or understand `pyproject.toml`.
+
+The panel:
+- Lists direct dependencies parsed from `pyproject.toml`'s `[project].dependencies` array.
+- Supports add (by PyPI name with optional version spec), remove, and upgrade.
+- Runs every operation through `uv` so `uv.lock` stays consistent.
+- Streams output to the same "environment activity" panel used by bootstrap.
+- Offers an "Edit pyproject.toml" escape hatch for advanced users, but the main process re-runs `uv sync` after any external edit before allowing the kernel to start.
+
+PDV never parses or resolves dependency constraints itself.
+
+#### 10.5.9 `uv` Binary
+
+PDV bundles a per-platform `uv` binary under `resources/uv/<platform>/uv[.exe]` via electron-builder's `extraResources`. The main process prefers the bundled binary. A config setting `uv.binaryPath` allows developers to point at a system `uv` for testing.
+
+Bundling is preferred over requiring a system install because §10.5.1's goal ("students who have never opened the project") rules out any "install uv first" prerequisite.
+
+#### 10.5.10 Python Version Acquisition
+
+If `environment.python_version` is set and no matching interpreter is installed, `uv sync` will offer to download one via `uv python install <version>`. PDV wraps this in an explicit user confirmation dialog on first occurrence per project ("This project requests Python 3.12, which is not installed. Download it now? (≈ 40 MB)"). This prevents surprise downloads.
+
+#### 10.5.11 Developer Mode (editable `pdv-python`)
+
+PDV contributors run the app against an editable install of `pdv-python`. In this mode the §10.5.6 install step would clobber the editable install. The app detects developer mode by the presence of a `.pdv-dev` marker file in the repo root. When detected:
+
+- `pdv-python` is **not** installed into the project venv.
+- Instead, the repo's `pdv-python/src` path is prepended to `PYTHONPATH` in the kernel's spawn environment.
+- This is documented in the contributor guide; end users never see it.
+
+#### 10.5.12 Garbage Collection
+
+The "Manage Project Environments" dialog (reachable from Settings) lists every directory under `<user-data-dir>/pdv/envs/`, its size, its associated project path (if still present on disk), and offers per-row delete. On app startup, PDV opportunistically removes env directories whose `<project-id>` no longer matches any entry in the recent-projects list **and** are older than 30 days. This is a best-effort cleanup; the manual UI is the authoritative control.
+
+#### 10.5.13 Offline Behavior
+
+First-time `uv sync` and `uv python install` require network access. If the network is unreachable, the error is surfaced and the user is offered the "Open as shared environment" fallback from §10.5.7. Subsequent opens of the same project on the same machine work fully offline because uv's cache and the materialized venv are local.
+
+#### 10.5.14 Conda Compatibility
+
+Per-project environments are explicitly `uv`-managed venvs. Users who prefer conda environments should use `mode: "shared"` and select their conda env in the Environment Selector. PDV does not attempt to build conda envs per project. This is a deliberate scope limit: bridging uv and conda in one project model is more complexity than the benefit justifies.
 
 ---
 
