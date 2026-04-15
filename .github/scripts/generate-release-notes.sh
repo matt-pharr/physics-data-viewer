@@ -54,7 +54,11 @@ if [ -n "$PREV_TAG" ]; then
     | sort -u || true)
 
   for PR in $PR_NUMBERS; do
-    gh api graphql \
+    # Commit messages may reference issue numbers as well as PR numbers.
+    # When the number is not a PR, GraphQL returns an `errors` array and
+    # `gh api` dumps the raw response to stdout while exiting non-zero —
+    # we must discard that stdout so it isn't treated as a valid node.
+    ISSUES_JSON=$(gh api graphql \
       -f query='
         query($owner: String!, $repo: String!, $pr: Int!) {
           repository(owner: $owner, name: $repo) {
@@ -72,7 +76,9 @@ if [ -n "$PREV_TAG" ]; then
         }' \
       -F owner="$OWNER" -F repo="$REPO_NAME" -F pr="$PR" \
       --jq '.data.repository.pullRequest.closingIssuesReferences.nodes[]? | @json' \
-    | while IFS= read -r issue; do
+      2>/dev/null) || ISSUES_JSON=""
+    printf '%s\n' "$ISSUES_JSON" | while IFS= read -r issue; do
+        [ -z "$issue" ] && continue
         NUM=$(echo "$issue" | jq -r '.number')
         if grep -qx "$NUM" "$SEEN_FILE" 2>/dev/null; then
           continue
