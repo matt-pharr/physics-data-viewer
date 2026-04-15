@@ -148,6 +148,47 @@
   min-width: 0;
 }
 
+select.modules-input-field,
+input.modules-input-field:not([type="range"]) {
+  padding: 2px 4px;
+  font-size: 12px;
+  border: 1px solid var(--border-color, #474747);
+  border-radius: 3px;
+  background: var(--bg-secondary, #252526);
+  color: var(--text-primary, #d4d4d4);
+  box-sizing: border-box;
+}
+
+select.modules-input-field option {
+  background: var(--bg-secondary, #252526);
+  color: var(--text-primary, #d4d4d4);
+}
+
+input.modules-input-field[type="range"] {
+  -webkit-appearance: none;
+  appearance: none;
+  height: 4px;
+  background: var(--border-color, #474747);
+  border-radius: 2px;
+  outline: none;
+  padding: 0;
+}
+
+input.modules-input-field[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--accent, #0e639c);
+  border: none;
+  cursor: pointer;
+}
+
+input.modules-input-field[type="range"]::-webkit-slider-thumb:hover {
+  background: var(--accent-hover, #1177bb);
+}
+
 .modules-input-checkbox {
   width: 16px;
   height: 16px;
