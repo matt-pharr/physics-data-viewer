@@ -203,9 +203,7 @@ const App: React.FC = () => {
   useCodeCellsPersistence({
     cellTabs: cellTabs,
     activeCellTab,
-    setCellTabs,
-    setActiveCellTab,
-    currentProjectDir,
+    currentKernelId,
   });
 
   useEffect(() => {

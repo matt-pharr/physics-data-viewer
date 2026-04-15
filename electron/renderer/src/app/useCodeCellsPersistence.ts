@@ -1,54 +1,38 @@
-import { useEffect, useRef, type Dispatch, type SetStateAction } from 'react';
+import { useEffect, useRef } from 'react';
 import type { CellTab } from '../types';
 import { CODE_CELL_SAVE_DEBOUNCE_MS } from './constants';
 
-/** Options for {@link useCodeCellsPersistence}. Reads/writes code cell state to ~/.PDV/state/. */
+/**
+ * Options for {@link useCodeCellsPersistence}.
+ *
+ * Writes the current code-cell tab state to the active kernel's working
+ * directory (``<workingDir>/code-cells.json``) on a debounce. Cells are
+ * scoped to the kernel lifetime: a fresh kernel starts with an empty tab
+ * set, and project load restores tabs via {@link useProjectWorkflow}, not
+ * via this hook. There is no global ``~/.PDV/state/`` persistence.
+ */
 interface UseCodeCellsPersistenceOptions {
   /** The current array of code editor tabs (code, title, id). */
   cellTabs: CellTab[];
   /** The ID of the currently active editor tab. */
   activeCellTab: number;
-  /** Setter to restore persisted tabs on mount. */
-  setCellTabs: Dispatch<SetStateAction<CellTab[]>>;
-  /** Setter to restore the persisted active tab on mount. */
-  setActiveCellTab: Dispatch<SetStateAction<number>>;
-  /** Current project directory — cells are only persisted/restored when a project is open. */
-  currentProjectDir: string | null;
+  /** Active kernel ID — autosave is disabled until a kernel is running. */
+  currentKernelId: string | null;
 }
 
 export function useCodeCellsPersistence({
   cellTabs,
   activeCellTab,
-  setCellTabs,
-  setActiveCellTab,
-  currentProjectDir,
+  currentKernelId,
 }: UseCodeCellsPersistenceOptions): void {
-  const hasProjectRef = useRef(currentProjectDir);
+  const saveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const hasKernelRef = useRef(currentKernelId);
   useEffect(() => {
-    hasProjectRef.current = currentProjectDir;
+    hasKernelRef.current = currentKernelId;
   });
 
   useEffect(() => {
-    if (!window.pdv?.codeCells || !currentProjectDir) {
-      return;
-    }
-    const loadCodeCells = async () => {
-      try {
-        const data = await window.pdv.codeCells.load();
-        if (data) {
-          setCellTabs(data.tabs);
-          setActiveCellTab(data.activeTabId);
-        }
-      } catch (error) {
-        console.error('[App] Failed to load code cells:', error);
-      }
-    };
-    void loadCodeCells();
-  }, [setActiveCellTab, setCellTabs, currentProjectDir]);
-
-  const saveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  useEffect(() => {
-    if (!window.pdv?.codeCells || !currentProjectDir) {
+    if (!window.pdv?.codeCells || !currentKernelId) {
       return;
     }
     if (saveTimeoutRef.current) {
@@ -69,7 +53,7 @@ export function useCodeCellsPersistence({
     return () => {
       if (saveTimeoutRef.current) {
         clearTimeout(saveTimeoutRef.current);
-        if (hasProjectRef.current) {
+        if (hasKernelRef.current) {
           void window.pdv.codeCells.save({
             tabs: cellTabs,
             activeTabId: activeCellTab,
@@ -77,5 +61,5 @@ export function useCodeCellsPersistence({
         }
       }
     };
-  }, [activeCellTab, cellTabs, currentProjectDir]);
+  }, [activeCellTab, cellTabs, currentKernelId]);
 }

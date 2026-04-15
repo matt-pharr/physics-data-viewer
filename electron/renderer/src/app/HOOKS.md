@@ -9,7 +9,7 @@ App (index.tsx)
  ├── 21 useState declarations (grouped by domain — see §State Groups below)
  ├── useLayoutState()           — sidebar/pane geometry (localStorage)
  ├── useThemeManager()          — theme colors + Monaco theme
- ├── useCodeCellsPersistence()  — load/save code tabs to ~/.PDV/state/
+ ├── useCodeCellsPersistence()  — autosave code tabs to <kernelWorkingDir>/code-cells.json
  ├── useKernelSubscriptions()   — push-subscription lifecycle
  ├── useKernelLifecycle()       — start / restart / env-save
  ├── useKeyboardShortcuts()     — global keydown listener
@@ -68,15 +68,15 @@ Several hooks bump integer "refresh tokens" (e.g. `setTreeRefreshToken(t => t + 
 
 ---
 
-### `useCodeCellsPersistence({ cellTabs, activeCellTab, setCellTabs, setActiveCellTab })`
+### `useCodeCellsPersistence({ cellTabs, activeCellTab, currentKernelId })`
 
-**Purpose**: Loads persisted code cell tabs from `~/.PDV/state/code-cells.json` on mount and saves them back on every change (debounced by `CODE_CELL_SAVE_DEBOUNCE_MS`).
+**Purpose**: Debounced autosave of code cell tab state to `<kernelWorkingDir>/code-cells.json` whenever a kernel is running. Cells are scoped to the kernel lifetime — a new kernel starts empty, and project open/save mirrors the file in/out of the project save directory via `useProjectWorkflow`. There is no global `~/.PDV/state/` persistence.
 
-**Takes**: Code editor state and setters.
+**Takes**: `cellTabs`, `activeCellTab`, and the active `currentKernelId` (autosave is disabled when null).
 
 **Returns**: Nothing (void).
 
-**Dependencies**: None — independent read/write to filesystem.
+**Dependencies**: None — independent write to the kernel working dir via IPC.
 
 ---
 
