@@ -41,6 +41,7 @@ from pdv_kernel.errors import PDVKeyError, PDVPathError, PDVScriptError
 # Internal helpers
 # ---------------------------------------------------------------------------
 
+
 def _split_dot_path(key: str) -> list[str]:
     """Split a dot-separated tree path into parts, validating each part.
 
@@ -197,9 +198,11 @@ def _extract_script_params(file_path: str) -> list[ScriptParameter]:
         )
     return extracted
 
+
 # ---------------------------------------------------------------------------
 # PDVFile — base class for file-backed tree nodes
 # ---------------------------------------------------------------------------
+
 
 class PDVFile:
     """
@@ -320,9 +323,14 @@ class PDVScript(PDVFile):
     ARCHITECTURE.md §5.7
     """
 
-    def __init__(self, relative_path: str, language: str = "python",
-                 doc: str | None = None, module_id: str = "",
-                 source_rel_path: str | None = None) -> None:
+    def __init__(
+        self,
+        relative_path: str,
+        language: str = "python",
+        doc: str | None = None,
+        module_id: str = "",
+        source_rel_path: str | None = None,
+    ) -> None:
         super().__init__(relative_path, source_rel_path=source_rel_path)
         self._language = language
         self._doc = doc
@@ -363,7 +371,7 @@ class PDVScript(PDVFile):
         return "PDV script"
 
     # Regex matching PEP 508 "extra ==" markers (used to declare optional deps).
-    _EXTRA_MARKER_RE = re.compile(r'extra\s*==')
+    _EXTRA_MARKER_RE = re.compile(r"extra\s*==")
 
     @staticmethod
     def _resolve_import_name(dist_name: str) -> str:
@@ -384,7 +392,9 @@ class PDVScript(PDVFile):
         if key in _known:
             return _known[key]
         try:
-            top_level = importlib.metadata.distribution(dist_name).read_text("top_level.txt")
+            top_level = importlib.metadata.distribution(dist_name).read_text(
+                "top_level.txt"
+            )
             if top_level:
                 first = top_level.strip().split()[0]
                 if first:
@@ -509,6 +519,7 @@ class PDVScript(PDVFile):
 # PDVGui
 # ---------------------------------------------------------------------------
 
+
 class PDVGui(PDVFile):
     """
     File-backed GUI definition node.
@@ -524,8 +535,12 @@ class PDVGui(PDVFile):
         Module identifier for module-owned GUIs. None for user-created project GUIs.
     """
 
-    def __init__(self, relative_path: str, module_id: str | None = None,
-                 source_rel_path: str | None = None) -> None:
+    def __init__(
+        self,
+        relative_path: str,
+        module_id: str | None = None,
+        source_rel_path: str | None = None,
+    ) -> None:
         super().__init__(relative_path, source_rel_path=source_rel_path)
         self._module_id = module_id
 
@@ -576,9 +591,13 @@ class PDVNamelist(PDVFile):
     ARCHITECTURE.md §7.2
     """
 
-    def __init__(self, relative_path: str, format: str = "auto",
-                 module_id: str | None = None,
-                 source_rel_path: str | None = None) -> None:
+    def __init__(
+        self,
+        relative_path: str,
+        format: str = "auto",
+        module_id: str | None = None,
+        source_rel_path: str | None = None,
+    ) -> None:
         super().__init__(relative_path, source_rel_path=source_rel_path)
         self._format = format  # "fortran", "toml", "auto"
         self._module_id = module_id
@@ -637,8 +656,12 @@ class PDVLib(PDVFile):
     ARCHITECTURE.md §5.10, §7.2
     """
 
-    def __init__(self, relative_path: str, module_id: str | None = None,
-                 source_rel_path: str | None = None) -> None:
+    def __init__(
+        self,
+        relative_path: str,
+        module_id: str | None = None,
+        source_rel_path: str | None = None,
+    ) -> None:
         super().__init__(relative_path, source_rel_path=source_rel_path)
         self._module_id = module_id
 
@@ -730,6 +753,7 @@ class PDVNote(PDVFile):
 # ---------------------------------------------------------------------------
 # PDVTree
 # ---------------------------------------------------------------------------
+
 
 class PDVTree(dict):
     """
@@ -829,7 +853,9 @@ class PDVTree(dict):
             pending = self._pending_changes
             self._pending_changes = []
             self._debounce_timer = None
-            send_fn = self._send_fn  # capture under lock to avoid race with _detach_comm
+            send_fn = (
+                self._send_fn
+            )  # capture under lock to avoid race with _detach_comm
         if not pending or send_fn is None:
             return
         # Deduplicate: last change_type per path wins.
@@ -1002,9 +1028,7 @@ class PDVTree(dict):
         returned (without notification) when *key* is missing.
         """
         if len(args) > 1:
-            raise TypeError(
-                f"pop expected at most 2 arguments, got {1 + len(args)}"
-            )
+            raise TypeError(f"pop expected at most 2 arguments, got {1 + len(args)}")
         parts = _split_dot_path(key)
         if len(parts) == 1:
             if not dict.__contains__(self, key):
@@ -1032,9 +1056,7 @@ class PDVTree(dict):
     def update(self, *args: Any, **kwargs: Any) -> None:  # type: ignore[override]
         """Merge key/value pairs, emitting a notification for each key."""
         if len(args) > 1:
-            raise TypeError(
-                f"update expected at most 1 argument, got {len(args)}"
-            )
+            raise TypeError(f"update expected at most 1 argument, got {len(args)}")
         if args:
             other = args[0]
             if hasattr(other, "keys"):
@@ -1147,11 +1169,16 @@ class PDVModule(PDVTree):
     ARCHITECTURE.md §5.9, and the #140 module editing workflow plan §5.
     """
 
-    def __init__(self, module_id: str, name: str, version: str,
-                 gui: PDVGui | None = None,
-                 dependencies: list[dict[str, str]] | None = None,
-                 description: str = "",
-                 language: str = "python") -> None:
+    def __init__(
+        self,
+        module_id: str,
+        name: str,
+        version: str,
+        gui: PDVGui | None = None,
+        dependencies: list[dict[str, str]] | None = None,
+        description: str = "",
+        language: str = "python",
+    ) -> None:
         super().__init__()
         self._module_id = module_id
         self._name = name

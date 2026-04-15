@@ -23,20 +23,45 @@ Do not import comms, handlers, or namespace internals directly — they
 are implementation details and their interfaces may change.
 """
 
-from pdv_kernel.tree import PDVTree, PDVFile, PDVScript, PDVNote, PDVGui, PDVNamelist, PDVModule, PDVLib
+from pdv_kernel.tree import (
+    PDVTree,
+    PDVFile,
+    PDVScript,
+    PDVNote,
+    PDVGui,
+    PDVNamelist,
+    PDVModule,
+    PDVLib,
+)
 from pdv_kernel.errors import PDVError
 from pdv_kernel.modules import handle
 from pdv_kernel.serializers import register as register_serializer
 
-from importlib.metadata import version as _pkg_version, PackageNotFoundError as _PkgNotFound
+from importlib.metadata import (
+    version as _pkg_version,
+    PackageNotFoundError as _PkgNotFound,
+)
+
 try:
     __version__ = _pkg_version("pdv-python")
 except _PkgNotFound:
     __version__ = "0.0.0"
 
 __all__ = [
-    "PDVTree", "PDVFile", "PDVScript", "PDVNote", "PDVGui", "PDVNamelist", "PDVModule", "PDVLib",
-    "PDVError", "bootstrap", "handle", "register_serializer", "log", "__version__",
+    "PDVTree",
+    "PDVFile",
+    "PDVScript",
+    "PDVNote",
+    "PDVGui",
+    "PDVNamelist",
+    "PDVModule",
+    "PDVLib",
+    "PDVError",
+    "bootstrap",
+    "handle",
+    "register_serializer",
+    "log",
+    "__version__",
 ]
 
 
@@ -124,6 +149,7 @@ def bootstrap(ip=None):
         dict.__setitem__(protected_ns, "pdv", app)
         try:
             from IPython.core.interactiveshell import InteractiveShell  # noqa: PLC0415
+
             is_real_shell = isinstance(ip, InteractiveShell)
         except ImportError:
             is_real_shell = False
@@ -137,7 +163,9 @@ def bootstrap(ip=None):
     comms_mod._ip = ip
 
     # Attach the comm send function to the tree for push notifications
-    tree._attach_comm(lambda msg_type, payload: comms_mod.send_message(msg_type, payload))
+    tree._attach_comm(
+        lambda msg_type, payload: comms_mod.send_message(msg_type, payload)
+    )
 
     # Register the comm target with IPython so the app can connect
     if ip is not None:
@@ -195,6 +223,7 @@ def _configure_matplotlib() -> None:
             # Enable interactive mode so plt.show() is non-blocking — the
             # plot window opens and the kernel returns to idle immediately.
             import matplotlib.pyplot as _plt  # noqa: PLC0415
+
             _plt.ion()
             return
         except Exception:
@@ -235,6 +264,7 @@ def _patch_plt_show_for_inline_capture() -> None:
 
             try:
                 from IPython.display import display, Image  # noqa: PLC0415
+
                 display(Image(data=base64.b64decode(png_b64), format="png"))
             except ImportError:
                 # IPython not available — nothing we can do
@@ -245,4 +275,6 @@ def _patch_plt_show_for_inline_capture() -> None:
             print(f"[PDV] Could not capture figure: {exc}")
 
     plt.show = _pdv_inline_show
-    print("[PDV] No interactive matplotlib backend found — figures will render inline in the PDV console.")
+    print(
+        "[PDV] No interactive matplotlib backend found — figures will render inline in the PDV console."
+    )

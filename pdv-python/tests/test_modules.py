@@ -49,6 +49,7 @@ class _Unrelated:
 
 def test_handle_decorator_registers_handler():
     """@handle(cls) should register the decorated function."""
+
     @handle(_Base)
     def on_base(obj, path, tree):
         pass
@@ -62,6 +63,7 @@ def test_handle_decorator_registers_handler():
 
 def test_has_handler_for_exact_type():
     """has_handler_for should match when the exact type is registered."""
+
     @handle(_Base)
     def on_base(obj, path, tree):
         pass
@@ -72,6 +74,7 @@ def test_has_handler_for_exact_type():
 
 def test_has_handler_for_subclass_via_mro():
     """has_handler_for should match subclasses via MRO."""
+
     @handle(_Base)
     def on_base(obj, path, tree):
         pass
@@ -81,6 +84,7 @@ def test_has_handler_for_subclass_via_mro():
 
 def test_last_registration_wins():
     """Registering a handler for the same type should overwrite with a warning."""
+
     @handle(_Base)
     def first(obj, path, tree):
         pass
@@ -125,6 +129,7 @@ def test_dispatch_handler_no_handler_returns_false():
 
 def test_get_handler_registry():
     """get_handler_registry should return a snapshot of registered handlers."""
+
     @handle(_Base)
     def on_base(obj, path, tree):
         pass
@@ -139,6 +144,7 @@ def test_get_handler_registry():
 
 def test_clear_handlers():
     """clear_handlers should empty the registry."""
+
     @handle(_Base)
     def on_base(obj, path, tree):
         pass

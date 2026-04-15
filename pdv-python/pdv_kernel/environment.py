@@ -109,7 +109,9 @@ def resolve_project_path(relative_path: str, project_root: str) -> str:
         If the path is absolute, escapes the project root, or is otherwise unsafe.
     """
     if os.path.isabs(relative_path):
-        raise PDVPathError(f"Expected a relative path, got absolute path: {relative_path}")
+        raise PDVPathError(
+            f"Expected a relative path, got absolute path: {relative_path}"
+        )
     candidate = os.path.realpath(os.path.join(project_root, relative_path))
     root = os.path.realpath(project_root)
     if not path_is_safe(candidate, root):
@@ -137,7 +139,9 @@ def path_is_safe(candidate: str, root: str) -> bool:
     try:
         candidate_real = os.path.realpath(candidate)
         root_real = os.path.realpath(root)
-        return candidate_real == root_real or candidate_real.startswith(root_real + os.sep)
+        return candidate_real == root_real or candidate_real.startswith(
+            root_real + os.sep
+        )
     except Exception:
         return False
 

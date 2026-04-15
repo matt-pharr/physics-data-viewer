@@ -56,7 +56,9 @@ def handle_note_register(msg: dict) -> None:
     full_path = f"{parent_path}.{name}" if parent_path else name
     tree[full_path] = note
 
-    send_message("pdv.note.register.response", {"path": full_path}, in_reply_to=msg.get("msg_id"))
+    send_message(
+        "pdv.note.register.response", {"path": full_path}, in_reply_to=msg.get("msg_id")
+    )
 
 
 register("pdv.note.register", handle_note_register)

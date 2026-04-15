@@ -80,17 +80,17 @@ def _parquet_engine() -> str:
     """
     try:
         import pyarrow  # noqa: F401, PLC0415
+
         return "pyarrow"
     except ImportError:
         pass
     try:
         import fastparquet  # noqa: F401, PLC0415
+
         return "fastparquet"
     except ImportError:
         pass
-    raise ImportError(
-        "No parquet engine available. Install pyarrow or fastparquet."
-    )
+    raise ImportError("No parquet engine available. Install pyarrow or fastparquet.")
 
 
 def _write_parquet(value: Any, path: str) -> None:
@@ -168,7 +168,16 @@ def detect_kind(value: Any) -> str:
     ndarray/dataframe/series values fall through to ``KIND_UNKNOWN``.
     """
     # Lazy import to avoid circular dependency and optional deps
-    from pdv_kernel.tree import PDVTree, PDVScript, PDVNote, PDVFile, PDVModule, PDVGui, PDVNamelist, PDVLib  # noqa: PLC0415
+    from pdv_kernel.tree import (
+        PDVTree,
+        PDVScript,
+        PDVNote,
+        PDVFile,
+        PDVModule,
+        PDVGui,
+        PDVNamelist,
+        PDVLib,
+    )  # noqa: PLC0415
 
     if isinstance(value, PDVModule):
         return KIND_MODULE
@@ -202,12 +211,14 @@ def detect_kind(value: Any) -> str:
     # Lazy numpy/pandas checks
     try:
         import numpy as np  # noqa: PLC0415
+
         if isinstance(value, np.ndarray):
             return KIND_NDARRAY
     except ImportError:
         pass
     try:
         import pandas as pd  # noqa: PLC0415
+
         if isinstance(value, pd.DataFrame):
             return KIND_DATAFRAME
         if isinstance(value, pd.Series):
@@ -278,20 +289,22 @@ def serialize_node(
     import shutil
 
     from pdv_kernel.environment import ensure_parent, working_dir_tree_path  # noqa: PLC0415
-    from pdv_kernel.tree import PDVFile, PDVScript, PDVModule, PDVLib, PDVGui, PDVNote  # noqa: PLC0415
+    from pdv_kernel.tree import PDVFile, PDVScript, PDVLib, PDVGui, PDVNote  # noqa: PLC0415
 
     # File extension and format for each PDVFile subclass
     _FILE_KIND_MAP: dict[str, tuple[str, str]] = {
-        KIND_SCRIPT:   (".py", FORMAT_PY_SCRIPT),
+        KIND_SCRIPT: (".py", FORMAT_PY_SCRIPT),
         KIND_MARKDOWN: (".md", FORMAT_MARKDOWN),
-        KIND_GUI:      (".gui.json", FORMAT_GUI_JSON),
-        KIND_LIB:      (".py", FORMAT_PY_LIB),
+        KIND_GUI: (".gui.json", FORMAT_GUI_JSON),
+        KIND_LIB: (".py", FORMAT_PY_LIB),
     }
 
     _source_dir = source_dir or working_dir
 
     kind = detect_kind(value)
-    now = datetime.datetime.now(datetime.timezone.utc).isoformat().replace("+00:00", "Z")
+    now = (
+        datetime.datetime.now(datetime.timezone.utc).isoformat().replace("+00:00", "Z")
+    )
     parts = tree_path.split(".")
     key = parts[-1]
     parent_path = ".".join(parts[:-1]) if len(parts) > 1 else ""
@@ -708,7 +721,6 @@ def node_preview(value: Any, kind: str) -> str:
             noun = "tuple" if isinstance(value, tuple) else "list"
             return f"{noun} ({len(value)} items)"
         if kind == KIND_NDARRAY:
-            import numpy as np  # noqa: PLC0415
 
             shape_str = " × ".join(str(d) for d in value.shape)
             return f"{value.dtype} array ({shape_str})"
@@ -736,5 +748,3 @@ def node_preview(value: Any, kind: str) -> str:
         except Exception:  # noqa: BLE001
             pass
     return "<unknown type>"
-
-

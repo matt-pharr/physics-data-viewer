@@ -55,7 +55,7 @@ def validate_register_request(
             send_error(
                 response_type,
                 f"{code_prefix}.missing_{field}",
-                f"{field} is required in {response_type[:-len('.response')]} payload",
+                f"{field} is required in {response_type[: -len('.response')]} payload",
                 in_reply_to=msg_id,
             )
             return None
@@ -109,7 +109,7 @@ def resolve_namelist_node(
         send_error(
             response_type,
             "namelist.missing_tree_path",
-            f"tree_path is required in {response_type[:-len('.response')]} payload",
+            f"tree_path is required in {response_type[: -len('.response')]} payload",
             in_reply_to=msg_id,
         )
         return None

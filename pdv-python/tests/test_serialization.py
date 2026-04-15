@@ -11,7 +11,6 @@ Tests cover:
 Reference: ARCHITECTURE.md §7.2, §7.3
 """
 
-import json
 import os
 import pytest
 from pdv_kernel.serialization import (
@@ -28,11 +27,6 @@ from pdv_kernel.serialization import (
     KIND_SEQUENCE,
     KIND_FOLDER,
     KIND_SCRIPT,
-    KIND_MARKDOWN,
-    KIND_MODULE,
-    KIND_GUI,
-    KIND_NAMELIST,
-    KIND_LIB,
     KIND_UNKNOWN,
 )
 from pdv_kernel.errors import PDVSerializationError
@@ -40,6 +34,7 @@ from pdv_kernel.errors import PDVSerializationError
 
 class WeirdPicklable:
     """Module-level class so pickle can locate it during round-trip tests."""
+
     pass
 
 
@@ -73,21 +68,22 @@ class TestDetectKind:
 
     def test_bytes_is_binary(self):
         from pdv_kernel.serialization import KIND_BINARY
+
         assert detect_kind(b"data") == KIND_BINARY
 
     def test_numpy_array_is_ndarray(self):
         """numpy array returns KIND_NDARRAY (skipped if numpy absent)."""
-        numpy = pytest.importorskip('numpy')
+        numpy = pytest.importorskip("numpy")
         assert detect_kind(numpy.array([1.0, 2.0])) == KIND_NDARRAY
 
     def test_pandas_dataframe_is_dataframe(self):
         """DataFrame returns KIND_DATAFRAME (skipped if pandas absent)."""
-        pandas = pytest.importorskip('pandas')
-        assert detect_kind(pandas.DataFrame({'a': [1, 2]})) == KIND_DATAFRAME
+        pandas = pytest.importorskip("pandas")
+        assert detect_kind(pandas.DataFrame({"a": [1, 2]})) == KIND_DATAFRAME
 
     def test_pandas_series_is_series(self):
         """Series returns KIND_SERIES (skipped if pandas absent)."""
-        pandas = pytest.importorskip('pandas')
+        pandas = pytest.importorskip("pandas")
         assert detect_kind(pandas.Series([1, 2, 3])) == KIND_SERIES
 
     def test_unknown_object(self):
@@ -97,126 +93,141 @@ class TestDetectKind:
     def test_pdv_tree_is_folder(self):
         """PDVTree returns KIND_FOLDER."""
         from pdv_kernel.tree import PDVTree
+
         assert detect_kind(PDVTree()) == KIND_FOLDER
 
     def test_pdv_script_is_script(self):
         """PDVScript returns KIND_SCRIPT."""
         from pdv_kernel.tree import PDVScript
-        from pdv_kernel.serialization import KIND_SCRIPT
-        assert detect_kind(PDVScript('scripts/test.py')) == KIND_SCRIPT
+
+        assert detect_kind(PDVScript("scripts/test.py")) == KIND_SCRIPT
 
 
 class TestSerializeAndDeserialize:
     """Round-trip tests for serialize_node() + deserialize_node()."""
 
     def test_scalar_json_roundtrip(self, tmp_working_dir):
-        descriptor = serialize_node('x', 42, tmp_working_dir)
-        assert descriptor['type'] == KIND_SCALAR
-        assert descriptor['storage']['backend'] == 'inline'
-        value = deserialize_node(descriptor['storage'], tmp_working_dir)
+        descriptor = serialize_node("x", 42, tmp_working_dir)
+        assert descriptor["type"] == KIND_SCALAR
+        assert descriptor["storage"]["backend"] == "inline"
+        value = deserialize_node(descriptor["storage"], tmp_working_dir)
         assert value == 42
 
     def test_text_roundtrip(self, tmp_working_dir):
-        descriptor = serialize_node('t', 'hello world', tmp_working_dir)
-        assert descriptor['type'] == KIND_TEXT
-        value = deserialize_node(descriptor['storage'], tmp_working_dir)
-        assert value == 'hello world'
+        descriptor = serialize_node("t", "hello world", tmp_working_dir)
+        assert descriptor["type"] == KIND_TEXT
+        value = deserialize_node(descriptor["storage"], tmp_working_dir)
+        assert value == "hello world"
 
     def test_mapping_json_roundtrip(self, tmp_working_dir):
-        data = {'key': 'val', 'num': 7}
-        descriptor = serialize_node('m', data, tmp_working_dir)
-        assert descriptor['type'] == KIND_MAPPING
-        value = deserialize_node(descriptor['storage'], tmp_working_dir)
+        data = {"key": "val", "num": 7}
+        descriptor = serialize_node("m", data, tmp_working_dir)
+        assert descriptor["type"] == KIND_MAPPING
+        value = deserialize_node(descriptor["storage"], tmp_working_dir)
         assert value == data
 
     def test_sequence_roundtrip(self, tmp_working_dir):
         data = [1, 2, 3]
-        descriptor = serialize_node('s', data, tmp_working_dir)
-        assert descriptor['type'] == KIND_SEQUENCE
-        value = deserialize_node(descriptor['storage'], tmp_working_dir)
+        descriptor = serialize_node("s", data, tmp_working_dir)
+        assert descriptor["type"] == KIND_SEQUENCE
+        value = deserialize_node(descriptor["storage"], tmp_working_dir)
         assert value == data
 
     def test_numpy_npy_roundtrip(self, tmp_working_dir):
         """numpy array → npy file → back to array (pytest.importorskip)."""
-        numpy = pytest.importorskip('numpy')
+        numpy = pytest.importorskip("numpy")
         arr = numpy.array([[1.0, 2.0], [3.0, 4.0]])
-        descriptor = serialize_node('data.arr', arr, tmp_working_dir)
-        assert descriptor['type'] == KIND_NDARRAY
-        assert descriptor['storage']['format'] == 'npy'
-        value = deserialize_node(descriptor['storage'], tmp_working_dir)
+        descriptor = serialize_node("data.arr", arr, tmp_working_dir)
+        assert descriptor["type"] == KIND_NDARRAY
+        assert descriptor["storage"]["format"] == "npy"
+        value = deserialize_node(descriptor["storage"], tmp_working_dir)
         assert numpy.array_equal(value, arr)
 
     def test_pandas_dataframe_parquet_roundtrip(self, tmp_working_dir):
         """DataFrame → parquet → back to DataFrame (pytest.importorskip)."""
-        pandas = pytest.importorskip('pandas')
-        pytest.importorskip('pyarrow')
-        df = pandas.DataFrame({'a': [1, 2, 3], 'b': [4.0, 5.0, 6.0]})
-        descriptor = serialize_node('data.df', df, tmp_working_dir)
-        assert descriptor['type'] == KIND_DATAFRAME
-        assert descriptor['storage']['format'] == 'parquet'
-        value = deserialize_node(descriptor['storage'], tmp_working_dir)
-        assert list(value['a']) == [1, 2, 3]
+        pandas = pytest.importorskip("pandas")
+        pytest.importorskip("pyarrow")
+        df = pandas.DataFrame({"a": [1, 2, 3], "b": [4.0, 5.0, 6.0]})
+        descriptor = serialize_node("data.df", df, tmp_working_dir)
+        assert descriptor["type"] == KIND_DATAFRAME
+        assert descriptor["storage"]["format"] == "parquet"
+        value = deserialize_node(descriptor["storage"], tmp_working_dir)
+        assert list(value["a"]) == [1, 2, 3]
 
     def test_unknown_raises_without_trusted(self, tmp_working_dir):
         """serialize_node() raises PDVSerializationError for unknown type without trusted=True."""
         with pytest.raises(PDVSerializationError):
-            serialize_node('u', WeirdPicklable(), tmp_working_dir)
+            serialize_node("u", WeirdPicklable(), tmp_working_dir)
 
     def test_unknown_pickle_roundtrip_trusted(self, tmp_working_dir):
         """serialize_node() with trusted=True pickles unknown types."""
         obj = WeirdPicklable()
-        descriptor = serialize_node('u', obj, tmp_working_dir, trusted=True)
-        assert descriptor['storage']['format'] == 'pickle'
-        restored = deserialize_node(descriptor['storage'], tmp_working_dir, trusted=True)
+        descriptor = serialize_node("u", obj, tmp_working_dir, trusted=True)
+        assert descriptor["storage"]["format"] == "pickle"
+        restored = deserialize_node(
+            descriptor["storage"], tmp_working_dir, trusted=True
+        )
         assert isinstance(restored, WeirdPicklable)
 
     def test_pickle_raises_without_trusted(self, tmp_working_dir):
         """deserialize_node raises for pickle format without trusted=True."""
-        descriptor = serialize_node('u', WeirdPicklable(), tmp_working_dir, trusted=True)
+        descriptor = serialize_node(
+            "u", WeirdPicklable(), tmp_working_dir, trusted=True
+        )
         with pytest.raises(PDVSerializationError):
-            deserialize_node(descriptor['storage'], tmp_working_dir, trusted=False)
+            deserialize_node(descriptor["storage"], tmp_working_dir, trusted=False)
 
     def test_descriptor_fields_present(self, tmp_working_dir):
         """Returned descriptor contains all required fields including metadata."""
-        descriptor = serialize_node('my.node', 123, tmp_working_dir)
-        required = {'id', 'path', 'key', 'parent_path', 'type', 'has_children',
-                    'created_at', 'updated_at', 'storage', 'metadata'}
+        descriptor = serialize_node("my.node", 123, tmp_working_dir)
+        required = {
+            "id",
+            "path",
+            "key",
+            "parent_path",
+            "type",
+            "has_children",
+            "created_at",
+            "updated_at",
+            "storage",
+            "metadata",
+        }
         assert required.issubset(descriptor.keys())
-        assert descriptor['id'] == 'my.node'
-        assert descriptor['key'] == 'node'
-        assert descriptor['parent_path'] == 'my'
-        assert 'preview' in descriptor['metadata']
+        assert descriptor["id"] == "my.node"
+        assert descriptor["key"] == "node"
+        assert descriptor["parent_path"] == "my"
+        assert "preview" in descriptor["metadata"]
 
 
 class TestNodePreview:
     """Tests for node_preview()."""
 
     def test_scalar_preview(self):
-        assert node_preview(42, KIND_SCALAR) == '42'
+        assert node_preview(42, KIND_SCALAR) == "42"
 
     def test_text_preview_truncates(self):
-        long_text = 'x' * 100
+        long_text = "x" * 100
         preview = node_preview(long_text, KIND_TEXT)
         assert len(preview) <= 100
-        assert '...' in preview
+        assert "..." in preview
 
     def test_text_short_no_truncation(self):
-        short = 'hello'
-        assert node_preview(short, KIND_TEXT) == 'hello'
+        short = "hello"
+        assert node_preview(short, KIND_TEXT) == "hello"
 
     def test_ndarray_preview(self):
-        numpy = pytest.importorskip('numpy')
+        numpy = pytest.importorskip("numpy")
         arr = numpy.array([[1.0, 2.0], [3.0, 4.0]])
         preview = node_preview(arr, KIND_NDARRAY)
-        assert 'array' in preview.lower() or 'float' in preview.lower()
+        assert "array" in preview.lower() or "float" in preview.lower()
 
     def test_mapping_preview(self):
-        preview = node_preview({'a': 1, 'b': 2}, KIND_MAPPING)
-        assert 'dict' in preview.lower()
+        preview = node_preview({"a": 1, "b": 2}, KIND_MAPPING)
+        assert "dict" in preview.lower()
 
     def test_sequence_preview(self):
         preview = node_preview([1, 2, 3], KIND_SEQUENCE)
-        assert 'list' in preview.lower()
+        assert "list" in preview.lower()
 
 
 class TestMetadataSubDict:
@@ -224,168 +235,181 @@ class TestMetadataSubDict:
 
     def test_module_descriptor_metadata(self, tmp_working_dir):
         from pdv_kernel.tree import PDVModule
+
         mod = PDVModule(module_id="test_mod", name="Test Module", version="1.0.0")
-        desc = serialize_node('mymod', mod, tmp_working_dir)
-        assert 'metadata' in desc
-        meta = desc['metadata']
-        assert meta['module_id'] == 'test_mod'
-        assert meta['name'] == 'Test Module'
-        assert meta['version'] == '1.0.0'
-        assert 'preview' in meta
+        desc = serialize_node("mymod", mod, tmp_working_dir)
+        assert "metadata" in desc
+        meta = desc["metadata"]
+        assert meta["module_id"] == "test_mod"
+        assert meta["name"] == "Test Module"
+        assert meta["version"] == "1.0.0"
+        assert "preview" in meta
 
     def test_gui_descriptor_metadata(self, tmp_working_dir):
         from pdv_kernel.tree import PDVGui
-        gui_file = os.path.join(tmp_working_dir, 'tree', 'mod', 'gui.gui.json')
+
+        gui_file = os.path.join(tmp_working_dir, "tree", "mod", "gui.gui.json")
         os.makedirs(os.path.dirname(gui_file), exist_ok=True)
-        with open(gui_file, 'w') as f:
-            f.write('{}')
+        with open(gui_file, "w") as f:
+            f.write("{}")
         gui = PDVGui(relative_path=gui_file, module_id="test_mod")
-        desc = serialize_node('mod.gui', gui, tmp_working_dir)
-        assert 'metadata' in desc
-        meta = desc['metadata']
-        assert meta['module_id'] == 'test_mod'
-        assert 'preview' in meta
+        desc = serialize_node("mod.gui", gui, tmp_working_dir)
+        assert "metadata" in desc
+        meta = desc["metadata"]
+        assert meta["module_id"] == "test_mod"
+        assert "preview" in meta
 
     def test_namelist_descriptor_metadata(self, tmp_working_dir):
         from pdv_kernel.tree import PDVNamelist
-        nml_file = os.path.join(tmp_working_dir, 'tree', 'mod', 'solver.nml')
+
+        nml_file = os.path.join(tmp_working_dir, "tree", "mod", "solver.nml")
         os.makedirs(os.path.dirname(nml_file), exist_ok=True)
-        with open(nml_file, 'w') as f:
-            f.write('&solver /\n')
-        nml = PDVNamelist(relative_path=nml_file, format='fortran', module_id='test_mod')
-        desc = serialize_node('mod.solver', nml, tmp_working_dir)
-        assert 'metadata' in desc
-        meta = desc['metadata']
-        assert meta['module_id'] == 'test_mod'
-        assert meta['namelist_format'] == 'fortran'
-        assert 'preview' in meta
+        with open(nml_file, "w") as f:
+            f.write("&solver /\n")
+        nml = PDVNamelist(
+            relative_path=nml_file, format="fortran", module_id="test_mod"
+        )
+        desc = serialize_node("mod.solver", nml, tmp_working_dir)
+        assert "metadata" in desc
+        meta = desc["metadata"]
+        assert meta["module_id"] == "test_mod"
+        assert meta["namelist_format"] == "fortran"
+        assert "preview" in meta
 
     def test_lib_descriptor_metadata(self, tmp_working_dir):
         from pdv_kernel.tree import PDVLib
-        lib_file = os.path.join(tmp_working_dir, 'tree', 'mod', 'lib', 'helpers.py')
+
+        lib_file = os.path.join(tmp_working_dir, "tree", "mod", "lib", "helpers.py")
         os.makedirs(os.path.dirname(lib_file), exist_ok=True)
-        with open(lib_file, 'w') as f:
-            f.write('# helpers\n')
-        lib = PDVLib(relative_path=lib_file, module_id='test_mod')
-        desc = serialize_node('mod.lib.helpers', lib, tmp_working_dir)
-        assert 'metadata' in desc
-        meta = desc['metadata']
-        assert meta['module_id'] == 'test_mod'
-        assert meta['language'] == 'python'
-        assert 'preview' in meta
+        with open(lib_file, "w") as f:
+            f.write("# helpers\n")
+        lib = PDVLib(relative_path=lib_file, module_id="test_mod")
+        desc = serialize_node("mod.lib.helpers", lib, tmp_working_dir)
+        assert "metadata" in desc
+        meta = desc["metadata"]
+        assert meta["module_id"] == "test_mod"
+        assert meta["language"] == "python"
+        assert "preview" in meta
 
     def test_script_descriptor_metadata(self, tmp_working_dir):
         from pdv_kernel.tree import PDVScript
-        script_file = os.path.join(tmp_working_dir, 'tree', 'run.py')
+
+        script_file = os.path.join(tmp_working_dir, "tree", "run.py")
         os.makedirs(os.path.dirname(script_file), exist_ok=True)
-        with open(script_file, 'w') as f:
+        with open(script_file, "w") as f:
             f.write('"""My script."""\ndef run(pdv_tree: dict):\n    return {}\n')
-        script = PDVScript(relative_path=script_file, language='python', doc='My script.')
-        desc = serialize_node('run', script, tmp_working_dir)
-        assert 'metadata' in desc
-        meta = desc['metadata']
-        assert meta['language'] == 'python'
-        assert meta['doc'] == 'My script.'
-        assert 'preview' in meta
+        script = PDVScript(
+            relative_path=script_file, language="python", doc="My script."
+        )
+        desc = serialize_node("run", script, tmp_working_dir)
+        assert "metadata" in desc
+        meta = desc["metadata"]
+        assert meta["language"] == "python"
+        assert meta["doc"] == "My script."
+        assert "preview" in meta
         # Non-module scripts do not carry source_rel_path.
-        assert 'source_rel_path' not in desc
+        assert "source_rel_path" not in desc
 
     def test_module_owned_script_carries_source_rel_path(self, tmp_working_dir):
         """PDVScript with source_rel_path set round-trips through serialize_node."""
         from pdv_kernel.tree import PDVScript
-        script_file = os.path.join(tmp_working_dir, 'my_mod', 'scripts', 'run.py')
+
+        script_file = os.path.join(tmp_working_dir, "my_mod", "scripts", "run.py")
         os.makedirs(os.path.dirname(script_file), exist_ok=True)
-        with open(script_file, 'w') as f:
+        with open(script_file, "w") as f:
             f.write('"""Module script."""\ndef run(pdv_tree: dict):\n    return {}\n')
         script = PDVScript(
             relative_path=script_file,
-            language='python',
-            doc='Module script.',
-            module_id='my_mod',
-            source_rel_path='scripts/run.py',
+            language="python",
+            doc="Module script.",
+            module_id="my_mod",
+            source_rel_path="scripts/run.py",
         )
-        desc = serialize_node('my_mod.scripts.run', script, tmp_working_dir)
-        assert desc['source_rel_path'] == 'scripts/run.py'
+        desc = serialize_node("my_mod.scripts.run", script, tmp_working_dir)
+        assert desc["source_rel_path"] == "scripts/run.py"
 
     def test_source_rel_path_round_trip_through_tree_loader(self, tmp_working_dir):
         """serialize_node + load_tree_index preserve source_rel_path across save/load."""
         from pdv_kernel.tree import PDVLib, PDVModule, PDVScript, PDVTree
         from pdv_kernel.tree_loader import load_tree_index
 
-        mod_root = os.path.join(tmp_working_dir, 'my_mod')
-        scripts_dir = os.path.join(mod_root, 'scripts')
-        lib_dir = os.path.join(mod_root, 'lib')
+        mod_root = os.path.join(tmp_working_dir, "my_mod")
+        scripts_dir = os.path.join(mod_root, "scripts")
+        lib_dir = os.path.join(mod_root, "lib")
         os.makedirs(scripts_dir, exist_ok=True)
         os.makedirs(lib_dir, exist_ok=True)
-        script_file = os.path.join(scripts_dir, 'run.py')
-        with open(script_file, 'w') as f:
-            f.write('def run(pdv_tree: dict):\n    return {}\n')
-        lib_file = os.path.join(lib_dir, 'helpers.py')
-        with open(lib_file, 'w') as f:
-            f.write('VALUE = 1\n')
+        script_file = os.path.join(scripts_dir, "run.py")
+        with open(script_file, "w") as f:
+            f.write("def run(pdv_tree: dict):\n    return {}\n")
+        lib_file = os.path.join(lib_dir, "helpers.py")
+        with open(lib_file, "w") as f:
+            f.write("VALUE = 1\n")
 
         script = PDVScript(
             relative_path=script_file,
-            module_id='my_mod',
-            source_rel_path='scripts/run.py',
+            module_id="my_mod",
+            source_rel_path="scripts/run.py",
         )
         lib = PDVLib(
             relative_path=lib_file,
-            module_id='my_mod',
-            source_rel_path='lib/helpers.py',
+            module_id="my_mod",
+            source_rel_path="lib/helpers.py",
         )
-        module = PDVModule(module_id='my_mod', name='My Mod', version='0.1.0')
+        module = PDVModule(module_id="my_mod", name="My Mod", version="0.1.0")
 
         descriptors = [
-            serialize_node('my_mod', module, tmp_working_dir),
-            serialize_node('my_mod.scripts', PDVTree(), tmp_working_dir),
-            serialize_node('my_mod.scripts.run', script, tmp_working_dir),
-            serialize_node('my_mod.lib', PDVTree(), tmp_working_dir),
-            serialize_node('my_mod.lib.helpers', lib, tmp_working_dir),
+            serialize_node("my_mod", module, tmp_working_dir),
+            serialize_node("my_mod.scripts", PDVTree(), tmp_working_dir),
+            serialize_node("my_mod.scripts.run", script, tmp_working_dir),
+            serialize_node("my_mod.lib", PDVTree(), tmp_working_dir),
+            serialize_node("my_mod.lib.helpers", lib, tmp_working_dir),
         ]
 
         # Rehydrate into a fresh tree.
         fresh = PDVTree()
         fresh._working_dir = tmp_working_dir
-        load_tree_index(fresh, descriptors, conflict_strategy='replace')
+        load_tree_index(fresh, descriptors, conflict_strategy="replace")
 
-        loaded_script = fresh['my_mod.scripts.run']
-        loaded_lib = fresh['my_mod.lib.helpers']
+        loaded_script = fresh["my_mod.scripts.run"]
+        loaded_lib = fresh["my_mod.lib.helpers"]
         assert isinstance(loaded_script, PDVScript)
         assert isinstance(loaded_lib, PDVLib)
-        assert loaded_script.source_rel_path == 'scripts/run.py'
-        assert loaded_lib.source_rel_path == 'lib/helpers.py'
+        assert loaded_script.source_rel_path == "scripts/run.py"
+        assert loaded_lib.source_rel_path == "lib/helpers.py"
 
     def test_all_descriptors_have_metadata(self, tmp_working_dir):
         """Every kind produces a descriptor with a metadata key."""
-        from pdv_kernel.tree import PDVTree, PDVScript, PDVModule, PDVNote
+        from pdv_kernel.tree import PDVTree
+
         values = [
-            ('folder', PDVTree()),
-            ('scalar', 42),
-            ('text', 'hello'),
-            ('mapping', {'a': 1}),
-            ('sequence', [1, 2]),
+            ("folder", PDVTree()),
+            ("scalar", 42),
+            ("text", "hello"),
+            ("mapping", {"a": 1}),
+            ("sequence", [1, 2]),
         ]
         for name, value in values:
             desc = serialize_node(name, value, tmp_working_dir)
-            assert 'metadata' in desc, f"Missing metadata for kind={desc['type']}"
-            assert 'preview' in desc['metadata'], f"Missing preview for kind={desc['type']}"
+            assert "metadata" in desc, f"Missing metadata for kind={desc['type']}"
+            assert "preview" in desc["metadata"], (
+                f"Missing preview for kind={desc['type']}"
+            )
 
     def test_ndarray_metadata(self, tmp_working_dir):
-        numpy = pytest.importorskip('numpy')
+        numpy = pytest.importorskip("numpy")
         arr = numpy.array([[1.0, 2.0], [3.0, 4.0]])
-        desc = serialize_node('data.arr', arr, tmp_working_dir)
-        meta = desc['metadata']
-        assert meta['shape'] == [2, 2]
-        assert meta['dtype'] == 'float64'
-        assert meta['size_bytes'] == arr.nbytes
-        assert 'preview' in meta
+        desc = serialize_node("data.arr", arr, tmp_working_dir)
+        meta = desc["metadata"]
+        assert meta["shape"] == [2, 2]
+        assert meta["dtype"] == "float64"
+        assert meta["size_bytes"] == arr.nbytes
+        assert "preview" in meta
 
     def test_dataframe_metadata(self, tmp_working_dir):
-        pandas = pytest.importorskip('pandas')
-        pytest.importorskip('pyarrow')
-        df = pandas.DataFrame({'a': [1, 2], 'b': [3, 4]})
-        desc = serialize_node('data.df', df, tmp_working_dir)
-        meta = desc['metadata']
-        assert meta['shape'] == [2, 2]
-        assert 'preview' in meta
+        pandas = pytest.importorskip("pandas")
+        pytest.importorskip("pyarrow")
+        df = pandas.DataFrame({"a": [1, 2], "b": [3, 4]})
+        desc = serialize_node("data.df", df, tmp_working_dir)
+        meta = desc["metadata"]
+        assert meta["shape"] == [2, 2]
+        assert "preview" in meta

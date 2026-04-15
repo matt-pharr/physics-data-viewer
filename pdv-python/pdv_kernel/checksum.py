@@ -71,6 +71,7 @@ def tree_checksum(node: Any, working_dir: str | None = None) -> str:
 # Private helpers
 # ---------------------------------------------------------------------------
 
+
 def _node_digest(node: Any, working_dir: str | None) -> bytes:
     """Return the 16-byte XXH3-128 digest for one node.
 
@@ -109,9 +110,20 @@ def _feed_node(h: xxhash.xxh3_128, node: Any, working_dir: str | None) -> None:
     """
     from pdv_kernel.serialization import (  # noqa: PLC0415
         detect_kind,
-        KIND_FOLDER, KIND_MODULE, KIND_SCALAR, KIND_TEXT, KIND_BINARY,
-        KIND_MAPPING, KIND_SEQUENCE, KIND_NDARRAY, KIND_DATAFRAME,
-        KIND_SERIES, KIND_SCRIPT, KIND_MARKDOWN, KIND_GUI, KIND_NAMELIST,
+        KIND_FOLDER,
+        KIND_MODULE,
+        KIND_SCALAR,
+        KIND_TEXT,
+        KIND_BINARY,
+        KIND_MAPPING,
+        KIND_SEQUENCE,
+        KIND_NDARRAY,
+        KIND_DATAFRAME,
+        KIND_SERIES,
+        KIND_SCRIPT,
+        KIND_MARKDOWN,
+        KIND_GUI,
+        KIND_NAMELIST,
         KIND_LIB,
     )
 
@@ -176,6 +188,7 @@ def _feed_node(h: xxhash.xxh3_128, node: Any, working_dir: str | None) -> None:
 
     elif kind == KIND_NDARRAY:
         import numpy as np  # noqa: PLC0415
+
         h.update(b"ndarray\x00")
         _feed_str(h, str(node.dtype))
         h.update(struct.pack("<Q", len(node.shape)))
@@ -188,6 +201,7 @@ def _feed_node(h: xxhash.xxh3_128, node: Any, working_dir: str | None) -> None:
 
     elif kind == KIND_DATAFRAME:
         import numpy as np  # noqa: PLC0415
+
         h.update(b"dataframe\x00")
         cols = list(node.columns)
         h.update(struct.pack("<Q", len(cols)))
@@ -202,6 +216,7 @@ def _feed_node(h: xxhash.xxh3_128, node: Any, working_dir: str | None) -> None:
 
     elif kind == KIND_SERIES:
         import numpy as np  # noqa: PLC0415
+
         h.update(b"series\x00")
         series_vals = node.values
         _feed_str(h, str(series_vals.dtype))

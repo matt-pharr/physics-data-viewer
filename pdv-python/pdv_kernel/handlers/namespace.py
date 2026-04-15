@@ -65,7 +65,9 @@ def handle_namespace_query(msg: dict) -> None:
         include_callables=include_callables,
     )
 
-    send_message("pdv.namespace.query.response", {"variables": variables}, in_reply_to=msg_id)
+    send_message(
+        "pdv.namespace.query.response", {"variables": variables}, in_reply_to=msg_id
+    )
 
 
 def handle_namespace_inspect(msg: dict) -> None:

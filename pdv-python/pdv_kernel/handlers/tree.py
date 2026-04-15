@@ -44,7 +44,7 @@ def handle_tree_list(msg: dict) -> None:
     from pdv_kernel.comms import get_pdv_tree, send_error, send_message  # noqa: PLC0415
     from pdv_kernel.modules import has_handler_for  # noqa: PLC0415
     from pdv_kernel.serialization import detect_kind, node_preview, python_type_string  # noqa: PLC0415
-    from pdv_kernel.tree import PDVTree, PDVModule, PDVGui  # noqa: PLC0415
+    from pdv_kernel.tree import PDVModule, PDVGui  # noqa: PLC0415
 
     msg_id = msg.get("msg_id")
     path = msg.get("payload", {}).get("path", "")
@@ -152,13 +152,19 @@ def handle_tree_get(msg: dict) -> None:
     tree = get_pdv_tree()
     if tree is None:
         send_error(
-            "pdv.tree.get.response", "tree.no_tree", "PDVTree is not initialized", in_reply_to=msg_id
+            "pdv.tree.get.response",
+            "tree.no_tree",
+            "PDVTree is not initialized",
+            in_reply_to=msg_id,
         )
         return
 
     if not path:
         send_error(
-            "pdv.tree.get.response", "tree.missing_path", "path is required", in_reply_to=msg_id
+            "pdv.tree.get.response",
+            "tree.missing_path",
+            "path is required",
+            in_reply_to=msg_id,
         )
         return
 
@@ -229,7 +235,6 @@ def handle_tree_resolve_file(msg: dict) -> None:
     msg : dict
         Parsed PDV message envelope.
     """
-    import os  # noqa: PLC0415
 
     from pdv_kernel.comms import get_pdv_tree, send_error, send_message  # noqa: PLC0415
     from pdv_kernel.tree import PDVFile  # noqa: PLC0415
@@ -241,23 +246,29 @@ def handle_tree_resolve_file(msg: dict) -> None:
     tree = get_pdv_tree()
     if tree is None:
         send_error(
-            "pdv.tree.resolve_file.response", "tree.no_tree",
-            "PDVTree is not initialized", in_reply_to=msg_id,
+            "pdv.tree.resolve_file.response",
+            "tree.no_tree",
+            "PDVTree is not initialized",
+            in_reply_to=msg_id,
         )
         return
 
     if not path or path not in tree:
         send_error(
-            "pdv.tree.resolve_file.response", "tree.path_not_found",
-            f"No node at path: '{path}'", in_reply_to=msg_id,
+            "pdv.tree.resolve_file.response",
+            "tree.path_not_found",
+            f"No node at path: '{path}'",
+            in_reply_to=msg_id,
         )
         return
 
     node = tree[path]
     if not isinstance(node, PDVFile):
         send_error(
-            "pdv.tree.resolve_file.response", "tree.not_a_file",
-            f"Node at '{path}' is not file-backed", in_reply_to=msg_id,
+            "pdv.tree.resolve_file.response",
+            "tree.not_a_file",
+            f"Node at '{path}' is not file-backed",
+            in_reply_to=msg_id,
         )
         return
 

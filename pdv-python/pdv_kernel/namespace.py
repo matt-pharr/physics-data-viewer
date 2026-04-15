@@ -135,7 +135,11 @@ class PDVApp:
 
         working_dir = getattr(tree, "_working_dir", None) or "."
         segments = path.split(".")
-        file_dir = os.path.join(working_dir, *segments[:-1]) if len(segments) > 1 else working_dir
+        file_dir = (
+            os.path.join(working_dir, *segments[:-1])
+            if len(segments) > 1
+            else working_dir
+        )
         os.makedirs(file_dir, exist_ok=True)
         file_path = os.path.join(file_dir, segments[-1] + ".md")
 
@@ -342,6 +346,8 @@ def namespace_kind(value: Any) -> str:
     if kind == "unknown" and value_has_object_children(value):
         return "object"
     return kind
+
+
 def namespace_preview(value: Any, max_length: int = 120) -> str:
     """Return a rich but bounded preview string for a namespace value."""
     kind = namespace_kind(value)
@@ -370,7 +376,9 @@ def namespace_preview(value: Any, max_length: int = 120) -> str:
         if kind == "series":
             import numpy as np  # noqa: PLC0415
 
-            body = np.array2string(value.to_numpy(), threshold=10, edgeitems=3, separator=", ")
+            body = np.array2string(
+                value.to_numpy(), threshold=10, edgeitems=3, separator=", "
+            )
             return trim_preview(
                 f"Series({body})",
                 max_length=max_length,
@@ -748,7 +756,9 @@ def describe_object_children(
     return children, len(names)
 
 
-def primitive_namespace_value(value: Any) -> tuple[bool, str | int | float | bool | None]:
+def primitive_namespace_value(
+    value: Any,
+) -> tuple[bool, str | int | float | bool | None]:
     """Return a JSON-safe selector value, with support flag."""
     if value is None or isinstance(value, (str, int, float, bool)):
         return True, value
