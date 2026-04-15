@@ -11,7 +11,6 @@ Tests cover:
 Reference: ARCHITECTURE.md §7.2, §7.3
 """
 
-import json
 import os
 import pytest
 from pdv_kernel.serialization import (
@@ -28,11 +27,6 @@ from pdv_kernel.serialization import (
     KIND_SEQUENCE,
     KIND_FOLDER,
     KIND_SCRIPT,
-    KIND_MARKDOWN,
-    KIND_MODULE,
-    KIND_GUI,
-    KIND_NAMELIST,
-    KIND_LIB,
     KIND_UNKNOWN,
 )
 from pdv_kernel.errors import PDVSerializationError
@@ -105,7 +99,6 @@ class TestDetectKind:
     def test_pdv_script_is_script(self):
         """PDVScript returns KIND_SCRIPT."""
         from pdv_kernel.tree import PDVScript
-        from pdv_kernel.serialization import KIND_SCRIPT
 
         assert detect_kind(PDVScript("scripts/test.py")) == KIND_SCRIPT
 
@@ -386,7 +379,7 @@ class TestMetadataSubDict:
 
     def test_all_descriptors_have_metadata(self, tmp_working_dir):
         """Every kind produces a descriptor with a metadata key."""
-        from pdv_kernel.tree import PDVTree, PDVScript, PDVModule, PDVNote
+        from pdv_kernel.tree import PDVTree
 
         values = [
             ("folder", PDVTree()),

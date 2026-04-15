@@ -26,7 +26,7 @@ from __future__ import annotations
 import sys
 import threading
 import uuid
-from typing import Any, Callable
+from typing import Any
 
 from pdv_kernel.errors import PDVVersionError
 

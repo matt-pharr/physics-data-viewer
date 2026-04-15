@@ -9,7 +9,6 @@ Tests are organized around two areas:
 Reference: ARCHITECTURE.md §5.6, §5.7, §5.8, §7.1
 """
 
-import os
 
 import pytest
 from pdv_kernel.tree import PDVTree, PDVScript

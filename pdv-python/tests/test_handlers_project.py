@@ -27,7 +27,6 @@ from pdv_kernel.tree import (
     PDVGui,
     PDVNamelist,
     PDVLib,
-    PDVNote,
 )
 
 

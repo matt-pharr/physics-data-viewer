@@ -11,7 +11,6 @@ Reference: ARCHITECTURE.md §4.1, §3.4
 """
 
 import uuid
-import pytest
 from unittest.mock import MagicMock, patch
 import pdv_kernel.comms as comms_mod
 from pdv_kernel.handlers.lifecycle import handle_init

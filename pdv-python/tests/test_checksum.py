@@ -11,7 +11,6 @@ Tests cover:
 7. test_roundtrip — save/load round-trip preserves the checksum.
 """
 
-import json
 import os
 from unittest.mock import MagicMock, patch
 

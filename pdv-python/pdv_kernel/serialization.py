@@ -289,7 +289,7 @@ def serialize_node(
     import shutil
 
     from pdv_kernel.environment import ensure_parent, working_dir_tree_path  # noqa: PLC0415
-    from pdv_kernel.tree import PDVFile, PDVScript, PDVModule, PDVLib, PDVGui, PDVNote  # noqa: PLC0415
+    from pdv_kernel.tree import PDVFile, PDVScript, PDVLib, PDVGui, PDVNote  # noqa: PLC0415
 
     # File extension and format for each PDVFile subclass
     _FILE_KIND_MAP: dict[str, tuple[str, str]] = {
@@ -721,7 +721,6 @@ def node_preview(value: Any, kind: str) -> str:
             noun = "tuple" if isinstance(value, tuple) else "list"
             return f"{noun} ({len(value)} items)"
         if kind == KIND_NDARRAY:
-            import numpy as np  # noqa: PLC0415
 
             shape_str = " × ".join(str(d) for d in value.shape)
             return f"{value.dtype} array ({shape_str})"

@@ -155,8 +155,6 @@ class TestHandleModuleReloadLibs:
 
     def test_reloads_lib_file_under_alias(self, tree_with_comm, tmp_path):
         """A lib file edited on disk is observably reloaded in sys.modules."""
-        import importlib
-        import os
 
         from pdv_kernel.tree import PDVModule
 

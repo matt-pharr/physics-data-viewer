@@ -15,8 +15,9 @@ ARCHITECTURE.md §4.2 (project load sequence), §8 (save and load)
 
 from __future__ import annotations
 
+from typing import Any, Callable
+
 from pdv_kernel.handlers import register
-from pdv_kernel import log
 
 
 def _count_nodes(tree: "Any") -> int:
@@ -225,8 +226,6 @@ def _collect_module_manifests(tree: "Any") -> list:
     from pdv_kernel.serialization import (  # noqa: PLC0415
         node_preview,
         detect_kind,
-        KIND_FOLDER,
-        KIND_MODULE,
     )
     from pdv_kernel.tree import PDVFile, PDVModule, PDVTree  # noqa: PLC0415
 
