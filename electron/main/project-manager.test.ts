@@ -27,6 +27,9 @@ import * as path from "path";
 import type { CommRouter } from "./comm-router";
 import { PDVCommError } from "./comm-router";
 import { ProjectManager, PDVSchemaVersionError } from "./project-manager";
+import type { CodeCellData } from "./ipc";
+
+const EMPTY_CELLS: CodeCellData = { tabs: [], activeTabId: 1 };
 import { PDVMessageType, getAppVersion, setAppVersion } from "./pdv-protocol";
 
 // ---------------------------------------------------------------------------
@@ -136,7 +139,7 @@ describe("ProjectManager", () => {
       requestMock.mockResolvedValue(makeOkResponse({ checksum: "abc123" }));
 
       const pm = new ProjectManager(router);
-      await pm.save(tmpDir, []);
+      await pm.save(tmpDir, EMPTY_CELLS);
 
       expect(requestMock).toHaveBeenCalledOnce();
       expect(requestMock).toHaveBeenCalledWith(PDVMessageType.PROJECT_SAVE, {
@@ -154,8 +157,11 @@ describe("ProjectManager", () => {
       });
 
       const pm = new ProjectManager(router);
-      const boxes = [{ id: 1, code: "print('hi')" }];
-      await pm.save(tmpDir, boxes);
+      const cells: CodeCellData = {
+        tabs: [{ id: 1, code: "print('hi')" }],
+        activeTabId: 1,
+      };
+      await pm.save(tmpDir, cells);
       callOrder.push("files-written");
 
       // Verify comm was called before file writes.
@@ -165,7 +171,7 @@ describe("ProjectManager", () => {
         path.join(tmpDir, "code-cells.json"),
         "utf8"
       );
-      expect(JSON.parse(cbContent)).toEqual(boxes);
+      expect(JSON.parse(cbContent)).toEqual(cells);
     });
 
     it("writes project.json with checksum from kernel", async () => {
@@ -175,7 +181,7 @@ describe("ProjectManager", () => {
       );
 
       const pm = new ProjectManager(router);
-      await pm.save(tmpDir, []);
+      await pm.save(tmpDir, EMPTY_CELLS);
 
       const raw = await fs.readFile(
         path.join(tmpDir, "project.json"),
@@ -193,12 +199,46 @@ describe("ProjectManager", () => {
       requestMock.mockRejectedValue(makeCommError("save.failed"));
 
       const pm = new ProjectManager(router);
-      await expect(pm.save(tmpDir, [])).rejects.toThrow();
+      await expect(pm.save(tmpDir, EMPTY_CELLS)).rejects.toThrow();
 
       // project.json must NOT exist.
       await expect(
         fs.stat(path.join(tmpDir, "project.json"))
       ).rejects.toMatchObject({ code: "ENOENT" });
+    });
+
+    it("refuses nullish codeCells payloads before any disk write", async () => {
+      const { router, requestMock } = makeMockRouter();
+      requestMock.mockResolvedValue(makeOkResponse({ checksum: "c1" }));
+
+      const pm = new ProjectManager(router);
+      await expect(
+        pm.save(tmpDir, null as unknown as CodeCellData)
+      ).rejects.toThrow(/CodeCellData/);
+      await expect(
+        pm.save(tmpDir, undefined as unknown as CodeCellData)
+      ).rejects.toThrow(/CodeCellData/);
+      expect(requestMock).not.toHaveBeenCalled();
+      await expect(
+        fs.stat(path.join(tmpDir, "code-cells.json"))
+      ).rejects.toMatchObject({ code: "ENOENT" });
+    });
+
+    it("refuses malformed cells shapes", async () => {
+      const { router } = makeMockRouter();
+      const pm = new ProjectManager(router);
+      await expect(
+        pm.save(tmpDir, { tabs: "not-an-array" } as unknown as CodeCellData)
+      ).rejects.toThrow(/tabs/);
+      await expect(
+        pm.save(tmpDir, { tabs: [], activeTabId: "one" } as unknown as CodeCellData)
+      ).rejects.toThrow(/activeTabId/);
+      await expect(
+        pm.save(
+          tmpDir,
+          { tabs: [{ id: "x", code: "" }], activeTabId: 1 } as unknown as CodeCellData
+        )
+      ).rejects.toThrow(/numeric id/);
     });
 
     it("writes comm, then code-cells.json, then project.json — in that order", async () => {
@@ -216,7 +256,7 @@ describe("ProjectManager", () => {
       });
 
       const pm = new ProjectManager(router);
-      await pm.save(tmpDir, []);
+      await pm.save(tmpDir, EMPTY_CELLS);
 
       // After save both files must exist.
       await expect(

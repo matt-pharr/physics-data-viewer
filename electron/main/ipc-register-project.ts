@@ -16,10 +16,14 @@ import * as fs from "fs/promises";
 import * as path from "path";
 import { ipcMain, type BrowserWindow } from "electron";
 
+import type { CommRouter } from "./comm-router";
+import type { CodeCellData } from "./ipc";
 import { IPC } from "./ipc";
 import { ModuleManager } from "./module-manager";
+import { setupProjectModuleNamespaces } from "./module-runtime";
 import {
   ProjectManager,
+  assertCodeCellData,
   type ModuleManifestBundle,
   type ModuleOwnedFile,
   type ProjectManifest,
@@ -34,6 +38,7 @@ import {
 interface RegisterProjectIpcHandlersOptions {
   projectManager: ProjectManager;
   moduleManager: ModuleManager;
+  commRouter: CommRouter;
   kernelWorkingDirs: Map<string, string>;
   getActiveKernelId: () => string | null;
   getActiveKernelLanguage: () => "python" | "julia";
@@ -138,9 +143,11 @@ async function writeModuleManifestsToSaveDir(
         description: bundle.description,
         language: bundle.language,
         dependencies: bundle.dependencies,
-        // Default lib_dir for v4 modules — matches the convention used
-        // by bundled example modules and read by buildModulesSetupPayload
-        // at kernel init / project-load time.
+        // Default lib_dir for the v4 manifest. Kept for external tooling
+        // that reads the on-disk manifest; the TS/kernel setup path no
+        // longer consumes this field — the kernel walker in
+        // handle_modules_setup derives sys.path entries directly from
+        // the live PDVModule subtree.
         libDir: "lib",
       });
       await writeModuleIndex(moduleDir, bundle.entries ?? []);
@@ -166,6 +173,7 @@ export function registerProjectIpcHandlers(
   const {
     projectManager,
     moduleManager,
+    commRouter,
     kernelWorkingDirs,
     getActiveKernelId,
     getActiveKernelLanguage,
@@ -184,6 +192,9 @@ export function registerProjectIpcHandlers(
   ipcMain.handle(
     IPC.project.save,
     async (_event, saveDir: string, codeCells: unknown, projectName?: string) => {
+      // Validate at the IPC boundary so the error path is reported to the
+      // renderer with a clean stack, rather than a mid-save filesystem error.
+      assertCodeCellData(codeCells);
       const saveResult = await projectManager.save(saveDir, codeCells, {
         language: getActiveKernelLanguage(),
         interpreterPath: getInterpreterPath(),
@@ -287,6 +298,32 @@ export function registerProjectIpcHandlers(
 
     const { codeCells, postLoadChecksum } = await projectManager.load(saveDir);
 
+    // Mirror the project's code-cells.json into the active kernel's working
+    // directory so the per-session autosave file is in sync with the loaded
+    // project state. The working-dir file is the single source of truth for
+    // the UI autosave loop during a session; the saveDir copy is the durable
+    // snapshot bundled with the project.
+    if (activeKernelId) {
+      const workingDir = kernelWorkingDirs.get(activeKernelId);
+      if (workingDir && codeCells != null) {
+        try {
+          await fs.writeFile(
+            path.join(workingDir, "code-cells.json"),
+            JSON.stringify(codeCells, null, 2),
+            "utf8"
+          );
+        } catch (err) {
+          console.warn("[ipc-register-project] mirror code-cells to working dir failed", err);
+        }
+      }
+    }
+
+    // Now that the kernel tree has been repopulated from tree-index.json,
+    // wire each module's lib parent dirs into sys.path. The kernel walker
+    // in handle_modules_setup is the sole owner of this, so project load
+    // must trigger a setup pass whenever it repopulates the tree.
+    await setupProjectModuleNamespaces(commRouter, moduleManager, saveDir);
+
     // Validate: compare the kernel's post-load checksum against the stored one.
     const checksumValid =
       postLoadChecksum != null && checksum != null
@@ -312,6 +349,40 @@ export function registerProjectIpcHandlers(
     }
 
     return { codeCells, checksum, checksumValid, nodeCount, savedPdvVersion, projectName };
+  });
+
+  // Kernel-working-dir scoped code-cell autosave. Replaces the previous
+  // global ~/.PDV/state/code-cells.json file (audit #5): tying cells to the
+  // kernel lifetime eliminates cross-project contamination and aligns with
+  // "the tree/working dir is the only persistent surface" from ARCHITECTURE.md.
+  const codeCellsFilePath = (): string | null => {
+    const kernelId = getActiveKernelId();
+    if (!kernelId) return null;
+    const workingDir = kernelWorkingDirs.get(kernelId);
+    if (!workingDir) return null;
+    return path.join(workingDir, "code-cells.json");
+  };
+
+  ipcMain.handle(IPC.codeCells.load, async (): Promise<CodeCellData | null> => {
+    const filePath = codeCellsFilePath();
+    if (!filePath) return null;
+    try {
+      const raw = await fs.readFile(filePath, "utf8");
+      return JSON.parse(raw) as CodeCellData;
+    } catch (err) {
+      const e = err as NodeJS.ErrnoException;
+      if (e.code === "ENOENT") return null;
+      console.warn("[ipc-register-project] codeCells.load failed", err);
+      return null;
+    }
+  });
+
+  ipcMain.handle(IPC.codeCells.save, async (_event, data: unknown): Promise<boolean> => {
+    assertCodeCellData(data);
+    const filePath = codeCellsFilePath();
+    if (!filePath) return false;
+    await fs.writeFile(filePath, JSON.stringify(data, null, 2), "utf8");
+    return true;
   });
 
   ipcMain.handle(IPC.project.new, async () => {

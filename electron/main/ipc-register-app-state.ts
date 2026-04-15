@@ -16,13 +16,12 @@ import * as fsSync from "fs";
 import * as path from "path";
 
 import type { ConfigStore, PDVConfig } from "./config";
-import type { CodeCellData, Theme, WindowChromeInfo, WindowChromePlatform } from "./ipc";
+import type { Theme, WindowChromeInfo, WindowChromePlatform } from "./ipc";
 import { IPC } from "./ipc";
 import { getTopLevelMenuModel, popupTopLevelMenu, updateMenuEnabled, updateRecentProjectsMenu } from "./menu";
 import { initAutoUpdater, checkForUpdates, downloadUpdate, installUpdate, openReleasesPage } from "./auto-updater";
 
 let savedThemes: Theme[] = [];
-let savedCodeCells: CodeCellData | null = null;
 
 interface RegisterAppStateIpcHandlersOptions {
   win: BrowserWindow;
@@ -30,7 +29,6 @@ interface RegisterAppStateIpcHandlersOptions {
   readConfig: (configStore: ConfigStore) => PDVConfig;
   themesDir: string;
   stateDir: string;
-  codeCellsPath: string;
   /** Flips the close-guard flag in `app.ts` so the next `win.close()` proceeds. */
   setAllowClose: (allow: boolean) => void;
 }
@@ -93,24 +91,6 @@ function loadThemesFromDisk(themesDir: string): void {
   }
 }
 
-function loadCodeCellsFromDisk(codeCellsPath: string): void {
-  if (savedCodeCells !== null) {
-    return;
-  }
-  try {
-    const raw = fsSync.readFileSync(codeCellsPath, "utf8");
-    savedCodeCells = JSON.parse(raw) as CodeCellData;
-  } catch (error) {
-    const err = error as NodeJS.ErrnoException;
-    if (err.code !== "ENOENT") {
-      console.warn(
-        `[ipc-register-app-state] Unable to read code cells from ${codeCellsPath}`,
-        error
-      );
-    }
-  }
-}
-
 /**
  * Register app-state IPC handlers (config/themes/code-cells/menu/files).
  *
@@ -121,7 +101,7 @@ function loadCodeCellsFromDisk(codeCellsPath: string): void {
 export function registerAppStateIpcHandlers(
   options: RegisterAppStateIpcHandlersOptions
 ): void {
-  const { win, configStore, readConfig, themesDir, stateDir, codeCellsPath, setAllowClose } = options;
+  const { win, configStore, readConfig, themesDir, stateDir, setAllowClose } = options;
 
   fs.mkdir(themesDir, { recursive: true }).catch((error) => {
     console.warn(
@@ -136,7 +116,6 @@ export function registerAppStateIpcHandlers(
     );
   });
   loadThemesFromDisk(themesDir);
-  loadCodeCellsFromDisk(codeCellsPath);
 
   const pushWindowChromeState = (): void => {
     if (win.isDestroyed()) {
@@ -190,14 +169,6 @@ export function registerAppStateIpcHandlers(
   ipcMain.handle(IPC.themes.openDir, async () => {
     await fs.mkdir(themesDir, { recursive: true });
     return shell.openPath(themesDir);
-  });
-
-  ipcMain.handle(IPC.codeCells.load, async () => savedCodeCells);
-
-  ipcMain.handle(IPC.codeCells.save, async (_event, data: CodeCellData) => {
-    savedCodeCells = data;
-    await fs.writeFile(codeCellsPath, JSON.stringify(data, null, 2), "utf8");
-    return true;
   });
 
   ipcMain.handle(IPC.menu.updateRecentProjects, async (_event, paths: string[]) => {

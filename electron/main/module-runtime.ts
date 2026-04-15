@@ -171,59 +171,89 @@ export function buildModuleActionCode(
 /**
  * Build the payload for the `pdv.modules.setup` comm message.
  *
- * For each imported module, resolves the lib directory path (already copied
- * to the working directory by {@link bindImportedModule}) and includes the
- * optional entry_point from the manifest.
+ * Per module, emits `{ alias, entry_point? }`. The kernel is the sole owner
+ * of `sys.path` wiring for module libraries: it walks each `PDVModule` in
+ * the live tree, collects the parent directory of every `PDVLib` descendant,
+ * and inserts the dedup'd set into `sys.path`. Main process code therefore
+ * does not touch on-disk module layout here — keeping the contract stable
+ * across storage-layout redesigns.
  *
- * The kernel adds the lib_dir directly to `sys.path`/`LOAD_PATH`, making the
- * module importable without enumerating individual files.
+ * For imported modules, `entry_point` is read from the installed manifest
+ * via {@link ModuleManager.getModuleSetupInfo}. In-session modules have no
+ * entry point and skip the manifest lookup entirely — which also means
+ * they work correctly before the first `project:save` (when no on-disk
+ * manifest exists yet). Manifest-read failures for imported modules
+ * degrade to emitting `{ alias }` so the kernel walker can still wire up
+ * libs from the live tree state.
  *
- * @param moduleManager - Module manager for manifest reads.
- * @param importedModules - List of project-imported modules.
- * @param workingDir - Kernel working directory where module files were copied.
+ * @param moduleManager - Module manager for imported-module manifest reads.
+ * @param modules - Project module imports (imported or in-session).
+ * @param projectDir - Active project directory (optional).
  * @returns Payload object for pdv.modules.setup.
  */
 export async function buildModulesSetupPayload(
   moduleManager: ModuleManager,
-  importedModules: ProjectModuleImport[],
-  workingDir?: string,
+  modules: ProjectModuleImport[],
   projectDir?: string | null,
 ): Promise<{
   modules: Array<{
-    lib_paths: string[];
-    lib_dir?: string;
+    alias: string;
     entry_point?: string;
   }>;
 }> {
-  const modules: Array<{
-    lib_paths: string[];
-    lib_dir?: string;
-    entry_point?: string;
-  }> = [];
-  for (const imp of importedModules) {
+  const out: Array<{ alias: string; entry_point?: string }> = [];
+  for (const imp of modules) {
+    if (imp.origin === "in_session") {
+      out.push({ alias: imp.alias });
+      continue;
+    }
     try {
       const info = await moduleManager.getModuleSetupInfo(imp.module_id, projectDir);
-      let libDir: string | undefined;
-      if (workingDir && info.libDir) {
-        // Module-owned files live under ``<workdir>/tree/<alias>/...``
-        // post-Option-A (see bindImportedModule above); the lib dir
-        // passed to the kernel's ``pdv.modules.setup`` handler follows
-        // that same layout so ``sys.path`` points at the right place.
-        libDir = path.join(workingDir, "tree", imp.alias, info.libDir);
-      }
-      modules.push({
-        lib_paths: [],
-        lib_dir: libDir,
-        entry_point: info.entryPoint,
-      });
+      const entry: { alias: string; entry_point?: string } = { alias: imp.alias };
+      if (info.entryPoint) entry.entry_point = info.entryPoint;
+      out.push(entry);
     } catch (error) {
       console.warn(
-        `[pdv] Failed to get module setup info for ${imp.module_id}:`,
-        error
+        `[pdv] Failed to read setup info for module ${imp.module_id}; kernel walker will still wire libs from the live tree:`,
+        error,
       );
+      out.push({ alias: imp.alias });
     }
   }
-  return { modules };
+  return { modules: out };
+}
+
+/**
+ * Send `pdv.modules.setup` to the kernel for every module in the active
+ * project manifest. Reads the manifest at call time so it sees whatever
+ * the latest save wrote. A no-op when there is no active project or when
+ * the manifest has no modules.
+ *
+ * Call this after any operation that populates or repopulates the kernel
+ * tree with module subtrees (project load, kernel restart-with-project),
+ * so the walker in `handle_modules_setup` has PDVModule nodes to traverse.
+ *
+ * @param commRouter - Comm router used to send the comm message.
+ * @param moduleManager - Module manager for imported-module manifest reads.
+ * @param projectDir - Active project directory, or null.
+ */
+export async function setupProjectModuleNamespaces(
+  commRouter: CommRouter,
+  moduleManager: ModuleManager,
+  projectDir: string | null,
+): Promise<void> {
+  if (!projectDir) return;
+  let manifest: Awaited<ReturnType<typeof ProjectManager.readManifest>>;
+  try {
+    manifest = await ProjectManager.readManifest(projectDir);
+  } catch {
+    return;
+  }
+  if (!manifest.modules || manifest.modules.length === 0) return;
+  const payload = await buildModulesSetupPayload(moduleManager, manifest.modules, projectDir);
+  if (payload.modules.length > 0) {
+    await commRouter.request(PDVMessageType.MODULES_SETUP, payload);
+  }
 }
 
 /**

@@ -438,7 +438,6 @@ export function registerIpcHandlers(
   // Derive per-purpose sub-directories within ~/.PDV
   const themesDir = path.join(pdvDir, "themes");
   const stateDir  = path.join(pdvDir, "state");
-  const codeCellsPath = path.join(stateDir, "code-cells.json");
   const moduleManager = new ModuleManager(pdvDir);
   let activeProjectDir: string | null = null;
   let activeKernelId: string | null = null;
@@ -602,6 +601,7 @@ export function registerIpcHandlers(
   registerProjectIpcHandlers({
     projectManager,
     moduleManager,
+    commRouter,
     kernelWorkingDirs,
     getActiveKernelId: () => activeKernelId,
     getActiveKernelLanguage: () => {
@@ -635,7 +635,6 @@ export function registerIpcHandlers(
     readConfig,
     themesDir,
     stateDir,
-    codeCellsPath,
     setAllowClose,
   });
 

@@ -26,6 +26,7 @@
 
 import { CommRouter } from "./comm-router";
 import { PDVMessageType, getAppVersion, type PDVProjectLoadResponsePayload } from "./pdv-protocol";
+import type { CodeCellData } from "./ipc";
 import * as fs from "fs/promises";
 import * as path from "path";
 import * as os from "os";
@@ -178,6 +179,44 @@ export class PDVSchemaVersionError extends Error {
   }
 }
 
+/**
+ * Validate that a value conforms to the {@link CodeCellData} shape.
+ *
+ * Used by {@link ProjectManager.save} to refuse nullish or malformed
+ * payloads before they are serialized into ``code-cells.json``. A prior
+ * bug (audit item #5) allowed ``undefined`` cells to silently clobber a
+ * project's saved tabs — this validator is the boundary check.
+ *
+ * @param value - Unknown payload from an IPC caller.
+ * @throws {Error} If the value is not a well-formed CodeCellData object.
+ */
+export function assertCodeCellData(value: unknown): asserts value is CodeCellData {
+  if (value == null || typeof value !== "object") {
+    throw new Error(
+      "project.save: codeCells payload must be a CodeCellData object, got " +
+        (value === null ? "null" : typeof value)
+    );
+  }
+  const obj = value as Record<string, unknown>;
+  if (!Array.isArray(obj.tabs)) {
+    throw new Error("project.save: codeCells.tabs must be an array");
+  }
+  if (typeof obj.activeTabId !== "number") {
+    throw new Error("project.save: codeCells.activeTabId must be a number");
+  }
+  for (const [i, tab] of obj.tabs.entries()) {
+    if (!tab || typeof tab !== "object") {
+      throw new Error(`project.save: codeCells.tabs[${i}] must be an object`);
+    }
+    const t = tab as Record<string, unknown>;
+    if (typeof t.id !== "number" || typeof t.code !== "string") {
+      throw new Error(
+        `project.save: codeCells.tabs[${i}] must have numeric id and string code`
+      );
+    }
+  }
+}
+
 // ---------------------------------------------------------------------------
 // ProjectManager
 // ---------------------------------------------------------------------------
@@ -232,7 +271,7 @@ export class ProjectManager {
    */
   async save(
     saveDir: string,
-    codeCells: unknown,
+    codeCells: CodeCellData,
     options?: { language?: "python" | "julia"; interpreterPath?: string; projectName?: string }
   ): Promise<{
     checksum: string;
@@ -240,6 +279,10 @@ export class ProjectManager {
     moduleOwnedFiles: ModuleOwnedFile[];
     moduleManifests: ModuleManifestBundle[];
   }> {
+    // Validate before any on-disk mutation: a nullish or malformed payload
+    // here used to clobber a project's saved tabs (audit #5).
+    assertCodeCellData(codeCells);
+
     // Ensure the save directory exists (creates it when the user enters a new project name
     // via the Save As dialog, so the folder hasn't been created yet).
     await fs.mkdir(saveDir, { recursive: true });

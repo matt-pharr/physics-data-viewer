@@ -131,6 +131,23 @@ def _read_parquet(path: str) -> Any:
             raise primary_err from primary_err
 
 
+def _is_json_native(value: Any) -> bool:
+    """Return True if ``value`` can be round-tripped through ``json.dumps``.
+
+    Used by :func:`serialize_node` to decide between the fast inline path for
+    plain dicts/lists of JSON-native values and the composite path that
+    emits per-leaf descriptors (for dicts containing ndarrays, DataFrames,
+    bytes, etc.).
+    """
+    import json  # noqa: PLC0415
+
+    try:
+        json.dumps(value)
+    except (TypeError, ValueError):
+        return False
+    return True
+
+
 def python_type_string(value: Any) -> str:
     """Return ``'module.qualname'`` for any object.
 
@@ -497,20 +514,41 @@ def serialize_node(
         descriptor["metadata"] = {"preview": preview}
         return descriptor
 
-    if kind in (KIND_MAPPING, KIND_SEQUENCE):
-        try:
-            json.dumps(value)
-        except (TypeError, ValueError) as exc:
-            raise PDVSerializationError(
-                f"Value at '{tree_path}' is not JSON-serializable: {exc}"
-            ) from exc
-        descriptor["storage"] = {
-            "backend": "inline",
-            "format": FORMAT_INLINE,
-            "value": value,
-        }
-        descriptor["metadata"] = {"preview": preview}
+    if kind == KIND_MAPPING:
+        if _is_json_native(value):
+            descriptor["storage"] = {
+                "backend": "inline",
+                "format": FORMAT_INLINE,
+                "value": value,
+            }
+            descriptor["metadata"] = {"preview": preview}
+            return descriptor
+        # Composite mapping: one or more leaves are not JSON-serializable.
+        # Emit a container descriptor; the save walker (_collect_nodes) is
+        # responsible for recursing into the dict and emitting per-leaf
+        # descriptors so each leaf reaches its own fast path (.npy, parquet,
+        # etc). Reconstructed on load as a plain dict, not a PDVTree.
+        descriptor["has_children"] = True
+        descriptor["storage"] = {"backend": "none", "format": "none"}
+        descriptor["metadata"] = {"preview": preview, "composite": True}
         return descriptor
+
+    if kind == KIND_SEQUENCE:
+        if _is_json_native(value):
+            descriptor["storage"] = {
+                "backend": "inline",
+                "format": FORMAT_INLINE,
+                "value": value,
+            }
+            descriptor["metadata"] = {"preview": preview}
+            return descriptor
+        raise PDVSerializationError(
+            f"Sequence at '{tree_path}' contains values that are not "
+            f"JSON-serializable (e.g. ndarray, DataFrame). PDV does not yet "
+            f"support composite sequences — wrap the values in a dict with "
+            f"named keys, e.g. {{'0': arr0, '1': arr1}}, so each element "
+            f"can be stored in its own file."
+        )
 
     if kind == KIND_BINARY:
         file_path = working_dir_tree_path(working_dir, tree_path, ".bin")
@@ -571,6 +609,84 @@ def serialize_node(
     }
     descriptor["metadata"] = {"preview": preview}
     return descriptor
+
+
+def pickle_fallback_node(tree_path: str, value: Any, working_dir: str) -> dict:
+    """Unconditionally write ``value`` as a pickle file and return a descriptor.
+
+    Super-fallback used by the save walker (:func:`_collect_nodes` in
+    ``handlers.project``) when :func:`serialize_node` raises
+    :class:`PDVSerializationError` for any reason. The policy is: the user's
+    data integrity trumps format purity — ``project.save`` must never fail
+    because of a single weird tree value.
+
+    Unlike the ``trusted=True`` branch of :func:`serialize_node`, this helper
+    bypasses the trusted gate entirely: the pickle file is written by this
+    same process and read back by this same process on project load (which
+    always passes ``trusted=True``), so there is no untrusted-code surface.
+
+    The returned descriptor carries ``metadata.fallback == "pickle"`` so that
+    tests, logs, and any future UI affordance can distinguish fallback nodes
+    from nodes whose value naturally required pickle.
+
+    Parameters
+    ----------
+    tree_path : str
+        Dot-separated tree path for the node.
+    value : Any
+        The value to pickle. May be anything picklable; if pickle itself
+        fails, the underlying exception propagates (at which point the save
+        truly cannot proceed).
+    working_dir : str
+        Absolute path to the save directory. The pickle file is written
+        under ``<working_dir>/tree/``.
+
+    Returns
+    -------
+    dict
+        A node descriptor with ``storage.backend == "local_file"``,
+        ``storage.format == FORMAT_PICKLE``, and
+        ``metadata.fallback == "pickle"``.
+    """
+    import datetime
+    import os
+    import pickle
+
+    from pdv_kernel.environment import ensure_parent, working_dir_tree_path  # noqa: PLC0415
+
+    file_path = working_dir_tree_path(working_dir, tree_path, ".pickle")
+    ensure_parent(file_path)
+    with open(file_path, "wb") as fh:
+        pickle.dump(value, fh)
+    rel_path = os.path.relpath(file_path, working_dir)
+
+    now = (
+        datetime.datetime.now(datetime.timezone.utc).isoformat().replace("+00:00", "Z")
+    )
+    parts = tree_path.split(".")
+    key = parts[-1]
+    parent_path = ".".join(parts[:-1]) if len(parts) > 1 else ""
+
+    return {
+        "id": tree_path,
+        "path": tree_path,
+        "key": key,
+        "parent_path": parent_path,
+        "type": KIND_UNKNOWN,
+        "has_children": False,
+        "created_at": now,
+        "updated_at": now,
+        "storage": {
+            "backend": "local_file",
+            "relative_path": rel_path,
+            "format": FORMAT_PICKLE,
+        },
+        "metadata": {
+            "preview": node_preview(value, KIND_UNKNOWN),
+            "python_type": python_type_string(value),
+            "fallback": "pickle",
+        },
+    }
 
 
 def deserialize_node(storage_ref: dict, save_dir: str, *, trusted: bool = False) -> Any:

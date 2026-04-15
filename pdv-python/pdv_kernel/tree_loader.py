@@ -31,10 +31,12 @@ Divergent details between the two callers are exposed as named arguments:
   :class:`PDVModule`.
 - ``module_id_default`` — fallback ``module_id`` for ``script`` nodes when
   the on-disk metadata is missing it.
-- ``inject_lib_sys_path`` — project load adds the parent directory of each
-  ``PDVLib`` file to ``sys.path`` so the library is importable; module
-  register defers ``sys.path`` injection to ``handle_modules_setup`` via
-  the ``lib_dir`` field, so the loader does not touch ``sys.path``.
+
+``sys.path`` wiring for module libraries is handled exclusively by
+``handle_modules_setup``: after ``load_tree_index`` populates the tree,
+main sends ``pdv.modules.setup`` and the kernel walks each ``PDVModule``
+subtree to collect the parent directories of every ``PDVLib``
+descendant. The loader itself never touches ``sys.path``.
 
 See Also
 --------
@@ -45,8 +47,6 @@ pdv_kernel.handlers.modules — pdv.module.register handler
 
 from __future__ import annotations
 
-import os
-import sys
 from typing import Any, Callable, Literal
 
 
@@ -65,7 +65,6 @@ def load_tree_index(
     patch_module_id_on_skip: str | None = None,
     module_id_default: str = "",
     working_dir: str = "",
-    inject_lib_sys_path: bool = False,
 ) -> None:
     """Mount a tree-index node list into ``tree`` using the two-pass algorithm.
 
@@ -98,12 +97,7 @@ def load_tree_index(
         metadata is missing it.
     working_dir : str
         Working directory used to resolve relative paths during
-        deserialization and (when ``inject_lib_sys_path`` is True) lib
-        ``sys.path`` injection.
-    inject_lib_sys_path : bool
-        When True, the parent directory of each ``PDVLib`` file is added
-        to ``sys.path``. Project load uses True; module register uses
-        False because ``handle_modules_setup`` handles this separately.
+        deserialization of file-backed leaves.
     """
     # Local imports to avoid circular dependencies — tree.py imports nothing
     # from this module, so importing tree.py here is safe.
@@ -149,6 +143,13 @@ def load_tree_index(
             folder._working_dir = tree._working_dir
             folder._save_dir = tree._save_dir
             tree.set_quiet(full_path, folder)
+        elif node_type == "mapping" and meta.get("composite"):
+            # Composite mapping: the user assigned a plain dict containing
+            # non-JSON-native leaves (e.g. ndarrays). Reconstruct as a plain
+            # dict — NOT a PDVTree — so type(value) is dict on load, matching
+            # what the user originally stored. Children are populated in
+            # Pass 2 via set_quiet, which traverses through plain dicts.
+            tree.set_quiet(full_path, {})
         elif node_type == "module":
             storage = node.get("storage", {})
             old_meta = storage.get("value", {})
@@ -172,7 +173,14 @@ def load_tree_index(
                 on_progress(index, total)
             continue
         node_type = node.get("type", "")
+        meta = node.get("metadata", {})
         if node_type in ("folder", "module"):
+            if on_progress is not None:
+                on_progress(index, total)
+            continue
+        if node_type == "mapping" and meta.get("composite"):
+            # Composite mapping container was created in Pass 1; children
+            # will be inserted into it by subsequent Pass 2 iterations.
             if on_progress is not None:
                 on_progress(index, total)
             continue
@@ -180,7 +188,6 @@ def load_tree_index(
         full_path = _full_path(node_path_rel)
         storage = node.get("storage", {})
         backend = storage.get("backend", "")
-        meta = node.get("metadata", {})
 
         if conflict_strategy == "skip":
             exists, existing_value = _node_exists(full_path)
@@ -267,12 +274,6 @@ def load_tree_index(
                     source_rel_path=src_rel,
                 ),
             )
-            if inject_lib_sys_path:
-                abs_path = os.path.join(working_dir, rel_path) if rel_path else ""
-                if abs_path:
-                    parent_dir = os.path.dirname(abs_path)
-                    if parent_dir and parent_dir not in sys.path:
-                        sys.path.insert(1, parent_dir)
         elif backend == "inline":
             tree.set_quiet(full_path, storage.get("value"))
         elif backend == "local_file":

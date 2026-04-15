@@ -522,6 +522,17 @@ export function registerTreeNamespaceScriptIpcHandlers(
         source_rel_path: sourceRelPath,
       } satisfies PDVFileRegisterPayload);
 
+      // Wire sys.path for the newly-created lib. The kernel walker in
+      // handle_modules_setup is the sole owner of sys.path for module
+      // libs — we re-run it for the affected module whenever a new
+      // PDVLib is added to the tree so its parent directory lands on
+      // sys.path. Entry point is intentionally omitted: create_empty
+      // modules do not have one, and imported-module entry points have
+      // already been imported at import time.
+      await commRouter.request(PDVMessageType.MODULES_SETUP, {
+        modules: [{ alias: moduleInfo.moduleAlias }],
+      });
+
       const treePath = targetPath ? `${targetPath}.${stem}` : stem;
       return { success: true, libPath, treePath };
     },

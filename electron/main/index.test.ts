@@ -995,8 +995,9 @@ describe("Step 5 IPC handlers", () => {
   it("project:save delegates to ProjectManager.save", async () => {
     const { projectManager } = setup();
     const save = getHandler(IPC.project.save);
-    const result = await save({}, "/tmp/project", []);
-    expect(projectManager.save).toHaveBeenCalledWith("/tmp/project", [], {
+    const cells = { tabs: [], activeTabId: 1 };
+    const result = await save({}, "/tmp/project", cells);
+    expect(projectManager.save).toHaveBeenCalledWith("/tmp/project", cells, {
       language: "python",
       interpreterPath: undefined,
     });
@@ -1022,7 +1023,7 @@ describe("Step 5 IPC handlers", () => {
       ],
     });
     const save = getHandler(IPC.project.save);
-    await save({}, "/tmp/project", []);
+    await save({}, "/tmp/project", { tabs: [], activeTabId: 1 });
 
     const scriptsDest = path.join("/tmp/project", "modules", "my_mod", "scripts/run.py");
     const libDest = path.join("/tmp/project", "modules", "my_mod", "lib/helpers.py");
@@ -1066,7 +1067,7 @@ describe("Step 5 IPC handlers", () => {
       ],
     });
     const save = getHandler(IPC.project.save);
-    await save({}, "/tmp/project", []);
+    await save({}, "/tmp/project", { tabs: [], activeTabId: 1 });
 
     const manifestWrites = (mocks.fsWriteFile as unknown as ReturnType<typeof vi.fn>).mock.calls
       .filter((c: unknown[]) => String(c[0]).includes("modules/toy/"));
@@ -1100,7 +1101,7 @@ describe("Step 5 IPC handlers", () => {
     });
     const save = getHandler(IPC.project.save);
     // Handler must not throw when a module-owned file disappeared mid-save.
-    await expect(save({}, "/tmp/project", [])).resolves.toBeDefined();
+    await expect(save({}, "/tmp/project", { tabs: [], activeTabId: 1 })).resolves.toBeDefined();
   });
 
   it("project:load delegates to ProjectManager.load", async () => {
@@ -1171,16 +1172,14 @@ describe("Step 5 IPC handlers", () => {
     });
   });
 
-  it("codeCells:load returns null initially, codeCells:save persists", async () => {
+  it("codeCells:load returns null when no active kernel", async () => {
+    // As of audit #5, code-cell persistence is scoped to the active
+    // kernel's working directory rather than a global ~/.PDV/state file.
+    // With no kernel started in this test harness, load must return null
+    // (no file to read) and the handler must not throw.
     setup();
     const load = getHandler(IPC.codeCells.load);
     expect(await load({})).toBeNull();
-
-    const save = getHandler(IPC.codeCells.save);
-    await save({}, { boxes: [{ id: "b1" }] });
-
-    const afterSave = await load({});
-    expect(afterSave).toEqual({ boxes: [{ id: "b1" }] });
   });
 
   it("modules:listInstalled delegates to ModuleManager.listInstalled", async () => {
@@ -1399,6 +1398,23 @@ describe("Step 5 IPC handlers", () => {
         language: "python",
       }),
     );
+    // A MODULES_SETUP must follow MODULE_CREATE_EMPTY so the kernel walker
+    // establishes sys.path for the fresh in-session module. The payload
+    // must identify the module by alias only — no pre-computed lib_dir.
+    const requestCalls = (
+      commRouter.request as unknown as ReturnType<typeof vi.fn>
+    ).mock.calls;
+    const createIdx = requestCalls.findIndex(
+      ([type]) => type === PDVMessageType.MODULE_CREATE_EMPTY,
+    );
+    const setupIdx = requestCalls.findIndex(
+      ([type]) => type === PDVMessageType.MODULES_SETUP,
+    );
+    expect(createIdx).toBeGreaterThanOrEqual(0);
+    expect(setupIdx).toBeGreaterThan(createIdx);
+    expect(requestCalls[setupIdx][1]).toEqual({
+      modules: [{ alias: "toy" }],
+    });
   });
 
   it("modules:createEmpty returns conflict when the alias already exists", async () => {

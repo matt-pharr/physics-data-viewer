@@ -1439,7 +1439,7 @@ The API surface:
 - `window.pdv.config.*` — app config: `get`, `set`
 - `window.pdv.about.*` — app metadata: `getVersion`
 - `window.pdv.themes.*` — theme persistence: `get`, `save`, `openDir` (open `~/.PDV/themes/` in OS file manager)
-- `window.pdv.codeCells.*` — tab persistence: `load`, `save` (stored under `~/.PDV/state/code-cells.json`)
+- `window.pdv.codeCells.*` — tab persistence: `load`, `save` (stored under `<kernelWorkingDir>/code-cells.json`; kernel-lifetime scope, mirrored into the project save dir on `project.save` and back out on `project.load`)
 - `window.pdv.files.*` — native OS dialogs: `pickExecutable() → string | null` (wraps Electron `dialog.showOpenDialog` for executables); `pickFile() → string | null` (general file picker); `pickDirectory() → string | null` (wraps `dialog.showOpenDialog` with `properties: ['openDirectory', 'createDirectory']`, used for Save/Open project)
 - `window.pdv.modules.*` — module management: `listInstalled`, `install`, `importToProject`, `listImported`, `removeImport`, `saveSettings`, `runAction`, `checkUpdates`, `uninstall`, `update`
 - `window.pdv.moduleWindows.*` — module GUI windows: `open`, `close`, `context`, `executeInMain`; push: `onExecuteRequest(cb) → unsub`
