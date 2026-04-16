@@ -152,6 +152,7 @@ const api: PDVApi = {
     downloadUpdate: () => ipcRenderer.invoke(IPC.updater.downloadUpdate),
     installUpdate: () => ipcRenderer.invoke(IPC.updater.installUpdate),
     openReleasesPage: () => ipcRenderer.invoke(IPC.updater.openReleasesPage),
+    getStatus: () => ipcRenderer.invoke(IPC.updater.getStatus),
     onUpdateStatus: (cb) => onPush(IPC.push.updateStatus, cb),
   },
   themes: {

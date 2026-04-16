@@ -122,6 +122,15 @@ export async function createWindow(
     if (allowClose || win.webContents.isDestroyed()) {
       return;
     }
+    // When a real quit is already in progress (Cmd+Q, autoUpdater restart,
+    // OS logout), do NOT intercept — let Electron close the window
+    // naturally so `window-all-closed` and `will-quit` can run. Routing
+    // through the renderer dirty prompt here re-enters the quit machinery
+    // and wedges the process on macOS. The title-bar X is still
+    // intercepted because `isQuittingGlobal` is false in that case.
+    if (isQuittingGlobal) {
+      return;
+    }
     event.preventDefault();
     win.webContents.send(IPC.push.requestClose);
   });
@@ -168,6 +177,21 @@ export async function createWindow(
 // Module-level shutdown flag to prevent re-entrant kernel cleanup during quit.
 let isShuttingDownGlobal = false;
 
+// Set by `before-quit` so window `close` handlers can distinguish a real quit
+// (Cmd+Q, app.quit(), autoUpdater.quitAndInstall(), OS logout) from the user
+// just closing the window with the title-bar X. Without this, macOS apps that
+// intercept `close` get stuck: the window goes away but the process never
+// exits, because `window-all-closed` is a no-op on darwin.
+let isQuittingGlobal = false;
+
+export function isQuitting(): boolean {
+  return isQuittingGlobal;
+}
+
+export function markQuitting(): void {
+  isQuittingGlobal = true;
+}
+
 /**
  * Register core Electron app events.
  *
@@ -177,8 +201,17 @@ let isShuttingDownGlobal = false;
 export function wireAppEvents(
   getKernelManager: () => KernelManager | null
 ): void {
+  app.on("before-quit", () => {
+    isQuittingGlobal = true;
+  });
+
   app.on("window-all-closed", () => {
-    if (process.platform !== "darwin") {
+    // On darwin we normally keep the app alive after the window closes (so
+    // Cmd+W behaves like a typical mac app). But if a real quit is in
+    // progress, we must actually exit so `will-quit` runs and the kernel
+    // shuts down — otherwise the process stays in the dock forever and
+    // autoUpdater.quitAndInstall() can never replace the binary.
+    if (process.platform !== "darwin" || isQuittingGlobal) {
       app.quit();
     }
   });
@@ -187,10 +220,15 @@ export function wireAppEvents(
   // have completed, so save-on-quit can still reach the active kernel.
   app.on("will-quit", (event) => {
     const kernelManager = getKernelManager();
-    if (!kernelManager || isShuttingDownGlobal) {
+    const kernelCount = kernelManager
+      ? Array.from((kernelManager as unknown as { kernels: Map<string, unknown> }).kernels?.keys() ?? []).length
+      : 0;
+    // Nothing to clean up — let the quit proceed normally. preventDefault'ing
+    // here and re-calling app.quit() afterwards is unreliable on macOS once
+    // will-quit has been canceled.
+    if (!kernelManager || isShuttingDownGlobal || kernelCount === 0) {
       return;
     }
-    // Prevent the default quit so we can await async cleanup first.
     event.preventDefault();
     isShuttingDownGlobal = true;
     kernelManager
@@ -199,7 +237,9 @@ export function wireAppEvents(
         console.error("[PDV] Failed to shutdown kernels during quit:", error);
       })
       .finally(() => {
-        app.quit();
+        // Use app.exit() rather than app.quit() — once we've preventDefault'd
+        // will-quit, re-entering the quit cycle is unreliable on macOS.
+        app.exit(0);
       });
   });
 

@@ -1,3 +1,1 @@
-# quickstart
-
-<!-- TODO -->
+--8<-- "DEV_QUICKSTART.md"
