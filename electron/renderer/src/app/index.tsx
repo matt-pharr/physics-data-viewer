@@ -370,22 +370,6 @@ const App: React.FC = () => {
     setPendingTreeChanges((prev) => [...prev, info]);
   }, []);
 
-  useKernelSubscriptions({
-    currentKernelId,
-    loadedProjectTabsRef,
-    setCellTabs,
-    setActiveCellTab,
-    setLogs,
-    setTreeRefreshToken,
-    setModulesRefreshToken,
-    setProjectReloading,
-    setProgress,
-    onKernelCrash: handleKernelCrash,
-    onTreeChanged: handleTreeChanged,
-    setNoteTabs,
-    setActiveNoteTabId,
-  });
-
   const { startKernel, handleEnvSave } = useKernelLifecycle({
     config,
     currentKernelId,
@@ -520,6 +504,8 @@ const App: React.FC = () => {
 
   // -- Note (Write tab) helpers --------------------------------------------
 
+  const isDirtyNote = useCallback((tab: NoteTab) => tab.content !== tab.savedContent, []);
+
   /** Open a markdown node in the Write tab, reading its content from disk.
    *  If the note is already open and forceReload is true, re-reads from disk. */
   const openNote = async (node: TreeNodeData, forceReload?: boolean) => {
@@ -531,6 +517,17 @@ const App: React.FC = () => {
     }
 
     if (!currentKernelId) return;
+
+    if (existing && forceReload && isDirtyNote(existing)) {
+      const confirmed = window.confirm(
+        `Discard unsaved changes in "${existing.name}" and reload from disk?`,
+      );
+      if (!confirmed) {
+        setActiveNoteTabId(node.path);
+        setActivePane('write');
+        return;
+      }
+    }
 
     try {
       const result = await window.pdv.note.read(currentKernelId, node.path);
@@ -595,10 +592,27 @@ const App: React.FC = () => {
     );
   }, [currentKernelId]);
 
+  useKernelSubscriptions({
+    currentKernelId,
+    loadedProjectTabsRef,
+    setCellTabs,
+    setActiveCellTab,
+    setLogs,
+    setTreeRefreshToken,
+    setModulesRefreshToken,
+    setProjectReloading,
+    setProgress,
+    onKernelCrash: handleKernelCrash,
+    onTreeChanged: handleTreeChanged,
+    flushDirtyNotes,
+    setNoteTabs,
+    setActiveNoteTabId,
+  });
+
   /** Re-read all open note tabs from disk, updating content + savedContent. */
   const reloadAllOpenNotes = useCallback(async () => {
     if (!currentKernelId) return;
-    const tabs = noteTabsRef.current;
+    const tabs = noteTabsRef.current.filter((tab) => !isDirtyNote(tab));
     if (tabs.length === 0) return;
     await Promise.all(
       tabs.map(async (tab) => {
@@ -616,7 +630,7 @@ const App: React.FC = () => {
         }
       }),
     );
-  }, [currentKernelId]);
+  }, [currentKernelId, isDirtyNote]);
 
   const handleNoteCloseTab = (id: string) => {
     setNoteTabs((prev) => {

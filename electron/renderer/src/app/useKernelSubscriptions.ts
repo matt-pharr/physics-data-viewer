@@ -26,6 +26,8 @@ interface UseKernelSubscriptionsOptions {
   onKernelCrash: (kernelId: string) => void;
   /** Called on incremental tree changes so the Tree can update selectively. */
   onTreeChanged: (info: TreeChangeInfo) => void;
+  /** Flushes dirty note tabs before destructive project reload cleanup. */
+  flushDirtyNotes: () => Promise<void>;
   /** Clears open note tabs on project load/reload. */
   setNoteTabs: Dispatch<SetStateAction<NoteTab[]>>;
   /** Clears the active note tab ID on project load/reload. */
@@ -44,6 +46,7 @@ export function useKernelSubscriptions({
   setProgress,
   onKernelCrash,
   onTreeChanged,
+  flushDirtyNotes,
   setNoteTabs,
   setActiveNoteTabId,
 }: UseKernelSubscriptionsOptions): void {
@@ -115,11 +118,14 @@ export function useKernelSubscriptions({
       if (payload.status === 'reloading') {
         setProjectReloading(true);
       } else if (payload.status === 'ready') {
-        setProjectReloading(false);
-        setNoteTabs([]);
-        setActiveNoteTabId(null);
-        setTreeRefreshToken((prev) => prev + 1);
-        setModulesRefreshToken((prev) => prev + 1);
+        void (async () => {
+          await flushDirtyNotes();
+          setProjectReloading(false);
+          setNoteTabs([]);
+          setActiveNoteTabId(null);
+          setTreeRefreshToken((prev) => prev + 1);
+          setModulesRefreshToken((prev) => prev + 1);
+        })();
       }
     });
 
@@ -141,6 +147,7 @@ export function useKernelSubscriptions({
     setProjectReloading,
     setTreeRefreshToken,
     onTreeChanged,
+    flushDirtyNotes,
     setNoteTabs,
     setActiveNoteTabId,
   ]);

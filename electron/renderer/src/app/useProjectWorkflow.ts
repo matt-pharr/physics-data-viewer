@@ -180,6 +180,7 @@ export function useProjectWorkflow(options: UseProjectWorkflowOptions) {
         return;
       }
       const saveDir = pickedDir;
+      await flushDirtyNotes();
       const result = await window.pdv.project.load(saveDir);
       const normalized = normalizeLoadedCodeCells(result.codeCells);
       loadedProjectTabsRef.current = normalized;
