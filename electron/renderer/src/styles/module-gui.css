@@ -288,7 +288,7 @@
   border: 1px solid var(--accent, #007acc);
   border-radius: 3px;
   background: var(--accent, #007acc);
-  color: #fff;
+  color: var(--text-on-accent, #ffffff);
   cursor: pointer;
   transition: opacity 0.15s;
 }

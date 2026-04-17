@@ -81,16 +81,30 @@
   font-size: 15px;
 }
 
-/* Read mode rendered markdown view */
+/* Read mode rendered markdown view. A CSS grid gives us a centered content
+   column capped at --read-view-max-width without relying on margin: auto
+   (which loses to element-specific margin shorthands like blockquote's
+   `margin: 0.8em 0`). The cap is user-configurable in Appearance settings.
+   NOTE: `position: absolute; inset: 0` requires the parent .code-cell-content
+   (command-pane.css) to be `position: relative` — otherwise this element
+   escapes its pane. */
 .read-view-content {
-  flex: 1;
+  position: absolute;
+  inset: 0;
   overflow-y: auto;
   padding: 24px 32px;
   font-family: var(--font-sans);
   font-size: 14px;
   line-height: 1.7;
   color: var(--text-primary);
-  max-width: 800px;
+  display: grid;
+  grid-template-columns: 1fr min(var(--read-view-max-width, 1200px), 100%) 1fr;
+  align-content: start;
+}
+
+.read-view-content > * {
+  grid-column: 2;
+  min-width: 0;
 }
 
 .read-view-content h1,
@@ -216,19 +230,19 @@
 
 .pane-switcher-btn.active {
   background-color: var(--accent);
-  color: var(--bg-primary);
+  color: var(--text-on-accent, #ffffff);
   cursor: default;
 }
 
 .pane-switcher-btn.active:hover {
   background-color: var(--accent);
-  color: var(--bg-primary);
+  color: var(--text-on-accent, #ffffff);
 }
 
 .pane-switcher-btn.active:focus-visible,
 .pane-switcher-btn.active:active {
   background-color: var(--accent);
-  color: var(--bg-primary);
+  color: var(--text-on-accent, #ffffff);
 }
 
 .pane-switcher-indicator {
