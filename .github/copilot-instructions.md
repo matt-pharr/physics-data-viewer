@@ -81,6 +81,8 @@ Renderer (React) ──window.pdv──► Preload ──ipcRenderer──► Ma
 
 10. **Unified version number.** `electron/package.json` version and `pdv-python/pyproject.toml` version must always match. This single version is used as the protocol version in comm messages, stored in project manifests, and checked by the environment detector. When bumping the version, update both files.
 
+11. **Always use theme-engine CSS variables for colors.** New GUI elements must reference tokens like `var(--bg-primary)`, `var(--text-primary)`, `var(--accent)`, `var(--text-on-accent)`, etc. — defined in `electron/renderer/src/themes.ts` and exposed via the Appearance settings editor. Never hardcode hex colors (`#fff`, `#007acc`, etc.) or `rgb(...)` literals in component CSS. If you need a color that isn't in the token set, add it to `themes.ts` (with per-theme values and a `CSS_VAR_GROUPS` entry) rather than hardcoding it. This keeps every built-in and custom theme looking correct.
+
 ---
 
 ## Testing
