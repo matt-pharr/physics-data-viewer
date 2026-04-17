@@ -107,6 +107,6 @@
 .toggle.active {
   background-color: var(--accent);
   border-color: var(--accent);
-  color: var(--bg-primary);
+  color: var(--text-on-accent, #ffffff);
   font-weight: 600;
 }

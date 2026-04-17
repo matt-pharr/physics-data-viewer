@@ -222,19 +222,19 @@
 
 .pane-switcher-btn.active {
   background-color: var(--accent);
-  color: var(--bg-primary);
+  color: var(--text-on-accent, #ffffff);
   cursor: default;
 }
 
 .pane-switcher-btn.active:hover {
   background-color: var(--accent);
-  color: var(--bg-primary);
+  color: var(--text-on-accent, #ffffff);
 }
 
 .pane-switcher-btn.active:focus-visible,
 .pane-switcher-btn.active:active {
   background-color: var(--accent);
-  color: var(--bg-primary);
+  color: var(--text-on-accent, #ffffff);
 }
 
 .pane-switcher-indicator {
