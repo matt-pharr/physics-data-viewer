@@ -180,6 +180,55 @@ interface ActiveViewZone {
 }
 
 /**
+ * Build a ViewZone for a single math region, pre-measure its rendered
+ * height in the editor's DOM context, and register it with Monaco.
+ * Returns the zone descriptor so the caller can track it for teardown,
+ * or null if the editor has no DOM container (shouldn't happen in practice).
+ */
+function createPreviewZone(
+  editor: monaco.editor.IStandaloneCodeEditor,
+  region: MathRegion,
+  html: string,
+): ActiveViewZone | null {
+  const container = editor.getDomNode();
+  if (!container) return null;
+
+  const domNode = document.createElement('div');
+  domNode.className = region.displayMode
+    ? 'math-preview-zone'
+    : 'math-preview-zone math-preview-inline-zone';
+  domNode.innerHTML = html;
+  domNode.style.padding = region.displayMode ? '4px 16px' : '2px 16px';
+  domNode.style.opacity = region.displayMode ? '0.9' : '0.85';
+  domNode.style.textAlign = 'left';
+
+  // Pre-measure off-screen so Monaco allocates the correct height. Attach
+  // to the editor's DOM so inherited fonts and sizing match the final zone.
+  domNode.style.position = 'absolute';
+  domNode.style.visibility = 'hidden';
+  container.appendChild(domNode);
+  const fallbackHeight = region.displayMode ? 40 : 24;
+  const measuredHeight = domNode.getBoundingClientRect().height || fallbackHeight;
+  container.removeChild(domNode);
+  domNode.style.position = '';
+  domNode.style.visibility = '';
+
+  let zoneId = '';
+  editor.changeViewZones((accessor) => {
+    zoneId = accessor.addZone({
+      afterLineNumber: region.endLine,
+      heightInPx: measuredHeight,
+      domNode,
+      // Omit afterColumn so Monaco uses the line's max column; otherwise on
+      // a word-wrapped source line the zone anchors to the first visual row
+      // instead of after the last wrap.
+      suppressMouseDown: true,
+    });
+  });
+  return { id: zoneId, endLine: region.endLine };
+}
+
+/**
  * Attach math preview rendering to a Monaco editor instance.
  * Returns a dispose function that cleans up all widgets and zones.
  */
@@ -207,75 +256,8 @@ export function attachMathPreview(
     // Create new zones/widgets for each region
     for (const region of regions) {
       const html = renderLatex(region.latex, region.displayMode);
-
-      if (region.displayMode) {
-        // Display math: ViewZone below the closing $$ line.
-        // Pre-measure the rendered height so Monaco allocates the right
-        // amount of space and the preview doesn't overlap editor text.
-        const domNode = document.createElement('div');
-        domNode.className = 'math-preview-zone';
-        domNode.innerHTML = html;
-        domNode.style.padding = '4px 16px';
-        domNode.style.opacity = '0.9';
-        domNode.style.textAlign = 'left';
-
-        // Measure off-screen: attach to the editor's DOM container so
-        // inherited fonts / sizing are accurate, then read the height.
-        const container = editor.getDomNode();
-        if (!container) continue;
-        domNode.style.position = 'absolute';
-        domNode.style.visibility = 'hidden';
-        container.appendChild(domNode);
-        const measuredHeight = domNode.getBoundingClientRect().height || 40;
-        container.removeChild(domNode);
-        domNode.style.position = '';
-        domNode.style.visibility = '';
-
-        editor.changeViewZones((accessor) => {
-          const id = accessor.addZone({
-            afterLineNumber: region.endLine,
-            heightInPx: measuredHeight,
-            domNode,
-            // Omit afterColumn so Monaco uses the max column; otherwise on a
-            // word-wrapped source line the zone anchors to the first visual
-            // row instead of after the last wrap.
-            suppressMouseDown: true,
-          });
-          activeZones.push({ id, endLine: region.endLine });
-        });
-      } else {
-        // Inline math: ViewZone below the source line (same pre-measure
-        // approach as display math, but rendered at inline size).
-        const domNode = document.createElement('div');
-        domNode.className = 'math-preview-zone math-preview-inline-zone';
-        domNode.innerHTML = html;
-        domNode.style.padding = '2px 16px';
-        domNode.style.opacity = '0.85';
-        domNode.style.textAlign = 'left';
-
-        const container = editor.getDomNode();
-        if (!container) continue;
-        domNode.style.position = 'absolute';
-        domNode.style.visibility = 'hidden';
-        container.appendChild(domNode);
-        const measuredHeight = domNode.getBoundingClientRect().height || 24;
-        container.removeChild(domNode);
-        domNode.style.position = '';
-        domNode.style.visibility = '';
-
-        editor.changeViewZones((accessor) => {
-          const id = accessor.addZone({
-            afterLineNumber: region.endLine,
-            heightInPx: measuredHeight,
-            domNode,
-            // Omit afterColumn so Monaco uses the max column; otherwise on a
-            // word-wrapped source line the zone anchors to the first visual
-            // row instead of after the last wrap.
-            suppressMouseDown: true,
-          });
-          activeZones.push({ id, endLine: region.endLine });
-        });
-      }
+      const zone = createPreviewZone(editor, region, html);
+      if (zone) activeZones.push(zone);
     }
   };
 

@@ -84,7 +84,10 @@
 /* Read mode rendered markdown view. A CSS grid gives us a centered content
    column capped at --read-view-max-width without relying on margin: auto
    (which loses to element-specific margin shorthands like blockquote's
-   `margin: 0.8em 0`). The cap is user-configurable in Appearance settings. */
+   `margin: 0.8em 0`). The cap is user-configurable in Appearance settings.
+   NOTE: `position: absolute; inset: 0` requires the parent .code-cell-content
+   (command-pane.css) to be `position: relative` — otherwise this element
+   escapes its pane. */
 .read-view-content {
   position: absolute;
   inset: 0;
