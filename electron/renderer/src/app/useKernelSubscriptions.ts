@@ -1,5 +1,5 @@
 import { useEffect, type Dispatch, type MutableRefObject, type SetStateAction } from 'react';
-import type { CellTab, LogEntry, TreeChangeInfo } from '../types';
+import type { CellTab, LogEntry, NoteTab, TreeChangeInfo } from '../types';
 import type { ProgressPayload } from '../types/pdv';
 
 /** Options for {@link useKernelSubscriptions}. Manages push-subscription lifecycle. */
@@ -26,6 +26,10 @@ interface UseKernelSubscriptionsOptions {
   onKernelCrash: (kernelId: string) => void;
   /** Called on incremental tree changes so the Tree can update selectively. */
   onTreeChanged: (info: TreeChangeInfo) => void;
+  /** Clears open note tabs on project load/reload. */
+  setNoteTabs: Dispatch<SetStateAction<NoteTab[]>>;
+  /** Clears the active note tab ID on project load/reload. */
+  setActiveNoteTabId: Dispatch<SetStateAction<string | null>>;
 }
 
 export function useKernelSubscriptions({
@@ -40,6 +44,8 @@ export function useKernelSubscriptions({
   setProgress,
   onKernelCrash,
   onTreeChanged,
+  setNoteTabs,
+  setActiveNoteTabId,
 }: UseKernelSubscriptionsOptions): void {
   useEffect(() => {
     const unsubscribe = window.pdv.kernels.onOutput((chunk) => {
@@ -87,6 +93,8 @@ export function useKernelSubscriptions({
         setCellTabs(loaded.tabs);
         setActiveCellTab(loaded.activeTabId);
       }
+      setNoteTabs([]);
+      setActiveNoteTabId(null);
       setTreeRefreshToken((prev) => prev + 1);
     });
 
@@ -108,6 +116,8 @@ export function useKernelSubscriptions({
         setProjectReloading(true);
       } else if (payload.status === 'ready') {
         setProjectReloading(false);
+        setNoteTabs([]);
+        setActiveNoteTabId(null);
         setTreeRefreshToken((prev) => prev + 1);
         setModulesRefreshToken((prev) => prev + 1);
       }
@@ -131,5 +141,7 @@ export function useKernelSubscriptions({
     setProjectReloading,
     setTreeRefreshToken,
     onTreeChanged,
+    setNoteTabs,
+    setActiveNoteTabId,
   ]);
 }

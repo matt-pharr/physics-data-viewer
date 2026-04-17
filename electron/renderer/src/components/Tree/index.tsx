@@ -317,6 +317,7 @@ export const Tree: React.FC<TreeProps> = ({ kernelId, disabled = false, refreshT
     setContextMenu(null);
     if (action === 'refresh') {
       void loadRoot(true);
+      onAction?.(action, node);
       return;
     }
     onAction?.(action, node);

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, type Dispatch, type MutableRefObject, type SetStateAction } from 'react';
-import type { CellTab, Config, LogEntry, MenuActionPayload } from '../types';
+import type { CellTab, Config, LogEntry, MenuActionPayload, NoteTab } from '../types';
 import type { ProgressPayload } from '../types/pdv';
 import { normalizeRecentProjects } from './app-utils';
 import { MAX_RECENT_PROJECTS } from './constants';
@@ -50,6 +50,10 @@ interface UseProjectWorkflowOptions {
   normalizeLoadedCodeCells: (data: unknown) => { tabs: CellTab[]; activeTabId: number };
   /** Flush all dirty markdown notes to disk before project save. */
   flushDirtyNotes: () => Promise<void>;
+  /** Clears open note tabs when loading a new project. */
+  setNoteTabs: Dispatch<SetStateAction<NoteTab[]>>;
+  /** Clears the active note tab ID when loading a new project. */
+  setActiveNoteTabId: Dispatch<SetStateAction<string | null>>;
 }
 
 export function useProjectWorkflow(options: UseProjectWorkflowOptions) {
@@ -76,6 +80,8 @@ export function useProjectWorkflow(options: UseProjectWorkflowOptions) {
     loadedProjectTabsRef,
     normalizeLoadedCodeCells,
     flushDirtyNotes,
+    setNoteTabs,
+    setActiveNoteTabId,
   } = options;
 
   // Refs so handleSaveProject always reads the latest cell state, even when
@@ -179,6 +185,8 @@ export function useProjectWorkflow(options: UseProjectWorkflowOptions) {
       loadedProjectTabsRef.current = normalized;
       setCellTabs(normalized.tabs);
       setActiveCellTab(normalized.activeTabId);
+      setNoteTabs([]);
+      setActiveNoteTabId(null);
       setCurrentProjectDir(saveDir);
       setCurrentProjectName(result.projectName ?? null);
       setModulesRefreshToken((prev) => prev + 1);
@@ -216,6 +224,8 @@ export function useProjectWorkflow(options: UseProjectWorkflowOptions) {
     setLogs,
     setModulesRefreshToken,
     setNamespaceRefreshToken,
+    setNoteTabs,
+    setActiveNoteTabId,
   ]);
 
   useEffect(() => {

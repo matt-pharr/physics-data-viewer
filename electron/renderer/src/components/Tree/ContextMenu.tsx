@@ -120,6 +120,7 @@ export function getActionsForNode(node: TreeNodeData) {
     actions.push({ id: 'edit', label: 'Edit', disabled: false });
   } else if (node.type === 'markdown') {
     actions.push({ id: 'open_note', label: 'Open', disabled: false });
+    actions.push({ id: 'reload_note', label: 'Reload from disk', disabled: false });
   }
 
   // ── Refresh (all nodes) ──

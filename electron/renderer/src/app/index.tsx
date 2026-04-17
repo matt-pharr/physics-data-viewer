@@ -382,6 +382,8 @@ const App: React.FC = () => {
     setProgress,
     onKernelCrash: handleKernelCrash,
     onTreeChanged: handleTreeChanged,
+    setNoteTabs,
+    setActiveNoteTabId,
   });
 
   const { startKernel, handleEnvSave } = useKernelLifecycle({
@@ -518,11 +520,11 @@ const App: React.FC = () => {
 
   // -- Note (Write tab) helpers --------------------------------------------
 
-  /** Open a markdown node in the Write tab, reading its content from disk. */
-  const openNote = async (node: TreeNodeData) => {
-    // If already open, just switch to it
+  /** Open a markdown node in the Write tab, reading its content from disk.
+   *  If the note is already open and forceReload is true, re-reads from disk. */
+  const openNote = async (node: TreeNodeData, forceReload?: boolean) => {
     const existing = noteTabs.find((t) => t.id === node.path);
-    if (existing) {
+    if (existing && !forceReload) {
       setActiveNoteTabId(node.path);
       setActivePane('write');
       return;
@@ -533,13 +535,22 @@ const App: React.FC = () => {
     try {
       const result = await window.pdv.note.read(currentKernelId, node.path);
       const content = result.success && result.content ? result.content : '';
-      const newTab: NoteTab = {
-        id: node.path,
-        content,
-        savedContent: content,
-        name: node.key,
-      };
-      setNoteTabs((prev) => [...prev, newTab]);
+      if (existing) {
+        // Re-read: update in-place
+        setNoteTabs((prev) =>
+          prev.map((tab) =>
+            tab.id === node.path ? { ...tab, content, savedContent: content } : tab,
+          ),
+        );
+      } else {
+        const newTab: NoteTab = {
+          id: node.path,
+          content,
+          savedContent: content,
+          name: node.key,
+        };
+        setNoteTabs((prev) => [...prev, newTab]);
+      }
       setActiveNoteTabId(node.path);
       setActivePane('write');
     } catch (error) {
@@ -584,6 +595,29 @@ const App: React.FC = () => {
     );
   }, [currentKernelId]);
 
+  /** Re-read all open note tabs from disk, updating content + savedContent. */
+  const reloadAllOpenNotes = useCallback(async () => {
+    if (!currentKernelId) return;
+    const tabs = noteTabsRef.current;
+    if (tabs.length === 0) return;
+    await Promise.all(
+      tabs.map(async (tab) => {
+        try {
+          const result = await window.pdv.note.read(currentKernelId, tab.id);
+          if (result.success && result.content != null) {
+            setNoteTabs((prev) =>
+              prev.map((t) =>
+                t.id === tab.id ? { ...t, content: result.content!, savedContent: result.content! } : t,
+              ),
+            );
+          }
+        } catch (error) {
+          console.error('[App] Failed to reload note:', error);
+        }
+      }),
+    );
+  }, [currentKernelId]);
+
   const handleNoteCloseTab = (id: string) => {
     setNoteTabs((prev) => {
       const updated = prev.filter((t) => t.id !== id);
@@ -598,6 +632,14 @@ const App: React.FC = () => {
   };
 
   const handleTreeAction = async (action: string, node: TreeNodeData) => {
+    if (action === 'refresh') {
+      await reloadAllOpenNotes();
+      return;
+    }
+    if (action === 'reload_note' && node.type === 'markdown') {
+      await openNote(node, true);
+      return;
+    }
     if (action === 'open_gui') {
       if (!currentKernelId) return;
       // Module-owned GUIs use the module window system; standalone GUIs use the viewer
@@ -870,6 +912,8 @@ const App: React.FC = () => {
     loadedProjectTabsRef,
     normalizeLoadedCodeCells,
     flushDirtyNotes,
+    setNoteTabs,
+    setActiveNoteTabId,
   });
 
   // Subscribe to main-process close requests (title-bar X, OS close, Cmd+Q)
