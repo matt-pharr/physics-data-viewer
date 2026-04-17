@@ -612,7 +612,7 @@ const App: React.FC = () => {
     setActiveNoteTabId,
   });
 
-  /** Re-read all open note tabs from disk, updating content + savedContent. */
+  /** Re-read all clean open note tabs from the working copy. */
   const reloadAllOpenNotes = useCallback(async () => {
     if (!currentKernelId) return;
     const tabs = getCleanNoteTabs(noteTabsRef.current);
@@ -620,7 +620,7 @@ const App: React.FC = () => {
     await Promise.all(
       tabs.map(async (tab) => {
         try {
-          const result = await window.pdv.note.read(currentKernelId, tab.id, { source: 'project' });
+          const result = await window.pdv.note.read(currentKernelId, tab.id);
           if (result.success && result.content != null) {
             setNoteTabs((prev) =>
               prev.map((t) =>
