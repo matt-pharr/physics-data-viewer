@@ -529,7 +529,11 @@ const App: React.FC = () => {
     }
 
     try {
-      const result = await window.pdv.note.read(currentKernelId, node.path);
+      const result = await window.pdv.note.read(
+        currentKernelId,
+        node.path,
+        forceReload ? { source: 'project' } : undefined,
+      );
       const content = result.success && result.content ? result.content : '';
       if (existing) {
         // Re-read: update in-place
@@ -616,7 +620,7 @@ const App: React.FC = () => {
     await Promise.all(
       tabs.map(async (tab) => {
         try {
-          const result = await window.pdv.note.read(currentKernelId, tab.id);
+          const result = await window.pdv.note.read(currentKernelId, tab.id, { source: 'project' });
           if (result.success && result.content != null) {
             setNoteTabs((prev) =>
               prev.map((t) =>

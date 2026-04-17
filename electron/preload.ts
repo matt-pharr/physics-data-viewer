@@ -93,8 +93,8 @@ const api: PDVApi = {
   note: {
     save: (kernelId, treePath, content) =>
       ipcRenderer.invoke(IPC.note.save, kernelId, treePath, content),
-    read: (kernelId, treePath) =>
-      ipcRenderer.invoke(IPC.note.read, kernelId, treePath),
+    read: (kernelId, treePath, options) =>
+      ipcRenderer.invoke(IPC.note.read, kernelId, treePath, options),
   },
   namelist: {
     read: (kernelId, treePath) =>

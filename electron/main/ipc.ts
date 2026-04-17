@@ -256,6 +256,11 @@ export const IPC = {
 // Re-export for preload and renderer use.
 export type { ExecuteOutputChunk };
 
+/** Selects which on-disk note copy should be read. */
+export interface NoteReadOptions {
+  source?: "working" | "project";
+}
+
 // ---------------------------------------------------------------------------
 // Kernel request/response helper types
 // ---------------------------------------------------------------------------
@@ -1588,9 +1593,10 @@ export interface PDVApi {
      *
      * @param kernelId - Target kernel ID (used to resolve working directory).
      * @param treePath - Dot-delimited tree path of the note node.
+     * @param options - Optional read-source override.
      * @returns File content.
      */
-    read(kernelId: string, treePath: string): Promise<{ success: boolean; content?: string; error?: string }>;
+    read(kernelId: string, treePath: string, options?: NoteReadOptions): Promise<{ success: boolean; content?: string; error?: string }>;
   };
 
   /** Namelist read/write operations. */

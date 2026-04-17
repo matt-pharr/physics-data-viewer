@@ -21,6 +21,7 @@ import type { QueryRouter } from "./query-router";
 import type { ConfigStore, PDVConfig } from "./config";
 import { IPC, type HandlerInvokeResult, type NamelistReadResult, type NamelistWriteResult, type NamespaceInspectResult, type NamespaceInspectTarget, type NamespaceInspectorNode, type NamespaceQueryOptions, type NamespaceVariable, type ScriptParameter, type ScriptRunRequest, type ScriptRunResult, type TreeAddFileResult, type TreeCreateGuiResult, type TreeCreateLibResult, type TreeCreateNoteResult, type TreeCreateScriptResult } from "./ipc";
 import type { KernelManager } from "./kernel-manager";
+import { readNoteFile, writeNoteFile } from "./note-files";
 import { PDVMessageType, type PDVFileRegisterPayload } from "./pdv-protocol";
 import type { ProjectManager } from "./project-manager";
 
@@ -43,6 +44,7 @@ interface RegisterTreeNamespaceScriptIpcHandlersOptions {
    * project files.
    */
   getKnownModuleAliases: () => Promise<Set<string>>;
+  getActiveProjectDir: () => string | null;
   readConfig: (configStore: ConfigStore) => PDVConfig;
   toNamespaceQueryPayload: (
     options?: NamespaceQueryOptions
@@ -235,6 +237,7 @@ export function registerTreeNamespaceScriptIpcHandlers(
     configStore,
     kernelWorkingDirs,
     getKnownModuleAliases,
+    getActiveProjectDir,
     readConfig,
     toNamespaceQueryPayload,
     toNamespaceInspectPayload,
@@ -748,15 +751,7 @@ export function registerTreeNamespaceScriptIpcHandlers(
       try {
         const workingDir = kernelWorkingDirs.get(kernelId);
         if (!workingDir) throw new Error(`Working dir not initialized: ${kernelId}`);
-        const segments = treePath.split(".").filter(Boolean);
-        const lastSeg = segments.pop();
-        if (!lastSeg) throw new Error("Invalid tree path");
-        const noteDir = segments.length > 0
-          ? path.join(workingDir, "tree", ...segments)
-          : path.join(workingDir, "tree");
-        const filePath = path.join(noteDir, lastSeg + ".md");
-        await fs.mkdir(noteDir, { recursive: true });
-        await fs.writeFile(filePath, content, "utf-8");
+        await writeNoteFile(workingDir, treePath, content);
         return { success: true };
       } catch (err) {
         return { success: false, error: String(err) };
@@ -766,18 +761,16 @@ export function registerTreeNamespaceScriptIpcHandlers(
 
   ipcMain.handle(
     IPC.note.read,
-    async (_event, kernelId: string, treePath: string) => {
+    async (_event, kernelId: string, treePath: string, options?: import("./ipc").NoteReadOptions) => {
       try {
         const workingDir = kernelWorkingDirs.get(kernelId);
         if (!workingDir) throw new Error(`Working dir not initialized: ${kernelId}`);
-        const segments = treePath.split(".").filter(Boolean);
-        const lastSeg = segments.pop();
-        if (!lastSeg) throw new Error("Invalid tree path");
-        const noteDir = segments.length > 0
-          ? path.join(workingDir, "tree", ...segments)
-          : path.join(workingDir, "tree");
-        const filePath = path.join(noteDir, lastSeg + ".md");
-        const content = await fs.readFile(filePath, "utf-8");
+        const content = await readNoteFile({
+          workingDir,
+          projectDir: getActiveProjectDir(),
+          treePath,
+          readOptions: options,
+        });
         return { success: true, content };
       } catch (err) {
         return { success: false, error: String(err) };

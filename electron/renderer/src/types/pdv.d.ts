@@ -30,6 +30,7 @@ export type { ScriptParameter } from '../../../main/ipc';
 
 /** Tree node descriptor returned by `pdv.tree.list`. Canonical: `pdv-protocol.ts`. */
 export type { NodeDescriptor } from '../../../main/ipc';
+export type { NoteReadOptions } from '../../../main/ipc';
 
 /** Runtime kernel descriptor returned by `kernels.start/list/restart`. */
 export interface KernelInfo {
@@ -735,7 +736,7 @@ export interface PDVApi {
   };
   note: {
     save(kernelId: string, treePath: string, content: string): Promise<{ success: boolean; error?: string }>;
-    read(kernelId: string, treePath: string): Promise<{ success: boolean; content?: string; error?: string }>;
+    read(kernelId: string, treePath: string, options?: import('../../../main/ipc').NoteReadOptions): Promise<{ success: boolean; content?: string; error?: string }>;
   };
   namelist: {
     read(kernelId: string, treePath: string): Promise<NamelistReadResult>;

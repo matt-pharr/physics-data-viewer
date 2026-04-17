@@ -570,6 +570,7 @@ export function registerIpcHandlers(
         ...pendingModuleImports.map((m) => m.alias),
       ]);
     },
+    getActiveProjectDir: () => activeProjectDir,
     readConfig,
     toNamespaceQueryPayload,
     toNamespaceInspectPayload,
