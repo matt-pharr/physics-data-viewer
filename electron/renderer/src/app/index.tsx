@@ -48,6 +48,7 @@ import type {
 import { resolveShortcuts } from '../shortcuts';
 import { normalizeLoadedCodeCells, normalizeRecentProjects, mergeConfigUpdate } from './app-utils';
 import { CELL_UNDO_LIMIT, MAX_LOG_ENTRIES, NAMESPACE_REFRESH_INTERVAL_MS } from './constants';
+import { getCleanNoteTabs, isDirtyNote } from './note-tab-utils';
 import { useCodeCellsPersistence } from './useCodeCellsPersistence';
 import { useKeyboardShortcuts } from './useKeyboardShortcuts';
 import { useKernelLifecycle } from './useKernelLifecycle';
@@ -504,8 +505,6 @@ const App: React.FC = () => {
 
   // -- Note (Write tab) helpers --------------------------------------------
 
-  const isDirtyNote = useCallback((tab: NoteTab) => tab.content !== tab.savedContent, []);
-
   /** Open a markdown node in the Write tab, reading its content from disk.
    *  If the note is already open and forceReload is true, re-reads from disk. */
   const openNote = async (node: TreeNodeData, forceReload?: boolean) => {
@@ -612,7 +611,7 @@ const App: React.FC = () => {
   /** Re-read all open note tabs from disk, updating content + savedContent. */
   const reloadAllOpenNotes = useCallback(async () => {
     if (!currentKernelId) return;
-    const tabs = noteTabsRef.current.filter((tab) => !isDirtyNote(tab));
+    const tabs = getCleanNoteTabs(noteTabsRef.current);
     if (tabs.length === 0) return;
     await Promise.all(
       tabs.map(async (tab) => {
@@ -630,7 +629,7 @@ const App: React.FC = () => {
         }
       }),
     );
-  }, [currentKernelId, isDirtyNote]);
+  }, [currentKernelId]);
 
   const handleNoteCloseTab = (id: string) => {
     setNoteTabs((prev) => {
