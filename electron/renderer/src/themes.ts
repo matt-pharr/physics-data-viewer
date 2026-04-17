@@ -504,6 +504,22 @@ export function detectDisplayFonts(): string[] {
   return DISPLAY_FONT_CANDIDATES.filter((f) => fontInstalled(f, 'sans-serif'));
 }
 
+/** Default max content width (px) for the read-mode markdown view. */
+export const DEFAULT_READ_VIEW_MAX_WIDTH = 1200;
+
+/**
+ * Apply the markdown read-view max width as a CSS custom property on :root.
+ * Pass `undefined` to revert to the stylesheet default.
+ */
+export function applyMarkdownSettings(maxContentWidth?: number): void {
+  const root = document.documentElement;
+  if (maxContentWidth && maxContentWidth > 0) {
+    root.style.setProperty('--read-view-max-width', `${maxContentWidth}px`);
+  } else {
+    root.style.removeProperty('--read-view-max-width');
+  }
+}
+
 /**
  * Apply code/display font choices as CSS custom properties so the entire app
  * (and Monaco, which is passed the value directly) reflects the selection.
