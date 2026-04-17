@@ -30,23 +30,27 @@ export interface MathRegion {
 /**
  * Scan document text for math delimiters.
  *
- * Rules:
- * - `$$...$$` is display math (may span multiple lines)
- * - `$...$` is inline math (single line only, no nested $)
- * - Math inside fenced code blocks (``` ... ```) is ignored
- * - Escaped delimiters (\$) are ignored
+ * Rules (mirror marked-katex-extension so edit-mode previews match read-mode
+ * rendering):
+ * - Block display math: `$$` alone on a line (only whitespace around),
+ *   closed by another `$$` alone on a later line. Content may span lines.
+ * - Inline display math: `$$...$$` on a single line.
+ * - Inline math: `$...$` on a single line.
+ * - Math inside fenced code blocks (``` ... ```) is ignored.
+ * - Escaped delimiters (\$) are skipped as delimiters.
  */
 export function scanMathRegions(text: string): MathRegion[] {
   const lines = text.split('\n');
   const regions: MathRegion[] = [];
   let inCodeBlock = false;
 
+  const isBlockDelimiter = (s: string) => /^\s*\$\$\s*$/.test(s);
+
   let i = 0;
   while (i < lines.length) {
     const line = lines[i];
 
-    // Toggle fenced code blocks
-    if (/^```/.test(line.trimStart())) {
+    if (/^\s*```/.test(line)) {
       inCodeBlock = !inCodeBlock;
       i++;
       continue;
@@ -56,132 +60,104 @@ export function scanMathRegions(text: string): MathRegion[] {
       continue;
     }
 
-    // Scan for display math ($$...$$) — may span lines
-    let col = 0;
-    while (col < line.length) {
-      // Skip escaped dollar signs
-      if (line[col] === '\\' && col + 1 < line.length && line[col + 1] === '$') {
-        col += 2;
-        continue;
-      }
-
-      // Display math opening: $$
-      if (line[col] === '$' && col + 1 < line.length && line[col + 1] === '$') {
-        const startLine = i + 1;
-        const startCol = col + 1;
-        const openEnd = col + 2;
-
-        // Search for closing $$
-        let found = false;
-        let searchLine = i;
-        let searchCol = openEnd;
-
-        while (searchLine < lines.length) {
-          const sLine = lines[searchLine];
-          while (searchCol < sLine.length) {
-            if (sLine[searchCol] === '\\' && searchCol + 1 < sLine.length && sLine[searchCol + 1] === '$') {
-              searchCol += 2;
-              continue;
-            }
-            if (sLine[searchCol] === '$' && searchCol + 1 < sLine.length && sLine[searchCol + 1] === '$') {
-              // Found closing $$
-              const latex = extractText(lines, i, openEnd, searchLine, searchCol);
-              if (latex.trim().length > 0) {
-                regions.push({
-                  latex,
-                  displayMode: true,
-                  startLine,
-                  startCol,
-                  endLine: searchLine + 1,
-                  endCol: searchCol + 3, // after $$
-                });
-              }
-              // Advance past the closing $$
-              if (searchLine === i) {
-                col = searchCol + 2;
-              } else {
-                i = searchLine;
-                col = searchCol + 2;
-              }
-              found = true;
-              break;
-            }
-            searchCol++;
-          }
-          if (found) break;
-          searchLine++;
-          searchCol = 0;
+    // Block display math — `$$` alone on a line, closed by another `$$` alone.
+    if (isBlockDelimiter(line)) {
+      let closeLine = -1;
+      let searchInCode = false;
+      for (let j = i + 1; j < lines.length; j++) {
+        if (/^\s*```/.test(lines[j])) {
+          searchInCode = !searchInCode;
+          continue;
         }
-
-        if (found) continue;
-        // No closing $$ found — skip this $$
-        col = openEnd;
-        continue;
-      }
-
-      // Inline math: single $...$  (same line only)
-      if (line[col] === '$') {
-        const openEnd = col + 1;
-        let closeCol = openEnd;
-        let found = false;
-
-        while (closeCol < line.length) {
-          if (line[closeCol] === '\\' && closeCol + 1 < line.length && line[closeCol + 1] === '$') {
-            closeCol += 2;
-            continue;
-          }
-          if (line[closeCol] === '$') {
-            // Avoid empty match
-            if (closeCol > openEnd) {
-              const latex = line.slice(openEnd, closeCol);
-              regions.push({
-                latex,
-                displayMode: false,
-                startLine: i + 1,
-                startCol: col + 1,
-                endLine: i + 1,
-                endCol: closeCol + 2, // after closing $
-              });
-              col = closeCol + 1;
-              found = true;
-            }
-            break;
-          }
-          closeCol++;
+        if (searchInCode) continue;
+        if (isBlockDelimiter(lines[j])) {
+          closeLine = j;
+          break;
         }
-
-        if (found) continue;
-        col++;
+      }
+      if (closeLine !== -1) {
+        const latex = lines.slice(i + 1, closeLine).join('\n');
+        if (latex.trim().length > 0) {
+          const openCol = line.indexOf('$') + 1; // 1-based
+          regions.push({
+            latex,
+            displayMode: true,
+            startLine: i + 1,
+            startCol: openCol,
+            endLine: closeLine + 1,
+            endCol: lines[closeLine].length + 1,
+          });
+        }
+        i = closeLine + 1;
         continue;
       }
-
-      col++;
+      // Unpaired block delimiter — fall through to inline scan for this line.
     }
 
+    scanInlineOnLine(line, i, regions);
     i++;
   }
 
   return regions;
 }
 
-/** Extract text between two (line, col) positions in a line array. */
-function extractText(
-  lines: string[],
-  startLine: number,
-  startCol: number,
-  endLine: number,
-  endCol: number,
-): string {
-  if (startLine === endLine) {
-    return lines[startLine].slice(startCol, endCol);
+/** Scan a single line for inline $...$ and inline $$...$$ math. */
+function scanInlineOnLine(line: string, lineIdx: number, regions: MathRegion[]): void {
+  let col = 0;
+  while (col < line.length) {
+    if (line[col] === '\\' && line[col + 1] === '$') {
+      col += 2;
+      continue;
+    }
+    if (line[col] !== '$') {
+      col++;
+      continue;
+    }
+
+    const isDouble = line[col + 1] === '$';
+    const delimLen = isDouble ? 2 : 1;
+    const openEnd = col + delimLen;
+    let close = openEnd;
+    let closed = false;
+
+    while (close < line.length) {
+      if (line[close] === '\\' && line[close + 1] === '$') {
+        close += 2;
+        continue;
+      }
+      if (line[close] === '$') {
+        if (isDouble) {
+          if (line[close + 1] === '$') {
+            closed = true;
+            break;
+          }
+          close++;
+          continue;
+        }
+        closed = true;
+        break;
+      }
+      close++;
+    }
+
+    if (!closed) {
+      col += delimLen;
+      continue;
+    }
+
+    const latex = line.slice(openEnd, close);
+    if (latex.trim().length > 0) {
+      regions.push({
+        latex,
+        displayMode: isDouble,
+        startLine: lineIdx + 1,
+        startCol: col + 1,
+        endLine: lineIdx + 1,
+        endCol: close + delimLen + 1,
+      });
+    }
+    col = close + delimLen;
   }
-  const parts: string[] = [];
-  parts.push(lines[startLine].slice(startCol));
-  for (let l = startLine + 1; l < endLine; l++) {
-    parts.push(lines[l]);
-  }
-  parts.push(lines[endLine].slice(0, endCol));
-  return parts.join('\n');
 }
 
 /** Render a LaTeX string to HTML via KaTeX. Returns HTML or error markup. */
@@ -260,7 +236,9 @@ export function attachMathPreview(
             afterLineNumber: region.endLine,
             heightInPx: measuredHeight,
             domNode,
-            afterColumn: 0,
+            // Omit afterColumn so Monaco uses the max column; otherwise on a
+            // word-wrapped source line the zone anchors to the first visual
+            // row instead of after the last wrap.
             suppressMouseDown: true,
           });
           activeZones.push({ id, endLine: region.endLine });
@@ -290,7 +268,9 @@ export function attachMathPreview(
             afterLineNumber: region.endLine,
             heightInPx: measuredHeight,
             domNode,
-            afterColumn: 0,
+            // Omit afterColumn so Monaco uses the max column; otherwise on a
+            // word-wrapped source line the zone anchors to the first visual
+            // row instead of after the last wrap.
             suppressMouseDown: true,
           });
           activeZones.push({ id, endLine: region.endLine });

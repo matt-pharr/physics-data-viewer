@@ -81,7 +81,9 @@
   font-size: 15px;
 }
 
-/* Read mode rendered markdown view */
+/* Read mode rendered markdown view. A CSS grid gives us a centered content
+   column capped at 1200px without relying on margin: auto (which loses to
+   element-specific margin shorthands like blockquote's `margin: 0.8em 0`). */
 .read-view-content {
   position: absolute;
   inset: 0;
@@ -91,12 +93,14 @@
   font-size: 14px;
   line-height: 1.7;
   color: var(--text-primary);
+  display: grid;
+  grid-template-columns: 1fr min(1200px, 100%) 1fr;
+  align-content: start;
 }
 
 .read-view-content > * {
-  max-width: 1200px;
-  margin-left: auto;
-  margin-right: auto;
+  grid-column: 2;
+  min-width: 0;
 }
 
 .read-view-content h1,
