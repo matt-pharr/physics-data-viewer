@@ -14,11 +14,11 @@ A module is a directory containing:
 
 See the example module:
 
-- Manifest: [`examples/modules/N-pendulum/pdv-module.json`](examples/modules/N-pendulum/pdv-module.json)
+- Manifest: [`examples/modules/N-pendulum/pdv-module.json`](https://github.com/matt-pharr/physics-data-viewer/blob/develop/examples/modules/N-pendulum/pdv-module.json)
 - Action scripts:
-  - [`examples/modules/N-pendulum/scripts/solve.py`](examples/modules/N-pendulum/scripts/solve.py)
-  - [`examples/modules/N-pendulum/scripts/animate.py`](examples/modules/N-pendulum/scripts/animate.py)
-- Library: [`examples/modules/N-pendulum/lib/n_pendulum.py`](examples/modules/N-pendulum/lib/n_pendulum.py)
+  - [`examples/modules/N-pendulum/scripts/solve.py`](https://github.com/matt-pharr/physics-data-viewer/blob/develop/examples/modules/N-pendulum/scripts/solve.py)
+  - [`examples/modules/N-pendulum/scripts/animate.py`](https://github.com/matt-pharr/physics-data-viewer/blob/develop/examples/modules/N-pendulum/scripts/animate.py)
+- Library: [`examples/modules/N-pendulum/lib/n_pendulum.py`](https://github.com/matt-pharr/physics-data-viewer/blob/develop/examples/modules/N-pendulum/lib/n_pendulum.py)
 
 ## Install model (global) vs import model (project-scoped)
 
@@ -91,8 +91,8 @@ In schema v3, functionality is split across `pdv-module.json` and `gui.json`.
 
 For concrete syntax examples, see the N-pendulum module:
 
-- `pdv-module.json`: [`examples/modules/N-pendulum/pdv-module.json`](examples/modules/N-pendulum/pdv-module.json)
-- `gui.json`: [`examples/modules/N-pendulum/gui.json`](examples/modules/N-pendulum/gui.json)
+- `pdv-module.json`: [`examples/modules/N-pendulum/pdv-module.json`](https://github.com/matt-pharr/physics-data-viewer/blob/develop/examples/modules/N-pendulum/pdv-module.json)
+- `gui.json`: [`examples/modules/N-pendulum/gui.json`](https://github.com/matt-pharr/physics-data-viewer/blob/develop/examples/modules/N-pendulum/gui.json)
 
 Key patterns demonstrated:
 - dropdown with dynamic tree options: `options_tree_path`

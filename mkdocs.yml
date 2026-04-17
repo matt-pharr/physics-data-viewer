@@ -113,12 +113,7 @@ nav:
       - The App Object (pdv): api-reference/app.md
       - Module API: api-reference/module-api.md
       - Exceptions: api-reference/errors.md
-  - Module Development:
-      - Overview: modules/index.md
-      - Manifest Format: modules/manifest.md
-      - GUI Definitions: modules/gui.md
-      - Library Files: modules/lib.md
-      - Entry Points: modules/entry-points.md
+  - Module Development: modules/index.md
   - Developer Guide:
       - Architecture: developer/architecture.md
       - Developer Quick Start: developer/developer-quickstart.md
