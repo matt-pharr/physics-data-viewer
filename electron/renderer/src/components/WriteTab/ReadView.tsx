@@ -14,7 +14,14 @@ import markedKatex from 'marked-katex-extension';
 import 'katex/dist/katex.min.css';
 
 const marked = new Marked();
-marked.use(markedKatex({ throwOnError: false }));
+marked.use(markedKatex({ throwOnError: false, nonStandard: true }));
+
+// marked-katex-extension's block rule requires the opening/closing `$$` line
+// to end exactly in `\n` — trailing spaces on the delimiter line silently
+// break block math. Strip that whitespace before parsing.
+function normalizeMathDelimiters(src: string): string {
+  return src.replace(/^([ \t]*\${1,2})[ \t]+$/gm, '$1');
+}
 
 interface ReadViewProps {
   content: string;
@@ -24,7 +31,7 @@ interface ReadViewProps {
 export const ReadView: React.FC<ReadViewProps> = ({ content }) => {
   const html = useMemo(() => {
     try {
-      return marked.parse(content) as string;
+      return marked.parse(normalizeMathDelimiters(content)) as string;
     } catch {
       return '<p style="color:red;">[Markdown render error]</p>';
     }

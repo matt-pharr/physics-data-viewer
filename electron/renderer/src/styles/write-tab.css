@@ -93,6 +93,12 @@
   color: var(--text-primary);
 }
 
+.read-view-content > * {
+  max-width: 1200px;
+  margin-left: auto;
+  margin-right: auto;
+}
+
 .read-view-content h1,
 .read-view-content h2,
 .read-view-content h3,
