@@ -83,14 +83,14 @@
 
 /* Read mode rendered markdown view */
 .read-view-content {
-  position: absolute;
-  inset: 0;
+  flex: 1;
   overflow-y: auto;
   padding: 24px 32px;
   font-family: var(--font-sans);
   font-size: 14px;
   line-height: 1.7;
   color: var(--text-primary);
+  max-width: 800px;
 }
 
 .read-view-content h1,
