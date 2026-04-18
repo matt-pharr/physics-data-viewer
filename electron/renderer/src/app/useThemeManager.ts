@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import type { Config } from '../types';
-import { BUILTIN_THEMES, applyThemeColors, applyFontSettings, getMonacoTheme, resolveThemeColors } from '../themes';
+import { BUILTIN_THEMES, applyThemeColors, applyFontSettings, applyMarkdownSettings, getMonacoTheme, resolveThemeColors } from '../themes';
 
 /** localStorage key used by the blocking theme script in index.html. */
 const THEME_CACHE_KEY = 'pdv-theme-cache';
@@ -65,6 +65,11 @@ export function useThemeManager({ config }: UseThemeManagerOptions): string {
   useEffect(() => {
     const fonts = config?.settings?.fonts;
     applyFontSettings(fonts?.codeFont, fonts?.displayFont);
+  }, [config]);
+
+  // Apply markdown settings (read-view max width) whenever config changes
+  useEffect(() => {
+    applyMarkdownSettings(config?.settings?.markdown?.maxContentWidth);
   }, [config]);
 
   return monacoTheme;

@@ -301,6 +301,10 @@ export interface Config {
       codeFont?: string;
       displayFont?: string;
     };
+    markdown?: {
+      /** Max content width (px) for the read-mode rendered markdown view. */
+      maxContentWidth?: number;
+    };
   };
 }
 

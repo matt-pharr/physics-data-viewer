@@ -30,23 +30,27 @@ export interface MathRegion {
 /**
  * Scan document text for math delimiters.
  *
- * Rules:
- * - `$$...$$` is display math (may span multiple lines)
- * - `$...$` is inline math (single line only, no nested $)
- * - Math inside fenced code blocks (``` ... ```) is ignored
- * - Escaped delimiters (\$) are ignored
+ * Rules (mirror marked-katex-extension so edit-mode previews match read-mode
+ * rendering):
+ * - Block display math: `$$` alone on a line (only whitespace around),
+ *   closed by another `$$` alone on a later line. Content may span lines.
+ * - Inline display math: `$$...$$` on a single line.
+ * - Inline math: `$...$` on a single line.
+ * - Math inside fenced code blocks (``` ... ```) is ignored.
+ * - Escaped delimiters (\$) are skipped as delimiters.
  */
 export function scanMathRegions(text: string): MathRegion[] {
   const lines = text.split('\n');
   const regions: MathRegion[] = [];
   let inCodeBlock = false;
 
+  const isBlockDelimiter = (s: string) => /^\s*\$\$\s*$/.test(s);
+
   let i = 0;
   while (i < lines.length) {
     const line = lines[i];
 
-    // Toggle fenced code blocks
-    if (/^```/.test(line.trimStart())) {
+    if (/^\s*```/.test(line)) {
       inCodeBlock = !inCodeBlock;
       i++;
       continue;
@@ -56,132 +60,104 @@ export function scanMathRegions(text: string): MathRegion[] {
       continue;
     }
 
-    // Scan for display math ($$...$$) — may span lines
-    let col = 0;
-    while (col < line.length) {
-      // Skip escaped dollar signs
-      if (line[col] === '\\' && col + 1 < line.length && line[col + 1] === '$') {
-        col += 2;
-        continue;
-      }
-
-      // Display math opening: $$
-      if (line[col] === '$' && col + 1 < line.length && line[col + 1] === '$') {
-        const startLine = i + 1;
-        const startCol = col + 1;
-        const openEnd = col + 2;
-
-        // Search for closing $$
-        let found = false;
-        let searchLine = i;
-        let searchCol = openEnd;
-
-        while (searchLine < lines.length) {
-          const sLine = lines[searchLine];
-          while (searchCol < sLine.length) {
-            if (sLine[searchCol] === '\\' && searchCol + 1 < sLine.length && sLine[searchCol + 1] === '$') {
-              searchCol += 2;
-              continue;
-            }
-            if (sLine[searchCol] === '$' && searchCol + 1 < sLine.length && sLine[searchCol + 1] === '$') {
-              // Found closing $$
-              const latex = extractText(lines, i, openEnd, searchLine, searchCol);
-              if (latex.trim().length > 0) {
-                regions.push({
-                  latex,
-                  displayMode: true,
-                  startLine,
-                  startCol,
-                  endLine: searchLine + 1,
-                  endCol: searchCol + 3, // after $$
-                });
-              }
-              // Advance past the closing $$
-              if (searchLine === i) {
-                col = searchCol + 2;
-              } else {
-                i = searchLine;
-                col = searchCol + 2;
-              }
-              found = true;
-              break;
-            }
-            searchCol++;
-          }
-          if (found) break;
-          searchLine++;
-          searchCol = 0;
+    // Block display math — `$$` alone on a line, closed by another `$$` alone.
+    if (isBlockDelimiter(line)) {
+      let closeLine = -1;
+      let searchInCode = false;
+      for (let j = i + 1; j < lines.length; j++) {
+        if (/^\s*```/.test(lines[j])) {
+          searchInCode = !searchInCode;
+          continue;
         }
-
-        if (found) continue;
-        // No closing $$ found — skip this $$
-        col = openEnd;
-        continue;
-      }
-
-      // Inline math: single $...$  (same line only)
-      if (line[col] === '$') {
-        const openEnd = col + 1;
-        let closeCol = openEnd;
-        let found = false;
-
-        while (closeCol < line.length) {
-          if (line[closeCol] === '\\' && closeCol + 1 < line.length && line[closeCol + 1] === '$') {
-            closeCol += 2;
-            continue;
-          }
-          if (line[closeCol] === '$') {
-            // Avoid empty match
-            if (closeCol > openEnd) {
-              const latex = line.slice(openEnd, closeCol);
-              regions.push({
-                latex,
-                displayMode: false,
-                startLine: i + 1,
-                startCol: col + 1,
-                endLine: i + 1,
-                endCol: closeCol + 2, // after closing $
-              });
-              col = closeCol + 1;
-              found = true;
-            }
-            break;
-          }
-          closeCol++;
+        if (searchInCode) continue;
+        if (isBlockDelimiter(lines[j])) {
+          closeLine = j;
+          break;
         }
-
-        if (found) continue;
-        col++;
+      }
+      if (closeLine !== -1) {
+        const latex = lines.slice(i + 1, closeLine).join('\n');
+        if (latex.trim().length > 0) {
+          const openCol = line.indexOf('$') + 1; // 1-based
+          regions.push({
+            latex,
+            displayMode: true,
+            startLine: i + 1,
+            startCol: openCol,
+            endLine: closeLine + 1,
+            endCol: lines[closeLine].length + 1,
+          });
+        }
+        i = closeLine + 1;
         continue;
       }
-
-      col++;
+      // Unpaired block delimiter — fall through to inline scan for this line.
     }
 
+    scanInlineOnLine(line, i, regions);
     i++;
   }
 
   return regions;
 }
 
-/** Extract text between two (line, col) positions in a line array. */
-function extractText(
-  lines: string[],
-  startLine: number,
-  startCol: number,
-  endLine: number,
-  endCol: number,
-): string {
-  if (startLine === endLine) {
-    return lines[startLine].slice(startCol, endCol);
+/** Scan a single line for inline $...$ and inline $$...$$ math. */
+function scanInlineOnLine(line: string, lineIdx: number, regions: MathRegion[]): void {
+  let col = 0;
+  while (col < line.length) {
+    if (line[col] === '\\' && line[col + 1] === '$') {
+      col += 2;
+      continue;
+    }
+    if (line[col] !== '$') {
+      col++;
+      continue;
+    }
+
+    const isDouble = line[col + 1] === '$';
+    const delimLen = isDouble ? 2 : 1;
+    const openEnd = col + delimLen;
+    let close = openEnd;
+    let closed = false;
+
+    while (close < line.length) {
+      if (line[close] === '\\' && line[close + 1] === '$') {
+        close += 2;
+        continue;
+      }
+      if (line[close] === '$') {
+        if (isDouble) {
+          if (line[close + 1] === '$') {
+            closed = true;
+            break;
+          }
+          close++;
+          continue;
+        }
+        closed = true;
+        break;
+      }
+      close++;
+    }
+
+    if (!closed) {
+      col += delimLen;
+      continue;
+    }
+
+    const latex = line.slice(openEnd, close);
+    if (latex.trim().length > 0) {
+      regions.push({
+        latex,
+        displayMode: isDouble,
+        startLine: lineIdx + 1,
+        startCol: col + 1,
+        endLine: lineIdx + 1,
+        endCol: close + delimLen + 1,
+      });
+    }
+    col = close + delimLen;
   }
-  const parts: string[] = [];
-  parts.push(lines[startLine].slice(startCol));
-  for (let l = startLine + 1; l < endLine; l++) {
-    parts.push(lines[l]);
-  }
-  parts.push(lines[endLine].slice(0, endCol));
-  return parts.join('\n');
 }
 
 /** Render a LaTeX string to HTML via KaTeX. Returns HTML or error markup. */
@@ -201,6 +177,55 @@ function renderLatex(latex: string, displayMode: boolean): string {
 interface ActiveViewZone {
   id: string;
   endLine: number;
+}
+
+/**
+ * Build a ViewZone for a single math region, pre-measure its rendered
+ * height in the editor's DOM context, and register it with Monaco.
+ * Returns the zone descriptor so the caller can track it for teardown,
+ * or null if the editor has no DOM container (shouldn't happen in practice).
+ */
+function createPreviewZone(
+  editor: monaco.editor.IStandaloneCodeEditor,
+  region: MathRegion,
+  html: string,
+): ActiveViewZone | null {
+  const container = editor.getDomNode();
+  if (!container) return null;
+
+  const domNode = document.createElement('div');
+  domNode.className = region.displayMode
+    ? 'math-preview-zone'
+    : 'math-preview-zone math-preview-inline-zone';
+  domNode.innerHTML = html;
+  domNode.style.padding = region.displayMode ? '4px 16px' : '2px 16px';
+  domNode.style.opacity = region.displayMode ? '0.9' : '0.85';
+  domNode.style.textAlign = 'left';
+
+  // Pre-measure off-screen so Monaco allocates the correct height. Attach
+  // to the editor's DOM so inherited fonts and sizing match the final zone.
+  domNode.style.position = 'absolute';
+  domNode.style.visibility = 'hidden';
+  container.appendChild(domNode);
+  const fallbackHeight = region.displayMode ? 40 : 24;
+  const measuredHeight = domNode.getBoundingClientRect().height || fallbackHeight;
+  container.removeChild(domNode);
+  domNode.style.position = '';
+  domNode.style.visibility = '';
+
+  let zoneId = '';
+  editor.changeViewZones((accessor) => {
+    zoneId = accessor.addZone({
+      afterLineNumber: region.endLine,
+      heightInPx: measuredHeight,
+      domNode,
+      // Omit afterColumn so Monaco uses the line's max column; otherwise on
+      // a word-wrapped source line the zone anchors to the first visual row
+      // instead of after the last wrap.
+      suppressMouseDown: true,
+    });
+  });
+  return { id: zoneId, endLine: region.endLine };
 }
 
 /**
@@ -231,71 +256,8 @@ export function attachMathPreview(
     // Create new zones/widgets for each region
     for (const region of regions) {
       const html = renderLatex(region.latex, region.displayMode);
-
-      if (region.displayMode) {
-        // Display math: ViewZone below the closing $$ line.
-        // Pre-measure the rendered height so Monaco allocates the right
-        // amount of space and the preview doesn't overlap editor text.
-        const domNode = document.createElement('div');
-        domNode.className = 'math-preview-zone';
-        domNode.innerHTML = html;
-        domNode.style.padding = '4px 16px';
-        domNode.style.opacity = '0.9';
-        domNode.style.textAlign = 'left';
-
-        // Measure off-screen: attach to the editor's DOM container so
-        // inherited fonts / sizing are accurate, then read the height.
-        const container = editor.getDomNode();
-        if (!container) continue;
-        domNode.style.position = 'absolute';
-        domNode.style.visibility = 'hidden';
-        container.appendChild(domNode);
-        const measuredHeight = domNode.getBoundingClientRect().height || 40;
-        container.removeChild(domNode);
-        domNode.style.position = '';
-        domNode.style.visibility = '';
-
-        editor.changeViewZones((accessor) => {
-          const id = accessor.addZone({
-            afterLineNumber: region.endLine,
-            heightInPx: measuredHeight,
-            domNode,
-            afterColumn: 0,
-            suppressMouseDown: true,
-          });
-          activeZones.push({ id, endLine: region.endLine });
-        });
-      } else {
-        // Inline math: ViewZone below the source line (same pre-measure
-        // approach as display math, but rendered at inline size).
-        const domNode = document.createElement('div');
-        domNode.className = 'math-preview-zone math-preview-inline-zone';
-        domNode.innerHTML = html;
-        domNode.style.padding = '2px 16px';
-        domNode.style.opacity = '0.85';
-        domNode.style.textAlign = 'left';
-
-        const container = editor.getDomNode();
-        if (!container) continue;
-        domNode.style.position = 'absolute';
-        domNode.style.visibility = 'hidden';
-        container.appendChild(domNode);
-        const measuredHeight = domNode.getBoundingClientRect().height || 24;
-        container.removeChild(domNode);
-        domNode.style.position = '';
-        domNode.style.visibility = '';
-
-        editor.changeViewZones((accessor) => {
-          const id = accessor.addZone({
-            afterLineNumber: region.endLine,
-            heightInPx: measuredHeight,
-            domNode,
-            afterColumn: 0,
-            suppressMouseDown: true,
-          });
-          activeZones.push({ id, endLine: region.endLine });
-        });
-      }
+      const zone = createPreviewZone(editor, region, html);
+      if (zone) activeZones.push(zone);
     }
   };
 
