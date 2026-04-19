@@ -4,7 +4,7 @@ A desktop environment for computational and experimental physics analysis. PDV c
 
 **Status**: Alpha (`v0.0.11`) — under active development.
 
-![PDV screenshot](screenshot.png)
+![PDV screenshot](docs/assets/screenshot.png)
 
 ---
 

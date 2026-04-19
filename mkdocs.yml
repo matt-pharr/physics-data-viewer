@@ -40,6 +40,30 @@ extra:
   version:
     provider: mike
     default: latest
+  analytics:
+    provider: google
+    property: G-0FGZ9YFWWQ
+    feedback:
+      title: Was this page helpful?
+      ratings:
+        - icon: material/emoticon-happy-outline
+          name: This page was helpful
+          data: 1
+          note: >-
+            Thanks for the feedback!
+        - icon: material/emoticon-sad-outline
+          name: This page could be improved
+          data: 0
+          note: >-
+            Thanks for the feedback! Help us improve by
+            <a href="https://github.com/matt-pharr/physics-data-viewer/issues/new?labels=documentation&title=Docs+feedback:+" target="_blank" rel="noopener">opening a documentation issue</a>.
+  consent:
+    title: Cookie consent
+    description: >-
+      We use cookies to measure documentation usage so we can see which pages
+      are helpful and where users get stuck. Nothing personal is collected.
+    actions:
+      - accept
 
 plugins:
   - search
