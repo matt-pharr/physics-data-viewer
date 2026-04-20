@@ -124,12 +124,8 @@ nav:
       - Installation: getting-started/installation.md
   - User Guide:
       - Overview: user-guide/index.md
-      - The Tree: user-guide/tree.md
-      - Code Editor: user-guide/code-editor.md
-      - Scripts: user-guide/scripts.md
-      - Notes: user-guide/notes.md
-      - Projects: user-guide/projects.md
-      - Modules: user-guide/modules.md
+      - Scripts & the Tree: user-guide/scripts-and-tree.md
+      - Notes & Projects: user-guide/notes-and-projects.md
   - API Reference:
       - Overview: api-reference/index.md
       - The Tree (pdv_tree): api-reference/tree.md
@@ -144,4 +140,4 @@ nav:
       - Contributing: developer/contributing.md
       - Development Setup: developer/setup.md
       - Testing: developer/testing.md
-  - Changelog: changelog/index.md
+  - Changelog: https://github.com/matt-pharr/physics-data-viewer/releases
