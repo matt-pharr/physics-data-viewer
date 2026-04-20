@@ -1,5 +1,5 @@
 """
-pdv_kernel.handlers.namespace — Handler for PDV namespace query messages.
+pdv.handlers.namespace — Handler for PDV namespace query messages.
 
 Handles:
 - ``pdv.namespace.query``: return a snapshot of the kernel user
@@ -10,12 +10,12 @@ Handles:
 See Also
 --------
 ARCHITECTURE.md §3.4 (namespace messages)
-pdv_kernel.namespace.pdv_namespace
+pdv.namespace.pdv_namespace
 """
 
 from __future__ import annotations
 
-from pdv_kernel.handlers import register
+from pdv.handlers import register
 
 
 def handle_namespace_query(msg: dict) -> None:
@@ -46,8 +46,8 @@ def handle_namespace_query(msg: dict) -> None:
     msg : dict
         Parsed PDV message envelope.
     """
-    from pdv_kernel.comms import get_ip, send_message  # noqa: PLC0415
-    from pdv_kernel.namespace import pdv_namespace  # noqa: PLC0415
+    from pdv.comms import get_ip, send_message  # noqa: PLC0415
+    from pdv.namespace import pdv_namespace  # noqa: PLC0415
 
     msg_id = msg.get("msg_id")
     payload = msg.get("payload", {})
@@ -72,8 +72,8 @@ def handle_namespace_query(msg: dict) -> None:
 
 def handle_namespace_inspect(msg: dict) -> None:
     """Handle the ``pdv.namespace.inspect`` message."""
-    from pdv_kernel.comms import get_ip, send_message  # noqa: PLC0415
-    from pdv_kernel.namespace import inspect_namespace  # noqa: PLC0415
+    from pdv.comms import get_ip, send_message  # noqa: PLC0415
+    from pdv.namespace import inspect_namespace  # noqa: PLC0415
 
     msg_id = msg.get("msg_id")
     payload = msg.get("payload", {})

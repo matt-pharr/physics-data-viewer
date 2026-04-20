@@ -1,5 +1,5 @@
 """
-pdv_kernel.checksum — Content-based Merkle-tree checksum for PDVTree.
+pdv.checksum — Content-based Merkle-tree checksum for PDVTree.
 
 Computes a canonical, content-based XXH3-128 checksum directly from the
 in-memory PDVTree. The checksum is:
@@ -58,7 +58,7 @@ def tree_checksum(node: Any, working_dir: str | None = None) -> str:
     str
         32-character lowercase hex XXH3-128 digest.
     """
-    from pdv_kernel.tree import PDVTree  # noqa: PLC0415
+    from pdv.tree import PDVTree  # noqa: PLC0415
 
     if working_dir is None and isinstance(node, PDVTree):
         working_dir = getattr(node, "_working_dir", None)
@@ -108,7 +108,7 @@ def _feed_node(h: xxhash.xxh3_128, node: Any, working_dir: str | None) -> None:
     working_dir : str or None
         Working directory for file-backed nodes.
     """
-    from pdv_kernel.serialization import (  # noqa: PLC0415
+    from pdv.serialization import (  # noqa: PLC0415
         detect_kind,
         KIND_FOLDER,
         KIND_MODULE,

@@ -18,9 +18,9 @@ import os
 import uuid
 import pytest
 from unittest.mock import MagicMock, patch
-import pdv_kernel.comms as comms_mod
-from pdv_kernel.handlers.project import handle_project_load, handle_project_save
-from pdv_kernel.tree import (
+import pdv.comms as comms_mod
+from pdv.handlers.project import handle_project_load, handle_project_save
+from pdv.tree import (
     PDVTree,
     PDVScript,
     PDVModule,
@@ -354,7 +354,7 @@ class TestHandleProjectSave:
         with open(lib_path, "w") as f:
             f.write("VALUE = 1\n")
 
-        from pdv_kernel.tree import PDVLib, PDVScript, PDVTree
+        from pdv.tree import PDVLib, PDVScript, PDVTree
 
         module = PDVModule(
             module_id="toy",
@@ -547,7 +547,7 @@ class TestTwoPassLoading:
 
     def test_gui_module_id_roundtrip(self, tree_with_comm, tmp_save_dir):
         """GUI module_id survives save→load."""
-        from pdv_kernel.tree import PDVModule, PDVGui
+        from pdv.tree import PDVModule, PDVGui
 
         mod = PDVModule(module_id="gui_mod", name="GuiMod", version="1.0")
         tree_with_comm["gmod"] = mod

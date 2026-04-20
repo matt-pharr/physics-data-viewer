@@ -94,7 +94,7 @@ PDV uses the standard Electron three-process architecture:
 - Manage lazy loading of tree node data from the save directory
 
 ### 2.4 What the Main Process Does NOT Do
-- The main process does not construct arbitrary Python or Julia business logic and send it via `execute_request`. All structured data exchange between the main process and the kernel happens via the PDV comm protocol (see Section 3). There are two well-defined exceptions: (1) the **bootstrap snippet** in `kernel-session.ts` that initializes `pdv_kernel` at startup (a one-time init, not business logic), and (2) the **script invocation string** built by the `script:run` IPC handler, which constructs a minimal `pdv_tree["path"].run(kwargs)` call so that script output flows through the standard Jupyter iopub stream and appears in the console.
+- The main process does not construct arbitrary Python or Julia business logic and send it via `execute_request`. All structured data exchange between the main process and the kernel happens via the PDV comm protocol (see Section 3). There are two well-defined exceptions: (1) the **bootstrap snippet** in `kernel-session.ts` that initializes `pdv` at startup (a one-time init, not business logic), and (2) the **script invocation string** built by the `script:run` IPC handler, which constructs a minimal `pdv_tree["path"].run(kwargs)` call so that script output flows through the standard Jupyter iopub stream and appears in the console.
 - The main process does not scan the filesystem to build the tree. The kernel is the sole tree authority.
 
 ---
@@ -474,7 +474,7 @@ sequenceDiagram
 ### 5.2 Package Structure
 
 ```
-pdv_kernel/
+pdv/
     __init__.py          # Public API: bootstrap(), PDVTree, PDVScript, PDVFile, PDVNote, PDVGui, PDVNamelist, PDVModule, PDVLib, PDVError, handle(), log, __version__
     comms.py             # Comm channel: register target, send/receive, dispatch, thread-local response sink
     tree.py              # PDVTree (debounced _emit_changed), PDVScript, PDVFile, PDVNote, PDVModule, PDVGui, PDVNamelist, PDVLib
@@ -503,7 +503,7 @@ pdv_kernel/
 
 ### 5.3 Bootstrap
 
-`pdv_kernel.bootstrap()` is called by a bootstrap snippet that the main process sends via `execute_request` (silent mode) from `kernel-session.ts` immediately after the kernel subprocess starts. It:
+`pdv.bootstrap()` is called by a bootstrap snippet that the main process sends via `execute_request` (silent mode) from `kernel-session.ts` immediately after the kernel subprocess starts. It:
 1. Registers the `pdv.kernel` comm target with IPython
 2. Injects `pdv_tree` and `pdv` into the IPython user namespace via a custom namespace class that blocks reassignment
 3. Sends the `pdv.ready` comm message
@@ -589,7 +589,7 @@ Rules:
 
 #### ScriptParameter Descriptor
 
-When a `PDVScript` is constructed (at registration time), `pdv_kernel` inspects the `run()` function's signature via `inspect.signature` and extracts all parameters except `pdv_tree`. Each becomes a `ScriptParameter` descriptor stored on the `PDVScript` and included in the `NodeDescriptor` returned by `pdv.tree.list.response`:
+When a `PDVScript` is constructed (at registration time), `pdv` inspects the `run()` function's signature via `inspect.signature` and extracts all parameters except `pdv_tree`. Each becomes a `ScriptParameter` descriptor stored on the `PDVScript` and included in the `NodeDescriptor` returned by `pdv.tree.list.response`:
 
 ```json
 {
@@ -929,7 +929,7 @@ registered name and `metadata` records `python_type` and `serializer`. Format
 names must be unique and must not collide with builtin formats. The module
 that registered the serializer must be imported before a project that
 contains nodes of that format is loaded; otherwise load fails with a clear
-error. Implementation lives in `pdv_kernel/serializers.py`.
+error. Implementation lives in `pdv/serializers.py`.
 
 ### 7.3 Node Descriptors
 
@@ -1248,7 +1248,7 @@ Detected environments are presented in the Environment Selector UI. The user sel
 ### 10.3 Package Check and Installation
 
 After an environment is selected:
-1. App runs `<python> -c "import pdv_kernel; print(pdv_kernel.__version__)"` (non-interactive, timeout 5s)
+1. App runs `<python> -c "import pdv; print(pdv.__version__)"` (non-interactive, timeout 5s)
 2. If this fails (import error or timeout): app shows a dialog:
    > "PDV kernel support is not installed in this environment. Install it now?"
    > `[Install]` `[Not now]`
@@ -1258,7 +1258,7 @@ After an environment is selected:
 
 ### 10.4 Version Mismatch
 
-If `pdv_kernel.__version__` is installed but incompatible with the app's expected protocol version (major version mismatch), the app shows:
+If `pdv.__version__` is installed but incompatible with the app's expected protocol version (major version mismatch), the app shows:
 > "Your pdv-python package is outdated. Please update it: `pip install --upgrade pdv-python`"
 
 ### 10.5 Per-Project Environments (uv-managed)
@@ -1668,7 +1668,7 @@ examples/
 ```
 pdv-python/
     pyproject.toml
-    pdv_kernel/
+    pdv/
         __init__.py
         comms.py
         tree.py

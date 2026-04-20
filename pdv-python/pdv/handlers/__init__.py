@@ -1,16 +1,16 @@
 """
-pdv_kernel.handlers — PDV comm message handler dispatch table.
+pdv.handlers — PDV comm message handler dispatch table.
 
 Maps PDV message type strings to handler functions. Each handler
 receives a parsed PDV message dict and is responsible for:
 
 1. Extracting the payload.
 2. Performing the requested action.
-3. Calling ``pdv_kernel.comms.send_message()`` with the response.
+3. Calling ``pdv.comms.send_message()`` with the response.
 
 Handler functions must NOT raise exceptions to the caller — all errors
 must be caught and returned as ``status='error'`` responses using
-``pdv_kernel.comms.send_error()``.
+``pdv.comms.send_error()``.
 
 See Also
 --------
@@ -50,7 +50,7 @@ def dispatch(msg: dict) -> None:
     msg : dict
         Parsed PDV message envelope (see ARCHITECTURE.md §3.2).
     """
-    from pdv_kernel.comms import send_error  # noqa: PLC0415
+    from pdv.comms import send_error  # noqa: PLC0415
 
     msg_type = msg.get("type", "")
     msg_id = msg.get("msg_id", None)
@@ -80,7 +80,7 @@ def dispatch(msg: dict) -> None:
 
 # Register all handlers by importing submodules.
 # These imports must come AFTER the register() function is defined.
-from pdv_kernel.handlers import (  # noqa: E402, F401
+from pdv.handlers import (  # noqa: E402, F401
     lifecycle as lifecycle,
     project as project,
     tree as tree,

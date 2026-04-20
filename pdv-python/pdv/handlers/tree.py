@@ -1,5 +1,5 @@
 """
-pdv_kernel.handlers.tree — Handlers for PDV tree query messages.
+pdv.handlers.tree — Handlers for PDV tree query messages.
 
 Handles:
 - ``pdv.tree.list``: return the children of a tree node at a given path.
@@ -12,7 +12,7 @@ ARCHITECTURE.md §3.4 (tree messages), §7 (tree data model)
 
 from __future__ import annotations
 
-from pdv_kernel.handlers import register
+from pdv.handlers import register
 
 
 def handle_tree_list(msg: dict) -> None:
@@ -41,10 +41,10 @@ def handle_tree_list(msg: dict) -> None:
     msg : dict
         Parsed PDV message envelope.
     """
-    from pdv_kernel.comms import get_pdv_tree, send_error, send_message  # noqa: PLC0415
-    from pdv_kernel.modules import has_handler_for  # noqa: PLC0415
-    from pdv_kernel.serialization import detect_kind, node_preview, python_type_string  # noqa: PLC0415
-    from pdv_kernel.tree import PDVModule, PDVGui  # noqa: PLC0415
+    from pdv.comms import get_pdv_tree, send_error, send_message  # noqa: PLC0415
+    from pdv.modules import has_handler_for  # noqa: PLC0415
+    from pdv.serialization import detect_kind, node_preview, python_type_string  # noqa: PLC0415
+    from pdv.tree import PDVModule, PDVGui  # noqa: PLC0415
 
     msg_id = msg.get("msg_id")
     path = msg.get("payload", {}).get("path", "")
@@ -140,9 +140,9 @@ def handle_tree_get(msg: dict) -> None:
     msg : dict
         Parsed PDV message envelope.
     """
-    from pdv_kernel.comms import get_pdv_tree, send_error, send_message  # noqa: PLC0415
-    from pdv_kernel.modules import has_handler_for  # noqa: PLC0415
-    from pdv_kernel.serialization import detect_kind, node_preview, python_type_string  # noqa: PLC0415
+    from pdv.comms import get_pdv_tree, send_error, send_message  # noqa: PLC0415
+    from pdv.modules import has_handler_for  # noqa: PLC0415
+    from pdv.serialization import detect_kind, node_preview, python_type_string  # noqa: PLC0415
 
     msg_id = msg.get("msg_id")
     payload = msg.get("payload", {})
@@ -236,8 +236,8 @@ def handle_tree_resolve_file(msg: dict) -> None:
         Parsed PDV message envelope.
     """
 
-    from pdv_kernel.comms import get_pdv_tree, send_error, send_message  # noqa: PLC0415
-    from pdv_kernel.tree import PDVFile  # noqa: PLC0415
+    from pdv.comms import get_pdv_tree, send_error, send_message  # noqa: PLC0415
+    from pdv.tree import PDVFile  # noqa: PLC0415
 
     msg_id = msg.get("msg_id")
     payload = msg.get("payload", {})
@@ -289,7 +289,7 @@ def handle_tree_delete(msg: dict) -> None:
     path : str
         Dot-separated tree path of the node to delete.
     """
-    from pdv_kernel.comms import send_message, send_error, get_pdv_tree  # noqa: PLC0415
+    from pdv.comms import send_message, send_error, get_pdv_tree  # noqa: PLC0415
 
     msg_id = msg.get("msg_id")
     payload = msg.get("payload", {})

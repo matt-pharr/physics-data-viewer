@@ -1,7 +1,7 @@
 """
 pdv-python/tests/conftest.py — pytest configuration and shared fixtures.
 
-Provides fixtures used across all pdv_kernel test modules:
+Provides fixtures used across all pdv test modules:
 
 - ``tmp_working_dir``: a freshly created temporary working directory
   (cleaned up after the test).
@@ -69,7 +69,7 @@ def tree_with_comm(tmp_working_dir, mock_send):
     Flushes pending debounced notifications on teardown to prevent
     timer threads from firing after the test exits.
     """
-    from pdv_kernel.tree import PDVTree
+    from pdv.tree import PDVTree
 
     tree = PDVTree()
     tree._set_working_dir(tmp_working_dir)
@@ -82,7 +82,7 @@ def tree_with_comm(tmp_working_dir, mock_send):
 @pytest.fixture()
 def fresh_namespace(tree_with_comm):
     """Return a PDVNamespace with pdv_tree and pdv pre-injected."""
-    from pdv_kernel.namespace import PDVApp, PDVNamespace
+    from pdv.namespace import PDVApp, PDVNamespace
 
     ns = PDVNamespace()
     dict.__setitem__(ns, "pdv_tree", tree_with_comm)
@@ -96,7 +96,7 @@ def mock_ipython(tree_with_comm):
 
     The namespace already contains pdv_tree and pdv.
     """
-    from pdv_kernel.namespace import PDVApp, PDVNamespace
+    from pdv.namespace import PDVApp, PDVNamespace
 
     ns = PDVNamespace()
     dict.__setitem__(ns, "pdv_tree", tree_with_comm)

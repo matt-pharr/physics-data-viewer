@@ -16,15 +16,15 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-import pdv_kernel.comms as comms_mod
-from pdv_kernel.handlers.modules import (
+import pdv.comms as comms_mod
+from pdv.handlers.modules import (
     handle_handler_invoke,
     handle_module_create_empty,
     handle_module_reload_libs,
     handle_module_update,
     handle_modules_setup,
 )
-from pdv_kernel.modules import clear_handlers, handle
+from pdv.modules import clear_handlers, handle
 
 
 @pytest.fixture(autouse=True)
@@ -63,7 +63,7 @@ class TestHandleModulesSetup:
     """
 
     def _install_module_with_libs(self, tree, tmp_path, alias, lib_rel_names):
-        from pdv_kernel.tree import PDVLib, PDVModule, PDVTree
+        from pdv.tree import PDVLib, PDVModule, PDVTree
 
         # Point the tree at tmp_path so PDVLib.resolve_path() lines up with
         # the on-disk files we create below.
@@ -180,7 +180,7 @@ class TestHandleModulesSetup:
 
     def test_empty_module_is_noop_but_not_error(self, tree_with_comm):
         """An empty PDVModule (create_empty just ran) triggers no sys.path edits and no warnings."""
-        from pdv_kernel.tree import PDVModule, PDVTree
+        from pdv.tree import PDVModule, PDVTree
 
         module = PDVModule(module_id="fresh", name="fresh", version="0.1.0")
         for child in ("scripts", "lib", "plots"):
@@ -213,7 +213,7 @@ class TestHandleModulesSetup:
                 "modules": [
                     {
                         "alias": "ep_mod",
-                        "entry_point": "pdv_kernel_test_fake_entry",
+                        "entry_point": "pdv_test_fake_entry",
                     }
                 ]
             },
@@ -227,7 +227,7 @@ class TestHandleModulesSetup:
         ):
             handle_modules_setup(msg)
 
-        mock_import.assert_called_once_with("pdv_kernel_test_fake_entry")
+        mock_import.assert_called_once_with("pdv_test_fake_entry")
 
     def test_create_empty_then_register_lib_allows_sibling_import(
         self, tree_with_comm, tmp_path
@@ -238,7 +238,7 @@ class TestHandleModulesSetup:
         register a sibling PDVScript, run setup, and assert the script can
         import from the sibling lib.
         """
-        from pdv_kernel.tree import PDVLib, PDVModule, PDVScript, PDVTree
+        from pdv.tree import PDVLib, PDVModule, PDVScript, PDVTree
 
         alias = "ddho"
         scripts_dir = tmp_path / "tree" / alias / "scripts"
@@ -357,7 +357,7 @@ class TestHandleModuleReloadLibs:
     def test_reloads_lib_file_under_alias(self, tree_with_comm, tmp_path):
         """A lib file edited on disk is observably reloaded in sys.modules."""
 
-        from pdv_kernel.tree import PDVModule
+        from pdv.tree import PDVModule
 
         # Arrange: working-dir/tree/<alias>/lib/<libname>.py — the
         # ``tree/`` prefix is the canonical working-dir subdir for
@@ -447,7 +447,7 @@ class TestHandleModuleCreateEmpty:
 
     def test_creates_module_with_default_subtrees(self, tree_with_comm):
         """An empty module lands with scripts/lib/plots PDVTree children."""
-        from pdv_kernel.tree import PDVModule, PDVTree
+        from pdv.tree import PDVModule, PDVTree
 
         mock_comm = _make_mock_comm()
         msg = _make_msg(
@@ -510,7 +510,7 @@ class TestHandleModuleUpdate:
     """Tests for pdv.module.update — metadata editor patch handler."""
 
     def test_updates_mutable_fields(self, tree_with_comm):
-        from pdv_kernel.tree import PDVModule
+        from pdv.tree import PDVModule
 
         tree_with_comm["toy"] = PDVModule(
             module_id="toy",
@@ -545,7 +545,7 @@ class TestHandleModuleUpdate:
 
     def test_omitted_fields_left_alone(self, tree_with_comm):
         """Only provided fields are updated; omitted fields are untouched."""
-        from pdv_kernel.tree import PDVModule
+        from pdv.tree import PDVModule
 
         tree_with_comm["toy"] = PDVModule(
             module_id="toy",

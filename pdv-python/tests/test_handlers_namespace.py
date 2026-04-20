@@ -9,8 +9,8 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-import pdv_kernel.comms as comms_mod
-from pdv_kernel.handlers.namespace import (
+import pdv.comms as comms_mod
+from pdv.handlers.namespace import (
     handle_namespace_inspect,
     handle_namespace_query,
 )

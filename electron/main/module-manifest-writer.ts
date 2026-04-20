@@ -8,7 +8,7 @@
  *
  * Non-responsibilities:
  * - Collecting the descriptors (kernel-side in
- *   ``pdv_kernel.handlers.project._collect_module_manifests``).
+ *   ``pdv.handlers.project._collect_module_manifests``).
  * - Copying file contents into ``<moduleDir>/`` (``ipc-register-project.ts``
  *   handles that via the §3 save-time sync step).
  *

@@ -6,7 +6,7 @@
  * 2. Extracting file/line/column locations from Python traceback frames, Julia
  *    `In[N]:line:col` references, `@ file:line` frames, caret lines, and evalue strings.
  * 3. Ranking candidate traceback frames so that user code is preferred over
- *    internal pdv_kernel/PDVJulia frames or synthetic cell paths.
+ *    internal pdv/PDVJulia frames or synthetic cell paths.
  * 4. Adjusting line numbers for leading blank lines in code-cell submissions.
  * 5. Building a single `KernelExecutionError` object with a human-readable
  *    summary that includes source context and location when available.
@@ -132,7 +132,7 @@ function parseTracebackFrames(traceback: string[]): TracebackFrame[] {
 }
 
 function framePriority(frame: TracebackFrame): number {
-  if (frame.file.includes("/pdv_kernel/") || frame.file.includes("/PDVJulia/")) return 0;
+  if (frame.file.includes("/pdv/") || frame.file.includes("/PDVJulia/")) return 0;
   if (frame.file.startsWith("<")) return 1;
   return 2;
 }

@@ -1,5 +1,5 @@
 """
-pdv_kernel.handlers.script — Handlers for PDV script messages.
+pdv.handlers.script — Handlers for PDV script messages.
 
 Handles:
 - ``pdv.script.register``: attach a :class:`PDVScript` node to the tree
@@ -10,18 +10,18 @@ Handles:
 See Also
 --------
 ARCHITECTURE.md §3.4 (script messages)
-pdv_kernel.tree.PDVScript
+pdv.tree.PDVScript
 """
 
 from __future__ import annotations
 
-from pdv_kernel.handlers import register
+from pdv.handlers import register
 
 
 def handle_script_register(msg: dict) -> None:
     """Handle the ``pdv.script.register`` message.
 
-    Creates a :class:`~pdv_kernel.tree.PDVScript` and attaches it to the
+    Creates a :class:`~pdv.tree.PDVScript` and attaches it to the
     tree at ``parent_path.name``. Sends a ``pdv.tree.changed`` push
     notification on success.
 
@@ -43,9 +43,9 @@ def handle_script_register(msg: dict) -> None:
     msg : dict
         Parsed PDV message envelope.
     """
-    from pdv_kernel.comms import send_message  # noqa: PLC0415
-    from pdv_kernel.tree import PDVScript  # noqa: PLC0415
-    from pdv_kernel.handlers._helpers import validate_register_request  # noqa: PLC0415
+    from pdv.comms import send_message  # noqa: PLC0415
+    from pdv.tree import PDVScript  # noqa: PLC0415
+    from pdv.handlers._helpers import validate_register_request  # noqa: PLC0415
 
     validated = validate_register_request(msg, "pdv.script.register.response", "script")
     if validated is None:
@@ -98,8 +98,8 @@ def handle_script_params(msg: dict) -> None:
     msg : dict
         Parsed PDV message envelope.
     """
-    from pdv_kernel.comms import get_pdv_tree, send_error, send_message  # noqa: PLC0415
-    from pdv_kernel.tree import PDVScript, _extract_script_params  # noqa: PLC0415
+    from pdv.comms import get_pdv_tree, send_error, send_message  # noqa: PLC0415
+    from pdv.tree import PDVScript, _extract_script_params  # noqa: PLC0415
 
     msg_id = msg.get("msg_id")
     payload = msg.get("payload", {})

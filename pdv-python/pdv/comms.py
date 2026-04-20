@@ -1,11 +1,11 @@
 """
-pdv_kernel.comms — PDV comm channel registration, message dispatch, and sending.
+pdv.comms — PDV comm channel registration, message dispatch, and sending.
 
 This module is the kernel-side comm layer. It:
 
 1. Registers the ``pdv.kernel`` comm target with IPython on bootstrap.
 2. Receives incoming comm messages and dispatches them to the appropriate
-   handler in ``pdv_kernel.handlers``.
+   handler in ``pdv.handlers``.
 3. Provides ``send_message()`` for building and sending correctly
    enveloped PDV messages back to the app.
 
@@ -28,9 +28,9 @@ import threading
 import uuid
 from typing import Any
 
-from pdv_kernel.errors import PDVVersionError
+from pdv.errors import PDVVersionError
 
-from pdv_kernel import __version__ as PDV_PROTOCOL_VERSION
+from pdv import __version__ as PDV_PROTOCOL_VERSION
 
 PDV_COMM_TARGET = "pdv.kernel"
 
@@ -174,7 +174,7 @@ def _on_comm_message(msg: dict) -> None:
     """Handle an incoming comm message from the app.
 
     Parses the PDV envelope, validates the version, and dispatches to
-    the appropriate handler from ``pdv_kernel.handlers``.
+    the appropriate handler from ``pdv.handlers``.
 
     Parameters
     ----------
@@ -194,7 +194,7 @@ def _on_comm_message(msg: dict) -> None:
         warnings.warn(str(exc), stacklevel=1)
         return
 
-    from pdv_kernel.handlers import dispatch  # noqa: PLC0415
+    from pdv.handlers import dispatch  # noqa: PLC0415
 
     dispatch(data)
 

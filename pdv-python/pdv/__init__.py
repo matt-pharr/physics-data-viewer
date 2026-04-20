@@ -1,5 +1,5 @@
 """
-pdv_kernel — Physics Data Viewer kernel support package.
+pdv — Physics Data Viewer kernel support package.
 
 This package implements the kernel side of the PDV comm protocol.
 It is installed into the user's Python environment and loaded when a
@@ -13,7 +13,7 @@ PDVTree : class
 PDVScript : class
     Lightweight wrapper for a script file stored as a tree node.
 PDVError : exception
-    Base exception for all pdv_kernel errors.
+    Base exception for all pdv errors.
 bootstrap : function
     Called by IPython startup machinery. Registers the PDV comm target,
     injects ``pdv_tree`` and ``pdv`` into the protected namespace, and
@@ -23,7 +23,7 @@ Do not import comms, handlers, or namespace internals directly — they
 are implementation details and their interfaces may change.
 """
 
-from pdv_kernel.tree import (
+from pdv.tree import (
     PDVTree,
     PDVFile,
     PDVScript,
@@ -33,9 +33,9 @@ from pdv_kernel.tree import (
     PDVModule,
     PDVLib,
 )
-from pdv_kernel.errors import PDVError
-from pdv_kernel.modules import handle
-from pdv_kernel.serializers import register as register_serializer
+from pdv.errors import PDVError
+from pdv.modules import handle
+from pdv.serializers import register as register_serializer
 
 from importlib.metadata import (
     version as _pkg_version,
@@ -110,7 +110,7 @@ def bootstrap(ip=None):
     --------
     ARCHITECTURE.md §4.1 (startup sequence), §5.3 (bootstrap detail)
     """
-    import pdv_kernel.comms as comms_mod  # noqa: PLC0415
+    import pdv.comms as comms_mod  # noqa: PLC0415
 
     if comms_mod._bootstrapped:
         return
@@ -123,11 +123,11 @@ def bootstrap(ip=None):
         except ImportError:
             pass
 
-    from pdv_kernel.namespace import PDVApp, PDVNamespace  # noqa: PLC0415
-    from pdv_kernel.tree import PDVTree  # noqa: PLC0415
+    from pdv.namespace import PDVApp, PDVNamespace  # noqa: PLC0415
+    from pdv.tree import PDVTree  # noqa: PLC0415
 
-    from pdv_kernel.modules import handle as _handle_decorator  # noqa: PLC0415
-    from pdv_kernel.serializers import register as _register_serializer  # noqa: PLC0415
+    from pdv.modules import handle as _handle_decorator  # noqa: PLC0415
+    from pdv.serializers import register as _register_serializer  # noqa: PLC0415
 
     # Create the tree and app objects
     tree = PDVTree()

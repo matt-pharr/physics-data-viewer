@@ -104,7 +104,7 @@ physics-data-viewer/
 │       └── shortcuts.ts     ← Keyboard shortcut registry
 │
 └── pdv-python/              ← Python kernel package
-    ├── pdv_kernel/
+    ├── pdv/
     │   ├── tree.py              PDVTree (dict subclass), PDVScript, PDVNote
     │   ├── comms.py             Comm target registration, message dispatch
     │   ├── namespace.py         Protected kernel namespace
@@ -149,8 +149,8 @@ Components live in `renderer/src/components/<Name>/index.tsx`. Types come from `
 ### Adding a PDV comm message type
 
 1. Add the type string to `electron/main/pdv-protocol.ts`
-2. Add the Python handler in `pdv-python/pdv_kernel/handlers/`
-3. Register the handler in `pdv_kernel/comms.py`
+2. Add the Python handler in `pdv-python/pdv/handlers/`
+3. Register the handler in `pdv/comms.py`
 
 ### Running a single test file
 

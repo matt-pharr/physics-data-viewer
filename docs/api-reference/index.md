@@ -1,6 +1,6 @@
 # API Reference
 
-This reference documents the Python surface exposed by the `pdv_kernel`
+This reference documents the Python surface exposed by the `pdv`
 package — everything a user touches from a code cell, a script, or a
 module library.
 
@@ -23,19 +23,19 @@ to teach PDV about their own classes — see the [Module API](module-api.md).
 ## What is not documented here
 
 Only the symbols described on these pages are public API. Everything else
-in `pdv_kernel` — `comms`, `handlers`, `namespace` internals, `serialization`
+in `pdv` — `comms`, `handlers`, `namespace` internals, `serialization`
 readers/writers, project load/save machinery — is implementation detail and
 may change without notice. Importing from those modules directly is not
 supported.
 
 ## Utilities
 
-::: pdv_kernel.log
+::: pdv.log
     options:
       show_root_heading: true
       show_source: false
 
-### `pdv_kernel.__version__`
+### `pdv.__version__`
 
 String version of the installed `pdv-python` package. Matches the Electron
 app version it was built against; mismatch is detected at kernel startup

@@ -6,7 +6,7 @@ import textwrap
 
 import pytest
 
-from pdv_kernel.tree import PDVNamelist
+from pdv.tree import PDVNamelist
 
 
 # ---------------------------------------------------------------------------
@@ -53,22 +53,22 @@ class TestPDVNamelistClass:
 
 class TestDetectFormat:
     def test_fortran_nml(self):
-        from pdv_kernel.namelist_utils import detect_namelist_format
+        from pdv.namelist_utils import detect_namelist_format
 
         assert detect_namelist_format("solver.nml") == "fortran"
 
     def test_fortran_in(self):
-        from pdv_kernel.namelist_utils import detect_namelist_format
+        from pdv.namelist_utils import detect_namelist_format
 
         assert detect_namelist_format("input.in") == "fortran"
 
     def test_toml(self):
-        from pdv_kernel.namelist_utils import detect_namelist_format
+        from pdv.namelist_utils import detect_namelist_format
 
         assert detect_namelist_format("config.toml") == "toml"
 
     def test_unknown(self):
-        from pdv_kernel.namelist_utils import detect_namelist_format
+        from pdv.namelist_utils import detect_namelist_format
 
         with pytest.raises(ValueError):
             detect_namelist_format("data.csv")
@@ -105,7 +105,7 @@ class TestFortranNamelist:
         pytest.importorskip("f90nml")
 
     def test_read_write_roundtrip(self, fortran_file, tmp_path):
-        from pdv_kernel.namelist_utils import read_namelist, write_namelist
+        from pdv.namelist_utils import read_namelist, write_namelist
 
         data = read_namelist(fortran_file, format="fortran")
         assert "solver_params" in data
@@ -121,7 +121,7 @@ class TestFortranNamelist:
         assert data2["grid"]["ny"] == 256
 
     def test_extract_hints(self, fortran_file):
-        from pdv_kernel.namelist_utils import extract_hints
+        from pdv.namelist_utils import extract_hints
 
         hints = extract_hints(fortran_file, format="fortran")
         assert "solver_params" in hints
@@ -129,7 +129,7 @@ class TestFortranNamelist:
         assert hints["solver_params"]["n_steps"] == "number of steps"
 
     def test_auto_detect(self, fortran_file):
-        from pdv_kernel.namelist_utils import read_namelist
+        from pdv.namelist_utils import read_namelist
 
         data = read_namelist(fortran_file, format="auto")
         assert "solver_params" in data
@@ -164,7 +164,7 @@ class TestTomlNamelist:
         pytest.importorskip("tomli_w")
 
     def test_read_write_roundtrip(self, toml_file, tmp_path):
-        from pdv_kernel.namelist_utils import read_namelist, write_namelist
+        from pdv.namelist_utils import read_namelist, write_namelist
 
         data = read_namelist(toml_file, format="toml")
         assert data["solver"]["dt"] == pytest.approx(0.01)
@@ -178,7 +178,7 @@ class TestTomlNamelist:
         assert data2["grid"]["ny"] == 256
 
     def test_extract_hints(self, toml_file):
-        from pdv_kernel.namelist_utils import extract_hints
+        from pdv.namelist_utils import extract_hints
 
         hints = extract_hints(toml_file, format="toml")
         assert "solver" in hints
@@ -193,7 +193,7 @@ class TestTomlNamelist:
 
 class TestInferTypes:
     def test_infer_types(self):
-        from pdv_kernel.namelist_utils import infer_types
+        from pdv.namelist_utils import infer_types
 
         data = {
             "group1": {
@@ -231,7 +231,7 @@ class TestPercentKeys:
         path = tmp_path / "derived.nml"
         path.write_text(content)
 
-        from pdv_kernel.namelist_utils import extract_hints
+        from pdv.namelist_utils import extract_hints
 
         hints = extract_hints(str(path), format="fortran")
         assert "params" in hints
@@ -245,13 +245,13 @@ class TestPercentKeys:
 
 class TestSerializationSupport:
     def test_detect_kind_namelist(self):
-        from pdv_kernel.serialization import detect_kind, KIND_NAMELIST
+        from pdv.serialization import detect_kind, KIND_NAMELIST
 
         node = PDVNamelist("test.nml", format="fortran")
         assert detect_kind(node) == KIND_NAMELIST
 
     def test_serialize_namelist_node(self, tmp_path):
-        from pdv_kernel.serialization import (
+        from pdv.serialization import (
             serialize_node,
             KIND_NAMELIST,
             FORMAT_NAMELIST,

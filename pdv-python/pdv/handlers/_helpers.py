@@ -1,5 +1,5 @@
 """
-pdv_kernel.handlers._helpers — Shared validation and lookup helpers.
+pdv.handlers._helpers — Shared validation and lookup helpers.
 
 Small utilities used by multiple handler modules to remove repetitive
 validation boilerplate. None of these helpers are part of the PDV public
@@ -45,7 +45,7 @@ def validate_register_request(
         error has been sent. Callers should ``return`` immediately on
         ``None``.
     """
-    from pdv_kernel.comms import get_pdv_tree, send_error  # noqa: PLC0415
+    from pdv.comms import get_pdv_tree, send_error  # noqa: PLC0415
 
     msg_id = msg.get("msg_id")
     payload = msg.get("payload", {})
@@ -98,8 +98,8 @@ def resolve_namelist_node(
         ``(tree, node, file_path, payload)`` on success, or ``None``
         after an error has been sent.
     """
-    from pdv_kernel.comms import get_pdv_tree, send_error  # noqa: PLC0415
-    from pdv_kernel.tree import PDVNamelist  # noqa: PLC0415
+    from pdv.comms import get_pdv_tree, send_error  # noqa: PLC0415
+    from pdv.tree import PDVNamelist  # noqa: PLC0415
 
     msg_id = msg.get("msg_id")
     payload = msg.get("payload", {})
@@ -168,7 +168,7 @@ def attach_gui_to_module(tree: Any, parent_path: str, gui_node: Any) -> None:
     """
     if not parent_path:
         return
-    from pdv_kernel.tree import PDVModule  # noqa: PLC0415
+    from pdv.tree import PDVModule  # noqa: PLC0415
 
     try:
         parent = tree[parent_path]

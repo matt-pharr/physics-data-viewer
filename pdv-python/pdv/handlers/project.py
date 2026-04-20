@@ -1,5 +1,5 @@
 """
-pdv_kernel.handlers.project — Handlers for PDV project messages.
+pdv.handlers.project — Handlers for PDV project messages.
 
 Handles:
 - ``pdv.project.load``: load a project from a save directory. Reads
@@ -17,12 +17,12 @@ from __future__ import annotations
 
 from typing import Any, Callable
 
-from pdv_kernel.handlers import register
+from pdv.handlers import register
 
 
 def _count_nodes(tree: "Any") -> int:
     """Count total nodes in a tree recursively (no I/O)."""
-    from pdv_kernel.tree import PDVTree  # noqa: PLC0415
+    from pdv.tree import PDVTree  # noqa: PLC0415
 
     count = 0
     for key in dict.keys(tree):
@@ -64,15 +64,15 @@ def _collect_nodes(
     list
         List of node descriptor dicts.
     """
-    from pdv_kernel.errors import PDVSerializationError  # noqa: PLC0415
-    from pdv_kernel.serialization import (  # noqa: PLC0415
+    from pdv.errors import PDVSerializationError  # noqa: PLC0415
+    from pdv.serialization import (  # noqa: PLC0415
         pickle_fallback_node,
         serialize_node,
     )
-    from pdv_kernel.tree import PDVTree  # noqa: PLC0415
+    from pdv.tree import PDVTree  # noqa: PLC0415
     import logging  # noqa: PLC0415
 
-    log = logging.getLogger("pdv_kernel")
+    log = logging.getLogger("pdv")
 
     if counter is None:
         counter = [0]
@@ -147,9 +147,9 @@ def _collect_module_owned_files(
 
     A node is emitted only when all three conditions hold:
 
-    1. It is a :class:`~pdv_kernel.tree.PDVFile` (script, lib, gui, namelist).
+    1. It is a :class:`~pdv.tree.PDVFile` (script, lib, gui, namelist).
     2. Its ``source_rel_path`` attribute is non-empty.
-    3. It lives beneath a :class:`~pdv_kernel.tree.PDVModule` ancestor
+    3. It lives beneath a :class:`~pdv.tree.PDVModule` ancestor
        (so ``current_module_id`` is known), or its own ``module_id``
        attribute identifies a module.
 
@@ -170,7 +170,7 @@ def _collect_module_owned_files(
         Entries of the form
         ``{"module_id": ..., "source_rel_path": ..., "workdir_path": ...}``.
     """
-    from pdv_kernel.tree import PDVFile, PDVModule, PDVTree  # noqa: PLC0415
+    from pdv.tree import PDVFile, PDVModule, PDVTree  # noqa: PLC0415
 
     import os  # noqa: PLC0415
 
@@ -257,11 +257,11 @@ def _collect_module_manifests(tree: "Any") -> list:
                 "entries": [<node descriptor>, ...],
             }
     """
-    from pdv_kernel.serialization import (  # noqa: PLC0415
+    from pdv.serialization import (  # noqa: PLC0415
         node_preview,
         detect_kind,
     )
-    from pdv_kernel.tree import PDVFile, PDVModule, PDVTree  # noqa: PLC0415
+    from pdv.tree import PDVFile, PDVModule, PDVTree  # noqa: PLC0415
 
     def _descriptor_for(
         rel_path: str,
@@ -428,7 +428,7 @@ def handle_project_load(msg: dict) -> None:
     import json
     import os
 
-    from pdv_kernel.comms import get_pdv_tree, send_error, send_message  # noqa: PLC0415
+    from pdv.comms import get_pdv_tree, send_error, send_message  # noqa: PLC0415
 
     msg_id = msg.get("msg_id")
     payload = msg.get("payload", {})
@@ -482,7 +482,7 @@ def handle_project_load(msg: dict) -> None:
 
     working_dir = tree._working_dir or save_dir
 
-    from pdv_kernel.tree_loader import load_tree_index  # noqa: PLC0415
+    from pdv.tree_loader import load_tree_index  # noqa: PLC0415
 
     def _emit_load_progress(current: int, total: int) -> None:
         if current % 5 == 0 or current == total:
@@ -507,7 +507,7 @@ def handle_project_load(msg: dict) -> None:
     os.chdir(os.path.expanduser("~"))
     node_count = len(nodes)
 
-    from pdv_kernel.checksum import tree_checksum  # noqa: PLC0415
+    from pdv.checksum import tree_checksum  # noqa: PLC0415
 
     post_load_checksum = tree_checksum(tree)
 
@@ -550,7 +550,7 @@ def handle_project_save(msg: dict) -> None:
     import json
     import os
 
-    from pdv_kernel.comms import get_pdv_tree, send_error, send_message  # noqa: PLC0415
+    from pdv.comms import get_pdv_tree, send_error, send_message  # noqa: PLC0415
 
     msg_id = msg.get("msg_id")
     payload = msg.get("payload", {})
@@ -616,7 +616,7 @@ def handle_project_save(msg: dict) -> None:
         fh.write(index_data)
     os.replace(tmp_path, index_path)
 
-    from pdv_kernel.checksum import tree_checksum  # noqa: PLC0415
+    from pdv.checksum import tree_checksum  # noqa: PLC0415
 
     checksum = tree_checksum(tree)
 

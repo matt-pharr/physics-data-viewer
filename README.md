@@ -85,7 +85,7 @@ electron/            Electron app (TypeScript)
   main/              Main process — kernel management, IPC, filesystem
   renderer/src/      React frontend — tree, editor, console, modules
 pdv-python/          Python kernel package (pip install pdv-python)
-  pdv_kernel/        Tree, comm protocol, serialization, handlers
+  pdv/        Tree, comm protocol, serialization, handlers
 examples/modules/    Bundled example modules
 ```
 

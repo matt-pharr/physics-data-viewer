@@ -1,12 +1,12 @@
 """
-pdv_kernel.query_server — Dedicated ZeroMQ thread for read-only tree/namespace queries.
+pdv.query_server — Dedicated ZeroMQ thread for read-only tree/namespace queries.
 
 Runs a ZMQ REP socket on a separate daemon thread so that tree browsing
 and namespace inspection work even while the main thread is executing
 user code.  Only a whitelist of read-only message types is accepted.
 
 The thread captures handler responses via a thread-local ``response_sink``
-in :mod:`pdv_kernel.comms`, so existing handlers need no modification.
+in :mod:`pdv.comms`, so existing handlers need no modification.
 
 See Also
 --------
@@ -76,9 +76,9 @@ class QueryServer:
         """Main loop for the query thread (runs in a daemon thread)."""
         import zmq  # noqa: PLC0415 — deferred so module loads without zmq
 
-        from pdv_kernel import __version__ as PDV_PROTOCOL_VERSION  # noqa: PLC0415
-        from pdv_kernel import comms as comms_mod  # noqa: PLC0415
-        from pdv_kernel.handlers import dispatch  # noqa: PLC0415
+        from pdv import __version__ as PDV_PROTOCOL_VERSION  # noqa: PLC0415
+        from pdv import comms as comms_mod  # noqa: PLC0415
+        from pdv.handlers import dispatch  # noqa: PLC0415
 
         ctx = zmq.Context.instance()
         sock = ctx.socket(zmq.REP)

@@ -1,5 +1,5 @@
 """
-pdv-python/tests/test_checksum.py — Tests for pdv_kernel.checksum.
+pdv-python/tests/test_checksum.py — Tests for pdv.checksum.
 
 Tests cover:
 1. test_empty_tree_is_stable — same digest on two calls to an empty tree.
@@ -16,10 +16,10 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-import pdv_kernel.comms as comms_mod
-from pdv_kernel.checksum import tree_checksum
-from pdv_kernel.handlers.project import handle_project_load, handle_project_save
-from pdv_kernel.tree import PDVTree, PDVScript
+import pdv.comms as comms_mod
+from pdv.checksum import tree_checksum
+from pdv.handlers.project import handle_project_load, handle_project_save
+from pdv.tree import PDVTree, PDVScript
 
 
 # ---------------------------------------------------------------------------
@@ -103,7 +103,7 @@ class TestSubtreeDigestMatchesRoot:
         dict.__setitem__(root, "sub", child)
 
         # Compute digest of child via the root traversal
-        from pdv_kernel.checksum import _node_digest
+        from pdv.checksum import _node_digest
 
         child_via_root = _node_digest(child, None).hex()
 

@@ -1,5 +1,5 @@
 """
-pdv_kernel.namespace — Protected kernel namespace and variable inspection.
+pdv.namespace — Protected kernel namespace and variable inspection.
 
 This module provides:
 
@@ -23,7 +23,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from pdv_kernel.errors import PDVError, PDVProtectedNameError
+from pdv.errors import PDVError, PDVProtectedNameError
 
 # Names that must never be reassigned by user code.
 _PROTECTED_NAMES: frozenset[str] = frozenset({"pdv_tree", "pdv"})
@@ -115,7 +115,7 @@ class PDVApp:
         scratch unless attached to the tree as ``PDVFile`` nodes — the
         tree is the only persistent surface.
         """
-        from pdv_kernel.comms import get_pdv_tree  # noqa: PLC0415
+        from pdv.comms import get_pdv_tree  # noqa: PLC0415
 
         tree = get_pdv_tree()
         if tree is None or not getattr(tree, "_working_dir", None):
@@ -131,7 +131,7 @@ class PDVApp:
         will prompt for a save location if no project is currently open.
         """
         try:
-            from pdv_kernel.comms import send_message  # noqa: PLC0415
+            from pdv.comms import send_message  # noqa: PLC0415
 
             send_message("pdv.project.save", {})
         except RuntimeError:
@@ -154,8 +154,8 @@ class PDVApp:
         """
         import os  # noqa: PLC0415
 
-        from pdv_kernel.comms import get_pdv_tree  # noqa: PLC0415
-        from pdv_kernel.tree import PDVNote  # noqa: PLC0415
+        from pdv.comms import get_pdv_tree  # noqa: PLC0415
+        from pdv.tree import PDVNote  # noqa: PLC0415
 
         tree = get_pdv_tree()
         if tree is None:
@@ -370,7 +370,7 @@ def describe_namespace_value(
 
 def namespace_kind(value: Any) -> str:
     """Return the canonical namespace inspector kind for a value."""
-    from pdv_kernel.serialization import detect_kind  # noqa: PLC0415
+    from pdv.serialization import detect_kind  # noqa: PLC0415
 
     kind = detect_kind(value)
     if kind == "unknown" and value_has_object_children(value):

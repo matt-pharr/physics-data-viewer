@@ -7,8 +7,8 @@ import pickle
 
 import pytest
 
-from pdv_kernel.errors import PDVSerializationError
-from pdv_kernel.serialization import deserialize_node
+from pdv.errors import PDVSerializationError
+from pdv.serialization import deserialize_node
 
 
 def test_missing_file_raises_descriptive_error(tmp_save_dir):

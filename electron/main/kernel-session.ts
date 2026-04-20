@@ -19,14 +19,15 @@ import { ProjectManager } from "./project-manager";
 
 const PYTHON_BOOTSTRAP = `
 from IPython import get_ipython
-import pdv_kernel
-import pdv_kernel.comms as _pdv_comms
+import pdv
+from pdv import PDVTree
+import pdv.comms as _pdv_comms
 try:
     from ipykernel.comm import Comm
 except Exception:
     from comm import Comm
 _ip = get_ipython()
-pdv_kernel.bootstrap(_ip)
+pdv.bootstrap(_ip)
 if _pdv_comms._comm is None:
     _pdv_comm = Comm(target_name="pdv.kernel")
     _pdv_comms._comm = _pdv_comm

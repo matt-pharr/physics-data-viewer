@@ -1,5 +1,5 @@
 """
-pdv_kernel.handlers.gui — Handler for PDV GUI registration messages.
+pdv.handlers.gui — Handler for PDV GUI registration messages.
 
 Handles:
 - ``pdv.gui.register``: attach a :class:`PDVGui` node to the tree
@@ -8,19 +8,19 @@ Handles:
 See Also
 --------
 ARCHITECTURE.md §3.4 (message type catalogue)
-pdv_kernel.tree.PDVGui
+pdv.tree.PDVGui
 """
 
 from __future__ import annotations
 
-from pdv_kernel.handlers import register
+from pdv.handlers import register
 
 
 def handle_gui_register(msg: dict) -> None:
     """Handle the ``pdv.gui.register`` message.
 
-    Creates a :class:`~pdv_kernel.tree.PDVGui` and attaches it to the
-    tree. If the parent is a :class:`~pdv_kernel.tree.PDVModule`, also
+    Creates a :class:`~pdv.tree.PDVGui` and attaches it to the
+    tree. If the parent is a :class:`~pdv.tree.PDVModule`, also
     sets the module's ``.gui`` attribute.
 
     Expected payload
@@ -41,9 +41,9 @@ def handle_gui_register(msg: dict) -> None:
     msg : dict
         Parsed PDV message envelope.
     """
-    from pdv_kernel.comms import send_message  # noqa: PLC0415
-    from pdv_kernel.tree import PDVGui  # noqa: PLC0415
-    from pdv_kernel.handlers._helpers import (  # noqa: PLC0415
+    from pdv.comms import send_message  # noqa: PLC0415
+    from pdv.tree import PDVGui  # noqa: PLC0415
+    from pdv.handlers._helpers import (  # noqa: PLC0415
         attach_gui_to_module,
         validate_register_request,
     )

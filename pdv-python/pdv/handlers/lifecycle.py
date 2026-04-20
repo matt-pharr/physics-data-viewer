@@ -1,5 +1,5 @@
 """
-pdv_kernel.handlers.lifecycle — Handlers for PDV lifecycle messages.
+pdv.handlers.lifecycle — Handlers for PDV lifecycle messages.
 
 Handles:
 - ``pdv.init``: receives the working directory path and initial config
@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import os
 
-from pdv_kernel.handlers import register
+from pdv.handlers import register
 
 
 def handle_init(msg: dict) -> None:
@@ -43,9 +43,9 @@ def handle_init(msg: dict) -> None:
     msg : dict
         Parsed PDV message envelope.
     """
-    from pdv_kernel.comms import get_pdv_tree, send_error, send_message  # noqa: PLC0415
-    from pdv_kernel.environment import validate_working_dir  # noqa: PLC0415
-    from pdv_kernel.errors import PDVPathError  # noqa: PLC0415
+    from pdv.comms import get_pdv_tree, send_error, send_message  # noqa: PLC0415
+    from pdv.environment import validate_working_dir  # noqa: PLC0415
+    from pdv.errors import PDVPathError  # noqa: PLC0415
 
     msg_id = msg.get("msg_id")
     payload = msg.get("payload", {})
@@ -78,8 +78,8 @@ def handle_init(msg: dict) -> None:
     # Start the query server if a query_port was provided.
     query_port = payload.get("query_port")
     if query_port is not None:
-        import pdv_kernel.comms as comms_mod  # noqa: PLC0415
-        from pdv_kernel.query_server import QueryServer  # noqa: PLC0415
+        import pdv.comms as comms_mod  # noqa: PLC0415
+        from pdv.query_server import QueryServer  # noqa: PLC0415
 
         # Stop any existing server (e.g. on kernel restart with new init).
         if comms_mod._query_server is not None:

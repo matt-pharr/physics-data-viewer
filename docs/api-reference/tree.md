@@ -14,7 +14,7 @@ but with a few important differences:
 The tree is the sole source of truth for project data. Any state a user
 wants to keep across sessions must live here.
 
-::: pdv_kernel.tree.PDVTree
+::: pdv.tree.PDVTree
     options:
       show_root_heading: true
       show_source: false

@@ -11,8 +11,8 @@ Reference: ARCHITECTURE.md §5.6, §5.7, §5.8, §7.1
 
 
 import pytest
-from pdv_kernel.tree import PDVTree, PDVScript
-from pdv_kernel.errors import PDVKeyError, PDVPathError, PDVScriptError
+from pdv.tree import PDVTree, PDVScript
+from pdv.errors import PDVKeyError, PDVPathError, PDVScriptError
 
 
 class TestDotPathAccess:
@@ -265,7 +265,7 @@ class TestPDVScript:
         self, tree_with_comm, tmp_path, monkeypatch
     ):
         """Calling script.run(**kwargs) uses the bootstrapped global tree."""
-        from pdv_kernel import comms
+        from pdv import comms
 
         script_file = tmp_path / "global_tree.py"
         script_file.write_text('def run(tree, **kwargs):\n    return tree["x"]\n')
@@ -305,7 +305,7 @@ class TestPDVScript:
 
     def test_extract_script_params_from_run_signature(self, tmp_path):
         """_extract_script_params extracts user-facing params from run() signature."""
-        from pdv_kernel.tree import _extract_script_params
+        from pdv.tree import _extract_script_params
 
         script_file = tmp_path / "param_script.py"
         script_file.write_text(
@@ -325,7 +325,7 @@ class TestPDVScript:
 
     def test_extract_script_params_empty_when_missing_or_invalid(self, tmp_path):
         """Missing or invalid script files produce an empty params list."""
-        from pdv_kernel.tree import _extract_script_params
+        from pdv.tree import _extract_script_params
 
         assert _extract_script_params(str(tmp_path / "does_not_exist.py")) == []
 

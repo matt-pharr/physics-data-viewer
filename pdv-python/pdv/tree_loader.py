@@ -1,8 +1,8 @@
 """
-pdv_kernel.tree_loader — Shared two-pass tree-index loader.
+pdv.tree_loader — Shared two-pass tree-index loader.
 
 Both ``pdv.project.load`` and ``pdv.module.register`` reconstruct a
-:class:`~pdv_kernel.tree.PDVTree` subtree from a list of node descriptors
+:class:`~pdv.tree.PDVTree` subtree from a list of node descriptors
 serialized to a ``tree-index.json``-style array. ARCHITECTURE.md §3.4
 explicitly states that module register uses "the same two-pass logic as
 project load" — this module is the canonical implementation, so the two
@@ -41,8 +41,8 @@ descendant. The loader itself never touches ``sys.path``.
 See Also
 --------
 ARCHITECTURE.md §3.4 (message type catalogue), §4.2 (project load sequence)
-pdv_kernel.handlers.project — pdv.project.load handler
-pdv_kernel.handlers.modules — pdv.module.register handler
+pdv.handlers.project — pdv.project.load handler
+pdv.handlers.modules — pdv.module.register handler
 """
 
 from __future__ import annotations
@@ -101,7 +101,7 @@ def load_tree_index(
     """
     # Local imports to avoid circular dependencies — tree.py imports nothing
     # from this module, so importing tree.py here is safe.
-    from pdv_kernel.tree import (  # noqa: PLC0415
+    from pdv.tree import (  # noqa: PLC0415
         PDVGui,
         PDVLib,
         PDVModule,
@@ -110,7 +110,7 @@ def load_tree_index(
         PDVScript,
         PDVTree,
     )
-    from pdv_kernel.serialization import deserialize_node  # noqa: PLC0415
+    from pdv.serialization import deserialize_node  # noqa: PLC0415
 
     def _full_path(node_path_rel: str) -> str:
         if alias_prefix:

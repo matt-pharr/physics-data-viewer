@@ -1,5 +1,5 @@
 """
-pdv_kernel.serializers — Custom serializer registry for module-defined types.
+pdv.serializers — Custom serializer registry for module-defined types.
 
 Module developers register a save/load callback pair for a class so that
 PDV can persist instances of that class without falling back to ``pickle``.
@@ -21,7 +21,7 @@ clear : function
 
 See Also
 --------
-pdv_kernel.serialization (consumer of this registry)
+pdv.serialization (consumer of this registry)
 ARCHITECTURE.md §7.2 (node types)
 """
 
@@ -30,7 +30,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Callable, Optional
 
-from pdv_kernel.errors import PDVSerializationError
+from pdv.errors import PDVSerializationError
 
 
 @dataclass
@@ -50,7 +50,7 @@ _serializer_registry: dict[type, SerializerEntry] = {}
 _format_index: dict[str, SerializerEntry] = {}
 
 
-# Format names reserved by builtin serializers in pdv_kernel.serialization.
+# Format names reserved by builtin serializers in pdv.serialization.
 # Listed inline (rather than imported) to avoid a circular import — the
 # constants in serialization.py are the source of truth and these strings
 # must stay in sync.

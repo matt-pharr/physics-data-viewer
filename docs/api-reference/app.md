@@ -13,7 +13,7 @@ pdv.help()                   # Print a quick reference
 
 Tab-completing `pdv.` in a code cell lists every available operation.
 
-::: pdv_kernel.namespace.PDVApp
+::: pdv.namespace.PDVApp
     options:
       show_root_heading: true
       show_source: false

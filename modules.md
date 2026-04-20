@@ -183,7 +183,7 @@ On project load (deserialization), `PDVLib` nodes are restored and their parent 
 Module `lib/` files can define custom Python classes and register double-click handlers using the `@handle` decorator:
 
 ```python
-from pdv_kernel import handle
+from pdv import handle
 
 class PendulumSolution:
     def __init__(self, t, thetas, omegas, xs, ys, params):

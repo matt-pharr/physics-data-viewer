@@ -1,5 +1,5 @@
 """
-pdv_kernel.serialization — Type detection and format readers/writers.
+pdv.serialization — Type detection and format readers/writers.
 
 Handles all conversion between in-memory Python values and on-disk
 file representations.
@@ -35,7 +35,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from pdv_kernel.errors import PDVSerializationError
+from pdv.errors import PDVSerializationError
 
 
 # Node kind strings — must match ARCHITECTURE.md §7.2
@@ -185,7 +185,7 @@ def detect_kind(value: Any) -> str:
     ndarray/dataframe/series values fall through to ``KIND_UNKNOWN``.
     """
     # Lazy import to avoid circular dependency and optional deps
-    from pdv_kernel.tree import (
+    from pdv.tree import (
         PDVTree,
         PDVScript,
         PDVNote,
@@ -305,8 +305,8 @@ def serialize_node(
     import pickle
     import shutil
 
-    from pdv_kernel.environment import ensure_parent, working_dir_tree_path  # noqa: PLC0415
-    from pdv_kernel.tree import PDVFile, PDVScript, PDVLib, PDVGui, PDVNote  # noqa: PLC0415
+    from pdv.environment import ensure_parent, working_dir_tree_path  # noqa: PLC0415
+    from pdv.tree import PDVFile, PDVScript, PDVLib, PDVGui, PDVNote  # noqa: PLC0415
 
     # File extension and format for each PDVFile subclass
     _FILE_KIND_MAP: dict[str, tuple[str, str]] = {
@@ -565,7 +565,7 @@ def serialize_node(
         return descriptor
 
     # KIND_UNKNOWN — try a registered custom serializer before falling back to pickle.
-    from pdv_kernel import serializers as _serializers  # noqa: PLC0415
+    from pdv import serializers as _serializers  # noqa: PLC0415
 
     custom = _serializers.find_for_value(value)
     if custom is not None:
@@ -652,7 +652,7 @@ def pickle_fallback_node(tree_path: str, value: Any, working_dir: str) -> dict:
     import os
     import pickle
 
-    from pdv_kernel.environment import ensure_parent, working_dir_tree_path  # noqa: PLC0415
+    from pdv.environment import ensure_parent, working_dir_tree_path  # noqa: PLC0415
 
     file_path = working_dir_tree_path(working_dir, tree_path, ".pickle")
     ensure_parent(file_path)
@@ -779,7 +779,7 @@ def deserialize_node(storage_ref: dict, save_dir: str, *, trusted: bool = False)
             with open(abs_path, "rb") as fh:
                 return pickle.load(fh)  # noqa: S301
 
-        from pdv_kernel import serializers as _serializers  # noqa: PLC0415
+        from pdv import serializers as _serializers  # noqa: PLC0415
 
         custom = _serializers.find_for_format(fmt)
         if custom is not None:
@@ -849,7 +849,7 @@ def node_preview(value: Any, kind: str) -> str:
         pass
     # Prefer a registered serializer's preview callback for unknown types.
     try:
-        from pdv_kernel import serializers as _serializers  # noqa: PLC0415
+        from pdv import serializers as _serializers  # noqa: PLC0415
 
         entry = _serializers.find_for_value(value)
         if entry is not None and entry.preview is not None:

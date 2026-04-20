@@ -1,5 +1,5 @@
 """
-pdv_kernel.namelist_utils — Namelist file parsing and writing utilities.
+pdv.namelist_utils — Namelist file parsing and writing utilities.
 
 Pure utility module with no dependency on comms, handlers, or IPython.
 

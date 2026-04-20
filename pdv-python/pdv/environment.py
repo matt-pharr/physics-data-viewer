@@ -1,7 +1,7 @@
 """
-pdv_kernel.environment — Path utilities and working directory management.
+pdv.environment — Path utilities and working directory management.
 
-Centralises all filesystem path logic for pdv_kernel:
+Centralises all filesystem path logic for pdv:
 
 - Creating and validating the working directory (received from the app
   via ``pdv.init``).
@@ -25,7 +25,7 @@ from __future__ import annotations
 
 import os
 
-from pdv_kernel.errors import PDVPathError
+from pdv.errors import PDVPathError
 
 
 def make_working_dir(base_tmp_dir: str) -> str:

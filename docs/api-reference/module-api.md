@@ -29,7 +29,7 @@ def show_equilibrium(obj, path, pdv_tree):
 Handlers are resolved by walking the object's MRO, so a handler
 registered on a base class covers every subclass.
 
-::: pdv_kernel.modules.handle
+::: pdv.modules.handle
     options:
       show_root_heading: true
       show_source: false
@@ -64,7 +64,7 @@ that the correct loader can be found when the project is re-opened.
 It must be unique across the user's installed modules and must not
 collide with any of PDV's builtin format names.
 
-::: pdv_kernel.serializers.register
+::: pdv.serializers.register
     options:
       show_root_heading: true
       show_source: false
@@ -75,7 +75,7 @@ The internal record type returned by the registry lookups. Module authors
 will usually not need to interact with this directly, but it is documented
 here for completeness.
 
-::: pdv_kernel.serializers.SerializerEntry
+::: pdv.serializers.SerializerEntry
     options:
       show_root_heading: true
       show_source: false

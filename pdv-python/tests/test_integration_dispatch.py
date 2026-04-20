@@ -14,9 +14,9 @@ from types import SimpleNamespace
 from typing import Any
 from unittest.mock import MagicMock, patch
 
-import pdv_kernel.comms as comms_mod
-from pdv_kernel.namespace import PDVApp
-from pdv_kernel.tree import PDVScript, PDVTree
+import pdv.comms as comms_mod
+from pdv.namespace import PDVApp
+from pdv.tree import PDVScript, PDVTree
 
 
 def _make_mock_comm() -> MagicMock:

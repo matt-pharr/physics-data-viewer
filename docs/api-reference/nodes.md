@@ -12,48 +12,48 @@ The tree stores two kinds of values:
 Construct a node and assign it into the tree at a dot-path:
 
 ```python
-from pdv_kernel import PDVScript, PDVNote
+from pdv import PDVScript, PDVNote
 
 pdv_tree['analysis.fit'] = PDVScript(relative_path='fit.py')
 pdv_tree['notes.intro']  = PDVNote(relative_path='intro.md', title='Intro')
 ```
 
-All node types are importable from the top-level `pdv_kernel` package.
+All node types are importable from the top-level `pdv` package.
 `PDVFile` is the base class for every file-backed node — its attributes
 (`relative_path`, `source_rel_path`, `resolve_path`) are inherited by all
 of the subclasses below.
 
 ---
 
-::: pdv_kernel.tree.PDVFile
+::: pdv.tree.PDVFile
 
 ---
 
-::: pdv_kernel.tree.PDVScript
+::: pdv.tree.PDVScript
     options:
       inherited_members: false
 
 ---
 
-::: pdv_kernel.tree.PDVNote
+::: pdv.tree.PDVNote
     options:
       inherited_members: false
 
 ---
 
-::: pdv_kernel.tree.PDVGui
+::: pdv.tree.PDVGui
     options:
       inherited_members: false
 
 ---
 
-::: pdv_kernel.tree.PDVNamelist
+::: pdv.tree.PDVNamelist
     options:
       inherited_members: false
 
 ---
 
-::: pdv_kernel.tree.PDVLib
+::: pdv.tree.PDVLib
     options:
       inherited_members: false
 
@@ -63,6 +63,6 @@ A `PDVModule` is itself a subclass of `PDVTree`, so it supports all the
 same dict-like operations. It represents a self-contained module package
 mounted at a tree path.
 
-::: pdv_kernel.tree.PDVModule
+::: pdv.tree.PDVModule
     options:
       inherited_members: false

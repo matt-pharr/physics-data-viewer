@@ -1,14 +1,14 @@
 """
-pdv_kernel.errors — PDV exception hierarchy.
+pdv.errors — PDV exception hierarchy.
 
-All exceptions raised by pdv_kernel are subclasses of PDVError.
+All exceptions raised by pdv are subclasses of PDVError.
 This allows callers to catch all PDV-specific errors with a single
 ``except PDVError`` clause.
 """
 
 
 class PDVError(Exception):
-    """Base exception for all pdv_kernel errors."""
+    """Base exception for all pdv errors."""
 
 
 class PDVPathError(PDVError):

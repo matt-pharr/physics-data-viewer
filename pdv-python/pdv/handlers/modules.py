@@ -1,5 +1,5 @@
 """
-pdv_kernel.handlers.modules — Handlers for module namespace setup and handler invocation.
+pdv.handlers.modules — Handlers for module namespace setup and handler invocation.
 
 Handles:
 - ``pdv.modules.setup``: add module install paths to sys.path and run entry points.
@@ -8,7 +8,7 @@ Handles:
 See Also
 --------
 ARCHITECTURE.md §3.4 (message type catalogue)
-pdv_kernel.modules — handler registry and decorator
+pdv.modules — handler registry and decorator
 """
 
 from __future__ import annotations
@@ -16,13 +16,13 @@ from __future__ import annotations
 import importlib
 import sys
 
-from pdv_kernel.handlers import register
+from pdv.handlers import register
 
 
 def handle_module_register(msg: dict) -> None:
     """Handle the ``pdv.module.register`` message.
 
-    Creates a :class:`~pdv_kernel.tree.PDVModule` and attaches it to the
+    Creates a :class:`~pdv.tree.PDVModule` and attaches it to the
     tree at the given alias path.
 
     For v4 modules, an optional ``module_index`` array may be included in the
@@ -60,8 +60,8 @@ def handle_module_register(msg: dict) -> None:
     msg : dict
         Parsed PDV message envelope.
     """
-    from pdv_kernel.comms import get_pdv_tree, send_error, send_message  # noqa: PLC0415
-    from pdv_kernel.tree import PDVModule  # noqa: PLC0415
+    from pdv.comms import get_pdv_tree, send_error, send_message  # noqa: PLC0415
+    from pdv.tree import PDVModule  # noqa: PLC0415
 
     msg_id = msg.get("msg_id")
     payload = msg.get("payload", {})
@@ -122,7 +122,7 @@ def handle_module_register(msg: dict) -> None:
     # derived inside handle_modules_setup by walking the PDVModule subtree —
     # the loader does not touch sys.path at all.
     if module_index:
-        from pdv_kernel.tree_loader import load_tree_index  # noqa: PLC0415
+        from pdv.tree_loader import load_tree_index  # noqa: PLC0415
 
         load_tree_index(
             tree,
@@ -150,7 +150,7 @@ def _iter_pdv_libs(container: object):
     the subtree regardless of shape, which keeps it forward-compatible with
     future storage layouts.
     """
-    from pdv_kernel.tree import PDVLib  # noqa: PLC0415
+    from pdv.tree import PDVLib  # noqa: PLC0415
 
     if isinstance(container, PDVLib):
         yield container
@@ -165,8 +165,8 @@ def handle_modules_setup(msg: dict) -> None:
     """Handle the ``pdv.modules.setup`` message.
 
     For each module alias in the payload, walks the corresponding
-    :class:`~pdv_kernel.tree.PDVModule` subtree in the live tree, collects
-    the parent directory of every :class:`~pdv_kernel.tree.PDVLib`
+    :class:`~pdv.tree.PDVModule` subtree in the live tree, collects
+    the parent directory of every :class:`~pdv.tree.PDVLib`
     descendant, dedupes, and inserts each unique parent into ``sys.path``.
     Then imports any specified entry point.
 
@@ -201,9 +201,9 @@ def handle_modules_setup(msg: dict) -> None:
     import os  # noqa: PLC0415
     import warnings  # noqa: PLC0415
 
-    from pdv_kernel.comms import get_pdv_tree, send_message  # noqa: PLC0415
-    from pdv_kernel.modules import get_handler_registry  # noqa: PLC0415
-    from pdv_kernel.tree import PDVModule  # noqa: PLC0415
+    from pdv.comms import get_pdv_tree, send_message  # noqa: PLC0415
+    from pdv.modules import get_handler_registry  # noqa: PLC0415
+    from pdv.tree import PDVModule  # noqa: PLC0415
 
     msg_id = msg.get("msg_id")
     payload = msg.get("payload", {})
@@ -258,7 +258,7 @@ def handle_modules_setup(msg: dict) -> None:
 def handle_module_create_empty(msg: dict) -> None:
     """Handle the ``pdv.module.create_empty`` message.
 
-    Creates a bare :class:`~pdv_kernel.tree.PDVModule` at the top of the
+    Creates a bare :class:`~pdv.tree.PDVModule` at the top of the
     tree and seeds it with three conventional empty ``PDVTree`` children
     (``scripts``, ``lib``, ``plots``). Used by workflow B of issue #140:
     a user starts a new module from scratch inside the app, populates its
@@ -292,8 +292,8 @@ def handle_module_create_empty(msg: dict) -> None:
     msg : dict
         Parsed PDV message envelope.
     """
-    from pdv_kernel.comms import get_pdv_tree, send_error, send_message  # noqa: PLC0415
-    from pdv_kernel.tree import PDVModule, PDVTree  # noqa: PLC0415
+    from pdv.comms import get_pdv_tree, send_error, send_message  # noqa: PLC0415
+    from pdv.tree import PDVModule, PDVTree  # noqa: PLC0415
 
     msg_id = msg.get("msg_id")
     payload = msg.get("payload", {})
@@ -367,7 +367,7 @@ def handle_module_update(msg: dict) -> None:
     """Handle the ``pdv.module.update`` message.
 
     Patches mutable fields (``name``, ``version``, ``description``) on an
-    existing :class:`~pdv_kernel.tree.PDVModule`. Any field omitted from
+    existing :class:`~pdv.tree.PDVModule`. Any field omitted from
     the payload is left unchanged. ``module_id`` and ``language`` are
     read-only — creating a new module is the right way to change those.
 
@@ -387,8 +387,8 @@ def handle_module_update(msg: dict) -> None:
     msg : dict
         Parsed PDV message envelope.
     """
-    from pdv_kernel.comms import get_pdv_tree, send_error, send_message  # noqa: PLC0415
-    from pdv_kernel.tree import PDVModule  # noqa: PLC0415
+    from pdv.comms import get_pdv_tree, send_error, send_message  # noqa: PLC0415
+    from pdv.tree import PDVModule  # noqa: PLC0415
 
     msg_id = msg.get("msg_id")
     payload = msg.get("payload", {})
@@ -484,7 +484,7 @@ def handle_module_reload_libs(msg: dict) -> None:
     """
     import os  # noqa: PLC0415
 
-    from pdv_kernel.comms import get_pdv_tree, send_error, send_message  # noqa: PLC0415
+    from pdv.comms import get_pdv_tree, send_error, send_message  # noqa: PLC0415
 
     msg_id = msg.get("msg_id")
     payload = msg.get("payload", {})
@@ -499,7 +499,7 @@ def handle_module_reload_libs(msg: dict) -> None:
         )
         return
 
-    from pdv_kernel.tree import PDVModule  # noqa: PLC0415
+    from pdv.tree import PDVModule  # noqa: PLC0415
 
     tree = get_pdv_tree()
     working_dir = getattr(tree, "_working_dir", "") if tree is not None else ""
@@ -595,8 +595,8 @@ def handle_handler_invoke(msg: dict) -> None:
     msg : dict
         Parsed PDV message envelope.
     """
-    from pdv_kernel.comms import get_pdv_tree, send_error, send_message  # noqa: PLC0415
-    from pdv_kernel.modules import dispatch_handler  # noqa: PLC0415
+    from pdv.comms import get_pdv_tree, send_error, send_message  # noqa: PLC0415
+    from pdv.modules import dispatch_handler  # noqa: PLC0415
 
     msg_id = msg.get("msg_id")
     payload = msg.get("payload", {})

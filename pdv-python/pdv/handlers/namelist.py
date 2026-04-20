@@ -1,5 +1,5 @@
 """
-pdv_kernel.handlers.namelist — Handlers for PDV namelist messages.
+pdv.handlers.namelist — Handlers for PDV namelist messages.
 
 Handles:
 - ``pdv.namelist.read``: parse a namelist file and return structured data.
@@ -8,13 +8,13 @@ Handles:
 
 See Also
 --------
-pdv_kernel.namelist_utils
-pdv_kernel.tree.PDVNamelist
+pdv.namelist_utils
+pdv.tree.PDVNamelist
 """
 
 from __future__ import annotations
 
-from pdv_kernel.handlers import register
+from pdv.handlers import register
 
 
 def handle_namelist_read(msg: dict) -> None:
@@ -36,8 +36,8 @@ def handle_namelist_read(msg: dict) -> None:
     msg : dict
         Parsed PDV message envelope.
     """
-    from pdv_kernel.comms import send_error, send_message  # noqa: PLC0415
-    from pdv_kernel.handlers._helpers import resolve_namelist_node  # noqa: PLC0415
+    from pdv.comms import send_error, send_message  # noqa: PLC0415
+    from pdv.handlers._helpers import resolve_namelist_node  # noqa: PLC0415
 
     msg_id = msg.get("msg_id")
     resolved = resolve_namelist_node(msg, "pdv.namelist.read.response")
@@ -46,7 +46,7 @@ def handle_namelist_read(msg: dict) -> None:
     _tree, node, file_path, _payload = resolved
 
     try:
-        from pdv_kernel.namelist_utils import (  # noqa: PLC0415
+        from pdv.namelist_utils import (  # noqa: PLC0415
             extract_hints,
             infer_types,
             read_namelist,
@@ -58,7 +58,7 @@ def handle_namelist_read(msg: dict) -> None:
         types = infer_types(groups)
         # Determine effective format (resolve "auto")
         if fmt == "auto":
-            from pdv_kernel.namelist_utils import detect_namelist_format  # noqa: PLC0415
+            from pdv.namelist_utils import detect_namelist_format  # noqa: PLC0415
 
             fmt = detect_namelist_format(file_path)
     except ImportError as exc:
@@ -112,8 +112,8 @@ def handle_namelist_write(msg: dict) -> None:
     msg : dict
         Parsed PDV message envelope.
     """
-    from pdv_kernel.comms import send_error, send_message  # noqa: PLC0415
-    from pdv_kernel.handlers._helpers import resolve_namelist_node  # noqa: PLC0415
+    from pdv.comms import send_error, send_message  # noqa: PLC0415
+    from pdv.handlers._helpers import resolve_namelist_node  # noqa: PLC0415
 
     msg_id = msg.get("msg_id")
     resolved = resolve_namelist_node(msg, "pdv.namelist.write.response")
@@ -123,7 +123,7 @@ def handle_namelist_write(msg: dict) -> None:
     data = payload.get("data", {})
 
     try:
-        from pdv_kernel.namelist_utils import write_namelist  # noqa: PLC0415
+        from pdv.namelist_utils import write_namelist  # noqa: PLC0415
 
         write_namelist(file_path, data, format=node.format)
     except ImportError as exc:
@@ -175,8 +175,8 @@ def handle_file_register(msg: dict) -> None:
     """
     import os  # noqa: PLC0415
 
-    from pdv_kernel.comms import get_pdv_tree, send_error, send_message  # noqa: PLC0415
-    from pdv_kernel.tree import PDVFile, PDVLib, PDVNamelist  # noqa: PLC0415
+    from pdv.comms import get_pdv_tree, send_error, send_message  # noqa: PLC0415
+    from pdv.tree import PDVFile, PDVLib, PDVNamelist  # noqa: PLC0415
 
     msg_id = msg.get("msg_id")
     payload = msg.get("payload", {})

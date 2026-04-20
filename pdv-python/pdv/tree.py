@@ -1,7 +1,7 @@
 """
-pdv_kernel.tree — PDVTree, PDVFile, PDVScript, PDVNote, PDVGui, and PDVModule data structures.
+pdv.tree — PDVTree, PDVFile, PDVScript, PDVNote, PDVGui, and PDVModule data structures.
 
-This module is the core of the pdv_kernel package. It implements:
+This module is the core of the pdv package. It implements:
 
 - :class:`PDVTree`: a dict subclass that is the live project data tree.
   It supports dot-path access and emits ``pdv.tree.changed`` push
@@ -34,7 +34,7 @@ import sys
 import threading
 from typing import Any, Callable, TypedDict
 
-from pdv_kernel.errors import PDVKeyError, PDVPathError, PDVScriptError
+from pdv.errors import PDVKeyError, PDVPathError, PDVScriptError
 
 
 # ---------------------------------------------------------------------------
@@ -453,7 +453,7 @@ class PDVScript(PDVFile):
         tree : PDVTree or None
             The live project data tree, passed as the first argument to
             the script's ``run()`` function. When omitted, the bootstrapped
-            global tree from ``pdv_kernel.comms`` is used.
+            global tree from ``pdv.comms`` is used.
         **kwargs
             Additional keyword arguments forwarded to ``run()``.
 
@@ -471,7 +471,7 @@ class PDVScript(PDVFile):
             or if ``run()`` raises.
         """
         if tree is None:
-            from pdv_kernel.comms import get_pdv_tree  # noqa: PLC0415
+            from pdv.comms import get_pdv_tree  # noqa: PLC0415
 
             tree = get_pdv_tree()
             if tree is None:

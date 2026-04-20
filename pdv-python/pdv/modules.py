@@ -1,5 +1,5 @@
 """
-pdv_kernel.modules — Handler registry, decorator, and dispatch for custom type handlers.
+pdv.modules — Handler registry, decorator, and dispatch for custom type handlers.
 
 Module developers use ``@pdv.handle(MyClass)`` to register a handler function
 that is invoked when a user double-clicks a tree node whose value is an instance
