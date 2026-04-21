@@ -975,7 +975,10 @@ class PDVTree(dict):
         """Set a value by key or dot-separated path.
 
         Creates intermediate :class:`PDVTree` nodes as needed.
-        Emits a ``pdv.tree.changed`` push notification.
+        Emits a ``pdv.tree.changed`` push notification for the leaf path
+        **and for any intermediate containers that are newly created
+        (or replaced) as a side effect**, so renderers that rely on
+        changed_paths to know what to refetch see every mutation.
 
         Parameters
         ----------
@@ -984,13 +987,35 @@ class PDVTree(dict):
         value : Any
             The value to store.
         """
-        # Determine change_type before modifying
+        parts = _split_dot_path(key)
+
+        # Walk the existing tree to find which prefix paths will be
+        # newly created (or replaced, in the "non-dict intermediate"
+        # branch of set_quiet). Once we hit the first missing/non-dict
+        # segment, every deeper intermediate prefix is also new.
+        added_prefixes: list[str] = []
+        current: dict = self
+        for i in range(len(parts) - 1):
+            part = parts[i]
+            needs_create = not dict.__contains__(current, part) or not isinstance(
+                dict.__getitem__(current, part), dict
+            )
+            if needs_create:
+                for j in range(i, len(parts) - 1):
+                    added_prefixes.append(".".join(parts[: j + 1]))
+                break
+            current = dict.__getitem__(current, part)
+
         try:
             exists = key in self
         except Exception:
             exists = False
         change_type = "updated" if exists else "added"
         self.set_quiet(key, value)
+
+        # Ancestors first so renderers can refresh top-down.
+        for prefix in added_prefixes:
+            self._emit_changed(prefix, "added")
         self._emit_changed(key, change_type)
 
     def __delitem__(self, key: str) -> None:

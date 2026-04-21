@@ -125,6 +125,55 @@ class TestChangeNotification:
         _, payload = mock_send.call_args[0]
         assert payload["changed_paths"] == ["x"]
 
+    def test_set_emits_for_newly_created_intermediates(
+        self, tree_with_comm, mock_send
+    ):
+        """Setting a deep path on an empty tree emits for each new ancestor.
+
+        Renderers use changed_paths to decide which subtree to re-fetch.
+        Without per-intermediate events, the parent of a deep leaf may not
+        yet exist in the renderer's view, so nothing refreshes. See the
+        Tree component in the Electron renderer.
+        """
+        tree_with_comm["imports.mesh"] = 1
+        tree_with_comm._flush_changes()
+        _, payload = mock_send.call_args[0]
+        assert set(payload["changed_paths"]) == {"imports", "imports.mesh"}
+
+    def test_set_does_not_emit_for_existing_intermediates(
+        self, tree_with_comm, mock_send
+    ):
+        """If all intermediates already exist as dicts, no extra events fire."""
+        tree_with_comm["imports.other"] = 1
+        tree_with_comm._flush_changes()
+        mock_send.reset_mock()
+        tree_with_comm["imports.mesh"] = 2
+        tree_with_comm._flush_changes()
+        _, payload = mock_send.call_args[0]
+        assert payload["changed_paths"] == ["imports.mesh"]
+
+    def test_set_emits_for_all_newly_created_deep_ancestors(
+        self, tree_with_comm, mock_send
+    ):
+        """A three-level new path emits for each intermediate ancestor."""
+        tree_with_comm["a.b.c"] = 1
+        tree_with_comm._flush_changes()
+        _, payload = mock_send.call_args[0]
+        assert set(payload["changed_paths"]) == {"a", "a.b", "a.b.c"}
+
+    def test_set_replacing_non_dict_intermediate_emits_for_that_ancestor(
+        self, tree_with_comm, mock_send
+    ):
+        """When set_quiet replaces a non-dict intermediate with a PDVTree,
+        that ancestor counts as newly created for renderer purposes."""
+        tree_with_comm["imports"] = 5  # leaf, not a dict
+        tree_with_comm._flush_changes()
+        mock_send.reset_mock()
+        tree_with_comm["imports.mesh"] = "v"
+        tree_with_comm._flush_changes()
+        _, payload = mock_send.call_args[0]
+        assert set(payload["changed_paths"]) == {"imports", "imports.mesh"}
+
 
 class TestMutatingDictMethods:
     """Tests for dict methods that must emit change notifications."""
