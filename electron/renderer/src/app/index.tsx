@@ -59,6 +59,7 @@ import { useLayoutState } from './useLayoutState';
 import { useProjectWorkflow } from './useProjectWorkflow';
 import { useKernelSubscriptions } from './useKernelSubscriptions';
 import { useThemeManager } from './useThemeManager';
+import { useTreeAction } from '../hooks/useTreeAction';
 
 type KernelStatus = 'idle' | 'starting' | 'ready' | 'error';
 type CodeCellExecutionError = {
@@ -133,6 +134,8 @@ const App: React.FC = () => {
   const [treeRefreshToken, setTreeRefreshToken] = useState(0);
   const [pendingTreeChanges, setPendingTreeChanges] = useState<TreeChangeInfo[]>([]);
   const [modulesRefreshToken, setModulesRefreshToken] = useState(0);
+
+  const runTreeAction = useTreeAction({ setLastError, setTreeRefreshToken });
 
   // -- Dialog visibility state ----------------------------------------------
 
@@ -1255,20 +1258,10 @@ const App: React.FC = () => {
           currentKey={renameTarget.key}
           nodePath={renameTarget.path}
           onCancel={() => setRenameTarget(null)}
-          onRename={async (newName) => {
-            try {
-              const result = await window.pdv.tree.rename(currentKernelId, renameTarget.path, newName);
-              if (!result.success) {
-                setLastError(result.error);
-              } else {
-                setTreeRefreshToken((t) => t + 1);
-              }
-            } catch (error) {
-              setLastError(error instanceof Error ? error.message : String(error));
-            } finally {
-              setRenameTarget(null);
-            }
-          }}
+          onRename={(newName) => void runTreeAction(
+            () => window.pdv.tree.rename(currentKernelId, renameTarget.path, newName),
+            () => setRenameTarget(null),
+          )}
         />
       )}
 
@@ -1277,20 +1270,10 @@ const App: React.FC = () => {
           currentPath={moveTarget.path}
           nodeType={moveTarget.type}
           onCancel={() => setMoveTarget(null)}
-          onMove={async (newPath, filename) => {
-            try {
-              const result = await window.pdv.tree.move(currentKernelId, moveTarget.path, newPath, filename);
-              if (!result.success) {
-                setLastError(result.error);
-              } else {
-                setTreeRefreshToken((t) => t + 1);
-              }
-            } catch (error) {
-              setLastError(error instanceof Error ? error.message : String(error));
-            } finally {
-              setMoveTarget(null);
-            }
-          }}
+          onMove={(newPath, filename) => void runTreeAction(
+            () => window.pdv.tree.move(currentKernelId, moveTarget.path, newPath, filename),
+            () => setMoveTarget(null),
+          )}
         />
       )}
 
@@ -1299,20 +1282,10 @@ const App: React.FC = () => {
           currentPath={duplicateTarget.path}
           nodeType={duplicateTarget.type}
           onCancel={() => setDuplicateTarget(null)}
-          onDuplicate={async (newPath, filename) => {
-            try {
-              const result = await window.pdv.tree.duplicate(currentKernelId, duplicateTarget.path, newPath, filename);
-              if (!result.success) {
-                setLastError(result.error);
-              } else {
-                setTreeRefreshToken((t) => t + 1);
-              }
-            } catch (error) {
-              setLastError(error instanceof Error ? error.message : String(error));
-            } finally {
-              setDuplicateTarget(null);
-            }
-          }}
+          onDuplicate={(newPath, filename) => void runTreeAction(
+            () => window.pdv.tree.duplicate(currentKernelId, duplicateTarget.path, newPath, filename),
+            () => setDuplicateTarget(null),
+          )}
         />
       )}
 
@@ -1320,20 +1293,10 @@ const App: React.FC = () => {
         <CreateNodeDialog
           parentPath={createNodeTarget}
           onCancel={() => setCreateNodeTarget(null)}
-          onCreate={async (name) => {
-            try {
-              const result = await window.pdv.tree.createNode(currentKernelId, createNodeTarget, name);
-              if (!result.success) {
-                setLastError(result.error);
-              } else {
-                setTreeRefreshToken((t) => t + 1);
-              }
-            } catch (error) {
-              setLastError(error instanceof Error ? error.message : String(error));
-            } finally {
-              setCreateNodeTarget(null);
-            }
-          }}
+          onCreate={(name) => void runTreeAction(
+            () => window.pdv.tree.createNode(currentKernelId, createNodeTarget, name),
+            () => setCreateNodeTarget(null),
+          )}
         />
       )}
 

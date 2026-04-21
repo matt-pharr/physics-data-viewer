@@ -251,7 +251,7 @@ export interface Config {
   pythonPath?: string;
   /** Julia executable configured by user. */
   juliaPath?: string;
-  /** External editor command map (legacy). TODO: remove, I think? Is this actually legacy?*/
+  /** External editor command map. See #206 for cleanup tracking. */
   editors?: Record<string, string>;
   /** Project root path (when persisted). */
   projectRoot?: string;

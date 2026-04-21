@@ -7,18 +7,7 @@
 
 import React, { useEffect, useRef, useState } from 'react';
 import { useModalKeyboard } from '../../hooks/useModalKeyboard';
-
-const FILE_BACKED_TYPES = new Set(['script', 'markdown', 'gui', 'lib', 'namelist']);
-
-function defaultExtension(type: string): string {
-  switch (type) {
-    case 'script': return '.py';
-    case 'lib': return '.py';
-    case 'markdown': return '.md';
-    case 'gui': return '.gui.json';
-    default: return '';
-  }
-}
+import { FILE_BACKED_TYPES, defaultExtension } from './tree-file-utils';
 
 interface DuplicateDialogProps {
   currentPath: string;
@@ -38,7 +27,7 @@ export const DuplicateDialog: React.FC<DuplicateDialogProps> = ({ currentPath, n
   const [path, setPath] = useState(defaultPath);
   const isFileBacked = FILE_BACKED_TYPES.has(nodeType);
   const ext = defaultExtension(nodeType);
-  const [filename, setFilename] = useState(isFileBacked ? copyKey + ext : '');
+  const [filename, setFilename] = useState(isFileBacked && ext ? copyKey + ext : '');
   const inputRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
@@ -85,17 +74,17 @@ export const DuplicateDialog: React.FC<DuplicateDialogProps> = ({ currentPath, n
           </label>
           {isFileBacked && (
             <label>
-              Filename
+              Filename {!ext && <span className="dialog-info-text">(leave blank to keep original)</span>}
               <input
                 type="text"
                 value={filename}
                 onChange={(e) => setFilename(e.target.value)}
                 onKeyDown={handleKeyDown}
-                placeholder={copyKey + ext}
+                placeholder={ext ? copyKey + ext : 'original filename'}
               />
             </label>
           )}
-          <div className="dialog-info-text">Creates an independent deep copy at the destination</div>
+          <div className="dialog-info-text">All parent containers in the destination path must already exist.</div>
         </div>
 
         <div className="dialog-footer">

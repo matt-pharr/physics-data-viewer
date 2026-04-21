@@ -806,128 +806,58 @@ export function registerTreeNamespaceScriptIpcHandlers(
     }
   );
 
-  ipcMain.handle(
+  /**
+   * Register a tree IPC handler that delegates to commRouter.request.
+   *
+   * Handles kernel-not-found checks, error wrapping, and payload extraction
+   * via a caller-supplied transform.
+   */
+  function treeCommHandler<T extends { success: boolean; error?: string }>(
+    channel: string,
+    msgType: string,
+    buildPayload: (...args: string[]) => Record<string, unknown>,
+    mapResult: (payload: Record<string, unknown>) => T,
+  ): void {
+    ipcMain.handle(channel, async (_event, kernelId: string, ...rest: string[]): Promise<T> => {
+      if (!kernelManager.getKernel(kernelId)) {
+        return { success: false, error: `Kernel not found: ${kernelId}` } as T;
+      }
+      try {
+        const response = await commRouter.request(msgType, buildPayload(...rest));
+        return mapResult(response.payload as Record<string, unknown>);
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        return { success: false, error: message } as T;
+      }
+    });
+  }
+
+  treeCommHandler<TreeCreateNodeResult>(
     IPC.tree.createNode,
-    async (
-      _event,
-      kernelId: string,
-      targetPath: string,
-      nodeName: string
-    ): Promise<TreeCreateNodeResult> => {
-      if (!kernelManager.getKernel(kernelId)) {
-        return { success: false, error: `Kernel not found: ${kernelId}` };
-      }
-      try {
-        const response = await commRouter.request(
-          PDVMessageType.TREE_CREATE_NODE,
-          { parent_path: targetPath, name: nodeName }
-        );
-        const payload = response.payload as {
-          path?: string;
-          created?: boolean;
-        };
-        return { success: true, treePath: payload.path };
-      } catch (err) {
-        const message = err instanceof Error ? err.message : String(err);
-        return { success: false, error: message };
-      }
-    }
+    PDVMessageType.TREE_CREATE_NODE,
+    (targetPath, nodeName) => ({ parent_path: targetPath, name: nodeName }),
+    (p) => ({ success: true, treePath: p.path as string | undefined }),
   );
 
-  ipcMain.handle(
+  treeCommHandler<TreeRenameResult>(
     IPC.tree.rename,
-    async (
-      _event,
-      kernelId: string,
-      treePath: string,
-      newName: string
-    ): Promise<TreeRenameResult> => {
-      if (!kernelManager.getKernel(kernelId)) {
-        return { success: false, error: `Kernel not found: ${kernelId}` };
-      }
-      try {
-        const response = await commRouter.request(
-          PDVMessageType.TREE_RENAME,
-          { path: treePath, new_name: newName }
-        );
-        const payload = response.payload as {
-          old_path?: string;
-          new_path?: string;
-          renamed?: boolean;
-        };
-        return {
-          success: true,
-          oldPath: payload.old_path,
-          newPath: payload.new_path,
-        };
-      } catch (err) {
-        const message = err instanceof Error ? err.message : String(err);
-        return { success: false, error: message };
-      }
-    }
+    PDVMessageType.TREE_RENAME,
+    (treePath, newName) => ({ path: treePath, new_name: newName }),
+    (p) => ({ success: true, oldPath: p.old_path as string | undefined, newPath: p.new_path as string | undefined }),
   );
 
-  ipcMain.handle(
+  treeCommHandler<TreeMoveResult>(
     IPC.tree.move,
-    async (
-      _event,
-      kernelId: string,
-      treePath: string,
-      newPath: string,
-      filename?: string
-    ): Promise<TreeMoveResult> => {
-      if (!kernelManager.getKernel(kernelId)) {
-        return { success: false, error: `Kernel not found: ${kernelId}` };
-      }
-      try {
-        const response = await commRouter.request(
-          PDVMessageType.TREE_MOVE,
-          { path: treePath, new_path: newPath, ...(filename ? { filename } : {}) }
-        );
-        const payload = response.payload as {
-          old_path?: string;
-          new_path?: string;
-          moved?: boolean;
-        };
-        return {
-          success: true,
-          oldPath: payload.old_path,
-          newPath: payload.new_path,
-        };
-      } catch (err) {
-        const message = err instanceof Error ? err.message : String(err);
-        return { success: false, error: message };
-      }
-    }
+    PDVMessageType.TREE_MOVE,
+    (treePath, newPath, filename) => ({ path: treePath, new_path: newPath, ...(filename ? { filename } : {}) }),
+    (p) => ({ success: true, oldPath: p.old_path as string | undefined, newPath: p.new_path as string | undefined }),
   );
 
-  ipcMain.handle(
+  treeCommHandler<TreeDuplicateResult>(
     IPC.tree.duplicate,
-    async (
-      _event,
-      kernelId: string,
-      treePath: string,
-      newPath: string,
-      filename?: string
-    ): Promise<TreeDuplicateResult> => {
-      if (!kernelManager.getKernel(kernelId)) {
-        return { success: false, error: `Kernel not found: ${kernelId}` };
-      }
-      try {
-        const response = await commRouter.request(
-          PDVMessageType.TREE_DUPLICATE,
-          { path: treePath, new_path: newPath, ...(filename ? { filename } : {}) }
-        );
-        const payload = response.payload as {
-          new_path?: string;
-          duplicated?: boolean;
-        };
-        return { success: true, newPath: payload.new_path };
-      } catch (err) {
-        const message = err instanceof Error ? err.message : String(err);
-        return { success: false, error: message };
-      }
-    }
+    PDVMessageType.TREE_DUPLICATE,
+    (treePath, newPath, filename) => ({ path: treePath, new_path: newPath, ...(filename ? { filename } : {}) }),
+    (p) => ({ success: true, newPath: p.new_path as string | undefined }),
   );
 
   ipcMain.handle(

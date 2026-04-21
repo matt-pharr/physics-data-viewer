@@ -62,7 +62,8 @@ def _relocate_single_file(
     plus the original file extension.
     """
     from pdv.tree import PDVFile  # noqa: PLC0415
-    assert isinstance(file_node, PDVFile)
+    if not isinstance(file_node, PDVFile):
+        raise TypeError(f"Expected PDVFile, got {type(file_node).__name__}")
 
     old_abs = file_node.resolve_path(working_dir)
 
@@ -560,6 +561,10 @@ def handle_tree_rename(msg: dict) -> None:
         return
 
     value = tree[path]
+
+    if tree._working_dir:
+        _relocate_files(value, path, new_path, tree._working_dir, copy=False)
+
     tree.set_quiet(new_path, value)
     # Delete the old key at the dict level to avoid a second changed push
     if parent_path:

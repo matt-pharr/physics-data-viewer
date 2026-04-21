@@ -7,18 +7,7 @@
 
 import React, { useEffect, useRef, useState } from 'react';
 import { useModalKeyboard } from '../../hooks/useModalKeyboard';
-
-const FILE_BACKED_TYPES = new Set(['script', 'markdown', 'gui', 'lib', 'namelist']);
-
-function defaultExtension(type: string): string {
-  switch (type) {
-    case 'script': return '.py';
-    case 'lib': return '.py';
-    case 'markdown': return '.md';
-    case 'gui': return '.gui.json';
-    default: return '';
-  }
-}
+import { FILE_BACKED_TYPES, defaultExtension } from './tree-file-utils';
 
 interface MoveDialogProps {
   currentPath: string;
@@ -33,7 +22,7 @@ export const MoveDialog: React.FC<MoveDialogProps> = ({ currentPath, nodeType, o
   const currentKey = currentPath.split('.').pop() ?? '';
   const isFileBacked = FILE_BACKED_TYPES.has(nodeType);
   const ext = defaultExtension(nodeType);
-  const [filename, setFilename] = useState(isFileBacked ? currentKey + ext : '');
+  const [filename, setFilename] = useState(isFileBacked && ext ? currentKey + ext : '');
   const inputRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
@@ -80,17 +69,17 @@ export const MoveDialog: React.FC<MoveDialogProps> = ({ currentPath, nodeType, o
           </label>
           {isFileBacked && (
             <label>
-              Filename
+              Filename {!ext && <span className="dialog-info-text">(leave blank to keep original)</span>}
               <input
                 type="text"
                 value={filename}
                 onChange={(e) => setFilename(e.target.value)}
                 onKeyDown={handleKeyDown}
-                placeholder={currentKey + ext}
+                placeholder={ext ? currentKey + ext : 'original filename'}
               />
             </label>
           )}
-          <div className="dialog-info-text">Enter the full dot-separated destination path</div>
+          <div className="dialog-info-text">All parent containers in the destination path must already exist.</div>
         </div>
 
         <div className="dialog-footer">

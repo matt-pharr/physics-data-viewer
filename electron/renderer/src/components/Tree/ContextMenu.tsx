@@ -136,10 +136,7 @@ export function getMenuEntries(node: TreeNodeData): MenuEntry[] {
     entries.push({ kind: 'separator', id: 'sep-1' });
   }
 
-  
-
   // ── Container actions (nodes that can have children) ──
-
 
   if (isContainer || isModule) {
     entries.push({ kind: 'action', id: 'create_node', label: 'Create new tree node', disabled: false });
@@ -152,7 +149,6 @@ export function getMenuEntries(node: TreeNodeData): MenuEntry[] {
 
   // ── Common actions (all nodes) ──
 
-
   entries.push({ kind: 'action', id: 'print', label: 'Print', disabled: false });
   entries.push({ kind: 'action', id: 'copy_path', label: 'Copy Path', disabled: false });
   if (node.type !== 'root') {
@@ -163,7 +159,7 @@ export function getMenuEntries(node: TreeNodeData): MenuEntry[] {
   entries.push({ kind: 'action', id: 'delete', label: 'Delete', disabled: false });
 
   // ── Refresh ──
-  
+
   entries.push({ kind: 'separator', id: 'sep-3' });
   entries.push({ kind: 'action', id: 'refresh', label: 'Refresh tree', disabled: false });
 
