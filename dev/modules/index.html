@@ -13,10 +13,10 @@
         <link rel="canonical" href="https://matt-pharr.github.io/physics-data-viewer/dev/modules/">
       
       
-        <link rel="prev" href="../api-reference/serialization/">
+        <link rel="prev" href="../api-reference/errors/">
       
       
-        <link rel="next" href="manifest/">
+        <link rel="next" href="../developer/architecture/">
       
       
         
@@ -27,7 +27,7 @@
     
     
       
-        <title>Overview - PDV - Physics Data Viewer</title>
+        <title>Module Development - PDV - Physics Data Viewer</title>
       
     
     
@@ -58,6 +58,16 @@
     <script>__md_scope=new URL("..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
     
       
+  
+
+
+  
+  
+
+<script id="__analytics">function __md_analytics(){function e(){dataLayer.push(arguments)}window.dataLayer=window.dataLayer||[],e("js",new Date),e("config","G-0FGZ9YFWWQ"),document.addEventListener("DOMContentLoaded",(function(){document.forms.search&&document.forms.search.query.addEventListener("blur",(function(){this.value&&e("event","search",{search_term:this.value})}));document$.subscribe((function(){var t=document.forms.feedback;if(void 0!==t)for(var a of t.querySelectorAll("[type=submit]"))a.addEventListener("click",(function(a){a.preventDefault();var n=document.location.pathname,d=this.getAttribute("data-md-value");e("event","feedback",{page:n,data:d}),t.firstElementChild.disabled=!0;var r=t.querySelector(".md-feedback__note [data-md-value='"+d+"']");r&&(r.hidden=!1)})),t.hidden=!1})),location$.subscribe((function(t){e("config","G-0FGZ9YFWWQ",{page_path:t.pathname})}))}));var t=document.createElement("script");t.async=!0,t.src="https://www.googletagmanager.com/gtag/js?id=G-0FGZ9YFWWQ",document.getElementById("__analytics").insertAdjacentElement("afterEnd",t)}</script>
+  
+    <script>if("undefined"!=typeof __md_analytics){var consent=__md_get("__consent");consent&&consent.analytics&&__md_analytics()}</script>
+  
 
     
     
@@ -80,7 +90,7 @@
     <div data-md-component="skip">
       
         
-        <a href="#index" class="md-skip">
+        <a href="#pdv-modules-feature" class="md-skip">
           Skip to content
         </a>
       
@@ -118,7 +128,7 @@
         <div class="md-header__topic" data-md-component="header-topic">
           <span class="md-ellipsis">
             
-              Overview
+              Module Development
             
           </span>
         </div>
@@ -311,18 +321,17 @@
     
   
   
-    
-    
-      <li class="md-tabs__item md-tabs__item--active">
-        <a href="./" class="md-tabs__link">
-          
+    <li class="md-tabs__item md-tabs__item--active">
+      <a href="./" class="md-tabs__link">
+        
   
+  
+    
   
   Module Development
 
-        </a>
-      </li>
-    
+      </a>
+    </li>
   
 
       
@@ -352,7 +361,7 @@
   
   
     <li class="md-tabs__item">
-      <a href="../changelog/" class="md-tabs__link">
+      <a href="https://github.com/matt-pharr/physics-data-viewer/releases" class="md-tabs__link">
         
   
   
@@ -519,34 +528,6 @@
 
               
             
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../getting-started/quickstart/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Quick Start
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
           </ul>
         </nav>
       
@@ -643,14 +624,14 @@
   
   
     <li class="md-nav__item">
-      <a href="../user-guide/tree/" class="md-nav__link">
+      <a href="../user-guide/scripts-and-tree/" class="md-nav__link">
         
   
   
   <span class="md-ellipsis">
     
   
-    The Tree
+    Scripts & the Tree
   
 
     
@@ -671,126 +652,14 @@
   
   
     <li class="md-nav__item">
-      <a href="../user-guide/code-editor/" class="md-nav__link">
+      <a href="../user-guide/notes-and-projects/" class="md-nav__link">
         
   
   
   <span class="md-ellipsis">
     
   
-    Code Editor
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../user-guide/scripts/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Scripts
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../user-guide/notes/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Notes
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../user-guide/projects/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Projects
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../user-guide/modules/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Modules
+    Notes & Projects
   
 
     
@@ -900,34 +769,6 @@
   
   
     <li class="md-nav__item">
-      <a href="../api-reference/pdv-kernel/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    pdv_kernel
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
       <a href="../api-reference/tree/" class="md-nav__link">
         
   
@@ -935,7 +776,7 @@
   <span class="md-ellipsis">
     
   
-    PDVTree
+    The Tree (pdv_tree)
   
 
     
@@ -956,14 +797,98 @@
   
   
     <li class="md-nav__item">
-      <a href="../api-reference/serialization/" class="md-nav__link">
+      <a href="../api-reference/nodes/" class="md-nav__link">
         
   
   
   <span class="md-ellipsis">
     
   
-    Serialization
+    Tree Node Types
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../api-reference/app/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    The App Object (pdv)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../api-reference/module-api/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Module API
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../api-reference/errors/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Exceptions
   
 
     
@@ -986,63 +911,6 @@
     
       
       
-  
-  
-    
-  
-  
-  
-    
-    
-    
-    
-      
-        
-        
-      
-      
-        
-      
-    
-    
-    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
-      
-        
-        
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5" checked>
-        
-          
-          <label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="">
-            
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Module Development
-  
-
-    
-  </span>
-  
-  
-
-            <span class="md-nav__icon md-icon"></span>
-          </label>
-        
-        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="true">
-          <label class="md-nav__title" for="__nav_5">
-            <span class="md-nav__icon md-icon"></span>
-            
-  
-    Module Development
-  
-
-          </label>
-          <ul class="md-nav__list" data-md-scrollfix>
-            
-              
-                
   
   
     
@@ -1057,6 +925,24 @@
         
       
       
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Module Development
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
       <a href="./" class="md-nav__link md-nav__link--active">
         
   
@@ -1064,7 +950,7 @@
   <span class="md-ellipsis">
     
   
-    Overview
+    Module Development
   
 
     
@@ -1074,125 +960,256 @@
 
       </a>
       
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="manifest/" class="md-nav__link">
         
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
   
   
-  <span class="md-ellipsis">
+  
     
   
-    Manifest Format
   
-
-    
-  </span>
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#what-a-module-is" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What a module is
+      
+    </span>
+  </a>
   
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#install-model-global-vs-import-model-project-scoped" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Install model (global) vs import model (project-scoped)
+      
+    </span>
+  </a>
   
-
-      </a>
-    </li>
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#global-module-store-and-metadata" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Global module store and metadata
+      
+    </span>
+  </a>
   
-
-              
-            
-              
-                
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#manifest-split-schema-v3" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Manifest split (schema v3)
+      
+    </span>
+  </a>
   
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#supported-manifest-functionality" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Supported manifest functionality
+      
+    </span>
+  </a>
   
-  
-  
-    <li class="md-nav__item">
-      <a href="gui/" class="md-nav__link">
+    <nav class="md-nav" aria-label="Supported manifest functionality">
+      <ul class="md-nav__list">
         
+          <li class="md-nav__item">
+  <a href="#pdv-modulejson-identity-manifest" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        pdv-module.json (identity manifest)
+      
+    </span>
+  </a>
   
-  
-  <span class="md-ellipsis">
-    
-  
-    GUI Definitions
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="lib/" class="md-nav__link">
+</li>
         
+          <li class="md-nav__item">
+  <a href="#guijson-gui-and-interaction-manifest" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        gui.json (GUI and interaction manifest)
+      
+    </span>
+  </a>
   
-  
-  <span class="md-ellipsis">
-    
-  
-    Library Files
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="entry-points/" class="md-nav__link">
+</li>
         
+      </ul>
+    </nav>
   
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#duplicate-installupdate-semantics" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Duplicate install/update semantics
+      
+    </span>
+  </a>
   
-  <span class="md-ellipsis">
-    
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#import-behavior-and-aliasing" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Import behavior and aliasing
+      
+    </span>
+  </a>
   
-    Entry Points
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#tree-binding-on-import" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Tree binding on import
+      
+    </span>
+  </a>
   
-
-    
-  </span>
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#the-lib-directory-and-python-namespace-setup" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The lib/ directory and Python namespace setup
+      
+    </span>
+  </a>
   
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#custom-type-handlers" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Custom type handlers
+      
+    </span>
+  </a>
   
-
-      </a>
-    </li>
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#script-binding-into-pdv_tree" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Script binding into pdv_tree
+      
+    </span>
+  </a>
   
-
-              
-            
-          </ul>
-        </nav>
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#module-gui-windows" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Module GUI windows
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Module GUI windows">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#layout-container-types" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Layout container types
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#leaf-node-types" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Leaf node types
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#communication" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Communication
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#modules-ui-functionality" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Modules UI functionality
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#action-execution-path" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Action execution path
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#health-checks-and-warnings" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Health checks and warnings
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
       
     </li>
   
@@ -1267,6 +1284,34 @@
     
   
     Architecture
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../developer/developer-quickstart/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Developer Quick Start
   
 
     
@@ -1378,7 +1423,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../changelog/" class="md-nav__link">
+      <a href="https://github.com/matt-pharr/physics-data-viewer/releases" class="md-nav__link">
         
   
   
@@ -1418,6 +1463,246 @@
     
   
   
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#what-a-module-is" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What a module is
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#install-model-global-vs-import-model-project-scoped" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Install model (global) vs import model (project-scoped)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#global-module-store-and-metadata" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Global module store and metadata
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#manifest-split-schema-v3" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Manifest split (schema v3)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#supported-manifest-functionality" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Supported manifest functionality
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Supported manifest functionality">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#pdv-modulejson-identity-manifest" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        pdv-module.json (identity manifest)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#guijson-gui-and-interaction-manifest" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        gui.json (GUI and interaction manifest)
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#duplicate-installupdate-semantics" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Duplicate install/update semantics
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#import-behavior-and-aliasing" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Import behavior and aliasing
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#tree-binding-on-import" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Tree binding on import
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#the-lib-directory-and-python-namespace-setup" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The lib/ directory and Python namespace setup
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#custom-type-handlers" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Custom type handlers
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#script-binding-into-pdv_tree" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Script binding into pdv_tree
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#module-gui-windows" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Module GUI windows
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Module GUI windows">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#layout-container-types" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Layout container types
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#leaf-node-types" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Leaf node types
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#communication" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Communication
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#modules-ui-functionality" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Modules UI functionality
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#action-execution-path" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Action execution path
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#health-checks-and-warnings" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Health checks and warnings
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
 </nav>
                   </div>
                 </div>
@@ -1441,8 +1726,335 @@
   
 
 
-<h1 id="index">index<a class="headerlink" href="#index" title="Permanent link">&para;</a></h1>
-<!-- TODO -->
+<h1 id="pdv-modules-feature">PDV Modules Feature<a class="headerlink" href="#pdv-modules-feature" title="Permanent link">&para;</a></h1>
+<p>This document describes the currently implemented <strong>Modules</strong> feature in PDV: how modules are structured, installed, imported into projects, bound into the tree, and executed.</p>
+<h2 id="what-a-module-is">What a module is<a class="headerlink" href="#what-a-module-is" title="Permanent link">&para;</a></h2>
+<p>A module is a directory containing:</p>
+<ul>
+<li><strong><code>pdv-module.json</code></strong> — the module manifest (identity, compatibility, scripts listing, files, entry point)</li>
+<li><strong><code>scripts/</code></strong> — one or more Python action scripts referenced by <code>actions[]</code> in <code>gui.json</code> (or in <code>pdv-module.json</code> for schema v1/v2)</li>
+<li><strong><code>lib/</code></strong> (optional) — importable Python files (<code>.py</code>) available to scripts and entry points</li>
+<li><strong><code>gui.json</code></strong> (optional) — declarative GUI layout for a module window</li>
+<li><strong><code>inputs/</code></strong> (optional) — input files (namelists, data files) declared in the manifest <code>files</code> array</li>
+</ul>
+<p>See the example module:</p>
+<ul>
+<li>Manifest: <a href="https://github.com/matt-pharr/physics-data-viewer/blob/develop/examples/modules/N-pendulum/pdv-module.json"><code>examples/modules/N-pendulum/pdv-module.json</code></a></li>
+<li>Action scripts:</li>
+<li><a href="https://github.com/matt-pharr/physics-data-viewer/blob/develop/examples/modules/N-pendulum/scripts/solve.py"><code>examples/modules/N-pendulum/scripts/solve.py</code></a></li>
+<li><a href="https://github.com/matt-pharr/physics-data-viewer/blob/develop/examples/modules/N-pendulum/scripts/animate.py"><code>examples/modules/N-pendulum/scripts/animate.py</code></a></li>
+<li>Library: <a href="https://github.com/matt-pharr/physics-data-viewer/blob/develop/examples/modules/N-pendulum/lib/n_pendulum.py"><code>examples/modules/N-pendulum/lib/n_pendulum.py</code></a></li>
+</ul>
+<h2 id="install-model-global-vs-import-model-project-scoped">Install model (global) vs import model (project-scoped)<a class="headerlink" href="#install-model-global-vs-import-model-project-scoped" title="Permanent link">&para;</a></h2>
+<p>PDV separates module lifecycle into two steps:</p>
+<ol>
+<li><strong>Install</strong> into a global module store (<code>~/.PDV/modules/...</code>), from:</li>
+<li>a local folder path (implemented), or</li>
+<li>a GitHub repository URL (scaffolded — UI shows "Coming soon").</li>
+<li><strong>Import</strong> an installed module into the current project with a project-local alias.</li>
+</ol>
+<p>Installed modules are globally available; imported modules are project-specific.</p>
+<h2 id="global-module-store-and-metadata">Global module store and metadata<a class="headerlink" href="#global-module-store-and-metadata" title="Permanent link">&para;</a></h2>
+<p>The Electron main process manages module storage and metadata:</p>
+<ul>
+<li>Packages root: <code>&lt;pdvDir&gt;/modules/packages</code></li>
+<li>Metadata index: <code>&lt;pdvDir&gt;/modules/index.json</code></li>
+</ul>
+<p>Installation validates <code>pdv-module.json</code>, copies the full module directory (including <code>lib/</code>, <code>scripts/</code>, <code>gui.json</code>, <code>inputs/</code>), and stores normalized metadata (<code>id</code>, <code>name</code>, <code>version</code>, source, revision when available).</p>
+<h2 id="manifest-split-schema-v3">Manifest split (schema v3)<a class="headerlink" href="#manifest-split-schema-v3" title="Permanent link">&para;</a></h2>
+<p>In schema v3, the module manifest is split across two files:</p>
+<ul>
+<li><strong><code>pdv-module.json</code></strong> retains identity (<code>id</code>, <code>name</code>, <code>version</code>, <code>schema_version</code>), <code>compatibility</code>, <code>scripts</code>, <code>files</code>, <code>lib</code>, <code>entry_point</code>, and <code>dependencies</code>.</li>
+<li><strong><code>gui.json</code></strong> holds <code>inputs</code>, <code>actions</code>, and the declarative <code>gui</code> layout. This file is optional — modules without a GUI omit it entirely.</li>
+</ul>
+<p>This separation keeps the identity/compatibility manifest lightweight and allows GUI definitions to evolve independently.</p>
+<h2 id="supported-manifest-functionality">Supported manifest functionality<a class="headerlink" href="#supported-manifest-functionality" title="Permanent link">&para;</a></h2>
+<p>In schema v3, functionality is split across <code>pdv-module.json</code> and <code>gui.json</code>.</p>
+<h3 id="pdv-modulejson-identity-manifest"><code>pdv-module.json</code> (identity manifest)<a class="headerlink" href="#pdv-modulejson-identity-manifest" title="Permanent link">&para;</a></h3>
+<ul>
+<li>Required module identity fields (<code>schema_version</code>, <code>id</code>, <code>name</code>, <code>version</code>)</li>
+<li><code>description</code></li>
+<li><code>scripts[]</code> — informational listing of action scripts: <code>{ name, path }</code></li>
+<li><code>files[]</code> — module-provided input files to copy and register:</li>
+<li><code>name</code> — tree node name</li>
+<li><code>path</code> — relative path within the module directory</li>
+<li><code>type</code> — <code>"namelist"</code>, <code>"lib"</code>, or <code>"file"</code></li>
+<li><code>entry_point</code> — Python module name to import after <code>sys.path</code> setup (e.g. <code>"n_pendulum"</code>)</li>
+<li>optional <code>compatibility</code> metadata:</li>
+<li><code>pdv_min</code>, <code>pdv_max</code></li>
+<li><code>python</code>, <code>python_min</code>, <code>python_max</code></li>
+<li>optional <code>dependencies[]</code> (warn-only)</li>
+</ul>
+<h3 id="guijson-gui-and-interaction-manifest"><code>gui.json</code> (GUI and interaction manifest)<a class="headerlink" href="#guijson-gui-and-interaction-manifest" title="Permanent link">&para;</a></h3>
+<ul>
+<li><code>has_gui</code> — boolean flag</li>
+<li><code>actions[]</code> with:</li>
+<li><code>id</code></li>
+<li><code>label</code></li>
+<li><code>script_path</code></li>
+<li>optional <code>inputs</code> (input IDs consumed by the action)</li>
+<li>optional <code>tab</code> (module-internal UI tab grouping)</li>
+<li><code>inputs[]</code> with declarative controls:</li>
+<li><code>control</code>: <code>text</code>, <code>dropdown</code>, <code>slider</code>, <code>checkbox</code>, <code>file</code> (omitting <code>control</code> defaults to <code>text</code>)</li>
+<li><code>default</code>, <code>type</code>, <code>label</code>, <code>tooltip</code></li>
+<li>grouping: <code>tab</code>, <code>section</code>, <code>section_collapsed</code></li>
+<li>conditional visibility: <code>visible_if</code> with <code>{ input_id, equals }</code></li>
+<li>slider metadata: <code>min</code>, <code>max</code>, <code>step</code></li>
+<li>file picker mode: <code>file_mode</code> (<code>file</code>/<code>directory</code>)</li>
+<li>dropdown options:<ul>
+<li>static <code>options</code> array of <code>{ label, value }</code></li>
+<li>dynamic <code>options_tree_path</code> (populate from tree children at that path)</li>
+</ul>
+</li>
+<li><code>gui</code> — declarative layout (see "Module GUI windows" below)</li>
+</ul>
+<p>For concrete syntax examples, see the N-pendulum module:</p>
+<ul>
+<li><code>pdv-module.json</code>: <a href="https://github.com/matt-pharr/physics-data-viewer/blob/develop/examples/modules/N-pendulum/pdv-module.json"><code>examples/modules/N-pendulum/pdv-module.json</code></a></li>
+<li><code>gui.json</code>: <a href="https://github.com/matt-pharr/physics-data-viewer/blob/develop/examples/modules/N-pendulum/gui.json"><code>examples/modules/N-pendulum/gui.json</code></a></li>
+</ul>
+<p>Key patterns demonstrated:
+- dropdown with dynamic tree options: <code>options_tree_path</code>
+- conditional input visibility with <code>visible_if</code>
+- action-to-input wiring via <code>actions[].inputs</code>
+- collapsible group containers with <code>collapsed: true</code>
+- namelist editor widget with <code>tree_path</code> binding</p>
+<h2 id="duplicate-installupdate-semantics">Duplicate install/update semantics<a class="headerlink" href="#duplicate-installupdate-semantics" title="Permanent link">&para;</a></h2>
+<p>Installing a module that already exists does not overwrite files silently. PDV reports:</p>
+<ul>
+<li><code>up_to_date</code></li>
+<li><code>update_available</code></li>
+<li><code>incompatible_update</code></li>
+</ul>
+<p>Current vs candidate version/revision metadata is surfaced so the UI can show explicit update status. Remote update checks are currently scaffolded (<code>checkUpdates</code> returns <code>not_implemented</code>).</p>
+<h2 id="import-behavior-and-aliasing">Import behavior and aliasing<a class="headerlink" href="#import-behavior-and-aliasing" title="Permanent link">&para;</a></h2>
+<p>When importing to a project:</p>
+<ul>
+<li>each imported module gets a project-local alias</li>
+<li>alias conflicts return <code>conflict</code> plus a suggested alias (<code>name_1</code>)</li>
+<li>imported module metadata is persisted in project data</li>
+<li>imports can be staged before first save, then written on save</li>
+</ul>
+<p>Imported modules are listed with:</p>
+<ul>
+<li>module identity/version</li>
+<li>declarative inputs/actions</li>
+<li>persisted settings</li>
+<li>evaluated health warnings</li>
+</ul>
+<h2 id="tree-binding-on-import">Tree binding on import<a class="headerlink" href="#tree-binding-on-import" title="Permanent link">&para;</a></h2>
+<p>When a module is imported into a project with an active kernel, the main process binds a tree structure under <code>&lt;alias&gt;</code>:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>&lt;alias&gt;/                  ← PDVModule node (module metadata)
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>  gui                     ← PDVGui node (if gui.json exists)
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>  &lt;namelist_name&gt;         ← PDVNamelist node (for each file with type &quot;namelist&quot;)
+<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>  lib/                    ← folder
+<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>    &lt;stem&gt;                ← PDVLib node (for each .py file in lib/)
+<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a>  scripts/                ← folder
+<a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a>    &lt;script_name&gt;         ← PDVScript node (for each action script)
+</code></pre></div>
+<p>Each node type is a first-class tree citizen:</p>
+<table>
+<thead>
+<tr>
+<th>Node</th>
+<th>Class</th>
+<th>Purpose</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>PDVModule</code></td>
+<td>dict subclass of <code>PDVTree</code></td>
+<td>Module metadata (id, name, version)</td>
+</tr>
+<tr>
+<td><code>PDVGui</code></td>
+<td>subclass of <code>PDVFile</code></td>
+<td>GUI layout definition (<code>.gui.json</code>)</td>
+</tr>
+<tr>
+<td><code>PDVNamelist</code></td>
+<td>subclass of <code>PDVFile</code></td>
+<td>Editable simulation namelist</td>
+</tr>
+<tr>
+<td><code>PDVLib</code></td>
+<td>subclass of <code>PDVFile</code></td>
+<td>Importable Python library</td>
+</tr>
+<tr>
+<td><code>PDVScript</code></td>
+<td><code>PDVScript</code></td>
+<td>Executable action script</td>
+</tr>
+</tbody>
+</table>
+<p>The bind sequence (<code>bindImportedModule</code> in <code>module-runtime.ts</code>) runs in order:</p>
+<ol>
+<li>Register <code>PDVModule</code> node at <code>&lt;alias&gt;</code></li>
+<li>Copy <code>gui.json</code> → register <code>PDVGui</code> at <code>&lt;alias&gt;.gui</code></li>
+<li>Copy manifest <code>files[]</code> → register <code>PDVNamelist</code>/<code>PDVFile</code> nodes</li>
+<li>Copy <code>lib/*.py</code> files → register <code>PDVLib</code> nodes under <code>&lt;alias&gt;.lib</code></li>
+<li>Copy action scripts → register <code>PDVScript</code> nodes under <code>&lt;alias&gt;.scripts</code></li>
+<li>Send <code>pdv.modules.setup</code> to kernel with <code>lib_paths</code> and <code>entry_point</code></li>
+</ol>
+<h2 id="the-lib-directory-and-python-namespace-setup">The <code>lib/</code> directory and Python namespace setup<a class="headerlink" href="#the-lib-directory-and-python-namespace-setup" title="Permanent link">&para;</a></h2>
+<p>Module developers place importable <code>.py</code> files in <code>&lt;module-root&gt;/lib/</code>. These files are the mechanism for sharing code between scripts and for defining custom data types with double-click handlers.</p>
+<p>On import, the main process:</p>
+<ol>
+<li>Copies each <code>.py</code> file from the installed module's <code>lib/</code> directory to the working directory under <code>&lt;alias&gt;/lib/</code>.</li>
+<li>Registers each as a <code>PDVLib</code> tree node (visible and editable in the tree).</li>
+<li>Sends <code>pdv.modules.setup</code> with <code>lib_paths</code> — the on-disk paths of the copied files. The kernel adds the parent directory of each path to <code>sys.path</code>.</li>
+<li>If the manifest specifies an <code>entry_point</code>, the kernel imports that module (which can register custom type handlers via <code>@handle</code>).</li>
+</ol>
+<p>This design:
+- Makes lib files visible and editable in the tree — users can modify libraries while working.
+- Is forward-compatible with planned UUID-based file storage where each file gets its own directory.
+- Keeps <code>sys.path</code> entries per-file rather than per-module, so each lib file works independently.</p>
+<p>On project load (deserialization), <code>PDVLib</code> nodes are restored and their parent directories are re-added to <code>sys.path</code>.</p>
+<h2 id="custom-type-handlers">Custom type handlers<a class="headerlink" href="#custom-type-handlers" title="Permanent link">&para;</a></h2>
+<p>Module <code>lib/</code> files can define custom Python classes and register double-click handlers using the <code>@handle</code> decorator:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">pdv</span><span class="w"> </span><span class="kn">import</span> <span class="n">handle</span>
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>
+<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="k">class</span><span class="w"> </span><span class="nc">PendulumSolution</span><span class="p">:</span>
+<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a>    <span class="k">def</span><span class="w"> </span><span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">t</span><span class="p">,</span> <span class="n">thetas</span><span class="p">,</span> <span class="n">omegas</span><span class="p">,</span> <span class="n">xs</span><span class="p">,</span> <span class="n">ys</span><span class="p">,</span> <span class="n">params</span><span class="p">):</span>
+<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a>        <span class="bp">self</span><span class="o">.</span><span class="n">t</span> <span class="o">=</span> <span class="n">t</span>
+<a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a>        <span class="c1"># ...</span>
+<a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a>
+<a id="__codelineno-1-8" name="__codelineno-1-8" href="#__codelineno-1-8"></a><span class="nd">@handle</span><span class="p">(</span><span class="n">PendulumSolution</span><span class="p">)</span>
+<a id="__codelineno-1-9" name="__codelineno-1-9" href="#__codelineno-1-9"></a><span class="k">def</span><span class="w"> </span><span class="nf">plot_pendulum</span><span class="p">(</span><span class="n">sol</span><span class="p">,</span> <span class="n">path</span><span class="p">,</span> <span class="n">pdv_tree</span><span class="p">):</span>
+<a id="__codelineno-1-10" name="__codelineno-1-10" href="#__codelineno-1-10"></a>    <span class="kn">import</span><span class="w"> </span><span class="nn">matplotlib.pyplot</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">plt</span>
+<a id="__codelineno-1-11" name="__codelineno-1-11" href="#__codelineno-1-11"></a>    <span class="c1"># ... create plot ...</span>
+<a id="__codelineno-1-12" name="__codelineno-1-12" href="#__codelineno-1-12"></a>    <span class="n">plt</span><span class="o">.</span><span class="n">show</span><span class="p">()</span>
+</code></pre></div>
+<p>When the user double-clicks a tree node containing a <code>PendulumSolution</code>, the registered handler is dispatched via <code>pdv.handler.invoke</code>. The handler walks the MRO of the stored object to find the best match.</p>
+<p>The <code>entry_point</code> in the manifest triggers the import that registers these handlers at kernel startup.</p>
+<h2 id="script-binding-into-pdv_tree">Script binding into <code>pdv_tree</code><a class="headerlink" href="#script-binding-into-pdv_tree" title="Permanent link">&para;</a></h2>
+<p>Each imported module action is bound to canonical script nodes:</p>
+<ul>
+<li><code>&lt;alias&gt;.scripts.&lt;scriptName&gt;</code></li>
+</ul>
+<p>These nodes are registered as PDV scripts and can be executed directly, e.g.:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="n">pdv_tree</span><span class="p">[</span><span class="s2">&quot;n_pendulum.scripts.solve&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">run</span><span class="p">(</span><span class="n">n_links</span><span class="o">=</span><span class="mi">3</span><span class="p">,</span> <span class="n">n_steps</span><span class="o">=</span><span class="mi">5000</span><span class="p">)</span>
+</code></pre></div>
+<p>Binding is idempotent across reload/restart. Script files are copied into the kernel working directory for editable working copies, while module store sources remain unchanged.</p>
+<h2 id="module-gui-windows">Module GUI windows<a class="headerlink" href="#module-gui-windows" title="Permanent link">&para;</a></h2>
+<p>Modules with a <code>gui.json</code> get a dedicated GUI button in the activity bar (showing the first letter of the module name). Clicking it opens a separate Electron <code>BrowserWindow</code> rendering the declarative GUI layout.</p>
+<h3 id="layout-container-types">Layout container types<a class="headerlink" href="#layout-container-types" title="Permanent link">&para;</a></h3>
+<p>The <code>gui.layout</code> object is a recursive tree of container and leaf nodes. Container types:</p>
+<table>
+<thead>
+<tr>
+<th>Type</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>row</code></td>
+<td>Horizontal flexbox — children side by side</td>
+</tr>
+<tr>
+<td><code>column</code></td>
+<td>Vertical flexbox — children stacked. When used as a direct child of <code>tabs</code>, the <code>label</code> property becomes the tab title.</td>
+</tr>
+<tr>
+<td><code>group</code></td>
+<td>Collapsible section with a <code>label</code> header. <code>collapsed: true</code> starts it folded.</td>
+</tr>
+<tr>
+<td><code>tabs</code></td>
+<td>Tabbed container — each direct child (typically <code>column</code>) becomes a tab.</td>
+</tr>
+</tbody>
+</table>
+<h3 id="leaf-node-types">Leaf node types<a class="headerlink" href="#leaf-node-types" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>Type</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>input</code></td>
+<td>Renders the input control matching <code>id</code> from <code>inputs[]</code>.</td>
+</tr>
+<tr>
+<td><code>action</code></td>
+<td>Renders the action button matching <code>id</code> from <code>actions[]</code>.</td>
+</tr>
+<tr>
+<td><code>namelist</code></td>
+<td>Inline namelist editor bound to a <code>PDVNamelist</code> tree node via <code>tree_path</code>. Optionally uses <code>tree_path_input</code> to dynamically override the path from a dropdown input.</td>
+</tr>
+</tbody>
+</table>
+<h3 id="communication">Communication<a class="headerlink" href="#communication" title="Permanent link">&para;</a></h3>
+<p>GUI windows communicate with the main window kernel through <code>window.pdv.moduleWindows.*</code>. Each module window calls <code>context()</code> on mount to learn its alias and kernel ID, and uses <code>executeInMain(code)</code> to run code in the main window's kernel.</p>
+<h2 id="modules-ui-functionality">Modules UI functionality<a class="headerlink" href="#modules-ui-functionality" title="Permanent link">&para;</a></h2>
+<p>The renderer provides two module views:</p>
+<ol>
+<li><strong>Module Library</strong></li>
+<li>list installed modules</li>
+<li>install from local folder (GitHub URL scaffolded but not yet functional)</li>
+<li>import installed module into project</li>
+<li>show status badges (imported, warning count)</li>
+<li>show duplicate/update prompts</li>
+<li><strong>Imported Modules</strong></li>
+<li>one tab per imported module alias</li>
+<li>render declarative inputs/actions from manifest</li>
+<li>run actions against the active kernel</li>
+<li>show non-blocking module health warnings</li>
+<li>persist per-module settings (including UI state)</li>
+</ol>
+<h2 id="action-execution-path">Action execution path<a class="headerlink" href="#action-execution-path" title="Permanent link">&para;</a></h2>
+<p>Running a module action:</p>
+<ol>
+<li>resolves action ID to a bound script node</li>
+<li>generates execution code for that script run call</li>
+<li>executes through normal kernel execution path</li>
+<li>displays output/errors in the existing console flow</li>
+</ol>
+<p>This keeps module actions transparent and consistent with normal script execution behavior.</p>
+<h2 id="health-checks-and-warnings">Health checks and warnings<a class="headerlink" href="#health-checks-and-warnings" title="Permanent link">&para;</a></h2>
+<p>PDV evaluates non-blocking module health warnings at import/load time. Warning codes:</p>
+<table>
+<thead>
+<tr>
+<th>Code</th>
+<th>Trigger</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>module_source_missing</code></td>
+<td>Installed module directory no longer exists on disk</td>
+</tr>
+<tr>
+<td><code>pdv_version_incompatible</code></td>
+<td>Current PDV version is below <code>pdv_min</code> or above <code>pdv_max</code></td>
+</tr>
+<tr>
+<td><code>python_version_unknown</code></td>
+<td>Could not detect the active Python version</td>
+</tr>
+<tr>
+<td><code>python_version_incompatible</code></td>
+<td>Active Python version is outside <code>python_min</code>–<code>python_max</code></td>
+</tr>
+<tr>
+<td><code>dependency_unverified</code></td>
+<td>A declared dependency could not be verified (warn-only)</td>
+</tr>
+<tr>
+<td><code>missing_action_script</code></td>
+<td>A script file referenced by an action does not exist</td>
+</tr>
+</tbody>
+</table>
+<p>Warnings are surfaced in module UI tabs and import results.</p>
 
 
 
@@ -1465,7 +2077,7 @@
     <span class="md-icon" title="Last update">
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M21 13.1c-.1 0-.3.1-.4.2l-1 1 2.1 2.1 1-1c.2-.2.2-.6 0-.8l-1.3-1.3c-.1-.1-.2-.2-.4-.2m-1.9 1.8-6.1 6V23h2.1l6.1-6.1zM12.5 7v5.2l4 2.4-1 1L11 13V7zM11 21.9c-5.1-.5-9-4.8-9-9.9C2 6.5 6.5 2 12 2c5.3 0 9.6 4.1 10 9.3-.3-.1-.6-.2-1-.2s-.7.1-1 .2C19.6 7.2 16.2 4 12 4c-4.4 0-8 3.6-8 8 0 4.1 3.1 7.5 7.1 7.9l-.1.2z"/></svg>
     </span>
-    <span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-date" title="April 2, 2026 20:11:58 UTC">April 2, 2026</span>
+    <span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-date" title="April 17, 2026 22:22:05 UTC">April 17, 2026</span>
   </span>
 
     
@@ -1484,7 +2096,59 @@
   </aside>
 
 
+  
 
+
+
+  <form class="md-feedback" name="feedback" hidden>
+    <fieldset>
+      <legend class="md-feedback__title">
+        Was this page helpful?
+      </legend>
+      <div class="md-feedback__inner">
+        <div class="md-feedback__list">
+          
+            <button class="md-feedback__icon md-icon" type="submit" title="This page was helpful" data-md-value="1">
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 12a8 8 0 0 0-8-8 8 8 0 0 0-8 8 8 8 0 0 0 8 8 8 8 0 0 0 8-8m2 0a10 10 0 0 1-10 10A10 10 0 0 1 2 12 10 10 0 0 1 12 2a10 10 0 0 1 10 10M10 9.5c0 .8-.7 1.5-1.5 1.5S7 10.3 7 9.5 7.7 8 8.5 8s1.5.7 1.5 1.5m7 0c0 .8-.7 1.5-1.5 1.5S14 10.3 14 9.5 14.7 8 15.5 8s1.5.7 1.5 1.5m-5 7.73c-1.75 0-3.29-.73-4.19-1.81L9.23 14c.45.72 1.52 1.23 2.77 1.23s2.32-.51 2.77-1.23l1.42 1.42c-.9 1.08-2.44 1.81-4.19 1.81"/></svg>
+            </button>
+          
+            <button class="md-feedback__icon md-icon" type="submit" title="This page could be improved" data-md-value="0">
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 12a8 8 0 0 0-8-8 8 8 0 0 0-8 8 8 8 0 0 0 8 8 8 8 0 0 0 8-8m2 0a10 10 0 0 1-10 10A10 10 0 0 1 2 12 10 10 0 0 1 12 2a10 10 0 0 1 10 10m-6.5-4c.8 0 1.5.7 1.5 1.5s-.7 1.5-1.5 1.5-1.5-.7-1.5-1.5.7-1.5 1.5-1.5M10 9.5c0 .8-.7 1.5-1.5 1.5S7 10.3 7 9.5 7.7 8 8.5 8s1.5.7 1.5 1.5m2 4.5c1.75 0 3.29.72 4.19 1.81l-1.42 1.42C14.32 16.5 13.25 16 12 16s-2.32.5-2.77 1.23l-1.42-1.42C8.71 14.72 10.25 14 12 14"/></svg>
+            </button>
+          
+        </div>
+        <div class="md-feedback__note">
+          
+            <div data-md-value="1" hidden>
+              
+              
+                
+              
+              
+              
+                
+                
+              
+              Thanks for the feedback!
+            </div>
+          
+            <div data-md-value="0" hidden>
+              
+              
+                
+              
+              
+              
+                
+                
+              
+              Thanks for the feedback! Help us improve by <a href="https://github.com/matt-pharr/physics-data-viewer/issues/new?labels=documentation&title=Docs+feedback:+" target="_blank" rel="noopener">opening a documentation issue</a>.
+            </div>
+          
+        </div>
+      </div>
+    </fieldset>
+  </form>
 
 
                 
@@ -1510,7 +2174,7 @@
       <nav class="md-footer__inner md-grid" aria-label="Footer" >
         
           
-          <a href="../api-reference/serialization/" class="md-footer__link md-footer__link--prev" aria-label="Previous: Serialization">
+          <a href="../api-reference/errors/" class="md-footer__link md-footer__link--prev" aria-label="Previous: Exceptions">
             <div class="md-footer__button md-icon">
               
               <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
@@ -1520,20 +2184,20 @@
                 Previous
               </span>
               <div class="md-ellipsis">
-                Serialization
+                Exceptions
               </div>
             </div>
           </a>
         
         
           
-          <a href="manifest/" class="md-footer__link md-footer__link--next" aria-label="Next: Manifest Format">
+          <a href="../developer/architecture/" class="md-footer__link md-footer__link--next" aria-label="Next: Architecture">
             <div class="md-footer__title">
               <span class="md-footer__direction">
                 Next
               </span>
               <div class="md-ellipsis">
-                Manifest Format
+                Architecture
               </div>
             </div>
             <div class="md-footer__button md-icon">
@@ -1566,6 +2230,75 @@
       <div class="md-dialog__inner md-typeset"></div>
     </div>
     
+    
+      <div class="md-consent" data-md-component="consent" id="__consent" hidden>
+        <div class="md-consent__overlay"></div>
+        <aside class="md-consent__inner">
+          <form class="md-consent__form md-grid md-typeset" name="consent">
+            
+
+
+
+  
+
+<h4>Cookie consent</h4>
+<p>We use cookies to measure documentation usage so we can see which pages are helpful and where users get stuck. Nothing personal is collected.</p>
+<input class="md-toggle" type="checkbox" id="__settings" checked>
+<div class="md-consent__settings">
+  <ul class="task-list">
+    
+    
+      
+        
+  
+  
+    
+    
+  
+  <li class="task-list-item">
+    <label class="task-list-control">
+      <input type="checkbox" name="analytics" checked>
+      <span class="task-list-indicator"></span>
+      Google Analytics
+    </label>
+  </li>
+
+      
+    
+    
+      
+        
+  
+  
+    
+    
+  
+  <li class="task-list-item">
+    <label class="task-list-control">
+      <input type="checkbox" name="github" checked>
+      <span class="task-list-indicator"></span>
+      GitHub
+    </label>
+  </li>
+
+      
+    
+    
+  </ul>
+</div>
+<div class="md-consent__controls">
+  
+    
+      <button class="md-button md-button--primary">Accept</button>
+    
+    
+    
+  
+</div>
+          </form>
+        </aside>
+      </div>
+      <script>var consent=__md_get("__consent");if(consent)for(var input of document.forms.consent.elements)input.name&&(input.checked=consent[input.name]||!1);else"file:"!==location.protocol&&setTimeout((function(){document.querySelector("[data-md-component=consent]").hidden=!1}),250);var form=document.forms.consent;for(var action of["submit","reset"])form.addEventListener(action,(function(e){if(e.preventDefault(),"reset"===e.type)for(var n of document.forms.consent.elements)n.name&&(n.checked=!1);__md_set("__consent",Object.fromEntries(Array.from(new FormData(form).keys()).map((function(e){return[e,!0]})))),location.hash="",location.reload()}))</script>
     
     
       

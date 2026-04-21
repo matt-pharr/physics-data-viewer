@@ -16,7 +16,7 @@
         <link rel="prev" href="../..">
       
       
-        <link rel="next" href="../quickstart/">
+        <link rel="next" href="../../user-guide/">
       
       
         
@@ -58,6 +58,16 @@
     <script>__md_scope=new URL("../..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
     
       
+  
+
+
+  
+  
+
+<script id="__analytics">function __md_analytics(){function e(){dataLayer.push(arguments)}window.dataLayer=window.dataLayer||[],e("js",new Date),e("config","G-0FGZ9YFWWQ"),document.addEventListener("DOMContentLoaded",(function(){document.forms.search&&document.forms.search.query.addEventListener("blur",(function(){this.value&&e("event","search",{search_term:this.value})}));document$.subscribe((function(){var t=document.forms.feedback;if(void 0!==t)for(var a of t.querySelectorAll("[type=submit]"))a.addEventListener("click",(function(a){a.preventDefault();var n=document.location.pathname,d=this.getAttribute("data-md-value");e("event","feedback",{page:n,data:d}),t.firstElementChild.disabled=!0;var r=t.querySelector(".md-feedback__note [data-md-value='"+d+"']");r&&(r.hidden=!1)})),t.hidden=!1})),location$.subscribe((function(t){e("config","G-0FGZ9YFWWQ",{page_path:t.pathname})}))}));var t=document.createElement("script");t.async=!0,t.src="https://www.googletagmanager.com/gtag/js?id=G-0FGZ9YFWWQ",document.getElementById("__analytics").insertAdjacentElement("afterEnd",t)}</script>
+  
+    <script>if("undefined"!=typeof __md_analytics){var consent=__md_get("__consent");consent&&consent.analytics&&__md_analytics()}</script>
+  
 
     
     
@@ -311,18 +321,17 @@
   
   
   
-    
-    
-      <li class="md-tabs__item">
-        <a href="../../modules/" class="md-tabs__link">
-          
+    <li class="md-tabs__item">
+      <a href="../../modules/" class="md-tabs__link">
+        
   
+  
+    
   
   Module Development
 
-        </a>
-      </li>
-    
+      </a>
+    </li>
   
 
       
@@ -352,7 +361,7 @@
   
   
     <li class="md-tabs__item">
-      <a href="../../changelog/" class="md-tabs__link">
+      <a href="https://github.com/matt-pharr/physics-data-viewer/releases" class="md-tabs__link">
         
   
   
@@ -510,6 +519,24 @@
         
       
       
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Installation
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
       <a href="./" class="md-nav__link md-nav__link--active">
         
   
@@ -527,34 +554,102 @@
 
       </a>
       
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../quickstart/" class="md-nav__link">
         
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
   
   
-  <span class="md-ellipsis">
+  
     
   
-    Quick Start
   
-
-    
-  </span>
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#prerequisites" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Prerequisites
+      
+    </span>
+  </a>
   
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#1-download-the-app" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        1. Download the app
+      
+    </span>
+  </a>
   
-
-      </a>
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#2-first-launch" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2. First launch
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#3-pick-a-python-environment" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3. Pick a Python environment
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#4-install-pdv-python" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4. Install pdv-python
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#5-youre-done" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5. You're done
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#troubleshooting" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Troubleshooting
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
     </li>
   
 
@@ -656,14 +751,14 @@
   
   
     <li class="md-nav__item">
-      <a href="../../user-guide/tree/" class="md-nav__link">
+      <a href="../../user-guide/scripts-and-tree/" class="md-nav__link">
         
   
   
   <span class="md-ellipsis">
     
   
-    The Tree
+    Scripts & the Tree
   
 
     
@@ -684,126 +779,14 @@
   
   
     <li class="md-nav__item">
-      <a href="../../user-guide/code-editor/" class="md-nav__link">
+      <a href="../../user-guide/notes-and-projects/" class="md-nav__link">
         
   
   
   <span class="md-ellipsis">
     
   
-    Code Editor
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../../user-guide/scripts/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Scripts
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../../user-guide/notes/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Notes
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../../user-guide/projects/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Projects
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../../user-guide/modules/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Modules
+    Notes & Projects
   
 
     
@@ -913,34 +896,6 @@
   
   
     <li class="md-nav__item">
-      <a href="../../api-reference/pdv-kernel/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    pdv_kernel
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
       <a href="../../api-reference/tree/" class="md-nav__link">
         
   
@@ -948,7 +903,7 @@
   <span class="md-ellipsis">
     
   
-    PDVTree
+    The Tree (pdv_tree)
   
 
     
@@ -969,14 +924,98 @@
   
   
     <li class="md-nav__item">
-      <a href="../../api-reference/serialization/" class="md-nav__link">
+      <a href="../../api-reference/nodes/" class="md-nav__link">
         
   
   
   <span class="md-ellipsis">
     
   
-    Serialization
+    Tree Node Types
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api-reference/app/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    The App Object (pdv)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api-reference/module-api/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Module API
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api-reference/errors/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Exceptions
   
 
     
@@ -999,60 +1038,6 @@
     
       
       
-  
-  
-  
-  
-    
-    
-    
-    
-      
-      
-        
-      
-    
-    
-    <li class="md-nav__item md-nav__item--nested">
-      
-        
-        
-          
-        
-        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_5" >
-        
-          
-          <label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="0">
-            
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Module Development
-  
-
-    
-  </span>
-  
-  
-
-            <span class="md-nav__icon md-icon"></span>
-          </label>
-        
-        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="false">
-          <label class="md-nav__title" for="__nav_5">
-            <span class="md-nav__icon md-icon"></span>
-            
-  
-    Module Development
-  
-
-          </label>
-          <ul class="md-nav__list" data-md-scrollfix>
-            
-              
-                
   
   
   
@@ -1065,7 +1050,7 @@
   <span class="md-ellipsis">
     
   
-    Overview
+    Module Development
   
 
     
@@ -1074,126 +1059,6 @@
   
 
       </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../../modules/manifest/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Manifest Format
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../../modules/gui/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    GUI Definitions
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../../modules/lib/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Library Files
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../../modules/entry-points/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Entry Points
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-          </ul>
-        </nav>
-      
     </li>
   
 
@@ -1267,6 +1132,34 @@
     
   
     Architecture
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../developer/developer-quickstart/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Developer Quick Start
   
 
     
@@ -1378,7 +1271,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../changelog/" class="md-nav__link">
+      <a href="https://github.com/matt-pharr/physics-data-viewer/releases" class="md-nav__link">
         
   
   
@@ -1418,6 +1311,91 @@
     
   
   
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#prerequisites" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Prerequisites
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#1-download-the-app" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        1. Download the app
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#2-first-launch" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2. First launch
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#3-pick-a-python-environment" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3. Pick a Python environment
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#4-install-pdv-python" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4. Install pdv-python
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#5-youre-done" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5. You're done
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#troubleshooting" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Troubleshooting
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
 </nav>
                   </div>
                 </div>
@@ -1441,8 +1419,146 @@
   
 
 
-<h1 id="installation">installation<a class="headerlink" href="#installation" title="Permanent link">&para;</a></h1>
-<!-- TODO -->
+<h1 id="installation">Installation<a class="headerlink" href="#installation" title="Permanent link">&para;</a></h1>
+<p>PDV ships as a desktop app plus a Python kernel package. The app installer is downloadable via <a href="https://github.com/matt-pharr/physics-data-viewer/releases/latest">releases</a>; the kernel package (<code>pdv-python</code>) is bundled with the app and installed into a Python environment of your choice the first time you use it.</p>
+<h2 id="prerequisites">Prerequisites<a class="headerlink" href="#prerequisites" title="Permanent link">&para;</a></h2>
+<ul>
+<li><strong>Operating system.</strong> macOS (Apple Silicon) or Linux (x86_64). Windows support is planned but not yet released.</li>
+<li><strong>Python ≥ 3.10</strong> available somewhere on your system. This can be a conda environment, a virtualenv, <code>pyenv</code>, or a system Python — PDV auto-detects all of these.</li>
+<li><strong>Internet connection</strong> for the initial app download and for fetching the kernel's Python dependencies (primarily <code>ipykernel</code>) on first install.</li>
+</ul>
+<div class="admonition info">
+<p class="admonition-title"><code>pdv-python</code> is bundled with the app</p>
+<p>The kernel package is not published on PyPI. PDV installs it into the environment you pick on first launch using the copy that ships inside the app bundle — there is no separate install step for you to run.</p>
+</div>
+<hr />
+<h2 id="1-download-the-app">1. Download the app<a class="headerlink" href="#1-download-the-app" title="Permanent link">&para;</a></h2>
+<p>Grab the latest release for your platform from the
+<a href="https://github.com/matt-pharr/physics-data-viewer/releases/latest">releases page</a>.</p>
+<div class="tabbed-set tabbed-alternate" data-tabs="1:3"><input checked="checked" id="__tabbed_1_1" name="__tabbed_1" type="radio" /><input id="__tabbed_1_2" name="__tabbed_1" type="radio" /><input id="__tabbed_1_3" name="__tabbed_1" type="radio" /><div class="tabbed-labels"><label for="__tabbed_1_1">macOS (Apple Silicon)</label><label for="__tabbed_1_2">Linux</label><label for="__tabbed_1_3">Windows</label></div>
+<div class="tabbed-content">
+<div class="tabbed-block">
+<p>Download <code>PDV-&lt;version&gt;-arm64.dmg</code>. Double-click to mount, then drag <strong>PDV</strong> into <code>Applications</code>.</p>
+<p>Intel Macs are not currently supported; the arm64 build is the only macOS target. If you use an Intel Mac, you can request an Intel build by <a href="https://github.com/matt-pharr/physics-data-viewer/issues/new">opening an issue</a>.</p>
+</div>
+<div class="tabbed-block">
+<p>Three formats are available; pick whichever fits your distro:</p>
+<ul>
+<li><strong>AppImage</strong> — <code>PDV-&lt;version&gt;.AppImage</code>. Make it executable and run it directly:
+  <div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>chmod<span class="w"> </span>+x<span class="w"> </span>PDV-*.AppImage
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>./PDV-*.AppImage
+</code></pre></div></li>
+<li><strong>.deb</strong> — for Debian/Ubuntu: <code>sudo apt install ./PDV_*.deb</code></li>
+<li><strong>.rpm</strong> — for Fedora/RHEL: <code>sudo dnf install ./PDV-*.rpm</code></li>
+</ul>
+</div>
+<div class="tabbed-block">
+<p>Not yet released. Planned for mid 2026.</p>
+</div>
+</div>
+</div>
+<hr />
+<h2 id="2-first-launch">2. First launch<a class="headerlink" href="#2-first-launch" title="Permanent link">&para;</a></h2>
+<p>Open PDV. You will land on the <strong>Welcome screen</strong> with three options:</p>
+<ul>
+<li><strong>New Python Project</strong></li>
+<li><strong>New Julia Project (experimental)</strong> — Julia support is early and pdv-julia is not yet bundled with the app. If you want to try it out, <a href="https://github.com/matt-pharr/physics-data-viewer/issues/new">open an issue</a>.</li>
+<li><strong>Open Project…</strong></li>
+</ul>
+<p>Pick <strong>New Python Project</strong>. If this is your first time, PDV will open the <strong>Environment Selector</strong> before starting a kernel.</p>
+<hr />
+<h2 id="3-pick-a-python-environment">3. Pick a Python environment<a class="headerlink" href="#3-pick-a-python-environment" title="Permanent link">&para;</a></h2>
+<p>The Environment Selector lists every Python interpreter PDV can find.
+It searches, in order:</p>
+<ol>
+<li>The path you configured previously (if any)</li>
+<li>The currently-active conda environment (<code>$CONDA_PREFIX</code>)</li>
+<li>The currently-active virtualenv (<code>$VIRTUAL_ENV</code>)</li>
+<li>All conda environments known to <code>conda env list</code></li>
+<li><code>pyenv</code> versions in <code>~/.pyenv/versions/</code></li>
+<li>System <code>python3</code> / <code>python</code> on <code>$PATH</code></li>
+</ol>
+<p>Each environment shows two status badges:</p>
+<table>
+<thead>
+<tr>
+<th>Badge</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong><code>pdv</code></strong> 🟢</td>
+<td><code>pdv-python</code> is installed and its version matches the app.</td>
+</tr>
+<tr>
+<td><strong><code>pdv</code></strong> 🟡</td>
+<td><code>pdv-python</code> is installed but the version does not match. A reinstall will be offered.</td>
+</tr>
+<tr>
+<td><strong><code>pdv</code></strong> 🔴</td>
+<td><code>pdv-python</code> is not installed.</td>
+</tr>
+<tr>
+<td><strong><code>ipy</code></strong> 🟢</td>
+<td><code>ipykernel</code> is installed.</td>
+</tr>
+<tr>
+<td><strong><code>ipy</code></strong> 🔴</td>
+<td><code>ipykernel</code> is missing. It will be pulled in when <code>pdv-python</code> is installed.</td>
+</tr>
+</tbody>
+</table>
+<p>If none of the detected environments are what you want, use <strong>Browse…</strong> to point PDV at a specific <code>python</code> executable. The GUI will install <code>pdv-python</code> into that environment pending your confirmation.</p>
+<hr />
+<h2 id="4-install-pdv-python">4. Install <code>pdv-python</code><a class="headerlink" href="#4-install-pdv-python" title="Permanent link">&para;</a></h2>
+<p>Select the environment you want to use. If either badge is red or yellow, an <strong>Install pdv-python</strong> button appears. Click it — PDV installs the bundled kernel package into the selected environment and streams the output into the selector panel. When it finishes and both badges are green, the <strong>Confirm</strong> button lights up.</p>
+<p>That's it. PDV opens a new project window and your kernel starts.</p>
+<div class="admonition note">
+<p class="admonition-title">Version pinning</p>
+<p>The <code>pdv-python</code> version must match the app version exactly during the <code>0.x</code> app versions. Full release <code>1.0</code> will have a more flexible compatibility policy to allow for backwards-compatiblity with projects, but generally future kernel versions will remain backwards-compatible with older projects. Breaking changes to the kernel API will be rare and will be bundled with a major app release (e.g. <code>2.0</code>); the app will include a migration tool for old projects if needed.</p>
+</div>
+<hr />
+<h2 id="5-youre-done">5. You're done<a class="headerlink" href="#5-youre-done" title="Permanent link">&para;</a></h2>
+<p>Head to the <a href="../../user-guide/">User Guide</a> to learn how the Tree works, or dive into <a href="../user-guide/scripts.md">Scripts</a> if you want to start running code right away.</p>
+<hr />
+<h2 id="troubleshooting">Troubleshooting<a class="headerlink" href="#troubleshooting" title="Permanent link">&para;</a></h2>
+<details class="question">
+<summary>"No Python environments found"</summary>
+<p>PDV did not find any Python interpreter it could use. Either:</p>
+<ul>
+<li>Install a Python distribution (we recommend
+  <a href="https://github.com/conda-forge/miniforge">miniconda</a> for managing environments), or</li>
+<li>Click <strong>Browse…</strong> and point PDV at an existing <code>python</code> executable.</li>
+</ul>
+<p>Future releases will ship with a bundled <a href="https://docs.astral.sh/uv/">uv</a> installer to use a virtual environment per-project.</p>
+</details>
+<details class="question">
+<summary><code>pdv-python</code> version mismatch after upgrading PDV</summary>
+<p>When you upgrade the app, the bundled <code>pdv-python</code> version moves with it, so any environment that was green before the upgrade will now show a yellow badge. Select the environment and click <strong>Install pdv-python</strong> to update it in-place.</p>
+</details>
+<details class="question">
+<summary>Install step fails with a pip error</summary>
+<p>The full pip output is shown in the selector panel — check it for the real error. Common causes:</p>
+<ul>
+<li><strong>Python &lt; 3.10.</strong> <code>pdv-python</code> requires Python 3.10 or newer. Pick a different environment or upgrade the interpreter.</li>
+<li><strong>No internet.</strong> The <code>pdv-python</code> package itself is bundled with the app, but its dependencies (primarily <code>ipykernel</code>) are pulled from PyPI on first install. If you are on an air-gapped machine, pre-install <code>ipykernel</code> into your target environment before running PDV's install step.</li>
+<li><strong>Read-only environment.</strong> Some system-managed Python installs (e.g. <code>/usr/bin/python3</code> on macOS) refuse to install packages. Create a venv or <a href="https://docs.conda.io/en/latest/miniconda.html">miniconda</a> env instead.</li>
+</ul>
+</details>
+<details class="question">
+<summary>macOS: "PDV is damaged and can't be opened"</summary>
+<p>This is a macOS quarantine issue. Remove the quarantine attribute:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>xattr<span class="w"> </span>-dr<span class="w"> </span>com.apple.quarantine<span class="w"> </span>/Applications/PDV.app
+</code></pre></div>
+<p>If this happens, please <a href="https://github.com/matt-pharr/physics-data-viewer/issues/new">open an issue</a> with your macOS version and the exact error message.</p>
+</details>
+<details class="question">
+<summary>Still stuck?</summary>
+<p><a href="https://github.com/matt-pharr/physics-data-viewer/issues/new">Open an issue</a>
+with the environment selector screenshot and the error output. Include
+your OS, Python version, and PDV version (Help → About).</p>
+</details>
 
 
 
@@ -1465,7 +1581,7 @@
     <span class="md-icon" title="Last update">
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M21 13.1c-.1 0-.3.1-.4.2l-1 1 2.1 2.1 1-1c.2-.2.2-.6 0-.8l-1.3-1.3c-.1-.1-.2-.2-.4-.2m-1.9 1.8-6.1 6V23h2.1l6.1-6.1zM12.5 7v5.2l4 2.4-1 1L11 13V7zM11 21.9c-5.1-.5-9-4.8-9-9.9C2 6.5 6.5 2 12 2c5.3 0 9.6 4.1 10 9.3-.3-.1-.6-.2-1-.2s-.7.1-1 .2C19.6 7.2 16.2 4 12 4c-4.4 0-8 3.6-8 8 0 4.1 3.1 7.5 7.1 7.9l-.1.2z"/></svg>
     </span>
-    <span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-date" title="April 2, 2026 20:11:58 UTC">April 2, 2026</span>
+    <span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-date" title="April 19, 2026 19:47:49 UTC">April 19, 2026</span>
   </span>
 
     
@@ -1484,7 +1600,59 @@
   </aside>
 
 
+  
 
+
+
+  <form class="md-feedback" name="feedback" hidden>
+    <fieldset>
+      <legend class="md-feedback__title">
+        Was this page helpful?
+      </legend>
+      <div class="md-feedback__inner">
+        <div class="md-feedback__list">
+          
+            <button class="md-feedback__icon md-icon" type="submit" title="This page was helpful" data-md-value="1">
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 12a8 8 0 0 0-8-8 8 8 0 0 0-8 8 8 8 0 0 0 8 8 8 8 0 0 0 8-8m2 0a10 10 0 0 1-10 10A10 10 0 0 1 2 12 10 10 0 0 1 12 2a10 10 0 0 1 10 10M10 9.5c0 .8-.7 1.5-1.5 1.5S7 10.3 7 9.5 7.7 8 8.5 8s1.5.7 1.5 1.5m7 0c0 .8-.7 1.5-1.5 1.5S14 10.3 14 9.5 14.7 8 15.5 8s1.5.7 1.5 1.5m-5 7.73c-1.75 0-3.29-.73-4.19-1.81L9.23 14c.45.72 1.52 1.23 2.77 1.23s2.32-.51 2.77-1.23l1.42 1.42c-.9 1.08-2.44 1.81-4.19 1.81"/></svg>
+            </button>
+          
+            <button class="md-feedback__icon md-icon" type="submit" title="This page could be improved" data-md-value="0">
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 12a8 8 0 0 0-8-8 8 8 0 0 0-8 8 8 8 0 0 0 8 8 8 8 0 0 0 8-8m2 0a10 10 0 0 1-10 10A10 10 0 0 1 2 12 10 10 0 0 1 12 2a10 10 0 0 1 10 10m-6.5-4c.8 0 1.5.7 1.5 1.5s-.7 1.5-1.5 1.5-1.5-.7-1.5-1.5.7-1.5 1.5-1.5M10 9.5c0 .8-.7 1.5-1.5 1.5S7 10.3 7 9.5 7.7 8 8.5 8s1.5.7 1.5 1.5m2 4.5c1.75 0 3.29.72 4.19 1.81l-1.42 1.42C14.32 16.5 13.25 16 12 16s-2.32.5-2.77 1.23l-1.42-1.42C8.71 14.72 10.25 14 12 14"/></svg>
+            </button>
+          
+        </div>
+        <div class="md-feedback__note">
+          
+            <div data-md-value="1" hidden>
+              
+              
+                
+              
+              
+              
+                
+                
+              
+              Thanks for the feedback!
+            </div>
+          
+            <div data-md-value="0" hidden>
+              
+              
+                
+              
+              
+              
+                
+                
+              
+              Thanks for the feedback! Help us improve by <a href="https://github.com/matt-pharr/physics-data-viewer/issues/new?labels=documentation&title=Docs+feedback:+" target="_blank" rel="noopener">opening a documentation issue</a>.
+            </div>
+          
+        </div>
+      </div>
+    </fieldset>
+  </form>
 
 
                 
@@ -1527,13 +1695,13 @@
         
         
           
-          <a href="../quickstart/" class="md-footer__link md-footer__link--next" aria-label="Next: Quick Start">
+          <a href="../../user-guide/" class="md-footer__link md-footer__link--next" aria-label="Next: Overview">
             <div class="md-footer__title">
               <span class="md-footer__direction">
                 Next
               </span>
               <div class="md-ellipsis">
-                Quick Start
+                Overview
               </div>
             </div>
             <div class="md-footer__button md-icon">
@@ -1566,6 +1734,75 @@
       <div class="md-dialog__inner md-typeset"></div>
     </div>
     
+    
+      <div class="md-consent" data-md-component="consent" id="__consent" hidden>
+        <div class="md-consent__overlay"></div>
+        <aside class="md-consent__inner">
+          <form class="md-consent__form md-grid md-typeset" name="consent">
+            
+
+
+
+  
+
+<h4>Cookie consent</h4>
+<p>We use cookies to measure documentation usage so we can see which pages are helpful and where users get stuck. Nothing personal is collected.</p>
+<input class="md-toggle" type="checkbox" id="__settings" checked>
+<div class="md-consent__settings">
+  <ul class="task-list">
+    
+    
+      
+        
+  
+  
+    
+    
+  
+  <li class="task-list-item">
+    <label class="task-list-control">
+      <input type="checkbox" name="analytics" checked>
+      <span class="task-list-indicator"></span>
+      Google Analytics
+    </label>
+  </li>
+
+      
+    
+    
+      
+        
+  
+  
+    
+    
+  
+  <li class="task-list-item">
+    <label class="task-list-control">
+      <input type="checkbox" name="github" checked>
+      <span class="task-list-indicator"></span>
+      GitHub
+    </label>
+  </li>
+
+      
+    
+    
+  </ul>
+</div>
+<div class="md-consent__controls">
+  
+    
+      <button class="md-button md-button--primary">Accept</button>
+    
+    
+    
+  
+</div>
+          </form>
+        </aside>
+      </div>
+      <script>var consent=__md_get("__consent");if(consent)for(var input of document.forms.consent.elements)input.name&&(input.checked=consent[input.name]||!1);else"file:"!==location.protocol&&setTimeout((function(){document.querySelector("[data-md-component=consent]").hidden=!1}),250);var form=document.forms.consent;for(var action of["submit","reset"])form.addEventListener(action,(function(e){if(e.preventDefault(),"reset"===e.type)for(var n of document.forms.consent.elements)n.name&&(n.checked=!1);__md_set("__consent",Object.fromEntries(Array.from(new FormData(form).keys()).map((function(e){return[e,!0]})))),location.hash="",location.reload()}))</script>
     
     
       

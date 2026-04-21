@@ -56,6 +56,16 @@
     <script>__md_scope=new URL(".",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
     
       
+  
+
+
+  
+  
+
+<script id="__analytics">function __md_analytics(){function e(){dataLayer.push(arguments)}window.dataLayer=window.dataLayer||[],e("js",new Date),e("config","G-0FGZ9YFWWQ"),document.addEventListener("DOMContentLoaded",(function(){document.forms.search&&document.forms.search.query.addEventListener("blur",(function(){this.value&&e("event","search",{search_term:this.value})}));document$.subscribe((function(){var t=document.forms.feedback;if(void 0!==t)for(var a of t.querySelectorAll("[type=submit]"))a.addEventListener("click",(function(a){a.preventDefault();var n=document.location.pathname,d=this.getAttribute("data-md-value");e("event","feedback",{page:n,data:d}),t.firstElementChild.disabled=!0;var r=t.querySelector(".md-feedback__note [data-md-value='"+d+"']");r&&(r.hidden=!1)})),t.hidden=!1})),location$.subscribe((function(t){e("config","G-0FGZ9YFWWQ",{page_path:t.pathname})}))}));var t=document.createElement("script");t.async=!0,t.src="https://www.googletagmanager.com/gtag/js?id=G-0FGZ9YFWWQ",document.getElementById("__analytics").insertAdjacentElement("afterEnd",t)}</script>
+  
+    <script>if("undefined"!=typeof __md_analytics){var consent=__md_get("__consent");consent&&consent.analytics&&__md_analytics()}</script>
+  
 
     
     
@@ -309,18 +319,17 @@
   
   
   
-    
-    
-      <li class="md-tabs__item">
-        <a href="modules/" class="md-tabs__link">
-          
+    <li class="md-tabs__item">
+      <a href="modules/" class="md-tabs__link">
+        
   
+  
+    
   
   Module Development
 
-        </a>
-      </li>
-    
+      </a>
+    </li>
   
 
       
@@ -350,7 +359,7 @@
   
   
     <li class="md-tabs__item">
-      <a href="changelog/" class="md-tabs__link">
+      <a href="https://github.com/matt-pharr/physics-data-viewer/releases" class="md-tabs__link">
         
   
   
@@ -426,6 +435,24 @@
         
       
       
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
       <a href="." class="md-nav__link md-nav__link--active">
         
   
@@ -442,6 +469,58 @@
   
 
       </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#why-pdv" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Why PDV?
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#features" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Features
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#get-involved" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Get involved
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
       
     </li>
   
@@ -516,34 +595,6 @@
     
   
     Installation
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="getting-started/quickstart/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Quick Start
   
 
     
@@ -653,14 +704,14 @@
   
   
     <li class="md-nav__item">
-      <a href="user-guide/tree/" class="md-nav__link">
+      <a href="user-guide/scripts-and-tree/" class="md-nav__link">
         
   
   
   <span class="md-ellipsis">
     
   
-    The Tree
+    Scripts & the Tree
   
 
     
@@ -681,126 +732,14 @@
   
   
     <li class="md-nav__item">
-      <a href="user-guide/code-editor/" class="md-nav__link">
+      <a href="user-guide/notes-and-projects/" class="md-nav__link">
         
   
   
   <span class="md-ellipsis">
     
   
-    Code Editor
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="user-guide/scripts/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Scripts
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="user-guide/notes/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Notes
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="user-guide/projects/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Projects
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="user-guide/modules/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Modules
+    Notes & Projects
   
 
     
@@ -910,34 +849,6 @@
   
   
     <li class="md-nav__item">
-      <a href="api-reference/pdv-kernel/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    pdv_kernel
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
       <a href="api-reference/tree/" class="md-nav__link">
         
   
@@ -945,7 +856,7 @@
   <span class="md-ellipsis">
     
   
-    PDVTree
+    The Tree (pdv_tree)
   
 
     
@@ -966,14 +877,98 @@
   
   
     <li class="md-nav__item">
-      <a href="api-reference/serialization/" class="md-nav__link">
+      <a href="api-reference/nodes/" class="md-nav__link">
         
   
   
   <span class="md-ellipsis">
     
   
-    Serialization
+    Tree Node Types
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="api-reference/app/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    The App Object (pdv)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="api-reference/module-api/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Module API
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="api-reference/errors/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Exceptions
   
 
     
@@ -996,60 +991,6 @@
     
       
       
-  
-  
-  
-  
-    
-    
-    
-    
-      
-      
-        
-      
-    
-    
-    <li class="md-nav__item md-nav__item--nested">
-      
-        
-        
-          
-        
-        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_5" >
-        
-          
-          <label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="0">
-            
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Module Development
-  
-
-    
-  </span>
-  
-  
-
-            <span class="md-nav__icon md-icon"></span>
-          </label>
-        
-        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="false">
-          <label class="md-nav__title" for="__nav_5">
-            <span class="md-nav__icon md-icon"></span>
-            
-  
-    Module Development
-  
-
-          </label>
-          <ul class="md-nav__list" data-md-scrollfix>
-            
-              
-                
   
   
   
@@ -1062,7 +1003,7 @@
   <span class="md-ellipsis">
     
   
-    Overview
+    Module Development
   
 
     
@@ -1071,126 +1012,6 @@
   
 
       </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="modules/manifest/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Manifest Format
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="modules/gui/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    GUI Definitions
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="modules/lib/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Library Files
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="modules/entry-points/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Entry Points
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-          </ul>
-        </nav>
-      
     </li>
   
 
@@ -1264,6 +1085,34 @@
     
   
     Architecture
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="developer/developer-quickstart/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Developer Quick Start
   
 
     
@@ -1375,7 +1224,7 @@
   
   
     <li class="md-nav__item">
-      <a href="changelog/" class="md-nav__link">
+      <a href="https://github.com/matt-pharr/physics-data-viewer/releases" class="md-nav__link">
         
   
   
@@ -1417,6 +1266,47 @@
     
   
   
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#why-pdv" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Why PDV?
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#features" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Features
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#get-involved" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Get involved
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
 </nav>
                   </div>
                 </div>
@@ -1442,8 +1332,85 @@
   
 
 
-<h1 id="pdv-physics-data-viewer">PDV - Physics Data Viewer<a class="headerlink" href="#pdv-physics-data-viewer" title="Permanent link">&para;</a></h1>
-<!-- TODO: Landing page content -->
+<h1 id="pdv-physics-data-viewer">PDV — Physics Data Viewer<a class="headerlink" href="#pdv-physics-data-viewer" title="Permanent link">&para;</a></h1>
+<p><strong>A desktop environment for computational and experimental physics analysis.</strong></p>
+<p>PDV combines a tabbed Jupyter code cell editor, an execution console, and a persistent, typed data hierarchy, the <strong>Tree</strong>, that lives inside a Python kernel. The Tree is what separates PDV from a Jupyter notebook: a navigable, save/load-able data structure that persists across sessions, giving you structured data management and reproducible analysis workflows across sessions and projects.</p>
+<p><img alt="PDV screenshot" src="assets/screenshot.png" /></p>
+<div class="admonition warning">
+<p class="admonition-title">Beta software</p>
+<p>PDV is under active development. Features documented on this site
+are expected to remain stable, including project file formats,
+but APIs and project file formats may still change between major versions.</p>
+</div>
+<hr />
+<h2 id="why-pdv">Why PDV?<a class="headerlink" href="#why-pdv" title="Permanent link">&para;</a></h2>
+<p>Physics analysis tends to sprawl: raw data in scattered files, derived results in notebook cells, one-off scripts for every plot. PDV gives you the interactive kernel of Jupyter with a persistent tree for organizing inputs and outputs, and a project-oriented workflow.</p>
+<ul>
+<li><strong>Environment-independent.</strong> Unlike OMFIT, PDV runs independently of a Python environment. Pick your own packages and Python version, and share projects without dependency headaches.</li>
+<li><strong>Easy install.</strong> No complicated platform-dependent setup. Runs on macOS and Linux out of the box, with Windows support planned.</li>
+<li><strong>Scripts and Modules.</strong> Package and re-use complex analysis stacks.</li>
+<li><strong>Live GUI builder.</strong> Set up user-friendly interfaces for scripts and parameter studies without writing UI code.</li>
+<li><strong>Modern web-app foundation.</strong> Built with the same tech as VS Code, Slack, and JupyterLab. Responsive interface that does not hang while your code runs, and does not crash when your code crashes.</li>
+<li><strong>Familiar to OMFIT users.</strong> Similar mental model, but with a modern interface designed for both local and remote execution, and a more flexible environment model for a wider variety of workflows.</li>
+<li><strong>Persistent tree object.</strong> Persist script inputs and outputs so you can save and reload your work without file-management gymnastics or wiping your namespace.</li>
+</ul>
+<p><a class="md-button md-button--primary" href="https://github.com/matt-pharr/physics-data-viewer/releases/latest">Download the latest release</a>
+<a class="md-button" href="getting-started/installation/">Get started →</a></p>
+<hr />
+<h2 id="features">Features<a class="headerlink" href="#features" title="Permanent link">&para;</a></h2>
+<div class="grid cards">
+<ul>
+<li>
+<p><strong>Persistent data tree</strong></p>
+<p>Hierarchical, typed, lazy-loaded data model inside the kernel. Arrays, DataFrames, scalars, scripts, notes, and modules all in one place.</p>
+</li>
+<li>
+<p><strong>Tabbed code editor</strong></p>
+<p>Monaco-powered editor with syntax highlighting, Jupyter-backed autocomplete, hover documentation, and multi-tab workflow.</p>
+</li>
+<li>
+<p><strong>Execution console</strong></p>
+<p>Real-time streamed output, inline plots, rich display, and error rendering — the feel of a notebook without its filesystem sprawl.</p>
+</li>
+<li>
+<p><strong>Scripts and parameters</strong></p>
+<p>Reusable analyses stored as tree nodes. Typed parameters, a run dialog, and results that go back into the Tree.</p>
+</li>
+<li>
+<p><strong>Modules</strong></p>
+<p>Share complete analysis stacks — library code, GUIs, namelists, custom type handlers — as installable packages.</p>
+</li>
+<li>
+<p><strong>Editable GUIs</strong></p>
+<p>Live drag-and-drop interface builder for configuring parameter studies without writing a UI.</p>
+</li>
+<li>
+<p><strong>Namelist editor</strong></p>
+<p>Structured editing for Fortran namelists and TOML configuration files, bound directly to tree nodes.</p>
+</li>
+<li>
+<p><strong>Markdown notes</strong></p>
+<p>Notes with LaTeX math rendering, stored in the Tree alongside data.</p>
+</li>
+<li>
+<p><strong>Project save/load</strong></p>
+<p>Serialize the complete analysis state — tree, scripts, notes, attached files — into a portable directory.</p>
+</li>
+</ul>
+</div>
+<hr />
+<h2 id="get-involved">Get involved<a class="headerlink" href="#get-involved" title="Permanent link">&para;</a></h2>
+<p>PDV is developed openly. Bug reports, feature requests, and contributions
+are all welcome.</p>
+<ul>
+<li><strong>Report a bug or request a feature:</strong>
+  <a href="https://github.com/matt-pharr/physics-data-viewer/issues/new">open an issue</a> on GitHub.</li>
+<li><strong>Request commit access or propose a contribution:</strong> email
+  <a href="mailto:matthew.pharr@columbia.edu">matthew.pharr@columbia.edu</a> with a short note about what you'd like to work on, or start a <a href="https://github.com/matt-pharr/physics-data-viewer/discussions">GitHub discussion</a>.</li>
+<li><strong>See the roadmap:</strong>
+  <a href="https://github.com/matt-pharr/physics-data-viewer/blob/develop/PLANNED_FEATURES.md">PLANNED_FEATURES.md</a> lays out features organized by release milestone.</li>
+</ul>
+<p>If you're ready to dive into the code, the <a href="developer/architecture/">Developer Guide</a> covers the architecture, setup, and testing workflow.</p>
 
 
 
@@ -1466,7 +1433,7 @@
     <span class="md-icon" title="Last update">
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M21 13.1c-.1 0-.3.1-.4.2l-1 1 2.1 2.1 1-1c.2-.2.2-.6 0-.8l-1.3-1.3c-.1-.1-.2-.2-.4-.2m-1.9 1.8-6.1 6V23h2.1l6.1-6.1zM12.5 7v5.2l4 2.4-1 1L11 13V7zM11 21.9c-5.1-.5-9-4.8-9-9.9C2 6.5 6.5 2 12 2c5.3 0 9.6 4.1 10 9.3-.3-.1-.6-.2-1-.2s-.7.1-1 .2C19.6 7.2 16.2 4 12 4c-4.4 0-8 3.6-8 8 0 4.1 3.1 7.5 7.1 7.9l-.1.2z"/></svg>
     </span>
-    <span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-date" title="April 2, 2026 20:11:58 UTC">April 2, 2026</span>
+    <span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-date" title="April 19, 2026 19:08:50 UTC">April 19, 2026</span>
   </span>
 
     
@@ -1485,9 +1452,61 @@
   </aside>
 
 
+  
+
 
   
 
+
+  <form class="md-feedback" name="feedback" hidden>
+    <fieldset>
+      <legend class="md-feedback__title">
+        Was this page helpful?
+      </legend>
+      <div class="md-feedback__inner">
+        <div class="md-feedback__list">
+          
+            <button class="md-feedback__icon md-icon" type="submit" title="This page was helpful" data-md-value="1">
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 12a8 8 0 0 0-8-8 8 8 0 0 0-8 8 8 8 0 0 0 8 8 8 8 0 0 0 8-8m2 0a10 10 0 0 1-10 10A10 10 0 0 1 2 12 10 10 0 0 1 12 2a10 10 0 0 1 10 10M10 9.5c0 .8-.7 1.5-1.5 1.5S7 10.3 7 9.5 7.7 8 8.5 8s1.5.7 1.5 1.5m7 0c0 .8-.7 1.5-1.5 1.5S14 10.3 14 9.5 14.7 8 15.5 8s1.5.7 1.5 1.5m-5 7.73c-1.75 0-3.29-.73-4.19-1.81L9.23 14c.45.72 1.52 1.23 2.77 1.23s2.32-.51 2.77-1.23l1.42 1.42c-.9 1.08-2.44 1.81-4.19 1.81"/></svg>
+            </button>
+          
+            <button class="md-feedback__icon md-icon" type="submit" title="This page could be improved" data-md-value="0">
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 12a8 8 0 0 0-8-8 8 8 0 0 0-8 8 8 8 0 0 0 8 8 8 8 0 0 0 8-8m2 0a10 10 0 0 1-10 10A10 10 0 0 1 2 12 10 10 0 0 1 12 2a10 10 0 0 1 10 10m-6.5-4c.8 0 1.5.7 1.5 1.5s-.7 1.5-1.5 1.5-1.5-.7-1.5-1.5.7-1.5 1.5-1.5M10 9.5c0 .8-.7 1.5-1.5 1.5S7 10.3 7 9.5 7.7 8 8.5 8s1.5.7 1.5 1.5m2 4.5c1.75 0 3.29.72 4.19 1.81l-1.42 1.42C14.32 16.5 13.25 16 12 16s-2.32.5-2.77 1.23l-1.42-1.42C8.71 14.72 10.25 14 12 14"/></svg>
+            </button>
+          
+        </div>
+        <div class="md-feedback__note">
+          
+            <div data-md-value="1" hidden>
+              
+              
+                
+              
+              
+              
+                
+                
+              
+              Thanks for the feedback!
+            </div>
+          
+            <div data-md-value="0" hidden>
+              
+              
+                
+              
+              
+              
+                
+                
+              
+              Thanks for the feedback! Help us improve by <a href="https://github.com/matt-pharr/physics-data-viewer/issues/new?labels=documentation&title=Docs+feedback:+" target="_blank" rel="noopener">opening a documentation issue</a>.
+            </div>
+          
+        </div>
+      </div>
+    </fieldset>
+  </form>
 
 
                 
@@ -1555,6 +1574,75 @@
       <div class="md-dialog__inner md-typeset"></div>
     </div>
     
+    
+      <div class="md-consent" data-md-component="consent" id="__consent" hidden>
+        <div class="md-consent__overlay"></div>
+        <aside class="md-consent__inner">
+          <form class="md-consent__form md-grid md-typeset" name="consent">
+            
+
+
+
+  
+
+<h4>Cookie consent</h4>
+<p>We use cookies to measure documentation usage so we can see which pages are helpful and where users get stuck. Nothing personal is collected.</p>
+<input class="md-toggle" type="checkbox" id="__settings" checked>
+<div class="md-consent__settings">
+  <ul class="task-list">
+    
+    
+      
+        
+  
+  
+    
+    
+  
+  <li class="task-list-item">
+    <label class="task-list-control">
+      <input type="checkbox" name="analytics" checked>
+      <span class="task-list-indicator"></span>
+      Google Analytics
+    </label>
+  </li>
+
+      
+    
+    
+      
+        
+  
+  
+    
+    
+  
+  <li class="task-list-item">
+    <label class="task-list-control">
+      <input type="checkbox" name="github" checked>
+      <span class="task-list-indicator"></span>
+      GitHub
+    </label>
+  </li>
+
+      
+    
+    
+  </ul>
+</div>
+<div class="md-consent__controls">
+  
+    
+      <button class="md-button md-button--primary">Accept</button>
+    
+    
+    
+  
+</div>
+          </form>
+        </aside>
+      </div>
+      <script>var consent=__md_get("__consent");if(consent)for(var input of document.forms.consent.elements)input.name&&(input.checked=consent[input.name]||!1);else"file:"!==location.protocol&&setTimeout((function(){document.querySelector("[data-md-component=consent]").hidden=!1}),250);var form=document.forms.consent;for(var action of["submit","reset"])form.addEventListener(action,(function(e){if(e.preventDefault(),"reset"===e.type)for(var n of document.forms.consent.elements)n.name&&(n.checked=!1);__md_set("__consent",Object.fromEntries(Array.from(new FormData(form).keys()).map((function(e){return[e,!0]})))),location.hash="",location.reload()}))</script>
     
     
       
