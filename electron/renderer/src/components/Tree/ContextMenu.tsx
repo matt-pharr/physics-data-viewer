@@ -132,7 +132,8 @@ export function getMenuEntries(node: TreeNodeData): MenuEntry[] {
     entries.push({ kind: 'action', id: 'edit', label: 'Edit', disabled: false });
   } else if (node.type === 'markdown') {
     entries.push({ kind: 'action', id: 'open_note', label: 'Open', disabled: false });
-    entries.push({ kind: 'action', id: 'edit', label: 'Open in external editor', disabled: false });
+    // TODO: re-enable after adding file-watcher to detect external edits
+    // entries.push({ kind: 'action', id: 'edit', label: 'Open in external editor', disabled: false });
     entries.push({ kind: 'separator', id: 'sep-1' });
   }
 
