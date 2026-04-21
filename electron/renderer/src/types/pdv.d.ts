@@ -685,6 +685,7 @@ export interface PDVApi {
     ): Promise<{ valid: boolean; error?: string }>;
     onOutput(callback: (chunk: ExecuteOutputChunk) => void): () => void;
     onKernelCrashed(callback: (payload: { kernelId: string }) => void): () => void;
+    onReconnected(callback: (payload: { kernelId: string }) => void): () => void;
   };
   tree: {
     list(kernelId: string, path?: string): Promise<NodeDescriptor[]>;

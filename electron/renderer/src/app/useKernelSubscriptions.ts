@@ -113,12 +113,18 @@ export function useKernelSubscriptions({
       }
     });
 
+    const unsubscribeReconnected = window.pdv.kernels.onReconnected(() => {
+      setTreeRefreshToken((prev) => prev + 1);
+      setModulesRefreshToken((prev) => prev + 1);
+    });
+
     return () => {
       unsubscribeTree();
       unsubscribeProject();
       unsubscribeKernelCrashed();
       unsubscribeProgress();
       unsubscribeReloading();
+      unsubscribeReconnected();
     };
   }, [
     currentKernelId,
