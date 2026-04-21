@@ -70,6 +70,7 @@ FORMAT_GUI_JSON = "gui_json"
 FORMAT_MODULE_META = "module_meta"
 FORMAT_NAMELIST = "namelist"
 FORMAT_PY_LIB = "py_lib"
+FORMAT_FILE = "file"
 
 
 def _parquet_engine() -> str:
@@ -433,6 +434,20 @@ def serialize_node(
         }
         return descriptor
 
+    if kind == KIND_FILE:
+        source_path = value.resolve_path(_source_dir)
+        if not os.path.exists(source_path):
+            raise PDVSerializationError(f"File not found: {source_path}")
+        node_uuid = value.uuid
+        node_filename = value.filename
+        dest_path = uuid_tree_path(working_dir, node_uuid, node_filename)
+        if os.path.abspath(source_path) != os.path.abspath(dest_path):
+            smart_copy(source_path, dest_path)
+        descriptor["uuid"] = node_uuid
+        descriptor["storage"] = _file_storage(node_uuid, node_filename, FORMAT_FILE)
+        descriptor["metadata"] = {"preview": preview}
+        return descriptor
+
     if kind == KIND_NDARRAY:
         import numpy as np  # noqa: PLC0415
 
@@ -760,6 +775,10 @@ def deserialize_node(storage_ref: dict, save_dir: str, *, trusted: bool = False)
             with open(abs_path, "rb") as fh:
                 return fh.read()
 
+        if fmt == FORMAT_FILE:
+            with open(abs_path, "rb") as fh:
+                return fh.read()
+
         if fmt == FORMAT_PICKLE:
             if not trusted:
                 raise PDVSerializationError(
@@ -811,6 +830,8 @@ def node_preview(value: Any, kind: str) -> str:
             return value.preview() if hasattr(value, "preview") else kind
         if kind in (KIND_SCRIPT, KIND_MARKDOWN):
             return value.preview() if hasattr(value, "preview") else kind
+        if kind == KIND_FILE:
+            return value.preview() if hasattr(value, "preview") else "file"
         if kind == KIND_SCALAR:
             return str(value)[:100]
         if kind == KIND_TEXT:

@@ -159,7 +159,7 @@ class TestIntegrationDispatch:
         fresh_tree = PDVTree()
         fresh_tree._set_working_dir(tmp_working_dir)
         # Simulate TypeScript's copyFilesForLoad: copy file-backed nodes to working dir
-        import shutil
+        from pdv.environment import smart_copy
 
         tree_index_path = os.path.join(tmp_save_dir, "tree-index.json")
         with open(tree_index_path, "r", encoding="utf-8") as fh:
@@ -171,9 +171,8 @@ class TestIntegrationDispatch:
             if storage.get("backend") == "local_file" and node_uuid and filename:
                 src = os.path.join(tmp_save_dir, "tree", node_uuid, filename)
                 dst = os.path.join(tmp_working_dir, "tree", node_uuid, filename)
-                os.makedirs(os.path.dirname(dst), exist_ok=True)
                 if os.path.exists(src):
-                    shutil.copy2(src, dst)
+                    smart_copy(src, dst)
         load_comm = _make_mock_comm()
         with (
             patch.object(comms_mod, "_comm", load_comm),

@@ -108,6 +108,7 @@ def load_tree_index(
     # Local imports to avoid circular dependencies — tree.py imports nothing
     # from this module, so importing tree.py here is safe.
     from pdv.tree import (  # noqa: PLC0415
+        PDVFile,
         PDVGui,
         PDVLib,
         PDVModule,
@@ -286,6 +287,15 @@ def load_tree_index(
                     uuid=node_uuid,
                     filename=node_filename,
                     module_id=mod_id,
+                    source_rel_path=src_rel,
+                ),
+            )
+        elif node_type == "file":
+            tree.set_quiet(
+                full_path,
+                PDVFile(
+                    uuid=node_uuid,
+                    filename=node_filename,
                     source_rel_path=src_rel,
                 ),
             )

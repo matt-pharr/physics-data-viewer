@@ -137,6 +137,69 @@ class PDVApp:
         except RuntimeError:
             print("PDV: No comm channel open. Cannot trigger save.")
 
+    def add_file(self, source_path: str) -> "PDVFile":
+        """Import an arbitrary file into the tree as a :class:`PDVFile`.
+
+        Eagerly copies the source file into the session working directory
+        under a fresh UUID-based storage path. The returned node is not
+        yet attached to the tree — assign it at the desired tree path::
+
+            mesh = pdv.add_file("~/Downloads/mesh.h5")
+            pdv_tree["simulation.mesh"] = mesh
+
+        If the returned node is never assigned to the tree, the copied
+        file is cleaned up when the kernel's temp working dir is wiped
+        at session end.
+
+        Parameters
+        ----------
+        source_path : str
+            Filesystem path to the source file. ``~`` is expanded.
+
+        Returns
+        -------
+        PDVFile
+            A new file-backed node wrapping the imported file.
+
+        Raises
+        ------
+        FileNotFoundError
+            If ``source_path`` does not exist.
+        ValueError
+            If ``source_path`` is not a regular file.
+        PDVError
+            If no kernel working directory is available (the kernel has
+            not yet received ``pdv.init``).
+        """
+        import os  # noqa: PLC0415
+
+        from pdv.comms import get_pdv_tree  # noqa: PLC0415
+        from pdv.environment import (  # noqa: PLC0415
+            generate_node_uuid,
+            smart_copy,
+            uuid_tree_path,
+        )
+        from pdv.tree import PDVFile  # noqa: PLC0415
+
+        resolved = os.path.realpath(os.path.expanduser(source_path))
+        if not os.path.exists(resolved):
+            raise FileNotFoundError(f"Source file not found: {source_path}")
+        if not os.path.isfile(resolved):
+            raise ValueError(f"Source path is not a file: {source_path}")
+
+        tree = get_pdv_tree()
+        working_dir = getattr(tree, "_working_dir", None) if tree is not None else None
+        if not working_dir:
+            raise PDVError(
+                "pdv.add_file is not available: kernel has not received pdv.init"
+            )
+
+        filename = os.path.basename(resolved)
+        node_uuid = generate_node_uuid()
+        dest = uuid_tree_path(working_dir, node_uuid, filename)
+        smart_copy(resolved, dest)
+        return PDVFile(uuid=node_uuid, filename=filename)
+
     def new_note(self, path: str, title: str | None = None) -> None:
         """Create a markdown note in the tree.
 
@@ -198,6 +261,7 @@ class PDVApp:
                 "  pdv_tree.run_script('path') — run a script node\n"
                 "  pdv.working_dir   — Path to the session working dir (for data files)\n"
                 "  pdv.save()        — save the project\n"
+                "  pdv.add_file('path/to/file') — import a file into the tree\n"
                 "  pdv.new_note('path', title='My Note') — create a markdown note\n"
                 "  pdv.help('pdv_tree') — help on a specific topic\n"
             )
