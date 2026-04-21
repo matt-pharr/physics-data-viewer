@@ -5,9 +5,9 @@ pdv-python/tests/test_handlers_script.py — Tests for pdv.script.register handl
 import uuid
 from unittest.mock import MagicMock, patch
 
-import pdv_kernel.comms as comms_mod
-from pdv_kernel.handlers.script import handle_script_register
-from pdv_kernel.tree import PDVScript, PDVTree
+import pdv.comms as comms_mod
+from pdv.handlers.script import handle_script_register
+from pdv.tree import PDVScript, PDVTree
 
 
 def _make_mock_comm():

@@ -17,9 +17,9 @@ const TEST_PYTHON_EXECUTABLE = process.env.PYTHON_PATH ?? "python3";
 
 const BOOTSTRAP_AND_OPEN_COMM = `
 from IPython import get_ipython
-import pdv_kernel.comms as _pdv_comms
-from pdv_kernel.tree import PDVTree
-from pdv_kernel.namespace import PDVApp
+import pdv.comms as _pdv_comms
+from pdv.tree import PDVTree
+from pdv.namespace import PDVApp
 try:
     from ipykernel.comm import Comm
 except Exception:

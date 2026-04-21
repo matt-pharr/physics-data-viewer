@@ -1,5 +1,5 @@
 """
-pdv-python/tests/test_serialization.py — Unit tests for pdv_kernel.serialization.
+pdv-python/tests/test_serialization.py — Unit tests for pdv.serialization.
 
 Tests cover:
 1. detect_kind() for all supported types.
@@ -13,7 +13,7 @@ Reference: ARCHITECTURE.md §7.2, §7.3
 
 import os
 import pytest
-from pdv_kernel.serialization import (
+from pdv.serialization import (
     detect_kind,
     serialize_node,
     deserialize_node,
@@ -29,7 +29,7 @@ from pdv_kernel.serialization import (
     KIND_SCRIPT,
     KIND_UNKNOWN,
 )
-from pdv_kernel.errors import PDVSerializationError
+from pdv.errors import PDVSerializationError
 
 
 class WeirdPicklable:
@@ -67,7 +67,7 @@ class TestDetectKind:
         assert detect_kind((1, 2)) == KIND_SEQUENCE
 
     def test_bytes_is_binary(self):
-        from pdv_kernel.serialization import KIND_BINARY
+        from pdv.serialization import KIND_BINARY
 
         assert detect_kind(b"data") == KIND_BINARY
 
@@ -92,13 +92,13 @@ class TestDetectKind:
 
     def test_pdv_tree_is_folder(self):
         """PDVTree returns KIND_FOLDER."""
-        from pdv_kernel.tree import PDVTree
+        from pdv.tree import PDVTree
 
         assert detect_kind(PDVTree()) == KIND_FOLDER
 
     def test_pdv_script_is_script(self):
         """PDVScript returns KIND_SCRIPT."""
-        from pdv_kernel.tree import PDVScript
+        from pdv.tree import PDVScript
 
         assert detect_kind(PDVScript("scripts/test.py")) == KIND_SCRIPT
 
@@ -234,7 +234,7 @@ class TestMetadataSubDict:
     """Tests that all descriptors contain a metadata sub-dict with type-specific fields."""
 
     def test_module_descriptor_metadata(self, tmp_working_dir):
-        from pdv_kernel.tree import PDVModule
+        from pdv.tree import PDVModule
 
         mod = PDVModule(module_id="test_mod", name="Test Module", version="1.0.0")
         desc = serialize_node("mymod", mod, tmp_working_dir)
@@ -246,7 +246,7 @@ class TestMetadataSubDict:
         assert "preview" in meta
 
     def test_gui_descriptor_metadata(self, tmp_working_dir):
-        from pdv_kernel.tree import PDVGui
+        from pdv.tree import PDVGui
 
         gui_file = os.path.join(tmp_working_dir, "tree", "mod", "gui.gui.json")
         os.makedirs(os.path.dirname(gui_file), exist_ok=True)
@@ -260,7 +260,7 @@ class TestMetadataSubDict:
         assert "preview" in meta
 
     def test_namelist_descriptor_metadata(self, tmp_working_dir):
-        from pdv_kernel.tree import PDVNamelist
+        from pdv.tree import PDVNamelist
 
         nml_file = os.path.join(tmp_working_dir, "tree", "mod", "solver.nml")
         os.makedirs(os.path.dirname(nml_file), exist_ok=True)
@@ -277,7 +277,7 @@ class TestMetadataSubDict:
         assert "preview" in meta
 
     def test_lib_descriptor_metadata(self, tmp_working_dir):
-        from pdv_kernel.tree import PDVLib
+        from pdv.tree import PDVLib
 
         lib_file = os.path.join(tmp_working_dir, "tree", "mod", "lib", "helpers.py")
         os.makedirs(os.path.dirname(lib_file), exist_ok=True)
@@ -292,7 +292,7 @@ class TestMetadataSubDict:
         assert "preview" in meta
 
     def test_script_descriptor_metadata(self, tmp_working_dir):
-        from pdv_kernel.tree import PDVScript
+        from pdv.tree import PDVScript
 
         script_file = os.path.join(tmp_working_dir, "tree", "run.py")
         os.makedirs(os.path.dirname(script_file), exist_ok=True)
@@ -312,7 +312,7 @@ class TestMetadataSubDict:
 
     def test_module_owned_script_carries_source_rel_path(self, tmp_working_dir):
         """PDVScript with source_rel_path set round-trips through serialize_node."""
-        from pdv_kernel.tree import PDVScript
+        from pdv.tree import PDVScript
 
         script_file = os.path.join(tmp_working_dir, "my_mod", "scripts", "run.py")
         os.makedirs(os.path.dirname(script_file), exist_ok=True)
@@ -330,8 +330,8 @@ class TestMetadataSubDict:
 
     def test_source_rel_path_round_trip_through_tree_loader(self, tmp_working_dir):
         """serialize_node + load_tree_index preserve source_rel_path across save/load."""
-        from pdv_kernel.tree import PDVLib, PDVModule, PDVScript, PDVTree
-        from pdv_kernel.tree_loader import load_tree_index
+        from pdv.tree import PDVLib, PDVModule, PDVScript, PDVTree
+        from pdv.tree_loader import load_tree_index
 
         mod_root = os.path.join(tmp_working_dir, "my_mod")
         scripts_dir = os.path.join(mod_root, "scripts")
@@ -379,7 +379,7 @@ class TestMetadataSubDict:
 
     def test_all_descriptors_have_metadata(self, tmp_working_dir):
         """Every kind produces a descriptor with a metadata key."""
-        from pdv_kernel.tree import PDVTree
+        from pdv.tree import PDVTree
 
         values = [
             ("folder", PDVTree()),
@@ -442,7 +442,7 @@ class TestCompositeMappingSerialize:
             )
 
     def test_pickle_fallback_node_writes_file(self, tmp_working_dir):
-        from pdv_kernel.serialization import pickle_fallback_node
+        from pdv.serialization import pickle_fallback_node
 
         obj = WeirdPicklable()
         desc = pickle_fallback_node("u", obj, tmp_working_dir)

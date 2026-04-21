@@ -5,8 +5,8 @@ pdv-python/tests/test_integration_bootstrap.py — Integration-style bootstrap/r
 from unittest.mock import MagicMock
 from types import SimpleNamespace
 
-import pdv_kernel.comms as comms_mod
-from pdv_kernel import bootstrap
+import pdv.comms as comms_mod
+from pdv import bootstrap
 
 
 def _make_mock_comm():

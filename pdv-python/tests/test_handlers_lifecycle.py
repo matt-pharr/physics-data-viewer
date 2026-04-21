@@ -12,9 +12,9 @@ Reference: ARCHITECTURE.md §4.1, §3.4
 
 import uuid
 from unittest.mock import MagicMock, patch
-import pdv_kernel.comms as comms_mod
-from pdv_kernel.handlers.lifecycle import handle_init
-from pdv_kernel.tree import PDVTree
+import pdv.comms as comms_mod
+from pdv.handlers.lifecycle import handle_init
+from pdv.tree import PDVTree
 
 
 def _make_mock_comm():

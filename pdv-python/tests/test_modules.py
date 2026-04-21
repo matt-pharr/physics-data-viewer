@@ -1,5 +1,5 @@
 """
-pdv-python/tests/test_modules.py — Tests for the handler registry in pdv_kernel.modules.
+pdv-python/tests/test_modules.py — Tests for the handler registry in pdv.modules.
 
 Tests cover:
 1. @handle decorator registers a handler.
@@ -18,7 +18,7 @@ import warnings
 
 import pytest
 
-from pdv_kernel.modules import (
+from pdv.modules import (
     clear_handlers,
     dispatch_handler,
     get_handler_registry,

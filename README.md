@@ -4,7 +4,7 @@ A desktop environment for computational and experimental physics analysis. PDV c
 
 **Status**: Alpha (`v0.0.11`) — under active development.
 
-![PDV screenshot](screenshot.png)
+![PDV screenshot](docs/assets/screenshot.png)
 
 ---
 
@@ -47,7 +47,7 @@ After installing the app, you'll be prompted to install the `pdv-python` kernel 
 
 ## Contributing
 
-PDV welcomes contributions. See the [contributor guide](./QUICK_START.md) for full setup instructions.
+PDV welcomes contributions. See the [contributor guide](./DEV_QUICKSTART.md) for full setup instructions.
 
 ### Quick Dev Setup
 
@@ -85,7 +85,7 @@ electron/            Electron app (TypeScript)
   main/              Main process — kernel management, IPC, filesystem
   renderer/src/      React frontend — tree, editor, console, modules
 pdv-python/          Python kernel package (pip install pdv-python)
-  pdv_kernel/        Tree, comm protocol, serialization, handlers
+  pdv/        Tree, comm protocol, serialization, handlers
 examples/modules/    Bundled example modules
 ```
 

@@ -140,9 +140,14 @@ export const SettingsDialog: React.FC<SettingsDialogProps> = ({
     /* eslint-enable react-hooks/set-state-in-effect */
   }, [config, shortcuts, isOpen, initialTab]);
 
-  // Subscribe to auto-update status pushes while the dialog is open.
+  // Subscribe to auto-update status pushes while the dialog is open, and
+  // fetch the current cached status so we reflect any check that completed
+  // before the dialog was first opened.
   useEffect(() => {
     if (!isOpen) return;
+    void window.pdv.updater.getStatus().then((status) => {
+      if (status) setUpdateInfo(status);
+    });
     return window.pdv.updater.onUpdateStatus(setUpdateInfo);
   }, [isOpen]);
 

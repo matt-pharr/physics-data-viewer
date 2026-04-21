@@ -1,5 +1,5 @@
 """
-pdv-python/tests/test_environment.py — Unit tests for pdv_kernel.environment.
+pdv-python/tests/test_environment.py — Unit tests for pdv.environment.
 
 Tests cover:
 1. validate_working_dir() happy path and error cases.
@@ -13,7 +13,7 @@ Reference: ARCHITECTURE.md §6.1, §6.2
 
 import os
 import pytest
-from pdv_kernel.environment import (
+from pdv.environment import (
     validate_working_dir,
     resolve_project_path,
     path_is_safe,
@@ -21,7 +21,7 @@ from pdv_kernel.environment import (
     ensure_parent,
     make_working_dir,
 )
-from pdv_kernel.errors import PDVPathError
+from pdv.errors import PDVPathError
 
 
 class TestValidateWorkingDir:

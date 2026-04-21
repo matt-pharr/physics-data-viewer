@@ -164,6 +164,7 @@ export const IPC = {
     downloadUpdate: "updater:downloadUpdate",
     installUpdate: "updater:installUpdate",
     openReleasesPage: "updater:openReleasesPage",
+    getStatus: "updater:getStatus",
   },
   /** Theme persistence channels. */
   themes: {
@@ -1856,6 +1857,8 @@ export interface PDVApi {
     installUpdate(): Promise<void>;
     /** Open the GitHub Releases page in the system browser. */
     openReleasesPage(): Promise<void>;
+    /** Get the current cached update status (null if no check has happened yet). */
+    getStatus(): Promise<UpdateStatus | null>;
     /** Subscribe to update status push notifications. */
     onUpdateStatus(callback: (status: UpdateStatus) => void): () => void;
   };

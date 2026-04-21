@@ -1,5 +1,5 @@
 """
-pdv-python/tests/test_namespace.py — Unit tests for pdv_kernel.namespace.
+pdv-python/tests/test_namespace.py — Unit tests for pdv.namespace.
 
 Tests cover:
 1. PDVNamespace blocks reassignment/deletion of pdv_tree and pdv.
@@ -13,10 +13,10 @@ from dataclasses import dataclass
 from pathlib import Path
 
 import pytest
-from pdv_kernel import comms
-from pdv_kernel.namespace import PDVApp, PDVNamespace, pdv_namespace
-from pdv_kernel.errors import PDVError, PDVProtectedNameError
-from pdv_kernel.tree import PDVTree
+from pdv import comms
+from pdv.namespace import PDVApp, PDVNamespace, pdv_namespace
+from pdv.errors import PDVError, PDVProtectedNameError
+from pdv.tree import PDVTree
 
 
 class TestPDVNamespace:

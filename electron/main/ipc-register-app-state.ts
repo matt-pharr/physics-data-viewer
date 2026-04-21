@@ -19,7 +19,8 @@ import type { ConfigStore, PDVConfig } from "./config";
 import type { Theme, WindowChromeInfo, WindowChromePlatform } from "./ipc";
 import { IPC } from "./ipc";
 import { getTopLevelMenuModel, popupTopLevelMenu, updateMenuEnabled, updateRecentProjectsMenu } from "./menu";
-import { initAutoUpdater, checkForUpdates, downloadUpdate, installUpdate, openReleasesPage } from "./auto-updater";
+import { initAutoUpdater, checkForUpdates, downloadUpdate, installUpdate, openReleasesPage, getUpdateStatus } from "./auto-updater";
+import { isQuitting } from "./app";
 
 let savedThemes: Theme[] = [];
 
@@ -138,6 +139,7 @@ export function registerAppStateIpcHandlers(
   ipcMain.handle(IPC.updater.downloadUpdate, async () => { await downloadUpdate(); });
   ipcMain.handle(IPC.updater.installUpdate, async () => { installUpdate(); });
   ipcMain.handle(IPC.updater.openReleasesPage, async () => { await openReleasesPage(); });
+  ipcMain.handle(IPC.updater.getStatus, async () => getUpdateStatus());
 
   ipcMain.handle(IPC.config.set, async (_event, updates: Partial<PDVConfig>) => {
     const current = readConfig(configStore);
@@ -216,6 +218,16 @@ export function registerAppStateIpcHandlers(
 
   ipcMain.handle(IPC.app.confirmClose, async () => {
     setAllowClose(true);
+    // During a real quit (Cmd+Q, autoUpdater restart, OS logout), call
+    // app.quit() instead of win.close(). app.quit() will close the window
+    // itself (the close handler passes through because allowClose is set),
+    // then will-quit runs kernel cleanup. Calling both win.close() and
+    // app.quit() in the same tick re-enters the quit machinery and breaks
+    // electron-updater on macOS.
+    if (isQuitting()) {
+      app.quit();
+      return;
+    }
     if (!win.isDestroyed()) {
       win.close();
     }

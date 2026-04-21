@@ -147,7 +147,7 @@ export function registerKernelIpcHandlers(
       const installStatus = await EnvironmentDetector.checkPDVInstalled(pythonPath);
       if (!installStatus.installed) {
         throw new Error(
-          `Selected Python runtime is missing pdv_kernel. Install it with: cd pdv-python && ${pythonPath} -m pip install -e ".[dev]"`
+          `Selected Python runtime is missing pdv. Install it with: cd pdv-python && ${pythonPath} -m pip install -e ".[dev]"`
         );
       }
     } else if (requestedLanguage === "julia") {
@@ -324,7 +324,7 @@ export function registerKernelIpcHandlers(
           return {
             valid: false,
             error:
-              'Missing pdv_kernel. Install it with: cd pdv-python && <python> -m pip install -e ".[dev]"',
+              'Missing pdv. Install it with: cd pdv-python && <python> -m pip install -e ".[dev]"',
           };
         }
       } else if (language === "julia") {

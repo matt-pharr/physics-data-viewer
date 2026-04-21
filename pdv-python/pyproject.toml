@@ -29,7 +29,7 @@ dev = [
 
 [tool.setuptools.packages.find]
 where = ["."]
-include = ["pdv_kernel*"]
+include = ["pdv*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

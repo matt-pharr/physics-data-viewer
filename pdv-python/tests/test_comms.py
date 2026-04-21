@@ -1,5 +1,5 @@
 """
-pdv-python/tests/test_comms.py — Unit tests for pdv_kernel.comms.
+pdv-python/tests/test_comms.py — Unit tests for pdv.comms.
 
 Tests cover:
 1. send_message() envelope construction.
@@ -15,8 +15,8 @@ Reference: ARCHITECTURE.md §3.2, §3.5, §3.6
 import uuid
 import pytest
 from unittest.mock import MagicMock, patch
-import pdv_kernel.comms as comms_mod
-from pdv_kernel.errors import PDVVersionError
+import pdv.comms as comms_mod
+from pdv.errors import PDVVersionError
 
 
 def _make_mock_comm():
@@ -121,7 +121,7 @@ class TestDispatch:
             called_with.append(msg)
 
         # Temporarily register our fake handler
-        from pdv_kernel.handlers import register, _DISPATCH
+        from pdv.handlers import register, _DISPATCH
 
         original = _DISPATCH.get("pdv._test_dispatch")
         register("pdv._test_dispatch", fake_handler)
@@ -175,12 +175,12 @@ class TestDispatch:
 
 
 class TestBootstrap:
-    """Tests for pdv_kernel.bootstrap() idempotency and injection."""
+    """Tests for pdv.bootstrap() idempotency and injection."""
 
     def test_bootstrap_idempotent(self, mock_ipython):
         """bootstrap() called twice does not double-inject or open a second comm."""
-        import pdv_kernel.comms as comms_mod
-        from pdv_kernel import bootstrap
+        import pdv.comms as comms_mod
+        from pdv import bootstrap
 
         # Ensure clean state
         comms_mod._bootstrapped = False
@@ -214,8 +214,8 @@ class TestBootstrap:
 
     def test_bootstrap_injects_pdv_tree(self, mock_ipython):
         """bootstrap() injects pdv_tree into the user namespace."""
-        import pdv_kernel.comms as comms_mod
-        from pdv_kernel import bootstrap
+        import pdv.comms as comms_mod
+        from pdv import bootstrap
 
         comms_mod._bootstrapped = False
         comms_mod._pdv_tree = None

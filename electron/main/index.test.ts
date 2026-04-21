@@ -781,7 +781,7 @@ describe("Step 5 IPC handlers", () => {
     expect(result).toEqual({ found: true, data: { "text/plain": "doc" } });
   });
 
-  it("kernels:validate returns valid when pdv_kernel is installed", async () => {
+  it("kernels:validate returns valid when pdv is installed", async () => {
     const { kernelManager: _ } = setup();
     vi.spyOn(EnvironmentDetector, "checkPDVInstalled").mockResolvedValueOnce({
       installed: true,
@@ -806,7 +806,7 @@ describe("Step 5 IPC handlers", () => {
     expect(result.error).toBeTruthy();
   });
 
-  it("kernels:validate returns invalid when pdv_kernel is missing", async () => {
+  it("kernels:validate returns invalid when pdv is missing", async () => {
     const { kernelManager: _ } = setup();
     vi.spyOn(EnvironmentDetector, "checkPDVInstalled").mockResolvedValueOnce({
       installed: false,
@@ -821,7 +821,7 @@ describe("Step 5 IPC handlers", () => {
     };
 
     expect(result.valid).toBe(false);
-    expect(result.error).toContain("pdv_kernel");
+    expect(result.error).toContain("Missing pdv");
   });
 
   it("tree:createScript sends correct payload to kernel and returns scriptPath", async () => {
@@ -1968,7 +1968,7 @@ describe("Step 5 IPC handlers", () => {
     );
   });
 
-  it("kernels:start fails fast when selected runtime lacks pdv_kernel", async () => {
+  it("kernels:start fails fast when selected runtime lacks pdv", async () => {
     const { kernelManager } = setup();
     vi.spyOn(EnvironmentDetector, "checkPDVInstalled").mockResolvedValueOnce({
       installed: false,
@@ -1979,7 +1979,7 @@ describe("Step 5 IPC handlers", () => {
     const start = getHandler(IPC.kernels.start);
     await expect(
       start({}, { language: "python", env: { PYTHON_PATH: "/usr/bin/python3" } })
-    ).rejects.toThrow("pdv_kernel");
+    ).rejects.toThrow("missing pdv");
     expect(kernelManager.start).not.toHaveBeenCalled();
   });
 

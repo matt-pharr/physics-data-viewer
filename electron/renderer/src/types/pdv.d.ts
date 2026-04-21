@@ -823,6 +823,7 @@ export interface PDVApi {
     downloadUpdate(): Promise<void>;
     installUpdate(): Promise<void>;
     openReleasesPage(): Promise<void>;
+    getStatus(): Promise<UpdateStatus | null>;
     onUpdateStatus(callback: (status: UpdateStatus) => void): () => void;
   };
   themes: {

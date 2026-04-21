@@ -33,7 +33,7 @@ electron/                ← Electron app (TypeScript)
         types/pdv.d.ts   ← all types used by renderer; re-exports from ipc.ts
 
 pdv-python/              ← Python kernel package (pip install pdv-python)
-    pdv_kernel/
+    pdv/
         __init__.py
         tree.py          ← PDVTree (dict subclass), PDVScript, PDVFile, PDVNote
         comms.py         ← comm target registration, message dispatch, bootstrap()

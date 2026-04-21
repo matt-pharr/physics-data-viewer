@@ -13,7 +13,7 @@ Renderer (React) ──window.pdv──► Preload ──ipcRenderer──► Ma
 - **Renderer (`electron/renderer/src`)**: UI only (Tree panel, command editing, console, namespace view). No direct Node.js or filesystem access.
 - **Preload (`electron/preload.ts`)**: typed bridge exposing `window.pdv`.
 - **Main (`electron/main`)**: owns kernel lifecycle, ZeroMQ sockets, project/config filesystem access, and IPC handler registration.
-- **Kernel (`pdv-python/pdv_kernel`)**: owns `PDVTree`, namespace protection, serialization, and PDV protocol handlers.
+- **Kernel (`pdv-python/pdv`)**: owns `PDVTree`, namespace protection, serialization, and PDV protocol handlers.
 
 For authoritative architecture details, see `ARCHITECTURE.md` §2 and §11.
 
@@ -139,7 +139,7 @@ npm run dev
 | Comm protocol envelope/types/versioning | `ARCHITECTURE.md` §3 and `electron/main/pdv-protocol.ts` |
 | Kernel process lifecycle and execution | `electron/main/kernel-manager.ts`, `ARCHITECTURE.md` §4 |
 | IPC surface and renderer bridge | `electron/main/ipc.ts`, `electron/main/index.ts`, `electron/preload.ts` |
-| Tree model and save/load authority | `ARCHITECTURE.md` §7 and `pdv-python/pdv_kernel/tree.py` |
-| Kernel bootstrap and handlers | `pdv-python/pdv_kernel/comms.py`, `pdv-python/pdv_kernel/handlers/` |
+| Tree model and save/load authority | `ARCHITECTURE.md` §7 and `pdv-python/pdv/tree.py` |
+| Kernel bootstrap and handlers | `pdv-python/pdv/comms.py`, `pdv-python/pdv/handlers/` |
 | Modules feature behavior and manifest syntax | `modules.md` |
 | Future roadmap items | `PLANNED_FEATURES.md` |

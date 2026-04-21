@@ -19,10 +19,10 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-import pdv_kernel.comms as comms_mod
-from pdv_kernel.handlers.note import handle_note_register
-from pdv_kernel.namespace import PDVApp
-from pdv_kernel.serialization import (
+import pdv.comms as comms_mod
+from pdv.handlers.note import handle_note_register
+from pdv.namespace import PDVApp
+from pdv.serialization import (
     FORMAT_MARKDOWN,
     KIND_MARKDOWN,
     detect_kind,
@@ -30,7 +30,7 @@ from pdv_kernel.serialization import (
     node_preview,
     serialize_node,
 )
-from pdv_kernel.tree import PDVNote, PDVTree
+from pdv.tree import PDVNote, PDVTree
 
 
 # ---------------------------------------------------------------------------

@@ -194,7 +194,7 @@ describe("EnvironmentDetector", () => {
   });
 
   describe("checkPDVInstalled()", () => {
-    it("returns { installed: true } when pdv_kernel is installed", async () => {
+    it("returns { installed: true } when pdv is installed", async () => {
       mockExecPerCommand({
         "/usr/bin/python3": { stdout: "0.0.7\n" },
       });
@@ -207,7 +207,7 @@ describe("EnvironmentDetector", () => {
       expect(status.compatible).toBe(true);
     });
 
-    it("returns { installed: false } when pdv_kernel is absent", async () => {
+    it("returns { installed: false } when pdv is absent", async () => {
       mockExecAlwaysFail();
 
       const status =
@@ -220,7 +220,7 @@ describe("EnvironmentDetector", () => {
   });
 
   describe("hasPDVKernel()", () => {
-    it("returns true when pdv_kernel is installed", async () => {
+    it("returns true when pdv is installed", async () => {
       mockExecPerCommand({
         "/usr/bin/python3": { stdout: "0.0.7\n" },
       });
@@ -229,7 +229,7 @@ describe("EnvironmentDetector", () => {
       expect(result).toBe(true);
     });
 
-    it("returns false when pdv_kernel is absent", async () => {
+    it("returns false when pdv is absent", async () => {
       mockExecAlwaysFail();
 
       const result = await EnvironmentDetector.hasPDVKernel("/bad/python");
@@ -310,7 +310,7 @@ describe("EnvironmentDetector", () => {
 
   describe("enrichEnvironment()", () => {
     it("returns enriched info with pdv and ipykernel status", async () => {
-      // Mock: python --version succeeds, pdv_kernel import succeeds, ipykernel import succeeds
+      // Mock: python --version succeeds, pdv import succeeds, ipykernel import succeeds
       mockExecPerCommand({
         "/usr/bin/python3": { stdout: "0.0.7\n" },
       });

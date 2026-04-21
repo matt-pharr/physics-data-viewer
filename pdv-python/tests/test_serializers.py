@@ -13,9 +13,9 @@ import os
 
 import pytest
 
-from pdv_kernel import serializers
-from pdv_kernel.errors import PDVSerializationError
-from pdv_kernel.serialization import (
+from pdv import serializers
+from pdv.errors import PDVSerializationError
+from pdv.serialization import (
     KIND_UNKNOWN,
     deserialize_node,
     serialize_node,
@@ -177,12 +177,12 @@ def test_deserialize_unknown_custom_format_raises(tmp_path):
 
 
 def test_public_register_serializer_entry_point_roundtrip(tmp_path):
-    """End-to-end test using ``pdv_kernel.register_serializer`` (the public API
+    """End-to-end test using ``pdv.register_serializer`` (the public API
     that module developers actually call), modeled on the n-pendulum example.
     """
     import numpy as np
 
-    import pdv_kernel
+    import pdv
 
     class _Solution:
         def __init__(self, t, x, params):
@@ -199,7 +199,7 @@ def test_public_register_serializer_entry_point_roundtrip(tmp_path):
             t=data["t"], x=data["x"], params=json.loads(str(data["params_json"]))
         )
 
-    pdv_kernel.register_serializer(
+    pdv.register_serializer(
         _Solution,
         format="solution_v1",
         extension=".npz",

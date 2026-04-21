@@ -522,7 +522,7 @@ export function checkVersionCompatibility(
   // During 0.x development, any minor/patch difference is flagged.
   // Post-1.0, consider relaxing to tolerate patch-level differences.
   // NOTE: Same version policy is enforced in environment-detector.ts
-  // (checkPDVInstalled) and pdv_kernel/comms.py (check_version).
+  // (checkPDVInstalled) and pdv/comms.py (check_version).
   if (inMinor !== myMinor || inPatch !== myPatch) return "minor_mismatch";
   return "ok";
 }

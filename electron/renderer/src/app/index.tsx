@@ -1409,9 +1409,11 @@ const App: React.FC = () => {
            });
          }}
          onInstallUpdate={() => {
-           guardDirty('install the update and restart', () => {
-             void window.pdv.updater.installUpdate();
-           });
+           // Don't guard here — the main-process close intercept will run
+           // its own dirty prompt as part of the quit sequence triggered by
+           // installUpdate(). Prompting in both places caused a double
+           // dialog and broke the welcome-screen quit path.
+           void window.pdv.updater.installUpdate();
          }}
          envWarning={interpreterWarning}
        />
