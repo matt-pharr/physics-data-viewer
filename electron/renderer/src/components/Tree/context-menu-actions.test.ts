@@ -1,33 +1,43 @@
 import { describe, expect, it } from 'vitest';
-import { getActionsForNode } from './ContextMenu';
+import { getMenuEntries, type MenuEntry } from './ContextMenu';
 
-function actionIds(type: string): string[] {
-  const node = { type } as unknown as Parameters<typeof getActionsForNode>[0];
-  return getActionsForNode(node).map((action) => action.id);
+type ActionEntry = Extract<MenuEntry, { kind: 'action' }>;
+
+function actions(type: string): ActionEntry[] {
+  const node = { type } as unknown as Parameters<typeof getMenuEntries>[0];
+  return getMenuEntries(node).filter((e): e is ActionEntry => e.kind === 'action');
 }
 
-describe('getActionsForNode', () => {
+function actionIds(type: string): string[] {
+  return actions(type).map((a) => a.id);
+}
+
+describe('getMenuEntries', () => {
   it('returns script actions for script nodes', () => {
     const ids = actionIds('script');
-    expect(ids).toEqual(['run', 'run_defaults', 'edit', 'refresh', 'print', 'copy_path', 'rename', 'delete']);
+    expect(ids).toEqual([
+      'run', 'run_defaults', 'edit', 'refresh',
+      'print', 'copy_path', 'rename', 'move', 'delete',
+    ]);
     expect(ids).not.toContain('create_script');
   });
 
-  it('includes rename for non-root nodes but not for root', () => {
+  it('includes rename and move for non-root nodes but not for root', () => {
     expect(actionIds('script')).toContain('rename');
+    expect(actionIds('script')).toContain('move');
     expect(actionIds('folder')).toContain('rename');
+    expect(actionIds('folder')).toContain('move');
     expect(actionIds('mapping')).toContain('rename');
-    expect(actionIds('ndarray')).toContain('rename');
+    expect(actionIds('ndarray')).toContain('move');
     expect(actionIds('root')).not.toContain('rename');
+    expect(actionIds('root')).not.toContain('move');
   });
 
   it('shows type-specific rename label', () => {
-    const scriptNode = { type: 'script' } as unknown as Parameters<typeof getActionsForNode>[0];
-    const renameAction = getActionsForNode(scriptNode).find((a) => a.id === 'rename');
+    const renameAction = actions('script').find((a) => a.id === 'rename');
     expect(renameAction?.label).toBe('Rename script');
 
-    const noteNode = { type: 'markdown' } as unknown as Parameters<typeof getActionsForNode>[0];
-    const noteRename = getActionsForNode(noteNode).find((a) => a.id === 'rename');
+    const noteRename = actions('markdown').find((a) => a.id === 'rename');
     expect(noteRename?.label).toBe('Rename note');
   });
 
@@ -48,8 +58,21 @@ describe('getActionsForNode', () => {
   });
 
   it('enables delete action', () => {
-    const node = { type: 'script' } as unknown as Parameters<typeof getActionsForNode>[0];
-    const deleteAction = getActionsForNode(node).find((action) => action.id === 'delete');
+    const deleteAction = actions('script').find((a) => a.id === 'delete');
     expect(deleteAction?.disabled).toBe(false);
+  });
+
+  it('includes edit (open in external editor) for markdown nodes', () => {
+    const ids = actionIds('markdown');
+    expect(ids).toContain('open_note');
+    expect(ids).toContain('edit');
+  });
+
+  it('includes separators between sections', () => {
+    const scriptEntries = getMenuEntries({ type: 'script' } as Parameters<typeof getMenuEntries>[0]);
+    expect(scriptEntries.filter((e) => e.kind === 'separator').length).toBe(1);
+
+    const folderEntries = getMenuEntries({ type: 'folder' } as Parameters<typeof getMenuEntries>[0]);
+    expect(folderEntries.filter((e) => e.kind === 'separator').length).toBe(2);
   });
 });

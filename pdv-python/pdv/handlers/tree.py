@@ -504,9 +504,134 @@ def handle_tree_rename(msg: dict) -> None:
     )
 
 
+def handle_tree_move(msg: dict) -> None:
+    """Handle ``pdv.tree.move`` — move a node to a new path in the tree.
+
+    Payload
+    -------
+    path : str
+        Dot-separated path of the node to move.
+    new_path : str
+        Full dot-separated destination path.
+    """
+    from pdv.comms import send_message, send_error, get_pdv_tree  # noqa: PLC0415
+
+    msg_id = msg.get("msg_id")
+    payload = msg.get("payload", {})
+    path = payload.get("path", "")
+    new_path = payload.get("new_path", "")
+
+    tree = get_pdv_tree()
+    if tree is None:
+        send_error(
+            "pdv.tree.move.response",
+            "tree.not_initialized",
+            "PDVTree is not initialized.",
+            in_reply_to=msg_id,
+        )
+        return
+
+    if not path:
+        send_error(
+            "pdv.tree.move.response",
+            "tree.invalid_path",
+            "Cannot move the root tree.",
+            in_reply_to=msg_id,
+        )
+        return
+
+    if not new_path:
+        send_error(
+            "pdv.tree.move.response",
+            "tree.invalid_path",
+            "Destination path must not be empty.",
+            in_reply_to=msg_id,
+        )
+        return
+
+    if path == new_path:
+        send_error(
+            "pdv.tree.move.response",
+            "tree.same_path",
+            "Source and destination are the same.",
+            in_reply_to=msg_id,
+        )
+        return
+
+    if path not in tree:
+        send_error(
+            "pdv.tree.move.response",
+            "tree.path_not_found",
+            f"No node at path: {path}",
+            in_reply_to=msg_id,
+        )
+        return
+
+    if new_path in tree:
+        send_error(
+            "pdv.tree.move.response",
+            "tree.already_exists",
+            f"A node already exists at path: {new_path}",
+            in_reply_to=msg_id,
+        )
+        return
+
+    # Prevent moving a node into its own subtree
+    if new_path.startswith(path + "."):
+        send_error(
+            "pdv.tree.move.response",
+            "tree.circular_move",
+            f"Cannot move '{path}' into its own subtree.",
+            in_reply_to=msg_id,
+        )
+        return
+
+    # Validate destination parent exists and is a container
+    new_parts = new_path.split(".")
+    if len(new_parts) > 1:
+        dest_parent = ".".join(new_parts[:-1])
+        if dest_parent not in tree:
+            send_error(
+                "pdv.tree.move.response",
+                "tree.path_not_found",
+                f"Destination parent does not exist: {dest_parent}",
+                in_reply_to=msg_id,
+            )
+            return
+        parent_val = tree[dest_parent]
+        if not isinstance(parent_val, dict):
+            send_error(
+                "pdv.tree.move.response",
+                "tree.not_a_container",
+                f"Destination parent '{dest_parent}' is not a container.",
+                in_reply_to=msg_id,
+            )
+            return
+
+    value = tree[path]
+    tree.set_quiet(new_path, value)
+
+    old_parts = path.split(".")
+    old_parent_path = ".".join(old_parts[:-1])
+    if old_parent_path:
+        old_parent = tree[old_parent_path]
+        dict.__delitem__(old_parent, old_parts[-1])
+    else:
+        dict.__delitem__(tree, old_parts[-1])
+
+    tree._emit_changed(path, "moved")
+
+    send_message(
+        "pdv.tree.move.response",
+        {"old_path": path, "new_path": new_path, "moved": True},
+        in_reply_to=msg_id,
+    )
+
+
 register("pdv.tree.list", handle_tree_list)
 register("pdv.tree.get", handle_tree_get)
 register("pdv.tree.resolve_file", handle_tree_resolve_file)
 register("pdv.tree.delete", handle_tree_delete)
 register("pdv.tree.create_node", handle_tree_create_node)
 register("pdv.tree.rename", handle_tree_rename)
+register("pdv.tree.move", handle_tree_move)

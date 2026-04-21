@@ -27,6 +27,7 @@ import { NewModuleDialog } from '../components/NewModuleDialog';
 import { ModuleMetadataDialog } from '../components/ModuleMetadataDialog';
 import { CreateNodeDialog } from '../components/Tree/CreateNodeDialog';
 import { CreateNoteDialog } from '../components/Tree/CreateNoteDialog';
+import { MoveDialog } from '../components/Tree/MoveDialog';
 import { RenameDialog } from '../components/Tree/RenameDialog';
 import { TitleBar } from '../components/TitleBar';
 import { WriteTab } from '../components/WriteTab';
@@ -138,6 +139,7 @@ const App: React.FC = () => {
   const [forceWelcome, setForceWelcome] = useState(false);
   const [scriptDialog, setScriptDialog] = useState<TreeNodeData | null>(null);
   const [renameTarget, setRenameTarget] = useState<{ path: string; key: string } | null>(null);
+  const [moveTarget, setMoveTarget] = useState<string | null>(null);
   const [createNodeTarget, setCreateNodeTarget] = useState<string | null>(null);
   const [createScriptTarget, setCreateScriptTarget] = useState<string | null>(null);
   const [createNoteTarget, setCreateNoteTarget] = useState<string | null>(null);
@@ -496,6 +498,7 @@ const App: React.FC = () => {
       if (showImportModule) { setShowImportModule(false); return; }
       if (scriptDialog) { setScriptDialog(null); return; }
       if (renameTarget) { setRenameTarget(null); return; }
+      if (moveTarget) { setMoveTarget(null); return; }
       if (createNodeTarget) { setCreateNodeTarget(null); return; }
       if (createScriptTarget) { setCreateScriptTarget(null); return; }
       if (createNoteTarget) { setCreateNoteTarget(null); return; }
@@ -679,7 +682,7 @@ const App: React.FC = () => {
         origin,
       });
       handleScriptRun(runResult);
-    } else if (action === 'edit' && (node.type === 'script' || node.type === 'namelist' || node.type === 'lib')) {
+    } else if (action === 'edit' && (node.type === 'script' || node.type === 'namelist' || node.type === 'lib' || node.type === 'markdown')) {
       try {
         if (!currentKernelId) return;
         await window.pdv.script.edit(currentKernelId, node.path);
@@ -700,6 +703,10 @@ const App: React.FC = () => {
     } else if (action === 'rename') {
       if (node.path) {
         setRenameTarget({ path: node.path, key: node.key });
+      }
+    } else if (action === 'move') {
+      if (node.path) {
+        setMoveTarget(node.path);
       }
     } else if (action === 'delete') {
       if (!currentKernelId || !node.path) return;
@@ -1253,6 +1260,27 @@ const App: React.FC = () => {
               setLastError(error instanceof Error ? error.message : String(error));
             } finally {
               setRenameTarget(null);
+            }
+          }}
+        />
+      )}
+
+      {moveTarget !== null && currentKernelId && (
+        <MoveDialog
+          currentPath={moveTarget}
+          onCancel={() => setMoveTarget(null)}
+          onMove={async (newPath) => {
+            try {
+              const result = await window.pdv.tree.move(currentKernelId, moveTarget, newPath);
+              if (!result.success) {
+                setLastError(result.error);
+              } else {
+                setTreeRefreshToken((t) => t + 1);
+              }
+            } catch (error) {
+              setLastError(error instanceof Error ? error.message : String(error));
+            } finally {
+              setMoveTarget(null);
             }
           }}
         />

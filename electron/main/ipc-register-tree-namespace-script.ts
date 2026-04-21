@@ -19,7 +19,7 @@ import * as path from "path";
 import type { CommRouter } from "./comm-router";
 import type { QueryRouter } from "./query-router";
 import type { ConfigStore, PDVConfig } from "./config";
-import { IPC, type HandlerInvokeResult, type NamelistReadResult, type NamelistWriteResult, type NamespaceInspectResult, type NamespaceInspectTarget, type NamespaceInspectorNode, type NamespaceQueryOptions, type NamespaceVariable, type ScriptParameter, type ScriptRunRequest, type ScriptRunResult, type TreeAddFileResult, type TreeCreateGuiResult, type TreeCreateLibResult, type TreeCreateNodeResult, type TreeCreateNoteResult, type TreeCreateScriptResult, type TreeRenameResult } from "./ipc";
+import { IPC, type HandlerInvokeResult, type NamelistReadResult, type NamelistWriteResult, type NamespaceInspectResult, type NamespaceInspectTarget, type NamespaceInspectorNode, type NamespaceQueryOptions, type NamespaceVariable, type ScriptParameter, type ScriptRunRequest, type ScriptRunResult, type TreeAddFileResult, type TreeCreateGuiResult, type TreeCreateLibResult, type TreeCreateNodeResult, type TreeCreateNoteResult, type TreeCreateScriptResult, type TreeMoveResult, type TreeRenameResult } from "./ipc";
 import type { KernelManager } from "./kernel-manager";
 import { PDVMessageType, type PDVFileRegisterPayload } from "./pdv-protocol";
 import type { ProjectManager } from "./project-manager";
@@ -851,6 +851,39 @@ export function registerTreeNamespaceScriptIpcHandlers(
           old_path?: string;
           new_path?: string;
           renamed?: boolean;
+        };
+        return {
+          success: true,
+          oldPath: payload.old_path,
+          newPath: payload.new_path,
+        };
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        return { success: false, error: message };
+      }
+    }
+  );
+
+  ipcMain.handle(
+    IPC.tree.move,
+    async (
+      _event,
+      kernelId: string,
+      treePath: string,
+      newPath: string
+    ): Promise<TreeMoveResult> => {
+      if (!kernelManager.getKernel(kernelId)) {
+        return { success: false, error: `Kernel not found: ${kernelId}` };
+      }
+      try {
+        const response = await commRouter.request(
+          PDVMessageType.TREE_MOVE,
+          { path: treePath, new_path: newPath }
+        );
+        const payload = response.payload as {
+          old_path?: string;
+          new_path?: string;
+          moved?: boolean;
         };
         return {
           success: true,

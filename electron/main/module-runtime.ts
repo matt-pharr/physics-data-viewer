@@ -264,10 +264,6 @@ export async function setupProjectModuleNamespaces(
  * paths, and sends a single MODULE_REGISTER message with the full remapped
  * module_index so the kernel can reconstruct the subtree in one pass.
  *
- * Non-v4 modules (no `module-index.json`) are rejected with a clear error.
- * The legacy (v1/v2/v3) per-node registration flow was removed as part of
- * the #140 module editing workflow — see the plan at
- * ~/.claude/plans/parsed-mapping-creek.md §1.
  *
  * @param commRouter - Comm router used for comm messages.
  * @param moduleManager - Module manager for manifest resolution.

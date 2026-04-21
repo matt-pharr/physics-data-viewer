@@ -110,6 +110,10 @@ export const PDVMessageType = {
   TREE_RENAME: "pdv.tree.rename",
   /** Kernel → app. Confirms rename; echoes old and new paths. */
   TREE_RENAME_RESPONSE: "pdv.tree.rename.response",
+  /** App → kernel. Move a tree node to a new path. */
+  TREE_MOVE: "pdv.tree.move",
+  /** Kernel → app. Confirms move; echoes old and new paths. */
+  TREE_MOVE_RESPONSE: "pdv.tree.move.response",
   /** App → kernel. Create an empty dict node at a given path. */
   TREE_CREATE_NODE: "pdv.tree.create_node",
   /** Kernel → app. Confirms node creation. */

@@ -88,6 +88,7 @@ export const IPC = {
     createLib: "tree:createLib",
     createNode: "tree:createNode",
     rename: "tree:rename",
+    move: "tree:move",
     invokeHandler: "tree:invokeHandler",
     delete: "tree:delete",
   },
@@ -440,6 +441,20 @@ export interface TreeRenameResult {
   /** Dot-path of the node before rename. */
   oldPath?: string;
   /** Dot-path of the node after rename. */
+  newPath?: string;
+}
+
+/**
+ * Result returned by `tree.move`.
+ */
+export interface TreeMoveResult {
+  /** True when the node was moved successfully. */
+  success: boolean;
+  /** Optional error message when `success` is false. */
+  error?: string;
+  /** Dot-path of the node before the move. */
+  oldPath?: string;
+  /** Dot-path of the node after the move. */
   newPath?: string;
 }
 
@@ -1543,6 +1558,19 @@ export interface PDVApi {
       treePath: string,
       newName: string
     ): Promise<TreeRenameResult>;
+    /**
+     * Move a tree node to a new path.
+     *
+     * @param kernelId - Target kernel ID.
+     * @param treePath - Dot-path of the node to move.
+     * @param newPath - Full dot-path of the destination.
+     * @returns Move result with old and new paths.
+     */
+    move(
+      kernelId: string,
+      treePath: string,
+      newPath: string
+    ): Promise<TreeMoveResult>;
     /**
      * Invoke a registered custom handler for a tree node.
      *
