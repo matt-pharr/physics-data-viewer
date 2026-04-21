@@ -127,14 +127,62 @@ async function syncModuleOwnedFilesToSaveDir(
  * @param bundles - Per-module manifest bundles from the save response.
  * @returns Nothing.
  */
+async function readManifestOnlyFields(
+  moduleDir: string,
+  moduleId: string,
+  moduleManager: ModuleManager,
+): Promise<{ entryPoint?: string; defaultGui?: string }> {
+  // Try the project-local manifest first (written by a previous save that
+  // already had the fix, or copied from the global store on first import).
+  try {
+    const raw = await fs.readFile(path.join(moduleDir, "pdv-module.json"), "utf8");
+    const existing = JSON.parse(raw) as Record<string, unknown>;
+    const entryPoint = typeof existing.entry_point === "string" ? existing.entry_point : undefined;
+    const defaultGui = typeof existing.default_gui === "string" ? existing.default_gui : undefined;
+    if (entryPoint || defaultGui) return { entryPoint, defaultGui };
+  } catch {
+    // No existing project-local manifest — fall through to installed source.
+  }
+
+  // Fallback: read from the globally installed or bundled module. Covers
+  // projects saved before this fix was in place, where the project-local
+  // pdv-module.json was overwritten without these fields.
+  try {
+    const installPath = await moduleManager.resolveModuleDir(moduleId, null);
+    if (installPath && installPath !== moduleDir) {
+      const raw = await fs.readFile(path.join(installPath, "pdv-module.json"), "utf8");
+      const source = JSON.parse(raw) as Record<string, unknown>;
+      return {
+        entryPoint: typeof source.entry_point === "string" ? source.entry_point : undefined,
+        defaultGui: typeof source.default_gui === "string" ? source.default_gui : undefined,
+      };
+    }
+  } catch {
+    // Module not installed globally — best-effort.
+  }
+
+  return {};
+}
+
 async function writeModuleManifestsToSaveDir(
   saveDir: string,
   bundles: ModuleManifestBundle[] | undefined,
+  moduleManager: ModuleManager,
 ): Promise<void> {
   if (!bundles || bundles.length === 0) return;
   for (const bundle of bundles) {
     if (!bundle.module_id) continue;
     const moduleDir = path.join(saveDir, "modules", bundle.module_id);
+
+    // Preserve entry_point and default_gui — these are set during module
+    // import/install and are not tracked in the kernel tree, so the
+    // kernel-side _collect_module_manifests cannot emit them. Without them,
+    // project load cannot import custom serializers (entry_point) or
+    // display the module in the activity bar (default_gui).
+    const { entryPoint, defaultGui } = await readManifestOnlyFields(
+      moduleDir, bundle.module_id, moduleManager,
+    );
+
     try {
       await writeModuleManifest(moduleDir, {
         id: bundle.module_id,
@@ -143,6 +191,8 @@ async function writeModuleManifestsToSaveDir(
         description: bundle.description,
         language: bundle.language,
         dependencies: bundle.dependencies,
+        entryPoint,
+        defaultGui,
         // Default lib_dir for the v4 manifest. Kept for external tooling
         // that reads the on-disk manifest; the TS/kernel setup path no
         // longer consumes this field — the kernel walker in
@@ -242,7 +292,7 @@ export function registerProjectIpcHandlers(
       // Now that the file contents are in place, stamp pdv-module.json and
       // module-index.json for every module in the tree so a fresh project
       // reload can rebind them via the existing v4 bind path. See plan §7.
-      await writeModuleManifestsToSaveDir(saveDir, saveResult.moduleManifests);
+      await writeModuleManifestsToSaveDir(saveDir, saveResult.moduleManifests, moduleManager);
 
       setActiveProjectDir(saveDir);
       await refreshProjectModuleHealth(saveDir);
