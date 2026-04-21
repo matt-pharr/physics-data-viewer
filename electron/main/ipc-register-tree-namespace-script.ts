@@ -19,7 +19,7 @@ import * as path from "path";
 import type { CommRouter } from "./comm-router";
 import type { QueryRouter } from "./query-router";
 import type { ConfigStore, PDVConfig } from "./config";
-import { IPC, type HandlerInvokeResult, type NamelistReadResult, type NamelistWriteResult, type NamespaceInspectResult, type NamespaceInspectTarget, type NamespaceInspectorNode, type NamespaceQueryOptions, type NamespaceVariable, type ScriptParameter, type ScriptRunRequest, type ScriptRunResult, type TreeAddFileResult, type TreeCreateGuiResult, type TreeCreateLibResult, type TreeCreateNoteResult, type TreeCreateScriptResult } from "./ipc";
+import { IPC, type HandlerInvokeResult, type NamelistReadResult, type NamelistWriteResult, type NamespaceInspectResult, type NamespaceInspectTarget, type NamespaceInspectorNode, type NamespaceQueryOptions, type NamespaceVariable, type ScriptParameter, type ScriptRunRequest, type ScriptRunResult, type TreeAddFileResult, type TreeCreateGuiResult, type TreeCreateLibResult, type TreeCreateNodeResult, type TreeCreateNoteResult, type TreeCreateScriptResult, type TreeDuplicateResult, type TreeMoveResult, type TreeRenameResult } from "./ipc";
 import type { KernelManager } from "./kernel-manager";
 import { PDVMessageType, type PDVFileRegisterPayload } from "./pdv-protocol";
 import type { ProjectManager } from "./project-manager";
@@ -692,6 +692,7 @@ export function registerTreeNamespaceScriptIpcHandlers(
     // Resolve the file path — try the kernel comm first (handles all
     // PDVFile types including lib/namelist), fall back to the legacy
     // tree-path-to-filesystem derivation for plain scripts.
+    // TODO: remove legacy for beta.
     let resolvedPath: string | undefined;
     try {
       const response = await queryRequest(
@@ -704,11 +705,13 @@ export function registerTreeNamespaceScriptIpcHandlers(
       }
     } catch {
       // Comm failed — fall through to legacy resolution
+      // TODO: remove this fallback, this silently ignores all errors.
     }
     if (!resolvedPath) {
       const kernel = kernelManager.getKernel(kernelId);
       const language = kernel?.language ?? "python";
       resolvedPath = resolveScriptPath(kernelId, scriptPath, kernelWorkingDirs, language);
+      console.warn(`[pdv] Falling back to legacy script path resolution for "${scriptPath}" → "${resolvedPath}"`);
     }
 
     const isJulia = resolvedPath.endsWith(".jl");
@@ -801,6 +804,60 @@ export function registerTreeNamespaceScriptIpcHandlers(
       const payload = response.payload as { dispatched: boolean; error?: string };
       return { success: payload.dispatched, error: payload.error };
     }
+  );
+
+  /**
+   * Register a tree IPC handler that delegates to commRouter.request.
+   *
+   * Handles kernel-not-found checks, error wrapping, and payload extraction
+   * via a caller-supplied transform.
+   */
+  function treeCommHandler<T extends { success: boolean; error?: string }>(
+    channel: string,
+    msgType: string,
+    buildPayload: (...args: string[]) => Record<string, unknown>,
+    mapResult: (payload: Record<string, unknown>) => T,
+  ): void {
+    ipcMain.handle(channel, async (_event, kernelId: string, ...rest: string[]): Promise<T> => {
+      if (!kernelManager.getKernel(kernelId)) {
+        return { success: false, error: `Kernel not found: ${kernelId}` } as T;
+      }
+      try {
+        const response = await commRouter.request(msgType, buildPayload(...rest));
+        return mapResult(response.payload as Record<string, unknown>);
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        return { success: false, error: message } as T;
+      }
+    });
+  }
+
+  treeCommHandler<TreeCreateNodeResult>(
+    IPC.tree.createNode,
+    PDVMessageType.TREE_CREATE_NODE,
+    (targetPath, nodeName) => ({ parent_path: targetPath, name: nodeName }),
+    (p) => ({ success: true, treePath: p.path as string | undefined }),
+  );
+
+  treeCommHandler<TreeRenameResult>(
+    IPC.tree.rename,
+    PDVMessageType.TREE_RENAME,
+    (treePath, newName) => ({ path: treePath, new_name: newName }),
+    (p) => ({ success: true, oldPath: p.old_path as string | undefined, newPath: p.new_path as string | undefined }),
+  );
+
+  treeCommHandler<TreeMoveResult>(
+    IPC.tree.move,
+    PDVMessageType.TREE_MOVE,
+    (treePath, newPath, filename) => ({ path: treePath, new_path: newPath, ...(filename ? { filename } : {}) }),
+    (p) => ({ success: true, oldPath: p.old_path as string | undefined, newPath: p.new_path as string | undefined }),
+  );
+
+  treeCommHandler<TreeDuplicateResult>(
+    IPC.tree.duplicate,
+    PDVMessageType.TREE_DUPLICATE,
+    (treePath, newPath, filename) => ({ path: treePath, new_path: newPath, ...(filename ? { filename } : {}) }),
+    (p) => ({ success: true, newPath: p.new_path as string | undefined }),
   );
 
   ipcMain.handle(

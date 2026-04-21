@@ -106,6 +106,22 @@ export const PDVMessageType = {
   TREE_DELETE: "pdv.tree.delete",
   /** Kernel → app. Confirms node deletion. */
   TREE_DELETE_RESPONSE: "pdv.tree.delete.response",
+  /** App → kernel. Rename a tree node (change its key under the same parent). */
+  TREE_RENAME: "pdv.tree.rename",
+  /** Kernel → app. Confirms rename; echoes old and new paths. */
+  TREE_RENAME_RESPONSE: "pdv.tree.rename.response",
+  /** App → kernel. Move a tree node to a new path. */
+  TREE_MOVE: "pdv.tree.move",
+  /** Kernel → app. Confirms move; echoes old and new paths. */
+  TREE_MOVE_RESPONSE: "pdv.tree.move.response",
+  /** App → kernel. Deep-copy a tree node to a new path. */
+  TREE_DUPLICATE: "pdv.tree.duplicate",
+  /** Kernel → app. Confirms duplication. */
+  TREE_DUPLICATE_RESPONSE: "pdv.tree.duplicate.response",
+  /** App → kernel. Create an empty dict node at a given path. */
+  TREE_CREATE_NODE: "pdv.tree.create_node",
+  /** Kernel → app. Confirms node creation. */
+  TREE_CREATE_NODE_RESPONSE: "pdv.tree.create_node.response",
   /** Kernel → app (push). Tree structure changed. */
   TREE_CHANGED: "pdv.tree.changed",
 

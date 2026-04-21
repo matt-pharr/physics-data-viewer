@@ -86,6 +86,10 @@ export const IPC = {
      * path is under a known module alias.
      */
     createLib: "tree:createLib",
+    createNode: "tree:createNode",
+    rename: "tree:rename",
+    move: "tree:move",
+    duplicate: "tree:duplicate",
     invokeHandler: "tree:invokeHandler",
     delete: "tree:delete",
   },
@@ -413,6 +417,58 @@ export interface TreeCreateNoteResult {
   notePath?: string;
   /** Dot-path of the created tree node. */
   treePath?: string;
+}
+
+/**
+ * Result returned by `tree.createNode`.
+ */
+export interface TreeCreateNodeResult {
+  /** True when the empty node was created successfully. */
+  success: boolean;
+  /** Optional error message when `success` is false. */
+  error?: string;
+  /** Dot-path of the created tree node. */
+  treePath?: string;
+}
+
+/**
+ * Result returned by `tree.rename`.
+ */
+export interface TreeRenameResult {
+  /** True when the node was renamed successfully. */
+  success: boolean;
+  /** Optional error message when `success` is false. */
+  error?: string;
+  /** Dot-path of the node before rename. */
+  oldPath?: string;
+  /** Dot-path of the node after rename. */
+  newPath?: string;
+}
+
+/**
+ * Result returned by `tree.move`.
+ */
+export interface TreeMoveResult {
+  /** True when the node was moved successfully. */
+  success: boolean;
+  /** Optional error message when `success` is false. */
+  error?: string;
+  /** Dot-path of the node before the move. */
+  oldPath?: string;
+  /** Dot-path of the node after the move. */
+  newPath?: string;
+}
+
+/**
+ * Result returned by `tree.duplicate`.
+ */
+export interface TreeDuplicateResult {
+  /** True when the deep copy succeeded. */
+  success: boolean;
+  /** Optional error message when `success` is false. */
+  error?: string;
+  /** Dot-path of the newly created copy. */
+  newPath?: string;
 }
 
 /**
@@ -1489,6 +1545,61 @@ export interface PDVApi {
       nodeType: "namelist" | "lib" | "file",
       filename: string
     ): Promise<TreeAddFileResult>;
+    /**
+     * Create an empty container (dict) node in the tree.
+     *
+     * @param kernelId - Target kernel ID.
+     * @param targetPath - Dot-path of the parent container (empty string for root).
+     * @param nodeName - Key name for the new node.
+     * @returns Node creation result payload.
+     */
+    createNode(
+      kernelId: string,
+      targetPath: string,
+      nodeName: string
+    ): Promise<TreeCreateNodeResult>;
+    /**
+     * Rename a tree node (change its key under the same parent).
+     *
+     * @param kernelId - Target kernel ID.
+     * @param treePath - Dot-path of the node to rename.
+     * @param newName - New key name (single segment, no dots).
+     * @returns Rename result with old and new paths.
+     */
+    rename(
+      kernelId: string,
+      treePath: string,
+      newName: string
+    ): Promise<TreeRenameResult>;
+    /**
+     * Move a tree node to a new path.
+     *
+     * @param kernelId - Target kernel ID.
+     * @param treePath - Dot-path of the node to move.
+     * @param newPath - Full dot-path of the destination.
+     * @returns Move result with old and new paths.
+     */
+    move(
+      kernelId: string,
+      treePath: string,
+      newPath: string,
+      filename?: string
+    ): Promise<TreeMoveResult>;
+    /**
+     * Deep-copy a tree node to a new path.
+     *
+     * @param kernelId - Target kernel ID.
+     * @param treePath - Dot-path of the node to copy.
+     * @param newPath - Full dot-path for the duplicate.
+     * @param filename - Optional override for the backing file name.
+     * @returns Duplicate result with the new path.
+     */
+    duplicate(
+      kernelId: string,
+      treePath: string,
+      newPath: string,
+      filename?: string
+    ): Promise<TreeDuplicateResult>;
     /**
      * Invoke a registered custom handler for a tree node.
      *

@@ -12,7 +12,80 @@ ARCHITECTURE.md §3.4 (tree messages), §7 (tree data model)
 
 from __future__ import annotations
 
+import os
+import shutil
+
 from pdv.handlers import register
+
+
+def _relocate_files(
+    value: object,
+    old_tree_path: str,
+    new_tree_path: str,
+    working_dir: str,
+    *,
+    copy: bool = False,
+    filename: str | None = None,
+) -> None:
+    """Move or copy backing files for all PDVFile nodes in *value*.
+
+    Recursively walks dicts so that container moves/duplicates also
+    relocate every file-backed descendant.  Updates each node's
+    ``_relative_path`` in place to reflect the new tree location.
+    """
+    from pdv.tree import PDVFile  # noqa: PLC0415
+
+    if isinstance(value, PDVFile):
+        _relocate_single_file(value, new_tree_path, working_dir,
+                              copy=copy, filename=filename)
+    elif isinstance(value, dict):
+        for key in list(dict.keys(value)):
+            child = dict.__getitem__(value, key)
+            old_child = f"{old_tree_path}.{key}"
+            new_child = f"{new_tree_path}.{key}"
+            _relocate_files(child, old_child, new_child, working_dir,
+                            copy=copy)
+
+
+def _relocate_single_file(
+    file_node: object,
+    new_tree_path: str,
+    working_dir: str,
+    *,
+    copy: bool = False,
+    filename: str | None = None,
+) -> None:
+    """Move or copy one backing file and update its ``_relative_path``.
+
+    *filename* overrides the destination filename.  When ``None``, the
+    new filename is derived from the last segment of *new_tree_path*
+    plus the original file extension.
+    """
+    from pdv.tree import PDVFile  # noqa: PLC0415
+    if not isinstance(file_node, PDVFile):
+        raise TypeError(f"Expected PDVFile, got {type(file_node).__name__}")
+
+    old_abs = file_node.resolve_path(working_dir)
+
+    if filename:
+        new_filename = filename
+    else:
+        _, ext = os.path.splitext(os.path.basename(file_node.relative_path))
+        new_key = new_tree_path.split(".")[-1]
+        new_filename = new_key + ext
+
+    new_parts = new_tree_path.split(".")
+    new_rel = os.path.join("tree", *new_parts[:-1], new_filename)
+    new_abs = os.path.join(working_dir, new_rel)
+
+    if os.path.exists(old_abs) and old_abs != new_abs:
+        os.makedirs(os.path.dirname(new_abs), exist_ok=True)
+        if copy:
+            shutil.copy2(old_abs, new_abs)
+        else:
+            shutil.move(old_abs, new_abs)
+
+    file_node._relative_path = new_rel
 
 
 def handle_tree_list(msg: dict) -> None:
@@ -332,7 +405,422 @@ def handle_tree_delete(msg: dict) -> None:
     )
 
 
+def handle_tree_create_node(msg: dict) -> None:
+    """Handle ``pdv.tree.create_node`` — create an empty dict node in the tree.
+
+    Payload
+    -------
+    parent_path : str
+        Dot-separated path of the parent container (empty string for root).
+    name : str
+        Key name for the new node.
+    """
+    from pdv.comms import send_message, send_error, get_pdv_tree  # noqa: PLC0415
+    from pdv.tree import PDVTree  # noqa: PLC0415
+
+    msg_id = msg.get("msg_id")
+    payload = msg.get("payload", {})
+    parent_path = payload.get("parent_path", "")
+    name = payload.get("name", "")
+
+    tree = get_pdv_tree()
+    if tree is None:
+        send_error(
+            "pdv.tree.create_node.response",
+            "tree.not_initialized",
+            "PDVTree is not initialized.",
+            in_reply_to=msg_id,
+        )
+        return
+
+    if not name:
+        send_error(
+            "pdv.tree.create_node.response",
+            "tree.invalid_name",
+            "Node name must not be empty.",
+            in_reply_to=msg_id,
+        )
+        return
+
+    full_path = f"{parent_path}.{name}" if parent_path else name
+
+    if full_path in tree:
+        send_error(
+            "pdv.tree.create_node.response",
+            "tree.already_exists",
+            f"A node already exists at path: {full_path}",
+            in_reply_to=msg_id,
+        )
+        return
+
+    if parent_path:
+        if parent_path not in tree:
+            send_error(
+                "pdv.tree.create_node.response",
+                "tree.path_not_found",
+                f"Parent path does not exist: {parent_path}",
+                in_reply_to=msg_id,
+            )
+            return
+        parent = tree[parent_path]
+        if not isinstance(parent, dict):
+            send_error(
+                "pdv.tree.create_node.response",
+                "tree.not_a_container",
+                f"Parent at '{parent_path}' is not a container.",
+                in_reply_to=msg_id,
+            )
+            return
+
+    tree[full_path] = PDVTree()
+
+    send_message(
+        "pdv.tree.create_node.response",
+        {"path": full_path, "created": True},
+        in_reply_to=msg_id,
+    )
+
+
+def handle_tree_rename(msg: dict) -> None:
+    """Handle ``pdv.tree.rename`` — change the key of a tree node.
+
+    Moves the value from ``path`` to a sibling key ``new_name`` under the
+    same parent. The old key is removed and the new key is inserted.
+
+    Payload
+    -------
+    path : str
+        Dot-separated path of the node to rename.
+    new_name : str
+        New key name (single segment, no dots).
+    """
+    from pdv.comms import send_message, send_error, get_pdv_tree  # noqa: PLC0415
+
+    msg_id = msg.get("msg_id")
+    payload = msg.get("payload", {})
+    path = payload.get("path", "")
+    new_name = payload.get("new_name", "")
+
+    tree = get_pdv_tree()
+    if tree is None:
+        send_error(
+            "pdv.tree.rename.response",
+            "tree.not_initialized",
+            "PDVTree is not initialized.",
+            in_reply_to=msg_id,
+        )
+        return
+
+    if not path:
+        send_error(
+            "pdv.tree.rename.response",
+            "tree.invalid_path",
+            "Cannot rename the root tree.",
+            in_reply_to=msg_id,
+        )
+        return
+
+    if not new_name:
+        send_error(
+            "pdv.tree.rename.response",
+            "tree.invalid_name",
+            "New name must not be empty.",
+            in_reply_to=msg_id,
+        )
+        return
+
+    if "." in new_name:
+        send_error(
+            "pdv.tree.rename.response",
+            "tree.invalid_name",
+            "New name must not contain dots.",
+            in_reply_to=msg_id,
+        )
+        return
+
+    if path not in tree:
+        send_error(
+            "pdv.tree.rename.response",
+            "tree.path_not_found",
+            f"No node at path: {path}",
+            in_reply_to=msg_id,
+        )
+        return
+
+    parts = path.split(".")
+    parent_path = ".".join(parts[:-1])
+    new_path = f"{parent_path}.{new_name}" if parent_path else new_name
+
+    if new_path in tree:
+        send_error(
+            "pdv.tree.rename.response",
+            "tree.already_exists",
+            f"A node already exists at path: {new_path}",
+            in_reply_to=msg_id,
+        )
+        return
+
+    value = tree[path]
+
+    if tree._working_dir:
+        _relocate_files(value, path, new_path, tree._working_dir, copy=False)
+
+    tree.set_quiet(new_path, value)
+    # Delete the old key at the dict level to avoid a second changed push
+    if parent_path:
+        parent = tree[parent_path]
+        dict.__delitem__(parent, parts[-1])
+    else:
+        dict.__delitem__(tree, parts[-1])
+    tree._emit_changed(path, "renamed")
+
+    send_message(
+        "pdv.tree.rename.response",
+        {"old_path": path, "new_path": new_path, "renamed": True},
+        in_reply_to=msg_id,
+    )
+
+
+def handle_tree_move(msg: dict) -> None:
+    """Handle ``pdv.tree.move`` — move a node to a new path in the tree.
+
+    Payload
+    -------
+    path : str
+        Dot-separated path of the node to move.
+    new_path : str
+        Full dot-separated destination path.
+    """
+    from pdv.comms import send_message, send_error, get_pdv_tree  # noqa: PLC0415
+
+    msg_id = msg.get("msg_id")
+    payload = msg.get("payload", {})
+    path = payload.get("path", "")
+    new_path = payload.get("new_path", "")
+
+    tree = get_pdv_tree()
+    if tree is None:
+        send_error(
+            "pdv.tree.move.response",
+            "tree.not_initialized",
+            "PDVTree is not initialized.",
+            in_reply_to=msg_id,
+        )
+        return
+
+    if not path:
+        send_error(
+            "pdv.tree.move.response",
+            "tree.invalid_path",
+            "Cannot move the root tree.",
+            in_reply_to=msg_id,
+        )
+        return
+
+    if not new_path:
+        send_error(
+            "pdv.tree.move.response",
+            "tree.invalid_path",
+            "Destination path must not be empty.",
+            in_reply_to=msg_id,
+        )
+        return
+
+    if path == new_path:
+        send_error(
+            "pdv.tree.move.response",
+            "tree.same_path",
+            "Source and destination are the same.",
+            in_reply_to=msg_id,
+        )
+        return
+
+    if path not in tree:
+        send_error(
+            "pdv.tree.move.response",
+            "tree.path_not_found",
+            f"No node at path: {path}",
+            in_reply_to=msg_id,
+        )
+        return
+
+    if new_path in tree:
+        send_error(
+            "pdv.tree.move.response",
+            "tree.already_exists",
+            f"A node already exists at path: {new_path}",
+            in_reply_to=msg_id,
+        )
+        return
+
+    # Prevent moving a node into its own subtree
+    if new_path.startswith(path + "."):
+        send_error(
+            "pdv.tree.move.response",
+            "tree.circular_move",
+            f"Cannot move '{path}' into its own subtree.",
+            in_reply_to=msg_id,
+        )
+        return
+
+    # Validate destination parent exists and is a container
+    new_parts = new_path.split(".")
+    if len(new_parts) > 1:
+        dest_parent = ".".join(new_parts[:-1])
+        if dest_parent not in tree:
+            send_error(
+                "pdv.tree.move.response",
+                "tree.path_not_found",
+                f"Destination parent does not exist: {dest_parent}",
+                in_reply_to=msg_id,
+            )
+            return
+        parent_val = tree[dest_parent]
+        if not isinstance(parent_val, dict):
+            send_error(
+                "pdv.tree.move.response",
+                "tree.not_a_container",
+                f"Destination parent '{dest_parent}' is not a container.",
+                in_reply_to=msg_id,
+            )
+            return
+
+    filename = payload.get("filename") or None
+
+    value = tree[path]
+
+    if tree._working_dir:
+        _relocate_files(value, path, new_path, tree._working_dir,
+                        copy=False, filename=filename)
+
+    tree.set_quiet(new_path, value)
+
+    old_parts = path.split(".")
+    old_parent_path = ".".join(old_parts[:-1])
+    if old_parent_path:
+        old_parent = tree[old_parent_path]
+        dict.__delitem__(old_parent, old_parts[-1])
+    else:
+        dict.__delitem__(tree, old_parts[-1])
+
+    tree._emit_changed(path, "moved")
+
+    send_message(
+        "pdv.tree.move.response",
+        {"old_path": path, "new_path": new_path, "moved": True},
+        in_reply_to=msg_id,
+    )
+
+
+def handle_tree_duplicate(msg: dict) -> None:
+    """Handle ``pdv.tree.duplicate`` — deep-copy a node to a new path.
+
+    Payload
+    -------
+    path : str
+        Dot-separated path of the node to copy.
+    new_path : str
+        Full dot-separated destination path for the copy.
+    """
+    import copy  # noqa: PLC0415
+
+    from pdv.comms import send_message, send_error, get_pdv_tree  # noqa: PLC0415
+
+    msg_id = msg.get("msg_id")
+    payload = msg.get("payload", {})
+    path = payload.get("path", "")
+    new_path = payload.get("new_path", "")
+
+    tree = get_pdv_tree()
+    if tree is None:
+        send_error(
+            "pdv.tree.duplicate.response",
+            "tree.not_initialized",
+            "PDVTree is not initialized.",
+            in_reply_to=msg_id,
+        )
+        return
+
+    if not path:
+        send_error(
+            "pdv.tree.duplicate.response",
+            "tree.invalid_path",
+            "Cannot duplicate the root tree.",
+            in_reply_to=msg_id,
+        )
+        return
+
+    if not new_path:
+        send_error(
+            "pdv.tree.duplicate.response",
+            "tree.invalid_path",
+            "Destination path must not be empty.",
+            in_reply_to=msg_id,
+        )
+        return
+
+    if path not in tree:
+        send_error(
+            "pdv.tree.duplicate.response",
+            "tree.path_not_found",
+            f"No node at path: {path}",
+            in_reply_to=msg_id,
+        )
+        return
+
+    if new_path in tree:
+        send_error(
+            "pdv.tree.duplicate.response",
+            "tree.already_exists",
+            f"A node already exists at path: {new_path}",
+            in_reply_to=msg_id,
+        )
+        return
+
+    new_parts = new_path.split(".")
+    if len(new_parts) > 1:
+        dest_parent = ".".join(new_parts[:-1])
+        if dest_parent not in tree:
+            send_error(
+                "pdv.tree.duplicate.response",
+                "tree.path_not_found",
+                f"Destination parent does not exist: {dest_parent}",
+                in_reply_to=msg_id,
+            )
+            return
+        parent_val = tree[dest_parent]
+        if not isinstance(parent_val, dict):
+            send_error(
+                "pdv.tree.duplicate.response",
+                "tree.not_a_container",
+                f"Destination parent '{dest_parent}' is not a container.",
+                in_reply_to=msg_id,
+            )
+            return
+
+    filename = payload.get("filename") or None
+
+    value = tree[path]
+    cloned = copy.deepcopy(value)
+
+    if tree._working_dir:
+        _relocate_files(cloned, path, new_path, tree._working_dir,
+                        copy=True, filename=filename)
+
+    tree[new_path] = cloned
+
+    send_message(
+        "pdv.tree.duplicate.response",
+        {"source_path": path, "new_path": new_path, "duplicated": True},
+        in_reply_to=msg_id,
+    )
+
+
 register("pdv.tree.list", handle_tree_list)
 register("pdv.tree.get", handle_tree_get)
 register("pdv.tree.resolve_file", handle_tree_resolve_file)
 register("pdv.tree.delete", handle_tree_delete)
+register("pdv.tree.create_node", handle_tree_create_node)
+register("pdv.tree.rename", handle_tree_rename)
+register("pdv.tree.move", handle_tree_move)
+register("pdv.tree.duplicate", handle_tree_duplicate)

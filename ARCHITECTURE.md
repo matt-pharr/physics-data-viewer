@@ -860,7 +860,7 @@ Both `themes/` and `state/` directories are created by the main process on start
 
 Rules:
 - `preferences.json` is authoritative for user configuration (`pythonPath`,
-  settings, shortcut overrides, appearance choices, etc.). Migrated automatically from legacy `config.json` if present.
+  settings, shortcut overrides, appearance choices, etc.).
 - Theme files are loaded from `~/.PDV/themes/*.json`; malformed files are
   ignored (non-fatal).
 - Code-cell persistence in `~/.PDV/state/code-cells.json` is separate from

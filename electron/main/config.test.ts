@@ -156,17 +156,4 @@ describe("ConfigStore", () => {
     expect(config.showCallableVariables).toBe(true);
   });
 
-  it("migrates a legacy config.json to preferences.json on first boot", () => {
-    const appDataDir = makeTempDir();
-    fs.writeFileSync(
-      path.join(appDataDir, "config.json"),
-      JSON.stringify({ theme: "dark", showPrivateVariables: true }, null, 2),
-      "utf8"
-    );
-
-    const store = new ConfigStore(appDataDir);
-    expect(store.getAll()).toMatchObject({ theme: "dark", showPrivateVariables: true });
-    expect(fs.existsSync(path.join(appDataDir, "preferences.json"))).toBe(true);
-    expect(fs.existsSync(path.join(appDataDir, "config.json"))).toBe(false);
-  });
 });
