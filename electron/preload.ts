@@ -54,6 +54,7 @@ const api: PDVApi = {
       ipcRenderer.invoke(IPC.kernels.validate, executablePath, language),
     onOutput: (callback) => onPush(IPC.push.executeOutput, callback),
     onKernelCrashed: (callback) => onPush(IPC.push.kernelCrashed, callback),
+    onReconnected: (callback) => onPush(IPC.push.kernelReconnected, callback),
   },
   tree: {
     list: (kernelId, nodePath = "") =>

@@ -189,6 +189,7 @@ export const IPC = {
      * unrecoverable session loss.
      */
     kernelCrashed: "pdv.kernel.crashed",
+    kernelReconnected: "pdv.kernel.reconnected",
     menuAction: "menu:action",
     chromeStateChanged: "chrome:stateChanged",
     executeOutput: "pdv.execute.output",
@@ -1384,6 +1385,14 @@ export interface PDVApi {
      * @returns Unsubscribe function.
      */
     onKernelCrashed(callback: (payload: { kernelId: string }) => void): () => void;
+    /**
+     * Subscribe to kernel reconnection push notifications. Fires after a
+     * system sleep/wake cycle when the kernel is confirmed still alive.
+     *
+     * @param callback - Invoked with the reconnected kernel ID.
+     * @returns Unsubscribe function.
+     */
+    onReconnected(callback: (payload: { kernelId: string }) => void): () => void;
   };
 
   /** Tree browsing and updates. */

@@ -27,7 +27,7 @@
  * index.ts — IPC handler registration (called from {@link createWindow})
  */
 
-import { app, BrowserWindow } from "electron";
+import { app, BrowserWindow, powerMonitor } from "electron";
 import * as os from "os";
 import * as path from "path";
 import * as fs from "fs";
@@ -38,6 +38,7 @@ import { QueryRouter } from "./query-router";
 import { ConfigStore } from "./config";
 import { KernelManager } from "./kernel-manager";
 import { ProjectManager } from "./project-manager";
+import { handleSystemResume } from "./wake-handler";
 
 let kernelManager: KernelManager | null = null;
 let mainWindow: BrowserWindow | null = null;
@@ -114,6 +115,15 @@ if (!hasSingleInstanceLock) {
     if (process.env.NODE_ENV === "development" && !process.env.VITE_DEV_SERVER_URL) {
       process.env.VITE_DEV_SERVER_URL = "http://localhost:5173";
     }
+
+    powerMonitor.on("resume", () => {
+      void handleSystemResume(kernelManager, () => mainWindow).catch(
+        (err) => {
+          console.error("[PDV] Wake handler error:", err);
+        }
+      );
+    });
+
     void openMainWindow().catch((error) => {
       console.error("[PDV] Failed to open main window:", error);
     });
