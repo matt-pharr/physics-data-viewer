@@ -89,6 +89,7 @@ export const IPC = {
     createNode: "tree:createNode",
     rename: "tree:rename",
     move: "tree:move",
+    duplicate: "tree:duplicate",
     invokeHandler: "tree:invokeHandler",
     delete: "tree:delete",
   },
@@ -455,6 +456,18 @@ export interface TreeMoveResult {
   /** Dot-path of the node before the move. */
   oldPath?: string;
   /** Dot-path of the node after the move. */
+  newPath?: string;
+}
+
+/**
+ * Result returned by `tree.duplicate`.
+ */
+export interface TreeDuplicateResult {
+  /** True when the deep copy succeeded. */
+  success: boolean;
+  /** Optional error message when `success` is false. */
+  error?: string;
+  /** Dot-path of the newly created copy. */
   newPath?: string;
 }
 
@@ -1569,8 +1582,24 @@ export interface PDVApi {
     move(
       kernelId: string,
       treePath: string,
-      newPath: string
+      newPath: string,
+      filename?: string
     ): Promise<TreeMoveResult>;
+    /**
+     * Deep-copy a tree node to a new path.
+     *
+     * @param kernelId - Target kernel ID.
+     * @param treePath - Dot-path of the node to copy.
+     * @param newPath - Full dot-path for the duplicate.
+     * @param filename - Optional override for the backing file name.
+     * @returns Duplicate result with the new path.
+     */
+    duplicate(
+      kernelId: string,
+      treePath: string,
+      newPath: string,
+      filename?: string
+    ): Promise<TreeDuplicateResult>;
     /**
      * Invoke a registered custom handler for a tree node.
      *

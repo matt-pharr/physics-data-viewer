@@ -114,6 +114,10 @@ export const PDVMessageType = {
   TREE_MOVE: "pdv.tree.move",
   /** Kernel → app. Confirms move; echoes old and new paths. */
   TREE_MOVE_RESPONSE: "pdv.tree.move.response",
+  /** App → kernel. Deep-copy a tree node to a new path. */
+  TREE_DUPLICATE: "pdv.tree.duplicate",
+  /** Kernel → app. Confirms duplication. */
+  TREE_DUPLICATE_RESPONSE: "pdv.tree.duplicate.response",
   /** App → kernel. Create an empty dict node at a given path. */
   TREE_CREATE_NODE: "pdv.tree.create_node",
   /** Kernel → app. Confirms node creation. */

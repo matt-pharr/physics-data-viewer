@@ -247,13 +247,11 @@ export interface Config {
   trusted?: boolean;
   /** Most-recent project paths for menu quick access. */
   recentProjects?: string[];
-  /** Custom kernel definitions (legacy/advanced). */
-  customKernels?: unknown[];
   /** Python executable configured by user. */
   pythonPath?: string;
   /** Julia executable configured by user. */
   juliaPath?: string;
-  /** External editor command map (legacy). */
+  /** External editor command map (legacy). TODO: remove, I think? Is this actually legacy?*/
   editors?: Record<string, string>;
   /** Project root path (when persisted). */
   projectRoot?: string;

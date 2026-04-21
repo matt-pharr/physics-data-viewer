@@ -19,7 +19,7 @@ import * as path from "path";
 import type { CommRouter } from "./comm-router";
 import type { QueryRouter } from "./query-router";
 import type { ConfigStore, PDVConfig } from "./config";
-import { IPC, type HandlerInvokeResult, type NamelistReadResult, type NamelistWriteResult, type NamespaceInspectResult, type NamespaceInspectTarget, type NamespaceInspectorNode, type NamespaceQueryOptions, type NamespaceVariable, type ScriptParameter, type ScriptRunRequest, type ScriptRunResult, type TreeAddFileResult, type TreeCreateGuiResult, type TreeCreateLibResult, type TreeCreateNodeResult, type TreeCreateNoteResult, type TreeCreateScriptResult, type TreeMoveResult, type TreeRenameResult } from "./ipc";
+import { IPC, type HandlerInvokeResult, type NamelistReadResult, type NamelistWriteResult, type NamespaceInspectResult, type NamespaceInspectTarget, type NamespaceInspectorNode, type NamespaceQueryOptions, type NamespaceVariable, type ScriptParameter, type ScriptRunRequest, type ScriptRunResult, type TreeAddFileResult, type TreeCreateGuiResult, type TreeCreateLibResult, type TreeCreateNodeResult, type TreeCreateNoteResult, type TreeCreateScriptResult, type TreeDuplicateResult, type TreeMoveResult, type TreeRenameResult } from "./ipc";
 import type { KernelManager } from "./kernel-manager";
 import { PDVMessageType, type PDVFileRegisterPayload } from "./pdv-protocol";
 import type { ProjectManager } from "./project-manager";
@@ -692,6 +692,7 @@ export function registerTreeNamespaceScriptIpcHandlers(
     // Resolve the file path — try the kernel comm first (handles all
     // PDVFile types including lib/namelist), fall back to the legacy
     // tree-path-to-filesystem derivation for plain scripts.
+    // TODO: remove legacy for beta.
     let resolvedPath: string | undefined;
     try {
       const response = await queryRequest(
@@ -704,11 +705,13 @@ export function registerTreeNamespaceScriptIpcHandlers(
       }
     } catch {
       // Comm failed — fall through to legacy resolution
+      // TODO: remove this fallback, this silently ignores all errors.
     }
     if (!resolvedPath) {
       const kernel = kernelManager.getKernel(kernelId);
       const language = kernel?.language ?? "python";
       resolvedPath = resolveScriptPath(kernelId, scriptPath, kernelWorkingDirs, language);
+      console.warn(`[pdv] Falling back to legacy script path resolution for "${scriptPath}" → "${resolvedPath}"`);
     }
 
     const isJulia = resolvedPath.endsWith(".jl");
@@ -870,7 +873,8 @@ export function registerTreeNamespaceScriptIpcHandlers(
       _event,
       kernelId: string,
       treePath: string,
-      newPath: string
+      newPath: string,
+      filename?: string
     ): Promise<TreeMoveResult> => {
       if (!kernelManager.getKernel(kernelId)) {
         return { success: false, error: `Kernel not found: ${kernelId}` };
@@ -878,7 +882,7 @@ export function registerTreeNamespaceScriptIpcHandlers(
       try {
         const response = await commRouter.request(
           PDVMessageType.TREE_MOVE,
-          { path: treePath, new_path: newPath }
+          { path: treePath, new_path: newPath, ...(filename ? { filename } : {}) }
         );
         const payload = response.payload as {
           old_path?: string;
@@ -890,6 +894,35 @@ export function registerTreeNamespaceScriptIpcHandlers(
           oldPath: payload.old_path,
           newPath: payload.new_path,
         };
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        return { success: false, error: message };
+      }
+    }
+  );
+
+  ipcMain.handle(
+    IPC.tree.duplicate,
+    async (
+      _event,
+      kernelId: string,
+      treePath: string,
+      newPath: string,
+      filename?: string
+    ): Promise<TreeDuplicateResult> => {
+      if (!kernelManager.getKernel(kernelId)) {
+        return { success: false, error: `Kernel not found: ${kernelId}` };
+      }
+      try {
+        const response = await commRouter.request(
+          PDVMessageType.TREE_DUPLICATE,
+          { path: treePath, new_path: newPath, ...(filename ? { filename } : {}) }
+        );
+        const payload = response.payload as {
+          new_path?: string;
+          duplicated?: boolean;
+        };
+        return { success: true, newPath: payload.new_path };
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
         return { success: false, error: message };

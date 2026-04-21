@@ -142,7 +142,7 @@ export function getMenuEntries(node: TreeNodeData): MenuEntry[] {
 
 
   if (isContainer || isModule) {
-    entries.push({ kind: 'action', id: 'create_node', label: 'Create new node', disabled: false });
+    entries.push({ kind: 'action', id: 'create_node', label: 'Create new tree node', disabled: false });
     entries.push({ kind: 'action', id: 'create_script', label: 'Create new script', disabled: false });
     entries.push({ kind: 'action', id: 'create_note', label: 'Create new note', disabled: false });
     entries.push({ kind: 'action', id: 'new_gui', label: 'Create new GUI', disabled: false });
@@ -158,6 +158,7 @@ export function getMenuEntries(node: TreeNodeData): MenuEntry[] {
   if (node.type !== 'root') {
     entries.push({ kind: 'action', id: 'rename', label: `Rename ${renameLabel(node.type)}`, disabled: false });
     entries.push({ kind: 'action', id: 'move', label: 'Move to...', disabled: false });
+    entries.push({ kind: 'action', id: 'duplicate', label: 'Duplicate to...', disabled: false });
   }
   entries.push({ kind: 'action', id: 'delete', label: 'Delete', disabled: false });
 

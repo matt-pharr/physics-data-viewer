@@ -14,7 +14,7 @@ interface CreateNodeDialogProps {
   onCancel: () => void;
 }
 
-/** Modal used by the Tree context menu's "Create new node" action. */
+/** Modal used by the Tree context menu's "Create new tree node" action. */
 export const CreateNodeDialog: React.FC<CreateNodeDialogProps> = ({ parentPath, onCreate, onCancel }) => {
   const [name, setName] = useState('');
   const inputRef = useRef<HTMLInputElement | null>(null);
@@ -37,7 +37,7 @@ export const CreateNodeDialog: React.FC<CreateNodeDialogProps> = ({ parentPath, 
     <div className="modal-overlay" onClick={onCancel}>
       <div className="script-dialog" onClick={(e) => e.stopPropagation()}>
         <div className="dialog-header">
-          <h3>Create new node</h3>
+          <h3>Create new tree node</h3>
           <button className="close-btn" onClick={onCancel} aria-label="Close dialog">
             ×
           </button>

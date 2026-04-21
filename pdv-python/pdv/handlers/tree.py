@@ -12,7 +12,79 @@ ARCHITECTURE.md §3.4 (tree messages), §7 (tree data model)
 
 from __future__ import annotations
 
+import os
+import shutil
+
 from pdv.handlers import register
+
+
+def _relocate_files(
+    value: object,
+    old_tree_path: str,
+    new_tree_path: str,
+    working_dir: str,
+    *,
+    copy: bool = False,
+    filename: str | None = None,
+) -> None:
+    """Move or copy backing files for all PDVFile nodes in *value*.
+
+    Recursively walks dicts so that container moves/duplicates also
+    relocate every file-backed descendant.  Updates each node's
+    ``_relative_path`` in place to reflect the new tree location.
+    """
+    from pdv.tree import PDVFile  # noqa: PLC0415
+
+    if isinstance(value, PDVFile):
+        _relocate_single_file(value, new_tree_path, working_dir,
+                              copy=copy, filename=filename)
+    elif isinstance(value, dict):
+        for key in list(dict.keys(value)):
+            child = dict.__getitem__(value, key)
+            old_child = f"{old_tree_path}.{key}"
+            new_child = f"{new_tree_path}.{key}"
+            _relocate_files(child, old_child, new_child, working_dir,
+                            copy=copy)
+
+
+def _relocate_single_file(
+    file_node: object,
+    new_tree_path: str,
+    working_dir: str,
+    *,
+    copy: bool = False,
+    filename: str | None = None,
+) -> None:
+    """Move or copy one backing file and update its ``_relative_path``.
+
+    *filename* overrides the destination filename.  When ``None``, the
+    new filename is derived from the last segment of *new_tree_path*
+    plus the original file extension.
+    """
+    from pdv.tree import PDVFile  # noqa: PLC0415
+    assert isinstance(file_node, PDVFile)
+
+    old_abs = file_node.resolve_path(working_dir)
+
+    if filename:
+        new_filename = filename
+    else:
+        _, ext = os.path.splitext(os.path.basename(file_node.relative_path))
+        new_key = new_tree_path.split(".")[-1]
+        new_filename = new_key + ext
+
+    new_parts = new_tree_path.split(".")
+    new_rel = os.path.join("tree", *new_parts[:-1], new_filename)
+    new_abs = os.path.join(working_dir, new_rel)
+
+    if os.path.exists(old_abs) and old_abs != new_abs:
+        os.makedirs(os.path.dirname(new_abs), exist_ok=True)
+        if copy:
+            shutil.copy2(old_abs, new_abs)
+        else:
+            shutil.move(old_abs, new_abs)
+
+    file_node._relative_path = new_rel
 
 
 def handle_tree_list(msg: dict) -> None:
@@ -608,7 +680,14 @@ def handle_tree_move(msg: dict) -> None:
             )
             return
 
+    filename = payload.get("filename") or None
+
     value = tree[path]
+
+    if tree._working_dir:
+        _relocate_files(value, path, new_path, tree._working_dir,
+                        copy=False, filename=filename)
+
     tree.set_quiet(new_path, value)
 
     old_parts = path.split(".")
@@ -628,6 +707,110 @@ def handle_tree_move(msg: dict) -> None:
     )
 
 
+def handle_tree_duplicate(msg: dict) -> None:
+    """Handle ``pdv.tree.duplicate`` — deep-copy a node to a new path.
+
+    Payload
+    -------
+    path : str
+        Dot-separated path of the node to copy.
+    new_path : str
+        Full dot-separated destination path for the copy.
+    """
+    import copy  # noqa: PLC0415
+
+    from pdv.comms import send_message, send_error, get_pdv_tree  # noqa: PLC0415
+
+    msg_id = msg.get("msg_id")
+    payload = msg.get("payload", {})
+    path = payload.get("path", "")
+    new_path = payload.get("new_path", "")
+
+    tree = get_pdv_tree()
+    if tree is None:
+        send_error(
+            "pdv.tree.duplicate.response",
+            "tree.not_initialized",
+            "PDVTree is not initialized.",
+            in_reply_to=msg_id,
+        )
+        return
+
+    if not path:
+        send_error(
+            "pdv.tree.duplicate.response",
+            "tree.invalid_path",
+            "Cannot duplicate the root tree.",
+            in_reply_to=msg_id,
+        )
+        return
+
+    if not new_path:
+        send_error(
+            "pdv.tree.duplicate.response",
+            "tree.invalid_path",
+            "Destination path must not be empty.",
+            in_reply_to=msg_id,
+        )
+        return
+
+    if path not in tree:
+        send_error(
+            "pdv.tree.duplicate.response",
+            "tree.path_not_found",
+            f"No node at path: {path}",
+            in_reply_to=msg_id,
+        )
+        return
+
+    if new_path in tree:
+        send_error(
+            "pdv.tree.duplicate.response",
+            "tree.already_exists",
+            f"A node already exists at path: {new_path}",
+            in_reply_to=msg_id,
+        )
+        return
+
+    new_parts = new_path.split(".")
+    if len(new_parts) > 1:
+        dest_parent = ".".join(new_parts[:-1])
+        if dest_parent not in tree:
+            send_error(
+                "pdv.tree.duplicate.response",
+                "tree.path_not_found",
+                f"Destination parent does not exist: {dest_parent}",
+                in_reply_to=msg_id,
+            )
+            return
+        parent_val = tree[dest_parent]
+        if not isinstance(parent_val, dict):
+            send_error(
+                "pdv.tree.duplicate.response",
+                "tree.not_a_container",
+                f"Destination parent '{dest_parent}' is not a container.",
+                in_reply_to=msg_id,
+            )
+            return
+
+    filename = payload.get("filename") or None
+
+    value = tree[path]
+    cloned = copy.deepcopy(value)
+
+    if tree._working_dir:
+        _relocate_files(cloned, path, new_path, tree._working_dir,
+                        copy=True, filename=filename)
+
+    tree[new_path] = cloned
+
+    send_message(
+        "pdv.tree.duplicate.response",
+        {"source_path": path, "new_path": new_path, "duplicated": True},
+        in_reply_to=msg_id,
+    )
+
+
 register("pdv.tree.list", handle_tree_list)
 register("pdv.tree.get", handle_tree_get)
 register("pdv.tree.resolve_file", handle_tree_resolve_file)
@@ -635,3 +818,4 @@ register("pdv.tree.delete", handle_tree_delete)
 register("pdv.tree.create_node", handle_tree_create_node)
 register("pdv.tree.rename", handle_tree_rename)
 register("pdv.tree.move", handle_tree_move)
+register("pdv.tree.duplicate", handle_tree_duplicate)

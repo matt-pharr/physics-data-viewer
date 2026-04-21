@@ -16,21 +16,25 @@ describe('getMenuEntries', () => {
   it('returns script actions for script nodes', () => {
     const ids = actionIds('script');
     expect(ids).toEqual([
-      'run', 'run_defaults', 'edit', 'refresh',
-      'print', 'copy_path', 'rename', 'move', 'delete',
+      'run', 'run_defaults', 'edit',
+      'print', 'copy_path', 'rename', 'move', 'duplicate', 'delete',
+      'refresh',
     ]);
     expect(ids).not.toContain('create_script');
   });
 
-  it('includes rename and move for non-root nodes but not for root', () => {
+  it('includes rename, move, and duplicate for non-root nodes but not for root', () => {
     expect(actionIds('script')).toContain('rename');
     expect(actionIds('script')).toContain('move');
+    expect(actionIds('script')).toContain('duplicate');
     expect(actionIds('folder')).toContain('rename');
     expect(actionIds('folder')).toContain('move');
+    expect(actionIds('folder')).toContain('duplicate');
     expect(actionIds('mapping')).toContain('rename');
-    expect(actionIds('ndarray')).toContain('move');
+    expect(actionIds('ndarray')).toContain('duplicate');
     expect(actionIds('root')).not.toContain('rename');
     expect(actionIds('root')).not.toContain('move');
+    expect(actionIds('root')).not.toContain('duplicate');
   });
 
   it('shows type-specific rename label', () => {

@@ -27,6 +27,7 @@ import { NewModuleDialog } from '../components/NewModuleDialog';
 import { ModuleMetadataDialog } from '../components/ModuleMetadataDialog';
 import { CreateNodeDialog } from '../components/Tree/CreateNodeDialog';
 import { CreateNoteDialog } from '../components/Tree/CreateNoteDialog';
+import { DuplicateDialog } from '../components/Tree/DuplicateDialog';
 import { MoveDialog } from '../components/Tree/MoveDialog';
 import { RenameDialog } from '../components/Tree/RenameDialog';
 import { TitleBar } from '../components/TitleBar';
@@ -139,7 +140,8 @@ const App: React.FC = () => {
   const [forceWelcome, setForceWelcome] = useState(false);
   const [scriptDialog, setScriptDialog] = useState<TreeNodeData | null>(null);
   const [renameTarget, setRenameTarget] = useState<{ path: string; key: string } | null>(null);
-  const [moveTarget, setMoveTarget] = useState<string | null>(null);
+  const [moveTarget, setMoveTarget] = useState<{ path: string; type: string } | null>(null);
+  const [duplicateTarget, setDuplicateTarget] = useState<{ path: string; type: string } | null>(null);
   const [createNodeTarget, setCreateNodeTarget] = useState<string | null>(null);
   const [createScriptTarget, setCreateScriptTarget] = useState<string | null>(null);
   const [createNoteTarget, setCreateNoteTarget] = useState<string | null>(null);
@@ -499,6 +501,7 @@ const App: React.FC = () => {
       if (scriptDialog) { setScriptDialog(null); return; }
       if (renameTarget) { setRenameTarget(null); return; }
       if (moveTarget) { setMoveTarget(null); return; }
+      if (duplicateTarget) { setDuplicateTarget(null); return; }
       if (createNodeTarget) { setCreateNodeTarget(null); return; }
       if (createScriptTarget) { setCreateScriptTarget(null); return; }
       if (createNoteTarget) { setCreateNoteTarget(null); return; }
@@ -706,7 +709,11 @@ const App: React.FC = () => {
       }
     } else if (action === 'move') {
       if (node.path) {
-        setMoveTarget(node.path);
+        setMoveTarget({ path: node.path, type: node.type });
+      }
+    } else if (action === 'duplicate') {
+      if (node.path) {
+        setDuplicateTarget({ path: node.path, type: node.type });
       }
     } else if (action === 'delete') {
       if (!currentKernelId || !node.path) return;
@@ -1267,11 +1274,12 @@ const App: React.FC = () => {
 
       {moveTarget !== null && currentKernelId && (
         <MoveDialog
-          currentPath={moveTarget}
+          currentPath={moveTarget.path}
+          nodeType={moveTarget.type}
           onCancel={() => setMoveTarget(null)}
-          onMove={async (newPath) => {
+          onMove={async (newPath, filename) => {
             try {
-              const result = await window.pdv.tree.move(currentKernelId, moveTarget, newPath);
+              const result = await window.pdv.tree.move(currentKernelId, moveTarget.path, newPath, filename);
               if (!result.success) {
                 setLastError(result.error);
               } else {
@@ -1281,6 +1289,28 @@ const App: React.FC = () => {
               setLastError(error instanceof Error ? error.message : String(error));
             } finally {
               setMoveTarget(null);
+            }
+          }}
+        />
+      )}
+
+      {duplicateTarget !== null && currentKernelId && (
+        <DuplicateDialog
+          currentPath={duplicateTarget.path}
+          nodeType={duplicateTarget.type}
+          onCancel={() => setDuplicateTarget(null)}
+          onDuplicate={async (newPath, filename) => {
+            try {
+              const result = await window.pdv.tree.duplicate(currentKernelId, duplicateTarget.path, newPath, filename);
+              if (!result.success) {
+                setLastError(result.error);
+              } else {
+                setTreeRefreshToken((t) => t + 1);
+              }
+            } catch (error) {
+              setLastError(error instanceof Error ? error.message : String(error));
+            } finally {
+              setDuplicateTarget(null);
             }
           }}
         />

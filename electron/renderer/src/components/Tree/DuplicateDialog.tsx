@@ -1,7 +1,7 @@
 /**
- * MoveDialog — lightweight modal for moving a tree node to a new path.
+ * DuplicateDialog — lightweight modal for deep-copying a tree node to a new path.
  *
- * Pre-fills with the current dot-path and returns the new destination path.
+ * Pre-fills with the current dot-path and returns the destination path.
  * For file-backed nodes, shows an additional filename field.
  */
 
@@ -20,20 +20,25 @@ function defaultExtension(type: string): string {
   }
 }
 
-interface MoveDialogProps {
+interface DuplicateDialogProps {
   currentPath: string;
   nodeType: string;
-  onMove: (newPath: string, filename?: string) => void;
+  onDuplicate: (newPath: string, filename?: string) => void;
   onCancel: () => void;
 }
 
-/** Modal used by the Tree context menu's "Move to..." action. */
-export const MoveDialog: React.FC<MoveDialogProps> = ({ currentPath, nodeType, onMove, onCancel }) => {
-  const [path, setPath] = useState(currentPath);
-  const currentKey = currentPath.split('.').pop() ?? '';
+/** Modal used by the Tree context menu's "Duplicate to..." action. */
+export const DuplicateDialog: React.FC<DuplicateDialogProps> = ({ currentPath, nodeType, onDuplicate, onCancel }) => {
+  const defaultKey = currentPath.split('.').pop() ?? '';
+  const copyKey = defaultKey + '_copy';
+  const parentSegments = currentPath.split('.');
+  parentSegments[parentSegments.length - 1] = copyKey;
+  const defaultPath = parentSegments.join('.');
+
+  const [path, setPath] = useState(defaultPath);
   const isFileBacked = FILE_BACKED_TYPES.has(nodeType);
   const ext = defaultExtension(nodeType);
-  const [filename, setFilename] = useState(isFileBacked ? currentKey + ext : '');
+  const [filename, setFilename] = useState(isFileBacked ? copyKey + ext : '');
   const inputRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
@@ -42,12 +47,12 @@ export const MoveDialog: React.FC<MoveDialogProps> = ({ currentPath, nodeType, o
   }, []);
 
   const trimmed = path.trim();
-  const canMove = trimmed.length > 0 && trimmed !== currentPath;
+  const canDuplicate = trimmed.length > 0 && trimmed !== currentPath;
 
   const handleSubmit = () => {
-    if (!canMove) return;
+    if (!canDuplicate) return;
     const trimmedFilename = filename.trim();
-    onMove(trimmed, isFileBacked && trimmedFilename ? trimmedFilename : undefined);
+    onDuplicate(trimmed, isFileBacked && trimmedFilename ? trimmedFilename : undefined);
   };
 
   const handleKeyDown = useModalKeyboard({ onSubmit: handleSubmit, onCancel });
@@ -56,7 +61,7 @@ export const MoveDialog: React.FC<MoveDialogProps> = ({ currentPath, nodeType, o
     <div className="modal-overlay" onClick={onCancel}>
       <div className="script-dialog" onClick={(e) => e.stopPropagation()}>
         <div className="dialog-header">
-          <h3>Move node</h3>
+          <h3>Duplicate node</h3>
           <button className="close-btn" onClick={onCancel} aria-label="Close dialog">
             ×
           </button>
@@ -64,11 +69,11 @@ export const MoveDialog: React.FC<MoveDialogProps> = ({ currentPath, nodeType, o
 
         <div className="dialog-body">
           <div className="script-info">
-            <strong>Current path</strong>
+            <strong>Source</strong>
             <span className="script-path">{currentPath}</span>
           </div>
           <label>
-            New path
+            Destination path
             <input
               ref={inputRef}
               type="text"
@@ -86,19 +91,19 @@ export const MoveDialog: React.FC<MoveDialogProps> = ({ currentPath, nodeType, o
                 value={filename}
                 onChange={(e) => setFilename(e.target.value)}
                 onKeyDown={handleKeyDown}
-                placeholder={currentKey + ext}
+                placeholder={copyKey + ext}
               />
             </label>
           )}
-          <div className="dialog-info-text">Enter the full dot-separated destination path</div>
+          <div className="dialog-info-text">Creates an independent deep copy at the destination</div>
         </div>
 
         <div className="dialog-footer">
           <button className="btn btn-secondary" onClick={onCancel}>
             Cancel
           </button>
-          <button className="btn btn-primary" onClick={handleSubmit} disabled={!canMove}>
-            Move
+          <button className="btn btn-primary" onClick={handleSubmit} disabled={!canDuplicate}>
+            Duplicate
           </button>
         </div>
       </div>
