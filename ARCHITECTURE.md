@@ -1,5 +1,5 @@
 # PDV Architecture Document
-**Version**: 0.0.11
+**Version**: 0.0.12
 **Date**: 2026-04-07
 **Status**: Authoritative design specification. All new code must conform to this document. Deviations require updating this document first.
 
@@ -117,7 +117,7 @@ Every PDV message — whether sent by the app or by the kernel — has the follo
 
 ```json
 {
-  "pdv_version": "0.0.11",
+  "pdv_version": "0.0.12",
   "msg_id": "<uuid-v4>",
   "in_reply_to": "<uuid-v4-or-null>",
   "type": "<message-type-string>",
@@ -128,7 +128,7 @@ Every PDV message — whether sent by the app or by the kernel — has the follo
 
 | Field | Type | Description |
 |---|---|---|
-| `pdv_version` | string | App/package version (e.g. `"0.0.11"`). Both the Electron app and `pdv-python` use their installed version as this value. The app rejects messages with an incompatible major version. |
+| `pdv_version` | string | App/package version (e.g. `"0.0.12"`). Both the Electron app and `pdv-python` use their installed version as this value. The app rejects messages with an incompatible major version. |
 | `msg_id` | string | UUID v4. Unique identifier for this message. |
 | `in_reply_to` | string \| null | The `msg_id` of the request this is responding to. `null` for unsolicited push messages. |
 | `type` | string | Dot-namespaced message type (see Section 3.4). |
@@ -815,7 +815,7 @@ Each `modules/<id>/` subdirectory is maintained authoritatively by `project:save
 | `schema_version` | string | Semantic version of the project.json format. The app rejects manifests with an incompatible major version. Currently `"1.2"`. |
 | `project_id` | string | UUIDv4 assigned on first save under schema 1.2. Stable across renames and moves. Used by per-project environment bookkeeping (§10.5). 1.1 manifests without this field get one assigned on upgrade. |
 | `saved_at` | string | ISO 8601 timestamp of last save. |
-| `pdv_version` | string | PDV app version used when saving (e.g. `"0.0.11"`). |
+| `pdv_version` | string | PDV app version used when saving (e.g. `"0.0.12"`). |
 | `project_name` | string? | Optional human-readable project name chosen by the user. Displayed in the title bar and recent projects list. Falls back to the directory name when absent (backward compat). |
 | `language` | string | Kernel language: `"python"` or `"julia"`. |
 | `interpreter_path` | string? | Optional path to the interpreter used at save time. Used for pre-selection when `environment.mode == "shared"`; ignored when `environment.mode == "project"`. |
