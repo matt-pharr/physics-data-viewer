@@ -83,6 +83,7 @@ const REGISTERED_CHANNELS: readonly string[] = [
   IPC.tree.createNote,
   IPC.tree.addFile,
   IPC.tree.createNode,
+  IPC.tree.rename,
   IPC.tree.invokeHandler,
   IPC.tree.delete,
   IPC.namespace.query,

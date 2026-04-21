@@ -9,8 +9,26 @@ function actionIds(type: string): string[] {
 describe('getActionsForNode', () => {
   it('returns script actions for script nodes', () => {
     const ids = actionIds('script');
-    expect(ids).toEqual(['run', 'run_defaults', 'edit', 'refresh', 'print', 'copy_path', 'delete']);
+    expect(ids).toEqual(['run', 'run_defaults', 'edit', 'refresh', 'print', 'copy_path', 'rename', 'delete']);
     expect(ids).not.toContain('create_script');
+  });
+
+  it('includes rename for non-root nodes but not for root', () => {
+    expect(actionIds('script')).toContain('rename');
+    expect(actionIds('folder')).toContain('rename');
+    expect(actionIds('mapping')).toContain('rename');
+    expect(actionIds('ndarray')).toContain('rename');
+    expect(actionIds('root')).not.toContain('rename');
+  });
+
+  it('shows type-specific rename label', () => {
+    const scriptNode = { type: 'script' } as unknown as Parameters<typeof getActionsForNode>[0];
+    const renameAction = getActionsForNode(scriptNode).find((a) => a.id === 'rename');
+    expect(renameAction?.label).toBe('Rename script');
+
+    const noteNode = { type: 'markdown' } as unknown as Parameters<typeof getActionsForNode>[0];
+    const noteRename = getActionsForNode(noteNode).find((a) => a.id === 'rename');
+    expect(noteRename?.label).toBe('Rename note');
   });
 
   it('returns folder actions including create_node and create_script for folders', () => {

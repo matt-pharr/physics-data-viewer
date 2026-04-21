@@ -87,6 +87,7 @@ export const IPC = {
      */
     createLib: "tree:createLib",
     createNode: "tree:createNode",
+    rename: "tree:rename",
     invokeHandler: "tree:invokeHandler",
     delete: "tree:delete",
   },
@@ -426,6 +427,20 @@ export interface TreeCreateNodeResult {
   error?: string;
   /** Dot-path of the created tree node. */
   treePath?: string;
+}
+
+/**
+ * Result returned by `tree.rename`.
+ */
+export interface TreeRenameResult {
+  /** True when the node was renamed successfully. */
+  success: boolean;
+  /** Optional error message when `success` is false. */
+  error?: string;
+  /** Dot-path of the node before rename. */
+  oldPath?: string;
+  /** Dot-path of the node after rename. */
+  newPath?: string;
 }
 
 /**
@@ -1515,6 +1530,19 @@ export interface PDVApi {
       targetPath: string,
       nodeName: string
     ): Promise<TreeCreateNodeResult>;
+    /**
+     * Rename a tree node (change its key under the same parent).
+     *
+     * @param kernelId - Target kernel ID.
+     * @param treePath - Dot-path of the node to rename.
+     * @param newName - New key name (single segment, no dots).
+     * @returns Rename result with old and new paths.
+     */
+    rename(
+      kernelId: string,
+      treePath: string,
+      newName: string
+    ): Promise<TreeRenameResult>;
     /**
      * Invoke a registered custom handler for a tree node.
      *

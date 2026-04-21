@@ -71,6 +71,8 @@ const api: PDVApi = {
       ipcRenderer.invoke(IPC.tree.createLib, kernelId, targetPath, libName),
     createNode: (kernelId, targetPath, nodeName) =>
       ipcRenderer.invoke(IPC.tree.createNode, kernelId, targetPath, nodeName),
+    rename: (kernelId, treePath, newName) =>
+      ipcRenderer.invoke(IPC.tree.rename, kernelId, treePath, newName),
     addFile: (kernelId, sourcePath, targetTreePath, nodeType, filename) =>
       ipcRenderer.invoke(IPC.tree.addFile, kernelId, sourcePath, targetTreePath, nodeType, filename),
     invokeHandler: (kernelId, nodePath) =>

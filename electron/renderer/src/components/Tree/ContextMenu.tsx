@@ -124,7 +124,7 @@ export function getActionsForNode(node: TreeNodeData) {
 
   // ── Refresh (all nodes) ──
 
-  actions.push({ id: 'refresh', label: 'Refresh', disabled: false });
+  actions.push({ id: 'refresh', label: 'Refresh tree', disabled: false });
 
   // ── Creation actions (containers only) ──
 
@@ -138,11 +138,25 @@ export function getActionsForNode(node: TreeNodeData) {
 
   // ── Common actions (all nodes) ──
 
-  actions.push(
-    { id: 'print', label: 'Print', disabled: false },
-    { id: 'copy_path', label: 'Copy Path', disabled: false },
-    { id: 'delete', label: 'Delete', disabled: false },
-  );
+  actions.push({ id: 'print', label: 'Print', disabled: false });
+  actions.push({ id: 'copy_path', label: 'Copy Path', disabled: false });
+  if (node.type !== 'root') {
+    actions.push({ id: 'rename', label: `Rename ${renameLabel(node.type)}`, disabled: false });
+  }
+  actions.push({ id: 'delete', label: 'Delete', disabled: false });
 
   return actions;
+}
+
+function renameLabel(type: string): string {
+  switch (type) {
+    case 'script': return 'script';
+    case 'markdown': return 'note';
+    case 'module': return 'module';
+    case 'folder': return 'folder';
+    case 'gui': return 'GUI';
+    case 'lib': return 'lib';
+    case 'namelist': return 'namelist';
+    default: return 'node';
+  }
 }

@@ -408,8 +408,105 @@ def handle_tree_create_node(msg: dict) -> None:
     )
 
 
+def handle_tree_rename(msg: dict) -> None:
+    """Handle ``pdv.tree.rename`` — change the key of a tree node.
+
+    Moves the value from ``path`` to a sibling key ``new_name`` under the
+    same parent. The old key is removed and the new key is inserted.
+
+    Payload
+    -------
+    path : str
+        Dot-separated path of the node to rename.
+    new_name : str
+        New key name (single segment, no dots).
+    """
+    from pdv.comms import send_message, send_error, get_pdv_tree  # noqa: PLC0415
+
+    msg_id = msg.get("msg_id")
+    payload = msg.get("payload", {})
+    path = payload.get("path", "")
+    new_name = payload.get("new_name", "")
+
+    tree = get_pdv_tree()
+    if tree is None:
+        send_error(
+            "pdv.tree.rename.response",
+            "tree.not_initialized",
+            "PDVTree is not initialized.",
+            in_reply_to=msg_id,
+        )
+        return
+
+    if not path:
+        send_error(
+            "pdv.tree.rename.response",
+            "tree.invalid_path",
+            "Cannot rename the root tree.",
+            in_reply_to=msg_id,
+        )
+        return
+
+    if not new_name:
+        send_error(
+            "pdv.tree.rename.response",
+            "tree.invalid_name",
+            "New name must not be empty.",
+            in_reply_to=msg_id,
+        )
+        return
+
+    if "." in new_name:
+        send_error(
+            "pdv.tree.rename.response",
+            "tree.invalid_name",
+            "New name must not contain dots.",
+            in_reply_to=msg_id,
+        )
+        return
+
+    if path not in tree:
+        send_error(
+            "pdv.tree.rename.response",
+            "tree.path_not_found",
+            f"No node at path: {path}",
+            in_reply_to=msg_id,
+        )
+        return
+
+    parts = path.split(".")
+    parent_path = ".".join(parts[:-1])
+    new_path = f"{parent_path}.{new_name}" if parent_path else new_name
+
+    if new_path in tree:
+        send_error(
+            "pdv.tree.rename.response",
+            "tree.already_exists",
+            f"A node already exists at path: {new_path}",
+            in_reply_to=msg_id,
+        )
+        return
+
+    value = tree[path]
+    tree.set_quiet(new_path, value)
+    # Delete the old key at the dict level to avoid a second changed push
+    if parent_path:
+        parent = tree[parent_path]
+        dict.__delitem__(parent, parts[-1])
+    else:
+        dict.__delitem__(tree, parts[-1])
+    tree._emit_changed(path, "renamed")
+
+    send_message(
+        "pdv.tree.rename.response",
+        {"old_path": path, "new_path": new_path, "renamed": True},
+        in_reply_to=msg_id,
+    )
+
+
 register("pdv.tree.list", handle_tree_list)
 register("pdv.tree.get", handle_tree_get)
 register("pdv.tree.resolve_file", handle_tree_resolve_file)
 register("pdv.tree.delete", handle_tree_delete)
 register("pdv.tree.create_node", handle_tree_create_node)
+register("pdv.tree.rename", handle_tree_rename)
