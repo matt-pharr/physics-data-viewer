@@ -129,12 +129,10 @@ export function getActionsForNode(node: TreeNodeData) {
   // ── Creation actions (containers only) ──
 
   if (isContainer || isModule) {
+    actions.push({ id: 'create_node', label: 'Create new node', disabled: false });
     actions.push({ id: 'create_script', label: 'Create new script', disabled: false });
     actions.push({ id: 'create_note', label: 'Create new note', disabled: false });
     actions.push({ id: 'new_gui', label: 'Create new GUI', disabled: false });
-    // Lib creation is meaningful only inside a module's subtree. The app
-    // handler validates this at IPC time; we surface the option whenever
-    // the user is right-clicking a container so it's discoverable.
     actions.push({ id: 'create_lib', label: 'Create new lib', disabled: false });
   }
 

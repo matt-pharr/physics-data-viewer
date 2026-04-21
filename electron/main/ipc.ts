@@ -86,6 +86,7 @@ export const IPC = {
      * path is under a known module alias.
      */
     createLib: "tree:createLib",
+    createNode: "tree:createNode",
     invokeHandler: "tree:invokeHandler",
     delete: "tree:delete",
   },
@@ -411,6 +412,18 @@ export interface TreeCreateNoteResult {
   error?: string;
   /** Absolute path to the created markdown file. */
   notePath?: string;
+  /** Dot-path of the created tree node. */
+  treePath?: string;
+}
+
+/**
+ * Result returned by `tree.createNode`.
+ */
+export interface TreeCreateNodeResult {
+  /** True when the empty node was created successfully. */
+  success: boolean;
+  /** Optional error message when `success` is false. */
+  error?: string;
   /** Dot-path of the created tree node. */
   treePath?: string;
 }
@@ -1489,6 +1502,19 @@ export interface PDVApi {
       nodeType: "namelist" | "lib" | "file",
       filename: string
     ): Promise<TreeAddFileResult>;
+    /**
+     * Create an empty container (dict) node in the tree.
+     *
+     * @param kernelId - Target kernel ID.
+     * @param targetPath - Dot-path of the parent container (empty string for root).
+     * @param nodeName - Key name for the new node.
+     * @returns Node creation result payload.
+     */
+    createNode(
+      kernelId: string,
+      targetPath: string,
+      nodeName: string
+    ): Promise<TreeCreateNodeResult>;
     /**
      * Invoke a registered custom handler for a tree node.
      *

@@ -19,7 +19,7 @@ import * as path from "path";
 import type { CommRouter } from "./comm-router";
 import type { QueryRouter } from "./query-router";
 import type { ConfigStore, PDVConfig } from "./config";
-import { IPC, type HandlerInvokeResult, type NamelistReadResult, type NamelistWriteResult, type NamespaceInspectResult, type NamespaceInspectTarget, type NamespaceInspectorNode, type NamespaceQueryOptions, type NamespaceVariable, type ScriptParameter, type ScriptRunRequest, type ScriptRunResult, type TreeAddFileResult, type TreeCreateGuiResult, type TreeCreateLibResult, type TreeCreateNoteResult, type TreeCreateScriptResult } from "./ipc";
+import { IPC, type HandlerInvokeResult, type NamelistReadResult, type NamelistWriteResult, type NamespaceInspectResult, type NamespaceInspectTarget, type NamespaceInspectorNode, type NamespaceQueryOptions, type NamespaceVariable, type ScriptParameter, type ScriptRunRequest, type ScriptRunResult, type TreeAddFileResult, type TreeCreateGuiResult, type TreeCreateLibResult, type TreeCreateNodeResult, type TreeCreateNoteResult, type TreeCreateScriptResult } from "./ipc";
 import type { KernelManager } from "./kernel-manager";
 import { PDVMessageType, type PDVFileRegisterPayload } from "./pdv-protocol";
 import type { ProjectManager } from "./project-manager";
@@ -800,6 +800,34 @@ export function registerTreeNamespaceScriptIpcHandlers(
       });
       const payload = response.payload as { dispatched: boolean; error?: string };
       return { success: payload.dispatched, error: payload.error };
+    }
+  );
+
+  ipcMain.handle(
+    IPC.tree.createNode,
+    async (
+      _event,
+      kernelId: string,
+      targetPath: string,
+      nodeName: string
+    ): Promise<TreeCreateNodeResult> => {
+      if (!kernelManager.getKernel(kernelId)) {
+        return { success: false, error: `Kernel not found: ${kernelId}` };
+      }
+      try {
+        const response = await commRouter.request(
+          PDVMessageType.TREE_CREATE_NODE,
+          { parent_path: targetPath, name: nodeName }
+        );
+        const payload = response.payload as {
+          path?: string;
+          created?: boolean;
+        };
+        return { success: true, treePath: payload.path };
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        return { success: false, error: message };
+      }
     }
   );
 

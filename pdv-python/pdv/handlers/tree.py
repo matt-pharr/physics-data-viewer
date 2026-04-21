@@ -332,7 +332,84 @@ def handle_tree_delete(msg: dict) -> None:
     )
 
 
+def handle_tree_create_node(msg: dict) -> None:
+    """Handle ``pdv.tree.create_node`` — create an empty dict node in the tree.
+
+    Payload
+    -------
+    parent_path : str
+        Dot-separated path of the parent container (empty string for root).
+    name : str
+        Key name for the new node.
+    """
+    from pdv.comms import send_message, send_error, get_pdv_tree  # noqa: PLC0415
+    from pdv.tree import PDVTree  # noqa: PLC0415
+
+    msg_id = msg.get("msg_id")
+    payload = msg.get("payload", {})
+    parent_path = payload.get("parent_path", "")
+    name = payload.get("name", "")
+
+    tree = get_pdv_tree()
+    if tree is None:
+        send_error(
+            "pdv.tree.create_node.response",
+            "tree.not_initialized",
+            "PDVTree is not initialized.",
+            in_reply_to=msg_id,
+        )
+        return
+
+    if not name:
+        send_error(
+            "pdv.tree.create_node.response",
+            "tree.invalid_name",
+            "Node name must not be empty.",
+            in_reply_to=msg_id,
+        )
+        return
+
+    full_path = f"{parent_path}.{name}" if parent_path else name
+
+    if full_path in tree:
+        send_error(
+            "pdv.tree.create_node.response",
+            "tree.already_exists",
+            f"A node already exists at path: {full_path}",
+            in_reply_to=msg_id,
+        )
+        return
+
+    if parent_path:
+        if parent_path not in tree:
+            send_error(
+                "pdv.tree.create_node.response",
+                "tree.path_not_found",
+                f"Parent path does not exist: {parent_path}",
+                in_reply_to=msg_id,
+            )
+            return
+        parent = tree[parent_path]
+        if not isinstance(parent, dict):
+            send_error(
+                "pdv.tree.create_node.response",
+                "tree.not_a_container",
+                f"Parent at '{parent_path}' is not a container.",
+                in_reply_to=msg_id,
+            )
+            return
+
+    tree[full_path] = PDVTree()
+
+    send_message(
+        "pdv.tree.create_node.response",
+        {"path": full_path, "created": True},
+        in_reply_to=msg_id,
+    )
+
+
 register("pdv.tree.list", handle_tree_list)
 register("pdv.tree.get", handle_tree_get)
 register("pdv.tree.resolve_file", handle_tree_resolve_file)
 register("pdv.tree.delete", handle_tree_delete)
+register("pdv.tree.create_node", handle_tree_create_node)

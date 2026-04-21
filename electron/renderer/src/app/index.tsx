@@ -25,6 +25,7 @@ import { CreateLibDialog } from '../components/Tree/CreateLibDialog';
 import { CreateGuiDialog } from '../components/Tree/CreateGuiDialog';
 import { NewModuleDialog } from '../components/NewModuleDialog';
 import { ModuleMetadataDialog } from '../components/ModuleMetadataDialog';
+import { CreateNodeDialog } from '../components/Tree/CreateNodeDialog';
 import { CreateNoteDialog } from '../components/Tree/CreateNoteDialog';
 import { TitleBar } from '../components/TitleBar';
 import { WriteTab } from '../components/WriteTab';
@@ -135,6 +136,7 @@ const App: React.FC = () => {
   const [showWelcome, setShowWelcome] = useState(true);
   const [forceWelcome, setForceWelcome] = useState(false);
   const [scriptDialog, setScriptDialog] = useState<TreeNodeData | null>(null);
+  const [createNodeTarget, setCreateNodeTarget] = useState<string | null>(null);
   const [createScriptTarget, setCreateScriptTarget] = useState<string | null>(null);
   const [createNoteTarget, setCreateNoteTarget] = useState<string | null>(null);
   const [createGuiTarget, setCreateGuiTarget] = useState<string | null>(null);
@@ -491,6 +493,7 @@ const App: React.FC = () => {
       if (showSaveAsDialog) { setShowSaveAsDialog(false); return; }
       if (showImportModule) { setShowImportModule(false); return; }
       if (scriptDialog) { setScriptDialog(null); return; }
+      if (createNodeTarget) { setCreateNodeTarget(null); return; }
       if (createScriptTarget) { setCreateScriptTarget(null); return; }
       if (createNoteTarget) { setCreateNoteTarget(null); return; }
       if (createGuiTarget) { setCreateGuiTarget(null); return; }
@@ -618,7 +621,9 @@ const App: React.FC = () => {
       setCreateGuiTarget(node.path);
       return;
     }
-    if (action === 'create_script') {
+    if (action === 'create_node') {
+      setCreateNodeTarget(node.path);
+    } else if (action === 'create_script') {
       setCreateScriptTarget(node.path);
     } else if (action === 'create_lib') {
       setCreateLibTarget(node.path);
@@ -1221,6 +1226,27 @@ const App: React.FC = () => {
           kernelId={currentKernelId}
           onRun={handleScriptRun}
           onCancel={() => setScriptDialog(null)}
+        />
+      )}
+
+      {createNodeTarget !== null && currentKernelId && (
+        <CreateNodeDialog
+          parentPath={createNodeTarget}
+          onCancel={() => setCreateNodeTarget(null)}
+          onCreate={async (name) => {
+            try {
+              const result = await window.pdv.tree.createNode(currentKernelId, createNodeTarget, name);
+              if (!result.success) {
+                setLastError(result.error);
+              } else {
+                setTreeRefreshToken((t) => t + 1);
+              }
+            } catch (error) {
+              setLastError(error instanceof Error ? error.message : String(error));
+            } finally {
+              setCreateNodeTarget(null);
+            }
+          }}
         />
       )}
 

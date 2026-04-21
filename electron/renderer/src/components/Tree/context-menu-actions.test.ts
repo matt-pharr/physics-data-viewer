@@ -13,16 +13,19 @@ describe('getActionsForNode', () => {
     expect(ids).not.toContain('create_script');
   });
 
-  it('returns folder actions including create_script for folders', () => {
+  it('returns folder actions including create_node and create_script for folders', () => {
     const ids = actionIds('folder');
     expect(ids).toContain('refresh');
+    expect(ids).toContain('create_node');
     expect(ids).toContain('create_script');
     expect(ids).toContain('new_gui');
     expect(ids).not.toContain('view');
   });
 
-  it('returns create_script for mapping nodes but not ndarray nodes', () => {
+  it('returns create_node and create_script for mapping nodes but not ndarray nodes', () => {
+    expect(actionIds('mapping')).toContain('create_node');
     expect(actionIds('mapping')).toContain('create_script');
+    expect(actionIds('ndarray')).not.toContain('create_node');
     expect(actionIds('ndarray')).not.toContain('create_script');
   });
 
