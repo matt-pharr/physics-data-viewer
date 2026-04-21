@@ -162,22 +162,21 @@ class PDVApp:
             print("PDV: Tree is not initialized. Cannot create note.")
             return
 
+        from pdv.environment import ensure_parent, generate_node_uuid, uuid_tree_path  # noqa: PLC0415
+
         working_dir = getattr(tree, "_working_dir", None) or "."
         segments = path.split(".")
-        file_dir = (
-            os.path.join(working_dir, *segments[:-1])
-            if len(segments) > 1
-            else working_dir
-        )
-        os.makedirs(file_dir, exist_ok=True)
-        file_path = os.path.join(file_dir, segments[-1] + ".md")
+        filename = segments[-1] + ".md"
+        node_uuid = generate_node_uuid()
+        file_path = uuid_tree_path(working_dir, node_uuid, filename)
+        ensure_parent(file_path)
 
         if not os.path.exists(file_path):
             with open(file_path, "w", encoding="utf-8") as fh:
                 if title:
                     fh.write(f"# {title}\n")
 
-        note = PDVNote(relative_path=file_path, title=title)
+        note = PDVNote(uuid=node_uuid, filename=filename, title=title)
         tree[path] = note
         print(f"Created note at '{path}'")
 

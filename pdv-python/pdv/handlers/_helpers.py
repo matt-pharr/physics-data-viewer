@@ -16,7 +16,7 @@ def validate_register_request(
     msg: dict,
     response_type: str,
     code_prefix: str,
-    required_fields: tuple[str, ...] = ("name", "relative_path"),
+    required_fields: tuple[str, ...] = ("name", "uuid", "filename"),
 ) -> tuple[Any, dict] | None:
     """Validate a ``pdv.<thing>.register`` request and resolve the tree.
 
@@ -36,7 +36,7 @@ def validate_register_request(
         ``f"{code_prefix}.no_tree"``.
     required_fields : tuple of str, optional
         Payload fields that must be present and truthy. Defaults to
-        ``("name", "relative_path")``.
+        ``("name", "uuid", "filename")``.
 
     Returns
     -------

@@ -303,9 +303,13 @@ def serialize_node(
     import json
     import os
     import pickle
-    import shutil
 
-    from pdv.environment import ensure_parent, working_dir_tree_path  # noqa: PLC0415
+    from pdv.environment import (  # noqa: PLC0415
+        ensure_parent,
+        generate_node_uuid,
+        smart_copy,
+        uuid_tree_path,
+    )
     from pdv.tree import PDVFile, PDVScript, PDVLib, PDVGui, PDVNote  # noqa: PLC0415
 
     # File extension and format for each PDVFile subclass
@@ -315,6 +319,14 @@ def serialize_node(
         KIND_GUI: (".gui.json", FORMAT_GUI_JSON),
         KIND_LIB: (".py", FORMAT_PY_LIB),
     }
+
+    def _file_storage(node_uuid: str, filename: str, fmt: str) -> dict:
+        return {
+            "backend": "local_file",
+            "uuid": node_uuid,
+            "filename": filename,
+            "format": fmt,
+        }
 
     _source_dir = source_dir or working_dir
 
@@ -371,35 +383,17 @@ def serialize_node(
 
     # -- PDVFile subclasses (PDVScript, PDVNote, future file types) -----------
     if kind in _FILE_KIND_MAP:
-        ext, fmt = _FILE_KIND_MAP[kind]
+        _ext, fmt = _FILE_KIND_MAP[kind]
         source_path = value.resolve_path(_source_dir)  # type: ignore[union-attr]
         if not os.path.exists(source_path):
             raise PDVSerializationError(f"File not found: {source_path}")
-        if isinstance(value, PDVLib):
-            # Lib files keep their original filename so that the Python import
-            # name stays consistent (e.g. n_pendulum.py → import n_pendulum).
-            # working_dir_tree_path would derive the name from the tree key,
-            # which has been mangled (n_pendulum_py).
-            if os.path.isabs(value.relative_path):
-                rel_path = os.path.relpath(source_path, _source_dir)
-            else:
-                rel_path = value.relative_path
-            # Copy lib file to save dir so it persists with the project
-            dest_path = os.path.join(working_dir, rel_path)
-            if os.path.abspath(source_path) != os.path.abspath(dest_path):
-                ensure_parent(dest_path)
-                shutil.copy2(source_path, dest_path)
-        else:
-            file_path = working_dir_tree_path(working_dir, tree_path, ext)
-            ensure_parent(file_path)
-            if os.path.abspath(source_path) != os.path.abspath(file_path):
-                shutil.copy2(source_path, file_path)
-            rel_path = os.path.relpath(file_path, working_dir)
-        descriptor["storage"] = {
-            "backend": "local_file",
-            "relative_path": rel_path,
-            "format": fmt,
-        }
+        node_uuid = value.uuid  # type: ignore[union-attr]
+        node_filename = value.filename  # type: ignore[union-attr]
+        dest_path = uuid_tree_path(working_dir, node_uuid, node_filename)
+        if os.path.abspath(source_path) != os.path.abspath(dest_path):
+            smart_copy(source_path, dest_path)
+        descriptor["uuid"] = node_uuid
+        descriptor["storage"] = _file_storage(node_uuid, node_filename, fmt)
         # Build type-specific metadata
         meta: dict[str, Any] = {"preview": preview}
         if isinstance(value, PDVScript):
@@ -421,20 +415,16 @@ def serialize_node(
         return descriptor
 
     if kind == KIND_NAMELIST:
-        ext = os.path.splitext(value.relative_path)[1] or ".nml"
         source_path = value.resolve_path(_source_dir)
         if not os.path.exists(source_path):
             raise PDVSerializationError(f"File not found: {source_path}")
-        file_path = working_dir_tree_path(working_dir, tree_path, ext)
-        ensure_parent(file_path)
-        if os.path.abspath(source_path) != os.path.abspath(file_path):
-            shutil.copy2(source_path, file_path)
-        rel_path = os.path.relpath(file_path, working_dir)
-        descriptor["storage"] = {
-            "backend": "local_file",
-            "relative_path": rel_path,
-            "format": FORMAT_NAMELIST,
-        }
+        node_uuid = value.uuid
+        node_filename = value.filename
+        dest_path = uuid_tree_path(working_dir, node_uuid, node_filename)
+        if os.path.abspath(source_path) != os.path.abspath(dest_path):
+            smart_copy(source_path, dest_path)
+        descriptor["uuid"] = node_uuid
+        descriptor["storage"] = _file_storage(node_uuid, node_filename, FORMAT_NAMELIST)
         descriptor["metadata"] = {
             "module_id": value.module_id,
             "namelist_format": value.format,
@@ -446,15 +436,13 @@ def serialize_node(
     if kind == KIND_NDARRAY:
         import numpy as np  # noqa: PLC0415
 
-        file_path = working_dir_tree_path(working_dir, tree_path, ".npy")
+        node_uuid = generate_node_uuid()
+        filename = key + ".npy"
+        file_path = uuid_tree_path(working_dir, node_uuid, filename)
         ensure_parent(file_path)
         np.save(file_path, value)
-        rel_path = os.path.relpath(file_path, working_dir)
-        descriptor["storage"] = {
-            "backend": "local_file",
-            "relative_path": rel_path,
-            "format": FORMAT_NPY,
-        }
+        descriptor["uuid"] = node_uuid
+        descriptor["storage"] = _file_storage(node_uuid, filename, FORMAT_NPY)
         descriptor["metadata"] = {
             "shape": list(value.shape),
             "dtype": str(value.dtype),
@@ -464,15 +452,13 @@ def serialize_node(
         return descriptor
 
     if kind in (KIND_DATAFRAME, KIND_SERIES):
-        file_path = working_dir_tree_path(working_dir, tree_path, ".parquet")
+        node_uuid = generate_node_uuid()
+        filename = key + ".parquet"
+        file_path = uuid_tree_path(working_dir, node_uuid, filename)
         ensure_parent(file_path)
         _write_parquet(value, file_path)
-        rel_path = os.path.relpath(file_path, working_dir)
-        descriptor["storage"] = {
-            "backend": "local_file",
-            "relative_path": rel_path,
-            "format": FORMAT_PARQUET,
-        }
+        descriptor["uuid"] = node_uuid
+        descriptor["storage"] = _file_storage(node_uuid, filename, FORMAT_PARQUET)
         if kind == KIND_DATAFRAME:
             shape = list(value.shape)  # type: ignore[union-attr]
         else:
@@ -501,16 +487,14 @@ def serialize_node(
                 "value": value,
             }
         else:
-            file_path = working_dir_tree_path(working_dir, tree_path, ".txt")
+            node_uuid = generate_node_uuid()
+            filename = key + ".txt"
+            file_path = uuid_tree_path(working_dir, node_uuid, filename)
             ensure_parent(file_path)
             with open(file_path, "w", encoding="utf-8") as fh:
                 fh.write(value)  # type: ignore[arg-type]
-            rel_path = os.path.relpath(file_path, working_dir)
-            descriptor["storage"] = {
-                "backend": "local_file",
-                "relative_path": rel_path,
-                "format": FORMAT_TXT,
-            }
+            descriptor["uuid"] = node_uuid
+            descriptor["storage"] = _file_storage(node_uuid, filename, FORMAT_TXT)
         descriptor["metadata"] = {"preview": preview}
         return descriptor
 
@@ -551,16 +535,14 @@ def serialize_node(
         )
 
     if kind == KIND_BINARY:
-        file_path = working_dir_tree_path(working_dir, tree_path, ".bin")
+        node_uuid = generate_node_uuid()
+        filename = key + ".bin"
+        file_path = uuid_tree_path(working_dir, node_uuid, filename)
         ensure_parent(file_path)
         with open(file_path, "wb") as fh:
             fh.write(value)  # type: ignore[arg-type]
-        rel_path = os.path.relpath(file_path, working_dir)
-        descriptor["storage"] = {
-            "backend": "local_file",
-            "relative_path": rel_path,
-            "format": "bin",
-        }
+        descriptor["uuid"] = node_uuid
+        descriptor["storage"] = _file_storage(node_uuid, filename, "bin")
         descriptor["metadata"] = {"preview": preview}
         return descriptor
 
@@ -569,7 +551,9 @@ def serialize_node(
 
     custom = _serializers.find_for_value(value)
     if custom is not None:
-        file_path = working_dir_tree_path(working_dir, tree_path, custom.extension)
+        node_uuid = generate_node_uuid()
+        filename = key + custom.extension
+        file_path = uuid_tree_path(working_dir, node_uuid, filename)
         ensure_parent(file_path)
         try:
             custom.save(value, file_path)
@@ -578,12 +562,8 @@ def serialize_node(
                 f"Custom serializer '{custom.class_name}' failed to save "
                 f"value at '{tree_path}': {exc}"
             ) from exc
-        rel_path = os.path.relpath(file_path, working_dir)
-        descriptor["storage"] = {
-            "backend": "local_file",
-            "relative_path": rel_path,
-            "format": custom.format,
-        }
+        descriptor["uuid"] = node_uuid
+        descriptor["storage"] = _file_storage(node_uuid, filename, custom.format)
         descriptor["metadata"] = {
             "preview": preview,
             "python_type": python_type_string(value),
@@ -597,16 +577,14 @@ def serialize_node(
             f"'{tree_path}'. Register a custom serializer with "
             f"pdv.register_serializer(), or pass trusted=True to allow pickle."
         )
-    file_path = working_dir_tree_path(working_dir, tree_path, ".pickle")
+    node_uuid = generate_node_uuid()
+    filename = key + ".pickle"
+    file_path = uuid_tree_path(working_dir, node_uuid, filename)
     ensure_parent(file_path)
     with open(file_path, "wb") as fh:
         pickle.dump(value, fh)
-    rel_path = os.path.relpath(file_path, working_dir)
-    descriptor["storage"] = {
-        "backend": "local_file",
-        "relative_path": rel_path,
-        "format": FORMAT_PICKLE,
-    }
+    descriptor["uuid"] = node_uuid
+    descriptor["storage"] = _file_storage(node_uuid, filename, FORMAT_PICKLE)
     descriptor["metadata"] = {"preview": preview}
     return descriptor
 
@@ -652,19 +630,24 @@ def pickle_fallback_node(tree_path: str, value: Any, working_dir: str) -> dict:
     import os
     import pickle
 
-    from pdv.environment import ensure_parent, working_dir_tree_path  # noqa: PLC0415
+    from pdv.environment import (  # noqa: PLC0415
+        ensure_parent,
+        generate_node_uuid,
+        uuid_tree_path,
+    )
 
-    file_path = working_dir_tree_path(working_dir, tree_path, ".pickle")
+    node_uuid = generate_node_uuid()
+    parts = tree_path.split(".")
+    key = parts[-1]
+    filename = key + ".pickle"
+    file_path = uuid_tree_path(working_dir, node_uuid, filename)
     ensure_parent(file_path)
     with open(file_path, "wb") as fh:
         pickle.dump(value, fh)
-    rel_path = os.path.relpath(file_path, working_dir)
 
     now = (
         datetime.datetime.now(datetime.timezone.utc).isoformat().replace("+00:00", "Z")
     )
-    parts = tree_path.split(".")
-    key = parts[-1]
     parent_path = ".".join(parts[:-1]) if len(parts) > 1 else ""
 
     return {
@@ -673,12 +656,14 @@ def pickle_fallback_node(tree_path: str, value: Any, working_dir: str) -> dict:
         "key": key,
         "parent_path": parent_path,
         "type": KIND_UNKNOWN,
+        "uuid": node_uuid,
         "has_children": False,
         "created_at": now,
         "updated_at": now,
         "storage": {
             "backend": "local_file",
-            "relative_path": rel_path,
+            "uuid": node_uuid,
+            "filename": filename,
             "format": FORMAT_PICKLE,
         },
         "metadata": {
@@ -696,7 +681,8 @@ def deserialize_node(storage_ref: dict, save_dir: str, *, trusted: bool = False)
     ----------
     storage_ref : dict
         Storage reference dict as defined in ARCHITECTURE.md §7.3.
-        Must contain ``backend``, ``relative_path``, and ``format``.
+        Must contain ``backend``, and for ``local_file`` backend:
+        ``uuid``, ``filename``, and ``format``.
     save_dir : str
         Absolute path to the project save directory (or working directory
         for session-local files).
@@ -726,6 +712,8 @@ def deserialize_node(storage_ref: dict, save_dir: str, *, trusted: bool = False)
     import os
     import pickle
 
+    from pdv.environment import uuid_tree_path  # noqa: PLC0415
+
     backend = storage_ref.get("backend", "")
 
     if backend == "none":
@@ -737,8 +725,9 @@ def deserialize_node(storage_ref: dict, save_dir: str, *, trusted: bool = False)
 
     if backend == "local_file":
         fmt = storage_ref.get("format", "")
-        rel_path = storage_ref.get("relative_path", "")
-        abs_path = os.path.join(save_dir, rel_path)
+        node_uuid = storage_ref.get("uuid", "")
+        filename = storage_ref.get("filename", "")
+        abs_path = uuid_tree_path(save_dir, node_uuid, filename)
 
         if not os.path.exists(abs_path):
             raise FileNotFoundError(f"Backing file not found: {abs_path}")

@@ -8,7 +8,7 @@ This module is the core of the pdv package. It implements:
   notifications on mutation (when a comm is attached).
 
 - :class:`PDVFile`: base class for file-backed tree nodes. Provides shared
-  ``relative_path`` storage and ``resolve_path()`` for consistent path
+  UUID-based storage and ``resolve_path()`` for consistent path
   resolution across all file-backed node types.
 
 - :class:`PDVScript`: a lightweight wrapper for a script file stored as
@@ -208,14 +208,16 @@ class PDVFile:
     """
     Base class for file-backed PDV tree nodes.
 
-    Provides shared ``relative_path`` storage and ``preview()`` interface
+    Provides shared UUID-based file storage and ``preview()`` interface
     used by both :class:`PDVScript` and :class:`PDVNote`, and any future
     file-backed node types (images, data files, etc.).
 
     Parameters
     ----------
-    relative_path : str
-        Path to the backing file (absolute or relative to working dir).
+    uuid : str
+        12-hex-character UUID identifying this node's storage directory.
+    filename : str
+        Original filename including extension (e.g. ``'fit.py'``).
     source_rel_path : str or None
         For module-owned files, the path of this file relative to the
         **module root** (e.g. ``"scripts/run.py"`` or ``"lib/helpers.py"``)
@@ -232,22 +234,33 @@ class PDVFile:
 
     def __init__(
         self,
-        relative_path: str,
+        uuid: str,
+        filename: str,
         source_rel_path: str | None = None,
     ) -> None:
-        self._relative_path = relative_path
+        self._uuid = uuid
+        self._filename = filename
         self._source_rel_path = source_rel_path
 
     @property
-    def relative_path(self) -> str:
-        """Path to the backing file.
+    def uuid(self) -> str:
+        """12-hex-character UUID for this node's storage directory.
 
         Returns
         -------
         str
-            File path (absolute or relative to working dir).
         """
-        return self._relative_path
+        return self._uuid
+
+    @property
+    def filename(self) -> str:
+        """Original filename including extension.
+
+        Returns
+        -------
+        str
+        """
+        return self._filename
 
     @property
     def source_rel_path(self) -> str | None:
@@ -265,24 +278,38 @@ class PDVFile:
     def resolve_path(self, working_dir: str | None = None) -> str:
         """Resolve the backing file to an absolute path.
 
+        Computes ``<working_dir>/tree/<uuid>/<filename>``.
+
         Parameters
         ----------
         working_dir : str or None
-            Working directory to resolve relative paths against. When the
-            stored ``relative_path`` is itself absolute this argument is
-            ignored. When it is relative and ``working_dir`` is falsy, the
-            current process working directory (``os.getcwd()``) is used as
-            a last-resort base so the returned path is always absolute.
+            Working directory (or save directory) containing the
+            ``tree/`` subdirectory. When ``None``, the current session's
+            working directory is obtained from the global ``pdv_tree``.
 
         Returns
         -------
         str
             Absolute file path.
+
+        Raises
+        ------
+        RuntimeError
+            If no working directory is available (no argument and no
+            active session).
         """
-        if os.path.isabs(self._relative_path):
-            return self._relative_path
-        base = working_dir or os.getcwd()
-        return os.path.join(base, self._relative_path)
+        if working_dir is None:
+            from pdv.comms import get_pdv_tree  # noqa: PLC0415
+
+            tree = get_pdv_tree()
+            if tree is not None:
+                working_dir = getattr(tree, "_working_dir", None)
+        if working_dir is None:
+            raise RuntimeError(
+                "Cannot resolve file path: no working directory. "
+                "Pass working_dir explicitly or ensure a PDV session is active."
+            )
+        return os.path.join(working_dir, "tree", self._uuid, self._filename)
 
     def preview(self) -> str:
         """Return a short human-readable preview for the tree panel.
@@ -293,11 +320,11 @@ class PDVFile:
             Preview string. Subclasses should override for domain-specific
             previews.
         """
-        return os.path.basename(self._relative_path)
+        return self._filename
 
     def __repr__(self) -> str:
         cls = type(self).__name__
-        return f"{cls}('{self._relative_path}')"
+        return f"{cls}(uuid='{self._uuid}', filename='{self._filename}')"
 
 
 class PDVScript(PDVFile):
@@ -310,8 +337,10 @@ class PDVScript(PDVFile):
 
     Parameters
     ----------
-    relative_path : str
-        Path of the script file relative to the project root.
+    uuid : str
+        12-hex-character UUID for this node's storage directory.
+    filename : str
+        Script filename including extension (e.g. ``'fit.py'``).
     language : str
         Language of the script. Currently only ``'python'`` is supported.
     doc : str or None
@@ -325,13 +354,14 @@ class PDVScript(PDVFile):
 
     def __init__(
         self,
-        relative_path: str,
+        uuid: str,
+        filename: str,
         language: str = "python",
         doc: str | None = None,
         module_id: str = "",
         source_rel_path: str | None = None,
     ) -> None:
-        super().__init__(relative_path, source_rel_path=source_rel_path)
+        super().__init__(uuid, filename, source_rel_path=source_rel_path)
         self._language = language
         self._doc = doc
         self._module_id = module_id
@@ -501,18 +531,18 @@ class PDVScript(PDVFile):
 
         if not hasattr(module, "run"):
             raise PDVScriptError(
-                f"Script '{self._relative_path}' does not define a run() function"
+                f"Script '{self._filename}' does not define a run() function"
             )
 
         try:
             return module.run(tree, **kwargs)
         except Exception as exc:
             raise PDVScriptError(
-                f"Script '{self._relative_path}' raised during run(): {exc}"
+                f"Script '{self._filename}' raised during run(): {exc}"
             ) from exc
 
     def __repr__(self) -> str:
-        return f"PDVScript('{self._relative_path}', lang='{self._language}')"
+        return f"PDVScript(uuid='{self._uuid}', filename='{self._filename}', lang='{self._language}')"
 
 
 # ---------------------------------------------------------------------------
@@ -529,19 +559,22 @@ class PDVGui(PDVFile):
 
     Parameters
     ----------
-    relative_path : str
-        Path to the ``.gui.json`` file (absolute or relative to working dir).
+    uuid : str
+        12-hex-character UUID for this node's storage directory.
+    filename : str
+        GUI filename (e.g. ``'editor.gui.json'``).
     module_id : str or None
         Module identifier for module-owned GUIs. None for user-created project GUIs.
     """
 
     def __init__(
         self,
-        relative_path: str,
+        uuid: str,
+        filename: str,
         module_id: str | None = None,
         source_rel_path: str | None = None,
     ) -> None:
-        super().__init__(relative_path, source_rel_path=source_rel_path)
+        super().__init__(uuid, filename, source_rel_path=source_rel_path)
         self._module_id = module_id
 
     @property
@@ -567,7 +600,7 @@ class PDVGui(PDVFile):
 
     def __repr__(self) -> str:
         mid = f", module_id='{self._module_id}'" if self._module_id else ""
-        return f"PDVGui('{self._relative_path}'{mid})"
+        return f"PDVGui(uuid='{self._uuid}', filename='{self._filename}'{mid})"
 
 
 class PDVNamelist(PDVFile):
@@ -579,8 +612,10 @@ class PDVNamelist(PDVFile):
 
     Parameters
     ----------
-    relative_path : str
-        Path to the backing namelist file (absolute or relative to working dir).
+    uuid : str
+        12-hex-character UUID for this node's storage directory.
+    filename : str
+        Namelist filename (e.g. ``'solver.nml'``).
     format : str
         Namelist format: ``'fortran'``, ``'toml'``, or ``'auto'`` (detect from extension).
     module_id : str or None
@@ -593,12 +628,13 @@ class PDVNamelist(PDVFile):
 
     def __init__(
         self,
-        relative_path: str,
+        uuid: str,
+        filename: str,
         format: str = "auto",
         module_id: str | None = None,
         source_rel_path: str | None = None,
     ) -> None:
-        super().__init__(relative_path, source_rel_path=source_rel_path)
+        super().__init__(uuid, filename, source_rel_path=source_rel_path)
         self._format = format  # "fortran", "toml", "auto"
         self._module_id = module_id
 
@@ -633,7 +669,7 @@ class PDVNamelist(PDVFile):
 
     def __repr__(self) -> str:
         mid = f", module_id='{self._module_id}'" if self._module_id else ""
-        return f"PDVNamelist('{self._relative_path}', format='{self._format}'{mid})"
+        return f"PDVNamelist(uuid='{self._uuid}', filename='{self._filename}', format='{self._format}'{mid})"
 
 
 class PDVLib(PDVFile):
@@ -646,8 +682,11 @@ class PDVLib(PDVFile):
 
     Parameters
     ----------
-    relative_path : str
-        Path to the ``.py`` file (absolute or relative to working dir).
+    uuid : str
+        12-hex-character UUID for this node's storage directory.
+    filename : str
+        Library filename (e.g. ``'n_pendulum.py'``). Preserved exactly
+        so that ``import n_pendulum`` works.
     module_id : str or None
         Module identifier for the owning module.
 
@@ -658,11 +697,12 @@ class PDVLib(PDVFile):
 
     def __init__(
         self,
-        relative_path: str,
+        uuid: str,
+        filename: str,
         module_id: str | None = None,
         source_rel_path: str | None = None,
     ) -> None:
-        super().__init__(relative_path, source_rel_path=source_rel_path)
+        super().__init__(uuid, filename, source_rel_path=source_rel_path)
         self._module_id = module_id
 
     @property
@@ -682,11 +722,11 @@ class PDVLib(PDVFile):
         -------
         str
         """
-        return f"Library ({os.path.basename(self._relative_path)})"
+        return f"Library ({self._filename})"
 
     def __repr__(self) -> str:
         mid = f", module_id='{self._module_id}'" if self._module_id else ""
-        return f"PDVLib('{self._relative_path}'{mid})"
+        return f"PDVLib(uuid='{self._uuid}', filename='{self._filename}'{mid})"
 
 
 class PDVNote(PDVFile):
@@ -698,8 +738,10 @@ class PDVNote(PDVFile):
 
     Parameters
     ----------
-    relative_path : str
-        Path to the ``.md`` file (absolute or relative to working dir).
+    uuid : str
+        12-hex-character UUID for this node's storage directory.
+    filename : str
+        Note filename (e.g. ``'intro.md'``).
     title : str or None
         Optional title for the note, used as a preview fallback. If None,
         the first non-empty line of the file is used.
@@ -709,8 +751,8 @@ class PDVNote(PDVFile):
     ARCHITECTURE.md §7.2, PLANNED_FEATURES.md Feature 4
     """
 
-    def __init__(self, relative_path: str, title: str | None = None) -> None:
-        super().__init__(relative_path)
+    def __init__(self, uuid: str, filename: str, title: str | None = None) -> None:
+        super().__init__(uuid, filename)
         self._title = title
 
     @property
@@ -737,16 +779,6 @@ class PDVNote(PDVFile):
         """
         if self._title:
             return self._title[:100]
-        try:
-            path = self._relative_path
-            if os.path.exists(path):
-                with open(path, "r", encoding="utf-8") as fh:
-                    for line in fh:
-                        stripped = line.strip().lstrip("#").strip()
-                        if stripped:
-                            return stripped[:100]
-        except Exception:  # noqa: BLE001
-            pass
         return "Markdown note"
 
 

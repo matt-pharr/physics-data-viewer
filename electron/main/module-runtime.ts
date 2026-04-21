@@ -300,42 +300,37 @@ export async function bindImportedModule(
 
   const moduleIndex = await moduleManager.readModuleIndex(installPath);
 
-  // Copy each local_file backend file to
-  // ``<workdir>/tree/<alias>/<relative_path>`` and build a remapped
-  // index with updated ``relative_paths``. The ``tree/`` prefix is the
-  // canonical working-dir/save-dir subdir for file-backed nodes
-  // (ARCHITECTURE.md §6.1/§6.2): ``serialize_node`` writes there,
-  // ``copyFilesForLoad`` mirrors from there, and the Option A fix in
-  // the #140 PR aligns every file-backed-node creation path on the
-  // same layout so in-memory ``relative_path`` stays stable across
-  // save/load cycles.
+  // Copy each local_file backend file to ``<workdir>/tree/<uuid>/<filename>``
+  // and build a remapped index with UUID-based storage. Each file gets a
+  // fresh UUID so its path is independent of the tree structure.
   //
-  // Each remapped entry also carries ``source_rel_path`` — the
-  // original module-rooted rel-path (e.g. ``scripts/run.py``) — so
-  // the save-time sync step (§3) can mirror working-dir edits back
-  // into ``<saveDir>/modules/<id>/<source_rel_path>``.
-  //
-  // TODO(UUID): once the UUID-based file storage redesign lands this
-  // layout becomes ``tree/<uuid>/<filename>``; source_rel_path is
-  // unaffected because it is intentionally tree-path-agnostic.
+  // Each remapped entry also carries ``source_rel_path`` — the original
+  // module-rooted rel-path (e.g. ``scripts/run.py``) — so the save-time
+  // sync step can mirror working-dir edits back into
+  // ``<saveDir>/modules/<id>/<source_rel_path>``.
+  const { randomUUID } = await import("crypto");
   const remappedIndex = await Promise.all(
     moduleIndex.map(async (node) => {
       const nodeAny = node as unknown as Record<string, unknown>;
       const storage = nodeAny.storage as Record<string, unknown> | undefined;
       if (!storage || storage.backend !== "local_file") return node;
-      const relPath = typeof storage.relative_path === "string" ? storage.relative_path : "";
-      if (!relPath || !workingDir) return node;
 
-      const srcPath = path.join(installPath, relPath);
-      const destRelPath = path.join("tree", importedModule.alias, relPath);
-      const destPath = path.join(workingDir, destRelPath);
+      const origRelPath = typeof storage.relative_path === "string" ? storage.relative_path : "";
+      const origFilename = typeof storage.filename === "string" ? storage.filename : "";
+      const filename = origFilename || path.basename(origRelPath);
+      if (!filename || !workingDir) return node;
+
+      const nodeUuid = randomUUID().replace(/-/g, "").slice(0, 12);
+      const srcPath = path.join(installPath, origRelPath || path.join(String(storage.uuid ?? ""), filename));
+      const destPath = path.join(workingDir, "tree", nodeUuid, filename);
       await fs.mkdir(path.dirname(destPath), { recursive: true });
       await fs.copyFile(srcPath, destPath);
 
       return {
         ...node,
-        storage: { ...storage, relative_path: destRelPath },
-        source_rel_path: relPath,
+        uuid: nodeUuid,
+        storage: { ...storage, uuid: nodeUuid, filename },
+        source_rel_path: origRelPath || filename,
       };
     }),
   );

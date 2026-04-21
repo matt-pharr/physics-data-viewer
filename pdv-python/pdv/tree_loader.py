@@ -32,11 +32,11 @@ Divergent details between the two callers are exposed as named arguments:
 - ``module_id_default`` — fallback ``module_id`` for ``script`` nodes when
   the on-disk metadata is missing it.
 
-``sys.path`` wiring for module libraries is handled exclusively by
-``handle_modules_setup``: after ``load_tree_index`` populates the tree,
-main sends ``pdv.modules.setup`` and the kernel walks each ``PDVModule``
-subtree to collect the parent directories of every ``PDVLib``
-descendant. The loader itself never touches ``sys.path``.
+``sys.path`` wiring for module libraries is handled by
+``handle_modules_setup`` (the canonical path) and, for project load only,
+by a ``between_passes`` callback that imports module entry points early
+so custom serializers are registered before Pass 2 deserializes data.
+The loader itself never touches ``sys.path``.
 
 See Also
 --------
@@ -65,6 +65,7 @@ def load_tree_index(
     patch_module_id_on_skip: str | None = None,
     module_id_default: str = "",
     working_dir: str = "",
+    between_passes: Callable[[], None] | None = None,
 ) -> None:
     """Mount a tree-index node list into ``tree`` using the two-pass algorithm.
 
@@ -98,6 +99,11 @@ def load_tree_index(
     working_dir : str
         Working directory used to resolve relative paths during
         deserialization of file-backed leaves.
+    between_passes : callable, optional
+        Invoked after Pass 1 (containers) completes and before Pass 2
+        (leaves) begins. Used by project load to import module entry
+        points — which may register custom serializers — so that
+        custom-format data nodes can be deserialized in Pass 2.
     """
     # Local imports to avoid circular dependencies — tree.py imports nothing
     # from this module, so importing tree.py here is safe.
@@ -164,6 +170,9 @@ def load_tree_index(
             mod._save_dir = tree._save_dir
             tree.set_quiet(full_path, mod)
 
+    if between_passes is not None:
+        between_passes()
+
     # ── Pass 2: leaves ───────────────────────────────────────────────────
     total = len(nodes)
     for index, node in enumerate(nodes, start=1):
@@ -202,7 +211,8 @@ def load_tree_index(
                     on_progress(index, total)
                 continue
 
-        rel_path = storage.get("relative_path", "")
+        node_uuid = node.get("uuid", storage.get("uuid", ""))
+        node_filename = storage.get("filename", "")
         # source_rel_path is the path of this file relative to its owning
         # module root (e.g. "scripts/run.py"). Set by the module bind path
         # for module-owned files and re-read here so it survives
@@ -216,7 +226,8 @@ def load_tree_index(
             tree.set_quiet(
                 full_path,
                 PDVScript(
-                    relative_path=rel_path,
+                    uuid=node_uuid,
+                    filename=node_filename,
                     language=language,
                     doc=doc,
                     module_id=mod_id,
@@ -228,14 +239,16 @@ def load_tree_index(
             tree.set_quiet(
                 full_path,
                 PDVNote(
-                    relative_path=rel_path,
+                    uuid=node_uuid,
+                    filename=node_filename,
                     title=title,
                 ),
             )
         elif node_type == "gui":
             mod_id = meta.get("module_id", node.get("module_id", module_id_default))
             gui_node = PDVGui(
-                relative_path=rel_path,
+                uuid=node_uuid,
+                filename=node_filename,
                 module_id=mod_id,
                 source_rel_path=src_rel,
             )
@@ -258,7 +271,8 @@ def load_tree_index(
             tree.set_quiet(
                 full_path,
                 PDVNamelist(
-                    relative_path=rel_path,
+                    uuid=node_uuid,
+                    filename=node_filename,
                     format=namelist_format,
                     module_id=mod_id,
                     source_rel_path=src_rel,
@@ -269,7 +283,8 @@ def load_tree_index(
             tree.set_quiet(
                 full_path,
                 PDVLib(
-                    relative_path=rel_path,
+                    uuid=node_uuid,
+                    filename=node_filename,
                     module_id=mod_id,
                     source_rel_path=src_rel,
                 ),

@@ -30,7 +30,8 @@ def handle_note_register(msg: dict) -> None:
         {
             "parent_path": "notes",
             "name": "introduction",
-            "relative_path": "/path/to/notes/introduction.md"
+            "uuid": "a1b2c3d4e5f6",
+            "filename": "introduction.md"
         }
 
     Response type: ``pdv.note.register.response``
@@ -50,9 +51,10 @@ def handle_note_register(msg: dict) -> None:
     tree, payload = validated
     parent_path = payload.get("parent_path", "")
     name = payload.get("name", "")
-    relative_path = payload.get("relative_path", "")
+    node_uuid = payload.get("uuid", "")
+    filename = payload.get("filename", "")
 
-    note = PDVNote(relative_path=relative_path)
+    note = PDVNote(uuid=node_uuid, filename=filename)
     full_path = f"{parent_path}.{name}" if parent_path else name
     tree[full_path] = note
 

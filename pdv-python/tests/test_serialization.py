@@ -100,7 +100,7 @@ class TestDetectKind:
         """PDVScript returns KIND_SCRIPT."""
         from pdv.tree import PDVScript
 
-        assert detect_kind(PDVScript("scripts/test.py")) == KIND_SCRIPT
+        assert detect_kind(PDVScript("abc123def456", "test.py")) == KIND_SCRIPT
 
 
 class TestSerializeAndDeserialize:
@@ -248,11 +248,12 @@ class TestMetadataSubDict:
     def test_gui_descriptor_metadata(self, tmp_working_dir):
         from pdv.tree import PDVGui
 
-        gui_file = os.path.join(tmp_working_dir, "tree", "mod", "gui.gui.json")
+        node_uuid = "gui_uuid_001"
+        gui_file = os.path.join(tmp_working_dir, "tree", node_uuid, "gui.gui.json")
         os.makedirs(os.path.dirname(gui_file), exist_ok=True)
         with open(gui_file, "w") as f:
             f.write("{}")
-        gui = PDVGui(relative_path=gui_file, module_id="test_mod")
+        gui = PDVGui(uuid=node_uuid, filename="gui.gui.json", module_id="test_mod")
         desc = serialize_node("mod.gui", gui, tmp_working_dir)
         assert "metadata" in desc
         meta = desc["metadata"]
@@ -262,12 +263,13 @@ class TestMetadataSubDict:
     def test_namelist_descriptor_metadata(self, tmp_working_dir):
         from pdv.tree import PDVNamelist
 
-        nml_file = os.path.join(tmp_working_dir, "tree", "mod", "solver.nml")
+        node_uuid = "nml_uuid_001"
+        nml_file = os.path.join(tmp_working_dir, "tree", node_uuid, "solver.nml")
         os.makedirs(os.path.dirname(nml_file), exist_ok=True)
         with open(nml_file, "w") as f:
             f.write("&solver /\n")
         nml = PDVNamelist(
-            relative_path=nml_file, format="fortran", module_id="test_mod"
+            uuid=node_uuid, filename="solver.nml", format="fortran", module_id="test_mod"
         )
         desc = serialize_node("mod.solver", nml, tmp_working_dir)
         assert "metadata" in desc
@@ -279,11 +281,12 @@ class TestMetadataSubDict:
     def test_lib_descriptor_metadata(self, tmp_working_dir):
         from pdv.tree import PDVLib
 
-        lib_file = os.path.join(tmp_working_dir, "tree", "mod", "lib", "helpers.py")
+        node_uuid = "lib_uuid_001"
+        lib_file = os.path.join(tmp_working_dir, "tree", node_uuid, "helpers.py")
         os.makedirs(os.path.dirname(lib_file), exist_ok=True)
         with open(lib_file, "w") as f:
             f.write("# helpers\n")
-        lib = PDVLib(relative_path=lib_file, module_id="test_mod")
+        lib = PDVLib(uuid=node_uuid, filename="helpers.py", module_id="test_mod")
         desc = serialize_node("mod.lib.helpers", lib, tmp_working_dir)
         assert "metadata" in desc
         meta = desc["metadata"]
@@ -294,12 +297,13 @@ class TestMetadataSubDict:
     def test_script_descriptor_metadata(self, tmp_working_dir):
         from pdv.tree import PDVScript
 
-        script_file = os.path.join(tmp_working_dir, "tree", "run.py")
+        node_uuid = "scr_uuid_001"
+        script_file = os.path.join(tmp_working_dir, "tree", node_uuid, "run.py")
         os.makedirs(os.path.dirname(script_file), exist_ok=True)
         with open(script_file, "w") as f:
             f.write('"""My script."""\ndef run(pdv_tree: dict):\n    return {}\n')
         script = PDVScript(
-            relative_path=script_file, language="python", doc="My script."
+            uuid=node_uuid, filename="run.py", language="python", doc="My script."
         )
         desc = serialize_node("run", script, tmp_working_dir)
         assert "metadata" in desc
@@ -314,12 +318,14 @@ class TestMetadataSubDict:
         """PDVScript with source_rel_path set round-trips through serialize_node."""
         from pdv.tree import PDVScript
 
-        script_file = os.path.join(tmp_working_dir, "my_mod", "scripts", "run.py")
+        node_uuid = "mod_scr_001"
+        script_file = os.path.join(tmp_working_dir, "tree", node_uuid, "run.py")
         os.makedirs(os.path.dirname(script_file), exist_ok=True)
         with open(script_file, "w") as f:
             f.write('"""Module script."""\ndef run(pdv_tree: dict):\n    return {}\n')
         script = PDVScript(
-            relative_path=script_file,
+            uuid=node_uuid,
+            filename="run.py",
             language="python",
             doc="Module script.",
             module_id="my_mod",
@@ -333,12 +339,13 @@ class TestMetadataSubDict:
         from pdv.tree import PDVLib, PDVModule, PDVScript, PDVTree
         from pdv.tree_loader import load_tree_index
 
-        mod_root = os.path.join(tmp_working_dir, "my_mod")
-        scripts_dir = os.path.join(mod_root, "scripts")
-        lib_dir = os.path.join(mod_root, "lib")
-        os.makedirs(scripts_dir, exist_ok=True)
+        scr_uuid = "mod_scr_rt01"
+        lib_uuid = "mod_lib_rt01"
+        script_dir = os.path.join(tmp_working_dir, "tree", scr_uuid)
+        lib_dir = os.path.join(tmp_working_dir, "tree", lib_uuid)
+        os.makedirs(script_dir, exist_ok=True)
         os.makedirs(lib_dir, exist_ok=True)
-        script_file = os.path.join(scripts_dir, "run.py")
+        script_file = os.path.join(script_dir, "run.py")
         with open(script_file, "w") as f:
             f.write("def run(pdv_tree: dict):\n    return {}\n")
         lib_file = os.path.join(lib_dir, "helpers.py")
@@ -346,12 +353,14 @@ class TestMetadataSubDict:
             f.write("VALUE = 1\n")
 
         script = PDVScript(
-            relative_path=script_file,
+            uuid=scr_uuid,
+            filename="run.py",
             module_id="my_mod",
             source_rel_path="scripts/run.py",
         )
         lib = PDVLib(
-            relative_path=lib_file,
+            uuid=lib_uuid,
+            filename="helpers.py",
             module_id="my_mod",
             source_rel_path="lib/helpers.py",
         )
@@ -443,6 +452,7 @@ class TestCompositeMappingSerialize:
 
     def test_pickle_fallback_node_writes_file(self, tmp_working_dir):
         from pdv.serialization import pickle_fallback_node
+        from pdv.environment import uuid_tree_path
 
         obj = WeirdPicklable()
         desc = pickle_fallback_node("u", obj, tmp_working_dir)
@@ -450,8 +460,9 @@ class TestCompositeMappingSerialize:
         assert desc["storage"]["format"] == "pickle"
         assert desc["metadata"]["fallback"] == "pickle"
         assert "python_type" in desc["metadata"]
-        rel = desc["storage"]["relative_path"]
-        assert os.path.exists(os.path.join(tmp_working_dir, rel))
+        node_uuid = desc["storage"]["uuid"]
+        filename = desc["storage"]["filename"]
+        assert os.path.exists(uuid_tree_path(tmp_working_dir, node_uuid, filename))
         # Round-trips via deserialize_node with trusted=True.
         restored = deserialize_node(
             desc["storage"], tmp_working_dir, trusted=True

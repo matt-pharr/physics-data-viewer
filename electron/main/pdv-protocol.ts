@@ -385,6 +385,8 @@ export interface PDVFileRegisterPayload {
   tree_path: string;
   /** Physical filename with extension (e.g. "input.nml"). */
   filename: string;
+  /** 12-hex-character UUID for the node's storage directory. */
+  uuid?: string;
   /** Node type classification for the file. */
   node_type: "namelist" | "lib" | "file";
   /** Optional explicit tree node name. When omitted the kernel derives it from filename. */

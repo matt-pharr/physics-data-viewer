@@ -245,19 +245,27 @@ class TestPDVScript:
         self, tree_with_comm, tmp_working_dir, tmp_path
     ):
         """PDVScript.run() calls the script's run() function."""
-        script_file = tmp_path / "test_script.py"
+        node_uuid = "abc123def456"
+        script_dir = tmp_path / "tree" / node_uuid
+        script_dir.mkdir(parents=True)
+        script_file = script_dir / "test_script.py"
         script_file.write_text("def run(tree, **kwargs):\n    return 42\n")
-        script = PDVScript(relative_path=str(script_file), language="python")
+        tree_with_comm._set_working_dir(str(tmp_path))
+        script = PDVScript(uuid=node_uuid, filename="test_script.py", language="python")
         result = script.run(tree_with_comm)
         assert result == 42
 
     def test_run_passes_tree_as_first_arg(self, tree_with_comm, tmp_path):
         """The tree is passed as the first argument to the script run()."""
-        script_file = tmp_path / "check_tree.py"
+        node_uuid = "abc123def457"
+        script_dir = tmp_path / "tree" / node_uuid
+        script_dir.mkdir(parents=True)
+        script_file = script_dir / "check_tree.py"
         script_file.write_text(
             "def run(tree, **kwargs):\n    return type(tree).__name__\n"
         )
-        script = PDVScript(relative_path=str(script_file))
+        tree_with_comm._set_working_dir(str(tmp_path))
+        script = PDVScript(uuid=node_uuid, filename="check_tree.py")
         result = script.run(tree_with_comm)
         assert result == "PDVTree"
 
@@ -267,39 +275,51 @@ class TestPDVScript:
         """Calling script.run(**kwargs) uses the bootstrapped global tree."""
         from pdv import comms
 
-        script_file = tmp_path / "global_tree.py"
+        node_uuid = "abc123def458"
+        script_dir = tmp_path / "tree" / node_uuid
+        script_dir.mkdir(parents=True)
+        script_file = script_dir / "global_tree.py"
         script_file.write_text('def run(tree, **kwargs):\n    return tree["x"]\n')
-        script = PDVScript(relative_path=str(script_file))
+        tree_with_comm._set_working_dir(str(tmp_path))
+        script = PDVScript(uuid=node_uuid, filename="global_tree.py")
         tree_with_comm["x"] = 7
         monkeypatch.setattr(comms, "_pdv_tree", tree_with_comm)
         assert script.run() == 7
 
     def test_run_missing_file_raises(self, tree_with_comm):
         """Running a non-existent script raises FileNotFoundError."""
-        script = PDVScript(relative_path="/nonexistent/path/to/script.py")
+        script = PDVScript(uuid="missing_uuid1", filename="script.py")
         with pytest.raises(FileNotFoundError):
             script.run(tree_with_comm)
 
     def test_run_no_run_fn_raises(self, tree_with_comm, tmp_path):
         """Running a script without run() raises PDVScriptError."""
-        script_file = tmp_path / "no_run.py"
+        node_uuid = "abc123def459"
+        script_dir = tmp_path / "tree" / node_uuid
+        script_dir.mkdir(parents=True)
+        script_file = script_dir / "no_run.py"
         script_file.write_text("x = 1\n")
-        script = PDVScript(relative_path=str(script_file))
+        tree_with_comm._set_working_dir(str(tmp_path))
+        script = PDVScript(uuid=node_uuid, filename="no_run.py")
         with pytest.raises(PDVScriptError):
             script.run(tree_with_comm)
 
     def test_preview(self, tmp_path):
         """preview() returns the first line of the script docstring."""
         script = PDVScript(
-            relative_path="scripts/test.py", doc="My script does stuff\nmore details"
+            uuid="abc123def460", filename="test.py", doc="My script does stuff\nmore details"
         )
         assert script.preview() == "My script does stuff"
 
     def test_run_script_via_tree(self, tree_with_comm, tmp_path):
         """pdv_tree.run_script('path') works end-to-end."""
-        script_file = tmp_path / "myrun.py"
+        node_uuid = "abc123def461"
+        script_dir = tmp_path / "tree" / node_uuid
+        script_dir.mkdir(parents=True)
+        script_file = script_dir / "myrun.py"
         script_file.write_text("def run(tree, **kwargs):\n    return 100\n")
-        tree_with_comm["s"] = PDVScript(relative_path=str(script_file))
+        tree_with_comm._set_working_dir(str(tmp_path))
+        tree_with_comm["s"] = PDVScript(uuid=node_uuid, filename="myrun.py")
         result = tree_with_comm.run_script("s")
         assert result == 100
 

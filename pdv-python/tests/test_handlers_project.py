@@ -85,7 +85,8 @@ class TestHandleProjectLoad:
         """File-backed nodes from tree-index.json are eagerly deserialized into the tree."""
         numpy = pytest.importorskip("numpy")
         arr = numpy.array([1.0, 2.0, 3.0])
-        tree_dir = os.path.join(tree_with_comm._working_dir, "tree")
+        node_uuid = "arr_uuid_001"
+        tree_dir = os.path.join(tree_with_comm._working_dir, "tree", node_uuid)
         os.makedirs(tree_dir, exist_ok=True)
         numpy.save(os.path.join(tree_dir, "arr.npy"), arr)
         nodes = [
@@ -94,7 +95,8 @@ class TestHandleProjectLoad:
                 "type": "ndarray",
                 "storage": {
                     "backend": "local_file",
-                    "relative_path": "tree/arr.npy",
+                    "uuid": node_uuid,
+                    "filename": "arr.npy",
                     "format": "npy",
                 },
             },
@@ -127,8 +129,8 @@ class TestHandleProjectLoad:
         """Script descriptors are restored as PDVScript instances, not plain text."""
         # Create file in working dir (TypeScript copies before load)
         working_dir = tree_with_comm._working_dir
-        script_rel = os.path.join("tree", "scripts", "demo.py")
-        script_file = os.path.join(working_dir, script_rel)
+        node_uuid = "scr_demo_001"
+        script_file = os.path.join(working_dir, "tree", node_uuid, "demo.py")
         os.makedirs(os.path.dirname(script_file), exist_ok=True)
         with open(script_file, "w", encoding="utf-8") as fh:
             fh.write("def run(pdv_tree: dict):\n    return {}\n")
@@ -143,9 +145,11 @@ class TestHandleProjectLoad:
             {
                 "path": "scripts.demo",
                 "type": "script",
+                "uuid": node_uuid,
                 "storage": {
                     "backend": "local_file",
-                    "relative_path": script_rel,
+                    "uuid": node_uuid,
+                    "filename": "demo.py",
                     "format": "py_script",
                 },
                 "metadata": {"language": "python", "doc": None, "preview": "script"},
@@ -287,12 +291,13 @@ class TestHandleProjectSave:
         """Module-owned PDVFile nodes surface in the save response so the main
         process can mirror them into <saveDir>/modules/<id>/<source_rel_path>."""
         working_dir = tree_with_comm._working_dir
-        # Place a script file and a lib file under the working-dir alias.
-        scripts_dir = os.path.join(working_dir, "my_mod", "scripts")
-        lib_dir = os.path.join(working_dir, "my_mod", "lib")
-        os.makedirs(scripts_dir, exist_ok=True)
+        scr_uuid = "mod_scr_ow01"
+        lib_uuid = "mod_lib_ow01"
+        script_dir = os.path.join(working_dir, "tree", scr_uuid)
+        lib_dir = os.path.join(working_dir, "tree", lib_uuid)
+        os.makedirs(script_dir, exist_ok=True)
         os.makedirs(lib_dir, exist_ok=True)
-        script_path = os.path.join(scripts_dir, "run.py")
+        script_path = os.path.join(script_dir, "run.py")
         with open(script_path, "w") as f:
             f.write("def run(pdv_tree: dict):\n    return {}\n")
         lib_path = os.path.join(lib_dir, "helpers.py")
@@ -303,13 +308,15 @@ class TestHandleProjectSave:
         module = PDVModule(module_id="my_mod", name="My", version="0.1.0")
         module["scripts"] = PDVTree()
         module["scripts.run"] = PDVScript(
-            relative_path=script_path,
+            uuid=scr_uuid,
+            filename="run.py",
             module_id="my_mod",
             source_rel_path="scripts/run.py",
         )
         module["lib"] = PDVTree()
         module["lib.helpers"] = PDVLib(
-            relative_path=lib_path,
+            uuid=lib_uuid,
+            filename="helpers.py",
             module_id="my_mod",
             source_rel_path="lib/helpers.py",
         )
@@ -343,11 +350,13 @@ class TestHandleProjectSave:
     ):
         """Each PDVModule surfaces a full manifest bundle with module-root-relative descriptors."""
         working_dir = tree_with_comm._working_dir
-        scripts_dir = os.path.join(working_dir, "toy", "scripts")
-        lib_dir = os.path.join(working_dir, "toy", "lib")
-        os.makedirs(scripts_dir, exist_ok=True)
+        scr_uuid = "toy_scr_mm01"
+        lib_uuid = "toy_lib_mm01"
+        script_dir = os.path.join(working_dir, "tree", scr_uuid)
+        lib_dir = os.path.join(working_dir, "tree", lib_uuid)
+        os.makedirs(script_dir, exist_ok=True)
         os.makedirs(lib_dir, exist_ok=True)
-        script_path = os.path.join(scripts_dir, "hello.py")
+        script_path = os.path.join(script_dir, "hello.py")
         with open(script_path, "w") as f:
             f.write("def run(pdv_tree: dict):\n    return {}\n")
         lib_path = os.path.join(lib_dir, "helpers.py")
@@ -365,13 +374,15 @@ class TestHandleProjectSave:
         )
         module["scripts"] = PDVTree()
         module["scripts.hello"] = PDVScript(
-            relative_path=script_path,
+            uuid=scr_uuid,
+            filename="hello.py",
             module_id="toy",
             source_rel_path="scripts/hello.py",
         )
         module["lib"] = PDVTree()
         module["lib.helpers"] = PDVLib(
-            relative_path=lib_path,
+            uuid=lib_uuid,
+            filename="helpers.py",
             module_id="toy",
             source_rel_path="lib/helpers.py",
         )
@@ -399,20 +410,16 @@ class TestHandleProjectSave:
         assert bundle["language"] == "python"
 
         by_path = {e["path"]: e for e in bundle["entries"]}
-        # Three container entries (scripts, lib, plots) and two leaves
-        # — all rooted at the module, not prefixed with "toy.".
         assert "scripts" in by_path
         assert "lib" in by_path
         assert "plots" in by_path
         assert by_path["scripts"]["type"] == "folder"
         assert "scripts.hello" in by_path
         assert by_path["scripts.hello"]["type"] == "script"
-        assert (
-            by_path["scripts.hello"]["storage"]["relative_path"] == "scripts/hello.py"
-        )
+        assert by_path["scripts.hello"]["storage"]["format"] == "py_script"
         assert by_path["scripts.hello"]["parent_path"] == "scripts"
         assert "lib.helpers" in by_path
-        assert by_path["lib.helpers"]["storage"]["relative_path"] == "lib/helpers.py"
+        assert by_path["lib.helpers"]["storage"]["format"] == "py_lib"
         assert by_path["lib.helpers"]["type"] == "lib"
 
     def test_save_response_has_empty_manifests_when_no_modules(
@@ -437,14 +444,15 @@ class TestHandleProjectSave:
     ):
         """Scripts outside any PDVModule subtree do not appear in module_owned_files."""
         working_dir = tree_with_comm._working_dir
-        scripts_dir = os.path.join(working_dir, "project_scripts")
-        os.makedirs(scripts_dir, exist_ok=True)
-        script_path = os.path.join(scripts_dir, "plain.py")
+        scr_uuid = "plain_scr_01"
+        script_dir = os.path.join(working_dir, "tree", scr_uuid)
+        os.makedirs(script_dir, exist_ok=True)
+        script_path = os.path.join(script_dir, "plain.py")
         with open(script_path, "w") as f:
             f.write("def run(pdv_tree: dict):\n    return {}\n")
         # Plain PDVScript with no module context and no source_rel_path.
         tree_with_comm["scripts"] = PDVTree()
-        tree_with_comm["scripts.plain"] = PDVScript(relative_path=script_path)
+        tree_with_comm["scripts.plain"] = PDVScript(uuid=scr_uuid, filename="plain.py")
 
         mock_comm = _make_mock_comm()
         msg = _make_msg("pdv.project.save", {"save_dir": tmp_save_dir})
@@ -466,8 +474,8 @@ class TestTwoPassLoading:
     def test_child_before_parent_gui(self, tree_with_comm, tmp_save_dir):
         """GUI node listed before its module parent still loads correctly."""
         working_dir = tree_with_comm._working_dir
-        gui_rel = os.path.join("tree", "mymod", "gui.gui.json")
-        gui_file = os.path.join(working_dir, gui_rel)
+        gui_uuid = "gui_uuid_cb01"
+        gui_file = os.path.join(working_dir, "tree", gui_uuid, "gui.gui.json")
         os.makedirs(os.path.dirname(gui_file), exist_ok=True)
         with open(gui_file, "w") as f:
             f.write("{}")
@@ -477,9 +485,11 @@ class TestTwoPassLoading:
             {
                 "path": "mymod.gui",
                 "type": "gui",
+                "uuid": gui_uuid,
                 "storage": {
                     "backend": "local_file",
-                    "relative_path": gui_rel,
+                    "uuid": gui_uuid,
+                    "filename": "gui.gui.json",
                     "format": "gui_json",
                 },
                 "metadata": {"module_id": "test_mod", "preview": "GUI"},
@@ -551,12 +561,12 @@ class TestTwoPassLoading:
 
         mod = PDVModule(module_id="gui_mod", name="GuiMod", version="1.0")
         tree_with_comm["gmod"] = mod
-        gui_rel = os.path.join("tree", "gmod", "gui.gui.json")
-        gui_file = os.path.join(tree_with_comm._working_dir, gui_rel)
+        gui_uuid = "gui_uuid_rt01"
+        gui_file = os.path.join(tree_with_comm._working_dir, "tree", gui_uuid, "gui.gui.json")
         os.makedirs(os.path.dirname(gui_file), exist_ok=True)
         with open(gui_file, "w") as f:
             f.write('{"layout": {}}')
-        gui = PDVGui(relative_path=gui_file, module_id="gui_mod")
+        gui = PDVGui(uuid=gui_uuid, filename="gui.gui.json", module_id="gui_mod")
         dict.__setitem__(mod, "gui", gui)
         mod.gui = gui
 
@@ -577,12 +587,12 @@ class TestTwoPassLoading:
 
     def test_namelist_format_roundtrip(self, tree_with_comm, tmp_save_dir):
         """Namelist format and module_id survive save→load."""
-        nml_rel = os.path.join("tree", "solver.nml")
-        nml_file = os.path.join(tree_with_comm._working_dir, nml_rel)
+        nml_uuid = "nml_uuid_rt01"
+        nml_file = os.path.join(tree_with_comm._working_dir, "tree", nml_uuid, "solver.nml")
         os.makedirs(os.path.dirname(nml_file), exist_ok=True)
         with open(nml_file, "w") as f:
             f.write("&solver /\n")
-        nml = PDVNamelist(relative_path=nml_file, format="fortran", module_id="nml_mod")
+        nml = PDVNamelist(uuid=nml_uuid, filename="solver.nml", format="fortran", module_id="nml_mod")
         tree_with_comm["solver"] = nml
 
         mock_comm = _make_mock_comm()
@@ -607,11 +617,11 @@ class TestTwoPassLoading:
         assert loaded.format == "fortran"
         assert loaded.module_id == "nml_mod"
 
-    def test_relative_paths_stored(self, tree_with_comm, tmp_save_dir):
-        """After load, PDVFile nodes store relative (not absolute) paths."""
+    def test_uuid_and_filename_stored(self, tree_with_comm, tmp_save_dir):
+        """After load, PDVFile nodes store uuid and filename."""
         working_dir = tree_with_comm._working_dir
-        script_rel = os.path.join("tree", "demo.py")
-        script_file = os.path.join(working_dir, script_rel)
+        node_uuid = "demo_uuid_01"
+        script_file = os.path.join(working_dir, "tree", node_uuid, "demo.py")
         os.makedirs(os.path.dirname(script_file), exist_ok=True)
         with open(script_file, "w") as f:
             f.write("def run(pdv_tree: dict):\n    return {}\n")
@@ -620,9 +630,11 @@ class TestTwoPassLoading:
             {
                 "path": "demo",
                 "type": "script",
+                "uuid": node_uuid,
                 "storage": {
                     "backend": "local_file",
-                    "relative_path": script_rel,
+                    "uuid": node_uuid,
+                    "filename": "demo.py",
                     "format": "py_script",
                 },
                 "metadata": {"language": "python", "preview": "script"},
@@ -638,8 +650,8 @@ class TestTwoPassLoading:
             handle_project_load(msg)
         script = tree_with_comm["demo"]
         assert isinstance(script, PDVScript)
-        assert not os.path.isabs(script.relative_path)
-        assert script.relative_path == script_rel
+        assert script.uuid == node_uuid
+        assert script.filename == "demo.py"
 
     def test_module_working_dir_propagated(self, tree_with_comm, tmp_save_dir):
         """After load, PDVModule subtree nodes share the root working dir."""

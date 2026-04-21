@@ -16,7 +16,8 @@ def test_missing_file_raises_descriptive_error(tmp_save_dir):
         deserialize_node(
             {
                 "backend": "local_file",
-                "relative_path": "tree/missing_arr.npy",
+                "uuid": "missing_uuid1",
+                "filename": "missing_arr.npy",
                 "format": "npy",
             },
             tmp_save_dir,
@@ -24,7 +25,8 @@ def test_missing_file_raises_descriptive_error(tmp_save_dir):
 
 
 def test_corrupted_npy_raises_descriptive_error(tmp_save_dir):
-    tree_dir = os.path.join(tmp_save_dir, "tree")
+    node_uuid = "corrupt_uuid"
+    tree_dir = os.path.join(tmp_save_dir, "tree", node_uuid)
     os.makedirs(tree_dir, exist_ok=True)
     bad_file = os.path.join(tree_dir, "bad.npy")
     with open(bad_file, "wb") as fh:
@@ -36,7 +38,8 @@ def test_corrupted_npy_raises_descriptive_error(tmp_save_dir):
         deserialize_node(
             {
                 "backend": "local_file",
-                "relative_path": "tree/bad.npy",
+                "uuid": node_uuid,
+                "filename": "bad.npy",
                 "format": "npy",
             },
             tmp_save_dir,
@@ -45,7 +48,8 @@ def test_corrupted_npy_raises_descriptive_error(tmp_save_dir):
 
 
 def test_wrong_format_hint_raises_error(tmp_save_dir):
-    tree_dir = os.path.join(tmp_save_dir, "tree")
+    node_uuid = "fmt_uuid_001"
+    tree_dir = os.path.join(tmp_save_dir, "tree", node_uuid)
     os.makedirs(tree_dir, exist_ok=True)
     file_path = os.path.join(tree_dir, "x.bin")
     with open(file_path, "wb") as fh:
@@ -55,7 +59,8 @@ def test_wrong_format_hint_raises_error(tmp_save_dir):
         deserialize_node(
             {
                 "backend": "local_file",
-                "relative_path": "tree/x.bin",
+                "uuid": node_uuid,
+                "filename": "x.bin",
                 "format": "made-up-format",
             },
             tmp_save_dir,
@@ -63,7 +68,8 @@ def test_wrong_format_hint_raises_error(tmp_save_dir):
 
 
 def test_deserialize_pickle_without_trusted_raises(tmp_save_dir):
-    tree_dir = os.path.join(tmp_save_dir, "tree")
+    node_uuid = "pkl_uuid_001"
+    tree_dir = os.path.join(tmp_save_dir, "tree", node_uuid)
     os.makedirs(tree_dir, exist_ok=True)
     file_path = os.path.join(tree_dir, "unsafe.pickle")
     with open(file_path, "wb") as fh:
@@ -75,7 +81,8 @@ def test_deserialize_pickle_without_trusted_raises(tmp_save_dir):
         deserialize_node(
             {
                 "backend": "local_file",
-                "relative_path": "tree/unsafe.pickle",
+                "uuid": node_uuid,
+                "filename": "unsafe.pickle",
                 "format": "pickle",
             },
             tmp_save_dir,

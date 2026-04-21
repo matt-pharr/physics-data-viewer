@@ -206,16 +206,10 @@ def handle_file_register(msg: dict) -> None:
         )
         return
 
-    # Build relative path: the file is expected under
-    # ``<working_dir>/tree/<tree_path_segments>/<filename>``.
-    # The ``tree/`` prefix is the canonical working-dir/save-dir subdir
-    # for every file-backed tree node (ARCHITECTURE.md §6.1/§6.2) —
-    # ``serialize_node`` writes into it and ``copyFilesForLoad`` mirrors
-    # from it, so keeping the in-memory rel-path prefixed here ensures
-    # the value stays stable across save/load cycles. See the #140 PR's
-    # Option-A canonical-layout fix.
-    segments = tree_path.split(".") if tree_path else []
-    relative_path = os.path.join("tree", *segments, filename)
+    node_uuid = payload.get("uuid", "")
+    if not node_uuid:
+        from pdv.environment import generate_node_uuid  # noqa: PLC0415
+        node_uuid = generate_node_uuid()
 
     # Use explicit name if provided, otherwise derive from filename stem
     if explicit_name:
@@ -232,20 +226,23 @@ def handle_file_register(msg: dict) -> None:
 
     if node_type == "namelist":
         node = PDVNamelist(
-            relative_path=relative_path,
+            uuid=node_uuid,
+            filename=filename,
             format="auto",
             module_id=module_id,
             source_rel_path=source_rel_path,
         )
     elif node_type == "lib":
         node = PDVLib(
-            relative_path=relative_path,
+            uuid=node_uuid,
+            filename=filename,
             module_id=module_id,
             source_rel_path=source_rel_path,
         )
     else:
         node = PDVFile(
-            relative_path=relative_path,
+            uuid=node_uuid,
+            filename=filename,
             source_rel_path=source_rel_path,
         )
 

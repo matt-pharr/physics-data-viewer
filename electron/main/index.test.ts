@@ -841,7 +841,8 @@ describe("Step 5 IPC handlers", () => {
       expect.objectContaining({
         parent_path: "scripts",
         name: "analysis",
-        relative_path: expect.stringMatching(/analysis\.py$/),
+        uuid: expect.stringMatching(/^[0-9a-f]{12}$/),
+        filename: "analysis.py",
         language: "python",
       })
     );
@@ -877,7 +878,8 @@ describe("Step 5 IPC handlers", () => {
         name: "hello",
         module_id: "toy",
         source_rel_path: "scripts/hello.py",
-        relative_path: expect.stringMatching(/toy\/scripts\/hello\.py$/),
+        uuid: expect.stringMatching(/^[0-9a-f]{12}$/),
+        filename: "hello.py",
       }),
     );
   });
@@ -903,7 +905,7 @@ describe("Step 5 IPC handlers", () => {
     };
 
     expect(result.success).toBe(true);
-    expect(result.libPath).toMatch(/toy\/lib\/helpers\.py$/);
+    expect(result.libPath).toMatch(/helpers\.py$/);
     expect(result.treePath).toBe("toy.lib.helpers");
 
     const fileRegisterCalls = (commRouter.request as unknown as ReturnType<typeof vi.fn>).mock.calls
@@ -914,6 +916,7 @@ describe("Step 5 IPC handlers", () => {
       expect.objectContaining({
         tree_path: "toy.lib",
         filename: "helpers.py",
+        uuid: expect.stringMatching(/^[0-9a-f]{12}$/),
         node_type: "lib",
         module_id: "toy",
         source_rel_path: "lib/helpers.py",
@@ -952,7 +955,8 @@ describe("Step 5 IPC handlers", () => {
       expect.objectContaining({
         parent_path: "notes",
         name: "derivation",
-        relative_path: expect.stringMatching(/derivation\.md$/),
+        uuid: expect.stringMatching(/^[0-9a-f]{12}$/),
+        filename: "derivation.md",
       })
     );
     expect(result.success).toBe(true);
@@ -1331,12 +1335,11 @@ describe("Step 5 IPC handlers", () => {
         module_index: expect.arrayContaining([
           expect.objectContaining({
             id: "scripts.run",
-            // Option A: module-owned files live under
-            // <workdir>/tree/<alias>/<src_rel_path> so the stored
-            // relative_path gains the canonical ``tree/`` prefix.
+            uuid: expect.stringMatching(/^[0-9a-f]{12}$/),
             storage: expect.objectContaining({
               backend: "local_file",
-              relative_path: path.join("tree", "demo-module", "scripts/run.py"),
+              uuid: expect.stringMatching(/^[0-9a-f]{12}$/),
+              filename: "run.py",
             }),
           }),
         ]),

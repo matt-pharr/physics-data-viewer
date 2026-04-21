@@ -66,10 +66,11 @@ describe('getMenuEntries', () => {
     expect(deleteAction?.disabled).toBe(false);
   });
 
-  it('includes edit (open in external editor) for markdown nodes', () => {
+  // TODO: re-enable after adding file-watcher to detect external edits
+  it('includes open for markdown nodes (external editor disabled pending file-watcher)', () => {
     const ids = actionIds('markdown');
     expect(ids).toContain('open_note');
-    expect(ids).toContain('edit');
+    expect(ids).not.toContain('edit');
   });
 
   it('includes separators between sections', () => {

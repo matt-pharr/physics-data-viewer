@@ -19,12 +19,13 @@ import * as path from "path";
  */
 interface FileBackedEntry {
   treePath: string;
-  relativePath: string;
+  uuid: string;
+  filename: string;
 }
 
 /**
  * Read tree-index.json from a directory and return entries that have a
- * `storage.relative_path` (i.e. file-backed nodes).
+ * `storage.uuid` and `storage.filename` (i.e. file-backed nodes).
  *
  * @param dir - Directory containing tree-index.json.
  * @returns Array of file-backed node descriptors.
@@ -39,15 +40,17 @@ async function readFileBackedEntries(dir: string): Promise<FileBackedEntry[]> {
         const storage = entry.storage as Record<string, unknown> | undefined;
         return (
           storage?.backend === "local_file" &&
-          typeof storage?.relative_path === "string" &&
-          (storage.relative_path as string).length > 0
+          typeof storage?.uuid === "string" &&
+          typeof storage?.filename === "string" &&
+          (storage.uuid as string).length > 0
         );
       })
       .map((entry) => {
         const storage = entry.storage as Record<string, unknown>;
         return {
           treePath: String(entry.path ?? ""),
-          relativePath: storage.relative_path as string,
+          uuid: storage.uuid as string,
+          filename: storage.filename as string,
         };
       });
   } catch (error) {
@@ -77,7 +80,8 @@ export async function copyFilesForLoad(
   const entries = await readFileBackedEntries(saveDir);
   const total = entries.length;
   for (let i = 0; i < total; i++) {
-    const { relativePath } = entries[i];
+    const { uuid, filename } = entries[i];
+    const relativePath = path.join("tree", uuid, filename);
     const src = path.join(saveDir, relativePath);
     const dest = path.join(workingDir, relativePath);
     await fs.mkdir(path.dirname(dest), { recursive: true });

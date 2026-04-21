@@ -24,6 +24,9 @@ ARCHITECTURE.md §6.1 (working directory), §6.2 (save directory)
 from __future__ import annotations
 
 import os
+import shutil
+import uuid as _uuid_mod
+from pathlib import Path
 
 from pdv.errors import PDVPathError
 
@@ -191,3 +194,80 @@ def ensure_parent(path: str) -> str:
     """
     os.makedirs(os.path.dirname(path), exist_ok=True)
     return path
+
+
+# ---------------------------------------------------------------------------
+# UUID-based file storage helpers
+# ---------------------------------------------------------------------------
+
+
+def generate_node_uuid() -> str:
+    """Generate a 12-hex-character UUID for a tree node.
+
+    Returns
+    -------
+    str
+        A 12-character lowercase hex string derived from UUID4.
+    """
+    return _uuid_mod.uuid4().hex[:12]
+
+
+def uuid_tree_path(working_dir: str, node_uuid: str, filename: str) -> str:
+    """Compute the absolute filesystem path for a UUID-based tree node file.
+
+    Parameters
+    ----------
+    working_dir : str
+        Absolute path to the working directory (or save directory).
+    node_uuid : str
+        The node's 12-hex-char UUID.
+    filename : str
+        The original filename including extension (e.g. ``'fit.py'``).
+
+    Returns
+    -------
+    str
+        Absolute path: ``<working_dir>/tree/<node_uuid>/<filename>``.
+
+    Example
+    -------
+    >>> uuid_tree_path('/tmp/pdv-abc', 'a1b2c3d4e5f6', 'ch1.npy')
+    '/tmp/pdv-abc/tree/a1b2c3d4e5f6/ch1.npy'
+    """
+    return os.path.join(working_dir, "tree", node_uuid, filename)
+
+
+def smart_copy(src: str, dst: str) -> None:
+    """Copy a file using the fastest available method.
+
+    Attempts copy-on-write cloning first, falling back to a regular copy.
+
+    1. Python 3.14+ ``pathlib.Path.copy()`` (OS-level CoW on APFS, btrfs,
+       XFS, ZFS, etc.).
+    2. ``reflink_copy.reflink_or_copy()`` (optional dependency, Rust-backed).
+    3. ``shutil.copy2()`` (universal fallback, preserves metadata).
+
+    Parent directories of *dst* are created automatically.
+
+    Parameters
+    ----------
+    src : str
+        Absolute path to the source file.
+    dst : str
+        Absolute path to the destination file.
+    """
+    ensure_parent(dst)
+
+    if hasattr(Path, "copy"):
+        Path(src).copy(Path(dst))
+        return
+
+    try:
+        from reflink_copy import reflink_or_copy  # noqa: PLC0415
+
+        reflink_or_copy(src, dst)
+        return
+    except ImportError:
+        pass
+
+    shutil.copy2(src, dst)

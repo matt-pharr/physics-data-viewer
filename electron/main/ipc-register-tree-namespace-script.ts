@@ -12,9 +12,15 @@
  */
 
 import { spawn } from "child_process";
+import { randomUUID } from "crypto";
 import { ipcMain } from "electron";
 import * as fs from "fs/promises";
 import * as path from "path";
+
+/** Generate a 12-hex-character node UUID matching the Python side. */
+function generateNodeUuid(): string {
+  return randomUUID().replace(/-/g, "").slice(0, 12);
+}
 
 import type { CommRouter } from "./comm-router";
 import type { QueryRouter } from "./query-router";
@@ -300,48 +306,29 @@ export function registerTreeNamespaceScriptIpcHandlers(
       const safeName = sanitizeScriptName(scriptName, language);
       const scriptNodeName = path.parse(safeName).name;
 
-      // Every file-backed tree node lives under the canonical
-      // ``<workdir>/tree/...`` subdirectory so the in-memory
-      // ``relative_path`` matches what ``serialize_node`` emits at save
-      // time and what ``copyFilesForLoad`` mirrors on reload. The
-      // pre-Option-A layout that dropped the ``tree/`` prefix for
-      // ``tree:createScript`` produced a rel-path drift across
-      // save/load (see the #140 PR's follow-up discussion on the
-      // checksum fix). Module-owned files also get the prefix via
-      // ``analyseModuleTarget``.
       const knownAliases = await getKnownModuleAliases();
       const moduleInfo = analyseModuleTarget(targetPath, knownAliases);
 
-      let scriptsDir: string;
+      const nodeUuid = generateNodeUuid();
+      const scriptDir = path.join(workingDir, "tree", nodeUuid);
+      await fs.mkdir(scriptDir, { recursive: true });
+      const scriptPath = path.join(scriptDir, safeName);
+      await ensureScriptFile(scriptPath, language);
+
       let sourceRelPath: string | undefined;
       let moduleId: string | undefined;
       if (moduleInfo) {
-        scriptsDir = path.join(workingDir, ...moduleInfo.workingDirSegments);
         sourceRelPath = moduleInfo.sourceRelDir
           ? `${moduleInfo.sourceRelDir}/${safeName}`
           : safeName;
         moduleId = moduleInfo.moduleAlias;
-      } else {
-        scriptsDir = path.join(
-          workingDir,
-          "tree",
-          ...targetPath.split(".").filter(Boolean),
-        );
       }
-      await fs.mkdir(scriptsDir, { recursive: true });
-      const scriptPath = path.join(scriptsDir, safeName);
-      await ensureScriptFile(scriptPath, language);
 
-      // Register with a workdir-relative path so the in-memory
-      // ``relative_path`` matches the ``tree-index.json`` entry post
-      // save/load. ``scriptPath`` (absolute) is still returned to the
-      // renderer because the external-editor spawn needs an absolute
-      // path.
-      const registeredRelPath = path.relative(workingDir, scriptPath);
       await commRouter.request(PDVMessageType.SCRIPT_REGISTER, {
         parent_path: targetPath,
         name: scriptNodeName,
-        relative_path: registeredRelPath,
+        uuid: nodeUuid,
+        filename: safeName,
         language,
         module_id: moduleId,
         source_rel_path: sourceRelPath,
@@ -367,9 +354,11 @@ export function registerTreeNamespaceScriptIpcHandlers(
         kernelWorkingDirs.set(kernelId, workingDir);
       }
       const safeName = noteName.trim().replace(/\s+/g, "_").replace(/[^a-zA-Z0-9_-]/g, "");
-      const noteDir = path.join(workingDir, "tree", ...targetPath.split(".").filter(Boolean));
+      const nodeUuid = generateNodeUuid();
+      const noteFilename = safeName + ".md";
+      const noteDir = path.join(workingDir, "tree", nodeUuid);
       await fs.mkdir(noteDir, { recursive: true });
-      const notePath = path.join(noteDir, safeName + ".md");
+      const notePath = path.join(noteDir, noteFilename);
 
       // Create the .md file if it doesn't exist
       try {
@@ -379,13 +368,11 @@ export function registerTreeNamespaceScriptIpcHandlers(
       }
 
       const treePath = targetPath ? `${targetPath}.${safeName}` : safeName;
-      // Register with a workdir-relative path so the in-memory
-      // ``relative_path`` matches what ``serialize_node`` emits at save
-      // time (see the Option A canonical-layout commit).
       await commRouter.request(PDVMessageType.NOTE_REGISTER, {
         parent_path: targetPath,
         name: safeName,
-        relative_path: path.relative(workingDir, notePath),
+        uuid: nodeUuid,
+        filename: noteFilename,
       });
       return { success: true, notePath, treePath };
     }
@@ -412,28 +399,23 @@ export function registerTreeNamespaceScriptIpcHandlers(
         return { success: false, error: "GUI name must contain at least one alphanumeric character" };
       }
 
-      // Every file-backed node lives under ``<workdir>/tree/...`` so the
-      // in-memory ``relative_path`` stays stable across save/load.
-      // ``analyseModuleTarget`` already bakes the ``tree/`` prefix into
-      // its ``workingDirSegments`` result for module-owned targets.
       const knownAliases = await getKnownModuleAliases();
       const moduleInfo = analyseModuleTarget(targetPath, knownAliases);
 
+      const nodeUuid = generateNodeUuid();
       const guiFilename = safeName + ".gui.json";
-      let guiDir: string;
+      const guiDir = path.join(workingDir, "tree", nodeUuid);
+      await fs.mkdir(guiDir, { recursive: true });
+      const guiPath = path.join(guiDir, guiFilename);
+
       let sourceRelPath: string | undefined;
       let moduleId: string | null = null;
       if (moduleInfo) {
-        guiDir = path.join(workingDir, ...moduleInfo.workingDirSegments);
         sourceRelPath = moduleInfo.sourceRelDir
           ? `${moduleInfo.sourceRelDir}/${guiFilename}`
           : guiFilename;
         moduleId = moduleInfo.moduleAlias;
-      } else {
-        guiDir = path.join(workingDir, "tree", ...targetPath.split(".").filter(Boolean));
       }
-      await fs.mkdir(guiDir, { recursive: true });
-      const guiPath = path.join(guiDir, guiFilename);
 
       const defaultManifest = {
         has_gui: true,
@@ -452,7 +434,8 @@ export function registerTreeNamespaceScriptIpcHandlers(
       await commRouter.request(PDVMessageType.GUI_REGISTER, {
         parent_path: targetPath,
         name: safeName,
-        relative_path: path.relative(workingDir, guiPath),
+        uuid: nodeUuid,
+        filename: guiFilename,
         module_id: moduleId,
         source_rel_path: sourceRelPath,
       });
@@ -504,7 +487,8 @@ export function registerTreeNamespaceScriptIpcHandlers(
         };
       }
 
-      const libDir = path.join(workingDir, ...moduleInfo.workingDirSegments);
+      const nodeUuid = generateNodeUuid();
+      const libDir = path.join(workingDir, "tree", nodeUuid);
       await fs.mkdir(libDir, { recursive: true });
       const libPath = path.join(libDir, filename);
       await ensureLibFile(libPath, language, moduleInfo.moduleAlias);
@@ -516,6 +500,7 @@ export function registerTreeNamespaceScriptIpcHandlers(
       await commRouter.request(PDVMessageType.FILE_REGISTER, {
         tree_path: targetPath,
         filename,
+        uuid: nodeUuid,
         node_type: "lib",
         name: stem,
         module_id: moduleInfo.moduleAlias,
@@ -552,12 +537,8 @@ export function registerTreeNamespaceScriptIpcHandlers(
       const workingDir = kernelWorkingDirs.get(kernelId);
       if (!workingDir) throw new Error(`Working dir not initialized: ${kernelId}`);
 
-      // File-backed nodes live under the canonical ``<workdir>/tree/...``
-      // subdirectory so the in-memory ``relative_path`` matches what
-      // ``serialize_node`` writes at save time and what
-      // ``copyFilesForLoad`` mirrors on reload.
-      const segments = targetTreePath.split(".").filter(Boolean);
-      const destDir = path.join(workingDir, "tree", ...segments);
+      const nodeUuid = generateNodeUuid();
+      const destDir = path.join(workingDir, "tree", nodeUuid);
       await fs.mkdir(destDir, { recursive: true });
       const destPath = path.join(destDir, filename);
       await fs.copyFile(sourcePath, destPath);
@@ -565,6 +546,7 @@ export function registerTreeNamespaceScriptIpcHandlers(
       await commRouter.request(PDVMessageType.FILE_REGISTER, {
         tree_path: targetTreePath,
         filename,
+        uuid: nodeUuid,
         node_type: nodeType,
       } satisfies PDVFileRegisterPayload);
 
@@ -749,16 +731,15 @@ export function registerTreeNamespaceScriptIpcHandlers(
     IPC.note.save,
     async (_event, kernelId: string, treePath: string, content: string) => {
       try {
-        const workingDir = kernelWorkingDirs.get(kernelId);
-        if (!workingDir) throw new Error(`Working dir not initialized: ${kernelId}`);
-        const segments = treePath.split(".").filter(Boolean);
-        const lastSeg = segments.pop();
-        if (!lastSeg) throw new Error("Invalid tree path");
-        const noteDir = segments.length > 0
-          ? path.join(workingDir, "tree", ...segments)
-          : path.join(workingDir, "tree");
-        const filePath = path.join(noteDir, lastSeg + ".md");
-        await fs.mkdir(noteDir, { recursive: true });
+        const response = await queryRequest(
+          PDVMessageType.TREE_RESOLVE_FILE,
+          { path: treePath }
+        );
+        const filePath = (response.payload as Record<string, unknown> | undefined)?.file_path;
+        if (typeof filePath !== "string" || !filePath) {
+          throw new Error(`Could not resolve file path for note at "${treePath}"`);
+        }
+        await fs.mkdir(path.dirname(filePath), { recursive: true });
         await fs.writeFile(filePath, content, "utf-8");
         return { success: true };
       } catch (err) {
@@ -771,15 +752,14 @@ export function registerTreeNamespaceScriptIpcHandlers(
     IPC.note.read,
     async (_event, kernelId: string, treePath: string) => {
       try {
-        const workingDir = kernelWorkingDirs.get(kernelId);
-        if (!workingDir) throw new Error(`Working dir not initialized: ${kernelId}`);
-        const segments = treePath.split(".").filter(Boolean);
-        const lastSeg = segments.pop();
-        if (!lastSeg) throw new Error("Invalid tree path");
-        const noteDir = segments.length > 0
-          ? path.join(workingDir, "tree", ...segments)
-          : path.join(workingDir, "tree");
-        const filePath = path.join(noteDir, lastSeg + ".md");
+        const response = await queryRequest(
+          PDVMessageType.TREE_RESOLVE_FILE,
+          { path: treePath }
+        );
+        const filePath = (response.payload as Record<string, unknown> | undefined)?.file_path;
+        if (typeof filePath !== "string" || !filePath) {
+          throw new Error(`Could not resolve file path for note at "${treePath}"`);
+        }
         const content = await fs.readFile(filePath, "utf-8");
         return { success: true, content };
       } catch (err) {

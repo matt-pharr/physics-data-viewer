@@ -107,11 +107,15 @@ class TestHandleTreeList:
 
     def test_script_nodes_do_not_include_params(self, tree_with_comm, tmp_path):
         """Script node descriptors from tree.list do not include params (fetched on demand)."""
-        script_file = tmp_path / "fit_model.py"
+        node_uuid = "scr_uuid_001"
+        script_dir = tmp_path / "tree" / node_uuid
+        script_dir.mkdir(parents=True)
+        script_file = script_dir / "fit_model.py"
         script_file.write_text(
             "def run(pdv_tree: dict, sigma: float = 0.1):\n    return {}\n"
         )
-        tree_with_comm["script_node"] = PDVScript(relative_path=str(script_file))
+        tree_with_comm._set_working_dir(str(tmp_path))
+        tree_with_comm["script_node"] = PDVScript(uuid=node_uuid, filename="fit_model.py")
         tree_with_comm["value_node"] = 42
 
         mock_comm = _make_mock_comm()

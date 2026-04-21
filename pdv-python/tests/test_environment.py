@@ -18,6 +18,7 @@ from pdv.environment import (
     resolve_project_path,
     path_is_safe,
     working_dir_tree_path,
+    uuid_tree_path,
     ensure_parent,
     make_working_dir,
 )
@@ -106,6 +107,19 @@ class TestWorkingDirTreePath:
         """A three-part tree path maps to the correct nested structure."""
         result = working_dir_tree_path(tmp_working_dir, "data.waveforms.ch1", ".npy")
         expected = os.path.join(tmp_working_dir, "tree", "data", "waveforms", "ch1.npy")
+        assert result == expected
+
+
+class TestUuidTreePath:
+    def test_simple_uuid_path(self, tmp_working_dir):
+        """uuid_tree_path returns <working_dir>/tree/<uuid>/<filename>."""
+        result = uuid_tree_path(tmp_working_dir, "a1b2c3d4e5f6", "ch1.npy")
+        assert result == os.path.join(tmp_working_dir, "tree", "a1b2c3d4e5f6", "ch1.npy")
+
+    def test_uuid_path_with_extension(self, tmp_working_dir):
+        """uuid_tree_path handles various file extensions."""
+        result = uuid_tree_path(tmp_working_dir, "abc123def456", "script.py")
+        expected = os.path.join(tmp_working_dir, "tree", "abc123def456", "script.py")
         assert result == expected
 
 

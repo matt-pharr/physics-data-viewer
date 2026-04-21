@@ -32,7 +32,8 @@ def handle_script_register(msg: dict) -> None:
         {
             "parent_path": "scripts.analysis",
             "name": "fit_model",
-            "relative_path": "tree/scripts/analysis/fit_model.py",
+            "uuid": "a1b2c3d4e5f6",
+            "filename": "fit_model.py",
             "language": "python"
         }
 
@@ -53,13 +54,15 @@ def handle_script_register(msg: dict) -> None:
     tree, payload = validated
     parent_path = payload.get("parent_path", "")
     name = payload.get("name", "")
-    relative_path = payload.get("relative_path", "")
+    node_uuid = payload.get("uuid", "")
+    filename = payload.get("filename", "")
     language = payload.get("language", "python")
     source_rel_path = payload.get("source_rel_path")
     module_id = payload.get("module_id", "")
 
     script = PDVScript(
-        relative_path=relative_path,
+        uuid=node_uuid,
+        filename=filename,
         language=language,
         module_id=module_id,
         source_rel_path=source_rel_path,
