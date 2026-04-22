@@ -237,8 +237,23 @@ def uuid_tree_path(working_dir: str, node_uuid: str, filename: str) -> str:
     return os.path.join(working_dir, "tree", node_uuid, filename)
 
 
+def _file_xxh3(path: str) -> bytes:
+    """Return the xxh3_128 digest of a file's contents."""
+    import xxhash  # noqa: PLC0415
+
+    h = xxhash.xxh3_128()
+    with open(path, "rb") as f:
+        for chunk in iter(lambda: f.read(1 << 16), b""):
+            h.update(chunk)
+    return h.digest()
+
+
 def smart_copy(src: str, dst: str) -> None:
     """Copy a file using the fastest available method.
+
+    If *dst* already exists and is byte-identical to *src* (verified via
+    xxh3_128), the copy is skipped. If *dst* exists but differs, it is
+    replaced.
 
     Attempts copy-on-write cloning first, falling back to a regular copy.
 
@@ -257,6 +272,11 @@ def smart_copy(src: str, dst: str) -> None:
         Absolute path to the destination file.
     """
     ensure_parent(dst)
+
+    if os.path.exists(dst):
+        if os.path.getsize(src) == os.path.getsize(dst) and _file_xxh3(src) == _file_xxh3(dst):
+            return
+        os.remove(dst)
 
     if hasattr(Path, "copy"):
         Path(src).copy(Path(dst))
