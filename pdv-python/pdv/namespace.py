@@ -7,7 +7,9 @@ This module provides:
   namespace. Blocks reassignment of ``pdv_tree`` and ``pdv``.
 
 - :class:`PDVApp`: the ``pdv`` object injected into the namespace.
-  Exposes ``pdv.save()``, ``pdv.help()`` to users.
+  Exposes ``pdv.save()``, ``pdv.save_project()``,
+  ``pdv.save_project_as()``, ``pdv.open_project()``,
+  ``pdv.help()`` to users.
 
 - :func:`pdv_namespace`: returns a snapshot of the current kernel
   namespace for display in the Namespace panel, excluding PDV internals
@@ -127,15 +129,86 @@ class PDVApp:
     def save(self) -> None:
         """Trigger a project save. Equivalent to File -> Save in the UI.
 
-        Sends a ``pdv.project.save`` comm message to the app. The app
+        Sends a ``pdv.project.save_request`` push to the app. The app
         will prompt for a save location if no project is currently open.
         """
         try:
             from pdv.comms import send_message  # noqa: PLC0415
 
-            send_message("pdv.project.save", {})
+            send_message("pdv.project.save_request", {})
         except RuntimeError:
             print("PDV: No comm channel open. Cannot trigger save.")
+
+    def save_project(self, path: str | None = None) -> None:
+        """Save the current project to a directory.
+
+        Sends a request to the app to perform a full project save
+        (tree serialization, code cells, manifest). Equivalent to
+        File -> Save with an explicit directory.
+
+        Parameters
+        ----------
+        path : str or None
+            Absolute or ``~``-prefixed path to the project directory.
+            If None, saves to the current project location (equivalent
+            to :meth:`save`).
+        """
+        try:
+            import os  # noqa: PLC0415
+
+            from pdv.comms import send_message  # noqa: PLC0415
+
+            if path is not None:
+                resolved = os.path.realpath(os.path.expanduser(path))
+                send_message("pdv.project.save_request", {"save_dir": resolved})
+            else:
+                send_message("pdv.project.save_request", {})
+        except RuntimeError:
+            print("PDV: No comm channel open. Cannot trigger save.")
+
+    def save_project_as(self, path: str) -> None:
+        """Save the project to a new directory (Save As).
+
+        Like :meth:`save_project`, but the given path becomes the new
+        active project directory. Equivalent to File -> Save As with
+        an explicit directory.
+
+        Parameters
+        ----------
+        path : str
+            Absolute or ``~``-prefixed path to the new project directory.
+        """
+        try:
+            import os  # noqa: PLC0415
+
+            from pdv.comms import send_message  # noqa: PLC0415
+
+            resolved = os.path.realpath(os.path.expanduser(path))
+            send_message("pdv.project.save_as_request", {"save_dir": resolved})
+        except RuntimeError:
+            print("PDV: No comm channel open. Cannot trigger save.")
+
+    def open_project(self, path: str) -> None:
+        """Open a project from a directory.
+
+        Sends a request to the app to load the project at the given
+        path. The current tree and code cells will be replaced with
+        the contents of the loaded project.
+
+        Parameters
+        ----------
+        path : str
+            Absolute or ``~``-prefixed path to the project directory.
+        """
+        try:
+            import os  # noqa: PLC0415
+
+            from pdv.comms import send_message  # noqa: PLC0415
+
+            resolved = os.path.realpath(os.path.expanduser(path))
+            send_message("pdv.project.open_request", {"save_dir": resolved})
+        except RuntimeError:
+            print("PDV: No comm channel open. Cannot open project.")
 
     def add_file(self, source_path: str) -> "PDVFile":
         """Import an arbitrary file into the tree as a :class:`PDVFile`.
@@ -261,6 +334,9 @@ class PDVApp:
                 "  pdv_tree.run_script('path') — run a script node\n"
                 "  pdv.working_dir   — Path to the session working dir (for data files)\n"
                 "  pdv.save()        — save the project\n"
+                "  pdv.save_project('path')    — save project to a directory\n"
+                "  pdv.save_project_as('path') — save project to a new directory (Save As)\n"
+                "  pdv.open_project('path')    — open a project from a directory\n"
                 "  pdv.add_file('path/to/file') — import a file into the tree\n"
                 "  pdv.new_note('path', title='My Note') — create a markdown note\n"
                 "  pdv.help('pdv_tree') — help on a specific topic\n"

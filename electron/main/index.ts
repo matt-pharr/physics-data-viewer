@@ -753,6 +753,24 @@ export function registerCommPushForwarding(
   subscribe(PDVMessageType.TREE_CHANGED, IPC.push.treeChanged, true);
   subscribe(PDVMessageType.PROJECT_LOADED, IPC.push.projectLoaded);
   subscribe(PDVMessageType.PROGRESS, IPC.push.progress);
+
+  // Kernel-initiated project operations — forward as menu actions so the
+  // renderer drives the full save/load workflow (including code-cell
+  // serialization and UI state updates).
+  const forwardAsMenuAction = (
+    type: string,
+    action: "project:save" | "project:saveAs" | "project:openRecent",
+  ): void => {
+    const handler = (msg: PDVMessage): void => {
+      const payload = msg.payload as { save_dir?: string };
+      win.webContents.send(IPC.push.menuAction, { action, path: payload.save_dir });
+    };
+    commRouter.onPush(type, handler);
+    pushSubscriptions.push({ commRouter, type, handler });
+  };
+  forwardAsMenuAction(PDVMessageType.PROJECT_SAVE_REQUEST, "project:save");
+  forwardAsMenuAction(PDVMessageType.PROJECT_SAVE_AS_REQUEST, "project:saveAs");
+  forwardAsMenuAction(PDVMessageType.PROJECT_OPEN_REQUEST, "project:openRecent");
 }
 
 /**
