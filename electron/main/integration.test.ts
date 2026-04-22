@@ -4,18 +4,13 @@
  * @slow — Spawns a real Python kernel and verifies PDV comm traffic.
  */
 
-import { randomUUID } from "crypto";
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import * as fs from "fs/promises";
 import * as os from "os";
 import * as path from "path";
 import { KernelManager } from "./kernel-manager";
 import { CommRouter } from "./comm-router";
-import { PDVMessage, PDVMessageType, getAppVersion, setAppVersion } from "./pdv-protocol";
-
-function generateNodeUuid(): string {
-  return randomUUID().replace(/-/g, "").slice(0, 12);
-}
+import { PDVMessage, PDVMessageType, generateNodeUuid, getAppVersion, setAppVersion } from "./pdv-protocol";
 
 const PYTHON_PACKAGE_DIR = path.resolve(__dirname, "../../pdv-python");
 const TEST_PYTHON_EXECUTABLE = process.env.PYTHON_PATH ?? "python3";

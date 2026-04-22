@@ -450,11 +450,11 @@ class PDVScript(PDVFile):
             if isinstance(value, PDVModule) and value.module_id == self._module_id:
                 parent_module = value
                 break
-        if parent_module is None or not parent_module._dependencies:
+        if parent_module is None or not parent_module.dependencies:
             return
 
         missing: list[str] = []
-        for dep in parent_module._dependencies:
+        for dep in parent_module.dependencies:
             name = dep.get("name", "")
             marker = dep.get("marker", "")
             if not name:
@@ -1316,6 +1316,16 @@ class PDVModule(PDVTree):
             ``"python"`` or ``"julia"``.
         """
         return self._language
+
+    @property
+    def dependencies(self) -> list[dict[str, str]]:
+        """Declared module dependencies (read-only).
+
+        Returns
+        -------
+        list[dict[str, str]]
+        """
+        return self._dependencies
 
     @property
     def gui(self) -> PDVGui | None:

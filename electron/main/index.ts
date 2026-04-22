@@ -281,31 +281,6 @@ function sanitizeScriptName(scriptName: string, language: "python" | "julia" = "
   return withExt.replace(/[\\/]/g, "_");
 }
 
-function resolveScriptPath(
-  kernelId: string,
-  scriptPath: string,
-  kernelWorkingDirs: Map<string, string>,
-  language: "python" | "julia" = "python"
-): string {
-  if (path.isAbsolute(scriptPath)) {
-    return scriptPath;
-  }
-  const workingDir = kernelWorkingDirs.get(kernelId);
-  if (!workingDir) {
-    throw new Error(`Kernel working directory not initialized: ${kernelId}`);
-  }
-  if (scriptPath.includes("/") || scriptPath.includes("\\")) {
-    return path.join(workingDir, scriptPath);
-  }
-  const parts = scriptPath.split(".").filter(Boolean);
-  if (parts.length === 0) {
-    throw new Error("Invalid script path");
-  }
-  const ext = language === "julia" ? ".jl" : ".py";
-  const leaf = parts[parts.length - 1];
-  return path.join(workingDir, ...parts.slice(0, -1), `${leaf}${ext}`);
-}
-
 /**
  * Write a script stub if the file does not already exist.
  *
@@ -580,7 +555,6 @@ export function registerIpcHandlers(
     sanitizeScriptName,
     ensureScriptFile,
     ensureLibFile,
-    resolveScriptPath,
     buildEditorSpawn,
     resolveEditorSpawn,
   });

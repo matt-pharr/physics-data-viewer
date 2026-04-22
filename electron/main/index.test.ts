@@ -495,13 +495,16 @@ describe("Step 5 IPC handlers", () => {
   });
 
   it("script:edit spawns the configured external editor process", async () => {
-    const { configStore } = setup();
+    const { configStore, commRouter } = setup();
     (configStore.getAll as unknown as ReturnType<typeof vi.fn>).mockReturnValue({
       showPrivateVariables: false,
       showModuleVariables: false,
       showCallableVariables: false,
       editorCommand: "code",
     });
+    (commRouter.request as unknown as ReturnType<typeof vi.fn>).mockResolvedValue(
+      { payload: { path: "/tmp/script.py", file_path: "/tmp/script.py" } }
+    );
 
     const edit = getHandler(IPC.script.edit);
     await edit({}, "kernel-1", "/tmp/script.py");
@@ -518,13 +521,16 @@ describe("Step 5 IPC handlers", () => {
 
   if (process.platform === "darwin") {
     it("script:edit launches terminal editors through Terminal.app on macOS", async () => {
-      const { configStore } = setup();
+      const { configStore, commRouter } = setup();
       (configStore.getAll as unknown as ReturnType<typeof vi.fn>).mockReturnValue({
         showPrivateVariables: false,
         showModuleVariables: false,
         showCallableVariables: false,
         pythonEditorCmd: "nvim {}",
       });
+      (commRouter.request as unknown as ReturnType<typeof vi.fn>).mockResolvedValue(
+        { payload: { path: "/tmp/script.py", file_path: "/tmp/script.py" } }
+      );
 
       const edit = getHandler(IPC.script.edit);
       await edit({}, "kernel-1", "/tmp/script.py");

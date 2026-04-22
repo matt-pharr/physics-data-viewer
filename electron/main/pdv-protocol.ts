@@ -17,6 +17,22 @@
 
 /* eslint-disable @typescript-eslint/no-unused-vars -- payload interfaces document the protocol schema (ARCHITECTURE.md §3.4) */
 
+import { randomUUID } from "crypto";
+
+// ---------------------------------------------------------------------------
+// UUID generation
+// ---------------------------------------------------------------------------
+
+/**
+ * Generate a 12-hex-character node UUID matching the Python side
+ * (`pdv.environment.generate_node_uuid`).
+ *
+ * @returns A 12-character lowercase hex string derived from UUID4.
+ */
+export function generateNodeUuid(): string {
+  return randomUUID().replace(/-/g, "").slice(0, 12);
+}
+
 // ---------------------------------------------------------------------------
 // Protocol version
 // ---------------------------------------------------------------------------

@@ -23,12 +23,16 @@ ARCHITECTURE.md §6.1 (working directory), §6.2 (save directory)
 
 from __future__ import annotations
 
+import logging
 import os
+import re
 import shutil
 import uuid as _uuid_mod
 from pathlib import Path
 
 from pdv.errors import PDVPathError
+
+_NODE_UUID_RE = re.compile(r"^[0-9a-f]{12}$")
 
 
 def make_working_dir(base_tmp_dir: str) -> str:
@@ -233,7 +237,16 @@ def uuid_tree_path(working_dir: str, node_uuid: str, filename: str) -> str:
     -------
     >>> uuid_tree_path('/tmp/pdv-abc', 'a1b2c3d4e5f6', 'ch1.npy')
     '/tmp/pdv-abc/tree/a1b2c3d4e5f6/ch1.npy'
+
+    Raises
+    ------
+    ValueError
+        If *node_uuid* or *filename* contain path traversal characters.
     """
+    if ".." in node_uuid or "/" in node_uuid or "\\" in node_uuid:
+        raise ValueError(f"Unsafe node UUID: {node_uuid!r}")
+    if ".." in filename or "/" in filename or "\\" in filename:
+        raise ValueError(f"Unsafe filename: {filename!r}")
     return os.path.join(working_dir, "tree", node_uuid, filename)
 
 
@@ -289,5 +302,10 @@ def smart_copy(src: str, dst: str) -> None:
         return
     except ImportError:
         pass
+    except OSError as exc:
+        logging.getLogger("pdv").warning(
+            "reflink_or_copy failed for %s -> %s: %s; falling back to shutil.copy2",
+            src, dst, exc,
+        )
 
     shutil.copy2(src, dst)

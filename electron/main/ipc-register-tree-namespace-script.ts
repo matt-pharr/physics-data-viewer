@@ -12,22 +12,16 @@
  */
 
 import { spawn } from "child_process";
-import { randomUUID } from "crypto";
 import { ipcMain } from "electron";
 import * as fs from "fs/promises";
 import * as path from "path";
-
-/** Generate a 12-hex-character node UUID matching the Python side. */
-function generateNodeUuid(): string {
-  return randomUUID().replace(/-/g, "").slice(0, 12);
-}
 
 import type { CommRouter } from "./comm-router";
 import type { QueryRouter } from "./query-router";
 import type { ConfigStore, PDVConfig } from "./config";
 import { IPC, type HandlerInvokeResult, type NamelistReadResult, type NamelistWriteResult, type NamespaceInspectResult, type NamespaceInspectTarget, type NamespaceInspectorNode, type NamespaceQueryOptions, type NamespaceVariable, type ScriptParameter, type ScriptRunRequest, type ScriptRunResult, type TreeAddFileResult, type TreeCreateGuiResult, type TreeCreateLibResult, type TreeCreateNodeResult, type TreeCreateNoteResult, type TreeCreateScriptResult, type TreeDuplicateResult, type TreeMoveResult, type TreeRenameResult } from "./ipc";
 import type { KernelManager } from "./kernel-manager";
-import { PDVMessageType, type PDVFileRegisterPayload } from "./pdv-protocol";
+import { PDVMessageType, generateNodeUuid, type PDVFileRegisterPayload } from "./pdv-protocol";
 import type { ProjectManager } from "./project-manager";
 
 interface RegisterTreeNamespaceScriptIpcHandlersOptions {
@@ -63,12 +57,6 @@ interface RegisterTreeNamespaceScriptIpcHandlersOptions {
     language: "python" | "julia",
     moduleAlias: string,
   ) => Promise<void>;
-  resolveScriptPath: (
-    kernelId: string,
-    scriptPath: string,
-    kernelWorkingDirs: Map<string, string>,
-    language?: "python" | "julia"
-  ) => string;
   buildEditorSpawn: (
     cmdString: string | undefined,
     filePath: string
@@ -232,7 +220,6 @@ export function registerTreeNamespaceScriptIpcHandlers(
     sanitizeScriptName,
     ensureScriptFile,
     ensureLibFile,
-    resolveScriptPath,
     buildEditorSpawn,
     resolveEditorSpawn,
   } = options;
@@ -656,30 +643,15 @@ export function registerTreeNamespaceScriptIpcHandlers(
   ipcMain.handle(IPC.script.edit, async (_event, kernelId: string, scriptPath: string) => {
     const config = readConfig(configStore);
 
-    // Resolve the file path — try the kernel comm first (handles all
-    // PDVFile types including lib/namelist), fall back to the legacy
-    // tree-path-to-filesystem derivation for plain scripts.
-    // TODO: remove legacy for beta.
-    let resolvedPath: string | undefined;
-    try {
-      const response = await queryRequest(
-        PDVMessageType.TREE_RESOLVE_FILE,
-        { path: scriptPath }
-      );
-      const filePath = (response.payload as Record<string, unknown> | undefined)?.file_path;
-      if (typeof filePath === "string" && filePath.length > 0) {
-        resolvedPath = filePath;
-      }
-    } catch {
-      // Comm failed — fall through to legacy resolution
-      // TODO: remove this fallback, this silently ignores all errors.
+    const response = await queryRequest(
+      PDVMessageType.TREE_RESOLVE_FILE,
+      { path: scriptPath }
+    );
+    const filePath = (response.payload as Record<string, unknown> | undefined)?.file_path;
+    if (typeof filePath !== "string" || filePath.length === 0) {
+      return { success: false, error: `Could not resolve file path for "${scriptPath}".` };
     }
-    if (!resolvedPath) {
-      const kernel = kernelManager.getKernel(kernelId);
-      const language = kernel?.language ?? "python";
-      resolvedPath = resolveScriptPath(kernelId, scriptPath, kernelWorkingDirs, language);
-      console.warn(`[pdv] Falling back to legacy script path resolution for "${scriptPath}" → "${resolvedPath}"`);
-    }
+    const resolvedPath = filePath;
 
     const isJulia = resolvedPath.endsWith(".jl");
     const cmdString = isJulia ? config.juliaEditorCmd : config.pythonEditorCmd;

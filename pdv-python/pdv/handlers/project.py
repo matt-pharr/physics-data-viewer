@@ -149,6 +149,8 @@ def _purge_orphaned_tree_files(save_dir: str, nodes: list[dict]) -> None:
     import os  # noqa: PLC0415
     import shutil  # noqa: PLC0415
 
+    from pdv.environment import _NODE_UUID_RE  # noqa: PLC0415
+
     log = logging.getLogger("pdv")
 
     tree_dir = os.path.join(save_dir, "tree")
@@ -172,6 +174,8 @@ def _purge_orphaned_tree_files(save_dir: str, nodes: list[dict]) -> None:
 
     for entry in entries:
         if entry in referenced_uuids:
+            continue
+        if not _NODE_UUID_RE.match(entry):
             continue
         orphan_path = os.path.join(tree_dir, entry)
         if not os.path.isdir(orphan_path):
@@ -442,7 +446,7 @@ def _collect_module_manifests(tree: "Any") -> list:
                 "version": value.version,
                 "description": getattr(value, "description", ""),
                 "language": getattr(value, "language", "python"),
-                "dependencies": list(getattr(value, "_dependencies", []) or []),
+                "dependencies": list(value.dependencies),
                 "entries": entries,
             }
         )
@@ -466,9 +470,9 @@ def _early_module_setup(
     """
     import importlib  # noqa: PLC0415
     import json as _json  # noqa: PLC0415
+    import logging  # noqa: PLC0415
     import os  # noqa: PLC0415
     import sys  # noqa: PLC0415
-    import warnings  # noqa: PLC0415
 
     # Collect module_ids from module-type nodes, and lib paths from lib-type
     # nodes. A lib node's path prefix tells us which module it belongs to
@@ -521,12 +525,14 @@ def _early_module_setup(
         if not entry_point:
             continue
 
+        log = logging.getLogger("pdv")
         try:
             importlib.import_module(entry_point)
         except Exception as exc:  # noqa: BLE001
-            warnings.warn(
-                f"Early module setup: failed to import entry point "
-                f"'{entry_point}' for module '{module_id}': {exc}"
+            log.warning(
+                "Early module setup: failed to import entry point "
+                "'%s' for module '%s': %s",
+                entry_point, module_id, exc,
             )
 
 
