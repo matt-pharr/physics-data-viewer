@@ -47,6 +47,7 @@ pdv.handlers.modules — pdv.module.register handler
 
 from __future__ import annotations
 
+import warnings
 from typing import Any, Callable, Literal
 
 
@@ -214,6 +215,14 @@ def load_tree_index(
 
         node_uuid = node.get("uuid", storage.get("uuid", ""))
         node_filename = storage.get("filename", "")
+        if node_uuid and (".." in node_uuid or "/" in node_uuid or "\\" in node_uuid):
+            warnings.warn(
+                f"Skipping node '{node_path_rel}' with unsafe UUID: {node_uuid!r}",
+                stacklevel=2,
+            )
+            if on_progress is not None:
+                on_progress(index, total)
+            continue
         # source_rel_path is the path of this file relative to its owning
         # module root (e.g. "scripts/run.py"). Set by the module bind path
         # for module-owned files and re-read here so it survives

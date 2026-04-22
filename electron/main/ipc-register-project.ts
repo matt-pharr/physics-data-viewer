@@ -316,7 +316,7 @@ export function registerProjectIpcHandlers(
       const workingDir = kernelWorkingDirs.get(activeKernelId);
       if (workingDir) {
         const win = getMainWindow();
-        await copyFilesForLoad(saveDir, workingDir, win ? (current, total) => {
+        const failedPaths = await copyFilesForLoad(saveDir, workingDir, win ? (current, total) => {
           win.webContents.send(IPC.push.progress, {
             operation: "load",
             phase: "Copying files",
@@ -324,6 +324,12 @@ export function registerProjectIpcHandlers(
             total,
           });
         } : undefined);
+        if (failedPaths.length > 0) {
+          console.warn(
+            `[pdv] load: ${failedPaths.length} file(s) could not be copied from save directory:`,
+            failedPaths,
+          );
+        }
       }
     }
 

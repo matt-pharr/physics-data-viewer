@@ -12,6 +12,7 @@
  * - Executing module actions.
  */
 
+import { randomUUID } from "crypto";
 import * as fs from "fs/promises";
 import * as path from "path";
 
@@ -308,7 +309,6 @@ export async function bindImportedModule(
   // module-rooted rel-path (e.g. ``scripts/run.py``) — so the save-time
   // sync step can mirror working-dir edits back into
   // ``<saveDir>/modules/<id>/<source_rel_path>``.
-  const { randomUUID } = await import("crypto");
   const remappedIndex = await Promise.all(
     moduleIndex.map(async (node) => {
       const nodeAny = node as unknown as Record<string, unknown>;

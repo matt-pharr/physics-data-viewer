@@ -14,6 +14,9 @@
 import * as fs from "fs/promises";
 import * as path from "path";
 
+/** Matches a valid 12-hex-character node UUID. */
+const UUID_RE = /^[0-9a-f]{12}$/;
+
 /**
  * One file-backed tree entry resolved from `tree-index.json`.
  */
@@ -42,7 +45,7 @@ async function readFileBackedEntries(dir: string): Promise<FileBackedEntry[]> {
           storage?.backend === "local_file" &&
           typeof storage?.uuid === "string" &&
           typeof storage?.filename === "string" &&
-          (storage.uuid as string).length > 0
+          UUID_RE.test(storage.uuid as string)
         );
       })
       .map((entry) => {
@@ -76,20 +79,23 @@ export async function copyFilesForLoad(
   saveDir: string,
   workingDir: string,
   onProgress?: (current: number, total: number) => void
-): Promise<void> {
+): Promise<string[]> {
   const entries = await readFileBackedEntries(saveDir);
   const total = entries.length;
+  const failedPaths: string[] = [];
   for (let i = 0; i < total; i++) {
-    const { uuid, filename } = entries[i];
+    const { uuid, filename, treePath } = entries[i];
     const relativePath = path.join("tree", uuid, filename);
     const src = path.join(saveDir, relativePath);
     const dest = path.join(workingDir, relativePath);
     await fs.mkdir(path.dirname(dest), { recursive: true });
     await fs.copyFile(src, dest).catch((error) => {
       console.warn(`[pdv] load: could not copy ${src}`, error);
+      failedPaths.push(treePath);
     });
     if (onProgress && (i % 5 === 0 || i === total - 1)) {
       onProgress(i + 1, total);
     }
   }
+  return failedPaths;
 }

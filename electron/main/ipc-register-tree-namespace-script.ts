@@ -95,23 +95,12 @@ function isRecord(value: unknown): value is Record<string, unknown> {
  *   file authored here (e.g. ``targetPath = "toy.scripts.helpers"``
  *   inside module ``toy`` yields ``sourceRelDir = "scripts/helpers"``).
  *   Empty when the target equals the module root.
- * - ``workingDirSegments`` — the filesystem path segments relative to
- *   the kernel working directory, *including* the canonical ``tree/``
- *   subdirectory prefix. Module-owned files live at
- *   ``<workdir>/tree/<alias>/<rest>`` so the on-disk layout matches
- *   what ``serialize_node`` produces at save time, which keeps
- *   ``relative_path`` stable across save/load cycles. The forthcoming
- *   UUID-based storage redesign will replace the content of the
- *   per-node rel path but keep this single-canonical-layout contract.
- *
- * Returns ``null`` when ``targetPath`` is not inside any known module,
- * in which case the caller routes through the standard ``tree/<path>``
- * layout for project-level files.
+ * Returns ``null`` when ``targetPath`` is not inside any known module.
  */
 function analyseModuleTarget(
   targetPath: string,
   knownAliases: Set<string>,
-): { moduleAlias: string; sourceRelDir: string; workingDirSegments: string[] } | null {
+): { moduleAlias: string; sourceRelDir: string } | null {
   const segments = targetPath.split(".").filter(Boolean);
   if (segments.length === 0) return null;
   const [alias, ...rest] = segments;
@@ -119,10 +108,6 @@ function analyseModuleTarget(
   return {
     moduleAlias: alias,
     sourceRelDir: rest.join("/"),
-    // TODO(UUID): replace with ``["tree", "<uuid>"]`` once the UUID-
-    // based file storage redesign lands — the tree-path-to-filesystem
-    // mapping goes away and file locations become identity-stable.
-    workingDirSegments: ["tree", alias, ...rest],
   };
 }
 
