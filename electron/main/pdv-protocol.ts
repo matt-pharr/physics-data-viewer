@@ -97,6 +97,8 @@ export const PDVMessageType = {
   PROGRESS: "pdv.progress",
   /** Kernel → app (push). Kernel requests the app to save the current project. */
   PROJECT_SAVE_REQUEST: "pdv.project.save_request",
+  /** Kernel → app (push). Tree already serialized by kernel; app finishes the save. */
+  PROJECT_SAVE_COMPLETED: "pdv.project.save_completed",
   /** Kernel → app (push). Kernel requests the app to save-as to a new directory. */
   PROJECT_SAVE_AS_REQUEST: "pdv.project.save_as_request",
   /** Kernel → app (push). Kernel requests the app to open a project from a directory. */

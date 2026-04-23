@@ -615,7 +615,8 @@ describe("Step 5 IPC handlers", () => {
     const { commRouter, webContentsSend } = setup();
     registerCommPushForwarding(
       { webContents: { send: webContentsSend } } as unknown as BrowserWindow,
-      commRouter
+      commRouter,
+      { cacheKernelSaveResults: vi.fn() } as unknown as ProjectManager,
     );
 
     const onPushCalls = (commRouter.onPush as unknown as ReturnType<typeof vi.fn>)

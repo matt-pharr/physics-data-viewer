@@ -658,6 +658,96 @@ def handle_project_load(msg: dict) -> None:
     )
 
 
+def serialize_tree_to_dir(
+    tree: "Any",
+    save_dir: str,
+    *,
+    on_progress: "Callable[[str, int, int], None] | None" = None,
+) -> dict:
+    """Serialize the in-memory tree to *save_dir* and return save metadata.
+
+    Writes data files and ``tree-index.json``, purges orphaned UUID
+    directories, and computes the tree checksum. This is the core
+    serialization logic shared by ``handle_project_save`` (comm path)
+    and ``PDVApp.save_project`` (direct Python call path).
+
+    Parameters
+    ----------
+    tree : PDVTree
+        Root tree to serialize.
+    save_dir : str
+        Absolute path to the project save directory.
+    on_progress : callable, optional
+        ``(phase, current, total)`` callback for UI progress reporting.
+
+    Returns
+    -------
+    dict
+        ``{"node_count", "checksum", "module_owned_files", "module_manifests"}``.
+
+    Raises
+    ------
+    Exception
+        Propagates serialization, I/O, and checksum errors to the caller.
+    """
+    import json  # noqa: PLC0415
+    import os  # noqa: PLC0415
+    import sys  # noqa: PLC0415
+    import time  # noqa: PLC0415
+
+    t0 = time.monotonic()
+
+    def _log(phase: str) -> None:
+        elapsed = time.monotonic() - t0
+        print(f"[project.save] {phase} ({elapsed:.3f}s)", file=sys.stderr, flush=True)
+
+    os.makedirs(os.path.join(save_dir, "tree"), exist_ok=True)
+
+    working_dir = tree._working_dir or save_dir
+    total = _count_nodes(tree)
+    _log(f"counted {total} nodes")
+
+    def _emit_progress(current: int) -> None:
+        if current % 5 == 0 or current == total:
+            if on_progress is not None:
+                on_progress("Serializing", current, total)
+
+    nodes = _collect_nodes(
+        tree,
+        save_dir,
+        working_dir=working_dir,
+        on_progress=_emit_progress,
+    )
+    _log(f"collected {len(nodes)} node descriptors")
+
+    index_data = json.dumps(nodes, indent=2, default=str)
+    index_path = os.path.join(save_dir, "tree-index.json")
+    tmp_path = index_path + ".tmp"
+    with open(tmp_path, "w", encoding="utf-8") as fh:
+        fh.write(index_data)
+    os.replace(tmp_path, index_path)
+    _log("wrote tree-index.json")
+
+    _purge_orphaned_tree_files(save_dir, nodes)
+    _log("purged orphans")
+
+    from pdv.checksum import tree_checksum  # noqa: PLC0415
+
+    checksum = tree_checksum(tree)
+    _log("computed checksum")
+
+    module_owned_files = _collect_module_owned_files(tree, working_dir)
+    module_manifests = _collect_module_manifests(tree)
+    _log("DONE")
+
+    return {
+        "node_count": len(nodes),
+        "checksum": checksum,
+        "module_owned_files": module_owned_files,
+        "module_manifests": module_manifests,
+    }
+
+
 def handle_project_save(msg: dict) -> None:
     """Handle the ``pdv.project.save`` message.
 
@@ -682,9 +772,6 @@ def handle_project_save(msg: dict) -> None:
     msg : dict
         Parsed PDV message envelope.
     """
-    import json
-    import os
-
     from pdv.comms import get_pdv_tree, send_error, send_message  # noqa: PLC0415
 
     msg_id = msg.get("msg_id")
@@ -700,8 +787,6 @@ def handle_project_save(msg: dict) -> None:
         )
         return
 
-    os.makedirs(os.path.join(save_dir, "tree"), exist_ok=True)
-
     tree = get_pdv_tree()
     if tree is None:
         send_error(
@@ -712,30 +797,19 @@ def handle_project_save(msg: dict) -> None:
         )
         return
 
-    working_dir = tree._working_dir or save_dir
-
-    total = _count_nodes(tree)
-
-    def _emit_save_progress(current: int) -> None:
-        if current % 5 == 0 or current == total:
-            send_message(
-                "pdv.progress",
-                {
-                    "operation": "save",
-                    "phase": "Serializing",
-                    "current": current,
-                    "total": total,
-                },
-            )
+    def _progress(phase: str, current: int, total: int) -> None:
+        send_message(
+            "pdv.progress",
+            {"operation": "save", "phase": phase, "current": current, "total": total},
+        )
 
     try:
-        nodes = _collect_nodes(
-            tree,
-            save_dir,
-            working_dir=working_dir,
-            on_progress=_emit_save_progress,
-        )
+        results = serialize_tree_to_dir(tree, save_dir, on_progress=_progress)
     except Exception as exc:  # noqa: BLE001
+        import sys  # noqa: PLC0415
+        import traceback  # noqa: PLC0415
+        print(f"[project.save] FAILED: {exc}", file=sys.stderr, flush=True)
+        traceback.print_exc(file=sys.stderr)
         send_error(
             "pdv.project.save.response",
             "project.serialization_error",
@@ -744,35 +818,9 @@ def handle_project_save(msg: dict) -> None:
         )
         return
 
-    index_data = json.dumps(nodes, indent=2, default=str)
-    index_path = os.path.join(save_dir, "tree-index.json")
-    tmp_path = index_path + ".tmp"
-    with open(tmp_path, "w", encoding="utf-8") as fh:
-        fh.write(index_data)
-    os.replace(tmp_path, index_path)
-
-    _purge_orphaned_tree_files(save_dir, nodes)
-
-    from pdv.checksum import tree_checksum  # noqa: PLC0415
-
-    checksum = tree_checksum(tree)
-
-    # Enumerate module-owned files so the main process can mirror their
-    # working-dir contents back into <saveDir>/modules/<id>/<source_rel_path>.
-    # See ARCHITECTURE.md §5.13 and the #140 workflow plan §3.
-    module_owned_files = _collect_module_owned_files(tree, working_dir)
-    # Collect per-module manifests for writing pdv-module.json +
-    # module-index.json into <saveDir>/modules/<id>/. See plan §7.
-    module_manifests = _collect_module_manifests(tree)
-
     send_message(
         "pdv.project.save.response",
-        {
-            "node_count": len(nodes),
-            "checksum": checksum,
-            "module_owned_files": module_owned_files,
-            "module_manifests": module_manifests,
-        },
+        results,
         in_reply_to=msg_id,
     )
 

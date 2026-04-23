@@ -33,7 +33,7 @@ import { ModuleManager } from "./module-manager";
 import {
   bindProjectModulesToTree,
 } from "./module-runtime";
-import { ProjectManager, type ProjectModuleImport } from "./project-manager";
+import { ProjectManager, type ProjectModuleImport, type ModuleOwnedFile, type ModuleManifestBundle } from "./project-manager";
 import { ConfigStore } from "./config";
 import { registerAppStateIpcHandlers } from "./ipc-register-app-state";
 import { registerGuiEditorIpcHandlers } from "./ipc-register-gui-editor";
@@ -629,7 +629,7 @@ export function registerIpcHandlers(
 
   registerEnvironmentIpcHandlers(win, configStore);
 
-  registerCommPushForwarding(win, commRouter, moduleWindowManager, guiEditorWindowManager, guiViewerWindowManager);
+  registerCommPushForwarding(win, commRouter, projectManager, moduleWindowManager, guiEditorWindowManager, guiViewerWindowManager);
 
   /**
    * Reset all in-session state. Called whenever the renderer reloads so that
@@ -707,6 +707,7 @@ function registerEnvironmentIpcHandlers(win: BrowserWindow, configStore: ConfigS
 export function registerCommPushForwarding(
   win: BrowserWindow,
   commRouter: CommRouter,
+  projectManager: ProjectManager,
   moduleWindowManager?: ModuleWindowManager,
   guiEditorWindowManager?: GuiEditorWindowManager,
   guiViewerWindowManager?: GuiViewerWindowManager
@@ -737,6 +738,7 @@ export function registerCommPushForwarding(
   ): void => {
     const handler = (msg: PDVMessage): void => {
       const payload = msg.payload as { save_dir?: string };
+      console.log(`[forwardAsMenuAction] received push ${type} → forwarding as ${action} (path=${payload.save_dir ?? "none"})`);
       win.webContents.send(IPC.push.menuAction, { action, path: payload.save_dir });
     };
     commRouter.onPush(type, handler);
@@ -745,6 +747,31 @@ export function registerCommPushForwarding(
   forwardAsMenuAction(PDVMessageType.PROJECT_SAVE_REQUEST, "project:save");
   forwardAsMenuAction(PDVMessageType.PROJECT_SAVE_AS_REQUEST, "project:saveAs");
   forwardAsMenuAction(PDVMessageType.PROJECT_OPEN_REQUEST, "project:openRecent");
+
+  // Kernel-initiated save (pdv.save_project()) — tree is already serialized.
+  // Cache the results so ProjectManager.save() skips the comm round-trip
+  // (which would deadlock while the kernel shell is still executing user code).
+  {
+    const handler = (msg: PDVMessage): void => {
+      const payload = msg.payload as Record<string, unknown>;
+      const saveDir = payload.save_dir as string | undefined;
+      if (!saveDir) return;
+      console.log(`[save_completed] kernel serialized tree to ${saveDir}, caching results`);
+      projectManager.cacheKernelSaveResults(saveDir, {
+        checksum: (payload.checksum as string) ?? "",
+        nodeCount: (payload.node_count as number) ?? 0,
+        moduleOwnedFiles: Array.isArray(payload.module_owned_files)
+          ? (payload.module_owned_files as unknown as ModuleOwnedFile[])
+          : [],
+        moduleManifests: Array.isArray(payload.module_manifests)
+          ? (payload.module_manifests as unknown as ModuleManifestBundle[])
+          : [],
+      });
+      win.webContents.send(IPC.push.menuAction, { action: "project:save", path: saveDir });
+    };
+    commRouter.onPush(PDVMessageType.PROJECT_SAVE_COMPLETED, handler);
+    pushSubscriptions.push({ commRouter, type: PDVMessageType.PROJECT_SAVE_COMPLETED, handler });
+  }
 }
 
 /**

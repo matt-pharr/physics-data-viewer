@@ -62,7 +62,58 @@ __all__ = [
     "register_serializer",
     "log",
     "__version__",
+    # PDVApp methods — surfaced at module level so that Jedi autocomplete
+    # works when it resolves ``pdv`` as the package instead of the injected
+    # PDVApp instance (the two share the same name).
+    "save",
+    "save_project",
+    "save_project_as",
+    "open_project",
+    "add_file",
+    "new_note",
+    "help",
+    "working_dir",
 ]
+
+
+def _get_app() -> "PDVApp | None":
+    """Return the bootstrapped PDVApp instance, or None."""
+    import pdv.comms as _comms  # noqa: PLC0415
+
+    ip = _comms._ip
+    if ip is None:
+        return None
+    app = ip.user_ns.get("pdv")
+    from pdv.namespace import PDVApp  # noqa: PLC0415
+
+    return app if isinstance(app, PDVApp) else None
+
+
+_APP_ATTRS: set[str] | None = None
+
+
+def _app_attr_names() -> set[str]:
+    global _APP_ATTRS  # noqa: PLW0603
+    if _APP_ATTRS is None:
+        from pdv.namespace import PDVApp  # noqa: PLC0415
+
+        _APP_ATTRS = {n for n in dir(PDVApp) if not n.startswith("_")}
+    return _APP_ATTRS
+
+
+def __getattr__(name: str):
+    if name in _app_attr_names():
+        app = _get_app()
+        if app is not None:
+            return getattr(app, name)
+        raise RuntimeError(
+            f"pdv.{name}() requires a running PDV kernel (bootstrap has not run)"
+        )
+    raise AttributeError(f"module 'pdv' has no attribute {name!r}")
+
+
+def __dir__():
+    return list(set(globals().keys()) | _app_attr_names())
 
 
 def log(*args, **kwargs) -> None:

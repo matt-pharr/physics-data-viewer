@@ -269,6 +269,39 @@ export class ProjectManager {
    * @param codeCells - The current code-cell state from the renderer.
    * @throws {PDVCommError} When the kernel responds with status='error'.
    */
+  /**
+   * Pre-computed kernel serialization results, keyed by saveDir.
+   *
+   * Populated by the ``pdv.project.save_completed`` push handler when
+   * the kernel serializes the tree synchronously (Python-initiated saves).
+   * Consumed once by the next ``save()`` call for the same directory.
+   */
+  private readonly _cachedKernelResults = new Map<string, {
+    checksum: string;
+    nodeCount: number;
+    moduleOwnedFiles: ModuleOwnedFile[];
+    moduleManifests: ModuleManifestBundle[];
+  }>();
+
+  /**
+   * Cache kernel serialization results from a ``pdv.project.save_completed``
+   * push so the next ``save()`` call can skip the comm round-trip.
+   *
+   * @param saveDir - Absolute path the kernel serialized to.
+   * @param results - Serialization outputs from the kernel.
+   */
+  cacheKernelSaveResults(
+    saveDir: string,
+    results: {
+      checksum: string;
+      nodeCount: number;
+      moduleOwnedFiles: ModuleOwnedFile[];
+      moduleManifests: ModuleManifestBundle[];
+    },
+  ): void {
+    this._cachedKernelResults.set(saveDir, results);
+  }
+
   async save(
     saveDir: string,
     codeCells: CodeCellData,
@@ -279,44 +312,53 @@ export class ProjectManager {
     moduleOwnedFiles: ModuleOwnedFile[];
     moduleManifests: ModuleManifestBundle[];
   }> {
-    // Validate before any on-disk mutation: a nullish or malformed payload
-    // here used to clobber a project's saved tabs (audit #5).
     assertCodeCellData(codeCells);
 
-    // Ensure the save directory exists (creates it when the user enters a new project name
-    // via the Save As dialog, so the folder hasn't been created yet).
+    const t0 = performance.now();
+
     await fs.mkdir(saveDir, { recursive: true });
 
-    // Step 1 — send pdv.project.save comm; throws PDVCommError on error status.
-    // Use progress pushes as keep-alive to prevent timeout during large saves.
-    const response = await this.commRouter.request(PDVMessageType.PROJECT_SAVE, {
-      save_dir: saveDir,
-    }, { keepAlivePushType: PDVMessageType.PROGRESS });
+    // Use cached results from a kernel-initiated save (pdv.save_project())
+    // to avoid the comm round-trip that deadlocks while the shell is busy.
+    const cached = this._cachedKernelResults.get(saveDir);
+    let checksum: string;
+    let nodeCount: number;
+    let moduleOwnedFiles: ModuleOwnedFile[];
+    let moduleManifests: ModuleManifestBundle[];
 
-    const payload = response.payload as {
-      checksum?: string;
-      node_count?: number;
-      module_owned_files?: ModuleOwnedFile[];
-      module_manifests?: ModuleManifestBundle[];
-    };
-    const checksum = payload.checksum ?? "";
-    const nodeCount = payload.node_count ?? 0;
-    const moduleOwnedFiles = Array.isArray(payload.module_owned_files)
-      ? payload.module_owned_files
-      : [];
-    const moduleManifests = Array.isArray(payload.module_manifests)
-      ? payload.module_manifests
-      : [];
+    if (cached) {
+      this._cachedKernelResults.delete(saveDir);
+      console.log(`[ProjectManager.save] using cached kernel results for ${saveDir}`);
+      ({ checksum, nodeCount, moduleOwnedFiles, moduleManifests } = cached);
+    } else {
+      console.log(`[ProjectManager.save] sending pdv.project.save comm (+${(performance.now() - t0).toFixed(0)}ms)`);
+      const response = await this.commRouter.request(PDVMessageType.PROJECT_SAVE, {
+        save_dir: saveDir,
+      }, { keepAlivePushType: PDVMessageType.PROGRESS });
+      console.log(`[ProjectManager.save] kernel responded (+${(performance.now() - t0).toFixed(0)}ms)`);
 
-    // Step 2 — write code-cells.json.
+      const payload = response.payload as {
+        checksum?: string;
+        node_count?: number;
+        module_owned_files?: ModuleOwnedFile[];
+        module_manifests?: ModuleManifestBundle[];
+      };
+      checksum = payload.checksum ?? "";
+      nodeCount = payload.node_count ?? 0;
+      moduleOwnedFiles = Array.isArray(payload.module_owned_files)
+        ? payload.module_owned_files
+        : [];
+      moduleManifests = Array.isArray(payload.module_manifests)
+        ? payload.module_manifests
+        : [];
+    }
+
     await fs.writeFile(
       path.join(saveDir, "code-cells.json"),
       JSON.stringify(codeCells, null, 2),
       "utf8"
     );
 
-    // Step 3 — write project.json (only after both kernel and app state are flushed).
-    // Preserve existing module imports and settings from a prior manifest if present.
     let existingModules: ProjectModuleImport[] = [];
     let existingModuleSettings: Record<string, Record<string, unknown>> = {};
     let projectName = options?.projectName;
@@ -324,7 +366,6 @@ export class ProjectManager {
       const existing = await ProjectManager.readManifest(saveDir);
       existingModules = existing.modules;
       existingModuleSettings = existing.module_settings;
-      // Preserve existing project_name unless a new one is explicitly provided.
       if (projectName === undefined) {
         projectName = existing.project_name;
       }
@@ -347,6 +388,7 @@ export class ProjectManager {
       JSON.stringify(manifest, null, 2),
       "utf8"
     );
+    console.log(`[ProjectManager.save] DONE (+${(performance.now() - t0).toFixed(0)}ms)`);
 
     return { checksum, nodeCount, moduleOwnedFiles, moduleManifests };
   }

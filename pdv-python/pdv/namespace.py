@@ -142,36 +142,55 @@ class PDVApp:
     def save_project(self, path: str | None = None) -> None:
         """Save the current project to a directory.
 
-        Sends a request to the app to perform a full project save
-        (tree serialization, code cells, manifest). Equivalent to
-        File -> Save with an explicit directory.
+        Serializes the tree synchronously (avoiding a comm round-trip
+        that would deadlock while the kernel shell is busy), then sends
+        a ``pdv.project.save_completed`` push so the app can write the
+        remaining manifest and code-cell files.
 
         Parameters
         ----------
         path : str or None
             Absolute or ``~``-prefixed path to the project directory.
-            If None, saves to the current project location (equivalent
-            to :meth:`save`).
+            If None, saves to the current project location (falls back
+            to :meth:`save` if no project is open).
         """
         try:
             import os  # noqa: PLC0415
 
-            from pdv.comms import send_message  # noqa: PLC0415
+            from pdv.comms import get_pdv_tree, send_message  # noqa: PLC0415
 
+            tree = get_pdv_tree()
+            if tree is None:
+                print("PDV: Tree is not initialized. Cannot save.")
+                return
+
+            save_dir: str | None = None
             if path is not None:
-                resolved = os.path.realpath(os.path.expanduser(path))
-                send_message("pdv.project.save_request", {"save_dir": resolved})
+                save_dir = os.path.realpath(os.path.expanduser(path))
             else:
+                save_dir = getattr(tree, "_save_dir", None)
+
+            if not save_dir:
                 send_message("pdv.project.save_request", {})
+                return
+
+            from pdv.handlers.project import serialize_tree_to_dir  # noqa: PLC0415
+
+            results = serialize_tree_to_dir(tree, save_dir)
+            send_message(
+                "pdv.project.save_completed",
+                {"save_dir": save_dir, **results},
+            )
         except RuntimeError:
             print("PDV: No comm channel open. Cannot trigger save.")
+        except Exception as exc:  # noqa: BLE001
+            print(f"PDV: save_project failed: {exc}")
 
     def save_project_as(self, path: str) -> None:
         """Save the project to a new directory (Save As).
 
         Like :meth:`save_project`, but the given path becomes the new
-        active project directory. Equivalent to File -> Save As with
-        an explicit directory.
+        active project directory.
 
         Parameters
         ----------
@@ -181,12 +200,26 @@ class PDVApp:
         try:
             import os  # noqa: PLC0415
 
-            from pdv.comms import send_message  # noqa: PLC0415
+            from pdv.comms import get_pdv_tree, send_message  # noqa: PLC0415
+
+            tree = get_pdv_tree()
+            if tree is None:
+                print("PDV: Tree is not initialized. Cannot save.")
+                return
 
             resolved = os.path.realpath(os.path.expanduser(path))
-            send_message("pdv.project.save_as_request", {"save_dir": resolved})
+
+            from pdv.handlers.project import serialize_tree_to_dir  # noqa: PLC0415
+
+            results = serialize_tree_to_dir(tree, resolved)
+            send_message(
+                "pdv.project.save_completed",
+                {"save_dir": resolved, **results},
+            )
         except RuntimeError:
             print("PDV: No comm channel open. Cannot trigger save.")
+        except Exception as exc:  # noqa: BLE001
+            print(f"PDV: save_project_as failed: {exc}")
 
     def open_project(self, path: str) -> None:
         """Open a project from a directory.
@@ -343,6 +376,17 @@ class PDVApp:
             )
         else:
             print(f"PDV help for topic '{topic}' is not yet implemented.")
+
+    def __getattr__(self, name: str) -> Any:
+        import sys  # noqa: PLC0415
+
+        pdv_module = sys.modules.get("pdv")
+        if pdv_module is not None:
+            try:
+                return getattr(pdv_module, name)
+            except (AttributeError, RuntimeError):
+                pass
+        raise AttributeError(f"'PDVApp' object has no attribute {name!r}")
 
     def __repr__(self) -> str:
         return "<PDV app object — type pdv.help() for usage>"
