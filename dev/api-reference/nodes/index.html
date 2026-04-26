@@ -872,10 +872,21 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#pdv.tree.PDVFile.relative_path" class="md-nav__link">
+  <a href="#pdv.tree.PDVFile.uuid" class="md-nav__link">
     <span class="md-ellipsis">
       
-        <code class="doc-symbol doc-symbol-toc doc-symbol-attribute"></code>&nbsp;relative_path
+        <code class="doc-symbol doc-symbol-toc doc-symbol-attribute"></code>&nbsp;uuid
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#pdv.tree.PDVFile.filename" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        <code class="doc-symbol doc-symbol-toc doc-symbol-attribute"></code>&nbsp;filename
       
     </span>
   </a>
@@ -1209,6 +1220,17 @@
     <span class="md-ellipsis">
       
         <code class="doc-symbol doc-symbol-toc doc-symbol-attribute"></code>&nbsp;language
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#pdv.tree.PDVModule.dependencies" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        <code class="doc-symbol doc-symbol-toc doc-symbol-attribute"></code>&nbsp;dependencies
       
     </span>
   </a>
@@ -1636,10 +1658,21 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#pdv.tree.PDVFile.relative_path" class="md-nav__link">
+  <a href="#pdv.tree.PDVFile.uuid" class="md-nav__link">
     <span class="md-ellipsis">
       
-        <code class="doc-symbol doc-symbol-toc doc-symbol-attribute"></code>&nbsp;relative_path
+        <code class="doc-symbol doc-symbol-toc doc-symbol-attribute"></code>&nbsp;uuid
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#pdv.tree.PDVFile.filename" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        <code class="doc-symbol doc-symbol-toc doc-symbol-attribute"></code>&nbsp;filename
       
     </span>
   </a>
@@ -1980,6 +2013,17 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#pdv.tree.PDVModule.dependencies" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        <code class="doc-symbol doc-symbol-toc doc-symbol-attribute"></code>&nbsp;dependencies
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#pdv.tree.PDVModule.gui" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2063,7 +2107,7 @@ of the subclasses below.</p>
 
 
 <a href="#pdv.tree.PDVFile" class="headerlink" title="Permanent link">&para;</a></h2>
-<div class="doc-signature highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="nf">PDVFile</span><span class="p">(</span><span class="n">relative_path</span><span class="p">:</span> <span class="n"><span title="str">str</span></span><span class="p">,</span> <span class="n">source_rel_path</span><span class="p">:</span> <span class="n"><span title="str">str</span></span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">)</span>
+<div class="doc-signature highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="nf">PDVFile</span><span class="p">(</span><span class="n">uuid</span><span class="p">:</span> <span class="n"><span title="str">str</span></span><span class="p">,</span> <span class="n">filename</span><span class="p">:</span> <span class="n"><span title="str">str</span></span><span class="p">,</span> <span class="n">source_rel_path</span><span class="p">:</span> <span class="n"><span title="str">str</span></span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">)</span>
 </code></pre></div>
 
     <div class="doc doc-contents first">
@@ -2071,7 +2115,7 @@ of the subclasses below.</p>
 
 
         <p>Base class for file-backed PDV tree nodes.</p>
-<p>Provides shared <code>relative_path</code> storage and <code>preview()</code> interface
+<p>Provides shared UUID-based file storage and <code>preview()</code> interface
 used by both :class:<code>PDVScript</code> and :class:<code>PDVNote</code>, and any future
 file-backed node types (images, data files, etc.).</p>
 
@@ -2089,14 +2133,30 @@ file-backed node types (images, data files, etc.).</p>
       <tbody>
           <tr class="doc-section-item">
             <td>
-                <code>relative_path</code>
+                <code>uuid</code>
             </td>
             <td>
                   <code><span title="str">str</span></code>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>Path to the backing file (absolute or relative to working dir).</p>
+                <p>12-hex-character UUID identifying this node's storage directory.</p>
+              </div>
+            </td>
+            <td>
+                <em>required</em>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                <code>filename</code>
+            </td>
+            <td>
+                  <code><span title="str">str</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Original filename including extension (e.g. <code>'fit.py'</code>).</p>
               </div>
             </td>
             <td>
@@ -2155,21 +2215,21 @@ non-module files (ordinary project scripts, notes, etc.).</p>
 
 
 
-<h3 id="pdv.tree.PDVFile.relative_path" class="doc doc-heading">
-<code class="doc-symbol doc-symbol-heading doc-symbol-attribute"></code>            <span class="doc doc-object-name doc-attribute-name">relative_path</span>
+<h3 id="pdv.tree.PDVFile.uuid" class="doc doc-heading">
+<code class="doc-symbol doc-symbol-heading doc-symbol-attribute"></code>            <span class="doc doc-object-name doc-attribute-name">uuid</span>
 
 
   <span class="doc doc-labels">
       <small class="doc doc-label doc-label-property"><code>property</code></small>
   </span>
 
-<a href="#pdv.tree.PDVFile.relative_path" class="headerlink" title="Permanent link">&para;</a></h3>
-<div class="doc-signature highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="n">relative_path</span><span class="p">:</span> <span class="n"><span title="str">str</span></span>
+<a href="#pdv.tree.PDVFile.uuid" class="headerlink" title="Permanent link">&para;</a></h3>
+<div class="doc-signature highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="n">uuid</span><span class="p">:</span> <span class="n"><span title="str">str</span></span>
 </code></pre></div>
 
     <div class="doc doc-contents ">
 
-        <p>Path to the backing file.</p>
+        <p>12-hex-character UUID for this node's storage directory.</p>
 
 
     <p><span class="doc-section-title">Returns:</span></p>
@@ -2187,7 +2247,54 @@ non-module files (ordinary project scripts, notes, etc.).</p>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>File path (absolute or relative to working dir).</p>
+                
+              </div>
+            </td>
+          </tr>
+      </tbody>
+    </table>
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-attribute">
+
+
+
+<h3 id="pdv.tree.PDVFile.filename" class="doc doc-heading">
+<code class="doc-symbol doc-symbol-heading doc-symbol-attribute"></code>            <span class="doc doc-object-name doc-attribute-name">filename</span>
+
+
+  <span class="doc doc-labels">
+      <small class="doc doc-label doc-label-property"><code>property</code></small>
+  </span>
+
+<a href="#pdv.tree.PDVFile.filename" class="headerlink" title="Permanent link">&para;</a></h3>
+<div class="doc-signature highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="n">filename</span><span class="p">:</span> <span class="n"><span title="str">str</span></span>
+</code></pre></div>
+
+    <div class="doc doc-contents ">
+
+        <p>Original filename including extension.</p>
+
+
+    <p><span class="doc-section-title">Returns:</span></p>
+    <table>
+      <thead>
+        <tr>
+          <th>Type</th>
+          <th>Description</th>
+        </tr>
+      </thead>
+      <tbody>
+          <tr class="doc-section-item">
+            <td>
+                  <code><span title="str">str</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                
               </div>
             </td>
           </tr>
@@ -2264,6 +2371,7 @@ belong to a module.</p>
     <div class="doc doc-contents ">
 
         <p>Resolve the backing file to an absolute path.</p>
+<p>Computes <code>&lt;working_dir&gt;/tree/&lt;uuid&gt;/&lt;filename&gt;</code>.</p>
 
 
 <p><span class="doc-section-title">Parameters:</span></p>
@@ -2286,11 +2394,9 @@ belong to a module.</p>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>Working directory to resolve relative paths against. When the
-stored <code>relative_path</code> is itself absolute this argument is
-ignored. When it is relative and <code>working_dir</code> is falsy, the
-current process working directory (<code>os.getcwd()</code>) is used as
-a last-resort base so the returned path is always absolute.</p>
+                <p>Working directory (or save directory) containing the
+<code>tree/</code> subdirectory. When <code>None</code>, the current session's
+working directory is obtained from the global <code>pdv_tree</code>.</p>
               </div>
             </td>
             <td>
@@ -2317,6 +2423,30 @@ a last-resort base so the returned path is always absolute.</p>
             <td>
               <div class="doc-md-description">
                 <p>Absolute file path.</p>
+              </div>
+            </td>
+          </tr>
+      </tbody>
+    </table>
+
+
+<p><span class="doc-section-title">Raises:</span></p>
+    <table>
+      <thead>
+        <tr>
+          <th>Type</th>
+          <th>Description</th>
+        </tr>
+      </thead>
+      <tbody>
+          <tr class="doc-section-item">
+            <td>
+                  <code><span title="RuntimeError">RuntimeError</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>If no working directory is available (no argument and no
+active session).</p>
               </div>
             </td>
           </tr>
@@ -2390,7 +2520,7 @@ previews.</p>
 
 
 <a href="#pdv.tree.PDVScript" class="headerlink" title="Permanent link">&para;</a></h2>
-<div class="doc-signature highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="nf">PDVScript</span><span class="p">(</span><span class="n">relative_path</span><span class="p">:</span> <span class="n"><span title="str">str</span></span><span class="p">,</span> <span class="n">language</span><span class="p">:</span> <span class="n"><span title="str">str</span></span> <span class="o">=</span> <span class="s1">&#39;python&#39;</span><span class="p">,</span> <span class="n">doc</span><span class="p">:</span> <span class="n"><span title="str">str</span></span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span> <span class="n">module_id</span><span class="p">:</span> <span class="n"><span title="str">str</span></span> <span class="o">=</span> <span class="s1">&#39;&#39;</span><span class="p">,</span> <span class="n">source_rel_path</span><span class="p">:</span> <span class="n"><span title="str">str</span></span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">)</span>
+<div class="doc-signature highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="nf">PDVScript</span><span class="p">(</span><span class="n">uuid</span><span class="p">:</span> <span class="n"><span title="str">str</span></span><span class="p">,</span> <span class="n">filename</span><span class="p">:</span> <span class="n"><span title="str">str</span></span><span class="p">,</span> <span class="n">language</span><span class="p">:</span> <span class="n"><span title="str">str</span></span> <span class="o">=</span> <span class="s1">&#39;python&#39;</span><span class="p">,</span> <span class="n">doc</span><span class="p">:</span> <span class="n"><span title="str">str</span></span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span> <span class="n">module_id</span><span class="p">:</span> <span class="n"><span title="str">str</span></span> <span class="o">=</span> <span class="s1">&#39;&#39;</span><span class="p">,</span> <span class="n">source_rel_path</span><span class="p">:</span> <span class="n"><span title="str">str</span></span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">)</span>
 </code></pre></div>
 
     <div class="doc doc-contents first">
@@ -2418,14 +2548,30 @@ Calling <code>script.run(pdv_tree, **kwargs)</code> loads the script module fres
       <tbody>
           <tr class="doc-section-item">
             <td>
-                <code>relative_path</code>
+                <code>uuid</code>
             </td>
             <td>
                   <code><span title="str">str</span></code>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>Path of the script file relative to the project root.</p>
+                <p>12-hex-character UUID for this node's storage directory.</p>
+              </div>
+            </td>
+            <td>
+                <em>required</em>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                <code>filename</code>
+            </td>
+            <td>
+                  <code><span title="str">str</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Script filename including extension (e.g. <code>'fit.py'</code>).</p>
               </div>
             </td>
             <td>
@@ -2777,7 +2923,7 @@ or if <code>run()</code> raises.</p>
 
 
 <a href="#pdv.tree.PDVNote" class="headerlink" title="Permanent link">&para;</a></h2>
-<div class="doc-signature highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="nf">PDVNote</span><span class="p">(</span><span class="n">relative_path</span><span class="p">:</span> <span class="n"><span title="str">str</span></span><span class="p">,</span> <span class="n">title</span><span class="p">:</span> <span class="n"><span title="str">str</span></span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">)</span>
+<div class="doc-signature highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="nf">PDVNote</span><span class="p">(</span><span class="n">uuid</span><span class="p">:</span> <span class="n"><span title="str">str</span></span><span class="p">,</span> <span class="n">filename</span><span class="p">:</span> <span class="n"><span title="str">str</span></span><span class="p">,</span> <span class="n">title</span><span class="p">:</span> <span class="n"><span title="str">str</span></span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">)</span>
 </code></pre></div>
 
     <div class="doc doc-contents first">
@@ -2804,14 +2950,30 @@ Backed by a <code>.md</code> file in the working directory.</p>
       <tbody>
           <tr class="doc-section-item">
             <td>
-                <code>relative_path</code>
+                <code>uuid</code>
             </td>
             <td>
                   <code><span title="str">str</span></code>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>Path to the <code>.md</code> file (absolute or relative to working dir).</p>
+                <p>12-hex-character UUID for this node's storage directory.</p>
+              </div>
+            </td>
+            <td>
+                <em>required</em>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                <code>filename</code>
+            </td>
+            <td>
+                  <code><span title="str">str</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Note filename (e.g. <code>'intro.md'</code>).</p>
               </div>
             </td>
             <td>
@@ -2974,7 +3136,7 @@ line of the <code>.md</code> file. Falls back to <code>'Markdown note'</code>.</
 
 
 <a href="#pdv.tree.PDVGui" class="headerlink" title="Permanent link">&para;</a></h2>
-<div class="doc-signature highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="nf">PDVGui</span><span class="p">(</span><span class="n">relative_path</span><span class="p">:</span> <span class="n"><span title="str">str</span></span><span class="p">,</span> <span class="n">module_id</span><span class="p">:</span> <span class="n"><span title="str">str</span></span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span> <span class="n">source_rel_path</span><span class="p">:</span> <span class="n"><span title="str">str</span></span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">)</span>
+<div class="doc-signature highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="nf">PDVGui</span><span class="p">(</span><span class="n">uuid</span><span class="p">:</span> <span class="n"><span title="str">str</span></span><span class="p">,</span> <span class="n">filename</span><span class="p">:</span> <span class="n"><span title="str">str</span></span><span class="p">,</span> <span class="n">module_id</span><span class="p">:</span> <span class="n"><span title="str">str</span></span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span> <span class="n">source_rel_path</span><span class="p">:</span> <span class="n"><span title="str">str</span></span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">)</span>
 </code></pre></div>
 
     <div class="doc doc-contents first">
@@ -3001,14 +3163,30 @@ Backed by a <code>.gui.json</code> file in the working directory.</p>
       <tbody>
           <tr class="doc-section-item">
             <td>
-                <code>relative_path</code>
+                <code>uuid</code>
             </td>
             <td>
                   <code><span title="str">str</span></code>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>Path to the <code>.gui.json</code> file (absolute or relative to working dir).</p>
+                <p>12-hex-character UUID for this node's storage directory.</p>
+              </div>
+            </td>
+            <td>
+                <em>required</em>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                <code>filename</code>
+            </td>
+            <td>
+                  <code><span title="str">str</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>GUI filename (e.g. <code>'editor.gui.json'</code>).</p>
               </div>
             </td>
             <td>
@@ -3163,7 +3341,7 @@ Backed by a <code>.gui.json</code> file in the working directory.</p>
 
 
 <a href="#pdv.tree.PDVNamelist" class="headerlink" title="Permanent link">&para;</a></h2>
-<div class="doc-signature highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="nf">PDVNamelist</span><span class="p">(</span><span class="n">relative_path</span><span class="p">:</span> <span class="n"><span title="str">str</span></span><span class="p">,</span> <span class="nb">format</span><span class="p">:</span> <span class="n"><span title="str">str</span></span> <span class="o">=</span> <span class="s1">&#39;auto&#39;</span><span class="p">,</span> <span class="n">module_id</span><span class="p">:</span> <span class="n"><span title="str">str</span></span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span> <span class="n">source_rel_path</span><span class="p">:</span> <span class="n"><span title="str">str</span></span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">)</span>
+<div class="doc-signature highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="nf">PDVNamelist</span><span class="p">(</span><span class="n">uuid</span><span class="p">:</span> <span class="n"><span title="str">str</span></span><span class="p">,</span> <span class="n">filename</span><span class="p">:</span> <span class="n"><span title="str">str</span></span><span class="p">,</span> <span class="nb">format</span><span class="p">:</span> <span class="n"><span title="str">str</span></span> <span class="o">=</span> <span class="s1">&#39;auto&#39;</span><span class="p">,</span> <span class="n">module_id</span><span class="p">:</span> <span class="n"><span title="str">str</span></span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span> <span class="n">source_rel_path</span><span class="p">:</span> <span class="n"><span title="str">str</span></span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">)</span>
 </code></pre></div>
 
     <div class="doc doc-contents first">
@@ -3190,14 +3368,30 @@ Backed by a Fortran <code>.in</code>/<code>.nml</code> or TOML file.</p>
       <tbody>
           <tr class="doc-section-item">
             <td>
-                <code>relative_path</code>
+                <code>uuid</code>
             </td>
             <td>
                   <code><span title="str">str</span></code>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>Path to the backing namelist file (absolute or relative to working dir).</p>
+                <p>12-hex-character UUID for this node's storage directory.</p>
+              </div>
+            </td>
+            <td>
+                <em>required</em>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                <code>filename</code>
+            </td>
+            <td>
+                  <code><span title="str">str</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Namelist filename (e.g. <code>'solver.nml'</code>).</p>
               </div>
             </td>
             <td>
@@ -3420,7 +3614,7 @@ Backed by a Fortran <code>.in</code>/<code>.nml</code> or TOML file.</p>
 
 
 <a href="#pdv.tree.PDVLib" class="headerlink" title="Permanent link">&para;</a></h2>
-<div class="doc-signature highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="nf">PDVLib</span><span class="p">(</span><span class="n">relative_path</span><span class="p">:</span> <span class="n"><span title="str">str</span></span><span class="p">,</span> <span class="n">module_id</span><span class="p">:</span> <span class="n"><span title="str">str</span></span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span> <span class="n">source_rel_path</span><span class="p">:</span> <span class="n"><span title="str">str</span></span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">)</span>
+<div class="doc-signature highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="nf">PDVLib</span><span class="p">(</span><span class="n">uuid</span><span class="p">:</span> <span class="n"><span title="str">str</span></span><span class="p">,</span> <span class="n">filename</span><span class="p">:</span> <span class="n"><span title="str">str</span></span><span class="p">,</span> <span class="n">module_id</span><span class="p">:</span> <span class="n"><span title="str">str</span></span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span> <span class="n">source_rel_path</span><span class="p">:</span> <span class="n"><span title="str">str</span></span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">)</span>
 </code></pre></div>
 
     <div class="doc doc-contents first">
@@ -3448,14 +3642,31 @@ is importable from scripts and entry points.</p>
       <tbody>
           <tr class="doc-section-item">
             <td>
-                <code>relative_path</code>
+                <code>uuid</code>
             </td>
             <td>
                   <code><span title="str">str</span></code>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>Path to the <code>.py</code> file (absolute or relative to working dir).</p>
+                <p>12-hex-character UUID for this node's storage directory.</p>
+              </div>
+            </td>
+            <td>
+                <em>required</em>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                <code>filename</code>
+            </td>
+            <td>
+                  <code><span title="str">str</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Library filename (e.g. <code>'n_pendulum.py'</code>). Preserved exactly
+so that <code>import n_pendulum</code> works.</p>
               </div>
             </td>
             <td>
@@ -3996,6 +4207,53 @@ at export time for workflow B (create empty → author → export).</p>
             <td>
               <div class="doc-md-description">
                 <p><code>"python"</code> or <code>"julia"</code>.</p>
+              </div>
+            </td>
+          </tr>
+      </tbody>
+    </table>
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-attribute">
+
+
+
+<h3 id="pdv.tree.PDVModule.dependencies" class="doc doc-heading">
+<code class="doc-symbol doc-symbol-heading doc-symbol-attribute"></code>            <span class="doc doc-object-name doc-attribute-name">dependencies</span>
+
+
+  <span class="doc doc-labels">
+      <small class="doc doc-label doc-label-property"><code>property</code></small>
+  </span>
+
+<a href="#pdv.tree.PDVModule.dependencies" class="headerlink" title="Permanent link">&para;</a></h3>
+<div class="doc-signature highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="n">dependencies</span><span class="p">:</span> <span class="n"><span title="list">list</span></span><span class="p">[</span><span class="n"><span title="dict">dict</span></span><span class="p">[</span><span class="n"><span title="str">str</span></span><span class="p">,</span> <span class="n"><span title="str">str</span></span><span class="p">]]</span>
+</code></pre></div>
+
+    <div class="doc doc-contents ">
+
+        <p>Declared module dependencies (read-only).</p>
+
+
+    <p><span class="doc-section-title">Returns:</span></p>
+    <table>
+      <thead>
+        <tr>
+          <th>Type</th>
+          <th>Description</th>
+        </tr>
+      </thead>
+      <tbody>
+          <tr class="doc-section-item">
+            <td>
+                  <code><span title="list">list</span>[<span title="dict">dict</span>[<span title="str">str</span>, <span title="str">str</span>]]</code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                
               </div>
             </td>
           </tr>

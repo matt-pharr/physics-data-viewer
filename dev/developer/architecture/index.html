@@ -3846,7 +3846,7 @@
 
 
 <h1 id="pdv-architecture-document">PDV Architecture Document<a class="headerlink" href="#pdv-architecture-document" title="Permanent link">&para;</a></h1>
-<p><strong>Version</strong>: 0.0.11
+<p><strong>Version</strong>: 0.0.12
 <strong>Date</strong>: 2026-04-07
 <strong>Status</strong>: Authoritative design specification. All new code must conform to this document. Deviations require updating this document first.</p>
 <blockquote>
@@ -3955,7 +3955,7 @@
 <h3 id="32-message-envelope">3.2 Message Envelope<a class="headerlink" href="#32-message-envelope" title="Permanent link">&para;</a></h3>
 <p>Every PDV message — whether sent by the app or by the kernel — has the following JSON structure:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="p">{</span>
-<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="w">  </span><span class="nt">&quot;pdv_version&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;0.0.11&quot;</span><span class="p">,</span>
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="w">  </span><span class="nt">&quot;pdv_version&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;0.0.12&quot;</span><span class="p">,</span>
 <a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="w">  </span><span class="nt">&quot;msg_id&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;&lt;uuid-v4&gt;&quot;</span><span class="p">,</span>
 <a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="w">  </span><span class="nt">&quot;in_reply_to&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;&lt;uuid-v4-or-null&gt;&quot;</span><span class="p">,</span>
 <a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a><span class="w">  </span><span class="nt">&quot;type&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;&lt;message-type-string&gt;&quot;</span><span class="p">,</span>
@@ -3975,7 +3975,7 @@
 <tr>
 <td><code>pdv_version</code></td>
 <td>string</td>
-<td>App/package version (e.g. <code>"0.0.11"</code>). Both the Electron app and <code>pdv-python</code> use their installed version as this value. The app rejects messages with an incompatible major version.</td>
+<td>App/package version (e.g. <code>"0.0.12"</code>). Both the Electron app and <code>pdv-python</code> use their installed version as this value. The app rejects messages with an incompatible major version.</td>
 </tr>
 <tr>
 <td><code>msg_id</code></td>
@@ -4646,12 +4646,17 @@
 <p>A parameter is <code>required</code> if it has no default value. <code>type</code> is the string representation of the annotation (e.g. <code>"float"</code>, <code>"int"</code>, <code>"str"</code>), or <code>"any"</code> if unannotated. If the script file cannot be parsed (syntax error, <code>run()</code> missing), registration still succeeds but <code>params</code> is an empty list.</p>
 <p><code>PDVScript.run(tree, **kwargs)</code> loads the module fresh (no cache), calls <code>module.run(tree, **kwargs)</code>, and returns the result.</p>
 <h3 id="58-pdvfile-and-pdvnote-classes">5.8 PDVFile and PDVNote Classes<a class="headerlink" href="#58-pdvfile-and-pdvnote-classes" title="Permanent link">&para;</a></h3>
-<p><code>PDVFile</code> is a base class for tree nodes backed by on-disk files that are not data or scripts. <code>PDVNote</code> is its subclass for markdown notes.</p>
+<p><code>PDVFile</code> is a base class for tree nodes backed by on-disk files that are not data or scripts. Subclasses include <code>PDVNote</code>, <code>PDVGui</code>, <code>PDVNamelist</code>, and <code>PDVLib</code>.</p>
+<p><strong>PDVFile</strong> attributes (inherited by all subclasses):
+- <code>uuid</code>: 12-hex-character UUID identifying this node's storage directory (see §6.3)
+- <code>filename</code>: original filename including extension (e.g. <code>"fit.py"</code>, <code>"mesh.h5"</code>)
+- <code>source_rel_path</code>: optional path relative to the owning module's root (see §5.13); <code>None</code> for non-module files
+- <code>resolve_path(working_dir?)</code>: returns the absolute file path <code>&lt;working_dir&gt;/tree/&lt;uuid&gt;/&lt;filename&gt;</code></p>
 <p><strong>PDVNote</strong> attributes:
-- <code>relative_path</code>: path of the <code>.md</code> file relative to the working directory
+- <code>uuid</code>, <code>filename</code> (inherited from <code>PDVFile</code>)
 - <code>title</code>: optional display title
 - <code>preview()</code>: returns the title, or the first non-empty line of the file, or <code>"Markdown note"</code> as fallback</p>
-<p>Notes are created via <code>pdv.note.register</code> (app → kernel) which creates a <code>PDVNote</code> instance and attaches it to the tree. The <code>.md</code> file itself lives in <code>&lt;workingDir&gt;/tree/&lt;path&gt;/</code> and is read/written directly by the main process via <code>note:read</code> / <code>note:save</code> IPC channels — no kernel round-trip is needed for content editing. On project save, the kernel serializes the note entry to <code>tree-index.json</code> and the main process copies the <code>.md</code> file into the save directory. On project load, the <code>.md</code> file is copied back from the save directory to the working directory and re-registered as a <code>PDVNote</code> in the tree.</p>
+<p>Notes are created via <code>pdv.note.register</code> (app → kernel) which creates a <code>PDVNote</code> instance and attaches it to the tree. The <code>.md</code> file itself lives in <code>&lt;workingDir&gt;/tree/&lt;uuid&gt;/&lt;filename&gt;</code> and is read/written directly by the main process via <code>note:read</code> / <code>note:save</code> IPC channels — no kernel round-trip is needed for content editing. On project save, the kernel serializes the note entry to <code>tree-index.json</code> and the main process copies the <code>.md</code> file into the save directory. On project load, the <code>.md</code> file is copied back from the save directory to the working directory and re-registered as a <code>PDVNote</code> in the tree.</p>
 <h3 id="59-pdvmodule-class">5.9 PDVModule Class<a class="headerlink" href="#59-pdvmodule-class" title="Permanent link">&para;</a></h3>
 <p><code>PDVModule</code> is a subclass of <code>PDVTree</code> (i.e. a dict subclass). It represents a module in the tree — either imported from the global store or authored in-session via workflow B (#140). Because it inherits from <code>PDVTree</code>, it holds children naturally — a module's sub-nodes (GUI, scripts, libs, namelists, plots) are direct dict entries.</p>
 <p>Attributes:
@@ -4672,14 +4677,14 @@
 <h3 id="510-pdvgui-class">5.10 PDVGui Class<a class="headerlink" href="#510-pdvgui-class" title="Permanent link">&para;</a></h3>
 <p><code>PDVGui</code> is a subclass of <code>PDVFile</code>. It represents a GUI definition file (<code>.gui.json</code>) that describes a module's user interface — inputs, actions, and layout.</p>
 <p>Attributes:
-- <code>relative_path</code> (inherited from <code>PDVFile</code>): path to the <code>.gui.json</code> file relative to the working directory
+- <code>uuid</code>, <code>filename</code> (inherited from <code>PDVFile</code>): UUID-based storage identity (§6.3)
 - <code>module_id</code> (read-only): the owning module's ID, or <code>None</code> for standalone project GUIs</p>
 <p><code>preview()</code> returns <code>"GUI"</code>.</p>
 <p>Created by the <code>pdv.gui.register</code> handler. For module GUIs, the <code>.gui.json</code> file is copied from the installed module directory into the working directory at import time. If the parent node is a <code>PDVModule</code>, the handler also sets the module's <code>.gui</code> attribute to point to this node.</p>
 <h3 id="511-pdvnamelist-class">5.11 PDVNamelist Class<a class="headerlink" href="#511-pdvnamelist-class" title="Permanent link">&para;</a></h3>
 <p><code>PDVNamelist</code> is a subclass of <code>PDVFile</code>. It represents a simulation namelist file that can be parsed and edited through the namelist editor widget.</p>
 <p>Attributes:
-- <code>relative_path</code> (inherited from <code>PDVFile</code>): path to the namelist file relative to the working directory
+- <code>uuid</code>, <code>filename</code> (inherited from <code>PDVFile</code>): UUID-based storage identity (§6.3)
 - <code>format</code> (read-only): one of <code>"fortran"</code>, <code>"toml"</code>, or <code>"auto"</code> (auto-detected from file content)
 - <code>module_id</code> (read-only): the owning module's ID, or <code>None</code> for standalone namelists</p>
 <p><code>preview()</code> returns <code>"Namelist ({format})"</code>.</p>
@@ -4687,15 +4692,15 @@
 <h3 id="512-pdvlib-class">5.12 PDVLib Class<a class="headerlink" href="#512-pdvlib-class" title="Permanent link">&para;</a></h3>
 <p><code>PDVLib</code> is a subclass of <code>PDVFile</code>. It represents a Python library file provided by a module's <code>lib/</code> directory that is importable by scripts and entry points.</p>
 <p>Attributes:
-- <code>relative_path</code> (inherited from <code>PDVFile</code>): path to the <code>.py</code> file relative to the working directory
+- <code>uuid</code>, <code>filename</code> (inherited from <code>PDVFile</code>): UUID-based storage identity (§6.3)
 - <code>source_rel_path</code> (inherited from <code>PDVFile</code>): path relative to the owning module's root, e.g. <code>"lib/helpers.py"</code>. Set for module-owned libs; <code>None</code> for project-level libs. Used by §5.13's save-time sync.
 - <code>module_id</code> (read-only): the owning module's ID, or <code>None</code></p>
 <p><code>preview()</code> returns <code>"Library (&lt;filename&gt;)"</code>.</p>
 <p><strong>Module lib/ convention</strong>: Module developers place importable <code>.py</code> files in <code>&lt;module-root&gt;/lib/</code>. When a v4 module is imported into a project, the main process:
-1. Reads <code>module-index.json</code> and copies each <code>local_file</code>-backed entry (including libs under <code>lib/</code>) into the working directory under <code>&lt;alias&gt;/&lt;relative_path&gt;</code>.
-2. Sends <code>pdv.module.register</code> with the remapped <code>module_index</code> so the kernel reconstructs the subtree and creates <code>PDVLib</code> nodes via <code>load_tree_index</code>.
-3. Sends <code>pdv.modules.setup</code> with <code>lib_dir: "&lt;workdir&gt;/&lt;alias&gt;/lib"</code>. The kernel adds that directory to <code>sys.path</code> so scripts can <code>import helpers</code> etc.</p>
-<p>In-session modules (workflow B) follow the same convention: <code>tree:createLib</code> writes new <code>.py</code> files under <code>&lt;workdir&gt;/&lt;alias&gt;/lib/</code>, sets <code>source_rel_path = "lib/&lt;filename&gt;"</code>, and §7's <code>pdv-module.json</code> writer stamps <code>lib_dir: "lib"</code> so the next project load's <code>setupModuleNamespaces</code> injects the path automatically.</p>
+1. Reads <code>module-index.json</code>, assigns each file-backed entry a fresh UUID, and copies each file into the working directory under <code>tree/&lt;uuid&gt;/&lt;filename&gt;</code>.
+2. Sends <code>pdv.module.register</code> with the remapped <code>module_index</code> (carrying UUIDs) so the kernel reconstructs the subtree and creates <code>PDVLib</code> nodes via <code>load_tree_index</code>.
+3. Sends <code>pdv.modules.setup</code>. The kernel walks each <code>PDVModule</code> subtree, collects the parent directory of every <code>PDVLib</code> descendant (<code>&lt;workdir&gt;/tree/&lt;uuid&gt;/</code>), and adds each to <code>sys.path</code> so scripts can <code>import helpers</code> etc.</p>
+<p>In-session modules (workflow B) follow the same convention: <code>tree:createLib</code> writes new <code>.py</code> files under <code>&lt;workdir&gt;/tree/&lt;uuid&gt;/&lt;filename&gt;</code>, sets <code>source_rel_path = "lib/&lt;filename&gt;"</code>, and §7's <code>pdv-module.json</code> writer stamps <code>lib_dir: "lib"</code> so the next project load's <code>setupModuleNamespaces</code> injects the path automatically.</p>
 <p><strong>Live lib reload</strong>: Before every <code>script:run</code> on a module-owned script, the main process fires a <code>pdv.module.reload_libs</code> preflight (§3.4). The kernel walks <code>sys.modules</code>, finds modules whose <code>__file__</code> sits under <code>&lt;workdir&gt;/&lt;alias&gt;/lib/</code>, and <code>importlib.reload()</code>s them so edits take effect without restarting the kernel. Reload failures are captured per-module and never block the script run itself — broken libs surface at import time inside the user's own traceback. The handler uses <code>os.path.realpath</code> on both sides of the prefix comparison so macOS's <code>/var</code> → <code>/private/var</code> symlink doesn't defeat the path match.</p>
 <p>On project load (deserialization), the <code>lib</code> node type is restored as a <code>PDVLib</code> and its <code>source_rel_path</code> is re-injected from the stored descriptor.</p>
 <h3 id="513-module-storage-and-resolution">5.13 Module Storage and Resolution<a class="headerlink" href="#513-module-storage-and-resolution" title="Permanent link">&para;</a></h3>
@@ -4727,21 +4732,24 @@
 <h3 id="61-working-directory">6.1 Working Directory<a class="headerlink" href="#61-working-directory" title="Permanent link">&para;</a></h3>
 <p>The working directory is a temporary directory created by the Electron main process at kernel startup. It is the live filesystem backing for the current session.</p>
 <p><strong>Creation</strong>: The main process calls <code>fs.mkdtemp()</code> (or equivalent) to create a uniquely named directory in the OS temporary directory. The path is passed to the kernel in the <code>pdv.init</code> message.</p>
-<p><strong>Structure</strong>:
+<p><strong>Structure</strong> (UUID-based — see §6.3):
 <div class="highlight"><pre><span></span><code><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a>/tmp/pdv-&lt;uuid&gt;/
 <a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a>    tree/
-<a id="__codelineno-10-3" name="__codelineno-10-3" href="#__codelineno-10-3"></a>        data/         ← data files written during the session (npy, parquet, etc.)
-<a id="__codelineno-10-4" name="__codelineno-10-4" href="#__codelineno-10-4"></a>        scripts/      ← script .py files for the current session
-<a id="__codelineno-10-5" name="__codelineno-10-5" href="#__codelineno-10-5"></a>        results/      ← result files produced by scripts
-<a id="__codelineno-10-6" name="__codelineno-10-6" href="#__codelineno-10-6"></a>    .pdv-work/
-<a id="__codelineno-10-7" name="__codelineno-10-7" href="#__codelineno-10-7"></a>        autosave/     ← reserved for future autosave feature
+<a id="__codelineno-10-3" name="__codelineno-10-3" href="#__codelineno-10-3"></a>        a1b2c3d4e5f6/     ← each file-backed node gets its own UUID directory
+<a id="__codelineno-10-4" name="__codelineno-10-4" href="#__codelineno-10-4"></a>            fit_model.py
+<a id="__codelineno-10-5" name="__codelineno-10-5" href="#__codelineno-10-5"></a>        f7e8d9c0b1a2/
+<a id="__codelineno-10-6" name="__codelineno-10-6" href="#__codelineno-10-6"></a>            ch1.npy
+<a id="__codelineno-10-7" name="__codelineno-10-7" href="#__codelineno-10-7"></a>        ...
+<a id="__codelineno-10-8" name="__codelineno-10-8" href="#__codelineno-10-8"></a>    .pdv-work/
+<a id="__codelineno-10-9" name="__codelineno-10-9" href="#__codelineno-10-9"></a>        autosave/     ← reserved for future autosave feature
 </code></pre></div></p>
+<p>File-backed tree nodes (scripts, notes, GUIs, namelists, libs, data files) each get a unique 12-hex-character UUID directory under <code>tree/</code>. The tree path is decoupled from the filesystem path — renaming or moving a tree node does not require renaming or copying files on disk. See §6.3 for the full UUID storage design.</p>
 <p><strong>Lifecycle</strong>: Created at kernel startup. Deleted on clean shutdown. If the app crashes, the directory is left on disk but is not recovered (crash recovery is out of scope for alpha).</p>
 <p><strong>Ownership</strong>: The main process creates it. The kernel writes to it (data files). The main process deletes it.</p>
 <h3 id="62-project-save-directory">6.2 Project Save Directory<a class="headerlink" href="#62-project-save-directory" title="Permanent link">&para;</a></h3>
 <p>A persistent, user-chosen directory that stores a complete saved snapshot of a PDV project.</p>
 <p><strong>Created when</strong>: The user explicitly performs File → Save Project (or Save As). Never created automatically.</p>
-<p><strong>Structure</strong> (human-readable, mirrors tree hierarchy):
+<p><strong>Structure</strong> (UUID-based — see §6.3):
 <div class="highlight"><pre><span></span><code><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a>my-project/
 <a id="__codelineno-11-2" name="__codelineno-11-2" href="#__codelineno-11-2"></a>    project.json              ← project manifest (owned by Electron main process)
 <a id="__codelineno-11-3" name="__codelineno-11-3" href="#__codelineno-11-3"></a>    tree-index.json           ← tree node registry (owned by kernel, written at save time)
@@ -4758,16 +4766,15 @@
 <a id="__codelineno-11-14" name="__codelineno-11-14" href="#__codelineno-11-14"></a>            lib/
 <a id="__codelineno-11-15" name="__codelineno-11-15" href="#__codelineno-11-15"></a>                n_pendulum.py
 <a id="__codelineno-11-16" name="__codelineno-11-16" href="#__codelineno-11-16"></a>            gui.json
-<a id="__codelineno-11-17" name="__codelineno-11-17" href="#__codelineno-11-17"></a>    tree/
-<a id="__codelineno-11-18" name="__codelineno-11-18" href="#__codelineno-11-18"></a>        data/
-<a id="__codelineno-11-19" name="__codelineno-11-19" href="#__codelineno-11-19"></a>            waveforms/
-<a id="__codelineno-11-20" name="__codelineno-11-20" href="#__codelineno-11-20"></a>                ch1.npy
-<a id="__codelineno-11-21" name="__codelineno-11-21" href="#__codelineno-11-21"></a>                ch2.npy
-<a id="__codelineno-11-22" name="__codelineno-11-22" href="#__codelineno-11-22"></a>        scripts/
-<a id="__codelineno-11-23" name="__codelineno-11-23" href="#__codelineno-11-23"></a>            analysis/
-<a id="__codelineno-11-24" name="__codelineno-11-24" href="#__codelineno-11-24"></a>                fit_model.py
-<a id="__codelineno-11-25" name="__codelineno-11-25" href="#__codelineno-11-25"></a>        results/
-<a id="__codelineno-11-26" name="__codelineno-11-26" href="#__codelineno-11-26"></a>            fit_output.parquet
+<a id="__codelineno-11-17" name="__codelineno-11-17" href="#__codelineno-11-17"></a>    tree/                     ← UUID-indexed file storage (§6.3)
+<a id="__codelineno-11-18" name="__codelineno-11-18" href="#__codelineno-11-18"></a>        a1b2c3d4e5f6/
+<a id="__codelineno-11-19" name="__codelineno-11-19" href="#__codelineno-11-19"></a>            ch1.npy
+<a id="__codelineno-11-20" name="__codelineno-11-20" href="#__codelineno-11-20"></a>        b2c3d4e5f6a7/
+<a id="__codelineno-11-21" name="__codelineno-11-21" href="#__codelineno-11-21"></a>            ch2.npy
+<a id="__codelineno-11-22" name="__codelineno-11-22" href="#__codelineno-11-22"></a>        c3d4e5f6a7b8/
+<a id="__codelineno-11-23" name="__codelineno-11-23" href="#__codelineno-11-23"></a>            fit_model.py
+<a id="__codelineno-11-24" name="__codelineno-11-24" href="#__codelineno-11-24"></a>        d4e5f6a7b8c9/
+<a id="__codelineno-11-25" name="__codelineno-11-25" href="#__codelineno-11-25"></a>            fit_output.parquet
 </code></pre></div></p>
 <p>Each <code>modules/&lt;id&gt;/</code> subdirectory is maintained authoritatively by <code>project:save</code>: §5.13's save-time sync copies edited files from the working directory into it, then the manifest writer stamps <code>pdv-module.json</code> and <code>module-index.json</code> from the current in-memory <code>PDVModule</code> state. In-session modules (workflow B, origin <code>"in_session"</code> in the manifest) get their directory created on first save; imported modules get it at import time and updated on every subsequent save.</p>
 <p><strong><code>project.json</code> schema</strong> (current version <code>"1.2"</code>; <code>"1.1"</code> manifests remain readable and are upgraded in place on next save — see §10.5.5):
@@ -4823,7 +4830,7 @@
 <tr>
 <td><code>pdv_version</code></td>
 <td>string</td>
-<td>PDV app version used when saving (e.g. <code>"0.0.11"</code>).</td>
+<td>PDV app version used when saving (e.g. <code>"0.0.12"</code>).</td>
 </tr>
 <tr>
 <td><code>project_name</code></td>
@@ -4867,21 +4874,42 @@
 <a id="__codelineno-13-2" name="__codelineno-13-2" href="#__codelineno-13-2"></a>
 <a id="__codelineno-13-3" name="__codelineno-13-3" href="#__codelineno-13-3"></a>**`code-cells.json` schema**: Written by the Electron main process during save. Contains tab code and active tab ID.
 <a id="__codelineno-13-4" name="__codelineno-13-4" href="#__codelineno-13-4"></a>
-<a id="__codelineno-13-5" name="__codelineno-13-5" href="#__codelineno-13-5"></a>### 6.3 Lazy Loading from Save to Working Directory
+<a id="__codelineno-13-5" name="__codelineno-13-5" href="#__codelineno-13-5"></a>### 6.3 UUID-Based File Storage
 <a id="__codelineno-13-6" name="__codelineno-13-6" href="#__codelineno-13-6"></a>
-<a id="__codelineno-13-7" name="__codelineno-13-7" href="#__codelineno-13-7"></a>When a user accesses a tree node whose data is in the save directory but not yet in the working directory, the kernel:
-<a id="__codelineno-13-8" name="__codelineno-13-8" href="#__codelineno-13-8"></a>1. Reads the appropriate file from the save directory
-<a id="__codelineno-13-9" name="__codelineno-13-9" href="#__codelineno-13-9"></a>2. Loads it into memory (e.g., `numpy.load`, `pandas.read_parquet`)
-<a id="__codelineno-13-10" name="__codelineno-13-10" href="#__codelineno-13-10"></a>3. Stores the result in the in-memory `PDVTree`
-<a id="__codelineno-13-11" name="__codelineno-13-11" href="#__codelineno-13-11"></a>4. Removes the entry from the lazy-load registry
-<a id="__codelineno-13-12" name="__codelineno-13-12" href="#__codelineno-13-12"></a>5. Does **not** copy the file to the working directory unless the data is subsequently modified
-<a id="__codelineno-13-13" name="__codelineno-13-13" href="#__codelineno-13-13"></a>
-<a id="__codelineno-13-14" name="__codelineno-13-14" href="#__codelineno-13-14"></a>Files are only written to the working directory when data is newly created or modified in the current session.
-<a id="__codelineno-13-15" name="__codelineno-13-15" href="#__codelineno-13-15"></a>
-<a id="__codelineno-13-16" name="__codelineno-13-16" href="#__codelineno-13-16"></a>### 6.4 User Preferences Directory (`~/.PDV`)
-<a id="__codelineno-13-17" name="__codelineno-13-17" href="#__codelineno-13-17"></a>
-<a id="__codelineno-13-18" name="__codelineno-13-18" href="#__codelineno-13-18"></a>Renderer-facing preferences and UI persistence are stored in a dedicated user
-<a id="__codelineno-13-19" name="__codelineno-13-19" href="#__codelineno-13-19"></a>directory managed by the main process:
+<a id="__codelineno-13-7" name="__codelineno-13-7" href="#__codelineno-13-7"></a>All file-backed tree nodes use UUID-based paths, decoupling the tree hierarchy from the filesystem layout. This is the single most important storage invariant in the codebase.
+<a id="__codelineno-13-8" name="__codelineno-13-8" href="#__codelineno-13-8"></a>
+<a id="__codelineno-13-9" name="__codelineno-13-9" href="#__codelineno-13-9"></a>**Design**: Each file-backed node (scripts, notes, GUIs, namelists, libs, data files) receives a 12-hex-character UUID at creation time. The backing file lives at `&lt;dir&gt;/tree/&lt;uuid&gt;/&lt;filename&gt;`, where `&lt;dir&gt;` is the working directory during a session or the save directory on disk.
+<a id="__codelineno-13-10" name="__codelineno-13-10" href="#__codelineno-13-10"></a>
+<a id="__codelineno-13-11" name="__codelineno-13-11" href="#__codelineno-13-11"></a>**Why UUIDs**: Tree operations (rename, move) become O(1) metadata updates — no file copies or renames on disk. Duplicate is the only tree mutation that creates a new file (with a fresh UUID). This eliminates a class of bugs around path escaping, collision, and stale references that plagued the earlier path-mirroring design.
+<a id="__codelineno-13-12" name="__codelineno-13-12" href="#__codelineno-13-12"></a>
+<a id="__codelineno-13-13" name="__codelineno-13-13" href="#__codelineno-13-13"></a>**UUID generation**: `generate_node_uuid()` in `environment.py` produces a 12-character hex string from UUID4. Short enough to be human-glanceable in logs and directory listings.
+<a id="__codelineno-13-14" name="__codelineno-13-14" href="#__codelineno-13-14"></a>
+<a id="__codelineno-13-15" name="__codelineno-13-15" href="#__codelineno-13-15"></a>**Path resolution**: `PDVFile.resolve_path(working_dir)` computes `&lt;working_dir&gt;/tree/&lt;uuid&gt;/&lt;filename&gt;`. The `uuid_tree_path()` helper in `environment.py` does the same for non-PDVFile data nodes during serialization.
+<a id="__codelineno-13-16" name="__codelineno-13-16" href="#__codelineno-13-16"></a>
+<a id="__codelineno-13-17" name="__codelineno-13-17" href="#__codelineno-13-17"></a>**File copying**: All file copy operations in the Python kernel use `smart_copy()` (in `environment.py`), which attempts copy-on-write cloning before falling back to a regular copy:
+<a id="__codelineno-13-18" name="__codelineno-13-18" href="#__codelineno-13-18"></a>1. Python 3.14+ `pathlib.Path.copy()` — OS-level CoW on APFS, btrfs, XFS, ZFS
+<a id="__codelineno-13-19" name="__codelineno-13-19" href="#__codelineno-13-19"></a>2. `reflink_copy.reflink_or_copy()` — optional dependency (`pip install pdv-python[copy]`), Rust-backed
+<a id="__codelineno-13-20" name="__codelineno-13-20" href="#__codelineno-13-20"></a>3. `shutil.copy2()` — universal fallback
+<a id="__codelineno-13-21" name="__codelineno-13-21" href="#__codelineno-13-21"></a>
+<a id="__codelineno-13-22" name="__codelineno-13-22" href="#__codelineno-13-22"></a>**Orphan cleanup**: Data nodes (ndarray, DataFrame, custom-serialized objects, pickle) receive a fresh UUID on every save because the in-memory value has no stable identity. After writing `tree-index.json`, the save handler purges any `tree/&lt;uuid&gt;/` directories not referenced in the new index. File-backed PDV nodes (scripts, notes, libs, etc.) reuse their UUID across saves and are never purged.
+<a id="__codelineno-13-23" name="__codelineno-13-23" href="#__codelineno-13-23"></a>
+<a id="__codelineno-13-24" name="__codelineno-13-24" href="#__codelineno-13-24"></a>**Invariant**: Every file under `tree/` must have a corresponding entry in `tree-index.json`. Files without an index entry are orphans and may be deleted. The kernel never traverses the `tree/` directory at load time — it reads `tree-index.json` and uses UUIDs to locate files.
+<a id="__codelineno-13-25" name="__codelineno-13-25" href="#__codelineno-13-25"></a>
+<a id="__codelineno-13-26" name="__codelineno-13-26" href="#__codelineno-13-26"></a>### 6.4 Lazy Loading from Save to Working Directory
+<a id="__codelineno-13-27" name="__codelineno-13-27" href="#__codelineno-13-27"></a>
+<a id="__codelineno-13-28" name="__codelineno-13-28" href="#__codelineno-13-28"></a>When a user accesses a tree node whose data is in the save directory but not yet in the working directory, the kernel:
+<a id="__codelineno-13-29" name="__codelineno-13-29" href="#__codelineno-13-29"></a>1. Reads the appropriate file from the save directory
+<a id="__codelineno-13-30" name="__codelineno-13-30" href="#__codelineno-13-30"></a>2. Loads it into memory (e.g., `numpy.load`, `pandas.read_parquet`)
+<a id="__codelineno-13-31" name="__codelineno-13-31" href="#__codelineno-13-31"></a>3. Stores the result in the in-memory `PDVTree`
+<a id="__codelineno-13-32" name="__codelineno-13-32" href="#__codelineno-13-32"></a>4. Removes the entry from the lazy-load registry
+<a id="__codelineno-13-33" name="__codelineno-13-33" href="#__codelineno-13-33"></a>5. Does **not** copy the file to the working directory unless the data is subsequently modified
+<a id="__codelineno-13-34" name="__codelineno-13-34" href="#__codelineno-13-34"></a>
+<a id="__codelineno-13-35" name="__codelineno-13-35" href="#__codelineno-13-35"></a>Files are only written to the working directory when data is newly created or modified in the current session.
+<a id="__codelineno-13-36" name="__codelineno-13-36" href="#__codelineno-13-36"></a>
+<a id="__codelineno-13-37" name="__codelineno-13-37" href="#__codelineno-13-37"></a>### 6.5 User Preferences Directory (`~/.PDV`)
+<a id="__codelineno-13-38" name="__codelineno-13-38" href="#__codelineno-13-38"></a>
+<a id="__codelineno-13-39" name="__codelineno-13-39" href="#__codelineno-13-39"></a>Renderer-facing preferences and UI persistence are stored in a dedicated user
+<a id="__codelineno-13-40" name="__codelineno-13-40" href="#__codelineno-13-40"></a>directory managed by the main process:
 </code></pre></div>
 ~/.PDV/
     preferences.json        ← global app preferences (<code>config.get/set</code>)
@@ -5049,8 +5077,8 @@
 </tr>
 </tbody>
 </table>
-<p><strong>Storage object</strong> — one of two backends:
-- File-backed: <code>{ "backend": "local_file", "relative_path": "tree/.../file.ext", "format": "&lt;format&gt;" }</code>
+<p><strong>Storage object</strong> — one of three backends:
+- File-backed: <code>{ "backend": "local_file", "uuid": "&lt;12-hex-uuid&gt;", "filename": "&lt;name.ext&gt;", "format": "&lt;format&gt;" }</code> — file lives at <code>tree/&lt;uuid&gt;/&lt;filename&gt;</code> (§6.3)
 - Inline: <code>{ "backend": "inline", "format": "&lt;format&gt;", "value": &lt;json-value&gt; }</code>
 - Folder: <code>{ "backend": "none", "format": "none" }</code></p>
 <p>Scalar and small inline values use <code>"backend": "inline"</code> and store the value directly in <code>"value"</code>.</p>
