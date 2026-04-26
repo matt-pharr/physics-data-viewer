@@ -498,7 +498,9 @@ def _early_module_setup(
             node_uuid = node.get("uuid", node.get("storage", {}).get("uuid", ""))
             filename = node.get("storage", {}).get("filename", "")
             if node_uuid and filename and working_dir:
-                lib_file = os.path.join(working_dir, "tree", node_uuid, filename)
+                from pdv.environment import uuid_tree_path  # noqa: PLC0415
+
+                lib_file = uuid_tree_path(working_dir, node_uuid, filename)
                 parent_dir = os.path.dirname(lib_file)
                 if parent_dir:
                     lib_dirs.add(parent_dir)

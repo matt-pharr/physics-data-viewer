@@ -153,35 +153,6 @@ def path_is_safe(candidate: str, root: str) -> bool:
         return False
 
 
-def working_dir_tree_path(working_dir: str, tree_path: str, extension: str) -> str:
-    """Compute the absolute filesystem path for a tree node's data file.
-
-    Maps a dot-separated tree path to a filesystem path under the working
-    directory's ``tree/`` subdirectory.
-
-    Parameters
-    ----------
-    working_dir : str
-        Absolute path to the working directory.
-    tree_path : str
-        Dot-separated tree path (e.g. ``'data.waveforms.ch1'``).
-    extension : str
-        File extension including the dot (e.g. ``'.npy'``).
-
-    Returns
-    -------
-    str
-        Absolute path for the data file (parent directories are not created
-        by this function).
-
-    Example
-    -------
-    >>> working_dir_tree_path('/tmp/pdv-abc', 'data.waveforms.ch1', '.npy')
-    '/tmp/pdv-abc/tree/data/waveforms/ch1.npy'
-    """
-    parts = tree_path.split(".")
-    return os.path.join(working_dir, "tree", *parts[:-1], parts[-1] + extension)
-
 
 def ensure_parent(path: str) -> str:
     """Create parent directories of ``path`` if they do not exist.

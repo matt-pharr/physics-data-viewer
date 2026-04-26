@@ -391,45 +391,48 @@ class TestHandleHandlerInvoke:
 
 class TestHandleModuleReloadLibs:
     """Tests for pdv.module.reload_libs — the script:run preflight that
-    importlib.reloads modules whose __file__ is under <workdir>/<alias>/lib/.
-    See the #140 workflow plan §4.
+    importlib.reloads modules whose __file__ is under a PDVLib's
+    UUID-based directory.  See the #140 workflow plan §4.
     """
 
     def test_reloads_lib_file_under_alias(self, tree_with_comm, tmp_path):
         """A lib file edited on disk is observably reloaded in sys.modules."""
 
-        from pdv.tree import PDVModule
+        from pdv.tree import PDVLib, PDVModule, PDVTree
 
-        # Arrange: working-dir/tree/<alias>/lib/<libname>.py — the
-        # ``tree/`` prefix is the canonical working-dir subdir for
-        # file-backed nodes after the Option-A layout fix.
         alias = "my_mod"
-        lib_dir = tmp_path / "tree" / alias / "lib"
+        lib_uuid = "aabbccddeeff"
+        lib_filename = "helpers_reload_v1.py"
+
+        # UUID-based layout: tree/<uuid>/<filename>
+        lib_dir = tmp_path / "tree" / lib_uuid
         lib_dir.mkdir(parents=True)
-        lib_file = lib_dir / "helpers_reload_v1.py"
+        lib_file = lib_dir / lib_filename
         lib_file.write_text("VALUE = 1\n")
         sys.path.insert(0, str(lib_dir))
 
-        # Force the working dir for this test's tree.
         tree_with_comm._working_dir = str(tmp_path)
 
-        # Install a PDVModule at the alias so the handler's is_module
-        # check passes.
-        tree_with_comm[alias] = PDVModule(
+        # Build a PDVModule with a PDVLib child so _iter_pdv_libs finds it.
+        module_node = PDVModule(
             module_id=alias,
             name="My",
             version="0.1.0",
         )
+        lib_container = PDVTree()
+        lib_container[lib_filename.removesuffix(".py")] = PDVLib(
+            uuid=lib_uuid, filename=lib_filename, module_id=alias,
+        )
+        module_node["lib"] = lib_container
+        tree_with_comm[alias] = module_node
 
         try:
             import helpers_reload_v1  # noqa: PLC0415
 
             assert helpers_reload_v1.VALUE == 1
 
-            # Edit the file on disk — simulates an external editor save.
             lib_file.write_text("VALUE = 42\n")
 
-            # Call the reload handler.
             mock_comm = _make_mock_comm()
             msg = _make_msg("pdv.module.reload_libs", {"alias": alias})
             with (
@@ -438,7 +441,6 @@ class TestHandleModuleReloadLibs:
             ):
                 handle_module_reload_libs(msg)
 
-            # Assert: the new value is observable and the response lists the reload.
             assert helpers_reload_v1.VALUE == 42
             response = mock_comm._sent[-1]
             assert response["type"] == "pdv.module.reload_libs.response"

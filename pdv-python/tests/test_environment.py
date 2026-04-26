@@ -5,7 +5,7 @@ Tests cover:
 1. validate_working_dir() happy path and error cases.
 2. resolve_project_path() path-traversal rejection.
 3. path_is_safe() boundary cases.
-4. working_dir_tree_path() path construction.
+4. uuid_tree_path() path construction.
 5. ensure_parent() directory creation.
 
 Reference: ARCHITECTURE.md §6.1, §6.2
@@ -17,7 +17,6 @@ from pdv.environment import (
     validate_working_dir,
     resolve_project_path,
     path_is_safe,
-    working_dir_tree_path,
     uuid_tree_path,
     ensure_parent,
     make_working_dir,
@@ -95,19 +94,6 @@ class TestPathIsSafe:
         # Construct a path that would escape via traversal before realpath
         attempt = os.path.join(str(tmp_path), "..", "outside")
         assert path_is_safe(attempt, str(tmp_path)) is False
-
-
-class TestWorkingDirTreePath:
-    def test_simple_path(self, tmp_working_dir):
-        """A simple one-part tree path maps correctly."""
-        result = working_dir_tree_path(tmp_working_dir, "x", ".npy")
-        assert result == os.path.join(tmp_working_dir, "tree", "x.npy")
-
-    def test_nested_path(self, tmp_working_dir):
-        """A three-part tree path maps to the correct nested structure."""
-        result = working_dir_tree_path(tmp_working_dir, "data.waveforms.ch1", ".npy")
-        expected = os.path.join(tmp_working_dir, "tree", "data", "waveforms", "ch1.npy")
-        assert result == expected
 
 
 class TestUuidTreePath:

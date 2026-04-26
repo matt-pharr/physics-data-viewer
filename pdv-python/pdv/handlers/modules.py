@@ -516,34 +516,31 @@ def handle_module_reload_libs(msg: dict) -> None:
         except (KeyError, TypeError):
             is_module = False
 
-    # ``<workdir>/tree/<alias>/lib/`` is where bindImportedModule places
-    # lib files for v4 modules. For modules authored in-session
-    # (workflow B), the same convention applies because the empty-
-    # module creation handler seeds the working dir with
-    # ``tree/<uuid>/<filename>``. Every file-backed tree node lives
-    # under the ``tree/`` subdir (ARCHITECTURE.md §6.1/§6.2), keyed
-    # by its UUID so paths are stable across rename/move/save/load.
+    # Collect the realpath'd parent directories of every PDVLib under
+    # this module.  Each lib's resolve_path() computes
+    # ``<working_dir>/tree/<uuid>/<filename>`` — the UUID-based layout
+    # documented in ARCHITECTURE.md §6.1/§6.2.
     #
-    # Use realpath on both sides of the comparison: on macOS, ``/var`` is a
-    # symlink to ``/private/var``, and a module's ``__file__`` can come back
-    # as the un-prefixed form while ``_working_dir`` is the fully-resolved
-    # ``/private/var/...`` path (or vice versa). A literal ``startswith``
-    # check would fail to match files that live at the same physical path.
-    lib_prefix = ""
-    if is_module and working_dir:
-        try:
-            lib_prefix = os.path.realpath(
-                os.path.join(working_dir, "tree", alias, "lib")
-            )
-        except Exception:  # noqa: BLE001
-            lib_prefix = ""
+    # realpath is needed on macOS where ``/var`` → ``/private/var``;
+    # without it a literal startswith check can miss files at the same
+    # physical path.
+    lib_dirs: set[str] = set()
+    if is_module and working_dir and tree is not None:
+        node = tree.get(alias)
+        if node is not None:
+            for lib in _iter_pdv_libs(node):
+                try:
+                    abs_path = lib.resolve_path(working_dir)
+                    lib_dirs.add(
+                        os.path.realpath(os.path.dirname(abs_path))
+                    )
+                except Exception:  # noqa: BLE001
+                    pass
 
     reloaded: list[str] = []
     errors: dict[str, str] = {}
 
-    if lib_prefix:
-        # Snapshot sys.modules — reload() mutates it and we don't want to
-        # iterate over a live dict that grows during traversal.
+    if lib_dirs:
         items = list(sys.modules.items())
         for mod_name, mod in items:
             try:
@@ -556,7 +553,7 @@ def handle_module_reload_libs(msg: dict) -> None:
                 mod_file_abs = os.path.realpath(mod_file)
             except Exception:  # noqa: BLE001
                 continue
-            if not mod_file_abs.startswith(lib_prefix + os.sep):
+            if os.path.dirname(mod_file_abs) not in lib_dirs:
                 continue
             try:
                 importlib.reload(mod)
