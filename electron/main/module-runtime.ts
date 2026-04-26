@@ -19,7 +19,7 @@ import { CommRouter } from "./comm-router";
 import type { ModuleInputValue } from "./ipc";
 import { KernelManager } from "./kernel-manager";
 import { ModuleManager } from "./module-manager";
-import { PDVMessageType, generateNodeUuid } from "./pdv-protocol";
+import { PDVMessageType, generateNodeUuid, resolveNodePath } from "./pdv-protocol";
 import { ProjectManager, type ProjectModuleImport } from "./project-manager";
 
 /**
@@ -321,7 +321,7 @@ export async function bindImportedModule(
 
       const nodeUuid = generateNodeUuid();
       const srcPath = path.join(installPath, origRelPath || path.join(String(storage.uuid ?? ""), filename));
-      const destPath = path.join(workingDir, "tree", nodeUuid, filename);
+      const destPath = resolveNodePath(workingDir, nodeUuid, filename);
       await fs.mkdir(path.dirname(destPath), { recursive: true });
       await fs.copyFile(srcPath, destPath);
 

@@ -14,6 +14,8 @@
 import * as fs from "fs/promises";
 import * as path from "path";
 
+import { resolveNodePath } from "./pdv-protocol";
+
 /** Matches a valid 12-hex-character node UUID. */
 const UUID_RE = /^[0-9a-f]{12}$/;
 
@@ -85,9 +87,8 @@ export async function copyFilesForLoad(
   const failedPaths: string[] = [];
   for (let i = 0; i < total; i++) {
     const { uuid, filename, treePath } = entries[i];
-    const relativePath = path.join("tree", uuid, filename);
-    const src = path.join(saveDir, relativePath);
-    const dest = path.join(workingDir, relativePath);
+    const src = resolveNodePath(saveDir, uuid, filename);
+    const dest = resolveNodePath(workingDir, uuid, filename);
     await fs.mkdir(path.dirname(dest), { recursive: true });
     await fs.copyFile(src, dest).catch((error) => {
       console.warn(`[pdv] load: could not copy ${src}`, error);

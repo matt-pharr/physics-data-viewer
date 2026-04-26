@@ -1385,19 +1385,8 @@ describe("Step 5 IPC handlers", () => {
 
     expect(result.success).toBe(true);
     expect(result.alias).toBe("toy");
-    // Working-dir scaffolding created for scripts/lib/plots.
-    expect(mocks.fsMkdir).toHaveBeenCalledWith(
-      expect.stringMatching(/toy\/scripts$/),
-      { recursive: true },
-    );
-    expect(mocks.fsMkdir).toHaveBeenCalledWith(
-      expect.stringMatching(/toy\/lib$/),
-      { recursive: true },
-    );
-    expect(mocks.fsMkdir).toHaveBeenCalledWith(
-      expect.stringMatching(/toy\/plots$/),
-      { recursive: true },
-    );
+    // No alias-based scaffolding — UUID dirs are created when individual
+    // nodes (scripts, libs, etc.) are added via tree:create* handlers.
     expect(commRouter.request).toHaveBeenCalledWith(
       PDVMessageType.MODULE_CREATE_EMPTY,
       expect.objectContaining({

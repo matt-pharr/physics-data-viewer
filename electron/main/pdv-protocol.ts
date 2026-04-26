@@ -18,9 +18,10 @@
 /* eslint-disable @typescript-eslint/no-unused-vars -- payload interfaces document the protocol schema (ARCHITECTURE.md §3.4) */
 
 import { randomUUID } from "crypto";
+import * as path from "path";
 
 // ---------------------------------------------------------------------------
-// UUID generation
+// UUID generation & path resolution
 // ---------------------------------------------------------------------------
 
 /**
@@ -31,6 +32,32 @@ import { randomUUID } from "crypto";
  */
 export function generateNodeUuid(): string {
   return randomUUID().replace(/-/g, "").slice(0, 12);
+}
+
+/**
+ * Resolve a tree node's backing file to an absolute path.
+ *
+ * Mirrors `PDVFile.resolve_path()` on the Python side and
+ * `uuid_tree_path()` in `pdv.environment`.
+ *
+ * @param workingDir - Absolute path to the working (or save) directory.
+ * @param nodeUuid - 12-hex-character node UUID.
+ * @param filename - Original filename including extension.
+ * @returns Absolute path: `<workingDir>/tree/<nodeUuid>/<filename>`.
+ */
+export function resolveNodePath(workingDir: string, nodeUuid: string, filename: string): string {
+  return path.join(workingDir, "tree", nodeUuid, filename);
+}
+
+/**
+ * Resolve a tree node's storage directory.
+ *
+ * @param workingDir - Absolute path to the working (or save) directory.
+ * @param nodeUuid - 12-hex-character node UUID.
+ * @returns Absolute path: `<workingDir>/tree/<nodeUuid>`.
+ */
+export function resolveNodeDir(workingDir: string, nodeUuid: string): string {
+  return path.join(workingDir, "tree", nodeUuid);
 }
 
 // ---------------------------------------------------------------------------

@@ -21,7 +21,7 @@ import type { QueryRouter } from "./query-router";
 import type { ConfigStore, PDVConfig } from "./config";
 import { IPC, type HandlerInvokeResult, type NamelistReadResult, type NamelistWriteResult, type NamespaceInspectResult, type NamespaceInspectTarget, type NamespaceInspectorNode, type NamespaceQueryOptions, type NamespaceVariable, type ScriptParameter, type ScriptRunRequest, type ScriptRunResult, type TreeAddFileResult, type TreeCreateGuiResult, type TreeCreateLibResult, type TreeCreateNodeResult, type TreeCreateNoteResult, type TreeCreateScriptResult, type TreeDuplicateResult, type TreeMoveResult, type TreeRenameResult } from "./ipc";
 import type { KernelManager } from "./kernel-manager";
-import { PDVMessageType, generateNodeUuid, type PDVFileRegisterPayload } from "./pdv-protocol";
+import { PDVMessageType, generateNodeUuid, resolveNodeDir, resolveNodePath, type PDVFileRegisterPayload } from "./pdv-protocol";
 import type { ProjectManager } from "./project-manager";
 
 interface RegisterTreeNamespaceScriptIpcHandlersOptions {
@@ -282,9 +282,8 @@ export function registerTreeNamespaceScriptIpcHandlers(
       const moduleInfo = analyseModuleTarget(targetPath, knownAliases);
 
       const nodeUuid = generateNodeUuid();
-      const scriptDir = path.join(workingDir, "tree", nodeUuid);
-      await fs.mkdir(scriptDir, { recursive: true });
-      const scriptPath = path.join(scriptDir, safeName);
+      const scriptPath = resolveNodePath(workingDir, nodeUuid, safeName);
+      await fs.mkdir(resolveNodeDir(workingDir, nodeUuid), { recursive: true });
       await ensureScriptFile(scriptPath, language);
 
       let sourceRelPath: string | undefined;
@@ -329,9 +328,8 @@ export function registerTreeNamespaceScriptIpcHandlers(
       const safeName = noteName.trim().replace(/\s+/g, "_").replace(/[^a-zA-Z0-9_-]/g, "");
       const nodeUuid = generateNodeUuid();
       const noteFilename = safeName + ".md";
-      const noteDir = path.join(workingDir, "tree", nodeUuid);
-      await fs.mkdir(noteDir, { recursive: true });
-      const notePath = path.join(noteDir, noteFilename);
+      const notePath = resolveNodePath(workingDir, nodeUuid, noteFilename);
+      await fs.mkdir(resolveNodeDir(workingDir, nodeUuid), { recursive: true });
 
       // Create the .md file if it doesn't exist
       try {
@@ -377,9 +375,8 @@ export function registerTreeNamespaceScriptIpcHandlers(
 
       const nodeUuid = generateNodeUuid();
       const guiFilename = safeName + ".gui.json";
-      const guiDir = path.join(workingDir, "tree", nodeUuid);
-      await fs.mkdir(guiDir, { recursive: true });
-      const guiPath = path.join(guiDir, guiFilename);
+      const guiPath = resolveNodePath(workingDir, nodeUuid, guiFilename);
+      await fs.mkdir(resolveNodeDir(workingDir, nodeUuid), { recursive: true });
 
       let sourceRelPath: string | undefined;
       let moduleId: string | null = null;
@@ -461,9 +458,8 @@ export function registerTreeNamespaceScriptIpcHandlers(
       }
 
       const nodeUuid = generateNodeUuid();
-      const libDir = path.join(workingDir, "tree", nodeUuid);
-      await fs.mkdir(libDir, { recursive: true });
-      const libPath = path.join(libDir, filename);
+      const libPath = resolveNodePath(workingDir, nodeUuid, filename);
+      await fs.mkdir(resolveNodeDir(workingDir, nodeUuid), { recursive: true });
       await ensureLibFile(libPath, language, moduleInfo.moduleAlias);
 
       const sourceRelPath = moduleInfo.sourceRelDir
@@ -511,9 +507,8 @@ export function registerTreeNamespaceScriptIpcHandlers(
       if (!workingDir) throw new Error(`Working dir not initialized: ${kernelId}`);
 
       const nodeUuid = generateNodeUuid();
-      const destDir = path.join(workingDir, "tree", nodeUuid);
-      await fs.mkdir(destDir, { recursive: true });
-      const destPath = path.join(destDir, filename);
+      const destPath = resolveNodePath(workingDir, nodeUuid, filename);
+      await fs.mkdir(resolveNodeDir(workingDir, nodeUuid), { recursive: true });
       await fs.copyFile(sourcePath, destPath);
 
       await commRouter.request(PDVMessageType.FILE_REGISTER, {
