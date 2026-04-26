@@ -1,3 +1,1 @@
-# index
-
-<!-- TODO -->
+--8<-- "modules.md"

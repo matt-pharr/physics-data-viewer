@@ -63,12 +63,12 @@ interface DetectedEnvironment {
 }
 
 /**
- * Result of checking whether ``pdv_kernel`` is installed in an environment.
+ * Result of checking whether ``pdv`` is installed in an environment.
  *
  * See ARCHITECTURE.md §10.3.
  */
 interface PDVInstallStatus {
-  /** True when ``pdv_kernel`` is importable in the given Python environment. */
+  /** True when ``pdv`` is importable in the given Python environment. */
   installed: boolean;
   /** The installed version string, or null when not installed. */
   version: string | null;
@@ -106,9 +106,9 @@ export interface EnvironmentInfo {
   label: string;
   /** Version string returned by ``python --version``. */
   pythonVersion: string;
-  /** True when ``pdv_kernel`` is importable. */
+  /** True when ``pdv`` is importable. */
   pdvInstalled: boolean;
-  /** Installed ``pdv_kernel`` version, or null when not installed. */
+  /** Installed ``pdv`` version, or null when not installed. */
   pdvVersion: string | null;
   /** True when the installed version is protocol-compatible. */
   pdvCompatible: boolean;
@@ -162,7 +162,7 @@ let _cache: DetectedEnvironment[] | null = null;
 let _juliaCache: DetectedJuliaEnvironment[] | null = null;
 
 /**
- * Detects Python environments and validates/install checks for `pdv_kernel`.
+ * Detects Python environments and validates/install checks for `pdv`.
  *
  * This class only performs environment discovery and subprocess probes; it
  * does NOT start kernels or perform IPC registration.
@@ -288,10 +288,10 @@ export class EnvironmentDetector {
   }
 
   /**
-   * Check whether ``pdv_kernel`` is installed in the given Python environment
+   * Check whether ``pdv`` is installed in the given Python environment
    * and whether its version is compatible with this app.
    *
-   * Runs: ``<python> -c "import pdv_kernel; print(pdv_kernel.__version__)"``
+   * Runs: ``<python> -c "import pdv; print(pdv.__version__)"``
    * with a 5-second timeout (ARCHITECTURE.md §10.3).
    *
    * @param pythonPath - Path to the Python executable to probe.
@@ -303,14 +303,14 @@ export class EnvironmentDetector {
     try {
       const { stdout } = await execFileAsync(
         pythonPath,
-        ["-c", "import pdv_kernel; print(pdv_kernel.__version__)"],
+        ["-c", "import pdv; print(pdv.__version__)"],
         { timeout: PROBE_TIMEOUT_MS }
       );
       const version = stdout.trim();
       // During 0.x, require an exact version match. Post-1.0 this could
       // relax to major-version compatibility.
       // NOTE: Same version policy is enforced in pdv-protocol.ts
-      // (checkVersionCompatibility) and pdv_kernel/comms.py (check_version).
+      // (checkVersionCompatibility) and pdv/comms.py (check_version).
       const compatible = version === getAppVersion();
       return { installed: true, version, compatible };
     } catch {
@@ -319,7 +319,7 @@ export class EnvironmentDetector {
   }
 
   /**
-   * Verify that a given Python executable has the ``pdv_kernel`` package
+   * Verify that a given Python executable has the ``pdv`` package
    * installed and that its version is compatible.
    *
    * @param pythonPath - Absolute path to the Python executable to check.

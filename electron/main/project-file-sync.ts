@@ -14,17 +14,23 @@
 import * as fs from "fs/promises";
 import * as path from "path";
 
+import { resolveNodePath } from "./pdv-protocol";
+
+/** Matches a valid 12-hex-character node UUID. */
+const UUID_RE = /^[0-9a-f]{12}$/;
+
 /**
  * One file-backed tree entry resolved from `tree-index.json`.
  */
 interface FileBackedEntry {
   treePath: string;
-  relativePath: string;
+  uuid: string;
+  filename: string;
 }
 
 /**
  * Read tree-index.json from a directory and return entries that have a
- * `storage.relative_path` (i.e. file-backed nodes).
+ * `storage.uuid` and `storage.filename` (i.e. file-backed nodes).
  *
  * @param dir - Directory containing tree-index.json.
  * @returns Array of file-backed node descriptors.
@@ -39,15 +45,17 @@ async function readFileBackedEntries(dir: string): Promise<FileBackedEntry[]> {
         const storage = entry.storage as Record<string, unknown> | undefined;
         return (
           storage?.backend === "local_file" &&
-          typeof storage?.relative_path === "string" &&
-          (storage.relative_path as string).length > 0
+          typeof storage?.uuid === "string" &&
+          typeof storage?.filename === "string" &&
+          UUID_RE.test(storage.uuid as string)
         );
       })
       .map((entry) => {
         const storage = entry.storage as Record<string, unknown>;
         return {
           treePath: String(entry.path ?? ""),
-          relativePath: storage.relative_path as string,
+          uuid: storage.uuid as string,
+          filename: storage.filename as string,
         };
       });
   } catch (error) {
@@ -73,19 +81,22 @@ export async function copyFilesForLoad(
   saveDir: string,
   workingDir: string,
   onProgress?: (current: number, total: number) => void
-): Promise<void> {
+): Promise<string[]> {
   const entries = await readFileBackedEntries(saveDir);
   const total = entries.length;
+  const failedPaths: string[] = [];
   for (let i = 0; i < total; i++) {
-    const { relativePath } = entries[i];
-    const src = path.join(saveDir, relativePath);
-    const dest = path.join(workingDir, relativePath);
+    const { uuid, filename, treePath } = entries[i];
+    const src = resolveNodePath(saveDir, uuid, filename);
+    const dest = resolveNodePath(workingDir, uuid, filename);
     await fs.mkdir(path.dirname(dest), { recursive: true });
     await fs.copyFile(src, dest).catch((error) => {
       console.warn(`[pdv] load: could not copy ${src}`, error);
+      failedPaths.push(treePath);
     });
     if (onProgress && (i % 5 === 0 || i === total - 1)) {
       onProgress(i + 1, total);
     }
   }
+  return failedPaths;
 }

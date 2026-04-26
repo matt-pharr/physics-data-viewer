@@ -51,3 +51,10 @@
   color: var(--text-hint);
   cursor: not-allowed;
 }
+
+.context-menu-separator {
+  height: 1px;
+  margin: 4px 8px;
+  background-color: var(--border-color);
+  opacity: 0.4;
+}

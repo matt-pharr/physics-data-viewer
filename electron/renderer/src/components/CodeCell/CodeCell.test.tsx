@@ -207,7 +207,7 @@ describe('CodeCell completion provider', () => {
 
   it('adds pdv_tree fallback for pdv* prefix completions', async () => {
     complete.mockResolvedValue({
-      matches: ['%pdb', 'pdv_kernel', 'pdv'],
+      matches: ['%pdb', 'pdv', 'pdv_tree'],
       cursor_start: 0,
       cursor_end: 3,
     });
@@ -219,7 +219,7 @@ describe('CodeCell completion provider', () => {
     );
 
     expect(result.suggestions.map((s) => s.label)).toEqual(
-      expect.arrayContaining(['pdv_tree', 'pdv', 'pdv_kernel', '%pdb'])
+      expect.arrayContaining(['pdv_tree', 'pdv', '%pdb'])
     );
   });
 

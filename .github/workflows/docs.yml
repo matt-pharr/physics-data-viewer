@@ -7,7 +7,7 @@ on:
     paths:
       - "docs/**"
       - "mkdocs.yml"
-      - "pdv-python/pdv_kernel/**"
+      - "pdv-python/pdv/**"
       - ".github/workflows/docs.yml"
   workflow_dispatch:
 

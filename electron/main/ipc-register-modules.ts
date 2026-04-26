@@ -215,12 +215,11 @@ export function registerModulesIpcHandlers(
           kernelWorkingDirs.get(activeKernelId),
           activeProjectDir,
         );
-        // Send pdv.modules.setup so the kernel adds lib paths to sys.path
-        // and imports entry points for the newly imported module.
+        // Send pdv.modules.setup so the kernel walks the newly-registered
+        // PDVModule subtree and wires its PDVLib parent dirs into sys.path.
         const setupPayload = await buildModulesSetupPayload(
           moduleManager,
           [importedModule],
-          kernelWorkingDirs.get(activeKernelId),
           activeProjectDir,
         );
         if (setupPayload.modules.length > 0) {
@@ -281,22 +280,6 @@ export function registerModulesIpcHandlers(
           error: "No running kernel — start one before creating a module.",
         };
       }
-      const workingDir = kernelWorkingDirs.get(activeKernelId);
-
-      // Seed working-dir scaffolding under the canonical
-      // ``<workdir>/tree/<alias>/{scripts,lib,plots}/`` layout so
-      // subsequent ``tree:createScript`` / ``tree:createLib`` hits land
-      // at paths that match where ``bindImportedModule`` would have
-      // placed an imported v4 module's files — see the Option A
-      // canonical-layout fix and ARCHITECTURE.md §6.1/§6.2.
-      if (workingDir) {
-        for (const child of ["scripts", "lib", "plots"]) {
-          await fs.mkdir(path.join(workingDir, "tree", baseAlias, child), {
-            recursive: true,
-          });
-        }
-      }
-
       const language =
         request.language ??
         (activeManifest?.language as "python" | "julia" | undefined) ??
@@ -316,6 +299,30 @@ export function registerModulesIpcHandlers(
           status: "error",
           error: `Kernel rejected create_empty: ${(error as Error).message}`,
         };
+      }
+
+      // Wire sys.path for the fresh module. Symmetric with the import
+      // path above: the kernel walks the PDVModule subtree (seeded by
+      // MODULE_CREATE_EMPTY) and adds parent dirs of any PDVLib nodes
+      // to sys.path. For a freshly created module the subtree has no
+      // libs yet, but this call establishes the invariant that every
+      // in-session module has been registered with the setup handler,
+      // so subsequent tree:createLib hits land in a directory that is
+      // already on sys.path.
+      const inSessionSetupPayload = await buildModulesSetupPayload(
+        moduleManager,
+        [
+          {
+            module_id: baseAlias,
+            alias: baseAlias,
+            version: request.version || "0.1.0",
+            origin: "in_session",
+          },
+        ],
+        getActiveProjectDir(),
+      );
+      if (inSessionSetupPayload.modules.length > 0) {
+        await commRouter.request(PDVMessageType.MODULES_SETUP, inSessionSetupPayload);
       }
 
       // Record the new module in the pending-imports list so it survives

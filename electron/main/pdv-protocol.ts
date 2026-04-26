@@ -17,6 +17,49 @@
 
 /* eslint-disable @typescript-eslint/no-unused-vars -- payload interfaces document the protocol schema (ARCHITECTURE.md §3.4) */
 
+import { randomUUID } from "crypto";
+import * as path from "path";
+
+// ---------------------------------------------------------------------------
+// UUID generation & path resolution
+// ---------------------------------------------------------------------------
+
+/**
+ * Generate a 12-hex-character node UUID matching the Python side
+ * (`pdv.environment.generate_node_uuid`).
+ *
+ * @returns A 12-character lowercase hex string derived from UUID4.
+ */
+export function generateNodeUuid(): string {
+  return randomUUID().replace(/-/g, "").slice(0, 12);
+}
+
+/**
+ * Resolve a tree node's backing file to an absolute path.
+ *
+ * Mirrors `PDVFile.resolve_path()` on the Python side and
+ * `uuid_tree_path()` in `pdv.environment`.
+ *
+ * @param workingDir - Absolute path to the working (or save) directory.
+ * @param nodeUuid - 12-hex-character node UUID.
+ * @param filename - Original filename including extension.
+ * @returns Absolute path: `<workingDir>/tree/<nodeUuid>/<filename>`.
+ */
+export function resolveNodePath(workingDir: string, nodeUuid: string, filename: string): string {
+  return path.join(workingDir, "tree", nodeUuid, filename);
+}
+
+/**
+ * Resolve a tree node's storage directory.
+ *
+ * @param workingDir - Absolute path to the working (or save) directory.
+ * @param nodeUuid - 12-hex-character node UUID.
+ * @returns Absolute path: `<workingDir>/tree/<nodeUuid>`.
+ */
+export function resolveNodeDir(workingDir: string, nodeUuid: string): string {
+  return path.join(workingDir, "tree", nodeUuid);
+}
+
 // ---------------------------------------------------------------------------
 // Protocol version
 // ---------------------------------------------------------------------------
@@ -79,6 +122,14 @@ export const PDVMessageType = {
   PROJECT_SAVE_RESPONSE: "pdv.project.save.response",
   /** Kernel → app (push). Progress update during save/load operations. */
   PROGRESS: "pdv.progress",
+  /** Kernel → app (push). Kernel requests the app to save the current project. */
+  PROJECT_SAVE_REQUEST: "pdv.project.save_request",
+  /** Kernel → app (push). Tree already serialized by kernel; app finishes the save. */
+  PROJECT_SAVE_COMPLETED: "pdv.project.save_completed",
+  /** Kernel → app (push). Kernel requests the app to save-as to a new directory. */
+  PROJECT_SAVE_AS_REQUEST: "pdv.project.save_as_request",
+  /** Kernel → app (push). Kernel requests the app to open a project from a directory. */
+  PROJECT_OPEN_REQUEST: "pdv.project.open_request",
 
   // Tree
   /** App → kernel. Request tree nodes at a given path. */
@@ -106,6 +157,22 @@ export const PDVMessageType = {
   TREE_DELETE: "pdv.tree.delete",
   /** Kernel → app. Confirms node deletion. */
   TREE_DELETE_RESPONSE: "pdv.tree.delete.response",
+  /** App → kernel. Rename a tree node (change its key under the same parent). */
+  TREE_RENAME: "pdv.tree.rename",
+  /** Kernel → app. Confirms rename; echoes old and new paths. */
+  TREE_RENAME_RESPONSE: "pdv.tree.rename.response",
+  /** App → kernel. Move a tree node to a new path. */
+  TREE_MOVE: "pdv.tree.move",
+  /** Kernel → app. Confirms move; echoes old and new paths. */
+  TREE_MOVE_RESPONSE: "pdv.tree.move.response",
+  /** App → kernel. Deep-copy a tree node to a new path. */
+  TREE_DUPLICATE: "pdv.tree.duplicate",
+  /** Kernel → app. Confirms duplication. */
+  TREE_DUPLICATE_RESPONSE: "pdv.tree.duplicate.response",
+  /** App → kernel. Create an empty dict node at a given path. */
+  TREE_CREATE_NODE: "pdv.tree.create_node",
+  /** Kernel → app. Confirms node creation. */
+  TREE_CREATE_NODE_RESPONSE: "pdv.tree.create_node.response",
   /** Kernel → app (push). Tree structure changed. */
   TREE_CHANGED: "pdv.tree.changed",
 
@@ -353,22 +420,14 @@ export interface PDVNamespaceInspectPayload {
 // Script message payloads
 // ---------------------------------------------------------------------------
 
-/** Payload for pdv.script.register (app → kernel). */
-export interface PDVScriptRegisterPayload {
-  /** Dot-separated path where the script node should appear in the tree. */
-  tree_path: string;
-  /** Relative path to the script file from the project root. */
-  relative_path: string;
-  /** If true, re-register an already-registered script (reload). */
-  reload?: boolean;
-}
-
 /** Payload for pdv.file.register (app → kernel). */
 export interface PDVFileRegisterPayload {
   /** Dot-path of the parent node; empty string for root. */
   tree_path: string;
   /** Physical filename with extension (e.g. "input.nml"). */
   filename: string;
+  /** 12-hex-character UUID for the node's storage directory. */
+  uuid?: string;
   /** Node type classification for the file. */
   node_type: "namelist" | "lib" | "file";
   /** Optional explicit tree node name. When omitted the kernel derives it from filename. */
@@ -522,7 +581,7 @@ export function checkVersionCompatibility(
   // During 0.x development, any minor/patch difference is flagged.
   // Post-1.0, consider relaxing to tolerate patch-level differences.
   // NOTE: Same version policy is enforced in environment-detector.ts
-  // (checkPDVInstalled) and pdv_kernel/comms.py (check_version).
+  // (checkPDVInstalled) and pdv/comms.py (check_version).
   if (inMinor !== myMinor || inPatch !== myPatch) return "minor_mismatch";
   return "ok";
 }

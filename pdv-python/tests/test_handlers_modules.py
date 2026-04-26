@@ -10,21 +10,22 @@ Tests cover:
 Reference: ARCHITECTURE.md §3.4
 """
 
+import os
 import sys
 import uuid
 from unittest.mock import MagicMock, patch
 
 import pytest
 
-import pdv_kernel.comms as comms_mod
-from pdv_kernel.handlers.modules import (
+import pdv.comms as comms_mod
+from pdv.handlers.modules import (
     handle_handler_invoke,
     handle_module_create_empty,
     handle_module_reload_libs,
     handle_module_update,
     handle_modules_setup,
 )
-from pdv_kernel.modules import clear_handlers, handle
+from pdv.modules import clear_handlers, handle
 
 
 @pytest.fixture(autouse=True)
@@ -54,39 +55,201 @@ def _make_msg(msg_type, payload, msg_id=None):
 
 
 class TestHandleModulesSetup:
-    def test_adds_to_sys_path(self):
-        """pdv.modules.setup should add parent dirs of lib_paths to sys.path."""
+    """Tests for the kernel-walks-tree implementation of pdv.modules.setup.
+
+    Payload shape: ``{"modules": [{"alias": str, "entry_point"?: str}]}``.
+    The handler looks up ``tree[alias]``, walks its PDVModule subtree for
+    PDVLib descendants, and inserts each unique parent directory into
+    ``sys.path``. No main-side path synthesis.
+    """
+
+    def _install_module_with_libs(self, tree, tmp_path, alias, lib_rel_names):
+        from pdv.environment import generate_node_uuid
+        from pdv.tree import PDVLib, PDVModule, PDVTree
+
+        # Point the tree at tmp_path so PDVLib.resolve_path() lines up with
+        # the on-disk files we create below.
+        tree._set_working_dir(str(tmp_path))
+
+        module = PDVModule(module_id=alias, name=alias, version="0.1.0")
+        module._working_dir = str(tmp_path)
+        lib_container = PDVTree()
+        lib_container._working_dir = str(tmp_path)
+        for rel in lib_rel_names:
+            # rel is like "tree/<alias>/lib/helpers.py" — we need to create the
+            # file at <tmp_path>/tree/<uuid>/<filename> and map the old structure.
+            import pathlib
+            rel_path = pathlib.PurePosixPath(rel)
+            filename = rel_path.name
+            node_uuid = generate_node_uuid()
+            uuid_dir = tmp_path / "tree" / node_uuid
+            uuid_dir.mkdir(parents=True, exist_ok=True)
+            abs_path = uuid_dir / filename
+            abs_path.write_text("# test lib\n")
+            lib_node = PDVLib(uuid=node_uuid, filename=filename, module_id=alias)
+            key = abs_path.stem
+            dict.__setitem__(lib_container, key, lib_node)
+        dict.__setitem__(module, "lib", lib_container)
+        dict.__setitem__(tree, alias, module)
+        return module
+
+    def test_walks_module_for_libs(self, tree_with_comm, tmp_path):
+        """Walker adds the parent dir of every PDVLib descendant to sys.path."""
+        module = self._install_module_with_libs(
+            tree_with_comm,
+            tmp_path,
+            "toy",
+            ["tree/toy/lib/helpers.py", "tree/toy/extras/more.py"],
+        )
+        assert module is not None
+
+        # With UUID storage, each lib lives in tree/<uuid>/<filename>.
+        # Collect expected dirs from the actual lib nodes.
+        from pdv.tree import PDVLib
+        lib_container = dict.__getitem__(module, "lib")
+        expected_dirs = []
+        for key in dict.keys(lib_container):
+            lib_node = dict.__getitem__(lib_container, key)
+            if isinstance(lib_node, PDVLib):
+                expected_dirs.append(os.path.dirname(lib_node.resolve_path(str(tmp_path))))
+
         mock_comm = _make_mock_comm()
-        fake_file = "/tmp/fake-module-path-for-test/n_pendulum.py"
-        expected_dir = "/tmp/fake-module-path-for-test"
+        msg = _make_msg("pdv.modules.setup", {"modules": [{"alias": "toy"}]})
+
+        try:
+            with (
+                patch.object(comms_mod, "_comm", mock_comm),
+                patch.object(comms_mod, "_pdv_tree", tree_with_comm),
+            ):
+                handle_modules_setup(msg)
+
+            for expected in expected_dirs:
+                assert expected in sys.path, (
+                    f"{expected} missing from sys.path after setup"
+                )
+            response = mock_comm._sent[-1]
+            assert response["type"] == "pdv.modules.setup.response"
+        finally:
+            for expected in expected_dirs:
+                while expected in sys.path:
+                    sys.path.remove(expected)
+
+    def test_deduplicates_sibling_libs(self, tree_with_comm, tmp_path):
+        """Two PDVLib nodes with the same UUID produce one sys.path entry."""
+        from pdv.tree import PDVLib, PDVModule, PDVTree
+
+        tree_with_comm._set_working_dir(str(tmp_path))
+        # Use a single UUID for both libs to test dedup.
+        shared_uuid = "dedup_uuid01"
+        uuid_dir = tmp_path / "tree" / shared_uuid
+        uuid_dir.mkdir(parents=True, exist_ok=True)
+        (uuid_dir / "a.py").write_text("# test lib a\n")
+        (uuid_dir / "b.py").write_text("# test lib b\n")
+
+        module = PDVModule(module_id="toy", name="toy", version="0.1.0")
+        module._working_dir = str(tmp_path)
+        lib_container = PDVTree()
+        lib_container._working_dir = str(tmp_path)
+        dict.__setitem__(lib_container, "a", PDVLib(uuid=shared_uuid, filename="a.py", module_id="toy"))
+        dict.__setitem__(lib_container, "b", PDVLib(uuid=shared_uuid, filename="b.py", module_id="toy"))
+        dict.__setitem__(module, "lib", lib_container)
+        dict.__setitem__(tree_with_comm, "toy", module)
+
+        expected_dir = str(uuid_dir)
+
+        # Clear any prior entries so the count assertion is meaningful.
+        while expected_dir in sys.path:
+            sys.path.remove(expected_dir)
+
+        mock_comm = _make_mock_comm()
+        msg = _make_msg("pdv.modules.setup", {"modules": [{"alias": "toy"}]})
+
+        try:
+            with (
+                patch.object(comms_mod, "_comm", mock_comm),
+                patch.object(comms_mod, "_pdv_tree", tree_with_comm),
+            ):
+                handle_modules_setup(msg)
+
+            assert sys.path.count(expected_dir) == 1
+        finally:
+            while expected_dir in sys.path:
+                sys.path.remove(expected_dir)
+
+    def test_missing_module_warns_and_continues(self, tree_with_comm, tmp_path):
+        """Unknown aliases warn but do not abort the loop — other modules still set up."""
+        module = self._install_module_with_libs(
+            tree_with_comm,
+            tmp_path,
+            "present",
+            ["tree/present/lib/p.py"],
+        )
+        # Find the actual expected dir from the installed lib node.
+        from pdv.tree import PDVLib
+        lib_container = dict.__getitem__(module, "lib")
+        expected_dirs = []
+        for key in dict.keys(lib_container):
+            lib_node = dict.__getitem__(lib_container, key)
+            if isinstance(lib_node, PDVLib):
+                expected_dirs.append(os.path.dirname(lib_node.resolve_path(str(tmp_path))))
+
+        mock_comm = _make_mock_comm()
         msg = _make_msg(
             "pdv.modules.setup",
-            {"modules": [{"lib_paths": [fake_file]}]},
+            {"modules": [{"alias": "ghost"}, {"alias": "present"}]},
         )
 
         try:
-            with patch.object(comms_mod, "_comm", mock_comm):
+            with (
+                patch.object(comms_mod, "_comm", mock_comm),
+                patch.object(comms_mod, "_pdv_tree", tree_with_comm),
+                pytest.warns(UserWarning, match="no PDVModule"),
+            ):
                 handle_modules_setup(msg)
 
-            assert expected_dir in sys.path
-            response = mock_comm._sent[0]
-            assert response["type"] == "pdv.modules.setup.response"
-            assert response["status"] == "ok"
+            for expected_dir in expected_dirs:
+                assert expected_dir in sys.path
         finally:
-            # Clean up sys.path
-            if expected_dir in sys.path:
-                sys.path.remove(expected_dir)
+            for expected_dir in expected_dirs:
+                while expected_dir in sys.path:
+                    sys.path.remove(expected_dir)
 
-    def test_runs_entry_point(self):
+    def test_empty_module_is_noop_but_not_error(self, tree_with_comm):
+        """An empty PDVModule (create_empty just ran) triggers no sys.path edits and no warnings."""
+        from pdv.tree import PDVModule, PDVTree
+
+        module = PDVModule(module_id="fresh", name="fresh", version="0.1.0")
+        for child in ("scripts", "lib", "plots"):
+            dict.__setitem__(module, child, PDVTree())
+        dict.__setitem__(tree_with_comm, "fresh", module)
+
+        mock_comm = _make_mock_comm()
+        msg = _make_msg("pdv.modules.setup", {"modules": [{"alias": "fresh"}]})
+
+        sys_path_before = list(sys.path)
+        with (
+            patch.object(comms_mod, "_comm", mock_comm),
+            patch.object(comms_mod, "_pdv_tree", tree_with_comm),
+        ):
+            handle_modules_setup(msg)
+        # No new entries added for an empty module.
+        assert sys.path == sys_path_before
+        assert mock_comm._sent[-1]["type"] == "pdv.modules.setup.response"
+
+    def test_runs_entry_point(self, tree_with_comm, tmp_path):
         """pdv.modules.setup should import the entry_point module."""
+        self._install_module_with_libs(
+            tree_with_comm, tmp_path, "ep_mod", []
+        )
+
         mock_comm = _make_mock_comm()
         msg = _make_msg(
             "pdv.modules.setup",
             {
                 "modules": [
                     {
-                        "lib_paths": ["/tmp/fake/my_module.py"],
-                        "entry_point": "pdv_kernel_test_fake_entry",
+                        "alias": "ep_mod",
+                        "entry_point": "pdv_test_fake_entry",
                     }
                 ]
             },
@@ -95,11 +258,90 @@ class TestHandleModulesSetup:
         mock_module = MagicMock()
         with (
             patch.object(comms_mod, "_comm", mock_comm),
+            patch.object(comms_mod, "_pdv_tree", tree_with_comm),
             patch("importlib.import_module", return_value=mock_module) as mock_import,
         ):
             handle_modules_setup(msg)
 
-        mock_import.assert_called_once_with("pdv_kernel_test_fake_entry")
+        mock_import.assert_called_once_with("pdv_test_fake_entry")
+
+    def test_create_empty_then_register_lib_allows_sibling_import(
+        self, tree_with_comm, tmp_path
+    ):
+        """End-to-end kernel-side audit repro.
+
+        Create an empty module, register a PDVLib with real on-disk contents,
+        register a sibling PDVScript, run setup, and assert the script can
+        import from the sibling lib.
+        """
+        from pdv.tree import PDVLib, PDVModule, PDVScript, PDVTree
+
+        alias = "ddho"
+        lib_uuid = "ddho_lib_001"
+        scr_uuid = "ddho_scr_001"
+
+        lib_dir = tmp_path / "tree" / lib_uuid
+        scr_dir = tmp_path / "tree" / scr_uuid
+        lib_dir.mkdir(parents=True)
+        scr_dir.mkdir(parents=True)
+
+        lib_file = lib_dir / "ddho_lib.py"
+        lib_file.write_text("K = 1.25\n")
+        script_file = scr_dir / "run_ddho.py"
+        script_file.write_text(
+            "from ddho_lib import K\n"
+            "def run(pdv_tree):\n"
+            "    return {'k': K}\n"
+        )
+
+        tree_with_comm._set_working_dir(str(tmp_path))
+        module = PDVModule(module_id=alias, name=alias, version="0.1.0")
+        module._working_dir = str(tmp_path)
+        scripts_container = PDVTree()
+        scripts_container._working_dir = str(tmp_path)
+        libs_container = PDVTree()
+        libs_container._working_dir = str(tmp_path)
+        dict.__setitem__(
+            libs_container,
+            "ddho_lib",
+            PDVLib(
+                uuid=lib_uuid,
+                filename="ddho_lib.py",
+                module_id=alias,
+            ),
+        )
+        dict.__setitem__(
+            scripts_container,
+            "run_ddho",
+            PDVScript(
+                uuid=scr_uuid,
+                filename="run_ddho.py",
+                language="python",
+                module_id=alias,
+            ),
+        )
+        dict.__setitem__(module, "lib", libs_container)
+        dict.__setitem__(module, "scripts", scripts_container)
+        dict.__setitem__(tree_with_comm, alias, module)
+
+        mock_comm = _make_mock_comm()
+        msg = _make_msg("pdv.modules.setup", {"modules": [{"alias": alias}]})
+
+        try:
+            with (
+                patch.object(comms_mod, "_comm", mock_comm),
+                patch.object(comms_mod, "_pdv_tree", tree_with_comm),
+            ):
+                handle_modules_setup(msg)
+
+            script_node = tree_with_comm[f"{alias}.scripts.run_ddho"]
+            result = script_node.run(tree_with_comm)
+            assert result == {"k": 1.25}
+        finally:
+            lib_parent = str(lib_dir)
+            while lib_parent in sys.path:
+                sys.path.remove(lib_parent)
+            sys.modules.pop("ddho_lib", None)
 
 
 class TestHandleHandlerInvoke:
@@ -149,44 +391,48 @@ class TestHandleHandlerInvoke:
 
 class TestHandleModuleReloadLibs:
     """Tests for pdv.module.reload_libs — the script:run preflight that
-    importlib.reloads modules whose __file__ is under <workdir>/<alias>/lib/.
-    See the #140 workflow plan §4.
+    importlib.reloads modules whose __file__ is under a PDVLib's
+    UUID-based directory.  See the #140 workflow plan §4.
     """
 
     def test_reloads_lib_file_under_alias(self, tree_with_comm, tmp_path):
         """A lib file edited on disk is observably reloaded in sys.modules."""
-        import importlib
-        import os
 
-        from pdv_kernel.tree import PDVModule
+        from pdv.tree import PDVLib, PDVModule, PDVTree
 
-        # Arrange: working-dir/tree/<alias>/lib/<libname>.py — the
-        # ``tree/`` prefix is the canonical working-dir subdir for
-        # file-backed nodes after the Option-A layout fix.
         alias = "my_mod"
-        lib_dir = tmp_path / "tree" / alias / "lib"
+        lib_uuid = "aabbccddeeff"
+        lib_filename = "helpers_reload_v1.py"
+
+        # UUID-based layout: tree/<uuid>/<filename>
+        lib_dir = tmp_path / "tree" / lib_uuid
         lib_dir.mkdir(parents=True)
-        lib_file = lib_dir / "helpers_reload_v1.py"
+        lib_file = lib_dir / lib_filename
         lib_file.write_text("VALUE = 1\n")
         sys.path.insert(0, str(lib_dir))
 
-        # Force the working dir for this test's tree.
         tree_with_comm._working_dir = str(tmp_path)
 
-        # Install a PDVModule at the alias so the handler's is_module
-        # check passes.
-        tree_with_comm[alias] = PDVModule(
-            module_id=alias, name="My", version="0.1.0",
+        # Build a PDVModule with a PDVLib child so _iter_pdv_libs finds it.
+        module_node = PDVModule(
+            module_id=alias,
+            name="My",
+            version="0.1.0",
         )
+        lib_container = PDVTree()
+        lib_container[lib_filename.removesuffix(".py")] = PDVLib(
+            uuid=lib_uuid, filename=lib_filename, module_id=alias,
+        )
+        module_node["lib"] = lib_container
+        tree_with_comm[alias] = module_node
 
         try:
             import helpers_reload_v1  # noqa: PLC0415
+
             assert helpers_reload_v1.VALUE == 1
 
-            # Edit the file on disk — simulates an external editor save.
             lib_file.write_text("VALUE = 42\n")
 
-            # Call the reload handler.
             mock_comm = _make_mock_comm()
             msg = _make_msg("pdv.module.reload_libs", {"alias": alias})
             with (
@@ -195,7 +441,6 @@ class TestHandleModuleReloadLibs:
             ):
                 handle_module_reload_libs(msg)
 
-            # Assert: the new value is observable and the response lists the reload.
             assert helpers_reload_v1.VALUE == 42
             response = mock_comm._sent[-1]
             assert response["type"] == "pdv.module.reload_libs.response"
@@ -245,7 +490,7 @@ class TestHandleModuleCreateEmpty:
 
     def test_creates_module_with_default_subtrees(self, tree_with_comm):
         """An empty module lands with scripts/lib/plots PDVTree children."""
-        from pdv_kernel.tree import PDVModule, PDVTree
+        from pdv.tree import PDVModule, PDVTree
 
         mock_comm = _make_mock_comm()
         msg = _make_msg(
@@ -308,10 +553,13 @@ class TestHandleModuleUpdate:
     """Tests for pdv.module.update — metadata editor patch handler."""
 
     def test_updates_mutable_fields(self, tree_with_comm):
-        from pdv_kernel.tree import PDVModule
+        from pdv.tree import PDVModule
 
         tree_with_comm["toy"] = PDVModule(
-            module_id="toy", name="Toy", version="0.1.0", description="old",
+            module_id="toy",
+            name="Toy",
+            version="0.1.0",
+            description="old",
         )
 
         mock_comm = _make_mock_comm()
@@ -340,10 +588,13 @@ class TestHandleModuleUpdate:
 
     def test_omitted_fields_left_alone(self, tree_with_comm):
         """Only provided fields are updated; omitted fields are untouched."""
-        from pdv_kernel.tree import PDVModule
+        from pdv.tree import PDVModule
 
         tree_with_comm["toy"] = PDVModule(
-            module_id="toy", name="Toy", version="0.1.0", description="orig",
+            module_id="toy",
+            name="Toy",
+            version="0.1.0",
+            description="orig",
         )
         mock_comm = _make_mock_comm()
         msg = _make_msg(

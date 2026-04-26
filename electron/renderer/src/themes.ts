@@ -29,13 +29,16 @@ export const CSS_VAR_GROUPS: { label: string; vars: { key: string; label: string
   {
     label: 'Accents & Borders',
     vars: [
-      { key: 'accent',       label: 'Accent' },
-      { key: 'accent-hover', label: 'Accent Hover' },
-      { key: 'border-color', label: 'Border' },
-      { key: 'error',        label: 'Error' },
-      { key: 'warning',      label: 'Warning' },
-      { key: 'warning-hover',label: 'Warning Hover' },
-      { key: 'success',      label: 'Success' },
+      { key: 'accent',          label: 'Accent' },
+      { key: 'accent-hover',    label: 'Accent Hover' },
+      { key: 'text-on-accent',  label: 'Text on Accent' },
+      { key: 'border-color',    label: 'Border' },
+      { key: 'error',           label: 'Error' },
+      { key: 'warning',         label: 'Warning' },
+      { key: 'warning-hover',   label: 'Warning Hover' },
+      { key: 'success',         label: 'Success' },
+      { key: 'danger',          label: 'Danger' },
+      { key: 'text-on-danger',  label: 'Text on Danger' },
     ],
   },
 ];
@@ -61,11 +64,14 @@ export const BUILTIN_THEMES: BuiltinTheme[] = [
       'text-hint':      '#5a5a5a',
       'accent':       '#007acc',
       'accent-hover': '#1a8fd1',
+      'text-on-accent': '#ffffff',
       'border-color': '#474747',
       'error':        '#f48771',
       'warning':      '#dcdcaa',
       'warning-hover':'#e4e4b4',
       'success':      '#4ec9b0',
+      'danger':       '#c42b1c',
+      'text-on-danger':'#ffffff',
     },
   },
   {
@@ -81,11 +87,14 @@ export const BUILTIN_THEMES: BuiltinTheme[] = [
       'text-hint':      '#aaaaaa',
       'accent':       '#007acc',
       'accent-hover': '#005a9e',
+      'text-on-accent': '#ffffff',
       'border-color': '#d4d4d4',
       'error':        '#e51400',
       'warning':      '#bf8803',
       'warning-hover':'#a67702',
       'success':      '#16825d',
+      'danger':       '#c42b1c',
+      'text-on-danger':'#ffffff',
     },
   },
   {
@@ -101,11 +110,14 @@ export const BUILTIN_THEMES: BuiltinTheme[] = [
       'text-hint':      '#49483e',
       'accent':       '#a6e22e',
       'accent-hover': '#b8f040',
+      'text-on-accent': '#272822',
       'border-color': '#49483e',
       'error':        '#f92672',
       'warning':      '#e6db74',
       'warning-hover':'#f0e68c',
       'success':      '#a6e22e',
+      'danger':       '#f92672',
+      'text-on-danger':'#272822',
     },
   },
   {
@@ -121,11 +133,14 @@ export const BUILTIN_THEMES: BuiltinTheme[] = [
       'text-hint':      '#bbbbbb',
       'accent':       '#128cff',
       'accent-hover': '#0a70cc',
+      'text-on-accent': '#ffffff',
       'border-color': '#d9d6d7',
       'error':        '#ff0000',
       'warning':      '#996800',
       'warning-hover':'#7a5300',
       'success':      '#008e00',
+      'danger':       '#c42b1c',
+      'text-on-danger':'#ffffff',
     },
   },
   {
@@ -141,11 +156,14 @@ export const BUILTIN_THEMES: BuiltinTheme[] = [
       'text-hint':      '#6c6b70',
       'accent':       '#1780fa',
       'accent-hover': '#0a64ca',
+      'text-on-accent': '#ffffff',
       'border-color': '#1a191c',
       'error':        '#f44747',
       'warning':      '#ffd60a',
       'warning-hover':'#ffe54c',
       'success':      '#32d74b',
+      'danger':       '#c42b1c',
+      'text-on-danger':'#ffffff',
     },
   },
   {
@@ -161,11 +179,14 @@ export const BUILTIN_THEMES: BuiltinTheme[] = [
       'text-hint':      '#6e7681',
       'accent':       '#0078d4',
       'accent-hover': '#026ec1',
+      'text-on-accent': '#ffffff',
       'border-color': '#2b2b2b',
       'error':        '#f85149',
       'warning':      '#cca700',
       'warning-hover':'#d4af00',
       'success':      '#4ec9b0',
+      'danger':       '#c42b1c',
+      'text-on-danger':'#ffffff',
     },
   },
   {
@@ -181,11 +202,14 @@ export const BUILTIN_THEMES: BuiltinTheme[] = [
       'text-hint':      '#6e7681',
       'accent':       '#005fb8',
       'accent-hover': '#0258a8',
+      'text-on-accent': '#ffffff',
       'border-color': '#e5e5e5',
       'error':        '#e51400',
       'warning':      '#bf8803',
       'warning-hover':'#a67702',
       'success':      '#2ea043',
+      'danger':       '#c42b1c',
+      'text-on-danger':'#ffffff',
     },
   },
 ];
@@ -494,6 +518,22 @@ export function detectMonoFonts(): string[] {
 /** Returns installed display fonts from the candidate list. */
 export function detectDisplayFonts(): string[] {
   return DISPLAY_FONT_CANDIDATES.filter((f) => fontInstalled(f, 'sans-serif'));
+}
+
+/** Default max content width (px) for the read-mode markdown view. */
+export const DEFAULT_READ_VIEW_MAX_WIDTH = 1200;
+
+/**
+ * Apply the markdown read-view max width as a CSS custom property on :root.
+ * Pass `undefined` to revert to the stylesheet default.
+ */
+export function applyMarkdownSettings(maxContentWidth?: number): void {
+  const root = document.documentElement;
+  if (maxContentWidth && maxContentWidth > 0) {
+    root.style.setProperty('--read-view-max-width', `${maxContentWidth}px`);
+  } else {
+    root.style.removeProperty('--read-view-max-width');
+  }
 }
 
 /**

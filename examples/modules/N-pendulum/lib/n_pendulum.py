@@ -14,8 +14,8 @@ from __future__ import annotations
 import json
 
 import numpy as np
-from pdv_kernel import register_serializer
-from pdv_kernel.modules import handle
+from pdv import register_serializer
+from pdv.modules import handle
 
 
 class PendulumSolution:

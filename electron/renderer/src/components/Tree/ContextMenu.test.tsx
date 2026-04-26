@@ -65,7 +65,9 @@ describe('ContextMenu', () => {
         onClose={vi.fn()}
       />,
     );
-    expect(screen.getByRole('button', { name: /^Open/ })).toBeTruthy();
+    expect(screen.getByRole('button', { name: /Open.*Double-click/ })).toBeTruthy();
+    // "Open in external editor" is disabled pending file-watcher support
+    expect(screen.queryByRole('button', { name: /Open in external editor/ })).toBeNull();
     expect(screen.queryByRole('button', { name: /^Create new script/ })).toBeNull();
   });
 

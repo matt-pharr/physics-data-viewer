@@ -222,19 +222,37 @@ export const Tree: React.FC<TreeProps> = ({ kernelId, disabled = false, refreshT
 
           // Read current nodes via ref to avoid stale closure.
           const parentNode = parentPath === '' ? null : findNode(nodesRef.current, parentPath);
-          let children: TreeNodeData[];
+          let freshChildren: TreeNodeData[];
           if (parentPath === '') {
-            children = await treeService.getRootNodes(kernelId, { force: true });
+            freshChildren = await treeService.getRootNodes(kernelId, { force: true });
           } else if (parentNode) {
-            children = await treeService.getChildren(parentNode, kernelId, { force: true });
+            freshChildren = await treeService.getChildren(parentNode, kernelId, { force: true });
           } else {
             continue;
           }
 
+          // Merge fresh children with existing ones to preserve expansion
+          // state. Fresh nodes from the API have isExpanded=false and no
+          // children; existing expanded nodes carry both.
+          const existingParent = parentPath === ''
+            ? nodesRef.current[0]
+            : findNode(nodesRef.current, parentPath);
+          const existingChildren = existingParent?.children ?? [];
+          const existingMap = new Map<string, TreeNodeData>();
+          for (const c of existingChildren) existingMap.set(c.path, c);
+
+          const mergedChildren = freshChildren.map((fresh) => {
+            const existing = existingMap.get(fresh.path);
+            if (existing?.isExpanded && existing.children) {
+              return { ...fresh, isExpanded: true, children: existing.children };
+            }
+            return fresh;
+          });
+
           if (parentPath === '') {
-            setNodes((prev) => updateNodeImmut(prev, '', (n) => ({ ...n, children })));
+            setNodes((prev) => updateNodeImmut(prev, '', (n) => ({ ...n, children: mergedChildren })));
           } else {
-            setNodes((prev) => updateNodeImmut(prev, parentPath, (n) => ({ ...n, children, isExpanded: true })));
+            setNodes((prev) => updateNodeImmut(prev, parentPath, (n) => ({ ...n, children: mergedChildren, isExpanded: true })));
           }
         }
       };

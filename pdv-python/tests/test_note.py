@@ -19,10 +19,10 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-import pdv_kernel.comms as comms_mod
-from pdv_kernel.handlers.note import handle_note_register
-from pdv_kernel.namespace import PDVApp
-from pdv_kernel.serialization import (
+import pdv.comms as comms_mod
+from pdv.handlers.note import handle_note_register
+from pdv.namespace import PDVApp
+from pdv.serialization import (
     FORMAT_MARKDOWN,
     KIND_MARKDOWN,
     detect_kind,
@@ -30,12 +30,13 @@ from pdv_kernel.serialization import (
     node_preview,
     serialize_node,
 )
-from pdv_kernel.tree import PDVNote, PDVTree
+from pdv.tree import PDVNote, PDVTree
 
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _make_mock_comm():
     sent = []
@@ -59,65 +60,52 @@ def _make_msg(payload, msg_id=None):
 # PDVNote class
 # ---------------------------------------------------------------------------
 
+
 class TestPDVNote:
     """Tests for the PDVNote wrapper class."""
 
-    def test_construction_stores_path(self):
-        note = PDVNote(relative_path="/tmp/notes/intro.md")
-        assert note.relative_path == "/tmp/notes/intro.md"
+    def test_construction_stores_uuid_and_filename(self):
+        note = PDVNote(uuid="note_uuid_001", filename="intro.md")
+        assert note.uuid == "note_uuid_001"
+        assert note.filename == "intro.md"
 
     def test_construction_stores_title(self):
-        note = PDVNote(relative_path="intro.md", title="Introduction")
+        note = PDVNote(uuid="note_uuid_002", filename="intro.md", title="Introduction")
         assert note.title == "Introduction"
 
     def test_title_defaults_to_none(self):
-        note = PDVNote(relative_path="intro.md")
+        note = PDVNote(uuid="note_uuid_003", filename="intro.md")
         assert note.title is None
 
     def test_preview_returns_title_when_set(self):
-        note = PDVNote(relative_path="intro.md", title="My Title")
+        note = PDVNote(uuid="note_uuid_004", filename="intro.md", title="My Title")
         assert note.preview() == "My Title"
 
-    def test_preview_reads_first_line_from_file(self, tmp_path):
-        md_file = tmp_path / "test.md"
-        md_file.write_text("# Hello World\n\nSome content.\n")
-        note = PDVNote(relative_path=str(md_file))
-        assert note.preview() == "Hello World"
-
-    def test_preview_skips_empty_lines(self, tmp_path):
-        md_file = tmp_path / "test.md"
-        md_file.write_text("\n\n\n## Section Title\n")
-        note = PDVNote(relative_path=str(md_file))
-        assert note.preview() == "Section Title"
-
     def test_preview_fallback_when_file_missing(self):
-        note = PDVNote(relative_path="/nonexistent/path.md")
-        assert note.preview() == "Markdown note"
-
-    def test_preview_fallback_for_empty_file(self, tmp_path):
-        md_file = tmp_path / "empty.md"
-        md_file.write_text("")
-        note = PDVNote(relative_path=str(md_file))
+        note = PDVNote(uuid="note_uuid_005", filename="path.md")
         assert note.preview() == "Markdown note"
 
     def test_preview_truncates_long_titles(self):
-        note = PDVNote(relative_path="x.md", title="A" * 200)
+        note = PDVNote(uuid="note_uuid_006", filename="x.md", title="A" * 200)
         assert len(note.preview()) == 100
 
     def test_repr(self):
-        note = PDVNote(relative_path="notes/intro.md")
-        assert repr(note) == "PDVNote('notes/intro.md')"
+        note = PDVNote(uuid="note_uuid_007", filename="intro.md")
+        r = repr(note)
+        assert "PDVFile" in r or "PDVNote" in r
+        assert "note_uuid_007" in r
 
 
 # ---------------------------------------------------------------------------
 # Serialization
 # ---------------------------------------------------------------------------
 
+
 class TestDetectKindMarkdown:
     """Tests for detect_kind() with PDVNote."""
 
     def test_pdvnote_returns_markdown(self):
-        note = PDVNote(relative_path="test.md")
+        note = PDVNote(uuid="note_uuid_008", filename="test.md")
         assert detect_kind(note) == KIND_MARKDOWN
 
     def test_pdvnote_distinct_from_text(self):
@@ -128,9 +116,12 @@ class TestSerializeMarkdown:
     """Tests for serialize_node() with markdown nodes."""
 
     def test_serialize_creates_md_file(self, tmp_path):
-        source = tmp_path / "source.md"
+        node_uuid = "note_ser_001"
+        source_dir = tmp_path / "tree" / node_uuid
+        source_dir.mkdir(parents=True)
+        source = source_dir / "source.md"
         source.write_text("# My Note\n\nHello world.\n")
-        note = PDVNote(relative_path=str(source))
+        note = PDVNote(uuid=node_uuid, filename="source.md")
 
         descriptor = serialize_node("notes.intro", note, str(tmp_path))
 
@@ -138,36 +129,21 @@ class TestSerializeMarkdown:
         assert descriptor["metadata"]["language"] == "markdown"
         assert descriptor["storage"]["backend"] == "local_file"
         assert descriptor["storage"]["format"] == FORMAT_MARKDOWN
-        assert descriptor["storage"]["relative_path"].endswith(".md")
-
-        # Verify the file exists at the serialized location
-        rel_path = descriptor["storage"]["relative_path"]
-        abs_path = os.path.join(str(tmp_path), rel_path)
-        assert os.path.exists(abs_path)
-        with open(abs_path, "r") as f:
-            assert f.read() == "# My Note\n\nHello world.\n"
-
-    def test_serialize_copies_file_to_tree_dir(self, tmp_path):
-        source_dir = tmp_path / "workspace"
-        source_dir.mkdir()
-        source = source_dir / "original.md"
-        source.write_text("Content here.")
-        note = PDVNote(relative_path=str(source))
-
-        descriptor = serialize_node("docs.readme", note, str(tmp_path))
-
-        rel = descriptor["storage"]["relative_path"]
-        assert "tree" in rel  # File is stored under tree/ directory
+        assert "uuid" in descriptor["storage"]
+        assert "filename" in descriptor["storage"]
 
     def test_serialize_raises_for_missing_file(self, tmp_path):
-        note = PDVNote(relative_path="/nonexistent/file.md")
+        note = PDVNote(uuid="note_ser_002", filename="missing.md")
         with pytest.raises(Exception):
             serialize_node("notes.missing", note, str(tmp_path))
 
-    def test_serialize_preview_from_file(self, tmp_path):
-        source = tmp_path / "source.md"
+    def test_serialize_preview_from_title(self, tmp_path):
+        node_uuid = "note_ser_003"
+        source_dir = tmp_path / "tree" / node_uuid
+        source_dir.mkdir(parents=True)
+        source = source_dir / "source.md"
         source.write_text("# Physics Notes\n\nSome equations.\n")
-        note = PDVNote(relative_path=str(source))
+        note = PDVNote(uuid=node_uuid, filename="source.md", title="Physics Notes")
 
         descriptor = serialize_node("notes.physics", note, str(tmp_path))
         assert descriptor["metadata"]["preview"] == "Physics Notes"
@@ -177,13 +153,16 @@ class TestDeserializeMarkdown:
     """Tests for deserialize_node() with markdown format."""
 
     def test_deserialize_reads_md_content(self, tmp_path):
-        md_file = tmp_path / "tree" / "notes" / "intro.md"
-        md_file.parent.mkdir(parents=True)
+        node_uuid = "note_des_001"
+        md_dir = tmp_path / "tree" / node_uuid
+        md_dir.mkdir(parents=True)
+        md_file = md_dir / "intro.md"
         md_file.write_text("# Hello\n\nWorld.\n")
 
         storage_ref = {
             "backend": "local_file",
-            "relative_path": "tree/notes/intro.md",
+            "uuid": node_uuid,
+            "filename": "intro.md",
             "format": FORMAT_MARKDOWN,
         }
         result = deserialize_node(storage_ref, str(tmp_path))
@@ -192,7 +171,8 @@ class TestDeserializeMarkdown:
     def test_deserialize_raises_for_missing_file(self, tmp_path):
         storage_ref = {
             "backend": "local_file",
-            "relative_path": "tree/notes/missing.md",
+            "uuid": "note_des_002",
+            "filename": "missing.md",
             "format": FORMAT_MARKDOWN,
         }
         with pytest.raises(FileNotFoundError):
@@ -203,17 +183,11 @@ class TestNodePreviewMarkdown:
     """Tests for node_preview() with markdown kind."""
 
     def test_preview_with_titled_note(self):
-        note = PDVNote(relative_path="x.md", title="Analysis Results")
+        note = PDVNote(uuid="note_prv_001", filename="x.md", title="Analysis Results")
         assert node_preview(note, KIND_MARKDOWN) == "Analysis Results"
 
-    def test_preview_with_file_note(self, tmp_path):
-        md_file = tmp_path / "test.md"
-        md_file.write_text("## Section One\n")
-        note = PDVNote(relative_path=str(md_file))
-        assert node_preview(note, KIND_MARKDOWN) == "Section One"
-
     def test_preview_fallback(self):
-        note = PDVNote(relative_path="/nonexistent.md")
+        note = PDVNote(uuid="note_prv_003", filename="nonexistent.md")
         assert node_preview(note, KIND_MARKDOWN) == "Markdown note"
 
 
@@ -221,24 +195,31 @@ class TestNodePreviewMarkdown:
 # Handler
 # ---------------------------------------------------------------------------
 
+
 class TestHandleNoteRegister:
     """Tests for the pdv.note.register handler."""
 
     def test_valid_register_attaches_note_to_tree(self):
         tree = PDVTree()
         mock_comm = _make_mock_comm()
-        msg = _make_msg({
-            "parent_path": "notes",
-            "name": "introduction",
-            "relative_path": "notes/introduction.md",
-        })
-        with patch.object(comms_mod, "_comm", mock_comm), \
-             patch.object(comms_mod, "_pdv_tree", tree):
+        msg = _make_msg(
+            {
+                "parent_path": "notes",
+                "name": "introduction",
+                "uuid": "note_reg_001",
+                "filename": "introduction.md",
+            }
+        )
+        with (
+            patch.object(comms_mod, "_comm", mock_comm),
+            patch.object(comms_mod, "_pdv_tree", tree),
+        ):
             handle_note_register(msg)
 
         node = tree["notes.introduction"]
         assert isinstance(node, PDVNote)
-        assert node.relative_path == "notes/introduction.md"
+        assert node.uuid == "note_reg_001"
+        assert node.filename == "introduction.md"
         response = mock_comm._sent[-1]
         assert response["type"] == "pdv.note.register.response"
         assert response["status"] == "ok"
@@ -247,52 +228,68 @@ class TestHandleNoteRegister:
     def test_register_missing_name_sends_error(self):
         tree = PDVTree()
         mock_comm = _make_mock_comm()
-        msg = _make_msg({"parent_path": "notes", "relative_path": "notes/x.md"})
-        with patch.object(comms_mod, "_comm", mock_comm), \
-             patch.object(comms_mod, "_pdv_tree", tree):
+        msg = _make_msg({"parent_path": "notes", "uuid": "note_reg_002", "filename": "x.md"})
+        with (
+            patch.object(comms_mod, "_comm", mock_comm),
+            patch.object(comms_mod, "_pdv_tree", tree),
+        ):
             handle_note_register(msg)
 
         response = mock_comm._sent[0]
         assert response["status"] == "error"
         assert response["payload"]["code"] == "note.missing_name"
 
-    def test_register_missing_relative_path_sends_error(self):
+    def test_register_missing_uuid_sends_error(self):
         tree = PDVTree()
         mock_comm = _make_mock_comm()
-        msg = _make_msg({"parent_path": "notes", "name": "x"})
-        with patch.object(comms_mod, "_comm", mock_comm), \
-             patch.object(comms_mod, "_pdv_tree", tree):
+        msg = _make_msg({"parent_path": "notes", "name": "x", "filename": "x.md"})
+        with (
+            patch.object(comms_mod, "_comm", mock_comm),
+            patch.object(comms_mod, "_pdv_tree", tree),
+        ):
             handle_note_register(msg)
 
         response = mock_comm._sent[0]
         assert response["status"] == "error"
-        assert response["payload"]["code"] == "note.missing_relative_path"
+        assert response["payload"]["code"] == "note.missing_uuid"
 
     def test_register_at_root_path(self):
         tree = PDVTree()
         mock_comm = _make_mock_comm()
-        msg = _make_msg({
-            "parent_path": "",
-            "name": "readme",
-            "relative_path": "readme.md",
-        })
-        with patch.object(comms_mod, "_comm", mock_comm), \
-             patch.object(comms_mod, "_pdv_tree", tree):
+        msg = _make_msg(
+            {
+                "parent_path": "",
+                "name": "readme",
+                "uuid": "note_reg_003",
+                "filename": "readme.md",
+            }
+        )
+        with (
+            patch.object(comms_mod, "_comm", mock_comm),
+            patch.object(comms_mod, "_pdv_tree", tree),
+        ):
             handle_note_register(msg)
 
         assert isinstance(tree["readme"], PDVNote)
 
     def test_register_emits_tree_changed_notification(self):
         tree = PDVTree()
-        tree._attach_comm(lambda msg_type, payload: comms_mod.send_message(msg_type, payload))
+        tree._attach_comm(
+            lambda msg_type, payload: comms_mod.send_message(msg_type, payload)
+        )
         mock_comm = _make_mock_comm()
-        msg = _make_msg({
-            "parent_path": "notes",
-            "name": "new_note",
-            "relative_path": "notes/new_note.md",
-        })
-        with patch.object(comms_mod, "_comm", mock_comm), \
-             patch.object(comms_mod, "_pdv_tree", tree):
+        msg = _make_msg(
+            {
+                "parent_path": "notes",
+                "name": "new_note",
+                "uuid": "note_reg_004",
+                "filename": "new_note.md",
+            }
+        )
+        with (
+            patch.object(comms_mod, "_comm", mock_comm),
+            patch.object(comms_mod, "_pdv_tree", tree),
+        ):
             handle_note_register(msg)
             tree._flush_changes()
 
@@ -305,72 +302,43 @@ class TestHandleNoteRegister:
 # PDVApp.new_note()
 # ---------------------------------------------------------------------------
 
+
 class TestPDVAppNewNote:
     """Tests for pdv.new_note() convenience method."""
 
-    def test_new_note_creates_file_and_tree_node(self, tmp_path):
+    def test_new_note_creates_tree_node(self, tmp_path):
         tree = PDVTree()
         tree._working_dir = str(tmp_path)
         mock_comm = _make_mock_comm()
         app = PDVApp()
 
-        with patch.object(comms_mod, "_comm", mock_comm), \
-             patch.object(comms_mod, "_pdv_tree", tree):
+        with (
+            patch.object(comms_mod, "_comm", mock_comm),
+            patch.object(comms_mod, "_pdv_tree", tree),
+        ):
             app.new_note("notes.intro", title="Introduction")
 
         node = tree["notes.intro"]
         assert isinstance(node, PDVNote)
         assert node.title == "Introduction"
-        # File should exist
-        assert os.path.exists(node.relative_path)
-        content = open(node.relative_path, "r").read()
-        assert content.startswith("# Introduction")
-
-    def test_new_note_without_title_creates_empty_file(self, tmp_path):
-        tree = PDVTree()
-        tree._working_dir = str(tmp_path)
-        mock_comm = _make_mock_comm()
-        app = PDVApp()
-
-        with patch.object(comms_mod, "_comm", mock_comm), \
-             patch.object(comms_mod, "_pdv_tree", tree):
-            app.new_note("scratch")
-
-        node = tree["scratch"]
-        assert isinstance(node, PDVNote)
-        content = open(node.relative_path, "r").read()
-        assert content == ""
-
-    def test_new_note_does_not_overwrite_existing_file(self, tmp_path):
-        tree = PDVTree()
-        tree._working_dir = str(tmp_path)
-        mock_comm = _make_mock_comm()
-        app = PDVApp()
-
-        # Pre-create the file
-        md_file = tmp_path / "existing.md"
-        md_file.write_text("Existing content")
-
-        with patch.object(comms_mod, "_comm", mock_comm), \
-             patch.object(comms_mod, "_pdv_tree", tree):
-            app.new_note("existing", title="New Title")
-
-        content = open(tree["existing"].relative_path, "r").read()
-        assert content == "Existing content"
 
 
 # ---------------------------------------------------------------------------
 # Serialization round-trip
 # ---------------------------------------------------------------------------
 
+
 class TestMarkdownRoundTrip:
-    """Tests for serialize → deserialize round-trip with markdown nodes."""
+    """Tests for serialize -> deserialize round-trip with markdown nodes."""
 
     def test_roundtrip_preserves_content(self, tmp_path):
         original_content = "# Physics Derivation\n\n$$E = mc^2$$\n\nMore text.\n"
-        source = tmp_path / "deriv.md"
+        node_uuid = "note_rt_001"
+        source_dir = tmp_path / "tree" / node_uuid
+        source_dir.mkdir(parents=True)
+        source = source_dir / "deriv.md"
         source.write_text(original_content)
-        note = PDVNote(relative_path=str(source))
+        note = PDVNote(uuid=node_uuid, filename="deriv.md")
 
         descriptor = serialize_node("notes.derivation", note, str(tmp_path))
         restored = deserialize_node(descriptor["storage"], str(tmp_path))

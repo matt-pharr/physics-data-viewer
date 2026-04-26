@@ -40,6 +40,30 @@ extra:
   version:
     provider: mike
     default: latest
+  analytics:
+    provider: google
+    property: G-0FGZ9YFWWQ
+    feedback:
+      title: Was this page helpful?
+      ratings:
+        - icon: material/emoticon-happy-outline
+          name: This page was helpful
+          data: 1
+          note: >-
+            Thanks for the feedback!
+        - icon: material/emoticon-sad-outline
+          name: This page could be improved
+          data: 0
+          note: >-
+            Thanks for the feedback! Help us improve by
+            <a href="https://github.com/matt-pharr/physics-data-viewer/issues/new?labels=documentation&title=Docs+feedback:+" target="_blank" rel="noopener">opening a documentation issue</a>.
+  consent:
+    title: Cookie consent
+    description: >-
+      We use cookies to measure documentation usage so we can see which pages
+      are helpful and where users get stuck. Nothing personal is collected.
+    actions:
+      - accept
 
 plugins:
   - search
@@ -48,9 +72,20 @@ plugins:
         python:
           paths: [pdv-python]
           options:
-            show_source: true
+            docstring_style: numpy
+            show_source: false
             show_root_heading: true
+            show_root_full_path: false
+            show_symbol_type_heading: true
+            show_symbol_type_toc: true
+            separate_signature: true
+            show_signature_annotations: true
+            signature_crossrefs: true
+            merge_init_into_class: true
             members_order: source
+            heading_level: 2
+            filters:
+              - "!^_"
   - git-revision-date-localized:
       enable_creation_date: true
       fallback_to_build_date: true
@@ -69,7 +104,10 @@ markdown_extensions:
   - pymdownx.inlinehilite
   - pymdownx.tabbed:
       alternate_style: true
-  - pymdownx.snippets
+  - pymdownx.snippets:
+      base_path:
+        - .
+        - docs
   - pymdownx.arithmatex:
       generic: true
   - attr_list
@@ -84,29 +122,22 @@ nav:
   - Home: index.md
   - Getting Started:
       - Installation: getting-started/installation.md
-      - Quick Start: getting-started/quickstart.md
   - User Guide:
       - Overview: user-guide/index.md
-      - The Tree: user-guide/tree.md
-      - Code Editor: user-guide/code-editor.md
-      - Scripts: user-guide/scripts.md
-      - Notes: user-guide/notes.md
-      - Projects: user-guide/projects.md
-      - Modules: user-guide/modules.md
+      - Scripts & the Tree: user-guide/scripts-and-tree.md
+      - Notes & Projects: user-guide/notes-and-projects.md
   - API Reference:
       - Overview: api-reference/index.md
-      - pdv_kernel: api-reference/pdv-kernel.md
-      - PDVTree: api-reference/tree.md
-      - Serialization: api-reference/serialization.md
-  - Module Development:
-      - Overview: modules/index.md
-      - Manifest Format: modules/manifest.md
-      - GUI Definitions: modules/gui.md
-      - Library Files: modules/lib.md
-      - Entry Points: modules/entry-points.md
+      - The Tree (pdv_tree): api-reference/tree.md
+      - Tree Node Types: api-reference/nodes.md
+      - The App Object (pdv): api-reference/app.md
+      - Module API: api-reference/module-api.md
+      - Exceptions: api-reference/errors.md
+  - Module Development: modules/index.md
   - Developer Guide:
       - Architecture: developer/architecture.md
+      - Developer Quick Start: developer/developer-quickstart.md
       - Contributing: developer/contributing.md
       - Development Setup: developer/setup.md
       - Testing: developer/testing.md
-  - Changelog: changelog/index.md
+  - Changelog: https://github.com/matt-pharr/physics-data-viewer/releases

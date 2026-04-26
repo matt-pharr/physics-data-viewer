@@ -47,7 +47,7 @@
   border: none;
   border-radius: 3px;
   background: var(--accent, #007acc);
-  color: #fff;
+  color: var(--text-on-accent, #ffffff);
   cursor: pointer;
   font-size: 12px;
   font-weight: 500;
@@ -216,7 +216,7 @@
 }
 
 .canvas-node-row.selected {
-  background: rgba(0, 122, 204, 0.2);
+  background: color-mix(in srgb, var(--accent) 20%, transparent);
   outline: 1px solid var(--accent, #007acc);
 }
 

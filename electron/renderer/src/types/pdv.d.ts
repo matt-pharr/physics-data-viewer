@@ -247,13 +247,11 @@ export interface Config {
   trusted?: boolean;
   /** Most-recent project paths for menu quick access. */
   recentProjects?: string[];
-  /** Custom kernel definitions (legacy/advanced). */
-  customKernels?: unknown[];
   /** Python executable configured by user. */
   pythonPath?: string;
   /** Julia executable configured by user. */
   juliaPath?: string;
-  /** External editor command map (legacy). */
+  /** External editor command map. See #206 for cleanup tracking. */
   editors?: Record<string, string>;
   /** Project root path (when persisted). */
   projectRoot?: string;
@@ -300,6 +298,10 @@ export interface Config {
     fonts?: {
       codeFont?: string;
       displayFont?: string;
+    };
+    markdown?: {
+      /** Max content width (px) for the read-mode rendered markdown view. */
+      maxContentWidth?: number;
     };
   };
 }
@@ -681,6 +683,7 @@ export interface PDVApi {
     ): Promise<{ valid: boolean; error?: string }>;
     onOutput(callback: (chunk: ExecuteOutputChunk) => void): () => void;
     onKernelCrashed(callback: (payload: { kernelId: string }) => void): () => void;
+    onReconnected(callback: (payload: { kernelId: string }) => void): () => void;
   };
   tree: {
     list(kernelId: string, path?: string): Promise<NodeDescriptor[]>;
@@ -689,7 +692,7 @@ export interface PDVApi {
       kernelId: string,
       targetPath: string,
       scriptName: string
-    ): Promise<{ success: boolean; error?: string; scriptPath?: string }>;
+    ): Promise<{ success: boolean; error?: string; scriptPath?: string; treePath?: string }>;
     createNote(
       kernelId: string,
       targetPath: string,
@@ -819,6 +822,7 @@ export interface PDVApi {
     downloadUpdate(): Promise<void>;
     installUpdate(): Promise<void>;
     openReleasesPage(): Promise<void>;
+    getStatus(): Promise<UpdateStatus | null>;
     onUpdateStatus(callback: (status: UpdateStatus) => void): () => void;
   };
   themes: {

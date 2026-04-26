@@ -123,7 +123,6 @@ export function useKernelLifecycle(options: UseKernelLifecycleOptions) {
       cwd: config?.cwd ?? '',
       trusted: config?.trusted ?? false,
       recentProjects: config?.recentProjects ?? [],
-      customKernels: config?.customKernels ?? [],
       pythonPath: paths.pythonPath ?? config?.pythonPath,
       juliaPath: paths.juliaPath ?? config?.juliaPath,
       editors: config?.editors,

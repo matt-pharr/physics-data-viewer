@@ -1,5 +1,5 @@
 """
-pdv-python/tests/test_checksum.py — Tests for pdv_kernel.checksum.
+pdv-python/tests/test_checksum.py — Tests for pdv.checksum.
 
 Tests cover:
 1. test_empty_tree_is_stable — same digest on two calls to an empty tree.
@@ -11,21 +11,21 @@ Tests cover:
 7. test_roundtrip — save/load round-trip preserves the checksum.
 """
 
-import json
 import os
 from unittest.mock import MagicMock, patch
 
 import pytest
 
-import pdv_kernel.comms as comms_mod
-from pdv_kernel.checksum import tree_checksum
-from pdv_kernel.handlers.project import handle_project_load, handle_project_save
-from pdv_kernel.tree import PDVTree, PDVScript
+import pdv.comms as comms_mod
+from pdv.checksum import tree_checksum
+from pdv.handlers.project import handle_project_load, handle_project_save
+from pdv.tree import PDVTree, PDVScript
 
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _make_tree(**items) -> PDVTree:
     t = PDVTree()
@@ -36,6 +36,7 @@ def _make_tree(**items) -> PDVTree:
 
 def _make_msg(msg_type, payload):
     import uuid
+
     return {
         "pdv_version": comms_mod.PDV_PROTOCOL_VERSION,
         "msg_id": str(uuid.uuid4()),
@@ -48,6 +49,7 @@ def _make_msg(msg_type, payload):
 # ---------------------------------------------------------------------------
 # Tests
 # ---------------------------------------------------------------------------
+
 
 class TestEmptyTreeIsStable:
     def test_empty_tree_is_stable(self):
@@ -101,7 +103,8 @@ class TestSubtreeDigestMatchesRoot:
         dict.__setitem__(root, "sub", child)
 
         # Compute digest of child via the root traversal
-        from pdv_kernel.checksum import _node_digest
+        from pdv.checksum import _node_digest
+
         child_via_root = _node_digest(child, None).hex()
 
         # Compute directly
@@ -127,18 +130,23 @@ class TestNdarrayContentSensitivity:
 class TestFileBackedNodeContentSensitivity:
     def test_file_backed_node_content_sensitivity(self, tmp_path):
         """Changing the content of a script file changes the checksum."""
-        script_file = tmp_path / "script.py"
+        node_uuid = "chk_uuid_001"
+        script_dir = tmp_path / "tree" / node_uuid
+        script_dir.mkdir(parents=True)
+        script_file = script_dir / "script.py"
         script_file.write_text("def run(pdv_tree):\n    return {}\n", encoding="utf-8")
 
         tree = PDVTree()
         tree._set_working_dir(str(tmp_path))
-        script = PDVScript(relative_path="script.py")
+        script = PDVScript(uuid=node_uuid, filename="script.py")
         dict.__setitem__(tree, "s", script)
 
         checksum_before = tree_checksum(tree)
 
         # Modify the file content
-        script_file.write_text("def run(pdv_tree):\n    return {'x': 1}\n", encoding="utf-8")
+        script_file.write_text(
+            "def run(pdv_tree):\n    return {'x': 1}\n", encoding="utf-8"
+        )
 
         checksum_after = tree_checksum(tree)
 
@@ -148,7 +156,7 @@ class TestFileBackedNodeContentSensitivity:
         """A missing script file does not raise; it feeds the sentinel value."""
         tree = PDVTree()
         tree._set_working_dir(str(tmp_path))
-        script = PDVScript(relative_path="nonexistent.py")
+        script = PDVScript(uuid="missing_uuid1", filename="nonexistent.py")
         dict.__setitem__(tree, "s", script)
 
         # Should not raise
@@ -156,51 +164,46 @@ class TestFileBackedNodeContentSensitivity:
         assert len(checksum) == 32
 
 
-class TestRelativePathNotHashed:
-    """Regression test for a long-standing bug where tree_checksum folded
-    ``relative_path`` into the digest of file-backed nodes, so any PDVScript
-    / PDVGui / PDVNamelist / PDVNote checksum drifted after save/load
-    because ``serialize_node`` rewrites the stored rel-path (``hello.py`` →
-    ``tree/hello.py``) but leaves the in-memory node untouched. See task #12
-    of the #140 module editing workflow.
-
-    The fix removes ``relative_path`` from the hash inputs — it's a storage
-    layout detail, not part of node identity. Content is still hashed in
-    full via ``_feed_file_content``, and the parent folder's key iteration
-    folds the tree path into the digest.
+class TestUuidNotHashed:
+    """Regression test: the UUID is a storage layout detail — it must NOT
+    be folded into the content hash. Two scripts with different UUIDs but
+    identical file content must produce the same checksum.
     """
 
-    def test_script_checksum_ignores_relative_path(self, tmp_path):
-        """Two PDVScripts pointing at the same content via different rel paths hash identically."""
-        file_a = tmp_path / "a.py"
-        file_b_dir = tmp_path / "tree"
-        file_b_dir.mkdir()
-        file_b = file_b_dir / "a.py"
+    def test_script_checksum_ignores_uuid(self, tmp_path):
+        """Two PDVScripts with different UUIDs but same content hash identically."""
+        uuid_a = "chk_uuid_a01"
+        uuid_b = "chk_uuid_b01"
         content = "def run(pdv_tree):\n    return {}\n"
-        file_a.write_text(content, encoding="utf-8")
-        file_b.write_text(content, encoding="utf-8")
+        for u in (uuid_a, uuid_b):
+            d = tmp_path / "tree" / u
+            d.mkdir(parents=True)
+            (d / "a.py").write_text(content, encoding="utf-8")
 
         tree_a = PDVTree()
         tree_a._set_working_dir(str(tmp_path))
-        dict.__setitem__(tree_a, "s", PDVScript(relative_path="a.py"))
+        dict.__setitem__(tree_a, "s", PDVScript(uuid=uuid_a, filename="a.py"))
 
         tree_b = PDVTree()
         tree_b._set_working_dir(str(tmp_path))
-        dict.__setitem__(tree_b, "s", PDVScript(relative_path="tree/a.py"))
+        dict.__setitem__(tree_b, "s", PDVScript(uuid=uuid_b, filename="a.py"))
 
         assert tree_checksum(tree_a) == tree_checksum(tree_b)
 
     def test_script_checksum_still_content_sensitive(self, tmp_path):
-        """Removing relative_path from the hash must not weaken content sensitivity."""
-        file_a = tmp_path / "a.py"
-        file_a.write_text("VERSION = 1\n", encoding="utf-8")
+        """UUID exclusion must not weaken content sensitivity."""
+        node_uuid = "chk_uuid_c01"
+        d = tmp_path / "tree" / node_uuid
+        d.mkdir(parents=True)
+        f = d / "a.py"
+        f.write_text("VERSION = 1\n", encoding="utf-8")
 
         tree = PDVTree()
         tree._set_working_dir(str(tmp_path))
-        dict.__setitem__(tree, "s", PDVScript(relative_path="a.py"))
+        dict.__setitem__(tree, "s", PDVScript(uuid=node_uuid, filename="a.py"))
         before = tree_checksum(tree)
 
-        file_a.write_text("VERSION = 2\n", encoding="utf-8")
+        f.write_text("VERSION = 2\n", encoding="utf-8")
         after = tree_checksum(tree)
         assert before != after
 
@@ -227,13 +230,16 @@ class TestRoundtrip:
         dict.__setitem__(tree, "flag", True)
         dict.__setitem__(tree, "items", [1, 2, 3])
 
-        script_file = os.path.join(working_dir, "hello.py")
+        hello_uuid = "chk_hello_01"
+        script_dir = os.path.join(working_dir, "tree", hello_uuid)
+        os.makedirs(script_dir, exist_ok=True)
+        script_file = os.path.join(script_dir, "hello.py")
         with open(script_file, "w", encoding="utf-8") as f:
             f.write("def run(pdv_tree: dict):\n    return {}\n")
         dict.__setitem__(
             tree,
             "hello",
-            PDVScript(relative_path="hello.py", language="python"),
+            PDVScript(uuid=hello_uuid, filename="hello.py", language="python"),
         )
 
         checksum_before = tree_checksum(tree)
@@ -243,8 +249,10 @@ class TestRoundtrip:
         sent: list = []
         mock_comm.send.side_effect = lambda data: sent.append(data)
         save_msg = _make_msg("pdv.project.save", {"save_dir": save_dir})
-        with patch.object(comms_mod, "_comm", mock_comm), \
-             patch.object(comms_mod, "_pdv_tree", tree):
+        with (
+            patch.object(comms_mod, "_comm", mock_comm),
+            patch.object(comms_mod, "_pdv_tree", tree),
+        ):
             handle_project_save(save_msg)
 
         # Confirm save emitted a response with a checksum
@@ -259,10 +267,13 @@ class TestRoundtrip:
         # before calling pdv.project.load so the rehydrated PDVFile nodes
         # can resolve their new tree-prefixed relative paths on disk.
         import shutil
+
         save_tree = os.path.join(save_dir, "tree")
         if os.path.exists(save_tree):
             shutil.copytree(
-                save_tree, os.path.join(working_dir, "tree"), dirs_exist_ok=True,
+                save_tree,
+                os.path.join(working_dir, "tree"),
+                dirs_exist_ok=True,
             )
 
         # ---- load into a fresh tree ----
@@ -271,8 +282,10 @@ class TestRoundtrip:
 
         sent.clear()
         load_msg = _make_msg("pdv.project.load", {"save_dir": save_dir})
-        with patch.object(comms_mod, "_comm", mock_comm), \
-             patch.object(comms_mod, "_pdv_tree", fresh_tree):
+        with (
+            patch.object(comms_mod, "_comm", mock_comm),
+            patch.object(comms_mod, "_pdv_tree", fresh_tree),
+        ):
             handle_project_load(load_msg)
 
         # The post-load response should carry the same checksum

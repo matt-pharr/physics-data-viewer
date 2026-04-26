@@ -1,3 +1,1 @@
-# architecture
-
-<!-- TODO -->
+--8<-- "ARCHITECTURE.md"

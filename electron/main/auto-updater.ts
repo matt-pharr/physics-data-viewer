@@ -24,6 +24,7 @@ import { autoUpdater } from "electron-updater";
 import type { UpdateInfo, ProgressInfo } from "electron-updater";
 import { IPC } from "./ipc";
 import type { ConfigStore } from "./config";
+import { markQuitting } from "./app";
 
 // ---------------------------------------------------------------------------
 // Public types
@@ -60,9 +61,15 @@ export interface UpdateStatus {
 
 const RELEASES_URL = "https://github.com/matt-pharr/physics-data-viewer/releases/latest";
 const CHECK_INTERVAL_MS = 24 * 60 * 60 * 1000; // 24 hours
-const STARTUP_DELAY_MS = 10_000; // 10 seconds after window load
+const STARTUP_DELAY_MS = 1_500; // 1.5 seconds after window load
 
 let mainWindow: BrowserWindow | null = null;
+let lastStatus: UpdateStatus | null = null;
+
+/** Return the most recent update status, or null if no check has happened yet. */
+export function getUpdateStatus(): UpdateStatus | null {
+  return lastStatus;
+}
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -86,6 +93,7 @@ function canAutoUpdate(): boolean {
  * @param status - Status to send.
  */
 function pushStatus(status: UpdateStatus): void {
+  lastStatus = status;
   if (mainWindow && !mainWindow.isDestroyed()) {
     mainWindow.webContents.send(IPC.push.updateStatus, status);
   }
@@ -116,8 +124,8 @@ export function initAutoUpdater(win: BrowserWindow, configStore: ConfigStore): v
   autoUpdater.autoDownload = false;
   // Install on quit so the next launch uses the new version.
   autoUpdater.autoInstallOnAppQuit = true;
-  // Include prerelease tags (e.g. v0.0.11-alpha1) since the app is still in alpha.
-  autoUpdater.allowPrerelease = true;
+  // Do not update to prereleases.
+  autoUpdater.allowPrerelease = false;
 
   // -- Event wiring ----------------------------------------------------------
 
@@ -206,7 +214,12 @@ export async function downloadUpdate(): Promise<void> {
  * The app will close and relaunch with the new version.
  */
 export function installUpdate(): void {
-  autoUpdater.quitAndInstall();
+  // Mark the quit BEFORE calling quitAndInstall. On macOS, electron-updater
+  // closes the window before `before-quit` fires, so we can't rely on that
+  // event to set the flag — `window-all-closed` would see isQuitting=false
+  // and stay alive in the dock.
+  markQuitting();
+  autoUpdater.quitAndInstall(true, true);
 }
 
 /**

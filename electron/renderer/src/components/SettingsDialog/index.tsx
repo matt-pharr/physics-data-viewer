@@ -11,9 +11,9 @@ import { SHORTCUT_LABELS, DEFAULT_SHORTCUTS } from '../../shortcuts';
 import type { Shortcuts } from '../../shortcuts';
 import { EnvironmentSelector } from '../EnvironmentSelector';
 import {
-  BUILTIN_THEMES, BUILTIN_THEME_NAMES, THEME_PAIRS,
+  BUILTIN_THEMES, BUILTIN_THEME_NAMES, THEME_PAIRS, DEFAULT_READ_VIEW_MAX_WIDTH,
   applyThemeColors, colorsEqual, defineMonacoThemes, getMonacoTheme, resolveThemeColors,
-  detectMonoFonts, detectDisplayFonts, applyFontSettings,
+  detectMonoFonts, detectDisplayFonts, applyFontSettings, applyMarkdownSettings,
 } from '../../themes';
 import type { Theme } from '../../types';
 import { loader } from '@monaco-editor/react';
@@ -84,6 +84,7 @@ export const SettingsDialog: React.FC<SettingsDialogProps> = ({
   const [editorFontSize, setEditorFontSize] = useState(13);
   const [editorTabSize, setEditorTabSize] = useState(4);
   const [editorWordWrap, setEditorWordWrap] = useState(true);
+  const [readViewMaxWidth, setReadViewMaxWidth] = useState(DEFAULT_READ_VIEW_MAX_WIDTH);
 
   // Font settings state
   const [codeFont, setCodeFont] = useState('');
@@ -108,6 +109,9 @@ export const SettingsDialog: React.FC<SettingsDialogProps> = ({
     setEditorFontSize(ed?.fontSize ?? 13);
     setEditorTabSize(ed?.tabSize ?? 4);
     setEditorWordWrap(ed?.wordWrap ?? true);
+    setReadViewMaxWidth(
+      config?.settings?.markdown?.maxContentWidth ?? DEFAULT_READ_VIEW_MAX_WIDTH,
+    );
     const fn = config?.settings?.fonts;
     setCodeFont(fn?.codeFont ?? '');
     setDisplayFont(fn?.displayFont ?? '');
@@ -136,9 +140,14 @@ export const SettingsDialog: React.FC<SettingsDialogProps> = ({
     /* eslint-enable react-hooks/set-state-in-effect */
   }, [config, shortcuts, isOpen, initialTab]);
 
-  // Subscribe to auto-update status pushes while the dialog is open.
+  // Subscribe to auto-update status pushes while the dialog is open, and
+  // fetch the current cached status so we reflect any check that completed
+  // before the dialog was first opened.
   useEffect(() => {
     if (!isOpen) return;
+    void window.pdv.updater.getStatus().then((status) => {
+      if (status) setUpdateInfo(status);
+    });
     return window.pdv.updater.onUpdateStatus(setUpdateInfo);
   }, [isOpen]);
 
@@ -261,6 +270,10 @@ export const SettingsDialog: React.FC<SettingsDialogProps> = ({
     setDisplayFont(font);
     applyFontSettings(codeFont || undefined, font || undefined);
   };
+  const handleReadViewMaxWidthChange = (width: number) => {
+    setReadViewMaxWidth(width);
+    applyMarkdownSettings(width);
+  };
 
   const onSaveSettings = async () => {
     // Persist shortcuts
@@ -303,6 +316,9 @@ export const SettingsDialog: React.FC<SettingsDialogProps> = ({
         fonts: {
           codeFont: codeFont || undefined,
           displayFont: displayFont || undefined,
+        },
+        markdown: {
+          maxContentWidth: readViewMaxWidth,
         },
       },
     });
@@ -513,6 +529,7 @@ export const SettingsDialog: React.FC<SettingsDialogProps> = ({
               editorFontSize={editorFontSize}
               editorTabSize={editorTabSize}
               editorWordWrap={editorWordWrap}
+              readViewMaxWidth={readViewMaxWidth}
               onFollowSystemThemeChange={setFollowSystemTheme}
               onThemeSelect={handleThemeSelect}
               onDarkThemeSelect={handleDarkThemeSelect}
@@ -526,6 +543,7 @@ export const SettingsDialog: React.FC<SettingsDialogProps> = ({
               onFontSizeChange={setEditorFontSize}
               onTabSizeChange={setEditorTabSize}
               onWordWrapChange={setEditorWordWrap}
+              onReadViewMaxWidthChange={handleReadViewMaxWidthChange}
             />
           )}
         </div>

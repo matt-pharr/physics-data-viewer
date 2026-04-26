@@ -99,6 +99,6 @@
 }
 
 .title-bar-window-button--close:hover {
-  background: #c42b1c;
-  color: #ffffff;
+  background: var(--danger);
+  color: var(--text-on-danger);
 }

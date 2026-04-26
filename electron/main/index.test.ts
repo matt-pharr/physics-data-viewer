@@ -308,6 +308,7 @@ function setup() {
     }),
     createWorkingDir: vi.fn(async () => "/tmp/pdv-test"),
     deleteWorkingDir: vi.fn(async () => undefined),
+    clearCachedKernelResults: vi.fn(),
   } as unknown as ProjectManager;
 
   const configState: PDVConfig = {
@@ -495,13 +496,16 @@ describe("Step 5 IPC handlers", () => {
   });
 
   it("script:edit spawns the configured external editor process", async () => {
-    const { configStore } = setup();
+    const { configStore, commRouter } = setup();
     (configStore.getAll as unknown as ReturnType<typeof vi.fn>).mockReturnValue({
       showPrivateVariables: false,
       showModuleVariables: false,
       showCallableVariables: false,
       editorCommand: "code",
     });
+    (commRouter.request as unknown as ReturnType<typeof vi.fn>).mockResolvedValue(
+      { payload: { path: "/tmp/script.py", file_path: "/tmp/script.py" } }
+    );
 
     const edit = getHandler(IPC.script.edit);
     await edit({}, "kernel-1", "/tmp/script.py");
@@ -518,13 +522,16 @@ describe("Step 5 IPC handlers", () => {
 
   if (process.platform === "darwin") {
     it("script:edit launches terminal editors through Terminal.app on macOS", async () => {
-      const { configStore } = setup();
+      const { configStore, commRouter } = setup();
       (configStore.getAll as unknown as ReturnType<typeof vi.fn>).mockReturnValue({
         showPrivateVariables: false,
         showModuleVariables: false,
         showCallableVariables: false,
         pythonEditorCmd: "nvim {}",
       });
+      (commRouter.request as unknown as ReturnType<typeof vi.fn>).mockResolvedValue(
+        { payload: { path: "/tmp/script.py", file_path: "/tmp/script.py" } }
+      );
 
       const edit = getHandler(IPC.script.edit);
       await edit({}, "kernel-1", "/tmp/script.py");
@@ -609,7 +616,8 @@ describe("Step 5 IPC handlers", () => {
     const { commRouter, webContentsSend } = setup();
     registerCommPushForwarding(
       { webContents: { send: webContentsSend } } as unknown as BrowserWindow,
-      commRouter
+      commRouter,
+      { cacheKernelSaveResults: vi.fn() } as unknown as ProjectManager,
     );
 
     const onPushCalls = (commRouter.onPush as unknown as ReturnType<typeof vi.fn>)
@@ -781,7 +789,7 @@ describe("Step 5 IPC handlers", () => {
     expect(result).toEqual({ found: true, data: { "text/plain": "doc" } });
   });
 
-  it("kernels:validate returns valid when pdv_kernel is installed", async () => {
+  it("kernels:validate returns valid when pdv is installed", async () => {
     const { kernelManager: _ } = setup();
     vi.spyOn(EnvironmentDetector, "checkPDVInstalled").mockResolvedValueOnce({
       installed: true,
@@ -806,7 +814,7 @@ describe("Step 5 IPC handlers", () => {
     expect(result.error).toBeTruthy();
   });
 
-  it("kernels:validate returns invalid when pdv_kernel is missing", async () => {
+  it("kernels:validate returns invalid when pdv is missing", async () => {
     const { kernelManager: _ } = setup();
     vi.spyOn(EnvironmentDetector, "checkPDVInstalled").mockResolvedValueOnce({
       installed: false,
@@ -821,7 +829,7 @@ describe("Step 5 IPC handlers", () => {
     };
 
     expect(result.valid).toBe(false);
-    expect(result.error).toContain("pdv_kernel");
+    expect(result.error).toContain("Missing pdv");
   });
 
   it("tree:createScript sends correct payload to kernel and returns scriptPath", async () => {
@@ -841,7 +849,8 @@ describe("Step 5 IPC handlers", () => {
       expect.objectContaining({
         parent_path: "scripts",
         name: "analysis",
-        relative_path: expect.stringMatching(/analysis\.py$/),
+        uuid: expect.stringMatching(/^[0-9a-f]{12}$/),
+        filename: "analysis.py",
         language: "python",
       })
     );
@@ -877,7 +886,8 @@ describe("Step 5 IPC handlers", () => {
         name: "hello",
         module_id: "toy",
         source_rel_path: "scripts/hello.py",
-        relative_path: expect.stringMatching(/toy\/scripts\/hello\.py$/),
+        uuid: expect.stringMatching(/^[0-9a-f]{12}$/),
+        filename: "hello.py",
       }),
     );
   });
@@ -903,7 +913,7 @@ describe("Step 5 IPC handlers", () => {
     };
 
     expect(result.success).toBe(true);
-    expect(result.libPath).toMatch(/toy\/lib\/helpers\.py$/);
+    expect(result.libPath).toMatch(/helpers\.py$/);
     expect(result.treePath).toBe("toy.lib.helpers");
 
     const fileRegisterCalls = (commRouter.request as unknown as ReturnType<typeof vi.fn>).mock.calls
@@ -914,6 +924,7 @@ describe("Step 5 IPC handlers", () => {
       expect.objectContaining({
         tree_path: "toy.lib",
         filename: "helpers.py",
+        uuid: expect.stringMatching(/^[0-9a-f]{12}$/),
         node_type: "lib",
         module_id: "toy",
         source_rel_path: "lib/helpers.py",
@@ -952,7 +963,8 @@ describe("Step 5 IPC handlers", () => {
       expect.objectContaining({
         parent_path: "notes",
         name: "derivation",
-        relative_path: expect.stringMatching(/derivation\.md$/),
+        uuid: expect.stringMatching(/^[0-9a-f]{12}$/),
+        filename: "derivation.md",
       })
     );
     expect(result.success).toBe(true);
@@ -995,8 +1007,9 @@ describe("Step 5 IPC handlers", () => {
   it("project:save delegates to ProjectManager.save", async () => {
     const { projectManager } = setup();
     const save = getHandler(IPC.project.save);
-    const result = await save({}, "/tmp/project", []);
-    expect(projectManager.save).toHaveBeenCalledWith("/tmp/project", [], {
+    const cells = { tabs: [], activeTabId: 1 };
+    const result = await save({}, "/tmp/project", cells);
+    expect(projectManager.save).toHaveBeenCalledWith("/tmp/project", cells, {
       language: "python",
       interpreterPath: undefined,
     });
@@ -1022,7 +1035,7 @@ describe("Step 5 IPC handlers", () => {
       ],
     });
     const save = getHandler(IPC.project.save);
-    await save({}, "/tmp/project", []);
+    await save({}, "/tmp/project", { tabs: [], activeTabId: 1 });
 
     const scriptsDest = path.join("/tmp/project", "modules", "my_mod", "scripts/run.py");
     const libDest = path.join("/tmp/project", "modules", "my_mod", "lib/helpers.py");
@@ -1066,7 +1079,7 @@ describe("Step 5 IPC handlers", () => {
       ],
     });
     const save = getHandler(IPC.project.save);
-    await save({}, "/tmp/project", []);
+    await save({}, "/tmp/project", { tabs: [], activeTabId: 1 });
 
     const manifestWrites = (mocks.fsWriteFile as unknown as ReturnType<typeof vi.fn>).mock.calls
       .filter((c: unknown[]) => String(c[0]).includes("modules/toy/"));
@@ -1100,7 +1113,7 @@ describe("Step 5 IPC handlers", () => {
     });
     const save = getHandler(IPC.project.save);
     // Handler must not throw when a module-owned file disappeared mid-save.
-    await expect(save({}, "/tmp/project", [])).resolves.toBeDefined();
+    await expect(save({}, "/tmp/project", { tabs: [], activeTabId: 1 })).resolves.toBeDefined();
   });
 
   it("project:load delegates to ProjectManager.load", async () => {
@@ -1171,16 +1184,14 @@ describe("Step 5 IPC handlers", () => {
     });
   });
 
-  it("codeCells:load returns null initially, codeCells:save persists", async () => {
+  it("codeCells:load returns null when no active kernel", async () => {
+    // As of audit #5, code-cell persistence is scoped to the active
+    // kernel's working directory rather than a global ~/.PDV/state file.
+    // With no kernel started in this test harness, load must return null
+    // (no file to read) and the handler must not throw.
     setup();
     const load = getHandler(IPC.codeCells.load);
     expect(await load({})).toBeNull();
-
-    const save = getHandler(IPC.codeCells.save);
-    await save({}, { boxes: [{ id: "b1" }] });
-
-    const afterSave = await load({});
-    expect(afterSave).toEqual({ boxes: [{ id: "b1" }] });
   });
 
   it("modules:listInstalled delegates to ModuleManager.listInstalled", async () => {
@@ -1332,12 +1343,11 @@ describe("Step 5 IPC handlers", () => {
         module_index: expect.arrayContaining([
           expect.objectContaining({
             id: "scripts.run",
-            // Option A: module-owned files live under
-            // <workdir>/tree/<alias>/<src_rel_path> so the stored
-            // relative_path gains the canonical ``tree/`` prefix.
+            uuid: expect.stringMatching(/^[0-9a-f]{12}$/),
             storage: expect.objectContaining({
               backend: "local_file",
-              relative_path: path.join("tree", "demo-module", "scripts/run.py"),
+              uuid: expect.stringMatching(/^[0-9a-f]{12}$/),
+              filename: "run.py",
             }),
           }),
         ]),
@@ -1376,19 +1386,8 @@ describe("Step 5 IPC handlers", () => {
 
     expect(result.success).toBe(true);
     expect(result.alias).toBe("toy");
-    // Working-dir scaffolding created for scripts/lib/plots.
-    expect(mocks.fsMkdir).toHaveBeenCalledWith(
-      expect.stringMatching(/toy\/scripts$/),
-      { recursive: true },
-    );
-    expect(mocks.fsMkdir).toHaveBeenCalledWith(
-      expect.stringMatching(/toy\/lib$/),
-      { recursive: true },
-    );
-    expect(mocks.fsMkdir).toHaveBeenCalledWith(
-      expect.stringMatching(/toy\/plots$/),
-      { recursive: true },
-    );
+    // No alias-based scaffolding — UUID dirs are created when individual
+    // nodes (scripts, libs, etc.) are added via tree:create* handlers.
     expect(commRouter.request).toHaveBeenCalledWith(
       PDVMessageType.MODULE_CREATE_EMPTY,
       expect.objectContaining({
@@ -1399,6 +1398,23 @@ describe("Step 5 IPC handlers", () => {
         language: "python",
       }),
     );
+    // A MODULES_SETUP must follow MODULE_CREATE_EMPTY so the kernel walker
+    // establishes sys.path for the fresh in-session module. The payload
+    // must identify the module by alias only — no pre-computed lib_dir.
+    const requestCalls = (
+      commRouter.request as unknown as ReturnType<typeof vi.fn>
+    ).mock.calls;
+    const createIdx = requestCalls.findIndex(
+      ([type]) => type === PDVMessageType.MODULE_CREATE_EMPTY,
+    );
+    const setupIdx = requestCalls.findIndex(
+      ([type]) => type === PDVMessageType.MODULES_SETUP,
+    );
+    expect(createIdx).toBeGreaterThanOrEqual(0);
+    expect(setupIdx).toBeGreaterThan(createIdx);
+    expect(requestCalls[setupIdx][1]).toEqual({
+      modules: [{ alias: "toy" }],
+    });
   });
 
   it("modules:createEmpty returns conflict when the alias already exists", async () => {
@@ -1952,7 +1968,7 @@ describe("Step 5 IPC handlers", () => {
     );
   });
 
-  it("kernels:start fails fast when selected runtime lacks pdv_kernel", async () => {
+  it("kernels:start fails fast when selected runtime lacks pdv", async () => {
     const { kernelManager } = setup();
     vi.spyOn(EnvironmentDetector, "checkPDVInstalled").mockResolvedValueOnce({
       installed: false,
@@ -1963,7 +1979,7 @@ describe("Step 5 IPC handlers", () => {
     const start = getHandler(IPC.kernels.start);
     await expect(
       start({}, { language: "python", env: { PYTHON_PATH: "/usr/bin/python3" } })
-    ).rejects.toThrow("pdv_kernel");
+    ).rejects.toThrow("missing pdv");
     expect(kernelManager.start).not.toHaveBeenCalled();
   });
 

@@ -54,6 +54,7 @@ const api: PDVApi = {
       ipcRenderer.invoke(IPC.kernels.validate, executablePath, language),
     onOutput: (callback) => onPush(IPC.push.executeOutput, callback),
     onKernelCrashed: (callback) => onPush(IPC.push.kernelCrashed, callback),
+    onReconnected: (callback) => onPush(IPC.push.kernelReconnected, callback),
   },
   tree: {
     list: (kernelId, nodePath = "") =>
@@ -68,6 +69,14 @@ const api: PDVApi = {
       ipcRenderer.invoke(IPC.tree.createGui, kernelId, targetPath, guiName),
     createLib: (kernelId, targetPath, libName) =>
       ipcRenderer.invoke(IPC.tree.createLib, kernelId, targetPath, libName),
+    createNode: (kernelId, targetPath, nodeName) =>
+      ipcRenderer.invoke(IPC.tree.createNode, kernelId, targetPath, nodeName),
+    rename: (kernelId, treePath, newName) =>
+      ipcRenderer.invoke(IPC.tree.rename, kernelId, treePath, newName),
+    move: (kernelId, treePath, newPath, filename) =>
+      ipcRenderer.invoke(IPC.tree.move, kernelId, treePath, newPath, filename),
+    duplicate: (kernelId, treePath, newPath, filename) =>
+      ipcRenderer.invoke(IPC.tree.duplicate, kernelId, treePath, newPath, filename),
     addFile: (kernelId, sourcePath, targetTreePath, nodeType, filename) =>
       ipcRenderer.invoke(IPC.tree.addFile, kernelId, sourcePath, targetTreePath, nodeType, filename),
     invokeHandler: (kernelId, nodePath) =>
@@ -152,6 +161,7 @@ const api: PDVApi = {
     downloadUpdate: () => ipcRenderer.invoke(IPC.updater.downloadUpdate),
     installUpdate: () => ipcRenderer.invoke(IPC.updater.installUpdate),
     openReleasesPage: () => ipcRenderer.invoke(IPC.updater.openReleasesPage),
+    getStatus: () => ipcRenderer.invoke(IPC.updater.getStatus),
     onUpdateStatus: (cb) => onPush(IPC.push.updateStatus, cb),
   },
   themes: {

@@ -25,7 +25,11 @@ import { CreateLibDialog } from '../components/Tree/CreateLibDialog';
 import { CreateGuiDialog } from '../components/Tree/CreateGuiDialog';
 import { NewModuleDialog } from '../components/NewModuleDialog';
 import { ModuleMetadataDialog } from '../components/ModuleMetadataDialog';
+import { CreateNodeDialog } from '../components/Tree/CreateNodeDialog';
 import { CreateNoteDialog } from '../components/Tree/CreateNoteDialog';
+import { DuplicateDialog } from '../components/Tree/DuplicateDialog';
+import { MoveDialog } from '../components/Tree/MoveDialog';
+import { RenameDialog } from '../components/Tree/RenameDialog';
 import { TitleBar } from '../components/TitleBar';
 import { WriteTab } from '../components/WriteTab';
 import { SettingsDialog } from '../components/SettingsDialog';
@@ -55,6 +59,7 @@ import { useLayoutState } from './useLayoutState';
 import { useProjectWorkflow } from './useProjectWorkflow';
 import { useKernelSubscriptions } from './useKernelSubscriptions';
 import { useThemeManager } from './useThemeManager';
+import { useTreeAction } from '../hooks/useTreeAction';
 
 type KernelStatus = 'idle' | 'starting' | 'ready' | 'error';
 type CodeCellExecutionError = {
@@ -130,11 +135,17 @@ const App: React.FC = () => {
   const [pendingTreeChanges, setPendingTreeChanges] = useState<TreeChangeInfo[]>([]);
   const [modulesRefreshToken, setModulesRefreshToken] = useState(0);
 
+  const runTreeAction = useTreeAction({ setLastError, setTreeRefreshToken });
+
   // -- Dialog visibility state ----------------------------------------------
 
   const [showWelcome, setShowWelcome] = useState(true);
   const [forceWelcome, setForceWelcome] = useState(false);
   const [scriptDialog, setScriptDialog] = useState<TreeNodeData | null>(null);
+  const [renameTarget, setRenameTarget] = useState<{ path: string; key: string } | null>(null);
+  const [moveTarget, setMoveTarget] = useState<{ path: string; type: string } | null>(null);
+  const [duplicateTarget, setDuplicateTarget] = useState<{ path: string; type: string } | null>(null);
+  const [createNodeTarget, setCreateNodeTarget] = useState<string | null>(null);
   const [createScriptTarget, setCreateScriptTarget] = useState<string | null>(null);
   const [createNoteTarget, setCreateNoteTarget] = useState<string | null>(null);
   const [createGuiTarget, setCreateGuiTarget] = useState<string | null>(null);
@@ -203,9 +214,7 @@ const App: React.FC = () => {
   useCodeCellsPersistence({
     cellTabs: cellTabs,
     activeCellTab,
-    setCellTabs,
-    setActiveCellTab,
-    currentProjectDir,
+    currentKernelId,
   });
 
   useEffect(() => {
@@ -493,6 +502,10 @@ const App: React.FC = () => {
       if (showSaveAsDialog) { setShowSaveAsDialog(false); return; }
       if (showImportModule) { setShowImportModule(false); return; }
       if (scriptDialog) { setScriptDialog(null); return; }
+      if (renameTarget) { setRenameTarget(null); return; }
+      if (moveTarget) { setMoveTarget(null); return; }
+      if (duplicateTarget) { setDuplicateTarget(null); return; }
+      if (createNodeTarget) { setCreateNodeTarget(null); return; }
       if (createScriptTarget) { setCreateScriptTarget(null); return; }
       if (createNoteTarget) { setCreateNoteTarget(null); return; }
       if (createGuiTarget) { setCreateGuiTarget(null); return; }
@@ -620,7 +633,9 @@ const App: React.FC = () => {
       setCreateGuiTarget(node.path);
       return;
     }
-    if (action === 'create_script') {
+    if (action === 'create_node') {
+      setCreateNodeTarget(node.path);
+    } else if (action === 'create_script') {
       setCreateScriptTarget(node.path);
     } else if (action === 'create_lib') {
       setCreateLibTarget(node.path);
@@ -673,7 +688,7 @@ const App: React.FC = () => {
         origin,
       });
       handleScriptRun(runResult);
-    } else if (action === 'edit' && (node.type === 'script' || node.type === 'namelist' || node.type === 'lib')) {
+    } else if (action === 'edit' && (node.type === 'script' || node.type === 'namelist' || node.type === 'lib' || node.type === 'markdown')) {
       try {
         if (!currentKernelId) return;
         await window.pdv.script.edit(currentKernelId, node.path);
@@ -690,6 +705,18 @@ const App: React.FC = () => {
       const result = await window.pdv.tree.invokeHandler(currentKernelId, node.path);
       if (!result.success && result.error) {
         console.error('[App] Handler failed:', result.error);
+      }
+    } else if (action === 'rename') {
+      if (node.path) {
+        setRenameTarget({ path: node.path, key: node.key });
+      }
+    } else if (action === 'move') {
+      if (node.path) {
+        setMoveTarget({ path: node.path, type: node.type });
+      }
+    } else if (action === 'duplicate') {
+      if (node.path) {
+        setDuplicateTarget({ path: node.path, type: node.type });
       }
     } else if (action === 'delete') {
       if (!currentKernelId || !node.path) return;
@@ -744,7 +771,6 @@ const App: React.FC = () => {
       setLastDuration(result.duration);
     }
     setNamespaceRefreshToken((prev) => prev + 1);
-    setTreeRefreshToken((prev) => prev + 1);
     setScriptDialog(null);
   };
 
@@ -826,7 +852,6 @@ const App: React.FC = () => {
     } finally {
       setIsExecuting(false);
       setNamespaceRefreshToken((prev) => prev + 1);
-      setTreeRefreshToken((prev) => prev + 1);
     }
   }, [currentKernelId, kernelStatus]);
 
@@ -1226,6 +1251,53 @@ const App: React.FC = () => {
         />
       )}
 
+      {renameTarget !== null && currentKernelId && (
+        <RenameDialog
+          currentKey={renameTarget.key}
+          nodePath={renameTarget.path}
+          onCancel={() => setRenameTarget(null)}
+          onRename={(newName) => void runTreeAction(
+            () => window.pdv.tree.rename(currentKernelId, renameTarget.path, newName),
+            () => setRenameTarget(null),
+          )}
+        />
+      )}
+
+      {moveTarget !== null && currentKernelId && (
+        <MoveDialog
+          currentPath={moveTarget.path}
+          nodeType={moveTarget.type}
+          onCancel={() => setMoveTarget(null)}
+          onMove={(newPath, filename) => void runTreeAction(
+            () => window.pdv.tree.move(currentKernelId, moveTarget.path, newPath, filename),
+            () => setMoveTarget(null),
+          )}
+        />
+      )}
+
+      {duplicateTarget !== null && currentKernelId && (
+        <DuplicateDialog
+          currentPath={duplicateTarget.path}
+          nodeType={duplicateTarget.type}
+          onCancel={() => setDuplicateTarget(null)}
+          onDuplicate={(newPath, filename) => void runTreeAction(
+            () => window.pdv.tree.duplicate(currentKernelId, duplicateTarget.path, newPath, filename),
+            () => setDuplicateTarget(null),
+          )}
+        />
+      )}
+
+      {createNodeTarget !== null && currentKernelId && (
+        <CreateNodeDialog
+          parentPath={createNodeTarget}
+          onCancel={() => setCreateNodeTarget(null)}
+          onCreate={(name) => void runTreeAction(
+            () => window.pdv.tree.createNode(currentKernelId, createNodeTarget, name),
+            () => setCreateNodeTarget(null),
+          )}
+        />
+      )}
+
       {createScriptTarget !== null && currentKernelId && (
         <CreateScriptDialog
           parentPath={createScriptTarget}
@@ -1235,8 +1307,9 @@ const App: React.FC = () => {
               const result = await window.pdv.tree.createScript(currentKernelId, createScriptTarget, name);
               if (!result.success) {
                 setLastError(result.error);
-              } else if (result.scriptPath) {
-                await window.pdv.script.edit(currentKernelId, result.scriptPath);
+              } else if (result.treePath) {
+                setTreeRefreshToken((t) => t + 1);
+                await window.pdv.script.edit(currentKernelId, result.treePath);
               }
             } catch (error) {
               setLastError(error instanceof Error ? error.message : String(error));
@@ -1410,9 +1483,11 @@ const App: React.FC = () => {
            });
          }}
          onInstallUpdate={() => {
-           guardDirty('install the update and restart', () => {
-             void window.pdv.updater.installUpdate();
-           });
+           // Don't guard here — the main-process close intercept will run
+           // its own dirty prompt as part of the quit sequence triggered by
+           // installUpdate(). Prompting in both places caused a double
+           // dialog and broke the welcome-screen quit path.
+           void window.pdv.updater.installUpdate();
          }}
          envWarning={interpreterWarning}
        />

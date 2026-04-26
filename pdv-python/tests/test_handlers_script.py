@@ -5,9 +5,9 @@ pdv-python/tests/test_handlers_script.py — Tests for pdv.script.register handl
 import uuid
 from unittest.mock import MagicMock, patch
 
-import pdv_kernel.comms as comms_mod
-from pdv_kernel.handlers.script import handle_script_register
-from pdv_kernel.tree import PDVScript, PDVTree
+import pdv.comms as comms_mod
+from pdv.handlers.script import handle_script_register
+from pdv.tree import PDVScript, PDVTree
 
 
 def _make_mock_comm():
@@ -20,11 +20,11 @@ def _make_mock_comm():
 
 def _make_msg(payload, msg_id=None):
     return {
-        'pdv_version': comms_mod.PDV_PROTOCOL_VERSION,
-        'msg_id': msg_id or str(uuid.uuid4()),
-        'in_reply_to': None,
-        'type': 'pdv.script.register',
-        'payload': payload,
+        "pdv_version": comms_mod.PDV_PROTOCOL_VERSION,
+        "msg_id": msg_id or str(uuid.uuid4()),
+        "in_reply_to": None,
+        "type": "pdv.script.register",
+        "payload": payload,
     }
 
 
@@ -34,22 +34,27 @@ class TestHandleScriptRegister:
         mock_comm = _make_mock_comm()
         msg = _make_msg(
             {
-                'parent_path': 'scripts.analysis',
-                'name': 'fit_model',
-                'relative_path': 'scripts/analysis/fit_model.py',
-                'language': 'python',
+                "parent_path": "scripts.analysis",
+                "name": "fit_model",
+                "uuid": "abc123def456",
+                "filename": "fit_model.py",
+                "language": "python",
             }
         )
-        with patch.object(comms_mod, '_comm', mock_comm), patch.object(comms_mod, '_pdv_tree', tree):
+        with (
+            patch.object(comms_mod, "_comm", mock_comm),
+            patch.object(comms_mod, "_pdv_tree", tree),
+        ):
             handle_script_register(msg)
 
-        node = tree['scripts.analysis.fit_model']
+        node = tree["scripts.analysis.fit_model"]
         assert isinstance(node, PDVScript)
-        assert node.relative_path == 'scripts/analysis/fit_model.py'
+        assert node.uuid == "abc123def456"
+        assert node.filename == "fit_model.py"
         response = mock_comm._sent[-1]
-        assert response['type'] == 'pdv.script.register.response'
-        assert response['status'] == 'ok'
-        assert response['payload']['path'] == 'scripts.analysis.fit_model'
+        assert response["type"] == "pdv.script.register.response"
+        assert response["status"] == "ok"
+        assert response["payload"]["path"] == "scripts.analysis.fit_model"
 
     def test_register_with_source_rel_path_persists_on_node(self):
         """source_rel_path from payload is stored on the PDVScript node.
@@ -62,75 +67,110 @@ class TestHandleScriptRegister:
         mock_comm = _make_mock_comm()
         msg = _make_msg(
             {
-                'parent_path': 'my_mod.scripts',
-                'name': 'solve',
-                'relative_path': 'my_mod/scripts/solve.py',
-                'language': 'python',
-                'module_id': 'my_mod',
-                'source_rel_path': 'scripts/solve.py',
+                "parent_path": "my_mod.scripts",
+                "name": "solve",
+                "uuid": "mod_solve_001",
+                "filename": "solve.py",
+                "language": "python",
+                "module_id": "my_mod",
+                "source_rel_path": "scripts/solve.py",
             }
         )
-        with patch.object(comms_mod, '_comm', mock_comm), patch.object(comms_mod, '_pdv_tree', tree):
+        with (
+            patch.object(comms_mod, "_comm", mock_comm),
+            patch.object(comms_mod, "_pdv_tree", tree),
+        ):
             handle_script_register(msg)
 
-        node = tree['my_mod.scripts.solve']
+        node = tree["my_mod.scripts.solve"]
         assert isinstance(node, PDVScript)
-        assert node.source_rel_path == 'scripts/solve.py'
+        assert node.source_rel_path == "scripts/solve.py"
 
     def test_register_missing_name_sends_error(self):
         tree = PDVTree()
         mock_comm = _make_mock_comm()
-        msg = _make_msg({'parent_path': 'scripts', 'relative_path': 'scripts/x.py'})
-        with patch.object(comms_mod, '_comm', mock_comm), patch.object(comms_mod, '_pdv_tree', tree):
+        msg = _make_msg({"parent_path": "scripts", "uuid": "abc123def456", "filename": "x.py"})
+        with (
+            patch.object(comms_mod, "_comm", mock_comm),
+            patch.object(comms_mod, "_pdv_tree", tree),
+        ):
             handle_script_register(msg)
 
         assert len(mock_comm._sent) == 1
         response = mock_comm._sent[0]
-        assert response['status'] == 'error'
-        assert response['payload']['code'] == 'script.missing_name'
+        assert response["status"] == "error"
+        assert response["payload"]["code"] == "script.missing_name"
 
-    def test_register_missing_relative_path_sends_error(self):
+    def test_register_missing_uuid_sends_error(self):
         tree = PDVTree()
         mock_comm = _make_mock_comm()
-        msg = _make_msg({'parent_path': 'scripts', 'name': 'x'})
-        with patch.object(comms_mod, '_comm', mock_comm), patch.object(comms_mod, '_pdv_tree', tree):
+        msg = _make_msg({"parent_path": "scripts", "name": "x", "filename": "x.py"})
+        with (
+            patch.object(comms_mod, "_comm", mock_comm),
+            patch.object(comms_mod, "_pdv_tree", tree),
+        ):
             handle_script_register(msg)
 
         assert len(mock_comm._sent) == 1
         response = mock_comm._sent[0]
-        assert response['status'] == 'error'
-        assert response['payload']['code'] == 'script.missing_relative_path'
+        assert response["status"] == "error"
+        assert response["payload"]["code"] == "script.missing_uuid"
+
+    def test_register_missing_filename_sends_error(self):
+        tree = PDVTree()
+        mock_comm = _make_mock_comm()
+        msg = _make_msg({"parent_path": "scripts", "name": "x", "uuid": "abc123def456"})
+        with (
+            patch.object(comms_mod, "_comm", mock_comm),
+            patch.object(comms_mod, "_pdv_tree", tree),
+        ):
+            handle_script_register(msg)
+
+        assert len(mock_comm._sent) == 1
+        response = mock_comm._sent[0]
+        assert response["status"] == "error"
+        assert response["payload"]["code"] == "script.missing_filename"
 
     def test_register_with_parent_path_creates_nested_script(self):
         tree = PDVTree()
         mock_comm = _make_mock_comm()
         msg = _make_msg(
             {
-                'parent_path': 'pipeline.stage1',
-                'name': 'preprocess',
-                'relative_path': 'pipeline/stage1/preprocess.py',
+                "parent_path": "pipeline.stage1",
+                "name": "preprocess",
+                "uuid": "abc123def457",
+                "filename": "preprocess.py",
             }
         )
-        with patch.object(comms_mod, '_comm', mock_comm), patch.object(comms_mod, '_pdv_tree', tree):
+        with (
+            patch.object(comms_mod, "_comm", mock_comm),
+            patch.object(comms_mod, "_pdv_tree", tree),
+        ):
             handle_script_register(msg)
 
-        assert isinstance(tree['pipeline.stage1.preprocess'], PDVScript)
+        assert isinstance(tree["pipeline.stage1.preprocess"], PDVScript)
 
     def test_register_emits_tree_changed_notification(self):
         tree = PDVTree()
-        tree._attach_comm(lambda msg_type, payload: comms_mod.send_message(msg_type, payload))
+        tree._attach_comm(
+            lambda msg_type, payload: comms_mod.send_message(msg_type, payload)
+        )
         mock_comm = _make_mock_comm()
         msg = _make_msg(
             {
-                'parent_path': 'scripts',
-                'name': 'new_script',
-                'relative_path': 'scripts/new_script.py',
+                "parent_path": "scripts",
+                "name": "new_script",
+                "uuid": "abc123def458",
+                "filename": "new_script.py",
             }
         )
-        with patch.object(comms_mod, '_comm', mock_comm), patch.object(comms_mod, '_pdv_tree', tree):
+        with (
+            patch.object(comms_mod, "_comm", mock_comm),
+            patch.object(comms_mod, "_pdv_tree", tree),
+        ):
             handle_script_register(msg)
             tree._flush_changes()
 
-        types = [envelope['type'] for envelope in mock_comm._sent]
-        assert 'pdv.tree.changed' in types
-        assert 'pdv.script.register.response' in types
+        types = [envelope["type"] for envelope in mock_comm._sent]
+        assert "pdv.tree.changed" in types
+        assert "pdv.script.register.response" in types

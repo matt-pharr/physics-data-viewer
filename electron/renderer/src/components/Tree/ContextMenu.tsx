@@ -12,7 +12,12 @@ import { formatShortcutHint } from '../../shortcuts';
 
 const MENU_WIDTH = 200;
 const MENU_ITEM_HEIGHT = 32;
+const SEPARATOR_HEIGHT = 9;
 const DEFAULT_VIEWPORT = { width: 1024, height: 768 };
+
+export type MenuEntry =
+  | { kind: 'action'; id: string; label: string; disabled: boolean }
+  | { kind: 'separator'; id: string };
 
 interface ContextMenuProps {
   x: number;
@@ -58,8 +63,11 @@ export const ContextMenu: React.FC<ContextMenuProps> = ({ x, y, node, shortcuts,
     copy_path: formatShortcutHint(shortcuts.treeCopyPath),
   };
 
-  const actions = getActionsForNode(node);
-  const estimatedHeight = actions.length * MENU_ITEM_HEIGHT;
+  const entries = getMenuEntries(node);
+  const estimatedHeight = entries.reduce(
+    (h, e) => h + (e.kind === 'separator' ? SEPARATOR_HEIGHT : MENU_ITEM_HEIGHT),
+    0,
+  );
   const viewportWidth = typeof window !== 'undefined' ? window.innerWidth : DEFAULT_VIEWPORT.width;
   const viewportHeight = typeof window !== 'undefined' ? window.innerHeight : DEFAULT_VIEWPORT.height;
   const clampedX = Math.max(0, Math.min(x, viewportWidth - MENU_WIDTH));
@@ -71,29 +79,33 @@ export const ContextMenu: React.FC<ContextMenuProps> = ({ x, y, node, shortcuts,
       className="context-menu"
       style={{ position: 'fixed', top: clampedY, left: clampedX }}
     >
-      {actions.map((action) => (
-        <button
-          key={action.id}
-          className="context-menu-item"
-          disabled={action.disabled}
-          onClick={() => {
-            onAction(action.id, node);
-            onClose();
-          }}
-        >
-          <span className="context-menu-label">{action.label}</span>
-          {actionShortcuts[action.id] && (
-            <span className="context-menu-shortcut">{actionShortcuts[action.id]}</span>
-          )}
-        </button>
-      ))}
+      {entries.map((entry) =>
+        entry.kind === 'separator' ? (
+          <div key={entry.id} className="context-menu-separator" />
+        ) : (
+          <button
+            key={entry.id}
+            className="context-menu-item"
+            disabled={entry.disabled}
+            onClick={() => {
+              onAction(entry.id, node);
+              onClose();
+            }}
+          >
+            <span className="context-menu-label">{entry.label}</span>
+            {actionShortcuts[entry.id] && (
+              <span className="context-menu-shortcut">{actionShortcuts[entry.id]}</span>
+            )}
+          </button>
+        ),
+      )}
     </div>
   );
 };
 
-/** Return menu actions allowed for the given node descriptor. */
-export function getActionsForNode(node: TreeNodeData) {
-  const actions: Array<{ id: string; label: string; disabled: boolean }> = [];
+/** Return menu entries (actions + separators) for the given node descriptor. */
+export function getMenuEntries(node: TreeNodeData): MenuEntry[] {
+  const entries: MenuEntry[] = [];
   const isContainer = node.type === 'mapping' || node.type === 'folder' || node.type === 'root';
   const isModule = node.type === 'module';
   const isGui = node.type === 'gui';
@@ -101,50 +113,69 @@ export function getActionsForNode(node: TreeNodeData) {
   // ── Primary actions (type-specific) ──
 
   if (isModule || isGui) {
-    actions.push({ id: 'open_gui', label: 'Open GUI', disabled: false });
-    actions.push({ id: 'edit_gui', label: 'Edit GUI', disabled: false });
+    entries.push({ kind: 'action', id: 'open_gui', label: 'Open GUI', disabled: false });
+    entries.push({ kind: 'action', id: 'edit_gui', label: 'Edit GUI', disabled: false });
   }
 
   if (isModule) {
-    actions.push({ id: 'edit_module_metadata', label: 'Edit metadata...', disabled: false });
-    actions.push({ id: 'export_module', label: 'Export to global store...', disabled: false });
+    entries.push({ kind: 'action', id: 'edit_module_metadata', label: 'Edit metadata...', disabled: false });
+    entries.push({ kind: 'action', id: 'export_module', label: 'Export to global store...', disabled: false });
   }
 
   if (node.type === 'script') {
-    actions.push(
-      { id: 'run', label: 'Run...', disabled: false },
-      { id: 'run_defaults', label: 'Run defaults', disabled: false },
-      { id: 'edit', label: 'Edit', disabled: false },
+    entries.push(
+      { kind: 'action', id: 'run', label: 'Run...', disabled: false },
+      { kind: 'action', id: 'run_defaults', label: 'Run defaults', disabled: false },
+      { kind: 'action', id: 'edit', label: 'Edit', disabled: false },
     );
   } else if (node.type === 'namelist' || node.type === 'lib') {
-    actions.push({ id: 'edit', label: 'Edit', disabled: false });
+    entries.push({ kind: 'action', id: 'edit', label: 'Edit', disabled: false });
   } else if (node.type === 'markdown') {
-    actions.push({ id: 'open_note', label: 'Open', disabled: false });
+    entries.push({ kind: 'action', id: 'open_note', label: 'Open', disabled: false });
+    // TODO: re-enable after adding file-watcher to detect external edits
+    // entries.push({ kind: 'action', id: 'edit', label: 'Open in external editor', disabled: false });
+    entries.push({ kind: 'separator', id: 'sep-1' });
   }
 
-  // ── Refresh (all nodes) ──
-
-  actions.push({ id: 'refresh', label: 'Refresh', disabled: false });
-
-  // ── Creation actions (containers only) ──
+  // ── Container actions (nodes that can have children) ──
 
   if (isContainer || isModule) {
-    actions.push({ id: 'create_script', label: 'Create new script', disabled: false });
-    actions.push({ id: 'create_note', label: 'Create new note', disabled: false });
-    actions.push({ id: 'new_gui', label: 'Create new GUI', disabled: false });
-    // Lib creation is meaningful only inside a module's subtree. The app
-    // handler validates this at IPC time; we surface the option whenever
-    // the user is right-clicking a container so it's discoverable.
-    actions.push({ id: 'create_lib', label: 'Create new lib', disabled: false });
+    entries.push({ kind: 'action', id: 'create_node', label: 'Create new tree node', disabled: false });
+    entries.push({ kind: 'action', id: 'create_script', label: 'Create new script', disabled: false });
+    entries.push({ kind: 'action', id: 'create_note', label: 'Create new note', disabled: false });
+    entries.push({ kind: 'action', id: 'new_gui', label: 'Create new GUI', disabled: false });
+    entries.push({ kind: 'action', id: 'create_lib', label: 'Create new lib', disabled: false });
+    entries.push({ kind: 'separator', id: 'sep-2' });
   }
 
   // ── Common actions (all nodes) ──
 
-  actions.push(
-    { id: 'print', label: 'Print', disabled: false },
-    { id: 'copy_path', label: 'Copy Path', disabled: false },
-    { id: 'delete', label: 'Delete', disabled: false },
-  );
+  entries.push({ kind: 'action', id: 'print', label: 'Print', disabled: false });
+  entries.push({ kind: 'action', id: 'copy_path', label: 'Copy Path', disabled: false });
+  if (node.type !== 'root') {
+    entries.push({ kind: 'action', id: 'rename', label: `Rename ${renameLabel(node.type)}`, disabled: false });
+    entries.push({ kind: 'action', id: 'move', label: 'Move to...', disabled: false });
+    entries.push({ kind: 'action', id: 'duplicate', label: 'Duplicate to...', disabled: false });
+  }
+  entries.push({ kind: 'action', id: 'delete', label: 'Delete', disabled: false });
 
-  return actions;
+  // ── Refresh ──
+
+  entries.push({ kind: 'separator', id: 'sep-3' });
+  entries.push({ kind: 'action', id: 'refresh', label: 'Refresh tree', disabled: false });
+
+  return entries;
+}
+
+function renameLabel(type: string): string {
+  switch (type) {
+    case 'script': return 'script';
+    case 'markdown': return 'note';
+    case 'module': return 'module';
+    case 'folder': return 'folder';
+    case 'gui': return 'GUI';
+    case 'lib': return 'lib';
+    case 'namelist': return 'namelist';
+    default: return 'node';
+  }
 }

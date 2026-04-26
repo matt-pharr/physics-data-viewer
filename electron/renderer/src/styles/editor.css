@@ -278,7 +278,7 @@
 }
 
 .log-stderr {
-  color: #ff9d88;
+  color: var(--error);
 }
 
 .log-result {
@@ -306,5 +306,5 @@
   align-self: flex-start;
   border: 1px solid var(--border-color);
   border-radius: 4px;
-  background-color: #111;
+  background-color: var(--bg-primary);
 }

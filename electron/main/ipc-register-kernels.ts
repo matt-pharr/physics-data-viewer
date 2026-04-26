@@ -22,8 +22,7 @@ import { IPC } from "./ipc";
 import { KernelManager, type KernelInfo } from "./kernel-manager";
 import { initializeKernelSession } from "./kernel-session";
 import type { ModuleManager } from "./module-manager";
-import { buildModulesSetupPayload } from "./module-runtime";
-import { PDVMessageType } from "./pdv-protocol";
+import { setupProjectModuleNamespaces } from "./module-runtime";
 import { copyFilesForLoad } from "./project-file-sync";
 import { ProjectManager } from "./project-manager";
 
@@ -100,24 +99,12 @@ export function registerKernelIpcHandlers(
   } = options;
 
   /**
-   * Send pdv.modules.setup to the kernel so lib file paths are added to
-   * sys.path and entry points are executed.
+   * Send `pdv.modules.setup` to the kernel so PDVLib parent dirs in the
+   * active project's modules are wired into `sys.path`. Reads the manifest
+   * at call time via {@link setupProjectModuleNamespaces}.
    */
-  async function setupModuleNamespaces(kernelId: string): Promise<void> {
-    const projectDir = getActiveProjectDir();
-    if (!projectDir) return;
-    let manifest: Awaited<ReturnType<typeof ProjectManager.readManifest>>;
-    try {
-      manifest = await ProjectManager.readManifest(projectDir);
-    } catch {
-      return;
-    }
-    if (!manifest.modules || manifest.modules.length === 0) return;
-    const workingDir = kernelWorkingDirs.get(kernelId);
-    const payload = await buildModulesSetupPayload(moduleManager, manifest.modules, workingDir, projectDir);
-    if (payload.modules.length > 0) {
-      await commRouter.request(PDVMessageType.MODULES_SETUP, payload);
-    }
+  async function setupModuleNamespaces(_kernelId: string): Promise<void> {
+    await setupProjectModuleNamespaces(commRouter, moduleManager, getActiveProjectDir());
   }
 
   // Serialize kernel start/restart so concurrent calls cannot race on
@@ -160,7 +147,7 @@ export function registerKernelIpcHandlers(
       const installStatus = await EnvironmentDetector.checkPDVInstalled(pythonPath);
       if (!installStatus.installed) {
         throw new Error(
-          `Selected Python runtime is missing pdv_kernel. Install it with: cd pdv-python && ${pythonPath} -m pip install -e ".[dev]"`
+          `Selected Python runtime is missing pdv. Install it with: cd pdv-python && ${pythonPath} -m pip install -e ".[dev]"`
         );
       }
     } else if (requestedLanguage === "julia") {
@@ -220,6 +207,7 @@ export function registerKernelIpcHandlers(
     startMutex = new Promise<void>((r) => { release = r; });
     try {
       await cleanupKernelWorkingDir(projectManager, kernelManager, kernelId, kernelWorkingDirs, crashHandlers);
+      projectManager.clearCachedKernelResults();
       await kernelManager.stop(kernelId);
       if (getActiveKernelId() === kernelId) {
         setActiveKernelId(null);
@@ -337,7 +325,7 @@ export function registerKernelIpcHandlers(
           return {
             valid: false,
             error:
-              'Missing pdv_kernel. Install it with: cd pdv-python && <python> -m pip install -e ".[dev]"',
+              'Missing pdv. Install it with: cd pdv-python && <python> -m pip install -e ".[dev]"',
           };
         }
       } else if (language === "julia") {

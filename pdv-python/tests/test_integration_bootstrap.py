@@ -5,8 +5,8 @@ pdv-python/tests/test_integration_bootstrap.py — Integration-style bootstrap/r
 from unittest.mock import MagicMock
 from types import SimpleNamespace
 
-import pdv_kernel.comms as comms_mod
-from pdv_kernel import bootstrap
+import pdv.comms as comms_mod
+from pdv import bootstrap
 
 
 def _make_mock_comm():
@@ -32,13 +32,13 @@ class TestBootstrapReadyFlow:
             callback = mock_ipython.comm_manager.register_target.call_args[0][1]
             mock_comm = _make_mock_comm()
 
-            callback(mock_comm, {'content': {'data': {}}})
+            callback(mock_comm, {"content": {"data": {}}})
 
             assert len(mock_comm._sent) == 1
             ready = mock_comm._sent[0]
-            assert ready['type'] == 'pdv.ready'
-            assert ready['status'] == 'ok'
-            assert ready['in_reply_to'] is None
+            assert ready["type"] == "pdv.ready"
+            assert ready["status"] == "ok"
+            assert ready["in_reply_to"] is None
         finally:
             _reset_bootstrap_state()
 
@@ -49,12 +49,12 @@ class TestBootstrapReadyFlow:
             callback = mock_ipython.comm_manager.register_target.call_args[0][1]
             mock_comm = _make_mock_comm()
 
-            callback(mock_comm, {'content': {'data': {}}})
+            callback(mock_comm, {"content": {"data": {}}})
 
             ready = mock_comm._sent[0]
-            assert ready['pdv_version'] == comms_mod.PDV_PROTOCOL_VERSION
-            assert isinstance(ready['msg_id'], str) and ready['msg_id']
-            assert ready['payload'] == {}
+            assert ready["pdv_version"] == comms_mod.PDV_PROTOCOL_VERSION
+            assert isinstance(ready["msg_id"], str) and ready["msg_id"]
+            assert ready["payload"] == {}
         finally:
             _reset_bootstrap_state()
 
@@ -67,9 +67,9 @@ class TestBootstrapReadyFlow:
             assert mock_ipython.comm_manager.register_target.call_count == 1
             callback = mock_ipython.comm_manager.register_target.call_args[0][1]
             mock_comm = _make_mock_comm()
-            callback(mock_comm, {'content': {'data': {}}})
+            callback(mock_comm, {"content": {"data": {}}})
 
-            ready_messages = [m for m in mock_comm._sent if m['type'] == 'pdv.ready']
+            ready_messages = [m for m in mock_comm._sent if m["type"] == "pdv.ready"]
             assert len(ready_messages) == 1
         finally:
             _reset_bootstrap_state()

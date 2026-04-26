@@ -27,6 +27,8 @@ export interface AppearanceTabProps {
   editorFontSize: number;
   editorTabSize: number;
   editorWordWrap: boolean;
+  // Markdown state
+  readViewMaxWidth: number;
   // Theme handlers
   onFollowSystemThemeChange: (checked: boolean) => void;
   onThemeSelect: (name: string) => void;
@@ -43,6 +45,8 @@ export interface AppearanceTabProps {
   onFontSizeChange: (size: number) => void;
   onTabSizeChange: (size: number) => void;
   onWordWrapChange: (checked: boolean) => void;
+  // Markdown handlers
+  onReadViewMaxWidthChange: (width: number) => void;
 }
 
 export const AppearanceTab: React.FC<AppearanceTabProps> = ({
@@ -60,6 +64,7 @@ export const AppearanceTab: React.FC<AppearanceTabProps> = ({
   editorFontSize,
   editorTabSize,
   editorWordWrap,
+  readViewMaxWidth,
   onFollowSystemThemeChange,
   onThemeSelect,
   onDarkThemeSelect,
@@ -73,6 +78,7 @@ export const AppearanceTab: React.FC<AppearanceTabProps> = ({
   onFontSizeChange,
   onTabSizeChange,
   onWordWrapChange,
+  onReadViewMaxWidthChange,
 }) => {
   const [importWarning, setImportWarning] = useState('');
 
@@ -292,6 +298,25 @@ export const AppearanceTab: React.FC<AppearanceTabProps> = ({
         />
         <span>Enabled</span>
       </label>
+    </div>
+
+    {/* ── Markdown section ── */}
+    <div className="appearance-section-header appearance-section-header--spaced">Markdown</div>
+    <div className="appearance-editor-grid">
+      <label htmlFor="ae-read-max-width">Read-mode width</label>
+      <div className="appearance-editor-row">
+        <input
+          id="ae-read-max-width"
+          type="range"
+          min={600}
+          max={2000}
+          step={50}
+          value={readViewMaxWidth}
+          onChange={(e) => onReadViewMaxWidthChange(Number(e.target.value))}
+          className="appearance-editor-slider"
+        />
+        <span className="appearance-editor-unit">{readViewMaxWidth} px</span>
+      </div>
     </div>
   </div>
   );
