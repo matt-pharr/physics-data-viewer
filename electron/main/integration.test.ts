@@ -10,7 +10,7 @@ import * as os from "os";
 import * as path from "path";
 import { KernelManager } from "./kernel-manager";
 import { CommRouter } from "./comm-router";
-import { PDVMessage, PDVMessageType, getAppVersion, setAppVersion } from "./pdv-protocol";
+import { PDVMessage, PDVMessageType, generateNodeUuid, getAppVersion, setAppVersion } from "./pdv-protocol";
 
 const PYTHON_PACKAGE_DIR = path.resolve(__dirname, "../../pdv-python");
 const TEST_PYTHON_EXECUTABLE = process.env.PYTHON_PATH ?? "python3";
@@ -309,11 +309,11 @@ describe("@slow Cross-boundary integration (Python + Electron)", { timeout: 120_
   });
 
   it("send pdv.script.register -> script node appears and tree.changed is pushed", async () => {
-    const scriptsDir = await fs.mkdtemp(path.join(os.tmpdir(), "pdv-int-script-"));
-    tempDirs.push(scriptsDir);
-    const scriptPath = path.join(scriptsDir, "fit_model.py");
+    const nodeUuid = generateNodeUuid();
+    const scriptDir = path.join(initialWorkingDir, "tree", nodeUuid);
+    await fs.mkdir(scriptDir, { recursive: true });
     await fs.writeFile(
-      scriptPath,
+      path.join(scriptDir, "fit_model.py"),
       "def run(pdv_tree: dict, x: int = 1):\n    return {'x2': x * 2}\n",
       "utf8"
     );
@@ -322,7 +322,8 @@ describe("@slow Cross-boundary integration (Python + Electron)", { timeout: 120_
     const response = await router.request(PDVMessageType.SCRIPT_REGISTER, {
       parent_path: "scripts.analysis",
       name: "fit_model",
-      relative_path: scriptPath,
+      uuid: nodeUuid,
+      filename: "fit_model.py",
       language: "python",
     });
     expect(response.status).toBe("ok");
@@ -345,12 +346,13 @@ describe("@slow Cross-boundary integration (Python + Electron)", { timeout: 120_
     expect(scriptNode?.type).toBe("script");
   });
 
-  it("pdv.script.params returns params on demand for relative-path scripts", async () => {
-    // Write a script with parameters into the working directory
-    const scriptRelDir = path.join(initialWorkingDir, "scripts");
-    await fs.mkdir(scriptRelDir, { recursive: true });
+  const solveUuid = generateNodeUuid();
+
+  it("pdv.script.params returns params on demand for UUID-based scripts", async () => {
+    const solveDir = path.join(initialWorkingDir, "tree", solveUuid);
+    await fs.mkdir(solveDir, { recursive: true });
     await fs.writeFile(
-      path.join(scriptRelDir, "solve.py"),
+      path.join(solveDir, "solve.py"),
       [
         "def run(pdv_tree: dict, n: int = 3, dt: float = 0.01, method: str = 'rk4'):",
         "    return {'result': n}",
@@ -359,12 +361,12 @@ describe("@slow Cross-boundary integration (Python + Electron)", { timeout: 120_
       "utf8"
     );
 
-    // Register the script with a relative path (relative to working_dir)
     const changedPromise = waitForPush(router, PDVMessageType.TREE_CHANGED);
     const response = await router.request(PDVMessageType.SCRIPT_REGISTER, {
       parent_path: "scripts",
       name: "solve",
-      relative_path: "scripts/solve.py",
+      uuid: solveUuid,
+      filename: "solve.py",
       language: "python",
     });
     expect(response.status).toBe("ok");
@@ -390,7 +392,7 @@ describe("@slow Cross-boundary integration (Python + Electron)", { timeout: 120_
 
   it("pdv.script.params reflects file edits without re-registering", async () => {
     // The script from the previous test already exists — edit it to add a param
-    const scriptPath = path.join(initialWorkingDir, "scripts", "solve.py");
+    const scriptPath = path.join(initialWorkingDir, "tree", solveUuid, "solve.py");
     await fs.writeFile(
       scriptPath,
       [

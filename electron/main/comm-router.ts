@@ -284,6 +284,7 @@ export class CommRouter {
     return new Promise<PDVMessage>((resolve, reject) => {
       const createTimer = (): ReturnType<typeof setTimeout> =>
         setTimeout(() => {
+          console.error(`[CommRouter] TIMEOUT type=${type} msg_id=${msgId} after ${timeoutMs}ms (pending: ${this.pending.size})`);
           if (keepAliveHandler) this.offPush(keepAlivePushType!, keepAliveHandler);
           this.pending.delete(msgId);
           reject(new PDVCommTimeoutError(`PDV request timed out: ${type}`, type));

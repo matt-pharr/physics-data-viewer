@@ -308,6 +308,7 @@ function setup() {
     }),
     createWorkingDir: vi.fn(async () => "/tmp/pdv-test"),
     deleteWorkingDir: vi.fn(async () => undefined),
+    clearCachedKernelResults: vi.fn(),
   } as unknown as ProjectManager;
 
   const configState: PDVConfig = {
@@ -495,13 +496,16 @@ describe("Step 5 IPC handlers", () => {
   });
 
   it("script:edit spawns the configured external editor process", async () => {
-    const { configStore } = setup();
+    const { configStore, commRouter } = setup();
     (configStore.getAll as unknown as ReturnType<typeof vi.fn>).mockReturnValue({
       showPrivateVariables: false,
       showModuleVariables: false,
       showCallableVariables: false,
       editorCommand: "code",
     });
+    (commRouter.request as unknown as ReturnType<typeof vi.fn>).mockResolvedValue(
+      { payload: { path: "/tmp/script.py", file_path: "/tmp/script.py" } }
+    );
 
     const edit = getHandler(IPC.script.edit);
     await edit({}, "kernel-1", "/tmp/script.py");
@@ -518,13 +522,16 @@ describe("Step 5 IPC handlers", () => {
 
   if (process.platform === "darwin") {
     it("script:edit launches terminal editors through Terminal.app on macOS", async () => {
-      const { configStore } = setup();
+      const { configStore, commRouter } = setup();
       (configStore.getAll as unknown as ReturnType<typeof vi.fn>).mockReturnValue({
         showPrivateVariables: false,
         showModuleVariables: false,
         showCallableVariables: false,
         pythonEditorCmd: "nvim {}",
       });
+      (commRouter.request as unknown as ReturnType<typeof vi.fn>).mockResolvedValue(
+        { payload: { path: "/tmp/script.py", file_path: "/tmp/script.py" } }
+      );
 
       const edit = getHandler(IPC.script.edit);
       await edit({}, "kernel-1", "/tmp/script.py");
@@ -609,7 +616,8 @@ describe("Step 5 IPC handlers", () => {
     const { commRouter, webContentsSend } = setup();
     registerCommPushForwarding(
       { webContents: { send: webContentsSend } } as unknown as BrowserWindow,
-      commRouter
+      commRouter,
+      { cacheKernelSaveResults: vi.fn() } as unknown as ProjectManager,
     );
 
     const onPushCalls = (commRouter.onPush as unknown as ReturnType<typeof vi.fn>)
@@ -841,7 +849,8 @@ describe("Step 5 IPC handlers", () => {
       expect.objectContaining({
         parent_path: "scripts",
         name: "analysis",
-        relative_path: expect.stringMatching(/analysis\.py$/),
+        uuid: expect.stringMatching(/^[0-9a-f]{12}$/),
+        filename: "analysis.py",
         language: "python",
       })
     );
@@ -877,7 +886,8 @@ describe("Step 5 IPC handlers", () => {
         name: "hello",
         module_id: "toy",
         source_rel_path: "scripts/hello.py",
-        relative_path: expect.stringMatching(/toy\/scripts\/hello\.py$/),
+        uuid: expect.stringMatching(/^[0-9a-f]{12}$/),
+        filename: "hello.py",
       }),
     );
   });
@@ -903,7 +913,7 @@ describe("Step 5 IPC handlers", () => {
     };
 
     expect(result.success).toBe(true);
-    expect(result.libPath).toMatch(/toy\/lib\/helpers\.py$/);
+    expect(result.libPath).toMatch(/helpers\.py$/);
     expect(result.treePath).toBe("toy.lib.helpers");
 
     const fileRegisterCalls = (commRouter.request as unknown as ReturnType<typeof vi.fn>).mock.calls
@@ -914,6 +924,7 @@ describe("Step 5 IPC handlers", () => {
       expect.objectContaining({
         tree_path: "toy.lib",
         filename: "helpers.py",
+        uuid: expect.stringMatching(/^[0-9a-f]{12}$/),
         node_type: "lib",
         module_id: "toy",
         source_rel_path: "lib/helpers.py",
@@ -952,7 +963,8 @@ describe("Step 5 IPC handlers", () => {
       expect.objectContaining({
         parent_path: "notes",
         name: "derivation",
-        relative_path: expect.stringMatching(/derivation\.md$/),
+        uuid: expect.stringMatching(/^[0-9a-f]{12}$/),
+        filename: "derivation.md",
       })
     );
     expect(result.success).toBe(true);
@@ -1331,12 +1343,11 @@ describe("Step 5 IPC handlers", () => {
         module_index: expect.arrayContaining([
           expect.objectContaining({
             id: "scripts.run",
-            // Option A: module-owned files live under
-            // <workdir>/tree/<alias>/<src_rel_path> so the stored
-            // relative_path gains the canonical ``tree/`` prefix.
+            uuid: expect.stringMatching(/^[0-9a-f]{12}$/),
             storage: expect.objectContaining({
               backend: "local_file",
-              relative_path: path.join("tree", "demo-module", "scripts/run.py"),
+              uuid: expect.stringMatching(/^[0-9a-f]{12}$/),
+              filename: "run.py",
             }),
           }),
         ]),
@@ -1375,19 +1386,8 @@ describe("Step 5 IPC handlers", () => {
 
     expect(result.success).toBe(true);
     expect(result.alias).toBe("toy");
-    // Working-dir scaffolding created for scripts/lib/plots.
-    expect(mocks.fsMkdir).toHaveBeenCalledWith(
-      expect.stringMatching(/toy\/scripts$/),
-      { recursive: true },
-    );
-    expect(mocks.fsMkdir).toHaveBeenCalledWith(
-      expect.stringMatching(/toy\/lib$/),
-      { recursive: true },
-    );
-    expect(mocks.fsMkdir).toHaveBeenCalledWith(
-      expect.stringMatching(/toy\/plots$/),
-      { recursive: true },
-    );
+    // No alias-based scaffolding — UUID dirs are created when individual
+    // nodes (scripts, libs, etc.) are added via tree:create* handlers.
     expect(commRouter.request).toHaveBeenCalledWith(
       PDVMessageType.MODULE_CREATE_EMPTY,
       expect.objectContaining({

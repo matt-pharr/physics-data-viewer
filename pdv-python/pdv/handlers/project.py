@@ -133,6 +133,59 @@ def _collect_nodes(
     return nodes
 
 
+def _purge_orphaned_tree_files(save_dir: str, nodes: list[dict]) -> None:
+    """Remove ``<save_dir>/tree/<uuid>/`` directories not referenced by *nodes*.
+
+    Data nodes (ndarray, DataFrame, custom-serialized objects, etc.) receive a
+    fresh UUID on every save because the value itself has no stable identity.
+    Without cleanup, each save leaves the previous UUID directory behind as an
+    orphan.  This function removes those orphans after ``tree-index.json`` has
+    been written so the save directory doesn't grow unboundedly.
+
+    File-backed PDV nodes (scripts, notes, libs, etc.) reuse their UUID across
+    saves and will always appear in *nodes*, so they are never purged.
+    """
+    import logging  # noqa: PLC0415
+    import os  # noqa: PLC0415
+    import shutil  # noqa: PLC0415
+
+    from pdv.environment import _NODE_UUID_RE  # noqa: PLC0415
+
+    log = logging.getLogger("pdv")
+
+    tree_dir = os.path.join(save_dir, "tree")
+    if not os.path.isdir(tree_dir):
+        return
+
+    referenced_uuids: set[str] = set()
+    for node in nodes:
+        node_uuid = node.get("uuid", "")
+        if node_uuid:
+            referenced_uuids.add(node_uuid)
+        storage = node.get("storage", {})
+        storage_uuid = storage.get("uuid", "")
+        if storage_uuid:
+            referenced_uuids.add(storage_uuid)
+
+    try:
+        entries = os.listdir(tree_dir)
+    except OSError:
+        return
+
+    for entry in entries:
+        if entry in referenced_uuids:
+            continue
+        if not _NODE_UUID_RE.match(entry):
+            continue
+        orphan_path = os.path.join(tree_dir, entry)
+        if not os.path.isdir(orphan_path):
+            continue
+        try:
+            shutil.rmtree(orphan_path)
+        except OSError as exc:
+            log.debug("Failed to remove orphaned tree dir %s: %s", orphan_path, exc)
+
+
 def _collect_module_owned_files(
     tree: "Any",
     working_dir: str,
@@ -271,11 +324,8 @@ def _collect_module_manifests(tree: "Any") -> list:
     ) -> dict:
         """Build a single module-rooted node descriptor.
 
-        For file-backed children we re-use the file's ``source_rel_path``
-        (set by the bind path / ``tree:create*`` handlers) as the
-        descriptor's ``storage.relative_path``, so on reload the
-        bindImportedModule v4 remap loop can re-prefix it with the new
-        alias.
+        For file-backed children we store ``uuid`` and ``filename`` in
+        the descriptor so the reload path can reconstruct the node.
         """
         kind = detect_kind(value)
         preview = node_preview(value, kind)
@@ -313,12 +363,6 @@ def _collect_module_manifests(tree: "Any") -> list:
             return descriptor
 
         if isinstance(value, PDVFile):
-            # Module-root-relative path is authoritative here — it's the
-            # one we care about on reload. Fall back to the stored
-            # relative_path when ``source_rel_path`` hasn't been set
-            # (shouldn't happen for module-owned files under workflow
-            # A/B, but keep the flow robust).
-            rel_storage = getattr(value, "source_rel_path", None) or value.relative_path
             format_map = {
                 "script": "py_script",
                 "lib": "py_lib",
@@ -328,9 +372,11 @@ def _collect_module_manifests(tree: "Any") -> list:
             }
             storage = {
                 "backend": "local_file",
-                "relative_path": rel_storage,
+                "uuid": value.uuid,
+                "filename": value.filename,
                 "format": format_map.get(kind, "file"),
             }
+            descriptor["uuid"] = value.uuid
             meta: dict = {"preview": preview}
             # Carry the authoring-time ``source_rel_path`` on the
             # descriptor too (for symmetry with how the bind path
@@ -400,11 +446,98 @@ def _collect_module_manifests(tree: "Any") -> list:
                 "version": value.version,
                 "description": getattr(value, "description", ""),
                 "language": getattr(value, "language", "python"),
-                "dependencies": list(getattr(value, "_dependencies", []) or []),
+                "dependencies": list(value.dependencies),
                 "entries": entries,
             }
         )
     return results
+
+
+def _early_module_setup(
+    nodes: list[dict], save_dir: str, working_dir: str
+) -> None:
+    """Wire module libs into ``sys.path`` and import entry points early.
+
+    Called between Pass 1 (containers) and Pass 2 (leaves) of
+    ``load_tree_index`` during project load. Pass 2 hasn't run yet so
+    ``PDVLib`` objects don't exist in the tree — instead we scan the raw
+    node descriptor list for ``lib`` entries and compute their filesystem
+    paths from uuid + filename directly.
+
+    Entry points are read from ``<save_dir>/modules/<module_id>/pdv-module.json``.
+    Failures are logged but never abort the load — the worst case is the
+    same error the user would have seen before this early-setup path existed.
+    """
+    import importlib  # noqa: PLC0415
+    import json as _json  # noqa: PLC0415
+    import logging  # noqa: PLC0415
+    import os  # noqa: PLC0415
+    import sys  # noqa: PLC0415
+
+    # Collect module_ids from module-type nodes, and lib paths from lib-type
+    # nodes. A lib node's path prefix tells us which module it belongs to
+    # (e.g. "n_pendulum.lib.n_pendulum" → module alias "n_pendulum").
+    module_ids: dict[str, str] = {}  # alias → module_id
+    lib_dirs: set[str] = set()
+
+    for node in nodes:
+        node_type = node.get("type", "")
+        node_path = node.get("path", "")
+
+        if node_type == "module":
+            meta = node.get("metadata", {})
+            storage = node.get("storage", {})
+            # Pre-UUID projects stored module_id inside storage.value
+            # rather than metadata; fall back for backwards compat.
+            old_meta = storage.get("value", {})
+            module_id = meta.get(
+                "module_id", old_meta.get("module_id", "")
+            )
+            if module_id:
+                module_ids[node_path] = module_id
+
+        elif node_type == "lib":
+            node_uuid = node.get("uuid", node.get("storage", {}).get("uuid", ""))
+            filename = node.get("storage", {}).get("filename", "")
+            if node_uuid and filename and working_dir:
+                from pdv.environment import uuid_tree_path  # noqa: PLC0415
+
+                lib_file = uuid_tree_path(working_dir, node_uuid, filename)
+                parent_dir = os.path.dirname(lib_file)
+                if parent_dir:
+                    lib_dirs.add(parent_dir)
+
+    # Wire lib directories into sys.path.
+    for lib_dir in lib_dirs:
+        if lib_dir not in sys.path:
+            sys.path.insert(1, lib_dir)
+
+    # Import entry points for each module.
+    for alias, module_id in module_ids.items():
+        manifest_path = os.path.join(
+            save_dir, "modules", module_id, "pdv-module.json"
+        )
+        if not os.path.isfile(manifest_path):
+            continue
+        try:
+            with open(manifest_path, "r", encoding="utf-8") as fh:
+                manifest = _json.load(fh)
+        except Exception:  # noqa: BLE001
+            continue
+
+        entry_point = manifest.get("entry_point")
+        if not entry_point:
+            continue
+
+        log = logging.getLogger("pdv")
+        try:
+            importlib.import_module(entry_point)
+        except Exception as exc:  # noqa: BLE001
+            log.warning(
+                "Early module setup: failed to import entry point "
+                "'%s' for module '%s': %s",
+                entry_point, module_id, exc,
+            )
 
 
 def handle_project_load(msg: dict) -> None:
@@ -496,12 +629,18 @@ def handle_project_load(msg: dict) -> None:
                 },
             )
 
+    def _setup_modules_before_leaves() -> None:
+        """Import module entry points so custom serializers are registered
+        before Pass 2 deserializes data nodes."""
+        _early_module_setup(nodes, save_dir, working_dir)
+
     load_tree_index(
         tree,
         nodes,
         on_progress=_emit_load_progress,
         conflict_strategy="replace",
         working_dir=working_dir,
+        between_passes=_setup_modules_before_leaves,
     )
 
     os.chdir(os.path.expanduser("~"))
@@ -521,6 +660,96 @@ def handle_project_load(msg: dict) -> None:
         "pdv.project.loaded",
         {"node_count": node_count},
     )
+
+
+def serialize_tree_to_dir(
+    tree: "Any",
+    save_dir: str,
+    *,
+    on_progress: "Callable[[str, int, int], None] | None" = None,
+) -> dict:
+    """Serialize the in-memory tree to *save_dir* and return save metadata.
+
+    Writes data files and ``tree-index.json``, purges orphaned UUID
+    directories, and computes the tree checksum. This is the core
+    serialization logic shared by ``handle_project_save`` (comm path)
+    and ``PDVApp.save_project`` (direct Python call path).
+
+    Parameters
+    ----------
+    tree : PDVTree
+        Root tree to serialize.
+    save_dir : str
+        Absolute path to the project save directory.
+    on_progress : callable, optional
+        ``(phase, current, total)`` callback for UI progress reporting.
+
+    Returns
+    -------
+    dict
+        ``{"node_count", "checksum", "module_owned_files", "module_manifests"}``.
+
+    Raises
+    ------
+    Exception
+        Propagates serialization, I/O, and checksum errors to the caller.
+    """
+    import json  # noqa: PLC0415
+    import os  # noqa: PLC0415
+    import sys  # noqa: PLC0415
+    import time  # noqa: PLC0415
+
+    t0 = time.monotonic()
+
+    def _log(phase: str) -> None:
+        elapsed = time.monotonic() - t0
+        print(f"[project.save] {phase} ({elapsed:.3f}s)", file=sys.stderr, flush=True)
+
+    os.makedirs(os.path.join(save_dir, "tree"), exist_ok=True)
+
+    working_dir = tree._working_dir or save_dir
+    total = _count_nodes(tree)
+    _log(f"counted {total} nodes")
+
+    def _emit_progress(current: int) -> None:
+        if current % 5 == 0 or current == total:
+            if on_progress is not None:
+                on_progress("Serializing", current, total)
+
+    nodes = _collect_nodes(
+        tree,
+        save_dir,
+        working_dir=working_dir,
+        on_progress=_emit_progress,
+    )
+    _log(f"collected {len(nodes)} node descriptors")
+
+    index_data = json.dumps(nodes, indent=2, default=str)
+    index_path = os.path.join(save_dir, "tree-index.json")
+    tmp_path = index_path + ".tmp"
+    with open(tmp_path, "w", encoding="utf-8") as fh:
+        fh.write(index_data)
+    os.replace(tmp_path, index_path)
+    _log("wrote tree-index.json")
+
+    _purge_orphaned_tree_files(save_dir, nodes)
+    _log("purged orphans")
+
+    from pdv.checksum import tree_checksum  # noqa: PLC0415
+
+    checksum = tree_checksum(tree)
+    _log("computed checksum")
+
+    module_owned_files = _collect_module_owned_files(tree, working_dir)
+    module_manifests = _collect_module_manifests(tree)
+    _log("DONE")
+
+    return {
+        "node_count": len(nodes),
+        "checksum": checksum,
+        "module_owned_files": module_owned_files,
+        "module_manifests": module_manifests,
+    }
 
 
 def handle_project_save(msg: dict) -> None:
@@ -547,9 +776,6 @@ def handle_project_save(msg: dict) -> None:
     msg : dict
         Parsed PDV message envelope.
     """
-    import json
-    import os
-
     from pdv.comms import get_pdv_tree, send_error, send_message  # noqa: PLC0415
 
     msg_id = msg.get("msg_id")
@@ -565,8 +791,6 @@ def handle_project_save(msg: dict) -> None:
         )
         return
 
-    os.makedirs(os.path.join(save_dir, "tree"), exist_ok=True)
-
     tree = get_pdv_tree()
     if tree is None:
         send_error(
@@ -577,30 +801,19 @@ def handle_project_save(msg: dict) -> None:
         )
         return
 
-    working_dir = tree._working_dir or save_dir
-
-    total = _count_nodes(tree)
-
-    def _emit_save_progress(current: int) -> None:
-        if current % 5 == 0 or current == total:
-            send_message(
-                "pdv.progress",
-                {
-                    "operation": "save",
-                    "phase": "Serializing",
-                    "current": current,
-                    "total": total,
-                },
-            )
+    def _progress(phase: str, current: int, total: int) -> None:
+        send_message(
+            "pdv.progress",
+            {"operation": "save", "phase": phase, "current": current, "total": total},
+        )
 
     try:
-        nodes = _collect_nodes(
-            tree,
-            save_dir,
-            working_dir=working_dir,
-            on_progress=_emit_save_progress,
-        )
+        results = serialize_tree_to_dir(tree, save_dir, on_progress=_progress)
     except Exception as exc:  # noqa: BLE001
+        import sys  # noqa: PLC0415
+        import traceback  # noqa: PLC0415
+        print(f"[project.save] FAILED: {exc}", file=sys.stderr, flush=True)
+        traceback.print_exc(file=sys.stderr)
         send_error(
             "pdv.project.save.response",
             "project.serialization_error",
@@ -609,33 +822,9 @@ def handle_project_save(msg: dict) -> None:
         )
         return
 
-    index_data = json.dumps(nodes, indent=2, default=str)
-    index_path = os.path.join(save_dir, "tree-index.json")
-    tmp_path = index_path + ".tmp"
-    with open(tmp_path, "w", encoding="utf-8") as fh:
-        fh.write(index_data)
-    os.replace(tmp_path, index_path)
-
-    from pdv.checksum import tree_checksum  # noqa: PLC0415
-
-    checksum = tree_checksum(tree)
-
-    # Enumerate module-owned files so the main process can mirror their
-    # working-dir contents back into <saveDir>/modules/<id>/<source_rel_path>.
-    # See ARCHITECTURE.md §5.13 and the #140 workflow plan §3.
-    module_owned_files = _collect_module_owned_files(tree, working_dir)
-    # Collect per-module manifests for writing pdv-module.json +
-    # module-index.json into <saveDir>/modules/<id>/. See plan §7.
-    module_manifests = _collect_module_manifests(tree)
-
     send_message(
         "pdv.project.save.response",
-        {
-            "node_count": len(nodes),
-            "checksum": checksum,
-            "module_owned_files": module_owned_files,
-            "module_manifests": module_manifests,
-        },
+        results,
         in_reply_to=msg_id,
     )
 

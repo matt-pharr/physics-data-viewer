@@ -37,6 +37,8 @@ export const CSS_VAR_GROUPS: { label: string; vars: { key: string; label: string
       { key: 'warning',         label: 'Warning' },
       { key: 'warning-hover',   label: 'Warning Hover' },
       { key: 'success',         label: 'Success' },
+      { key: 'danger',          label: 'Danger' },
+      { key: 'text-on-danger',  label: 'Text on Danger' },
     ],
   },
 ];
@@ -68,6 +70,8 @@ export const BUILTIN_THEMES: BuiltinTheme[] = [
       'warning':      '#dcdcaa',
       'warning-hover':'#e4e4b4',
       'success':      '#4ec9b0',
+      'danger':       '#c42b1c',
+      'text-on-danger':'#ffffff',
     },
   },
   {
@@ -89,6 +93,8 @@ export const BUILTIN_THEMES: BuiltinTheme[] = [
       'warning':      '#bf8803',
       'warning-hover':'#a67702',
       'success':      '#16825d',
+      'danger':       '#c42b1c',
+      'text-on-danger':'#ffffff',
     },
   },
   {
@@ -110,6 +116,8 @@ export const BUILTIN_THEMES: BuiltinTheme[] = [
       'warning':      '#e6db74',
       'warning-hover':'#f0e68c',
       'success':      '#a6e22e',
+      'danger':       '#f92672',
+      'text-on-danger':'#272822',
     },
   },
   {
@@ -131,6 +139,8 @@ export const BUILTIN_THEMES: BuiltinTheme[] = [
       'warning':      '#996800',
       'warning-hover':'#7a5300',
       'success':      '#008e00',
+      'danger':       '#c42b1c',
+      'text-on-danger':'#ffffff',
     },
   },
   {
@@ -152,6 +162,8 @@ export const BUILTIN_THEMES: BuiltinTheme[] = [
       'warning':      '#ffd60a',
       'warning-hover':'#ffe54c',
       'success':      '#32d74b',
+      'danger':       '#c42b1c',
+      'text-on-danger':'#ffffff',
     },
   },
   {
@@ -173,6 +185,8 @@ export const BUILTIN_THEMES: BuiltinTheme[] = [
       'warning':      '#cca700',
       'warning-hover':'#d4af00',
       'success':      '#4ec9b0',
+      'danger':       '#c42b1c',
+      'text-on-danger':'#ffffff',
     },
   },
   {
@@ -194,6 +208,8 @@ export const BUILTIN_THEMES: BuiltinTheme[] = [
       'warning':      '#bf8803',
       'warning-hover':'#a67702',
       'success':      '#2ea043',
+      'danger':       '#c42b1c',
+      'text-on-danger':'#ffffff',
     },
   },
 ];

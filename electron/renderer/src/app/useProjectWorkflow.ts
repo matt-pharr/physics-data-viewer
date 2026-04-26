@@ -105,7 +105,7 @@ export function useProjectWorkflow(options: UseProjectWorkflowOptions) {
     }
     // If Save As is requested or no project is open yet, show the SaveAs dialog
     // instead of the native directory picker.
-    if (options?.saveAs || (!options?.directory && !currentProjectDir)) {
+    if (!options?.directory && (options?.saveAs || !currentProjectDir)) {
       setShowSaveAsDialog(true);
       // Returns false — not an error. The dialog will invoke handleSaveProject
       // again with { directory, projectName } once the user confirms.
@@ -226,11 +226,11 @@ export function useProjectWorkflow(options: UseProjectWorkflowOptions) {
       // project:open and project:openRecent are handled in App's menu listener
       // so they can route through openProjectFromWelcome when the kernel isn't ready.
       if (payload.action === 'project:save') {
-        void handleSaveProject();
+        void handleSaveProject(payload.path ? { directory: payload.path } : undefined);
         return;
       }
       if (payload.action === 'project:saveAs') {
-        void handleSaveProject({ saveAs: true });
+        void handleSaveProject({ saveAs: true, directory: payload.path });
       }
     });
     return () => unsubscribe();

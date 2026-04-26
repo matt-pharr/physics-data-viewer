@@ -16,34 +16,32 @@ from pdv.tree import PDVNamelist
 
 class TestPDVNamelistClass:
     def test_construction_defaults(self):
-        node = PDVNamelist("path/to/input.nml")
-        assert node.relative_path == "path/to/input.nml"
+        node = PDVNamelist("nml_uuid_0001", "input.nml")
+        assert node.uuid == "nml_uuid_0001"
+        assert node.filename == "input.nml"
         assert node.format == "auto"
         assert node.module_id is None
 
     def test_construction_explicit(self):
-        node = PDVNamelist("input.nml", format="fortran", module_id="my_mod")
+        node = PDVNamelist("nml_uuid_0002", "input.nml", format="fortran", module_id="my_mod")
         assert node.format == "fortran"
         assert node.module_id == "my_mod"
 
     def test_preview(self):
-        node = PDVNamelist("input.nml", format="fortran")
+        node = PDVNamelist("nml_uuid_0003", "input.nml", format="fortran")
         assert node.preview() == "Namelist (fortran)"
 
     def test_repr(self):
-        node = PDVNamelist("input.nml", format="toml", module_id="m")
+        node = PDVNamelist("nml_uuid_0004", "input.nml", format="toml", module_id="m")
         r = repr(node)
         assert "PDVNamelist" in r
         assert "toml" in r
         assert "module_id='m'" in r
 
-    def test_resolve_path_absolute(self):
-        node = PDVNamelist("/abs/path/input.nml")
-        assert node.resolve_path("/working") == "/abs/path/input.nml"
-
-    def test_resolve_path_relative(self):
-        node = PDVNamelist("sub/input.nml")
-        assert node.resolve_path("/working") == "/working/sub/input.nml"
+    def test_resolve_path(self):
+        node = PDVNamelist("nml_uuid_0005", "input.nml")
+        import os
+        assert node.resolve_path("/working") == os.path.join("/working", "tree", "nml_uuid_0005", "input.nml")
 
 
 # ---------------------------------------------------------------------------
@@ -247,7 +245,7 @@ class TestSerializationSupport:
     def test_detect_kind_namelist(self):
         from pdv.serialization import detect_kind, KIND_NAMELIST
 
-        node = PDVNamelist("test.nml", format="fortran")
+        node = PDVNamelist("nml_uuid_s001", "test.nml", format="fortran")
         assert detect_kind(node) == KIND_NAMELIST
 
     def test_serialize_namelist_node(self, tmp_path):
@@ -257,18 +255,21 @@ class TestSerializationSupport:
             FORMAT_NAMELIST,
         )
 
-        # Create a source file
-        source = tmp_path / "input.nml"
+        node_uuid = "nml_uuid_s002"
+        source_dir = tmp_path / "tree" / node_uuid
+        source_dir.mkdir(parents=True)
+        source = source_dir / "input.nml"
         source.write_text("&test\n  x = 1\n/\n")
 
-        node = PDVNamelist(str(source), format="fortran")
+        node = PDVNamelist(node_uuid, "input.nml", format="fortran")
         working_dir = str(tmp_path)
         descriptor = serialize_node("mod.solver_nml", node, working_dir)
 
         assert descriptor["type"] == KIND_NAMELIST
         assert descriptor["storage"]["format"] == FORMAT_NAMELIST
         assert descriptor["storage"]["backend"] == "local_file"
-        assert "relative_path" in descriptor["storage"]
+        assert "uuid" in descriptor["storage"]
+        assert "filename" in descriptor["storage"]
         meta = descriptor["metadata"]
         assert meta["language"] == "namelist"
         assert meta["namelist_format"] == "fortran"

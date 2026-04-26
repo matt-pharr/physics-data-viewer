@@ -23,9 +23,16 @@ ARCHITECTURE.md §6.1 (working directory), §6.2 (save directory)
 
 from __future__ import annotations
 
+import logging
 import os
+import re
+import shutil
+import uuid as _uuid_mod
+from pathlib import Path
 
 from pdv.errors import PDVPathError
+
+_NODE_UUID_RE = re.compile(r"^[0-9a-f]{12}$")
 
 
 def make_working_dir(base_tmp_dir: str) -> str:
@@ -146,35 +153,6 @@ def path_is_safe(candidate: str, root: str) -> bool:
         return False
 
 
-def working_dir_tree_path(working_dir: str, tree_path: str, extension: str) -> str:
-    """Compute the absolute filesystem path for a tree node's data file.
-
-    Maps a dot-separated tree path to a filesystem path under the working
-    directory's ``tree/`` subdirectory.
-
-    Parameters
-    ----------
-    working_dir : str
-        Absolute path to the working directory.
-    tree_path : str
-        Dot-separated tree path (e.g. ``'data.waveforms.ch1'``).
-    extension : str
-        File extension including the dot (e.g. ``'.npy'``).
-
-    Returns
-    -------
-    str
-        Absolute path for the data file (parent directories are not created
-        by this function).
-
-    Example
-    -------
-    >>> working_dir_tree_path('/tmp/pdv-abc', 'data.waveforms.ch1', '.npy')
-    '/tmp/pdv-abc/tree/data/waveforms/ch1.npy'
-    """
-    parts = tree_path.split(".")
-    return os.path.join(working_dir, "tree", *parts[:-1], parts[-1] + extension)
-
 
 def ensure_parent(path: str) -> str:
     """Create parent directories of ``path`` if they do not exist.
@@ -191,3 +169,114 @@ def ensure_parent(path: str) -> str:
     """
     os.makedirs(os.path.dirname(path), exist_ok=True)
     return path
+
+
+# ---------------------------------------------------------------------------
+# UUID-based file storage helpers
+# ---------------------------------------------------------------------------
+
+
+def generate_node_uuid() -> str:
+    """Generate a 12-hex-character UUID for a tree node.
+
+    Returns
+    -------
+    str
+        A 12-character lowercase hex string derived from UUID4.
+    """
+    return _uuid_mod.uuid4().hex[:12]
+
+
+def uuid_tree_path(working_dir: str, node_uuid: str, filename: str) -> str:
+    """Compute the absolute filesystem path for a UUID-based tree node file.
+
+    Parameters
+    ----------
+    working_dir : str
+        Absolute path to the working directory (or save directory).
+    node_uuid : str
+        The node's 12-hex-char UUID.
+    filename : str
+        The original filename including extension (e.g. ``'fit.py'``).
+
+    Returns
+    -------
+    str
+        Absolute path: ``<working_dir>/tree/<node_uuid>/<filename>``.
+
+    Example
+    -------
+    >>> uuid_tree_path('/tmp/pdv-abc', 'a1b2c3d4e5f6', 'ch1.npy')
+    '/tmp/pdv-abc/tree/a1b2c3d4e5f6/ch1.npy'
+
+    Raises
+    ------
+    ValueError
+        If *node_uuid* or *filename* contain path traversal characters.
+    """
+    if ".." in node_uuid or "/" in node_uuid or "\\" in node_uuid:
+        raise ValueError(f"Unsafe node UUID: {node_uuid!r}")
+    if ".." in filename or "/" in filename or "\\" in filename:
+        raise ValueError(f"Unsafe filename: {filename!r}")
+    return os.path.join(working_dir, "tree", node_uuid, filename)
+
+
+def _file_xxh3(path: str) -> bytes:
+    """Return the xxh3_128 digest of a file's contents."""
+    import xxhash  # noqa: PLC0415
+
+    h = xxhash.xxh3_128()
+    with open(path, "rb") as f:
+        for chunk in iter(lambda: f.read(1 << 16), b""):
+            h.update(chunk)
+    return h.digest()
+
+
+def smart_copy(src: str, dst: str) -> None:
+    """Copy a file using the fastest available method.
+
+    If *dst* already exists and is byte-identical to *src* (verified via
+    xxh3_128), the copy is skipped. If *dst* exists but differs, it is
+    replaced.
+
+    Attempts copy-on-write cloning first, falling back to a regular copy.
+
+    1. Python 3.14+ ``pathlib.Path.copy()`` (OS-level CoW on APFS, btrfs,
+       XFS, ZFS, etc.).
+    2. ``reflink_copy.reflink_or_copy()`` (optional dependency, Rust-backed).
+    3. ``shutil.copy2()`` (universal fallback, preserves metadata).
+
+    Parent directories of *dst* are created automatically.
+
+    Parameters
+    ----------
+    src : str
+        Absolute path to the source file.
+    dst : str
+        Absolute path to the destination file.
+    """
+    ensure_parent(dst)
+
+    if os.path.exists(dst):
+        if os.path.getsize(src) == os.path.getsize(dst) and _file_xxh3(src) == _file_xxh3(dst):
+            return
+        os.remove(dst)
+
+    if hasattr(Path, "copy"):
+        Path(src).copy(Path(dst))
+        return
+
+    try:
+        from reflink_copy import reflink_or_copy  # noqa: PLC0415
+
+        reflink_or_copy(src, dst)
+        return
+    except ImportError:
+        pass
+    except OSError as exc:
+        logging.getLogger("pdv").warning(
+            "reflink_or_copy failed for %s -> %s: %s; falling back to shutil.copy2",
+            src, dst, exc,
+        )
+
+    shutil.copy2(src, dst)

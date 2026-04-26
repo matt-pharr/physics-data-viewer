@@ -1,5 +1,5 @@
 # PDV Architecture Document
-**Version**: 0.0.11
+**Version**: 0.0.12
 **Date**: 2026-04-07
 **Status**: Authoritative design specification. All new code must conform to this document. Deviations require updating this document first.
 
@@ -117,7 +117,7 @@ Every PDV message — whether sent by the app or by the kernel — has the follo
 
 ```json
 {
-  "pdv_version": "0.0.11",
+  "pdv_version": "0.0.12",
   "msg_id": "<uuid-v4>",
   "in_reply_to": "<uuid-v4-or-null>",
   "type": "<message-type-string>",
@@ -128,7 +128,7 @@ Every PDV message — whether sent by the app or by the kernel — has the follo
 
 | Field | Type | Description |
 |---|---|---|
-| `pdv_version` | string | App/package version (e.g. `"0.0.11"`). Both the Electron app and `pdv-python` use their installed version as this value. The app rejects messages with an incompatible major version. |
+| `pdv_version` | string | App/package version (e.g. `"0.0.12"`). Both the Electron app and `pdv-python` use their installed version as this value. The app rejects messages with an incompatible major version. |
 | `msg_id` | string | UUID v4. Unique identifier for this message. |
 | `in_reply_to` | string \| null | The `msg_id` of the request this is responding to. `null` for unsolicited push messages. |
 | `type` | string | Dot-namespaced message type (see Section 3.4). |
@@ -606,14 +606,20 @@ A parameter is `required` if it has no default value. `type` is the string repre
 
 ### 5.8 PDVFile and PDVNote Classes
 
-`PDVFile` is a base class for tree nodes backed by on-disk files that are not data or scripts. `PDVNote` is its subclass for markdown notes.
+`PDVFile` is a base class for tree nodes backed by on-disk files that are not data or scripts. Subclasses include `PDVNote`, `PDVGui`, `PDVNamelist`, and `PDVLib`.
+
+**PDVFile** attributes (inherited by all subclasses):
+- `uuid`: 12-hex-character UUID identifying this node's storage directory (see §6.3)
+- `filename`: original filename including extension (e.g. `"fit.py"`, `"mesh.h5"`)
+- `source_rel_path`: optional path relative to the owning module's root (see §5.13); `None` for non-module files
+- `resolve_path(working_dir?)`: returns the absolute file path `<working_dir>/tree/<uuid>/<filename>`
 
 **PDVNote** attributes:
-- `relative_path`: path of the `.md` file relative to the working directory
+- `uuid`, `filename` (inherited from `PDVFile`)
 - `title`: optional display title
 - `preview()`: returns the title, or the first non-empty line of the file, or `"Markdown note"` as fallback
 
-Notes are created via `pdv.note.register` (app → kernel) which creates a `PDVNote` instance and attaches it to the tree. The `.md` file itself lives in `<workingDir>/tree/<path>/` and is read/written directly by the main process via `note:read` / `note:save` IPC channels — no kernel round-trip is needed for content editing. On project save, the kernel serializes the note entry to `tree-index.json` and the main process copies the `.md` file into the save directory. On project load, the `.md` file is copied back from the save directory to the working directory and re-registered as a `PDVNote` in the tree.
+Notes are created via `pdv.note.register` (app → kernel) which creates a `PDVNote` instance and attaches it to the tree. The `.md` file itself lives in `<workingDir>/tree/<uuid>/<filename>` and is read/written directly by the main process via `note:read` / `note:save` IPC channels — no kernel round-trip is needed for content editing. On project save, the kernel serializes the note entry to `tree-index.json` and the main process copies the `.md` file into the save directory. On project load, the `.md` file is copied back from the save directory to the working directory and re-registered as a `PDVNote` in the tree.
 
 ### 5.9 PDVModule Class
 
@@ -642,7 +648,7 @@ Projects track in-session modules via an `origin: "in_session"` field on the `Pr
 `PDVGui` is a subclass of `PDVFile`. It represents a GUI definition file (`.gui.json`) that describes a module's user interface — inputs, actions, and layout.
 
 Attributes:
-- `relative_path` (inherited from `PDVFile`): path to the `.gui.json` file relative to the working directory
+- `uuid`, `filename` (inherited from `PDVFile`): UUID-based storage identity (§6.3)
 - `module_id` (read-only): the owning module's ID, or `None` for standalone project GUIs
 
 `preview()` returns `"GUI"`.
@@ -654,7 +660,7 @@ Created by the `pdv.gui.register` handler. For module GUIs, the `.gui.json` file
 `PDVNamelist` is a subclass of `PDVFile`. It represents a simulation namelist file that can be parsed and edited through the namelist editor widget.
 
 Attributes:
-- `relative_path` (inherited from `PDVFile`): path to the namelist file relative to the working directory
+- `uuid`, `filename` (inherited from `PDVFile`): UUID-based storage identity (§6.3)
 - `format` (read-only): one of `"fortran"`, `"toml"`, or `"auto"` (auto-detected from file content)
 - `module_id` (read-only): the owning module's ID, or `None` for standalone namelists
 
@@ -667,18 +673,18 @@ The namelist file is parsed and written by dedicated comm handlers (`pdv.namelis
 `PDVLib` is a subclass of `PDVFile`. It represents a Python library file provided by a module's `lib/` directory that is importable by scripts and entry points.
 
 Attributes:
-- `relative_path` (inherited from `PDVFile`): path to the `.py` file relative to the working directory
+- `uuid`, `filename` (inherited from `PDVFile`): UUID-based storage identity (§6.3)
 - `source_rel_path` (inherited from `PDVFile`): path relative to the owning module's root, e.g. `"lib/helpers.py"`. Set for module-owned libs; `None` for project-level libs. Used by §5.13's save-time sync.
 - `module_id` (read-only): the owning module's ID, or `None`
 
 `preview()` returns `"Library (<filename>)"`.
 
 **Module lib/ convention**: Module developers place importable `.py` files in `<module-root>/lib/`. When a v4 module is imported into a project, the main process:
-1. Reads `module-index.json` and copies each `local_file`-backed entry (including libs under `lib/`) into the working directory under `<alias>/<relative_path>`.
-2. Sends `pdv.module.register` with the remapped `module_index` so the kernel reconstructs the subtree and creates `PDVLib` nodes via `load_tree_index`.
-3. Sends `pdv.modules.setup` with `lib_dir: "<workdir>/<alias>/lib"`. The kernel adds that directory to `sys.path` so scripts can `import helpers` etc.
+1. Reads `module-index.json`, assigns each file-backed entry a fresh UUID, and copies each file into the working directory under `tree/<uuid>/<filename>`.
+2. Sends `pdv.module.register` with the remapped `module_index` (carrying UUIDs) so the kernel reconstructs the subtree and creates `PDVLib` nodes via `load_tree_index`.
+3. Sends `pdv.modules.setup`. The kernel walks each `PDVModule` subtree, collects the parent directory of every `PDVLib` descendant (`<workdir>/tree/<uuid>/`), and adds each to `sys.path` so scripts can `import helpers` etc.
 
-In-session modules (workflow B) follow the same convention: `tree:createLib` writes new `.py` files under `<workdir>/<alias>/lib/`, sets `source_rel_path = "lib/<filename>"`, and §7's `pdv-module.json` writer stamps `lib_dir: "lib"` so the next project load's `setupModuleNamespaces` injects the path automatically.
+In-session modules (workflow B) follow the same convention: `tree:createLib` writes new `.py` files under `<workdir>/tree/<uuid>/<filename>`, sets `source_rel_path = "lib/<filename>"`, and §7's `pdv-module.json` writer stamps `lib_dir: "lib"` so the next project load's `setupModuleNamespaces` injects the path automatically.
 
 **Live lib reload**: Before every `script:run` on a module-owned script, the main process fires a `pdv.module.reload_libs` preflight (§3.4). The kernel walks `sys.modules`, finds modules whose `__file__` sits under `<workdir>/<alias>/lib/`, and `importlib.reload()`s them so edits take effect without restarting the kernel. Reload failures are captured per-module and never block the script run itself — broken libs surface at import time inside the user's own traceback. The handler uses `os.path.realpath` on both sides of the prefix comparison so macOS's `/var` → `/private/var` symlink doesn't defeat the path match.
 
@@ -729,16 +735,20 @@ The working directory is a temporary directory created by the Electron main proc
 
 **Creation**: The main process calls `fs.mkdtemp()` (or equivalent) to create a uniquely named directory in the OS temporary directory. The path is passed to the kernel in the `pdv.init` message.
 
-**Structure**:
+**Structure** (UUID-based — see §6.3):
 ```
 /tmp/pdv-<uuid>/
     tree/
-        data/         ← data files written during the session (npy, parquet, etc.)
-        scripts/      ← script .py files for the current session
-        results/      ← result files produced by scripts
+        a1b2c3d4e5f6/     ← each file-backed node gets its own UUID directory
+            fit_model.py
+        f7e8d9c0b1a2/
+            ch1.npy
+        ...
     .pdv-work/
         autosave/     ← reserved for future autosave feature
 ```
+
+File-backed tree nodes (scripts, notes, GUIs, namelists, libs, data files) each get a unique 12-hex-character UUID directory under `tree/`. The tree path is decoupled from the filesystem path — renaming or moving a tree node does not require renaming or copying files on disk. See §6.3 for the full UUID storage design.
 
 **Lifecycle**: Created at kernel startup. Deleted on clean shutdown. If the app crashes, the directory is left on disk but is not recovered (crash recovery is out of scope for alpha).
 
@@ -750,7 +760,7 @@ A persistent, user-chosen directory that stores a complete saved snapshot of a P
 
 **Created when**: The user explicitly performs File → Save Project (or Save As). Never created automatically.
 
-**Structure** (human-readable, mirrors tree hierarchy):
+**Structure** (UUID-based — see §6.3):
 ```
 my-project/
     project.json              ← project manifest (owned by Electron main process)
@@ -768,15 +778,14 @@ my-project/
             lib/
                 n_pendulum.py
             gui.json
-    tree/
-        data/
-            waveforms/
-                ch1.npy
-                ch2.npy
-        scripts/
-            analysis/
-                fit_model.py
-        results/
+    tree/                     ← UUID-indexed file storage (§6.3)
+        a1b2c3d4e5f6/
+            ch1.npy
+        b2c3d4e5f6a7/
+            ch2.npy
+        c3d4e5f6a7b8/
+            fit_model.py
+        d4e5f6a7b8c9/
             fit_output.parquet
 ```
 
@@ -815,7 +824,7 @@ Each `modules/<id>/` subdirectory is maintained authoritatively by `project:save
 | `schema_version` | string | Semantic version of the project.json format. The app rejects manifests with an incompatible major version. Currently `"1.2"`. |
 | `project_id` | string | UUIDv4 assigned on first save under schema 1.2. Stable across renames and moves. Used by per-project environment bookkeeping (§10.5). 1.1 manifests without this field get one assigned on upgrade. |
 | `saved_at` | string | ISO 8601 timestamp of last save. |
-| `pdv_version` | string | PDV app version used when saving (e.g. `"0.0.11"`). |
+| `pdv_version` | string | PDV app version used when saving (e.g. `"0.0.12"`). |
 | `project_name` | string? | Optional human-readable project name chosen by the user. Displayed in the title bar and recent projects list. Falls back to the directory name when absent (backward compat). |
 | `language` | string | Kernel language: `"python"` or `"julia"`. |
 | `interpreter_path` | string? | Optional path to the interpreter used at save time. Used for pre-selection when `environment.mode == "shared"`; ignored when `environment.mode == "project"`. |
@@ -831,7 +840,28 @@ Each `modules/<id>/` subdirectory is maintained authoritatively by `project:save
 
 **`code-cells.json` schema**: Written by the Electron main process during save. Contains tab code and active tab ID.
 
-### 6.3 Lazy Loading from Save to Working Directory
+### 6.3 UUID-Based File Storage
+
+All file-backed tree nodes use UUID-based paths, decoupling the tree hierarchy from the filesystem layout. This is the single most important storage invariant in the codebase.
+
+**Design**: Each file-backed node (scripts, notes, GUIs, namelists, libs, data files) receives a 12-hex-character UUID at creation time. The backing file lives at `<dir>/tree/<uuid>/<filename>`, where `<dir>` is the working directory during a session or the save directory on disk.
+
+**Why UUIDs**: Tree operations (rename, move) become O(1) metadata updates — no file copies or renames on disk. Duplicate is the only tree mutation that creates a new file (with a fresh UUID). This eliminates a class of bugs around path escaping, collision, and stale references that plagued the earlier path-mirroring design.
+
+**UUID generation**: `generate_node_uuid()` in `environment.py` produces a 12-character hex string from UUID4. Short enough to be human-glanceable in logs and directory listings.
+
+**Path resolution**: `PDVFile.resolve_path(working_dir)` computes `<working_dir>/tree/<uuid>/<filename>`. The `uuid_tree_path()` helper in `environment.py` does the same for non-PDVFile data nodes during serialization.
+
+**File copying**: All file copy operations in the Python kernel use `smart_copy()` (in `environment.py`), which attempts copy-on-write cloning before falling back to a regular copy:
+1. Python 3.14+ `pathlib.Path.copy()` — OS-level CoW on APFS, btrfs, XFS, ZFS
+2. `reflink_copy.reflink_or_copy()` — optional dependency (`pip install pdv-python[copy]`), Rust-backed
+3. `shutil.copy2()` — universal fallback
+
+**Orphan cleanup**: Data nodes (ndarray, DataFrame, custom-serialized objects, pickle) receive a fresh UUID on every save because the in-memory value has no stable identity. After writing `tree-index.json`, the save handler purges any `tree/<uuid>/` directories not referenced in the new index. File-backed PDV nodes (scripts, notes, libs, etc.) reuse their UUID across saves and are never purged.
+
+**Invariant**: Every file under `tree/` must have a corresponding entry in `tree-index.json`. Files without an index entry are orphans and may be deleted. The kernel never traverses the `tree/` directory at load time — it reads `tree-index.json` and uses UUIDs to locate files.
+
+### 6.4 Lazy Loading from Save to Working Directory
 
 When a user accesses a tree node whose data is in the save directory but not yet in the working directory, the kernel:
 1. Reads the appropriate file from the save directory
@@ -842,7 +872,7 @@ When a user accesses a tree node whose data is in the save directory but not yet
 
 Files are only written to the working directory when data is newly created or modified in the current session.
 
-### 6.4 User Preferences Directory (`~/.PDV`)
+### 6.5 User Preferences Directory (`~/.PDV`)
 
 Renderer-facing preferences and UI persistence are stored in a dedicated user
 directory managed by the main process:
@@ -969,8 +999,8 @@ Each node in `tree-index.json` is produced by `serialization.serialize_node()`. 
 | `storage` | object | Describes where the data lives. See below. |
 | `metadata` | object | Type-specific metadata. Always contains at least `"preview"`. |
 
-**Storage object** — one of two backends:
-- File-backed: `{ "backend": "local_file", "relative_path": "tree/.../file.ext", "format": "<format>" }`
+**Storage object** — one of three backends:
+- File-backed: `{ "backend": "local_file", "uuid": "<12-hex-uuid>", "filename": "<name.ext>", "format": "<format>" }` — file lives at `tree/<uuid>/<filename>` (§6.3)
 - Inline: `{ "backend": "inline", "format": "<format>", "value": <json-value> }`
 - Folder: `{ "backend": "none", "format": "none" }`
 

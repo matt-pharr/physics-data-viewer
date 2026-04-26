@@ -33,7 +33,7 @@ import { ModuleManager } from "./module-manager";
 import {
   bindProjectModulesToTree,
 } from "./module-runtime";
-import { ProjectManager, type ProjectModuleImport } from "./project-manager";
+import { ProjectManager, type ProjectModuleImport, type ModuleOwnedFile, type ModuleManifestBundle } from "./project-manager";
 import { ConfigStore } from "./config";
 import { registerAppStateIpcHandlers } from "./ipc-register-app-state";
 import { registerGuiEditorIpcHandlers } from "./ipc-register-gui-editor";
@@ -279,31 +279,6 @@ function sanitizeScriptName(scriptName: string, language: "python" | "julia" = "
   const trimmed = scriptName.trim() || "script";
   const withExt = trimmed.endsWith(ext) ? trimmed : `${trimmed}${ext}`;
   return withExt.replace(/[\\/]/g, "_");
-}
-
-function resolveScriptPath(
-  kernelId: string,
-  scriptPath: string,
-  kernelWorkingDirs: Map<string, string>,
-  language: "python" | "julia" = "python"
-): string {
-  if (path.isAbsolute(scriptPath)) {
-    return scriptPath;
-  }
-  const workingDir = kernelWorkingDirs.get(kernelId);
-  if (!workingDir) {
-    throw new Error(`Kernel working directory not initialized: ${kernelId}`);
-  }
-  if (scriptPath.includes("/") || scriptPath.includes("\\")) {
-    return path.join(workingDir, scriptPath);
-  }
-  const parts = scriptPath.split(".").filter(Boolean);
-  if (parts.length === 0) {
-    throw new Error("Invalid script path");
-  }
-  const ext = language === "julia" ? ".jl" : ".py";
-  const leaf = parts[parts.length - 1];
-  return path.join(workingDir, ...parts.slice(0, -1), `${leaf}${ext}`);
 }
 
 /**
@@ -580,7 +555,6 @@ export function registerIpcHandlers(
     sanitizeScriptName,
     ensureScriptFile,
     ensureLibFile,
-    resolveScriptPath,
     buildEditorSpawn,
     resolveEditorSpawn,
   });
@@ -655,7 +629,7 @@ export function registerIpcHandlers(
 
   registerEnvironmentIpcHandlers(win, configStore);
 
-  registerCommPushForwarding(win, commRouter, moduleWindowManager, guiEditorWindowManager, guiViewerWindowManager);
+  registerCommPushForwarding(win, commRouter, projectManager, moduleWindowManager, guiEditorWindowManager, guiViewerWindowManager);
 
   /**
    * Reset all in-session state. Called whenever the renderer reloads so that
@@ -733,6 +707,7 @@ function registerEnvironmentIpcHandlers(win: BrowserWindow, configStore: ConfigS
 export function registerCommPushForwarding(
   win: BrowserWindow,
   commRouter: CommRouter,
+  projectManager: ProjectManager,
   moduleWindowManager?: ModuleWindowManager,
   guiEditorWindowManager?: GuiEditorWindowManager,
   guiViewerWindowManager?: GuiViewerWindowManager
@@ -753,6 +728,50 @@ export function registerCommPushForwarding(
   subscribe(PDVMessageType.TREE_CHANGED, IPC.push.treeChanged, true);
   subscribe(PDVMessageType.PROJECT_LOADED, IPC.push.projectLoaded);
   subscribe(PDVMessageType.PROGRESS, IPC.push.progress);
+
+  // Kernel-initiated project operations — forward as menu actions so the
+  // renderer drives the full save/load workflow (including code-cell
+  // serialization and UI state updates).
+  const forwardAsMenuAction = (
+    type: string,
+    action: "project:save" | "project:saveAs" | "project:openRecent",
+  ): void => {
+    const handler = (msg: PDVMessage): void => {
+      const payload = msg.payload as { save_dir?: string };
+      console.log(`[forwardAsMenuAction] received push ${type} → forwarding as ${action} (path=${payload.save_dir ?? "none"})`);
+      win.webContents.send(IPC.push.menuAction, { action, path: payload.save_dir });
+    };
+    commRouter.onPush(type, handler);
+    pushSubscriptions.push({ commRouter, type, handler });
+  };
+  forwardAsMenuAction(PDVMessageType.PROJECT_SAVE_REQUEST, "project:save");
+  forwardAsMenuAction(PDVMessageType.PROJECT_SAVE_AS_REQUEST, "project:saveAs");
+  forwardAsMenuAction(PDVMessageType.PROJECT_OPEN_REQUEST, "project:openRecent");
+
+  // Kernel-initiated save (pdv.save_project()) — tree is already serialized.
+  // Cache the results so ProjectManager.save() skips the comm round-trip
+  // (which would deadlock while the kernel shell is still executing user code).
+  {
+    const handler = (msg: PDVMessage): void => {
+      const payload = msg.payload as Record<string, unknown>;
+      const saveDir = payload.save_dir as string | undefined;
+      if (!saveDir) return;
+      console.log(`[save_completed] kernel serialized tree to ${saveDir}, caching results`);
+      projectManager.cacheKernelSaveResults(saveDir, {
+        checksum: (payload.checksum as string) ?? "",
+        nodeCount: (payload.node_count as number) ?? 0,
+        moduleOwnedFiles: Array.isArray(payload.module_owned_files)
+          ? (payload.module_owned_files as unknown as ModuleOwnedFile[])
+          : [],
+        moduleManifests: Array.isArray(payload.module_manifests)
+          ? (payload.module_manifests as unknown as ModuleManifestBundle[])
+          : [],
+      });
+      win.webContents.send(IPC.push.menuAction, { action: "project:save", path: saveDir });
+    };
+    commRouter.onPush(PDVMessageType.PROJECT_SAVE_COMPLETED, handler);
+    pushSubscriptions.push({ commRouter, type: PDVMessageType.PROJECT_SAVE_COMPLETED, handler });
+  }
 }
 
 /**

@@ -112,104 +112,93 @@ class TestDuplicate:
 
 
 class TestRelocateFiles:
-    """Tests for _relocate_files and _relocate_single_file."""
+    """Tests for _relocate_files and _relocate_single_file.
 
-    def test_relocate_single_file_moves(self, tmp_working_dir):
+    With UUID-based storage, rename/move is a no-op (the file path is
+    independent of the tree path). Only copy=True (duplicate) needs
+    to create a new file with a fresh UUID.
+    """
+
+    def test_relocate_single_file_noop_on_rename(self, tmp_working_dir):
+        """Rename (copy=False) is a no-op with UUID storage."""
         from pdv.handlers.tree import _relocate_single_file
 
-        tree_dir = os.path.join(tmp_working_dir, "tree")
+        node_uuid = "reloc_uuid01"
+        tree_dir = os.path.join(tmp_working_dir, "tree", node_uuid)
         os.makedirs(tree_dir)
         old_path = os.path.join(tree_dir, "old_script.py")
         with open(old_path, "w") as f:
             f.write("# test")
 
-        script = PDVScript(relative_path="tree/old_script.py")
-        _relocate_single_file(script, "new_script", tmp_working_dir, copy=False)
+        script = PDVScript(uuid=node_uuid, filename="old_script.py")
+        _relocate_single_file(script, tmp_working_dir, copy=False)
 
-        assert script.relative_path == os.path.join("tree", "new_script.py")
-        new_abs = os.path.join(tmp_working_dir, "tree", "new_script.py")
-        assert os.path.exists(new_abs)
-        assert not os.path.exists(old_path)
+        # UUID should be unchanged since it's a rename (no-op)
+        assert script.uuid == node_uuid
+        assert os.path.exists(old_path)
 
     def test_relocate_single_file_copies(self, tmp_working_dir):
+        """Duplicate (copy=True) assigns a new UUID and copies the file."""
         from pdv.handlers.tree import _relocate_single_file
 
-        tree_dir = os.path.join(tmp_working_dir, "tree")
+        node_uuid = "reloc_uuid02"
+        tree_dir = os.path.join(tmp_working_dir, "tree", node_uuid)
         os.makedirs(tree_dir)
         old_path = os.path.join(tree_dir, "src.py")
         with open(old_path, "w") as f:
             f.write("# test")
 
-        script = PDVScript(relative_path="tree/src.py")
-        _relocate_single_file(script, "dst", tmp_working_dir, copy=True)
+        script = PDVScript(uuid=node_uuid, filename="src.py")
+        _relocate_single_file(script, tmp_working_dir, copy=True)
 
+        # Original file still exists
         assert os.path.exists(old_path)
-        new_abs = os.path.join(tmp_working_dir, "tree", "dst.py")
-        assert os.path.exists(new_abs)
+        # Script should have a new UUID
+        assert script.uuid != node_uuid
+        # New file should exist at the new UUID location
+        new_path = script.resolve_path(tmp_working_dir)
+        assert os.path.exists(new_path)
 
-    def test_relocate_with_filename_override(self, tmp_working_dir):
+    def test_relocate_rejects_non_pdvfile(self):
         from pdv.handlers.tree import _relocate_single_file
+        with pytest.raises(TypeError, match="Expected PDVFile"):
+            _relocate_single_file("not_a_file", "/tmp", copy=False)
 
-        tree_dir = os.path.join(tmp_working_dir, "tree")
-        os.makedirs(tree_dir)
-        old_path = os.path.join(tree_dir, "old.py")
-        with open(old_path, "w") as f:
-            f.write("# test")
-
-        script = PDVScript(relative_path="tree/old.py")
-        _relocate_single_file(script, "new_key", tmp_working_dir,
-                              copy=False, filename="custom_name.py")
-
-        assert script.relative_path == os.path.join("tree", "custom_name.py")
-
-    def test_relocate_files_recursive(self, tmp_working_dir):
+    def test_relocate_files_recursive_copy(self, tmp_working_dir):
+        """Recursive duplicate assigns fresh UUIDs to file-backed descendants."""
         from pdv.handlers.tree import _relocate_files
 
-        tree_dir = os.path.join(tmp_working_dir, "tree", "parent")
+        node_uuid = "reloc_uuid03"
+        tree_dir = os.path.join(tmp_working_dir, "tree", node_uuid)
         os.makedirs(tree_dir)
         script_path = os.path.join(tree_dir, "my_script.py")
         with open(script_path, "w") as f:
             f.write("# test")
 
         container = PDVTree()
-        script = PDVScript(relative_path=os.path.join("tree", "parent", "my_script.py"))
+        script = PDVScript(uuid=node_uuid, filename="my_script.py")
         dict.__setitem__(container, "my_script", script)
 
-        _relocate_files(container, "parent", "new_parent", tmp_working_dir, copy=False)
-        assert script.relative_path == os.path.join("tree", "new_parent", "my_script.py")
+        _relocate_files(container, "parent", "new_parent", tmp_working_dir, copy=True)
+        # Script should have a new UUID after copy
+        assert script.uuid != node_uuid
+        new_path = script.resolve_path(tmp_working_dir)
+        assert os.path.exists(new_path)
 
-    def test_relocate_rejects_non_pdvfile(self):
-        from pdv.handlers.tree import _relocate_single_file
-        with pytest.raises(TypeError, match="Expected PDVFile"):
-            _relocate_single_file("not_a_file", "path", "/tmp", copy=False)
-
-    def test_rename_relocates_backing_file(self, tmp_working_dir):
-        """Rename of a file-backed node should update its _relative_path."""
-        from pdv.handlers.tree import _relocate_files
-
-        tree_dir = os.path.join(tmp_working_dir, "tree")
-        os.makedirs(tree_dir)
-        old_file = os.path.join(tree_dir, "old_name.py")
-        with open(old_file, "w") as f:
-            f.write("# script")
-
-        script = PDVScript(relative_path="tree/old_name.py")
-        _relocate_files(script, "old_name", "new_name", tmp_working_dir, copy=False)
-
-        assert script.relative_path == os.path.join("tree", "new_name.py")
-        assert os.path.exists(os.path.join(tmp_working_dir, "tree", "new_name.py"))
-        assert not os.path.exists(old_file)
-
-    def test_note_relocation(self, tmp_working_dir):
+    def test_note_relocation_copy(self, tmp_working_dir):
+        """Duplicate of a note creates a fresh UUID."""
         from pdv.handlers.tree import _relocate_single_file
 
-        tree_dir = os.path.join(tmp_working_dir, "tree")
+        node_uuid = "reloc_uuid04"
+        tree_dir = os.path.join(tmp_working_dir, "tree", node_uuid)
         os.makedirs(tree_dir)
         note_path = os.path.join(tree_dir, "my_note.md")
         with open(note_path, "w") as f:
             f.write("# Note")
 
-        note = PDVNote(relative_path="tree/my_note.md")
-        _relocate_single_file(note, "renamed_note", tmp_working_dir, copy=False)
+        note = PDVNote(uuid=node_uuid, filename="my_note.md")
+        _relocate_single_file(note, tmp_working_dir, copy=True)
 
-        assert note.relative_path == os.path.join("tree", "renamed_note.md")
+        assert note.uuid != node_uuid
+        new_path = note.resolve_path(tmp_working_dir)
+        assert os.path.exists(new_path)

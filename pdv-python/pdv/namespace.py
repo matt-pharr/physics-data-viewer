@@ -7,7 +7,9 @@ This module provides:
   namespace. Blocks reassignment of ``pdv_tree`` and ``pdv``.
 
 - :class:`PDVApp`: the ``pdv`` object injected into the namespace.
-  Exposes ``pdv.save()``, ``pdv.help()`` to users.
+  Exposes ``pdv.save()``, ``pdv.save_project()``,
+  ``pdv.save_project_as()``, ``pdv.open_project()``,
+  ``pdv.help()`` to users.
 
 - :func:`pdv_namespace`: returns a snapshot of the current kernel
   namespace for display in the Namespace panel, excluding PDV internals
@@ -127,15 +129,182 @@ class PDVApp:
     def save(self) -> None:
         """Trigger a project save. Equivalent to File -> Save in the UI.
 
-        Sends a ``pdv.project.save`` comm message to the app. The app
+        Sends a ``pdv.project.save_request`` push to the app. The app
         will prompt for a save location if no project is currently open.
         """
         try:
             from pdv.comms import send_message  # noqa: PLC0415
 
-            send_message("pdv.project.save", {})
+            send_message("pdv.project.save_request", {})
         except RuntimeError:
             print("PDV: No comm channel open. Cannot trigger save.")
+
+    def save_project(self, path: str | None = None) -> None:
+        """Save the current project to a directory.
+
+        Serializes the tree synchronously (avoiding a comm round-trip
+        that would deadlock while the kernel shell is busy), then sends
+        a ``pdv.project.save_completed`` push so the app can write the
+        remaining manifest and code-cell files.
+
+        Parameters
+        ----------
+        path : str or None
+            Absolute or ``~``-prefixed path to the project directory.
+            If None, saves to the current project location (falls back
+            to :meth:`save` if no project is open).
+        """
+        try:
+            import os  # noqa: PLC0415
+
+            from pdv.comms import get_pdv_tree, send_message  # noqa: PLC0415
+
+            tree = get_pdv_tree()
+            if tree is None:
+                print("PDV: Tree is not initialized. Cannot save.")
+                return
+
+            save_dir: str | None = None
+            if path is not None:
+                save_dir = os.path.realpath(os.path.expanduser(path))
+            else:
+                save_dir = getattr(tree, "_save_dir", None)
+
+            if not save_dir:
+                send_message("pdv.project.save_request", {})
+                return
+
+            from pdv.handlers.project import serialize_tree_to_dir  # noqa: PLC0415
+
+            results = serialize_tree_to_dir(tree, save_dir)
+            send_message(
+                "pdv.project.save_completed",
+                {"save_dir": save_dir, **results},
+            )
+        except RuntimeError:
+            print("PDV: No comm channel open. Cannot trigger save.")
+        except Exception as exc:  # noqa: BLE001
+            print(f"PDV: save_project failed: {exc}")
+
+    def save_project_as(self, path: str) -> None:
+        """Save the project to a new directory (Save As).
+
+        Like :meth:`save_project`, but the given path becomes the new
+        active project directory.
+
+        Parameters
+        ----------
+        path : str
+            Absolute or ``~``-prefixed path to the new project directory.
+        """
+        try:
+            import os  # noqa: PLC0415
+
+            from pdv.comms import get_pdv_tree, send_message  # noqa: PLC0415
+
+            tree = get_pdv_tree()
+            if tree is None:
+                print("PDV: Tree is not initialized. Cannot save.")
+                return
+
+            resolved = os.path.realpath(os.path.expanduser(path))
+
+            from pdv.handlers.project import serialize_tree_to_dir  # noqa: PLC0415
+
+            results = serialize_tree_to_dir(tree, resolved)
+            send_message(
+                "pdv.project.save_completed",
+                {"save_dir": resolved, **results},
+            )
+        except RuntimeError:
+            print("PDV: No comm channel open. Cannot trigger save.")
+        except Exception as exc:  # noqa: BLE001
+            print(f"PDV: save_project_as failed: {exc}")
+
+    def open_project(self, path: str) -> None:
+        """Open a project from a directory.
+
+        Sends a request to the app to load the project at the given
+        path. The current tree and code cells will be replaced with
+        the contents of the loaded project.
+
+        Parameters
+        ----------
+        path : str
+            Absolute or ``~``-prefixed path to the project directory.
+        """
+        try:
+            import os  # noqa: PLC0415
+
+            from pdv.comms import send_message  # noqa: PLC0415
+
+            resolved = os.path.realpath(os.path.expanduser(path))
+            send_message("pdv.project.open_request", {"save_dir": resolved})
+        except RuntimeError:
+            print("PDV: No comm channel open. Cannot open project.")
+
+    def add_file(self, source_path: str) -> "PDVFile":
+        """Import an arbitrary file into the tree as a :class:`PDVFile`.
+
+        Eagerly copies the source file into the session working directory
+        under a fresh UUID-based storage path. The returned node is not
+        yet attached to the tree — assign it at the desired tree path::
+
+            mesh = pdv.add_file("~/Downloads/mesh.h5")
+            pdv_tree["simulation.mesh"] = mesh
+
+        If the returned node is never assigned to the tree, the copied
+        file is cleaned up when the kernel's temp working dir is wiped
+        at session end.
+
+        Parameters
+        ----------
+        source_path : str
+            Filesystem path to the source file. ``~`` is expanded.
+
+        Returns
+        -------
+        PDVFile
+            A new file-backed node wrapping the imported file.
+
+        Raises
+        ------
+        FileNotFoundError
+            If ``source_path`` does not exist.
+        ValueError
+            If ``source_path`` is not a regular file.
+        PDVError
+            If no kernel working directory is available (the kernel has
+            not yet received ``pdv.init``).
+        """
+        import os  # noqa: PLC0415
+
+        from pdv.comms import get_pdv_tree  # noqa: PLC0415
+        from pdv.environment import (  # noqa: PLC0415
+            generate_node_uuid,
+            smart_copy,
+            uuid_tree_path,
+        )
+        from pdv.tree import PDVFile  # noqa: PLC0415
+
+        resolved = os.path.realpath(os.path.expanduser(source_path))
+        if not os.path.exists(resolved):
+            raise FileNotFoundError(f"Source file not found: {source_path}")
+        if not os.path.isfile(resolved):
+            raise ValueError(f"Source path is not a file: {source_path}")
+
+        tree = get_pdv_tree()
+        working_dir = getattr(tree, "_working_dir", None) if tree is not None else None
+        if not working_dir:
+            raise PDVError(
+                "pdv.add_file is not available: kernel has not received pdv.init"
+            )
+
+        filename = os.path.basename(resolved)
+        node_uuid = generate_node_uuid()
+        dest = uuid_tree_path(working_dir, node_uuid, filename)
+        smart_copy(resolved, dest)
+        return PDVFile(uuid=node_uuid, filename=filename)
 
     def new_note(self, path: str, title: str | None = None) -> None:
         """Create a markdown note in the tree.
@@ -162,22 +331,21 @@ class PDVApp:
             print("PDV: Tree is not initialized. Cannot create note.")
             return
 
+        from pdv.environment import ensure_parent, generate_node_uuid, uuid_tree_path  # noqa: PLC0415
+
         working_dir = getattr(tree, "_working_dir", None) or "."
         segments = path.split(".")
-        file_dir = (
-            os.path.join(working_dir, *segments[:-1])
-            if len(segments) > 1
-            else working_dir
-        )
-        os.makedirs(file_dir, exist_ok=True)
-        file_path = os.path.join(file_dir, segments[-1] + ".md")
+        filename = segments[-1] + ".md"
+        node_uuid = generate_node_uuid()
+        file_path = uuid_tree_path(working_dir, node_uuid, filename)
+        ensure_parent(file_path)
 
         if not os.path.exists(file_path):
             with open(file_path, "w", encoding="utf-8") as fh:
                 if title:
                     fh.write(f"# {title}\n")
 
-        note = PDVNote(relative_path=file_path, title=title)
+        note = PDVNote(uuid=node_uuid, filename=filename, title=title)
         tree[path] = note
         print(f"Created note at '{path}'")
 
@@ -199,11 +367,26 @@ class PDVApp:
                 "  pdv_tree.run_script('path') — run a script node\n"
                 "  pdv.working_dir   — Path to the session working dir (for data files)\n"
                 "  pdv.save()        — save the project\n"
+                "  pdv.save_project('path')    — save project to a directory\n"
+                "  pdv.save_project_as('path') — save project to a new directory (Save As)\n"
+                "  pdv.open_project('path')    — open a project from a directory\n"
+                "  pdv.add_file('path/to/file') — import a file into the tree\n"
                 "  pdv.new_note('path', title='My Note') — create a markdown note\n"
                 "  pdv.help('pdv_tree') — help on a specific topic\n"
             )
         else:
             print(f"PDV help for topic '{topic}' is not yet implemented.")
+
+    def __getattr__(self, name: str) -> Any:
+        import sys  # noqa: PLC0415
+
+        pdv_module = sys.modules.get("pdv")
+        if pdv_module is not None:
+            try:
+                return getattr(pdv_module, name)
+            except (AttributeError, RuntimeError):
+                pass
+        raise AttributeError(f"'PDVApp' object has no attribute {name!r}")
 
     def __repr__(self) -> str:
         return "<PDV app object — type pdv.help() for usage>"

@@ -771,7 +771,6 @@ const App: React.FC = () => {
       setLastDuration(result.duration);
     }
     setNamespaceRefreshToken((prev) => prev + 1);
-    setTreeRefreshToken((prev) => prev + 1);
     setScriptDialog(null);
   };
 
@@ -853,7 +852,6 @@ const App: React.FC = () => {
     } finally {
       setIsExecuting(false);
       setNamespaceRefreshToken((prev) => prev + 1);
-      setTreeRefreshToken((prev) => prev + 1);
     }
   }, [currentKernelId, kernelStatus]);
 
@@ -1309,9 +1307,9 @@ const App: React.FC = () => {
               const result = await window.pdv.tree.createScript(currentKernelId, createScriptTarget, name);
               if (!result.success) {
                 setLastError(result.error);
-              } else if (result.scriptPath) {
+              } else if (result.treePath) {
                 setTreeRefreshToken((t) => t + 1);
-                await window.pdv.script.edit(currentKernelId, result.scriptPath);
+                await window.pdv.script.edit(currentKernelId, result.treePath);
               }
             } catch (error) {
               setLastError(error instanceof Error ? error.message : String(error));

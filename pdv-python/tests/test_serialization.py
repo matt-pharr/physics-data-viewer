@@ -27,7 +27,9 @@ from pdv.serialization import (
     KIND_SEQUENCE,
     KIND_FOLDER,
     KIND_SCRIPT,
+    KIND_FILE,
     KIND_UNKNOWN,
+    FORMAT_FILE,
 )
 from pdv.errors import PDVSerializationError
 
@@ -100,7 +102,7 @@ class TestDetectKind:
         """PDVScript returns KIND_SCRIPT."""
         from pdv.tree import PDVScript
 
-        assert detect_kind(PDVScript("scripts/test.py")) == KIND_SCRIPT
+        assert detect_kind(PDVScript("abc123def456", "test.py")) == KIND_SCRIPT
 
 
 class TestSerializeAndDeserialize:
@@ -248,11 +250,12 @@ class TestMetadataSubDict:
     def test_gui_descriptor_metadata(self, tmp_working_dir):
         from pdv.tree import PDVGui
 
-        gui_file = os.path.join(tmp_working_dir, "tree", "mod", "gui.gui.json")
+        node_uuid = "gui_uuid_001"
+        gui_file = os.path.join(tmp_working_dir, "tree", node_uuid, "gui.gui.json")
         os.makedirs(os.path.dirname(gui_file), exist_ok=True)
         with open(gui_file, "w") as f:
             f.write("{}")
-        gui = PDVGui(relative_path=gui_file, module_id="test_mod")
+        gui = PDVGui(uuid=node_uuid, filename="gui.gui.json", module_id="test_mod")
         desc = serialize_node("mod.gui", gui, tmp_working_dir)
         assert "metadata" in desc
         meta = desc["metadata"]
@@ -262,12 +265,13 @@ class TestMetadataSubDict:
     def test_namelist_descriptor_metadata(self, tmp_working_dir):
         from pdv.tree import PDVNamelist
 
-        nml_file = os.path.join(tmp_working_dir, "tree", "mod", "solver.nml")
+        node_uuid = "nml_uuid_001"
+        nml_file = os.path.join(tmp_working_dir, "tree", node_uuid, "solver.nml")
         os.makedirs(os.path.dirname(nml_file), exist_ok=True)
         with open(nml_file, "w") as f:
             f.write("&solver /\n")
         nml = PDVNamelist(
-            relative_path=nml_file, format="fortran", module_id="test_mod"
+            uuid=node_uuid, filename="solver.nml", format="fortran", module_id="test_mod"
         )
         desc = serialize_node("mod.solver", nml, tmp_working_dir)
         assert "metadata" in desc
@@ -279,11 +283,12 @@ class TestMetadataSubDict:
     def test_lib_descriptor_metadata(self, tmp_working_dir):
         from pdv.tree import PDVLib
 
-        lib_file = os.path.join(tmp_working_dir, "tree", "mod", "lib", "helpers.py")
+        node_uuid = "lib_uuid_001"
+        lib_file = os.path.join(tmp_working_dir, "tree", node_uuid, "helpers.py")
         os.makedirs(os.path.dirname(lib_file), exist_ok=True)
         with open(lib_file, "w") as f:
             f.write("# helpers\n")
-        lib = PDVLib(relative_path=lib_file, module_id="test_mod")
+        lib = PDVLib(uuid=node_uuid, filename="helpers.py", module_id="test_mod")
         desc = serialize_node("mod.lib.helpers", lib, tmp_working_dir)
         assert "metadata" in desc
         meta = desc["metadata"]
@@ -294,12 +299,13 @@ class TestMetadataSubDict:
     def test_script_descriptor_metadata(self, tmp_working_dir):
         from pdv.tree import PDVScript
 
-        script_file = os.path.join(tmp_working_dir, "tree", "run.py")
+        node_uuid = "scr_uuid_001"
+        script_file = os.path.join(tmp_working_dir, "tree", node_uuid, "run.py")
         os.makedirs(os.path.dirname(script_file), exist_ok=True)
         with open(script_file, "w") as f:
             f.write('"""My script."""\ndef run(pdv_tree: dict):\n    return {}\n')
         script = PDVScript(
-            relative_path=script_file, language="python", doc="My script."
+            uuid=node_uuid, filename="run.py", language="python", doc="My script."
         )
         desc = serialize_node("run", script, tmp_working_dir)
         assert "metadata" in desc
@@ -314,12 +320,14 @@ class TestMetadataSubDict:
         """PDVScript with source_rel_path set round-trips through serialize_node."""
         from pdv.tree import PDVScript
 
-        script_file = os.path.join(tmp_working_dir, "my_mod", "scripts", "run.py")
+        node_uuid = "mod_scr_001"
+        script_file = os.path.join(tmp_working_dir, "tree", node_uuid, "run.py")
         os.makedirs(os.path.dirname(script_file), exist_ok=True)
         with open(script_file, "w") as f:
             f.write('"""Module script."""\ndef run(pdv_tree: dict):\n    return {}\n')
         script = PDVScript(
-            relative_path=script_file,
+            uuid=node_uuid,
+            filename="run.py",
             language="python",
             doc="Module script.",
             module_id="my_mod",
@@ -333,12 +341,13 @@ class TestMetadataSubDict:
         from pdv.tree import PDVLib, PDVModule, PDVScript, PDVTree
         from pdv.tree_loader import load_tree_index
 
-        mod_root = os.path.join(tmp_working_dir, "my_mod")
-        scripts_dir = os.path.join(mod_root, "scripts")
-        lib_dir = os.path.join(mod_root, "lib")
-        os.makedirs(scripts_dir, exist_ok=True)
+        scr_uuid = "mod_scr_rt01"
+        lib_uuid = "mod_lib_rt01"
+        script_dir = os.path.join(tmp_working_dir, "tree", scr_uuid)
+        lib_dir = os.path.join(tmp_working_dir, "tree", lib_uuid)
+        os.makedirs(script_dir, exist_ok=True)
         os.makedirs(lib_dir, exist_ok=True)
-        script_file = os.path.join(scripts_dir, "run.py")
+        script_file = os.path.join(script_dir, "run.py")
         with open(script_file, "w") as f:
             f.write("def run(pdv_tree: dict):\n    return {}\n")
         lib_file = os.path.join(lib_dir, "helpers.py")
@@ -346,12 +355,14 @@ class TestMetadataSubDict:
             f.write("VALUE = 1\n")
 
         script = PDVScript(
-            relative_path=script_file,
+            uuid=scr_uuid,
+            filename="run.py",
             module_id="my_mod",
             source_rel_path="scripts/run.py",
         )
         lib = PDVLib(
-            relative_path=lib_file,
+            uuid=lib_uuid,
+            filename="helpers.py",
             module_id="my_mod",
             source_rel_path="lib/helpers.py",
         )
@@ -443,6 +454,7 @@ class TestCompositeMappingSerialize:
 
     def test_pickle_fallback_node_writes_file(self, tmp_working_dir):
         from pdv.serialization import pickle_fallback_node
+        from pdv.environment import uuid_tree_path
 
         obj = WeirdPicklable()
         desc = pickle_fallback_node("u", obj, tmp_working_dir)
@@ -450,10 +462,252 @@ class TestCompositeMappingSerialize:
         assert desc["storage"]["format"] == "pickle"
         assert desc["metadata"]["fallback"] == "pickle"
         assert "python_type" in desc["metadata"]
-        rel = desc["storage"]["relative_path"]
-        assert os.path.exists(os.path.join(tmp_working_dir, rel))
+        node_uuid = desc["storage"]["uuid"]
+        filename = desc["storage"]["filename"]
+        assert os.path.exists(uuid_tree_path(tmp_working_dir, node_uuid, filename))
         # Round-trips via deserialize_node with trusted=True.
         restored = deserialize_node(
             desc["storage"], tmp_working_dir, trusted=True
         )
         assert isinstance(restored, WeirdPicklable)
+
+
+class TestPDVFileSerialize:
+    """Tests for bare PDVFile serialization and round-trip."""
+
+    def test_bare_pdvfile_is_kind_file(self):
+        from pdv.tree import PDVFile
+
+        node = PDVFile(uuid="abc123def456", filename="mesh.h5")
+        assert detect_kind(node) == KIND_FILE
+
+    def test_pdvfile_serialize_emits_file_descriptor(self, tmp_working_dir):
+        """serialize_node writes descriptor with format=file and local_file backend."""
+        from pdv.tree import PDVFile
+
+        node_uuid = "filenode_001"
+        src_dir = os.path.join(tmp_working_dir, "tree", node_uuid)
+        os.makedirs(src_dir, exist_ok=True)
+        src_path = os.path.join(src_dir, "mesh.h5")
+        with open(src_path, "wb") as fh:
+            fh.write(b"\x89HDF\r\n\x1a\nfake content")
+
+        node = PDVFile(uuid=node_uuid, filename="mesh.h5")
+        desc = serialize_node("simulation.mesh", node, tmp_working_dir)
+
+        assert desc["type"] == KIND_FILE
+        assert desc["uuid"] == node_uuid
+        assert desc["storage"]["backend"] == "local_file"
+        assert desc["storage"]["format"] == FORMAT_FILE
+        assert desc["storage"]["uuid"] == node_uuid
+        assert desc["storage"]["filename"] == "mesh.h5"
+        assert "preview" in desc["metadata"]
+
+    def test_pdvfile_serialize_copies_to_save_dir(
+        self, tmp_working_dir, tmp_save_dir
+    ):
+        """Serialization copies the backing file from source_dir to working_dir (=save dir)."""
+        from pdv.environment import uuid_tree_path
+        from pdv.tree import PDVFile
+
+        node_uuid = "filenode_002"
+        src_dir = os.path.join(tmp_working_dir, "tree", node_uuid)
+        os.makedirs(src_dir, exist_ok=True)
+        src_path = os.path.join(src_dir, "data.bin")
+        payload = b"\x00\x01\x02hello\xff"
+        with open(src_path, "wb") as fh:
+            fh.write(payload)
+
+        node = PDVFile(uuid=node_uuid, filename="data.bin")
+        serialize_node(
+            "imports.data",
+            node,
+            tmp_save_dir,
+            source_dir=tmp_working_dir,
+        )
+
+        dest_path = uuid_tree_path(tmp_save_dir, node_uuid, "data.bin")
+        assert os.path.exists(dest_path)
+        with open(dest_path, "rb") as fh:
+            assert fh.read() == payload
+
+    def test_pdvfile_serialize_missing_file_raises(self, tmp_working_dir):
+        from pdv.tree import PDVFile
+
+        node = PDVFile(uuid="ghost_uuid_xx", filename="nowhere.dat")
+        with pytest.raises(PDVSerializationError, match="File not found"):
+            serialize_node("ghost", node, tmp_working_dir)
+
+    def test_pdvfile_deserialize_returns_bytes(self, tmp_working_dir):
+        """deserialize_node on FORMAT_FILE returns raw bytes (fallback path)."""
+        from pdv.environment import ensure_parent, uuid_tree_path
+
+        node_uuid = "deser_file_01"
+        abs_path = uuid_tree_path(tmp_working_dir, node_uuid, "blob.bin")
+        ensure_parent(abs_path)
+        payload = b"raw-bytes-content"
+        with open(abs_path, "wb") as fh:
+            fh.write(payload)
+
+        storage = {
+            "backend": "local_file",
+            "uuid": node_uuid,
+            "filename": "blob.bin",
+            "format": FORMAT_FILE,
+        }
+        result = deserialize_node(storage, tmp_working_dir, trusted=False)
+        assert result == payload
+
+    def test_pdvfile_round_trip_through_tree_loader(self, tmp_working_dir):
+        """serialize_node + load_tree_index reconstruct a PDVFile with correct fields."""
+        from pdv.tree import PDVFile, PDVTree
+        from pdv.tree_loader import load_tree_index
+
+        node_uuid = "rt_file_uuid1"
+        src_dir = os.path.join(tmp_working_dir, "tree", node_uuid)
+        os.makedirs(src_dir, exist_ok=True)
+        src_path = os.path.join(src_dir, "dataset.h5")
+        with open(src_path, "wb") as fh:
+            fh.write(b"roundtrip-payload")
+
+        node = PDVFile(uuid=node_uuid, filename="dataset.h5")
+        descriptors = [serialize_node("imports.dataset", node, tmp_working_dir)]
+
+        fresh = PDVTree()
+        fresh._working_dir = tmp_working_dir
+        load_tree_index(fresh, descriptors, conflict_strategy="replace")
+
+        loaded = fresh["imports.dataset"]
+        assert isinstance(loaded, PDVFile)
+        assert loaded.uuid == node_uuid
+        assert loaded.filename == "dataset.h5"
+        assert loaded.resolve_path(tmp_working_dir) == src_path
+
+    def test_pdvfile_preview(self):
+        from pdv.tree import PDVFile
+
+        node = PDVFile(uuid="prev_uuid_01", filename="camera.jpg")
+        assert node_preview(node, KIND_FILE) == "camera.jpg"
+
+
+class TestAddFile:
+    """Tests for pdv.add_file() — user-facing file import API."""
+
+    def _fresh_tree(self, tmp_working_dir):
+        from pdv.tree import PDVTree
+
+        tree = PDVTree()
+        tree._set_working_dir(tmp_working_dir)
+        return tree
+
+    def test_add_file_imports_and_returns_pdvfile(self, tmp_working_dir, tmp_path):
+        """add_file() copies the source and returns a PDVFile with fresh UUID."""
+        import pdv.comms as comms_mod
+        from pdv.environment import uuid_tree_path
+        from pdv.namespace import PDVApp
+        from pdv.tree import PDVFile
+
+        source = tmp_path / "mesh.h5"
+        source.write_bytes(b"\x89HDF\r\nmesh-data")
+
+        tree = self._fresh_tree(tmp_working_dir)
+        old_tree = comms_mod._pdv_tree
+        comms_mod._pdv_tree = tree
+        try:
+            node = PDVApp().add_file(str(source))
+        finally:
+            comms_mod._pdv_tree = old_tree
+
+        assert isinstance(node, PDVFile)
+        assert node.filename == "mesh.h5"
+        assert len(node.uuid) == 12
+        dest = uuid_tree_path(tmp_working_dir, node.uuid, "mesh.h5")
+        assert os.path.exists(dest)
+        with open(dest, "rb") as fh:
+            assert fh.read() == b"\x89HDF\r\nmesh-data"
+
+    def test_add_file_expands_tilde(self, tmp_working_dir, tmp_path, monkeypatch):
+        import pdv.comms as comms_mod
+        from pdv.namespace import PDVApp
+
+        monkeypatch.setenv("HOME", str(tmp_path))
+        source = tmp_path / "mesh.h5"
+        source.write_bytes(b"tilde-content")
+
+        tree = self._fresh_tree(tmp_working_dir)
+        old_tree = comms_mod._pdv_tree
+        comms_mod._pdv_tree = tree
+        try:
+            node = PDVApp().add_file("~/mesh.h5")
+        finally:
+            comms_mod._pdv_tree = old_tree
+
+        assert node.filename == "mesh.h5"
+
+    def test_add_file_missing_source_raises(self, tmp_working_dir):
+        import pdv.comms as comms_mod
+        from pdv.namespace import PDVApp
+
+        tree = self._fresh_tree(tmp_working_dir)
+        old_tree = comms_mod._pdv_tree
+        comms_mod._pdv_tree = tree
+        try:
+            with pytest.raises(FileNotFoundError):
+                PDVApp().add_file("/definitely/not/a/real/path.xyz")
+        finally:
+            comms_mod._pdv_tree = old_tree
+
+    def test_add_file_directory_raises(self, tmp_working_dir, tmp_path):
+        import pdv.comms as comms_mod
+        from pdv.namespace import PDVApp
+
+        tree = self._fresh_tree(tmp_working_dir)
+        old_tree = comms_mod._pdv_tree
+        comms_mod._pdv_tree = tree
+        try:
+            with pytest.raises(ValueError, match="not a file"):
+                PDVApp().add_file(str(tmp_path))
+        finally:
+            comms_mod._pdv_tree = old_tree
+
+    def test_add_file_no_working_dir_raises(self, tmp_path):
+        import pdv.comms as comms_mod
+        from pdv.errors import PDVError
+        from pdv.namespace import PDVApp
+        from pdv.tree import PDVTree
+
+        source = tmp_path / "mesh.h5"
+        source.write_bytes(b"x")
+
+        tree = PDVTree()  # no working_dir set
+        old_tree = comms_mod._pdv_tree
+        comms_mod._pdv_tree = tree
+        try:
+            with pytest.raises(PDVError, match="has not received pdv.init"):
+                PDVApp().add_file(str(source))
+        finally:
+            comms_mod._pdv_tree = old_tree
+
+    def test_add_file_then_assign_to_tree(self, tmp_working_dir, tmp_path):
+        """End-to-end: imported PDVFile can be assigned to a tree path and resolved."""
+        import pdv.comms as comms_mod
+        from pdv.namespace import PDVApp
+        from pdv.tree import PDVFile
+
+        source = tmp_path / "table.csv"
+        source.write_text("a,b\n1,2\n")
+
+        tree = self._fresh_tree(tmp_working_dir)
+        old_tree = comms_mod._pdv_tree
+        comms_mod._pdv_tree = tree
+        try:
+            node = PDVApp().add_file(str(source))
+            tree["imports.table"] = node
+        finally:
+            comms_mod._pdv_tree = old_tree
+
+        assert isinstance(tree["imports.table"], PDVFile)
+        resolved = tree["imports.table"].resolve_path(tmp_working_dir)
+        assert os.path.exists(resolved)
+        with open(resolved) as fh:
+            assert fh.read() == "a,b\n1,2\n"

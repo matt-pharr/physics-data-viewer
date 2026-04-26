@@ -692,7 +692,7 @@ export interface PDVApi {
       kernelId: string,
       targetPath: string,
       scriptName: string
-    ): Promise<{ success: boolean; error?: string; scriptPath?: string }>;
+    ): Promise<{ success: boolean; error?: string; scriptPath?: string; treePath?: string }>;
     createNote(
       kernelId: string,
       targetPath: string,

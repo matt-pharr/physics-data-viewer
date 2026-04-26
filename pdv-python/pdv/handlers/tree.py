@@ -13,7 +13,6 @@ ARCHITECTURE.md §3.4 (tree messages), §7 (tree data model)
 from __future__ import annotations
 
 import os
-import shutil
 
 from pdv.handlers import register
 
@@ -25,19 +24,20 @@ def _relocate_files(
     working_dir: str,
     *,
     copy: bool = False,
-    filename: str | None = None,
 ) -> None:
-    """Move or copy backing files for all PDVFile nodes in *value*.
+    """Duplicate backing files for all PDVFile nodes in *value*.
 
-    Recursively walks dicts so that container moves/duplicates also
-    relocate every file-backed descendant.  Updates each node's
-    ``_relative_path`` in place to reflect the new tree location.
+    With UUID-based storage, rename/move is a no-op (the file path is
+    independent of the tree path). Only ``copy=True`` (duplicate) needs
+    to create a new file — the duplicate gets a fresh UUID.
+
+    Recursively walks dicts so that container duplicates also handle
+    every file-backed descendant.
     """
     from pdv.tree import PDVFile  # noqa: PLC0415
 
     if isinstance(value, PDVFile):
-        _relocate_single_file(value, new_tree_path, working_dir,
-                              copy=copy, filename=filename)
+        _relocate_single_file(value, working_dir, copy=copy)
     elif isinstance(value, dict):
         for key in list(dict.keys(value)):
             child = dict.__getitem__(value, key)
@@ -49,43 +49,33 @@ def _relocate_files(
 
 def _relocate_single_file(
     file_node: object,
-    new_tree_path: str,
     working_dir: str,
     *,
     copy: bool = False,
-    filename: str | None = None,
 ) -> None:
-    """Move or copy one backing file and update its ``_relative_path``.
+    """Handle file relocation for a single PDVFile node.
 
-    *filename* overrides the destination filename.  When ``None``, the
-    new filename is derived from the last segment of *new_tree_path*
-    plus the original file extension.
+    With UUID-based storage, rename/move requires no file system
+    operation — the backing file path is independent of the tree path.
+
+    For duplicates (``copy=True``), a new UUID is assigned and the
+    backing file is copied to the new UUID directory.
     """
+    from pdv.environment import generate_node_uuid, smart_copy, uuid_tree_path  # noqa: PLC0415
     from pdv.tree import PDVFile  # noqa: PLC0415
+
     if not isinstance(file_node, PDVFile):
         raise TypeError(f"Expected PDVFile, got {type(file_node).__name__}")
 
+    if not copy:
+        return
+
     old_abs = file_node.resolve_path(working_dir)
-
-    if filename:
-        new_filename = filename
-    else:
-        _, ext = os.path.splitext(os.path.basename(file_node.relative_path))
-        new_key = new_tree_path.split(".")[-1]
-        new_filename = new_key + ext
-
-    new_parts = new_tree_path.split(".")
-    new_rel = os.path.join("tree", *new_parts[:-1], new_filename)
-    new_abs = os.path.join(working_dir, new_rel)
-
-    if os.path.exists(old_abs) and old_abs != new_abs:
-        os.makedirs(os.path.dirname(new_abs), exist_ok=True)
-        if copy:
-            shutil.copy2(old_abs, new_abs)
-        else:
-            shutil.move(old_abs, new_abs)
-
-    file_node._relative_path = new_rel
+    new_uuid = generate_node_uuid()
+    new_abs = uuid_tree_path(working_dir, new_uuid, file_node.filename)
+    if os.path.exists(old_abs):
+        smart_copy(old_abs, new_abs)
+    file_node._uuid = new_uuid
 
 
 def handle_tree_list(msg: dict) -> None:

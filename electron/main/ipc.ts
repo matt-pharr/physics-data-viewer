@@ -403,6 +403,8 @@ export interface TreeCreateScriptResult {
   error?: string;
   /** Absolute path to the created script file. */
   scriptPath?: string;
+  /** Dot-separated tree path of the created script node. */
+  treePath?: string;
 }
 
 /**

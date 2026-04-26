@@ -124,15 +124,17 @@ class TestIntegrationDispatch:
     def test_project_save_load_roundtrip_with_multiple_node_types(
         self, tmp_working_dir: str, tmp_save_dir: str, tmp_path
     ) -> None:
-        script_file = tmp_path / "roundtrip_script.py"
-        script_file.write_text(
-            "def run(pdv_tree: dict):\n    return {'ok': True}\n", encoding="utf-8"
-        )
+        scr_uuid = "integ_scr_01"
+        script_dir = os.path.join(tmp_working_dir, "tree", scr_uuid)
+        os.makedirs(script_dir, exist_ok=True)
+        script_file = os.path.join(script_dir, "roundtrip_script.py")
+        with open(script_file, "w", encoding="utf-8") as f:
+            f.write("def run(pdv_tree: dict):\n    return {'ok': True}\n")
 
         tree = PDVTree()
         tree._set_working_dir(tmp_working_dir)
         tree["data.x"] = 1
-        tree["scripts.demo"] = PDVScript(relative_path=str(script_file))
+        tree["scripts.demo"] = PDVScript(uuid=scr_uuid, filename="roundtrip_script.py")
 
         try:
             import numpy as np  # type: ignore
@@ -157,20 +159,20 @@ class TestIntegrationDispatch:
         fresh_tree = PDVTree()
         fresh_tree._set_working_dir(tmp_working_dir)
         # Simulate TypeScript's copyFilesForLoad: copy file-backed nodes to working dir
-        import shutil
+        from pdv.environment import smart_copy
 
         tree_index_path = os.path.join(tmp_save_dir, "tree-index.json")
         with open(tree_index_path, "r", encoding="utf-8") as fh:
             index_nodes = json.loads(fh.read())
         for node in index_nodes:
             storage = node.get("storage", {})
-            rel = storage.get("relative_path", "")
-            if storage.get("backend") == "local_file" and rel:
-                src = os.path.join(tmp_save_dir, rel)
-                dst = os.path.join(tmp_working_dir, rel)
-                os.makedirs(os.path.dirname(dst), exist_ok=True)
+            node_uuid = storage.get("uuid", "")
+            filename = storage.get("filename", "")
+            if storage.get("backend") == "local_file" and node_uuid and filename:
+                src = os.path.join(tmp_save_dir, "tree", node_uuid, filename)
+                dst = os.path.join(tmp_working_dir, "tree", node_uuid, filename)
                 if os.path.exists(src):
-                    shutil.copy2(src, dst)
+                    smart_copy(src, dst)
         load_comm = _make_mock_comm()
         with (
             patch.object(comms_mod, "_comm", load_comm),
@@ -194,11 +196,12 @@ class TestIntegrationDispatch:
     def test_script_register_then_run_pipeline(
         self, tmp_working_dir: str, tmp_path
     ) -> None:
-        script_file = tmp_path / "double.py"
-        script_file.write_text(
-            "def run(pdv_tree: dict, x: int = 1):\n    return {'result': x * 2}\n",
-            encoding="utf-8",
-        )
+        scr_uuid = "integ_scr_02"
+        script_dir = os.path.join(tmp_working_dir, "tree", scr_uuid)
+        os.makedirs(script_dir, exist_ok=True)
+        script_file = os.path.join(script_dir, "double.py")
+        with open(script_file, "w", encoding="utf-8") as f:
+            f.write("def run(pdv_tree: dict, x: int = 1):\n    return {'result': x * 2}\n")
 
         tree = PDVTree()
         tree._set_working_dir(tmp_working_dir)
@@ -219,7 +222,8 @@ class TestIntegrationDispatch:
                     {
                         "parent_path": "scripts",
                         "name": "double",
-                        "relative_path": str(script_file),
+                        "uuid": scr_uuid,
+                        "filename": "double.py",
                         "language": "python",
                     },
                 )

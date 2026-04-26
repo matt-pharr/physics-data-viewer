@@ -280,22 +280,6 @@ export function registerModulesIpcHandlers(
           error: "No running kernel — start one before creating a module.",
         };
       }
-      const workingDir = kernelWorkingDirs.get(activeKernelId);
-
-      // Seed working-dir scaffolding under the canonical
-      // ``<workdir>/tree/<alias>/{scripts,lib,plots}/`` layout so
-      // subsequent ``tree:createScript`` / ``tree:createLib`` hits land
-      // at paths that match where ``bindImportedModule`` would have
-      // placed an imported v4 module's files — see the Option A
-      // canonical-layout fix and ARCHITECTURE.md §6.1/§6.2.
-      if (workingDir) {
-        for (const child of ["scripts", "lib", "plots"]) {
-          await fs.mkdir(path.join(workingDir, "tree", baseAlias, child), {
-            recursive: true,
-          });
-        }
-      }
-
       const language =
         request.language ??
         (activeManifest?.language as "python" | "julia" | undefined) ??

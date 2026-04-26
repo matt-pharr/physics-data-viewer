@@ -30,7 +30,8 @@ def handle_gui_register(msg: dict) -> None:
         {
             "parent_path": "n_pendulum",
             "name": "gui",
-            "relative_path": "tree/n_pendulum/gui.gui.json",
+            "uuid": "a1b2c3d4e5f6",
+            "filename": "gui.gui.json",
             "module_id": "n_pendulum"
         }
 
@@ -54,12 +55,14 @@ def handle_gui_register(msg: dict) -> None:
     tree, payload = validated
     parent_path = payload.get("parent_path", "")
     name = payload.get("name", "")
-    relative_path = payload.get("relative_path", "")
+    node_uuid = payload.get("uuid", "")
+    filename = payload.get("filename", "")
     module_id = payload.get("module_id")
     source_rel_path = payload.get("source_rel_path")
 
     gui_node = PDVGui(
-        relative_path=relative_path,
+        uuid=node_uuid,
+        filename=filename,
         module_id=module_id,
         source_rel_path=source_rel_path,
     )

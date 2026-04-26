@@ -143,12 +143,13 @@ def test_serialize_roundtrip_with_custom_serializer(tmp_path):
     assert descriptor["type"] == KIND_UNKNOWN
     assert descriptor["storage"]["backend"] == "local_file"
     assert descriptor["storage"]["format"] == "unpicklable_v1"
-    assert descriptor["storage"]["relative_path"].endswith(".json")
+    assert descriptor["storage"]["filename"].endswith(".json")
     assert descriptor["metadata"]["python_type"].endswith("_Unpicklable")
     assert descriptor["metadata"]["serializer"].endswith("_Unpicklable")
     assert descriptor["metadata"]["preview"] == "unpicklable(2 keys)"
 
-    abs_path = os.path.join(str(tmp_path), descriptor["storage"]["relative_path"])
+    from pdv.environment import uuid_tree_path
+    abs_path = uuid_tree_path(str(tmp_path), descriptor["storage"]["uuid"], descriptor["storage"]["filename"])
     assert os.path.exists(abs_path)
 
     loaded = deserialize_node(descriptor["storage"], str(tmp_path))
@@ -164,12 +165,14 @@ def test_serialize_unknown_without_serializer_still_requires_trusted(tmp_path):
 
 
 def test_deserialize_unknown_custom_format_raises(tmp_path):
-    backing = tmp_path / "tree" / "data" / "solver.json"
-    backing.parent.mkdir(parents=True, exist_ok=True)
-    backing.write_text("{}")
+    node_uuid = "unk_fmt_uuid"
+    backing_dir = tmp_path / "tree" / node_uuid
+    backing_dir.mkdir(parents=True, exist_ok=True)
+    (backing_dir / "solver.json").write_text("{}")
     storage_ref = {
         "backend": "local_file",
-        "relative_path": "tree/data/solver.json",
+        "uuid": node_uuid,
+        "filename": "solver.json",
         "format": "no_such_format",
     }
     with pytest.raises(PDVSerializationError, match="no_such_format"):
@@ -210,7 +213,7 @@ def test_public_register_serializer_entry_point_roundtrip(tmp_path):
     sol = _Solution(t=np.linspace(0, 1, 5), x=np.arange(5.0), params={"k": 1})
     descriptor = serialize_node("results.run", sol, str(tmp_path))
     assert descriptor["storage"]["format"] == "solution_v1"
-    assert descriptor["storage"]["relative_path"].endswith(".npz")
+    assert descriptor["storage"]["filename"].endswith(".npz")
 
     loaded = deserialize_node(descriptor["storage"], str(tmp_path))
     assert isinstance(loaded, _Solution)

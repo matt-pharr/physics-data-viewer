@@ -127,14 +127,62 @@ async function syncModuleOwnedFilesToSaveDir(
  * @param bundles - Per-module manifest bundles from the save response.
  * @returns Nothing.
  */
+async function readManifestOnlyFields(
+  moduleDir: string,
+  moduleId: string,
+  moduleManager: ModuleManager,
+): Promise<{ entryPoint?: string; defaultGui?: string }> {
+  // Try the project-local manifest first (written by a previous save that
+  // already had the fix, or copied from the global store on first import).
+  try {
+    const raw = await fs.readFile(path.join(moduleDir, "pdv-module.json"), "utf8");
+    const existing = JSON.parse(raw) as Record<string, unknown>;
+    const entryPoint = typeof existing.entry_point === "string" ? existing.entry_point : undefined;
+    const defaultGui = typeof existing.default_gui === "string" ? existing.default_gui : undefined;
+    if (entryPoint || defaultGui) return { entryPoint, defaultGui };
+  } catch {
+    // No existing project-local manifest — fall through to installed source.
+  }
+
+  // Fallback: read from the globally installed or bundled module. Covers
+  // projects saved before this fix was in place, where the project-local
+  // pdv-module.json was overwritten without these fields.
+  try {
+    const installPath = await moduleManager.resolveModuleDir(moduleId, null);
+    if (installPath && installPath !== moduleDir) {
+      const raw = await fs.readFile(path.join(installPath, "pdv-module.json"), "utf8");
+      const source = JSON.parse(raw) as Record<string, unknown>;
+      return {
+        entryPoint: typeof source.entry_point === "string" ? source.entry_point : undefined,
+        defaultGui: typeof source.default_gui === "string" ? source.default_gui : undefined,
+      };
+    }
+  } catch {
+    // Module not installed globally — best-effort.
+  }
+
+  return {};
+}
+
 async function writeModuleManifestsToSaveDir(
   saveDir: string,
   bundles: ModuleManifestBundle[] | undefined,
+  moduleManager: ModuleManager,
 ): Promise<void> {
   if (!bundles || bundles.length === 0) return;
   for (const bundle of bundles) {
     if (!bundle.module_id) continue;
     const moduleDir = path.join(saveDir, "modules", bundle.module_id);
+
+    // Preserve entry_point and default_gui — these are set during module
+    // import/install and are not tracked in the kernel tree, so the
+    // kernel-side _collect_module_manifests cannot emit them. Without them,
+    // project load cannot import custom serializers (entry_point) or
+    // display the module in the activity bar (default_gui).
+    const { entryPoint, defaultGui } = await readManifestOnlyFields(
+      moduleDir, bundle.module_id, moduleManager,
+    );
+
     try {
       await writeModuleManifest(moduleDir, {
         id: bundle.module_id,
@@ -143,6 +191,8 @@ async function writeModuleManifestsToSaveDir(
         description: bundle.description,
         language: bundle.language,
         dependencies: bundle.dependencies,
+        entryPoint,
+        defaultGui,
         // Default lib_dir for the v4 manifest. Kept for external tooling
         // that reads the on-disk manifest; the TS/kernel setup path no
         // longer consumes this field — the kernel walker in
@@ -189,73 +239,81 @@ export function registerProjectIpcHandlers(
     getInterpreterPath,
   } = options;
 
+  // Serialize concurrent saves so a rapid second call waits for the first to
+  // finish rather than racing on the filesystem and kernel shell channel.
+  let activeSave: Promise<unknown> = Promise.resolve();
+  let saveSeq = 0;
+
   ipcMain.handle(
     IPC.project.save,
     async (_event, saveDir: string, codeCells: unknown, projectName?: string) => {
-      // Validate at the IPC boundary so the error path is reported to the
-      // renderer with a clean stack, rather than a mid-save filesystem error.
       assertCodeCellData(codeCells);
-      const saveResult = await projectManager.save(saveDir, codeCells, {
-        language: getActiveKernelLanguage(),
-        interpreterPath: getInterpreterPath(),
-        projectName,
-      });
+      const seq = ++saveSeq;
+      console.debug(`[project:save] IPC received seq=${seq} saveDir=${saveDir}`);
 
-      // Merge pending in-memory module imports/settings into the on-disk manifest.
-      const pendingModuleImports = getPendingModuleImports();
-      const pendingModuleSettings = getPendingModuleSettings();
-      if (pendingModuleImports.length > 0 || Object.keys(pendingModuleSettings).length > 0) {
-        // Copy pending module contents into the project-local modules directory.
-        for (const pendingModule of pendingModuleImports) {
-          const installPath = await moduleManager.getModuleInstallPath(pendingModule.module_id);
-          if (installPath) {
-            const dest = path.join(saveDir, "modules", pendingModule.module_id);
-            await fs.mkdir(path.join(saveDir, "modules"), { recursive: true });
-            // Overwrites any existing copy from a previous import (intentional).
-            await fs.cp(installPath, dest, { recursive: true });
-          }
-        }
-        await runSerializedProjectManifestMutation(saveDir, async () => {
-          const manifest = await ProjectManager.readManifest(saveDir);
-          const mergedManifest = {
-            ...manifest,
-            modules: [...manifest.modules, ...pendingModuleImports],
-            module_settings: { ...manifest.module_settings, ...pendingModuleSettings },
-          };
-          await ProjectManager.saveManifest(saveDir, mergedManifest);
+      const doSave = async (): Promise<{ checksum: string; nodeCount: number; projectName?: string }> => {
+        console.debug(`[project:save] seq=${seq} starting (was queued behind previous save)`);
+        const saveResult = await projectManager.save(saveDir, codeCells, {
+          language: getActiveKernelLanguage(),
+          interpreterPath: getInterpreterPath(),
+          projectName,
         });
-        setPendingModuleImports([]);
-        setPendingModuleSettings({});
-      }
 
-      // NOTE: file-backed nodes are already copied to saveDir/tree/ by the
-      // Python serializer (serialize_node writes directly to save_dir).
-      // No additional copy step is needed here.
+        const pendingModuleImports = getPendingModuleImports();
+        const pendingModuleSettings = getPendingModuleSettings();
+        if (pendingModuleImports.length > 0 || Object.keys(pendingModuleSettings).length > 0) {
+          for (const pendingModule of pendingModuleImports) {
+            const installPath = await moduleManager.getModuleInstallPath(pendingModule.module_id);
+            if (installPath) {
+              const dest = path.join(saveDir, "modules", pendingModule.module_id);
+              await fs.mkdir(path.join(saveDir, "modules"), { recursive: true });
+              await fs.cp(installPath, dest, { recursive: true });
+            }
+          }
+          await runSerializedProjectManifestMutation(saveDir, async () => {
+            const manifest = await ProjectManager.readManifest(saveDir);
+            const mergedManifest = {
+              ...manifest,
+              modules: [...manifest.modules, ...pendingModuleImports],
+              module_settings: { ...manifest.module_settings, ...pendingModuleSettings },
+            };
+            await ProjectManager.saveManifest(saveDir, mergedManifest);
+          });
+          setPendingModuleImports([]);
+          setPendingModuleSettings({});
+        }
 
-      // Mirror edited working-dir copies of module-owned files back into
-      // <saveDir>/modules/<id>/<source_rel_path>. See ARCHITECTURE.md §5.13
-      // and the #140 module editing workflow plan §3.
-      // TODO(#182): propagate deletions — if a module-owned file was removed
-      // from the tree, the pristine copy under <saveDir>/modules/<id>/ is
-      // left behind. Safe lacuna for now; fix alongside the GitHub push flow.
-      await syncModuleOwnedFilesToSaveDir(saveDir, saveResult.moduleOwnedFiles);
-      // Now that the file contents are in place, stamp pdv-module.json and
-      // module-index.json for every module in the tree so a fresh project
-      // reload can rebind them via the existing v4 bind path. See plan §7.
-      await writeModuleManifestsToSaveDir(saveDir, saveResult.moduleManifests);
+        // NOTE: file-backed nodes are already copied to saveDir/tree/ by the
+        // Python serializer (serialize_node writes directly to save_dir).
+        // No additional copy step is needed here.
 
-      setActiveProjectDir(saveDir);
-      await refreshProjectModuleHealth(saveDir);
+        // Mirror edited working-dir copies of module-owned files back into
+        // <saveDir>/modules/<id>/<source_rel_path>. See ARCHITECTURE.md §5.13
+        // and the #140 module editing workflow plan §3.
+        // TODO(#182): propagate deletions — if a module-owned file was removed
+        // from the tree, the pristine copy under <saveDir>/modules/<id>/ is
+        // left behind. Safe lacuna for now; fix alongside the GitHub push flow.
+        await syncModuleOwnedFilesToSaveDir(saveDir, saveResult.moduleOwnedFiles);
+        await writeModuleManifestsToSaveDir(saveDir, saveResult.moduleManifests, moduleManager);
 
-      // Read back the project name from the manifest (may have been preserved from prior save).
-      let savedProjectName: string | undefined;
-      try {
-        const manifest = await ProjectManager.readManifest(saveDir);
-        savedProjectName = manifest.project_name;
-      } catch {
-        // Non-blocking
-      }
-      return { checksum: saveResult.checksum, nodeCount: saveResult.nodeCount, projectName: savedProjectName };
+        setActiveProjectDir(saveDir);
+        await refreshProjectModuleHealth(saveDir);
+
+        let savedProjectName: string | undefined;
+        try {
+          const manifest = await ProjectManager.readManifest(saveDir);
+          savedProjectName = manifest.project_name;
+        } catch {
+          // Non-blocking
+        }
+        console.debug(`[project:save] seq=${seq} DONE`);
+        return { checksum: saveResult.checksum, nodeCount: saveResult.nodeCount, projectName: savedProjectName };
+      };
+
+      // Chain behind any in-flight save so they never overlap.
+      const queued = activeSave.then(doSave, doSave);
+      activeSave = queued.catch(() => {});
+      return queued;
     }
   );
 
@@ -266,7 +324,7 @@ export function registerProjectIpcHandlers(
       const workingDir = kernelWorkingDirs.get(activeKernelId);
       if (workingDir) {
         const win = getMainWindow();
-        await copyFilesForLoad(saveDir, workingDir, win ? (current, total) => {
+        const failedPaths = await copyFilesForLoad(saveDir, workingDir, win ? (current, total) => {
           win.webContents.send(IPC.push.progress, {
             operation: "load",
             phase: "Copying files",
@@ -274,6 +332,12 @@ export function registerProjectIpcHandlers(
             total,
           });
         } : undefined);
+        if (failedPaths.length > 0) {
+          console.warn(
+            `[pdv] load: ${failedPaths.length} file(s) could not be copied from save directory:`,
+            failedPaths,
+          );
+        }
       }
     }
 

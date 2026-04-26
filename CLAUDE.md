@@ -108,3 +108,21 @@ Every `.ts` file in `electron/main/` must have:
 - A JSDoc file header describing purpose, responsibilities, and what the file does NOT do
 - JSDoc on every exported function and class with `@param`, `@returns`, `@throws`
 - No unguarded `any` types
+
+---
+
+## PR Review Checklist
+
+When reviewing a pull request (including via `/review`), check every item below in addition to standard code-quality review:
+
+- [ ] **IPC single source of truth** — All IPC channel names and types are defined in `ipc.ts`. No new strings introduced in preload, index.ts, or renderer code.
+- [ ] **Process boundary respected** — Renderer imports types from `types/pdv.d.ts`, never from `../../main/ipc`. Renderer never accesses Node.js APIs or the filesystem directly.
+- [ ] **No tree state caching in main** — The main process does not cache or duplicate tree data. The kernel's `PDVTree` remains the sole authority.
+- [ ] **Script execution path** — No Python or Julia code strings in the renderer. Script execution goes through `window.pdv.script.run()`.
+- [ ] **Theme CSS variables** — No hardcoded hex colors (`#fff`, `#007acc`) or `rgb(...)` literals. All colors use `var(--token)` from `themes.ts`. New tokens added to `themes.ts` with per-theme values if needed.
+- [ ] **Preload bridge completeness** — Any new IPC channel exposed to the renderer has a corresponding method in `preload.ts` under `window.pdv`.
+- [ ] **Comm protocol consistency** — New or changed comm messages between main and kernel follow the `pdv.*` protocol defined in `pdv-protocol.ts`.
+- [ ] **Script signature** — New or modified PDV scripts define `run(pdv_tree: dict, **user_params) -> dict`.
+- [ ] **Version parity** — If either `electron/package.json` or `pdv-python/pyproject.toml` version was bumped, both were bumped to the same value.
+- [ ] **JSDoc coverage** — New or modified exports in `electron/main/` have JSDoc with `@param`, `@returns`, `@throws`. No unguarded `any` types introduced.
+- [ ] **Documentation updated** — If the PR changes architecture, adds new IPC channels, modifies the comm protocol, introduces new tree node types, or alters any behavior described in `ARCHITECTURE.md` or `PLANNED_FEATURES.md`, those documents have been updated to match.
