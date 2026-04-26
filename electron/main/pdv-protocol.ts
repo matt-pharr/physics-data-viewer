@@ -420,16 +420,6 @@ export interface PDVNamespaceInspectPayload {
 // Script message payloads
 // ---------------------------------------------------------------------------
 
-/** Payload for pdv.script.register (app → kernel). */
-export interface PDVScriptRegisterPayload {
-  /** Dot-separated path where the script node should appear in the tree. */
-  tree_path: string;
-  /** Relative path to the script file from the project root. */
-  relative_path: string;
-  /** If true, re-register an already-registered script (reload). */
-  reload?: boolean;
-}
-
 /** Payload for pdv.file.register (app → kernel). */
 export interface PDVFileRegisterPayload {
   /** Dot-path of the parent node; empty string for root. */
