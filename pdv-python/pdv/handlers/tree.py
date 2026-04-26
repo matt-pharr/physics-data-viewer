@@ -24,7 +24,6 @@ def _relocate_files(
     working_dir: str,
     *,
     copy: bool = False,
-    filename: str | None = None,
 ) -> None:
     """Duplicate backing files for all PDVFile nodes in *value*.
 
