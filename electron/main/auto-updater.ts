@@ -124,8 +124,8 @@ export function initAutoUpdater(win: BrowserWindow, configStore: ConfigStore): v
   autoUpdater.autoDownload = false;
   // Install on quit so the next launch uses the new version.
   autoUpdater.autoInstallOnAppQuit = true;
-  // Include prerelease tags (e.g. v0.0.12-alpha1) since the app is still in alpha.
-  autoUpdater.allowPrerelease = true;
+  // Do not update to prereleases.
+  autoUpdater.allowPrerelease = false;
 
   // -- Event wiring ----------------------------------------------------------
 
