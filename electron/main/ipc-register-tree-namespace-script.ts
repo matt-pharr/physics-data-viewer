@@ -296,6 +296,7 @@ export function registerTreeNamespaceScriptIpcHandlers(
         moduleId = moduleInfo.moduleAlias;
       }
 
+      const treePath = targetPath ? `${targetPath}.${scriptNodeName}` : scriptNodeName;
       await commRouter.request(PDVMessageType.SCRIPT_REGISTER, {
         parent_path: targetPath,
         name: scriptNodeName,
@@ -305,7 +306,7 @@ export function registerTreeNamespaceScriptIpcHandlers(
         module_id: moduleId,
         source_rel_path: sourceRelPath,
       });
-      return { success: true, scriptPath };
+      return { success: true, scriptPath, treePath };
     }
   );
 
