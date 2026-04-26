@@ -207,6 +207,7 @@ export function registerKernelIpcHandlers(
     startMutex = new Promise<void>((r) => { release = r; });
     try {
       await cleanupKernelWorkingDir(projectManager, kernelManager, kernelId, kernelWorkingDirs, crashHandlers);
+      projectManager.clearCachedKernelResults();
       await kernelManager.stop(kernelId);
       if (getActiveKernelId() === kernelId) {
         setActiveKernelId(null);

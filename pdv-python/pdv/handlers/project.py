@@ -487,6 +487,8 @@ def _early_module_setup(
         if node_type == "module":
             meta = node.get("metadata", {})
             storage = node.get("storage", {})
+            # Pre-UUID projects stored module_id inside storage.value
+            # rather than metadata; fall back for backwards compat.
             old_meta = storage.get("value", {})
             module_id = meta.get(
                 "module_id", old_meta.get("module_id", "")

@@ -249,10 +249,10 @@ export function registerProjectIpcHandlers(
     async (_event, saveDir: string, codeCells: unknown, projectName?: string) => {
       assertCodeCellData(codeCells);
       const seq = ++saveSeq;
-      console.log(`[project:save] IPC received seq=${seq} saveDir=${saveDir}`);
+      console.debug(`[project:save] IPC received seq=${seq} saveDir=${saveDir}`);
 
       const doSave = async (): Promise<{ checksum: string; nodeCount: number; projectName?: string }> => {
-        console.log(`[project:save] seq=${seq} starting (was queued behind previous save)`);
+        console.debug(`[project:save] seq=${seq} starting (was queued behind previous save)`);
         const saveResult = await projectManager.save(saveDir, codeCells, {
           language: getActiveKernelLanguage(),
           interpreterPath: getInterpreterPath(),
@@ -306,7 +306,7 @@ export function registerProjectIpcHandlers(
         } catch {
           // Non-blocking
         }
-        console.log(`[project:save] seq=${seq} DONE`);
+        console.debug(`[project:save] seq=${seq} DONE`);
         return { checksum: saveResult.checksum, nodeCount: saveResult.nodeCount, projectName: savedProjectName };
       };
 

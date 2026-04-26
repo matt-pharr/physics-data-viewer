@@ -308,6 +308,7 @@ function setup() {
     }),
     createWorkingDir: vi.fn(async () => "/tmp/pdv-test"),
     deleteWorkingDir: vi.fn(async () => undefined),
+    clearCachedKernelResults: vi.fn(),
   } as unknown as ProjectManager;
 
   const configState: PDVConfig = {

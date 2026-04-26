@@ -269,6 +269,7 @@ export class ProjectManager {
    * @param codeCells - The current code-cell state from the renderer.
    * @throws {PDVCommError} When the kernel responds with status='error'.
    */
+
   /**
    * Pre-computed kernel serialization results, keyed by saveDir.
    *
@@ -302,6 +303,16 @@ export class ProjectManager {
     this._cachedKernelResults.set(saveDir, results);
   }
 
+  /**
+   * Drop any cached kernel serialization results.
+   *
+   * Called on kernel stop so stale entries from abandoned
+   * Python-initiated saves don't survive into a new session.
+   */
+  clearCachedKernelResults(): void {
+    this._cachedKernelResults.clear();
+  }
+
   async save(
     saveDir: string,
     codeCells: CodeCellData,
@@ -328,14 +339,14 @@ export class ProjectManager {
 
     if (cached) {
       this._cachedKernelResults.delete(saveDir);
-      console.log(`[ProjectManager.save] using cached kernel results for ${saveDir}`);
+      console.debug(`[ProjectManager.save] using cached kernel results for ${saveDir}`);
       ({ checksum, nodeCount, moduleOwnedFiles, moduleManifests } = cached);
     } else {
-      console.log(`[ProjectManager.save] sending pdv.project.save comm (+${(performance.now() - t0).toFixed(0)}ms)`);
+      console.debug(`[ProjectManager.save] sending pdv.project.save comm (+${(performance.now() - t0).toFixed(0)}ms)`);
       const response = await this.commRouter.request(PDVMessageType.PROJECT_SAVE, {
         save_dir: saveDir,
       }, { keepAlivePushType: PDVMessageType.PROGRESS });
-      console.log(`[ProjectManager.save] kernel responded (+${(performance.now() - t0).toFixed(0)}ms)`);
+      console.debug(`[ProjectManager.save] kernel responded (+${(performance.now() - t0).toFixed(0)}ms)`);
 
       const payload = response.payload as {
         checksum?: string;
@@ -388,7 +399,7 @@ export class ProjectManager {
       JSON.stringify(manifest, null, 2),
       "utf8"
     );
-    console.log(`[ProjectManager.save] DONE (+${(performance.now() - t0).toFixed(0)}ms)`);
+    console.debug(`[ProjectManager.save] DONE (+${(performance.now() - t0).toFixed(0)}ms)`);
 
     return { checksum, nodeCount, moduleOwnedFiles, moduleManifests };
   }
