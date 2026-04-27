@@ -77,6 +77,8 @@ export const SettingsDialog: React.FC<SettingsDialogProps> = ({
   const [pythonEditorCmd, setPythonEditorCmd] = useState('code {}');
   const [juliaEditorCmd, setJuliaEditorCmd] = useState('code {}');
   const [fileManagerCmd, setFileManagerCmd] = useState(DEFAULT_FILE_MANAGER);
+  const [defaultSaveLocation, setDefaultSaveLocation] = useState('');
+  const [workingDirBase, setWorkingDirBase] = useState('');
 
   // About tab state
   const [appVersion, setAppVersion] = useState<string>('…');
@@ -105,6 +107,8 @@ export const SettingsDialog: React.FC<SettingsDialogProps> = ({
     setPythonEditorCmd(config?.pythonEditorCmd ?? 'code {}');
     setJuliaEditorCmd(config?.juliaEditorCmd ?? 'code {}');
     setFileManagerCmd(config?.fileManagerCmd ?? DEFAULT_FILE_MANAGER);
+    setDefaultSaveLocation(config?.defaultSaveLocation ?? '');
+    setWorkingDirBase(config?.workingDirBase ?? '');
     const ed = config?.settings?.editor;
     setEditorFontSize(ed?.fontSize ?? 13);
     setEditorTabSize(ed?.tabSize ?? 4);
@@ -299,6 +303,8 @@ export const SettingsDialog: React.FC<SettingsDialogProps> = ({
       pythonEditorCmd: pythonEditorCmd.trim() || 'code {}',
       juliaEditorCmd:  juliaEditorCmd.trim()  || 'code {}',
       fileManagerCmd:  fileManagerCmd.trim()  || DEFAULT_FILE_MANAGER,
+      defaultSaveLocation: defaultSaveLocation.trim() || undefined,
+      workingDirBase: workingDirBase.trim() || undefined,
       settings: {
         shortcuts: savedShortcuts,
         appearance: {
@@ -389,6 +395,68 @@ export const SettingsDialog: React.FC<SettingsDialogProps> = ({
                 <div className="settings-general-desc">
                   Used to reveal files in the OS file browser (e.g.{' '}
                   <code>open {'{}' }</code> on macOS, <code>xdg-open {'{}' }</code> on Linux).
+                </div>
+              </div>
+
+              <h4 className="settings-general-section">Directories</h4>
+              <div className="settings-general-grid">
+                <label htmlFor="sg-default-save">Default save location</label>
+                <div className="settings-general-dir-row">
+                  <span className="settings-general-dir-path" title={defaultSaveLocation}>
+                    {defaultSaveLocation || 'Not set'}
+                  </span>
+                  <button
+                    className="btn btn-secondary btn-sm"
+                    type="button"
+                    onClick={async () => {
+                      const picked = await window.pdv.files.pickDirectory(defaultSaveLocation || undefined);
+                      if (picked) setDefaultSaveLocation(picked);
+                    }}
+                  >
+                    Choose...
+                  </button>
+                  {defaultSaveLocation && (
+                    <button
+                      className="btn btn-secondary btn-sm"
+                      type="button"
+                      onClick={() => setDefaultSaveLocation('')}
+                    >
+                      Clear
+                    </button>
+                  )}
+                </div>
+                <div className="settings-general-desc">
+                  Pre-filled location in the Save As dialog for new projects.
+                </div>
+
+                <label htmlFor="sg-working-dir">Working directory</label>
+                <div className="settings-general-dir-row">
+                  <span className="settings-general-dir-path" title={workingDirBase}>
+                    {workingDirBase || 'Default (~/.PDV/working/)'}
+                  </span>
+                  <button
+                    className="btn btn-secondary btn-sm"
+                    type="button"
+                    onClick={async () => {
+                      const picked = await window.pdv.files.pickDirectory(workingDirBase || undefined);
+                      if (picked) setWorkingDirBase(picked);
+                    }}
+                  >
+                    Choose...
+                  </button>
+                  {workingDirBase && (
+                    <button
+                      className="btn btn-secondary btn-sm"
+                      type="button"
+                      onClick={() => setWorkingDirBase('')}
+                    >
+                      Clear
+                    </button>
+                  )}
+                </div>
+                <div className="settings-general-desc">
+                  Base directory for temporary session files. Use a fast local drive on HPC systems.
+                  Takes effect on next kernel start.
                 </div>
               </div>
             </div>

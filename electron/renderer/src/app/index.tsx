@@ -1454,7 +1454,7 @@ const App: React.FC = () => {
          <SaveAsDialog
            defaultLocation={currentProjectDir
              ? currentProjectDir.replace(/\/[^/]+\/?$/, '')
-             : null}
+             : config?.defaultSaveLocation ?? null}
            defaultName={currentProjectName ?? undefined}
            onSave={async (projectName, saveDir) => {
              setShowSaveAsDialog(false);

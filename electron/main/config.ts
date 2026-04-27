@@ -66,6 +66,10 @@ export interface PDVConfig {
   projectRoot?: string;
   /** Timestamp (ms since epoch) of last auto-update check. Internal use only. */
   lastUpdateCheck?: number;
+  /** Default parent directory for new project saves (pre-fills Save As dialog). */
+  defaultSaveLocation?: string;
+  /** Base directory for session working directories. Defaults to `~/.PDV/working/`. */
+  workingDirBase?: string;
   /** Renderer settings blob persisted by Settings dialog. */
   settings?: {
     shortcuts?: Record<string, string>;

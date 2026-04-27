@@ -272,7 +272,7 @@ export function registerTreeNamespaceScriptIpcHandlers(
       const language = kernel.language;
       let workingDir = kernelWorkingDirs.get(kernelId);
       if (!workingDir) {
-        workingDir = await projectManager.createWorkingDir();
+        workingDir = await projectManager.createWorkingDir(readConfig(configStore).workingDirBase);
         kernelWorkingDirs.set(kernelId, workingDir);
       }
       const safeName = sanitizeScriptName(scriptName, language);
@@ -322,7 +322,7 @@ export function registerTreeNamespaceScriptIpcHandlers(
       }
       let workingDir = kernelWorkingDirs.get(kernelId);
       if (!workingDir) {
-        workingDir = await projectManager.createWorkingDir();
+        workingDir = await projectManager.createWorkingDir(readConfig(configStore).workingDirBase);
         kernelWorkingDirs.set(kernelId, workingDir);
       }
       const safeName = noteName.trim().replace(/\s+/g, "_").replace(/[^a-zA-Z0-9_-]/g, "");
@@ -362,7 +362,7 @@ export function registerTreeNamespaceScriptIpcHandlers(
       }
       let workingDir = kernelWorkingDirs.get(kernelId);
       if (!workingDir) {
-        workingDir = await projectManager.createWorkingDir();
+        workingDir = await projectManager.createWorkingDir(readConfig(configStore).workingDirBase);
         kernelWorkingDirs.set(kernelId, workingDir);
       }
       const safeName = guiName.trim().replace(/\s+/g, "_").replace(/[^a-zA-Z0-9_-]/g, "");
@@ -428,7 +428,7 @@ export function registerTreeNamespaceScriptIpcHandlers(
       const language = kernel.language;
       let workingDir = kernelWorkingDirs.get(kernelId);
       if (!workingDir) {
-        workingDir = await projectManager.createWorkingDir();
+        workingDir = await projectManager.createWorkingDir(readConfig(configStore).workingDirBase);
         kernelWorkingDirs.set(kernelId, workingDir);
       }
       // Sanitize the filename — Python libs need their stem to be a valid
