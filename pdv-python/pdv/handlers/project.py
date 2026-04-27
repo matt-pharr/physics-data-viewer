@@ -715,20 +715,11 @@ def serialize_tree_to_dir(
     """
     import json  # noqa: PLC0415
     import os  # noqa: PLC0415
-    import sys  # noqa: PLC0415
-    import time  # noqa: PLC0415
-
-    t0 = time.monotonic()
-
-    def _log(phase: str) -> None:
-        elapsed = time.monotonic() - t0
-        print(f"[project.save] {phase} ({elapsed:.3f}s)", file=sys.stderr, flush=True)
 
     os.makedirs(os.path.join(save_dir, "tree"), exist_ok=True)
 
     working_dir = tree._working_dir or save_dir
     total = _count_nodes(tree)
-    _log(f"counted {total} nodes")
 
     def _emit_progress(current: int) -> None:
         if current % 5 == 0 or current == total:
@@ -743,10 +734,7 @@ def serialize_tree_to_dir(
         on_progress=_emit_progress,
         missing_files=missing_files,
     )
-    _log(f"collected {len(nodes)} node descriptors")
-
     if missing_files:
-        _log(f"ABORTED — {len(missing_files)} file-backed node(s) have missing backing files")
         return {
             "node_count": len(nodes),
             "checksum": "",
@@ -761,19 +749,15 @@ def serialize_tree_to_dir(
     with open(tmp_path, "w", encoding="utf-8") as fh:
         fh.write(index_data)
     os.replace(tmp_path, index_path)
-    _log("wrote tree-index.json")
 
     _purge_orphaned_tree_files(save_dir, nodes)
-    _log("purged orphans")
 
     from pdv.checksum import tree_checksum  # noqa: PLC0415
 
     checksum = tree_checksum(tree)
-    _log("computed checksum")
 
     module_owned_files = _collect_module_owned_files(tree, working_dir)
     module_manifests = _collect_module_manifests(tree)
-    _log("DONE")
 
     return {
         "node_count": len(nodes),

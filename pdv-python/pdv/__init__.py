@@ -106,12 +106,7 @@ def _working_dir() -> Path:
 
 def save() -> None:
     """Trigger a project save. Equivalent to File -> Save in the UI."""
-    try:
-        from pdv.comms import send_message  # noqa: PLC0415
-
-        send_message("pdv.project.save_request", {})
-    except RuntimeError:
-        print("PDV: No comm channel open. Cannot trigger save.")
+    save_project()
 
 
 def save_project(path: str | None = None) -> None:
