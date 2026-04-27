@@ -34,13 +34,11 @@ interface RegisterTreeNamespaceScriptIpcHandlersOptions {
   /**
    * Returns the set of currently-known module aliases (active project
    * manifest ∪ pending-imports). Used by ``tree:createScript`` /
-   * ``tree:createGui`` / ``tree:createLib`` to decide whether a new
-   * file lives inside a module subtree — in which case it needs
-   * ``source_rel_path`` set so the save-time sync (§3) can mirror it
-   * back to ``<saveDir>/modules/<id>/`` and its on-disk location must
-   * match the ``<workdir>/<alias>/...`` layout used by the module bind
-   * path rather than the ``<workdir>/tree/...`` layout used for plain
-   * project files.
+   * ``tree:createGui`` / ``tree:createLib`` to detect whether a new
+   * file lives inside a module subtree — in which case it gets
+   * ``module_id`` and ``source_rel_path`` set so the save-time sync
+   * (§3) can mirror it back to ``<saveDir>/modules/<id>/``.
+   * Files created outside a module are standalone project files.
    */
   getKnownModuleAliases: () => Promise<Set<string>>;
   readConfig: (configStore: ConfigStore) => PDVConfig;
@@ -55,7 +53,7 @@ interface RegisterTreeNamespaceScriptIpcHandlersOptions {
   ensureLibFile: (
     libPath: string,
     language: "python" | "julia",
-    moduleAlias: string,
+    moduleAlias?: string,
   ) => Promise<void>;
   buildEditorSpawn: (
     cmdString: string | undefined,
@@ -423,7 +421,7 @@ export function registerTreeNamespaceScriptIpcHandlers(
     ): Promise<TreeCreateLibResult> => {
       const kernel = kernelManager.getKernel(kernelId);
       if (!kernel) {
-        throw new Error(`Kernel not found: ${kernelId}`);
+        return { success: false, error: "No active kernel. Try restarting the kernel." };
       }
       const language = kernel.language;
       let workingDir = kernelWorkingDirs.get(kernelId);
@@ -439,32 +437,18 @@ export function registerTreeNamespaceScriptIpcHandlers(
       if (!stem) {
         return {
           success: false,
-          error: "Lib name must contain at least one alphanumeric character",
+          error: "Lib name must contain at least one letter or number.",
         };
       }
       const filename = `${stem}.py`;
 
-      // Libs are workflow-A/B territory — only allow creation when the
-      // target sits under a known module alias. Free-floating project
-      // libs are out of scope for this pass (and for v4 modules lib/
-      // is the only supported location).
       const knownAliases = await getKnownModuleAliases();
       const moduleInfo = analyseModuleTarget(targetPath, knownAliases);
-      if (!moduleInfo) {
-        return {
-          success: false,
-          error: `tree:createLib target must live inside a known module — got ${JSON.stringify(targetPath)}`,
-        };
-      }
 
       const nodeUuid = generateNodeUuid();
       const libPath = resolveNodePath(workingDir, nodeUuid, filename);
       await fs.mkdir(resolveNodeDir(workingDir, nodeUuid), { recursive: true });
-      await ensureLibFile(libPath, language, moduleInfo.moduleAlias);
-
-      const sourceRelPath = moduleInfo.sourceRelDir
-        ? `${moduleInfo.sourceRelDir}/${filename}`
-        : filename;
+      await ensureLibFile(libPath, language, moduleInfo?.moduleAlias);
 
       await commRouter.request(PDVMessageType.FILE_REGISTER, {
         tree_path: targetPath,
@@ -472,20 +456,21 @@ export function registerTreeNamespaceScriptIpcHandlers(
         uuid: nodeUuid,
         node_type: "lib",
         name: stem,
-        module_id: moduleInfo.moduleAlias,
-        source_rel_path: sourceRelPath,
+        ...(moduleInfo
+          ? {
+              module_id: moduleInfo.moduleAlias,
+              source_rel_path: moduleInfo.sourceRelDir
+                ? `${moduleInfo.sourceRelDir}/${filename}`
+                : filename,
+            }
+          : {}),
       } satisfies PDVFileRegisterPayload);
 
-      // Wire sys.path for the newly-created lib. The kernel walker in
-      // handle_modules_setup is the sole owner of sys.path for module
-      // libs — we re-run it for the affected module whenever a new
-      // PDVLib is added to the tree so its parent directory lands on
-      // sys.path. Entry point is intentionally omitted: create_empty
-      // modules do not have one, and imported-module entry points have
-      // already been imported at import time.
-      await commRouter.request(PDVMessageType.MODULES_SETUP, {
-        modules: [{ alias: moduleInfo.moduleAlias }],
-      });
+      if (moduleInfo) {
+        await commRouter.request(PDVMessageType.MODULES_SETUP, {
+          modules: [{ alias: moduleInfo.moduleAlias }],
+        });
+      }
 
       const treePath = targetPath ? `${targetPath}.${stem}` : stem;
       return { success: true, libPath, treePath };
@@ -729,7 +714,7 @@ export function registerTreeNamespaceScriptIpcHandlers(
       nodePath: string
     ): Promise<HandlerInvokeResult> => {
       if (!kernelManager.getKernel(kernelId)) {
-        return { success: false, error: `Kernel not found: ${kernelId}` };
+        return { success: false, error: "No active kernel. Try restarting the kernel." };
       }
       const response = await commRouter.request(PDVMessageType.HANDLER_INVOKE, {
         path: nodePath,
@@ -750,16 +735,18 @@ export function registerTreeNamespaceScriptIpcHandlers(
     msgType: string,
     buildPayload: (...args: string[]) => Record<string, unknown>,
     mapResult: (payload: Record<string, unknown>) => T,
+    actionLabel?: string,
   ): void {
     ipcMain.handle(channel, async (_event, kernelId: string, ...rest: string[]): Promise<T> => {
       if (!kernelManager.getKernel(kernelId)) {
-        return { success: false, error: `Kernel not found: ${kernelId}` } as T;
+        return { success: false, error: "No active kernel. Try restarting the kernel." } as T;
       }
       try {
         const response = await commRouter.request(msgType, buildPayload(...rest));
         return mapResult(response.payload as Record<string, unknown>);
       } catch (err) {
-        const message = err instanceof Error ? err.message : String(err);
+        const raw = err instanceof Error ? err.message : String(err);
+        const message = actionLabel ? `Could not ${actionLabel}: ${raw}` : raw;
         return { success: false, error: message } as T;
       }
     });
@@ -770,6 +757,7 @@ export function registerTreeNamespaceScriptIpcHandlers(
     PDVMessageType.TREE_CREATE_NODE,
     (targetPath, nodeName) => ({ parent_path: targetPath, name: nodeName }),
     (p) => ({ success: true, treePath: p.path as string | undefined }),
+    "create the node",
   );
 
   treeCommHandler<TreeRenameResult>(
@@ -777,20 +765,23 @@ export function registerTreeNamespaceScriptIpcHandlers(
     PDVMessageType.TREE_RENAME,
     (treePath, newName) => ({ path: treePath, new_name: newName }),
     (p) => ({ success: true, oldPath: p.old_path as string | undefined, newPath: p.new_path as string | undefined }),
+    "rename the node",
   );
 
   treeCommHandler<TreeMoveResult>(
     IPC.tree.move,
     PDVMessageType.TREE_MOVE,
-    (treePath, newPath, filename) => ({ path: treePath, new_path: newPath, ...(filename ? { filename } : {}) }),
+    (treePath, newPath) => ({ path: treePath, new_path: newPath }),
     (p) => ({ success: true, oldPath: p.old_path as string | undefined, newPath: p.new_path as string | undefined }),
+    "move the node",
   );
 
   treeCommHandler<TreeDuplicateResult>(
     IPC.tree.duplicate,
     PDVMessageType.TREE_DUPLICATE,
-    (treePath, newPath, filename) => ({ path: treePath, new_path: newPath, ...(filename ? { filename } : {}) }),
+    (treePath, newPath) => ({ path: treePath, new_path: newPath }),
     (p) => ({ success: true, newPath: p.new_path as string | undefined }),
+    "duplicate the node",
   );
 
   ipcMain.handle(
@@ -801,7 +792,7 @@ export function registerTreeNamespaceScriptIpcHandlers(
       treePath: string
     ): Promise<{ success: boolean; error?: string }> => {
       if (!kernelManager.getKernel(kernelId)) {
-        return { success: false, error: `Kernel not found: ${kernelId}` };
+        return { success: false, error: "No active kernel. Try restarting the kernel." };
       }
       try {
         await commRouter.request(PDVMessageType.TREE_DELETE, {
@@ -809,8 +800,8 @@ export function registerTreeNamespaceScriptIpcHandlers(
         });
         return { success: true };
       } catch (err) {
-        const message = err instanceof Error ? err.message : String(err);
-        return { success: false, error: message };
+        const raw = err instanceof Error ? err.message : String(err);
+        return { success: false, error: `Could not delete the node: ${raw}` };
       }
     }
   );
