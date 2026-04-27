@@ -675,13 +675,11 @@ def handle_tree_move(msg: dict) -> None:
             )
             return
 
-    filename = payload.get("filename") or None
-
     value = tree[path]
 
     if tree._working_dir:
         _relocate_files(value, path, new_path, tree._working_dir,
-                        copy=False, filename=filename)
+                        copy=False)
 
     tree.set_quiet(new_path, value)
 
@@ -788,14 +786,12 @@ def handle_tree_duplicate(msg: dict) -> None:
             )
             return
 
-    filename = payload.get("filename") or None
-
     value = tree[path]
     cloned = copy.deepcopy(value)
 
     if tree._working_dir:
         _relocate_files(cloned, path, new_path, tree._working_dir,
-                        copy=True, filename=filename)
+                        copy=True)
 
     tree[new_path] = cloned
 

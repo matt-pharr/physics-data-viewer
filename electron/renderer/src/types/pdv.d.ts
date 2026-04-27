@@ -716,6 +716,26 @@ export interface PDVApi {
       targetPath: string,
       libName: string
     ): Promise<{ success: boolean; error?: string; libPath?: string; treePath?: string }>;
+    createNode(
+      kernelId: string,
+      targetPath: string,
+      nodeName: string
+    ): Promise<{ success: boolean; error?: string; treePath?: string }>;
+    rename(
+      kernelId: string,
+      treePath: string,
+      newName: string
+    ): Promise<{ success: boolean; error?: string; oldPath?: string; newPath?: string }>;
+    move(
+      kernelId: string,
+      treePath: string,
+      newPath: string,
+    ): Promise<{ success: boolean; error?: string; oldPath?: string; newPath?: string }>;
+    duplicate(
+      kernelId: string,
+      treePath: string,
+      newPath: string,
+    ): Promise<{ success: boolean; error?: string; newPath?: string }>;
     addFile(
       kernelId: string,
       sourcePath: string,

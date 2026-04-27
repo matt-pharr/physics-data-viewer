@@ -2,22 +2,20 @@
  * DuplicateDialog — lightweight modal for deep-copying a tree node to a new path.
  *
  * Pre-fills with the current dot-path and returns the destination path.
- * For file-backed nodes, shows an additional filename field.
  */
 
 import React, { useEffect, useRef, useState } from 'react';
 import { useModalKeyboard } from '../../hooks/useModalKeyboard';
-import { FILE_BACKED_TYPES, defaultExtension } from './tree-file-utils';
 
 interface DuplicateDialogProps {
   currentPath: string;
   nodeType: string;
-  onDuplicate: (newPath: string, filename?: string) => void;
+  onDuplicate: (newPath: string) => void;
   onCancel: () => void;
 }
 
 /** Modal used by the Tree context menu's "Duplicate to..." action. */
-export const DuplicateDialog: React.FC<DuplicateDialogProps> = ({ currentPath, nodeType, onDuplicate, onCancel }) => {
+export const DuplicateDialog: React.FC<DuplicateDialogProps> = ({ currentPath, onDuplicate, onCancel }) => {
   const defaultKey = currentPath.split('.').pop() ?? '';
   const copyKey = defaultKey + '_copy';
   const parentSegments = currentPath.split('.');
@@ -25,9 +23,6 @@ export const DuplicateDialog: React.FC<DuplicateDialogProps> = ({ currentPath, n
   const defaultPath = parentSegments.join('.');
 
   const [path, setPath] = useState(defaultPath);
-  const isFileBacked = FILE_BACKED_TYPES.has(nodeType);
-  const ext = defaultExtension(nodeType);
-  const [filename, setFilename] = useState(isFileBacked && ext ? copyKey + ext : '');
   const inputRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
@@ -40,8 +35,7 @@ export const DuplicateDialog: React.FC<DuplicateDialogProps> = ({ currentPath, n
 
   const handleSubmit = () => {
     if (!canDuplicate) return;
-    const trimmedFilename = filename.trim();
-    onDuplicate(trimmed, isFileBacked && trimmedFilename ? trimmedFilename : undefined);
+    onDuplicate(trimmed);
   };
 
   const handleKeyDown = useModalKeyboard({ onSubmit: handleSubmit, onCancel });
@@ -72,19 +66,12 @@ export const DuplicateDialog: React.FC<DuplicateDialogProps> = ({ currentPath, n
               placeholder="parent.child.name"
             />
           </label>
-          {isFileBacked && (
-            <label>
-              Filename {!ext && <span className="dialog-info-text">(leave blank to keep original)</span>}
-              <input
-                type="text"
-                value={filename}
-                onChange={(e) => setFilename(e.target.value)}
-                onKeyDown={handleKeyDown}
-                placeholder={ext ? copyKey + ext : 'original filename'}
-              />
-            </label>
-          )}
-          <div className="dialog-info-text">All parent containers in the destination path must already exist.</div>
+          <div className="dialog-info-text">
+            Use dots to separate path segments.
+            For example, <code>backup.{copyKey}</code> puts the copy
+            inside the <code>backup</code> container.
+            All parent containers must already exist.
+          </div>
         </div>
 
         <div className="dialog-footer">
