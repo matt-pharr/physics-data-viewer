@@ -103,9 +103,9 @@ class TestSubtreeDigestMatchesRoot:
         dict.__setitem__(root, "sub", child)
 
         # Compute digest of child via the root traversal
-        from pdv.checksum import _node_digest
+        from pdv.checksum import node_digest
 
-        child_via_root = _node_digest(child, None).hex()
+        child_via_root = node_digest(child, None).hex()
 
         # Compute directly
         child_direct = tree_checksum(child)

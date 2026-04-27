@@ -19,6 +19,17 @@ from typing import Any, Callable
 
 from pdv.handlers import register
 
+# In-memory autosave checksum cache. Maps tree_path → (digest_bytes, descriptor).
+# Allows subsequent autosaves to skip serialization for unchanged data nodes.
+# Cleared on explicit save and on kernel shutdown.
+_autosave_cache: dict[str, tuple[bytes, dict]] = {}
+
+
+def clear_autosave_cache() -> None:
+    """Clear the in-memory autosave checksum cache."""
+    global _autosave_cache  # noqa: PLW0603
+    _autosave_cache = {}
+
 
 def _count_nodes(tree: "Any") -> int:
     """Count total nodes in a tree recursively (no I/O)."""
@@ -42,6 +53,7 @@ def _collect_nodes(
     on_progress: "Callable[[int], None] | None" = None,
     counter: "list[int] | None" = None,
     missing_files: "list[str] | None" = None,
+    autosave_cache: "dict[str, tuple[bytes, dict]] | None" = None,
 ) -> list:
     """Recursively serialize tree nodes and return descriptor list.
 
@@ -96,6 +108,7 @@ def _collect_nodes(
                 save_dir,
                 trusted=True,
                 source_dir=working_dir or save_dir,
+                autosave_cache=autosave_cache,
             )
         except PDVSerializationError as exc:
             if missing_files is not None and str(exc).startswith("File not found:"):
@@ -130,6 +143,7 @@ def _collect_nodes(
                     on_progress=on_progress,
                     counter=counter,
                     missing_files=missing_files,
+                    autosave_cache=autosave_cache,
                 )
             )
         elif descriptor.get("metadata", {}).get("composite") and isinstance(value, dict):
@@ -146,6 +160,7 @@ def _collect_nodes(
                     on_progress=on_progress,
                     counter=counter,
                     missing_files=missing_files,
+                    autosave_cache=autosave_cache,
                 )
             )
     return nodes
@@ -685,6 +700,7 @@ def serialize_tree_to_dir(
     save_dir: str,
     *,
     on_progress: "Callable[[str, int, int], None] | None" = None,
+    autosave_cache: "dict[str, tuple[bytes, dict]] | None" = None,
 ) -> dict:
     """Serialize the in-memory tree to *save_dir* and return save metadata.
 
@@ -733,6 +749,7 @@ def serialize_tree_to_dir(
         working_dir=working_dir,
         on_progress=_emit_progress,
         missing_files=missing_files,
+        autosave_cache=autosave_cache,
     )
     if missing_files:
         return {
@@ -792,11 +809,17 @@ def handle_project_save(msg: dict) -> None:
     msg : dict
         Parsed PDV message envelope.
     """
+    global _autosave_cache  # noqa: PLW0603
     from pdv.comms import get_pdv_tree, send_error, send_message  # noqa: PLC0415
 
     msg_id = msg.get("msg_id")
     payload = msg.get("payload", {})
     save_dir = payload.get("save_dir", "")
+    is_autosave = payload.get("is_autosave", False)
+    clear_cache = payload.get("clear_cache", False)
+
+    if clear_cache:
+        _autosave_cache = {}
 
     if not save_dir:
         send_error(
@@ -823,8 +846,11 @@ def handle_project_save(msg: dict) -> None:
             {"operation": "save", "phase": phase, "current": current, "total": total},
         )
 
+    cache = _autosave_cache if is_autosave else None
     try:
-        results = serialize_tree_to_dir(tree, save_dir, on_progress=_progress)
+        results = serialize_tree_to_dir(
+            tree, save_dir, on_progress=_progress, autosave_cache=cache,
+        )
     except Exception as exc:  # noqa: BLE001
         import sys  # noqa: PLC0415
         import traceback  # noqa: PLC0415
@@ -837,6 +863,9 @@ def handle_project_save(msg: dict) -> None:
             in_reply_to=msg_id,
         )
         return
+
+    if not is_autosave:
+        _autosave_cache = {}
 
     send_message(
         "pdv.project.save.response",
