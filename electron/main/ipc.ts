@@ -1285,6 +1285,8 @@ export interface ProjectSaveResult {
   nodeCount: number;
   /** Project name stored in the manifest (may be absent for older projects). */
   projectName?: string;
+  /** Tree paths of file-backed nodes whose backing files were missing during save. */
+  missingFiles?: string[];
 }
 
 /**
@@ -1303,6 +1305,8 @@ export interface ProjectLoadResult {
   savedPdvVersion: string | null;
   /** Project name stored in the manifest, or null if absent. */
   projectName: string | null;
+  /** Tree paths of file-backed nodes whose files were missing from the save directory. */
+  missingFiles?: string[];
 }
 
 /**

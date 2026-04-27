@@ -301,6 +301,7 @@ function setup() {
       nodeCount: 0,
       moduleOwnedFiles: [],
       moduleManifests: [],
+      missingFiles: [],
     })),
     load: vi.fn(async (_saveDir: string, onBeforePush?: () => Promise<void>) => {
       if (onBeforePush) await onBeforePush();
@@ -1033,6 +1034,7 @@ describe("Step 5 IPC handlers", () => {
           workdir_path: "/tmp/pdv-test/my_mod/lib/helpers.py",
         },
       ],
+      missingFiles: [],
     });
     const save = getHandler(IPC.project.save);
     await save({}, "/tmp/project", { tabs: [], activeTabId: 1 });
@@ -1077,6 +1079,7 @@ describe("Step 5 IPC handlers", () => {
           ],
         },
       ],
+      missingFiles: [],
     });
     const save = getHandler(IPC.project.save);
     await save({}, "/tmp/project", { tabs: [], activeTabId: 1 });
@@ -1106,6 +1109,7 @@ describe("Step 5 IPC handlers", () => {
           workdir_path: "/tmp/pdv-test/my_mod/scripts/gone.py",
         },
       ],
+      missingFiles: [],
     });
     (mocks.fsCopyFile as unknown as ReturnType<typeof vi.fn>).mockImplementationOnce(() => {
       const err = Object.assign(new Error("ENOENT"), { code: "ENOENT" });

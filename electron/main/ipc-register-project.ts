@@ -77,8 +77,9 @@ interface RegisterProjectIpcHandlersOptions {
 async function syncModuleOwnedFilesToSaveDir(
   saveDir: string,
   moduleOwnedFiles: ModuleOwnedFile[] | undefined,
-): Promise<void> {
-  if (!moduleOwnedFiles || moduleOwnedFiles.length === 0) return;
+): Promise<string[]> {
+  const failedPaths: string[] = [];
+  if (!moduleOwnedFiles || moduleOwnedFiles.length === 0) return failedPaths;
   for (const entry of moduleOwnedFiles) {
     if (!entry.module_id || !entry.source_rel_path || !entry.workdir_path) {
       continue;
@@ -100,8 +101,7 @@ async function syncModuleOwnedFilesToSaveDir(
     } catch (error) {
       const code = (error as NodeJS.ErrnoException)?.code;
       if (code === "ENOENT") {
-        // Working-dir file vanished between serialization and sync —
-        // harmless, just skip it.
+        failedPaths.push(`${entry.module_id}/${entry.source_rel_path}`);
         continue;
       }
       console.warn(
@@ -110,6 +110,7 @@ async function syncModuleOwnedFilesToSaveDir(
       );
     }
   }
+  return failedPaths;
 }
 
 /**
@@ -251,13 +252,26 @@ export function registerProjectIpcHandlers(
       const seq = ++saveSeq;
       console.debug(`[project:save] IPC received seq=${seq} saveDir=${saveDir}`);
 
-      const doSave = async (): Promise<{ checksum: string; nodeCount: number; projectName?: string }> => {
+      const doSave = async (): Promise<{ checksum: string; nodeCount: number; projectName?: string; missingFiles?: string[] }> => {
         console.debug(`[project:save] seq=${seq} starting (was queued behind previous save)`);
         const saveResult = await projectManager.save(saveDir, codeCells, {
           language: getActiveKernelLanguage(),
           interpreterPath: getInterpreterPath(),
           projectName,
         });
+
+        // If the serializer detected missing backing files it aborted before
+        // writing tree-index.json or project.json, so the existing save dir is
+        // still intact. Return immediately so the renderer can block the save
+        // and offer Save As.
+        if (saveResult.missingFiles.length > 0) {
+          console.debug(`[project:save] seq=${seq} BLOCKED — missing backing files`);
+          return {
+            checksum: saveResult.checksum,
+            nodeCount: saveResult.nodeCount,
+            missingFiles: saveResult.missingFiles,
+          };
+        }
 
         const pendingModuleImports = getPendingModuleImports();
         const pendingModuleSettings = getPendingModuleSettings();
@@ -293,7 +307,7 @@ export function registerProjectIpcHandlers(
         // TODO(#182): propagate deletions — if a module-owned file was removed
         // from the tree, the pristine copy under <saveDir>/modules/<id>/ is
         // left behind. Safe lacuna for now; fix alongside the GitHub push flow.
-        await syncModuleOwnedFilesToSaveDir(saveDir, saveResult.moduleOwnedFiles);
+        const syncFailedPaths = await syncModuleOwnedFilesToSaveDir(saveDir, saveResult.moduleOwnedFiles);
         await writeModuleManifestsToSaveDir(saveDir, saveResult.moduleManifests, moduleManager);
 
         setActiveProjectDir(saveDir);
@@ -306,8 +320,15 @@ export function registerProjectIpcHandlers(
         } catch {
           // Non-blocking
         }
+
+        const allMissingFiles = [...(saveResult.missingFiles ?? []), ...syncFailedPaths];
         console.debug(`[project:save] seq=${seq} DONE`);
-        return { checksum: saveResult.checksum, nodeCount: saveResult.nodeCount, projectName: savedProjectName };
+        return {
+          checksum: saveResult.checksum,
+          nodeCount: saveResult.nodeCount,
+          projectName: savedProjectName,
+          missingFiles: allMissingFiles.length > 0 ? allMissingFiles : undefined,
+        };
       };
 
       // Chain behind any in-flight save so they never overlap.
@@ -319,12 +340,13 @@ export function registerProjectIpcHandlers(
 
   ipcMain.handle(IPC.project.load, async (_event, saveDir: string) => {
     // Copy file-backed node files from save dir into working dir before kernel load.
+    let loadFailedPaths: string[] = [];
     const activeKernelId = getActiveKernelId();
     if (activeKernelId) {
       const workingDir = kernelWorkingDirs.get(activeKernelId);
       if (workingDir) {
         const win = getMainWindow();
-        const failedPaths = await copyFilesForLoad(saveDir, workingDir, win ? (current, total) => {
+        loadFailedPaths = await copyFilesForLoad(saveDir, workingDir, win ? (current, total) => {
           win.webContents.send(IPC.push.progress, {
             operation: "load",
             phase: "Copying files",
@@ -332,10 +354,10 @@ export function registerProjectIpcHandlers(
             total,
           });
         } : undefined);
-        if (failedPaths.length > 0) {
+        if (loadFailedPaths.length > 0) {
           console.warn(
-            `[pdv] load: ${failedPaths.length} file(s) could not be copied from save directory:`,
-            failedPaths,
+            `[pdv] load: ${loadFailedPaths.length} file(s) could not be copied from save directory:`,
+            loadFailedPaths,
           );
         }
       }
@@ -412,7 +434,10 @@ export function registerProjectIpcHandlers(
       // Non-blocking
     }
 
-    return { codeCells, checksum, checksumValid, nodeCount, savedPdvVersion, projectName };
+    return {
+      codeCells, checksum, checksumValid, nodeCount, savedPdvVersion, projectName,
+      missingFiles: loadFailedPaths.length > 0 ? loadFailedPaths : undefined,
+    };
   });
 
   // Kernel-working-dir scoped code-cell autosave. Replaces the previous

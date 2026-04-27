@@ -526,6 +526,7 @@ export function registerIpcHandlers(
     setActiveKernelId: (id) => { activeKernelId = id; },
     getActiveKernelId: () => activeKernelId,
     getActiveProjectDir: () => activeProjectDir,
+    getWorkingDirBase: () => readConfig(configStore).workingDirBase,
     bindActiveProjectModules,
   });
 
@@ -765,6 +766,9 @@ export function registerCommPushForwarding(
           : [],
         moduleManifests: Array.isArray(payload.module_manifests)
           ? (payload.module_manifests as unknown as ModuleManifestBundle[])
+          : [],
+        missingFiles: Array.isArray(payload.missing_files)
+          ? (payload.missing_files as string[])
           : [],
       });
       win.webContents.send(IPC.push.menuAction, { action: "project:save", path: saveDir });
