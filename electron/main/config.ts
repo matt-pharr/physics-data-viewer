@@ -196,7 +196,7 @@ function parseConfig(raw: string, filePath: string): Partial<PDVConfig> {
       result.theme = theme;
     }
   }
-  for (const key of ["pythonEditorCmd", "juliaEditorCmd", "fileManagerCmd"] as const) {
+  for (const key of ["pythonEditorCmd", "juliaEditorCmd", "fileManagerCmd", "defaultSaveLocation", "workingDirBase"] as const) {
     if (key in obj) {
       const val = obj[key];
       if (val !== null && val !== undefined && typeof val !== "string") {
