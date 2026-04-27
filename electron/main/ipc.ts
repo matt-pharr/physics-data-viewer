@@ -1155,10 +1155,10 @@ export interface TreeCreateGuiResult {
 /**
  * Result returned by `tree.createLib`.
  *
- * ``tree:createLib`` is workflow-B-only: it creates a new ``.py`` file
- * under ``<module_alias>.lib`` (or a nested sub-path thereof). When the
- * target does not live inside a known module alias, the handler returns
- * ``{ success: false, error }``.
+ * Creates a new ``.py`` lib file at the target path. When the target
+ * lives inside a known module, the lib gets ``module_id`` and
+ * ``source_rel_path`` for save-time sync. Standalone libs (outside
+ * any module) are also supported.
  */
 export interface TreeCreateLibResult {
   /** True when the lib file was created and the node was registered. */
@@ -1285,6 +1285,8 @@ export interface ProjectSaveResult {
   nodeCount: number;
   /** Project name stored in the manifest (may be absent for older projects). */
   projectName?: string;
+  /** Tree paths of file-backed nodes whose backing files were missing during save. */
+  missingFiles?: string[];
 }
 
 /**
@@ -1303,6 +1305,8 @@ export interface ProjectLoadResult {
   savedPdvVersion: string | null;
   /** Project name stored in the manifest, or null if absent. */
   projectName: string | null;
+  /** Tree paths of file-backed nodes whose files were missing from the save directory. */
+  missingFiles?: string[];
 }
 
 /**
@@ -1513,12 +1517,10 @@ export interface PDVApi {
     /**
      * Create a new PDVLib (`.py`) node inside a module's `lib` subtree.
      *
-     * Workflow B only — ``targetPath`` must live under a known module
-     * alias. Writes an empty ``<stem>.py`` to
-     * ``<workdir>/<alias>/.../<stem>.py`` and registers the node via
-     * ``pdv.file.register`` with ``source_rel_path`` set so §3's
-     * save-time sync mirrors future edits back to
-     * ``<saveDir>/modules/<alias>/.../<stem>.py``.
+     * Create a new ``.py`` lib file and register it in the tree.
+     * When ``targetPath`` lives under a known module alias, the lib
+     * gets ``module_id`` and ``source_rel_path`` for save-time sync.
+     * Standalone libs (outside any module) are also supported.
      *
      * @param kernelId - Target kernel ID.
      * @param targetPath - Dot-path under which to register the lib.
@@ -1585,7 +1587,6 @@ export interface PDVApi {
       kernelId: string,
       treePath: string,
       newPath: string,
-      filename?: string
     ): Promise<TreeMoveResult>;
     /**
      * Deep-copy a tree node to a new path.
@@ -1593,14 +1594,12 @@ export interface PDVApi {
      * @param kernelId - Target kernel ID.
      * @param treePath - Dot-path of the node to copy.
      * @param newPath - Full dot-path for the duplicate.
-     * @param filename - Optional override for the backing file name.
      * @returns Duplicate result with the new path.
      */
     duplicate(
       kernelId: string,
       treePath: string,
       newPath: string,
-      filename?: string
     ): Promise<TreeDuplicateResult>;
     /**
      * Invoke a registered custom handler for a tree node.

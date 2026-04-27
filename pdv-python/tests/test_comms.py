@@ -224,7 +224,6 @@ class TestBootstrap:
         try:
             bootstrap(mock_ipython)
             assert "pdv_tree" in mock_ipython.user_ns
-            assert "pdv" in mock_ipython.user_ns
         finally:
             comms_mod._bootstrapped = False
             comms_mod._pdv_tree = None

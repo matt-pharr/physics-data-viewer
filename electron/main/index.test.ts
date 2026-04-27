@@ -301,6 +301,7 @@ function setup() {
       nodeCount: 0,
       moduleOwnedFiles: [],
       moduleManifests: [],
+      missingFiles: [],
     })),
     load: vi.fn(async (_saveDir: string, onBeforePush?: () => Promise<void>) => {
       if (onBeforePush) await onBeforePush();
@@ -932,18 +933,36 @@ describe("Step 5 IPC handlers", () => {
     );
   });
 
-  it("tree:createLib rejects targets that are not inside a known module", async () => {
-    setup();
+  it("tree:createLib creates standalone libs outside modules without module_id", async () => {
+    const { commRouter } = setup();
     const start = getHandler(IPC.kernels.start);
     await start({}, { language: "python" });
+    (commRouter.request as unknown as ReturnType<typeof vi.fn>).mockResolvedValue(
+      makeMessage({})
+    );
 
     const createLib = getHandler(IPC.tree.createLib);
     const result = (await createLib({}, "kernel-1", "free_floating", "helpers")) as {
       success: boolean;
-      error?: string;
+      libPath?: string;
+      treePath?: string;
     };
-    expect(result.success).toBe(false);
-    expect(result.error).toContain("must live inside a known module");
+    expect(result.success).toBe(true);
+    expect(result.treePath).toBe("free_floating.helpers");
+
+    const fileRegisterCalls = (commRouter.request as unknown as ReturnType<typeof vi.fn>).mock.calls
+      .filter((c: unknown[]) => c[0] === PDVMessageType.FILE_REGISTER);
+    expect(fileRegisterCalls.length).toBeGreaterThanOrEqual(1);
+    const payload = fileRegisterCalls[fileRegisterCalls.length - 1][1];
+    expect(payload).toEqual(
+      expect.objectContaining({
+        tree_path: "free_floating",
+        filename: "helpers.py",
+        node_type: "lib",
+      }),
+    );
+    expect(payload.module_id).toBeUndefined();
+    expect(payload.source_rel_path).toBeUndefined();
   });
 
   it("tree:createNote sends correct payload to kernel and returns notePath", async () => {
@@ -1033,6 +1052,7 @@ describe("Step 5 IPC handlers", () => {
           workdir_path: "/tmp/pdv-test/my_mod/lib/helpers.py",
         },
       ],
+      missingFiles: [],
     });
     const save = getHandler(IPC.project.save);
     await save({}, "/tmp/project", { tabs: [], activeTabId: 1 });
@@ -1077,6 +1097,7 @@ describe("Step 5 IPC handlers", () => {
           ],
         },
       ],
+      missingFiles: [],
     });
     const save = getHandler(IPC.project.save);
     await save({}, "/tmp/project", { tabs: [], activeTabId: 1 });
@@ -1106,6 +1127,7 @@ describe("Step 5 IPC handlers", () => {
           workdir_path: "/tmp/pdv-test/my_mod/scripts/gone.py",
         },
       ],
+      missingFiles: [],
     });
     (mocks.fsCopyFile as unknown as ReturnType<typeof vi.fn>).mockImplementationOnce(() => {
       const err = Object.assign(new Error("ENOENT"), { code: "ENOENT" });

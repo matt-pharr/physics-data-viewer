@@ -207,6 +207,8 @@ export interface ProjectSaveResult {
   nodeCount: number;
   /** Project name stored in the manifest (may be absent for older projects). */
   projectName?: string;
+  /** Tree paths of file-backed nodes whose backing files were missing during save. */
+  missingFiles?: string[];
 }
 
 /** Result returned from `project.load()`. */
@@ -223,6 +225,8 @@ export interface ProjectLoadResult {
   savedPdvVersion: string | null;
   /** Project name stored in the manifest, or null if absent. */
   projectName: string | null;
+  /** Tree paths of file-backed nodes whose files were missing from the save directory. */
+  missingFiles?: string[];
 }
 
 /** Lightweight manifest peek returned before kernel start. */
@@ -273,6 +277,10 @@ export interface Config {
   juliaEditorCmd?: string;
   /** File-manager command to reveal a file/folder. Uses `{}` as placeholder. */
   fileManagerCmd?: string;
+  /** Default parent directory for new project saves (pre-fills Save As dialog). */
+  defaultSaveLocation?: string;
+  /** Base directory for session working directories. */
+  workingDirBase?: string;
   settings?: {
     /** Keyboard shortcut overrides. */
     shortcuts?: {
@@ -708,6 +716,26 @@ export interface PDVApi {
       targetPath: string,
       libName: string
     ): Promise<{ success: boolean; error?: string; libPath?: string; treePath?: string }>;
+    createNode(
+      kernelId: string,
+      targetPath: string,
+      nodeName: string
+    ): Promise<{ success: boolean; error?: string; treePath?: string }>;
+    rename(
+      kernelId: string,
+      treePath: string,
+      newName: string
+    ): Promise<{ success: boolean; error?: string; oldPath?: string; newPath?: string }>;
+    move(
+      kernelId: string,
+      treePath: string,
+      newPath: string,
+    ): Promise<{ success: boolean; error?: string; oldPath?: string; newPath?: string }>;
+    duplicate(
+      kernelId: string,
+      treePath: string,
+      newPath: string,
+    ): Promise<{ success: boolean; error?: string; newPath?: string }>;
     addFile(
       kernelId: string,
       sourcePath: string,

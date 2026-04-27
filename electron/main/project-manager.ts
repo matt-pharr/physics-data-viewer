@@ -234,15 +234,30 @@ export class ProjectManager {
   constructor(private readonly commRouter: CommRouter) {}
 
   /**
-   * Create a uniquely named working directory under the OS temp directory.
+   * Create a uniquely named working directory.
+   *
+   * Uses a persistent, app-managed directory instead of OS temp space to
+   * prevent silent purging during long-running sessions. A `session.lock`
+   * file is written so that orphan cleanup on next startup can distinguish
+   * active sessions from crashed ones.
    *
    * The caller (Electron main process) is responsible for deleting this
    * directory on clean shutdown. See ARCHITECTURE.md §6.1.
    *
+   * @param customBase - Optional base directory override from user settings.
+   *   Falls back to `~/.PDV/working/`.
    * @returns Absolute path to the newly created directory.
    */
-  async createWorkingDir(): Promise<string> {
-    return fs.mkdtemp(path.join(os.tmpdir(), "pdv-"));
+  async createWorkingDir(customBase?: string): Promise<string> {
+    const workingBase = customBase || path.join(os.homedir(), ".PDV", "working");
+    await fs.mkdir(workingBase, { recursive: true });
+    const dir = await fs.mkdtemp(path.join(workingBase, "pdv-"));
+    await fs.writeFile(
+      path.join(dir, "session.lock"),
+      JSON.stringify({ pid: process.pid, createdAt: Date.now() }),
+      "utf8",
+    );
+    return dir;
   }
 
   /**
@@ -282,6 +297,7 @@ export class ProjectManager {
     nodeCount: number;
     moduleOwnedFiles: ModuleOwnedFile[];
     moduleManifests: ModuleManifestBundle[];
+    missingFiles: string[];
   }>();
 
   /**
@@ -298,6 +314,7 @@ export class ProjectManager {
       nodeCount: number;
       moduleOwnedFiles: ModuleOwnedFile[];
       moduleManifests: ModuleManifestBundle[];
+      missingFiles: string[];
     },
   ): void {
     this._cachedKernelResults.set(saveDir, results);
@@ -322,6 +339,7 @@ export class ProjectManager {
     nodeCount: number;
     moduleOwnedFiles: ModuleOwnedFile[];
     moduleManifests: ModuleManifestBundle[];
+    missingFiles: string[];
   }> {
     assertCodeCellData(codeCells);
 
@@ -336,11 +354,12 @@ export class ProjectManager {
     let nodeCount: number;
     let moduleOwnedFiles: ModuleOwnedFile[];
     let moduleManifests: ModuleManifestBundle[];
+    let missingFiles: string[];
 
     if (cached) {
       this._cachedKernelResults.delete(saveDir);
       console.debug(`[ProjectManager.save] using cached kernel results for ${saveDir}`);
-      ({ checksum, nodeCount, moduleOwnedFiles, moduleManifests } = cached);
+      ({ checksum, nodeCount, moduleOwnedFiles, moduleManifests, missingFiles } = cached);
     } else {
       console.debug(`[ProjectManager.save] sending pdv.project.save comm (+${(performance.now() - t0).toFixed(0)}ms)`);
       const response = await this.commRouter.request(PDVMessageType.PROJECT_SAVE, {
@@ -353,6 +372,7 @@ export class ProjectManager {
         node_count?: number;
         module_owned_files?: ModuleOwnedFile[];
         module_manifests?: ModuleManifestBundle[];
+        missing_files?: string[];
       };
       checksum = payload.checksum ?? "";
       nodeCount = payload.node_count ?? 0;
@@ -362,6 +382,19 @@ export class ProjectManager {
       moduleManifests = Array.isArray(payload.module_manifests)
         ? payload.module_manifests
         : [];
+      missingFiles = Array.isArray(payload.missing_files)
+        ? payload.missing_files
+        : [];
+    }
+
+    // If backing files are missing, abort before writing any project metadata.
+    // This preserves the existing save directory intact so the user can Save As
+    // to a different location without corrupting their known-good save.
+    if (missingFiles.length > 0) {
+      console.warn(
+        `[ProjectManager.save] ABORTED — ${missingFiles.length} file-backed node(s) have missing backing files`,
+      );
+      return { checksum, nodeCount, moduleOwnedFiles, moduleManifests, missingFiles };
     }
 
     await fs.writeFile(
@@ -401,7 +434,7 @@ export class ProjectManager {
     );
     console.debug(`[ProjectManager.save] DONE (+${(performance.now() - t0).toFixed(0)}ms)`);
 
-    return { checksum, nodeCount, moduleOwnedFiles, moduleManifests };
+    return { checksum, nodeCount, moduleOwnedFiles, moduleManifests, missingFiles };
   }
 
   /**

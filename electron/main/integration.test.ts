@@ -19,16 +19,13 @@ const BOOTSTRAP_AND_OPEN_COMM = `
 from IPython import get_ipython
 import pdv.comms as _pdv_comms
 from pdv.tree import PDVTree
-from pdv.namespace import PDVApp
 try:
     from ipykernel.comm import Comm
 except Exception:
     from comm import Comm
 _ip = get_ipython()
 _tree = PDVTree()
-_app = PDVApp()
 _ip.user_ns["pdv_tree"] = _tree
-_ip.user_ns["pdv"] = _app
 _pdv_comms._pdv_tree = _tree
 _pdv_comms._ip = _ip
 _pdv_comms._bootstrapped = True
@@ -436,6 +433,249 @@ describe("@slow Cross-boundary integration (Python + Electron)", { timeout: 120_
     } finally {
       unsubscribe();
     }
+  });
+
+  // ── Tree context menu operations ──────────────────────────────────
+
+  it("pdv.tree.create_node creates an empty container and pushes tree.changed", async () => {
+    const changedPromise = waitForPush(router, PDVMessageType.TREE_CHANGED);
+    const response = await router.request(PDVMessageType.TREE_CREATE_NODE, {
+      parent_path: "",
+      name: "ctx_container",
+    });
+    expect(response.status).toBe("ok");
+    const payload = response.payload as { path?: string; created?: boolean };
+    expect(payload.created).toBe(true);
+    expect(payload.path).toBe("ctx_container");
+
+    const push = await changedPromise;
+    const pushPayload = push.payload as { changed_paths?: string[] };
+    expect(pushPayload.changed_paths).toContain("ctx_container");
+
+    const listResponse = await router.request(PDVMessageType.TREE_LIST, { path: "" });
+    const nodes = ((listResponse.payload as { nodes?: Array<{ key?: string }> }).nodes ?? []);
+    expect(nodes.find((n) => n.key === "ctx_container")).toBeDefined();
+  });
+
+  it("pdv.tree.create_node rejects duplicate names", async () => {
+    await expect(
+      router.request(PDVMessageType.TREE_CREATE_NODE, {
+        parent_path: "",
+        name: "ctx_container",
+      })
+    ).rejects.toThrow(/already exists/);
+  });
+
+  it("pdv.tree.rename renames a node and pushes tree.changed", async () => {
+    const seedResult = await km.execute(kernelId, {
+      code: "pdv_tree['rename_me'] = 'hello'",
+    });
+    expect(seedResult.error).toBeUndefined();
+    await waitForPush(router, PDVMessageType.TREE_CHANGED);
+
+    const changedPromise = waitForPush(router, PDVMessageType.TREE_CHANGED);
+    const response = await router.request(PDVMessageType.TREE_RENAME, {
+      path: "rename_me",
+      new_name: "renamed",
+    });
+    expect(response.status).toBe("ok");
+    const payload = response.payload as { old_path?: string; new_path?: string; renamed?: boolean };
+    expect(payload.renamed).toBe(true);
+    expect(payload.old_path).toBe("rename_me");
+    expect(payload.new_path).toBe("renamed");
+    await changedPromise;
+
+    const getResponse = await router.request(PDVMessageType.TREE_GET, {
+      path: "renamed",
+      mode: "value",
+    });
+    expect(getResponse.status).toBe("ok");
+    expect(String((getResponse.payload as { value?: unknown }).value)).toContain("hello");
+
+    await expect(
+      router.request(PDVMessageType.TREE_GET, { path: "rename_me", mode: "value" })
+    ).rejects.toThrow(/path/i);
+  });
+
+  it("pdv.tree.move relocates a node to a new path", async () => {
+    const seedResult = await km.execute(kernelId, {
+      code: "pdv_tree['move_src'] = {'a': 1, 'b': 2}",
+    });
+    expect(seedResult.error).toBeUndefined();
+    await waitForPush(router, PDVMessageType.TREE_CHANGED);
+
+    const changedPromise = waitForPush(router, PDVMessageType.TREE_CHANGED);
+    const response = await router.request(PDVMessageType.TREE_MOVE, {
+      path: "move_src",
+      new_path: "ctx_container.moved",
+    });
+    expect(response.status).toBe("ok");
+    const payload = response.payload as { old_path?: string; new_path?: string; moved?: boolean };
+    expect(payload.moved).toBe(true);
+    await changedPromise;
+
+    const getResponse = await router.request(PDVMessageType.TREE_LIST, {
+      path: "ctx_container.moved",
+    });
+    expect(getResponse.status).toBe("ok");
+    const children = ((getResponse.payload as { nodes?: Array<{ key?: string }> }).nodes ?? []);
+    expect(children.map((n) => n.key)).toEqual(expect.arrayContaining(["a", "b"]));
+
+    await expect(
+      router.request(PDVMessageType.TREE_GET, { path: "move_src", mode: "value" })
+    ).rejects.toThrow(/path/i);
+  });
+
+  it("pdv.tree.move rejects circular moves", async () => {
+    const seedResult = await km.execute(kernelId, {
+      code: "pdv_tree['circ'] = {'inner': {'deep': 1}}",
+    });
+    expect(seedResult.error).toBeUndefined();
+    await waitForPush(router, PDVMessageType.TREE_CHANGED);
+
+    await expect(
+      router.request(PDVMessageType.TREE_MOVE, {
+        path: "circ",
+        new_path: "circ.inner.inside_itself",
+      })
+    ).rejects.toThrow(/subtree/i);
+  });
+
+  it("pdv.tree.duplicate deep-copies a node to a new path", async () => {
+    const seedResult = await km.execute(kernelId, {
+      code: "pdv_tree['dup_src'] = {'val': 42}",
+    });
+    expect(seedResult.error).toBeUndefined();
+    await waitForPush(router, PDVMessageType.TREE_CHANGED);
+
+    const changedPromise = waitForPush(router, PDVMessageType.TREE_CHANGED);
+    const response = await router.request(PDVMessageType.TREE_DUPLICATE, {
+      path: "dup_src",
+      new_path: "dup_copy",
+    });
+    expect(response.status).toBe("ok");
+    const payload = response.payload as { source_path?: string; new_path?: string; duplicated?: boolean };
+    expect(payload.duplicated).toBe(true);
+    await changedPromise;
+
+    const srcResponse = await router.request(PDVMessageType.TREE_LIST, { path: "dup_src" });
+    expect(srcResponse.status).toBe("ok");
+    const copyResponse = await router.request(PDVMessageType.TREE_LIST, { path: "dup_copy" });
+    expect(copyResponse.status).toBe("ok");
+    const copyChildren = ((copyResponse.payload as { nodes?: Array<{ key?: string }> }).nodes ?? []);
+    expect(copyChildren.find((n) => n.key === "val")).toBeDefined();
+  });
+
+  it("pdv.tree.duplicate rejects when destination already exists", async () => {
+    await expect(
+      router.request(PDVMessageType.TREE_DUPLICATE, {
+        path: "dup_src",
+        new_path: "dup_copy",
+      })
+    ).rejects.toThrow(/already exists/);
+  });
+
+  it("pdv.tree.delete removes a node and pushes tree.changed", async () => {
+    const seedResult = await km.execute(kernelId, {
+      code: "pdv_tree['delete_me'] = 'gone'",
+    });
+    expect(seedResult.error).toBeUndefined();
+    await waitForPush(router, PDVMessageType.TREE_CHANGED);
+
+    const changedPromise = waitForPush(router, PDVMessageType.TREE_CHANGED);
+    const response = await router.request(PDVMessageType.TREE_DELETE, {
+      path: "delete_me",
+    });
+    expect(response.status).toBe("ok");
+    const payload = response.payload as { path?: string; deleted?: boolean };
+    expect(payload.deleted).toBe(true);
+    await changedPromise;
+
+    await expect(
+      router.request(PDVMessageType.TREE_GET, { path: "delete_me", mode: "value" })
+    ).rejects.toThrow(/path/i);
+  });
+
+  it("pdv.file.register creates a standalone lib with sys.path wired", async () => {
+    const nodeUuid = generateNodeUuid();
+    const libDir = path.join(initialWorkingDir, "tree", nodeUuid);
+    await fs.mkdir(libDir, { recursive: true });
+    await fs.writeFile(
+      path.join(libDir, "helpers.py"),
+      "MAGIC = 42\n\ndef double(x):\n    return x * 2\n",
+      "utf8"
+    );
+
+    const changedPromise = waitForPush(router, PDVMessageType.TREE_CHANGED);
+    const response = await router.request(PDVMessageType.FILE_REGISTER, {
+      tree_path: "ctx_container",
+      filename: "helpers.py",
+      uuid: nodeUuid,
+      node_type: "lib",
+      name: "helpers",
+    });
+    expect(response.status).toBe("ok");
+    await changedPromise;
+
+    const listResponse = await router.request(PDVMessageType.TREE_LIST, {
+      path: "ctx_container",
+    });
+    const nodes = ((listResponse.payload as { nodes?: Array<{ key?: string; type?: string }> }).nodes ?? []);
+    const libNode = nodes.find((n) => n.key === "helpers");
+    expect(libNode).toBeDefined();
+    expect(libNode?.type).toBe("lib");
+
+    const importResult = await km.execute(kernelId, {
+      code: "from helpers import double; result = double(21)",
+    });
+    expect(importResult.error).toBeUndefined();
+    expect(importResult.stdout ?? "").not.toContain("Error");
+
+    const checkResult = await km.execute(kernelId, { code: "print(result)" });
+    expect(checkResult.error).toBeUndefined();
+    expect(checkResult.stdout?.trim()).toBe("42");
+  });
+
+  it("pdv.tree.move works for file-backed nodes (PDVLib)", async () => {
+    const changedPromise = waitForPush(router, PDVMessageType.TREE_CHANGED);
+    const response = await router.request(PDVMessageType.TREE_MOVE, {
+      path: "ctx_container.helpers",
+      new_path: "ctx_container.moved.helpers",
+    });
+    expect(response.status).toBe("ok");
+    await changedPromise;
+
+    const resolveResponse = await router.request(PDVMessageType.TREE_RESOLVE_FILE, {
+      path: "ctx_container.moved.helpers",
+    });
+    expect(resolveResponse.status).toBe("ok");
+    const filePath = (resolveResponse.payload as { file_path?: string }).file_path;
+    expect(filePath).toBeDefined();
+    expect(filePath).toMatch(/helpers\.py$/);
+  });
+
+  it("pdv.tree.duplicate copies file-backed nodes with new UUIDs", async () => {
+    const changedPromise = waitForPush(router, PDVMessageType.TREE_CHANGED);
+    const response = await router.request(PDVMessageType.TREE_DUPLICATE, {
+      path: "ctx_container.moved.helpers",
+      new_path: "ctx_container.helpers_copy",
+    });
+    expect(response.status).toBe("ok");
+    await changedPromise;
+
+    const origResolve = await router.request(PDVMessageType.TREE_RESOLVE_FILE, {
+      path: "ctx_container.moved.helpers",
+    });
+    const copyResolve = await router.request(PDVMessageType.TREE_RESOLVE_FILE, {
+      path: "ctx_container.helpers_copy",
+    });
+    expect(origResolve.status).toBe("ok");
+    expect(copyResolve.status).toBe("ok");
+
+    const origPath = (origResolve.payload as { file_path?: string }).file_path!;
+    const copyPath = (copyResolve.payload as { file_path?: string }).file_path!;
+    expect(copyPath).toMatch(/helpers\.py$/);
+    expect(copyPath).not.toBe(origPath);
   });
 
   it("kernel restart cycle re-bootstraps session and starts with an empty tree", async () => {

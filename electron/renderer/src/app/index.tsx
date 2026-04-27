@@ -1268,8 +1268,8 @@ const App: React.FC = () => {
           currentPath={moveTarget.path}
           nodeType={moveTarget.type}
           onCancel={() => setMoveTarget(null)}
-          onMove={(newPath, filename) => void runTreeAction(
-            () => window.pdv.tree.move(currentKernelId, moveTarget.path, newPath, filename),
+          onMove={(newPath) => void runTreeAction(
+            () => window.pdv.tree.move(currentKernelId, moveTarget.path, newPath),
             () => setMoveTarget(null),
           )}
         />
@@ -1280,8 +1280,8 @@ const App: React.FC = () => {
           currentPath={duplicateTarget.path}
           nodeType={duplicateTarget.type}
           onCancel={() => setDuplicateTarget(null)}
-          onDuplicate={(newPath, filename) => void runTreeAction(
-            () => window.pdv.tree.duplicate(currentKernelId, duplicateTarget.path, newPath, filename),
+          onDuplicate={(newPath) => void runTreeAction(
+            () => window.pdv.tree.duplicate(currentKernelId, duplicateTarget.path, newPath),
             () => setDuplicateTarget(null),
           )}
         />
@@ -1382,11 +1382,9 @@ const App: React.FC = () => {
               const result = await window.pdv.tree.createLib(currentKernelId, createLibTarget, name);
               if (!result.success) {
                 setLastError(result.error);
-              } else if (result.libPath) {
+              } else if (result.treePath) {
                 setTreeRefreshToken((t) => t + 1);
-                // Open the new lib in the external editor so the user can
-                // start typing right away — same UX as new script.
-                await window.pdv.script.edit(currentKernelId, result.libPath);
+                await window.pdv.script.edit(currentKernelId, result.treePath);
               }
             } catch (error) {
               setLastError(error instanceof Error ? error.message : String(error));
@@ -1454,7 +1452,7 @@ const App: React.FC = () => {
          <SaveAsDialog
            defaultLocation={currentProjectDir
              ? currentProjectDir.replace(/\/[^/]+\/?$/, '')
-             : null}
+             : config?.defaultSaveLocation ?? null}
            defaultName={currentProjectName ?? undefined}
            onSave={async (projectName, saveDir) => {
              setShowSaveAsDialog(false);

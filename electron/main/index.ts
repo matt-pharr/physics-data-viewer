@@ -333,13 +333,13 @@ async function ensureScriptFile(scriptPath: string, language: "python" | "julia"
  * @param language - Active kernel language (only Python is actually
  *   supported by the ``tree:createLib`` handler today; Julia falls back
  *   to a block-comment equivalent for future-proofing).
- * @param moduleAlias - Top-level tree alias of the owning PDVModule, so
- *   the stub can reference it in the header.
+ * @param moduleAlias - Top-level tree alias of the owning PDVModule (if
+ *   any), so the stub can reference it in the header.
  */
 async function ensureLibFile(
   libPath: string,
   language: "python" | "julia",
-  moduleAlias: string
+  moduleAlias?: string
 ): Promise<void> {
   try {
     await fs.stat(libPath);
@@ -354,10 +354,13 @@ async function ensureLibFile(
   const user = process.env.USER ?? process.env.USERNAME ?? "user";
   const host = os.hostname();
   const filename = path.basename(libPath);
+  const context = moduleAlias
+    ? `Library for PDVModule "${moduleAlias}"`
+    : "Standalone project library";
   const template = language === "julia"
     ? "#=\n" +
       `  ${filename}\n` +
-      `  Library module for PDVModule "${moduleAlias}"\n` +
+      `  ${context}\n` +
       `  created by ${user} on ${host} on ${date} at ${time}\n` +
       "=#\n\n" +
       "# Define helper functions below — they will be importable from\n" +
@@ -367,7 +370,7 @@ async function ensureLibFile(
       "# end\n"
     : '"""\n' +
       `${filename}\n` +
-      `Library module for PDVModule "${moduleAlias}"\n` +
+      `${context}\n` +
       `created by ${user} on ${host} on ${date} at ${time}\n` +
       '"""\n\n' +
       "# Define helper functions below — they will be importable from\n" +
@@ -526,6 +529,7 @@ export function registerIpcHandlers(
     setActiveKernelId: (id) => { activeKernelId = id; },
     getActiveKernelId: () => activeKernelId,
     getActiveProjectDir: () => activeProjectDir,
+    getWorkingDirBase: () => readConfig(configStore).workingDirBase,
     bindActiveProjectModules,
   });
 
@@ -765,6 +769,9 @@ export function registerCommPushForwarding(
           : [],
         moduleManifests: Array.isArray(payload.module_manifests)
           ? (payload.module_manifests as unknown as ModuleManifestBundle[])
+          : [],
+        missingFiles: Array.isArray(payload.missing_files)
+          ? (payload.missing_files as string[])
           : [],
       });
       win.webContents.send(IPC.push.menuAction, { action: "project:save", path: saveDir });

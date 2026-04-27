@@ -60,6 +60,9 @@ export const RenameDialog: React.FC<RenameDialogProps> = ({ currentKey, nodePath
               placeholder={currentKey}
             />
           </label>
+          <div className="dialog-info-text">
+            The node stays in the same location — only its name changes. Spaces are replaced with underscores.
+          </div>
         </div>
 
         <div className="dialog-footer">
