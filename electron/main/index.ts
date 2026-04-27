@@ -636,6 +636,12 @@ export function registerIpcHandlers(
     themesDir,
     stateDir,
     setAllowClose,
+    onConfigChanged: (prev, next) => {
+      if (prev.autoSaveIntervalSeconds !== next.autoSaveIntervalSeconds && activeKernelId) {
+        const intervalMs = (next.autoSaveIntervalSeconds ?? 300) * 1000;
+        projectManager.startAutosaveTimer(intervalMs, triggerAutosave);
+      }
+    },
   });
 
   registerModuleWindowIpcHandlers({
