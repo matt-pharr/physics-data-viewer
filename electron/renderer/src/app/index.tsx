@@ -865,6 +865,16 @@ const App: React.FC = () => {
     return unsub;
   }, [currentKernelId, handleExecute]);
 
+  // Autosave: respond to main process trigger by sending current code cells
+  useEffect(() => {
+    if (!window.pdv?.autosave) return;
+    const unsub = window.pdv.autosave.onTrigger(() => {
+      const codeCells = { tabs: cellTabsRef.current, activeTabId: activeCellTab };
+      void window.pdv.autosave.run(codeCells);
+    });
+    return unsub;
+  }, [activeCellTab]);
+
   // Whether the session has no user work (no project, no code, no logs, no notes).
   const isPristine = currentProjectDir === null
     && cellTabs.every((t) => !t.code.trim())

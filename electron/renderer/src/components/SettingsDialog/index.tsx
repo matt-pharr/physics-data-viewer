@@ -79,6 +79,7 @@ export const SettingsDialog: React.FC<SettingsDialogProps> = ({
   const [fileManagerCmd, setFileManagerCmd] = useState(DEFAULT_FILE_MANAGER);
   const [defaultSaveLocation, setDefaultSaveLocation] = useState('');
   const [workingDirBase, setWorkingDirBase] = useState('');
+  const [autoSaveInterval, setAutoSaveInterval] = useState(300);
 
   // About tab state
   const [appVersion, setAppVersion] = useState<string>('…');
@@ -109,6 +110,7 @@ export const SettingsDialog: React.FC<SettingsDialogProps> = ({
     setFileManagerCmd(config?.fileManagerCmd ?? DEFAULT_FILE_MANAGER);
     setDefaultSaveLocation(config?.defaultSaveLocation ?? '');
     setWorkingDirBase(config?.workingDirBase ?? '');
+    setAutoSaveInterval(config?.autoSaveIntervalSeconds ?? 300);
     const ed = config?.settings?.editor;
     setEditorFontSize(ed?.fontSize ?? 13);
     setEditorTabSize(ed?.tabSize ?? 4);
@@ -305,6 +307,7 @@ export const SettingsDialog: React.FC<SettingsDialogProps> = ({
       fileManagerCmd:  fileManagerCmd.trim()  || DEFAULT_FILE_MANAGER,
       defaultSaveLocation: defaultSaveLocation.trim() || undefined,
       workingDirBase: workingDirBase.trim() || undefined,
+      autoSaveIntervalSeconds: Math.max(30, autoSaveInterval),
       settings: {
         shortcuts: savedShortcuts,
         appearance: {
@@ -457,6 +460,35 @@ export const SettingsDialog: React.FC<SettingsDialogProps> = ({
                 <div className="settings-general-desc">
                   Base directory for temporary session files. Use a fast local drive on HPC systems.
                   Takes effect on next kernel start.
+                </div>
+              </div>
+
+              <h4 className="settings-general-section">Autosave</h4>
+              <div className="settings-general-grid">
+                <label htmlFor="sg-autosave-interval">Interval (seconds)</label>
+                <input
+                  id="sg-autosave-interval"
+                  type="number"
+                  min={30}
+                  value={autoSaveInterval}
+                  onChange={(e) => setAutoSaveInterval(Math.max(30, parseInt(e.target.value) || 30))}
+                />
+                <div className="settings-general-desc">
+                  How often to automatically save project state. Minimum 30 seconds.
+                </div>
+
+                <label>Clear autosave data</label>
+                <div>
+                  <button
+                    className="btn btn-secondary btn-sm"
+                    type="button"
+                    onClick={() => void window.pdv.autosave.clear()}
+                  >
+                    Clear
+                  </button>
+                </div>
+                <div className="settings-general-desc">
+                  Remove cached autosave files for the current project.
                 </div>
               </div>
             </div>
