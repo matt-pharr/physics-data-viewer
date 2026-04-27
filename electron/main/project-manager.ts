@@ -27,6 +27,7 @@
 import { CommRouter } from "./comm-router";
 import { PDVMessageType, getAppVersion, type PDVProjectLoadResponsePayload } from "./pdv-protocol";
 import type { CodeCellData } from "./ipc";
+import * as crypto from "crypto";
 import * as fs from "fs/promises";
 import * as path from "path";
 import * as os from "os";
@@ -77,6 +78,8 @@ export interface ProjectManifest {
   pdv_version: string;
   /** XXH3-128 content-based checksum of the tree. */
   tree_checksum: string;
+  /** SHA-256 content checksum of code cells (tab text). */
+  code_cells_checksum: string;
   /** Kernel language used by this project ("python" or "julia"). */
   language: "python" | "julia";
   /**
@@ -148,6 +151,7 @@ function defaultManifest(): ProjectManifest {
     saved_at: new Date(0).toISOString(),
     pdv_version: getAppVersion(),
     tree_checksum: "",
+    code_cells_checksum: "",
     language: "python",
     modules: [],
     module_settings: {},
@@ -215,6 +219,24 @@ export function assertCodeCellData(value: unknown): asserts value is CodeCellDat
       );
     }
   }
+}
+
+/**
+ * Compute a SHA-256 hex digest of code cell content for integrity checking.
+ *
+ * Hashes only content-bearing fields (id, code, name) in a deterministic
+ * order. {@link CodeCellData.activeTabId} is excluded because selecting a
+ * different tab is not a content change. Tabs are sorted by id for order
+ * independence.
+ *
+ * @param codeCells - Validated code cell state.
+ * @returns 64-character lowercase hex SHA-256 digest.
+ */
+export function computeCodeCellsChecksum(codeCells: CodeCellData): string {
+  const canonical = codeCells.tabs
+    .map(t => ({ id: t.id, code: t.code, name: t.name ?? "" }))
+    .sort((a, b) => a.id - b.id);
+  return crypto.createHash("sha256").update(JSON.stringify(canonical)).digest("hex");
 }
 
 // ---------------------------------------------------------------------------
@@ -416,11 +438,13 @@ export class ProjectManager {
     } catch {
       // No prior manifest or unreadable — start fresh.
     }
+    const codeCellsChecksum = computeCodeCellsChecksum(codeCells);
     const manifest: ProjectManifest = {
       schema_version: SCHEMA_VERSION,
       saved_at: new Date().toISOString(),
       pdv_version: getAppVersion(),
       tree_checksum: checksum,
+      code_cells_checksum: codeCellsChecksum,
       language: options?.language ?? "python",
       interpreter_path: options?.interpreterPath,
       project_name: projectName,
@@ -526,12 +550,12 @@ export class ProjectManager {
       typeof obj.interpreter_path === "string" ? obj.interpreter_path : undefined;
     const projectName =
       typeof obj.project_name === "string" ? obj.project_name : undefined;
-
     return {
       schema_version: schemaVersion,
       saved_at: String(obj.saved_at ?? new Date(0).toISOString()),
       pdv_version: String(obj.pdv_version ?? getAppVersion()),
       tree_checksum: String(obj.tree_checksum ?? ""),
+      code_cells_checksum: String(obj.code_cells_checksum ?? ""),
       language,
       interpreter_path: interpreterPath,
       project_name: projectName,

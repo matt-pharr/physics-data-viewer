@@ -24,6 +24,7 @@ import { setupProjectModuleNamespaces } from "./module-runtime";
 import {
   ProjectManager,
   assertCodeCellData,
+  computeCodeCellsChecksum,
   type ModuleManifestBundle,
   type ModuleOwnedFile,
   type ProjectManifest,
@@ -370,12 +371,14 @@ export function registerProjectIpcHandlers(
 
     // Read the manifest checksum and version (the values stored at save time).
     let checksum: string | null = null;
+    let savedCodeCellsChecksum: string | null = null;
     let savedPdvVersion: string | null = null;
     let projectName: string | null = null;
     let nodeCount: number | null = null;
     try {
       const manifest = await ProjectManager.readManifest(saveDir);
       checksum = manifest.tree_checksum || null;
+      savedCodeCellsChecksum = manifest.code_cells_checksum || null;
       savedPdvVersion = manifest.pdv_version || null;
       projectName = manifest.project_name ?? null;
     } catch {
@@ -410,17 +413,39 @@ export function registerProjectIpcHandlers(
     // must trigger a setup pass whenever it repopulates the tree.
     await setupProjectModuleNamespaces(commRouter, moduleManager, saveDir);
 
-    // Validate: compare the kernel's post-load checksum against the stored one.
-    const checksumValid =
+    // Validate tree checksum.
+    const treeChecksumValid =
       postLoadChecksum != null && checksum != null
         ? postLoadChecksum === checksum
         : null;
 
-    if (checksumValid === false) {
+    if (treeChecksumValid === false) {
       console.warn(
         `[pdv] tree checksum mismatch after load: expected ${checksum}, got ${postLoadChecksum}`
       );
     }
+
+    // Validate code cells checksum.
+    let codeCellsChecksumValid: boolean | null = null;
+    if (savedCodeCellsChecksum != null && codeCells != null) {
+      try {
+        assertCodeCellData(codeCells);
+        codeCellsChecksumValid =
+          computeCodeCellsChecksum(codeCells) === savedCodeCellsChecksum;
+      } catch {
+        codeCellsChecksumValid = null;
+      }
+    }
+
+    if (codeCellsChecksumValid === false) {
+      console.warn("[pdv] code cells checksum mismatch after load");
+    }
+
+    // Combined: false if either checksum fails, true if all pass.
+    const checksumValid =
+      treeChecksumValid === false || codeCellsChecksumValid === false
+        ? false
+        : treeChecksumValid;
 
     // Read node count from tree-index.json
     try {

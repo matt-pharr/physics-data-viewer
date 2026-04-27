@@ -26,7 +26,7 @@ import * as os from "os";
 import * as path from "path";
 import type { CommRouter } from "./comm-router";
 import { PDVCommError } from "./comm-router";
-import { ProjectManager, PDVSchemaVersionError } from "./project-manager";
+import { ProjectManager, PDVSchemaVersionError, computeCodeCellsChecksum } from "./project-manager";
 import type { CodeCellData } from "./ipc";
 
 const EMPTY_CELLS: CodeCellData = { tabs: [], activeTabId: 1 };
@@ -461,5 +461,121 @@ describe("ProjectManager", () => {
 
       await expect(fs.stat(dir)).rejects.toMatchObject({ code: "ENOENT" });
     });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// computeCodeCellsChecksum
+// ---------------------------------------------------------------------------
+
+describe("computeCodeCellsChecksum", () => {
+  it("returns a stable 64-char hex digest", () => {
+    const cells: CodeCellData = {
+      tabs: [{ id: 1, code: "x = 1" }],
+      activeTabId: 1,
+    };
+    const d1 = computeCodeCellsChecksum(cells);
+    const d2 = computeCodeCellsChecksum(cells);
+    expect(d1).toBe(d2);
+    expect(d1).toHaveLength(64);
+    expect(d1).toMatch(/^[0-9a-f]+$/);
+  });
+
+  it("is sensitive to code changes", () => {
+    const a: CodeCellData = { tabs: [{ id: 1, code: "x = 1" }], activeTabId: 1 };
+    const b: CodeCellData = { tabs: [{ id: 1, code: "x = 2" }], activeTabId: 1 };
+    expect(computeCodeCellsChecksum(a)).not.toBe(computeCodeCellsChecksum(b));
+  });
+
+  it("is sensitive to tab name changes", () => {
+    const a: CodeCellData = { tabs: [{ id: 1, code: "x", name: "alpha" }], activeTabId: 1 };
+    const b: CodeCellData = { tabs: [{ id: 1, code: "x", name: "beta" }], activeTabId: 1 };
+    expect(computeCodeCellsChecksum(a)).not.toBe(computeCodeCellsChecksum(b));
+  });
+
+  it("excludes activeTabId from the digest", () => {
+    const a: CodeCellData = { tabs: [{ id: 1, code: "x" }, { id: 2, code: "y" }], activeTabId: 1 };
+    const b: CodeCellData = { tabs: [{ id: 1, code: "x" }, { id: 2, code: "y" }], activeTabId: 2 };
+    expect(computeCodeCellsChecksum(a)).toBe(computeCodeCellsChecksum(b));
+  });
+
+  it("is order-independent (tabs sorted by id)", () => {
+    const a: CodeCellData = { tabs: [{ id: 1, code: "x" }, { id: 2, code: "y" }], activeTabId: 1 };
+    const b: CodeCellData = { tabs: [{ id: 2, code: "y" }, { id: 1, code: "x" }], activeTabId: 1 };
+    expect(computeCodeCellsChecksum(a)).toBe(computeCodeCellsChecksum(b));
+  });
+
+  it("produces a deterministic digest for empty tabs", () => {
+    const cells: CodeCellData = { tabs: [], activeTabId: 1 };
+    const d = computeCodeCellsChecksum(cells);
+    expect(d).toHaveLength(64);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// code_cells_checksum in manifest round-trip
+// ---------------------------------------------------------------------------
+
+describe("code_cells_checksum in project manifest", () => {
+  let tmpDir: string;
+
+  beforeEach(async () => {
+    setAppVersion("0.0.7");
+    tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "pdv-cc-chk-"));
+  });
+
+  afterEach(async () => {
+    await fs.rm(tmpDir, { recursive: true, force: true });
+  });
+
+  it("save() writes code_cells_checksum to project.json", async () => {
+    const { router, requestMock } = makeMockRouter();
+    requestMock.mockResolvedValue(makeOkResponse({ checksum: "treechk" }));
+
+    const pm = new ProjectManager(router);
+    const cells: CodeCellData = {
+      tabs: [{ id: 1, code: "print('hello')" }],
+      activeTabId: 1,
+    };
+    await pm.save(tmpDir, cells);
+
+    const raw = await fs.readFile(path.join(tmpDir, "project.json"), "utf8");
+    const manifest = JSON.parse(raw);
+    expect(manifest.code_cells_checksum).toBe(computeCodeCellsChecksum(cells));
+  });
+
+  it("readManifest() parses code_cells_checksum when present", async () => {
+    const manifest = {
+      schema_version: "1.1",
+      saved_at: "2026-01-01T00:00:00.000Z",
+      pdv_version: "0.0.7",
+      tree_checksum: "abc",
+      code_cells_checksum: "def456",
+    };
+    await fs.writeFile(
+      path.join(tmpDir, "project.json"),
+      JSON.stringify(manifest),
+      "utf8"
+    );
+
+    const result = await ProjectManager.readManifest(tmpDir);
+    expect(result.code_cells_checksum).toBe("def456");
+  });
+
+  it("readManifest() defaults code_cells_checksum to empty string when absent", async () => {
+    const manifest = {
+      schema_version: "1.0",
+      saved_at: "2026-01-01T00:00:00.000Z",
+      pdv_version: "0.0.7",
+      tree_checksum: "abc",
+    };
+    await fs.writeFile(
+      path.join(tmpDir, "project.json"),
+      JSON.stringify(manifest),
+      "utf8"
+    );
+
+    const result = await ProjectManager.readManifest(tmpDir);
+    expect(result.code_cells_checksum).toBe("");
   });
 });
