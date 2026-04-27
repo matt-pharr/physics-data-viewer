@@ -24,6 +24,23 @@ import { registerIpcHandlers } from "./index";
 import { initializeAppMenu } from "./menu";
 import { IPC } from "./ipc";
 
+/**
+ * Check whether a process with the given PID is currently running.
+ *
+ * Uses signal 0 which tests existence without actually sending a signal.
+ *
+ * @param pid - Process ID to check.
+ * @returns `true` if the process is alive.
+ */
+function isProcessAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 function getWindowChromeOptions(): BrowserWindowConstructorOptions {
   if (process.platform === "darwin") {
     return {
@@ -87,16 +104,33 @@ export async function createWindow(
     },
   });
 
-  // Clean up any orphaned pdv-* working dirs from a previous crash.
-  const tmpDir = os.tmpdir();
-  try {
-    const entries = fsSync.readdirSync(tmpDir);
-    for (const e of entries) {
-      if (/^pdv-/.test(e)) {
-        fsSync.rmSync(path.join(tmpDir, e), { recursive: true, force: true });
+  // Clean up orphaned pdv-* working dirs from a previous crash.
+  // Each session writes a session.lock with its PID; dirs whose owner is
+  // no longer running (or that lack a lockfile) are treated as orphans.
+  // Scan both the default location and any custom location from config.
+  const defaultWorkingBase = path.join(os.homedir(), ".PDV", "working");
+  const customWorkingBase = configStore.get("workingDirBase");
+  const workingBases = new Set([defaultWorkingBase]);
+  if (customWorkingBase) workingBases.add(customWorkingBase);
+  for (const workingBase of workingBases) {
+    try {
+      const entries = fsSync.readdirSync(workingBase);
+      for (const e of entries) {
+        if (!/^pdv-/.test(e)) continue;
+        const sessionDir = path.join(workingBase, e);
+        const lockPath = path.join(sessionDir, "session.lock");
+        try {
+          const lockData = JSON.parse(fsSync.readFileSync(lockPath, "utf8"));
+          if (typeof lockData.pid === "number" && isProcessAlive(lockData.pid)) {
+            continue;
+          }
+        } catch {
+          // No lockfile or unreadable — treat as orphan.
+        }
+        fsSync.rmSync(sessionDir, { recursive: true, force: true });
       }
-    }
-  } catch { /* best-effort */ }
+    } catch { /* best-effort — workingBase may not exist on first launch */ }
+  }
 
   // `allowClose` gates the close intercept below. The renderer flips it via
   // `IPC.app.confirmClose` after the user resolves the unsaved-changes prompt.
