@@ -184,6 +184,8 @@ vi.mock("fs/promises", () => ({
   readFile: mocks.fsReadFile,
   copyFile: mocks.fsCopyFile,
   cp: mocks.fsCp,
+  rm: vi.fn().mockResolvedValue(undefined),
+  readdir: vi.fn().mockResolvedValue([]),
 }));
 
 vi.mock("./module-manager", () => ({
@@ -310,6 +312,13 @@ function setup() {
     createWorkingDir: vi.fn(async () => "/tmp/pdv-test"),
     deleteWorkingDir: vi.fn(async () => undefined),
     clearCachedKernelResults: vi.fn(),
+    startAutosaveTimer: vi.fn(),
+    stopAutosaveTimer: vi.fn(),
+    resetAutosaveTimer: vi.fn(),
+    markAutosaveCacheDirty: vi.fn(),
+    setAutosavePending: vi.fn(),
+    consumeAutosavePending: vi.fn(() => false),
+    autosave: vi.fn(async () => null),
   } as unknown as ProjectManager;
 
   const configState: PDVConfig = {

@@ -52,6 +52,7 @@ interface RegisterProjectIpcHandlersOptions {
   runSerializedProjectManifestMutation: <T>(dir: string, task: () => Promise<T>) => Promise<T>;
   getMainWindow: () => BrowserWindow | null;
   getInterpreterPath: () => string | undefined;
+  onExplicitSaveCompleted?: (saveDir: string) => void;
 }
 
 /**
@@ -238,6 +239,7 @@ export function registerProjectIpcHandlers(
     runSerializedProjectManifestMutation,
     getMainWindow,
     getInterpreterPath,
+    onExplicitSaveCompleted,
   } = options;
 
   // Serialize concurrent saves so a rapid second call waits for the first to
@@ -312,6 +314,7 @@ export function registerProjectIpcHandlers(
 
         setActiveProjectDir(saveDir);
         await refreshProjectModuleHealth(saveDir);
+        onExplicitSaveCompleted?.(saveDir);
 
         let savedProjectName: string | undefined;
         try {

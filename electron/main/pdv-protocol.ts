@@ -352,6 +352,10 @@ export interface PDVProjectLoadResponsePayload {
 export interface PDVProjectSavePayload {
   /** Absolute path to the project save directory. */
   save_dir: string;
+  /** When true, use the autosave checksum cache to skip unchanged data nodes. */
+  is_autosave?: boolean;
+  /** When true, clear the autosave cache before serializing. */
+  clear_cache?: boolean;
 }
 
 /** Payload for pdv.project.save.response (kernel → app). */

@@ -556,6 +556,180 @@ export class ProjectManager {
       "utf8"
     );
   }
+
+  // -------------------------------------------------------------------------
+  // Autosave
+  // -------------------------------------------------------------------------
+
+  private autosaveTimer: ReturnType<typeof setInterval> | null = null;
+  private autosaveIntervalMs = 300_000;
+  private autosavePending = false;
+  private autosaveClearCacheOnNext = false;
+  private autosaveTickCallback: (() => void) | null = null;
+
+  /**
+   * Start the autosave timer. If already running, restarts with the new interval.
+   *
+   * @param intervalMs - Timer interval in milliseconds.
+   * @param onTick - Callback invoked on each timer tick.
+   */
+  startAutosaveTimer(intervalMs: number, onTick: () => void): void {
+    this.stopAutosaveTimer();
+    this.autosaveIntervalMs = Math.max(intervalMs, 30_000);
+    this.autosaveTickCallback = onTick;
+    this.autosaveTimer = setInterval(onTick, this.autosaveIntervalMs);
+  }
+
+  /**
+   * Stop the autosave timer.
+   */
+  stopAutosaveTimer(): void {
+    if (this.autosaveTimer) {
+      clearInterval(this.autosaveTimer);
+      this.autosaveTimer = null;
+    }
+    this.autosavePending = false;
+  }
+
+  /**
+   * Reset the autosave timer (restart the interval from now).
+   * Called after an explicit save so the full interval elapses before next autosave.
+   */
+  resetAutosaveTimer(): void {
+    if (this.autosaveTimer && this.autosaveTickCallback) {
+      this.startAutosaveTimer(this.autosaveIntervalMs, this.autosaveTickCallback);
+    }
+  }
+
+  /**
+   * Mark the autosave cache as needing to be cleared on the next autosave.
+   * Called when the user manually clears autosave data from Settings.
+   */
+  markAutosaveCacheDirty(): void {
+    this.autosaveClearCacheOnNext = true;
+  }
+
+  /**
+   * Record that an autosave was deferred because the kernel was busy.
+   * The caller should check this after kernel goes idle.
+   */
+  setAutosavePending(): void {
+    this.autosavePending = true;
+  }
+
+  /**
+   * Check and clear the pending autosave flag.
+   *
+   * @returns Whether an autosave was deferred.
+   */
+  consumeAutosavePending(): boolean {
+    const was = this.autosavePending;
+    this.autosavePending = false;
+    return was;
+  }
+
+  /**
+   * Run an autosave: serialize the tree to `<dir>/.autosave/` and write code-cells.
+   *
+   * Does NOT write project.json. Uses the autosave checksum cache on the
+   * kernel side to skip unchanged data nodes.
+   *
+   * @param autosaveDir - The .autosave/ directory to write to (will be created).
+   * @param codeCells - Current code-cell state from the renderer.
+   * @returns The kernel response (checksum, node count, etc.), or null on error.
+   */
+  async autosave(
+    autosaveDir: string,
+    codeCells: CodeCellData,
+  ): Promise<{ checksum: string; nodeCount: number } | null> {
+    const t0 = performance.now();
+
+    await fs.mkdir(autosaveDir, { recursive: true });
+
+    const clearCache = this.autosaveClearCacheOnNext;
+    this.autosaveClearCacheOnNext = false;
+
+    try {
+      const response = await this.commRouter.request(PDVMessageType.PROJECT_SAVE, {
+        save_dir: autosaveDir,
+        is_autosave: true,
+        clear_cache: clearCache,
+      }, { keepAlivePushType: PDVMessageType.PROGRESS });
+
+      const payload = response.payload as {
+        checksum?: string;
+        node_count?: number;
+        missing_files?: string[];
+      };
+
+      // Write code-cells.json to autosave dir
+      await fs.writeFile(
+        path.join(autosaveDir, "code-cells.json"),
+        JSON.stringify(codeCells, null, 2),
+        "utf8"
+      );
+
+      console.debug(`[ProjectManager.autosave] DONE (+${(performance.now() - t0).toFixed(0)}ms)`);
+      return {
+        checksum: payload.checksum ?? "",
+        nodeCount: payload.node_count ?? 0,
+      };
+    } catch (err) {
+      console.error("[ProjectManager.autosave] FAILED:", err);
+      return null;
+    }
+  }
+
+  /**
+   * Check if autosave data exists for a project directory.
+   *
+   * @param dir - Project save directory (or working dir for unsaved projects).
+   * @returns Whether .autosave/tree-index.json exists and its mtime.
+   */
+  static async checkForAutosave(dir: string): Promise<{ exists: boolean; timestamp?: string }> {
+    const indexPath = path.join(dir, ".autosave", "tree-index.json");
+    try {
+      const stat = await fs.stat(indexPath);
+      return { exists: true, timestamp: stat.mtime.toISOString() };
+    } catch {
+      return { exists: false };
+    }
+  }
+
+  /**
+   * Delete the .autosave/ directory for a project.
+   *
+   * @param dir - Project save directory (or working dir for unsaved projects).
+   */
+  static async clearAutosave(dir: string): Promise<void> {
+    const autosavePath = path.join(dir, ".autosave");
+    await fs.rm(autosavePath, { recursive: true, force: true });
+  }
+
+  /**
+   * Scan a base directory for subdirectories containing .autosave/ data.
+   * Used to find orphaned autosave data from unsaved projects.
+   *
+   * @param workingDirBase - Base directory to scan (e.g. ~/.PDV/working/).
+   * @returns List of directories with autosave data and their timestamps.
+   */
+  static async scanForAutosaves(workingDirBase: string): Promise<{ dir: string; timestamp: string }[]> {
+    const results: { dir: string; timestamp: string }[] = [];
+    try {
+      const entries = await fs.readdir(workingDirBase, { withFileTypes: true });
+      for (const entry of entries) {
+        if (!entry.isDirectory()) continue;
+        const dirPath = path.join(workingDirBase, entry.name);
+        const check = await ProjectManager.checkForAutosave(dirPath);
+        if (check.exists && check.timestamp) {
+          results.push({ dir: dirPath, timestamp: check.timestamp });
+        }
+      }
+    } catch {
+      // workingDirBase doesn't exist or isn't readable — no autosaves
+    }
+    return results;
+  }
 }
 
 // ---------------------------------------------------------------------------

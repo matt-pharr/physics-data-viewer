@@ -48,6 +48,7 @@ import {
   ModuleHealthWarning,
   NamespaceQueryOptions,
   PDVConfig,
+  type CodeCellData,
 } from "./ipc";
 import { PDVMessage, PDVMessageType, setAppVersion } from "./pdv-protocol";
 
@@ -150,6 +151,10 @@ const REGISTERED_CHANNELS: readonly string[] = [
   IPC.environment.check,
   IPC.environment.install,
   IPC.environment.refresh,
+  IPC.autosave.run,
+  IPC.autosave.clear,
+  IPC.autosave.check,
+  IPC.autosave.scanWorkingDirs,
 ];
 
 interface PushSubscription {
@@ -526,7 +531,16 @@ export function registerIpcHandlers(
       guiEditorWindowManager.closeAll();
       guiViewerWindowManager.closeAll();
     },
-    setActiveKernelId: (id) => { activeKernelId = id; },
+    setActiveKernelId: (id) => {
+      activeKernelId = id;
+      if (id) {
+        const config = readConfig(configStore);
+        const intervalMs = (config.autoSaveIntervalSeconds ?? 300) * 1000;
+        projectManager.startAutosaveTimer(intervalMs, triggerAutosave);
+      } else {
+        projectManager.stopAutosaveTimer();
+      }
+    },
     getActiveKernelId: () => activeKernelId,
     getActiveProjectDir: () => activeProjectDir,
     getWorkingDirBase: () => readConfig(configStore).workingDirBase,
@@ -609,6 +623,10 @@ export function registerIpcHandlers(
         : "python";
       return lang === "julia" ? config.juliaPath : config.pythonPath;
     },
+    onExplicitSaveCompleted: (saveDir) => {
+      void ProjectManager.clearAutosave(saveDir);
+      projectManager.resetAutosaveTimer();
+    },
   });
 
   registerAppStateIpcHandlers({
@@ -632,6 +650,51 @@ export function registerIpcHandlers(
   });
 
   registerEnvironmentIpcHandlers(win, configStore);
+
+  // ---- Autosave IPC handlers and lifecycle wiring --------------------------
+
+  function triggerAutosave(): void {
+    if (!activeKernelId) return;
+    const state = kernelManager.getExecutionState(activeKernelId);
+    if (state !== "idle") {
+      projectManager.setAutosavePending();
+      return;
+    }
+    win.webContents.send(IPC.push.autosaveTrigger);
+  }
+
+  ipcMain.handle(IPC.autosave.run, async (_event, codeCells: unknown) => {
+    const baseDir = activeProjectDir || kernelWorkingDirs.get(activeKernelId ?? "");
+    if (!baseDir) return;
+    const autosaveDir = path.join(baseDir, ".autosave");
+    await projectManager.autosave(autosaveDir, codeCells as CodeCellData);
+  });
+
+  ipcMain.handle(IPC.autosave.clear, async (_event, dir?: string) => {
+    const target = dir || activeProjectDir || kernelWorkingDirs.get(activeKernelId ?? "");
+    if (target) {
+      await ProjectManager.clearAutosave(target);
+      projectManager.markAutosaveCacheDirty();
+    }
+  });
+
+  ipcMain.handle(IPC.autosave.check, async (_event, dir: string) => {
+    return ProjectManager.checkForAutosave(dir);
+  });
+
+  ipcMain.handle(IPC.autosave.scanWorkingDirs, async () => {
+    const config = readConfig(configStore);
+    const base = config.workingDirBase || path.join(os.homedir(), ".PDV", "working");
+    return ProjectManager.scanForAutosaves(base);
+  });
+
+  // When kernel goes idle and an autosave was deferred, trigger it now.
+  kernelManager.on("kernel:executionState", (kernelId: string, state: string) => {
+    if (kernelId !== activeKernelId) return;
+    if (state === "idle" && projectManager.consumeAutosavePending()) {
+      triggerAutosave();
+    }
+  });
 
   registerCommPushForwarding(win, commRouter, projectManager, moduleWindowManager, guiEditorWindowManager, guiViewerWindowManager);
 

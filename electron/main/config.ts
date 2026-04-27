@@ -70,6 +70,8 @@ export interface PDVConfig {
   defaultSaveLocation?: string;
   /** Base directory for session working directories. Defaults to `~/.PDV/working/`. */
   workingDirBase?: string;
+  /** Autosave interval in seconds. Default 300 (5 minutes). Minimum 30. */
+  autoSaveIntervalSeconds?: number;
   /** Renderer settings blob persisted by Settings dialog. */
   settings?: {
     shortcuts?: Record<string, string>;
@@ -97,6 +99,7 @@ const CONFIG_DEFAULTS: PDVConfig = {
   showModuleVariables: false,
   showCallableVariables: false,
   autoRefreshNamespace: false,
+  autoSaveIntervalSeconds: 300,
   settings: {
     appearance: {
       themeName: "Dark+ (VSCode)",
@@ -203,6 +206,12 @@ function parseConfig(raw: string, filePath: string): Partial<PDVConfig> {
         throw new Error(`Invalid config value for ${key} in ${filePath}`);
       }
       if (typeof val === "string") result[key] = val;
+    }
+  }
+  if ("autoSaveIntervalSeconds" in obj) {
+    const val = obj.autoSaveIntervalSeconds;
+    if (val !== null && val !== undefined && typeof val === "number" && val >= 30) {
+      result.autoSaveIntervalSeconds = val;
     }
   }
   if ("projectRoot" in obj) {

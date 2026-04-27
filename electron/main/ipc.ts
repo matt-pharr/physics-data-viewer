@@ -158,6 +158,13 @@ export const IPC = {
     get: "config:get",
     set: "config:set",
   },
+  /** Autosave management channels. */
+  autosave: {
+    run: "autosave:run",
+    clear: "autosave:clear",
+    check: "autosave:check",
+    scanWorkingDirs: "autosave:scanWorkingDirs",
+  },
   /** App info channels. */
   about: {
     getVersion: "about:getVersion",
@@ -210,6 +217,7 @@ export const IPC = {
     installOutput: "pdv.environment.installOutput",
     updateStatus: "pdv.updater.status",
     requestClose: "pdv.app.requestClose",
+    autosaveTrigger: "pdv.autosave.trigger",
   },
   /** App-level lifecycle channels (close confirmation, etc.). */
   app: {
@@ -1956,6 +1964,43 @@ export interface PDVApi {
      * @returns Updated merged config object.
      */
     set(updates: Partial<PDVConfig>): Promise<PDVConfig>;
+  };
+
+  /** Autosave management. */
+  autosave: {
+    /**
+     * Execute an autosave with the given code-cell state.
+     * Called by the renderer in response to an autosave trigger push.
+     *
+     * @param codeCells - Current code-cell state.
+     */
+    run(codeCells: unknown): Promise<void>;
+    /**
+     * Delete the .autosave/ directory for the given project directory.
+     *
+     * @param dir - Project save directory (or working dir for unsaved projects).
+     */
+    clear(dir?: string): Promise<void>;
+    /**
+     * Check if autosave data exists for a given directory.
+     *
+     * @param dir - Project save directory to check.
+     * @returns Whether autosave data exists and its timestamp.
+     */
+    check(dir: string): Promise<{ exists: boolean; timestamp?: string }>;
+    /**
+     * Scan working directories for orphaned autosave data (unsaved projects).
+     *
+     * @returns List of working dirs containing .autosave/ data.
+     */
+    scanWorkingDirs(): Promise<{ dir: string; timestamp: string }[]>;
+    /**
+     * Subscribe to autosave trigger push notifications from the main process.
+     *
+     * @param callback - Invoked when the main process requests an autosave.
+     * @returns Unsubscribe function.
+     */
+    onTrigger(callback: () => void): () => void;
   };
 
   /** App info accessors. */
