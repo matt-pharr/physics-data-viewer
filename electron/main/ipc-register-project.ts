@@ -52,6 +52,7 @@ interface RegisterProjectIpcHandlersOptions {
   runSerializedProjectManifestMutation: <T>(dir: string, task: () => Promise<T>) => Promise<T>;
   getMainWindow: () => BrowserWindow | null;
   getInterpreterPath: () => string | undefined;
+  /** Called after a successful explicit save to clean up autosave state. */
   onExplicitSaveCompleted?: (saveDir: string) => void;
 }
 
@@ -341,7 +342,10 @@ export function registerProjectIpcHandlers(
     }
   );
 
-  ipcMain.handle(IPC.project.load, async (_event, saveDir: string) => {
+  ipcMain.handle(IPC.project.load, async (_event, saveDir: string, options?: { restoreFromAutosave?: boolean }) => {
+    const restoreFromAutosave = options?.restoreFromAutosave ?? false;
+    const autosaveDir = path.join(saveDir, ".autosave");
+
     // Copy file-backed node files from save dir into working dir before kernel load.
     let loadFailedPaths: string[] = [];
     const activeKernelId = getActiveKernelId();
@@ -349,14 +353,21 @@ export function registerProjectIpcHandlers(
       const workingDir = kernelWorkingDirs.get(activeKernelId);
       if (workingDir) {
         const win = getMainWindow();
-        loadFailedPaths = await copyFilesForLoad(saveDir, workingDir, win ? (current, total) => {
+        const onProgress = win ? (current: number, total: number) => {
           win.webContents.send(IPC.push.progress, {
             operation: "load",
             phase: "Copying files",
             current,
             total,
           });
-        } : undefined);
+        } : undefined;
+        // Baseline: copy from the main save dir
+        loadFailedPaths = await copyFilesForLoad(saveDir, workingDir, onProgress);
+        // Overlay: copy autosaved files on top (changed nodes take precedence)
+        if (restoreFromAutosave) {
+          const autosaveFailedPaths = await copyFilesForLoad(autosaveDir, workingDir, onProgress);
+          loadFailedPaths.push(...autosaveFailedPaths);
+        }
         if (loadFailedPaths.length > 0) {
           console.warn(
             `[pdv] load: ${loadFailedPaths.length} file(s) could not be copied from save directory:`,
@@ -385,7 +396,10 @@ export function registerProjectIpcHandlers(
       // Non-blocking — proceed with load even if manifest read fails
     }
 
-    const { codeCells, postLoadChecksum } = await projectManager.load(saveDir);
+    const loadOptions = restoreFromAutosave
+      ? { treeIndexDir: autosaveDir, codeCellsDir: autosaveDir }
+      : undefined;
+    const { codeCells, postLoadChecksum } = await projectManager.load(saveDir, loadOptions);
 
     // Mirror the project's code-cells.json into the active kernel's working
     // directory so the per-session autosave file is in sync with the loaded

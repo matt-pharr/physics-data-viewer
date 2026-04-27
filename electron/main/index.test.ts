@@ -1155,7 +1155,7 @@ describe("Step 5 IPC handlers", () => {
     });
     const load = getHandler(IPC.project.load);
     const result = await load({}, "/tmp/project");
-    expect(projectManager.load).toHaveBeenCalledWith("/tmp/project");
+    expect(projectManager.load).toHaveBeenCalledWith("/tmp/project", undefined);
     expect(result).toEqual({
       codeCells: [{ id: "box1" }],
       checksum: null,

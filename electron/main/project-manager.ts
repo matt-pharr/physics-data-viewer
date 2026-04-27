@@ -452,7 +452,10 @@ export class ProjectManager {
    * @returns The code-cell state and post-load checksum from the kernel.
    * @throws {PDVCommError} When the kernel responds with status='error'.
    */
-  async load(saveDir: string): Promise<{ codeCells: unknown; postLoadChecksum: string | null }> {
+  async load(
+    saveDir: string,
+    options?: { treeIndexDir?: string; codeCellsDir?: string },
+  ): Promise<{ codeCells: unknown; postLoadChecksum: string | null }> {
     // Step 1 — register the push handler BEFORE sending the request so the
     // notification is never missed even if the kernel responds very quickly.
     const pushPromise = new Promise<void>((resolve) => {
@@ -466,9 +469,14 @@ export class ProjectManager {
     // Step 2 — send pdv.project.load comm.
     // The request resolves when the kernel sends pdv.project.load.response.
     // Use progress pushes as keep-alive to prevent timeout during large loads.
-    const response = await this.commRouter.request(PDVMessageType.PROJECT_LOAD, {
-      save_dir: saveDir,
-    }, { keepAlivePushType: PDVMessageType.PROGRESS });
+    const payload: Record<string, string> = { save_dir: saveDir };
+    if (options?.treeIndexDir) {
+      payload.tree_index_dir = options.treeIndexDir;
+    }
+    const response = await this.commRouter.request(
+      PDVMessageType.PROJECT_LOAD, payload,
+      { keepAlivePushType: PDVMessageType.PROGRESS },
+    );
 
     const loadPayload = response.payload as unknown as PDVProjectLoadResponsePayload;
     const postLoadChecksum = loadPayload?.post_load_checksum ?? null;
@@ -477,7 +485,8 @@ export class ProjectManager {
     await pushPromise;
 
     // Step 4 — read code-cells.json.
-    const codeCells = await _readCodeCells(saveDir);
+    const codeCellsSource = options?.codeCellsDir ?? saveDir;
+    const codeCells = await _readCodeCells(codeCellsSource);
     return { codeCells, postLoadChecksum };
   }
 

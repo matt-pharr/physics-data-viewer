@@ -599,6 +599,7 @@ def handle_project_load(msg: dict) -> None:
     msg_id = msg.get("msg_id")
     payload = msg.get("payload", {})
     save_dir = payload.get("save_dir", "")
+    tree_index_dir = payload.get("tree_index_dir", "")
 
     if not save_dir or not os.path.isdir(save_dir):
         send_error(
@@ -609,7 +610,8 @@ def handle_project_load(msg: dict) -> None:
         )
         return
 
-    tree_index_path = os.path.join(save_dir, "tree-index.json")
+    index_source = tree_index_dir if tree_index_dir and os.path.isdir(tree_index_dir) else save_dir
+    tree_index_path = os.path.join(index_source, "tree-index.json")
     if not os.path.exists(tree_index_path):
         send_error(
             "pdv.project.load.response",

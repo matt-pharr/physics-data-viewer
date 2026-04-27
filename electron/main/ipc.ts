@@ -1854,7 +1854,7 @@ export interface PDVApi {
      * @param saveDir - Source save directory.
       * @returns Loaded code-cell state with checksum metadata.
       */
-    load(saveDir: string): Promise<ProjectLoadResult>;
+    load(saveDir: string, options?: { restoreFromAutosave?: boolean }): Promise<ProjectLoadResult>;
     /**
      * Start a new empty project session.
      *

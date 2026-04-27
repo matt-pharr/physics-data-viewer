@@ -137,7 +137,7 @@ const api: PDVApi = {
   project: {
     save: (saveDir, codeCells, projectName) =>
       ipcRenderer.invoke(IPC.project.save, saveDir, codeCells, projectName),
-    load: (saveDir) => ipcRenderer.invoke(IPC.project.load, saveDir),
+    load: (saveDir, options) => ipcRenderer.invoke(IPC.project.load, saveDir, options),
     new: () => ipcRenderer.invoke(IPC.project.new),
     peekLanguages: (paths) =>
       ipcRenderer.invoke(IPC.project.peekLanguages, paths),
