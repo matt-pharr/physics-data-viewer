@@ -94,7 +94,7 @@ PDV uses the standard Electron three-process architecture:
 - Manage lazy loading of tree node data from the save directory
 
 ### 2.4 What the Main Process Does NOT Do
-- The main process does not construct arbitrary Python or Julia business logic and send it via `execute_request`. All structured data exchange between the main process and the kernel happens via the PDV comm protocol (see Section 3). There are two well-defined exceptions: (1) the **bootstrap snippet** in `kernel-session.ts` that initializes `pdv` at startup (a one-time init, not business logic), and (2) the **script invocation string** built by the `script:run` IPC handler, which constructs a minimal `pdv_tree["path"].run(kwargs)` call so that script output flows through the standard Jupyter iopub stream and appears in the console.
+- The main process does not construct arbitrary Python or Julia business logic and send it via `execute_request`. All structured data exchange between the main process and the kernel happens via the PDV comm protocol (see Section 3). There are two well-defined exceptions: (1) the **bootstrap snippet** in `kernel-session.ts` that initializes `pdv_tree` at startup (a one-time init, not business logic), and (2) the **script invocation string** built by the `script:run` IPC handler, which constructs a minimal `pdv_tree["path"].run(kwargs)` call so that script output flows through the standard Jupyter iopub stream and appears in the console.
 - The main process does not scan the filesystem to build the tree. The kernel is the sole tree authority.
 
 ---
@@ -160,7 +160,7 @@ All type strings are namespaced with `pdv.`. The convention is `pdv.<domain>.<ac
 | `pdv.project.load` | app → kernel | Instructs the kernel to load a project from a save directory. |
 | `pdv.project.loaded` | kernel → app | Sent after the tree is fully populated from a project load. No `in_reply_to` (push notification). |
 | `pdv.project.save` | app → kernel | Instructs the kernel to serialize the tree to the save directory. |
-| `pdv.project.save.response` | kernel → app | Confirms save completed. Payload: `{ node_count, checksum, module_owned_files, module_manifests }`. `module_owned_files` lists every file-backed node that belongs to a `PDVModule` (see §5.9) so the main process can mirror working-dir edits into `<saveDir>/modules/<id>/<source_rel_path>`. `module_manifests` carries per-module metadata + module-root-relative node descriptors for writing `pdv-module.json` and `module-index.json` under each module dir. Both fields are empty arrays when the tree contains no `PDVModule` nodes. |
+| `pdv.project.save.response` | kernel → app | Confirms save completed. Payload: `{ node_count, checksum, module_owned_files, module_manifests, missing_files }`. `module_owned_files` lists every file-backed node that belongs to a `PDVModule` (see §5.9) so the main process can mirror working-dir edits into `<saveDir>/modules/<id>/<source_rel_path>`. `module_manifests` carries per-module metadata + module-root-relative node descriptors for writing `pdv-module.json` and `module-index.json` under each module dir. Both fields are empty arrays when the tree contains no `PDVModule` nodes. `missing_files` lists tree paths of file-backed nodes whose backing files were missing during serialization; these nodes are skipped rather than pickled. |
 
 #### Tree Messages
 
@@ -505,7 +505,7 @@ pdv/
 
 `pdv.bootstrap()` is called by a bootstrap snippet that the main process sends via `execute_request` (silent mode) from `kernel-session.ts` immediately after the kernel subprocess starts. It:
 1. Registers the `pdv.kernel` comm target with IPython
-2. Injects `pdv_tree` and `pdv` into the IPython user namespace via a custom namespace class that blocks reassignment
+2. Injects `pdv_tree` into the IPython user namespace via a custom namespace class that blocks reassignment
 3. Sends the `pdv.ready` comm message
 
 `bootstrap()` must be idempotent — calling it twice must not open a second comm or re-inject variables.
@@ -516,11 +516,11 @@ The IPython user namespace is replaced with a subclass of `dict` that overrides 
 
 ```python
 class PDVNamespace(dict):
-    _PROTECTED = frozenset({'pdv_tree', 'pdv'})
+    _PROTECTED = frozenset({'pdv_tree'})
 
     def __setitem__(self, key, value):
         if key in self._PROTECTED:
-            raise PDVError(
+            raise PDVProtectedNameError(
                 f"'{key}' is a protected PDV object and cannot be reassigned. "
                 f"Use pdv_tree['key'] = value to store data in the tree."
             )
@@ -531,12 +531,13 @@ This is set via `IPython.get_ipython().user_ns = PDVNamespace(...)` during boots
 
 ### 5.5 User-Facing Names in the Kernel Namespace
 
-After bootstrap, exactly two names are injected into the user namespace:
+After bootstrap, exactly one name is injected into the user namespace:
 
 | Name | Type | Description |
 |---|---|---|
 | `pdv_tree` | `PDVTree` instance | The live project data tree. The sole data authority. |
-| `pdv` | `PDVApp` instance | App-control object. Exposes `pdv.save()`, `pdv.help()`, etc. |
+
+App-level operations (`pdv.save()`, `pdv.help()`, `pdv.add_file()`, etc.) are module-level functions on the `pdv` package itself. Users access them via `import pdv` (or the package is already importable since `pdv-python` is installed). There is no injected `pdv` object — the `pdv` name in the namespace is simply the Python package.
 
 All other `pdv_*` names in the namespace are an error. Internal implementation functions must be unreachable from the user namespace.
 
@@ -731,15 +732,16 @@ PDV has three tiers of module storage:
 
 ### 6.1 Working Directory
 
-The working directory is a temporary directory created by the Electron main process at kernel startup. It is the live filesystem backing for the current session.
+The working directory is created by the Electron main process at kernel startup under `~/.PDV/working/`. It is the live filesystem backing for the current session. Using a persistent, app-managed directory instead of OS temp space prevents silent purging during long-running sessions.
 
-**Creation**: The main process calls `fs.mkdtemp()` (or equivalent) to create a uniquely named directory in the OS temporary directory. The path is passed to the kernel in the `pdv.init` message.
+**Creation**: The main process calls `fs.mkdtemp()` to create a uniquely named directory under `~/.PDV/working/`. A `session.lock` file containing `{ pid, createdAt }` is written so that orphan cleanup on next startup can distinguish active sessions from crashed ones. The working directory path is passed to the kernel in the `pdv.init` message.
 
 **Structure** (UUID-based — see §6.3):
 ```
-/tmp/pdv-<uuid>/
+~/.PDV/working/pdv-<random>/
+    session.lock              ← { pid, createdAt } for orphan detection
     tree/
-        a1b2c3d4e5f6/     ← each file-backed node gets its own UUID directory
+        a1b2c3d4e5f6/         ← each file-backed node gets its own UUID directory
             fit_model.py
         f7e8d9c0b1a2/
             ch1.npy
@@ -750,7 +752,7 @@ The working directory is a temporary directory created by the Electron main proc
 
 File-backed tree nodes (scripts, notes, GUIs, namelists, libs, data files) each get a unique 12-hex-character UUID directory under `tree/`. The tree path is decoupled from the filesystem path — renaming or moving a tree node does not require renaming or copying files on disk. See §6.3 for the full UUID storage design.
 
-**Lifecycle**: Created at kernel startup. Deleted on clean shutdown. If the app crashes, the directory is left on disk but is not recovered (crash recovery is out of scope for alpha).
+**Lifecycle**: Created at kernel startup. Deleted on clean shutdown. On next launch, the app scans `~/.PDV/working/` for `pdv-*` directories whose `session.lock` PID is no longer running (or whose lockfile is missing) and removes them as orphans.
 
 **Ownership**: The main process creates it. The kernel writes to it (data files). The main process deletes it.
 

@@ -81,12 +81,11 @@ def tree_with_comm(tmp_working_dir, mock_send):
 
 @pytest.fixture()
 def fresh_namespace(tree_with_comm):
-    """Return a PDVNamespace with pdv_tree and pdv pre-injected."""
-    from pdv.namespace import PDVApp, PDVNamespace
+    """Return a PDVNamespace with pdv_tree pre-injected."""
+    from pdv.namespace import PDVNamespace
 
     ns = PDVNamespace()
     dict.__setitem__(ns, "pdv_tree", tree_with_comm)
-    dict.__setitem__(ns, "pdv", PDVApp())
     return ns
 
 
@@ -94,13 +93,12 @@ def fresh_namespace(tree_with_comm):
 def mock_ipython(tree_with_comm):
     """Return a mock IPython shell with a PDVNamespace user_ns.
 
-    The namespace already contains pdv_tree and pdv.
+    The namespace already contains pdv_tree.
     """
-    from pdv.namespace import PDVApp, PDVNamespace
+    from pdv.namespace import PDVNamespace
 
     ns = PDVNamespace()
     dict.__setitem__(ns, "pdv_tree", tree_with_comm)
-    dict.__setitem__(ns, "pdv", PDVApp())
 
     ip = MagicMock()
     ip.user_ns = ns

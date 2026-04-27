@@ -19,16 +19,13 @@ const BOOTSTRAP_AND_OPEN_COMM = `
 from IPython import get_ipython
 import pdv.comms as _pdv_comms
 from pdv.tree import PDVTree
-from pdv.namespace import PDVApp
 try:
     from ipykernel.comm import Comm
 except Exception:
     from comm import Comm
 _ip = get_ipython()
 _tree = PDVTree()
-_app = PDVApp()
 _ip.user_ns["pdv_tree"] = _tree
-_ip.user_ns["pdv"] = _app
 _pdv_comms._pdv_tree = _tree
 _pdv_comms._ip = _ip
 _pdv_comms._bootstrapped = True

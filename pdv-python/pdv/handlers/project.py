@@ -41,6 +41,7 @@ def _collect_nodes(
     working_dir: str = "",
     on_progress: "Callable[[int], None] | None" = None,
     counter: "list[int] | None" = None,
+    missing_files: "list[str] | None" = None,
 ) -> list:
     """Recursively serialize tree nodes and return descriptor list.
 
@@ -58,6 +59,10 @@ def _collect_nodes(
         Called with current node count after each node is serialized.
     counter : list, optional
         Mutable single-element list tracking the running count across recursion.
+    missing_files : list, optional
+        Mutable list that collects tree paths of file-backed nodes whose
+        backing files were missing. If provided, missing-file errors skip
+        the node instead of falling back to pickle.
 
     Returns
     -------
@@ -93,6 +98,17 @@ def _collect_nodes(
                 source_dir=working_dir or save_dir,
             )
         except PDVSerializationError as exc:
+            if missing_files is not None and str(exc).startswith("File not found:"):
+                log.warning(
+                    "project.save: skipping node '%s' — backing file missing: %s",
+                    path,
+                    exc,
+                )
+                missing_files.append(path)
+                counter[0] += 1
+                if on_progress is not None:
+                    on_progress(counter[0])
+                continue
             log.warning(
                 "project.save: falling back to pickle for node '%s' (%s): %s",
                 path,
@@ -113,6 +129,7 @@ def _collect_nodes(
                     working_dir=working_dir,
                     on_progress=on_progress,
                     counter=counter,
+                    missing_files=missing_files,
                 )
             )
         elif descriptor.get("metadata", {}).get("composite") and isinstance(value, dict):
@@ -128,6 +145,7 @@ def _collect_nodes(
                     working_dir=working_dir,
                     on_progress=on_progress,
                     counter=counter,
+                    missing_files=missing_files,
                 )
             )
     return nodes
@@ -673,7 +691,7 @@ def serialize_tree_to_dir(
     Writes data files and ``tree-index.json``, purges orphaned UUID
     directories, and computes the tree checksum. This is the core
     serialization logic shared by ``handle_project_save`` (comm path)
-    and ``PDVApp.save_project`` (direct Python call path).
+    and ``pdv.save_project`` (direct Python call path).
 
     Parameters
     ----------
@@ -687,7 +705,8 @@ def serialize_tree_to_dir(
     Returns
     -------
     dict
-        ``{"node_count", "checksum", "module_owned_files", "module_manifests"}``.
+        ``{"node_count", "checksum", "module_owned_files", "module_manifests",
+        "missing_files"}``.
 
     Raises
     ------
@@ -716,13 +735,25 @@ def serialize_tree_to_dir(
             if on_progress is not None:
                 on_progress("Serializing", current, total)
 
+    missing_files: list[str] = []
     nodes = _collect_nodes(
         tree,
         save_dir,
         working_dir=working_dir,
         on_progress=_emit_progress,
+        missing_files=missing_files,
     )
     _log(f"collected {len(nodes)} node descriptors")
+
+    if missing_files:
+        _log(f"ABORTED — {len(missing_files)} file-backed node(s) have missing backing files")
+        return {
+            "node_count": len(nodes),
+            "checksum": "",
+            "module_owned_files": [],
+            "module_manifests": [],
+            "missing_files": missing_files,
+        }
 
     index_data = json.dumps(nodes, indent=2, default=str)
     index_path = os.path.join(save_dir, "tree-index.json")
@@ -749,6 +780,7 @@ def serialize_tree_to_dir(
         "checksum": checksum,
         "module_owned_files": module_owned_files,
         "module_manifests": module_manifests,
+        "missing_files": missing_files,
     }
 
 
