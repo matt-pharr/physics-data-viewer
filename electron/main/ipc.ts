@@ -220,6 +220,17 @@ export const IPC = {
     updateStatus: "pdv.updater.status",
     requestClose: "pdv.app.requestClose",
     autosaveTrigger: "pdv.autosave.trigger",
+    /**
+     * Bracketing pushes around an autosave run. The renderer uses these to
+     * gate cell execution: code submitted while an autosave is in flight is
+     * held in a renderer-side queue and only dispatched to the kernel after
+     * `autosaveEnded` arrives. Without this gate, an `execute_request`
+     * queued behind a `pdv.project.save` comm in the kernel's shell channel
+     * gets stuck — see https://github.com/matt-pharr/physics-data-viewer
+     * PR #217 review thread.
+     */
+    autosaveStarted: "pdv.autosave.started",
+    autosaveEnded: "pdv.autosave.ended",
   },
   /** App-level lifecycle channels (close confirmation, etc.). */
   app: {
@@ -2027,6 +2038,15 @@ export interface PDVApi {
      * @returns Unsubscribe function.
      */
     onTrigger(callback: () => void): () => void;
+    /**
+     * Subscribe to bracketing pushes around an autosave run.
+     *
+     * @param callback - Invoked with `true` when an autosave begins (kernel
+     *   busy with `pdv.project.save`), `false` when it ends (success or
+     *   failure). The renderer uses this to gate cell execution.
+     * @returns Unsubscribe function.
+     */
+    onInFlightChange(callback: (inFlight: boolean) => void): () => void;
   };
 
   /** App info accessors. */

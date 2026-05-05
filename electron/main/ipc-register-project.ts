@@ -339,7 +339,19 @@ export function registerProjectIpcHandlers(
       };
 
       // Chain behind any in-flight save or autosave so they never overlap.
-      return projectManager.runWithSaveLock(doSave);
+      // Bracket with autosave start/end pushes so the renderer's cell-execution
+      // gate treats explicit saves the same as autosaves — both put a
+      // pdv.project.save comm on the kernel's shell channel, so cells must
+      // wait either way to avoid the queue-stuck symptom.
+      return projectManager.runWithSaveLock(async () => {
+        const win = getMainWindow();
+        win?.webContents.send(IPC.push.autosaveStarted);
+        try {
+          return await doSave();
+        } finally {
+          win?.webContents.send(IPC.push.autosaveEnded);
+        }
+      });
     }
   );
 

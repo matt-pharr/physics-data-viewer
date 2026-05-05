@@ -856,6 +856,7 @@ export interface PDVApi {
     }>;
     deleteOrphan(orphanDir: string): Promise<void>;
     onTrigger(callback: () => void): () => void;
+    onInFlightChange(callback: (inFlight: boolean) => void): () => void;
   };
   about: {
     getVersion(): Promise<string>;

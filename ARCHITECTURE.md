@@ -919,7 +919,7 @@ The tree panel uses **virtualized rendering** (`react-window` `List` component) 
 
 - `TreeNodeRow` is wrapped in `React.memo` with stable props to prevent unnecessary re-renders
 - Expand/collapse discards children (no expansion state persistence across sessions). Re-expanding a node always fetches fresh children from the kernel.
-- After code cell or script execution completes, the tree does a full refresh via `refreshToken` bump
+- After code cell or script execution completes, the renderer bumps `treeRefreshToken` (in `executeImmediate`'s `finally` block) so the tree does a full refetch. This runs **in addition to** push-driven updates and serves as defense in depth for the nested-dict limitation in §7.1.2 — silent sub-tree mutations during a run are caught when the cell finishes.
 - Incremental updates from `pdv.tree.changed` push notifications update only affected subtrees (selective parent re-fetch)
 
 ### 7.1.2 Change Notification Debouncing
@@ -928,7 +928,7 @@ The tree panel uses **virtualized rendering** (`react-window` `List` component) 
 
 All mutating `dict` methods are overridden to emit notifications: `__setitem__`, `__delitem__`, `pop`, `update`, `clear`, `setdefault`, `popitem`, `__ior__` (the `|=` operator). The standard `dict.fromkeys()` classmethod is not overridden because new instances have no comm attached.
 
-**Nested dict limitation**: Only the root `PDVTree` (which has `_send_fn` attached) emits notifications. Sub-dicts accessed via `pdv_tree['path']` are `PDVTree` instances without a comm. Mutations on sub-dicts are silent. The recommended pattern is dot-path access through the root: `pdv_tree.pop('parent.child')` rather than `pdv_tree['parent'].pop('child')`.
+**Nested dict limitation**: Only the root `PDVTree` (which has `_send_fn` attached) emits notifications. Sub-dicts accessed via `pdv_tree['path']` are `PDVTree` instances without a comm. Mutations on sub-dicts are silent. The recommended pattern is dot-path access through the root: `pdv_tree.pop('parent.child')` rather than `pdv_tree['parent'].pop('child')`. Mutations from inside an executing code cell or script are still caught by the post-execute `treeRefreshToken` bump described in §7.1.1, but mutations from comm callbacks or background threads on a sub-tree are lost. The planned fix is to give sub-trees a parent ref so `_emit_changed` can walk to the root and emit with the full dot-path — tracked in [issue #218](https://github.com/matt-pharr/physics-data-viewer/issues/218).
 
 ### 7.2 Node Types
 

@@ -33,8 +33,14 @@ interface CodeCellProps {
   onRenameTab?: (id: number, name: string | undefined) => void;
   onExecute: (code: string) => void;
   onInterrupt?: () => void;
+  /** Drop the queued execute_request before it reaches the kernel. Distinct
+   * from `onInterrupt`, which sends SIGINT to a kernel actively running. */
+  onCancelQueued?: () => void;
   onClear: () => void;
   isExecuting: boolean;
+  /** True while a submitted run is held in the renderer-side queue waiting
+   * for an in-flight save to finish. Mutually exclusive with `isExecuting`. */
+  isQueued?: boolean;
   lastError?: string;
   shortcuts: Shortcuts;
   monacoTheme?: string;
@@ -57,8 +63,10 @@ export const CodeCell: React.FC<CodeCellProps> = ({
   onRenameTab,
   onExecute,
   onInterrupt,
+  onCancelQueued,
   onClear,
   isExecuting,
+  isQueued = false,
   lastError,
   shortcuts,
   monacoTheme = 'vs-dark',
@@ -72,6 +80,7 @@ export const CodeCell: React.FC<CodeCellProps> = ({
   const activeTab = useMemo(() => tabs.find((tab) => tab.id === activeTabId), [tabs, activeTabId]);
   const activeTabRef = useRef(activeTab);
   const isExecutingRef = useRef(isExecuting);
+  const isQueuedRef = useRef(isQueued);
   const disabledRef = useRef(disabled);
   const shortcutsRef = useRef(shortcuts);
   const onAddTabRef = useRef(onAddTab);
@@ -95,6 +104,10 @@ export const CodeCell: React.FC<CodeCellProps> = ({
   useEffect(() => {
     isExecutingRef.current = isExecuting;
   }, [isExecuting]);
+
+  useEffect(() => {
+    isQueuedRef.current = isQueued;
+  }, [isQueued]);
 
   useEffect(() => {
     disabledRef.current = disabled;
@@ -273,7 +286,7 @@ export const CodeCell: React.FC<CodeCellProps> = ({
       if (matchesShortcut(nativeEvent, shortcutsRef.current.execute)) {
         e.preventDefault();
         e.stopPropagation();
-        if (!disabledRef.current && !isExecutingRef.current && activeTabRef.current) {
+        if (!disabledRef.current && !isExecutingRef.current && !isQueuedRef.current && activeTabRef.current) {
           onExecuteRef.current(activeTabRef.current.code);
         }
       }
@@ -308,7 +321,7 @@ export const CodeCell: React.FC<CodeCellProps> = ({
   };
 
   const handleExecute = () => {
-    if (!disabled && !isExecuting && activeTab.code.trim()) {
+    if (!disabled && !isExecuting && !isQueued && activeTab.code.trim()) {
       onExecute(activeTab.code);
     }
   };
@@ -390,7 +403,16 @@ export const CodeCell: React.FC<CodeCellProps> = ({
         )}
 
         <div className="pane-actions">
-          {isExecuting ? (
+          {isQueued ? (
+            <button
+              className="btn btn-warning"
+              onClick={onCancelQueued}
+              disabled={disabled || !onCancelQueued}
+              title="The kernel is busy saving — cancel before this run reaches the kernel"
+            >
+              Cancel
+            </button>
+          ) : isExecuting ? (
             <button
               className="btn btn-warning"
               onClick={onInterrupt}
@@ -407,7 +429,7 @@ export const CodeCell: React.FC<CodeCellProps> = ({
               Execute
             </button>
           )}
-          <button className="btn btn-secondary" onClick={isEmpty ? handleClose : handleClear} disabled={disabled || isExecuting}>
+          <button className="btn btn-secondary" onClick={isEmpty ? handleClose : handleClear} disabled={disabled || isExecuting || isQueued}>
             {isEmpty ? 'Close' : 'Clear'}
           </button>
         </div>

@@ -101,6 +101,11 @@ const App: React.FC = () => {
   const [currentKernelId, setCurrentKernelId] = useState<string | null>(null);
   const [kernelStatus, setKernelStatus] = useState<KernelStatus>('idle');
   const [isExecuting, setIsExecuting] = useState(false);
+  /** True while a save (auto or explicit) is in flight on the kernel. */
+  const [isSaveInFlight, setIsSaveInFlight] = useState(false);
+  /** True while a user-submitted run is held in the renderer queue waiting
+   * for `isSaveInFlight` to clear. Mutually exclusive with `isExecuting`. */
+  const [isQueuedExecution, setIsQueuedExecution] = useState(false);
   const [lastError, setLastError] = useState<string | undefined>(undefined);
   const [codeCellExecutionError, setCodeCellExecutionError] =
     useState<CodeCellExecutionError | undefined>(undefined);
@@ -778,7 +783,15 @@ const App: React.FC = () => {
     setScriptDialog(null);
   };
 
-  const handleExecute = useCallback(async (code: string, originOverride?: KernelExecutionOrigin) => {
+  // Single-slot queue for a run held while a save is in flight. Stored in a
+  // ref because the *contents* don't drive UI updates (the boolean flag does)
+  // and so the drain effect below can read the latest payload without being
+  // re-created when it changes.
+  const queuedExecutionRef = useRef<{ code: string; originOverride?: KernelExecutionOrigin } | null>(null);
+  const isSaveInFlightRef = useRef(false);
+  useEffect(() => { isSaveInFlightRef.current = isSaveInFlight; }, [isSaveInFlight]);
+
+  const executeImmediate = useCallback(async (code: string, originOverride?: KernelExecutionOrigin) => {
     if (!currentKernelId || kernelStatus !== 'ready' || !code.trim()) return;
 
     setIsExecuting(true);
@@ -856,8 +869,56 @@ const App: React.FC = () => {
     } finally {
       setIsExecuting(false);
       setNamespaceRefreshToken((prev) => prev + 1);
+      // Defense in depth: a script that mutates a sub-PDVTree directly
+      // (e.g. `pdv_tree['big']['x'] = ...`) doesn't fire `pdv.tree.changed`
+      // because sub-trees don't carry _send_fn. Refetching the tree after
+      // execution catches those silent mutations even before that's fixed
+      // properly upstream, and is cheap (a single tree.list query).
+      setTreeRefreshToken((prev) => prev + 1);
     }
   }, [currentKernelId, kernelStatus]);
+
+  /**
+   * Public execute entry point. Routes to {@link executeImmediate} unless a
+   * save is in flight, in which case the run is held in
+   * {@link queuedExecutionRef} until the autosave-ended push fires.
+   *
+   * Reads `isSaveInFlight` from a ref so the callback identity stays stable
+   * across save transitions (otherwise `useEffect`s that depend on it would
+   * tear down their listeners every time a save started or ended).
+   */
+  const handleExecute = useCallback(async (code: string, originOverride?: KernelExecutionOrigin) => {
+    if (!currentKernelId || kernelStatus !== 'ready' || !code.trim()) return;
+    if (isSaveInFlightRef.current) {
+      queuedExecutionRef.current = { code, originOverride };
+      setIsQueuedExecution(true);
+      return;
+    }
+    await executeImmediate(code, originOverride);
+  }, [currentKernelId, kernelStatus, executeImmediate]);
+
+  const handleCancelQueued = useCallback(() => {
+    queuedExecutionRef.current = null;
+    setIsQueuedExecution(false);
+  }, []);
+
+  // Drain the queued run when a save finishes.
+  useEffect(() => {
+    if (!isSaveInFlight && isQueuedExecution) {
+      const queued = queuedExecutionRef.current;
+      queuedExecutionRef.current = null;
+      setIsQueuedExecution(false);
+      if (queued) {
+        void executeImmediate(queued.code, queued.originOverride);
+      }
+    }
+  }, [isSaveInFlight, isQueuedExecution, executeImmediate]);
+
+  // Subscribe to autosave-in-flight pushes from main.
+  useEffect(() => {
+    if (!window.pdv?.autosave?.onInFlightChange) return;
+    return window.pdv.autosave.onInFlightChange(setIsSaveInFlight);
+  }, []);
 
   // Listen for execution requests from module popup windows
   useEffect(() => {
@@ -1323,8 +1384,10 @@ const App: React.FC = () => {
                       onRenameTab={handleRenameCellTab}
                       onExecute={handleExecute}
                       onInterrupt={currentKernelId ? () => { void window.pdv.kernels.interrupt(currentKernelId); } : undefined}
+                      onCancelQueued={handleCancelQueued}
                       onClear={handleClearCommand}
                       isExecuting={isExecuting}
+                      isQueued={isQueuedExecution}
                       lastError={lastError}
                       executionError={codeCellExecutionError}
                       shortcuts={shortcuts}

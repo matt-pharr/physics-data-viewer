@@ -705,24 +705,34 @@ export function registerIpcHandlers(
       : "python";
 
     return projectManager.runWithSaveLock(async () => {
-      const autosaveDir = autosaveDirFor(baseDir);
-      const result = await projectManager.autosave(autosaveDir, codeCells as CodeCellData);
-      if (result === null) return { saved: false };
+      // Bracket the kernel comm with start/end pushes so the renderer can
+      // gate cell execution. An execute_request queued behind a
+      // pdv.project.save in ipykernel's shell channel can hang in ways
+      // that aren't worth root-causing here — easier to keep them off the
+      // wire entirely until the save returns.
+      win.webContents.send(IPC.push.autosaveStarted);
+      try {
+        const autosaveDir = autosaveDirFor(baseDir);
+        const result = await projectManager.autosave(autosaveDir, codeCells as CodeCellData);
+        if (result === null) return { saved: false };
 
-      await mirrorAutosaveSidecars(
-        autosaveDir,
-        result,
-        {
-          activeProjectDir,
-          pendingImports: importsSnapshot,
-          pendingSettings: settingsSnapshot,
-          language,
-          pdvVersion: app.getVersion(),
-        },
-        moduleManager,
-      );
+        await mirrorAutosaveSidecars(
+          autosaveDir,
+          result,
+          {
+            activeProjectDir,
+            pendingImports: importsSnapshot,
+            pendingSettings: settingsSnapshot,
+            language,
+            pdvVersion: app.getVersion(),
+          },
+          moduleManager,
+        );
 
-      return { saved: true };
+        return { saved: true };
+      } finally {
+        win.webContents.send(IPC.push.autosaveEnded);
+      }
     });
   });
 

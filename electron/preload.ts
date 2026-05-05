@@ -161,6 +161,11 @@ const api: PDVApi = {
     recoverUnsaved: (orphanDir: string) => ipcRenderer.invoke(IPC.autosave.recoverUnsaved, orphanDir),
     deleteOrphan: (orphanDir: string) => ipcRenderer.invoke(IPC.autosave.deleteOrphan, orphanDir),
     onTrigger: (cb: () => void) => onPush(IPC.push.autosaveTrigger, cb),
+    onInFlightChange: (cb: (inFlight: boolean) => void) => {
+      const offStart = onPush<void>(IPC.push.autosaveStarted, () => cb(true));
+      const offEnd = onPush<void>(IPC.push.autosaveEnded, () => cb(false));
+      return () => { offStart(); offEnd(); };
+    },
   },
   about: {
     getVersion: () => ipcRenderer.invoke(IPC.about.getVersion),
