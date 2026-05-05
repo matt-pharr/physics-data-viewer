@@ -13,13 +13,21 @@ pdv.help()                   # Print a quick reference
 
 Tab-completing `pdv.` in a code cell lists every available operation.
 
-::: pdv.namespace.PDVApp
+::: pdv
     options:
       show_root_heading: true
       show_source: false
       members_order: source
-      filters:
-        - "!^_"
+      members:
+        - working_dir
+        - save
+        - save_project
+        - save_project_as
+        - open_project
+        - add_file
+        - new_note
+        - help
+        - log
 
 ## Module authoring
 
