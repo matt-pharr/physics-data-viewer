@@ -1741,6 +1741,17 @@
   
 </li>
         
+          <li class="md-nav__item">
+  <a href="#84-autosave-and-recovery" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        8.4 Autosave and Recovery
+      
+    </span>
+  </a>
+  
+</li>
+        
       </ul>
     </nav>
   
@@ -3212,6 +3223,17 @@
   
 </li>
         
+          <li class="md-nav__item">
+  <a href="#84-autosave-and-recovery" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        8.4 Autosave and Recovery
+      
+    </span>
+  </a>
+  
+</li>
+        
       </ul>
     </nav>
   
@@ -3936,7 +3958,7 @@
 </ul>
 <h3 id="24-what-the-main-process-does-not-do">2.4 What the Main Process Does NOT Do<a class="headerlink" href="#24-what-the-main-process-does-not-do" title="Permanent link">&para;</a></h3>
 <ul>
-<li>The main process does not construct arbitrary Python or Julia business logic and send it via <code>execute_request</code>. All structured data exchange between the main process and the kernel happens via the PDV comm protocol (see Section 3). There are two well-defined exceptions: (1) the <strong>bootstrap snippet</strong> in <code>kernel-session.ts</code> that initializes <code>pdv</code> at startup (a one-time init, not business logic), and (2) the <strong>script invocation string</strong> built by the <code>script:run</code> IPC handler, which constructs a minimal <code>pdv_tree["path"].run(kwargs)</code> call so that script output flows through the standard Jupyter iopub stream and appears in the console.</li>
+<li>The main process does not construct arbitrary Python or Julia business logic and send it via <code>execute_request</code>. All structured data exchange between the main process and the kernel happens via the PDV comm protocol (see Section 3). There are two well-defined exceptions: (1) the <strong>bootstrap snippet</strong> in <code>kernel-session.ts</code> that initializes <code>pdv_tree</code> at startup (a one-time init, not business logic), and (2) the <strong>script invocation string</strong> built by the <code>script:run</code> IPC handler, which constructs a minimal <code>pdv_tree["path"].run(kwargs)</code> call so that script output flows through the standard Jupyter iopub stream and appears in the console.</li>
 <li>The main process does not scan the filesystem to build the tree. The kernel is the sole tree authority.</li>
 </ul>
 <hr />
@@ -4049,7 +4071,7 @@
 <tr>
 <td><code>pdv.project.load</code></td>
 <td>app → kernel</td>
-<td>Instructs the kernel to load a project from a save directory.</td>
+<td>Instructs the kernel to load a project from a save directory. Payload: <code>{ save_dir, tree_index_dir? }</code>. When <code>tree_index_dir</code> is present and exists, the kernel reads <code>tree-index.json</code> from there instead of <code>save_dir</code>; used by autosave recovery to overlay an autosaved tree (see §8.4).</td>
 </tr>
 <tr>
 <td><code>pdv.project.loaded</code></td>
@@ -4059,12 +4081,12 @@
 <tr>
 <td><code>pdv.project.save</code></td>
 <td>app → kernel</td>
-<td>Instructs the kernel to serialize the tree to the save directory.</td>
+<td>Instructs the kernel to serialize the tree to the save directory. Payload: <code>{ save_dir, is_autosave?, clear_cache? }</code>. When <code>is_autosave: true</code> the kernel consults its per-node checksum cache and reuses unchanged-data descriptors (see §8.4). <code>clear_cache: true</code> wipes the cache before saving (used after the user discards a stale <code>.autosave/</code>).</td>
 </tr>
 <tr>
 <td><code>pdv.project.save.response</code></td>
 <td>kernel → app</td>
-<td>Confirms save completed. Payload: <code>{ node_count, checksum, module_owned_files, module_manifests }</code>. <code>module_owned_files</code> lists every file-backed node that belongs to a <code>PDVModule</code> (see §5.9) so the main process can mirror working-dir edits into <code>&lt;saveDir&gt;/modules/&lt;id&gt;/&lt;source_rel_path&gt;</code>. <code>module_manifests</code> carries per-module metadata + module-root-relative node descriptors for writing <code>pdv-module.json</code> and <code>module-index.json</code> under each module dir. Both fields are empty arrays when the tree contains no <code>PDVModule</code> nodes.</td>
+<td>Confirms save completed. Payload: <code>{ node_count, checksum, module_owned_files, module_manifests, missing_files, autosave_cache_hits }</code>. <code>module_owned_files</code> lists every file-backed node that belongs to a <code>PDVModule</code> (see §5.9) so the main process can mirror working-dir edits into <code>&lt;saveDir&gt;/modules/&lt;id&gt;/&lt;source_rel_path&gt;</code>. <code>module_manifests</code> carries per-module metadata + module-root-relative node descriptors for writing <code>pdv-module.json</code> and <code>module-index.json</code> under each module dir. Both fields are empty arrays when the tree contains no <code>PDVModule</code> nodes. <code>missing_files</code> lists tree paths of file-backed nodes whose backing files were missing during serialization; these nodes are skipped rather than pickled. <code>autosave_cache_hits</code> reports how many nodes were reused from the cache (only meaningful when the request set <code>is_autosave: true</code>).</td>
 </tr>
 </tbody>
 </table>
@@ -4557,17 +4579,17 @@
 <h3 id="53-bootstrap">5.3 Bootstrap<a class="headerlink" href="#53-bootstrap" title="Permanent link">&para;</a></h3>
 <p><code>pdv.bootstrap()</code> is called by a bootstrap snippet that the main process sends via <code>execute_request</code> (silent mode) from <code>kernel-session.ts</code> immediately after the kernel subprocess starts. It:
 1. Registers the <code>pdv.kernel</code> comm target with IPython
-2. Injects <code>pdv_tree</code> and <code>pdv</code> into the IPython user namespace via a custom namespace class that blocks reassignment
+2. Injects <code>pdv_tree</code> into the IPython user namespace via a custom namespace class that blocks reassignment
 3. Sends the <code>pdv.ready</code> comm message</p>
 <p><code>bootstrap()</code> must be idempotent — calling it twice must not open a second comm or re-inject variables.</p>
 <h3 id="54-protected-namespace">5.4 Protected Namespace<a class="headerlink" href="#54-protected-namespace" title="Permanent link">&para;</a></h3>
 <p>The IPython user namespace is replaced with a subclass of <code>dict</code> that overrides <code>__setitem__</code>:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="k">class</span><span class="w"> </span><span class="nc">PDVNamespace</span><span class="p">(</span><span class="nb">dict</span><span class="p">):</span>
-<a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a>    <span class="n">_PROTECTED</span> <span class="o">=</span> <span class="nb">frozenset</span><span class="p">({</span><span class="s1">&#39;pdv_tree&#39;</span><span class="p">,</span> <span class="s1">&#39;pdv&#39;</span><span class="p">})</span>
+<a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a>    <span class="n">_PROTECTED</span> <span class="o">=</span> <span class="nb">frozenset</span><span class="p">({</span><span class="s1">&#39;pdv_tree&#39;</span><span class="p">})</span>
 <a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a>
 <a id="__codelineno-7-4" name="__codelineno-7-4" href="#__codelineno-7-4"></a>    <span class="k">def</span><span class="w"> </span><span class="fm">__setitem__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">key</span><span class="p">,</span> <span class="n">value</span><span class="p">):</span>
 <a id="__codelineno-7-5" name="__codelineno-7-5" href="#__codelineno-7-5"></a>        <span class="k">if</span> <span class="n">key</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">_PROTECTED</span><span class="p">:</span>
-<a id="__codelineno-7-6" name="__codelineno-7-6" href="#__codelineno-7-6"></a>            <span class="k">raise</span> <span class="n">PDVError</span><span class="p">(</span>
+<a id="__codelineno-7-6" name="__codelineno-7-6" href="#__codelineno-7-6"></a>            <span class="k">raise</span> <span class="n">PDVProtectedNameError</span><span class="p">(</span>
 <a id="__codelineno-7-7" name="__codelineno-7-7" href="#__codelineno-7-7"></a>                <span class="sa">f</span><span class="s2">&quot;&#39;</span><span class="si">{</span><span class="n">key</span><span class="si">}</span><span class="s2">&#39; is a protected PDV object and cannot be reassigned. &quot;</span>
 <a id="__codelineno-7-8" name="__codelineno-7-8" href="#__codelineno-7-8"></a>                <span class="sa">f</span><span class="s2">&quot;Use pdv_tree[&#39;key&#39;] = value to store data in the tree.&quot;</span>
 <a id="__codelineno-7-9" name="__codelineno-7-9" href="#__codelineno-7-9"></a>            <span class="p">)</span>
@@ -4575,7 +4597,7 @@
 </code></pre></div>
 <p>This is set via <code>IPython.get_ipython().user_ns = PDVNamespace(...)</code> during bootstrap.</p>
 <h3 id="55-user-facing-names-in-the-kernel-namespace">5.5 User-Facing Names in the Kernel Namespace<a class="headerlink" href="#55-user-facing-names-in-the-kernel-namespace" title="Permanent link">&para;</a></h3>
-<p>After bootstrap, exactly two names are injected into the user namespace:</p>
+<p>After bootstrap, exactly one name is injected into the user namespace:</p>
 <table>
 <thead>
 <tr>
@@ -4590,13 +4612,9 @@
 <td><code>PDVTree</code> instance</td>
 <td>The live project data tree. The sole data authority.</td>
 </tr>
-<tr>
-<td><code>pdv</code></td>
-<td><code>PDVApp</code> instance</td>
-<td>App-control object. Exposes <code>pdv.save()</code>, <code>pdv.help()</code>, etc.</td>
-</tr>
 </tbody>
 </table>
+<p>App-level operations (<code>pdv.save()</code>, <code>pdv.help()</code>, <code>pdv.add_file()</code>, etc.) are module-level functions on the <code>pdv</code> package itself. Users access them via <code>import pdv</code> (or the package is already importable since <code>pdv-python</code> is installed). There is no injected <code>pdv</code> object — the <code>pdv</code> name in the namespace is simply the Python package.</p>
 <p>All other <code>pdv_*</code> names in the namespace are an error. Internal implementation functions must be unreachable from the user namespace.</p>
 <h3 id="56-pdvtree-class">5.6 PDVTree Class<a class="headerlink" href="#56-pdvtree-class" title="Permanent link">&para;</a></h3>
 <p><code>PDVTree</code> is a <code>dict</code> subclass with the following additions:</p>
@@ -4730,21 +4748,25 @@
 <hr />
 <h2 id="6-the-working-directory-and-project-save-directory">6. The Working Directory and Project Save Directory<a class="headerlink" href="#6-the-working-directory-and-project-save-directory" title="Permanent link">&para;</a></h2>
 <h3 id="61-working-directory">6.1 Working Directory<a class="headerlink" href="#61-working-directory" title="Permanent link">&para;</a></h3>
-<p>The working directory is a temporary directory created by the Electron main process at kernel startup. It is the live filesystem backing for the current session.</p>
-<p><strong>Creation</strong>: The main process calls <code>fs.mkdtemp()</code> (or equivalent) to create a uniquely named directory in the OS temporary directory. The path is passed to the kernel in the <code>pdv.init</code> message.</p>
+<p>The working directory is created by the Electron main process at kernel startup under <code>~/.PDV/working/</code>. It is the live filesystem backing for the current session. Using a persistent, app-managed directory instead of OS temp space prevents silent purging during long-running sessions.</p>
+<p><strong>Creation</strong>: The main process calls <code>fs.mkdtemp()</code> to create a uniquely named directory under <code>~/.PDV/working/</code>. A <code>session.lock</code> file containing <code>{ pid, createdAt }</code> is written so that orphan cleanup on next startup can distinguish active sessions from crashed ones. The working directory path is passed to the kernel in the <code>pdv.init</code> message.</p>
 <p><strong>Structure</strong> (UUID-based — see §6.3):
-<div class="highlight"><pre><span></span><code><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a>/tmp/pdv-&lt;uuid&gt;/
-<a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a>    tree/
-<a id="__codelineno-10-3" name="__codelineno-10-3" href="#__codelineno-10-3"></a>        a1b2c3d4e5f6/     ← each file-backed node gets its own UUID directory
-<a id="__codelineno-10-4" name="__codelineno-10-4" href="#__codelineno-10-4"></a>            fit_model.py
-<a id="__codelineno-10-5" name="__codelineno-10-5" href="#__codelineno-10-5"></a>        f7e8d9c0b1a2/
-<a id="__codelineno-10-6" name="__codelineno-10-6" href="#__codelineno-10-6"></a>            ch1.npy
-<a id="__codelineno-10-7" name="__codelineno-10-7" href="#__codelineno-10-7"></a>        ...
-<a id="__codelineno-10-8" name="__codelineno-10-8" href="#__codelineno-10-8"></a>    .pdv-work/
-<a id="__codelineno-10-9" name="__codelineno-10-9" href="#__codelineno-10-9"></a>        autosave/     ← reserved for future autosave feature
+<div class="highlight"><pre><span></span><code><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a>~/.PDV/working/pdv-&lt;random&gt;/
+<a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a>    session.lock              ← { pid, createdAt } for orphan detection
+<a id="__codelineno-10-3" name="__codelineno-10-3" href="#__codelineno-10-3"></a>    code-cells.json           ← per-session autosave of the renderer&#39;s cell tabs
+<a id="__codelineno-10-4" name="__codelineno-10-4" href="#__codelineno-10-4"></a>    tree/
+<a id="__codelineno-10-5" name="__codelineno-10-5" href="#__codelineno-10-5"></a>        a1b2c3d4e5f6/         ← each file-backed node gets its own UUID directory
+<a id="__codelineno-10-6" name="__codelineno-10-6" href="#__codelineno-10-6"></a>            fit_model.py
+<a id="__codelineno-10-7" name="__codelineno-10-7" href="#__codelineno-10-7"></a>        f7e8d9c0b1a2/
+<a id="__codelineno-10-8" name="__codelineno-10-8" href="#__codelineno-10-8"></a>            ch1.npy
+<a id="__codelineno-10-9" name="__codelineno-10-9" href="#__codelineno-10-9"></a>        ...
+<a id="__codelineno-10-10" name="__codelineno-10-10" href="#__codelineno-10-10"></a>    .autosave/                ← present once the autosave timer has fired at least once
+<a id="__codelineno-10-11" name="__codelineno-10-11" href="#__codelineno-10-11"></a>        tree-index.json
+<a id="__codelineno-10-12" name="__codelineno-10-12" href="#__codelineno-10-12"></a>        code-cells.json
+<a id="__codelineno-10-13" name="__codelineno-10-13" href="#__codelineno-10-13"></a>        tree/...
 </code></pre></div></p>
 <p>File-backed tree nodes (scripts, notes, GUIs, namelists, libs, data files) each get a unique 12-hex-character UUID directory under <code>tree/</code>. The tree path is decoupled from the filesystem path — renaming or moving a tree node does not require renaming or copying files on disk. See §6.3 for the full UUID storage design.</p>
-<p><strong>Lifecycle</strong>: Created at kernel startup. Deleted on clean shutdown. If the app crashes, the directory is left on disk but is not recovered (crash recovery is out of scope for alpha).</p>
+<p><strong>Lifecycle</strong>: Created at kernel startup. Deleted on clean shutdown. On next launch, the app scans <code>~/.PDV/working/</code> for <code>pdv-*</code> directories whose <code>session.lock</code> PID is no longer running (or whose lockfile is missing) and removes them as orphans — <strong>except</strong> when the directory contains <code>.autosave/tree-index.json</code>. Such orphans are preserved so the welcome screen can offer recovery (see §8.4); Recover or Discard removes the directory afterwards.</p>
 <p><strong>Ownership</strong>: The main process creates it. The kernel writes to it (data files). The main process deletes it.</p>
 <h3 id="62-project-save-directory">6.2 Project Save Directory<a class="headerlink" href="#62-project-save-directory" title="Permanent link">&para;</a></h3>
 <p>A persistent, user-chosen directory that stores a complete saved snapshot of a PDV project.</p>
@@ -4945,7 +4967,7 @@
 <a id="__codelineno-14-26" name="__codelineno-14-26" href="#__codelineno-14-26"></a>
 <a id="__codelineno-14-27" name="__codelineno-14-27" href="#__codelineno-14-27"></a>- `TreeNodeRow` is wrapped in `React.memo` with stable props to prevent unnecessary re-renders
 <a id="__codelineno-14-28" name="__codelineno-14-28" href="#__codelineno-14-28"></a>- Expand/collapse discards children (no expansion state persistence across sessions). Re-expanding a node always fetches fresh children from the kernel.
-<a id="__codelineno-14-29" name="__codelineno-14-29" href="#__codelineno-14-29"></a>- After code cell or script execution completes, the tree does a full refresh via `refreshToken` bump
+<a id="__codelineno-14-29" name="__codelineno-14-29" href="#__codelineno-14-29"></a>- After code cell or script execution completes, the renderer bumps `treeRefreshToken` (in `executeImmediate`&#39;s `finally` block) so the tree does a full refetch. This runs **in addition to** push-driven updates and serves as defense in depth for the nested-dict limitation in §7.1.2 — silent sub-tree mutations during a run are caught when the cell finishes.
 <a id="__codelineno-14-30" name="__codelineno-14-30" href="#__codelineno-14-30"></a>- Incremental updates from `pdv.tree.changed` push notifications update only affected subtrees (selective parent re-fetch)
 <a id="__codelineno-14-31" name="__codelineno-14-31" href="#__codelineno-14-31"></a>
 <a id="__codelineno-14-32" name="__codelineno-14-32" href="#__codelineno-14-32"></a>### 7.1.2 Change Notification Debouncing
@@ -4954,7 +4976,7 @@
 <a id="__codelineno-14-35" name="__codelineno-14-35" href="#__codelineno-14-35"></a>
 <a id="__codelineno-14-36" name="__codelineno-14-36" href="#__codelineno-14-36"></a>All mutating `dict` methods are overridden to emit notifications: `__setitem__`, `__delitem__`, `pop`, `update`, `clear`, `setdefault`, `popitem`, `__ior__` (the `|=` operator). The standard `dict.fromkeys()` classmethod is not overridden because new instances have no comm attached.
 <a id="__codelineno-14-37" name="__codelineno-14-37" href="#__codelineno-14-37"></a>
-<a id="__codelineno-14-38" name="__codelineno-14-38" href="#__codelineno-14-38"></a>**Nested dict limitation**: Only the root `PDVTree` (which has `_send_fn` attached) emits notifications. Sub-dicts accessed via `pdv_tree[&#39;path&#39;]` are `PDVTree` instances without a comm. Mutations on sub-dicts are silent. The recommended pattern is dot-path access through the root: `pdv_tree.pop(&#39;parent.child&#39;)` rather than `pdv_tree[&#39;parent&#39;].pop(&#39;child&#39;)`.
+<a id="__codelineno-14-38" name="__codelineno-14-38" href="#__codelineno-14-38"></a>**Nested dict limitation**: Only the root `PDVTree` (which has `_send_fn` attached) emits notifications. Sub-dicts accessed via `pdv_tree[&#39;path&#39;]` are `PDVTree` instances without a comm. Mutations on sub-dicts are silent. The recommended pattern is dot-path access through the root: `pdv_tree.pop(&#39;parent.child&#39;)` rather than `pdv_tree[&#39;parent&#39;].pop(&#39;child&#39;)`. Mutations from inside an executing code cell or script are still caught by the post-execute `treeRefreshToken` bump described in §7.1.1, but mutations from comm callbacks or background threads on a sub-tree are lost. The planned fix is to give sub-trees a parent ref so `_emit_changed` can walk to the root and emit with the full dot-path — tracked in [issue #218](https://github.com/matt-pharr/physics-data-viewer/issues/218).
 <a id="__codelineno-14-39" name="__codelineno-14-39" href="#__codelineno-14-39"></a>
 <a id="__codelineno-14-40" name="__codelineno-14-40" href="#__codelineno-14-40"></a>### 7.2 Node Types
 <a id="__codelineno-14-41" name="__codelineno-14-41" href="#__codelineno-14-41"></a>
@@ -5276,6 +5298,31 @@
 <p>See Section 4.2. Note that the console output history is <strong>not</strong> saved or restored — the console is always empty after a project load.</p>
 <h3 id="83-save-directory-layout-invariant">8.3 Save Directory Layout Invariant<a class="headerlink" href="#83-save-directory-layout-invariant" title="Permanent link">&para;</a></h3>
 <p>Every file in <code>tree/</code> must have a corresponding entry in <code>tree-index.json</code>. Files in <code>tree/</code> without an index entry are ignored (treated as orphans). The kernel must not rely on filesystem traversal during load — it reads <code>tree-index.json</code> only and uses it to reconstruct the tree.</p>
+<h3 id="84-autosave-and-recovery">8.4 Autosave and Recovery<a class="headerlink" href="#84-autosave-and-recovery" title="Permanent link">&para;</a></h3>
+<p>Autosave protects against losing tree state and code cells when the user forgets to save or PDV crashes. It is a periodic, partial save that writes alongside the canonical save without disturbing it.</p>
+<p><strong>Where autosaves land.</strong> The autosave timer fires from the main process. The renderer responds by handing the current code-cell state back over IPC, then the main process serializes the kernel's tree to a <code>.autosave/</code> subdirectory:</p>
+<ul>
+<li><strong>For an open project</strong> (a save dir is set): writes to <code>&lt;saveDir&gt;/.autosave/</code>.</li>
+<li><strong>For an unsaved project</strong> (no save dir yet): writes to <code>&lt;workingDir&gt;/.autosave/</code>. This is the only path that ever produces orphan recovery candidates.</li>
+</ul>
+<p>The contents of <code>.autosave/</code> mirror the save-dir layout — <code>tree-index.json</code>, <code>code-cells.json</code>, and a <code>tree/</code> directory of file-backed nodes — so that recovery can use the same load primitives as a normal project open.</p>
+<p><strong>Incremental serialization.</strong> The kernel keeps an in-memory <code>_autosave_cache: dict[tree_path, (digest, descriptor)]</code> (see <code>pdv-python/pdv/handlers/project.py</code>). The cache is consulted <em>and</em> updated on every save — autosave and explicit. On an explicit save it ends up populated with <code>(digest, descriptor)</code> pairs whose descriptors point at canonical UUIDs in <code>&lt;saveDir&gt;/tree/</code>; the next autosave then hits the cache for unchanged data nodes, returns the canonical descriptor (so its <code>tree-index.json</code> references the canonical UUID), and skips writing duplicate file contents under <code>&lt;saveDir&gt;/.autosave/tree/</code>. Only nodes that genuinely changed since the last save get a fresh UUID and a new file. The cache is reset only when the user explicitly clears autosave data from Settings (signalled via <code>clear_cache: true</code> on the next save) or on kernel shutdown.</p>
+<p>The cache covers in-memory data kinds — ndarray, DataFrame, Series, scalar, text, mapping, sequence, binary. File-backed kinds (PDVScript, PDVLib, PDVNote, PDVGui, PDVNamelist, PDVFile) bypass the cache and <code>smart_copy</code> their backing file on every autosave; the per-file copy is cheap because <code>smart_copy</code> is reflink/CoW where the filesystem supports it.</p>
+<p><strong>Save / autosave serialization.</strong> Both <code>IPC.project.save</code> and <code>IPC.autosave.run</code> acquire a single FIFO mutex inside <code>ProjectManager</code> (<code>runWithSaveLock</code>). When the autosave timer fires while an explicit save is in flight, the autosave queues until the save finishes. When the user clicks Save while an autosave is in flight, Save queues the same way. Combined with the kernel-busy deferral via <code>consumeAutosavePending</code>, this means autosave never overlaps an explicit save's main-process post-save side effects (manifest writes, module mirror).</p>
+<p><strong>Two recovery flows.</strong></p>
+<ol>
+<li>
+<p><strong>Recovery on project open.</strong> When the user opens a project that has a <code>&lt;saveDir&gt;/.autosave/</code> younger than (or independent of) the canonical save, the renderer prompts: "Restore autosaved changes?" If yes, the main process copies any file-backed nodes from <code>.autosave/</code> into the kernel working dir and calls <code>projectManager.load(saveDir, { treeIndexDir: &lt;saveDir&gt;/.autosave, codeCellsDir: &lt;saveDir&gt;/.autosave })</code>. The kernel reads <code>tree-index.json</code> from the override directory; everything else (the <code>save_dir</code> argument, the kernel's <code>_set_save_dir</code>) is unchanged. After a successful load the <code>.autosave/</code> directory is cleared.</p>
+</li>
+<li>
+<p><strong>Recovery on welcome screen (unsaved sessions).</strong> When the welcome screen renders, the renderer calls <code>IPC.autosave.scanWorkingDirs</code>, which lists <code>pdv-*</code> subdirectories of the working-dir base that contain <code>.autosave/tree-index.json</code>. Each entry is shown under "Recoverable Unsaved Sessions" with a Recover and a Discard button.</p>
+<ul>
+<li><strong>Recover</strong> starts the kernel (deferring via the welcome-screen pending-action ref if needed), then calls <code>IPC.autosave.recoverUnsaved(orphanDir)</code>. The handler copies file-backed nodes from <code>&lt;orphan&gt;/.autosave/</code> into the new kernel's working dir, calls <code>projectManager.load(workingDir, { treeIndexDir: …, codeCellsDir: … })</code>, mirrors <code>code-cells.json</code>, runs module setup, and then deletes the orphan directory. The renderer leaves <code>currentProjectDir = null</code> so the project remains in the unsaved state — the user is expected to Save As to keep it.</li>
+<li><strong>Discard</strong> calls <code>IPC.autosave.deleteOrphan(orphanDir)</code>, which removes the directory wholesale.</li>
+</ul>
+</li>
+</ol>
+<p><strong>Status bar feedback.</strong> After every successful autosave, the status bar shows "Autosaved at HH:MM:SS" (left of the checksum diamond). The timestamp clears when the user opens a different project; the next autosave repopulates it.</p>
 <hr />
 <h2 id="9-user-code-execution-and-the-console">9. User Code Execution and the Console<a class="headerlink" href="#9-user-code-execution-and-the-console" title="Permanent link">&para;</a></h2>
 <h3 id="91-execution-channel">9.1 Execution Channel<a class="headerlink" href="#91-execution-channel" title="Permanent link">&para;</a></h3>
