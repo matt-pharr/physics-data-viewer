@@ -25,7 +25,12 @@
  */
 
 import { CommRouter } from "./comm-router";
-import { PDVMessageType, getAppVersion, type PDVProjectLoadResponsePayload } from "./pdv-protocol";
+import {
+  PDVMessageType,
+  getAppVersion,
+  type PDVProjectLoadResponsePayload,
+  type PDVProjectSaveResponsePayload,
+} from "./pdv-protocol";
 import type { CodeCellData } from "./ipc";
 import * as fs from "fs/promises";
 import * as path from "path";
@@ -449,10 +454,21 @@ export class ProjectManager {
    * before calling this method, and for running module setup after.
    *
    * @param saveDir - Absolute path to the project directory.
+   * @param options - Optional overrides used by autosave recovery.
+   *   - `treeIndexDir`: forwarded to the kernel as `tree_index_dir`. The
+   *     kernel reads `tree-index.json` from this directory instead of from
+   *     `saveDir`. Used to overlay autosaved tree state on top of (or in
+   *     lieu of) the last persisted save.
+   *   - `codeCellsDir`: directory to read `code-cells.json` from. Defaults
+   *     to `saveDir`. Used so an autosaved code-cell snapshot can be
+   *     recovered alongside the autosaved tree.
    * @returns The code-cell state and post-load checksum from the kernel.
    * @throws {PDVCommError} When the kernel responds with status='error'.
    */
-  async load(saveDir: string): Promise<{ codeCells: unknown; postLoadChecksum: string | null }> {
+  async load(
+    saveDir: string,
+    options?: { treeIndexDir?: string; codeCellsDir?: string },
+  ): Promise<{ codeCells: unknown; postLoadChecksum: string | null }> {
     // Step 1 — register the push handler BEFORE sending the request so the
     // notification is never missed even if the kernel responds very quickly.
     const pushPromise = new Promise<void>((resolve) => {
@@ -466,9 +482,14 @@ export class ProjectManager {
     // Step 2 — send pdv.project.load comm.
     // The request resolves when the kernel sends pdv.project.load.response.
     // Use progress pushes as keep-alive to prevent timeout during large loads.
-    const response = await this.commRouter.request(PDVMessageType.PROJECT_LOAD, {
-      save_dir: saveDir,
-    }, { keepAlivePushType: PDVMessageType.PROGRESS });
+    const payload: Record<string, string> = { save_dir: saveDir };
+    if (options?.treeIndexDir) {
+      payload.tree_index_dir = options.treeIndexDir;
+    }
+    const response = await this.commRouter.request(
+      PDVMessageType.PROJECT_LOAD, payload,
+      { keepAlivePushType: PDVMessageType.PROGRESS },
+    );
 
     const loadPayload = response.payload as unknown as PDVProjectLoadResponsePayload;
     const postLoadChecksum = loadPayload?.post_load_checksum ?? null;
@@ -477,7 +498,8 @@ export class ProjectManager {
     await pushPromise;
 
     // Step 4 — read code-cells.json.
-    const codeCells = await _readCodeCells(saveDir);
+    const codeCellsSource = options?.codeCellsDir ?? saveDir;
+    const codeCells = await _readCodeCells(codeCellsSource);
     return { codeCells, postLoadChecksum };
   }
 
@@ -555,6 +577,231 @@ export class ProjectManager {
       JSON.stringify(manifest, null, 2),
       "utf8"
     );
+  }
+
+  // -------------------------------------------------------------------------
+  // Save / autosave mutex
+  // -------------------------------------------------------------------------
+
+  /**
+   * FIFO queue chained off a single shared promise. Both explicit save and
+   * autosave acquire it via {@link runWithSaveLock}, so the kernel only ever
+   * sees one `pdv.project.save` request at a time and the main-side post-save
+   * side effects (manifest writes, module mirror) never interleave between
+   * the two paths.
+   */
+  private saveQueue: Promise<unknown> = Promise.resolve();
+
+  /**
+   * Run *fn* serially with respect to all other save and autosave operations.
+   *
+   * Used by both the IPC.project.save handler and the IPC.autosave.run
+   * handler so explicit user saves and autosave timer ticks queue rather
+   * than overlap. Errors thrown by *fn* are surfaced to the caller, but
+   * the queue continues with the next waiter regardless.
+   *
+   * @param fn - Async work to run while holding the save lock.
+   * @returns Whatever *fn* returns.
+   */
+  async runWithSaveLock<T>(fn: () => Promise<T>): Promise<T> {
+    const prior = this.saveQueue;
+    let release!: () => void;
+    this.saveQueue = new Promise<void>((r) => { release = r; });
+    try {
+      await prior.catch(() => {});
+      return await fn();
+    } finally {
+      release();
+    }
+  }
+
+  // -------------------------------------------------------------------------
+  // Autosave
+  // -------------------------------------------------------------------------
+
+  private autosaveTimer: ReturnType<typeof setInterval> | null = null;
+  private autosaveIntervalMs = 300_000;
+  private autosavePending = false;
+  private autosaveClearCacheOnNext = false;
+  private autosaveTickCallback: (() => void) | null = null;
+
+  /**
+   * Start the autosave timer. If already running, restarts with the new interval.
+   *
+   * @param intervalMs - Timer interval in milliseconds.
+   * @param onTick - Callback invoked on each timer tick.
+   */
+  startAutosaveTimer(intervalMs: number, onTick: () => void): void {
+    this.stopAutosaveTimer();
+    this.autosaveIntervalMs = Math.max(intervalMs, 30_000);
+    this.autosaveTickCallback = onTick;
+    this.autosaveTimer = setInterval(onTick, this.autosaveIntervalMs);
+  }
+
+  /**
+   * Stop the autosave timer.
+   */
+  stopAutosaveTimer(): void {
+    if (this.autosaveTimer) {
+      clearInterval(this.autosaveTimer);
+      this.autosaveTimer = null;
+    }
+    this.autosavePending = false;
+  }
+
+  /**
+   * Reset the autosave timer (restart the interval from now).
+   * Called after an explicit save so the full interval elapses before next autosave.
+   */
+  resetAutosaveTimer(): void {
+    if (this.autosaveTimer && this.autosaveTickCallback) {
+      this.startAutosaveTimer(this.autosaveIntervalMs, this.autosaveTickCallback);
+    }
+  }
+
+  /**
+   * Mark the autosave cache as needing to be cleared on the next autosave.
+   * Called when the user manually clears autosave data from Settings.
+   */
+  markAutosaveCacheDirty(): void {
+    this.autosaveClearCacheOnNext = true;
+  }
+
+  /**
+   * Record that an autosave was deferred because the kernel was busy.
+   * The caller should check this after kernel goes idle.
+   */
+  setAutosavePending(): void {
+    this.autosavePending = true;
+  }
+
+  /**
+   * Check and clear the pending autosave flag.
+   *
+   * @returns Whether an autosave was deferred.
+   */
+  consumeAutosavePending(): boolean {
+    const was = this.autosavePending;
+    this.autosavePending = false;
+    return was;
+  }
+
+  /**
+   * Run an autosave: serialize the tree to `<dir>/.autosave/` and write code-cells.
+   *
+   * Does NOT write project.json. Uses the autosave checksum cache on the
+   * kernel side to skip unchanged data nodes.
+   *
+   * @param autosaveDir - The .autosave/ directory to write to (will be created).
+   * @param codeCells - Current code-cell state from the renderer.
+   * @returns The kernel response (checksum, node count, module bundles), or
+   *   null on error. ``moduleOwnedFiles`` and ``moduleManifests`` are
+   *   forwarded so the autosave handler can mirror module state into the
+   *   `.autosave/` directory for recovery.
+   */
+  async autosave(
+    autosaveDir: string,
+    codeCells: CodeCellData,
+  ): Promise<{
+    checksum: string;
+    nodeCount: number;
+    moduleOwnedFiles: ModuleOwnedFile[];
+    moduleManifests: ModuleManifestBundle[];
+  } | null> {
+    const t0 = performance.now();
+
+    await fs.mkdir(autosaveDir, { recursive: true });
+
+    const clearCache = this.autosaveClearCacheOnNext;
+    this.autosaveClearCacheOnNext = false;
+
+    try {
+      const response = await this.commRouter.request(PDVMessageType.PROJECT_SAVE, {
+        save_dir: autosaveDir,
+        is_autosave: true,
+        clear_cache: clearCache,
+      }, { keepAlivePushType: PDVMessageType.PROGRESS });
+
+      const payload = response.payload as unknown as PDVProjectSaveResponsePayload & {
+        module_owned_files?: ModuleOwnedFile[];
+        module_manifests?: ModuleManifestBundle[];
+      };
+
+      // Write code-cells.json to autosave dir
+      await fs.writeFile(
+        path.join(autosaveDir, "code-cells.json"),
+        JSON.stringify(codeCells, null, 2),
+        "utf8"
+      );
+
+      const ms = (performance.now() - t0).toFixed(0);
+      const total = payload.node_count ?? 0;
+      const hits = payload.autosave_cache_hits ?? 0;
+      const serialized = total - hits;
+      console.log(
+        `[autosave] DONE (${ms}ms): ${serialized} serialized, ${hits} skipped from cache (${total} total)`,
+      );
+      return {
+        checksum: payload.checksum ?? "",
+        nodeCount: total,
+        moduleOwnedFiles: payload.module_owned_files ?? [],
+        moduleManifests: payload.module_manifests ?? [],
+      };
+    } catch (err) {
+      console.error("[ProjectManager.autosave] FAILED:", err);
+      return null;
+    }
+  }
+
+  /**
+   * Check if autosave data exists for a project directory.
+   *
+   * @param dir - Project save directory (or working dir for unsaved projects).
+   * @returns Whether .autosave/tree-index.json exists and its mtime.
+   */
+  static async checkForAutosave(dir: string): Promise<{ exists: boolean; timestamp?: string }> {
+    const indexPath = path.join(dir, ".autosave", "tree-index.json");
+    try {
+      const stat = await fs.stat(indexPath);
+      return { exists: true, timestamp: stat.mtime.toISOString() };
+    } catch {
+      return { exists: false };
+    }
+  }
+
+  /**
+   * Delete the .autosave/ directory for a project.
+   *
+   * @param dir - Project save directory (or working dir for unsaved projects).
+   */
+  static async clearAutosave(dir: string): Promise<void> {
+    const autosavePath = path.join(dir, ".autosave");
+    await fs.rm(autosavePath, { recursive: true, force: true });
+  }
+
+  /**
+   * Scan a base directory for subdirectories containing .autosave/ data.
+   * Used to find orphaned autosave data from unsaved projects.
+   *
+   * @param workingDirBase - Base directory to scan (e.g. ~/.PDV/working/).
+   * @returns List of directories with autosave data and their timestamps.
+   */
+  static async scanForAutosaves(workingDirBase: string): Promise<{ dir: string; timestamp: string }[]> {
+    const results: { dir: string; timestamp: string }[] = [];
+    try {
+      const entries = await fs.readdir(workingDirBase, { withFileTypes: true });
+      for (const entry of entries) {
+        if (!entry.isDirectory()) continue;
+        const dirPath = path.join(workingDirBase, entry.name);
+        const check = await ProjectManager.checkForAutosave(dirPath);
+        if (check.exists && check.timestamp) {
+          results.push({ dir: dirPath, timestamp: check.timestamp });
+        }
+      }
+    } catch {
+      // workingDirBase doesn't exist or isn't readable — no autosaves
+    }
+    return results;
   }
 }
 

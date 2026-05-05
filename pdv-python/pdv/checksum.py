@@ -67,13 +67,8 @@ def tree_checksum(node: Any, working_dir: str | None = None) -> str:
     return h.hexdigest()
 
 
-# ---------------------------------------------------------------------------
-# Private helpers
-# ---------------------------------------------------------------------------
-
-
-def _node_digest(node: Any, working_dir: str | None) -> bytes:
-    """Return the 16-byte XXH3-128 digest for one node.
+def node_digest(node: Any, working_dir: str | None) -> bytes:
+    """Return the 16-byte XXH3-128 digest for a single node.
 
     Parameters
     ----------
@@ -90,6 +85,11 @@ def _node_digest(node: Any, working_dir: str | None) -> bytes:
     h = xxhash.xxh3_128()
     _feed_node(h, node, working_dir)
     return h.digest()
+
+
+# ---------------------------------------------------------------------------
+# Private helpers
+# ---------------------------------------------------------------------------
 
 
 def _feed_node(h: xxhash.xxh3_128, node: Any, working_dir: str | None) -> None:
@@ -136,7 +136,7 @@ def _feed_node(h: xxhash.xxh3_128, node: Any, working_dir: str | None) -> None:
         for key in sorted_keys:
             _feed_str(h, key)
             child = dict.__getitem__(node, key)
-            h.update(_node_digest(child, working_dir))
+            h.update(node_digest(child, working_dir))
 
     elif kind == KIND_MODULE:
         h.update(b"module\x00")
@@ -148,7 +148,7 @@ def _feed_node(h: xxhash.xxh3_128, node: Any, working_dir: str | None) -> None:
         for key in sorted_keys:
             _feed_str(h, key)
             child = dict.__getitem__(node, key)
-            h.update(_node_digest(child, working_dir))
+            h.update(node_digest(child, working_dir))
 
     elif kind == KIND_SCALAR:
         if node is None:

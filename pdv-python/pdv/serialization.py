@@ -246,6 +246,32 @@ def detect_kind(value: Any) -> str:
     return KIND_UNKNOWN
 
 
+def _try_autosave_cache(
+    autosave_cache: "dict[str, tuple[bytes, dict]] | None",
+    tree_path: str,
+    value: Any,
+    source_dir: str,
+    hit_counter: "list[int] | None" = None,
+) -> "tuple[bytes | None, dict | None]":
+    """Check autosave cache for an unchanged data node.
+
+    Returns ``(digest, cached_descriptor)`` on cache hit, ``(digest, None)``
+    on miss, or ``(None, None)`` when caching is disabled. When provided,
+    ``hit_counter[0]`` is incremented on every cache hit.
+    """
+    if autosave_cache is None:
+        return None, None
+    from pdv.checksum import node_digest  # noqa: PLC0415
+
+    digest = node_digest(value, source_dir)
+    cached = autosave_cache.get(tree_path)
+    if cached is not None and cached[0] == digest:
+        if hit_counter is not None:
+            hit_counter[0] += 1
+        return digest, cached[1]
+    return digest, None
+
+
 def serialize_node(
     tree_path: str,
     value: Any,
@@ -253,6 +279,8 @@ def serialize_node(
     *,
     trusted: bool = False,
     source_dir: str = "",
+    autosave_cache: "dict[str, tuple[bytes, dict]] | None" = None,
+    autosave_hits: "list[int] | None" = None,
 ) -> dict:
     """Serialize a value to disk and return a node descriptor dict.
 
@@ -284,6 +312,16 @@ def serialize_node(
         (scripts, libs, etc.) live. Defaults to ``working_dir`` when
         empty. Needed when source files are in the kernel working dir
         but output is written to a separate save dir.
+    autosave_cache : dict or None
+        When provided, data nodes (ndarray, DataFrame, etc.) are
+        checksum-compared against previous autosave results. Unchanged
+        nodes reuse their cached UUID and skip file I/O. The dict is
+        mutated in place with ``{tree_path: (digest, descriptor)}``
+        entries on every miss.
+    autosave_hits : list[int] or None
+        Optional one-element counter; ``autosave_hits[0]`` is incremented
+        on every cache hit. Lets callers report cache effectiveness in
+        autosave logs. Ignored when ``autosave_cache`` is None.
 
     Returns
     -------
@@ -449,6 +487,10 @@ def serialize_node(
         return descriptor
 
     if kind == KIND_NDARRAY:
+        _digest, _cached = _try_autosave_cache(autosave_cache, tree_path, value, _source_dir, autosave_hits)
+        if _cached is not None:
+            return _cached
+
         import numpy as np  # noqa: PLC0415
 
         node_uuid = generate_node_uuid()
@@ -464,9 +506,15 @@ def serialize_node(
             "size_bytes": value.nbytes,
             "preview": preview,
         }
+        if _digest is not None:
+            autosave_cache[tree_path] = (_digest, descriptor)  # type: ignore[index]
         return descriptor
 
     if kind in (KIND_DATAFRAME, KIND_SERIES):
+        _digest, _cached = _try_autosave_cache(autosave_cache, tree_path, value, _source_dir, autosave_hits)
+        if _cached is not None:
+            return _cached
+
         node_uuid = generate_node_uuid()
         filename = key + ".parquet"
         file_path = uuid_tree_path(working_dir, node_uuid, filename)
@@ -482,6 +530,8 @@ def serialize_node(
             "shape": shape,
             "preview": preview,
         }
+        if _digest is not None:
+            autosave_cache[tree_path] = (_digest, descriptor)  # type: ignore[index]
         return descriptor
 
     if kind == KIND_SCALAR:
@@ -502,6 +552,9 @@ def serialize_node(
                 "value": value,
             }
         else:
+            _digest, _cached = _try_autosave_cache(autosave_cache, tree_path, value, _source_dir, autosave_hits)
+            if _cached is not None:
+                return _cached
             node_uuid = generate_node_uuid()
             filename = key + ".txt"
             file_path = uuid_tree_path(working_dir, node_uuid, filename)
@@ -510,6 +563,8 @@ def serialize_node(
                 fh.write(value)  # type: ignore[arg-type]
             descriptor["uuid"] = node_uuid
             descriptor["storage"] = _file_storage(node_uuid, filename, FORMAT_TXT)
+            if _digest is not None:
+                autosave_cache[tree_path] = (_digest, descriptor)  # type: ignore[index]
         descriptor["metadata"] = {"preview": preview}
         return descriptor
 
@@ -550,6 +605,9 @@ def serialize_node(
         )
 
     if kind == KIND_BINARY:
+        _digest, _cached = _try_autosave_cache(autosave_cache, tree_path, value, _source_dir, autosave_hits)
+        if _cached is not None:
+            return _cached
         node_uuid = generate_node_uuid()
         filename = key + ".bin"
         file_path = uuid_tree_path(working_dir, node_uuid, filename)
@@ -559,9 +617,15 @@ def serialize_node(
         descriptor["uuid"] = node_uuid
         descriptor["storage"] = _file_storage(node_uuid, filename, "bin")
         descriptor["metadata"] = {"preview": preview}
+        if _digest is not None:
+            autosave_cache[tree_path] = (_digest, descriptor)  # type: ignore[index]
         return descriptor
 
     # KIND_UNKNOWN — try a registered custom serializer before falling back to pickle.
+    _digest, _cached = _try_autosave_cache(autosave_cache, tree_path, value, _source_dir, autosave_hits)
+    if _cached is not None:
+        return _cached
+
     from pdv import serializers as _serializers  # noqa: PLC0415
 
     custom = _serializers.find_for_value(value)
@@ -584,6 +648,8 @@ def serialize_node(
             "python_type": python_type_string(value),
             "serializer": custom.class_name,
         }
+        if _digest is not None:
+            autosave_cache[tree_path] = (_digest, descriptor)  # type: ignore[index]
         return descriptor
 
     if not trusted:
@@ -601,6 +667,8 @@ def serialize_node(
     descriptor["uuid"] = node_uuid
     descriptor["storage"] = _file_storage(node_uuid, filename, FORMAT_PICKLE)
     descriptor["metadata"] = {"preview": preview}
+    if _digest is not None:
+        autosave_cache[tree_path] = (_digest, descriptor)  # type: ignore[index]
     return descriptor
 
 

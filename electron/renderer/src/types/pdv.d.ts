@@ -281,6 +281,8 @@ export interface Config {
   defaultSaveLocation?: string;
   /** Base directory for session working directories. */
   workingDirBase?: string;
+  /** Autosave interval in seconds. Default 300 (5 minutes). Minimum 30. */
+  autoSaveIntervalSeconds?: number;
   settings?: {
     /** Keyboard shortcut overrides. */
     shortcuts?: {
@@ -828,7 +830,7 @@ export interface PDVApi {
   };
   project: {
     save(saveDir: string, codeCells: unknown, projectName?: string): Promise<ProjectSaveResult>;
-    load(saveDir: string): Promise<ProjectLoadResult>;
+    load(saveDir: string, options?: { restoreFromAutosave?: boolean }): Promise<ProjectLoadResult>;
     new(): Promise<boolean>;
     peekLanguages(paths: string[]): Promise<Record<string, "python" | "julia">>;
     peekManifest(dir: string): Promise<ProjectManifestPeek>;
@@ -841,6 +843,19 @@ export interface PDVApi {
   config: {
     get(): Promise<Config>;
     set(updates: Partial<Config>): Promise<Config>;
+  };
+  autosave: {
+    run(codeCells: unknown): Promise<{ saved: boolean }>;
+    clear(dir?: string): Promise<void>;
+    check(dir: string): Promise<{ exists: boolean; timestamp?: string }>;
+    scanWorkingDirs(): Promise<{ dir: string; timestamp: string }[]>;
+    recoverUnsaved(orphanDir: string): Promise<{
+      codeCells: unknown;
+      projectName: string | null;
+      missingFiles?: string[];
+    }>;
+    deleteOrphan(orphanDir: string): Promise<void>;
+    onTrigger(callback: () => void): () => void;
   };
   about: {
     getVersion(): Promise<string>;

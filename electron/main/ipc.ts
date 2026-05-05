@@ -158,6 +158,15 @@ export const IPC = {
     get: "config:get",
     set: "config:set",
   },
+  /** Autosave management channels. */
+  autosave: {
+    run: "autosave:run",
+    clear: "autosave:clear",
+    check: "autosave:check",
+    scanWorkingDirs: "autosave:scanWorkingDirs",
+    recoverUnsaved: "autosave:recoverUnsaved",
+    deleteOrphan: "autosave:deleteOrphan",
+  },
   /** App info channels. */
   about: {
     getVersion: "about:getVersion",
@@ -210,6 +219,7 @@ export const IPC = {
     installOutput: "pdv.environment.installOutput",
     updateStatus: "pdv.updater.status",
     requestClose: "pdv.app.requestClose",
+    autosaveTrigger: "pdv.autosave.trigger",
   },
   /** App-level lifecycle channels (close confirmation, etc.). */
   app: {
@@ -1846,7 +1856,7 @@ export interface PDVApi {
      * @param saveDir - Source save directory.
       * @returns Loaded code-cell state with checksum metadata.
       */
-    load(saveDir: string): Promise<ProjectLoadResult>;
+    load(saveDir: string, options?: { restoreFromAutosave?: boolean }): Promise<ProjectLoadResult>;
     /**
      * Start a new empty project session.
      *
@@ -1956,6 +1966,67 @@ export interface PDVApi {
      * @returns Updated merged config object.
      */
     set(updates: Partial<PDVConfig>): Promise<PDVConfig>;
+  };
+
+  /** Autosave management. */
+  autosave: {
+    /**
+     * Execute an autosave with the given code-cell state.
+     * Called by the renderer in response to an autosave trigger push.
+     *
+     * @param codeCells - Current code-cell state.
+     * @returns `{ saved: true }` when an autosave actually ran, or
+     *   `{ saved: false }` when the handler couldn't write (no kernel,
+     *   no working dir, or the kernel rejected the save).
+     */
+    run(codeCells: unknown): Promise<{ saved: boolean }>;
+    /**
+     * Delete the .autosave/ directory for the given project directory.
+     *
+     * @param dir - Project save directory (or working dir for unsaved projects).
+     */
+    clear(dir?: string): Promise<void>;
+    /**
+     * Check if autosave data exists for a given directory.
+     *
+     * @param dir - Project save directory to check.
+     * @returns Whether autosave data exists and its timestamp.
+     */
+    check(dir: string): Promise<{ exists: boolean; timestamp?: string }>;
+    /**
+     * Scan working directories for orphaned autosave data (unsaved projects).
+     *
+     * @returns List of working dirs containing .autosave/ data.
+     */
+    scanWorkingDirs(): Promise<{ dir: string; timestamp: string }[]>;
+    /**
+     * Recover an unsaved session from an orphaned working dir's `.autosave/`.
+     *
+     * Copies tree files into the active kernel's new working dir, loads the
+     * tree + code cells, and removes the orphan dir. Leaves the project in
+     * an unsaved state (no active project dir).
+     *
+     * @param orphanDir - Absolute path to the orphan working dir.
+     * @returns Loaded code-cells and any files that failed to copy.
+     */
+    recoverUnsaved(orphanDir: string): Promise<{
+      codeCells: unknown;
+      projectName: string | null;
+      missingFiles?: string[];
+    }>;
+    /**
+     * Permanently delete an orphan working dir (discard an unsaved session).
+     *
+     * @param orphanDir - Absolute path to the orphan working dir.
+     */
+    deleteOrphan(orphanDir: string): Promise<void>;
+    /**
+     * Subscribe to autosave trigger push notifications from the main process.
+     *
+     * @param callback - Invoked when the main process requests an autosave.
+     * @returns Unsubscribe function.
+     */
+    onTrigger(callback: () => void): () => void;
   };
 
   /** App info accessors. */

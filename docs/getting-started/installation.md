@@ -93,7 +93,7 @@ That's it. PDV opens a new project window and your kernel starts.
 
 ## 5. You're done
 
-Head to the [User Guide](../user-guide/index.md) to learn how the Tree works, or dive into [Scripts](../user-guide/scripts.md) if you want to start running code right away.
+Head to the [User Guide](../user-guide/index.md) to learn how the Tree works, or dive into [Scripts & the Tree](../user-guide/scripts-and-tree.md) if you want to start running code right away.
 
 ---
 

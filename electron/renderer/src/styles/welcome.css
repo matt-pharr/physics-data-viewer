@@ -128,3 +128,33 @@
   max-width: 100%;
 }
 
+.welcome-recoverable {
+  margin-bottom: 12px;
+}
+
+.welcome-recoverable-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 12px;
+  border-radius: 4px;
+}
+
+.welcome-recoverable-item:hover {
+  background-color: var(--bg-hover);
+}
+
+.welcome-recoverable-info {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  flex: 1;
+  min-width: 0;
+}
+
+.welcome-recoverable-actions {
+  display: flex;
+  gap: 6px;
+  flex-shrink: 0;
+}
+

@@ -199,6 +199,8 @@ interface ManagedKernel {
   iopubLoopDone: Promise<void>;
   /** Serializes shell-socket operations to avoid concurrent socket access. */
   shellQueue: Promise<void>;
+  /** Latest execution_state from iopub status messages. */
+  executionState: "idle" | "busy";
 }
 
 // ---------------------------------------------------------------------------
@@ -506,10 +508,22 @@ export class KernelManager extends EventEmitter {
       shuttingDown: false,
       iopubLoopDone,
       shellQueue: Promise.resolve(),
+      executionState: "busy",
     };
 
     this.kernels.set(kernelId, managed);
     this.iopubListeners.set(kernelId, new Set());
+
+    // Track kernel execution state from iopub status messages for autosave scheduling.
+    this.onIopubMessage(kernelId, (msg) => {
+      if (msg.header.msg_type === "status" && msg.content?.execution_state) {
+        const prev = managed.executionState;
+        managed.executionState = msg.content.execution_state as "idle" | "busy";
+        if (prev !== managed.executionState) {
+          this.emit("kernel:executionState", kernelId, managed.executionState);
+        }
+      }
+    });
 
     // Start the background iopub reader *before* waiting for ready so that
     // any status messages arriving during startup are dispatched.
@@ -925,6 +939,16 @@ export class KernelManager extends EventEmitter {
    */
   getKernel(id: string): KernelInfo | undefined {
     return this.kernels.get(id)?.info;
+  }
+
+  /**
+   * Return the kernel's current execution state from iopub status messages.
+   *
+   * @param id - Kernel ID.
+   * @returns "idle" or "busy", or undefined if the kernel is not found.
+   */
+  getExecutionState(id: string): "idle" | "busy" | undefined {
+    return this.kernels.get(id)?.executionState;
   }
 
   /**

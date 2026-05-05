@@ -137,7 +137,7 @@ const api: PDVApi = {
   project: {
     save: (saveDir, codeCells, projectName) =>
       ipcRenderer.invoke(IPC.project.save, saveDir, codeCells, projectName),
-    load: (saveDir) => ipcRenderer.invoke(IPC.project.load, saveDir),
+    load: (saveDir, options) => ipcRenderer.invoke(IPC.project.load, saveDir, options),
     new: () => ipcRenderer.invoke(IPC.project.new),
     peekLanguages: (paths) =>
       ipcRenderer.invoke(IPC.project.peekLanguages, paths),
@@ -152,6 +152,15 @@ const api: PDVApi = {
   config: {
     get: () => ipcRenderer.invoke(IPC.config.get),
     set: (updates) => ipcRenderer.invoke(IPC.config.set, updates),
+  },
+  autosave: {
+    run: (codeCells: unknown) => ipcRenderer.invoke(IPC.autosave.run, codeCells),
+    clear: (dir?: string) => ipcRenderer.invoke(IPC.autosave.clear, dir),
+    check: (dir: string) => ipcRenderer.invoke(IPC.autosave.check, dir),
+    scanWorkingDirs: () => ipcRenderer.invoke(IPC.autosave.scanWorkingDirs),
+    recoverUnsaved: (orphanDir: string) => ipcRenderer.invoke(IPC.autosave.recoverUnsaved, orphanDir),
+    deleteOrphan: (orphanDir: string) => ipcRenderer.invoke(IPC.autosave.deleteOrphan, orphanDir),
+    onTrigger: (cb: () => void) => onPush(IPC.push.autosaveTrigger, cb),
   },
   about: {
     getVersion: () => ipcRenderer.invoke(IPC.about.getVersion),

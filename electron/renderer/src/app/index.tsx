@@ -36,7 +36,7 @@ import { SettingsDialog } from '../components/SettingsDialog';
 import { ImportModuleDialog } from '../components/ImportModuleDialog';
 import { SaveAsDialog } from '../components/SaveAsDialog';
 import { UnsavedChangesDialog } from '../components/UnsavedChangesDialog';
-import { WelcomeScreen, type RecentProject } from '../components/WelcomeScreen';
+import { WelcomeScreen, type RecentProject, type RecoverableSession } from '../components/WelcomeScreen';
 import type {
   CellTab,
   Config,
@@ -117,7 +117,11 @@ const App: React.FC = () => {
   const initRef = useRef(false);
   const loadedProjectTabsRef = useRef<{ tabs: CellTab[]; activeTabId: number } | null>(null);
   /** Deferred project action to execute once the kernel becomes ready. */
-  const pendingProjectRef = useRef<{ type: 'open'; path?: string; language?: 'python' | 'julia' } | null>(null);
+  const pendingProjectRef = useRef<
+    | { type: 'open'; path?: string; language?: 'python' | 'julia' }
+    | { type: 'recover'; orphanDir: string }
+    | null
+  >(null);
 
   // Undo stack for cell clear/close. Each entry captures the full tab list and
   // active tab id so a single Cmd+Z restores exactly what was destroyed.
@@ -865,6 +869,28 @@ const App: React.FC = () => {
     return unsub;
   }, [currentKernelId, handleExecute]);
 
+  // Most-recent successful autosave timestamp (ms since epoch). Cleared on
+  // project change so the status bar reflects the active session, not stale data.
+  const [lastAutosaveAt, setLastAutosaveAt] = useState<number | null>(null);
+  useEffect(() => {
+    setLastAutosaveAt(null);
+  }, [currentProjectDir]);
+
+  // Autosave: respond to main process trigger by sending current code cells
+  useEffect(() => {
+    if (!window.pdv?.autosave) return;
+    const unsub = window.pdv.autosave.onTrigger(() => {
+      const codeCells = { tabs: cellTabsRef.current, activeTabId: activeCellTab };
+      void window.pdv.autosave.run(codeCells).then(
+        (result) => {
+          if (result?.saved) setLastAutosaveAt(Date.now());
+        },
+        (err) => { console.warn('[autosave] run failed', err); },
+      );
+    });
+    return unsub;
+  }, [activeCellTab]);
+
   // Whether the session has no user work (no project, no code, no logs, no notes).
   const isPristine = currentProjectDir === null
     && cellTabs.every((t) => !t.code.trim())
@@ -945,6 +971,28 @@ const App: React.FC = () => {
     });
     return () => { cancelled = true; };
   }, [recentProjectPaths]);
+
+  // Orphaned autosaves available on the welcome screen. Refreshed on mount,
+  // again when the kernel becomes ready (in case scan races with kernel start),
+  // and after each Recover/Discard.
+  const [recoverableSessions, setRecoverableSessions] = useState<RecoverableSession[]>([]);
+  const refreshRecoverableSessions = useCallback(async () => {
+    try {
+      const sessions = await window.pdv.autosave.scanWorkingDirs();
+      setRecoverableSessions(sessions);
+    } catch (error) {
+      console.warn('[app] scanWorkingDirs failed', error);
+      setRecoverableSessions([]);
+    }
+  }, []);
+  useEffect(() => {
+    void refreshRecoverableSessions();
+  }, [refreshRecoverableSessions]);
+  useEffect(() => {
+    if (kernelStatus === 'ready') {
+      void refreshRecoverableSessions();
+    }
+  }, [kernelStatus, refreshRecoverableSessions]);
 
   const dismissWelcome = useCallback(() => {
     setShowWelcome(false);
@@ -1058,6 +1106,72 @@ const App: React.FC = () => {
     }
   }, [kernelStatus, executeOpenProject, openProjectFromWelcome, guardDirty]);
 
+  /**
+   * Recover an orphaned autosave into the active kernel session. The recovered
+   * tree + code-cells land in an unsaved-project state — the user must Save As
+   * to persist them.
+   */
+  const executeRecoverUnsaved = useCallback(async (orphanDir: string) => {
+    if (kernelStatus !== 'ready') return;
+    try {
+      const result = await window.pdv.autosave.recoverUnsaved(orphanDir);
+      const normalized = normalizeLoadedCodeCells(result.codeCells);
+      loadedProjectTabsRef.current = normalized;
+      setCellTabs(normalized.tabs);
+      setActiveCellTab(normalized.activeTabId);
+      setCurrentProjectDir(null);
+      setCurrentProjectName(null);
+      setModulesRefreshToken((prev) => prev + 1);
+      setNamespaceRefreshToken((prev) => prev + 1);
+
+      const missingWarn = result.missingFiles?.length
+        ? `\nWarning: ${result.missingFiles.length} file(s) could not be copied:\n  ${result.missingFiles.join('\n  ')}`
+        : '';
+      setLogs((prev) => [...prev, {
+        id: `recover-${Date.now()}`,
+        timestamp: Date.now(),
+        code: '',
+        stdout: `Recovered unsaved session — use File → Save to keep it.${missingWarn}`,
+      }]);
+    } catch (error) {
+      setLastError(error instanceof Error ? error.message : String(error));
+    } finally {
+      void refreshRecoverableSessions();
+    }
+  }, [
+    kernelStatus,
+    setCellTabs,
+    setActiveCellTab,
+    setCurrentProjectDir,
+    setCurrentProjectName,
+    setModulesRefreshToken,
+    setNamespaceRefreshToken,
+    setLogs,
+    setLastError,
+    refreshRecoverableSessions,
+  ]);
+
+  const handleRecoverSession = useCallback((orphanDir: string) => {
+    if (kernelStatus === 'ready') {
+      guardDirty('recover an unsaved session', () => { void executeRecoverUnsaved(orphanDir); });
+      return;
+    }
+    dismissWelcome();
+    setInterpreterWarning(null);
+    pendingProjectRef.current = { type: 'recover', orphanDir };
+    void ensureKernel('python');
+  }, [kernelStatus, guardDirty, executeRecoverUnsaved, dismissWelcome, ensureKernel]);
+
+  const handleDiscardSession = useCallback(async (orphanDir: string) => {
+    try {
+      await window.pdv.autosave.deleteOrphan(orphanDir);
+    } catch (error) {
+      setLastError(error instanceof Error ? error.message : String(error));
+    } finally {
+      void refreshRecoverableSessions();
+    }
+  }, [setLastError, refreshRecoverableSessions]);
+
   // Keep refs in sync so the menu-action effect (subscribed once) calls the latest handlers.
   handleOpenWithPickerRef.current = handleOpenWithPicker;
   handleOpenRecentRef.current = handleOpenRecent;
@@ -1067,8 +1181,12 @@ const App: React.FC = () => {
     if (kernelStatus !== 'ready' || !pendingProjectRef.current) return;
     const pending = pendingProjectRef.current;
     pendingProjectRef.current = null;
-    void executeOpenProject(pending.path);
-  }, [kernelStatus, executeOpenProject]);
+    if (pending.type === 'recover') {
+      void executeRecoverUnsaved(pending.orphanDir);
+    } else {
+      void executeOpenProject(pending.path);
+    }
+  }, [kernelStatus, executeOpenProject, executeRecoverUnsaved]);
 
   const projectTitle = currentProjectName
     ?? (currentProjectDir
@@ -1439,6 +1557,7 @@ const App: React.FC = () => {
           checksumMismatch={checksumMismatch}
           savedPdvVersion={savedPdvVersion}
           runningPdvVersion={runningPdvVersion}
+          lastAutosaveAt={lastAutosaveAt}
         />
 
        <ImportModuleDialog
@@ -1493,9 +1612,12 @@ const App: React.FC = () => {
        {((showWelcome && isPristine) || forceWelcome) && (
          <WelcomeScreen
            recentProjects={recentProjects}
+           recoverableSessions={recoverableSessions}
            onNewProject={handleWelcomeNewProject}
            onOpenProject={handleOpenWithPicker}
            onOpenRecent={handleOpenRecent}
+           onRecoverSession={handleRecoverSession}
+           onDiscardSession={handleDiscardSession}
          />
        )}
 
