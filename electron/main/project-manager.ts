@@ -488,7 +488,8 @@ export class ProjectManager {
       payload.tree_index_dir = options.treeIndexDir;
     }
     const response = await this.commRouter.request(
-      PDVMessageType.PROJECT_LOAD, payload,
+      PDVMessageType.PROJECT_LOAD,
+      payload as unknown as Record<string, unknown>,
       { keepAlivePushType: PDVMessageType.PROGRESS },
     );
 
