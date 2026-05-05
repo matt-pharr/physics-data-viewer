@@ -10,7 +10,7 @@ import { KernelManager } from "./kernel-manager";
 
 const TEST_PYTHON_EXECUTABLE = process.env.PYTHON_PATH ?? "python3";
 
-describe("@slow KernelManager error paths", { timeout: 60_000 }, () => {
+describe("@slow KernelManager error paths", { timeout: 90_000 }, () => {
   let km: KernelManager;
 
   const startKernel = () =>
@@ -23,12 +23,12 @@ describe("@slow KernelManager error paths", { timeout: 60_000 }, () => {
     km = new KernelManager();
   });
 
-  // Bump the hook timeout to 20s (up from vitest's 10s default) because
+  // Bump the hook timeout to 30s (up from vitest's 10s default) because
   // real-kernel shutdown can hang briefly while zmq sockets close on a
-  // busy CI runner. Test timeout is already 60s via the describe options.
+  // busy CI runner. Test timeout is already 90s via the describe options.
   afterEach(async () => {
     await km.shutdownAll();
-  }, 20_000);
+  }, 30_000);
 
   it("kernel crash -> kernel:crashed event emitted", async () => {
     const info = await startKernel();

@@ -127,6 +127,13 @@ export async function createWindow(
         } catch {
           // No lockfile or unreadable — treat as orphan.
         }
+        // Preserve dirs that have autosaved tree state — the welcome screen's
+        // "Recoverable Unsaved Sessions" surfaces these so the user can opt to
+        // Recover or Discard. Wiping here would silently destroy unsaved work
+        // from a previous crash. Recover/Discard remove the dir afterwards.
+        if (fsSync.existsSync(path.join(sessionDir, ".autosave", "tree-index.json"))) {
+          continue;
+        }
         fsSync.rmSync(sessionDir, { recursive: true, force: true });
       }
     } catch { /* best-effort — workingBase may not exist on first launch */ }

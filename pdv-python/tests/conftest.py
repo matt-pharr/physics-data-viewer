@@ -27,6 +27,23 @@ from unittest.mock import MagicMock
 import pytest
 
 
+@pytest.fixture(autouse=True)
+def _reset_autosave_cache() -> Generator[None, None, None]:
+    """Clear the kernel's in-memory autosave cache between tests.
+
+    The cache is module-level state in ``pdv.handlers.project`` and now
+    persists across explicit saves (so unchanged data nodes can skip
+    re-serialization on the next autosave). Without this fixture an
+    earlier test that touches `handle_project_save` can leak cached
+    descriptors into a later test and produce surprising cache hits.
+    """
+    from pdv.handlers.project import clear_autosave_cache
+
+    clear_autosave_cache()
+    yield
+    clear_autosave_cache()
+
+
 @pytest.fixture()
 def tmp_working_dir() -> Generator[str, None, None]:
     """Yield a freshly created temporary working directory.

@@ -65,6 +65,8 @@ const mocks = vi.hoisted(() => {
   });
   const fsCopyFile = vi.fn(async () => undefined);
   const fsCp = vi.fn(async () => undefined);
+  const fsRm = vi.fn(async () => undefined);
+  const fsReaddir = vi.fn(async () => []);
   const dialogShowOpenDialog = vi.fn();
   const dialogShowMessageBox = vi.fn(async () => ({ response: 0 }));
   const shellOpenPath = vi.fn(async () => "");
@@ -131,6 +133,8 @@ const mocks = vi.hoisted(() => {
     fsReadFile,
     fsCopyFile,
     fsCp,
+    fsRm,
+    fsReaddir,
     dialogShowOpenDialog,
     dialogShowMessageBox,
     shellOpenPath,
@@ -184,6 +188,8 @@ vi.mock("fs/promises", () => ({
   readFile: mocks.fsReadFile,
   copyFile: mocks.fsCopyFile,
   cp: mocks.fsCp,
+  rm: mocks.fsRm,
+  readdir: mocks.fsReaddir,
 }));
 
 vi.mock("./module-manager", () => ({
@@ -310,6 +316,17 @@ function setup() {
     createWorkingDir: vi.fn(async () => "/tmp/pdv-test"),
     deleteWorkingDir: vi.fn(async () => undefined),
     clearCachedKernelResults: vi.fn(),
+    startAutosaveTimer: vi.fn(),
+    stopAutosaveTimer: vi.fn(),
+    resetAutosaveTimer: vi.fn(),
+    markAutosaveCacheDirty: vi.fn(),
+    setAutosavePending: vi.fn(),
+    consumeAutosavePending: vi.fn(() => false),
+    autosave: vi.fn(async () => null),
+    // Save mutex used by both IPC.project.save and IPC.autosave.run.
+    // The mock just runs fn immediately; tests that need to assert FIFO
+    // ordering can spy on this directly.
+    runWithSaveLock: vi.fn(<T,>(fn: () => Promise<T>) => fn()),
   } as unknown as ProjectManager;
 
   const configState: PDVConfig = {
@@ -1146,7 +1163,7 @@ describe("Step 5 IPC handlers", () => {
     });
     const load = getHandler(IPC.project.load);
     const result = await load({}, "/tmp/project");
-    expect(projectManager.load).toHaveBeenCalledWith("/tmp/project");
+    expect(projectManager.load).toHaveBeenCalledWith("/tmp/project", undefined);
     expect(result).toEqual({
       codeCells: [{ id: "box1" }],
       checksum: null,
@@ -2036,5 +2053,194 @@ describe("Step 5 IPC handlers", () => {
     // resolveActionScripts should NOT be called during load
     // (module binding is now handled by setupModuleNamespaces via pdv.modules.setup comm)
     expect(mocks.moduleManagerResolveActionScripts).not.toHaveBeenCalled();
+  });
+
+  // -------------------------------------------------------------------------
+  // Autosave IPC handlers
+  // -------------------------------------------------------------------------
+
+  it("autosave:clear delegates to ProjectManager.clearAutosave with the given dir", async () => {
+    const { projectManager } = setup();
+    const clear = getHandler(IPC.autosave.clear);
+
+    await clear({}, "/tmp/some-project");
+
+    // ProjectManager.clearAutosave is a static method that fs.rms <dir>/.autosave/
+    // and the handler also marks the per-instance cache dirty.
+    expect(mocks.fsRm).toHaveBeenCalledWith(
+      path.join("/tmp/some-project", ".autosave"),
+      expect.objectContaining({ recursive: true, force: true }),
+    );
+    expect(projectManager.markAutosaveCacheDirty).toHaveBeenCalledOnce();
+  });
+
+  it("autosave:check returns exists=false when tree-index.json is absent", async () => {
+    setup();
+    const check = getHandler(IPC.autosave.check);
+
+    // fsStat default mock throws ENOENT, so the static checkForAutosave
+    // returns { exists: false }.
+    const result = await check({}, "/tmp/no-autosave");
+    expect(result).toEqual({ exists: false });
+  });
+
+  it("autosave:scanWorkingDirs returns [] for an empty workingDirBase", async () => {
+    setup();
+    const scan = getHandler(IPC.autosave.scanWorkingDirs);
+    // fsReaddir defaults to [] — no subdirectories under the base.
+    const result = await scan({});
+    expect(result).toEqual([]);
+  });
+
+  it("autosave:scanWorkingDirs surfaces orphans whose .autosave/tree-index.json exists", async () => {
+    setup();
+    const scan = getHandler(IPC.autosave.scanWorkingDirs);
+
+    // Two subdirectories at the base; only `pdv-A` has a valid tree-index.
+    mocks.fsReaddir.mockResolvedValueOnce([
+      { name: "pdv-A", isDirectory: () => true } as unknown as never,
+      { name: "pdv-B", isDirectory: () => true } as unknown as never,
+      { name: "stray.txt", isDirectory: () => false } as unknown as never,
+    ]);
+    // checkForAutosave -> fs.stat(<dir>/.autosave/tree-index.json)
+    // First call (pdv-A): success. Second call (pdv-B): ENOENT.
+    mocks.fsStat.mockResolvedValueOnce({
+      mtime: new Date("2026-05-04T12:00:00.000Z"),
+    } as unknown as never);
+    mocks.fsStat.mockImplementationOnce(async () => {
+      throw Object.assign(new Error("ENOENT"), { code: "ENOENT" });
+    });
+
+    const result = (await scan({})) as { dir: string; timestamp: string }[];
+    expect(result).toHaveLength(1);
+    expect(result[0].dir).toMatch(/pdv-A$/);
+    expect(result[0].timestamp).toBe("2026-05-04T12:00:00.000Z");
+  });
+
+  it("autosave:deleteOrphan removes the orphan dir recursively", async () => {
+    setup();
+    const deleteOrphan = getHandler(IPC.autosave.deleteOrphan);
+
+    await deleteOrphan({}, "/tmp/orphan-session");
+
+    expect(mocks.fsRm).toHaveBeenCalledWith(
+      "/tmp/orphan-session",
+      expect.objectContaining({ recursive: true, force: true }),
+    );
+  });
+
+  it("autosave:recoverUnsaved throws when no kernel is active", async () => {
+    setup();
+    const recover = getHandler(IPC.autosave.recoverUnsaved);
+    // No kernels.start has been awaited, so activeKernelId is null.
+    await expect(recover({}, "/tmp/orphan")).rejects.toThrow(/no active kernel/i);
+  });
+
+  it("autosave:run returns { saved: false } and warns when there is no working dir", async () => {
+    setup();
+    const run = getHandler(IPC.autosave.run);
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    // No kernel started, no project loaded — handler must short-circuit.
+    const result = await run({}, { tabs: [], activeTabId: 1 });
+
+    expect(result).toEqual({ saved: false });
+    expect(warnSpy).toHaveBeenCalledWith(
+      expect.stringMatching(/\[autosave\] skipped/),
+    );
+    warnSpy.mockRestore();
+  });
+
+  it("autosave:run acquires the shared save lock", async () => {
+    const { projectManager } = setup();
+    const start = getHandler(IPC.kernels.start);
+    await start({}, { language: "python" });
+
+    const run = getHandler(IPC.autosave.run);
+    await run({}, { tabs: [], activeTabId: 1 });
+
+    expect(projectManager.runWithSaveLock).toHaveBeenCalled();
+  });
+
+  it("project:save acquires the shared save lock", async () => {
+    const { projectManager } = setup();
+    const start = getHandler(IPC.kernels.start);
+    await start({}, { language: "python" });
+
+    const save = getHandler(IPC.project.save);
+    await save({}, "/tmp/save", { tabs: [], activeTabId: 1 });
+
+    expect(projectManager.runWithSaveLock).toHaveBeenCalled();
+  });
+
+  it("autosave:deleteOrphan refuses to remove the active session's working dir", async () => {
+    const { kernelManager } = setup();
+    const start = getHandler(IPC.kernels.start);
+    const kernel = (await start({}, { language: "python" })) as KernelInfo;
+    void kernelManager; // satisfy lint
+
+    // Look up the working dir the kernel was assigned (the test mock uses
+    // /tmp/pdv-test consistently — see ProjectManager.createWorkingDir mock).
+    const deleteOrphan = getHandler(IPC.autosave.deleteOrphan);
+    await expect(deleteOrphan({}, "/tmp/pdv-test")).rejects.toThrow(
+      /active session/i,
+    );
+    expect(mocks.fsRm).not.toHaveBeenCalledWith(
+      "/tmp/pdv-test",
+      expect.anything(),
+    );
+    expect(kernel.id).toBeTruthy();
+  });
+
+  it("autosave:scanWorkingDirs filters out the active session's working dir", async () => {
+    const { configStore } = setup();
+    // Pin workingDirBase to /tmp so it matches the mock createWorkingDir
+    // result ("/tmp/pdv-test"); without this they live in different roots
+    // and the filter has nothing to filter.
+    (configStore.set as unknown as ReturnType<typeof vi.fn>)("workingDirBase", "/tmp");
+
+    const start = getHandler(IPC.kernels.start);
+    await start({}, { language: "python" });
+
+    // Two orphans on disk — one matches the active working dir, one doesn't.
+    mocks.fsReaddir.mockResolvedValueOnce([
+      { name: "pdv-test", isDirectory: () => true } as unknown as never,
+      { name: "pdv-stale", isDirectory: () => true } as unknown as never,
+    ]);
+    // checkForAutosave -> fs.stat for each: both have valid tree-index.json.
+    mocks.fsStat.mockResolvedValueOnce({
+      mtime: new Date("2026-05-04T12:00:00.000Z"),
+    } as unknown as never);
+    mocks.fsStat.mockResolvedValueOnce({
+      mtime: new Date("2026-05-04T13:00:00.000Z"),
+    } as unknown as never);
+
+    const scan = getHandler(IPC.autosave.scanWorkingDirs);
+    const result = (await scan({})) as { dir: string; timestamp: string }[];
+
+    // /tmp/pdv-test is the active working dir so it must be hidden from
+    // the welcome screen. /tmp/pdv-stale stays.
+    const dirs = result.map((r) => r.dir);
+    expect(dirs).not.toContain("/tmp/pdv-test");
+    expect(dirs).toContain("/tmp/pdv-stale");
+  });
+
+  it("unregisterIpcHandlers detaches the kernel:executionState listener", () => {
+    const { kernelManager } = setup();
+    // setup() calls registerIpcHandlers which attaches the listener.
+    const onMock = kernelManager.on as unknown as ReturnType<typeof vi.fn>;
+    const onCalls = onMock.mock.calls.filter(
+      (c: unknown[]) => c[0] === "kernel:executionState",
+    );
+    expect(onCalls.length).toBe(1);
+    const attachedListener = onCalls[0][1];
+
+    unregisterIpcHandlers();
+
+    const removeMock = kernelManager.removeListener as unknown as ReturnType<typeof vi.fn>;
+    expect(removeMock).toHaveBeenCalledWith(
+      "kernel:executionState",
+      attachedListener,
+    );
   });
 });
