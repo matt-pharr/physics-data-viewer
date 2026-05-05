@@ -32,7 +32,9 @@ import { KernelManager } from "./kernel-manager";
 import { ModuleManager } from "./module-manager";
 import {
   bindProjectModulesToTree,
+  setupProjectModuleNamespaces,
 } from "./module-runtime";
+import { copyFilesForLoad } from "./project-file-sync";
 import { ProjectManager, type ProjectModuleImport, type ModuleOwnedFile, type ModuleManifestBundle } from "./project-manager";
 import { ConfigStore } from "./config";
 import { registerAppStateIpcHandlers } from "./ipc-register-app-state";
@@ -155,6 +157,8 @@ const REGISTERED_CHANNELS: readonly string[] = [
   IPC.autosave.clear,
   IPC.autosave.check,
   IPC.autosave.scanWorkingDirs,
+  IPC.autosave.recoverUnsaved,
+  IPC.autosave.deleteOrphan,
 ];
 
 interface PushSubscription {
@@ -693,6 +697,80 @@ export function registerIpcHandlers(
     const config = readConfig(configStore);
     const base = config.workingDirBase || path.join(os.homedir(), ".PDV", "working");
     return ProjectManager.scanForAutosaves(base);
+  });
+
+  ipcMain.handle(IPC.autosave.recoverUnsaved, async (_event, orphanDir: string) => {
+    if (!activeKernelId) {
+      throw new Error("Cannot recover unsaved session: no active kernel");
+    }
+    const workingDir = kernelWorkingDirs.get(activeKernelId);
+    if (!workingDir) {
+      throw new Error("Cannot recover unsaved session: active kernel has no working dir");
+    }
+    if (workingDir === orphanDir) {
+      throw new Error("Cannot recover unsaved session: orphan dir is the active working dir");
+    }
+
+    const orphanAutosaveDir = path.join(orphanDir, ".autosave");
+    const onProgress = (current: number, total: number) => {
+      win.webContents.send(IPC.push.progress, {
+        operation: "load",
+        phase: "Copying files",
+        current,
+        total,
+      });
+    };
+
+    const missingFiles = await copyFilesForLoad(orphanAutosaveDir, workingDir, onProgress);
+    if (missingFiles.length > 0) {
+      console.warn(
+        `[autosave:recoverUnsaved] ${missingFiles.length} file(s) could not be copied from orphan autosave:`,
+        missingFiles,
+      );
+    }
+
+    // Load the tree and code cells from the orphan's .autosave/. The kernel's
+    // save_dir is set to the new working dir; activeProjectDir stays null so
+    // the project remains in the unsaved state.
+    const { codeCells } = await projectManager.load(workingDir, {
+      treeIndexDir: orphanAutosaveDir,
+      codeCellsDir: orphanAutosaveDir,
+    });
+
+    // Mirror code-cells.json into the new working dir so the per-session
+    // autosave loop has an up-to-date baseline.
+    if (codeCells != null) {
+      try {
+        await fs.writeFile(
+          path.join(workingDir, "code-cells.json"),
+          JSON.stringify(codeCells, null, 2),
+          "utf8",
+        );
+      } catch (err) {
+        console.warn("[autosave:recoverUnsaved] mirror code-cells failed", err);
+      }
+    }
+
+    // Wire any module namespaces that the recovered tree references. Pass
+    // the working dir as the project root since there is no save dir yet.
+    await setupProjectModuleNamespaces(commRouter, moduleManager, workingDir);
+
+    // Remove the orphan now that the recovery has succeeded.
+    try {
+      await fs.rm(orphanDir, { recursive: true, force: true });
+    } catch (err) {
+      console.warn("[autosave:recoverUnsaved] failed to remove orphan dir", err);
+    }
+
+    return {
+      codeCells,
+      projectName: null,
+      missingFiles: missingFiles.length > 0 ? missingFiles : undefined,
+    };
+  });
+
+  ipcMain.handle(IPC.autosave.deleteOrphan, async (_event, orphanDir: string) => {
+    await fs.rm(orphanDir, { recursive: true, force: true });
   });
 
   // When kernel goes idle and an autosave was deferred, trigger it now.

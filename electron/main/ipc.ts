@@ -164,6 +164,8 @@ export const IPC = {
     clear: "autosave:clear",
     check: "autosave:check",
     scanWorkingDirs: "autosave:scanWorkingDirs",
+    recoverUnsaved: "autosave:recoverUnsaved",
+    deleteOrphan: "autosave:deleteOrphan",
   },
   /** App info channels. */
   about: {
@@ -1994,6 +1996,27 @@ export interface PDVApi {
      * @returns List of working dirs containing .autosave/ data.
      */
     scanWorkingDirs(): Promise<{ dir: string; timestamp: string }[]>;
+    /**
+     * Recover an unsaved session from an orphaned working dir's `.autosave/`.
+     *
+     * Copies tree files into the active kernel's new working dir, loads the
+     * tree + code cells, and removes the orphan dir. Leaves the project in
+     * an unsaved state (no active project dir).
+     *
+     * @param orphanDir - Absolute path to the orphan working dir.
+     * @returns Loaded code-cells and any files that failed to copy.
+     */
+    recoverUnsaved(orphanDir: string): Promise<{
+      codeCells: unknown;
+      projectName: string | null;
+      missingFiles?: string[];
+    }>;
+    /**
+     * Permanently delete an orphan working dir (discard an unsaved session).
+     *
+     * @param orphanDir - Absolute path to the orphan working dir.
+     */
+    deleteOrphan(orphanDir: string): Promise<void>;
     /**
      * Subscribe to autosave trigger push notifications from the main process.
      *

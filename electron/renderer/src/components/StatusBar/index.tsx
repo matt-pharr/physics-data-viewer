@@ -23,6 +23,15 @@ interface StatusBarProps {
   checksumMismatch: boolean;
   savedPdvVersion: string | null;
   runningPdvVersion: string | null;
+  /** Timestamp (ms) of the most recent successful autosave, or null if none yet. */
+  lastAutosaveAt: number | null;
+}
+
+/** Format a timestamp as HH:MM:SS in the user's locale. */
+function formatTimeOfDay(ms: number): string {
+  const d = new Date(ms);
+  const pad = (n: number): string => n.toString().padStart(2, '0');
+  return `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
 }
 
 /** Application status bar at the bottom of the window. */
@@ -41,6 +50,7 @@ export const StatusBar: React.FC<StatusBarProps> = ({
   checksumMismatch,
   savedPdvVersion,
   runningPdvVersion,
+  lastAutosaveAt,
 }) => {
   const runtimeLabel = activeLanguage === 'julia'
     ? (juliaPath ?? 'julia')
@@ -87,6 +97,14 @@ export const StatusBar: React.FC<StatusBarProps> = ({
             title="Project was saved with a different PDV version"
           >
             Saved: v{savedPdvVersion} | Running: v{runningPdvVersion}
+          </span>
+        )}
+        {lastAutosaveAt !== null && (
+          <span
+            className="status-item"
+            title="Time of the most recent autosave"
+          >
+            Autosaved at {formatTimeOfDay(lastAutosaveAt)}
           </span>
         )}
         {lastChecksum && (

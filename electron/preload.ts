@@ -158,6 +158,8 @@ const api: PDVApi = {
     clear: (dir?: string) => ipcRenderer.invoke(IPC.autosave.clear, dir),
     check: (dir: string) => ipcRenderer.invoke(IPC.autosave.check, dir),
     scanWorkingDirs: () => ipcRenderer.invoke(IPC.autosave.scanWorkingDirs),
+    recoverUnsaved: (orphanDir: string) => ipcRenderer.invoke(IPC.autosave.recoverUnsaved, orphanDir),
+    deleteOrphan: (orphanDir: string) => ipcRenderer.invoke(IPC.autosave.deleteOrphan, orphanDir),
     onTrigger: (cb: () => void) => onPush(IPC.push.autosaveTrigger, cb),
   },
   about: {

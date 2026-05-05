@@ -849,6 +849,12 @@ export interface PDVApi {
     clear(dir?: string): Promise<void>;
     check(dir: string): Promise<{ exists: boolean; timestamp?: string }>;
     scanWorkingDirs(): Promise<{ dir: string; timestamp: string }[]>;
+    recoverUnsaved(orphanDir: string): Promise<{
+      codeCells: unknown;
+      projectName: string | null;
+      missingFiles?: string[];
+    }>;
+    deleteOrphan(orphanDir: string): Promise<void>;
     onTrigger(callback: () => void): () => void;
   };
   about: {
