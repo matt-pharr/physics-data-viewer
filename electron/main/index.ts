@@ -663,6 +663,7 @@ export function registerIpcHandlers(
     if (!activeKernelId) return;
     const state = kernelManager.getExecutionState(activeKernelId);
     if (state !== "idle") {
+      console.log("[autosave] kernel busy, deferring until idle");
       projectManager.setAutosavePending();
       return;
     }
@@ -698,6 +699,7 @@ export function registerIpcHandlers(
   kernelManager.on("kernel:executionState", (kernelId: string, state: string) => {
     if (kernelId !== activeKernelId) return;
     if (state === "idle" && projectManager.consumeAutosavePending()) {
+      console.log("[autosave] kernel idle, running deferred autosave");
       triggerAutosave();
     }
   });

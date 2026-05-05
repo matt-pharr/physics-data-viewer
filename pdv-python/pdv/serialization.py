@@ -251,11 +251,13 @@ def _try_autosave_cache(
     tree_path: str,
     value: Any,
     source_dir: str,
+    hit_counter: "list[int] | None" = None,
 ) -> "tuple[bytes | None, dict | None]":
     """Check autosave cache for an unchanged data node.
 
     Returns ``(digest, cached_descriptor)`` on cache hit, ``(digest, None)``
-    on miss, or ``(None, None)`` when caching is disabled.
+    on miss, or ``(None, None)`` when caching is disabled. When provided,
+    ``hit_counter[0]`` is incremented on every cache hit.
     """
     if autosave_cache is None:
         return None, None
@@ -264,6 +266,8 @@ def _try_autosave_cache(
     digest = node_digest(value, source_dir)
     cached = autosave_cache.get(tree_path)
     if cached is not None and cached[0] == digest:
+        if hit_counter is not None:
+            hit_counter[0] += 1
         return digest, cached[1]
     return digest, None
 
@@ -276,6 +280,7 @@ def serialize_node(
     trusted: bool = False,
     source_dir: str = "",
     autosave_cache: "dict[str, tuple[bytes, dict]] | None" = None,
+    autosave_hits: "list[int] | None" = None,
 ) -> dict:
     """Serialize a value to disk and return a node descriptor dict.
 
@@ -476,7 +481,7 @@ def serialize_node(
         return descriptor
 
     if kind == KIND_NDARRAY:
-        _digest, _cached = _try_autosave_cache(autosave_cache, tree_path, value, _source_dir)
+        _digest, _cached = _try_autosave_cache(autosave_cache, tree_path, value, _source_dir, autosave_hits)
         if _cached is not None:
             return _cached
 
@@ -500,7 +505,7 @@ def serialize_node(
         return descriptor
 
     if kind in (KIND_DATAFRAME, KIND_SERIES):
-        _digest, _cached = _try_autosave_cache(autosave_cache, tree_path, value, _source_dir)
+        _digest, _cached = _try_autosave_cache(autosave_cache, tree_path, value, _source_dir, autosave_hits)
         if _cached is not None:
             return _cached
 
@@ -541,7 +546,7 @@ def serialize_node(
                 "value": value,
             }
         else:
-            _digest, _cached = _try_autosave_cache(autosave_cache, tree_path, value, _source_dir)
+            _digest, _cached = _try_autosave_cache(autosave_cache, tree_path, value, _source_dir, autosave_hits)
             if _cached is not None:
                 return _cached
             node_uuid = generate_node_uuid()
@@ -594,7 +599,7 @@ def serialize_node(
         )
 
     if kind == KIND_BINARY:
-        _digest, _cached = _try_autosave_cache(autosave_cache, tree_path, value, _source_dir)
+        _digest, _cached = _try_autosave_cache(autosave_cache, tree_path, value, _source_dir, autosave_hits)
         if _cached is not None:
             return _cached
         node_uuid = generate_node_uuid()
@@ -611,7 +616,7 @@ def serialize_node(
         return descriptor
 
     # KIND_UNKNOWN — try a registered custom serializer before falling back to pickle.
-    _digest, _cached = _try_autosave_cache(autosave_cache, tree_path, value, _source_dir)
+    _digest, _cached = _try_autosave_cache(autosave_cache, tree_path, value, _source_dir, autosave_hits)
     if _cached is not None:
         return _cached
 

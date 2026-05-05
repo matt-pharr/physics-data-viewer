@@ -669,6 +669,7 @@ export class ProjectManager {
         checksum?: string;
         node_count?: number;
         missing_files?: string[];
+        autosave_cache_hits?: number;
       };
 
       // Write code-cells.json to autosave dir
@@ -678,10 +679,16 @@ export class ProjectManager {
         "utf8"
       );
 
-      console.debug(`[ProjectManager.autosave] DONE (+${(performance.now() - t0).toFixed(0)}ms)`);
+      const ms = (performance.now() - t0).toFixed(0);
+      const total = payload.node_count ?? 0;
+      const hits = payload.autosave_cache_hits ?? 0;
+      const serialized = total - hits;
+      console.log(
+        `[autosave] DONE (${ms}ms): ${serialized} serialized, ${hits} skipped from cache (${total} total)`,
+      );
       return {
         checksum: payload.checksum ?? "",
-        nodeCount: payload.node_count ?? 0,
+        nodeCount: total,
       };
     } catch (err) {
       console.error("[ProjectManager.autosave] FAILED:", err);

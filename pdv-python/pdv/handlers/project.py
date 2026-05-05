@@ -54,6 +54,7 @@ def _collect_nodes(
     counter: "list[int] | None" = None,
     missing_files: "list[str] | None" = None,
     autosave_cache: "dict[str, tuple[bytes, dict]] | None" = None,
+    autosave_hits: "list[int] | None" = None,
 ) -> list:
     """Recursively serialize tree nodes and return descriptor list.
 
@@ -109,6 +110,7 @@ def _collect_nodes(
                 trusted=True,
                 source_dir=working_dir or save_dir,
                 autosave_cache=autosave_cache,
+                autosave_hits=autosave_hits,
             )
         except PDVSerializationError as exc:
             if missing_files is not None and str(exc).startswith("File not found:"):
@@ -144,6 +146,7 @@ def _collect_nodes(
                     counter=counter,
                     missing_files=missing_files,
                     autosave_cache=autosave_cache,
+                    autosave_hits=autosave_hits,
                 )
             )
         elif descriptor.get("metadata", {}).get("composite") and isinstance(value, dict):
@@ -161,6 +164,7 @@ def _collect_nodes(
                     counter=counter,
                     missing_files=missing_files,
                     autosave_cache=autosave_cache,
+                    autosave_hits=autosave_hits,
                 )
             )
     return nodes
@@ -745,6 +749,7 @@ def serialize_tree_to_dir(
                 on_progress("Serializing", current, total)
 
     missing_files: list[str] = []
+    autosave_hits: list[int] = [0]
     nodes = _collect_nodes(
         tree,
         save_dir,
@@ -752,6 +757,7 @@ def serialize_tree_to_dir(
         on_progress=_emit_progress,
         missing_files=missing_files,
         autosave_cache=autosave_cache,
+        autosave_hits=autosave_hits,
     )
     if missing_files:
         return {
@@ -760,6 +766,7 @@ def serialize_tree_to_dir(
             "module_owned_files": [],
             "module_manifests": [],
             "missing_files": missing_files,
+            "autosave_cache_hits": autosave_hits[0],
         }
 
     index_data = json.dumps(nodes, indent=2, default=str)
@@ -784,6 +791,7 @@ def serialize_tree_to_dir(
         "module_owned_files": module_owned_files,
         "module_manifests": module_manifests,
         "missing_files": missing_files,
+        "autosave_cache_hits": autosave_hits[0],
     }
 
 
