@@ -65,6 +65,8 @@ const mocks = vi.hoisted(() => {
   });
   const fsCopyFile = vi.fn(async () => undefined);
   const fsCp = vi.fn(async () => undefined);
+  const fsRm = vi.fn(async () => undefined);
+  const fsReaddir = vi.fn(async () => []);
   const dialogShowOpenDialog = vi.fn();
   const dialogShowMessageBox = vi.fn(async () => ({ response: 0 }));
   const shellOpenPath = vi.fn(async () => "");
@@ -131,6 +133,8 @@ const mocks = vi.hoisted(() => {
     fsReadFile,
     fsCopyFile,
     fsCp,
+    fsRm,
+    fsReaddir,
     dialogShowOpenDialog,
     dialogShowMessageBox,
     shellOpenPath,
@@ -184,8 +188,8 @@ vi.mock("fs/promises", () => ({
   readFile: mocks.fsReadFile,
   copyFile: mocks.fsCopyFile,
   cp: mocks.fsCp,
-  rm: vi.fn().mockResolvedValue(undefined),
-  readdir: vi.fn().mockResolvedValue([]),
+  rm: mocks.fsRm,
+  readdir: mocks.fsReaddir,
 }));
 
 vi.mock("./module-manager", () => ({
@@ -2045,5 +2049,86 @@ describe("Step 5 IPC handlers", () => {
     // resolveActionScripts should NOT be called during load
     // (module binding is now handled by setupModuleNamespaces via pdv.modules.setup comm)
     expect(mocks.moduleManagerResolveActionScripts).not.toHaveBeenCalled();
+  });
+
+  // -------------------------------------------------------------------------
+  // Autosave IPC handlers
+  // -------------------------------------------------------------------------
+
+  it("autosave:clear delegates to ProjectManager.clearAutosave with the given dir", async () => {
+    const { projectManager } = setup();
+    const clear = getHandler(IPC.autosave.clear);
+
+    await clear({}, "/tmp/some-project");
+
+    // ProjectManager.clearAutosave is a static method that fs.rms <dir>/.autosave/
+    // and the handler also marks the per-instance cache dirty.
+    expect(mocks.fsRm).toHaveBeenCalledWith(
+      path.join("/tmp/some-project", ".autosave"),
+      expect.objectContaining({ recursive: true, force: true }),
+    );
+    expect(projectManager.markAutosaveCacheDirty).toHaveBeenCalledOnce();
+  });
+
+  it("autosave:check returns exists=false when tree-index.json is absent", async () => {
+    setup();
+    const check = getHandler(IPC.autosave.check);
+
+    // fsStat default mock throws ENOENT, so the static checkForAutosave
+    // returns { exists: false }.
+    const result = await check({}, "/tmp/no-autosave");
+    expect(result).toEqual({ exists: false });
+  });
+
+  it("autosave:scanWorkingDirs returns [] for an empty workingDirBase", async () => {
+    setup();
+    const scan = getHandler(IPC.autosave.scanWorkingDirs);
+    // fsReaddir defaults to [] — no subdirectories under the base.
+    const result = await scan({});
+    expect(result).toEqual([]);
+  });
+
+  it("autosave:scanWorkingDirs surfaces orphans whose .autosave/tree-index.json exists", async () => {
+    setup();
+    const scan = getHandler(IPC.autosave.scanWorkingDirs);
+
+    // Two subdirectories at the base; only `pdv-A` has a valid tree-index.
+    mocks.fsReaddir.mockResolvedValueOnce([
+      { name: "pdv-A", isDirectory: () => true } as unknown as never,
+      { name: "pdv-B", isDirectory: () => true } as unknown as never,
+      { name: "stray.txt", isDirectory: () => false } as unknown as never,
+    ]);
+    // checkForAutosave -> fs.stat(<dir>/.autosave/tree-index.json)
+    // First call (pdv-A): success. Second call (pdv-B): ENOENT.
+    mocks.fsStat.mockResolvedValueOnce({
+      mtime: new Date("2026-05-04T12:00:00.000Z"),
+    } as unknown as never);
+    mocks.fsStat.mockImplementationOnce(async () => {
+      throw Object.assign(new Error("ENOENT"), { code: "ENOENT" });
+    });
+
+    const result = (await scan({})) as { dir: string; timestamp: string }[];
+    expect(result).toHaveLength(1);
+    expect(result[0].dir).toMatch(/pdv-A$/);
+    expect(result[0].timestamp).toBe("2026-05-04T12:00:00.000Z");
+  });
+
+  it("autosave:deleteOrphan removes the orphan dir recursively", async () => {
+    setup();
+    const deleteOrphan = getHandler(IPC.autosave.deleteOrphan);
+
+    await deleteOrphan({}, "/tmp/orphan-session");
+
+    expect(mocks.fsRm).toHaveBeenCalledWith(
+      "/tmp/orphan-session",
+      expect.objectContaining({ recursive: true, force: true }),
+    );
+  });
+
+  it("autosave:recoverUnsaved throws when no kernel is active", async () => {
+    setup();
+    const recover = getHandler(IPC.autosave.recoverUnsaved);
+    // No kernels.start has been awaited, so activeKernelId is null.
+    await expect(recover({}, "/tmp/orphan")).rejects.toThrow(/no active kernel/i);
   });
 });

@@ -208,6 +208,105 @@ class TestUuidNotHashed:
         assert before != after
 
 
+class TestAutosaveCache:
+    """Tests for the per-node autosave cache used by ``serialize_node``.
+
+    The cache is a ``dict[tree_path, (digest, descriptor)]`` keyed on tree
+    path. On each serialize call, the node's content digest is recomputed
+    and compared against the cached digest. Matches reuse the previous
+    descriptor (same UUID, no file rewrite) and increment ``hit_counter[0]``.
+    """
+
+    def test_cache_hit_on_unchanged_ndarray(self, tmp_path):
+        """Re-serializing the same ndarray reuses the cached descriptor."""
+        np = pytest.importorskip("numpy")
+        from pdv.serialization import serialize_node
+
+        working_dir = str(tmp_path)
+        cache: dict = {}
+        hits = [0]
+        arr = np.array([1.0, 2.0, 3.0])
+
+        first = serialize_node(
+            "x", arr, working_dir, autosave_cache=cache, autosave_hits=hits
+        )
+        assert hits[0] == 0  # first call is a miss
+        assert "x" in cache
+
+        second = serialize_node(
+            "x", arr, working_dir, autosave_cache=cache, autosave_hits=hits
+        )
+        assert hits[0] == 1  # second call hits the cache
+        # Cache hit must reuse the existing descriptor (same UUID).
+        assert second["uuid"] == first["uuid"]
+
+    def test_cache_miss_after_array_mutation(self, tmp_path):
+        """Modifying the array's contents invalidates the cache entry."""
+        np = pytest.importorskip("numpy")
+        from pdv.serialization import serialize_node
+
+        working_dir = str(tmp_path)
+        cache: dict = {}
+        hits = [0]
+
+        arr1 = np.array([1.0, 2.0, 3.0])
+        first = serialize_node(
+            "x", arr1, working_dir, autosave_cache=cache, autosave_hits=hits
+        )
+
+        arr2 = np.array([1.0, 2.0, 9.9])  # one element differs
+        second = serialize_node(
+            "x", arr2, working_dir, autosave_cache=cache, autosave_hits=hits
+        )
+
+        assert hits[0] == 0  # never hit
+        assert second["uuid"] != first["uuid"]  # fresh UUID written
+        # Cache should now hold the *new* descriptor.
+        assert cache["x"][1]["uuid"] == second["uuid"]
+
+    def test_cache_disabled_when_none(self, tmp_path):
+        """``autosave_cache=None`` disables caching — every call is a miss."""
+        np = pytest.importorskip("numpy")
+        from pdv.serialization import serialize_node
+
+        working_dir = str(tmp_path)
+        hits = [0]
+        arr = np.array([1.0, 2.0, 3.0])
+
+        first = serialize_node(
+            "x", arr, working_dir, autosave_cache=None, autosave_hits=hits
+        )
+        second = serialize_node(
+            "x", arr, working_dir, autosave_cache=None, autosave_hits=hits
+        )
+
+        assert hits[0] == 0
+        # Without a cache, each serialization writes a fresh node.
+        assert second["uuid"] != first["uuid"]
+
+    def test_cache_keyed_by_tree_path(self, tmp_path):
+        """Identical values at different paths are cached independently."""
+        np = pytest.importorskip("numpy")
+        from pdv.serialization import serialize_node
+
+        working_dir = str(tmp_path)
+        cache: dict = {}
+        hits = [0]
+        arr = np.array([1.0, 2.0, 3.0])
+
+        a = serialize_node(
+            "a", arr, working_dir, autosave_cache=cache, autosave_hits=hits
+        )
+        b = serialize_node(
+            "b", arr, working_dir, autosave_cache=cache, autosave_hits=hits
+        )
+
+        # Different paths → two independent cache entries, neither a hit.
+        assert hits[0] == 0
+        assert a["uuid"] != b["uuid"]
+        assert set(cache.keys()) == {"a", "b"}
+
+
 class TestRoundtrip:
     def test_roundtrip(self, tmp_path):
         """Save a tree to disk and reload it; tree_checksum must be equal."""

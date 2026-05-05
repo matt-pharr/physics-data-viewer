@@ -462,4 +462,96 @@ describe("ProjectManager", () => {
       await expect(fs.stat(dir)).rejects.toMatchObject({ code: "ENOENT" });
     });
   });
+
+  // -------------------------------------------------------------------------
+  // checkForAutosave() / scanForAutosaves()
+  // -------------------------------------------------------------------------
+
+  describe("checkForAutosave()", () => {
+    let dir: string;
+
+    beforeEach(async () => {
+      dir = await fs.mkdtemp(path.join(os.tmpdir(), "pdv-autosave-test-"));
+    });
+
+    afterEach(async () => {
+      await fs.rm(dir, { recursive: true, force: true });
+    });
+
+    it("returns exists=false when .autosave/ is absent", async () => {
+      const result = await ProjectManager.checkForAutosave(dir);
+      expect(result.exists).toBe(false);
+      expect(result.timestamp).toBeUndefined();
+    });
+
+    it("returns exists=false when .autosave/ exists but lacks tree-index.json", async () => {
+      await fs.mkdir(path.join(dir, ".autosave"), { recursive: true });
+      const result = await ProjectManager.checkForAutosave(dir);
+      expect(result.exists).toBe(false);
+    });
+
+    it("returns exists=true with mtime ISO string when tree-index.json exists", async () => {
+      await fs.mkdir(path.join(dir, ".autosave"), { recursive: true });
+      await fs.writeFile(path.join(dir, ".autosave", "tree-index.json"), "[]", "utf8");
+
+      const result = await ProjectManager.checkForAutosave(dir);
+      expect(result.exists).toBe(true);
+      expect(result.timestamp).toMatch(/^\d{4}-\d{2}-\d{2}T/);
+      // mtime should be parseable and recent
+      expect(Number.isNaN(Date.parse(result.timestamp!))).toBe(false);
+    });
+  });
+
+  describe("scanForAutosaves()", () => {
+    let base: string;
+
+    beforeEach(async () => {
+      base = await fs.mkdtemp(path.join(os.tmpdir(), "pdv-scan-test-"));
+    });
+
+    afterEach(async () => {
+      await fs.rm(base, { recursive: true, force: true });
+    });
+
+    it("returns [] when the base directory does not exist", async () => {
+      const missing = path.join(base, "does-not-exist");
+      const results = await ProjectManager.scanForAutosaves(missing);
+      expect(results).toEqual([]);
+    });
+
+    it("returns [] when the base is empty", async () => {
+      const results = await ProjectManager.scanForAutosaves(base);
+      expect(results).toEqual([]);
+    });
+
+    it("ignores subdirectories without .autosave/tree-index.json", async () => {
+      await fs.mkdir(path.join(base, "session-a"));
+      await fs.mkdir(path.join(base, "session-b", ".autosave"), { recursive: true });
+      // session-b has .autosave/ but no tree-index.json — should be skipped.
+      const results = await ProjectManager.scanForAutosaves(base);
+      expect(results).toEqual([]);
+    });
+
+    it("ignores plain files in the base directory", async () => {
+      await fs.writeFile(path.join(base, "stray.txt"), "noise", "utf8");
+      const results = await ProjectManager.scanForAutosaves(base);
+      expect(results).toEqual([]);
+    });
+
+    it("returns each subdirectory that has .autosave/tree-index.json", async () => {
+      const a = path.join(base, "session-a");
+      const b = path.join(base, "session-b");
+      await fs.mkdir(path.join(a, ".autosave"), { recursive: true });
+      await fs.mkdir(path.join(b, ".autosave"), { recursive: true });
+      await fs.writeFile(path.join(a, ".autosave", "tree-index.json"), "[]", "utf8");
+      await fs.writeFile(path.join(b, ".autosave", "tree-index.json"), "[]", "utf8");
+
+      const results = await ProjectManager.scanForAutosaves(base);
+      const dirs = results.map((r) => r.dir).sort();
+      expect(dirs).toEqual([a, b].sort());
+      for (const r of results) {
+        expect(Number.isNaN(Date.parse(r.timestamp))).toBe(false);
+      }
+    });
+  });
 });
