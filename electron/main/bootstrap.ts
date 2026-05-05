@@ -27,6 +27,20 @@
  * index.ts — IPC handler registration (called from {@link createWindow})
  */
 
+// Prepend a timestamp to every console.* call from the main process.
+// Installed before any other imports so all module-level logs are stamped.
+(function installConsoleTimestamps(): void {
+  const stamp = (): string => {
+    const d = new Date();
+    const pad = (n: number, w = 2): string => String(n).padStart(w, "0");
+    return `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}.${pad(d.getMilliseconds(), 3)}`;
+  };
+  for (const method of ["log", "info", "warn", "error", "debug"] as const) {
+    const original = console[method].bind(console);
+    console[method] = (...args: unknown[]) => original(`[${stamp()}]`, ...args);
+  }
+})();
+
 import { app, BrowserWindow, powerMonitor } from "electron";
 import * as os from "os";
 import * as path from "path";
