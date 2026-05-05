@@ -76,7 +76,7 @@ interface RegisterProjectIpcHandlersOptions {
  *   kernel-side serialization (the authoritative part) has already
  *   succeeded by the time this runs.
  */
-async function syncModuleOwnedFilesToSaveDir(
+export async function syncModuleOwnedFilesToSaveDir(
   saveDir: string,
   moduleOwnedFiles: ModuleOwnedFile[] | undefined,
 ): Promise<string[]> {
@@ -167,7 +167,7 @@ async function readManifestOnlyFields(
   return {};
 }
 
-async function writeModuleManifestsToSaveDir(
+export async function writeModuleManifestsToSaveDir(
   saveDir: string,
   bundles: ModuleManifestBundle[] | undefined,
   moduleManager: ModuleManager,

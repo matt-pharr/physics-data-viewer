@@ -25,7 +25,12 @@
  */
 
 import { CommRouter } from "./comm-router";
-import { PDVMessageType, getAppVersion, type PDVProjectLoadResponsePayload } from "./pdv-protocol";
+import {
+  PDVMessageType,
+  getAppVersion,
+  type PDVProjectLoadResponsePayload,
+  type PDVProjectSaveResponsePayload,
+} from "./pdv-protocol";
 import type { CodeCellData } from "./ipc";
 import * as fs from "fs/promises";
 import * as path from "path";
@@ -653,12 +658,20 @@ export class ProjectManager {
    *
    * @param autosaveDir - The .autosave/ directory to write to (will be created).
    * @param codeCells - Current code-cell state from the renderer.
-   * @returns The kernel response (checksum, node count, etc.), or null on error.
+   * @returns The kernel response (checksum, node count, module bundles), or
+   *   null on error. ``moduleOwnedFiles`` and ``moduleManifests`` are
+   *   forwarded so the autosave handler can mirror module state into the
+   *   `.autosave/` directory for recovery.
    */
   async autosave(
     autosaveDir: string,
     codeCells: CodeCellData,
-  ): Promise<{ checksum: string; nodeCount: number } | null> {
+  ): Promise<{
+    checksum: string;
+    nodeCount: number;
+    moduleOwnedFiles: ModuleOwnedFile[];
+    moduleManifests: ModuleManifestBundle[];
+  } | null> {
     const t0 = performance.now();
 
     await fs.mkdir(autosaveDir, { recursive: true });
@@ -673,11 +686,9 @@ export class ProjectManager {
         clear_cache: clearCache,
       }, { keepAlivePushType: PDVMessageType.PROGRESS });
 
-      const payload = response.payload as {
-        checksum?: string;
-        node_count?: number;
-        missing_files?: string[];
-        autosave_cache_hits?: number;
+      const payload = response.payload as unknown as PDVProjectSaveResponsePayload & {
+        module_owned_files?: ModuleOwnedFile[];
+        module_manifests?: ModuleManifestBundle[];
       };
 
       // Write code-cells.json to autosave dir
@@ -697,6 +708,8 @@ export class ProjectManager {
       return {
         checksum: payload.checksum ?? "",
         nodeCount: total,
+        moduleOwnedFiles: payload.module_owned_files ?? [],
+        moduleManifests: payload.module_manifests ?? [],
       };
     } catch (err) {
       console.error("[ProjectManager.autosave] FAILED:", err);

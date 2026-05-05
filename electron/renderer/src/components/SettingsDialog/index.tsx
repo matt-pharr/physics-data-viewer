@@ -23,6 +23,7 @@ import {
 } from './utils';
 import { ShortcutCapture } from './ShortcutCapture';
 import { AppearanceTab } from './AppearanceTab';
+import { DEFAULT_AUTOSAVE_INTERVAL_S } from '../../app/constants';
 
 type SettingsTab = 'general' | 'shortcuts' | 'appearance' | 'runtime' | 'about';
 
@@ -79,7 +80,9 @@ export const SettingsDialog: React.FC<SettingsDialogProps> = ({
   const [fileManagerCmd, setFileManagerCmd] = useState(DEFAULT_FILE_MANAGER);
   const [defaultSaveLocation, setDefaultSaveLocation] = useState('');
   const [workingDirBase, setWorkingDirBase] = useState('');
-  const [autoSaveInterval, setAutoSaveInterval] = useState(300);
+  const [autoSaveInterval, setAutoSaveInterval] = useState(DEFAULT_AUTOSAVE_INTERVAL_S);
+  /** Transient status message under the "Clear autosave data" button. */
+  const [clearAutosaveStatus, setClearAutosaveStatus] = useState<string | null>(null);
 
   // About tab state
   const [appVersion, setAppVersion] = useState<string>('…');
@@ -110,7 +113,7 @@ export const SettingsDialog: React.FC<SettingsDialogProps> = ({
     setFileManagerCmd(config?.fileManagerCmd ?? DEFAULT_FILE_MANAGER);
     setDefaultSaveLocation(config?.defaultSaveLocation ?? '');
     setWorkingDirBase(config?.workingDirBase ?? '');
-    setAutoSaveInterval(config?.autoSaveIntervalSeconds ?? 300);
+    setAutoSaveInterval(config?.autoSaveIntervalSeconds ?? DEFAULT_AUTOSAVE_INTERVAL_S);
     const ed = config?.settings?.editor;
     setEditorFontSize(ed?.fontSize ?? 13);
     setEditorTabSize(ed?.tabSize ?? 4);
@@ -482,13 +485,33 @@ export const SettingsDialog: React.FC<SettingsDialogProps> = ({
                   <button
                     className="btn btn-secondary btn-sm"
                     type="button"
-                    onClick={() => void window.pdv.autosave.clear()}
+                    onClick={() => {
+                      if (!window.confirm(
+                        "Permanently delete autosaved data for the current project? This cannot be undone."
+                      )) return;
+                      void window.pdv.autosave.clear().then(
+                        () => {
+                          setClearAutosaveStatus("Autosave data cleared.");
+                          window.setTimeout(() => setClearAutosaveStatus(null), 4000);
+                        },
+                        (err) => {
+                          setClearAutosaveStatus(
+                            `Failed to clear: ${err instanceof Error ? err.message : String(err)}`
+                          );
+                        },
+                      );
+                    }}
                   >
                     Clear
                   </button>
                 </div>
                 <div className="settings-general-desc">
                   Remove cached autosave files for the current project.
+                  {clearAutosaveStatus && (
+                    <div style={{ marginTop: 4, color: 'var(--accent)' }}>
+                      {clearAutosaveStatus}
+                    </div>
+                  )}
                 </div>
               </div>
             </div>

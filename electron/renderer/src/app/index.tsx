@@ -882,7 +882,9 @@ const App: React.FC = () => {
     const unsub = window.pdv.autosave.onTrigger(() => {
       const codeCells = { tabs: cellTabsRef.current, activeTabId: activeCellTab };
       void window.pdv.autosave.run(codeCells).then(
-        () => { setLastAutosaveAt(Date.now()); },
+        (result) => {
+          if (result?.saved) setLastAutosaveAt(Date.now());
+        },
         (err) => { console.warn('[autosave] run failed', err); },
       );
     });

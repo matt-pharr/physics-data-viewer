@@ -2131,4 +2131,83 @@ describe("Step 5 IPC handlers", () => {
     // No kernels.start has been awaited, so activeKernelId is null.
     await expect(recover({}, "/tmp/orphan")).rejects.toThrow(/no active kernel/i);
   });
+
+  it("autosave:run returns { saved: false } when there is no working dir", async () => {
+    setup();
+    const run = getHandler(IPC.autosave.run);
+    // No kernel started, no project loaded — handler must short-circuit.
+    const result = await run({}, { tabs: [], activeTabId: 1 });
+    expect(result).toEqual({ saved: false });
+  });
+
+  it("autosave:deleteOrphan refuses to remove the active session's working dir", async () => {
+    const { kernelManager } = setup();
+    const start = getHandler(IPC.kernels.start);
+    const kernel = (await start({}, { language: "python" })) as KernelInfo;
+    void kernelManager; // satisfy lint
+
+    // Look up the working dir the kernel was assigned (the test mock uses
+    // /tmp/pdv-test consistently — see ProjectManager.createWorkingDir mock).
+    const deleteOrphan = getHandler(IPC.autosave.deleteOrphan);
+    await expect(deleteOrphan({}, "/tmp/pdv-test")).rejects.toThrow(
+      /active session/i,
+    );
+    expect(mocks.fsRm).not.toHaveBeenCalledWith(
+      "/tmp/pdv-test",
+      expect.anything(),
+    );
+    expect(kernel.id).toBeTruthy();
+  });
+
+  it("autosave:scanWorkingDirs filters out the active session's working dir", async () => {
+    const { configStore } = setup();
+    // Pin workingDirBase to /tmp so it matches the mock createWorkingDir
+    // result ("/tmp/pdv-test"); without this they live in different roots
+    // and the filter has nothing to filter.
+    (configStore.set as unknown as ReturnType<typeof vi.fn>)("workingDirBase", "/tmp");
+
+    const start = getHandler(IPC.kernels.start);
+    await start({}, { language: "python" });
+
+    // Two orphans on disk — one matches the active working dir, one doesn't.
+    mocks.fsReaddir.mockResolvedValueOnce([
+      { name: "pdv-test", isDirectory: () => true } as unknown as never,
+      { name: "pdv-stale", isDirectory: () => true } as unknown as never,
+    ]);
+    // checkForAutosave -> fs.stat for each: both have valid tree-index.json.
+    mocks.fsStat.mockResolvedValueOnce({
+      mtime: new Date("2026-05-04T12:00:00.000Z"),
+    } as unknown as never);
+    mocks.fsStat.mockResolvedValueOnce({
+      mtime: new Date("2026-05-04T13:00:00.000Z"),
+    } as unknown as never);
+
+    const scan = getHandler(IPC.autosave.scanWorkingDirs);
+    const result = (await scan({})) as { dir: string; timestamp: string }[];
+
+    // /tmp/pdv-test is the active working dir so it must be hidden from
+    // the welcome screen. /tmp/pdv-stale stays.
+    const dirs = result.map((r) => r.dir);
+    expect(dirs).not.toContain("/tmp/pdv-test");
+    expect(dirs).toContain("/tmp/pdv-stale");
+  });
+
+  it("unregisterIpcHandlers detaches the kernel:executionState listener", () => {
+    const { kernelManager } = setup();
+    // setup() calls registerIpcHandlers which attaches the listener.
+    const onMock = kernelManager.on as unknown as ReturnType<typeof vi.fn>;
+    const onCalls = onMock.mock.calls.filter(
+      (c: unknown[]) => c[0] === "kernel:executionState",
+    );
+    expect(onCalls.length).toBe(1);
+    const attachedListener = onCalls[0][1];
+
+    unregisterIpcHandlers();
+
+    const removeMock = kernelManager.removeListener as unknown as ReturnType<typeof vi.fn>;
+    expect(removeMock).toHaveBeenCalledWith(
+      "kernel:executionState",
+      attachedListener,
+    );
+  });
 });

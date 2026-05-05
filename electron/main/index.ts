@@ -27,7 +27,11 @@ import { EnvironmentDetector } from "./environment-detector";
 import { buildEditorSpawn, resolveEditorSpawn } from "./editor-spawn";
 import { registerKernelIpcHandlers } from "./ipc-register-kernels";
 import { registerModulesIpcHandlers } from "./ipc-register-modules";
-import { registerProjectIpcHandlers } from "./ipc-register-project";
+import {
+  registerProjectIpcHandlers,
+  syncModuleOwnedFilesToSaveDir,
+  writeModuleManifestsToSaveDir,
+} from "./ipc-register-project";
 import { KernelManager } from "./kernel-manager";
 import { ModuleManager } from "./module-manager";
 import {
@@ -35,8 +39,14 @@ import {
   setupProjectModuleNamespaces,
 } from "./module-runtime";
 import { copyFilesForLoad } from "./project-file-sync";
-import { ProjectManager, type ProjectModuleImport, type ModuleOwnedFile, type ModuleManifestBundle } from "./project-manager";
-import { ConfigStore } from "./config";
+import {
+  ProjectManager,
+  type ProjectModuleImport,
+  type ModuleOwnedFile,
+  type ModuleManifestBundle,
+  type ProjectManifest,
+} from "./project-manager";
+import { ConfigStore, DEFAULT_AUTOSAVE_INTERVAL_S } from "./config";
 import { registerAppStateIpcHandlers } from "./ipc-register-app-state";
 import { registerGuiEditorIpcHandlers } from "./ipc-register-gui-editor";
 import { registerModuleWindowIpcHandlers } from "./ipc-register-module-windows";
@@ -172,6 +182,11 @@ const kernelWorkingDirs = new Map<string, string>();
 const crashHandlers = new Map<string, (id: string) => void>();
 const projectManifestMutationQueue = new Map<string, Promise<void>>();
 let activeKernelManagerRef: KernelManager | null = null;
+// The kernel:executionState listener attached by registerIpcHandlers(). Stored
+// at module scope so unregisterIpcHandlers() can detach it symmetrically.
+let trackedExecutionStateListener:
+  | { km: KernelManager; fn: (kernelId: string, state: string) => void }
+  | null = null;
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -539,7 +554,7 @@ export function registerIpcHandlers(
       activeKernelId = id;
       if (id) {
         const config = readConfig(configStore);
-        const intervalMs = (config.autoSaveIntervalSeconds ?? 300) * 1000;
+        const intervalMs = (config.autoSaveIntervalSeconds ?? DEFAULT_AUTOSAVE_INTERVAL_S) * 1000;
         projectManager.startAutosaveTimer(intervalMs, triggerAutosave);
       } else {
         projectManager.stopAutosaveTimer();
@@ -642,7 +657,7 @@ export function registerIpcHandlers(
     setAllowClose,
     onConfigChanged: (prev, next) => {
       if (prev.autoSaveIntervalSeconds !== next.autoSaveIntervalSeconds && activeKernelId) {
-        const intervalMs = (next.autoSaveIntervalSeconds ?? 300) * 1000;
+        const intervalMs = (next.autoSaveIntervalSeconds ?? DEFAULT_AUTOSAVE_INTERVAL_S) * 1000;
         projectManager.startAutosaveTimer(intervalMs, triggerAutosave);
       }
     },
@@ -676,9 +691,51 @@ export function registerIpcHandlers(
 
   ipcMain.handle(IPC.autosave.run, async (_event, codeCells: unknown) => {
     const baseDir = activeProjectDir || kernelWorkingDirs.get(activeKernelId ?? "");
-    if (!baseDir) return;
+    if (!baseDir) return { saved: false };
     const autosaveDir = path.join(baseDir, ".autosave");
-    await projectManager.autosave(autosaveDir, codeCells as CodeCellData);
+    const result = await projectManager.autosave(autosaveDir, codeCells as CodeCellData);
+    if (result === null) return { saved: false };
+
+    // Mirror module-owned working-dir files and module manifests into the
+    // autosave dir so unsaved-session recovery can restore them. For saved
+    // projects this is partly redundant with the canonical save dir, but
+    // doing it unconditionally avoids special-casing and keeps `.autosave/`
+    // self-sufficient as a recovery source. See ARCHITECTURE.md §8.4.
+    await syncModuleOwnedFilesToSaveDir(autosaveDir, result.moduleOwnedFiles);
+    await writeModuleManifestsToSaveDir(autosaveDir, result.moduleManifests, moduleManager);
+
+    // Persist a project.json snapshot so setupProjectModuleNamespaces can
+    // rebind imported modules during recovery. For a saved project we copy
+    // the canonical manifest verbatim; for an unsaved project we synthesize
+    // one from the in-memory pending-imports state.
+    let manifest: ProjectManifest | null = null;
+    if (activeProjectDir) {
+      try {
+        manifest = await ProjectManager.readManifest(activeProjectDir);
+      } catch {
+        // Manifest unreadable — fall through to synthesizing one below.
+      }
+    }
+    if (!manifest) {
+      manifest = {
+        schema_version: "1.1",
+        saved_at: new Date().toISOString(),
+        pdv_version: app.getVersion(),
+        tree_checksum: result.checksum,
+        language: activeKernelId
+          ? (kernelManager.getKernel(activeKernelId)?.language ?? "python")
+          : "python",
+        modules: [...pendingModuleImports],
+        module_settings: { ...pendingModuleSettings },
+      };
+    }
+    try {
+      await ProjectManager.saveManifest(autosaveDir, manifest);
+    } catch (err) {
+      console.warn("[autosave] failed to write project.json snapshot", err);
+    }
+
+    return { saved: true };
   });
 
   ipcMain.handle(IPC.autosave.clear, async (_event, dir?: string) => {
@@ -696,7 +753,14 @@ export function registerIpcHandlers(
   ipcMain.handle(IPC.autosave.scanWorkingDirs, async () => {
     const config = readConfig(configStore);
     const base = config.workingDirBase || path.join(os.homedir(), ".PDV", "working");
-    return ProjectManager.scanForAutosaves(base);
+    const results = await ProjectManager.scanForAutosaves(base);
+    // Hide the active session's own working dir so the welcome screen never
+    // offers it as recoverable. (Reachable via File → New Project, which
+    // shows the welcome screen mid-session without restarting the kernel.)
+    const activeWorkingDir = activeKernelId ? kernelWorkingDirs.get(activeKernelId) : undefined;
+    return activeWorkingDir
+      ? results.filter((r) => r.dir !== activeWorkingDir)
+      : results;
   });
 
   ipcMain.handle(IPC.autosave.recoverUnsaved, async (_event, orphanDir: string) => {
@@ -727,6 +791,46 @@ export function registerIpcHandlers(
         `[autosave:recoverUnsaved] ${missingFiles.length} file(s) could not be copied from orphan autosave:`,
         missingFiles,
       );
+    }
+
+    // Copy the manifest snapshot + module mirror so module namespace setup
+    // (both the kernel-side _early_module_setup and the main-side
+    // setupProjectModuleNamespaces below) finds the bindings the user had
+    // before the crash. copyFilesForLoad only handles UUID tree files, so
+    // these are explicit. Each copy is best-effort: an autosave produced
+    // before this change ships won't have these files, and recovery should
+    // still proceed with whatever it can salvage.
+    const orphanProjectJson = path.join(orphanAutosaveDir, "project.json");
+    const orphanModulesDir = path.join(orphanAutosaveDir, "modules");
+    try {
+      await fs.copyFile(orphanProjectJson, path.join(workingDir, "project.json"));
+    } catch (err) {
+      const code = (err as NodeJS.ErrnoException)?.code;
+      if (code !== "ENOENT") {
+        console.warn("[autosave:recoverUnsaved] copy project.json failed", err);
+      }
+    }
+    try {
+      await fs.cp(orphanModulesDir, path.join(workingDir, "modules"), {
+        recursive: true,
+        force: true,
+        errorOnExist: false,
+      });
+    } catch (err) {
+      const code = (err as NodeJS.ErrnoException)?.code;
+      if (code !== "ENOENT") {
+        console.warn("[autosave:recoverUnsaved] copy modules dir failed", err);
+      }
+    }
+
+    // Restore in-memory pending-imports state from the recovered manifest so
+    // a future Save As writes the modules into the new save dir's manifest.
+    try {
+      const recovered = await ProjectManager.readManifest(workingDir);
+      pendingModuleImports = [...recovered.modules];
+      pendingModuleSettings = { ...recovered.module_settings };
+    } catch {
+      // No manifest in the orphan (older autosave format) — nothing to restore.
     }
 
     // Load the tree and code cells from the orphan's .autosave/. The kernel's
@@ -770,17 +874,28 @@ export function registerIpcHandlers(
   });
 
   ipcMain.handle(IPC.autosave.deleteOrphan, async (_event, orphanDir: string) => {
+    // Defense in depth: the renderer-side scan already filters this out, but
+    // never let a bug or stale list cause us to rm -rf the live working dir.
+    const activeWorkingDir = activeKernelId ? kernelWorkingDirs.get(activeKernelId) : undefined;
+    if (activeWorkingDir && orphanDir === activeWorkingDir) {
+      throw new Error("Cannot discard the active session's working directory");
+    }
     await fs.rm(orphanDir, { recursive: true, force: true });
   });
 
   // When kernel goes idle and an autosave was deferred, trigger it now.
-  kernelManager.on("kernel:executionState", (kernelId: string, state: string) => {
+  // Tracked in `executionStateListener` so unregisterIpcHandlers can detach
+  // it; otherwise repeated registerIpcHandlers calls (tests, future re-init)
+  // would accumulate listeners.
+  const executionStateListener = (kernelId: string, state: string): void => {
     if (kernelId !== activeKernelId) return;
     if (state === "idle" && projectManager.consumeAutosavePending()) {
       console.log("[autosave] kernel idle, running deferred autosave");
       triggerAutosave();
     }
-  });
+  };
+  kernelManager.on("kernel:executionState", executionStateListener);
+  trackedExecutionStateListener = { km: kernelManager, fn: executionStateListener };
 
   registerCommPushForwarding(win, commRouter, projectManager, moduleWindowManager, guiEditorWindowManager, guiViewerWindowManager);
 
@@ -938,6 +1053,13 @@ export function registerCommPushForwarding(
 export function unregisterIpcHandlers(): void {
   for (const channel of REGISTERED_CHANNELS) {
     ipcMain.removeHandler(channel);
+  }
+  if (trackedExecutionStateListener) {
+    trackedExecutionStateListener.km.removeListener(
+      "kernel:executionState",
+      trackedExecutionStateListener.fn,
+    );
+    trackedExecutionStateListener = null;
   }
   for (const [id, dir] of kernelWorkingDirs) {
     const handler = crashHandlers.get(id);

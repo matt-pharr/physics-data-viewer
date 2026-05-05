@@ -94,12 +94,20 @@ export interface PDVConfig {
   };
 }
 
+/**
+ * Default autosave interval in seconds when neither config nor user input
+ * supplies a value. Used as the `?? DEFAULT_AUTOSAVE_INTERVAL_S` fallback in
+ * the autosave timer setup and the Settings dialog so the magic number lives
+ * in exactly one place.
+ */
+export const DEFAULT_AUTOSAVE_INTERVAL_S = 300;
+
 const CONFIG_DEFAULTS: PDVConfig = {
   showPrivateVariables: false,
   showModuleVariables: false,
   showCallableVariables: false,
   autoRefreshNamespace: false,
-  autoSaveIntervalSeconds: 300,
+  autoSaveIntervalSeconds: DEFAULT_AUTOSAVE_INTERVAL_S,
   settings: {
     appearance: {
       themeName: "Dark+ (VSCode)",

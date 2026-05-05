@@ -845,7 +845,7 @@ export interface PDVApi {
     set(updates: Partial<Config>): Promise<Config>;
   };
   autosave: {
-    run(codeCells: unknown): Promise<void>;
+    run(codeCells: unknown): Promise<{ saved: boolean }>;
     clear(dir?: string): Promise<void>;
     check(dir: string): Promise<{ exists: boolean; timestamp?: string }>;
     scanWorkingDirs(): Promise<{ dir: string; timestamp: string }[]>;

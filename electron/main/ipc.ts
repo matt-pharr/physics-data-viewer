@@ -1975,8 +1975,11 @@ export interface PDVApi {
      * Called by the renderer in response to an autosave trigger push.
      *
      * @param codeCells - Current code-cell state.
+     * @returns `{ saved: true }` when an autosave actually ran, or
+     *   `{ saved: false }` when the handler couldn't write (no kernel,
+     *   no working dir, or the kernel rejected the save).
      */
-    run(codeCells: unknown): Promise<void>;
+    run(codeCells: unknown): Promise<{ saved: boolean }>;
     /**
      * Delete the .autosave/ directory for the given project directory.
      *
