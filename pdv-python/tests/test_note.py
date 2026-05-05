@@ -21,7 +21,7 @@ import pytest
 
 import pdv.comms as comms_mod
 from pdv.handlers.note import handle_note_register
-from pdv.namespace import PDVApp
+import pdv
 from pdv.serialization import (
     FORMAT_MARKDOWN,
     KIND_MARKDOWN,
@@ -299,24 +299,23 @@ class TestHandleNoteRegister:
 
 
 # ---------------------------------------------------------------------------
-# PDVApp.new_note()
+# pdv.new_note()
 # ---------------------------------------------------------------------------
 
 
 class TestPDVAppNewNote:
-    """Tests for pdv.new_note() convenience method."""
+    """Tests for pdv.new_note() module-level function."""
 
     def test_new_note_creates_tree_node(self, tmp_path):
         tree = PDVTree()
         tree._working_dir = str(tmp_path)
         mock_comm = _make_mock_comm()
-        app = PDVApp()
 
         with (
             patch.object(comms_mod, "_comm", mock_comm),
             patch.object(comms_mod, "_pdv_tree", tree),
         ):
-            app.new_note("notes.intro", title="Introduction")
+            pdv.new_note("notes.intro", title="Introduction")
 
         node = tree["notes.intro"]
         assert isinstance(node, PDVNote)

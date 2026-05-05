@@ -23,6 +23,7 @@ import {
 } from './utils';
 import { ShortcutCapture } from './ShortcutCapture';
 import { AppearanceTab } from './AppearanceTab';
+import { DEFAULT_AUTOSAVE_INTERVAL_S } from '../../app/constants';
 
 type SettingsTab = 'general' | 'shortcuts' | 'appearance' | 'runtime' | 'about';
 
@@ -77,6 +78,11 @@ export const SettingsDialog: React.FC<SettingsDialogProps> = ({
   const [pythonEditorCmd, setPythonEditorCmd] = useState('code {}');
   const [juliaEditorCmd, setJuliaEditorCmd] = useState('code {}');
   const [fileManagerCmd, setFileManagerCmd] = useState(DEFAULT_FILE_MANAGER);
+  const [defaultSaveLocation, setDefaultSaveLocation] = useState('');
+  const [workingDirBase, setWorkingDirBase] = useState('');
+  const [autoSaveInterval, setAutoSaveInterval] = useState(DEFAULT_AUTOSAVE_INTERVAL_S);
+  /** Transient status message under the "Clear autosave data" button. */
+  const [clearAutosaveStatus, setClearAutosaveStatus] = useState<string | null>(null);
 
   // About tab state
   const [appVersion, setAppVersion] = useState<string>('…');
@@ -105,6 +111,9 @@ export const SettingsDialog: React.FC<SettingsDialogProps> = ({
     setPythonEditorCmd(config?.pythonEditorCmd ?? 'code {}');
     setJuliaEditorCmd(config?.juliaEditorCmd ?? 'code {}');
     setFileManagerCmd(config?.fileManagerCmd ?? DEFAULT_FILE_MANAGER);
+    setDefaultSaveLocation(config?.defaultSaveLocation ?? '');
+    setWorkingDirBase(config?.workingDirBase ?? '');
+    setAutoSaveInterval(config?.autoSaveIntervalSeconds ?? DEFAULT_AUTOSAVE_INTERVAL_S);
     const ed = config?.settings?.editor;
     setEditorFontSize(ed?.fontSize ?? 13);
     setEditorTabSize(ed?.tabSize ?? 4);
@@ -299,6 +308,9 @@ export const SettingsDialog: React.FC<SettingsDialogProps> = ({
       pythonEditorCmd: pythonEditorCmd.trim() || 'code {}',
       juliaEditorCmd:  juliaEditorCmd.trim()  || 'code {}',
       fileManagerCmd:  fileManagerCmd.trim()  || DEFAULT_FILE_MANAGER,
+      defaultSaveLocation: defaultSaveLocation.trim() || undefined,
+      workingDirBase: workingDirBase.trim() || undefined,
+      autoSaveIntervalSeconds: Math.max(30, autoSaveInterval),
       settings: {
         shortcuts: savedShortcuts,
         appearance: {
@@ -389,6 +401,117 @@ export const SettingsDialog: React.FC<SettingsDialogProps> = ({
                 <div className="settings-general-desc">
                   Used to reveal files in the OS file browser (e.g.{' '}
                   <code>open {'{}' }</code> on macOS, <code>xdg-open {'{}' }</code> on Linux).
+                </div>
+              </div>
+
+              <h4 className="settings-general-section">Directories</h4>
+              <div className="settings-general-grid">
+                <label htmlFor="sg-default-save">Default save location</label>
+                <div className="settings-general-dir-row">
+                  <span className="settings-general-dir-path" title={defaultSaveLocation}>
+                    {defaultSaveLocation || 'Not set'}
+                  </span>
+                  <button
+                    className="btn btn-secondary btn-sm"
+                    type="button"
+                    onClick={async () => {
+                      const picked = await window.pdv.files.pickDirectory(defaultSaveLocation || undefined);
+                      if (picked) setDefaultSaveLocation(picked);
+                    }}
+                  >
+                    Choose...
+                  </button>
+                  {defaultSaveLocation && (
+                    <button
+                      className="btn btn-secondary btn-sm"
+                      type="button"
+                      onClick={() => setDefaultSaveLocation('')}
+                    >
+                      Clear
+                    </button>
+                  )}
+                </div>
+                <div className="settings-general-desc">
+                  Pre-filled location in the Save As dialog for new projects.
+                </div>
+
+                <label htmlFor="sg-working-dir">Working directory</label>
+                <div className="settings-general-dir-row">
+                  <span className="settings-general-dir-path" title={workingDirBase}>
+                    {workingDirBase || 'Default (~/.PDV/working/)'}
+                  </span>
+                  <button
+                    className="btn btn-secondary btn-sm"
+                    type="button"
+                    onClick={async () => {
+                      const picked = await window.pdv.files.pickDirectory(workingDirBase || undefined);
+                      if (picked) setWorkingDirBase(picked);
+                    }}
+                  >
+                    Choose...
+                  </button>
+                  {workingDirBase && (
+                    <button
+                      className="btn btn-secondary btn-sm"
+                      type="button"
+                      onClick={() => setWorkingDirBase('')}
+                    >
+                      Clear
+                    </button>
+                  )}
+                </div>
+                <div className="settings-general-desc">
+                  Base directory for temporary session files. Use a fast local drive on HPC systems.
+                  Takes effect on next kernel start.
+                </div>
+              </div>
+
+              <h4 className="settings-general-section">Autosave</h4>
+              <div className="settings-general-grid">
+                <label htmlFor="sg-autosave-interval">Interval (seconds)</label>
+                <input
+                  id="sg-autosave-interval"
+                  type="number"
+                  min={30}
+                  value={autoSaveInterval}
+                  onChange={(e) => setAutoSaveInterval(Math.max(30, parseInt(e.target.value) || 30))}
+                />
+                <div className="settings-general-desc">
+                  How often to automatically save project state. Minimum 30 seconds.
+                </div>
+
+                <label>Clear autosave data</label>
+                <div>
+                  <button
+                    className="btn btn-secondary btn-sm"
+                    type="button"
+                    onClick={() => {
+                      if (!window.confirm(
+                        "Permanently delete autosaved data for the current project? This cannot be undone."
+                      )) return;
+                      void window.pdv.autosave.clear().then(
+                        () => {
+                          setClearAutosaveStatus("Autosave data cleared.");
+                          window.setTimeout(() => setClearAutosaveStatus(null), 4000);
+                        },
+                        (err) => {
+                          setClearAutosaveStatus(
+                            `Failed to clear: ${err instanceof Error ? err.message : String(err)}`
+                          );
+                        },
+                      );
+                    }}
+                  >
+                    Clear
+                  </button>
+                </div>
+                <div className="settings-general-desc">
+                  Remove cached autosave files for the current project.
+                  {clearAutosaveStatus && (
+                    <div style={{ marginTop: 4, color: 'var(--accent)' }}>
+                      {clearAutosaveStatus}
+                    </div>
+                  )}
                 </div>
               </div>
             </div>

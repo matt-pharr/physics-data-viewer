@@ -121,6 +121,19 @@ export function useProjectWorkflow(options: UseProjectWorkflowOptions) {
         tabs: cellTabsRef.current,
         activeTabId: activeCellTabRef.current,
       }, options?.projectName);
+
+      // If backing files are missing the save was blocked to protect the
+      // existing project directory. Warn the user and offer Save As.
+      if (result.missingFiles?.length) {
+        setLogs((prev) => [...prev, {
+          id: `save-blocked-${Date.now()}`,
+          timestamp: Date.now(),
+          code: '',
+          stderr: `Save blocked: ${result.missingFiles!.length} file-backed node(s) have missing backing files in the working directory:\n  ${result.missingFiles!.join('\n  ')}\nThe existing project save was not modified. Use Save As to save to a new location.`,
+        }]);
+        return false;
+      }
+
       setCurrentProjectDir(saveDir);
       setCurrentProjectName(result.projectName ?? options?.projectName ?? null);
       setModulesRefreshToken((prev) => prev + 1);
@@ -174,7 +187,23 @@ export function useProjectWorkflow(options: UseProjectWorkflowOptions) {
         return;
       }
       const saveDir = pickedDir;
-      const result = await window.pdv.project.load(saveDir);
+
+      // Check for autosave recovery before loading
+      let restoreFromAutosave = false;
+      const autosaveCheck = await window.pdv.autosave.check(saveDir);
+      if (autosaveCheck.exists) {
+        const when = autosaveCheck.timestamp
+          ? new Date(autosaveCheck.timestamp).toLocaleString()
+          : 'unknown time';
+        restoreFromAutosave = window.confirm(
+          `This project has autosaved changes from ${when} that were not explicitly saved.\n\nRestore autosaved changes?`
+        );
+        if (!restoreFromAutosave) {
+          await window.pdv.autosave.clear(saveDir);
+        }
+      }
+
+      const result = await window.pdv.project.load(saveDir, restoreFromAutosave ? { restoreFromAutosave: true } : undefined);
       const normalized = normalizeLoadedCodeCells(result.codeCells);
       loadedProjectTabsRef.current = normalized;
       setCellTabs(normalized.tabs);
@@ -187,12 +216,21 @@ export function useProjectWorkflow(options: UseProjectWorkflowOptions) {
       setLastChecksum(result.checksum ? result.checksum.slice(0, 6) : null);
       setChecksumMismatch(result.checksumValid === false);
       setSavedPdvVersion(result.savedPdvVersion ?? null);
+      // Clean up .autosave/ after a successful restore
+      if (restoreFromAutosave) {
+        await window.pdv.autosave.clear(saveDir);
+      }
+
       const nodeCountMsg = result.nodeCount != null ? ` (${result.nodeCount} nodes)` : '';
+      const restoredMsg = restoreFromAutosave ? ' (restored from autosave)' : '';
+      const loadMissingWarn = result.missingFiles?.length
+        ? `\nWarning: ${result.missingFiles.length} file(s) were missing from the save directory:\n  ${result.missingFiles.join('\n  ')}`
+        : '';
       setLogs((prev) => [...prev, {
         id: `load-${Date.now()}`,
         timestamp: Date.now(),
         code: '',
-        stdout: `Project loaded${nodeCountMsg}`,
+        stdout: `Project loaded${nodeCountMsg}${restoredMsg}${loadMissingWarn}`,
       }]);
     } catch (error) {
       setProgress(null);

@@ -248,6 +248,15 @@ def handle_file_register(msg: dict) -> None:
 
     tree[full_path] = node
 
+    if node_type == "lib" and tree._working_dir:
+        import sys  # noqa: PLC0415
+
+        abs_path = node.resolve_path(tree._working_dir)
+        if abs_path:
+            parent_dir = os.path.dirname(abs_path)
+            if parent_dir and parent_dir not in sys.path:
+                sys.path.insert(1, parent_dir)
+
     send_message(
         "pdv.file.register.response",
         {"path": full_path},

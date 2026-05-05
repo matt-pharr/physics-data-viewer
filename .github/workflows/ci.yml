@@ -122,3 +122,42 @@ jobs:
       - name: Renderer tests
         working-directory: electron
         run: npm run test -- --reporter=verbose renderer/src/
+
+  docs-build:
+    name: Docs build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          # git-revision-date-localized-plugin needs full history for the
+          # "Last update" timestamps; without this the plugin falls back to
+          # the build time and prints noisy warnings.
+          fetch-depth: 0
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: |
+          pip install -r docs/requirements.txt
+          pip install -e pdv-python/
+
+      # Mirrors the build step in docs.yml. Fails the job on any mkdocs
+      # ERROR line — broken cross-refs, missing pages, mkdocstrings
+      # resolution failures — so docs breakage is caught at PR time rather
+      # than waiting until a tag/release. We don't use `--strict` because
+      # that also fails on benign warnings (e.g. git-revision-date plugin
+      # complaining about pages with no git history yet).
+      - name: Build docs
+        run: |
+          set -o pipefail
+          mkdocs build 2>&1 | tee /tmp/mkdocs.log
+          if grep -q "^ERROR" /tmp/mkdocs.log; then
+            echo "::error::mkdocs reported ERROR lines (see log above)"
+            exit 1
+          fi

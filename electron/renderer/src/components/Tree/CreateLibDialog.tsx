@@ -2,11 +2,8 @@
  * CreateLibDialog — modal for new PDVLib (Python library) node creation.
  *
  * Mirrors {@link CreateScriptDialog} but emits names for the
- * ``tree:createLib`` handler, which is workflow-B-only (validated
- * server-side). The dialog doesn't enforce "target must be inside a
- * module" — that's surfaced as an error from the IPC call so the
- * user gets the same diagnostic whether they typed a bad path by hand
- * or hit an edge case via keyboard shortcut.
+ * ``tree:createLib`` handler. Libs can be created inside a module
+ * (module-owned) or anywhere else in the tree (standalone).
  */
 
 import React, { useEffect, useRef, useState } from 'react';

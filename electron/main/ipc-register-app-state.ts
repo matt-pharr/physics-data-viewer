@@ -32,6 +32,8 @@ interface RegisterAppStateIpcHandlersOptions {
   stateDir: string;
   /** Flips the close-guard flag in `app.ts` so the next `win.close()` proceeds. */
   setAllowClose: (allow: boolean) => void;
+  /** Called after config:set with the old and new config values. */
+  onConfigChanged?: (prev: PDVConfig, next: PDVConfig) => void;
 }
 
 function getWindowChromePlatform(): WindowChromePlatform {
@@ -102,7 +104,7 @@ function loadThemesFromDisk(themesDir: string): void {
 export function registerAppStateIpcHandlers(
   options: RegisterAppStateIpcHandlersOptions
 ): void {
-  const { win, configStore, readConfig, themesDir, stateDir, setAllowClose } = options;
+  const { win, configStore, readConfig, themesDir, stateDir, setAllowClose, onConfigChanged } = options;
 
   fs.mkdir(themesDir, { recursive: true }).catch((error) => {
     console.warn(
@@ -142,15 +144,17 @@ export function registerAppStateIpcHandlers(
   ipcMain.handle(IPC.updater.getStatus, async () => getUpdateStatus());
 
   ipcMain.handle(IPC.config.set, async (_event, updates: Partial<PDVConfig>) => {
-    const current = readConfig(configStore);
-    const merged: PDVConfig = { ...current, ...updates };
+    const prev = readConfig(configStore);
+    const merged: PDVConfig = { ...prev, ...updates };
     for (const key of Object.keys(updates) as Array<keyof PDVConfig>) {
       const value = updates[key];
       if (value !== undefined) {
         configStore.set(key, value);
       }
     }
-    return { ...merged, ...configStore.getAll() };
+    const next = { ...merged, ...configStore.getAll() };
+    onConfigChanged?.(prev, next);
+    return next;
   });
 
   ipcMain.handle(IPC.themes.get, async () => savedThemes);

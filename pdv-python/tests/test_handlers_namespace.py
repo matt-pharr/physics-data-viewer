@@ -53,7 +53,6 @@ class TestHandleNamespaceQuery:
             "module_ref": math,
             "fn": lambda x: x,
             "pdv_tree": object(),
-            "pdv": object(),
         }
         mock_comm = _make_mock_comm()
         msg = _make_msg()
@@ -71,7 +70,6 @@ class TestHandleNamespaceQuery:
         assert "module_ref" not in variables
         assert "fn" not in variables
         assert "pdv_tree" not in variables
-        assert "pdv" not in variables
 
     def test_query_include_private_includes_private_vars(self):
         ip = MagicMock()
@@ -87,9 +85,9 @@ class TestHandleNamespaceQuery:
         variables = mock_comm._sent[0]["payload"]["variables"]
         assert "_private" in variables
 
-    def test_query_excludes_pdv_tree_and_pdv(self):
+    def test_query_excludes_pdv_tree(self):
         ip = MagicMock()
-        ip.user_ns = {"pdv_tree": object(), "pdv": object(), "value": 1}
+        ip.user_ns = {"pdv_tree": object(), "value": 1}
         mock_comm = _make_mock_comm()
         msg = _make_msg(
             {
@@ -106,7 +104,6 @@ class TestHandleNamespaceQuery:
 
         variables = mock_comm._sent[0]["payload"]["variables"]
         assert "pdv_tree" not in variables
-        assert "pdv" not in variables
         assert "value" in variables
 
     def test_query_no_kernel_returns_empty_variables(self):

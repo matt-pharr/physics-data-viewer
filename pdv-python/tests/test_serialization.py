@@ -602,9 +602,9 @@ class TestAddFile:
 
     def test_add_file_imports_and_returns_pdvfile(self, tmp_working_dir, tmp_path):
         """add_file() copies the source and returns a PDVFile with fresh UUID."""
+        import pdv
         import pdv.comms as comms_mod
         from pdv.environment import uuid_tree_path
-        from pdv.namespace import PDVApp
         from pdv.tree import PDVFile
 
         source = tmp_path / "mesh.h5"
@@ -614,7 +614,7 @@ class TestAddFile:
         old_tree = comms_mod._pdv_tree
         comms_mod._pdv_tree = tree
         try:
-            node = PDVApp().add_file(str(source))
+            node = pdv.add_file(str(source))
         finally:
             comms_mod._pdv_tree = old_tree
 
@@ -627,8 +627,8 @@ class TestAddFile:
             assert fh.read() == b"\x89HDF\r\nmesh-data"
 
     def test_add_file_expands_tilde(self, tmp_working_dir, tmp_path, monkeypatch):
+        import pdv
         import pdv.comms as comms_mod
-        from pdv.namespace import PDVApp
 
         monkeypatch.setenv("HOME", str(tmp_path))
         source = tmp_path / "mesh.h5"
@@ -638,42 +638,42 @@ class TestAddFile:
         old_tree = comms_mod._pdv_tree
         comms_mod._pdv_tree = tree
         try:
-            node = PDVApp().add_file("~/mesh.h5")
+            node = pdv.add_file("~/mesh.h5")
         finally:
             comms_mod._pdv_tree = old_tree
 
         assert node.filename == "mesh.h5"
 
     def test_add_file_missing_source_raises(self, tmp_working_dir):
+        import pdv
         import pdv.comms as comms_mod
-        from pdv.namespace import PDVApp
 
         tree = self._fresh_tree(tmp_working_dir)
         old_tree = comms_mod._pdv_tree
         comms_mod._pdv_tree = tree
         try:
             with pytest.raises(FileNotFoundError):
-                PDVApp().add_file("/definitely/not/a/real/path.xyz")
+                pdv.add_file("/definitely/not/a/real/path.xyz")
         finally:
             comms_mod._pdv_tree = old_tree
 
     def test_add_file_directory_raises(self, tmp_working_dir, tmp_path):
+        import pdv
         import pdv.comms as comms_mod
-        from pdv.namespace import PDVApp
 
         tree = self._fresh_tree(tmp_working_dir)
         old_tree = comms_mod._pdv_tree
         comms_mod._pdv_tree = tree
         try:
             with pytest.raises(ValueError, match="not a file"):
-                PDVApp().add_file(str(tmp_path))
+                pdv.add_file(str(tmp_path))
         finally:
             comms_mod._pdv_tree = old_tree
 
     def test_add_file_no_working_dir_raises(self, tmp_path):
+        import pdv
         import pdv.comms as comms_mod
         from pdv.errors import PDVError
-        from pdv.namespace import PDVApp
         from pdv.tree import PDVTree
 
         source = tmp_path / "mesh.h5"
@@ -684,14 +684,14 @@ class TestAddFile:
         comms_mod._pdv_tree = tree
         try:
             with pytest.raises(PDVError, match="has not received pdv.init"):
-                PDVApp().add_file(str(source))
+                pdv.add_file(str(source))
         finally:
             comms_mod._pdv_tree = old_tree
 
     def test_add_file_then_assign_to_tree(self, tmp_working_dir, tmp_path):
         """End-to-end: imported PDVFile can be assigned to a tree path and resolved."""
+        import pdv
         import pdv.comms as comms_mod
-        from pdv.namespace import PDVApp
         from pdv.tree import PDVFile
 
         source = tmp_path / "table.csv"
@@ -701,7 +701,7 @@ class TestAddFile:
         old_tree = comms_mod._pdv_tree
         comms_mod._pdv_tree = tree
         try:
-            node = PDVApp().add_file(str(source))
+            node = pdv.add_file(str(source))
             tree["imports.table"] = node
         finally:
             comms_mod._pdv_tree = old_tree

@@ -27,6 +27,23 @@ from unittest.mock import MagicMock
 import pytest
 
 
+@pytest.fixture(autouse=True)
+def _reset_autosave_cache() -> Generator[None, None, None]:
+    """Clear the kernel's in-memory autosave cache between tests.
+
+    The cache is module-level state in ``pdv.handlers.project`` and now
+    persists across explicit saves (so unchanged data nodes can skip
+    re-serialization on the next autosave). Without this fixture an
+    earlier test that touches `handle_project_save` can leak cached
+    descriptors into a later test and produce surprising cache hits.
+    """
+    from pdv.handlers.project import clear_autosave_cache
+
+    clear_autosave_cache()
+    yield
+    clear_autosave_cache()
+
+
 @pytest.fixture()
 def tmp_working_dir() -> Generator[str, None, None]:
     """Yield a freshly created temporary working directory.
@@ -81,12 +98,11 @@ def tree_with_comm(tmp_working_dir, mock_send):
 
 @pytest.fixture()
 def fresh_namespace(tree_with_comm):
-    """Return a PDVNamespace with pdv_tree and pdv pre-injected."""
-    from pdv.namespace import PDVApp, PDVNamespace
+    """Return a PDVNamespace with pdv_tree pre-injected."""
+    from pdv.namespace import PDVNamespace
 
     ns = PDVNamespace()
     dict.__setitem__(ns, "pdv_tree", tree_with_comm)
-    dict.__setitem__(ns, "pdv", PDVApp())
     return ns
 
 
@@ -94,13 +110,12 @@ def fresh_namespace(tree_with_comm):
 def mock_ipython(tree_with_comm):
     """Return a mock IPython shell with a PDVNamespace user_ns.
 
-    The namespace already contains pdv_tree and pdv.
+    The namespace already contains pdv_tree.
     """
-    from pdv.namespace import PDVApp, PDVNamespace
+    from pdv.namespace import PDVNamespace
 
     ns = PDVNamespace()
     dict.__setitem__(ns, "pdv_tree", tree_with_comm)
-    dict.__setitem__(ns, "pdv", PDVApp())
 
     ip = MagicMock()
     ip.user_ns = ns

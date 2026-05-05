@@ -4,13 +4,24 @@ pdv.handlers.project — Handlers for PDV project messages.
 Handles:
 - ``pdv.project.load``: load a project from a save directory. Reads
   ``tree-index.json``, rebuilds the in-memory tree structure, sends
-  ``pdv.project.loaded`` push.
+  ``pdv.project.loaded`` push. Accepts an optional ``tree_index_dir``
+  override so autosave recovery can load from ``.autosave/`` instead.
 - ``pdv.project.save``: serialize the current tree to a save directory.
   Sends ``pdv.project.save.response`` with node count and checksum.
+  Accepts a ``clear_cache`` flag for explicit cache reset (sent by the
+  main process when the user discards autosave data).
+
+This module also owns :data:`_autosave_cache`, the in-memory map
+``{tree_path: (digest, descriptor)}`` consulted on every save. Explicit
+saves populate it with canonical-UUID descriptors so the next autosave
+hits the cache and writes file contents only for nodes that genuinely
+changed. The cache is reset only when ``clear_cache=True`` is sent or on
+kernel shutdown (module reload).
 
 See Also
 --------
-ARCHITECTURE.md §4.2 (project load sequence), §8 (save and load)
+ARCHITECTURE.md §4.2 (project load sequence), §8 (save and load), §8.4
+(autosave and recovery).
 """
 
 from __future__ import annotations
@@ -18,6 +29,22 @@ from __future__ import annotations
 from typing import Any, Callable
 
 from pdv.handlers import register
+
+# In-memory autosave checksum cache. Maps tree_path → (digest_bytes, descriptor).
+# Allows subsequent autosaves to skip serialization for unchanged data nodes.
+# Populated by both explicit save and autosave; cleared only on user-initiated
+# `clear_cache` (Settings → Clear, decline-restore-on-load) and kernel shutdown.
+# TODO: stale entries for deleted tree paths accumulate for the kernel lifetime.
+# A long session that creates and deletes many large arrays will grow this dict
+# without bound. Consider pruning paths that aren't in the just-serialized tree
+# at the end of each save (cheap: set difference against the tree's path set).
+_autosave_cache: dict[str, tuple[bytes, dict]] = {}
+
+
+def clear_autosave_cache() -> None:
+    """Clear the in-memory autosave checksum cache."""
+    global _autosave_cache  # noqa: PLW0603
+    _autosave_cache = {}
 
 
 def _count_nodes(tree: "Any") -> int:
@@ -41,6 +68,9 @@ def _collect_nodes(
     working_dir: str = "",
     on_progress: "Callable[[int], None] | None" = None,
     counter: "list[int] | None" = None,
+    missing_files: "list[str] | None" = None,
+    autosave_cache: "dict[str, tuple[bytes, dict]] | None" = None,
+    autosave_hits: "list[int] | None" = None,
 ) -> list:
     """Recursively serialize tree nodes and return descriptor list.
 
@@ -58,6 +88,19 @@ def _collect_nodes(
         Called with current node count after each node is serialized.
     counter : list, optional
         Mutable single-element list tracking the running count across recursion.
+    missing_files : list, optional
+        Mutable list that collects tree paths of file-backed nodes whose
+        backing files were missing. If provided, missing-file errors skip
+        the node instead of falling back to pickle.
+    autosave_cache : dict, optional
+        Per-node checksum cache shared across calls. When provided, data
+        nodes whose digest matches the cached value reuse the previous
+        descriptor (and its UUID/file) instead of being re-serialized.
+        Pass the module-level :data:`_autosave_cache` to participate in
+        the in-memory cache used by autosave runs.
+    autosave_hits : list, optional
+        Single-element counter incremented once per cache hit. Used by
+        the autosave handler to log cache effectiveness.
 
     Returns
     -------
@@ -91,8 +134,21 @@ def _collect_nodes(
                 save_dir,
                 trusted=True,
                 source_dir=working_dir or save_dir,
+                autosave_cache=autosave_cache,
+                autosave_hits=autosave_hits,
             )
         except PDVSerializationError as exc:
+            if missing_files is not None and str(exc).startswith("File not found:"):
+                log.warning(
+                    "project.save: skipping node '%s' — backing file missing: %s",
+                    path,
+                    exc,
+                )
+                missing_files.append(path)
+                counter[0] += 1
+                if on_progress is not None:
+                    on_progress(counter[0])
+                continue
             log.warning(
                 "project.save: falling back to pickle for node '%s' (%s): %s",
                 path,
@@ -113,6 +169,9 @@ def _collect_nodes(
                     working_dir=working_dir,
                     on_progress=on_progress,
                     counter=counter,
+                    missing_files=missing_files,
+                    autosave_cache=autosave_cache,
+                    autosave_hits=autosave_hits,
                 )
             )
         elif descriptor.get("metadata", {}).get("composite") and isinstance(value, dict):
@@ -128,6 +187,9 @@ def _collect_nodes(
                     working_dir=working_dir,
                     on_progress=on_progress,
                     counter=counter,
+                    missing_files=missing_files,
+                    autosave_cache=autosave_cache,
+                    autosave_hits=autosave_hits,
                 )
             )
     return nodes
@@ -551,7 +613,18 @@ def handle_project_load(msg: dict) -> None:
     ----------------
     .. code-block:: json
 
-        { "save_dir": "/path/to/project" }
+        {
+          "save_dir": "/path/to/project",
+          "tree_index_dir": "/path/to/.autosave"  // optional
+        }
+
+    When ``tree_index_dir`` is provided and exists, ``tree-index.json``
+    is read from it instead of from ``save_dir``. This is how autosave
+    recovery overlays an autosaved tree on top of (or in lieu of) the
+    last persisted save: the main process copies any file-backed nodes
+    into the kernel's working dir, then asks the kernel to load the
+    autosaved index. File-backed nodes are still resolved via the
+    kernel's working dir, not the save dir.
 
     Parameters
     ----------
@@ -566,6 +639,7 @@ def handle_project_load(msg: dict) -> None:
     msg_id = msg.get("msg_id")
     payload = msg.get("payload", {})
     save_dir = payload.get("save_dir", "")
+    tree_index_dir = payload.get("tree_index_dir", "")
 
     if not save_dir or not os.path.isdir(save_dir):
         send_error(
@@ -576,7 +650,18 @@ def handle_project_load(msg: dict) -> None:
         )
         return
 
-    tree_index_path = os.path.join(save_dir, "tree-index.json")
+    if tree_index_dir and not os.path.isdir(tree_index_dir):
+        # Recovery flow asked us to overlay an autosave dir that no longer
+        # exists (e.g. cleared between copyFilesForLoad and the load comm).
+        # Falling back silently would hide the recovery failure, so log it.
+        import logging  # noqa: PLC0415
+
+        logging.getLogger("pdv").warning(
+            "tree_index_dir override missing, falling back to save_dir: '%s'",
+            tree_index_dir,
+        )
+    index_source = tree_index_dir if tree_index_dir and os.path.isdir(tree_index_dir) else save_dir
+    tree_index_path = os.path.join(index_source, "tree-index.json")
     if not os.path.exists(tree_index_path):
         send_error(
             "pdv.project.load.response",
@@ -667,13 +752,14 @@ def serialize_tree_to_dir(
     save_dir: str,
     *,
     on_progress: "Callable[[str, int, int], None] | None" = None,
+    autosave_cache: "dict[str, tuple[bytes, dict]] | None" = None,
 ) -> dict:
     """Serialize the in-memory tree to *save_dir* and return save metadata.
 
     Writes data files and ``tree-index.json``, purges orphaned UUID
     directories, and computes the tree checksum. This is the core
     serialization logic shared by ``handle_project_save`` (comm path)
-    and ``PDVApp.save_project`` (direct Python call path).
+    and ``pdv.save_project`` (direct Python call path).
 
     Parameters
     ----------
@@ -683,11 +769,19 @@ def serialize_tree_to_dir(
         Absolute path to the project save directory.
     on_progress : callable, optional
         ``(phase, current, total)`` callback for UI progress reporting.
+    autosave_cache : dict, optional
+        Per-node checksum cache to share across successive serialize calls.
+        Pass the module-level :data:`_autosave_cache` from this module to
+        let an autosave run skip re-serializing unchanged data nodes.
+        Pass ``None`` for explicit (full) saves.
 
     Returns
     -------
     dict
-        ``{"node_count", "checksum", "module_owned_files", "module_manifests"}``.
+        ``{"node_count", "checksum", "module_owned_files", "module_manifests",
+        "missing_files", "autosave_cache_hits"}``. ``autosave_cache_hits``
+        is the number of nodes that reused a cached descriptor; meaningful
+        only when ``autosave_cache`` was provided.
 
     Raises
     ------
@@ -696,33 +790,37 @@ def serialize_tree_to_dir(
     """
     import json  # noqa: PLC0415
     import os  # noqa: PLC0415
-    import sys  # noqa: PLC0415
-    import time  # noqa: PLC0415
-
-    t0 = time.monotonic()
-
-    def _log(phase: str) -> None:
-        elapsed = time.monotonic() - t0
-        print(f"[project.save] {phase} ({elapsed:.3f}s)", file=sys.stderr, flush=True)
 
     os.makedirs(os.path.join(save_dir, "tree"), exist_ok=True)
 
     working_dir = tree._working_dir or save_dir
     total = _count_nodes(tree)
-    _log(f"counted {total} nodes")
 
     def _emit_progress(current: int) -> None:
         if current % 5 == 0 or current == total:
             if on_progress is not None:
                 on_progress("Serializing", current, total)
 
+    missing_files: list[str] = []
+    autosave_hits: list[int] = [0]
     nodes = _collect_nodes(
         tree,
         save_dir,
         working_dir=working_dir,
         on_progress=_emit_progress,
+        missing_files=missing_files,
+        autosave_cache=autosave_cache,
+        autosave_hits=autosave_hits,
     )
-    _log(f"collected {len(nodes)} node descriptors")
+    if missing_files:
+        return {
+            "node_count": len(nodes),
+            "checksum": "",
+            "module_owned_files": [],
+            "module_manifests": [],
+            "missing_files": missing_files,
+            "autosave_cache_hits": autosave_hits[0],
+        }
 
     index_data = json.dumps(nodes, indent=2, default=str)
     index_path = os.path.join(save_dir, "tree-index.json")
@@ -730,25 +828,23 @@ def serialize_tree_to_dir(
     with open(tmp_path, "w", encoding="utf-8") as fh:
         fh.write(index_data)
     os.replace(tmp_path, index_path)
-    _log("wrote tree-index.json")
 
     _purge_orphaned_tree_files(save_dir, nodes)
-    _log("purged orphans")
 
     from pdv.checksum import tree_checksum  # noqa: PLC0415
 
     checksum = tree_checksum(tree)
-    _log("computed checksum")
 
     module_owned_files = _collect_module_owned_files(tree, working_dir)
     module_manifests = _collect_module_manifests(tree)
-    _log("DONE")
 
     return {
         "node_count": len(nodes),
         "checksum": checksum,
         "module_owned_files": module_owned_files,
         "module_manifests": module_manifests,
+        "missing_files": missing_files,
+        "autosave_cache_hits": autosave_hits[0],
     }
 
 
@@ -763,24 +859,57 @@ def handle_project_save(msg: dict) -> None:
     ----------------
     .. code-block:: json
 
-        { "save_dir": "/path/to/project" }
+        {
+          "save_dir": "/path/to/project",
+          "is_autosave": false,    // optional, default false
+          "clear_cache": false     // optional, default false
+        }
+
+    The module-level :data:`_autosave_cache` is consulted and updated on
+    every save (autosave *and* explicit). On an explicit save it ends up
+    populated with ``(digest, descriptor)`` pairs whose descriptors point
+    at canonical UUIDs in ``<save_dir>/tree/``; the next autosave then
+    finds those entries on cache hit and skips writing duplicate file
+    contents under ``<saveDir>/.autosave/tree/``. ``is_autosave`` remains
+    part of the wire spec for forward compatibility but the kernel no
+    longer differentiates behaviour based on it. The user-facing
+    ``clear_cache`` flag (sent by ``IPC.autosave.clear`` from the main
+    process when the user clears autosave data) is the explicit reset
+    path: the cache is wiped *before* the save runs.
 
     Response payload
     ----------------
     .. code-block:: json
 
-        { "node_count": 42, "checksum": "<sha256-of-tree-index.json>" }
+        {
+          "node_count": 42,
+          "checksum": "<sha256-of-tree-index.json>",
+          "autosave_cache_hits": 0,
+          "module_owned_files": [...],
+          "module_manifests": [...],
+          "missing_files": [...]
+        }
 
     Parameters
     ----------
     msg : dict
         Parsed PDV message envelope.
     """
+    global _autosave_cache  # noqa: PLW0603
     from pdv.comms import get_pdv_tree, send_error, send_message  # noqa: PLC0415
 
     msg_id = msg.get("msg_id")
     payload = msg.get("payload", {})
     save_dir = payload.get("save_dir", "")
+    # `is_autosave` is still part of the wire spec for forward compatibility
+    # but the kernel no longer behaves differently based on it: the cache is
+    # always passed to the serializer (so explicit saves populate it for the
+    # next autosave) and the user-facing `clear_cache` flag is the sole reset
+    # path. See ARCHITECTURE.md §8.4.
+    clear_cache = payload.get("clear_cache", False)
+
+    if clear_cache:
+        _autosave_cache = {}
 
     if not save_dir:
         send_error(
@@ -807,8 +936,17 @@ def handle_project_save(msg: dict) -> None:
             {"operation": "save", "phase": phase, "current": current, "total": total},
         )
 
+    # Always pass the cache. On explicit save it gets populated with
+    # `(digest, descriptor)` entries pointing at canonical UUIDs under
+    # `<save_dir>/tree/`; the next autosave then hits the cache and only
+    # writes file contents for nodes that genuinely changed since the last
+    # save (rather than duplicating the whole data tree under
+    # `<saveDir>/.autosave/tree/`). The user-facing `clear_cache` flag above
+    # remains the explicit reset path. See ARCHITECTURE.md §8.4.
     try:
-        results = serialize_tree_to_dir(tree, save_dir, on_progress=_progress)
+        results = serialize_tree_to_dir(
+            tree, save_dir, on_progress=_progress, autosave_cache=_autosave_cache,
+        )
     except Exception as exc:  # noqa: BLE001
         import sys  # noqa: PLC0415
         import traceback  # noqa: PLC0415

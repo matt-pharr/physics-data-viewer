@@ -40,6 +40,7 @@ interface RegisterKernelIpcHandlersOptions {
   setActiveKernelId: (id: string | null) => void;
   getActiveKernelId: () => string | null;
   getActiveProjectDir: () => string | null;
+  getWorkingDirBase: () => string | undefined;
   bindActiveProjectModules: (kernelId: string | null) => Promise<void>;
 }
 
@@ -95,6 +96,7 @@ export function registerKernelIpcHandlers(
     setActiveKernelId,
     getActiveKernelId,
     getActiveProjectDir,
+    getWorkingDirBase,
     bindActiveProjectModules,
   } = options;
 
@@ -178,7 +180,8 @@ export function registerKernelIpcHandlers(
       queryRouter,
       projectManager,
       kernel.id,
-      kernelWorkingDirs
+      kernelWorkingDirs,
+      getWorkingDirBase(),
     );
     setActiveKernelId(kernel.id);
     await setupModuleNamespaces(kernel.id);

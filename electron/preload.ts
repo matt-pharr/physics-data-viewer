@@ -73,10 +73,10 @@ const api: PDVApi = {
       ipcRenderer.invoke(IPC.tree.createNode, kernelId, targetPath, nodeName),
     rename: (kernelId, treePath, newName) =>
       ipcRenderer.invoke(IPC.tree.rename, kernelId, treePath, newName),
-    move: (kernelId, treePath, newPath, filename) =>
-      ipcRenderer.invoke(IPC.tree.move, kernelId, treePath, newPath, filename),
-    duplicate: (kernelId, treePath, newPath, filename) =>
-      ipcRenderer.invoke(IPC.tree.duplicate, kernelId, treePath, newPath, filename),
+    move: (kernelId, treePath, newPath) =>
+      ipcRenderer.invoke(IPC.tree.move, kernelId, treePath, newPath),
+    duplicate: (kernelId, treePath, newPath) =>
+      ipcRenderer.invoke(IPC.tree.duplicate, kernelId, treePath, newPath),
     addFile: (kernelId, sourcePath, targetTreePath, nodeType, filename) =>
       ipcRenderer.invoke(IPC.tree.addFile, kernelId, sourcePath, targetTreePath, nodeType, filename),
     invokeHandler: (kernelId, nodePath) =>
@@ -137,7 +137,7 @@ const api: PDVApi = {
   project: {
     save: (saveDir, codeCells, projectName) =>
       ipcRenderer.invoke(IPC.project.save, saveDir, codeCells, projectName),
-    load: (saveDir) => ipcRenderer.invoke(IPC.project.load, saveDir),
+    load: (saveDir, options) => ipcRenderer.invoke(IPC.project.load, saveDir, options),
     new: () => ipcRenderer.invoke(IPC.project.new),
     peekLanguages: (paths) =>
       ipcRenderer.invoke(IPC.project.peekLanguages, paths),
@@ -152,6 +152,20 @@ const api: PDVApi = {
   config: {
     get: () => ipcRenderer.invoke(IPC.config.get),
     set: (updates) => ipcRenderer.invoke(IPC.config.set, updates),
+  },
+  autosave: {
+    run: (codeCells: unknown) => ipcRenderer.invoke(IPC.autosave.run, codeCells),
+    clear: (dir?: string) => ipcRenderer.invoke(IPC.autosave.clear, dir),
+    check: (dir: string) => ipcRenderer.invoke(IPC.autosave.check, dir),
+    scanWorkingDirs: () => ipcRenderer.invoke(IPC.autosave.scanWorkingDirs),
+    recoverUnsaved: (orphanDir: string) => ipcRenderer.invoke(IPC.autosave.recoverUnsaved, orphanDir),
+    deleteOrphan: (orphanDir: string) => ipcRenderer.invoke(IPC.autosave.deleteOrphan, orphanDir),
+    onTrigger: (cb: () => void) => onPush(IPC.push.autosaveTrigger, cb),
+    onInFlightChange: (cb: (inFlight: boolean) => void) => {
+      const offStart = onPush<void>(IPC.push.autosaveStarted, () => cb(true));
+      const offEnd = onPush<void>(IPC.push.autosaveEnded, () => cb(false));
+      return () => { offStart(); offEnd(); };
+    },
   },
   about: {
     getVersion: () => ipcRenderer.invoke(IPC.about.getVersion),

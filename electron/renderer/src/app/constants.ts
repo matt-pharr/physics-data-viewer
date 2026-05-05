@@ -18,3 +18,10 @@ export const MAX_RECENT_PROJECTS = 10;
 
 /** Maximum console log entries before oldest are dropped. */
 export const MAX_LOG_ENTRIES = 2000;
+
+/**
+ * Fallback autosave interval (s) when no config value is present. Should
+ * match `DEFAULT_AUTOSAVE_INTERVAL_S` in `electron/main/config.ts` — kept in
+ * sync manually because the renderer can't import from main.
+ */
+export const DEFAULT_AUTOSAVE_INTERVAL_S = 300;

@@ -15,7 +15,6 @@ from typing import Any
 from unittest.mock import MagicMock, patch
 
 import pdv.comms as comms_mod
-from pdv.namespace import PDVApp
 from pdv.tree import PDVScript, PDVTree
 
 
@@ -53,7 +52,7 @@ class TestIntegrationDispatch:
         tree._set_working_dir(tmp_working_dir)
         tree["alpha"] = 1
         mock_comm = _make_mock_comm()
-        ip = SimpleNamespace(user_ns={"pdv_tree": tree, "pdv": PDVApp(), "x": 42})
+        ip = SimpleNamespace(user_ns={"pdv_tree": tree, "x": 42})
 
         with (
             patch.object(comms_mod, "_comm", mock_comm),
@@ -206,7 +205,7 @@ class TestIntegrationDispatch:
         tree = PDVTree()
         tree._set_working_dir(tmp_working_dir)
         mock_comm = _make_mock_comm()
-        ip = SimpleNamespace(user_ns={"pdv_tree": tree, "pdv": PDVApp()})
+        ip = SimpleNamespace(user_ns={"pdv_tree": tree})
 
         with (
             patch.object(comms_mod, "_comm", mock_comm),

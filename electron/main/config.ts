@@ -66,6 +66,12 @@ export interface PDVConfig {
   projectRoot?: string;
   /** Timestamp (ms since epoch) of last auto-update check. Internal use only. */
   lastUpdateCheck?: number;
+  /** Default parent directory for new project saves (pre-fills Save As dialog). */
+  defaultSaveLocation?: string;
+  /** Base directory for session working directories. Defaults to `~/.PDV/working/`. */
+  workingDirBase?: string;
+  /** Autosave interval in seconds. Default 300 (5 minutes). Minimum 30. */
+  autoSaveIntervalSeconds?: number;
   /** Renderer settings blob persisted by Settings dialog. */
   settings?: {
     shortcuts?: Record<string, string>;
@@ -88,11 +94,20 @@ export interface PDVConfig {
   };
 }
 
+/**
+ * Default autosave interval in seconds when neither config nor user input
+ * supplies a value. Used as the `?? DEFAULT_AUTOSAVE_INTERVAL_S` fallback in
+ * the autosave timer setup and the Settings dialog so the magic number lives
+ * in exactly one place.
+ */
+export const DEFAULT_AUTOSAVE_INTERVAL_S = 300;
+
 const CONFIG_DEFAULTS: PDVConfig = {
   showPrivateVariables: false,
   showModuleVariables: false,
   showCallableVariables: false,
   autoRefreshNamespace: false,
+  autoSaveIntervalSeconds: DEFAULT_AUTOSAVE_INTERVAL_S,
   settings: {
     appearance: {
       themeName: "Dark+ (VSCode)",
@@ -192,13 +207,19 @@ function parseConfig(raw: string, filePath: string): Partial<PDVConfig> {
       result.theme = theme;
     }
   }
-  for (const key of ["pythonEditorCmd", "juliaEditorCmd", "fileManagerCmd"] as const) {
+  for (const key of ["pythonEditorCmd", "juliaEditorCmd", "fileManagerCmd", "defaultSaveLocation", "workingDirBase"] as const) {
     if (key in obj) {
       const val = obj[key];
       if (val !== null && val !== undefined && typeof val !== "string") {
         throw new Error(`Invalid config value for ${key} in ${filePath}`);
       }
       if (typeof val === "string") result[key] = val;
+    }
+  }
+  if ("autoSaveIntervalSeconds" in obj) {
+    const val = obj.autoSaveIntervalSeconds;
+    if (val !== null && val !== undefined && typeof val === "number" && val >= 30) {
+      result.autoSaveIntervalSeconds = val;
     }
   }
   if ("projectRoot" in obj) {

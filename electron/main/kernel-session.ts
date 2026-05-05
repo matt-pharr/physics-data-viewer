@@ -84,6 +84,7 @@ async function waitForPush(
  * @param projectManager - Project manager used to create kernel working dirs.
  * @param kernelId - Kernel id to initialize.
  * @param kernelWorkingDirs - Working-dir map updated with this kernel's directory.
+ * @param workingDirBase - Optional custom base directory for working dirs (from user settings).
  * @returns Nothing.
  * @throws {Error} When bootstrap execution fails or handshake times out.
  */
@@ -93,7 +94,8 @@ export async function initializeKernelSession(
   queryRouter: QueryRouter,
   projectManager: ProjectManager,
   kernelId: string,
-  kernelWorkingDirs: Map<string, string>
+  kernelWorkingDirs: Map<string, string>,
+  workingDirBase?: string,
 ): Promise<void> {
   const kernel = kernelManager.getKernel(kernelId);
   const language = kernel?.language ?? "python";
@@ -120,7 +122,7 @@ export async function initializeKernelSession(
   // Without this, pdv.init (a comm_msg) can be silently lost on the
   // ROUTER socket under ipykernel ≥ 7.
   await kernelManager.ping(kernelId);
-  const workingDir = await projectManager.createWorkingDir();
+  const workingDir = await projectManager.createWorkingDir(workingDirBase);
   await commRouter.request(PDVMessageType.INIT, {
     working_dir: workingDir,
     pdv_version: getAppVersion(),

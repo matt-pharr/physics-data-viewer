@@ -2,9 +2,10 @@
 pdv-python/tests/test_namespace.py — Unit tests for pdv.namespace.
 
 Tests cover:
-1. PDVNamespace blocks reassignment/deletion of pdv_tree and pdv.
+1. PDVNamespace blocks reassignment/deletion of pdv_tree.
 2. PDVNamespace allows normal assignment/deletion of other names.
-3. pdv_namespace() snapshot filtering (private, modules, callables).
+3. pdv.working_dir module-level property.
+4. pdv_namespace() snapshot filtering (private, modules, callables).
 
 Reference: ARCHITECTURE.md §5.4, §5.5
 """
@@ -14,7 +15,7 @@ from pathlib import Path
 
 import pytest
 from pdv import comms
-from pdv.namespace import PDVApp, PDVNamespace, pdv_namespace
+from pdv.namespace import PDVNamespace, pdv_namespace
 from pdv.errors import PDVError, PDVProtectedNameError
 from pdv.tree import PDVTree
 
@@ -26,11 +27,11 @@ class TestPDVNamespace:
         with pytest.raises(PDVProtectedNameError):
             ns["pdv_tree"] = "anything"
 
-    def test_set_pdv_raises(self):
-        """Assigning pdv raises PDVProtectedNameError."""
+    def test_set_pdv_allowed(self):
+        """Assigning 'pdv' is allowed (no longer a protected name)."""
         ns = PDVNamespace()
-        with pytest.raises(PDVProtectedNameError):
-            ns["pdv"] = "anything"
+        ns["pdv"] = "anything"
+        assert ns["pdv"] == "anything"
 
     def test_set_normal_name_allowed(self):
         """Normal variable assignment works."""
@@ -60,23 +61,29 @@ class TestPDVNamespace:
         assert "pdv_tree" in ns
 
 
-class TestPDVAppWorkingDir:
+class TestWorkingDir:
     def test_working_dir_returns_tree_working_dir(self, tmp_path, monkeypatch):
+        import pdv  # noqa: PLC0415
+
         tree = PDVTree()
         tree._set_working_dir(str(tmp_path))
         monkeypatch.setattr(comms, "_pdv_tree", tree)
-        assert PDVApp().working_dir == Path(str(tmp_path))
+        assert pdv.working_dir == Path(str(tmp_path))
 
     def test_working_dir_raises_before_init(self, monkeypatch):
+        import pdv  # noqa: PLC0415
+
         monkeypatch.setattr(comms, "_pdv_tree", None)
-        with pytest.raises(PDVError):
-            _ = PDVApp().working_dir
+        with pytest.raises(RuntimeError):
+            _ = pdv.working_dir
 
     def test_working_dir_raises_when_unset(self, monkeypatch):
+        import pdv  # noqa: PLC0415
+
         tree = PDVTree()
         monkeypatch.setattr(comms, "_pdv_tree", tree)
         with pytest.raises(PDVError):
-            _ = PDVApp().working_dir
+            _ = pdv.working_dir
 
 
 class TestPDVNamespaceSnapshot:
@@ -84,11 +91,6 @@ class TestPDVNamespaceSnapshot:
         """pdv_namespace() result does not contain pdv_tree."""
         result = pdv_namespace(fresh_namespace)
         assert "pdv_tree" not in result
-
-    def test_excludes_pdv(self, fresh_namespace):
-        """pdv_namespace() result does not contain pdv."""
-        result = pdv_namespace(fresh_namespace)
-        assert "pdv" not in result
 
     def test_excludes_private_by_default(self, fresh_namespace):
         """Private names are excluded unless include_private=True."""

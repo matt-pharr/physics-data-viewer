@@ -1,5 +1,5 @@
 # PDV Architecture Document
-**Version**: 0.0.12
+**Version**: 0.0.13
 **Date**: 2026-04-07
 **Status**: Authoritative design specification. All new code must conform to this document. Deviations require updating this document first.
 
@@ -94,7 +94,7 @@ PDV uses the standard Electron three-process architecture:
 - Manage lazy loading of tree node data from the save directory
 
 ### 2.4 What the Main Process Does NOT Do
-- The main process does not construct arbitrary Python or Julia business logic and send it via `execute_request`. All structured data exchange between the main process and the kernel happens via the PDV comm protocol (see Section 3). There are two well-defined exceptions: (1) the **bootstrap snippet** in `kernel-session.ts` that initializes `pdv` at startup (a one-time init, not business logic), and (2) the **script invocation string** built by the `script:run` IPC handler, which constructs a minimal `pdv_tree["path"].run(kwargs)` call so that script output flows through the standard Jupyter iopub stream and appears in the console.
+- The main process does not construct arbitrary Python or Julia business logic and send it via `execute_request`. All structured data exchange between the main process and the kernel happens via the PDV comm protocol (see Section 3). There are two well-defined exceptions: (1) the **bootstrap snippet** in `kernel-session.ts` that initializes `pdv_tree` at startup (a one-time init, not business logic), and (2) the **script invocation string** built by the `script:run` IPC handler, which constructs a minimal `pdv_tree["path"].run(kwargs)` call so that script output flows through the standard Jupyter iopub stream and appears in the console.
 - The main process does not scan the filesystem to build the tree. The kernel is the sole tree authority.
 
 ---
@@ -117,7 +117,7 @@ Every PDV message — whether sent by the app or by the kernel — has the follo
 
 ```json
 {
-  "pdv_version": "0.0.12",
+  "pdv_version": "0.0.13",
   "msg_id": "<uuid-v4>",
   "in_reply_to": "<uuid-v4-or-null>",
   "type": "<message-type-string>",
@@ -128,7 +128,7 @@ Every PDV message — whether sent by the app or by the kernel — has the follo
 
 | Field | Type | Description |
 |---|---|---|
-| `pdv_version` | string | App/package version (e.g. `"0.0.12"`). Both the Electron app and `pdv-python` use their installed version as this value. The app rejects messages with an incompatible major version. |
+| `pdv_version` | string | App/package version (e.g. `"0.0.13"`). Both the Electron app and `pdv-python` use their installed version as this value. The app rejects messages with an incompatible major version. |
 | `msg_id` | string | UUID v4. Unique identifier for this message. |
 | `in_reply_to` | string \| null | The `msg_id` of the request this is responding to. `null` for unsolicited push messages. |
 | `type` | string | Dot-namespaced message type (see Section 3.4). |
@@ -157,10 +157,10 @@ All type strings are namespaced with `pdv.`. The convention is `pdv.<domain>.<ac
 
 | Type | Direction | Description |
 |---|---|---|
-| `pdv.project.load` | app → kernel | Instructs the kernel to load a project from a save directory. |
+| `pdv.project.load` | app → kernel | Instructs the kernel to load a project from a save directory. Payload: `{ save_dir, tree_index_dir? }`. When `tree_index_dir` is present and exists, the kernel reads `tree-index.json` from there instead of `save_dir`; used by autosave recovery to overlay an autosaved tree (see §8.4). |
 | `pdv.project.loaded` | kernel → app | Sent after the tree is fully populated from a project load. No `in_reply_to` (push notification). |
-| `pdv.project.save` | app → kernel | Instructs the kernel to serialize the tree to the save directory. |
-| `pdv.project.save.response` | kernel → app | Confirms save completed. Payload: `{ node_count, checksum, module_owned_files, module_manifests }`. `module_owned_files` lists every file-backed node that belongs to a `PDVModule` (see §5.9) so the main process can mirror working-dir edits into `<saveDir>/modules/<id>/<source_rel_path>`. `module_manifests` carries per-module metadata + module-root-relative node descriptors for writing `pdv-module.json` and `module-index.json` under each module dir. Both fields are empty arrays when the tree contains no `PDVModule` nodes. |
+| `pdv.project.save` | app → kernel | Instructs the kernel to serialize the tree to the save directory. Payload: `{ save_dir, is_autosave?, clear_cache? }`. When `is_autosave: true` the kernel consults its per-node checksum cache and reuses unchanged-data descriptors (see §8.4). `clear_cache: true` wipes the cache before saving (used after the user discards a stale `.autosave/`). |
+| `pdv.project.save.response` | kernel → app | Confirms save completed. Payload: `{ node_count, checksum, module_owned_files, module_manifests, missing_files, autosave_cache_hits }`. `module_owned_files` lists every file-backed node that belongs to a `PDVModule` (see §5.9) so the main process can mirror working-dir edits into `<saveDir>/modules/<id>/<source_rel_path>`. `module_manifests` carries per-module metadata + module-root-relative node descriptors for writing `pdv-module.json` and `module-index.json` under each module dir. Both fields are empty arrays when the tree contains no `PDVModule` nodes. `missing_files` lists tree paths of file-backed nodes whose backing files were missing during serialization; these nodes are skipped rather than pickled. `autosave_cache_hits` reports how many nodes were reused from the cache (only meaningful when the request set `is_autosave: true`). |
 
 #### Tree Messages
 
@@ -505,7 +505,7 @@ pdv/
 
 `pdv.bootstrap()` is called by a bootstrap snippet that the main process sends via `execute_request` (silent mode) from `kernel-session.ts` immediately after the kernel subprocess starts. It:
 1. Registers the `pdv.kernel` comm target with IPython
-2. Injects `pdv_tree` and `pdv` into the IPython user namespace via a custom namespace class that blocks reassignment
+2. Injects `pdv_tree` into the IPython user namespace via a custom namespace class that blocks reassignment
 3. Sends the `pdv.ready` comm message
 
 `bootstrap()` must be idempotent — calling it twice must not open a second comm or re-inject variables.
@@ -516,11 +516,11 @@ The IPython user namespace is replaced with a subclass of `dict` that overrides 
 
 ```python
 class PDVNamespace(dict):
-    _PROTECTED = frozenset({'pdv_tree', 'pdv'})
+    _PROTECTED = frozenset({'pdv_tree'})
 
     def __setitem__(self, key, value):
         if key in self._PROTECTED:
-            raise PDVError(
+            raise PDVProtectedNameError(
                 f"'{key}' is a protected PDV object and cannot be reassigned. "
                 f"Use pdv_tree['key'] = value to store data in the tree."
             )
@@ -531,12 +531,13 @@ This is set via `IPython.get_ipython().user_ns = PDVNamespace(...)` during boots
 
 ### 5.5 User-Facing Names in the Kernel Namespace
 
-After bootstrap, exactly two names are injected into the user namespace:
+After bootstrap, exactly one name is injected into the user namespace:
 
 | Name | Type | Description |
 |---|---|---|
 | `pdv_tree` | `PDVTree` instance | The live project data tree. The sole data authority. |
-| `pdv` | `PDVApp` instance | App-control object. Exposes `pdv.save()`, `pdv.help()`, etc. |
+
+App-level operations (`pdv.save()`, `pdv.help()`, `pdv.add_file()`, etc.) are module-level functions on the `pdv` package itself. Users access them via `import pdv` (or the package is already importable since `pdv-python` is installed). There is no injected `pdv` object — the `pdv` name in the namespace is simply the Python package.
 
 All other `pdv_*` names in the namespace are an error. Internal implementation functions must be unreachable from the user namespace.
 
@@ -731,26 +732,30 @@ PDV has three tiers of module storage:
 
 ### 6.1 Working Directory
 
-The working directory is a temporary directory created by the Electron main process at kernel startup. It is the live filesystem backing for the current session.
+The working directory is created by the Electron main process at kernel startup under `~/.PDV/working/`. It is the live filesystem backing for the current session. Using a persistent, app-managed directory instead of OS temp space prevents silent purging during long-running sessions.
 
-**Creation**: The main process calls `fs.mkdtemp()` (or equivalent) to create a uniquely named directory in the OS temporary directory. The path is passed to the kernel in the `pdv.init` message.
+**Creation**: The main process calls `fs.mkdtemp()` to create a uniquely named directory under `~/.PDV/working/`. A `session.lock` file containing `{ pid, createdAt }` is written so that orphan cleanup on next startup can distinguish active sessions from crashed ones. The working directory path is passed to the kernel in the `pdv.init` message.
 
 **Structure** (UUID-based — see §6.3):
 ```
-/tmp/pdv-<uuid>/
+~/.PDV/working/pdv-<random>/
+    session.lock              ← { pid, createdAt } for orphan detection
+    code-cells.json           ← per-session autosave of the renderer's cell tabs
     tree/
-        a1b2c3d4e5f6/     ← each file-backed node gets its own UUID directory
+        a1b2c3d4e5f6/         ← each file-backed node gets its own UUID directory
             fit_model.py
         f7e8d9c0b1a2/
             ch1.npy
         ...
-    .pdv-work/
-        autosave/     ← reserved for future autosave feature
+    .autosave/                ← present once the autosave timer has fired at least once
+        tree-index.json
+        code-cells.json
+        tree/...
 ```
 
 File-backed tree nodes (scripts, notes, GUIs, namelists, libs, data files) each get a unique 12-hex-character UUID directory under `tree/`. The tree path is decoupled from the filesystem path — renaming or moving a tree node does not require renaming or copying files on disk. See §6.3 for the full UUID storage design.
 
-**Lifecycle**: Created at kernel startup. Deleted on clean shutdown. If the app crashes, the directory is left on disk but is not recovered (crash recovery is out of scope for alpha).
+**Lifecycle**: Created at kernel startup. Deleted on clean shutdown. On next launch, the app scans `~/.PDV/working/` for `pdv-*` directories whose `session.lock` PID is no longer running (or whose lockfile is missing) and removes them as orphans — **except** when the directory contains `.autosave/tree-index.json`. Such orphans are preserved so the welcome screen can offer recovery (see §8.4); Recover or Discard removes the directory afterwards.
 
 **Ownership**: The main process creates it. The kernel writes to it (data files). The main process deletes it.
 
@@ -824,7 +829,7 @@ Each `modules/<id>/` subdirectory is maintained authoritatively by `project:save
 | `schema_version` | string | Semantic version of the project.json format. The app rejects manifests with an incompatible major version. Currently `"1.2"`. |
 | `project_id` | string | UUIDv4 assigned on first save under schema 1.2. Stable across renames and moves. Used by per-project environment bookkeeping (§10.5). 1.1 manifests without this field get one assigned on upgrade. |
 | `saved_at` | string | ISO 8601 timestamp of last save. |
-| `pdv_version` | string | PDV app version used when saving (e.g. `"0.0.12"`). |
+| `pdv_version` | string | PDV app version used when saving (e.g. `"0.0.13"`). |
 | `project_name` | string? | Optional human-readable project name chosen by the user. Displayed in the title bar and recent projects list. Falls back to the directory name when absent (backward compat). |
 | `language` | string | Kernel language: `"python"` or `"julia"`. |
 | `interpreter_path` | string? | Optional path to the interpreter used at save time. Used for pre-selection when `environment.mode == "shared"`; ignored when `environment.mode == "project"`. |
@@ -914,7 +919,7 @@ The tree panel uses **virtualized rendering** (`react-window` `List` component) 
 
 - `TreeNodeRow` is wrapped in `React.memo` with stable props to prevent unnecessary re-renders
 - Expand/collapse discards children (no expansion state persistence across sessions). Re-expanding a node always fetches fresh children from the kernel.
-- After code cell or script execution completes, the tree does a full refresh via `refreshToken` bump
+- After code cell or script execution completes, the renderer bumps `treeRefreshToken` (in `executeImmediate`'s `finally` block) so the tree does a full refetch. This runs **in addition to** push-driven updates and serves as defense in depth for the nested-dict limitation in §7.1.2 — silent sub-tree mutations during a run are caught when the cell finishes.
 - Incremental updates from `pdv.tree.changed` push notifications update only affected subtrees (selective parent re-fetch)
 
 ### 7.1.2 Change Notification Debouncing
@@ -923,7 +928,7 @@ The tree panel uses **virtualized rendering** (`react-window` `List` component) 
 
 All mutating `dict` methods are overridden to emit notifications: `__setitem__`, `__delitem__`, `pop`, `update`, `clear`, `setdefault`, `popitem`, `__ior__` (the `|=` operator). The standard `dict.fromkeys()` classmethod is not overridden because new instances have no comm attached.
 
-**Nested dict limitation**: Only the root `PDVTree` (which has `_send_fn` attached) emits notifications. Sub-dicts accessed via `pdv_tree['path']` are `PDVTree` instances without a comm. Mutations on sub-dicts are silent. The recommended pattern is dot-path access through the root: `pdv_tree.pop('parent.child')` rather than `pdv_tree['parent'].pop('child')`.
+**Nested dict limitation**: Only the root `PDVTree` (which has `_send_fn` attached) emits notifications. Sub-dicts accessed via `pdv_tree['path']` are `PDVTree` instances without a comm. Mutations on sub-dicts are silent. The recommended pattern is dot-path access through the root: `pdv_tree.pop('parent.child')` rather than `pdv_tree['parent'].pop('child')`. Mutations from inside an executing code cell or script are still caught by the post-execute `treeRefreshToken` bump described in §7.1.1, but mutations from comm callbacks or background threads on a sub-tree are lost. The planned fix is to give sub-trees a parent ref so `_emit_changed` can walk to the root and emit with the full dot-path — tracked in [issue #218](https://github.com/matt-pharr/physics-data-viewer/issues/218).
 
 ### 7.2 Node Types
 
@@ -1215,6 +1220,33 @@ See Section 4.2. Note that the console output history is **not** saved or restor
 ### 8.3 Save Directory Layout Invariant
 
 Every file in `tree/` must have a corresponding entry in `tree-index.json`. Files in `tree/` without an index entry are ignored (treated as orphans). The kernel must not rely on filesystem traversal during load — it reads `tree-index.json` only and uses it to reconstruct the tree.
+
+### 8.4 Autosave and Recovery
+
+Autosave protects against losing tree state and code cells when the user forgets to save or PDV crashes. It is a periodic, partial save that writes alongside the canonical save without disturbing it.
+
+**Where autosaves land.** The autosave timer fires from the main process. The renderer responds by handing the current code-cell state back over IPC, then the main process serializes the kernel's tree to a `.autosave/` subdirectory:
+
+- **For an open project** (a save dir is set): writes to `<saveDir>/.autosave/`.
+- **For an unsaved project** (no save dir yet): writes to `<workingDir>/.autosave/`. This is the only path that ever produces orphan recovery candidates.
+
+The contents of `.autosave/` mirror the save-dir layout — `tree-index.json`, `code-cells.json`, and a `tree/` directory of file-backed nodes — so that recovery can use the same load primitives as a normal project open.
+
+**Incremental serialization.** The kernel keeps an in-memory `_autosave_cache: dict[tree_path, (digest, descriptor)]` (see `pdv-python/pdv/handlers/project.py`). The cache is consulted *and* updated on every save — autosave and explicit. On an explicit save it ends up populated with `(digest, descriptor)` pairs whose descriptors point at canonical UUIDs in `<saveDir>/tree/`; the next autosave then hits the cache for unchanged data nodes, returns the canonical descriptor (so its `tree-index.json` references the canonical UUID), and skips writing duplicate file contents under `<saveDir>/.autosave/tree/`. Only nodes that genuinely changed since the last save get a fresh UUID and a new file. The cache is reset only when the user explicitly clears autosave data from Settings (signalled via `clear_cache: true` on the next save) or on kernel shutdown.
+
+The cache covers in-memory data kinds — ndarray, DataFrame, Series, scalar, text, mapping, sequence, binary. File-backed kinds (PDVScript, PDVLib, PDVNote, PDVGui, PDVNamelist, PDVFile) bypass the cache and `smart_copy` their backing file on every autosave; the per-file copy is cheap because `smart_copy` is reflink/CoW where the filesystem supports it.
+
+**Save / autosave serialization.** Both `IPC.project.save` and `IPC.autosave.run` acquire a single FIFO mutex inside `ProjectManager` (`runWithSaveLock`). When the autosave timer fires while an explicit save is in flight, the autosave queues until the save finishes. When the user clicks Save while an autosave is in flight, Save queues the same way. Combined with the kernel-busy deferral via `consumeAutosavePending`, this means autosave never overlaps an explicit save's main-process post-save side effects (manifest writes, module mirror).
+
+**Two recovery flows.**
+
+1. **Recovery on project open.** When the user opens a project that has a `<saveDir>/.autosave/` younger than (or independent of) the canonical save, the renderer prompts: "Restore autosaved changes?" If yes, the main process copies any file-backed nodes from `.autosave/` into the kernel working dir and calls `projectManager.load(saveDir, { treeIndexDir: <saveDir>/.autosave, codeCellsDir: <saveDir>/.autosave })`. The kernel reads `tree-index.json` from the override directory; everything else (the `save_dir` argument, the kernel's `_set_save_dir`) is unchanged. After a successful load the `.autosave/` directory is cleared.
+
+2. **Recovery on welcome screen (unsaved sessions).** When the welcome screen renders, the renderer calls `IPC.autosave.scanWorkingDirs`, which lists `pdv-*` subdirectories of the working-dir base that contain `.autosave/tree-index.json`. Each entry is shown under "Recoverable Unsaved Sessions" with a Recover and a Discard button.
+    - **Recover** starts the kernel (deferring via the welcome-screen pending-action ref if needed), then calls `IPC.autosave.recoverUnsaved(orphanDir)`. The handler copies file-backed nodes from `<orphan>/.autosave/` into the new kernel's working dir, calls `projectManager.load(workingDir, { treeIndexDir: …, codeCellsDir: … })`, mirrors `code-cells.json`, runs module setup, and then deletes the orphan directory. The renderer leaves `currentProjectDir = null` so the project remains in the unsaved state — the user is expected to Save As to keep it.
+    - **Discard** calls `IPC.autosave.deleteOrphan(orphanDir)`, which removes the directory wholesale.
+
+**Status bar feedback.** After every successful autosave, the status bar shows "Autosaved at HH:MM:SS" (left of the checksum diamond). The timestamp clears when the user opens a different project; the next autosave repopulates it.
 
 ---
 

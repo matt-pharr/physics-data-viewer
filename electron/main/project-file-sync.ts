@@ -77,6 +77,45 @@ async function readFileBackedEntries(dir: string): Promise<FileBackedEntry[]> {
  * @returns Nothing.
  * @throws {Error} When directory creation fails.
  */
+/**
+ * Overlay autosaved file-backed-node files on top of a working directory.
+ *
+ * Used by the saved-project recovery flow when the user opts to "restore
+ * autosaved changes." After {@link copyFilesForLoad} has populated the
+ * working dir from `<saveDir>/tree/`, this helper recursively copies
+ * whatever exists under `<autosaveDir>/tree/` over the same destination
+ * tree — overwriting only the UUIDs the autosave actually wrote new files
+ * for. Cache-hit UUIDs (whose canonical files live in `<saveDir>/tree/`)
+ * are deliberately *not* listed in `<autosaveDir>/tree/` and so are left
+ * alone here, which is the correct behaviour: the canonical file copied
+ * by `copyFilesForLoad` is already what we want.
+ *
+ * Distinct from `copyFilesForLoad`: that variant reads tree-index.json
+ * and copies a known list of UUIDs, surfacing missing files as warnings
+ * to the user. For an overlay, missing files (cache hits) aren't an
+ * error, so directory-style copy is the right primitive.
+ *
+ * @param autosaveDir - Source `.autosave/` directory.
+ * @param workingDir - Destination kernel working directory.
+ * @returns Nothing. Quietly no-ops if `<autosaveDir>/tree/` doesn't exist.
+ * @throws {Error} For any I/O error other than ENOENT on the source root.
+ */
+export async function overlayAutosaveTreeFiles(
+  autosaveDir: string,
+  workingDir: string,
+): Promise<void> {
+  const src = path.join(autosaveDir, "tree");
+  const dst = path.join(workingDir, "tree");
+  try {
+    await fs.cp(src, dst, { recursive: true, force: true });
+  } catch (err) {
+    const code = (err as NodeJS.ErrnoException)?.code;
+    if (code !== "ENOENT") throw err;
+    // .autosave/tree/ doesn't exist — every data node hit the cache and no
+    // fresh writes happened since the last explicit save. Nothing to overlay.
+  }
+}
+
 export async function copyFilesForLoad(
   saveDir: string,
   workingDir: string,
