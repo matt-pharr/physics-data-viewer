@@ -315,7 +315,13 @@ def serialize_node(
     autosave_cache : dict or None
         When provided, data nodes (ndarray, DataFrame, etc.) are
         checksum-compared against previous autosave results. Unchanged
-        nodes reuse their cached UUID and skip file I/O.
+        nodes reuse their cached UUID and skip file I/O. The dict is
+        mutated in place with ``{tree_path: (digest, descriptor)}``
+        entries on every miss.
+    autosave_hits : list[int] or None
+        Optional one-element counter; ``autosave_hits[0]`` is incremented
+        on every cache hit. Lets callers report cache effectiveness in
+        autosave logs. Ignored when ``autosave_cache`` is None.
 
     Returns
     -------

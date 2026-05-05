@@ -332,6 +332,13 @@ export interface PDVInitResponsePayload {
 export interface PDVProjectLoadPayload {
   /** Absolute path to the project save directory. */
   save_dir: string;
+  /**
+   * Optional override directory for `tree-index.json`. When set and the
+   * directory exists, the kernel reads the index from here instead of from
+   * `save_dir`. Used by autosave recovery to overlay autosaved tree state
+   * on top of (or in lieu of) the last persisted save.
+   */
+  tree_index_dir?: string;
 }
 
 /** Payload for pdv.project.loaded push notification (kernel → app). */
@@ -364,6 +371,13 @@ export interface PDVProjectSaveResponsePayload {
   node_count: number;
   /** SHA-256 checksum of the written tree-index.json. */
   checksum: string;
+  /**
+   * Number of nodes that reused a cached descriptor instead of being
+   * re-serialized. Meaningful only when the request set `is_autosave: true`.
+   */
+  autosave_cache_hits?: number;
+  /** Tree paths whose backing files were missing at save time. */
+  missing_files?: string[];
 }
 
 // ---------------------------------------------------------------------------

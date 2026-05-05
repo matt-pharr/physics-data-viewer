@@ -157,10 +157,10 @@ All type strings are namespaced with `pdv.`. The convention is `pdv.<domain>.<ac
 
 | Type | Direction | Description |
 |---|---|---|
-| `pdv.project.load` | app → kernel | Instructs the kernel to load a project from a save directory. |
+| `pdv.project.load` | app → kernel | Instructs the kernel to load a project from a save directory. Payload: `{ save_dir, tree_index_dir? }`. When `tree_index_dir` is present and exists, the kernel reads `tree-index.json` from there instead of `save_dir`; used by autosave recovery to overlay an autosaved tree (see §8.4). |
 | `pdv.project.loaded` | kernel → app | Sent after the tree is fully populated from a project load. No `in_reply_to` (push notification). |
-| `pdv.project.save` | app → kernel | Instructs the kernel to serialize the tree to the save directory. |
-| `pdv.project.save.response` | kernel → app | Confirms save completed. Payload: `{ node_count, checksum, module_owned_files, module_manifests, missing_files }`. `module_owned_files` lists every file-backed node that belongs to a `PDVModule` (see §5.9) so the main process can mirror working-dir edits into `<saveDir>/modules/<id>/<source_rel_path>`. `module_manifests` carries per-module metadata + module-root-relative node descriptors for writing `pdv-module.json` and `module-index.json` under each module dir. Both fields are empty arrays when the tree contains no `PDVModule` nodes. `missing_files` lists tree paths of file-backed nodes whose backing files were missing during serialization; these nodes are skipped rather than pickled. |
+| `pdv.project.save` | app → kernel | Instructs the kernel to serialize the tree to the save directory. Payload: `{ save_dir, is_autosave?, clear_cache? }`. When `is_autosave: true` the kernel consults its per-node checksum cache and reuses unchanged-data descriptors (see §8.4). `clear_cache: true` wipes the cache before saving (used after the user discards a stale `.autosave/`). |
+| `pdv.project.save.response` | kernel → app | Confirms save completed. Payload: `{ node_count, checksum, module_owned_files, module_manifests, missing_files, autosave_cache_hits }`. `module_owned_files` lists every file-backed node that belongs to a `PDVModule` (see §5.9) so the main process can mirror working-dir edits into `<saveDir>/modules/<id>/<source_rel_path>`. `module_manifests` carries per-module metadata + module-root-relative node descriptors for writing `pdv-module.json` and `module-index.json` under each module dir. Both fields are empty arrays when the tree contains no `PDVModule` nodes. `missing_files` lists tree paths of file-backed nodes whose backing files were missing during serialization; these nodes are skipped rather than pickled. `autosave_cache_hits` reports how many nodes were reused from the cache (only meaningful when the request set `is_autosave: true`). |
 
 #### Tree Messages
 
@@ -740,19 +740,22 @@ The working directory is created by the Electron main process at kernel startup 
 ```
 ~/.PDV/working/pdv-<random>/
     session.lock              ← { pid, createdAt } for orphan detection
+    code-cells.json           ← per-session autosave of the renderer's cell tabs
     tree/
         a1b2c3d4e5f6/         ← each file-backed node gets its own UUID directory
             fit_model.py
         f7e8d9c0b1a2/
             ch1.npy
         ...
-    .pdv-work/
-        autosave/     ← reserved for future autosave feature
+    .autosave/                ← present once the autosave timer has fired at least once
+        tree-index.json
+        code-cells.json
+        tree/...
 ```
 
 File-backed tree nodes (scripts, notes, GUIs, namelists, libs, data files) each get a unique 12-hex-character UUID directory under `tree/`. The tree path is decoupled from the filesystem path — renaming or moving a tree node does not require renaming or copying files on disk. See §6.3 for the full UUID storage design.
 
-**Lifecycle**: Created at kernel startup. Deleted on clean shutdown. On next launch, the app scans `~/.PDV/working/` for `pdv-*` directories whose `session.lock` PID is no longer running (or whose lockfile is missing) and removes them as orphans.
+**Lifecycle**: Created at kernel startup. Deleted on clean shutdown. On next launch, the app scans `~/.PDV/working/` for `pdv-*` directories whose `session.lock` PID is no longer running (or whose lockfile is missing) and removes them as orphans — **except** when the directory contains `.autosave/tree-index.json`. Such orphans are preserved so the welcome screen can offer recovery (see §8.4); Recover or Discard removes the directory afterwards.
 
 **Ownership**: The main process creates it. The kernel writes to it (data files). The main process deletes it.
 
@@ -1217,6 +1220,29 @@ See Section 4.2. Note that the console output history is **not** saved or restor
 ### 8.3 Save Directory Layout Invariant
 
 Every file in `tree/` must have a corresponding entry in `tree-index.json`. Files in `tree/` without an index entry are ignored (treated as orphans). The kernel must not rely on filesystem traversal during load — it reads `tree-index.json` only and uses it to reconstruct the tree.
+
+### 8.4 Autosave and Recovery
+
+Autosave protects against losing tree state and code cells when the user forgets to save or PDV crashes. It is a periodic, partial save that writes alongside the canonical save without disturbing it.
+
+**Where autosaves land.** The autosave timer fires from the main process. The renderer responds by handing the current code-cell state back over IPC, then the main process serializes the kernel's tree to a `.autosave/` subdirectory:
+
+- **For an open project** (a save dir is set): writes to `<saveDir>/.autosave/`.
+- **For an unsaved project** (no save dir yet): writes to `<workingDir>/.autosave/`. This is the only path that ever produces orphan recovery candidates.
+
+The contents of `.autosave/` mirror the save-dir layout — `tree-index.json`, `code-cells.json`, and a `tree/` directory of file-backed nodes — so that recovery can use the same load primitives as a normal project open.
+
+**Incremental serialization.** The kernel keeps an in-memory `_autosave_cache: dict[tree_path, (digest, descriptor)]` (see `pdv-python/pdv/handlers/project.py`). On an autosave run (`is_autosave: true`), each data node's content digest is recomputed and compared against the cached value; matches reuse the cached descriptor and skip the file write. Explicit (non-autosave) saves always reset the cache so the next autosave runs against a fresh baseline. The cache is also reset when the user discards an autosave from Settings, signalled via `clear_cache: true` on the next save.
+
+**Two recovery flows.**
+
+1. **Recovery on project open.** When the user opens a project that has a `<saveDir>/.autosave/` younger than (or independent of) the canonical save, the renderer prompts: "Restore autosaved changes?" If yes, the main process copies any file-backed nodes from `.autosave/` into the kernel working dir and calls `projectManager.load(saveDir, { treeIndexDir: <saveDir>/.autosave, codeCellsDir: <saveDir>/.autosave })`. The kernel reads `tree-index.json` from the override directory; everything else (the `save_dir` argument, the kernel's `_set_save_dir`) is unchanged. After a successful load the `.autosave/` directory is cleared.
+
+2. **Recovery on welcome screen (unsaved sessions).** When the welcome screen renders, the renderer calls `IPC.autosave.scanWorkingDirs`, which lists `pdv-*` subdirectories of the working-dir base that contain `.autosave/tree-index.json`. Each entry is shown under "Recoverable Unsaved Sessions" with a Recover and a Discard button.
+    - **Recover** starts the kernel (deferring via the welcome-screen pending-action ref if needed), then calls `IPC.autosave.recoverUnsaved(orphanDir)`. The handler copies file-backed nodes from `<orphan>/.autosave/` into the new kernel's working dir, calls `projectManager.load(workingDir, { treeIndexDir: …, codeCellsDir: … })`, mirrors `code-cells.json`, runs module setup, and then deletes the orphan directory. The renderer leaves `currentProjectDir = null` so the project remains in the unsaved state — the user is expected to Save As to keep it.
+    - **Discard** calls `IPC.autosave.deleteOrphan(orphanDir)`, which removes the directory wholesale.
+
+**Status bar feedback.** After every successful autosave, the status bar shows "Autosaved at HH:MM:SS" (left of the checksum diamond). The timestamp clears when the user opens a different project; the next autosave repopulates it.
 
 ---
 

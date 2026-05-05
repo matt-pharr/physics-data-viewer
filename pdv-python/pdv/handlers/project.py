@@ -4,13 +4,22 @@ pdv.handlers.project — Handlers for PDV project messages.
 Handles:
 - ``pdv.project.load``: load a project from a save directory. Reads
   ``tree-index.json``, rebuilds the in-memory tree structure, sends
-  ``pdv.project.loaded`` push.
+  ``pdv.project.loaded`` push. Accepts an optional ``tree_index_dir``
+  override so autosave recovery can load from ``.autosave/`` instead.
 - ``pdv.project.save``: serialize the current tree to a save directory.
   Sends ``pdv.project.save.response`` with node count and checksum.
+  Accepts ``is_autosave`` and ``clear_cache`` flags that drive the
+  per-node checksum cache used by autosave runs.
+
+This module also owns :data:`_autosave_cache`, the in-memory map
+``{tree_path: (digest, descriptor)}`` consulted on autosave saves.
+Explicit (non-autosave) saves reset the cache; the cache also resets on
+kernel shutdown.
 
 See Also
 --------
-ARCHITECTURE.md §4.2 (project load sequence), §8 (save and load)
+ARCHITECTURE.md §4.2 (project load sequence), §8 (save and load), §8.4
+(autosave and recovery).
 """
 
 from __future__ import annotations
@@ -76,6 +85,15 @@ def _collect_nodes(
         Mutable list that collects tree paths of file-backed nodes whose
         backing files were missing. If provided, missing-file errors skip
         the node instead of falling back to pickle.
+    autosave_cache : dict, optional
+        Per-node checksum cache shared across calls. When provided, data
+        nodes whose digest matches the cached value reuse the previous
+        descriptor (and its UUID/file) instead of being re-serialized.
+        Pass the module-level :data:`_autosave_cache` to participate in
+        the in-memory cache used by autosave runs.
+    autosave_hits : list, optional
+        Single-element counter incremented once per cache hit. Used by
+        the autosave handler to log cache effectiveness.
 
     Returns
     -------
@@ -588,7 +606,18 @@ def handle_project_load(msg: dict) -> None:
     ----------------
     .. code-block:: json
 
-        { "save_dir": "/path/to/project" }
+        {
+          "save_dir": "/path/to/project",
+          "tree_index_dir": "/path/to/.autosave"  // optional
+        }
+
+    When ``tree_index_dir`` is provided and exists, ``tree-index.json``
+    is read from it instead of from ``save_dir``. This is how autosave
+    recovery overlays an autosaved tree on top of (or in lieu of) the
+    last persisted save: the main process copies any file-backed nodes
+    into the kernel's working dir, then asks the kernel to load the
+    autosaved index. File-backed nodes are still resolved via the
+    kernel's working dir, not the save dir.
 
     Parameters
     ----------
@@ -723,12 +752,19 @@ def serialize_tree_to_dir(
         Absolute path to the project save directory.
     on_progress : callable, optional
         ``(phase, current, total)`` callback for UI progress reporting.
+    autosave_cache : dict, optional
+        Per-node checksum cache to share across successive serialize calls.
+        Pass the module-level :data:`_autosave_cache` from this module to
+        let an autosave run skip re-serializing unchanged data nodes.
+        Pass ``None`` for explicit (full) saves.
 
     Returns
     -------
     dict
         ``{"node_count", "checksum", "module_owned_files", "module_manifests",
-        "missing_files"}``.
+        "missing_files", "autosave_cache_hits"}``. ``autosave_cache_hits``
+        is the number of nodes that reused a cached descriptor; meaningful
+        only when ``autosave_cache`` was provided.
 
     Raises
     ------
@@ -806,13 +842,33 @@ def handle_project_save(msg: dict) -> None:
     ----------------
     .. code-block:: json
 
-        { "save_dir": "/path/to/project" }
+        {
+          "save_dir": "/path/to/project",
+          "is_autosave": false,    // optional, default false
+          "clear_cache": false     // optional, default false
+        }
+
+    When ``is_autosave`` is true, the module-level :data:`_autosave_cache`
+    is consulted and updated so unchanged data nodes can skip
+    re-serialization. Explicit (non-autosave) saves always reset the
+    cache after completion so the next autosave starts from a clean
+    baseline against the canonical save. When ``clear_cache`` is true
+    (sent by ``IPC.autosave.clear`` from the main process) the cache is
+    wiped *before* the save runs — used after a stale ``.autosave/`` is
+    discarded by the user.
 
     Response payload
     ----------------
     .. code-block:: json
 
-        { "node_count": 42, "checksum": "<sha256-of-tree-index.json>" }
+        {
+          "node_count": 42,
+          "checksum": "<sha256-of-tree-index.json>",
+          "autosave_cache_hits": 0,
+          "module_owned_files": [...],
+          "module_manifests": [...],
+          "missing_files": [...]
+        }
 
     Parameters
     ----------

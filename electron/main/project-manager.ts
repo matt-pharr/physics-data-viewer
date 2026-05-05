@@ -449,6 +449,14 @@ export class ProjectManager {
    * before calling this method, and for running module setup after.
    *
    * @param saveDir - Absolute path to the project directory.
+   * @param options - Optional overrides used by autosave recovery.
+   *   - `treeIndexDir`: forwarded to the kernel as `tree_index_dir`. The
+   *     kernel reads `tree-index.json` from this directory instead of from
+   *     `saveDir`. Used to overlay autosaved tree state on top of (or in
+   *     lieu of) the last persisted save.
+   *   - `codeCellsDir`: directory to read `code-cells.json` from. Defaults
+   *     to `saveDir`. Used so an autosaved code-cell snapshot can be
+   *     recovered alongside the autosaved tree.
    * @returns The code-cell state and post-load checksum from the kernel.
    * @throws {PDVCommError} When the kernel responds with status='error'.
    */
