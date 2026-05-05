@@ -654,9 +654,11 @@ def handle_project_load(msg: dict) -> None:
         # Recovery flow asked us to overlay an autosave dir that no longer
         # exists (e.g. cleared between copyFilesForLoad and the load comm).
         # Falling back silently would hide the recovery failure, so log it.
-        print(
-            f"[pdv.project.load] tree_index_dir override missing, "
-            f"falling back to save_dir: '{tree_index_dir}'"
+        import logging  # noqa: PLC0415
+
+        logging.getLogger("pdv").warning(
+            "tree_index_dir override missing, falling back to save_dir: '%s'",
+            tree_index_dir,
         )
     index_source = tree_index_dir if tree_index_dir and os.path.isdir(tree_index_dir) else save_dir
     tree_index_path = os.path.join(index_source, "tree-index.json")
