@@ -28,6 +28,7 @@ import { CommRouter } from "./comm-router";
 import {
   PDVMessageType,
   getAppVersion,
+  type PDVProjectLoadPayload,
   type PDVProjectLoadResponsePayload,
   type PDVProjectSaveResponsePayload,
 } from "./pdv-protocol";
@@ -482,7 +483,7 @@ export class ProjectManager {
     // Step 2 — send pdv.project.load comm.
     // The request resolves when the kernel sends pdv.project.load.response.
     // Use progress pushes as keep-alive to prevent timeout during large loads.
-    const payload: Record<string, string> = { save_dir: saveDir };
+    const payload: PDVProjectLoadPayload = { save_dir: saveDir };
     if (options?.treeIndexDir) {
       payload.tree_index_dir = options.treeIndexDir;
     }
@@ -798,8 +799,13 @@ export class ProjectManager {
           results.push({ dir: dirPath, timestamp: check.timestamp });
         }
       }
-    } catch {
-      // workingDirBase doesn't exist or isn't readable — no autosaves
+    } catch (err) {
+      // ENOENT is the common case (no working-dir base yet). Log other errors
+      // (e.g. EACCES) so a misconfigured base doesn't silently look "empty".
+      const code = (err as NodeJS.ErrnoException)?.code;
+      if (code !== "ENOENT") {
+        console.warn(`[scanForAutosaves] failed to read ${workingDirBase}:`, err);
+      }
     }
     return results;
   }

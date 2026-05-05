@@ -32,7 +32,12 @@ from pdv.handlers import register
 
 # In-memory autosave checksum cache. Maps tree_path → (digest_bytes, descriptor).
 # Allows subsequent autosaves to skip serialization for unchanged data nodes.
-# Cleared on explicit save and on kernel shutdown.
+# Populated by both explicit save and autosave; cleared only on user-initiated
+# `clear_cache` (Settings → Clear, decline-restore-on-load) and kernel shutdown.
+# TODO: stale entries for deleted tree paths accumulate for the kernel lifetime.
+# A long session that creates and deletes many large arrays will grow this dict
+# without bound. Consider pruning paths that aren't in the just-serialized tree
+# at the end of each save (cheap: set difference against the tree's path set).
 _autosave_cache: dict[str, tuple[bytes, dict]] = {}
 
 
@@ -645,6 +650,14 @@ def handle_project_load(msg: dict) -> None:
         )
         return
 
+    if tree_index_dir and not os.path.isdir(tree_index_dir):
+        # Recovery flow asked us to overlay an autosave dir that no longer
+        # exists (e.g. cleared between copyFilesForLoad and the load comm).
+        # Falling back silently would hide the recovery failure, so log it.
+        print(
+            f"[pdv.project.load] tree_index_dir override missing, "
+            f"falling back to save_dir: '{tree_index_dir}'"
+        )
     index_source = tree_index_dir if tree_index_dir and os.path.isdir(tree_index_dir) else save_dir
     tree_index_path = os.path.join(index_source, "tree-index.json")
     if not os.path.exists(tree_index_path):
