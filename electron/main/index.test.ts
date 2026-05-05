@@ -323,6 +323,10 @@ function setup() {
     setAutosavePending: vi.fn(),
     consumeAutosavePending: vi.fn(() => false),
     autosave: vi.fn(async () => null),
+    // Save mutex used by both IPC.project.save and IPC.autosave.run.
+    // The mock just runs fn immediately; tests that need to assert FIFO
+    // ordering can spy on this directly.
+    runWithSaveLock: vi.fn(<T,>(fn: () => Promise<T>) => fn()),
   } as unknown as ProjectManager;
 
   const configState: PDVConfig = {
@@ -2132,12 +2136,41 @@ describe("Step 5 IPC handlers", () => {
     await expect(recover({}, "/tmp/orphan")).rejects.toThrow(/no active kernel/i);
   });
 
-  it("autosave:run returns { saved: false } when there is no working dir", async () => {
+  it("autosave:run returns { saved: false } and warns when there is no working dir", async () => {
     setup();
     const run = getHandler(IPC.autosave.run);
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+
     // No kernel started, no project loaded — handler must short-circuit.
     const result = await run({}, { tabs: [], activeTabId: 1 });
+
     expect(result).toEqual({ saved: false });
+    expect(warnSpy).toHaveBeenCalledWith(
+      expect.stringMatching(/\[autosave\] skipped/),
+    );
+    warnSpy.mockRestore();
+  });
+
+  it("autosave:run acquires the shared save lock", async () => {
+    const { projectManager } = setup();
+    const start = getHandler(IPC.kernels.start);
+    await start({}, { language: "python" });
+
+    const run = getHandler(IPC.autosave.run);
+    await run({}, { tabs: [], activeTabId: 1 });
+
+    expect(projectManager.runWithSaveLock).toHaveBeenCalled();
+  });
+
+  it("project:save acquires the shared save lock", async () => {
+    const { projectManager } = setup();
+    const start = getHandler(IPC.kernels.start);
+    await start({}, { language: "python" });
+
+    const save = getHandler(IPC.project.save);
+    await save({}, "/tmp/save", { tabs: [], activeTabId: 1 });
+
+    expect(projectManager.runWithSaveLock).toHaveBeenCalled();
   });
 
   it("autosave:deleteOrphan refuses to remove the active session's working dir", async () => {

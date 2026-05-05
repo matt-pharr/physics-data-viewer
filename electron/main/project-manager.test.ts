@@ -554,4 +554,49 @@ describe("ProjectManager", () => {
       }
     });
   });
+
+  // -------------------------------------------------------------------------
+  // runWithSaveLock() — shared FIFO mutex for save and autosave
+  // -------------------------------------------------------------------------
+
+  describe("runWithSaveLock()", () => {
+    it("runs work serially in submission order", async () => {
+      const { router } = makeMockRouter();
+      const pm = new ProjectManager(router);
+      const events: string[] = [];
+
+      const a = pm.runWithSaveLock(async () => {
+        events.push("a:start");
+        await new Promise((r) => setTimeout(r, 10));
+        events.push("a:end");
+        return "a";
+      });
+      const b = pm.runWithSaveLock(async () => {
+        events.push("b:start");
+        events.push("b:end");
+        return "b";
+      });
+
+      const [ra, rb] = await Promise.all([a, b]);
+      expect(ra).toBe("a");
+      expect(rb).toBe("b");
+      // b must not start until a has fully finished.
+      expect(events).toEqual(["a:start", "a:end", "b:start", "b:end"]);
+    });
+
+    it("releases the lock and proceeds when fn throws", async () => {
+      const { router } = makeMockRouter();
+      const pm = new ProjectManager(router);
+
+      await expect(
+        pm.runWithSaveLock(async () => {
+          throw new Error("boom");
+        }),
+      ).rejects.toThrow(/boom/);
+
+      // The next caller must still be able to acquire the lock and finish.
+      const result = await pm.runWithSaveLock(async () => "ok");
+      expect(result).toBe("ok");
+    });
+  });
 });

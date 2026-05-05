@@ -8,13 +8,15 @@ Handles:
   override so autosave recovery can load from ``.autosave/`` instead.
 - ``pdv.project.save``: serialize the current tree to a save directory.
   Sends ``pdv.project.save.response`` with node count and checksum.
-  Accepts ``is_autosave`` and ``clear_cache`` flags that drive the
-  per-node checksum cache used by autosave runs.
+  Accepts a ``clear_cache`` flag for explicit cache reset (sent by the
+  main process when the user discards autosave data).
 
 This module also owns :data:`_autosave_cache`, the in-memory map
-``{tree_path: (digest, descriptor)}`` consulted on autosave saves.
-Explicit (non-autosave) saves reset the cache; the cache also resets on
-kernel shutdown.
+``{tree_path: (digest, descriptor)}`` consulted on every save. Explicit
+saves populate it with canonical-UUID descriptors so the next autosave
+hits the cache and writes file contents only for nodes that genuinely
+changed. The cache is reset only when ``clear_cache=True`` is sent or on
+kernel shutdown (module reload).
 
 See Also
 --------
@@ -848,14 +850,17 @@ def handle_project_save(msg: dict) -> None:
           "clear_cache": false     // optional, default false
         }
 
-    When ``is_autosave`` is true, the module-level :data:`_autosave_cache`
-    is consulted and updated so unchanged data nodes can skip
-    re-serialization. Explicit (non-autosave) saves always reset the
-    cache after completion so the next autosave starts from a clean
-    baseline against the canonical save. When ``clear_cache`` is true
-    (sent by ``IPC.autosave.clear`` from the main process) the cache is
-    wiped *before* the save runs — used after a stale ``.autosave/`` is
-    discarded by the user.
+    The module-level :data:`_autosave_cache` is consulted and updated on
+    every save (autosave *and* explicit). On an explicit save it ends up
+    populated with ``(digest, descriptor)`` pairs whose descriptors point
+    at canonical UUIDs in ``<save_dir>/tree/``; the next autosave then
+    finds those entries on cache hit and skips writing duplicate file
+    contents under ``<saveDir>/.autosave/tree/``. ``is_autosave`` remains
+    part of the wire spec for forward compatibility but the kernel no
+    longer differentiates behaviour based on it. The user-facing
+    ``clear_cache`` flag (sent by ``IPC.autosave.clear`` from the main
+    process when the user clears autosave data) is the explicit reset
+    path: the cache is wiped *before* the save runs.
 
     Response payload
     ----------------
@@ -881,7 +886,11 @@ def handle_project_save(msg: dict) -> None:
     msg_id = msg.get("msg_id")
     payload = msg.get("payload", {})
     save_dir = payload.get("save_dir", "")
-    is_autosave = payload.get("is_autosave", False)
+    # `is_autosave` is still part of the wire spec for forward compatibility
+    # but the kernel no longer behaves differently based on it: the cache is
+    # always passed to the serializer (so explicit saves populate it for the
+    # next autosave) and the user-facing `clear_cache` flag is the sole reset
+    # path. See ARCHITECTURE.md §8.4.
     clear_cache = payload.get("clear_cache", False)
 
     if clear_cache:
@@ -912,10 +921,16 @@ def handle_project_save(msg: dict) -> None:
             {"operation": "save", "phase": phase, "current": current, "total": total},
         )
 
-    cache = _autosave_cache if is_autosave else None
+    # Always pass the cache. On explicit save it gets populated with
+    # `(digest, descriptor)` entries pointing at canonical UUIDs under
+    # `<save_dir>/tree/`; the next autosave then hits the cache and only
+    # writes file contents for nodes that genuinely changed since the last
+    # save (rather than duplicating the whole data tree under
+    # `<saveDir>/.autosave/tree/`). The user-facing `clear_cache` flag above
+    # remains the explicit reset path. See ARCHITECTURE.md §8.4.
     try:
         results = serialize_tree_to_dir(
-            tree, save_dir, on_progress=_progress, autosave_cache=cache,
+            tree, save_dir, on_progress=_progress, autosave_cache=_autosave_cache,
         )
     except Exception as exc:  # noqa: BLE001
         import sys  # noqa: PLC0415
@@ -929,9 +944,6 @@ def handle_project_save(msg: dict) -> None:
             in_reply_to=msg_id,
         )
         return
-
-    if not is_autosave:
-        _autosave_cache = {}
 
     send_message(
         "pdv.project.save.response",

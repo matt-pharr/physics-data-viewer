@@ -306,6 +306,52 @@ class TestAutosaveCache:
         assert a["uuid"] != b["uuid"]
         assert set(cache.keys()) == {"a", "b"}
 
+    def test_cache_populated_by_explicit_save_persists_into_autosave(self, tmp_path):
+        """Two-phase test mirroring the saved-project disk-doubling fix.
+
+        First call simulates an explicit save: cache empty on entry, gets
+        populated with `(digest, descriptor)` entries. Second call
+        simulates a follow-up autosave that shares the same cache; every
+        unchanged data node should hit the cache (no fresh write to the
+        autosave dir, descriptor reused — referencing the original UUID).
+        """
+        np = pytest.importorskip("numpy")
+        from pdv.serialization import serialize_node
+
+        save_dir = str(tmp_path / "save")
+        autosave_dir = str(tmp_path / "save" / ".autosave")
+
+        cache: dict = {}
+        hits = [0]
+        arr = np.array([1.0, 2.0, 3.0])
+
+        # Explicit-save phase: writes under save_dir, populates cache.
+        first = serialize_node(
+            "x", arr, save_dir, autosave_cache=cache, autosave_hits=hits
+        )
+        assert hits[0] == 0  # first call always misses
+        assert "x" in cache
+
+        # Autosave phase: cache has an entry from the explicit save. With
+        # the same array value, this is a cache hit and the returned
+        # descriptor still references the canonical (save_dir) UUID — so
+        # autosave's tree-index references the canonical file and avoids
+        # writing a duplicate copy under autosave_dir/tree/.
+        second = serialize_node(
+            "x", arr, autosave_dir, autosave_cache=cache, autosave_hits=hits
+        )
+        assert hits[0] == 1
+        assert second["uuid"] == first["uuid"]
+
+        # The autosave dir must NOT have a tree/ subdir for this node — the
+        # whole point of the fix is that we skip the write when the cache
+        # hits.
+        import os
+        autosave_tree = os.path.join(autosave_dir, "tree", second["uuid"])
+        assert not os.path.exists(autosave_tree), (
+            f"autosave duplicated the canonical file at {autosave_tree}"
+        )
+
 
 class TestRoundtrip:
     def test_roundtrip(self, tmp_path):

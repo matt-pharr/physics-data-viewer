@@ -27,11 +27,8 @@ import { EnvironmentDetector } from "./environment-detector";
 import { buildEditorSpawn, resolveEditorSpawn } from "./editor-spawn";
 import { registerKernelIpcHandlers } from "./ipc-register-kernels";
 import { registerModulesIpcHandlers } from "./ipc-register-modules";
-import {
-  registerProjectIpcHandlers,
-  syncModuleOwnedFilesToSaveDir,
-  writeModuleManifestsToSaveDir,
-} from "./ipc-register-project";
+import { registerProjectIpcHandlers } from "./ipc-register-project";
+import { mirrorAutosaveSidecars, autosaveDirFor } from "./autosave-sidecars";
 import { KernelManager } from "./kernel-manager";
 import { ModuleManager } from "./module-manager";
 import {
@@ -44,7 +41,6 @@ import {
   type ProjectModuleImport,
   type ModuleOwnedFile,
   type ModuleManifestBundle,
-  type ProjectManifest,
 } from "./project-manager";
 import { ConfigStore, DEFAULT_AUTOSAVE_INTERVAL_S } from "./config";
 import { registerAppStateIpcHandlers } from "./ipc-register-app-state";
@@ -691,51 +687,43 @@ export function registerIpcHandlers(
 
   ipcMain.handle(IPC.autosave.run, async (_event, codeCells: unknown) => {
     const baseDir = activeProjectDir || kernelWorkingDirs.get(activeKernelId ?? "");
-    if (!baseDir) return { saved: false };
-    const autosaveDir = path.join(baseDir, ".autosave");
-    const result = await projectManager.autosave(autosaveDir, codeCells as CodeCellData);
-    if (result === null) return { saved: false };
-
-    // Mirror module-owned working-dir files and module manifests into the
-    // autosave dir so unsaved-session recovery can restore them. For saved
-    // projects this is partly redundant with the canonical save dir, but
-    // doing it unconditionally avoids special-casing and keeps `.autosave/`
-    // self-sufficient as a recovery source. See ARCHITECTURE.md §8.4.
-    await syncModuleOwnedFilesToSaveDir(autosaveDir, result.moduleOwnedFiles);
-    await writeModuleManifestsToSaveDir(autosaveDir, result.moduleManifests, moduleManager);
-
-    // Persist a project.json snapshot so setupProjectModuleNamespaces can
-    // rebind imported modules during recovery. For a saved project we copy
-    // the canonical manifest verbatim; for an unsaved project we synthesize
-    // one from the in-memory pending-imports state.
-    let manifest: ProjectManifest | null = null;
-    if (activeProjectDir) {
-      try {
-        manifest = await ProjectManager.readManifest(activeProjectDir);
-      } catch {
-        // Manifest unreadable — fall through to synthesizing one below.
-      }
-    }
-    if (!manifest) {
-      manifest = {
-        schema_version: "1.1",
-        saved_at: new Date().toISOString(),
-        pdv_version: app.getVersion(),
-        tree_checksum: result.checksum,
-        language: activeKernelId
-          ? (kernelManager.getKernel(activeKernelId)?.language ?? "python")
-          : "python",
-        modules: [...pendingModuleImports],
-        module_settings: { ...pendingModuleSettings },
-      };
-    }
-    try {
-      await ProjectManager.saveManifest(autosaveDir, manifest);
-    } catch (err) {
-      console.warn("[autosave] failed to write project.json snapshot", err);
+    if (!baseDir) {
+      console.warn(
+        "[autosave] skipped: no active project dir or kernel working dir",
+      );
+      return { saved: false };
     }
 
-    return { saved: true };
+    // Snapshot the in-memory module-import state up front. The autosave is
+    // about to await a kernel comm + several disk writes; if a `modules:*`
+    // IPC mutates `pendingModuleImports` mid-flight the synthesized manifest
+    // could be torn. (Also belt-and-suspenders against the save-lock below.)
+    const importsSnapshot = [...pendingModuleImports];
+    const settingsSnapshot = { ...pendingModuleSettings };
+    const language: "python" | "julia" = activeKernelId
+      ? (kernelManager.getKernel(activeKernelId)?.language ?? "python")
+      : "python";
+
+    return projectManager.runWithSaveLock(async () => {
+      const autosaveDir = autosaveDirFor(baseDir);
+      const result = await projectManager.autosave(autosaveDir, codeCells as CodeCellData);
+      if (result === null) return { saved: false };
+
+      await mirrorAutosaveSidecars(
+        autosaveDir,
+        result,
+        {
+          activeProjectDir,
+          pendingImports: importsSnapshot,
+          pendingSettings: settingsSnapshot,
+          language,
+          pdvVersion: app.getVersion(),
+        },
+        moduleManager,
+      );
+
+      return { saved: true };
+    });
   });
 
   ipcMain.handle(IPC.autosave.clear, async (_event, dir?: string) => {

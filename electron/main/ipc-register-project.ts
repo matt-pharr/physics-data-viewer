@@ -29,7 +29,7 @@ import {
   type ProjectManifest,
   type ProjectModuleImport,
 } from "./project-manager";
-import { copyFilesForLoad } from "./project-file-sync";
+import { copyFilesForLoad, overlayAutosaveTreeFiles } from "./project-file-sync";
 import {
   writeModuleIndex,
   writeModuleManifest,
@@ -243,9 +243,12 @@ export function registerProjectIpcHandlers(
     onExplicitSaveCompleted,
   } = options;
 
-  // Serialize concurrent saves so a rapid second call waits for the first to
-  // finish rather than racing on the filesystem and kernel shell channel.
-  let activeSave: Promise<unknown> = Promise.resolve();
+  // Serialization of concurrent saves and autosaves is done by the shared
+  // `projectManager.runWithSaveLock` mutex (see ProjectManager). Both the
+  // IPC.project.save handler below and the IPC.autosave.run handler in
+  // electron/main/index.ts acquire the same lock so a rapid second save
+  // waits for the first to finish, and autosave never overlaps an
+  // explicit save.
   let saveSeq = 0;
 
   ipcMain.handle(
@@ -335,10 +338,8 @@ export function registerProjectIpcHandlers(
         };
       };
 
-      // Chain behind any in-flight save so they never overlap.
-      const queued = activeSave.then(doSave, doSave);
-      activeSave = queued.catch(() => {});
-      return queued;
+      // Chain behind any in-flight save or autosave so they never overlap.
+      return projectManager.runWithSaveLock(doSave);
     }
   );
 
@@ -363,10 +364,14 @@ export function registerProjectIpcHandlers(
         } : undefined;
         // Baseline: copy from the main save dir
         loadFailedPaths = await copyFilesForLoad(saveDir, workingDir, onProgress);
-        // Overlay: copy autosaved files on top (changed nodes take precedence)
+        // Overlay: copy any files the autosave wrote on top. Uses a directory
+        // copy rather than tree-index-driven copy because the autosave's
+        // tree-index can reference cache-hit canonical UUIDs whose files only
+        // exist under <saveDir>/tree/ (already copied above) — those would
+        // ENOENT under the prior copyFilesForLoad-based overlay and surface
+        // as bogus "missing files" warnings. See ARCHITECTURE.md §8.4.
         if (restoreFromAutosave) {
-          const autosaveFailedPaths = await copyFilesForLoad(autosaveDir, workingDir, onProgress);
-          loadFailedPaths.push(...autosaveFailedPaths);
+          await overlayAutosaveTreeFiles(autosaveDir, workingDir);
         }
         if (loadFailedPaths.length > 0) {
           console.warn(

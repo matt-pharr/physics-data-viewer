@@ -580,6 +580,42 @@ export class ProjectManager {
   }
 
   // -------------------------------------------------------------------------
+  // Save / autosave mutex
+  // -------------------------------------------------------------------------
+
+  /**
+   * FIFO queue chained off a single shared promise. Both explicit save and
+   * autosave acquire it via {@link runWithSaveLock}, so the kernel only ever
+   * sees one `pdv.project.save` request at a time and the main-side post-save
+   * side effects (manifest writes, module mirror) never interleave between
+   * the two paths.
+   */
+  private saveQueue: Promise<unknown> = Promise.resolve();
+
+  /**
+   * Run *fn* serially with respect to all other save and autosave operations.
+   *
+   * Used by both the IPC.project.save handler and the IPC.autosave.run
+   * handler so explicit user saves and autosave timer ticks queue rather
+   * than overlap. Errors thrown by *fn* are surfaced to the caller, but
+   * the queue continues with the next waiter regardless.
+   *
+   * @param fn - Async work to run while holding the save lock.
+   * @returns Whatever *fn* returns.
+   */
+  async runWithSaveLock<T>(fn: () => Promise<T>): Promise<T> {
+    const prior = this.saveQueue;
+    let release!: () => void;
+    this.saveQueue = new Promise<void>((r) => { release = r; });
+    try {
+      await prior.catch(() => {});
+      return await fn();
+    } finally {
+      release();
+    }
+  }
+
+  // -------------------------------------------------------------------------
   // Autosave
   // -------------------------------------------------------------------------
 
