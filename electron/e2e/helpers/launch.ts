@@ -27,6 +27,12 @@ export interface LaunchOptions {
   preferences?: Record<string, unknown>;
   /** Extra env vars merged into the launched Electron process. */
   env?: Record<string, string>;
+  /**
+   * Hook fired after the temp HOME and `<HOME>/.PDV/preferences.json` are
+   * created but before Electron is spawned. Use this to seed orphan working
+   * dirs, recent project lists pointing at fixtures on disk, etc.
+   */
+  onBeforeLaunch?: (homeDir: string) => Promise<void>;
 }
 
 export interface LaunchedApp {
@@ -92,6 +98,9 @@ export async function launchPDV(opts: LaunchOptions = {}): Promise<LaunchedApp> 
   const homeDir = await fs.mkdtemp(path.join(os.tmpdir(), "pdv-e2e-home-"));
   await seedPreferences(homeDir, pythonPath, opts.preferences);
   await fs.mkdir(MPL_CACHE_DIR, { recursive: true });
+  if (opts.onBeforeLaunch) {
+    await opts.onBeforeLaunch(homeDir);
+  }
 
   // Pass "." rather than "dist/main/bootstrap.js" so Electron resolves
   // package.json (and `app.getVersion()`) from the project root. Passing the
