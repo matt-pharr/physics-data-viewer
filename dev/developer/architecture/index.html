@@ -1686,6 +1686,17 @@
   
 </li>
         
+          <li class="md-nav__item">
+  <a href="#742-poll-safety-net" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        7.4.2 Poll (safety net)
+      
+    </span>
+  </a>
+  
+</li>
+        
       </ul>
     </nav>
   
@@ -3168,6 +3179,17 @@
   
 </li>
         
+          <li class="md-nav__item">
+  <a href="#742-poll-safety-net" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        7.4.2 Poll (safety net)
+      
+    </span>
+  </a>
+  
+</li>
+        
       </ul>
     </nav>
   
@@ -3868,7 +3890,7 @@
 
 
 <h1 id="pdv-architecture-document">PDV Architecture Document<a class="headerlink" href="#pdv-architecture-document" title="Permanent link">&para;</a></h1>
-<p><strong>Version</strong>: 0.0.12
+<p><strong>Version</strong>: 0.0.13
 <strong>Date</strong>: 2026-04-07
 <strong>Status</strong>: Authoritative design specification. All new code must conform to this document. Deviations require updating this document first.</p>
 <blockquote>
@@ -3977,7 +3999,7 @@
 <h3 id="32-message-envelope">3.2 Message Envelope<a class="headerlink" href="#32-message-envelope" title="Permanent link">&para;</a></h3>
 <p>Every PDV message — whether sent by the app or by the kernel — has the following JSON structure:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="p">{</span>
-<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="w">  </span><span class="nt">&quot;pdv_version&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;0.0.12&quot;</span><span class="p">,</span>
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="w">  </span><span class="nt">&quot;pdv_version&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;0.0.13&quot;</span><span class="p">,</span>
 <a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="w">  </span><span class="nt">&quot;msg_id&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;&lt;uuid-v4&gt;&quot;</span><span class="p">,</span>
 <a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="w">  </span><span class="nt">&quot;in_reply_to&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;&lt;uuid-v4-or-null&gt;&quot;</span><span class="p">,</span>
 <a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a><span class="w">  </span><span class="nt">&quot;type&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;&lt;message-type-string&gt;&quot;</span><span class="p">,</span>
@@ -3997,7 +4019,7 @@
 <tr>
 <td><code>pdv_version</code></td>
 <td>string</td>
-<td>App/package version (e.g. <code>"0.0.12"</code>). Both the Electron app and <code>pdv-python</code> use their installed version as this value. The app rejects messages with an incompatible major version.</td>
+<td>App/package version (e.g. <code>"0.0.13"</code>). Both the Electron app and <code>pdv-python</code> use their installed version as this value. The app rejects messages with an incompatible major version.</td>
 </tr>
 <tr>
 <td><code>msg_id</code></td>
@@ -4133,7 +4155,7 @@
 <tr>
 <td><code>pdv.tree.changed</code></td>
 <td>kernel → app</td>
-<td>Push notification. Sent when tree structure changes. Payload: <code>{ changed_paths: string[], change_type: "added" \| "removed" \| "updated" \| "batch" }</code>. Notifications are <strong>debounced</strong> (100ms): rapid mutations are batched into a single notification with <code>change_type: "batch"</code> and all affected paths. No <code>in_reply_to</code>.</td>
+<td>Push notification. Sent when tree structure changes. Payload: <code>{ changed_paths: string[], change_type: "added" \| "removed" \| "updated" \| "batch" \| "unknown" }</code>. Notifications are <strong>debounced</strong> (100ms): rapid mutations are batched into a single notification with <code>change_type: "batch"</code> and all affected paths. Mutations on a <strong>non-root <code>PDVTree</code></strong> (intermediate sub-tree, or a scratch instance the user constructed and is mutating before assigning into the root) emit <code>change_type: "unknown"</code> with empty <code>changed_paths</code>, signalling that the renderer should do a full refresh. No <code>in_reply_to</code>. See §7.4 for the full propagation contract.</td>
 </tr>
 </tbody>
 </table>
@@ -4852,7 +4874,7 @@
 <tr>
 <td><code>pdv_version</code></td>
 <td>string</td>
-<td>PDV app version used when saving (e.g. <code>"0.0.12"</code>).</td>
+<td>PDV app version used when saving (e.g. <code>"0.0.13"</code>).</td>
 </tr>
 <tr>
 <td><code>project_name</code></td>
@@ -4976,7 +4998,7 @@
 <a id="__codelineno-14-35" name="__codelineno-14-35" href="#__codelineno-14-35"></a>
 <a id="__codelineno-14-36" name="__codelineno-14-36" href="#__codelineno-14-36"></a>All mutating `dict` methods are overridden to emit notifications: `__setitem__`, `__delitem__`, `pop`, `update`, `clear`, `setdefault`, `popitem`, `__ior__` (the `|=` operator). The standard `dict.fromkeys()` classmethod is not overridden because new instances have no comm attached.
 <a id="__codelineno-14-37" name="__codelineno-14-37" href="#__codelineno-14-37"></a>
-<a id="__codelineno-14-38" name="__codelineno-14-38" href="#__codelineno-14-38"></a>**Nested dict limitation**: Only the root `PDVTree` (which has `_send_fn` attached) emits notifications. Sub-dicts accessed via `pdv_tree[&#39;path&#39;]` are `PDVTree` instances without a comm. Mutations on sub-dicts are silent. The recommended pattern is dot-path access through the root: `pdv_tree.pop(&#39;parent.child&#39;)` rather than `pdv_tree[&#39;parent&#39;].pop(&#39;child&#39;)`. Mutations from inside an executing code cell or script are still caught by the post-execute `treeRefreshToken` bump described in §7.1.1, but mutations from comm callbacks or background threads on a sub-tree are lost. The planned fix is to give sub-trees a parent ref so `_emit_changed` can walk to the root and emit with the full dot-path — tracked in [issue #218](https://github.com/matt-pharr/physics-data-viewer/issues/218).
+<a id="__codelineno-14-38" name="__codelineno-14-38" href="#__codelineno-14-38"></a>**Non-root PDVTree mutations**: Only the root `PDVTree` (which has `_send_fn` attached) can emit precise-path notifications, because absolute paths are only known relative to the root. Sub-trees accessed via `pdv_tree[&#39;path&#39;]` and scratch `PDVTree` instances the user constructs locally have no awareness of their parent. To keep the renderer in sync without parent pointers or aliasing bookkeeping, every `PDVTree` instance — root or not — falls back on a class-level &quot;global ping&quot; channel. Mutations on a non-root `PDVTree` fire a single coarse `change_type: &quot;unknown&quot;` notification (with empty `changed_paths`) that signals the renderer to do a full refresh-with-expansion. The class-level send_fn is registered alongside the root&#39;s `_send_fn` in `_attach_comm` and torn down in `_detach_comm`. Plain `dict` values stored in the tree (`pdv_tree[&#39;data&#39;] = {&#39;x&#39;: 1}`) bypass this entirely — they have no emission machinery — and are caught by the 1 Hz safety-net poll instead (see §7.4).
 <a id="__codelineno-14-39" name="__codelineno-14-39" href="#__codelineno-14-39"></a>
 <a id="__codelineno-14-40" name="__codelineno-14-40" href="#__codelineno-14-40"></a>### 7.2 Node Types
 <a id="__codelineno-14-41" name="__codelineno-14-41" href="#__codelineno-14-41"></a>
@@ -5224,26 +5246,38 @@
 <td><code>true</code> if a custom <code>@pdv.handle()</code> handler is registered for this node's type.</td>
 </tr>
 <tr>
-<td><div class="highlight"><pre><span></span><code><a id="__codelineno-24-1" name="__codelineno-24-1" href="#__codelineno-24-1"></a>### 7.4 Tree-Changed Push Notifications
+<td><div class="highlight"><pre><span></span><code><a id="__codelineno-24-1" name="__codelineno-24-1" href="#__codelineno-24-1"></a>### 7.4 Tree-Update Propagation
 <a id="__codelineno-24-2" name="__codelineno-24-2" href="#__codelineno-24-2"></a>
-<a id="__codelineno-24-3" name="__codelineno-24-3" href="#__codelineno-24-3"></a>Whenever the tree structure changes — a node is added, deleted, or its value updated — the kernel emits a `pdv.tree.changed` push notification:
+<a id="__codelineno-24-3" name="__codelineno-24-3" href="#__codelineno-24-3"></a>Tree changes propagate to the renderer by two complementary mechanisms — push notifications for snappy live updates, and a 1 Hz poll as a safety net for mutations that bypass push.
 <a id="__codelineno-24-4" name="__codelineno-24-4" href="#__codelineno-24-4"></a>
-<a id="__codelineno-24-5" name="__codelineno-24-5" href="#__codelineno-24-5"></a>```json
-<a id="__codelineno-24-6" name="__codelineno-24-6" href="#__codelineno-24-6"></a>{
-<a id="__codelineno-24-7" name="__codelineno-24-7" href="#__codelineno-24-7"></a>  &quot;type&quot;: &quot;pdv.tree.changed&quot;,
-<a id="__codelineno-24-8" name="__codelineno-24-8" href="#__codelineno-24-8"></a>  &quot;status&quot;: &quot;ok&quot;,
-<a id="__codelineno-24-9" name="__codelineno-24-9" href="#__codelineno-24-9"></a>  &quot;payload&quot;: {
-<a id="__codelineno-24-10" name="__codelineno-24-10" href="#__codelineno-24-10"></a>    &quot;changed_paths&quot;: [&quot;data.waveforms.ch1&quot;],
-<a id="__codelineno-24-11" name="__codelineno-24-11" href="#__codelineno-24-11"></a>    &quot;change_type&quot;: &quot;added | removed | updated&quot;
-<a id="__codelineno-24-12" name="__codelineno-24-12" href="#__codelineno-24-12"></a>  }
-<a id="__codelineno-24-13" name="__codelineno-24-13" href="#__codelineno-24-13"></a>}
+<a id="__codelineno-24-5" name="__codelineno-24-5" href="#__codelineno-24-5"></a>#### 7.4.1 Push (primary)
+<a id="__codelineno-24-6" name="__codelineno-24-6" href="#__codelineno-24-6"></a>
+<a id="__codelineno-24-7" name="__codelineno-24-7" href="#__codelineno-24-7"></a>Whenever the tree structure changes — a node is added, deleted, or its value updated — the kernel emits a `pdv.tree.changed` push notification:
+<a id="__codelineno-24-8" name="__codelineno-24-8" href="#__codelineno-24-8"></a>
+<a id="__codelineno-24-9" name="__codelineno-24-9" href="#__codelineno-24-9"></a>```json
+<a id="__codelineno-24-10" name="__codelineno-24-10" href="#__codelineno-24-10"></a>{
+<a id="__codelineno-24-11" name="__codelineno-24-11" href="#__codelineno-24-11"></a>  &quot;type&quot;: &quot;pdv.tree.changed&quot;,
+<a id="__codelineno-24-12" name="__codelineno-24-12" href="#__codelineno-24-12"></a>  &quot;status&quot;: &quot;ok&quot;,
+<a id="__codelineno-24-13" name="__codelineno-24-13" href="#__codelineno-24-13"></a>  &quot;payload&quot;: {
+<a id="__codelineno-24-14" name="__codelineno-24-14" href="#__codelineno-24-14"></a>    &quot;changed_paths&quot;: [&quot;data.waveforms.ch1&quot;],
+<a id="__codelineno-24-15" name="__codelineno-24-15" href="#__codelineno-24-15"></a>    &quot;change_type&quot;: &quot;added&quot; | &quot;removed&quot; | &quot;updated&quot; | &quot;batch&quot; | &quot;unknown&quot;
+<a id="__codelineno-24-16" name="__codelineno-24-16" href="#__codelineno-24-16"></a>  }
+<a id="__codelineno-24-17" name="__codelineno-24-17" href="#__codelineno-24-17"></a>}
 </code></pre></div></td>
 <td></td>
 <td></td>
 </tr>
 </tbody>
 </table>
-<p>The renderer subscribes to these notifications and refreshes the relevant subtree of the tree panel. The renderer does <strong>not</strong> poll for tree changes.</p>
+<p>Mutations on the <strong>root</strong> <code>PDVTree</code> emit precise paths via the per-instance debounced queue (§7.1.2). Mutations on <strong>any other</strong> <code>PDVTree</code> (intermediate sub-trees, scratch instances) emit <code>change_type: "unknown"</code> with empty <code>changed_paths</code> via a class-level global channel — local paths can't be reconciled with the renderer's absolute view, so the renderer responds with a full refresh-with-expansion. Both channels share the 100 ms debounce.</p>
+<h4 id="742-poll-safety-net">7.4.2 Poll (safety net)<a class="headerlink" href="#742-poll-safety-net" title="Permanent link">&para;</a></h4>
+<p>The renderer also polls. Every second, the Tree component fetches fresh <code>pdv.tree.list</code> results for the root and every currently expanded subtree, structurally compares each child list against the rendered state (path / key / type / hasChildren / preview), and triggers a full reload only when it detects drift. Most ticks find no change and are effectively free, since <code>pdv.tree.list</code> is served by the kernel's dedicated read-only thread (<code>pdv.query_server</code>, §3.1) and doesn't block on user-code execution.</p>
+<p>The poll exists to catch mutations that push cannot see — primarily plain-<code>dict</code> values stored in the tree, which have no emission machinery. The user-facing contract is therefore:</p>
+<ul>
+<li>Mutations on <code>PDVTree</code> values are reflected in the tree panel within ~100 ms.</li>
+<li>Mutations on plain <code>dict</code> values stored in the tree are reflected within ~1 s.</li>
+</ul>
+<p>This is the trade we accept to avoid silently coercing user-supplied <code>dict</code> values into <code>PDVTree</code> at assignment time, which would change the type of stored values out from under the user.</p>
 <hr />
 <h2 id="8-project-save-and-load">8. Project Save and Load<a class="headerlink" href="#8-project-save-and-load" title="Permanent link">&para;</a></h2>
 <h3 id="81-save-sequence">8.1 Save Sequence<a class="headerlink" href="#81-save-sequence" title="Permanent link">&para;</a></h3>
