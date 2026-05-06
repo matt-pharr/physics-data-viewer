@@ -46,9 +46,7 @@ class TestHandleInit:
             patch.object(comms_mod, "_pdv_tree", tree),
         ):
             handle_init(msg)
-        assert (
-            tree._working_dir == tmp_working_dir or tree._working_dir is not None
-        )  # may be realpath-resolved
+        assert tree._working_dir == tmp_working_dir
 
     def test_valid_init_sends_ok_response(self, tmp_working_dir):
         """A valid pdv.init sends pdv.init.response with status=ok."""
