@@ -398,10 +398,19 @@ export interface PDVTreeGetPayload {
 
 /** Payload for pdv.tree.changed push notification (kernel → app). */
 export interface PDVTreeChangedPayload {
-  /** Dot-paths of changed nodes. */
+  /** Dot-paths of changed nodes. Empty when change_type is "unknown". */
   changed_paths: string[];
-  /** Type of change. */
-  change_type: "added" | "removed" | "updated" | "batch";
+  /**
+   * Type of change.
+   *
+   * "added" | "removed" | "updated" | "batch": precise notifications from
+   * the root tree.
+   *
+   * "unknown": a non-root PDVTree mutated (paths are local to that subtree
+   * and cannot be reconciled to the root, so the renderer should do a full
+   * refresh).
+   */
+  change_type: "added" | "removed" | "updated" | "batch" | "unknown";
 }
 
 // ---------------------------------------------------------------------------

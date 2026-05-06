@@ -175,6 +175,71 @@ class TestChangeNotification:
         assert set(payload["changed_paths"]) == {"imports", "imports.mesh"}
 
 
+class TestGlobalPing:
+    """Tests for the class-level "global ping" emitted by non-root PDVTrees.
+
+    Mutations on detached or sub-tree PDVTree instances cannot emit precise
+    paths (their local path has no relationship to the root tree), so they
+    fire a coarse ``change_type: "unknown"`` notification that the renderer
+    treats as "refetch the visible tree."
+    """
+
+    def test_subtree_mutation_emits_unknown(self, tree_with_comm, mock_send):
+        """Mutating an intermediate PDVTree fires a global unknown ping."""
+        tree_with_comm["a.b"] = 0
+        tree_with_comm._flush_changes()
+        mock_send.reset_mock()
+
+        # Mutate the sub-tree directly, bypassing the root.
+        sub = tree_with_comm["a"]
+        assert isinstance(sub, PDVTree)
+        sub["c"] = 99
+        PDVTree._flush_global()
+
+        mock_send.assert_called_once()
+        msg_type, payload = mock_send.call_args[0]
+        assert msg_type == "pdv.tree.changed"
+        assert payload["change_type"] == "unknown"
+        assert payload["changed_paths"] == []
+
+    def test_detached_tree_mutation_emits_unknown(self, tree_with_comm, mock_send):
+        """A scratch PDVTree the user constructs locally also pings."""
+        tree_with_comm._flush_changes()
+        mock_send.reset_mock()
+
+        scratch = PDVTree()
+        scratch["x"] = 1
+        PDVTree._flush_global()
+
+        mock_send.assert_called_once()
+        _, payload = mock_send.call_args[0]
+        assert payload["change_type"] == "unknown"
+
+    def test_root_mutation_does_not_fire_global(self, tree_with_comm, mock_send):
+        """Root-tree mutations use precise paths, not the global ping."""
+        tree_with_comm["x"] = 1
+        tree_with_comm._flush_changes()
+        # Global timer should not have been scheduled.
+        PDVTree._flush_global()
+        # Only the precise-path emit should have fired.
+        msg_types = [call[0][0] for call in mock_send.call_args_list]
+        assert msg_types.count("pdv.tree.changed") == 1
+        _, payload = mock_send.call_args[0]
+        assert payload["change_type"] == "batch"
+
+    def test_detach_clears_global_state(self, tmp_working_dir, mock_send):
+        """Detaching the root tree silences future global pings."""
+        tree = PDVTree()
+        tree._set_working_dir(tmp_working_dir)
+        tree._attach_comm(mock_send)
+        tree._detach_comm()
+
+        scratch = PDVTree()
+        scratch["x"] = 1
+        PDVTree._flush_global()
+        mock_send.assert_not_called()
+
+
 class TestMutatingDictMethods:
     """Tests for dict methods that must emit change notifications."""
 

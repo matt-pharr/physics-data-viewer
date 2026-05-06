@@ -63,6 +63,15 @@ export function useKernelSubscriptions({
     }
 
     const unsubscribeTree = window.pdv.tree.onChanged((payload) => {
+      // "unknown" comes from non-root PDVTree mutations (intermediate
+      // sub-trees, scratch trees) where the local path can't be mapped to
+      // the renderer's absolute view. Trigger a full refresh-with-expansion
+      // instead of trying to reconcile changed_paths.
+      if (payload.change_type === "unknown") {
+        setTreeRefreshToken((prev) => prev + 1);
+        setModulesRefreshToken((prev) => prev + 1);
+        return;
+      }
       // Notify Tree for selective (incremental) update instead of a full reload.
       onTreeChanged({
         changed_paths: payload.changed_paths,

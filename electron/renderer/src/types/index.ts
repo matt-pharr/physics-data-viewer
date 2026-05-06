@@ -163,5 +163,15 @@ export interface TreeNodeData
 /** Describes a tree change pushed from the kernel. */
 export interface TreeChangeInfo {
   changed_paths: string[];
-  change_type: 'added' | 'removed' | 'updated' | 'batch';
+  /**
+   * Granularity of the change.
+   *
+   * - ``added`` / ``removed`` / ``updated``: precise per-path notifications
+   *   from the root tree.
+   * - ``batch``: multiple precise paths coalesced under one debounce window.
+   * - ``unknown``: a non-root ``PDVTree`` mutated, or a 1 Hz poll detected
+   *   drift; ``changed_paths`` is empty and the consumer should do a full
+   *   refresh.
+   */
+  change_type: 'added' | 'removed' | 'updated' | 'batch' | 'unknown';
 }
