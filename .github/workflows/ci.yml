@@ -143,7 +143,7 @@ jobs:
           python-version: "3.11"
 
       - name: Install Python dependencies
-        run: pip install ipykernel "pdv-python/[dev]"
+        run: pip install ipykernel "pdv-python/[dev]" matplotlib numpy
 
       - name: Install Node dependencies
         working-directory: electron
