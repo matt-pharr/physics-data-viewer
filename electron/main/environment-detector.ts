@@ -23,7 +23,7 @@ import * as path from "path";
 import * as os from "os";
 import * as fs from "fs";
 import { BrowserWindow } from "electron";
-import { getAppVersion } from "./pdv-protocol";
+import { coreVersion, getAppVersion } from "./pdv-protocol";
 
 const execFileAsync = promisify(execFile);
 
@@ -308,10 +308,12 @@ export class EnvironmentDetector {
       );
       const version = stdout.trim();
       // During 0.x, require an exact version match. Post-1.0 this could
-      // relax to major-version compatibility.
+      // relax to major-version compatibility. Compare cores so that
+      // setuptools' normalization (`0.1.0-rc1` → `0.1.0rc1`) doesn't make
+      // matching electron + pdv-python builds look incompatible.
       // NOTE: Same version policy is enforced in pdv-protocol.ts
       // (checkVersionCompatibility) and pdv/comms.py (check_version).
-      const compatible = version === getAppVersion();
+      const compatible = coreVersion(version) === coreVersion(getAppVersion());
       return { installed: true, version, compatible };
     } catch {
       return { installed: false, version: null, compatible: false };
@@ -538,7 +540,7 @@ export class EnvironmentDetector {
     const appVersion = getAppVersion();
     let pdvVersionMismatch = false;
     if (pdvStatus.installed && pdvStatus.version && appVersion) {
-      pdvVersionMismatch = pdvStatus.version !== appVersion;
+      pdvVersionMismatch = coreVersion(pdvStatus.version) !== coreVersion(appVersion);
     }
 
     return {
