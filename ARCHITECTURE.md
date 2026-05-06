@@ -172,7 +172,7 @@ All type strings are namespaced with `pdv.`. The convention is `pdv.<domain>.<ac
 | `pdv.tree.get.response` | kernel → app | Returns node value (may be lazy-loaded from save directory). |
 | `pdv.tree.resolve_file` | app → kernel | Resolve a file-backed tree node (PDVFile subclass) to its absolute filesystem path. Payload: `{ path }`. |
 | `pdv.tree.resolve_file.response` | kernel → app | Returns `{ path, file_path }` where `file_path` is the absolute path on disk. |
-| `pdv.tree.changed` | kernel → app | Push notification. Sent when tree structure changes. Payload: `{ changed_paths: string[], change_type: "added" \| "removed" \| "updated" \| "batch" }`. Notifications are **debounced** (100ms): rapid mutations are batched into a single notification with `change_type: "batch"` and all affected paths. No `in_reply_to`. |
+| `pdv.tree.changed` | kernel → app | Push notification. Sent when tree structure changes. Payload: `{ changed_paths: string[], change_type: "added" \| "removed" \| "updated" \| "batch" \| "unknown" }`. Notifications are **debounced** (100ms): rapid mutations are batched into a single notification with `change_type: "batch"` and all affected paths. Mutations on a **non-root `PDVTree`** (intermediate sub-tree, or a scratch instance the user constructed and is mutating before assigning into the root) emit `change_type: "unknown"` with empty `changed_paths`, signalling that the renderer should do a full refresh. No `in_reply_to`. See §7.4 for the full propagation contract. |
 
 #### Namespace Messages
 
@@ -928,7 +928,7 @@ The tree panel uses **virtualized rendering** (`react-window` `List` component) 
 
 All mutating `dict` methods are overridden to emit notifications: `__setitem__`, `__delitem__`, `pop`, `update`, `clear`, `setdefault`, `popitem`, `__ior__` (the `|=` operator). The standard `dict.fromkeys()` classmethod is not overridden because new instances have no comm attached.
 
-**Nested dict limitation**: Only the root `PDVTree` (which has `_send_fn` attached) emits notifications. Sub-dicts accessed via `pdv_tree['path']` are `PDVTree` instances without a comm. Mutations on sub-dicts are silent. The recommended pattern is dot-path access through the root: `pdv_tree.pop('parent.child')` rather than `pdv_tree['parent'].pop('child')`. Mutations from inside an executing code cell or script are still caught by the post-execute `treeRefreshToken` bump described in §7.1.1, but mutations from comm callbacks or background threads on a sub-tree are lost. The planned fix is to give sub-trees a parent ref so `_emit_changed` can walk to the root and emit with the full dot-path — tracked in [issue #218](https://github.com/matt-pharr/physics-data-viewer/issues/218).
+**Non-root PDVTree mutations**: Only the root `PDVTree` (which has `_send_fn` attached) can emit precise-path notifications, because absolute paths are only known relative to the root. Sub-trees accessed via `pdv_tree['path']` and scratch `PDVTree` instances the user constructs locally have no awareness of their parent. To keep the renderer in sync without parent pointers or aliasing bookkeeping, every `PDVTree` instance — root or not — falls back on a class-level "global ping" channel. Mutations on a non-root `PDVTree` fire a single coarse `change_type: "unknown"` notification (with empty `changed_paths`) that signals the renderer to do a full refresh-with-expansion. The class-level send_fn is registered alongside the root's `_send_fn` in `_attach_comm` and torn down in `_detach_comm`. Plain `dict` values stored in the tree (`pdv_tree['data'] = {'x': 1}`) bypass this entirely — they have no emission machinery — and are caught by the 1 Hz safety-net poll instead (see §7.4).
 
 ### 7.2 Node Types
 
@@ -1136,7 +1136,11 @@ Additional fields present at top level for specific types:
 | `has_handler` | boolean | `true` if a custom `@pdv.handle()` handler is registered for this node's type. |
 ```
 
-### 7.4 Tree-Changed Push Notifications
+### 7.4 Tree-Update Propagation
+
+Tree changes propagate to the renderer by two complementary mechanisms — push notifications for snappy live updates, and a 1 Hz poll as a safety net for mutations that bypass push.
+
+#### 7.4.1 Push (primary)
 
 Whenever the tree structure changes — a node is added, deleted, or its value updated — the kernel emits a `pdv.tree.changed` push notification:
 
@@ -1146,12 +1150,23 @@ Whenever the tree structure changes — a node is added, deleted, or its value u
   "status": "ok",
   "payload": {
     "changed_paths": ["data.waveforms.ch1"],
-    "change_type": "added | removed | updated"
+    "change_type": "added" | "removed" | "updated" | "batch" | "unknown"
   }
 }
 ```
 
-The renderer subscribes to these notifications and refreshes the relevant subtree of the tree panel. The renderer does **not** poll for tree changes.
+Mutations on the **root** `PDVTree` emit precise paths via the per-instance debounced queue (§7.1.2). Mutations on **any other** `PDVTree` (intermediate sub-trees, scratch instances) emit `change_type: "unknown"` with empty `changed_paths` via a class-level global channel — local paths can't be reconciled with the renderer's absolute view, so the renderer responds with a full refresh-with-expansion. Both channels share the 100 ms debounce.
+
+#### 7.4.2 Poll (safety net)
+
+The renderer also polls. Every second, the Tree component fetches fresh `pdv.tree.list` results for the root and every currently expanded subtree, structurally compares each child list against the rendered state (path / key / type / hasChildren / preview), and triggers a full reload only when it detects drift. Most ticks find no change and are effectively free, since `pdv.tree.list` is served by the kernel's dedicated read-only thread (`pdv.query_server`, §3.1) and doesn't block on user-code execution.
+
+The poll exists to catch mutations that push cannot see — primarily plain-`dict` values stored in the tree, which have no emission machinery. The user-facing contract is therefore:
+
+- Mutations on `PDVTree` values are reflected in the tree panel within ~100 ms.
+- Mutations on plain `dict` values stored in the tree are reflected within ~1 s.
+
+This is the trade we accept to avoid silently coercing user-supplied `dict` values into `PDVTree` at assignment time, which would change the type of stored values out from under the user.
 
 ---
 

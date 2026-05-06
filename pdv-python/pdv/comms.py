@@ -23,6 +23,7 @@ ARCHITECTURE.md §5.3 (bootstrap)
 
 from __future__ import annotations
 
+import re
 import sys
 import threading
 import uuid
@@ -31,6 +32,20 @@ from typing import Any
 from pdv.errors import PDVVersionError
 
 from pdv import __version__ as PDV_PROTOCOL_VERSION
+
+_CORE_VERSION_RE = re.compile(r"^(\d+)\.(\d+)\.(\d+)")
+
+
+def _core_version(v: str) -> str:
+    """Return the leading ``major.minor.patch`` of a version string.
+
+    Discards any prerelease/build suffix (e.g. ``-rc1``, ``rc1``,
+    ``+build``). Mirrors ``coreVersion`` in ``electron/main/pdv-protocol.ts``;
+    used so that setuptools' normalization (``0.1.0-rc1`` → ``0.1.0rc1``)
+    doesn't make matching electron + pdv-python builds look incompatible.
+    """
+    m = _CORE_VERSION_RE.match(v)
+    return f"{m.group(1)}.{m.group(2)}.{m.group(3)}" if m else v
 
 PDV_COMM_TARGET = "pdv.kernel"
 
@@ -149,20 +164,22 @@ def check_version(msg: dict) -> None:
         logged but tolerated. See ARCHITECTURE.md §3.6.
     """
     incoming = str(msg.get("pdv_version", ""))
-    expected_parts = PDV_PROTOCOL_VERSION.split(".")
-    incoming_parts = incoming.split(".") if incoming else []
-    expected_major = expected_parts[0] if expected_parts else "0"
-    incoming_major = incoming_parts[0] if incoming_parts else ""
+    expected_core = _core_version(PDV_PROTOCOL_VERSION)
+    incoming_core = _core_version(incoming)
+    expected_major = expected_core.split(".")[0]
+    incoming_major = incoming_core.split(".")[0] if incoming_core else ""
     # See pdv-protocol.ts `checkVersionCompatibility` for the canonical
     # statement of the version-compatibility policy. The same rule
     # (major mismatch rejects; minor/patch mismatch warns during 0.x)
     # is enforced here and in environment-detector.ts `checkPDVInstalled`.
+    # All comparisons use the M.m.p core so that prerelease suffixes
+    # (`0.1.0-rc1` vs setuptools-normalized `0.1.0rc1`) compare equal.
     if incoming_major != expected_major:
         raise PDVVersionError(
             f"Incompatible PDV version: got '{incoming}', "
             f"expected major version '{expected_major}'"
         )
-    if incoming != PDV_PROTOCOL_VERSION:
+    if incoming_core != expected_core:
         print(
             f"[PDV] version mismatch: kernel={PDV_PROTOCOL_VERSION}, app={incoming}",
             file=sys.stderr,

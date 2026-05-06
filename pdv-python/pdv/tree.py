@@ -813,6 +813,17 @@ class PDVTree(dict):
 
     _DEBOUNCE_INTERVAL = 0.1  # seconds
 
+    # Class-level state for the "global ping" fallback. Any PDVTree instance
+    # (even a detached scratch one a user constructs and mutates without
+    # assigning to the root) emits a coarse ``change_type: "unknown"``
+    # notification through this channel so the renderer knows to refetch.
+    # Only the root tree uses precise per-instance path emission.
+    _root_tree: "PDVTree | None" = None
+    _global_send_fn: Callable[[str, dict], None] | None = None
+    _global_pending: bool = False
+    _global_timer: threading.Timer | None = None
+    _global_lock: threading.Lock = threading.Lock()
+
     def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
         self._working_dir: str | None = None
@@ -837,6 +848,12 @@ class PDVTree(dict):
     def _attach_comm(self, send_fn: Callable[[str, dict], None]) -> None:
         """Attach a comm send function for push notifications.
 
+        Wires the caller as the *root tree* — its mutations emit precise
+        per-path notifications. Also installs ``send_fn`` as the class-level
+        fallback so any other ``PDVTree`` instance (e.g. user-constructed
+        scratch trees, intermediate sub-trees) can fire a coarse
+        ``change_type: "unknown"`` ping on mutation.
+
         Parameters
         ----------
         send_fn : callable
@@ -844,36 +861,103 @@ class PDVTree(dict):
             Called when the tree changes.
         """
         self._send_fn = send_fn
+        PDVTree._root_tree = self
+        PDVTree._global_send_fn = send_fn
 
     def _detach_comm(self) -> None:
-        """Detach the comm send function (e.g. on kernel restart)."""
+        """Detach the comm send function (e.g. on kernel restart).
+
+        Clears class-level state if this instance was the root tree.
+        """
         self._send_fn = None
+        if PDVTree._root_tree is self:
+            PDVTree._root_tree = None
+            PDVTree._global_send_fn = None
+            with PDVTree._global_lock:
+                if PDVTree._global_timer is not None:
+                    PDVTree._global_timer.cancel()
+                    PDVTree._global_timer = None
+                PDVTree._global_pending = False
 
     def _emit_changed(self, path: str, change_type: str) -> None:
         """Queue a change notification and schedule a debounced flush.
 
-        Notifications are accumulated and sent as a single batch after
-        ``_DEBOUNCE_INTERVAL`` seconds of inactivity.  This prevents
+        Dispatch:
+
+        - If this instance is the root tree, accumulate ``(path, change_type)``
+          into the per-instance queue. Paths are absolute (they come from
+          user-facing dot-paths into the root) and a precise
+          ``change_type: "batch"`` notification is sent on flush.
+        - Otherwise this is a non-root ``PDVTree`` (intermediate sub-tree, or
+          a scratch tree the user constructed and is mutating before
+          assigning into the root). Local paths can't be reconciled to the
+          renderer's absolute view, so fire a coarse class-level
+          ``change_type: "unknown"`` ping that triggers a full refetch.
+
+        Both paths are debounced over ``_DEBOUNCE_INTERVAL`` to avoid
         flooding the comm channel during tight mutation loops.
 
         Parameters
         ----------
         path : str
-            The dot-separated path that changed.
+            The dot-separated path that changed (absolute for root tree,
+            local for non-root — only used by the root branch).
         change_type : str
             One of ``'added'``, ``'removed'``, or ``'updated'``.
         """
-        if self._send_fn is None:
+        if self is PDVTree._root_tree:
+            if self._send_fn is None:
+                return
+            with self._debounce_lock:
+                self._pending_changes.append((path, change_type))
+                if self._debounce_timer is not None:
+                    self._debounce_timer.cancel()
+                self._debounce_timer = threading.Timer(
+                    self._DEBOUNCE_INTERVAL, self._flush_changes
+                )
+                self._debounce_timer.daemon = True
+                self._debounce_timer.start()
+        else:
+            PDVTree._emit_global_ping()
+
+    @classmethod
+    def _emit_global_ping(cls) -> None:
+        """Schedule a debounced ``change_type: "unknown"`` notification.
+
+        Called by mutations on non-root ``PDVTree`` instances. The renderer
+        treats the unknown change_type as "something changed somewhere,
+        refetch the visible tree."
+        """
+        if cls._global_send_fn is None:
             return
-        with self._debounce_lock:
-            self._pending_changes.append((path, change_type))
-            if self._debounce_timer is not None:
-                self._debounce_timer.cancel()
-            self._debounce_timer = threading.Timer(
-                self._DEBOUNCE_INTERVAL, self._flush_changes
+        with cls._global_lock:
+            cls._global_pending = True
+            if cls._global_timer is not None:
+                cls._global_timer.cancel()
+            cls._global_timer = threading.Timer(
+                cls._DEBOUNCE_INTERVAL, cls._flush_global
             )
-            self._debounce_timer.daemon = True
-            self._debounce_timer.start()
+            cls._global_timer.daemon = True
+            cls._global_timer.start()
+
+    @classmethod
+    def _flush_global(cls) -> None:
+        """Send the pending ``change_type: "unknown"`` notification.
+
+        Called by the class-level debounce timer.
+        """
+        with cls._global_lock:
+            if not cls._global_pending:
+                return
+            cls._global_pending = False
+            cls._global_timer = None
+            send_fn = cls._global_send_fn
+        if send_fn is None:
+            return
+        send_fn(
+            "pdv.tree.changed",
+            {"changed_paths": [], "change_type": "unknown"},
+        )
 
     def _flush_changes(self) -> None:
         """Send all pending change notifications as a single batch.

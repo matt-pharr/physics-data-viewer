@@ -398,10 +398,19 @@ export interface PDVTreeGetPayload {
 
 /** Payload for pdv.tree.changed push notification (kernel → app). */
 export interface PDVTreeChangedPayload {
-  /** Dot-paths of changed nodes. */
+  /** Dot-paths of changed nodes. Empty when change_type is "unknown". */
   changed_paths: string[];
-  /** Type of change. */
-  change_type: "added" | "removed" | "updated" | "batch";
+  /**
+   * Type of change.
+   *
+   * "added" | "removed" | "updated" | "batch": precise notifications from
+   * the root tree.
+   *
+   * "unknown": a non-root PDVTree mutated (paths are local to that subtree
+   * and cannot be reconciled to the root, so the renderer should do a full
+   * refresh).
+   */
+  change_type: "added" | "removed" | "updated" | "batch" | "unknown";
 }
 
 // ---------------------------------------------------------------------------
@@ -572,10 +581,32 @@ export function isPDVMessage(data: unknown): data is PDVMessage {
 // ---------------------------------------------------------------------------
 
 /**
+ * Extract the leading `major.minor.patch` core from a version string,
+ * discarding any prerelease/build suffix (e.g. `-rc1`, `rc1`, `+build`).
+ *
+ * Setuptools normalizes `0.1.0-rc1` → `0.1.0rc1` when building a wheel,
+ * so the electron and pdv-python sides round-trip to different strings
+ * even when bumped to the same source value. Comparing cores keeps the
+ * compatibility check stable across that normalization.
+ *
+ * @param v - Version string from package.json, pyproject.toml, or a comm
+ *   message envelope.
+ * @returns The `M.m.p` prefix, or the original string if no match.
+ */
+export function coreVersion(v: string): string {
+  const m = v.match(/^(\d+)\.(\d+)\.(\d+)/);
+  return m ? `${m[1]}.${m[2]}.${m[3]}` : v;
+}
+
+/**
  * Check whether an incoming message's protocol version is compatible with
  * the version this build of the app expects.
  *
- * - `'ok'`: Versions match exactly (major.minor.patch).
+ * Compares only the `major.minor.patch` core — prerelease suffixes like
+ * `-rc1` are ignored, so `0.1.0-rc1` and `0.1.0rc1` (the setuptools-
+ * normalized form of the same source version) are treated as identical.
+ *
+ * - `'ok'`: Cores match exactly.
  * - `'minor_mismatch'`: Major matches; minor or patch differs (tolerated, warn only).
  * - `'major_mismatch'`: Major versions differ (incompatible; reject message).
  *
@@ -585,12 +616,12 @@ export function isPDVMessage(data: unknown): data is PDVMessage {
 export function checkVersionCompatibility(
   msg: PDVMessage
 ): "ok" | "major_mismatch" | "minor_mismatch" {
-  const myParts = _appVersion.split(".").map(Number);
+  const myParts = coreVersion(_appVersion).split(".").map(Number);
   const myMajor = myParts[0] ?? 0;
   const myMinor = myParts[1] ?? 0;
   const myPatch = myParts[2] ?? 0;
 
-  const inParts = (msg.pdv_version ?? "0.0.0").split(".").map(Number);
+  const inParts = coreVersion(msg.pdv_version ?? "0.0.0").split(".").map(Number);
   const inMajor = inParts[0] ?? 0;
   const inMinor = inParts[1] ?? 0;
   const inPatch = inParts[2] ?? 0;

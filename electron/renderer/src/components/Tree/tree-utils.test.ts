@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { TreeNodeData } from '../../types';
-import { findNode, flattenTree, updateNodeImmut } from './tree-utils';
+import { childrenDiffer, findNode, flattenTree, updateNodeImmut } from './tree-utils';
 
 function makeNode(
   path: string,
@@ -81,6 +81,44 @@ describe('findNode', () => {
 
   it('returns undefined when path does not exist', () => {
     expect(findNode(tree, 'missing.path')).toBeUndefined();
+  });
+});
+
+describe('childrenDiffer', () => {
+  it('returns false for identical lists', () => {
+    expect(childrenDiffer([makeNode('a'), makeNode('b')], [makeNode('a'), makeNode('b')])).toBe(false);
+  });
+
+  it('returns true on different length', () => {
+    expect(childrenDiffer([makeNode('a')], [makeNode('a'), makeNode('b')])).toBe(true);
+  });
+
+  it('returns true when a path is replaced', () => {
+    expect(childrenDiffer([makeNode('a')], [makeNode('b')])).toBe(true);
+  });
+
+  it('returns true when type changes', () => {
+    const a = makeNode('a', { type: 'folder' });
+    const b = makeNode('a', { type: 'script' });
+    expect(childrenDiffer([a], [b])).toBe(true);
+  });
+
+  it('returns true when preview changes (catches deep dict mutations)', () => {
+    const a = makeNode('a', { preview: '{x: 1}' });
+    const b = makeNode('a', { preview: '{x: 1, y: 2}' });
+    expect(childrenDiffer([a], [b])).toBe(true);
+  });
+
+  it('returns true when hasChildren flips', () => {
+    const a = makeNode('a', { hasChildren: false });
+    const b = makeNode('a', { hasChildren: true });
+    expect(childrenDiffer([a], [b])).toBe(true);
+  });
+
+  it('ignores ordering — equal sets compare equal', () => {
+    expect(
+      childrenDiffer([makeNode('a'), makeNode('b')], [makeNode('b'), makeNode('a')]),
+    ).toBe(false);
   });
 });
 

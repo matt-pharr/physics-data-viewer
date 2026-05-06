@@ -754,7 +754,7 @@ export interface PDVApi {
       treePath: string
     ): Promise<{ success: boolean; error?: string }>;
     onChanged(
-      callback: (payload: { changed_paths: string[]; change_type: "added" | "removed" | "updated" | "batch" }) => void
+      callback: (payload: { changed_paths: string[]; change_type: "added" | "removed" | "updated" | "batch" | "unknown" }) => void
     ): () => void;
   };
   namespace: {

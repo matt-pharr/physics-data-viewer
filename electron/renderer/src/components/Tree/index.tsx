@@ -10,7 +10,7 @@ import { List, type ListImperativeAPI, type RowComponentProps } from 'react-wind
 import { treeService, type TreeNodeData } from '../../services/tree';
 import { TreeNodeRow } from './TreeNodeRow';
 import { ContextMenu } from './ContextMenu';
-import { flattenTree, findNode, removeNodeImmut, updateNodeImmut } from './tree-utils';
+import { childrenDiffer, flattenTree, findNode, removeNodeImmut, updateNodeImmut } from './tree-utils';
 import type { TreeChangeInfo } from '../../types';
 import type { Shortcuts } from '../../shortcuts';
 import { matchesShortcut } from '../../shortcuts';
@@ -172,6 +172,58 @@ export const Tree: React.FC<TreeProps> = ({ kernelId, disabled = false, refreshT
     void loadRoot(true);
   // eslint-disable-next-line react-hooks/exhaustive-deps -- loadRoot is stable for given kernelId; real triggers are kernelId/refreshToken/disabled
   }, [kernelId, refreshToken, disabled]);
+
+  // Safety-net poll. Push notifications cover all PDVTree mutations, but
+  // plain-dict mutations under the tree (e.g. `pdv_tree['data']['x'] = 1`
+  // when `data` is a plain dict) emit nothing. Once a second, fetch the
+  // root and every currently-expanded subtree, structurally compare the
+  // children, and trigger a full reload only on real drift. Most ticks
+  // detect no change and are effectively free thanks to the kernel's
+  // dedicated read-only query thread (pdv.query_server).
+  useEffect(() => {
+    if (!kernelId || disabled) return;
+    let cancelled = false;
+
+    const pollOnce = async () => {
+      // Snapshot the paths to check at tick start so concurrent expansion
+      // changes during the poll don't matter.
+      const pathsToCheck = ['', ...expandedPathsRef.current];
+
+      for (const path of pathsToCheck) {
+        if (cancelled || !kernelId) return;
+        let fresh: TreeNodeData[];
+        try {
+          fresh =
+            path === ''
+              ? await treeService.getRootNodes(kernelId, { force: true })
+              : await treeService.listByPath(kernelId, path, { force: true });
+        } catch {
+          // Path may have been removed, or the kernel may be transiently
+          // unavailable — skip without disturbing the UI.
+          continue;
+        }
+        if (cancelled) return;
+
+        const currentNode =
+          path === '' ? nodesRef.current[0] : findNode(nodesRef.current, path);
+        const current = currentNode?.children ?? [];
+
+        if (childrenDiffer(current, fresh)) {
+          if (!cancelled) void loadRoot(true);
+          return;
+        }
+      }
+    };
+
+    const interval = window.setInterval(() => {
+      void pollOnce();
+    }, 1000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(interval);
+    };
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- loadRoot is stable for kernelId; expandedPathsRef is read live, not as a dep
+  }, [kernelId, disabled]);
 
   // Incremental tree update from push notifications — avoids full reload.
   // Processes a queue of changes so rapid successive updates are not lost.
