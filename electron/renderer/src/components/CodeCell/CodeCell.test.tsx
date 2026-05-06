@@ -3,6 +3,8 @@
 import { cleanup, render } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { DEFAULT_SHORTCUTS } from '../../shortcuts';
+import type { PDVApi } from '../../types/pdv';
+import { installPdvMock } from '../../test-fixtures/pdv-mock';
 
 vi.mock('../../themes', () => ({
   defineMonacoThemes: vi.fn(),
@@ -49,9 +51,9 @@ type MockModel = {
 };
 
 let completionProvider: CompletionProvider | null = null;
-const complete = vi.fn();
-const inspect = vi.fn();
-const treeList = vi.fn();
+const complete = vi.fn<PDVApi['kernels']['complete']>();
+const inspect = vi.fn<PDVApi['kernels']['inspect']>();
+const treeList = vi.fn<PDVApi['tree']['list']>();
 const registerCompletionItemProvider = vi.fn();
 const setModelMarkers = vi.fn();
 
@@ -104,17 +106,9 @@ beforeEach(() => {
     getWordAtPosition: () => ({ startColumn: 1, endColumn: 8 }),
   };
 
-  Object.defineProperty(window, 'pdv', {
-    configurable: true,
-    value: {
-      kernels: {
-        complete,
-        inspect,
-      },
-      tree: {
-        list: treeList,
-      },
-    },
+  installPdvMock({
+    kernels: { complete, inspect },
+    tree: { list: treeList },
   });
 });
 

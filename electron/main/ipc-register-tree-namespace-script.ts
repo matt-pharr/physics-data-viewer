@@ -621,7 +621,7 @@ export function registerTreeNamespaceScriptIpcHandlers(
     return { code, executionId, origin, result };
   });
 
-  ipcMain.handle(IPC.script.edit, async (_event, kernelId: string, scriptPath: string) => {
+  ipcMain.handle(IPC.script.edit, async (_event, _kernelId: string, scriptPath: string) => {
     const config = readConfig(configStore);
 
     const response = await queryRequest(
@@ -656,7 +656,7 @@ export function registerTreeNamespaceScriptIpcHandlers(
 
   ipcMain.handle(
     IPC.script.getParams,
-    async (_event, kernelId: string, treePath: string): Promise<ScriptParameter[]> => {
+    async (_event, _kernelId: string, treePath: string): Promise<ScriptParameter[]> => {
       const response = await commRouter.request(PDVMessageType.SCRIPT_PARAMS, {
         path: treePath,
       });
@@ -667,7 +667,7 @@ export function registerTreeNamespaceScriptIpcHandlers(
 
   ipcMain.handle(
     IPC.note.save,
-    async (_event, kernelId: string, treePath: string, content: string) => {
+    async (_event, _kernelId: string, treePath: string, content: string) => {
       try {
         const response = await queryRequest(
           PDVMessageType.TREE_RESOLVE_FILE,
@@ -688,7 +688,7 @@ export function registerTreeNamespaceScriptIpcHandlers(
 
   ipcMain.handle(
     IPC.note.read,
-    async (_event, kernelId: string, treePath: string) => {
+    async (_event, _kernelId: string, treePath: string) => {
       try {
         const response = await queryRequest(
           PDVMessageType.TREE_RESOLVE_FILE,

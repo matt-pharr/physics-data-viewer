@@ -4,6 +4,8 @@ import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/re
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { NamespaceInspectorNode, NamespaceVariable } from '../../types';
+import type { PDVApi } from '../../types/pdv';
+import { installPdvMock, type PdvMock } from '../../test-fixtures/pdv-mock';
 import { NamespaceView } from './index';
 
 function makeVars(): NamespaceVariable[] {
@@ -56,17 +58,16 @@ function makeChildren(): NamespaceInspectorNode[] {
   ];
 }
 
+let pdv: PdvMock;
+
 beforeEach(() => {
-  Object.defineProperty(window, 'pdv', {
-    configurable: true,
-    value: {
-      namespace: {
-        query: vi.fn(async () => makeVars()),
-        inspect: vi.fn(async () => ({
-          children: makeChildren(),
-          truncated: false,
-        })),
-      },
+  pdv = installPdvMock({
+    namespace: {
+      query: vi.fn<PDVApi['namespace']['query']>(async () => makeVars()),
+      inspect: vi.fn<PDVApi['namespace']['inspect']>(async () => ({
+        children: makeChildren(),
+        truncated: false,
+      })),
     },
   });
 });
@@ -77,7 +78,7 @@ afterEach(() => {
 
 describe('NamespaceView', () => {
   it('does not call API when kernel is null and shows empty kernel state', async () => {
-    const query = window.pdv.namespace.query as unknown as ReturnType<typeof vi.fn>;
+    const query = pdv.namespace.query;
     render(<NamespaceView kernelId={null} />);
     await waitFor(() => {
       expect(screen.getByText('No kernel active')).toBeTruthy();
@@ -106,7 +107,7 @@ describe('NamespaceView', () => {
   });
 
   it('shows error when API call fails', async () => {
-    const query = window.pdv.namespace.query as unknown as ReturnType<typeof vi.fn>;
+    const query = pdv.namespace.query;
     query.mockRejectedValue(new Error('query failed'));
     render(<NamespaceView kernelId="k1" />);
     await waitFor(() => {
@@ -115,7 +116,7 @@ describe('NamespaceView', () => {
   });
 
   it('applies filter toggles to subsequent API requests', async () => {
-    const query = window.pdv.namespace.query as unknown as ReturnType<typeof vi.fn>;
+    const query = pdv.namespace.query;
     render(<NamespaceView kernelId="k1" />);
     await waitFor(() => expect(query).toHaveBeenCalledTimes(1));
 
@@ -135,7 +136,7 @@ describe('NamespaceView', () => {
   });
 
   it('sorts top-level rows by column header clicks and reacts to refreshToken changes', async () => {
-    const query = window.pdv.namespace.query as unknown as ReturnType<typeof vi.fn>;
+    const query = pdv.namespace.query;
     const { rerender } = render(<NamespaceView kernelId="k1" refreshToken={0} />);
     await waitFor(() => {
       expect(screen.getByText('alpha')).toBeTruthy();
@@ -150,7 +151,7 @@ describe('NamespaceView', () => {
   });
 
   it('expands nodes lazily through namespace.inspect', async () => {
-    const inspect = window.pdv.namespace.inspect as unknown as ReturnType<typeof vi.fn>;
+    const inspect = pdv.namespace.inspect;
     render(<NamespaceView kernelId="k1" />);
 
     await waitFor(() => expect(screen.getByText('arr')).toBeTruthy());
@@ -164,7 +165,7 @@ describe('NamespaceView', () => {
   });
 
   it('auto-refresh triggers interval-based re-queries', async () => {
-    const query = window.pdv.namespace.query as unknown as ReturnType<typeof vi.fn>;
+    const query = pdv.namespace.query;
     render(<NamespaceView kernelId="k1" autoRefresh refreshInterval={20} />);
     await waitFor(() => expect(query.mock.calls.length).toBeGreaterThanOrEqual(3), { timeout: 2000 });
   });

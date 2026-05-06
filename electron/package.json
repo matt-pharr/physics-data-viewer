@@ -30,6 +30,9 @@
     "dist:mac": "npm run build && electron-builder --mac",
     "dist:linux": "npm run build && electron-builder --linux",
     "test": "node ./node_modules/vitest/vitest.mjs run",
+    "typecheck": "npm run typecheck:main && npm run typecheck:renderer",
+    "typecheck:main": "node ./node_modules/typescript/bin/tsc -p tsconfig.test.json --noEmit",
+    "typecheck:renderer": "node ./node_modules/typescript/bin/tsc -p renderer/tsconfig.json --noEmit",
     "lint": "eslint .",
     "knip": "knip",
     "clean": "rm -rf dist renderer/dist release node_modules renderer/node_modules"
