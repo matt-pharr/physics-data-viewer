@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { cleanup, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { ScriptParameter, ScriptRunResult } from '../../types';
@@ -40,18 +40,13 @@ afterEach(() => {
   cleanup();
 });
 
+// No-param render + cancel, end-to-end run-and-forward, kernel-error display,
+// and the in-flight "Running..." state are reachable via the live tree-script
+// run path covered by `tree-create-and-run.spec.ts`. The unit tests retained
+// here pin the param-form rules that are easier to assert in isolation:
+// required-param validation, input-type controls per type, and the boolean
+// serialization contract sent to script.run.
 describe('ScriptDialog', () => {
-  it('renders no-parameter message and cancel behavior', async () => {
-    setupPdvMock([]);
-    const onCancel = vi.fn();
-    render(<ScriptDialog node={makeNode()} kernelId="k1" onRun={vi.fn()} onCancel={onCancel} />);
-    await waitFor(() => {
-      expect(screen.getByText('This script has no parameters')).toBeTruthy();
-    });
-    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
-    expect(onCancel).toHaveBeenCalledTimes(1);
-  });
-
   it('requires required params before enabling run', async () => {
     setupPdvMock([{ name: 'name', type: 'str', required: true, default: null }]);
     render(<ScriptDialog node={makeNode()} kernelId="k1" onRun={vi.fn()} onCancel={vi.fn()} />);
@@ -85,41 +80,6 @@ describe('ScriptDialog', () => {
 
     const textboxes = screen.getAllByRole('textbox');
     expect(textboxes.length).toBe(1);
-  });
-
-  it('calls script.run with correct payload and forwards result to onRun', async () => {
-    const pdv = setupPdvMock([{ name: 'x', type: 'int', required: true, default: null }]);
-    const scriptRun = pdv.script.run;
-    const mockResult: ScriptRunResult = {
-      code: 'generated-code',
-      executionId: 'exec-1',
-      origin: { kind: 'tree-script', label: 'scripts.double', scriptPath: 'scripts.double' },
-      result: { result: { done: true } },
-    };
-    scriptRun.mockResolvedValue(mockResult);
-    const onRun = vi.fn();
-    const node = makeNode({ path: 'scripts.double' });
-    render(<ScriptDialog node={node} kernelId="kernel-1" onRun={onRun} onCancel={vi.fn()} />);
-
-    await waitFor(() => {
-      expect(screen.getByRole('spinbutton')).toBeTruthy();
-    });
-    const user = userEvent.setup();
-    await user.type(screen.getByRole('spinbutton'), '5');
-    await user.click(screen.getByRole('button', { name: 'Run' }));
-
-    await waitFor(() => {
-      expect(scriptRun).toHaveBeenCalledWith('kernel-1', expect.objectContaining({
-        treePath: 'scripts.double',
-        params: { x: 5 },
-        origin: {
-          kind: 'tree-script',
-          label: 'scripts.double',
-          scriptPath: 'scripts.double',
-        },
-      }));
-    });
-    expect(onRun).toHaveBeenCalledWith(mockResult);
   });
 
   it('serializes checkbox booleans in params', async () => {
@@ -156,51 +116,4 @@ describe('ScriptDialog', () => {
     expect(onRun).toHaveBeenCalled();
   });
 
-  it('shows kernel error and does not call onRun', async () => {
-    const pdv = setupPdvMock([]);
-    const scriptRun = pdv.script.run;
-    scriptRun.mockRejectedValue(new Error('kernel failed'));
-    const onRun = vi.fn();
-    render(<ScriptDialog node={makeNode()} kernelId="k1" onRun={onRun} onCancel={vi.fn()} />);
-
-    await waitFor(() => {
-      expect(screen.getByText('This script has no parameters')).toBeTruthy();
-    });
-    const user = userEvent.setup();
-    await user.click(screen.getByRole('button', { name: 'Run' }));
-
-    await waitFor(() => {
-      expect(screen.getByText('kernel failed')).toBeTruthy();
-    });
-    expect(onRun).not.toHaveBeenCalled();
-  });
-
-  it('shows running state while execute is in flight', async () => {
-    const pdv = setupPdvMock([]);
-    let resolveRun: ((value: ScriptRunResult) => void) | null = null;
-    const scriptRun = pdv.script.run;
-    scriptRun.mockImplementation(
-      () =>
-        new Promise<ScriptRunResult>((resolve) => {
-          resolveRun = resolve;
-        }),
-    );
-    render(<ScriptDialog node={makeNode()} kernelId="k1" onRun={vi.fn()} onCancel={vi.fn()} />);
-
-    await waitFor(() => {
-      expect(screen.getByText('This script has no parameters')).toBeTruthy();
-    });
-    const user = userEvent.setup();
-    await user.click(screen.getByRole('button', { name: 'Run' }));
-    expect(screen.getByRole('button', { name: 'Running...' })).toBeTruthy();
-    resolveRun!({
-      code: '',
-      executionId: 'test',
-      origin: { kind: 'tree-script' },
-      result: {},
-    });
-    await waitFor(() => {
-      expect(screen.getByRole('button', { name: 'Run' })).toBeTruthy();
-    });
-  });
 });

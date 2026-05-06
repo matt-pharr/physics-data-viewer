@@ -96,9 +96,17 @@ cd electron && npm test -- --reporter=verbose
 
 # Integration tests (requires Python + ipykernel in PYTHON_PATH env)
 cd electron && PYTHON_PATH=/path/to/python npm test -- --reporter=verbose main/integration.test.ts
+
+# Renderer end-to-end tests (Playwright drives the prod Electron bundle
+# against a real Python kernel). Build first, then run:
+cd electron && npm run build:e2e
+cd electron && PYTHON_PATH=/path/to/python npm run test:e2e
 ```
 
-There are no automated tests for the renderer. The renderer is verified by manual smoke test.
+The renderer is covered by Playwright specs under `electron/e2e/` plus targeted
+unit tests for the bits that are awkward to assert through a live window
+(e.g. CSS-class state, viewport math, completion-provider logic). Manual smoke
+testing is no longer the primary verification.
 
 ---
 

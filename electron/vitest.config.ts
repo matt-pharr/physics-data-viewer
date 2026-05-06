@@ -1,4 +1,4 @@
-import { defineConfig } from "vitest/config";
+import { defineConfig, configDefaults } from "vitest/config";
 
 /**
  * Vitest configuration for the Electron main-process test suite.
@@ -13,5 +13,7 @@ import { defineConfig } from "vitest/config";
 export default defineConfig({
   test: {
     pool: "forks",
+    // Playwright specs live under ./e2e and are not vitest tests.
+    exclude: [...configDefaults.exclude, "e2e/**"],
   },
 });

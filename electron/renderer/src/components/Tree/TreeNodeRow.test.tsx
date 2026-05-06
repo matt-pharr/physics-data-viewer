@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { cleanup, render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { TreeNodeData } from '../../types';
 import { TreeNodeRow } from './TreeNodeRow';
@@ -27,46 +27,11 @@ function makeNode(overrides: Record<string, unknown> = {}): TreeNodeData & { dep
   } as TreeNodeData & { depth: number };
 }
 
+// Icon rendering and pointer-event wiring (click/double-click/contextmenu) are
+// covered end-to-end by `electron/e2e/tree-create-and-run.spec.ts`. The unit
+// tests retained below pin the bits the E2E suite can't cheaply exercise:
+// CSS class state and the loading-spinner/expanded-arrow markup.
 describe('TreeNodeRow', () => {
-  it('renders known icons and fallback icon', () => {
-    const onExpand = vi.fn();
-    const onDoubleClick = vi.fn();
-    const onRightClick = vi.fn();
-    const onClick = vi.fn();
-
-    const iconCases: Array<[string, string]> = [
-      ['root', '🌳'], ['folder', '📁'], ['file', '📄'], ['script', '📜'], ['markdown', '📝'],
-      ['ndarray', '🔢'], ['dataframe', '📊'], ['series', '📈'], ['mapping', '🗂️'],
-      ['sequence', '🧾'], ['text', '🔤'], ['scalar', '#️⃣'], ['binary', '🧬'],
-      ['namelist', '📋'], ['module', '📦'], ['gui', '🖼️'], ['lib', '📚'], ['unknown', '❓'],
-    ];
-
-    for (const [type, icon] of iconCases) {
-      const { unmount } = render(
-        <TreeNodeRow
-          node={makeNode({ type, key: type })}
-          onExpand={onExpand}
-          onDoubleClick={onDoubleClick}
-          onRightClick={onRightClick}
-          onClick={onClick}
-        />,
-      );
-      expect(screen.getByText(icon)).toBeTruthy();
-      unmount();
-    }
-
-    render(
-      <TreeNodeRow
-        node={makeNode({ type: 'mystery', key: 'mystery' })}
-        onExpand={onExpand}
-        onDoubleClick={onDoubleClick}
-        onRightClick={onRightClick}
-        onClick={onClick}
-      />,
-    );
-    expect(screen.getByText('❓')).toBeTruthy();
-  });
-
   it('applies selected class and hidden expand button for leaf nodes', () => {
     const { container } = render(
       <TreeNodeRow
@@ -80,42 +45,6 @@ describe('TreeNodeRow', () => {
     );
     expect(container.querySelector('.tree-row')?.className.includes('selected')).toBe(true);
     expect(container.querySelector('.tree-toggle')?.className.includes('hidden')).toBe(true);
-  });
-
-  it('wires click, double click, right click, and expand interactions', () => {
-    const onExpand = vi.fn();
-    const onDoubleClick = vi.fn();
-    const onRightClick = vi.fn();
-    const onClick = vi.fn();
-
-    const { container } = render(
-      <TreeNodeRow
-        node={makeNode({ depth: 2 })}
-        onExpand={onExpand}
-        onDoubleClick={onDoubleClick}
-        onRightClick={onRightClick}
-        onClick={onClick}
-      />,
-    );
-
-    const row = container.querySelector('.tree-row') as HTMLElement;
-    const toggle = screen.getByRole('button', { name: 'Expand x' });
-
-    fireEvent.click(row);
-    expect(onClick).toHaveBeenCalledTimes(1);
-
-    fireEvent.doubleClick(row);
-    expect(onDoubleClick).toHaveBeenCalledTimes(1);
-
-    fireEvent.contextMenu(row);
-    expect(onRightClick).toHaveBeenCalledTimes(1);
-
-    fireEvent.click(toggle);
-    expect(onExpand).toHaveBeenCalledTimes(1);
-    expect(onClick).toHaveBeenCalledTimes(1);
-
-    const keyColumn = container.querySelector('.tree-col.key') as HTMLElement;
-    expect(keyColumn.style.paddingLeft).toBe('calc(2 * var(--tree-indent-size))');
   });
 
   it('renders loading spinner and expanded arrow states', () => {

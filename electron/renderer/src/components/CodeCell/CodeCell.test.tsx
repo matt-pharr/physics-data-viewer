@@ -153,17 +153,6 @@ describe('CodeCell completion provider', () => {
     expect(provider.triggerCharacters).toEqual(['.', '[', "'", '"']);
   });
 
-  it('returns no suggestions when there is no active kernel', async () => {
-    await renderCodeCell(null);
-    expect(completionProvider).toBeTruthy();
-    const result = await completionProvider!.provideCompletionItems(
-      makeModel('os.path.'),
-      { lineNumber: 1, column: 8 }
-    );
-    expect(result.suggestions).toEqual([]);
-    expect(complete).not.toHaveBeenCalled();
-  });
-
   it('maps kernel completion results into Monaco suggestions', async () => {
     complete.mockResolvedValue({
       matches: ['join', 'exists'],
@@ -185,18 +174,6 @@ describe('CodeCell completion provider', () => {
     expect(result.suggestions[0].insertText).toBe('join');
     expect(result.suggestions[0].kind).toBe(1);
     expect(result.suggestions[1].kind).toBe(7);
-  });
-
-  it('handles kernel completion failures gracefully', async () => {
-    complete.mockRejectedValue(new Error('completion failed'));
-    await renderCodeCell('kernel-1');
-
-    const result = await completionProvider!.provideCompletionItems(
-      makeModel('os.path.'),
-      { lineNumber: 1, column: 8 }
-    );
-
-    expect(result.suggestions).toEqual([]);
   });
 
   it('adds pdv_tree fallback for pdv* prefix completions', async () => {

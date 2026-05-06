@@ -622,6 +622,12 @@ export function registerTreeNamespaceScriptIpcHandlers(
   });
 
   ipcMain.handle(IPC.script.edit, async (_event, _kernelId: string, scriptPath: string) => {
+    // Under E2E we never spawn an external editor — the spawn is detached
+    // (`detached: true`, `child.unref()`) so a real VS Code instance launched
+    // by a test would outlive the Electron app being torn down.
+    if (process.env.PDV_E2E === "1") {
+      return { success: true };
+    }
     const config = readConfig(configStore);
 
     const response = await queryRequest(
