@@ -97,8 +97,14 @@ export async function launchPDV(opts: LaunchOptions = {}): Promise<LaunchedApp> 
   // package.json (and `app.getVersion()`) from the project root. Passing the
   // bundled script path directly causes app.getVersion() to fall back to the
   // Electron framework version, which makes pdv-python's version check fail.
+  // --no-sandbox is required on Linux CI runners where chromium's sandbox
+  // (user namespaces / seccomp) isn't available; harmless elsewhere.
+  const launchArgs = ["."];
+  if (process.platform === "linux" && process.env.CI) {
+    launchArgs.push("--no-sandbox");
+  }
   const app = await electron.launch({
-    args: ["."],
+    args: launchArgs,
     cwd: ELECTRON_ROOT,
     env: {
       ...process.env,

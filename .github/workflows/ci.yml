@@ -123,6 +123,79 @@ jobs:
         working-directory: electron
         run: npm run test -- --reporter=verbose renderer/src/
 
+  e2e-tests:
+    name: Playwright E2E
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install Python dependencies
+        run: pip install ipykernel "pdv-python/[dev]"
+
+      - name: Install Node dependencies
+        working-directory: electron
+        run: |
+          if [ -f package-lock.json ]; then
+            npm ci
+          else
+            npm install
+          fi
+
+      # Electron needs a display server on Linux CI. xvfb-run wraps the test
+      # invocation with a virtual framebuffer so BrowserWindow can render
+      # offscreen. The other deps are GTK/X libs Electron links against on
+      # Ubuntu — newer ubuntu-latest has most preinstalled, but installing
+      # the full set is cheap and avoids drift when the runner image changes.
+      - name: Install Electron Linux dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            xvfb libnss3 libatk1.0-0 libatk-bridge2.0-0 libcups2 \
+            libdrm2 libgbm1 libxkbcommon0 libxcomposite1 libxdamage1 \
+            libxfixes3 libxrandr2 libpango-1.0-0 libcairo2 libasound2t64
+
+      - name: Build renderer + main for E2E
+        working-directory: electron
+        run: npm run build:e2e
+
+      # Cache the matplotlib font cache so the first spec doesn't rebuild it
+      # (~17s) and blow the bootstrap timeout. Keyed on the matplotlib version
+      # in the installed pdv-python deps.
+      - name: Cache matplotlib font cache
+        uses: actions/cache@v4
+        with:
+          path: electron/e2e/.fixtures-cache/matplotlib
+          key: mpl-fontcache-${{ runner.os }}-py3.11-${{ hashFiles('pdv-python/pyproject.toml') }}
+
+      - name: Run Playwright E2E tests
+        working-directory: electron
+        env:
+          PYTHON_PATH: python3
+        run: xvfb-run -a npm run test:e2e
+
+      - name: Upload Playwright report on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: |
+            electron/playwright-report/
+            electron/test-results/
+          retention-days: 7
+
   docs-build:
     name: Docs build
     runs-on: ubuntu-latest
