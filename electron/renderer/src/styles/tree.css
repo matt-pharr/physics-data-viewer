@@ -79,8 +79,12 @@
 }
 
 .tree-row.selected {
-  background-color: var(--bg-tertiary);
+  background-color: color-mix(in srgb, var(--accent) 18%, transparent);
   border-left: 3px solid var(--accent);
+}
+
+.tree-row.selected:hover {
+  background-color: color-mix(in srgb, var(--accent) 24%, transparent);
 }
 
 .tree-toggle {

@@ -127,6 +127,9 @@ function buildBase() {
       get: stub<PDVApi["config"]["get"]>(),
       set: stub<PDVApi["config"]["set"]>(),
     },
+    window: {
+      setBackgroundColor: stub<PDVApi["window"]["setBackgroundColor"]>(async () => undefined),
+    },
     autosave: {
       run: stub<PDVApi["autosave"]["run"]>(async () => ({ saved: false })),
       clear: stub<PDVApi["autosave"]["clear"]>(async () => undefined),

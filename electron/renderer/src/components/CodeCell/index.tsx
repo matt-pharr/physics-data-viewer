@@ -11,9 +11,10 @@ import Editor, { type OnMount, type BeforeMount } from '@monaco-editor/react';
 import type * as monaco from 'monaco-editor';
 import type { CellTab } from '../../types';
 import type { Shortcuts } from '../../shortcuts';
-import { matchesShortcut } from '../../shortcuts';
+import { matchesShortcut, formatShortcutHint } from '../../shortcuts';
 import { defineMonacoThemes } from '../../themes';
 import { ansiToHtml } from '../Console/ansi';
+import { PlayIcon } from '../Icons';
 import { registerKernelCompletionProvider, registerKernelHoverProvider } from './monaco-providers';
 
 /** Props for the tabbed code-cell editor pane. */
@@ -381,7 +382,12 @@ export const CodeCell: React.FC<CodeCellProps> = ({
               </button>
             );
           })}
-          <button className="tab add" onClick={onAddTab} disabled={disabled}>
+          <button
+            className="tab add"
+            onClick={onAddTab}
+            disabled={disabled}
+            title={`New tab (${formatShortcutHint(shortcuts.newTab)})`}
+          >
             +
           </button>
         </div>
@@ -405,7 +411,7 @@ export const CodeCell: React.FC<CodeCellProps> = ({
         <div className="pane-actions">
           {isQueued ? (
             <button
-              className="btn btn-warning"
+              className="btn btn-warning btn-cc-primary"
               onClick={onCancelQueued}
               disabled={disabled || !onCancelQueued}
               title="The kernel is busy saving — cancel before this run reaches the kernel"
@@ -414,7 +420,7 @@ export const CodeCell: React.FC<CodeCellProps> = ({
             </button>
           ) : isExecuting ? (
             <button
-              className="btn btn-warning"
+              className="btn btn-warning btn-cc-primary"
               onClick={onInterrupt}
               disabled={disabled || !onInterrupt}
             >
@@ -422,14 +428,20 @@ export const CodeCell: React.FC<CodeCellProps> = ({
             </button>
           ) : (
             <button
-              className="btn btn-primary"
+              className="btn btn-primary btn-execute btn-cc-primary"
               onClick={handleExecute}
               disabled={disabled || !activeTab.code.trim()}
+              title={`Execute (${formatShortcutHint(shortcuts.execute)})`}
             >
-              Execute
+              <PlayIcon className="btn-execute-icon" />
+              <span>Execute</span>
             </button>
           )}
-          <button className="btn btn-secondary" onClick={isEmpty ? handleClose : handleClear} disabled={disabled || isExecuting || isQueued}>
+          <button
+            className="btn btn-secondary btn-cc-secondary"
+            onClick={isEmpty ? handleClose : handleClear}
+            disabled={disabled || isExecuting || isQueued}
+          >
             {isEmpty ? 'Close' : 'Clear'}
           </button>
         </div>

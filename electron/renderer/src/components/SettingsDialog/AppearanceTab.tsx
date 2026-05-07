@@ -314,6 +314,7 @@ export const AppearanceTab: React.FC<AppearanceTabProps> = ({
           value={readViewMaxWidth}
           onChange={(e) => onReadViewMaxWidthChange(Number(e.target.value))}
           className="appearance-editor-slider"
+          style={{ ["--slider-pct" as string]: `${((readViewMaxWidth - 600) / (2000 - 600)) * 100}%` }}
         />
         <span className="appearance-editor-unit">{readViewMaxWidth} px</span>
       </div>

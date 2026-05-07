@@ -153,6 +153,9 @@ const api: PDVApi = {
     get: () => ipcRenderer.invoke(IPC.config.get),
     set: (updates) => ipcRenderer.invoke(IPC.config.set, updates),
   },
+  window: {
+    setBackgroundColor: (color) => ipcRenderer.invoke(IPC.window.setBackgroundColor, color),
+  },
   autosave: {
     run: (codeCells: unknown) => ipcRenderer.invoke(IPC.autosave.run, codeCells),
     clear: (dir?: string) => ipcRenderer.invoke(IPC.autosave.clear, dir),

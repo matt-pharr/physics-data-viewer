@@ -44,6 +44,12 @@
   background-color: var(--bg-primary);
 }
 
+/* Keep weight constant across active/inactive so tabs don't reflow. */
+.settings-tabs .tab,
+.settings-tabs .tab.active {
+  font-weight: 500;
+}
+
 .settings-grid {
   display: grid;
   grid-template-columns: 1fr auto;
@@ -189,7 +195,8 @@
   padding-right: 4px;
 }
 
-.settings-general-grid input[type="text"] {
+.settings-general-grid input[type="text"],
+.settings-general-grid input[type="number"] {
   padding: 5px 8px;
   border: 1px solid var(--border-color);
   border-radius: 4px;
@@ -201,7 +208,8 @@
   box-sizing: border-box;
 }
 
-.settings-general-grid input[type="text"]:focus {
+.settings-general-grid input[type="text"]:focus,
+.settings-general-grid input[type="number"]:focus {
   outline: none;
   border-color: var(--accent);
 }
@@ -361,7 +369,68 @@
 .appearance-editor-slider {
   flex: 1;
   max-width: 280px;
-  accent-color: var(--accent);
+  -webkit-appearance: none;
+  appearance: none;
+  height: 4px;
+  background: transparent;
+  border-radius: 2px;
+  outline: none;
+  cursor: pointer;
+  --slider-pct: 50%;
+}
+
+.appearance-editor-slider::-webkit-slider-runnable-track {
+  height: 4px;
+  background: linear-gradient(
+    to right,
+    var(--accent) 0%,
+    var(--accent) var(--slider-pct),
+    var(--border-color) var(--slider-pct),
+    var(--border-color) 100%
+  );
+  border-radius: 2px;
+}
+
+.appearance-editor-slider::-moz-range-track {
+  height: 4px;
+  background: var(--border-color);
+  border-radius: 2px;
+  border: none;
+}
+
+.appearance-editor-slider::-moz-range-progress {
+  height: 4px;
+  background: var(--accent);
+  border-radius: 2px;
+}
+
+.appearance-editor-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--accent);
+  border: none;
+  margin-top: -5px;
+  cursor: pointer;
+}
+
+.appearance-editor-slider::-moz-range-thumb {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--accent);
+  border: none;
+  cursor: pointer;
+}
+
+.appearance-editor-slider:focus::-webkit-slider-thumb {
+  box-shadow: 0 0 0 2px var(--bg-primary), 0 0 0 4px var(--accent);
+}
+
+.appearance-editor-slider:focus::-moz-range-thumb {
+  box-shadow: 0 0 0 2px var(--bg-primary), 0 0 0 4px var(--accent);
 }
 
 .appearance-editor-check {

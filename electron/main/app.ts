@@ -10,7 +10,7 @@
  * index.ts — IPC handler registration and push forwarding
  */
 
-import { BrowserWindow, app, type BrowserWindowConstructorOptions } from "electron";
+import { BrowserWindow, app, nativeTheme, type BrowserWindowConstructorOptions } from "electron";
 import * as path from "path";
 import * as os from "os";
 import * as fsSync from "fs";
@@ -55,6 +55,53 @@ function getWindowChromeOptions(): BrowserWindowConstructorOptions {
   return {};
 }
 
+/**
+ * Built-in theme `bg-primary` lookup, mirrored from
+ * `renderer/src/themes.ts`'s `BUILTIN_THEMES`. Duplicated here because
+ * `themes.ts` lives in the renderer bundle and isn't reachable from main.
+ * Keep in sync when adding or renaming built-in themes.
+ */
+const BUILTIN_BG_PRIMARY: Record<string, string> = {
+  "Dark+ (VSCode)": "#1e1e1e",
+  "Light+ (VSCode)": "#ffffff",
+  "Monokai": "#272822",
+  "Xcode Light": "#ffffff",
+  "Xcode Dark": "#242529",
+  "Dark Modern (VSCode)": "#1f1f1f",
+  "Light Modern (VSCode)": "#ffffff",
+};
+
+const FALLBACK_DARK_BG = "#1e1e1e";
+const FALLBACK_LIGHT_BG = "#ffffff";
+
+/**
+ * Resolve the BrowserWindow `backgroundColor` from persisted appearance
+ * settings before any renderer code runs. Mirrors the renderer's
+ * `useThemeManager` resolution: honors `followSystemTheme` via
+ * `nativeTheme.shouldUseDarkColors`, then falls back to a constant dark
+ * value if no usable theme name is found.
+ *
+ * Custom user themes (saved on disk by `themes:save`) aren't visible from
+ * here without an extra disk read on the hot-path; if the active theme is
+ * custom we fall back to dark/light by system preference. The renderer's
+ * follow-up `window:setBackgroundColor` call corrects it within ms.
+ *
+ * @param settings - The persisted `appearance` block (may be undefined).
+ * @returns A hex color string suitable for `BrowserWindowConstructorOptions.backgroundColor`.
+ */
+function resolveInitialBackgroundColor(
+  settings: { themeName?: string; followSystemTheme?: boolean; darkTheme?: string; lightTheme?: string; colors?: Record<string, string> } | undefined,
+): string {
+  const systemDark = nativeTheme.shouldUseDarkColors;
+  if (!settings) return systemDark ? FALLBACK_DARK_BG : FALLBACK_LIGHT_BG;
+  if (settings.colors?.["bg-primary"]) return settings.colors["bg-primary"];
+  const activeName = settings.followSystemTheme
+    ? (systemDark ? settings.darkTheme : settings.lightTheme)
+    : settings.themeName;
+  if (activeName && BUILTIN_BG_PRIMARY[activeName]) return BUILTIN_BG_PRIMARY[activeName];
+  return systemDark ? FALLBACK_DARK_BG : FALLBACK_LIGHT_BG;
+}
+
 async function loadDevUrlWithRetry(
   win: BrowserWindow,
   url: string,
@@ -95,6 +142,7 @@ export async function createWindow(
     width: 1440,
     height: 960,
     show: false,
+    backgroundColor: resolveInitialBackgroundColor(configStore.get("settings")?.appearance),
     ...getWindowChromeOptions(),
     webPreferences: {
       preload: path.join(__dirname, "..", "preload.js"),

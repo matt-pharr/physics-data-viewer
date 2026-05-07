@@ -11,6 +11,13 @@ type IconProps = React.SVGProps<SVGSVGElement>;
 
 const defaults: IconProps = { width: 20, height: 20, viewBox: '0 0 20 20', fill: 'none', stroke: 'currentColor', strokeWidth: 1.5, strokeLinecap: 'round', strokeLinejoin: 'round' };
 
+/** Filled play triangle for execute / run actions. */
+export const PlayIcon: React.FC<IconProps> = (props) => (
+  <svg viewBox="0 0 20 20" fill="currentColor" width="12" height="12" {...props}>
+    <path d="M6 4.5v11a0.6 0.6 0 0 0 0.92 0.51l9-5.5a0.6 0.6 0 0 0 0-1.02l-9-5.5A0.6 0.6 0 0 0 6 4.5z" />
+  </svg>
+);
+
 /** Hierarchical tree / data browser icon. */
 export const TreeIcon: React.FC<IconProps> = (props) => (
   <svg {...defaults} {...props}>

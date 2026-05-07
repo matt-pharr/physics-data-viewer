@@ -844,6 +844,11 @@ export interface PDVApi {
     get(): Promise<Config>;
     set(updates: Partial<Config>): Promise<Config>;
   };
+  window: {
+    /** Sync the BrowserWindow's native background to the active theme so
+     *  live-resize gestures don't flash the OS-default white. */
+    setBackgroundColor(color: string): Promise<void>;
+  };
   autosave: {
     run(codeCells: unknown): Promise<{ saved: boolean }>;
     clear(dir?: string): Promise<void>;

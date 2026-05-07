@@ -10,7 +10,7 @@
  * - Push forwarding between comm router and renderer.
  */
 
-import { app, dialog, ipcMain, shell, type BrowserWindow } from "electron";
+import { BrowserWindow as ElectronBrowserWindow, app, dialog, ipcMain, shell, type BrowserWindow } from "electron";
 import * as fs from "fs/promises";
 import * as fsSync from "fs";
 import * as path from "path";
@@ -155,6 +155,16 @@ export function registerAppStateIpcHandlers(
     const next = { ...merged, ...configStore.getAll() };
     onConfigChanged?.(prev, next);
     return next;
+  });
+
+  ipcMain.handle(IPC.window.setBackgroundColor, (event, color: string) => {
+    // Sync the BrowserWindow's native background to the active theme's
+    // bg-primary so live-resize gestures don't expose OS-default white.
+    // Look up the source window so multi-window setups (gui-editor,
+    // module-window, etc.) each update the right native chrome.
+    if (typeof color !== "string" || !/^#[0-9a-fA-F]{6}$/.test(color)) return;
+    const sourceWin = ElectronBrowserWindow.fromWebContents(event.sender);
+    sourceWin?.setBackgroundColor(color);
   });
 
   ipcMain.handle(IPC.themes.get, async () => savedThemes);

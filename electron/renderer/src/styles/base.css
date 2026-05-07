@@ -30,6 +30,15 @@ body {
   -moz-osx-font-smoothing: grayscale;
 }
 
+/* ===== FOCUS RING =====
+   Low-specificity rule via :where() so per-component :focus rules that set
+   border-color still win for the border, while this rule layers an accent
+   ring on top via box-shadow. */
+:where(input, select, textarea):focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 35%, transparent);
+}
+
 /* ===== SCROLLBAR ===== */
 ::-webkit-scrollbar {
   width: 8px;

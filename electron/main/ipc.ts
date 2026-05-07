@@ -158,6 +158,10 @@ export const IPC = {
     get: "config:get",
     set: "config:set",
   },
+  /** BrowserWindow chrome channels. */
+  window: {
+    setBackgroundColor: "window:setBackgroundColor",
+  },
   /** Autosave management channels. */
   autosave: {
     run: "autosave:run",
@@ -1977,6 +1981,18 @@ export interface PDVApi {
      * @returns Updated merged config object.
      */
     set(updates: Partial<PDVConfig>): Promise<PDVConfig>;
+  };
+
+  /** BrowserWindow chrome controls. */
+  window: {
+    /**
+     * Update the native BrowserWindow background color so live-resize gestures
+     * don't expose the OS-default white behind the dark theme. Call this
+     * whenever the active theme's `bg-primary` changes.
+     *
+     * @param color - CSS hex string (`#rrggbb`).
+     */
+    setBackgroundColor(color: string): Promise<void>;
   };
 
   /** Autosave management. */

@@ -218,6 +218,7 @@
 .console-content {
   flex: 1;
   overflow-y: auto;
+  overflow-x: hidden;
   padding: 12px;
   font-family: var(--font-mono);
   font-size: 13px;
@@ -260,7 +261,8 @@
 .log-stdout,
 .log-stderr,
 .log-result,
-.log-error {
+.log-error,
+.log-traceback {
   margin: 0 0 6px;
   white-space: pre-wrap;
   word-break: break-word;
