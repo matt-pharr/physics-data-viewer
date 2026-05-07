@@ -38,6 +38,7 @@ const VirtualRowImpl = ({ index, style, ariaAttributes, flatNodes, selectedPath,
   return (
     <TreeNodeRow
       node={node}
+      index={index}
       selected={node.path === selectedPath}
       onExpand={onExpand}
       onDoubleClick={onDoubleClick}

@@ -62,6 +62,10 @@
   color: var(--error);
 }
 
+/* Base row.
+   Cascade order matters below — later rules override earlier ones at equal
+   specificity. Order is: base → striped (odd) → branch tint → hover →
+   selected → selected+hover. */
 .tree-row {
   display: flex;
   align-items: center;
@@ -71,7 +75,20 @@
   font-size: 13px;
   color: var(--text-primary);
   cursor: default;
-  border-bottom: 1px solid var(--bg-primary);
+  border-bottom: 1px solid transparent;
+}
+
+/* Absolute-row striping for leaves so densely-populated folders are
+   easier to scan. Branches get their own (heavier) tint below and
+   override this. */
+.tree-row.odd {
+  background-color: var(--bg-secondary);
+}
+
+/* Branch (folder/container) rows get a slightly elevated background so
+   they read as section headers regardless of stripe parity. */
+.tree-row.branch {
+  background-color: var(--bg-tertiary);
 }
 
 .tree-row:hover {
@@ -119,15 +136,32 @@
   line-height: 1;
 }
 
+/* Leaf names: regular weight, foreground text color. Branch names get
+   bumped to 600 below so folders read as section labels.
+   Accent is reserved for the *selected* state — using it for every
+   name dilutes the highlight. */
 .tree-key-text {
   font-weight: 500;
+  color: var(--text-primary);
+}
+
+.tree-row.branch .tree-key-text {
+  font-weight: 600;
+}
+
+.tree-row.selected .tree-key-text {
   color: var(--accent);
 }
 
+/* Type chip: bordered + transparent so it stays legible on every row
+   background variant (primary, stripe-secondary, branch-tertiary,
+   selected-accent-tint, hover). A solid fill collided with at least
+   one of those in some themes. */
 .tree-type-badge {
   display: inline-block;
-  padding: 2px 6px;
-  background-color: var(--bg-tertiary);
+  padding: 1px 6px;
+  background-color: transparent;
+  border: 1px solid var(--border-color);
   border-radius: 3px;
   font-size: 11px;
   color: var(--text-secondary);
@@ -136,8 +170,7 @@
   margin-left: 4px;
 }
 .tree-type-badge.subtle {
-  background-color: var(--bg-secondary);
-  color: var(--text-secondary);
+  opacity: 0.7;
 }
 
 .spinner {
