@@ -330,8 +330,24 @@ const App: React.FC = () => {
         setSettingsInitialTab('general');
         setShowSettings(true);
       } else if (payload.action === 'project:new') {
-        setCurrentProjectName(null);
-        setForceWelcome(true);
+        guardDirtyRef.current('start a new project', () => {
+          // Reset renderer-side project state so the workspace behind the
+          // splash isn't holding the prior project's tabs/name/checksum.
+          // Tree state lives in the kernel and gets cleared on the next
+          // language pick (which restarts the kernel via ensureKernel).
+          setCurrentProjectName(null);
+          setCurrentProjectDir(null);
+          setCellTabs([{ id: 1, code: '' }]);
+          setActiveCellTab(1);
+          setNoteTabs([]);
+          setActiveNoteTabId(null);
+          setLastChecksum(null);
+          setChecksumMismatch(false);
+          setSavedPdvVersion(null);
+          loadedProjectTabsRef.current = null;
+          setProjectDirty(false);
+          setForceWelcome(true);
+        });
       } else if (payload.action === 'recentProjects:clear') {
         void window.pdv.config.set({ recentProjects: [] }).then((updated) => {
           if (updated) setConfig((prev) => (prev ? { ...prev, recentProjects: [] } : prev));
@@ -1157,19 +1173,25 @@ const App: React.FC = () => {
     const dir = await window.pdv.files.pickDirectory(defaultPath);
     if (!dir) return;
     if (kernelStatus === 'ready') {
-      guardDirty('open another project', () => { void executeOpenProject(dir); });
+      guardDirty('open another project', () => {
+        dismissWelcome();
+        void executeOpenProject(dir);
+      });
     } else {
       await openProjectFromWelcome(dir);
     }
-  }, [currentProjectDir, kernelStatus, executeOpenProject, openProjectFromWelcome, guardDirty]);
+  }, [currentProjectDir, kernelStatus, executeOpenProject, openProjectFromWelcome, guardDirty, dismissWelcome]);
 
   const handleOpenRecent = useCallback(async (path: string) => {
     if (kernelStatus === 'ready') {
-      guardDirty('open another project', () => { void executeOpenProject(path); });
+      guardDirty('open another project', () => {
+        dismissWelcome();
+        void executeOpenProject(path);
+      });
     } else {
       await openProjectFromWelcome(path);
     }
-  }, [kernelStatus, executeOpenProject, openProjectFromWelcome, guardDirty]);
+  }, [kernelStatus, executeOpenProject, openProjectFromWelcome, guardDirty, dismissWelcome]);
 
   /**
    * Recover an orphaned autosave into the active kernel session. The recovered
