@@ -72,21 +72,58 @@ FORMAT_PY_LIB = "py_lib"
 FORMAT_FILE = "file"
 
 
-def _is_json_native(value: Any) -> bool:
-    """Return True if ``value`` can be round-tripped through ``json.dumps``.
+def _can_inline_json(value: Any) -> bool:
+    """Return True if ``value`` round-trips losslessly through JSON.
 
-    Used by :func:`serialize_node` to decide between the fast inline path for
-    plain dicts/lists of JSON-native values and the composite path that
-    emits per-leaf descriptors (for dicts containing ndarrays, DataFrames,
-    bytes, etc.).
+    Stricter than "json.dumps doesn't raise": rejects tuples (collapsed to
+    arrays), sets/frozensets, complex, bytes, and any value at any nesting
+    level whose Python type can't be reconstructed from JSON. Only str /
+    int / float / bool / None scalars and lists/dicts (with str keys)
+    composed of those are considered inline-safe.
+
+    Used by :func:`serialize_node` to decide between the fast inline path
+    and the composite/pickle paths that preserve type fidelity.
     """
-    import json  # noqa: PLC0415
+    if value is None or isinstance(value, (str, bool)):
+        return True
+    if isinstance(value, (int, float)) and not isinstance(value, complex):
+        return True
+    if isinstance(value, list):
+        return all(_can_inline_json(v) for v in value)
+    if isinstance(value, dict):
+        return all(
+            isinstance(k, str) and _can_inline_json(v) for k, v in value.items()
+        )
+    return False
 
+
+def _has_array_leaf(value: Any) -> bool:
+    """Return True if ``value`` or any nested value is an ndarray, DataFrame, or Series.
+
+    Used by the sequence-serialization path to choose between pickling the
+    whole container (safe for tuples/sets/complex/bytes leaves) and raising
+    a "split into a dict" error (when an array leaf is present and would
+    need its own file for fast access).
+    """
     try:
-        json.dumps(value)
-    except (TypeError, ValueError):
-        return False
-    return True
+        import numpy as np  # noqa: PLC0415
+
+        if isinstance(value, np.ndarray):
+            return True
+    except ImportError:
+        pass
+    try:
+        import pandas as pd  # noqa: PLC0415
+
+        if isinstance(value, (pd.DataFrame, pd.Series)):
+            return True
+    except ImportError:
+        pass
+    if isinstance(value, dict):
+        return any(_has_array_leaf(v) for v in value.values())
+    if isinstance(value, (list, tuple, set, frozenset)):
+        return any(_has_array_leaf(v) for v in value)
+    return False
 
 
 def python_type_string(value: Any) -> str:
@@ -532,7 +569,7 @@ def serialize_node(
         return descriptor
 
     if kind == KIND_MAPPING:
-        if _is_json_native(value):
+        if _can_inline_json(value):
             descriptor["storage"] = {
                 "backend": "inline",
                 "format": FORMAT_INLINE,
@@ -540,21 +577,11 @@ def serialize_node(
             }
             descriptor["metadata"] = {"preview": preview}
             return descriptor
-        # Composite mapping: one or more leaves are not JSON-serializable.
-        # Emit a container descriptor; the save walker (_collect_nodes) is
-        # responsible for recursing into the dict and emitting per-leaf
-        # descriptors so each leaf reaches its own fast path (.npy, .pickle,
-        # etc). Reconstructed on load as a plain dict, not a PDVTree.
-        descriptor["has_children"] = True
-        descriptor["storage"] = {"backend": "none", "format": "none"}
-        descriptor["metadata"] = {"preview": preview, "composite": True}
-        return descriptor
-
-    if kind == KIND_SEQUENCE:
-        # Tuples, sets, and frozensets all need pickle to preserve their
-        # concrete type — JSON collapses tuples to lists and can't represent
-        # sets at all. Lists of JSON-native values stay inline.
-        if isinstance(value, (tuple, set, frozenset)):
+        if not _has_array_leaf(value):
+            # No ndarray/DataFrame/Series anywhere — pickle the whole dict so
+            # nested tuples, sets, complex, bytes, etc. round-trip with type
+            # fidelity. (The composite/per-leaf path is reserved for dicts
+            # whose array leaves benefit from their own files.)
             node_uuid = generate_node_uuid()
             filename = key + ".pickle"
             file_path = uuid_tree_path(working_dir, node_uuid, filename)
@@ -565,7 +592,18 @@ def serialize_node(
             descriptor["storage"] = _file_storage(node_uuid, filename, FORMAT_PICKLE)
             descriptor["metadata"] = {"preview": preview}
             return descriptor
-        if _is_json_native(value):
+        # Composite mapping: at least one array leaf. Emit a container
+        # descriptor; the save walker (_collect_nodes) recurses and emits
+        # per-leaf descriptors so each array reaches its own fast path
+        # (.npy, .pickle, etc). Reconstructed on load as a plain dict.
+        descriptor["has_children"] = True
+        descriptor["storage"] = {"backend": "none", "format": "none"}
+        descriptor["metadata"] = {"preview": preview, "composite": True}
+        return descriptor
+
+    if kind == KIND_SEQUENCE:
+        # Lists of purely JSON-faithful values stay inline (cheap, no file).
+        if _can_inline_json(value):
             descriptor["storage"] = {
                 "backend": "inline",
                 "format": FORMAT_INLINE,
@@ -573,12 +611,28 @@ def serialize_node(
             }
             descriptor["metadata"] = {"preview": preview}
             return descriptor
+        # Anything else — tuples, sets, frozensets, lists of tuples, lists
+        # containing complex/bytes — pickles, which preserves type fidelity
+        # at every nesting level. Sequences containing ndarray/DataFrame
+        # leaves are still rejected: those need to be split into a dict so
+        # each array gets its own file for fast random access.
+        if not _has_array_leaf(value):
+            node_uuid = generate_node_uuid()
+            filename = key + ".pickle"
+            file_path = uuid_tree_path(working_dir, node_uuid, filename)
+            ensure_parent(file_path)
+            with open(file_path, "wb") as fh:
+                pickle.dump(value, fh)
+            descriptor["uuid"] = node_uuid
+            descriptor["storage"] = _file_storage(node_uuid, filename, FORMAT_PICKLE)
+            descriptor["metadata"] = {"preview": preview}
+            return descriptor
         raise PDVSerializationError(
-            f"Sequence at '{tree_path}' contains values that are not "
-            f"JSON-serializable (e.g. ndarray, DataFrame). PDV does not yet "
-            f"support composite sequences — wrap the values in a dict with "
-            f"named keys, e.g. {{'0': arr0, '1': arr1}}, so each element "
-            f"can be stored in its own file."
+            f"Sequence at '{tree_path}' contains array leaves (ndarray, "
+            f"DataFrame, Series). PDV does not yet support composite "
+            f"sequences — wrap the values in a dict with named keys, "
+            f"e.g. {{'0': arr0, '1': arr1}}, so each element can be "
+            f"stored in its own file."
         )
 
     if kind == KIND_BINARY:
