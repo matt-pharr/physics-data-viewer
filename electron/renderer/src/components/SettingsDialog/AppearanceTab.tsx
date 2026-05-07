@@ -9,6 +9,55 @@ import React, { useState } from 'react';
 import type { Theme } from '../../types';
 import { BUILTIN_THEMES, CSS_VAR_GROUPS, THEME_PAIRS } from '../../themes';
 
+/**
+ * Range-input wrapper that sets the `--slider-pct` custom property the
+ * gradient-track CSS expects, so call sites don't have to compute the
+ * fill percentage by hand. Without this, every consumer of
+ * `.appearance-editor-slider` would have to thread the math through
+ * an inline `style`, and any consumer that forgot would render with
+ * an empty/incorrect fill bar (the CSS no longer defaults to 50%
+ * specifically to make that bug visible if it ever recurs).
+ */
+type AppearanceSliderProps = Omit<
+  React.InputHTMLAttributes<HTMLInputElement>,
+  'type' | 'value' | 'min' | 'max' | 'onChange'
+> & {
+  value: number;
+  min: number;
+  max: number;
+  onChange: (value: number) => void;
+};
+
+const AppearanceSlider: React.FC<AppearanceSliderProps> = ({
+  value,
+  min,
+  max,
+  onChange,
+  className,
+  style,
+  ...rest
+}) => {
+  const range = max - min;
+  const pct = range > 0 ? Math.max(0, Math.min(100, ((value - min) / range) * 100)) : 0;
+  const mergedStyle: React.CSSProperties = {
+    ...style,
+    ['--slider-pct' as string]: `${pct}%`,
+  };
+  const mergedClass = ['appearance-editor-slider', className].filter(Boolean).join(' ');
+  return (
+    <input
+      {...rest}
+      type="range"
+      value={value}
+      min={min}
+      max={max}
+      onChange={(e) => onChange(Number(e.target.value))}
+      className={mergedClass}
+      style={mergedStyle}
+    />
+  );
+};
+
 export interface AppearanceTabProps {
   // Theme state
   followSystemTheme: boolean;
@@ -305,16 +354,13 @@ export const AppearanceTab: React.FC<AppearanceTabProps> = ({
     <div className="appearance-editor-grid">
       <label htmlFor="ae-read-max-width">Read-mode width</label>
       <div className="appearance-editor-row">
-        <input
+        <AppearanceSlider
           id="ae-read-max-width"
-          type="range"
           min={600}
           max={2000}
           step={50}
           value={readViewMaxWidth}
-          onChange={(e) => onReadViewMaxWidthChange(Number(e.target.value))}
-          className="appearance-editor-slider"
-          style={{ ["--slider-pct" as string]: `${((readViewMaxWidth - 600) / (2000 - 600)) * 100}%` }}
+          onChange={onReadViewMaxWidthChange}
         />
         <span className="appearance-editor-unit">{readViewMaxWidth} px</span>
       </div>

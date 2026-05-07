@@ -391,7 +391,12 @@
   border-radius: 2px;
   outline: none;
   cursor: pointer;
-  --slider-pct: 50%;
+  /* Default the fill at 0%, not 50%, so a slider rendered without the
+     inline `--slider-pct` style appears obviously empty rather than
+     deceptively half-filled. The `<AppearanceSlider>` wrapper in
+     `AppearanceTab.tsx` always sets the variable; this default only
+     ever shows up if a future consumer goes around the wrapper. */
+  --slider-pct: 0%;
 }
 
 .appearance-editor-slider::-webkit-slider-runnable-track {
