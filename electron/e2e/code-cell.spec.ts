@@ -7,6 +7,7 @@
  */
 
 import { test, expect } from "@playwright/test";
+import { expectKernelReady } from "./helpers/kernel-status";
 import { launchPDV, type LaunchedApp } from "./helpers/launch";
 
 let launched: LaunchedApp;
@@ -15,7 +16,7 @@ test.beforeAll(async () => {
   launched = await launchPDV();
   // Boot the kernel once for both cases.
   await launched.window.getByRole("button", { name: "New Python Project" }).click();
-  await expect(launched.window.getByText(/●\s+Connected\b/)).toBeVisible({ timeout: 60_000 });
+  await expectKernelReady(launched.window);
 });
 
 test.afterAll(async () => {
@@ -30,7 +31,7 @@ async function runInCodeCell(code: string): Promise<void> {
   await editor.focus();
   const modifier = process.platform === "darwin" ? "Meta" : "Control";
   await window.keyboard.press(`${modifier}+a`);
-  await window.keyboard.press("Delete");
+  await window.keyboard.press("Backspace");
   await window.keyboard.type(code);
   await window.getByRole("button", { name: "Execute" }).click();
 }

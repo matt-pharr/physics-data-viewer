@@ -9,6 +9,7 @@
  */
 
 import { test, expect } from "@playwright/test";
+import { expectKernelReady } from "./helpers/kernel-status";
 import { launchPDV, type LaunchedApp } from "./helpers/launch";
 
 let launched: LaunchedApp;
@@ -16,7 +17,7 @@ let launched: LaunchedApp;
 test.beforeAll(async () => {
   launched = await launchPDV();
   await launched.window.getByRole("button", { name: "New Python Project" }).click();
-  await expect(launched.window.getByText(/●\s+Connected\b/)).toBeVisible({ timeout: 60_000 });
+  await expectKernelReady(launched.window);
 });
 
 test.afterAll(async () => {

@@ -20,6 +20,7 @@
 import { test, expect } from "@playwright/test";
 import * as fs from "fs/promises";
 import * as path from "path";
+import { expectKernelReady } from "./helpers/kernel-status";
 import { launchPDV } from "./helpers/launch";
 import { makeAutosaveOrphan } from "./helpers/fixtures";
 
@@ -31,7 +32,7 @@ async function clickRecoverAndWaitForKernel(window: import("@playwright/test").P
   // status indicator to flip to Connected.
   await expect(window.getByRole("heading", { name: "Recoverable Unsaved Sessions" })).toBeVisible({ timeout: 15_000 });
   await window.getByRole("button", { name: "Recover" }).first().click();
-  await expect(window.getByText(/●\s+Connected\b/)).toBeVisible({ timeout: 60_000 });
+  await expectKernelReady(window);
 }
 
 test("orphan with tree state only is restored on Recover", async () => {

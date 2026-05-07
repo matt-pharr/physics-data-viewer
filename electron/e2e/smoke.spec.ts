@@ -7,6 +7,7 @@
  */
 
 import { test, expect } from "@playwright/test";
+import type { PDVApi } from "../renderer/src/types/pdv";
 import { launchPDV, type LaunchedApp } from "./helpers/launch";
 
 let launched: LaunchedApp;
@@ -26,8 +27,7 @@ test("Electron launches the prod bundle", async () => {
 
 test("preload exposes window.pdv to the renderer", async () => {
   const exposed = await launched.window.evaluate(() => {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    return typeof (window as any).pdv;
+    return typeof (window as unknown as { pdv: PDVApi }).pdv;
   });
   expect(exposed).toBe("object");
 });

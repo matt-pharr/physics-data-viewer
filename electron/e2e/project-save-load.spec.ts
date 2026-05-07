@@ -14,13 +14,14 @@ import { test, expect } from "@playwright/test";
 import * as fs from "fs/promises";
 import * as os from "os";
 import * as path from "path";
+import { expectKernelReady } from "./helpers/kernel-status";
 import { launchPDV } from "./helpers/launch";
 import { stubDialog } from "./helpers/dialog-mock";
 import { sendMenuAction } from "./helpers/menu-action";
 
 async function bootKernel(window: import("@playwright/test").Page): Promise<void> {
   await window.getByRole("button", { name: "New Python Project" }).click();
-  await expect(window.getByText(/●\s+Connected\b/)).toBeVisible({ timeout: 60_000 });
+  await expectKernelReady(window);
 }
 
 async function runCode(window: import("@playwright/test").Page, code: string): Promise<void> {
@@ -28,7 +29,7 @@ async function runCode(window: import("@playwright/test").Page, code: string): P
   await editor.focus();
   const modifier = process.platform === "darwin" ? "Meta" : "Control";
   await window.keyboard.press(`${modifier}+a`);
-  await window.keyboard.press("Delete");
+  await window.keyboard.press("Backspace");
   await window.keyboard.type(code);
   await window.getByRole("button", { name: "Execute" }).click();
 }

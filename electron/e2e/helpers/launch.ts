@@ -120,12 +120,15 @@ export async function launchPDV(opts: LaunchOptions = {}): Promise<LaunchedApp> 
       HOME: homeDir,
       USERPROFILE: homeDir,
       PYTHON_PATH: pythonPath,
-      // Pin matplotlib's cache to a persistent dir so the kernel doesn't
-      // rebuild fonts (~15s) every test run and blow the bootstrap timeout.
-      MPLCONFIGDIR: MPL_CACHE_DIR,
-      PDV_E2E: "1",
       ELECTRON_DISABLE_SECURITY_WARNINGS: "1",
       ...(opts.env ?? {}),
+      // Critical E2E knobs go after `opts.env` so a caller-supplied env
+      // object can't accidentally override them. PDV_E2E gates the orphan-
+      // cleanup skip and the script.edit short-circuit; MPLCONFIGDIR points
+      // matplotlib at the persistent font cache so we don't rebuild it
+      // (~15s) every spec.
+      MPLCONFIGDIR: MPL_CACHE_DIR,
+      PDV_E2E: "1",
     },
   });
 

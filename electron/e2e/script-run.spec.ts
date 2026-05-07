@@ -18,6 +18,8 @@
 
 import { test, expect } from "@playwright/test";
 import * as fs from "fs/promises";
+import type { PDVApi } from "../renderer/src/types/pdv";
+import { expectKernelReady } from "./helpers/kernel-status";
 import { launchPDV, type LaunchedApp } from "./helpers/launch";
 
 let launched: LaunchedApp;
@@ -25,7 +27,7 @@ let launched: LaunchedApp;
 test.beforeAll(async () => {
   launched = await launchPDV();
   await launched.window.getByRole("button", { name: "New Python Project" }).click();
-  await expect(launched.window.getByText(/●\s+Connected\b/)).toBeVisible({ timeout: 60_000 });
+  await expectKernelReady(launched.window);
 });
 
 test.afterAll(async () => {
@@ -40,14 +42,14 @@ test("create script → overwrite body → run defaults → side effect lands in
   // renderer doesn't expose the scriptPath to us through the dialog flow,
   // and we need the on-disk path to overwrite the stub.
   const scriptPath = await window.evaluate(async () => {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const pdv = (window as any).pdv;
+    const pdv = (window as unknown as { pdv: PDVApi }).pdv;
     const kernels = await pdv.kernels.list();
     const kernelId = kernels[0]?.id;
     if (!kernelId) throw new Error("no active kernel");
     const result = await pdv.tree.createScript(kernelId, "", "write_demo");
     if (!result?.success) throw new Error(result?.error ?? "createScript failed");
-    return result.scriptPath as string;
+    if (!result.scriptPath) throw new Error("createScript returned no scriptPath");
+    return result.scriptPath;
   });
   expect(scriptPath).toBeTruthy();
 
@@ -76,7 +78,7 @@ test("create script → overwrite body → run defaults → side effect lands in
   await editor.focus();
   const modifier = process.platform === "darwin" ? "Meta" : "Control";
   await window.keyboard.press(`${modifier}+a`);
-  await window.keyboard.press("Delete");
+  await window.keyboard.press("Backspace");
   await window.keyboard.type("pdv_tree['written']");
   await window.getByRole("button", { name: "Execute" }).click();
 

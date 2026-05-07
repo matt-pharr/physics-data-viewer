@@ -7,6 +7,7 @@
  */
 
 import { test, expect } from "@playwright/test";
+import { expectKernelReady } from "./helpers/kernel-status";
 import { launchPDV, type LaunchedApp } from "./helpers/launch";
 
 let launched: LaunchedApp;
@@ -29,8 +30,8 @@ test("clicking New Python Project boots a kernel and reaches Connected", async (
   const { window } = launched;
   await window.getByRole("button", { name: "New Python Project" }).click();
 
-  // The status bar text flips from "Disconnected" → "Starting..." → "Connected"
-  // once the kernel handshake completes. Anchor on the leading bullet glyph so
-  // we don't accidentally match "Disconnected".
-  await expect(window.getByText(/●\s+Connected\b/)).toBeVisible({ timeout: 60_000 });
+  // The kernel transitions: disconnected → starting → ready. Assert against
+  // the underlying state machine value via `data-status` so a UI copy change
+  // doesn't break this spec.
+  await expectKernelReady(window);
 });

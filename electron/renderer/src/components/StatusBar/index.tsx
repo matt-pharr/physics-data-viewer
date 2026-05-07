@@ -115,7 +115,11 @@ export const StatusBar: React.FC<StatusBarProps> = ({
             {checksumMismatch ? '⚠' : '◆'} {lastChecksum}
           </span>
         )}
-        <span className={`status-item ${kernelStatus === 'ready' ? 'status-connected' : kernelStatus === 'error' ? 'status-error' : ''}`}>
+        <span
+          className={`status-item ${kernelStatus === 'ready' ? 'status-connected' : kernelStatus === 'error' ? 'status-error' : ''}`}
+          data-testid="kernel-status"
+          data-status={kernelStatus}
+        >
           ● {kernelStatus === 'ready' ? 'Connected' : kernelStatus === 'starting' ? 'Starting...' : 'Disconnected'}
         </span>
         <span className="status-item">
