@@ -870,6 +870,38 @@
   flex-direction: column;
 }
 
+/* ===== DIALOG-BODY FORM CONTROLS =====
+   Generic styling for the `<label>{text}<input/></label>` pattern used
+   by the Create / Rename / Move / Duplicate tree dialogs and any other
+   modal that follows the same shape. Scoped via `:has()` to labels
+   that *contain* a text input — this avoids stomping on labels with
+   non-input contents (e.g. `.param-input label` which holds a name +
+   type annotation alongside the input as a sibling). */
+.dialog-body label:has(> input[type="text"]) {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 16px;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-primary);
+}
+
+.dialog-body label > input[type="text"] {
+  padding: 8px 12px;
+  background-color: var(--bg-primary);
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  color: var(--text-primary);
+  font-size: 14px;
+  font-family: var(--font-sans);
+}
+
+.dialog-body label > input[type="text"]:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
 .script-info {
   display: flex;
   flex-direction: column;
@@ -913,13 +945,13 @@
 .param-list {
   display: flex;
   flex-direction: column;
-  gap: 16px;
+  gap: 12px;
 }
 
 .param-input {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 4px;
 }
 
 .param-input label {
@@ -927,23 +959,26 @@
   font-weight: 500;
   color: var(--text-primary);
   display: flex;
-  align-items: center;
+  flex-direction: row;
+  align-items: baseline;
   gap: 6px;
 }
 
 .required {
   color: var(--error);
+  font-weight: 600;
 }
 
 .param-type {
   font-size: 11px;
   color: var(--text-secondary);
   font-weight: normal;
+  font-family: var(--font-mono);
 }
 
 .param-input input[type="text"],
 .param-input input[type="number"] {
-  padding: 8px 12px;
+  padding: 6px 10px;
   background-color: var(--bg-primary);
   border: 1px solid var(--border-color);
   border-radius: 4px;

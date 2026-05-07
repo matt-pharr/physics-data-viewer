@@ -1452,6 +1452,7 @@ const App: React.FC = () => {
         <MoveDialog
           currentPath={moveTarget.path}
           nodeType={moveTarget.type}
+          kernelId={currentKernelId}
           onCancel={() => setMoveTarget(null)}
           onMove={(newPath) => void runTreeAction(
             () => window.pdv.tree.move(currentKernelId, moveTarget.path, newPath),
