@@ -9,43 +9,16 @@ afterEach(() => {
   cleanup();
 });
 
+// Parent-path rendering, name sanitization on Enter, and Escape/overlay
+// dismissal are covered by `tree-create-and-run.spec.ts`. The whitespace-only
+// disable check is the only behavior that the E2E spec doesn't naturally hit
+// (the user there always types a real name), so it stays as a unit test.
 describe('CreateScriptDialog', () => {
-  it('renders parent path and initial disabled create button', () => {
-    render(<CreateScriptDialog parentPath="scripts.analysis" onCreate={vi.fn()} onCancel={vi.fn()} />);
-    expect(screen.getByText('scripts.analysis')).toBeTruthy();
-    expect((screen.getByRole('button', { name: 'Create' }) as HTMLButtonElement).disabled).toBe(true);
-  });
-
-  it('sanitizes names and submits via Enter', async () => {
-    const onCreate = vi.fn();
-    render(<CreateScriptDialog parentPath="scripts" onCreate={onCreate} onCancel={vi.fn()} />);
-    const user = userEvent.setup();
-
-    const input = screen.getByPlaceholderText('my_script');
-    await user.type(input, 'my script{enter}');
-
-    expect(screen.getByText('Will create my_script.py inside the tree folder')).toBeTruthy();
-    expect(onCreate).toHaveBeenCalledWith('my_script');
-  });
-
   it('keeps create disabled for whitespace-only names', async () => {
     render(<CreateScriptDialog parentPath="" onCreate={vi.fn()} onCancel={vi.fn()} />);
     const user = userEvent.setup();
     const input = screen.getByPlaceholderText('my_script');
     await user.type(input, '   ');
     expect((screen.getByRole('button', { name: 'Create' }) as HTMLButtonElement).disabled).toBe(true);
-  });
-
-  it('calls onCancel for Escape and overlay click', async () => {
-    const onCancel = vi.fn();
-    render(<CreateScriptDialog parentPath="" onCreate={vi.fn()} onCancel={onCancel} />);
-    const user = userEvent.setup();
-
-    const input = screen.getByPlaceholderText('my_script');
-    await user.type(input, '{escape}');
-    expect(onCancel).toHaveBeenCalledTimes(1);
-
-    await user.click(document.querySelector('.modal-overlay') as HTMLElement);
-    expect(onCancel).toHaveBeenCalledTimes(2);
   });
 });

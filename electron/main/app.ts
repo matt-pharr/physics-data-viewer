@@ -108,10 +108,16 @@ export async function createWindow(
   // Each session writes a session.lock with its PID; dirs whose owner is
   // no longer running (or that lack a lockfile) are treated as orphans.
   // Scan both the default location and any custom location from config.
+  // Skipped under PDV_E2E so fixture-seeded orphans (autosave-recovery
+  // spec) survive into the test, and so a developer running the suite
+  // doesn't have their real ~/.PDV/working state mutated.
   const defaultWorkingBase = path.join(os.homedir(), ".PDV", "working");
   const customWorkingBase = configStore.get("workingDirBase");
   const workingBases = new Set([defaultWorkingBase]);
   if (customWorkingBase) workingBases.add(customWorkingBase);
+  if (process.env.PDV_E2E === "1") {
+    workingBases.clear();
+  }
   for (const workingBase of workingBases) {
     try {
       const entries = fsSync.readdirSync(workingBase);

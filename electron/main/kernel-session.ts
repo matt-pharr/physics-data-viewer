@@ -121,7 +121,13 @@ export async function initializeKernelSession(
   // the kernel's shell thread is ready to accept the next message.
   // Without this, pdv.init (a comm_msg) can be silently lost on the
   // ROUTER socket under ipykernel ≥ 7.
-  await kernelManager.ping(kernelId);
+  //
+  // The default 5s ping timeout is tight on cold boots — pdv.bootstrap
+  // imports/configures matplotlib and the asyncio shell handler in
+  // ipykernel ≥ 7 is sometimes still draining bootstrap frames when the
+  // ping arrives. Use the same headroom we give pdv.ready (15s for
+  // Python, 60s for Julia).
+  await kernelManager.ping(kernelId, readyTimeoutMs);
   const workingDir = await projectManager.createWorkingDir(workingDirBase);
   await commRouter.request(PDVMessageType.INIT, {
     working_dir: workingDir,

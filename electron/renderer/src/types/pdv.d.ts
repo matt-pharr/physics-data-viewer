@@ -831,7 +831,7 @@ export interface PDVApi {
   project: {
     save(saveDir: string, codeCells: unknown, projectName?: string): Promise<ProjectSaveResult>;
     load(saveDir: string, options?: { restoreFromAutosave?: boolean }): Promise<ProjectLoadResult>;
-    new(): Promise<boolean>;
+    new: () => Promise<boolean>;
     peekLanguages(paths: string[]): Promise<Record<string, "python" | "julia">>;
     peekManifest(dir: string): Promise<ProjectManifestPeek>;
     onLoaded(callback: (payload: Record<string, unknown>) => void): () => void;

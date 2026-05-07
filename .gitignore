@@ -18,6 +18,9 @@ electron/.cache/
 electron/renderer/dist/
 electron/logs
 electron/.mcp.json
+electron/playwright-report/
+electron/test-results/
+electron/e2e/.fixtures-cache/
 package-lock.json
 
 pdv-icon.iconset
