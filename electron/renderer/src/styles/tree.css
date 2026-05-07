@@ -92,6 +92,14 @@
   background-color: var(--bg-hover);
 }
 
+/* Branch hover override: in some light themes (Xcode Light, Light Modern)
+   `bg-hover` is *lighter* than `bg-tertiary`, so hovering a folder row
+   would make it recede instead of pop. Use an accent-tinted blend on top
+   of the branch tint so the direction is consistent across every theme. */
+.tree-row.branch:hover {
+  background-color: color-mix(in srgb, var(--accent) 12%, var(--bg-tertiary));
+}
+
 .tree-row.selected {
   background-color: color-mix(in srgb, var(--accent) 18%, transparent);
   border-left-color: var(--accent);
