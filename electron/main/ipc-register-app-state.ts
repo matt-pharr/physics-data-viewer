@@ -135,6 +135,23 @@ export function registerAppStateIpcHandlers(
 
   ipcMain.handle(IPC.about.getVersion, () => app.getVersion());
 
+  ipcMain.handle(IPC.about.openRepoPage, async () => {
+    await shell.openExternal("https://github.com/matt-pharr/physics-data-viewer");
+  });
+
+  ipcMain.handle(IPC.about.openIssuesPage, async () => {
+    await shell.openExternal("https://github.com/matt-pharr/physics-data-viewer/issues");
+  });
+
+  ipcMain.handle(IPC.about.openDocsPage, async () => {
+    // Version-pinned docs URL. `app.getVersion()` reads the running
+    // build's package.json version, so users always see the docs that
+    // match the binary they're running — even if they're on an older
+    // release that wouldn't reflect newer site changes.
+    const version = app.getVersion();
+    await shell.openExternal(`https://matt-pharr.github.io/physics-data-viewer/${version}/`);
+  });
+
   // Auto-updater
   initAutoUpdater(win, configStore);
   ipcMain.handle(IPC.updater.checkForUpdates, async () => { await checkForUpdates(configStore); });

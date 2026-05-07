@@ -172,6 +172,9 @@ const api: PDVApi = {
   },
   about: {
     getVersion: () => ipcRenderer.invoke(IPC.about.getVersion),
+    openRepoPage: () => ipcRenderer.invoke(IPC.about.openRepoPage),
+    openIssuesPage: () => ipcRenderer.invoke(IPC.about.openIssuesPage),
+    openDocsPage: () => ipcRenderer.invoke(IPC.about.openDocsPage),
   },
   updater: {
     checkForUpdates: () => ipcRenderer.invoke(IPC.updater.checkForUpdates),

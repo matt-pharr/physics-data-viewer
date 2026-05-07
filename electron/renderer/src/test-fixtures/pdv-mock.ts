@@ -142,6 +142,9 @@ function buildBase() {
     },
     about: {
       getVersion: stub<PDVApi["about"]["getVersion"]>(async () => "0.0.0-test"),
+      openRepoPage: stub<PDVApi["about"]["openRepoPage"]>(async () => undefined),
+      openIssuesPage: stub<PDVApi["about"]["openIssuesPage"]>(async () => undefined),
+      openDocsPage: stub<PDVApi["about"]["openDocsPage"]>(async () => undefined),
     },
     updater: {
       checkForUpdates: stub<PDVApi["updater"]["checkForUpdates"]>(async () => undefined),

@@ -97,14 +97,39 @@ export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({
   return (
     <div className="welcome-overlay">
       <div className="welcome-card">
-        {/* Logo */}
+        {/* Logo — paths copied verbatim from `assets/pdv-icon.svg`, with
+            the same theme-aware color mapping used by the About tab so
+            the two surfaces share one mark. The rounded-square backdrop
+            from the desktop icon is omitted; the welcome screen sits on
+            bg-primary so the alpha-particle stands on its own. */}
         <div className="welcome-logo">
-          <svg className="welcome-logo-icon" width="72" height="72" viewBox="0 0 80 80" xmlns="http://www.w3.org/2000/svg">
-            <circle cx="40" cy="40" r="36" fill="none" stroke="var(--text-secondary)" strokeWidth="2" opacity=".2"/>
-            <circle cx="33" cy="33" r="14" fill="var(--accent)"/>
-            <circle cx="47" cy="33" r="14" fill="var(--text-secondary)"/>
-            <circle cx="33" cy="47" r="14" fill="var(--text-secondary)"/>
-            <circle cx="47" cy="47" r="14" fill="var(--accent)"/>
+          <svg className="welcome-logo-icon" width="80" height="80" viewBox="0 0 1024 1024" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+            <path
+              fill="currentColor"
+              opacity="0.1"
+              d="M 987.428589 512 C 987.428589 774.571899 774.571899 987.428589 512 987.428589 C 249.428055 987.428589 36.57143 774.571899 36.57143 512 C 36.57143 249.42804 249.428055 36.571411 512 36.571411 C 774.571899 36.571411 987.428589 249.42804 987.428589 512 Z"
+            />
+            <path
+              fill="currentColor"
+              opacity="0.14"
+              d="M 914.285706 512 C 914.285706 734.17627 734.17627 914.285706 512 914.285706 C 289.82373 914.285706 109.714287 734.17627 109.714287 512 C 109.714287 289.82373 289.82373 109.714294 512 109.714294 C 734.17627 109.714294 914.285706 289.82373 914.285706 512 Z"
+            />
+            <path
+              fill="var(--accent)"
+              d="M 603.428589 420.571411 C 603.428589 521.560669 521.560669 603.428589 420.571442 603.428589 C 319.582214 603.428589 237.714279 521.560669 237.714279 420.571411 C 237.714279 319.582153 319.582214 237.714294 420.571442 237.714294 C 521.560669 237.714294 603.428589 319.582153 603.428589 420.571411 Z"
+            />
+            <path
+              fill="color-mix(in srgb, var(--accent) 60%, white)"
+              d="M 786.285706 420.571411 C 786.285706 521.560669 704.417786 603.428589 603.428589 603.428589 C 502.439362 603.428589 420.571442 521.560669 420.571442 420.571411 C 420.571442 319.582153 502.439362 237.714294 603.428589 237.714294 C 704.417786 237.714294 786.285706 319.582153 786.285706 420.571411 Z"
+            />
+            <path
+              fill="color-mix(in srgb, var(--accent) 60%, white)"
+              d="M 603.428589 603.428589 C 603.428589 704.417725 521.560669 786.285706 420.571442 786.285706 C 319.582214 786.285706 237.714279 704.417725 237.714279 603.428589 C 237.714279 502.439331 319.582214 420.571411 420.571442 420.571411 C 521.560669 420.571411 603.428589 502.439331 603.428589 603.428589 Z"
+            />
+            <path
+              fill="var(--accent)"
+              d="M 786.285706 603.428589 C 786.285706 704.417725 704.417786 786.285706 603.428589 786.285706 C 502.439362 786.285706 420.571442 704.417725 420.571442 603.428589 C 420.571442 502.439331 502.439362 420.571411 603.428589 420.571411 C 704.417786 420.571411 786.285706 502.439331 786.285706 603.428589 Z"
+            />
           </svg>
           <h1 className="welcome-title">Physics Data Viewer</h1>
         </div>

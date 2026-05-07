@@ -865,6 +865,9 @@ export interface PDVApi {
   };
   about: {
     getVersion(): Promise<string>;
+    openRepoPage(): Promise<void>;
+    openIssuesPage(): Promise<void>;
+    openDocsPage(): Promise<void>;
   };
   updater: {
     checkForUpdates(): Promise<void>;

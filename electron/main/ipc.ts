@@ -174,6 +174,9 @@ export const IPC = {
   /** App info channels. */
   about: {
     getVersion: "about:getVersion",
+    openRepoPage: "about:openRepoPage",
+    openIssuesPage: "about:openIssuesPage",
+    openDocsPage: "about:openDocsPage",
   },
   /** App auto-update channels. */
   updater: {
@@ -2074,6 +2077,12 @@ export interface PDVApi {
      * @returns Version string, e.g. "0.0.2".
      */
     getVersion(): Promise<string>;
+    /** Open the project's GitHub repository in the user's browser. */
+    openRepoPage(): Promise<void>;
+    /** Open the project's GitHub issues page in the user's browser. */
+    openIssuesPage(): Promise<void>;
+    /** Open the docs site for the running app version in the user's browser. */
+    openDocsPage(): Promise<void>;
   };
 
   /** App auto-update operations. */

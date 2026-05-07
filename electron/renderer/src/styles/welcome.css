@@ -32,8 +32,12 @@
 }
 
 .welcome-logo-icon {
+  /* `color` resolves the SVG's `currentColor` (the two faint electron-
+     shell rings). The accent-colored nucleons use `var(--accent)`
+     directly so the global icon opacity used previously was dimming
+     them along with the rings — removed. The rings have their own
+     inline opacity (0.10 / 0.14) inside the SVG. */
   color: var(--text-secondary);
-  opacity: 0.8;
 }
 
 .welcome-title {
