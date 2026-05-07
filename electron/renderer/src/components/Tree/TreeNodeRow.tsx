@@ -75,8 +75,6 @@ function resolveTypeLabel(type: string, pythonType?: string): string {
 
 interface TreeNodeRowProps {
   node: TreeNodeData & { depth: number };
-  /** Position in the virtualized flat list. Used for absolute-row striping. */
-  index?: number;
   selected?: boolean;
   onExpand: (node: TreeNodeData) => void;
   onDoubleClick: (node: TreeNodeData) => void;
@@ -89,7 +87,6 @@ interface TreeNodeRowProps {
 /** Render one row in the tree table view. */
 const TreeNodeRowInner: React.FC<TreeNodeRowProps> = ({
   node,
-  index,
   selected,
   onExpand,
   onDoubleClick,
@@ -106,7 +103,6 @@ const TreeNodeRowInner: React.FC<TreeNodeRowProps> = ({
     : `${node.key} has no children`;
   const indent = `calc(${node.depth || 0} * var(--tree-indent-size))`;
   const isBranch = BRANCH_TYPES.has(node.type);
-  const parityClass = typeof index === 'number' && index % 2 === 1 ? 'odd' : 'even';
 
   const handleExpandClick = (e: React.MouseEvent) => {
     e.stopPropagation();
@@ -117,11 +113,18 @@ const TreeNodeRowInner: React.FC<TreeNodeRowProps> = ({
 
   return (
     <div
-      className={`tree-row ${parityClass} ${isBranch ? 'branch' : 'leaf'}${selected ? ' selected' : ''}`}
+      className={`tree-row ${isBranch ? 'branch' : 'leaf'}${selected ? ' selected' : ''}`}
       style={style}
       {...ariaAttributes}
       onDoubleClick={() => onDoubleClick(node)}
-      onClick={() => onClick(node)}
+      // Use mousedown rather than click for selection so the highlight
+      // appears on press, not release. Click fires on mouseup, which
+      // gives a ~100ms perceived lag equal to how long the button is
+      // held down. Guard on `button === 0` so right-clicks don't
+      // double-fire (onContextMenu handles those).
+      onMouseDown={(e) => {
+        if (e.button === 0) onClick(node);
+      }}
       onContextMenu={(e) => {
         e.preventDefault();
         onRightClick(node, e);

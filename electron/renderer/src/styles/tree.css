@@ -81,15 +81,9 @@
   border-left: 3px solid transparent;
 }
 
-/* Absolute-row striping for leaves so densely-populated folders are
-   easier to scan. Branches get their own (heavier) tint below and
-   override this. */
-.tree-row.odd {
-  background-color: var(--bg-secondary);
-}
-
 /* Branch (folder/container) rows get a slightly elevated background so
-   they read as section headers regardless of stripe parity. */
+   they read as section headers, providing the tree's only horizontal
+   structure cue. */
 .tree-row.branch {
   background-color: var(--bg-tertiary);
 }

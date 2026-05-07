@@ -38,7 +38,6 @@ const VirtualRowImpl = ({ index, style, ariaAttributes, flatNodes, selectedPath,
   return (
     <TreeNodeRow
       node={node}
-      index={index}
       selected={node.path === selectedPath}
       onExpand={onExpand}
       onDoubleClick={onDoubleClick}
@@ -426,6 +425,49 @@ export const Tree: React.FC<TreeProps> = ({ kernelId, disabled = false, refreshT
       event.preventDefault();
       return;
     }
+
+    // Arrow-key navigation through the visible flattened tree.
+    // Up/Down: move selection by one row. Right: expand a collapsed
+    // branch, or step into the first child of an expanded one.
+    // Left: collapse an expanded branch, or step up to the parent.
+    if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+      if (disabled || flatNodes.length === 0) return;
+      event.preventDefault();
+      if (!selectedNode) {
+        setSelectedPath(flatNodes[0].path);
+        return;
+      }
+      const currentIdx = flatNodes.findIndex((n) => n.path === selectedNode.path);
+      if (currentIdx < 0) {
+        setSelectedPath(flatNodes[0].path);
+        return;
+      }
+      const nextIdx = event.key === 'ArrowDown'
+        ? Math.min(flatNodes.length - 1, currentIdx + 1)
+        : Math.max(0, currentIdx - 1);
+      setSelectedPath(flatNodes[nextIdx].path);
+      return;
+    }
+    if (event.key === 'ArrowRight' && selectedNode && !disabled) {
+      event.preventDefault();
+      if (selectedNode.hasChildren && !selectedNode.isExpanded) {
+        await handleExpand(selectedNode);
+      } else if (selectedNode.isExpanded && selectedNode.children && selectedNode.children.length > 0) {
+        setSelectedPath(selectedNode.children[0].path);
+      }
+      return;
+    }
+    if (event.key === 'ArrowLeft' && selectedNode && !disabled) {
+      event.preventDefault();
+      if (selectedNode.isExpanded && selectedNode.hasChildren) {
+        await handleExpand(selectedNode);
+      } else if (selectedNode.parentPath !== null) {
+        // Step up to parent. parentPath of '' means the synthetic root row.
+        setSelectedPath(selectedNode.parentPath);
+      }
+      return;
+    }
+
     if (!selectedNode || disabled) return;
     const nativeEvent = event.nativeEvent;
 
