@@ -275,6 +275,98 @@ class TestKitchenSink:
         assert loaded["empty_tuple"] == ()
 
 
+class TestXarrayPickleRoundtrip:
+    """xarray DataArray and Dataset must round-trip via builtin pickle.
+
+    First-class xarray serialization is planned for beta; until then PDV
+    persists xarray values as pickle files (overriding any user-registered
+    custom serializer) so projects always save and load without external
+    registration.
+    """
+
+    def test_dataarray_roundtrip(self, tmp_working_dir):
+        xr = pytest.importorskip("xarray")
+        np = pytest.importorskip("numpy")
+        da = xr.DataArray(
+            np.array([[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]]),
+            dims=("time", "channel"),
+            coords={"time": [0.0, 1.0], "channel": ["a", "b", "c"]},
+            name="signal",
+            attrs={"units": "V", "description": "demo"},
+        )
+        descriptor = serialize_node("v", da, tmp_working_dir, trusted=True)
+        assert descriptor["storage"]["format"] == "pickle"
+        loaded = deserialize_node(
+            descriptor["storage"], tmp_working_dir, trusted=True
+        )
+        assert isinstance(loaded, xr.DataArray)
+        assert loaded.name == "signal"
+        assert loaded.dims == ("time", "channel")
+        assert list(loaded.coords["channel"].values) == ["a", "b", "c"]
+        assert loaded.attrs["units"] == "V"
+        assert np.array_equal(loaded.values, da.values)
+
+    def test_dataset_roundtrip(self, tmp_working_dir):
+        xr = pytest.importorskip("xarray")
+        np = pytest.importorskip("numpy")
+        ds = xr.Dataset(
+            data_vars={
+                "voltage": (("t",), np.array([1.0, 2.0, 3.0])),
+                "current": (("t",), np.array([0.1, 0.2, 0.3])),
+            },
+            coords={"t": [0.0, 0.5, 1.0]},
+            attrs={"experiment": "demo"},
+        )
+        descriptor = serialize_node("v", ds, tmp_working_dir, trusted=True)
+        assert descriptor["storage"]["format"] == "pickle"
+        loaded = deserialize_node(
+            descriptor["storage"], tmp_working_dir, trusted=True
+        )
+        assert isinstance(loaded, xr.Dataset)
+        assert set(loaded.data_vars) == {"voltage", "current"}
+        assert loaded.attrs["experiment"] == "demo"
+        assert np.array_equal(loaded["voltage"].values, ds["voltage"].values)
+
+    def test_dataarray_overrides_user_registered_serializer(
+        self, tmp_working_dir
+    ):
+        """Even with a user-registered xarray serializer, builtin pickle wins."""
+        xr = pytest.importorskip("xarray")
+        np = pytest.importorskip("numpy")
+        from pdv import serializers as _serializers
+
+        save_calls = []
+
+        def _save(obj, path):
+            save_calls.append(path)
+            with open(path, "w") as fh:
+                fh.write("user-format")
+
+        def _load(path):
+            return "should-not-be-called"
+
+        try:
+            _serializers.register(
+                xr.DataArray,
+                format="user_xarray_dataarray",
+                extension=".user",
+                save=_save,
+                load=_load,
+            )
+            da = xr.DataArray(np.array([1.0, 2.0]), dims=("x",))
+            descriptor = serialize_node("v", da, tmp_working_dir, trusted=True)
+            # Builtin pickle path must win; user serializer's save isn't called.
+            assert descriptor["storage"]["format"] == "pickle"
+            assert save_calls == []
+            loaded = deserialize_node(
+                descriptor["storage"], tmp_working_dir, trusted=True
+            )
+            assert isinstance(loaded, xr.DataArray)
+            assert np.array_equal(loaded.values, da.values)
+        finally:
+            _serializers.clear()
+
+
 class TestChecksumDistinguishesTypes:
     """Sanity checks that the checksum itself catches type-collapse."""
 

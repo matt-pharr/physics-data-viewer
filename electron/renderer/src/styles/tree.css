@@ -76,6 +76,9 @@
   color: var(--text-primary);
   cursor: default;
   border-bottom: 1px solid transparent;
+  /* Reserve the 3px slot the selected accent stripe lives in so content
+     doesn't shift right when a row becomes selected. */
+  border-left: 3px solid transparent;
 }
 
 /* Absolute-row striping for leaves so densely-populated folders are
@@ -97,7 +100,7 @@
 
 .tree-row.selected {
   background-color: color-mix(in srgb, var(--accent) 18%, transparent);
-  border-left: 3px solid var(--accent);
+  border-left-color: var(--accent);
 }
 
 .tree-row.selected:hover {
@@ -131,9 +134,12 @@
   visibility: hidden;
 }
 
+/* Tree-node icons. Designed at a 20×20 viewBox; rendered at 16px so the
+   1.5px stroke weight reads cleanly without dominating the row. */
 .tree-icon {
-  font-size: 14px;
-  line-height: 1;
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
 }
 
 /* Leaf names: regular weight, foreground text color. Branch names get

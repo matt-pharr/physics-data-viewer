@@ -97,6 +97,21 @@ def _can_inline_json(value: Any) -> bool:
     return False
 
 
+def _is_xarray_object(value: Any) -> bool:
+    """Return True if ``value`` is an xarray DataArray or Dataset.
+
+    Used by :func:`serialize_node` to route xarray nodes to builtin pickle
+    storage, bypassing the custom-serializer registry. First-class xarray
+    support with a more inspectable on-disk format is planned for beta;
+    until then pickle is the simplest reliable round-trip.
+    """
+    try:
+        import xarray as xr  # noqa: PLC0415
+    except ImportError:
+        return False
+    return isinstance(value, (xr.DataArray, xr.Dataset))
+
+
 def _has_array_leaf(value: Any) -> bool:
     """Return True if ``value`` or any nested value is an ndarray, DataFrame, or Series.
 
@@ -657,6 +672,27 @@ def serialize_node(
     if _cached is not None:
         return _cached
 
+    # xarray DataArrays and Datasets pickle as a builtin, overriding any
+    # user-registered custom serializer until first-class xarray support
+    # lands in beta. This keeps round-trips reliable without requiring
+    # users to import a registration module before loading a project.
+    if _is_xarray_object(value):
+        node_uuid = generate_node_uuid()
+        filename = key + ".pickle"
+        file_path = uuid_tree_path(working_dir, node_uuid, filename)
+        ensure_parent(file_path)
+        with open(file_path, "wb") as fh:
+            pickle.dump(value, fh)
+        descriptor["uuid"] = node_uuid
+        descriptor["storage"] = _file_storage(node_uuid, filename, FORMAT_PICKLE)
+        descriptor["metadata"] = {
+            "preview": preview,
+            "python_type": python_type_string(value),
+        }
+        if _digest is not None:
+            autosave_cache[tree_path] = (_digest, descriptor)  # type: ignore[index]
+        return descriptor
+
     from pdv import serializers as _serializers  # noqa: PLC0415
 
     custom = _serializers.find_for_value(value)
@@ -922,7 +958,10 @@ def node_preview(value: Any, kind: str) -> str:
     """
     try:
         if kind == KIND_FOLDER:
-            return "folder"
+            # "folder" was misleading because PDV folders are PDVTree
+            # subnodes, not filesystem folders. The chip shows `tree`;
+            # the preview matches and adds the child count.
+            return f"tree ({len(value)} items)"
         if kind in (KIND_MODULE, KIND_GUI, KIND_NAMELIST, KIND_LIB):
             return value.preview() if hasattr(value, "preview") else kind
         if kind in (KIND_SCRIPT, KIND_MARKDOWN):

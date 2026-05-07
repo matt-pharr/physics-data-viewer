@@ -7,30 +7,7 @@
 
 import React from 'react';
 import type { TreeNodeData } from '../../types';
-
-// Keys must match the canonical NodeKindValue union from pdv-protocol.ts
-// (`mapping`, `sequence`, `text`, `scalar`, `binary`, etc.). The 'root' key
-// is the synthetic Tree-panel root row. Anything else falls back to 'unknown'.
-const TYPE_ICONS: Record<string, string> = {
-  root: '🌳',
-  folder: '📁',
-  file: '📄',
-  script: '📜',
-  markdown: '📝',
-  ndarray: '🔢',
-  dataframe: '📊',
-  series: '📈',
-  mapping: '🗂️',
-  sequence: '🧾',
-  text: '🔤',
-  scalar: '#️⃣',
-  binary: '🧬',
-  namelist: '📋',
-  module: '📦',
-  gui: '🖼️',
-  lib: '📚',
-  unknown: '❓',
-};
+import { TYPE_ICONS, UnknownIcon } from './icons';
 
 /** Types that are containers (have or can have children). Drives the
  *  branch-vs-leaf visual distinction in tree.css (heavier name weight,
@@ -45,7 +22,10 @@ const BRANCH_TYPES = new Set<string>(['root', 'folder', 'mapping', 'sequence', '
  *  Unknown nodes fall back to the descriptor's `python_type` field. */
 const DISPLAY_LABELS: Record<string, string> = {
   root: 'root',
-  folder: 'folder',
+  // PDV "folders" are PDVTree subnodes — they don't correspond to
+  // filesystem folders. Surfacing them as `tree` in the chip prevents
+  // users from assuming they reflect on-disk structure.
+  folder: 'tree',
   mapping: 'dict',
   sequence: 'list',
   ndarray: 'np.ndarray',
@@ -118,7 +98,7 @@ const TreeNodeRowInner: React.FC<TreeNodeRowProps> = ({
   style,
   ariaAttributes,
 }) => {
-  const icon = TYPE_ICONS[node.type] || TYPE_ICONS.unknown;
+  const Icon = TYPE_ICONS[node.type] ?? UnknownIcon;
   const toggleLabel = node.hasChildren
     ? node.isExpanded
       ? `Collapse ${node.key}`
@@ -165,7 +145,7 @@ const TreeNodeRowInner: React.FC<TreeNodeRowProps> = ({
           )}
         </button>
 
-        <span className="tree-icon">{icon}</span>
+        <Icon className="tree-icon" />
         <span className="tree-key-text">{node.key}</span>
       </div>
 
