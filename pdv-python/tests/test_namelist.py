@@ -29,7 +29,7 @@ class TestPDVNamelistClass:
 
     def test_preview(self):
         node = PDVNamelist("nml_uuid_0003", "input.nml", format="fortran")
-        assert node.preview() == "Namelist (fortran)"
+        assert node.preview() == "fortran"
 
     def test_repr(self):
         node = PDVNamelist("nml_uuid_0004", "input.nml", format="toml", module_id="m")

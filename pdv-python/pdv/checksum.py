@@ -159,6 +159,9 @@ def _feed_node(h: xxhash.xxh3_128, node: Any, working_dir: str | None) -> None:
         elif isinstance(node, int):
             h.update(b"scalar\x00int\x00")
             _feed_str(h, str(node))
+        elif isinstance(node, complex):
+            h.update(b"scalar\x00complex\x00")
+            h.update(struct.pack("<dd", node.real, node.imag))
         else:  # float
             h.update(b"scalar\x00float\x00")
             h.update(struct.pack("<d", node))
@@ -183,7 +186,13 @@ def _feed_node(h: xxhash.xxh3_128, node: Any, working_dir: str | None) -> None:
     elif kind == KIND_SEQUENCE:
         h.update(b"sequence\x00")
         h.update(struct.pack("<Q", len(node)))
-        for item in node:
+        if isinstance(node, (set, frozenset)):
+            # Sets are unordered; sort by repr for a deterministic digest so
+            # autosave doesn't flag unchanged sets as dirty across runs.
+            items = sorted(node, key=repr)
+        else:
+            items = node
+        for item in items:
             _feed_node(h, item, working_dir)
 
     elif kind == KIND_NDARRAY:

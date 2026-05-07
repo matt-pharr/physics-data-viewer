@@ -480,7 +480,7 @@ pdv/
     tree.py              # PDVTree (debounced _emit_changed), PDVScript, PDVFile, PDVNote, PDVModule, PDVGui, PDVNamelist, PDVLib
     query_server.py      # QueryServer: ZMQ REP daemon thread for read-only queries during execution
     namespace.py         # PDVNamespace (protected dict), PDVApp, pdv_namespace()
-    serialization.py     # Type detection, format writers (npy, parquet, json, module, gui, namelist, lib)
+    serialization.py     # Type detection, format writers (npy, pickle, json, module, gui, namelist, lib)
     environment.py       # Path utilities, working dir management, project root logic
     errors.py            # PDVError, PDVPathError, PDVKeyError, PDVProtectedNameError, PDVSerializationError, PDVScriptError, PDVVersionError
     modules.py           # Custom type handler registry and dispatch (@pdv.handle() decorator)
@@ -791,7 +791,7 @@ my-project/
         c3d4e5f6a7b8/
             fit_model.py
         d4e5f6a7b8c9/
-            fit_output.parquet
+            fit_output.pickle
 ```
 
 Each `modules/<id>/` subdirectory is maintained authoritatively by `project:save`: §5.13's save-time sync copies edited files from the working directory into it, then the manifest writer stamps `pdv-module.json` and `module-index.json` from the current in-memory `PDVModule` state. In-session modules (workflow B, origin `"in_session"` in the manifest) get their directory created on first save; imported modules get it at import time and updated on every subsequent save.
@@ -870,7 +870,7 @@ All file-backed tree nodes use UUID-based paths, decoupling the tree hierarchy f
 
 When a user accesses a tree node whose data is in the save directory but not yet in the working directory, the kernel:
 1. Reads the appropriate file from the save directory
-2. Loads it into memory (e.g., `numpy.load`, `pandas.read_parquet`)
+2. Loads it into memory (e.g., `numpy.load`, `pickle.load`)
 3. Stores the result in the in-memory `PDVTree`
 4. Removes the entry from the lazy-load registry
 5. Does **not** copy the file to the working directory unless the data is subsequently modified
@@ -945,8 +945,8 @@ The following node types are supported:
 | `script` | A `PDVScript` object | `.py` file in working or save directory |
 | `markdown` | A `PDVNote` object | `.md` file in working or save directory |
 | `ndarray` | NumPy array | `.npy` file |
-| `dataframe` | Pandas DataFrame | `.parquet` file |
-| `series` | Pandas Series | `.parquet` file |
+| `dataframe` | Pandas DataFrame | `.pickle` file |
+| `series` | Pandas Series | `.pickle` file |
 | `scalar` | Python int, float, bool, None | Inline in tree-index.json |
 | `text` | Python string | `.txt` file (if large) or inline |
 | `mapping` | Plain Python dict (not PDVTree) | Inline JSON |
@@ -1946,7 +1946,7 @@ All `pdv-python` modules must be importable and testable without a running Jupyt
 - `PDVTree` get/set/delete, dot-path access, protected-name rejection
 - `PDVScript` run, docstring extraction
 - Lazy-load registry: population from tree-index, fetch-on-access, registry cleanup
-- Serialization: round-trip for each supported format (npy, parquet, json, txt)
+- Serialization: round-trip for each supported format (npy, pickle, json, txt)
 - `PDVNamespace`: reassignment of protected names raises `PDVError`
 - Message envelope validation: malformed messages raise appropriate errors
 

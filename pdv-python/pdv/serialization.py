@@ -7,7 +7,7 @@ file representations.
 Supported formats
 -----------------
 - **npy** — NumPy arrays (requires numpy)
-- **parquet** — Pandas DataFrame and Series (requires pandas + pyarrow or fastparquet)
+- **pickle** — Pandas DataFrame and Series (PDV saves are internal)
 - **json** — JSON-native scalars, lists, dicts
 - **txt** — Plain text strings
 - **pickle** — Fallback for unknown types (only when ``trusted=True``)
@@ -59,7 +59,6 @@ KIND_UNKNOWN = "unknown"
 
 # Format strings — must match ARCHITECTURE.md §7.3 storage.format
 FORMAT_NPY = "npy"
-FORMAT_PARQUET = "parquet"
 FORMAT_JSON = "json"
 FORMAT_TXT = "txt"
 FORMAT_PICKLE = "pickle"
@@ -71,65 +70,6 @@ FORMAT_MODULE_META = "module_meta"
 FORMAT_NAMELIST = "namelist"
 FORMAT_PY_LIB = "py_lib"
 FORMAT_FILE = "file"
-
-
-def _parquet_engine() -> str:
-    """Return the best available parquet engine name.
-
-    Prefers ``'pyarrow'`` when importable, falls back to ``'fastparquet'``.
-    Raises :class:`ImportError` if neither is available.
-    """
-    try:
-        import pyarrow  # noqa: F401, PLC0415
-
-        return "pyarrow"
-    except ImportError:
-        pass
-    try:
-        import fastparquet  # noqa: F401, PLC0415
-
-        return "fastparquet"
-    except ImportError:
-        pass
-    raise ImportError("No parquet engine available. Install pyarrow or fastparquet.")
-
-
-def _write_parquet(value: Any, path: str) -> None:
-    """Write a DataFrame or Series to a parquet file.
-
-    Uses an explicit engine to avoid pyarrow extension-type registration
-    conflicts that occur when ``to_parquet()`` is called without one.
-    """
-    engine = _parquet_engine()
-    try:
-        value.to_parquet(path, engine=engine)
-    except Exception as primary_err:
-        # pyarrow can raise extension-type conflicts on repeated writes
-        # in the same process.  Fall back to the other engine if possible.
-        fallback = "fastparquet" if engine == "pyarrow" else "pyarrow"
-        try:
-            value.to_parquet(path, engine=fallback)
-        except ImportError:
-            raise primary_err from primary_err
-
-
-def _read_parquet(path: str) -> Any:
-    """Read a parquet file into a DataFrame.
-
-    Uses an explicit engine to avoid pyarrow extension-type registration
-    conflicts.
-    """
-    import pandas as pd  # noqa: PLC0415
-
-    engine = _parquet_engine()
-    try:
-        return pd.read_parquet(path, engine=engine)
-    except Exception as primary_err:
-        fallback = "fastparquet" if engine == "pyarrow" else "pyarrow"
-        try:
-            return pd.read_parquet(path, engine=fallback)
-        except ImportError:
-            raise primary_err from primary_err
 
 
 def _is_json_native(value: Any) -> bool:
@@ -216,7 +156,7 @@ def detect_kind(value: Any) -> str:
     # bool must be checked before int (bool is a subclass of int)
     if isinstance(value, bool):
         return KIND_SCALAR
-    if isinstance(value, (int, float)) or value is None:
+    if isinstance(value, (int, float, complex)) or value is None:
         return KIND_SCALAR
     if isinstance(value, str):
         return KIND_TEXT
@@ -224,7 +164,11 @@ def detect_kind(value: Any) -> str:
         return KIND_BINARY
     if isinstance(value, dict):
         return KIND_MAPPING
-    if isinstance(value, (list, tuple)):
+    # Sets are unordered, but classifying them under the sequence kind
+    # keeps the renderer treatment (collection chip, sized preview)
+    # consistent with list/tuple. The Python class shown in the chip
+    # (`set` / `frozenset`) tells users they're not lists.
+    if isinstance(value, (list, tuple, set, frozenset)):
         return KIND_SEQUENCE
     # Lazy numpy/pandas checks
     try:
@@ -512,17 +456,22 @@ def serialize_node(
         return descriptor
 
     if kind in (KIND_DATAFRAME, KIND_SERIES):
+        # PDV saves are internal, so pandas DataFrames and Series go through
+        # pickle. This avoids an external parquet-engine dependency and keeps
+        # name/index/dtype/extension-type round-trips lossless. Users who want
+        # parquet for interchange can write it themselves.
         _digest, _cached = _try_autosave_cache(autosave_cache, tree_path, value, _source_dir, autosave_hits)
         if _cached is not None:
             return _cached
 
         node_uuid = generate_node_uuid()
-        filename = key + ".parquet"
+        filename = key + ".pickle"
         file_path = uuid_tree_path(working_dir, node_uuid, filename)
         ensure_parent(file_path)
-        _write_parquet(value, file_path)
+        with open(file_path, "wb") as fh:
+            pickle.dump(value, fh)
         descriptor["uuid"] = node_uuid
-        descriptor["storage"] = _file_storage(node_uuid, filename, FORMAT_PARQUET)
+        descriptor["storage"] = _file_storage(node_uuid, filename, FORMAT_PICKLE)
         if kind == KIND_DATAFRAME:
             shape = list(value.shape)  # type: ignore[union-attr]
         else:
@@ -536,6 +485,19 @@ def serialize_node(
         return descriptor
 
     if kind == KIND_SCALAR:
+        if isinstance(value, complex):
+            # complex isn't JSON-native, so the inline path can't store it.
+            # Pickle it like other non-JSON-native values.
+            node_uuid = generate_node_uuid()
+            filename = key + ".pickle"
+            file_path = uuid_tree_path(working_dir, node_uuid, filename)
+            ensure_parent(file_path)
+            with open(file_path, "wb") as fh:
+                pickle.dump(value, fh)
+            descriptor["uuid"] = node_uuid
+            descriptor["storage"] = _file_storage(node_uuid, filename, FORMAT_PICKLE)
+            descriptor["metadata"] = {"preview": preview}
+            return descriptor
         descriptor["storage"] = {
             "backend": "inline",
             "format": FORMAT_INLINE,
@@ -581,7 +543,7 @@ def serialize_node(
         # Composite mapping: one or more leaves are not JSON-serializable.
         # Emit a container descriptor; the save walker (_collect_nodes) is
         # responsible for recursing into the dict and emitting per-leaf
-        # descriptors so each leaf reaches its own fast path (.npy, parquet,
+        # descriptors so each leaf reaches its own fast path (.npy, .pickle,
         # etc). Reconstructed on load as a plain dict, not a PDVTree.
         descriptor["has_children"] = True
         descriptor["storage"] = {"backend": "none", "format": "none"}
@@ -589,6 +551,20 @@ def serialize_node(
         return descriptor
 
     if kind == KIND_SEQUENCE:
+        # Tuples, sets, and frozensets all need pickle to preserve their
+        # concrete type — JSON collapses tuples to lists and can't represent
+        # sets at all. Lists of JSON-native values stay inline.
+        if isinstance(value, (tuple, set, frozenset)):
+            node_uuid = generate_node_uuid()
+            filename = key + ".pickle"
+            file_path = uuid_tree_path(working_dir, node_uuid, filename)
+            ensure_parent(file_path)
+            with open(file_path, "wb") as fh:
+                pickle.dump(value, fh)
+            descriptor["uuid"] = node_uuid
+            descriptor["storage"] = _file_storage(node_uuid, filename, FORMAT_PICKLE)
+            descriptor["metadata"] = {"preview": preview}
+            return descriptor
         if _is_json_native(value):
             descriptor["storage"] = {
                 "backend": "inline",
@@ -822,9 +798,6 @@ def deserialize_node(storage_ref: dict, save_dir: str, *, trusted: bool = False)
 
             return np.load(abs_path, allow_pickle=False)
 
-        if fmt == FORMAT_PARQUET:
-            return _read_parquet(abs_path)
-
         if fmt == FORMAT_TXT:
             with open(abs_path, "r", encoding="utf-8") as fh:
                 return fh.read()
@@ -914,7 +887,14 @@ def node_preview(value: Any, kind: str) -> str:
         if kind == KIND_MAPPING:
             return f"dict ({len(value)} keys)"
         if kind == KIND_SEQUENCE:
-            noun = "tuple" if isinstance(value, tuple) else "list"
+            if isinstance(value, frozenset):
+                noun = "frozenset"
+            elif isinstance(value, set):
+                noun = "set"
+            elif isinstance(value, tuple):
+                noun = "tuple"
+            else:
+                noun = "list"
             return f"{noun} ({len(value)} items)"
         if kind == KIND_NDARRAY:
 
