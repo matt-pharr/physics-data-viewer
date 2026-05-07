@@ -57,13 +57,8 @@
   align-items: center;
 }
 
-/* Shortcut tab uses 3 columns: label | key display | buttons */
-.settings-shortcuts-grid {
-  display: grid;
-  grid-template-columns: 1fr auto auto;
-  gap: 10px 12px;
-  align-items: center;
-}
+/* `.settings-shortcuts-grid` shape and label styling now come from the
+   unified rules near `.settings-general-grid`. */
 
 .shortcut-section-header {
   grid-column: 1 / -1;
@@ -181,16 +176,38 @@
   border-radius: 3px;
 }
 
-.settings-general-grid {
+/* ===== UNIFIED SETTINGS-DIALOG FORM GRIDS =====
+   General, Appearance, and Shortcuts tabs all use a label-on-the-left,
+   control-on-the-right grid. Previously each tab had its own values
+   (different label widths, alignments, colors), which made the dialog
+   feel stitched together. They share the same shape and label
+   styling now; only the column count differs (Shortcuts has a third
+   column for the action buttons). */
+.settings-general-grid,
+.appearance-editor-grid,
+.settings-shortcuts-grid {
   display: grid;
-  grid-template-columns: 150px 1fr;
-  gap: 8px 12px;
+  gap: 10px 12px;
   align-items: center;
 }
 
-.settings-general-grid label {
+.settings-general-grid,
+.appearance-editor-grid {
+  grid-template-columns: 140px 1fr;
+}
+
+/* Shortcut-tab labels are `<span>`s (rendered by ShortcutCapture as a
+   Fragment of three direct grid children: span, keys-div, actions-div).
+   Hence the `> span` selector in the unified label rule below. */
+.settings-shortcuts-grid {
+  grid-template-columns: 140px 1fr auto;
+}
+
+.settings-general-grid > label,
+.appearance-editor-grid > label,
+.settings-shortcuts-grid > span {
   font-size: 13px;
-  color: var(--text-primary);
+  color: var(--text-secondary);
   text-align: right;
   padding-right: 4px;
 }
@@ -239,7 +256,9 @@
 
 .settings-general-dir-row {
   display: flex;
-  align-items: center;
+  /* `flex-start` keeps the action buttons aligned with the first line
+     of the path when the path wraps onto multiple lines. */
+  align-items: flex-start;
   gap: 6px;
 }
 
@@ -247,11 +266,16 @@
   flex: 1;
   font-family: var(--font-mono);
   font-size: 12px;
+  line-height: 1.5;
   color: var(--text-secondary);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  /* Allow long paths to wrap rather than truncate with an ellipsis —
+     users need the full path visible to verify it. `break-all` is
+     necessary because filesystem paths have no spaces. */
+  word-break: break-all;
   min-width: 0;
+  /* Match the buttons' implicit baseline-y so the row reads as one
+     unit even with a single-line path. */
+  padding-top: 4px;
 }
 
 .settings-runtime {
@@ -295,17 +319,8 @@
   font-weight: normal;
 }
 
-.appearance-editor-grid {
-  display: grid;
-  grid-template-columns: 110px 1fr;
-  gap: 8px 12px;
-  align-items: center;
-}
-
-.appearance-editor-grid label {
-  font-size: 13px;
-  color: var(--text-secondary);
-}
+/* `.appearance-editor-grid` shape and label styling now come from the
+   unified rules near `.settings-general-grid`. */
 
 .appearance-editor-select {
   padding: 5px 8px;

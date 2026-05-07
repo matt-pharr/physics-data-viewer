@@ -376,18 +376,11 @@ export const SettingsDialog: React.FC<SettingsDialogProps> = ({
                   Used when opening Python scripts from the Tree (e.g. <code>code {'{}' }</code>, <code>nvim {'{}' }</code>).
                 </div>
 
-                <label htmlFor="sg-julia-editor">Julia editor</label>
-                <input
-                  id="sg-julia-editor"
-                  type="text"
-                  value={juliaEditorCmd}
-                  onChange={(e) => setJuliaEditorCmd(e.target.value)}
-                  placeholder="code {}"
-                  spellCheck={false}
-                />
-                <div className="settings-general-desc">
-                  Used when opening Julia scripts (not yet in use).
-                </div>
+                {/* Julia editor field hidden alongside the welcome-screen
+                    Julia button while the Julia workflow is still
+                    experimental. The juliaEditorCmd state and persistence
+                    paths are intact so re-enabling is just unhiding this
+                    block. */}
 
                 <label htmlFor="sg-file-manager">File manager</label>
                 <input
