@@ -213,8 +213,12 @@ export async function createWindow(
 
   // Intercept window close (title-bar X, OS close) so the renderer can
   // prompt the user about unsaved changes before the window goes away.
+  // Skipped under PDV_E2E: Playwright's app.close() drives the same code
+  // path, and `projectDirty` flips to true as soon as the kernel reaches
+  // ready, so the dialog would block every spec's teardown indefinitely.
+  const skipCloseGuard = process.env.PDV_E2E === "1";
   win.on("close", (event) => {
-    if (allowClose || win.webContents.isDestroyed()) {
+    if (skipCloseGuard || allowClose || win.webContents.isDestroyed()) {
       return;
     }
     // When a real quit is already in progress and `allowClose` is still
@@ -236,7 +240,7 @@ export async function createWindow(
   // `allowClose=true` and re-invokes `app.quit()`. On the second pass we fall
   // through the `allowClose` gate and the quit proceeds normally.
   app.on("before-quit", (event) => {
-    if (allowClose) {
+    if (skipCloseGuard || allowClose) {
       isQuittingGlobal = true;
       return;
     }
