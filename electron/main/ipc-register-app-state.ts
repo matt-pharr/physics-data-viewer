@@ -230,6 +230,12 @@ export function registerAppStateIpcHandlers(
     return true;
   });
 
+  ipcMain.handle(IPC.app.setDocumentEdited, async (_event, edited: boolean) => {
+    if (!win.isDestroyed()) {
+      win.setDocumentEdited(Boolean(edited));
+    }
+  });
+
   ipcMain.handle(IPC.app.confirmClose, async () => {
     setAllowClose(true);
     // During a real quit (Cmd+Q, autoUpdater restart, OS logout), call

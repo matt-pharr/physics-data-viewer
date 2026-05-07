@@ -924,6 +924,12 @@ export interface PDVApi {
      * the title-bar close button and OS-level window close (Cmd+Q, Alt+F4).
      */
     onRequestClose(callback: () => void): () => void;
+    /**
+     * Mark the main window's document as edited or clean. On macOS this
+     * toggles the dot inside the red close traffic-light. No-op on other
+     * platforms.
+     */
+    setDocumentEdited(edited: boolean): Promise<void>;
   };
 }
 

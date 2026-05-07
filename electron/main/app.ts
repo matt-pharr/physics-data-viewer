@@ -211,22 +211,41 @@ export async function createWindow(
     setAllowClose,
   );
 
-  // Intercept window close (title-bar X, OS close, Cmd+Q) so the renderer can
+  // Intercept window close (title-bar X, OS close) so the renderer can
   // prompt the user about unsaved changes before the window goes away.
   win.on("close", (event) => {
     if (allowClose || win.webContents.isDestroyed()) {
       return;
     }
-    // When a real quit is already in progress (Cmd+Q, autoUpdater restart,
-    // OS logout), do NOT intercept — let Electron close the window
-    // naturally so `window-all-closed` and `will-quit` can run. Routing
-    // through the renderer dirty prompt here re-enters the quit machinery
-    // and wedges the process on macOS. The title-bar X is still
-    // intercepted because `isQuittingGlobal` is false in that case.
+    // When a real quit is already in progress and `allowClose` is still
+    // false, the new before-quit interceptor below will have already pushed
+    // the dirty prompt — but if that path was bypassed (e.g. the renderer
+    // was destroyed, or createWindow failed before registering), let the
+    // close proceed so `window-all-closed` and `will-quit` can run.
     if (isQuittingGlobal) {
       return;
     }
     event.preventDefault();
+    win.webContents.send(IPC.push.requestClose);
+  });
+
+  // Intercept Cmd+Q / menu Quit / autoUpdater restart / OS logout so the same
+  // unsaved-changes dialog runs before the app exits. The renderer's existing
+  // `requestClose` handler decides whether to show the dialog (dirty) or
+  // immediately confirm (clean), then calls `confirmClose`, which sets
+  // `allowClose=true` and re-invokes `app.quit()`. On the second pass we fall
+  // through the `allowClose` gate and the quit proceeds normally.
+  app.on("before-quit", (event) => {
+    if (allowClose) {
+      isQuittingGlobal = true;
+      return;
+    }
+    if (win.isDestroyed() || win.webContents.isDestroyed()) {
+      isQuittingGlobal = true;
+      return;
+    }
+    event.preventDefault();
+    isQuittingGlobal = true;
     win.webContents.send(IPC.push.requestClose);
   });
 

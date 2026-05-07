@@ -228,6 +228,8 @@ const api: PDVApi = {
   app: {
     confirmClose: () => ipcRenderer.invoke(IPC.app.confirmClose),
     onRequestClose: (callback) => onPush<void>(IPC.push.requestClose, callback),
+    setDocumentEdited: (edited) =>
+      ipcRenderer.invoke(IPC.app.setDocumentEdited, edited),
   },
 };
 

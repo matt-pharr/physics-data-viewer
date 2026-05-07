@@ -997,11 +997,15 @@ const App: React.FC = () => {
   useEffect(() => {
     if (!window.pdv?.app) return;
     return window.pdv.app.onRequestClose(() => {
-      guardDirtyRef.current('close PDV', () => {
+      guardDirtyRef.current('exit PDV', () => {
         void window.pdv.app.confirmClose();
       });
     });
   }, []);
+
+  useEffect(() => {
+    void window.pdv?.app?.setDocumentEdited(projectDirty);
+  }, [projectDirty]);
 
   // -- Welcome screen (pristine session) ------------------------------------
 

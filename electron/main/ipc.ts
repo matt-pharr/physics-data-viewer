@@ -239,6 +239,7 @@ export const IPC = {
   /** App-level lifecycle channels (close confirmation, etc.). */
   app: {
     confirmClose: "app:confirmClose",
+    setDocumentEdited: "app:setDocumentEdited",
   },
   /** App menu synchronization channels. */
   menu: {
@@ -2291,6 +2292,15 @@ export interface PDVApi {
      * @returns Unsubscribe function.
      */
     onRequestClose(callback: () => void): () => void;
+    /**
+     * Mark the main window's document as edited or clean. On macOS this
+     * toggles the dot inside the red close traffic-light to signal unsaved
+     * changes. No-op on other platforms.
+     *
+     * @param edited - True if the project has unsaved changes.
+     * @returns Resolves once the flag has been applied.
+     */
+    setDocumentEdited(edited: boolean): Promise<void>;
   };
 
   /** Window chrome integration and title-bar controls. */

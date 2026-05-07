@@ -196,6 +196,7 @@ function buildBase() {
     app: {
       confirmClose: stub<PDVApi["app"]["confirmClose"]>(async () => undefined),
       onRequestClose: subStub<PDVApi["app"]["onRequestClose"]>(),
+      setDocumentEdited: stub<PDVApi["app"]["setDocumentEdited"]>(async () => undefined),
     },
   } satisfies PDVApi;
 }
