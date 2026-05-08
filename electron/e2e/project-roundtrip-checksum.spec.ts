@@ -35,33 +35,14 @@ import numpy as np
 import pandas as pd
 import xarray as xr
 from pdv.tree import PDVScript, PDVNote, PDVGui
-from pdv import register_serializer
 
 np.random.seed(42)
 
-# --- one-time: teach PDV how to preview xarray objects -------------------
-def _da_preview(da):
-    dims = ", ".join(f"{k}: {v}" for k, v in da.sizes.items())
-    name = da.name or "DataArray"
-    return f"{name} ({dims}) {da.dtype}"
-
-def _ds_preview(ds):
-    dims = ", ".join(f"{k}: {v}" for k, v in ds.sizes.items())
-    return f"Dataset ({len(ds.data_vars)} vars · {dims})"
-
-for _cls, _fmt, _ext, _prev in (
-    (xr.DataArray, "xarray_dataarray", ".nc", _da_preview),
-    (xr.Dataset,   "xarray_dataset",   ".nc", _ds_preview),
-):
-    try:
-        register_serializer(
-            _cls, format=_fmt, extension=_ext,
-            save=lambda obj, p: obj.to_netcdf(p),
-            load=lambda p: xr.open_dataset(p).load(),
-            preview=_prev,
-        )
-    except Exception:
-        pass
+# NOTE: pdv-python currently routes xr.DataArray / xr.Dataset to its
+# builtin pickle path inside serialize_node(), explicitly overriding any
+# user-registered serializer (see pdv-python/pdv/serialization.py:702).
+# Once first-class xarray support lands, re-introduce the
+# register_serializer(...) calls here AND in Phase 2 before project.load.
 
 # --- synthetic AC power data --------------------------------------------
 N = 2048

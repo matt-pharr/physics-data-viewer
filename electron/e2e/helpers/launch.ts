@@ -142,9 +142,10 @@ export async function launchPDV(opts: LaunchOptions = {}): Promise<LaunchedApp> 
   //     bus on Linux CI runners.
   //   - `gpu/...command_buffer_proxy_impl.cc ... ContextResult::kTransientFailure`
   //     — software GPU on headless runners flapping mid-init.
-  // PDV_E2E_VERBOSE=1 disables the filter so the raw stream is still
-  // available for debugging.
-  const stderrNoiseRe = /dbus\/bus\.cc.*Failed to connect to the bus|gpu\/ipc\/client\/command_buffer_proxy_impl\.cc/;
+  // Both legs are anchored to the specific failure substring so we don't
+  // swallow unrelated dbus/GPU errors that should surface. PDV_E2E_VERBOSE=1
+  // disables the filter entirely if more debug context is needed.
+  const stderrNoiseRe = /dbus\/bus\.cc.*Failed to connect to the bus.*Could not parse server address|command_buffer_proxy_impl\.cc.*ContextResult::kTransientFailure/;
   app.process().stderr?.on("data", (b: Buffer) => {
     const text = b.toString();
     if (process.env.PDV_E2E_VERBOSE !== "1") {
