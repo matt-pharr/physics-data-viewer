@@ -231,20 +231,40 @@ async function bootKernel(window: Page): Promise<void> {
   await expectKernelReady(window);
 }
 
-/** Paste a code block into the active editor via the system clipboard, then run it. */
-async function pasteAndRun(window: Page, app: ElectronApplication, code: string): Promise<void> {
+/**
+ * Type a short snippet into the active editor and click Execute. Monaco
+ * accepts `\n` as Enter via `keyboard.type`, but typing 4 KB of code is slow
+ * and risks auto-pair / auto-indent quirks. For the long populate body we
+ * call `runFromFile` instead, which only types a tiny `exec(open(...).read())`
+ * bootstrap.
+ */
+async function typeAndRun(window: Page, code: string): Promise<void> {
   const editor = window.getByRole("textbox", { name: "Editor content" });
   await editor.focus();
   await window.keyboard.press(`${MOD}+a`);
   await window.keyboard.press("Backspace");
-  // Write to Electron's system clipboard from the main process; Monaco's paste
-  // handler reads from the same clipboard, so this avoids the slow keyboard.type
-  // path and the auto-pair / auto-indent corruption it can cause.
-  await app.evaluate(({ clipboard }, c) => {
-    clipboard.writeText(c);
-  }, code);
-  await editor.press(`${MOD}+V`);
+  await window.keyboard.type(code);
   await window.getByRole("button", { name: "Execute" }).click();
+}
+
+/**
+ * Run a code body that's too large to type directly. Writes the body to a
+ * temp file (visible to the kernel — same machine, same filesystem) and
+ * types a 1-line `exec(open(...).read())` bootstrap into the editor. Avoids
+ * clipboard paste, which is unreliable on Linux CI runners with no display
+ * server / clipboard daemon.
+ */
+async function runFromFile(window: Page, code: string): Promise<string> {
+  const codePath = path.join(
+    await fs.mkdtemp(path.join(os.tmpdir(), "pdv-e2e-bootstrap-")),
+    "populate.py",
+  );
+  await fs.writeFile(codePath, code, "utf8");
+  // Use repr-style escaping via JSON.stringify so paths with spaces / odd
+  // chars survive intact in the typed Python string literal.
+  const bootstrap = `exec(open(${JSON.stringify(codePath)}).read())`;
+  await typeAndRun(window, bootstrap);
+  return codePath;
 }
 
 /** Open the Import Module dialog, click Import on the named bundled module, close. */
@@ -290,12 +310,13 @@ test.setTimeout(360_000);
 test("project round-trips with diverse tree content; checksum is stable", async () => {
   const saveDir = await fs.mkdtemp(path.join(os.tmpdir(), "pdv-e2e-roundtrip-"));
   let savedChecksum = "";
+  let bootstrapPath: string | null = null;
 
   // ── Phase 1: launch, populate, import module, save ─────────────────
   const first = await launchPDV();
   try {
     await bootKernel(first.window);
-    await pasteAndRun(first.window, first.app, POPULATE_CODE);
+    bootstrapPath = await runFromFile(first.window, POPULATE_CODE);
 
     // Wait for representative rows from each top-level branch before saving,
     // so we don't race the tree.changed push.
@@ -380,5 +401,8 @@ test("project round-trips with diverse tree content; checksum is stable", async 
   } finally {
     await second.cleanup();
     await fs.rm(saveDir, { recursive: true, force: true });
+    if (bootstrapPath) {
+      await fs.rm(path.dirname(bootstrapPath), { recursive: true, force: true });
+    }
   }
 });
