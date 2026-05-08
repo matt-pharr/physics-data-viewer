@@ -420,7 +420,7 @@ const App: React.FC = () => {
     onTreeChanged: handleTreeChanged,
   });
 
-  const { startKernel, handleEnvSave } = useKernelLifecycle({
+  const { startKernel, handleEnvSave, lastErrorRef } = useKernelLifecycle({
     config,
     currentKernelId,
     setCurrentKernelId,
@@ -1094,7 +1094,7 @@ const App: React.FC = () => {
     setActiveLanguage(language);
     if (language === 'julia') {
       const ok = await startKernel(config ?? {} as Config, 'julia');
-      if (!ok) openEnvSettings('Kernel failed to start.');
+      if (!ok) openEnvSettings(lastErrorRef.current ?? 'Kernel failed to start.');
     } else {
       if (!config?.pythonPath) {
         openEnvSettings();
@@ -1114,9 +1114,9 @@ const App: React.FC = () => {
         // Probe failed — try starting anyway
       }
       const ok = await startKernel(config, 'python');
-      if (!ok) openEnvSettings('Kernel failed to start.');
+      if (!ok) openEnvSettings(lastErrorRef.current ?? 'Kernel failed to start.');
     }
-  }, [config, runningPdvVersion, startKernel, openEnvSettings]);
+  }, [config, runningPdvVersion, startKernel, openEnvSettings, lastErrorRef]);
 
   const handleWelcomeNewProject = useCallback(async (language: 'python' | 'julia') => {
     dismissWelcome();
@@ -1684,7 +1684,7 @@ const App: React.FC = () => {
              setInterpreterWarning(null);
              void handleEnvSave(paths).then((ok) => {
                if (!ok) {
-                 openEnvSettings('Kernel failed to start with the selected environment.');
+                 openEnvSettings(lastErrorRef.current ?? 'Kernel failed to start with the selected environment.');
                }
              });
            });
