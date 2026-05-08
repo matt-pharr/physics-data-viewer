@@ -89,3 +89,25 @@ class TestBootstrapReadyFlow:
             )
         finally:
             _reset_bootstrap_state()
+
+    def test_bootstrap_prewarms_jedi_via_ip_complete(self, mock_ipython):
+        _reset_bootstrap_state()
+        try:
+            bootstrap(mock_ipython)
+            mock_ipython.complete.assert_called_once_with("pdv_tree.")
+        finally:
+            _reset_bootstrap_state()
+
+    def test_bootstrap_succeeds_when_jedi_prewarm_raises(self, mock_ipython):
+        _reset_bootstrap_state()
+        try:
+            mock_ipython.complete.side_effect = RuntimeError("jedi exploded")
+            bootstrap(mock_ipython)
+            assert comms_mod._bootstrapped is True
+            # pdv.ready still wired up: opening a comm should send the ready push.
+            callback = mock_ipython.comm_manager.register_target.call_args[0][1]
+            mock_comm = _make_mock_comm()
+            callback(mock_comm, {"content": {"data": {}}})
+            assert any(m["type"] == "pdv.ready" for m in mock_comm._sent)
+        finally:
+            _reset_bootstrap_state()
