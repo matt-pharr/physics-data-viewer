@@ -106,7 +106,7 @@ function setup(initial: Partial<Harness> = {}): Harness {
     getPendingModuleSettings: () => ({}),
     getModuleHealthWarningsByAlias: () => new Map(),
     detectPythonVersion: async () => "3.11.6",
-    getPdvVersion: () => "0.0.13",
+    getPdvVersion: () => "0.1.0",
     runWithProjectManifestWriteLock: async (_dir, fn) => fn(),
   });
   return harness;

@@ -2,8 +2,6 @@
 
 This document is a roadmap, not a spec. It lists features planned beyond the current beta1 release, grouped by target milestone. Items are under-specified on purpose — exact scope is decided during implementation. The authoritative design spec is [`ARCHITECTURE.md`](ARCHITECTURE.md).
 
-Beta1 is the current starting point. Everything below is forward-looking.
-
 ## Milestones
 
 | Release | Theme |
@@ -26,7 +24,7 @@ The headline shift: PDV becomes usable against remote compute and against extern
 Decouple tree paths from on-disk filesystem paths by addressing node payloads by UUID. Prerequisite for incremental save and for remote mode. Tracked separately from the main remote work because it touches serialization and save/load directly.
 
 ### Incremental save
-Dirty tracking at the node level. On save, only modified nodes are re-serialized; unchanged nodes are left on disk. Project load reads metadata from `tree-index.json` without materializing payloads until accessed. Depends on UUID storage.
+Dirty tracking at the node level. On save, only modified nodes are re-serialized; unchanged nodes are left on disk. Project load reads metadata from `tree-index.json` without materializing payloads until accessed. Depends on UUID storage. Folds in the previously separate "re-implement lazy loading" item ([#130](https://github.com/matt-pharr/physics-data-viewer/issues/130)) — the lazy-materialization path lands as part of incremental save rather than as standalone work.
 
 ### Full remote mode
 Renderer runs locally; main process and kernel run on a remote host over SSH, VS Code Remote-SSH style. All code execution, filesystem, and tree state live on the remote. Local renderer connects, disconnects gracefully on network drop, and reattaches on resume without losing in-memory state.
@@ -47,6 +45,11 @@ Design discussed in detail in [issue #180](https://github.com/matt-pharr/physics
 
 ### Per-project environment management
 Each project can declare and manage its own Python environment, isolated from PDV's own runtime and from other projects. Replaces the idea of session environment snapshots — this is the more complete version. Design: **ARCHITECTURE.md §10.5**. Summary: `uv`-managed venvs keyed on a manifest `project_id`, venvs stored outside the project under `<user-data>/pdv/envs/<project-id>/`, a `pyproject.toml` + `uv.lock` pair committed inside the project as the portable source of truth, `pdv-python` installed as an app-managed dep (not listed in the user's pyproject), bundled `uv` binary per platform, and a "Project Packages" UI layered over `uv add`/`uv remove`. The existing shared-environment flow (§10.2) remains the default and the fallback for conda users. Independent of the remote and agents tracks; can be developed in parallel.
+
+## Data nodes track
+
+### PDVDataset and PDVHdf5 tree node types
+First-class tree node types for scientific data files: `PDVDataset` wraps `xarray.Dataset` / NetCDF, and `PDVHdf5` wraps `h5py` files. Both open lazily, expand into the tree to expose variables/groups as children, and treat their host libraries as optional dependencies — projects that don't use them don't pay for them. No metadata caching in the main process; the kernel remains the sole authority on dataset shape and contents. Tracked in [#203](https://github.com/matt-pharr/physics-data-viewer/issues/203). Independent of the other beta2 tracks.
 
 ---
 
@@ -71,7 +74,19 @@ Target use case: a physicist running a Julia simulation code on a remote cluster
 These are the items that should land before 1.0.0 but whose internal ordering isn't yet decided. Expect the list to evolve — some items may be absorbed into others, some may be cut after beta2 user feedback.
 
 ### Trust and security model
-A trust level for projects (trusted / untrusted) that gates MCP write tools, raw `kernel_execute`, and the existing `unknown`/pickle node type. Needed before 1.0.0 because of community-shared projects and agent access. May need a minimal version earlier if MCP write tools prove too sharp without it.
+A trust level for projects (trusted / untrusted) that gates MCP write tools, raw `kernel_execute`, and the existing `unknown`/pickle node type. Needed before 1.0.0 because of community-shared projects and agent access. May need a minimal version earlier if MCP write tools prove too sharp without it. Pairs with enabling Electron `sandbox: true` on all `BrowserWindow`s ([#161](https://github.com/matt-pharr/physics-data-viewer/issues/161)) — both are part of the same hardening pass.
+
+### File-on-disk node type and smart-copy
+A user-facing `PDVFile` type for files that live on disk rather than in the kernel namespace, plus a `smart_copy` copy-on-write helper so duplicating a file-backed node doesn't pay full I/O cost until the duplicate is mutated. Materialization is lazy: payloads are only read when accessed. Tracked in [#108](https://github.com/matt-pharr/physics-data-viewer/issues/108).
+
+### Namelist editor
+A `PDVNamelist` tree type for Fortran-style namelist files (common in tokamak codes). Comm-based parsing in the kernel, a `gui.json` layout node so module authors can drop a namelist editor into a module UI, and dynamic path binding via dropdown so one editor instance can target different namelist nodes at runtime. Design agreed; implementation not yet scheduled.
+
+### Tree trash / scratch area
+A recoverable deletion path for tree nodes — deleted nodes move to a scratch area instead of being destroyed immediately, so accidental deletion is reversible within a session. Tracked in [#160](https://github.com/matt-pharr/physics-data-viewer/issues/160).
+
+### Module editing: commit and push to upstream
+For modules installed from a GitHub source, expose an in-app workflow to commit local edits and push them back to the upstream repository, so module authors can iterate on a module from inside PDV without leaving for an external git client. Tracked in [#182](https://github.com/matt-pharr/physics-data-viewer/issues/182).
 
 ### Multi-window and session abstraction
 Support multiple top-level windows sharing or isolating project state. Tracked in [#167](https://github.com/matt-pharr/physics-data-viewer/issues/167). Blocked on remote mode because the session abstraction needs to cover both local and remote kernels in one design.
@@ -85,11 +100,17 @@ Ghost-text completions in the code cell backed by the user's own Copilot, Claude
 ### Per-node annotations
 Free-text notes attachable to individual tree nodes, persisted in `tree-index.json`. Small feature; can ship as a line-item alongside any later-beta release.
 
+### Visual and asset polish
+Bundle of small but visible items: audit and replace placeholder icons across the UI ([#118](https://github.com/matt-pharr/physics-data-viewer/issues/118)) and add a theme import capability so users can share custom themes ([#57](https://github.com/matt-pharr/physics-data-viewer/issues/57)). Sized to ride alongside any later-beta release rather than gating one.
+
 ---
 
 # 1.0.0
 
-PDV is ready to ship 1.0.0 when the later-beta items are complete and stable, and when a polish pass has closed the rough edges that accumulate across a long beta. No fixed feature list — 1.0.0 is defined by "the betas shipped, the features work, and the community can pick it up without a PDV author on call."
+PDV is ready to ship 1.0.0 when the later-beta items are complete and stable, and when a polish pass has closed the rough edges that accumulate across a long beta. The defining test is "the betas shipped, the features work, and the community can pick it up without a PDV author on call."
+
+### Cross-platform readiness
+Windows is the one platform-coverage item explicitly attached to 1.0.0. Beta releases target macOS and Linux; a Windows build, installer, and CI matrix entry are required before 1.0.0 because the broader physics community is still substantially Windows-based. Tracked in [#171](https://github.com/matt-pharr/physics-data-viewer/issues/171).
 
 Additional features may be added to this milestone as the beta progresses and user feedback arrives.
 
