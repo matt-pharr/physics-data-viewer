@@ -30,6 +30,16 @@ body {
   -moz-osx-font-smoothing: grayscale;
 }
 
+/* ===== FORM CONTROLS =====
+   Tint native checkboxes/radios with the theme accent so they read correctly
+   in both light and dark themes. `color-scheme` is set per-theme on :root by
+   applyThemeColors(); together these ensure native controls match the palette
+   without per-component overrides. */
+input[type="checkbox"],
+input[type="radio"] {
+  accent-color: var(--accent);
+}
+
 /* ===== FOCUS RING =====
    Low-specificity rule via :where() so per-component :focus rules that set
    border-color still win for the border, while this rule layers an accent

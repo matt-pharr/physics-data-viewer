@@ -44,13 +44,15 @@ Grab the latest release for your platform from the
 
 ## 2. First launch
 
-Open PDV. You will land on the **Welcome screen** with three options:
+Open PDV. You will land on the **Welcome screen** with two options:
 
 - **New Python Project**
-- **New Julia Project (experimental)** — Julia support is early and pdv-julia is not yet bundled with the app. If you want to try it out, [open an issue](https://github.com/matt-pharr/physics-data-viewer/issues/new).
 - **Open Project…**
 
 Pick **New Python Project**. If this is your first time, PDV will open the **Environment Selector** before starting a kernel.
+
+!!! info "Julia support"
+    Julia is a planned second kernel backend but the **New Julia Project** button is hidden until `pdv-julia` is ready. If you want to try an early build, [open an issue](https://github.com/matt-pharr/physics-data-viewer/issues/new).
 
 ---
 
