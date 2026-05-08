@@ -2765,7 +2765,8 @@ extracted from the file automatically.</p>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>The first line of the docstring, or a generic fallback.</p>
+                <p>The first line of the docstring, or empty string when the
+script has no docstring (the chip already says <code>script</code>).</p>
               </div>
             </td>
           </tr>
@@ -3087,8 +3088,8 @@ the first non-empty line of the file is used.</p>
     <div class="doc doc-contents ">
 
         <p>Return a short preview string for the tree panel.</p>
-<p>Tries the cached title first, then reads the first non-empty
-line of the <code>.md</code> file. Falls back to <code>'Markdown note'</code>.</p>
+<p>Returns the cached title (or empty string when there is no
+title — the chip already says <code>note</code>).</p>
 
 
     <p><span class="doc-section-title">Returns:</span></p>
@@ -3294,29 +3295,9 @@ Backed by a <code>.gui.json</code> file in the working directory.</p>
     <div class="doc doc-contents ">
 
         <p>Return a short preview string for the tree panel.</p>
-
-
-    <p><span class="doc-section-title">Returns:</span></p>
-    <table>
-      <thead>
-        <tr>
-          <th>Type</th>
-          <th>Description</th>
-        </tr>
-      </thead>
-      <tbody>
-          <tr class="doc-section-item">
-            <td>
-                  <code><span title="str">str</span></code>
-            </td>
-            <td>
-              <div class="doc-md-description">
-                <p>Always <code>'GUI'</code>.</p>
-              </div>
-            </td>
-          </tr>
-      </tbody>
-    </table>
+<p>Returns empty string — the chip already says <code>gui</code> and the
+key column already shows the user-chosen name. There's no
+additional info worth surfacing here.</p>
 
 
     </div>
@@ -3567,29 +3548,8 @@ Backed by a Fortran <code>.in</code>/<code>.nml</code> or TOML file.</p>
     <div class="doc doc-contents ">
 
         <p>Return a short preview string for the tree panel.</p>
-
-
-    <p><span class="doc-section-title">Returns:</span></p>
-    <table>
-      <thead>
-        <tr>
-          <th>Type</th>
-          <th>Description</th>
-        </tr>
-      </thead>
-      <tbody>
-          <tr class="doc-section-item">
-            <td>
-                  <code><span title="str">str</span></code>
-            </td>
-            <td>
-              <div class="doc-md-description">
-                
-              </div>
-            </td>
-          </tr>
-      </tbody>
-    </table>
+<p>Returns the namelist format only; the chip already says
+<code>namelist</code>, so prefixing it again would be redundant.</p>
 
 
     </div>
@@ -3779,29 +3739,8 @@ so that <code>import n_pendulum</code> works.</p>
     <div class="doc doc-contents ">
 
         <p>Return a short preview string for the tree panel.</p>
-
-
-    <p><span class="doc-section-title">Returns:</span></p>
-    <table>
-      <thead>
-        <tr>
-          <th>Type</th>
-          <th>Description</th>
-        </tr>
-      </thead>
-      <tbody>
-          <tr class="doc-section-item">
-            <td>
-                  <code><span title="str">str</span></code>
-            </td>
-            <td>
-              <div class="doc-md-description">
-                
-              </div>
-            </td>
-          </tr>
-      </tbody>
-    </table>
+<p>Returns the filename only; the chip already says <code>lib</code>,
+so prefixing it again would be redundant.</p>
 
 
     </div>

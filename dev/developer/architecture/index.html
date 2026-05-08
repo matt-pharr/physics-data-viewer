@@ -4578,7 +4578,7 @@
 <a id="__codelineno-6-4" name="__codelineno-6-4" href="#__codelineno-6-4"></a>    tree.py              # PDVTree (debounced _emit_changed), PDVScript, PDVFile, PDVNote, PDVModule, PDVGui, PDVNamelist, PDVLib
 <a id="__codelineno-6-5" name="__codelineno-6-5" href="#__codelineno-6-5"></a>    query_server.py      # QueryServer: ZMQ REP daemon thread for read-only queries during execution
 <a id="__codelineno-6-6" name="__codelineno-6-6" href="#__codelineno-6-6"></a>    namespace.py         # PDVNamespace (protected dict), PDVApp, pdv_namespace()
-<a id="__codelineno-6-7" name="__codelineno-6-7" href="#__codelineno-6-7"></a>    serialization.py     # Type detection, format writers (npy, parquet, json, module, gui, namelist, lib)
+<a id="__codelineno-6-7" name="__codelineno-6-7" href="#__codelineno-6-7"></a>    serialization.py     # Type detection, format writers (npy, pickle, json, module, gui, namelist, lib)
 <a id="__codelineno-6-8" name="__codelineno-6-8" href="#__codelineno-6-8"></a>    environment.py       # Path utilities, working dir management, project root logic
 <a id="__codelineno-6-9" name="__codelineno-6-9" href="#__codelineno-6-9"></a>    errors.py            # PDVError, PDVPathError, PDVKeyError, PDVProtectedNameError, PDVSerializationError, PDVScriptError, PDVVersionError
 <a id="__codelineno-6-10" name="__codelineno-6-10" href="#__codelineno-6-10"></a>    modules.py           # Custom type handler registry and dispatch (@pdv.handle() decorator)
@@ -4818,7 +4818,7 @@
 <a id="__codelineno-11-22" name="__codelineno-11-22" href="#__codelineno-11-22"></a>        c3d4e5f6a7b8/
 <a id="__codelineno-11-23" name="__codelineno-11-23" href="#__codelineno-11-23"></a>            fit_model.py
 <a id="__codelineno-11-24" name="__codelineno-11-24" href="#__codelineno-11-24"></a>        d4e5f6a7b8c9/
-<a id="__codelineno-11-25" name="__codelineno-11-25" href="#__codelineno-11-25"></a>            fit_output.parquet
+<a id="__codelineno-11-25" name="__codelineno-11-25" href="#__codelineno-11-25"></a>            fit_output.pickle
 </code></pre></div></p>
 <p>Each <code>modules/&lt;id&gt;/</code> subdirectory is maintained authoritatively by <code>project:save</code>: §5.13's save-time sync copies edited files from the working directory into it, then the manifest writer stamps <code>pdv-module.json</code> and <code>module-index.json</code> from the current in-memory <code>PDVModule</code> state. In-session modules (workflow B, origin <code>"in_session"</code> in the manifest) get their directory created on first save; imported modules get it at import time and updated on every subsequent save.</p>
 <p><strong><code>project.json</code> schema</strong> (current version <code>"1.2"</code>; <code>"1.1"</code> manifests remain readable and are upgraded in place on next save — see §10.5.5):
@@ -4943,7 +4943,7 @@
 <a id="__codelineno-13-27" name="__codelineno-13-27" href="#__codelineno-13-27"></a>
 <a id="__codelineno-13-28" name="__codelineno-13-28" href="#__codelineno-13-28"></a>When a user accesses a tree node whose data is in the save directory but not yet in the working directory, the kernel:
 <a id="__codelineno-13-29" name="__codelineno-13-29" href="#__codelineno-13-29"></a>1. Reads the appropriate file from the save directory
-<a id="__codelineno-13-30" name="__codelineno-13-30" href="#__codelineno-13-30"></a>2. Loads it into memory (e.g., `numpy.load`, `pandas.read_parquet`)
+<a id="__codelineno-13-30" name="__codelineno-13-30" href="#__codelineno-13-30"></a>2. Loads it into memory (e.g., `numpy.load`, `pickle.load`)
 <a id="__codelineno-13-31" name="__codelineno-13-31" href="#__codelineno-13-31"></a>3. Stores the result in the in-memory `PDVTree`
 <a id="__codelineno-13-32" name="__codelineno-13-32" href="#__codelineno-13-32"></a>4. Removes the entry from the lazy-load registry
 <a id="__codelineno-13-33" name="__codelineno-13-33" href="#__codelineno-13-33"></a>5. Does **not** copy the file to the working directory unless the data is subsequently modified
@@ -5015,8 +5015,8 @@
 <a id="__codelineno-14-52" name="__codelineno-14-52" href="#__codelineno-14-52"></a>| `script` | A `PDVScript` object | `.py` file in working or save directory |
 <a id="__codelineno-14-53" name="__codelineno-14-53" href="#__codelineno-14-53"></a>| `markdown` | A `PDVNote` object | `.md` file in working or save directory |
 <a id="__codelineno-14-54" name="__codelineno-14-54" href="#__codelineno-14-54"></a>| `ndarray` | NumPy array | `.npy` file |
-<a id="__codelineno-14-55" name="__codelineno-14-55" href="#__codelineno-14-55"></a>| `dataframe` | Pandas DataFrame | `.parquet` file |
-<a id="__codelineno-14-56" name="__codelineno-14-56" href="#__codelineno-14-56"></a>| `series` | Pandas Series | `.parquet` file |
+<a id="__codelineno-14-55" name="__codelineno-14-55" href="#__codelineno-14-55"></a>| `dataframe` | Pandas DataFrame | `.pickle` file |
+<a id="__codelineno-14-56" name="__codelineno-14-56" href="#__codelineno-14-56"></a>| `series` | Pandas Series | `.pickle` file |
 <a id="__codelineno-14-57" name="__codelineno-14-57" href="#__codelineno-14-57"></a>| `scalar` | Python int, float, bool, None | Inline in tree-index.json |
 <a id="__codelineno-14-58" name="__codelineno-14-58" href="#__codelineno-14-58"></a>| `text` | Python string | `.txt` file (if large) or inline |
 <a id="__codelineno-14-59" name="__codelineno-14-59" href="#__codelineno-14-59"></a>| `mapping` | Plain Python dict (not PDVTree) | Inline JSON |
@@ -5946,7 +5946,7 @@ This is idempotent and fast (cached) when the version is already present.</p>
 <li><code>PDVTree</code> get/set/delete, dot-path access, protected-name rejection</li>
 <li><code>PDVScript</code> run, docstring extraction</li>
 <li>Lazy-load registry: population from tree-index, fetch-on-access, registry cleanup</li>
-<li>Serialization: round-trip for each supported format (npy, parquet, json, txt)</li>
+<li>Serialization: round-trip for each supported format (npy, pickle, json, txt)</li>
 <li><code>PDVNamespace</code>: reassignment of protected names raises <code>PDVError</code></li>
 <li>Message envelope validation: malformed messages raise appropriate errors</li>
 </ul>
