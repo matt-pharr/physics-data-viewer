@@ -135,7 +135,29 @@ export async function launchPDV(opts: LaunchOptions = {}): Promise<LaunchedApp> 
   // Always surface the main-process stderr so kernel/bootstrap failures aren't
   // silenced inside the spawned Electron process. Stdout is gated behind
   // PDV_E2E_VERBOSE because it is high-volume during normal kernel ops.
-  app.process().stderr?.on("data", (b: Buffer) => process.stderr.write(`[main:err] ${b}`));
+  //
+  // Filter known-harmless Chromium noise that fires when the launcher's
+  // environment lacks the relevant system service:
+  //   - `dbus/bus.cc:... Failed to connect to the bus` — no system message
+  //     bus on Linux CI runners.
+  //   - `gpu/...command_buffer_proxy_impl.cc ... ContextResult::kTransientFailure`
+  //     — software GPU on headless runners flapping mid-init.
+  // PDV_E2E_VERBOSE=1 disables the filter so the raw stream is still
+  // available for debugging.
+  const stderrNoiseRe = /dbus\/bus\.cc.*Failed to connect to the bus|gpu\/ipc\/client\/command_buffer_proxy_impl\.cc/;
+  app.process().stderr?.on("data", (b: Buffer) => {
+    const text = b.toString();
+    if (process.env.PDV_E2E_VERBOSE !== "1") {
+      const filtered = text
+        .split("\n")
+        .filter((line) => line === "" || !stderrNoiseRe.test(line))
+        .join("\n");
+      if (filtered.trim().length === 0) return;
+      process.stderr.write(`[main:err] ${filtered}`);
+      return;
+    }
+    process.stderr.write(`[main:err] ${text}`);
+  });
   if (process.env.PDV_E2E_VERBOSE === "1") {
     app.process().stdout?.on("data", (b: Buffer) => process.stdout.write(`[main] ${b}`));
   }
