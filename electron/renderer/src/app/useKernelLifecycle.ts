@@ -125,7 +125,6 @@ export function useKernelLifecycle(options: UseKernelLifecycleOptions) {
       recentProjects: config?.recentProjects ?? [],
       pythonPath: paths.pythonPath ?? config?.pythonPath,
       juliaPath: paths.juliaPath ?? config?.juliaPath,
-      editors: config?.editors,
       treeRoot: config?.treeRoot,
       settings: config?.settings,
     };
