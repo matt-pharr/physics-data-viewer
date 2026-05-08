@@ -274,6 +274,8 @@ function setup() {
     ping: vi.fn(async () => undefined),
     getKernel: vi.fn(() => makeKernelInfo()),
     getQueryPort: vi.fn(() => 12345),
+    getKernelProcessState: vi.fn(() => ({ exitCode: null, killed: false })),
+    onIopubMessage: vi.fn(() => () => undefined),
     shutdownAll: vi.fn(async () => undefined),
     on: vi.fn(),
     removeListener: vi.fn(),

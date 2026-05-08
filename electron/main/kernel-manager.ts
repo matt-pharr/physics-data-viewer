@@ -952,6 +952,23 @@ export class KernelManager extends EventEmitter {
   }
 
   /**
+   * Return the OS process state for a kernel — used to enrich diagnostics
+   * when a handshake or execute fails.
+   *
+   * @param id - Kernel ID.
+   * @returns `{ exitCode, killed }` (both as the `child_process` reports them),
+   *   or undefined if the kernel is not found.
+   */
+  getKernelProcessState(id: string): { exitCode: number | null; killed: boolean } | undefined {
+    const managed = this.kernels.get(id);
+    if (!managed) return undefined;
+    return {
+      exitCode: managed.process.exitCode,
+      killed: managed.process.killed,
+    };
+  }
+
+  /**
    * Gracefully shut down every running kernel.
    */
   async shutdownAll(): Promise<void> {

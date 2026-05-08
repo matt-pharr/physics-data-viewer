@@ -447,6 +447,15 @@ def bootstrap(ip=None):
     # Users can still override with %matplotlib <backend> after bootstrap.
     _configure_matplotlib()
 
+    # Pay jedi's first-call grammar-table load cost here, on the same shell
+    # thread that will later serve complete_request, so the user's first
+    # completion isn't a 3–8 s stall (which serializes against execute_request).
+    if ip is not None:
+        try:
+            ip.complete("pdv_tree.")
+        except Exception:
+            pass
+
     comms_mod._bootstrapped = True
 
 
