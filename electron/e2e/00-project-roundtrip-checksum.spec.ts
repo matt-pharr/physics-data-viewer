@@ -232,39 +232,26 @@ async function bootKernel(window: Page): Promise<void> {
 }
 
 /**
- * Type a short snippet into the active editor and click Execute. Monaco
- * accepts `\n` as Enter via `keyboard.type`, but typing 4 KB of code is slow
- * and risks auto-pair / auto-indent quirks. For the long populate body we
- * call `runFromFile` instead, which only types a tiny `exec(open(...).read())`
- * bootstrap.
+ * Run arbitrary Python in the active kernel via the IPC, surfacing any
+ * kernel-side error immediately. Bypasses Monaco completely so we don't
+ * fight clipboard / auto-pair quirks across platforms (the previous
+ * editor-based approach silently failed on Linux CI).
+ *
+ * Looks up the kernel ID from `window.pdv.kernels.list()` rather than
+ * threading it in — there's exactly one kernel after `bootKernel`.
  */
-async function typeAndRun(window: Page, code: string): Promise<void> {
-  const editor = window.getByRole("textbox", { name: "Editor content" });
-  await editor.focus();
-  await window.keyboard.press(`${MOD}+a`);
-  await window.keyboard.press("Backspace");
-  await window.keyboard.type(code);
-  await window.getByRole("button", { name: "Execute" }).click();
-}
-
-/**
- * Run a code body that's too large to type directly. Writes the body to a
- * temp file (visible to the kernel — same machine, same filesystem) and
- * types a 1-line `exec(open(...).read())` bootstrap into the editor. Avoids
- * clipboard paste, which is unreliable on Linux CI runners with no display
- * server / clipboard daemon.
- */
-async function runFromFile(window: Page, code: string): Promise<string> {
-  const codePath = path.join(
-    await fs.mkdtemp(path.join(os.tmpdir(), "pdv-e2e-bootstrap-")),
-    "populate.py",
-  );
-  await fs.writeFile(codePath, code, "utf8");
-  // Use repr-style escaping via JSON.stringify so paths with spaces / odd
-  // chars survive intact in the typed Python string literal.
-  const bootstrap = `exec(open(${JSON.stringify(codePath)}).read())`;
-  await typeAndRun(window, bootstrap);
-  return codePath;
+async function executeInKernel(window: Page, code: string): Promise<void> {
+  const result = await window.evaluate(async (src) => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const pdv = (window as any).pdv;
+    const kernels = await pdv.kernels.list();
+    if (!kernels?.length) throw new Error("no kernels running");
+    return await pdv.kernels.execute(kernels[0].id, { code: src });
+  }, code);
+  if (result?.error) {
+    const detail = result.errorDetails?.traceback?.join("\n") ?? result.stderr ?? "";
+    throw new Error(`kernel execute failed: ${result.error}\n${detail}`);
+  }
 }
 
 /** Open the Import Module dialog, click Import on the named bundled module, close. */
@@ -310,13 +297,12 @@ test.setTimeout(360_000);
 test("project round-trips with diverse tree content; checksum is stable", async () => {
   const saveDir = await fs.mkdtemp(path.join(os.tmpdir(), "pdv-e2e-roundtrip-"));
   let savedChecksum = "";
-  let bootstrapPath: string | null = null;
 
   // ── Phase 1: launch, populate, import module, save ─────────────────
   const first = await launchPDV();
   try {
     await bootKernel(first.window);
-    bootstrapPath = await runFromFile(first.window, POPULATE_CODE);
+    await executeInKernel(first.window, POPULATE_CODE);
 
     // Wait for representative rows from each top-level branch before saving,
     // so we don't race the tree.changed push.
@@ -401,8 +387,5 @@ test("project round-trips with diverse tree content; checksum is stable", async 
   } finally {
     await second.cleanup();
     await fs.rm(saveDir, { recursive: true, force: true });
-    if (bootstrapPath) {
-      await fs.rm(path.dirname(bootstrapPath), { recursive: true, force: true });
-    }
   }
 });
