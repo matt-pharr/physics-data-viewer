@@ -68,7 +68,12 @@ def _split_dot_path(key: str) -> list[str]:
 
 
 def _resolve_nested(obj: dict, parts: list[str]) -> Any:
-    """Recursively resolve a list of path parts through nested dicts.
+    """Recursively resolve a list of path parts through nested containers.
+
+    Descends through nested dicts using string keys. When the current value
+    is a ``list`` or ``tuple``, the next path part is interpreted as an
+    integer index (so ``tree['waveforms.0.t']`` resolves to the ``'t'``
+    field of the first waveform when ``waveforms`` is a list of dicts).
 
     Parameters
     ----------
@@ -85,13 +90,34 @@ def _resolve_nested(obj: dict, parts: list[str]) -> Any:
     Raises
     ------
     KeyError
-        If any part is not found at its level.
+        If any part is not found at its level, or if a numeric index is
+        out of range / non-integer where a list or tuple is expected.
     """
-    current = obj
+    from pdv.serialization import _is_xarray_dataset  # noqa: PLC0415
+
+    current: Any = obj
     for part in parts:
-        if not isinstance(current, dict):
+        if isinstance(current, dict):
+            current = dict.__getitem__(current, part)
+        elif isinstance(current, (list, tuple)):
+            try:
+                index = int(part)
+            except ValueError:
+                raise KeyError(part)
+            try:
+                current = current[index]
+            except IndexError:
+                raise KeyError(part)
+        elif _is_xarray_dataset(current):
+            # Dataset.__getitem__ resolves both data_vars and coords by
+            # name, so coord dot-paths work even though the tree panel
+            # only lists data_vars as children.
+            try:
+                current = current[part]
+            except KeyError:
+                raise KeyError(part)
+        else:
             raise KeyError(part)
-        current = dict.__getitem__(current, part)
     return current
 
 

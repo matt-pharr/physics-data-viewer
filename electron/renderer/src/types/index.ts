@@ -142,6 +142,7 @@ export interface TreeNodeData
     | 'module_version'
     | 'module_description'
     | 'module_language'
+    | 'is_indexed'
   > {
   type: NodeDescriptor['type'] | 'root';
   parentPath: string | null;
@@ -155,6 +156,10 @@ export interface TreeNodeData
   moduleVersion?: string;
   moduleDescription?: string;
   moduleLanguage?: 'python' | 'julia';
+  /** True for elements of a list/tuple parent (path key is a numeric
+   *  index). Drives the renderer's gating of structural-mutation
+   *  context-menu actions. */
+  isIndexed?: boolean;
   children?: TreeNodeData[];
   isExpanded?: boolean;
   isLoading?: boolean;

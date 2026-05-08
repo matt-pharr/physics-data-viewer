@@ -493,6 +493,8 @@ const NodeKind = {
   GUI: "gui",
   LIB: "lib",
   MARKDOWN: "markdown",
+  DATASET: "dataset",
+  DATAARRAY: "dataarray",
 } as const;
 
 /** Union of all valid node `type` values in tree descriptors. */
@@ -548,6 +550,11 @@ export interface NodeDescriptor {
   module_description?: string;
   /** Module kernel language. Present when type is "module". */
   module_language?: "python" | "julia";
+  /** True when this node is an element of a list/tuple parent (path key
+   *  is a stringified integer). The renderer uses this to hide
+   *  structural-mutation actions (rename / move / duplicate / delete)
+   *  that don't apply to sequence elements. */
+  is_indexed?: boolean;
 }
 
 // ---------------------------------------------------------------------------

@@ -125,6 +125,7 @@ class TreeService {
       module_version,
       module_description,
       module_language,
+      is_indexed,
       ...rest
     } = node;
     return {
@@ -140,6 +141,7 @@ class TreeService {
       moduleVersion: module_version,
       moduleDescription: module_description,
       moduleLanguage: module_language,
+      isIndexed: Boolean(is_indexed),
       isExpanded: false,
       isLoading: false,
     };

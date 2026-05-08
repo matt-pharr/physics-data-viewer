@@ -70,6 +70,91 @@ class TestDotPathAccess:
         with pytest.raises(PDVPathError):
             _ = tree_with_comm["a..b"]
 
+    def test_get_indexes_into_list(self, tree_with_comm):
+        """A numeric segment indexes into a list value."""
+        tree_with_comm["xs"] = [10, 20, 30]
+        assert tree_with_comm["xs.0"] == 10
+        assert tree_with_comm["xs.2"] == 30
+
+    def test_get_indexes_into_tuple(self, tree_with_comm):
+        """A numeric segment indexes into a tuple value."""
+        tree_with_comm["pair"] = ("a", "b")
+        assert tree_with_comm["pair.1"] == "b"
+
+    def test_get_descends_through_list_into_dict(self, tree_with_comm):
+        """Dot-path descends through list indices into nested dicts."""
+        tree_with_comm["records"] = [{"name": "a"}, {"name": "b"}]
+        assert tree_with_comm["records.0.name"] == "a"
+        assert tree_with_comm["records.1.name"] == "b"
+
+    def test_index_out_of_range_raises_key_error(self, tree_with_comm):
+        """Out-of-range index on a list raises PDVKeyError."""
+        tree_with_comm["xs"] = [1, 2]
+        with pytest.raises(PDVKeyError):
+            _ = tree_with_comm["xs.5"]
+
+    def test_non_numeric_segment_into_list_raises_key_error(self, tree_with_comm):
+        """Non-numeric segment into a list value raises PDVKeyError."""
+        tree_with_comm["xs"] = [1, 2, 3]
+        with pytest.raises(PDVKeyError):
+            _ = tree_with_comm["xs.foo"]
+
+    def test_contains_indexed_path(self, tree_with_comm):
+        """`'xs.0' in tree` works for list values."""
+        tree_with_comm["xs"] = [1, 2]
+        assert "xs.0" in tree_with_comm
+        assert "xs.5" not in tree_with_comm
+        assert "xs.foo" not in tree_with_comm
+
+    def test_get_descends_into_xarray_dataset(self, tree_with_comm):
+        """A dot-path segment after a Dataset resolves via Dataset[name]."""
+        xr = pytest.importorskip("xarray")
+        import numpy as np
+        ds = xr.Dataset(
+            {"a": (("t",), np.array([1.0, 2.0, 3.0]))},
+            coords={"t": [10, 20, 30]},
+        )
+        tree_with_comm["ds"] = ds
+        result = tree_with_comm["ds.a"]
+        assert isinstance(result, xr.DataArray)
+        assert result.equals(ds["a"])
+
+    def test_get_descends_to_dataset_coord(self, tree_with_comm):
+        """Coord names resolve incidentally via Dataset.__getitem__ even
+        though the tree panel only lists data_vars as children."""
+        xr = pytest.importorskip("xarray")
+        import numpy as np
+        ds = xr.Dataset(
+            {"a": (("t",), np.array([1.0, 2.0]))},
+            coords={"t": [10, 20]},
+        )
+        tree_with_comm["ds"] = ds
+        result = tree_with_comm["ds.t"]
+        assert isinstance(result, xr.DataArray)
+        assert list(result.values) == [10, 20]
+
+    def test_dataset_missing_key_raises_pdv_key_error(self, tree_with_comm):
+        """Unknown var/coord names raise PDVKeyError."""
+        xr = pytest.importorskip("xarray")
+        import numpy as np
+        tree_with_comm["ds"] = xr.Dataset(
+            {"a": (("t",), np.array([1.0]))}
+        )
+        with pytest.raises(PDVKeyError):
+            _ = tree_with_comm["ds.missing"]
+
+    def test_no_descent_through_dataarray(self, tree_with_comm):
+        """DataArrays are leaves — descending past one with another
+        segment raises PDVKeyError (we do not interpret da[label] as
+        dimension indexing)."""
+        xr = pytest.importorskip("xarray")
+        import numpy as np
+        tree_with_comm["ds"] = xr.Dataset(
+            {"a": (("t",), np.array([1.0, 2.0]))}
+        )
+        with pytest.raises(PDVKeyError):
+            _ = tree_with_comm["ds.a.0"]
+
 
 class TestChangeNotification:
     """Tests for pdv.tree.changed push notifications (debounced)."""
