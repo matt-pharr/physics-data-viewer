@@ -87,11 +87,20 @@ class TestDotPathAccess:
         assert tree_with_comm["records.0.name"] == "a"
         assert tree_with_comm["records.1.name"] == "b"
 
+    def test_negative_index_returns_from_end(self, tree_with_comm):
+        """Negative indices in a dot-path index from the end of the list,
+        following Python's native sequence-indexing semantics."""
+        tree_with_comm["xs"] = [10, 20, 30]
+        assert tree_with_comm["xs.-1"] == 30
+        assert tree_with_comm["xs.-2"] == 20
+
     def test_index_out_of_range_raises_key_error(self, tree_with_comm):
         """Out-of-range index on a list raises PDVKeyError."""
         tree_with_comm["xs"] = [1, 2]
         with pytest.raises(PDVKeyError):
             _ = tree_with_comm["xs.5"]
+        with pytest.raises(PDVKeyError):
+            _ = tree_with_comm["xs.-5"]
 
     def test_non_numeric_segment_into_list_raises_key_error(self, tree_with_comm):
         """Non-numeric segment into a list value raises PDVKeyError."""

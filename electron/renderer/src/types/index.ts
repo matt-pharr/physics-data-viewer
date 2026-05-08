@@ -142,7 +142,7 @@ export interface TreeNodeData
     | 'module_version'
     | 'module_description'
     | 'module_language'
-    | 'is_indexed'
+    | 'parent_is_opaque'
   > {
   type: NodeDescriptor['type'] | 'root';
   parentPath: string | null;
@@ -156,10 +156,11 @@ export interface TreeNodeData
   moduleVersion?: string;
   moduleDescription?: string;
   moduleLanguage?: 'python' | 'julia';
-  /** True for elements of a list/tuple parent (path key is a numeric
-   *  index). Drives the renderer's gating of structural-mutation
-   *  context-menu actions. */
-  isIndexed?: boolean;
+  /** True when the parent container can't be addressed by key from the
+   *  tree-mutation handlers (list/tuple/Dataset). Drives suppression of
+   *  rename / move / duplicate / delete on this row. See the wire field
+   *  ``parent_is_opaque`` on ``NodeDescriptor`` for the full contract. */
+  parentIsOpaque?: boolean;
   children?: TreeNodeData[];
   isExpanded?: boolean;
   isLoading?: boolean;

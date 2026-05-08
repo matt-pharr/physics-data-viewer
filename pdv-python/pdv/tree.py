@@ -74,6 +74,12 @@ def _resolve_nested(obj: dict, parts: list[str]) -> Any:
     is a ``list`` or ``tuple``, the next path part is interpreted as an
     integer index (so ``tree['waveforms.0.t']`` resolves to the ``'t'``
     field of the first waveform when ``waveforms`` is a list of dicts).
+    Negative indices are supported (``tree['xs.-1']`` returns the last
+    element) since ``int('-n')`` parses and Python's sequence indexing
+    accepts negatives natively. When the current value is an
+    ``xarray.Dataset``, the next part is looked up via
+    ``Dataset.__getitem__``, which resolves both data variables and
+    coordinate names.
 
     Parameters
     ----------
@@ -93,7 +99,7 @@ def _resolve_nested(obj: dict, parts: list[str]) -> Any:
         If any part is not found at its level, or if a numeric index is
         out of range / non-integer where a list or tuple is expected.
     """
-    from pdv.serialization import _is_xarray_dataset  # noqa: PLC0415
+    from pdv.serialization import is_xarray_dataset  # noqa: PLC0415
 
     current: Any = obj
     for part in parts:
@@ -103,19 +109,19 @@ def _resolve_nested(obj: dict, parts: list[str]) -> Any:
             try:
                 index = int(part)
             except ValueError:
-                raise KeyError(part)
+                raise KeyError(part) from None
             try:
                 current = current[index]
             except IndexError:
-                raise KeyError(part)
-        elif _is_xarray_dataset(current):
+                raise KeyError(part) from None
+        elif is_xarray_dataset(current):
             # Dataset.__getitem__ resolves both data_vars and coords by
             # name, so coord dot-paths work even though the tree panel
             # only lists data_vars as children.
             try:
                 current = current[part]
             except KeyError:
-                raise KeyError(part)
+                raise KeyError(part) from None
         else:
             raise KeyError(part)
     return current

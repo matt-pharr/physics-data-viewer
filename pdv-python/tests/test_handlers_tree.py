@@ -158,7 +158,7 @@ class TestHandleTreeList:
 
     def test_list_container_enumerates_indexed_children(self, tree_with_comm):
         """pdv.tree.list at a list path returns one child per element with
-        stringified-int keys and the is_indexed flag set."""
+        stringified-int keys and the parent_is_opaque flag set."""
         tree_with_comm["xs"] = ["a", "b", "c"]
         mock_comm = _make_mock_comm()
         msg = _make_msg("pdv.tree.list", {"path": "xs"})
@@ -172,10 +172,10 @@ class TestHandleTreeList:
         nodes = response["payload"]["nodes"]
         assert [n["key"] for n in nodes] == ["0", "1", "2"]
         assert [n["path"] for n in nodes] == ["xs.0", "xs.1", "xs.2"]
-        assert all(n["is_indexed"] is True for n in nodes)
+        assert all(n["parent_is_opaque"] is True for n in nodes)
 
     def test_dict_children_are_not_indexed(self, tree_with_comm):
-        """Children of a dict parent never carry is_indexed."""
+        """Children of a dict parent never carry parent_is_opaque."""
         tree_with_comm["data.x"] = 1
         mock_comm = _make_mock_comm()
         msg = _make_msg("pdv.tree.list", {"path": "data"})
@@ -186,7 +186,7 @@ class TestHandleTreeList:
             handle_tree_list(msg)
         nodes = mock_comm._sent[0]["payload"]["nodes"]
         for node in nodes:
-            assert "is_indexed" not in node
+            assert "parent_is_opaque" not in node
 
     def test_nested_list_in_list(self, tree_with_comm):
         """A list containing dicts/lists is recursively expandable."""
@@ -252,7 +252,7 @@ class TestHandleTreeList:
         nodes = response["payload"]["nodes"]
         assert [n["key"] for n in nodes] == ["a", "b"]
         assert all(n["type"] == "dataarray" for n in nodes)
-        assert all(n["is_indexed"] is True for n in nodes)
+        assert all(n["parent_is_opaque"] is True for n in nodes)
         assert all(n["has_children"] is False for n in nodes)
         assert nodes[0]["preview"] == "x: 3"
         assert nodes[1]["preview"] == "x: 3, y: 4"

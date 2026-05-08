@@ -152,16 +152,17 @@ export function getMenuEntries(node: TreeNodeData): MenuEntry[] {
 
   entries.push({ kind: 'action', id: 'print', label: 'Print', disabled: false });
   entries.push({ kind: 'action', id: 'copy_path', label: 'Copy Path', disabled: false });
-  // Indexed children (elements of list/tuple parents) cannot be renamed,
-  // moved, duplicated, or deleted via the tree handlers — those operate
-  // on dict keys, not sequence positions. Suppress the entries entirely
-  // rather than show them disabled, which would invite confusion.
-  if (node.type !== 'root' && !node.isIndexed) {
+  // Children of an opaque parent (list/tuple element, Dataset data-var)
+  // cannot be renamed, moved, duplicated, or deleted via the tree
+  // handlers — those operate on dict keys inside containers the kernel
+  // knows how to mutate. Suppress the entries entirely rather than show
+  // them disabled, which would invite confusion.
+  if (node.type !== 'root' && !node.parentIsOpaque) {
     entries.push({ kind: 'action', id: 'rename', label: `Rename ${renameLabel(node.type)}`, disabled: false });
     entries.push({ kind: 'action', id: 'move', label: 'Move to...', disabled: false });
     entries.push({ kind: 'action', id: 'duplicate', label: 'Duplicate to...', disabled: false });
   }
-  if (!node.isIndexed) {
+  if (!node.parentIsOpaque) {
     entries.push({ kind: 'action', id: 'delete', label: 'Delete', disabled: false });
   }
 

@@ -99,7 +99,7 @@ def _can_inline_json(value: Any) -> bool:
     return False
 
 
-def _is_xarray_dataset(value: Any) -> bool:
+def is_xarray_dataset(value: Any) -> bool:
     """Return True if ``value`` is an xarray ``Dataset``."""
     try:
         import xarray as xr  # noqa: PLC0415
@@ -108,7 +108,7 @@ def _is_xarray_dataset(value: Any) -> bool:
     return isinstance(value, xr.Dataset)
 
 
-def _is_xarray_dataarray(value: Any) -> bool:
+def is_xarray_dataarray(value: Any) -> bool:
     """Return True if ``value`` is an xarray ``DataArray``."""
     try:
         import xarray as xr  # noqa: PLC0415
@@ -125,7 +125,7 @@ def _is_xarray_object(value: Any) -> bool:
     support with a more inspectable on-disk format is planned for beta;
     until then pickle is the simplest reliable round-trip.
     """
-    return _is_xarray_dataset(value) or _is_xarray_dataarray(value)
+    return is_xarray_dataset(value) or is_xarray_dataarray(value)
 
 
 def _has_array_leaf(value: Any) -> bool:
@@ -241,9 +241,9 @@ def detect_kind(value: Any) -> str:
     # xarray comes before numpy because DataArray wraps an ndarray and we
     # want the richer kind. Both helpers are no-ops when xarray isn't
     # installed.
-    if _is_xarray_dataset(value):
+    if is_xarray_dataset(value):
         return KIND_DATASET
-    if _is_xarray_dataarray(value):
+    if is_xarray_dataarray(value):
         return KIND_DATAARRAY
     # Lazy numpy/pandas checks
     try:
