@@ -2,6 +2,14 @@ import { useEffect, useState } from 'react';
 import type { Config } from '../types';
 import { BUILTIN_THEMES, applyThemeColors, applyFontSettings, applyMarkdownSettings, getMonacoTheme, resolveThemeColors } from '../themes';
 
+/** Push the active theme's bg-primary to main so the BrowserWindow's native
+ *  background matches — keeps live-resize gestures from flashing the OS default. */
+function syncWindowBackground(colors: Record<string, string> | undefined): void {
+  const bg = colors?.['bg-primary'];
+  if (!bg) return;
+  void window.pdv.window?.setBackgroundColor(bg);
+}
+
 /** localStorage key used by the blocking theme script in index.html. */
 const THEME_CACHE_KEY = 'pdv-theme-cache';
 
@@ -46,6 +54,7 @@ export function useThemeManager({ config }: UseThemeManagerOptions): string {
       const colors = systemPrefersDark ? darkColors : lightColors;
       if (colors) {
         applyThemeColors(colors);
+        syncWindowBackground(colors);
         // eslint-disable-next-line react-hooks/set-state-in-effect -- deriving Monaco theme from config on change
         setMonacoTheme(getMonacoTheme(
           (systemPrefersDark ? app.darkTheme : app.lightTheme) ?? '', BUILTIN_THEMES,
@@ -55,6 +64,7 @@ export function useThemeManager({ config }: UseThemeManagerOptions): string {
     } else {
       if (app.colors) {
         applyThemeColors(app.colors);
+        syncWindowBackground(app.colors);
         cacheTheme({ followSystem: false, colors: app.colors });
       }
       setMonacoTheme(getMonacoTheme(app.themeName ?? '', BUILTIN_THEMES));

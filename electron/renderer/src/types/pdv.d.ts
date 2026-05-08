@@ -844,6 +844,11 @@ export interface PDVApi {
     get(): Promise<Config>;
     set(updates: Partial<Config>): Promise<Config>;
   };
+  window: {
+    /** Sync the BrowserWindow's native background to the active theme so
+     *  live-resize gestures don't flash the OS-default white. */
+    setBackgroundColor(color: string): Promise<void>;
+  };
   autosave: {
     run(codeCells: unknown): Promise<{ saved: boolean }>;
     clear(dir?: string): Promise<void>;
@@ -860,6 +865,9 @@ export interface PDVApi {
   };
   about: {
     getVersion(): Promise<string>;
+    openRepoPage(): Promise<void>;
+    openIssuesPage(): Promise<void>;
+    openDocsPage(): Promise<void>;
   };
   updater: {
     checkForUpdates(): Promise<void>;
@@ -919,6 +927,12 @@ export interface PDVApi {
      * the title-bar close button and OS-level window close (Cmd+Q, Alt+F4).
      */
     onRequestClose(callback: () => void): () => void;
+    /**
+     * Mark the main window's document as edited or clean. On macOS this
+     * toggles the dot inside the red close traffic-light. No-op on other
+     * platforms.
+     */
+    setDocumentEdited(edited: boolean): Promise<void>;
   };
 }
 

@@ -10,7 +10,7 @@
  * index.ts — IPC handler registration and push forwarding
  */
 
-import { BrowserWindow, app, type BrowserWindowConstructorOptions } from "electron";
+import { BrowserWindow, app, nativeTheme, type BrowserWindowConstructorOptions } from "electron";
 import * as path from "path";
 import * as os from "os";
 import * as fsSync from "fs";
@@ -55,6 +55,53 @@ function getWindowChromeOptions(): BrowserWindowConstructorOptions {
   return {};
 }
 
+/**
+ * Built-in theme `bg-primary` lookup, mirrored from
+ * `renderer/src/themes.ts`'s `BUILTIN_THEMES`. Duplicated here because
+ * `themes.ts` lives in the renderer bundle and isn't reachable from main.
+ * Keep in sync when adding or renaming built-in themes.
+ */
+const BUILTIN_BG_PRIMARY: Record<string, string> = {
+  "Dark+ (VSCode)": "#1e1e1e",
+  "Light+ (VSCode)": "#ffffff",
+  "Monokai": "#272822",
+  "Xcode Light": "#ffffff",
+  "Xcode Dark": "#242529",
+  "Dark Modern (VSCode)": "#1f1f1f",
+  "Light Modern (VSCode)": "#ffffff",
+};
+
+const FALLBACK_DARK_BG = "#1e1e1e";
+const FALLBACK_LIGHT_BG = "#ffffff";
+
+/**
+ * Resolve the BrowserWindow `backgroundColor` from persisted appearance
+ * settings before any renderer code runs. Mirrors the renderer's
+ * `useThemeManager` resolution: honors `followSystemTheme` via
+ * `nativeTheme.shouldUseDarkColors`, then falls back to a constant dark
+ * value if no usable theme name is found.
+ *
+ * Custom user themes (saved on disk by `themes:save`) aren't visible from
+ * here without an extra disk read on the hot-path; if the active theme is
+ * custom we fall back to dark/light by system preference. The renderer's
+ * follow-up `window:setBackgroundColor` call corrects it within ms.
+ *
+ * @param settings - The persisted `appearance` block (may be undefined).
+ * @returns A hex color string suitable for `BrowserWindowConstructorOptions.backgroundColor`.
+ */
+function resolveInitialBackgroundColor(
+  settings: { themeName?: string; followSystemTheme?: boolean; darkTheme?: string; lightTheme?: string; colors?: Record<string, string> } | undefined,
+): string {
+  const systemDark = nativeTheme.shouldUseDarkColors;
+  if (!settings) return systemDark ? FALLBACK_DARK_BG : FALLBACK_LIGHT_BG;
+  if (settings.colors?.["bg-primary"]) return settings.colors["bg-primary"];
+  const activeName = settings.followSystemTheme
+    ? (systemDark ? settings.darkTheme : settings.lightTheme)
+    : settings.themeName;
+  if (activeName && BUILTIN_BG_PRIMARY[activeName]) return BUILTIN_BG_PRIMARY[activeName];
+  return systemDark ? FALLBACK_DARK_BG : FALLBACK_LIGHT_BG;
+}
+
 async function loadDevUrlWithRetry(
   win: BrowserWindow,
   url: string,
@@ -95,6 +142,7 @@ export async function createWindow(
     width: 1440,
     height: 960,
     show: false,
+    backgroundColor: resolveInitialBackgroundColor(configStore.get("settings")?.appearance),
     ...getWindowChromeOptions(),
     webPreferences: {
       preload: path.join(__dirname, "..", "preload.js"),
@@ -163,22 +211,43 @@ export async function createWindow(
     setAllowClose,
   );
 
-  // Intercept window close (title-bar X, OS close, Cmd+Q) so the renderer can
+  // Intercept window close (title-bar X, OS close) so the renderer can
   // prompt the user about unsaved changes before the window goes away.
+  // Skipped under PDV_E2E: Playwright's app.close() drives the same code
+  // path, and `projectDirty` flips to true as soon as the kernel reaches
+  // ready, so the dialog would block every spec's teardown indefinitely.
+  const skipCloseGuard = process.env.PDV_E2E === "1";
   win.on("close", (event) => {
-    if (allowClose || win.webContents.isDestroyed()) {
+    if (skipCloseGuard || allowClose || win.webContents.isDestroyed()) {
       return;
     }
-    // When a real quit is already in progress (Cmd+Q, autoUpdater restart,
-    // OS logout), do NOT intercept — let Electron close the window
-    // naturally so `window-all-closed` and `will-quit` can run. Routing
-    // through the renderer dirty prompt here re-enters the quit machinery
-    // and wedges the process on macOS. The title-bar X is still
-    // intercepted because `isQuittingGlobal` is false in that case.
-    if (isQuittingGlobal) {
+    // X-click / native close supersedes any pending quit dialog: this is a
+    // close, not a quit, so confirmClose should call win.close() (and on
+    // darwin leave the app in the dock) rather than app.quit().
+    quitRequestPending = false;
+    event.preventDefault();
+    win.webContents.send(IPC.push.requestClose);
+  });
+
+  // Intercept Cmd+Q / menu Quit / autoUpdater restart / OS logout so the same
+  // unsaved-changes dialog runs before the app exits. The renderer's existing
+  // `requestClose` handler decides whether to show the dialog (dirty) or
+  // immediately confirm (clean), then calls `confirmClose`, which sets
+  // `allowClose=true` and re-invokes `app.quit()`. On the second pass we fall
+  // through the `allowClose` gate and the quit proceeds normally.
+  app.on("before-quit", (event) => {
+    if (skipCloseGuard || allowClose) {
+      isQuittingGlobal = true;
+      quitRequestPending = false;
+      return;
+    }
+    if (win.isDestroyed() || win.webContents.isDestroyed()) {
+      isQuittingGlobal = true;
+      quitRequestPending = false;
       return;
     }
     event.preventDefault();
+    quitRequestPending = true;
     win.webContents.send(IPC.push.requestClose);
   });
 
@@ -224,12 +293,20 @@ export async function createWindow(
 // Module-level shutdown flag to prevent re-entrant kernel cleanup during quit.
 let isShuttingDownGlobal = false;
 
-// Set by `before-quit` so window `close` handlers can distinguish a real quit
-// (Cmd+Q, app.quit(), autoUpdater.quitAndInstall(), OS logout) from the user
-// just closing the window with the title-bar X. Without this, macOS apps that
-// intercept `close` get stuck: the window goes away but the process never
-// exits, because `window-all-closed` is a no-op on darwin.
+// Set when a quit is actively proceeding (we've passed the `allowClose` gate
+// or there's no renderer to ask). `window-all-closed` reads this on darwin
+// to decide whether to actually exit; without it, macOS apps that intercept
+// `close` get stuck in the dock with no live window.
 let isQuittingGlobal = false;
+
+// Set when `before-quit` fired and we deferred to the renderer's dirty
+// prompt — i.e. a quit is requested but awaiting user resolution. Read by
+// `confirmClose` to decide whether to call `app.quit()` (full quit) or
+// `win.close()` (just close window, app stays in dock on darwin). Cleared
+// when the user clicks the title-bar X / native close instead, so an
+// X-click supersedes any orphaned quit request and a confirm afterwards
+// doesn't accidentally quit the app on darwin.
+let quitRequestPending = false;
 
 export function isQuitting(): boolean {
   return isQuittingGlobal;
@@ -237,6 +314,14 @@ export function isQuitting(): boolean {
 
 export function markQuitting(): void {
   isQuittingGlobal = true;
+}
+
+export function isQuitRequestPending(): boolean {
+  return quitRequestPending;
+}
+
+export function clearQuitRequestPending(): void {
+  quitRequestPending = false;
 }
 
 /**

@@ -299,7 +299,7 @@ export const EnvironmentSelector: React.FC<EnvironmentSelectorProps> = ({
                 env.pdvVersionMismatch ? (
                   <span className="env-badge env-badge--warning" title={`Version mismatch: ${env.pdvVersion} (app: ${appVersion ?? '?'})`}>pdv {env.pdvVersion}</span>
                 ) : (
-                  <span className="env-badge env-badge--ok" title={`pdv-python ${env.pdvVersion}`}>pdv</span>
+                  <span className="env-badge env-badge--ok" title={`pdv-python ${env.pdvVersion}`}>pdv {env.pdvVersion}</span>
                 )
               ) : (
                 <span className="env-badge env-badge--missing" title="pdv-python not installed">pdv</span>

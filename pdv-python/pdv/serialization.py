@@ -7,7 +7,7 @@ file representations.
 Supported formats
 -----------------
 - **npy** — NumPy arrays (requires numpy)
-- **parquet** — Pandas DataFrame and Series (requires pandas + pyarrow or fastparquet)
+- **pickle** — Pandas DataFrame and Series (PDV saves are internal)
 - **json** — JSON-native scalars, lists, dicts
 - **txt** — Plain text strings
 - **pickle** — Fallback for unknown types (only when ``trusted=True``)
@@ -59,7 +59,6 @@ KIND_UNKNOWN = "unknown"
 
 # Format strings — must match ARCHITECTURE.md §7.3 storage.format
 FORMAT_NPY = "npy"
-FORMAT_PARQUET = "parquet"
 FORMAT_JSON = "json"
 FORMAT_TXT = "txt"
 FORMAT_PICKLE = "pickle"
@@ -73,80 +72,73 @@ FORMAT_PY_LIB = "py_lib"
 FORMAT_FILE = "file"
 
 
-def _parquet_engine() -> str:
-    """Return the best available parquet engine name.
+def _can_inline_json(value: Any) -> bool:
+    """Return True if ``value`` round-trips losslessly through JSON.
 
-    Prefers ``'pyarrow'`` when importable, falls back to ``'fastparquet'``.
-    Raises :class:`ImportError` if neither is available.
+    Stricter than "json.dumps doesn't raise": rejects tuples (collapsed to
+    arrays), sets/frozensets, complex, bytes, and any value at any nesting
+    level whose Python type can't be reconstructed from JSON. Only str /
+    int / float / bool / None scalars and lists/dicts (with str keys)
+    composed of those are considered inline-safe.
+
+    Used by :func:`serialize_node` to decide between the fast inline path
+    and the composite/pickle paths that preserve type fidelity.
+    """
+    if value is None or isinstance(value, (str, bool)):
+        return True
+    if isinstance(value, (int, float)) and not isinstance(value, complex):
+        return True
+    if isinstance(value, list):
+        return all(_can_inline_json(v) for v in value)
+    if isinstance(value, dict):
+        return all(
+            isinstance(k, str) and _can_inline_json(v) for k, v in value.items()
+        )
+    return False
+
+
+def _is_xarray_object(value: Any) -> bool:
+    """Return True if ``value`` is an xarray DataArray or Dataset.
+
+    Used by :func:`serialize_node` to route xarray nodes to builtin pickle
+    storage, bypassing the custom-serializer registry. First-class xarray
+    support with a more inspectable on-disk format is planned for beta;
+    until then pickle is the simplest reliable round-trip.
     """
     try:
-        import pyarrow  # noqa: F401, PLC0415
-
-        return "pyarrow"
+        import xarray as xr  # noqa: PLC0415
     except ImportError:
-        pass
-    try:
-        import fastparquet  # noqa: F401, PLC0415
-
-        return "fastparquet"
-    except ImportError:
-        pass
-    raise ImportError("No parquet engine available. Install pyarrow or fastparquet.")
-
-
-def _write_parquet(value: Any, path: str) -> None:
-    """Write a DataFrame or Series to a parquet file.
-
-    Uses an explicit engine to avoid pyarrow extension-type registration
-    conflicts that occur when ``to_parquet()`` is called without one.
-    """
-    engine = _parquet_engine()
-    try:
-        value.to_parquet(path, engine=engine)
-    except Exception as primary_err:
-        # pyarrow can raise extension-type conflicts on repeated writes
-        # in the same process.  Fall back to the other engine if possible.
-        fallback = "fastparquet" if engine == "pyarrow" else "pyarrow"
-        try:
-            value.to_parquet(path, engine=fallback)
-        except ImportError:
-            raise primary_err from primary_err
-
-
-def _read_parquet(path: str) -> Any:
-    """Read a parquet file into a DataFrame.
-
-    Uses an explicit engine to avoid pyarrow extension-type registration
-    conflicts.
-    """
-    import pandas as pd  # noqa: PLC0415
-
-    engine = _parquet_engine()
-    try:
-        return pd.read_parquet(path, engine=engine)
-    except Exception as primary_err:
-        fallback = "fastparquet" if engine == "pyarrow" else "pyarrow"
-        try:
-            return pd.read_parquet(path, engine=fallback)
-        except ImportError:
-            raise primary_err from primary_err
-
-
-def _is_json_native(value: Any) -> bool:
-    """Return True if ``value`` can be round-tripped through ``json.dumps``.
-
-    Used by :func:`serialize_node` to decide between the fast inline path for
-    plain dicts/lists of JSON-native values and the composite path that
-    emits per-leaf descriptors (for dicts containing ndarrays, DataFrames,
-    bytes, etc.).
-    """
-    import json  # noqa: PLC0415
-
-    try:
-        json.dumps(value)
-    except (TypeError, ValueError):
         return False
-    return True
+    return isinstance(value, (xr.DataArray, xr.Dataset))
+
+
+def _has_array_leaf(value: Any) -> bool:
+    """Return True if ``value`` or any nested value is an ndarray, DataFrame, or Series.
+
+    Used by the sequence-serialization path to choose between pickling the
+    whole container (safe for tuples/sets/complex/bytes leaves) and raising
+    a "split into a dict" error (when an array leaf is present and would
+    need its own file for fast access).
+    """
+    try:
+        import numpy as np  # noqa: PLC0415
+
+        if isinstance(value, np.ndarray):
+            return True
+    except ImportError:
+        pass
+    try:
+        import pandas as pd  # noqa: PLC0415
+
+        if isinstance(value, (pd.DataFrame, pd.Series)):
+            return True
+    except ImportError:
+        pass
+    if isinstance(value, dict):
+        return any(_has_array_leaf(v) for v in value.values())
+    if isinstance(value, (list, tuple, set, frozenset)):
+        return any(_has_array_leaf(v) for v in value)
+    return False
 
 
 def python_type_string(value: Any) -> str:
@@ -216,7 +208,7 @@ def detect_kind(value: Any) -> str:
     # bool must be checked before int (bool is a subclass of int)
     if isinstance(value, bool):
         return KIND_SCALAR
-    if isinstance(value, (int, float)) or value is None:
+    if isinstance(value, (int, float, complex)) or value is None:
         return KIND_SCALAR
     if isinstance(value, str):
         return KIND_TEXT
@@ -224,7 +216,11 @@ def detect_kind(value: Any) -> str:
         return KIND_BINARY
     if isinstance(value, dict):
         return KIND_MAPPING
-    if isinstance(value, (list, tuple)):
+    # Sets are unordered, but classifying them under the sequence kind
+    # keeps the renderer treatment (collection chip, sized preview)
+    # consistent with list/tuple. The Python class shown in the chip
+    # (`set` / `frozenset`) tells users they're not lists.
+    if isinstance(value, (list, tuple, set, frozenset)):
         return KIND_SEQUENCE
     # Lazy numpy/pandas checks
     try:
@@ -385,6 +381,7 @@ def serialize_node(
         "key": key,
         "parent_path": parent_path,
         "type": kind,
+        "python_type": python_type_string(value),
         "has_children": False,
         "created_at": now,
         "updated_at": now,
@@ -511,17 +508,22 @@ def serialize_node(
         return descriptor
 
     if kind in (KIND_DATAFRAME, KIND_SERIES):
+        # PDV saves are internal, so pandas DataFrames and Series go through
+        # pickle. This avoids an external parquet-engine dependency and keeps
+        # name/index/dtype/extension-type round-trips lossless. Users who want
+        # parquet for interchange can write it themselves.
         _digest, _cached = _try_autosave_cache(autosave_cache, tree_path, value, _source_dir, autosave_hits)
         if _cached is not None:
             return _cached
 
         node_uuid = generate_node_uuid()
-        filename = key + ".parquet"
+        filename = key + ".pickle"
         file_path = uuid_tree_path(working_dir, node_uuid, filename)
         ensure_parent(file_path)
-        _write_parquet(value, file_path)
+        with open(file_path, "wb") as fh:
+            pickle.dump(value, fh)
         descriptor["uuid"] = node_uuid
-        descriptor["storage"] = _file_storage(node_uuid, filename, FORMAT_PARQUET)
+        descriptor["storage"] = _file_storage(node_uuid, filename, FORMAT_PICKLE)
         if kind == KIND_DATAFRAME:
             shape = list(value.shape)  # type: ignore[union-attr]
         else:
@@ -535,6 +537,19 @@ def serialize_node(
         return descriptor
 
     if kind == KIND_SCALAR:
+        if isinstance(value, complex):
+            # complex isn't JSON-native, so the inline path can't store it.
+            # Pickle it like other non-JSON-native values.
+            node_uuid = generate_node_uuid()
+            filename = key + ".pickle"
+            file_path = uuid_tree_path(working_dir, node_uuid, filename)
+            ensure_parent(file_path)
+            with open(file_path, "wb") as fh:
+                pickle.dump(value, fh)
+            descriptor["uuid"] = node_uuid
+            descriptor["storage"] = _file_storage(node_uuid, filename, FORMAT_PICKLE)
+            descriptor["metadata"] = {"preview": preview}
+            return descriptor
         descriptor["storage"] = {
             "backend": "inline",
             "format": FORMAT_INLINE,
@@ -569,7 +584,7 @@ def serialize_node(
         return descriptor
 
     if kind == KIND_MAPPING:
-        if _is_json_native(value):
+        if _can_inline_json(value):
             descriptor["storage"] = {
                 "backend": "inline",
                 "format": FORMAT_INLINE,
@@ -577,18 +592,33 @@ def serialize_node(
             }
             descriptor["metadata"] = {"preview": preview}
             return descriptor
-        # Composite mapping: one or more leaves are not JSON-serializable.
-        # Emit a container descriptor; the save walker (_collect_nodes) is
-        # responsible for recursing into the dict and emitting per-leaf
-        # descriptors so each leaf reaches its own fast path (.npy, parquet,
-        # etc). Reconstructed on load as a plain dict, not a PDVTree.
+        if not _has_array_leaf(value):
+            # No ndarray/DataFrame/Series anywhere — pickle the whole dict so
+            # nested tuples, sets, complex, bytes, etc. round-trip with type
+            # fidelity. (The composite/per-leaf path is reserved for dicts
+            # whose array leaves benefit from their own files.)
+            node_uuid = generate_node_uuid()
+            filename = key + ".pickle"
+            file_path = uuid_tree_path(working_dir, node_uuid, filename)
+            ensure_parent(file_path)
+            with open(file_path, "wb") as fh:
+                pickle.dump(value, fh)
+            descriptor["uuid"] = node_uuid
+            descriptor["storage"] = _file_storage(node_uuid, filename, FORMAT_PICKLE)
+            descriptor["metadata"] = {"preview": preview}
+            return descriptor
+        # Composite mapping: at least one array leaf. Emit a container
+        # descriptor; the save walker (_collect_nodes) recurses and emits
+        # per-leaf descriptors so each array reaches its own fast path
+        # (.npy, .pickle, etc). Reconstructed on load as a plain dict.
         descriptor["has_children"] = True
         descriptor["storage"] = {"backend": "none", "format": "none"}
         descriptor["metadata"] = {"preview": preview, "composite": True}
         return descriptor
 
     if kind == KIND_SEQUENCE:
-        if _is_json_native(value):
+        # Lists of purely JSON-faithful values stay inline (cheap, no file).
+        if _can_inline_json(value):
             descriptor["storage"] = {
                 "backend": "inline",
                 "format": FORMAT_INLINE,
@@ -596,12 +626,28 @@ def serialize_node(
             }
             descriptor["metadata"] = {"preview": preview}
             return descriptor
+        # Anything else — tuples, sets, frozensets, lists of tuples, lists
+        # containing complex/bytes — pickles, which preserves type fidelity
+        # at every nesting level. Sequences containing ndarray/DataFrame
+        # leaves are still rejected: those need to be split into a dict so
+        # each array gets its own file for fast random access.
+        if not _has_array_leaf(value):
+            node_uuid = generate_node_uuid()
+            filename = key + ".pickle"
+            file_path = uuid_tree_path(working_dir, node_uuid, filename)
+            ensure_parent(file_path)
+            with open(file_path, "wb") as fh:
+                pickle.dump(value, fh)
+            descriptor["uuid"] = node_uuid
+            descriptor["storage"] = _file_storage(node_uuid, filename, FORMAT_PICKLE)
+            descriptor["metadata"] = {"preview": preview}
+            return descriptor
         raise PDVSerializationError(
-            f"Sequence at '{tree_path}' contains values that are not "
-            f"JSON-serializable (e.g. ndarray, DataFrame). PDV does not yet "
-            f"support composite sequences — wrap the values in a dict with "
-            f"named keys, e.g. {{'0': arr0, '1': arr1}}, so each element "
-            f"can be stored in its own file."
+            f"Sequence at '{tree_path}' contains array leaves (ndarray, "
+            f"DataFrame, Series). PDV does not yet support composite "
+            f"sequences — wrap the values in a dict with named keys, "
+            f"e.g. {{'0': arr0, '1': arr1}}, so each element can be "
+            f"stored in its own file."
         )
 
     if kind == KIND_BINARY:
@@ -625,6 +671,27 @@ def serialize_node(
     _digest, _cached = _try_autosave_cache(autosave_cache, tree_path, value, _source_dir, autosave_hits)
     if _cached is not None:
         return _cached
+
+    # xarray DataArrays and Datasets pickle as a builtin, overriding any
+    # user-registered custom serializer until first-class xarray support
+    # lands in beta. This keeps round-trips reliable without requiring
+    # users to import a registration module before loading a project.
+    if _is_xarray_object(value):
+        node_uuid = generate_node_uuid()
+        filename = key + ".pickle"
+        file_path = uuid_tree_path(working_dir, node_uuid, filename)
+        ensure_parent(file_path)
+        with open(file_path, "wb") as fh:
+            pickle.dump(value, fh)
+        descriptor["uuid"] = node_uuid
+        descriptor["storage"] = _file_storage(node_uuid, filename, FORMAT_PICKLE)
+        descriptor["metadata"] = {
+            "preview": preview,
+            "python_type": python_type_string(value),
+        }
+        if _digest is not None:
+            autosave_cache[tree_path] = (_digest, descriptor)  # type: ignore[index]
+        return descriptor
 
     from pdv import serializers as _serializers  # noqa: PLC0415
 
@@ -739,6 +806,7 @@ def pickle_fallback_node(tree_path: str, value: Any, working_dir: str) -> dict:
         "key": key,
         "parent_path": parent_path,
         "type": KIND_UNKNOWN,
+        "python_type": python_type_string(value),
         "uuid": node_uuid,
         "has_children": False,
         "created_at": now,
@@ -820,9 +888,6 @@ def deserialize_node(storage_ref: dict, save_dir: str, *, trusted: bool = False)
 
             return np.load(abs_path, allow_pickle=False)
 
-        if fmt == FORMAT_PARQUET:
-            return _read_parquet(abs_path)
-
         if fmt == FORMAT_TXT:
             with open(abs_path, "r", encoding="utf-8") as fh:
                 return fh.read()
@@ -893,7 +958,10 @@ def node_preview(value: Any, kind: str) -> str:
     """
     try:
         if kind == KIND_FOLDER:
-            return "folder"
+            # "folder" was misleading because PDV folders are PDVTree
+            # subnodes, not filesystem folders. The chip shows `tree`;
+            # the preview matches and adds the child count.
+            return f"tree ({len(value)} items)"
         if kind in (KIND_MODULE, KIND_GUI, KIND_NAMELIST, KIND_LIB):
             return value.preview() if hasattr(value, "preview") else kind
         if kind in (KIND_SCRIPT, KIND_MARKDOWN):
@@ -912,7 +980,14 @@ def node_preview(value: Any, kind: str) -> str:
         if kind == KIND_MAPPING:
             return f"dict ({len(value)} keys)"
         if kind == KIND_SEQUENCE:
-            noun = "tuple" if isinstance(value, tuple) else "list"
+            if isinstance(value, frozenset):
+                noun = "frozenset"
+            elif isinstance(value, set):
+                noun = "set"
+            elif isinstance(value, tuple):
+                noun = "tuple"
+            else:
+                noun = "list"
             return f"{noun} ({len(value)} items)"
         if kind == KIND_NDARRAY:
 

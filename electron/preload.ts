@@ -153,6 +153,9 @@ const api: PDVApi = {
     get: () => ipcRenderer.invoke(IPC.config.get),
     set: (updates) => ipcRenderer.invoke(IPC.config.set, updates),
   },
+  window: {
+    setBackgroundColor: (color) => ipcRenderer.invoke(IPC.window.setBackgroundColor, color),
+  },
   autosave: {
     run: (codeCells: unknown) => ipcRenderer.invoke(IPC.autosave.run, codeCells),
     clear: (dir?: string) => ipcRenderer.invoke(IPC.autosave.clear, dir),
@@ -169,6 +172,9 @@ const api: PDVApi = {
   },
   about: {
     getVersion: () => ipcRenderer.invoke(IPC.about.getVersion),
+    openRepoPage: () => ipcRenderer.invoke(IPC.about.openRepoPage),
+    openIssuesPage: () => ipcRenderer.invoke(IPC.about.openIssuesPage),
+    openDocsPage: () => ipcRenderer.invoke(IPC.about.openDocsPage),
   },
   updater: {
     checkForUpdates: () => ipcRenderer.invoke(IPC.updater.checkForUpdates),
@@ -225,6 +231,8 @@ const api: PDVApi = {
   app: {
     confirmClose: () => ipcRenderer.invoke(IPC.app.confirmClose),
     onRequestClose: (callback) => onPush<void>(IPC.push.requestClose, callback),
+    setDocumentEdited: (edited) =>
+      ipcRenderer.invoke(IPC.app.setDocumentEdited, edited),
   },
 };
 

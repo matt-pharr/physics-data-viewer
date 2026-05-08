@@ -8,6 +8,76 @@
   padding: 8px 0;
 }
 
+/* Hero block: alpha-particle logo on the left, app name + build line
+   stacked on the right. Anchors the tab visually and gives users a
+   clear "yes, this is the app I think it is" reading. */
+.about-hero {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  padding: 4px 0 12px;
+}
+
+.about-hero-logo {
+  width: 72px;
+  height: 72px;
+  flex-shrink: 0;
+  color: var(--text-secondary);
+}
+
+.about-hero-text {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.about-name-line {
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--text-primary);
+  letter-spacing: -0.01em;
+}
+
+.about-build-line {
+  font-size: 12px;
+  font-family: var(--font-mono);
+  color: var(--text-secondary);
+}
+
+/* Links row: subtle, separated by middots, opens in the user's
+   default browser via the about IPC handlers. Using <button>s
+   styled as links keeps keyboard activation working without an
+   explicit href the renderer can't safely follow. */
+.about-links {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding-top: 4px;
+  border-top: 1px solid var(--border-color);
+  margin-top: 4px;
+  font-size: 13px;
+}
+
+.about-link {
+  background: none;
+  border: none;
+  padding: 4px 0;
+  font-size: 13px;
+  font-family: inherit;
+  color: var(--accent);
+  cursor: pointer;
+}
+
+.about-link:hover {
+  text-decoration: underline;
+}
+
+.about-link-sep {
+  color: var(--text-hint);
+  user-select: none;
+}
+
 .about-row {
   display: flex;
   align-items: flex-start;

@@ -66,6 +66,40 @@ export const StatusBar: React.FC<StatusBarProps> = ({
         </div>
       )}
       <div className="status-left">
+        <span className="status-item">{currentProjectDir ?? 'Unsaved Project'}</span>
+        {savedPdvVersion && runningPdvVersion && savedPdvVersion !== runningPdvVersion && (
+          <span
+            className="status-item status-warning"
+            title="Project was saved with a different PDV version"
+          >
+            Saved: v{savedPdvVersion} | Running: v{runningPdvVersion}
+          </span>
+        )}
+        {lastChecksum && (
+          <span
+            className={`status-item ${checksumMismatch ? 'status-warning' : ''}`}
+            title={checksumMismatch ? 'Checksum mismatch — data may have changed since last save' : 'Project checksum'}
+          >
+            {checksumMismatch ? '⚠' : '◆'} {lastChecksum}
+          </span>
+        )}
+        {lastAutosaveAt !== null && (
+          <span
+            className="status-item"
+            title="Time of the most recent autosave"
+          >
+            Autosaved at {formatTimeOfDay(lastAutosaveAt)}
+          </span>
+        )}
+      </div>
+      <div className="status-right">
+        <span
+          className="status-item status-clickable"
+          onClick={onRuntimeClick}
+          title="Click to change runtime"
+        >
+          {runtimeLabel}
+        </span>
         <span className="status-item">
           {progress ? (
             <>
@@ -81,49 +115,15 @@ export const StatusBar: React.FC<StatusBarProps> = ({
             </>
           )}
         </span>
-        <span
-          className="status-item status-clickable"
-          onClick={onRuntimeClick}
-          title="Click to change runtime"
-        >
-          {runtimeLabel}
+        <span className="status-item">
+          Last: {lastDuration !== null ? `${Math.round(lastDuration)}ms` : '--'}
         </span>
-        <span className="status-item">{currentProjectDir ?? 'Unsaved Project'}</span>
-      </div>
-      <div className="status-right">
-        {savedPdvVersion && runningPdvVersion && savedPdvVersion !== runningPdvVersion && (
-          <span
-            className="status-item status-warning"
-            title="Project was saved with a different PDV version"
-          >
-            Saved: v{savedPdvVersion} | Running: v{runningPdvVersion}
-          </span>
-        )}
-        {lastAutosaveAt !== null && (
-          <span
-            className="status-item"
-            title="Time of the most recent autosave"
-          >
-            Autosaved at {formatTimeOfDay(lastAutosaveAt)}
-          </span>
-        )}
-        {lastChecksum && (
-          <span
-            className={`status-item ${checksumMismatch ? 'status-warning' : ''}`}
-            title={checksumMismatch ? 'Checksum mismatch — data may have changed since last save' : 'Project checksum'}
-          >
-            {checksumMismatch ? '⚠' : '◆'} {lastChecksum}
-          </span>
-        )}
         <span
           className={`status-item ${kernelStatus === 'ready' ? 'status-connected' : kernelStatus === 'error' ? 'status-error' : ''}`}
           data-testid="kernel-status"
           data-status={kernelStatus}
         >
           ● {kernelStatus === 'ready' ? 'Connected' : kernelStatus === 'starting' ? 'Starting...' : 'Disconnected'}
-        </span>
-        <span className="status-item">
-          Last: {lastDuration !== null ? `${Math.round(lastDuration)}ms` : '--'}
         </span>
       </div>
     </footer>

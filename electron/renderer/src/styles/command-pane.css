@@ -20,13 +20,36 @@
 
 .code-cell-error-bar {
   display: flex;
-  align-items: center;
-  justify-content: space-between;
+  align-items: flex-start;
+  gap: 8px;
   padding: 8px 12px;
+  background-color: color-mix(in srgb, var(--error) 12%, var(--bg-secondary));
+  color: var(--error);
+  border-top: 1px solid var(--error);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.5;
+  /* Cap so a very long error doesn't dominate the pane; scroll the rest. */
+  max-height: 6.5em;
+  overflow-y: auto;
+}
+
+.code-cell-error-bar > span {
+  flex: 1;
+  min-width: 0;
+  word-break: break-word;
+  white-space: pre-wrap;
+}
+
+/* Leading bullet so the strip reads as an alert without flooding the row. */
+.code-cell-error-bar::before {
+  content: '';
+  flex-shrink: 0;
+  width: 6px;
+  height: 6px;
+  margin-top: 7px;
+  border-radius: 50%;
   background-color: var(--error);
-  color: var(--bg-primary);
-  border-top: 1px solid var(--border-color);
-  font-size: 13px;
 }
 
 .code-cell-status-bar {

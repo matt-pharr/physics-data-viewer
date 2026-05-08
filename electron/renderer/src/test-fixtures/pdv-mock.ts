@@ -127,6 +127,9 @@ function buildBase() {
       get: stub<PDVApi["config"]["get"]>(),
       set: stub<PDVApi["config"]["set"]>(),
     },
+    window: {
+      setBackgroundColor: stub<PDVApi["window"]["setBackgroundColor"]>(async () => undefined),
+    },
     autosave: {
       run: stub<PDVApi["autosave"]["run"]>(async () => ({ saved: false })),
       clear: stub<PDVApi["autosave"]["clear"]>(async () => undefined),
@@ -139,6 +142,9 @@ function buildBase() {
     },
     about: {
       getVersion: stub<PDVApi["about"]["getVersion"]>(async () => "0.0.0-test"),
+      openRepoPage: stub<PDVApi["about"]["openRepoPage"]>(async () => undefined),
+      openIssuesPage: stub<PDVApi["about"]["openIssuesPage"]>(async () => undefined),
+      openDocsPage: stub<PDVApi["about"]["openDocsPage"]>(async () => undefined),
     },
     updater: {
       checkForUpdates: stub<PDVApi["updater"]["checkForUpdates"]>(async () => undefined),
@@ -193,6 +199,7 @@ function buildBase() {
     app: {
       confirmClose: stub<PDVApi["app"]["confirmClose"]>(async () => undefined),
       onRequestClose: subStub<PDVApi["app"]["onRequestClose"]>(),
+      setDocumentEdited: stub<PDVApi["app"]["setDocumentEdited"]>(async () => undefined),
     },
   } satisfies PDVApi;
 }

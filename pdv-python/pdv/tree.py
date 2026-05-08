@@ -394,11 +394,12 @@ class PDVScript(PDVFile):
         Returns
         -------
         str
-            The first line of the docstring, or a generic fallback.
+            The first line of the docstring, or empty string when the
+            script has no docstring (the chip already says ``script``).
         """
         if self._doc:
             return self._doc.split("\n")[0]
-        return "PDV script"
+        return ""
 
     # Regex matching PEP 508 "extra ==" markers (used to declare optional deps).
     _EXTRA_MARKER_RE = re.compile(r"extra\s*==")
@@ -591,12 +592,11 @@ class PDVGui(PDVFile):
     def preview(self) -> str:
         """Return a short preview string for the tree panel.
 
-        Returns
-        -------
-        str
-            Always ``'GUI'``.
+        Returns empty string — the chip already says ``gui`` and the
+        key column already shows the user-chosen name. There's no
+        additional info worth surfacing here.
         """
-        return "GUI"
+        return ""
 
     def __repr__(self) -> str:
         mid = f", module_id='{self._module_id}'" if self._module_id else ""
@@ -661,11 +661,10 @@ class PDVNamelist(PDVFile):
     def preview(self) -> str:
         """Return a short preview string for the tree panel.
 
-        Returns
-        -------
-        str
+        Returns the namelist format only; the chip already says
+        ``namelist``, so prefixing it again would be redundant.
         """
-        return f"Namelist ({self._format})"
+        return self._format
 
     def __repr__(self) -> str:
         mid = f", module_id='{self._module_id}'" if self._module_id else ""
@@ -718,11 +717,10 @@ class PDVLib(PDVFile):
     def preview(self) -> str:
         """Return a short preview string for the tree panel.
 
-        Returns
-        -------
-        str
+        Returns the filename only; the chip already says ``lib``,
+        so prefixing it again would be redundant.
         """
-        return f"Library ({self._filename})"
+        return self._filename
 
     def __repr__(self) -> str:
         mid = f", module_id='{self._module_id}'" if self._module_id else ""
@@ -769,8 +767,8 @@ class PDVNote(PDVFile):
     def preview(self) -> str:
         """Return a short preview string for the tree panel.
 
-        Tries the cached title first, then reads the first non-empty
-        line of the ``.md`` file. Falls back to ``'Markdown note'``.
+        Returns the cached title (or empty string when there is no
+        title — the chip already says ``note``).
 
         Returns
         -------
@@ -779,7 +777,7 @@ class PDVNote(PDVFile):
         """
         if self._title:
             return self._title[:100]
-        return "Markdown note"
+        return ""
 
 
 # ---------------------------------------------------------------------------

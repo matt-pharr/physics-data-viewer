@@ -72,7 +72,9 @@
   justify-content: center;
   background: transparent;
   border: none;
-  border-left: 2px solid transparent;
+  /* Match the tree row's reserved 3px accent slot — width never changes
+     between idle/active so icons don't shift. */
+  border-left: 3px solid transparent;
   border-radius: 4px;
   color: var(--text-secondary);
   cursor: pointer;
@@ -84,9 +86,17 @@
   background-color: var(--bg-hover);
 }
 
+/* Active panel — same accent-tint bg + stripe pattern as a selected
+   tree row, so the "this is the current view" cue is consistent
+   across the app. */
 .activity-btn.active {
   color: var(--accent);
+  background-color: color-mix(in srgb, var(--accent) 15%, transparent);
   border-left-color: var(--accent);
+}
+
+.activity-btn.active:hover {
+  background-color: color-mix(in srgb, var(--accent) 22%, transparent);
 }
 
 .activity-bar-divider {

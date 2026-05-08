@@ -158,6 +158,10 @@ export const IPC = {
     get: "config:get",
     set: "config:set",
   },
+  /** BrowserWindow chrome channels. */
+  window: {
+    setBackgroundColor: "window:setBackgroundColor",
+  },
   /** Autosave management channels. */
   autosave: {
     run: "autosave:run",
@@ -170,6 +174,9 @@ export const IPC = {
   /** App info channels. */
   about: {
     getVersion: "about:getVersion",
+    openRepoPage: "about:openRepoPage",
+    openIssuesPage: "about:openIssuesPage",
+    openDocsPage: "about:openDocsPage",
   },
   /** App auto-update channels. */
   updater: {
@@ -235,6 +242,7 @@ export const IPC = {
   /** App-level lifecycle channels (close confirmation, etc.). */
   app: {
     confirmClose: "app:confirmClose",
+    setDocumentEdited: "app:setDocumentEdited",
   },
   /** App menu synchronization channels. */
   menu: {
@@ -1979,6 +1987,18 @@ export interface PDVApi {
     set(updates: Partial<PDVConfig>): Promise<PDVConfig>;
   };
 
+  /** BrowserWindow chrome controls. */
+  window: {
+    /**
+     * Update the native BrowserWindow background color so live-resize gestures
+     * don't expose the OS-default white behind the dark theme. Call this
+     * whenever the active theme's `bg-primary` changes.
+     *
+     * @param color - CSS hex string (`#rrggbb`).
+     */
+    setBackgroundColor(color: string): Promise<void>;
+  };
+
   /** Autosave management. */
   autosave: {
     /**
@@ -2057,6 +2077,12 @@ export interface PDVApi {
      * @returns Version string, e.g. "0.0.2".
      */
     getVersion(): Promise<string>;
+    /** Open the project's GitHub repository in the user's browser. */
+    openRepoPage(): Promise<void>;
+    /** Open the project's GitHub issues page in the user's browser. */
+    openIssuesPage(): Promise<void>;
+    /** Open the docs site for the running app version in the user's browser. */
+    openDocsPage(): Promise<void>;
   };
 
   /** App auto-update operations. */
@@ -2275,6 +2301,15 @@ export interface PDVApi {
      * @returns Unsubscribe function.
      */
     onRequestClose(callback: () => void): () => void;
+    /**
+     * Mark the main window's document as edited or clean. On macOS this
+     * toggles the dot inside the red close traffic-light to signal unsaved
+     * changes. No-op on other platforms.
+     *
+     * @param edited - True if the project has unsaved changes.
+     * @returns Resolves once the flag has been applied.
+     */
+    setDocumentEdited(edited: boolean): Promise<void>;
   };
 
   /** Window chrome integration and title-bar controls. */

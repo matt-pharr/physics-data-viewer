@@ -62,6 +62,10 @@
   color: var(--error);
 }
 
+/* Base row.
+   Cascade order matters below — later rules override earlier ones at equal
+   specificity. Order is: base → striped (odd) → branch tint → hover →
+   selected → selected+hover. */
 .tree-row {
   display: flex;
   align-items: center;
@@ -71,16 +75,38 @@
   font-size: 13px;
   color: var(--text-primary);
   cursor: default;
-  border-bottom: 1px solid var(--bg-primary);
+  border-bottom: 1px solid transparent;
+  /* Reserve the 3px slot the selected accent stripe lives in so content
+     doesn't shift right when a row becomes selected. */
+  border-left: 3px solid transparent;
+}
+
+/* Branch (folder/container) rows get a slightly elevated background so
+   they read as section headers, providing the tree's only horizontal
+   structure cue. */
+.tree-row.branch {
+  background-color: var(--bg-tertiary);
 }
 
 .tree-row:hover {
   background-color: var(--bg-hover);
 }
 
+/* Branch hover override: in some light themes (Xcode Light, Light Modern)
+   `bg-hover` is *lighter* than `bg-tertiary`, so hovering a folder row
+   would make it recede instead of pop. Use an accent-tinted blend on top
+   of the branch tint so the direction is consistent across every theme. */
+.tree-row.branch:hover {
+  background-color: color-mix(in srgb, var(--accent) 12%, var(--bg-tertiary));
+}
+
 .tree-row.selected {
-  background-color: var(--bg-tertiary);
-  border-left: 3px solid var(--accent);
+  background-color: color-mix(in srgb, var(--accent) 18%, transparent);
+  border-left-color: var(--accent);
+}
+
+.tree-row.selected:hover {
+  background-color: color-mix(in srgb, var(--accent) 24%, transparent);
 }
 
 .tree-toggle {
@@ -110,20 +136,40 @@
   visibility: hidden;
 }
 
+/* Tree-node icons. Designed at a 20×20 viewBox; rendered at 16px so the
+   1.5px stroke weight reads cleanly without dominating the row. */
 .tree-icon {
-  font-size: 14px;
-  line-height: 1;
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
 }
 
+/* Leaf names: regular weight, foreground text color. Branch names get
+   bumped to 600 below so folders read as section labels.
+   Accent is reserved for the *selected* state — using it for every
+   name dilutes the highlight. */
 .tree-key-text {
   font-weight: 500;
+  color: var(--text-primary);
+}
+
+.tree-row.branch .tree-key-text {
+  font-weight: 600;
+}
+
+.tree-row.selected .tree-key-text {
   color: var(--accent);
 }
 
+/* Type chip: bordered + transparent so it stays legible on every row
+   background variant (primary, stripe-secondary, branch-tertiary,
+   selected-accent-tint, hover). A solid fill collided with at least
+   one of those in some themes. */
 .tree-type-badge {
   display: inline-block;
-  padding: 2px 6px;
-  background-color: var(--bg-tertiary);
+  padding: 1px 6px;
+  background-color: transparent;
+  border: 1px solid var(--border-color);
   border-radius: 3px;
   font-size: 11px;
   color: var(--text-secondary);
@@ -132,8 +178,7 @@
   margin-left: 4px;
 }
 .tree-type-badge.subtle {
-  background-color: var(--bg-secondary);
-  color: var(--text-secondary);
+  opacity: 0.7;
 }
 
 .spinner {
