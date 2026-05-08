@@ -33,6 +33,18 @@
           'success':      '#4ec9b0'
         };
 
+        function luminance(hex) {
+          if (!hex) return 0.5;
+          var h = String(hex).trim().replace(/^#/, '');
+          if (h.length === 3) h = h.split('').map(function (c) { return c + c; }).join('');
+          if (h.length !== 6) return 0.5;
+          var r = parseInt(h.slice(0, 2), 16);
+          var g = parseInt(h.slice(2, 4), 16);
+          var b = parseInt(h.slice(4, 6), 16);
+          if (isNaN(r) || isNaN(g) || isNaN(b)) return 0.5;
+          return (0.299 * r + 0.587 * g + 0.114 * b) / 255;
+        }
+
         function apply(colors) {
           var root = document.documentElement;
           for (var key in colors) {
@@ -41,6 +53,7 @@
             }
           }
           root.style.backgroundColor = colors['bg-primary'] || '#1e1e1e';
+          root.style.colorScheme = luminance(colors['bg-primary']) < 0.5 ? 'dark' : 'light';
         }
 
         // Always lay down the default palette first so semantic variables
