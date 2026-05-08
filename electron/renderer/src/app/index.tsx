@@ -115,6 +115,10 @@ const App: React.FC = () => {
   const [savedPdvVersion, setSavedPdvVersion] = useState<string | null>(null);
   const [runningPdvVersion, setRunningPdvVersion] = useState<string | null>(null);
   const [interpreterWarning, setInterpreterWarning] = useState<string | null>(null);
+  /** Latest RSS in bytes for the active kernel subprocess, or null when unknown. */
+  const [kernelMemoryRss, setKernelMemoryRss] = useState<number | null>(null);
+  /** Latest auto-update status pushed by the main process. */
+  const [updateStatus, setUpdateStatus] = useState<import('../types/pdv').UpdateStatus | null>(null);
 
   // -- App / config state ---------------------------------------------------
   const [config, setConfig] = useState<Config | null>(null);
@@ -310,6 +314,16 @@ const App: React.FC = () => {
     void window.pdv.menu.updateRecentProjects(recentProjects);
   }, [config]);
 
+  // Surface auto-update state in the status bar. Seed from the cached value in
+  // case a check completed before the App mounted, then subscribe for live
+  // transitions.
+  useEffect(() => {
+    void window.pdv.updater.getStatus().then((status) => {
+      if (status) setUpdateStatus(status);
+    });
+    return window.pdv.updater.onUpdateStatus(setUpdateStatus);
+  }, []);
+
   // Listen for File-menu actions handled at the App level.
   // project:open and project:openRecent are dispatched via refs so this effect
   // doesn't re-subscribe on every kernelStatus change (handlers defined later).
@@ -418,6 +432,7 @@ const App: React.FC = () => {
     setProgress,
     onKernelCrash: handleKernelCrash,
     onTreeChanged: handleTreeChanged,
+    setKernelMemoryRss,
   });
 
   const { startKernel, handleEnvSave } = useKernelLifecycle({
@@ -1648,6 +1663,9 @@ const App: React.FC = () => {
           savedPdvVersion={savedPdvVersion}
           runningPdvVersion={runningPdvVersion}
           lastAutosaveAt={lastAutosaveAt}
+          kernelMemoryRss={kernelMemoryRss}
+          updateStatus={updateStatus}
+          onUpdateClick={() => { setSettingsInitialTab('about'); setShowSettings(true); }}
         />
 
        <ImportModuleDialog

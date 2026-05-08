@@ -26,6 +26,8 @@ interface UseKernelSubscriptionsOptions {
   onKernelCrash: (kernelId: string) => void;
   /** Called on incremental tree changes so the Tree can update selectively. */
   onTreeChanged: (info: TreeChangeInfo) => void;
+  /** Setter for the latest kernel-process RSS in bytes (null when unknown). */
+  setKernelMemoryRss: Dispatch<SetStateAction<number | null>>;
 }
 
 export function useKernelSubscriptions({
@@ -40,6 +42,7 @@ export function useKernelSubscriptions({
   setProgress,
   onKernelCrash,
   onTreeChanged,
+  setKernelMemoryRss,
 }: UseKernelSubscriptionsOptions): void {
   useEffect(() => {
     const unsubscribe = window.pdv.kernels.onOutput((chunk) => {
@@ -127,6 +130,11 @@ export function useKernelSubscriptions({
       setModulesRefreshToken((prev) => prev + 1);
     });
 
+    const unsubscribeMemory = window.pdv.kernels.onMemory((payload) => {
+      if (payload.kernelId !== currentKernelId) return;
+      setKernelMemoryRss(payload.rssBytes);
+    });
+
     return () => {
       unsubscribeTree();
       unsubscribeProject();
@@ -134,6 +142,9 @@ export function useKernelSubscriptions({
       unsubscribeProgress();
       unsubscribeReloading();
       unsubscribeReconnected();
+      unsubscribeMemory();
+      // Clear the readout so a fresh kernel doesn't briefly show stale memory.
+      setKernelMemoryRss(null);
     };
   }, [
     currentKernelId,
@@ -146,5 +157,6 @@ export function useKernelSubscriptions({
     setProjectReloading,
     setTreeRefreshToken,
     onTreeChanged,
+    setKernelMemoryRss,
   ]);
 }

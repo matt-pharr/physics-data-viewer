@@ -31,6 +31,9 @@ export type { ScriptParameter } from '../../../main/ipc';
 /** Tree node descriptor returned by `pdv.tree.list`. Canonical: `pdv-protocol.ts`. */
 export type { NodeDescriptor } from '../../../main/ipc';
 
+/** Periodic kernel-memory snapshot pushed on `IPC.push.kernelMemory`. */
+export type { KernelMemoryPayload } from '../../../main/ipc';
+
 /** Runtime kernel descriptor returned by `kernels.start/list/restart`. */
 export interface KernelInfo {
   /** Opaque kernel id used in subsequent API calls. */
@@ -692,6 +695,7 @@ export interface PDVApi {
     onOutput(callback: (chunk: ExecuteOutputChunk) => void): () => void;
     onKernelCrashed(callback: (payload: { kernelId: string }) => void): () => void;
     onReconnected(callback: (payload: { kernelId: string }) => void): () => void;
+    onMemory(callback: (payload: KernelMemoryPayload) => void): () => void;
   };
   tree: {
     list(kernelId: string, path?: string): Promise<NodeDescriptor[]>;
