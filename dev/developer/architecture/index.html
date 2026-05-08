@@ -5021,44 +5021,50 @@
 <a id="__codelineno-14-58" name="__codelineno-14-58" href="#__codelineno-14-58"></a>| `text` | Python string | `.txt` file (if large) or inline |
 <a id="__codelineno-14-59" name="__codelineno-14-59" href="#__codelineno-14-59"></a>| `mapping` | Plain Python dict (not PDVTree) | Inline JSON |
 <a id="__codelineno-14-60" name="__codelineno-14-60" href="#__codelineno-14-60"></a>| `sequence` | Python list or tuple | Inline JSON |
-<a id="__codelineno-14-61" name="__codelineno-14-61" href="#__codelineno-14-61"></a>| `binary` | bytes / bytearray | `.bin` file |
-<a id="__codelineno-14-62" name="__codelineno-14-62" href="#__codelineno-14-62"></a>| `unknown` | Unrecognized type | Custom serializer file (if a module registered one for the type), otherwise `.pickle` (only if `trusted=True`) |
+<a id="__codelineno-14-61" name="__codelineno-14-61" href="#__codelineno-14-61"></a>| `dataset` | xarray.Dataset (in-memory) | Pickle |
+<a id="__codelineno-14-62" name="__codelineno-14-62" href="#__codelineno-14-62"></a>| `dataarray` | xarray.DataArray (in-memory) | Pickle |
 <a id="__codelineno-14-63" name="__codelineno-14-63" href="#__codelineno-14-63"></a>
-<a id="__codelineno-14-64" name="__codelineno-14-64" href="#__codelineno-14-64"></a>**Custom serializer hook.** Module developers can register save/load
-<a id="__codelineno-14-65" name="__codelineno-14-65" href="#__codelineno-14-65"></a>callbacks for a class via `pdv.register_serializer(MyClass, format=&quot;my_fmt&quot;,
-<a id="__codelineno-14-66" name="__codelineno-14-66" href="#__codelineno-14-66"></a>extension=&quot;.h5&quot;, save=..., load=...)`. PDV chooses the on-disk filename and
-<a id="__codelineno-14-67" name="__codelineno-14-67" href="#__codelineno-14-67"></a>passes the absolute path to the callbacks; the module just reads or writes
-<a id="__codelineno-14-68" name="__codelineno-14-68" href="#__codelineno-14-68"></a>that file. Lookup walks `type(value).__mro__` so subclasses inherit. The
-<a id="__codelineno-14-69" name="__codelineno-14-69" href="#__codelineno-14-69"></a>node&#39;s `type` field stays `&quot;unknown&quot;`, but `storage.format` carries the
-<a id="__codelineno-14-70" name="__codelineno-14-70" href="#__codelineno-14-70"></a>registered name and `metadata` records `python_type` and `serializer`. Format
-<a id="__codelineno-14-71" name="__codelineno-14-71" href="#__codelineno-14-71"></a>names must be unique and must not collide with builtin formats. The module
-<a id="__codelineno-14-72" name="__codelineno-14-72" href="#__codelineno-14-72"></a>that registered the serializer must be imported before a project that
-<a id="__codelineno-14-73" name="__codelineno-14-73" href="#__codelineno-14-73"></a>contains nodes of that format is loaded; otherwise load fails with a clear
-<a id="__codelineno-14-74" name="__codelineno-14-74" href="#__codelineno-14-74"></a>error. Implementation lives in `pdv/serializers.py`.
-<a id="__codelineno-14-75" name="__codelineno-14-75" href="#__codelineno-14-75"></a>
-<a id="__codelineno-14-76" name="__codelineno-14-76" href="#__codelineno-14-76"></a>### 7.3 Node Descriptors
-<a id="__codelineno-14-77" name="__codelineno-14-77" href="#__codelineno-14-77"></a>
-<a id="__codelineno-14-78" name="__codelineno-14-78" href="#__codelineno-14-78"></a>There are two related but distinct descriptor formats: one for **`tree-index.json`** (written by `serialize_node` during project save) and one for **`pdv.tree.list` responses** (constructed at runtime by the tree list handler). Both share the same base fields but diverge on type-specific data.
-<a id="__codelineno-14-79" name="__codelineno-14-79" href="#__codelineno-14-79"></a>
-<a id="__codelineno-14-80" name="__codelineno-14-80" href="#__codelineno-14-80"></a>#### 7.3.1 `tree-index.json` Entry (Serialized Descriptor)
+<a id="__codelineno-14-64" name="__codelineno-14-64" href="#__codelineno-14-64"></a>`mapping` and `sequence` containers are expandable in the tree panel. The `pdv.tree.list` handler descends into either kind, returning one descriptor per child. Sequence children carry stringified-int keys (`&quot;0&quot;`, `&quot;1&quot;`, …) and a `parent_is_opaque: true` flag; the renderer suppresses rename / move / duplicate / delete on those rows since the tree-mutation handlers can&#39;t address a child by key inside a non-dict parent. Sequence children remain navigable from Python: a numeric segment in a dot-path indexes into a list or tuple value (e.g. `tree[&quot;records.0.name&quot;]` resolves through a list of dicts). Negative indices are supported (`tree[&quot;xs.-1&quot;]` returns the last element).
+<a id="__codelineno-14-65" name="__codelineno-14-65" href="#__codelineno-14-65"></a>
+<a id="__codelineno-14-66" name="__codelineno-14-66" href="#__codelineno-14-66"></a>`dataset` rows are likewise expandable: `pdv.tree.list` enumerates `ds.data_vars` in insertion order, one `dataarray` child per variable, each tagged with `parent_is_opaque: true` (same suppression semantics as sequence children — the tree-mutation handlers can&#39;t address a child by key inside a non-dict parent). Coords are intentionally omitted from the children list to match the OMFIT idiom; their information is implicit in the dim-size preview of each data variable (e.g. `&quot;mode_C: 7, m_singcoup_out: 43&quot;`). Coord values remain reachable via dot-path (`tree[&quot;ds.x_coord&quot;]`) because `Dataset.__getitem__` resolves both data_vars and coords by name. `dataarray` is a leaf — DataArrays do not expand further, and dot-paths cannot descend past one (`tree[&quot;ds.var.0&quot;]` raises `PDVKeyError`). xarray is an optional dependency; PDV runs unchanged when it isn&#39;t installed.
+<a id="__codelineno-14-67" name="__codelineno-14-67" href="#__codelineno-14-67"></a>| `binary` | bytes / bytearray | `.bin` file |
+<a id="__codelineno-14-68" name="__codelineno-14-68" href="#__codelineno-14-68"></a>| `unknown` | Unrecognized type | Custom serializer file (if a module registered one for the type), otherwise `.pickle` (only if `trusted=True`) |
+<a id="__codelineno-14-69" name="__codelineno-14-69" href="#__codelineno-14-69"></a>
+<a id="__codelineno-14-70" name="__codelineno-14-70" href="#__codelineno-14-70"></a>**Custom serializer hook.** Module developers can register save/load
+<a id="__codelineno-14-71" name="__codelineno-14-71" href="#__codelineno-14-71"></a>callbacks for a class via `pdv.register_serializer(MyClass, format=&quot;my_fmt&quot;,
+<a id="__codelineno-14-72" name="__codelineno-14-72" href="#__codelineno-14-72"></a>extension=&quot;.h5&quot;, save=..., load=...)`. PDV chooses the on-disk filename and
+<a id="__codelineno-14-73" name="__codelineno-14-73" href="#__codelineno-14-73"></a>passes the absolute path to the callbacks; the module just reads or writes
+<a id="__codelineno-14-74" name="__codelineno-14-74" href="#__codelineno-14-74"></a>that file. Lookup walks `type(value).__mro__` so subclasses inherit. The
+<a id="__codelineno-14-75" name="__codelineno-14-75" href="#__codelineno-14-75"></a>node&#39;s `type` field stays `&quot;unknown&quot;`, but `storage.format` carries the
+<a id="__codelineno-14-76" name="__codelineno-14-76" href="#__codelineno-14-76"></a>registered name and `metadata` records `python_type` and `serializer`. Format
+<a id="__codelineno-14-77" name="__codelineno-14-77" href="#__codelineno-14-77"></a>names must be unique and must not collide with builtin formats. The module
+<a id="__codelineno-14-78" name="__codelineno-14-78" href="#__codelineno-14-78"></a>that registered the serializer must be imported before a project that
+<a id="__codelineno-14-79" name="__codelineno-14-79" href="#__codelineno-14-79"></a>contains nodes of that format is loaded; otherwise load fails with a clear
+<a id="__codelineno-14-80" name="__codelineno-14-80" href="#__codelineno-14-80"></a>error. Implementation lives in `pdv/serializers.py`.
 <a id="__codelineno-14-81" name="__codelineno-14-81" href="#__codelineno-14-81"></a>
-<a id="__codelineno-14-82" name="__codelineno-14-82" href="#__codelineno-14-82"></a>Each node in `tree-index.json` is produced by `serialization.serialize_node()`. Type-specific data lives in a nested `metadata` dict, and a `storage` dict describes where the data lives on disk.
+<a id="__codelineno-14-82" name="__codelineno-14-82" href="#__codelineno-14-82"></a>### 7.3 Node Descriptors
 <a id="__codelineno-14-83" name="__codelineno-14-83" href="#__codelineno-14-83"></a>
-<a id="__codelineno-14-84" name="__codelineno-14-84" href="#__codelineno-14-84"></a>**Common fields (all types):**
-<a id="__codelineno-14-85" name="__codelineno-14-85" href="#__codelineno-14-85"></a>```json
-<a id="__codelineno-14-86" name="__codelineno-14-86" href="#__codelineno-14-86"></a>{
-<a id="__codelineno-14-87" name="__codelineno-14-87" href="#__codelineno-14-87"></a>  &quot;id&quot;: &quot;data.waveforms.ch1&quot;,
-<a id="__codelineno-14-88" name="__codelineno-14-88" href="#__codelineno-14-88"></a>  &quot;path&quot;: &quot;data.waveforms.ch1&quot;,
-<a id="__codelineno-14-89" name="__codelineno-14-89" href="#__codelineno-14-89"></a>  &quot;key&quot;: &quot;ch1&quot;,
-<a id="__codelineno-14-90" name="__codelineno-14-90" href="#__codelineno-14-90"></a>  &quot;parent_path&quot;: &quot;data.waveforms&quot;,
-<a id="__codelineno-14-91" name="__codelineno-14-91" href="#__codelineno-14-91"></a>  &quot;type&quot;: &quot;ndarray&quot;,
-<a id="__codelineno-14-92" name="__codelineno-14-92" href="#__codelineno-14-92"></a>  &quot;has_children&quot;: false,
-<a id="__codelineno-14-93" name="__codelineno-14-93" href="#__codelineno-14-93"></a>  &quot;lazy&quot;: false,
-<a id="__codelineno-14-94" name="__codelineno-14-94" href="#__codelineno-14-94"></a>  &quot;created_at&quot;: &quot;&lt;iso8601&gt;&quot;,
-<a id="__codelineno-14-95" name="__codelineno-14-95" href="#__codelineno-14-95"></a>  &quot;updated_at&quot;: &quot;&lt;iso8601&gt;&quot;,
-<a id="__codelineno-14-96" name="__codelineno-14-96" href="#__codelineno-14-96"></a>  &quot;storage&quot;: { },
-<a id="__codelineno-14-97" name="__codelineno-14-97" href="#__codelineno-14-97"></a>  &quot;metadata&quot;: { &quot;preview&quot;: &quot;...&quot; }
-<a id="__codelineno-14-98" name="__codelineno-14-98" href="#__codelineno-14-98"></a>}
+<a id="__codelineno-14-84" name="__codelineno-14-84" href="#__codelineno-14-84"></a>There are two related but distinct descriptor formats: one for **`tree-index.json`** (written by `serialize_node` during project save) and one for **`pdv.tree.list` responses** (constructed at runtime by the tree list handler). Both share the same base fields but diverge on type-specific data.
+<a id="__codelineno-14-85" name="__codelineno-14-85" href="#__codelineno-14-85"></a>
+<a id="__codelineno-14-86" name="__codelineno-14-86" href="#__codelineno-14-86"></a>#### 7.3.1 `tree-index.json` Entry (Serialized Descriptor)
+<a id="__codelineno-14-87" name="__codelineno-14-87" href="#__codelineno-14-87"></a>
+<a id="__codelineno-14-88" name="__codelineno-14-88" href="#__codelineno-14-88"></a>Each node in `tree-index.json` is produced by `serialization.serialize_node()`. Type-specific data lives in a nested `metadata` dict, and a `storage` dict describes where the data lives on disk.
+<a id="__codelineno-14-89" name="__codelineno-14-89" href="#__codelineno-14-89"></a>
+<a id="__codelineno-14-90" name="__codelineno-14-90" href="#__codelineno-14-90"></a>**Common fields (all types):**
+<a id="__codelineno-14-91" name="__codelineno-14-91" href="#__codelineno-14-91"></a>```json
+<a id="__codelineno-14-92" name="__codelineno-14-92" href="#__codelineno-14-92"></a>{
+<a id="__codelineno-14-93" name="__codelineno-14-93" href="#__codelineno-14-93"></a>  &quot;id&quot;: &quot;data.waveforms.ch1&quot;,
+<a id="__codelineno-14-94" name="__codelineno-14-94" href="#__codelineno-14-94"></a>  &quot;path&quot;: &quot;data.waveforms.ch1&quot;,
+<a id="__codelineno-14-95" name="__codelineno-14-95" href="#__codelineno-14-95"></a>  &quot;key&quot;: &quot;ch1&quot;,
+<a id="__codelineno-14-96" name="__codelineno-14-96" href="#__codelineno-14-96"></a>  &quot;parent_path&quot;: &quot;data.waveforms&quot;,
+<a id="__codelineno-14-97" name="__codelineno-14-97" href="#__codelineno-14-97"></a>  &quot;type&quot;: &quot;ndarray&quot;,
+<a id="__codelineno-14-98" name="__codelineno-14-98" href="#__codelineno-14-98"></a>  &quot;has_children&quot;: false,
+<a id="__codelineno-14-99" name="__codelineno-14-99" href="#__codelineno-14-99"></a>  &quot;lazy&quot;: false,
+<a id="__codelineno-14-100" name="__codelineno-14-100" href="#__codelineno-14-100"></a>  &quot;created_at&quot;: &quot;&lt;iso8601&gt;&quot;,
+<a id="__codelineno-14-101" name="__codelineno-14-101" href="#__codelineno-14-101"></a>  &quot;updated_at&quot;: &quot;&lt;iso8601&gt;&quot;,
+<a id="__codelineno-14-102" name="__codelineno-14-102" href="#__codelineno-14-102"></a>  &quot;storage&quot;: { },
+<a id="__codelineno-14-103" name="__codelineno-14-103" href="#__codelineno-14-103"></a>  &quot;metadata&quot;: { &quot;preview&quot;: &quot;...&quot; }
+<a id="__codelineno-14-104" name="__codelineno-14-104" href="#__codelineno-14-104"></a>}
 </code></pre></div></p>
 <table>
 <thead>
