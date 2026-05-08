@@ -76,7 +76,11 @@ vi.mock("./auto-updater", () => ({
   openReleasesPage: vi.fn(async () => undefined),
   getUpdateStatus: vi.fn(() => null),
 }));
-vi.mock("./app", () => ({ isQuitting: vi.fn(() => false) }));
+vi.mock("./app", () => ({
+  isQuitting: vi.fn(() => false),
+  isQuitRequestPending: vi.fn(() => false),
+  clearQuitRequestPending: vi.fn(),
+}));
 vi.mock("./environment-detector", () => ({
   EnvironmentDetector: {
     checkPDVInstalled: vi.fn(async () => ({ installed: true })),

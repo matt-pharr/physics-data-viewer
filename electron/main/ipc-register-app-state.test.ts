@@ -62,6 +62,8 @@ const updaterMocks = vi.hoisted(() => ({
 
 const appLifecycleMocks = vi.hoisted(() => ({
   isQuitting: vi.fn(() => false),
+  isQuitRequestPending: vi.fn(() => false),
+  clearQuitRequestPending: vi.fn(),
 }));
 
 vi.mock("electron", () => ({
@@ -141,6 +143,7 @@ beforeEach(() => {
   fsSyncMocks.existsSync.mockReturnValue(false);
   fsSyncMocks.readdirSync.mockReturnValue([]);
   appLifecycleMocks.isQuitting.mockReturnValue(false);
+  appLifecycleMocks.isQuitRequestPending.mockReturnValue(false);
 });
 
 afterEach(() => {
@@ -251,6 +254,12 @@ describe("chrome:* window controls", () => {
     expect(win.webContentsSend).toHaveBeenCalledWith(IPC.push.requestClose);
     expect(win.win.close).not.toHaveBeenCalled();
   });
+
+  it("chrome:close clears any pending quit request so a confirm afterwards closes the window instead of quitting on darwin", async () => {
+    setup();
+    await getHandler(IPC.chrome.close)({});
+    expect(appLifecycleMocks.clearQuitRequestPending).toHaveBeenCalled();
+  });
 });
 
 describe("app:confirmClose", () => {
@@ -261,12 +270,21 @@ describe("app:confirmClose", () => {
     expect(win.win.close).toHaveBeenCalled();
   });
 
-  it("during a Cmd+Q quit, calls app.quit() instead of win.close()", async () => {
+  it("when isQuitting is true (autoUpdater / OS logout path), calls app.quit() instead of win.close()", async () => {
     appLifecycleMocks.isQuitting.mockReturnValue(true);
     const { setAllowClose, win } = setup();
     await getHandler(IPC.app.confirmClose)({});
     expect(setAllowClose).toHaveBeenCalledWith(true);
     expect(win.win.close).not.toHaveBeenCalled();
+  });
+
+  it("when a Cmd+Q quit is pending dialog resolution, calls app.quit() and clears the pending flag", async () => {
+    appLifecycleMocks.isQuitRequestPending.mockReturnValue(true);
+    const { setAllowClose, win } = setup();
+    await getHandler(IPC.app.confirmClose)({});
+    expect(setAllowClose).toHaveBeenCalledWith(true);
+    expect(win.win.close).not.toHaveBeenCalled();
+    expect(appLifecycleMocks.clearQuitRequestPending).toHaveBeenCalled();
   });
 });
 

@@ -20,7 +20,7 @@ import type { Theme, WindowChromeInfo, WindowChromePlatform } from "./ipc";
 import { IPC } from "./ipc";
 import { getTopLevelMenuModel, popupTopLevelMenu, updateMenuEnabled, updateRecentProjectsMenu } from "./menu";
 import { initAutoUpdater, checkForUpdates, downloadUpdate, installUpdate, openReleasesPage, getUpdateStatus } from "./auto-updater";
-import { isQuitting } from "./app";
+import { isQuitting, isQuitRequestPending, clearQuitRequestPending } from "./app";
 
 let savedThemes: Theme[] = [];
 
@@ -242,6 +242,10 @@ export function registerAppStateIpcHandlers(
     // unsaved changes. The renderer will call `IPC.app.confirmClose` once
     // the user resolves the prompt.
     if (!win.isDestroyed()) {
+      // Custom title-bar X is a close, not a quit — supersede any orphaned
+      // quit-pending state so confirmClose calls win.close() (and on darwin
+      // leaves the app in the dock) rather than app.quit().
+      clearQuitRequestPending();
       win.webContents.send(IPC.push.requestClose);
     }
     return true;
@@ -261,7 +265,12 @@ export function registerAppStateIpcHandlers(
     // then will-quit runs kernel cleanup. Calling both win.close() and
     // app.quit() in the same tick re-enters the quit machinery and breaks
     // electron-updater on macOS.
-    if (isQuitting()) {
+    //
+    // `quitRequestPending` covers the deferred Cmd+Q case where before-quit
+    // pushed the dialog and is awaiting our resolution; `isQuitting` covers
+    // paths that set the proceed-flag directly (autoUpdater.markQuitting).
+    if (isQuitRequestPending() || isQuitting()) {
+      clearQuitRequestPending();
       app.quit();
       return;
     }

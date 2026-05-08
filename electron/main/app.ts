@@ -221,14 +221,10 @@ export async function createWindow(
     if (skipCloseGuard || allowClose || win.webContents.isDestroyed()) {
       return;
     }
-    // When a real quit is already in progress and `allowClose` is still
-    // false, the new before-quit interceptor below will have already pushed
-    // the dirty prompt — but if that path was bypassed (e.g. the renderer
-    // was destroyed, or createWindow failed before registering), let the
-    // close proceed so `window-all-closed` and `will-quit` can run.
-    if (isQuittingGlobal) {
-      return;
-    }
+    // X-click / native close supersedes any pending quit dialog: this is a
+    // close, not a quit, so confirmClose should call win.close() (and on
+    // darwin leave the app in the dock) rather than app.quit().
+    quitRequestPending = false;
     event.preventDefault();
     win.webContents.send(IPC.push.requestClose);
   });
@@ -242,14 +238,16 @@ export async function createWindow(
   app.on("before-quit", (event) => {
     if (skipCloseGuard || allowClose) {
       isQuittingGlobal = true;
+      quitRequestPending = false;
       return;
     }
     if (win.isDestroyed() || win.webContents.isDestroyed()) {
       isQuittingGlobal = true;
+      quitRequestPending = false;
       return;
     }
     event.preventDefault();
-    isQuittingGlobal = true;
+    quitRequestPending = true;
     win.webContents.send(IPC.push.requestClose);
   });
 
@@ -295,12 +293,20 @@ export async function createWindow(
 // Module-level shutdown flag to prevent re-entrant kernel cleanup during quit.
 let isShuttingDownGlobal = false;
 
-// Set by `before-quit` so window `close` handlers can distinguish a real quit
-// (Cmd+Q, app.quit(), autoUpdater.quitAndInstall(), OS logout) from the user
-// just closing the window with the title-bar X. Without this, macOS apps that
-// intercept `close` get stuck: the window goes away but the process never
-// exits, because `window-all-closed` is a no-op on darwin.
+// Set when a quit is actively proceeding (we've passed the `allowClose` gate
+// or there's no renderer to ask). `window-all-closed` reads this on darwin
+// to decide whether to actually exit; without it, macOS apps that intercept
+// `close` get stuck in the dock with no live window.
 let isQuittingGlobal = false;
+
+// Set when `before-quit` fired and we deferred to the renderer's dirty
+// prompt — i.e. a quit is requested but awaiting user resolution. Read by
+// `confirmClose` to decide whether to call `app.quit()` (full quit) or
+// `win.close()` (just close window, app stays in dock on darwin). Cleared
+// when the user clicks the title-bar X / native close instead, so an
+// X-click supersedes any orphaned quit request and a confirm afterwards
+// doesn't accidentally quit the app on darwin.
+let quitRequestPending = false;
 
 export function isQuitting(): boolean {
   return isQuittingGlobal;
@@ -308,6 +314,14 @@ export function isQuitting(): boolean {
 
 export function markQuitting(): void {
   isQuittingGlobal = true;
+}
+
+export function isQuitRequestPending(): boolean {
+  return quitRequestPending;
+}
+
+export function clearQuitRequestPending(): void {
+  quitRequestPending = false;
 }
 
 /**
