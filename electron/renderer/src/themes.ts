@@ -424,11 +424,32 @@ export function getMonacoTheme(themeName: string, allThemes: BuiltinTheme[]): st
   return 'vs-dark';
 }
 
+/**
+ * Compute relative luminance of a hex color string (`#rgb`, `#rrggbb`).
+ * Returns a value in [0, 1]; returns 0.5 for unparseable input.
+ */
+function hexLuminance(hex: string): number {
+  let h = hex.trim().replace(/^#/, '');
+  if (h.length === 3) h = h.split('').map((c) => c + c).join('');
+  if (h.length !== 6) return 0.5;
+  const r = parseInt(h.slice(0, 2), 16);
+  const g = parseInt(h.slice(2, 4), 16);
+  const b = parseInt(h.slice(4, 6), 16);
+  if (Number.isNaN(r) || Number.isNaN(g) || Number.isNaN(b)) return 0.5;
+  return (0.299 * r + 0.587 * g + 0.114 * b) / 255;
+}
+
 /** Apply a color map directly to CSS custom properties on :root. */
 export function applyThemeColors(colors: Record<string, string>): void {
   Object.entries(colors).forEach(([key, value]) => {
     document.documentElement.style.setProperty(`--${key}`, value);
   });
+  // Set `color-scheme` so native form controls (checkboxes, radios, scrollbars,
+  // selects) render with dark or light defaults that match the theme.
+  const bg = colors['bg-primary'];
+  if (bg) {
+    document.documentElement.style.colorScheme = hexLuminance(bg) < 0.5 ? 'dark' : 'light';
+  }
 }
 
 /** Return true if two color maps are equal. */

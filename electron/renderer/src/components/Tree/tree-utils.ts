@@ -63,6 +63,31 @@ export function removeNodeImmut(
   return changed ? result : list;
 }
 
+/**
+ * Compare two child lists for visible structural difference.
+ *
+ * Returns true if a 1 Hz safety-net poll has detected drift the renderer
+ * should re-render — i.e. a child was added, removed, or its visible
+ * descriptor (key, type, hasChildren, preview) changed.
+ *
+ * Used to suppress no-op refreshes from idle polls. Push-driven updates
+ * ride a separate code path and don't go through this comparison.
+ */
+export function childrenDiffer(a: TreeNodeData[], b: TreeNodeData[]): boolean {
+  if (a.length !== b.length) return true;
+  const byPath = new Map<string, TreeNodeData>();
+  for (const node of a) byPath.set(node.path, node);
+  for (const node of b) {
+    const existing = byPath.get(node.path);
+    if (!existing) return true;
+    if (existing.key !== node.key) return true;
+    if (existing.type !== node.type) return true;
+    if (existing.hasChildren !== node.hasChildren) return true;
+    if (existing.preview !== node.preview) return true;
+  }
+  return false;
+}
+
 /** Immutably update one node by path while preserving unrelated references. */
 export function updateNodeImmut(
   list: TreeNodeData[],

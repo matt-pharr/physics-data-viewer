@@ -26,6 +26,8 @@ interface UseKernelSubscriptionsOptions {
   onKernelCrash: (kernelId: string) => void;
   /** Called on incremental tree changes so the Tree can update selectively. */
   onTreeChanged: (info: TreeChangeInfo) => void;
+  /** Setter for the latest kernel-process RSS in bytes (null when unknown). */
+  setKernelMemoryRss: Dispatch<SetStateAction<number | null>>;
 }
 
 export function useKernelSubscriptions({
@@ -40,6 +42,7 @@ export function useKernelSubscriptions({
   setProgress,
   onKernelCrash,
   onTreeChanged,
+  setKernelMemoryRss,
 }: UseKernelSubscriptionsOptions): void {
   useEffect(() => {
     const unsubscribe = window.pdv.kernels.onOutput((chunk) => {
@@ -63,6 +66,15 @@ export function useKernelSubscriptions({
     }
 
     const unsubscribeTree = window.pdv.tree.onChanged((payload) => {
+      // "unknown" comes from non-root PDVTree mutations (intermediate
+      // sub-trees, scratch trees) where the local path can't be mapped to
+      // the renderer's absolute view. Trigger a full refresh-with-expansion
+      // instead of trying to reconcile changed_paths.
+      if (payload.change_type === "unknown") {
+        setTreeRefreshToken((prev) => prev + 1);
+        setModulesRefreshToken((prev) => prev + 1);
+        return;
+      }
       // Notify Tree for selective (incremental) update instead of a full reload.
       onTreeChanged({
         changed_paths: payload.changed_paths,
@@ -118,6 +130,11 @@ export function useKernelSubscriptions({
       setModulesRefreshToken((prev) => prev + 1);
     });
 
+    const unsubscribeMemory = window.pdv.kernels.onMemory((payload) => {
+      if (payload.kernelId !== currentKernelId) return;
+      setKernelMemoryRss(payload.rssBytes);
+    });
+
     return () => {
       unsubscribeTree();
       unsubscribeProject();
@@ -125,6 +142,9 @@ export function useKernelSubscriptions({
       unsubscribeProgress();
       unsubscribeReloading();
       unsubscribeReconnected();
+      unsubscribeMemory();
+      // Clear the readout so a fresh kernel doesn't briefly show stale memory.
+      setKernelMemoryRss(null);
     };
   }, [
     currentKernelId,
@@ -137,5 +157,6 @@ export function useKernelSubscriptions({
     setProjectReloading,
     setTreeRefreshToken,
     onTreeChanged,
+    setKernelMemoryRss,
   ]);
 }

@@ -1,9 +1,10 @@
 // @vitest-environment jsdom
 
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { NamespaceInspectorNode, NamespaceVariable } from '../../types';
+import type { PDVApi } from '../../types/pdv';
+import { installPdvMock, type PdvMock } from '../../test-fixtures/pdv-mock';
 import { NamespaceView } from './index';
 
 function makeVars(): NamespaceVariable[] {
@@ -56,17 +57,16 @@ function makeChildren(): NamespaceInspectorNode[] {
   ];
 }
 
+let pdv: PdvMock;
+
 beforeEach(() => {
-  Object.defineProperty(window, 'pdv', {
-    configurable: true,
-    value: {
-      namespace: {
-        query: vi.fn(async () => makeVars()),
-        inspect: vi.fn(async () => ({
-          children: makeChildren(),
-          truncated: false,
-        })),
-      },
+  pdv = installPdvMock({
+    namespace: {
+      query: vi.fn<PDVApi['namespace']['query']>(async () => makeVars()),
+      inspect: vi.fn<PDVApi['namespace']['inspect']>(async () => ({
+        children: makeChildren(),
+        truncated: false,
+      })),
     },
   });
 });
@@ -75,47 +75,15 @@ afterEach(() => {
   cleanup();
 });
 
+// Empty-kernel/disabled placeholder copy, search-filtering, error display,
+// and lazy-expand are all covered indirectly when a real kernel runs against
+// NamespaceView in the larger E2E flow. The unit tests retained here pin the
+// mapping between UI controls and the request shape sent to
+// `namespace.query`/`inspect`, plus the polling cadence — both of which are
+// hard to verify with on/off-only observability.
 describe('NamespaceView', () => {
-  it('does not call API when kernel is null and shows empty kernel state', async () => {
-    const query = window.pdv.namespace.query as unknown as ReturnType<typeof vi.fn>;
-    render(<NamespaceView kernelId={null} />);
-    await waitFor(() => {
-      expect(screen.getByText('No kernel active')).toBeTruthy();
-    });
-    expect(query).not.toHaveBeenCalled();
-  });
-
-  it('shows disabled state message when kernel is disabled', async () => {
-    render(<NamespaceView kernelId="k1" disabled />);
-    await waitFor(() => {
-      expect(screen.getByText('Starting kernel...')).toBeTruthy();
-    });
-  });
-
-  it('renders queried variables and supports search filtering', async () => {
-    render(<NamespaceView kernelId="k1" />);
-    await waitFor(() => {
-      expect(screen.getByText('alpha')).toBeTruthy();
-      expect(screen.getByText('beta')).toBeTruthy();
-    });
-
-    const user = userEvent.setup();
-    await user.type(screen.getByPlaceholderText('Search variables...'), 'alp');
-    expect(screen.getByText('alpha')).toBeTruthy();
-    expect(screen.queryByText('beta')).toBeNull();
-  });
-
-  it('shows error when API call fails', async () => {
-    const query = window.pdv.namespace.query as unknown as ReturnType<typeof vi.fn>;
-    query.mockRejectedValue(new Error('query failed'));
-    render(<NamespaceView kernelId="k1" />);
-    await waitFor(() => {
-      expect(screen.getByText('query failed')).toBeTruthy();
-    });
-  });
-
   it('applies filter toggles to subsequent API requests', async () => {
-    const query = window.pdv.namespace.query as unknown as ReturnType<typeof vi.fn>;
+    const query = pdv.namespace.query;
     render(<NamespaceView kernelId="k1" />);
     await waitFor(() => expect(query).toHaveBeenCalledTimes(1));
 
@@ -135,7 +103,7 @@ describe('NamespaceView', () => {
   });
 
   it('sorts top-level rows by column header clicks and reacts to refreshToken changes', async () => {
-    const query = window.pdv.namespace.query as unknown as ReturnType<typeof vi.fn>;
+    const query = pdv.namespace.query;
     const { rerender } = render(<NamespaceView kernelId="k1" refreshToken={0} />);
     await waitFor(() => {
       expect(screen.getByText('alpha')).toBeTruthy();
@@ -149,22 +117,8 @@ describe('NamespaceView', () => {
     await waitFor(() => expect(query.mock.calls.length).toBeGreaterThanOrEqual(2));
   });
 
-  it('expands nodes lazily through namespace.inspect', async () => {
-    const inspect = window.pdv.namespace.inspect as unknown as ReturnType<typeof vi.fn>;
-    render(<NamespaceView kernelId="k1" />);
-
-    await waitFor(() => expect(screen.getByText('arr')).toBeTruthy());
-    fireEvent.click(screen.getByRole('button', { name: /Expand arr/i }));
-
-    await waitFor(() => expect(inspect).toHaveBeenCalledWith('k1', {
-      rootName: 'arr',
-      path: [],
-    }));
-    await waitFor(() => expect(screen.getByText('[0]')).toBeTruthy());
-  });
-
   it('auto-refresh triggers interval-based re-queries', async () => {
-    const query = window.pdv.namespace.query as unknown as ReturnType<typeof vi.fn>;
+    const query = pdv.namespace.query;
     render(<NamespaceView kernelId="k1" autoRefresh refreshInterval={20} />);
     await waitFor(() => expect(query.mock.calls.length).toBeGreaterThanOrEqual(3), { timeout: 2000 });
   });

@@ -115,6 +115,10 @@ const App: React.FC = () => {
   const [savedPdvVersion, setSavedPdvVersion] = useState<string | null>(null);
   const [runningPdvVersion, setRunningPdvVersion] = useState<string | null>(null);
   const [interpreterWarning, setInterpreterWarning] = useState<string | null>(null);
+  /** Latest RSS in bytes for the active kernel subprocess, or null when unknown. */
+  const [kernelMemoryRss, setKernelMemoryRss] = useState<number | null>(null);
+  /** Latest auto-update status pushed by the main process. */
+  const [updateStatus, setUpdateStatus] = useState<import('../types/pdv').UpdateStatus | null>(null);
 
   // -- App / config state ---------------------------------------------------
   const [config, setConfig] = useState<Config | null>(null);
@@ -310,6 +314,16 @@ const App: React.FC = () => {
     void window.pdv.menu.updateRecentProjects(recentProjects);
   }, [config]);
 
+  // Surface auto-update state in the status bar. Seed from the cached value in
+  // case a check completed before the App mounted, then subscribe for live
+  // transitions.
+  useEffect(() => {
+    void window.pdv.updater.getStatus().then((status) => {
+      if (status) setUpdateStatus(status);
+    });
+    return window.pdv.updater.onUpdateStatus(setUpdateStatus);
+  }, []);
+
   // Listen for File-menu actions handled at the App level.
   // project:open and project:openRecent are dispatched via refs so this effect
   // doesn't re-subscribe on every kernelStatus change (handlers defined later).
@@ -330,8 +344,24 @@ const App: React.FC = () => {
         setSettingsInitialTab('general');
         setShowSettings(true);
       } else if (payload.action === 'project:new') {
-        setCurrentProjectName(null);
-        setForceWelcome(true);
+        guardDirtyRef.current('start a new project', () => {
+          // Reset renderer-side project state so the workspace behind the
+          // splash isn't holding the prior project's tabs/name/checksum.
+          // Tree state lives in the kernel and gets cleared on the next
+          // language pick (which restarts the kernel via ensureKernel).
+          setCurrentProjectName(null);
+          setCurrentProjectDir(null);
+          setCellTabs([{ id: 1, code: '' }]);
+          setActiveCellTab(1);
+          setNoteTabs([]);
+          setActiveNoteTabId(null);
+          setLastChecksum(null);
+          setChecksumMismatch(false);
+          setSavedPdvVersion(null);
+          loadedProjectTabsRef.current = null;
+          setProjectDirty(false);
+          setForceWelcome(true);
+        });
       } else if (payload.action === 'recentProjects:clear') {
         void window.pdv.config.set({ recentProjects: [] }).then((updated) => {
           if (updated) setConfig((prev) => (prev ? { ...prev, recentProjects: [] } : prev));
@@ -402,9 +432,10 @@ const App: React.FC = () => {
     setProgress,
     onKernelCrash: handleKernelCrash,
     onTreeChanged: handleTreeChanged,
+    setKernelMemoryRss,
   });
 
-  const { startKernel, handleEnvSave } = useKernelLifecycle({
+  const { startKernel, handleEnvSave, lastErrorRef } = useKernelLifecycle({
     config,
     currentKernelId,
     setCurrentKernelId,
@@ -997,11 +1028,15 @@ const App: React.FC = () => {
   useEffect(() => {
     if (!window.pdv?.app) return;
     return window.pdv.app.onRequestClose(() => {
-      guardDirtyRef.current('close PDV', () => {
+      guardDirtyRef.current('exit PDV', () => {
         void window.pdv.app.confirmClose();
       });
     });
   }, []);
+
+  useEffect(() => {
+    void window.pdv?.app?.setDocumentEdited(projectDirty);
+  }, [projectDirty]);
 
   // -- Welcome screen (pristine session) ------------------------------------
 
@@ -1074,7 +1109,7 @@ const App: React.FC = () => {
     setActiveLanguage(language);
     if (language === 'julia') {
       const ok = await startKernel(config ?? {} as Config, 'julia');
-      if (!ok) openEnvSettings('Kernel failed to start.');
+      if (!ok) openEnvSettings(lastErrorRef.current ?? 'Kernel failed to start.');
     } else {
       if (!config?.pythonPath) {
         openEnvSettings();
@@ -1094,9 +1129,9 @@ const App: React.FC = () => {
         // Probe failed — try starting anyway
       }
       const ok = await startKernel(config, 'python');
-      if (!ok) openEnvSettings('Kernel failed to start.');
+      if (!ok) openEnvSettings(lastErrorRef.current ?? 'Kernel failed to start.');
     }
-  }, [config, runningPdvVersion, startKernel, openEnvSettings]);
+  }, [config, runningPdvVersion, startKernel, openEnvSettings, lastErrorRef]);
 
   const handleWelcomeNewProject = useCallback(async (language: 'python' | 'julia') => {
     dismissWelcome();
@@ -1153,19 +1188,25 @@ const App: React.FC = () => {
     const dir = await window.pdv.files.pickDirectory(defaultPath);
     if (!dir) return;
     if (kernelStatus === 'ready') {
-      guardDirty('open another project', () => { void executeOpenProject(dir); });
+      guardDirty('open another project', () => {
+        dismissWelcome();
+        void executeOpenProject(dir);
+      });
     } else {
       await openProjectFromWelcome(dir);
     }
-  }, [currentProjectDir, kernelStatus, executeOpenProject, openProjectFromWelcome, guardDirty]);
+  }, [currentProjectDir, kernelStatus, executeOpenProject, openProjectFromWelcome, guardDirty, dismissWelcome]);
 
   const handleOpenRecent = useCallback(async (path: string) => {
     if (kernelStatus === 'ready') {
-      guardDirty('open another project', () => { void executeOpenProject(path); });
+      guardDirty('open another project', () => {
+        dismissWelcome();
+        void executeOpenProject(path);
+      });
     } else {
       await openProjectFromWelcome(path);
     }
-  }, [kernelStatus, executeOpenProject, openProjectFromWelcome, guardDirty]);
+  }, [kernelStatus, executeOpenProject, openProjectFromWelcome, guardDirty, dismissWelcome]);
 
   /**
    * Recover an orphaned autosave into the active kernel session. The recovered
@@ -1448,6 +1489,7 @@ const App: React.FC = () => {
         <MoveDialog
           currentPath={moveTarget.path}
           nodeType={moveTarget.type}
+          kernelId={currentKernelId}
           onCancel={() => setMoveTarget(null)}
           onMove={(newPath) => void runTreeAction(
             () => window.pdv.tree.move(currentKernelId, moveTarget.path, newPath),
@@ -1621,6 +1663,9 @@ const App: React.FC = () => {
           savedPdvVersion={savedPdvVersion}
           runningPdvVersion={runningPdvVersion}
           lastAutosaveAt={lastAutosaveAt}
+          kernelMemoryRss={kernelMemoryRss}
+          updateStatus={updateStatus}
+          onUpdateClick={() => { setSettingsInitialTab('about'); setShowSettings(true); }}
         />
 
        <ImportModuleDialog
@@ -1657,7 +1702,7 @@ const App: React.FC = () => {
              setInterpreterWarning(null);
              void handleEnvSave(paths).then((ok) => {
                if (!ok) {
-                 openEnvSettings('Kernel failed to start with the selected environment.');
+                 openEnvSettings(lastErrorRef.current ?? 'Kernel failed to start with the selected environment.');
                }
              });
            });

@@ -1,6 +1,6 @@
 {
   "name": "physics-data-viewer",
-  "version": "0.0.13",
+  "version": "0.1.0",
   "private": true,
   "author": {
     "name": "Matthew Pharr",
@@ -25,17 +25,24 @@
     "build": "npm run build:renderer && npm run build:main",
     "build:renderer": "cd renderer && node ../node_modules/vite/bin/vite.js build",
     "build:main": "node ./node_modules/typescript/bin/tsc -p tsconfig.json",
+    "build:e2e": "npm run build:renderer && npm run build:main",
+    "test:e2e": "node ./node_modules/@playwright/test/cli.js test --config=playwright.config.ts",
+    "test:e2e:headed": "node ./node_modules/@playwright/test/cli.js test --headed --config=playwright.config.ts",
     "pack": "npm run build && electron-builder --dir",
     "dist": "npm run build && electron-builder",
     "dist:mac": "npm run build && electron-builder --mac",
     "dist:linux": "npm run build && electron-builder --linux",
     "test": "node ./node_modules/vitest/vitest.mjs run",
+    "typecheck": "npm run typecheck:main && npm run typecheck:renderer",
+    "typecheck:main": "node ./node_modules/typescript/bin/tsc -p tsconfig.test.json --noEmit",
+    "typecheck:renderer": "node ./node_modules/typescript/bin/tsc -p renderer/tsconfig.json --noEmit",
     "lint": "eslint .",
     "knip": "knip",
     "clean": "rm -rf dist renderer/dist release node_modules renderer/node_modules"
   },
   "devDependencies": {
     "@eslint/js": "^9.39.4",
+    "@playwright/test": "^1.59.1",
     "@testing-library/react": "^16.3.2",
     "@testing-library/user-event": "^14.6.1",
     "@types/node": "^20.0.0",
@@ -58,8 +65,8 @@
   },
   "dependencies": {
     "@monaco-editor/react": "^4.6.0",
-    "electron-updater": "^6.6.2",
     "ansi-to-html": "^0.7.2",
+    "electron-updater": "^6.6.2",
     "katex": "^0.16.38",
     "marked": "^17.0.4",
     "marked-katex-extension": "^5.1.7",

@@ -39,7 +39,7 @@ The main working area has two panes, toggled by the **Code / Write** switcher at
 **Code pane**
 
 - **Console** (top half) — a chronological log of everything you run: executed code, stdout/stderr, inline plots, return values, errors with tracebacks, and execution time.
-- **Code editor** (bottom half) — a tabbed Monaco editor for Python (or Julia). Each tab is a scratch code cell. Keyboard shortcuts: ++cmd+enter++ to execute, ++cmd+l++ to clear, ++cmd+w++ to close a tab.
+- **Code editor** (bottom half) — a tabbed Monaco editor for Python. Each tab is a scratch code cell. Keyboard shortcuts: ++cmd+enter++ to execute, ++cmd+l++ to clear, ++cmd+w++ to close a tab.
 
 **Write pane**
 

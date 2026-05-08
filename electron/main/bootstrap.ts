@@ -54,6 +54,17 @@ import { KernelManager } from "./kernel-manager";
 import { ProjectManager } from "./project-manager";
 import { handleSystemResume } from "./wake-handler";
 
+// Under PDV_E2E, redirect Electron's userData (where the renderer's
+// localStorage and ConfigStore-backed preferences live) to a path under the
+// test's temp HOME. On macOS, app.getPath('appData') is derived from
+// NSHomeDirectory() / getpwuid(), NOT $HOME, so overriding HOME in the
+// launcher alone leaks userData into the developer's real PDV install. Each
+// E2E launch gets its own temp HOME (mkdtemp in launch.ts), so this gives
+// us per-test localStorage isolation.
+if (process.env.PDV_E2E === "1" && process.env.HOME) {
+  app.setPath("userData", path.join(process.env.HOME, ".pdv-e2e-userdata"));
+}
+
 let kernelManager: KernelManager | null = null;
 let mainWindow: BrowserWindow | null = null;
 let openingWindow: Promise<void> | null = null;

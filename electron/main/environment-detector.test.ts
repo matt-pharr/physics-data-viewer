@@ -217,6 +217,23 @@ describe("EnvironmentDetector", () => {
       expect(status.version).toBeNull();
       expect(status.compatible).toBe(false);
     });
+
+    it("treats prerelease suffixes as compatible across setuptools normalization", async () => {
+      // App: `0.1.0-rc1` (electron/package.json semver form).
+      // Installed pdv-python reports `0.1.0rc1` (PEP 440 normalized).
+      // Both share the M.m.p core `0.1.0`, so they are compatible.
+      setAppVersion("0.1.0-rc1");
+      mockExecPerCommand({
+        "/usr/bin/python3": { stdout: "0.1.0rc1\n" },
+      });
+
+      const status =
+        await EnvironmentDetector.checkPDVInstalled("/usr/bin/python3");
+
+      expect(status.installed).toBe(true);
+      expect(status.version).toBe("0.1.0rc1");
+      expect(status.compatible).toBe(true);
+    });
   });
 
   describe("hasPDVKernel()", () => {
@@ -352,6 +369,27 @@ describe("EnvironmentDetector", () => {
       expect(info.pdvInstalled).toBe(true);
       expect(info.pdvVersion).toBe("0.0.5");
       expect(info.pdvVersionMismatch).toBe(true);
+    });
+
+    it("does not flag a mismatch when only the prerelease suffix differs", async () => {
+      // Same M.m.p core, different normalized form — must not flag.
+      setAppVersion("0.1.0-rc1");
+      mockExecPerCommand({
+        "/usr/bin/python3": { stdout: "0.1.0rc1\n" },
+      });
+
+      const baseEnv = {
+        kind: "system" as const,
+        pythonPath: "/usr/bin/python3",
+        jupyterPath: "jupyter",
+        label: "System — Python 3.11.0",
+        pythonVersion: "3.11.0",
+      };
+
+      const info = await EnvironmentDetector.enrichEnvironment(baseEnv);
+
+      expect(info.pdvVersion).toBe("0.1.0rc1");
+      expect(info.pdvVersionMismatch).toBe(false);
     });
   });
 

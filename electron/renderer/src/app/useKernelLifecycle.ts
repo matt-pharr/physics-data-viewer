@@ -43,10 +43,16 @@ export function useKernelLifecycle(options: UseKernelLifecycleOptions) {
   // previously queued call (only the latest queued call runs).
   const startQueueRef = useRef<Promise<boolean>>(Promise.resolve(false));
   const pendingStartRef = useRef<{ cfg: Config; language: 'python' | 'julia'; resolve: (v: boolean) => void } | null>(null);
+  // Mirrors `lastError` synchronously so callers can read the message right
+  // after `await startKernel()` returns, without waiting for React to flush
+  // setLastError. Used to surface diagnostic text (e.g. handshake-step errors)
+  // in the env-settings dialog warning slot.
+  const lastErrorRef = useRef<string | undefined>(undefined);
 
   const doStartKernel = useCallback(async (cfg: Config, language: 'python' | 'julia' = 'python'): Promise<boolean> => {
     setKernelStatus('starting');
     setLastError(undefined);
+    lastErrorRef.current = undefined;
     try {
       if (currentKernelId) {
         await window.pdv.kernels.stop(currentKernelId);
@@ -74,9 +80,11 @@ export function useKernelLifecycle(options: UseKernelLifecycleOptions) {
       return true;
     } catch (error) {
       console.error('[App] Failed to start kernel:', error);
+      const msg = error instanceof Error ? error.message : String(error);
       setCurrentKernelId(null);
       setKernelStatus('error');
-      setLastError(error instanceof Error ? error.message : String(error));
+      lastErrorRef.current = msg;
+      setLastError(msg);
       return false;
     }
   }, [
@@ -125,7 +133,6 @@ export function useKernelLifecycle(options: UseKernelLifecycleOptions) {
       recentProjects: config?.recentProjects ?? [],
       pythonPath: paths.pythonPath ?? config?.pythonPath,
       juliaPath: paths.juliaPath ?? config?.juliaPath,
-      editors: config?.editors,
       treeRoot: config?.treeRoot,
       settings: config?.settings,
     };
@@ -166,5 +173,6 @@ export function useKernelLifecycle(options: UseKernelLifecycleOptions) {
     startKernel,
     handleEnvSave,
     handleRestartKernel,
+    lastErrorRef,
   };
 }

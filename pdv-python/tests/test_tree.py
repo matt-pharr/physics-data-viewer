@@ -70,6 +70,100 @@ class TestDotPathAccess:
         with pytest.raises(PDVPathError):
             _ = tree_with_comm["a..b"]
 
+    def test_get_indexes_into_list(self, tree_with_comm):
+        """A numeric segment indexes into a list value."""
+        tree_with_comm["xs"] = [10, 20, 30]
+        assert tree_with_comm["xs.0"] == 10
+        assert tree_with_comm["xs.2"] == 30
+
+    def test_get_indexes_into_tuple(self, tree_with_comm):
+        """A numeric segment indexes into a tuple value."""
+        tree_with_comm["pair"] = ("a", "b")
+        assert tree_with_comm["pair.1"] == "b"
+
+    def test_get_descends_through_list_into_dict(self, tree_with_comm):
+        """Dot-path descends through list indices into nested dicts."""
+        tree_with_comm["records"] = [{"name": "a"}, {"name": "b"}]
+        assert tree_with_comm["records.0.name"] == "a"
+        assert tree_with_comm["records.1.name"] == "b"
+
+    def test_negative_index_returns_from_end(self, tree_with_comm):
+        """Negative indices in a dot-path index from the end of the list,
+        following Python's native sequence-indexing semantics."""
+        tree_with_comm["xs"] = [10, 20, 30]
+        assert tree_with_comm["xs.-1"] == 30
+        assert tree_with_comm["xs.-2"] == 20
+
+    def test_index_out_of_range_raises_key_error(self, tree_with_comm):
+        """Out-of-range index on a list raises PDVKeyError."""
+        tree_with_comm["xs"] = [1, 2]
+        with pytest.raises(PDVKeyError):
+            _ = tree_with_comm["xs.5"]
+        with pytest.raises(PDVKeyError):
+            _ = tree_with_comm["xs.-5"]
+
+    def test_non_numeric_segment_into_list_raises_key_error(self, tree_with_comm):
+        """Non-numeric segment into a list value raises PDVKeyError."""
+        tree_with_comm["xs"] = [1, 2, 3]
+        with pytest.raises(PDVKeyError):
+            _ = tree_with_comm["xs.foo"]
+
+    def test_contains_indexed_path(self, tree_with_comm):
+        """`'xs.0' in tree` works for list values."""
+        tree_with_comm["xs"] = [1, 2]
+        assert "xs.0" in tree_with_comm
+        assert "xs.5" not in tree_with_comm
+        assert "xs.foo" not in tree_with_comm
+
+    def test_get_descends_into_xarray_dataset(self, tree_with_comm):
+        """A dot-path segment after a Dataset resolves via Dataset[name]."""
+        xr = pytest.importorskip("xarray")
+        import numpy as np
+        ds = xr.Dataset(
+            {"a": (("t",), np.array([1.0, 2.0, 3.0]))},
+            coords={"t": [10, 20, 30]},
+        )
+        tree_with_comm["ds"] = ds
+        result = tree_with_comm["ds.a"]
+        assert isinstance(result, xr.DataArray)
+        assert result.equals(ds["a"])
+
+    def test_get_descends_to_dataset_coord(self, tree_with_comm):
+        """Coord names resolve incidentally via Dataset.__getitem__ even
+        though the tree panel only lists data_vars as children."""
+        xr = pytest.importorskip("xarray")
+        import numpy as np
+        ds = xr.Dataset(
+            {"a": (("t",), np.array([1.0, 2.0]))},
+            coords={"t": [10, 20]},
+        )
+        tree_with_comm["ds"] = ds
+        result = tree_with_comm["ds.t"]
+        assert isinstance(result, xr.DataArray)
+        assert list(result.values) == [10, 20]
+
+    def test_dataset_missing_key_raises_pdv_key_error(self, tree_with_comm):
+        """Unknown var/coord names raise PDVKeyError."""
+        xr = pytest.importorskip("xarray")
+        import numpy as np
+        tree_with_comm["ds"] = xr.Dataset(
+            {"a": (("t",), np.array([1.0]))}
+        )
+        with pytest.raises(PDVKeyError):
+            _ = tree_with_comm["ds.missing"]
+
+    def test_no_descent_through_dataarray(self, tree_with_comm):
+        """DataArrays are leaves — descending past one with another
+        segment raises PDVKeyError (we do not interpret da[label] as
+        dimension indexing)."""
+        xr = pytest.importorskip("xarray")
+        import numpy as np
+        tree_with_comm["ds"] = xr.Dataset(
+            {"a": (("t",), np.array([1.0, 2.0]))}
+        )
+        with pytest.raises(PDVKeyError):
+            _ = tree_with_comm["ds.a.0"]
+
 
 class TestChangeNotification:
     """Tests for pdv.tree.changed push notifications (debounced)."""
@@ -173,6 +267,71 @@ class TestChangeNotification:
         tree_with_comm._flush_changes()
         _, payload = mock_send.call_args[0]
         assert set(payload["changed_paths"]) == {"imports", "imports.mesh"}
+
+
+class TestGlobalPing:
+    """Tests for the class-level "global ping" emitted by non-root PDVTrees.
+
+    Mutations on detached or sub-tree PDVTree instances cannot emit precise
+    paths (their local path has no relationship to the root tree), so they
+    fire a coarse ``change_type: "unknown"`` notification that the renderer
+    treats as "refetch the visible tree."
+    """
+
+    def test_subtree_mutation_emits_unknown(self, tree_with_comm, mock_send):
+        """Mutating an intermediate PDVTree fires a global unknown ping."""
+        tree_with_comm["a.b"] = 0
+        tree_with_comm._flush_changes()
+        mock_send.reset_mock()
+
+        # Mutate the sub-tree directly, bypassing the root.
+        sub = tree_with_comm["a"]
+        assert isinstance(sub, PDVTree)
+        sub["c"] = 99
+        PDVTree._flush_global()
+
+        mock_send.assert_called_once()
+        msg_type, payload = mock_send.call_args[0]
+        assert msg_type == "pdv.tree.changed"
+        assert payload["change_type"] == "unknown"
+        assert payload["changed_paths"] == []
+
+    def test_detached_tree_mutation_emits_unknown(self, tree_with_comm, mock_send):
+        """A scratch PDVTree the user constructs locally also pings."""
+        tree_with_comm._flush_changes()
+        mock_send.reset_mock()
+
+        scratch = PDVTree()
+        scratch["x"] = 1
+        PDVTree._flush_global()
+
+        mock_send.assert_called_once()
+        _, payload = mock_send.call_args[0]
+        assert payload["change_type"] == "unknown"
+
+    def test_root_mutation_does_not_fire_global(self, tree_with_comm, mock_send):
+        """Root-tree mutations use precise paths, not the global ping."""
+        tree_with_comm["x"] = 1
+        tree_with_comm._flush_changes()
+        # Global timer should not have been scheduled.
+        PDVTree._flush_global()
+        # Only the precise-path emit should have fired.
+        msg_types = [call[0][0] for call in mock_send.call_args_list]
+        assert msg_types.count("pdv.tree.changed") == 1
+        _, payload = mock_send.call_args[0]
+        assert payload["change_type"] == "batch"
+
+    def test_detach_clears_global_state(self, tmp_working_dir, mock_send):
+        """Detaching the root tree silences future global pings."""
+        tree = PDVTree()
+        tree._set_working_dir(tmp_working_dir)
+        tree._attach_comm(mock_send)
+        tree._detach_comm()
+
+        scratch = PDVTree()
+        scratch["x"] = 1
+        PDVTree._flush_global()
+        mock_send.assert_not_called()
 
 
 class TestMutatingDictMethods:

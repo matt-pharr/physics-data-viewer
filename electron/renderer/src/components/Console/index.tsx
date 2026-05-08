@@ -5,7 +5,7 @@
  * emitted from kernel executions coordinated by `App`.
  */
 
-import React, { useEffect, useMemo, useRef } from 'react';
+import React, { useCallback, useLayoutEffect, useMemo, useRef } from 'react';
 import type { LogEntry } from '../../types';
 import { ansiToHtml } from './ansi';
 
@@ -15,15 +15,39 @@ interface ConsoleProps {
   onClear: () => void;
 }
 
+/** Pixels of slack at the bottom that still count as "pinned". Larger
+ *  than 0 to absorb sub-pixel rounding from zoom and HiDPI displays;
+ *  small enough that scrolling up by a single line disengages. */
+const PIN_THRESHOLD_PX = 4;
+
 /** Execution console component. */
 export const Console: React.FC<ConsoleProps> = ({ logs, onClear }) => {
   const contentRef = useRef<HTMLDivElement>(null);
+  // True when the viewport is at (or within PIN_THRESHOLD_PX of) the
+  // bottom. Initialized true so the first batch of output scrolls into
+  // view; updated on every user scroll. Stored in a ref because it's
+  // read inside a layout effect and shouldn't trigger re-render.
+  const pinnedToBottomRef = useRef(true);
 
-  useEffect(() => {
-    if (contentRef.current) {
-      contentRef.current.scrollTop = contentRef.current.scrollHeight;
+  const handleScroll = useCallback(() => {
+    const el = contentRef.current;
+    if (!el) return;
+    const distance = el.scrollHeight - el.scrollTop - el.clientHeight;
+    pinnedToBottomRef.current = distance <= PIN_THRESHOLD_PX;
+  }, []);
+
+  useLayoutEffect(() => {
+    const el = contentRef.current;
+    if (!el) return;
+    // When everything fits (no scrollbar), there's no "scrolled up"
+    // state to preserve — re-arm the pin so the next overflow scrolls.
+    if (el.scrollHeight <= el.clientHeight + PIN_THRESHOLD_PX) {
+      pinnedToBottomRef.current = true;
     }
-  }, [logs.length]);
+    if (pinnedToBottomRef.current) {
+      el.scrollTop = el.scrollHeight;
+    }
+  }, [logs]);
 
   return (
     <section className="console-pane">
@@ -36,7 +60,7 @@ export const Console: React.FC<ConsoleProps> = ({ logs, onClear }) => {
         </div>
       </header>
 
-      <div className="console-content" ref={contentRef}>
+      <div className="console-content" ref={contentRef} onScroll={handleScroll}>
         {logs.length === 0 ? (
           <div className="console-empty">
             <p>No output yet</p>

@@ -83,7 +83,7 @@ class TestPDVNote:
 
     def test_preview_fallback_when_file_missing(self):
         note = PDVNote(uuid="note_uuid_005", filename="path.md")
-        assert note.preview() == "Markdown note"
+        assert note.preview() == ""
 
     def test_preview_truncates_long_titles(self):
         note = PDVNote(uuid="note_uuid_006", filename="x.md", title="A" * 200)
@@ -188,7 +188,7 @@ class TestNodePreviewMarkdown:
 
     def test_preview_fallback(self):
         note = PDVNote(uuid="note_prv_003", filename="nonexistent.md")
-        assert node_preview(note, KIND_MARKDOWN) == "Markdown note"
+        assert node_preview(note, KIND_MARKDOWN) == ""
 
 
 # ---------------------------------------------------------------------------

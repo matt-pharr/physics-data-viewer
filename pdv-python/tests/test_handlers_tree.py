@@ -14,6 +14,9 @@ Reference: ARCHITECTURE.md §3.4, §7
 
 import uuid
 from unittest.mock import MagicMock, patch
+
+import pytest
+
 import pdv.comms as comms_mod
 from pdv.handlers.tree import handle_tree_list, handle_tree_get
 from pdv.tree import PDVScript
@@ -134,6 +137,167 @@ class TestHandleTreeList:
         assert "params" not in script_node
         assert "params" not in value_node
 
+    def test_list_value_marks_has_children(self, tree_with_comm):
+        """Non-empty list/tuple values report has_children so the renderer
+        shows a disclosure chevron."""
+        tree_with_comm["xs"] = [10, 20, 30]
+        tree_with_comm["empty"] = []
+        tree_with_comm["pair"] = (1, 2)
+        mock_comm = _make_mock_comm()
+        msg = _make_msg("pdv.tree.list", {"path": ""})
+        with (
+            patch.object(comms_mod, "_comm", mock_comm),
+            patch.object(comms_mod, "_pdv_tree", tree_with_comm),
+        ):
+            handle_tree_list(msg)
+        nodes = {n["key"]: n for n in mock_comm._sent[0]["payload"]["nodes"]}
+        assert nodes["xs"]["type"] == "sequence"
+        assert nodes["xs"]["has_children"] is True
+        assert nodes["pair"]["has_children"] is True
+        assert nodes["empty"]["has_children"] is False
+
+    def test_list_container_enumerates_indexed_children(self, tree_with_comm):
+        """pdv.tree.list at a list path returns one child per element with
+        stringified-int keys and the parent_is_opaque flag set."""
+        tree_with_comm["xs"] = ["a", "b", "c"]
+        mock_comm = _make_mock_comm()
+        msg = _make_msg("pdv.tree.list", {"path": "xs"})
+        with (
+            patch.object(comms_mod, "_comm", mock_comm),
+            patch.object(comms_mod, "_pdv_tree", tree_with_comm),
+        ):
+            handle_tree_list(msg)
+        response = mock_comm._sent[0]
+        assert response["status"] == "ok"
+        nodes = response["payload"]["nodes"]
+        assert [n["key"] for n in nodes] == ["0", "1", "2"]
+        assert [n["path"] for n in nodes] == ["xs.0", "xs.1", "xs.2"]
+        assert all(n["parent_is_opaque"] is True for n in nodes)
+
+    def test_dict_children_are_not_indexed(self, tree_with_comm):
+        """Children of a dict parent never carry parent_is_opaque."""
+        tree_with_comm["data.x"] = 1
+        mock_comm = _make_mock_comm()
+        msg = _make_msg("pdv.tree.list", {"path": "data"})
+        with (
+            patch.object(comms_mod, "_comm", mock_comm),
+            patch.object(comms_mod, "_pdv_tree", tree_with_comm),
+        ):
+            handle_tree_list(msg)
+        nodes = mock_comm._sent[0]["payload"]["nodes"]
+        for node in nodes:
+            assert "parent_is_opaque" not in node
+
+    def test_nested_list_in_list(self, tree_with_comm):
+        """A list containing dicts/lists is recursively expandable."""
+        tree_with_comm["records"] = [{"name": "a", "v": 1}, [10, 20]]
+        mock_comm = _make_mock_comm()
+        msg = _make_msg("pdv.tree.list", {"path": "records"})
+        with (
+            patch.object(comms_mod, "_comm", mock_comm),
+            patch.object(comms_mod, "_pdv_tree", tree_with_comm),
+        ):
+            handle_tree_list(msg)
+        nodes = mock_comm._sent[0]["payload"]["nodes"]
+        by_key = {n["key"]: n for n in nodes}
+        assert by_key["0"]["type"] == "mapping"
+        assert by_key["0"]["has_children"] is True
+        assert by_key["1"]["type"] == "sequence"
+        assert by_key["1"]["has_children"] is True
+
+    def test_dataset_value_marks_has_children(self, tree_with_comm):
+        """Non-empty xarray.Dataset values report has_children so the
+        renderer shows a disclosure chevron."""
+        xr = pytest.importorskip("xarray")
+        import numpy as np
+        tree_with_comm["ds"] = xr.Dataset(
+            {"a": (("x",), np.array([1, 2, 3]))},
+            coords={"x": [0, 1, 2]},
+        )
+        tree_with_comm["empty_ds"] = xr.Dataset(coords={"x": [0, 1]})
+        mock_comm = _make_mock_comm()
+        msg = _make_msg("pdv.tree.list", {"path": ""})
+        with (
+            patch.object(comms_mod, "_comm", mock_comm),
+            patch.object(comms_mod, "_pdv_tree", tree_with_comm),
+        ):
+            handle_tree_list(msg)
+        nodes = {n["key"]: n for n in mock_comm._sent[0]["payload"]["nodes"]}
+        assert nodes["ds"]["type"] == "dataset"
+        assert nodes["ds"]["has_children"] is True
+        assert nodes["ds"]["preview"] == "1 vars"
+        assert nodes["empty_ds"]["has_children"] is False
+
+    def test_dataset_lists_data_vars_only(self, tree_with_comm):
+        """pdv.tree.list at a Dataset path returns one child per data
+        variable in insertion order; coords are intentionally excluded."""
+        xr = pytest.importorskip("xarray")
+        import numpy as np
+        tree_with_comm["ds"] = xr.Dataset(
+            {
+                "a": (("x",), np.array([1, 2, 3])),
+                "b": (("x", "y"), np.zeros((3, 4))),
+            },
+            coords={"x": [0, 1, 2]},
+        )
+        mock_comm = _make_mock_comm()
+        msg = _make_msg("pdv.tree.list", {"path": "ds"})
+        with (
+            patch.object(comms_mod, "_comm", mock_comm),
+            patch.object(comms_mod, "_pdv_tree", tree_with_comm),
+        ):
+            handle_tree_list(msg)
+        response = mock_comm._sent[0]
+        assert response["status"] == "ok"
+        nodes = response["payload"]["nodes"]
+        assert [n["key"] for n in nodes] == ["a", "b"]
+        assert all(n["type"] == "dataarray" for n in nodes)
+        assert all(n["parent_is_opaque"] is True for n in nodes)
+        assert all(n["has_children"] is False for n in nodes)
+        assert nodes[0]["preview"] == "x: 3"
+        assert nodes[1]["preview"] == "x: 3, y: 4"
+
+    def test_dataarray_path_is_not_a_folder(self, tree_with_comm):
+        """A DataArray inside a Dataset is a leaf — pdv.tree.list at its
+        path errors with tree.not_a_folder."""
+        xr = pytest.importorskip("xarray")
+        import numpy as np
+        tree_with_comm["ds"] = xr.Dataset(
+            {"a": (("x",), np.array([1, 2, 3]))}
+        )
+        mock_comm = _make_mock_comm()
+        msg = _make_msg("pdv.tree.list", {"path": "ds.a"})
+        with (
+            patch.object(comms_mod, "_comm", mock_comm),
+            patch.object(comms_mod, "_pdv_tree", tree_with_comm),
+        ):
+            handle_tree_list(msg)
+        response = mock_comm._sent[0]
+        assert response["status"] == "error"
+        assert "not_a_folder" in response["payload"]["code"]
+
+    def test_dataarray_inside_list(self, tree_with_comm):
+        """A DataArray held inside a regular list is detected and
+        previewed with dim sizes — confirms detect_kind picks it up
+        without extra wiring in the sequence path."""
+        xr = pytest.importorskip("xarray")
+        import numpy as np
+        tree_with_comm["arrs"] = [
+            xr.DataArray(np.zeros(5), dims=("t",)),
+            xr.DataArray(np.zeros((2, 3)), dims=("a", "b")),
+        ]
+        mock_comm = _make_mock_comm()
+        msg = _make_msg("pdv.tree.list", {"path": "arrs"})
+        with (
+            patch.object(comms_mod, "_comm", mock_comm),
+            patch.object(comms_mod, "_pdv_tree", tree_with_comm),
+        ):
+            handle_tree_list(msg)
+        nodes = mock_comm._sent[0]["payload"]["nodes"]
+        assert [n["type"] for n in nodes] == ["dataarray", "dataarray"]
+        assert nodes[0]["preview"] == "t: 5"
+        assert nodes[1]["preview"] == "a: 2, b: 3"
+
     def test_nodes_include_python_type_and_has_handler(self, tree_with_comm):
         """Node descriptors include python_type and has_handler fields."""
         tree_with_comm["val"] = 42
@@ -180,6 +344,35 @@ class TestHandleTreeGet:
         response = mock_comm._sent[0]
         assert response["status"] == "ok"
         assert response["payload"]["path"] == "ch1"
+
+    def test_get_indexed_list_element(self, tree_with_comm):
+        """pdv.tree.get resolves a numeric path segment as a list index."""
+        tree_with_comm["xs"] = ["alpha", "beta", "gamma"]
+        mock_comm = _make_mock_comm()
+        msg = _make_msg("pdv.tree.get", {"path": "xs.1", "mode": "value"})
+        with (
+            patch.object(comms_mod, "_comm", mock_comm),
+            patch.object(comms_mod, "_pdv_tree", tree_with_comm),
+        ):
+            handle_tree_get(msg)
+        response = mock_comm._sent[0]
+        assert response["status"] == "ok"
+        assert response["payload"]["path"] == "xs.1"
+        assert "beta" in response["payload"]["value"]
+
+    def test_get_indexed_path_into_dict_inside_list(self, tree_with_comm):
+        """Dot-paths descend through list indices into nested dicts."""
+        tree_with_comm["records"] = [{"name": "a"}, {"name": "b"}]
+        mock_comm = _make_mock_comm()
+        msg = _make_msg("pdv.tree.get", {"path": "records.1.name", "mode": "value"})
+        with (
+            patch.object(comms_mod, "_comm", mock_comm),
+            patch.object(comms_mod, "_pdv_tree", tree_with_comm),
+        ):
+            handle_tree_get(msg)
+        response = mock_comm._sent[0]
+        assert response["status"] == "ok"
+        assert "b" in response["payload"]["value"]
 
     def test_get_missing_path_sends_error(self, tree_with_comm):
         """pdv.tree.get for a non-existent path sends status=error."""

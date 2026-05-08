@@ -158,6 +158,10 @@ export const IPC = {
     get: "config:get",
     set: "config:set",
   },
+  /** BrowserWindow chrome channels. */
+  window: {
+    setBackgroundColor: "window:setBackgroundColor",
+  },
   /** Autosave management channels. */
   autosave: {
     run: "autosave:run",
@@ -170,6 +174,9 @@ export const IPC = {
   /** App info channels. */
   about: {
     getVersion: "about:getVersion",
+    openRepoPage: "about:openRepoPage",
+    openIssuesPage: "about:openIssuesPage",
+    openDocsPage: "about:openDocsPage",
   },
   /** App auto-update channels. */
   updater: {
@@ -203,6 +210,12 @@ export const IPC = {
      */
     kernelCrashed: "pdv.kernel.crashed",
     kernelReconnected: "pdv.kernel.reconnected",
+    /**
+     * Periodic kernel-process memory snapshot. Emitted by the main process
+     * (no corresponding wire message) at ~1 Hz while the kernel is running.
+     * Sourced from an OS-level RSS read against the kernel subprocess PID.
+     */
+    kernelMemory: "pdv.kernel.memory",
     menuAction: "menu:action",
     chromeStateChanged: "chrome:stateChanged",
     executeOutput: "pdv.execute.output",
@@ -235,6 +248,7 @@ export const IPC = {
   /** App-level lifecycle channels (close confirmation, etc.). */
   app: {
     confirmClose: "app:confirmClose",
+    setDocumentEdited: "app:setDocumentEdited",
   },
   /** App menu synchronization channels. */
   menu: {
@@ -1297,6 +1311,18 @@ export type TreeChangedPayload = PDVTreeChangedPayload;
 export type ProjectLoadedPayload = PDVProjectLoadedPayload;
 
 /**
+ * Payload delivered on `IPC.push.kernelMemory`.
+ */
+export interface KernelMemoryPayload {
+  /** Kernel ID the snapshot belongs to. */
+  kernelId: string;
+  /** Resident-set-size of the kernel subprocess, in bytes. */
+  rssBytes: number;
+  /** Wall-clock timestamp (ms since epoch) when the snapshot was taken. */
+  timestamp: number;
+}
+
+/**
  * Result returned from `project.save()`.
  */
 export interface ProjectSaveResult {
@@ -1476,6 +1502,14 @@ export interface PDVApi {
      * @returns Unsubscribe function.
      */
     onReconnected(callback: (payload: { kernelId: string }) => void): () => void;
+    /**
+     * Subscribe to periodic kernel-memory snapshots. Fires at ~1 Hz while the
+     * kernel subprocess is running.
+     *
+     * @param callback - Invoked with each memory snapshot.
+     * @returns Unsubscribe function.
+     */
+    onMemory(callback: (payload: KernelMemoryPayload) => void): () => void;
   };
 
   /** Tree browsing and updates. */
@@ -1979,6 +2013,18 @@ export interface PDVApi {
     set(updates: Partial<PDVConfig>): Promise<PDVConfig>;
   };
 
+  /** BrowserWindow chrome controls. */
+  window: {
+    /**
+     * Update the native BrowserWindow background color so live-resize gestures
+     * don't expose the OS-default white behind the dark theme. Call this
+     * whenever the active theme's `bg-primary` changes.
+     *
+     * @param color - CSS hex string (`#rrggbb`).
+     */
+    setBackgroundColor(color: string): Promise<void>;
+  };
+
   /** Autosave management. */
   autosave: {
     /**
@@ -2057,6 +2103,12 @@ export interface PDVApi {
      * @returns Version string, e.g. "0.0.2".
      */
     getVersion(): Promise<string>;
+    /** Open the project's GitHub repository in the user's browser. */
+    openRepoPage(): Promise<void>;
+    /** Open the project's GitHub issues page in the user's browser. */
+    openIssuesPage(): Promise<void>;
+    /** Open the docs site for the running app version in the user's browser. */
+    openDocsPage(): Promise<void>;
   };
 
   /** App auto-update operations. */
@@ -2275,6 +2327,15 @@ export interface PDVApi {
      * @returns Unsubscribe function.
      */
     onRequestClose(callback: () => void): () => void;
+    /**
+     * Mark the main window's document as edited or clean. On macOS this
+     * toggles the dot inside the red close traffic-light to signal unsaved
+     * changes. No-op on other platforms.
+     *
+     * @param edited - True if the project has unsaved changes.
+     * @returns Resolves once the flag has been applied.
+     */
+    setDocumentEdited(edited: boolean): Promise<void>;
   };
 
   /** Window chrome integration and title-bar controls. */

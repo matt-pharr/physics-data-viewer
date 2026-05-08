@@ -110,6 +110,22 @@ class TestCheckVersion:
         with pytest.raises(PDVVersionError):
             comms_mod.check_version({"pdv_version": f"{wrong_major}.0"})
 
+    def test_prerelease_suffix_compares_by_core(self, capsys):
+        """Prerelease suffixes (`-rc1` vs `rc1`) compare equal by M.m.p core."""
+        # Pin both sides so the test doesn't depend on the live build version.
+        with patch.object(comms_mod, "PDV_PROTOCOL_VERSION", "0.1.0-rc1"):
+            comms_mod.check_version({"pdv_version": "0.1.0rc1"})
+        # No mismatch warning should have been emitted.
+        captured = capsys.readouterr()
+        assert "version mismatch" not in captured.err
+
+    def test_core_mismatch_warns(self, capsys):
+        """A patch-level difference still emits the warning (via core compare)."""
+        with patch.object(comms_mod, "PDV_PROTOCOL_VERSION", "0.1.0-rc1"):
+            comms_mod.check_version({"pdv_version": "0.1.1rc1"})
+        captured = capsys.readouterr()
+        assert "version mismatch" in captured.err
+
 
 class TestDispatch:
     def test_known_message_type_dispatched(self):

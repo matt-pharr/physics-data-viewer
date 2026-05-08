@@ -3,7 +3,7 @@ pdv-python/tests/test_serialization.py — Unit tests for pdv.serialization.
 
 Tests cover:
 1. detect_kind() for all supported types.
-2. serialize_node() for each format: npy, parquet, json, txt, pickle.
+2. serialize_node() for each format: npy, json, txt, pickle.
 3. deserialize_node() round-trips for each format.
 4. node_preview() for representative values.
 5. metadata sub-dict present and correct for all node kinds.
@@ -56,6 +56,9 @@ class TestDetectKind:
         # bool is a subclass of int; must still map to scalar
         assert detect_kind(True) == KIND_SCALAR
 
+    def test_complex_is_scalar(self):
+        assert detect_kind(1 + 2j) == KIND_SCALAR
+
     def test_str_is_text(self):
         assert detect_kind("hello") == KIND_TEXT
 
@@ -67,6 +70,12 @@ class TestDetectKind:
 
     def test_tuple_is_sequence(self):
         assert detect_kind((1, 2)) == KIND_SEQUENCE
+
+    def test_set_is_sequence(self):
+        assert detect_kind({1, 2, 3}) == KIND_SEQUENCE
+
+    def test_frozenset_is_sequence(self):
+        assert detect_kind(frozenset({1, 2, 3})) == KIND_SEQUENCE
 
     def test_bytes_is_binary(self):
         from pdv.serialization import KIND_BINARY
@@ -135,6 +144,67 @@ class TestSerializeAndDeserialize:
         value = deserialize_node(descriptor["storage"], tmp_working_dir)
         assert value == data
 
+    def test_tuple_pickle_roundtrip(self, tmp_working_dir):
+        """Tuples pickle (not inline) so they round-trip as tuples, not lists."""
+        data = ("a", "b", "c")
+        descriptor = serialize_node("t", data, tmp_working_dir)
+        assert descriptor["type"] == KIND_SEQUENCE
+        assert descriptor["storage"]["format"] == "pickle"
+        value = deserialize_node(
+            descriptor["storage"], tmp_working_dir, trusted=True
+        )
+        assert isinstance(value, tuple)
+        assert value == data
+
+    def test_nested_tuple_pickle_roundtrip(self, tmp_working_dir):
+        """Nested tuples preserve their type at every level via pickle."""
+        data = (("a", 1), ("b", 2))
+        descriptor = serialize_node("t", data, tmp_working_dir)
+        value = deserialize_node(
+            descriptor["storage"], tmp_working_dir, trusted=True
+        )
+        assert isinstance(value, tuple)
+        assert isinstance(value[0], tuple)
+        assert value == data
+
+    def test_list_stays_inline(self, tmp_working_dir):
+        """Lists of JSON-native values still go inline, not pickle."""
+        descriptor = serialize_node("l", [1, 2, 3], tmp_working_dir)
+        assert descriptor["storage"]["backend"] == "inline"
+        value = deserialize_node(descriptor["storage"], tmp_working_dir)
+        assert isinstance(value, list)
+        assert value == [1, 2, 3]
+
+    def test_complex_scalar_pickle_roundtrip(self, tmp_working_dir):
+        """complex scalars aren't JSON-native, so they pickle."""
+        descriptor = serialize_node("c", 1 + 2j, tmp_working_dir)
+        assert descriptor["type"] == KIND_SCALAR
+        assert descriptor["storage"]["format"] == "pickle"
+        value = deserialize_node(
+            descriptor["storage"], tmp_working_dir, trusted=True
+        )
+        assert value == 1 + 2j
+
+    def test_set_sequence_pickle_roundtrip(self, tmp_working_dir):
+        """sets aren't JSON-native, so they pickle and round-trip as sets."""
+        descriptor = serialize_node("s", {1, 2, 3, 4}, tmp_working_dir)
+        assert descriptor["type"] == KIND_SEQUENCE
+        assert descriptor["storage"]["format"] == "pickle"
+        value = deserialize_node(
+            descriptor["storage"], tmp_working_dir, trusted=True
+        )
+        assert value == {1, 2, 3, 4}
+        assert isinstance(value, set)
+
+    def test_frozenset_sequence_pickle_roundtrip(self, tmp_working_dir):
+        descriptor = serialize_node("s", frozenset({1, 2, 3}), tmp_working_dir)
+        assert descriptor["storage"]["format"] == "pickle"
+        value = deserialize_node(
+            descriptor["storage"], tmp_working_dir, trusted=True
+        )
+        assert isinstance(value, frozenset)
+        assert value == frozenset({1, 2, 3})
+
     def test_numpy_npy_roundtrip(self, tmp_working_dir):
         """numpy array → npy file → back to array (pytest.importorskip)."""
         numpy = pytest.importorskip("numpy")
@@ -145,16 +215,44 @@ class TestSerializeAndDeserialize:
         value = deserialize_node(descriptor["storage"], tmp_working_dir)
         assert numpy.array_equal(value, arr)
 
-    def test_pandas_dataframe_parquet_roundtrip(self, tmp_working_dir):
-        """DataFrame → parquet → back to DataFrame (pytest.importorskip)."""
+    def test_pandas_dataframe_pickle_roundtrip(self, tmp_working_dir):
+        """DataFrame → pickle → back to DataFrame (pytest.importorskip)."""
         pandas = pytest.importorskip("pandas")
-        pytest.importorskip("pyarrow")
         df = pandas.DataFrame({"a": [1, 2, 3], "b": [4.0, 5.0, 6.0]})
         descriptor = serialize_node("data.df", df, tmp_working_dir)
         assert descriptor["type"] == KIND_DATAFRAME
-        assert descriptor["storage"]["format"] == "parquet"
-        value = deserialize_node(descriptor["storage"], tmp_working_dir)
+        assert descriptor["storage"]["format"] == "pickle"
+        value = deserialize_node(
+            descriptor["storage"], tmp_working_dir, trusted=True
+        )
         assert list(value["a"]) == [1, 2, 3]
+
+    def test_pandas_series_pickle_roundtrip(self, tmp_working_dir):
+        """Series → pickle → back to Series, with name and index preserved."""
+        pandas = pytest.importorskip("pandas")
+        s = pandas.Series([1.0, 2.0, 3.0, 4.0], index=["a", "b", "c", "d"], name="v")
+        descriptor = serialize_node("data.s", s, tmp_working_dir)
+        assert descriptor["type"] == KIND_SERIES
+        assert descriptor["storage"]["format"] == "pickle"
+        value = deserialize_node(
+            descriptor["storage"], tmp_working_dir, trusted=True
+        )
+        assert isinstance(value, pandas.Series)
+        assert value.name == "v"
+        assert list(value.index) == ["a", "b", "c", "d"]
+        assert list(value) == [1.0, 2.0, 3.0, 4.0]
+
+    def test_pandas_series_unnamed_pickle_roundtrip(self, tmp_working_dir):
+        """Unnamed Series round-trips with name=None."""
+        pandas = pytest.importorskip("pandas")
+        s = pandas.Series([10, 20, 30])
+        descriptor = serialize_node("data.s", s, tmp_working_dir)
+        value = deserialize_node(
+            descriptor["storage"], tmp_working_dir, trusted=True
+        )
+        assert isinstance(value, pandas.Series)
+        assert value.name is None
+        assert list(value) == [10, 20, 30]
 
     def test_unknown_raises_without_trusted(self, tmp_working_dir):
         """serialize_node() raises PDVSerializationError for unknown type without trusted=True."""
@@ -418,7 +516,6 @@ class TestMetadataSubDict:
 
     def test_dataframe_metadata(self, tmp_working_dir):
         pandas = pytest.importorskip("pandas")
-        pytest.importorskip("pyarrow")
         df = pandas.DataFrame({"a": [1, 2], "b": [3, 4]})
         desc = serialize_node("data.df", df, tmp_working_dir)
         meta = desc["metadata"]

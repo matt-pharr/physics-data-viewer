@@ -38,6 +38,21 @@ function makeManager(): KernelManager {
   return new KernelManager();
 }
 
+/**
+ * Spawn a kernel using `PYTHON_PATH` from the environment when set. Without
+ * this, `KernelManager.start()` falls back to bare `python3` resolved via
+ * PATH, which on macOS often resolves to `/Applications/Xcode.app/...` and
+ * fails with `No module named ipykernel_launcher`. To run these @slow tests
+ * against a conda env where `python3` isn't aliased, set
+ * `PYTHON_PATH=$(conda run -n <env> which python)`.
+ */
+function startKernel(km: KernelManager): Promise<KernelInfo> {
+  const pythonPath = process.env.PYTHON_PATH;
+  return pythonPath
+    ? km.start({ language: "python", env: { PYTHON_PATH: pythonPath } })
+    : km.start();
+}
+
 // ---------------------------------------------------------------------------
 // @slow KernelManager tests — real ipykernel processes
 // ---------------------------------------------------------------------------
@@ -62,7 +77,7 @@ describe("@slow KernelManager (real kernel process)", { timeout: 90_000 }, () =>
 
   describe("start()", () => {
     it("returns KernelInfo with a valid id and status: 'idle'", async () => {
-      const info: KernelInfo = await km.start();
+      const info: KernelInfo = await startKernel(km);
 
       expect(typeof info.id).toBe("string");
       expect(info.id.length).toBeGreaterThan(0);
@@ -73,7 +88,7 @@ describe("@slow KernelManager (real kernel process)", { timeout: 90_000 }, () =>
     });
 
     it("appears in list() after start()", async () => {
-      const info = await km.start();
+      const info = await startKernel(km);
 
 
       const kernels = km.list();
@@ -81,7 +96,7 @@ describe("@slow KernelManager (real kernel process)", { timeout: 90_000 }, () =>
     });
 
     it("getKernel() returns the KernelInfo for a started kernel", async () => {
-      const info = await km.start();
+      const info = await startKernel(km);
 
 
       const found = km.getKernel(info.id);
@@ -96,7 +111,7 @@ describe("@slow KernelManager (real kernel process)", { timeout: 90_000 }, () =>
 
   describe("execute()", () => {
     it("returns result: 2 for code '1 + 1'", async () => {
-      const info = await km.start();
+      const info = await startKernel(km);
 
 
       const result = await km.execute(info.id, { code: "1 + 1" });
@@ -106,7 +121,7 @@ describe("@slow KernelManager (real kernel process)", { timeout: 90_000 }, () =>
     });
 
     it("returns stdout: 'hello\\n' for print(\"hello\")", async () => {
-      const info = await km.start();
+      const info = await startKernel(km);
 
 
       const result = await km.execute(info.id, { code: 'print("hello")' });
@@ -116,7 +131,7 @@ describe("@slow KernelManager (real kernel process)", { timeout: 90_000 }, () =>
     });
 
     it("returns error containing 'ValueError' for raise ValueError", async () => {
-      const info = await km.start();
+      const info = await startKernel(km);
 
 
       const result = await km.execute(info.id, {
@@ -128,7 +143,7 @@ describe("@slow KernelManager (real kernel process)", { timeout: 90_000 }, () =>
     });
 
     it("preserves traceback details and parsed location metadata", async () => {
-      const info = await km.start();
+      const info = await startKernel(km);
 
 
       const result = await km.execute(info.id, {
@@ -144,7 +159,7 @@ describe("@slow KernelManager (real kernel process)", { timeout: 90_000 }, () =>
     });
 
     it("extracts syntax-error column metadata when caret info is present", async () => {
-      const info = await km.start();
+      const info = await startKernel(km);
 
 
       const result = await km.execute(info.id, {
@@ -158,7 +173,7 @@ describe("@slow KernelManager (real kernel process)", { timeout: 90_000 }, () =>
     });
 
     it("accounts for leading blank lines in code-cell location", async () => {
-      const info = await km.start();
+      const info = await startKernel(km);
 
 
       const result = await km.execute(info.id, {
@@ -171,7 +186,7 @@ describe("@slow KernelManager (real kernel process)", { timeout: 90_000 }, () =>
     });
 
     it("records duration in the result", async () => {
-      const info = await km.start();
+      const info = await startKernel(km);
 
 
       const result = await km.execute(info.id, { code: "pass" });
@@ -187,7 +202,7 @@ describe("@slow KernelManager (real kernel process)", { timeout: 90_000 }, () =>
 
   describe("complete() / inspect()", () => {
     it("can send a shell request and receive kernel_info_reply", async () => {
-      const info = await km.start();
+      const info = await startKernel(km);
 
 
       const managed = (km as unknown as {
@@ -209,7 +224,7 @@ describe("@slow KernelManager (real kernel process)", { timeout: 90_000 }, () =>
     });
 
     it("returns completion matches for os.path.* symbols", async () => {
-      const info = await km.start();
+      const info = await startKernel(km);
 
       await km.execute(info.id, { code: "import os" });
 
@@ -221,7 +236,7 @@ describe("@slow KernelManager (real kernel process)", { timeout: 90_000 }, () =>
     });
 
     it("supports concurrent completion requests without socket errors", async () => {
-      const info = await km.start();
+      const info = await startKernel(km);
 
       await km.execute(info.id, { code: "import os" });
 
@@ -235,7 +250,7 @@ describe("@slow KernelManager (real kernel process)", { timeout: 90_000 }, () =>
     });
 
     it("returns an empty completion list for missing variables", async () => {
-      const info = await km.start();
+      const info = await startKernel(km);
 
 
       const result = await km.complete(info.id, "nonexistent_var.", 16);
@@ -244,7 +259,7 @@ describe("@slow KernelManager (real kernel process)", { timeout: 90_000 }, () =>
     });
 
     it("returns inspect docs for os.path.join", async () => {
-      const info = await km.start();
+      const info = await startKernel(km);
 
       await km.execute(info.id, { code: "import os" });
 
@@ -255,7 +270,7 @@ describe("@slow KernelManager (real kernel process)", { timeout: 90_000 }, () =>
     });
 
     it("returns found=false for inspect misses", async () => {
-      const info = await km.start();
+      const info = await startKernel(km);
 
 
       const result = await km.inspect(info.id, "nonexistent_symbol", 10);
@@ -270,7 +285,7 @@ describe("@slow KernelManager (real kernel process)", { timeout: 90_000 }, () =>
 
   describe("stop()", () => {
     it("causes the kernel process to exit within 3 seconds", async () => {
-      const info = await km.start();
+      const info = await startKernel(km);
       const kernel = km.getKernel(info.id);
       expect(kernel).toBeDefined();
 
@@ -297,7 +312,7 @@ describe("@slow KernelManager (real kernel process)", { timeout: 90_000 }, () =>
 
   describe("shutdownAll()", () => {
     it("stops all running kernels", async () => {
-      const [a, b] = await Promise.all([km.start(), km.start()]);
+      const [a, b] = await Promise.all([startKernel(km), startKernel(km)]);
 
       expect(km.list().length).toBe(2);
 
@@ -315,7 +330,7 @@ describe("@slow KernelManager (real kernel process)", { timeout: 90_000 }, () =>
 
   describe("crash detection", () => {
     it("emits 'kernel:crashed' when the process is killed externally", async () => {
-      const info = await km.start();
+      const info = await startKernel(km);
 
 
       // Grab the underlying ChildProcess via the private map by intercepting
@@ -345,7 +360,7 @@ describe("@slow KernelManager (real kernel process)", { timeout: 90_000 }, () =>
 
   describe("onIopubMessage()", () => {
     it("callback receives iopub messages during execution", async () => {
-      const info = await km.start();
+      const info = await startKernel(km);
 
 
       const messages: string[] = [];
@@ -362,7 +377,7 @@ describe("@slow KernelManager (real kernel process)", { timeout: 90_000 }, () =>
     });
 
     it("returned unsubscribe function stops delivery", async () => {
-      const info = await km.start();
+      const info = await startKernel(km);
 
 
       const received: string[] = [];

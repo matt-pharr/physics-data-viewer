@@ -68,7 +68,18 @@ def _split_dot_path(key: str) -> list[str]:
 
 
 def _resolve_nested(obj: dict, parts: list[str]) -> Any:
-    """Recursively resolve a list of path parts through nested dicts.
+    """Recursively resolve a list of path parts through nested containers.
+
+    Descends through nested dicts using string keys. When the current value
+    is a ``list`` or ``tuple``, the next path part is interpreted as an
+    integer index (so ``tree['waveforms.0.t']`` resolves to the ``'t'``
+    field of the first waveform when ``waveforms`` is a list of dicts).
+    Negative indices are supported (``tree['xs.-1']`` returns the last
+    element) since ``int('-n')`` parses and Python's sequence indexing
+    accepts negatives natively. When the current value is an
+    ``xarray.Dataset``, the next part is looked up via
+    ``Dataset.__getitem__``, which resolves both data variables and
+    coordinate names.
 
     Parameters
     ----------
@@ -85,13 +96,34 @@ def _resolve_nested(obj: dict, parts: list[str]) -> Any:
     Raises
     ------
     KeyError
-        If any part is not found at its level.
+        If any part is not found at its level, or if a numeric index is
+        out of range / non-integer where a list or tuple is expected.
     """
-    current = obj
+    from pdv.serialization import is_xarray_dataset  # noqa: PLC0415
+
+    current: Any = obj
     for part in parts:
-        if not isinstance(current, dict):
+        if isinstance(current, dict):
+            current = dict.__getitem__(current, part)
+        elif isinstance(current, (list, tuple)):
+            try:
+                index = int(part)
+            except ValueError:
+                raise KeyError(part) from None
+            try:
+                current = current[index]
+            except IndexError:
+                raise KeyError(part) from None
+        elif is_xarray_dataset(current):
+            # Dataset.__getitem__ resolves both data_vars and coords by
+            # name, so coord dot-paths work even though the tree panel
+            # only lists data_vars as children.
+            try:
+                current = current[part]
+            except KeyError:
+                raise KeyError(part) from None
+        else:
             raise KeyError(part)
-        current = dict.__getitem__(current, part)
     return current
 
 
@@ -394,11 +426,12 @@ class PDVScript(PDVFile):
         Returns
         -------
         str
-            The first line of the docstring, or a generic fallback.
+            The first line of the docstring, or empty string when the
+            script has no docstring (the chip already says ``script``).
         """
         if self._doc:
             return self._doc.split("\n")[0]
-        return "PDV script"
+        return ""
 
     # Regex matching PEP 508 "extra ==" markers (used to declare optional deps).
     _EXTRA_MARKER_RE = re.compile(r"extra\s*==")
@@ -591,12 +624,11 @@ class PDVGui(PDVFile):
     def preview(self) -> str:
         """Return a short preview string for the tree panel.
 
-        Returns
-        -------
-        str
-            Always ``'GUI'``.
+        Returns empty string — the chip already says ``gui`` and the
+        key column already shows the user-chosen name. There's no
+        additional info worth surfacing here.
         """
-        return "GUI"
+        return ""
 
     def __repr__(self) -> str:
         mid = f", module_id='{self._module_id}'" if self._module_id else ""
@@ -661,11 +693,10 @@ class PDVNamelist(PDVFile):
     def preview(self) -> str:
         """Return a short preview string for the tree panel.
 
-        Returns
-        -------
-        str
+        Returns the namelist format only; the chip already says
+        ``namelist``, so prefixing it again would be redundant.
         """
-        return f"Namelist ({self._format})"
+        return self._format
 
     def __repr__(self) -> str:
         mid = f", module_id='{self._module_id}'" if self._module_id else ""
@@ -718,11 +749,10 @@ class PDVLib(PDVFile):
     def preview(self) -> str:
         """Return a short preview string for the tree panel.
 
-        Returns
-        -------
-        str
+        Returns the filename only; the chip already says ``lib``,
+        so prefixing it again would be redundant.
         """
-        return f"Library ({self._filename})"
+        return self._filename
 
     def __repr__(self) -> str:
         mid = f", module_id='{self._module_id}'" if self._module_id else ""
@@ -769,8 +799,8 @@ class PDVNote(PDVFile):
     def preview(self) -> str:
         """Return a short preview string for the tree panel.
 
-        Tries the cached title first, then reads the first non-empty
-        line of the ``.md`` file. Falls back to ``'Markdown note'``.
+        Returns the cached title (or empty string when there is no
+        title — the chip already says ``note``).
 
         Returns
         -------
@@ -779,7 +809,7 @@ class PDVNote(PDVFile):
         """
         if self._title:
             return self._title[:100]
-        return "Markdown note"
+        return ""
 
 
 # ---------------------------------------------------------------------------
@@ -813,6 +843,17 @@ class PDVTree(dict):
 
     _DEBOUNCE_INTERVAL = 0.1  # seconds
 
+    # Class-level state for the "global ping" fallback. Any PDVTree instance
+    # (even a detached scratch one a user constructs and mutates without
+    # assigning to the root) emits a coarse ``change_type: "unknown"``
+    # notification through this channel so the renderer knows to refetch.
+    # Only the root tree uses precise per-instance path emission.
+    _root_tree: "PDVTree | None" = None
+    _global_send_fn: Callable[[str, dict], None] | None = None
+    _global_pending: bool = False
+    _global_timer: threading.Timer | None = None
+    _global_lock: threading.Lock = threading.Lock()
+
     def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
         self._working_dir: str | None = None
@@ -837,6 +878,12 @@ class PDVTree(dict):
     def _attach_comm(self, send_fn: Callable[[str, dict], None]) -> None:
         """Attach a comm send function for push notifications.
 
+        Wires the caller as the *root tree* — its mutations emit precise
+        per-path notifications. Also installs ``send_fn`` as the class-level
+        fallback so any other ``PDVTree`` instance (e.g. user-constructed
+        scratch trees, intermediate sub-trees) can fire a coarse
+        ``change_type: "unknown"`` ping on mutation.
+
         Parameters
         ----------
         send_fn : callable
@@ -844,36 +891,103 @@ class PDVTree(dict):
             Called when the tree changes.
         """
         self._send_fn = send_fn
+        PDVTree._root_tree = self
+        PDVTree._global_send_fn = send_fn
 
     def _detach_comm(self) -> None:
-        """Detach the comm send function (e.g. on kernel restart)."""
+        """Detach the comm send function (e.g. on kernel restart).
+
+        Clears class-level state if this instance was the root tree.
+        """
         self._send_fn = None
+        if PDVTree._root_tree is self:
+            PDVTree._root_tree = None
+            PDVTree._global_send_fn = None
+            with PDVTree._global_lock:
+                if PDVTree._global_timer is not None:
+                    PDVTree._global_timer.cancel()
+                    PDVTree._global_timer = None
+                PDVTree._global_pending = False
 
     def _emit_changed(self, path: str, change_type: str) -> None:
         """Queue a change notification and schedule a debounced flush.
 
-        Notifications are accumulated and sent as a single batch after
-        ``_DEBOUNCE_INTERVAL`` seconds of inactivity.  This prevents
+        Dispatch:
+
+        - If this instance is the root tree, accumulate ``(path, change_type)``
+          into the per-instance queue. Paths are absolute (they come from
+          user-facing dot-paths into the root) and a precise
+          ``change_type: "batch"`` notification is sent on flush.
+        - Otherwise this is a non-root ``PDVTree`` (intermediate sub-tree, or
+          a scratch tree the user constructed and is mutating before
+          assigning into the root). Local paths can't be reconciled to the
+          renderer's absolute view, so fire a coarse class-level
+          ``change_type: "unknown"`` ping that triggers a full refetch.
+
+        Both paths are debounced over ``_DEBOUNCE_INTERVAL`` to avoid
         flooding the comm channel during tight mutation loops.
 
         Parameters
         ----------
         path : str
-            The dot-separated path that changed.
+            The dot-separated path that changed (absolute for root tree,
+            local for non-root — only used by the root branch).
         change_type : str
             One of ``'added'``, ``'removed'``, or ``'updated'``.
         """
-        if self._send_fn is None:
+        if self is PDVTree._root_tree:
+            if self._send_fn is None:
+                return
+            with self._debounce_lock:
+                self._pending_changes.append((path, change_type))
+                if self._debounce_timer is not None:
+                    self._debounce_timer.cancel()
+                self._debounce_timer = threading.Timer(
+                    self._DEBOUNCE_INTERVAL, self._flush_changes
+                )
+                self._debounce_timer.daemon = True
+                self._debounce_timer.start()
+        else:
+            PDVTree._emit_global_ping()
+
+    @classmethod
+    def _emit_global_ping(cls) -> None:
+        """Schedule a debounced ``change_type: "unknown"`` notification.
+
+        Called by mutations on non-root ``PDVTree`` instances. The renderer
+        treats the unknown change_type as "something changed somewhere,
+        refetch the visible tree."
+        """
+        if cls._global_send_fn is None:
             return
-        with self._debounce_lock:
-            self._pending_changes.append((path, change_type))
-            if self._debounce_timer is not None:
-                self._debounce_timer.cancel()
-            self._debounce_timer = threading.Timer(
-                self._DEBOUNCE_INTERVAL, self._flush_changes
+        with cls._global_lock:
+            cls._global_pending = True
+            if cls._global_timer is not None:
+                cls._global_timer.cancel()
+            cls._global_timer = threading.Timer(
+                cls._DEBOUNCE_INTERVAL, cls._flush_global
             )
-            self._debounce_timer.daemon = True
-            self._debounce_timer.start()
+            cls._global_timer.daemon = True
+            cls._global_timer.start()
+
+    @classmethod
+    def _flush_global(cls) -> None:
+        """Send the pending ``change_type: "unknown"`` notification.
+
+        Called by the class-level debounce timer.
+        """
+        with cls._global_lock:
+            if not cls._global_pending:
+                return
+            cls._global_pending = False
+            cls._global_timer = None
+            send_fn = cls._global_send_fn
+        if send_fn is None:
+            return
+        send_fn(
+            "pdv.tree.changed",
+            {"changed_paths": [], "change_type": "unknown"},
+        )
 
     def _flush_changes(self) -> None:
         """Send all pending change notifications as a single batch.

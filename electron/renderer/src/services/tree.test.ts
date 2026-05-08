@@ -1,12 +1,15 @@
+// @vitest-environment jsdom
+
 /**
  * tree.test.ts — unit tests for renderer tree service caching behavior.
  *
- * Uses a mocked preload API (`window.pdv.tree`) to validate cache semantics
- * without requiring an Electron runtime.
+ * Uses the typed `installPdvMock` factory from `test-fixtures/pdv-mock` so the
+ * mocked surface stays in sync with the real `PDVApi` contract.
  */
 
-import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { NodeDescriptor } from '../types/pdv';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import type { NodeDescriptor, PDVApi } from '../types/pdv';
+import { installPdvMock, type PdvMock } from '../test-fixtures/pdv-mock';
 import { treeService } from './tree';
 
 const rootNodes: NodeDescriptor[] = [
@@ -25,43 +28,32 @@ const childNodes: NodeDescriptor[] = [
   },
 ];
 
-const originalWindow = globalThis.window;
-
 describe('treeService', () => {
-  beforeAll(() => {
-    Object.defineProperty(globalThis, 'window', {
-      value: {} as Window,
-      writable: true,
-    });
-  });
+  let pdv: PdvMock;
 
   beforeEach(() => {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- mock window.pdv for tests
-    (globalThis.window as any).pdv = {
+    pdv = installPdvMock({
       tree: {
-        list: vi.fn(async (_kernelId?: string, path?: string) => {
-          if (!path || path === '') {
-            return rootNodes;
-          }
-          if (path === 'data') {
-            return childNodes;
-          }
+        list: vi.fn<PDVApi['tree']['list']>(async (_kernelId, path) => {
+          if (!path || path === '') return rootNodes;
+          if (path === 'data') return childNodes;
           return [];
         }),
-        createScript: vi.fn(async () => ({ success: true })),
       },
-    };
+    });
 
     treeService.clearCache();
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
   });
 
   it('loads and caches root nodes', async () => {
     const first = await treeService.getRootNodes('k1');
     const second = await treeService.getRootNodes('k1');
 
-    const listMock = (window.pdv.tree.list as unknown as ReturnType<typeof vi.fn>);
-
-    expect(listMock).toHaveBeenCalledTimes(1);
+    expect(pdv.tree.list).toHaveBeenCalledTimes(1);
     expect(first).toBe(second);
     expect(first).toHaveLength(rootNodes.length);
     expect(first[0].isExpanded).toBe(false);
@@ -79,8 +71,7 @@ describe('treeService', () => {
     const result = await treeService.getChildren(node, 'k1');
 
     expect(result).toEqual([]);
-    const listMock = (window.pdv.tree.list as unknown as ReturnType<typeof vi.fn>);
-    expect(listMock).not.toHaveBeenCalledWith(node.path);
+    expect(pdv.tree.list).not.toHaveBeenCalledWith(node.path);
   });
 
   it('loads and caches children by path', async () => {
@@ -89,9 +80,7 @@ describe('treeService', () => {
     const first = await treeService.getChildren(parent, 'k1');
     const second = await treeService.getChildren(parent, 'k1');
 
-    const listMock = (window.pdv.tree.list as unknown as ReturnType<typeof vi.fn>);
-
-    expect(listMock).toHaveBeenCalledTimes(1);
+    expect(pdv.tree.list).toHaveBeenCalledTimes(1);
     expect(first).toBe(second);
     expect(first[0].path).toBe('data.array1');
   });
@@ -101,14 +90,6 @@ describe('treeService', () => {
     await treeService.getChildren(parent, 'k1');
     await treeService.getChildren(parent, 'k2');
 
-    const listMock = (window.pdv.tree.list as unknown as ReturnType<typeof vi.fn>);
-    expect(listMock).toHaveBeenCalledTimes(2);
-  });
-
-  afterAll(() => {
-    Object.defineProperty(globalThis, 'window', {
-      value: originalWindow,
-      writable: true,
-    });
+    expect(pdv.tree.list).toHaveBeenCalledTimes(2);
   });
 });

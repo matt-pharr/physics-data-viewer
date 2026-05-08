@@ -10,7 +10,7 @@
  * - Push forwarding between comm router and renderer.
  */
 
-import { app, dialog, ipcMain, shell, type BrowserWindow } from "electron";
+import { BrowserWindow as ElectronBrowserWindow, app, dialog, ipcMain, shell, type BrowserWindow } from "electron";
 import * as fs from "fs/promises";
 import * as fsSync from "fs";
 import * as path from "path";
@@ -20,7 +20,7 @@ import type { Theme, WindowChromeInfo, WindowChromePlatform } from "./ipc";
 import { IPC } from "./ipc";
 import { getTopLevelMenuModel, popupTopLevelMenu, updateMenuEnabled, updateRecentProjectsMenu } from "./menu";
 import { initAutoUpdater, checkForUpdates, downloadUpdate, installUpdate, openReleasesPage, getUpdateStatus } from "./auto-updater";
-import { isQuitting } from "./app";
+import { isQuitting, isQuitRequestPending, clearQuitRequestPending } from "./app";
 
 let savedThemes: Theme[] = [];
 
@@ -135,6 +135,23 @@ export function registerAppStateIpcHandlers(
 
   ipcMain.handle(IPC.about.getVersion, () => app.getVersion());
 
+  ipcMain.handle(IPC.about.openRepoPage, async () => {
+    await shell.openExternal("https://github.com/matt-pharr/physics-data-viewer");
+  });
+
+  ipcMain.handle(IPC.about.openIssuesPage, async () => {
+    await shell.openExternal("https://github.com/matt-pharr/physics-data-viewer/issues");
+  });
+
+  ipcMain.handle(IPC.about.openDocsPage, async () => {
+    // Version-pinned docs URL. `app.getVersion()` reads the running
+    // build's package.json version, so users always see the docs that
+    // match the binary they're running — even if they're on an older
+    // release that wouldn't reflect newer site changes.
+    const version = app.getVersion();
+    await shell.openExternal(`https://matt-pharr.github.io/physics-data-viewer/${version}/`);
+  });
+
   // Auto-updater
   initAutoUpdater(win, configStore);
   ipcMain.handle(IPC.updater.checkForUpdates, async () => { await checkForUpdates(configStore); });
@@ -155,6 +172,16 @@ export function registerAppStateIpcHandlers(
     const next = { ...merged, ...configStore.getAll() };
     onConfigChanged?.(prev, next);
     return next;
+  });
+
+  ipcMain.handle(IPC.window.setBackgroundColor, (event, color: string) => {
+    // Sync the BrowserWindow's native background to the active theme's
+    // bg-primary so live-resize gestures don't expose OS-default white.
+    // Look up the source window so multi-window setups (gui-editor,
+    // module-window, etc.) each update the right native chrome.
+    if (typeof color !== "string" || !/^#[0-9a-fA-F]{6}$/.test(color)) return;
+    const sourceWin = ElectronBrowserWindow.fromWebContents(event.sender);
+    sourceWin?.setBackgroundColor(color);
   });
 
   ipcMain.handle(IPC.themes.get, async () => savedThemes);
@@ -215,9 +242,19 @@ export function registerAppStateIpcHandlers(
     // unsaved changes. The renderer will call `IPC.app.confirmClose` once
     // the user resolves the prompt.
     if (!win.isDestroyed()) {
+      // Custom title-bar X is a close, not a quit — supersede any orphaned
+      // quit-pending state so confirmClose calls win.close() (and on darwin
+      // leaves the app in the dock) rather than app.quit().
+      clearQuitRequestPending();
       win.webContents.send(IPC.push.requestClose);
     }
     return true;
+  });
+
+  ipcMain.handle(IPC.app.setDocumentEdited, async (_event, edited: boolean) => {
+    if (!win.isDestroyed()) {
+      win.setDocumentEdited(Boolean(edited));
+    }
   });
 
   ipcMain.handle(IPC.app.confirmClose, async () => {
@@ -228,7 +265,12 @@ export function registerAppStateIpcHandlers(
     // then will-quit runs kernel cleanup. Calling both win.close() and
     // app.quit() in the same tick re-enters the quit machinery and breaks
     // electron-updater on macOS.
-    if (isQuitting()) {
+    //
+    // `quitRequestPending` covers the deferred Cmd+Q case where before-quit
+    // pushed the dialog and is awaiting our resolution; `isQuitting` covers
+    // paths that set the proceed-flag directly (autoUpdater.markQuitting).
+    if (isQuitRequestPending() || isQuitting()) {
+      clearQuitRequestPending();
       app.quit();
       return;
     }

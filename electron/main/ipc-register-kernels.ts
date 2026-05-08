@@ -109,6 +109,18 @@ export function registerKernelIpcHandlers(
     await setupProjectModuleNamespaces(commRouter, moduleManager, getActiveProjectDir());
   }
 
+  // Forward periodic kernel-memory snapshots to the renderer. Registered once
+  // for this window/manager pair (the payload carries `kernelId` so a single
+  // listener serves any number of kernels).
+  kernelManager.on("kernel:memoryRss", (kernelId: string, rssBytes: number) => {
+    if (win.isDestroyed()) return;
+    win.webContents.send(IPC.push.kernelMemory, {
+      kernelId,
+      rssBytes,
+      timestamp: Date.now(),
+    });
+  });
+
   // Serialize kernel start/restart so concurrent calls cannot race on
   // the shared commRouter (which causes "CommRouter detached" rejections).
   let startMutex: Promise<unknown> = Promise.resolve();

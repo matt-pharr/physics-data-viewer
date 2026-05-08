@@ -31,6 +31,9 @@ export type { ScriptParameter } from '../../../main/ipc';
 /** Tree node descriptor returned by `pdv.tree.list`. Canonical: `pdv-protocol.ts`. */
 export type { NodeDescriptor } from '../../../main/ipc';
 
+/** Periodic kernel-memory snapshot pushed on `IPC.push.kernelMemory`. */
+export type { KernelMemoryPayload } from '../../../main/ipc';
+
 /** Runtime kernel descriptor returned by `kernels.start/list/restart`. */
 export interface KernelInfo {
   /** Opaque kernel id used in subsequent API calls. */
@@ -255,8 +258,6 @@ export interface Config {
   pythonPath?: string;
   /** Julia executable configured by user. */
   juliaPath?: string;
-  /** External editor command map. See #206 for cleanup tracking. */
-  editors?: Record<string, string>;
   /** Project root path (when persisted). */
   projectRoot?: string;
   /** Tree root path (when persisted). */
@@ -694,6 +695,7 @@ export interface PDVApi {
     onOutput(callback: (chunk: ExecuteOutputChunk) => void): () => void;
     onKernelCrashed(callback: (payload: { kernelId: string }) => void): () => void;
     onReconnected(callback: (payload: { kernelId: string }) => void): () => void;
+    onMemory(callback: (payload: KernelMemoryPayload) => void): () => void;
   };
   tree: {
     list(kernelId: string, path?: string): Promise<NodeDescriptor[]>;
@@ -754,7 +756,7 @@ export interface PDVApi {
       treePath: string
     ): Promise<{ success: boolean; error?: string }>;
     onChanged(
-      callback: (payload: { changed_paths: string[]; change_type: "added" | "removed" | "updated" | "batch" }) => void
+      callback: (payload: { changed_paths: string[]; change_type: "added" | "removed" | "updated" | "batch" | "unknown" }) => void
     ): () => void;
   };
   namespace: {
@@ -831,7 +833,7 @@ export interface PDVApi {
   project: {
     save(saveDir: string, codeCells: unknown, projectName?: string): Promise<ProjectSaveResult>;
     load(saveDir: string, options?: { restoreFromAutosave?: boolean }): Promise<ProjectLoadResult>;
-    new(): Promise<boolean>;
+    new: () => Promise<boolean>;
     peekLanguages(paths: string[]): Promise<Record<string, "python" | "julia">>;
     peekManifest(dir: string): Promise<ProjectManifestPeek>;
     onLoaded(callback: (payload: Record<string, unknown>) => void): () => void;
@@ -843,6 +845,11 @@ export interface PDVApi {
   config: {
     get(): Promise<Config>;
     set(updates: Partial<Config>): Promise<Config>;
+  };
+  window: {
+    /** Sync the BrowserWindow's native background to the active theme so
+     *  live-resize gestures don't flash the OS-default white. */
+    setBackgroundColor(color: string): Promise<void>;
   };
   autosave: {
     run(codeCells: unknown): Promise<{ saved: boolean }>;
@@ -860,6 +867,9 @@ export interface PDVApi {
   };
   about: {
     getVersion(): Promise<string>;
+    openRepoPage(): Promise<void>;
+    openIssuesPage(): Promise<void>;
+    openDocsPage(): Promise<void>;
   };
   updater: {
     checkForUpdates(): Promise<void>;
@@ -919,6 +929,12 @@ export interface PDVApi {
      * the title-bar close button and OS-level window close (Cmd+Q, Alt+F4).
      */
     onRequestClose(callback: () => void): () => void;
+    /**
+     * Mark the main window's document as edited or clean. On macOS this
+     * toggles the dot inside the red close traffic-light. No-op on other
+     * platforms.
+     */
+    setDocumentEdited(edited: boolean): Promise<void>;
   };
 }
 

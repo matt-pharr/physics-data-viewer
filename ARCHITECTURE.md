@@ -1,5 +1,5 @@
 # PDV Architecture Document
-**Version**: 0.0.13
+**Version**: 0.1.0
 **Date**: 2026-04-07
 **Status**: Authoritative design specification. All new code must conform to this document. Deviations require updating this document first.
 
@@ -23,7 +23,7 @@
 12. [File and Module Structure](#12-file-and-module-structure)
 13. [TypeScript Documentation Standard](#13-typescript-documentation-standard)
 14. [Testing Strategy](#14-testing-strategy)
-15. [What is Explicitly Out of Scope (Alpha)](#15-what-is-explicitly-out-of-scope-alpha)
+15. [What is Explicitly Out of Scope (Beta)](#15-what-is-explicitly-out-of-scope-beta)
 
 ---
 
@@ -35,7 +35,7 @@ PDV is an Electron desktop application for computational and experimental physic
 - A **persistent project data model** (the Tree — a live, hierarchical data object in a language kernel)
 - **Scripted, reusable analysis workflows** (scripts stored as tree nodes)
 - **Markdown notes** (first-class tree nodes with KaTeX math preview, edited in a dedicated Write tab)
-- **Multi-language backend support** (Python first; Julia deferred to beta)
+- **Multi-language backend support** (Python first; Julia planned, currently deferred)
 
 The defining characteristic that separates PDV from a Jupyter notebook is the **Tree**: a persistent, navigable, typed data hierarchy that lives in the kernel namespace and is the single authority on all project data. Users explore it via a graphical tree panel, store analysis results in it, attach scripts to it, and save/load it as part of a project.
 
@@ -117,7 +117,7 @@ Every PDV message — whether sent by the app or by the kernel — has the follo
 
 ```json
 {
-  "pdv_version": "0.0.13",
+  "pdv_version": "0.1.0",
   "msg_id": "<uuid-v4>",
   "in_reply_to": "<uuid-v4-or-null>",
   "type": "<message-type-string>",
@@ -128,7 +128,7 @@ Every PDV message — whether sent by the app or by the kernel — has the follo
 
 | Field | Type | Description |
 |---|---|---|
-| `pdv_version` | string | App/package version (e.g. `"0.0.13"`). Both the Electron app and `pdv-python` use their installed version as this value. The app rejects messages with an incompatible major version. |
+| `pdv_version` | string | App/package version (e.g. `"0.1.0"`). Both the Electron app and `pdv-python` use their installed version as this value. The app rejects messages with an incompatible major version. |
 | `msg_id` | string | UUID v4. Unique identifier for this message. |
 | `in_reply_to` | string \| null | The `msg_id` of the request this is responding to. `null` for unsolicited push messages. |
 | `type` | string | Dot-namespaced message type (see Section 3.4). |
@@ -172,7 +172,7 @@ All type strings are namespaced with `pdv.`. The convention is `pdv.<domain>.<ac
 | `pdv.tree.get.response` | kernel → app | Returns node value (may be lazy-loaded from save directory). |
 | `pdv.tree.resolve_file` | app → kernel | Resolve a file-backed tree node (PDVFile subclass) to its absolute filesystem path. Payload: `{ path }`. |
 | `pdv.tree.resolve_file.response` | kernel → app | Returns `{ path, file_path }` where `file_path` is the absolute path on disk. |
-| `pdv.tree.changed` | kernel → app | Push notification. Sent when tree structure changes. Payload: `{ changed_paths: string[], change_type: "added" \| "removed" \| "updated" \| "batch" }`. Notifications are **debounced** (100ms): rapid mutations are batched into a single notification with `change_type: "batch"` and all affected paths. No `in_reply_to`. |
+| `pdv.tree.changed` | kernel → app | Push notification. Sent when tree structure changes. Payload: `{ changed_paths: string[], change_type: "added" \| "removed" \| "updated" \| "batch" \| "unknown" }`. Notifications are **debounced** (100ms): rapid mutations are batched into a single notification with `change_type: "batch"` and all affected paths. Mutations on a **non-root `PDVTree`** (intermediate sub-tree, or a scratch instance the user constructed and is mutating before assigning into the root) emit `change_type: "unknown"` with empty `changed_paths`, signalling that the renderer should do a full refresh. No `in_reply_to`. See §7.4 for the full propagation contract. |
 
 #### Namespace Messages
 
@@ -480,7 +480,7 @@ pdv/
     tree.py              # PDVTree (debounced _emit_changed), PDVScript, PDVFile, PDVNote, PDVModule, PDVGui, PDVNamelist, PDVLib
     query_server.py      # QueryServer: ZMQ REP daemon thread for read-only queries during execution
     namespace.py         # PDVNamespace (protected dict), PDVApp, pdv_namespace()
-    serialization.py     # Type detection, format writers (npy, parquet, json, module, gui, namelist, lib)
+    serialization.py     # Type detection, format writers (npy, pickle, json, module, gui, namelist, lib)
     environment.py       # Path utilities, working dir management, project root logic
     errors.py            # PDVError, PDVPathError, PDVKeyError, PDVProtectedNameError, PDVSerializationError, PDVScriptError, PDVVersionError
     modules.py           # Custom type handler registry and dispatch (@pdv.handle() decorator)
@@ -791,7 +791,7 @@ my-project/
         c3d4e5f6a7b8/
             fit_model.py
         d4e5f6a7b8c9/
-            fit_output.parquet
+            fit_output.pickle
 ```
 
 Each `modules/<id>/` subdirectory is maintained authoritatively by `project:save`: §5.13's save-time sync copies edited files from the working directory into it, then the manifest writer stamps `pdv-module.json` and `module-index.json` from the current in-memory `PDVModule` state. In-session modules (workflow B, origin `"in_session"` in the manifest) get their directory created on first save; imported modules get it at import time and updated on every subsequent save.
@@ -829,7 +829,7 @@ Each `modules/<id>/` subdirectory is maintained authoritatively by `project:save
 | `schema_version` | string | Semantic version of the project.json format. The app rejects manifests with an incompatible major version. Currently `"1.2"`. |
 | `project_id` | string | UUIDv4 assigned on first save under schema 1.2. Stable across renames and moves. Used by per-project environment bookkeeping (§10.5). 1.1 manifests without this field get one assigned on upgrade. |
 | `saved_at` | string | ISO 8601 timestamp of last save. |
-| `pdv_version` | string | PDV app version used when saving (e.g. `"0.0.13"`). |
+| `pdv_version` | string | PDV app version used when saving (e.g. `"0.1.0"`). |
 | `project_name` | string? | Optional human-readable project name chosen by the user. Displayed in the title bar and recent projects list. Falls back to the directory name when absent (backward compat). |
 | `language` | string | Kernel language: `"python"` or `"julia"`. |
 | `interpreter_path` | string? | Optional path to the interpreter used at save time. Used for pre-selection when `environment.mode == "shared"`; ignored when `environment.mode == "project"`. |
@@ -870,7 +870,7 @@ All file-backed tree nodes use UUID-based paths, decoupling the tree hierarchy f
 
 When a user accesses a tree node whose data is in the save directory but not yet in the working directory, the kernel:
 1. Reads the appropriate file from the save directory
-2. Loads it into memory (e.g., `numpy.load`, `pandas.read_parquet`)
+2. Loads it into memory (e.g., `numpy.load`, `pickle.load`)
 3. Stores the result in the in-memory `PDVTree`
 4. Removes the entry from the lazy-load registry
 5. Does **not** copy the file to the working directory unless the data is subsequently modified
@@ -928,7 +928,7 @@ The tree panel uses **virtualized rendering** (`react-window` `List` component) 
 
 All mutating `dict` methods are overridden to emit notifications: `__setitem__`, `__delitem__`, `pop`, `update`, `clear`, `setdefault`, `popitem`, `__ior__` (the `|=` operator). The standard `dict.fromkeys()` classmethod is not overridden because new instances have no comm attached.
 
-**Nested dict limitation**: Only the root `PDVTree` (which has `_send_fn` attached) emits notifications. Sub-dicts accessed via `pdv_tree['path']` are `PDVTree` instances without a comm. Mutations on sub-dicts are silent. The recommended pattern is dot-path access through the root: `pdv_tree.pop('parent.child')` rather than `pdv_tree['parent'].pop('child')`. Mutations from inside an executing code cell or script are still caught by the post-execute `treeRefreshToken` bump described in §7.1.1, but mutations from comm callbacks or background threads on a sub-tree are lost. The planned fix is to give sub-trees a parent ref so `_emit_changed` can walk to the root and emit with the full dot-path — tracked in [issue #218](https://github.com/matt-pharr/physics-data-viewer/issues/218).
+**Non-root PDVTree mutations**: Only the root `PDVTree` (which has `_send_fn` attached) can emit precise-path notifications, because absolute paths are only known relative to the root. Sub-trees accessed via `pdv_tree['path']` and scratch `PDVTree` instances the user constructs locally have no awareness of their parent. To keep the renderer in sync without parent pointers or aliasing bookkeeping, every `PDVTree` instance — root or not — falls back on a class-level "global ping" channel. Mutations on a non-root `PDVTree` fire a single coarse `change_type: "unknown"` notification (with empty `changed_paths`) that signals the renderer to do a full refresh-with-expansion. The class-level send_fn is registered alongside the root's `_send_fn` in `_attach_comm` and torn down in `_detach_comm`. Plain `dict` values stored in the tree (`pdv_tree['data'] = {'x': 1}`) bypass this entirely — they have no emission machinery — and are caught by the 1 Hz safety-net poll instead (see §7.4).
 
 ### 7.2 Node Types
 
@@ -945,12 +945,18 @@ The following node types are supported:
 | `script` | A `PDVScript` object | `.py` file in working or save directory |
 | `markdown` | A `PDVNote` object | `.md` file in working or save directory |
 | `ndarray` | NumPy array | `.npy` file |
-| `dataframe` | Pandas DataFrame | `.parquet` file |
-| `series` | Pandas Series | `.parquet` file |
+| `dataframe` | Pandas DataFrame | `.pickle` file |
+| `series` | Pandas Series | `.pickle` file |
 | `scalar` | Python int, float, bool, None | Inline in tree-index.json |
 | `text` | Python string | `.txt` file (if large) or inline |
 | `mapping` | Plain Python dict (not PDVTree) | Inline JSON |
 | `sequence` | Python list or tuple | Inline JSON |
+| `dataset` | xarray.Dataset (in-memory) | Pickle |
+| `dataarray` | xarray.DataArray (in-memory) | Pickle |
+
+`mapping` and `sequence` containers are expandable in the tree panel. The `pdv.tree.list` handler descends into either kind, returning one descriptor per child. Sequence children carry stringified-int keys (`"0"`, `"1"`, …) and a `parent_is_opaque: true` flag; the renderer suppresses rename / move / duplicate / delete on those rows since the tree-mutation handlers can't address a child by key inside a non-dict parent. Sequence children remain navigable from Python: a numeric segment in a dot-path indexes into a list or tuple value (e.g. `tree["records.0.name"]` resolves through a list of dicts). Negative indices are supported (`tree["xs.-1"]` returns the last element).
+
+`dataset` rows are likewise expandable: `pdv.tree.list` enumerates `ds.data_vars` in insertion order, one `dataarray` child per variable, each tagged with `parent_is_opaque: true` (same suppression semantics as sequence children — the tree-mutation handlers can't address a child by key inside a non-dict parent). Coords are intentionally omitted from the children list to match the OMFIT idiom; their information is implicit in the dim-size preview of each data variable (e.g. `"mode_C: 7, m_singcoup_out: 43"`). Coord values remain reachable via dot-path (`tree["ds.x_coord"]`) because `Dataset.__getitem__` resolves both data_vars and coords by name. `dataarray` is a leaf — DataArrays do not expand further, and dot-paths cannot descend past one (`tree["ds.var.0"]` raises `PDVKeyError`). xarray is an optional dependency; PDV runs unchanged when it isn't installed.
 | `binary` | bytes / bytearray | `.bin` file |
 | `unknown` | Unrecognized type | Custom serializer file (if a module registered one for the type), otherwise `.pickle` (only if `trusted=True`) |
 
@@ -1136,7 +1142,11 @@ Additional fields present at top level for specific types:
 | `has_handler` | boolean | `true` if a custom `@pdv.handle()` handler is registered for this node's type. |
 ```
 
-### 7.4 Tree-Changed Push Notifications
+### 7.4 Tree-Update Propagation
+
+Tree changes propagate to the renderer by two complementary mechanisms — push notifications for snappy live updates, and a 1 Hz poll as a safety net for mutations that bypass push.
+
+#### 7.4.1 Push (primary)
 
 Whenever the tree structure changes — a node is added, deleted, or its value updated — the kernel emits a `pdv.tree.changed` push notification:
 
@@ -1146,12 +1156,23 @@ Whenever the tree structure changes — a node is added, deleted, or its value u
   "status": "ok",
   "payload": {
     "changed_paths": ["data.waveforms.ch1"],
-    "change_type": "added | removed | updated"
+    "change_type": "added" | "removed" | "updated" | "batch" | "unknown"
   }
 }
 ```
 
-The renderer subscribes to these notifications and refreshes the relevant subtree of the tree panel. The renderer does **not** poll for tree changes.
+Mutations on the **root** `PDVTree` emit precise paths via the per-instance debounced queue (§7.1.2). Mutations on **any other** `PDVTree` (intermediate sub-trees, scratch instances) emit `change_type: "unknown"` with empty `changed_paths` via a class-level global channel — local paths can't be reconciled with the renderer's absolute view, so the renderer responds with a full refresh-with-expansion. Both channels share the 100 ms debounce.
+
+#### 7.4.2 Poll (safety net)
+
+The renderer also polls. Every second, the Tree component fetches fresh `pdv.tree.list` results for the root and every currently expanded subtree, structurally compares each child list against the rendered state (path / key / type / hasChildren / preview), and triggers a full reload only when it detects drift. Most ticks find no change and are effectively free, since `pdv.tree.list` is served by the kernel's dedicated read-only thread (`pdv.query_server`, §3.1) and doesn't block on user-code execution.
+
+The poll exists to catch mutations that push cannot see — primarily plain-`dict` values stored in the tree, which have no emission machinery. The user-facing contract is therefore:
+
+- Mutations on `PDVTree` values are reflected in the tree panel within ~100 ms.
+- Mutations on plain `dict` values stored in the tree are reflected within ~1 s.
+
+This is the trade we accept to avoid silently coercing user-supplied `dict` values into `PDVTree` at assignment time, which would change the type of stored values out from under the user.
 
 ---
 
@@ -1931,7 +1952,7 @@ All `pdv-python` modules must be importable and testable without a running Jupyt
 - `PDVTree` get/set/delete, dot-path access, protected-name rejection
 - `PDVScript` run, docstring extraction
 - Lazy-load registry: population from tree-index, fetch-on-access, registry cleanup
-- Serialization: round-trip for each supported format (npy, parquet, json, txt)
+- Serialization: round-trip for each supported format (npy, pickle, json, txt)
 - `PDVNamespace`: reassignment of protected names raises `PDVError`
 - Message envelope validation: malformed messages raise appropriate errors
 
@@ -1945,12 +1966,12 @@ Main process modules tested in isolation with mocked ZeroMQ sockets:
 - IPC handlers: each `ipcMain.handle` has at least a happy-path and error-path test
 
 ### 14.3 What Is Not Unit Tested
-- The renderer (React components) — covered by manual QA in alpha
+- The renderer (React components) — covered by Playwright E2E specs under `electron/e2e/` plus targeted unit tests for CSS/viewport/completion logic
 - End-to-end kernel ↔ app comm flow — covered by integration tests once the protocol is stable
 
 ---
 
-## 15. What is Explicitly Out of Scope (Alpha)
+## 15. What is Explicitly Out of Scope (Beta)
 
 The following features are acknowledged as future work and must not influence the current architecture in ways that complicate the above design:
 

@@ -106,7 +106,12 @@ def handle_tree_list(msg: dict) -> None:
     """
     from pdv.comms import get_pdv_tree, send_error, send_message  # noqa: PLC0415
     from pdv.modules import has_handler_for  # noqa: PLC0415
-    from pdv.serialization import detect_kind, node_preview, python_type_string  # noqa: PLC0415
+    from pdv.serialization import (  # noqa: PLC0415
+        is_xarray_dataset,
+        detect_kind,
+        node_preview,
+        python_type_string,
+    )
     from pdv.tree import PDVModule, PDVGui  # noqa: PLC0415
 
     msg_id = msg.get("msg_id")
@@ -134,7 +139,10 @@ def handle_tree_list(msg: dict) -> None:
                 in_reply_to=msg_id,
             )
             return
-        if not isinstance(container, dict):
+        if not (
+            isinstance(container, (dict, list, tuple))
+            or is_xarray_dataset(container)
+        ):
             send_error(
                 "pdv.tree.list.response",
                 "tree.not_a_folder",
@@ -145,16 +153,48 @@ def handle_tree_list(msg: dict) -> None:
     else:
         container = tree
 
+    # Iterate (key, value) pairs. Dict children carry their own string
+    # keys; list/tuple children get stringified integer indices; Dataset
+    # children enumerate only ``data_vars`` (in insertion order). All
+    # non-dict parents are flagged opaque on each child via
+    # ``parent_is_opaque: true`` so the renderer can hide
+    # structural-mutation actions (rename, move, duplicate, delete) —
+    # the tree-mutation handlers operate on dict keys inside containers
+    # the kernel knows how to mutate, which excludes lists/tuples
+    # (positional) and Datasets (variables live inside an opaque
+    # container the handlers don't traverse for mutation).
+    parent_is_sequence = isinstance(container, (list, tuple))
+    parent_is_dataset = is_xarray_dataset(container)
+    parent_is_opaque = parent_is_sequence or parent_is_dataset
+    if isinstance(container, dict):
+        keys_iter = list(dict.keys(container))
+    elif parent_is_dataset:
+        keys_iter = list(container.data_vars)
+    else:
+        keys_iter = [str(i) for i in range(len(container))]
+
     nodes = []
-    for key in list(dict.keys(container)):
-        try:
-            value = dict.__getitem__(container, key)
-        except KeyError:
-            continue  # key deleted concurrently by another thread
+    for key in keys_iter:
+        if isinstance(container, dict):
+            try:
+                value = dict.__getitem__(container, key)
+            except KeyError:
+                continue  # key deleted concurrently by another thread
+        elif parent_is_dataset:
+            value = container[key]
+        else:
+            value = container[int(key)]
         child_path = f"{path}.{key}" if path else key
         kind = detect_kind(value)
         preview = node_preview(value, kind)
-        has_children = isinstance(value, dict) and bool(dict.keys(value))
+        if isinstance(value, dict):
+            has_children = bool(dict.keys(value))
+        elif isinstance(value, (list, tuple)):
+            has_children = len(value) > 0
+        elif is_xarray_dataset(value):
+            has_children = len(value.data_vars) > 0
+        else:
+            has_children = False
         descriptor = {
             "id": child_path,
             "path": child_path,
@@ -166,6 +206,8 @@ def handle_tree_list(msg: dict) -> None:
             "python_type": python_type_string(value),
             "has_handler": has_handler_for(value),
         }
+        if parent_is_opaque:
+            descriptor["parent_is_opaque"] = True
         if kind == "module" and isinstance(value, PDVModule):
             descriptor["module_id"] = value.module_id
             descriptor["module_name"] = value.name

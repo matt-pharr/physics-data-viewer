@@ -142,6 +142,7 @@ export interface TreeNodeData
     | 'module_version'
     | 'module_description'
     | 'module_language'
+    | 'parent_is_opaque'
   > {
   type: NodeDescriptor['type'] | 'root';
   parentPath: string | null;
@@ -155,6 +156,11 @@ export interface TreeNodeData
   moduleVersion?: string;
   moduleDescription?: string;
   moduleLanguage?: 'python' | 'julia';
+  /** True when the parent container can't be addressed by key from the
+   *  tree-mutation handlers (list/tuple/Dataset). Drives suppression of
+   *  rename / move / duplicate / delete on this row. See the wire field
+   *  ``parent_is_opaque`` on ``NodeDescriptor`` for the full contract. */
+  parentIsOpaque?: boolean;
   children?: TreeNodeData[];
   isExpanded?: boolean;
   isLoading?: boolean;
@@ -163,5 +169,15 @@ export interface TreeNodeData
 /** Describes a tree change pushed from the kernel. */
 export interface TreeChangeInfo {
   changed_paths: string[];
-  change_type: 'added' | 'removed' | 'updated' | 'batch';
+  /**
+   * Granularity of the change.
+   *
+   * - ``added`` / ``removed`` / ``updated``: precise per-path notifications
+   *   from the root tree.
+   * - ``batch``: multiple precise paths coalesced under one debounce window.
+   * - ``unknown``: a non-root ``PDVTree`` mutated, or a 1 Hz poll detected
+   *   drift; ``changed_paths`` is empty and the consumer should do a full
+   *   refresh.
+   */
+  change_type: 'added' | 'removed' | 'updated' | 'batch' | 'unknown';
 }

@@ -49,3 +49,31 @@
   opacity: 0.6;
   cursor: not-allowed;
 }
+
+/* ===== EXECUTE BUTTON =====
+   Variant of .btn-primary with a leading play glyph. Used by the
+   CodeCell pane header. The keyboard shortcut is shown via the
+   button's `title` attribute (hover tooltip), not inline. */
+.btn-execute {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.btn-execute-icon {
+  flex-shrink: 0;
+}
+
+/* CodeCell action-row slot widths. Both buttons have content that varies
+   with state (Execute / Stop / Cancel and Clear / Close), and the row is
+   right-pinned by the flexing tabs to its left — without fixed widths,
+   the whole row shifts horizontally when either label changes. */
+.btn-cc-primary {
+  min-width: 124px;
+  justify-content: center;
+}
+
+.btn-cc-secondary {
+  min-width: 64px;
+  text-align: center;
+}

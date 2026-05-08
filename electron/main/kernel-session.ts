@@ -103,31 +103,57 @@ export async function initializeKernelSession(
   // Julia JIT compilation can be slow on first load; allow more time.
   const readyTimeoutMs = language === "julia" ? 60_000 : 15_000;
 
-  const readyPromise = waitForPush(commRouter, PDVMessageType.READY, readyTimeoutMs);
-  // Avoid unhandled rejection warnings if bootstrap fails before pdv.ready.
-  void readyPromise.catch(() => undefined);
-  const bootstrapResult = await kernelManager.execute(kernelId, {
-    code: bootstrapCode,
-    silent: true,
+  // Track the last iopub msg_type seen during the handshake so that, if
+  // anything throws, the diagnostic message can tell the user what the
+  // kernel was last doing instead of just "Kernel failed to start".
+  let lastIopubMsgType: string | null = null;
+  const disposeIopubObserver = kernelManager.onIopubMessage(kernelId, (m) => {
+    lastIopubMsgType = m.header.msg_type;
   });
-  if (bootstrapResult.error) {
-    throw new Error(bootstrapResult.error);
+
+  let step: "bootstrap" | "ready" | "init" = "bootstrap";
+  try {
+    const readyPromise = waitForPush(commRouter, PDVMessageType.READY, readyTimeoutMs);
+    // Avoid unhandled rejection warnings if bootstrap fails before pdv.ready.
+    void readyPromise.catch(() => undefined);
+    const bootstrapResult = await kernelManager.execute(kernelId, {
+      code: bootstrapCode,
+      silent: true,
+    });
+    if (bootstrapResult.error) {
+      throw new Error(bootstrapResult.error);
+    }
+    // KernelManager.execute resolves on `status: idle` correlated to the
+    // bootstrap execute's msg_id (see kernel-manager.ts), so by this point
+    // the shell handler has finished bootstrap and is ready for the next
+    // message. The previous extra `ping()` round-trip was a stopgap that
+    // racetrap'd cold boots; the iopub-idle signal above is the
+    // deterministic readiness invariant we actually want.
+    step = "ready";
+    await readyPromise;
+    step = "init";
+    const workingDir = await projectManager.createWorkingDir(workingDirBase);
+    await commRouter.request(PDVMessageType.INIT, {
+      working_dir: workingDir,
+      pdv_version: getAppVersion(),
+      query_port: kernelManager.getQueryPort(kernelId),
+    });
+    queryRouter.attach(kernelManager, kernelId);
+    kernelWorkingDirs.set(kernelId, workingDir);
+  } catch (err) {
+    const original = err instanceof Error ? err.message : String(err);
+    const proc = kernelManager.getKernelProcessState(kernelId);
+    const status = kernelManager.getKernel(kernelId)?.status ?? "(unknown)";
+    const procStr = proc
+      ? `exitCode=${proc.exitCode === null ? "null" : proc.exitCode} killed=${proc.killed}`
+      : "(kernel not found)";
+    throw new Error(
+      `Kernel handshake failed at step '${step}': ${original}\n` +
+        `  process: ${procStr}\n` +
+        `  kernel status: ${status}\n` +
+        `  last iopub msg_type: ${lastIopubMsgType ?? "(none)"}`
+    );
+  } finally {
+    disposeIopubObserver();
   }
-  await readyPromise;
-  // Ping the shell channel before sending pdv.init.  The bootstrap
-  // execute leaves unread kernel_info_reply / execute_reply frames in the
-  // DEALER socket's receive buffer.  Sending a kernel_info_request and
-  // reading the correlated reply drains those stale frames and confirms
-  // the kernel's shell thread is ready to accept the next message.
-  // Without this, pdv.init (a comm_msg) can be silently lost on the
-  // ROUTER socket under ipykernel ≥ 7.
-  await kernelManager.ping(kernelId);
-  const workingDir = await projectManager.createWorkingDir(workingDirBase);
-  await commRouter.request(PDVMessageType.INIT, {
-    working_dir: workingDir,
-    pdv_version: getAppVersion(),
-    query_port: kernelManager.getQueryPort(kernelId),
-  });
-  queryRouter.attach(kernelManager, kernelId);
-  kernelWorkingDirs.set(kernelId, workingDir);
 }

@@ -57,7 +57,6 @@ _format_index: dict[str, SerializerEntry] = {}
 _RESERVED_FORMATS: frozenset[str] = frozenset(
     {
         "npy",
-        "parquet",
         "json",
         "txt",
         "pickle",
@@ -98,7 +97,7 @@ def register(
     format : str
         Unique format identifier stored in ``tree-index.json`` so the right
         loader can be found at load time. Must not collide with any builtin
-        format name (``npy``, ``parquet``, ``pickle``, ...).
+        format name (``npy``, ``pickle``, ``json``, ...).
     extension : str
         File extension PDV appends to the chosen filename. Leading ``.`` is
         added if missing. Defaults to ``".bin"``.
