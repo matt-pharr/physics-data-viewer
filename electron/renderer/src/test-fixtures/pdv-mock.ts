@@ -52,6 +52,7 @@ function buildBase() {
       onOutput: subStub<PDVApi["kernels"]["onOutput"]>(),
       onKernelCrashed: subStub<PDVApi["kernels"]["onKernelCrashed"]>(),
       onReconnected: subStub<PDVApi["kernels"]["onReconnected"]>(),
+      onMemory: subStub<PDVApi["kernels"]["onMemory"]>(),
     },
     tree: {
       list: stub<PDVApi["tree"]["list"]>(async () => []),

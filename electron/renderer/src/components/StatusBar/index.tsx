@@ -6,7 +6,7 @@
  */
 
 import React from 'react';
-import type { ProgressPayload } from '../../types/pdv';
+import type { ProgressPayload, UpdateStatus } from '../../types/pdv';
 
 interface StatusBarProps {
   isExecuting: boolean;
@@ -25,6 +25,12 @@ interface StatusBarProps {
   runningPdvVersion: string | null;
   /** Timestamp (ms) of the most recent successful autosave, or null if none yet. */
   lastAutosaveAt: number | null;
+  /** Resident-set-size of the active kernel subprocess, in bytes. Hidden when null. */
+  kernelMemoryRss: number | null;
+  /** Latest auto-update status. Status-bar badge shown when state is `available` or `downloaded`. */
+  updateStatus: UpdateStatus | null;
+  /** Click handler for the update-available badge — typically opens Settings → About. */
+  onUpdateClick: () => void;
 }
 
 /** Format a timestamp as HH:MM:SS in the user's locale. */
@@ -32,6 +38,13 @@ function formatTimeOfDay(ms: number): string {
   const d = new Date(ms);
   const pad = (n: number): string => n.toString().padStart(2, '0');
   return `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+}
+
+/** Format a byte count for status-bar display: "245 MB" or "1.4 GB" (1 decimal ≥1 GB). */
+function formatBytes(bytes: number): string {
+  const mb = bytes / (1024 * 1024);
+  if (mb < 1024) return `${Math.round(mb)} MB`;
+  return `${(mb / 1024).toFixed(1)} GB`;
 }
 
 /** Application status bar at the bottom of the window. */
@@ -51,7 +64,12 @@ export const StatusBar: React.FC<StatusBarProps> = ({
   savedPdvVersion,
   runningPdvVersion,
   lastAutosaveAt,
+  kernelMemoryRss,
+  updateStatus,
+  onUpdateClick,
 }) => {
+  const showUpdateBadge =
+    updateStatus?.state === 'available' || updateStatus?.state === 'downloaded';
   const runtimeLabel = activeLanguage === 'julia'
     ? (juliaPath ?? 'julia')
     : (pythonPath ?? kernelSpec ?? 'python3');
@@ -67,6 +85,21 @@ export const StatusBar: React.FC<StatusBarProps> = ({
       )}
       <div className="status-left">
         <span className="status-item">{currentProjectDir ?? 'Unsaved Project'}</span>
+        {showUpdateBadge && updateStatus && (
+          <span
+            className="status-item status-warning status-clickable"
+            onClick={onUpdateClick}
+            title={
+              updateStatus.state === 'downloaded'
+                ? `v${updateStatus.version ?? '?'} ready — restart to install`
+                : `v${updateStatus.version ?? '?'} available`
+            }
+          >
+            ⬆ {updateStatus.state === 'downloaded'
+              ? `Update ready: v${updateStatus.version ?? '?'}`
+              : `Update available: v${updateStatus.version ?? '?'}`}
+          </span>
+        )}
         {savedPdvVersion && runningPdvVersion && savedPdvVersion !== runningPdvVersion && (
           <span
             className="status-item status-warning"
@@ -100,6 +133,14 @@ export const StatusBar: React.FC<StatusBarProps> = ({
         >
           {runtimeLabel}
         </span>
+        {kernelMemoryRss !== null && (
+          <span
+            className="status-item"
+            title="Resident memory used by the kernel subprocess"
+          >
+            RAM: {formatBytes(kernelMemoryRss)}
+          </span>
+        )}
         <span className="status-item">
           {progress ? (
             <>

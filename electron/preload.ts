@@ -55,6 +55,7 @@ const api: PDVApi = {
     onOutput: (callback) => onPush(IPC.push.executeOutput, callback),
     onKernelCrashed: (callback) => onPush(IPC.push.kernelCrashed, callback),
     onReconnected: (callback) => onPush(IPC.push.kernelReconnected, callback),
+    onMemory: (callback) => onPush(IPC.push.kernelMemory, callback),
   },
   tree: {
     list: (kernelId, nodePath = "") =>

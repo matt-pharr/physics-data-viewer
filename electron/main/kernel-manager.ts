@@ -31,6 +31,7 @@ import { spawn, ChildProcess } from "child_process";
 import { EventEmitter } from "events";
 import type { KernelCompleteResult, KernelInspectResult } from "./ipc";
 import { buildExecutionError, type KernelExecutionLocation } from "./kernel-error-parser";
+import { getProcessRssBytes } from "./process-stats";
 
 // ---------------------------------------------------------------------------
 // Public types
@@ -201,6 +202,8 @@ interface ManagedKernel {
   shellQueue: Promise<void>;
   /** Latest execution_state from iopub status messages. */
   executionState: "idle" | "busy";
+  /** Interval handle for the periodic kernel-memory poll, or undefined if not started. */
+  memoryPollHandle?: NodeJS.Timeout;
 }
 
 // ---------------------------------------------------------------------------
@@ -536,6 +539,10 @@ export class KernelManager extends EventEmitter {
     // shutdownAll() will call stop() and do the cleanup.
     kernelProcess.on("exit", () => {
       managed.info.status = "dead";
+      if (managed.memoryPollHandle !== undefined) {
+        clearInterval(managed.memoryPollHandle);
+        managed.memoryPollHandle = undefined;
+      }
       if (!managed.shuttingDown) {
         this.emit("kernel:crashed", kernelId);
       }
@@ -545,6 +552,22 @@ export class KernelManager extends EventEmitter {
     await this.waitForKernelReady(managed);
 
     kernelInfo.status = "idle";
+
+    // Begin polling the kernel subprocess RSS at ~1 Hz. The first sample is
+    // emitted immediately so the UI doesn't show a blank "RAM: --" for a
+    // second after the kernel comes up.
+    const pid = managed.process.pid;
+    if (pid !== undefined) {
+      const sample = async (): Promise<void> => {
+        const rssBytes = await getProcessRssBytes(pid);
+        if (rssBytes !== null && this.kernels.has(kernelId)) {
+          this.emit("kernel:memoryRss", kernelId, rssBytes);
+        }
+      };
+      void sample();
+      managed.memoryPollHandle = setInterval(() => { void sample(); }, 1000);
+    }
+
     return { ...kernelInfo };
   }
 
@@ -562,6 +585,12 @@ export class KernelManager extends EventEmitter {
 
     // Signal the iopub loop to exit (it polls this flag every 100 ms).
     managed.shuttingDown = true;
+
+    // Stop the memory poll interval — we're tearing down the kernel.
+    if (managed.memoryPollHandle !== undefined) {
+      clearInterval(managed.memoryPollHandle);
+      managed.memoryPollHandle = undefined;
+    }
 
     // Attempt a graceful JMP shutdown.
     try {

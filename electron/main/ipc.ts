@@ -210,6 +210,12 @@ export const IPC = {
      */
     kernelCrashed: "pdv.kernel.crashed",
     kernelReconnected: "pdv.kernel.reconnected",
+    /**
+     * Periodic kernel-process memory snapshot. Emitted by the main process
+     * (no corresponding wire message) at ~1 Hz while the kernel is running.
+     * Sourced from an OS-level RSS read against the kernel subprocess PID.
+     */
+    kernelMemory: "pdv.kernel.memory",
     menuAction: "menu:action",
     chromeStateChanged: "chrome:stateChanged",
     executeOutput: "pdv.execute.output",
@@ -1305,6 +1311,18 @@ export type TreeChangedPayload = PDVTreeChangedPayload;
 export type ProjectLoadedPayload = PDVProjectLoadedPayload;
 
 /**
+ * Payload delivered on `IPC.push.kernelMemory`.
+ */
+export interface KernelMemoryPayload {
+  /** Kernel ID the snapshot belongs to. */
+  kernelId: string;
+  /** Resident-set-size of the kernel subprocess, in bytes. */
+  rssBytes: number;
+  /** Wall-clock timestamp (ms since epoch) when the snapshot was taken. */
+  timestamp: number;
+}
+
+/**
  * Result returned from `project.save()`.
  */
 export interface ProjectSaveResult {
@@ -1484,6 +1502,14 @@ export interface PDVApi {
      * @returns Unsubscribe function.
      */
     onReconnected(callback: (payload: { kernelId: string }) => void): () => void;
+    /**
+     * Subscribe to periodic kernel-memory snapshots. Fires at ~1 Hz while the
+     * kernel subprocess is running.
+     *
+     * @param callback - Invoked with each memory snapshot.
+     * @returns Unsubscribe function.
+     */
+    onMemory(callback: (payload: KernelMemoryPayload) => void): () => void;
   };
 
   /** Tree browsing and updates. */
