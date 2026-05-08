@@ -493,6 +493,8 @@ const NodeKind = {
   GUI: "gui",
   LIB: "lib",
   MARKDOWN: "markdown",
+  DATASET: "dataset",
+  DATAARRAY: "dataarray",
 } as const;
 
 /** Union of all valid node `type` values in tree descriptors. */
@@ -548,6 +550,15 @@ export interface NodeDescriptor {
   module_description?: string;
   /** Module kernel language. Present when type is "module". */
   module_language?: "python" | "julia";
+  /** True when this node lives inside a parent the tree-mutation
+   *  handlers can't address by key — currently a list, tuple, or
+   *  ``xarray.Dataset``. The renderer uses this to hide structural
+   *  mutation actions (rename / move / duplicate / delete) on those
+   *  rows: list/tuple keys are positional, and Dataset variables live
+   *  inside an opaque container the kernel-side handlers don't traverse
+   *  for mutation. The flag is *not* about value mutability — the
+   *  underlying value may still be mutable through normal Python access. */
+  parent_is_opaque?: boolean;
 }
 
 // ---------------------------------------------------------------------------

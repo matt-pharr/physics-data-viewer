@@ -55,6 +55,8 @@ KIND_GUI = "gui"
 KIND_NAMELIST = "namelist"
 KIND_LIB = "lib"
 KIND_FILE = "file"
+KIND_DATASET = "dataset"
+KIND_DATAARRAY = "dataarray"
 KIND_UNKNOWN = "unknown"
 
 # Format strings — must match ARCHITECTURE.md §7.3 storage.format
@@ -97,6 +99,24 @@ def _can_inline_json(value: Any) -> bool:
     return False
 
 
+def is_xarray_dataset(value: Any) -> bool:
+    """Return True if ``value`` is an xarray ``Dataset``."""
+    try:
+        import xarray as xr  # noqa: PLC0415
+    except ImportError:
+        return False
+    return isinstance(value, xr.Dataset)
+
+
+def is_xarray_dataarray(value: Any) -> bool:
+    """Return True if ``value`` is an xarray ``DataArray``."""
+    try:
+        import xarray as xr  # noqa: PLC0415
+    except ImportError:
+        return False
+    return isinstance(value, xr.DataArray)
+
+
 def _is_xarray_object(value: Any) -> bool:
     """Return True if ``value`` is an xarray DataArray or Dataset.
 
@@ -105,11 +125,7 @@ def _is_xarray_object(value: Any) -> bool:
     support with a more inspectable on-disk format is planned for beta;
     until then pickle is the simplest reliable round-trip.
     """
-    try:
-        import xarray as xr  # noqa: PLC0415
-    except ImportError:
-        return False
-    return isinstance(value, (xr.DataArray, xr.Dataset))
+    return is_xarray_dataset(value) or is_xarray_dataarray(value)
 
 
 def _has_array_leaf(value: Any) -> bool:
@@ -222,6 +238,13 @@ def detect_kind(value: Any) -> str:
     # (`set` / `frozenset`) tells users they're not lists.
     if isinstance(value, (list, tuple, set, frozenset)):
         return KIND_SEQUENCE
+    # xarray comes before numpy because DataArray wraps an ndarray and we
+    # want the richer kind. Both helpers are no-ops when xarray isn't
+    # installed.
+    if is_xarray_dataset(value):
+        return KIND_DATASET
+    if is_xarray_dataarray(value):
+        return KIND_DATAARRAY
     # Lazy numpy/pandas checks
     try:
         import numpy as np  # noqa: PLC0415
@@ -998,6 +1021,12 @@ def node_preview(value: Any, kind: str) -> str:
             return f"DataFrame ({rows} × {cols})"
         if kind == KIND_SERIES:
             return f"Series ({len(value)},)"
+        if kind == KIND_DATASET:
+            return f"{len(value.data_vars)} vars"
+        if kind == KIND_DATAARRAY:
+            if not value.dims:
+                return "scalar"
+            return ", ".join(f"{d}: {s}" for d, s in zip(value.dims, value.shape))
     except Exception:  # noqa: BLE001
         pass
     # Prefer a registered serializer's preview callback for unknown types.

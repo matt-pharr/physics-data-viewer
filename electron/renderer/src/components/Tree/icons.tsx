@@ -243,6 +243,8 @@ export const TYPE_ICONS: Record<string, React.FC<IconProps>> = {
   ndarray: NdarrayIcon,
   dataframe: DataframeIcon,
   series: SeriesIcon,
+  dataset: NdarrayIcon,
+  dataarray: NdarrayIcon,
   file: FileIcon,
   script: ScriptIcon,
   markdown: MarkdownIcon,
