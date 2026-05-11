@@ -967,5 +967,32 @@ def handle_project_save(msg: dict) -> None:
     )
 
 
+def handle_project_clear_autosave_cache(msg: dict) -> None:
+    """Handle the ``pdv.project.clear_autosave_cache`` message.
+
+    Resets the in-memory :data:`_autosave_cache`. Sent by the main process
+    when the user clicks "Clear autosave data" so the next save can't
+    reuse cached descriptors whose backing files were just deleted from
+    ``<saveDir>/.autosave/tree/``.
+
+    Without this, the kernel-side cache would retain entries pointing at
+    autosave-side UUIDs that no longer exist on disk. ``serialize_node``'s
+    file-existence check would catch them one at a time, but eager clear
+    is cleaner.
+
+    Expected payload: empty.
+    Response payload: empty.
+    """
+    from pdv.comms import send_message  # noqa: PLC0415
+
+    clear_autosave_cache()
+    send_message(
+        "pdv.project.clear_autosave_cache.response",
+        {},
+        in_reply_to=msg.get("msg_id"),
+    )
+
+
 register("pdv.project.load", handle_project_load)
 register("pdv.project.save", handle_project_save)
+register("pdv.project.clear_autosave_cache", handle_project_clear_autosave_cache)

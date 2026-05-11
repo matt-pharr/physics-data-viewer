@@ -322,6 +322,7 @@ function setup() {
     stopAutosaveTimer: vi.fn(),
     resetAutosaveTimer: vi.fn(),
     markAutosaveCacheDirty: vi.fn(),
+    clearAutosaveCache: vi.fn(async () => undefined),
     setAutosavePending: vi.fn(),
     consumeAutosavePending: vi.fn(() => false),
     autosave: vi.fn(async () => null),
@@ -2067,12 +2068,14 @@ describe("Step 5 IPC handlers", () => {
 
     await clear({}, "/tmp/some-project");
 
-    // ProjectManager.clearAutosave is a static method that fs.rms <dir>/.autosave/
-    // and the handler also marks the per-instance cache dirty.
+    // ProjectManager.clearAutosave is a static method that fs.rms <dir>/.autosave/.
+    // The handler also drops the kernel-side cache eagerly (via comm) and
+    // sets the per-instance dirty flag as a fallback for the next autosave.
     expect(mocks.fsRm).toHaveBeenCalledWith(
       path.join("/tmp/some-project", ".autosave"),
       expect.objectContaining({ recursive: true, force: true }),
     );
+    expect(projectManager.clearAutosaveCache).toHaveBeenCalledOnce();
     expect(projectManager.markAutosaveCacheDirty).toHaveBeenCalledOnce();
   });
 
