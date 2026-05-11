@@ -664,9 +664,40 @@ export class ProjectManager {
   /**
    * Mark the autosave cache as needing to be cleared on the next autosave.
    * Called when the user manually clears autosave data from Settings.
+   *
+   * Kept as a belt-and-suspenders fallback for the eager
+   * {@link clearAutosaveCache} comm: if the comm fails (kernel disconnected,
+   * busy, etc.) the next autosave still sends ``clear_cache: true`` and
+   * resets the kernel-side cache before serializing.
    */
   markAutosaveCacheDirty(): void {
     this.autosaveClearCacheOnNext = true;
+  }
+
+  /**
+   * Eagerly drop the kernel-side autosave cache by sending a
+   * ``pdv.project.clear_autosave_cache`` comm.
+   *
+   * Called when the user clicks "Clear autosave data" so the kernel can't
+   * reuse cached descriptors whose backing files were just deleted from
+   * ``<saveDir>/.autosave/tree/``. Best-effort: a failed comm logs a
+   * warning and the per-instance dirty flag (set by
+   * {@link markAutosaveCacheDirty}) catches the next autosave as a fallback.
+   *
+   * @returns Nothing. Never throws.
+   */
+  async clearAutosaveCache(): Promise<void> {
+    try {
+      await this.commRouter.request(
+        PDVMessageType.PROJECT_CLEAR_AUTOSAVE_CACHE,
+        {},
+      );
+    } catch (err) {
+      console.warn(
+        "[ProjectManager.clearAutosaveCache] comm failed; relying on next-autosave fallback",
+        err,
+      );
+    }
   }
 
   /**

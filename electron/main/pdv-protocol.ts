@@ -130,6 +130,17 @@ export const PDVMessageType = {
   PROJECT_SAVE_AS_REQUEST: "pdv.project.save_as_request",
   /** Kernel → app (push). Kernel requests the app to open a project from a directory. */
   PROJECT_OPEN_REQUEST: "pdv.project.open_request",
+  /**
+   * App → kernel. Instructs the kernel to drop its in-memory autosave
+   * checksum cache (the dict consulted by every save to skip unchanged
+   * data nodes). Sent eagerly when the user clicks "Clear autosave data"
+   * so the kernel can't reuse descriptors whose backing files were just
+   * deleted from disk. The kernel side responds with an empty payload.
+   */
+  PROJECT_CLEAR_AUTOSAVE_CACHE: "pdv.project.clear_autosave_cache",
+  /** Kernel → app. Confirms cache reset. */
+  PROJECT_CLEAR_AUTOSAVE_CACHE_RESPONSE:
+    "pdv.project.clear_autosave_cache.response",
 
   // Tree
   /** App → kernel. Request tree nodes at a given path. */

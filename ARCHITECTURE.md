@@ -1,5 +1,5 @@
 # PDV Architecture Document
-**Version**: 0.1.1
+**Version**: 0.1.2
 **Date**: 2026-04-07
 **Status**: Authoritative design specification. All new code must conform to this document. Deviations require updating this document first.
 
@@ -117,7 +117,7 @@ Every PDV message — whether sent by the app or by the kernel — has the follo
 
 ```json
 {
-  "pdv_version": "0.1.1",
+  "pdv_version": "0.1.2",
   "msg_id": "<uuid-v4>",
   "in_reply_to": "<uuid-v4-or-null>",
   "type": "<message-type-string>",
@@ -128,7 +128,7 @@ Every PDV message — whether sent by the app or by the kernel — has the follo
 
 | Field | Type | Description |
 |---|---|---|
-| `pdv_version` | string | App/package version (e.g. `"0.1.1"`). Both the Electron app and `pdv-python` use their installed version as this value. The app rejects messages with an incompatible major version. |
+| `pdv_version` | string | App/package version (e.g. `"0.1.2"`). Both the Electron app and `pdv-python` use their installed version as this value. The app rejects messages with an incompatible major version. |
 | `msg_id` | string | UUID v4. Unique identifier for this message. |
 | `in_reply_to` | string \| null | The `msg_id` of the request this is responding to. `null` for unsolicited push messages. |
 | `type` | string | Dot-namespaced message type (see Section 3.4). |
@@ -161,6 +161,8 @@ All type strings are namespaced with `pdv.`. The convention is `pdv.<domain>.<ac
 | `pdv.project.loaded` | kernel → app | Sent after the tree is fully populated from a project load. No `in_reply_to` (push notification). |
 | `pdv.project.save` | app → kernel | Instructs the kernel to serialize the tree to the save directory. Payload: `{ save_dir, is_autosave?, clear_cache? }`. When `is_autosave: true` the kernel consults its per-node checksum cache and reuses unchanged-data descriptors (see §8.4). `clear_cache: true` wipes the cache before saving (used after the user discards a stale `.autosave/`). |
 | `pdv.project.save.response` | kernel → app | Confirms save completed. Payload: `{ node_count, checksum, module_owned_files, module_manifests, missing_files, autosave_cache_hits }`. `module_owned_files` lists every file-backed node that belongs to a `PDVModule` (see §5.9) so the main process can mirror working-dir edits into `<saveDir>/modules/<id>/<source_rel_path>`. `module_manifests` carries per-module metadata + module-root-relative node descriptors for writing `pdv-module.json` and `module-index.json` under each module dir. Both fields are empty arrays when the tree contains no `PDVModule` nodes. `missing_files` lists tree paths of file-backed nodes whose backing files were missing during serialization; these nodes are skipped rather than pickled. `autosave_cache_hits` reports how many nodes were reused from the cache (only meaningful when the request set `is_autosave: true`). |
+| `pdv.project.clear_autosave_cache` | app → kernel | Instructs the kernel to drop its in-memory `_autosave_cache`. Empty payload. Sent eagerly when the user clicks *Clear autosave data* so the kernel can't reuse descriptors whose backing files were just deleted from `<saveDir>/.autosave/tree/`. The `clear_cache: true` flag on `pdv.project.save` is the in-band fallback if this comm fails (kernel disconnected/busy); see §8.4. |
+| `pdv.project.clear_autosave_cache.response` | kernel → app | Confirms cache reset. Empty payload. |
 
 #### Tree Messages
 
@@ -829,7 +831,7 @@ Each `modules/<id>/` subdirectory is maintained authoritatively by `project:save
 | `schema_version` | string | Semantic version of the project.json format. The app rejects manifests with an incompatible major version. Currently `"1.2"`. |
 | `project_id` | string | UUIDv4 assigned on first save under schema 1.2. Stable across renames and moves. Used by per-project environment bookkeeping (§10.5). 1.1 manifests without this field get one assigned on upgrade. |
 | `saved_at` | string | ISO 8601 timestamp of last save. |
-| `pdv_version` | string | PDV app version used when saving (e.g. `"0.1.1"`). |
+| `pdv_version` | string | PDV app version used when saving (e.g. `"0.1.2"`). |
 | `project_name` | string? | Optional human-readable project name chosen by the user. Displayed in the title bar and recent projects list. Falls back to the directory name when absent (backward compat). |
 | `language` | string | Kernel language: `"python"` or `"julia"`. |
 | `interpreter_path` | string? | Optional path to the interpreter used at save time. Used for pre-selection when `environment.mode == "shared"`; ignored when `environment.mode == "project"`. |
@@ -1253,7 +1255,16 @@ Autosave protects against losing tree state and code cells when the user forgets
 
 The contents of `.autosave/` mirror the save-dir layout — `tree-index.json`, `code-cells.json`, and a `tree/` directory of file-backed nodes — so that recovery can use the same load primitives as a normal project open.
 
-**Incremental serialization.** The kernel keeps an in-memory `_autosave_cache: dict[tree_path, (digest, descriptor)]` (see `pdv-python/pdv/handlers/project.py`). The cache is consulted *and* updated on every save — autosave and explicit. On an explicit save it ends up populated with `(digest, descriptor)` pairs whose descriptors point at canonical UUIDs in `<saveDir>/tree/`; the next autosave then hits the cache for unchanged data nodes, returns the canonical descriptor (so its `tree-index.json` references the canonical UUID), and skips writing duplicate file contents under `<saveDir>/.autosave/tree/`. Only nodes that genuinely changed since the last save get a fresh UUID and a new file. The cache is reset only when the user explicitly clears autosave data from Settings (signalled via `clear_cache: true` on the next save) or on kernel shutdown.
+**Incremental serialization.** The kernel keeps an in-memory `_autosave_cache: dict[tree_path, (digest, descriptor)]` (see `pdv-python/pdv/handlers/project.py`). The cache is consulted *and* updated on every save — autosave and explicit. On an explicit save it ends up populated with `(digest, descriptor)` pairs whose descriptors point at canonical UUIDs in `<saveDir>/tree/`; the next autosave then hits the cache for unchanged data nodes, returns the canonical descriptor (so its `tree-index.json` references the canonical UUID), and skips writing duplicate file contents under `<saveDir>/.autosave/tree/`. Only nodes that genuinely changed since the last save get a fresh UUID and a new file.
+
+**Cache-hit file reconciliation.** Because the cache survives across saves to *different* directories (`<saveDir>` for explicit saves, `<saveDir>/.autosave/` for autosaves), a cached descriptor's UUID may reference a file that physically lives in the *other* directory. `serialize_node` reconciles this on every cache hit via `_verify_or_relocate_cached_file`:
+
+- If the file is already at `<working_dir>/tree/<uuid>/<filename>`, hit is valid.
+- Else, when `working_dir` is the canonical save dir, look under `<working_dir>/.autosave/tree/<uuid>/<filename>` and move the file into the canonical location with `os.replace` (same-volume rename is constant-time; falls back to `shutil.copy2 + os.remove` on EXDEV). This is the common case: an autosave wrote a changed value into `.autosave/tree/`, the user then explicit-saves with no further changes, and the file folds into the canonical tree dir essentially for free.
+- Else, when `working_dir` is itself `.autosave/`, accept a file in the parent's `tree/<uuid>/` as a valid home — the autosave's `tree-index.json` will reference that UUID and the recovery overlay (`copyFilesForLoad` + `overlayAutosaveTreeFiles`) brings it into the working dir at load time.
+- Otherwise the entry is stale: drop it from the cache and force re-serialization with a fresh UUID. Keeps `tree-index.json` and the on-disk tree consistent even after the cache and the filesystem drift apart.
+
+**Cache invalidation.** When the user clicks *Clear autosave data* the main process sends `pdv.project.clear_autosave_cache` (see §3.4) to reset the kernel cache eagerly. The `clear_cache: true` flag on the next `pdv.project.save` is the in-band fallback if the eager comm fails (kernel disconnected, busy). Kernel shutdown also resets the cache via module reload.
 
 The cache covers in-memory data kinds — ndarray, DataFrame, Series, scalar, text, mapping, sequence, binary. File-backed kinds (PDVScript, PDVLib, PDVNote, PDVGui, PDVNamelist, PDVFile) bypass the cache and `smart_copy` their backing file on every autosave; the per-file copy is cheap because `smart_copy` is reflink/CoW where the filesystem supports it.
 

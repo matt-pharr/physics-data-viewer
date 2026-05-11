@@ -19,7 +19,11 @@ import uuid
 import pytest
 from unittest.mock import MagicMock, patch
 import pdv.comms as comms_mod
-from pdv.handlers.project import handle_project_load, handle_project_save
+from pdv.handlers.project import (
+    handle_project_clear_autosave_cache,
+    handle_project_load,
+    handle_project_save,
+)
 from pdv.tree import (
     PDVTree,
     PDVScript,
@@ -466,6 +470,38 @@ class TestHandleProjectSave:
             m for m in mock_comm._sent if m.get("type") == "pdv.project.save.response"
         )
         assert response["payload"].get("module_owned_files", []) == []
+
+
+class TestHandleProjectClearAutosaveCache:
+    def test_clears_module_level_cache(self, tree_with_comm, tmp_save_dir):
+        """The handler wipes ``_autosave_cache`` so the next save can't reuse
+        descriptors whose backing files were just deleted from
+        ``<saveDir>/.autosave/tree/``.
+        """
+        numpy = pytest.importorskip("numpy")
+        from pdv.handlers import project as project_mod
+
+        # Prime the cache by running a save.
+        tree_with_comm["arr"] = numpy.array([1.0, 2.0, 3.0])
+        mock_comm = _make_mock_comm()
+        save_msg = _make_msg("pdv.project.save", {"save_dir": tmp_save_dir})
+        with (
+            patch.object(comms_mod, "_comm", mock_comm),
+            patch.object(comms_mod, "_pdv_tree", tree_with_comm),
+        ):
+            handle_project_save(save_msg)
+        assert project_mod._autosave_cache, "save should populate the cache"
+
+        # Clear it via the comm handler.
+        clear_msg = _make_msg("pdv.project.clear_autosave_cache", {})
+        with patch.object(comms_mod, "_comm", mock_comm):
+            handle_project_clear_autosave_cache(clear_msg)
+        assert project_mod._autosave_cache == {}
+
+        response = mock_comm._sent[-1]
+        assert response["type"] == "pdv.project.clear_autosave_cache.response"
+        assert response["status"] == "ok"
+        assert response["in_reply_to"] == clear_msg["msg_id"]
 
 
 class TestTwoPassLoading:
