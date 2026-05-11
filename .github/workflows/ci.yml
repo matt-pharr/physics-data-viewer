@@ -10,7 +10,59 @@ on:
       - develop
 
 jobs:
+  # Detect which directory groups changed so downstream jobs can skip
+  # work that the PR cannot have affected. Every downstream job still
+  # appears in the checks list (as "skipped"), so branch protection
+  # rules that require these checks don't get stuck waiting.
+  #
+  # `node-main-tests` and `e2e-tests` cross the language boundary — they
+  # spawn a real Python kernel from Electron code — so they fire on
+  # either group of changes.
+  filter:
+    name: Detect changes
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      python: ${{ steps.filter.outputs.python }}
+      electron: ${{ steps.filter.outputs.electron }}
+      docs: ${{ steps.filter.outputs.docs }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            python:
+              - 'pdv-python/**'
+            electron:
+              - 'electron/**'
+            docs:
+              - 'docs/**'
+              - 'mkdocs.yml'
+              - 'pdv-python/**'
+              - '*.md'
+
+  version-parity:
+    name: Version parity
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # Always runs — parity drift can happen in any file group, and the
+      # check is cheap (~10s). Fails the PR if electron/package.json,
+      # pdv-python/pyproject.toml, docs, example modules, and test
+      # fixtures don't all agree on the PDV version. Bump them in one
+      # shot with scripts/bump-version.sh.
+      - name: Check version parity
+        run: ./scripts/check-version-parity.sh
+
   build:
+    needs: filter
+    if: needs.filter.outputs.electron == 'true'
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -22,8 +74,25 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 20
+          # Caches ~/.npm so npm fetch is hot on cache miss for the
+          # node_modules cache below. Keyed automatically on
+          # cache-dependency-path's hash.
+          cache: 'npm'
+          cache-dependency-path: electron/package-lock.json
+
+      # On a cache hit, electron/node_modules is restored as-is and the
+      # next step is skipped, saving 30-40s vs running `npm ci`. On a
+      # miss (package-lock.json changed, or new runner OS), the npm
+      # download cache from setup-node above still warms the install.
+      - name: Cache electron/node_modules
+        id: node-cache
+        uses: actions/cache@v4
+        with:
+          path: electron/node_modules
+          key: node-modules-${{ runner.os }}-${{ hashFiles('electron/package-lock.json') }}
 
       - name: Install Node dependencies
+        if: steps.node-cache.outputs.cache-hit != 'true'
         working-directory: electron
         run: |
           if [ -f package-lock.json ]; then
@@ -37,6 +106,8 @@ jobs:
         run: npm run build
 
   python-tests:
+    needs: filter
+    if: needs.filter.outputs.python == 'true'
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -53,6 +124,8 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
           allow-prereleases: true
+          cache: 'pip'
+          cache-dependency-path: pdv-python/pyproject.toml
 
       - name: Install Python dependencies
         run: pip install ipykernel "pdv-python/[dev]"
@@ -62,6 +135,10 @@ jobs:
         run: pytest tests/ -v
 
   node-main-tests:
+    # Main-process tests spawn a real Python kernel from Electron code, so
+    # both language groups can affect them.
+    needs: filter
+    if: needs.filter.outputs.electron == 'true' || needs.filter.outputs.python == 'true'
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -73,16 +150,35 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 20
+          # Caches ~/.npm so npm fetch is hot on cache miss for the
+          # node_modules cache below. Keyed automatically on
+          # cache-dependency-path's hash.
+          cache: 'npm'
+          cache-dependency-path: electron/package-lock.json
 
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
+          cache: 'pip'
+          cache-dependency-path: pdv-python/pyproject.toml
 
       - name: Install Python dependencies
         run: pip install ipykernel "pdv-python/[dev]"
 
+      # On a cache hit, electron/node_modules is restored as-is and the
+      # next step is skipped, saving 30-40s vs running `npm ci`. On a
+      # miss (package-lock.json changed, or new runner OS), the npm
+      # download cache from setup-node above still warms the install.
+      - name: Cache electron/node_modules
+        id: node-cache
+        uses: actions/cache@v4
+        with:
+          path: electron/node_modules
+          key: node-modules-${{ runner.os }}-${{ hashFiles('electron/package-lock.json') }}
+
       - name: Install Node dependencies
+        if: steps.node-cache.outputs.cache-hit != 'true'
         working-directory: electron
         run: |
           if [ -f package-lock.json ]; then
@@ -98,6 +194,8 @@ jobs:
         run: npm run test -- --reporter=verbose main/
 
   renderer-tests:
+    needs: filter
+    if: needs.filter.outputs.electron == 'true'
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -109,8 +207,25 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 20
+          # Caches ~/.npm so npm fetch is hot on cache miss for the
+          # node_modules cache below. Keyed automatically on
+          # cache-dependency-path's hash.
+          cache: 'npm'
+          cache-dependency-path: electron/package-lock.json
+
+      # On a cache hit, electron/node_modules is restored as-is and the
+      # next step is skipped, saving 30-40s vs running `npm ci`. On a
+      # miss (package-lock.json changed, or new runner OS), the npm
+      # download cache from setup-node above still warms the install.
+      - name: Cache electron/node_modules
+        id: node-cache
+        uses: actions/cache@v4
+        with:
+          path: electron/node_modules
+          key: node-modules-${{ runner.os }}-${{ hashFiles('electron/package-lock.json') }}
 
       - name: Install Node dependencies
+        if: steps.node-cache.outputs.cache-hit != 'true'
         working-directory: electron
         run: |
           if [ -f package-lock.json ]; then
@@ -124,6 +239,10 @@ jobs:
         run: npm run test -- --reporter=verbose renderer/src/
 
   e2e-tests:
+    # E2E drives a real Electron build talking to a real Python kernel,
+    # so it has to run when either language group changes.
+    needs: filter
+    if: needs.filter.outputs.electron == 'true' || needs.filter.outputs.python == 'true'
     name: Playwright E2E
     runs-on: ubuntu-latest
     permissions:
@@ -136,11 +255,18 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 20
+          # Caches ~/.npm so npm fetch is hot on cache miss for the
+          # node_modules cache below. Keyed automatically on
+          # cache-dependency-path's hash.
+          cache: 'npm'
+          cache-dependency-path: electron/package-lock.json
 
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
+          cache: 'pip'
+          cache-dependency-path: pdv-python/pyproject.toml
 
       - name: Install Python dependencies
         # xarray + netcdf4 needed by the round-trip checksum spec, which
@@ -148,7 +274,19 @@ jobs:
         # standard numpy/pandas/matplotlib node types.
         run: pip install ipykernel "pdv-python/[dev]" matplotlib numpy xarray netcdf4
 
+      # On a cache hit, electron/node_modules is restored as-is and the
+      # next step is skipped, saving 30-40s vs running `npm ci`. On a
+      # miss (package-lock.json changed, or new runner OS), the npm
+      # download cache from setup-node above still warms the install.
+      - name: Cache electron/node_modules
+        id: node-cache
+        uses: actions/cache@v4
+        with:
+          path: electron/node_modules
+          key: node-modules-${{ runner.os }}-${{ hashFiles('electron/package-lock.json') }}
+
       - name: Install Node dependencies
+        if: steps.node-cache.outputs.cache-hit != 'true'
         working-directory: electron
         run: |
           if [ -f package-lock.json ]; then
@@ -200,6 +338,10 @@ jobs:
           retention-days: 7
 
   docs-build:
+    # Docs depend on docs/ sources, mkdocs.yml, and pdv-python sources
+    # (mkdocstrings introspects the package).
+    needs: filter
+    if: needs.filter.outputs.docs == 'true'
     name: Docs build
     runs-on: ubuntu-latest
     permissions:
@@ -217,6 +359,10 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+          cache: 'pip'
+          cache-dependency-path: |
+            pdv-python/pyproject.toml
+            docs/requirements.txt
 
       - name: Install dependencies
         run: |

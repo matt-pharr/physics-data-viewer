@@ -100,19 +100,35 @@ def _can_inline_json(value: Any) -> bool:
 
 
 def is_xarray_dataset(value: Any) -> bool:
-    """Return True if ``value`` is an xarray ``Dataset``."""
-    try:
-        import xarray as xr  # noqa: PLC0415
-    except ImportError:
+    """Return True if ``value`` is an xarray ``Dataset``.
+
+    Reads ``sys.modules`` instead of doing ``import xarray`` so this helper
+    is safe to call from the QueryServer thread while the main kernel
+    thread is unpickling Dataset objects during project load. xarray's
+    first import is not safe to drive concurrently from multiple threads
+    and races produce "partially initialized module" errors. If xarray
+    isn't already imported, ``value`` cannot be a Dataset, so returning
+    False is correct (any real Dataset would have caused xarray to be
+    imported by the code that constructed it).
+    """
+    import sys  # noqa: PLC0415
+
+    xr = sys.modules.get("xarray")
+    if xr is None:
         return False
     return isinstance(value, xr.Dataset)
 
 
 def is_xarray_dataarray(value: Any) -> bool:
-    """Return True if ``value`` is an xarray ``DataArray``."""
-    try:
-        import xarray as xr  # noqa: PLC0415
-    except ImportError:
+    """Return True if ``value`` is an xarray ``DataArray``.
+
+    See :func:`is_xarray_dataset` for why this checks ``sys.modules``
+    rather than importing xarray.
+    """
+    import sys  # noqa: PLC0415
+
+    xr = sys.modules.get("xarray")
+    if xr is None:
         return False
     return isinstance(value, xr.DataArray)
 

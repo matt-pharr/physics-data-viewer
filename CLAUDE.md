@@ -101,6 +101,11 @@ cd electron && PYTHON_PATH=/path/to/python npm test -- --reporter=verbose main/i
 # against a real Python kernel). Build first, then run:
 cd electron && npm run build:e2e
 cd electron && PYTHON_PATH=/path/to/python npm run test:e2e
+
+# pdv-python dependency-resolution sweep (uv-driven matrix of Python
+# versions x extras combos x resolution strategies). Run before merging
+# any PR that touches pdv-python or its pyproject.toml.
+pdv-python/scripts/sweep-deps.sh
 ```
 
 The renderer is covered by Playwright specs under `electron/e2e/` plus targeted
@@ -119,6 +124,18 @@ Every `.ts` file in `electron/main/` must have:
 
 ---
 
+## Pre-merge dependency sweep
+
+Before merging any pull request that touches `pdv-python/` (source or `pyproject.toml`), run `pdv-python/scripts/sweep-deps.sh` and confirm it exits green. The sweep installs pdv-python under multiple Python versions, extras combos, and uv resolution strategies (highest + lowest-direct), then runs the test suite in each cell. It catches:
+
+- Test cases that aren't properly guarded behind optional extras (e.g., unconditional `import numpy` in a test that should run on a bare install).
+- Declared lower bounds that are too low for the supported Python range (e.g., `numpy>=1.24` floors to a version that won't build on Python 3.12+).
+- Future upper-bound breakage from newly-released deps.
+
+The full sweep takes ~3 minutes locally and produces a results CSV plus per-cell logs under `${PDV_SWEEP_WORKDIR:-/tmp/pdv-dep-sweep}`. Exit code is non-zero if any cell failed to install or had a non-zero pytest exit.
+
+**When asked to draft a pull request summary**, remind the user to run this sweep (or do so yourself if changes touch pdv-python) and reflect the result in the PR description's "Test plan" section. Do not silently skip it.
+
 ## PR Review Checklist
 
 When reviewing a pull request (including via `/review`), check every item below in addition to standard code-quality review:
@@ -134,3 +151,4 @@ When reviewing a pull request (including via `/review`), check every item below 
 - [ ] **Version parity** — If either `electron/package.json` or `pdv-python/pyproject.toml` version was bumped, both were bumped to the same value.
 - [ ] **JSDoc coverage** — New or modified exports in `electron/main/` have JSDoc with `@param`, `@returns`, `@throws`. No unguarded `any` types introduced.
 - [ ] **Documentation updated** — If the PR changes architecture, adds new IPC channels, modifies the comm protocol, introduces new tree node types, or alters any behavior described in `ARCHITECTURE.md` or `PLANNED_FEATURES.md`, those documents have been updated to match.
+- [ ] **Dependency sweep passed** — If the PR touches `pdv-python/` (source or `pyproject.toml`), `pdv-python/scripts/sweep-deps.sh` was run locally and exited green. Result is recorded in the PR description's "Test plan".

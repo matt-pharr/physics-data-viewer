@@ -650,6 +650,7 @@ export interface EnvironmentInfo {
   pdvCompatible: boolean;
   pdvVersionMismatch: boolean;
   ipykernelInstalled: boolean;
+  isFreeThreaded: boolean;
 }
 
 /** Result of a streaming pip install operation. */
