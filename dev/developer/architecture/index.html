@@ -2359,10 +2359,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#15-what-is-explicitly-out-of-scope-alpha" class="md-nav__link">
+  <a href="#15-what-is-explicitly-out-of-scope-beta" class="md-nav__link">
     <span class="md-ellipsis">
       
-        15. What is Explicitly Out of Scope (Alpha)
+        15. What is Explicitly Out of Scope (Beta)
       
     </span>
   </a>
@@ -3852,10 +3852,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#15-what-is-explicitly-out-of-scope-alpha" class="md-nav__link">
+  <a href="#15-what-is-explicitly-out-of-scope-beta" class="md-nav__link">
     <span class="md-ellipsis">
       
-        15. What is Explicitly Out of Scope (Alpha)
+        15. What is Explicitly Out of Scope (Beta)
       
     </span>
   </a>
@@ -3888,7 +3888,7 @@
 
 
 <h1 id="pdv-architecture-document">PDV Architecture Document<a class="headerlink" href="#pdv-architecture-document" title="Permanent link">&para;</a></h1>
-<p><strong>Version</strong>: 0.0.13
+<p><strong>Version</strong>: 0.1.1
 <strong>Date</strong>: 2026-04-07
 <strong>Status</strong>: Authoritative design specification. All new code must conform to this document. Deviations require updating this document first.</p>
 <blockquote>
@@ -3911,7 +3911,7 @@
 <li><a href="#12-file-and-module-structure">File and Module Structure</a></li>
 <li><a href="#13-typescript-documentation-standard">TypeScript Documentation Standard</a></li>
 <li><a href="#14-testing-strategy">Testing Strategy</a></li>
-<li><a href="#15-what-is-explicitly-out-of-scope-alpha">What is Explicitly Out of Scope (Alpha)</a></li>
+<li><a href="#15-what-is-explicitly-out-of-scope-beta">What is Explicitly Out of Scope (Beta)</a></li>
 </ol>
 <hr />
 <h2 id="1-project-overview">1. Project Overview<a class="headerlink" href="#1-project-overview" title="Permanent link">&para;</a></h2>
@@ -3921,7 +3921,7 @@
 <li>A <strong>persistent project data model</strong> (the Tree — a live, hierarchical data object in a language kernel)</li>
 <li><strong>Scripted, reusable analysis workflows</strong> (scripts stored as tree nodes)</li>
 <li><strong>Markdown notes</strong> (first-class tree nodes with KaTeX math preview, edited in a dedicated Write tab)</li>
-<li><strong>Multi-language backend support</strong> (Python first; Julia deferred to beta)</li>
+<li><strong>Multi-language backend support</strong> (Python first; Julia planned, currently deferred)</li>
 </ul>
 <p>The defining characteristic that separates PDV from a Jupyter notebook is the <strong>Tree</strong>: a persistent, navigable, typed data hierarchy that lives in the kernel namespace and is the single authority on all project data. Users explore it via a graphical tree panel, store analysis results in it, attach scripts to it, and save/load it as part of a project.</p>
 <hr />
@@ -3997,7 +3997,7 @@
 <h3 id="32-message-envelope">3.2 Message Envelope<a class="headerlink" href="#32-message-envelope" title="Permanent link">&para;</a></h3>
 <p>Every PDV message — whether sent by the app or by the kernel — has the following JSON structure:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="p">{</span>
-<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="w">  </span><span class="nt">&quot;pdv_version&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;0.0.13&quot;</span><span class="p">,</span>
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="w">  </span><span class="nt">&quot;pdv_version&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;0.1.1&quot;</span><span class="p">,</span>
 <a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="w">  </span><span class="nt">&quot;msg_id&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;&lt;uuid-v4&gt;&quot;</span><span class="p">,</span>
 <a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="w">  </span><span class="nt">&quot;in_reply_to&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;&lt;uuid-v4-or-null&gt;&quot;</span><span class="p">,</span>
 <a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a><span class="w">  </span><span class="nt">&quot;type&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;&lt;message-type-string&gt;&quot;</span><span class="p">,</span>
@@ -4017,7 +4017,7 @@
 <tr>
 <td><code>pdv_version</code></td>
 <td>string</td>
-<td>App/package version (e.g. <code>"0.0.13"</code>). Both the Electron app and <code>pdv-python</code> use their installed version as this value. The app rejects messages with an incompatible major version.</td>
+<td>App/package version (e.g. <code>"0.1.1"</code>). Both the Electron app and <code>pdv-python</code> use their installed version as this value. The app rejects messages with an incompatible major version.</td>
 </tr>
 <tr>
 <td><code>msg_id</code></td>
@@ -4872,7 +4872,7 @@
 <tr>
 <td><code>pdv_version</code></td>
 <td>string</td>
-<td>PDV app version used when saving (e.g. <code>"0.0.13"</code>).</td>
+<td>PDV app version used when saving (e.g. <code>"0.1.1"</code>).</td>
 </tr>
 <tr>
 <td><code>project_name</code></td>
@@ -5963,11 +5963,11 @@ This is idempotent and fast (cached) when the version is already present.</p>
 - IPC handlers: each <code>ipcMain.handle</code> has at least a happy-path and error-path test</p>
 <h3 id="143-what-is-not-unit-tested">14.3 What Is Not Unit Tested<a class="headerlink" href="#143-what-is-not-unit-tested" title="Permanent link">&para;</a></h3>
 <ul>
-<li>The renderer (React components) — covered by manual QA in alpha</li>
+<li>The renderer (React components) — covered by Playwright E2E specs under <code>electron/e2e/</code> plus targeted unit tests for CSS/viewport/completion logic</li>
 <li>End-to-end kernel ↔ app comm flow — covered by integration tests once the protocol is stable</li>
 </ul>
 <hr />
-<h2 id="15-what-is-explicitly-out-of-scope-alpha">15. What is Explicitly Out of Scope (Alpha)<a class="headerlink" href="#15-what-is-explicitly-out-of-scope-alpha" title="Permanent link">&para;</a></h2>
+<h2 id="15-what-is-explicitly-out-of-scope-beta">15. What is Explicitly Out of Scope (Beta)<a class="headerlink" href="#15-what-is-explicitly-out-of-scope-beta" title="Permanent link">&para;</a></h2>
 <p>The following features are acknowledged as future work and must not influence the current architecture in ways that complicate the above design:</p>
 <ul>
 <li><strong>Julia kernel support</strong> — protocol is designed to be language-agnostic; implementation is deferred</li>
