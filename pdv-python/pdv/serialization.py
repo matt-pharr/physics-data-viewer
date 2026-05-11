@@ -73,6 +73,12 @@ FORMAT_NAMELIST = "namelist"
 FORMAT_PY_LIB = "py_lib"
 FORMAT_FILE = "file"
 
+# Directory-name convention for the autosave sibling under a save dir.
+# Centralized here so `_verify_or_relocate_cached_file` and any future
+# reconciliation paths agree on the heuristic. Mirrors `autosaveDirFor`
+# in `electron/main/autosave-sidecars.ts`.
+AUTOSAVE_DIR_NAME = ".autosave"
+
 
 def _can_inline_json(value: Any) -> bool:
     """Return True if ``value`` round-trips losslessly through JSON.
@@ -326,13 +332,13 @@ def _verify_or_relocate_cached_file(
         return True
 
     working_norm = working_dir.rstrip(os.sep)
-    is_autosave_dir = os.path.basename(working_norm) == ".autosave"
+    is_autosave_dir = os.path.basename(working_norm) == AUTOSAVE_DIR_NAME
 
     if not is_autosave_dir:
         # Explicit save: file may have been written by a previous autosave.
         # Same-volume rename brings it into the canonical tree dir.
         autosave_loc = uuid_tree_path(
-            os.path.join(working_dir, ".autosave"), node_uuid, filename
+            os.path.join(working_dir, AUTOSAVE_DIR_NAME), node_uuid, filename
         )
         if os.path.exists(autosave_loc):
             ensure_parent(canonical)
@@ -350,13 +356,21 @@ def _verify_or_relocate_cached_file(
                 if getattr(exc, "errno", None) == errno.EXDEV:
                     try:
                         shutil.copy2(autosave_loc, canonical)
+                    except OSError:
+                        # Copy failed — re-serialize. Safer than returning
+                        # a descriptor we can't back with a file.
+                        return False
+                    # Copy succeeded. Best-effort remove of the autosave
+                    # source; failure here just leaves an orphan that the
+                    # autosave's own `_purge_orphaned_tree_files` will
+                    # collect on its next run. The canonical file is in
+                    # place, so the descriptor is valid.
+                    try:
                         os.remove(autosave_loc)
-                        return True
                     except OSError:
                         pass
-                # Permission failure or copy failure — re-serialize.
-                # Safer than returning a descriptor we can't back with
-                # a file.
+                    return True
+                # Permission or other non-EXDEV failure — re-serialize.
                 return False
         return False
 

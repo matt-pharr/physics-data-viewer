@@ -739,12 +739,15 @@ export function registerIpcHandlers(
   ipcMain.handle(IPC.autosave.clear, async (_event, dir?: string) => {
     const target = dir || activeProjectDir || kernelWorkingDirs.get(activeKernelId ?? "");
     if (target) {
-      await ProjectManager.clearAutosave(target);
-      // Eagerly drop the kernel-side cache so the next save (autosave or
-      // explicit) can't reuse descriptors whose files were just deleted.
-      // markAutosaveCacheDirty() is the fallback if the comm fails.
+      // Order matters: clear the kernel-side cache *before* deleting the
+      // `.autosave/` dir on disk. If an autosave timer were to fire between
+      // these two awaits, a populated cache + missing `.autosave/` is the
+      // exact stale-entry condition we're trying to avoid. Clearing the
+      // cache first means any racing autosave starts from a clean slate.
+      // markAutosaveCacheDirty() is the in-band fallback if the comm fails.
       await projectManager.clearAutosaveCache();
       projectManager.markAutosaveCacheDirty();
+      await ProjectManager.clearAutosave(target);
     }
   });
 
