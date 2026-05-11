@@ -740,6 +740,10 @@ export function registerIpcHandlers(
     const target = dir || activeProjectDir || kernelWorkingDirs.get(activeKernelId ?? "");
     if (target) {
       await ProjectManager.clearAutosave(target);
+      // Eagerly drop the kernel-side cache so the next save (autosave or
+      // explicit) can't reuse descriptors whose files were just deleted.
+      // markAutosaveCacheDirty() is the fallback if the comm fails.
+      await projectManager.clearAutosaveCache();
       projectManager.markAutosaveCacheDirty();
     }
   });
