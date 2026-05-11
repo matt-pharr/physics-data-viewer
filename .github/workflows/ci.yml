@@ -10,6 +10,39 @@ on:
       - develop
 
 jobs:
+  # Detect which directory groups changed so downstream jobs can skip
+  # work that the PR cannot have affected. Every downstream job still
+  # appears in the checks list (as "skipped"), so branch protection
+  # rules that require these checks don't get stuck waiting.
+  #
+  # `node-main-tests` and `e2e-tests` cross the language boundary — they
+  # spawn a real Python kernel from Electron code — so they fire on
+  # either group of changes.
+  filter:
+    name: Detect changes
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      python: ${{ steps.filter.outputs.python }}
+      electron: ${{ steps.filter.outputs.electron }}
+      docs: ${{ steps.filter.outputs.docs }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            python:
+              - 'pdv-python/**'
+            electron:
+              - 'electron/**'
+            docs:
+              - 'docs/**'
+              - 'mkdocs.yml'
+              - 'pdv-python/**'
+              - '*.md'
+
   version-parity:
     name: Version parity
     runs-on: ubuntu-latest
@@ -19,13 +52,17 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      # Fails the PR if electron/package.json, pdv-python/pyproject.toml,
-      # docs, example modules, and test fixtures don't all agree on the
-      # PDV version. Bump them in one shot with scripts/bump-version.sh.
+      # Always runs — parity drift can happen in any file group, and the
+      # check is cheap (~10s). Fails the PR if electron/package.json,
+      # pdv-python/pyproject.toml, docs, example modules, and test
+      # fixtures don't all agree on the PDV version. Bump them in one
+      # shot with scripts/bump-version.sh.
       - name: Check version parity
         run: ./scripts/check-version-parity.sh
 
   build:
+    needs: filter
+    if: needs.filter.outputs.electron == 'true'
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -52,6 +89,8 @@ jobs:
         run: npm run build
 
   python-tests:
+    needs: filter
+    if: needs.filter.outputs.python == 'true'
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -77,6 +116,10 @@ jobs:
         run: pytest tests/ -v
 
   node-main-tests:
+    # Main-process tests spawn a real Python kernel from Electron code, so
+    # both language groups can affect them.
+    needs: filter
+    if: needs.filter.outputs.electron == 'true' || needs.filter.outputs.python == 'true'
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -113,6 +156,8 @@ jobs:
         run: npm run test -- --reporter=verbose main/
 
   renderer-tests:
+    needs: filter
+    if: needs.filter.outputs.electron == 'true'
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -139,6 +184,10 @@ jobs:
         run: npm run test -- --reporter=verbose renderer/src/
 
   e2e-tests:
+    # E2E drives a real Electron build talking to a real Python kernel,
+    # so it has to run when either language group changes.
+    needs: filter
+    if: needs.filter.outputs.electron == 'true' || needs.filter.outputs.python == 'true'
     name: Playwright E2E
     runs-on: ubuntu-latest
     permissions:
@@ -215,6 +264,10 @@ jobs:
           retention-days: 7
 
   docs-build:
+    # Docs depend on docs/ sources, mkdocs.yml, and pdv-python sources
+    # (mkdocstrings introspects the package).
+    needs: filter
+    if: needs.filter.outputs.docs == 'true'
     name: Docs build
     runs-on: ubuntu-latest
     permissions:
