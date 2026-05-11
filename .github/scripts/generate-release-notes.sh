@@ -121,10 +121,10 @@ cat > release-notes.md <<EOF
 
 | Platform | File |
 |----------|------|
-| macOS (Apple Silicon) | \`PDV-${VERSION}-arm64.dmg\` |
-| Linux (portable) | \`PDV-${VERSION}.AppImage\` |
-| Linux (Debian/Ubuntu) | \`physics-data-viewer_${VERSION}_amd64.deb\` |
-| Linux (Fedora/RHEL) | \`PDV-${VERSION}.x86_64.rpm\` |
+| macOS (Apple Silicon) | [\`PDV-${VERSION}-arm64.dmg\`](https://github.com/${REPO}/releases/download/${TAG}/PDV-${VERSION}-arm64.dmg) |
+| Linux (portable) | [\`PDV-${VERSION}.AppImage\`](https://github.com/${REPO}/releases/download/${TAG}/PDV-${VERSION}.AppImage) |
+| Linux (Debian/Ubuntu) | [\`physics-data-viewer_${VERSION}_amd64.deb\`](https://github.com/${REPO}/releases/download/${TAG}/physics-data-viewer_${VERSION}_amd64.deb) |
+| Linux (Fedora/RHEL) | [\`physics-data-viewer-${VERSION}.x86_64.rpm\`](https://github.com/${REPO}/releases/download/${TAG}/physics-data-viewer-${VERSION}.x86_64.rpm) |
 
 > Other assets (\`.yml\`, \`.blockmap\`, \`.zip\`) are used internally by the auto-updater.
 
