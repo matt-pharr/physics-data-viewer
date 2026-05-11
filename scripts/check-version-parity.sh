@@ -33,7 +33,7 @@ echo
 SITES=(
     "pdv-python/pyproject.toml|^version = \"$CANONICAL\"\$"
     "electron/package.json|^[[:space:]]+\"version\": \"$CANONICAL\","
-    "README.md|\\\`v$CANONICAL\\\`"
+    "README.md|\`v$CANONICAL\`"
     "ARCHITECTURE.md|^\*\*Version\*\*: $CANONICAL\$"
     ".github/scripts/generate-release-notes.sh|e\.g\. v$CANONICAL"
     "examples/modules/N-pendulum/pdv-module.json|\"pdv_min\": \"$CANONICAL\""
