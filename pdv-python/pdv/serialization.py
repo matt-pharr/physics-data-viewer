@@ -335,14 +335,28 @@ def _verify_or_relocate_cached_file(
             os.path.join(working_dir, ".autosave"), node_uuid, filename
         )
         if os.path.exists(autosave_loc):
+            ensure_parent(canonical)
             try:
-                ensure_parent(canonical)
                 os.replace(autosave_loc, canonical)
                 return True
-            except OSError:
-                # Cross-device or permission failure — fall through and
-                # let the caller re-serialize. Safer than returning a
-                # descriptor we can't back with a file.
+            except OSError as exc:
+                # EXDEV (cross-device) is the realistic failure here —
+                # rare, since `.autosave/` is a subdir of saveDir, but
+                # bind-mounts and overlay filesystems can split them.
+                # Fall back to copy+remove so we don't orphan the
+                # autosave file on the source side.
+                import errno  # noqa: PLC0415
+                import shutil  # noqa: PLC0415
+                if getattr(exc, "errno", None) == errno.EXDEV:
+                    try:
+                        shutil.copy2(autosave_loc, canonical)
+                        os.remove(autosave_loc)
+                        return True
+                    except OSError:
+                        pass
+                # Permission failure or copy failure — re-serialize.
+                # Safer than returning a descriptor we can't back with
+                # a file.
                 return False
         return False
 
@@ -363,8 +377,8 @@ def _try_autosave_cache(
     tree_path: str,
     value: Any,
     source_dir: str,
-    hit_counter: "list[int] | None" = None,
-    working_dir: str = "",
+    hit_counter: "list[int] | None",
+    working_dir: str,
 ) -> "tuple[bytes | None, dict | None]":
     """Check autosave cache for an unchanged data node.
 
