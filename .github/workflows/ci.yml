@@ -10,6 +10,21 @@ on:
       - develop
 
 jobs:
+  version-parity:
+    name: Version parity
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # Fails the PR if electron/package.json, pdv-python/pyproject.toml,
+      # docs, example modules, and test fixtures don't all agree on the
+      # PDV version. Bump them in one shot with scripts/bump-version.sh.
+      - name: Check version parity
+        run: ./scripts/check-version-parity.sh
+
   build:
     runs-on: ubuntu-latest
     permissions:
