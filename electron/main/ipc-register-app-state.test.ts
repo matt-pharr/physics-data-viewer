@@ -74,7 +74,7 @@ vi.mock("electron", () => ({
   dialog: dialogMocks,
   shell: shellMocks,
   app: {
-    getVersion: () => "0.1.1-test",
+    getVersion: () => "0.1.2-test",
     quit: vi.fn(),
   },
 }));
