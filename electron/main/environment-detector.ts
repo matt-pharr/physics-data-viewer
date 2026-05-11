@@ -116,6 +116,14 @@ export interface EnvironmentInfo {
   pdvVersionMismatch: boolean;
   /** True when ``ipykernel`` is importable. */
   ipykernelInstalled: boolean;
+  /**
+   * True when the Python build is free-threaded (no-GIL, PEP 703).
+   * PDV's pyzmq-based comm stack is not free-thread-safe, so these
+   * environments cannot run a PDV kernel; the UI must block selection
+   * and surface a clear explanation rather than the misleading
+   * "ipykernel not installed" badge.
+   */
+  isFreeThreaded: boolean;
 }
 
 /**
@@ -476,6 +484,33 @@ export class EnvironmentDetector {
   }
 
   /**
+   * Check whether the Python build is free-threaded (PEP 703, no-GIL).
+   *
+   * Free-threaded builds report ``sys._is_gil_enabled() == False``. The
+   * function only exists on Python 3.13+, which is the only version where
+   * free-threaded builds are produced. Anything older — or any regular
+   * GIL-enabled build — returns false.
+   *
+   * @param pythonPath - Path to the Python executable to probe.
+   * @returns True when the interpreter is a free-threaded build.
+   */
+  static async checkIsFreeThreaded(pythonPath: string): Promise<boolean> {
+    try {
+      const { stdout } = await execFileAsync(
+        pythonPath,
+        [
+          "-c",
+          "import sys; print('FT' if hasattr(sys, '_is_gil_enabled') and not sys._is_gil_enabled() else 'OK')",
+        ],
+        { timeout: PROBE_TIMEOUT_MS }
+      );
+      return stdout.trim() === "FT";
+    } catch {
+      return false;
+    }
+  }
+
+  /**
    * Resolve the absolute path to the bundled ``pdv-python`` source directory.
    *
    * In packaged builds, ``pdv-python/`` is in ``process.resourcesPath``.
@@ -532,9 +567,10 @@ export class EnvironmentDetector {
   static async enrichEnvironment(
     env: DetectedEnvironment
   ): Promise<EnvironmentInfo> {
-    const [pdvStatus, ipykernelInstalled] = await Promise.all([
+    const [pdvStatus, ipykernelInstalled, isFreeThreaded] = await Promise.all([
       EnvironmentDetector.checkPDVInstalled(env.pythonPath),
       EnvironmentDetector.checkIpykernelInstalled(env.pythonPath),
+      EnvironmentDetector.checkIsFreeThreaded(env.pythonPath),
     ]);
 
     const appVersion = getAppVersion();
@@ -553,6 +589,7 @@ export class EnvironmentDetector {
       pdvCompatible: pdvStatus.compatible,
       pdvVersionMismatch,
       ipykernelInstalled,
+      isFreeThreaded,
     };
   }
 

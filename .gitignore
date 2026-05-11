@@ -21,7 +21,12 @@ electron/.mcp.json
 electron/playwright-report/
 electron/test-results/
 electron/e2e/.fixtures-cache/
-package-lock.json
+
+# Defensive: prevent accidentally committing a stray root-level
+# package-lock.json created by running `npm install` in the repo root
+# (there is no root package.json — the npm project lives under electron/).
+# electron/package-lock.json IS tracked and required.
+/package-lock.json
 
 pdv-icon.iconset
 

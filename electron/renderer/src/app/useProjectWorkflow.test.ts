@@ -239,7 +239,7 @@ describe("useProjectWorkflow.executeOpenProject", () => {
               checksum: "deadbeef0000",
               checksumValid: true,
               nodeCount: 3,
-              savedPdvVersion: "0.1.0",
+              savedPdvVersion: "0.1.1",
               projectName: "loaded-demo",
               missingFiles: undefined,
             })) as never,
@@ -258,7 +258,7 @@ describe("useProjectWorkflow.executeOpenProject", () => {
     expect(state.activeCellTab).toBe(7);
     expect(state.lastChecksum).toBe("deadbe");
     expect(state.checksumMismatch).toBe(false);
-    expect(state.savedPdvVersion).toBe("0.1.0");
+    expect(state.savedPdvVersion).toBe("0.1.1");
     expect(loadedProjectTabsRef.current).toEqual({
       tabs: [{ id: 7, code: "loaded" }],
       activeTabId: 7,

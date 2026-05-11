@@ -25,6 +25,24 @@ are implementation details and their interfaces may change.
 
 from __future__ import annotations
 
+import sys as _sys
+
+# PDV's kernel pipeline depends on pyzmq, jupyter_client, and ipykernel. None
+# of those declare themselves free-thread-safe yet (PEP 703), so importing
+# them on a no-GIL Python build fails inside pyzmq's C extension with a
+# cryptic "init function returned uninitialized object" error. Refuse to
+# import here with a clearer message instead. `_is_gil_enabled` was added in
+# Python 3.13 — the only version where free-threaded builds exist.
+if hasattr(_sys, "_is_gil_enabled") and not _sys._is_gil_enabled():
+    raise ImportError(
+        "pdv-python does not support free-threaded (no-GIL) Python builds. "
+        "Its dependencies (pyzmq, jupyter_client, ipykernel) are not yet "
+        "free-thread-safe. Use a standard (GIL-enabled) CPython build of "
+        "Python 3.10–3.14 instead. If your conda env is named '<x>t', it "
+        "is the free-threaded variant; create one with `conda create -n <x> "
+        "python=3.14` (no 't') and select that env in PDV."
+    )
+
 from pathlib import Path
 from typing import TYPE_CHECKING
 

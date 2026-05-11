@@ -249,7 +249,13 @@ export const EnvironmentSelector: React.FC<EnvironmentSelectorProps> = ({
   }, [juliaPath, onSelect]);
 
   // -- Can the user confirm selection? ---------------------------------------
-  const canConfirm = selectedInfo?.pdvInstalled && selectedInfo?.pdvCompatible;
+  // Free-threaded (no-GIL) Python builds cannot run a PDV kernel because
+  // pyzmq's C extension is not yet free-thread-safe. Block selection of
+  // such environments and explain rather than silently failing later.
+  const canConfirm =
+    selectedInfo?.pdvInstalled
+    && selectedInfo?.pdvCompatible
+    && !selectedInfo?.isFreeThreaded;
 
   // -- Render ----------------------------------------------------------------
 
@@ -295,6 +301,14 @@ export const EnvironmentSelector: React.FC<EnvironmentSelectorProps> = ({
               <span className="env-row-path">{env.pythonPath}</span>
             </span>
             <span className="env-row-badges">
+              {env.isFreeThreaded && (
+                <span
+                  className="env-badge env-badge--missing"
+                  title="Free-threaded (no-GIL) Python — not supported by PDV. pyzmq, jupyter_client, and ipykernel are not yet free-thread-safe."
+                >
+                  no-GIL
+                </span>
+              )}
               {env.pdvInstalled ? (
                 env.pdvVersionMismatch ? (
                   <span className="env-badge env-badge--warning" title={`Version mismatch: ${env.pdvVersion} (app: ${appVersion ?? '?'})`}>pdv {env.pdvVersion}</span>
@@ -324,8 +338,22 @@ export const EnvironmentSelector: React.FC<EnvironmentSelectorProps> = ({
         </button>
       </div>
 
-      {/* Install panel — visible when selected env needs pdv-python */}
-      {selectedInfo && (!selectedInfo.pdvInstalled || selectedInfo.pdvVersionMismatch) && (
+      {/* Free-threaded Python is unsupported — block install/confirm and explain. */}
+      {selectedInfo?.isFreeThreaded && (
+        <div className="env-install-panel">
+          <div className="env-install-header">
+            This is a free-threaded (no-GIL) Python build. PDV cannot run on
+            it — pyzmq, jupyter_client, and ipykernel are not yet
+            free-thread-safe. Select a standard (GIL-enabled) Python 3.10–3.14
+            instead. If this conda env is named &lt;name&gt;t (e.g. "314t"),
+            create a non-free-threaded one with{' '}
+            <code>conda create -n &lt;name&gt; python=3.14</code>.
+          </div>
+        </div>
+      )}
+
+      {/* Install panel — visible when selected env needs pdv-python (and is not free-threaded). */}
+      {selectedInfo && !selectedInfo.isFreeThreaded && (!selectedInfo.pdvInstalled || selectedInfo.pdvVersionMismatch) && (
         <div className="env-install-panel">
           <div className="env-install-header">
             {selectedInfo.pdvVersionMismatch

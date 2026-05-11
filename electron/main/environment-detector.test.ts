@@ -349,6 +349,7 @@ describe("EnvironmentDetector", () => {
       expect(info.pdvCompatible).toBe(true);
       expect(info.pdvVersionMismatch).toBe(false);
       expect(info.ipykernelInstalled).toBe(true);
+      expect(info.isFreeThreaded).toBe(false);
     });
 
     it("flags version mismatch when installed version differs from app version", async () => {
