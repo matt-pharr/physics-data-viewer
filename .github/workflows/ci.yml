@@ -74,8 +74,25 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 20
+          # Caches ~/.npm so npm fetch is hot on cache miss for the
+          # node_modules cache below. Keyed automatically on
+          # cache-dependency-path's hash.
+          cache: 'npm'
+          cache-dependency-path: electron/package-lock.json
+
+      # On a cache hit, electron/node_modules is restored as-is and the
+      # next step is skipped, saving 30-40s vs running `npm ci`. On a
+      # miss (package-lock.json changed, or new runner OS), the npm
+      # download cache from setup-node above still warms the install.
+      - name: Cache electron/node_modules
+        id: node-cache
+        uses: actions/cache@v4
+        with:
+          path: electron/node_modules
+          key: node-modules-${{ runner.os }}-${{ hashFiles('electron/package-lock.json') }}
 
       - name: Install Node dependencies
+        if: steps.node-cache.outputs.cache-hit != 'true'
         working-directory: electron
         run: |
           if [ -f package-lock.json ]; then
@@ -107,6 +124,8 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
           allow-prereleases: true
+          cache: 'pip'
+          cache-dependency-path: pdv-python/pyproject.toml
 
       - name: Install Python dependencies
         run: pip install ipykernel "pdv-python/[dev]"
@@ -131,16 +150,35 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 20
+          # Caches ~/.npm so npm fetch is hot on cache miss for the
+          # node_modules cache below. Keyed automatically on
+          # cache-dependency-path's hash.
+          cache: 'npm'
+          cache-dependency-path: electron/package-lock.json
 
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
+          cache: 'pip'
+          cache-dependency-path: pdv-python/pyproject.toml
 
       - name: Install Python dependencies
         run: pip install ipykernel "pdv-python/[dev]"
 
+      # On a cache hit, electron/node_modules is restored as-is and the
+      # next step is skipped, saving 30-40s vs running `npm ci`. On a
+      # miss (package-lock.json changed, or new runner OS), the npm
+      # download cache from setup-node above still warms the install.
+      - name: Cache electron/node_modules
+        id: node-cache
+        uses: actions/cache@v4
+        with:
+          path: electron/node_modules
+          key: node-modules-${{ runner.os }}-${{ hashFiles('electron/package-lock.json') }}
+
       - name: Install Node dependencies
+        if: steps.node-cache.outputs.cache-hit != 'true'
         working-directory: electron
         run: |
           if [ -f package-lock.json ]; then
@@ -169,8 +207,25 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 20
+          # Caches ~/.npm so npm fetch is hot on cache miss for the
+          # node_modules cache below. Keyed automatically on
+          # cache-dependency-path's hash.
+          cache: 'npm'
+          cache-dependency-path: electron/package-lock.json
+
+      # On a cache hit, electron/node_modules is restored as-is and the
+      # next step is skipped, saving 30-40s vs running `npm ci`. On a
+      # miss (package-lock.json changed, or new runner OS), the npm
+      # download cache from setup-node above still warms the install.
+      - name: Cache electron/node_modules
+        id: node-cache
+        uses: actions/cache@v4
+        with:
+          path: electron/node_modules
+          key: node-modules-${{ runner.os }}-${{ hashFiles('electron/package-lock.json') }}
 
       - name: Install Node dependencies
+        if: steps.node-cache.outputs.cache-hit != 'true'
         working-directory: electron
         run: |
           if [ -f package-lock.json ]; then
@@ -200,11 +255,18 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 20
+          # Caches ~/.npm so npm fetch is hot on cache miss for the
+          # node_modules cache below. Keyed automatically on
+          # cache-dependency-path's hash.
+          cache: 'npm'
+          cache-dependency-path: electron/package-lock.json
 
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
+          cache: 'pip'
+          cache-dependency-path: pdv-python/pyproject.toml
 
       - name: Install Python dependencies
         # xarray + netcdf4 needed by the round-trip checksum spec, which
@@ -212,7 +274,19 @@ jobs:
         # standard numpy/pandas/matplotlib node types.
         run: pip install ipykernel "pdv-python/[dev]" matplotlib numpy xarray netcdf4
 
+      # On a cache hit, electron/node_modules is restored as-is and the
+      # next step is skipped, saving 30-40s vs running `npm ci`. On a
+      # miss (package-lock.json changed, or new runner OS), the npm
+      # download cache from setup-node above still warms the install.
+      - name: Cache electron/node_modules
+        id: node-cache
+        uses: actions/cache@v4
+        with:
+          path: electron/node_modules
+          key: node-modules-${{ runner.os }}-${{ hashFiles('electron/package-lock.json') }}
+
       - name: Install Node dependencies
+        if: steps.node-cache.outputs.cache-hit != 'true'
         working-directory: electron
         run: |
           if [ -f package-lock.json ]; then
@@ -285,6 +359,10 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+          cache: 'pip'
+          cache-dependency-path: |
+            pdv-python/pyproject.toml
+            docs/requirements.txt
 
       - name: Install dependencies
         run: |
