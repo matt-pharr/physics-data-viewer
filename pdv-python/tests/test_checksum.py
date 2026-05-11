@@ -398,6 +398,44 @@ class TestAutosaveCache:
             "autosave copy should have been moved (rename), not duplicated"
         )
 
+    def test_autosave_after_explicit_save_leaves_canonical_file_in_place(self, tmp_path):
+        """Reverse direction of the relocation fix: after an explicit save
+        has written the canonical file under ``<saveDir>/tree/<uuid>/``, a
+        follow-up autosave with the same value must hit the cache and leave
+        the file where it is. The autosave's tree-index will reference that
+        UUID, and the recovery flow's ``copyFilesForLoad`` (which reads
+        ``<saveDir>/tree-index.json``) brings the file into the working dir
+        at load time — no second copy needs to live under ``.autosave/tree/``.
+        """
+        np = pytest.importorskip("numpy")
+        import os
+        from pdv.serialization import serialize_node
+
+        save_dir = str(tmp_path / "save")
+        autosave_dir = str(tmp_path / "save" / ".autosave")
+
+        cache: dict = {}
+        hits = [0]
+        arr = np.array([1.0, 2.0, 3.0])
+
+        first = serialize_node(
+            "x", arr, save_dir, autosave_cache=cache, autosave_hits=hits
+        )
+        canonical = os.path.join(save_dir, "tree", first["uuid"], "x.npy")
+        assert os.path.exists(canonical)
+
+        second = serialize_node(
+            "x", arr, autosave_dir, autosave_cache=cache, autosave_hits=hits
+        )
+        assert hits[0] == 1
+        assert second["uuid"] == first["uuid"]
+        # Canonical file untouched, no duplicate appears under .autosave/tree/.
+        assert os.path.exists(canonical)
+        autosave_copy = os.path.join(
+            autosave_dir, "tree", first["uuid"], "x.npy"
+        )
+        assert not os.path.exists(autosave_copy)
+
     def test_cache_hit_with_missing_file_forces_reserialize(self, tmp_path):
         """If the file backing a cached descriptor has gone missing entirely
         (no canonical copy, no .autosave copy), treat the cache entry as
