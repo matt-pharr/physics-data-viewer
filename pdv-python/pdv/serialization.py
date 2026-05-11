@@ -281,18 +281,104 @@ def detect_kind(value: Any) -> str:
     return KIND_UNKNOWN
 
 
+def _verify_or_relocate_cached_file(
+    descriptor: dict,
+    working_dir: str,
+) -> bool:
+    """Make a cache-hit descriptor's backing file reachable under ``working_dir``.
+
+    The autosave cache stores ``(digest, descriptor)`` pairs whose
+    ``storage.uuid`` was minted by whichever serialize call wrote the file.
+    For an autosave miss the file lands in ``<saveDir>/.autosave/tree/<uuid>/``;
+    for an explicit-save miss it lands in ``<saveDir>/tree/<uuid>/``. When the
+    *next* save sees a cache hit, the descriptor's UUID is reused verbatim —
+    but the file may not be where the new ``tree-index.json`` is going to claim
+    it is.
+
+    This helper closes that gap. For a file-backed descriptor it:
+
+    1. Returns True if the file is already at ``<working_dir>/tree/<uuid>/<filename>``.
+    2. Otherwise tries the sibling autosave dir (``<working_dir>/.autosave/...``)
+       and moves the file into the canonical location via ``os.replace`` —
+       same-volume rename is effectively free, so this is the cheap path that
+       lets an explicit save adopt files left behind by an autosave.
+    3. If ``working_dir`` itself ends in ``.autosave``, treats the parent's
+       ``tree/<uuid>/`` as a valid home too (a previous explicit save's file).
+       In that case no move happens — autosave recovery's overlay handles it.
+    4. Otherwise returns False so the caller falls through to re-serialize.
+
+    Inline (``backend != "local_file"``) descriptors are always valid.
+    """
+    import os  # noqa: PLC0415
+
+    storage = descriptor.get("storage", {})
+    if storage.get("backend") != "local_file":
+        return True
+    node_uuid = storage.get("uuid")
+    filename = storage.get("filename")
+    if not node_uuid or not filename:
+        return True
+
+    from pdv.environment import ensure_parent, uuid_tree_path  # noqa: PLC0415
+
+    canonical = uuid_tree_path(working_dir, node_uuid, filename)
+    if os.path.exists(canonical):
+        return True
+
+    working_norm = working_dir.rstrip(os.sep)
+    is_autosave_dir = os.path.basename(working_norm) == ".autosave"
+
+    if not is_autosave_dir:
+        # Explicit save: file may have been written by a previous autosave.
+        # Same-volume rename brings it into the canonical tree dir.
+        autosave_loc = uuid_tree_path(
+            os.path.join(working_dir, ".autosave"), node_uuid, filename
+        )
+        if os.path.exists(autosave_loc):
+            try:
+                ensure_parent(canonical)
+                os.replace(autosave_loc, canonical)
+                return True
+            except OSError:
+                # Cross-device or permission failure — fall through and
+                # let the caller re-serialize. Safer than returning a
+                # descriptor we can't back with a file.
+                return False
+        return False
+
+    # Autosave save: the canonical file may live in the parent's tree dir
+    # from a prior explicit save. The recovery overlay (overlayAutosaveTreeFiles)
+    # leaves canonical files in place at load time, and copyFilesForLoad has
+    # already brought them into the working dir.
+    parent = os.path.dirname(working_norm)
+    if parent:
+        parent_loc = uuid_tree_path(parent, node_uuid, filename)
+        if os.path.exists(parent_loc):
+            return True
+    return False
+
+
 def _try_autosave_cache(
     autosave_cache: "dict[str, tuple[bytes, dict]] | None",
     tree_path: str,
     value: Any,
     source_dir: str,
     hit_counter: "list[int] | None" = None,
+    working_dir: str = "",
 ) -> "tuple[bytes | None, dict | None]":
     """Check autosave cache for an unchanged data node.
 
     Returns ``(digest, cached_descriptor)`` on cache hit, ``(digest, None)``
     on miss, or ``(None, None)`` when caching is disabled. When provided,
     ``hit_counter[0]`` is incremented on every cache hit.
+
+    A "hit" is only returned when the cached descriptor's backing file is
+    reachable from ``working_dir`` — see :func:`_verify_or_relocate_cached_file`.
+    If the digest matches but the file has gone missing (e.g. the canonical
+    tree dir was wiped between sessions), the cache entry is dropped and the
+    caller falls back to re-serializing. This keeps ``tree-index.json`` and
+    the on-disk tree consistent even after the cache and the filesystem
+    drift apart.
     """
     if autosave_cache is None:
         return None, None
@@ -301,9 +387,13 @@ def _try_autosave_cache(
     digest = node_digest(value, source_dir)
     cached = autosave_cache.get(tree_path)
     if cached is not None and cached[0] == digest:
-        if hit_counter is not None:
-            hit_counter[0] += 1
-        return digest, cached[1]
+        if _verify_or_relocate_cached_file(cached[1], working_dir):
+            if hit_counter is not None:
+                hit_counter[0] += 1
+            return digest, cached[1]
+        # File can't be located. Drop the stale entry so the caller's
+        # re-serialize repopulates the cache with a fresh descriptor.
+        autosave_cache.pop(tree_path, None)
     return digest, None
 
 
@@ -523,7 +613,7 @@ def serialize_node(
         return descriptor
 
     if kind == KIND_NDARRAY:
-        _digest, _cached = _try_autosave_cache(autosave_cache, tree_path, value, _source_dir, autosave_hits)
+        _digest, _cached = _try_autosave_cache(autosave_cache, tree_path, value, _source_dir, autosave_hits, working_dir)
         if _cached is not None:
             return _cached
 
@@ -551,7 +641,7 @@ def serialize_node(
         # pickle. This avoids an external parquet-engine dependency and keeps
         # name/index/dtype/extension-type round-trips lossless. Users who want
         # parquet for interchange can write it themselves.
-        _digest, _cached = _try_autosave_cache(autosave_cache, tree_path, value, _source_dir, autosave_hits)
+        _digest, _cached = _try_autosave_cache(autosave_cache, tree_path, value, _source_dir, autosave_hits, working_dir)
         if _cached is not None:
             return _cached
 
@@ -606,7 +696,7 @@ def serialize_node(
                 "value": value,
             }
         else:
-            _digest, _cached = _try_autosave_cache(autosave_cache, tree_path, value, _source_dir, autosave_hits)
+            _digest, _cached = _try_autosave_cache(autosave_cache, tree_path, value, _source_dir, autosave_hits, working_dir)
             if _cached is not None:
                 return _cached
             node_uuid = generate_node_uuid()
@@ -690,7 +780,7 @@ def serialize_node(
         )
 
     if kind == KIND_BINARY:
-        _digest, _cached = _try_autosave_cache(autosave_cache, tree_path, value, _source_dir, autosave_hits)
+        _digest, _cached = _try_autosave_cache(autosave_cache, tree_path, value, _source_dir, autosave_hits, working_dir)
         if _cached is not None:
             return _cached
         node_uuid = generate_node_uuid()
@@ -707,7 +797,7 @@ def serialize_node(
         return descriptor
 
     # KIND_UNKNOWN — try a registered custom serializer before falling back to pickle.
-    _digest, _cached = _try_autosave_cache(autosave_cache, tree_path, value, _source_dir, autosave_hits)
+    _digest, _cached = _try_autosave_cache(autosave_cache, tree_path, value, _source_dir, autosave_hits, working_dir)
     if _cached is not None:
         return _cached
 
