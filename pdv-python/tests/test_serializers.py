@@ -183,7 +183,7 @@ def test_public_register_serializer_entry_point_roundtrip(tmp_path):
     """End-to-end test using ``pdv.register_serializer`` (the public API
     that module developers actually call), modeled on the n-pendulum example.
     """
-    import numpy as np
+    np = pytest.importorskip("numpy")
 
     import pdv
 
