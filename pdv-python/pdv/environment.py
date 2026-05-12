@@ -233,18 +233,30 @@ def _file_xxh3(path: str) -> bytes:
 
 
 def smart_copy(src: str, dst: str) -> None:
-    """Copy a file using the fastest available method.
+    """Copy a file using the fastest available method, atomically.
 
-    If *dst* already exists and is byte-identical to *src* (verified via
-    xxh3_128), the copy is skipped. If *dst* exists but differs, it is
-    replaced.
+    The copy is staged at a sibling ``<dst>.tmp`` and then renamed onto
+    *dst* via :func:`os.replace`. POSIX guarantees the rename is atomic
+    when source and destination are on the same volume — which is
+    always the case here because the temp is a sibling of *dst*. A
+    crash mid-copy therefore leaves *dst* either untouched (if the
+    rename hadn't happened) or fully-new; never torn. This is the
+    invariant that file-backed PDV nodes (PDVScript, PDVNote, PDVLib,
+    PDVGui, PDVNamelist, PDVFile) rely on for crash-safe in-place
+    overwrites: they reuse a stable UUID across saves and so the
+    canonical path is the same each save.
 
-    Attempts copy-on-write cloning first, falling back to a regular copy.
+    If *dst* already exists and is byte-identical to *src* (verified
+    via xxh3_128), the copy is skipped entirely with no I/O.
 
-    1. Python 3.14+ ``pathlib.Path.copy()`` (OS-level CoW on APFS, btrfs,
-       XFS, ZFS, etc.).
-    2. ``reflink_copy.reflink_or_copy()`` (optional dependency, Rust-backed).
-    3. ``shutil.copy2()`` (universal fallback, preserves metadata).
+    The underlying copy attempts copy-on-write cloning first, falling
+    back to a regular copy:
+
+    1. Python 3.14+ :meth:`pathlib.Path.copy` (OS-level CoW on APFS,
+       btrfs, XFS, ZFS, etc.).
+    2. :func:`reflink_copy.reflink_or_copy` (optional dependency,
+       Rust-backed).
+    3. :func:`shutil.copy2` (universal fallback, preserves metadata).
 
     Parent directories of *dst* are created automatically.
 
@@ -254,29 +266,48 @@ def smart_copy(src: str, dst: str) -> None:
         Absolute path to the source file.
     dst : str
         Absolute path to the destination file.
+
+    Raises
+    ------
+    OSError
+        Propagates errors from the underlying copy primitives. The
+        sibling ``<dst>.tmp`` is removed before the error propagates,
+        and *dst* itself is never modified on failure.
     """
     ensure_parent(dst)
 
+    # Fast-path: identical destination — skip all I/O.
     if os.path.exists(dst):
         if os.path.getsize(src) == os.path.getsize(dst) and _file_xxh3(src) == _file_xxh3(dst):
             return
-        os.remove(dst)
 
-    if hasattr(Path, "copy"):
-        Path(src).copy(Path(dst))
-        return
-
+    tmp = dst + ".tmp"
     try:
-        from reflink_copy import reflink_or_copy  # noqa: PLC0415
+        if hasattr(Path, "copy"):
+            Path(src).copy(Path(tmp))
+        else:
+            _copied = False
+            try:
+                from reflink_copy import reflink_or_copy  # noqa: PLC0415
 
-        reflink_or_copy(src, dst)
-        return
-    except ImportError:
-        pass
-    except OSError as exc:
-        logging.getLogger("pdv").warning(
-            "reflink_or_copy failed for %s -> %s: %s; falling back to shutil.copy2",
-            src, dst, exc,
-        )
-
-    shutil.copy2(src, dst)
+                reflink_or_copy(src, tmp)
+                _copied = True
+            except ImportError:
+                pass
+            except OSError as exc:
+                logging.getLogger("pdv").warning(
+                    "reflink_or_copy failed for %s -> %s: %s; falling back to shutil.copy2",
+                    src, tmp, exc,
+                )
+            if not _copied:
+                shutil.copy2(src, tmp)
+        os.replace(tmp, dst)
+    except BaseException:
+        # Clean up the temp on any failure (including KeyboardInterrupt
+        # and SystemExit) so the save dir doesn't accumulate `.tmp`
+        # detritus across crashed runs.
+        try:
+            os.remove(tmp)
+        except OSError:
+            pass
+        raise
