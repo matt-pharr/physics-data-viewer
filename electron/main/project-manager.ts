@@ -465,6 +465,12 @@ export class ProjectManager {
    * module-owned files) is already on disk. A crash during the
    * underlying rename leaves the prior ``project.json`` intact.
    *
+   * The ``saved_at`` timestamp on *manifest* is overwritten with the
+   * current time immediately before the write so it reflects the
+   * actual commit moment (not when {@link save} originally staged the
+   * manifest, which can be several hundred milliseconds earlier given
+   * the intervening module-file sync and per-module manifest writes).
+   *
    * @param saveDir - Absolute path to the project directory.
    * @param manifest - Manifest data to persist. Typically the
    *   ``pendingManifest`` returned by {@link save}, possibly with
@@ -474,7 +480,11 @@ export class ProjectManager {
    * @throws {Error} When the write or rename fails.
    */
   async commitProjectManifest(saveDir: string, manifest: ProjectManifest): Promise<void> {
-    await atomicWriteJson(path.join(saveDir, "project.json"), manifest);
+    const stamped: ProjectManifest = {
+      ...manifest,
+      saved_at: new Date().toISOString(),
+    };
+    await atomicWriteJson(path.join(saveDir, "project.json"), stamped);
   }
 
   /**

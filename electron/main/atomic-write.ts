@@ -14,6 +14,14 @@
  *      step is atomic when source and destination are on the same volume —
  *      which is always true here because the temp file is a sibling.
  *
+ * On Windows, Node's ``fs.rename`` uses ``MoveFileEx`` with
+ * ``MOVEFILE_REPLACE_EXISTING``; it is also atomic on the same volume.
+ * The realistic edge case is when the destination is held open by
+ * another process (antivirus scanning the file, an editor with a
+ * handle), in which case ``rename`` can fail with ``EBUSY``. Our
+ * cleanup removes the temp and propagates the error; the destination
+ * is never left torn either way.
+ *
  * After a process crash mid-write, the destination file is either
  * fully-old or fully-new; never torn. A stale ``.tmp`` may remain on
  * disk; it is harmless and gets overwritten on the next save. Matches
@@ -89,9 +97,15 @@ export async function atomicWriteFile(
  *
  * Thin wrapper around {@link atomicWriteFile} that handles the
  * stringification consistently — two-space indent, trailing newline —
- * to match the existing on-disk format of project artifacts. Callers
- * that need a different shape should call {@link atomicWriteFile}
- * directly.
+ * to match the existing on-disk format of project artifacts. The
+ * trailing ``\n`` matches POSIX text-file convention and the prior
+ * shape of ``pdv-module.json`` / ``module-index.json`` (the only
+ * artifacts that previously appended one); ``project.json`` and
+ * ``code-cells.json`` now gain it too, which is a one-byte cosmetic
+ * improvement on the next save.
+ *
+ * Callers that need a different shape should call
+ * {@link atomicWriteFile} directly.
  *
  * @param filePath - Absolute path of the JSON file to write.
  * @param value - JSON-serializable value.
@@ -105,7 +119,7 @@ export async function atomicWriteJson(
   value: unknown,
   indent: number = 2,
 ): Promise<void> {
-  const body = JSON.stringify(value, null, indent);
+  const body = JSON.stringify(value, null, indent) + "\n";
   await atomicWriteFile(filePath, body, "utf8");
 }
 
@@ -114,8 +128,13 @@ export async function atomicWriteJson(
  *
  * Creates the destination's parent directory on demand. The destination
  * is either fully replaced with ``src``'s contents or left untouched on
- * any error. Used by the save pipeline to mirror module-owned files
- * into ``<saveDir>/modules/<id>/`` without leaving torn copies.
+ * any error.
+ *
+ * Used by ``syncModuleOwnedFilesToSaveDir`` in
+ * ``ipc-register-project.ts`` so that mirroring an edited module-owned
+ * file (script, lib, gui, namelist, generic file) into
+ * ``<saveDir>/modules/<id>/<source_rel_path>`` cannot leave a torn copy
+ * if the process dies mid-copy.
  *
  * @param src - Absolute path of the source file.
  * @param dst - Absolute path of the destination file.

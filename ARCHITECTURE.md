@@ -1213,24 +1213,34 @@ User triggers save
     │                module_owned_files, module_manifests,
     │              }
     │
-    ├─► App writes code-cells.json to save directory
+    ├─► App writes code-cells.json to save directory (atomic)
     │
     ├─► App syncs module-owned file contents from the working dir
-    │       into <saveDir>/modules/<id>/<source_rel_path> (§5.13).
+    │       into <saveDir>/modules/<id>/<source_rel_path> (§5.13),
+    │       each copy staged at `<dest>.tmp` and renamed (atomic).
     │       Missing source files are swallowed (ENOENT logged, not
     │       thrown) so a mid-save deletion doesn't abort the save.
     │
     ├─► App stamps pdv-module.json + module-index.json into each
-    │       <saveDir>/modules/<id>/ from module_manifests (§7). This
-    │       makes in-session modules reloadable on the next project
-    │       load via the same v4 bind path used for imported modules.
+    │       <saveDir>/modules/<id>/ from module_manifests (§7), each
+    │       staged at `<dest>.tmp` and renamed (atomic). This makes
+    │       in-session modules reloadable on the next project load
+    │       via the same v4 bind path used for imported modules.
     │
-    ├─► App writes project.json to save directory
-    │       (only after kernel serialization, code-cells, module sync,
-    │        and manifest writing have all flushed)
+    ├─► App atomically writes project.json to save directory — this
+    │       is the **commit gate**. Until the rename onto project.json
+    │       completes, the prior project.json is byte-for-byte intact
+    │       and the loader sees the prior project state. After the
+    │       rename returns, every preceding write is already on disk;
+    │       "project.json exists and parses" is therefore sufficient
+    │       to know the save is complete.
     │
     └─► App updates title bar: "My Experiment"
 ```
+
+All on-disk writes in the save pipeline (`tree-index.json`, `code-cells.json`, per-module `pdv-module.json` / `module-index.json`, module-owned file copies, and `project.json`) are atomic: each is written to a sibling `.tmp` file and `rename`d onto its final path, so a process crash mid-save leaves the destination either fully-old or fully-new but never torn. `tree-index.json` is the kernel-side commit point for the tree (in `pdv-python/pdv/handlers/project.py`); `project.json`, written last by the app, is the overall commit gate that promises every other artifact is durable. See `docs/developer/save-pipeline.md` for the full atomicity audit.
+
+To prevent a concurrent module-settings IPC handler from silently overwriting the manifest snapshot taken inside `ProjectManager.save`, the entire save body runs inside `runSerializedProjectManifestMutation` (the same lock that `ipc-register-modules.ts` uses around its read-modify-write mutations of `project.json`). Lock order: save-lock (outer) → manifest-write-lock (inner). No deadlock: nothing acquires the save-lock while holding the manifest-write-lock.
 
 If the kernel responds with `status: "error"`, the app aborts the save, does not write `project.json`, and displays the error message to the user.
 
