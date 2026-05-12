@@ -808,3 +808,167 @@ class TestAddFile:
         assert os.path.exists(resolved)
         with open(resolved) as fh:
             assert fh.read() == "a,b\n1,2\n"
+
+
+class TestVerifyOrRelocateCachedFile:
+    """Tests for `_verify_or_relocate_cached_file` — the autosave-cache
+    descriptor reconciliation helper that decides whether a cached
+    UUID's backing file is reachable from a given working dir, moving
+    it from the sibling `.autosave/` tree into the canonical tree when
+    necessary."""
+
+    def _local_file_descriptor(self, node_uuid: str, filename: str) -> dict:
+        return {
+            "uuid": node_uuid,
+            "storage": {
+                "backend": "local_file",
+                "uuid": node_uuid,
+                "filename": filename,
+                "format": "npy",
+            },
+        }
+
+    def test_inline_descriptor_is_always_valid(self):
+        from pdv.serialization import _verify_or_relocate_cached_file
+
+        assert _verify_or_relocate_cached_file(
+            {"storage": {"backend": "inline"}}, "/anywhere"
+        ) is True
+
+    def test_returns_true_when_canonical_already_exists(self, tmp_path):
+        from pdv.environment import uuid_tree_path
+        from pdv.serialization import _verify_or_relocate_cached_file
+
+        node_uuid = "deadbeef0001"
+        canonical = uuid_tree_path(str(tmp_path), node_uuid, "x.npy")
+        os.makedirs(os.path.dirname(canonical), exist_ok=True)
+        with open(canonical, "wb") as fh:
+            fh.write(b"payload")
+
+        ok = _verify_or_relocate_cached_file(
+            self._local_file_descriptor(node_uuid, "x.npy"), str(tmp_path)
+        )
+        assert ok is True
+        # File untouched.
+        with open(canonical, "rb") as fh:
+            assert fh.read() == b"payload"
+
+    def test_relocates_from_autosave_sibling_via_os_replace(self, tmp_path):
+        # The common reconciliation path: a previous autosave wrote to
+        # `<saveDir>/.autosave/tree/<uuid>/`, and this explicit save
+        # needs the file at the canonical `<saveDir>/tree/<uuid>/`.
+        from pdv.environment import uuid_tree_path
+        from pdv.serialization import _verify_or_relocate_cached_file
+
+        node_uuid = "deadbeef0002"
+        autosave_path = uuid_tree_path(
+            str(tmp_path / ".autosave"), node_uuid, "x.npy"
+        )
+        os.makedirs(os.path.dirname(autosave_path), exist_ok=True)
+        with open(autosave_path, "wb") as fh:
+            fh.write(b"from-autosave")
+
+        ok = _verify_or_relocate_cached_file(
+            self._local_file_descriptor(node_uuid, "x.npy"), str(tmp_path)
+        )
+        assert ok is True
+
+        canonical = uuid_tree_path(str(tmp_path), node_uuid, "x.npy")
+        with open(canonical, "rb") as fh:
+            assert fh.read() == b"from-autosave"
+        # Source moved, not copied.
+        assert not os.path.exists(autosave_path)
+
+    def test_exdev_fallback_copies_to_tmp_then_replaces(
+        self, tmp_path, monkeypatch: pytest.MonkeyPatch
+    ):
+        # Force `os.replace(autosave_loc, canonical)` to raise EXDEV
+        # on its FIRST call (the cross-device rename of the source
+        # over the destination). The fallback path should then:
+        #   1. shutil.copy2 -> `canonical + ".tmp"`
+        #   2. os.replace(canonical_tmp, canonical) onto the destination
+        #   3. os.remove(autosave_loc) — best-effort
+        # and finally return True with the canonical file in place.
+        import errno
+        from pdv.environment import uuid_tree_path
+        from pdv.serialization import _verify_or_relocate_cached_file
+        import pdv.serialization as serialization_mod
+
+        node_uuid = "deadbeef0003"
+        autosave_path = uuid_tree_path(
+            str(tmp_path / ".autosave"), node_uuid, "x.npy"
+        )
+        os.makedirs(os.path.dirname(autosave_path), exist_ok=True)
+        with open(autosave_path, "wb") as fh:
+            fh.write(b"exdev-payload")
+
+        real_replace = os.replace
+        calls = {"count": 0}
+
+        def _fake_replace(src: str, dst: str) -> None:
+            calls["count"] += 1
+            # Only the FIRST replace (the direct autosave→canonical
+            # move) raises EXDEV. Subsequent replaces (the tmp→dst
+            # rename inside the fallback) are real, so the fallback
+            # can complete.
+            if calls["count"] == 1:
+                raise OSError(errno.EXDEV, "Invalid cross-device link")
+            real_replace(src, dst)
+
+        monkeypatch.setattr(os, "replace", _fake_replace)
+
+        ok = _verify_or_relocate_cached_file(
+            self._local_file_descriptor(node_uuid, "x.npy"), str(tmp_path)
+        )
+        assert ok is True
+
+        canonical = uuid_tree_path(str(tmp_path), node_uuid, "x.npy")
+        with open(canonical, "rb") as fh:
+            assert fh.read() == b"exdev-payload"
+        # Autosave source removed.
+        assert not os.path.exists(autosave_path)
+        # The canonical_tmp was renamed onto canonical, not left around.
+        assert not os.path.exists(canonical + ".tmp")
+        # Two replace calls: the failed direct one and the fallback's
+        # tmp→canonical rename.
+        assert calls["count"] == 2
+        # Quiet a lint warning about the unused import alias.
+        _ = serialization_mod
+
+    def test_exdev_fallback_returns_false_when_copy_fails(
+        self, tmp_path, monkeypatch: pytest.MonkeyPatch
+    ):
+        # If shutil.copy2 in the EXDEV branch raises, the helper must
+        # clean up any partial tmp and return False (so the caller
+        # falls through to re-serialize) rather than leave a torn
+        # canonical or a stray tmp.
+        import errno
+        import shutil
+        from pdv.environment import uuid_tree_path
+        from pdv.serialization import _verify_or_relocate_cached_file
+
+        node_uuid = "deadbeef0004"
+        autosave_path = uuid_tree_path(
+            str(tmp_path / ".autosave"), node_uuid, "x.npy"
+        )
+        os.makedirs(os.path.dirname(autosave_path), exist_ok=True)
+        with open(autosave_path, "wb") as fh:
+            fh.write(b"copy-will-fail")
+
+        def _exdev(src: str, dst: str) -> None:
+            raise OSError(errno.EXDEV, "Invalid cross-device link")
+
+        def _failing_copy2(src: str, dst: str) -> None:
+            raise OSError(13, "Permission denied")
+
+        monkeypatch.setattr(os, "replace", _exdev)
+        monkeypatch.setattr(shutil, "copy2", _failing_copy2)
+
+        ok = _verify_or_relocate_cached_file(
+            self._local_file_descriptor(node_uuid, "x.npy"), str(tmp_path)
+        )
+        assert ok is False
+        # Canonical was never written; tmp was cleaned up.
+        canonical = uuid_tree_path(str(tmp_path), node_uuid, "x.npy")
+        assert not os.path.exists(canonical)
+        assert not os.path.exists(canonical + ".tmp")
