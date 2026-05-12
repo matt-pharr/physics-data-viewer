@@ -5322,24 +5322,32 @@
 <a id="__codelineno-25-22" name="__codelineno-25-22" href="#__codelineno-25-22"></a>    │                module_owned_files, module_manifests,
 <a id="__codelineno-25-23" name="__codelineno-25-23" href="#__codelineno-25-23"></a>    │              }
 <a id="__codelineno-25-24" name="__codelineno-25-24" href="#__codelineno-25-24"></a>    │
-<a id="__codelineno-25-25" name="__codelineno-25-25" href="#__codelineno-25-25"></a>    ├─► App writes code-cells.json to save directory
+<a id="__codelineno-25-25" name="__codelineno-25-25" href="#__codelineno-25-25"></a>    ├─► App writes code-cells.json to save directory (atomic)
 <a id="__codelineno-25-26" name="__codelineno-25-26" href="#__codelineno-25-26"></a>    │
 <a id="__codelineno-25-27" name="__codelineno-25-27" href="#__codelineno-25-27"></a>    ├─► App syncs module-owned file contents from the working dir
-<a id="__codelineno-25-28" name="__codelineno-25-28" href="#__codelineno-25-28"></a>    │       into &lt;saveDir&gt;/modules/&lt;id&gt;/&lt;source_rel_path&gt; (§5.13).
-<a id="__codelineno-25-29" name="__codelineno-25-29" href="#__codelineno-25-29"></a>    │       Missing source files are swallowed (ENOENT logged, not
-<a id="__codelineno-25-30" name="__codelineno-25-30" href="#__codelineno-25-30"></a>    │       thrown) so a mid-save deletion doesn&#39;t abort the save.
-<a id="__codelineno-25-31" name="__codelineno-25-31" href="#__codelineno-25-31"></a>    │
-<a id="__codelineno-25-32" name="__codelineno-25-32" href="#__codelineno-25-32"></a>    ├─► App stamps pdv-module.json + module-index.json into each
-<a id="__codelineno-25-33" name="__codelineno-25-33" href="#__codelineno-25-33"></a>    │       &lt;saveDir&gt;/modules/&lt;id&gt;/ from module_manifests (§7). This
-<a id="__codelineno-25-34" name="__codelineno-25-34" href="#__codelineno-25-34"></a>    │       makes in-session modules reloadable on the next project
-<a id="__codelineno-25-35" name="__codelineno-25-35" href="#__codelineno-25-35"></a>    │       load via the same v4 bind path used for imported modules.
-<a id="__codelineno-25-36" name="__codelineno-25-36" href="#__codelineno-25-36"></a>    │
-<a id="__codelineno-25-37" name="__codelineno-25-37" href="#__codelineno-25-37"></a>    ├─► App writes project.json to save directory
-<a id="__codelineno-25-38" name="__codelineno-25-38" href="#__codelineno-25-38"></a>    │       (only after kernel serialization, code-cells, module sync,
-<a id="__codelineno-25-39" name="__codelineno-25-39" href="#__codelineno-25-39"></a>    │        and manifest writing have all flushed)
-<a id="__codelineno-25-40" name="__codelineno-25-40" href="#__codelineno-25-40"></a>    │
-<a id="__codelineno-25-41" name="__codelineno-25-41" href="#__codelineno-25-41"></a>    └─► App updates title bar: &quot;My Experiment&quot;
+<a id="__codelineno-25-28" name="__codelineno-25-28" href="#__codelineno-25-28"></a>    │       into &lt;saveDir&gt;/modules/&lt;id&gt;/&lt;source_rel_path&gt; (§5.13),
+<a id="__codelineno-25-29" name="__codelineno-25-29" href="#__codelineno-25-29"></a>    │       each copy staged at `&lt;dest&gt;.tmp` and renamed (atomic).
+<a id="__codelineno-25-30" name="__codelineno-25-30" href="#__codelineno-25-30"></a>    │       Missing source files are swallowed (ENOENT logged, not
+<a id="__codelineno-25-31" name="__codelineno-25-31" href="#__codelineno-25-31"></a>    │       thrown) so a mid-save deletion doesn&#39;t abort the save.
+<a id="__codelineno-25-32" name="__codelineno-25-32" href="#__codelineno-25-32"></a>    │
+<a id="__codelineno-25-33" name="__codelineno-25-33" href="#__codelineno-25-33"></a>    ├─► App stamps pdv-module.json + module-index.json into each
+<a id="__codelineno-25-34" name="__codelineno-25-34" href="#__codelineno-25-34"></a>    │       &lt;saveDir&gt;/modules/&lt;id&gt;/ from module_manifests (§7), each
+<a id="__codelineno-25-35" name="__codelineno-25-35" href="#__codelineno-25-35"></a>    │       staged at `&lt;dest&gt;.tmp` and renamed (atomic). This makes
+<a id="__codelineno-25-36" name="__codelineno-25-36" href="#__codelineno-25-36"></a>    │       in-session modules reloadable on the next project load
+<a id="__codelineno-25-37" name="__codelineno-25-37" href="#__codelineno-25-37"></a>    │       via the same v4 bind path used for imported modules.
+<a id="__codelineno-25-38" name="__codelineno-25-38" href="#__codelineno-25-38"></a>    │
+<a id="__codelineno-25-39" name="__codelineno-25-39" href="#__codelineno-25-39"></a>    ├─► App atomically writes project.json to save directory — this
+<a id="__codelineno-25-40" name="__codelineno-25-40" href="#__codelineno-25-40"></a>    │       is the **commit gate**. Until the rename onto project.json
+<a id="__codelineno-25-41" name="__codelineno-25-41" href="#__codelineno-25-41"></a>    │       completes, the prior project.json is byte-for-byte intact
+<a id="__codelineno-25-42" name="__codelineno-25-42" href="#__codelineno-25-42"></a>    │       and the loader sees the prior project state. After the
+<a id="__codelineno-25-43" name="__codelineno-25-43" href="#__codelineno-25-43"></a>    │       rename returns, every preceding write is already on disk;
+<a id="__codelineno-25-44" name="__codelineno-25-44" href="#__codelineno-25-44"></a>    │       &quot;project.json exists and parses&quot; is therefore sufficient
+<a id="__codelineno-25-45" name="__codelineno-25-45" href="#__codelineno-25-45"></a>    │       to know the save is complete.
+<a id="__codelineno-25-46" name="__codelineno-25-46" href="#__codelineno-25-46"></a>    │
+<a id="__codelineno-25-47" name="__codelineno-25-47" href="#__codelineno-25-47"></a>    └─► App updates title bar: &quot;My Experiment&quot;
 </code></pre></div>
+<p>All on-disk writes in the save pipeline (<code>tree-index.json</code>, <code>code-cells.json</code>, per-module <code>pdv-module.json</code> / <code>module-index.json</code>, module-owned file copies, and <code>project.json</code>) are atomic: each is written to a sibling <code>.tmp</code> file and <code>rename</code>d onto its final path, so a process crash mid-save leaves the destination either fully-old or fully-new but never torn. <code>tree-index.json</code> is the kernel-side commit point for the tree (in <code>pdv-python/pdv/handlers/project.py</code>); <code>project.json</code>, written last by the app, is the overall commit gate that promises every other artifact is durable. See <code>docs/developer/save-pipeline.md</code> for the full atomicity audit.</p>
+<p>To prevent a concurrent module-settings IPC handler from silently overwriting the manifest snapshot taken inside <code>ProjectManager.save</code>, the entire save body runs inside <code>runSerializedProjectManifestMutation</code> (the same lock that <code>ipc-register-modules.ts</code> uses around its read-modify-write mutations of <code>project.json</code>). Lock order: save-lock (outer) → manifest-write-lock (inner). No deadlock: nothing acquires the save-lock while holding the manifest-write-lock.</p>
 <p>If the kernel responds with <code>status: "error"</code>, the app aborts the save, does not write <code>project.json</code>, and displays the error message to the user.</p>
 <p>The module-owned file sync and the per-module manifest writer are both best-effort: errors are logged but never thrown, because by the time they run the kernel-side serialization (the authoritative part) has already succeeded and aborting would leave the save dir in a confusing half-saved state. A follow-up pass (#182) will move deletion propagation and overall robustness into the same lock.</p>
 <h3 id="82-load-sequence">8.2 Load Sequence<a class="headerlink" href="#82-load-sequence" title="Permanent link">&para;</a></h3>
