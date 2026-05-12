@@ -28,8 +28,6 @@ updates:
       semver-major-days: 14
       semver-minor-days: 7
       semver-patch-days: 7
-      include:
-        - "*"
     groups:
       actions-minor-patch:
         update-types:
@@ -46,8 +44,6 @@ updates:
       semver-major-days: 14
       semver-minor-days: 7
       semver-patch-days: 7
-      include:
-        - "*"
     groups:
       npm-minor-patch:
         update-types:
@@ -64,8 +60,6 @@ updates:
       semver-major-days: 14
       semver-minor-days: 7
       semver-patch-days: 7
-      include:
-        - "*"
     groups:
       pip-minor-patch:
         update-types:
