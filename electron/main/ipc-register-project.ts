@@ -50,6 +50,15 @@ interface RegisterProjectIpcHandlersOptions {
   setPendingModuleSettings: (settings: Record<string, Record<string, unknown>>) => void;
   clearModuleHealthWarnings: () => void;
   refreshProjectModuleHealth: (dir: string | null) => Promise<ProjectManifest | null>;
+  /**
+   * Run *fn* serially against any other ``project.json`` mutation. Same
+   * lock that ``ipc-register-modules.ts`` takes around its read-modify-write
+   * settings/imports mutations; acquired here around the whole explicit
+   * save body so a module-settings update can't race the manifest
+   * snapshot taken inside ``ProjectManager.save`` and get silently
+   * overwritten by the final ``commitProjectManifest``.
+   */
+  runSerializedProjectManifestMutation: <T>(dir: string, task: () => Promise<T>) => Promise<T>;
   getMainWindow: () => BrowserWindow | null;
   getInterpreterPath: () => string | undefined;
   /** Called after a successful explicit save to clean up autosave state. */
@@ -240,6 +249,7 @@ export function registerProjectIpcHandlers(
     setPendingModuleSettings,
     clearModuleHealthWarnings,
     refreshProjectModuleHealth,
+    runSerializedProjectManifestMutation,
     getMainWindow,
     getInterpreterPath,
     onExplicitSaveCompleted,
@@ -284,7 +294,15 @@ export function registerProjectIpcHandlers(
         // `pendingManifest` is the manifest staged by `save()` carrying any
         // pre-existing modules/settings forward. Pending imports merge into
         // it below, then it gets committed atomically at the end.
-        const finalManifest: ProjectManifest = saveResult.pendingManifest!;
+        // The check on `missingFiles.length` above guarantees this is
+        // present; the runtime guard is belt-and-suspenders so the type
+        // narrows cleanly without a non-null assertion.
+        const finalManifest: ProjectManifest | undefined = saveResult.pendingManifest;
+        if (!finalManifest) {
+          throw new Error(
+            "[project:save] internal invariant: ProjectManager.save did not return a pendingManifest despite no missingFiles",
+          );
+        }
 
         const pendingModuleImports = getPendingModuleImports();
         const pendingModuleSettings = getPendingModuleSettings();
@@ -342,15 +360,27 @@ export function registerProjectIpcHandlers(
       // gate treats explicit saves the same as autosaves — both put a
       // pdv.project.save comm on the kernel's shell channel, so cells must
       // wait either way to avoid the queue-stuck symptom.
-      return projectManager.runWithSaveLock(async () => {
-        const win = getMainWindow();
-        win?.webContents.send(IPC.push.autosaveStarted);
-        try {
-          return await doSave();
-        } finally {
-          win?.webContents.send(IPC.push.autosaveEnded);
-        }
-      });
+      //
+      // The body also runs inside `runSerializedProjectManifestMutation`
+      // so concurrent module IPC handlers (which take that lock around
+      // their read-modify-write of project.json) can't land an update
+      // between `ProjectManager.save` reading the current manifest and
+      // `commitProjectManifest` atomically writing the merged result.
+      // Lock order: save-lock (outer) → manifest-write-lock (inner).
+      // No deadlock: nothing acquires save-lock while holding the
+      // manifest-write-lock (autosave doesn't touch project.json, and
+      // module handlers don't take the save-lock).
+      return projectManager.runWithSaveLock(async () =>
+        runSerializedProjectManifestMutation(saveDir, async () => {
+          const win = getMainWindow();
+          win?.webContents.send(IPC.push.autosaveStarted);
+          try {
+            return await doSave();
+          } finally {
+            win?.webContents.send(IPC.push.autosaveEnded);
+          }
+        }),
+      );
     }
   );
 

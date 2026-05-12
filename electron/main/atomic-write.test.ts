@@ -79,17 +79,22 @@ describe("atomicWriteJson", () => {
     await fs.rm(tmpDir, { recursive: true, force: true });
   });
 
-  it("stringifies with two-space indent by default", async () => {
+  it("stringifies with two-space indent and a trailing newline by default", async () => {
     const dest = path.join(tmpDir, "out.json");
     await atomicWriteJson(dest, { a: 1, nested: { b: 2 } });
     const body = await fs.readFile(dest, "utf8");
-    expect(body).toBe('{\n  "a": 1,\n  "nested": {\n    "b": 2\n  }\n}');
+    // Trailing newline matches POSIX text-file convention and the prior
+    // shape of pdv-module.json / module-index.json (the only project
+    // artifacts that previously appended one). Migrating project.json
+    // and code-cells.json onto the same convention is a one-byte diff
+    // on the next save — strictly an improvement.
+    expect(body).toBe('{\n  "a": 1,\n  "nested": {\n    "b": 2\n  }\n}\n');
   });
 
-  it("respects a custom indent", async () => {
+  it("respects a custom indent and still ends with a newline", async () => {
     const dest = path.join(tmpDir, "out.json");
     await atomicWriteJson(dest, { a: 1 }, 0);
-    expect(await fs.readFile(dest, "utf8")).toBe('{"a":1}');
+    expect(await fs.readFile(dest, "utf8")).toBe('{"a":1}\n');
   });
 });
 

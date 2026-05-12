@@ -284,6 +284,83 @@ describe("ProjectManager", () => {
       const pjStat = await fs.stat(path.join(tmpDir, "project.json"));
       expect(cbStat.birthtimeMs).toBeLessThanOrEqual(pjStat.birthtimeMs);
     });
+
+    it("commitProjectManifest leaves the prior project.json intact when the rename fails", async () => {
+      // Simulates a crash-equivalent: the .tmp gets written but the
+      // rename cannot complete because the project directory is read-only.
+      // The prior project.json (with old content) must still be on disk.
+      const { router, requestMock } = makeMockRouter();
+      requestMock.mockResolvedValue(makeOkResponse({ checksum: "new" }));
+
+      // Plant a "previous save" with known content.
+      const existing = JSON.stringify({
+        schema_version: "1.1",
+        saved_at: "2026-01-01T00:00:00.000Z",
+        pdv_version: "0.0.0-prev",
+        tree_checksum: "prev-checksum",
+        language: "python",
+        project_name: "prev",
+        modules: [],
+        module_settings: {},
+      });
+      await fs.writeFile(path.join(tmpDir, "project.json"), existing);
+
+      const pm = new ProjectManager(router);
+      const result = await pm.save(tmpDir, EMPTY_CELLS, { projectName: "next" });
+      expect(result.pendingManifest).toBeDefined();
+
+      // Lock the directory so atomicWriteJson's rename(<tmp>, project.json)
+      // fails. On POSIX, removing write+exec on the parent dir is the
+      // simplest way to force EACCES on the rename.
+      await fs.chmod(tmpDir, 0o555);
+      try {
+        await expect(
+          pm.commitProjectManifest(tmpDir, result.pendingManifest!),
+        ).rejects.toThrow();
+      } finally {
+        // Restore so cleanup can run.
+        await fs.chmod(tmpDir, 0o755);
+      }
+
+      // Critically: the prior project.json content is byte-for-byte
+      // intact. Atomic-write never overwrote it because the rename
+      // never succeeded.
+      const after = await fs.readFile(path.join(tmpDir, "project.json"), "utf8");
+      expect(JSON.parse(after).tree_checksum).toBe("prev-checksum");
+      expect(JSON.parse(after).project_name).toBe("prev");
+
+      // The temp may or may not exist depending on whether the rename
+      // failed before or after the temp was created. Either way, it
+      // never replaced the destination. Best-effort cleanup so other
+      // tests aren't affected.
+      await fs.rm(path.join(tmpDir, "project.json.tmp"), { force: true });
+    });
+
+    it("commitProjectManifest stamps saved_at fresh at write time", async () => {
+      const { router, requestMock } = makeMockRouter();
+      requestMock.mockResolvedValue(makeOkResponse({ checksum: "c" }));
+
+      const pm = new ProjectManager(router);
+      const result = await pm.save(tmpDir, EMPTY_CELLS);
+
+      // Mutate the staged manifest's saved_at to a sentinel value the
+      // commit must override (otherwise the timestamp would drift
+      // between staging and commit).
+      const staged = result.pendingManifest!;
+      staged.saved_at = "1970-01-01T00:00:00.000Z";
+
+      const before = Date.now();
+      await pm.commitProjectManifest(tmpDir, staged);
+      const after = Date.now();
+
+      const written = JSON.parse(
+        await fs.readFile(path.join(tmpDir, "project.json"), "utf8"),
+      );
+      const writtenMs = Date.parse(written.saved_at);
+      expect(writtenMs).toBeGreaterThanOrEqual(before);
+      expect(writtenMs).toBeLessThanOrEqual(after);
+      expect(written.saved_at).not.toBe("1970-01-01T00:00:00.000Z");
+    });
   });
 
   // -------------------------------------------------------------------------

@@ -354,17 +354,33 @@ def _verify_or_relocate_cached_file(
                 import errno  # noqa: PLC0415
                 import shutil  # noqa: PLC0415
                 if getattr(exc, "errno", None) == errno.EXDEV:
+                    # Cross-device rename failed; stage to a sibling
+                    # `.tmp` on the destination volume and atomically
+                    # replace. This keeps the canonical path either
+                    # fully-old or fully-new even if a crash happens
+                    # between the copy and the rename.
+                    canonical_tmp = canonical + ".tmp"
                     try:
-                        shutil.copy2(autosave_loc, canonical)
+                        shutil.copy2(autosave_loc, canonical_tmp)
                     except OSError:
-                        # Copy failed — re-serialize. Safer than returning
-                        # a descriptor we can't back with a file.
+                        try:
+                            os.remove(canonical_tmp)
+                        except OSError:
+                            pass
                         return False
-                    # Copy succeeded. Best-effort remove of the autosave
-                    # source; failure here just leaves an orphan that the
-                    # autosave's own `_purge_orphaned_tree_files` will
-                    # collect on its next run. The canonical file is in
-                    # place, so the descriptor is valid.
+                    try:
+                        os.replace(canonical_tmp, canonical)
+                    except OSError:
+                        try:
+                            os.remove(canonical_tmp)
+                        except OSError:
+                            pass
+                        return False
+                    # Canonical is in place. Best-effort remove of the
+                    # autosave source; failure here just leaves an
+                    # orphan that the autosave's own
+                    # `_purge_orphaned_tree_files` will collect on its
+                    # next run.
                     try:
                         os.remove(autosave_loc)
                     except OSError:
