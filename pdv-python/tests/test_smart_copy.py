@@ -146,3 +146,42 @@ class TestSmartCopy:
         smart_copy(str(src), str(dst))
         assert copy_calls == []
         assert not (tmp_path / "dst.txt.tmp").exists()
+
+    def test_stale_tmp_from_prior_crash_is_swept_on_fast_path(
+        self, tmp_path: os.PathLike
+    ) -> None:
+        # If a previous SIGKILL or power loss left a `<dst>.tmp` behind,
+        # smart_copy on the next byte-identical save must still sweep
+        # it. Without the sweep, the stale tmp would persist
+        # indefinitely because the byte-identical fast path returns
+        # without ever touching the tmp path.
+        src = tmp_path / "src.txt"
+        src.write_text("intended")
+        dst = tmp_path / "dst.txt"
+        dst.write_text("intended")  # byte-identical to src
+        stale = tmp_path / "dst.txt.tmp"
+        stale.write_bytes(b"garbage from previous crash")
+
+        smart_copy(str(src), str(dst))
+
+        assert dst.read_text() == "intended"
+        assert not stale.exists()
+
+    def test_stale_tmp_swept_when_actual_write_happens(
+        self, tmp_path: os.PathLike
+    ) -> None:
+        # When the contents differ and a real write is needed, the
+        # stale tmp from a prior crash must be unlinked before staging
+        # the new copy — otherwise the next write could land bytes
+        # that share a path with stale data.
+        src = tmp_path / "src.txt"
+        src.write_text("new content")
+        dst = tmp_path / "dst.txt"
+        dst.write_text("old content")  # differs from src
+        stale = tmp_path / "dst.txt.tmp"
+        stale.write_bytes(b"garbage from previous crash")
+
+        smart_copy(str(src), str(dst))
+
+        assert dst.read_text() == "new content"
+        assert not stale.exists()

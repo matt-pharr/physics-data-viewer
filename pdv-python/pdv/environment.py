@@ -258,7 +258,25 @@ def smart_copy(src: str, dst: str) -> None:
        Rust-backed).
     3. :func:`shutil.copy2` (universal fallback, preserves metadata).
 
-    Parent directories of *dst* are created automatically.
+    Stale ``<dst>.tmp`` from a prior crash is unlinked at the top of
+    the copy attempt. The in-process ``BaseException`` cleanup at the
+    end only covers crashes the process notices; an external
+    ``SIGKILL`` or power loss leaves the temp behind, so the next
+    save's fast-path-skip case would otherwise let it linger.
+    ``Path.copy`` (3.14+) is documented to overwrite by default, and
+    both ``reflink_or_copy`` and ``shutil.copy2`` overwrite by default,
+    so the unlink is belt-and-suspenders — but it also keeps the save
+    directory tidy.
+
+    Concurrency note: the tmp name is deterministic (``<dst>.tmp``).
+    Today PDV serializes saves through the kernel, so only one writer
+    is in flight for a given path at a time. If multi-window / Session
+    work ever introduces two concurrent writers targeting the same
+    UUID file, the tmp name will need a per-writer suffix to avoid
+    collision; see ``project_multi_window`` notes.
+
+    Parent directories of *dst* are created automatically when a write
+    is actually needed (fast-path-skip skips the ``mkdir`` too).
 
     Parameters
     ----------
@@ -274,24 +292,39 @@ def smart_copy(src: str, dst: str) -> None:
         sibling ``<dst>.tmp`` is removed before the error propagates,
         and *dst* itself is never modified on failure.
     """
-    ensure_parent(dst)
+    tmp = dst + ".tmp"
+    # Sweep any stale temp left by a previous crashed save *before*
+    # the fast-path check, so a byte-identical save still cleans up
+    # after a prior SIGKILL or power loss. One extra `unlink` syscall
+    # per call is a small price for not accumulating tmp detritus in
+    # the save directory across crashed runs. All three underlying
+    # primitives below also overwrite an existing tmp, so this is
+    # belt-and-suspenders for the actual-write path.
+    try:
+        os.remove(tmp)
+    except FileNotFoundError:
+        pass
+    except OSError:
+        # Permission failure on cleanup: let the copy attempt below
+        # surface a clearer error from the actual write path.
+        pass
 
-    # Fast-path: identical destination — skip all I/O.
+    # Fast-path: identical destination — skip the rest of the I/O.
     if os.path.exists(dst):
         if os.path.getsize(src) == os.path.getsize(dst) and _file_xxh3(src) == _file_xxh3(dst):
             return
 
-    tmp = dst + ".tmp"
+    ensure_parent(dst)
     try:
         if hasattr(Path, "copy"):
             Path(src).copy(Path(tmp))
         else:
-            _copied = False
+            copied = False
             try:
                 from reflink_copy import reflink_or_copy  # noqa: PLC0415
 
                 reflink_or_copy(src, tmp)
-                _copied = True
+                copied = True
             except ImportError:
                 pass
             except OSError as exc:
@@ -299,13 +332,13 @@ def smart_copy(src: str, dst: str) -> None:
                     "reflink_or_copy failed for %s -> %s: %s; falling back to shutil.copy2",
                     src, tmp, exc,
                 )
-            if not _copied:
+            if not copied:
                 shutil.copy2(src, tmp)
         os.replace(tmp, dst)
     except BaseException:
         # Clean up the temp on any failure (including KeyboardInterrupt
         # and SystemExit) so the save dir doesn't accumulate `.tmp`
-        # detritus across crashed runs.
+        # detritus across in-process failures.
         try:
             os.remove(tmp)
         except OSError:
