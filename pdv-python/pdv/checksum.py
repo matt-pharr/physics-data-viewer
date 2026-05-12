@@ -120,6 +120,8 @@ def _feed_node(h: xxhash.xxh3_128, node: Any, working_dir: str | None) -> None:
         KIND_NDARRAY,
         KIND_DATAFRAME,
         KIND_SERIES,
+        KIND_DATASET,
+        KIND_DATAARRAY,
         KIND_SCRIPT,
         KIND_MARKDOWN,
         KIND_GUI,
@@ -243,6 +245,32 @@ def _feed_node(h: xxhash.xxh3_128, node: Any, working_dir: str | None) -> None:
         else:
             _feed_str(h, repr(node.tolist()))
 
+    elif kind == KIND_DATAARRAY:
+        h.update(b"dataarray\x00")
+        _feed_xarray_array(
+            h, str(node.name) if node.name is not None else "", node
+        )
+        coord_names = sorted(node.coords, key=str)
+        h.update(struct.pack("<Q", len(coord_names)))
+        for cname in coord_names:
+            _feed_xarray_array(h, str(cname), node.coords[cname])
+
+    elif kind == KIND_DATASET:
+        h.update(b"dataset\x00")
+        var_names = sorted(node.data_vars, key=str)
+        h.update(struct.pack("<Q", len(var_names)))
+        for vname in var_names:
+            _feed_xarray_array(h, str(vname), node[vname])
+        coord_names = sorted(node.coords, key=str)
+        h.update(struct.pack("<Q", len(coord_names)))
+        for cname in coord_names:
+            _feed_xarray_array(h, str(cname), node.coords[cname])
+        attr_keys = sorted(node.attrs.keys(), key=str)
+        h.update(struct.pack("<Q", len(attr_keys)))
+        for key in attr_keys:
+            _feed_str(h, str(key))
+            _feed_str(h, repr(node.attrs[key]))
+
     # ------------------------------------------------------------------
     # File-backed nodes intentionally do NOT hash ``relative_path``:
     # it is a storage-layout detail that drifts across save/load cycles
@@ -280,6 +308,34 @@ def _feed_node(h: xxhash.xxh3_128, node: Any, working_dir: str | None) -> None:
     else:  # KIND_UNKNOWN (and KIND_FILE base class, if encountered)
         h.update(b"unknown\x00")
         _feed_str(h, repr(node))
+
+
+def _feed_xarray_array(h: xxhash.xxh3_128, name: str, da: Any) -> None:
+    """Feed the bare content of an xarray.DataArray (name, dims, dtype,
+    shape, raw values, attrs) into ``h``. Coordinates are *not* recursed
+    into here — callers hash coords as a separate, flat sequence so a
+    Dataset's shared coords are fed once instead of once per data_var.
+    """
+    import numpy as np  # noqa: PLC0415
+
+    _feed_str(h, name)
+    h.update(struct.pack("<Q", len(da.dims)))
+    for dim in da.dims:
+        _feed_str(h, str(dim))
+    _feed_str(h, str(da.dtype))
+    h.update(struct.pack("<Q", len(da.shape)))
+    for d in da.shape:
+        h.update(struct.pack("<Q", d))
+    values = np.asarray(da.values)
+    if values.dtype.kind in ("f", "i", "u", "c", "b"):
+        h.update(np.ascontiguousarray(values))
+    else:
+        _feed_str(h, repr(values.tolist()))
+    attr_keys = sorted(da.attrs.keys(), key=str)
+    h.update(struct.pack("<Q", len(attr_keys)))
+    for key in attr_keys:
+        _feed_str(h, str(key))
+        _feed_str(h, repr(da.attrs[key]))
 
 
 def _feed_str(h: xxhash.xxh3_128, s: str) -> None:
