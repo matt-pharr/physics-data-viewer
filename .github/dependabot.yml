@@ -23,11 +23,11 @@ updates:
     schedule:
       interval: "weekly"
     target-branch: "develop"
+    # github-actions tags aren't formal semver, so only default-days
+    # is supported here — semver-{major,minor,patch}-days are rejected
+    # by Dependabot's validator for this ecosystem.
     cooldown:
       default-days: 7
-      semver-major-days: 14
-      semver-minor-days: 7
-      semver-patch-days: 7
     groups:
       actions-minor-patch:
         update-types:
