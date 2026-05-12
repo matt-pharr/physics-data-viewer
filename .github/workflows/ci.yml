@@ -35,13 +35,16 @@ jobs:
           filters: |
             python:
               - 'pdv-python/**'
+              - '.github/workflows/ci.yml'
             electron:
               - 'electron/**'
+              - '.github/workflows/ci.yml'
             docs:
               - 'docs/**'
               - 'mkdocs.yml'
               - 'pdv-python/**'
               - '*.md'
+              - '.github/workflows/ci.yml'
 
   version-parity:
     name: Version parity
