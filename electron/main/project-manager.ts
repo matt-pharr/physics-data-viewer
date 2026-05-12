@@ -7,8 +7,11 @@
  * Save coordination (ARCHITECTURE.md §8.1):
  * 1. App sends ``pdv.project.save`` comm → kernel writes tree + tree-index.json.
  * 2. Kernel responds with checksum.
- * 3. App writes code-cells.json.
- * 4. App writes project.json (only on full success).
+ * 3. App writes code-cells.json (atomic).
+ * 4. App copies module-owned files + writes per-module manifests (atomic).
+ * 5. App atomically writes project.json — the last write, and the commit
+ *    gate for the entire save. If a crash happens before step 5, the
+ *    prior project.json is untouched and the project still loads.
  *
  * Load coordination (ARCHITECTURE.md §8.2):
  * 1. App sends ``pdv.project.load`` comm with save_dir.
@@ -33,6 +36,7 @@ import {
   type PDVProjectSaveResponsePayload,
 } from "./pdv-protocol";
 import type { CodeCellData } from "./ipc";
+import { atomicWriteJson } from "./atomic-write";
 import * as fs from "fs/promises";
 import * as path from "path";
 import * as os from "os";
@@ -276,22 +280,6 @@ export class ProjectManager {
   }
 
   /**
-   * Save the current project to a directory.
-   *
-   * Implements the full save sequence from ARCHITECTURE.md §8.1:
-   * 1. Send ``pdv.project.save`` comm and await the kernel's response.
-   * 2. Write ``code-cells.json`` to ``saveDir``.
-   * 3. Write ``project.json`` to ``saveDir`` (only on full success).
-   *
-   * If the kernel responds with ``status: 'error'``, this method re-throws
-   * the comm error and does **not** write ``project.json``.
-   *
-   * @param saveDir - Absolute path to the project directory.
-   * @param codeCells - The current code-cell state from the renderer.
-   * @throws {PDVCommError} When the kernel responds with status='error'.
-   */
-
-  /**
    * Pre-computed kernel serialization results, keyed by saveDir.
    *
    * Populated by the ``pdv.project.save_completed`` push handler when
@@ -336,6 +324,39 @@ export class ProjectManager {
     this._cachedKernelResults.clear();
   }
 
+  /**
+   * Serialize the tree, write ``code-cells.json``, and prepare a
+   * ``project.json`` manifest ready for the caller to commit.
+   *
+   * Implements steps 1–3 of the save sequence in ARCHITECTURE.md §8.1:
+   *
+   * 1. Send ``pdv.project.save`` comm and await the kernel's response —
+   *    kernel writes data files and ``tree-index.json`` atomically.
+   * 2. Atomically write ``code-cells.json`` to ``saveDir``.
+   * 3. Build a {@link ProjectManifest} carrying any existing modules and
+   *    settings forward. **Does not write ``project.json``.** The caller
+   *    runs the remaining side effects (pending-module imports, module
+   *    file sync, per-module manifests) and then commits the manifest via
+   *    {@link commitProjectManifest}, which performs the atomic write.
+   *
+   * Splitting the write of ``project.json`` out of this method lets the
+   * IPC handler order it as the last file touched on disk, so a crash
+   * anywhere before {@link commitProjectManifest} leaves the prior
+   * ``project.json`` intact and the project still openable.
+   *
+   * If the kernel reports missing backing files, the method returns
+   * early with ``missingFiles`` populated and ``pendingManifest`` unset;
+   * neither ``code-cells.json`` nor ``project.json`` are written.
+   *
+   * @param saveDir - Absolute path to the project directory.
+   * @param codeCells - The current code-cell state from the renderer.
+   * @param options - Save-time metadata (language, interpreter path,
+   *   project name). Each is carried into the returned manifest.
+   * @returns Kernel save metadata plus a ``pendingManifest`` the caller
+   *   must commit. ``pendingManifest`` is omitted when ``missingFiles``
+   *   is non-empty (the save was aborted).
+   * @throws {PDVCommError} When the kernel responds with status='error'.
+   */
   async save(
     saveDir: string,
     codeCells: CodeCellData,
@@ -346,6 +367,7 @@ export class ProjectManager {
     moduleOwnedFiles: ModuleOwnedFile[];
     moduleManifests: ModuleManifestBundle[];
     missingFiles: string[];
+    pendingManifest?: ProjectManifest;
   }> {
     assertCodeCellData(codeCells);
 
@@ -403,11 +425,7 @@ export class ProjectManager {
       return { checksum, nodeCount, moduleOwnedFiles, moduleManifests, missingFiles };
     }
 
-    await fs.writeFile(
-      path.join(saveDir, "code-cells.json"),
-      JSON.stringify(codeCells, null, 2),
-      "utf8"
-    );
+    await atomicWriteJson(path.join(saveDir, "code-cells.json"), codeCells);
 
     let existingModules: ProjectModuleImport[] = [];
     let existingModuleSettings: Record<string, Record<string, unknown>> = {};
@@ -422,7 +440,7 @@ export class ProjectManager {
     } catch {
       // No prior manifest or unreadable — start fresh.
     }
-    const manifest: ProjectManifest = {
+    const pendingManifest: ProjectManifest = {
       schema_version: SCHEMA_VERSION,
       saved_at: new Date().toISOString(),
       pdv_version: getAppVersion(),
@@ -433,14 +451,40 @@ export class ProjectManager {
       modules: existingModules,
       module_settings: existingModuleSettings,
     };
-    await fs.writeFile(
-      path.join(saveDir, "project.json"),
-      JSON.stringify(manifest, null, 2),
-      "utf8"
-    );
-    console.debug(`[ProjectManager.save] DONE (+${(performance.now() - t0).toFixed(0)}ms)`);
+    console.debug(`[ProjectManager.save] staged (+${(performance.now() - t0).toFixed(0)}ms)`);
 
-    return { checksum, nodeCount, moduleOwnedFiles, moduleManifests, missingFiles };
+    return { checksum, nodeCount, moduleOwnedFiles, moduleManifests, missingFiles, pendingManifest };
+  }
+
+  /**
+   * Atomically write ``project.json`` to ``saveDir``.
+   *
+   * This is the commit gate for an explicit save. By the time this
+   * returns successfully, every other persistent artifact of the save
+   * (``tree-index.json``, ``code-cells.json``, per-module manifests,
+   * module-owned files) is already on disk. A crash during the
+   * underlying rename leaves the prior ``project.json`` intact.
+   *
+   * The ``saved_at`` timestamp on *manifest* is overwritten with the
+   * current time immediately before the write so it reflects the
+   * actual commit moment (not when {@link save} originally staged the
+   * manifest, which can be several hundred milliseconds earlier given
+   * the intervening module-file sync and per-module manifest writes).
+   *
+   * @param saveDir - Absolute path to the project directory.
+   * @param manifest - Manifest data to persist. Typically the
+   *   ``pendingManifest`` returned by {@link save}, possibly with
+   *   ``modules`` / ``module_settings`` extended to include pending
+   *   imports merged in by the IPC handler.
+   * @returns Nothing.
+   * @throws {Error} When the write or rename fails.
+   */
+  async commitProjectManifest(saveDir: string, manifest: ProjectManifest): Promise<void> {
+    const stamped: ProjectManifest = {
+      ...manifest,
+      saved_at: new Date().toISOString(),
+    };
+    await atomicWriteJson(path.join(saveDir, "project.json"), stamped);
   }
 
   /**
@@ -574,11 +618,7 @@ export class ProjectManager {
     saveDir: string,
     manifest: ProjectManifest
   ): Promise<void> {
-    await fs.writeFile(
-      path.join(saveDir, "project.json"),
-      JSON.stringify(manifest, null, 2),
-      "utf8"
-    );
+    await atomicWriteJson(path.join(saveDir, "project.json"), manifest);
   }
 
   // -------------------------------------------------------------------------
@@ -761,11 +801,7 @@ export class ProjectManager {
       };
 
       // Write code-cells.json to autosave dir
-      await fs.writeFile(
-        path.join(autosaveDir, "code-cells.json"),
-        JSON.stringify(codeCells, null, 2),
-        "utf8"
-      );
+      await atomicWriteJson(path.join(autosaveDir, "code-cells.json"), codeCells);
 
       const ms = (performance.now() - t0).toFixed(0);
       const total = payload.node_count ?? 0;

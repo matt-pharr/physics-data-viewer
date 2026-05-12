@@ -66,6 +66,7 @@ const mocks = vi.hoisted(() => {
   const fsCopyFile = vi.fn(async () => undefined);
   const fsCp = vi.fn(async () => undefined);
   const fsRm = vi.fn(async () => undefined);
+  const fsRename = vi.fn(async () => undefined);
   const fsReaddir = vi.fn(async () => []);
   const dialogShowOpenDialog = vi.fn();
   const dialogShowMessageBox = vi.fn(async () => ({ response: 0 }));
@@ -134,6 +135,7 @@ const mocks = vi.hoisted(() => {
     fsCopyFile,
     fsCp,
     fsRm,
+    fsRename,
     fsReaddir,
     dialogShowOpenDialog,
     dialogShowMessageBox,
@@ -189,6 +191,7 @@ vi.mock("fs/promises", () => ({
   copyFile: mocks.fsCopyFile,
   cp: mocks.fsCp,
   rm: mocks.fsRm,
+  rename: mocks.fsRename,
   readdir: mocks.fsReaddir,
 }));
 
@@ -310,7 +313,17 @@ function setup() {
       moduleOwnedFiles: [],
       moduleManifests: [],
       missingFiles: [],
+      pendingManifest: {
+        schema_version: "1.1",
+        saved_at: "2026-01-01T00:00:00.000Z",
+        pdv_version: "0.0.0-test",
+        tree_checksum: "abc123",
+        language: "python" as const,
+        modules: [],
+        module_settings: {},
+      },
     })),
+    commitProjectManifest: vi.fn(async () => undefined),
     load: vi.fn(async (_saveDir: string, onBeforePush?: () => Promise<void>) => {
       if (onBeforePush) await onBeforePush();
       return [];
@@ -1072,7 +1085,17 @@ describe("Step 5 IPC handlers", () => {
           workdir_path: "/tmp/pdv-test/my_mod/lib/helpers.py",
         },
       ],
+      moduleManifests: [],
       missingFiles: [],
+      pendingManifest: {
+        schema_version: "1.1",
+        saved_at: "2026-01-01T00:00:00.000Z",
+        pdv_version: "0.0.0-test",
+        tree_checksum: "abc123",
+        language: "python" as const,
+        modules: [],
+        module_settings: {},
+      },
     });
     const save = getHandler(IPC.project.save);
     await save({}, "/tmp/project", { tabs: [], activeTabId: 1 });
@@ -1118,17 +1141,29 @@ describe("Step 5 IPC handlers", () => {
         },
       ],
       missingFiles: [],
+      pendingManifest: {
+        schema_version: "1.1",
+        saved_at: "2026-01-01T00:00:00.000Z",
+        pdv_version: "0.0.0-test",
+        tree_checksum: "abc",
+        language: "python" as const,
+        modules: [],
+        module_settings: {},
+      },
     });
     const save = getHandler(IPC.project.save);
     await save({}, "/tmp/project", { tabs: [], activeTabId: 1 });
 
+    // Atomic writes target `<path>.tmp` and rename onto the destination.
+    // Strip the suffix here so the assertions can talk about effective paths.
+    const stripTmp = (p: string): string => p.endsWith(".tmp") ? p.slice(0, -".tmp".length) : p;
     const manifestWrites = (mocks.fsWriteFile as unknown as ReturnType<typeof vi.fn>).mock.calls
-      .filter((c: unknown[]) => String(c[0]).includes("modules/toy/"));
-    const paths = manifestWrites.map((c) => String((c as unknown[])[0]));
+      .filter((c: unknown[]) => stripTmp(String(c[0])).includes("modules/toy/"));
+    const paths = manifestWrites.map((c) => stripTmp(String((c as unknown[])[0])));
     expect(paths.some((p) => p.endsWith("pdv-module.json"))).toBe(true);
     expect(paths.some((p) => p.endsWith("module-index.json"))).toBe(true);
     const manifestBody = String(
-      (manifestWrites.find((c) => String((c as unknown[])[0]).endsWith("pdv-module.json")) as unknown[])[1],
+      (manifestWrites.find((c) => stripTmp(String((c as unknown[])[0])).endsWith("pdv-module.json")) as unknown[])[1],
     );
     expect(manifestBody).toContain('"schema_version": "4"');
     expect(manifestBody).toContain('"id": "toy"');
@@ -1147,7 +1182,17 @@ describe("Step 5 IPC handlers", () => {
           workdir_path: "/tmp/pdv-test/my_mod/scripts/gone.py",
         },
       ],
+      moduleManifests: [],
       missingFiles: [],
+      pendingManifest: {
+        schema_version: "1.1",
+        saved_at: "2026-01-01T00:00:00.000Z",
+        pdv_version: "0.0.0-test",
+        tree_checksum: "abc123",
+        language: "python" as const,
+        modules: [],
+        module_settings: {},
+      },
     });
     (mocks.fsCopyFile as unknown as ReturnType<typeof vi.fn>).mockImplementationOnce(() => {
       const err = Object.assign(new Error("ENOENT"), { code: "ENOENT" });
@@ -1370,10 +1415,16 @@ describe("Step 5 IPC handlers", () => {
     expect(result.warnings).toEqual([
       { code: "dependency_unverified", message: "Dependency requirement not auto-validated: numpy >=1.26" },
     ]);
+    // Atomic write — target path is `<final>.tmp` then renamed onto the
+    // destination. The renderer-visible artifact is unchanged.
     expect(mocks.fsWriteFile).toHaveBeenCalledWith(
-      "/tmp/project/project.json",
+      "/tmp/project/project.json.tmp",
       expect.stringContaining('"module_id": "demo-module"'),
       "utf8"
+    );
+    expect(mocks.fsRename).toHaveBeenCalledWith(
+      "/tmp/project/project.json.tmp",
+      "/tmp/project/project.json",
     );
     expect(commRouter.request).toHaveBeenCalledWith(
       PDVMessageType.MODULE_REGISTER,
@@ -1852,10 +1903,15 @@ describe("Step 5 IPC handlers", () => {
     })) as { success: boolean };
 
     expect(result.success).toBe(true);
+    // Atomic write — writeFile goes to `.tmp`, rename swaps onto the destination.
     expect(mocks.fsWriteFile).toHaveBeenCalledWith(
-      "/tmp/project/project.json",
+      "/tmp/project/project.json.tmp",
       expect.stringContaining('"threshold": 9'),
       "utf8"
+    );
+    expect(mocks.fsRename).toHaveBeenCalledWith(
+      "/tmp/project/project.json.tmp",
+      "/tmp/project/project.json",
     );
   });
 
@@ -1888,7 +1944,10 @@ describe("Step 5 IPC handlers", () => {
       throw err;
     });
     mocks.fsWriteFile.mockImplementation(async (filePath: string, content: string) => {
-      if (String(filePath).endsWith("project.json")) {
+      // Atomic write: real writes target `<path>.tmp`. Treat that as the
+      // effective write to the destination since the rename is a no-op
+      // in this mocked filesystem.
+      if (String(filePath).endsWith("project.json.tmp")) {
         await new Promise((resolve) => setTimeout(resolve, 5));
         manifestState = JSON.parse(content);
       }

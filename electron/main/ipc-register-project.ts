@@ -49,6 +49,14 @@ interface RegisterProjectIpcHandlersOptions {
   setPendingModuleSettings: (settings: Record<string, Record<string, unknown>>) => void;
   clearModuleHealthWarnings: () => void;
   refreshProjectModuleHealth: (dir: string | null) => Promise<ProjectManifest | null>;
+  /**
+   * Run *fn* serially against any other ``project.json`` mutation. Same
+   * lock that ``ipc-register-modules.ts`` takes around its read-modify-write
+   * settings/imports mutations; acquired here around the whole explicit
+   * save body so a module-settings update can't race the manifest
+   * snapshot taken inside ``ProjectManager.save`` and get silently
+   * overwritten by the final ``commitProjectManifest``.
+   */
   runSerializedProjectManifestMutation: <T>(dir: string, task: () => Promise<T>) => Promise<T>;
   getMainWindow: () => BrowserWindow | null;
   getInterpreterPath: () => string | undefined;
@@ -267,7 +275,7 @@ export function registerProjectIpcHandlers(
         });
 
         // If the serializer detected missing backing files it aborted before
-        // writing tree-index.json or project.json, so the existing save dir is
+        // writing code-cells.json or project.json, so the existing save dir is
         // still intact. Return immediately so the renderer can block the save
         // and offer Save As.
         if (saveResult.missingFiles.length > 0) {
@@ -277,6 +285,19 @@ export function registerProjectIpcHandlers(
             nodeCount: saveResult.nodeCount,
             missingFiles: saveResult.missingFiles,
           };
+        }
+
+        // `pendingManifest` is the manifest staged by `save()` carrying any
+        // pre-existing modules/settings forward. Pending imports merge into
+        // it below, then it gets committed atomically at the end.
+        // The check on `missingFiles.length` above guarantees this is
+        // present; the runtime guard is belt-and-suspenders so the type
+        // narrows cleanly without a non-null assertion.
+        const finalManifest: ProjectManifest | undefined = saveResult.pendingManifest;
+        if (!finalManifest) {
+          throw new Error(
+            "[project:save] internal invariant: ProjectManager.save did not return a pendingManifest despite no missingFiles",
+          );
         }
 
         const pendingModuleImports = getPendingModuleImports();
@@ -290,15 +311,8 @@ export function registerProjectIpcHandlers(
               await fs.cp(installPath, dest, { recursive: true });
             }
           }
-          await runSerializedProjectManifestMutation(saveDir, async () => {
-            const manifest = await ProjectManager.readManifest(saveDir);
-            const mergedManifest = {
-              ...manifest,
-              modules: [...manifest.modules, ...pendingModuleImports],
-              module_settings: { ...manifest.module_settings, ...pendingModuleSettings },
-            };
-            await ProjectManager.saveManifest(saveDir, mergedManifest);
-          });
+          finalManifest.modules = [...finalManifest.modules, ...pendingModuleImports];
+          finalManifest.module_settings = { ...finalManifest.module_settings, ...pendingModuleSettings };
           setPendingModuleImports([]);
           setPendingModuleSettings({});
         }
@@ -316,24 +330,23 @@ export function registerProjectIpcHandlers(
         const syncFailedPaths = await syncModuleOwnedFilesToSaveDir(saveDir, saveResult.moduleOwnedFiles);
         await writeModuleManifestsToSaveDir(saveDir, saveResult.moduleManifests, moduleManager);
 
+        // Commit gate: atomically write project.json as the very last
+        // file. Until this returns, the prior project.json (if any) is
+        // untouched. After this returns, every other persistent artifact
+        // of the save is already on disk, so a parseable project.json
+        // implies the save is complete.
+        await projectManager.commitProjectManifest(saveDir, finalManifest);
+
         setActiveProjectDir(saveDir);
         await refreshProjectModuleHealth(saveDir);
         onExplicitSaveCompleted?.(saveDir);
-
-        let savedProjectName: string | undefined;
-        try {
-          const manifest = await ProjectManager.readManifest(saveDir);
-          savedProjectName = manifest.project_name;
-        } catch {
-          // Non-blocking
-        }
 
         const allMissingFiles = [...(saveResult.missingFiles ?? []), ...syncFailedPaths];
         console.debug(`[project:save] seq=${seq} DONE`);
         return {
           checksum: saveResult.checksum,
           nodeCount: saveResult.nodeCount,
-          projectName: savedProjectName,
+          projectName: finalManifest.project_name,
           missingFiles: allMissingFiles.length > 0 ? allMissingFiles : undefined,
         };
       };
@@ -343,15 +356,27 @@ export function registerProjectIpcHandlers(
       // gate treats explicit saves the same as autosaves — both put a
       // pdv.project.save comm on the kernel's shell channel, so cells must
       // wait either way to avoid the queue-stuck symptom.
-      return projectManager.runWithSaveLock(async () => {
-        const win = getMainWindow();
-        win?.webContents.send(IPC.push.autosaveStarted);
-        try {
-          return await doSave();
-        } finally {
-          win?.webContents.send(IPC.push.autosaveEnded);
-        }
-      });
+      //
+      // The body also runs inside `runSerializedProjectManifestMutation`
+      // so concurrent module IPC handlers (which take that lock around
+      // their read-modify-write of project.json) can't land an update
+      // between `ProjectManager.save` reading the current manifest and
+      // `commitProjectManifest` atomically writing the merged result.
+      // Lock order: save-lock (outer) → manifest-write-lock (inner).
+      // No deadlock: nothing acquires save-lock while holding the
+      // manifest-write-lock (autosave doesn't touch project.json, and
+      // module handlers don't take the save-lock).
+      return projectManager.runWithSaveLock(async () =>
+        runSerializedProjectManifestMutation(saveDir, async () => {
+          const win = getMainWindow();
+          win?.webContents.send(IPC.push.autosaveStarted);
+          try {
+            return await doSave();
+          } finally {
+            win?.webContents.send(IPC.push.autosaveEnded);
+          }
+        }),
+      );
     }
   );
 

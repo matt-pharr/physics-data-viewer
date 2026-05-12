@@ -21,6 +21,8 @@
 import * as fs from "fs/promises";
 import * as path from "path";
 
+import { atomicWriteJson } from "./atomic-write";
+
 /**
  * Subset of ``pdv-module.json`` fields that ``writeModuleManifest`` emits.
  * Mirrors the v4 schema documented in ARCHITECTURE.md §5.13 — optional
@@ -87,7 +89,7 @@ export async function writeModuleManifest(
     manifest.dependencies = input.dependencies;
   }
   const target = path.join(moduleDir, "pdv-module.json");
-  await fs.writeFile(target, JSON.stringify(manifest, null, 2) + "\n", "utf8");
+  await atomicWriteJson(target, manifest);
 }
 
 /**
@@ -108,5 +110,5 @@ export async function writeModuleIndex(
 ): Promise<void> {
   await fs.mkdir(moduleDir, { recursive: true });
   const target = path.join(moduleDir, "module-index.json");
-  await fs.writeFile(target, JSON.stringify(entries, null, 2) + "\n", "utf8");
+  await atomicWriteJson(target, entries);
 }
