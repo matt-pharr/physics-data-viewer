@@ -28,6 +28,12 @@ updates:
     # by Dependabot's validator for this ecosystem.
     cooldown:
       default-days: 7
+    # anthropics/claude-code-action is intentionally pinned to the
+    # floating @v1 tag (not a SHA) so first-party fixes from Anthropic
+    # reach us immediately without a Dependabot round-trip. Suppress
+    # the otherwise-routine "bump v1 → v1.x.y" PRs.
+    ignore:
+      - dependency-name: "anthropics/claude-code-action"
     groups:
       actions-minor-patch:
         update-types:
