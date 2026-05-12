@@ -1104,12 +1104,22 @@ describe("Step 5 IPC handlers", () => {
     const libDest = path.join("/tmp/project", "modules", "my_mod", "lib/helpers.py");
     expect(mocks.fsMkdir).toHaveBeenCalledWith(path.dirname(scriptsDest), { recursive: true });
     expect(mocks.fsMkdir).toHaveBeenCalledWith(path.dirname(libDest), { recursive: true });
+    // Atomic copy: real call lands at `<dest>.tmp`; a rename then promotes
+    // it onto the destination. Test that both legs happen for both files.
     expect(mocks.fsCopyFile).toHaveBeenCalledWith(
       path.resolve("/tmp/pdv-test/my_mod/scripts/run.py"),
-      path.resolve(scriptsDest),
+      path.resolve(scriptsDest) + ".tmp",
     );
     expect(mocks.fsCopyFile).toHaveBeenCalledWith(
       path.resolve("/tmp/pdv-test/my_mod/lib/helpers.py"),
+      path.resolve(libDest) + ".tmp",
+    );
+    expect(mocks.fsRename).toHaveBeenCalledWith(
+      path.resolve(scriptsDest) + ".tmp",
+      path.resolve(scriptsDest),
+    );
+    expect(mocks.fsRename).toHaveBeenCalledWith(
+      path.resolve(libDest) + ".tmp",
       path.resolve(libDest),
     );
   });
