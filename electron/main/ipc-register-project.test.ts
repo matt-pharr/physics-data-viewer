@@ -27,6 +27,8 @@ const fsMocks = vi.hoisted(() => ({
   cp: vi.fn(async () => undefined),
   readFile: vi.fn(async () => "{}"),
   writeFile: vi.fn(async () => undefined),
+  rename: vi.fn(async () => undefined),
+  rm: vi.fn(async () => undefined),
 }));
 
 const moduleRuntimeMocks = vi.hoisted(() => ({
@@ -358,6 +360,40 @@ describe("syncModuleOwnedFilesToSaveDir helper", () => {
     ] as never);
     expect(fsMocks.copyFile).not.toHaveBeenCalled();
     expect(result).toEqual([]);
+  });
+
+  it("stages the copy at <dest>.tmp then renames onto the destination", async () => {
+    // Atomic-copy invariant: the user-edited module file is never
+    // half-written at the destination path. The copy lands at
+    // `<dest>.tmp` and only the rename promotes it onto the final
+    // path. A crash between the two leaves the prior contents intact.
+    await syncModuleOwnedFilesToSaveDir("/save", [
+      { module_id: "m1", source_rel_path: "scripts/run.py", workdir_path: "/wd/r.py" },
+    ] as never);
+    const finalDest = path.resolve("/save", "modules", "m1", "scripts/run.py");
+    expect(fsMocks.copyFile).toHaveBeenCalledWith(
+      path.resolve("/wd/r.py"),
+      finalDest + ".tmp",
+    );
+    expect(fsMocks.rename).toHaveBeenCalledWith(finalDest + ".tmp", finalDest);
+  });
+
+  it("cleans up the tmp and does not call rename when the underlying copy fails", async () => {
+    fsMocks.copyFile.mockRejectedValueOnce(
+      Object.assign(new Error("EACCES"), { code: "EACCES" }),
+    );
+    // EACCES is a non-ENOENT failure so the helper logs and continues
+    // (it does not push to failedPaths). What matters here is that the
+    // failure path cleans up the tmp and never renames onto the destination.
+    await syncModuleOwnedFilesToSaveDir("/save", [
+      { module_id: "m1", source_rel_path: "scripts/run.py", workdir_path: "/wd/r.py" },
+    ] as never);
+    const finalDest = path.resolve("/save", "modules", "m1", "scripts/run.py");
+    expect(fsMocks.rm).toHaveBeenCalledWith(
+      finalDest + ".tmp",
+      expect.objectContaining({ force: true }),
+    );
+    expect(fsMocks.rename).not.toHaveBeenCalled();
   });
 });
 

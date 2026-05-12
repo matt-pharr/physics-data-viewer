@@ -34,6 +34,7 @@ import {
   writeModuleIndex,
   writeModuleManifest,
 } from "./module-manifest-writer";
+import { atomicCopyFile } from "./atomic-write";
 
 interface RegisterProjectIpcHandlersOptions {
   projectManager: ProjectManager;
@@ -97,8 +98,11 @@ export async function syncModuleOwnedFilesToSaveDir(
       if (srcResolved === destResolved) {
         continue;
       }
-      await fs.mkdir(path.dirname(dest), { recursive: true });
-      await fs.copyFile(srcResolved, destResolved);
+      // Atomic copy: write to <dest>.tmp then rename onto dest, so a
+      // crash mid-copy leaves the prior version of the user-edited
+      // module file intact. The previous direct fs.copyFile overwrote
+      // dest in place, briefly torn while the write was in progress.
+      await atomicCopyFile(srcResolved, destResolved);
     } catch (error) {
       const code = (error as NodeJS.ErrnoException)?.code;
       if (code === "ENOENT") {
