@@ -264,13 +264,29 @@ export function createProjectManagerMock(
   overrides: Partial<ProjectManager> = {},
 ): ProjectManager {
   return {
-    save: vi.fn(async () => ({
+    save: vi.fn(async (
+      _saveDir: string,
+      _cells: unknown,
+      options?: { language?: "python" | "julia"; interpreterPath?: string; projectName?: string },
+    ) => ({
       checksum: "abc123",
       nodeCount: 0,
       moduleOwnedFiles: [],
       moduleManifests: [],
       missingFiles: [],
+      pendingManifest: {
+        schema_version: "1.1",
+        saved_at: "2026-01-01T00:00:00.000Z",
+        pdv_version: "0.0.0-test",
+        tree_checksum: "abc123",
+        language: options?.language ?? ("python" as const),
+        interpreter_path: options?.interpreterPath,
+        project_name: options?.projectName,
+        modules: [],
+        module_settings: {},
+      },
     })),
+    commitProjectManifest: vi.fn(async () => undefined),
     load: vi.fn(async () => ({
       codeCells: null,
       postLoadChecksum: null,

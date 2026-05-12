@@ -49,7 +49,6 @@ interface RegisterProjectIpcHandlersOptions {
   setPendingModuleSettings: (settings: Record<string, Record<string, unknown>>) => void;
   clearModuleHealthWarnings: () => void;
   refreshProjectModuleHealth: (dir: string | null) => Promise<ProjectManifest | null>;
-  runSerializedProjectManifestMutation: <T>(dir: string, task: () => Promise<T>) => Promise<T>;
   getMainWindow: () => BrowserWindow | null;
   getInterpreterPath: () => string | undefined;
   /** Called after a successful explicit save to clean up autosave state. */
@@ -237,7 +236,6 @@ export function registerProjectIpcHandlers(
     setPendingModuleSettings,
     clearModuleHealthWarnings,
     refreshProjectModuleHealth,
-    runSerializedProjectManifestMutation,
     getMainWindow,
     getInterpreterPath,
     onExplicitSaveCompleted,
@@ -267,7 +265,7 @@ export function registerProjectIpcHandlers(
         });
 
         // If the serializer detected missing backing files it aborted before
-        // writing tree-index.json or project.json, so the existing save dir is
+        // writing code-cells.json or project.json, so the existing save dir is
         // still intact. Return immediately so the renderer can block the save
         // and offer Save As.
         if (saveResult.missingFiles.length > 0) {
@@ -278,6 +276,11 @@ export function registerProjectIpcHandlers(
             missingFiles: saveResult.missingFiles,
           };
         }
+
+        // `pendingManifest` is the manifest staged by `save()` carrying any
+        // pre-existing modules/settings forward. Pending imports merge into
+        // it below, then it gets committed atomically at the end.
+        const finalManifest: ProjectManifest = saveResult.pendingManifest!;
 
         const pendingModuleImports = getPendingModuleImports();
         const pendingModuleSettings = getPendingModuleSettings();
@@ -290,15 +293,8 @@ export function registerProjectIpcHandlers(
               await fs.cp(installPath, dest, { recursive: true });
             }
           }
-          await runSerializedProjectManifestMutation(saveDir, async () => {
-            const manifest = await ProjectManager.readManifest(saveDir);
-            const mergedManifest = {
-              ...manifest,
-              modules: [...manifest.modules, ...pendingModuleImports],
-              module_settings: { ...manifest.module_settings, ...pendingModuleSettings },
-            };
-            await ProjectManager.saveManifest(saveDir, mergedManifest);
-          });
+          finalManifest.modules = [...finalManifest.modules, ...pendingModuleImports];
+          finalManifest.module_settings = { ...finalManifest.module_settings, ...pendingModuleSettings };
           setPendingModuleImports([]);
           setPendingModuleSettings({});
         }
@@ -316,24 +312,23 @@ export function registerProjectIpcHandlers(
         const syncFailedPaths = await syncModuleOwnedFilesToSaveDir(saveDir, saveResult.moduleOwnedFiles);
         await writeModuleManifestsToSaveDir(saveDir, saveResult.moduleManifests, moduleManager);
 
+        // Commit gate: atomically write project.json as the very last
+        // file. Until this returns, the prior project.json (if any) is
+        // untouched. After this returns, every other persistent artifact
+        // of the save is already on disk, so a parseable project.json
+        // implies the save is complete.
+        await projectManager.commitProjectManifest(saveDir, finalManifest);
+
         setActiveProjectDir(saveDir);
         await refreshProjectModuleHealth(saveDir);
         onExplicitSaveCompleted?.(saveDir);
-
-        let savedProjectName: string | undefined;
-        try {
-          const manifest = await ProjectManager.readManifest(saveDir);
-          savedProjectName = manifest.project_name;
-        } catch {
-          // Non-blocking
-        }
 
         const allMissingFiles = [...(saveResult.missingFiles ?? []), ...syncFailedPaths];
         console.debug(`[project:save] seq=${seq} DONE`);
         return {
           checksum: saveResult.checksum,
           nodeCount: saveResult.nodeCount,
-          projectName: savedProjectName,
+          projectName: finalManifest.project_name,
           missingFiles: allMissingFiles.length > 0 ? allMissingFiles : undefined,
         };
       };

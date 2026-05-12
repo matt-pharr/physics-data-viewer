@@ -174,24 +174,31 @@ describe("ProjectManager", () => {
       expect(JSON.parse(cbContent)).toEqual(cells);
     });
 
-    it("writes project.json with checksum from kernel", async () => {
+    it("save() returns a pendingManifest carrying the kernel checksum; commitProjectManifest writes it", async () => {
       const { router, requestMock } = makeMockRouter();
       requestMock.mockResolvedValue(
         makeOkResponse({ checksum: "deadbeef1234" })
       );
 
       const pm = new ProjectManager(router);
-      await pm.save(tmpDir, EMPTY_CELLS);
+      const result = await pm.save(tmpDir, EMPTY_CELLS);
 
-      const raw = await fs.readFile(
-        path.join(tmpDir, "project.json"),
-        "utf8"
-      );
-      const manifest = JSON.parse(raw);
-      expect(manifest.tree_checksum).toBe("deadbeef1234");
-      expect(manifest.schema_version).toBeDefined();
-      expect(manifest.modules).toEqual([]);
-      expect(manifest.module_settings).toEqual({});
+      // save() no longer writes project.json; the IPC handler does, after
+      // running other side effects. The returned manifest carries the data.
+      expect(result.pendingManifest).toBeDefined();
+      expect(result.pendingManifest!.tree_checksum).toBe("deadbeef1234");
+      expect(result.pendingManifest!.schema_version).toBeDefined();
+      expect(result.pendingManifest!.modules).toEqual([]);
+      expect(result.pendingManifest!.module_settings).toEqual({});
+      await expect(
+        fs.stat(path.join(tmpDir, "project.json"))
+      ).rejects.toMatchObject({ code: "ENOENT" });
+
+      // commitProjectManifest atomically writes the manifest the caller
+      // hands it — this is what the IPC handler does last.
+      await pm.commitProjectManifest(tmpDir, result.pendingManifest!);
+      const raw = await fs.readFile(path.join(tmpDir, "project.json"), "utf8");
+      expect(JSON.parse(raw).tree_checksum).toBe("deadbeef1234");
     });
 
     it("does not write project.json when kernel returns error", async () => {
@@ -241,7 +248,7 @@ describe("ProjectManager", () => {
       ).rejects.toThrow(/numeric id/);
     });
 
-    it("writes comm, then code-cells.json, then project.json — in that order", async () => {
+    it("writes comm, then code-cells.json; project.json is deferred to commitProjectManifest", async () => {
       const { router, requestMock } = makeMockRouter();
 
       // During the comm call neither output file should exist yet.
@@ -256,17 +263,23 @@ describe("ProjectManager", () => {
       });
 
       const pm = new ProjectManager(router);
-      await pm.save(tmpDir, EMPTY_CELLS);
+      const result = await pm.save(tmpDir, EMPTY_CELLS);
 
-      // After save both files must exist.
+      // After save(), code-cells.json exists but project.json does not.
       await expect(
         fs.stat(path.join(tmpDir, "code-cells.json"))
       ).resolves.toBeDefined();
       await expect(
         fs.stat(path.join(tmpDir, "project.json"))
+      ).rejects.toMatchObject({ code: "ENOENT" });
+
+      // commitProjectManifest writes project.json atomically.
+      await pm.commitProjectManifest(tmpDir, result.pendingManifest!);
+      await expect(
+        fs.stat(path.join(tmpDir, "project.json"))
       ).resolves.toBeDefined();
 
-      // code-cells.json must have been written before project.json.
+      // code-cells.json was written before project.json.
       const cbStat = await fs.stat(path.join(tmpDir, "code-cells.json"));
       const pjStat = await fs.stat(path.join(tmpDir, "project.json"));
       expect(cbStat.birthtimeMs).toBeLessThanOrEqual(pjStat.birthtimeMs);

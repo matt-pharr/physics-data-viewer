@@ -629,7 +629,6 @@ export function registerIpcHandlers(
     setPendingModuleSettings: (settings) => { pendingModuleSettings = settings; },
     clearModuleHealthWarnings: () => moduleHealthWarningsByAlias.clear(),
     refreshProjectModuleHealth,
-    runSerializedProjectManifestMutation,
     getMainWindow: () => win,
     getInterpreterPath: () => {
       const config = readConfig(configStore);
