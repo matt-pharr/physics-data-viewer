@@ -6,6 +6,15 @@
 # patch bumps are grouped per ecosystem so routine maintenance shows up as
 # at most one PR per week per ecosystem; security advisories and major
 # version bumps still open their own individual PRs.
+#
+# Every ecosystem also carries a cooldown so freshly-published versions
+# sit in the registry for at least 7 days before Dependabot will propose
+# them. This is the version-update analogue of uv's --exclude-newer and
+# is intended to dodge supply-chain compromises that get caught and
+# deprecated within hours (e.g. the 2026-05-11 TanStack incident, which
+# was deprecated within ~20 minutes of publish). Security updates — the
+# repo-settings toggle, not this file — intentionally bypass the cooldown
+# because they patch a known-vulnerable version already in the tree.
 
 version: 2
 updates:
@@ -14,6 +23,13 @@ updates:
     schedule:
       interval: "weekly"
     target-branch: "develop"
+    cooldown:
+      default-days: 7
+      semver-major-days: 14
+      semver-minor-days: 7
+      semver-patch-days: 7
+      include:
+        - "*"
     groups:
       actions-minor-patch:
         update-types:
@@ -25,6 +41,13 @@ updates:
     schedule:
       interval: "weekly"
     target-branch: "develop"
+    cooldown:
+      default-days: 7
+      semver-major-days: 14
+      semver-minor-days: 7
+      semver-patch-days: 7
+      include:
+        - "*"
     groups:
       npm-minor-patch:
         update-types:
@@ -36,6 +59,13 @@ updates:
     schedule:
       interval: "weekly"
     target-branch: "develop"
+    cooldown:
+      default-days: 7
+      semver-major-days: 14
+      semver-minor-days: 7
+      semver-patch-days: 7
+      include:
+        - "*"
     groups:
       pip-minor-patch:
         update-types:
