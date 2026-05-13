@@ -15,6 +15,13 @@ import { defineConfig, configDefaults } from "vitest/config";
  * when PYTHON_PATH is set in the environment — CI's node-main-tests job sets
  * this explicitly, and local devs can do the same once they have a Python
  * env with `pdv-python[dev]` installed.
+ *
+ * fileParallelism: disabled when @slow tests are active. Each @slow file
+ * spawns real ipykernel subprocesses (and integration.test.ts holds one for
+ * the duration of the describe block). Running them in parallel forks on a
+ * 2-core CI runner produces CPU contention severe enough that comm replies
+ * miss the CommRouter's 30s timeout — see the post-mutation pdv.tree.get
+ * stalls in node-main-tests. Fast tests still run in parallel locally.
  */
 const runSlow = !!process.env.PYTHON_PATH;
 
@@ -27,6 +34,7 @@ const slowFiles = [
 export default defineConfig({
   test: {
     pool: "forks",
+    fileParallelism: !runSlow,
     exclude: [
       ...configDefaults.exclude,
       // Playwright specs live under ./e2e and are not vitest tests.
