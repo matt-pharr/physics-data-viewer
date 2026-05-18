@@ -465,6 +465,15 @@ def bootstrap(ip=None):
     # Users can still override with %matplotlib <backend> after bootstrap.
     _configure_matplotlib()
 
+    # Register built-in double-click plot handlers for ndarray / Series /
+    # DataFrame / DataArray. Each registration is guarded by an import
+    # check, so missing optional deps just skip silently. Users can
+    # override any of these by registering their own handler for the
+    # same type in a module.
+    from pdv.default_handlers import register_defaults  # noqa: PLC0415
+
+    register_defaults()
+
     # Pay jedi's first-call grammar-table load cost here, on the same shell
     # thread that will later serve complete_request, so the user's first
     # completion isn't a 3–8 s stall (which serializes against execute_request).

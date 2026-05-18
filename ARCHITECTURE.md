@@ -486,6 +486,7 @@ pdv/
     environment.py       # Path utilities, working dir management, project root logic
     errors.py            # PDVError, PDVPathError, PDVKeyError, PDVProtectedNameError, PDVSerializationError, PDVScriptError, PDVVersionError
     modules.py           # Custom type handler registry and dispatch (@pdv.handle() decorator)
+    default_handlers.py  # Built-in double-click plot handlers for np.ndarray, pd.Series/DataFrame, xr.DataArray
     namelist_utils.py    # Fortran namelist and TOML parsing utilities
     checksum.py          # Content-based XXH3-128 Merkle-tree checksum for PDVTree (tree_checksum())
     tree_loader.py       # Shared two-pass tree-index loader used by project.load and module.register handlers
@@ -508,9 +509,11 @@ pdv/
 `pdv.bootstrap()` is called by a bootstrap snippet that the main process sends via `execute_request` (silent mode) from `kernel-session.ts` immediately after the kernel subprocess starts. It:
 1. Registers the `pdv.kernel` comm target with IPython
 2. Injects `pdv_tree` into the IPython user namespace via a custom namespace class that blocks reassignment
-3. Sends the `pdv.ready` comm message
+3. Configures an interactive matplotlib backend (or patches `plt.show()` for inline emission when none is available)
+4. Registers the built-in double-click plot handlers via `pdv.default_handlers.register_defaults()`. Each registration is guarded by an import check, so missing optional deps (numpy / pandas / xarray) silently skip. Per-type behavior: `np.ndarray` 1D → `ax.plot`, 2D → `ax.imshow` + colorbar, 0D/>2D → printed notice; `pd.Series` and `pd.DataFrame` → their built-in `.plot()`; `xr.DataArray` → its built-in `.plot()` (which dispatches 1D → line, 2D → pcolormesh, >2D → histogram by ndim). A value that cannot actually be plotted (e.g. a non-numeric `pd.Series` or an object-dtype array) closes its half-built figure and prints a `[PDV]` notice rather than raising — a raised exception would reach the renderer as an opaque `internal.error`. `xr.Dataset` is intentionally not registered — users drill into a specific `data_var`
+5. Sends the `pdv.ready` comm message
 
-`bootstrap()` must be idempotent — calling it twice must not open a second comm or re-inject variables.
+`bootstrap()` must be idempotent — calling it twice must not open a second comm or re-inject variables. Re-registering the default handlers is safe; the overwrite warning that `pdv.handle()` normally emits is suppressed inside `register_defaults()` because that warning is meant to flag user-vs-user conflicts.
 
 ### 5.4 Protected Namespace
 
