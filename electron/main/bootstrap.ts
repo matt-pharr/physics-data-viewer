@@ -47,6 +47,8 @@ import * as path from "path";
 import * as fs from "fs";
 
 import { createWindow, wireAppEvents } from "./app";
+import { getMcpServerHooks } from "./index";
+import { PdvMcpServer } from "./mcp/mcp-server";
 import { CommRouter } from "./comm-router";
 import { QueryRouter } from "./query-router";
 import { ConfigStore } from "./config";
@@ -69,6 +71,7 @@ let kernelManager: KernelManager | null = null;
 let mainWindow: BrowserWindow | null = null;
 let openingWindow: Promise<void> | null = null;
 let configStore: ConfigStore | null = null;
+let mcpServer: PdvMcpServer | null = null;
 
 const commRouter = new CommRouter();
 const queryRouter = new QueryRouter();
@@ -91,12 +94,14 @@ async function openMainWindow(): Promise<void> {
       fs.mkdirSync(pdvDir, { recursive: true });
       configStore = new ConfigStore(pdvDir);
     }
+    const km = kernelManager;
+    const cfg = configStore;
     const win = await createWindow(
-      kernelManager,
+      km,
       commRouter,
       queryRouter,
       projectManager,
-      configStore,
+      cfg,
     );
     mainWindow = win;
     win.on("closed", () => {
@@ -104,6 +109,27 @@ async function openMainWindow(): Promise<void> {
         mainWindow = null;
       }
     });
+    // Start the AI-agent MCP server once the window's IPC handlers (and thus
+    // the lifecycle hooks) have been registered. See ARCHITECTURE.md §15.
+    if (!mcpServer) {
+      const hooks = getMcpServerHooks();
+      if (hooks) {
+        mcpServer = new PdvMcpServer({
+          kernelManager: km,
+          commRouter,
+          queryRouter,
+          projectManager,
+          configStore: cfg,
+          hooks,
+          appVersion: app.getVersion(),
+        });
+        try {
+          await mcpServer.start();
+        } catch (error) {
+          console.error("[PDV] Failed to start MCP server:", error);
+        }
+      }
+    }
   })();
   try {
     await openingWindow;
@@ -122,7 +148,7 @@ const hasSingleInstanceLock = app.requestSingleInstanceLock();
 if (!hasSingleInstanceLock) {
   app.quit();
 } else {
-  wireAppEvents(() => kernelManager);
+  wireAppEvents(() => kernelManager, () => mcpServer);
   app.on("second-instance", () => {
     if (mainWindow && !mainWindow.isDestroyed()) {
       if (mainWindow.isMinimized()) {

@@ -149,14 +149,15 @@ function listExpectedHandlerChannels(): string[] {
 }
 
 /**
- * Channels that are NOT registered by any of the 7 `ipc-register-*` files
- * (instead, they are registered inline in `electron/main/index.ts`).
- * Track them here so the meta-test only asserts on what the dedicated
- * register functions own.
+ * Channels that are NOT registered by any of the 7 `ipc-register-*` files —
+ * instead they are registered inline in `electron/main/index.ts`, or, for
+ * `mcp:getStatus`, by `PdvMcpServer.start()`. Track them here so the
+ * meta-test only asserts on what the dedicated register functions own.
  */
 const CHANNELS_REGISTERED_IN_INDEX = [
   ...Object.values(IPC.autosave),
   ...Object.values(IPC.environment),
+  ...Object.values(IPC.mcp),
 ];
 
 function setupAll(): void {

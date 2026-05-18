@@ -90,4 +90,5 @@ from pdv.handlers import (  # noqa: E402, F401
     modules as modules,
     gui as gui,
     namelist as namelist,
+    introspection as introspection,
 )

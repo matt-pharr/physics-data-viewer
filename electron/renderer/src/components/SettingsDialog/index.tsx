@@ -23,9 +23,10 @@ import {
 } from './utils';
 import { ShortcutCapture } from './ShortcutCapture';
 import { AppearanceTab } from './AppearanceTab';
+import { AgentsTab } from './AgentsTab';
 import { DEFAULT_AUTOSAVE_INTERVAL_S } from '../../app/constants';
 
-type SettingsTab = 'general' | 'shortcuts' | 'appearance' | 'runtime' | 'about';
+type SettingsTab = 'general' | 'shortcuts' | 'appearance' | 'agents' | 'runtime' | 'about';
 
 const DEFAULT_FILE_MANAGER = IS_MAC ? 'open {}' : 'xdg-open {}';
 const DEFAULT_VSCODE_PAIR = THEME_PAIRS.find((pair) => pair.name === 'VSCode');
@@ -352,6 +353,7 @@ export const SettingsDialog: React.FC<SettingsDialogProps> = ({
           <button className={`tab ${activeTab === 'general' ? 'active' : ''}`} onClick={() => setActiveTab('general')}>General</button>
           <button className={`tab ${activeTab === 'shortcuts' ? 'active' : ''}`} onClick={() => setActiveTab('shortcuts')}>Keyboard Shortcuts</button>
           <button className={`tab ${activeTab === 'appearance' ? 'active' : ''}`} onClick={() => setActiveTab('appearance')}>Appearance</button>
+          <button className={`tab ${activeTab === 'agents' ? 'active' : ''}`} onClick={() => setActiveTab('agents')}>Agents</button>
           <button className={`tab ${activeTab === 'runtime' ? 'active' : ''}`} onClick={() => setActiveTab('runtime')}>Runtime</button>
           <button className={`tab ${activeTab === 'about' ? 'active' : ''}`} onClick={() => setActiveTab('about')}>About</button>
         </div>
@@ -531,6 +533,8 @@ export const SettingsDialog: React.FC<SettingsDialogProps> = ({
                 </React.Fragment>
               ))}
             </div>
+          ) : activeTab === 'agents' ? (
+            <AgentsTab />
           ) : activeTab === 'runtime' ? (
             <EnvironmentSelector
               embedded
@@ -753,7 +757,7 @@ export const SettingsDialog: React.FC<SettingsDialogProps> = ({
             />
           )}
         </div>
-        {activeTab !== 'runtime' && activeTab !== 'about' && (
+        {activeTab !== 'runtime' && activeTab !== 'about' && activeTab !== 'agents' && (
           <div className="dialog-footer">
             <button className="btn btn-secondary" onClick={onClose}>Cancel</button>
             <button

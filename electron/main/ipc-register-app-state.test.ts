@@ -181,6 +181,29 @@ describe("config:get / config:set", () => {
     expect(config.set).toHaveBeenCalledWith("autoRefreshNamespace", true);
     expect(config.set).not.toHaveBeenCalledWith("pythonPath", undefined);
   });
+
+  it("config:set deep-merges the `mcp` subtree to preserve main-only fields", async () => {
+    // Simulate the main-side bearer-token persistence: the server has
+    // written `authToken` into `mcp`, and the renderer later writes a
+    // partial `mcp` block (no `authToken`) to flip a toggle. Without the
+    // deep-merge, a full replace would silently wipe `authToken` and
+    // break every connected agent on the next toggle.
+    const { config } = setup();
+    (config.state as Record<string, unknown>).mcp = {
+      authToken: "secret-token",
+      defaultPort: 7391,
+    };
+
+    await getHandler(IPC.config.set)({}, {
+      mcp: { mutatingToolsEnabled: true },
+    } as Partial<PDVConfig>);
+
+    expect((config.state as Record<string, unknown>).mcp).toMatchObject({
+      authToken: "secret-token",
+      defaultPort: 7391,
+      mutatingToolsEnabled: true,
+    });
+  });
 });
 
 describe("themes:get / themes:save / themes:openDir", () => {
