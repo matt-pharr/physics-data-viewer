@@ -128,6 +128,7 @@ import {
   createModuleManagerMock,
   createModuleWindowManagerMock,
   createProjectManagerMock,
+  TEST_PDV_VERSION,
 } from "./test-helpers";
 import { QueryRouter } from "./query-router";
 import type { PDVConfig } from "./config";
@@ -221,7 +222,7 @@ function setupAll(): void {
     getPendingModuleSettings: () => ({}),
     getModuleHealthWarningsByAlias: () => new Map(),
     detectPythonVersion: async () => "3.11.6",
-    getPdvVersion: () => "0.1.2",
+    getPdvVersion: () => TEST_PDV_VERSION,
     runWithProjectManifestWriteLock: async (_dir, fn) => fn(),
   });
   registerProjectIpcHandlers({

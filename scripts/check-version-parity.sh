@@ -38,11 +38,8 @@ SITES=(
     ".github/scripts/generate-release-notes.sh|e\.g\. v$CANONICAL"
     "examples/modules/N-pendulum/pdv-module.json|\"pdv_min\": \"$CANONICAL\""
     "examples/modules/N-pendulum-julia/pdv-module.json|\"pdv_min\": \"$CANONICAL\""
-    "electron/main/ipc-register-app-state.test.ts|\"$CANONICAL-test\""
-    "electron/main/ipc-register-coverage.test.ts|getPdvVersion: \\(\\) => \"$CANONICAL\""
-    "electron/main/ipc-register-modules.test.ts|getPdvVersion: \\(\\) => \"$CANONICAL\""
-    "electron/main/ipc-register-project.test.ts|pdv_version: \"$CANONICAL\""
-    "electron/renderer/src/app/useProjectWorkflow.test.ts|savedPdvVersion: \"$CANONICAL\""
+    # Test fixtures used to be listed here. They now derive at runtime from
+    # electron/package.json via TEST_PDV_VERSION — see issue #235.
 )
 
 bad=0

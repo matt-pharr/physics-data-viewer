@@ -69,6 +69,7 @@ import {
   createCommRouterMock,
   createModuleManagerMock,
   createProjectManagerMock,
+  TEST_PDV_VERSION,
   type InvokeHandler,
 } from "./test-helpers";
 
@@ -204,7 +205,7 @@ describe("project:load", () => {
     setup();
     vi.spyOn(ProjectManager, "readManifest").mockResolvedValue({
       tree_checksum: "sha-1",
-      pdv_version: "0.1.2",
+      pdv_version: TEST_PDV_VERSION,
       project_name: "demo",
     } as never);
     fsMocks.readFile.mockImplementation(async (filePath: string) => {
@@ -220,7 +221,7 @@ describe("project:load", () => {
       nodeCount: number;
     };
     expect(result.checksum).toBe("sha-1");
-    expect(result.savedPdvVersion).toBe("0.1.2");
+    expect(result.savedPdvVersion).toBe(TEST_PDV_VERSION);
     expect(result.nodeCount).toBe(2);
   });
 
@@ -277,7 +278,7 @@ describe("project:peekLanguages / peekManifest", () => {
     vi.spyOn(ProjectManager, "readManifest").mockResolvedValueOnce({
       language: "julia",
       interpreter_path: "/usr/bin/julia",
-      pdv_version: "0.1.2",
+      pdv_version: TEST_PDV_VERSION,
       project_name: "demo",
     } as never);
     const ok = (await getHandler(IPC.project.peekManifest)({}, "/save")) as {

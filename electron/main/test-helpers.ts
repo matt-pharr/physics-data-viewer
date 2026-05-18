@@ -19,11 +19,29 @@
 import { vi } from "vitest";
 import type { BrowserWindow } from "electron";
 
+import pkg from "../package.json";
 import {
   PDVMessageType,
   setAppVersion,
   type PDVMessage,
 } from "./pdv-protocol";
+
+// ---------------------------------------------------------------------------
+// PDV version — single source of truth for test fixtures (issue #235)
+// ---------------------------------------------------------------------------
+
+/**
+ * Canonical PDV version, derived from `electron/package.json`. Use this in
+ * place of hardcoded version strings in mocks and fixtures so a version bump
+ * doesn't have to touch every test file.
+ */
+export const TEST_PDV_VERSION: string = pkg.version;
+
+/**
+ * {@link TEST_PDV_VERSION} with the `-test` suffix used where a test mocks
+ * Electron's `app.getVersion()`.
+ */
+export const TEST_PDV_VERSION_TEST_SUFFIX = `${pkg.version}-test`;
 
 // Set the app version once at module load so makeOkResponse and other helpers
 // don't trigger the "getAppVersion() called before setAppVersion()" warning.

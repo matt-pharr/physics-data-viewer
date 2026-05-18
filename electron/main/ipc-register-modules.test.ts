@@ -58,6 +58,7 @@ import {
   createKernelManagerMock,
   createModuleManagerMock,
   makeKernelInfo,
+  TEST_PDV_VERSION,
   type InvokeHandler,
 } from "./test-helpers";
 import type { ProjectModuleImport } from "./project-manager";
@@ -106,7 +107,7 @@ function setup(initial: Partial<Harness> = {}): Harness {
     getPendingModuleSettings: () => ({}),
     getModuleHealthWarningsByAlias: () => new Map(),
     detectPythonVersion: async () => "3.11.6",
-    getPdvVersion: () => "0.1.2",
+    getPdvVersion: () => TEST_PDV_VERSION,
     runWithProjectManifestWriteLock: async (_dir, fn) => fn(),
   });
   return harness;
