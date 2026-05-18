@@ -1,0 +1,2072 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="Desktop application for computational and experimental physics analysis">
+      
+      
+      
+        <link rel="canonical" href="https://matt-pharr.github.io/physics-data-viewer/dev/developer/save-pipeline/">
+      
+      
+      
+      
+        
+      
+      
+      <link rel="icon" href="../../assets/pdv-icon.svg">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.6">
+    
+    
+      
+        <title>Save / Autosave / Clear-Autosave Pipeline - PDV - Physics Data Viewer</title>
+      
+    
+    
+      <link rel="stylesheet" href="../../assets/stylesheets/main.484c7ddc.min.css">
+      
+        
+        <link rel="stylesheet" href="../../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+      <link rel="stylesheet" href="../../assets/_mkdocstrings.css">
+    
+    <script>__md_scope=new URL("../..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+  
+
+
+  
+  
+
+<script id="__analytics">function __md_analytics(){function e(){dataLayer.push(arguments)}window.dataLayer=window.dataLayer||[],e("js",new Date),e("config","G-0FGZ9YFWWQ"),document.addEventListener("DOMContentLoaded",(function(){document.forms.search&&document.forms.search.query.addEventListener("blur",(function(){this.value&&e("event","search",{search_term:this.value})}));document$.subscribe((function(){var t=document.forms.feedback;if(void 0!==t)for(var a of t.querySelectorAll("[type=submit]"))a.addEventListener("click",(function(a){a.preventDefault();var n=document.location.pathname,d=this.getAttribute("data-md-value");e("event","feedback",{page:n,data:d}),t.firstElementChild.disabled=!0;var r=t.querySelector(".md-feedback__note [data-md-value='"+d+"']");r&&(r.hidden=!1)})),t.hidden=!1})),location$.subscribe((function(t){e("config","G-0FGZ9YFWWQ",{page_path:t.pathname})}))}));var t=document.createElement("script");t.async=!0,t.src="https://www.googletagmanager.com/gtag/js?id=G-0FGZ9YFWWQ",document.getElementById("__analytics").insertAdjacentElement("afterEnd",t)}</script>
+  
+    <script>if("undefined"!=typeof __md_analytics){var consent=__md_get("__consent");consent&&consent.analytics&&__md_analytics()}</script>
+  
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#save-autosave-clear-autosave-pipeline" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+      <div data-md-color-scheme="default" data-md-component="outdated" hidden>
+        
+      </div>
+    
+    
+      
+
+<header class="md-header" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href="../.." title="PDV - Physics Data Viewer" class="md-header__button md-logo" aria-label="PDV - Physics Data Viewer" data-md-component="logo">
+      
+  <img src="../../assets/pdv-icon.svg" alt="logo">
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            PDV - Physics Data Viewer
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Save / Autosave / Clear-Autosave Pipeline
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: light)" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a4 4 0 0 0-4 4 4 4 0 0 0 4 4 4 4 0 0 0 4-4 4 4 0 0 0-4-4m0 10a6 6 0 0 1-6-6 6 6 0 0 1 6-6 6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: dark)" data-md-color-scheme="slate" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 18c-.89 0-1.74-.2-2.5-.55C11.56 16.5 13 14.42 13 12s-1.44-4.5-3.5-5.45C10.26 6.2 11.11 6 12 6a6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+        <div class="md-search__suggest" data-md-component="search-suggest"></div>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/matt-pharr/physics-data-viewer" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M173.9 397.4c0 2-2.3 3.6-5.2 3.6-3.3.3-5.6-1.3-5.6-3.6 0-2 2.3-3.6 5.2-3.6 3-.3 5.6 1.3 5.6 3.6m-31.1-4.5c-.7 2 1.3 4.3 4.3 4.9 2.6 1 5.6 0 6.2-2s-1.3-4.3-4.3-5.2c-2.6-.7-5.5.3-6.2 2.3m44.2-1.7c-2.9.7-4.9 2.6-4.6 4.9.3 2 2.9 3.3 5.9 2.6 2.9-.7 4.9-2.6 4.6-4.6-.3-1.9-3-3.2-5.9-2.9M252.8 8C114.1 8 8 113.3 8 252c0 110.9 69.8 205.8 169.5 239.2 12.8 2.3 17.3-5.6 17.3-12.1 0-6.2-.3-40.4-.3-61.4 0 0-70 15-84.7-29.8 0 0-11.4-29.1-27.8-36.6 0 0-22.9-15.7 1.6-15.4 0 0 24.9 2 38.6 25.8 21.9 38.6 58.6 27.5 72.9 20.9 2.3-16 8.8-27.1 16-33.7-55.9-6.2-112.3-14.3-112.3-110.5 0-27.5 7.6-41.3 23.6-58.9-2.6-6.5-11.1-33.3 2.6-67.9 20.9-6.5 69 27 69 27 20-5.6 41.5-8.5 62.8-8.5s42.8 2.9 62.8 8.5c0 0 48.1-33.6 69-27 13.7 34.7 5.2 61.4 2.6 67.9 16 17.7 25.8 31.5 25.8 58.9 0 96.5-58.9 104.2-114.8 110.5 9.2 7.9 17 22.9 17 46.4 0 33.7-.3 75.4-.3 83.6 0 6.5 4.6 14.4 17.3 12.1C436.2 457.8 504 362.9 504 252 504 113.3 391.5 8 252.8 8M105.2 352.9c-1.3 1-1 3.3.7 5.2 1.6 1.6 3.9 2.3 5.2 1 1.3-1 1-3.3-.7-5.2-1.6-1.6-3.9-2.3-5.2-1m-10.8-8.1c-.7 1.3.3 2.9 2.3 3.9 1.6 1 3.6.7 4.3-.7.7-1.3-.3-2.9-2.3-3.9-2-.6-3.6-.3-4.3.7m32.4 35.6c-1.6 1.3-1 4.3 1.3 6.2 2.3 2.3 5.2 2.6 6.5 1 1.3-1.3.7-4.3-1.3-6.2-2.2-2.3-5.2-2.6-6.5-1m-11.4-14.7c-1.6 1-1.6 3.6 0 5.9s4.3 3.3 5.6 2.3c1.6-1.3 1.6-3.9 0-6.2-1.4-2.3-4-3.3-5.6-2"/></svg>
+  </div>
+  <div class="md-source__repository">
+    matt-pharr/physics-data-viewer
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+            
+<nav class="md-tabs" aria-label="Tabs" data-md-component="tabs">
+  <div class="md-grid">
+    <ul class="md-tabs__list">
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../.." class="md-tabs__link">
+        
+  
+  
+    
+  
+  Home
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../getting-started/installation/" class="md-tabs__link">
+          
+  
+  
+  Getting Started
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../user-guide/" class="md-tabs__link">
+          
+  
+  
+  User Guide
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../api-reference/" class="md-tabs__link">
+          
+  
+  
+  API Reference
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../../modules/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Module Development
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../architecture/" class="md-tabs__link">
+          
+  
+  
+  Developer Guide
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="https://github.com/matt-pharr/physics-data-viewer/releases" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Changelog
+
+      </a>
+    </li>
+  
+
+      
+    </ul>
+  </div>
+</nav>
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+  
+
+
+<nav class="md-nav md-nav--primary md-nav--lifted" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href="../.." title="PDV - Physics Data Viewer" class="md-nav__button md-logo" aria-label="PDV - Physics Data Viewer" data-md-component="logo">
+      
+  <img src="../../assets/pdv-icon.svg" alt="logo">
+
+    </a>
+    PDV - Physics Data Viewer
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/matt-pharr/physics-data-viewer" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M173.9 397.4c0 2-2.3 3.6-5.2 3.6-3.3.3-5.6-1.3-5.6-3.6 0-2 2.3-3.6 5.2-3.6 3-.3 5.6 1.3 5.6 3.6m-31.1-4.5c-.7 2 1.3 4.3 4.3 4.9 2.6 1 5.6 0 6.2-2s-1.3-4.3-4.3-5.2c-2.6-.7-5.5.3-6.2 2.3m44.2-1.7c-2.9.7-4.9 2.6-4.6 4.9.3 2 2.9 3.3 5.9 2.6 2.9-.7 4.9-2.6 4.6-4.6-.3-1.9-3-3.2-5.9-2.9M252.8 8C114.1 8 8 113.3 8 252c0 110.9 69.8 205.8 169.5 239.2 12.8 2.3 17.3-5.6 17.3-12.1 0-6.2-.3-40.4-.3-61.4 0 0-70 15-84.7-29.8 0 0-11.4-29.1-27.8-36.6 0 0-22.9-15.7 1.6-15.4 0 0 24.9 2 38.6 25.8 21.9 38.6 58.6 27.5 72.9 20.9 2.3-16 8.8-27.1 16-33.7-55.9-6.2-112.3-14.3-112.3-110.5 0-27.5 7.6-41.3 23.6-58.9-2.6-6.5-11.1-33.3 2.6-67.9 20.9-6.5 69 27 69 27 20-5.6 41.5-8.5 62.8-8.5s42.8 2.9 62.8 8.5c0 0 48.1-33.6 69-27 13.7 34.7 5.2 61.4 2.6 67.9 16 17.7 25.8 31.5 25.8 58.9 0 96.5-58.9 104.2-114.8 110.5 9.2 7.9 17 22.9 17 46.4 0 33.7-.3 75.4-.3 83.6 0 6.5 4.6 14.4 17.3 12.1C436.2 457.8 504 362.9 504 252 504 113.3 391.5 8 252.8 8M105.2 352.9c-1.3 1-1 3.3.7 5.2 1.6 1.6 3.9 2.3 5.2 1 1.3-1 1-3.3-.7-5.2-1.6-1.6-3.9-2.3-5.2-1m-10.8-8.1c-.7 1.3.3 2.9 2.3 3.9 1.6 1 3.6.7 4.3-.7.7-1.3-.3-2.9-2.3-3.9-2-.6-3.6-.3-4.3.7m32.4 35.6c-1.6 1.3-1 4.3 1.3 6.2 2.3 2.3 5.2 2.6 6.5 1 1.3-1.3.7-4.3-1.3-6.2-2.2-2.3-5.2-2.6-6.5-1m-11.4-14.7c-1.6 1-1.6 3.6 0 5.9s4.3 3.3 5.6 2.3c1.6-1.3 1.6-3.9 0-6.2-1.4-2.3-4-3.3-5.6-2"/></svg>
+  </div>
+  <div class="md-source__repository">
+    matt-pharr/physics-data-viewer
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../.." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_2" >
+        
+          
+          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Getting Started
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Getting Started
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../getting-started/installation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Installation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_3" >
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    User Guide
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    User Guide
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../user-guide/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Overview
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../user-guide/scripts-and-tree/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Scripts & the Tree
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../user-guide/notes-and-projects/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Notes & Projects
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_4" >
+        
+          
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    API Reference
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    API Reference
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api-reference/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Overview
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api-reference/tree/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    The Tree (pdv_tree)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api-reference/nodes/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Tree Node Types
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api-reference/app/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    The App Object (pdv)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api-reference/module-api/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Module API
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api-reference/errors/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Exceptions
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../modules/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Module Development
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_6" >
+        
+          
+          <label class="md-nav__link" for="__nav_6" id="__nav_6_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Developer Guide
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_6_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_6">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Developer Guide
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../architecture/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Architecture
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../developer-quickstart/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Developer Quick Start
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../contributing/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Contributing
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../setup/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Development Setup
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../testing/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Testing
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="https://github.com/matt-pharr/physics-data-viewer/releases" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Changelog
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#1-explicit-save" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        1. Explicit save
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="1. Explicit save">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#renderer-main" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Renderer → main
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#main-ipcprojectsave-handler" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Main: IPC.project.save handler
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#main-projectmanagersave-project-managerts339444" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Main: ProjectManager.save() (project-manager.ts:339–444)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#kernel-handle_project_save-pdv-pythonpdvhandlersprojectpy851968" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Kernel: handle_project_save (pdv-python/pdv/handlers/project.py:851–968)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#post-save-cleanup-electronmainindexts641644" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Post-save cleanup (electron/main/index.ts:641–644)
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#2-autosave" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2. Autosave
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="2. Autosave">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#timer-project-managerts624662" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Timer (project-manager.ts:624–662)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#tick-path-electronmainindexts677686" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Tick path (electron/main/index.ts:677–686)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#ipcautosaverun-handler-indexts688737" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        IPC.autosave.run handler (index.ts:688–737)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#projectmanagerautosave-project-managerts735787" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        ProjectManager.autosave() (project-manager.ts:735–787)
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#3-autosave-cache" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3. Autosave cache
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="3. Autosave cache">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#definition-pdv-pythonpdvhandlersprojectpy41" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Definition (pdv-python/pdv/handlers/project.py:41)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#how-the-cache-is-consulted-pdv-pythonpdvserializationpy375411" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        How the cache is consulted (pdv-python/pdv/serialization.py:375–411)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#file-relocation-pdv-pythonpdvserializationpy284372" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        File relocation (pdv-python/pdv/serialization.py:284–372)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#cache-lifetime" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Cache lifetime
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#4-clear-autosave" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4. Clear-autosave
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="4. Clear-autosave">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#user-initiated-ipcautosaveclear-electronmainindexts739749" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        User-initiated: IPC.autosave.clear (electron/main/index.ts:739–749)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#kernel-handler-handle_project_clear_autosave_cache-projectpy970993" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Kernel handler: handle_project_clear_autosave_cache (project.py:970–993)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#post-explicit-save-onexplicitsavecompleted-indexts641644" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Post-explicit-save: onExplicitSaveCompleted (index.ts:641–644)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#orphan-recovery" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Orphan recovery
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#5-invariants-the-recent-commits-maintain" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5. Invariants the recent commits maintain
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#summary-diagram" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Summary diagram
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+    <a href="https://github.com/matt-pharr/physics-data-viewer/edit/develop/docs/developer/save-pipeline.md" title="Edit this page" class="md-content__button md-icon" rel="edit">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M10 20H6V4h7v5h5v3.1l2-2V8l-6-6H6c-1.1 0-2 .9-2 2v16c0 1.1.9 2 2 2h4zm10.2-7c.1 0 .3.1.4.2l1.3 1.3c.2.2.2.6 0 .8l-1 1-2.1-2.1 1-1c.1-.1.2-.2.4-.2m0 3.9L14.1 23H12v-2.1l6.1-6.1z"/></svg>
+    </a>
+  
+  
+
+
+<h1 id="save-autosave-clear-autosave-pipeline">Save / Autosave / Clear-Autosave Pipeline<a class="headerlink" href="#save-autosave-clear-autosave-pipeline" title="Permanent link">&para;</a></h1>
+<p>This document maps the end-to-end behavior of PDV's project-persistence
+machinery: explicit "Save" / "Save As", the timer-driven autosave, the
+in-kernel autosave checksum cache that lets autosaves skip unchanged nodes,
+and the various paths that clear autosave state. All line numbers are against
+<code>HEAD</code> (branch <code>fix/clear-autosave-cache-eagerly</code>) at the time of writing.</p>
+<p>The pipeline spans three processes:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>Renderer (React) ──window.pdv──► Main (Electron, TS) ──comm──► Kernel (Python)
+</code></pre></div>
+<p>The kernel's <code>PDVTree</code> is the sole data authority. Saves serialize that tree
+to disk; the main process owns the filesystem and the timer; the renderer
+just triggers things and gates cell execution while a save is in flight.</p>
+<hr />
+<h2 id="1-explicit-save">1. Explicit save<a class="headerlink" href="#1-explicit-save" title="Permanent link">&para;</a></h2>
+<p>Triggered by the user (<code>Save</code>, <code>Save As</code>, or saving into a freshly chosen
+directory). One IPC handler in main, one comm message to the kernel, then
+a final post-save cleanup hook.</p>
+<h3 id="renderer-main">Renderer → main<a class="headerlink" href="#renderer-main" title="Permanent link">&para;</a></h3>
+<p><code>window.pdv.project.save(saveDir, codeCells, projectName?)</code> resolves to the
+<code>IPC.project.save</code> channel.</p>
+<h3 id="main-ipcprojectsave-handler">Main: <code>IPC.project.save</code> handler<a class="headerlink" href="#main-ipcprojectsave-handler" title="Permanent link">&para;</a></h3>
+<p><code>electron/main/ipc-register-project.ts</code> registers a handler that runs the
+save under the project-manager save lock so that explicit saves and autosave
+ticks queue against each other rather than racing on the kernel's shell
+channel. The handler calls <code>projectManager.save(saveDir, codeCells, ...)</code>,
+then mirrors module-owned files and module manifests into <code>&lt;saveDir&gt;/modules/</code>,
+and finally fires the <code>onExplicitSaveCompleted(saveDir)</code> callback.</p>
+<p>Save lock is the same mutex used by autosave — see
+<code>project-manager.ts:585–618</code> (<code>runWithSaveLock</code>).</p>
+<h3 id="main-projectmanagersave-project-managerts339444">Main: <code>ProjectManager.save()</code> (<code>project-manager.ts:339–444</code>)<a class="headerlink" href="#main-projectmanagersave-project-managerts339444" title="Permanent link">&para;</a></h3>
+<ol>
+<li>Ensures <code>saveDir</code> exists.</li>
+<li>Consults <code>_cachedKernelResults</code> (line 301) so that a kernel-initiated
+   <code>pdv.save_project()</code> already in flight isn't re-issued and deadlocked.</li>
+<li>Otherwise sends <code>PDVMessageType.PROJECT_SAVE</code> over the comm router with
+   <code>{ save_dir, is_autosave: false, ... }</code>.</li>
+<li>On response, writes <code>code-cells.json</code> to <code>saveDir</code>.</li>
+<li>Reads any existing <code>project.json</code>, merges in module imports / settings
+   coming from the response, and writes the updated <code>project.json</code>. This
+   is the only path that writes <code>project.json</code> to the real save dir;
+   autosave never does.</li>
+</ol>
+<h3 id="kernel-handle_project_save-pdv-pythonpdvhandlersprojectpy851968">Kernel: <code>handle_project_save</code> (<code>pdv-python/pdv/handlers/project.py:851–968</code>)<a class="headerlink" href="#kernel-handle_project_save-pdv-pythonpdvhandlersprojectpy851968" title="Permanent link">&para;</a></h3>
+<p>Registered at <code>project.py:997</code>. Behavior:</p>
+<ul>
+<li>Reads <code>payload.clear_cache</code> and, if true, resets the module-level
+  <code>_autosave_cache</code> <em>before</em> serializing (<code>project.py:909–912</code>). This is the
+  fallback path used when the eager <code>clear_autosave_cache</code> comm couldn't be
+  delivered.</li>
+<li>Calls <code>serialize_tree_to_dir(tree, save_dir, on_progress=..., autosave_cache=_autosave_cache)</code>
+  (<code>project.py:947–949</code>). The cache is <strong>always</strong> passed in — explicit saves
+  participate in the same cache as autosaves; the cache is just an XXH3-128
+  digest of the node's content keyed by tree path.</li>
+<li>Responds with <code>node_count</code>, <code>checksum</code>, <code>autosave_cache_hits</code>,
+  <code>module_owned_files</code>, <code>module_manifests</code>, and <code>missing_files</code>
+  (<code>project.py:963–967</code>).</li>
+</ul>
+<h3 id="post-save-cleanup-electronmainindexts641644">Post-save cleanup (<code>electron/main/index.ts:641–644</code>)<a class="headerlink" href="#post-save-cleanup-electronmainindexts641644" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>onExplicitSaveCompleted: (saveDir) =&gt; {
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>  void ProjectManager.clearAutosave(saveDir);
+<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>  projectManager.resetAutosaveTimer();
+<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a>}
+</code></pre></div>
+<p>That is, after a successful explicit save:</p>
+<ul>
+<li><code>&lt;saveDir&gt;/.autosave/</code> is deleted on disk. This prevents the next autosave
+  from being a no-op cache hit pointing at a <code>.autosave/tree/&lt;uuid&gt;/</code> file
+  that the next explicit save would have to relocate or duplicate.</li>
+<li>The autosave timer is restarted from zero so the user gets a full interval
+  before the next autosave wakes up.</li>
+</ul>
+<p>Note: the kernel-side <code>_autosave_cache</code> is <strong>not</strong> cleared here. That is
+deliberate — the descriptors in the cache point at the canonical
+<code>&lt;saveDir&gt;/tree/&lt;uuid&gt;/</code> files that were just written, so they are still
+valid and useful for the next autosave's cache hits.</p>
+<hr />
+<h2 id="2-autosave">2. Autosave<a class="headerlink" href="#2-autosave" title="Permanent link">&para;</a></h2>
+<p>Timer-driven, runs against <code>&lt;baseDir&gt;/.autosave/</code>, never writes
+<code>project.json</code> into the real save dir.</p>
+<h3 id="timer-project-managerts624662">Timer (<code>project-manager.ts:624–662</code>)<a class="headerlink" href="#timer-project-managerts624662" title="Permanent link">&para;</a></h3>
+<p>State:</p>
+<ul>
+<li><code>autosaveTimer: ReturnType&lt;typeof setInterval&gt; | null</code></li>
+<li><code>autosaveIntervalMs</code> (defaults to 300 s, min 30 s)</li>
+<li><code>autosavePending</code> — set when the kernel was busy at tick time</li>
+<li><code>autosaveClearCacheOnNext</code> — fallback flag for cache invalidation</li>
+<li><code>autosaveTickCallback</code> — the closure to invoke on each tick</li>
+</ul>
+<p><code>startAutosaveTimer(intervalMs, onTick)</code> (line 636) creates the interval.
+<code>resetAutosaveTimer()</code> (line 658) restarts the interval — called after
+explicit save. The timer lives in the main process, not the renderer.</p>
+<h3 id="tick-path-electronmainindexts677686">Tick path (<code>electron/main/index.ts:677–686</code>)<a class="headerlink" href="#tick-path-electronmainindexts677686" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>function triggerAutosave(): void {
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>  if (!activeKernelId) return;
+<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a>  const state = kernelManager.getExecutionState(activeKernelId);
+<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a>  if (state !== &quot;idle&quot;) {
+<a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a>    projectManager.setAutosavePending();   // deferred until idle
+<a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a>    return;
+<a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a>  }
+<a id="__codelineno-2-8" name="__codelineno-2-8" href="#__codelineno-2-8"></a>  win.webContents.send(IPC.push.autosaveTrigger);  // ask renderer for cells
+<a id="__codelineno-2-9" name="__codelineno-2-9" href="#__codelineno-2-9"></a>}
+</code></pre></div>
+<p>The renderer needs to be the one to actually send the autosave because it
+owns the in-memory <code>codeCells</code> snapshot. So main pushes <code>autosaveTrigger</code>,
+the renderer round-trips by invoking <code>IPC.autosave.run</code> with current cells.</p>
+<p>If the kernel is busy at tick time, <code>autosavePending</code> is set. When the
+kernel transitions back to idle, <code>index.ts:888–896</code> checks the pending flag
+and calls <code>triggerAutosave()</code> again.</p>
+<h3 id="ipcautosaverun-handler-indexts688737"><code>IPC.autosave.run</code> handler (<code>index.ts:688–737</code>)<a class="headerlink" href="#ipcautosaverun-handler-indexts688737" title="Permanent link">&para;</a></h3>
+<ol>
+<li>Picks <code>baseDir</code> from <code>activeProjectDir</code> (if a project is open) or
+   <code>kernelWorkingDirs.get(activeKernelId)</code> (orphan / untitled).</li>
+<li>Snapshots in-memory <code>pendingModuleImports</code> and <code>pendingModuleSettings</code>
+   up front so a concurrent <code>modules:*</code> IPC can't tear the synthesized
+   manifest mid-flight.</li>
+<li>Acquires <code>runWithSaveLock</code> (same mutex as explicit save).</li>
+<li>Pushes <code>IPC.push.autosaveStarted</code> so the renderer gates cell execution
+   while the save is in flight.</li>
+<li>Calls <code>projectManager.autosave(autosaveDir, codeCells)</code> where
+   <code>autosaveDir = autosaveDirFor(baseDir)</code> is <code>&lt;baseDir&gt;/.autosave/</code>.</li>
+<li>Calls <code>mirrorAutosaveSidecars(autosaveDir, result, ...)</code> which copies
+   module-owned files into <code>.autosave/modules/</code>, writes per-module
+   manifests, and writes a <code>project.json</code> snapshot specifically into
+   <code>.autosave/project.json</code> for recovery.</li>
+<li>Pushes <code>IPC.push.autosaveEnded</code>.</li>
+</ol>
+<h3 id="projectmanagerautosave-project-managerts735787"><code>ProjectManager.autosave()</code> (<code>project-manager.ts:735–787</code>)<a class="headerlink" href="#projectmanagerautosave-project-managerts735787" title="Permanent link">&para;</a></h3>
+<ul>
+<li>Makes <code>&lt;autosaveDir&gt;/</code> recursively.</li>
+<li>Reads <code>this.autosaveClearCacheOnNext</code> <em>and clears it</em> (lines 748–749).
+  If set, the upcoming comm carries <code>clear_cache: true</code>.</li>
+<li>Sends <code>PDVMessageType.PROJECT_SAVE</code> with <code>save_dir: autosaveDir</code>,
+  <code>is_autosave: true</code>, <code>clear_cache: clearCache</code>.</li>
+<li>Writes <code>code-cells.json</code> directly into the autosave dir.</li>
+<li>Does <strong>not</strong> write <code>project.json</code> to the real save dir.</li>
+<li>Logs a one-liner reporting nodes serialized vs. cache hits so the dev
+  console reflects cache effectiveness.</li>
+</ul>
+<p>The kernel-side handler is the same <code>handle_project_save</code>. The only
+difference from explicit save is the <code>save_dir</code> it receives and the
+<code>is_autosave</code> flag (which is currently informational only — both paths
+go through <code>serialize_tree_to_dir</code> with the same <code>_autosave_cache</code>).</p>
+<hr />
+<h2 id="3-autosave-cache">3. Autosave cache<a class="headerlink" href="#3-autosave-cache" title="Permanent link">&para;</a></h2>
+<p>The cache is a single module-level dict in the kernel. It is the mechanism
+that lets autosaves skip re-serializing unchanged data nodes — without it,
+autosave would re-write every file under <code>.autosave/tree/</code> on every tick.</p>
+<h3 id="definition-pdv-pythonpdvhandlersprojectpy41">Definition (<code>pdv-python/pdv/handlers/project.py:41</code>)<a class="headerlink" href="#definition-pdv-pythonpdvhandlersprojectpy41" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="n">_autosave_cache</span><span class="p">:</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">tuple</span><span class="p">[</span><span class="nb">bytes</span><span class="p">,</span> <span class="nb">dict</span><span class="p">]]</span> <span class="o">=</span> <span class="p">{}</span>
+</code></pre></div>
+<ul>
+<li><strong>Key</strong>: <code>tree_path</code> — the canonical dotted path of the node, e.g.
+  <code>data.runs.001.profiles</code>.</li>
+<li><strong>Value</strong>: <code>(digest, descriptor)</code>.</li>
+<li><code>digest</code>: 16-byte XXH3-128 of the node's serialized content (computed
+    by <code>pdv.checksum.node_digest</code>).</li>
+<li><code>descriptor</code>: the full node descriptor that would have gone into
+    <code>tree-index.json</code>, including a <code>storage.uuid</code> and <code>storage.filename</code>
+    pointing at the file that backs the node.</li>
+</ul>
+<h3 id="how-the-cache-is-consulted-pdv-pythonpdvserializationpy375411">How the cache is consulted (<code>pdv-python/pdv/serialization.py:375–411</code>)<a class="headerlink" href="#how-the-cache-is-consulted-pdv-pythonpdvserializationpy375411" title="Permanent link">&para;</a></h3>
+<p><code>_try_autosave_cache(autosave_cache, tree_path, value, source_dir, hit_counter, working_dir)</code>:</p>
+<ol>
+<li>Computes <code>digest = node_digest(value, source_dir)</code>.</li>
+<li>Looks up <code>cached = autosave_cache.get(tree_path)</code>.</li>
+<li>If <code>cached[0] == digest</code>, verifies the descriptor's backing file is
+   actually reachable from <code>working_dir</code> via <code>_verify_or_relocate_cached_file</code>.</li>
+<li>On success, increments the hit counter and returns
+     <code>(digest, cached_descriptor)</code>.</li>
+<li>On failure, drops the stale entry and returns <code>(digest, None)</code> so the
+     caller re-serializes from scratch. This is the invariant that keeps
+     <code>tree-index.json</code> from referencing a missing file.</li>
+<li>On miss, returns <code>(digest, None)</code>. Callers then serialize as normal and
+   write back: <code>autosave_cache[tree_path] = (digest, descriptor)</code>.</li>
+</ol>
+<p>The cache is consulted at every "data node" code path in
+<code>serialize_node()</code> (<code>serialization.py:630, 658, 713, 797, 814, 836, 862, 881</code>).</p>
+<h3 id="file-relocation-pdv-pythonpdvserializationpy284372">File relocation (<code>pdv-python/pdv/serialization.py:284–372</code>)<a class="headerlink" href="#file-relocation-pdv-pythonpdvserializationpy284372" title="Permanent link">&para;</a></h3>
+<p><code>_verify_or_relocate_cached_file(descriptor, working_dir)</code> is the key
+helper introduced by commit a880c60 ("file relocation for autosave cache").</p>
+<p>For a <code>local_file</code> descriptor (inline <code>Inline</code> ones short-circuit to <code>True</code>)
+it checks four possibilities, in order:</p>
+<ol>
+<li><strong>Canonical hit</strong>: <code>&lt;working_dir&gt;/tree/&lt;uuid&gt;/&lt;filename&gt;</code> exists →
+   return True with no I/O.</li>
+<li><strong>Explicit-save adopting an autosave file</strong>: <code>working_dir</code> is <em>not</em>
+   an <code>.autosave</code> dir, and the file is found at
+   <code>&lt;working_dir&gt;/.autosave/tree/&lt;uuid&gt;/&lt;filename&gt;</code>. The helper
+   <code>os.replace()</code>s it into the canonical location. Same-volume rename is
+   effectively free; cross-device (EXDEV) falls back to <code>shutil.copy2 +
+   os.remove</code>. If both fail, returns False so the caller re-serializes
+   rather than emitting a descriptor we can't back.</li>
+<li><strong>Autosave reusing a prior explicit save's file</strong>: <code>working_dir</code> <em>is</em>
+   the <code>.autosave</code> dir, and the file lives at <code>&lt;parent&gt;/tree/&lt;uuid&gt;/&lt;filename&gt;</code>
+   from a prior explicit save. No move — the recovery overlay handles
+   reading from the parent on load.</li>
+<li><strong>Otherwise</strong>: return False; caller re-serializes.</li>
+</ol>
+<p>This is why explicit saves do not need to clear the cache: file relocation
+guarantees that, by the time <code>tree-index.json</code> is written for the explicit
+save, the file is at its canonical location, regardless of which save
+originally wrote it.</p>
+<h3 id="cache-lifetime">Cache lifetime<a class="headerlink" href="#cache-lifetime" title="Permanent link">&para;</a></h3>
+<p>The cache lives only in Python kernel memory. It is invalidated by:</p>
+<ul>
+<li><code>clear_cache: true</code> arriving in a <code>pdv.project.save</code> payload
+  (<code>project.py:909–912</code>) — both the user-facing "Clear autosave data" path
+  and the fallback path eventually drive this.</li>
+<li>The <code>pdv.project.clear_autosave_cache</code> comm
+  (<code>project.py:970–993</code>) — the eager path.</li>
+<li>Kernel restart / module reload (it is just a module-level dict).</li>
+</ul>
+<p>It is <strong>not</strong> cleared on explicit save, because the descriptors are still
+valid and point at the canonical files that were just written.</p>
+<hr />
+<h2 id="4-clear-autosave">4. Clear-autosave<a class="headerlink" href="#4-clear-autosave" title="Permanent link">&para;</a></h2>
+<p>Two distinct things can be "cleared":</p>
+<ul>
+<li><strong><code>.autosave/</code> on disk</strong> — the staging directory written by autosave
+  ticks.</li>
+<li><strong>The kernel's <code>_autosave_cache</code></strong> — the in-memory dict.</li>
+</ul>
+<p>These are independent. The user-facing "Clear autosave data" button does
+both. Post-explicit-save cleanup does only the first. Recovery flows clean
+up orphans.</p>
+<h3 id="user-initiated-ipcautosaveclear-electronmainindexts739749">User-initiated: <code>IPC.autosave.clear</code> (<code>electron/main/index.ts:739–749</code>)<a class="headerlink" href="#user-initiated-ipcautosaveclear-electronmainindexts739749" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>ipcMain.handle(IPC.autosave.clear, async (_event, dir?: string) =&gt; {
+<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a>  const target = dir || activeProjectDir || kernelWorkingDirs.get(...);
+<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a>  if (target) {
+<a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a>    await ProjectManager.clearAutosave(target);    // remove .autosave/ on disk
+<a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a>    await projectManager.clearAutosaveCache();     // eager comm
+<a id="__codelineno-4-6" name="__codelineno-4-6" href="#__codelineno-4-6"></a>    projectManager.markAutosaveCacheDirty();       // fallback flag
+<a id="__codelineno-4-7" name="__codelineno-4-7" href="#__codelineno-4-7"></a>  }
+<a id="__codelineno-4-8" name="__codelineno-4-8" href="#__codelineno-4-8"></a>});
+</code></pre></div>
+<p>The eager + fallback layering is the subject of commit 7525b86 ("eager
+clearing of autosave cache to prevent reuse of deleted descriptors"):</p>
+<ul>
+<li><code>clearAutosaveCache()</code> (<code>project-manager.ts:689–701</code>) sends
+  <code>PDVMessageType.PROJECT_CLEAR_AUTOSAVE_CACHE</code> and logs on failure.</li>
+<li><code>markAutosaveCacheDirty()</code> (<code>project-manager.ts:673–675</code>) sets
+  <code>autosaveClearCacheOnNext = true</code> so the next save (autosave or
+  explicit) carries <code>clear_cache: true</code> even if the comm above didn't
+  land (kernel disconnected, busy, etc.).</li>
+</ul>
+<h3 id="kernel-handler-handle_project_clear_autosave_cache-projectpy970993">Kernel handler: <code>handle_project_clear_autosave_cache</code> (<code>project.py:970–993</code>)<a class="headerlink" href="#kernel-handler-handle_project_clear_autosave_cache-projectpy970993" title="Permanent link">&para;</a></h3>
+<p>Calls <code>clear_autosave_cache()</code> (resets <code>_autosave_cache = {}</code>) and replies
+with an empty-payload response. Registered at <code>project.py:998</code>.</p>
+<h3 id="post-explicit-save-onexplicitsavecompleted-indexts641644">Post-explicit-save: <code>onExplicitSaveCompleted</code> (<code>index.ts:641–644</code>)<a class="headerlink" href="#post-explicit-save-onexplicitsavecompleted-indexts641644" title="Permanent link">&para;</a></h3>
+<p>Already documented above: deletes <code>&lt;saveDir&gt;/.autosave/</code> on disk, does
+<strong>not</strong> clear the kernel cache. The 22a9889 commit ("prevent duplication
+after explicit saves") is what made this happen unconditionally — before
+that, an autosave run shortly after an explicit save could leave duplicate
+files under <code>.autosave/tree/</code>.</p>
+<h3 id="orphan-recovery">Orphan recovery<a class="headerlink" href="#orphan-recovery" title="Permanent link">&para;</a></h3>
+<p><code>IPC.autosave.deleteOrphan</code> (<code>index.ts:878–...</code>) and
+<code>IPC.autosave.recoverUnsaved</code> (<code>index.ts:768–...</code>) handle the case where
+an unsaved working directory has a <code>.autosave/</code> left behind from a previous
+crash. Recovery copies files out of the orphan's <code>.autosave/</code> into the new
+project; deletion just removes the orphan dir. Neither path touches the
+in-memory cache (the kernel that produced those files is long gone).</p>
+<hr />
+<h2 id="5-invariants-the-recent-commits-maintain">5. Invariants the recent commits maintain<a class="headerlink" href="#5-invariants-the-recent-commits-maintain" title="Permanent link">&para;</a></h2>
+<p>The three commits this PR train is building on encode the following
+invariants. If you change anything in this pipeline, preserve them.</p>
+<ol>
+<li>
+<p><strong><code>tree-index.json</code> never references a missing file.</strong>
+   Enforced by <code>_verify_or_relocate_cached_file</code> dropping stale entries
+   when the backing file can't be located
+   (<code>serialization.py:408–410</code>).</p>
+</li>
+<li>
+<p><strong>After explicit save, no duplicate files under <code>.autosave/tree/</code>.</strong>
+   Enforced by deleting <code>.autosave/</code> in <code>onExplicitSaveCompleted</code>
+   (<code>index.ts:642</code>). Without this, an autosave shortly after an explicit
+   save would be a cache hit pointing at the canonical file, but the
+   <code>.autosave/tree/&lt;uuid&gt;/</code> file from the prior autosave would still be
+   sitting on disk.</p>
+</li>
+<li>
+<p><strong>After "Clear autosave data", the cache cannot resurrect deleted files.</strong>
+   Enforced by the eager <code>clearAutosaveCache()</code> comm
+   (<code>index.ts:746</code>) plus the <code>autosaveClearCacheOnNext</code> fallback
+   (<code>index.ts:747</code>, <code>project-manager.ts:748–749</code>). At least one of the two
+   will land before the next save.</p>
+</li>
+<li>
+<p><strong>Explicit save and autosave never overlap on the kernel shell channel.</strong>
+   Enforced by <code>runWithSaveLock</code> (<code>project-manager.ts:608</code>) wrapping both
+   the <code>IPC.project.save</code> handler (<code>ipc-register-project.ts</code>) and the
+   <code>IPC.autosave.run</code> handler (<code>index.ts:707</code>). ipykernel's shell channel
+   serializes requests anyway, but an <code>execute_request</code> queued behind a
+   <code>pdv.project.save</code> can hang in awkward ways — this lock keeps autosaves
+   off the wire while an explicit save is running, and vice versa.</p>
+</li>
+<li>
+<p><strong><code>project.json</code> for the real project lives only at <code>&lt;saveDir&gt;/project.json</code>.</strong>
+   Autosave writes a <code>project.json</code> <em>snapshot</em> into <code>.autosave/project.json</code>
+   (via <code>mirrorAutosaveSidecars</code>) for recovery, but never touches the
+   parent's <code>project.json</code>. The real <code>project.json</code> is updated only by
+   <code>ProjectManager.save()</code> after the kernel response lands
+   (<code>project-manager.ts:436–440</code>).</p>
+</li>
+<li>
+<p><strong>Cache descriptors are reused verbatim across saves; only their backing
+   file location may need adjustment.</strong> A cache hit always returns the
+   exact descriptor dict the cache holds, including its original UUID —
+   the relocation step ensures the file is wherever the <em>consuming</em>
+   <code>tree-index.json</code> is about to claim it is.</p>
+</li>
+<li>
+<p><strong>The "Save → autosave → save" cycle does not allocate new UUIDs for
+   unchanged nodes.</strong> Consequence of (6): one explicit save mints the UUID,
+   subsequent autosaves are cache hits that reuse it, the next explicit
+   save reuses it again (and relocates the file in from <code>.autosave/</code> if
+   needed).</p>
+</li>
+</ol>
+<hr />
+<h2 id="summary-diagram">Summary diagram<a class="headerlink" href="#summary-diagram" title="Permanent link">&para;</a></h2>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a>EXPLICIT SAVE
+<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a>  Renderer → IPC.project.save
+<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a>    main: runWithSaveLock(
+<a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a>      → comm pdv.project.save { save_dir, is_autosave: false }
+<a id="__codelineno-5-5" name="__codelineno-5-5" href="#__codelineno-5-5"></a>          kernel: serialize_tree_to_dir(save_dir, autosave_cache=_autosave_cache)
+<a id="__codelineno-5-6" name="__codelineno-5-6" href="#__codelineno-5-6"></a>                    cache: hit → reuse descriptor, relocate file if needed
+<a id="__codelineno-5-7" name="__codelineno-5-7" href="#__codelineno-5-7"></a>                           miss → serialize, write file, store (digest, descriptor)
+<a id="__codelineno-5-8" name="__codelineno-5-8" href="#__codelineno-5-8"></a>                  write tree-index.json
+<a id="__codelineno-5-9" name="__codelineno-5-9" href="#__codelineno-5-9"></a>      ← response { node_count, checksum, autosave_cache_hits, ... }
+<a id="__codelineno-5-10" name="__codelineno-5-10" href="#__codelineno-5-10"></a>      write code-cells.json
+<a id="__codelineno-5-11" name="__codelineno-5-11" href="#__codelineno-5-11"></a>      write project.json (merged with prior contents)
+<a id="__codelineno-5-12" name="__codelineno-5-12" href="#__codelineno-5-12"></a>      syncModuleOwnedFilesToSaveDir / writeModuleManifestsToSaveDir
+<a id="__codelineno-5-13" name="__codelineno-5-13" href="#__codelineno-5-13"></a>    )
+<a id="__codelineno-5-14" name="__codelineno-5-14" href="#__codelineno-5-14"></a>    onExplicitSaveCompleted(saveDir):
+<a id="__codelineno-5-15" name="__codelineno-5-15" href="#__codelineno-5-15"></a>      ProjectManager.clearAutosave(saveDir)   # rm -rf .autosave/
+<a id="__codelineno-5-16" name="__codelineno-5-16" href="#__codelineno-5-16"></a>      projectManager.resetAutosaveTimer()
+<a id="__codelineno-5-17" name="__codelineno-5-17" href="#__codelineno-5-17"></a>
+<a id="__codelineno-5-18" name="__codelineno-5-18" href="#__codelineno-5-18"></a>AUTOSAVE TICK
+<a id="__codelineno-5-19" name="__codelineno-5-19" href="#__codelineno-5-19"></a>  main timer → triggerAutosave()
+<a id="__codelineno-5-20" name="__codelineno-5-20" href="#__codelineno-5-20"></a>    kernel busy? → autosavePending = true, exit
+<a id="__codelineno-5-21" name="__codelineno-5-21" href="#__codelineno-5-21"></a>    otherwise → win.send(IPC.push.autosaveTrigger)
+<a id="__codelineno-5-22" name="__codelineno-5-22" href="#__codelineno-5-22"></a>  Renderer → IPC.autosave.run (with codeCells)
+<a id="__codelineno-5-23" name="__codelineno-5-23" href="#__codelineno-5-23"></a>    main: runWithSaveLock(
+<a id="__codelineno-5-24" name="__codelineno-5-24" href="#__codelineno-5-24"></a>      win.send(autosaveStarted)
+<a id="__codelineno-5-25" name="__codelineno-5-25" href="#__codelineno-5-25"></a>      → comm pdv.project.save {
+<a id="__codelineno-5-26" name="__codelineno-5-26" href="#__codelineno-5-26"></a>            save_dir: &lt;base&gt;/.autosave/,
+<a id="__codelineno-5-27" name="__codelineno-5-27" href="#__codelineno-5-27"></a>            is_autosave: true,
+<a id="__codelineno-5-28" name="__codelineno-5-28" href="#__codelineno-5-28"></a>            clear_cache: autosaveClearCacheOnNext (then unset)
+<a id="__codelineno-5-29" name="__codelineno-5-29" href="#__codelineno-5-29"></a>          }
+<a id="__codelineno-5-30" name="__codelineno-5-30" href="#__codelineno-5-30"></a>          kernel: same handler; mostly cache hits → file relocations or no-ops
+<a id="__codelineno-5-31" name="__codelineno-5-31" href="#__codelineno-5-31"></a>      write code-cells.json into .autosave/
+<a id="__codelineno-5-32" name="__codelineno-5-32" href="#__codelineno-5-32"></a>      mirrorAutosaveSidecars(autosaveDir, ...):
+<a id="__codelineno-5-33" name="__codelineno-5-33" href="#__codelineno-5-33"></a>        copy module files into .autosave/modules/
+<a id="__codelineno-5-34" name="__codelineno-5-34" href="#__codelineno-5-34"></a>        write module manifests into .autosave/modules/
+<a id="__codelineno-5-35" name="__codelineno-5-35" href="#__codelineno-5-35"></a>        write .autosave/project.json snapshot
+<a id="__codelineno-5-36" name="__codelineno-5-36" href="#__codelineno-5-36"></a>      win.send(autosaveEnded)
+<a id="__codelineno-5-37" name="__codelineno-5-37" href="#__codelineno-5-37"></a>    )
+<a id="__codelineno-5-38" name="__codelineno-5-38" href="#__codelineno-5-38"></a>
+<a id="__codelineno-5-39" name="__codelineno-5-39" href="#__codelineno-5-39"></a>CLEAR AUTOSAVE (Settings button)
+<a id="__codelineno-5-40" name="__codelineno-5-40" href="#__codelineno-5-40"></a>  Renderer → IPC.autosave.clear(dir?)
+<a id="__codelineno-5-41" name="__codelineno-5-41" href="#__codelineno-5-41"></a>    main: ProjectManager.clearAutosave(target)  # rm -rf .autosave/
+<a id="__codelineno-5-42" name="__codelineno-5-42" href="#__codelineno-5-42"></a>          projectManager.clearAutosaveCache()   # eager: pdv.project.clear_autosave_cache comm
+<a id="__codelineno-5-43" name="__codelineno-5-43" href="#__codelineno-5-43"></a>          projectManager.markAutosaveCacheDirty()  # fallback flag
+<a id="__codelineno-5-44" name="__codelineno-5-44" href="#__codelineno-5-44"></a>        kernel: _autosave_cache = {}  (either on the eager comm or on the next save)
+</code></pre></div>
+
+
+
+
+
+
+
+  
+    
+  
+  
+    
+  
+
+
+  <aside class="md-source-file">
+    
+      
+  <span class="md-source-file__fact">
+    <span class="md-icon" title="Last update">
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M21 13.1c-.1 0-.3.1-.4.2l-1 1 2.1 2.1 1-1c.2-.2.2-.6 0-.8l-1.3-1.3c-.1-.1-.2-.2-.4-.2m-1.9 1.8-6.1 6V23h2.1l6.1-6.1zM12.5 7v5.2l4 2.4-1 1L11 13V7zM11 21.9c-5.1-.5-9-4.8-9-9.9C2 6.5 6.5 2 12 2c5.3 0 9.6 4.1 10 9.3-.3-.1-.6-.2-1-.2s-.7.1-1 .2C19.6 7.2 16.2 4 12 4c-4.4 0-8 3.6-8 8 0 4.1 3.1 7.5 7.1 7.9l-.1.2z"/></svg>
+    </span>
+    <span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-date" title="May 18, 2026 17:56:24 UTC">May 18, 2026</span>
+  </span>
+
+    
+    
+      
+  <span class="md-source-file__fact">
+    <span class="md-icon" title="Created">
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M14.47 15.08 11 13V7h1.5v5.25l3.08 1.83c-.41.28-.79.62-1.11 1m-1.39 4.84c-.36.05-.71.08-1.08.08-4.42 0-8-3.58-8-8s3.58-8 8-8 8 3.58 8 8c0 .37-.03.72-.08 1.08.69.1 1.33.32 1.92.64.1-.56.16-1.13.16-1.72 0-5.5-4.5-10-10-10S2 6.5 2 12s4.47 10 10 10c.59 0 1.16-.06 1.72-.16-.32-.59-.54-1.23-.64-1.92M18 15v3h-3v2h3v3h2v-3h3v-2h-3v-3z"/></svg>
+    </span>
+    <span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-date" title="May 18, 2026 17:56:24 UTC">May 18, 2026</span>
+  </span>
+
+    
+    
+    
+  </aside>
+
+
+  
+
+
+
+  <form class="md-feedback" name="feedback" hidden>
+    <fieldset>
+      <legend class="md-feedback__title">
+        Was this page helpful?
+      </legend>
+      <div class="md-feedback__inner">
+        <div class="md-feedback__list">
+          
+            <button class="md-feedback__icon md-icon" type="submit" title="This page was helpful" data-md-value="1">
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 12a8 8 0 0 0-8-8 8 8 0 0 0-8 8 8 8 0 0 0 8 8 8 8 0 0 0 8-8m2 0a10 10 0 0 1-10 10A10 10 0 0 1 2 12 10 10 0 0 1 12 2a10 10 0 0 1 10 10M10 9.5c0 .8-.7 1.5-1.5 1.5S7 10.3 7 9.5 7.7 8 8.5 8s1.5.7 1.5 1.5m7 0c0 .8-.7 1.5-1.5 1.5S14 10.3 14 9.5 14.7 8 15.5 8s1.5.7 1.5 1.5m-5 7.73c-1.75 0-3.29-.73-4.19-1.81L9.23 14c.45.72 1.52 1.23 2.77 1.23s2.32-.51 2.77-1.23l1.42 1.42c-.9 1.08-2.44 1.81-4.19 1.81"/></svg>
+            </button>
+          
+            <button class="md-feedback__icon md-icon" type="submit" title="This page could be improved" data-md-value="0">
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 12a8 8 0 0 0-8-8 8 8 0 0 0-8 8 8 8 0 0 0 8 8 8 8 0 0 0 8-8m2 0a10 10 0 0 1-10 10A10 10 0 0 1 2 12 10 10 0 0 1 12 2a10 10 0 0 1 10 10m-6.5-4c.8 0 1.5.7 1.5 1.5s-.7 1.5-1.5 1.5-1.5-.7-1.5-1.5.7-1.5 1.5-1.5M10 9.5c0 .8-.7 1.5-1.5 1.5S7 10.3 7 9.5 7.7 8 8.5 8s1.5.7 1.5 1.5m2 4.5c1.75 0 3.29.72 4.19 1.81l-1.42 1.42C14.32 16.5 13.25 16 12 16s-2.32.5-2.77 1.23l-1.42-1.42C8.71 14.72 10.25 14 12 14"/></svg>
+            </button>
+          
+        </div>
+        <div class="md-feedback__note">
+          
+            <div data-md-value="1" hidden>
+              
+              
+                
+              
+              
+              
+                
+                
+              
+              Thanks for the feedback!
+            </div>
+          
+            <div data-md-value="0" hidden>
+              
+              
+                
+              
+              
+              
+                
+                
+              
+              Thanks for the feedback! Help us improve by <a href="https://github.com/matt-pharr/physics-data-viewer/issues/new?labels=documentation&title=Docs+feedback:+" target="_blank" rel="noopener">opening a documentation issue</a>.
+            </div>
+          
+        </div>
+      </div>
+    </fieldset>
+  </form>
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+    
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+      <div class="md-consent" data-md-component="consent" id="__consent" hidden>
+        <div class="md-consent__overlay"></div>
+        <aside class="md-consent__inner">
+          <form class="md-consent__form md-grid md-typeset" name="consent">
+            
+
+
+
+  
+
+<h4>Cookie consent</h4>
+<p>We use cookies to measure documentation usage so we can see which pages are helpful and where users get stuck. Nothing personal is collected.</p>
+<input class="md-toggle" type="checkbox" id="__settings" checked>
+<div class="md-consent__settings">
+  <ul class="task-list">
+    
+    
+      
+        
+  
+  
+    
+    
+  
+  <li class="task-list-item">
+    <label class="task-list-control">
+      <input type="checkbox" name="analytics" checked>
+      <span class="task-list-indicator"></span>
+      Google Analytics
+    </label>
+  </li>
+
+      
+    
+    
+      
+        
+  
+  
+    
+    
+  
+  <li class="task-list-item">
+    <label class="task-list-control">
+      <input type="checkbox" name="github" checked>
+      <span class="task-list-indicator"></span>
+      GitHub
+    </label>
+  </li>
+
+      
+    
+    
+  </ul>
+</div>
+<div class="md-consent__controls">
+  
+    
+      <button class="md-button md-button--primary">Accept</button>
+    
+    
+    
+  
+</div>
+          </form>
+        </aside>
+      </div>
+      <script>var consent=__md_get("__consent");if(consent)for(var input of document.forms.consent.elements)input.name&&(input.checked=consent[input.name]||!1);else"file:"!==location.protocol&&setTimeout((function(){document.querySelector("[data-md-component=consent]").hidden=!1}),250);var form=document.forms.consent;for(var action of["submit","reset"])form.addEventListener(action,(function(e){if(e.preventDefault(),"reset"===e.type)for(var n of document.forms.consent.elements)n.name&&(n.checked=!1);__md_set("__consent",Object.fromEntries(Array.from(new FormData(form).keys()).map((function(e){return[e,!0]})))),location.hash="",location.reload()}))</script>
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "../..", "features": ["navigation.tabs", "navigation.sections", "navigation.expand", "navigation.top", "navigation.footer", "search.suggest", "search.highlight", "content.code.copy", "content.code.annotate", "content.action.edit"], "search": "../../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": {"default": "latest", "provider": "mike"}}</script>
+    
+    
+      <script src="../../assets/javascripts/bundle.79ae519e.min.js"></script>
+      
+        <script src="https://unpkg.com/mathjax@3/es5/tex-mml-chtml.js"></script>
+      
+    
+  </body>
+</html>
