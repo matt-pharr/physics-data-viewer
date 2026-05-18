@@ -587,6 +587,119 @@
   border-color: var(--accent);
 }
 
+/* ── Agents tab ── */
+.settings-agents {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.agents-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--text-primary);
+}
+
+.agents-status-dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.agents-status-dot--on {
+  background: var(--success);
+}
+
+.agents-status-dot--off {
+  background: var(--text-secondary);
+}
+
+.agents-status-text {
+  font-size: 13px;
+}
+
+.agents-inline-code,
+.agents-field-value {
+  font-family: var(--font-mono);
+  background: var(--bg-tertiary);
+  color: var(--text-primary);
+  border-radius: 3px;
+}
+
+.agents-inline-code {
+  padding: 1px 4px;
+  font-size: 12px;
+}
+
+.agents-field {
+  display: grid;
+  grid-template-columns: 140px 1fr auto;
+  gap: 10px 12px;
+  align-items: center;
+}
+
+.agents-field-label {
+  font-size: 13px;
+  color: var(--text-secondary);
+  text-align: right;
+  padding-right: 4px;
+}
+
+.agents-field-value {
+  padding: 5px 8px;
+  font-size: 12px;
+  border: 1px solid var(--border-color);
+  word-break: break-all;
+  min-width: 0;
+}
+
+.agents-snippet {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.agents-snippet-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.agents-snippet-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.agents-snippet-body {
+  margin: 0;
+  padding: 8px 10px;
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  background: var(--bg-tertiary);
+  color: var(--text-primary);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-all;
+  overflow-x: auto;
+}
+
+.agents-toggle {
+  align-self: flex-start;
+}
+
+.settings-agents-desc {
+  font-size: 11px;
+  color: var(--text-secondary);
+  margin-top: -6px;
+}
+
 /* ===== ENVIRONMENT SELECTOR (discovery picker) ===== */
 
 .environment-selector h2 {

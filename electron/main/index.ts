@@ -59,6 +59,7 @@ import {
   type CodeCellData,
 } from "./ipc";
 import { PDVMessage, PDVMessageType, setAppVersion } from "./pdv-protocol";
+import type { McpServerHooks } from "./mcp/mcp-context";
 
 // ---------------------------------------------------------------------------
 // Unified version — set once before any handler uses getAppVersion()
@@ -443,6 +444,13 @@ export function registerIpcHandlers(
   const moduleManager = new ModuleManager(pdvDir);
   let activeProjectDir: string | null = null;
   let activeKernelId: string | null = null;
+  // Project/kernel generation counter — bumped on project switch/reload,
+  // kernel restart, and environment change so connected MCP sessions can
+  // detect that the project changed underneath them (ARCHITECTURE.md §15.3).
+  let generation = 0;
+  const bumpGeneration = (): void => {
+    generation += 1;
+  };
   const moduleHealthWarningsByAlias = new Map<string, ModuleHealthWarning[]>();
 
   // In-memory module state for imports made before the project is saved to disk.
@@ -548,6 +556,8 @@ export function registerIpcHandlers(
     },
     setActiveKernelId: (id) => {
       activeKernelId = id;
+      // A new/restarted kernel invalidates connected MCP sessions.
+      bumpGeneration();
       if (id) {
         const config = readConfig(configStore);
         const intervalMs = (config.autoSaveIntervalSeconds ?? DEFAULT_AUTOSAVE_INTERVAL_S) * 1000;
@@ -622,7 +632,7 @@ export function registerIpcHandlers(
       }
       return "python";
     },
-    setActiveProjectDir: (dir) => { activeProjectDir = dir; },
+    setActiveProjectDir: (dir) => { activeProjectDir = dir; bumpGeneration(); },
     getPendingModuleImports: () => pendingModuleImports,
     setPendingModuleImports: (imports) => { pendingModuleImports = imports; },
     getPendingModuleSettings: () => pendingModuleSettings,
@@ -920,7 +930,30 @@ export function registerIpcHandlers(
     guiViewerWindowManager.closeAll();
   }
 
+  // Publish the lifecycle hooks the MCP server reads (ARCHITECTURE.md §15).
+  mcpServerHooks = {
+    getActiveKernelId: () => activeKernelId,
+    getActiveProjectDir: () => activeProjectDir,
+    getGeneration: () => generation,
+    bumpGeneration,
+  };
+
   return resetSessionState;
+}
+
+/**
+ * MCP server lifecycle hooks, populated by {@link registerIpcHandlers} when
+ * the window's IPC handlers are registered. `null` before that point.
+ */
+let mcpServerHooks: McpServerHooks | null = null;
+
+/**
+ * Get the MCP server lifecycle hooks.
+ *
+ * @returns The hooks, or `null` if IPC handlers have not been registered yet.
+ */
+export function getMcpServerHooks(): McpServerHooks | null {
+  return mcpServerHooks;
 }
 
 /**

@@ -2027,7 +2027,9 @@ Each MCP client session records the generation at which it connected. A tool cal
 
 ### 15.4 Authentication
 
-A loopback port is reachable by **any** local process. Because the tool surface includes code execution, an unauthenticated server would let any local process — including a malicious dependency's install script — drive the kernel. The server therefore generates a random **bearer token** at startup and rejects any request that does not present it (`Authorization: Bearer …`). This is not a vendor credential and PDV stores no account information — it is a local handshake secret. The token is shown in the Agents settings pane, pre-baked into the copy-paste client snippets.
+A loopback port is reachable by **any** local process. Because the tool surface includes code execution, an unauthenticated server would let any local process — including a malicious dependency's install script — drive the kernel. The server therefore requires a random **bearer token** on every request (`Authorization: Bearer …`) and rejects any request that does not present it. This is not a vendor credential and PDV stores no account information — it is a local handshake secret. The token is shown in the Agents settings pane, pre-baked into the copy-paste client snippets.
+
+The token is minted on first server start and **persisted** in the config store (`mcp.authToken`). A per-run token would silently break every connected agent on each app restart; a persisted one means the client snippet a user copies once keeps working. At rest the token lives in the user's config file, which carries the same local-process threat model as the loopback port — any process able to read the config could already bind the port. Token rotation from the Agents pane is deferred work (§15.12).
 
 ### 15.5 Tool Surface
 
@@ -2059,9 +2061,9 @@ All tools are thin wrappers over operations PDV already performs. They divide in
 
 - `namespace_list` — non-protected names in the kernel namespace.
 - `pdv_help` — live `inspect.signature` + docstring (and source on request) for any symbol: the `pdv.*` API, PDV classes, or the user's own loaded modules. Always in sync, because it introspects the running kernel rather than a static document.
-- `project_info` — project name, save directory, working directory, app/protocol version, kernel status, the active environment's interpreter path, and the agent log path (§15.7).
+- `project_info` — project name, save directory, working directory, app/protocol version, kernel status, the active environment's interpreter path, and the execution transcript path (§15.7).
 
-There is deliberately **no raw `kernel_execute` tool distinct from `pdv_run`**, and **no `console_tail`, `script_read`, or `note_read` tool** — those collapse into, respectively, `pdv_run`, the agent log file (§15.7), and `tree_get_node` returning a path the agent reads natively.
+There is deliberately **no raw `kernel_execute` tool distinct from `pdv_run`**, and **no `console_tail`, `script_read`, or `note_read` tool** — those collapse into, respectively, `pdv_run`, the execution transcript (§15.7), and `tree_get_node` returning a path the agent reads natively.
 
 ### 15.6 Tool-Surface Design Principles
 
@@ -2073,13 +2075,27 @@ MCP servers commonly inflate an agent's context. PDV's must not. The integration
 4. **Lazy and capped.** `tree_list` is shallow by default; `tree_get_data` is size-capped and leads with a summary. The agent requests depth explicitly.
 5. **Do not duplicate native capability.** No file listing, no grep, no generic file read — the agent already has those.
 
-### 15.7 Execution Output and the Agent Log
+### 15.7 Execution Output and the Transcript
 
 Reading the output of a run is what makes an agent's debug loop work, and it must be designed so it does not flood context.
 
 `script_run`, `cell_run`, and `pdv_run` return a **structured summary**: status, duration, the full error and traceback on failure, and the final lines of output inline — enough to see success or a traceback without loading everything.
 
-For anything beyond that, PDV writes execution output to a plain **agent log file** inside the kernel working directory (§6.1) — alongside `code-cells.json`, and like it, **session-scoped scratch**. The agent receives the file's path (in run results and in `project_info`) and reads it with its own `grep` / `head` / `tail` — the same output-filtering workflow it uses for shell commands, which an MCP tool's return value cannot support. The file is never written into the project save directory, is not loaded with a project, and is discarded when the working directory is torn down on shutdown (§6.1) — these properties fall out of its location and require no save/load machinery. It is deliberately **not** a persistent console-history feature; it exists only so an in-session agent can inspect recent output.
+For anything beyond that, PDV appends every execution — user-initiated and agent-initiated alike — to a plain-text **session execution transcript** inside the kernel working directory (§6.1), alongside `code-cells.json` and, like it, **session-scoped scratch**. The agent receives the file's path (in run results and in `project_info`) and reads it with its own `grep` / `head` / `tail` — the same output-filtering workflow it uses for shell commands, which an MCP tool's return value cannot support. The file is never written into the project save directory, is not loaded with a project, and is discarded when the working directory is torn down on shutdown (§6.1) — these properties fall out of its location and require no save/load machinery. It is deliberately **not** a persistent console-history feature; it exists only so an in-session agent can inspect recent activity.
+
+The transcript is **plain text, not JSON** — its primary job is line-oriented `grep` / `tail` over verbatim output, which JSON escaping of multi-line output would defeat. Each execution is one block: a distinctive, greppable header line carrying the execution id, ISO timestamp, origin (`user:cell-2`, `agent:pdv_run`, `agent:script_run:<path>`, …), status, and duration, followed by the code that ran and then its verbatim output.
+
+```
+═══ exec 7f3b · 2026-05-18T14:32:09 · user:cell-2 · error · 0.02s ═══
+--- code ---
+1/0
+--- output ---
+Traceback (most recent call last):
+  ...
+ZeroDivisionError: division by zero
+```
+
+This delimits executions, attributes each to its origin, and separates code from output — `grep '^═══ exec'` is a full execution index, `grep ' · agent:'` filters to agent runs — while keeping output verbatim. A structured (JSON-lines) format may be revisited if the plain-text form proves limiting.
 
 ### 15.8 Renderer Interaction
 

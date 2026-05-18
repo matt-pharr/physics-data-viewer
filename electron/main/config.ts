@@ -92,6 +92,31 @@ export interface PDVConfig {
       displayFont?: string;
     };
   };
+  /** AI agent integration (MCP server) settings. */
+  mcp?: {
+    /**
+     * Preferred loopback port for the MCP server. The server falls back to
+     * the next free port on collision. Defaults to {@link DEFAULT_MCP_PORT}.
+     */
+    defaultPort?: number;
+    /**
+     * Whether mutating MCP tools are exposed to connected agents. Off by
+     * default; gated here until the project trust model lands (Phase 2).
+     */
+    mutatingToolsEnabled?: boolean;
+    /**
+     * Whether the `pdv_run` tool (arbitrary code in the live kernel) is
+     * exposed. Off by default (Phase 2).
+     */
+    pdvRunEnabled?: boolean;
+    /**
+     * Bearer token authenticating MCP requests. Minted on first server
+     * start and persisted so a connected agent survives an app restart
+     * instead of failing auth against a freshly-rotated secret. Absent
+     * until the MCP server has started at least once.
+     */
+    authToken?: string;
+  };
 }
 
 /**
@@ -101,6 +126,13 @@ export interface PDVConfig {
  * in exactly one place.
  */
 export const DEFAULT_AUTOSAVE_INTERVAL_S = 300;
+
+/**
+ * Default loopback port for the AI-agent MCP server. The server falls back
+ * to the next free port when this one is taken. Overridable via the
+ * `mcp.defaultPort` config key.
+ */
+export const DEFAULT_MCP_PORT = 7391;
 
 const CONFIG_DEFAULTS: PDVConfig = {
   showPrivateVariables: false,
@@ -254,6 +286,15 @@ function parseConfig(raw: string, filePath: string): Partial<PDVConfig> {
     }
     if (settings && typeof settings === "object" && !Array.isArray(settings)) {
       result.settings = settings as PDVConfig["settings"];
+    }
+  }
+  if ("mcp" in obj) {
+    const mcp = obj.mcp;
+    if (mcp !== null && mcp !== undefined && (typeof mcp !== "object" || Array.isArray(mcp))) {
+      throw new Error(`Invalid config value for mcp in ${filePath}`);
+    }
+    if (mcp && typeof mcp === "object" && !Array.isArray(mcp)) {
+      result.mcp = mcp as PDVConfig["mcp"];
     }
   }
 
