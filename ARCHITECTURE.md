@@ -23,7 +23,8 @@
 12. [File and Module Structure](#12-file-and-module-structure)
 13. [TypeScript Documentation Standard](#13-typescript-documentation-standard)
 14. [Testing Strategy](#14-testing-strategy)
-15. [What is Explicitly Out of Scope (Beta)](#15-what-is-explicitly-out-of-scope-beta)
+15. [AI Agent Integration (MCP Server)](#15-ai-agent-integration-mcp-server)
+16. [What is Explicitly Out of Scope (Beta)](#16-what-is-explicitly-out-of-scope-beta)
 
 ---
 
@@ -1327,7 +1328,7 @@ Both gracefully return empty/not-found results on error.
 
 ### 9.5 Console History
 
-Console output is **ephemeral**. It is not saved to disk, not persisted across sessions, and not included in the project save. When a project is loaded, the console is empty. This is by design.
+Console output is **ephemeral**. It is not saved to disk, not persisted across sessions, and not included in the project save. When a project is loaded, the console is empty. This is by design. (The MCP agent integration writes execution output to a separate, session-scoped scratch file in the working directory for agent consumption — see §15.7; that file is not the renderer console and is never saved with the project.)
 
 ---
 
@@ -1992,7 +1993,139 @@ Main process modules tested in isolation with mocked ZeroMQ sockets:
 
 ---
 
-## 15. What is Explicitly Out of Scope (Beta)
+## 15. AI Agent Integration (MCP Server)
+
+### 15.1 Goal and Philosophy
+
+PDV exposes the active project to external AI coding agents (Claude Code, Codex, Cursor, and any other [Model Context Protocol](https://modelcontextprotocol.io) client) through a local **MCP server**. PDV is an MCP *server*, never an agent *host*: it does not embed a chat panel, an agent loop, or any model credentials. The user brings their own agent and their own subscription.
+
+This is a deliberate architectural boundary, not a temporary limitation:
+
+- The expensive, fast-moving part of an "AI integration" is the **agent harness** — tool selection, retries, context management, the conversation loop. A capable harness already exists for every major vendor and is already paid for by the user's subscription. PDV embedding its own harness would require separate metered API billing (a non-starter for the typical subscription-tier user) and would perpetually trail the vendors' own tools.
+- An MCP server is **vendor-neutral**: one implementation serves every MCP-capable agent.
+- It is **low-maintenance and durable**: the MCP wire protocol is a stable standard, and the tool surface maps one-to-one onto operations PDV already performs. A new PDV feature becomes one new tool, not a re-architecture.
+
+The mental model for the tool surface follows from one principle: **PDV exposes the runtime; the agent keeps the filesystem.** An external agent is already excellent at reading files, editing files, grepping, and browsing directories — and the PDV project is a real directory on disk. PDV's tools therefore cover only what the filesystem cannot: the live tree structure, live data and namespace, the kernel run path, and the translation between tree paths and on-disk paths. Anything file-shaped (script source, note bodies, GUI JSON) is handed to the agent as a **path**, and the agent edits it with its own native tooling. The agent is, in effect, "a script author with a fast typing speed" — every write it makes flows through PDV's existing execution and tree paths, so no parallel permission or mutation system is introduced.
+
+### 15.2 The Server
+
+- **Process.** The MCP server runs inside the Electron **main process**. It reaches the kernel through the existing `CommRouter` / `QueryRouter` (§3) and `KernelManager.execute` (§9) entry points, exactly as the IPC handlers do. It introduces no new transport to the kernel.
+- **Transport.** Streamable HTTP, bound to loopback (`127.0.0.1`) only. Stdio is rejected: the server must talk to an *already-running* PDV instance with an open project, which a stdio-spawned process cannot.
+- **Dependency.** The official `@modelcontextprotocol/sdk` package. This is the one new runtime dependency; hand-rolling the protocol would be strictly more long-term maintenance.
+- **Lifecycle.** The server starts on app launch and stops on quit — its lifetime is the **app's**, not the project's. The listening port is chosen dynamically (a default, with fallback on collision) and surfaced in Settings (§15.10); it is never hardcoded.
+- **Not a global singleton.** The server is owned by a project/window session. Today PDV exposes one window, so there is one server instance and one port. When multi-window lands, each window owns its own server instance on its own port, and the user connects an agent to the specific window they want. The server instance is destined to live on the future `Session` abstraction, alongside the autosave timer; until then it is main-process-owned but encapsulated so the move is mechanical. No code may assume a single global server.
+
+### 15.3 Session Binding and Staleness
+
+The server runs for the whole app session, but a connected agent must never act on a project or kernel that has since changed underneath it. PDV maintains a single integer **generation counter**, incremented whenever any of the following occurs:
+
+- the active project is switched or reloaded,
+- the kernel is restarted,
+- the environment is changed.
+
+Each MCP client session records the generation at which it connected. A tool call from a session whose generation no longer matches the current one fails immediately with a clear, actionable error (*"PDV's project or kernel has changed; reconnect."*). The endpoint URL and auth token are unaffected — only the session is invalidated — so the agent re-initializes and transparently picks up the new project, and the Settings snippet never goes stale. This one counter is the entire staleness guard, and it makes "open a different project in the same window" structurally incapable of serving an agent stale data.
+
+### 15.4 Authentication
+
+A loopback port is reachable by **any** local process. Because the tool surface includes code execution, an unauthenticated server would let any local process — including a malicious dependency's install script — drive the kernel. The server therefore generates a random **bearer token** at startup and rejects any request that does not present it (`Authorization: Bearer …`). This is not a vendor credential and PDV stores no account information — it is a local handshake secret. The token is shown in the Agents settings pane, pre-baked into the copy-paste client snippets.
+
+### 15.5 Tool Surface
+
+All tools are thin wrappers over operations PDV already performs. They divide into read-only and mutating tiers; both ship together. The mutating tier is governed by the project trust model when it lands (§15.12); in the interim it is governed by a single Settings toggle.
+
+**Translation**
+
+- `resolve_path` — bidirectional mapping between an on-disk path and a tree path. Because file-backed nodes are stored under opaque `tree/<uuid>/` directories (§6.3), this is the tool that lets an agent grep the project with its native tools and still report findings in tree terms (`pdv_tree["..."]`). Keystone tool.
+
+**Tree (read-only)**
+
+- `tree_list` — a compact, `tree`-style hierarchical view: types, shapes, dtypes, sizes. Shallow by default; the agent drills in.
+- `tree_get_node` — full metadata for one node. For file-backed nodes it returns the on-disk path so the agent can read the file natively.
+- `tree_get_data` — the actual payload for a data node; size-capped and summary-first (shape/dtype/statistics before raw values).
+
+**Tree (mutating)**
+
+- `create_tree_node` — creates a node of a given `type` (`note`, `script`, `gui`, `namelist`, `lib`, `file`, `module`, or a plain sub-tree) at a path, writing a templated backing file (e.g. a script's `run(pdv_tree, **params)` stub). The agent then edits that file natively.
+- `delete_tree_node` — destructive; always raises a PDV-side confirmation dialog regardless of trust level.
+- `move_tree_node` — rename or relocate a node. This must be a tool, not a filesystem move: UUID storage decouples the tree path from the on-disk path.
+
+**Execution**
+
+- `script_run` — runs a `PDVScript` through the existing `script.run()` path (§5.7), tagged with `origin: agent`.
+- `cell_list` / `cell_read` / `cell_write` / `cell_run` — inspect, edit, and run the renderer's code-cell tabs (§15.8).
+- `pdv_run` — executes a Python string in the live kernel. The intended use is one-off experiments; the code and its output are written to the console, agent-tagged and visually marked (§15.9), so a one-off is never invisible to the user. Persistent code belongs in a cell or a script, not here. `pdv_run` is the most powerful tool and is the primary subject of the mutating-tier gate.
+
+**Introspection**
+
+- `namespace_list` — non-protected names in the kernel namespace.
+- `pdv_help` — live `inspect.signature` + docstring (and source on request) for any symbol: the `pdv.*` API, PDV classes, or the user's own loaded modules. Always in sync, because it introspects the running kernel rather than a static document.
+- `project_info` — project name, save directory, working directory, app/protocol version, kernel status, the active environment's interpreter path, and the agent log path (§15.7).
+
+There is deliberately **no raw `kernel_execute` tool distinct from `pdv_run`**, and **no `console_tail`, `script_read`, or `note_read` tool** — those collapse into, respectively, `pdv_run`, the agent log file (§15.7), and `tree_get_node` returning a path the agent reads natively.
+
+### 15.6 Tool-Surface Design Principles
+
+MCP servers commonly inflate an agent's context. PDV's must not. The integration succeeds only if it feels like a native extension of the agent's normal work — editing Python, browsing directories, running code — rather than a heavyweight bolt-on. The rules:
+
+1. **Few tools.** Every tool's schema occupies context permanently. The surface is kept near the tools of §15.5; capabilities are merged (one `create_tree_node`, not one tool per node type) rather than multiplied.
+2. **Return references, not payloads.** File-backed content is returned as a path, never inlined. The agent reads and edits it with its own tools — gaining diff views, edit-context optimizations, and everything else its harness already does well.
+3. **Compact text over JSON.** `tree_list` returns a `tree`-style text block, not nested JSON, because it is cheaper to tokenize and immediately legible.
+4. **Lazy and capped.** `tree_list` is shallow by default; `tree_get_data` is size-capped and leads with a summary. The agent requests depth explicitly.
+5. **Do not duplicate native capability.** No file listing, no grep, no generic file read — the agent already has those.
+
+### 15.7 Execution Output and the Agent Log
+
+Reading the output of a run is what makes an agent's debug loop work, and it must be designed so it does not flood context.
+
+`script_run`, `cell_run`, and `pdv_run` return a **structured summary**: status, duration, the full error and traceback on failure, and the final lines of output inline — enough to see success or a traceback without loading everything.
+
+For anything beyond that, PDV writes execution output to a plain **agent log file** inside the kernel working directory (§6.1) — alongside `code-cells.json`, and like it, **session-scoped scratch**. The agent receives the file's path (in run results and in `project_info`) and reads it with its own `grep` / `head` / `tail` — the same output-filtering workflow it uses for shell commands, which an MCP tool's return value cannot support. The file is never written into the project save directory, is not loaded with a project, and is discarded when the working directory is torn down on shutdown (§6.1) — these properties fall out of its location and require no save/load machinery. It is deliberately **not** a persistent console-history feature; it exists only so an in-session agent can inspect recent output.
+
+### 15.8 Renderer Interaction
+
+The tree, namespace, introspection, project, `script_run`, and `pdv_run` tools operate entirely between the main process and the kernel; the renderer is not involved.
+
+**The cell tools are the exception** — code cells live only in renderer React state. `cell_list`, `cell_read`, and `cell_run` use the request/response pattern already proven by the autosave pipeline (§8.4): the main process asks the renderer to report (or act on) its live cell state, and the renderer replies. `cell_write` is a one-way push the renderer applies to its tab state. No "cell mirror" is cached in the main process, and no tree state is cached — the §7.1 single-authority rule is unaffected, since cells are renderer scratch state rather than tree data.
+
+### 15.9 Visual Coupling
+
+PDV stays visually coupled to agent activity, but minimally — the elaborate coupling layer is deferred (§15.12). What ships:
+
+- **`origin` tagging.** The existing `KernelExecutionOrigin` type gains an `agent` kind. Every agent-initiated run is tagged, so the console can style it distinctly — a boxed or differently-colored entry that marks it unambiguously as agent-run.
+- **Connection indicator.** A status-bar dot showing whether an MCP client is currently attached.
+
+### 15.10 Settings: the Agents Pane
+
+A new **Agents** pane in Settings (§11) shows:
+
+- the server endpoint URL and bearer token,
+- ready-to-paste configuration snippets for Claude Code, Codex, and Cursor, with the token pre-filled,
+- the mutating-tier toggle (and, in particular, an off-switch for `pdv_run`).
+
+PDV stores no agent credentials; the only secret here is the local handshake token of §15.4.
+
+### 15.11 Documentation Exposure
+
+For an agent to write scripts that integrate correctly, it must know the PDV library API (`pdv.add_file`, `pdv.save`, `pdv.working_dir`, the `PDVTree` / `PDVScript` / `PDVNote` classes and their methods) and the script contract.
+
+PDV does not ship a static API reference, which would drift. Instead:
+
+- `pdv_help` provides live introspection of any symbol, always in sync with the installed `pdv-python`.
+- The pdv-python source itself lives in the environment on disk; once `project_info` exposes the interpreter path, the agent can read the full package source natively.
+- The MCP server's `instructions` string — surfaced to the model by the client — carries only a terse, always-relevant orientation: the script contract (`run(pdv_tree, **user_params) -> dict`), the runtime-vs-filesystem principle of §15.1, the rule that all computation must be authored as PDV scripts/cells rather than run outside PDV, and a pointer to `pdv_help` and the source path.
+- The GUI file format — the structure of a `gui.json` — is the versioned `GuiManifestV1` schema, defined canonically in `ipc.ts` together with `LayoutNode` and the input/action descriptors, and exercised by PDV's own GUI editor. Because that definition lives in the PDV application source rather than in any project the agent can see, the MCP server surfaces a reference to it on demand (pointed to from `instructions`), so an agent can author or edit a `gui.json` correctly.
+
+### 15.12 Deferred Work
+
+**Deferred — extended visual coupling.** Highlight rings on tree nodes and code cells, the streaming-edit animation, a dedicated `agent:activity` IPC channel, and an activity-log panel are deferred. The §15.9 minimum (origin tagging + connection dot) is what ships first.
+
+**Deferred — trust model.** Gating of the mutating tier properly belongs to the project trust model, tracked separately. Until it lands, the mutating tier is governed by the single Settings toggle of §15.10.
+
+**Out of scope.** An in-app chat panel, an embedded agent loop, PDV-managed model credentials, an embedded terminal, and inline ghost-text completions (a separate, orthogonal track) are out of scope for this work.
+
+---
+
+## 16. What is Explicitly Out of Scope (Beta)
 
 The following features are acknowledged as future work and must not influence the current architecture in ways that complicate the above design:
 
