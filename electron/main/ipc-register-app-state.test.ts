@@ -74,7 +74,12 @@ vi.mock("electron", () => ({
   dialog: dialogMocks,
   shell: shellMocks,
   app: {
-    getVersion: () => "0.1.2-test",
+    // Lazy require so the value derives from the shared
+    // TEST_PDV_VERSION_TEST_SUFFIX constant without referencing a top-level
+    // import inside vi.mock's hoisted factory. Same pattern as index.test.ts.
+    getVersion: () =>
+      (require("./test-helpers") as typeof import("./test-helpers"))
+        .TEST_PDV_VERSION_TEST_SUFFIX,
     quit: vi.fn(),
   },
 }));

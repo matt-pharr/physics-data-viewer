@@ -113,33 +113,9 @@ replace_in_file examples/modules/N-pendulum-julia/pdv-module.json \
     "\"pdv_min\": \"$OLD_RE\"" \
     "\"pdv_min\": \"$NEW\""
 
-# Test fixtures that hardcode the pdv version. Each site is targeted so
-# unrelated "0.x.y" fixtures (demo module versions, setuptools-normalization
-# probes) are left alone.
-replace_in_file electron/main/ipc-register-app-state.test.ts \
-    "\"$OLD_RE-test\"" \
-    "\"$NEW-test\""
-replace_in_file electron/main/ipc-register-coverage.test.ts \
-    "getPdvVersion: \\(\\) => \"$OLD_RE\"" \
-    "getPdvVersion: () => \"$NEW\""
-replace_in_file electron/main/ipc-register-modules.test.ts \
-    "getPdvVersion: \\(\\) => \"$OLD_RE\"" \
-    "getPdvVersion: () => \"$NEW\""
-replace_in_file electron/main/ipc-register-project.test.ts \
-    "pdv_version: \"$OLD_RE\"" \
-    "pdv_version: \"$NEW\""
-# This file also has `expect(...).toBe("0.1.0")` — same value as pdv_version,
-# safe to do a follow-up global replace of the OLD string in the file since
-# every "$OLD" in the file is a pdv version.
-replace_in_file electron/main/ipc-register-project.test.ts \
-    "\"$OLD_RE\"" \
-    "\"$NEW\""
-replace_in_file electron/renderer/src/app/useProjectWorkflow.test.ts \
-    "savedPdvVersion: \"$OLD_RE\"" \
-    "savedPdvVersion: \"$NEW\""
-replace_in_file electron/renderer/src/app/useProjectWorkflow.test.ts \
-    "\\.toBe\\(\"$OLD_RE\"\\)" \
-    ".toBe(\"$NEW\")"
+# Test fixtures no longer need a per-site replacement: they derive the
+# version at runtime from electron/package.json via TEST_PDV_VERSION
+# (see issue #235).
 
 echo
 echo "Edits applied. Verifying parity..."

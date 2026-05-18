@@ -38,11 +38,8 @@ SITES=(
     ".github/scripts/generate-release-notes.sh|e\.g\. v$CANONICAL"
     "examples/modules/N-pendulum/pdv-module.json|\"pdv_min\": \"$CANONICAL\""
     "examples/modules/N-pendulum-julia/pdv-module.json|\"pdv_min\": \"$CANONICAL\""
-    "electron/main/ipc-register-app-state.test.ts|\"$CANONICAL-test\""
-    "electron/main/ipc-register-coverage.test.ts|getPdvVersion: \\(\\) => \"$CANONICAL\""
-    "electron/main/ipc-register-modules.test.ts|getPdvVersion: \\(\\) => \"$CANONICAL\""
-    "electron/main/ipc-register-project.test.ts|pdv_version: \"$CANONICAL\""
-    "electron/renderer/src/app/useProjectWorkflow.test.ts|savedPdvVersion: \"$CANONICAL\""
+    # Test fixtures used to be listed here. They now derive at runtime from
+    # electron/package.json via TEST_PDV_VERSION — see issue #235.
 )
 
 bad=0
@@ -63,6 +60,33 @@ for entry in "${SITES[@]}"; do
         bad=1
     fi
 done
+
+echo
+
+# Regression guard for issue #235: no .test.ts file should hold the literal
+# canonical version as a string. Tests must reference TEST_PDV_VERSION (or
+# TEST_PDV_VERSION_TEST_SUFFIX) instead, so a version bump never touches a
+# fixture. We grep for "$CANONICAL" and "$CANONICAL-test" as quoted string
+# literals — `grep -F` keeps the dots in the version from being treated as
+# regex metacharacters.
+echo "Checking for hardcoded canonical version in test files..."
+stray=$(
+    {
+        grep -rFln --include='*.test.ts' "\"$CANONICAL\"" electron/ || true
+        grep -rFln --include='*.test.ts' "\"$CANONICAL-test\"" electron/ || true
+    } | sort -u
+)
+if [ -n "$stray" ]; then
+    echo "  ✗ canonical version hardcoded in test file(s):"
+    while IFS= read -r f; do echo "      $f"; done <<< "$stray"
+    echo
+    echo "Fix: replace the literal with TEST_PDV_VERSION (or"
+    echo "     TEST_PDV_VERSION_TEST_SUFFIX) imported from test-helpers.ts"
+    echo "     or renderer/src/test-fixtures/test-pdv-version.ts."
+    bad=1
+else
+    echo "  ✓ no test file hardcodes the canonical version"
+fi
 
 echo
 if [ $bad -ne 0 ]; then
