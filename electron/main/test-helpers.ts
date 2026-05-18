@@ -31,9 +31,14 @@ import {
 // ---------------------------------------------------------------------------
 
 /**
- * Canonical PDV version, derived from `electron/package.json`. Use this in
- * place of hardcoded version strings in mocks and fixtures so a version bump
- * doesn't have to touch every test file.
+ * Canonical PDV version for main-process test fixtures, derived from
+ * `electron/package.json`. Use this in place of hardcoded version strings in
+ * mocks and fixtures so a version bump doesn't have to touch every test file.
+ *
+ * @see electron/renderer/src/test-fixtures/test-pdv-version.ts — the
+ *      renderer-side twin (they can't share one TS module across the
+ *      main↔renderer tsconfig boundary; both derive from the same
+ *      `electron/package.json`).
  */
 export const TEST_PDV_VERSION: string = pkg.version;
 

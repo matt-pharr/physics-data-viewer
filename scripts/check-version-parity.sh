@@ -62,6 +62,33 @@ for entry in "${SITES[@]}"; do
 done
 
 echo
+
+# Regression guard for issue #235: no .test.ts file should hold the literal
+# canonical version as a string. Tests must reference TEST_PDV_VERSION (or
+# TEST_PDV_VERSION_TEST_SUFFIX) instead, so a version bump never touches a
+# fixture. We grep for "$CANONICAL" and "$CANONICAL-test" as quoted string
+# literals — `grep -F` keeps the dots in the version from being treated as
+# regex metacharacters.
+echo "Checking for hardcoded canonical version in test files..."
+stray=$(
+    {
+        grep -rFln --include='*.test.ts' "\"$CANONICAL\"" electron/ || true
+        grep -rFln --include='*.test.ts' "\"$CANONICAL-test\"" electron/ || true
+    } | sort -u
+)
+if [ -n "$stray" ]; then
+    echo "  ✗ canonical version hardcoded in test file(s):"
+    while IFS= read -r f; do echo "      $f"; done <<< "$stray"
+    echo
+    echo "Fix: replace the literal with TEST_PDV_VERSION (or"
+    echo "     TEST_PDV_VERSION_TEST_SUFFIX) imported from test-helpers.ts"
+    echo "     or renderer/src/test-fixtures/test-pdv-version.ts."
+    bad=1
+else
+    echo "  ✓ no test file hardcodes the canonical version"
+fi
+
+echo
 if [ $bad -ne 0 ]; then
     echo "Version parity check FAILED."
     echo "Fix: run scripts/bump-version.sh $CANONICAL to align all sites,"
