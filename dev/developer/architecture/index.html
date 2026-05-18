@@ -4590,28 +4590,31 @@
 <a id="__codelineno-6-8" name="__codelineno-6-8" href="#__codelineno-6-8"></a>    environment.py       # Path utilities, working dir management, project root logic
 <a id="__codelineno-6-9" name="__codelineno-6-9" href="#__codelineno-6-9"></a>    errors.py            # PDVError, PDVPathError, PDVKeyError, PDVProtectedNameError, PDVSerializationError, PDVScriptError, PDVVersionError
 <a id="__codelineno-6-10" name="__codelineno-6-10" href="#__codelineno-6-10"></a>    modules.py           # Custom type handler registry and dispatch (@pdv.handle() decorator)
-<a id="__codelineno-6-11" name="__codelineno-6-11" href="#__codelineno-6-11"></a>    namelist_utils.py    # Fortran namelist and TOML parsing utilities
-<a id="__codelineno-6-12" name="__codelineno-6-12" href="#__codelineno-6-12"></a>    checksum.py          # Content-based XXH3-128 Merkle-tree checksum for PDVTree (tree_checksum())
-<a id="__codelineno-6-13" name="__codelineno-6-13" href="#__codelineno-6-13"></a>    tree_loader.py       # Shared two-pass tree-index loader used by project.load and module.register handlers
-<a id="__codelineno-6-14" name="__codelineno-6-14" href="#__codelineno-6-14"></a>    handlers/
-<a id="__codelineno-6-15" name="__codelineno-6-15" href="#__codelineno-6-15"></a>        __init__.py
-<a id="__codelineno-6-16" name="__codelineno-6-16" href="#__codelineno-6-16"></a>        _helpers.py      # Shared register-validation, namelist resolution, and gui-attach helpers
-<a id="__codelineno-6-17" name="__codelineno-6-17" href="#__codelineno-6-17"></a>        lifecycle.py     # pdv.init, pdv.ready handlers
-<a id="__codelineno-6-18" name="__codelineno-6-18" href="#__codelineno-6-18"></a>        project.py       # pdv.project.load, pdv.project.save handlers
-<a id="__codelineno-6-19" name="__codelineno-6-19" href="#__codelineno-6-19"></a>        tree.py          # pdv.tree.list, pdv.tree.get, pdv.tree.resolve_file handlers
-<a id="__codelineno-6-20" name="__codelineno-6-20" href="#__codelineno-6-20"></a>        namespace.py     # pdv.namespace.query handler
-<a id="__codelineno-6-21" name="__codelineno-6-21" href="#__codelineno-6-21"></a>        script.py        # pdv.script.register handler
-<a id="__codelineno-6-22" name="__codelineno-6-22" href="#__codelineno-6-22"></a>        note.py          # pdv.note.register handler
-<a id="__codelineno-6-23" name="__codelineno-6-23" href="#__codelineno-6-23"></a>        modules.py       # pdv.module.register, pdv.modules.setup, pdv.handler.invoke handlers
-<a id="__codelineno-6-24" name="__codelineno-6-24" href="#__codelineno-6-24"></a>        gui.py           # pdv.gui.register handler
-<a id="__codelineno-6-25" name="__codelineno-6-25" href="#__codelineno-6-25"></a>        namelist.py      # pdv.namelist.read, pdv.namelist.write, pdv.file.register handlers
+<a id="__codelineno-6-11" name="__codelineno-6-11" href="#__codelineno-6-11"></a>    default_handlers.py  # Built-in double-click plot handlers for np.ndarray, pd.Series/DataFrame, xr.DataArray
+<a id="__codelineno-6-12" name="__codelineno-6-12" href="#__codelineno-6-12"></a>    namelist_utils.py    # Fortran namelist and TOML parsing utilities
+<a id="__codelineno-6-13" name="__codelineno-6-13" href="#__codelineno-6-13"></a>    checksum.py          # Content-based XXH3-128 Merkle-tree checksum for PDVTree (tree_checksum())
+<a id="__codelineno-6-14" name="__codelineno-6-14" href="#__codelineno-6-14"></a>    tree_loader.py       # Shared two-pass tree-index loader used by project.load and module.register handlers
+<a id="__codelineno-6-15" name="__codelineno-6-15" href="#__codelineno-6-15"></a>    handlers/
+<a id="__codelineno-6-16" name="__codelineno-6-16" href="#__codelineno-6-16"></a>        __init__.py
+<a id="__codelineno-6-17" name="__codelineno-6-17" href="#__codelineno-6-17"></a>        _helpers.py      # Shared register-validation, namelist resolution, and gui-attach helpers
+<a id="__codelineno-6-18" name="__codelineno-6-18" href="#__codelineno-6-18"></a>        lifecycle.py     # pdv.init, pdv.ready handlers
+<a id="__codelineno-6-19" name="__codelineno-6-19" href="#__codelineno-6-19"></a>        project.py       # pdv.project.load, pdv.project.save handlers
+<a id="__codelineno-6-20" name="__codelineno-6-20" href="#__codelineno-6-20"></a>        tree.py          # pdv.tree.list, pdv.tree.get, pdv.tree.resolve_file handlers
+<a id="__codelineno-6-21" name="__codelineno-6-21" href="#__codelineno-6-21"></a>        namespace.py     # pdv.namespace.query handler
+<a id="__codelineno-6-22" name="__codelineno-6-22" href="#__codelineno-6-22"></a>        script.py        # pdv.script.register handler
+<a id="__codelineno-6-23" name="__codelineno-6-23" href="#__codelineno-6-23"></a>        note.py          # pdv.note.register handler
+<a id="__codelineno-6-24" name="__codelineno-6-24" href="#__codelineno-6-24"></a>        modules.py       # pdv.module.register, pdv.modules.setup, pdv.handler.invoke handlers
+<a id="__codelineno-6-25" name="__codelineno-6-25" href="#__codelineno-6-25"></a>        gui.py           # pdv.gui.register handler
+<a id="__codelineno-6-26" name="__codelineno-6-26" href="#__codelineno-6-26"></a>        namelist.py      # pdv.namelist.read, pdv.namelist.write, pdv.file.register handlers
 </code></pre></div>
 <h3 id="53-bootstrap">5.3 Bootstrap<a class="headerlink" href="#53-bootstrap" title="Permanent link">&para;</a></h3>
 <p><code>pdv.bootstrap()</code> is called by a bootstrap snippet that the main process sends via <code>execute_request</code> (silent mode) from <code>kernel-session.ts</code> immediately after the kernel subprocess starts. It:
 1. Registers the <code>pdv.kernel</code> comm target with IPython
 2. Injects <code>pdv_tree</code> into the IPython user namespace via a custom namespace class that blocks reassignment
-3. Sends the <code>pdv.ready</code> comm message</p>
-<p><code>bootstrap()</code> must be idempotent — calling it twice must not open a second comm or re-inject variables.</p>
+3. Configures an interactive matplotlib backend (or patches <code>plt.show()</code> for inline emission when none is available)
+4. Registers the built-in double-click plot handlers via <code>pdv.default_handlers.register_defaults()</code>. Each registration is guarded by an import check, so missing optional deps (numpy / pandas / xarray) silently skip. Per-type behavior: <code>np.ndarray</code> 1D → <code>ax.plot</code>, 2D → <code>ax.imshow</code> + colorbar, 0D/&gt;2D → printed notice; <code>pd.Series</code> and <code>pd.DataFrame</code> → their built-in <code>.plot()</code>; <code>xr.DataArray</code> → its built-in <code>.plot()</code> (which dispatches 1D → line, 2D → pcolormesh, &gt;2D → histogram by ndim). A value that cannot actually be plotted (e.g. a non-numeric <code>pd.Series</code> or an object-dtype array) closes its half-built figure and prints a <code>[PDV]</code> notice rather than raising — a raised exception would reach the renderer as an opaque <code>internal.error</code>. <code>xr.Dataset</code> is intentionally not registered — users drill into a specific <code>data_var</code>
+5. Sends the <code>pdv.ready</code> comm message</p>
+<p><code>bootstrap()</code> must be idempotent — calling it twice must not open a second comm or re-inject variables. Re-registering the default handlers is safe; the overwrite warning that <code>pdv.handle()</code> normally emits is suppressed inside <code>register_defaults()</code> because that warning is meant to flag user-vs-user conflicts.</p>
 <h3 id="54-protected-namespace">5.4 Protected Namespace<a class="headerlink" href="#54-protected-namespace" title="Permanent link">&para;</a></h3>
 <p>The IPython user namespace is replaced with a subclass of <code>dict</code> that overrides <code>__setitem__</code>:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="k">class</span><span class="w"> </span><span class="nc">PDVNamespace</span><span class="p">(</span><span class="nb">dict</span><span class="p">):</span>
