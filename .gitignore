@@ -9,6 +9,9 @@ __pycache__/
 pdv-python/build/
 .playwright-mcp/
 
+# Claude Code local working files (plans, settings, agent worktrees)
+.claude/
+
 # Electron
 electron/node_modules/
 electron/dist/
