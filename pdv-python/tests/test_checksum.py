@@ -127,6 +127,70 @@ class TestNdarrayContentSensitivity:
         assert tree_checksum(t1) != tree_checksum(t2)
 
 
+class TestXarrayContentSensitivity:
+    def test_dataarray_value_change_changes_digest(self):
+        """Mutating a single value inside an xr.DataArray changes the digest."""
+        np = pytest.importorskip("numpy")
+        xr = pytest.importorskip("xarray")
+
+        da1 = xr.DataArray(np.array([1.0, 2.0, 3.0]), dims=["x"], name="v")
+        da2 = xr.DataArray(np.array([1.0, 2.0, 9.9]), dims=["x"], name="v")
+
+        assert tree_checksum(_make_tree(da=da1)) != tree_checksum(_make_tree(da=da2))
+
+    def test_dataarray_attrs_change_digest(self):
+        """Changing ``.attrs`` on an xr.DataArray changes the digest."""
+        np = pytest.importorskip("numpy")
+        xr = pytest.importorskip("xarray")
+
+        arr = np.array([1.0, 2.0, 3.0])
+        da1 = xr.DataArray(arr, dims=["x"], name="v", attrs={"units": "m"})
+        da2 = xr.DataArray(arr, dims=["x"], name="v", attrs={"units": "s"})
+
+        assert tree_checksum(_make_tree(da=da1)) != tree_checksum(_make_tree(da=da2))
+
+    def test_dataset_var_change_changes_digest(self):
+        """Mutating a data_var inside an xr.Dataset changes the digest."""
+        np = pytest.importorskip("numpy")
+        xr = pytest.importorskip("xarray")
+
+        ds1 = xr.Dataset({"a": (["x"], np.array([1.0, 2.0, 3.0]))})
+        ds2 = xr.Dataset({"a": (["x"], np.array([1.0, 2.0, 9.9]))})
+
+        assert tree_checksum(_make_tree(ds=ds1)) != tree_checksum(_make_tree(ds=ds2))
+
+    def test_dataset_coord_change_changes_digest(self):
+        """Changing a coordinate value changes the digest even if data_vars match."""
+        np = pytest.importorskip("numpy")
+        xr = pytest.importorskip("xarray")
+
+        data = np.array([1.0, 2.0, 3.0])
+        ds1 = xr.Dataset(
+            {"a": (["x"], data)}, coords={"x": np.array([0.0, 1.0, 2.0])}
+        )
+        ds2 = xr.Dataset(
+            {"a": (["x"], data)}, coords={"x": np.array([0.0, 1.0, 9.9])}
+        )
+
+        assert tree_checksum(_make_tree(ds=ds1)) != tree_checksum(_make_tree(ds=ds2))
+
+    def test_dataset_unchanged_is_stable(self):
+        """Two structurally identical Datasets produce the same digest."""
+        np = pytest.importorskip("numpy")
+        xr = pytest.importorskip("xarray")
+
+        def make():
+            return xr.Dataset(
+                {"a": (["x"], np.array([1.0, 2.0, 3.0]))},
+                coords={"x": np.array([0.0, 1.0, 2.0])},
+                attrs={"title": "ok"},
+            )
+
+        assert tree_checksum(_make_tree(ds=make())) == tree_checksum(
+            _make_tree(ds=make())
+        )
+
+
 class TestFileBackedNodeContentSensitivity:
     def test_file_backed_node_content_sensitivity(self, tmp_path):
         """Changing the content of a script file changes the checksum."""
