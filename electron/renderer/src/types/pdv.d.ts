@@ -284,6 +284,15 @@ export interface Config {
   workingDirBase?: string;
   /** Autosave interval in seconds. Default 300 (5 minutes). Minimum 30. */
   autoSaveIntervalSeconds?: number;
+  /** Local AI-agent MCP server settings, surfaced in the Agents tab. */
+  mcp?: {
+    /** Preferred TCP port for the MCP server to bind. */
+    defaultPort?: number;
+    /** Whether agents may use mutating (write) tools. Defaults to off. */
+    mutatingToolsEnabled?: boolean;
+    /** Whether agents may run code in the kernel via `pdv_run`. Defaults to off. */
+    pdvRunEnabled?: boolean;
+  };
   settings?: {
     /** Keyboard shortcut overrides. */
     shortcuts?: {
@@ -666,6 +675,25 @@ export interface InstallOutputChunk {
 }
 
 /** Complete preload API contract exposed as `window.pdv`. */
+/**
+ * Status of the local AI-agent MCP server, surfaced to the Settings →
+ * Agents pane. Mirrors `McpStatus` in `main/ipc.ts`.
+ */
+export interface McpStatus {
+  /** Whether the MCP server is currently listening. */
+  running: boolean;
+  /** Loopback host the server binds to (always `127.0.0.1`). */
+  host: string;
+  /** TCP port the server listens on, or `null` when not running. */
+  port: number | null;
+  /** Bearer token every request must present, or `null` when not running. */
+  token: string | null;
+  /** Full endpoint URL an agent connects to, or `null` when not running. */
+  url: string | null;
+  /** Current project/kernel generation counter (diagnostic). */
+  generation: number;
+}
+
 export interface PDVApi {
   kernels: {
     list(): Promise<KernelInfo[]>;
@@ -846,6 +874,10 @@ export interface PDVApi {
   config: {
     get(): Promise<Config>;
     set(updates: Partial<Config>): Promise<Config>;
+  };
+  mcp: {
+    /** Fetch the current MCP server status for the Settings → Agents pane. */
+    getStatus(): Promise<McpStatus>;
   };
   window: {
     /** Sync the BrowserWindow's native background to the active theme so

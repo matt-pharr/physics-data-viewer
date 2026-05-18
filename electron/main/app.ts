@@ -23,6 +23,7 @@ import { ConfigStore } from "./config";
 import { registerIpcHandlers } from "./index";
 import { initializeAppMenu } from "./menu";
 import { IPC } from "./ipc";
+import type { PdvMcpServer } from "./mcp/mcp-server";
 
 /**
  * Check whether a process with the given PID is currently running.
@@ -328,10 +329,12 @@ export function clearQuitRequestPending(): void {
  * Register core Electron app events.
  *
  * @param getKernelManager - Lazy getter for the current kernel manager.
+ * @param getMcpServer - Lazy getter for the MCP server, stopped on quit.
  * @returns Nothing.
  */
 export function wireAppEvents(
-  getKernelManager: () => KernelManager | null
+  getKernelManager: () => KernelManager | null,
+  getMcpServer: () => PdvMcpServer | null
 ): void {
   app.on("before-quit", () => {
     isQuittingGlobal = true;
@@ -351,6 +354,9 @@ export function wireAppEvents(
   // Run kernel shutdown during will-quit, after renderer close/save flows
   // have completed, so save-on-quit can still reach the active kernel.
   app.on("will-quit", (event) => {
+    // Stop the MCP server first — it is independent of kernel shutdown and
+    // closes its loopback socket quickly.
+    void getMcpServer()?.stop();
     const kernelManager = getKernelManager();
     const kernelCount = kernelManager
       ? Array.from((kernelManager as unknown as { kernels: Map<string, unknown> }).kernels?.keys() ?? []).length

@@ -128,6 +128,16 @@ function buildBase() {
       get: stub<PDVApi["config"]["get"]>(),
       set: stub<PDVApi["config"]["set"]>(),
     },
+    mcp: {
+      getStatus: stub<PDVApi["mcp"]["getStatus"]>(async () => ({
+        running: false,
+        host: "127.0.0.1",
+        port: null,
+        token: null,
+        url: null,
+        generation: 0,
+      })),
+    },
     window: {
       setBackgroundColor: stub<PDVApi["window"]["setBackgroundColor"]>(async () => undefined),
     },

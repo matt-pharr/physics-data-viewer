@@ -314,6 +314,7 @@ export interface ConfigStoreMock<T extends Record<string, unknown>> {
   store: ConfigStore;
   state: T;
   getAll: ReturnType<typeof vi.fn>;
+  get: ReturnType<typeof vi.fn>;
   set: ReturnType<typeof vi.fn>;
 }
 
@@ -328,13 +329,15 @@ export function createConfigStoreMock<T extends Record<string, unknown>>(
 ): ConfigStoreMock<T> {
   const state = { ...initial };
   const getAll = vi.fn(() => ({ ...state }));
+  const get = vi.fn((key: string) => (state as Record<string, unknown>)[key]);
   const set = vi.fn((key: string, value: unknown) => {
     (state as Record<string, unknown>)[key] = value;
   });
   return {
-    store: { getAll, set } as unknown as ConfigStore,
+    store: { getAll, get, set } as unknown as ConfigStore,
     state,
     getAll,
+    get,
     set,
   };
 }

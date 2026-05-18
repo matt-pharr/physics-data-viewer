@@ -158,6 +158,10 @@ export const IPC = {
     get: "config:get",
     set: "config:set",
   },
+  /** AI agent MCP server channels. */
+  mcp: {
+    getStatus: "mcp:getStatus",
+  },
   /** BrowserWindow chrome channels. */
   window: {
     setBackgroundColor: "window:setBackgroundColor",
@@ -1394,6 +1398,25 @@ export interface ProgressPayload {
  * Every method corresponds to one IPC request channel. Push subscriptions are
  * exposed as callback registration helpers.
  */
+/**
+ * Status of the local AI-agent MCP server, surfaced to the renderer's
+ * Settings → Agents pane.
+ */
+export interface McpStatus {
+  /** Whether the MCP server is currently listening. */
+  running: boolean;
+  /** Loopback host the server binds to (always `127.0.0.1`). */
+  host: string;
+  /** TCP port the server listens on, or `null` when not running. */
+  port: number | null;
+  /** Bearer token every request must present, or `null` when not running. */
+  token: string | null;
+  /** Full endpoint URL an agent connects to, or `null` when not running. */
+  url: string | null;
+  /** Current project/kernel generation counter (diagnostic). */
+  generation: number;
+}
+
 export interface PDVApi {
   /** Kernel lifecycle and execution methods. */
   kernels: {
@@ -2011,6 +2034,17 @@ export interface PDVApi {
      * @returns Updated merged config object.
      */
     set(updates: Partial<PDVConfig>): Promise<PDVConfig>;
+  };
+
+  /** AI agent MCP server. */
+  mcp: {
+    /**
+     * Fetch the current MCP server status — endpoint URL, bearer token,
+     * and running state — for the Settings → Agents pane.
+     *
+     * @returns The current {@link McpStatus}.
+     */
+    getStatus(): Promise<McpStatus>;
   };
 
   /** BrowserWindow chrome controls. */
