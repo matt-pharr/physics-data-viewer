@@ -10,7 +10,6 @@ that a message was printed and no figure was created).
 
 from __future__ import annotations
 
-import io
 import sys
 
 import matplotlib
@@ -65,6 +64,22 @@ class TestNdarrayDefault:
         assert len(fig.axes) == 2  # image axis + colorbar axis
         # At least one image artist was added.
         assert any(ax.images for ax in fig.axes)
+        # The image axis is created first; the title lands on it.
+        assert fig.axes[0].get_title() == "test.arr2d"
+
+    def test_object_dtype_ndarray_prints_notice(self, capsys):
+        np = pytest.importorskip("numpy")
+        register_defaults()
+
+        arr = np.array([{"x": 1}, {"y": 2}, {"z": 3}], dtype=object)
+        result = dispatch_handler(arr, "test.objarr", None)
+
+        # The handler still "dispatched" — it just degraded to a notice
+        # instead of raising into dispatch() as an internal.error.
+        assert result == {"dispatched": True}
+        # The half-built figure was closed, not leaked.
+        assert _figure_count() == 0
+        assert "[PDV]" in capsys.readouterr().out
 
     def test_0d_ndarray_prints_notice_no_plot(self, capsys):
         np = pytest.importorskip("numpy")
@@ -117,6 +132,28 @@ class TestPandasDefault:
         # DataFrame.plot() with two numeric columns puts two lines on the axes.
         assert len(plt.gcf().axes[0].lines) == 2
 
+    def test_string_series_prints_notice(self, capsys):
+        pd = pytest.importorskip("pandas")
+        register_defaults()
+
+        s = pd.Series(["x", "y", "z"], name="labels")
+        result = dispatch_handler(s, "test.strseries", None)
+
+        assert result == {"dispatched": True}
+        assert _figure_count() == 0
+        assert "[PDV]" in capsys.readouterr().out
+
+    def test_dataframe_no_numeric_columns_prints_notice(self, capsys):
+        pd = pytest.importorskip("pandas")
+        register_defaults()
+
+        df = pd.DataFrame({"a": ["p", "q"], "b": ["r", "s"]})
+        result = dispatch_handler(df, "test.strdf", None)
+
+        assert result == {"dispatched": True}
+        assert _figure_count() == 0
+        assert "[PDV]" in capsys.readouterr().out
+
 
 class TestXarrayDefault:
     def test_dataarray_1d_plots(self):
@@ -144,6 +181,22 @@ class TestXarrayDefault:
         assert result == {"dispatched": True}
         # xarray.DataArray.plot() for 2D opens a pcolormesh + colorbar.
         assert _figure_count() == 1
+        # The pcolormesh axis is created first; the title lands on it.
+        assert plt.gcf().axes[0].get_title() == "test.da2d"
+
+    def test_dataarray_3d_plots_histogram(self):
+        np = pytest.importorskip("numpy")
+        xr = pytest.importorskip("xarray")
+        register_defaults()
+
+        da = xr.DataArray(np.zeros((2, 3, 4)), dims=["a", "b", "c"], name="cube")
+        result = dispatch_handler(da, "test.da3d", None)
+
+        assert result == {"dispatched": True}
+        # DataArray.plot() falls back to a histogram for >2D — a real plot,
+        # not a notice.
+        assert _figure_count() == 1
+        assert plt.gcf().axes[0].get_title() == "test.da3d"
 
 
 class TestRegistration:
@@ -152,6 +205,20 @@ class TestRegistration:
         register_defaults()
 
         assert has_handler_for(np.zeros(3))
+
+    def test_double_register_suppresses_overwrite_warning(self, recwarn):
+        """Re-registering the defaults must not emit the overwrite warning.
+
+        ``pdv.modules.handle`` warns when a handler is overwritten; that
+        warning flags user-vs-user conflicts, so ``register_defaults``
+        suppresses it for its own re-registration (the documented contract).
+        """
+        pytest.importorskip("numpy")
+        register_defaults()
+        register_defaults()  # overwrites the same default handlers
+
+        overwrite = [w for w in recwarn.list if "overwritten" in str(w.message)]
+        assert overwrite == []
 
     def test_user_can_override_default(self):
         np = pytest.importorskip("numpy")
