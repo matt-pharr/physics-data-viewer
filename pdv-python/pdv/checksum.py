@@ -327,7 +327,11 @@ def _feed_xarray_array(h: xxhash.xxh3_128, name: str, da: Any) -> None:
     for d in da.shape:
         h.update(struct.pack("<Q", d))
     values = np.asarray(da.values)
-    if values.dtype.kind in ("f", "i", "u", "c", "b"):
+    # datetime64/timedelta64 ('M'/'m') are fixed-width and expose a buffer,
+    # so they take the fast path alongside the plain numeric kinds — xarray
+    # time coordinates are common and can be large. Only genuinely
+    # buffer-less dtypes (object, str, ...) fall back to repr().
+    if values.dtype.kind in ("f", "i", "u", "c", "b", "M", "m"):
         h.update(np.ascontiguousarray(values))
     else:
         _feed_str(h, repr(values.tolist()))

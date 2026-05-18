@@ -14,14 +14,21 @@ dependencies = [
     # bug that breaks pandas .plot(), and 3.10.5 is the first release with
     # Python 3.14 wheels.
     "matplotlib>=3.10.5",
+    # numpy is a core dependency: matplotlib already pulls it in transitively,
+    # and checksum.py / serialization.py import it directly. Pinning it here
+    # (rather than relying on the transitive resolution) guarantees the >=2.2
+    # floor the PDV code expects instead of whatever matplotlib happens to
+    # allow. 2.2 is the oldest that builds on Python 3.12+ (earlier numpy
+    # depends on the removed `distutils` stdlib module).
+    "numpy>=2.2",
 ]
 
 [project.optional-dependencies]
 # Optional data format support — imported lazily inside serialization.py.
-# Floors set to the oldest versions that build on Python 3.12+ (earlier
-# numpy/pandas depend on the removed `distutils` stdlib module).
+# numpy is a core dependency (see above); pandas stays optional. Floor set to
+# the oldest version that builds on Python 3.12+ (earlier pandas depends on
+# the removed `distutils` stdlib module).
 data = [
-    "numpy>=2.2",
     "pandas>=2.2.3",
 ]
 # Optional copy-on-write file cloning for faster file operations
@@ -31,7 +38,6 @@ copy = [
 dev = [
     "pytest>=8.0",
     "pytest-asyncio>=0.23",
-    "numpy>=2.2",
     "pandas>=2.2.3",
     "reflink-copy>=0.2",
 ]

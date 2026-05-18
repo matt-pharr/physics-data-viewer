@@ -60,14 +60,15 @@ def register_defaults() -> None:
 def _plot_or_notice(path: str, draw: Callable[[Any, Any], None]) -> None:
     """Create a fresh figure, run ``draw(fig, ax)``, title it, and show it.
 
-    On any failure, close the figure and print a ``[PDV]`` notice instead
-    of raising — handler exceptions would otherwise propagate through
-    ``dispatch_handler`` and reach the renderer as an ``internal.error``.
+    On any failure — whether in ``draw`` or in the final ``plt.show()`` —
+    close the figure and print a ``[PDV]`` notice instead of raising:
+    handler exceptions would otherwise propagate through ``dispatch_handler``
+    and reach the renderer as an opaque ``internal.error``.
 
     Exactly one figure is created per call, so the inline ``plt.show()``
     patch installed by :func:`pdv._configure_matplotlib` (which captures
     ``plt.gcf()``) always resolves to this figure. The success path leaves
-    the figure for ``plt.show()`` to own; only the error path closes it.
+    the figure for ``plt.show()`` to own; any failure path closes it.
 
     Parameters
     ----------
@@ -86,7 +87,11 @@ def _plot_or_notice(path: str, draw: Callable[[Any, Any], None]) -> None:
         plt.close(fig)
         print(f"[PDV] Cannot plot {path!r}: {exc}")
         return
-    plt.show()
+    try:
+        plt.show()
+    except Exception as exc:  # noqa: BLE001
+        plt.close(fig)
+        print(f"[PDV] Could not display {path!r}: {exc}")
 
 
 def _register_numpy(handle: Any) -> None:
