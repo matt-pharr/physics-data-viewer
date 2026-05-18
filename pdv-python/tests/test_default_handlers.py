@@ -24,10 +24,19 @@ from pdv.modules import clear_handlers, dispatch_handler, has_handler_for  # noq
 
 
 @pytest.fixture(autouse=True)
-def _clean_state():
-    """Clear the handler registry and close any open figures around each test."""
+def _clean_state(monkeypatch):
+    """Clear the handler registry, pin ``plt.show`` to a no-op, and close
+    any open figures around each test.
+
+    ``plt.show`` is pinned because :func:`pdv.bootstrap` — exercised by
+    other test modules earlier in the run — may globally replace it with
+    an inline-capture shim that *closes* the figure after emitting it.
+    These tests need figures to persist so they can assert on them, so
+    they must not depend on whatever ``plt.show`` happens to be globally.
+    """
     clear_handlers()
     plt.close("all")
+    monkeypatch.setattr(plt, "show", lambda *args, **kwargs: None)
     yield
     clear_handlers()
     plt.close("all")
