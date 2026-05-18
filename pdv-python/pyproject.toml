@@ -10,7 +10,10 @@ requires-python = ">=3.10"
 dependencies = [
     "ipykernel>=6.0",
     "xxhash>=3.0",
-    "matplotlib>=3.10",
+    # 3.10.5 is the floor: 3.10.0 has a Path.__deepcopy__ infinite-recursion
+    # bug that breaks pandas .plot(), and 3.10.5 is the first release with
+    # Python 3.14 wheels.
+    "matplotlib>=3.10.5",
 ]
 
 [project.optional-dependencies]
