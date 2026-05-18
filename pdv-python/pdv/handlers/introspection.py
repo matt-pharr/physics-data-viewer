@@ -19,9 +19,9 @@ ARCHITECTURE.md §15 (MCP server)
 
 from __future__ import annotations
 
-import importlib
 import inspect
 import os
+import sys
 from typing import Any
 
 from pdv.handlers import register
@@ -31,14 +31,22 @@ def _resolve_symbol(symbol: str) -> Any:
     """Resolve a dotted symbol string to a live Python object.
 
     Splits *symbol* on ``.``. The head is looked up first in the kernel
-    user namespace, and failing that imported as a module. The remaining
-    parts are walked with :func:`getattr`.
+    user namespace, and failing that in :data:`sys.modules` (already-loaded
+    modules only — ``pdv.help`` does **not** implicitly import). The
+    remaining parts are walked with :func:`getattr`, with one allowance:
+    if the next dotted prefix is itself a loaded submodule it is preferred
+    over a plain :func:`getattr` so e.g. ``numpy.linalg.norm`` resolves
+    when ``numpy.linalg`` is already imported.
+
+    Restricting module lookup to :data:`sys.modules` keeps a read-only
+    introspection call from triggering arbitrary ``__init__.py`` execution
+    via an attacker-controlled symbol (ARCHITECTURE.md §15.4).
 
     Parameters
     ----------
     symbol : str
-        A dotted symbol, e.g. ``'pdv'``, ``'pdv.add_file'``,
-        ``'numpy.ndarray'``, or a bare user-namespace variable name.
+        A dotted symbol, e.g. ``'pdv'``, ``'pdv.add_file'``, or a bare
+        user-namespace variable name.
 
     Returns
     -------
@@ -47,7 +55,7 @@ def _resolve_symbol(symbol: str) -> Any:
 
     Raises
     ------
-    KeyError, AttributeError, ImportError, ValueError
+    KeyError, AttributeError, ModuleNotFoundError, ValueError
         If the symbol cannot be resolved at any step.
     """
     from pdv.comms import get_ip  # noqa: PLC0415
@@ -64,16 +72,21 @@ def _resolve_symbol(symbol: str) -> Any:
     if head in user_ns:
         obj: Any = user_ns[head]
     else:
-        # Not in the namespace — try importing it as a module. Walk the
-        # longest importable dotted prefix so e.g. ``numpy.linalg.norm``
-        # imports ``numpy.linalg`` and then getattrs ``norm``.
-        obj = importlib.import_module(head)
+        loaded = sys.modules.get(head)
+        if loaded is None:
+            raise ModuleNotFoundError(
+                f"Module '{head}' is not loaded; pdv.help does not "
+                f"implicitly import modules"
+            )
+        obj = loaded
+        # Walk the longest already-loaded dotted prefix.
         while rest:
-            try:
-                obj = importlib.import_module(f"{head}.{rest[0]}")
-            except ImportError:
+            candidate = f"{head}.{rest[0]}"
+            submodule = sys.modules.get(candidate)
+            if submodule is None:
                 break
-            head = f"{head}.{rest[0]}"
+            obj = submodule
+            head = candidate
             rest = rest[1:]
 
     for attr in rest:

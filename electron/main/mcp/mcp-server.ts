@@ -283,14 +283,17 @@ function respondJson(
   res.end(JSON.stringify(body));
 }
 
-// Try `preferred`, `preferred + 1`, … until one binds or the attempt cap is hit.
+// Try `preferred`, `preferred + 1`, … until one binds or the attempt cap is
+// hit. Pass `preferred = 0` to let the OS pick a free port directly. Returns
+// the port actually assigned by the kernel (read from `server.address()`),
+// which lets `preferred = 0` work correctly.
 async function listenWithFallback(
   server: http.Server,
   preferred: number,
   host: string,
 ): Promise<number> {
   for (let attempt = 0; attempt < MAX_PORT_ATTEMPTS; attempt++) {
-    const candidate = preferred + attempt;
+    const candidate = preferred === 0 ? 0 : preferred + attempt;
     try {
       await new Promise<void>((resolve, reject) => {
         const onError = (err: NodeJS.ErrnoException): void => {
@@ -305,7 +308,11 @@ async function listenWithFallback(
         server.once("listening", onListening);
         server.listen(candidate, host);
       });
-      return candidate;
+      const addr = server.address();
+      if (addr === null || typeof addr === "string") {
+        throw new Error("MCP server: unexpected http.Server.address() result");
+      }
+      return addr.port;
     } catch (err) {
       if ((err as NodeJS.ErrnoException).code !== "EADDRINUSE") {
         throw err;

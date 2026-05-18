@@ -64,7 +64,11 @@ function makeDeps(
   };
 }
 
-/** A random high port, to avoid collisions across parallel test files. */
+/**
+ * A random high port. Tests that do not exercise the port-fallback path
+ * should pass `0` to {@link makeDeps} instead — the OS then picks a free
+ * port directly, removing collision risk across parallel test files.
+ */
 function randomPort(): number {
   return 48000 + Math.floor(Math.random() * 1500);
 }
@@ -79,7 +83,7 @@ describe("PdvMcpServer", () => {
   });
 
   it("starts and stops, reporting status", async () => {
-    const server = new PdvMcpServer(makeDeps(randomPort()));
+    const server = new PdvMcpServer(makeDeps(0));
     cleanup.push(() => server.stop());
     expect(server.status.running).toBe(false);
 
@@ -107,7 +111,7 @@ describe("PdvMcpServer", () => {
   });
 
   it("rejects requests without the bearer token", async () => {
-    const server = new PdvMcpServer(makeDeps(randomPort()));
+    const server = new PdvMcpServer(makeDeps(0));
     cleanup.push(() => server.stop());
     await server.start();
 
@@ -124,7 +128,7 @@ describe("PdvMcpServer", () => {
   });
 
   it("accepts an initialize request carrying the bearer token", async () => {
-    const server = new PdvMcpServer(makeDeps(randomPort()));
+    const server = new PdvMcpServer(makeDeps(0));
     cleanup.push(() => server.stop());
     await server.start();
 
@@ -152,12 +156,11 @@ describe("PdvMcpServer", () => {
   });
 
   it("persists its bearer token across server instances", async () => {
-    const port = randomPort();
-    const state: Record<string, unknown> = { mcp: { defaultPort: port } };
+    const state: Record<string, unknown> = { mcp: { defaultPort: 0 } };
     const configStore = makeConfigStore(state);
 
     // First instance mints a token and writes it to the config store.
-    const first = new PdvMcpServer(makeDeps(port, configStore));
+    const first = new PdvMcpServer(makeDeps(0, configStore));
     cleanup.push(() => first.stop());
     await first.start();
     const token = first.status.token as string;
@@ -166,8 +169,9 @@ describe("PdvMcpServer", () => {
     await first.stop();
 
     // A relaunch builds a fresh server against the same persisted config and
-    // reuses the stored token instead of rotating it.
-    const second = new PdvMcpServer(makeDeps(port, configStore));
+    // reuses the stored token instead of rotating it. The port the OS picks
+    // may differ — token reuse is what's being asserted.
+    const second = new PdvMcpServer(makeDeps(0, configStore));
     cleanup.push(() => second.stop());
     await second.start();
     expect(second.status.token).toBe(token);

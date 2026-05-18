@@ -7,6 +7,7 @@ Covers ``pdv.help`` (symbol introspection) and ``pdv.tree.resolve_path``
 """
 
 import os
+import sys
 import uuid
 from unittest.mock import MagicMock, patch
 
@@ -145,6 +146,32 @@ class TestHandleHelp:
         response = mock_comm._sent[0]
         assert response["status"] == "error"
         assert response["payload"]["code"] == "introspection.symbol_not_found"
+
+    def test_does_not_implicitly_import_modules(self):
+        """pdv.help refuses to introspect a symbol whose head module is not
+        already loaded in sys.modules, instead of triggering an import.
+        An implicit import would execute the module's __init__.py and is
+        a side channel for attacker-influenced lookup strings.
+        """
+        fake_module = "pdv_test_unloaded_module_xyz"
+        sys.modules.pop(fake_module, None)
+        assert fake_module not in sys.modules
+        ip = MagicMock()
+        ip.user_ns = {}
+        mock_comm = _make_mock_comm()
+        msg = _make_msg("pdv.help", {"symbol": fake_module})
+        with (
+            patch.object(comms_mod, "_comm", mock_comm),
+            patch.object(comms_mod, "_ip", ip),
+        ):
+            handle_help(msg)
+
+        response = mock_comm._sent[0]
+        assert response["status"] == "error"
+        assert response["payload"]["code"] == "introspection.symbol_not_found"
+        assert "not loaded" in response["payload"]["message"]
+        # The lookup did NOT auto-import the module.
+        assert fake_module not in sys.modules
 
     def test_missing_symbol_sends_error(self):
         """pdv.help with no symbol sends a missing-symbol error."""

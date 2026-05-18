@@ -555,9 +555,16 @@ export function registerIpcHandlers(
       guiViewerWindowManager.closeAll();
     },
     setActiveKernelId: (id) => {
+      const prevId = activeKernelId;
       activeKernelId = id;
-      // A new/restarted kernel invalidates connected MCP sessions.
-      bumpGeneration();
+      // A kernel switch (restart, language change) invalidates connected MCP
+      // sessions — but the initial null -> id assignment at window startup
+      // is not a switch (the agent hasn't seen this kernel yet) and bumping
+      // there would surface a misleading "PDV's project or kernel has
+      // changed" error on an eager agent's first call.
+      if (prevId !== null) {
+        bumpGeneration();
+      }
       if (id) {
         const config = readConfig(configStore);
         const intervalMs = (config.autoSaveIntervalSeconds ?? DEFAULT_AUTOSAVE_INTERVAL_S) * 1000;
@@ -632,7 +639,15 @@ export function registerIpcHandlers(
       }
       return "python";
     },
-    setActiveProjectDir: (dir) => { activeProjectDir = dir; bumpGeneration(); },
+    setActiveProjectDir: (dir) => {
+      const prevDir = activeProjectDir;
+      activeProjectDir = dir;
+      // Only a *change* invalidates connected MCP sessions; the initial
+      // null -> dir assignment at window startup is not a project switch.
+      if (prevDir !== null) {
+        bumpGeneration();
+      }
+    },
     getPendingModuleImports: () => pendingModuleImports,
     setPendingModuleImports: (imports) => { pendingModuleImports = imports; },
     getPendingModuleSettings: () => pendingModuleSettings,
