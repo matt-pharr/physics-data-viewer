@@ -196,6 +196,8 @@ describe("assertCurrentGeneration", () => {
       configStore: {} as McpToolContext["configStore"],
       hooks: makeHooks(currentGen),
       appVersion: "0.0.0-test",
+      cellRpc: {} as McpToolContext["cellRpc"],
+      getRendererWindow: () => null,
       getSessionGeneration: () => sessionGen,
     };
   }

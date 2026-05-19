@@ -63,10 +63,18 @@ function makeCtx(query: QueryFn, kernelRunning = true): McpToolContext {
     hooks: {
       getActiveKernelId: () => "k1",
       getActiveProjectDir: () => "/proj",
+      getActiveWorkingDir: () => null,
       getGeneration: () => 0,
       bumpGeneration: () => undefined,
+      treeCreate: {
+        script: () => Promise.reject(new Error("not implemented in tests")),
+        note: () => Promise.reject(new Error("not implemented in tests")),
+        lib: () => Promise.reject(new Error("not implemented in tests")),
+      },
     },
     appVersion: "0.0.0-test",
+    cellRpc: {} as McpToolContext["cellRpc"],
+    getRendererWindow: () => null,
     getSessionGeneration: () => 0,
   };
 }
