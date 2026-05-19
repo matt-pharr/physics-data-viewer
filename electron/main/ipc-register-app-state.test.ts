@@ -33,8 +33,8 @@ const shellMocks = vi.hoisted(() => ({
 }));
 
 const fsMocks = vi.hoisted(() => ({
-  mkdir: vi.fn(async () => undefined),
-  writeFile: vi.fn(async () => undefined),
+  mkdir: vi.fn(async (_path: string, _options?: { recursive?: boolean }) => undefined),
+  writeFile: vi.fn(async (_path: string, _contents: string, _encoding?: string) => undefined),
 }));
 
 const fsSyncMocks = vi.hoisted(() => ({
@@ -74,7 +74,12 @@ vi.mock("electron", () => ({
   dialog: dialogMocks,
   shell: shellMocks,
   app: {
-    getVersion: () => "0.1.2-test",
+    // Lazy require so the value derives from the shared
+    // TEST_PDV_VERSION_TEST_SUFFIX constant without referencing a top-level
+    // import inside vi.mock's hoisted factory. Same pattern as index.test.ts.
+    getVersion: () =>
+      (require("./test-helpers") as typeof import("./test-helpers"))
+        .TEST_PDV_VERSION_TEST_SUFFIX,
     quit: vi.fn(),
   },
 }));
@@ -184,7 +189,7 @@ describe("config:get / config:set", () => {
     // deep-merge, a full replace would silently wipe `authToken` and
     // break every connected agent on the next toggle.
     const { config } = setup();
-    (config.state as Record<string, unknown>).mcp = {
+    (config.state as unknown as Record<string, unknown>).mcp = {
       authToken: "secret-token",
       defaultPort: 7391,
     };
@@ -193,7 +198,7 @@ describe("config:get / config:set", () => {
       mcp: { mutatingToolsEnabled: true },
     } as Partial<PDVConfig>);
 
-    expect((config.state as Record<string, unknown>).mcp).toMatchObject({
+    expect((config.state as unknown as Record<string, unknown>).mcp).toMatchObject({
       authToken: "secret-token",
       defaultPort: 7391,
       mutatingToolsEnabled: true,

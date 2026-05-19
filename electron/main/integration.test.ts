@@ -229,8 +229,9 @@ describe("@slow Cross-boundary integration (Python + Electron)", { timeout: 180_
       include_callables: false,
     });
     expect(response.status).toBe("ok");
-    const variables = (response.payload as { variables?: Record<string, { type?: string; preview?: string }> })
-      .variables;
+    const variables = (response.payload as {
+      variables?: Record<string, { type?: string; kind?: string; preview?: string }>;
+    }).variables;
     expect(variables).toBeDefined();
     expect(variables?.x).toBeDefined();
     expect(variables?.x.type).toBe("int");

@@ -13,6 +13,7 @@
 import { act } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { renderHookWithPdv } from "../test-fixtures/hook-helpers";
+import { TEST_PDV_VERSION } from "../test-fixtures/test-pdv-version";
 import type {
   CellTab,
   Config,
@@ -239,7 +240,7 @@ describe("useProjectWorkflow.executeOpenProject", () => {
               checksum: "deadbeef0000",
               checksumValid: true,
               nodeCount: 3,
-              savedPdvVersion: "0.1.2",
+              savedPdvVersion: TEST_PDV_VERSION,
               projectName: "loaded-demo",
               missingFiles: undefined,
             })) as never,
@@ -258,7 +259,7 @@ describe("useProjectWorkflow.executeOpenProject", () => {
     expect(state.activeCellTab).toBe(7);
     expect(state.lastChecksum).toBe("deadbe");
     expect(state.checksumMismatch).toBe(false);
-    expect(state.savedPdvVersion).toBe("0.1.2");
+    expect(state.savedPdvVersion).toBe(TEST_PDV_VERSION);
     expect(loadedProjectTabsRef.current).toEqual({
       tabs: [{ id: 7, code: "loaded" }],
       activeTabId: 7,

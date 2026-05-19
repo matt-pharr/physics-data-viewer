@@ -19,11 +19,34 @@
 import { vi } from "vitest";
 import type { BrowserWindow } from "electron";
 
+import pkg from "../package.json";
 import {
   PDVMessageType,
   setAppVersion,
   type PDVMessage,
 } from "./pdv-protocol";
+
+// ---------------------------------------------------------------------------
+// PDV version — single source of truth for test fixtures (issue #235)
+// ---------------------------------------------------------------------------
+
+/**
+ * Canonical PDV version for main-process test fixtures, derived from
+ * `electron/package.json`. Use this in place of hardcoded version strings in
+ * mocks and fixtures so a version bump doesn't have to touch every test file.
+ *
+ * @see electron/renderer/src/test-fixtures/test-pdv-version.ts — the
+ *      renderer-side twin (they can't share one TS module across the
+ *      main↔renderer tsconfig boundary; both derive from the same
+ *      `electron/package.json`).
+ */
+export const TEST_PDV_VERSION: string = pkg.version;
+
+/**
+ * {@link TEST_PDV_VERSION} with the `-test` suffix used where a test mocks
+ * Electron's `app.getVersion()`.
+ */
+export const TEST_PDV_VERSION_TEST_SUFFIX = `${pkg.version}-test`;
 
 // Set the app version once at module load so makeOkResponse and other helpers
 // don't trigger the "getAppVersion() called before setAppVersion()" warning.
@@ -310,7 +333,7 @@ export function createProjectManagerMock(
 // ConfigStore mock
 // ---------------------------------------------------------------------------
 
-export interface ConfigStoreMock<T extends Record<string, unknown>> {
+export interface ConfigStoreMock<T extends object> {
   store: ConfigStore;
   state: T;
   getAll: ReturnType<typeof vi.fn>;
@@ -323,8 +346,12 @@ export interface ConfigStoreMock<T extends Record<string, unknown>> {
  * inspect and mutate directly. The default state is the bare minimum to
  * satisfy `PDVConfig` for current tests; tests requiring richer config can
  * pass an initial state.
+ *
+ * The `T extends object` constraint (rather than `Record<string, unknown>`)
+ * lets callers pass a typed interface like `PDVConfig` directly; the internal
+ * cast handles the unknown-string-key access.
  */
-export function createConfigStoreMock<T extends Record<string, unknown>>(
+export function createConfigStoreMock<T extends object>(
   initial: T,
 ): ConfigStoreMock<T> {
   const state = { ...initial };

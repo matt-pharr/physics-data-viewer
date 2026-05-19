@@ -182,7 +182,10 @@ describe("CommRouter", () => {
       mock.simulateIopub(KERNEL_ID, errResponse);
 
       await expect(requestPromise).rejects.toBeInstanceOf(PDVCommError);
-      const err = await requestPromise.catch((e: PDVCommError) => e);
+      // The `await ... .catch(...)` form has a union return type (resolved
+      // value | rejection value); the preceding `.rejects.toBeInstanceOf`
+      // already asserts the rejection branch, so cast for the field access.
+      const err = (await requestPromise.catch((e: PDVCommError) => e)) as PDVCommError;
       expect(err.code).toBe("tree.path_not_found");
     });
 
@@ -195,7 +198,9 @@ describe("CommRouter", () => {
       vi.advanceTimersByTime(200);
 
       await expect(requestPromise).rejects.toBeInstanceOf(PDVCommTimeoutError);
-      const err = await requestPromise.catch((e: PDVCommTimeoutError) => e);
+      const err = (await requestPromise.catch(
+        (e: PDVCommTimeoutError) => e,
+      )) as PDVCommTimeoutError;
       expect(err.messageType).toBe("pdv.namespace.query");
 
       vi.useRealTimers();

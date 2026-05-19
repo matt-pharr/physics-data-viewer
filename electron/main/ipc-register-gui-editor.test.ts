@@ -19,8 +19,8 @@ const ipcRegistry = vi.hoisted(() => {
 });
 
 const fsMocks = vi.hoisted(() => ({
-  readFile: vi.fn(async () => '{"version": 1}'),
-  writeFile: vi.fn(async () => undefined),
+  readFile: vi.fn(async (_path: string, _encoding?: string) => '{"version": 1}'),
+  writeFile: vi.fn(async (_path: string, _contents: string, _encoding?: string) => undefined),
 }));
 
 vi.mock("electron", () => ({
