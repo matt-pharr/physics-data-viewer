@@ -329,6 +329,7 @@ const App: React.FC = () => {
   // doesn't re-subscribe on every kernelStatus change (handlers defined later).
   const handleOpenWithPickerRef = useRef<() => Promise<void>>();
   const handleOpenRecentRef = useRef<(path: string) => Promise<void>>();
+  const handleClearRecentsRef = useRef<() => void>();
   useEffect(() => {
     if (!window.pdv?.menu) return;
     const unsub = window.pdv.menu.onAction((payload) => {
@@ -363,10 +364,7 @@ const App: React.FC = () => {
           setForceWelcome(true);
         });
       } else if (payload.action === 'recentProjects:clear') {
-        void window.pdv.config.set({ recentProjects: [] }).then((updated) => {
-          if (updated) setConfig((prev) => (prev ? { ...prev, recentProjects: [] } : prev));
-        });
-        void window.pdv.menu.updateRecentProjects([]);
+        handleClearRecentsRef.current?.();
       }
     });
     return unsub;
@@ -1274,9 +1272,19 @@ const App: React.FC = () => {
     }
   }, [setLastError, refreshRecoverableSessions]);
 
+  // Shared between the WelcomeScreen "Clear" button and the native
+  // File → Clear Menu action (see the menuAction useEffect below).
+  const handleClearRecents = useCallback(() => {
+    void window.pdv.config.set({ recentProjects: [] }).then((updated) => {
+      if (updated) setConfig((prev) => (prev ? { ...prev, recentProjects: [] } : prev));
+    });
+    void window.pdv.menu.updateRecentProjects([]);
+  }, []);
+
   // Keep refs in sync so the menu-action effect (subscribed once) calls the latest handlers.
   handleOpenWithPickerRef.current = handleOpenWithPicker;
   handleOpenRecentRef.current = handleOpenRecent;
+  handleClearRecentsRef.current = handleClearRecents;
 
   // Execute deferred project action once the kernel becomes ready.
   useEffect(() => {
@@ -1726,6 +1734,7 @@ const App: React.FC = () => {
            onOpenRecent={handleOpenRecent}
            onRecoverSession={handleRecoverSession}
            onDiscardSession={handleDiscardSession}
+           onClearRecents={handleClearRecents}
          />
        )}
 
