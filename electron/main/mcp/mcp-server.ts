@@ -187,6 +187,7 @@ export class PdvMcpServer {
       token: running ? this.token : null,
       url: running ? `http://${HOST}:${this.port}/mcp` : null,
       generation: this.deps.hooks.getGeneration(),
+      clientCount: this.sessions.size,
     };
   }
 

@@ -2111,7 +2111,7 @@ The tree, namespace, introspection, project, `script_run`, and `pdv_run` tools o
 PDV stays visually coupled to agent activity, but minimally — the elaborate coupling layer is deferred (§15.12). What ships:
 
 - **`origin` tagging.** The existing `KernelExecutionOrigin` type gains an `agent` kind. Every agent-initiated run is tagged, so the console can style it distinctly — a boxed or differently-colored entry that marks it unambiguously as agent-run.
-- **Connection indicator.** A status-bar dot showing whether an MCP client is currently attached.
+- **Connection indicator.** A status-bar dot showing whether an MCP client is currently attached. Driven by a `pdv.mcp.clientStatus` main → renderer push emitted from `PdvMcpServer` on session initialize and transport close; the renderer also seeds initial state from `mcp:getStatus` on mount so a renderer reload while a client is already attached doesn't leave the indicator dark.
 
 ### 15.10 Settings: the Agents Pane
 

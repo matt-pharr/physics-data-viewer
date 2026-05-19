@@ -1455,6 +1455,13 @@ export interface McpStatus {
   url: string | null;
   /** Current project/kernel generation counter (diagnostic). */
   generation: number;
+  /**
+   * Number of currently-connected MCP client sessions. Returned by
+   * `getStatus()` so renderers can seed `mcpClientAttached` on mount
+   * without waiting for the next {@link IPCPushChannels.mcpClientStatus}
+   * push.
+   */
+  clientCount: number;
 }
 
 /**

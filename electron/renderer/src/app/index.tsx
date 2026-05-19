@@ -327,8 +327,14 @@ const App: React.FC = () => {
   }, []);
 
   // Surface MCP client connection state in the status bar. The MCP server
-  // pushes whenever the count of attached client sessions changes.
+  // pushes whenever the count of attached client sessions changes; the
+  // initial getStatus() call seeds state so a renderer reload while a
+  // client is already attached doesn't leave the indicator dark until the
+  // next disconnect/reconnect.
   useEffect(() => {
+    void window.pdv.mcp.getStatus().then((status) => {
+      setMcpClientAttached(status.clientCount > 0);
+    });
     return window.pdv.mcp.onClientStatus(({ clientCount }) => {
       setMcpClientAttached(clientCount > 0);
     });
