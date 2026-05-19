@@ -1,6 +1,7 @@
 import { useEffect, type Dispatch, type MutableRefObject, type SetStateAction } from 'react';
 import type { CellTab, LogEntry, TreeChangeInfo } from '../types';
 import type { ProgressPayload } from '../types/pdv';
+import { MAX_LOG_ENTRIES } from './constants';
 
 /** Options for {@link useKernelSubscriptions}. Manages push-subscription lifecycle. */
 interface UseKernelSubscriptionsOptions {
@@ -58,6 +59,50 @@ export function useKernelSubscriptions({
       );
     });
     return unsubscribe;
+  }, [setLogs]);
+
+  // Main-initiated runs (MCP agent tools) push a `begin` event before the
+  // first chunk so we can seed a log entry — without that, `onOutput`
+  // chunks find no row to attach to and the Console stays empty for agent
+  // activity. `finish` carries duration/error info that does not arrive
+  // via streaming chunks. The renderer's own `kernels.execute` calls do
+  // not emit these pushes; they seed their log entries locally.
+  useEffect(() => {
+    const offBegin = window.pdv.kernels.onExecuteBegin((payload) => {
+      setLogs((prev) => {
+        if (prev.some((l) => l.id === payload.executionId)) return prev;
+        const next: LogEntry[] = [
+          ...prev,
+          {
+            id: payload.executionId,
+            timestamp: payload.timestamp,
+            code: payload.code,
+            origin: payload.origin,
+          },
+        ];
+        return next.length > MAX_LOG_ENTRIES
+          ? next.slice(next.length - MAX_LOG_ENTRIES)
+          : next;
+      });
+    });
+    const offFinish = window.pdv.kernels.onExecuteFinish((payload) => {
+      setLogs((prev) =>
+        prev.map((l) =>
+          l.id === payload.executionId
+            ? {
+                ...l,
+                duration: payload.duration,
+                error: payload.error,
+                errorDetails: payload.errorDetails,
+              }
+            : l,
+        ),
+      );
+    });
+    return () => {
+      offBegin();
+      offFinish();
+    };
   }, [setLogs]);
 
   useEffect(() => {

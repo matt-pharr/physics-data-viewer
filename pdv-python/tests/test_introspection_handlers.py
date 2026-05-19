@@ -147,6 +147,27 @@ class TestHandleHelp:
         assert response["status"] == "error"
         assert response["payload"]["code"] == "introspection.symbol_not_found"
 
+    def test_resolves_bare_pdv_class_name(self):
+        """pdv.help resolves a bare class name like 'PDVScript' by falling
+        back to looking up attributes of the loaded `pdv` module — the
+        same way `from pdv import PDVScript` works at the kernel."""
+        ip = MagicMock()
+        ip.user_ns = {}
+        mock_comm = _make_mock_comm()
+        msg = _make_msg("pdv.help", {"symbol": "PDVScript"})
+        with (
+            patch.object(comms_mod, "_comm", mock_comm),
+            patch.object(comms_mod, "_ip", ip),
+        ):
+            handle_help(msg)
+
+        response = mock_comm._sent[0]
+        assert response["type"] == "pdv.help.response"
+        assert response["status"] == "ok"
+        payload = response["payload"]
+        assert payload["symbol"] == "PDVScript"
+        assert payload["kind"] == "class"
+
     def test_does_not_implicitly_import_modules(self):
         """pdv.help refuses to introspect a symbol whose head module is not
         already loaded in sys.modules, instead of triggering an import.

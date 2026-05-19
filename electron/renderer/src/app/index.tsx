@@ -983,6 +983,80 @@ const App: React.FC = () => {
     return unsub;
   }, [activeCellTab]);
 
+  // MCP cell tools (ARCHITECTURE.md §15.8): the main process pushes cell
+  // read requests for `cell_list`/`cell_read` and one-way `cell_write`
+  // pushes. Mirrors the autosave round-trip pattern above.
+  useEffect(() => {
+    if (!window.pdv?.cells) return;
+    const offRequest = window.pdv.cells.onRequest((req) => {
+      const tabs = cellTabsRef.current;
+      const respond = window.pdv.cells.respond;
+      if (req.op === 'list') {
+        void respond({
+          requestId: req.requestId,
+          ok: true,
+          result: {
+            tabs: tabs.map((t) => ({
+              id: t.id,
+              name: t.name,
+              length: t.code.length,
+            })),
+            activeTabId: activeCellTab ?? null,
+          },
+        });
+        return;
+      }
+      if (req.op === 'read') {
+        const tab = tabs.find((t) => t.id === req.tabId);
+        if (!tab) {
+          void respond({
+            requestId: req.requestId,
+            ok: false,
+            error: `No cell tab with id ${req.tabId}`,
+          });
+          return;
+        }
+        void respond({
+          requestId: req.requestId,
+          ok: true,
+          result: { id: tab.id, name: tab.name, code: tab.code },
+        });
+      }
+    });
+    const offWrite = window.pdv.cells.onWrite((write) => {
+      let createdId: number | null = null;
+      setCellTabs((prev) => {
+        if (
+          typeof write.tabId === 'number' &&
+          prev.some((t) => t.id === write.tabId)
+        ) {
+          return prev.map((t) =>
+            t.id === write.tabId
+              ? { ...t, code: write.code, name: write.name ?? t.name }
+              : t,
+          );
+        }
+        const nextId =
+          prev.length === 0 ? 1 : Math.max(...prev.map((t) => t.id)) + 1;
+        createdId = nextId;
+        return [
+          ...prev,
+          { id: nextId, code: write.code, name: write.name },
+        ];
+      });
+      // Activating the new tab takes the user's focus to where the agent
+      // just wrote — without this, an agent-appended cell stays out of view
+      // and feels like nothing happened.
+      if (createdId !== null) {
+        setActiveCellTab(createdId);
+      }
+    });
+    return () => {
+      offRequest();
+      offWrite();
+    };
+  }, [activeCellTab]);
+
   // Whether the session has no user work (no project, no code, no logs, no notes).
   const isPristine = currentProjectDir === null
     && cellTabs.every((t) => !t.code.trim())

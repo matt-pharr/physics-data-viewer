@@ -261,6 +261,12 @@ function formatExecutionSource(source: KernelExecutionOrigin | undefined): strin
   if (source.kind === "tree-script") {
     return label ? `Script "${label}"` : "Script";
   }
+  if (source.kind === "agent") {
+    const tool = source.agentTool;
+    if (tool && label) return `Agent ${tool} "${label}"`;
+    if (tool) return `Agent ${tool}`;
+    return label ? `Agent "${label}"` : "Agent";
+  }
   return label ? `Execution "${label}"` : "Execution";
 }
 

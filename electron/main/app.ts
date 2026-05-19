@@ -23,6 +23,7 @@ import { ConfigStore } from "./config";
 import { registerIpcHandlers } from "./index";
 import { initializeAppMenu } from "./menu";
 import { IPC } from "./ipc";
+import type { CellRpcClient } from "./mcp/cell-rpc";
 import type { PdvMcpServer } from "./mcp/mcp-server";
 
 /**
@@ -330,11 +331,13 @@ export function clearQuitRequestPending(): void {
  *
  * @param getKernelManager - Lazy getter for the current kernel manager.
  * @param getMcpServer - Lazy getter for the MCP server, stopped on quit.
+ * @param getCellRpc - Lazy getter for the cell-RPC client, stopped on quit.
  * @returns Nothing.
  */
 export function wireAppEvents(
   getKernelManager: () => KernelManager | null,
-  getMcpServer: () => PdvMcpServer | null
+  getMcpServer: () => PdvMcpServer | null,
+  getCellRpc: () => CellRpcClient | null = () => null
 ): void {
   app.on("before-quit", () => {
     isQuittingGlobal = true;
@@ -355,8 +358,9 @@ export function wireAppEvents(
   // have completed, so save-on-quit can still reach the active kernel.
   app.on("will-quit", (event) => {
     // Stop the MCP server first — it is independent of kernel shutdown and
-    // closes its loopback socket quickly.
+    // closes its loopback socket quickly. Then detach the cell-RPC handler.
     void getMcpServer()?.stop();
+    getCellRpc()?.stop();
     const kernelManager = getKernelManager();
     const kernelCount = kernelManager
       ? Array.from((kernelManager as unknown as { kernels: Map<string, unknown> }).kernels?.keys() ?? []).length

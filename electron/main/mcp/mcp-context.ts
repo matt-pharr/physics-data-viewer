@@ -14,11 +14,19 @@
  * mcp-server.ts — constructs the context and owns the session registry
  */
 
+import type { BrowserWindow } from "electron";
+
 import type { CommRouter } from "../comm-router";
 import type { ConfigStore } from "../config";
+import type {
+  TreeCreateLibResult,
+  TreeCreateNoteResult,
+  TreeCreateScriptResult,
+} from "../ipc";
 import type { KernelManager } from "../kernel-manager";
 import type { ProjectManager } from "../project-manager";
 import type { QueryRouter } from "../query-router";
+import type { CellRpcClient } from "./cell-rpc";
 
 /**
  * Lifecycle accessors the MCP server needs from the IPC-handler closure in
@@ -30,6 +38,12 @@ export interface McpServerHooks {
   getActiveKernelId(): string | null;
   /** Absolute save directory of the active project, or `null` when none is open. */
   getActiveProjectDir(): string | null;
+  /**
+   * Kernel working directory for the active kernel, or `null` when no kernel
+   * has been started yet. Used by execution tools to construct the per-run
+   * `TranscriptWriter` (ARCHITECTURE.md §15.7).
+   */
+  getActiveWorkingDir(): string | null;
   /** Current project/kernel generation counter (ARCHITECTURE.md §15.3). */
   getGeneration(): number;
   /**
@@ -37,6 +51,32 @@ export interface McpServerHooks {
    * kernel, or environment changes so connected MCP sessions become stale.
    */
   bumpGeneration(): void;
+  /**
+   * Pre-bound helpers for file-backed tree-node creation. Implementations
+   * live in `index.ts` so they can close over the kernel working-dir map and
+   * the project's module aliases; the MCP `create_tree_node` tool calls them
+   * via the hooks without needing to know any of that wiring.
+   */
+  treeCreate: {
+    /** Allocate a UUID-backed script file and register it with the kernel. */
+    script(
+      kernelId: string,
+      parentPath: string,
+      scriptName: string,
+    ): Promise<TreeCreateScriptResult>;
+    /** Allocate a UUID-backed Markdown note and register it with the kernel. */
+    note(
+      kernelId: string,
+      parentPath: string,
+      noteName: string,
+    ): Promise<TreeCreateNoteResult>;
+    /** Allocate a UUID-backed importable lib file and register it with the kernel. */
+    lib(
+      kernelId: string,
+      parentPath: string,
+      libName: string,
+    ): Promise<TreeCreateLibResult>;
+  };
 }
 
 /**
@@ -59,6 +99,19 @@ export interface McpToolContext {
   hooks: McpServerHooks;
   /** App version string (`app.getVersion()`), surfaced by `project_info`. */
   appVersion: string;
+  /**
+   * Renderer code-cell RPC client (ARCHITECTURE.md §15.8). Used by the MCP
+   * cell tools to read and write the renderer's live cell tabs.
+   */
+  cellRpc: CellRpcClient;
+  /**
+   * Accessor for the renderer window an agent run's output should stream
+   * into. Returns `null` when no window is open. Used by execution tools to
+   * forward iopub chunks to the Console via `IPC.push.executeOutput` so
+   * agent-initiated runs are visible alongside user runs (ARCHITECTURE.md
+   * §15.9).
+   */
+  getRendererWindow(): BrowserWindow | null;
   /**
    * Generation a given MCP session connected at, or `undefined` for an
    * unknown session. Used by tools to reject calls from a session that

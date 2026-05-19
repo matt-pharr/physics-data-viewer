@@ -25,8 +25,14 @@ function makeHooks(generation = 0): McpServerHooks {
   return {
     getActiveKernelId: () => null,
     getActiveProjectDir: () => null,
+    getActiveWorkingDir: () => null,
     getGeneration: () => generation,
     bumpGeneration: () => undefined,
+    treeCreate: {
+      script: () => Promise.reject(new Error("not implemented in tests")),
+      note: () => Promise.reject(new Error("not implemented in tests")),
+      lib: () => Promise.reject(new Error("not implemented in tests")),
+    },
   };
 }
 
@@ -61,6 +67,8 @@ function makeDeps(
     configStore,
     hooks: makeHooks(),
     appVersion: "0.0.0-test",
+    cellRpc: {} as PdvMcpServerDeps["cellRpc"],
+    getRendererWindow: () => null,
   };
 }
 

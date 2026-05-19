@@ -60,6 +60,11 @@ import {
 } from "./ipc";
 import { PDVMessage, PDVMessageType, setAppVersion } from "./pdv-protocol";
 import type { McpServerHooks } from "./mcp/mcp-context";
+import {
+  allocateAndRegisterLib,
+  allocateAndRegisterNote,
+  allocateAndRegisterScript,
+} from "./tree-create";
 
 // ---------------------------------------------------------------------------
 // Unified version — set once before any handler uses getAppVersion()
@@ -579,6 +584,21 @@ export function registerIpcHandlers(
     bindActiveProjectModules,
   });
 
+  // Aggregate module aliases from the active on-disk manifest plus any
+  // in-memory pending imports (the latter carries in-session modules
+  // created by modules:createEmpty before the first save). Both the tree
+  // create* IPC handlers and the MCP `create_tree_node` tool consume this
+  // to route module-owned files through the `<workdir>/<alias>/...` layout
+  // with `source_rel_path` set.
+  const getKnownModuleAliases = async (): Promise<Set<string>> => {
+    const manifest = await readActiveProjectManifest();
+    const disk = manifest?.modules ?? [];
+    return new Set([
+      ...disk.map((m) => m.alias),
+      ...pendingModuleImports.map((m) => m.alias),
+    ]);
+  };
+
   registerTreeNamespaceScriptIpcHandlers({
     kernelManager,
     commRouter,
@@ -586,19 +606,7 @@ export function registerIpcHandlers(
     projectManager,
     configStore,
     kernelWorkingDirs,
-    // Aggregate module aliases from the active on-disk manifest plus any
-    // in-memory pending imports (the latter carries in-session modules
-    // created by modules:createEmpty before the first save). The tree
-    // create* handlers use this to route module-owned files through the
-    // ``<workdir>/<alias>/...`` layout with source_rel_path set.
-    getKnownModuleAliases: async (): Promise<Set<string>> => {
-      const manifest = await readActiveProjectManifest();
-      const disk = manifest?.modules ?? [];
-      return new Set([
-        ...disk.map((m) => m.alias),
-        ...pendingModuleImports.map((m) => m.alias),
-      ]);
-    },
+    getKnownModuleAliases,
     readConfig,
     toNamespaceQueryPayload,
     toNamespaceInspectPayload,
@@ -946,11 +954,53 @@ export function registerIpcHandlers(
   }
 
   // Publish the lifecycle hooks the MCP server reads (ARCHITECTURE.md §15).
+  const treeCreateBaseDeps = {
+    kernelManager,
+    commRouter,
+    projectManager,
+    configStore,
+    kernelWorkingDirs,
+    readConfig,
+  };
   mcpServerHooks = {
     getActiveKernelId: () => activeKernelId,
     getActiveProjectDir: () => activeProjectDir,
+    getActiveWorkingDir: () =>
+      activeKernelId ? (kernelWorkingDirs.get(activeKernelId) ?? null) : null,
     getGeneration: () => generation,
     bumpGeneration,
+    treeCreate: {
+      script: (kernelId, parentPath, scriptName) =>
+        allocateAndRegisterScript(
+          {
+            ...treeCreateBaseDeps,
+            getKnownModuleAliases,
+            sanitizeScriptName,
+            ensureScriptFile,
+          },
+          kernelId,
+          parentPath,
+          scriptName,
+        ),
+      note: (kernelId, parentPath, noteName) =>
+        allocateAndRegisterNote(
+          treeCreateBaseDeps,
+          kernelId,
+          parentPath,
+          noteName,
+        ),
+      lib: (kernelId, parentPath, libName) =>
+        allocateAndRegisterLib(
+          {
+            ...treeCreateBaseDeps,
+            getKnownModuleAliases,
+            ensureLibFile,
+          },
+          kernelId,
+          parentPath,
+          libName,
+        ),
+    },
   };
 
   return resetSessionState;

@@ -62,10 +62,12 @@ export interface KernelSpec {
 
 /** Execution source metadata attached to execute requests/results. */
 export interface KernelExecutionOrigin {
-  kind: "code-cell" | "tree-script" | "unknown";
+  kind: "code-cell" | "tree-script" | "agent" | "unknown";
   label?: string;
   tabId?: number;
   scriptPath?: string;
+  /** MCP tool name when `kind === "agent"` (e.g. "pdv_run", "script_run"). */
+  agentTool?: string;
 }
 
 /** Parsed traceback location metadata surfaced in execution errors. */
@@ -694,6 +696,63 @@ export interface McpStatus {
   generation: number;
 }
 
+/**
+ * Cell-tool RPC payloads mirroring the types in `main/ipc.ts`. The main
+ * process drives reads via `cellsRequest`/`respond` and writes via
+ * `cellWrite` (ARCHITECTURE.md §15.8).
+ */
+export interface CellsRequestPush {
+  requestId: string;
+  op: "list" | "read";
+  tabId?: number;
+}
+
+export interface CellListEntry {
+  id: number;
+  name?: string;
+  length: number;
+}
+
+export interface CellListResult {
+  tabs: CellListEntry[];
+  activeTabId: number | null;
+}
+
+export interface CellReadResult {
+  id: number;
+  name?: string;
+  code: string;
+}
+
+export interface CellsResponse {
+  requestId: string;
+  ok: boolean;
+  result?: CellListResult | CellReadResult;
+  error?: string;
+}
+
+/** Mirrors `ExecuteBeginPayload` in `main/ipc.ts`. */
+export interface ExecuteBeginPayload {
+  executionId: string;
+  code: string;
+  origin: KernelExecutionOrigin;
+  timestamp: number;
+}
+
+/** Mirrors `ExecuteFinishPayload` in `main/ipc.ts`. */
+export interface ExecuteFinishPayload {
+  executionId: string;
+  duration: number;
+  error?: string;
+  errorDetails?: KernelExecutionError;
+}
+
+export interface CellWritePush {
+  tabId?: number;
+  code: string;
+  name?: string;
+}
+
 export interface PDVApi {
   kernels: {
     list(): Promise<KernelInfo[]>;
@@ -722,6 +781,8 @@ export interface PDVApi {
       language: "python" | "julia"
     ): Promise<{ valid: boolean; error?: string }>;
     onOutput(callback: (chunk: ExecuteOutputChunk) => void): () => void;
+    onExecuteBegin(callback: (payload: ExecuteBeginPayload) => void): () => void;
+    onExecuteFinish(callback: (payload: ExecuteFinishPayload) => void): () => void;
     onKernelCrashed(callback: (payload: { kernelId: string }) => void): () => void;
     onReconnected(callback: (payload: { kernelId: string }) => void): () => void;
     onMemory(callback: (payload: KernelMemoryPayload) => void): () => void;
@@ -897,6 +958,16 @@ export interface PDVApi {
     deleteOrphan(orphanDir: string): Promise<void>;
     onTrigger(callback: () => void): () => void;
     onInFlightChange(callback: (inFlight: boolean) => void): () => void;
+  };
+  /**
+   * MCP cell-tool round-trip (ARCHITECTURE.md §15.8). The main process pushes
+   * `cells.onRequest` and reads the renderer's reply via `cells.respond`;
+   * `cells.onWrite` is one-way main → renderer.
+   */
+  cells: {
+    onRequest(callback: (req: CellsRequestPush) => void): () => void;
+    onWrite(callback: (write: CellWritePush) => void): () => void;
+    respond(response: CellsResponse): Promise<void>;
   };
   about: {
     getVersion(): Promise<string>;

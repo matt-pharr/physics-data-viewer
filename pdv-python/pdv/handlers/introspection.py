@@ -74,20 +74,32 @@ def _resolve_symbol(symbol: str) -> Any:
     else:
         loaded = sys.modules.get(head)
         if loaded is None:
-            raise ModuleNotFoundError(
-                f"Module '{head}' is not loaded; pdv.help does not "
-                f"implicitly import modules"
-            )
-        obj = loaded
-        # Walk the longest already-loaded dotted prefix.
-        while rest:
-            candidate = f"{head}.{rest[0]}"
-            submodule = sys.modules.get(candidate)
-            if submodule is None:
-                break
-            obj = submodule
-            head = candidate
-            rest = rest[1:]
+            # Bare-name fallback: try `<head>` as an attribute of the pdv
+            # package so `pdv.help("PDVScript")` works the same way
+            # `from pdv import PDVScript` would. This is what a user sitting
+            # at the kernel would type, and the original "Module not loaded"
+            # error was actively misleading for it.
+            pdv_module = sys.modules.get("pdv")
+            if pdv_module is not None and hasattr(pdv_module, head):
+                obj = getattr(pdv_module, head)
+            else:
+                raise ModuleNotFoundError(
+                    f"Could not resolve '{symbol}': '{head}' is not loaded "
+                    f"in the kernel. Try the fully qualified name (e.g. "
+                    f"'pdv.{head}') or use a variable from the namespace. "
+                    f"pdv.help does not implicitly import modules."
+                )
+        else:
+            obj = loaded
+            # Walk the longest already-loaded dotted prefix.
+            while rest:
+                candidate = f"{head}.{rest[0]}"
+                submodule = sys.modules.get(candidate)
+                if submodule is None:
+                    break
+                obj = submodule
+                head = candidate
+                rest = rest[1:]
 
     for attr in rest:
         obj = getattr(obj, attr)
