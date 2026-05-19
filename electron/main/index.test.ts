@@ -53,21 +53,34 @@ const mocks = vi.hoisted(() => {
       cb?.(null, "Python 3.11.6\n", "");
     }
   );
-  const fsMkdir = vi.fn(async () => undefined);
-  const fsStat = vi.fn(async () => {
+  // Signatures match the bits of fs/promises that tests exercise. Typing
+  // these explicitly (rather than `vi.fn(async () => undefined)`) lets
+  // `mockResolvedValueOnce("...")` and `mockImplementation((path, contents) => ...)`
+  // typecheck against the real argument/return types.
+  const fsMkdir = vi.fn(
+    async (_path: string, _options?: { recursive?: boolean }) => undefined,
+  );
+  const fsStat = vi.fn(async (_path: string): Promise<unknown> => {
     const err = Object.assign(new Error("ENOENT"), { code: "ENOENT" });
     throw err;
   });
-  const fsWriteFile = vi.fn(async () => undefined);
-  const fsReadFile = vi.fn(async () => {
+  const fsWriteFile = vi.fn(
+    async (_path: string, _contents: string, _encoding?: string): Promise<void> =>
+      undefined,
+  );
+  const fsReadFile = vi.fn(async (_path: string, _encoding?: string): Promise<string> => {
     const err = Object.assign(new Error("ENOENT"), { code: "ENOENT" });
     throw err;
   });
-  const fsCopyFile = vi.fn(async () => undefined);
-  const fsCp = vi.fn(async () => undefined);
-  const fsRm = vi.fn(async () => undefined);
-  const fsRename = vi.fn(async () => undefined);
-  const fsReaddir = vi.fn(async () => []);
+  const fsCopyFile = vi.fn(async (_src: string, _dest: string) => undefined);
+  const fsCp = vi.fn(
+    async (_src: string, _dest: string, _options?: { recursive?: boolean }) => undefined,
+  );
+  const fsRm = vi.fn(
+    async (_path: string, _options?: { recursive?: boolean; force?: boolean }) => undefined,
+  );
+  const fsRename = vi.fn(async (_oldPath: string, _newPath: string) => undefined);
+  const fsReaddir = vi.fn(async (_path: string): Promise<string[]> => []);
   const dialogShowOpenDialog = vi.fn();
   const dialogShowMessageBox = vi.fn(async () => ({ response: 0 }));
   const shellOpenPath = vi.fn(async () => "");
@@ -196,25 +209,28 @@ vi.mock("fs/promises", () => ({
 }));
 
 vi.mock("./module-manager", () => ({
-  ModuleManager: vi.fn().mockImplementation(() => ({
-    listInstalled: mocks.moduleManagerListInstalled,
-    install: mocks.moduleManagerInstall,
-    checkUpdates: mocks.moduleManagerCheckUpdates,
-    evaluateHealth: mocks.moduleManagerEvaluateHealth,
-    resolveActionScripts: mocks.moduleManagerResolveActionScripts,
-    getModuleInputs: mocks.moduleManagerGetModuleInputs,
-    getModuleGuiInfo: mocks.moduleManagerGetModuleGuiInfo,
-    getModuleInstallPath: mocks.moduleManagerGetModuleInstallPath,
-    getGlobalStorePath: mocks.moduleManagerGetGlobalStorePath,
-    registerInGlobalStore: mocks.moduleManagerRegisterInGlobalStore,
-    getModuleSetupInfo: mocks.moduleManagerGetModuleSetupInfo,
-    isV4Module: mocks.moduleManagerIsV4Module,
-    readModuleIndex: mocks.moduleManagerReadModuleIndex,
-    getModuleDependencies: mocks.moduleManagerGetModuleDependencies,
-    resolveModuleDir: mocks.moduleManagerResolveModuleDir,
-    uninstall: mocks.moduleManagerUninstall,
-    update: mocks.moduleManagerUpdate,
-  })),
+  // `new`-able mock: vitest 4 requires a non-arrow implementation for constructors.
+  ModuleManager: vi.fn().mockImplementation(function () {
+    return {
+      listInstalled: mocks.moduleManagerListInstalled,
+      install: mocks.moduleManagerInstall,
+      checkUpdates: mocks.moduleManagerCheckUpdates,
+      evaluateHealth: mocks.moduleManagerEvaluateHealth,
+      resolveActionScripts: mocks.moduleManagerResolveActionScripts,
+      getModuleInputs: mocks.moduleManagerGetModuleInputs,
+      getModuleGuiInfo: mocks.moduleManagerGetModuleGuiInfo,
+      getModuleInstallPath: mocks.moduleManagerGetModuleInstallPath,
+      getGlobalStorePath: mocks.moduleManagerGetGlobalStorePath,
+      registerInGlobalStore: mocks.moduleManagerRegisterInGlobalStore,
+      getModuleSetupInfo: mocks.moduleManagerGetModuleSetupInfo,
+      isV4Module: mocks.moduleManagerIsV4Module,
+      readModuleIndex: mocks.moduleManagerReadModuleIndex,
+      getModuleDependencies: mocks.moduleManagerGetModuleDependencies,
+      resolveModuleDir: mocks.moduleManagerResolveModuleDir,
+      uninstall: mocks.moduleManagerUninstall,
+      update: mocks.moduleManagerUpdate,
+    };
+  }),
 }));
 
 function getHandler(channel: string): InvokeHandler {
@@ -349,6 +365,7 @@ function setup() {
     showPrivateVariables: false,
     showModuleVariables: false,
     showCallableVariables: false,
+    autoRefreshNamespace: false,
   };
   const configStore = {
     getAll: vi.fn(() => ({ ...configState })),
@@ -358,7 +375,17 @@ function setup() {
   } as unknown as ConfigStore;
 
   const queryRouter = new QueryRouter();
-  registerIpcHandlers(win, kernelManager, commRouter, queryRouter, projectManager, configStore, os.tmpdir());
+  const setAllowClose = vi.fn<(allow: boolean) => void>();
+  registerIpcHandlers(
+    win,
+    kernelManager,
+    commRouter,
+    queryRouter,
+    projectManager,
+    configStore,
+    os.tmpdir(),
+    setAllowClose,
+  );
 
   return {
     webContentsSend,
@@ -2271,7 +2298,7 @@ describe("Step 5 IPC handlers", () => {
     // Pin workingDirBase to /tmp so it matches the mock createWorkingDir
     // result ("/tmp/pdv-test"); without this they live in different roots
     // and the filter has nothing to filter.
-    (configStore.set as unknown as ReturnType<typeof vi.fn>)("workingDirBase", "/tmp");
+    (configStore.set as unknown as (key: string, value: unknown) => void)("workingDirBase", "/tmp");
 
     const start = getHandler(IPC.kernels.start);
     await start({}, { language: "python" });

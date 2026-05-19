@@ -7,7 +7,7 @@
  * pass-throughs for execute / interrupt / complete / inspect / list.
  */
 
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from "vitest";
 
 const ipcRegistry = vi.hoisted(() => {
   const handlers = new Map<string, (event: unknown, ...args: unknown[]) => unknown>();
@@ -83,13 +83,16 @@ interface Harness {
   moduleManager: ReturnType<typeof createModuleManagerMock>;
   kernelWorkingDirs: Map<string, string>;
   crashHandlers: Map<string, (id: string) => void>;
-  resetProjectState: ReturnType<typeof vi.fn>;
-  resetKernelState: ReturnType<typeof vi.fn>;
-  setActiveKernelId: ReturnType<typeof vi.fn>;
-  getActiveKernelId: ReturnType<typeof vi.fn>;
-  getActiveProjectDir: ReturnType<typeof vi.fn>;
-  getWorkingDirBase: ReturnType<typeof vi.fn>;
-  bindActiveProjectModules: ReturnType<typeof vi.fn>;
+  // Typed Mocks so each field is structurally assignable to the typed
+  // callback the registration function expects, while still exposing
+  // .mockReturnValueOnce / .mock.calls for test assertions.
+  resetProjectState: Mock<() => void>;
+  resetKernelState: Mock<() => void>;
+  setActiveKernelId: Mock<(id: string | null) => void>;
+  getActiveKernelId: Mock<() => string | null>;
+  getActiveProjectDir: Mock<() => string | null>;
+  getWorkingDirBase: Mock<() => string | undefined>;
+  bindActiveProjectModules: Mock<(kernelId: string | null) => Promise<void>>;
 }
 
 function setup(): Harness {
