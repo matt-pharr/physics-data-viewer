@@ -229,11 +229,20 @@ async function promptDeleteConfirmation(path: string): Promise<boolean> {
     defaultId: 0,
     cancelId: 0,
   });
-  const timeoutPromise = new Promise<{ response: number }>((resolve) =>
-    setTimeout(() => resolve({ response: 0 }), 60_000),
-  );
-  const result = await Promise.race([dialogPromise, timeoutPromise]);
-  return result.response === 1;
+  // Promise.race doesn't cancel the losing promise, so an idle 60s
+  // setTimeout would keep the process from quitting cleanly between a
+  // user's quick click and the timer's expiry. Clear the timer when the
+  // dialog resolves first.
+  let timeoutHandle: NodeJS.Timeout | undefined;
+  const timeoutPromise = new Promise<{ response: number }>((resolve) => {
+    timeoutHandle = setTimeout(() => resolve({ response: 0 }), 60_000);
+  });
+  try {
+    const result = await Promise.race([dialogPromise, timeoutPromise]);
+    return result.response === 1;
+  } finally {
+    if (timeoutHandle) clearTimeout(timeoutHandle);
+  }
 }
 
 /**

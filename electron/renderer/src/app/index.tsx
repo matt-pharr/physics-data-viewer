@@ -1024,12 +1024,13 @@ const App: React.FC = () => {
       }
     });
     const offWrite = window.pdv.cells.onWrite((write) => {
-      let createdId: number | null = null;
+      let activatedId: number | null = null;
       setCellTabs((prev) => {
         if (
           typeof write.tabId === 'number' &&
           prev.some((t) => t.id === write.tabId)
         ) {
+          activatedId = write.tabId;
           return prev.map((t) =>
             t.id === write.tabId
               ? { ...t, code: write.code, name: write.name ?? t.name }
@@ -1038,17 +1039,18 @@ const App: React.FC = () => {
         }
         const nextId =
           prev.length === 0 ? 1 : Math.max(...prev.map((t) => t.id)) + 1;
-        createdId = nextId;
+        activatedId = nextId;
         return [
           ...prev,
           { id: nextId, code: write.code, name: write.name },
         ];
       });
-      // Activating the new tab takes the user's focus to where the agent
-      // just wrote — without this, an agent-appended cell stays out of view
-      // and feels like nothing happened.
-      if (createdId !== null) {
-        setActiveCellTab(createdId);
+      // Bring focus to whichever tab the agent just wrote — both append and
+      // overwrite. Without this on overwrite, an agent edit to a non-active
+      // tab is silent ("agent rewrote cell 3, user was on cell 5"), which is
+      // the same surprise the append case would have without activation.
+      if (activatedId !== null) {
+        setActiveCellTab(activatedId);
       }
     });
     return () => {

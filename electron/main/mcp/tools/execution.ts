@@ -124,6 +124,11 @@ export function registerExecutionTools(server: McpServer, ctx: McpToolContext): 
     },
     async ({ code }, extra) => {
       assertCurrentGeneration(ctx, extra);
+      // pdv_run requires BOTH gates: it is a mutating-tier tool (it can
+      // write the Tree, files, and run subprocess), so a user who toggled
+      // the mutating tier off should not be exposed to it just because
+      // pdv_run's own switch happens to still be on.
+      assertMutatingToolsEnabled(ctx);
       assertPdvRunEnabled(ctx);
       requireKernel(ctx);
       const origin: KernelExecutionOrigin = {
@@ -303,12 +308,14 @@ function buildScriptInvocation(
 }
 
 function formatPythonKwarg(key: string, value: unknown): string {
+  if (value === null || value === undefined) return `${key}=None`;
   if (typeof value === "string") return `${key}=${JSON.stringify(value)}`;
   if (typeof value === "boolean") return `${key}=${value ? "True" : "False"}`;
   return `${key}=${String(value)}`;
 }
 
 function formatJuliaKwarg(key: string, value: unknown): string {
+  if (value === null || value === undefined) return `${key}=nothing`;
   if (typeof value === "string") return `${key}=${JSON.stringify(value)}`;
   if (typeof value === "boolean") return `${key}=${value ? "true" : "false"}`;
   return `${key}=${String(value)}`;
@@ -335,6 +342,7 @@ async function runOnKernel(
   // begin/finish pushes — the renderer needs a seeded log entry before
   // streaming chunks attach to it.
   const executionId = randomUUID();
+  const start = Date.now();
   const sendToRenderer = (channel: string, payload: unknown): void => {
     if (win && !win.isDestroyed()) {
       win.webContents.send(channel, payload);
@@ -344,7 +352,7 @@ async function runOnKernel(
     executionId,
     code,
     origin,
-    timestamp: Date.now(),
+    timestamp: start,
   });
   try {
     const result = await executeAndTranscribe(
@@ -356,15 +364,18 @@ async function runOnKernel(
     );
     sendToRenderer(IPC.push.executeFinish, {
       executionId,
-      duration: result.duration ?? 0,
+      duration: result.duration ?? Date.now() - start,
       error: result.error,
       errorDetails: result.errorDetails,
     });
     return result;
   } catch (err) {
+    // A throw can happen far into a long-running execution (kernel timeout,
+    // transport error). Report the elapsed wall time so the Console doesn't
+    // claim a 30-second failure took 0 ms.
     sendToRenderer(IPC.push.executeFinish, {
       executionId,
-      duration: 0,
+      duration: Date.now() - start,
       error: err instanceof Error ? err.message : String(err),
     });
     throw err;
