@@ -202,6 +202,7 @@ export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({
                 type="button"
                 className="welcome-recent-clear"
                 onClick={handleClearRecents}
+                aria-label="Clear recent projects list"
               >
                 Clear
               </button>

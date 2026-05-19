@@ -36,25 +36,25 @@ function renderWelcome(overrides: Partial<Parameters<typeof WelcomeScreen>[0]> =
 describe('WelcomeScreen — Clear recents button (#191)', () => {
   it('renders the Clear button when there are recent projects', () => {
     renderWelcome();
-    expect(screen.getByRole('button', { name: 'Clear' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Clear recent projects list' })).toBeTruthy();
   });
 
   it('does not render the Clear button when there are no recent projects', () => {
     renderWelcome({ recentProjects: [] });
-    expect(screen.queryByRole('button', { name: 'Clear' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Clear recent projects list' })).toBeNull();
   });
 
   it('calls onClearRecents after the user confirms', async () => {
     vi.spyOn(window, 'confirm').mockReturnValue(true);
     const { onClearRecents } = renderWelcome();
-    await userEvent.setup().click(screen.getByRole('button', { name: 'Clear' }));
+    await userEvent.setup().click(screen.getByRole('button', { name: 'Clear recent projects list' }));
     expect(onClearRecents).toHaveBeenCalledTimes(1);
   });
 
   it('does not call onClearRecents when the user cancels the confirm', async () => {
     vi.spyOn(window, 'confirm').mockReturnValue(false);
     const { onClearRecents } = renderWelcome();
-    await userEvent.setup().click(screen.getByRole('button', { name: 'Clear' }));
+    await userEvent.setup().click(screen.getByRole('button', { name: 'Clear recent projects list' }));
     expect(onClearRecents).not.toHaveBeenCalled();
   });
 });
