@@ -48,6 +48,7 @@ import * as fs from "fs";
 
 import { createWindow, wireAppEvents } from "./app";
 import { getMcpServerHooks } from "./index";
+import { CellRpcClient } from "./mcp/cell-rpc";
 import { PdvMcpServer } from "./mcp/mcp-server";
 import { CommRouter } from "./comm-router";
 import { QueryRouter } from "./query-router";
@@ -72,6 +73,7 @@ let mainWindow: BrowserWindow | null = null;
 let openingWindow: Promise<void> | null = null;
 let configStore: ConfigStore | null = null;
 let mcpServer: PdvMcpServer | null = null;
+let cellRpc: CellRpcClient | null = null;
 
 const commRouter = new CommRouter();
 const queryRouter = new QueryRouter();
@@ -114,6 +116,10 @@ async function openMainWindow(): Promise<void> {
     if (!mcpServer) {
       const hooks = getMcpServerHooks();
       if (hooks) {
+        if (!cellRpc) {
+          cellRpc = new CellRpcClient(() => mainWindow);
+          cellRpc.start();
+        }
         mcpServer = new PdvMcpServer({
           kernelManager: km,
           commRouter,
@@ -122,6 +128,8 @@ async function openMainWindow(): Promise<void> {
           configStore: cfg,
           hooks,
           appVersion: app.getVersion(),
+          cellRpc,
+          getRendererWindow: () => mainWindow,
         });
         try {
           await mcpServer.start();
@@ -148,7 +156,7 @@ const hasSingleInstanceLock = app.requestSingleInstanceLock();
 if (!hasSingleInstanceLock) {
   app.quit();
 } else {
-  wireAppEvents(() => kernelManager, () => mcpServer);
+  wireAppEvents(() => kernelManager, () => mcpServer, () => cellRpc);
   app.on("second-instance", () => {
     if (mainWindow && !mainWindow.isDestroyed()) {
       if (mainWindow.isMinimized()) {

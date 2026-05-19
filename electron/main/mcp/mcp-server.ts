@@ -38,6 +38,7 @@ import { IPC, type McpStatus } from "../ipc";
 import type { KernelManager } from "../kernel-manager";
 import type { ProjectManager } from "../project-manager";
 import type { QueryRouter } from "../query-router";
+import type { CellRpcClient } from "./cell-rpc";
 import { generateBearerToken, requestHasValidToken } from "./mcp-auth";
 import type { McpServerHooks, McpToolContext } from "./mcp-context";
 import { MCP_INSTRUCTIONS } from "./mcp-instructions";
@@ -65,6 +66,10 @@ export interface PdvMcpServerDeps {
   hooks: McpServerHooks;
   /** App version string (`app.getVersion()`). */
   appVersion: string;
+  /** Renderer cell-state RPC client (ARCHITECTURE.md §15.8). */
+  cellRpc: CellRpcClient;
+  /** Accessor for the renderer window agent runs stream output to. */
+  getRendererWindow: () => import("electron").BrowserWindow | null;
 }
 
 /** One connected MCP client session. */
@@ -105,6 +110,8 @@ export class PdvMcpServer {
       configStore: deps.configStore,
       hooks: deps.hooks,
       appVersion: deps.appVersion,
+      cellRpc: deps.cellRpc,
+      getRendererWindow: deps.getRendererWindow,
       getSessionGeneration: (sessionId) =>
         sessionId ? this.sessions.get(sessionId)?.generation : undefined,
     };

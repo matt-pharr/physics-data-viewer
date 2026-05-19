@@ -53,6 +53,8 @@ const api: PDVApi = {
     validate: (executablePath, language) =>
       ipcRenderer.invoke(IPC.kernels.validate, executablePath, language),
     onOutput: (callback) => onPush(IPC.push.executeOutput, callback),
+    onExecuteBegin: (callback) => onPush(IPC.push.executeBegin, callback),
+    onExecuteFinish: (callback) => onPush(IPC.push.executeFinish, callback),
     onKernelCrashed: (callback) => onPush(IPC.push.kernelCrashed, callback),
     onReconnected: (callback) => onPush(IPC.push.kernelReconnected, callback),
     onMemory: (callback) => onPush(IPC.push.kernelMemory, callback),
@@ -173,6 +175,11 @@ const api: PDVApi = {
       const offEnd = onPush<void>(IPC.push.autosaveEnded, () => cb(false));
       return () => { offStart(); offEnd(); };
     },
+  },
+  cells: {
+    onRequest: (cb) => onPush(IPC.push.cellsRequest, cb),
+    onWrite: (cb) => onPush(IPC.push.cellWrite, cb),
+    respond: (response) => ipcRenderer.invoke(IPC.cells.respond, response),
   },
   about: {
     getVersion: () => ipcRenderer.invoke(IPC.about.getVersion),

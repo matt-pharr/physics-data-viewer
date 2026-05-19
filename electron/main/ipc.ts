@@ -201,6 +201,15 @@ export const IPC = {
     load: "codeCells:load",
     save: "codeCells:save",
   },
+  /**
+   * Code-cell round-trip channels used by the MCP cell tools (ARCHITECTURE.md
+   * §15.8). Cells live only in renderer React state, so the main process
+   * asks the renderer to report on (or accept writes to) its live cell tabs.
+   */
+  cells: {
+    /** Renderer's reply for a {@link IPCPushChannels.cellsRequest} push. */
+    respond: "cells:respond",
+  },
   /** Main → renderer push channels forwarded from CommRouter push messages. */
   push: {
     treeChanged: "pdv.tree.changed",
@@ -248,6 +257,31 @@ export const IPC = {
      */
     autosaveStarted: "pdv.autosave.started",
     autosaveEnded: "pdv.autosave.ended",
+    /**
+     * Main → renderer. Request the renderer to report on its live code-cell
+     * state (list / read). Used by the MCP `cell_list` / `cell_read` tools.
+     * The renderer replies on {@link IPCChannels.cells.respond}.
+     */
+    cellsRequest: "pdv.cells.request",
+    /**
+     * Main → renderer, one-way. Apply an update to the renderer's code-cell
+     * tabs. Used by the MCP `cell_write` tool.
+     */
+    cellWrite: "pdv.cells.write",
+    /**
+     * Main → renderer. Fired immediately before a main-initiated kernel
+     * execution starts (e.g. an MCP agent tool run). Lets the renderer seed
+     * a Console log entry so subsequent `executeOutput` chunks have a row
+     * to attach to. The renderer's own `kernels.execute` invocations seed
+     * their log entry locally and do not emit this push.
+     */
+    executeBegin: "pdv.execute.begin",
+    /**
+     * Main → renderer. Companion to {@link executeBegin} — fired after the
+     * run resolves so the renderer can finalize the seeded log entry with
+     * duration / error info that does not arrive via streaming chunks.
+     */
+    executeFinish: "pdv.execute.finish",
   },
   /** App-level lifecycle channels (close confirmation, etc.). */
   app: {
@@ -1417,6 +1451,103 @@ export interface McpStatus {
   generation: number;
 }
 
+/**
+ * Push payload for {@link IPCPushChannels.cellsRequest} — a main → renderer
+ * RPC for read-side access to renderer-owned code-cell state.
+ * The renderer answers on {@link IPCChannels.cells.respond} keyed by `requestId`.
+ */
+export interface CellsRequestPush {
+  /** Correlates this request with its response. */
+  requestId: string;
+  /** Which renderer operation to perform. */
+  op: "list" | "read";
+  /**
+   * Required for `op === "read"`. The id of the cell tab whose code is wanted.
+   */
+  tabId?: number;
+}
+
+/** One tab entry returned by `cell_list`. */
+export interface CellListEntry {
+  id: number;
+  name?: string;
+  /** Number of characters in the cell's source (cheap size hint). */
+  length: number;
+}
+
+/** Result body for `op === "list"`. */
+export interface CellListResult {
+  tabs: CellListEntry[];
+  activeTabId: number | null;
+}
+
+/** Result body for `op === "read"`. */
+export interface CellReadResult {
+  id: number;
+  name?: string;
+  code: string;
+}
+
+/** Renderer's reply to a {@link CellsRequestPush}, sent via `cells.respond`. */
+export interface CellsResponse {
+  /** Matches the request's `requestId`. */
+  requestId: string;
+  /** Whether the renderer successfully fulfilled the op. */
+  ok: boolean;
+  /** Operation-specific result body (absent on error). */
+  result?: CellListResult | CellReadResult;
+  /** Human-readable error message when `ok === false`. */
+  error?: string;
+}
+
+/**
+ * Push payload for {@link IPCPushChannels.cellWrite} — one-way main → renderer
+ * update used by the MCP `cell_write` tool. The renderer applies it directly
+ * to its tab state.
+ */
+/**
+ * Push payload for {@link IPCPushChannels.executeBegin}: a main-initiated run
+ * is about to start. The renderer seeds a Console log entry keyed by
+ * `executionId` so streamed `executeOutput` chunks have a row to attach to.
+ */
+export interface ExecuteBeginPayload {
+  /** Correlates with the chunks pushed on `executeOutput`. */
+  executionId: string;
+  /** Source code being executed (so the log entry can render it). */
+  code: string;
+  /** Origin metadata (kind, agentTool, scriptPath, etc.). */
+  origin: import("./kernel-manager").KernelExecutionOrigin;
+  /** Wall-clock start time (ms since epoch). */
+  timestamp: number;
+}
+
+/**
+ * Push payload for {@link IPCPushChannels.executeFinish}: a main-initiated run
+ * has resolved. Carries the final duration and any error so the renderer can
+ * finalize the seeded log entry.
+ */
+export interface ExecuteFinishPayload {
+  executionId: string;
+  /** Duration in milliseconds. */
+  duration: number;
+  /** Error string when the run failed. */
+  error?: string;
+  /** Structured error details, when available. */
+  errorDetails?: import("./kernel-manager").KernelExecutionError;
+}
+
+export interface CellWritePush {
+  /**
+   * Existing tab id to update. When omitted (or when no tab has this id), a
+   * new tab is appended; the new tab's id is allocated by the renderer.
+   */
+  tabId?: number;
+  /** New source code for the cell. */
+  code: string;
+  /** Optional tab display name. */
+  name?: string;
+}
+
 export interface PDVApi {
   /** Kernel lifecycle and execution methods. */
   kernels: {
@@ -1509,6 +1640,26 @@ export interface PDVApi {
      * @returns Unsubscribe function.
      */
     onOutput(callback: (chunk: ExecuteOutputChunk) => void): () => void;
+    /**
+     * Subscribe to "execution starting" pushes from the main process. Fires
+     * for main-initiated runs (e.g. MCP agent tools) immediately before the
+     * first output chunk; the renderer should seed a Console log entry keyed
+     * by `executionId`. The renderer's own `kernels.execute` calls do not
+     * emit this push — they seed their log entry locally.
+     *
+     * @param callback - Receives the begin payload.
+     * @returns Unsubscribe function.
+     */
+    onExecuteBegin(callback: (payload: ExecuteBeginPayload) => void): () => void;
+    /**
+     * Subscribe to "execution finished" pushes from the main process.
+     * Companion to {@link onExecuteBegin}; carries duration + error info
+     * that does not arrive via streaming chunks.
+     *
+     * @param callback - Receives the finish payload.
+     * @returns Unsubscribe function.
+     */
+    onExecuteFinish(callback: (payload: ExecuteFinishPayload) => void): () => void;
     /**
      * Subscribe to kernel crash push notifications. Fires only when the
      * kernel subprocess exits unexpectedly.
@@ -2127,6 +2278,37 @@ export interface PDVApi {
      * @returns Unsubscribe function.
      */
     onInFlightChange(callback: (inFlight: boolean) => void): () => void;
+  };
+
+  /**
+   * Code-cell round-trip used by the MCP cell tools (ARCHITECTURE.md §15.8).
+   * Cells live only in renderer state, so the main process pushes a request
+   * and the renderer replies; for writes, the main process pushes one-way
+   * and the renderer applies the update.
+   */
+  cells: {
+    /**
+     * Subscribe to cell read requests pushed from the main process. The
+     * renderer should answer by invoking {@link respond} with the matching
+     * `requestId`.
+     *
+     * @param callback - Receives the request payload.
+     * @returns Unsubscribe function.
+     */
+    onRequest(callback: (req: CellsRequestPush) => void): () => void;
+    /**
+     * Subscribe to one-way cell-write pushes from the main process.
+     *
+     * @param callback - Applies the write to the renderer's cell tabs.
+     * @returns Unsubscribe function.
+     */
+    onWrite(callback: (write: CellWritePush) => void): () => void;
+    /**
+     * Reply to a previously-received {@link CellsRequestPush}.
+     *
+     * @param response - The response, carrying the request's `requestId`.
+     */
+    respond(response: CellsResponse): Promise<void>;
   };
 
   /** App info accessors. */

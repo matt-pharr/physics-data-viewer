@@ -21,8 +21,14 @@ import type { QueryRouter } from "./query-router";
 import type { ConfigStore, PDVConfig } from "./config";
 import { IPC, type HandlerInvokeResult, type NamelistReadResult, type NamelistWriteResult, type NamespaceInspectResult, type NamespaceInspectTarget, type NamespaceInspectorNode, type NamespaceQueryOptions, type NamespaceVariable, type ScriptParameter, type ScriptRunRequest, type ScriptRunResult, type TreeAddFileResult, type TreeCreateGuiResult, type TreeCreateLibResult, type TreeCreateNodeResult, type TreeCreateNoteResult, type TreeCreateScriptResult, type TreeDuplicateResult, type TreeMoveResult, type TreeRenameResult } from "./ipc";
 import type { KernelManager } from "./kernel-manager";
+import { executeAndTranscribe, TranscriptWriter } from "./mcp/transcript";
 import { PDVMessageType, generateNodeUuid, resolveNodeDir, resolveNodePath, type PDVFileRegisterPayload } from "./pdv-protocol";
 import type { ProjectManager } from "./project-manager";
+import {
+  allocateAndRegisterNote,
+  allocateAndRegisterScript,
+  analyseModuleTarget,
+} from "./tree-create";
 
 interface RegisterTreeNamespaceScriptIpcHandlersOptions {
   kernelManager: KernelManager;
@@ -83,19 +89,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
  *   Empty when the target equals the module root.
  * Returns ``null`` when ``targetPath`` is not inside any known module.
  */
-function analyseModuleTarget(
-  targetPath: string,
-  knownAliases: Set<string>,
-): { moduleAlias: string; sourceRelDir: string } | null {
-  const segments = targetPath.split(".").filter(Boolean);
-  if (segments.length === 0) return null;
-  const [alias, ...rest] = segments;
-  if (!knownAliases.has(alias)) return null;
-  return {
-    moduleAlias: alias,
-    sourceRelDir: rest.join("/"),
-  };
-}
+// `analyseModuleTarget` lives in `./tree-create` — imported above.
 
 function toNamespaceVariable(
   name: string,
@@ -261,50 +255,24 @@ export function registerTreeNamespaceScriptIpcHandlers(
       _event,
       kernelId: string,
       targetPath: string,
-      scriptName: string
-    ): Promise<TreeCreateScriptResult> => {
-      const kernel = kernelManager.getKernel(kernelId);
-      if (!kernel) {
-        throw new Error(`Kernel not found: ${kernelId}`);
-      }
-      const language = kernel.language;
-      let workingDir = kernelWorkingDirs.get(kernelId);
-      if (!workingDir) {
-        workingDir = await projectManager.createWorkingDir(readConfig(configStore).workingDirBase);
-        kernelWorkingDirs.set(kernelId, workingDir);
-      }
-      const safeName = sanitizeScriptName(scriptName, language);
-      const scriptNodeName = path.parse(safeName).name;
-
-      const knownAliases = await getKnownModuleAliases();
-      const moduleInfo = analyseModuleTarget(targetPath, knownAliases);
-
-      const nodeUuid = generateNodeUuid();
-      const scriptPath = resolveNodePath(workingDir, nodeUuid, safeName);
-      await fs.mkdir(resolveNodeDir(workingDir, nodeUuid), { recursive: true });
-      await ensureScriptFile(scriptPath, language);
-
-      let sourceRelPath: string | undefined;
-      let moduleId: string | undefined;
-      if (moduleInfo) {
-        sourceRelPath = moduleInfo.sourceRelDir
-          ? `${moduleInfo.sourceRelDir}/${safeName}`
-          : safeName;
-        moduleId = moduleInfo.moduleAlias;
-      }
-
-      const treePath = targetPath ? `${targetPath}.${scriptNodeName}` : scriptNodeName;
-      await commRouter.request(PDVMessageType.SCRIPT_REGISTER, {
-        parent_path: targetPath,
-        name: scriptNodeName,
-        uuid: nodeUuid,
-        filename: safeName,
-        language,
-        module_id: moduleId,
-        source_rel_path: sourceRelPath,
-      });
-      return { success: true, scriptPath, treePath };
-    }
+      scriptName: string,
+    ): Promise<TreeCreateScriptResult> =>
+      allocateAndRegisterScript(
+        {
+          kernelManager,
+          commRouter,
+          projectManager,
+          configStore,
+          kernelWorkingDirs,
+          readConfig,
+          getKnownModuleAliases,
+          sanitizeScriptName,
+          ensureScriptFile,
+        },
+        kernelId,
+        targetPath,
+        scriptName,
+      ),
   );
 
   ipcMain.handle(
@@ -313,38 +281,21 @@ export function registerTreeNamespaceScriptIpcHandlers(
       _event,
       kernelId: string,
       targetPath: string,
-      noteName: string
-    ): Promise<TreeCreateNoteResult> => {
-      if (!kernelManager.getKernel(kernelId)) {
-        throw new Error(`Kernel not found: ${kernelId}`);
-      }
-      let workingDir = kernelWorkingDirs.get(kernelId);
-      if (!workingDir) {
-        workingDir = await projectManager.createWorkingDir(readConfig(configStore).workingDirBase);
-        kernelWorkingDirs.set(kernelId, workingDir);
-      }
-      const safeName = noteName.trim().replace(/\s+/g, "_").replace(/[^a-zA-Z0-9_-]/g, "");
-      const nodeUuid = generateNodeUuid();
-      const noteFilename = safeName + ".md";
-      const notePath = resolveNodePath(workingDir, nodeUuid, noteFilename);
-      await fs.mkdir(resolveNodeDir(workingDir, nodeUuid), { recursive: true });
-
-      // Create the .md file if it doesn't exist
-      try {
-        await fs.access(notePath);
-      } catch {
-        await fs.writeFile(notePath, "", "utf-8");
-      }
-
-      const treePath = targetPath ? `${targetPath}.${safeName}` : safeName;
-      await commRouter.request(PDVMessageType.NOTE_REGISTER, {
-        parent_path: targetPath,
-        name: safeName,
-        uuid: nodeUuid,
-        filename: noteFilename,
-      });
-      return { success: true, notePath, treePath };
-    }
+      noteName: string,
+    ): Promise<TreeCreateNoteResult> =>
+      allocateAndRegisterNote(
+        {
+          kernelManager,
+          commRouter,
+          projectManager,
+          configStore,
+          kernelWorkingDirs,
+          readConfig,
+        },
+        kernelId,
+        targetPath,
+        noteName,
+      ),
   );
 
   ipcMain.handle(
@@ -617,7 +568,14 @@ export function registerTreeNamespaceScriptIpcHandlers(
         : `pdv_tree[${JSON.stringify(treePath)}].run()`;
     }
 
-    const result = await kernelManager.execute(kernelId, { code, executionId, origin });
+    const workingDir = kernelWorkingDirs.get(kernelId);
+    const transcript = workingDir ? new TranscriptWriter(workingDir) : null;
+    const result = await executeAndTranscribe(
+      kernelManager.execute.bind(kernelManager),
+      transcript,
+      kernelId,
+      { code, executionId, origin },
+    );
     return { code, executionId, origin, result };
   });
 

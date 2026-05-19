@@ -21,6 +21,7 @@ import { EnvironmentDetector } from "./environment-detector";
 import { IPC } from "./ipc";
 import { KernelManager, type KernelInfo } from "./kernel-manager";
 import { initializeKernelSession } from "./kernel-session";
+import { executeAndTranscribe, TranscriptWriter } from "./mcp/transcript";
 import type { ModuleManager } from "./module-manager";
 import { setupProjectModuleNamespaces } from "./module-runtime";
 import { copyFilesForLoad } from "./project-file-sync";
@@ -236,10 +237,15 @@ export function registerKernelIpcHandlers(
   });
 
   ipcMain.handle(IPC.kernels.execute, async (event, kernelId, request) => {
-    return kernelManager.execute(
-      kernelId as string,
+    const id = kernelId as string;
+    const workingDir = kernelWorkingDirs.get(id);
+    const transcript = workingDir ? new TranscriptWriter(workingDir) : null;
+    return executeAndTranscribe(
+      kernelManager.execute.bind(kernelManager),
+      transcript,
+      id,
       request as Parameters<KernelManager["execute"]>[1],
-      (chunk) => event.sender.send(IPC.push.executeOutput, chunk)
+      (chunk) => event.sender.send(IPC.push.executeOutput, chunk),
     );
   });
 

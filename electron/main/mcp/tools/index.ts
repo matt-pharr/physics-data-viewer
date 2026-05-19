@@ -12,8 +12,10 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 
 import type { McpToolContext } from "../mcp-context";
+import { registerExecutionTools } from "./execution";
 import { registerIntrospectionTools } from "./introspection";
 import { registerTranslationTools } from "./translation";
+import { registerTreeMutateTools } from "./tree-mutate";
 import { registerTreeReadTools } from "./tree-read";
 
 /**
@@ -26,5 +28,7 @@ import { registerTreeReadTools } from "./tree-read";
 export function registerAllTools(server: McpServer, ctx: McpToolContext): void {
   registerTranslationTools(server, ctx);
   registerTreeReadTools(server, ctx);
+  registerTreeMutateTools(server, ctx);
+  registerExecutionTools(server, ctx);
   registerIntrospectionTools(server, ctx);
 }

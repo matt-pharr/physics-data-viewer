@@ -66,13 +66,19 @@ export interface KernelInfo {
 /** Input to KernelManager.execute(). */
 export interface KernelExecutionOrigin {
   /** High-level execution source category. */
-  kind: "code-cell" | "tree-script" | "unknown";
+  kind: "code-cell" | "tree-script" | "agent" | "unknown";
   /** Human-readable source label (for example tab name or script path). */
   label?: string;
   /** Optional code-cell tab id when `kind === "code-cell"`. */
   tabId?: number;
   /** Optional script path when `kind === "tree-script"`. */
   scriptPath?: string;
+  /**
+   * Optional MCP tool name when `kind === "agent"` (e.g. `"pdv_run"`,
+   * `"script_run"`, `"cell_run"`). Used by the transcript writer and
+   * the Console's agent-styled labels (ARCHITECTURE.md §15.7, §15.9).
+   */
+  agentTool?: string;
 }
 
 /** Structured execution error details derived from iopub `error` payloads. */

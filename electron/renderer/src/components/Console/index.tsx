@@ -162,6 +162,12 @@ function formatSourceLabel(source: LogEntry['origin']): string | undefined {
   if (source.kind === 'tree-script') {
     return source.label ? `Script: ${source.label}` : 'Script';
   }
+  if (source.kind === 'agent') {
+    const tool = source.agentTool;
+    if (tool && source.label) return `Agent · ${tool}: ${source.label}`;
+    if (tool) return `Agent · ${tool}`;
+    return source.label ? `Agent: ${source.label}` : 'Agent';
+  }
   return source.label ? `Execution: ${source.label}` : 'Execution';
 }
 

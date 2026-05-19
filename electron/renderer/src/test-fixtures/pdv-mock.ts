@@ -50,6 +50,8 @@ function buildBase() {
       inspect: stub<PDVApi["kernels"]["inspect"]>(async () => ({ found: false })),
       validate: stub<PDVApi["kernels"]["validate"]>(async () => ({ valid: true })),
       onOutput: subStub<PDVApi["kernels"]["onOutput"]>(),
+      onExecuteBegin: subStub<PDVApi["kernels"]["onExecuteBegin"]>(),
+      onExecuteFinish: subStub<PDVApi["kernels"]["onExecuteFinish"]>(),
       onKernelCrashed: subStub<PDVApi["kernels"]["onKernelCrashed"]>(),
       onReconnected: subStub<PDVApi["kernels"]["onReconnected"]>(),
       onMemory: subStub<PDVApi["kernels"]["onMemory"]>(),
@@ -150,6 +152,11 @@ function buildBase() {
       deleteOrphan: stub<PDVApi["autosave"]["deleteOrphan"]>(async () => undefined),
       onTrigger: subStub<PDVApi["autosave"]["onTrigger"]>(),
       onInFlightChange: subStub<PDVApi["autosave"]["onInFlightChange"]>(),
+    },
+    cells: {
+      onRequest: subStub<PDVApi["cells"]["onRequest"]>(),
+      onWrite: subStub<PDVApi["cells"]["onWrite"]>(),
+      respond: stub<PDVApi["cells"]["respond"]>(async () => undefined),
     },
     about: {
       getVersion: stub<PDVApi["about"]["getVersion"]>(async () => "0.0.0-test"),

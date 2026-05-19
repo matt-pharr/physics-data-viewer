@@ -31,7 +31,10 @@ export function registerIntrospectionTools(server: McpServer, ctx: McpToolContex
       title: "List kernel namespace",
       annotations: { readOnlyHint: true },
       description:
-        "List the variables currently defined in the PDV kernel namespace.",
+        "List user-defined variables in the PDV kernel namespace. PDV's " +
+        "always-injected names (`pdv_tree`, `pdv`) are filtered out — they " +
+        "are always present, so listing them is noise; inspect them with " +
+        "`tree_list` / `tree_get_data` and `pdv_help(\"pdv\")` instead.",
       inputSchema: {
         include_private: z
           .boolean()
