@@ -123,13 +123,13 @@ export function useProjectWorkflow(options: UseProjectWorkflowOptions) {
       }, options?.projectName);
 
       // If backing files are missing the save was blocked to protect the
-      // existing project directory. Warn the user and offer Save As.
+      // existing project directory.
       if (result.missingFiles?.length) {
         setLogs((prev) => [...prev, {
           id: `save-blocked-${Date.now()}`,
           timestamp: Date.now(),
           code: '',
-          stderr: `Save blocked: ${result.missingFiles!.length} file-backed node(s) have missing backing files in the working directory:\n  ${result.missingFiles!.join('\n  ')}\nThe existing project save was not modified. Use Save As to save to a new location.`,
+          stderr: `Save blocked: ${result.missingFiles!.length} file-backed node(s) have missing backing files. These nodes must be removed from the tree or their files restored before saving:\n  ${result.missingFiles!.join('\n  ')}\nTo remove a node, right-click it in the Tree and choose Delete. If you'd rather discard in-memory changes and not lose data, reopen the project from disk (File > Open Project) to restore the last saved state.`,
         }]);
         return false;
       }
