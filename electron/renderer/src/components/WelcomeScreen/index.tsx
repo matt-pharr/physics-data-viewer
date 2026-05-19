@@ -42,6 +42,8 @@ interface WelcomeScreenProps {
   onRecoverSession: (orphanDir: string) => void;
   /** Called when the user clicks "Discard" on an orphan autosave. */
   onDiscardSession: (orphanDir: string) => void;
+  /** Called when the user clicks "Clear" beneath the recent-projects list. */
+  onClearRecents: () => void;
 }
 
 /** Short language badge for the recent projects list. */
@@ -85,12 +87,19 @@ export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({
   onOpenRecent,
   onRecoverSession,
   onDiscardSession,
+  onClearRecents,
 }) => {
   const handleDiscard = (dir: string): void => {
     if (window.confirm(
       "Permanently discard this unsaved session? This cannot be undone.",
     )) {
       onDiscardSession(dir);
+    }
+  };
+
+  const handleClearRecents = (): void => {
+    if (window.confirm("Clear the list of recent projects? Your project files are not affected.")) {
+      onClearRecents();
     }
   };
 
@@ -187,7 +196,16 @@ export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({
 
         {recentProjects.length > 0 && (
           <div className="welcome-recent">
-            <h2 className="welcome-recent-heading">Recent Projects</h2>
+            <div className="welcome-recent-header">
+              <h2 className="welcome-recent-heading">Recent Projects</h2>
+              <button
+                type="button"
+                className="welcome-recent-clear"
+                onClick={handleClearRecents}
+              >
+                Clear
+              </button>
+            </div>
             <ul className="welcome-recent-list">
               {recentProjects.map((entry) => (
                 <li key={entry.path}>
