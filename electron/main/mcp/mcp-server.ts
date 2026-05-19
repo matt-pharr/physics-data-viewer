@@ -43,6 +43,7 @@ import { generateBearerToken, requestHasValidToken } from "./mcp-auth";
 import type { McpServerHooks, McpToolContext } from "./mcp-context";
 import { MCP_INSTRUCTIONS } from "./mcp-instructions";
 import { registerAllTools } from "./tools";
+import { hashCellCode } from "./tools/_helpers";
 
 /** Loopback host the MCP server always binds to. */
 const HOST = "127.0.0.1";
@@ -80,6 +81,13 @@ interface McpSession {
   server: McpServer;
   /** Project/kernel generation the session connected at (ARCHITECTURE.md §15.3). */
   generation: number;
+  /**
+   * Per-tab SHA-256 of the cell source this session last observed via
+   * `cell_read` (or last successfully wrote). Drives the `cell_write`
+   * read-before-write guard: a session must read a cell before overwriting
+   * it, and the cell must not have changed in between.
+   */
+  readCells: Map<number, string>;
 }
 
 /**
@@ -114,6 +122,16 @@ export class PdvMcpServer {
       getRendererWindow: deps.getRendererWindow,
       getSessionGeneration: (sessionId) =>
         sessionId ? this.sessions.get(sessionId)?.generation : undefined,
+      recordCellRead: (sessionId, tabId, code) => {
+        if (!sessionId) return;
+        const session = this.sessions.get(sessionId);
+        if (!session) return;
+        session.readCells.set(tabId, hashCellCode(code));
+      },
+      getCellReadHash: (sessionId, tabId) => {
+        if (!sessionId) return undefined;
+        return this.sessions.get(sessionId)?.readCells.get(tabId);
+      },
     };
   }
 
@@ -244,6 +262,7 @@ export class PdvMcpServer {
           transport,
           server: mcpServer,
           generation: this.deps.hooks.getGeneration(),
+          readCells: new Map(),
         });
         this.pushClientStatus();
       },

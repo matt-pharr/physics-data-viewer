@@ -121,4 +121,33 @@ export interface McpToolContext {
    * @returns The connect-time generation, or `undefined`.
    */
   getSessionGeneration(sessionId: string | undefined): number | undefined;
+  /**
+   * Record that the calling MCP session has just read a code-cell tab, along
+   * with a hash of the source that was returned. Used by the `cell_write`
+   * read-before-write guard to detect concurrent edits by the user or
+   * another agent.
+   *
+   * @param sessionId - The MCP session id (or `undefined` for an unknown
+   *   session — recorded but never matched).
+   * @param tabId - The cell tab id.
+   * @param code - The cell source the session just observed.
+   */
+  recordCellRead(
+    sessionId: string | undefined,
+    tabId: number,
+    code: string,
+  ): void;
+  /**
+   * Hash of the cell source the given session most recently observed for the
+   * given tab, or `undefined` when the session has not read that tab in this
+   * connection.
+   *
+   * @param sessionId - The MCP session id, or `undefined`.
+   * @param tabId - The cell tab id.
+   * @returns The recorded hash, or `undefined`.
+   */
+  getCellReadHash(
+    sessionId: string | undefined,
+    tabId: number,
+  ): string | undefined;
 }

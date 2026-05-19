@@ -76,6 +76,8 @@ function makeCtx(opts: CtxOpts = {}): McpToolContext {
     cellRpc: {} as McpToolContext["cellRpc"],
     getRendererWindow: () => null,
     getSessionGeneration: () => 0,
+    recordCellRead: () => undefined,
+    getCellReadHash: () => undefined,
   };
 }
 

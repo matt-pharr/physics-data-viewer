@@ -566,8 +566,9 @@ export function registerIpcHandlers(
       // sessions — but the initial null -> id assignment at window startup
       // is not a switch (the agent hasn't seen this kernel yet) and bumping
       // there would surface a misleading "PDV's project or kernel has
-      // changed" error on an eager agent's first call.
-      if (prevId !== null) {
+      // changed" error on an eager agent's first call. Likewise, re-asserting
+      // the same id is not a switch.
+      if (prevId !== null && prevId !== id) {
         bumpGeneration();
       }
       if (id) {
@@ -650,9 +651,11 @@ export function registerIpcHandlers(
     setActiveProjectDir: (dir) => {
       const prevDir = activeProjectDir;
       activeProjectDir = dir;
-      // Only a *change* invalidates connected MCP sessions; the initial
-      // null -> dir assignment at window startup is not a project switch.
-      if (prevDir !== null) {
+      // Only a *change* invalidates connected MCP sessions. The initial
+      // null -> dir assignment at window startup is not a project switch,
+      // and `project:save` re-asserts the same dir on every save — bumping
+      // there would force the agent to reconnect after each save.
+      if (prevDir !== null && prevDir !== dir) {
         bumpGeneration();
       }
     },

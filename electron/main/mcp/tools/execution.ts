@@ -37,6 +37,7 @@ import { PDVMessageType } from "../../pdv-protocol";
 import type { McpToolContext } from "../mcp-context";
 import { executeAndTranscribe, TranscriptWriter } from "../transcript";
 import {
+  assertCellReadFresh,
   assertCurrentGeneration,
   assertMutatingToolsEnabled,
   assertPdvRunEnabled,
@@ -182,6 +183,11 @@ export function registerExecutionTools(server: McpServer, ctx: McpToolContext): 
     async ({ tab_id }, extra) => {
       assertCurrentGeneration(ctx, extra);
       const cell = await ctx.cellRpc.read(tab_id);
+      // Record this read for the cell_write read-before-write guard. We key
+      // on `cell.id` (the renderer's canonical id) rather than the request
+      // arg so an arg of e.g. `-1` mapping to an active tab still arms the
+      // guard for the right tab.
+      ctx.recordCellRead(extra.sessionId, cell.id, cell.code);
       const header =
         `cell id: ${cell.id}` + (cell.name ? `  (${cell.name})` : "");
       return textResult(`${header}\n\n${cell.code}`);
@@ -195,7 +201,10 @@ export function registerExecutionTools(server: McpServer, ctx: McpToolContext): 
       description:
         "Overwrite a cell tab's source, or append a new tab when `tab_id` " +
         "is omitted or matches no existing tab. The renderer updates its " +
-        "live tab state on receipt.",
+        "live tab state on receipt. When `tab_id` is provided, you must " +
+        "call `cell_read` on that tab first, and the cell must not have " +
+        "changed since — this prevents clobbering edits the user or another " +
+        "agent made while you were reasoning.",
       inputSchema: {
         tab_id: z
           .number()
@@ -209,6 +218,16 @@ export function registerExecutionTools(server: McpServer, ctx: McpToolContext): 
     async ({ tab_id, code, name }, extra) => {
       assertCurrentGeneration(ctx, extra);
       assertMutatingToolsEnabled(ctx);
+      if (tab_id !== undefined) {
+        // Read-before-write: fetch the current source and compare it to the
+        // hash the session captured at cell_read time. Throws if the
+        // session never read this tab, or if the cell changed since.
+        const current = await ctx.cellRpc.read(tab_id);
+        assertCellReadFresh(ctx, extra, current.id, current.code);
+        // Promote the write to the new "last seen" state so the session can
+        // immediately follow up with another cell_write without re-reading.
+        ctx.recordCellRead(extra.sessionId, current.id, code);
+      }
       ctx.cellRpc.write({ tabId: tab_id, code, name });
       return textResult(
         tab_id !== undefined

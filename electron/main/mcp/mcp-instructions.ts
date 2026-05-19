@@ -30,4 +30,9 @@ cells) and run through PDV so results integrate into the project Tree. Do not
 run ad-hoc analysis or produce plots outside PDV.
 
 Use the pdv_help tool to introspect the pdv library API and any project symbol.
+
+Code cells: call cell_read before cell_write on an existing tab — the
+read-before-write guard rejects an overwrite when the session hasn't read the
+tab, or when the cell changed since the last read (a user or another agent
+edited it). To create a new tab, call cell_write without tab_id.
 `;
