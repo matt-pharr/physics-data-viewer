@@ -333,7 +333,7 @@ export function createProjectManagerMock(
 // ConfigStore mock
 // ---------------------------------------------------------------------------
 
-export interface ConfigStoreMock<T extends Record<string, unknown>> {
+export interface ConfigStoreMock<T extends object> {
   store: ConfigStore;
   state: T;
   getAll: ReturnType<typeof vi.fn>;
@@ -346,8 +346,12 @@ export interface ConfigStoreMock<T extends Record<string, unknown>> {
  * inspect and mutate directly. The default state is the bare minimum to
  * satisfy `PDVConfig` for current tests; tests requiring richer config can
  * pass an initial state.
+ *
+ * The `T extends object` constraint (rather than `Record<string, unknown>`)
+ * lets callers pass a typed interface like `PDVConfig` directly; the internal
+ * cast handles the unknown-string-key access.
  */
-export function createConfigStoreMock<T extends Record<string, unknown>>(
+export function createConfigStoreMock<T extends object>(
   initial: T,
 ): ConfigStoreMock<T> {
   const state = { ...initial };

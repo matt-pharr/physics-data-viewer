@@ -8,7 +8,7 @@
  */
 
 import * as path from "path";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from "vitest";
 
 const ipcRegistry = vi.hoisted(() => {
   const handlers = new Map<string, (event: unknown, ...args: unknown[]) => unknown>();
@@ -22,13 +22,21 @@ const ipcRegistry = vi.hoisted(() => {
 });
 
 const fsMocks = vi.hoisted(() => ({
-  mkdir: vi.fn(async () => undefined),
-  copyFile: vi.fn(async () => undefined),
-  cp: vi.fn(async () => undefined),
-  readFile: vi.fn(async () => "{}"),
-  writeFile: vi.fn(async () => undefined),
-  rename: vi.fn(async () => undefined),
-  rm: vi.fn(async () => undefined),
+  mkdir: vi.fn(async (_path: string, _options?: { recursive?: boolean }) => undefined),
+  copyFile: vi.fn(async (_src: string, _dest: string) => undefined),
+  cp: vi.fn(
+    async (_src: string, _dest: string, _options?: { recursive?: boolean }) => undefined,
+  ),
+  readFile: vi.fn<(path: string, encoding?: string) => Promise<string>>(
+    async () => "{}",
+  ),
+  writeFile: vi.fn<(path: string, contents: string, encoding?: string) => Promise<void>>(
+    async () => undefined,
+  ),
+  rename: vi.fn(async (_oldPath: string, _newPath: string) => undefined),
+  rm: vi.fn(
+    async (_path: string, _options?: { recursive?: boolean; force?: boolean }) => undefined,
+  ),
 }));
 
 const moduleRuntimeMocks = vi.hoisted(() => ({
@@ -64,6 +72,10 @@ import {
   writeModuleManifestsToSaveDir,
 } from "./ipc-register-project";
 import { ProjectManager } from "./project-manager";
+import type {
+  ProjectManifest,
+  ProjectModuleImport,
+} from "./project-manager";
 import {
   createBrowserWindowMock,
   createCommRouterMock,
@@ -85,15 +97,18 @@ interface Harness {
   projectManager: ReturnType<typeof createProjectManagerMock>;
   moduleManager: ReturnType<typeof createModuleManagerMock>;
   kernelWorkingDirs: Map<string, string>;
-  setActiveProjectDir: ReturnType<typeof vi.fn>;
-  getActiveKernelId: ReturnType<typeof vi.fn>;
-  getPendingModuleImports: ReturnType<typeof vi.fn>;
-  getPendingModuleSettings: ReturnType<typeof vi.fn>;
-  setPendingModuleImports: ReturnType<typeof vi.fn>;
-  setPendingModuleSettings: ReturnType<typeof vi.fn>;
-  refreshProjectModuleHealth: ReturnType<typeof vi.fn>;
-  clearModuleHealthWarnings: ReturnType<typeof vi.fn>;
-  onExplicitSaveCompleted: ReturnType<typeof vi.fn>;
+  // Typed Mocks so each field is structurally assignable to the typed
+  // callback the registration function expects, while still exposing
+  // .mockReturnValueOnce / .mock.calls for test assertions.
+  setActiveProjectDir: Mock<(dir: string | null) => void>;
+  getActiveKernelId: Mock<() => string | null>;
+  getPendingModuleImports: Mock<() => ProjectModuleImport[]>;
+  getPendingModuleSettings: Mock<() => Record<string, Record<string, unknown>>>;
+  setPendingModuleImports: Mock<(imports: ProjectModuleImport[]) => void>;
+  setPendingModuleSettings: Mock<(settings: Record<string, Record<string, unknown>>) => void>;
+  refreshProjectModuleHealth: Mock<(dir: string | null) => Promise<ProjectManifest | null>>;
+  clearModuleHealthWarnings: Mock<() => void>;
+  onExplicitSaveCompleted: Mock<(saveDir: string) => void>;
 }
 
 function setup(): Harness {
@@ -109,17 +124,17 @@ function setup(): Harness {
     projectManager,
     moduleManager,
     kernelWorkingDirs,
-    setActiveProjectDir: vi.fn((dir: string | null) => {
+    setActiveProjectDir: vi.fn<(dir: string | null) => void>((dir) => {
       activeProjectDir = dir;
     }),
-    getActiveKernelId: vi.fn(() => null as string | null),
-    getPendingModuleImports: vi.fn(() => []),
-    getPendingModuleSettings: vi.fn(() => ({})),
-    setPendingModuleImports: vi.fn(),
-    setPendingModuleSettings: vi.fn(),
-    refreshProjectModuleHealth: vi.fn(async () => null),
-    clearModuleHealthWarnings: vi.fn(),
-    onExplicitSaveCompleted: vi.fn(),
+    getActiveKernelId: vi.fn<() => string | null>(() => null),
+    getPendingModuleImports: vi.fn<() => ProjectModuleImport[]>(() => []),
+    getPendingModuleSettings: vi.fn<() => Record<string, Record<string, unknown>>>(() => ({})),
+    setPendingModuleImports: vi.fn<(imports: ProjectModuleImport[]) => void>(),
+    setPendingModuleSettings: vi.fn<(settings: Record<string, Record<string, unknown>>) => void>(),
+    refreshProjectModuleHealth: vi.fn<(dir: string | null) => Promise<ProjectManifest | null>>(async () => null),
+    clearModuleHealthWarnings: vi.fn<() => void>(),
+    onExplicitSaveCompleted: vi.fn<(saveDir: string) => void>(),
   };
   void activeProjectDir;
   registerProjectIpcHandlers({
