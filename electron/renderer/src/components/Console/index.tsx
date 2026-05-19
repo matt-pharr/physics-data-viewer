@@ -84,9 +84,10 @@ const LogEntryView: React.FC<{ log: LogEntry; index: number }> = ({ log, index }
   const sourceText = formatSourceLabel(log.errorDetails?.source ?? log.origin);
   const locationText = formatLocationLabel(log.errorDetails?.location);
   const tracebackText = log.errorDetails?.traceback?.join('\n') ?? '';
+  const isAgent = log.origin?.kind === 'agent';
 
   return (
-    <div className="log-entry">
+    <div className={`log-entry${isAgent ? ' log-entry-agent' : ''}`}>
       <div className="log-entry-meta">
         <span className="log-count">[{index}]</span>
         <span className="log-time">{timestamp}</span>

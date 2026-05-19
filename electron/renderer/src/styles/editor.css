@@ -235,6 +235,17 @@
   background-color: var(--bg-secondary);
 }
 
+/* Both selectors are required: `.log-entry-agent` alone (specificity 0,1,0)
+   is lower than `.log-entry:nth-child(odd)` (0,2,0) above, so odd-positioned
+   agent rows would inherit the striped secondary background without the
+   matching `:nth-child(odd)` companion selector. Don't "simplify" it. */
+.log-entry-agent,
+.log-entry-agent:nth-child(odd) {
+  background-color: var(--agent-bg);
+  border-left: 3px solid var(--agent-border);
+  padding-left: 9px;
+}
+
 .log-entry-meta {
   display: flex;
   align-items: center;

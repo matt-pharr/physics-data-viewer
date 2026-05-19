@@ -119,6 +119,8 @@ const App: React.FC = () => {
   const [kernelMemoryRss, setKernelMemoryRss] = useState<number | null>(null);
   /** Latest auto-update status pushed by the main process. */
   const [updateStatus, setUpdateStatus] = useState<import('../types/pdv').UpdateStatus | null>(null);
+  /** True when at least one MCP agent client is currently connected. */
+  const [mcpClientAttached, setMcpClientAttached] = useState<boolean>(false);
 
   // -- App / config state ---------------------------------------------------
   const [config, setConfig] = useState<Config | null>(null);
@@ -322,6 +324,20 @@ const App: React.FC = () => {
       if (status) setUpdateStatus(status);
     });
     return window.pdv.updater.onUpdateStatus(setUpdateStatus);
+  }, []);
+
+  // Surface MCP client connection state in the status bar. The MCP server
+  // pushes whenever the count of attached client sessions changes; the
+  // initial getStatus() call seeds state so a renderer reload while a
+  // client is already attached doesn't leave the indicator dark until the
+  // next disconnect/reconnect.
+  useEffect(() => {
+    void window.pdv.mcp.getStatus().then((status) => {
+      setMcpClientAttached(status.clientCount > 0);
+    });
+    return window.pdv.mcp.onClientStatus(({ clientCount }) => {
+      setMcpClientAttached(clientCount > 0);
+    });
   }, []);
 
   // Listen for File-menu actions handled at the App level.
@@ -1750,6 +1766,7 @@ const App: React.FC = () => {
           kernelMemoryRss={kernelMemoryRss}
           updateStatus={updateStatus}
           onUpdateClick={() => { setSettingsInitialTab('about'); setShowSettings(true); }}
+          mcpClientAttached={mcpClientAttached}
         />
 
        <ImportModuleDialog

@@ -34,7 +34,7 @@ import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/
 import type { CommRouter } from "../comm-router";
 import { DEFAULT_MCP_PORT } from "../config";
 import type { ConfigStore } from "../config";
-import { IPC, type McpStatus } from "../ipc";
+import { IPC, type McpClientStatusPayload, type McpStatus } from "../ipc";
 import type { KernelManager } from "../kernel-manager";
 import type { ProjectManager } from "../project-manager";
 import type { QueryRouter } from "../query-router";
@@ -187,6 +187,7 @@ export class PdvMcpServer {
       token: running ? this.token : null,
       url: running ? `http://${HOST}:${this.port}/mcp` : null,
       generation: this.deps.hooks.getGeneration(),
+      clientCount: this.sessions.size,
     };
   }
 
@@ -244,16 +245,28 @@ export class PdvMcpServer {
           server: mcpServer,
           generation: this.deps.hooks.getGeneration(),
         });
+        this.pushClientStatus();
       },
     });
     transport.onclose = (): void => {
       const id = transport.sessionId;
-      if (id) {
-        this.sessions.delete(id);
+      if (id && this.sessions.delete(id)) {
+        this.pushClientStatus();
       }
     };
     await mcpServer.connect(transport);
     await transport.handleRequest(req, res);
+  }
+
+  // Push the current client-session count to the renderer. The renderer
+  // uses this to drive the StatusBar's MCP connection indicator dot.
+  private pushClientStatus(): void {
+    const win = this.deps.getRendererWindow();
+    if (!win || win.isDestroyed()) return;
+    const payload: McpClientStatusPayload = {
+      clientCount: this.sessions.size,
+    };
+    win.webContents.send(IPC.push.mcpClientStatus, payload);
   }
 }
 

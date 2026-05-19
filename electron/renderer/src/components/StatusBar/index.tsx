@@ -31,6 +31,8 @@ interface StatusBarProps {
   updateStatus: UpdateStatus | null;
   /** Click handler for the update-available badge — typically opens Settings → About. */
   onUpdateClick: () => void;
+  /** True when at least one MCP agent client is currently connected. */
+  mcpClientAttached: boolean;
 }
 
 /** Format a timestamp as HH:MM:SS in the user's locale. */
@@ -67,6 +69,7 @@ export const StatusBar: React.FC<StatusBarProps> = ({
   kernelMemoryRss,
   updateStatus,
   onUpdateClick,
+  mcpClientAttached,
 }) => {
   const showUpdateBadge =
     updateStatus?.state === 'available' || updateStatus?.state === 'downloaded';
@@ -126,6 +129,16 @@ export const StatusBar: React.FC<StatusBarProps> = ({
         )}
       </div>
       <div className="status-right">
+        {mcpClientAttached && (
+          <span
+            className="status-item"
+            title="AI agent connected via MCP"
+            data-testid="mcp-client-indicator"
+          >
+            <span className="status-dot mcp-attached" />
+            <span>Agent</span>
+          </span>
+        )}
         <span
           className="status-item status-clickable"
           onClick={onRuntimeClick}

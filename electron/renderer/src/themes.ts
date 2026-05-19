@@ -41,6 +41,14 @@ export const CSS_VAR_GROUPS: { label: string; vars: { key: string; label: string
       { key: 'text-on-danger',  label: 'Text on Danger' },
     ],
   },
+  {
+    label: 'AI Agents',
+    vars: [
+      { key: 'agent-bg',         label: 'Agent Log Background' },
+      { key: 'agent-border',     label: 'Agent Log Border' },
+      { key: 'mcp-dot-attached', label: 'MCP Connection Dot' },
+    ],
+  },
 ];
 
 /** Built-in PDV theme entry with mapped Monaco theme id. */
@@ -72,6 +80,9 @@ export const BUILTIN_THEMES: BuiltinTheme[] = [
       'success':      '#4ec9b0',
       'danger':       '#c42b1c',
       'text-on-danger':'#ffffff',
+      'agent-bg':         '#2a2d3a',
+      'agent-border':     '#8a76e3',
+      'mcp-dot-attached': '#8a76e3',
     },
   },
   {
@@ -95,6 +106,9 @@ export const BUILTIN_THEMES: BuiltinTheme[] = [
       'success':      '#16825d',
       'danger':       '#c42b1c',
       'text-on-danger':'#ffffff',
+      'agent-bg':         '#eef0fb',
+      'agent-border':     '#6a5cd1',
+      'mcp-dot-attached': '#6a5cd1',
     },
   },
   {
@@ -118,6 +132,9 @@ export const BUILTIN_THEMES: BuiltinTheme[] = [
       'success':      '#a6e22e',
       'danger':       '#f92672',
       'text-on-danger':'#272822',
+      'agent-bg':         '#2d2a37',
+      'agent-border':     '#ae81ff',
+      'mcp-dot-attached': '#ae81ff',
     },
   },
   {
@@ -141,6 +158,9 @@ export const BUILTIN_THEMES: BuiltinTheme[] = [
       'success':      '#008e00',
       'danger':       '#c42b1c',
       'text-on-danger':'#ffffff',
+      'agent-bg':         '#ecedf6',
+      'agent-border':     '#7e57c2',
+      'mcp-dot-attached': '#7e57c2',
     },
   },
   {
@@ -164,6 +184,9 @@ export const BUILTIN_THEMES: BuiltinTheme[] = [
       'success':      '#32d74b',
       'danger':       '#c42b1c',
       'text-on-danger':'#ffffff',
+      'agent-bg':         '#2a2b34',
+      'agent-border':     '#bf5af2',
+      'mcp-dot-attached': '#bf5af2',
     },
   },
   {
@@ -187,6 +210,9 @@ export const BUILTIN_THEMES: BuiltinTheme[] = [
       'success':      '#4ec9b0',
       'danger':       '#c42b1c',
       'text-on-danger':'#ffffff',
+      'agent-bg':         '#262a3d',
+      'agent-border':     '#9d7df0',
+      'mcp-dot-attached': '#9d7df0',
     },
   },
   {
@@ -210,6 +236,9 @@ export const BUILTIN_THEMES: BuiltinTheme[] = [
       'success':      '#2ea043',
       'danger':       '#c42b1c',
       'text-on-danger':'#ffffff',
+      'agent-bg':         '#f1eefb',
+      'agent-border':     '#6b3fa0',
+      'mcp-dot-attached': '#6b3fa0',
     },
   },
 ];
