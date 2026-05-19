@@ -83,6 +83,10 @@
   background-color: var(--error);
 }
 
+.status-dot.mcp-attached {
+  background-color: var(--mcp-dot-attached);
+}
+
 .plot-toggle {
   display: flex;
   align-items: center;

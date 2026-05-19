@@ -139,6 +139,7 @@ function buildBase() {
         url: null,
         generation: 0,
       })),
+      onClientStatus: subStub<PDVApi["mcp"]["onClientStatus"]>(),
     },
     window: {
       setBackgroundColor: stub<PDVApi["window"]["setBackgroundColor"]>(async () => undefined),

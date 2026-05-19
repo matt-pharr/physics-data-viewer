@@ -158,6 +158,7 @@ const api: PDVApi = {
   },
   mcp: {
     getStatus: () => ipcRenderer.invoke(IPC.mcp.getStatus),
+    onClientStatus: (callback) => onPush(IPC.push.mcpClientStatus, callback),
   },
   window: {
     setBackgroundColor: (color) => ipcRenderer.invoke(IPC.window.setBackgroundColor, color),

@@ -697,6 +697,15 @@ export interface McpStatus {
 }
 
 /**
+ * Push payload for `IPC.push.mcpClientStatus`. Mirrors
+ * `McpClientStatusPayload` in `main/ipc.ts`.
+ */
+export interface McpClientStatusPayload {
+  /** Number of currently-connected MCP client sessions. */
+  clientCount: number;
+}
+
+/**
  * Cell-tool RPC payloads mirroring the types in `main/ipc.ts`. The main
  * process drives reads via `cellsRequest`/`respond` and writes via
  * `cellWrite` (ARCHITECTURE.md §15.8).
@@ -939,6 +948,13 @@ export interface PDVApi {
   mcp: {
     /** Fetch the current MCP server status for the Settings → Agents pane. */
     getStatus(): Promise<McpStatus>;
+    /**
+     * Subscribe to MCP client connection-status push notifications. Fires
+     * whenever the count of connected client sessions changes.
+     */
+    onClientStatus(
+      callback: (status: McpClientStatusPayload) => void,
+    ): () => void;
   };
   window: {
     /** Sync the BrowserWindow's native background to the active theme so

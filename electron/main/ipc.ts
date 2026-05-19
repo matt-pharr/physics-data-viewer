@@ -282,6 +282,12 @@ export const IPC = {
      * duration / error info that does not arrive via streaming chunks.
      */
     executeFinish: "pdv.execute.finish",
+    /**
+     * Main → renderer. Pushed by the MCP server when a client connects
+     * (transport initialize) or disconnects (transport close). The renderer
+     * uses this to drive the StatusBar's MCP connection indicator dot.
+     */
+    mcpClientStatus: "pdv.mcp.clientStatus",
   },
   /** App-level lifecycle channels (close confirmation, etc.). */
   app: {
@@ -1452,6 +1458,16 @@ export interface McpStatus {
 }
 
 /**
+ * Push payload for {@link IPCPushChannels.mcpClientStatus}: the count of
+ * connected MCP client sessions changed (an agent connected or disconnected).
+ * The renderer treats `attached === true` whenever `clientCount > 0`.
+ */
+export interface McpClientStatusPayload {
+  /** Number of currently-connected MCP client sessions. */
+  clientCount: number;
+}
+
+/**
  * Push payload for {@link IPCPushChannels.cellsRequest} — a main → renderer
  * RPC for read-side access to renderer-owned code-cell state.
  * The renderer answers on {@link IPCChannels.cells.respond} keyed by `requestId`.
@@ -2196,6 +2212,18 @@ export interface PDVApi {
      * @returns The current {@link McpStatus}.
      */
     getStatus(): Promise<McpStatus>;
+    /**
+     * Subscribe to MCP client connection-status push notifications.
+     *
+     * Fires whenever the count of connected client sessions changes (an
+     * agent connects via `initialize`, or its transport closes).
+     *
+     * @param callback - Invoked with the latest {@link McpClientStatusPayload}.
+     * @returns Unsubscribe function.
+     */
+    onClientStatus(
+      callback: (status: McpClientStatusPayload) => void,
+    ): () => void;
   };
 
   /** BrowserWindow chrome controls. */

@@ -235,6 +235,13 @@
   background-color: var(--bg-secondary);
 }
 
+.log-entry-agent,
+.log-entry-agent:nth-child(odd) {
+  background-color: var(--agent-bg);
+  border-left: 3px solid var(--agent-border);
+  padding-left: 9px;
+}
+
 .log-entry-meta {
   display: flex;
   align-items: center;
