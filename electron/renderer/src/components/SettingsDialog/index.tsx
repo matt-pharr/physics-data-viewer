@@ -6,7 +6,7 @@
  */
 
 import React, { useEffect, useLayoutEffect, useMemo, useState } from 'react';
-import type { Config, UpdateStatus } from '../../types';
+import type { Config, TerminalPreset, UpdateStatus } from '../../types';
 import { SHORTCUT_LABELS, DEFAULT_SHORTCUTS } from '../../shortcuts';
 import type { Shortcuts } from '../../shortcuts';
 import { EnvironmentSelector } from '../EnvironmentSelector';
@@ -19,6 +19,9 @@ import type { Theme } from '../../types';
 import { loader } from '@monaco-editor/react';
 import {
   IS_MAC,
+  TERMINAL_PRESET_LABELS,
+  defaultTerminalPresetForPlatform,
+  getTerminalPresetsForPlatform,
   normalizeShortcut,
 } from './utils';
 import { ShortcutCapture } from './ShortcutCapture';
@@ -30,6 +33,18 @@ type SettingsTab = 'general' | 'shortcuts' | 'appearance' | 'agents' | 'runtime'
 
 const DEFAULT_FILE_MANAGER = IS_MAC ? 'open {}' : 'xdg-open {}';
 const DEFAULT_VSCODE_PAIR = THEME_PAIRS.find((pair) => pair.name === 'VSCode');
+
+/**
+ * Platform identifier reported by the main process via the preload bridge.
+ * `process.platform` is a constant for the life of the session, so we read it
+ * synchronously rather than routing through an async IPC call. Falls back to
+ * `'linux'` only if the bridge is missing (e.g. unit-test environment without
+ * a preload step).
+ */
+const PLATFORM: NodeJS.Platform =
+  (typeof window !== 'undefined' && window.pdv?.system?.platform) || 'linux';
+const TERMINAL_PRESET_OPTIONS = getTerminalPresetsForPlatform(PLATFORM);
+const DEFAULT_TERMINAL_PRESET = defaultTerminalPresetForPlatform(PLATFORM);
 
 interface SettingsDialogProps {
   isOpen: boolean;
@@ -79,6 +94,8 @@ export const SettingsDialog: React.FC<SettingsDialogProps> = ({
   const [pythonEditorCmd, setPythonEditorCmd] = useState('code {}');
   const [juliaEditorCmd, setJuliaEditorCmd] = useState('code {}');
   const [fileManagerCmd, setFileManagerCmd] = useState(DEFAULT_FILE_MANAGER);
+  const [terminalPreset, setTerminalPreset] = useState<TerminalPreset>(DEFAULT_TERMINAL_PRESET);
+  const [terminalCustomTemplate, setTerminalCustomTemplate] = useState('');
   const [defaultSaveLocation, setDefaultSaveLocation] = useState('');
   const [workingDirBase, setWorkingDirBase] = useState('');
   const [autoSaveInterval, setAutoSaveInterval] = useState(DEFAULT_AUTOSAVE_INTERVAL_S);
@@ -112,6 +129,13 @@ export const SettingsDialog: React.FC<SettingsDialogProps> = ({
     setPythonEditorCmd(config?.pythonEditorCmd ?? 'code {}');
     setJuliaEditorCmd(config?.juliaEditorCmd ?? 'code {}');
     setFileManagerCmd(config?.fileManagerCmd ?? DEFAULT_FILE_MANAGER);
+    const savedPreset = config?.launchers?.terminal?.preset;
+    setTerminalPreset(
+      savedPreset && TERMINAL_PRESET_OPTIONS.includes(savedPreset)
+        ? savedPreset
+        : DEFAULT_TERMINAL_PRESET,
+    );
+    setTerminalCustomTemplate(config?.launchers?.terminal?.customTemplate ?? '');
     setDefaultSaveLocation(config?.defaultSaveLocation ?? '');
     setWorkingDirBase(config?.workingDirBase ?? '');
     setAutoSaveInterval(config?.autoSaveIntervalSeconds ?? DEFAULT_AUTOSAVE_INTERVAL_S);
@@ -305,10 +329,17 @@ export const SettingsDialog: React.FC<SettingsDialogProps> = ({
       setSelectedThemeName(savedThemeName);
     }
 
+    const trimmedCustom = terminalCustomTemplate.trim();
+    const terminalLauncher =
+      terminalPreset === 'custom'
+        ? { preset: terminalPreset, customTemplate: trimmedCustom || undefined }
+        : { preset: terminalPreset };
+
     await onSave({
       pythonEditorCmd: pythonEditorCmd.trim() || 'code {}',
       juliaEditorCmd:  juliaEditorCmd.trim()  || 'code {}',
       fileManagerCmd:  fileManagerCmd.trim()  || DEFAULT_FILE_MANAGER,
+      launchers: { terminal: terminalLauncher },
       defaultSaveLocation: defaultSaveLocation.trim() || undefined,
       workingDirBase: workingDirBase.trim() || undefined,
       autoSaveIntervalSeconds: Math.max(30, autoSaveInterval),
@@ -397,6 +428,48 @@ export const SettingsDialog: React.FC<SettingsDialogProps> = ({
                   Used to reveal files in the OS file browser (e.g.{' '}
                   <code>open {'{}' }</code> on macOS, <code>xdg-open {'{}' }</code> on Linux).
                 </div>
+
+                <label htmlFor="sg-terminal-preset">Terminal application</label>
+                <select
+                  id="sg-terminal-preset"
+                  value={terminalPreset}
+                  onChange={(e) => setTerminalPreset(e.target.value as TerminalPreset)}
+                >
+                  {TERMINAL_PRESET_OPTIONS.map((preset) => (
+                    <option key={preset} value={preset}>{TERMINAL_PRESET_LABELS[preset]}</option>
+                  ))}
+                </select>
+                <div className="settings-general-desc">
+                  Wraps TUI editors (<code>vim</code>, <code>nvim</code>, <code>nano</code>, …) so they open in a real
+                  terminal window. Leave on the platform default unless you have a preferred terminal.
+                  {terminalPreset === 'none' && (
+                    <div role="alert" className="settings-general-warn">
+                      TUI editors will not work without a terminal wrapper. Use this option only with
+                      GUI editors that PDV's allowlist misclassifies (e.g. <code>nvim-qt</code>).
+                    </div>
+                  )}
+                </div>
+
+                {terminalPreset === 'custom' && (
+                  <>
+                    <label htmlFor="sg-terminal-custom">Custom template</label>
+                    <input
+                      id="sg-terminal-custom"
+                      type="text"
+                      value={terminalCustomTemplate}
+                      onChange={(e) => setTerminalCustomTemplate(e.target.value)}
+                      placeholder="alacritty -e {cmd}"
+                      spellCheck={false}
+                    />
+                    <div className="settings-general-desc">
+                      Use <code>{'{cmd}'}</code> to splice the editor command as separate arguments
+                      (most terminals), or <code>{'{cmdstr}'}</code> for a quoted shell string
+                      (AppleScript wrappers like Terminal.app / iTerm2). Quote paths containing
+                      spaces with <code>{'"…"'}</code>; on Windows always quote paths so backslash
+                      separators are preserved.
+                    </div>
+                  </>
+                )}
               </div>
 
               <h4 className="settings-general-section">Directories</h4>

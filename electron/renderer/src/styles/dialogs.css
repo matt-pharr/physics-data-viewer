@@ -246,6 +246,16 @@
   border-radius: 3px;
 }
 
+.settings-general-warn {
+  margin-top: 6px;
+  padding: 6px 8px;
+  border-left: 3px solid var(--warning);
+  background: var(--bg-tertiary);
+  color: var(--text-primary);
+  border-radius: 3px;
+  font-size: 11px;
+}
+
 .settings-general-section {
   font-size: 13px;
   font-weight: 600;

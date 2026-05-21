@@ -210,7 +210,7 @@ function setupAll(): void {
     ensureScriptFile: async () => undefined,
     ensureLibFile: async () => undefined,
     buildEditorSpawn: () => ({ file: "", args: [] }),
-    resolveEditorSpawn: () => ({ file: "", args: [] }),
+    resolveEditorSpawn: (_file: string, _args: string[], _opts?: unknown) => ({ file: "", args: [] }),
   });
   registerModulesIpcHandlers({
     win: win.win,

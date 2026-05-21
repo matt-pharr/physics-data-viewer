@@ -34,6 +34,12 @@ export type { NodeDescriptor } from '../../../main/ipc';
 /** Periodic kernel-memory snapshot pushed on `IPC.push.kernelMemory`. */
 export type { KernelMemoryPayload } from '../../../main/ipc';
 
+/** Terminal-emulator preset identifier for the launchers config. */
+export type { TerminalPreset } from '../../../main/ipc';
+
+/** Persisted terminal-launcher selection (`launchers.terminal`). */
+export type { TerminalLauncherConfig } from '../../../main/ipc';
+
 /** Runtime kernel descriptor returned by `kernels.start/list/restart`. */
 export interface KernelInfo {
   /** Opaque kernel id used in subsequent API calls. */
@@ -294,6 +300,11 @@ export interface Config {
     mutatingToolsEnabled?: boolean;
     /** Whether agents may run code in the kernel via `pdv_run`. Defaults to off. */
     pdvRunEnabled?: boolean;
+  };
+  /** Configurable external-app launchers (terminal wrap, editor, agent). */
+  launchers?: {
+    /** Terminal emulator used to wrap TUI editors (vim, nvim, …). */
+    terminal?: TerminalLauncherConfig;
   };
   settings?: {
     /** Keyboard shortcut overrides. */
@@ -1039,6 +1050,11 @@ export interface PDVApi {
     getModel(): Promise<AppMenuTopLevel[]>;
     popup(menuId: AppMenuTopLevel["id"], x: number, y: number): Promise<boolean>;
     onAction(callback: (payload: MenuActionPayload) => void): () => void;
+  };
+  /** Constant facts about the host system, injected at preload time. */
+  system: {
+    /** Node.js platform identifier of the main process. */
+    platform: NodeJS.Platform;
   };
   chrome: {
     getInfo(): Promise<WindowChromeInfo>;
