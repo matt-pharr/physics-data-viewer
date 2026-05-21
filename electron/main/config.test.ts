@@ -159,6 +159,25 @@ describe("ConfigStore", () => {
     expect(onDisk.launchers.editor.fileCommand).toBe("nvim {}");
   });
 
+  it("migrates juliaEditorCmd when no pythonEditorCmd is present", () => {
+    const appDataDir = makeTempDir();
+    fs.writeFileSync(
+      path.join(appDataDir, "preferences.json"),
+      JSON.stringify({
+        showPrivateVariables: false,
+        showModuleVariables: false,
+        showCallableVariables: false,
+        juliaEditorCmd: "nvim {}",
+      }),
+      "utf8",
+    );
+
+    const store = new ConfigStore(appDataDir);
+    const config = store.getAll();
+    expect(config.launchers?.editor?.fileCommand).toBe("nvim {}");
+    expect(config.juliaEditorCmd).toBeUndefined();
+  });
+
   it("drops legacy editor keys without overwriting an existing launchers.editor.fileCommand", () => {
     const appDataDir = makeTempDir();
     fs.writeFileSync(

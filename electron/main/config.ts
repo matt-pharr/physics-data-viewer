@@ -486,7 +486,9 @@ export class ConfigStore {
       this.state.juliaEditorCmd !== undefined;
     if (!hasLegacy) return;
 
-    const legacyCmd = this.state.pythonEditorCmd;
+    // Prefer the Python editor command; fall back to the Julia one so a
+    // user who configured only `juliaEditorCmd` doesn't lose it.
+    const legacyCmd = this.state.pythonEditorCmd ?? this.state.juliaEditorCmd;
     const alreadyMigrated =
       this.state.launchers?.editor?.fileCommand !== undefined;
 

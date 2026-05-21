@@ -44,12 +44,20 @@ export interface BuildAgentInvocationOptions {
 }
 
 /**
- * Quote a path for a `cmd.exe` command line. Windows paths don't contain
- * the shell metacharacters that would need escaping; wrapping in double
- * quotes covers the realistic case (spaces in the path).
+ * Quote a path for a `cmd.exe` command line.
+ *
+ * Wrapping in double quotes covers spaces and most metacharacters (`&`, `|`,
+ * `^` are inert inside quotes). Embedded `"` is doubled — though NTFS forbids
+ * `"` in path names, so this is purely defensive.
+ *
+ * Known limitation: `cmd.exe` expands `%VAR%` even inside double quotes and
+ * offers no command-line escape for a literal `%`. A directory whose name
+ * contains a `%NAME%` pair matching a real environment variable will be
+ * mis-expanded. This is rare, Windows-only, and the user can work around it
+ * with a custom agent command; a hard failure is not worth the complexity.
  */
 function cmdQuote(arg: string): string {
-  return `"${arg}"`;
+  return `"${arg.replace(/"/g, '""')}"`;
 }
 
 /**

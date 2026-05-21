@@ -19,6 +19,7 @@
  *   the protection boundary there.
  */
 
+import { randomBytes } from "node:crypto";
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
 
@@ -63,8 +64,9 @@ export async function writeMcpConfigFile(
   // Atomic temp-then-rename, with the temp file created mode 0600 so the
   // bearer token is never briefly world-readable. `fs.writeFile`'s `mode`
   // only applies when the file is created; `chmod` defensively covers a
-  // pre-existing temp file left by a crashed write.
-  const tmp = `${configPath}.tmp`;
+  // pre-existing temp file left by a crashed write. The temp name carries a
+  // random suffix so two concurrent writes can't clobber each other's temp.
+  const tmp = `${configPath}.${randomBytes(6).toString("hex")}.tmp`;
   try {
     await fs.writeFile(tmp, body, { encoding: "utf8", mode: 0o600 });
     await fs.chmod(tmp, 0o600);

@@ -204,6 +204,26 @@ describe("config:get / config:set", () => {
       mutatingToolsEnabled: true,
     });
   });
+
+  it("config:set deep-merges the `launchers` subtree to preserve sibling slots", async () => {
+    // A partial `launchers` update (just the agent slot) must not wipe the
+    // previously-saved `terminal` / `editor` slots.
+    const { config } = setup();
+    (config.state as unknown as Record<string, unknown>).launchers = {
+      terminal: { preset: "alacritty" },
+      editor: { fileCommand: "nvim {}" },
+    };
+
+    await getHandler(IPC.config.set)({}, {
+      launchers: { agent: { command: "claude" } },
+    } as Partial<PDVConfig>);
+
+    expect((config.state as unknown as Record<string, unknown>).launchers).toMatchObject({
+      terminal: { preset: "alacritty" },
+      editor: { fileCommand: "nvim {}" },
+      agent: { command: "claude" },
+    });
+  });
 });
 
 describe("themes:get / themes:save / themes:openDir", () => {

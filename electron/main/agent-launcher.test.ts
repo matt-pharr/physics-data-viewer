@@ -100,6 +100,19 @@ describe("buildAgentInvocation", () => {
     });
   });
 
+  it("double-quotes a Windows path containing a space", () => {
+    const { args } = buildAgentInvocation({
+      mcpConfigPath: "C:\\wd\\.pdv-mcp.json",
+      projectRoot: "C:\\Users\\me\\My Project",
+      workingDir: "C:\\wd",
+      platform: "win32",
+    });
+    // args = ["new-tab", "cmd", "/c", "<line>"]
+    expect(args[3]).toBe(
+      `cd /d "C:\\Users\\me\\My Project" && claude --mcp-config "C:\\wd\\.pdv-mcp.json"`,
+    );
+  });
+
   it("wraps in Terminal.app via osascript on macOS by default", () => {
     const { file, args } = buildAgentInvocation({
       mcpConfigPath: "/wd/.pdv-mcp.json",
