@@ -19,6 +19,8 @@ import * as path from "path";
 
 import {
   TERMINAL_PRESET_LIST,
+  type AgentLauncherConfig,
+  type EditorLauncherConfig,
   type TerminalLauncherConfig,
   type TerminalPreset,
 } from "./editor-spawn";
@@ -52,15 +54,14 @@ export interface PDVConfig {
   /** UI theme override. Undefined = follow system. */
   theme?: "light" | "dark";
   /**
-   * External editor command for Python scripts.
-   * Use `{}` as the file-path placeholder, e.g. `"code {}"` or `"nvim {}"`.
-   * If `{}` is absent the path is appended as the last argument.
-   * Defaults to `"code {}"`.
+   * @deprecated Superseded by `launchers.editor.fileCommand`. Retained so the
+   * one-shot migration in {@link ConfigStore} can pick up pre-existing values;
+   * no longer written once a user has the `launchers.editor` block.
    */
   pythonEditorCmd?: string;
   /**
-   * External editor command for Julia scripts.
-   * Same `{}` placeholder convention as `pythonEditorCmd`.
+   * @deprecated Superseded by `launchers.editor.fileCommand`. See
+   * {@link PDVConfig.pythonEditorCmd}.
    */
   juliaEditorCmd?: string;
   /**
@@ -102,8 +103,8 @@ export interface PDVConfig {
   };
   /**
    * Configurable external-app launchers — terminal emulator wrap for TUI
-   * editors today, and (in later milestones) editor/IDE and AI-agent slots
-   * that share the same infrastructure. See `editor-spawn.ts` for templates.
+   * editors and the editor/IDE command today, plus (in a later milestone) an
+   * AI-agent slot that shares the same infrastructure. See `editor-spawn.ts`.
    */
   launchers?: {
     /**
@@ -113,6 +114,13 @@ export interface PDVConfig {
      * Windows.
      */
     terminal?: TerminalLauncherConfig;
+    /**
+     * Editor / IDE commands. Supersedes the legacy `pythonEditorCmd` /
+     * `juliaEditorCmd` keys (migrated automatically on first load).
+     */
+    editor?: EditorLauncherConfig;
+    /** AI-agent CLI launched by the action-bar agent button. */
+    agent?: AgentLauncherConfig;
   };
   /** AI agent integration (MCP server) settings. */
   mcp?: {
@@ -376,6 +384,55 @@ function parseLaunchers(
       out.terminal = entry;
     }
   }
+  if ("editor" in obj) {
+    const editor = obj.editor;
+    if (editor !== null && editor !== undefined) {
+      if (typeof editor !== "object" || Array.isArray(editor)) {
+        throw new Error(`Invalid config value for launchers.editor in ${filePath}`);
+      }
+      const e = editor as Record<string, unknown>;
+      const entry: EditorLauncherConfig = {};
+      for (const key of ["fileCommand", "dirCommand"] as const) {
+        const val = e[key];
+        if (val !== undefined && val !== null) {
+          if (typeof val !== "string") {
+            throw new Error(`Invalid config value for launchers.editor.${key} in ${filePath}`);
+          }
+          entry[key] = val;
+        }
+      }
+      if (e.isTuiEditor !== undefined && e.isTuiEditor !== null) {
+        if (typeof e.isTuiEditor !== "boolean") {
+          throw new Error(`Invalid config value for launchers.editor.isTuiEditor in ${filePath}`);
+        }
+        entry.isTuiEditor = e.isTuiEditor;
+      }
+      if (Object.keys(entry).length > 0) out.editor = entry;
+    }
+  }
+  if ("agent" in obj) {
+    const agent = obj.agent;
+    if (agent !== null && agent !== undefined) {
+      if (typeof agent !== "object" || Array.isArray(agent)) {
+        throw new Error(`Invalid config value for launchers.agent in ${filePath}`);
+      }
+      const a = agent as Record<string, unknown>;
+      const entry: AgentLauncherConfig = {};
+      if (a.command !== undefined && a.command !== null) {
+        if (typeof a.command !== "string") {
+          throw new Error(`Invalid config value for launchers.agent.command in ${filePath}`);
+        }
+        entry.command = a.command;
+      }
+      if (a.cwd !== undefined && a.cwd !== null) {
+        if (a.cwd !== "project" && a.cwd !== "working") {
+          throw new Error(`Invalid config value for launchers.agent.cwd in ${filePath}`);
+        }
+        entry.cwd = a.cwd;
+      }
+      if (Object.keys(entry).length > 0) out.agent = entry;
+    }
+  }
   return Object.keys(out).length > 0 ? out : undefined;
 }
 
@@ -406,6 +463,46 @@ export class ConfigStore {
     fs.mkdirSync(this.appDataDir, { recursive: true });
     this.configPath = path.join(this.appDataDir, "preferences.json");
     this.state = this.loadState();
+    this.migrateLegacyEditorCmd();
+  }
+
+  /**
+   * One-shot migration from the legacy per-language editor keys
+   * (`pythonEditorCmd` / `juliaEditorCmd`) to the unified
+   * `launchers.editor.fileCommand` slot.
+   *
+   * Runs once at load: if a legacy key is present, its value seeds
+   * `launchers.editor.fileCommand` (unless that is already set — the newer
+   * value wins) and both legacy keys are dropped from the persisted file.
+   * After it has run the config no longer carries the legacy keys, so on
+   * every subsequent launch this is a cheap no-op with no disk write.
+   *
+   * @returns Nothing.
+   * @throws {Error} When the rewritten config cannot be persisted.
+   */
+  private migrateLegacyEditorCmd(): void {
+    const hasLegacy =
+      this.state.pythonEditorCmd !== undefined ||
+      this.state.juliaEditorCmd !== undefined;
+    if (!hasLegacy) return;
+
+    // Prefer the Python editor command; fall back to the Julia one so a
+    // user who configured only `juliaEditorCmd` doesn't lose it.
+    const legacyCmd = this.state.pythonEditorCmd ?? this.state.juliaEditorCmd;
+    const alreadyMigrated =
+      this.state.launchers?.editor?.fileCommand !== undefined;
+
+    const next: Partial<PDVConfig> = { ...this.state };
+    delete next.pythonEditorCmd;
+    delete next.juliaEditorCmd;
+    if (!alreadyMigrated && typeof legacyCmd === "string") {
+      next.launchers = {
+        ...next.launchers,
+        editor: { ...next.launchers?.editor, fileCommand: legacyCmd },
+      };
+    }
+    this.state = next;
+    this.persist();
   }
 
   /**

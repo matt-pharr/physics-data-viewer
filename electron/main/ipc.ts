@@ -45,11 +45,16 @@ import type {
 
 export type { PDVConfig } from "./config";
 /**
- * Re-export the terminal-launcher types so renderer-facing type files can
- * consume them via `types/pdv.d.ts` without importing across the
- * main↔renderer process boundary.
+ * Re-export the launcher types so renderer-facing type files can consume
+ * them via `types/pdv.d.ts` without importing across the main↔renderer
+ * process boundary.
  */
-export type { TerminalPreset, TerminalLauncherConfig } from "./editor-spawn";
+export type {
+  TerminalPreset,
+  TerminalLauncherConfig,
+  EditorLauncherConfig,
+  AgentLauncherConfig,
+} from "./editor-spawn";
 import type { UpdateStatus } from "./auto-updater";
 export type { UpdateStatus } from "./auto-updater";
 export type { EnvironmentInfo, EnvironmentInstallResult, InstallOutputChunk } from "./environment-detector";
@@ -109,6 +114,10 @@ export const IPC = {
     edit: "script:edit",
     run: "script:run",
     getParams: "script:getParams",
+  },
+  /** External-app launcher channels (action-bar buttons). */
+  launchers: {
+    openAgent: "launchers:openAgent",
   },
   /** Markdown note channels. */
   note: {
@@ -2607,6 +2616,19 @@ export interface PDVApi {
      * action-bar buttons) can branch on platform without an async call.
      */
     platform: NodeJS.Platform;
+  };
+
+  /** External-app launchers driven by the action bar. */
+  launchers: {
+    /**
+     * Launch the configured AI agent (Claude Code by default) in a terminal
+     * window, `cd`-ed to the active project (or working) directory, with a
+     * freshly-written `.pdv-mcp.json` pointing it at PDV's MCP server.
+     *
+     * @returns `{ success: true }`, or `{ success: false, error }` when no
+     *   kernel is active, the MCP server is down, or the spawn fails.
+     */
+    openAgent(): Promise<ScriptOperationResult>;
   };
 
   /** Window chrome integration and title-bar controls. */

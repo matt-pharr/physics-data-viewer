@@ -72,6 +72,30 @@ export function defaultTerminalPresetForPlatform(platform: NodeJS.Platform): Ter
   return 'x-terminal-emulator';
 }
 
+/**
+ * TUI editor basenames PDV auto-wraps in a terminal. Mirrors `TERMINAL_EDITORS`
+ * in `main/editor-spawn.ts` — kept in sync manually (the list is small and
+ * stable, and the runtime value can't cross the process boundary).
+ */
+const TUI_EDITOR_BASENAMES = new Set([
+  'vi', 'vim', 'nvim', 'nano', 'pico', 'emacs', 'kak', 'hx', 'helix',
+]);
+
+/**
+ * Whether an editor command's executable looks like a TUI editor. Used to
+ * pre-derive the "Run in terminal" checkbox so vim/nvim work without the
+ * user having to discover the setting. Mirrors `isTerminalEditorCommand`
+ * in `main/editor-spawn.ts`.
+ *
+ * @param command - Editor command template, e.g. `"nvim {}"` or `"code {}"`.
+ * @returns True when the first token's basename is a known TUI editor.
+ */
+export function isLikelyTuiEditor(command: string): boolean {
+  const firstToken = command.trim().split(/\s+/)[0] ?? '';
+  const base = (firstToken.split(/[/\\]/).pop() ?? '').toLowerCase().replace(/\.exe$/, '');
+  return TUI_EDITOR_BASENAMES.has(base);
+}
+
 /** Convert a stored shortcut token to a human-readable key badge label. */
 export function tokenToLabel(token: string): string {
   switch (token.toLowerCase()) {

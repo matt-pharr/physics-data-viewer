@@ -588,7 +588,7 @@ describe("Step 5 IPC handlers", () => {
         showPrivateVariables: false,
         showModuleVariables: false,
         showCallableVariables: false,
-        pythonEditorCmd: "nvim {}",
+        launchers: { editor: { fileCommand: "nvim {}" } },
       });
       (commRouter.request as unknown as ReturnType<typeof vi.fn>).mockResolvedValue(
         { payload: { path: "/tmp/script.py", file_path: "/tmp/script.py" } }
@@ -621,8 +621,10 @@ describe("Step 5 IPC handlers", () => {
         showPrivateVariables: false,
         showModuleVariables: false,
         showCallableVariables: false,
-        pythonEditorCmd: "nvim {}",
-        launchers: { terminal: { preset: "iterm2" } },
+        launchers: {
+          editor: { fileCommand: "nvim {}" },
+          terminal: { preset: "iterm2" },
+        },
       });
       (commRouter.request as unknown as ReturnType<typeof vi.fn>).mockResolvedValue(
         { payload: { path: "/tmp/script.py", file_path: "/tmp/script.py" } }
@@ -648,8 +650,10 @@ describe("Step 5 IPC handlers", () => {
         showPrivateVariables: false,
         showModuleVariables: false,
         showCallableVariables: false,
-        pythonEditorCmd: "nvim {}",
-        launchers: { terminal: { preset: "x-terminal-emulator" } },
+        launchers: {
+          editor: { fileCommand: "nvim {}" },
+          terminal: { preset: "x-terminal-emulator" },
+        },
       });
       (commRouter.request as unknown as ReturnType<typeof vi.fn>).mockResolvedValue(
         { payload: { path: "/tmp/script.py", file_path: "/tmp/script.py" } }
@@ -674,8 +678,10 @@ describe("Step 5 IPC handlers", () => {
         showPrivateVariables: false,
         showModuleVariables: false,
         showCallableVariables: false,
-        pythonEditorCmd: "nvim {}",
-        launchers: { terminal: { preset: "none" } },
+        launchers: {
+          editor: { fileCommand: "nvim {}" },
+          terminal: { preset: "none" },
+        },
       });
       (commRouter.request as unknown as ReturnType<typeof vi.fn>).mockResolvedValue(
         { payload: { path: "/tmp/script.py", file_path: "/tmp/script.py" } }
@@ -695,6 +701,29 @@ describe("Step 5 IPC handlers", () => {
     } finally {
       warnSpy.mockRestore();
     }
+  });
+
+  it("script:edit honours an explicit launchers.editor.isTuiEditor=false override", async () => {
+    const { configStore, commRouter } = setup();
+    (configStore.getAll as unknown as ReturnType<typeof vi.fn>).mockReturnValue({
+      showPrivateVariables: false,
+      showModuleVariables: false,
+      showCallableVariables: false,
+      // `nvim` would normally auto-wrap; the explicit flag opts out.
+      launchers: { editor: { fileCommand: "nvim {}", isTuiEditor: false } },
+    });
+    (commRouter.request as unknown as ReturnType<typeof vi.fn>).mockResolvedValue(
+      { payload: { path: "/tmp/script.py", file_path: "/tmp/script.py" } }
+    );
+
+    const edit = getHandler(IPC.script.edit);
+    await edit({}, "kernel-1", "/tmp/script.py");
+
+    expect(mocks.spawn).toHaveBeenCalledWith(
+      "nvim",
+      ["/tmp/script.py"],
+      expect.objectContaining({ detached: true, stdio: "ignore" }),
+    );
   });
 
   it("config:get returns current config object", async () => {

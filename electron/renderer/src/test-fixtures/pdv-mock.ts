@@ -214,6 +214,9 @@ function buildBase() {
       // sensitive renderer code under test sees the same value as in prod.
       platform: process.platform,
     },
+    launchers: {
+      openAgent: stub<PDVApi["launchers"]["openAgent"]>(async () => ({ success: true })),
+    },
     chrome: {
       getInfo: stub<PDVApi["chrome"]["getInfo"]>(),
       minimize: stub<PDVApi["chrome"]["minimize"]>(async () => true),

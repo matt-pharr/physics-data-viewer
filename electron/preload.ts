@@ -239,6 +239,9 @@ const api: PDVApi = {
     // IPC channel — renderers read this synchronously from `window.pdv`.
     platform: process.platform,
   },
+  launchers: {
+    openAgent: () => ipcRenderer.invoke(IPC.launchers.openAgent),
+  },
   chrome: {
     getInfo: () => ipcRenderer.invoke(IPC.chrome.getInfo),
     minimize: () => ipcRenderer.invoke(IPC.chrome.minimize),

@@ -22,6 +22,7 @@ import {
   TERMINAL_PRESET_LABELS,
   defaultTerminalPresetForPlatform,
   getTerminalPresetsForPlatform,
+  isLikelyTuiEditor,
   normalizeShortcut,
 } from './utils';
 import { ShortcutCapture } from './ShortcutCapture';
@@ -32,6 +33,8 @@ import { DEFAULT_AUTOSAVE_INTERVAL_S } from '../../app/constants';
 type SettingsTab = 'general' | 'shortcuts' | 'appearance' | 'agents' | 'runtime' | 'about';
 
 const DEFAULT_FILE_MANAGER = IS_MAC ? 'open {}' : 'xdg-open {}';
+/** Mirrors `DEFAULT_AGENT_COMMAND` in `main/editor-spawn.ts`. */
+const DEFAULT_AGENT_COMMAND = 'claude --mcp-config {mcpConfig}';
 const DEFAULT_VSCODE_PAIR = THEME_PAIRS.find((pair) => pair.name === 'VSCode');
 
 /**
@@ -91,11 +94,13 @@ export const SettingsDialog: React.FC<SettingsDialogProps> = ({
   );
 
   // General settings state
-  const [pythonEditorCmd, setPythonEditorCmd] = useState('code {}');
-  const [juliaEditorCmd, setJuliaEditorCmd] = useState('code {}');
+  const [editorFileCommand, setEditorFileCommand] = useState('code {}');
+  const [editorIsTuiEditor, setEditorIsTuiEditor] = useState(false);
   const [fileManagerCmd, setFileManagerCmd] = useState(DEFAULT_FILE_MANAGER);
   const [terminalPreset, setTerminalPreset] = useState<TerminalPreset>(DEFAULT_TERMINAL_PRESET);
   const [terminalCustomTemplate, setTerminalCustomTemplate] = useState('');
+  const [agentCommand, setAgentCommand] = useState(DEFAULT_AGENT_COMMAND);
+  const [agentCwd, setAgentCwd] = useState<'project' | 'working'>('project');
   const [defaultSaveLocation, setDefaultSaveLocation] = useState('');
   const [workingDirBase, setWorkingDirBase] = useState('');
   const [autoSaveInterval, setAutoSaveInterval] = useState(DEFAULT_AUTOSAVE_INTERVAL_S);
@@ -126,8 +131,12 @@ export const SettingsDialog: React.FC<SettingsDialogProps> = ({
     if (!isOpen) return;
     /* eslint-disable react-hooks/set-state-in-effect -- intentional sync from props on dialog open */
     setEditedShortcuts(shortcuts);
-    setPythonEditorCmd(config?.pythonEditorCmd ?? 'code {}');
-    setJuliaEditorCmd(config?.juliaEditorCmd ?? 'code {}');
+    const editorCfg = config?.launchers?.editor;
+    const fileCmd = editorCfg?.fileCommand ?? 'code {}';
+    setEditorFileCommand(fileCmd);
+    // The checkbox shows the *effective* wrap decision: an explicit saved
+    // override, or PDV's basename auto-detection when the user has none.
+    setEditorIsTuiEditor(editorCfg?.isTuiEditor ?? isLikelyTuiEditor(fileCmd));
     setFileManagerCmd(config?.fileManagerCmd ?? DEFAULT_FILE_MANAGER);
     const savedPreset = config?.launchers?.terminal?.preset;
     setTerminalPreset(
@@ -136,6 +145,8 @@ export const SettingsDialog: React.FC<SettingsDialogProps> = ({
         : DEFAULT_TERMINAL_PRESET,
     );
     setTerminalCustomTemplate(config?.launchers?.terminal?.customTemplate ?? '');
+    setAgentCommand(config?.launchers?.agent?.command ?? DEFAULT_AGENT_COMMAND);
+    setAgentCwd(config?.launchers?.agent?.cwd ?? 'project');
     setDefaultSaveLocation(config?.defaultSaveLocation ?? '');
     setWorkingDirBase(config?.workingDirBase ?? '');
     setAutoSaveInterval(config?.autoSaveIntervalSeconds ?? DEFAULT_AUTOSAVE_INTERVAL_S);
@@ -335,11 +346,23 @@ export const SettingsDialog: React.FC<SettingsDialogProps> = ({
         ? { preset: terminalPreset, customTemplate: trimmedCustom || undefined }
         : { preset: terminalPreset };
 
+    const fileCommand = editorFileCommand.trim() || 'code {}';
+    // Persist `isTuiEditor` only when it overrides PDV's auto-detection — that
+    // keeps the main-process auto-detect live for the common case (a saved
+    // explicit `false` for, say, `vim` would silently break terminal wrapping).
+    const isTuiEditor =
+      editorIsTuiEditor === isLikelyTuiEditor(fileCommand) ? undefined : editorIsTuiEditor;
+
     await onSave({
-      pythonEditorCmd: pythonEditorCmd.trim() || 'code {}',
-      juliaEditorCmd:  juliaEditorCmd.trim()  || 'code {}',
       fileManagerCmd:  fileManagerCmd.trim()  || DEFAULT_FILE_MANAGER,
-      launchers: { terminal: terminalLauncher },
+      launchers: {
+        terminal: terminalLauncher,
+        editor: { fileCommand, isTuiEditor },
+        agent: {
+          command: agentCommand.trim() || DEFAULT_AGENT_COMMAND,
+          cwd: agentCwd,
+        },
+      },
       defaultSaveLocation: defaultSaveLocation.trim() || undefined,
       workingDirBase: workingDirBase.trim() || undefined,
       autoSaveIntervalSeconds: Math.max(30, autoSaveInterval),
@@ -396,24 +419,42 @@ export const SettingsDialog: React.FC<SettingsDialogProps> = ({
                 If omitted, the path is appended automatically.
               </p>
               <div className="settings-general-grid">
-                <label htmlFor="sg-python-editor">Python editor</label>
+                <label htmlFor="sg-editor-file">Editor / IDE</label>
                 <input
-                  id="sg-python-editor"
+                  id="sg-editor-file"
                   type="text"
-                  value={pythonEditorCmd}
-                  onChange={(e) => setPythonEditorCmd(e.target.value)}
+                  value={editorFileCommand}
+                  onChange={(e) => {
+                    const value = e.target.value;
+                    setEditorFileCommand(value);
+                    // Re-derive the wrap checkbox as the command changes so a
+                    // user switching to vim/nvim gets terminal wrapping without
+                    // having to discover the checkbox. A deliberate override is
+                    // re-applied by toggling the checkbox after editing.
+                    setEditorIsTuiEditor(isLikelyTuiEditor(value));
+                  }}
                   placeholder="code {}"
                   spellCheck={false}
                 />
                 <div className="settings-general-desc">
-                  Used when opening Python scripts from the Tree (e.g. <code>code {'{}' }</code>, <code>nvim {'{}' }</code>).
+                  Used when opening a script from the Tree (e.g. <code>code {'{}' }</code>, <code>nvim {'{}' }</code>).
                 </div>
 
-                {/* Julia editor field hidden alongside the welcome-screen
-                    Julia button while the Julia workflow is still
-                    experimental. The juliaEditorCmd state and persistence
-                    paths are intact so re-enabling is just unhiding this
-                    block. */}
+                <label htmlFor="sg-editor-tui">Run in terminal</label>
+                <div className="settings-general-check">
+                  <input
+                    id="sg-editor-tui"
+                    type="checkbox"
+                    checked={editorIsTuiEditor}
+                    onChange={(e) => setEditorIsTuiEditor(e.target.checked)}
+                  />
+                </div>
+                <div className="settings-general-desc">
+                  Wrap the editor in a terminal window — required for TUI editors
+                  like <code>vim</code>, <code>nvim</code>, <code>nano</code>.
+                  Auto-detected from the command; toggle to override (e.g. for GUI
+                  variants such as <code>nvim-qt</code>).
+                </div>
 
                 <label htmlFor="sg-file-manager">File manager</label>
                 <input
@@ -470,6 +511,38 @@ export const SettingsDialog: React.FC<SettingsDialogProps> = ({
                     </div>
                   </>
                 )}
+              </div>
+
+              <h4 className="settings-general-section">AI agent</h4>
+              <div className="settings-general-grid">
+                <label htmlFor="sg-agent-command">Command</label>
+                <input
+                  id="sg-agent-command"
+                  type="text"
+                  value={agentCommand}
+                  onChange={(e) => setAgentCommand(e.target.value)}
+                  placeholder={DEFAULT_AGENT_COMMAND}
+                  spellCheck={false}
+                />
+                <div className="settings-general-desc">
+                  Run by the agent button in the activity bar, inside the configured terminal.
+                  Placeholders: <code>{'{mcpConfig}'}</code> (PDV's MCP config file),{' '}
+                  <code>{'{projectRoot}'}</code>, <code>{'{workingDir}'}</code> — each substituted
+                  with a quoted absolute path.
+                </div>
+
+                <label htmlFor="sg-agent-cwd">Start in</label>
+                <select
+                  id="sg-agent-cwd"
+                  value={agentCwd}
+                  onChange={(e) => setAgentCwd(e.target.value as 'project' | 'working')}
+                >
+                  <option value="project">Project directory</option>
+                  <option value="working">Session working directory</option>
+                </select>
+                <div className="settings-general-desc">
+                  Which directory the agent shell <code>cd</code>s into before launching.
+                </div>
               </div>
 
               <h4 className="settings-general-section">Directories</h4>

@@ -6,7 +6,9 @@
  */
 
 import type {
+  AgentLauncherConfig,
   Config,
+  EditorLauncherConfig,
   EnvironmentInfo,
   InstallOutputChunk,
   KernelExecutionError,
@@ -48,7 +50,9 @@ import type {
 
 /** Re-export core preload API contract types for renderer imports. */
 export type {
+  AgentLauncherConfig,
   Config,
+  EditorLauncherConfig,
   EnvironmentInfo,
   InstallOutputChunk,
   KernelExecutionError,

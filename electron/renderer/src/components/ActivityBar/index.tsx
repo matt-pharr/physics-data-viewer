@@ -6,7 +6,7 @@
  */
 
 import React from 'react';
-import { TreeIcon, NamespaceIcon, SettingsIcon } from '../Icons';
+import { TreeIcon, NamespaceIcon, SettingsIcon, AgentIcon } from '../Icons';
 
 type LeftPanel = 'tree' | 'namespace';
 
@@ -15,6 +15,7 @@ interface ActivityBarProps {
   leftPanel: LeftPanel;
   onActivityBarClick: (panel: LeftPanel) => void;
   onSettingsClick: () => void;
+  onAgentClick: () => void;
   guiModules?: { alias: string; name: string }[];
   kernelId: string | null;
 }
@@ -25,6 +26,7 @@ export const ActivityBar: React.FC<ActivityBarProps> = ({
   leftPanel,
   onActivityBarClick,
   onSettingsClick,
+  onAgentClick,
   guiModules = [],
   kernelId,
 }) => (
@@ -66,6 +68,14 @@ export const ActivityBar: React.FC<ActivityBarProps> = ({
       )}
     </div>
     <div className="activity-bar-bottom">
+      <button
+        className="activity-btn"
+        onClick={onAgentClick}
+        disabled={!kernelId}
+        title={kernelId ? 'Open AI agent in terminal' : 'Start a kernel to launch an AI agent'}
+      >
+        <AgentIcon />
+      </button>
       <button
         className="activity-btn"
         onClick={onSettingsClick}

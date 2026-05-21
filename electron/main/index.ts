@@ -58,8 +58,10 @@ import {
   NamespaceQueryOptions,
   PDVConfig,
   type CodeCellData,
+  type McpStatus,
 } from "./ipc";
 import { PDVMessage, PDVMessageType, setAppVersion } from "./pdv-protocol";
+import { registerLaunchersIpcHandlers } from "./ipc-register-launchers";
 import type { McpServerHooks } from "./mcp/mcp-context";
 import {
   allocateAndRegisterLib,
@@ -616,6 +618,14 @@ export function registerIpcHandlers(
     resolveEditorSpawn,
   });
 
+  registerLaunchersIpcHandlers({
+    kernelWorkingDirs,
+    getActiveKernelId: () => activeKernelId,
+    getActiveProjectDir: () => activeProjectDir,
+    getConfig: () => readConfig(configStore),
+    getMcpStatus: () => mcpServerInstance?.status ?? null,
+  });
+
   registerModulesIpcHandlers({
     win,
     kernelManager,
@@ -1019,6 +1029,27 @@ let mcpServerHooks: McpServerHooks | null = null;
  */
 export function getMcpServerHooks(): McpServerHooks | null {
   return mcpServerHooks;
+}
+
+/**
+ * Live MCP server reference, set by `bootstrap.ts` once the server has
+ * started. The agent-launcher IPC handler reads `.status` from it at
+ * click time. `null` before the server starts (and in tests).
+ *
+ * Typed structurally so this module does not import the `PdvMcpServer`
+ * class (which would pull MCP-server transitive deps into every importer).
+ */
+let mcpServerInstance: { status: McpStatus } | null = null;
+
+/**
+ * Register (or clear) the live MCP server reference.
+ *
+ * @param server - The running MCP server, or `null` to clear.
+ */
+export function setMcpServerInstance(
+  server: { status: McpStatus } | null,
+): void {
+  mcpServerInstance = server;
 }
 
 /**

@@ -220,11 +220,37 @@ describe("resolveEditorSpawn", () => {
     warnSpy.mockRestore();
   });
 
-  it("returns the spec unchanged for a GUI editor", () => {
+  it("returns the spec unchanged for a GUI editor (auto-detect)", () => {
     expect(resolveEditorSpawn("code", ["/tmp/foo.py"])).toEqual({
       file: "code",
       args: ["/tmp/foo.py"],
     });
+  });
+
+  it("wraps a GUI-named editor when wrapInTerminal is forced true", () => {
+    // The override path: a TUI editor PDV's allowlist doesn't recognise.
+    const { file } = resolveEditorSpawn("my-tui-editor", ["/tmp/foo.py"], {
+      wrapInTerminal: true,
+      terminal: { preset: "alacritty" },
+      platform: "linux",
+    });
+    expect(file).toBe("alacritty");
+  });
+
+  it("does not wrap a TUI editor when wrapInTerminal is forced false", () => {
+    // The opt-out path: a GUI variant whose basename matches the allowlist.
+    expect(
+      resolveEditorSpawn("vim", ["/tmp/foo.py"], { wrapInTerminal: false }),
+    ).toEqual({ file: "vim", args: ["/tmp/foo.py"] });
+  });
+
+  it("auto-detects wrapping when wrapInTerminal is omitted", () => {
+    expect(
+      resolveEditorSpawn("vim", ["/tmp/foo.py"], {
+        terminal: { preset: "alacritty" },
+        platform: "linux",
+      }).file,
+    ).toBe("alacritty");
   });
 
   it("does not wrap when preset='none', even for a TUI editor (logs warning)", () => {
