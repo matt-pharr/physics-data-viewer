@@ -24,8 +24,9 @@ import { initializeKernelSession } from "./kernel-session";
 import { executeAndTranscribe, TranscriptWriter } from "./mcp/transcript";
 import type { ModuleManager } from "./module-manager";
 import { setupProjectModuleNamespaces } from "./module-runtime";
-import { copyFilesForLoad } from "./project-file-sync";
+import { copyEnvFilesForLoad, copyFilesForLoad } from "./project-file-sync";
 import { ProjectManager } from "./project-manager";
+import { materializeUvEnvironment } from "./uv-environment";
 
 interface RegisterKernelIpcHandlersOptions {
   win: BrowserWindow;
@@ -110,6 +111,43 @@ export function registerKernelIpcHandlers(
     await setupProjectModuleNamespaces(commRouter, moduleManager, getActiveProjectDir());
   }
 
+  /**
+   * Materialize a uv-mode project's environment before its kernel spawns.
+   *
+   * Creates the kernel working directory, copies in `pyproject.toml` /
+   * `uv.lock` from the save directory, runs `uv sync`, and installs
+   * `pdv-python` into the venv (ARCHITECTURE.md §10.5.9). The venv lives
+   * inside the working directory, so this must complete before the kernel
+   * process is spawned against the venv interpreter.
+   *
+   * @param saveDir - Save directory of the uv-mode project being opened.
+   * @returns The pre-created working directory and the venv interpreter path.
+   * @throws {Error} When uv environment setup fails. The partially-created
+   *   working directory is removed before the error propagates.
+   */
+  async function startUvEnvironment(
+    saveDir: string
+  ): Promise<{ workingDir: string; venvPython: string }> {
+    const workingDir = await projectManager.createWorkingDir(getWorkingDirBase());
+    try {
+      await copyEnvFilesForLoad(saveDir, workingDir);
+      const manifest = await ProjectManager.readManifest(saveDir);
+      const result = await materializeUvEnvironment(workingDir, {
+        pythonVersion: manifest.environment?.python_version,
+        win,
+        pushChannel: IPC.push.installOutput,
+      });
+      if (!result.success || !result.venvPython) {
+        const step = result.failedStep ? ` (${result.failedStep})` : "";
+        throw new Error(`uv environment setup failed${step}:\n${result.output}`);
+      }
+      return { workingDir, venvPython: result.venvPython };
+    } catch (err) {
+      await projectManager.deleteWorkingDir(workingDir).catch(() => undefined);
+      throw err;
+    }
+  }
+
   // Forward periodic kernel-memory snapshots to the renderer. Registered once
   // for this window/manager pair (the payload carries `kernelId` so a single
   // listener serves any number of kernels).
@@ -148,22 +186,46 @@ export function registerKernelIpcHandlers(
     return kernelManager.list();
   });
 
-  ipcMain.handle(IPC.kernels.start, async (_event, spec) => {
+  ipcMain.handle(IPC.kernels.start, async (_event, spec, uvContext) => {
     await awaitPreviousMutex("kernels.start");
     let release!: () => void;
     startMutex = new Promise<void>((r) => { release = r; });
     try {
-    const requestedSpec = spec as Parameters<KernelManager["start"]>[0];
-    const pythonPath =
-      requestedSpec?.env?.PYTHON_PATH ??
-      (Array.isArray(requestedSpec?.argv) ? requestedSpec.argv[0] : undefined);
+    let requestedSpec = spec as Parameters<KernelManager["start"]>[0];
     const requestedLanguage = requestedSpec?.language ?? "python";
-    if (requestedLanguage === "python" && pythonPath) {
-      const installStatus = await EnvironmentDetector.checkPDVInstalled(pythonPath);
-      if (!installStatus.installed) {
-        throw new Error(
-          `Selected Python runtime is missing pdv. Install it with: cd pdv-python && ${pythonPath} -m pip install -e ".[dev]"`
-        );
+    const uv = uvContext as { saveDir: string } | undefined;
+
+    // Starting a new kernel always means a new session — clear any in-memory
+    // project state from a previous session (pending imports, active project
+    // dir, health warnings) so they don't carry over.
+    resetProjectState();
+
+    // uv-mode boot: the project venv lives inside the kernel working
+    // directory, so it must be created and materialized BEFORE the kernel
+    // process spawns against the venv interpreter (ARCHITECTURE.md §10.5.9).
+    // The materialize step installs pdv-python into the venv, so the
+    // shared-mode pdv-install check below is skipped for uv kernels.
+    let preCreatedWorkingDir: string | undefined;
+    if (uv && requestedLanguage === "python") {
+      const uvEnv = await startUvEnvironment(uv.saveDir);
+      preCreatedWorkingDir = uvEnv.workingDir;
+      requestedSpec = {
+        ...(requestedSpec ?? {}),
+        language: "python",
+        argv: undefined,
+        env: { ...(requestedSpec?.env ?? {}), PYTHON_PATH: uvEnv.venvPython },
+      };
+    } else if (requestedLanguage === "python") {
+      const pythonPath =
+        requestedSpec?.env?.PYTHON_PATH ??
+        (Array.isArray(requestedSpec?.argv) ? requestedSpec.argv[0] : undefined);
+      if (pythonPath) {
+        const installStatus = await EnvironmentDetector.checkPDVInstalled(pythonPath);
+        if (!installStatus.installed) {
+          throw new Error(
+            `Selected Python runtime is missing pdv. Install it with: cd pdv-python && ${pythonPath} -m pip install -e ".[dev]"`
+          );
+        }
       }
     } else if (requestedLanguage === "julia") {
       const juliaPath = requestedSpec?.env?.JULIA_PATH ??
@@ -177,14 +239,8 @@ export function registerKernelIpcHandlers(
         }
       }
     }
-    // Starting a new kernel always means a new session — clear any in-memory
-    // project state from a previous session (pending imports, active project
-    // dir, health warnings) so they don't carry over.
-    resetProjectState();
 
-    const kernel = await kernelManager.start(
-      requestedSpec
-    );
+    const kernel = await kernelManager.start(requestedSpec);
     commRouter.attach(kernelManager, kernel.id);
     queryRouter.detach();
     await initializeKernelSession(
@@ -195,6 +251,7 @@ export function registerKernelIpcHandlers(
       kernel.id,
       kernelWorkingDirs,
       getWorkingDirBase(),
+      preCreatedWorkingDir,
     );
     setActiveKernelId(kernel.id);
     await setupModuleNamespaces(kernel.id);

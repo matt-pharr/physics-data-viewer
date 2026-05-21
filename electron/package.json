@@ -1,6 +1,7 @@
 {
   "name": "physics-data-viewer",
   "version": "0.1.2",
+  "uvVersion": "0.11.6",
   "private": true,
   "author": {
     "name": "Matthew Pharr",
@@ -22,6 +23,9 @@
     "dev:main": "node ./node_modules/cross-env/dist/bin/cross-env.js NODE_ENV=development node ./node_modules/electronmon/bin/cli.js .",
     "dev:renderer": "cd renderer && node ../node_modules/vite/bin/vite.js",
     "generate:icon:mac": "sh ./scripts/generate-mac-icon.sh && sh ./scripts/build-icon.sh",
+    "fetch:uv": "node scripts/fetch-uv.mjs --host",
+    "build:pdv-wheel": "node scripts/build-pdv-wheel.mjs",
+    "prebuild": "node scripts/fetch-uv.mjs && node scripts/build-pdv-wheel.mjs",
     "build": "npm run build:renderer && npm run build:main",
     "build:renderer": "cd renderer && node ../node_modules/vite/bin/vite.js build",
     "build:main": "node ./node_modules/typescript/bin/tsc -p tsconfig.json",

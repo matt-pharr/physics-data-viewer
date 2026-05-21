@@ -1240,6 +1240,14 @@ const App: React.FC = () => {
     setInterpreterWarning(null);
     pendingProjectRef.current = { type: 'open', path: dir, language };
 
+    // uv-mode projects own their environment: the main process materializes
+    // the venv on kernel start, so interpreter detection is skipped (§10.5.9).
+    if (peek.environment?.mode === 'uv' && language === 'python') {
+      setActiveLanguage(language);
+      await startKernel(config ?? {} as Config, language, { saveDir: dir });
+      return;
+    }
+
     // If the project saved an interpreter path, try to use it.
     // TODO: Add Julia interpreter validation once Julia supports saved interpreter paths.
     if (peek.interpreterPath && language === 'python') {

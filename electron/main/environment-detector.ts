@@ -538,6 +538,43 @@ export class EnvironmentDetector {
   }
 
   /**
+   * Resolve the absolute path to the bundled ``pdv-python`` wheel.
+   *
+   * In packaged builds the wheel is copied into
+   * ``<resourcesPath>/pdv-python-wheel/``. In development it is built by
+   * ``scripts/build-pdv-wheel.mjs`` into ``electron/resources/pdv-python-wheel/``.
+   * Exactly one ``*.whl`` is expected in that directory.
+   *
+   * Used by the uv-mode kernel boot to install ``pdv-python`` into the
+   * project venv (ARCHITECTURE.md §10.5.7).
+   *
+   * @returns Absolute path to the ``pdv-python`` wheel, or null if not found.
+   */
+  static resolveBundledPDVWheelPath(): string | null {
+    const findWheel = (dir: string): string | null => {
+      try {
+        const wheel = fs.readdirSync(dir).find((name) => name.endsWith(".whl"));
+        return wheel ? path.join(dir, wheel) : null;
+      } catch {
+        return null;
+      }
+    };
+    if (process.resourcesPath) {
+      const packaged = findWheel(path.join(process.resourcesPath, "pdv-python-wheel"));
+      if (packaged) {
+        return packaged;
+      }
+    }
+    for (let dir = __dirname; dir !== path.dirname(dir); dir = path.dirname(dir)) {
+      const candidate = findWheel(path.join(dir, "resources", "pdv-python-wheel"));
+      if (candidate) {
+        return candidate;
+      }
+    }
+    return null;
+  }
+
+  /**
    * Read the version of the bundled ``pdv-python`` package from its
    * ``pyproject.toml`` in the app Resources directory.
    *

@@ -117,6 +117,15 @@ export interface PDVConfig {
      */
     authToken?: string;
   };
+  /** uv environment-manager settings (ARCHITECTURE.md §10.5). */
+  uv?: {
+    /**
+     * Absolute path to a `uv` binary that overrides the one bundled with
+     * the app. For developers who want PDV to use a system `uv`. Undefined
+     * means use the bundled binary (§10.5.6).
+     */
+    binaryPath?: string;
+  };
 }
 
 /**
@@ -295,6 +304,15 @@ function parseConfig(raw: string, filePath: string): Partial<PDVConfig> {
     }
     if (mcp && typeof mcp === "object" && !Array.isArray(mcp)) {
       result.mcp = mcp as PDVConfig["mcp"];
+    }
+  }
+  if ("uv" in obj) {
+    const uv = obj.uv;
+    if (uv !== null && uv !== undefined && (typeof uv !== "object" || Array.isArray(uv))) {
+      throw new Error(`Invalid config value for uv in ${filePath}`);
+    }
+    if (uv && typeof uv === "object" && !Array.isArray(uv)) {
+      result.uv = uv as PDVConfig["uv"];
     }
   }
 

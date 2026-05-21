@@ -235,6 +235,14 @@ export interface ProjectLoadResult {
 }
 
 /** Lightweight manifest peek returned before kernel start. */
+/** Per-project Python environment configuration (§10.5). */
+export interface EnvironmentConfig {
+  /** Which environment flow this project uses. */
+  mode: "uv" | "shared";
+  /** Requested Python version for uv mode (e.g. "3.12"). */
+  python_version?: string;
+}
+
 export interface ProjectManifestPeek {
   /** Kernel language used by this project. */
   language: "python" | "julia";
@@ -244,6 +252,18 @@ export interface ProjectManifestPeek {
   pdvVersion?: string;
   /** Project name stored in the manifest. */
   projectName?: string;
+  /** Per-project environment configuration (§10.5). Absent on legacy manifests. */
+  environment?: EnvironmentConfig;
+}
+
+/**
+ * Extra context passed to `kernels.start` when opening a `mode: "uv"`
+ * project — tells the main process to materialize the uv environment and
+ * launch the kernel against the venv interpreter (§10.5.9).
+ */
+export interface KernelUvContext {
+  /** Save directory of the uv-mode project being opened. */
+  saveDir: string;
 }
 
 /** Persisted user configuration payload returned by `config.get`. */
@@ -294,6 +314,11 @@ export interface Config {
     mutatingToolsEnabled?: boolean;
     /** Whether agents may run code in the kernel via `pdv_run`. Defaults to off. */
     pdvRunEnabled?: boolean;
+  };
+  /** uv environment-manager settings. */
+  uv?: {
+    /** Absolute path to a `uv` binary overriding the bundled one. */
+    binaryPath?: string;
   };
   settings?: {
     /** Keyboard shortcut overrides. */
@@ -771,7 +796,7 @@ export interface CellWritePush {
 export interface PDVApi {
   kernels: {
     list(): Promise<KernelInfo[]>;
-    start(spec?: Partial<KernelSpec>): Promise<KernelInfo>;
+    start(spec?: Partial<KernelSpec>, uvContext?: KernelUvContext): Promise<KernelInfo>;
     stop(kernelId: string): Promise<boolean>;
     execute(kernelId: string, request: KernelExecuteRequest): Promise<KernelExecuteResult>;
     interrupt(kernelId: string): Promise<boolean>;

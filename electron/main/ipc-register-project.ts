@@ -573,6 +573,7 @@ export function registerProjectIpcHandlers(
           interpreterPath: manifest.interpreter_path,
           pdvVersion: manifest.pdv_version,
           projectName: manifest.project_name,
+          environment: manifest.environment,
         };
       } catch {
         return { language: "python" as const };

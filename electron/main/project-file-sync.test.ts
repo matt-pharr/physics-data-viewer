@@ -14,7 +14,11 @@ import * as fs from "fs/promises";
 import * as os from "os";
 import * as path from "path";
 
-import { overlayAutosaveTreeFiles } from "./project-file-sync";
+import {
+  copyEnvFilesForLoad,
+  copyEnvFilesForSave,
+  overlayAutosaveTreeFiles,
+} from "./project-file-sync";
 
 describe("overlayAutosaveTreeFiles()", () => {
   let workingDir: string;
@@ -82,5 +86,66 @@ describe("overlayAutosaveTreeFiles()", () => {
     expect(
       await fs.readFile(path.join(workingDir, "tree", uuid, "data.npy"), "utf8"),
     ).toBe("new");
+  });
+});
+
+describe("copyEnvFilesForLoad() / copyEnvFilesForSave()", () => {
+  let saveDir: string;
+  let workingDir: string;
+
+  beforeEach(async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "pdv-envfiles-"));
+    saveDir = path.join(root, "save");
+    workingDir = path.join(root, "working");
+    await fs.mkdir(saveDir, { recursive: true });
+    await fs.mkdir(workingDir, { recursive: true });
+  });
+
+  afterEach(async () => {
+    await fs.rm(path.dirname(saveDir), { recursive: true, force: true });
+  });
+
+  it("copies pyproject.toml and uv.lock from the save dir into the working dir", async () => {
+    await fs.writeFile(path.join(saveDir, "pyproject.toml"), "[project]\n");
+    await fs.writeFile(path.join(saveDir, "uv.lock"), "version = 1\n");
+
+    const copied = await copyEnvFilesForLoad(saveDir, workingDir);
+
+    expect(copied.sort()).toEqual(["pyproject.toml", "uv.lock"]);
+    expect(await fs.readFile(path.join(workingDir, "pyproject.toml"), "utf8")).toBe("[project]\n");
+    expect(await fs.readFile(path.join(workingDir, "uv.lock"), "utf8")).toBe("version = 1\n");
+  });
+
+  it("skips env files absent from the save dir", async () => {
+    await fs.writeFile(path.join(saveDir, "pyproject.toml"), "[project]\n");
+
+    const copied = await copyEnvFilesForLoad(saveDir, workingDir);
+
+    expect(copied).toEqual(["pyproject.toml"]);
+    await expect(fs.stat(path.join(workingDir, "uv.lock"))).rejects.toMatchObject({
+      code: "ENOENT",
+    });
+  });
+
+  it("copies env files back from the working dir into the save dir on save", async () => {
+    await fs.writeFile(path.join(workingDir, "pyproject.toml"), "[project]\nname='x'\n");
+    await fs.writeFile(path.join(workingDir, "uv.lock"), "version = 1\n");
+
+    const copied = await copyEnvFilesForSave(workingDir, saveDir);
+
+    expect(copied.sort()).toEqual(["pyproject.toml", "uv.lock"]);
+    expect(await fs.readFile(path.join(saveDir, "pyproject.toml"), "utf8")).toBe(
+      "[project]\nname='x'\n",
+    );
+  });
+
+  it("does not clobber a saved uv.lock when the working dir lacks one", async () => {
+    await fs.writeFile(path.join(saveDir, "uv.lock"), "good-lock\n");
+    await fs.writeFile(path.join(workingDir, "pyproject.toml"), "[project]\n");
+
+    const copied = await copyEnvFilesForSave(workingDir, saveDir);
+
+    expect(copied).toEqual(["pyproject.toml"]);
+    expect(await fs.readFile(path.join(saveDir, "uv.lock"), "utf8")).toBe("good-lock\n");
   });
 });

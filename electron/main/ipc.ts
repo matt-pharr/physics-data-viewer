@@ -47,6 +47,8 @@ export type { PDVConfig } from "./config";
 import type { UpdateStatus } from "./auto-updater";
 export type { UpdateStatus } from "./auto-updater";
 export type { EnvironmentInfo, EnvironmentInstallResult, InstallOutputChunk } from "./environment-detector";
+import type { EnvironmentConfig } from "./project-manager";
+export type { EnvironmentConfig } from "./project-manager";
 
 // ---------------------------------------------------------------------------
 // IPC channel catalogue
@@ -1412,6 +1414,22 @@ export interface ProjectManifestPeek {
   pdvVersion?: string;
   /** Project name stored in the manifest. */
   projectName?: string;
+  /**
+   * Per-project environment configuration (§10.5). Absent on legacy
+   * manifests; the renderer treats absence as shared mode.
+   */
+  environment?: EnvironmentConfig;
+}
+
+/**
+ * Extra context passed to `kernels.start` when opening a `mode: "uv"`
+ * project. Its presence tells the main process to materialize the project's
+ * uv environment (working dir + `uv sync` + `pdv-python`) and launch the
+ * kernel against the venv interpreter (§10.5.9).
+ */
+export interface KernelUvContext {
+  /** Save directory of the uv-mode project being opened. */
+  saveDir: string;
 }
 
 /**
@@ -1584,9 +1602,11 @@ export interface PDVApi {
      * Start a new kernel process.
      *
      * @param spec - Optional kernel spec override.
+     * @param uvContext - When opening a `mode: "uv"` project, the project's
+     *   uv context; triggers venv materialization before launch (§10.5.9).
      * @returns Started kernel metadata.
      */
-    start(spec?: Partial<KernelSpec>): Promise<KernelInfo>;
+    start(spec?: Partial<KernelSpec>, uvContext?: KernelUvContext): Promise<KernelInfo>;
     /**
      * Stop a running kernel.
      *

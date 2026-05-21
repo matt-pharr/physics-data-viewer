@@ -159,4 +159,34 @@ describe("ConfigStore", () => {
     expect(config.showCallableVariables).toBe(true);
   });
 
+  it("loads uv.binaryPath from preferences.json", () => {
+    const appDataDir = makeTempDir();
+    fs.writeFileSync(
+      path.join(appDataDir, "preferences.json"),
+      JSON.stringify({ uv: { binaryPath: "/opt/uv/uv" } }, null, 2),
+      "utf8"
+    );
+
+    const store = new ConfigStore(appDataDir);
+    expect(store.get("uv")).toEqual({ binaryPath: "/opt/uv/uv" });
+  });
+
+  it("backs up a config whose uv field is not an object", () => {
+    const appDataDir = makeTempDir();
+    fs.writeFileSync(
+      path.join(appDataDir, "preferences.json"),
+      JSON.stringify({ uv: "nonsense" }, null, 2),
+      "utf8"
+    );
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+
+    const store = new ConfigStore(appDataDir);
+    expect(store.get("uv")).toBeUndefined();
+    expect(
+      fs
+        .readdirSync(appDataDir)
+        .some((name) => name.startsWith("preferences.json.corrupted-"))
+    ).toBe(true);
+  });
+
 });

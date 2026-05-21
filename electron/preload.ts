@@ -40,7 +40,7 @@ function onPush<TPayload>(
 const api: PDVApi = {
   kernels: {
     list: () => ipcRenderer.invoke(IPC.kernels.list),
-    start: (spec) => ipcRenderer.invoke(IPC.kernels.start, spec),
+    start: (spec, uvContext) => ipcRenderer.invoke(IPC.kernels.start, spec, uvContext),
     stop: (kernelId) => ipcRenderer.invoke(IPC.kernels.stop, kernelId),
     execute: (kernelId, request) =>
       ipcRenderer.invoke(IPC.kernels.execute, kernelId, request),

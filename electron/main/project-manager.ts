@@ -74,6 +74,25 @@ export interface ProjectModuleImport {
 }
 
 /**
+ * Per-project Python environment configuration (ARCHITECTURE.md §10.5).
+ *
+ * ``"shared"`` uses the app-wide environment selected in the Environment
+ * Selector (§10.2) — the default, and the home of conda users. ``"uv"`` uses
+ * an isolated per-project environment materialized by ``uv`` from a
+ * ``pyproject.toml`` + ``uv.lock`` pair.
+ */
+export interface EnvironmentConfig {
+  /** Which environment flow this project uses. */
+  mode: "uv" | "shared";
+  /**
+   * Requested Python version for uv mode (e.g. ``"3.12"``). Absent means
+   * uv picks the newest interpreter it can find or install. Ignored in
+   * shared mode.
+   */
+  python_version?: string;
+}
+
+/**
  * Persisted metadata stored in ``project.json`` alongside ``code-cells.json``.
  *
  * Includes per-project module import activation and module settings.
@@ -105,6 +124,12 @@ export interface ProjectManifest {
   modules: ProjectModuleImport[];
   /** Persisted per-module settings keyed by module alias. */
   module_settings: Record<string, Record<string, unknown>>;
+  /**
+   * Per-project Python environment configuration (ARCHITECTURE.md §10.5).
+   * Absent in legacy ``"1.1"`` manifests; such manifests are treated as
+   * ``{ mode: "shared" }`` on read.
+   */
+  environment?: EnvironmentConfig;
 }
 
 /**
@@ -148,8 +173,12 @@ export interface ModuleManifestBundle {
   entries: Array<Record<string, unknown>>;
 }
 
-/** Current schema major version. Increment on breaking changes to project.json. */
-const SCHEMA_VERSION = "1.1";
+/**
+ * Current project.json schema version. The major version is the
+ * compatibility boundary (see {@link _assertCompatibleSchema}); minor bumps
+ * are additive. ``1.2`` adds the optional ``environment`` block (§10.5).
+ */
+const SCHEMA_VERSION = "1.2";
 
 /** Default manifest returned when project.json is missing (ARCHITECTURE.md §8). */
 function defaultManifest(): ProjectManifest {
@@ -161,6 +190,7 @@ function defaultManifest(): ProjectManifest {
     language: "python",
     modules: [],
     module_settings: {},
+    environment: { mode: "shared" },
   };
 }
 
@@ -429,11 +459,13 @@ export class ProjectManager {
 
     let existingModules: ProjectModuleImport[] = [];
     let existingModuleSettings: Record<string, Record<string, unknown>> = {};
+    let existingEnvironment: EnvironmentConfig | undefined;
     let projectName = options?.projectName;
     try {
       const existing = await ProjectManager.readManifest(saveDir);
       existingModules = existing.modules;
       existingModuleSettings = existing.module_settings;
+      existingEnvironment = existing.environment;
       if (projectName === undefined) {
         projectName = existing.project_name;
       }
@@ -450,6 +482,7 @@ export class ProjectManager {
       project_name: projectName,
       modules: existingModules,
       module_settings: existingModuleSettings,
+      environment: existingEnvironment ?? { mode: "shared" },
     };
     console.debug(`[ProjectManager.save] staged (+${(performance.now() - t0).toFixed(0)}ms)`);
 
@@ -605,6 +638,7 @@ export class ProjectManager {
       project_name: projectName,
       modules: _parseManifestModules(obj.modules, manifestPath),
       module_settings: _parseModuleSettings(obj.module_settings, manifestPath),
+      environment: _parseEnvironment(obj.environment),
     };
   }
 
@@ -895,6 +929,32 @@ function _assertCompatibleSchema(schemaVersion: string): void {
   if (isNaN(foundMajor) || foundMajor > supportedMajor) {
     throw new PDVSchemaVersionError(schemaVersion, SCHEMA_VERSION);
   }
+}
+
+/**
+ * Parse the ``environment`` block from a project manifest payload.
+ *
+ * Absent, malformed, or unrecognized values default to ``{ mode: "shared" }``
+ * so legacy ``"1.1"`` manifests and hand-edited files load safely
+ * (ARCHITECTURE.md §10.5.5). Only ``mode: "uv"`` opts into uv mode; any other
+ * value is coerced to shared.
+ *
+ * @param raw - The raw ``environment`` field from project.json, if any.
+ * @returns A valid {@link EnvironmentConfig}.
+ */
+function _parseEnvironment(raw: unknown): EnvironmentConfig {
+  if (raw === null || typeof raw !== "object" || Array.isArray(raw)) {
+    return { mode: "shared" };
+  }
+  const obj = raw as Record<string, unknown>;
+  if (obj.mode !== "uv") {
+    return { mode: "shared" };
+  }
+  const environment: EnvironmentConfig = { mode: "uv" };
+  if (typeof obj.python_version === "string") {
+    environment.python_version = obj.python_version;
+  }
+  return environment;
 }
 
 /**
