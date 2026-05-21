@@ -72,6 +72,12 @@ export interface PDVConfig {
   workingDirBase?: string;
   /** Autosave interval in seconds. Default 300 (5 minutes). Minimum 30. */
   autoSaveIntervalSeconds?: number;
+  /**
+   * Packages (PEP 508 specs) seeded into a new uv project's pyproject.toml
+   * at creation (ARCHITECTURE.md §10.5.14). Editable in Settings. Defaults
+   * to ["numpy", "matplotlib"]. Editing it never changes existing projects.
+   */
+  defaultPackages?: string[];
   /** Renderer settings blob persisted by Settings dialog. */
   settings?: {
     shortcuts?: Record<string, string>;
@@ -149,6 +155,7 @@ const CONFIG_DEFAULTS: PDVConfig = {
   showCallableVariables: false,
   autoRefreshNamespace: false,
   autoSaveIntervalSeconds: DEFAULT_AUTOSAVE_INTERVAL_S,
+  defaultPackages: ["numpy", "matplotlib"],
   settings: {
     appearance: {
       themeName: "Dark+ (VSCode)",
@@ -261,6 +268,18 @@ function parseConfig(raw: string, filePath: string): Partial<PDVConfig> {
     const val = obj.autoSaveIntervalSeconds;
     if (val !== null && val !== undefined && typeof val === "number" && val >= 30) {
       result.autoSaveIntervalSeconds = val;
+    }
+  }
+  if ("defaultPackages" in obj) {
+    const defaultPackages = obj.defaultPackages;
+    if (defaultPackages !== null && defaultPackages !== undefined) {
+      if (
+        !Array.isArray(defaultPackages) ||
+        !defaultPackages.every((entry) => typeof entry === "string")
+      ) {
+        throw new Error(`Invalid config value for defaultPackages in ${filePath}`);
+      }
+      result.defaultPackages = defaultPackages;
     }
   }
   if ("projectRoot" in obj) {

@@ -581,6 +581,7 @@ export function registerIpcHandlers(
     getActiveKernelId: () => activeKernelId,
     getActiveProjectDir: () => activeProjectDir,
     getWorkingDirBase: () => readConfig(configStore).workingDirBase,
+    getDefaultPackages: () => readConfig(configStore).defaultPackages ?? [],
     bindActiveProjectModules,
   });
 

@@ -92,6 +92,7 @@ interface Harness {
   getActiveKernelId: Mock<() => string | null>;
   getActiveProjectDir: Mock<() => string | null>;
   getWorkingDirBase: Mock<() => string | undefined>;
+  getDefaultPackages: Mock<() => string[]>;
   bindActiveProjectModules: Mock<(kernelId: string | null) => Promise<void>>;
 }
 
@@ -122,6 +123,7 @@ function setup(): Harness {
     getActiveKernelId: vi.fn(() => activeId),
     getActiveProjectDir: vi.fn(() => null),
     getWorkingDirBase: vi.fn(() => undefined),
+    getDefaultPackages: vi.fn(() => []),
     bindActiveProjectModules: vi.fn(async () => undefined),
   };
   registerKernelIpcHandlers({
@@ -139,6 +141,7 @@ function setup(): Harness {
     getActiveKernelId: harness.getActiveKernelId,
     getActiveProjectDir: harness.getActiveProjectDir,
     getWorkingDirBase: harness.getWorkingDirBase,
+    getDefaultPackages: harness.getDefaultPackages,
     bindActiveProjectModules: harness.bindActiveProjectModules,
   });
   return harness;

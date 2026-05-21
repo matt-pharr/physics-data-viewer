@@ -46,6 +46,7 @@ describe("ConfigStore", () => {
       showCallableVariables: false,
       autoRefreshNamespace: false,
       autoSaveIntervalSeconds: 300,
+      defaultPackages: ["numpy", "matplotlib"],
       settings: {
         appearance: {
           themeName: "Dark+ (VSCode)",
@@ -93,6 +94,7 @@ describe("ConfigStore", () => {
       showCallableVariables: false,
       autoRefreshNamespace: false,
       autoSaveIntervalSeconds: 300,
+      defaultPackages: ["numpy", "matplotlib"],
       theme: "dark",
       settings: {
         appearance: {
@@ -115,6 +117,7 @@ describe("ConfigStore", () => {
       showCallableVariables: false,
       autoRefreshNamespace: false,
       autoSaveIntervalSeconds: 300,
+      defaultPackages: ["numpy", "matplotlib"],
       settings: {
         appearance: {
           themeName: "Dark+ (VSCode)",
@@ -187,6 +190,18 @@ describe("ConfigStore", () => {
         .readdirSync(appDataDir)
         .some((name) => name.startsWith("preferences.json.corrupted-"))
     ).toBe(true);
+  });
+
+  it("loads a custom defaultPackages list from preferences.json", () => {
+    const appDataDir = makeTempDir();
+    fs.writeFileSync(
+      path.join(appDataDir, "preferences.json"),
+      JSON.stringify({ defaultPackages: ["scipy", "xarray"] }, null, 2),
+      "utf8"
+    );
+
+    const store = new ConfigStore(appDataDir);
+    expect(store.get("defaultPackages")).toEqual(["scipy", "xarray"]);
   });
 
 });

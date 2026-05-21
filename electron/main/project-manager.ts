@@ -390,7 +390,12 @@ export class ProjectManager {
   async save(
     saveDir: string,
     codeCells: CodeCellData,
-    options?: { language?: "python" | "julia"; interpreterPath?: string; projectName?: string }
+    options?: {
+      language?: "python" | "julia";
+      interpreterPath?: string;
+      projectName?: string;
+      environment?: EnvironmentConfig;
+    }
   ): Promise<{
     checksum: string;
     nodeCount: number;
@@ -472,6 +477,19 @@ export class ProjectManager {
     } catch {
       // No prior manifest or unreadable — start fresh.
     }
+    // Environment precedence: an explicit option (e.g. a new project being
+    // promoted to uv mode) wins, else the previously-saved environment, else
+    // shared. When promoting to uv, preserve any python_version a prior save
+    // recorded.
+    let environment: EnvironmentConfig =
+      options?.environment ?? existingEnvironment ?? { mode: "shared" };
+    if (
+      environment.mode === "uv" &&
+      !environment.python_version &&
+      existingEnvironment?.python_version
+    ) {
+      environment = { ...environment, python_version: existingEnvironment.python_version };
+    }
     const pendingManifest: ProjectManifest = {
       schema_version: SCHEMA_VERSION,
       saved_at: new Date().toISOString(),
@@ -482,7 +500,7 @@ export class ProjectManager {
       project_name: projectName,
       modules: existingModules,
       module_settings: existingModuleSettings,
-      environment: existingEnvironment ?? { mode: "shared" },
+      environment,
     };
     console.debug(`[ProjectManager.save] staged (+${(performance.now() - t0).toFixed(0)}ms)`);
 

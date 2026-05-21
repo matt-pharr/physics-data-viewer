@@ -13,6 +13,9 @@
  * - Push forwarding.
  */
 
+import * as fs from "fs/promises";
+import * as path from "path";
+
 import { BrowserWindow, ipcMain } from "electron";
 
 import { CommRouter } from "./comm-router";
@@ -27,6 +30,7 @@ import { setupProjectModuleNamespaces } from "./module-runtime";
 import { copyEnvFilesForLoad, copyFilesForLoad } from "./project-file-sync";
 import { ProjectManager } from "./project-manager";
 import { materializeUvEnvironment } from "./uv-environment";
+import { generatePyproject } from "./pyproject";
 
 interface RegisterKernelIpcHandlersOptions {
   win: BrowserWindow;
@@ -43,6 +47,8 @@ interface RegisterKernelIpcHandlersOptions {
   getActiveKernelId: () => string | null;
   getActiveProjectDir: () => string | null;
   getWorkingDirBase: () => string | undefined;
+  /** Default packages seeded into a new uv project's pyproject.toml (§10.5.14). */
+  getDefaultPackages: () => string[];
   bindActiveProjectModules: (kernelId: string | null) => Promise<void>;
 }
 
@@ -99,6 +105,7 @@ export function registerKernelIpcHandlers(
     getActiveKernelId,
     getActiveProjectDir,
     getWorkingDirBase,
+    getDefaultPackages,
     bindActiveProjectModules,
   } = options;
 
@@ -120,20 +127,31 @@ export function registerKernelIpcHandlers(
    * inside the working directory, so this must complete before the kernel
    * process is spawned against the venv interpreter.
    *
-   * @param saveDir - Save directory of the uv-mode project being opened.
+   * @param uv - uv context: an existing project's `saveDir` to copy env
+   *   files from, or `newProject` to seed a fresh `pyproject.toml` from the
+   *   user's default packages.
    * @returns The pre-created working directory and the venv interpreter path.
    * @throws {Error} When uv environment setup fails. The partially-created
    *   working directory is removed before the error propagates.
    */
   async function startUvEnvironment(
-    saveDir: string
+    uv: { saveDir?: string; newProject?: boolean }
   ): Promise<{ workingDir: string; venvPython: string }> {
     const workingDir = await projectManager.createWorkingDir(getWorkingDirBase());
     try {
-      await copyEnvFilesForLoad(saveDir, workingDir);
-      const manifest = await ProjectManager.readManifest(saveDir);
+      let pythonVersion: string | undefined;
+      if (uv.saveDir) {
+        // Opening an existing uv project: copy its env files in.
+        await copyEnvFilesForLoad(uv.saveDir, workingDir);
+        const manifest = await ProjectManager.readManifest(uv.saveDir);
+        pythonVersion = manifest.environment?.python_version;
+      } else {
+        // New uv project: generate a pyproject.toml from the default packages.
+        const toml = generatePyproject({ dependencies: getDefaultPackages() });
+        await fs.writeFile(path.join(workingDir, "pyproject.toml"), toml, "utf8");
+      }
       const result = await materializeUvEnvironment(workingDir, {
-        pythonVersion: manifest.environment?.python_version,
+        pythonVersion,
         win,
         pushChannel: IPC.push.installOutput,
       });
@@ -193,7 +211,7 @@ export function registerKernelIpcHandlers(
     try {
     let requestedSpec = spec as Parameters<KernelManager["start"]>[0];
     const requestedLanguage = requestedSpec?.language ?? "python";
-    const uv = uvContext as { saveDir: string } | undefined;
+    const uv = uvContext as { saveDir?: string; newProject?: boolean } | undefined;
 
     // Starting a new kernel always means a new session — clear any in-memory
     // project state from a previous session (pending imports, active project
@@ -207,7 +225,7 @@ export function registerKernelIpcHandlers(
     // shared-mode pdv-install check below is skipped for uv kernels.
     let preCreatedWorkingDir: string | undefined;
     if (uv && requestedLanguage === "python") {
-      const uvEnv = await startUvEnvironment(uv.saveDir);
+      const uvEnv = await startUvEnvironment(uv);
       preCreatedWorkingDir = uvEnv.workingDir;
       requestedSpec = {
         ...(requestedSpec ?? {}),

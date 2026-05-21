@@ -449,6 +449,7 @@ const App: React.FC = () => {
     setKernelMemoryRss,
   });
 
+  const [environmentMode, setEnvironmentMode] = useState<'uv' | 'shared'>('shared');
   const { startKernel, handleEnvSave, lastErrorRef } = useKernelLifecycle({
     config,
     currentKernelId,
@@ -459,6 +460,7 @@ const App: React.FC = () => {
     setLogs,
     setNamespaceRefreshToken,
     setTreeRefreshToken,
+    setEnvironmentMode,
   });
 
   const addCellTab = () => {
@@ -1225,8 +1227,17 @@ const App: React.FC = () => {
 
   const handleWelcomeNewProject = useCallback(async (language: 'python' | 'julia') => {
     dismissWelcome();
+    if (language === 'python') {
+      // New Python projects are uv projects by default: the main process
+      // creates the venv from the user's default packages (§10.5.8). No shared
+      // interpreter is needed, so bypass ensureKernel's env pre-flight checks.
+      setActiveLanguage('python');
+      const ok = await startKernel(config ?? {} as Config, 'python', { newProject: true });
+      if (!ok) openEnvSettings(lastErrorRef.current ?? 'Failed to create the project environment.');
+      return;
+    }
     await ensureKernel(language);
-  }, [dismissWelcome, ensureKernel]);
+  }, [config, dismissWelcome, ensureKernel, startKernel, openEnvSettings, lastErrorRef, setActiveLanguage]);
 
   /**
    * Open a project from the welcome screen. Peeks at the manifest to detect
@@ -1758,6 +1769,7 @@ const App: React.FC = () => {
         <StatusBar
           isExecuting={isExecuting}
           activeLanguage={activeLanguage}
+          environmentMode={environmentMode}
           pythonPath={config?.pythonPath}
           juliaPath={config?.juliaPath}
           kernelSpec={config?.kernelSpec ?? undefined}

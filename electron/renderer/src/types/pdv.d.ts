@@ -262,8 +262,10 @@ export interface ProjectManifestPeek {
  * launch the kernel against the venv interpreter (§10.5.9).
  */
 export interface KernelUvContext {
-  /** Save directory of the uv-mode project being opened. */
-  saveDir: string;
+  /** Opening an existing uv project: its save directory. */
+  saveDir?: string;
+  /** Creating a brand-new uv project (seed from default packages, §10.5.8). */
+  newProject?: boolean;
 }
 
 /** Persisted user configuration payload returned by `config.get`. */
@@ -306,6 +308,8 @@ export interface Config {
   workingDirBase?: string;
   /** Autosave interval in seconds. Default 300 (5 minutes). Minimum 30. */
   autoSaveIntervalSeconds?: number;
+  /** Packages (PEP 508 specs) seeded into a new uv project. */
+  defaultPackages?: string[];
   /** Local AI-agent MCP server settings, surfaced in the Agents tab. */
   mcp?: {
     /** Preferred TCP port for the MCP server to bind. */

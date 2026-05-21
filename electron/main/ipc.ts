@@ -1428,8 +1428,13 @@ export interface ProjectManifestPeek {
  * kernel against the venv interpreter (§10.5.9).
  */
 export interface KernelUvContext {
-  /** Save directory of the uv-mode project being opened. */
-  saveDir: string;
+  /** Opening an existing uv project: copy its env files from this save dir. */
+  saveDir?: string;
+  /**
+   * Creating a brand-new uv project: seed `pyproject.toml` from the user's
+   * default packages (§10.5.8) rather than copying from a save directory.
+   */
+  newProject?: boolean;
 }
 
 /**

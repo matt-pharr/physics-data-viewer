@@ -23,6 +23,8 @@ interface UseKernelLifecycleOptions {
   setNamespaceRefreshToken: Dispatch<SetStateAction<number>>;
   /** Bumps the token to trigger a Tree panel refetch. */
   setTreeRefreshToken: Dispatch<SetStateAction<number>>;
+  /** Setter for the active environment mode ("uv" project venv vs shared). */
+  setEnvironmentMode: Dispatch<SetStateAction<'uv' | 'shared'>>;
 }
 
 export function useKernelLifecycle(options: UseKernelLifecycleOptions) {
@@ -36,6 +38,7 @@ export function useKernelLifecycle(options: UseKernelLifecycleOptions) {
     setLogs,
     setNamespaceRefreshToken,
     setTreeRefreshToken,
+    setEnvironmentMode,
   } = options;
 
   // Serializes startKernel calls so only one runs at a time.
@@ -74,6 +77,9 @@ export function useKernelLifecycle(options: UseKernelLifecycleOptions) {
 
       const kernel = await window.pdv.kernels.start(spec, uvContext);
       setCurrentKernelId(kernel.id);
+      // uvContext is only supplied for uv-project launches; its presence is
+      // the authoritative signal that this kernel runs in a project venv.
+      setEnvironmentMode(uvContext ? 'uv' : 'shared');
       setTreeRefreshToken((prev) => prev + 1);
       setNamespaceRefreshToken((prev) => prev + 1);
       setKernelStatus('ready');
@@ -94,6 +100,7 @@ export function useKernelLifecycle(options: UseKernelLifecycleOptions) {
     setLastError,
     setNamespaceRefreshToken,
     setTreeRefreshToken,
+    setEnvironmentMode,
   ]);
 
   /** Start (or restart) a kernel. Returns `true` on success, `false` on failure. */

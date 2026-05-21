@@ -29,7 +29,7 @@ import {
   type ProjectManifest,
   type ProjectModuleImport,
 } from "./project-manager";
-import { copyFilesForLoad, overlayAutosaveTreeFiles } from "./project-file-sync";
+import { copyEnvFilesForSave, copyFilesForLoad, overlayAutosaveTreeFiles } from "./project-file-sync";
 import {
   writeModuleIndex,
   writeModuleManifest,
@@ -272,10 +272,24 @@ export function registerProjectIpcHandlers(
 
       const doSave = async (): Promise<{ checksum: string; nodeCount: number; projectName?: string; missingFiles?: string[] }> => {
         console.debug(`[project:save] seq=${seq} starting (was queued behind previous save)`);
+
+        // A uv project is identified by a pyproject.toml in the working dir
+        // (generated for new projects, copied for opened ones). Record uv mode
+        // in the manifest and write the env files back to the save dir (§10.5.10).
+        const activeKernelId = getActiveKernelId();
+        const uvWorkingDir = activeKernelId ? kernelWorkingDirs.get(activeKernelId) : undefined;
+        const isUvProject = uvWorkingDir
+          ? await fs
+              .access(path.join(uvWorkingDir, "pyproject.toml"))
+              .then(() => true)
+              .catch(() => false)
+          : false;
+
         const saveResult = await projectManager.save(saveDir, codeCells, {
           language: getActiveKernelLanguage(),
           interpreterPath: getInterpreterPath(),
           projectName,
+          environment: isUvProject ? { mode: "uv" } : undefined,
         });
 
         // If the serializer detected missing backing files it aborted before
@@ -340,6 +354,13 @@ export function registerProjectIpcHandlers(
         // of the save is already on disk, so a parseable project.json
         // implies the save is complete.
         await projectManager.commitProjectManifest(saveDir, finalManifest);
+
+        // Persist the uv environment spec alongside the manifest. Only files
+        // present in the working dir are copied, so a failed sync (no uv.lock)
+        // never clobbers a previously-saved lock (§10.5.10).
+        if (isUvProject && uvWorkingDir) {
+          await copyEnvFilesForSave(uvWorkingDir, saveDir);
+        }
 
         setActiveProjectDir(saveDir);
         await refreshProjectModuleHealth(saveDir);
