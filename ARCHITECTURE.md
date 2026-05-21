@@ -1688,14 +1688,16 @@ The `chrome.*` IPC namespace (§11.2) provides the renderer with platform-specif
 
 When `kernels.restart()` is called while a project is loaded, the main process automatically preserves and reloads project state:
 
-1. Stop the old kernel, start a new one (preserving `activeProjectDir`)
-2. Send `project.onReloading` push with `{ status: "reloading" }` — renderer shows overlay
-3. Copy project files from the save directory to the new kernel's working directory
-4. Call `projectManager.load()` to re-populate the tree via `pdv.project.load`
-5. Re-run module setup (`pdv.modules.setup`)
-6. Send `project.onReloading` push with `{ status: "ready" }` — renderer removes overlay
+1. **Snapshot the uv environment** (uv mode only): before the old working directory is deleted, read its `pyproject.toml` and `uv.lock` into memory. This captures any packages installed during the session (e.g. via `pdv.install()`, §10.5.11) that may not yet be in the save directory.
+2. Stop the old kernel, start a new one (preserving `activeProjectDir`)
+3. **Re-materialize the uv environment** (uv mode only): write the snapshot into the new working directory and run the §10.5.9 sequence (`uv sync` → install `pdv-python`), launching the new kernel against the project venv interpreter. Shared-mode kernels skip this and relaunch on the app-selected interpreter as before.
+4. Send `project.onReloading` push with `{ status: "reloading" }` — renderer shows overlay
+5. Copy project files from the save directory to the new kernel's working directory
+6. Call `projectManager.load()` to re-populate the tree via `pdv.project.load`
+7. Re-run module setup (`pdv.modules.setup`)
+8. Send `project.onReloading` push with `{ status: "ready" }` — renderer removes overlay
 
-This ensures tree state, module bindings, and `sys.path` configuration survive kernel restarts.
+This ensures the project venv, tree state, module bindings, and `sys.path` configuration survive kernel restarts. Because the renderer's environment-mode indicator reflects the project (not the individual kernel), it stays correct across a restart that re-materializes the same venv.
 
 ---
 

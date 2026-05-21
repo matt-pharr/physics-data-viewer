@@ -131,19 +131,35 @@ export function registerKernelIpcHandlers(
    * process is spawned against the venv interpreter.
    *
    * @param uv - uv context: an existing project's `saveDir` to copy env
-   *   files from, or `newProject` to seed a fresh `pyproject.toml` from the
-   *   user's default packages.
+   *   files from, `newProject` to seed a fresh `pyproject.toml` from the
+   *   user's default packages, or an `envSnapshot` of file contents captured
+   *   before the source working dir was torn down (used on restart, §11.6).
    * @returns The pre-created working directory and the venv interpreter path.
    * @throws {Error} When uv environment setup fails. The partially-created
    *   working directory is removed before the error propagates.
    */
   async function startUvEnvironment(
-    uv: { saveDir?: string; newProject?: boolean }
+    uv: {
+      saveDir?: string;
+      newProject?: boolean;
+      envSnapshot?: { pyproject: string; uvLock?: string };
+    }
   ): Promise<{ workingDir: string; venvPython: string }> {
     const workingDir = await projectManager.createWorkingDir(getWorkingDirBase());
     try {
       let pythonVersion: string | undefined;
-      if (uv.saveDir) {
+      if (uv.envSnapshot) {
+        // Restart: re-create the env from the snapshot taken before the old
+        // working dir was deleted, so freshly-installed packages survive.
+        await fs.writeFile(
+          path.join(workingDir, "pyproject.toml"),
+          uv.envSnapshot.pyproject,
+          "utf8"
+        );
+        if (uv.envSnapshot.uvLock !== undefined) {
+          await fs.writeFile(path.join(workingDir, "uv.lock"), uv.envSnapshot.uvLock, "utf8");
+        }
+      } else if (uv.saveDir) {
         // Opening an existing uv project: copy its env files in.
         await copyEnvFilesForLoad(uv.saveDir, workingDir);
         const manifest = await ProjectManager.readManifest(uv.saveDir);
@@ -350,12 +366,50 @@ export function registerKernelIpcHandlers(
       if (!current) {
         throw new Error(`Kernel not found: ${kernelId}`);
       }
+
+      // Snapshot the uv env spec BEFORE the old working dir is deleted, so a
+      // uv kernel relaunches into its project venv rather than system python
+      // (ARCHITECTURE.md §10.5.9, §11.6). The snapshot carries any packages
+      // installed since load (e.g. via pdv.install, §10.5.11).
+      const oldWorkingDir = kernelWorkingDirs.get(kernelId);
+      let envSnapshot: { pyproject: string; uvLock?: string } | undefined;
+      if (current.language === "python" && oldWorkingDir) {
+        try {
+          const pyproject = await fs.readFile(
+            path.join(oldWorkingDir, "pyproject.toml"),
+            "utf8"
+          );
+          let uvLock: string | undefined;
+          try {
+            uvLock = await fs.readFile(path.join(oldWorkingDir, "uv.lock"), "utf8");
+          } catch {
+            /* lock may not exist yet */
+          }
+          envSnapshot = { pyproject, uvLock };
+        } catch {
+          /* no pyproject.toml -> shared-mode kernel */
+        }
+      }
+
       await cleanupKernelWorkingDir(projectManager, kernelManager, kernelId, kernelWorkingDirs, crashHandlers);
       await kernelManager.stop(kernelId);
-      const restarted = await kernelManager.start({
-        name: current.name,
-        language: current.language,
-      });
+
+      let preCreatedWorkingDir: string | undefined;
+      let restarted: KernelInfo;
+      if (envSnapshot) {
+        const uvEnv = await startUvEnvironment({ envSnapshot });
+        preCreatedWorkingDir = uvEnv.workingDir;
+        restarted = await kernelManager.start({
+          name: current.name,
+          language: current.language,
+          env: { PYTHON_PATH: uvEnv.venvPython },
+        });
+      } else {
+        restarted = await kernelManager.start({
+          name: current.name,
+          language: current.language,
+        });
+      }
       commRouter.attach(kernelManager, restarted.id);
       queryRouter.detach();
       await initializeKernelSession(
@@ -364,7 +418,9 @@ export function registerKernelIpcHandlers(
         queryRouter,
         projectManager,
         restarted.id,
-        kernelWorkingDirs
+        kernelWorkingDirs,
+        getWorkingDirBase(),
+        preCreatedWorkingDir
       );
       return restarted;
     }

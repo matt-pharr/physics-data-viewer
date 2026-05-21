@@ -8,6 +8,9 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from "vitest";
+import * as fs from "fs";
+import * as os from "os";
+import * as path from "path";
 
 const ipcRegistry = vi.hoisted(() => {
   const handlers = new Map<string, (event: unknown, ...args: unknown[]) => unknown>();
@@ -35,6 +38,11 @@ const moduleRuntimeMocks = vi.hoisted(() => ({
 
 const projectFileSyncMocks = vi.hoisted(() => ({
   copyFilesForLoad: vi.fn(async () => undefined),
+  copyEnvFilesForLoad: vi.fn(async () => []),
+}));
+
+const uvEnvironmentMocks = vi.hoisted(() => ({
+  materializeUvEnvironment: vi.fn(),
 }));
 
 vi.mock("electron", () => ({
@@ -54,6 +62,7 @@ vi.mock("./environment-detector", () => ({
 vi.mock("./kernel-session", () => kernelSessionMocks);
 vi.mock("./module-runtime", () => moduleRuntimeMocks);
 vi.mock("./project-file-sync", () => projectFileSyncMocks);
+vi.mock("./uv-environment", () => uvEnvironmentMocks);
 
 import { IPC } from "./ipc";
 import { registerKernelIpcHandlers } from "./ipc-register-kernels";
@@ -263,6 +272,52 @@ describe("kernels:restart", () => {
       "/tmp/new-wd",
     );
     expect(harness.projectManager.load).toHaveBeenCalledWith("/projects/x");
+  });
+
+  it("re-materializes the uv environment and relaunches into the venv", async () => {
+    const harness = setup();
+    const oldDir = fs.mkdtempSync(path.join(os.tmpdir(), "pdv-restart-old-"));
+    const newDir = fs.mkdtempSync(path.join(os.tmpdir(), "pdv-restart-new-"));
+    fs.writeFileSync(path.join(oldDir, "pyproject.toml"), "[project]\nname = 'x'\n");
+    fs.writeFileSync(path.join(oldDir, "uv.lock"), "version = 1\n");
+
+    (harness.kernelManager.getKernel as Mock).mockReturnValue(
+      makeKernelInfo({ id: "old", language: "python" }),
+    );
+    (harness.kernelManager.start as Mock).mockResolvedValueOnce(
+      makeKernelInfo({ id: "new", language: "python" }),
+    );
+    (harness.projectManager.createWorkingDir as Mock).mockResolvedValue(newDir);
+    (harness.getActiveProjectDir as Mock).mockReturnValue(null);
+    harness.kernelWorkingDirs.set("old", oldDir);
+    const venvPython = path.join(newDir, ".venv", "bin", "python");
+    uvEnvironmentMocks.materializeUvEnvironment.mockResolvedValue({
+      success: true,
+      venvPython,
+      output: "",
+    });
+
+    try {
+      await getHandler(IPC.kernels.restart)({}, "old");
+
+      // The snapshot was written into the new working dir and re-synced there.
+      expect(uvEnvironmentMocks.materializeUvEnvironment).toHaveBeenCalledWith(
+        newDir,
+        expect.any(Object),
+      );
+      expect(fs.readFileSync(path.join(newDir, "pyproject.toml"), "utf8")).toContain(
+        "[project]",
+      );
+      // The new kernel launched against the venv interpreter, not system python.
+      const startArg = (harness.kernelManager.start as Mock).mock.calls.at(-1)?.[0];
+      expect(startArg.env.PYTHON_PATH).toBe(venvPython);
+      // The session was initialized with the pre-created (uv) working dir.
+      const initArgs = kernelSessionMocks.initializeKernelSession.mock.calls.at(-1);
+      expect(initArgs?.[initArgs.length - 1]).toBe(newDir);
+    } finally {
+      fs.rmSync(oldDir, { recursive: true, force: true });
+      fs.rmSync(newDir, { recursive: true, force: true });
+    }
   });
 
   it("rejects when the kernel does not exist", async () => {
