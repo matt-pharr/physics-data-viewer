@@ -70,6 +70,53 @@ export interface TerminalLauncherConfig {
 }
 
 /**
+ * User-configured editor / IDE launcher. Persisted under
+ * `PDVConfig.launchers.editor`. Supersedes the legacy per-language
+ * `pythonEditorCmd` / `juliaEditorCmd` config keys.
+ */
+export interface EditorLauncherConfig {
+  /**
+   * Command used to open a single file (e.g. `"code {}"`, `"nvim {}"`).
+   * `{}` is the file-path placeholder; if absent the path is appended.
+   */
+  fileCommand?: string;
+  /**
+   * Command used to open a directory (e.g. the per-kernel working
+   * directory). Same `{}` placeholder convention. Consumed by the
+   * "open working directory" action — see PLANNED_FEATURES.md.
+   */
+  dirCommand?: string;
+  /**
+   * Whether `fileCommand` is a TUI editor that must be wrapped in a
+   * terminal. When unset, PDV auto-detects from the command's basename
+   * (see {@link isTerminalEditorCommand}).
+   */
+  isTuiEditor?: boolean;
+}
+
+/**
+ * User-configured AI-agent launcher. Persisted under
+ * `PDVConfig.launchers.agent`. The agent CLI runs inside the configured
+ * terminal preset, in a shell that has `cd`-ed to {@link cwd}.
+ */
+export interface AgentLauncherConfig {
+  /**
+   * Agent CLI command. Three placeholders are substituted with
+   * shell-quoted absolute paths before launch:
+   * - `{mcpConfig}` — the materialized `.pdv-mcp.json` (point the agent at
+   *   PDV's MCP server, e.g. `claude --mcp-config {mcpConfig}`).
+   * - `{projectRoot}` — the active project directory.
+   * - `{workingDir}` — the active kernel's session working directory.
+   */
+  command?: string;
+  /** Which directory the agent shell starts in. Defaults to `'project'`. */
+  cwd?: "project" | "working";
+}
+
+/** Default agent command when `launchers.agent.command` is unset. */
+export const DEFAULT_AGENT_COMMAND = "claude --mcp-config {mcpConfig}";
+
+/**
  * Templates for each preset. Two placeholders are recognised:
  *
  * - `{cmd}` — splices the editor argv in as multiple argv tokens. Used by
@@ -197,7 +244,7 @@ export function isTerminalEditorCommand(command: string): boolean {
  * @param arg - Argv element to quote.
  * @returns Single-quoted form safe to embed in a shell command line.
  */
-function posixShellQuote(arg: string): string {
+export function posixShellQuote(arg: string): string {
   if (arg.length === 0) return "''";
   return `'${arg.replace(/'/g, `'\\''`)}'`;
 }
@@ -397,9 +444,12 @@ export function buildEditorSpawn(
 /**
  * Resolve platform-specific spawn command/args for launching an editor.
  *
- * For non-TUI editors (`code`, `subl`, …) the spec passes through unchanged.
- * For TUI editors (`vim`, `nvim`, …) the spec is wrapped in the configured
- * terminal preset so a terminal window actually opens.
+ * Whether to wrap the command in a terminal is governed by
+ * `opts.wrapInTerminal`. The caller passes the user's
+ * `launchers.editor.isTuiEditor` flag straight through: when it is `true`
+ * the spec is wrapped, when `false` it is left bare, and when `undefined`
+ * (the user has expressed no preference) PDV auto-detects from the
+ * command's basename via {@link isTerminalEditorCommand}.
  *
  * When `opts.terminal` is unset, the platform-default preset is used (see
  * {@link defaultTerminalPreset}) — preserves PDV's prior macOS-Terminal.app
@@ -408,24 +458,32 @@ export function buildEditorSpawn(
  * at all.
  *
  * `preset: 'none'` is a deliberate opt-out: it returns the spec unwrapped
- * even for TUI editors. Spawning `vim` without a TTY won't open a usable
+ * even for a TUI editor. Spawning `vim` without a TTY won't open a usable
  * window — the setting is intended for GUI editors that PDV's allowlist
  * misclassifies (e.g. `nvim-qt`, custom shims). A warning is logged when
  * this combination is hit.
  *
  * @param command - Editor executable.
  * @param args - Editor arguments.
- * @param opts - Optional terminal-launcher configuration. `platform` defaults
- *   to `process.platform` and exists primarily so tests can exercise
- *   platform-specific templates without monkey-patching globals.
+ * @param opts - Optional launcher configuration:
+ *   - `wrapInTerminal` — force terminal wrapping on/off; auto-detected when
+ *     omitted.
+ *   - `terminal` — terminal-emulator preset selection.
+ *   - `platform` — defaults to `process.platform`; lets tests exercise
+ *     platform-specific templates without monkey-patching globals.
  * @returns Spawn-ready executable and argument list.
  */
 export function resolveEditorSpawn(
   command: string,
   args: string[],
-  opts?: { terminal?: TerminalLauncherConfig; platform?: NodeJS.Platform },
+  opts?: {
+    wrapInTerminal?: boolean;
+    terminal?: TerminalLauncherConfig;
+    platform?: NodeJS.Platform;
+  },
 ): { file: string; args: string[] } {
-  if (!isTerminalEditorCommand(command)) {
+  const wrapInTerminal = opts?.wrapInTerminal ?? isTerminalEditorCommand(command);
+  if (!wrapInTerminal) {
     return { file: command, args };
   }
 

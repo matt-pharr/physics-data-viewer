@@ -1421,6 +1421,14 @@ const App: React.FC = () => {
           leftPanel={leftPanel}
           onActivityBarClick={handleActivityBarClick}
           onSettingsClick={() => { setSettingsInitialTab('general'); setShowSettings(true); }}
+          onAgentClick={() => {
+            void window.pdv.launchers.openAgent().then((result) => {
+              if (!result.success) {
+                console.error('[pdv] failed to launch agent:', result.error);
+                window.alert(result.error ?? 'Failed to launch the AI agent.');
+              }
+            });
+          }}
           guiModules={importedGuiModules}
           kernelId={currentKernelId}
         />

@@ -239,6 +239,14 @@
   margin-bottom: 4px;
 }
 
+/* Checkbox cell in the settings grid — vertically centre the control so it
+   lines up with its right-aligned label. */
+.settings-general-check {
+  display: flex;
+  align-items: center;
+  min-height: 26px;
+}
+
 .settings-general-desc code {
   font-family: var(--font-mono);
   background: var(--bg-tertiary);

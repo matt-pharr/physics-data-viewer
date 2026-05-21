@@ -40,6 +40,12 @@ export type { TerminalPreset } from '../../../main/ipc';
 /** Persisted terminal-launcher selection (`launchers.terminal`). */
 export type { TerminalLauncherConfig } from '../../../main/ipc';
 
+/** Persisted editor / IDE launcher config (`launchers.editor`). */
+export type { EditorLauncherConfig } from '../../../main/ipc';
+
+/** Persisted AI-agent launcher config (`launchers.agent`). */
+export type { AgentLauncherConfig } from '../../../main/ipc';
+
 /** Runtime kernel descriptor returned by `kernels.start/list/restart`. */
 export interface KernelInfo {
   /** Opaque kernel id used in subsequent API calls. */
@@ -280,9 +286,9 @@ export interface Config {
   autoRefreshNamespace?: boolean;
   /** Coarse light/dark mode override. */
   theme?: "light" | "dark";
-  /** External editor command for Python scripts. Uses `{}` as file-path placeholder. */
+  /** @deprecated Superseded by `launchers.editor.fileCommand` (migrated on load). */
   pythonEditorCmd?: string;
-  /** External editor command for Julia scripts. Uses `{}` as file-path placeholder. */
+  /** @deprecated Superseded by `launchers.editor.fileCommand` (migrated on load). */
   juliaEditorCmd?: string;
   /** File-manager command to reveal a file/folder. Uses `{}` as placeholder. */
   fileManagerCmd?: string;
@@ -305,6 +311,10 @@ export interface Config {
   launchers?: {
     /** Terminal emulator used to wrap TUI editors (vim, nvim, …). */
     terminal?: TerminalLauncherConfig;
+    /** Editor / IDE commands (supersedes `pythonEditorCmd`/`juliaEditorCmd`). */
+    editor?: EditorLauncherConfig;
+    /** AI-agent CLI launched by the action-bar agent button. */
+    agent?: AgentLauncherConfig;
   };
   settings?: {
     /** Keyboard shortcut overrides. */
@@ -1055,6 +1065,11 @@ export interface PDVApi {
   system: {
     /** Node.js platform identifier of the main process. */
     platform: NodeJS.Platform;
+  };
+  /** External-app launchers driven by the action bar. */
+  launchers: {
+    /** Launch the configured AI agent in a terminal pointed at PDV's MCP server. */
+    openAgent(): Promise<{ success: boolean; error?: string }>;
   };
   chrome: {
     getInfo(): Promise<WindowChromeInfo>;
