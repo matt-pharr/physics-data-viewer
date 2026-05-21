@@ -17,6 +17,8 @@ import type {
   ServerRequest,
 } from "@modelcontextprotocol/sdk/types.js";
 
+import { createHash } from "node:crypto";
+
 import type { PDVMessage } from "../../pdv-protocol";
 import type { McpToolContext } from "../mcp-context";
 
@@ -126,6 +128,57 @@ export function assertPdvRunEnabled(ctx: McpToolContext): void {
     throw new Error(
       "The pdv_run tool is disabled. Enable it in PDV under " +
         "Settings → Agents → Allow pdv_run (arbitrary kernel code).",
+    );
+  }
+}
+
+/**
+ * Hash a code-cell source the same way `mcp-server.ts` does for its
+ * per-session read cache. Kept in sync via {@link hashCellCode}'s usage in
+ * both files — SHA-256 of the UTF-8 source, hex-encoded.
+ *
+ * @param code - The cell source to fingerprint.
+ * @returns Hex SHA-256 digest of `code`.
+ */
+export function hashCellCode(code: string): string {
+  return createHash("sha256").update(code).digest("hex");
+}
+
+/**
+ * Read-before-write guard for `cell_write`. Mirrors Claude Code's Read/Edit
+ * mechanic: a session must have called `cell_read` for the tab in this
+ * connection, and the cell source must not have changed in between. This
+ * prevents the agent from clobbering edits the user (or another agent) made
+ * after the agent last looked.
+ *
+ * @param ctx - The MCP tool context.
+ * @param extra - The SDK tool-callback `extra` (carries the session id).
+ * @param tabId - The cell tab id about to be overwritten.
+ * @param currentCode - The cell's source as it exists right now.
+ * @throws {Error} When the session has not read the tab, or the cell has
+ *   changed since the last read.
+ */
+export function assertCellReadFresh(
+  ctx: McpToolContext,
+  extra: ToolExtra,
+  tabId: number,
+  currentCode: string,
+): void {
+  const recorded = ctx.getCellReadHash(extra.sessionId, tabId);
+  if (recorded === undefined) {
+    throw new Error(
+      `cell_write refused: you must call cell_read on tab ${tabId} ` +
+        "before overwriting it. Reading first lets the guard detect " +
+        "concurrent edits by the user or another agent. To create a new " +
+        "tab, call cell_write without `tab_id`.",
+    );
+  }
+  const current = hashCellCode(currentCode);
+  if (current !== recorded) {
+    throw new Error(
+      `cell_write refused: cell ${tabId} has changed since you last ` +
+        "read it (likely a user or another agent edited it). Call " +
+        "cell_read again to see the current source before overwriting.",
     );
   }
 }

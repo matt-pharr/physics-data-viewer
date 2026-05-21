@@ -137,6 +137,8 @@ function makeCtx(opts: CtxOpts = {}): {
     cellRpc: {} as McpToolContext["cellRpc"],
     getRendererWindow: () => null,
     getSessionGeneration: () => 0,
+    recordCellRead: () => undefined,
+    getCellReadHash: () => undefined,
   };
   return { ctx, commRequest };
 }
