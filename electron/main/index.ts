@@ -582,6 +582,7 @@ export function registerIpcHandlers(
     getActiveProjectDir: () => activeProjectDir,
     getWorkingDirBase: () => readConfig(configStore).workingDirBase,
     getDefaultPackages: () => readConfig(configStore).defaultPackages ?? [],
+    getUvBinaryPath: () => readConfig(configStore).uv?.binaryPath,
     bindActiveProjectModules,
   });
 

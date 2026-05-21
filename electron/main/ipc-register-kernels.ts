@@ -49,6 +49,8 @@ interface RegisterKernelIpcHandlersOptions {
   getWorkingDirBase: () => string | undefined;
   /** Default packages seeded into a new uv project's pyproject.toml (§10.5.14). */
   getDefaultPackages: () => string[];
+  /** Optional `uv` binary override from config (§10.5.6); undefined = bundled. */
+  getUvBinaryPath: () => string | undefined;
   bindActiveProjectModules: (kernelId: string | null) => Promise<void>;
 }
 
@@ -106,6 +108,7 @@ export function registerKernelIpcHandlers(
     getActiveProjectDir,
     getWorkingDirBase,
     getDefaultPackages,
+    getUvBinaryPath,
     bindActiveProjectModules,
   } = options;
 
@@ -154,6 +157,7 @@ export function registerKernelIpcHandlers(
         pythonVersion,
         win,
         pushChannel: IPC.push.installOutput,
+        binaryPath: getUvBinaryPath(),
       });
       if (!result.success || !result.venvPython) {
         const step = result.failedStep ? ` (${result.failedStep})` : "";

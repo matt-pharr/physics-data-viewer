@@ -1531,7 +1531,13 @@ If `environment.python_version` names an interpreter uv cannot find, `uv` can do
 
 #### 10.5.16 Developer Mode (editable `pdv-python`)
 
-PDV contributors run the app against an editable install of `pdv-python`; the §10.5.7 wheel install would clobber it. The app detects developer mode by a `.pdv-dev` marker file at the repo root. When present, `pdv-python` is **not** installed into the venv; instead the repo's `pdv-python/src` path is prepended to `PYTHONPATH` in the kernel's spawn environment. This is documented in the contributor guide; end users never see it.
+PDV contributors want their edits to `pdv-python/` to take effect live, not be shadowed by a pinned bundled wheel. The app detects developer mode by a `.pdv-dev` marker file at the repo root (a packaged app has no repo root, so this is never true in distribution). When present, the §10.5.7 wheel install is replaced by an **editable install of the repo checkout** into the project venv:
+
+```
+uv pip install --python <venv-python> -e <repo>/pdv-python
+```
+
+The editable install is preferred over a `PYTHONPATH` shim because it both keeps the source live *and* resolves `pdv-python`'s own dependencies (`ipykernel`, `numpy`, …) into the venv, so the kernel can launch. This is documented in the contributor guide; end users never see it.
 
 #### 10.5.17 Conda and Shared Mode
 
