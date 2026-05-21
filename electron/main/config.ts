@@ -17,6 +17,14 @@
 import * as fs from "fs";
 import * as path from "path";
 
+import {
+  TERMINAL_PRESET_LIST,
+  type TerminalLauncherConfig,
+  type TerminalPreset,
+} from "./editor-spawn";
+
+const TERMINAL_PRESET_SET: ReadonlySet<TerminalPreset> = new Set(TERMINAL_PRESET_LIST);
+
 // ---------------------------------------------------------------------------
 // Schema
 // ---------------------------------------------------------------------------
@@ -91,6 +99,20 @@ export interface PDVConfig {
       codeFont?: string;
       displayFont?: string;
     };
+  };
+  /**
+   * Configurable external-app launchers — terminal emulator wrap for TUI
+   * editors today, and (in later milestones) editor/IDE and AI-agent slots
+   * that share the same infrastructure. See `editor-spawn.ts` for templates.
+   */
+  launchers?: {
+    /**
+     * Terminal emulator used to wrap TUI editors (vim, nvim, …) and (later)
+     * the AI-agent launch flow. When unset, the platform default is used:
+     * Terminal.app on macOS, `x-terminal-emulator` on Linux, `wt.exe` on
+     * Windows.
+     */
+    terminal?: TerminalLauncherConfig;
   };
   /** AI agent integration (MCP server) settings. */
   mcp?: {
@@ -297,8 +319,64 @@ function parseConfig(raw: string, filePath: string): Partial<PDVConfig> {
       result.mcp = mcp as PDVConfig["mcp"];
     }
   }
+  if ("launchers" in obj) {
+    const launchers = obj.launchers;
+    if (launchers !== null && launchers !== undefined) {
+      if (typeof launchers !== "object" || Array.isArray(launchers)) {
+        throw new Error(`Invalid config value for launchers in ${filePath}`);
+      }
+      const parsed = parseLaunchers(launchers as Record<string, unknown>, filePath);
+      if (parsed) result.launchers = parsed;
+    }
+  }
 
   return result;
+}
+
+/**
+ * Validate the `launchers` config block. Unknown keys are dropped (forward
+ * compatibility); malformed values raise an error so a corrupt file is
+ * surfaced loudly rather than silently ignored.
+ *
+ * @param obj - Raw `launchers` object from the parsed JSON.
+ * @param filePath - Config file path, used for error messages.
+ * @returns The normalized `launchers` block, or `undefined` if no recognised
+ *   keys were present.
+ */
+function parseLaunchers(
+  obj: Record<string, unknown>,
+  filePath: string,
+): PDVConfig["launchers"] | undefined {
+  const out: NonNullable<PDVConfig["launchers"]> = {};
+  if ("terminal" in obj) {
+    const terminal = obj.terminal;
+    if (terminal !== null && terminal !== undefined) {
+      if (typeof terminal !== "object" || Array.isArray(terminal)) {
+        throw new Error(`Invalid config value for launchers.terminal in ${filePath}`);
+      }
+      const t = terminal as Record<string, unknown>;
+      const preset = t.preset;
+      if (typeof preset !== "string" || !TERMINAL_PRESET_SET.has(preset as TerminalPreset)) {
+        throw new Error(
+          `Invalid config value for launchers.terminal.preset in ${filePath}: ${String(preset)}`,
+        );
+      }
+      const entry: TerminalLauncherConfig = { preset: preset as TerminalPreset };
+      if (preset === "custom") {
+        const customTemplate = t.customTemplate;
+        if (customTemplate !== undefined && customTemplate !== null) {
+          if (typeof customTemplate !== "string") {
+            throw new Error(
+              `Invalid config value for launchers.terminal.customTemplate in ${filePath}`,
+            );
+          }
+          entry.customTemplate = customTemplate;
+        }
+      }
+      out.terminal = entry;
+    }
+  }
+  return Object.keys(out).length > 0 ? out : undefined;
 }
 
 // ---------------------------------------------------------------------------

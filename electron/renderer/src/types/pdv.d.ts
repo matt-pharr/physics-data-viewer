@@ -295,6 +295,16 @@ export interface Config {
     /** Whether agents may run code in the kernel via `pdv_run`. Defaults to off. */
     pdvRunEnabled?: boolean;
   };
+  /** Configurable external-app launchers (terminal wrap, editor, agent). */
+  launchers?: {
+    /** Terminal emulator used to wrap TUI editors (vim, nvim, …). */
+    terminal?: {
+      /** Preset identifier (`'terminal-app'`, `'alacritty'`, `'custom'`, `'none'`, …). */
+      preset: string;
+      /** Template string used when `preset === 'custom'`. */
+      customTemplate?: string;
+    };
+  };
   settings?: {
     /** Keyboard shortcut overrides. */
     shortcuts?: {
@@ -1039,6 +1049,11 @@ export interface PDVApi {
     getModel(): Promise<AppMenuTopLevel[]>;
     popup(menuId: AppMenuTopLevel["id"], x: number, y: number): Promise<boolean>;
     onAction(callback: (payload: MenuActionPayload) => void): () => void;
+  };
+  /** Constant facts about the host system, injected at preload time. */
+  system: {
+    /** Node.js platform identifier of the main process. */
+    platform: NodeJS.Platform;
   };
   chrome: {
     getInfo(): Promise<WindowChromeInfo>;

@@ -582,7 +582,7 @@ describe("Step 5 IPC handlers", () => {
   });
 
   if (process.platform === "darwin") {
-    it("script:edit launches terminal editors through Terminal.app on macOS", async () => {
+    it("script:edit defaults to Terminal.app on macOS when no launcher preset is set (back-compat)", async () => {
       const { configStore, commRouter } = setup();
       (configStore.getAll as unknown as ReturnType<typeof vi.fn>).mockReturnValue({
         showPrivateVariables: false,
@@ -614,7 +614,88 @@ describe("Step 5 IPC handlers", () => {
         expect.any(Object)
       );
     });
+
+    it("script:edit honours launchers.terminal.preset='iterm2' on macOS", async () => {
+      const { configStore, commRouter } = setup();
+      (configStore.getAll as unknown as ReturnType<typeof vi.fn>).mockReturnValue({
+        showPrivateVariables: false,
+        showModuleVariables: false,
+        showCallableVariables: false,
+        pythonEditorCmd: "nvim {}",
+        launchers: { terminal: { preset: "iterm2" } },
+      });
+      (commRouter.request as unknown as ReturnType<typeof vi.fn>).mockResolvedValue(
+        { payload: { path: "/tmp/script.py", file_path: "/tmp/script.py" } }
+      );
+
+      const edit = getHandler(IPC.script.edit);
+      await edit({}, "kernel-1", "/tmp/script.py");
+
+      expect(mocks.spawn).toHaveBeenCalledWith(
+        "osascript",
+        expect.arrayContaining([
+          expect.stringContaining(`tell application "iTerm" to create window`),
+        ]),
+        expect.any(Object),
+      );
+    });
   }
+
+  if (process.platform === "linux") {
+    it("script:edit honours launchers.terminal.preset='x-terminal-emulator' on Linux", async () => {
+      const { configStore, commRouter } = setup();
+      (configStore.getAll as unknown as ReturnType<typeof vi.fn>).mockReturnValue({
+        showPrivateVariables: false,
+        showModuleVariables: false,
+        showCallableVariables: false,
+        pythonEditorCmd: "nvim {}",
+        launchers: { terminal: { preset: "x-terminal-emulator" } },
+      });
+      (commRouter.request as unknown as ReturnType<typeof vi.fn>).mockResolvedValue(
+        { payload: { path: "/tmp/script.py", file_path: "/tmp/script.py" } }
+      );
+
+      const edit = getHandler(IPC.script.edit);
+      await edit({}, "kernel-1", "/tmp/script.py");
+
+      expect(mocks.spawn).toHaveBeenCalledWith(
+        "x-terminal-emulator",
+        ["-e", "nvim", "/tmp/script.py"],
+        expect.objectContaining({ detached: true, stdio: "ignore" }),
+      );
+    });
+  }
+
+  it("script:edit honours launchers.terminal.preset='none' as an explicit opt-out", async () => {
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const { configStore, commRouter } = setup();
+      (configStore.getAll as unknown as ReturnType<typeof vi.fn>).mockReturnValue({
+        showPrivateVariables: false,
+        showModuleVariables: false,
+        showCallableVariables: false,
+        pythonEditorCmd: "nvim {}",
+        launchers: { terminal: { preset: "none" } },
+      });
+      (commRouter.request as unknown as ReturnType<typeof vi.fn>).mockResolvedValue(
+        { payload: { path: "/tmp/script.py", file_path: "/tmp/script.py" } }
+      );
+
+      const edit = getHandler(IPC.script.edit);
+      await edit({}, "kernel-1", "/tmp/script.py");
+
+      expect(mocks.spawn).toHaveBeenCalledWith(
+        "nvim",
+        ["/tmp/script.py"],
+        expect.objectContaining({ detached: true, stdio: "ignore" }),
+      );
+      expect(warnSpy).toHaveBeenCalledWith(
+        expect.stringContaining("without a terminal wrapper"),
+      );
+    } finally {
+      warnSpy.mockRestore();
+    }
+  });
 
   it("config:get returns current config object", async () => {
     const { configStore } = setup();
