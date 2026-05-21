@@ -34,6 +34,12 @@ export type { NodeDescriptor } from '../../../main/ipc';
 /** Periodic kernel-memory snapshot pushed on `IPC.push.kernelMemory`. */
 export type { KernelMemoryPayload } from '../../../main/ipc';
 
+/** Terminal-emulator preset identifier for the launchers config. */
+export type { TerminalPreset } from '../../../main/ipc';
+
+/** Persisted terminal-launcher selection (`launchers.terminal`). */
+export type { TerminalLauncherConfig } from '../../../main/ipc';
+
 /** Runtime kernel descriptor returned by `kernels.start/list/restart`. */
 export interface KernelInfo {
   /** Opaque kernel id used in subsequent API calls. */
@@ -298,12 +304,7 @@ export interface Config {
   /** Configurable external-app launchers (terminal wrap, editor, agent). */
   launchers?: {
     /** Terminal emulator used to wrap TUI editors (vim, nvim, …). */
-    terminal?: {
-      /** Preset identifier (`'terminal-app'`, `'alacritty'`, `'custom'`, `'none'`, …). */
-      preset: string;
-      /** Template string used when `preset === 'custom'`. */
-      customTemplate?: string;
-    };
+    terminal?: TerminalLauncherConfig;
   };
   settings?: {
     /** Keyboard shortcut overrides. */

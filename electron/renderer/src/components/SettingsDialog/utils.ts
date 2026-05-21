@@ -2,7 +2,7 @@
  * utils.ts — pure shortcut utility helpers used by SettingsDialog.
  */
 
-import type { TerminalPreset } from '../../../../main/editor-spawn';
+import type { TerminalPreset } from '../../types';
 
 /** Runtime platform check used for shortcut labels and default commands. */
 export const IS_MAC = typeof navigator !== 'undefined' && navigator.platform.toUpperCase().startsWith('MAC');

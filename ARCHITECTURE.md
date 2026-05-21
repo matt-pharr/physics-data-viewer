@@ -907,6 +907,29 @@ Rules:
 - Code-cell persistence in `~/.PDV/state/code-cells.json` is separate from
   project save snapshots (`<project>/code-cells.json`). The `state/` directory stores session-level renderer state that is not tied to any project.
 
+#### External-app launchers (`launchers`)
+
+`preferences.json` carries a `launchers` block for configuring how PDV
+invokes external applications. Today it holds one slot:
+
+- `launchers.terminal` — `{ preset, customTemplate? }`. The `preset` selects
+  a terminal emulator (`terminal-app`, `iterm2`, `alacritty`, `kitty`,
+  `ghostty`, `wezterm`, `gnome-terminal`, `konsole`, `xterm`,
+  `x-terminal-emulator`, `windows-terminal`) or one of two meta-presets:
+  `custom` (use `customTemplate`) and `none` (no terminal wrapper).
+
+  TUI editors (`vim`, `nvim`, …) opened via `script.edit` are wrapped in the
+  selected terminal so they get a real window. `editor-spawn.ts` owns the
+  per-platform preset templates and the `{cmd}` / `{cmdstr}` placeholder
+  expansion. When `launchers.terminal` is unset, a platform default is used
+  (`terminal-app` on macOS, `x-terminal-emulator` on Linux, `wt.exe` on
+  Windows). The `editor` and `agent` launcher slots are reserved for later
+  milestones (see `PLANNED_FEATURES.md`).
+
+The renderer reads the host platform synchronously via the preload value
+`window.pdv.system.platform` — exposed as a constant rather than an IPC
+channel because `process.platform` never changes during a session.
+
 ---
 
 ## 7. The Tree: Data Model and Authority
@@ -1554,6 +1577,7 @@ The API surface:
 - `window.pdv.guiEditor.*` — GUI editor and viewer windows: `open` (editor), `openViewer` (standalone GUI viewer), `context`, `read`, `save`
 - `window.pdv.environment.*` — Python environment management: `list`, `check`, `install`, `refresh`; push: `onInstallOutput(cb) → unsub`
 - `window.pdv.chrome.*` — window chrome controls: `getInfo`, `minimize`, `toggleMaximize`, `close`; push: `onStateChanged(cb) → unsub`
+- `window.pdv.system.*` — constant host facts injected at preload time: `platform` (the main process's `process.platform`). Exposed as a plain value, not a function — it never changes during a session, so it needs no IPC channel
 - `window.pdv.progress.*` — operation progress: push only: `onProgress(cb) → unsub`
 - `window.pdv.menu.*` — menu bridge: `updateRecentProjects(paths)`, `onAction(cb) → unsub`
 

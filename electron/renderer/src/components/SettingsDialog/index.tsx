@@ -6,7 +6,7 @@
  */
 
 import React, { useEffect, useLayoutEffect, useMemo, useState } from 'react';
-import type { Config, UpdateStatus } from '../../types';
+import type { Config, TerminalPreset, UpdateStatus } from '../../types';
 import { SHORTCUT_LABELS, DEFAULT_SHORTCUTS } from '../../shortcuts';
 import type { Shortcuts } from '../../shortcuts';
 import { EnvironmentSelector } from '../EnvironmentSelector';
@@ -24,7 +24,6 @@ import {
   getTerminalPresetsForPlatform,
   normalizeShortcut,
 } from './utils';
-import type { TerminalPreset } from '../../../../main/editor-spawn';
 import { ShortcutCapture } from './ShortcutCapture';
 import { AppearanceTab } from './AppearanceTab';
 import { AgentsTab } from './AgentsTab';
@@ -130,7 +129,7 @@ export const SettingsDialog: React.FC<SettingsDialogProps> = ({
     setPythonEditorCmd(config?.pythonEditorCmd ?? 'code {}');
     setJuliaEditorCmd(config?.juliaEditorCmd ?? 'code {}');
     setFileManagerCmd(config?.fileManagerCmd ?? DEFAULT_FILE_MANAGER);
-    const savedPreset = config?.launchers?.terminal?.preset as TerminalPreset | undefined;
+    const savedPreset = config?.launchers?.terminal?.preset;
     setTerminalPreset(
       savedPreset && TERMINAL_PRESET_OPTIONS.includes(savedPreset)
         ? savedPreset
@@ -465,8 +464,9 @@ export const SettingsDialog: React.FC<SettingsDialogProps> = ({
                     <div className="settings-general-desc">
                       Use <code>{'{cmd}'}</code> to splice the editor command as separate arguments
                       (most terminals), or <code>{'{cmdstr}'}</code> for a quoted shell string
-                      (AppleScript wrappers like Terminal.app / iTerm2). Quoted paths in the template
-                      are preserved as single tokens.
+                      (AppleScript wrappers like Terminal.app / iTerm2). Quote paths containing
+                      spaces with <code>{'"…"'}</code>; on Windows always quote paths so backslash
+                      separators are preserved.
                     </div>
                   </>
                 )}

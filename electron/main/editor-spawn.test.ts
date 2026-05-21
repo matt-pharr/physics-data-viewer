@@ -78,12 +78,25 @@ describe("tokenizeShellLike", () => {
     ]);
   });
 
-  it("handles backslash-escaped spaces outside quotes", () => {
-    expect(tokenizeShellLike("/path/with\\ space -e {cmd}")).toEqual([
+  it("handles backslash-escaped spaces outside quotes on POSIX platforms", () => {
+    expect(tokenizeShellLike("/path/with\\ space -e {cmd}", "linux")).toEqual([
       "/path/with space",
       "-e",
       "{cmd}",
     ]);
+  });
+
+  it("treats a bare backslash as a literal char on Windows (path separator)", () => {
+    // A user-typed Windows custom template — backslashes must survive.
+    expect(
+      tokenizeShellLike("C:\\tools\\myterm.exe -e {cmd}", "win32"),
+    ).toEqual(["C:\\tools\\myterm.exe", "-e", "{cmd}"]);
+  });
+
+  it("still preserves a double-quoted Windows path", () => {
+    expect(
+      tokenizeShellLike(`"C:\\Program Files\\My Term\\term.exe" -e {cmd}`, "win32"),
+    ).toEqual(["C:\\Program Files\\My Term\\term.exe", "-e", "{cmd}"]);
   });
 
   it("throws on an unterminated single quote", () => {
@@ -348,7 +361,7 @@ describe("resolveEditorSpawn", () => {
     });
   });
 
-  it("wraps with konsole using -e --", () => {
+  it("wraps with konsole using -e (no -- separator)", () => {
     expect(
       resolveEditorSpawn("vim", ["/tmp/foo.py"], {
         terminal: { preset: "konsole" },
@@ -356,7 +369,7 @@ describe("resolveEditorSpawn", () => {
       }),
     ).toEqual({
       file: "konsole",
-      args: ["-e", "--", "vim", "/tmp/foo.py"],
+      args: ["-e", "vim", "/tmp/foo.py"],
     });
   });
 
@@ -422,7 +435,7 @@ describe("resolveEditorSpawn", () => {
     // it didn't return the bare unwrapped command, and that a warning fired.
     expect(result.file).not.toBe("vim");
     expect(warnSpy).toHaveBeenCalledWith(
-      expect.stringContaining("no template for platform"),
+      expect.stringContaining("customTemplate is empty"),
     );
   });
 

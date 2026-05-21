@@ -44,6 +44,12 @@ import type {
 } from "./environment-detector";
 
 export type { PDVConfig } from "./config";
+/**
+ * Re-export the terminal-launcher types so renderer-facing type files can
+ * consume them via `types/pdv.d.ts` without importing across the
+ * main↔renderer process boundary.
+ */
+export type { TerminalPreset, TerminalLauncherConfig } from "./editor-spawn";
 import type { UpdateStatus } from "./auto-updater";
 export type { UpdateStatus } from "./auto-updater";
 export type { EnvironmentInfo, EnvironmentInstallResult, InstallOutputChunk } from "./environment-detector";
