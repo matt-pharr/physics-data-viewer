@@ -118,6 +118,7 @@ export const IPC = {
   /** External-app launcher channels (action-bar buttons). */
   launchers: {
     openAgent: "launchers:openAgent",
+    openWorkingDir: "launchers:openWorkingDir",
   },
   /** Markdown note channels. */
   note: {
@@ -2629,6 +2630,14 @@ export interface PDVApi {
      *   kernel is active, the MCP server is down, or the spawn fails.
      */
     openAgent(): Promise<ScriptOperationResult>;
+    /**
+     * Open the active kernel's session working directory in the configured
+     * editor/IDE (`launchers.editor.dirCommand`, default `code {}`).
+     *
+     * @returns `{ success: true }`, or `{ success: false, error }` when no
+     *   kernel is active or the spawn fails.
+     */
+    openWorkingDir(): Promise<ScriptOperationResult>;
   };
 
   /** Window chrome integration and title-bar controls. */

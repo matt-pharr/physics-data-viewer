@@ -216,6 +216,7 @@ function buildBase() {
     },
     launchers: {
       openAgent: stub<PDVApi["launchers"]["openAgent"]>(async () => ({ success: true })),
+      openWorkingDir: stub<PDVApi["launchers"]["openWorkingDir"]>(async () => ({ success: true })),
     },
     chrome: {
       getInfo: stub<PDVApi["chrome"]["getInfo"]>(),

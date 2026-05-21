@@ -636,7 +636,7 @@ describe("Step 5 IPC handlers", () => {
       expect(mocks.spawn).toHaveBeenCalledWith(
         "osascript",
         expect.arrayContaining([
-          expect.stringContaining(`tell application "iTerm" to create window`),
+          expect.stringContaining(`tell application "iTerm" to tell current session of (create window with default profile) to write text`),
         ]),
         expect.any(Object),
       );

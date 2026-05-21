@@ -416,7 +416,7 @@ describe("resolveEditorSpawn", () => {
     ]);
   });
 
-  it("wraps with iterm2 via osascript and appends `; exit`", () => {
+  it("wraps with iterm2 via osascript using `write text` and appends `; exit`", () => {
     const { file, args } = resolveEditorSpawn("vim", ["/tmp/foo.py"], {
       terminal: { preset: "iterm2" },
       platform: "darwin",
@@ -424,7 +424,7 @@ describe("resolveEditorSpawn", () => {
     expect(file).toBe("osascript");
     expect(args).toEqual([
       "-e",
-      `tell application "iTerm" to create window with default profile command "'vim' '/tmp/foo.py'" & "; exit"`,
+      `tell application "iTerm" to tell current session of (create window with default profile) to write text "'vim' '/tmp/foo.py'" & "; exit"`,
     ]);
   });
 

@@ -158,8 +158,13 @@ const TERMINAL_PRESET_TEMPLATES: Record<
       `osascript -e 'tell application "Terminal" to do script {cmdstr} & "; exit"'`,
   },
   "iterm2": {
+    // `create window … command "…"` is unreliable across iTerm2 versions and
+    // can fail/crash on a complex command string. The documented-robust
+    // pattern is to open a window with the default profile and `write text`
+    // the command into its session — exactly how Terminal.app's `do script`
+    // behaves, so the same quoting that works there works here.
     darwin:
-      `osascript -e 'tell application "iTerm" to create window with default profile command {cmdstr} & "; exit"'`,
+      `osascript -e 'tell application "iTerm" to tell current session of (create window with default profile) to write text {cmdstr} & "; exit"'`,
   },
   "ghostty": {
     darwin: `open -na Ghostty --args -e {cmd}`,

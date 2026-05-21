@@ -95,6 +95,7 @@ export const SettingsDialog: React.FC<SettingsDialogProps> = ({
 
   // General settings state
   const [editorFileCommand, setEditorFileCommand] = useState('code {}');
+  const [editorDirCommand, setEditorDirCommand] = useState('code {}');
   const [editorIsTuiEditor, setEditorIsTuiEditor] = useState(false);
   const [fileManagerCmd, setFileManagerCmd] = useState(DEFAULT_FILE_MANAGER);
   const [terminalPreset, setTerminalPreset] = useState<TerminalPreset>(DEFAULT_TERMINAL_PRESET);
@@ -134,6 +135,7 @@ export const SettingsDialog: React.FC<SettingsDialogProps> = ({
     const editorCfg = config?.launchers?.editor;
     const fileCmd = editorCfg?.fileCommand ?? 'code {}';
     setEditorFileCommand(fileCmd);
+    setEditorDirCommand(editorCfg?.dirCommand ?? 'code {}');
     // The checkbox shows the *effective* wrap decision: an explicit saved
     // override, or PDV's basename auto-detection when the user has none.
     setEditorIsTuiEditor(editorCfg?.isTuiEditor ?? isLikelyTuiEditor(fileCmd));
@@ -347,6 +349,7 @@ export const SettingsDialog: React.FC<SettingsDialogProps> = ({
         : { preset: terminalPreset };
 
     const fileCommand = editorFileCommand.trim() || 'code {}';
+    const dirCommand = editorDirCommand.trim() || 'code {}';
     // Persist `isTuiEditor` only when it overrides PDV's auto-detection — that
     // keeps the main-process auto-detect live for the common case (a saved
     // explicit `false` for, say, `vim` would silently break terminal wrapping).
@@ -357,7 +360,7 @@ export const SettingsDialog: React.FC<SettingsDialogProps> = ({
       fileManagerCmd:  fileManagerCmd.trim()  || DEFAULT_FILE_MANAGER,
       launchers: {
         terminal: terminalLauncher,
-        editor: { fileCommand, isTuiEditor },
+        editor: { fileCommand, dirCommand, isTuiEditor },
         agent: {
           command: agentCommand.trim() || DEFAULT_AGENT_COMMAND,
           cwd: agentCwd,
@@ -454,6 +457,20 @@ export const SettingsDialog: React.FC<SettingsDialogProps> = ({
                   like <code>vim</code>, <code>nvim</code>, <code>nano</code>.
                   Auto-detected from the command; toggle to override (e.g. for GUI
                   variants such as <code>nvim-qt</code>).
+                </div>
+
+                <label htmlFor="sg-editor-dir">Open folder command</label>
+                <input
+                  id="sg-editor-dir"
+                  type="text"
+                  value={editorDirCommand}
+                  onChange={(e) => setEditorDirCommand(e.target.value)}
+                  placeholder="code {}"
+                  spellCheck={false}
+                />
+                <div className="settings-general-desc">
+                  Used by the activity-bar button that opens the session working
+                  directory in your editor/IDE (e.g. <code>code {'{}' }</code>).
                 </div>
 
                 <label htmlFor="sg-file-manager">File manager</label>

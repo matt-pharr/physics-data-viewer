@@ -1070,6 +1070,8 @@ export interface PDVApi {
   launchers: {
     /** Launch the configured AI agent in a terminal pointed at PDV's MCP server. */
     openAgent(): Promise<{ success: boolean; error?: string }>;
+    /** Open the active kernel's working directory in the configured editor/IDE. */
+    openWorkingDir(): Promise<{ success: boolean; error?: string }>;
   };
   chrome: {
     getInfo(): Promise<WindowChromeInfo>;

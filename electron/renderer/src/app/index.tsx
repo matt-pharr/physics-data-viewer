@@ -420,6 +420,15 @@ const App: React.FC = () => {
       });
   }, []);
 
+  const handleOpenWorkingDir = useCallback(() => {
+    void window.pdv.launchers.openWorkingDir().then((result) => {
+      if (!result.success) {
+        console.error('[pdv] failed to open working directory:', result.error);
+        window.alert(result.error ?? 'Failed to open the working directory.');
+      }
+    });
+  }, []);
+
   const handleKernelCrash = useCallback((crashedKernelId: string) => {
     if (crashedKernelId === currentKernelIdRef.current) {
       setKernelStatus('error');
@@ -1441,6 +1450,7 @@ const App: React.FC = () => {
           onActivityBarClick={handleActivityBarClick}
           onSettingsClick={() => { setSettingsInitialTab('general'); setShowSettings(true); }}
           onAgentClick={handleOpenAgent}
+          onOpenWorkingDir={handleOpenWorkingDir}
           guiModules={importedGuiModules}
           kernelId={currentKernelId}
         />
