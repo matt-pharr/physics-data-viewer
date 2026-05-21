@@ -245,6 +245,13 @@ export const IPC = {
     projectReloading: "pdv.project.reloading",
     progress: "pdv.progress",
     installOutput: "pdv.environment.installOutput",
+    /**
+     * Main → renderer. Streams `uv` output during a uv-project environment
+     * setup (`uv sync`, `pdv-python` install) so the EnvSyncModal can show
+     * progress. Distinct from `installOutput` (shared-mode pip install) so
+     * the two panels never cross-talk. See ARCHITECTURE.md §10.5.9.
+     */
+    envActivity: "pdv.environment.envActivity",
     updateStatus: "pdv.updater.status",
     requestClose: "pdv.app.requestClose",
     autosaveTrigger: "pdv.autosave.trigger",
@@ -2216,6 +2223,14 @@ export interface PDVApi {
      * @returns Unsubscribe function.
      */
     onInstallOutput(callback: (chunk: InstallOutputChunk) => void): () => void;
+    /**
+     * Subscribe to streaming `uv` output during a uv-project environment
+     * setup (`uv sync`, `pdv-python` install). See ARCHITECTURE.md §10.5.9.
+     *
+     * @param callback - Invoked with each output chunk as it arrives.
+     * @returns Unsubscribe function.
+     */
+    onEnvActivity(callback: (chunk: InstallOutputChunk) => void): () => void;
   };
 
   /** App configuration accessors. */

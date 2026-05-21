@@ -916,6 +916,8 @@ export interface PDVApi {
     install(pythonPath: string): Promise<EnvironmentInstallResult>;
     refresh(): Promise<EnvironmentInfo[]>;
     onInstallOutput(callback: (chunk: InstallOutputChunk) => void): () => void;
+    /** Streams `uv` output during a uv-project environment setup (§10.5.9). */
+    onEnvActivity(callback: (chunk: InstallOutputChunk) => void): () => void;
   };
   modules: {
     listInstalled(): Promise<ModuleDescriptor[]>;

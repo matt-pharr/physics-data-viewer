@@ -172,7 +172,7 @@ export function registerKernelIpcHandlers(
       const result = await materializeUvEnvironment(workingDir, {
         pythonVersion,
         win,
-        pushChannel: IPC.push.installOutput,
+        pushChannel: IPC.push.envActivity,
         binaryPath: getUvBinaryPath(),
       });
       if (!result.success || !result.venvPython) {

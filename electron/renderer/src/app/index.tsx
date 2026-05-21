@@ -37,6 +37,7 @@ import { ImportModuleDialog } from '../components/ImportModuleDialog';
 import { SaveAsDialog } from '../components/SaveAsDialog';
 import { UnsavedChangesDialog } from '../components/UnsavedChangesDialog';
 import { WelcomeScreen, type RecentProject, type RecoverableSession } from '../components/WelcomeScreen';
+import { EnvSyncModal } from '../components/EnvSyncModal';
 import type {
   CellTab,
   Config,
@@ -450,6 +451,8 @@ const App: React.FC = () => {
   });
 
   const [environmentMode, setEnvironmentMode] = useState<'uv' | 'shared'>('shared');
+  const [uvSync, setUvSync] = useState<{ phase: 'idle' | 'syncing' | 'failed'; output: string; error?: string }>({ phase: 'idle', output: '' });
+  const lastUvLaunchRef = useRef<import('../types').KernelUvContext | null>(null);
   const { startKernel, handleEnvSave, lastErrorRef } = useKernelLifecycle({
     config,
     currentKernelId,
@@ -1197,6 +1200,44 @@ const App: React.FC = () => {
     setShowSettings(true);
   }, []);
 
+  // --- uv environment setup modal ----------------------------------------
+  // Stream uv output into the EnvSyncModal while a uv-project launch runs.
+  useEffect(() => {
+    const unsub = window.pdv.environment.onEnvActivity((chunk) => {
+      setUvSync((s) => (s.phase === 'idle' ? s : { ...s, output: s.output + chunk.data }));
+    });
+    return unsub;
+  }, []);
+
+  /**
+   * Launch (or relaunch) a uv-project kernel behind the blocking EnvSyncModal.
+   * Resolves true on success; on failure the modal stays up with Retry/Cancel.
+   */
+  const launchUvKernel = useCallback(async (uvContext: import('../types').KernelUvContext): Promise<boolean> => {
+    lastUvLaunchRef.current = uvContext;
+    setActiveLanguage('python');
+    setUvSync({ phase: 'syncing', output: '' });
+    const ok = await startKernel(config ?? {} as Config, 'python', uvContext);
+    if (ok) {
+      setUvSync({ phase: 'idle', output: '' });
+    } else {
+      setUvSync((s) => ({ phase: 'failed', output: s.output, error: lastErrorRef.current }));
+    }
+    return ok;
+  }, [config, startKernel, lastErrorRef]);
+
+  /** Retry a failed uv environment setup (replays the last launch). */
+  const handleUvSyncRetry = useCallback(() => {
+    const ctx = lastUvLaunchRef.current;
+    if (ctx) void launchUvKernel(ctx);
+  }, [launchUvKernel]);
+
+  /** Abandon a failed uv environment setup and return to the welcome screen. */
+  const handleUvSyncCancel = useCallback(() => {
+    setUvSync({ phase: 'idle', output: '' });
+    setForceWelcome(true);
+  }, []);
+
   const ensureKernel = useCallback(async (language: 'python' | 'julia' = 'python') => {
     setActiveLanguage(language);
     if (language === 'julia') {
@@ -1228,16 +1269,13 @@ const App: React.FC = () => {
   const handleWelcomeNewProject = useCallback(async (language: 'python' | 'julia') => {
     dismissWelcome();
     if (language === 'python') {
-      // New Python projects are uv projects by default: the main process
-      // creates the venv from the user's default packages (§10.5.8). No shared
-      // interpreter is needed, so bypass ensureKernel's env pre-flight checks.
-      setActiveLanguage('python');
-      const ok = await startKernel(config ?? {} as Config, 'python', { newProject: true });
-      if (!ok) openEnvSettings(lastErrorRef.current ?? 'Failed to create the project environment.');
+      // New Python projects are uv projects (§10.5.8). The EnvSyncModal covers
+      // the venv build; ensureKernel's shared-env pre-flight does not apply.
+      await launchUvKernel({ newProject: true });
       return;
     }
     await ensureKernel(language);
-  }, [config, dismissWelcome, ensureKernel, startKernel, openEnvSettings, lastErrorRef, setActiveLanguage]);
+  }, [dismissWelcome, ensureKernel, launchUvKernel]);
 
   /**
    * Open a project from the welcome screen. Peeks at the manifest to detect
@@ -1251,11 +1289,10 @@ const App: React.FC = () => {
     setInterpreterWarning(null);
     pendingProjectRef.current = { type: 'open', path: dir, language };
 
-    // uv-mode projects own their environment: the main process materializes
-    // the venv on kernel start, so interpreter detection is skipped (§10.5.9).
+    // uv-mode projects own their environment: the EnvSyncModal covers venv
+    // materialization, so shared-interpreter detection is skipped (§10.5.9).
     if (peek.environment?.mode === 'uv' && language === 'python') {
-      setActiveLanguage(language);
-      await startKernel(config ?? {} as Config, language, { saveDir: dir });
+      await launchUvKernel({ saveDir: dir });
       return;
     }
 
@@ -1284,7 +1321,7 @@ const App: React.FC = () => {
     }
 
     await ensureKernel(language);
-  }, [config, dismissWelcome, ensureKernel, openEnvSettings, startKernel]);
+  }, [config, dismissWelcome, ensureKernel, openEnvSettings, startKernel, launchUvKernel]);
 
   /**
    * Open a project via the file picker, with smart-open resolution.
@@ -1421,6 +1458,17 @@ const App: React.FC = () => {
           chromeInfo={chromeInfo}
           menuModel={menuModel}
           title={projectTitle}
+        />
+      )}
+
+      {/* uv environment setup — blocking modal during a uv-project launch */}
+      {uvSync.phase !== 'idle' && (
+        <EnvSyncModal
+          phase={uvSync.phase}
+          output={uvSync.output}
+          errorMessage={uvSync.error}
+          onRetry={handleUvSyncRetry}
+          onCancel={handleUvSyncCancel}
         />
       )}
 

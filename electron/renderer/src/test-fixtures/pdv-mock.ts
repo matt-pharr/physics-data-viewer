@@ -98,6 +98,7 @@ function buildBase() {
       install: stub<PDVApi["environment"]["install"]>(),
       refresh: stub<PDVApi["environment"]["refresh"]>(async () => []),
       onInstallOutput: subStub<PDVApi["environment"]["onInstallOutput"]>(),
+      onEnvActivity: subStub<PDVApi["environment"]["onEnvActivity"]>(),
     },
     modules: {
       listInstalled: stub<PDVApi["modules"]["listInstalled"]>(async () => []),
