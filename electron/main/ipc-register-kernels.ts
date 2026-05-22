@@ -30,6 +30,7 @@ import { setupProjectModuleNamespaces } from "./module-runtime";
 import { copyEnvFilesForLoad, copyFilesForLoad } from "./project-file-sync";
 import { ProjectManager } from "./project-manager";
 import { materializeUvEnvironment } from "./uv-environment";
+import { resolveUvBinary } from "./uv-runner";
 import { generatePyproject } from "./pyproject";
 
 interface RegisterKernelIpcHandlersOptions {
@@ -144,7 +145,11 @@ export function registerKernelIpcHandlers(
       newProject?: boolean;
       envSnapshot?: { pyproject: string; uvLock?: string };
     }
-  ): Promise<{ workingDir: string; venvPython: string }> {
+  ): Promise<{ workingDir: string; venvPython: string; uvBinary: string | undefined }> {
+    // The resolved uv binary travels to the kernel in pdv.init so pdv.install()
+    // can run `uv add` directly (§10.5.11). Non-null here — materialize would
+    // have thrown UvBinaryNotFoundError otherwise.
+    const uvBinary = resolveUvBinary(getUvBinaryPath()) ?? undefined;
     const workingDir = await projectManager.createWorkingDir(getWorkingDirBase());
     try {
       let pythonVersion: string | undefined;
@@ -179,7 +184,7 @@ export function registerKernelIpcHandlers(
         const step = result.failedStep ? ` (${result.failedStep})` : "";
         throw new Error(`uv environment setup failed${step}:\n${result.output}`);
       }
-      return { workingDir, venvPython: result.venvPython };
+      return { workingDir, venvPython: result.venvPython, uvBinary };
     } catch (err) {
       await projectManager.deleteWorkingDir(workingDir).catch(() => undefined);
       throw err;
@@ -244,9 +249,11 @@ export function registerKernelIpcHandlers(
     // The materialize step installs pdv-python into the venv, so the
     // shared-mode pdv-install check below is skipped for uv kernels.
     let preCreatedWorkingDir: string | undefined;
+    let uvBinaryForInit: string | undefined;
     if (uv && requestedLanguage === "python") {
       const uvEnv = await startUvEnvironment(uv);
       preCreatedWorkingDir = uvEnv.workingDir;
+      uvBinaryForInit = uvEnv.uvBinary;
       requestedSpec = {
         ...(requestedSpec ?? {}),
         language: "python",
@@ -290,6 +297,7 @@ export function registerKernelIpcHandlers(
       kernelWorkingDirs,
       getWorkingDirBase(),
       preCreatedWorkingDir,
+      uvBinaryForInit,
     );
     setActiveKernelId(kernel.id);
     await setupModuleNamespaces(kernel.id);
@@ -395,10 +403,12 @@ export function registerKernelIpcHandlers(
       await kernelManager.stop(kernelId);
 
       let preCreatedWorkingDir: string | undefined;
+      let uvBinaryForInit: string | undefined;
       let restarted: KernelInfo;
       if (envSnapshot) {
         const uvEnv = await startUvEnvironment({ envSnapshot });
         preCreatedWorkingDir = uvEnv.workingDir;
+        uvBinaryForInit = uvEnv.uvBinary;
         restarted = await kernelManager.start({
           name: current.name,
           language: current.language,
@@ -420,7 +430,8 @@ export function registerKernelIpcHandlers(
         restarted.id,
         kernelWorkingDirs,
         getWorkingDirBase(),
-        preCreatedWorkingDir
+        preCreatedWorkingDir,
+        uvBinaryForInit
       );
       return restarted;
     }

@@ -1496,13 +1496,16 @@ On `project.save`, `pyproject.toml` and `uv.lock` are written from the working d
 
 `pdv.install("pkg", ...)` is callable from any code cell and installs packages into the project venv **without a kernel restart**.
 
-The kernel does not shell out to `uv` itself: it does not know where the bundled binary is, and the streaming-output UX belongs to the main process. Instead:
+The kernel runs `uv` directly. The main process resolves the bundled `uv` binary (honoring the `uv.binaryPath` override) and passes its path, alongside the working directory, to the kernel in the `pdv.init` payload — for uv-mode kernels only. `pdv.install()` then:
 
-1. The kernel sends a `pdv.env.install` comm request to the main process and blocks on the response.
-2. The main process runs `uv add <specs>` in the working directory via the uv-runner, streaming output to the environment activity panel. `uv add` updates both `pyproject.toml` and `uv.lock`, so the dependency persists into the next save and every future open.
-3. On success the kernel runs `importlib.invalidate_caches()`. A subsequent `import` of a newly installed package then succeeds — failed imports are not cached in `sys.modules`, so only the path-finder caches need invalidating.
+1. Runs `uv add <specs>` as a subprocess with the working directory as its cwd, blocking the cell. Because the kernel's own interpreter *is* `<working-dir>/.venv`, `uv add` installs into the very venv the kernel runs in, and updates `pyproject.toml` + `uv.lock` so the dependency persists into the next save and every future open. uv's output streams straight to the cell.
+2. On success runs `importlib.invalidate_caches()`. A subsequent `import` of a newly installed package then succeeds — failed imports are not cached in `sys.modules`, so only the path-finder caches need invalidating.
 
-**Upgrades of already-imported packages.** If a requested package is already present in `sys.modules`, `invalidate_caches()` cannot swap the live module object. `pdv.install()` does not attempt to — no `sys.modules` walking, no forced `reload()`. It emits a warning to the cell output stating that a kernel restart is required for the upgrade to take full effect.
+Running uv on the kernel's own (blocked) cell thread is intentional: blocking until the install finishes is the desired UX, and there is no comm-channel deadlock to avoid because the call never waits on a main-process reply. Concurrent uv invocations — e.g. a cell's `pdv.install()` racing the Packages UI (§10.5.13) — are serialized by uv's own project lock.
+
+In shared mode (no project venv) the kernel is not given a uv binary path, and `pdv.install()` raises a clear error pointing the user at the shared environment's own package manager.
+
+**Upgrades of already-imported packages.** If a requested package is already present in `sys.modules`, `invalidate_caches()` cannot swap the live module object. `pdv.install()` does not attempt to — no `sys.modules` walking, no forced `reload()`. It emits a warning to the cell output stating that a kernel restart is required for the upgrade to take full effect (the restart re-materializes the venv with the new package, §11.6).
 
 #### 10.5.12 Reactive Install from Errors
 
@@ -1546,6 +1549,8 @@ The editable install is preferred over a `PYTHONPATH` shim because it both keeps
 #### 10.5.18 The `uv-runner` Module
 
 All `uv` invocations in the main process go through one module, `electron/main/uv-runner.ts` — a single spawn helper that locates the bundled binary (or the `uv.binaryPath` override), runs `uv sync` / `add` / `remove` / `lock` / `pip install` / `python install`, and streams stdout/stderr over IPC to the environment activity panel. No other file in the main process spawns `uv` directly.
+
+The one uv invocation *outside* the main process is `pdv.install()` in the kernel (§10.5.11), which spawns `uv add` itself using the binary path the main process resolved with `uv-runner`'s resolver and passed to the kernel at init.
 
 ---
 

@@ -964,6 +964,11 @@ const App: React.FC = () => {
     }
   }, [isSaveInFlight, isQueuedExecution, executeImmediate]);
 
+  /** Run pdv.install("<name>") for a missing module (reactive affordance, §10.5.12). */
+  const handleInstallMissingModule = useCallback((moduleName: string) => {
+    void handleExecute(`pdv.install(${JSON.stringify(moduleName)})`);
+  }, [handleExecute]);
+
   // Subscribe to autosave-in-flight pushes from main.
   useEffect(() => {
     if (!window.pdv?.autosave?.onInFlightChange) return;
@@ -1565,7 +1570,11 @@ const App: React.FC = () => {
           {activePane === 'code' ? (
             <>
               <div className="console-wrapper">
-                <Console logs={logs} onClear={handleClearConsole} />
+                <Console
+                  logs={logs}
+                  onClear={handleClearConsole}
+                  onInstallPackage={environmentMode === 'uv' ? handleInstallMissingModule : undefined}
+                />
               </div>
               {editorCollapsed ? (
                 <div

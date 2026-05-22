@@ -13,6 +13,24 @@ import { ansiToHtml } from './ansi';
 interface ConsoleProps {
   logs: LogEntry[];
   onClear: () => void;
+  /**
+   * Run `pdv.install("<name>")` for a missing module. Provided only for uv
+   * projects (§10.5.12); when omitted, the reactive install affordance is
+   * hidden.
+   */
+  onInstallPackage?: (moduleName: string) => void;
+}
+
+/**
+ * Extract the top-level package name from a `ModuleNotFoundError`, or null.
+ *
+ * @param log - The console log entry.
+ * @returns The missing top-level module name, or null when not applicable.
+ */
+function missingModuleName(log: LogEntry): string | null {
+  if (log.errorDetails?.name !== 'ModuleNotFoundError') return null;
+  const match = /No module named ['"]([\w.]+)['"]/.exec(log.errorDetails.message ?? '');
+  return match ? match[1].split('.')[0] : null;
 }
 
 /** Pixels of slack at the bottom that still count as "pinned". Larger
@@ -21,7 +39,7 @@ interface ConsoleProps {
 const PIN_THRESHOLD_PX = 4;
 
 /** Execution console component. */
-export const Console: React.FC<ConsoleProps> = ({ logs, onClear }) => {
+export const Console: React.FC<ConsoleProps> = ({ logs, onClear, onInstallPackage }) => {
   const contentRef = useRef<HTMLDivElement>(null);
   // True when the viewport is at (or within PIN_THRESHOLD_PX of) the
   // bottom. Initialized true so the first batch of output scrolls into
@@ -68,7 +86,12 @@ export const Console: React.FC<ConsoleProps> = ({ logs, onClear }) => {
           </div>
         ) : (
           logs.map((log, index) => (
-            <LogEntryView key={log.id} log={log} index={index + 1} />
+            <LogEntryView
+              key={log.id}
+              log={log}
+              index={index + 1}
+              onInstallPackage={onInstallPackage}
+            />
           ))
         )}
       </div>
@@ -77,10 +100,15 @@ export const Console: React.FC<ConsoleProps> = ({ logs, onClear }) => {
 };
 
 /** Render one console history item with optional streams/result/images. */
-const LogEntryView: React.FC<{ log: LogEntry; index: number }> = ({ log, index }) => {
+const LogEntryView: React.FC<{
+  log: LogEntry;
+  index: number;
+  onInstallPackage?: (moduleName: string) => void;
+}> = ({ log, index, onInstallPackage }) => {
   const timestamp = useMemo(() => new Date(log.timestamp).toLocaleTimeString(), [log.timestamp]);
   const hasResult = log.result !== undefined;
   const hasImages = log.images && log.images.length > 0;
+  const missingModule = missingModuleName(log);
   const sourceText = formatSourceLabel(log.errorDetails?.source ?? log.origin);
   const locationText = formatLocationLabel(log.errorDetails?.location);
   const tracebackText = log.errorDetails?.traceback?.join('\n') ?? '';
@@ -119,6 +147,17 @@ const LogEntryView: React.FC<{ log: LogEntry; index: number }> = ({ log, index }
           className="log-traceback"
           dangerouslySetInnerHTML={{ __html: ansiToHtml(tracebackText) }}
         />
+      )}
+      {onInstallPackage && missingModule && (
+        <div className="log-install-action">
+          <button
+            className="btn btn-secondary"
+            onClick={() => onInstallPackage(missingModule)}
+            title="Install the missing package into this project's environment"
+          >
+            Install with pdv.install("{missingModule}")
+          </button>
+        </div>
       )}
       {hasImages && (
         <div className="log-images">

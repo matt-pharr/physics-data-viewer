@@ -311,9 +311,13 @@ describe("kernels:restart", () => {
       // The new kernel launched against the venv interpreter, not system python.
       const startArg = (harness.kernelManager.start as Mock).mock.calls.at(-1)?.[0];
       expect(startArg.env.PYTHON_PATH).toBe(venvPython);
-      // The session was initialized with the pre-created (uv) working dir.
-      const initArgs = kernelSessionMocks.initializeKernelSession.mock.calls.at(-1);
-      expect(initArgs?.[initArgs.length - 1]).toBe(newDir);
+      // The session was initialized with the pre-created (uv) working dir
+      // (8th positional arg; the 9th is the resolved uv binary path, which is
+      // environment-dependent in tests).
+      const initArgs = kernelSessionMocks.initializeKernelSession.mock.calls.at(-1) as
+        | unknown[]
+        | undefined;
+      expect(initArgs?.[7]).toBe(newDir);
     } finally {
       fs.rmSync(oldDir, { recursive: true, force: true });
       fs.rmSync(newDir, { recursive: true, force: true });

@@ -89,6 +89,9 @@ async function waitForPush(
  *   caller before the kernel was spawned. uv-mode kernels must materialize
  *   their venv (and therefore their working dir) before launch (§10.5.9);
  *   when supplied, this directory is used as-is instead of creating one.
+ * @param uvBinaryPath - Optional absolute path to the resolved `uv` binary,
+ *   passed to the kernel (uv-mode only) so `pdv.install()` can run `uv add`
+ *   directly (§10.5.11).
  * @returns Nothing.
  * @throws {Error} When bootstrap execution fails or handshake times out.
  */
@@ -101,6 +104,7 @@ export async function initializeKernelSession(
   kernelWorkingDirs: Map<string, string>,
   workingDirBase?: string,
   preCreatedWorkingDir?: string,
+  uvBinaryPath?: string,
 ): Promise<void> {
   const kernel = kernelManager.getKernel(kernelId);
   const language = kernel?.language ?? "python";
@@ -143,6 +147,7 @@ export async function initializeKernelSession(
       working_dir: workingDir,
       pdv_version: getAppVersion(),
       query_port: kernelManager.getQueryPort(kernelId),
+      ...(uvBinaryPath ? { uv_binary: uvBinaryPath } : {}),
     });
     queryRouter.attach(kernelManager, kernelId);
     kernelWorkingDirs.set(kernelId, workingDir);

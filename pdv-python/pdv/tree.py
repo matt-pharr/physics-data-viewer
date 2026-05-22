@@ -858,6 +858,9 @@ class PDVTree(dict):
         super().__init__(*args, **kwargs)
         self._working_dir: str | None = None
         self._save_dir: str | None = None
+        # Absolute path to the uv binary, provided by the app at pdv.init for
+        # uv-mode kernels (None in shared mode). Used by pdv.install().
+        self._uv_binary: str | None = None
         self._send_fn: Callable[[str, dict], None] | None = None
         self._pending_changes: list[tuple[str, str]] = []
         self._debounce_timer: threading.Timer | None = None
@@ -870,6 +873,10 @@ class PDVTree(dict):
     def _set_working_dir(self, path: str) -> None:
         """Set the working directory path. Called by lifecycle handler after pdv.init."""
         self._working_dir = path
+
+    def _set_uv_binary(self, path: str | None) -> None:
+        """Set the uv binary path (uv-mode kernels only). Called after pdv.init."""
+        self._uv_binary = path
 
     def _set_save_dir(self, path: str | None) -> None:
         """Set the save directory path. None means no project is loaded."""
