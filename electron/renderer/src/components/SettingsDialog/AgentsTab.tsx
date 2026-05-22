@@ -17,6 +17,9 @@ import type { Config, McpStatus } from '../../types';
 /** Capability flags persisted under `config.mcp`. */
 type McpToggleKey = 'mutatingToolsEnabled' | 'pdvRunEnabled';
 
+/** Default agent command; mirrors `DEFAULT_AGENT_COMMAND` in `main/editor-spawn.ts`. */
+const DEFAULT_AGENT_COMMAND = 'claude --mcp-config {mcpConfig}';
+
 /** Placeholder values shown in snippets before the server is running. */
 const URL_PLACEHOLDER = '<not running>';
 const TOKEN_PLACEHOLDER = '<not running>';
@@ -88,20 +91,39 @@ const SnippetBlock: React.FC<{ title: string; snippet: string }> = ({ title, sni
 export const AgentsTab: React.FC = () => {
   const [status, setStatus] = useState<McpStatus | null>(null);
   const [mcpConfig, setMcpConfig] = useState<NonNullable<Config['mcp']>>({});
+  const [agentCommand, setAgentCommand] = useState(DEFAULT_AGENT_COMMAND);
+  const [agentCwd, setAgentCwd] = useState<'project' | 'working'>('working');
 
-  // Fetch the MCP server status and persisted capability flags on mount.
+  // Fetch the MCP server status and persisted config on mount.
   useEffect(() => {
     let cancelled = false;
     void window.pdv.mcp.getStatus().then((s) => {
       if (!cancelled) setStatus(s);
     });
     void window.pdv.config.get().then((cfg) => {
-      if (!cancelled) setMcpConfig(cfg.mcp ?? {});
+      if (cancelled) return;
+      setMcpConfig(cfg.mcp ?? {});
+      setAgentCommand(cfg.launchers?.agent?.command ?? DEFAULT_AGENT_COMMAND);
+      setAgentCwd(cfg.launchers?.agent?.cwd ?? 'working');
     });
     return () => {
       cancelled = true;
     };
   }, []);
+
+  /**
+   * Persist the agent launcher config. The `config:set` handler deep-merges
+   * the `launchers` subtree, so writing just `agent` here leaves the
+   * General-tab `terminal` / `editor` slots untouched.
+   */
+  const persistAgent = useCallback(
+    (next: { command: string; cwd: 'project' | 'working' }) => {
+      void window.pdv.config.set({
+        launchers: { agent: { command: next.command.trim() || DEFAULT_AGENT_COMMAND, cwd: next.cwd } },
+      });
+    },
+    [],
+  );
 
   const running = status?.running ?? false;
   const url = status?.url ?? null;
@@ -147,8 +169,50 @@ export const AgentsTab: React.FC = () => {
         current project. Connect your agent using the details below.
       </p>
 
+      {/* ── Agent launcher ── */}
+      <div className="appearance-section-header">Agent launcher</div>
+      <p className="settings-general-hint">
+        The activity-bar agent button runs this command in the configured
+        terminal. Use the placeholders <code>{'{mcpConfig}'}</code> (PDV's MCP
+        config file), <code>{'{projectRoot}'}</code>, and{' '}
+        <code>{'{workingDir}'}</code> — each substituted with a quoted
+        absolute path.
+      </p>
+      <div className="settings-general-grid">
+        <label htmlFor="agent-command">Command</label>
+        <input
+          id="agent-command"
+          type="text"
+          value={agentCommand}
+          onChange={(e) => setAgentCommand(e.target.value)}
+          onBlur={() => persistAgent({ command: agentCommand, cwd: agentCwd })}
+          placeholder={DEFAULT_AGENT_COMMAND}
+          spellCheck={false}
+        />
+        <div className="settings-general-desc">
+          Default opens Claude Code wired to PDV's MCP server.
+        </div>
+
+        <label htmlFor="agent-cwd">Start in</label>
+        <select
+          id="agent-cwd"
+          value={agentCwd}
+          onChange={(e) => {
+            const cwd = e.target.value as 'project' | 'working';
+            setAgentCwd(cwd);
+            persistAgent({ command: agentCommand, cwd });
+          }}
+        >
+          <option value="project">Project directory</option>
+          <option value="working">Session working directory</option>
+        </select>
+        <div className="settings-general-desc">
+          Which directory the agent shell <code>cd</code>s into before launching.
+        </div>
+      </div>
+
       {/* ── Connection status ── */}
-      <div className="appearance-section-header">Connection</div>
+      <div className="appearance-section-header appearance-section-header--spaced">Connection</div>
       <div className="agents-status">
         <span
           className={`agents-status-dot ${running ? 'agents-status-dot--on' : 'agents-status-dot--off'}`}

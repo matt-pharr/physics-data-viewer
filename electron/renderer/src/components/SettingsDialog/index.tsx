@@ -18,12 +18,18 @@ import {
 import type { Theme } from '../../types';
 import { loader } from '@monaco-editor/react';
 import {
-  IS_MAC,
+  CUSTOM_PRESET_ID,
+  EDITOR_PRESETS,
   TERMINAL_PRESET_LABELS,
+  checkForCommand,
   defaultTerminalPresetForPlatform,
+  editorPresetIdForCommand,
+  fileManagerPresetIdForCommand,
+  getFileManagerPresets,
   getTerminalPresetsForPlatform,
   isLikelyTuiEditor,
   normalizeShortcut,
+  terminalPresetCheck,
 } from './utils';
 import { ShortcutCapture } from './ShortcutCapture';
 import { AppearanceTab } from './AppearanceTab';
@@ -32,9 +38,6 @@ import { DEFAULT_AUTOSAVE_INTERVAL_S } from '../../app/constants';
 
 type SettingsTab = 'general' | 'shortcuts' | 'appearance' | 'agents' | 'runtime' | 'about';
 
-const DEFAULT_FILE_MANAGER = IS_MAC ? 'open {}' : 'xdg-open {}';
-/** Mirrors `DEFAULT_AGENT_COMMAND` in `main/editor-spawn.ts`. */
-const DEFAULT_AGENT_COMMAND = 'claude --mcp-config {mcpConfig}';
 const DEFAULT_VSCODE_PAIR = THEME_PAIRS.find((pair) => pair.name === 'VSCode');
 
 /**
@@ -48,6 +51,7 @@ const PLATFORM: NodeJS.Platform =
   (typeof window !== 'undefined' && window.pdv?.system?.platform) || 'linux';
 const TERMINAL_PRESET_OPTIONS = getTerminalPresetsForPlatform(PLATFORM);
 const DEFAULT_TERMINAL_PRESET = defaultTerminalPresetForPlatform(PLATFORM);
+const FILE_MANAGER_OPTIONS = getFileManagerPresets(PLATFORM);
 
 interface SettingsDialogProps {
   isOpen: boolean;
@@ -93,15 +97,20 @@ export const SettingsDialog: React.FC<SettingsDialogProps> = ({
     DEFAULT_VSCODE_PAIR?.light ?? BUILTIN_THEMES.find((t) => t.monacoTheme === 'vs')?.name ?? BUILTIN_THEMES[0].name,
   );
 
-  // General settings state
-  const [editorFileCommand, setEditorFileCommand] = useState('code {}');
-  const [editorDirCommand, setEditorDirCommand] = useState('code {}');
-  const [editorIsTuiEditor, setEditorIsTuiEditor] = useState(false);
-  const [fileManagerCmd, setFileManagerCmd] = useState(DEFAULT_FILE_MANAGER);
+  // General settings state — launchers
+  const [editorPresetId, setEditorPresetId] = useState<string>('vscode');
+  const [editorCustomCommand, setEditorCustomCommand] = useState('code {}');
+  const [editorCustomIsTui, setEditorCustomIsTui] = useState(false);
+  const [fileManagerPresetId, setFileManagerPresetId] = useState<string>(FILE_MANAGER_OPTIONS[0].id);
+  const [fileManagerCustomCommand, setFileManagerCustomCommand] = useState(FILE_MANAGER_OPTIONS[0].command);
   const [terminalPreset, setTerminalPreset] = useState<TerminalPreset>(DEFAULT_TERMINAL_PRESET);
   const [terminalCustomTemplate, setTerminalCustomTemplate] = useState('');
-  const [agentCommand, setAgentCommand] = useState(DEFAULT_AGENT_COMMAND);
-  const [agentCwd, setAgentCwd] = useState<'project' | 'working'>('project');
+  /** Availability of each General-tab launcher; `null` while a check is in flight. */
+  const [launcherAvailability, setLauncherAvailability] = useState<{
+    terminal: boolean | null;
+    editor: boolean | null;
+    fileManager: boolean | null;
+  }>({ terminal: true, editor: true, fileManager: true });
   const [defaultSaveLocation, setDefaultSaveLocation] = useState('');
   const [workingDirBase, setWorkingDirBase] = useState('');
   const [autoSaveInterval, setAutoSaveInterval] = useState(DEFAULT_AUTOSAVE_INTERVAL_S);
@@ -132,14 +141,18 @@ export const SettingsDialog: React.FC<SettingsDialogProps> = ({
     if (!isOpen) return;
     /* eslint-disable react-hooks/set-state-in-effect -- intentional sync from props on dialog open */
     setEditedShortcuts(shortcuts);
+    // Editor: reverse-map the saved command to a preset (or Custom).
     const editorCfg = config?.launchers?.editor;
     const fileCmd = editorCfg?.fileCommand ?? 'code {}';
-    setEditorFileCommand(fileCmd);
-    setEditorDirCommand(editorCfg?.dirCommand ?? 'code {}');
-    // The checkbox shows the *effective* wrap decision: an explicit saved
-    // override, or PDV's basename auto-detection when the user has none.
-    setEditorIsTuiEditor(editorCfg?.isTuiEditor ?? isLikelyTuiEditor(fileCmd));
-    setFileManagerCmd(config?.fileManagerCmd ?? DEFAULT_FILE_MANAGER);
+    const editorPreset = editorPresetIdForCommand(fileCmd);
+    setEditorPresetId(editorPreset);
+    setEditorCustomCommand(fileCmd);
+    setEditorCustomIsTui(editorCfg?.isTuiEditor ?? isLikelyTuiEditor(fileCmd));
+    // File manager: reverse-map likewise.
+    const fmCmd = config?.fileManagerCmd;
+    const fmPreset = fileManagerPresetIdForCommand(fmCmd, PLATFORM);
+    setFileManagerPresetId(fmPreset);
+    setFileManagerCustomCommand(fmCmd ?? FILE_MANAGER_OPTIONS[0].command);
     const savedPreset = config?.launchers?.terminal?.preset;
     setTerminalPreset(
       savedPreset && TERMINAL_PRESET_OPTIONS.includes(savedPreset)
@@ -147,8 +160,6 @@ export const SettingsDialog: React.FC<SettingsDialogProps> = ({
         : DEFAULT_TERMINAL_PRESET,
     );
     setTerminalCustomTemplate(config?.launchers?.terminal?.customTemplate ?? '');
-    setAgentCommand(config?.launchers?.agent?.command ?? DEFAULT_AGENT_COMMAND);
-    setAgentCwd(config?.launchers?.agent?.cwd ?? 'project');
     setDefaultSaveLocation(config?.defaultSaveLocation ?? '');
     setWorkingDirBase(config?.workingDirBase ?? '');
     setAutoSaveInterval(config?.autoSaveIntervalSeconds ?? DEFAULT_AUTOSAVE_INTERVAL_S);
@@ -186,6 +197,60 @@ export const SettingsDialog: React.FC<SettingsDialogProps> = ({
     void window.pdv.about.getVersion().then(setAppVersion).catch(() => setAppVersion('unknown'));
     /* eslint-enable react-hooks/set-state-in-effect */
   }, [config, shortcuts, isOpen, initialTab]);
+
+  // Effective editor command + TUI flag + availability check, resolved from
+  // the dropdown selection (or the Custom free-text field).
+  const editorResolved = useMemo(() => {
+    if (editorPresetId === CUSTOM_PRESET_ID) {
+      const command = editorCustomCommand.trim() || 'code {}';
+      return { command, isTui: editorCustomIsTui, check: checkForCommand(command) };
+    }
+    const preset = EDITOR_PRESETS.find((p) => p.id === editorPresetId) ?? EDITOR_PRESETS[0];
+    return { command: preset.command, isTui: preset.isTuiEditor, check: preset.check };
+  }, [editorPresetId, editorCustomCommand, editorCustomIsTui]);
+
+  const fileManagerResolved = useMemo(() => {
+    if (fileManagerPresetId === CUSTOM_PRESET_ID) {
+      const command = fileManagerCustomCommand.trim() || FILE_MANAGER_OPTIONS[0].command;
+      return { command, check: checkForCommand(command) };
+    }
+    const preset =
+      FILE_MANAGER_OPTIONS.find((p) => p.id === fileManagerPresetId) ?? FILE_MANAGER_OPTIONS[0];
+    return { command: preset.command, check: preset.check };
+  }, [fileManagerPresetId, fileManagerCustomCommand]);
+
+  const terminalCheck = useMemo(
+    () => terminalPresetCheck(terminalPreset, PLATFORM, terminalCustomTemplate),
+    [terminalPreset, terminalCustomTemplate],
+  );
+
+  // Probe each launcher's availability (debounced, so typing in a Custom
+  // field doesn't fire an IPC per keystroke). Save is blocked while any
+  // selected launcher is confirmed missing.
+  useEffect(() => {
+    if (!isOpen) return;
+    let cancelled = false;
+    const timer = window.setTimeout(() => {
+      void (async () => {
+        const [terminal, editor, fileManager] = await Promise.all([
+          window.pdv.launchers.checkAvailability(terminalCheck),
+          window.pdv.launchers.checkAvailability(editorResolved.check),
+          window.pdv.launchers.checkAvailability(fileManagerResolved.check),
+        ]);
+        if (!cancelled) setLauncherAvailability({ terminal, editor, fileManager });
+      })();
+    }, 250);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [isOpen, terminalCheck, editorResolved.check, fileManagerResolved.check]);
+
+  /** True when a selected launcher is confirmed missing — blocks Save. */
+  const hasUnavailableLauncher =
+    launcherAvailability.terminal === false ||
+    launcherAvailability.editor === false ||
+    launcherAvailability.fileManager === false;
 
   // Subscribe to auto-update status pushes while the dialog is open, and
   // fetch the current cached status so we reflect any check that completed
@@ -348,22 +413,18 @@ export const SettingsDialog: React.FC<SettingsDialogProps> = ({
         ? { preset: terminalPreset, customTemplate: trimmedCustom || undefined }
         : { preset: terminalPreset };
 
-    const fileCommand = editorFileCommand.trim() || 'code {}';
-    const dirCommand = editorDirCommand.trim() || 'code {}';
-    // Persist `isTuiEditor` only when it overrides PDV's auto-detection — that
-    // keeps the main-process auto-detect live for the common case (a saved
-    // explicit `false` for, say, `vim` would silently break terminal wrapping).
-    const isTuiEditor =
-      editorIsTuiEditor === isLikelyTuiEditor(fileCommand) ? undefined : editorIsTuiEditor;
+    // The collapsed editor choice drives both file-open and folder-open; the
+    // `isTuiEditor` flag is now always definite (preset flag or Custom checkbox).
+    const editorCommand = editorResolved.command;
 
     await onSave({
-      fileManagerCmd:  fileManagerCmd.trim()  || DEFAULT_FILE_MANAGER,
+      fileManagerCmd: fileManagerResolved.command,
       launchers: {
         terminal: terminalLauncher,
-        editor: { fileCommand, dirCommand, isTuiEditor },
-        agent: {
-          command: agentCommand.trim() || DEFAULT_AGENT_COMMAND,
-          cwd: agentCwd,
+        editor: {
+          fileCommand: editorCommand,
+          dirCommand: editorCommand,
+          isTuiEditor: editorResolved.isTui,
         },
       },
       defaultSaveLocation: defaultSaveLocation.trim() || undefined,
@@ -399,6 +460,15 @@ export const SettingsDialog: React.FC<SettingsDialogProps> = ({
     { title: 'Tree',        keys: ['treeCopyPath', 'treeEditScript', 'treePrint'] },
   ];
 
+  /** Inline "not installed" marker shown under a launcher whose check failed. */
+  const renderUnavailable = (state: boolean | null, kind: string): React.ReactNode =>
+    state === false ? (
+      <div role="alert" className="settings-general-error">
+        The selected {kind} wasn't found on this system — install it or choose
+        another option before saving.
+      </div>
+    ) : null;
+
   return (
     <div className="modal-overlay">
       <div className="settings-dialog">
@@ -422,70 +492,92 @@ export const SettingsDialog: React.FC<SettingsDialogProps> = ({
                 If omitted, the path is appended automatically.
               </p>
               <div className="settings-general-grid">
-                <label htmlFor="sg-editor-file">Editor / IDE</label>
-                <input
-                  id="sg-editor-file"
-                  type="text"
-                  value={editorFileCommand}
-                  onChange={(e) => {
-                    const value = e.target.value;
-                    setEditorFileCommand(value);
-                    // Re-derive the wrap checkbox as the command changes so a
-                    // user switching to vim/nvim gets terminal wrapping without
-                    // having to discover the checkbox. A deliberate override is
-                    // re-applied by toggling the checkbox after editing.
-                    setEditorIsTuiEditor(isLikelyTuiEditor(value));
-                  }}
-                  placeholder="code {}"
-                  spellCheck={false}
-                />
+                <label htmlFor="sg-editor">Editor / IDE</label>
+                <select
+                  id="sg-editor"
+                  value={editorPresetId}
+                  onChange={(e) => setEditorPresetId(e.target.value)}
+                >
+                  {EDITOR_PRESETS.map((p) => (
+                    <option key={p.id} value={p.id}>{p.label}</option>
+                  ))}
+                  <option value={CUSTOM_PRESET_ID}>Custom…</option>
+                </select>
                 <div className="settings-general-desc">
-                  Used when opening a script from the Tree (e.g. <code>code {'{}' }</code>, <code>nvim {'{}' }</code>).
+                  Opens a script from the Tree, and the working directory via the
+                  activity-bar button.
+                  {renderUnavailable(launcherAvailability.editor, 'editor')}
                 </div>
 
-                <label htmlFor="sg-editor-tui">Run in terminal</label>
-                <div className="settings-general-check">
-                  <input
-                    id="sg-editor-tui"
-                    type="checkbox"
-                    checked={editorIsTuiEditor}
-                    onChange={(e) => setEditorIsTuiEditor(e.target.checked)}
-                  />
-                </div>
-                <div className="settings-general-desc">
-                  Wrap the editor in a terminal window — required for TUI editors
-                  like <code>vim</code>, <code>nvim</code>, <code>nano</code>.
-                  Auto-detected from the command; toggle to override (e.g. for GUI
-                  variants such as <code>nvim-qt</code>).
-                </div>
+                {editorPresetId === CUSTOM_PRESET_ID && (
+                  <>
+                    <label htmlFor="sg-editor-custom">Editor command</label>
+                    <input
+                      id="sg-editor-custom"
+                      type="text"
+                      value={editorCustomCommand}
+                      onChange={(e) => {
+                        const value = e.target.value;
+                        setEditorCustomCommand(value);
+                        // Re-derive the wrap checkbox as the command changes so
+                        // switching to vim/nvim wraps without hunting for it.
+                        setEditorCustomIsTui(isLikelyTuiEditor(value));
+                      }}
+                      placeholder="code {}"
+                      spellCheck={false}
+                    />
+                    <div className="settings-general-desc">
+                      Use <code>{'{}'}</code> as the file/folder path placeholder.
+                    </div>
 
-                <label htmlFor="sg-editor-dir">Open folder command</label>
-                <input
-                  id="sg-editor-dir"
-                  type="text"
-                  value={editorDirCommand}
-                  onChange={(e) => setEditorDirCommand(e.target.value)}
-                  placeholder="code {}"
-                  spellCheck={false}
-                />
-                <div className="settings-general-desc">
-                  Used by the activity-bar button that opens the session working
-                  directory in your editor/IDE (e.g. <code>code {'{}' }</code>).
-                </div>
+                    <label htmlFor="sg-editor-tui">Run in terminal</label>
+                    <div className="settings-general-check">
+                      <input
+                        id="sg-editor-tui"
+                        type="checkbox"
+                        checked={editorCustomIsTui}
+                        onChange={(e) => setEditorCustomIsTui(e.target.checked)}
+                      />
+                    </div>
+                    <div className="settings-general-desc">
+                      Required for TUI editors (<code>vim</code>, <code>nvim</code>,
+                      <code>nano</code>). Auto-set from the command; toggle to override.
+                    </div>
+                  </>
+                )}
 
                 <label htmlFor="sg-file-manager">File manager</label>
-                <input
+                <select
                   id="sg-file-manager"
-                  type="text"
-                  value={fileManagerCmd}
-                  onChange={(e) => setFileManagerCmd(e.target.value)}
-                  placeholder={DEFAULT_FILE_MANAGER}
-                  spellCheck={false}
-                />
+                  value={fileManagerPresetId}
+                  onChange={(e) => setFileManagerPresetId(e.target.value)}
+                >
+                  {FILE_MANAGER_OPTIONS.map((p) => (
+                    <option key={p.id} value={p.id}>{p.label}</option>
+                  ))}
+                  <option value={CUSTOM_PRESET_ID}>Custom…</option>
+                </select>
                 <div className="settings-general-desc">
-                  Used to reveal files in the OS file browser (e.g.{' '}
-                  <code>open {'{}' }</code> on macOS, <code>xdg-open {'{}' }</code> on Linux).
+                  Used to reveal files in the OS file browser.
+                  {renderUnavailable(launcherAvailability.fileManager, 'file manager')}
                 </div>
+
+                {fileManagerPresetId === CUSTOM_PRESET_ID && (
+                  <>
+                    <label htmlFor="sg-file-manager-custom">File-manager command</label>
+                    <input
+                      id="sg-file-manager-custom"
+                      type="text"
+                      value={fileManagerCustomCommand}
+                      onChange={(e) => setFileManagerCustomCommand(e.target.value)}
+                      placeholder="xdg-open {}"
+                      spellCheck={false}
+                    />
+                    <div className="settings-general-desc">
+                      Use <code>{'{}'}</code> as the path placeholder.
+                    </div>
+                  </>
+                )}
 
                 <label htmlFor="sg-terminal-preset">Terminal application</label>
                 <select
@@ -500,6 +592,7 @@ export const SettingsDialog: React.FC<SettingsDialogProps> = ({
                 <div className="settings-general-desc">
                   Wraps TUI editors (<code>vim</code>, <code>nvim</code>, <code>nano</code>, …) so they open in a real
                   terminal window. Leave on the platform default unless you have a preferred terminal.
+                  {renderUnavailable(launcherAvailability.terminal, 'terminal')}
                   {terminalPreset === 'none' && (
                     <div role="alert" className="settings-general-warn">
                       TUI editors will not work without a terminal wrapper. Use this option only with
@@ -530,37 +623,6 @@ export const SettingsDialog: React.FC<SettingsDialogProps> = ({
                 )}
               </div>
 
-              <h4 className="settings-general-section">AI agent</h4>
-              <div className="settings-general-grid">
-                <label htmlFor="sg-agent-command">Command</label>
-                <input
-                  id="sg-agent-command"
-                  type="text"
-                  value={agentCommand}
-                  onChange={(e) => setAgentCommand(e.target.value)}
-                  placeholder={DEFAULT_AGENT_COMMAND}
-                  spellCheck={false}
-                />
-                <div className="settings-general-desc">
-                  Run by the agent button in the activity bar, inside the configured terminal.
-                  Placeholders: <code>{'{mcpConfig}'}</code> (PDV's MCP config file),{' '}
-                  <code>{'{projectRoot}'}</code>, <code>{'{workingDir}'}</code> — each substituted
-                  with a quoted absolute path.
-                </div>
-
-                <label htmlFor="sg-agent-cwd">Start in</label>
-                <select
-                  id="sg-agent-cwd"
-                  value={agentCwd}
-                  onChange={(e) => setAgentCwd(e.target.value as 'project' | 'working')}
-                >
-                  <option value="project">Project directory</option>
-                  <option value="working">Session working directory</option>
-                </select>
-                <div className="settings-general-desc">
-                  Which directory the agent shell <code>cd</code>s into before launching.
-                </div>
-              </div>
 
               <h4 className="settings-general-section">Directories</h4>
               <div className="settings-general-grid">
@@ -926,8 +988,16 @@ export const SettingsDialog: React.FC<SettingsDialogProps> = ({
             <button
               className="btn btn-primary"
               onClick={() => void onSaveSettings()}
-              disabled={activeTab === 'shortcuts' && hasConflicts}
-              title={activeTab === 'shortcuts' && hasConflicts ? 'Resolve duplicate shortcuts before saving' : undefined}
+              disabled={
+                (activeTab === 'shortcuts' && hasConflicts) || hasUnavailableLauncher
+              }
+              title={
+                hasUnavailableLauncher
+                  ? 'A selected launcher is not installed — fix it on the General tab before saving'
+                  : activeTab === 'shortcuts' && hasConflicts
+                    ? 'Resolve duplicate shortcuts before saving'
+                    : undefined
+              }
             >
               Save
             </button>

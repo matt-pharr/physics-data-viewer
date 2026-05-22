@@ -109,7 +109,7 @@ export interface AgentLauncherConfig {
    * - `{workingDir}` — the active kernel's session working directory.
    */
   command?: string;
-  /** Which directory the agent shell starts in. Defaults to `'project'`. */
+  /** Which directory the agent shell starts in. Defaults to `'working'`. */
   cwd?: "project" | "working";
 }
 

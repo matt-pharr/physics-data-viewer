@@ -46,6 +46,9 @@ export type { EditorLauncherConfig } from '../../../main/ipc';
 /** Persisted AI-agent launcher config (`launchers.agent`). */
 export type { AgentLauncherConfig } from '../../../main/ipc';
 
+/** Launcher availability-check descriptor for `launchers.checkAvailability`. */
+export type { LauncherCheck } from '../../../main/ipc';
+
 /** Runtime kernel descriptor returned by `kernels.start/list/restart`. */
 export interface KernelInfo {
   /** Opaque kernel id used in subsequent API calls. */
@@ -1072,6 +1075,8 @@ export interface PDVApi {
     openAgent(): Promise<{ success: boolean; error?: string }>;
     /** Open the active kernel's working directory in the configured editor/IDE. */
     openWorkingDir(): Promise<{ success: boolean; error?: string }>;
+    /** Check whether a launcher is installed (no launch), to gate Settings Save. */
+    checkAvailability(check: LauncherCheck): Promise<boolean>;
   };
   chrome: {
     getInfo(): Promise<WindowChromeInfo>;

@@ -264,6 +264,17 @@
   font-size: 11px;
 }
 
+/* Hard "not installed" marker — Save is blocked while this is shown. */
+.settings-general-error {
+  margin-top: 6px;
+  padding: 6px 8px;
+  border-left: 3px solid var(--error);
+  background: var(--bg-tertiary);
+  color: var(--text-primary);
+  border-radius: 3px;
+  font-size: 11px;
+}
+
 .settings-general-section {
   font-size: 13px;
   font-weight: 600;

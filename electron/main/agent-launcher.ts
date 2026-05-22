@@ -81,13 +81,13 @@ export function buildAgentInvocation(
 
   const command =
     (opts.agent?.command ?? DEFAULT_AGENT_COMMAND).trim() || DEFAULT_AGENT_COMMAND;
-  const cwdMode = opts.agent?.cwd ?? "project";
+  const cwdMode = opts.agent?.cwd ?? "working";
   // `working` always exists; `project` falls back to the working directory
   // when no project has been saved yet.
   const targetDir =
-    cwdMode === "working"
-      ? opts.workingDir
-      : (opts.projectRoot ?? opts.workingDir);
+    cwdMode === "project"
+      ? (opts.projectRoot ?? opts.workingDir)
+      : opts.workingDir;
 
   const expandedCommand = command
     .replace(/\{mcpConfig\}/g, quote(opts.mcpConfigPath))
