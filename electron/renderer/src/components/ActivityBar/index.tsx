@@ -6,7 +6,7 @@
  */
 
 import React from 'react';
-import { TreeIcon, NamespaceIcon, SettingsIcon, AgentIcon } from '../Icons';
+import { TreeIcon, NamespaceIcon, SettingsIcon, AgentIcon, FolderCodeIcon } from '../Icons';
 
 type LeftPanel = 'tree' | 'namespace';
 
@@ -16,6 +16,7 @@ interface ActivityBarProps {
   onActivityBarClick: (panel: LeftPanel) => void;
   onSettingsClick: () => void;
   onAgentClick: () => void;
+  onOpenWorkingDir: () => void;
   guiModules?: { alias: string; name: string }[];
   kernelId: string | null;
 }
@@ -27,6 +28,7 @@ export const ActivityBar: React.FC<ActivityBarProps> = ({
   onActivityBarClick,
   onSettingsClick,
   onAgentClick,
+  onOpenWorkingDir,
   guiModules = [],
   kernelId,
 }) => (
@@ -68,6 +70,14 @@ export const ActivityBar: React.FC<ActivityBarProps> = ({
       )}
     </div>
     <div className="activity-bar-bottom">
+      <button
+        className="activity-btn"
+        onClick={onOpenWorkingDir}
+        disabled={!kernelId}
+        title={kernelId ? 'Open working directory in editor' : 'Start a kernel to open its working directory'}
+      >
+        <FolderCodeIcon />
+      </button>
       <button
         className="activity-btn"
         onClick={onAgentClick}

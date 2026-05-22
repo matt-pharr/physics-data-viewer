@@ -1596,7 +1596,7 @@ The API surface:
 - `window.pdv.environment.*` — Python environment management: `list`, `check`, `install`, `refresh`; push: `onInstallOutput(cb) → unsub`
 - `window.pdv.chrome.*` — window chrome controls: `getInfo`, `minimize`, `toggleMaximize`, `close`; push: `onStateChanged(cb) → unsub`
 - `window.pdv.system.*` — constant host facts injected at preload time: `platform` (the main process's `process.platform`). Exposed as a plain value, not a function — it never changes during a session, so it needs no IPC channel
-- `window.pdv.launchers.*` — action-bar external-app launchers: `openAgent` (launch the configured AI agent in a terminal)
+- `window.pdv.launchers.*` — action-bar external-app launchers: `openAgent` (launch the configured AI agent in a terminal), `openWorkingDir` (open the active kernel's working directory in the configured editor/IDE)
 - `window.pdv.progress.*` — operation progress: push only: `onProgress(cb) → unsub`
 - `window.pdv.menu.*` — menu bridge: `updateRecentProjects(paths)`, `onAction(cb) → unsub`
 

@@ -1,11 +1,14 @@
 /**
  * ipc-register-launchers.ts — IPC handlers for the action-bar launcher buttons.
  *
- * Currently registers `launchers.openAgent`, which launches the configured AI
- * agent CLI in a terminal window pointed at PDV's MCP server.
+ * Registers:
+ * - `launchers.openAgent` — launch the configured AI agent CLI in a terminal
+ *   pointed at PDV's MCP server.
+ * - `launchers.openWorkingDir` — open the active kernel's working directory in
+ *   the configured editor/IDE.
  *
  * Non-responsibilities:
- * - Building the spawn spec (see `agent-launcher.ts`).
+ * - Building the agent spawn spec (see `agent-launcher.ts`).
  * - Writing the MCP config file (see `mcp/mcp-config-writer.ts`).
  */
 
@@ -15,8 +18,29 @@ import { ipcMain } from "electron";
 
 import { buildAgentInvocation } from "./agent-launcher";
 import type { PDVConfig } from "./config";
+import { buildEditorSpawn, resolveEditorSpawn } from "./editor-spawn";
 import { IPC, type McpStatus, type ScriptOperationResult } from "./ipc";
 import { writeMcpConfigFile } from "./mcp/mcp-config-writer";
+
+/**
+ * Spawn a detached launcher process and never block on it. Errors are logged
+ * (the child outlives this process), so callers treat a successful spawn as
+ * success.
+ *
+ * @param spec - Executable and arguments to spawn.
+ * @param label - Short label used in error logs (e.g. `"agent"`).
+ */
+function spawnDetached(spec: { file: string; args: string[] }, label: string): void {
+  const child = spawn(spec.file, spec.args, { detached: true, stdio: "ignore" });
+  child.on("error", (err) => {
+    const msg =
+      err && (err as NodeJS.ErrnoException).code === "ENOENT"
+        ? `${label} launch failed: "${spec.file}" not found.`
+        : `${label} launch failed: ${err.message}`;
+    console.error(`[pdv] ${label} spawn error:`, msg);
+  });
+  child.unref();
+}
 
 /** Dependency bag for {@link registerLaunchersIpcHandlers}. */
 export interface RegisterLaunchersIpcHandlersOptions {
@@ -81,23 +105,46 @@ export function registerLaunchersIpcHandlers(
           projectRoot: getActiveProjectDir(),
           workingDir,
         });
-        const child = spawn(spawnSpec.file, spawnSpec.args, {
-          detached: true,
-          stdio: "ignore",
-        });
-        child.on("error", (err) => {
-          const msg =
-            err && (err as NodeJS.ErrnoException).code === "ENOENT"
-              ? `Agent launch failed: "${spawnSpec.file}" not found.`
-              : `Agent launch failed: ${err.message}`;
-          console.error("[pdv] agent spawn error:", msg);
-        });
-        child.unref();
+        spawnDetached(spawnSpec, "agent");
         return { success: true };
       } catch (err) {
         const error = err instanceof Error ? err.message : String(err);
         console.error("[pdv] launchers.openAgent failed:", error);
         return { success: false, error: `Failed to launch agent: ${error}` };
+      }
+    },
+  );
+
+  ipcMain.handle(
+    IPC.launchers.openWorkingDir,
+    async (): Promise<ScriptOperationResult> => {
+      if (process.env.PDV_E2E === "1") {
+        return { success: true };
+      }
+
+      const kernelId = getActiveKernelId();
+      if (!kernelId) {
+        return { success: false, error: "No active kernel; start one first." };
+      }
+      const workingDir = kernelWorkingDirs.get(kernelId);
+      if (!workingDir) {
+        return { success: false, error: "No working directory for the active kernel." };
+      }
+
+      try {
+        const config = getConfig();
+        const { file, args } = buildEditorSpawn(
+          config.launchers?.editor?.dirCommand,
+          workingDir,
+        );
+        // Opening a directory in a GUI editor/IDE never needs a terminal wrap.
+        const spawnSpec = resolveEditorSpawn(file, args, { wrapInTerminal: false });
+        spawnDetached(spawnSpec, "editor");
+        return { success: true };
+      } catch (err) {
+        const error = err instanceof Error ? err.message : String(err);
+        console.error("[pdv] launchers.openWorkingDir failed:", error);
+        return { success: false, error: `Failed to open working directory: ${error}` };
       }
     },
   );
