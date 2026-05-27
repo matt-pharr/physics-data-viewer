@@ -29,7 +29,7 @@
     "build": "npm run build:renderer && npm run build:main",
     "build:renderer": "cd renderer && node ../node_modules/vite/bin/vite.js build",
     "build:main": "node ./node_modules/typescript/bin/tsc -p tsconfig.json",
-    "build:e2e": "npm run build:renderer && npm run build:main",
+    "build:e2e": "npm run build",
     "test:e2e": "node ./node_modules/@playwright/test/cli.js test --config=playwright.config.ts",
     "test:e2e:headed": "node ./node_modules/@playwright/test/cli.js test --headed --config=playwright.config.ts",
     "pack": "npm run build && electron-builder --dir",
