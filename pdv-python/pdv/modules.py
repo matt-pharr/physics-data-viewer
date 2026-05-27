@@ -6,14 +6,23 @@ that is invoked when a user double-clicks a tree node whose value is an instance
 of ``MyClass``. Handlers are resolved by walking the MRO, so a handler
 registered on a base class also applies to subclasses.
 
+Classes the user authors directly may instead define a ``__pdv_handle__``
+method (the dunder protocol — see :mod:`pdv.serializers`); the registered
+handler wins when both are present. ``dispatch_handler`` wraps both paths in
+try/except so a handler exception surfaces to the renderer as a structured
+``{"dispatched": False, "error": "..."}`` reply rather than an opaque kernel
+error.
+
 Public API
 ----------
 handle : decorator factory
     ``@pdv.handle(MyClass)`` registers a handler for instances of MyClass.
 has_handler_for : function
-    Check whether any registered handler matches an object's type (via MRO).
+    Check whether any registered handler matches an object's type (via MRO),
+    or the value's class defines ``__pdv_handle__``.
 dispatch_handler : function
-    Find and call the appropriate handler for an object.
+    Find and call the appropriate handler for an object. Catches handler
+    exceptions and returns them as a structured error.
 get_handler_registry : function
     Return a snapshot of all registered handlers.
 clear_handlers : function
@@ -22,6 +31,7 @@ clear_handlers : function
 See Also
 --------
 ARCHITECTURE.md §3.4 (message type catalogue)
+pdv.serializers (dunder protocol surface, including ``__pdv_handle__``)
 """
 
 from __future__ import annotations
@@ -78,7 +88,10 @@ def handle(cls: type) -> Callable:
 
 
 def has_handler_for(obj: Any) -> bool:
-    """Check whether any registered handler matches *obj*'s type via MRO.
+    """Check whether any handler matches *obj* — registered or dunder.
+
+    Looks up ``@pdv.handle``-registered handlers via MRO walk, then falls
+    back to checking whether ``type(obj)`` defines ``__pdv_handle__``.
 
     Parameters
     ----------
@@ -88,16 +101,23 @@ def has_handler_for(obj: Any) -> bool:
     Returns
     -------
     bool
-        True if a handler is registered for ``type(obj)`` or any of its bases.
+        True if a handler is registered for ``type(obj)`` or any of its bases,
+        or if the class defines a ``__pdv_handle__`` method.
     """
     for cls in type(obj).__mro__:
         if cls in _handler_registry:
             return True
-    return False
+    return hasattr(type(obj), "__pdv_handle__")
 
 
 def dispatch_handler(obj: Any, path: str, pdv_tree: Any) -> dict:
     """Find and call the handler for *obj*.
+
+    Resolution order: registered ``@pdv.handle`` (MRO walk) wins over a
+    class-defined ``__pdv_handle__`` dunder. Exceptions from either path
+    are caught and returned as ``{"dispatched": False, "error": "..."}`` so
+    the renderer receives a structured error rather than an opaque kernel
+    exception.
 
     Parameters
     ----------
@@ -112,12 +132,28 @@ def dispatch_handler(obj: Any, path: str, pdv_tree: Any) -> dict:
     -------
     dict
         ``{"dispatched": True}`` on success, or
-        ``{"dispatched": False, "error": "..."}`` when no handler matches.
+        ``{"dispatched": False, "error": "..."}`` when no handler matches
+        or the chosen handler raised.
     """
     for cls in type(obj).__mro__:
         if cls in _handler_registry:
-            _handler_registry[cls].func(obj, path, pdv_tree)
+            try:
+                _handler_registry[cls].func(obj, path, pdv_tree)
+            except Exception as exc:  # noqa: BLE001
+                return {
+                    "dispatched": False,
+                    "error": (
+                        f"Handler for {cls.__module__}.{cls.__qualname__} "
+                        f"failed: {exc}"
+                    ),
+                }
             return {"dispatched": True}
+    if hasattr(type(obj), "__pdv_handle__"):
+        try:
+            obj.__pdv_handle__(path, pdv_tree)
+        except Exception as exc:  # noqa: BLE001
+            return {"dispatched": False, "error": f"__pdv_handle__ failed: {exc}"}
+        return {"dispatched": True}
     t = type(obj)
     return {
         "dispatched": False,

@@ -118,6 +118,23 @@ replace_in_file examples/modules/N-pendulum-julia/pdv-module.json \
 # (see issue #235).
 
 echo
+# Regenerate electron/package-lock.json so its top-level "version" field
+# matches package.json. Without this, `npm ci` in CI runs in a degraded
+# mode that skips postinstall scripts — and the Electron prebuilt download
+# is one of those, so Playwright E2E silently fails on `electron.launch`
+# with "Electron failed to install correctly". --package-lock-only updates
+# the lockfile without touching node_modules, so this is fast and free of
+# side effects on the developer's working tree.
+if command -v npm >/dev/null 2>&1; then
+    echo "Regenerating electron/package-lock.json..."
+    (cd "$REPO_ROOT/electron" && npm install --package-lock-only --silent)
+    echo "  ✓ electron/package-lock.json"
+else
+    echo "  ! npm not found in PATH — skipping electron/package-lock.json regeneration."
+    echo "    Run 'cd electron && npm install --package-lock-only' yourself before pushing."
+fi
+
+echo
 echo "Edits applied. Verifying parity..."
 echo
 "$REPO_ROOT/scripts/check-version-parity.sh"

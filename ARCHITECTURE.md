@@ -1,5 +1,5 @@
 # PDV Architecture Document
-**Version**: 0.1.2
+**Version**: 0.2.0
 **Date**: 2026-04-07
 **Status**: Authoritative design specification. All new code must conform to this document. Deviations require updating this document first.
 
@@ -118,7 +118,7 @@ Every PDV message — whether sent by the app or by the kernel — has the follo
 
 ```json
 {
-  "pdv_version": "0.1.2",
+  "pdv_version": "0.2.0",
   "msg_id": "<uuid-v4>",
   "in_reply_to": "<uuid-v4-or-null>",
   "type": "<message-type-string>",
@@ -129,7 +129,7 @@ Every PDV message — whether sent by the app or by the kernel — has the follo
 
 | Field | Type | Description |
 |---|---|---|
-| `pdv_version` | string | App/package version (e.g. `"0.1.2"`). Both the Electron app and `pdv-python` use their installed version as this value. The app rejects messages with an incompatible major version. |
+| `pdv_version` | string | App/package version (e.g. `"0.2.0"`). Both the Electron app and `pdv-python` use their installed version as this value. The app rejects messages with an incompatible major version. |
 | `msg_id` | string | UUID v4. Unique identifier for this message. |
 | `in_reply_to` | string \| null | The `msg_id` of the request this is responding to. `null` for unsolicited push messages. |
 | `type` | string | Dot-namespaced message type (see Section 3.4). |
@@ -836,7 +836,7 @@ Each `modules/<id>/` subdirectory is maintained authoritatively by `project:save
 |---|---|---|
 | `schema_version` | string | Semantic version of the project.json format. The app rejects manifests with an incompatible major version. Currently `"1.2"`. |
 | `saved_at` | string | ISO 8601 timestamp of last save. |
-| `pdv_version` | string | PDV app version used when saving (e.g. `"0.1.2"`). |
+| `pdv_version` | string | PDV app version used when saving (e.g. `"0.2.0"`). |
 | `project_name` | string? | Optional human-readable project name chosen by the user. Displayed in the title bar and recent projects list. Falls back to the directory name when absent (backward compat). |
 | `language` | string | Kernel language: `"python"` or `"julia"`. |
 | `interpreter_path` | string? | Optional path to the interpreter used at save time. Used for pre-selection when `environment.mode == "shared"`; ignored when `environment.mode == "uv"`. |
@@ -1020,6 +1020,25 @@ that registered the serializer must be imported before a project that
 contains nodes of that format is loaded; otherwise load fails with a clear
 error. Implementation lives in `pdv/serializers.py`.
 
+**Dunder-protocol hook.** Classes the package author defines can opt into PDV
+compatibility without calling `register_serializer` by implementing
+`__pdv_format__`, `__pdv_serialize__`, and `__pdv_deserialize__` (required as
+a set; partial trios are silently treated as "no protocol" so the same dunder
+names may be used for unrelated purposes). Optional companion methods:
+`__pdv_preview__`, `__pdv_handle__`, `__pdv_digest__`. Lookup walks
+`type(value).__mro__` via standard attribute access. `register_serializer` and
+`@pdv.handle` win over the corresponding dunder when both are present —
+explicit registration is for wrapping types you don't own; the dunder protocol
+is for types you do. Load-time class recovery uses the descriptor's
+`metadata.python_type` field with `importlib.import_module`; the defining
+package must be installed (no need to be imported beforehand). Reserved and
+registered-serializer format names are rejected at save time. Dunder-served
+nodes carry `metadata.serializer = "dunder:<class_name>"` in `tree-index.json`
+to distinguish them from `register_serializer`-served nodes. Implementation
+lives in `pdv/serializers.py` (`find_for_value_dunder`,
+`find_for_format_dunder`) with integration points in `pdv/serialization.py`,
+`pdv/modules.py`, and `pdv/checksum.py`.
+
 ### 7.3 Node Descriptors
 
 There are two related but distinct descriptor formats: one for **`tree-index.json`** (written by `serialize_node` during project save) and one for **`pdv.tree.list` responses** (constructed at runtime by the tree list handler). Both share the same base fields but diverge on type-specific data.
@@ -1158,6 +1177,19 @@ Module `storage` uses inline backend with `format: "module_meta"` and `value: { 
   }
 }
 ```
+
+**Unknown-kind metadata** (registered serializer or dunder protocol):
+```json
+{
+  "metadata": {
+    "preview": "GEqdsk(R0=1.8, B0=2.1)",
+    "python_type": "mypkg.geqdsk.GEqdskData",
+    "serializer": "dunder:mypkg.geqdsk.GEqdskData"
+  }
+}
+```
+
+`metadata.serializer` records which custom hook wrote the file. Values written by `pdv.register_serializer` use the bare fully qualified class name (e.g. `"scipy.sparse.csr_matrix"`); values written via the dunder protocol carry a `"dunder:"` prefix so loaders can tell the two paths apart without a new descriptor field. `metadata.python_type` is the dotted module path that the load-time fallback feeds to `importlib.import_module` when no registered serializer matches the format.
 
 #### 7.3.2 `pdv.tree.list` Response Descriptor (Runtime)
 

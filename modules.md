@@ -201,6 +201,32 @@ When the user double-clicks a tree node containing a `PendulumSolution`, the reg
 
 The `entry_point` in the manifest triggers the import that registers these handlers at kernel startup.
 
+### Self-registering classes (dunder protocol)
+
+A class that lives in a regular PyPI package — rather than an in-project PDV module — can opt into PDV directly by defining methods on itself. No `import pdv` is needed in the package; PDV finds the class at load time via `metadata.python_type` and `importlib.import_module`.
+
+```python
+class GEqdskData:
+    @classmethod
+    def __pdv_format__(cls):
+        return ("geqdsk", ".geqdsk")
+
+    def __pdv_serialize__(self, path):
+        ...  # write self to path
+
+    @classmethod
+    def __pdv_deserialize__(cls, path):
+        ...  # return reconstructed instance
+
+    # Optional: enable double-click without writing a separate handler.
+    def __pdv_handle__(self, path, pdv_tree):
+        ...
+```
+
+The three storage methods are required as a set; the other dunders (`__pdv_preview__`, `__pdv_handle__`, `__pdv_digest__`) are independently optional. A `pdv.register_serializer` or `@pdv.handle` registration takes precedence over the corresponding dunder for the same class, so downstream users can still override your defaults.
+
+See [Module API → Dunder protocol](docs/api-reference/module-api.md#dunder-protocol) for the full surface, precedence rules, and worked example.
+
 ## Script binding into `pdv_tree`
 
 Each imported module action is bound to canonical script nodes:

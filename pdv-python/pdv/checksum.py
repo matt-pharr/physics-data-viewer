@@ -11,6 +11,12 @@ File-backed nodes (PDVScript, PDVNote, PDVGui, PDVNamelist, PDVLib) are
 hashed including their file content. Missing files feed a sentinel value
 rather than raising, so partial sub-tree hashes work during debugging.
 
+Custom unknown-kind values may opt into stable digesting by defining a
+``__pdv_digest__`` method (part of the dunder protocol — see
+:mod:`pdv.serializers`). When present, its byte payload is fed into the
+hasher under the ``b"dunder\\x00"`` type tag; otherwise ``repr(node)`` is
+used as a best-effort fallback.
+
 XXH3-128 is a non-cryptographic hash used purely for change detection.
 It is not suitable for security purposes.
 
@@ -307,6 +313,17 @@ def _feed_node(h: xxhash.xxh3_128, node: Any, working_dir: str | None) -> None:
 
     else:  # KIND_UNKNOWN (and KIND_FILE base class, if encountered)
         h.update(b"unknown\x00")
+        if hasattr(type(node), "__pdv_digest__"):
+            try:
+                payload = node.__pdv_digest__()
+                if not isinstance(payload, (bytes, bytearray)):
+                    payload = bytes(str(payload), "utf-8")
+                h.update(b"dunder\x00")
+                h.update(struct.pack("<Q", len(payload)))
+                h.update(bytes(payload))
+                return
+            except Exception:  # noqa: BLE001
+                pass
         _feed_str(h, repr(node))
 
 

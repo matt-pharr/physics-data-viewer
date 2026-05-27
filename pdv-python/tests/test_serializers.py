@@ -222,6 +222,38 @@ def test_public_register_serializer_entry_point_roundtrip(tmp_path):
     assert loaded.params == {"k": 1}
 
 
+def test_clear_also_clears_dunder_caches():
+    """serializers.clear() must drop dunder caches alongside the registry.
+
+    Without this, a test that exercises the dunder protocol could leave a
+    cached :class:`DunderEntry` (or a None-cached "no protocol" marker)
+    visible to subsequent tests, masking real regressions.
+    """
+
+    class _Cls:
+        @classmethod
+        def __pdv_format__(cls):
+            return ("clear_test_v1", ".bin")
+
+        def __pdv_serialize__(self, path):
+            open(path, "wb").write(b"")
+
+        @classmethod
+        def __pdv_deserialize__(cls, path):
+            return cls()
+
+    entry = serializers.find_for_value_dunder(_Cls())
+    assert entry is not None
+    assert _Cls in serializers._dunder_cache
+
+    # Also populate the format-cache by simulating a load-time recovery.
+    serializers._dunder_format_cache[("clear_test_v1", "fake")] = _Cls
+
+    serializers.clear()
+    assert _Cls not in serializers._dunder_cache
+    assert ("clear_test_v1", "fake") not in serializers._dunder_format_cache
+
+
 def test_save_callback_error_is_wrapped(tmp_path):
     def _bad_save(obj, path):
         raise RuntimeError("solver checkpoint failed")
