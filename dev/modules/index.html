@@ -1109,6 +1109,23 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="Custom type handlers">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#self-registering-classes-dunder-protocol" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Self-registering classes (dunder protocol)
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
         <li class="md-nav__item">
@@ -1603,6 +1620,23 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="Custom type handlers">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#self-registering-classes-dunder-protocol" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Self-registering classes (dunder protocol)
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
         <li class="md-nav__item">
@@ -1927,13 +1961,33 @@
 </code></pre></div>
 <p>When the user double-clicks a tree node containing a <code>PendulumSolution</code>, the registered handler is dispatched via <code>pdv.handler.invoke</code>. The handler walks the MRO of the stored object to find the best match.</p>
 <p>The <code>entry_point</code> in the manifest triggers the import that registers these handlers at kernel startup.</p>
+<h3 id="self-registering-classes-dunder-protocol">Self-registering classes (dunder protocol)<a class="headerlink" href="#self-registering-classes-dunder-protocol" title="Permanent link">&para;</a></h3>
+<p>A class that lives in a regular PyPI package — rather than an in-project PDV module — can opt into PDV directly by defining methods on itself. No <code>import pdv</code> is needed in the package; PDV finds the class at load time via <code>metadata.python_type</code> and <code>importlib.import_module</code>.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="k">class</span><span class="w"> </span><span class="nc">GEqdskData</span><span class="p">:</span>
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>    <span class="nd">@classmethod</span>
+<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a>    <span class="k">def</span><span class="w"> </span><span class="nf">__pdv_format__</span><span class="p">(</span><span class="bp">cls</span><span class="p">):</span>
+<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a>        <span class="k">return</span> <span class="p">(</span><span class="s2">&quot;geqdsk&quot;</span><span class="p">,</span> <span class="s2">&quot;.geqdsk&quot;</span><span class="p">)</span>
+<a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a>
+<a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a>    <span class="k">def</span><span class="w"> </span><span class="nf">__pdv_serialize__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">path</span><span class="p">):</span>
+<a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a>        <span class="o">...</span>  <span class="c1"># write self to path</span>
+<a id="__codelineno-2-8" name="__codelineno-2-8" href="#__codelineno-2-8"></a>
+<a id="__codelineno-2-9" name="__codelineno-2-9" href="#__codelineno-2-9"></a>    <span class="nd">@classmethod</span>
+<a id="__codelineno-2-10" name="__codelineno-2-10" href="#__codelineno-2-10"></a>    <span class="k">def</span><span class="w"> </span><span class="nf">__pdv_deserialize__</span><span class="p">(</span><span class="bp">cls</span><span class="p">,</span> <span class="n">path</span><span class="p">):</span>
+<a id="__codelineno-2-11" name="__codelineno-2-11" href="#__codelineno-2-11"></a>        <span class="o">...</span>  <span class="c1"># return reconstructed instance</span>
+<a id="__codelineno-2-12" name="__codelineno-2-12" href="#__codelineno-2-12"></a>
+<a id="__codelineno-2-13" name="__codelineno-2-13" href="#__codelineno-2-13"></a>    <span class="c1"># Optional: enable double-click without writing a separate handler.</span>
+<a id="__codelineno-2-14" name="__codelineno-2-14" href="#__codelineno-2-14"></a>    <span class="k">def</span><span class="w"> </span><span class="nf">__pdv_handle__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">path</span><span class="p">,</span> <span class="n">pdv_tree</span><span class="p">):</span>
+<a id="__codelineno-2-15" name="__codelineno-2-15" href="#__codelineno-2-15"></a>        <span class="o">...</span>
+</code></pre></div>
+<p>The three storage methods are required as a set; the other dunders (<code>__pdv_preview__</code>, <code>__pdv_handle__</code>, <code>__pdv_digest__</code>) are independently optional. A <code>pdv.register_serializer</code> or <code>@pdv.handle</code> registration takes precedence over the corresponding dunder for the same class, so downstream users can still override your defaults.</p>
+<p>See <a href="docs/api-reference/module-api.md#dunder-protocol">Module API → Dunder protocol</a> for the full surface, precedence rules, and worked example.</p>
 <h2 id="script-binding-into-pdv_tree">Script binding into <code>pdv_tree</code><a class="headerlink" href="#script-binding-into-pdv_tree" title="Permanent link">&para;</a></h2>
 <p>Each imported module action is bound to canonical script nodes:</p>
 <ul>
 <li><code>&lt;alias&gt;.scripts.&lt;scriptName&gt;</code></li>
 </ul>
 <p>These nodes are registered as PDV scripts and can be executed directly, e.g.:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="n">pdv_tree</span><span class="p">[</span><span class="s2">&quot;n_pendulum.scripts.solve&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">run</span><span class="p">(</span><span class="n">n_links</span><span class="o">=</span><span class="mi">3</span><span class="p">,</span> <span class="n">n_steps</span><span class="o">=</span><span class="mi">5000</span><span class="p">)</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="n">pdv_tree</span><span class="p">[</span><span class="s2">&quot;n_pendulum.scripts.solve&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">run</span><span class="p">(</span><span class="n">n_links</span><span class="o">=</span><span class="mi">3</span><span class="p">,</span> <span class="n">n_steps</span><span class="o">=</span><span class="mi">5000</span><span class="p">)</span>
 </code></pre></div>
 <p>Binding is idempotent across reload/restart. Script files are copied into the kernel working directory for editable working copies, while module store sources remain unchanged.</p>
 <h2 id="module-gui-windows">Module GUI windows<a class="headerlink" href="#module-gui-windows" title="Permanent link">&para;</a></h2>

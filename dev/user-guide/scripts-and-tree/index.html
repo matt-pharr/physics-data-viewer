@@ -1586,6 +1586,7 @@
 <li>PDV node types: <code>PDVScript</code>, <code>PDVNote</code>, <code>PDVFile</code>, <code>PDVLib</code></li>
 </ul>
 <p>Large arrays and DataFrames are handled efficiently — PDV uses format-appropriate serialization (e.g. <code>.npy</code> for arrays, <code>.parquet</code> for DataFrames) rather than pickling everything.</p>
+<p>User-defined classes can opt into PDV's storage and double-click handling either by calling <code>pdv.register_serializer</code> / <code>@pdv.handle</code> (for types you don't own) or by implementing the <strong>dunder protocol</strong> (<code>__pdv_format__</code>, <code>__pdv_serialize__</code>, <code>__pdv_deserialize__</code> and friends) directly on the class. The dunder path is useful for shipping a PyPI package that knows how to live in PDV without depending on <code>pdv</code>. See <a href="../../api-reference/module-api/#dunder-protocol">Module API → Dunder protocol</a> for the full surface.</p>
 <h3 id="the-tree-panel">The Tree panel<a class="headerlink" href="#the-tree-panel" title="Permanent link">&para;</a></h3>
 <p>The Tree panel in the sidebar is a live view of <code>pdv_tree</code>. It updates automatically whenever your code modifies the tree. You can:</p>
 <ul>
@@ -1731,7 +1732,7 @@
     <span class="md-icon" title="Last update">
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M21 13.1c-.1 0-.3.1-.4.2l-1 1 2.1 2.1 1-1c.2-.2.2-.6 0-.8l-1.3-1.3c-.1-.1-.2-.2-.4-.2m-1.9 1.8-6.1 6V23h2.1l6.1-6.1zM12.5 7v5.2l4 2.4-1 1L11 13V7zM11 21.9c-5.1-.5-9-4.8-9-9.9C2 6.5 6.5 2 12 2c5.3 0 9.6 4.1 10 9.3-.3-.1-.6-.2-1-.2s-.7.1-1 .2C19.6 7.2 16.2 4 12 4c-4.4 0-8 3.6-8 8 0 4.1 3.1 7.5 7.1 7.9l-.1.2z"/></svg>
     </span>
-    <span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-date" title="April 20, 2026 23:59:59 UTC">April 20, 2026</span>
+    <span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-date" title="May 27, 2026 05:38:10 UTC">May 27, 2026</span>
   </span>
 
     

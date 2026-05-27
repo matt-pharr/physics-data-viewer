@@ -4274,7 +4274,7 @@
 
 
 <h1 id="pdv-architecture-document">PDV Architecture Document<a class="headerlink" href="#pdv-architecture-document" title="Permanent link">&para;</a></h1>
-<p><strong>Version</strong>: 0.1.2
+<p><strong>Version</strong>: 0.2.0
 <strong>Date</strong>: 2026-04-07
 <strong>Status</strong>: Authoritative design specification. All new code must conform to this document. Deviations require updating this document first.</p>
 <blockquote>
@@ -4384,7 +4384,7 @@
 <h3 id="32-message-envelope">3.2 Message Envelope<a class="headerlink" href="#32-message-envelope" title="Permanent link">&para;</a></h3>
 <p>Every PDV message — whether sent by the app or by the kernel — has the following JSON structure:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="p">{</span>
-<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="w">  </span><span class="nt">&quot;pdv_version&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;0.1.2&quot;</span><span class="p">,</span>
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="w">  </span><span class="nt">&quot;pdv_version&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;0.2.0&quot;</span><span class="p">,</span>
 <a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="w">  </span><span class="nt">&quot;msg_id&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;&lt;uuid-v4&gt;&quot;</span><span class="p">,</span>
 <a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="w">  </span><span class="nt">&quot;in_reply_to&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;&lt;uuid-v4-or-null&gt;&quot;</span><span class="p">,</span>
 <a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a><span class="w">  </span><span class="nt">&quot;type&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;&lt;message-type-string&gt;&quot;</span><span class="p">,</span>
@@ -4404,7 +4404,7 @@
 <tr>
 <td><code>pdv_version</code></td>
 <td>string</td>
-<td>App/package version (e.g. <code>"0.1.2"</code>). Both the Electron app and <code>pdv-python</code> use their installed version as this value. The app rejects messages with an incompatible major version.</td>
+<td>App/package version (e.g. <code>"0.2.0"</code>). Both the Electron app and <code>pdv-python</code> use their installed version as this value. The app rejects messages with an incompatible major version.</td>
 </tr>
 <tr>
 <td><code>msg_id</code></td>
@@ -5269,7 +5269,7 @@
 <tr>
 <td><code>pdv_version</code></td>
 <td>string</td>
-<td>PDV app version used when saving (e.g. <code>"0.1.2"</code>).</td>
+<td>PDV app version used when saving (e.g. <code>"0.2.0"</code>).</td>
 </tr>
 <tr>
 <td><code>project_name</code></td>
@@ -5478,29 +5478,48 @@
 <a id="__codelineno-14-120" name="__codelineno-14-120" href="#__codelineno-14-120"></a>contains nodes of that format is loaded; otherwise load fails with a clear
 <a id="__codelineno-14-121" name="__codelineno-14-121" href="#__codelineno-14-121"></a>error. Implementation lives in `pdv/serializers.py`.
 <a id="__codelineno-14-122" name="__codelineno-14-122" href="#__codelineno-14-122"></a>
-<a id="__codelineno-14-123" name="__codelineno-14-123" href="#__codelineno-14-123"></a>### 7.3 Node Descriptors
-<a id="__codelineno-14-124" name="__codelineno-14-124" href="#__codelineno-14-124"></a>
-<a id="__codelineno-14-125" name="__codelineno-14-125" href="#__codelineno-14-125"></a>There are two related but distinct descriptor formats: one for **`tree-index.json`** (written by `serialize_node` during project save) and one for **`pdv.tree.list` responses** (constructed at runtime by the tree list handler). Both share the same base fields but diverge on type-specific data.
-<a id="__codelineno-14-126" name="__codelineno-14-126" href="#__codelineno-14-126"></a>
-<a id="__codelineno-14-127" name="__codelineno-14-127" href="#__codelineno-14-127"></a>#### 7.3.1 `tree-index.json` Entry (Serialized Descriptor)
-<a id="__codelineno-14-128" name="__codelineno-14-128" href="#__codelineno-14-128"></a>
-<a id="__codelineno-14-129" name="__codelineno-14-129" href="#__codelineno-14-129"></a>Each node in `tree-index.json` is produced by `serialization.serialize_node()`. Type-specific data lives in a nested `metadata` dict, and a `storage` dict describes where the data lives on disk.
-<a id="__codelineno-14-130" name="__codelineno-14-130" href="#__codelineno-14-130"></a>
-<a id="__codelineno-14-131" name="__codelineno-14-131" href="#__codelineno-14-131"></a>**Common fields (all types):**
-<a id="__codelineno-14-132" name="__codelineno-14-132" href="#__codelineno-14-132"></a>```json
-<a id="__codelineno-14-133" name="__codelineno-14-133" href="#__codelineno-14-133"></a>{
-<a id="__codelineno-14-134" name="__codelineno-14-134" href="#__codelineno-14-134"></a>  &quot;id&quot;: &quot;data.waveforms.ch1&quot;,
-<a id="__codelineno-14-135" name="__codelineno-14-135" href="#__codelineno-14-135"></a>  &quot;path&quot;: &quot;data.waveforms.ch1&quot;,
-<a id="__codelineno-14-136" name="__codelineno-14-136" href="#__codelineno-14-136"></a>  &quot;key&quot;: &quot;ch1&quot;,
-<a id="__codelineno-14-137" name="__codelineno-14-137" href="#__codelineno-14-137"></a>  &quot;parent_path&quot;: &quot;data.waveforms&quot;,
-<a id="__codelineno-14-138" name="__codelineno-14-138" href="#__codelineno-14-138"></a>  &quot;type&quot;: &quot;ndarray&quot;,
-<a id="__codelineno-14-139" name="__codelineno-14-139" href="#__codelineno-14-139"></a>  &quot;has_children&quot;: false,
-<a id="__codelineno-14-140" name="__codelineno-14-140" href="#__codelineno-14-140"></a>  &quot;lazy&quot;: false,
-<a id="__codelineno-14-141" name="__codelineno-14-141" href="#__codelineno-14-141"></a>  &quot;created_at&quot;: &quot;&lt;iso8601&gt;&quot;,
-<a id="__codelineno-14-142" name="__codelineno-14-142" href="#__codelineno-14-142"></a>  &quot;updated_at&quot;: &quot;&lt;iso8601&gt;&quot;,
-<a id="__codelineno-14-143" name="__codelineno-14-143" href="#__codelineno-14-143"></a>  &quot;storage&quot;: { },
-<a id="__codelineno-14-144" name="__codelineno-14-144" href="#__codelineno-14-144"></a>  &quot;metadata&quot;: { &quot;preview&quot;: &quot;...&quot; }
-<a id="__codelineno-14-145" name="__codelineno-14-145" href="#__codelineno-14-145"></a>}
+<a id="__codelineno-14-123" name="__codelineno-14-123" href="#__codelineno-14-123"></a>**Dunder-protocol hook.** Classes the package author defines can opt into PDV
+<a id="__codelineno-14-124" name="__codelineno-14-124" href="#__codelineno-14-124"></a>compatibility without calling `register_serializer` by implementing
+<a id="__codelineno-14-125" name="__codelineno-14-125" href="#__codelineno-14-125"></a>`__pdv_format__`, `__pdv_serialize__`, and `__pdv_deserialize__` (required as
+<a id="__codelineno-14-126" name="__codelineno-14-126" href="#__codelineno-14-126"></a>a set; partial trios are silently treated as &quot;no protocol&quot; so the same dunder
+<a id="__codelineno-14-127" name="__codelineno-14-127" href="#__codelineno-14-127"></a>names may be used for unrelated purposes). Optional companion methods:
+<a id="__codelineno-14-128" name="__codelineno-14-128" href="#__codelineno-14-128"></a>`__pdv_preview__`, `__pdv_handle__`, `__pdv_digest__`. Lookup walks
+<a id="__codelineno-14-129" name="__codelineno-14-129" href="#__codelineno-14-129"></a>`type(value).__mro__` via standard attribute access. `register_serializer` and
+<a id="__codelineno-14-130" name="__codelineno-14-130" href="#__codelineno-14-130"></a>`@pdv.handle` win over the corresponding dunder when both are present —
+<a id="__codelineno-14-131" name="__codelineno-14-131" href="#__codelineno-14-131"></a>explicit registration is for wrapping types you don&#39;t own; the dunder protocol
+<a id="__codelineno-14-132" name="__codelineno-14-132" href="#__codelineno-14-132"></a>is for types you do. Load-time class recovery uses the descriptor&#39;s
+<a id="__codelineno-14-133" name="__codelineno-14-133" href="#__codelineno-14-133"></a>`metadata.python_type` field with `importlib.import_module`; the defining
+<a id="__codelineno-14-134" name="__codelineno-14-134" href="#__codelineno-14-134"></a>package must be installed (no need to be imported beforehand). Reserved and
+<a id="__codelineno-14-135" name="__codelineno-14-135" href="#__codelineno-14-135"></a>registered-serializer format names are rejected at save time. Dunder-served
+<a id="__codelineno-14-136" name="__codelineno-14-136" href="#__codelineno-14-136"></a>nodes carry `metadata.serializer = &quot;dunder:&lt;class_name&gt;&quot;` in `tree-index.json`
+<a id="__codelineno-14-137" name="__codelineno-14-137" href="#__codelineno-14-137"></a>to distinguish them from `register_serializer`-served nodes. Implementation
+<a id="__codelineno-14-138" name="__codelineno-14-138" href="#__codelineno-14-138"></a>lives in `pdv/serializers.py` (`find_for_value_dunder`,
+<a id="__codelineno-14-139" name="__codelineno-14-139" href="#__codelineno-14-139"></a>`find_for_format_dunder`) with integration points in `pdv/serialization.py`,
+<a id="__codelineno-14-140" name="__codelineno-14-140" href="#__codelineno-14-140"></a>`pdv/modules.py`, and `pdv/checksum.py`.
+<a id="__codelineno-14-141" name="__codelineno-14-141" href="#__codelineno-14-141"></a>
+<a id="__codelineno-14-142" name="__codelineno-14-142" href="#__codelineno-14-142"></a>### 7.3 Node Descriptors
+<a id="__codelineno-14-143" name="__codelineno-14-143" href="#__codelineno-14-143"></a>
+<a id="__codelineno-14-144" name="__codelineno-14-144" href="#__codelineno-14-144"></a>There are two related but distinct descriptor formats: one for **`tree-index.json`** (written by `serialize_node` during project save) and one for **`pdv.tree.list` responses** (constructed at runtime by the tree list handler). Both share the same base fields but diverge on type-specific data.
+<a id="__codelineno-14-145" name="__codelineno-14-145" href="#__codelineno-14-145"></a>
+<a id="__codelineno-14-146" name="__codelineno-14-146" href="#__codelineno-14-146"></a>#### 7.3.1 `tree-index.json` Entry (Serialized Descriptor)
+<a id="__codelineno-14-147" name="__codelineno-14-147" href="#__codelineno-14-147"></a>
+<a id="__codelineno-14-148" name="__codelineno-14-148" href="#__codelineno-14-148"></a>Each node in `tree-index.json` is produced by `serialization.serialize_node()`. Type-specific data lives in a nested `metadata` dict, and a `storage` dict describes where the data lives on disk.
+<a id="__codelineno-14-149" name="__codelineno-14-149" href="#__codelineno-14-149"></a>
+<a id="__codelineno-14-150" name="__codelineno-14-150" href="#__codelineno-14-150"></a>**Common fields (all types):**
+<a id="__codelineno-14-151" name="__codelineno-14-151" href="#__codelineno-14-151"></a>```json
+<a id="__codelineno-14-152" name="__codelineno-14-152" href="#__codelineno-14-152"></a>{
+<a id="__codelineno-14-153" name="__codelineno-14-153" href="#__codelineno-14-153"></a>  &quot;id&quot;: &quot;data.waveforms.ch1&quot;,
+<a id="__codelineno-14-154" name="__codelineno-14-154" href="#__codelineno-14-154"></a>  &quot;path&quot;: &quot;data.waveforms.ch1&quot;,
+<a id="__codelineno-14-155" name="__codelineno-14-155" href="#__codelineno-14-155"></a>  &quot;key&quot;: &quot;ch1&quot;,
+<a id="__codelineno-14-156" name="__codelineno-14-156" href="#__codelineno-14-156"></a>  &quot;parent_path&quot;: &quot;data.waveforms&quot;,
+<a id="__codelineno-14-157" name="__codelineno-14-157" href="#__codelineno-14-157"></a>  &quot;type&quot;: &quot;ndarray&quot;,
+<a id="__codelineno-14-158" name="__codelineno-14-158" href="#__codelineno-14-158"></a>  &quot;has_children&quot;: false,
+<a id="__codelineno-14-159" name="__codelineno-14-159" href="#__codelineno-14-159"></a>  &quot;lazy&quot;: false,
+<a id="__codelineno-14-160" name="__codelineno-14-160" href="#__codelineno-14-160"></a>  &quot;created_at&quot;: &quot;&lt;iso8601&gt;&quot;,
+<a id="__codelineno-14-161" name="__codelineno-14-161" href="#__codelineno-14-161"></a>  &quot;updated_at&quot;: &quot;&lt;iso8601&gt;&quot;,
+<a id="__codelineno-14-162" name="__codelineno-14-162" href="#__codelineno-14-162"></a>  &quot;storage&quot;: { },
+<a id="__codelineno-14-163" name="__codelineno-14-163" href="#__codelineno-14-163"></a>  &quot;metadata&quot;: { &quot;preview&quot;: &quot;...&quot; }
+<a id="__codelineno-14-164" name="__codelineno-14-164" href="#__codelineno-14-164"></a>}
 </code></pre></div></p>
 <table>
 <thead>
@@ -5644,20 +5663,30 @@
 <a id="__codelineno-22-6" name="__codelineno-22-6" href="#__codelineno-22-6"></a><span class="w">  </span><span class="p">}</span>
 <a id="__codelineno-22-7" name="__codelineno-22-7" href="#__codelineno-22-7"></a><span class="p">}</span>
 </code></pre></div></p>
+<p><strong>Unknown-kind metadata</strong> (registered serializer or dunder protocol):
+<div class="highlight"><pre><span></span><code><a id="__codelineno-23-1" name="__codelineno-23-1" href="#__codelineno-23-1"></a><span class="p">{</span>
+<a id="__codelineno-23-2" name="__codelineno-23-2" href="#__codelineno-23-2"></a><span class="w">  </span><span class="nt">&quot;metadata&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
+<a id="__codelineno-23-3" name="__codelineno-23-3" href="#__codelineno-23-3"></a><span class="w">    </span><span class="nt">&quot;preview&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;GEqdsk(R0=1.8, B0=2.1)&quot;</span><span class="p">,</span>
+<a id="__codelineno-23-4" name="__codelineno-23-4" href="#__codelineno-23-4"></a><span class="w">    </span><span class="nt">&quot;python_type&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;mypkg.geqdsk.GEqdskData&quot;</span><span class="p">,</span>
+<a id="__codelineno-23-5" name="__codelineno-23-5" href="#__codelineno-23-5"></a><span class="w">    </span><span class="nt">&quot;serializer&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;dunder:mypkg.geqdsk.GEqdskData&quot;</span>
+<a id="__codelineno-23-6" name="__codelineno-23-6" href="#__codelineno-23-6"></a><span class="w">  </span><span class="p">}</span>
+<a id="__codelineno-23-7" name="__codelineno-23-7" href="#__codelineno-23-7"></a><span class="p">}</span>
+</code></pre></div></p>
+<p><code>metadata.serializer</code> records which custom hook wrote the file. Values written by <code>pdv.register_serializer</code> use the bare fully qualified class name (e.g. <code>"scipy.sparse.csr_matrix"</code>); values written via the dunder protocol carry a <code>"dunder:"</code> prefix so loaders can tell the two paths apart without a new descriptor field. <code>metadata.python_type</code> is the dotted module path that the load-time fallback feeds to <code>importlib.import_module</code> when no registered serializer matches the format.</p>
 <h4 id="732-pdvtreelist-response-descriptor-runtime">7.3.2 <code>pdv.tree.list</code> Response Descriptor (Runtime)<a class="headerlink" href="#732-pdvtreelist-response-descriptor-runtime" title="Permanent link">&para;</a></h4>
 <p>The <code>pdv.tree.list</code> handler builds descriptors on-the-fly from live tree state. These are simpler — no <code>storage</code>, <code>metadata</code>, <code>created_at</code>, or <code>updated_at</code>. Type-specific fields are at top level alongside common fields.</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-23-1" name="__codelineno-23-1" href="#__codelineno-23-1"></a><span class="p">{</span>
-<a id="__codelineno-23-2" name="__codelineno-23-2" href="#__codelineno-23-2"></a><span class="w">  </span><span class="nt">&quot;id&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;data.waveforms.ch1&quot;</span><span class="p">,</span>
-<a id="__codelineno-23-3" name="__codelineno-23-3" href="#__codelineno-23-3"></a><span class="w">  </span><span class="nt">&quot;path&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;data.waveforms.ch1&quot;</span><span class="p">,</span>
-<a id="__codelineno-23-4" name="__codelineno-23-4" href="#__codelineno-23-4"></a><span class="w">  </span><span class="nt">&quot;key&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;ch1&quot;</span><span class="p">,</span>
-<a id="__codelineno-23-5" name="__codelineno-23-5" href="#__codelineno-23-5"></a><span class="w">  </span><span class="nt">&quot;parent_path&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;data.waveforms&quot;</span><span class="p">,</span>
-<a id="__codelineno-23-6" name="__codelineno-23-6" href="#__codelineno-23-6"></a><span class="w">  </span><span class="nt">&quot;type&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;ndarray&quot;</span><span class="p">,</span>
-<a id="__codelineno-23-7" name="__codelineno-23-7" href="#__codelineno-23-7"></a><span class="w">  </span><span class="nt">&quot;has_children&quot;</span><span class="p">:</span><span class="w"> </span><span class="kc">false</span><span class="p">,</span>
-<a id="__codelineno-23-8" name="__codelineno-23-8" href="#__codelineno-23-8"></a><span class="w">  </span><span class="nt">&quot;lazy&quot;</span><span class="p">:</span><span class="w"> </span><span class="kc">false</span><span class="p">,</span>
-<a id="__codelineno-23-9" name="__codelineno-23-9" href="#__codelineno-23-9"></a><span class="w">  </span><span class="nt">&quot;preview&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;float64 array (1024 × 4)&quot;</span><span class="p">,</span>
-<a id="__codelineno-23-10" name="__codelineno-23-10" href="#__codelineno-23-10"></a><span class="w">  </span><span class="nt">&quot;python_type&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;numpy.ndarray&quot;</span><span class="p">,</span>
-<a id="__codelineno-23-11" name="__codelineno-23-11" href="#__codelineno-23-11"></a><span class="w">  </span><span class="nt">&quot;has_handler&quot;</span><span class="p">:</span><span class="w"> </span><span class="kc">false</span>
-<a id="__codelineno-23-12" name="__codelineno-23-12" href="#__codelineno-23-12"></a><span class="p">}</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-24-1" name="__codelineno-24-1" href="#__codelineno-24-1"></a><span class="p">{</span>
+<a id="__codelineno-24-2" name="__codelineno-24-2" href="#__codelineno-24-2"></a><span class="w">  </span><span class="nt">&quot;id&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;data.waveforms.ch1&quot;</span><span class="p">,</span>
+<a id="__codelineno-24-3" name="__codelineno-24-3" href="#__codelineno-24-3"></a><span class="w">  </span><span class="nt">&quot;path&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;data.waveforms.ch1&quot;</span><span class="p">,</span>
+<a id="__codelineno-24-4" name="__codelineno-24-4" href="#__codelineno-24-4"></a><span class="w">  </span><span class="nt">&quot;key&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;ch1&quot;</span><span class="p">,</span>
+<a id="__codelineno-24-5" name="__codelineno-24-5" href="#__codelineno-24-5"></a><span class="w">  </span><span class="nt">&quot;parent_path&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;data.waveforms&quot;</span><span class="p">,</span>
+<a id="__codelineno-24-6" name="__codelineno-24-6" href="#__codelineno-24-6"></a><span class="w">  </span><span class="nt">&quot;type&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;ndarray&quot;</span><span class="p">,</span>
+<a id="__codelineno-24-7" name="__codelineno-24-7" href="#__codelineno-24-7"></a><span class="w">  </span><span class="nt">&quot;has_children&quot;</span><span class="p">:</span><span class="w"> </span><span class="kc">false</span><span class="p">,</span>
+<a id="__codelineno-24-8" name="__codelineno-24-8" href="#__codelineno-24-8"></a><span class="w">  </span><span class="nt">&quot;lazy&quot;</span><span class="p">:</span><span class="w"> </span><span class="kc">false</span><span class="p">,</span>
+<a id="__codelineno-24-9" name="__codelineno-24-9" href="#__codelineno-24-9"></a><span class="w">  </span><span class="nt">&quot;preview&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;float64 array (1024 × 4)&quot;</span><span class="p">,</span>
+<a id="__codelineno-24-10" name="__codelineno-24-10" href="#__codelineno-24-10"></a><span class="w">  </span><span class="nt">&quot;python_type&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;numpy.ndarray&quot;</span><span class="p">,</span>
+<a id="__codelineno-24-11" name="__codelineno-24-11" href="#__codelineno-24-11"></a><span class="w">  </span><span class="nt">&quot;has_handler&quot;</span><span class="p">:</span><span class="w"> </span><span class="kc">false</span>
+<a id="__codelineno-24-12" name="__codelineno-24-12" href="#__codelineno-24-12"></a><span class="p">}</span>
 </code></pre></div>
 <p>Additional fields present at top level for specific types:
 - <strong>Scripts</strong>: <code>"params": [{ name, type, default, required }, ...]</code> — the <code>ScriptParameter</code> array built from <code>run()</code> signature inspection.
@@ -5688,23 +5717,23 @@
 <td><code>true</code> if a custom <code>@pdv.handle()</code> handler is registered for this node's type.</td>
 </tr>
 <tr>
-<td><div class="highlight"><pre><span></span><code><a id="__codelineno-24-1" name="__codelineno-24-1" href="#__codelineno-24-1"></a>### 7.4 Tree-Update Propagation
-<a id="__codelineno-24-2" name="__codelineno-24-2" href="#__codelineno-24-2"></a>
-<a id="__codelineno-24-3" name="__codelineno-24-3" href="#__codelineno-24-3"></a>Tree changes propagate to the renderer by two complementary mechanisms — push notifications for snappy live updates, and a 1 Hz poll as a safety net for mutations that bypass push.
-<a id="__codelineno-24-4" name="__codelineno-24-4" href="#__codelineno-24-4"></a>
-<a id="__codelineno-24-5" name="__codelineno-24-5" href="#__codelineno-24-5"></a>#### 7.4.1 Push (primary)
-<a id="__codelineno-24-6" name="__codelineno-24-6" href="#__codelineno-24-6"></a>
-<a id="__codelineno-24-7" name="__codelineno-24-7" href="#__codelineno-24-7"></a>Whenever the tree structure changes — a node is added, deleted, or its value updated — the kernel emits a `pdv.tree.changed` push notification:
-<a id="__codelineno-24-8" name="__codelineno-24-8" href="#__codelineno-24-8"></a>
-<a id="__codelineno-24-9" name="__codelineno-24-9" href="#__codelineno-24-9"></a>```json
-<a id="__codelineno-24-10" name="__codelineno-24-10" href="#__codelineno-24-10"></a>{
-<a id="__codelineno-24-11" name="__codelineno-24-11" href="#__codelineno-24-11"></a>  &quot;type&quot;: &quot;pdv.tree.changed&quot;,
-<a id="__codelineno-24-12" name="__codelineno-24-12" href="#__codelineno-24-12"></a>  &quot;status&quot;: &quot;ok&quot;,
-<a id="__codelineno-24-13" name="__codelineno-24-13" href="#__codelineno-24-13"></a>  &quot;payload&quot;: {
-<a id="__codelineno-24-14" name="__codelineno-24-14" href="#__codelineno-24-14"></a>    &quot;changed_paths&quot;: [&quot;data.waveforms.ch1&quot;],
-<a id="__codelineno-24-15" name="__codelineno-24-15" href="#__codelineno-24-15"></a>    &quot;change_type&quot;: &quot;added&quot; | &quot;removed&quot; | &quot;updated&quot; | &quot;batch&quot; | &quot;unknown&quot;
-<a id="__codelineno-24-16" name="__codelineno-24-16" href="#__codelineno-24-16"></a>  }
-<a id="__codelineno-24-17" name="__codelineno-24-17" href="#__codelineno-24-17"></a>}
+<td><div class="highlight"><pre><span></span><code><a id="__codelineno-25-1" name="__codelineno-25-1" href="#__codelineno-25-1"></a>### 7.4 Tree-Update Propagation
+<a id="__codelineno-25-2" name="__codelineno-25-2" href="#__codelineno-25-2"></a>
+<a id="__codelineno-25-3" name="__codelineno-25-3" href="#__codelineno-25-3"></a>Tree changes propagate to the renderer by two complementary mechanisms — push notifications for snappy live updates, and a 1 Hz poll as a safety net for mutations that bypass push.
+<a id="__codelineno-25-4" name="__codelineno-25-4" href="#__codelineno-25-4"></a>
+<a id="__codelineno-25-5" name="__codelineno-25-5" href="#__codelineno-25-5"></a>#### 7.4.1 Push (primary)
+<a id="__codelineno-25-6" name="__codelineno-25-6" href="#__codelineno-25-6"></a>
+<a id="__codelineno-25-7" name="__codelineno-25-7" href="#__codelineno-25-7"></a>Whenever the tree structure changes — a node is added, deleted, or its value updated — the kernel emits a `pdv.tree.changed` push notification:
+<a id="__codelineno-25-8" name="__codelineno-25-8" href="#__codelineno-25-8"></a>
+<a id="__codelineno-25-9" name="__codelineno-25-9" href="#__codelineno-25-9"></a>```json
+<a id="__codelineno-25-10" name="__codelineno-25-10" href="#__codelineno-25-10"></a>{
+<a id="__codelineno-25-11" name="__codelineno-25-11" href="#__codelineno-25-11"></a>  &quot;type&quot;: &quot;pdv.tree.changed&quot;,
+<a id="__codelineno-25-12" name="__codelineno-25-12" href="#__codelineno-25-12"></a>  &quot;status&quot;: &quot;ok&quot;,
+<a id="__codelineno-25-13" name="__codelineno-25-13" href="#__codelineno-25-13"></a>  &quot;payload&quot;: {
+<a id="__codelineno-25-14" name="__codelineno-25-14" href="#__codelineno-25-14"></a>    &quot;changed_paths&quot;: [&quot;data.waveforms.ch1&quot;],
+<a id="__codelineno-25-15" name="__codelineno-25-15" href="#__codelineno-25-15"></a>    &quot;change_type&quot;: &quot;added&quot; | &quot;removed&quot; | &quot;updated&quot; | &quot;batch&quot; | &quot;unknown&quot;
+<a id="__codelineno-25-16" name="__codelineno-25-16" href="#__codelineno-25-16"></a>  }
+<a id="__codelineno-25-17" name="__codelineno-25-17" href="#__codelineno-25-17"></a>}
 </code></pre></div></td>
 <td></td>
 <td></td>
@@ -5726,53 +5755,53 @@
 <p>Triggered by user action (File → Save / Cmd+S). The app coordinates.</p>
 <p><strong>Save As dialog</strong>: When saving for the first time or via File → Save As (Cmd+Shift+S), a custom Save As dialog is shown. The user enters a project name and chooses a parent directory; the app creates <code>&lt;parent&gt;/&lt;sanitized-name&gt;/</code> and saves into it. The project name is stored in <code>project.json</code> as <code>project_name</code> and displayed in the title bar and recent projects list. Subsequent saves (Cmd+S) go directly to the same directory without a dialog.</p>
 <p><strong>Open dialog</strong>: File → Open (Cmd+O) opens a native directory picker defaulting to the parent of the current project directory.</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-25-1" name="__codelineno-25-1" href="#__codelineno-25-1"></a>User triggers save
-<a id="__codelineno-25-2" name="__codelineno-25-2" href="#__codelineno-25-2"></a>    │
-<a id="__codelineno-25-3" name="__codelineno-25-3" href="#__codelineno-25-3"></a>    ├─► App shows Save As dialog if no project directory set
-<a id="__codelineno-25-4" name="__codelineno-25-4" href="#__codelineno-25-4"></a>    │       (user enters project name + picks parent location)
-<a id="__codelineno-25-5" name="__codelineno-25-5" href="#__codelineno-25-5"></a>    │
-<a id="__codelineno-25-6" name="__codelineno-25-6" href="#__codelineno-25-6"></a>    ├─► App sends pdv.project.save comm:
-<a id="__codelineno-25-7" name="__codelineno-25-7" href="#__codelineno-25-7"></a>    │       payload: { save_dir: &quot;/path/to/project&quot; }
-<a id="__codelineno-25-8" name="__codelineno-25-8" href="#__codelineno-25-8"></a>    │
-<a id="__codelineno-25-9" name="__codelineno-25-9" href="#__codelineno-25-9"></a>    ├─► Kernel:
-<a id="__codelineno-25-10" name="__codelineno-25-10" href="#__codelineno-25-10"></a>    │       1. Serializes all tree nodes to the save directory
-<a id="__codelineno-25-11" name="__codelineno-25-11" href="#__codelineno-25-11"></a>    │          (data files + scripts, mirroring tree hierarchy)
-<a id="__codelineno-25-12" name="__codelineno-25-12" href="#__codelineno-25-12"></a>    │       2. Writes tree-index.json (with `source_rel_path` on every
-<a id="__codelineno-25-13" name="__codelineno-25-13" href="#__codelineno-25-13"></a>    │          module-owned PDVFile so load can re-inject it)
-<a id="__codelineno-25-14" name="__codelineno-25-14" href="#__codelineno-25-14"></a>    │       3. Walks the tree collecting module_owned_files (every
-<a id="__codelineno-25-15" name="__codelineno-25-15" href="#__codelineno-25-15"></a>    │          file-backed node under a PDVModule with source_rel_path)
-<a id="__codelineno-25-16" name="__codelineno-25-16" href="#__codelineno-25-16"></a>    │          and module_manifests (per-module metadata + module-root-
-<a id="__codelineno-25-17" name="__codelineno-25-17" href="#__codelineno-25-17"></a>    │          relative node descriptors for pdv-module.json /
-<a id="__codelineno-25-18" name="__codelineno-25-18" href="#__codelineno-25-18"></a>    │          module-index.json writing)
-<a id="__codelineno-25-19" name="__codelineno-25-19" href="#__codelineno-25-19"></a>    │       4. Responds with pdv.project.save.response:
-<a id="__codelineno-25-20" name="__codelineno-25-20" href="#__codelineno-25-20"></a>    │              payload: {
-<a id="__codelineno-25-21" name="__codelineno-25-21" href="#__codelineno-25-21"></a>    │                node_count, checksum,
-<a id="__codelineno-25-22" name="__codelineno-25-22" href="#__codelineno-25-22"></a>    │                module_owned_files, module_manifests,
-<a id="__codelineno-25-23" name="__codelineno-25-23" href="#__codelineno-25-23"></a>    │              }
-<a id="__codelineno-25-24" name="__codelineno-25-24" href="#__codelineno-25-24"></a>    │
-<a id="__codelineno-25-25" name="__codelineno-25-25" href="#__codelineno-25-25"></a>    ├─► App writes code-cells.json to save directory (atomic)
-<a id="__codelineno-25-26" name="__codelineno-25-26" href="#__codelineno-25-26"></a>    │
-<a id="__codelineno-25-27" name="__codelineno-25-27" href="#__codelineno-25-27"></a>    ├─► App syncs module-owned file contents from the working dir
-<a id="__codelineno-25-28" name="__codelineno-25-28" href="#__codelineno-25-28"></a>    │       into &lt;saveDir&gt;/modules/&lt;id&gt;/&lt;source_rel_path&gt; (§5.13),
-<a id="__codelineno-25-29" name="__codelineno-25-29" href="#__codelineno-25-29"></a>    │       each copy staged at `&lt;dest&gt;.tmp` and renamed (atomic).
-<a id="__codelineno-25-30" name="__codelineno-25-30" href="#__codelineno-25-30"></a>    │       Missing source files are swallowed (ENOENT logged, not
-<a id="__codelineno-25-31" name="__codelineno-25-31" href="#__codelineno-25-31"></a>    │       thrown) so a mid-save deletion doesn&#39;t abort the save.
-<a id="__codelineno-25-32" name="__codelineno-25-32" href="#__codelineno-25-32"></a>    │
-<a id="__codelineno-25-33" name="__codelineno-25-33" href="#__codelineno-25-33"></a>    ├─► App stamps pdv-module.json + module-index.json into each
-<a id="__codelineno-25-34" name="__codelineno-25-34" href="#__codelineno-25-34"></a>    │       &lt;saveDir&gt;/modules/&lt;id&gt;/ from module_manifests (§7), each
-<a id="__codelineno-25-35" name="__codelineno-25-35" href="#__codelineno-25-35"></a>    │       staged at `&lt;dest&gt;.tmp` and renamed (atomic). This makes
-<a id="__codelineno-25-36" name="__codelineno-25-36" href="#__codelineno-25-36"></a>    │       in-session modules reloadable on the next project load
-<a id="__codelineno-25-37" name="__codelineno-25-37" href="#__codelineno-25-37"></a>    │       via the same v4 bind path used for imported modules.
-<a id="__codelineno-25-38" name="__codelineno-25-38" href="#__codelineno-25-38"></a>    │
-<a id="__codelineno-25-39" name="__codelineno-25-39" href="#__codelineno-25-39"></a>    ├─► App atomically writes project.json to save directory — this
-<a id="__codelineno-25-40" name="__codelineno-25-40" href="#__codelineno-25-40"></a>    │       is the **commit gate**. Until the rename onto project.json
-<a id="__codelineno-25-41" name="__codelineno-25-41" href="#__codelineno-25-41"></a>    │       completes, the prior project.json is byte-for-byte intact
-<a id="__codelineno-25-42" name="__codelineno-25-42" href="#__codelineno-25-42"></a>    │       and the loader sees the prior project state. After the
-<a id="__codelineno-25-43" name="__codelineno-25-43" href="#__codelineno-25-43"></a>    │       rename returns, every preceding write is already on disk;
-<a id="__codelineno-25-44" name="__codelineno-25-44" href="#__codelineno-25-44"></a>    │       &quot;project.json exists and parses&quot; is therefore sufficient
-<a id="__codelineno-25-45" name="__codelineno-25-45" href="#__codelineno-25-45"></a>    │       to know the save is complete.
-<a id="__codelineno-25-46" name="__codelineno-25-46" href="#__codelineno-25-46"></a>    │
-<a id="__codelineno-25-47" name="__codelineno-25-47" href="#__codelineno-25-47"></a>    └─► App updates title bar: &quot;My Experiment&quot;
+<div class="highlight"><pre><span></span><code><a id="__codelineno-26-1" name="__codelineno-26-1" href="#__codelineno-26-1"></a>User triggers save
+<a id="__codelineno-26-2" name="__codelineno-26-2" href="#__codelineno-26-2"></a>    │
+<a id="__codelineno-26-3" name="__codelineno-26-3" href="#__codelineno-26-3"></a>    ├─► App shows Save As dialog if no project directory set
+<a id="__codelineno-26-4" name="__codelineno-26-4" href="#__codelineno-26-4"></a>    │       (user enters project name + picks parent location)
+<a id="__codelineno-26-5" name="__codelineno-26-5" href="#__codelineno-26-5"></a>    │
+<a id="__codelineno-26-6" name="__codelineno-26-6" href="#__codelineno-26-6"></a>    ├─► App sends pdv.project.save comm:
+<a id="__codelineno-26-7" name="__codelineno-26-7" href="#__codelineno-26-7"></a>    │       payload: { save_dir: &quot;/path/to/project&quot; }
+<a id="__codelineno-26-8" name="__codelineno-26-8" href="#__codelineno-26-8"></a>    │
+<a id="__codelineno-26-9" name="__codelineno-26-9" href="#__codelineno-26-9"></a>    ├─► Kernel:
+<a id="__codelineno-26-10" name="__codelineno-26-10" href="#__codelineno-26-10"></a>    │       1. Serializes all tree nodes to the save directory
+<a id="__codelineno-26-11" name="__codelineno-26-11" href="#__codelineno-26-11"></a>    │          (data files + scripts, mirroring tree hierarchy)
+<a id="__codelineno-26-12" name="__codelineno-26-12" href="#__codelineno-26-12"></a>    │       2. Writes tree-index.json (with `source_rel_path` on every
+<a id="__codelineno-26-13" name="__codelineno-26-13" href="#__codelineno-26-13"></a>    │          module-owned PDVFile so load can re-inject it)
+<a id="__codelineno-26-14" name="__codelineno-26-14" href="#__codelineno-26-14"></a>    │       3. Walks the tree collecting module_owned_files (every
+<a id="__codelineno-26-15" name="__codelineno-26-15" href="#__codelineno-26-15"></a>    │          file-backed node under a PDVModule with source_rel_path)
+<a id="__codelineno-26-16" name="__codelineno-26-16" href="#__codelineno-26-16"></a>    │          and module_manifests (per-module metadata + module-root-
+<a id="__codelineno-26-17" name="__codelineno-26-17" href="#__codelineno-26-17"></a>    │          relative node descriptors for pdv-module.json /
+<a id="__codelineno-26-18" name="__codelineno-26-18" href="#__codelineno-26-18"></a>    │          module-index.json writing)
+<a id="__codelineno-26-19" name="__codelineno-26-19" href="#__codelineno-26-19"></a>    │       4. Responds with pdv.project.save.response:
+<a id="__codelineno-26-20" name="__codelineno-26-20" href="#__codelineno-26-20"></a>    │              payload: {
+<a id="__codelineno-26-21" name="__codelineno-26-21" href="#__codelineno-26-21"></a>    │                node_count, checksum,
+<a id="__codelineno-26-22" name="__codelineno-26-22" href="#__codelineno-26-22"></a>    │                module_owned_files, module_manifests,
+<a id="__codelineno-26-23" name="__codelineno-26-23" href="#__codelineno-26-23"></a>    │              }
+<a id="__codelineno-26-24" name="__codelineno-26-24" href="#__codelineno-26-24"></a>    │
+<a id="__codelineno-26-25" name="__codelineno-26-25" href="#__codelineno-26-25"></a>    ├─► App writes code-cells.json to save directory (atomic)
+<a id="__codelineno-26-26" name="__codelineno-26-26" href="#__codelineno-26-26"></a>    │
+<a id="__codelineno-26-27" name="__codelineno-26-27" href="#__codelineno-26-27"></a>    ├─► App syncs module-owned file contents from the working dir
+<a id="__codelineno-26-28" name="__codelineno-26-28" href="#__codelineno-26-28"></a>    │       into &lt;saveDir&gt;/modules/&lt;id&gt;/&lt;source_rel_path&gt; (§5.13),
+<a id="__codelineno-26-29" name="__codelineno-26-29" href="#__codelineno-26-29"></a>    │       each copy staged at `&lt;dest&gt;.tmp` and renamed (atomic).
+<a id="__codelineno-26-30" name="__codelineno-26-30" href="#__codelineno-26-30"></a>    │       Missing source files are swallowed (ENOENT logged, not
+<a id="__codelineno-26-31" name="__codelineno-26-31" href="#__codelineno-26-31"></a>    │       thrown) so a mid-save deletion doesn&#39;t abort the save.
+<a id="__codelineno-26-32" name="__codelineno-26-32" href="#__codelineno-26-32"></a>    │
+<a id="__codelineno-26-33" name="__codelineno-26-33" href="#__codelineno-26-33"></a>    ├─► App stamps pdv-module.json + module-index.json into each
+<a id="__codelineno-26-34" name="__codelineno-26-34" href="#__codelineno-26-34"></a>    │       &lt;saveDir&gt;/modules/&lt;id&gt;/ from module_manifests (§7), each
+<a id="__codelineno-26-35" name="__codelineno-26-35" href="#__codelineno-26-35"></a>    │       staged at `&lt;dest&gt;.tmp` and renamed (atomic). This makes
+<a id="__codelineno-26-36" name="__codelineno-26-36" href="#__codelineno-26-36"></a>    │       in-session modules reloadable on the next project load
+<a id="__codelineno-26-37" name="__codelineno-26-37" href="#__codelineno-26-37"></a>    │       via the same v4 bind path used for imported modules.
+<a id="__codelineno-26-38" name="__codelineno-26-38" href="#__codelineno-26-38"></a>    │
+<a id="__codelineno-26-39" name="__codelineno-26-39" href="#__codelineno-26-39"></a>    ├─► App atomically writes project.json to save directory — this
+<a id="__codelineno-26-40" name="__codelineno-26-40" href="#__codelineno-26-40"></a>    │       is the **commit gate**. Until the rename onto project.json
+<a id="__codelineno-26-41" name="__codelineno-26-41" href="#__codelineno-26-41"></a>    │       completes, the prior project.json is byte-for-byte intact
+<a id="__codelineno-26-42" name="__codelineno-26-42" href="#__codelineno-26-42"></a>    │       and the loader sees the prior project state. After the
+<a id="__codelineno-26-43" name="__codelineno-26-43" href="#__codelineno-26-43"></a>    │       rename returns, every preceding write is already on disk;
+<a id="__codelineno-26-44" name="__codelineno-26-44" href="#__codelineno-26-44"></a>    │       &quot;project.json exists and parses&quot; is therefore sufficient
+<a id="__codelineno-26-45" name="__codelineno-26-45" href="#__codelineno-26-45"></a>    │       to know the save is complete.
+<a id="__codelineno-26-46" name="__codelineno-26-46" href="#__codelineno-26-46"></a>    │
+<a id="__codelineno-26-47" name="__codelineno-26-47" href="#__codelineno-26-47"></a>    └─► App updates title bar: &quot;My Experiment&quot;
 </code></pre></div>
 <p>All on-disk writes in the save pipeline (<code>tree-index.json</code>, <code>code-cells.json</code>, per-module <code>pdv-module.json</code> / <code>module-index.json</code>, module-owned file copies, and <code>project.json</code>) are atomic: each is written to a sibling <code>.tmp</code> file and <code>rename</code>d onto its final path, so a process crash mid-save leaves the destination either fully-old or fully-new but never torn. <code>tree-index.json</code> is the kernel-side commit point for the tree (in <code>pdv-python/pdv/handlers/project.py</code>); <code>project.json</code>, written last by the app, is the overall commit gate that promises every other artifact is durable. See <code>docs/developer/save-pipeline.md</code> for the full atomicity audit.</p>
 <p>To prevent a concurrent module-settings IPC handler from silently overwriting the manifest snapshot taken inside <code>ProjectManager.save</code>, the entire save body runs inside <code>runSerializedProjectManifestMutation</code> (the same lock that <code>ipc-register-modules.ts</code> uses around its read-modify-write mutations of <code>project.json</code>). Lock order: save-lock (outer) → manifest-write-lock (inner). No deadlock: nothing acquires the save-lock while holding the manifest-write-lock.</p>
@@ -5944,13 +5973,13 @@
 </ul>
 <h4 id="1055-manifest-additions">10.5.5 Manifest Additions<a class="headerlink" href="#1055-manifest-additions" title="Permanent link">&para;</a></h4>
 <p><code>project.json</code> gains an <code>environment</code> object; the schema version bumps to <code>"1.2"</code>:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-26-1" name="__codelineno-26-1" href="#__codelineno-26-1"></a><span class="p">{</span>
-<a id="__codelineno-26-2" name="__codelineno-26-2" href="#__codelineno-26-2"></a><span class="w">  </span><span class="nt">&quot;schema_version&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;1.2&quot;</span><span class="p">,</span>
-<a id="__codelineno-26-3" name="__codelineno-26-3" href="#__codelineno-26-3"></a><span class="w">  </span><span class="nt">&quot;environment&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
-<a id="__codelineno-26-4" name="__codelineno-26-4" href="#__codelineno-26-4"></a><span class="w">    </span><span class="nt">&quot;mode&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;uv&quot;</span><span class="p">,</span>
-<a id="__codelineno-26-5" name="__codelineno-26-5" href="#__codelineno-26-5"></a><span class="w">    </span><span class="nt">&quot;python_version&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;3.12&quot;</span>
-<a id="__codelineno-26-6" name="__codelineno-26-6" href="#__codelineno-26-6"></a><span class="w">  </span><span class="p">}</span>
-<a id="__codelineno-26-7" name="__codelineno-26-7" href="#__codelineno-26-7"></a><span class="p">}</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-27-1" name="__codelineno-27-1" href="#__codelineno-27-1"></a><span class="p">{</span>
+<a id="__codelineno-27-2" name="__codelineno-27-2" href="#__codelineno-27-2"></a><span class="w">  </span><span class="nt">&quot;schema_version&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;1.2&quot;</span><span class="p">,</span>
+<a id="__codelineno-27-3" name="__codelineno-27-3" href="#__codelineno-27-3"></a><span class="w">  </span><span class="nt">&quot;environment&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
+<a id="__codelineno-27-4" name="__codelineno-27-4" href="#__codelineno-27-4"></a><span class="w">    </span><span class="nt">&quot;mode&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;uv&quot;</span><span class="p">,</span>
+<a id="__codelineno-27-5" name="__codelineno-27-5" href="#__codelineno-27-5"></a><span class="w">    </span><span class="nt">&quot;python_version&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;3.12&quot;</span>
+<a id="__codelineno-27-6" name="__codelineno-27-6" href="#__codelineno-27-6"></a><span class="w">  </span><span class="p">}</span>
+<a id="__codelineno-27-7" name="__codelineno-27-7" href="#__codelineno-27-7"></a><span class="p">}</span>
 </code></pre></div>
 <table>
 <thead>
@@ -5983,7 +6012,7 @@
 <h4 id="1057-pdv-python-handling">10.5.7 <code>pdv-python</code> Handling<a class="headerlink" href="#1057-pdv-python-handling" title="Permanent link">&para;</a></h4>
 <p><code>pdv-python</code> is installed into the project venv by PDV, never through the user's <code>pyproject.toml</code>. Coupling the user's dependency graph to PDV's internal version would turn every app update into a merge conflict in every project.</p>
 <p>PDV ships the matching <code>pdv-python</code> wheel as a bundled resource and, after every <code>uv sync</code>, installs it from that local file into the venv:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-27-1" name="__codelineno-27-1" href="#__codelineno-27-1"></a>uv pip install --python &lt;venv-python&gt; &lt;bundled-pdv-python-wheel&gt;
+<div class="highlight"><pre><span></span><code><a id="__codelineno-28-1" name="__codelineno-28-1" href="#__codelineno-28-1"></a>uv pip install --python &lt;venv-python&gt; &lt;bundled-pdv-python-wheel&gt;
 </code></pre></div>
 <p>where <code>&lt;venv-python&gt;</code> is <code>&lt;working-dir&gt;/.venv/bin/python</code> (<code>...\.venv\Scripts\python.exe</code> on Windows). Installing from the bundled wheel means the kernel's own support package needs no network access and can never version-drift from the running app. The operation is idempotent and fast when the matching version is already present. The version-match check from §10.4 remains authoritative. Developer mode (§10.5.16) skips this step.</p>
 <h4 id="1058-new-project-flow">10.5.8 New Project Flow<a class="headerlink" href="#1058-new-project-flow" title="Permanent link">&para;</a></h4>
@@ -6038,7 +6067,7 @@
 <p>If <code>environment.python_version</code> names an interpreter uv cannot find, <code>uv</code> can download one via <code>uv python install</code>. Because that is a tens-of-megabytes download, PDV gates it behind an explicit confirmation dialog the first time it is needed for a project ("This project requests Python 3.12, which is not installed. Download it now? (≈ 40 MB)"). Downloaded interpreters land in uv's standard location (§10.5.6) and are shared with any system <code>uv</code>.</p>
 <h4 id="10516-developer-mode-editable-pdv-python">10.5.16 Developer Mode (editable <code>pdv-python</code>)<a class="headerlink" href="#10516-developer-mode-editable-pdv-python" title="Permanent link">&para;</a></h4>
 <p>PDV contributors want their edits to <code>pdv-python/</code> to take effect live, not be shadowed by a pinned bundled wheel. The app detects developer mode by a <code>.pdv-dev</code> marker file at the repo root (a packaged app has no repo root, so this is never true in distribution). When present, the §10.5.7 wheel install is replaced by an <strong>editable install of the repo checkout</strong> into the project venv:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-28-1" name="__codelineno-28-1" href="#__codelineno-28-1"></a>uv pip install --python &lt;venv-python&gt; -e &lt;repo&gt;/pdv-python
+<div class="highlight"><pre><span></span><code><a id="__codelineno-29-1" name="__codelineno-29-1" href="#__codelineno-29-1"></a>uv pip install --python &lt;venv-python&gt; -e &lt;repo&gt;/pdv-python
 </code></pre></div>
 <p>The editable install is preferred over a <code>PYTHONPATH</code> shim because it both keeps the source live <em>and</em> resolves <code>pdv-python</code>'s own dependencies (<code>ipykernel</code>, <code>numpy</code>, …) into the venv, so the kernel can launch. This is documented in the contributor guide; end users never see it.</p>
 <h4 id="10517-conda-and-shared-mode">10.5.17 Conda and Shared Mode<a class="headerlink" href="#10517-conda-and-shared-mode" title="Permanent link">&para;</a></h4>
@@ -6101,54 +6130,54 @@
 - <strong>Kernel-scoped</strong> (<code>currentKernelId</code> keyed): <code>tree.onChanged</code>, <code>project.onLoaded</code>, <code>kernels.onKernelStatus</code>, <code>project.onReloading</code>, <code>progress.onProgress</code> — managed by <code>useKernelSubscriptions</code>
 - <strong>App-scoped</strong> (always-on while renderer mounted): <code>kernels.onOutput</code> — managed by <code>useKernelSubscriptions</code>; <code>menu.onAction</code> — managed by <code>useProjectWorkflow</code> and <code>app/index.tsx</code> (for <code>modules:import</code>); <code>chrome.onStateChanged</code> — registered directly in <code>app/index.tsx</code></p>
 <p><strong>Module popup windows</strong> are separate <code>BrowserWindow</code> roots with their own renderer entry point. They register their own push subscriptions (e.g. <code>tree.onChanged</code> in <code>ModuleWindowRoot.tsx</code> for refreshing tree-backed dropdowns). The "one owner" rule below applies within the main window only.</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-29-1" name="__codelineno-29-1" href="#__codelineno-29-1"></a><span class="c1">// useKernelSubscriptions.ts — app-scoped subscription</span>
-<a id="__codelineno-29-2" name="__codelineno-29-2" href="#__codelineno-29-2"></a><span class="nx">useEffect</span><span class="p">(()</span><span class="w"> </span><span class="p">=&gt;</span><span class="w"> </span><span class="p">{</span>
-<a id="__codelineno-29-3" name="__codelineno-29-3" href="#__codelineno-29-3"></a><span class="w">  </span><span class="kd">const</span><span class="w"> </span><span class="nx">unsubOutput</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="nb">window</span><span class="p">.</span><span class="nx">pdv</span><span class="p">.</span><span class="nx">kernels</span><span class="p">.</span><span class="nx">onOutput</span><span class="p">(</span><span class="nx">chunk</span><span class="w"> </span><span class="p">=&gt;</span><span class="w"> </span><span class="p">{</span>
-<a id="__codelineno-29-4" name="__codelineno-29-4" href="#__codelineno-29-4"></a><span class="w">    </span><span class="c1">// append streamed execute output to the matching log entry</span>
-<a id="__codelineno-29-5" name="__codelineno-29-5" href="#__codelineno-29-5"></a><span class="w">  </span><span class="p">});</span>
-<a id="__codelineno-29-6" name="__codelineno-29-6" href="#__codelineno-29-6"></a><span class="w">  </span><span class="k">return</span><span class="w"> </span><span class="p">()</span><span class="w"> </span><span class="p">=&gt;</span><span class="w"> </span><span class="nx">unsubOutput</span><span class="p">();</span>
-<a id="__codelineno-29-7" name="__codelineno-29-7" href="#__codelineno-29-7"></a><span class="p">},</span><span class="w"> </span><span class="p">[]);</span>
-<a id="__codelineno-29-8" name="__codelineno-29-8" href="#__codelineno-29-8"></a>
-<a id="__codelineno-29-9" name="__codelineno-29-9" href="#__codelineno-29-9"></a><span class="c1">// useKernelSubscriptions.ts — kernel-scoped subscriptions</span>
-<a id="__codelineno-29-10" name="__codelineno-29-10" href="#__codelineno-29-10"></a><span class="nx">useEffect</span><span class="p">(()</span><span class="w"> </span><span class="p">=&gt;</span><span class="w"> </span><span class="p">{</span>
-<a id="__codelineno-29-11" name="__codelineno-29-11" href="#__codelineno-29-11"></a><span class="w">  </span><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="o">!</span><span class="nx">currentKernelId</span><span class="p">)</span><span class="w"> </span><span class="k">return</span><span class="p">;</span>
-<a id="__codelineno-29-12" name="__codelineno-29-12" href="#__codelineno-29-12"></a>
-<a id="__codelineno-29-13" name="__codelineno-29-13" href="#__codelineno-29-13"></a><span class="w">  </span><span class="kd">const</span><span class="w"> </span><span class="nx">unsubTree</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="nb">window</span><span class="p">.</span><span class="nx">pdv</span><span class="p">.</span><span class="nx">tree</span><span class="p">.</span><span class="nx">onChanged</span><span class="p">(</span><span class="nx">_payload</span><span class="w"> </span><span class="p">=&gt;</span><span class="w"> </span><span class="p">{</span>
-<a id="__codelineno-29-14" name="__codelineno-29-14" href="#__codelineno-29-14"></a><span class="w">    </span><span class="nx">setTreeRefreshToken</span><span class="p">(</span><span class="nx">t</span><span class="w"> </span><span class="p">=&gt;</span><span class="w"> </span><span class="nx">t</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="mf">1</span><span class="p">);</span>
-<a id="__codelineno-29-15" name="__codelineno-29-15" href="#__codelineno-29-15"></a><span class="w">  </span><span class="p">});</span>
-<a id="__codelineno-29-16" name="__codelineno-29-16" href="#__codelineno-29-16"></a>
-<a id="__codelineno-29-17" name="__codelineno-29-17" href="#__codelineno-29-17"></a><span class="w">  </span><span class="kd">const</span><span class="w"> </span><span class="nx">unsubProject</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="nb">window</span><span class="p">.</span><span class="nx">pdv</span><span class="p">.</span><span class="nx">project</span><span class="p">.</span><span class="nx">onLoaded</span><span class="p">(</span><span class="nx">payload</span><span class="w"> </span><span class="p">=&gt;</span><span class="w"> </span><span class="p">{</span>
-<a id="__codelineno-29-18" name="__codelineno-29-18" href="#__codelineno-29-18"></a><span class="w">    </span><span class="c1">// repopulate code cell tabs from project</span>
-<a id="__codelineno-29-19" name="__codelineno-29-19" href="#__codelineno-29-19"></a><span class="w">  </span><span class="p">});</span>
-<a id="__codelineno-29-20" name="__codelineno-29-20" href="#__codelineno-29-20"></a>
-<a id="__codelineno-29-21" name="__codelineno-29-21" href="#__codelineno-29-21"></a><span class="w">  </span><span class="kd">const</span><span class="w"> </span><span class="nx">unsubKernelStatus</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="nb">window</span><span class="p">.</span><span class="nx">pdv</span><span class="p">.</span><span class="nx">kernels</span><span class="p">.</span><span class="nx">onKernelStatus</span><span class="p">(</span><span class="nx">payload</span><span class="w"> </span><span class="p">=&gt;</span><span class="w"> </span><span class="p">{</span>
-<a id="__codelineno-29-22" name="__codelineno-29-22" href="#__codelineno-29-22"></a><span class="w">    </span><span class="c1">// detect kernel crash (status === &#39;dead&#39;)</span>
-<a id="__codelineno-29-23" name="__codelineno-29-23" href="#__codelineno-29-23"></a><span class="w">  </span><span class="p">});</span>
-<a id="__codelineno-29-24" name="__codelineno-29-24" href="#__codelineno-29-24"></a>
-<a id="__codelineno-29-25" name="__codelineno-29-25" href="#__codelineno-29-25"></a><span class="w">  </span><span class="kd">const</span><span class="w"> </span><span class="nx">unsubReloading</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="nb">window</span><span class="p">.</span><span class="nx">pdv</span><span class="p">.</span><span class="nx">project</span><span class="p">.</span><span class="nx">onReloading</span><span class="p">(</span><span class="nx">payload</span><span class="w"> </span><span class="p">=&gt;</span><span class="w"> </span><span class="p">{</span>
-<a id="__codelineno-29-26" name="__codelineno-29-26" href="#__codelineno-29-26"></a><span class="w">    </span><span class="c1">// show/hide project-reloading overlay during kernel restart</span>
-<a id="__codelineno-29-27" name="__codelineno-29-27" href="#__codelineno-29-27"></a><span class="w">  </span><span class="p">});</span>
-<a id="__codelineno-29-28" name="__codelineno-29-28" href="#__codelineno-29-28"></a>
-<a id="__codelineno-29-29" name="__codelineno-29-29" href="#__codelineno-29-29"></a><span class="w">  </span><span class="kd">const</span><span class="w"> </span><span class="nx">unsubProgress</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="nb">window</span><span class="p">.</span><span class="nx">pdv</span><span class="p">.</span><span class="nx">progress</span><span class="p">.</span><span class="nx">onProgress</span><span class="p">(</span><span class="nx">payload</span><span class="w"> </span><span class="p">=&gt;</span><span class="w"> </span><span class="p">{</span>
-<a id="__codelineno-29-30" name="__codelineno-29-30" href="#__codelineno-29-30"></a><span class="w">    </span><span class="c1">// update save/load progress display</span>
-<a id="__codelineno-29-31" name="__codelineno-29-31" href="#__codelineno-29-31"></a><span class="w">  </span><span class="p">});</span>
-<a id="__codelineno-29-32" name="__codelineno-29-32" href="#__codelineno-29-32"></a>
-<a id="__codelineno-29-33" name="__codelineno-29-33" href="#__codelineno-29-33"></a><span class="w">  </span><span class="k">return</span><span class="w"> </span><span class="p">()</span><span class="w"> </span><span class="p">=&gt;</span><span class="w"> </span><span class="p">{</span>
-<a id="__codelineno-29-34" name="__codelineno-29-34" href="#__codelineno-29-34"></a><span class="w">    </span><span class="nx">unsubTree</span><span class="p">();</span>
-<a id="__codelineno-29-35" name="__codelineno-29-35" href="#__codelineno-29-35"></a><span class="w">    </span><span class="nx">unsubProject</span><span class="p">();</span>
-<a id="__codelineno-29-36" name="__codelineno-29-36" href="#__codelineno-29-36"></a><span class="w">    </span><span class="nx">unsubKernelStatus</span><span class="p">();</span>
-<a id="__codelineno-29-37" name="__codelineno-29-37" href="#__codelineno-29-37"></a><span class="w">    </span><span class="nx">unsubReloading</span><span class="p">();</span>
-<a id="__codelineno-29-38" name="__codelineno-29-38" href="#__codelineno-29-38"></a><span class="w">    </span><span class="nx">unsubProgress</span><span class="p">();</span>
-<a id="__codelineno-29-39" name="__codelineno-29-39" href="#__codelineno-29-39"></a><span class="w">  </span><span class="p">};</span>
-<a id="__codelineno-29-40" name="__codelineno-29-40" href="#__codelineno-29-40"></a><span class="p">},</span><span class="w"> </span><span class="p">[</span><span class="nx">currentKernelId</span><span class="p">]);</span>
-<a id="__codelineno-29-41" name="__codelineno-29-41" href="#__codelineno-29-41"></a>
-<a id="__codelineno-29-42" name="__codelineno-29-42" href="#__codelineno-29-42"></a><span class="c1">// useProjectWorkflow.ts — app-scoped menu subscription</span>
-<a id="__codelineno-29-43" name="__codelineno-29-43" href="#__codelineno-29-43"></a><span class="nx">useEffect</span><span class="p">(()</span><span class="w"> </span><span class="p">=&gt;</span><span class="w"> </span><span class="p">{</span>
-<a id="__codelineno-29-44" name="__codelineno-29-44" href="#__codelineno-29-44"></a><span class="w">  </span><span class="kd">const</span><span class="w"> </span><span class="nx">unsubMenu</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="nb">window</span><span class="p">.</span><span class="nx">pdv</span><span class="p">.</span><span class="nx">menu</span><span class="p">.</span><span class="nx">onAction</span><span class="p">(</span><span class="nx">payload</span><span class="w"> </span><span class="p">=&gt;</span><span class="w"> </span><span class="p">{</span>
-<a id="__codelineno-29-45" name="__codelineno-29-45" href="#__codelineno-29-45"></a><span class="w">    </span><span class="c1">// open/save project actions routed from main menu</span>
-<a id="__codelineno-29-46" name="__codelineno-29-46" href="#__codelineno-29-46"></a><span class="w">  </span><span class="p">});</span>
-<a id="__codelineno-29-47" name="__codelineno-29-47" href="#__codelineno-29-47"></a><span class="w">  </span><span class="k">return</span><span class="w"> </span><span class="p">()</span><span class="w"> </span><span class="p">=&gt;</span><span class="w"> </span><span class="nx">unsubMenu</span><span class="p">();</span>
-<a id="__codelineno-29-48" name="__codelineno-29-48" href="#__codelineno-29-48"></a><span class="p">},</span><span class="w"> </span><span class="p">[]);</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-30-1" name="__codelineno-30-1" href="#__codelineno-30-1"></a><span class="c1">// useKernelSubscriptions.ts — app-scoped subscription</span>
+<a id="__codelineno-30-2" name="__codelineno-30-2" href="#__codelineno-30-2"></a><span class="nx">useEffect</span><span class="p">(()</span><span class="w"> </span><span class="p">=&gt;</span><span class="w"> </span><span class="p">{</span>
+<a id="__codelineno-30-3" name="__codelineno-30-3" href="#__codelineno-30-3"></a><span class="w">  </span><span class="kd">const</span><span class="w"> </span><span class="nx">unsubOutput</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="nb">window</span><span class="p">.</span><span class="nx">pdv</span><span class="p">.</span><span class="nx">kernels</span><span class="p">.</span><span class="nx">onOutput</span><span class="p">(</span><span class="nx">chunk</span><span class="w"> </span><span class="p">=&gt;</span><span class="w"> </span><span class="p">{</span>
+<a id="__codelineno-30-4" name="__codelineno-30-4" href="#__codelineno-30-4"></a><span class="w">    </span><span class="c1">// append streamed execute output to the matching log entry</span>
+<a id="__codelineno-30-5" name="__codelineno-30-5" href="#__codelineno-30-5"></a><span class="w">  </span><span class="p">});</span>
+<a id="__codelineno-30-6" name="__codelineno-30-6" href="#__codelineno-30-6"></a><span class="w">  </span><span class="k">return</span><span class="w"> </span><span class="p">()</span><span class="w"> </span><span class="p">=&gt;</span><span class="w"> </span><span class="nx">unsubOutput</span><span class="p">();</span>
+<a id="__codelineno-30-7" name="__codelineno-30-7" href="#__codelineno-30-7"></a><span class="p">},</span><span class="w"> </span><span class="p">[]);</span>
+<a id="__codelineno-30-8" name="__codelineno-30-8" href="#__codelineno-30-8"></a>
+<a id="__codelineno-30-9" name="__codelineno-30-9" href="#__codelineno-30-9"></a><span class="c1">// useKernelSubscriptions.ts — kernel-scoped subscriptions</span>
+<a id="__codelineno-30-10" name="__codelineno-30-10" href="#__codelineno-30-10"></a><span class="nx">useEffect</span><span class="p">(()</span><span class="w"> </span><span class="p">=&gt;</span><span class="w"> </span><span class="p">{</span>
+<a id="__codelineno-30-11" name="__codelineno-30-11" href="#__codelineno-30-11"></a><span class="w">  </span><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="o">!</span><span class="nx">currentKernelId</span><span class="p">)</span><span class="w"> </span><span class="k">return</span><span class="p">;</span>
+<a id="__codelineno-30-12" name="__codelineno-30-12" href="#__codelineno-30-12"></a>
+<a id="__codelineno-30-13" name="__codelineno-30-13" href="#__codelineno-30-13"></a><span class="w">  </span><span class="kd">const</span><span class="w"> </span><span class="nx">unsubTree</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="nb">window</span><span class="p">.</span><span class="nx">pdv</span><span class="p">.</span><span class="nx">tree</span><span class="p">.</span><span class="nx">onChanged</span><span class="p">(</span><span class="nx">_payload</span><span class="w"> </span><span class="p">=&gt;</span><span class="w"> </span><span class="p">{</span>
+<a id="__codelineno-30-14" name="__codelineno-30-14" href="#__codelineno-30-14"></a><span class="w">    </span><span class="nx">setTreeRefreshToken</span><span class="p">(</span><span class="nx">t</span><span class="w"> </span><span class="p">=&gt;</span><span class="w"> </span><span class="nx">t</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="mf">1</span><span class="p">);</span>
+<a id="__codelineno-30-15" name="__codelineno-30-15" href="#__codelineno-30-15"></a><span class="w">  </span><span class="p">});</span>
+<a id="__codelineno-30-16" name="__codelineno-30-16" href="#__codelineno-30-16"></a>
+<a id="__codelineno-30-17" name="__codelineno-30-17" href="#__codelineno-30-17"></a><span class="w">  </span><span class="kd">const</span><span class="w"> </span><span class="nx">unsubProject</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="nb">window</span><span class="p">.</span><span class="nx">pdv</span><span class="p">.</span><span class="nx">project</span><span class="p">.</span><span class="nx">onLoaded</span><span class="p">(</span><span class="nx">payload</span><span class="w"> </span><span class="p">=&gt;</span><span class="w"> </span><span class="p">{</span>
+<a id="__codelineno-30-18" name="__codelineno-30-18" href="#__codelineno-30-18"></a><span class="w">    </span><span class="c1">// repopulate code cell tabs from project</span>
+<a id="__codelineno-30-19" name="__codelineno-30-19" href="#__codelineno-30-19"></a><span class="w">  </span><span class="p">});</span>
+<a id="__codelineno-30-20" name="__codelineno-30-20" href="#__codelineno-30-20"></a>
+<a id="__codelineno-30-21" name="__codelineno-30-21" href="#__codelineno-30-21"></a><span class="w">  </span><span class="kd">const</span><span class="w"> </span><span class="nx">unsubKernelStatus</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="nb">window</span><span class="p">.</span><span class="nx">pdv</span><span class="p">.</span><span class="nx">kernels</span><span class="p">.</span><span class="nx">onKernelStatus</span><span class="p">(</span><span class="nx">payload</span><span class="w"> </span><span class="p">=&gt;</span><span class="w"> </span><span class="p">{</span>
+<a id="__codelineno-30-22" name="__codelineno-30-22" href="#__codelineno-30-22"></a><span class="w">    </span><span class="c1">// detect kernel crash (status === &#39;dead&#39;)</span>
+<a id="__codelineno-30-23" name="__codelineno-30-23" href="#__codelineno-30-23"></a><span class="w">  </span><span class="p">});</span>
+<a id="__codelineno-30-24" name="__codelineno-30-24" href="#__codelineno-30-24"></a>
+<a id="__codelineno-30-25" name="__codelineno-30-25" href="#__codelineno-30-25"></a><span class="w">  </span><span class="kd">const</span><span class="w"> </span><span class="nx">unsubReloading</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="nb">window</span><span class="p">.</span><span class="nx">pdv</span><span class="p">.</span><span class="nx">project</span><span class="p">.</span><span class="nx">onReloading</span><span class="p">(</span><span class="nx">payload</span><span class="w"> </span><span class="p">=&gt;</span><span class="w"> </span><span class="p">{</span>
+<a id="__codelineno-30-26" name="__codelineno-30-26" href="#__codelineno-30-26"></a><span class="w">    </span><span class="c1">// show/hide project-reloading overlay during kernel restart</span>
+<a id="__codelineno-30-27" name="__codelineno-30-27" href="#__codelineno-30-27"></a><span class="w">  </span><span class="p">});</span>
+<a id="__codelineno-30-28" name="__codelineno-30-28" href="#__codelineno-30-28"></a>
+<a id="__codelineno-30-29" name="__codelineno-30-29" href="#__codelineno-30-29"></a><span class="w">  </span><span class="kd">const</span><span class="w"> </span><span class="nx">unsubProgress</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="nb">window</span><span class="p">.</span><span class="nx">pdv</span><span class="p">.</span><span class="nx">progress</span><span class="p">.</span><span class="nx">onProgress</span><span class="p">(</span><span class="nx">payload</span><span class="w"> </span><span class="p">=&gt;</span><span class="w"> </span><span class="p">{</span>
+<a id="__codelineno-30-30" name="__codelineno-30-30" href="#__codelineno-30-30"></a><span class="w">    </span><span class="c1">// update save/load progress display</span>
+<a id="__codelineno-30-31" name="__codelineno-30-31" href="#__codelineno-30-31"></a><span class="w">  </span><span class="p">});</span>
+<a id="__codelineno-30-32" name="__codelineno-30-32" href="#__codelineno-30-32"></a>
+<a id="__codelineno-30-33" name="__codelineno-30-33" href="#__codelineno-30-33"></a><span class="w">  </span><span class="k">return</span><span class="w"> </span><span class="p">()</span><span class="w"> </span><span class="p">=&gt;</span><span class="w"> </span><span class="p">{</span>
+<a id="__codelineno-30-34" name="__codelineno-30-34" href="#__codelineno-30-34"></a><span class="w">    </span><span class="nx">unsubTree</span><span class="p">();</span>
+<a id="__codelineno-30-35" name="__codelineno-30-35" href="#__codelineno-30-35"></a><span class="w">    </span><span class="nx">unsubProject</span><span class="p">();</span>
+<a id="__codelineno-30-36" name="__codelineno-30-36" href="#__codelineno-30-36"></a><span class="w">    </span><span class="nx">unsubKernelStatus</span><span class="p">();</span>
+<a id="__codelineno-30-37" name="__codelineno-30-37" href="#__codelineno-30-37"></a><span class="w">    </span><span class="nx">unsubReloading</span><span class="p">();</span>
+<a id="__codelineno-30-38" name="__codelineno-30-38" href="#__codelineno-30-38"></a><span class="w">    </span><span class="nx">unsubProgress</span><span class="p">();</span>
+<a id="__codelineno-30-39" name="__codelineno-30-39" href="#__codelineno-30-39"></a><span class="w">  </span><span class="p">};</span>
+<a id="__codelineno-30-40" name="__codelineno-30-40" href="#__codelineno-30-40"></a><span class="p">},</span><span class="w"> </span><span class="p">[</span><span class="nx">currentKernelId</span><span class="p">]);</span>
+<a id="__codelineno-30-41" name="__codelineno-30-41" href="#__codelineno-30-41"></a>
+<a id="__codelineno-30-42" name="__codelineno-30-42" href="#__codelineno-30-42"></a><span class="c1">// useProjectWorkflow.ts — app-scoped menu subscription</span>
+<a id="__codelineno-30-43" name="__codelineno-30-43" href="#__codelineno-30-43"></a><span class="nx">useEffect</span><span class="p">(()</span><span class="w"> </span><span class="p">=&gt;</span><span class="w"> </span><span class="p">{</span>
+<a id="__codelineno-30-44" name="__codelineno-30-44" href="#__codelineno-30-44"></a><span class="w">  </span><span class="kd">const</span><span class="w"> </span><span class="nx">unsubMenu</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="nb">window</span><span class="p">.</span><span class="nx">pdv</span><span class="p">.</span><span class="nx">menu</span><span class="p">.</span><span class="nx">onAction</span><span class="p">(</span><span class="nx">payload</span><span class="w"> </span><span class="p">=&gt;</span><span class="w"> </span><span class="p">{</span>
+<a id="__codelineno-30-45" name="__codelineno-30-45" href="#__codelineno-30-45"></a><span class="w">    </span><span class="c1">// open/save project actions routed from main menu</span>
+<a id="__codelineno-30-46" name="__codelineno-30-46" href="#__codelineno-30-46"></a><span class="w">  </span><span class="p">});</span>
+<a id="__codelineno-30-47" name="__codelineno-30-47" href="#__codelineno-30-47"></a><span class="w">  </span><span class="k">return</span><span class="w"> </span><span class="p">()</span><span class="w"> </span><span class="p">=&gt;</span><span class="w"> </span><span class="nx">unsubMenu</span><span class="p">();</span>
+<a id="__codelineno-30-48" name="__codelineno-30-48" href="#__codelineno-30-48"></a><span class="p">},</span><span class="w"> </span><span class="p">[]);</span>
 </code></pre></div>
 <p>Rules:
 - <strong>One owner (main window)</strong>: Within the main window, only <code>App</code> (via its hooks) directly registers push subscriptions. Child components receive state/refresh tokens as props. Module popup windows are independent roots and manage their own subscriptions.
@@ -6177,173 +6206,173 @@
 <hr />
 <h2 id="12-file-and-module-structure">12. File and Module Structure<a class="headerlink" href="#12-file-and-module-structure" title="Permanent link">&para;</a></h2>
 <h3 id="121-electron-typescript">12.1 Electron (TypeScript)<a class="headerlink" href="#121-electron-typescript" title="Permanent link">&para;</a></h3>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-30-1" name="__codelineno-30-1" href="#__codelineno-30-1"></a>electron/
-<a id="__codelineno-30-2" name="__codelineno-30-2" href="#__codelineno-30-2"></a>    package.json
-<a id="__codelineno-30-3" name="__codelineno-30-3" href="#__codelineno-30-3"></a>    tsconfig.json
-<a id="__codelineno-30-4" name="__codelineno-30-4" href="#__codelineno-30-4"></a>    preload.ts                  ← window.pdv API bridge
-<a id="__codelineno-30-5" name="__codelineno-30-5" href="#__codelineno-30-5"></a>    main/
-<a id="__codelineno-30-6" name="__codelineno-30-6" href="#__codelineno-30-6"></a>        bootstrap.ts            ← Electron app entry point and singleton guard
-<a id="__codelineno-30-7" name="__codelineno-30-7" href="#__codelineno-30-7"></a>        index.ts                ← IPC handler registration hub, push forwarding
-<a id="__codelineno-30-8" name="__codelineno-30-8" href="#__codelineno-30-8"></a>        ipc.ts                  ← ALL IPC channel names and TypeScript types
-<a id="__codelineno-30-9" name="__codelineno-30-9" href="#__codelineno-30-9"></a>        pdv-protocol.ts         ← PDV comm protocol envelope types, message type constants, version checks
-<a id="__codelineno-30-10" name="__codelineno-30-10" href="#__codelineno-30-10"></a>        kernel-manager.ts       ← Kernel process lifecycle, ZeroMQ socket management
-<a id="__codelineno-30-11" name="__codelineno-30-11" href="#__codelineno-30-11"></a>        kernel-session.ts       ← Kernel bootstrap/init handshake helpers (pdv.ready → pdv.init)
-<a id="__codelineno-30-12" name="__codelineno-30-12" href="#__codelineno-30-12"></a>        kernel-error-parser.ts  ← Traceback/error parsing for execution errors
-<a id="__codelineno-30-13" name="__codelineno-30-13" href="#__codelineno-30-13"></a>        comm-router.ts          ← PDV comm message routing (write ops + push notifications)
-<a id="__codelineno-30-14" name="__codelineno-30-14" href="#__codelineno-30-14"></a>        query-router.ts         ← Read-only query routing via dedicated ZMQ socket
-<a id="__codelineno-30-15" name="__codelineno-30-15" href="#__codelineno-30-15"></a>        config.ts               ← App config persistence (~/.PDV/preferences.json)
-<a id="__codelineno-30-16" name="__codelineno-30-16" href="#__codelineno-30-16"></a>        app.ts                  ← Electron app lifecycle (BrowserWindow, menus)
-<a id="__codelineno-30-17" name="__codelineno-30-17" href="#__codelineno-30-17"></a>        menu.ts                 ← Native app menu construction and action forwarding to renderer
-<a id="__codelineno-30-18" name="__codelineno-30-18" href="#__codelineno-30-18"></a>        editor-spawn.ts         ← External editor command expansion and terminal adapter
-<a id="__codelineno-30-19" name="__codelineno-30-19" href="#__codelineno-30-19"></a>        environment-detector.ts ← Python/Julia environment detection
-<a id="__codelineno-30-20" name="__codelineno-30-20" href="#__codelineno-30-20"></a>        project-manager.ts      ← Project manifest read/write, save coordination
-<a id="__codelineno-30-21" name="__codelineno-30-21" href="#__codelineno-30-21"></a>        project-file-sync.ts    ← Tree file synchronization between working/save dirs
-<a id="__codelineno-30-22" name="__codelineno-30-22" href="#__codelineno-30-22"></a>        module-manager.ts       ← Module import/installation pipeline
-<a id="__codelineno-30-23" name="__codelineno-30-23" href="#__codelineno-30-23"></a>        module-runtime.ts       ← Module bind/setup helpers: lib file copy, sys.path setup, script registration
-<a id="__codelineno-30-24" name="__codelineno-30-24" href="#__codelineno-30-24"></a>        base-window-manager.ts    ← Generic per-key BrowserWindow lifecycle base class shared by the three popup managers
-<a id="__codelineno-30-25" name="__codelineno-30-25" href="#__codelineno-30-25"></a>        module-window-manager.ts  ← Module GUI popup BrowserWindow (subclass of BaseWindowManager)
-<a id="__codelineno-30-26" name="__codelineno-30-26" href="#__codelineno-30-26"></a>        gui-editor-window-manager.ts  ← GUI editor popup BrowserWindow (subclass of BaseWindowManager)
-<a id="__codelineno-30-27" name="__codelineno-30-27" href="#__codelineno-30-27"></a>        gui-viewer-window-manager.ts  ← Standalone GUI viewer BrowserWindow (subclass of BaseWindowManager)
-<a id="__codelineno-30-28" name="__codelineno-30-28" href="#__codelineno-30-28"></a>        ipc-register-kernels.ts           ← IPC handlers: kernel lifecycle + execution
-<a id="__codelineno-30-29" name="__codelineno-30-29" href="#__codelineno-30-29"></a>        ipc-register-project.ts           ← IPC handlers: project save/load/new
-<a id="__codelineno-30-30" name="__codelineno-30-30" href="#__codelineno-30-30"></a>        ipc-register-modules.ts           ← IPC handlers: module import/install
-<a id="__codelineno-30-31" name="__codelineno-30-31" href="#__codelineno-30-31"></a>        ipc-register-module-windows.ts    ← IPC handlers: module GUI window open/close/context
-<a id="__codelineno-30-32" name="__codelineno-30-32" href="#__codelineno-30-32"></a>        ipc-register-gui-editor.ts        ← IPC handlers: GUI editor/viewer window open/context/read/save
-<a id="__codelineno-30-33" name="__codelineno-30-33" href="#__codelineno-30-33"></a>        ipc-register-tree-namespace-script.ts ← IPC handlers: tree, namespace, script
-<a id="__codelineno-30-34" name="__codelineno-30-34" href="#__codelineno-30-34"></a>        ipc-register-app-state.ts         ← IPC handlers: config, themes, code cells, files, about
-<a id="__codelineno-30-35" name="__codelineno-30-35" href="#__codelineno-30-35"></a>        modules/
-<a id="__codelineno-30-36" name="__codelineno-30-36" href="#__codelineno-30-36"></a>            manifest-utils.ts   ← Module manifest validation (v1/v2/v3), GUI manifest validation
-<a id="__codelineno-30-37" name="__codelineno-30-37" href="#__codelineno-30-37"></a>    renderer/
-<a id="__codelineno-30-38" name="__codelineno-30-38" href="#__codelineno-30-38"></a>        src/
-<a id="__codelineno-30-39" name="__codelineno-30-39" href="#__codelineno-30-39"></a>            main.tsx                    ← Main window renderer entry point
-<a id="__codelineno-30-40" name="__codelineno-30-40" href="#__codelineno-30-40"></a>            module-window-main.tsx      ← Module popup window renderer entry point
-<a id="__codelineno-30-41" name="__codelineno-30-41" href="#__codelineno-30-41"></a>            vite-env.d.ts               ← Vite type declarations
-<a id="__codelineno-30-42" name="__codelineno-30-42" href="#__codelineno-30-42"></a>            app/
-<a id="__codelineno-30-43" name="__codelineno-30-43" href="#__codelineno-30-43"></a>                index.tsx               ← Root App component (state orchestration, 7 hooks)
-<a id="__codelineno-30-44" name="__codelineno-30-44" href="#__codelineno-30-44"></a>                HOOKS.md                ← Hook composition documentation
-<a id="__codelineno-30-45" name="__codelineno-30-45" href="#__codelineno-30-45"></a>                app-utils.ts            ← Shared App-level utility functions
-<a id="__codelineno-30-46" name="__codelineno-30-46" href="#__codelineno-30-46"></a>                constants.ts            ← App-level constants
-<a id="__codelineno-30-47" name="__codelineno-30-47" href="#__codelineno-30-47"></a>                useLayoutState.ts       ← Sidebar/pane geometry (localStorage)
-<a id="__codelineno-30-48" name="__codelineno-30-48" href="#__codelineno-30-48"></a>                useThemeManager.ts      ← Theme colors, Monaco theme, font settings
-<a id="__codelineno-30-49" name="__codelineno-30-49" href="#__codelineno-30-49"></a>                useCodeCellsPersistence.ts ← Load/save code tabs to ~/.PDV/state/
-<a id="__codelineno-30-50" name="__codelineno-30-50" href="#__codelineno-30-50"></a>                useKernelSubscriptions.ts  ← Push subscription lifecycle
-<a id="__codelineno-30-51" name="__codelineno-30-51" href="#__codelineno-30-51"></a>                useKernelLifecycle.ts    ← Kernel start/restart/env-save callbacks
-<a id="__codelineno-30-52" name="__codelineno-30-52" href="#__codelineno-30-52"></a>                useKeyboardShortcuts.ts ← Global keyboard shortcut listener
-<a id="__codelineno-30-53" name="__codelineno-30-53" href="#__codelineno-30-53"></a>                useProjectWorkflow.ts   ← Project save/load/new + unsaved dialog
-<a id="__codelineno-30-54" name="__codelineno-30-54" href="#__codelineno-30-54"></a>            components/
-<a id="__codelineno-30-55" name="__codelineno-30-55" href="#__codelineno-30-55"></a>                Icons.tsx               ← Shared SVG icon components
-<a id="__codelineno-30-56" name="__codelineno-30-56" href="#__codelineno-30-56"></a>                CodeCell/
-<a id="__codelineno-30-57" name="__codelineno-30-57" href="#__codelineno-30-57"></a>                    index.tsx           ← Tabbed Monaco editor surface
-<a id="__codelineno-30-58" name="__codelineno-30-58" href="#__codelineno-30-58"></a>                    monaco-providers.ts ← Completion + hover provider logic
-<a id="__codelineno-30-59" name="__codelineno-30-59" href="#__codelineno-30-59"></a>                WriteTab/
-<a id="__codelineno-30-60" name="__codelineno-30-60" href="#__codelineno-30-60"></a>                    index.tsx           ← Tabbed markdown editor (Edit/Read mode toggle)
-<a id="__codelineno-30-61" name="__codelineno-30-61" href="#__codelineno-30-61"></a>                    ReadView.tsx        ← Full rendered markdown view (marked + KaTeX)
-<a id="__codelineno-30-62" name="__codelineno-30-62" href="#__codelineno-30-62"></a>                    math-preview.ts     ← Inline KaTeX math preview in Monaco editor
-<a id="__codelineno-30-63" name="__codelineno-30-63" href="#__codelineno-30-63"></a>                Console/                ← Streamed output and result rendering
-<a id="__codelineno-30-64" name="__codelineno-30-64" href="#__codelineno-30-64"></a>                Tree/                   ← Tree browser + context menu actions
-<a id="__codelineno-30-65" name="__codelineno-30-65" href="#__codelineno-30-65"></a>                TitleBar/               ← Custom title bar (drag region, menus, window controls)
-<a id="__codelineno-30-66" name="__codelineno-30-66" href="#__codelineno-30-66"></a>                NamespaceView/          ← Namespace table and filtering
-<a id="__codelineno-30-67" name="__codelineno-30-67" href="#__codelineno-30-67"></a>                SettingsDialog/
-<a id="__codelineno-30-68" name="__codelineno-30-68" href="#__codelineno-30-68"></a>                    index.tsx           ← Settings modal shell + General/Shortcuts/Runtime/About tabs
-<a id="__codelineno-30-69" name="__codelineno-30-69" href="#__codelineno-30-69"></a>                    AppearanceTab.tsx   ← Appearance tab (themes, fonts, colors)
-<a id="__codelineno-30-70" name="__codelineno-30-70" href="#__codelineno-30-70"></a>                    ShortcutCapture.tsx ← Reusable shortcut key-capture widget
-<a id="__codelineno-30-71" name="__codelineno-30-71" href="#__codelineno-30-71"></a>                ScriptDialog/           ← Script execution dialog with parameter form
-<a id="__codelineno-30-72" name="__codelineno-30-72" href="#__codelineno-30-72"></a>                WelcomeScreen/          ← Welcome overlay shown on launch (no kernel running)
-<a id="__codelineno-30-73" name="__codelineno-30-73" href="#__codelineno-30-73"></a>                EnvironmentSelector/    ← Python environment selection dialog
-<a id="__codelineno-30-74" name="__codelineno-30-74" href="#__codelineno-30-74"></a>                ActivityBar/            ← Sidebar activity bar with panel selection
-<a id="__codelineno-30-75" name="__codelineno-30-75" href="#__codelineno-30-75"></a>                StatusBar/              ← Status bar with kernel and project info
-<a id="__codelineno-30-76" name="__codelineno-30-76" href="#__codelineno-30-76"></a>                ImportModuleDialog/     ← File &gt; Import Module... modal dialog
-<a id="__codelineno-30-77" name="__codelineno-30-77" href="#__codelineno-30-77"></a>                ModulesPanel/           ← Module actions and inputs panels (used inside module GUI)
-<a id="__codelineno-30-78" name="__codelineno-30-78" href="#__codelineno-30-78"></a>                ModuleGui/              ← Module GUI rendering: ContainerRenderer, InputControl, ActionButton, NamelistEditor
-<a id="__codelineno-30-79" name="__codelineno-30-79" href="#__codelineno-30-79"></a>            module-window/              ← Separate renderer entry for module GUI popup windows
-<a id="__codelineno-30-80" name="__codelineno-30-80" href="#__codelineno-30-80"></a>            gui-editor/                 ← GUI editor: drag-and-drop layout canvas, property editor, live preview
-<a id="__codelineno-30-81" name="__codelineno-30-81" href="#__codelineno-30-81"></a>            gui-viewer/                 ← Standalone GUI viewer for project GUIs (non-module)
-<a id="__codelineno-30-82" name="__codelineno-30-82" href="#__codelineno-30-82"></a>            styles/                     ← CSS stylesheets (base, layout, tabs, tree, editor, etc.)
-<a id="__codelineno-30-83" name="__codelineno-30-83" href="#__codelineno-30-83"></a>            themes.ts                   ← Builtin themes, Monaco theme definitions, font helpers
-<a id="__codelineno-30-84" name="__codelineno-30-84" href="#__codelineno-30-84"></a>            shortcuts.ts                ← Canonical shortcut registry and matcher
-<a id="__codelineno-30-85" name="__codelineno-30-85" href="#__codelineno-30-85"></a>            services/tree.ts            ← Renderer tree fetch/cache adapter
-<a id="__codelineno-30-86" name="__codelineno-30-86" href="#__codelineno-30-86"></a>            types/                      ← Renderer view-model + preload API types
-<a id="__codelineno-30-87" name="__codelineno-30-87" href="#__codelineno-30-87"></a>examples/
-<a id="__codelineno-30-88" name="__codelineno-30-88" href="#__codelineno-30-88"></a>    modules/
-<a id="__codelineno-30-89" name="__codelineno-30-89" href="#__codelineno-30-89"></a>        N-pendulum/                     ← Bundled Python example module
-<a id="__codelineno-30-90" name="__codelineno-30-90" href="#__codelineno-30-90"></a>        N-pendulum-julia/               ← Bundled Julia example module
+<div class="highlight"><pre><span></span><code><a id="__codelineno-31-1" name="__codelineno-31-1" href="#__codelineno-31-1"></a>electron/
+<a id="__codelineno-31-2" name="__codelineno-31-2" href="#__codelineno-31-2"></a>    package.json
+<a id="__codelineno-31-3" name="__codelineno-31-3" href="#__codelineno-31-3"></a>    tsconfig.json
+<a id="__codelineno-31-4" name="__codelineno-31-4" href="#__codelineno-31-4"></a>    preload.ts                  ← window.pdv API bridge
+<a id="__codelineno-31-5" name="__codelineno-31-5" href="#__codelineno-31-5"></a>    main/
+<a id="__codelineno-31-6" name="__codelineno-31-6" href="#__codelineno-31-6"></a>        bootstrap.ts            ← Electron app entry point and singleton guard
+<a id="__codelineno-31-7" name="__codelineno-31-7" href="#__codelineno-31-7"></a>        index.ts                ← IPC handler registration hub, push forwarding
+<a id="__codelineno-31-8" name="__codelineno-31-8" href="#__codelineno-31-8"></a>        ipc.ts                  ← ALL IPC channel names and TypeScript types
+<a id="__codelineno-31-9" name="__codelineno-31-9" href="#__codelineno-31-9"></a>        pdv-protocol.ts         ← PDV comm protocol envelope types, message type constants, version checks
+<a id="__codelineno-31-10" name="__codelineno-31-10" href="#__codelineno-31-10"></a>        kernel-manager.ts       ← Kernel process lifecycle, ZeroMQ socket management
+<a id="__codelineno-31-11" name="__codelineno-31-11" href="#__codelineno-31-11"></a>        kernel-session.ts       ← Kernel bootstrap/init handshake helpers (pdv.ready → pdv.init)
+<a id="__codelineno-31-12" name="__codelineno-31-12" href="#__codelineno-31-12"></a>        kernel-error-parser.ts  ← Traceback/error parsing for execution errors
+<a id="__codelineno-31-13" name="__codelineno-31-13" href="#__codelineno-31-13"></a>        comm-router.ts          ← PDV comm message routing (write ops + push notifications)
+<a id="__codelineno-31-14" name="__codelineno-31-14" href="#__codelineno-31-14"></a>        query-router.ts         ← Read-only query routing via dedicated ZMQ socket
+<a id="__codelineno-31-15" name="__codelineno-31-15" href="#__codelineno-31-15"></a>        config.ts               ← App config persistence (~/.PDV/preferences.json)
+<a id="__codelineno-31-16" name="__codelineno-31-16" href="#__codelineno-31-16"></a>        app.ts                  ← Electron app lifecycle (BrowserWindow, menus)
+<a id="__codelineno-31-17" name="__codelineno-31-17" href="#__codelineno-31-17"></a>        menu.ts                 ← Native app menu construction and action forwarding to renderer
+<a id="__codelineno-31-18" name="__codelineno-31-18" href="#__codelineno-31-18"></a>        editor-spawn.ts         ← External editor command expansion and terminal adapter
+<a id="__codelineno-31-19" name="__codelineno-31-19" href="#__codelineno-31-19"></a>        environment-detector.ts ← Python/Julia environment detection
+<a id="__codelineno-31-20" name="__codelineno-31-20" href="#__codelineno-31-20"></a>        project-manager.ts      ← Project manifest read/write, save coordination
+<a id="__codelineno-31-21" name="__codelineno-31-21" href="#__codelineno-31-21"></a>        project-file-sync.ts    ← Tree file synchronization between working/save dirs
+<a id="__codelineno-31-22" name="__codelineno-31-22" href="#__codelineno-31-22"></a>        module-manager.ts       ← Module import/installation pipeline
+<a id="__codelineno-31-23" name="__codelineno-31-23" href="#__codelineno-31-23"></a>        module-runtime.ts       ← Module bind/setup helpers: lib file copy, sys.path setup, script registration
+<a id="__codelineno-31-24" name="__codelineno-31-24" href="#__codelineno-31-24"></a>        base-window-manager.ts    ← Generic per-key BrowserWindow lifecycle base class shared by the three popup managers
+<a id="__codelineno-31-25" name="__codelineno-31-25" href="#__codelineno-31-25"></a>        module-window-manager.ts  ← Module GUI popup BrowserWindow (subclass of BaseWindowManager)
+<a id="__codelineno-31-26" name="__codelineno-31-26" href="#__codelineno-31-26"></a>        gui-editor-window-manager.ts  ← GUI editor popup BrowserWindow (subclass of BaseWindowManager)
+<a id="__codelineno-31-27" name="__codelineno-31-27" href="#__codelineno-31-27"></a>        gui-viewer-window-manager.ts  ← Standalone GUI viewer BrowserWindow (subclass of BaseWindowManager)
+<a id="__codelineno-31-28" name="__codelineno-31-28" href="#__codelineno-31-28"></a>        ipc-register-kernels.ts           ← IPC handlers: kernel lifecycle + execution
+<a id="__codelineno-31-29" name="__codelineno-31-29" href="#__codelineno-31-29"></a>        ipc-register-project.ts           ← IPC handlers: project save/load/new
+<a id="__codelineno-31-30" name="__codelineno-31-30" href="#__codelineno-31-30"></a>        ipc-register-modules.ts           ← IPC handlers: module import/install
+<a id="__codelineno-31-31" name="__codelineno-31-31" href="#__codelineno-31-31"></a>        ipc-register-module-windows.ts    ← IPC handlers: module GUI window open/close/context
+<a id="__codelineno-31-32" name="__codelineno-31-32" href="#__codelineno-31-32"></a>        ipc-register-gui-editor.ts        ← IPC handlers: GUI editor/viewer window open/context/read/save
+<a id="__codelineno-31-33" name="__codelineno-31-33" href="#__codelineno-31-33"></a>        ipc-register-tree-namespace-script.ts ← IPC handlers: tree, namespace, script
+<a id="__codelineno-31-34" name="__codelineno-31-34" href="#__codelineno-31-34"></a>        ipc-register-app-state.ts         ← IPC handlers: config, themes, code cells, files, about
+<a id="__codelineno-31-35" name="__codelineno-31-35" href="#__codelineno-31-35"></a>        modules/
+<a id="__codelineno-31-36" name="__codelineno-31-36" href="#__codelineno-31-36"></a>            manifest-utils.ts   ← Module manifest validation (v1/v2/v3), GUI manifest validation
+<a id="__codelineno-31-37" name="__codelineno-31-37" href="#__codelineno-31-37"></a>    renderer/
+<a id="__codelineno-31-38" name="__codelineno-31-38" href="#__codelineno-31-38"></a>        src/
+<a id="__codelineno-31-39" name="__codelineno-31-39" href="#__codelineno-31-39"></a>            main.tsx                    ← Main window renderer entry point
+<a id="__codelineno-31-40" name="__codelineno-31-40" href="#__codelineno-31-40"></a>            module-window-main.tsx      ← Module popup window renderer entry point
+<a id="__codelineno-31-41" name="__codelineno-31-41" href="#__codelineno-31-41"></a>            vite-env.d.ts               ← Vite type declarations
+<a id="__codelineno-31-42" name="__codelineno-31-42" href="#__codelineno-31-42"></a>            app/
+<a id="__codelineno-31-43" name="__codelineno-31-43" href="#__codelineno-31-43"></a>                index.tsx               ← Root App component (state orchestration, 7 hooks)
+<a id="__codelineno-31-44" name="__codelineno-31-44" href="#__codelineno-31-44"></a>                HOOKS.md                ← Hook composition documentation
+<a id="__codelineno-31-45" name="__codelineno-31-45" href="#__codelineno-31-45"></a>                app-utils.ts            ← Shared App-level utility functions
+<a id="__codelineno-31-46" name="__codelineno-31-46" href="#__codelineno-31-46"></a>                constants.ts            ← App-level constants
+<a id="__codelineno-31-47" name="__codelineno-31-47" href="#__codelineno-31-47"></a>                useLayoutState.ts       ← Sidebar/pane geometry (localStorage)
+<a id="__codelineno-31-48" name="__codelineno-31-48" href="#__codelineno-31-48"></a>                useThemeManager.ts      ← Theme colors, Monaco theme, font settings
+<a id="__codelineno-31-49" name="__codelineno-31-49" href="#__codelineno-31-49"></a>                useCodeCellsPersistence.ts ← Load/save code tabs to ~/.PDV/state/
+<a id="__codelineno-31-50" name="__codelineno-31-50" href="#__codelineno-31-50"></a>                useKernelSubscriptions.ts  ← Push subscription lifecycle
+<a id="__codelineno-31-51" name="__codelineno-31-51" href="#__codelineno-31-51"></a>                useKernelLifecycle.ts    ← Kernel start/restart/env-save callbacks
+<a id="__codelineno-31-52" name="__codelineno-31-52" href="#__codelineno-31-52"></a>                useKeyboardShortcuts.ts ← Global keyboard shortcut listener
+<a id="__codelineno-31-53" name="__codelineno-31-53" href="#__codelineno-31-53"></a>                useProjectWorkflow.ts   ← Project save/load/new + unsaved dialog
+<a id="__codelineno-31-54" name="__codelineno-31-54" href="#__codelineno-31-54"></a>            components/
+<a id="__codelineno-31-55" name="__codelineno-31-55" href="#__codelineno-31-55"></a>                Icons.tsx               ← Shared SVG icon components
+<a id="__codelineno-31-56" name="__codelineno-31-56" href="#__codelineno-31-56"></a>                CodeCell/
+<a id="__codelineno-31-57" name="__codelineno-31-57" href="#__codelineno-31-57"></a>                    index.tsx           ← Tabbed Monaco editor surface
+<a id="__codelineno-31-58" name="__codelineno-31-58" href="#__codelineno-31-58"></a>                    monaco-providers.ts ← Completion + hover provider logic
+<a id="__codelineno-31-59" name="__codelineno-31-59" href="#__codelineno-31-59"></a>                WriteTab/
+<a id="__codelineno-31-60" name="__codelineno-31-60" href="#__codelineno-31-60"></a>                    index.tsx           ← Tabbed markdown editor (Edit/Read mode toggle)
+<a id="__codelineno-31-61" name="__codelineno-31-61" href="#__codelineno-31-61"></a>                    ReadView.tsx        ← Full rendered markdown view (marked + KaTeX)
+<a id="__codelineno-31-62" name="__codelineno-31-62" href="#__codelineno-31-62"></a>                    math-preview.ts     ← Inline KaTeX math preview in Monaco editor
+<a id="__codelineno-31-63" name="__codelineno-31-63" href="#__codelineno-31-63"></a>                Console/                ← Streamed output and result rendering
+<a id="__codelineno-31-64" name="__codelineno-31-64" href="#__codelineno-31-64"></a>                Tree/                   ← Tree browser + context menu actions
+<a id="__codelineno-31-65" name="__codelineno-31-65" href="#__codelineno-31-65"></a>                TitleBar/               ← Custom title bar (drag region, menus, window controls)
+<a id="__codelineno-31-66" name="__codelineno-31-66" href="#__codelineno-31-66"></a>                NamespaceView/          ← Namespace table and filtering
+<a id="__codelineno-31-67" name="__codelineno-31-67" href="#__codelineno-31-67"></a>                SettingsDialog/
+<a id="__codelineno-31-68" name="__codelineno-31-68" href="#__codelineno-31-68"></a>                    index.tsx           ← Settings modal shell + General/Shortcuts/Runtime/About tabs
+<a id="__codelineno-31-69" name="__codelineno-31-69" href="#__codelineno-31-69"></a>                    AppearanceTab.tsx   ← Appearance tab (themes, fonts, colors)
+<a id="__codelineno-31-70" name="__codelineno-31-70" href="#__codelineno-31-70"></a>                    ShortcutCapture.tsx ← Reusable shortcut key-capture widget
+<a id="__codelineno-31-71" name="__codelineno-31-71" href="#__codelineno-31-71"></a>                ScriptDialog/           ← Script execution dialog with parameter form
+<a id="__codelineno-31-72" name="__codelineno-31-72" href="#__codelineno-31-72"></a>                WelcomeScreen/          ← Welcome overlay shown on launch (no kernel running)
+<a id="__codelineno-31-73" name="__codelineno-31-73" href="#__codelineno-31-73"></a>                EnvironmentSelector/    ← Python environment selection dialog
+<a id="__codelineno-31-74" name="__codelineno-31-74" href="#__codelineno-31-74"></a>                ActivityBar/            ← Sidebar activity bar with panel selection
+<a id="__codelineno-31-75" name="__codelineno-31-75" href="#__codelineno-31-75"></a>                StatusBar/              ← Status bar with kernel and project info
+<a id="__codelineno-31-76" name="__codelineno-31-76" href="#__codelineno-31-76"></a>                ImportModuleDialog/     ← File &gt; Import Module... modal dialog
+<a id="__codelineno-31-77" name="__codelineno-31-77" href="#__codelineno-31-77"></a>                ModulesPanel/           ← Module actions and inputs panels (used inside module GUI)
+<a id="__codelineno-31-78" name="__codelineno-31-78" href="#__codelineno-31-78"></a>                ModuleGui/              ← Module GUI rendering: ContainerRenderer, InputControl, ActionButton, NamelistEditor
+<a id="__codelineno-31-79" name="__codelineno-31-79" href="#__codelineno-31-79"></a>            module-window/              ← Separate renderer entry for module GUI popup windows
+<a id="__codelineno-31-80" name="__codelineno-31-80" href="#__codelineno-31-80"></a>            gui-editor/                 ← GUI editor: drag-and-drop layout canvas, property editor, live preview
+<a id="__codelineno-31-81" name="__codelineno-31-81" href="#__codelineno-31-81"></a>            gui-viewer/                 ← Standalone GUI viewer for project GUIs (non-module)
+<a id="__codelineno-31-82" name="__codelineno-31-82" href="#__codelineno-31-82"></a>            styles/                     ← CSS stylesheets (base, layout, tabs, tree, editor, etc.)
+<a id="__codelineno-31-83" name="__codelineno-31-83" href="#__codelineno-31-83"></a>            themes.ts                   ← Builtin themes, Monaco theme definitions, font helpers
+<a id="__codelineno-31-84" name="__codelineno-31-84" href="#__codelineno-31-84"></a>            shortcuts.ts                ← Canonical shortcut registry and matcher
+<a id="__codelineno-31-85" name="__codelineno-31-85" href="#__codelineno-31-85"></a>            services/tree.ts            ← Renderer tree fetch/cache adapter
+<a id="__codelineno-31-86" name="__codelineno-31-86" href="#__codelineno-31-86"></a>            types/                      ← Renderer view-model + preload API types
+<a id="__codelineno-31-87" name="__codelineno-31-87" href="#__codelineno-31-87"></a>examples/
+<a id="__codelineno-31-88" name="__codelineno-31-88" href="#__codelineno-31-88"></a>    modules/
+<a id="__codelineno-31-89" name="__codelineno-31-89" href="#__codelineno-31-89"></a>        N-pendulum/                     ← Bundled Python example module
+<a id="__codelineno-31-90" name="__codelineno-31-90" href="#__codelineno-31-90"></a>        N-pendulum-julia/               ← Bundled Julia example module
 </code></pre></div>
 <h3 id="122-python-package-separate-repository-or-subdirectory">12.2 Python Package (separate repository or subdirectory)<a class="headerlink" href="#122-python-package-separate-repository-or-subdirectory" title="Permanent link">&para;</a></h3>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-31-1" name="__codelineno-31-1" href="#__codelineno-31-1"></a>pdv-python/
-<a id="__codelineno-31-2" name="__codelineno-31-2" href="#__codelineno-31-2"></a>    pyproject.toml
-<a id="__codelineno-31-3" name="__codelineno-31-3" href="#__codelineno-31-3"></a>    pdv/
-<a id="__codelineno-31-4" name="__codelineno-31-4" href="#__codelineno-31-4"></a>        __init__.py
-<a id="__codelineno-31-5" name="__codelineno-31-5" href="#__codelineno-31-5"></a>        comms.py
-<a id="__codelineno-31-6" name="__codelineno-31-6" href="#__codelineno-31-6"></a>        tree.py
-<a id="__codelineno-31-7" name="__codelineno-31-7" href="#__codelineno-31-7"></a>        query_server.py
-<a id="__codelineno-31-8" name="__codelineno-31-8" href="#__codelineno-31-8"></a>        namespace.py
-<a id="__codelineno-31-9" name="__codelineno-31-9" href="#__codelineno-31-9"></a>        serialization.py
-<a id="__codelineno-31-10" name="__codelineno-31-10" href="#__codelineno-31-10"></a>        environment.py
-<a id="__codelineno-31-11" name="__codelineno-31-11" href="#__codelineno-31-11"></a>        errors.py
-<a id="__codelineno-31-12" name="__codelineno-31-12" href="#__codelineno-31-12"></a>        modules.py
-<a id="__codelineno-31-13" name="__codelineno-31-13" href="#__codelineno-31-13"></a>        namelist_utils.py
-<a id="__codelineno-31-14" name="__codelineno-31-14" href="#__codelineno-31-14"></a>        checksum.py
-<a id="__codelineno-31-15" name="__codelineno-31-15" href="#__codelineno-31-15"></a>        handlers/
-<a id="__codelineno-31-16" name="__codelineno-31-16" href="#__codelineno-31-16"></a>            __init__.py
-<a id="__codelineno-31-17" name="__codelineno-31-17" href="#__codelineno-31-17"></a>            lifecycle.py
-<a id="__codelineno-31-18" name="__codelineno-31-18" href="#__codelineno-31-18"></a>            project.py
-<a id="__codelineno-31-19" name="__codelineno-31-19" href="#__codelineno-31-19"></a>            tree.py
-<a id="__codelineno-31-20" name="__codelineno-31-20" href="#__codelineno-31-20"></a>            namespace.py
-<a id="__codelineno-31-21" name="__codelineno-31-21" href="#__codelineno-31-21"></a>            script.py
-<a id="__codelineno-31-22" name="__codelineno-31-22" href="#__codelineno-31-22"></a>            note.py
-<a id="__codelineno-31-23" name="__codelineno-31-23" href="#__codelineno-31-23"></a>            modules.py
-<a id="__codelineno-31-24" name="__codelineno-31-24" href="#__codelineno-31-24"></a>            gui.py
-<a id="__codelineno-31-25" name="__codelineno-31-25" href="#__codelineno-31-25"></a>            namelist.py
-<a id="__codelineno-31-26" name="__codelineno-31-26" href="#__codelineno-31-26"></a>    tests/
-<a id="__codelineno-31-27" name="__codelineno-31-27" href="#__codelineno-31-27"></a>        conftest.py
-<a id="__codelineno-31-28" name="__codelineno-31-28" href="#__codelineno-31-28"></a>        test_tree.py
-<a id="__codelineno-31-29" name="__codelineno-31-29" href="#__codelineno-31-29"></a>        test_serialization.py
-<a id="__codelineno-31-30" name="__codelineno-31-30" href="#__codelineno-31-30"></a>        test_serialization_errors.py
-<a id="__codelineno-31-31" name="__codelineno-31-31" href="#__codelineno-31-31"></a>        test_checksum.py
-<a id="__codelineno-31-32" name="__codelineno-31-32" href="#__codelineno-31-32"></a>        test_comms.py
-<a id="__codelineno-31-33" name="__codelineno-31-33" href="#__codelineno-31-33"></a>        test_namespace.py
-<a id="__codelineno-31-34" name="__codelineno-31-34" href="#__codelineno-31-34"></a>        test_environment.py
-<a id="__codelineno-31-35" name="__codelineno-31-35" href="#__codelineno-31-35"></a>        test_note.py
-<a id="__codelineno-31-36" name="__codelineno-31-36" href="#__codelineno-31-36"></a>        test_namelist.py
-<a id="__codelineno-31-37" name="__codelineno-31-37" href="#__codelineno-31-37"></a>        test_modules.py
-<a id="__codelineno-31-38" name="__codelineno-31-38" href="#__codelineno-31-38"></a>        test_handlers_lifecycle.py
-<a id="__codelineno-31-39" name="__codelineno-31-39" href="#__codelineno-31-39"></a>        test_handlers_tree.py
-<a id="__codelineno-31-40" name="__codelineno-31-40" href="#__codelineno-31-40"></a>        test_handlers_namespace.py
-<a id="__codelineno-31-41" name="__codelineno-31-41" href="#__codelineno-31-41"></a>        test_handlers_script.py
-<a id="__codelineno-31-42" name="__codelineno-31-42" href="#__codelineno-31-42"></a>        test_handlers_project.py
-<a id="__codelineno-31-43" name="__codelineno-31-43" href="#__codelineno-31-43"></a>        test_handlers_modules.py
-<a id="__codelineno-31-44" name="__codelineno-31-44" href="#__codelineno-31-44"></a>        test_integration_bootstrap.py
-<a id="__codelineno-31-45" name="__codelineno-31-45" href="#__codelineno-31-45"></a>        test_integration_dispatch.py
+<div class="highlight"><pre><span></span><code><a id="__codelineno-32-1" name="__codelineno-32-1" href="#__codelineno-32-1"></a>pdv-python/
+<a id="__codelineno-32-2" name="__codelineno-32-2" href="#__codelineno-32-2"></a>    pyproject.toml
+<a id="__codelineno-32-3" name="__codelineno-32-3" href="#__codelineno-32-3"></a>    pdv/
+<a id="__codelineno-32-4" name="__codelineno-32-4" href="#__codelineno-32-4"></a>        __init__.py
+<a id="__codelineno-32-5" name="__codelineno-32-5" href="#__codelineno-32-5"></a>        comms.py
+<a id="__codelineno-32-6" name="__codelineno-32-6" href="#__codelineno-32-6"></a>        tree.py
+<a id="__codelineno-32-7" name="__codelineno-32-7" href="#__codelineno-32-7"></a>        query_server.py
+<a id="__codelineno-32-8" name="__codelineno-32-8" href="#__codelineno-32-8"></a>        namespace.py
+<a id="__codelineno-32-9" name="__codelineno-32-9" href="#__codelineno-32-9"></a>        serialization.py
+<a id="__codelineno-32-10" name="__codelineno-32-10" href="#__codelineno-32-10"></a>        environment.py
+<a id="__codelineno-32-11" name="__codelineno-32-11" href="#__codelineno-32-11"></a>        errors.py
+<a id="__codelineno-32-12" name="__codelineno-32-12" href="#__codelineno-32-12"></a>        modules.py
+<a id="__codelineno-32-13" name="__codelineno-32-13" href="#__codelineno-32-13"></a>        namelist_utils.py
+<a id="__codelineno-32-14" name="__codelineno-32-14" href="#__codelineno-32-14"></a>        checksum.py
+<a id="__codelineno-32-15" name="__codelineno-32-15" href="#__codelineno-32-15"></a>        handlers/
+<a id="__codelineno-32-16" name="__codelineno-32-16" href="#__codelineno-32-16"></a>            __init__.py
+<a id="__codelineno-32-17" name="__codelineno-32-17" href="#__codelineno-32-17"></a>            lifecycle.py
+<a id="__codelineno-32-18" name="__codelineno-32-18" href="#__codelineno-32-18"></a>            project.py
+<a id="__codelineno-32-19" name="__codelineno-32-19" href="#__codelineno-32-19"></a>            tree.py
+<a id="__codelineno-32-20" name="__codelineno-32-20" href="#__codelineno-32-20"></a>            namespace.py
+<a id="__codelineno-32-21" name="__codelineno-32-21" href="#__codelineno-32-21"></a>            script.py
+<a id="__codelineno-32-22" name="__codelineno-32-22" href="#__codelineno-32-22"></a>            note.py
+<a id="__codelineno-32-23" name="__codelineno-32-23" href="#__codelineno-32-23"></a>            modules.py
+<a id="__codelineno-32-24" name="__codelineno-32-24" href="#__codelineno-32-24"></a>            gui.py
+<a id="__codelineno-32-25" name="__codelineno-32-25" href="#__codelineno-32-25"></a>            namelist.py
+<a id="__codelineno-32-26" name="__codelineno-32-26" href="#__codelineno-32-26"></a>    tests/
+<a id="__codelineno-32-27" name="__codelineno-32-27" href="#__codelineno-32-27"></a>        conftest.py
+<a id="__codelineno-32-28" name="__codelineno-32-28" href="#__codelineno-32-28"></a>        test_tree.py
+<a id="__codelineno-32-29" name="__codelineno-32-29" href="#__codelineno-32-29"></a>        test_serialization.py
+<a id="__codelineno-32-30" name="__codelineno-32-30" href="#__codelineno-32-30"></a>        test_serialization_errors.py
+<a id="__codelineno-32-31" name="__codelineno-32-31" href="#__codelineno-32-31"></a>        test_checksum.py
+<a id="__codelineno-32-32" name="__codelineno-32-32" href="#__codelineno-32-32"></a>        test_comms.py
+<a id="__codelineno-32-33" name="__codelineno-32-33" href="#__codelineno-32-33"></a>        test_namespace.py
+<a id="__codelineno-32-34" name="__codelineno-32-34" href="#__codelineno-32-34"></a>        test_environment.py
+<a id="__codelineno-32-35" name="__codelineno-32-35" href="#__codelineno-32-35"></a>        test_note.py
+<a id="__codelineno-32-36" name="__codelineno-32-36" href="#__codelineno-32-36"></a>        test_namelist.py
+<a id="__codelineno-32-37" name="__codelineno-32-37" href="#__codelineno-32-37"></a>        test_modules.py
+<a id="__codelineno-32-38" name="__codelineno-32-38" href="#__codelineno-32-38"></a>        test_handlers_lifecycle.py
+<a id="__codelineno-32-39" name="__codelineno-32-39" href="#__codelineno-32-39"></a>        test_handlers_tree.py
+<a id="__codelineno-32-40" name="__codelineno-32-40" href="#__codelineno-32-40"></a>        test_handlers_namespace.py
+<a id="__codelineno-32-41" name="__codelineno-32-41" href="#__codelineno-32-41"></a>        test_handlers_script.py
+<a id="__codelineno-32-42" name="__codelineno-32-42" href="#__codelineno-32-42"></a>        test_handlers_project.py
+<a id="__codelineno-32-43" name="__codelineno-32-43" href="#__codelineno-32-43"></a>        test_handlers_modules.py
+<a id="__codelineno-32-44" name="__codelineno-32-44" href="#__codelineno-32-44"></a>        test_integration_bootstrap.py
+<a id="__codelineno-32-45" name="__codelineno-32-45" href="#__codelineno-32-45"></a>        test_integration_dispatch.py
 </code></pre></div>
 <h3 id="123-tests">12.3 Tests<a class="headerlink" href="#123-tests" title="Permanent link">&para;</a></h3>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-32-1" name="__codelineno-32-1" href="#__codelineno-32-1"></a>tests/
-<a id="__codelineno-32-2" name="__codelineno-32-2" href="#__codelineno-32-2"></a>    python/               ← pytest tests for pdv-python (no kernel required)
-<a id="__codelineno-32-3" name="__codelineno-32-3" href="#__codelineno-32-3"></a>    typescript/           ← vitest tests for Electron main process modules
-<a id="__codelineno-32-4" name="__codelineno-32-4" href="#__codelineno-32-4"></a>    README.md
+<div class="highlight"><pre><span></span><code><a id="__codelineno-33-1" name="__codelineno-33-1" href="#__codelineno-33-1"></a>tests/
+<a id="__codelineno-33-2" name="__codelineno-33-2" href="#__codelineno-33-2"></a>    python/               ← pytest tests for pdv-python (no kernel required)
+<a id="__codelineno-33-3" name="__codelineno-33-3" href="#__codelineno-33-3"></a>    typescript/           ← vitest tests for Electron main process modules
+<a id="__codelineno-33-4" name="__codelineno-33-4" href="#__codelineno-33-4"></a>    README.md
 </code></pre></div>
 <hr />
 <h2 id="13-typescript-documentation-standard">13. TypeScript Documentation Standard<a class="headerlink" href="#13-typescript-documentation-standard" title="Permanent link">&para;</a></h2>
 <p>All TypeScript files in <code>electron/</code> must follow this documentation standard. This is mandatory for maintainability, particularly for contributors unfamiliar with TypeScript or Electron.</p>
 <h3 id="131-file-header">13.1 File Header<a class="headerlink" href="#131-file-header" title="Permanent link">&para;</a></h3>
 <p>Every <code>.ts</code> file begins with a JSDoc block describing the file's purpose, its place in the architecture, and what it does NOT do (to prevent scope creep).</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-33-1" name="__codelineno-33-1" href="#__codelineno-33-1"></a><span class="cm">/**</span>
-<a id="__codelineno-33-2" name="__codelineno-33-2" href="#__codelineno-33-2"></a><span class="cm"> * @file comm-router.ts</span>
-<a id="__codelineno-33-3" name="__codelineno-33-3" href="#__codelineno-33-3"></a><span class="cm"> * @description</span>
-<a id="__codelineno-33-4" name="__codelineno-33-4" href="#__codelineno-33-4"></a><span class="cm"> * Routes incoming PDV comm messages from the kernel to their appropriate handlers.</span>
-<a id="__codelineno-33-5" name="__codelineno-33-5" href="#__codelineno-33-5"></a><span class="cm"> *</span>
-<a id="__codelineno-33-6" name="__codelineno-33-6" href="#__codelineno-33-6"></a><span class="cm"> * This module is responsible for:</span>
-<a id="__codelineno-33-7" name="__codelineno-33-7" href="#__codelineno-33-7"></a><span class="cm"> * - Parsing comm_msg frames arriving on the iopub ZeroMQ socket</span>
-<a id="__codelineno-33-8" name="__codelineno-33-8" href="#__codelineno-33-8"></a><span class="cm"> * - Matching responses to pending requests by msg_id (in_reply_to)</span>
-<a id="__codelineno-33-9" name="__codelineno-33-9" href="#__codelineno-33-9"></a><span class="cm"> * - Forwarding push notifications (in_reply_to === null) to the renderer</span>
-<a id="__codelineno-33-10" name="__codelineno-33-10" href="#__codelineno-33-10"></a><span class="cm"> *</span>
-<a id="__codelineno-33-11" name="__codelineno-33-11" href="#__codelineno-33-11"></a><span class="cm"> * This module is NOT responsible for:</span>
-<a id="__codelineno-33-12" name="__codelineno-33-12" href="#__codelineno-33-12"></a><span class="cm"> * - Opening or managing ZeroMQ sockets (see kernel-manager.ts)</span>
-<a id="__codelineno-33-13" name="__codelineno-33-13" href="#__codelineno-33-13"></a><span class="cm"> * - Serializing or deserializing tree data (handled by the kernel)</span>
-<a id="__codelineno-33-14" name="__codelineno-33-14" href="#__codelineno-33-14"></a><span class="cm"> * - Any IPC communication with the renderer (see index.ts)</span>
-<a id="__codelineno-33-15" name="__codelineno-33-15" href="#__codelineno-33-15"></a><span class="cm"> *</span>
-<a id="__codelineno-33-16" name="__codelineno-33-16" href="#__codelineno-33-16"></a><span class="cm"> * @see kernel-manager.ts for socket lifecycle</span>
-<a id="__codelineno-33-17" name="__codelineno-33-17" href="#__codelineno-33-17"></a><span class="cm"> * @see ipc.ts for all IPC channel names and TypeScript types</span>
-<a id="__codelineno-33-18" name="__codelineno-33-18" href="#__codelineno-33-18"></a><span class="cm"> */</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-34-1" name="__codelineno-34-1" href="#__codelineno-34-1"></a><span class="cm">/**</span>
+<a id="__codelineno-34-2" name="__codelineno-34-2" href="#__codelineno-34-2"></a><span class="cm"> * @file comm-router.ts</span>
+<a id="__codelineno-34-3" name="__codelineno-34-3" href="#__codelineno-34-3"></a><span class="cm"> * @description</span>
+<a id="__codelineno-34-4" name="__codelineno-34-4" href="#__codelineno-34-4"></a><span class="cm"> * Routes incoming PDV comm messages from the kernel to their appropriate handlers.</span>
+<a id="__codelineno-34-5" name="__codelineno-34-5" href="#__codelineno-34-5"></a><span class="cm"> *</span>
+<a id="__codelineno-34-6" name="__codelineno-34-6" href="#__codelineno-34-6"></a><span class="cm"> * This module is responsible for:</span>
+<a id="__codelineno-34-7" name="__codelineno-34-7" href="#__codelineno-34-7"></a><span class="cm"> * - Parsing comm_msg frames arriving on the iopub ZeroMQ socket</span>
+<a id="__codelineno-34-8" name="__codelineno-34-8" href="#__codelineno-34-8"></a><span class="cm"> * - Matching responses to pending requests by msg_id (in_reply_to)</span>
+<a id="__codelineno-34-9" name="__codelineno-34-9" href="#__codelineno-34-9"></a><span class="cm"> * - Forwarding push notifications (in_reply_to === null) to the renderer</span>
+<a id="__codelineno-34-10" name="__codelineno-34-10" href="#__codelineno-34-10"></a><span class="cm"> *</span>
+<a id="__codelineno-34-11" name="__codelineno-34-11" href="#__codelineno-34-11"></a><span class="cm"> * This module is NOT responsible for:</span>
+<a id="__codelineno-34-12" name="__codelineno-34-12" href="#__codelineno-34-12"></a><span class="cm"> * - Opening or managing ZeroMQ sockets (see kernel-manager.ts)</span>
+<a id="__codelineno-34-13" name="__codelineno-34-13" href="#__codelineno-34-13"></a><span class="cm"> * - Serializing or deserializing tree data (handled by the kernel)</span>
+<a id="__codelineno-34-14" name="__codelineno-34-14" href="#__codelineno-34-14"></a><span class="cm"> * - Any IPC communication with the renderer (see index.ts)</span>
+<a id="__codelineno-34-15" name="__codelineno-34-15" href="#__codelineno-34-15"></a><span class="cm"> *</span>
+<a id="__codelineno-34-16" name="__codelineno-34-16" href="#__codelineno-34-16"></a><span class="cm"> * @see kernel-manager.ts for socket lifecycle</span>
+<a id="__codelineno-34-17" name="__codelineno-34-17" href="#__codelineno-34-17"></a><span class="cm"> * @see ipc.ts for all IPC channel names and TypeScript types</span>
+<a id="__codelineno-34-18" name="__codelineno-34-18" href="#__codelineno-34-18"></a><span class="cm"> */</span>
 </code></pre></div>
 <h3 id="132-exported-functions-and-classes">13.2 Exported Functions and Classes<a class="headerlink" href="#132-exported-functions-and-classes" title="Permanent link">&para;</a></h3>
 <p>Every exported function, class, and type must have a JSDoc comment with:
@@ -6352,58 +6381,58 @@
 - <code>@returns</code> tag describing the return value
 - <code>@throws</code> tag if the function can throw
 - An example if the usage is non-obvious</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-34-1" name="__codelineno-34-1" href="#__codelineno-34-1"></a><span class="cm">/**</span>
-<a id="__codelineno-34-2" name="__codelineno-34-2" href="#__codelineno-34-2"></a><span class="cm"> * Sends a PDV comm request to the kernel and waits for a correlated response.</span>
-<a id="__codelineno-34-3" name="__codelineno-34-3" href="#__codelineno-34-3"></a><span class="cm"> *</span>
-<a id="__codelineno-34-4" name="__codelineno-34-4" href="#__codelineno-34-4"></a><span class="cm"> * Registers a pending request keyed by a generated msg_id, sends the message</span>
-<a id="__codelineno-34-5" name="__codelineno-34-5" href="#__codelineno-34-5"></a><span class="cm"> * on the shell socket, and returns a promise that resolves when the kernel</span>
-<a id="__codelineno-34-6" name="__codelineno-34-6" href="#__codelineno-34-6"></a><span class="cm"> * replies with a matching in_reply_to value. Rejects after `timeoutMs`.</span>
-<a id="__codelineno-34-7" name="__codelineno-34-7" href="#__codelineno-34-7"></a><span class="cm"> *</span>
-<a id="__codelineno-34-8" name="__codelineno-34-8" href="#__codelineno-34-8"></a><span class="cm"> * @param kernelId - The ID of the target kernel (from KernelManager)</span>
-<a id="__codelineno-34-9" name="__codelineno-34-9" href="#__codelineno-34-9"></a><span class="cm"> * @param type - The PDV message type string (e.g., &#39;pdv.tree.list&#39;)</span>
-<a id="__codelineno-34-10" name="__codelineno-34-10" href="#__codelineno-34-10"></a><span class="cm"> * @param payload - The message payload object. Must be JSON-serializable.</span>
-<a id="__codelineno-34-11" name="__codelineno-34-11" href="#__codelineno-34-11"></a><span class="cm"> * @param timeoutMs - Maximum wait time in milliseconds. Default: 30000.</span>
-<a id="__codelineno-34-12" name="__codelineno-34-12" href="#__codelineno-34-12"></a><span class="cm"> * @returns The response payload if status is &#39;ok&#39;.</span>
-<a id="__codelineno-34-13" name="__codelineno-34-13" href="#__codelineno-34-13"></a><span class="cm"> * @throws {PDVCommError} If the kernel responds with status &#39;error&#39;.</span>
-<a id="__codelineno-34-14" name="__codelineno-34-14" href="#__codelineno-34-14"></a><span class="cm"> * @throws {PDVCommTimeoutError} If no response is received within timeoutMs.</span>
-<a id="__codelineno-34-15" name="__codelineno-34-15" href="#__codelineno-34-15"></a><span class="cm"> *</span>
-<a id="__codelineno-34-16" name="__codelineno-34-16" href="#__codelineno-34-16"></a><span class="cm"> * @example</span>
-<a id="__codelineno-34-17" name="__codelineno-34-17" href="#__codelineno-34-17"></a><span class="cm"> * const nodes = await commRouter.request(kernelId, &#39;pdv.tree.list&#39;, { path: &#39;data&#39; });</span>
-<a id="__codelineno-34-18" name="__codelineno-34-18" href="#__codelineno-34-18"></a><span class="cm"> */</span>
-<a id="__codelineno-34-19" name="__codelineno-34-19" href="#__codelineno-34-19"></a><span class="k">export</span><span class="w"> </span><span class="k">async</span><span class="w"> </span><span class="kd">function</span><span class="w"> </span><span class="nx">request</span><span class="p">(</span>
-<a id="__codelineno-34-20" name="__codelineno-34-20" href="#__codelineno-34-20"></a><span class="w">  </span><span class="nx">kernelId</span><span class="o">:</span><span class="w"> </span><span class="kt">string</span><span class="p">,</span>
-<a id="__codelineno-34-21" name="__codelineno-34-21" href="#__codelineno-34-21"></a><span class="w">  </span><span class="kr">type</span><span class="o">:</span><span class="w"> </span><span class="kt">string</span><span class="p">,</span>
-<a id="__codelineno-34-22" name="__codelineno-34-22" href="#__codelineno-34-22"></a><span class="w">  </span><span class="nx">payload</span><span class="o">:</span><span class="w"> </span><span class="kt">Record</span><span class="o">&lt;</span><span class="kt">string</span><span class="p">,</span><span class="w"> </span><span class="nx">unknown</span><span class="o">&gt;</span><span class="p">,</span>
-<a id="__codelineno-34-23" name="__codelineno-34-23" href="#__codelineno-34-23"></a><span class="w">  </span><span class="nx">timeoutMs</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mf">30</span><span class="nx">_000</span><span class="p">,</span>
-<a id="__codelineno-34-24" name="__codelineno-34-24" href="#__codelineno-34-24"></a><span class="p">)</span><span class="o">:</span><span class="w"> </span><span class="nb">Promise</span><span class="o">&lt;</span><span class="nx">Record</span><span class="o">&lt;</span><span class="kt">string</span><span class="p">,</span><span class="w"> </span><span class="nx">unknown</span><span class="o">&gt;&gt;</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="p">...</span><span class="w"> </span><span class="p">}</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-35-1" name="__codelineno-35-1" href="#__codelineno-35-1"></a><span class="cm">/**</span>
+<a id="__codelineno-35-2" name="__codelineno-35-2" href="#__codelineno-35-2"></a><span class="cm"> * Sends a PDV comm request to the kernel and waits for a correlated response.</span>
+<a id="__codelineno-35-3" name="__codelineno-35-3" href="#__codelineno-35-3"></a><span class="cm"> *</span>
+<a id="__codelineno-35-4" name="__codelineno-35-4" href="#__codelineno-35-4"></a><span class="cm"> * Registers a pending request keyed by a generated msg_id, sends the message</span>
+<a id="__codelineno-35-5" name="__codelineno-35-5" href="#__codelineno-35-5"></a><span class="cm"> * on the shell socket, and returns a promise that resolves when the kernel</span>
+<a id="__codelineno-35-6" name="__codelineno-35-6" href="#__codelineno-35-6"></a><span class="cm"> * replies with a matching in_reply_to value. Rejects after `timeoutMs`.</span>
+<a id="__codelineno-35-7" name="__codelineno-35-7" href="#__codelineno-35-7"></a><span class="cm"> *</span>
+<a id="__codelineno-35-8" name="__codelineno-35-8" href="#__codelineno-35-8"></a><span class="cm"> * @param kernelId - The ID of the target kernel (from KernelManager)</span>
+<a id="__codelineno-35-9" name="__codelineno-35-9" href="#__codelineno-35-9"></a><span class="cm"> * @param type - The PDV message type string (e.g., &#39;pdv.tree.list&#39;)</span>
+<a id="__codelineno-35-10" name="__codelineno-35-10" href="#__codelineno-35-10"></a><span class="cm"> * @param payload - The message payload object. Must be JSON-serializable.</span>
+<a id="__codelineno-35-11" name="__codelineno-35-11" href="#__codelineno-35-11"></a><span class="cm"> * @param timeoutMs - Maximum wait time in milliseconds. Default: 30000.</span>
+<a id="__codelineno-35-12" name="__codelineno-35-12" href="#__codelineno-35-12"></a><span class="cm"> * @returns The response payload if status is &#39;ok&#39;.</span>
+<a id="__codelineno-35-13" name="__codelineno-35-13" href="#__codelineno-35-13"></a><span class="cm"> * @throws {PDVCommError} If the kernel responds with status &#39;error&#39;.</span>
+<a id="__codelineno-35-14" name="__codelineno-35-14" href="#__codelineno-35-14"></a><span class="cm"> * @throws {PDVCommTimeoutError} If no response is received within timeoutMs.</span>
+<a id="__codelineno-35-15" name="__codelineno-35-15" href="#__codelineno-35-15"></a><span class="cm"> *</span>
+<a id="__codelineno-35-16" name="__codelineno-35-16" href="#__codelineno-35-16"></a><span class="cm"> * @example</span>
+<a id="__codelineno-35-17" name="__codelineno-35-17" href="#__codelineno-35-17"></a><span class="cm"> * const nodes = await commRouter.request(kernelId, &#39;pdv.tree.list&#39;, { path: &#39;data&#39; });</span>
+<a id="__codelineno-35-18" name="__codelineno-35-18" href="#__codelineno-35-18"></a><span class="cm"> */</span>
+<a id="__codelineno-35-19" name="__codelineno-35-19" href="#__codelineno-35-19"></a><span class="k">export</span><span class="w"> </span><span class="k">async</span><span class="w"> </span><span class="kd">function</span><span class="w"> </span><span class="nx">request</span><span class="p">(</span>
+<a id="__codelineno-35-20" name="__codelineno-35-20" href="#__codelineno-35-20"></a><span class="w">  </span><span class="nx">kernelId</span><span class="o">:</span><span class="w"> </span><span class="kt">string</span><span class="p">,</span>
+<a id="__codelineno-35-21" name="__codelineno-35-21" href="#__codelineno-35-21"></a><span class="w">  </span><span class="kr">type</span><span class="o">:</span><span class="w"> </span><span class="kt">string</span><span class="p">,</span>
+<a id="__codelineno-35-22" name="__codelineno-35-22" href="#__codelineno-35-22"></a><span class="w">  </span><span class="nx">payload</span><span class="o">:</span><span class="w"> </span><span class="kt">Record</span><span class="o">&lt;</span><span class="kt">string</span><span class="p">,</span><span class="w"> </span><span class="nx">unknown</span><span class="o">&gt;</span><span class="p">,</span>
+<a id="__codelineno-35-23" name="__codelineno-35-23" href="#__codelineno-35-23"></a><span class="w">  </span><span class="nx">timeoutMs</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mf">30</span><span class="nx">_000</span><span class="p">,</span>
+<a id="__codelineno-35-24" name="__codelineno-35-24" href="#__codelineno-35-24"></a><span class="p">)</span><span class="o">:</span><span class="w"> </span><span class="nb">Promise</span><span class="o">&lt;</span><span class="nx">Record</span><span class="o">&lt;</span><span class="kt">string</span><span class="p">,</span><span class="w"> </span><span class="nx">unknown</span><span class="o">&gt;&gt;</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="p">...</span><span class="w"> </span><span class="p">}</span>
 </code></pre></div>
 <h3 id="133-interfaces-and-types">13.3 Interfaces and Types<a class="headerlink" href="#133-interfaces-and-types" title="Permanent link">&para;</a></h3>
 <p>All interfaces must have a JSDoc comment and inline comments on every field.</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-35-1" name="__codelineno-35-1" href="#__codelineno-35-1"></a><span class="cm">/**</span>
-<a id="__codelineno-35-2" name="__codelineno-35-2" href="#__codelineno-35-2"></a><span class="cm"> * Envelope for all PDV comm messages, both requests and responses.</span>
-<a id="__codelineno-35-3" name="__codelineno-35-3" href="#__codelineno-35-3"></a><span class="cm"> * Every message sent over the pdv.kernel comm channel must conform to this shape.</span>
-<a id="__codelineno-35-4" name="__codelineno-35-4" href="#__codelineno-35-4"></a><span class="cm"> */</span>
-<a id="__codelineno-35-5" name="__codelineno-35-5" href="#__codelineno-35-5"></a><span class="k">export</span><span class="w"> </span><span class="kd">interface</span><span class="w"> </span><span class="nx">PDVMessage</span><span class="w"> </span><span class="p">{</span>
-<a id="__codelineno-35-6" name="__codelineno-35-6" href="#__codelineno-35-6"></a><span class="w">  </span><span class="cm">/** Protocol version. Must be &#39;1.0&#39; for this release. */</span>
-<a id="__codelineno-35-7" name="__codelineno-35-7" href="#__codelineno-35-7"></a><span class="w">  </span><span class="nx">pdv_version</span><span class="o">:</span><span class="w"> </span><span class="kt">string</span><span class="p">;</span>
-<a id="__codelineno-35-8" name="__codelineno-35-8" href="#__codelineno-35-8"></a><span class="w">  </span><span class="cm">/** UUID v4 uniquely identifying this message. */</span>
-<a id="__codelineno-35-9" name="__codelineno-35-9" href="#__codelineno-35-9"></a><span class="w">  </span><span class="nx">msg_id</span><span class="o">:</span><span class="w"> </span><span class="kt">string</span><span class="p">;</span>
-<a id="__codelineno-35-10" name="__codelineno-35-10" href="#__codelineno-35-10"></a><span class="w">  </span><span class="cm">/** msg_id of the request this is responding to. Null for push notifications. */</span>
-<a id="__codelineno-35-11" name="__codelineno-35-11" href="#__codelineno-35-11"></a><span class="w">  </span><span class="nx">in_reply_to</span><span class="o">:</span><span class="w"> </span><span class="kt">string</span><span class="w"> </span><span class="o">|</span><span class="w"> </span><span class="kc">null</span><span class="p">;</span>
-<a id="__codelineno-35-12" name="__codelineno-35-12" href="#__codelineno-35-12"></a><span class="w">  </span><span class="cm">/** Dot-namespaced message type string. See ARCHITECTURE.md Section 3.4. */</span>
-<a id="__codelineno-35-13" name="__codelineno-35-13" href="#__codelineno-35-13"></a><span class="w">  </span><span class="kr">type</span><span class="o">:</span><span class="w"> </span><span class="kt">string</span><span class="p">;</span>
-<a id="__codelineno-35-14" name="__codelineno-35-14" href="#__codelineno-35-14"></a><span class="w">  </span><span class="cm">/** Present on responses only. &#39;ok&#39; or &#39;error&#39;. */</span>
-<a id="__codelineno-35-15" name="__codelineno-35-15" href="#__codelineno-35-15"></a><span class="w">  </span><span class="nx">status</span><span class="o">?:</span><span class="w"> </span><span class="s1">&#39;ok&#39;</span><span class="w"> </span><span class="o">|</span><span class="w"> </span><span class="s1">&#39;error&#39;</span><span class="p">;</span>
-<a id="__codelineno-35-16" name="__codelineno-35-16" href="#__codelineno-35-16"></a><span class="w">  </span><span class="cm">/** Message-specific data. Shape depends on type. */</span>
-<a id="__codelineno-35-17" name="__codelineno-35-17" href="#__codelineno-35-17"></a><span class="w">  </span><span class="nx">payload</span><span class="o">:</span><span class="w"> </span><span class="kt">Record</span><span class="o">&lt;</span><span class="kt">string</span><span class="p">,</span><span class="w"> </span><span class="nx">unknown</span><span class="o">&gt;</span><span class="p">;</span>
-<a id="__codelineno-35-18" name="__codelineno-35-18" href="#__codelineno-35-18"></a><span class="p">}</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-36-1" name="__codelineno-36-1" href="#__codelineno-36-1"></a><span class="cm">/**</span>
+<a id="__codelineno-36-2" name="__codelineno-36-2" href="#__codelineno-36-2"></a><span class="cm"> * Envelope for all PDV comm messages, both requests and responses.</span>
+<a id="__codelineno-36-3" name="__codelineno-36-3" href="#__codelineno-36-3"></a><span class="cm"> * Every message sent over the pdv.kernel comm channel must conform to this shape.</span>
+<a id="__codelineno-36-4" name="__codelineno-36-4" href="#__codelineno-36-4"></a><span class="cm"> */</span>
+<a id="__codelineno-36-5" name="__codelineno-36-5" href="#__codelineno-36-5"></a><span class="k">export</span><span class="w"> </span><span class="kd">interface</span><span class="w"> </span><span class="nx">PDVMessage</span><span class="w"> </span><span class="p">{</span>
+<a id="__codelineno-36-6" name="__codelineno-36-6" href="#__codelineno-36-6"></a><span class="w">  </span><span class="cm">/** Protocol version. Must be &#39;1.0&#39; for this release. */</span>
+<a id="__codelineno-36-7" name="__codelineno-36-7" href="#__codelineno-36-7"></a><span class="w">  </span><span class="nx">pdv_version</span><span class="o">:</span><span class="w"> </span><span class="kt">string</span><span class="p">;</span>
+<a id="__codelineno-36-8" name="__codelineno-36-8" href="#__codelineno-36-8"></a><span class="w">  </span><span class="cm">/** UUID v4 uniquely identifying this message. */</span>
+<a id="__codelineno-36-9" name="__codelineno-36-9" href="#__codelineno-36-9"></a><span class="w">  </span><span class="nx">msg_id</span><span class="o">:</span><span class="w"> </span><span class="kt">string</span><span class="p">;</span>
+<a id="__codelineno-36-10" name="__codelineno-36-10" href="#__codelineno-36-10"></a><span class="w">  </span><span class="cm">/** msg_id of the request this is responding to. Null for push notifications. */</span>
+<a id="__codelineno-36-11" name="__codelineno-36-11" href="#__codelineno-36-11"></a><span class="w">  </span><span class="nx">in_reply_to</span><span class="o">:</span><span class="w"> </span><span class="kt">string</span><span class="w"> </span><span class="o">|</span><span class="w"> </span><span class="kc">null</span><span class="p">;</span>
+<a id="__codelineno-36-12" name="__codelineno-36-12" href="#__codelineno-36-12"></a><span class="w">  </span><span class="cm">/** Dot-namespaced message type string. See ARCHITECTURE.md Section 3.4. */</span>
+<a id="__codelineno-36-13" name="__codelineno-36-13" href="#__codelineno-36-13"></a><span class="w">  </span><span class="kr">type</span><span class="o">:</span><span class="w"> </span><span class="kt">string</span><span class="p">;</span>
+<a id="__codelineno-36-14" name="__codelineno-36-14" href="#__codelineno-36-14"></a><span class="w">  </span><span class="cm">/** Present on responses only. &#39;ok&#39; or &#39;error&#39;. */</span>
+<a id="__codelineno-36-15" name="__codelineno-36-15" href="#__codelineno-36-15"></a><span class="w">  </span><span class="nx">status</span><span class="o">?:</span><span class="w"> </span><span class="s1">&#39;ok&#39;</span><span class="w"> </span><span class="o">|</span><span class="w"> </span><span class="s1">&#39;error&#39;</span><span class="p">;</span>
+<a id="__codelineno-36-16" name="__codelineno-36-16" href="#__codelineno-36-16"></a><span class="w">  </span><span class="cm">/** Message-specific data. Shape depends on type. */</span>
+<a id="__codelineno-36-17" name="__codelineno-36-17" href="#__codelineno-36-17"></a><span class="w">  </span><span class="nx">payload</span><span class="o">:</span><span class="w"> </span><span class="kt">Record</span><span class="o">&lt;</span><span class="kt">string</span><span class="p">,</span><span class="w"> </span><span class="nx">unknown</span><span class="o">&gt;</span><span class="p">;</span>
+<a id="__codelineno-36-18" name="__codelineno-36-18" href="#__codelineno-36-18"></a><span class="p">}</span>
 </code></pre></div>
 <h3 id="134-internal-functions">13.4 Internal Functions<a class="headerlink" href="#134-internal-functions" title="Permanent link">&para;</a></h3>
 <p>Private/internal functions (not exported) require at minimum a one-line comment explaining their purpose and any non-obvious behavior. They do not require full JSDoc.</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-36-1" name="__codelineno-36-1" href="#__codelineno-36-1"></a><span class="c1">// Generates a monotonically increasing ISO 8601 timestamp with millisecond precision.</span>
-<a id="__codelineno-36-2" name="__codelineno-36-2" href="#__codelineno-36-2"></a><span class="kd">function</span><span class="w"> </span><span class="nx">nowIso</span><span class="p">()</span><span class="o">:</span><span class="w"> </span><span class="kt">string</span><span class="w"> </span><span class="p">{</span>
-<a id="__codelineno-36-3" name="__codelineno-36-3" href="#__codelineno-36-3"></a><span class="w">  </span><span class="k">return</span><span class="w"> </span><span class="ow">new</span><span class="w"> </span><span class="nb">Date</span><span class="p">().</span><span class="nx">toISOString</span><span class="p">();</span>
-<a id="__codelineno-36-4" name="__codelineno-36-4" href="#__codelineno-36-4"></a><span class="p">}</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-37-1" name="__codelineno-37-1" href="#__codelineno-37-1"></a><span class="c1">// Generates a monotonically increasing ISO 8601 timestamp with millisecond precision.</span>
+<a id="__codelineno-37-2" name="__codelineno-37-2" href="#__codelineno-37-2"></a><span class="kd">function</span><span class="w"> </span><span class="nx">nowIso</span><span class="p">()</span><span class="o">:</span><span class="w"> </span><span class="kt">string</span><span class="w"> </span><span class="p">{</span>
+<a id="__codelineno-37-3" name="__codelineno-37-3" href="#__codelineno-37-3"></a><span class="w">  </span><span class="k">return</span><span class="w"> </span><span class="ow">new</span><span class="w"> </span><span class="nb">Date</span><span class="p">().</span><span class="nx">toISOString</span><span class="p">();</span>
+<a id="__codelineno-37-4" name="__codelineno-37-4" href="#__codelineno-37-4"></a><span class="p">}</span>
 </code></pre></div>
 <h3 id="135-ipc-handlers">13.5 IPC Handlers<a class="headerlink" href="#135-ipc-handlers" title="Permanent link">&para;</a></h3>
 <p>Every <code>ipcMain.handle</code> registration must have an inline comment above it stating:
@@ -6411,22 +6440,22 @@
 - What input it expects
 - What it returns on success
 - What it returns on failure (error shape)</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-37-1" name="__codelineno-37-1" href="#__codelineno-37-1"></a><span class="c1">// Handles tree:list requests from the renderer.</span>
-<a id="__codelineno-37-2" name="__codelineno-37-2" href="#__codelineno-37-2"></a><span class="c1">// Input: kernelId (string), path (string, dot-separated tree path, may be empty for root)</span>
-<a id="__codelineno-37-3" name="__codelineno-37-3" href="#__codelineno-37-3"></a><span class="c1">// Returns: TreeNode[] on success</span>
-<a id="__codelineno-37-4" name="__codelineno-37-4" href="#__codelineno-37-4"></a><span class="c1">// On error: returns [] and logs the error (does not throw to renderer)</span>
-<a id="__codelineno-37-5" name="__codelineno-37-5" href="#__codelineno-37-5"></a><span class="nx">ipcMain</span><span class="p">.</span><span class="nx">handle</span><span class="p">(</span><span class="nx">IPC</span><span class="p">.</span><span class="nx">tree</span><span class="p">.</span><span class="nx">list</span><span class="p">,</span><span class="w"> </span><span class="k">async</span><span class="w"> </span><span class="p">(</span><span class="nx">_event</span><span class="p">,</span><span class="w"> </span><span class="nx">kernelId</span><span class="o">:</span><span class="w"> </span><span class="kt">string</span><span class="p">,</span><span class="w"> </span><span class="nx">path</span><span class="o">:</span><span class="w"> </span><span class="kt">string</span><span class="p">)</span><span class="w"> </span><span class="p">=&gt;</span><span class="w"> </span><span class="p">{</span>
-<a id="__codelineno-37-6" name="__codelineno-37-6" href="#__codelineno-37-6"></a><span class="w">  </span><span class="p">...</span>
-<a id="__codelineno-37-7" name="__codelineno-37-7" href="#__codelineno-37-7"></a><span class="p">});</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-38-1" name="__codelineno-38-1" href="#__codelineno-38-1"></a><span class="c1">// Handles tree:list requests from the renderer.</span>
+<a id="__codelineno-38-2" name="__codelineno-38-2" href="#__codelineno-38-2"></a><span class="c1">// Input: kernelId (string), path (string, dot-separated tree path, may be empty for root)</span>
+<a id="__codelineno-38-3" name="__codelineno-38-3" href="#__codelineno-38-3"></a><span class="c1">// Returns: TreeNode[] on success</span>
+<a id="__codelineno-38-4" name="__codelineno-38-4" href="#__codelineno-38-4"></a><span class="c1">// On error: returns [] and logs the error (does not throw to renderer)</span>
+<a id="__codelineno-38-5" name="__codelineno-38-5" href="#__codelineno-38-5"></a><span class="nx">ipcMain</span><span class="p">.</span><span class="nx">handle</span><span class="p">(</span><span class="nx">IPC</span><span class="p">.</span><span class="nx">tree</span><span class="p">.</span><span class="nx">list</span><span class="p">,</span><span class="w"> </span><span class="k">async</span><span class="w"> </span><span class="p">(</span><span class="nx">_event</span><span class="p">,</span><span class="w"> </span><span class="nx">kernelId</span><span class="o">:</span><span class="w"> </span><span class="kt">string</span><span class="p">,</span><span class="w"> </span><span class="nx">path</span><span class="o">:</span><span class="w"> </span><span class="kt">string</span><span class="p">)</span><span class="w"> </span><span class="p">=&gt;</span><span class="w"> </span><span class="p">{</span>
+<a id="__codelineno-38-6" name="__codelineno-38-6" href="#__codelineno-38-6"></a><span class="w">  </span><span class="p">...</span>
+<a id="__codelineno-38-7" name="__codelineno-38-7" href="#__codelineno-38-7"></a><span class="p">});</span>
 </code></pre></div>
 <h3 id="136-no-implicit-any">13.6 No Implicit <code>any</code><a class="headerlink" href="#136-no-implicit-any" title="Permanent link">&para;</a></h3>
 <p>TypeScript <code>strict</code> mode is enabled. <code>any</code> is forbidden without an explicit <code>// eslint-disable-next-line</code> comment explaining why it is necessary. <code>unknown</code> is used instead wherever the type is genuinely unknown.</p>
 <h3 id="137-architecture-cross-references">13.7 Architecture Cross-References<a class="headerlink" href="#137-architecture-cross-references" title="Permanent link">&para;</a></h3>
 <p>Comments may reference this document by section number when the reason for a design decision is not locally obvious:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-38-1" name="__codelineno-38-1" href="#__codelineno-38-1"></a><span class="c1">// Per ARCHITECTURE.md §3.6: reject incompatible major protocol versions immediately.</span>
-<a id="__codelineno-38-2" name="__codelineno-38-2" href="#__codelineno-38-2"></a><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="nx">majorVersion</span><span class="p">(</span><span class="nx">msg</span><span class="p">.</span><span class="nx">pdv_version</span><span class="p">)</span><span class="w"> </span><span class="o">!==</span><span class="w"> </span><span class="nx">EXPECTED_MAJOR</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
-<a id="__codelineno-38-3" name="__codelineno-38-3" href="#__codelineno-38-3"></a><span class="w">  </span><span class="k">throw</span><span class="w"> </span><span class="ow">new</span><span class="w"> </span><span class="nx">PDVVersionError</span><span class="p">(</span><span class="nx">msg</span><span class="p">.</span><span class="nx">pdv_version</span><span class="p">);</span>
-<a id="__codelineno-38-4" name="__codelineno-38-4" href="#__codelineno-38-4"></a><span class="p">}</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-39-1" name="__codelineno-39-1" href="#__codelineno-39-1"></a><span class="c1">// Per ARCHITECTURE.md §3.6: reject incompatible major protocol versions immediately.</span>
+<a id="__codelineno-39-2" name="__codelineno-39-2" href="#__codelineno-39-2"></a><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="nx">majorVersion</span><span class="p">(</span><span class="nx">msg</span><span class="p">.</span><span class="nx">pdv_version</span><span class="p">)</span><span class="w"> </span><span class="o">!==</span><span class="w"> </span><span class="nx">EXPECTED_MAJOR</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<a id="__codelineno-39-3" name="__codelineno-39-3" href="#__codelineno-39-3"></a><span class="w">  </span><span class="k">throw</span><span class="w"> </span><span class="ow">new</span><span class="w"> </span><span class="nx">PDVVersionError</span><span class="p">(</span><span class="nx">msg</span><span class="p">.</span><span class="nx">pdv_version</span><span class="p">);</span>
+<a id="__codelineno-39-4" name="__codelineno-39-4" href="#__codelineno-39-4"></a><span class="p">}</span>
 </code></pre></div>
 <hr />
 <h2 id="14-testing-strategy">14. Testing Strategy<a class="headerlink" href="#14-testing-strategy" title="Permanent link">&para;</a></h2>
@@ -6527,13 +6556,13 @@
 <p><code>script_run</code>, <code>cell_run</code>, and <code>pdv_run</code> return a <strong>structured summary</strong>: status, duration, the full error and traceback on failure, and the final lines of output inline — enough to see success or a traceback without loading everything.</p>
 <p>For anything beyond that, PDV appends every execution — user-initiated and agent-initiated alike — to a plain-text <strong>session execution transcript</strong> inside the kernel working directory (§6.1), alongside <code>code-cells.json</code> and, like it, <strong>session-scoped scratch</strong>. The agent receives the file's path (in run results and in <code>project_info</code>) and reads it with its own <code>grep</code> / <code>head</code> / <code>tail</code> — the same output-filtering workflow it uses for shell commands, which an MCP tool's return value cannot support. The file is never written into the project save directory, is not loaded with a project, and is discarded when the working directory is torn down on shutdown (§6.1) — these properties fall out of its location and require no save/load machinery. It is deliberately <strong>not</strong> a persistent console-history feature; it exists only so an in-session agent can inspect recent activity.</p>
 <p>The transcript is <strong>plain text, not JSON</strong> — its primary job is line-oriented <code>grep</code> / <code>tail</code> over verbatim output, which JSON escaping of multi-line output would defeat. Each execution is one block: a distinctive, greppable header line carrying the execution id, ISO timestamp, origin (<code>user:cell-2</code>, <code>agent:pdv_run</code>, <code>agent:script_run:&lt;path&gt;</code>, …), status, and duration, followed by the code that ran and then its verbatim output.</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-39-1" name="__codelineno-39-1" href="#__codelineno-39-1"></a>═══ exec 7f3b · 2026-05-18T14:32:09 · user:cell-2 · error · 0.02s ═══
-<a id="__codelineno-39-2" name="__codelineno-39-2" href="#__codelineno-39-2"></a>--- code ---
-<a id="__codelineno-39-3" name="__codelineno-39-3" href="#__codelineno-39-3"></a>1/0
-<a id="__codelineno-39-4" name="__codelineno-39-4" href="#__codelineno-39-4"></a>--- output ---
-<a id="__codelineno-39-5" name="__codelineno-39-5" href="#__codelineno-39-5"></a>Traceback (most recent call last):
-<a id="__codelineno-39-6" name="__codelineno-39-6" href="#__codelineno-39-6"></a>  ...
-<a id="__codelineno-39-7" name="__codelineno-39-7" href="#__codelineno-39-7"></a>ZeroDivisionError: division by zero
+<div class="highlight"><pre><span></span><code><a id="__codelineno-40-1" name="__codelineno-40-1" href="#__codelineno-40-1"></a>═══ exec 7f3b · 2026-05-18T14:32:09 · user:cell-2 · error · 0.02s ═══
+<a id="__codelineno-40-2" name="__codelineno-40-2" href="#__codelineno-40-2"></a>--- code ---
+<a id="__codelineno-40-3" name="__codelineno-40-3" href="#__codelineno-40-3"></a>1/0
+<a id="__codelineno-40-4" name="__codelineno-40-4" href="#__codelineno-40-4"></a>--- output ---
+<a id="__codelineno-40-5" name="__codelineno-40-5" href="#__codelineno-40-5"></a>Traceback (most recent call last):
+<a id="__codelineno-40-6" name="__codelineno-40-6" href="#__codelineno-40-6"></a>  ...
+<a id="__codelineno-40-7" name="__codelineno-40-7" href="#__codelineno-40-7"></a>ZeroDivisionError: division by zero
 </code></pre></div>
 <p>This delimits executions, attributes each to its origin, and separates code from output — <code>grep '^═══ exec'</code> is a full execution index, <code>grep ' · agent:'</code> filters to agent runs — while keeping output verbatim. A structured (JSON-lines) format may be revisited if the plain-text form proves limiting.</p>
 <h3 id="158-renderer-interaction">15.8 Renderer Interaction<a class="headerlink" href="#158-renderer-interaction" title="Permanent link">&para;</a></h3>
