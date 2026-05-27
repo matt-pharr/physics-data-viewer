@@ -329,43 +329,76 @@ def find_for_value_dunder(value: Any) -> Optional[DunderEntry]:
     return entry
 
 
-def find_for_format_dunder(fmt: str, python_type: str) -> Optional[type]:
+#: Failure reason codes returned by :func:`find_for_format_dunder` alongside
+#: the recovered class (or ``None``). The caller uses these to render a more
+#: actionable error message than a generic "format not supported".
+LOOKUP_OK = ""
+LOOKUP_NO_PYTHON_TYPE = "no_python_type"
+LOOKUP_IMPORT_FAILED = "import_failed"
+LOOKUP_CLASS_UNLOADABLE = "class_unloadable"
+
+
+def find_for_format_dunder(
+    fmt: str, python_type: str
+) -> tuple[Optional[type], str]:
     """Recover a class implementing ``__pdv_deserialize__`` by importing it.
 
     On project load, PDV reads the descriptor's ``metadata.python_type``
-    (e.g. ``"mypkg.geqdsk.GEqdskData"``) and asks this function to import the
-    module, walk to the named class, and confirm it implements the dunder
-    protocol. The defining package only needs to be installed — it does
-    **not** need to be imported by the user before project load.
+    (e.g. ``"mypkg.geqdsk.GEqdskData"``) and asks this function to import
+    the module, walk to the named class, and confirm it implements the
+    dunder protocol. The defining package only needs to be installed — it
+    does **not** need to be imported by the user before project load.
+    Nested qualnames (``pkg.mod.Outer.Inner``) are supported via an
+    inner-dot walk after the module split.
 
-    Never raises: returns ``None`` for any failure mode (missing module,
-    unknown attribute, class no longer implementing the protocol). The
-    caller is expected to raise a descriptive ``PDVSerializationError`` that
-    names the format and the ``python_type`` so the user knows what to install.
+    Never raises for missing or unimportable modules, missing attributes,
+    or classes that have lost the protocol; on any of those, returns a
+    failure reason code so the caller can render an actionable error.
+
+    Cached hits re-validate that the cached class still defines
+    ``__pdv_deserialize__``. A class that has been hot-reloaded between
+    calls and lost the method is treated as a fresh miss; this matters
+    for module-reload workflows (Jupyter ``%autoreload``, tests that
+    redefine classes), and prevents the cache from masking the post-
+    upgrade "method removed" case.
 
     Parameters
     ----------
     fmt : str
-        The on-disk format identifier read from ``storage.format``. Used as
-        part of the cache key.
+        The on-disk format identifier read from ``storage.format``. Used
+        as part of the cache key.
     python_type : str
-        Dotted path ``"module.qualname"``. Supports nested ``qualname`` via
-        the inner-dot walk after the module split.
+        Dotted path ``"module.qualname"``.
 
     Returns
     -------
-    type or None
-        The recovered class, or ``None`` if the import/resolution failed.
+    (type | None, str)
+        ``(cls, LOOKUP_OK)`` on success.
+        ``(None, LOOKUP_NO_PYTHON_TYPE)`` if ``python_type`` is empty.
+        ``(None, LOOKUP_IMPORT_FAILED)`` if no prefix of ``python_type``
+        imports as a module — the user almost certainly needs to install
+        the defining package.
+        ``(None, LOOKUP_CLASS_UNLOADABLE)`` if a module imports but the
+        named attribute is missing, not a class, or no longer defines
+        ``__pdv_deserialize__`` — the class was renamed, removed, or had
+        the dunder protocol dropped (e.g. an upgrade).
     """
     if not python_type:
-        return None
+        return None, LOOKUP_NO_PYTHON_TYPE
     cache_key = (fmt, python_type)
     cached = _dunder_format_cache.get(cache_key)
     if cached is not None:
-        return cached
+        # Re-validate on hit: if the class was hot-reloaded and lost the
+        # method, drop the stale entry so the user sees the correct
+        # "class unloadable" failure instead of a downstream AttributeError.
+        if hasattr(cached, "__pdv_deserialize__"):
+            return cached, LOOKUP_OK
+        _dunder_format_cache.pop(cache_key, None)
 
-    # Split on the *last* dot first; on failure walk leftwards so nested
-    # qualnames like "pkg.mod.Outer.Inner" still resolve.
+    # Split on the *last* dot first; on each import failure, walk leftwards
+    # so nested qualnames still resolve. Example: "pkg.mod.Outer.Inner"
+    # tries import("pkg.mod.Outer") → fails → retries import("pkg.mod") with
+    # tail "Outer.Inner" → succeeds → getattr-walks Outer.Inner.
     head, sep, tail = python_type.rpartition(".")
     while head:
         try:
@@ -378,15 +411,16 @@ def find_for_format_dunder(fmt: str, python_type: str) -> Optional[type]:
         try:
             for part in tail.split("."):
                 obj = getattr(obj, part)
-        except AttributeError:
-            return None
+        except Exception:  # noqa: BLE001
+            return None, LOOKUP_CLASS_UNLOADABLE
         if not isinstance(obj, type):
-            return None
+            return None, LOOKUP_CLASS_UNLOADABLE
         if not hasattr(obj, "__pdv_deserialize__"):
-            return None
+            return None, LOOKUP_CLASS_UNLOADABLE
         _dunder_format_cache[cache_key] = obj
-        return obj
-    return None
+        return obj, LOOKUP_OK
+    # Loop exited without ever importing a prefix successfully.
+    return None, LOOKUP_IMPORT_FAILED
 
 
 def clear() -> None:

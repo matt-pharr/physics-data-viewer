@@ -723,23 +723,21 @@ def test_deserialize_raises_wraps_with_python_type(tmp_path):
                 del sys.modules[k]
 
 
-def test_class_lost_pdv_deserialize_surfaces_install_message(tmp_path):
+def test_class_lost_pdv_deserialize_surfaces_distinct_message(tmp_path):
     """A class that imports cleanly but no longer defines
-    ``__pdv_deserialize__`` (e.g. user upgraded the defining package and the
-    method was removed) falls into the same "ensure the defining package is
-    installed" error branch as a missing class — the user gets actionable
-    instructions instead of an opaque AttributeError."""
+    ``__pdv_deserialize__`` (e.g. the user upgraded the defining package and
+    the dunder method was removed) gets the LOOKUP_CLASS_UNLOADABLE branch
+    of the error message — distinct from the "install the package" branch
+    that fires for a missing module. The package is installed; telling the
+    user to install it again would be misleading."""
     pkg_dir = tmp_path / "lostmethod_pkg"
     pkg_dir.mkdir()
     (pkg_dir / "__init__.py").write_text("")
     # The class exists and imports cleanly — but defines NO dunder methods.
-    # This simulates the post-upgrade case where __pdv_deserialize__ was
-    # removed but old projects still reference this python_type.
     (pkg_dir / "mod.py").write_text("class Thing:\n    pass\n")
 
     sys.path.insert(0, str(tmp_path))
     try:
-        # Craft a descriptor as if the old version had saved it.
         node_uuid = "lostmethod_uuid"
         backing = tmp_path / "tree" / node_uuid
         backing.mkdir(parents=True, exist_ok=True)
@@ -758,16 +756,182 @@ def test_class_lost_pdv_deserialize_surfaces_install_message(tmp_path):
                 python_type="lostmethod_pkg.mod.Thing",
             )
         msg = str(ei.value)
-        # Same actionable branch as the missing-module case: the user is
-        # told to ensure the defining package is installed (or import it
-        # before load), even though the import itself succeeded.
         assert "old_format_v1" in msg
         assert "lostmethod_pkg.mod.Thing" in msg
-        assert "install" in msg.lower()
+        # Distinguishes from the missing-package branch: the message names
+        # rename/removal/upgrade as the likely cause and does NOT tell the
+        # user to install the (already-installed) package.
+        assert "renamed" in msg.lower() or "dropped" in msg.lower()
+        assert "install the defining package" not in msg.lower()
     finally:
         sys.path.remove(str(tmp_path))
         for k in list(sys.modules):
             if k.startswith("lostmethod_pkg"):
+                del sys.modules[k]
+
+
+# ---------------------------------------------------------------------------
+# Additional error-path coverage (from PR review feedback).
+# ---------------------------------------------------------------------------
+
+
+def test_pdv_format_raising_is_wrapped():
+    """``__pdv_format__()`` raising is caught and re-raised as
+    ``PDVSerializationError`` naming the class and chaining the original."""
+
+    class _BadFormat:
+        @classmethod
+        def __pdv_format__(cls):
+            raise RuntimeError("format method broken")
+
+        def __pdv_serialize__(self, path):
+            open(path, "wb").write(b"")
+
+        @classmethod
+        def __pdv_deserialize__(cls, path):
+            return cls()
+
+    with pytest.raises(PDVSerializationError) as ei:
+        serializers.find_for_value_dunder(_BadFormat())
+    msg = str(ei.value)
+    assert "_BadFormat" in msg
+    assert "__pdv_format__" in msg
+    assert "format method broken" in msg
+    assert isinstance(ei.value.__cause__, RuntimeError)
+
+
+@pytest.mark.parametrize(
+    "bad_return",
+    [
+        "not a tuple",
+        ("missing extension",),
+        ("too", "many", "parts"),
+        (42, ".bin"),
+        ("fmt", 42),
+        (None, None),
+    ],
+)
+def test_pdv_format_bad_return_raises(bad_return):
+    """``__pdv_format__()`` must return ``(str, str)``. Anything else
+    (wrong type, wrong arity, non-string elements) raises a descriptive
+    error pointing at the class."""
+
+    class _BadShape:
+        @classmethod
+        def __pdv_format__(cls):
+            return bad_return
+
+        def __pdv_serialize__(self, path):
+            open(path, "wb").write(b"")
+
+        @classmethod
+        def __pdv_deserialize__(cls, path):
+            return cls()
+
+    with pytest.raises(PDVSerializationError, match="2-tuple"):
+        serializers.find_for_value_dunder(_BadShape())
+
+
+def test_find_for_format_dunder_resolves_nested_qualname(tmp_path, monkeypatch):
+    """``find_for_format_dunder`` walks leftwards on import failures so a
+    nested class like ``pkg.mod.Outer.Inner`` resolves correctly, and a
+    second lookup hits the cache without re-importing."""
+    pkg_dir = tmp_path / "nestedpkg"
+    pkg_dir.mkdir()
+    (pkg_dir / "__init__.py").write_text("")
+    (pkg_dir / "mod.py").write_text(textwrap.dedent("""
+        class Outer:
+            class Inner:
+                @classmethod
+                def __pdv_format__(cls):
+                    return ("nested_v1", ".bin")
+
+                def __pdv_serialize__(self, path):
+                    open(path, "wb").write(b"")
+
+                @classmethod
+                def __pdv_deserialize__(cls, path):
+                    return cls()
+    """))
+
+    monkeypatch.syspath_prepend(str(tmp_path))
+    try:
+        cls, reason = serializers.find_for_format_dunder(
+            "nested_v1", "nestedpkg.mod.Outer.Inner"
+        )
+        assert reason == serializers.LOOKUP_OK
+        assert cls is not None
+        assert cls.__qualname__ == "Outer.Inner"
+
+        # Second call must hit the cache (verify by monkeypatching
+        # importlib.import_module to fail — if the cache misses, we'd
+        # observe the failure).
+        import importlib as _importlib
+
+        original_import = _importlib.import_module
+
+        def _explode(name, *args, **kwargs):
+            raise AssertionError(
+                f"cache miss: import_module called for {name!r}"
+            )
+
+        monkeypatch.setattr(_importlib, "import_module", _explode)
+        cls2, reason2 = serializers.find_for_format_dunder(
+            "nested_v1", "nestedpkg.mod.Outer.Inner"
+        )
+        assert reason2 == serializers.LOOKUP_OK
+        assert cls2 is cls
+        monkeypatch.setattr(_importlib, "import_module", original_import)
+    finally:
+        for k in list(sys.modules):
+            if k.startswith("nestedpkg"):
+                del sys.modules[k]
+
+
+def test_find_for_format_dunder_revalidates_cached_class(tmp_path, monkeypatch):
+    """A cached class that has been hot-reloaded and lost
+    ``__pdv_deserialize__`` is treated as a cache miss, so the caller
+    observes ``LOOKUP_CLASS_UNLOADABLE`` rather than a stale hit that would
+    later AttributeError on the dispatch site."""
+    pkg_dir = tmp_path / "reloadpkg"
+    pkg_dir.mkdir()
+    (pkg_dir / "__init__.py").write_text("")
+    (pkg_dir / "mod.py").write_text(textwrap.dedent("""
+        class Thing:
+            @classmethod
+            def __pdv_format__(cls):
+                return ("reload_v1", ".bin")
+
+            def __pdv_serialize__(self, path):
+                open(path, "wb").write(b"")
+
+            @classmethod
+            def __pdv_deserialize__(cls, path):
+                return cls()
+    """))
+
+    monkeypatch.syspath_prepend(str(tmp_path))
+    try:
+        cls, reason = serializers.find_for_format_dunder(
+            "reload_v1", "reloadpkg.mod.Thing"
+        )
+        assert reason == serializers.LOOKUP_OK
+        assert cls is not None
+
+        # Simulate a hot-reload that drops the dunder method.
+        del cls.__pdv_deserialize__
+
+        cls2, reason2 = serializers.find_for_format_dunder(
+            "reload_v1", "reloadpkg.mod.Thing"
+        )
+        # On revalidation, the cache entry is dropped. The class is the
+        # same identity (still in sys.modules) but no longer qualifies,
+        # so the resolver walks through to LOOKUP_CLASS_UNLOADABLE.
+        assert cls2 is None
+        assert reason2 == serializers.LOOKUP_CLASS_UNLOADABLE
+    finally:
+        for k in list(sys.modules):
+            if k.startswith("reloadpkg"):
                 del sys.modules[k]
 
 

@@ -1144,7 +1144,7 @@ def deserialize_node(
                 ) from exc
 
         if python_type:
-            cls = _serializers.find_for_format_dunder(fmt, python_type)
+            cls, reason = _serializers.find_for_format_dunder(fmt, python_type)
             if cls is not None:
                 try:
                     return cls.__pdv_deserialize__(abs_path)
@@ -1154,15 +1154,26 @@ def deserialize_node(
                         f"'{python_type}.__pdv_deserialize__' failed to load "
                         f"'{abs_path}': {exc}"
                     ) from exc
+            if reason == _serializers.LOOKUP_IMPORT_FAILED:
+                raise PDVSerializationError(
+                    f"Unsupported storage format: '{fmt}'. PDV tried to import "
+                    f"'{python_type}' to recover its __pdv_deserialize__ "
+                    f"classmethod, but no prefix of that path could be "
+                    f"imported. Ensure the defining package is installed in "
+                    f"the kernel's Python environment, or import a module "
+                    f"that registers a serializer for this format before "
+                    f"loading the project."
+                )
+            # reason == LOOKUP_CLASS_UNLOADABLE: module imported but the class
+            # is missing, was renamed, or no longer implements the protocol.
             raise PDVSerializationError(
-                f"Unsupported storage format: '{fmt}'. This format was written "
-                f"by a custom serializer or dunder-protocol class "
-                f"('{python_type}'). PDV tried to import '{python_type}' to "
-                f"recover its __pdv_deserialize__ classmethod, but the import "
-                f"failed (or the class no longer implements the protocol). "
-                f"Ensure the defining package is installed, or import the "
-                f"module that registered the serializer before loading the "
-                f"project."
+                f"Unsupported storage format: '{fmt}'. PDV found '{python_type}' "
+                f"reachable from the kernel's Python environment, but it is "
+                f"not a class that implements __pdv_deserialize__ — the class "
+                f"was likely renamed, removed, or upgraded to a version that "
+                f"dropped the dunder protocol. Pin the older version of the "
+                f"defining package, or import a module that registers a "
+                f"serializer for this format before loading the project."
             )
 
         raise PDVSerializationError(
