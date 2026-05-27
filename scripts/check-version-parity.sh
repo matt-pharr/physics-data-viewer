@@ -38,6 +38,12 @@ SITES=(
     ".github/scripts/generate-release-notes.sh|e\.g\. v$CANONICAL"
     "examples/modules/N-pendulum/pdv-module.json|\"pdv_min\": \"$CANONICAL\""
     "examples/modules/N-pendulum-julia/pdv-module.json|\"pdv_min\": \"$CANONICAL\""
+    # The lockfile must agree with electron/package.json or `npm ci` skips
+    # postinstall scripts (Electron's prebuilt download) and Playwright E2E
+    # tests bail with "Electron failed to install correctly". The pattern
+    # matches the top-level "version" key (2-space indent), distinct from
+    # the deeper dependency entries that also use "version".
+    "electron/package-lock.json|^  \"version\": \"$CANONICAL\","
     # Test fixtures used to be listed here. They now derive at runtime from
     # electron/package.json via TEST_PDV_VERSION — see issue #235.
 )
