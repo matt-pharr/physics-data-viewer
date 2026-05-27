@@ -199,6 +199,8 @@ describe("assertCurrentGeneration", () => {
       cellRpc: {} as McpToolContext["cellRpc"],
       getRendererWindow: () => null,
       getSessionGeneration: () => sessionGen,
+      recordCellRead: () => undefined,
+      getCellReadHash: () => undefined,
     };
   }
   const extra = { sessionId: "s1" } as ToolExtra;

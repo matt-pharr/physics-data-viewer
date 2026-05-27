@@ -28,6 +28,7 @@ import { buildEditorSpawn, resolveEditorSpawn } from "./editor-spawn";
 import { registerKernelIpcHandlers } from "./ipc-register-kernels";
 import { registerModulesIpcHandlers } from "./ipc-register-modules";
 import { registerProjectIpcHandlers } from "./ipc-register-project";
+import { shouldBumpOnSwap } from "./mcp/generation-guard";
 import { mirrorAutosaveSidecars, autosaveDirFor } from "./autosave-sidecars";
 import { KernelManager } from "./kernel-manager";
 import { ModuleManager } from "./module-manager";
@@ -58,6 +59,7 @@ import {
   PDVConfig,
   type CodeCellData,
   type EnvironmentInstallResult,
+  type McpStatus,
   type ProjectPackage,
 } from "./ipc";
 import { parseDependencies, normalizeDistName, specName } from "./pyproject";
@@ -71,6 +73,7 @@ import {
 } from "./uv-runner";
 import { venvPythonPath } from "./uv-environment";
 import { PDVMessage, PDVMessageType, setAppVersion } from "./pdv-protocol";
+import { registerLaunchersIpcHandlers } from "./ipc-register-launchers";
 import type { McpServerHooks } from "./mcp/mcp-context";
 import {
   allocateAndRegisterLib,
@@ -575,11 +578,9 @@ export function registerIpcHandlers(
       const prevId = activeKernelId;
       activeKernelId = id;
       // A kernel switch (restart, language change) invalidates connected MCP
-      // sessions — but the initial null -> id assignment at window startup
-      // is not a switch (the agent hasn't seen this kernel yet) and bumping
-      // there would surface a misleading "PDV's project or kernel has
-      // changed" error on an eager agent's first call.
-      if (prevId !== null) {
+      // sessions. See `shouldBumpOnSwap` for the no-bump cases (initial set,
+      // re-assertion of the same id).
+      if (shouldBumpOnSwap(prevId, id)) {
         bumpGeneration();
       }
       if (id) {
@@ -631,6 +632,14 @@ export function registerIpcHandlers(
     resolveEditorSpawn,
   });
 
+  registerLaunchersIpcHandlers({
+    kernelWorkingDirs,
+    getActiveKernelId: () => activeKernelId,
+    getActiveProjectDir: () => activeProjectDir,
+    getConfig: () => readConfig(configStore),
+    getMcpStatus: () => mcpServerInstance?.status ?? null,
+  });
+
   registerModulesIpcHandlers({
     win,
     kernelManager,
@@ -664,9 +673,10 @@ export function registerIpcHandlers(
     setActiveProjectDir: (dir) => {
       const prevDir = activeProjectDir;
       activeProjectDir = dir;
-      // Only a *change* invalidates connected MCP sessions; the initial
-      // null -> dir assignment at window startup is not a project switch.
-      if (prevDir !== null) {
+      // Only a real switch invalidates connected MCP sessions. See
+      // `shouldBumpOnSwap` for the no-bump cases (initial set; re-assertion
+      // of the same dir, which `project:save` does on every save).
+      if (shouldBumpOnSwap(prevDir, dir)) {
         bumpGeneration();
       }
     },
@@ -1116,6 +1126,27 @@ let mcpServerHooks: McpServerHooks | null = null;
  */
 export function getMcpServerHooks(): McpServerHooks | null {
   return mcpServerHooks;
+}
+
+/**
+ * Live MCP server reference, set by `bootstrap.ts` once the server has
+ * started. The agent-launcher IPC handler reads `.status` from it at
+ * click time. `null` before the server starts (and in tests).
+ *
+ * Typed structurally so this module does not import the `PdvMcpServer`
+ * class (which would pull MCP-server transitive deps into every importer).
+ */
+let mcpServerInstance: { status: McpStatus } | null = null;
+
+/**
+ * Register (or clear) the live MCP server reference.
+ *
+ * @param server - The running MCP server, or `null` to clear.
+ */
+export function setMcpServerInstance(
+  server: { status: McpStatus } | null,
+): void {
+  mcpServerInstance = server;
 }
 
 /**

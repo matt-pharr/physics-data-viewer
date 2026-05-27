@@ -133,6 +133,141 @@ describe("ConfigStore", () => {
     expect(errorSpy).toHaveBeenCalled();
   });
 
+  it("migrates legacy pythonEditorCmd to launchers.editor.fileCommand on load", () => {
+    const appDataDir = makeTempDir();
+    const configPath = path.join(appDataDir, "preferences.json");
+    fs.writeFileSync(
+      configPath,
+      JSON.stringify({
+        showPrivateVariables: false,
+        showModuleVariables: false,
+        showCallableVariables: false,
+        pythonEditorCmd: "nvim {}",
+        juliaEditorCmd: "code {}",
+      }),
+      "utf8",
+    );
+
+    const store = new ConfigStore(appDataDir);
+    const config = store.getAll();
+    expect(config.launchers?.editor?.fileCommand).toBe("nvim {}");
+    expect(config.pythonEditorCmd).toBeUndefined();
+    expect(config.juliaEditorCmd).toBeUndefined();
+
+    // The legacy keys are scrubbed from the persisted file, not just the
+    // in-memory view.
+    const onDisk = JSON.parse(fs.readFileSync(configPath, "utf8"));
+    expect(onDisk.pythonEditorCmd).toBeUndefined();
+    expect(onDisk.juliaEditorCmd).toBeUndefined();
+    expect(onDisk.launchers.editor.fileCommand).toBe("nvim {}");
+  });
+
+  it("migrates juliaEditorCmd when no pythonEditorCmd is present", () => {
+    const appDataDir = makeTempDir();
+    fs.writeFileSync(
+      path.join(appDataDir, "preferences.json"),
+      JSON.stringify({
+        showPrivateVariables: false,
+        showModuleVariables: false,
+        showCallableVariables: false,
+        juliaEditorCmd: "nvim {}",
+      }),
+      "utf8",
+    );
+
+    const store = new ConfigStore(appDataDir);
+    const config = store.getAll();
+    expect(config.launchers?.editor?.fileCommand).toBe("nvim {}");
+    expect(config.juliaEditorCmd).toBeUndefined();
+  });
+
+  it("drops legacy editor keys without overwriting an existing launchers.editor.fileCommand", () => {
+    const appDataDir = makeTempDir();
+    fs.writeFileSync(
+      path.join(appDataDir, "preferences.json"),
+      JSON.stringify({
+        showPrivateVariables: false,
+        showModuleVariables: false,
+        showCallableVariables: false,
+        pythonEditorCmd: "nvim {}",
+        launchers: { editor: { fileCommand: "code {}" } },
+      }),
+      "utf8",
+    );
+
+    const store = new ConfigStore(appDataDir);
+    const config = store.getAll();
+    // The newer launchers.editor value wins; the legacy key is just dropped.
+    expect(config.launchers?.editor?.fileCommand).toBe("code {}");
+    expect(config.pythonEditorCmd).toBeUndefined();
+  });
+
+  it("does not rewrite preferences.json when there is nothing to migrate", () => {
+    const appDataDir = makeTempDir();
+    const configPath = path.join(appDataDir, "preferences.json");
+    const original = JSON.stringify({
+      showPrivateVariables: true,
+      showModuleVariables: false,
+      showCallableVariables: false,
+    });
+    fs.writeFileSync(configPath, original, "utf8");
+    const mtimeBefore = fs.statSync(configPath).mtimeMs;
+
+    new ConfigStore(appDataDir);
+
+    // No legacy keys → migration is a no-op and must not touch the file.
+    expect(fs.readFileSync(configPath, "utf8")).toBe(original);
+    expect(fs.statSync(configPath).mtimeMs).toBe(mtimeBefore);
+  });
+
+  it("loads a full launchers block (terminal, editor, agent)", () => {
+    const appDataDir = makeTempDir();
+    fs.writeFileSync(
+      path.join(appDataDir, "preferences.json"),
+      JSON.stringify({
+        showPrivateVariables: false,
+        showModuleVariables: false,
+        showCallableVariables: false,
+        launchers: {
+          terminal: { preset: "alacritty" },
+          editor: { fileCommand: "nvim {}", isTuiEditor: true },
+          agent: { command: "claude --mcp-config {mcpConfig}", cwd: "working" },
+        },
+      }),
+      "utf8",
+    );
+
+    const store = new ConfigStore(appDataDir);
+    expect(store.getAll().launchers).toEqual({
+      terminal: { preset: "alacritty" },
+      editor: { fileCommand: "nvim {}", isTuiEditor: true },
+      agent: { command: "claude --mcp-config {mcpConfig}", cwd: "working" },
+    });
+  });
+
+  it("rejects an invalid launchers.agent.cwd and backs up the file", () => {
+    const appDataDir = makeTempDir();
+    fs.writeFileSync(
+      path.join(appDataDir, "preferences.json"),
+      JSON.stringify({
+        showPrivateVariables: false,
+        showModuleVariables: false,
+        showCallableVariables: false,
+        launchers: { agent: { cwd: "nonsense" } },
+      }),
+      "utf8",
+    );
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined);
+
+    // parseConfig throws → loadState backs up the file and falls back to defaults.
+    const store = new ConfigStore(appDataDir);
+    expect(store.getAll().launchers).toBeUndefined();
+    expect(
+      fs.readdirSync(appDataDir).some((n) => n.startsWith("preferences.json.corrupted-")),
+    ).toBe(true);
+    expect(errorSpy).toHaveBeenCalled();
+  });
+
   it("treats null optional fields as cleared values", () => {
     const appDataDir = makeTempDir();
     fs.writeFileSync(

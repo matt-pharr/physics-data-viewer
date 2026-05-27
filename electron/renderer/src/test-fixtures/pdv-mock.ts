@@ -214,6 +214,16 @@ function buildBase() {
       popup: stub<PDVApi["menu"]["popup"]>(async () => true),
       onAction: subStub<PDVApi["menu"]["onAction"]>(),
     },
+    system: {
+      // Tests run under Node (process.platform is set); mirror it so platform-
+      // sensitive renderer code under test sees the same value as in prod.
+      platform: process.platform,
+    },
+    launchers: {
+      openAgent: stub<PDVApi["launchers"]["openAgent"]>(async () => ({ success: true })),
+      openWorkingDir: stub<PDVApi["launchers"]["openWorkingDir"]>(async () => ({ success: true })),
+      checkAvailability: stub<PDVApi["launchers"]["checkAvailability"]>(async () => true),
+    },
     chrome: {
       getInfo: stub<PDVApi["chrome"]["getInfo"]>(),
       minimize: stub<PDVApi["chrome"]["minimize"]>(async () => true),

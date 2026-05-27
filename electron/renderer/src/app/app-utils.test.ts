@@ -119,4 +119,32 @@ describe("mergeConfigUpdate", () => {
     expect(merged.theme).toBe("dark");
     expect(merged.settings).toEqual({ appearance: {} });
   });
+
+  it("deep-merges the launchers subtree, preserving the agent slot", () => {
+    // The General tab writes only terminal + editor; the Agents-tab `agent`
+    // slot must survive in the in-memory copy (mirrors the main-side merge).
+    const base = {
+      launchers: {
+        terminal: { preset: 'terminal-app' },
+        agent: { command: 'claude', cwd: 'working' },
+      },
+    } as unknown as Config;
+    const merged = mergeConfigUpdate(base, {
+      launchers: {
+        terminal: { preset: 'iterm2' },
+        editor: { fileCommand: 'code {}' },
+      },
+    } as unknown as Partial<Config>);
+    expect(merged.launchers?.terminal?.preset).toBe('iterm2');
+    expect(merged.launchers?.editor?.fileCommand).toBe('code {}');
+    expect(merged.launchers?.agent?.command).toBe('claude');
+  });
+
+  it("leaves launchers untouched when an update omits it", () => {
+    const base = {
+      launchers: { agent: { command: 'claude' } },
+    } as unknown as Config;
+    const merged = mergeConfigUpdate(base, { theme: 'dark' });
+    expect(merged.launchers?.agent?.command).toBe('claude');
+  });
 });

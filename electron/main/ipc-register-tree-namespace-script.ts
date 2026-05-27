@@ -67,7 +67,11 @@ interface RegisterTreeNamespaceScriptIpcHandlersOptions {
   ) => { file: string; args: string[] };
   resolveEditorSpawn: (
     command: string,
-    args: string[]
+    args: string[],
+    opts?: {
+      wrapInTerminal?: boolean;
+      terminal?: import("./editor-spawn").TerminalLauncherConfig;
+    },
   ) => { file: string; args: string[] };
 }
 
@@ -598,10 +602,14 @@ export function registerTreeNamespaceScriptIpcHandlers(
     }
     const resolvedPath = filePath;
 
-    const isJulia = resolvedPath.endsWith(".jl");
-    const cmdString = isJulia ? config.juliaEditorCmd : config.pythonEditorCmd;
-    const { file, args } = buildEditorSpawn(cmdString, resolvedPath);
-    const spawnSpec = resolveEditorSpawn(file, args);
+    const { file, args } = buildEditorSpawn(
+      config.launchers?.editor?.fileCommand,
+      resolvedPath,
+    );
+    const spawnSpec = resolveEditorSpawn(file, args, {
+      wrapInTerminal: config.launchers?.editor?.isTuiEditor,
+      terminal: config.launchers?.terminal,
+    });
     try {
       const child = spawn(spawnSpec.file, spawnSpec.args, { detached: true, stdio: "ignore" });
       child.on("error", (err) => {

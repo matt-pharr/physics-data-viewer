@@ -30,4 +30,10 @@ cells) and run through PDV so results integrate into the project Tree. Do not
 run ad-hoc analysis or produce plots outside PDV.
 
 Use the pdv_help tool to introspect the pdv library API and any project symbol.
+
+Code cells: cell_write with a tab_id requires (a) the tab_id to refer to an
+existing tab and (b) you to have called cell_read on it in this session,
+and (c) the cell to be unchanged since that read. To create a new tab, call
+cell_write WITHOUT tab_id. The guard prevents clobbering edits the user or
+another agent made while you were reasoning.
 `;

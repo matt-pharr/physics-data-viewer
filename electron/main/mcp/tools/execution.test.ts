@@ -16,7 +16,7 @@ vi.mock("electron", () => ({
 }));
 
 import type { McpToolContext } from "../mcp-context";
-import type { ToolExtra } from "./_helpers";
+import { hashCellCode, type ToolExtra } from "./_helpers";
 import { registerExecutionTools } from "./execution";
 
 type ToolCallback = (
@@ -37,6 +37,14 @@ function captureTools(): { server: McpServer; tools: Map<string, ToolCallback> }
 interface CtxOpts {
   mutatingEnabled?: boolean;
   pdvRunEnabled?: boolean;
+  /** When set, `cellRpc.read` rejects with this error message. */
+  cellReadError?: string;
+  /** When set, used as the response from `cellRpc.read`. */
+  cellReadResult?: { id: number; name?: string; code: string };
+  /** Captures cell_write fire-and-forget pushes for assertions. */
+  cellWriteSpy?: ReturnType<typeof vi.fn>;
+  /** Hash recorded for the read-before-write guard, keyed by tab id. */
+  cellReadHashes?: Map<number, string>;
 }
 
 function makeCtx(opts: CtxOpts = {}): McpToolContext {
@@ -73,9 +81,23 @@ function makeCtx(opts: CtxOpts = {}): McpToolContext {
       },
     } as unknown as McpToolContext["hooks"],
     appVersion: "0.0.0-test",
-    cellRpc: {} as McpToolContext["cellRpc"],
+    cellRpc: {
+      read: vi.fn(async (_tabId: number) => {
+        if (opts.cellReadError) {
+          throw new Error(opts.cellReadError);
+        }
+        return opts.cellReadResult ?? { id: 1, code: "" };
+      }),
+      write: opts.cellWriteSpy ?? vi.fn(),
+      list: vi.fn(),
+    } as unknown as McpToolContext["cellRpc"],
     getRendererWindow: () => null,
     getSessionGeneration: () => 0,
+    recordCellRead: vi.fn((_sessionId, tabId, code) => {
+      opts.cellReadHashes?.set(tabId, hashCellCode(code));
+    }),
+    getCellReadHash: (_sessionId, tabId) =>
+      opts.cellReadHashes?.get(tabId),
   };
 }
 
@@ -123,5 +145,74 @@ describe("pdv_run gating", () => {
         extra,
       ),
     ).resolves.toBeDefined();
+  });
+});
+
+describe("cell_write tab_id contract", () => {
+  it("rejects with a clean error when tab_id refers to no existing tab", async () => {
+    // The renderer rejects unknown ids with `No cell tab with id N`. The
+    // tool layer must convert that into a tool-level error that explains
+    // the contract (use cell_list to find ids, omit tab_id to append) —
+    // not surface the bare RPC failure.
+    const { server, tools } = captureTools();
+    const cellWriteSpy = vi.fn();
+    registerExecutionTools(
+      server,
+      makeCtx({
+        mutatingEnabled: true,
+        cellReadError: "No cell tab with id 99",
+        cellWriteSpy,
+      }),
+    );
+    await expect(
+      tools.get("cell_write")!(
+        { tab_id: 99, code: "x = 1" },
+        extra,
+      ),
+    ).rejects.toThrow(/no cell tab with id 99.*omit tab_id to append/i);
+    // The fire-and-forget write must NOT have been issued — the previous
+    // behavior was an accidental append on a typo'd tab_id.
+    expect(cellWriteSpy).not.toHaveBeenCalled();
+  });
+
+  it("re-throws unrelated RPC failures untouched", async () => {
+    // Renderer-unreachable / timeout errors should bubble up as-is so the
+    // agent can distinguish "you typed the wrong id" from "PDV is gone."
+    const { server, tools } = captureTools();
+    registerExecutionTools(
+      server,
+      makeCtx({
+        mutatingEnabled: true,
+        cellReadError: "Cell read failed: no renderer window",
+      }),
+    );
+    await expect(
+      tools.get("cell_write")!(
+        { tab_id: 1, code: "x = 1" },
+        extra,
+      ),
+    ).rejects.toThrow(/no renderer window/);
+  });
+
+  it("appends without any prior read when tab_id is omitted", async () => {
+    // The guard only fires on overwrites of an existing tab_id. An append
+    // is safe by definition — there's nothing to clobber.
+    const { server, tools } = captureTools();
+    const cellWriteSpy = vi.fn();
+    registerExecutionTools(
+      server,
+      makeCtx({
+        mutatingEnabled: true,
+        cellWriteSpy,
+      }),
+    );
+    await expect(
+      tools.get("cell_write")!({ code: "x = 1" }, extra),
+    ).resolves.toBeDefined();
+    expect(cellWriteSpy).toHaveBeenCalledWith({
+      tabId: undefined,
+      code: "x = 1",
+      name: undefined,
+    });
   });
 });

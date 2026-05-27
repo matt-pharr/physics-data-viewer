@@ -6,10 +6,13 @@
  */
 
 import type {
+  AgentLauncherConfig,
   Config,
+  EditorLauncherConfig,
   EnvironmentInfo,
   EnvironmentInstallResult,
   InstallOutputChunk,
+  LauncherCheck,
   KernelExecutionError,
   KernelExecutionOrigin,
   KernelExecuteResult,
@@ -41,6 +44,8 @@ import type {
   ProjectLoadResult,
   ProjectSaveResult,
   ScriptParameter,
+  TerminalLauncherConfig,
+  TerminalPreset,
   ScriptRunResult,
   Theme,
   UpdateStatus,
@@ -49,7 +54,9 @@ import type {
 
 /** Re-export core preload API contract types for renderer imports. */
 export type {
+  AgentLauncherConfig,
   Config,
+  EditorLauncherConfig,
   EnvironmentInfo,
   EnvironmentInstallResult,
   InstallOutputChunk,
@@ -60,6 +67,7 @@ export type {
   KernelUvContext,
   ProjectPackage,
   ImportedModuleDescriptor,
+  LauncherCheck,
   LayoutActionRef,
   LayoutContainer,
   LayoutInputRef,
@@ -84,6 +92,8 @@ export type {
   ProjectSaveResult,
   ScriptParameter,
   ScriptRunResult,
+  TerminalLauncherConfig,
+  TerminalPreset,
   Theme,
   UpdateStatus,
   WindowChromeInfo,

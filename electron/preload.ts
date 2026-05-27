@@ -238,6 +238,17 @@ const api: PDVApi = {
     popup: (menuId, x, y) => ipcRenderer.invoke(IPC.menu.popup, menuId, x, y),
     onAction: (callback) => onPush(IPC.push.menuAction, callback),
   },
+  system: {
+    // Read once at preload time and snapshot. `process.platform` is a constant
+    // for the life of the process, so there is no point routing it through an
+    // IPC channel — renderers read this synchronously from `window.pdv`.
+    platform: process.platform,
+  },
+  launchers: {
+    openAgent: () => ipcRenderer.invoke(IPC.launchers.openAgent),
+    openWorkingDir: () => ipcRenderer.invoke(IPC.launchers.openWorkingDir),
+    checkAvailability: (check) => ipcRenderer.invoke(IPC.launchers.checkAvailability, check),
+  },
   chrome: {
     getInfo: () => ipcRenderer.invoke(IPC.chrome.getInfo),
     minimize: () => ipcRenderer.invoke(IPC.chrome.minimize),

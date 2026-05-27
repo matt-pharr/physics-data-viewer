@@ -68,3 +68,23 @@ export const SettingsIcon: React.FC<IconProps> = (props) => (
     </g>
   </svg>
 );
+
+/** Robot-head icon for the AI-agent launcher button. */
+export const AgentIcon: React.FC<IconProps> = (props) => (
+  <svg {...defaults} {...props}>
+    <rect x="4" y="7.5" width="12" height="8.5" rx="2" />
+    <line x1="10" y1="4" x2="10" y2="7.5" />
+    <circle cx="10" cy="3.3" r="1.1" fill="currentColor" stroke="none" />
+    <circle cx="8" cy="11.5" r="1.1" fill="currentColor" stroke="none" />
+    <circle cx="12" cy="11.5" r="1.1" fill="currentColor" stroke="none" />
+  </svg>
+);
+
+/** Folder-with-code-caret icon for the "open working directory" button. */
+export const FolderCodeIcon: React.FC<IconProps> = (props) => (
+  <svg {...defaults} {...props}>
+    <path d="M3 6a1 1 0 0 1 1-1h3.5l1.5 2H16a1 1 0 0 1 1 1v6a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1z" />
+    <polyline points="8.5,10 7,11.5 8.5,13" />
+    <polyline points="11.5,10 13,11.5 11.5,13" />
+  </svg>
+);

@@ -37,6 +37,7 @@ import { PDVMessageType } from "../../pdv-protocol";
 import type { McpToolContext } from "../mcp-context";
 import { executeAndTranscribe, TranscriptWriter } from "../transcript";
 import {
+  assertCellReadFresh,
   assertCurrentGeneration,
   assertMutatingToolsEnabled,
   assertPdvRunEnabled,
@@ -182,6 +183,11 @@ export function registerExecutionTools(server: McpServer, ctx: McpToolContext): 
     async ({ tab_id }, extra) => {
       assertCurrentGeneration(ctx, extra);
       const cell = await ctx.cellRpc.read(tab_id);
+      // Record this read for the cell_write read-before-write guard. We key
+      // on `cell.id` (the renderer's canonical id) rather than the request
+      // arg so an arg of e.g. `-1` mapping to an active tab still arms the
+      // guard for the right tab.
+      ctx.recordCellRead(extra.sessionId, cell.id, cell.code);
       const header =
         `cell id: ${cell.id}` + (cell.name ? `  (${cell.name})` : "");
       return textResult(`${header}\n\n${cell.code}`);
@@ -193,9 +199,13 @@ export function registerExecutionTools(server: McpServer, ctx: McpToolContext): 
     {
       title: "Write a PDV code cell",
       description:
-        "Overwrite a cell tab's source, or append a new tab when `tab_id` " +
-        "is omitted or matches no existing tab. The renderer updates its " +
-        "live tab state on receipt.",
+        "Overwrite a cell tab's source, or — when `tab_id` is omitted — " +
+        "append a new tab. The renderer updates its live tab state on " +
+        "receipt. When `tab_id` is provided it MUST refer to an existing " +
+        "tab (use `cell_list` to discover ids); you must also have called " +
+        "`cell_read` on that tab first, and the cell must not have changed " +
+        "since — this prevents clobbering edits the user or another agent " +
+        "made while you were reasoning. To create a new tab, omit `tab_id`.",
       inputSchema: {
         tab_id: z
           .number()
@@ -209,6 +219,39 @@ export function registerExecutionTools(server: McpServer, ctx: McpToolContext): 
     async ({ tab_id, code, name }, extra) => {
       assertCurrentGeneration(ctx, extra);
       assertMutatingToolsEnabled(ctx);
+      if (tab_id !== undefined) {
+        // Read-before-write: fetch the current source and compare it to the
+        // hash the session captured at cell_read time. Throws if the
+        // session never read this tab, or if the cell changed since.
+        // Convert the renderer's "no tab matches" error into an actionable
+        // tool error so the agent doesn't see a bare RPC failure.
+        let current;
+        try {
+          current = await ctx.cellRpc.read(tab_id);
+        } catch (err) {
+          if (err instanceof Error && /No cell tab with id/.test(err.message)) {
+            throw new Error(
+              `cell_write refused: no cell tab with id ${tab_id}. ` +
+                "Call cell_list to discover existing tab ids, or omit " +
+                "tab_id to append a new tab.",
+            );
+          }
+          throw err;
+        }
+        // Key the guard on `current.id` (the renderer's canonical id) — the
+        // same key cell_read used to arm it. This stays correct even when
+        // the renderer canonicalizes a caller-supplied id (e.g. -1 → active
+        // tab), because the canonicalized id flows back through `current`.
+        assertCellReadFresh(ctx, extra, current.id, current.code);
+        // Promote the write to the new "last seen" state so the session can
+        // immediately follow up with another cell_write without re-reading.
+        // Note: cell_rpc.write is fire-and-forget (see cell-rpc.ts), so the
+        // promoted hash is the agent's *intended* code, not whatever the
+        // renderer ultimately applied. That's good enough — the guard's
+        // scope is the "agent thought for 30s then clobbered" window, not
+        // the millisecond race against a concurrent user edit.
+        ctx.recordCellRead(extra.sessionId, current.id, code);
+      }
       ctx.cellRpc.write({ tabId: tab_id, code, name });
       return textResult(
         tab_id !== undefined

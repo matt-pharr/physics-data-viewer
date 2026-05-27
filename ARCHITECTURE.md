@@ -908,6 +908,47 @@ Rules:
 - Code-cell persistence in `~/.PDV/state/code-cells.json` is separate from
   project save snapshots (`<project>/code-cells.json`). The `state/` directory stores session-level renderer state that is not tied to any project.
 
+#### External-app launchers (`launchers`)
+
+`preferences.json` carries a `launchers` block for configuring how PDV
+invokes external applications:
+
+- `launchers.terminal` — `{ preset, customTemplate? }`. The `preset` selects
+  a terminal emulator (`terminal-app`, `iterm2`, `alacritty`, `kitty`,
+  `ghostty`, `wezterm`, `gnome-terminal`, `konsole`, `xterm`,
+  `x-terminal-emulator`, `windows-terminal`) or one of two meta-presets:
+  `custom` (use `customTemplate`) and `none` (no terminal wrapper).
+
+  TUI editors (`vim`, `nvim`, …) opened via `script.edit` are wrapped in the
+  selected terminal so they get a real window. `editor-spawn.ts` owns the
+  per-platform preset templates and the `{cmd}` / `{cmdstr}` placeholder
+  expansion. When `launchers.terminal` is unset, a platform default is used
+  (`terminal-app` on macOS, `x-terminal-emulator` on Linux, `wt.exe` on
+  Windows).
+
+- `launchers.editor` — `{ fileCommand?, dirCommand?, isTuiEditor? }`. The
+  command PDV uses to open a script (`fileCommand`) or a directory
+  (`dirCommand`); `{}` is the path placeholder. `isTuiEditor` forces terminal
+  wrapping on/off; when unset PDV auto-detects from the command basename.
+  This slot supersedes the legacy `pythonEditorCmd` / `juliaEditorCmd` keys —
+  `ConfigStore` migrates a pre-existing `pythonEditorCmd` into
+  `launchers.editor.fileCommand` once, at load, and drops the legacy keys.
+
+- `launchers.agent` — `{ command?, cwd? }`. The AI-agent CLI launched by the
+  activity-bar agent button. The command runs inside the configured terminal
+  preset, in a login shell that has `cd`-ed into the project (`cwd: 'project'`)
+  or session working directory (`cwd: 'working'`). Three placeholders are
+  substituted with quoted absolute paths: `{mcpConfig}`, `{projectRoot}`,
+  `{workingDir}`. Before launch, `mcp/mcp-config-writer.ts` materializes a
+  `.pdv-mcp.json` (mode `0600`) into the kernel working directory so the agent
+  — Claude Code by default — connects back to PDV's MCP server. The working
+  directory is ephemeral, so the embedded bearer token never lands in a
+  user-visible or version-controlled location.
+
+The renderer reads the host platform synchronously via the preload value
+`window.pdv.system.platform` — exposed as a constant rather than an IPC
+channel because `process.platform` never changes during a session.
+
 ---
 
 ## 7. The Tree: Data Model and Authority
@@ -1584,6 +1625,8 @@ The API surface:
 - `window.pdv.guiEditor.*` — GUI editor and viewer windows: `open` (editor), `openViewer` (standalone GUI viewer), `context`, `read`, `save`
 - `window.pdv.environment.*` — Python environment management: `list`, `check`, `install`, `refresh`; push: `onInstallOutput(cb) → unsub`
 - `window.pdv.chrome.*` — window chrome controls: `getInfo`, `minimize`, `toggleMaximize`, `close`; push: `onStateChanged(cb) → unsub`
+- `window.pdv.system.*` — constant host facts injected at preload time: `platform` (the main process's `process.platform`). Exposed as a plain value, not a function — it never changes during a session, so it needs no IPC channel
+- `window.pdv.launchers.*` — action-bar external-app launchers: `openAgent` (launch the configured AI agent in a terminal), `openWorkingDir` (open the active kernel's working directory in the configured editor/IDE), `checkAvailability` (probe whether a terminal/editor/file-manager is installed, without launching it — used to gate Settings Save)
 - `window.pdv.progress.*` — operation progress: push only: `onProgress(cb) → unsub`
 - `window.pdv.menu.*` — menu bridge: `updateRecentProjects(paths)`, `onAction(cb) → unsub`
 

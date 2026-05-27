@@ -166,13 +166,19 @@ export function registerAppStateIpcHandlers(
     for (const key of Object.keys(updates) as Array<keyof PDVConfig>) {
       const value = updates[key];
       if (value === undefined) continue;
-      if (key === "mcp" && value !== null && typeof value === "object") {
-        // The renderer's `Config['mcp']` type intentionally omits main-only
-        // fields (e.g. `authToken`). A full replace would silently drop the
-        // persisted bearer token and break every connected agent on the
-        // next toggle, so merge into the existing `mcp` subtree instead.
-        const existing = (configStore.get("mcp") ?? {}) as NonNullable<PDVConfig["mcp"]>;
-        configStore.set("mcp", { ...existing, ...(value as PDVConfig["mcp"]) });
+      if ((key === "mcp" || key === "launchers") && value !== null && typeof value === "object") {
+        // Shallow-merge these nested subtrees rather than full-replacing them:
+        // - `mcp`: the renderer's `Config['mcp']` type omits main-only fields
+        //   (e.g. `authToken`); a full replace would drop the persisted bearer
+        //   token and break every connected agent on the next toggle.
+        // - `launchers`: a caller may send a partial update (just `terminal`,
+        //   say); a full replace would silently drop the sibling `editor` /
+        //   `agent` slots.
+        const existing = (configStore.get(key) ?? {}) as Record<string, unknown>;
+        configStore.set(key, {
+          ...existing,
+          ...(value as Record<string, unknown>),
+        } as PDVConfig[typeof key]);
       } else {
         configStore.set(key, value);
       }

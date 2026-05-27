@@ -7,9 +7,12 @@
 import { describe, expect, it } from "vitest";
 
 import type { McpToolContext } from "../mcp-context";
+import type { ToolExtra } from "./_helpers";
 import {
+  assertCellReadFresh,
   assertMutatingToolsEnabled,
   assertPdvRunEnabled,
+  hashCellCode,
 } from "./_helpers";
 
 /** Minimal context exposing only the configStore needed by the gate helpers. */
@@ -66,6 +69,36 @@ describe("assertPdvRunEnabled", () => {
       assertPdvRunEnabled(
         makeCtx({ pdvRunEnabled: true, mutatingToolsEnabled: false }),
       ),
+    ).not.toThrow();
+  });
+});
+
+describe("assertCellReadFresh (read-before-write guard)", () => {
+  /** Build a ctx whose `getCellReadHash` returns a fixed recorded hash. */
+  function ctxWithRecordedHash(recorded: string | undefined): McpToolContext {
+    return {
+      getCellReadHash: () => recorded,
+    } as unknown as McpToolContext;
+  }
+  const extra = { sessionId: "s1" } as ToolExtra;
+
+  it("throws when the session never read this tab", () => {
+    expect(() =>
+      assertCellReadFresh(ctxWithRecordedHash(undefined), extra, 7, "x = 1"),
+    ).toThrow(/must call cell_read/);
+  });
+
+  it("throws when the cell changed since the session's last read", () => {
+    const staleHash = hashCellCode("x = 1");
+    expect(() =>
+      assertCellReadFresh(ctxWithRecordedHash(staleHash), extra, 7, "x = 2"),
+    ).toThrow(/changed since you last/);
+  });
+
+  it("passes when the recorded hash matches the current source", () => {
+    const liveHash = hashCellCode("x = 1");
+    expect(() =>
+      assertCellReadFresh(ctxWithRecordedHash(liveHash), extra, 7, "x = 1"),
     ).not.toThrow();
   });
 });

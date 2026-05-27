@@ -402,6 +402,34 @@ const App: React.FC = () => {
   const currentKernelIdRef = useRef(currentKernelId);
   currentKernelIdRef.current = currentKernelId;
 
+  // Guards re-entrant agent-button clicks so a rapid double-click doesn't
+  // spawn two terminals. Set true for the duration of the openAgent call.
+  const agentLaunchingRef = useRef(false);
+  const handleOpenAgent = useCallback(() => {
+    if (agentLaunchingRef.current) return;
+    agentLaunchingRef.current = true;
+    void window.pdv.launchers
+      .openAgent()
+      .then((result) => {
+        if (!result.success) {
+          console.error('[pdv] failed to launch agent:', result.error);
+          window.alert(result.error ?? 'Failed to launch the AI agent.');
+        }
+      })
+      .finally(() => {
+        agentLaunchingRef.current = false;
+      });
+  }, []);
+
+  const handleOpenWorkingDir = useCallback(() => {
+    void window.pdv.launchers.openWorkingDir().then((result) => {
+      if (!result.success) {
+        console.error('[pdv] failed to open working directory:', result.error);
+        window.alert(result.error ?? 'Failed to open the working directory.');
+      }
+    });
+  }, []);
+
   const handleKernelCrash = useCallback((crashedKernelId: string) => {
     if (crashedKernelId === currentKernelIdRef.current) {
       setKernelStatus('error');
@@ -1493,6 +1521,8 @@ const App: React.FC = () => {
           leftPanel={leftPanel}
           onActivityBarClick={handleActivityBarClick}
           onSettingsClick={() => { setSettingsInitialTab('general'); setShowSettings(true); }}
+          onAgentClick={handleOpenAgent}
+          onOpenWorkingDir={handleOpenWorkingDir}
           guiModules={importedGuiModules}
           kernelId={currentKernelId}
         />

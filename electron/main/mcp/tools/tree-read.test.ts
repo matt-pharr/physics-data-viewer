@@ -76,6 +76,8 @@ function makeCtx(query: QueryFn, kernelRunning = true): McpToolContext {
     cellRpc: {} as McpToolContext["cellRpc"],
     getRendererWindow: () => null,
     getSessionGeneration: () => 0,
+    recordCellRead: () => undefined,
+    getCellReadHash: () => undefined,
   };
 }
 

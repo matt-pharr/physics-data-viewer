@@ -47,7 +47,7 @@ import * as path from "path";
 import * as fs from "fs";
 
 import { createWindow, wireAppEvents } from "./app";
-import { getMcpServerHooks } from "./index";
+import { getMcpServerHooks, setMcpServerInstance } from "./index";
 import { CellRpcClient } from "./mcp/cell-rpc";
 import { PdvMcpServer } from "./mcp/mcp-server";
 import { CommRouter } from "./comm-router";
@@ -133,6 +133,9 @@ async function openMainWindow(): Promise<void> {
         });
         try {
           await mcpServer.start();
+          // Publish the live server so the agent-launcher IPC handler can
+          // read its status (port + token) at button-click time.
+          setMcpServerInstance(mcpServer);
         } catch (error) {
           console.error("[PDV] Failed to start MCP server:", error);
         }

@@ -118,6 +118,7 @@ import { registerProjectIpcHandlers } from "./ipc-register-project";
 import { registerAppStateIpcHandlers } from "./ipc-register-app-state";
 import { registerModuleWindowIpcHandlers } from "./ipc-register-module-windows";
 import { registerGuiEditorIpcHandlers } from "./ipc-register-gui-editor";
+import { registerLaunchersIpcHandlers } from "./ipc-register-launchers";
 import {
   createBrowserWindowMock,
   createCommRouterMock,
@@ -212,7 +213,7 @@ function setupAll(): void {
     ensureScriptFile: async () => undefined,
     ensureLibFile: async () => undefined,
     buildEditorSpawn: () => ({ file: "", args: [] }),
-    resolveEditorSpawn: () => ({ file: "", args: [] }),
+    resolveEditorSpawn: (_file: string, _args: string[], _opts?: unknown) => ({ file: "", args: [] }),
   });
   registerModulesIpcHandlers({
     win: win.win,
@@ -264,6 +265,13 @@ function setupAll(): void {
     guiEditorWindowManager: createGuiEditorWindowManagerMock(),
     guiViewerWindowManager: createGuiViewerWindowManagerMock(),
     commRouter: commRouter.router,
+  });
+  registerLaunchersIpcHandlers({
+    kernelWorkingDirs,
+    getActiveKernelId: () => null,
+    getActiveProjectDir: () => null,
+    getConfig: () => config.store.getAll() as PDVConfig,
+    getMcpStatus: () => null,
   });
 }
 

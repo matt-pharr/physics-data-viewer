@@ -115,7 +115,7 @@ function setup(initial: { knownAliases?: Set<string> } = {}): Harness {
     ensureScriptFile: async () => undefined,
     ensureLibFile: async () => undefined,
     buildEditorSpawn: (_cmd, file) => ({ file: "code", args: [file] }),
-    resolveEditorSpawn: (file, args) => ({ file, args }),
+    resolveEditorSpawn: (file, args, _opts) => ({ file, args }),
   });
 
   return {

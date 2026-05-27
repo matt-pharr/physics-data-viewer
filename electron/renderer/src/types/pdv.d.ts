@@ -34,6 +34,21 @@ export type { NodeDescriptor } from '../../../main/ipc';
 /** Periodic kernel-memory snapshot pushed on `IPC.push.kernelMemory`. */
 export type { KernelMemoryPayload } from '../../../main/ipc';
 
+/** Terminal-emulator preset identifier for the launchers config. */
+export type { TerminalPreset } from '../../../main/ipc';
+
+/** Persisted terminal-launcher selection (`launchers.terminal`). */
+export type { TerminalLauncherConfig } from '../../../main/ipc';
+
+/** Persisted editor / IDE launcher config (`launchers.editor`). */
+export type { EditorLauncherConfig } from '../../../main/ipc';
+
+/** Persisted AI-agent launcher config (`launchers.agent`). */
+export type { AgentLauncherConfig } from '../../../main/ipc';
+
+/** Launcher availability-check descriptor for `launchers.checkAvailability`. */
+export type { LauncherCheck } from '../../../main/ipc';
+
 /** Runtime kernel descriptor returned by `kernels.start/list/restart`. */
 export interface KernelInfo {
   /** Opaque kernel id used in subsequent API calls. */
@@ -309,12 +324,10 @@ export interface Config {
   autoRefreshNamespace?: boolean;
   /** Coarse light/dark mode override. */
   theme?: "light" | "dark";
-  /** External editor command for Python scripts. Uses `{}` as file-path placeholder. */
+  /** @deprecated Superseded by `launchers.editor.fileCommand` (migrated on load). */
   pythonEditorCmd?: string;
-  /** External editor command for Julia scripts. Uses `{}` as file-path placeholder. */
+  /** @deprecated Superseded by `launchers.editor.fileCommand` (migrated on load). */
   juliaEditorCmd?: string;
-  /** File-manager command to reveal a file/folder. Uses `{}` as placeholder. */
-  fileManagerCmd?: string;
   /** Default parent directory for new project saves (pre-fills Save As dialog). */
   defaultSaveLocation?: string;
   /** Base directory for session working directories. */
@@ -336,6 +349,15 @@ export interface Config {
   uv?: {
     /** Absolute path to a `uv` binary overriding the bundled one. */
     binaryPath?: string;
+  };
+  /** Configurable external-app launchers (terminal wrap, editor, agent). */
+  launchers?: {
+    /** Terminal emulator used to wrap TUI editors (vim, nvim, …). */
+    terminal?: TerminalLauncherConfig;
+    /** Editor / IDE commands (supersedes `pythonEditorCmd`/`juliaEditorCmd`). */
+    editor?: EditorLauncherConfig;
+    /** AI-agent CLI launched by the action-bar agent button. */
+    agent?: AgentLauncherConfig;
   };
   settings?: {
     /** Keyboard shortcut overrides. */
@@ -1091,6 +1113,20 @@ export interface PDVApi {
     getModel(): Promise<AppMenuTopLevel[]>;
     popup(menuId: AppMenuTopLevel["id"], x: number, y: number): Promise<boolean>;
     onAction(callback: (payload: MenuActionPayload) => void): () => void;
+  };
+  /** Constant facts about the host system, injected at preload time. */
+  system: {
+    /** Node.js platform identifier of the main process. */
+    platform: NodeJS.Platform;
+  };
+  /** External-app launchers driven by the action bar. */
+  launchers: {
+    /** Launch the configured AI agent in a terminal pointed at PDV's MCP server. */
+    openAgent(): Promise<{ success: boolean; error?: string }>;
+    /** Open the active kernel's working directory in the configured editor/IDE. */
+    openWorkingDir(): Promise<{ success: boolean; error?: string }>;
+    /** Check whether a launcher is installed (no launch), to gate Settings Save. */
+    checkAvailability(check: LauncherCheck): Promise<boolean>;
   };
   chrome: {
     getInfo(): Promise<WindowChromeInfo>;
