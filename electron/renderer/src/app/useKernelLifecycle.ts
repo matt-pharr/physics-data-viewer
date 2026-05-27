@@ -23,6 +23,8 @@ interface UseKernelLifecycleOptions {
   setNamespaceRefreshToken: Dispatch<SetStateAction<number>>;
   /** Bumps the token to trigger a Tree panel refetch. */
   setTreeRefreshToken: Dispatch<SetStateAction<number>>;
+  /** Setter for the active environment mode ("uv" project venv vs shared). */
+  setEnvironmentMode: Dispatch<SetStateAction<'uv' | 'shared'>>;
 }
 
 export function useKernelLifecycle(options: UseKernelLifecycleOptions) {
@@ -36,20 +38,21 @@ export function useKernelLifecycle(options: UseKernelLifecycleOptions) {
     setLogs,
     setNamespaceRefreshToken,
     setTreeRefreshToken,
+    setEnvironmentMode,
   } = options;
 
   // Serializes startKernel calls so only one runs at a time.
   // A second call while one is in-flight queues and replaces any
   // previously queued call (only the latest queued call runs).
   const startQueueRef = useRef<Promise<boolean>>(Promise.resolve(false));
-  const pendingStartRef = useRef<{ cfg: Config; language: 'python' | 'julia'; resolve: (v: boolean) => void } | null>(null);
+  const pendingStartRef = useRef<{ cfg: Config; language: 'python' | 'julia'; uvContext?: import('../types').KernelUvContext; resolve: (v: boolean) => void } | null>(null);
   // Mirrors `lastError` synchronously so callers can read the message right
   // after `await startKernel()` returns, without waiting for React to flush
   // setLastError. Used to surface diagnostic text (e.g. handshake-step errors)
   // in the env-settings dialog warning slot.
   const lastErrorRef = useRef<string | undefined>(undefined);
 
-  const doStartKernel = useCallback(async (cfg: Config, language: 'python' | 'julia' = 'python'): Promise<boolean> => {
+  const doStartKernel = useCallback(async (cfg: Config, language: 'python' | 'julia' = 'python', uvContext?: import('../types').KernelUvContext): Promise<boolean> => {
     setKernelStatus('starting');
     setLastError(undefined);
     lastErrorRef.current = undefined;
@@ -72,8 +75,11 @@ export function useKernelLifecycle(options: UseKernelLifecycleOptions) {
         };
       }
 
-      const kernel = await window.pdv.kernels.start(spec);
+      const kernel = await window.pdv.kernels.start(spec, uvContext);
       setCurrentKernelId(kernel.id);
+      // uvContext is only supplied for uv-project launches; its presence is
+      // the authoritative signal that this kernel runs in a project venv.
+      setEnvironmentMode(uvContext ? 'uv' : 'shared');
       setTreeRefreshToken((prev) => prev + 1);
       setNamespaceRefreshToken((prev) => prev + 1);
       setKernelStatus('ready');
@@ -94,17 +100,18 @@ export function useKernelLifecycle(options: UseKernelLifecycleOptions) {
     setLastError,
     setNamespaceRefreshToken,
     setTreeRefreshToken,
+    setEnvironmentMode,
   ]);
 
   /** Start (or restart) a kernel. Returns `true` on success, `false` on failure. */
-  const startKernel = useCallback((cfg: Config, language: 'python' | 'julia' = 'python'): Promise<boolean> => {
+  const startKernel = useCallback((cfg: Config, language: 'python' | 'julia' = 'python', uvContext?: import('../types').KernelUvContext): Promise<boolean> => {
     // If a start is already in-flight, queue this call (replacing any
     // previously queued call — only the latest wins).
     const prev = pendingStartRef.current;
     if (prev) prev.resolve(false);
 
     return new Promise<boolean>((resolve) => {
-      pendingStartRef.current = { cfg, language, resolve };
+      pendingStartRef.current = { cfg, language, uvContext, resolve };
       // Chain onto the current start so it runs after completion.
       startQueueRef.current = startQueueRef.current
         .catch(() => {})
@@ -116,7 +123,7 @@ export function useKernelLifecycle(options: UseKernelLifecycleOptions) {
             return false;
           }
           pendingStartRef.current = null;
-          return doStartKernel(queued.cfg, queued.language).then((ok) => {
+          return doStartKernel(queued.cfg, queued.language, queued.uvContext).then((ok) => {
             queued.resolve(ok);
             return ok;
           });

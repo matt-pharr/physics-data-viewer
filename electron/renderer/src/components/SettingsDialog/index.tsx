@@ -32,9 +32,10 @@ import {
 import { ShortcutCapture } from './ShortcutCapture';
 import { AppearanceTab } from './AppearanceTab';
 import { AgentsTab } from './AgentsTab';
+import { PackagesTab } from './PackagesTab';
 import { DEFAULT_AUTOSAVE_INTERVAL_S } from '../../app/constants';
 
-type SettingsTab = 'general' | 'shortcuts' | 'appearance' | 'agents' | 'runtime' | 'about';
+type SettingsTab = 'general' | 'shortcuts' | 'appearance' | 'agents' | 'runtime' | 'packages' | 'about';
 
 const DEFAULT_VSCODE_PAIR = THEME_PAIRS.find((pair) => pair.name === 'VSCode');
 
@@ -63,6 +64,8 @@ interface SettingsDialogProps {
    *  caller can prompt about unsaved changes before the app restarts. */
   onInstallUpdate?: () => void;
   envWarning?: string | null;
+  /** Active environment mode — drives the Packages tab content (§10.5.13). */
+  environmentMode?: 'uv' | 'shared';
 }
 
 /** Top-level settings modal used by the App shell. */
@@ -77,6 +80,7 @@ export const SettingsDialog: React.FC<SettingsDialogProps> = ({
   onEnvSave,
   onInstallUpdate,
   envWarning,
+  environmentMode,
 }) => {
   const [activeTab, setActiveTab] = useState<SettingsTab>(initialTab);
   const [editedShortcuts, setEditedShortcuts] = useState<Shortcuts>(shortcuts);
@@ -471,6 +475,7 @@ export const SettingsDialog: React.FC<SettingsDialogProps> = ({
           <button className={`tab ${activeTab === 'appearance' ? 'active' : ''}`} onClick={() => setActiveTab('appearance')}>Appearance</button>
           <button className={`tab ${activeTab === 'agents' ? 'active' : ''}`} onClick={() => setActiveTab('agents')}>Agents</button>
           <button className={`tab ${activeTab === 'runtime' ? 'active' : ''}`} onClick={() => setActiveTab('runtime')}>Runtime</button>
+          <button className={`tab ${activeTab === 'packages' ? 'active' : ''}`} onClick={() => setActiveTab('packages')}>Packages</button>
           <button className={`tab ${activeTab === 'about' ? 'active' : ''}`} onClick={() => setActiveTab('about')}>About</button>
         </div>
         <div className="dialog-body">
@@ -726,6 +731,8 @@ export const SettingsDialog: React.FC<SettingsDialogProps> = ({
               warning={envWarning}
               onSelect={onEnvSave}
             />
+          ) : activeTab === 'packages' ? (
+            <PackagesTab environmentMode={environmentMode} />
           ) : activeTab === 'about' ? (
             <div className="settings-about">
               <div className="about-hero">

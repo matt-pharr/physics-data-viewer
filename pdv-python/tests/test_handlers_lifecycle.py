@@ -48,6 +48,31 @@ class TestHandleInit:
             handle_init(msg)
         assert tree._working_dir == tmp_working_dir
 
+    def test_init_sets_uv_binary_when_provided(self, tmp_working_dir):
+        """A uv_binary in the payload is stored on the tree for pdv.install."""
+        mock_comm = _make_mock_comm()
+        tree = PDVTree()
+        msg = _make_init_msg(working_dir=tmp_working_dir)
+        msg["payload"]["uv_binary"] = "/bundled/uv"
+        with (
+            patch.object(comms_mod, "_comm", mock_comm),
+            patch.object(comms_mod, "_pdv_tree", tree),
+        ):
+            handle_init(msg)
+        assert tree._uv_binary == "/bundled/uv"
+
+    def test_init_leaves_uv_binary_none_in_shared_mode(self, tmp_working_dir):
+        """Without a uv_binary (shared mode), the tree's uv binary stays None."""
+        mock_comm = _make_mock_comm()
+        tree = PDVTree()
+        msg = _make_init_msg(working_dir=tmp_working_dir)
+        with (
+            patch.object(comms_mod, "_comm", mock_comm),
+            patch.object(comms_mod, "_pdv_tree", tree),
+        ):
+            handle_init(msg)
+        assert tree._uv_binary is None
+
     def test_valid_init_sends_ok_response(self, tmp_working_dir):
         """A valid pdv.init sends pdv.init.response with status=ok."""
         mock_comm = _make_mock_comm()

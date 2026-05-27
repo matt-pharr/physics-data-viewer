@@ -46,6 +46,7 @@ describe("ConfigStore", () => {
       showCallableVariables: false,
       autoRefreshNamespace: false,
       autoSaveIntervalSeconds: 300,
+      defaultPackages: ["numpy", "matplotlib"],
       settings: {
         appearance: {
           themeName: "Dark+ (VSCode)",
@@ -93,6 +94,7 @@ describe("ConfigStore", () => {
       showCallableVariables: false,
       autoRefreshNamespace: false,
       autoSaveIntervalSeconds: 300,
+      defaultPackages: ["numpy", "matplotlib"],
       theme: "dark",
       settings: {
         appearance: {
@@ -115,6 +117,7 @@ describe("ConfigStore", () => {
       showCallableVariables: false,
       autoRefreshNamespace: false,
       autoSaveIntervalSeconds: 300,
+      defaultPackages: ["numpy", "matplotlib"],
       settings: {
         appearance: {
           themeName: "Dark+ (VSCode)",
@@ -292,6 +295,48 @@ describe("ConfigStore", () => {
     expect(config.showPrivateVariables).toBe(true);
     expect(config.showModuleVariables).toBe(false);
     expect(config.showCallableVariables).toBe(true);
+  });
+
+  it("loads uv.binaryPath from preferences.json", () => {
+    const appDataDir = makeTempDir();
+    fs.writeFileSync(
+      path.join(appDataDir, "preferences.json"),
+      JSON.stringify({ uv: { binaryPath: "/opt/uv/uv" } }, null, 2),
+      "utf8"
+    );
+
+    const store = new ConfigStore(appDataDir);
+    expect(store.get("uv")).toEqual({ binaryPath: "/opt/uv/uv" });
+  });
+
+  it("backs up a config whose uv field is not an object", () => {
+    const appDataDir = makeTempDir();
+    fs.writeFileSync(
+      path.join(appDataDir, "preferences.json"),
+      JSON.stringify({ uv: "nonsense" }, null, 2),
+      "utf8"
+    );
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+
+    const store = new ConfigStore(appDataDir);
+    expect(store.get("uv")).toBeUndefined();
+    expect(
+      fs
+        .readdirSync(appDataDir)
+        .some((name) => name.startsWith("preferences.json.corrupted-"))
+    ).toBe(true);
+  });
+
+  it("loads a custom defaultPackages list from preferences.json", () => {
+    const appDataDir = makeTempDir();
+    fs.writeFileSync(
+      path.join(appDataDir, "preferences.json"),
+      JSON.stringify({ defaultPackages: ["scipy", "xarray"] }, null, 2),
+      "utf8"
+    );
+
+    const store = new ConfigStore(appDataDir);
+    expect(store.get("defaultPackages")).toEqual(["scipy", "xarray"]);
   });
 
 });

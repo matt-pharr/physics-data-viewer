@@ -76,6 +76,12 @@ export interface PDVConfig {
   workingDirBase?: string;
   /** Autosave interval in seconds. Default 300 (5 minutes). Minimum 30. */
   autoSaveIntervalSeconds?: number;
+  /**
+   * Packages (PEP 508 specs) seeded into a new uv project's pyproject.toml
+   * at creation (ARCHITECTURE.md §10.5.14). Editable in Settings. Defaults
+   * to ["numpy", "matplotlib"]. Editing it never changes existing projects.
+   */
+  defaultPackages?: string[];
   /** Renderer settings blob persisted by Settings dialog. */
   settings?: {
     shortcuts?: Record<string, string>;
@@ -142,6 +148,15 @@ export interface PDVConfig {
      */
     authToken?: string;
   };
+  /** uv environment-manager settings (ARCHITECTURE.md §10.5). */
+  uv?: {
+    /**
+     * Absolute path to a `uv` binary that overrides the one bundled with
+     * the app. For developers who want PDV to use a system `uv`. Undefined
+     * means use the bundled binary (§10.5.6).
+     */
+    binaryPath?: string;
+  };
 }
 
 /**
@@ -165,6 +180,7 @@ const CONFIG_DEFAULTS: PDVConfig = {
   showCallableVariables: false,
   autoRefreshNamespace: false,
   autoSaveIntervalSeconds: DEFAULT_AUTOSAVE_INTERVAL_S,
+  defaultPackages: ["numpy", "matplotlib"],
   settings: {
     appearance: {
       themeName: "Dark+ (VSCode)",
@@ -279,6 +295,18 @@ function parseConfig(raw: string, filePath: string): Partial<PDVConfig> {
       result.autoSaveIntervalSeconds = val;
     }
   }
+  if ("defaultPackages" in obj) {
+    const defaultPackages = obj.defaultPackages;
+    if (defaultPackages !== null && defaultPackages !== undefined) {
+      if (
+        !Array.isArray(defaultPackages) ||
+        !defaultPackages.every((entry) => typeof entry === "string")
+      ) {
+        throw new Error(`Invalid config value for defaultPackages in ${filePath}`);
+      }
+      result.defaultPackages = defaultPackages;
+    }
+  }
   if ("projectRoot" in obj) {
     const projectRoot = obj.projectRoot;
     if (projectRoot !== null && projectRoot !== undefined && typeof projectRoot !== "string") {
@@ -320,6 +348,15 @@ function parseConfig(raw: string, filePath: string): Partial<PDVConfig> {
     }
     if (mcp && typeof mcp === "object" && !Array.isArray(mcp)) {
       result.mcp = mcp as PDVConfig["mcp"];
+    }
+  }
+  if ("uv" in obj) {
+    const uv = obj.uv;
+    if (uv !== null && uv !== undefined && (typeof uv !== "object" || Array.isArray(uv))) {
+      throw new Error(`Invalid config value for uv in ${filePath}`);
+    }
+    if (uv && typeof uv === "object" && !Array.isArray(uv)) {
+      result.uv = uv as PDVConfig["uv"];
     }
   }
   if ("launchers" in obj) {

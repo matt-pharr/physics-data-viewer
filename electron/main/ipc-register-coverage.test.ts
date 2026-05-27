@@ -194,6 +194,8 @@ function setupAll(): void {
     getActiveKernelId: () => null,
     getActiveProjectDir: () => null,
     getWorkingDirBase: () => undefined,
+    getDefaultPackages: () => [],
+    getUvBinaryPath: () => undefined,
     bindActiveProjectModules: vi.fn(async () => undefined),
   });
   registerTreeNamespaceScriptIpcHandlers({

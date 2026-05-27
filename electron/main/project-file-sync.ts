@@ -139,3 +139,64 @@ export async function copyFilesForLoad(
   }
   return failedPaths;
 }
+
+/** uv environment files that travel between the save dir and working dir. */
+const ENV_FILES = ["pyproject.toml", "uv.lock"];
+
+/**
+ * Copy uv environment files (`pyproject.toml`, `uv.lock`) from the project
+ * save directory into the kernel working directory.
+ *
+ * Called for `mode: "uv"` projects before `uv sync` so the working directory
+ * is a self-contained uv project (ARCHITECTURE.md §10.5.3, §10.5.9). Files
+ * absent from the save directory are skipped silently.
+ *
+ * @param saveDir - Project save directory (source).
+ * @param workingDir - Kernel working directory (destination).
+ * @returns Relative names of the files that were copied.
+ * @throws {Error} For any I/O error other than a missing source file.
+ */
+export async function copyEnvFilesForLoad(
+  saveDir: string,
+  workingDir: string
+): Promise<string[]> {
+  const copied: string[] = [];
+  for (const name of ENV_FILES) {
+    try {
+      await fs.copyFile(path.join(saveDir, name), path.join(workingDir, name));
+      copied.push(name);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException)?.code !== "ENOENT") throw error;
+    }
+  }
+  return copied;
+}
+
+/**
+ * Copy uv environment files (`pyproject.toml`, `uv.lock`) from the kernel
+ * working directory back into the project save directory (§10.5.10).
+ *
+ * Only files present in the working directory are copied — a project whose
+ * `uv sync` failed may have no `uv.lock`, and a missing working-dir file must
+ * never clobber a good saved one.
+ *
+ * @param workingDir - Kernel working directory (source).
+ * @param saveDir - Project save directory (destination).
+ * @returns Relative names of the files that were copied.
+ * @throws {Error} For any I/O error other than a missing source file.
+ */
+export async function copyEnvFilesForSave(
+  workingDir: string,
+  saveDir: string
+): Promise<string[]> {
+  const copied: string[] = [];
+  for (const name of ENV_FILES) {
+    try {
+      await fs.copyFile(path.join(workingDir, name), path.join(saveDir, name));
+      copied.push(name);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException)?.code !== "ENOENT") throw error;
+    }
+  }
+  return copied;
+}

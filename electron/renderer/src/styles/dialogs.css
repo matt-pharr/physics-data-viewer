@@ -917,6 +917,119 @@
   margin: 0;
 }
 
+/* ===== uv ENVIRONMENT SETUP MODAL (ARCHITECTURE.md §10.5.9) ===== */
+.env-sync-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.45);
+  backdrop-filter: blur(2px);
+}
+
+.env-sync-panel {
+  width: 520px;
+  max-width: 90%;
+  padding: 20px 24px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.4);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.env-sync-title {
+  color: var(--text-primary);
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.env-sync-subtitle {
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+.env-sync-error {
+  color: var(--error);
+  font-size: 12px;
+  white-space: pre-wrap;
+}
+
+.env-sync-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+/* ===== Packages settings tab (ARCHITECTURE.md §10.5.13) ===== */
+.settings-packages {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.settings-packages-hint {
+  color: var(--text-secondary);
+  font-size: 12px;
+  margin: 0;
+}
+
+.settings-packages-hint code {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-primary);
+}
+
+.settings-packages-add {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.settings-packages-add input {
+  flex: 1;
+  padding: 6px 8px;
+  background: var(--bg-primary);
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  color: var(--text-primary);
+  font-size: 12px;
+}
+
+.settings-packages-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+
+.settings-packages-table th,
+.settings-packages-table td {
+  padding: 6px 8px;
+  text-align: left;
+  border-bottom: 1px solid var(--border-color);
+  color: var(--text-primary);
+}
+
+.settings-packages-table th {
+  color: var(--text-secondary);
+  font-weight: 600;
+}
+
+.settings-packages-table code {
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+
+.settings-packages-actions {
+  display: flex;
+  gap: 6px;
+  justify-content: flex-end;
+}
+
 .env-install-success {
   color: var(--success, #4ec9b0);
   font-size: 13px;

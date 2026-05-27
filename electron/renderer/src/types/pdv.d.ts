@@ -250,6 +250,14 @@ export interface ProjectLoadResult {
 }
 
 /** Lightweight manifest peek returned before kernel start. */
+/** Per-project Python environment configuration (§10.5). */
+export interface EnvironmentConfig {
+  /** Which environment flow this project uses. */
+  mode: "uv" | "shared";
+  /** Requested Python version for uv mode (e.g. "3.12"). */
+  python_version?: string;
+}
+
 export interface ProjectManifestPeek {
   /** Kernel language used by this project. */
   language: "python" | "julia";
@@ -259,6 +267,33 @@ export interface ProjectManifestPeek {
   pdvVersion?: string;
   /** Project name stored in the manifest. */
   projectName?: string;
+  /** Per-project environment configuration (§10.5). Absent on legacy manifests. */
+  environment?: EnvironmentConfig;
+}
+
+/**
+ * Extra context passed to `kernels.start` when opening a `mode: "uv"`
+ * project — tells the main process to materialize the uv environment and
+ * launch the kernel against the venv interpreter (§10.5.9).
+ */
+export interface KernelUvContext {
+  /** Opening an existing uv project: its save directory. */
+  saveDir?: string;
+  /** Creating a brand-new uv project (seed from default packages, §10.5.8). */
+  newProject?: boolean;
+}
+
+/**
+ * One row of the Packages UI (§10.5.13): a project dependency paired with
+ * the version actually installed in the venv (when present).
+ */
+export interface ProjectPackage {
+  /** PEP 508 specifier as written in `[project].dependencies`. */
+  spec: string;
+  /** Distribution name normalized per PEP 503. */
+  name: string;
+  /** Version reported by `uv pip list`, or undefined if not installed. */
+  installedVersion?: string;
 }
 
 /** Persisted user configuration payload returned by `config.get`. */
@@ -299,6 +334,8 @@ export interface Config {
   workingDirBase?: string;
   /** Autosave interval in seconds. Default 300 (5 minutes). Minimum 30. */
   autoSaveIntervalSeconds?: number;
+  /** Packages (PEP 508 specs) seeded into a new uv project. */
+  defaultPackages?: string[];
   /** Local AI-agent MCP server settings, surfaced in the Agents tab. */
   mcp?: {
     /** Preferred TCP port for the MCP server to bind. */
@@ -307,6 +344,11 @@ export interface Config {
     mutatingToolsEnabled?: boolean;
     /** Whether agents may run code in the kernel via `pdv_run`. Defaults to off. */
     pdvRunEnabled?: boolean;
+  };
+  /** uv environment-manager settings. */
+  uv?: {
+    /** Absolute path to a `uv` binary overriding the bundled one. */
+    binaryPath?: string;
   };
   /** Configurable external-app launchers (terminal wrap, editor, agent). */
   launchers?: {
@@ -793,7 +835,7 @@ export interface CellWritePush {
 export interface PDVApi {
   kernels: {
     list(): Promise<KernelInfo[]>;
-    start(spec?: Partial<KernelSpec>): Promise<KernelInfo>;
+    start(spec?: Partial<KernelSpec>, uvContext?: KernelUvContext): Promise<KernelInfo>;
     stop(kernelId: string): Promise<boolean>;
     execute(kernelId: string, request: KernelExecuteRequest): Promise<KernelExecuteResult>;
     interrupt(kernelId: string): Promise<boolean>;
@@ -909,6 +951,16 @@ export interface PDVApi {
     install(pythonPath: string): Promise<EnvironmentInstallResult>;
     refresh(): Promise<EnvironmentInfo[]>;
     onInstallOutput(callback: (chunk: InstallOutputChunk) => void): () => void;
+    /** Streams `uv` output during a uv-project environment setup (§10.5.9). */
+    onEnvActivity(callback: (chunk: InstallOutputChunk) => void): () => void;
+    /** List declared deps paired with installed versions (uv projects only). */
+    listPackages(): Promise<ProjectPackage[]>;
+    /** Add packages to the project (`uv add <specs>`). */
+    addPackage(specs: string[]): Promise<EnvironmentInstallResult>;
+    /** Remove packages from the project (`uv remove <names>`). */
+    removePackage(names: string[]): Promise<EnvironmentInstallResult>;
+    /** Upgrade packages within their declared constraints (`uv lock --upgrade-package` + sync). */
+    upgradePackage(names: string[]): Promise<EnvironmentInstallResult>;
   };
   modules: {
     listInstalled(): Promise<ModuleDescriptor[]>;
