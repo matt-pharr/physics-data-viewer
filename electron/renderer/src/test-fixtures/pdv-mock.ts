@@ -99,6 +99,10 @@ function buildBase() {
       refresh: stub<PDVApi["environment"]["refresh"]>(async () => []),
       onInstallOutput: subStub<PDVApi["environment"]["onInstallOutput"]>(),
       onEnvActivity: subStub<PDVApi["environment"]["onEnvActivity"]>(),
+      listPackages: stub<PDVApi["environment"]["listPackages"]>(async () => []),
+      addPackage: stub<PDVApi["environment"]["addPackage"]>(async () => ({ success: true, output: "" })),
+      removePackage: stub<PDVApi["environment"]["removePackage"]>(async () => ({ success: true, output: "" })),
+      upgradePackage: stub<PDVApi["environment"]["upgradePackage"]>(async () => ({ success: true, output: "" })),
     },
     modules: {
       listInstalled: stub<PDVApi["modules"]["listInstalled"]>(async () => []),

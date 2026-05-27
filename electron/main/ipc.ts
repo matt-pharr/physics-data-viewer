@@ -338,6 +338,14 @@ export const IPC = {
     check: "environment:check",
     install: "environment:install",
     refresh: "environment:refresh",
+    /** Packages UI (§10.5.13): list declared deps + installed versions. */
+    listPackages: "environment:listPackages",
+    /** Packages UI: `uv add <specs>`. */
+    addPackage: "environment:addPackage",
+    /** Packages UI: `uv remove <names>`. */
+    removePackage: "environment:removePackage",
+    /** Packages UI: `uv lock --upgrade-package <names>` + `uv sync`. */
+    upgradePackage: "environment:upgradePackage",
   },
   /** Native file/directory picker channels. */
   files: {
@@ -1445,6 +1453,19 @@ export interface KernelUvContext {
 }
 
 /**
+ * One row of the Packages UI (§10.5.13): a project dependency paired with
+ * the version actually installed in the venv (when present).
+ */
+export interface ProjectPackage {
+  /** PEP 508 specifier as written in `[project].dependencies`. */
+  spec: string;
+  /** Distribution name normalized per PEP 503 (lowercase, `-_.` collapsed to `-`). */
+  name: string;
+  /** Version reported by `uv pip list`, or undefined if not installed. */
+  installedVersion?: string;
+}
+
+/**
  * Progress update payload pushed during save/load operations.
  */
 export interface ProgressPayload {
@@ -2231,6 +2252,38 @@ export interface PDVApi {
      * @returns Unsubscribe function.
      */
     onEnvActivity(callback: (chunk: InstallOutputChunk) => void): () => void;
+    /**
+     * List the project's declared dependencies paired with the version
+     * actually installed in the venv. uv-mode projects only; returns `[]`
+     * for shared-mode kernels or when no project is open.
+     *
+     * @returns Array of {@link ProjectPackage} entries.
+     */
+    listPackages(): Promise<ProjectPackage[]>;
+    /**
+     * Add packages to the project (`uv add <specs>`), updating
+     * `pyproject.toml` and `uv.lock` and installing into the venv.
+     * Streams uv output via `onEnvActivity`.
+     *
+     * @param specs - PEP 508 specs (e.g. `["scipy>=1.10", "xarray"]`).
+     * @returns The uv result.
+     */
+    addPackage(specs: string[]): Promise<EnvironmentInstallResult>;
+    /**
+     * Remove packages from the project (`uv remove <names>`).
+     *
+     * @param names - Distribution names to remove.
+     * @returns The uv result.
+     */
+    removePackage(names: string[]): Promise<EnvironmentInstallResult>;
+    /**
+     * Upgrade specific packages within their declared constraints
+     * (`uv lock --upgrade-package <name>...` + `uv sync`).
+     *
+     * @param names - Distribution names to upgrade.
+     * @returns The uv result.
+     */
+    upgradePackage(names: string[]): Promise<EnvironmentInstallResult>;
   };
 
   /** App configuration accessors. */

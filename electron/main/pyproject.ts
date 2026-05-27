@@ -1,15 +1,25 @@
 /**
- * pyproject.ts — Generate a project's `pyproject.toml`.
+ * pyproject.ts — Generate and read a project's `pyproject.toml`.
  *
- * For now this only *generates* a fresh PEP 621 manifest for a new uv
- * project (ARCHITECTURE.md §10.5.8). Reading and round-tripping an existing
- * `pyproject.toml` without clobbering user-authored fields (§10.5.4) needs a
- * real TOML library and lands with the Packages UI (§10.5.13).
+ * `generatePyproject` produces a fresh PEP 621 manifest for new uv projects
+ * (ARCHITECTURE.md §10.5.8). `parseDependencies` reads `[project].dependencies`
+ * for the Packages UI (§10.5.13).
+ *
+ * PDV does not WRITE to an existing `pyproject.toml` directly — every
+ * mutation goes through `uv add` / `uv remove`, which preserves user-authored
+ * fields and re-locks atomically (§10.5.4).
  *
  * See Also
  * --------
- * ARCHITECTURE.md §10.5.8 (new project flow), §10.5.14 (default packages)
+ * ARCHITECTURE.md §10.5.8, §10.5.13, §10.5.14
  */
+
+// `smol-toml` is published as an ES module; the main process is CommonJS, so
+// we load it via a dynamic `import()` rather than a static import.
+async function _loadTomlParse(): Promise<(text: string) => unknown> {
+  const mod = await import("smol-toml");
+  return mod.parse;
+}
 
 /** Options for {@link generatePyproject}. */
 export interface GeneratePyprojectOptions {
@@ -57,4 +67,50 @@ export function generatePyproject(options: GeneratePyprojectOptions): string {
     `requires-python = ${tomlString(requiresPython)}\n` +
     `${depBlock}\n`
   );
+}
+
+/**
+ * Read the `[project].dependencies` array from a `pyproject.toml` source.
+ *
+ * Returns an empty list when the file is unparseable or the field is absent
+ * or malformed — the Packages UI degrades gracefully rather than throwing.
+ *
+ * @param pyprojectText - Raw contents of a `pyproject.toml` file.
+ * @returns The PEP 508 specs declared in `[project].dependencies`, in order.
+ */
+export async function parseDependencies(pyprojectText: string): Promise<string[]> {
+  let toml: Record<string, unknown>;
+  try {
+    const parse = await _loadTomlParse();
+    toml = parse(pyprojectText) as Record<string, unknown>;
+  } catch {
+    return [];
+  }
+  const project = toml.project as Record<string, unknown> | undefined;
+  const deps = project?.dependencies;
+  if (!Array.isArray(deps)) return [];
+  return deps.filter((d): d is string => typeof d === "string");
+}
+
+/**
+ * Normalize a distribution name per PEP 503 (lowercase, runs of `-_.`
+ * collapsed to `-`). Used to match a PEP 508 spec name against a
+ * `uv pip list` entry's name.
+ *
+ * @param name - Raw distribution or spec name (e.g. `"Numpy_Test"`).
+ * @returns The normalized name (e.g. `"numpy-test"`).
+ */
+export function normalizeDistName(name: string): string {
+  return name.toLowerCase().replace(/[-_.]+/g, "-");
+}
+
+/**
+ * Extract the distribution name from a PEP 508 specifier.
+ *
+ * @param spec - A PEP 508 spec like `"scipy>=1.10"` or `"pkg[extra]>=1.0"`.
+ * @returns The normalized distribution name.
+ */
+export function specName(spec: string): string {
+  const head = spec.split(/[<>=!~\[; ]/, 1)[0]?.trim() ?? "";
+  return normalizeDistName(head);
 }

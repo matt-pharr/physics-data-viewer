@@ -121,6 +121,10 @@ const api: PDVApi = {
     refresh: () => ipcRenderer.invoke(IPC.environment.refresh),
     onInstallOutput: (callback) => onPush(IPC.push.installOutput, callback),
     onEnvActivity: (callback) => onPush(IPC.push.envActivity, callback),
+    listPackages: () => ipcRenderer.invoke(IPC.environment.listPackages),
+    addPackage: (specs) => ipcRenderer.invoke(IPC.environment.addPackage, specs),
+    removePackage: (names) => ipcRenderer.invoke(IPC.environment.removePackage, names),
+    upgradePackage: (names) => ipcRenderer.invoke(IPC.environment.upgradePackage, names),
   },
   modules: {
     listInstalled: () => ipcRenderer.invoke(IPC.modules.listInstalled),

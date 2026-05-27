@@ -293,3 +293,17 @@ export function uvPythonInstall(version: string, opts: UvRunOptions = {}): Promi
 export function uvPythonList(opts: UvRunOptions = {}): Promise<UvResult> {
   return runUv(["python", "list"], opts);
 }
+
+/**
+ * Run `uv pip list --format json --python <venvPython>` — enumerate the
+ * packages actually installed in a venv. Used by the Packages UI to pair
+ * declared specs with their resolved versions (§10.5.13).
+ *
+ * @param venvPython - Absolute path to the venv's interpreter.
+ * @param opts - Run options.
+ * @returns The {@link UvResult}; `output` is the JSON package listing.
+ * @throws {UvBinaryNotFoundError} When no `uv` binary can be located.
+ */
+export function uvPipList(venvPython: string, opts: UvRunOptions = {}): Promise<UvResult> {
+  return runUv(["pip", "list", "--format", "json", "--python", venvPython], opts);
+}

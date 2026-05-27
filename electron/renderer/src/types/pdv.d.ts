@@ -268,6 +268,19 @@ export interface KernelUvContext {
   newProject?: boolean;
 }
 
+/**
+ * One row of the Packages UI (§10.5.13): a project dependency paired with
+ * the version actually installed in the venv (when present).
+ */
+export interface ProjectPackage {
+  /** PEP 508 specifier as written in `[project].dependencies`. */
+  spec: string;
+  /** Distribution name normalized per PEP 503. */
+  name: string;
+  /** Version reported by `uv pip list`, or undefined if not installed. */
+  installedVersion?: string;
+}
+
 /** Persisted user configuration payload returned by `config.get`. */
 export interface Config {
   /** Kernel spec name used for launch defaults. */
@@ -918,6 +931,14 @@ export interface PDVApi {
     onInstallOutput(callback: (chunk: InstallOutputChunk) => void): () => void;
     /** Streams `uv` output during a uv-project environment setup (§10.5.9). */
     onEnvActivity(callback: (chunk: InstallOutputChunk) => void): () => void;
+    /** List declared deps paired with installed versions (uv projects only). */
+    listPackages(): Promise<ProjectPackage[]>;
+    /** Add packages to the project (`uv add <specs>`). */
+    addPackage(specs: string[]): Promise<EnvironmentInstallResult>;
+    /** Remove packages from the project (`uv remove <names>`). */
+    removePackage(names: string[]): Promise<EnvironmentInstallResult>;
+    /** Upgrade packages within their declared constraints (`uv lock --upgrade-package` + sync). */
+    upgradePackage(names: string[]): Promise<EnvironmentInstallResult>;
   };
   modules: {
     listInstalled(): Promise<ModuleDescriptor[]>;

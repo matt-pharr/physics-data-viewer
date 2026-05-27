@@ -1870,6 +1870,7 @@ const App: React.FC = () => {
          isOpen={showSettings}
          initialTab={settingsInitialTab}
          activeLanguage={activeLanguage}
+         environmentMode={environmentMode}
          config={config}
          shortcuts={shortcuts}
          onClose={() => setShowSettings(false)}
