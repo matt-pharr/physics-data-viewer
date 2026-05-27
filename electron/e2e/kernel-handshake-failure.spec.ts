@@ -75,14 +75,14 @@ test("bootstrap failure surfaces the multi-line diagnostic in the env-settings d
   const { window } = launched;
   await window.getByRole("button", { name: "New Python Project" }).click();
 
-  // The handshake should fail at the bootstrap step. The renderer routes the
-  // failure to openEnvSettings(lastErrorRef.current ?? 'Kernel failed to start.'),
-  // so the diagnostic should land in the EnvironmentSelector's `.error-text`
-  // warning slot (rendered with white-space: pre-wrap so the lines stay split).
-  const warning = window.locator("p.error-text").filter({
+  // New Python Project boots a uv-mode kernel, so a bootstrap-step handshake
+  // failure now routes through launchUvKernel → setUvSync({phase:"failed"}),
+  // which renders the diagnostic in the EnvSyncModal's `.env-sync-error`
+  // slot (white-space: pre-wrap preserves the multi-line layout).
+  const warning = window.locator(".env-sync-error").filter({
     hasText: /Kernel handshake failed at step/,
   });
-  await expect(warning).toBeVisible({ timeout: 30_000 });
+  await expect(warning).toBeVisible({ timeout: 60_000 });
 
   const text = await warning.textContent();
   expect(text).toBeTruthy();

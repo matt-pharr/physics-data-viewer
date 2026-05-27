@@ -58,8 +58,20 @@ import {
   NamespaceQueryOptions,
   PDVConfig,
   type CodeCellData,
+  type EnvironmentInstallResult,
   type McpStatus,
+  type ProjectPackage,
 } from "./ipc";
+import { parseDependencies, normalizeDistName, specName } from "./pyproject";
+import {
+  uvAdd,
+  uvRemove,
+  uvLockUpgrade,
+  uvSync,
+  uvPipList,
+  type UvRunOptions,
+} from "./uv-runner";
+import { venvPythonPath } from "./uv-environment";
 import { PDVMessage, PDVMessageType, setAppVersion } from "./pdv-protocol";
 import { registerLaunchersIpcHandlers } from "./ipc-register-launchers";
 import type { McpServerHooks } from "./mcp/mcp-context";
@@ -582,6 +594,8 @@ export function registerIpcHandlers(
     getActiveKernelId: () => activeKernelId,
     getActiveProjectDir: () => activeProjectDir,
     getWorkingDirBase: () => readConfig(configStore).workingDirBase,
+    getDefaultPackages: () => readConfig(configStore).defaultPackages ?? [],
+    getUvBinaryPath: () => readConfig(configStore).uv?.binaryPath,
     bindActiveProjectModules,
   });
 
@@ -714,6 +728,89 @@ export function registerIpcHandlers(
   });
 
   registerEnvironmentIpcHandlers(win, configStore);
+
+  // --- Packages tab (ARCHITECTURE.md §10.5.13) -----------------------------
+  // Per-project package CRUD: list declared deps paired with installed
+  // versions, and add/remove/upgrade via uv. After each mutation the kernel's
+  // import-finder caches are invalidated so newly installed packages import
+  // without a restart (same mechanism as pdv.install, §10.5.11).
+  const pkgRunOptions = (): UvRunOptions => ({
+    cwd: activeKernelId ? kernelWorkingDirs.get(activeKernelId) : undefined,
+    win,
+    pushChannel: IPC.push.envActivity,
+    binaryPath: readConfig(configStore).uv?.binaryPath,
+  });
+  const refreshKernelImportCaches = async (): Promise<void> => {
+    if (!activeKernelId) return;
+    try {
+      await kernelManager.execute(activeKernelId, {
+        code: "import importlib; importlib.invalidate_caches()",
+        silent: true,
+      });
+    } catch (err) {
+      console.warn("[env] failed to refresh kernel import caches:", err);
+    }
+  };
+  ipcMain.handle(IPC.environment.listPackages, async (): Promise<ProjectPackage[]> => {
+    if (!activeKernelId) return [];
+    const workingDir = kernelWorkingDirs.get(activeKernelId);
+    if (!workingDir) return [];
+    let pyprojectText: string;
+    try {
+      pyprojectText = await fs.readFile(path.join(workingDir, "pyproject.toml"), "utf8");
+    } catch {
+      return [];
+    }
+    const specs = await parseDependencies(pyprojectText);
+    const venvPython = venvPythonPath(workingDir);
+    const pipResult = await uvPipList(venvPython, {
+      cwd: workingDir,
+      binaryPath: readConfig(configStore).uv?.binaryPath,
+    });
+    const installed = new Map<string, string>();
+    if (pipResult.success) {
+      try {
+        const list = JSON.parse(pipResult.output) as Array<{ name?: string; version?: string }>;
+        for (const p of list) {
+          if (p.name && p.version) installed.set(normalizeDistName(p.name), p.version);
+        }
+      } catch {
+        // uv may emit warnings before the JSON; degrade gracefully.
+      }
+    }
+    return specs.map((spec) => {
+      const name = specName(spec);
+      return { spec, name, installedVersion: installed.get(name) };
+    });
+  });
+  ipcMain.handle(
+    IPC.environment.addPackage,
+    async (_event, specs: string[]): Promise<EnvironmentInstallResult> => {
+      const result = await uvAdd(specs, pkgRunOptions());
+      if (result.success) await refreshKernelImportCaches();
+      return { success: result.success, output: result.output };
+    }
+  );
+  ipcMain.handle(
+    IPC.environment.removePackage,
+    async (_event, names: string[]): Promise<EnvironmentInstallResult> => {
+      const result = await uvRemove(names, pkgRunOptions());
+      if (result.success) await refreshKernelImportCaches();
+      return { success: result.success, output: result.output };
+    }
+  );
+  ipcMain.handle(
+    IPC.environment.upgradePackage,
+    async (_event, names: string[]): Promise<EnvironmentInstallResult> => {
+      const opts = pkgRunOptions();
+      const lock = await uvLockUpgrade(names, opts);
+      if (!lock.success) return { success: false, output: lock.output };
+      const sync = await uvSync(opts);
+      if (sync.success) await refreshKernelImportCaches();
+      return { success: sync.success, output: lock.output + sync.output };
+    }
+  );
+
 
   // ---- Autosave IPC handlers and lifecycle wiring --------------------------
 

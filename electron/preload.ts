@@ -40,7 +40,7 @@ function onPush<TPayload>(
 const api: PDVApi = {
   kernels: {
     list: () => ipcRenderer.invoke(IPC.kernels.list),
-    start: (spec) => ipcRenderer.invoke(IPC.kernels.start, spec),
+    start: (spec, uvContext) => ipcRenderer.invoke(IPC.kernels.start, spec, uvContext),
     stop: (kernelId) => ipcRenderer.invoke(IPC.kernels.stop, kernelId),
     execute: (kernelId, request) =>
       ipcRenderer.invoke(IPC.kernels.execute, kernelId, request),
@@ -120,6 +120,11 @@ const api: PDVApi = {
     install: (pythonPath) => ipcRenderer.invoke(IPC.environment.install, pythonPath),
     refresh: () => ipcRenderer.invoke(IPC.environment.refresh),
     onInstallOutput: (callback) => onPush(IPC.push.installOutput, callback),
+    onEnvActivity: (callback) => onPush(IPC.push.envActivity, callback),
+    listPackages: () => ipcRenderer.invoke(IPC.environment.listPackages),
+    addPackage: (specs) => ipcRenderer.invoke(IPC.environment.addPackage, specs),
+    removePackage: (names) => ipcRenderer.invoke(IPC.environment.removePackage, names),
+    upgradePackage: (names) => ipcRenderer.invoke(IPC.environment.upgradePackage, names),
   },
   modules: {
     listInstalled: () => ipcRenderer.invoke(IPC.modules.listInstalled),

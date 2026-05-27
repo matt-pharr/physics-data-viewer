@@ -77,4 +77,30 @@ describe('Console', () => {
     const entry = container.querySelector('.log-entry');
     expect(entry?.classList.contains('log-entry-agent')).toBe(false);
   });
+
+  const moduleNotFoundLog = (): LogEntry =>
+    makeLog({
+      error: "No module named 'xarray'",
+      errorDetails: {
+        name: 'ModuleNotFoundError',
+        message: "No module named 'xarray'",
+        summary: "No module named 'xarray'",
+        traceback: [],
+      },
+    });
+
+  it('offers pdv.install for a ModuleNotFoundError when onInstallPackage is provided', () => {
+    const onInstallPackage = vi.fn();
+    const { getByRole } = render(
+      <Console logs={[moduleNotFoundLog()]} onClear={vi.fn()} onInstallPackage={onInstallPackage} />
+    );
+    const btn = getByRole('button', { name: /pdv\.install\("xarray"\)/ });
+    btn.click();
+    expect(onInstallPackage).toHaveBeenCalledWith('xarray');
+  });
+
+  it('hides the install affordance in shared mode (no onInstallPackage)', () => {
+    const { container } = render(<Console logs={[moduleNotFoundLog()]} onClear={vi.fn()} />);
+    expect(container.querySelector('.log-install-action')).toBeNull();
+  });
 });

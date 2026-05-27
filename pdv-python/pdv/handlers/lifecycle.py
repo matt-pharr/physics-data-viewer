@@ -74,6 +74,10 @@ def handle_init(msg: dict) -> None:
     tree = get_pdv_tree()
     if tree is not None:
         tree._set_working_dir(validated)
+        # uv-mode kernels receive the resolved uv binary path so pdv.install()
+        # can shell out to it directly (ARCHITECTURE.md §10.5.11). Absent in
+        # shared mode.
+        tree._set_uv_binary(payload.get("uv_binary"))
 
     # Start the query server if a query_port was provided.
     query_port = payload.get("query_port")

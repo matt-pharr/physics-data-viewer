@@ -24,6 +24,8 @@ electron/.mcp.json
 electron/playwright-report/
 electron/test-results/
 electron/e2e/.fixtures-cache/
+# Build artifacts produced by scripts/ (uv binary, pdv-python wheel).
+electron/resources/
 
 # Defensive: prevent accidentally committing a stray root-level
 # package-lock.json created by running `npm install` in the repo root

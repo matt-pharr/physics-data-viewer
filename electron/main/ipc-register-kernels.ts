@@ -13,6 +13,9 @@
  * - Push forwarding.
  */
 
+import * as fs from "fs/promises";
+import * as path from "path";
+
 import { BrowserWindow, ipcMain } from "electron";
 
 import { CommRouter } from "./comm-router";
@@ -24,8 +27,11 @@ import { initializeKernelSession } from "./kernel-session";
 import { executeAndTranscribe, TranscriptWriter } from "./mcp/transcript";
 import type { ModuleManager } from "./module-manager";
 import { setupProjectModuleNamespaces } from "./module-runtime";
-import { copyFilesForLoad } from "./project-file-sync";
+import { copyEnvFilesForLoad, copyFilesForLoad } from "./project-file-sync";
 import { ProjectManager } from "./project-manager";
+import { materializeUvEnvironment } from "./uv-environment";
+import { resolveUvBinary } from "./uv-runner";
+import { generatePyproject } from "./pyproject";
 
 interface RegisterKernelIpcHandlersOptions {
   win: BrowserWindow;
@@ -42,6 +48,10 @@ interface RegisterKernelIpcHandlersOptions {
   getActiveKernelId: () => string | null;
   getActiveProjectDir: () => string | null;
   getWorkingDirBase: () => string | undefined;
+  /** Default packages seeded into a new uv project's pyproject.toml (§10.5.14). */
+  getDefaultPackages: () => string[];
+  /** Optional `uv` binary override from config (§10.5.6); undefined = bundled. */
+  getUvBinaryPath: () => string | undefined;
   bindActiveProjectModules: (kernelId: string | null) => Promise<void>;
 }
 
@@ -98,6 +108,8 @@ export function registerKernelIpcHandlers(
     getActiveKernelId,
     getActiveProjectDir,
     getWorkingDirBase,
+    getDefaultPackages,
+    getUvBinaryPath,
     bindActiveProjectModules,
   } = options;
 
@@ -108,6 +120,75 @@ export function registerKernelIpcHandlers(
    */
   async function setupModuleNamespaces(_kernelId: string): Promise<void> {
     await setupProjectModuleNamespaces(commRouter, moduleManager, getActiveProjectDir());
+  }
+
+  /**
+   * Materialize a uv-mode project's environment before its kernel spawns.
+   *
+   * Creates the kernel working directory, copies in `pyproject.toml` /
+   * `uv.lock` from the save directory, runs `uv sync`, and installs
+   * `pdv-python` into the venv (ARCHITECTURE.md §10.5.9). The venv lives
+   * inside the working directory, so this must complete before the kernel
+   * process is spawned against the venv interpreter.
+   *
+   * @param uv - uv context: an existing project's `saveDir` to copy env
+   *   files from, `newProject` to seed a fresh `pyproject.toml` from the
+   *   user's default packages, or an `envSnapshot` of file contents captured
+   *   before the source working dir was torn down (used on restart, §11.6).
+   * @returns The pre-created working directory and the venv interpreter path.
+   * @throws {Error} When uv environment setup fails. The partially-created
+   *   working directory is removed before the error propagates.
+   */
+  async function startUvEnvironment(
+    uv: {
+      saveDir?: string;
+      newProject?: boolean;
+      envSnapshot?: { pyproject: string; uvLock?: string };
+    }
+  ): Promise<{ workingDir: string; venvPython: string; uvBinary: string | undefined }> {
+    // The resolved uv binary travels to the kernel in pdv.init so pdv.install()
+    // can run `uv add` directly (§10.5.11). Non-null here — materialize would
+    // have thrown UvBinaryNotFoundError otherwise.
+    const uvBinary = resolveUvBinary(getUvBinaryPath()) ?? undefined;
+    const workingDir = await projectManager.createWorkingDir(getWorkingDirBase());
+    try {
+      let pythonVersion: string | undefined;
+      if (uv.envSnapshot) {
+        // Restart: re-create the env from the snapshot taken before the old
+        // working dir was deleted, so freshly-installed packages survive.
+        await fs.writeFile(
+          path.join(workingDir, "pyproject.toml"),
+          uv.envSnapshot.pyproject,
+          "utf8"
+        );
+        if (uv.envSnapshot.uvLock !== undefined) {
+          await fs.writeFile(path.join(workingDir, "uv.lock"), uv.envSnapshot.uvLock, "utf8");
+        }
+      } else if (uv.saveDir) {
+        // Opening an existing uv project: copy its env files in.
+        await copyEnvFilesForLoad(uv.saveDir, workingDir);
+        const manifest = await ProjectManager.readManifest(uv.saveDir);
+        pythonVersion = manifest.environment?.python_version;
+      } else {
+        // New uv project: generate a pyproject.toml from the default packages.
+        const toml = generatePyproject({ dependencies: getDefaultPackages() });
+        await fs.writeFile(path.join(workingDir, "pyproject.toml"), toml, "utf8");
+      }
+      const result = await materializeUvEnvironment(workingDir, {
+        pythonVersion,
+        win,
+        pushChannel: IPC.push.envActivity,
+        binaryPath: getUvBinaryPath(),
+      });
+      if (!result.success || !result.venvPython) {
+        const step = result.failedStep ? ` (${result.failedStep})` : "";
+        throw new Error(`uv environment setup failed${step}:\n${result.output}`);
+      }
+      return { workingDir, venvPython: result.venvPython, uvBinary };
+    } catch (err) {
+      await projectManager.deleteWorkingDir(workingDir).catch(() => undefined);
+      throw err;
+    }
   }
 
   // Forward periodic kernel-memory snapshots to the renderer. Registered once
@@ -148,22 +229,48 @@ export function registerKernelIpcHandlers(
     return kernelManager.list();
   });
 
-  ipcMain.handle(IPC.kernels.start, async (_event, spec) => {
+  ipcMain.handle(IPC.kernels.start, async (_event, spec, uvContext) => {
     await awaitPreviousMutex("kernels.start");
     let release!: () => void;
     startMutex = new Promise<void>((r) => { release = r; });
     try {
-    const requestedSpec = spec as Parameters<KernelManager["start"]>[0];
-    const pythonPath =
-      requestedSpec?.env?.PYTHON_PATH ??
-      (Array.isArray(requestedSpec?.argv) ? requestedSpec.argv[0] : undefined);
+    let requestedSpec = spec as Parameters<KernelManager["start"]>[0];
     const requestedLanguage = requestedSpec?.language ?? "python";
-    if (requestedLanguage === "python" && pythonPath) {
-      const installStatus = await EnvironmentDetector.checkPDVInstalled(pythonPath);
-      if (!installStatus.installed) {
-        throw new Error(
-          `Selected Python runtime is missing pdv. Install it with: cd pdv-python && ${pythonPath} -m pip install -e ".[dev]"`
-        );
+    const uv = uvContext as { saveDir?: string; newProject?: boolean } | undefined;
+
+    // Starting a new kernel always means a new session — clear any in-memory
+    // project state from a previous session (pending imports, active project
+    // dir, health warnings) so they don't carry over.
+    resetProjectState();
+
+    // uv-mode boot: the project venv lives inside the kernel working
+    // directory, so it must be created and materialized BEFORE the kernel
+    // process spawns against the venv interpreter (ARCHITECTURE.md §10.5.9).
+    // The materialize step installs pdv-python into the venv, so the
+    // shared-mode pdv-install check below is skipped for uv kernels.
+    let preCreatedWorkingDir: string | undefined;
+    let uvBinaryForInit: string | undefined;
+    if (uv && requestedLanguage === "python") {
+      const uvEnv = await startUvEnvironment(uv);
+      preCreatedWorkingDir = uvEnv.workingDir;
+      uvBinaryForInit = uvEnv.uvBinary;
+      requestedSpec = {
+        ...(requestedSpec ?? {}),
+        language: "python",
+        argv: undefined,
+        env: { ...(requestedSpec?.env ?? {}), PYTHON_PATH: uvEnv.venvPython },
+      };
+    } else if (requestedLanguage === "python") {
+      const pythonPath =
+        requestedSpec?.env?.PYTHON_PATH ??
+        (Array.isArray(requestedSpec?.argv) ? requestedSpec.argv[0] : undefined);
+      if (pythonPath) {
+        const installStatus = await EnvironmentDetector.checkPDVInstalled(pythonPath);
+        if (!installStatus.installed) {
+          throw new Error(
+            `Selected Python runtime is missing pdv. Install it with: cd pdv-python && ${pythonPath} -m pip install -e ".[dev]"`
+          );
+        }
       }
     } else if (requestedLanguage === "julia") {
       const juliaPath = requestedSpec?.env?.JULIA_PATH ??
@@ -177,14 +284,8 @@ export function registerKernelIpcHandlers(
         }
       }
     }
-    // Starting a new kernel always means a new session — clear any in-memory
-    // project state from a previous session (pending imports, active project
-    // dir, health warnings) so they don't carry over.
-    resetProjectState();
 
-    const kernel = await kernelManager.start(
-      requestedSpec
-    );
+    const kernel = await kernelManager.start(requestedSpec);
     commRouter.attach(kernelManager, kernel.id);
     queryRouter.detach();
     await initializeKernelSession(
@@ -195,6 +296,8 @@ export function registerKernelIpcHandlers(
       kernel.id,
       kernelWorkingDirs,
       getWorkingDirBase(),
+      preCreatedWorkingDir,
+      uvBinaryForInit,
     );
     setActiveKernelId(kernel.id);
     await setupModuleNamespaces(kernel.id);
@@ -271,12 +374,52 @@ export function registerKernelIpcHandlers(
       if (!current) {
         throw new Error(`Kernel not found: ${kernelId}`);
       }
+
+      // Snapshot the uv env spec BEFORE the old working dir is deleted, so a
+      // uv kernel relaunches into its project venv rather than system python
+      // (ARCHITECTURE.md §10.5.9, §11.6). The snapshot carries any packages
+      // installed since load (e.g. via pdv.install, §10.5.11).
+      const oldWorkingDir = kernelWorkingDirs.get(kernelId);
+      let envSnapshot: { pyproject: string; uvLock?: string } | undefined;
+      if (current.language === "python" && oldWorkingDir) {
+        try {
+          const pyproject = await fs.readFile(
+            path.join(oldWorkingDir, "pyproject.toml"),
+            "utf8"
+          );
+          let uvLock: string | undefined;
+          try {
+            uvLock = await fs.readFile(path.join(oldWorkingDir, "uv.lock"), "utf8");
+          } catch {
+            /* lock may not exist yet */
+          }
+          envSnapshot = { pyproject, uvLock };
+        } catch {
+          /* no pyproject.toml -> shared-mode kernel */
+        }
+      }
+
       await cleanupKernelWorkingDir(projectManager, kernelManager, kernelId, kernelWorkingDirs, crashHandlers);
       await kernelManager.stop(kernelId);
-      const restarted = await kernelManager.start({
-        name: current.name,
-        language: current.language,
-      });
+
+      let preCreatedWorkingDir: string | undefined;
+      let uvBinaryForInit: string | undefined;
+      let restarted: KernelInfo;
+      if (envSnapshot) {
+        const uvEnv = await startUvEnvironment({ envSnapshot });
+        preCreatedWorkingDir = uvEnv.workingDir;
+        uvBinaryForInit = uvEnv.uvBinary;
+        restarted = await kernelManager.start({
+          name: current.name,
+          language: current.language,
+          env: { PYTHON_PATH: uvEnv.venvPython },
+        });
+      } else {
+        restarted = await kernelManager.start({
+          name: current.name,
+          language: current.language,
+        });
+      }
       commRouter.attach(kernelManager, restarted.id);
       queryRouter.detach();
       await initializeKernelSession(
@@ -285,7 +428,10 @@ export function registerKernelIpcHandlers(
         queryRouter,
         projectManager,
         restarted.id,
-        kernelWorkingDirs
+        kernelWorkingDirs,
+        getWorkingDirBase(),
+        preCreatedWorkingDir,
+        uvBinaryForInit
       );
       return restarted;
     }

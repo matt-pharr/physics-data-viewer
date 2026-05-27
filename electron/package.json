@@ -1,6 +1,7 @@
 {
   "name": "physics-data-viewer",
   "version": "0.2.0",
+  "uvVersion": "0.11.6",
   "private": true,
   "author": {
     "name": "Matthew Pharr",
@@ -22,10 +23,13 @@
     "dev:main": "node ./node_modules/cross-env/dist/bin/cross-env.js NODE_ENV=development node ./node_modules/electronmon/bin/cli.js .",
     "dev:renderer": "cd renderer && node ../node_modules/vite/bin/vite.js",
     "generate:icon:mac": "sh ./scripts/generate-mac-icon.sh && sh ./scripts/build-icon.sh",
+    "fetch:uv": "node scripts/fetch-uv.mjs --host",
+    "build:pdv-wheel": "node scripts/build-pdv-wheel.mjs",
+    "prebuild": "node scripts/fetch-uv.mjs && node scripts/build-pdv-wheel.mjs",
     "build": "npm run build:renderer && npm run build:main",
     "build:renderer": "cd renderer && node ../node_modules/vite/bin/vite.js build",
     "build:main": "node ./node_modules/typescript/bin/tsc -p tsconfig.json",
-    "build:e2e": "npm run build:renderer && npm run build:main",
+    "build:e2e": "npm run build",
     "test:e2e": "node ./node_modules/@playwright/test/cli.js test --config=playwright.config.ts",
     "test:e2e:headed": "node ./node_modules/@playwright/test/cli.js test --headed --config=playwright.config.ts",
     "pack": "npm run build && electron-builder --dir",
@@ -48,7 +52,7 @@
     "@types/node": "^20.0.0",
     "@types/react": "^18.2.0",
     "@types/react-dom": "^18.2.0",
-    "@vitejs/plugin-react": "^4.2.0",
+    "@vitejs/plugin-react": "^6.0.2",
     "concurrently": "^9.2.1",
     "cross-env": "^10.1.0",
     "electron": "^41.5.1",
@@ -60,7 +64,7 @@
     "knip": "^6.14.1",
     "typescript": "^6.0.3",
     "typescript-eslint": "^8.59.4",
-    "vite": "^6.2.0",
+    "vite": "^8.0.12",
     "vitest": "^4.1.6"
   },
   "dependencies": {
@@ -75,6 +79,7 @@
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
     "react-window": "^2.2.7",
+    "smol-toml": "^1.6.1",
     "zeromq": "^6.5.0",
     "zod": "^4.4.3"
   }

@@ -27,4 +27,17 @@ export default tseslint.config(
       ],
     },
   },
+  {
+    // Node-environment build scripts (ESM). Provide the Node globals they use.
+    files: ["scripts/**/*.mjs"],
+    languageOptions: {
+      globals: {
+        console: "readonly",
+        process: "readonly",
+        Buffer: "readonly",
+        fetch: "readonly",
+        URL: "readonly",
+      },
+    },
+  },
 );

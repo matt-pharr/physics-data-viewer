@@ -210,6 +210,12 @@ pdv_tree["nested_types.edges.complex_nested"] = {
 async function bootKernel(window: Page): Promise<void> {
   await window.getByRole("button", { name: "New Python Project" }).click();
   await expectKernelReady(window);
+  // The POPULATE script imports pandas + xarray. A fresh uv project is
+  // seeded only with the user's defaultPackages (numpy + matplotlib), so
+  // install the test's extra dependencies into the project venv. Idempotent:
+  // a no-op if uv add resolves them as already installed (e.g. after a
+  // round-trip reopen whose pyproject already lists them).
+  await executeInKernel(window, 'pdv.install("pandas", "xarray")');
 }
 
 /**

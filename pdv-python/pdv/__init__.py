@@ -92,6 +92,7 @@ __all__ = [
     "save_project",
     "save_project_as",
     "open_project",
+    "install",
     "add_file",
     "new_note",
     "help",
@@ -201,6 +202,81 @@ def save_project_as(path: str) -> None:
         print("PDV: No comm channel open. Cannot trigger save.")
     except Exception as exc:  # noqa: BLE001
         print(f"PDV: save_project_as failed: {exc}")
+
+
+def install(*packages: str) -> None:
+    """Install Python packages into the current project's uv environment.
+
+    Runs ``uv add`` against the project, installing the packages into the venv
+    the kernel is running in and recording them in ``pyproject.toml`` so they
+    persist. The packages become importable without a kernel restart
+    (ARCHITECTURE.md §10.5.11). Only available in uv-managed project
+    environments.
+
+    Parameters
+    ----------
+    *packages : str
+        PEP 508 specifiers, e.g. ``pdv.install("xarray", "netcdf4>=1.6")``.
+
+    Raises
+    ------
+    PDVError
+        If the project is not a uv environment, or ``uv add`` fails.
+    """
+    import importlib  # noqa: PLC0415
+    import re  # noqa: PLC0415
+    import subprocess  # noqa: PLC0415
+    import sys  # noqa: PLC0415
+
+    if not packages:
+        print("pdv.install: no packages specified.")
+        return
+
+    tree = _get_tree()
+    uv_binary = getattr(tree, "_uv_binary", None)
+    working_dir = getattr(tree, "_working_dir", None)
+    if not uv_binary or not working_dir:
+        raise PDVError(
+            "pdv.install() requires a uv-managed project environment. This "
+            "project uses a shared environment; install packages with that "
+            "environment's own package manager (pip/conda)."
+        )
+
+    # Best-effort note of packages already imported this session: uv installs
+    # them, but the live module object can't be swapped without a kernel
+    # restart (§10.5.11).
+    def _import_name(spec: str) -> str:
+        return re.split(r"[<>=!~\[; ]", spec.strip(), maxsplit=1)[0].replace("-", "_")
+
+    already_imported = sorted(
+        {_import_name(p) for p in packages if _import_name(p) in sys.modules}
+    )
+
+    print(f"pdv.install: uv add {' '.join(packages)}", flush=True)
+    proc = subprocess.Popen(
+        [uv_binary, "add", *packages],
+        cwd=working_dir,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+        bufsize=1,
+    )
+    for line in proc.stdout or []:
+        print(line, end="")
+    returncode = proc.wait()
+    if returncode != 0:
+        raise PDVError(f"pdv.install: 'uv add' failed (exit code {returncode}).")
+
+    importlib.invalidate_caches()
+
+    if already_imported:
+        print(
+            "pdv.install: "
+            + ", ".join(already_imported)
+            + " already imported in this session — restart the kernel for the "
+            "updated version to take effect.",
+            file=sys.stderr,
+        )
 
 
 def open_project(path: str) -> None:

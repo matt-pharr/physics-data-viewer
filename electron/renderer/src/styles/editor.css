@@ -280,6 +280,11 @@
   font-family: var(--font-mono);
 }
 
+/* Reactive "Install with pdv.install(...)" affordance under a ModuleNotFoundError. */
+.log-install-action {
+  margin: 0 0 6px;
+}
+
 .log-code {
   padding: 8px;
   border-radius: 4px;

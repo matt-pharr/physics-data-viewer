@@ -201,6 +201,77 @@ describe("ProjectManager", () => {
       expect(JSON.parse(raw).tree_checksum).toBe("deadbeef1234");
     });
 
+    it("carries an existing uv environment block forward into the pending manifest", async () => {
+      await fs.writeFile(
+        path.join(tmpDir, "project.json"),
+        JSON.stringify({
+          schema_version: "1.2",
+          saved_at: "2026-01-01T00:00:00.000Z",
+          pdv_version: getAppVersion(),
+          tree_checksum: "old",
+          environment: { mode: "uv", python_version: "3.12" },
+        }),
+        "utf8"
+      );
+
+      const { router, requestMock } = makeMockRouter();
+      requestMock.mockResolvedValue(makeOkResponse({ checksum: "new" }));
+
+      const pm = new ProjectManager(router);
+      const result = await pm.save(tmpDir, EMPTY_CELLS);
+
+      expect(result.pendingManifest!.environment).toEqual({
+        mode: "uv",
+        python_version: "3.12",
+      });
+      expect(result.pendingManifest!.schema_version).toBe("1.2");
+    });
+
+    it("defaults a freshly saved project to a shared environment", async () => {
+      const { router, requestMock } = makeMockRouter();
+      requestMock.mockResolvedValue(makeOkResponse({ checksum: "chk" }));
+
+      const pm = new ProjectManager(router);
+      const result = await pm.save(tmpDir, EMPTY_CELLS);
+
+      expect(result.pendingManifest!.environment).toEqual({ mode: "shared" });
+    });
+
+    it("records uv mode when the environment option is set (new project)", async () => {
+      const { router, requestMock } = makeMockRouter();
+      requestMock.mockResolvedValue(makeOkResponse({ checksum: "chk" }));
+
+      const pm = new ProjectManager(router);
+      const result = await pm.save(tmpDir, EMPTY_CELLS, { environment: { mode: "uv" } });
+
+      expect(result.pendingManifest!.environment).toEqual({ mode: "uv" });
+    });
+
+    it("preserves a prior python_version when promoting an existing project to uv", async () => {
+      await fs.writeFile(
+        path.join(tmpDir, "project.json"),
+        JSON.stringify({
+          schema_version: "1.2",
+          saved_at: "2026-01-01T00:00:00.000Z",
+          pdv_version: getAppVersion(),
+          tree_checksum: "old",
+          environment: { mode: "uv", python_version: "3.12" },
+        }),
+        "utf8"
+      );
+
+      const { router, requestMock } = makeMockRouter();
+      requestMock.mockResolvedValue(makeOkResponse({ checksum: "new" }));
+
+      const pm = new ProjectManager(router);
+      const result = await pm.save(tmpDir, EMPTY_CELLS, { environment: { mode: "uv" } });
+
+      expect(result.pendingManifest!.environment).toEqual({
+        mode: "uv",
+        python_version: "3.12",
+      });
+    });
+
     it("does not write project.json when kernel returns error", async () => {
       const { router, requestMock } = makeMockRouter();
       requestMock.mockRejectedValue(makeCommError("save.failed"));
@@ -519,6 +590,78 @@ describe("ProjectManager", () => {
       await expect(ProjectManager.readManifest(tmpDir)).rejects.toThrow(
         PDVSchemaVersionError
       );
+    });
+
+    it("defaults environment to shared when the field is absent (legacy 1.1)", async () => {
+      const manifest = {
+        schema_version: "1.1",
+        saved_at: "2026-01-01T00:00:00.000Z",
+        pdv_version: getAppVersion(),
+        tree_checksum: "abc",
+      };
+      await fs.writeFile(
+        path.join(tmpDir, "project.json"),
+        JSON.stringify(manifest),
+        "utf8"
+      );
+
+      const result = await ProjectManager.readManifest(tmpDir);
+      expect(result.environment).toEqual({ mode: "shared" });
+    });
+
+    it("parses a uv environment block with python_version", async () => {
+      const manifest = {
+        schema_version: "1.2",
+        saved_at: "2026-01-01T00:00:00.000Z",
+        pdv_version: getAppVersion(),
+        tree_checksum: "abc",
+        environment: { mode: "uv", python_version: "3.12" },
+      };
+      await fs.writeFile(
+        path.join(tmpDir, "project.json"),
+        JSON.stringify(manifest),
+        "utf8"
+      );
+
+      const result = await ProjectManager.readManifest(tmpDir);
+      expect(result.environment).toEqual({ mode: "uv", python_version: "3.12" });
+    });
+
+    it("omits python_version from a uv environment block when it is not a string", async () => {
+      const manifest = {
+        schema_version: "1.2",
+        saved_at: "2026-01-01T00:00:00.000Z",
+        pdv_version: getAppVersion(),
+        tree_checksum: "abc",
+        environment: { mode: "uv", python_version: 312 },
+      };
+      await fs.writeFile(
+        path.join(tmpDir, "project.json"),
+        JSON.stringify(manifest),
+        "utf8"
+      );
+
+      const result = await ProjectManager.readManifest(tmpDir);
+      expect(result.environment).toEqual({ mode: "uv" });
+    });
+
+    it("coerces a malformed environment block to shared", async () => {
+      for (const bad of ["nonsense", 42, ["uv"], { mode: "bogus" }, null]) {
+        const manifest = {
+          schema_version: "1.2",
+          saved_at: "2026-01-01T00:00:00.000Z",
+          pdv_version: getAppVersion(),
+          tree_checksum: "abc",
+          environment: bad,
+        };
+        await fs.writeFile(
+          path.join(tmpDir, "project.json"),
+          JSON.stringify(manifest),
+          "utf8"
+        );
+        const result = await ProjectManager.readManifest(tmpDir);
+        expect(result.environment).toEqual({ mode: "shared" });
+      }
     });
   });
 

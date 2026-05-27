@@ -11,6 +11,8 @@ import type { ProgressPayload, UpdateStatus } from '../../types/pdv';
 interface StatusBarProps {
   isExecuting: boolean;
   activeLanguage: 'python' | 'julia';
+  /** Whether the active kernel runs in a per-project uv venv or a shared env. */
+  environmentMode?: 'uv' | 'shared';
   pythonPath: string | undefined;
   juliaPath: string | undefined;
   kernelSpec: string | undefined;
@@ -53,6 +55,7 @@ function formatBytes(bytes: number): string {
 export const StatusBar: React.FC<StatusBarProps> = ({
   isExecuting,
   activeLanguage,
+  environmentMode,
   pythonPath,
   juliaPath,
   kernelSpec,
@@ -73,9 +76,15 @@ export const StatusBar: React.FC<StatusBarProps> = ({
 }) => {
   const showUpdateBadge =
     updateStatus?.state === 'available' || updateStatus?.state === 'downloaded';
+  const isUvProject = activeLanguage === 'python' && environmentMode === 'uv';
   const runtimeLabel = activeLanguage === 'julia'
     ? (juliaPath ?? 'julia')
-    : (pythonPath ?? kernelSpec ?? 'python3');
+    : isUvProject
+      ? 'uv · project venv'
+      : (pythonPath ?? kernelSpec ?? 'python3');
+  const runtimeTitle = isUvProject
+    ? 'Project-specific environment managed by uv'
+    : 'Click to change runtime';
 
   const progressPct = progress ? Math.round((progress.current / progress.total) * 100) : 0;
 
@@ -142,7 +151,7 @@ export const StatusBar: React.FC<StatusBarProps> = ({
         <span
           className="status-item status-clickable"
           onClick={onRuntimeClick}
-          title="Click to change runtime"
+          title={runtimeTitle}
         >
           {runtimeLabel}
         </span>

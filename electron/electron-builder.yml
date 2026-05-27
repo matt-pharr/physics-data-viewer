@@ -65,6 +65,13 @@ mac:
   extraResources:
     - from: assets/Assets.car
       to: Assets.car
+    # Per-platform uv binary, fetched by scripts/fetch-uv.mjs (ARCHITECTURE.md §10.5.6).
+    # Resolved at runtime as <Resources>/uv/uv by uv-runner.ts.
+    - from: resources/uv/darwin-arm64
+      to: uv
+    # App-managed pdv-python wheel, built by scripts/build-pdv-wheel.mjs (§10.5.7).
+    - from: resources/pdv-python-wheel
+      to: pdv-python-wheel
   extendInfo:
     CFBundleIconName: pdv-macicon
   target:
@@ -90,6 +97,14 @@ dmg:
 linux:
   category: Science
   icon: assets/pdv-icon-linux.svg
+  # Per-platform uv binary, fetched by scripts/fetch-uv.mjs (ARCHITECTURE.md §10.5.6).
+  # Resolved at runtime as <Resources>/uv/uv by uv-runner.ts.
+  extraResources:
+    - from: resources/uv/linux-x64
+      to: uv
+    # App-managed pdv-python wheel, built by scripts/build-pdv-wheel.mjs (§10.5.7).
+    - from: resources/pdv-python-wheel
+      to: pdv-python-wheel
   target:
     - target: AppImage
       arch:

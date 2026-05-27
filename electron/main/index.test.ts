@@ -207,6 +207,9 @@ vi.mock("fs/promises", () => ({
   rm: mocks.fsRm,
   rename: mocks.fsRename,
   readdir: mocks.fsReaddir,
+  // Default: nothing exists. The save handler's uv-mode probe
+  // (access pyproject.toml) resolves to "not a uv project".
+  access: () => Promise.reject(new Error("ENOENT")),
 }));
 
 vi.mock("./module-manager", () => ({
