@@ -154,9 +154,21 @@ export function runUv(args: string[], opts: UvRunOptions = {}): Promise<UvResult
   }
   return new Promise<UvResult>((resolve) => {
     const chunks: string[] = [];
+    // uv emits ANSI colors + a redrawn progress spinner even on a piped
+    // stdout (it consults the host TERM rather than isatty alone). The
+    // streaming panels (EnvSyncModal, Packages tab) render plain text, so
+    // colors arrive as visible escape characters and the spinner produces
+    // garbled \r redraws. Forcing plain text at the env level keeps the
+    // streams readable without per-call arg threading; callers can still
+    // override via `opts.env`.
+    const baseEnv: Record<string, string | undefined> = {
+      ...process.env,
+      NO_COLOR: "1",
+      UV_NO_PROGRESS: "1",
+    };
     const proc = spawn(binary, args, {
       cwd: opts.cwd,
-      env: opts.env ? { ...process.env, ...opts.env } : process.env,
+      env: opts.env ? { ...baseEnv, ...opts.env } : baseEnv,
       stdio: ["ignore", "pipe", "pipe"],
       signal: opts.signal,
     });
