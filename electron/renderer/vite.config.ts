@@ -28,7 +28,7 @@ export default defineConfig({
   base: './',
   build: {
     outDir: 'dist',
-    rollupOptions: {
+    rolldownOptions: {
       input: {
         main: resolve(__dirname, 'index.html'),
         moduleWindow: resolve(__dirname, 'module-window.html'),
