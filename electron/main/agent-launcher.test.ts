@@ -8,6 +8,7 @@ import { buildAgentInvocation } from "./agent-launcher";
 
 describe("buildAgentInvocation", () => {
   it("wraps the default command in sh -lc + the terminal preset (Linux)", () => {
+    // The default cwd is the session working directory.
     expect(
       buildAgentInvocation({
         terminal: { preset: "alacritty" },
@@ -22,7 +23,7 @@ describe("buildAgentInvocation", () => {
         "-e",
         "sh",
         "-lc",
-        "cd '/proj' && exec claude --mcp-config '/wd/.pdv-mcp.json'",
+        "cd '/wd' && exec claude --mcp-config '/wd/.pdv-mcp.json'",
       ],
     });
   });
@@ -37,13 +38,13 @@ describe("buildAgentInvocation", () => {
       platform: "linux",
     });
     expect(args[3]).toBe(
-      "cd '/proj' && exec myagent '/wd/.pdv-mcp.json' '/proj' '/wd'",
+      "cd '/wd' && exec myagent '/wd/.pdv-mcp.json' '/proj' '/wd'",
     );
   });
 
-  it("cd's into the working directory when cwd='working'", () => {
+  it("cd's into the project directory when cwd='project'", () => {
     const { args } = buildAgentInvocation({
-      agent: { cwd: "working" },
+      agent: { cwd: "project" },
       terminal: { preset: "alacritty" },
       mcpConfigPath: "/wd/.pdv-mcp.json",
       projectRoot: "/proj",
@@ -51,12 +52,13 @@ describe("buildAgentInvocation", () => {
       platform: "linux",
     });
     expect(args[3]).toBe(
-      "cd '/wd' && exec claude --mcp-config '/wd/.pdv-mcp.json'",
+      "cd '/proj' && exec claude --mcp-config '/wd/.pdv-mcp.json'",
     );
   });
 
   it("falls back to the working directory when cwd='project' but no project is loaded", () => {
     const { args } = buildAgentInvocation({
+      agent: { cwd: "project" },
       terminal: { preset: "alacritty" },
       mcpConfigPath: "/wd/.pdv-mcp.json",
       projectRoot: null,
@@ -70,6 +72,7 @@ describe("buildAgentInvocation", () => {
 
   it("quotes a project path containing spaces", () => {
     const { args } = buildAgentInvocation({
+      agent: { cwd: "project" },
       terminal: { preset: "alacritty" },
       mcpConfigPath: "/wd/.pdv-mcp.json",
       projectRoot: "/Users/me/My Project",
@@ -95,13 +98,14 @@ describe("buildAgentInvocation", () => {
         "new-tab",
         "cmd",
         "/c",
-        `cd /d "C:\\proj" && claude --mcp-config "C:\\wd\\.pdv-mcp.json"`,
+        `cd /d "C:\\wd" && claude --mcp-config "C:\\wd\\.pdv-mcp.json"`,
       ],
     });
   });
 
   it("double-quotes a Windows path containing a space", () => {
     const { args } = buildAgentInvocation({
+      agent: { cwd: "project" },
       mcpConfigPath: "C:\\wd\\.pdv-mcp.json",
       projectRoot: "C:\\Users\\me\\My Project",
       workingDir: "C:\\wd",

@@ -119,6 +119,7 @@ export const IPC = {
   launchers: {
     openAgent: "launchers:openAgent",
     openWorkingDir: "launchers:openWorkingDir",
+    checkAvailability: "launchers:checkAvailability",
   },
   /** Markdown note channels. */
   note: {
@@ -623,6 +624,24 @@ export interface ScriptOperationResult {
   /** Optional error message when `success` is false. */
   error?: string;
 }
+
+/**
+ * How to check whether a launcher (terminal / editor / file-manager) is
+ * actually installed, without launching it. Consumed by
+ * `launchers.checkAvailability`.
+ */
+export type LauncherCheck =
+  /** An executable that must be resolvable on `$PATH`. */
+  | { kind: "path"; bin: string }
+  /**
+   * A macOS `.app` bundle, checked by probing the standard application
+   * directories (`/Applications`, `~/Applications`, `/System/Applications`,
+   * `/System/Applications/Utilities`) — nothing is launched. An app installed
+   * outside those locations reports as missing.
+   */
+  | { kind: "macapp"; app: string }
+  /** Always available (e.g. Terminal.app, or the "none" / unset choice). */
+  | { kind: "none" };
 
 /**
  * Request payload for `script.run`.
@@ -2638,6 +2657,14 @@ export interface PDVApi {
      *   kernel is active or the spawn fails.
      */
     openWorkingDir(): Promise<ScriptOperationResult>;
+    /**
+     * Check whether a launcher is installed, without launching it. Used by
+     * the Settings dialog to gate Save on a valid selection.
+     *
+     * @param check - What to probe (PATH executable, macOS app, or none).
+     * @returns True when the launcher is present (or the check is `none`).
+     */
+    checkAvailability(check: LauncherCheck): Promise<boolean>;
   };
 
   /** Window chrome integration and title-bar controls. */

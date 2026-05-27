@@ -19,7 +19,8 @@ import { ipcMain } from "electron";
 import { buildAgentInvocation } from "./agent-launcher";
 import type { PDVConfig } from "./config";
 import { buildEditorSpawn, resolveEditorSpawn } from "./editor-spawn";
-import { IPC, type McpStatus, type ScriptOperationResult } from "./ipc";
+import { IPC, type LauncherCheck, type McpStatus, type ScriptOperationResult } from "./ipc";
+import { checkLauncherAvailability } from "./launcher-availability";
 import { writeMcpConfigFile } from "./mcp/mcp-config-writer";
 
 /**
@@ -145,6 +146,18 @@ export function registerLaunchersIpcHandlers(
         const error = err instanceof Error ? err.message : String(err);
         console.error("[pdv] launchers.openWorkingDir failed:", error);
         return { success: false, error: `Failed to open working directory: ${error}` };
+      }
+    },
+  );
+
+  ipcMain.handle(
+    IPC.launchers.checkAvailability,
+    async (_event, check: LauncherCheck): Promise<boolean> => {
+      try {
+        return await checkLauncherAvailability(check);
+      } catch (err) {
+        console.error("[pdv] launchers.checkAvailability failed:", err);
+        return false;
       }
     },
   );
