@@ -293,8 +293,6 @@ export interface Config {
   pythonEditorCmd?: string;
   /** @deprecated Superseded by `launchers.editor.fileCommand` (migrated on load). */
   juliaEditorCmd?: string;
-  /** File-manager command to reveal a file/folder. Uses `{}` as placeholder. */
-  fileManagerCmd?: string;
   /** Default parent directory for new project saves (pre-fills Save As dialog). */
   defaultSaveLocation?: string;
   /** Base directory for session working directories. */

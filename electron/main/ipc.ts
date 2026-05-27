@@ -633,7 +633,12 @@ export interface ScriptOperationResult {
 export type LauncherCheck =
   /** An executable that must be resolvable on `$PATH`. */
   | { kind: "path"; bin: string }
-  /** A macOS `.app` bundle, probed via LaunchServices without launching. */
+  /**
+   * A macOS `.app` bundle, checked by probing the standard application
+   * directories (`/Applications`, `~/Applications`, `/System/Applications`,
+   * `/System/Applications/Utilities`) — nothing is launched. An app installed
+   * outside those locations reports as missing.
+   */
   | { kind: "macapp"; app: string }
   /** Always available (e.g. Terminal.app, or the "none" / unset choice). */
   | { kind: "none" };

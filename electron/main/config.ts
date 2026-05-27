@@ -64,11 +64,6 @@ export interface PDVConfig {
    * {@link PDVConfig.pythonEditorCmd}.
    */
   juliaEditorCmd?: string;
-  /**
-   * File-manager command used to reveal a file or folder in the OS browser.
-   * Use `{}` as the placeholder, e.g. `"open {}"` (macOS) or `"xdg-open {}"` (Linux).
-   */
-  fileManagerCmd?: string;
   /** Recently opened project paths for menu synchronization. */
   recentProjects?: string[];
   /** Current/last active project root directory. */
@@ -269,7 +264,7 @@ function parseConfig(raw: string, filePath: string): Partial<PDVConfig> {
       result.theme = theme;
     }
   }
-  for (const key of ["pythonEditorCmd", "juliaEditorCmd", "fileManagerCmd", "defaultSaveLocation", "workingDirBase"] as const) {
+  for (const key of ["pythonEditorCmd", "juliaEditorCmd", "defaultSaveLocation", "workingDirBase"] as const) {
     if (key in obj) {
       const val = obj[key];
       if (val !== null && val !== undefined && typeof val !== "string") {

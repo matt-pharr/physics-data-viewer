@@ -62,8 +62,11 @@ export function normalizeRecentProjects(data: unknown): string[] {
 /**
  * Deep-merge a partial config update into the current config.
  *
- * Handles nested `settings` and `settings.appearance` without requiring
- * callers to manually spread every level.
+ * Handles nested `settings` / `settings.appearance` and the `launchers`
+ * subtree without requiring callers to spread every level. The `launchers`
+ * merge mirrors the main-process `config:set` handler so a partial update
+ * (e.g. the General tab writing only `terminal` + `editor`) doesn't drop the
+ * sibling `agent` slot from the renderer's in-memory copy.
  */
 export function mergeConfigUpdate(base: Config, updates: Partial<Config>): Config {
   return {
@@ -77,5 +80,8 @@ export function mergeConfigUpdate(base: Config, updates: Partial<Config>): Confi
         ...updates.settings?.appearance,
       },
     },
+    ...(updates.launchers
+      ? { launchers: { ...base.launchers, ...updates.launchers } }
+      : {}),
   };
 }

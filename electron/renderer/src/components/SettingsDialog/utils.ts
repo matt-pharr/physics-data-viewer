@@ -122,14 +122,6 @@ export interface EditorPreset {
   check: LauncherCheck;
 }
 
-/** A file-manager the user can pick from the General-tab dropdown. */
-export interface FileManagerPreset {
-  id: string;
-  label: string;
-  command: string;
-  check: LauncherCheck;
-}
-
 /**
  * Editor/IDE presets. All are cross-platform tools; the dropdown shows the
  * same set on every platform (availability checking weeds out uninstalled
@@ -146,35 +138,15 @@ export const EDITOR_PRESETS: readonly EditorPreset[] = [
   { id: 'nano',    label: 'Nano',         command: 'nano {}',  isTuiEditor: true,  check: { kind: 'path', bin: 'nano' } },
 ];
 
-const FILE_MANAGER_PRESETS_MAC: readonly FileManagerPreset[] = [
-  { id: 'finder', label: 'Finder', command: 'open {}', check: { kind: 'none' } },
-];
-const FILE_MANAGER_PRESETS_WIN: readonly FileManagerPreset[] = [
-  { id: 'explorer', label: 'File Explorer', command: 'explorer {}', check: { kind: 'none' } },
-];
-const FILE_MANAGER_PRESETS_LINUX: readonly FileManagerPreset[] = [
-  { id: 'xdg-open',  label: 'System default (xdg-open)', command: 'xdg-open {}',  check: { kind: 'path', bin: 'xdg-open' } },
-  { id: 'nautilus',  label: 'Files (Nautilus)',          command: 'nautilus {}', check: { kind: 'path', bin: 'nautilus' } },
-  { id: 'dolphin',   label: 'Dolphin',                   command: 'dolphin {}',  check: { kind: 'path', bin: 'dolphin' } },
-  { id: 'thunar',    label: 'Thunar',                    command: 'thunar {}',   check: { kind: 'path', bin: 'thunar' } },
-];
-
-/**
- * File-manager presets for a platform, in display order.
- *
- * @param platform - NodeJS platform identifier.
- * @returns Presets to render in the dropdown.
- */
-export function getFileManagerPresets(platform: NodeJS.Platform): readonly FileManagerPreset[] {
-  if (platform === 'darwin') return FILE_MANAGER_PRESETS_MAC;
-  if (platform === 'win32') return FILE_MANAGER_PRESETS_WIN;
-  return FILE_MANAGER_PRESETS_LINUX;
-}
-
 /**
  * Derive a {@link LauncherCheck} from an arbitrary command string (used for
  * the "Custom…" option). Probes the first token on `$PATH`; an empty command
  * is treated as always-available so a blank custom field doesn't block Save.
+ *
+ * Limitation: the first token is assumed to be the executable, so a wrapper
+ * or env prefix (`env FOO=1 code {}`, `flatpak run org.x {}`) checks the
+ * wrapper (`env` / `flatpak`) rather than the real program. The worst case is
+ * a spurious "not found" marker on an otherwise-valid custom command.
  *
  * @param command - Command template, e.g. `"alacritty -e {cmd}"`.
  * @returns A check descriptor.
@@ -194,22 +166,6 @@ export function checkForCommand(command: string): LauncherCheck {
 export function editorPresetIdForCommand(command: string | undefined): string {
   const norm = (command ?? '').trim();
   return EDITOR_PRESETS.find((p) => p.command === norm)?.id ?? CUSTOM_PRESET_ID;
-}
-
-/**
- * Reverse-map a saved file-manager command to a preset id, or
- * {@link CUSTOM_PRESET_ID} when it matches no preset for the platform.
- *
- * @param command - The saved `fileManagerCmd`.
- * @param platform - NodeJS platform identifier.
- * @returns A preset id.
- */
-export function fileManagerPresetIdForCommand(
-  command: string | undefined,
-  platform: NodeJS.Platform,
-): string {
-  const norm = (command ?? '').trim();
-  return getFileManagerPresets(platform).find((p) => p.command === norm)?.id ?? CUSTOM_PRESET_ID;
 }
 
 /**

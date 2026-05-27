@@ -4,8 +4,6 @@ import {
   buildShortcutString,
   checkForCommand,
   editorPresetIdForCommand,
-  fileManagerPresetIdForCommand,
-  getFileManagerPresets,
   getTerminalPresetsForPlatform,
   normalizeShortcut,
   parseShortcutTokens,
@@ -88,24 +86,6 @@ describe('editorPresetIdForCommand', () => {
   it('returns "custom" for an unrecognised command', () => {
     expect(editorPresetIdForCommand('my-editor --wait {}')).toBe('custom');
     expect(editorPresetIdForCommand(undefined)).toBe('custom');
-  });
-});
-
-describe('fileManagerPresetIdForCommand', () => {
-  it('reverse-maps the platform default', () => {
-    expect(fileManagerPresetIdForCommand('open {}', 'darwin')).toBe('finder');
-    expect(fileManagerPresetIdForCommand('xdg-open {}', 'linux')).toBe('xdg-open');
-  });
-  it('returns "custom" for an unrecognised command', () => {
-    expect(fileManagerPresetIdForCommand('ranger {}', 'linux')).toBe('custom');
-  });
-});
-
-describe('getFileManagerPresets', () => {
-  it('is platform-specific', () => {
-    expect(getFileManagerPresets('darwin').map((p) => p.id)).toEqual(['finder']);
-    expect(getFileManagerPresets('win32').map((p) => p.id)).toEqual(['explorer']);
-    expect(getFileManagerPresets('linux').length).toBeGreaterThan(1);
   });
 });
 

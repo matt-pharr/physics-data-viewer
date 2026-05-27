@@ -24,8 +24,6 @@ import {
   checkForCommand,
   defaultTerminalPresetForPlatform,
   editorPresetIdForCommand,
-  fileManagerPresetIdForCommand,
-  getFileManagerPresets,
   getTerminalPresetsForPlatform,
   isLikelyTuiEditor,
   normalizeShortcut,
@@ -51,7 +49,6 @@ const PLATFORM: NodeJS.Platform =
   (typeof window !== 'undefined' && window.pdv?.system?.platform) || 'linux';
 const TERMINAL_PRESET_OPTIONS = getTerminalPresetsForPlatform(PLATFORM);
 const DEFAULT_TERMINAL_PRESET = defaultTerminalPresetForPlatform(PLATFORM);
-const FILE_MANAGER_OPTIONS = getFileManagerPresets(PLATFORM);
 
 interface SettingsDialogProps {
   isOpen: boolean;
@@ -101,16 +98,13 @@ export const SettingsDialog: React.FC<SettingsDialogProps> = ({
   const [editorPresetId, setEditorPresetId] = useState<string>('vscode');
   const [editorCustomCommand, setEditorCustomCommand] = useState('code {}');
   const [editorCustomIsTui, setEditorCustomIsTui] = useState(false);
-  const [fileManagerPresetId, setFileManagerPresetId] = useState<string>(FILE_MANAGER_OPTIONS[0].id);
-  const [fileManagerCustomCommand, setFileManagerCustomCommand] = useState(FILE_MANAGER_OPTIONS[0].command);
   const [terminalPreset, setTerminalPreset] = useState<TerminalPreset>(DEFAULT_TERMINAL_PRESET);
   const [terminalCustomTemplate, setTerminalCustomTemplate] = useState('');
   /** Availability of each General-tab launcher; `null` while a check is in flight. */
   const [launcherAvailability, setLauncherAvailability] = useState<{
     terminal: boolean | null;
     editor: boolean | null;
-    fileManager: boolean | null;
-  }>({ terminal: true, editor: true, fileManager: true });
+  }>({ terminal: true, editor: true });
   const [defaultSaveLocation, setDefaultSaveLocation] = useState('');
   const [workingDirBase, setWorkingDirBase] = useState('');
   const [autoSaveInterval, setAutoSaveInterval] = useState(DEFAULT_AUTOSAVE_INTERVAL_S);
@@ -148,11 +142,6 @@ export const SettingsDialog: React.FC<SettingsDialogProps> = ({
     setEditorPresetId(editorPreset);
     setEditorCustomCommand(fileCmd);
     setEditorCustomIsTui(editorCfg?.isTuiEditor ?? isLikelyTuiEditor(fileCmd));
-    // File manager: reverse-map likewise.
-    const fmCmd = config?.fileManagerCmd;
-    const fmPreset = fileManagerPresetIdForCommand(fmCmd, PLATFORM);
-    setFileManagerPresetId(fmPreset);
-    setFileManagerCustomCommand(fmCmd ?? FILE_MANAGER_OPTIONS[0].command);
     const savedPreset = config?.launchers?.terminal?.preset;
     setTerminalPreset(
       savedPreset && TERMINAL_PRESET_OPTIONS.includes(savedPreset)
@@ -209,16 +198,6 @@ export const SettingsDialog: React.FC<SettingsDialogProps> = ({
     return { command: preset.command, isTui: preset.isTuiEditor, check: preset.check };
   }, [editorPresetId, editorCustomCommand, editorCustomIsTui]);
 
-  const fileManagerResolved = useMemo(() => {
-    if (fileManagerPresetId === CUSTOM_PRESET_ID) {
-      const command = fileManagerCustomCommand.trim() || FILE_MANAGER_OPTIONS[0].command;
-      return { command, check: checkForCommand(command) };
-    }
-    const preset =
-      FILE_MANAGER_OPTIONS.find((p) => p.id === fileManagerPresetId) ?? FILE_MANAGER_OPTIONS[0];
-    return { command: preset.command, check: preset.check };
-  }, [fileManagerPresetId, fileManagerCustomCommand]);
-
   const terminalCheck = useMemo(
     () => terminalPresetCheck(terminalPreset, PLATFORM, terminalCustomTemplate),
     [terminalPreset, terminalCustomTemplate],
@@ -232,25 +211,23 @@ export const SettingsDialog: React.FC<SettingsDialogProps> = ({
     let cancelled = false;
     const timer = window.setTimeout(() => {
       void (async () => {
-        const [terminal, editor, fileManager] = await Promise.all([
+        const [terminal, editor] = await Promise.all([
           window.pdv.launchers.checkAvailability(terminalCheck),
           window.pdv.launchers.checkAvailability(editorResolved.check),
-          window.pdv.launchers.checkAvailability(fileManagerResolved.check),
         ]);
-        if (!cancelled) setLauncherAvailability({ terminal, editor, fileManager });
+        if (!cancelled) setLauncherAvailability({ terminal, editor });
       })();
     }, 250);
     return () => {
       cancelled = true;
       window.clearTimeout(timer);
     };
-  }, [isOpen, terminalCheck, editorResolved.check, fileManagerResolved.check]);
+  }, [isOpen, terminalCheck, editorResolved.check]);
 
   /** True when a selected launcher is confirmed missing — blocks Save. */
   const hasUnavailableLauncher =
     launcherAvailability.terminal === false ||
-    launcherAvailability.editor === false ||
-    launcherAvailability.fileManager === false;
+    launcherAvailability.editor === false;
 
   // Subscribe to auto-update status pushes while the dialog is open, and
   // fetch the current cached status so we reflect any check that completed
@@ -417,16 +394,28 @@ export const SettingsDialog: React.FC<SettingsDialogProps> = ({
     // `isTuiEditor` flag is now always definite (preset flag or Custom checkbox).
     const editorCommand = editorResolved.command;
 
+    // If the user has gated General-tab edits (a selected launcher isn't
+    // installed) AND is saving from another tab, drop those edits from the
+    // payload so we don't silently persist a broken launcher config. The
+    // pending in-memory selection stays on the General tab for the user to
+    // fix on a later visit.
+    const dropGatedGeneralEdits =
+      activeTab !== 'general' && hasUnavailableLauncher;
+    const launcherUpdates = dropGatedGeneralEdits
+      ? {}
+      : {
+          launchers: {
+            terminal: terminalLauncher,
+            editor: {
+              fileCommand: editorCommand,
+              dirCommand: editorCommand,
+              isTuiEditor: editorResolved.isTui,
+            },
+          },
+        };
+
     await onSave({
-      fileManagerCmd: fileManagerResolved.command,
-      launchers: {
-        terminal: terminalLauncher,
-        editor: {
-          fileCommand: editorCommand,
-          dirCommand: editorCommand,
-          isTuiEditor: editorResolved.isTui,
-        },
-      },
+      ...launcherUpdates,
       defaultSaveLocation: defaultSaveLocation.trim() || undefined,
       workingDirBase: workingDirBase.trim() || undefined,
       autoSaveIntervalSeconds: Math.max(30, autoSaveInterval),
@@ -542,39 +531,6 @@ export const SettingsDialog: React.FC<SettingsDialogProps> = ({
                     <div className="settings-general-desc">
                       Required for TUI editors (<code>vim</code>, <code>nvim</code>,
                       <code>nano</code>). Auto-set from the command; toggle to override.
-                    </div>
-                  </>
-                )}
-
-                <label htmlFor="sg-file-manager">File manager</label>
-                <select
-                  id="sg-file-manager"
-                  value={fileManagerPresetId}
-                  onChange={(e) => setFileManagerPresetId(e.target.value)}
-                >
-                  {FILE_MANAGER_OPTIONS.map((p) => (
-                    <option key={p.id} value={p.id}>{p.label}</option>
-                  ))}
-                  <option value={CUSTOM_PRESET_ID}>Custom…</option>
-                </select>
-                <div className="settings-general-desc">
-                  Used to reveal files in the OS file browser.
-                  {renderUnavailable(launcherAvailability.fileManager, 'file manager')}
-                </div>
-
-                {fileManagerPresetId === CUSTOM_PRESET_ID && (
-                  <>
-                    <label htmlFor="sg-file-manager-custom">File-manager command</label>
-                    <input
-                      id="sg-file-manager-custom"
-                      type="text"
-                      value={fileManagerCustomCommand}
-                      onChange={(e) => setFileManagerCustomCommand(e.target.value)}
-                      placeholder="xdg-open {}"
-                      spellCheck={false}
-                    />
-                    <div className="settings-general-desc">
-                      Use <code>{'{}'}</code> as the path placeholder.
                     </div>
                   </>
                 )}
@@ -989,11 +945,12 @@ export const SettingsDialog: React.FC<SettingsDialogProps> = ({
               className="btn btn-primary"
               onClick={() => void onSaveSettings()}
               disabled={
-                (activeTab === 'shortcuts' && hasConflicts) || hasUnavailableLauncher
+                (activeTab === 'shortcuts' && hasConflicts) ||
+                (activeTab === 'general' && hasUnavailableLauncher)
               }
               title={
-                hasUnavailableLauncher
-                  ? 'A selected launcher is not installed — fix it on the General tab before saving'
+                activeTab === 'general' && hasUnavailableLauncher
+                  ? 'A selected launcher is not installed — pick another option before saving'
                   : activeTab === 'shortcuts' && hasConflicts
                     ? 'Resolve duplicate shortcuts before saving'
                     : undefined
