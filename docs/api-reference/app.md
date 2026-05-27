@@ -41,3 +41,11 @@ Two additional attributes are attached to `pdv` at kernel startup:
 
 Both are only relevant when authoring a module library, which is why
 they are documented there.
+
+If you control the class you want PDV to recognize — i.e. you're shipping
+it from a PyPI package rather than wrapping someone else's type — prefer
+the [dunder protocol](module-api.md#dunder-protocol) instead. It lets
+your class self-register through methods like `__pdv_format__` and
+`__pdv_handle__` without your package depending on `pdv` at all, and
+without the user having to import your module before opening their
+project.

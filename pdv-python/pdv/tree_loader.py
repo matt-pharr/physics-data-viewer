@@ -311,7 +311,12 @@ def load_tree_index(
         elif backend == "inline":
             tree.set_quiet(full_path, storage.get("value"))
         elif backend == "local_file":
-            value = deserialize_node(storage, working_dir, trusted=True)
+            value = deserialize_node(
+                storage,
+                working_dir,
+                trusted=True,
+                python_type=meta.get("python_type", ""),
+            )
             tree.set_quiet(full_path, value)
 
         if on_progress is not None:

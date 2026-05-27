@@ -315,6 +315,26 @@ class TestHandleTreeList:
         assert "has_handler" in node
         assert node["has_handler"] is False
 
+    def test_pdv_handle_dunder_sets_has_handler_true(self, tree_with_comm):
+        """A class defining only ``__pdv_handle__`` is reported as having a
+        handler in the tree-list response, so the renderer enables double-click
+        without requiring a ``@pdv.handle`` registration."""
+
+        class _DunderHandled:
+            def __pdv_handle__(self, path, pdv_tree):
+                pass
+
+        tree_with_comm["d"] = _DunderHandled()
+        mock_comm = _make_mock_comm()
+        msg = _make_msg("pdv.tree.list", {"path": ""})
+        with (
+            patch.object(comms_mod, "_comm", mock_comm),
+            patch.object(comms_mod, "_pdv_tree", tree_with_comm),
+        ):
+            handle_tree_list(msg)
+        node = mock_comm._sent[0]["payload"]["nodes"][0]
+        assert node["has_handler"] is True
+
 
 class TestHandleTreeGet:
     def test_metadata_mode_returns_kind(self, tree_with_comm):

@@ -624,3 +624,45 @@ class TestRoundtrip:
 
         assert checksum_after == checksum_before
         assert post_load_checksum == checksum_before
+
+
+class TestDunderDigestHook:
+    """``__pdv_digest__`` opt-in for custom (KIND_UNKNOWN) values."""
+
+    def _make_class(self):
+        class _D:
+            def __init__(self, x: int):
+                self.x = x
+
+            def __pdv_digest__(self) -> bytes:
+                return self.x.to_bytes(8, "little", signed=True)
+
+        return _D
+
+    def test_equal_digests_produce_equal_tree_checksum(self):
+        cls = self._make_class()
+        t1 = _make_tree(node=cls(7))
+        t2 = _make_tree(node=cls(7))
+        assert tree_checksum(t1) == tree_checksum(t2)
+
+    def test_unequal_digests_produce_unequal_tree_checksum(self):
+        cls = self._make_class()
+        t1 = _make_tree(node=cls(7))
+        t2 = _make_tree(node=cls(8))
+        assert tree_checksum(t1) != tree_checksum(t2)
+
+    def test_digest_exception_falls_back_to_repr(self):
+        class _Boom:
+            def __init__(self, x):
+                self.x = x
+
+            def __repr__(self):
+                return f"_Boom({self.x})"
+
+            def __pdv_digest__(self):
+                raise RuntimeError("digest boom")
+
+        t1 = _make_tree(node=_Boom(1))
+        t2 = _make_tree(node=_Boom(1))
+        # Both fall back to repr, which is identical → equal checksum.
+        assert tree_checksum(t1) == tree_checksum(t2)

@@ -51,6 +51,8 @@ The Tree accepts any Python value that can be serialized:
 
 Large arrays and DataFrames are handled efficiently — PDV uses format-appropriate serialization (e.g. `.npy` for arrays, `.parquet` for DataFrames) rather than pickling everything.
 
+User-defined classes can opt into PDV's storage and double-click handling either by calling `pdv.register_serializer` / `@pdv.handle` (for types you don't own) or by implementing the **dunder protocol** (`__pdv_format__`, `__pdv_serialize__`, `__pdv_deserialize__` and friends) directly on the class. The dunder path is useful for shipping a PyPI package that knows how to live in PDV without depending on `pdv`. See [Module API → Dunder protocol](../api-reference/module-api.md#dunder-protocol) for the full surface.
+
 ### The Tree panel
 
 The Tree panel in the sidebar is a live view of `pdv_tree`. It updates automatically whenever your code modifies the tree. You can:

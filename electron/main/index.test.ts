@@ -25,6 +25,7 @@ import { QueryRouter } from "./query-router";
 import type { ProjectManager } from "./project-manager";
 import type { ConfigStore } from "./config";
 import { EnvironmentDetector } from "./environment-detector";
+import { TEST_PDV_VERSION } from "./test-helpers";
 
 type InvokeHandler = (event: unknown, ...args: unknown[]) => unknown;
 
@@ -1840,7 +1841,7 @@ describe("Step 5 IPC handlers", () => {
       payload: {
         alias: "toy",
         name: "Toy (renamed)",
-        version: "0.2.0",
+        version: TEST_PDV_VERSION,
         description: "new",
       },
     });
@@ -1849,15 +1850,15 @@ describe("Step 5 IPC handlers", () => {
     const result = (await update({}, {
       alias: "toy",
       name: "Toy (renamed)",
-      version: "0.2.0",
+      version: TEST_PDV_VERSION,
       description: "new",
     })) as { success: boolean; version?: string };
 
     expect(result.success).toBe(true);
-    expect(result.version).toBe("0.2.0");
+    expect(result.version).toBe(TEST_PDV_VERSION);
     expect(commRouter.request).toHaveBeenCalledWith(
       PDVMessageType.MODULE_UPDATE,
-      expect.objectContaining({ alias: "toy", version: "0.2.0" }),
+      expect.objectContaining({ alias: "toy", version: TEST_PDV_VERSION }),
     );
   });
 

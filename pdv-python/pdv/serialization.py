@@ -892,6 +892,30 @@ def serialize_node(
             autosave_cache[tree_path] = (_digest, descriptor)  # type: ignore[index]
         return descriptor
 
+    dunder = _serializers.find_for_value_dunder(value)
+    if dunder is not None:
+        node_uuid = generate_node_uuid()
+        filename = key + dunder.extension
+        file_path = uuid_tree_path(working_dir, node_uuid, filename)
+        ensure_parent(file_path)
+        try:
+            value.__pdv_serialize__(file_path)
+        except Exception as exc:  # noqa: BLE001
+            raise PDVSerializationError(
+                f"Dunder serializer for '{dunder.class_name}' failed to save "
+                f"value at '{tree_path}': {exc}"
+            ) from exc
+        descriptor["uuid"] = node_uuid
+        descriptor["storage"] = _file_storage(node_uuid, filename, dunder.format)
+        descriptor["metadata"] = {
+            "preview": preview,
+            "python_type": python_type_string(value),
+            "serializer": f"dunder:{dunder.class_name}",
+        }
+        if _digest is not None:
+            autosave_cache[tree_path] = (_digest, descriptor)  # type: ignore[index]
+        return descriptor
+
     if not trusted:
         raise PDVSerializationError(
             f"Cannot serialize value of type '{type(value).__name__}' at path "
@@ -998,7 +1022,13 @@ def pickle_fallback_node(tree_path: str, value: Any, working_dir: str) -> dict:
     }
 
 
-def deserialize_node(storage_ref: dict, save_dir: str, *, trusted: bool = False) -> Any:
+def deserialize_node(
+    storage_ref: dict,
+    save_dir: str,
+    *,
+    trusted: bool = False,
+    python_type: str = "",
+) -> Any:
     """Deserialize a value from disk given a storage reference dict.
 
     Parameters
@@ -1018,6 +1048,14 @@ def deserialize_node(storage_ref: dict, save_dir: str, *, trusted: bool = False)
         path exists for tests and any future user-facing import flow that
         wants to surface untrusted pickles as errors instead of executing
         them.
+    python_type : str
+        Dotted ``"module.qualname"`` recovered from the descriptor's
+        ``metadata.python_type``. When non-empty and the format is not one
+        of the builtins or registered serializers, PDV uses this string to
+        import the class and call its ``__pdv_deserialize__`` classmethod
+        (the dunder protocol). When empty (legacy descriptors written
+        before the dunder protocol existed), the lookup is skipped and the
+        existing "Unsupported storage format" error fires.
 
     Returns
     -------
@@ -1105,6 +1143,28 @@ def deserialize_node(storage_ref: dict, save_dir: str, *, trusted: bool = False)
                     f"'{abs_path}': {exc}"
                 ) from exc
 
+        if python_type:
+            cls = _serializers.find_for_format_dunder(fmt, python_type)
+            if cls is not None:
+                try:
+                    return cls.__pdv_deserialize__(abs_path)
+                except Exception as exc:  # noqa: BLE001
+                    raise PDVSerializationError(
+                        f"Dunder deserializer "
+                        f"'{python_type}.__pdv_deserialize__' failed to load "
+                        f"'{abs_path}': {exc}"
+                    ) from exc
+            raise PDVSerializationError(
+                f"Unsupported storage format: '{fmt}'. This format was written "
+                f"by a custom serializer or dunder-protocol class "
+                f"('{python_type}'). PDV tried to import '{python_type}' to "
+                f"recover its __pdv_deserialize__ classmethod, but the import "
+                f"failed (or the class no longer implements the protocol). "
+                f"Ensure the defining package is installed, or import the "
+                f"module that registered the serializer before loading the "
+                f"project."
+            )
+
         raise PDVSerializationError(
             f"Unsupported storage format: '{fmt}'. If this format was written "
             f"by a custom serializer, import the module that registered it "
@@ -1188,6 +1248,12 @@ def node_preview(value: Any, kind: str) -> str:
             return str(entry.preview(value))[:100]
     except Exception:  # noqa: BLE001
         pass
+    # Dunder-protocol classes can supply __pdv_preview__ directly on the class.
+    if hasattr(type(value), "__pdv_preview__"):
+        try:
+            return str(value.__pdv_preview__())[:100]
+        except Exception:  # noqa: BLE001
+            pass
     # Custom types may provide a preview() method (e.g. module-defined types
     # with registered handlers).
     if hasattr(value, "preview") and callable(value.preview):

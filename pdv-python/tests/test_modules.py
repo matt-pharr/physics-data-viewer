@@ -152,3 +152,15 @@ def test_clear_handlers():
     assert len(get_handler_registry()) == 1
     clear_handlers()
     assert len(get_handler_registry()) == 0
+
+
+def test_has_handler_for_falls_back_to_pdv_handle_dunder():
+    """``has_handler_for`` returns True for a class that defines only the
+    ``__pdv_handle__`` dunder (no ``@pdv.handle`` registration)."""
+
+    class _DunderOnly:
+        def __pdv_handle__(self, path, pdv_tree):
+            pass
+
+    assert has_handler_for(_DunderOnly()) is True
+    assert has_handler_for(_Unrelated()) is False

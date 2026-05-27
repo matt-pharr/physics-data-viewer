@@ -1,10 +1,24 @@
 """
-pdv.serializers — Custom serializer registry for module-defined types.
+pdv.serializers — Custom serializer registry and dunder protocol for custom types.
 
-Module developers register a save/load callback pair for a class so that
-PDV can persist instances of that class without falling back to ``pickle``.
-This is the only supported way to save objects whose state lives outside
-Python (ctypes pointers, Fortran library handles, GPU buffers, ...).
+PDV supports two extension paths for persisting instances of a custom class:
+
+1. **Registered serializers.** A module developer calls
+   ``pdv.register_serializer(MyClass, format=..., extension=..., save=..., load=...)``
+   to attach save/load callbacks to a class they may not own (e.g.
+   ``scipy.sparse.csr_matrix``). This is the only supported way to save
+   objects whose state lives outside Python (ctypes pointers, Fortran library
+   handles, GPU buffers, ...).
+2. **Dunder protocol.** A class the package author defines may opt in by
+   implementing ``__pdv_format__`` / ``__pdv_serialize__`` /
+   ``__pdv_deserialize__`` (required as a set) plus the optional
+   ``__pdv_preview__``, ``__pdv_handle__``, and ``__pdv_digest__`` methods.
+   The defining package never imports ``pdv``; load-time class recovery uses
+   the descriptor's ``python_type`` metadata and ``importlib.import_module``.
+
+Registered serializers take precedence over the dunder protocol when both
+exist for the same class — explicit registration is the way to override a
+class's own intent for types you don't own.
 
 Public API
 ----------
@@ -14,19 +28,25 @@ find_for_value : function
     Look up a registered entry by walking ``type(value).__mro__``.
 find_for_format : function
     Look up a registered entry by its format name (used during load).
+find_for_value_dunder : function
+    Synthesize a :class:`DunderEntry` from a value's dunder methods, or None.
+find_for_format_dunder : function
+    Recover the class for a dunder-served format by importing ``python_type``.
 get_registry : function
     Snapshot of registered serializers, for tests and debugging.
 clear : function
-    Drop all registered serializers (used in tests).
+    Drop all registered serializers and dunder caches (used in tests).
 
 See Also
 --------
 pdv.serialization (consumer of this registry)
+pdv.modules (companion ``@pdv.handle`` decorator and ``__pdv_handle__`` fallback)
 ARCHITECTURE.md §7.2 (node types)
 """
 
 from __future__ import annotations
 
+import importlib
 from dataclasses import dataclass
 from typing import Any, Callable, Optional
 
@@ -48,6 +68,25 @@ class SerializerEntry:
 
 _serializer_registry: dict[type, SerializerEntry] = {}
 _format_index: dict[str, SerializerEntry] = {}
+
+
+@dataclass
+class DunderEntry:
+    """A class's dunder-protocol opt-in, synthesized from its methods."""
+
+    cls: type
+    format: str
+    extension: str
+    class_name: str  # fully qualified: "module.Class"
+
+
+# Per-type cache; None marks a class that has been checked and found not to
+# implement the full trio. Cleared by :func:`clear`.
+_dunder_cache: dict[type, Optional[DunderEntry]] = {}
+
+# Maps (format, python_type) -> class object so we don't re-import on every
+# subsequent load of the same format.
+_dunder_format_cache: dict[tuple[str, str], type] = {}
 
 
 # Format names reserved by builtin serializers in pdv.serialization.
@@ -197,7 +236,162 @@ def get_registry() -> dict[str, str]:
     return {entry.class_name: entry.format for entry in _serializer_registry.values()}
 
 
+def find_for_value_dunder(value: Any) -> Optional[DunderEntry]:
+    """Return a :class:`DunderEntry` for *value*'s class, or ``None``.
+
+    A class opts into the dunder protocol by defining all three of
+    ``__pdv_format__`` (classmethod returning ``(format_name, extension)``),
+    ``__pdv_serialize__`` (instance method writing the value to a path), and
+    ``__pdv_deserialize__`` (classmethod reading the file back). When a class
+    defines only one or two of those (the dunder names may be present on the
+    class for unrelated reasons), this function returns ``None`` so the
+    caller can fall through to the pickle fallback.
+
+    Lookup is via standard ``hasattr`` on ``type(value)``, which walks the
+    MRO. The result is cached per type.
+
+    Parameters
+    ----------
+    value : Any
+        The value PDV is about to serialize.
+
+    Returns
+    -------
+    DunderEntry or None
+        ``None`` when the class does not implement the full trio.
+
+    Raises
+    ------
+    PDVSerializationError
+        If ``__pdv_format__()`` raises, returns a non-(str, str) tuple, or
+        returns a name that collides with a builtin format or with a
+        :func:`register` entry for a *different* class.
+    """
+    cls = type(value)
+    cached = _dunder_cache.get(cls)
+    if cached is not None:
+        return cached
+    if cls in _dunder_cache:  # cached as None — definitively no protocol
+        return None
+
+    has_fmt = hasattr(cls, "__pdv_format__")
+    has_ser = hasattr(cls, "__pdv_serialize__")
+    has_des = hasattr(cls, "__pdv_deserialize__")
+    present = sum((has_fmt, has_ser, has_des))
+    if present < 3:
+        # Partial trio: silently treat as "no protocol" so users may use any
+        # of these names for unrelated reasons. Cache the negative result so
+        # repeated saves are cheap.
+        _dunder_cache[cls] = None
+        return None
+
+    class_name = f"{cls.__module__}.{cls.__qualname__}"
+
+    try:
+        result = cls.__pdv_format__()
+    except Exception as exc:  # noqa: BLE001
+        raise PDVSerializationError(
+            f"Dunder protocol for '{class_name}': __pdv_format__() raised: {exc}"
+        ) from exc
+
+    if (
+        not isinstance(result, tuple)
+        or len(result) != 2
+        or not isinstance(result[0], str)
+        or not isinstance(result[1], str)
+    ):
+        raise PDVSerializationError(
+            f"Class '{class_name}.__pdv_format__()' must return a 2-tuple of "
+            f"(format_name: str, extension: str). Got: {result!r}"
+        )
+
+    fmt, ext = result
+    if fmt in _RESERVED_FORMATS:
+        raise PDVSerializationError(
+            f"Dunder protocol for '{class_name}': format '{fmt}' collides with "
+            f"a builtin format name. Choose a different name in __pdv_format__()."
+        )
+
+    existing = _format_index.get(fmt)
+    if existing is not None and existing.cls is not cls:
+        raise PDVSerializationError(
+            f"Dunder protocol for '{class_name}': format '{fmt}' is already "
+            f"registered via pdv.register_serializer for "
+            f"'{existing.class_name}'. Choose a different name in "
+            f"__pdv_format__() or remove the conflicting registration."
+        )
+
+    if not ext.startswith("."):
+        ext = "." + ext
+
+    entry = DunderEntry(cls=cls, format=fmt, extension=ext, class_name=class_name)
+    _dunder_cache[cls] = entry
+    return entry
+
+
+def find_for_format_dunder(fmt: str, python_type: str) -> Optional[type]:
+    """Recover a class implementing ``__pdv_deserialize__`` by importing it.
+
+    On project load, PDV reads the descriptor's ``metadata.python_type``
+    (e.g. ``"mypkg.geqdsk.GEqdskData"``) and asks this function to import the
+    module, walk to the named class, and confirm it implements the dunder
+    protocol. The defining package only needs to be installed — it does
+    **not** need to be imported by the user before project load.
+
+    Never raises: returns ``None`` for any failure mode (missing module,
+    unknown attribute, class no longer implementing the protocol). The
+    caller is expected to raise a descriptive ``PDVSerializationError`` that
+    names the format and the ``python_type`` so the user knows what to install.
+
+    Parameters
+    ----------
+    fmt : str
+        The on-disk format identifier read from ``storage.format``. Used as
+        part of the cache key.
+    python_type : str
+        Dotted path ``"module.qualname"``. Supports nested ``qualname`` via
+        the inner-dot walk after the module split.
+
+    Returns
+    -------
+    type or None
+        The recovered class, or ``None`` if the import/resolution failed.
+    """
+    if not python_type:
+        return None
+    cache_key = (fmt, python_type)
+    cached = _dunder_format_cache.get(cache_key)
+    if cached is not None:
+        return cached
+
+    # Split on the *last* dot first; on failure walk leftwards so nested
+    # qualnames like "pkg.mod.Outer.Inner" still resolve.
+    head, sep, tail = python_type.rpartition(".")
+    while head:
+        try:
+            module = importlib.import_module(head)
+        except Exception:  # noqa: BLE001
+            head, sep, rest = head.rpartition(".")
+            tail = f"{rest}.{tail}" if sep else tail
+            continue
+        obj: Any = module
+        try:
+            for part in tail.split("."):
+                obj = getattr(obj, part)
+        except AttributeError:
+            return None
+        if not isinstance(obj, type):
+            return None
+        if not hasattr(obj, "__pdv_deserialize__"):
+            return None
+        _dunder_format_cache[cache_key] = obj
+        return obj
+    return None
+
+
 def clear() -> None:
-    """Drop all registered serializers. Used in tests."""
+    """Drop all registered serializers and dunder caches. Used in tests."""
     _serializer_registry.clear()
     _format_index.clear()
+    _dunder_cache.clear()
+    _dunder_format_cache.clear()
