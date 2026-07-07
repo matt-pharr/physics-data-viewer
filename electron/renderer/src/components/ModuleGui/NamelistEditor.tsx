@@ -216,7 +216,7 @@ interface NamelistFieldProps {
   onChange: (value: unknown) => void;
 }
 
-const NamelistField: React.FC<NamelistFieldProps> = ({
+export const NamelistField: React.FC<NamelistFieldProps> = ({
   value,
   typeHint,
   onChange,
@@ -256,25 +256,7 @@ const NamelistField: React.FC<NamelistFieldProps> = ({
   }
 
   if (typeHint === "array") {
-    const arr = Array.isArray(value) ? value : [];
-    const text = arr.join(", ");
-    return (
-      <input
-        type="text"
-        value={text}
-        onChange={(e) => {
-          const parts = e.target.value
-            .split(",")
-            .map((s) => s.trim())
-            .filter((s) => s.length > 0)
-            .map((s) => {
-              const n = Number(s);
-              return Number.isNaN(n) ? s : n;
-            });
-          onChange(parts);
-        }}
-      />
-    );
+    return <NamelistArrayField value={value} onChange={onChange} />;
   }
 
   // Default: string
@@ -283,6 +265,46 @@ const NamelistField: React.FC<NamelistFieldProps> = ({
       type="text"
       value={value === null || value === undefined ? "" : String(value)}
       onChange={(e) => onChange(e.target.value)}
+    />
+  );
+};
+
+/**
+ * Array field with a local draft while editing.
+ *
+ * The displayed text must NOT be re-derived from the parsed array on
+ * every keystroke — parse-and-rejoin consumes the comma the user just
+ * typed (and any partial entry), making arrays effectively uneditable.
+ * Instead the raw string is held in local state while the field is being
+ * edited and parsed once on blur, mirroring the numeric branch above.
+ */
+const NamelistArrayField: React.FC<{
+  value: unknown;
+  onChange: (value: unknown) => void;
+}> = ({ value, onChange }) => {
+  const arr = Array.isArray(value) ? value : [];
+  const joined = arr.join(", ");
+  // null = not editing; display follows the committed value.
+  const [draft, setDraft] = useState<string | null>(null);
+
+  return (
+    <input
+      type="text"
+      value={draft ?? joined}
+      onChange={(e) => setDraft(e.target.value)}
+      onBlur={() => {
+        if (draft === null) return;
+        const parts = draft
+          .split(",")
+          .map((s) => s.trim())
+          .filter((s) => s.length > 0)
+          .map((s) => {
+            const n = Number(s);
+            return Number.isNaN(n) ? s : n;
+          });
+        onChange(parts);
+        setDraft(null);
+      }}
     />
   );
 };

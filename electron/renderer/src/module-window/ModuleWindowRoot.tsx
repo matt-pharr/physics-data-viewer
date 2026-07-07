@@ -51,7 +51,10 @@ export const ModuleWindowRoot: React.FC = () => {
       try {
         const ctx = await window.pdv.moduleWindows.context();
         if (cancelled || !ctx) {
-          if (!cancelled) setError("No module context available.");
+          if (!cancelled) {
+            setError("No module context available.");
+            setLoading(false);
+          }
           return;
         }
         setContext(ctx);
@@ -59,7 +62,10 @@ export const ModuleWindowRoot: React.FC = () => {
         const importedModules = await window.pdv.modules.listImported();
         const mod = importedModules.find((m) => m.alias === ctx.alias);
         if (!mod) {
-          setError(`Module not found: ${ctx.alias}`);
+          if (!cancelled) {
+            setError(`Module not found: ${ctx.alias}`);
+            setLoading(false);
+          }
           return;
         }
 
@@ -348,18 +354,20 @@ export const ModuleWindowRoot: React.FC = () => {
 
   const handleSetError = useCallback((msg: string) => setError(msg), []);
 
-  if (loading) {
-    return (
-      <div className="module-window-root" style={{ padding: 16 }}>
-        <div style={{ color: "var(--text-secondary)" }}>Loading module...</div>
-      </div>
-    );
-  }
-
+  // Error wins over the loading placeholder: an early failure that never
+  // cleared `loading` must show the message, not spin forever.
   if (error && !descriptor) {
     return (
       <div className="module-window-root" style={{ padding: 16 }}>
         <div style={{ color: "var(--error)" }}>{error}</div>
+      </div>
+    );
+  }
+
+  if (loading) {
+    return (
+      <div className="module-window-root" style={{ padding: 16 }}>
+        <div style={{ color: "var(--text-secondary)" }}>Loading module...</div>
       </div>
     );
   }
