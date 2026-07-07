@@ -842,6 +842,28 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
+  <a href="#pdv.tree.PDVTree.get" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        <code class="doc-symbol doc-symbol-toc doc-symbol-method"></code>&nbsp;get
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#pdv.tree.PDVTree.copy" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        <code class="doc-symbol doc-symbol-toc doc-symbol-method"></code>&nbsp;copy
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#pdv.tree.PDVTree.set_quiet" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1345,6 +1367,28 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
+  <a href="#pdv.tree.PDVTree.get" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        <code class="doc-symbol doc-symbol-toc doc-symbol-method"></code>&nbsp;get
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#pdv.tree.PDVTree.copy" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        <code class="doc-symbol doc-symbol-toc doc-symbol-method"></code>&nbsp;copy
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#pdv.tree.PDVTree.set_quiet" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1568,6 +1612,56 @@ be reassigned).</p>
 
 
 
+
+<div class="doc doc-object doc-function">
+
+
+<h3 id="pdv.tree.PDVTree.get" class="doc doc-heading">
+<code class="doc-symbol doc-symbol-heading doc-symbol-method"></code>            <span class="doc doc-object-name doc-function-name">get</span>
+
+
+<a href="#pdv.tree.PDVTree.get" class="headerlink" title="Permanent link">&para;</a></h3>
+<div class="doc-signature highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="nf">get</span><span class="p">(</span><span class="n">key</span><span class="p">:</span> <span class="n"><span title="str">str</span></span><span class="p">,</span> <span class="n">default</span><span class="p">:</span> <span class="n"><span title="typing.Any">Any</span></span> <span class="o">=</span> <span class="kc">None</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n"><span title="typing.Any">Any</span></span>
+</code></pre></div>
+
+    <div class="doc doc-contents ">
+
+        <p>Get a value by key or dot-path, returning <em>default</em> if absent.</p>
+<p>Unlike <code>dict.get</code>, this resolves dot-separated paths the same way
+<code>__getitem__</code>/<code>__contains__</code> do, so <code>tree.get('a.b')</code> and
+<code>tree['a.b']</code> agree instead of <code>get</code> silently returning the
+default for any dotted path.</p>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h3 id="pdv.tree.PDVTree.copy" class="doc doc-heading">
+<code class="doc-symbol doc-symbol-heading doc-symbol-method"></code>            <span class="doc doc-object-name doc-function-name">copy</span>
+
+
+<a href="#pdv.tree.PDVTree.copy" class="headerlink" title="Permanent link">&para;</a></h3>
+<div class="doc-signature highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="nf">copy</span><span class="p">()</span> <span class="o">-&gt;</span> <span class="s1">&#39;PDVTree&#39;</span>
+</code></pre></div>
+
+    <div class="doc doc-contents ">
+
+        <p>Return a shallow copy that preserves the node's actual type.</p>
+<p>Unlike <code>dict.copy</code> (which returns a plain <code>dict</code>, silently
+dropping the PDVTree type, working/save dirs, and any subclass
+attributes), this rebuilds the same class with the same instance
+state. The copy is <em>detached</em> — no comm attached — so mutating it
+emits no notifications until it is inserted into the root tree.
+Values are shared (shallow), matching <code>dict.copy</code> semantics.</p>
+
+
+    </div>
+
+</div>
 
 <div class="doc doc-object doc-function">
 
