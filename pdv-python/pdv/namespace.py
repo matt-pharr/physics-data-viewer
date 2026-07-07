@@ -78,6 +78,79 @@ class PDVNamespace(dict):
             )
         super().__delitem__(key)
 
+    def update(self, *args: Any, **kwargs: Any) -> None:  # type: ignore[override]
+        """Merge key/value pairs, blocking reassignment of protected names.
+
+        Raises
+        ------
+        PDVProtectedNameError
+            If any incoming key is in :data:`_PROTECTED_NAMES`. No keys are
+            merged in that case (all-or-nothing).
+        """
+        incoming = dict(*args, **kwargs)
+        for key in incoming:
+            if key in _PROTECTED_NAMES:
+                raise PDVProtectedNameError(
+                    f"'{key}' is a protected PDV object and cannot be reassigned. "
+                    "Use pdv_tree['key'] = value to store data in the tree."
+                )
+        super().update(incoming)
+
+    def pop(self, key: str, *args: Any) -> Any:
+        """Remove and return *key*, blocking removal of protected names.
+
+        Raises
+        ------
+        PDVProtectedNameError
+            If ``key`` is in :data:`_PROTECTED_NAMES`.
+        """
+        if key in _PROTECTED_NAMES:
+            raise PDVProtectedNameError(
+                f"'{key}' is a protected PDV object and cannot be removed."
+            )
+        return super().pop(key, *args)
+
+    def popitem(self) -> tuple[str, Any]:
+        """Remove and return an arbitrary item, never a protected one.
+
+        Raises
+        ------
+        KeyError
+            If no non-protected items remain.
+        """
+        for key in reversed(list(self.keys())):
+            if key not in _PROTECTED_NAMES:
+                return key, super().pop(key)
+        raise KeyError("popitem(): no removable (non-protected) items")
+
+    def setdefault(self, key: str, default: Any = None) -> Any:
+        """Get *key* if present, otherwise set it to *default*.
+
+        Raises
+        ------
+        PDVProtectedNameError
+            If ``key`` is a protected name that is not already present
+            (assigning it is not allowed). Reading an existing protected
+            name is fine.
+        """
+        if key in _PROTECTED_NAMES and key not in self:
+            raise PDVProtectedNameError(
+                f"'{key}' is a protected PDV object and cannot be assigned."
+            )
+        return super().setdefault(key, default)
+
+    def clear(self) -> None:
+        """Remove all names EXCEPT protected ones.
+
+        IPython's ``%reset`` calls ``user_ns.clear()`` — without this
+        override it would silently wipe ``pdv_tree`` out of the namespace.
+        Preserving (rather than raising) keeps ``%reset`` working for
+        everything else.
+        """
+        preserved = {k: self[k] for k in self if k in _PROTECTED_NAMES}
+        super().clear()
+        super().update(preserved)
+
 
 def pdv_namespace(
     ns: dict,

@@ -4,9 +4,11 @@
  * useCodeCellsPersistence.test.ts — Unit tests for the debounced code-cell
  * autosave hook.
  *
- * Covers: debounce coalescing of rapid changes, no-op when kernel is null,
- * cleanup-on-unmount only flushes when the kernel was alive at unmount, and
- * cleanup is a no-op if the kernel was already null at unmount.
+ * Covers: debounce coalescing of rapid changes (regression: the effect
+ * cleanup used to fire an immediate save on every dep change, i.e. an IPC
+ * + disk write per keystroke), no-op when kernel is null, flush-on-unmount
+ * when the kernel is alive with a pending edit, and no flush when the
+ * kernel was already null at unmount.
  */
 
 import { act } from "@testing-library/react";
@@ -51,12 +53,11 @@ describe("useCodeCellsPersistence", () => {
     expect(pdv.codeCells.save).not.toHaveBeenCalled();
   });
 
-  it("flushes intermediate saves on each change and a final save after the debounce window", async () => {
-    // Note: this hook intentionally flushes on every rerender (effect cleanup
-    // cancels the pending timeout AND fires an immediate save) plus a final
-    // settle save when the timeout elapses. So rapid changes don't *coalesce*
-    // — they each get persisted right away. The debounce only matters as the
-    // tail timer for the last change.
+  it("coalesces rapid changes into a single save with the latest content", async () => {
+    // Regression: the cleanup used to fire an immediate save on every dep
+    // change, so typing produced one IPC + disk write per keystroke with
+    // one-keystroke-stale content. Rapid edits must coalesce into exactly
+    // one save after the debounce window, carrying the newest tabs.
     const { rerender, pdv } = renderHookWithPdv<void, Props>(
       (p) => useCodeCellsPersistence(p),
       {
@@ -79,23 +80,27 @@ describe("useCodeCellsPersistence", () => {
       currentKernelId: "k1",
     });
 
-    // Each rerender triggers cleanup-then-effect, and cleanup flushes when
-    // the kernel is still alive. So we already have ≥1 save by here.
-    const callsBeforeAdvance = (pdv.codeCells.save as ReturnType<typeof vi.fn>).mock
-      .calls.length;
-    expect(callsBeforeAdvance).toBeGreaterThan(0);
+    // Nothing has been written yet — the debounce is still pending.
+    expect(pdv.codeCells.save).not.toHaveBeenCalled();
 
     await act(async () => {
       await vi.advanceTimersByTimeAsync(CODE_CELL_SAVE_DEBOUNCE_MS);
     });
 
-    // The final settle save fires with the latest tabs.
+    // Exactly one save, with the latest tabs.
+    expect(pdv.codeCells.save).toHaveBeenCalledTimes(1);
     expect(pdv.codeCells.save).toHaveBeenLastCalledWith(
       expect.objectContaining({
         tabs: [{ id: 1, code: "print(3)" }],
         activeTabId: 1,
       }),
     );
+
+    // And the debounce stays quiet afterwards — no trailing writes.
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(CODE_CELL_SAVE_DEBOUNCE_MS * 3);
+    });
+    expect(pdv.codeCells.save).toHaveBeenCalledTimes(1);
   });
 
   it("on unmount, flushes the pending save when the kernel is still alive", () => {

@@ -249,6 +249,18 @@ export function editorReducer(state: EditorState, action: EditorAction): EditorS
     case "MOVE_NODE": {
       const layout = state.manifest.gui?.layout;
       if (!layout) return state;
+      // Reject moves into the dragged subtree (or onto the node itself):
+      // removing the source first would also remove the destination, so
+      // the insert either throws or silently drops the whole subtree.
+      // Compare parsed index segments, not string prefixes.
+      const fromIndices = parsePath(action.fromPath);
+      const toParentIndices = parsePath(action.toParentPath);
+      if (
+        fromIndices.length <= toParentIndices.length &&
+        fromIndices.every((v, i) => v === toParentIndices[i])
+      ) {
+        return state;
+      }
       const [afterRemove, removed] = removeNode(layout, action.fromPath);
       if (!removed) return state;
       const adjusted = adjustPathAfterRemoval(action.toParentPath, action.toIndex, action.fromPath);
@@ -264,6 +276,10 @@ export function editorReducer(state: EditorState, action: EditorAction): EditorS
     case "DELETE_NODE": {
       const layout = state.manifest.gui?.layout;
       if (!layout) return state;
+      // The root container is not deletable. Without this guard, the
+      // empty path collects every input/action ID from the root (wiping
+      // all descriptors) while removeNode leaves the layout untouched.
+      if (!action.path) return state;
 
       // Collect all input/action IDs in the subtree before removing
       const nodeToDelete = getNodeAtPath(layout, action.path);

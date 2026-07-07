@@ -115,6 +115,89 @@ class TestHandleProjectLoad:
             handle_project_load(msg)
         assert numpy.array_equal(dict.__getitem__(tree_with_comm, "arr"), arr)
 
+    def test_corrupt_node_skipped_rest_of_project_loads(
+        self, tree_with_comm, tmp_save_dir
+    ):
+        """One unloadable node must not abort the load (regression).
+
+        A leaf whose backing file is missing used to raise out of
+        handle_project_load, leaving the tree half-populated with no
+        pdv.project.loaded push. Now it is skipped and reported in the
+        response's skipped_nodes, and every other node still loads.
+        """
+        nodes = [
+            {
+                "path": "good_before",
+                "type": "scalar",
+                "storage": {"backend": "inline", "format": "inline", "value": 1},
+                "metadata": {},
+            },
+            {
+                "path": "broken",
+                "type": "ndarray",
+                "storage": {
+                    "backend": "local_file",
+                    "uuid": "missing_uuid",
+                    "filename": "gone.npy",
+                    "format": "npy",
+                },
+                "metadata": {},
+            },
+            {
+                "path": "good_after",
+                "type": "scalar",
+                "storage": {"backend": "inline", "format": "inline", "value": 2},
+                "metadata": {},
+            },
+        ]
+        _write_tree_index(tmp_save_dir, nodes)
+        mock_comm = _make_mock_comm()
+        msg = _make_msg("pdv.project.load", {"save_dir": tmp_save_dir})
+        with (
+            patch.object(comms_mod, "_comm", mock_comm),
+            patch.object(comms_mod, "_pdv_tree", tree_with_comm),
+        ):
+            handle_project_load(msg)
+
+        assert tree_with_comm["good_before"] == 1
+        assert tree_with_comm["good_after"] == 2
+        assert "broken" not in tree_with_comm
+
+        types_sent = [e["type"] for e in mock_comm._sent]
+        assert "pdv.project.loaded" in types_sent
+        response = [
+            e for e in mock_comm._sent if e["type"] == "pdv.project.load.response"
+        ][-1]
+        skipped = response["payload"]["skipped_nodes"]
+        assert len(skipped) == 1
+        assert skipped[0]["path"] == "broken"
+        assert skipped[0]["error"]
+
+    def test_clean_load_reports_no_skipped_nodes(self, tree_with_comm, tmp_save_dir):
+        """A fully healthy project reports an empty skipped_nodes list."""
+        _write_tree_index(
+            tmp_save_dir,
+            [
+                {
+                    "path": "x",
+                    "type": "scalar",
+                    "storage": {"backend": "inline", "format": "inline", "value": 5},
+                    "metadata": {},
+                }
+            ],
+        )
+        mock_comm = _make_mock_comm()
+        msg = _make_msg("pdv.project.load", {"save_dir": tmp_save_dir})
+        with (
+            patch.object(comms_mod, "_comm", mock_comm),
+            patch.object(comms_mod, "_pdv_tree", tree_with_comm),
+        ):
+            handle_project_load(msg)
+        response = [
+            e for e in mock_comm._sent if e["type"] == "pdv.project.load.response"
+        ][-1]
+        assert response["payload"]["skipped_nodes"] == []
+
     def test_sends_project_loaded_push(self, tree_with_comm, tmp_save_dir):
         """After loading, pdv.project.loaded push notification is sent."""
         _write_tree_index(tmp_save_dir, [])
@@ -199,6 +282,53 @@ class TestHandleProjectSave:
         with open(index_path) as f:
             nodes = json.load(f)
         assert isinstance(nodes, list)
+
+    def test_nan_scalar_saves_as_strictly_valid_json(
+        self, tree_with_comm, tmp_save_dir
+    ):
+        """A NaN in the tree must not corrupt tree-index.json (regression).
+
+        NaN used to be inlined, making json.dumps write a bare ``NaN``
+        token — invalid JSON that the app's JSON.parse rejects, bricking
+        project load. It now routes to pickle and the index stays
+        strictly parseable.
+        """
+        tree_with_comm["measurement"] = float("nan")
+        tree_with_comm["ok"] = 1.5
+        mock_comm = _make_mock_comm()
+        msg = _make_msg("pdv.project.save", {"save_dir": tmp_save_dir})
+        with (
+            patch.object(comms_mod, "_comm", mock_comm),
+            patch.object(comms_mod, "_pdv_tree", tree_with_comm),
+        ):
+            handle_project_save(msg)
+
+        index_path = os.path.join(tmp_save_dir, "tree-index.json")
+        with open(index_path) as f:
+            raw = f.read()
+
+        def _reject_constant(name):
+            raise AssertionError(f"non-finite JSON constant in index: {name}")
+
+        # Strict parse: bare NaN/Infinity tokens must be absent entirely.
+        nodes = json.loads(raw, parse_constant=_reject_constant)
+        by_path = {n["path"]: n for n in nodes}
+        assert by_path["measurement"]["storage"]["backend"] != "inline"
+        assert by_path["ok"]["storage"]["value"] == 1.5
+
+        # And the NaN round-trips back through load. No working dir on the
+        # fresh tree: load then resolves backing files against the save dir
+        # (in the app, Electron's file sync copies them to the working dir).
+        fresh = PDVTree()
+        load_comm = _make_mock_comm()
+        load_msg = _make_msg("pdv.project.load", {"save_dir": tmp_save_dir})
+        with (
+            patch.object(comms_mod, "_comm", load_comm),
+            patch.object(comms_mod, "_pdv_tree", fresh),
+        ):
+            handle_project_load(load_msg)
+        restored = fresh["measurement"]
+        assert restored != restored  # NaN
 
     def test_writes_data_files(self, tree_with_comm, tmp_save_dir):
         """Data files are written for each serializable node."""

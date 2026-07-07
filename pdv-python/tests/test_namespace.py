@@ -61,6 +61,77 @@ class TestPDVNamespace:
         assert "pdv_tree" in ns
 
 
+class TestPDVNamespaceMutatorBypass:
+    """The non-dunder dict mutators must not bypass protection.
+
+    Regression tests: pop()/clear()/update()/setdefault() inherited from
+    dict used to silently remove or clobber pdv_tree — notably IPython's
+    %reset, which calls user_ns.clear().
+    """
+
+    def _ns(self) -> PDVNamespace:
+        ns = PDVNamespace()
+        dict.__setitem__(ns, "pdv_tree", "TREE")
+        ns["other"] = 1
+        return ns
+
+    def test_pop_protected_raises(self):
+        ns = self._ns()
+        with pytest.raises(PDVProtectedNameError):
+            ns.pop("pdv_tree")
+        assert ns["pdv_tree"] == "TREE"
+
+    def test_pop_normal_allowed(self):
+        ns = self._ns()
+        assert ns.pop("other") == 1
+        assert "other" not in ns
+
+    def test_update_protected_raises_and_merges_nothing(self):
+        ns = self._ns()
+        with pytest.raises(PDVProtectedNameError):
+            ns.update({"pdv_tree": "CLOBBER", "new_var": 2})
+        assert ns["pdv_tree"] == "TREE"
+        assert "new_var" not in ns  # all-or-nothing
+
+    def test_update_normal_allowed(self):
+        ns = self._ns()
+        ns.update({"a": 1}, b=2)
+        assert ns["a"] == 1
+        assert ns["b"] == 2
+
+    def test_clear_preserves_protected(self):
+        """%reset calls user_ns.clear() — pdv_tree must survive it."""
+        ns = self._ns()
+        tree_obj = ns["pdv_tree"]
+        ns.clear()
+        assert ns["pdv_tree"] is tree_obj
+        assert "other" not in ns
+
+    def test_setdefault_protected_raises_when_absent(self):
+        ns = PDVNamespace()
+        with pytest.raises(PDVProtectedNameError):
+            ns.setdefault("pdv_tree", "sneaky")
+
+    def test_setdefault_protected_reads_existing(self):
+        ns = self._ns()
+        assert ns.setdefault("pdv_tree", "ignored") == "TREE"
+
+    def test_setdefault_normal_allowed(self):
+        ns = self._ns()
+        assert ns.setdefault("fresh", 7) == 7
+        assert ns["fresh"] == 7
+
+    def test_popitem_never_pops_protected(self):
+        ns = PDVNamespace()
+        dict.__setitem__(ns, "pdv_tree", "TREE")
+        ns["only_other"] = 1
+        key, value = ns.popitem()
+        assert key == "only_other"
+        with pytest.raises(KeyError):
+            ns.popitem()  # only pdv_tree remains
+        assert ns["pdv_tree"] == "TREE"
+
+
 class TestWorkingDir:
     def test_working_dir_returns_tree_working_dir(self, tmp_path, monkeypatch):
         import pdv  # noqa: PLC0415

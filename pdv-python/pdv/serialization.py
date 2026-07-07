@@ -33,6 +33,7 @@ ARCHITECTURE.md §7.2 (node types), §7.3 (node descriptor)
 
 from __future__ import annotations
 
+import math
 from typing import Any
 
 from pdv.errors import PDVSerializationError
@@ -94,8 +95,13 @@ def _can_inline_json(value: Any) -> bool:
     """
     if value is None or isinstance(value, (str, bool)):
         return True
-    if isinstance(value, (int, float)) and not isinstance(value, complex):
+    if isinstance(value, int):
         return True
+    if isinstance(value, float):
+        # NaN/inf serialize as bare ``NaN``/``Infinity`` tokens, which are
+        # invalid JSON — JSON.parse on the app side would reject the whole
+        # tree-index.json. Route non-finite floats to the pickle path.
+        return math.isfinite(value)
     if isinstance(value, list):
         return all(_can_inline_json(v) for v in value)
     if isinstance(value, dict):
@@ -710,9 +716,14 @@ def serialize_node(
         return descriptor
 
     if kind == KIND_SCALAR:
-        if isinstance(value, complex):
+        if isinstance(value, complex) or (
+            isinstance(value, float) and not math.isfinite(value)
+        ):
             # complex isn't JSON-native, so the inline path can't store it.
-            # Pickle it like other non-JSON-native values.
+            # NaN/inf floats are JSON-native to json.dumps but serialize as
+            # bare NaN/Infinity tokens — invalid JSON that the app's
+            # JSON.parse rejects, corrupting tree-index.json.
+            # Pickle both like other non-JSON-native values.
             node_uuid = generate_node_uuid()
             filename = key + ".pickle"
             file_path = uuid_tree_path(working_dir, node_uuid, filename)

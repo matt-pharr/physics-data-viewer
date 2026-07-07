@@ -855,7 +855,7 @@ class PDVTree(dict):
     _global_lock: threading.Lock = threading.Lock()
 
     def __init__(self, *args: Any, **kwargs: Any) -> None:
-        super().__init__(*args, **kwargs)
+        super().__init__()
         self._working_dir: str | None = None
         self._save_dir: str | None = None
         # Absolute path to the uv binary, provided by the app at pdv.init for
@@ -865,6 +865,17 @@ class PDVTree(dict):
         self._pending_changes: list[tuple[str, str]] = []
         self._debounce_timer: threading.Timer | None = None
         self._debounce_lock = threading.Lock()
+        # Route initial data through set_quiet so dotted keys expand into
+        # nested nodes and non-string keys are rejected — otherwise
+        # ``PDVTree({'a.b': 1})`` would store a literal ``'a.b'`` key that
+        # ``__getitem__('a.b')`` can never retrieve.
+        if args or kwargs:
+            for key, value in dict(*args, **kwargs).items():
+                if not isinstance(key, str):
+                    raise PDVPathError(
+                        f"Tree keys must be strings, got {type(key).__name__}: {key!r}"
+                    )
+                self.set_quiet(key, value)
 
     # ------------------------------------------------------------------
     # Internal state management (not user-facing)
@@ -1024,6 +1035,37 @@ class PDVTree(dict):
     # dict overrides
     # ------------------------------------------------------------------
 
+    def __getstate__(self) -> dict:
+        """Return picklable instance state, dropping runtime-only attributes.
+
+        The debounce lock/timer and the comm send-fn are not picklable and
+        are rebuilt on unpickle (see :meth:`__setstate__`). Because
+        ``copy.deepcopy`` uses the same ``__reduce_ex__`` machinery, this
+        also makes deepcopy work — without it, both raise
+        ``TypeError: cannot pickle '_thread.lock' object``. Subclass
+        attributes (``PDVModule._module_id``, etc.) survive because they
+        live in ``__dict__``.
+        """
+        state = self.__dict__.copy()
+        state.pop("_debounce_lock", None)
+        state.pop("_debounce_timer", None)
+        state.pop("_send_fn", None)
+        state["_pending_changes"] = []
+        return state
+
+    def __setstate__(self, state: dict) -> None:
+        """Restore instance state, rebuilding runtime-only attributes.
+
+        The restored tree is intentionally *detached*: ``_send_fn`` is None,
+        so it emits no notifications until inserted into the root tree.
+        """
+        self.__dict__.update(state)
+        self._debounce_lock = threading.Lock()
+        self._debounce_timer = None
+        self._send_fn = None
+        if "_pending_changes" not in self.__dict__:
+            self._pending_changes = []
+
     def __getitem__(self, key: str) -> Any:
         """Get a value by key or dot-separated path.
 
@@ -1055,6 +1097,35 @@ class PDVTree(dict):
             return _resolve_nested(self, parts)
         except KeyError:
             raise PDVKeyError(key)
+
+    def get(self, key: str, default: Any = None) -> Any:
+        """Get a value by key or dot-path, returning *default* if absent.
+
+        Unlike ``dict.get``, this resolves dot-separated paths the same way
+        ``__getitem__``/``__contains__`` do, so ``tree.get('a.b')`` and
+        ``tree['a.b']`` agree instead of ``get`` silently returning the
+        default for any dotted path.
+        """
+        try:
+            return self[key]
+        except PDVKeyError:
+            return default
+
+    def copy(self) -> "PDVTree":
+        """Return a shallow copy that preserves the node's actual type.
+
+        Unlike ``dict.copy`` (which returns a plain ``dict``, silently
+        dropping the PDVTree type, working/save dirs, and any subclass
+        attributes), this rebuilds the same class with the same instance
+        state. The copy is *detached* — no comm attached — so mutating it
+        emits no notifications until it is inserted into the root tree.
+        Values are shared (shallow), matching ``dict.copy`` semantics.
+        """
+        new = type(self).__new__(type(self))
+        new.__setstate__(self.__getstate__())
+        for k in dict.keys(self):
+            dict.__setitem__(new, k, dict.__getitem__(self, k))
+        return new
 
     def set_quiet(self, key: str, value: Any) -> None:
         """Set a value at a dot-path without emitting notifications.

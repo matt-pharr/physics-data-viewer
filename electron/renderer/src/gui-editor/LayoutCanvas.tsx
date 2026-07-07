@@ -152,6 +152,9 @@ function CanvasNode({ node, path, onDrop }: CanvasNodeProps) {
   };
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
+    // The root container is not deletable — same rule as the delete
+    // button, which is hidden for the root row.
+    if (isRoot) return;
     if (e.key === "Delete" || e.key === "Backspace") {
       e.preventDefault();
       dispatch({ type: "DELETE_NODE", path });

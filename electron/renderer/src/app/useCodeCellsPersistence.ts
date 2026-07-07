@@ -26,11 +26,19 @@ export function useCodeCellsPersistence({
   currentKernelId,
 }: UseCodeCellsPersistenceOptions): void {
   const saveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const hasKernelRef = useRef(currentKernelId);
+  // True while an edit is scheduled but not yet written. Lets the
+  // kernel-change/unmount flush below know whether there is anything to
+  // persist without re-running on every keystroke.
+  const pendingRef = useRef(false);
+  const latestRef = useRef({ cellTabs, activeCellTab });
   useEffect(() => {
-    hasKernelRef.current = currentKernelId;
+    latestRef.current = { cellTabs, activeCellTab };
   });
 
+  // Debounced save. The cleanup ONLY cancels the pending timer — it must
+  // not write. `cellTabs` changes on every keystroke, so a cleanup that
+  // saves (as this hook once did) degrades into an IPC + disk write per
+  // keystroke with one-keystroke-stale content.
   useEffect(() => {
     if (!window.pdv?.codeCells || !currentKernelId) {
       return;
@@ -38,8 +46,10 @@ export function useCodeCellsPersistence({
     if (saveTimeoutRef.current) {
       clearTimeout(saveTimeoutRef.current);
     }
-
+    pendingRef.current = true;
     saveTimeoutRef.current = setTimeout(async () => {
+      saveTimeoutRef.current = null;
+      pendingRef.current = false;
       try {
         await window.pdv.codeCells.save({
           tabs: cellTabs,
@@ -53,13 +63,28 @@ export function useCodeCellsPersistence({
     return () => {
       if (saveTimeoutRef.current) {
         clearTimeout(saveTimeoutRef.current);
-        if (hasKernelRef.current) {
-          void window.pdv.codeCells.save({
-            tabs: cellTabs,
-            activeTabId: activeCellTab,
-          });
-        }
+        saveTimeoutRef.current = null;
       }
     };
   }, [activeCellTab, cellTabs, currentKernelId]);
+
+  // Flush on true unmount or kernel change only. Keyed on the kernel id
+  // alone, so it does NOT re-run per edit; it reads the newest tab state
+  // from `latestRef`. This cleanup runs after the debounce cleanup above
+  // (declaration order), which has already cancelled the timer but left
+  // `pendingRef` set.
+  useEffect(() => {
+    if (!window.pdv?.codeCells || !currentKernelId) {
+      return;
+    }
+    return () => {
+      if (pendingRef.current) {
+        pendingRef.current = false;
+        void window.pdv.codeCells.save({
+          tabs: latestRef.current.cellTabs,
+          activeTabId: latestRef.current.activeCellTab,
+        });
+      }
+    };
+  }, [currentKernelId]);
 }

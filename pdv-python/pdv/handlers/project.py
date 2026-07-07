@@ -633,6 +633,7 @@ def handle_project_load(msg: dict) -> None:
     """
     import json
     import os
+    import sys
 
     from pdv.comms import get_pdv_tree, send_error, send_message  # noqa: PLC0415
 
@@ -719,7 +720,7 @@ def handle_project_load(msg: dict) -> None:
         before Pass 2 deserializes data nodes."""
         _early_module_setup(nodes, save_dir, working_dir)
 
-    load_tree_index(
+    skipped_nodes = load_tree_index(
         tree,
         nodes,
         on_progress=_emit_load_progress,
@@ -727,6 +728,13 @@ def handle_project_load(msg: dict) -> None:
         working_dir=working_dir,
         between_passes=_setup_modules_before_leaves,
     )
+    if skipped_nodes:
+        print(
+            f"[pdv] project load: skipped {len(skipped_nodes)} unloadable "
+            f"node(s): "
+            + ", ".join(f"{s['path']} ({s['error']})" for s in skipped_nodes),
+            file=sys.stderr,
+        )
 
     os.chdir(os.path.expanduser("~"))
     node_count = len(nodes)
@@ -737,7 +745,11 @@ def handle_project_load(msg: dict) -> None:
 
     send_message(
         "pdv.project.load.response",
-        {"node_count": node_count, "post_load_checksum": post_load_checksum},
+        {
+            "node_count": node_count,
+            "post_load_checksum": post_load_checksum,
+            "skipped_nodes": skipped_nodes,
+        },
         in_reply_to=msg_id,
     )
     # Send pdv.project.loaded push notification (no in_reply_to)
@@ -822,7 +834,10 @@ def serialize_tree_to_dir(
             "autosave_cache_hits": autosave_hits[0],
         }
 
-    index_data = json.dumps(nodes, indent=2, default=str)
+    # allow_nan=False: a bare NaN/Infinity token would be invalid JSON and
+    # make the app's JSON.parse reject the whole index at load time —
+    # better to fail the save loudly than write a corrupt file.
+    index_data = json.dumps(nodes, indent=2, default=str, allow_nan=False)
     index_path = os.path.join(save_dir, "tree-index.json")
     tmp_path = index_path + ".tmp"
     with open(tmp_path, "w", encoding="utf-8") as fh:

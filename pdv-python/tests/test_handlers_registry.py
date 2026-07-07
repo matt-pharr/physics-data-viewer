@@ -50,7 +50,6 @@ KNOWN_UNTESTED: dict[str, str] = {
     "pdv.tree.delete": "no handler-level test; tree mutation covered indirectly",
     "pdv.tree.rename": "semantics covered by test_tree_handlers.py::TestRename — handler entry point untested",
     "pdv.tree.move": "semantics covered by test_tree_handlers.py::TestMove — handler entry point untested",
-    "pdv.tree.duplicate": "semantics covered by test_tree_handlers.py::TestDuplicate — handler entry point untested",
     "pdv.tree.resolve_file": "no test for resolve_file handler entry point",
     "pdv.script.params": "no test for late param fetch",
     "pdv.module.register": "no test for module registration message handler",
