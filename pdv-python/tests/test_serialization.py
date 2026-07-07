@@ -185,6 +185,39 @@ class TestSerializeAndDeserialize:
         )
         assert value == 1 + 2j
 
+    @pytest.mark.parametrize(
+        "bad_float", [float("nan"), float("inf"), float("-inf")]
+    )
+    def test_nonfinite_float_not_inlined(self, tmp_working_dir, bad_float):
+        """NaN/inf must NOT inline: json.dumps would emit bare NaN/Infinity
+        tokens, which are invalid JSON and break the app's JSON.parse of
+        tree-index.json. They route to pickle instead (regression)."""
+        from pdv.serialization import _can_inline_json
+
+        assert _can_inline_json(bad_float) is False
+        descriptor = serialize_node("f", bad_float, tmp_working_dir)
+        assert descriptor["storage"]["backend"] != "inline"
+        assert descriptor["storage"]["format"] == "pickle"
+        value = deserialize_node(
+            descriptor["storage"], tmp_working_dir, trusted=True
+        )
+        if bad_float != bad_float:  # NaN
+            assert value != value
+        else:
+            assert value == bad_float
+
+    def test_nonfinite_inside_list_not_inlined(self, tmp_working_dir):
+        """A NaN nested in a list poisons the whole list for inlining."""
+        from pdv.serialization import _can_inline_json
+
+        assert _can_inline_json([1.0, float("nan")]) is False
+        descriptor = serialize_node("l", [1.0, float("nan")], tmp_working_dir)
+        assert descriptor["storage"]["backend"] != "inline"
+
+    def test_finite_float_still_inlines(self, tmp_working_dir):
+        descriptor = serialize_node("f", 3.14, tmp_working_dir)
+        assert descriptor["storage"]["backend"] == "inline"
+
     def test_set_sequence_pickle_roundtrip(self, tmp_working_dir):
         """sets aren't JSON-native, so they pickle and round-trip as sets."""
         descriptor = serialize_node("s", {1, 2, 3, 4}, tmp_working_dir)

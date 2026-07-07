@@ -67,8 +67,13 @@ def load_tree_index(
     module_id_default: str = "",
     working_dir: str = "",
     between_passes: Callable[[], None] | None = None,
-) -> None:
+) -> list[dict]:
     """Mount a tree-index node list into ``tree`` using the two-pass algorithm.
+
+    A node that fails to mount (missing/corrupt backing file, bad
+    metadata) is skipped and reported rather than aborting the whole
+    load — mirroring save's "never fail on a single node" policy. All
+    other nodes still load.
 
     Parameters
     ----------
@@ -105,6 +110,13 @@ def load_tree_index(
         (leaves) begins. Used by project load to import module entry
         points — which may register custom serializers — so that
         custom-format data nodes can be deserialized in Pass 2.
+
+    Returns
+    -------
+    list[dict]
+        One ``{"path": <full tree path>, "error": <repr of the failure>}``
+        entry per node that could not be mounted. Empty when every node
+        loaded cleanly.
     """
     # Local imports to avoid circular dependencies — tree.py imports nothing
     # from this module, so importing tree.py here is safe.
@@ -132,6 +144,8 @@ def load_tree_index(
         except (KeyError, TypeError):
             return False, None
 
+    skipped: list[dict] = []
+
     # ── Pass 1: containers ───────────────────────────────────────────────
     for node in nodes:
         node_path_rel = node.get("path", "")
@@ -146,31 +160,34 @@ def load_tree_index(
             if exists:
                 continue
 
-        if node_type == "folder":
-            folder = PDVTree()
-            folder._working_dir = tree._working_dir
-            folder._save_dir = tree._save_dir
-            tree.set_quiet(full_path, folder)
-        elif node_type == "mapping" and meta.get("composite"):
-            # Composite mapping: the user assigned a plain dict containing
-            # non-JSON-native leaves (e.g. ndarrays). Reconstruct as a plain
-            # dict — NOT a PDVTree — so type(value) is dict on load, matching
-            # what the user originally stored. Children are populated in
-            # Pass 2 via set_quiet, which traverses through plain dicts.
-            tree.set_quiet(full_path, {})
-        elif node_type == "module":
-            storage = node.get("storage", {})
-            old_meta = storage.get("value", {})
-            mod = PDVModule(
-                module_id=meta.get(
-                    "module_id", old_meta.get("module_id", module_id_default)
-                ),
-                name=meta.get("name", old_meta.get("name", "")),
-                version=meta.get("version", old_meta.get("version", "")),
-            )
-            mod._working_dir = tree._working_dir
-            mod._save_dir = tree._save_dir
-            tree.set_quiet(full_path, mod)
+        try:
+            if node_type == "folder":
+                folder = PDVTree()
+                folder._working_dir = tree._working_dir
+                folder._save_dir = tree._save_dir
+                tree.set_quiet(full_path, folder)
+            elif node_type == "mapping" and meta.get("composite"):
+                # Composite mapping: the user assigned a plain dict containing
+                # non-JSON-native leaves (e.g. ndarrays). Reconstruct as a plain
+                # dict — NOT a PDVTree — so type(value) is dict on load, matching
+                # what the user originally stored. Children are populated in
+                # Pass 2 via set_quiet, which traverses through plain dicts.
+                tree.set_quiet(full_path, {})
+            elif node_type == "module":
+                storage = node.get("storage", {})
+                old_meta = storage.get("value", {})
+                mod = PDVModule(
+                    module_id=meta.get(
+                        "module_id", old_meta.get("module_id", module_id_default)
+                    ),
+                    name=meta.get("name", old_meta.get("name", "")),
+                    version=meta.get("version", old_meta.get("version", "")),
+                )
+                mod._working_dir = tree._working_dir
+                mod._save_dir = tree._save_dir
+                tree.set_quiet(full_path, mod)
+        except Exception as exc:  # noqa: BLE001 — one bad container must not abort the load
+            skipped.append({"path": full_path, "error": repr(exc)})
 
     if between_passes is not None:
         between_passes()
@@ -220,6 +237,9 @@ def load_tree_index(
                 f"Skipping node '{node_path_rel}' with unsafe UUID: {node_uuid!r}",
                 stacklevel=2,
             )
+            skipped.append(
+                {"path": full_path, "error": f"unsafe UUID: {node_uuid!r}"}
+            )
             if on_progress is not None:
                 on_progress(index, total)
             continue
@@ -229,95 +249,106 @@ def load_tree_index(
         # save/load cycles. See ARCHITECTURE.md §5.13.
         src_rel = node.get("source_rel_path")
 
-        if node_type == "script":
-            language = meta.get("language", node.get("language", "python"))
-            doc = meta.get("doc")
-            mod_id = meta.get("module_id", module_id_default)
-            tree.set_quiet(
-                full_path,
-                PDVScript(
-                    uuid=node_uuid,
-                    filename=node_filename,
-                    language=language,
-                    doc=doc,
-                    module_id=mod_id,
-                    source_rel_path=src_rel,
-                ),
-            )
-        elif node_type == "markdown":
-            title = meta.get("title")
-            tree.set_quiet(
-                full_path,
-                PDVNote(
-                    uuid=node_uuid,
-                    filename=node_filename,
-                    title=title,
-                ),
-            )
-        elif node_type == "gui":
-            mod_id = meta.get("module_id", node.get("module_id", module_id_default))
-            gui_node = PDVGui(
-                uuid=node_uuid,
-                filename=node_filename,
-                module_id=mod_id,
-                source_rel_path=src_rel,
-            )
-            tree.set_quiet(full_path, gui_node)
-            # Attach gui reference to parent PDVModule if applicable.
-            parts = full_path.split(".")
-            if len(parts) > 1:
-                parent_path = ".".join(parts[:-1])
-                try:
-                    parent = tree[parent_path]
-                    if isinstance(parent, PDVModule):
-                        parent.gui = gui_node
-                except (KeyError, AttributeError):
-                    pass
-        elif node_type == "namelist":
-            mod_id = meta.get("module_id", node.get("module_id", module_id_default))
-            namelist_format = meta.get(
-                "namelist_format", node.get("namelist_format", "auto")
-            )
-            tree.set_quiet(
-                full_path,
-                PDVNamelist(
-                    uuid=node_uuid,
-                    filename=node_filename,
-                    format=namelist_format,
-                    module_id=mod_id,
-                    source_rel_path=src_rel,
-                ),
-            )
-        elif node_type == "lib":
-            mod_id = meta.get("module_id", node.get("module_id", module_id_default))
-            tree.set_quiet(
-                full_path,
-                PDVLib(
+        try:
+            if node_type == "script":
+                language = meta.get("language", node.get("language", "python"))
+                doc = meta.get("doc")
+                mod_id = meta.get("module_id", module_id_default)
+                tree.set_quiet(
+                    full_path,
+                    PDVScript(
+                        uuid=node_uuid,
+                        filename=node_filename,
+                        language=language,
+                        doc=doc,
+                        module_id=mod_id,
+                        source_rel_path=src_rel,
+                    ),
+                )
+            elif node_type == "markdown":
+                title = meta.get("title")
+                tree.set_quiet(
+                    full_path,
+                    PDVNote(
+                        uuid=node_uuid,
+                        filename=node_filename,
+                        title=title,
+                    ),
+                )
+            elif node_type == "gui":
+                mod_id = meta.get(
+                    "module_id", node.get("module_id", module_id_default)
+                )
+                gui_node = PDVGui(
                     uuid=node_uuid,
                     filename=node_filename,
                     module_id=mod_id,
                     source_rel_path=src_rel,
-                ),
-            )
-        elif node_type == "file":
-            tree.set_quiet(
-                full_path,
-                PDVFile(
-                    uuid=node_uuid,
-                    filename=node_filename,
-                    source_rel_path=src_rel,
-                ),
-            )
-        elif backend == "inline":
-            tree.set_quiet(full_path, storage.get("value"))
-        elif backend == "local_file":
-            value = deserialize_node(
-                storage,
-                working_dir,
-                trusted=True,
-                python_type=meta.get("python_type", ""),
-            )
-            tree.set_quiet(full_path, value)
+                )
+                tree.set_quiet(full_path, gui_node)
+                # Attach gui reference to parent PDVModule if applicable.
+                parts = full_path.split(".")
+                if len(parts) > 1:
+                    parent_path = ".".join(parts[:-1])
+                    try:
+                        parent = tree[parent_path]
+                        if isinstance(parent, PDVModule):
+                            parent.gui = gui_node
+                    except (KeyError, AttributeError):
+                        pass
+            elif node_type == "namelist":
+                mod_id = meta.get(
+                    "module_id", node.get("module_id", module_id_default)
+                )
+                namelist_format = meta.get(
+                    "namelist_format", node.get("namelist_format", "auto")
+                )
+                tree.set_quiet(
+                    full_path,
+                    PDVNamelist(
+                        uuid=node_uuid,
+                        filename=node_filename,
+                        format=namelist_format,
+                        module_id=mod_id,
+                        source_rel_path=src_rel,
+                    ),
+                )
+            elif node_type == "lib":
+                mod_id = meta.get(
+                    "module_id", node.get("module_id", module_id_default)
+                )
+                tree.set_quiet(
+                    full_path,
+                    PDVLib(
+                        uuid=node_uuid,
+                        filename=node_filename,
+                        module_id=mod_id,
+                        source_rel_path=src_rel,
+                    ),
+                )
+            elif node_type == "file":
+                tree.set_quiet(
+                    full_path,
+                    PDVFile(
+                        uuid=node_uuid,
+                        filename=node_filename,
+                        source_rel_path=src_rel,
+                    ),
+                )
+            elif backend == "inline":
+                tree.set_quiet(full_path, storage.get("value"))
+            elif backend == "local_file":
+                value = deserialize_node(
+                    storage,
+                    working_dir,
+                    trusted=True,
+                    python_type=meta.get("python_type", ""),
+                )
+                tree.set_quiet(full_path, value)
+        except Exception as exc:  # noqa: BLE001 — one bad leaf must not abort the load
+            skipped.append({"path": full_path, "error": repr(exc)})
 
         if on_progress is not None:
             on_progress(index, total)
+
+    return skipped
