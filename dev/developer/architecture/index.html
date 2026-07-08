@@ -2039,10 +2039,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#10513-package-management-ui" class="md-nav__link">
+  <a href="#10513-project-environment-tab-package-management-ui" class="md-nav__link">
     <span class="md-ellipsis">
       
-        10.5.13 Package Management UI
+        10.5.13 Project Environment Tab (Package Management UI)
       
     </span>
   </a>
@@ -2098,6 +2098,17 @@
     <span class="md-ellipsis">
       
         10.5.18 The uv-runner Module
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#10519-default-runtime-vs-project-environment" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        10.5.19 Default Runtime vs Project Environment
       
     </span>
   </a>
@@ -3725,10 +3736,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#10513-package-management-ui" class="md-nav__link">
+  <a href="#10513-project-environment-tab-package-management-ui" class="md-nav__link">
     <span class="md-ellipsis">
       
-        10.5.13 Package Management UI
+        10.5.13 Project Environment Tab (Package Management UI)
       
     </span>
   </a>
@@ -3784,6 +3795,17 @@
     <span class="md-ellipsis">
       
         10.5.18 The uv-runner Module
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#10519-default-runtime-vs-project-environment" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        10.5.19 Default Runtime vs Project Environment
       
     </span>
   </a>
@@ -4493,7 +4515,7 @@
 <tr>
 <td><code>pdv.project.save.response</code></td>
 <td>kernel → app</td>
-<td>Confirms save completed. Payload: <code>{ node_count, checksum, module_owned_files, module_manifests, missing_files, autosave_cache_hits }</code>. <code>module_owned_files</code> lists every file-backed node that belongs to a <code>PDVModule</code> (see §5.9) so the main process can mirror working-dir edits into <code>&lt;saveDir&gt;/modules/&lt;id&gt;/&lt;source_rel_path&gt;</code>. <code>module_manifests</code> carries per-module metadata + module-root-relative node descriptors for writing <code>pdv-module.json</code> and <code>module-index.json</code> under each module dir. Both fields are empty arrays when the tree contains no <code>PDVModule</code> nodes. <code>missing_files</code> lists tree paths of file-backed nodes whose backing files were missing during serialization; these nodes are skipped rather than pickled. <code>autosave_cache_hits</code> reports how many nodes were reused from the cache (only meaningful when the request set <code>is_autosave: true</code>).</td>
+<td>Confirms save completed. Payload: <code>{ node_count, checksum, aborted, module_owned_files, module_manifests, missing_files, autosave_cache_hits }</code>. <code>module_owned_files</code> lists every file-backed node that belongs to a <code>PDVModule</code> (see §5.9) so the main process can mirror working-dir edits into <code>&lt;saveDir&gt;/modules/&lt;id&gt;/&lt;source_rel_path&gt;</code>. <code>module_manifests</code> carries per-module metadata + module-root-relative node descriptors for writing <code>pdv-module.json</code> and <code>module-index.json</code> under each module dir. Both fields are empty arrays when the tree contains no <code>PDVModule</code> nodes. <code>missing_files</code> lists tree paths of file-backed nodes whose backing files were missing during serialization; these nodes are skipped rather than pickled. A non-empty <code>missing_files</code> (equivalently <code>aborted: true</code>) means the save was <strong>aborted before <code>tree-index.json</code> was written</strong> — the previous index stays in place, <code>checksum</code> is empty, and the main process responds by skipping its own <code>code-cells.json</code>/<code>project.json</code> writes while the renderer surfaces a "Save blocked" error. <code>autosave_cache_hits</code> reports how many nodes were reused from the cache (only meaningful when the request set <code>is_autosave: true</code>).</td>
 </tr>
 <tr>
 <td><code>pdv.project.clear_autosave_cache</code></td>
@@ -4530,12 +4552,12 @@
 <tr>
 <td><code>pdv.tree.get</code></td>
 <td>app → kernel</td>
-<td>Request data value for a specific node.</td>
+<td>Request descriptive info (and optionally a repr) for a specific node. Payload: <code>{ path, mode? }</code> where <code>mode</code> is <code>"value"</code> (default) or <code>"metadata"</code>/<code>"preview"</code>.</td>
 </tr>
 <tr>
 <td><code>pdv.tree.get.response</code></td>
 <td>kernel → app</td>
-<td>Returns node value (may be lazy-loaded from save directory).</td>
+<td>Returns <code>{ path, type, preview, python_type, has_handler }</code> for every mode; <code>mode: "value"</code> adds <code>value</code> — the node's <code>repr</code>, truncated to 10 000 characters with <code>value_truncated: true</code> when the cap bites (so a giant builtin can't produce a multi-MB comm message).</td>
 </tr>
 <tr>
 <td><code>pdv.tree.resolve_file</code></td>
@@ -4999,9 +5021,9 @@
 1. Registers the <code>pdv.kernel</code> comm target with IPython
 2. Injects <code>pdv_tree</code> into the IPython user namespace via a custom namespace class that blocks reassignment
 3. Configures an interactive matplotlib backend (or patches <code>plt.show()</code> for inline emission when none is available)
-4. Registers the built-in double-click plot handlers via <code>pdv.default_handlers.register_defaults()</code>. Each registration is guarded by an import check, so missing optional deps (numpy / pandas / xarray) silently skip. Per-type behavior: <code>np.ndarray</code> 1D → <code>ax.plot</code>, 2D → <code>ax.imshow</code> + colorbar, 0D/&gt;2D → printed notice; <code>pd.Series</code> and <code>pd.DataFrame</code> → their built-in <code>.plot()</code>; <code>xr.DataArray</code> → its built-in <code>.plot()</code> (which dispatches 1D → line, 2D → pcolormesh, &gt;2D → histogram by ndim). A value that cannot actually be plotted (e.g. a non-numeric <code>pd.Series</code> or an object-dtype array) closes its half-built figure and prints a <code>[PDV]</code> notice rather than raising — a raised exception would reach the renderer as an opaque <code>internal.error</code>. <code>xr.Dataset</code> is intentionally not registered — users drill into a specific <code>data_var</code>
+4. Arranges the built-in double-click plot handlers to register <strong>lazily</strong>: the handler-registry lookups in <code>pdv.modules</code> (<code>has_handler_for</code>, <code>dispatch_handler</code>) call <code>pdv.default_handlers.register_defaults()</code>, which registers per-library defaults once numpy / pandas / xarray actually appear in <code>sys.modules</code>. Bootstrap itself imports none of them — eager imports cost real startup latency and undercut the never-import-xarray design in <code>serialization.py</code>, and a tree value can only <em>be</em> one of these types if its library is already imported. Per-type behavior: <code>np.ndarray</code> 1D → <code>ax.plot</code>, 2D → <code>ax.imshow</code> + colorbar, 0D/&gt;2D → printed notice; <code>pd.Series</code> and <code>pd.DataFrame</code> → their built-in <code>.plot()</code>; <code>xr.DataArray</code> → its built-in <code>.plot()</code> (which dispatches 1D → line, 2D → pcolormesh, &gt;2D → histogram by ndim). A value that cannot actually be plotted (e.g. a non-numeric <code>pd.Series</code> or an object-dtype array) closes its half-built figure and prints a <code>[PDV]</code> notice rather than raising — a raised exception would reach the renderer as an opaque <code>internal.error</code>. <code>xr.Dataset</code> is intentionally not registered — users drill into a specific <code>data_var</code>
 5. Sends the <code>pdv.ready</code> comm message</p>
-<p><code>bootstrap()</code> must be idempotent — calling it twice must not open a second comm or re-inject variables. Re-registering the default handlers is safe; the overwrite warning that <code>pdv.handle()</code> normally emits is suppressed inside <code>register_defaults()</code> because that warning is meant to flag user-vs-user conflicts.</p>
+<p><code>bootstrap()</code> must be idempotent — calling it twice must not open a second comm or re-inject variables. <code>register_defaults()</code> is likewise safe to call any number of times: each library's defaults register once, and a default never overwrites an existing registration, so a user handler for the same type wins regardless of registration order.</p>
 <h3 id="54-protected-namespace">5.4 Protected Namespace<a class="headerlink" href="#54-protected-namespace" title="Permanent link">&para;</a></h3>
 <p>The IPython user namespace is replaced with a subclass of <code>dict</code> that overrides <code>__setitem__</code>:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="k">class</span><span class="w"> </span><span class="nc">PDVNamespace</span><span class="p">(</span><span class="nb">dict</span><span class="p">):</span>
@@ -5052,7 +5074,7 @@
 - <code>relative_path</code>: path of the script file relative to the project root
 - <code>language</code>: <code>'python'</code> (Julia deferred)
 - <code>doc</code>: first line of the script's module docstring (for preview display)</p>
-<p>Note: <code>params</code> (the <code>ScriptParameter</code> array) is <strong>not</strong> stored as a class attribute. It is computed on-demand by <code>_extract_script_params()</code> at registration time and via the <code>pdv.script.params</code> comm handler, and included in <code>pdv.tree.list</code> responses. See below for the descriptor shape.</p>
+<p>Note: <code>params</code> (the <code>ScriptParameter</code> array) is <strong>not</strong> stored as a class attribute. It is computed on-demand by <code>_extract_script_params()</code> at registration time and via the <code>pdv.script.params</code> comm handler, and included in <code>pdv.tree.list</code> responses. Extraction parses the script with <code>ast</code> — it never imports or executes the module, so a UI param fetch cannot trigger the script's top-level side effects. Literal defaults come back as real values; non-literal defaults (e.g. <code>np.pi</code>) fall back to their source text. See below for the descriptor shape.</p>
 <p><code>PDVScript.run(tree, **kwargs)</code> loads the module fresh (no import cache), calls <code>module.run(tree, **kwargs)</code>, and returns the result dict.</p>
 <h4 id="script-file-format">Script File Format<a class="headerlink" href="#script-file-format" title="Permanent link">&para;</a></h4>
 <p>Every PDV script is a plain Python file with a module-level docstring and a single <code>run()</code> function:</p>
@@ -5170,6 +5192,7 @@
 <h3 id="61-working-directory">6.1 Working Directory<a class="headerlink" href="#61-working-directory" title="Permanent link">&para;</a></h3>
 <p>The working directory is created by the Electron main process at kernel startup under <code>~/.PDV/working/</code>. It is the live filesystem backing for the current session. Using a persistent, app-managed directory instead of OS temp space prevents silent purging during long-running sessions.</p>
 <p><strong>Creation</strong>: The main process calls <code>fs.mkdtemp()</code> to create a uniquely named directory under <code>~/.PDV/working/</code>. A <code>session.lock</code> file containing <code>{ pid, createdAt }</code> is written so that orphan cleanup on next startup can distinguish active sessions from crashed ones. The working directory path is passed to the kernel in the <code>pdv.init</code> message.</p>
+<p><strong>Kernel CWD policy</strong>: the kernel process's <em>current working directory</em> is deliberately <strong>not</strong> the working directory. <code>pdv.environment.reset_cwd_to_home()</code> points the CWD at the user's home directory after <code>pdv.init</code> and again after every project load, so relative paths in user code resolve somewhere durable and predictable rather than into a session temp dir that is deleted on stop.</p>
 <p><strong>Structure</strong> (UUID-based — see §6.3):
 <div class="highlight"><pre><span></span><code><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a>~/.PDV/working/pdv-&lt;random&gt;/
 <a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a>    session.lock              ← { pid, createdAt } for orphan detection
@@ -5515,11 +5538,10 @@
 <a id="__codelineno-14-157" name="__codelineno-14-157" href="#__codelineno-14-157"></a>  &quot;type&quot;: &quot;ndarray&quot;,
 <a id="__codelineno-14-158" name="__codelineno-14-158" href="#__codelineno-14-158"></a>  &quot;has_children&quot;: false,
 <a id="__codelineno-14-159" name="__codelineno-14-159" href="#__codelineno-14-159"></a>  &quot;lazy&quot;: false,
-<a id="__codelineno-14-160" name="__codelineno-14-160" href="#__codelineno-14-160"></a>  &quot;created_at&quot;: &quot;&lt;iso8601&gt;&quot;,
-<a id="__codelineno-14-161" name="__codelineno-14-161" href="#__codelineno-14-161"></a>  &quot;updated_at&quot;: &quot;&lt;iso8601&gt;&quot;,
-<a id="__codelineno-14-162" name="__codelineno-14-162" href="#__codelineno-14-162"></a>  &quot;storage&quot;: { },
-<a id="__codelineno-14-163" name="__codelineno-14-163" href="#__codelineno-14-163"></a>  &quot;metadata&quot;: { &quot;preview&quot;: &quot;...&quot; }
-<a id="__codelineno-14-164" name="__codelineno-14-164" href="#__codelineno-14-164"></a>}
+<a id="__codelineno-14-160" name="__codelineno-14-160" href="#__codelineno-14-160"></a>  &quot;updated_at&quot;: &quot;&lt;iso8601&gt;&quot;,
+<a id="__codelineno-14-161" name="__codelineno-14-161" href="#__codelineno-14-161"></a>  &quot;storage&quot;: { },
+<a id="__codelineno-14-162" name="__codelineno-14-162" href="#__codelineno-14-162"></a>  &quot;metadata&quot;: { &quot;preview&quot;: &quot;...&quot; }
+<a id="__codelineno-14-163" name="__codelineno-14-163" href="#__codelineno-14-163"></a>}
 </code></pre></div></p>
 <table>
 <thead>
@@ -5561,14 +5583,9 @@
 <td><code>true</code> for data nodes (ndarray, dataframe, series, large text) that are loaded on-demand.</td>
 </tr>
 <tr>
-<td><code>created_at</code></td>
-<td>string</td>
-<td>ISO 8601 timestamp of when the node was serialized.</td>
-</tr>
-<tr>
 <td><code>updated_at</code></td>
 <td>string</td>
-<td>ISO 8601 timestamp (same as <code>created_at</code> on first save).</td>
+<td>ISO 8601 timestamp of when this descriptor was serialized. (A <code>created_at</code> field existed through v0.2.x but was regenerated on every save — always equal to <code>updated_at</code> — so it recorded nothing and was dropped.)</td>
 </tr>
 <tr>
 <td><code>storage</code></td>
@@ -5674,7 +5691,7 @@
 </code></pre></div></p>
 <p><code>metadata.serializer</code> records which custom hook wrote the file. Values written by <code>pdv.register_serializer</code> use the bare fully qualified class name (e.g. <code>"scipy.sparse.csr_matrix"</code>); values written via the dunder protocol carry a <code>"dunder:"</code> prefix so loaders can tell the two paths apart without a new descriptor field. <code>metadata.python_type</code> is the dotted module path that the load-time fallback feeds to <code>importlib.import_module</code> when no registered serializer matches the format.</p>
 <h4 id="732-pdvtreelist-response-descriptor-runtime">7.3.2 <code>pdv.tree.list</code> Response Descriptor (Runtime)<a class="headerlink" href="#732-pdvtreelist-response-descriptor-runtime" title="Permanent link">&para;</a></h4>
-<p>The <code>pdv.tree.list</code> handler builds descriptors on-the-fly from live tree state. These are simpler — no <code>storage</code>, <code>metadata</code>, <code>created_at</code>, or <code>updated_at</code>. Type-specific fields are at top level alongside common fields.</p>
+<p>The <code>pdv.tree.list</code> handler builds descriptors on-the-fly from live tree state. These are simpler — no <code>storage</code>, <code>metadata</code>, or <code>updated_at</code>. Type-specific fields are at top level alongside common fields.</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-24-1" name="__codelineno-24-1" href="#__codelineno-24-1"></a><span class="p">{</span>
 <a id="__codelineno-24-2" name="__codelineno-24-2" href="#__codelineno-24-2"></a><span class="w">  </span><span class="nt">&quot;id&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;data.waveforms.ch1&quot;</span><span class="p">,</span>
 <a id="__codelineno-24-3" name="__codelineno-24-3" href="#__codelineno-24-3"></a><span class="w">  </span><span class="nt">&quot;path&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;data.waveforms.ch1&quot;</span><span class="p">,</span>
@@ -5803,7 +5820,7 @@
 <a id="__codelineno-26-46" name="__codelineno-26-46" href="#__codelineno-26-46"></a>    │
 <a id="__codelineno-26-47" name="__codelineno-26-47" href="#__codelineno-26-47"></a>    └─► App updates title bar: &quot;My Experiment&quot;
 </code></pre></div>
-<p>All on-disk writes in the save pipeline (<code>tree-index.json</code>, <code>code-cells.json</code>, per-module <code>pdv-module.json</code> / <code>module-index.json</code>, module-owned file copies, and <code>project.json</code>) are atomic: each is written to a sibling <code>.tmp</code> file and <code>rename</code>d onto its final path, so a process crash mid-save leaves the destination either fully-old or fully-new but never torn. <code>tree-index.json</code> is the kernel-side commit point for the tree (in <code>pdv-python/pdv/handlers/project.py</code>); <code>project.json</code>, written last by the app, is the overall commit gate that promises every other artifact is durable. See <code>docs/developer/save-pipeline.md</code> for the full atomicity audit.</p>
+<p>All on-disk writes in the save pipeline (<code>tree-index.json</code>, <code>code-cells.json</code>, per-module <code>pdv-module.json</code> / <code>module-index.json</code>, module-owned file copies, data-node files written by <code>serialize_node</code> (<code>.npy</code>, pickle, <code>.txt</code>, <code>.bin</code>, custom-serializer output), and <code>project.json</code>) are atomic: each is written to a sibling <code>.tmp</code> file and <code>rename</code>d onto its final path, so a process crash mid-save leaves the destination either fully-old or fully-new but never torn. <code>tree-index.json</code> is the kernel-side commit point for the tree (in <code>pdv-python/pdv/handlers/project.py</code>); <code>project.json</code>, written last by the app, is the overall commit gate that promises every other artifact is durable. See <code>docs/developer/save-pipeline.md</code> for the full atomicity audit.</p>
 <p>To prevent a concurrent module-settings IPC handler from silently overwriting the manifest snapshot taken inside <code>ProjectManager.save</code>, the entire save body runs inside <code>runSerializedProjectManifestMutation</code> (the same lock that <code>ipc-register-modules.ts</code> uses around its read-modify-write mutations of <code>project.json</code>). Lock order: save-lock (outer) → manifest-write-lock (inner). No deadlock: nothing acquires the save-lock while holding the manifest-write-lock.</p>
 <p>If the kernel responds with <code>status: "error"</code>, the app aborts the save, does not write <code>project.json</code>, and displays the error message to the user.</p>
 <p>The module-owned file sync and the per-module manifest writer are both best-effort: errors are logged but never thrown, because by the time they run the kernel-side serialization (the authoritative part) has already succeeded and aborting would leave the save dir in a confusing half-saved state. A follow-up pass (#182) will move deletion propagation and overall robustness into the same lock.</p>
@@ -5819,7 +5836,7 @@
 <li><strong>For an unsaved project</strong> (no save dir yet): writes to <code>&lt;workingDir&gt;/.autosave/</code>. This is the only path that ever produces orphan recovery candidates.</li>
 </ul>
 <p>The contents of <code>.autosave/</code> mirror the save-dir layout — <code>tree-index.json</code>, <code>code-cells.json</code>, and a <code>tree/</code> directory of file-backed nodes — so that recovery can use the same load primitives as a normal project open.</p>
-<p><strong>Incremental serialization.</strong> The kernel keeps an in-memory <code>_autosave_cache: dict[tree_path, (digest, descriptor)]</code> (see <code>pdv-python/pdv/handlers/project.py</code>). The cache is consulted <em>and</em> updated on every save — autosave and explicit. On an explicit save it ends up populated with <code>(digest, descriptor)</code> pairs whose descriptors point at canonical UUIDs in <code>&lt;saveDir&gt;/tree/</code>; the next autosave then hits the cache for unchanged data nodes, returns the canonical descriptor (so its <code>tree-index.json</code> references the canonical UUID), and skips writing duplicate file contents under <code>&lt;saveDir&gt;/.autosave/tree/</code>. Only nodes that genuinely changed since the last save get a fresh UUID and a new file.</p>
+<p><strong>Incremental serialization.</strong> The kernel keeps an in-memory <code>_autosave_cache: dict[tree_path, (digest, descriptor)]</code> (see <code>pdv-python/pdv/handlers/project.py</code>). The cache is consulted <em>and</em> updated on every save — autosave and explicit. On an explicit save it ends up populated with <code>(digest, descriptor)</code> pairs whose descriptors point at canonical UUIDs in <code>&lt;saveDir&gt;/tree/</code>; the next autosave then hits the cache for unchanged data nodes, returns the canonical descriptor (so its <code>tree-index.json</code> references the canonical UUID), and skips writing duplicate file contents under <code>&lt;saveDir&gt;/.autosave/tree/</code>. Only nodes that genuinely changed since the last save get a fresh UUID and a new file. At the end of every successful save the cache is pruned of tree paths that no longer exist, so it cannot grow without bound over a long session of creating and deleting nodes.</p>
 <p><strong>Cache-hit file reconciliation.</strong> Because the cache survives across saves to <em>different</em> directories (<code>&lt;saveDir&gt;</code> for explicit saves, <code>&lt;saveDir&gt;/.autosave/</code> for autosaves), a cached descriptor's UUID may reference a file that physically lives in the <em>other</em> directory. <code>serialize_node</code> reconciles this on every cache hit via <code>_verify_or_relocate_cached_file</code>:</p>
 <ul>
 <li>If the file is already at <code>&lt;working_dir&gt;/tree/&lt;uuid&gt;/&lt;filename&gt;</code>, hit is valid.</li>
@@ -5830,7 +5847,7 @@
 <p><strong>Cache invalidation.</strong> When the user clicks <em>Clear autosave data</em> the main process sends <code>pdv.project.clear_autosave_cache</code> (see §3.4) to reset the kernel cache eagerly. The <code>clear_cache: true</code> flag on the next <code>pdv.project.save</code> is the in-band fallback if the eager comm fails (kernel disconnected, busy). Kernel shutdown also resets the cache via module reload.</p>
 <p>The cache covers in-memory data kinds — ndarray, DataFrame, Series, scalar, text, mapping, sequence, binary. File-backed kinds (PDVScript, PDVLib, PDVNote, PDVGui, PDVNamelist, PDVFile) bypass the cache and <code>smart_copy</code> their backing file on every autosave; the per-file copy is cheap because <code>smart_copy</code> is reflink/CoW where the filesystem supports it.</p>
 <p><strong>Save / autosave serialization.</strong> Both <code>IPC.project.save</code> and <code>IPC.autosave.run</code> acquire a single FIFO mutex inside <code>ProjectManager</code> (<code>runWithSaveLock</code>). When the autosave timer fires while an explicit save is in flight, the autosave queues until the save finishes. When the user clicks Save while an autosave is in flight, Save queues the same way. Combined with the kernel-busy deferral via <code>consumeAutosavePending</code>, this means autosave never overlaps an explicit save's main-process post-save side effects (manifest writes, module mirror).</p>
-<p><strong>Two recovery flows.</strong></p>
+<p><strong>Three recovery flows.</strong></p>
 <ol>
 <li>
 <p><strong>Recovery on project open.</strong> When the user opens a project that has a <code>&lt;saveDir&gt;/.autosave/</code> younger than (or independent of) the canonical save, the renderer prompts: "Restore autosaved changes?" If yes, the main process copies any file-backed nodes from <code>.autosave/</code> into the kernel working dir and calls <code>projectManager.load(saveDir, { treeIndexDir: &lt;saveDir&gt;/.autosave, codeCellsDir: &lt;saveDir&gt;/.autosave })</code>. The kernel reads <code>tree-index.json</code> from the override directory; everything else (the <code>save_dir</code> argument, the kernel's <code>_set_save_dir</code>) is unchanged. After a successful load the <code>.autosave/</code> directory is cleared.</p>
@@ -5840,6 +5857,13 @@
 <ul>
 <li><strong>Recover</strong> starts the kernel (deferring via the welcome-screen pending-action ref if needed), then calls <code>IPC.autosave.recoverUnsaved(orphanDir)</code>. The handler copies file-backed nodes from <code>&lt;orphan&gt;/.autosave/</code> into the new kernel's working dir, calls <code>projectManager.load(workingDir, { treeIndexDir: …, codeCellsDir: … })</code>, mirrors <code>code-cells.json</code>, runs module setup, and then deletes the orphan directory. The renderer leaves <code>currentProjectDir = null</code> so the project remains in the unsaved state — the user is expected to Save As to keep it.</li>
 <li><strong>Discard</strong> calls <code>IPC.autosave.deleteOrphan(orphanDir)</code>, which removes the directory wholesale.</li>
+</ul>
+</li>
+<li>
+<p><strong>Restart preservation.</strong> A user-initiated restart (the StatusBar <strong>⟳ Restart</strong> control, driving <code>IPC.kernels.restart</code>) must not lose in-memory work. Before the old session is torn down, the restart handler takes a snapshot: if the session is idle it hands the current code-cell tabs back and runs the same <code>performAutosave</code> core as the timer, writing a fresh <code>.autosave/</code> next to the active project (or in the working dir for an unsaved session). A non-idle session — often <em>why</em> the user is restarting — is not snapshotted; the handler falls back to whatever the last timer autosave left. After the new session is ready, restore reuses the two flows above:</p>
+<ul>
+<li><strong>Saved project:</strong> the same overlay + <code>treeIndexDir</code>/<code>codeCellsDir</code> override recipe as flow 1, gated on a snapshot actually existing (<code>ProjectManager.checkForAutosave</code>).</li>
+<li><strong>Unsaved session:</strong> the old working dir is kept (the restart's <code>preserveOldDir</code> path skips its deletion) and handed to the flow-2 <code>recoverUnsavedAfterRestart</code> routine. If restore fails for any reason, the old dir is left on disk, so the session reappears under "Recoverable Unsaved Sessions" on the next launch — restart degrades to flow 2 rather than losing data.</li>
 </ul>
 </li>
 </ol>
@@ -5950,13 +5974,18 @@
 <td>✓ (materialized on open, written back on save)</td>
 </tr>
 <tr>
+<td><code>.python-version</code></td>
+<td>✓</td>
+<td>✓ (uv's native interpreter pin, written at creation from the New Project dialog's version choice)</td>
+</tr>
+<tr>
 <td><code>.venv/</code></td>
 <td>—</td>
 <td>✓ (built by <code>uv sync</code>; <strong>never</strong> persisted)</td>
 </tr>
 </tbody>
 </table>
-<p><code>pyproject.toml</code> and <code>uv.lock</code> are two more project files that ride the existing materialize-on-open / write-on-save flow used for the tree. <code>.venv/</code> is the only uv artifact never copied to the save directory.</p>
+<p><code>pyproject.toml</code>, <code>uv.lock</code>, and <code>.python-version</code> are three more project files that ride the existing materialize-on-open / write-on-save flow used for the tree (<code>ENV_FILES</code> in <code>project-file-sync.ts</code>). <code>.venv/</code> is the only uv artifact never copied to the save directory.</p>
 <p>The consequences are all deliberate:</p>
 <ul>
 <li><strong>The working directory is a textbook uv project.</strong> It contains <code>pyproject.toml</code>, <code>uv.lock</code>, and <code>.venv/</code> at its root, exactly as <code>uv init</code> would produce. <code>uv</code> invoked there — by PDV or by the user from a terminal — behaves identically to <code>uv</code> in any hand-made project.</li>
@@ -5993,18 +6022,18 @@
 <tr>
 <td><code>environment.mode</code></td>
 <td>string</td>
-<td><code>"uv"</code> or <code>"shared"</code>. Absent (legacy <code>"1.1"</code> manifests) is treated as <code>"shared"</code>.</td>
+<td><code>"uv"</code> or <code>"shared"</code>. Absent (legacy <code>"1.1"</code> manifests) is treated as <code>"shared"</code>. Both modes are recorded explicitly at save time from the active kernel's environment metadata.</td>
 </tr>
 <tr>
 <td><code>environment.python_version</code></td>
 <td>string?</td>
-<td>Requested Python version (e.g. <code>"3.12"</code>), uv-mode only. If absent, uv picks the newest interpreter it can find or install.</td>
+<td>The <code>major.minor</code> Python version the session actually ran on, uv-mode only — resolved by probing the live venv interpreter at kernel start and recorded on every save. The working/save-dir <code>.python-version</code> pin (§10.5.3) is what drives <code>uv sync --python</code> on reopen; the manifest field is a fallback for pre-pin projects and for display.</td>
 </tr>
 </tbody>
 </table>
 <p>No venv path and no project identifier are stored. The venv always lives at <code>&lt;working-dir&gt;/.venv/</code>, derived from the session's working directory, so there is nothing machine-specific to record.</p>
 <p>A <code>"1.1"</code> manifest opened by a 1.2-capable app is upgraded in place on next save: <code>schema_version</code> becomes <code>"1.2"</code> and <code>environment.mode</code> defaults to <code>"shared"</code>. No <code>pyproject.toml</code> is created — an existing project is never silently turned into a uv project.</p>
-<p>The legacy top-level <code>interpreter_path</code> field from §6.2 is retained for <code>mode: "shared"</code> (it records which env was used at last save so it can be pre-selected on reopen) and is ignored for <code>mode: "uv"</code>.</p>
+<p>The top-level <code>interpreter_path</code> field from §6.2 is <strong>authoritative for <code>mode: "shared"</code></strong>: it records the interpreter the kernel actually spawned on (from the per-kernel environment metadata the main process keeps, <code>kernelEnvMeta</code>), not the app-wide config value. On reopen it is probed via <code>environment.check</code>; if the environment is gone the user is warned and offered the Default Runtime selector. For <code>mode: "uv"</code> no <code>interpreter_path</code> is recorded — the venv path is ephemeral, and mode + version pin are the environment's identity.</p>
 <h4 id="1056-the-uv-binary">10.5.6 The <code>uv</code> Binary<a class="headerlink" href="#1056-the-uv-binary" title="Permanent link">&para;</a></h4>
 <p>PDV bundles a per-platform <code>uv</code> binary under <code>resources/uv/&lt;platform&gt;/uv[.exe]</code> via electron-builder's <code>extraResources</code>. The bundled version is pinned in <code>electron/package.json</code> so every install is reproducible. The main process prefers the bundled binary; the <code>uv.binaryPath</code> config setting lets a developer point at a system <code>uv</code>.</p>
 <p>Bundling is mandatory, not a convenience: §10.5.1's "a machine that has never opened the project" goal forbids any "install uv first" prerequisite.</p>
@@ -6016,12 +6045,19 @@
 </code></pre></div>
 <p>where <code>&lt;venv-python&gt;</code> is <code>&lt;working-dir&gt;/.venv/bin/python</code> (<code>...\.venv\Scripts\python.exe</code> on Windows). Installing from the bundled wheel means the kernel's own support package needs no network access and can never version-drift from the running app. The operation is idempotent and fast when the matching version is already present. The version-match check from §10.4 remains authoritative. Developer mode (§10.5.16) skips this step.</p>
 <h4 id="1058-new-project-flow">10.5.8 New Project Flow<a class="headerlink" href="#1058-new-project-flow" title="Permanent link">&para;</a></h4>
+<p>Clicking <strong>New Python Project</strong> on the welcome screen opens the <strong>New Project dialog</strong> — the one moment the environment choice is free, so it is made here and recorded, not changed later (§10.5.19). The project itself stays unsaved until the first explicit Save; the dialog configures only the environment:</p>
+<ul>
+<li><strong>Python version</strong> — a dropdown over <code>SUPPORTED_PYTHON_VERSIONS</code> (<code>electron/main/python-versions.ts</code>, kept in sync with pdv-python's <code>requires-python</code>), defaulting to <code>DEFAULT_PYTHON_VERSION</code> (one behind the newest supported, for wheel availability). Missing interpreters are downloaded automatically by uv (§10.5.15).</li>
+<li><strong>Initial packages</strong> — prefilled from the user-level default-packages list (§10.5.14); comma-separated PEP 508 specs, validated by uv itself.</li>
+<li><strong>Advanced: use an existing environment</strong> — a mode toggle for the conda/cluster case (§10.5.17). Opening it <em>replaces</em> the uv fields with the embedded environment selector (its own confirm and install buttons suppressed via <code>hideConfirm</code>/<code>hideInstallButton</code>), so the two paths are mutually exclusive and the footer's primary button is the <strong>single always-visible action</strong>: <strong>Create</strong> when the highlighted environment has a compatible pdv-python; <strong>Install pdv-python</strong> when that is the required next step (driving the selector's install flow through its <code>actionsRef</code>, then flipping to Create on the post-install re-probe); disabled with the reason in its tooltip otherwise (no selection, no-GIL build). Nothing the user must click is ever below the scroll. Confirming starts a shared-mode session on that interpreter, session-scoped (the global config is untouched); the choice reaches the manifest as <code>mode: "shared"</code> + <code>interpreter_path</code> on first save.</li>
+</ul>
+<p>On Create (uv path):</p>
 <ol>
-<li>The user chooses a save directory (File → New Project).</li>
-<li>PDV writes <code>project.json</code> (<code>environment.mode: "uv"</code>) and a <code>pyproject.toml</code> seeded from the user-level default-packages list (§10.5.14). <code>python_version</code> defaults to the newest interpreter uv reports.</li>
-<li>PDV runs <code>uv sync</code> in the working directory, streaming output to the environment activity panel behind a blocking modal.</li>
+<li><code>kernels.start</code> receives the choices via <code>KernelUvContext</code> (<code>{ newProject, pythonVersion, packages }</code>); <code>pythonVersion</code> is validated against <code>SUPPORTED_PYTHON_VERSIONS</code>.</li>
+<li>PDV writes a <code>pyproject.toml</code> seeded from the chosen packages and a <code>.python-version</code> pin into the fresh working directory.</li>
+<li>PDV runs <code>uv sync --python &lt;version&gt;</code> there, streaming output to the environment activity panel behind a blocking modal.</li>
 <li>PDV installs <code>pdv-python</code> (§10.5.7).</li>
-<li>The kernel launches against <code>&lt;working-dir&gt;/.venv</code> and §4.1's startup sequence proceeds.</li>
+<li>The kernel launches against <code>&lt;working-dir&gt;/.venv</code> and §4.1's startup sequence proceeds. The resolved venv version and interpreter are recorded in the per-kernel environment metadata for later manifest writes (§10.5.5).</li>
 </ol>
 <h4 id="1059-project-open-flow">10.5.9 Project Open Flow<a class="headerlink" href="#1059-project-open-flow" title="Permanent link">&para;</a></h4>
 <p>When the main process loads a project whose manifest has <code>environment.mode: "uv"</code>:</p>
@@ -6039,7 +6075,7 @@
 <p>Once the locked package set is in uv's cache, every later open works fully offline — <code>uv sync</code> rebuilds <code>.venv/</code> from the local cache with no network.</p>
 <p>On failure the app surfaces uv's output verbatim and offers <strong>Retry</strong> and <strong>Cancel</strong>. uv's output names the failing package, so the user can correct <code>pyproject.toml</code> and retry. There is deliberately no silent fallback to a different interpreter: a uv project's identity is its locked environment.</p>
 <h4 id="10510-project-save-flow">10.5.10 Project Save Flow<a class="headerlink" href="#10510-project-save-flow" title="Permanent link">&para;</a></h4>
-<p>On <code>project.save</code>, <code>pyproject.toml</code> and <code>uv.lock</code> are written from the working directory back into the save directory alongside the tree (§8.1). Both can change mid-session — <code>pdv.install()</code> and the package UI mutate them — so both are part of every save. <code>.venv/</code> is never saved.</p>
+<p>On <code>project.save</code>, <code>pyproject.toml</code>, <code>uv.lock</code>, and <code>.python-version</code> are written from the working directory back into the save directory alongside the tree (§8.1). The first two can change mid-session — <code>pdv.install()</code> and the package UI mutate them — so all are part of every save. <code>.venv/</code> is never saved. The manifest additionally records the environment (<code>mode</code>, <code>python_version</code> / <code>interpreter_path</code>) from the active kernel's metadata (§10.5.5).</p>
 <h4 id="10511-pdvinstall-in-kernel-installs">10.5.11 <code>pdv.install()</code> — In-Kernel Installs<a class="headerlink" href="#10511-pdvinstall-in-kernel-installs" title="Permanent link">&para;</a></h4>
 <p><code>pdv.install("pkg", ...)</code> is callable from any code cell and installs packages into the project venv <strong>without a kernel restart</strong>.</p>
 <p>The kernel runs <code>uv</code> directly. The main process resolves the bundled <code>uv</code> binary (honoring the <code>uv.binaryPath</code> override) and passes its path, alongside the working directory, to the kernel in the <code>pdv.init</code> payload — for uv-mode kernels only. <code>pdv.install()</code> then:</p>
@@ -6052,19 +6088,20 @@
 <p><strong>Upgrades of already-imported packages.</strong> If a requested package is already present in <code>sys.modules</code>, <code>invalidate_caches()</code> cannot swap the live module object. <code>pdv.install()</code> does not attempt to — no <code>sys.modules</code> walking, no forced <code>reload()</code>. It emits a warning to the cell output stating that a kernel restart is required for the upgrade to take full effect (the restart re-materializes the venv with the new package, §11.6).</p>
 <h4 id="10512-reactive-install-from-errors">10.5.12 Reactive Install from Errors<a class="headerlink" href="#10512-reactive-install-from-errors" title="Permanent link">&para;</a></h4>
 <p>A <code>ModuleNotFoundError</code> raised by a code cell is detected in the kernel's output stream, and the console renders an affordance beneath the traceback: a one-click <code>Install with pdv.install("&lt;name&gt;")</code> action that runs the install for the user. Detection is not restricted to a curated package list — any missing module name is offered. A wrong suggestion (a typo, a missing local module) costs only an ignored button; the discoverability win for users who do not know <code>pdv.install()</code> exists is worth that.</p>
-<h4 id="10513-package-management-ui">10.5.13 Package Management UI<a class="headerlink" href="#10513-package-management-ui" title="Permanent link">&para;</a></h4>
-<p>A <strong>Packages</strong> tab in the project settings is the friendly face over <code>uv add</code> / <code>uv remove</code> / <code>uv lock --upgrade-package</code>. Users never have to read <code>pyproject.toml</code>.</p>
+<h4 id="10513-project-environment-tab-package-management-ui">10.5.13 Project Environment Tab (Package Management UI)<a class="headerlink" href="#10513-project-environment-tab-package-management-ui" title="Permanent link">&para;</a></h4>
+<p>The <strong>Project Environment</strong> settings tab (tab id <code>packages</code>) answers "what is this session running on" and is the friendly face over <code>uv add</code> / <code>uv remove</code> / <code>uv lock --upgrade-package</code>. Users never have to read <code>pyproject.toml</code>.</p>
 <p>The tab:
-- Lists direct dependencies parsed from <code>pyproject.toml</code>'s <code>[project].dependencies</code> array, each with its installed version.
+- Opens with an environment header driven by the <code>environment:activeInfo</code> IPC channel (backed by the main process's per-kernel <code>kernelEnvMeta</code> map): a mode badge ("uv-managed · shareable" vs "external environment"), the interpreter the kernel actually spawned on, and its Python version.
+- For uv mode, lists direct dependencies parsed from <code>pyproject.toml</code>'s <code>[project].dependencies</code> array, each with its installed version.
 - Supports add (PyPI name with optional version spec), remove, and per-package upgrade.
 - Runs every operation through <code>uv</code> so <code>uv.lock</code> stays consistent, and refreshes the kernel's import caches afterward exactly as §10.5.11 does.
 - Streams output to the same environment activity panel used by bootstrap.
-- Offers an "Edit pyproject.toml" escape hatch; the main process re-runs <code>uv sync</code> after any external edit.</p>
+- For shared mode, shows the environment header plus a note that packages are managed by the external environment's own tooling and that changing an existing project's environment is a planned dedicated action (issue #335), not a settings toggle.</p>
 <p>PDV never parses or resolves dependency constraints itself — everything is delegated to <code>uv</code>.</p>
 <h4 id="10514-default-packages">10.5.14 Default Packages<a class="headerlink" href="#10514-default-packages" title="Permanent link">&para;</a></h4>
 <p>A user-level setting (Settings → Python) holds a list of PEP 508 dependency specs. It is consulted <strong>only</strong> at new-project creation (§10.5.8), where it seeds the initial <code>[project].dependencies</code> of the generated <code>pyproject.toml</code>. Editing the list later never retroactively changes an existing project — once created, a project owns its own dependency set.</p>
 <h4 id="10515-python-version-acquisition">10.5.15 Python Version Acquisition<a class="headerlink" href="#10515-python-version-acquisition" title="Permanent link">&para;</a></h4>
-<p>If <code>environment.python_version</code> names an interpreter uv cannot find, <code>uv</code> can download one via <code>uv python install</code>. Because that is a tens-of-megabytes download, PDV gates it behind an explicit confirmation dialog the first time it is needed for a project ("This project requests Python 3.12, which is not installed. Download it now? (≈ 40 MB)"). Downloaded interpreters land in uv's standard location (§10.5.6) and are shared with any system <code>uv</code>.</p>
+<p>If the pinned version (<code>.python-version</code> / <code>--python</code>) names an interpreter uv cannot find, <code>uv sync</code> downloads one automatically as part of environment materialization — uv's default behavior, which PDV does not override. The download streams through the same blocking environment-setup modal as the rest of the sync, and the New Project dialog notes next to the version dropdown that missing versions are downloaded automatically. Downloaded interpreters land in uv's standard location (§10.5.6) and are shared with any system <code>uv</code>, so the tens-of-megabytes cost is paid once per machine per version.</p>
 <h4 id="10516-developer-mode-editable-pdv-python">10.5.16 Developer Mode (editable <code>pdv-python</code>)<a class="headerlink" href="#10516-developer-mode-editable-pdv-python" title="Permanent link">&para;</a></h4>
 <p>PDV contributors want their edits to <code>pdv-python/</code> to take effect live, not be shadowed by a pinned bundled wheel. The app detects developer mode by a <code>.pdv-dev</code> marker file at the repo root (a packaged app has no repo root, so this is never true in distribution). When present, the §10.5.7 wheel install is replaced by an <strong>editable install of the repo checkout</strong> into the project venv:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-29-1" name="__codelineno-29-1" href="#__codelineno-29-1"></a>uv pip install --python &lt;venv-python&gt; -e &lt;repo&gt;/pdv-python
@@ -6075,6 +6112,13 @@
 <h4 id="10518-the-uv-runner-module">10.5.18 The <code>uv-runner</code> Module<a class="headerlink" href="#10518-the-uv-runner-module" title="Permanent link">&para;</a></h4>
 <p>All <code>uv</code> invocations in the main process go through one module, <code>electron/main/uv-runner.ts</code> — a single spawn helper that locates the bundled binary (or the <code>uv.binaryPath</code> override), runs <code>uv sync</code> / <code>add</code> / <code>remove</code> / <code>lock</code> / <code>pip install</code> / <code>python install</code>, and streams stdout/stderr over IPC to the environment activity panel. No other file in the main process spawns <code>uv</code> directly.</p>
 <p>The one uv invocation <em>outside</em> the main process is <code>pdv.install()</code> in the kernel (§10.5.11), which spawns <code>uv add</code> itself using the binary path the main process resolved with <code>uv-runner</code>'s resolver and passed to the kernel at init.</p>
+<h4 id="10519-default-runtime-vs-project-environment">10.5.19 Default Runtime vs Project Environment<a class="headerlink" href="#10519-default-runtime-vs-project-environment" title="Permanent link">&para;</a></h4>
+<p>The environment is a <strong>property of the project, not of the app</strong> — the settings UI is split along that line:</p>
+<ul>
+<li><strong>Default Runtime tab</strong> (tab id <code>runtime</code>, the environment selector): global scope only. It sets the interpreter used for the first run, shared-mode sessions started outside a project's own choice, and Julia. When a session is <code>ready</code>, selecting an environment there writes the global config <strong>for future sessions only</strong>, with an explanatory note — it never stops, restarts, or re-homes the live session. (The pre-rescope behavior — stop the kernel and relaunch shared-mode on the new interpreter — silently demoted uv projects to shared mode.) When no session is ready (first run, start-failure recovery, missing-interpreter fallback on open), the selector keeps its save-and-start behavior, which those flows depend on.</li>
+<li><strong>Project Environment tab</strong> (§10.5.13): per-project scope — what the active session actually runs on, and uv package management.</li>
+</ul>
+<p>There is deliberately <strong>no mid-project environment switching</strong>. The choice is made once in the New Project dialog (§10.5.8) and recorded in the manifest; a guarded, explicit "Change project environment…" action is tracked as issue #335.</p>
 <hr />
 <h2 id="11-electron-architecture-main-preload-renderer">11. Electron Architecture: Main, Preload, Renderer<a class="headerlink" href="#11-electron-architecture-main-preload-renderer" title="Permanent link">&para;</a></h2>
 <h3 id="111-ipc-boundary">11.1 IPC Boundary<a class="headerlink" href="#111-ipc-boundary" title="Permanent link">&para;</a></h3>
@@ -6098,9 +6142,9 @@
 - <code>window.pdv.modules.*</code> — module management: <code>listInstalled</code>, <code>install</code>, <code>importToProject</code>, <code>listImported</code>, <code>removeImport</code>, <code>saveSettings</code>, <code>runAction</code>, <code>checkUpdates</code>, <code>uninstall</code>, <code>update</code>
 - <code>window.pdv.moduleWindows.*</code> — module GUI windows: <code>open</code>, <code>close</code>, <code>context</code>, <code>executeInMain</code>; push: <code>onExecuteRequest(cb) → unsub</code>
 - <code>window.pdv.guiEditor.*</code> — GUI editor and viewer windows: <code>open</code> (editor), <code>openViewer</code> (standalone GUI viewer), <code>context</code>, <code>read</code>, <code>save</code>
-- <code>window.pdv.environment.*</code> — Python environment management: <code>list</code>, <code>check</code>, <code>install</code>, <code>refresh</code>; push: <code>onInstallOutput(cb) → unsub</code>
+- <code>window.pdv.environment.*</code> — Python environment management: <code>list</code>, <code>check</code>, <code>install</code>, <code>refresh</code>, <code>activeInfo</code> (active kernel's environment metadata — mode, interpreter, Python version — for the Project Environment tab), plus the uv package UI: <code>listPackages</code>, <code>addPackage</code>, <code>removePackage</code>, <code>upgradePackage</code>; push: <code>onInstallOutput(cb) → unsub</code>, <code>onEnvActivity(cb) → unsub</code> (streaming uv output)
 - <code>window.pdv.chrome.*</code> — window chrome controls: <code>getInfo</code>, <code>minimize</code>, <code>toggleMaximize</code>, <code>close</code>; push: <code>onStateChanged(cb) → unsub</code>
-- <code>window.pdv.system.*</code> — constant host facts injected at preload time: <code>platform</code> (the main process's <code>process.platform</code>). Exposed as a plain value, not a function — it never changes during a session, so it needs no IPC channel
+- <code>window.pdv.system.*</code> — constant host facts injected at preload time: <code>platform</code> (the main process's <code>process.platform</code>), <code>supportedPythonVersions</code> and <code>defaultPythonVersion</code> (the New Project dialog's version range, from <code>python-versions.ts</code>). Exposed as plain values, not functions — they never change during a session, so they need no IPC channel
 - <code>window.pdv.launchers.*</code> — action-bar external-app launchers: <code>openAgent</code> (launch the configured AI agent in a terminal), <code>openWorkingDir</code> (open the active kernel's working directory in the configured editor/IDE), <code>checkAvailability</code> (probe whether a terminal/editor/file-manager is installed, without launching it — used to gate Settings Save)
 - <code>window.pdv.progress.*</code> — operation progress: push only: <code>onProgress(cb) → unsub</code>
 - <code>window.pdv.menu.*</code> — menu bridge: <code>updateRecentProjects(paths)</code>, <code>onAction(cb) → unsub</code></p>
@@ -6191,18 +6235,21 @@
 - <strong>Linux</strong>: <code>frame: false</code> — the window is completely frameless. The <code>TitleBar</code> component renders window control buttons (minimize, maximize, close), an integrated menu bar, and the drag region.</p>
 <p>The <code>chrome.*</code> IPC namespace (§11.2) provides the renderer with platform-specific metadata (<code>WindowChromeInfo</code>) so the <code>TitleBar</code> component can adapt its layout. The <code>menu.*</code> namespace provides <code>getModel</code> and <code>popup</code> for rendering the integrated menu on Linux.</p>
 <h3 id="116-kernel-restart-with-project-reload">11.6 Kernel Restart with Project Reload<a class="headerlink" href="#116-kernel-restart-with-project-reload" title="Permanent link">&para;</a></h3>
-<p>When <code>kernels.restart()</code> is called while a project is loaded, the main process automatically preserves and reloads project state:</p>
+<p>When <code>kernels.restart()</code> is called, the main process automatically preserves and reloads project state:</p>
 <ol>
-<li><strong>Snapshot the uv environment</strong> (uv mode only): before the old working directory is deleted, read its <code>pyproject.toml</code> and <code>uv.lock</code> into memory. This captures any packages installed during the session (e.g. via <code>pdv.install()</code>, §10.5.11) that may not yet be in the save directory.</li>
-<li>Stop the old kernel, start a new one (preserving <code>activeProjectDir</code>)</li>
-<li><strong>Re-materialize the uv environment</strong> (uv mode only): write the snapshot into the new working directory and run the §10.5.9 sequence (<code>uv sync</code> → install <code>pdv-python</code>), launching the new kernel against the project venv interpreter. Shared-mode kernels skip this and relaunch on the app-selected interpreter as before.</li>
+<li><strong>Pre-restart tree snapshot</strong>: attempt a fresh <code>.autosave</code> snapshot while the old session is still alive (§8.4 flow 3) — but <strong>only when the server process is alive and idle</strong>. Liveness is checked via the process state (<code>getKernelProcessState</code> / <code>status === "dead"</code>), not <code>executionState</code> alone, because the execution state stays stale-<code>idle</code> after a crash. The snapshot's kernel comm is bounded to 5 s (instead of the default 30 s) so a wedged-but-alive server cannot stall the restart. When skipped or failed, the most recent timer autosave serves as the snapshot.</li>
+<li><strong>Snapshot the uv environment</strong> (uv mode only): before the old working directory is deleted, read its <code>pyproject.toml</code>, <code>uv.lock</code>, and <code>.python-version</code> into memory. This captures any packages installed during the session (e.g. via <code>pdv.install()</code>, §10.5.11) that may not yet be in the save directory. Hardening: if the old working directory is gone but the saved project has a <code>pyproject.toml</code>, the environment is rebuilt from the save directory instead of silently falling back to a shared-mode start.</li>
+<li>Stop the old kernel, start a new one (preserving <code>activeProjectDir</code> and carrying the per-kernel environment metadata to the new kernel id)</li>
+<li><strong>Re-materialize the uv environment</strong> (uv mode only): write the snapshot into the new working directory and run the §10.5.9 sequence (<code>uv sync --python &lt;pin&gt;</code> → install <code>pdv-python</code>), launching the new kernel against the project venv interpreter. Shared-mode kernels skip this and relaunch on the app-selected interpreter as before.</li>
 <li>Send <code>project.onReloading</code> push with <code>{ status: "reloading" }</code> — renderer shows overlay</li>
-<li>Copy project files from the save directory to the new kernel's working directory</li>
+<li>Copy project files from the save directory to the new kernel's working directory, overlaying the <code>.autosave</code> snapshot when one exists (unsaved sessions restore via the welcome screen's recovery routine instead)</li>
 <li>Call <code>projectManager.load()</code> to re-populate the tree via <code>pdv.project.load</code></li>
 <li>Re-run module setup (<code>pdv.modules.setup</code>)</li>
 <li>Send <code>project.onReloading</code> push with <code>{ status: "ready" }</code> — renderer removes overlay</li>
 </ol>
-<p>This ensures the project venv, tree state, module bindings, and <code>sys.path</code> configuration survive kernel restarts. Because the renderer's environment-mode indicator reflects the project (not the individual kernel), it stays correct across a restart that re-materializes the same venv.</p>
+<p><code>kernels.restart</code> returns a <code>KernelRestartResult</code> — <code>{ kernel, restoredFromAutosave }</code> — so the renderer can tell the user what came back ("restored from the last autosave" vs "starting fresh") in the console.</p>
+<p><strong>Crash recovery.</strong> The kernel crash handler (<code>onCrash</code>) deliberately does <strong>not</strong> delete the crashed kernel's working directory or its map entry: the directory holds the uv env spec the restart snapshots and any <code>.autosave</code> of an unsaved session. (It used to delete it, which silently demoted a crashed uv project to shared mode and destroyed unsaved work.) <code>kernels.restart</code> and <code>kernels.stop</code> clean the directory up; if the user quits instead, the stale <code>session.lock</code> surfaces it on the welcome screen as a recoverable session (§8.4). The StatusBar offers the ⟳ Restart control both while connected and in the <code>error</code> state when a restartable session exists (<code>canRestart</code>, i.e. a kernel id is known) — a crashed session can be restarted; a failed start cannot, and its recovery flows through the environment-setup retry surfaces instead.</p>
+<p>This ensures the project venv, tree state, module bindings, and <code>sys.path</code> configuration survive kernel restarts — including crashes. Because the renderer's environment-mode indicator reflects the project (not the individual kernel), it stays correct across a restart that re-materializes the same venv.</p>
 <hr />
 <h2 id="12-file-and-module-structure">12. File and Module Structure<a class="headerlink" href="#12-file-and-module-structure" title="Permanent link">&para;</a></h2>
 <h3 id="121-electron-typescript">12.1 Electron (TypeScript)<a class="headerlink" href="#121-electron-typescript" title="Permanent link">&para;</a></h3>
