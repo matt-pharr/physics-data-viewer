@@ -481,7 +481,7 @@ const App: React.FC = () => {
   const [environmentMode, setEnvironmentMode] = useState<'uv' | 'shared'>('shared');
   const [uvSync, setUvSync] = useState<{ phase: 'idle' | 'syncing' | 'failed'; output: string; error?: string }>({ phase: 'idle', output: '' });
   const lastUvLaunchRef = useRef<import('../types').KernelUvContext | null>(null);
-  const { startKernel, handleEnvSave, lastErrorRef } = useKernelLifecycle({
+  const { startKernel, handleEnvSave, handleRestartKernel, lastErrorRef } = useKernelLifecycle({
     config,
     currentKernelId,
     setCurrentKernelId,
@@ -1865,6 +1865,7 @@ const App: React.FC = () => {
           lastDuration={lastDuration}
           progress={progress}
           onRuntimeClick={() => { setSettingsInitialTab('runtime'); setShowSettings(true); }}
+          onRestartSession={handleRestartKernel}
           lastChecksum={lastChecksum}
           checksumMismatch={checksumMismatch}
           savedPdvVersion={savedPdvVersion}

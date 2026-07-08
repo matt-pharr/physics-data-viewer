@@ -1,7 +1,7 @@
 /**
  * index.ts — IPC handler registration and comm push forwarding.
  *
- * Registers all `ipcMain.handle(...)` channels consumed by the preload
+ * Registers all `handleIpc(...)` channels consumed by the preload
  * `window.pdv` API. Each handler translates renderer requests into either:
  * - direct `KernelManager` operations, or
  * - PDV comm requests via `CommRouter`.
@@ -15,7 +15,8 @@
  * ipc.ts — channel constants and API types
  */
 
-import { ipcMain, BrowserWindow, app } from "electron";
+import { BrowserWindow, app } from "electron";
+import { handleIpc, removeAllIpcHandlers } from "./ipc-registry";
 import * as fs from "fs/promises";
 import * as fsSync from "fs";
 import * as os from "os";
@@ -25,7 +26,10 @@ import { CommRouter } from "./comm-router";
 import { QueryRouter } from "./query-router";
 import { EnvironmentDetector } from "./environment-detector";
 import { buildEditorSpawn, resolveEditorSpawn } from "./editor-spawn";
-import { registerKernelIpcHandlers } from "./ipc-register-kernels";
+import {
+  registerKernelIpcHandlers,
+  removeKernelMemoryListener,
+} from "./ipc-register-kernels";
 import { registerModulesIpcHandlers } from "./ipc-register-modules";
 import { registerProjectIpcHandlers } from "./ipc-register-project";
 import { shouldBumpOnSwap } from "./mcp/generation-guard";
@@ -96,97 +100,6 @@ const DEFAULT_CONFIG: PDVConfig = {
   showCallableVariables: false,
   autoRefreshNamespace: false,
 };
-
-const REGISTERED_CHANNELS: readonly string[] = [
-  IPC.kernels.list,
-  IPC.kernels.start,
-  IPC.kernels.stop,
-  IPC.kernels.execute,
-  IPC.kernels.interrupt,
-  IPC.kernels.restart,
-  IPC.kernels.complete,
-  IPC.kernels.inspect,
-  IPC.kernels.validate,
-  IPC.tree.list,
-  IPC.tree.get,
-  IPC.tree.createScript,
-  IPC.tree.createNote,
-  IPC.tree.addFile,
-  IPC.tree.createNode,
-  IPC.tree.rename,
-  IPC.tree.move,
-  IPC.tree.duplicate,
-  IPC.tree.invokeHandler,
-  IPC.tree.delete,
-  IPC.namespace.query,
-  IPC.namespace.inspect,
-  IPC.script.edit,
-  IPC.script.run,
-  IPC.script.getParams,
-  IPC.note.save,
-  IPC.note.read,
-  IPC.modules.listInstalled,
-  IPC.modules.install,
-  IPC.modules.checkUpdates,
-  IPC.modules.importToProject,
-  IPC.modules.listImported,
-  IPC.modules.saveSettings,
-  IPC.modules.runAction,
-  IPC.modules.removeImport,
-  IPC.modules.uninstall,
-  IPC.modules.update,
-  IPC.namelist.read,
-  IPC.namelist.write,
-  IPC.project.save,
-  IPC.project.load,
-  IPC.project.new,
-  IPC.project.peekLanguages,
-  IPC.project.peekManifest,
-  IPC.config.get,
-  IPC.config.set,
-  IPC.themes.get,
-  IPC.themes.save,
-  IPC.themes.openDir,
-  IPC.codeCells.load,
-  IPC.codeCells.save,
-  IPC.menu.updateRecentProjects,
-  IPC.menu.updateEnabled,
-  IPC.menu.getModel,
-  IPC.menu.popup,
-  IPC.chrome.getInfo,
-  IPC.chrome.minimize,
-  IPC.chrome.toggleMaximize,
-  IPC.chrome.close,
-  IPC.app.confirmClose,
-  IPC.moduleWindows.open,
-  IPC.moduleWindows.close,
-  IPC.moduleWindows.context,
-  IPC.moduleWindows.executeInMain,
-  IPC.guiEditor.open,
-  IPC.guiEditor.openViewer,
-  IPC.guiEditor.context,
-  IPC.guiEditor.read,
-  IPC.guiEditor.save,
-  IPC.tree.createGui,
-  IPC.files.pickExecutable,
-  IPC.files.pickFile,
-  IPC.files.pickDirectory,
-  IPC.about.getVersion,
-  IPC.updater.checkForUpdates,
-  IPC.updater.downloadUpdate,
-  IPC.updater.installUpdate,
-  IPC.updater.openReleasesPage,
-  IPC.environment.list,
-  IPC.environment.check,
-  IPC.environment.install,
-  IPC.environment.refresh,
-  IPC.autosave.run,
-  IPC.autosave.clear,
-  IPC.autosave.check,
-  IPC.autosave.scanWorkingDirs,
-  IPC.autosave.recoverUnsaved,
-  IPC.autosave.deleteOrphan,
-];
 
 interface PushSubscription {
   commRouter: CommRouter;
@@ -436,7 +349,7 @@ function clearPushSubscriptions(): void {
 // ---------------------------------------------------------------------------
 
 /**
- * Register all `ipcMain.handle(...)` channels required by Step 5.
+ * Register all `handleIpc(...)` channels required by Step 5.
  *
  * @param win - Main browser window used for push forwarding.
  * @param kernelManager - Kernel manager instance.
@@ -597,6 +510,13 @@ export function registerIpcHandlers(
     getDefaultPackages: () => readConfig(configStore).defaultPackages ?? [],
     getUvBinaryPath: () => readConfig(configStore).uv?.binaryPath,
     bindActiveProjectModules,
+    // Function declarations below in this scope — hoisted, so referencing
+    // them here is safe. Defined next to the autosave IPC handlers whose
+    // logic they share.
+    autosaveBeforeRestart,
+    recoverUnsavedAfterRestart: async (orphanDir: string) => {
+      await recoverUnsavedSession(orphanDir);
+    },
   });
 
   // Aggregate module aliases from the active on-disk manifest plus any
@@ -751,7 +671,7 @@ export function registerIpcHandlers(
       console.warn("[env] failed to refresh kernel import caches:", err);
     }
   };
-  ipcMain.handle(IPC.environment.listPackages, async (): Promise<ProjectPackage[]> => {
+  handleIpc(IPC.environment.listPackages, async (): Promise<ProjectPackage[]> => {
     if (!activeKernelId) return [];
     const workingDir = kernelWorkingDirs.get(activeKernelId);
     if (!workingDir) return [];
@@ -783,7 +703,7 @@ export function registerIpcHandlers(
       return { spec, name, installedVersion: installed.get(name) };
     });
   });
-  ipcMain.handle(
+  handleIpc(
     IPC.environment.addPackage,
     async (_event, specs: string[]): Promise<EnvironmentInstallResult> => {
       const result = await uvAdd(specs, pkgRunOptions());
@@ -791,7 +711,7 @@ export function registerIpcHandlers(
       return { success: result.success, output: result.output };
     }
   );
-  ipcMain.handle(
+  handleIpc(
     IPC.environment.removePackage,
     async (_event, names: string[]): Promise<EnvironmentInstallResult> => {
       const result = await uvRemove(names, pkgRunOptions());
@@ -799,7 +719,7 @@ export function registerIpcHandlers(
       return { success: result.success, output: result.output };
     }
   );
-  ipcMain.handle(
+  handleIpc(
     IPC.environment.upgradePackage,
     async (_event, names: string[]): Promise<EnvironmentInstallResult> => {
       const opts = pkgRunOptions();
@@ -825,7 +745,19 @@ export function registerIpcHandlers(
     win.webContents.send(IPC.push.autosaveTrigger);
   }
 
-  ipcMain.handle(IPC.autosave.run, async (_event, codeCells: unknown) => {
+  /**
+   * Core autosave routine, shared by the renderer-triggered
+   * ``autosave.run`` IPC handler and the pre-restart snapshot.
+   *
+   * Saves the tree into ``<baseDir>/.autosave`` (the project dir when one
+   * is active, else the session working dir) and mirrors the
+   * manifest/module sidecars needed for recovery.
+   *
+   * @param codeCells - Code-cell state to bundle with the snapshot.
+   * @returns ``{ saved: boolean }`` — false when there is nowhere to save
+   *   (no project dir or working dir) or the kernel-side save failed.
+   */
+  async function performAutosave(codeCells: CodeCellData): Promise<{ saved: boolean }> {
     const baseDir = activeProjectDir || kernelWorkingDirs.get(activeKernelId ?? "");
     if (!baseDir) {
       console.warn(
@@ -853,7 +785,7 @@ export function registerIpcHandlers(
       win.webContents.send(IPC.push.autosaveStarted);
       try {
         const autosaveDir = autosaveDirFor(baseDir);
-        const result = await projectManager.autosave(autosaveDir, codeCells as CodeCellData);
+        const result = await projectManager.autosave(autosaveDir, codeCells);
         if (result === null) return { saved: false };
 
         await mirrorAutosaveSidecars(
@@ -874,9 +806,53 @@ export function registerIpcHandlers(
         win.webContents.send(IPC.push.autosaveEnded);
       }
     });
+  }
+
+  handleIpc(IPC.autosave.run, async (_event, codeCells: unknown) => {
+    return performAutosave(codeCells as CodeCellData);
   });
 
-  ipcMain.handle(IPC.autosave.clear, async (_event, dir?: string) => {
+  /**
+   * Pre-restart snapshot (see ``RegisterKernelIpcHandlersOptions``).
+   *
+   * Reads the code cells from the working dir's ``code-cells.json`` (the
+   * renderer mirrors its tabs there on a debounce, so the on-disk copy is
+   * at most one debounce window behind) and takes a fresh autosave. When
+   * the server is not idle — a hung server is often *why* the user is
+   * restarting — the fresh save is skipped rather than stalling the
+   * restart on a comm request that may never answer; any snapshot from
+   * the timer-based autosave loop is reported instead.
+   *
+   * @param kernelId - The server session being restarted.
+   * @returns True when ``<baseDir>/.autosave`` holds a usable snapshot.
+   */
+  async function autosaveBeforeRestart(kernelId: string): Promise<boolean> {
+    const workingDir = kernelWorkingDirs.get(kernelId);
+    const baseDir = activeProjectDir || workingDir;
+    if (!baseDir) return false;
+
+    if (kernelManager.getExecutionState(kernelId) === "idle") {
+      let codeCells: CodeCellData = { tabs: [], activeTabId: 1 };
+      if (workingDir) {
+        try {
+          codeCells = JSON.parse(
+            await fs.readFile(path.join(workingDir, "code-cells.json"), "utf8"),
+          ) as CodeCellData;
+        } catch {
+          /* no cells mirrored yet — snapshot the tree with empty cells */
+        }
+      }
+      const result = await performAutosave(codeCells);
+      if (result.saved) return true;
+    } else {
+      console.warn(
+        "[autosave] pre-restart snapshot skipped: server not idle; falling back to the last timer autosave",
+      );
+    }
+    return (await ProjectManager.checkForAutosave(baseDir)).exists;
+  }
+
+  handleIpc(IPC.autosave.clear, async (_event, dir?: string) => {
     const target = dir || activeProjectDir || kernelWorkingDirs.get(activeKernelId ?? "");
     if (target) {
       // Order matters: clear the kernel-side cache *before* deleting the
@@ -891,11 +867,11 @@ export function registerIpcHandlers(
     }
   });
 
-  ipcMain.handle(IPC.autosave.check, async (_event, dir: string) => {
+  handleIpc(IPC.autosave.check, async (_event, dir: string) => {
     return ProjectManager.checkForAutosave(dir);
   });
 
-  ipcMain.handle(IPC.autosave.scanWorkingDirs, async () => {
+  handleIpc(IPC.autosave.scanWorkingDirs, async () => {
     const config = readConfig(configStore);
     const base = config.workingDirBase || path.join(os.homedir(), ".PDV", "working");
     const results = await ProjectManager.scanForAutosaves(base);
@@ -908,7 +884,20 @@ export function registerIpcHandlers(
       : results;
   });
 
-  ipcMain.handle(IPC.autosave.recoverUnsaved, async (_event, orphanDir: string) => {
+  /**
+   * Restore an unsaved session's ``.autosave`` snapshot from ``orphanDir``
+   * into the active session's working dir, load the tree/cells from it,
+   * and delete the orphan. Shared by the welcome screen's Recover flow
+   * (``autosave.recoverUnsaved``) and the post-restart recovery callback
+   * passed to ``registerKernelIpcHandlers``.
+   *
+   * @param orphanDir - Working directory of the orphaned session.
+   * @returns The recovered code cells and any files that could not be
+   *   copied from the orphan.
+   * @throws {Error} When there is no active server session to recover
+   *   into, or the orphan dir is the active working dir.
+   */
+  async function recoverUnsavedSession(orphanDir: string) {
     if (!activeKernelId) {
       throw new Error("Cannot recover unsaved session: no active kernel");
     }
@@ -1016,9 +1005,13 @@ export function registerIpcHandlers(
       projectName: null,
       missingFiles: missingFiles.length > 0 ? missingFiles : undefined,
     };
+  }
+
+  handleIpc(IPC.autosave.recoverUnsaved, async (_event, orphanDir: string) => {
+    return recoverUnsavedSession(orphanDir);
   });
 
-  ipcMain.handle(IPC.autosave.deleteOrphan, async (_event, orphanDir: string) => {
+  handleIpc(IPC.autosave.deleteOrphan, async (_event, orphanDir: string) => {
     // Defense in depth: the renderer-side scan already filters this out, but
     // never let a bug or stale list cause us to rm -rf the live working dir.
     const activeWorkingDir = activeKernelId ? kernelWorkingDirs.get(activeKernelId) : undefined;
@@ -1156,20 +1149,20 @@ export function setMcpServerInstance(
  */
 function registerEnvironmentIpcHandlers(win: BrowserWindow, configStore: ConfigStore): void {
 
-  ipcMain.handle(IPC.environment.list, async () => {
+  handleIpc(IPC.environment.list, async () => {
     const config = configStore.getAll();
     return EnvironmentDetector.listEnvironmentInfo(config.pythonPath);
   });
 
-  ipcMain.handle(IPC.environment.check, async (_event, pythonPath: string) => {
+  handleIpc(IPC.environment.check, async (_event, pythonPath: string) => {
     return EnvironmentDetector.checkEnvironment(pythonPath);
   });
 
-  ipcMain.handle(IPC.environment.install, async (_event, pythonPath: string) => {
+  handleIpc(IPC.environment.install, async (_event, pythonPath: string) => {
     return EnvironmentDetector.installPDVFromBundle(pythonPath, win, IPC.push.installOutput);
   });
 
-  ipcMain.handle(IPC.environment.refresh, async () => {
+  handleIpc(IPC.environment.refresh, async () => {
     EnvironmentDetector.clearCache();
     const config = configStore.getAll();
     return EnvironmentDetector.listEnvironmentInfo(config.pythonPath);
@@ -1282,9 +1275,8 @@ export function registerCommPushForwarding(
  * @returns Nothing.
  */
 export function unregisterIpcHandlers(): void {
-  for (const channel of REGISTERED_CHANNELS) {
-    ipcMain.removeHandler(channel);
-  }
+  removeAllIpcHandlers();
+  removeKernelMemoryListener();
   if (trackedExecutionStateListener) {
     trackedExecutionStateListener.km.removeListener(
       "kernel:executionState",

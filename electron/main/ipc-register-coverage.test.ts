@@ -197,6 +197,8 @@ function setupAll(): void {
     getDefaultPackages: () => [],
     getUvBinaryPath: () => undefined,
     bindActiveProjectModules: vi.fn(async () => undefined),
+    autosaveBeforeRestart: vi.fn(async () => false),
+    recoverUnsavedAfterRestart: vi.fn(async () => undefined),
   });
   registerTreeNamespaceScriptIpcHandlers({
     kernelManager,

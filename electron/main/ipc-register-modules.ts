@@ -14,7 +14,8 @@
 
 import * as fs from "fs/promises";
 import * as path from "path";
-import { BrowserWindow, dialog, ipcMain } from "electron";
+import { BrowserWindow, dialog } from "electron";
+import { handleIpc } from "./ipc-registry";
 
 import { CommRouter } from "./comm-router";
 import {
@@ -103,24 +104,24 @@ export function registerModulesIpcHandlers(
     runWithProjectManifestWriteLock,
   } = options;
 
-  ipcMain.handle(
+  handleIpc(
     IPC.modules.listInstalled,
     async (): Promise<ModuleDescriptor[]> => moduleManager.listInstalled()
   );
 
-  ipcMain.handle(
+  handleIpc(
     IPC.modules.install,
     async (_event, request: ModuleInstallRequest): Promise<ModuleInstallResult> =>
       moduleManager.install(request)
   );
 
-  ipcMain.handle(
+  handleIpc(
     IPC.modules.checkUpdates,
     async (_event, moduleId: string): Promise<ModuleUpdateResult> =>
       moduleManager.checkUpdates(moduleId)
   );
 
-  ipcMain.handle(
+  handleIpc(
     IPC.modules.importToProject,
     async (_event, request: ModuleImportRequest): Promise<ModuleImportResult> => {
       const installedModules = await moduleManager.listInstalled();
@@ -239,7 +240,7 @@ export function registerModulesIpcHandlers(
     }
   );
 
-  ipcMain.handle(
+  handleIpc(
     IPC.modules.createEmpty,
     async (_event, request: ModuleCreateEmptyRequest): Promise<ModuleCreateEmptyResult> => {
       // Normalize and validate the requested id. Collision detection mirrors
@@ -379,7 +380,7 @@ export function registerModulesIpcHandlers(
     },
   );
 
-  ipcMain.handle(
+  handleIpc(
     IPC.modules.updateMetadata,
     async (_event, request: ModuleUpdateMetadataRequest): Promise<ModuleUpdateMetadataResult> => {
       if (!request?.alias) {
@@ -422,7 +423,7 @@ export function registerModulesIpcHandlers(
     },
   );
 
-  ipcMain.handle(
+  handleIpc(
     IPC.modules.exportFromProject,
     async (_event, request: ModuleExportRequest): Promise<ModuleExportResult> => {
       if (!request?.alias) {
@@ -551,7 +552,7 @@ export function registerModulesIpcHandlers(
     },
   );
 
-  ipcMain.handle(
+  handleIpc(
     IPC.modules.listImported,
     async (): Promise<ImportedModuleDescriptor[]> => {
       if (!getActiveKernelId()) return [];
@@ -617,7 +618,7 @@ export function registerModulesIpcHandlers(
     }
   );
 
-  ipcMain.handle(
+  handleIpc(
     IPC.modules.saveSettings,
     async (_event, request: ModuleSettingsRequest): Promise<ModuleSettingsResult> => {
       if (!request.values || typeof request.values !== "object" || Array.isArray(request.values)) {
@@ -674,7 +675,7 @@ export function registerModulesIpcHandlers(
     }
   );
 
-  ipcMain.handle(
+  handleIpc(
     IPC.modules.runAction,
     async (_event, request: ModuleActionRequest): Promise<ModuleActionResult> => {
       if (!kernelManager.getKernel(request.kernelId)) {
@@ -739,7 +740,7 @@ export function registerModulesIpcHandlers(
     }
   );
 
-  ipcMain.handle(
+  handleIpc(
     IPC.modules.removeImport,
     async (_event, moduleAlias: string): Promise<ModuleSettingsResult> => {
       const pendingImports = getPendingModuleImports();
@@ -782,13 +783,13 @@ export function registerModulesIpcHandlers(
     }
   );
 
-  ipcMain.handle(
+  handleIpc(
     IPC.modules.uninstall,
     async (_event, moduleId: string): Promise<ModuleUninstallResult> =>
       moduleManager.uninstall(moduleId)
   );
 
-  ipcMain.handle(
+  handleIpc(
     IPC.modules.update,
     async (_event, moduleId: string): Promise<ModuleInstallResult> =>
       moduleManager.update(moduleId)

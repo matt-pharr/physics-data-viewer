@@ -14,7 +14,6 @@ import * as os from "os";
 import * as path from "path";
 
 const ELECTRON_ROOT = path.resolve(__dirname, "..", "..");
-const PYTHON_PACKAGE_DIR = path.resolve(ELECTRON_ROOT, "..", "pdv-python");
 // Persistent matplotlib font cache shared across E2E runs. Without this, every
 // fresh temp HOME forces matplotlib to rebuild its font cache (~15-20s), which
 // pushes pdv.bootstrap past the 15s readyTimeoutMs in kernel-session.ts.
@@ -44,12 +43,6 @@ export interface LaunchedApp {
   cleanup: () => Promise<void>;
 }
 
-function withPythonPath(): string {
-  const existing = process.env.PYTHONPATH;
-  return existing
-    ? `${PYTHON_PACKAGE_DIR}${path.delimiter}${existing}`
-    : PYTHON_PACKAGE_DIR;
-}
 
 async function seedPreferences(
   homeDir: string,
@@ -172,7 +165,17 @@ export async function launchPDV(opts: LaunchOptions = {}): Promise<LaunchedApp> 
     } catch {
       // Already closed (test may have done it explicitly).
     }
-    await fs.rm(homeDir, { recursive: true, force: true });
+    // app.close() resolves before the OS has necessarily flushed every last
+    // write the closing session made under HOME/.PDV (a final autosave, the
+    // restart-reload's file copies). If one lands mid-walk, a plain recursive
+    // rm throws ENOTEMPTY. maxRetries/retryDelay is Node's built-in handling
+    // for exactly this class of transient rmdir race.
+    await fs.rm(homeDir, {
+      recursive: true,
+      force: true,
+      maxRetries: 5,
+      retryDelay: 100,
+    });
   };
 
   return { app, window, homeDir, cleanup };

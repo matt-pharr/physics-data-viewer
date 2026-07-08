@@ -46,6 +46,7 @@
  */
 
 import * as fs from "fs/promises";
+import * as fsSync from "fs";
 import * as path from "path";
 
 /**
@@ -121,6 +122,38 @@ export async function atomicWriteJson(
 ): Promise<void> {
   const body = JSON.stringify(value, null, indent) + "\n";
   await atomicWriteFile(filePath, body, "utf8");
+}
+
+/**
+ * Synchronous variant of {@link atomicWriteFile}.
+ *
+ * For callers that must stay synchronous — notably ``ConfigStore``'s
+ * ``persist()``, whose write of ``preferences.json`` previously used a
+ * bare ``writeFileSync``: a crash mid-write left a torn file that the
+ * next boot backed up and reset, silently discarding all settings
+ * (including the persisted MCP auth token).
+ *
+ * @param filePath - Absolute path of the file to write.
+ * @param data - Contents to write, encoded as UTF-8.
+ * @returns Nothing.
+ * @throws {Error} When the parent directory cannot be created, the temp
+ *   file cannot be written, or the rename fails. The temp file is
+ *   removed before the error propagates.
+ */
+export function atomicWriteFileSync(filePath: string, data: string): void {
+  fsSync.mkdirSync(path.dirname(filePath), { recursive: true });
+  const tmp = filePath + TMP_SUFFIX;
+  try {
+    fsSync.writeFileSync(tmp, data, "utf8");
+    fsSync.renameSync(tmp, filePath);
+  } catch (err) {
+    try {
+      fsSync.rmSync(tmp, { force: true });
+    } catch {
+      /* best-effort temp cleanup; the original error propagates */
+    }
+    throw err;
+  }
 }
 
 /**

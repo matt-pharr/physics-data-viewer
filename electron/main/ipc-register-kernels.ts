@@ -16,7 +16,8 @@
 import * as fs from "fs/promises";
 import * as path from "path";
 
-import { BrowserWindow, ipcMain } from "electron";
+import { BrowserWindow } from "electron";
+import { handleIpc } from "./ipc-registry";
 
 import { CommRouter } from "./comm-router";
 import { QueryRouter } from "./query-router";
@@ -27,11 +28,40 @@ import { initializeKernelSession } from "./kernel-session";
 import { executeAndTranscribe, TranscriptWriter } from "./mcp/transcript";
 import type { ModuleManager } from "./module-manager";
 import { setupProjectModuleNamespaces } from "./module-runtime";
-import { copyEnvFilesForLoad, copyFilesForLoad } from "./project-file-sync";
+import { copyEnvFilesForLoad, copyFilesForLoad, overlayAutosaveTreeFiles } from "./project-file-sync";
 import { ProjectManager } from "./project-manager";
+import { autosaveDirFor } from "./autosave-sidecars";
 import { materializeUvEnvironment } from "./uv-environment";
 import { resolveUvBinary } from "./uv-runner";
 import { generatePyproject } from "./pyproject";
+
+/**
+ * The `kernel:memoryRss` listener currently attached to a KernelManager,
+ * tracked so teardown can detach it. The KernelManager outlives windows,
+ * so an untracked listener would accumulate once per window re-creation.
+ * Mirrors `trackedExecutionStateListener` in `index.ts`.
+ */
+let trackedMemoryListener:
+  | { km: KernelManager; fn: (kernelId: string, rssBytes: number) => void }
+  | null = null;
+
+/**
+ * Detach the tracked `kernel:memoryRss` listener, if any.
+ *
+ * Called on re-registration (below) and from `unregisterIpcHandlers()` in
+ * `index.ts` so registration and teardown stay symmetric.
+ *
+ * @returns Nothing.
+ */
+export function removeKernelMemoryListener(): void {
+  if (trackedMemoryListener) {
+    trackedMemoryListener.km.removeListener(
+      "kernel:memoryRss",
+      trackedMemoryListener.fn,
+    );
+    trackedMemoryListener = null;
+  }
+}
 
 interface RegisterKernelIpcHandlersOptions {
   win: BrowserWindow;
@@ -53,6 +83,21 @@ interface RegisterKernelIpcHandlersOptions {
   /** Optional `uv` binary override from config (§10.5.6); undefined = bundled. */
   getUvBinaryPath: () => string | undefined;
   bindActiveProjectModules: (kernelId: string | null) => Promise<void>;
+  /**
+   * Best-effort tree snapshot taken while the old Jupyter server is still
+   * alive, so a restart never loses in-memory work. Returns true when a
+   * usable ``.autosave`` snapshot exists afterwards — fresh, or a fallback
+   * to the most recent timer autosave when the server is too busy to
+   * answer a save request (a hung server is often *why* the user is
+   * restarting). Must never throw.
+   */
+  autosaveBeforeRestart: (kernelId: string) => Promise<boolean>;
+  /**
+   * Restore an unsaved session's ``.autosave`` snapshot from the preserved
+   * old working directory into the freshly started session, then delete
+   * the old directory. Same routine the welcome screen's "Recover" uses.
+   */
+  recoverUnsavedAfterRestart: (orphanDir: string) => Promise<void>;
 }
 
 /**
@@ -63,17 +108,26 @@ interface RegisterKernelIpcHandlersOptions {
  * @param kernelId       - Kernel whose working dir should be cleaned up.
  * @param kernelWorkingDirs - Map of kernel IDs to working directory paths.
  * @param crashHandlers  - Map of kernel IDs to crash handler functions.
+ * @param preserveDir    - Keep the directory on disk (still unregisters it
+ *   and the crash handler). Used by restart when the directory holds an
+ *   unsaved session's ``.autosave`` snapshot that the post-restart
+ *   recovery step reads — and, should that step never run, the directory
+ *   surfaces on the welcome screen as a recoverable session instead of
+ *   being lost.
  */
 async function cleanupKernelWorkingDir(
   projectManager: ProjectManager,
   kernelManager: KernelManager,
   kernelId: string,
   kernelWorkingDirs: Map<string, string>,
-  crashHandlers: Map<string, (id: string) => void>
+  crashHandlers: Map<string, (id: string) => void>,
+  preserveDir = false
 ): Promise<void> {
   const oldDir = kernelWorkingDirs.get(kernelId);
   if (oldDir) {
-    await projectManager.deleteWorkingDir(oldDir);
+    if (!preserveDir) {
+      await projectManager.deleteWorkingDir(oldDir);
+    }
     kernelWorkingDirs.delete(kernelId);
   }
   const handler = crashHandlers.get(kernelId);
@@ -111,6 +165,8 @@ export function registerKernelIpcHandlers(
     getDefaultPackages,
     getUvBinaryPath,
     bindActiveProjectModules,
+    autosaveBeforeRestart,
+    recoverUnsavedAfterRestart,
   } = options;
 
   /**
@@ -193,47 +249,72 @@ export function registerKernelIpcHandlers(
 
   // Forward periodic kernel-memory snapshots to the renderer. Registered once
   // for this window/manager pair (the payload carries `kernelId` so a single
-  // listener serves any number of kernels).
-  kernelManager.on("kernel:memoryRss", (kernelId: string, rssBytes: number) => {
+  // listener serves any number of kernels). Tracked so re-registration (e.g.
+  // macOS window re-creation) detaches the previous window's listener from
+  // the long-lived KernelManager instead of stacking a duplicate that pushes
+  // to a destroyed webContents.
+  removeKernelMemoryListener();
+  const memoryListener = (kernelId: string, rssBytes: number): void => {
     if (win.isDestroyed()) return;
     win.webContents.send(IPC.push.kernelMemory, {
       kernelId,
       rssBytes,
       timestamp: Date.now(),
     });
-  });
+  };
+  kernelManager.on("kernel:memoryRss", memoryListener);
+  trackedMemoryListener = { km: kernelManager, fn: memoryListener };
 
-  // Serialize kernel start/restart so concurrent calls cannot race on
-  // the shared commRouter (which causes "CommRouter detached" rejections).
+  // Serialize start/stop/restart of the Jupyter server process so concurrent
+  // calls cannot race on the shared commRouter (which causes "CommRouter
+  // detached" rejections).
   let startMutex: Promise<unknown> = Promise.resolve();
 
   /**
-   * Wait for the previous mutex-serialized operation to settle. Errors from
-   * the prior operation are logged (with the operation name) but NOT
-   * propagated, so the next operation can still run on a serialized turn.
-   * Without this log, prior failures would silently disappear via
-   * `previous.catch(() => {})`.
+   * Run ``fn`` while holding the start/stop/restart serialization lock.
+   *
+   * The queue promise is swapped in **synchronously** — before any await —
+   * so every concurrent caller observes the previous holder's promise and
+   * chains behind it. (The previous implementation awaited the old promise
+   * first and swapped afterwards; two calls arriving together both saw the
+   * same settled promise and both proceeded, defeating the serialization.)
+   * Same pattern as ``ProjectManager.runWithSaveLock``.
+   *
+   * The lock promise is resolved in ``finally`` and never rejects; the
+   * catch below only fires if a future refactor changes that, so a prior
+   * failure still can't silently vanish.
+   *
+   * @param operation - Label for the warn log (e.g. ``"kernels.start"``).
+   * @param fn - Operation to run exclusively.
+   * @returns The value returned by ``fn``.
+   * @throws Whatever ``fn`` throws — after releasing the lock.
    */
-  async function awaitPreviousMutex(operation: string): Promise<void> {
-    try {
-      await startMutex;
-    } catch (err) {
+  async function withStartLock<T>(
+    operation: string,
+    fn: () => Promise<T>,
+  ): Promise<T> {
+    const prior = startMutex;
+    let release!: () => void;
+    startMutex = new Promise<void>((r) => { release = r; });
+    await prior.catch((err) => {
       console.warn(
-        `[ipc-register-kernels] Prior kernel-mutex operation rejected before ${operation}:`,
+        `[ipc-register-kernels] Prior serialized operation rejected before ${operation}:`,
         err
       );
+    });
+    try {
+      return await fn();
+    } finally {
+      release();
     }
   }
 
-  ipcMain.handle(IPC.kernels.list, async () => {
+  handleIpc(IPC.kernels.list, async () => {
     return kernelManager.list();
   });
 
-  ipcMain.handle(IPC.kernels.start, async (_event, spec, uvContext) => {
-    await awaitPreviousMutex("kernels.start");
-    let release!: () => void;
-    startMutex = new Promise<void>((r) => { release = r; });
-    try {
+  handleIpc(IPC.kernels.start, async (_event, spec, uvContext) => {
+    return withStartLock("kernels.start", async () => {
     let requestedSpec = spec as Parameters<KernelManager["start"]>[0];
     const requestedLanguage = requestedSpec?.language ?? "python";
     const uv = uvContext as { saveDir?: string; newProject?: boolean } | undefined;
@@ -315,16 +396,11 @@ export function registerKernelIpcHandlers(
     kernelManager.on("kernel:crashed", onCrash);
 
     return kernel;
-    } finally {
-      release();
-    }
+    });
   });
 
-  ipcMain.handle(IPC.kernels.stop, async (_event, kernelId: string) => {
-    await awaitPreviousMutex("kernels.stop");
-    let release!: () => void;
-    startMutex = new Promise<void>((r) => { release = r; });
-    try {
+  handleIpc(IPC.kernels.stop, async (_event, kernelId: string) => {
+    return withStartLock("kernels.stop", async () => {
       await cleanupKernelWorkingDir(projectManager, kernelManager, kernelId, kernelWorkingDirs, crashHandlers);
       projectManager.clearCachedKernelResults();
       await kernelManager.stop(kernelId);
@@ -334,12 +410,10 @@ export function registerKernelIpcHandlers(
       commRouter.detach();
       queryRouter.detach();
       return true;
-    } finally {
-      release();
-    }
+    });
   });
 
-  ipcMain.handle(IPC.kernels.execute, async (event, kernelId, request) => {
+  handleIpc(IPC.kernels.execute, async (event, kernelId, request) => {
     const id = kernelId as string;
     const workingDir = kernelWorkingDirs.get(id);
     const transcript = workingDir ? new TranscriptWriter(workingDir) : null;
@@ -352,16 +426,30 @@ export function registerKernelIpcHandlers(
     );
   });
 
-  ipcMain.handle(IPC.kernels.interrupt, async (_event, kernelId: string) => {
+  handleIpc(IPC.kernels.interrupt, async (_event, kernelId: string) => {
     await kernelManager.interrupt(kernelId);
     return true;
   });
 
-  ipcMain.handle(IPC.kernels.restart, async (_event, kernelId: string) => {
-    await awaitPreviousMutex("kernels.restart");
-    let release!: () => void;
-    startMutex = new Promise<void>((r) => { release = r; });
+  handleIpc(IPC.kernels.restart, async (_event, kernelId: string) => {
+    return withStartLock("kernels.restart", async () => {
+    // Snapshot the tree while the old server is still alive so a restart
+    // never loses in-memory work — for saved projects the snapshot lands
+    // in <projectDir>/.autosave and is restored by the reload below; for
+    // unsaved sessions it lands in <workingDir>/.autosave and is restored
+    // via the same routine the welcome screen's "Recover" uses.
+    let hasSnapshot = false;
     try {
+      hasSnapshot = await autosaveBeforeRestart(kernelId);
+    } catch (err) {
+      console.warn("[ipc-register-kernels] pre-restart autosave failed:", err);
+    }
+    const projectDirBeforeRestart = getActiveProjectDir();
+    const oldWorkingDir = kernelWorkingDirs.get(kernelId);
+    // Unsaved session with a snapshot: keep the old working dir on disk
+    // through the teardown — the snapshot lives inside it.
+    const preserveOldDir = !projectDirBeforeRestart && hasSnapshot && !!oldWorkingDir;
+
     // Restart preserves activeProjectDir — only reset kernel-scoped state.
     resetKernelState();
 
@@ -399,7 +487,14 @@ export function registerKernelIpcHandlers(
         }
       }
 
-      await cleanupKernelWorkingDir(projectManager, kernelManager, kernelId, kernelWorkingDirs, crashHandlers);
+      await cleanupKernelWorkingDir(
+        projectManager,
+        kernelManager,
+        kernelId,
+        kernelWorkingDirs,
+        crashHandlers,
+        preserveOldDir
+      );
       await kernelManager.stop(kernelId);
 
       let preCreatedWorkingDir: string | undefined;
@@ -439,46 +534,75 @@ export function registerKernelIpcHandlers(
     const restarted = await doRestart();
     setActiveKernelId(restarted.id);
 
-    // If a project was active, auto-reload it into the new kernel.
+    // If a project was active, auto-reload it into the new kernel — from
+    // the pre-restart .autosave snapshot when one exists, so unsaved
+    // changes survive the restart (same overlay + tree-index override
+    // recipe as the project-open recovery path in ipc-register-project).
     const activeProjectDir = getActiveProjectDir();
     if (activeProjectDir) {
       win.webContents.send(IPC.push.projectReloading, { status: "reloading" });
       try {
+        const autosaveDir = autosaveDirFor(activeProjectDir);
+        const restoreFromAutosave =
+          hasSnapshot &&
+          (await ProjectManager.checkForAutosave(activeProjectDir)).exists;
         const newWorkingDir = kernelWorkingDirs.get(restarted.id);
         if (newWorkingDir) {
           await copyFilesForLoad(activeProjectDir, newWorkingDir);
+          if (restoreFromAutosave) {
+            await overlayAutosaveTreeFiles(autosaveDir, newWorkingDir);
+          }
         }
-        await projectManager.load(activeProjectDir);
+        await projectManager.load(
+          activeProjectDir,
+          restoreFromAutosave
+            ? { treeIndexDir: autosaveDir, codeCellsDir: autosaveDir }
+            : undefined
+        );
         await setupModuleNamespaces(restarted.id);
       } finally {
         win.webContents.send(IPC.push.projectReloading, { status: "ready" });
       }
     } else {
       await setupModuleNamespaces(restarted.id);
+      // Unsaved session: restore the preserved snapshot into the new
+      // session. Failure is non-fatal — the old dir stays on disk and the
+      // welcome screen offers it as a recoverable session next launch.
+      if (preserveOldDir && oldWorkingDir) {
+        win.webContents.send(IPC.push.projectReloading, { status: "reloading" });
+        try {
+          await recoverUnsavedAfterRestart(oldWorkingDir);
+        } catch (err) {
+          console.warn(
+            "[ipc-register-kernels] post-restart recovery failed; the old session remains recoverable from the welcome screen:",
+            err
+          );
+        } finally {
+          win.webContents.send(IPC.push.projectReloading, { status: "ready" });
+        }
+      }
     }
     await bindActiveProjectModules(restarted.id);
 
     return restarted;
-    } finally {
-      release();
-    }
+    });
   });
 
-  ipcMain.handle(
+  handleIpc(
     IPC.kernels.complete,
     async (_event, kernelId: string, code: string, cursorPos: number) => {
       return kernelManager.complete(kernelId, code, cursorPos);
     }
   );
 
-  ipcMain.handle(
+  handleIpc(
     IPC.kernels.inspect,
     async (_event, kernelId: string, code: string, cursorPos: number) => {
       return kernelManager.inspect(kernelId, code, cursorPos);
     }
   );
 
-  ipcMain.handle(
+  handleIpc(
     IPC.kernels.validate,
     async (_event, executablePath: string, language: "python" | "julia") => {
       if (!executablePath.trim()) {

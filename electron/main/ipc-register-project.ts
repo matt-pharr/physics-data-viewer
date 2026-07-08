@@ -14,7 +14,8 @@
 
 import * as fs from "fs/promises";
 import * as path from "path";
-import { ipcMain, type BrowserWindow } from "electron";
+import { type BrowserWindow } from "electron";
+import { handleIpc } from "./ipc-registry";
 
 import type { CommRouter } from "./comm-router";
 import type { CodeCellData } from "./ipc";
@@ -263,7 +264,7 @@ export function registerProjectIpcHandlers(
   // explicit save.
   let saveSeq = 0;
 
-  ipcMain.handle(
+  handleIpc(
     IPC.project.save,
     async (_event, saveDir: string, codeCells: unknown, projectName?: string) => {
       assertCodeCellData(codeCells);
@@ -405,7 +406,7 @@ export function registerProjectIpcHandlers(
     }
   );
 
-  ipcMain.handle(IPC.project.load, async (_event, saveDir: string, options?: { restoreFromAutosave?: boolean }) => {
+  handleIpc(IPC.project.load, async (_event, saveDir: string, options?: { restoreFromAutosave?: boolean }) => {
     const restoreFromAutosave = options?.restoreFromAutosave ?? false;
     const autosaveDir = path.join(saveDir, ".autosave");
 
@@ -536,7 +537,7 @@ export function registerProjectIpcHandlers(
     return path.join(workingDir, "code-cells.json");
   };
 
-  ipcMain.handle(IPC.codeCells.load, async (): Promise<CodeCellData | null> => {
+  handleIpc(IPC.codeCells.load, async (): Promise<CodeCellData | null> => {
     const filePath = codeCellsFilePath();
     if (!filePath) return null;
     try {
@@ -550,7 +551,7 @@ export function registerProjectIpcHandlers(
     }
   });
 
-  ipcMain.handle(IPC.codeCells.save, async (_event, data: unknown): Promise<boolean> => {
+  handleIpc(IPC.codeCells.save, async (_event, data: unknown): Promise<boolean> => {
     assertCodeCellData(data);
     const filePath = codeCellsFilePath();
     if (!filePath) return false;
@@ -558,7 +559,7 @@ export function registerProjectIpcHandlers(
     return true;
   });
 
-  ipcMain.handle(IPC.project.new, async () => {
+  handleIpc(IPC.project.new, async () => {
     setActiveProjectDir(null);
     setPendingModuleImports([]);
     setPendingModuleSettings({});
@@ -566,7 +567,7 @@ export function registerProjectIpcHandlers(
     return true;
   });
 
-  ipcMain.handle(
+  handleIpc(
     IPC.project.peekLanguages,
     async (_event, paths: string[]): Promise<Record<string, "python" | "julia">> => {
       const result: Record<string, "python" | "julia"> = {};
@@ -584,7 +585,7 @@ export function registerProjectIpcHandlers(
     }
   );
 
-  ipcMain.handle(
+  handleIpc(
     IPC.project.peekManifest,
     async (_event, dir: string) => {
       try {

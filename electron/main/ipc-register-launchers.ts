@@ -14,7 +14,7 @@
 
 import { spawn } from "child_process";
 
-import { ipcMain } from "electron";
+import { handleIpc } from "./ipc-registry";
 
 import { buildAgentInvocation } from "./agent-launcher";
 import type { PDVConfig } from "./config";
@@ -74,7 +74,7 @@ export function registerLaunchersIpcHandlers(
     getMcpStatus,
   } = options;
 
-  ipcMain.handle(
+  handleIpc(
     IPC.launchers.openAgent,
     async (): Promise<ScriptOperationResult> => {
       // Under E2E we never spawn an external terminal — the spawn is detached
@@ -116,7 +116,7 @@ export function registerLaunchersIpcHandlers(
     },
   );
 
-  ipcMain.handle(
+  handleIpc(
     IPC.launchers.openWorkingDir,
     async (): Promise<ScriptOperationResult> => {
       if (process.env.PDV_E2E === "1") {
@@ -150,7 +150,7 @@ export function registerLaunchersIpcHandlers(
     },
   );
 
-  ipcMain.handle(
+  handleIpc(
     IPC.launchers.checkAvailability,
     async (_event, check: LauncherCheck): Promise<boolean> => {
       try {

@@ -237,7 +237,7 @@ export async function createWindow(
   // immediately confirm (clean), then calls `confirmClose`, which sets
   // `allowClose=true` and re-invokes `app.quit()`. On the second pass we fall
   // through the `allowClose` gate and the quit proceeds normally.
-  app.on("before-quit", (event) => {
+  const beforeQuitGuard = (event: Electron.Event): void => {
     if (skipCloseGuard || allowClose) {
       isQuittingGlobal = true;
       quitRequestPending = false;
@@ -251,6 +251,14 @@ export async function createWindow(
     event.preventDefault();
     quitRequestPending = true;
     win.webContents.send(IPC.push.requestClose);
+  };
+  app.on("before-quit", beforeQuitGuard);
+  // The guard belongs to this window. Detach it when the window goes away:
+  // otherwise every macOS close → activate → re-create cycle stacks another
+  // handler whose destroyed-window branch flips isQuittingGlobal before the
+  // live window's guard has decided whether to block the quit.
+  win.on("closed", () => {
+    app.removeListener("before-quit", beforeQuitGuard);
   });
 
   // Reset in-memory project state on every renderer load/reload so that stale

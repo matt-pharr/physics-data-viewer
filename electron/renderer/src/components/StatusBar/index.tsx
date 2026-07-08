@@ -21,6 +21,9 @@ interface StatusBarProps {
   lastDuration: number | null;
   progress: ProgressPayload | null;
   onRuntimeClick: () => void;
+  /** Restart the active session. Rendered only while connected; the tree
+   *  is snapshotted before teardown and restored afterwards. */
+  onRestartSession?: () => void;
   lastChecksum: string | null;
   checksumMismatch: boolean;
   savedPdvVersion: string | null;
@@ -64,6 +67,7 @@ export const StatusBar: React.FC<StatusBarProps> = ({
   lastDuration,
   progress,
   onRuntimeClick,
+  onRestartSession,
   lastChecksum,
   checksumMismatch,
   savedPdvVersion,
@@ -181,6 +185,16 @@ export const StatusBar: React.FC<StatusBarProps> = ({
         <span className="status-item">
           Last: {lastDuration !== null ? `${Math.round(lastDuration)}ms` : '--'}
         </span>
+        {kernelStatus === 'ready' && onRestartSession && (
+          <span
+            className="status-item status-clickable"
+            onClick={onRestartSession}
+            title="Restart the session — the tree is snapshotted and restored automatically"
+            data-testid="restart-session"
+          >
+            ⟳ Restart
+          </span>
+        )}
         <span
           className={`status-item ${kernelStatus === 'ready' ? 'status-connected' : kernelStatus === 'error' ? 'status-error' : ''}`}
           data-testid="kernel-status"

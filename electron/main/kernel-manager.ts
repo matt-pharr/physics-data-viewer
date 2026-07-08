@@ -342,6 +342,14 @@ async function loadZmq(): Promise<typeof import("zeromq")> {
   return import("zeromq");
 }
 
+/**
+ * ``receiveTimeout`` (ms) for the query REQ socket, so ``receive()``
+ * throws instead of blocking forever if the kernel dies (or stalls)
+ * mid-request. Shared by socket creation and by
+ * ``recreateQuerySocket`` so the replacement socket always matches.
+ */
+const QUERY_RECEIVE_TIMEOUT_MS = 10_000;
+
 // ---------------------------------------------------------------------------
 // KernelManager
 // ---------------------------------------------------------------------------
@@ -481,7 +489,8 @@ export class KernelManager extends EventEmitter {
     querySocket.linger = 0;
     // receiveTimeout prevents receive() from blocking forever if the kernel
     // dies mid-request.  The sendQueryRequest queue would deadlock otherwise.
-    (querySocket as unknown as { receiveTimeout: number }).receiveTimeout = 10_000;
+    (querySocket as unknown as { receiveTimeout: number }).receiveTimeout =
+      QUERY_RECEIVE_TIMEOUT_MS;
 
     const base = `${connectionInfo.transport}://${connectionInfo.ip}`;
     await shellSocket.connect(`${base}:${shellPort}`);
@@ -1107,11 +1116,57 @@ export class KernelManager extends EventEmitter {
           const [reply] = await managed.querySocket.receive();
           resolve(JSON.parse(reply.toString("utf-8")));
         } catch (err) {
+          // A failed send/receive (typically the receive timeout) leaves
+          // the REQ socket with an outstanding request; REQ enforces a
+          // strict send → receive alternation, so every later send() on
+          // it fails immediately. Replace the socket so one timed-out
+          // query doesn't wedge the query channel for the rest of the
+          // session. This runs inside the serialized queue, so nothing
+          // else can touch the socket mid-swap.
+          if (!managed.shuttingDown) {
+            await this.recreateQuerySocket(managed);
+          }
           reject(err);
         }
       });
     });
     return result;
+  }
+
+  /**
+   * Replace a kernel's query socket with a freshly connected one.
+   *
+   * Called from the serialized query queue after a send/receive failure
+   * (see ``sendQueryRequest``). The old socket is closed (``linger = 0``,
+   * so this never blocks) and a new REQ socket is connected to the same
+   * endpoint with the same options.
+   *
+   * @param managed - Managed kernel whose query socket to replace.
+   * @returns Nothing.
+   * @throws Never — replacement failures are logged and the next query
+   *   surfaces any persistent connection problem itself.
+   */
+  private async recreateQuerySocket(managed: ManagedKernel): Promise<void> {
+    try {
+      managed.querySocket.close();
+    } catch {
+      /* already closed */
+    }
+    try {
+      const zmq = await loadZmq();
+      const fresh = new zmq.Request();
+      fresh.linger = 0;
+      (fresh as unknown as { receiveTimeout: number }).receiveTimeout =
+        QUERY_RECEIVE_TIMEOUT_MS;
+      const ci = managed.connectionInfo;
+      await fresh.connect(`${ci.transport}://${ci.ip}:${ci.query_port}`);
+      managed.querySocket = fresh;
+    } catch (err) {
+      console.warn(
+        "[KernelManager] Failed to recreate query socket after error:",
+        err,
+      );
+    }
   }
 
   // -------------------------------------------------------------------------

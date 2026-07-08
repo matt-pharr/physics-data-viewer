@@ -10,7 +10,8 @@
  * - Push forwarding between comm router and renderer.
  */
 
-import { BrowserWindow as ElectronBrowserWindow, app, dialog, ipcMain, shell, type BrowserWindow } from "electron";
+import { BrowserWindow as ElectronBrowserWindow, app, dialog, shell, type BrowserWindow } from "electron";
+import { handleIpc } from "./ipc-registry";
 import * as fs from "fs/promises";
 import * as fsSync from "fs";
 import * as path from "path";
@@ -126,24 +127,27 @@ export function registerAppStateIpcHandlers(
     }
     win.webContents.send(IPC.push.chromeStateChanged, buildWindowChromeInfo(win));
   };
+  // Deliberately untracked: these attach to the BrowserWindow itself and are
+  // released when the window is destroyed, unlike listeners on long-lived
+  // objects (app, KernelManager) which must be detached on re-registration.
   win.on("maximize", pushWindowChromeState);
   win.on("unmaximize", pushWindowChromeState);
   win.on("enter-full-screen", pushWindowChromeState);
   win.on("leave-full-screen", pushWindowChromeState);
 
-  ipcMain.handle(IPC.config.get, async () => readConfig(configStore));
+  handleIpc(IPC.config.get, async () => readConfig(configStore));
 
-  ipcMain.handle(IPC.about.getVersion, () => app.getVersion());
+  handleIpc(IPC.about.getVersion, () => app.getVersion());
 
-  ipcMain.handle(IPC.about.openRepoPage, async () => {
+  handleIpc(IPC.about.openRepoPage, async () => {
     await shell.openExternal("https://github.com/matt-pharr/physics-data-viewer");
   });
 
-  ipcMain.handle(IPC.about.openIssuesPage, async () => {
+  handleIpc(IPC.about.openIssuesPage, async () => {
     await shell.openExternal("https://github.com/matt-pharr/physics-data-viewer/issues");
   });
 
-  ipcMain.handle(IPC.about.openDocsPage, async () => {
+  handleIpc(IPC.about.openDocsPage, async () => {
     // Version-pinned docs URL. `app.getVersion()` reads the running
     // build's package.json version, so users always see the docs that
     // match the binary they're running — even if they're on an older
@@ -154,13 +158,13 @@ export function registerAppStateIpcHandlers(
 
   // Auto-updater
   initAutoUpdater(win, configStore);
-  ipcMain.handle(IPC.updater.checkForUpdates, async () => { await checkForUpdates(configStore); });
-  ipcMain.handle(IPC.updater.downloadUpdate, async () => { await downloadUpdate(); });
-  ipcMain.handle(IPC.updater.installUpdate, async () => { installUpdate(); });
-  ipcMain.handle(IPC.updater.openReleasesPage, async () => { await openReleasesPage(); });
-  ipcMain.handle(IPC.updater.getStatus, async () => getUpdateStatus());
+  handleIpc(IPC.updater.checkForUpdates, async () => { await checkForUpdates(configStore); });
+  handleIpc(IPC.updater.downloadUpdate, async () => { await downloadUpdate(); });
+  handleIpc(IPC.updater.installUpdate, async () => { installUpdate(); });
+  handleIpc(IPC.updater.openReleasesPage, async () => { await openReleasesPage(); });
+  handleIpc(IPC.updater.getStatus, async () => getUpdateStatus());
 
-  ipcMain.handle(IPC.config.set, async (_event, updates: Partial<PDVConfig>) => {
+  handleIpc(IPC.config.set, async (_event, updates: Partial<PDVConfig>) => {
     const prev = readConfig(configStore);
     const merged: PDVConfig = { ...prev, ...updates };
     for (const key of Object.keys(updates) as Array<keyof PDVConfig>) {
@@ -188,7 +192,7 @@ export function registerAppStateIpcHandlers(
     return next;
   });
 
-  ipcMain.handle(IPC.window.setBackgroundColor, (event, color: string) => {
+  handleIpc(IPC.window.setBackgroundColor, (event, color: string) => {
     // Sync the BrowserWindow's native background to the active theme's
     // bg-primary so live-resize gestures don't expose OS-default white.
     // Look up the source window so multi-window setups (gui-editor,
@@ -198,9 +202,9 @@ export function registerAppStateIpcHandlers(
     sourceWin?.setBackgroundColor(color);
   });
 
-  ipcMain.handle(IPC.themes.get, async () => savedThemes);
+  handleIpc(IPC.themes.get, async () => savedThemes);
 
-  ipcMain.handle(IPC.themes.save, async (_event, theme: Theme) => {
+  handleIpc(IPC.themes.save, async (_event, theme: Theme) => {
     const existing = savedThemes.findIndex((entry) => entry.name === theme.name);
     if (existing >= 0) {
       savedThemes[existing] = theme;
@@ -213,35 +217,35 @@ export function registerAppStateIpcHandlers(
     return true;
   });
 
-  ipcMain.handle(IPC.themes.openDir, async () => {
+  handleIpc(IPC.themes.openDir, async () => {
     await fs.mkdir(themesDir, { recursive: true });
     return shell.openPath(themesDir);
   });
 
-  ipcMain.handle(IPC.menu.updateRecentProjects, async (_event, paths: string[]) => {
+  handleIpc(IPC.menu.updateRecentProjects, async (_event, paths: string[]) => {
     updateRecentProjectsMenu(Array.isArray(paths) ? paths : []);
     return true;
   });
 
-  ipcMain.handle(IPC.menu.updateEnabled, async (_event, state: Record<string, boolean>) => {
+  handleIpc(IPC.menu.updateEnabled, async (_event, state: Record<string, boolean>) => {
     updateMenuEnabled(state);
     return true;
   });
 
-  ipcMain.handle(IPC.menu.getModel, async () => getTopLevelMenuModel());
+  handleIpc(IPC.menu.getModel, async () => getTopLevelMenuModel());
 
-  ipcMain.handle(IPC.menu.popup, async (_event, menuId: "file" | "edit" | "view" | "window", x: number, y: number) =>
+  handleIpc(IPC.menu.popup, async (_event, menuId: "file" | "edit" | "view" | "window", x: number, y: number) =>
     popupTopLevelMenu(menuId, x, y)
   );
 
-  ipcMain.handle(IPC.chrome.getInfo, async () => buildWindowChromeInfo(win));
+  handleIpc(IPC.chrome.getInfo, async () => buildWindowChromeInfo(win));
 
-  ipcMain.handle(IPC.chrome.minimize, async () => {
+  handleIpc(IPC.chrome.minimize, async () => {
     win.minimize();
     return true;
   });
 
-  ipcMain.handle(IPC.chrome.toggleMaximize, async () => {
+  handleIpc(IPC.chrome.toggleMaximize, async () => {
     if (win.isMaximized()) {
       win.unmaximize();
     } else {
@@ -250,7 +254,7 @@ export function registerAppStateIpcHandlers(
     return win.isMaximized();
   });
 
-  ipcMain.handle(IPC.chrome.close, async () => {
+  handleIpc(IPC.chrome.close, async () => {
     // Route through the same close-confirmation flow as the OS-level close
     // (`win.on('close')` in app.ts) so the title-bar X also prompts about
     // unsaved changes. The renderer will call `IPC.app.confirmClose` once
@@ -265,13 +269,13 @@ export function registerAppStateIpcHandlers(
     return true;
   });
 
-  ipcMain.handle(IPC.app.setDocumentEdited, async (_event, edited: boolean) => {
+  handleIpc(IPC.app.setDocumentEdited, async (_event, edited: boolean) => {
     if (!win.isDestroyed()) {
       win.setDocumentEdited(Boolean(edited));
     }
   });
 
-  ipcMain.handle(IPC.app.confirmClose, async () => {
+  handleIpc(IPC.app.confirmClose, async () => {
     setAllowClose(true);
     // During a real quit (Cmd+Q, autoUpdater restart, OS logout), call
     // app.quit() instead of win.close(). app.quit() will close the window
@@ -293,7 +297,7 @@ export function registerAppStateIpcHandlers(
     }
   });
 
-  ipcMain.handle(IPC.files.pickExecutable, async () => {
+  handleIpc(IPC.files.pickExecutable, async () => {
     const result = await dialog.showOpenDialog({ properties: ["openFile"] });
     if (result.canceled || result.filePaths.length === 0) {
       return null;
@@ -301,7 +305,7 @@ export function registerAppStateIpcHandlers(
     return result.filePaths[0] ?? null;
   });
 
-  ipcMain.handle(IPC.files.pickFile, async () => {
+  handleIpc(IPC.files.pickFile, async () => {
     const result = await dialog.showOpenDialog({ properties: ["openFile"] });
     if (result.canceled || result.filePaths.length === 0) {
       return null;
@@ -309,7 +313,7 @@ export function registerAppStateIpcHandlers(
     return result.filePaths[0] ?? null;
   });
 
-  ipcMain.handle(IPC.files.pickDirectory, async (_event, defaultPath?: string) => {
+  handleIpc(IPC.files.pickDirectory, async (_event, defaultPath?: string) => {
     const result = await dialog.showOpenDialog({
       properties: ["openDirectory", "createDirectory"],
       defaultPath: defaultPath || undefined,

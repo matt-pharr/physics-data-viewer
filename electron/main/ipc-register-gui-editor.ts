@@ -11,8 +11,9 @@
  * - GUI manifest validation or editing logic.
  */
 
-import { ipcMain } from "electron";
+import { handleIpc } from "./ipc-registry";
 import * as fs from "fs/promises";
+import { atomicWriteFile } from "./atomic-write";
 
 import {
   IPC,
@@ -70,7 +71,7 @@ export function registerGuiEditorIpcHandlers(
 ): void {
   const { guiEditorWindowManager, guiViewerWindowManager, commRouter } = options;
 
-  ipcMain.handle(
+  handleIpc(
     IPC.guiEditor.open,
     async (
       _event,
@@ -88,7 +89,7 @@ export function registerGuiEditorIpcHandlers(
     }
   );
 
-  ipcMain.handle(
+  handleIpc(
     IPC.guiEditor.openViewer,
     async (
       _event,
@@ -106,7 +107,7 @@ export function registerGuiEditorIpcHandlers(
     }
   );
 
-  ipcMain.handle(
+  handleIpc(
     IPC.guiEditor.context,
     async (event): Promise<GuiEditorContext | null> => {
       return guiEditorWindowManager.getContextForSender(event.sender.id)
@@ -114,7 +115,7 @@ export function registerGuiEditorIpcHandlers(
     }
   );
 
-  ipcMain.handle(
+  handleIpc(
     IPC.guiEditor.read,
     async (_event, treePath: string): Promise<GuiEditorReadResult> => {
       try {
@@ -131,13 +132,14 @@ export function registerGuiEditorIpcHandlers(
     }
   );
 
-  ipcMain.handle(
+  handleIpc(
     IPC.guiEditor.save,
     async (_event, request: GuiEditorSaveRequest): Promise<GuiEditorSaveResult> => {
       try {
         const filePath = await resolveGuiFilePath(commRouter, request.treePath);
         const json = JSON.stringify(request.manifest, null, 2) + "\n";
-        await fs.writeFile(filePath, json, "utf-8");
+        // Atomic: a crash mid-save must not tear the .gui.json manifest.
+        await atomicWriteFile(filePath, json);
         return { success: true };
       } catch (error) {
         return {
