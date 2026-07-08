@@ -140,12 +140,18 @@ export async function copyFilesForLoad(
   return failedPaths;
 }
 
-/** uv environment files that travel between the save dir and working dir. */
-const ENV_FILES = ["pyproject.toml", "uv.lock"];
+/**
+ * uv environment files that travel between the save dir and working dir.
+ * `.python-version` is uv's native interpreter pin, written at project
+ * creation from the New Project dialog's version choice; carrying it here
+ * makes the pinned version survive save → open round-trips.
+ */
+const ENV_FILES = ["pyproject.toml", "uv.lock", ".python-version"];
 
 /**
- * Copy uv environment files (`pyproject.toml`, `uv.lock`) from the project
- * save directory into the kernel working directory.
+ * Copy uv environment files (`pyproject.toml`, `uv.lock`,
+ * `.python-version`) from the project save directory into the kernel
+ * working directory.
  *
  * Called for `mode: "uv"` projects before `uv sync` so the working directory
  * is a self-contained uv project (ARCHITECTURE.md §10.5.3, §10.5.9). Files
@@ -173,8 +179,9 @@ export async function copyEnvFilesForLoad(
 }
 
 /**
- * Copy uv environment files (`pyproject.toml`, `uv.lock`) from the kernel
- * working directory back into the project save directory (§10.5.10).
+ * Copy uv environment files (`pyproject.toml`, `uv.lock`,
+ * `.python-version`) from the kernel working directory back into the
+ * project save directory (§10.5.10).
  *
  * Only files present in the working directory are copied — a project whose
  * `uv sync` failed may have no `uv.lock`, and a missing working-dir file must

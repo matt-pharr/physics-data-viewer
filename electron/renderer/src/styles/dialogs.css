@@ -1452,3 +1452,142 @@
   color: var(--text-primary);
   line-height: 1.5;
 }
+
+/* ===== NEW PROJECT DIALOG ===== */
+
+.new-project-dialog {
+  background-color: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  width: 560px;
+  max-width: 90%;
+  max-height: 85vh;
+  display: flex;
+  flex-direction: column;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+}
+
+.new-project-dialog .dialog-body {
+  overflow-y: auto;
+}
+
+.new-project-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-primary);
+  margin-bottom: 6px;
+}
+
+.new-project-field input[type="text"],
+.new-project-field select {
+  padding: 8px 12px;
+  background-color: var(--bg-primary);
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  color: var(--text-primary);
+  font-size: 14px;
+}
+
+.new-project-field input[type="text"]:focus,
+.new-project-field select:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.new-project-hint {
+  font-size: 12px;
+  color: var(--text-secondary);
+  margin-bottom: 16px;
+  line-height: 1.4;
+}
+
+.new-project-hint code {
+  font-family: var(--font-mono);
+  background: var(--bg-tertiary);
+  padding: 1px 4px;
+  border-radius: 3px;
+}
+
+.new-project-advanced-toggle {
+  background: none;
+  border: none;
+  padding: 4px 0;
+  font-size: 13px;
+  color: var(--text-secondary);
+  cursor: pointer;
+  text-align: left;
+}
+
+.new-project-advanced-toggle:hover {
+  color: var(--text-primary);
+}
+
+.new-project-advanced {
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid var(--border-color);
+}
+
+/* ===== PROJECT ENVIRONMENT TAB (settings) ===== */
+
+.settings-env-header {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  padding-bottom: 12px;
+  margin-bottom: 12px;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.settings-env-badge {
+  font-size: 11px;
+  font-weight: 600;
+  padding: 3px 8px;
+  border-radius: 10px;
+  border: 1px solid var(--border-color);
+}
+
+.settings-env-badge-uv {
+  color: var(--text-on-accent);
+  background: var(--accent);
+  border-color: var(--accent);
+}
+
+.settings-env-badge-shared {
+  color: var(--text-secondary);
+  background: var(--bg-tertiary);
+}
+
+.settings-env-version {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.settings-env-interpreter {
+  flex-basis: 100%;
+  font-size: 12px;
+  color: var(--text-secondary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.settings-env-interpreter code {
+  font-family: var(--font-mono);
+}
+
+.settings-runtime-note {
+  font-size: 12px;
+  color: var(--text-secondary);
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  padding: 8px 12px;
+  margin: 0 0 12px;
+  line-height: 1.4;
+}

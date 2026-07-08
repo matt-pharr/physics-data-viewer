@@ -22,6 +22,8 @@ import { statSync } from "fs";
 import * as path from "path";
 import { promisify } from "util";
 
+import { atomicWriteJson } from "./atomic-write";
+
 import type {
   ModuleDescriptor,
   ModuleHealthWarning,
@@ -1063,9 +1065,6 @@ export class ModuleManager {
       const moduleDir = path.join(this.packagesRoot, manifest.id);
       const previous = index.modules[manifest.id];
 
-      await this.replaceDirectory(stagingDir, moduleDir);
-      didMoveStaging = true;
-
       const descriptor: ModuleDescriptor = {
         id: manifest.id,
         name: manifest.name,
@@ -1078,6 +1077,15 @@ export class ModuleManager {
         upstream: manifest.upstream ?? normalizedSource.location,
       };
       if (previous) {
+        // Duplicate install: report the update status WITHOUT touching
+        // the installed files — the staged clone is discarded by the
+        // `finally` below. (This used to replaceDirectory first, so a
+        // reinstall overwrote the module on disk even while returning
+        // `up_to_date` and keeping the old index entry: files and index
+        // could disagree. The local-source path already returned before
+        // touching moduleDir; this now matches it and `install()`'s
+        // documented duplicate-install contract. A user-confirmed
+        // update goes through `update()`, which replaces deliberately.)
         const status = this.duplicateInstallStatus(previous, descriptor);
         this.recordUpdateCheck(index, descriptor, status);
         await this.writeIndex(index);
@@ -1089,6 +1097,9 @@ export class ModuleManager {
           currentRevision: previous.revision,
         };
       }
+
+      await this.replaceDirectory(stagingDir, moduleDir);
+      didMoveStaging = true;
       this.upsertIndex(index, descriptor);
       await this.writeIndex(index);
       return {
@@ -1167,7 +1178,8 @@ export class ModuleManager {
    * @param index - Index payload to write.
    */
   private async writeIndex(index: ModuleStoreIndex): Promise<void> {
-    await fs.writeFile(this.indexPath, JSON.stringify(index, null, 2), "utf8");
+    // Atomic: a torn module-index.json would orphan every installed module.
+    await atomicWriteJson(this.indexPath, index);
   }
 
   /**

@@ -13,6 +13,10 @@
 
 import { contextBridge, ipcRenderer } from "electron";
 import { IPC, type PDVApi } from "./main/ipc";
+import {
+  DEFAULT_PYTHON_VERSION,
+  SUPPORTED_PYTHON_VERSIONS,
+} from "./main/python-versions";
 
 /**
  * Register an IPC push listener and return an unsubscribe callback.
@@ -125,6 +129,7 @@ const api: PDVApi = {
     addPackage: (specs) => ipcRenderer.invoke(IPC.environment.addPackage, specs),
     removePackage: (names) => ipcRenderer.invoke(IPC.environment.removePackage, names),
     upgradePackage: (names) => ipcRenderer.invoke(IPC.environment.upgradePackage, names),
+    activeInfo: () => ipcRenderer.invoke(IPC.environment.activeInfo),
   },
   modules: {
     listInstalled: () => ipcRenderer.invoke(IPC.modules.listInstalled),
@@ -243,6 +248,9 @@ const api: PDVApi = {
     // for the life of the process, so there is no point routing it through an
     // IPC channel — renderers read this synchronously from `window.pdv`.
     platform: process.platform,
+    // Compile-time constants from python-versions.ts; same rationale.
+    supportedPythonVersions: SUPPORTED_PYTHON_VERSIONS,
+    defaultPythonVersion: DEFAULT_PYTHON_VERSION,
   },
   launchers: {
     openAgent: () => ipcRenderer.invoke(IPC.launchers.openAgent),

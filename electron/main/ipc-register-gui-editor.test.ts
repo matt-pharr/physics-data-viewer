@@ -23,6 +23,12 @@ const fsMocks = vi.hoisted(() => ({
   writeFile: vi.fn(async (_path: string, _contents: string, _encoding?: string) => undefined),
 }));
 
+// `save` delegates to atomicWriteFile (tmp + rename) so a crash can't
+// tear the .gui.json manifest; mock at that seam rather than raw fs.
+const atomicWriteMocks = vi.hoisted(() => ({
+  atomicWriteFile: vi.fn(async (_path: string, _contents: string | Buffer) => undefined),
+}));
+
 vi.mock("electron", () => ({
   ipcMain: {
     handle: ipcRegistry.ipcHandle,
@@ -33,6 +39,10 @@ vi.mock("electron", () => ({
 vi.mock("fs/promises", () => ({
   readFile: fsMocks.readFile,
   writeFile: fsMocks.writeFile,
+}));
+
+vi.mock("./atomic-write", () => ({
+  atomicWriteFile: atomicWriteMocks.atomicWriteFile,
 }));
 
 import { IPC } from "./ipc";
@@ -182,10 +192,9 @@ describe("guiEditor:save", () => {
       manifest,
     });
 
-    expect(fsMocks.writeFile).toHaveBeenCalledTimes(1);
-    const [filePath, contents, encoding] = fsMocks.writeFile.mock.calls[0];
+    expect(atomicWriteMocks.atomicWriteFile).toHaveBeenCalledTimes(1);
+    const [filePath, contents] = atomicWriteMocks.atomicWriteFile.mock.calls[0];
     expect(filePath).toBe("/tmp/working/ui.gui.json");
-    expect(encoding).toBe("utf-8");
     expect(contents).toBe(JSON.stringify(manifest, null, 2) + "\n");
     expect(result).toEqual({ success: true });
   });
@@ -195,7 +204,7 @@ describe("guiEditor:save", () => {
     commRouter.request.mockResolvedValueOnce(
       makeOkResponse({ file_path: "/tmp/working/ui.gui.json" }),
     );
-    fsMocks.writeFile.mockRejectedValueOnce(new Error("EACCES"));
+    atomicWriteMocks.atomicWriteFile.mockRejectedValueOnce(new Error("EACCES"));
     setup({ commRouter });
 
     const result = (await getHandler(IPC.guiEditor.save)({}, {

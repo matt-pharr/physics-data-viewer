@@ -103,6 +103,7 @@ function buildBase() {
       addPackage: stub<PDVApi["environment"]["addPackage"]>(async () => ({ success: true, output: "" })),
       removePackage: stub<PDVApi["environment"]["removePackage"]>(async () => ({ success: true, output: "" })),
       upgradePackage: stub<PDVApi["environment"]["upgradePackage"]>(async () => ({ success: true, output: "" })),
+      activeInfo: stub<PDVApi["environment"]["activeInfo"]>(async () => null),
     },
     modules: {
       listInstalled: stub<PDVApi["modules"]["listInstalled"]>(async () => []),
@@ -218,6 +219,8 @@ function buildBase() {
       // Tests run under Node (process.platform is set); mirror it so platform-
       // sensitive renderer code under test sees the same value as in prod.
       platform: process.platform,
+      supportedPythonVersions: ["3.10", "3.11", "3.12", "3.13", "3.14"],
+      defaultPythonVersion: "3.13",
     },
     launchers: {
       openAgent: stub<PDVApi["launchers"]["openAgent"]>(async () => ({ success: true })),

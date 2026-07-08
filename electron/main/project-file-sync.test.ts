@@ -148,4 +148,20 @@ describe("copyEnvFilesForLoad() / copyEnvFilesForSave()", () => {
     expect(copied).toEqual(["pyproject.toml"]);
     expect(await fs.readFile(path.join(saveDir, "uv.lock"), "utf8")).toBe("good-lock\n");
   });
+
+  it("round-trips the .python-version pin through save and open (§10.5.8)", async () => {
+    await fs.writeFile(path.join(workingDir, "pyproject.toml"), "[project]\n");
+    await fs.writeFile(path.join(workingDir, ".python-version"), "3.12\n");
+
+    const savedNames = await copyEnvFilesForSave(workingDir, saveDir);
+    expect(savedNames).toContain(".python-version");
+
+    const otherWorkingDir = path.join(path.dirname(saveDir), "working2");
+    await fs.mkdir(otherWorkingDir, { recursive: true });
+    const loadedNames = await copyEnvFilesForLoad(saveDir, otherWorkingDir);
+    expect(loadedNames).toContain(".python-version");
+    expect(await fs.readFile(path.join(otherWorkingDir, ".python-version"), "utf8")).toBe(
+      "3.12\n",
+    );
+  });
 });

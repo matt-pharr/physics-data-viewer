@@ -11,7 +11,8 @@
  * - Module manifest or action execution logic.
  */
 
-import { BrowserWindow, ipcMain } from "electron";
+import { BrowserWindow } from "electron";
+import { handleIpc } from "./ipc-registry";
 
 import {
   IPC,
@@ -37,7 +38,7 @@ export function registerModuleWindowIpcHandlers(
 ): void {
   const { moduleWindowManager, mainWindow } = options;
 
-  ipcMain.handle(
+  handleIpc(
     IPC.moduleWindows.open,
     async (
       _event,
@@ -55,21 +56,21 @@ export function registerModuleWindowIpcHandlers(
     }
   );
 
-  ipcMain.handle(
+  handleIpc(
     IPC.moduleWindows.close,
     async (_event, alias: string): Promise<boolean> => {
       return moduleWindowManager.close(alias);
     }
   );
 
-  ipcMain.handle(
+  handleIpc(
     IPC.moduleWindows.context,
     async (event): Promise<ModuleWindowContext | null> => {
       return moduleWindowManager.getContextForSender(event.sender.id);
     }
   );
 
-  ipcMain.handle(
+  handleIpc(
     IPC.moduleWindows.executeInMain,
     async (event, code: string): Promise<void> => {
       const context = moduleWindowManager.getContextForSender(event.sender.id);

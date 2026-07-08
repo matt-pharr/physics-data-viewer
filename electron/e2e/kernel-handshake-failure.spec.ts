@@ -18,6 +18,7 @@ import * as fs from "fs/promises";
 import * as os from "os";
 import * as path from "path";
 import { launchPDV, type LaunchedApp } from "./helpers/launch";
+import { createNewPythonProject } from "./helpers/new-project";
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const electronPackage = require("../package.json") as { version: string };
 
@@ -73,7 +74,7 @@ test.afterAll(async () => {
 
 test("bootstrap failure surfaces the multi-line diagnostic in the env-settings dialog", async () => {
   const { window } = launched;
-  await window.getByRole("button", { name: "New Python Project" }).click();
+  await createNewPythonProject(window);
 
   // New Python Project boots a uv-mode kernel, so a bootstrap-step handshake
   // failure now routes through launchUvKernel → setUvSync({phase:"failed"}),

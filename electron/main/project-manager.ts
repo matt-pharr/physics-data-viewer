@@ -819,6 +819,10 @@ export class ProjectManager {
    *
    * @param autosaveDir - The .autosave/ directory to write to (will be created).
    * @param codeCells - Current code-cell state from the renderer.
+   * @param opts - Optional overrides. ``timeoutMs`` bounds the kernel comm
+   *   request (default: the CommRouter's 30 s); the pre-restart snapshot
+   *   passes a short timeout so a wedged-but-alive kernel cannot stall the
+   *   restart.
    * @returns The kernel response (checksum, node count, module bundles), or
    *   null on error. ``moduleOwnedFiles`` and ``moduleManifests`` are
    *   forwarded so the autosave handler can mirror module state into the
@@ -827,6 +831,7 @@ export class ProjectManager {
   async autosave(
     autosaveDir: string,
     codeCells: CodeCellData,
+    opts?: { timeoutMs?: number },
   ): Promise<{
     checksum: string;
     nodeCount: number;
@@ -845,7 +850,7 @@ export class ProjectManager {
         save_dir: autosaveDir,
         is_autosave: true,
         clear_cache: clearCache,
-      }, { keepAlivePushType: PDVMessageType.PROGRESS });
+      }, { keepAlivePushType: PDVMessageType.PROGRESS, timeoutMs: opts?.timeoutMs });
 
       const payload = response.payload as unknown as PDVProjectSaveResponsePayload & {
         module_owned_files?: ModuleOwnedFile[];

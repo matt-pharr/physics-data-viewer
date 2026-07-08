@@ -14,10 +14,11 @@
 
 import * as fs from "fs/promises";
 import * as path from "path";
-import { ipcMain, type BrowserWindow } from "electron";
+import { type BrowserWindow } from "electron";
+import { handleIpc } from "./ipc-registry";
 
 import type { CommRouter } from "./comm-router";
-import type { CodeCellData } from "./ipc";
+import type { ActiveEnvironmentInfo, CodeCellData } from "./ipc";
 import { IPC } from "./ipc";
 import { ModuleManager } from "./module-manager";
 import { setupProjectModuleNamespaces } from "./module-runtime";
@@ -60,7 +61,19 @@ interface RegisterProjectIpcHandlersOptions {
    */
   runSerializedProjectManifestMutation: <T>(dir: string, task: () => Promise<T>) => Promise<T>;
   getMainWindow: () => BrowserWindow | null;
+  /**
+   * Fallback interpreter path from the global config, used only when the
+   * active kernel has no recorded environment metadata (legacy sessions).
+   */
   getInterpreterPath: () => string | undefined;
+  /**
+   * Environment metadata of the active kernel (mode, actual interpreter,
+   * resolved Python version), recorded by `kernels.start`/`restart`. The
+   * authoritative source for the manifest's `environment` and
+   * `interpreter_path` fields at save time (§10.5); undefined when no
+   * kernel is active or the entry is missing.
+   */
+  getActiveKernelEnvMeta: () => ActiveEnvironmentInfo | undefined;
   /** Called after a successful explicit save to clean up autosave state. */
   onExplicitSaveCompleted?: (saveDir: string) => void;
 }
@@ -252,6 +265,7 @@ export function registerProjectIpcHandlers(
     runSerializedProjectManifestMutation,
     getMainWindow,
     getInterpreterPath,
+    getActiveKernelEnvMeta,
     onExplicitSaveCompleted,
   } = options;
 
@@ -263,7 +277,7 @@ export function registerProjectIpcHandlers(
   // explicit save.
   let saveSeq = 0;
 
-  ipcMain.handle(
+  handleIpc(
     IPC.project.save,
     async (_event, saveDir: string, codeCells: unknown, projectName?: string) => {
       assertCodeCellData(codeCells);
@@ -285,11 +299,21 @@ export function registerProjectIpcHandlers(
               .catch(() => false)
           : false;
 
+        // Environment recording (§10.5): uv projects record mode + the
+        // resolved Python version (the venv path is ephemeral, so no
+        // interpreter_path); shared projects record the interpreter the
+        // kernel actually spawned on — falling back to the global config
+        // value only when no per-kernel metadata exists (legacy sessions).
+        const envMeta = getActiveKernelEnvMeta();
         const saveResult = await projectManager.save(saveDir, codeCells, {
           language: getActiveKernelLanguage(),
-          interpreterPath: getInterpreterPath(),
+          interpreterPath: isUvProject
+            ? undefined
+            : (envMeta?.interpreterPath ?? getInterpreterPath()),
           projectName,
-          environment: isUvProject ? { mode: "uv" } : undefined,
+          environment: isUvProject
+            ? { mode: "uv", python_version: envMeta?.pythonVersion }
+            : { mode: "shared" },
         });
 
         // If the serializer detected missing backing files it aborted before
@@ -405,7 +429,7 @@ export function registerProjectIpcHandlers(
     }
   );
 
-  ipcMain.handle(IPC.project.load, async (_event, saveDir: string, options?: { restoreFromAutosave?: boolean }) => {
+  handleIpc(IPC.project.load, async (_event, saveDir: string, options?: { restoreFromAutosave?: boolean }) => {
     const restoreFromAutosave = options?.restoreFromAutosave ?? false;
     const autosaveDir = path.join(saveDir, ".autosave");
 
@@ -536,7 +560,7 @@ export function registerProjectIpcHandlers(
     return path.join(workingDir, "code-cells.json");
   };
 
-  ipcMain.handle(IPC.codeCells.load, async (): Promise<CodeCellData | null> => {
+  handleIpc(IPC.codeCells.load, async (): Promise<CodeCellData | null> => {
     const filePath = codeCellsFilePath();
     if (!filePath) return null;
     try {
@@ -550,7 +574,7 @@ export function registerProjectIpcHandlers(
     }
   });
 
-  ipcMain.handle(IPC.codeCells.save, async (_event, data: unknown): Promise<boolean> => {
+  handleIpc(IPC.codeCells.save, async (_event, data: unknown): Promise<boolean> => {
     assertCodeCellData(data);
     const filePath = codeCellsFilePath();
     if (!filePath) return false;
@@ -558,7 +582,7 @@ export function registerProjectIpcHandlers(
     return true;
   });
 
-  ipcMain.handle(IPC.project.new, async () => {
+  handleIpc(IPC.project.new, async () => {
     setActiveProjectDir(null);
     setPendingModuleImports([]);
     setPendingModuleSettings({});
@@ -566,7 +590,7 @@ export function registerProjectIpcHandlers(
     return true;
   });
 
-  ipcMain.handle(
+  handleIpc(
     IPC.project.peekLanguages,
     async (_event, paths: string[]): Promise<Record<string, "python" | "julia">> => {
       const result: Record<string, "python" | "julia"> = {};
@@ -584,7 +608,7 @@ export function registerProjectIpcHandlers(
     }
   );
 
-  ipcMain.handle(
+  handleIpc(
     IPC.project.peekManifest,
     async (_event, dir: string) => {
       try {

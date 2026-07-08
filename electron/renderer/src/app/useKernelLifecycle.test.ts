@@ -216,18 +216,61 @@ describe("useKernelLifecycle.handleEnvSave", () => {
     expect(pdv.kernels.start).toHaveBeenCalledTimes(1);
     expect(state.config?.pythonPath).toBe("/opt/python3.12");
   });
+
+  it("restart: false writes config without touching the running kernel (§10.5.19)", async () => {
+    // Guards the Default Runtime tab's future-sessions-only behavior: with a
+    // session up, selecting an environment must never stop/restart it (the
+    // old behavior silently demoted uv projects to shared mode).
+    const { state, setters } = createState();
+    state.currentKernelId = "k1";
+    const startMock = vi.fn();
+    const stopMock = vi.fn();
+    const { result, pdv } = renderHookWithPdv(
+      () =>
+        useKernelLifecycle({
+          config: state.config,
+          currentKernelId: state.currentKernelId,
+          ...setters,
+        }),
+      {
+        pdvOverrides: {
+          kernels: { start: startMock as never, stop: stopMock as never },
+          config: { set: vi.fn(async (cfg) => cfg as never) as never },
+        },
+      },
+    );
+
+    let ok: boolean | undefined;
+    await act(async () => {
+      ok = await result.current.handleEnvSave(
+        { pythonPath: "/opt/conda/bin/python" },
+        { restart: false },
+      );
+    });
+
+    expect(ok).toBe(true);
+    expect(pdv.config.set).toHaveBeenCalledWith(
+      expect.objectContaining({ pythonPath: "/opt/conda/bin/python" }),
+    );
+    expect(state.config?.pythonPath).toBe("/opt/conda/bin/python");
+    expect(startMock).not.toHaveBeenCalled();
+    expect(stopMock).not.toHaveBeenCalled();
+  });
 });
 
 describe("useKernelLifecycle.handleRestartKernel", () => {
-  it("calls pdv.kernels.restart, clears logs, bumps both refresh tokens", async () => {
+  it("calls pdv.kernels.restart, seeds a restored-state log entry, bumps both refresh tokens", async () => {
     const { state, setters } = createState();
     state.currentKernelId = "k1";
     state.logs = [{ executionId: "e1", chunks: [] } as never];
     const restartMock = vi.fn(async () => ({
-      id: "k2",
-      name: "python3",
-      language: "python" as const,
-      status: "idle" as const,
+      kernel: {
+        id: "k2",
+        name: "python3",
+        language: "python" as const,
+        status: "idle" as const,
+      },
+      restoredFromAutosave: true,
     }));
     const { result, pdv } = renderHookWithPdv(
       () =>
@@ -249,9 +292,46 @@ describe("useKernelLifecycle.handleRestartKernel", () => {
 
     expect(pdv.kernels.restart).toHaveBeenCalledWith("k1");
     expect(state.currentKernelId).toBe("k2");
-    expect(state.logs).toEqual([]);
+    // The log history is replaced with a single info entry saying what
+    // came back (restored vs fresh).
+    expect(state.logs).toHaveLength(1);
+    expect((state.logs[0] as { stdout?: string }).stdout).toMatch(/restored from the last autosave/i);
     expect(state.namespaceRefreshToken).toBe(1);
     expect(state.treeRefreshToken).toBe(1);
+  });
+
+  it("reports a fresh session when nothing was restored", async () => {
+    const { state, setters } = createState();
+    state.currentKernelId = "k1";
+    const restartMock = vi.fn(async () => ({
+      kernel: {
+        id: "k2",
+        name: "python3",
+        language: "python" as const,
+        status: "idle" as const,
+      },
+      restoredFromAutosave: false,
+    }));
+    const { result } = renderHookWithPdv(
+      () =>
+        useKernelLifecycle({
+          config: state.config,
+          currentKernelId: state.currentKernelId,
+          ...setters,
+        }),
+      {
+        pdvOverrides: {
+          kernels: { restart: restartMock as never },
+        },
+      },
+    );
+
+    await act(async () => {
+      await result.current.handleRestartKernel();
+    });
+
+    expect(state.logs).toHaveLength(1);
+    expect((state.logs[0] as { stdout?: string }).stdout).toMatch(/no autosave found/i);
   });
 
   it("no-op when there is no active kernel", async () => {

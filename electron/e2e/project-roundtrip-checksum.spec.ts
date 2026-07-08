@@ -21,6 +21,7 @@ import * as os from "os";
 import * as path from "path";
 import { expectKernelReady } from "./helpers/kernel-status";
 import { launchPDV } from "./helpers/launch";
+import { createNewPythonProject } from "./helpers/new-project";
 import { sendMenuAction } from "./helpers/menu-action";
 
 const MOD = process.platform === "darwin" ? "Meta" : "Control";
@@ -208,7 +209,7 @@ pdv_tree["nested_types.edges.complex_nested"] = {
 `;
 
 async function bootKernel(window: Page): Promise<void> {
-  await window.getByRole("button", { name: "New Python Project" }).click();
+  await createNewPythonProject(window);
   await expectKernelReady(window);
   // The POPULATE script imports pandas + xarray. A fresh uv project is
   // seeded only with the user's defaultPackages (numpy + matplotlib), so

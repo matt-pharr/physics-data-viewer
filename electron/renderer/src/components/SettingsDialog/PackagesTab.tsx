@@ -1,19 +1,21 @@
 /**
- * PackagesTab — Per-project dependency management for uv-mode projects.
+ * PackagesTab — the "Project Environment" settings tab.
  *
- * Lists declared dependencies from `pyproject.toml` paired with the version
- * actually installed in the venv (via `uv pip list`), and exposes add /
- * remove / upgrade actions that go through `uv add` / `uv remove` /
+ * Shows the active session's environment (mode badge, interpreter path,
+ * Python version, via `environment.activeInfo`), and for uv-mode projects
+ * lists declared dependencies from `pyproject.toml` paired with the version
+ * actually installed in the venv (via `uv pip list`), with add / remove /
+ * upgrade actions that go through `uv add` / `uv remove` /
  * `uv lock --upgrade-package` in the main process. Streams uv output via
  * the existing `envActivity` push channel.
  *
  * See Also
  * --------
- * ARCHITECTURE.md §10.5.13 (Package Management UI)
+ * ARCHITECTURE.md §10.5.13 (Package Management UI), §10.5.19
  */
 
 import React, { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
-import type { EnvironmentInstallResult, ProjectPackage } from '../../types';
+import type { ActiveEnvironmentInfo, EnvironmentInstallResult, ProjectPackage } from '../../types';
 
 /** Props for {@link PackagesTab}. */
 interface PackagesTabProps {
@@ -21,14 +23,26 @@ interface PackagesTabProps {
   environmentMode?: 'uv' | 'shared';
 }
 
-/** Settings tab body for per-project package management. */
+/** Settings tab body for the project environment (info header + packages). */
 export const PackagesTab: React.FC<PackagesTabProps> = ({ environmentMode }) => {
   const [packages, setPackages] = useState<ProjectPackage[]>([]);
+  const [envInfo, setEnvInfo] = useState<ActiveEnvironmentInfo | null>(null);
   const [loading, setLoading] = useState(false);
   const [busy, setBusy] = useState(false);
   const [addInput, setAddInput] = useState('');
   const [output, setOutput] = useState('');
   const outputRef = useRef<HTMLPreElement>(null);
+
+  // Fetch the active session's environment metadata for the header.
+  useEffect(() => {
+    let cancelled = false;
+    void window.pdv.environment.activeInfo().then((info) => {
+      if (!cancelled) setEnvInfo(info);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [environmentMode]);
 
   // Auto-scroll the streaming output pane to the latest line.
   useLayoutEffect(() => {
@@ -88,14 +102,37 @@ export const PackagesTab: React.FC<PackagesTabProps> = ({ environmentMode }) => 
     void runMutation(() => window.pdv.environment.addPackage([spec]));
   }, [addInput, runMutation]);
 
+  // Environment info header shared by both modes (§10.5.19). Falls back to
+  // the mode prop when the metadata fetch hasn't resolved yet.
+  const mode = envInfo?.mode ?? environmentMode;
+  const envHeader = (
+    <div className="settings-env-header" data-testid="project-env-header">
+      <span
+        className={`settings-env-badge ${mode === 'uv' ? 'settings-env-badge-uv' : 'settings-env-badge-shared'}`}
+      >
+        {mode === 'uv' ? 'uv-managed · shareable' : 'external environment'}
+      </span>
+      {envInfo?.pythonVersion && (
+        <span className="settings-env-version">Python {envInfo.pythonVersion}</span>
+      )}
+      {envInfo?.interpreterPath && (
+        <div className="settings-env-interpreter" title={envInfo.interpreterPath}>
+          <code>{envInfo.interpreterPath}</code>
+        </div>
+      )}
+    </div>
+  );
+
   if (environmentMode !== 'uv') {
     return (
       <div className="settings-packages">
+        {envHeader}
         <p className="settings-packages-hint">
-          Project package management is available only for uv-managed projects.
-          This project uses the shared environment selected in the Runtime tab —
-          use that environment&rsquo;s own package manager (pip / conda) to
-          install packages.
+          This project runs on an environment managed outside PDV (e.g. conda),
+          chosen when the project was created. Use that environment&rsquo;s own
+          package manager (pip / conda) to install packages. Changing an
+          existing project&rsquo;s environment isn&rsquo;t supported yet
+          (planned as a dedicated action).
         </p>
       </div>
     );
@@ -103,6 +140,7 @@ export const PackagesTab: React.FC<PackagesTabProps> = ({ environmentMode }) => 
 
   return (
     <div className="settings-packages">
+      {envHeader}
       <h4 className="settings-general-section">Project Dependencies</h4>
       <p className="settings-packages-hint">
         Packages declared in this project&rsquo;s <code>pyproject.toml</code>,

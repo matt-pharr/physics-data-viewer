@@ -241,6 +241,79 @@ describe("ModuleManager", () => {
     expect(installed.some((entry) => entry.id === "git_mod")).toBe(true);
   });
 
+  it("git reinstall reporting up_to_date leaves the installed files untouched (regression)", async () => {
+    // The github path used to replaceDirectory BEFORE the duplicate-install
+    // check, so a reinstall rewrote the module on disk even while returning
+    // up_to_date against the unchanged index — files and index could
+    // disagree. Duplicate installs must not touch the installed files;
+    // only a user-confirmed update() replaces them.
+    const repoSource = path.join(tmpDir, "repo-reinstall");
+    await fs.mkdir(repoSource, { recursive: true });
+    await runGit(repoSource, ["init"]);
+    await runGit(repoSource, ["config", "user.email", "pdv-tests@example.com"]);
+    await runGit(repoSource, ["config", "user.name", "PDV Tests"]);
+    await writeModuleFixture(repoSource, "reinstall_mod", "1.0.0");
+    await runGit(repoSource, ["add", "."]);
+    await runGit(repoSource, ["commit", "-m", "initial module"]);
+
+    const first = await manager.install({
+      source: { type: "github", location: repoSource },
+    });
+    expect(first.status).toBe("installed");
+    const installPath = first.module!.installPath!;
+
+    // Marker: a local change inside the installed copy. A reinstall that
+    // rewrites the directory would wipe it.
+    const markerPath = path.join(installPath, "scripts", "run.py");
+    await fs.writeFile(markerPath, "# locally modified marker\n", "utf8");
+
+    const second = await manager.install({
+      source: { type: "github", location: repoSource },
+    });
+    expect(second.success).toBe(true);
+    expect(second.status).toBe("up_to_date");
+    expect(await fs.readFile(markerPath, "utf8")).toBe(
+      "# locally modified marker\n",
+    );
+  });
+
+  it("git reinstall of a newer version reports update_available without replacing files", async () => {
+    const repoSource = path.join(tmpDir, "repo-newer");
+    await fs.mkdir(repoSource, { recursive: true });
+    await runGit(repoSource, ["init"]);
+    await runGit(repoSource, ["config", "user.email", "pdv-tests@example.com"]);
+    await runGit(repoSource, ["config", "user.name", "PDV Tests"]);
+    await writeModuleFixture(repoSource, "newer_mod", "1.0.0");
+    await runGit(repoSource, ["add", "."]);
+    await runGit(repoSource, ["commit", "-m", "v1.0.0"]);
+
+    const first = await manager.install({
+      source: { type: "github", location: repoSource },
+    });
+    const installPath = first.module!.installPath!;
+
+    await writeModuleFixture(repoSource, "newer_mod", "1.1.0");
+    await runGit(repoSource, ["add", "."]);
+    await runGit(repoSource, ["commit", "-m", "v1.1.0"]);
+
+    const second = await manager.install({
+      source: { type: "github", location: repoSource },
+    });
+    expect(second.status).toBe("update_available");
+    expect(second.currentVersion).toBe("1.0.0");
+
+    // On-disk manifest still carries the installed version until the
+    // user confirms the update through update().
+    const manifestRaw = await fs.readFile(
+      path.join(installPath, "pdv-module.json"),
+      "utf8",
+    );
+    expect(JSON.parse(manifestRaw).version).toBe("1.0.0");
+
+    const installed = await manager.listInstalled();
+    expect(installed.find((m) => m.id === "newer_mod")?.version).toBe("1.0.0");
+  });
+
   it("resolves canonical script bindings from manifest actions", async () => {
     const localSource = path.join(tmpDir, "binding-source");
     await writeModuleFixture(localSource, "binding_mod", "1.0.0", [

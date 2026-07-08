@@ -26,6 +26,7 @@ const ipcRegistry = vi.hoisted(() => {
 const envDetectorMocks = vi.hoisted(() => ({
   checkPDVInstalled: vi.fn(async () => ({ installed: true })),
   checkJuliaPDVInstalled: vi.fn(async () => ({ installed: true })),
+  resolvePythonMajorMinor: vi.fn(async () => "3.13"),
 }));
 
 const kernelSessionMocks = vi.hoisted(() => ({
@@ -39,6 +40,7 @@ const moduleRuntimeMocks = vi.hoisted(() => ({
 const projectFileSyncMocks = vi.hoisted(() => ({
   copyFilesForLoad: vi.fn(async () => undefined),
   copyEnvFilesForLoad: vi.fn(async () => []),
+  overlayAutosaveTreeFiles: vi.fn(async () => undefined),
 }));
 
 const uvEnvironmentMocks = vi.hoisted(() => ({
@@ -56,6 +58,7 @@ vi.mock("./environment-detector", () => ({
   EnvironmentDetector: {
     checkPDVInstalled: envDetectorMocks.checkPDVInstalled,
     checkJuliaPDVInstalled: envDetectorMocks.checkJuliaPDVInstalled,
+    resolvePythonMajorMinor: envDetectorMocks.resolvePythonMajorMinor,
   },
 }));
 
@@ -64,8 +67,9 @@ vi.mock("./module-runtime", () => moduleRuntimeMocks);
 vi.mock("./project-file-sync", () => projectFileSyncMocks);
 vi.mock("./uv-environment", () => uvEnvironmentMocks);
 
-import { IPC } from "./ipc";
+import { IPC, type ActiveEnvironmentInfo } from "./ipc";
 import { registerKernelIpcHandlers } from "./ipc-register-kernels";
+import { ProjectManager } from "./project-manager";
 import {
   createBrowserWindowMock,
   createCommRouterMock,
@@ -91,6 +95,7 @@ interface Harness {
   projectManager: ReturnType<typeof createProjectManagerMock>;
   moduleManager: ReturnType<typeof createModuleManagerMock>;
   kernelWorkingDirs: Map<string, string>;
+  kernelEnvMeta: Map<string, ActiveEnvironmentInfo>;
   crashHandlers: Map<string, (id: string) => void>;
   // Typed Mocks so each field is structurally assignable to the typed
   // callback the registration function expects, while still exposing
@@ -104,6 +109,8 @@ interface Harness {
   getDefaultPackages: Mock<() => string[]>;
   getUvBinaryPath: Mock<() => string | undefined>;
   bindActiveProjectModules: Mock<(kernelId: string | null) => Promise<void>>;
+  autosaveBeforeRestart: Mock<(kernelId: string) => Promise<boolean>>;
+  recoverUnsavedAfterRestart: Mock<(orphanDir: string) => Promise<void>>;
 }
 
 function setup(): Harness {
@@ -114,6 +121,7 @@ function setup(): Harness {
   const projectManager = createProjectManagerMock();
   const moduleManager = createModuleManagerMock();
   const kernelWorkingDirs = new Map<string, string>();
+  const kernelEnvMeta = new Map<string, ActiveEnvironmentInfo>();
   const crashHandlers = new Map<string, (id: string) => void>();
   let activeId: string | null = null;
   const harness: Harness = {
@@ -124,6 +132,7 @@ function setup(): Harness {
     projectManager,
     moduleManager,
     kernelWorkingDirs,
+    kernelEnvMeta,
     crashHandlers,
     resetProjectState: vi.fn(),
     resetKernelState: vi.fn(),
@@ -136,6 +145,8 @@ function setup(): Harness {
     getDefaultPackages: vi.fn(() => []),
     getUvBinaryPath: vi.fn(() => undefined),
     bindActiveProjectModules: vi.fn(async () => undefined),
+    autosaveBeforeRestart: vi.fn(async () => false),
+    recoverUnsavedAfterRestart: vi.fn(async () => undefined),
   };
   registerKernelIpcHandlers({
     win: win.win,
@@ -145,6 +156,7 @@ function setup(): Harness {
     projectManager,
     moduleManager,
     kernelWorkingDirs,
+    kernelEnvMeta: harness.kernelEnvMeta,
     crashHandlers,
     resetProjectState: harness.resetProjectState,
     resetKernelState: harness.resetKernelState,
@@ -155,6 +167,8 @@ function setup(): Harness {
     getDefaultPackages: harness.getDefaultPackages,
     getUvBinaryPath: harness.getUvBinaryPath,
     bindActiveProjectModules: harness.bindActiveProjectModules,
+    autosaveBeforeRestart: harness.autosaveBeforeRestart,
+    recoverUnsavedAfterRestart: harness.recoverUnsavedAfterRestart,
   });
   return harness;
 }
@@ -164,6 +178,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   envDetectorMocks.checkPDVInstalled.mockResolvedValue({ installed: true });
   envDetectorMocks.checkJuliaPDVInstalled.mockResolvedValue({ installed: true });
+  envDetectorMocks.resolvePythonMajorMinor.mockResolvedValue("3.13");
 });
 
 afterEach(() => {
@@ -212,7 +227,12 @@ describe("kernels:start", () => {
     ).rejects.toThrow(/missing PDVKernel/);
   });
 
-  it("crash handler cleans up working dir and pushes kernelCrashed to renderer", async () => {
+  it("crash handler preserves the working dir and pushes kernelCrashed to renderer", async () => {
+    // Regression (§11.6): the crash handler used to delete the working dir,
+    // destroying the uv env spec (pyproject.toml/uv.lock/.python-version)
+    // and any unsaved-session `.autosave` — a crashed uv project would
+    // silently restart in shared mode. The dir and its map entry must
+    // survive until kernels.restart / kernels.stop clean them up.
     const harness = setup();
     harness.kernelManager.start = vi.fn(async () => makeKernelInfo({ id: "kx" }));
     const result = (await getHandler(IPC.kernels.start)({}, {
@@ -222,11 +242,153 @@ describe("kernels:start", () => {
     harness.kernelWorkingDirs.set(result.id, "/tmp/working");
     const onCrash = harness.crashHandlers.get(result.id)!;
     await onCrash(result.id);
-    expect(harness.projectManager.deleteWorkingDir).toHaveBeenCalledWith("/tmp/working");
+    expect(harness.projectManager.deleteWorkingDir).not.toHaveBeenCalled();
+    expect(harness.kernelWorkingDirs.get(result.id)).toBe("/tmp/working");
+    expect(harness.commRouter.detach).toHaveBeenCalled();
     expect(harness.win.webContentsSend).toHaveBeenCalledWith(
       IPC.push.kernelCrashed,
       { kernelId: result.id },
     );
+  });
+});
+
+describe("kernels:start — new uv project (§10.5.8)", () => {
+  function setupUvStart(): { harness: Harness; wd: string } {
+    const harness = setup();
+    const wd = fs.mkdtempSync(path.join(os.tmpdir(), "pdv-newproj-"));
+    (harness.projectManager.createWorkingDir as Mock).mockResolvedValue(wd);
+    uvEnvironmentMocks.materializeUvEnvironment.mockResolvedValue({
+      success: true,
+      venvPython: path.join(wd, ".venv", "bin", "python"),
+      output: "",
+    });
+    return { harness, wd };
+  }
+
+  it("writes pyproject from the chosen packages, pins .python-version, passes --python, launches into the venv", async () => {
+    const { harness, wd } = setupUvStart();
+    try {
+      await getHandler(IPC.kernels.start)(
+        {},
+        { language: "python" },
+        { newProject: true, pythonVersion: "3.12", packages: ["scipy>=1.10", "xarray"] },
+      );
+      const pyproject = fs.readFileSync(path.join(wd, "pyproject.toml"), "utf8");
+      expect(pyproject).toContain("scipy>=1.10");
+      expect(pyproject).toContain("xarray");
+      expect(fs.readFileSync(path.join(wd, ".python-version"), "utf8").trim()).toBe("3.12");
+      const materializeOpts = uvEnvironmentMocks.materializeUvEnvironment.mock.calls.at(-1)?.[1] as
+        | { pythonVersion?: string }
+        | undefined;
+      expect(materializeOpts?.pythonVersion).toBe("3.12");
+      const startArg = (harness.kernelManager.start as Mock).mock.calls.at(-1)?.[0] as {
+        env: { PYTHON_PATH: string };
+      };
+      expect(startArg.env.PYTHON_PATH).toBe(path.join(wd, ".venv", "bin", "python"));
+    } finally {
+      fs.rmSync(wd, { recursive: true, force: true });
+    }
+  });
+
+  it("falls back to the default version and the user's default packages", async () => {
+    const { harness, wd } = setupUvStart();
+    harness.getDefaultPackages.mockReturnValue(["numpy", "matplotlib"]);
+    try {
+      await getHandler(IPC.kernels.start)({}, { language: "python" }, { newProject: true });
+      const pyproject = fs.readFileSync(path.join(wd, "pyproject.toml"), "utf8");
+      expect(pyproject).toContain("numpy");
+      expect(pyproject).toContain("matplotlib");
+      expect(fs.readFileSync(path.join(wd, ".python-version"), "utf8").trim()).toBe("3.13");
+    } finally {
+      fs.rmSync(wd, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects an unsupported Python version before touching the filesystem", async () => {
+    const { harness, wd } = setupUvStart();
+    try {
+      await expect(
+        getHandler(IPC.kernels.start)(
+          {},
+          { language: "python" },
+          { newProject: true, pythonVersion: "2.7" },
+        ),
+      ).rejects.toThrow(/Unsupported Python version "2\.7"/);
+      expect(harness.projectManager.createWorkingDir).not.toHaveBeenCalled();
+    } finally {
+      fs.rmSync(wd, { recursive: true, force: true });
+    }
+  });
+
+  it("records uv env metadata for the new kernel (environment:activeInfo source)", async () => {
+    const { harness, wd } = setupUvStart();
+    envDetectorMocks.resolvePythonMajorMinor.mockResolvedValue("3.12");
+    harness.kernelManager.start = vi.fn(async () => makeKernelInfo({ id: "kuv" }));
+    try {
+      await getHandler(IPC.kernels.start)(
+        {},
+        { language: "python" },
+        { newProject: true, pythonVersion: "3.12" },
+      );
+      expect(harness.kernelEnvMeta.get("kuv")).toEqual({
+        mode: "uv",
+        interpreterPath: path.join(wd, ".venv", "bin", "python"),
+        pythonVersion: "3.12",
+      });
+    } finally {
+      fs.rmSync(wd, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("start/stop/restart serialization", () => {
+  it("serializes concurrent start calls — the second waits for the first (regression)", async () => {
+    // The old implementation awaited the previous lock promise BEFORE
+    // swapping in its own, so two calls arriving together both saw the
+    // same settled promise and both entered their bodies, racing on the
+    // shared commRouter. The lock must be swapped synchronously.
+    const harness = setup();
+    const events: string[] = [];
+    let finishFirst!: () => void;
+    const firstGate = new Promise<void>((r) => { finishFirst = r; });
+    let call = 0;
+    harness.kernelManager.start = vi.fn(async () => {
+      call += 1;
+      const id = `k${call}`;
+      events.push(`begin:${id}`);
+      if (call === 1) await firstGate;
+      events.push(`end:${id}`);
+      return makeKernelInfo({ id });
+    });
+
+    const p1 = getHandler(IPC.kernels.start)({}, { language: "python" });
+    const p2 = getHandler(IPC.kernels.start)({}, { language: "python" });
+
+    // Let any incorrectly-unblocked second call run its continuations.
+    await new Promise((r) => setImmediate(r));
+    await new Promise((r) => setImmediate(r));
+    expect(events).toEqual(["begin:k1"]);
+
+    finishFirst();
+    await Promise.all([p1, p2]);
+    expect(events).toEqual(["begin:k1", "end:k1", "begin:k2", "end:k2"]);
+  });
+
+  it("releases the lock when the serialized operation throws", async () => {
+    const harness = setup();
+    harness.kernelManager.start = vi
+      .fn(async () => makeKernelInfo({ id: "k2" }))
+      .mockRejectedValueOnce(new Error("spawn failed"));
+
+    await expect(
+      getHandler(IPC.kernels.start)({}, { language: "python" }),
+    ).rejects.toThrow(/spawn failed/);
+
+    // The failed first operation must not leave the lock held.
+    const result = (await getHandler(IPC.kernels.start)({}, {
+      language: "python",
+    })) as { id: string };
+    expect(result.id).toBe("k2");
   });
 });
 
@@ -263,15 +425,143 @@ describe("kernels:restart", () => {
     harness.kernelWorkingDirs.set("new", "/tmp/new-wd");
 
     const restarted = (await getHandler(IPC.kernels.restart)({}, "old")) as {
-      id: string;
+      kernel: { id: string };
+      restoredFromAutosave: boolean;
     };
-    expect(restarted.id).toBe("new");
+    expect(restarted.kernel.id).toBe("new");
+    // No autosave snapshot → the renderer is told nothing was restored.
+    expect(restarted.restoredFromAutosave).toBe(false);
     expect(harness.resetKernelState).toHaveBeenCalled();
     expect(projectFileSyncMocks.copyFilesForLoad).toHaveBeenCalledWith(
       "/projects/x",
       "/tmp/new-wd",
     );
-    expect(harness.projectManager.load).toHaveBeenCalledWith("/projects/x");
+    // No autosave snapshot → plain load, no tree-index override.
+    expect(harness.projectManager.load).toHaveBeenCalledWith(
+      "/projects/x",
+      undefined,
+    );
+  });
+
+  it("snapshots the tree before teardown (autosave runs before stop)", async () => {
+    const harness = setup();
+    const events: string[] = [];
+    harness.autosaveBeforeRestart.mockImplementation(async () => {
+      events.push("autosave");
+      return false;
+    });
+    (harness.kernelManager.stop as Mock).mockImplementation(async () => {
+      events.push("stop");
+    });
+    (harness.kernelManager.getKernel as Mock).mockReturnValue(
+      makeKernelInfo({ id: "old", language: "python" }),
+    );
+    (harness.kernelManager.start as Mock).mockResolvedValueOnce(
+      makeKernelInfo({ id: "new", language: "python" }),
+    );
+
+    await getHandler(IPC.kernels.restart)({}, "old");
+    expect(events).toEqual(["autosave", "stop"]);
+  });
+
+  it("unsaved session with a snapshot: preserves the old working dir and recovers it after restart", async () => {
+    const harness = setup();
+    harness.autosaveBeforeRestart.mockResolvedValue(true);
+    (harness.getActiveProjectDir as Mock).mockReturnValue(null);
+    harness.kernelWorkingDirs.set("old", "/tmp/old-wd");
+    (harness.kernelManager.getKernel as Mock).mockReturnValue(
+      makeKernelInfo({ id: "old", language: "python" }),
+    );
+    (harness.kernelManager.start as Mock).mockResolvedValueOnce(
+      makeKernelInfo({ id: "new", language: "python" }),
+    );
+
+    await getHandler(IPC.kernels.restart)({}, "old");
+
+    // The old dir must survive teardown — it holds the .autosave snapshot.
+    expect(harness.projectManager.deleteWorkingDir).not.toHaveBeenCalledWith(
+      "/tmp/old-wd",
+    );
+    // ...and the recovery routine re-imports it into the new session.
+    expect(harness.recoverUnsavedAfterRestart).toHaveBeenCalledWith("/tmp/old-wd");
+  });
+
+  it("unsaved session without a snapshot: old behavior (dir deleted, no recovery)", async () => {
+    const harness = setup();
+    harness.autosaveBeforeRestart.mockResolvedValue(false);
+    (harness.getActiveProjectDir as Mock).mockReturnValue(null);
+    harness.kernelWorkingDirs.set("old", "/tmp/old-wd");
+    (harness.kernelManager.getKernel as Mock).mockReturnValue(
+      makeKernelInfo({ id: "old", language: "python" }),
+    );
+    (harness.kernelManager.start as Mock).mockResolvedValueOnce(
+      makeKernelInfo({ id: "new", language: "python" }),
+    );
+
+    await getHandler(IPC.kernels.restart)({}, "old");
+
+    expect(harness.projectManager.deleteWorkingDir).toHaveBeenCalledWith(
+      "/tmp/old-wd",
+    );
+    expect(harness.recoverUnsavedAfterRestart).not.toHaveBeenCalled();
+  });
+
+  it("saved project with a snapshot: reloads from the autosave overlay", async () => {
+    const harness = setup();
+    harness.autosaveBeforeRestart.mockResolvedValue(true);
+    (harness.getActiveProjectDir as Mock).mockReturnValue("/projects/x");
+    (harness.kernelManager.getKernel as Mock).mockReturnValue(
+      makeKernelInfo({ id: "old", language: "python" }),
+    );
+    (harness.kernelManager.start as Mock).mockResolvedValueOnce(
+      makeKernelInfo({ id: "new", language: "python" }),
+    );
+    harness.kernelWorkingDirs.set("new", "/tmp/new-wd");
+    const checkSpy = vi
+      .spyOn(ProjectManager, "checkForAutosave")
+      .mockResolvedValue({ exists: true, timestamp: "2026-07-07T00:00:00Z" });
+
+    try {
+      await getHandler(IPC.kernels.restart)({}, "old");
+    } finally {
+      checkSpy.mockRestore();
+    }
+
+    const autosaveDir = path.join("/projects/x", ".autosave");
+    expect(projectFileSyncMocks.copyFilesForLoad).toHaveBeenCalledWith(
+      "/projects/x",
+      "/tmp/new-wd",
+    );
+    expect(projectFileSyncMocks.overlayAutosaveTreeFiles).toHaveBeenCalledWith(
+      autosaveDir,
+      "/tmp/new-wd",
+    );
+    expect(harness.projectManager.load).toHaveBeenCalledWith("/projects/x", {
+      treeIndexDir: autosaveDir,
+      codeCellsDir: autosaveDir,
+    });
+  });
+
+  it("restart still completes when recovery of the preserved session fails", async () => {
+    const harness = setup();
+    harness.autosaveBeforeRestart.mockResolvedValue(true);
+    harness.recoverUnsavedAfterRestart.mockRejectedValue(new Error("recover boom"));
+    (harness.getActiveProjectDir as Mock).mockReturnValue(null);
+    harness.kernelWorkingDirs.set("old", "/tmp/old-wd");
+    (harness.kernelManager.getKernel as Mock).mockReturnValue(
+      makeKernelInfo({ id: "old", language: "python" }),
+    );
+    (harness.kernelManager.start as Mock).mockResolvedValueOnce(
+      makeKernelInfo({ id: "new", language: "python" }),
+    );
+
+    const restarted = (await getHandler(IPC.kernels.restart)({}, "old")) as {
+      kernel: { id: string };
+      restoredFromAutosave: boolean;
+    };
+    expect(restarted.kernel.id).toBe("new");
+    // Recovery failed, so nothing was actually restored.
+    expect(restarted.restoredFromAutosave).toBe(false);
   });
 
   it("re-materializes the uv environment and relaunches into the venv", async () => {
@@ -280,6 +570,7 @@ describe("kernels:restart", () => {
     const newDir = fs.mkdtempSync(path.join(os.tmpdir(), "pdv-restart-new-"));
     fs.writeFileSync(path.join(oldDir, "pyproject.toml"), "[project]\nname = 'x'\n");
     fs.writeFileSync(path.join(oldDir, "uv.lock"), "version = 1\n");
+    fs.writeFileSync(path.join(oldDir, ".python-version"), "3.11\n");
 
     (harness.kernelManager.getKernel as Mock).mockReturnValue(
       makeKernelInfo({ id: "old", language: "python" }),
@@ -308,6 +599,15 @@ describe("kernels:restart", () => {
       expect(fs.readFileSync(path.join(newDir, "pyproject.toml"), "utf8")).toContain(
         "[project]",
       );
+      // The version pin rode the snapshot into the new working dir and was
+      // forwarded to uv sync --python (§10.5.8).
+      expect(fs.readFileSync(path.join(newDir, ".python-version"), "utf8").trim()).toBe(
+        "3.11",
+      );
+      const rematerializeOpts = uvEnvironmentMocks.materializeUvEnvironment.mock.calls.at(-1)?.[1] as
+        | { pythonVersion?: string }
+        | undefined;
+      expect(rematerializeOpts?.pythonVersion).toBe("3.11");
       // The new kernel launched against the venv interpreter, not system python.
       const startArg = (harness.kernelManager.start as Mock).mock.calls.at(-1)?.[0];
       expect(startArg.env.PYTHON_PATH).toBe(venvPython);

@@ -281,6 +281,40 @@ export interface KernelUvContext {
   saveDir?: string;
   /** Creating a brand-new uv project (seed from default packages, §10.5.8). */
   newProject?: boolean;
+  /**
+   * Python version for a new project's venv (e.g. `"3.13"`), chosen in the
+   * New Project dialog. Only meaningful with `newProject`.
+   */
+  pythonVersion?: string;
+  /**
+   * Initial PEP 508 dependency specs for a new project's `pyproject.toml`.
+   * Only meaningful with `newProject`; defaults to the global default
+   * packages when absent.
+   */
+  packages?: string[];
+}
+
+/**
+ * Result of `kernels.restart`: the freshly started kernel plus whether
+ * project state was restored from a pre-restart autosave snapshot.
+ */
+export interface KernelRestartResult {
+  /** Metadata of the newly started kernel. */
+  kernel: KernelInfo;
+  /** True when tree/cell state was reloaded from an autosave snapshot. */
+  restoredFromAutosave: boolean;
+}
+
+/**
+ * Environment metadata for the active kernel (Project Environment tab).
+ */
+export interface ActiveEnvironmentInfo {
+  /** Whether the session runs in a uv-managed project venv or a shared env. */
+  mode: 'uv' | 'shared';
+  /** Interpreter the kernel actually spawned on (venv python for uv mode). */
+  interpreterPath?: string;
+  /** Resolved `major.minor` Python version of that interpreter. */
+  pythonVersion?: string;
 }
 
 /**
@@ -839,7 +873,7 @@ export interface PDVApi {
     stop(kernelId: string): Promise<boolean>;
     execute(kernelId: string, request: KernelExecuteRequest): Promise<KernelExecuteResult>;
     interrupt(kernelId: string): Promise<boolean>;
-    restart(kernelId: string): Promise<KernelInfo>;
+    restart(kernelId: string): Promise<KernelRestartResult>;
     complete(
       kernelId: string,
       code: string,
@@ -961,6 +995,8 @@ export interface PDVApi {
     removePackage(names: string[]): Promise<EnvironmentInstallResult>;
     /** Upgrade packages within their declared constraints (`uv lock --upgrade-package` + sync). */
     upgradePackage(names: string[]): Promise<EnvironmentInstallResult>;
+    /** Active kernel's environment metadata, or null when no kernel is active. */
+    activeInfo(): Promise<ActiveEnvironmentInfo | null>;
   };
   modules: {
     listInstalled(): Promise<ModuleDescriptor[]>;
@@ -1118,6 +1154,10 @@ export interface PDVApi {
   system: {
     /** Node.js platform identifier of the main process. */
     platform: NodeJS.Platform;
+    /** CPython minor versions offered by the New Project dialog, oldest first. */
+    supportedPythonVersions: readonly string[];
+    /** Version preselected in the New Project dialog (e.g. `"3.13"`). */
+    defaultPythonVersion: string;
   };
   /** External-app launchers driven by the action bar. */
   launchers: {

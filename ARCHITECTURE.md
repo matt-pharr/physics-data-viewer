@@ -1358,13 +1358,17 @@ The cache covers in-memory data kinds — ndarray, DataFrame, Series, scalar, te
 
 **Save / autosave serialization.** Both `IPC.project.save` and `IPC.autosave.run` acquire a single FIFO mutex inside `ProjectManager` (`runWithSaveLock`). When the autosave timer fires while an explicit save is in flight, the autosave queues until the save finishes. When the user clicks Save while an autosave is in flight, Save queues the same way. Combined with the kernel-busy deferral via `consumeAutosavePending`, this means autosave never overlaps an explicit save's main-process post-save side effects (manifest writes, module mirror).
 
-**Two recovery flows.**
+**Three recovery flows.**
 
 1. **Recovery on project open.** When the user opens a project that has a `<saveDir>/.autosave/` younger than (or independent of) the canonical save, the renderer prompts: "Restore autosaved changes?" If yes, the main process copies any file-backed nodes from `.autosave/` into the kernel working dir and calls `projectManager.load(saveDir, { treeIndexDir: <saveDir>/.autosave, codeCellsDir: <saveDir>/.autosave })`. The kernel reads `tree-index.json` from the override directory; everything else (the `save_dir` argument, the kernel's `_set_save_dir`) is unchanged. After a successful load the `.autosave/` directory is cleared.
 
 2. **Recovery on welcome screen (unsaved sessions).** When the welcome screen renders, the renderer calls `IPC.autosave.scanWorkingDirs`, which lists `pdv-*` subdirectories of the working-dir base that contain `.autosave/tree-index.json`. Each entry is shown under "Recoverable Unsaved Sessions" with a Recover and a Discard button.
     - **Recover** starts the kernel (deferring via the welcome-screen pending-action ref if needed), then calls `IPC.autosave.recoverUnsaved(orphanDir)`. The handler copies file-backed nodes from `<orphan>/.autosave/` into the new kernel's working dir, calls `projectManager.load(workingDir, { treeIndexDir: …, codeCellsDir: … })`, mirrors `code-cells.json`, runs module setup, and then deletes the orphan directory. The renderer leaves `currentProjectDir = null` so the project remains in the unsaved state — the user is expected to Save As to keep it.
     - **Discard** calls `IPC.autosave.deleteOrphan(orphanDir)`, which removes the directory wholesale.
+
+3. **Restart preservation.** A user-initiated restart (the StatusBar **⟳ Restart** control, driving `IPC.kernels.restart`) must not lose in-memory work. Before the old session is torn down, the restart handler takes a snapshot: if the session is idle it hands the current code-cell tabs back and runs the same `performAutosave` core as the timer, writing a fresh `.autosave/` next to the active project (or in the working dir for an unsaved session). A non-idle session — often *why* the user is restarting — is not snapshotted; the handler falls back to whatever the last timer autosave left. After the new session is ready, restore reuses the two flows above:
+    - **Saved project:** the same overlay + `treeIndexDir`/`codeCellsDir` override recipe as flow 1, gated on a snapshot actually existing (`ProjectManager.checkForAutosave`).
+    - **Unsaved session:** the old working dir is kept (the restart's `preserveOldDir` path skips its deletion) and handed to the flow-2 `recoverUnsavedAfterRestart` routine. If restore fails for any reason, the old dir is left on disk, so the session reappears under "Recoverable Unsaved Sessions" on the next launch — restart degrades to flow 2 rather than losing data.
 
 **Status bar feedback.** After every successful autosave, the status bar shows "Autosaved at HH:MM:SS" (left of the checksum diamond). The timestamp clears when the user opens a different project; the next autosave repopulates it.
 
@@ -1471,9 +1475,10 @@ uv-mode hinges on PDV's existing split between the **working directory** (§6.1 
 | `project.json` | ✓ | — |
 | `pyproject.toml` | ✓ | ✓ (materialized on open, written back on save) |
 | `uv.lock` | ✓ | ✓ (materialized on open, written back on save) |
+| `.python-version` | ✓ | ✓ (uv's native interpreter pin, written at creation from the New Project dialog's version choice) |
 | `.venv/` | — | ✓ (built by `uv sync`; **never** persisted) |
 
-`pyproject.toml` and `uv.lock` are two more project files that ride the existing materialize-on-open / write-on-save flow used for the tree. `.venv/` is the only uv artifact never copied to the save directory.
+`pyproject.toml`, `uv.lock`, and `.python-version` are three more project files that ride the existing materialize-on-open / write-on-save flow used for the tree (`ENV_FILES` in `project-file-sync.ts`). `.venv/` is the only uv artifact never copied to the save directory.
 
 The consequences are all deliberate:
 
@@ -1506,14 +1511,14 @@ For `mode: "uv"`, the authoritative dependency specification is the `pyproject.t
 
 | Field | Type | Description |
 |---|---|---|
-| `environment.mode` | string | `"uv"` or `"shared"`. Absent (legacy `"1.1"` manifests) is treated as `"shared"`. |
-| `environment.python_version` | string? | Requested Python version (e.g. `"3.12"`), uv-mode only. If absent, uv picks the newest interpreter it can find or install. |
+| `environment.mode` | string | `"uv"` or `"shared"`. Absent (legacy `"1.1"` manifests) is treated as `"shared"`. Both modes are recorded explicitly at save time from the active kernel's environment metadata. |
+| `environment.python_version` | string? | The `major.minor` Python version the session actually ran on, uv-mode only — resolved by probing the live venv interpreter at kernel start and recorded on every save. The working/save-dir `.python-version` pin (§10.5.3) is what drives `uv sync --python` on reopen; the manifest field is a fallback for pre-pin projects and for display. |
 
 No venv path and no project identifier are stored. The venv always lives at `<working-dir>/.venv/`, derived from the session's working directory, so there is nothing machine-specific to record.
 
 A `"1.1"` manifest opened by a 1.2-capable app is upgraded in place on next save: `schema_version` becomes `"1.2"` and `environment.mode` defaults to `"shared"`. No `pyproject.toml` is created — an existing project is never silently turned into a uv project.
 
-The legacy top-level `interpreter_path` field from §6.2 is retained for `mode: "shared"` (it records which env was used at last save so it can be pre-selected on reopen) and is ignored for `mode: "uv"`.
+The top-level `interpreter_path` field from §6.2 is **authoritative for `mode: "shared"`**: it records the interpreter the kernel actually spawned on (from the per-kernel environment metadata the main process keeps, `kernelEnvMeta`), not the app-wide config value. On reopen it is probed via `environment.check`; if the environment is gone the user is warned and offered the Default Runtime selector. For `mode: "uv"` no `interpreter_path` is recorded — the venv path is ephemeral, and mode + version pin are the environment's identity.
 
 #### 10.5.6 The `uv` Binary
 
@@ -1537,11 +1542,19 @@ where `<venv-python>` is `<working-dir>/.venv/bin/python` (`...\.venv\Scripts\py
 
 #### 10.5.8 New Project Flow
 
-1. The user chooses a save directory (File → New Project).
-2. PDV writes `project.json` (`environment.mode: "uv"`) and a `pyproject.toml` seeded from the user-level default-packages list (§10.5.14). `python_version` defaults to the newest interpreter uv reports.
-3. PDV runs `uv sync` in the working directory, streaming output to the environment activity panel behind a blocking modal.
+Clicking **New Python Project** on the welcome screen opens the **New Project dialog** — the one moment the environment choice is free, so it is made here and recorded, not changed later (§10.5.19). The project itself stays unsaved until the first explicit Save; the dialog configures only the environment:
+
+- **Python version** — a dropdown over `SUPPORTED_PYTHON_VERSIONS` (`electron/main/python-versions.ts`, kept in sync with pdv-python's `requires-python`), defaulting to `DEFAULT_PYTHON_VERSION` (one behind the newest supported, for wheel availability). Missing interpreters are downloaded automatically by uv (§10.5.15).
+- **Initial packages** — prefilled from the user-level default-packages list (§10.5.14); comma-separated PEP 508 specs, validated by uv itself.
+- **Advanced: use an existing environment** — a mode toggle for the conda/cluster case (§10.5.17). Opening it *replaces* the uv fields with the embedded environment selector (its own confirm and install buttons suppressed via `hideConfirm`/`hideInstallButton`), so the two paths are mutually exclusive and the footer's primary button is the **single always-visible action**: **Create** when the highlighted environment has a compatible pdv-python; **Install pdv-python** when that is the required next step (driving the selector's install flow through its `actionsRef`, then flipping to Create on the post-install re-probe); disabled with the reason in its tooltip otherwise (no selection, no-GIL build). Nothing the user must click is ever below the scroll. Confirming starts a shared-mode session on that interpreter, session-scoped (the global config is untouched); the choice reaches the manifest as `mode: "shared"` + `interpreter_path` on first save.
+
+On Create (uv path):
+
+1. `kernels.start` receives the choices via `KernelUvContext` (`{ newProject, pythonVersion, packages }`); `pythonVersion` is validated against `SUPPORTED_PYTHON_VERSIONS`.
+2. PDV writes a `pyproject.toml` seeded from the chosen packages and a `.python-version` pin into the fresh working directory.
+3. PDV runs `uv sync --python <version>` there, streaming output to the environment activity panel behind a blocking modal.
 4. PDV installs `pdv-python` (§10.5.7).
-5. The kernel launches against `<working-dir>/.venv` and §4.1's startup sequence proceeds.
+5. The kernel launches against `<working-dir>/.venv` and §4.1's startup sequence proceeds. The resolved venv version and interpreter are recorded in the per-kernel environment metadata for later manifest writes (§10.5.5).
 
 #### 10.5.9 Project Open Flow
 
@@ -1563,7 +1576,7 @@ On failure the app surfaces uv's output verbatim and offers **Retry** and **Canc
 
 #### 10.5.10 Project Save Flow
 
-On `project.save`, `pyproject.toml` and `uv.lock` are written from the working directory back into the save directory alongside the tree (§8.1). Both can change mid-session — `pdv.install()` and the package UI mutate them — so both are part of every save. `.venv/` is never saved.
+On `project.save`, `pyproject.toml`, `uv.lock`, and `.python-version` are written from the working directory back into the save directory alongside the tree (§8.1). The first two can change mid-session — `pdv.install()` and the package UI mutate them — so all are part of every save. `.venv/` is never saved. The manifest additionally records the environment (`mode`, `python_version` / `interpreter_path`) from the active kernel's metadata (§10.5.5).
 
 #### 10.5.11 `pdv.install()` — In-Kernel Installs
 
@@ -1584,16 +1597,17 @@ In shared mode (no project venv) the kernel is not given a uv binary path, and `
 
 A `ModuleNotFoundError` raised by a code cell is detected in the kernel's output stream, and the console renders an affordance beneath the traceback: a one-click `Install with pdv.install("<name>")` action that runs the install for the user. Detection is not restricted to a curated package list — any missing module name is offered. A wrong suggestion (a typo, a missing local module) costs only an ignored button; the discoverability win for users who do not know `pdv.install()` exists is worth that.
 
-#### 10.5.13 Package Management UI
+#### 10.5.13 Project Environment Tab (Package Management UI)
 
-A **Packages** tab in the project settings is the friendly face over `uv add` / `uv remove` / `uv lock --upgrade-package`. Users never have to read `pyproject.toml`.
+The **Project Environment** settings tab (tab id `packages`) answers "what is this session running on" and is the friendly face over `uv add` / `uv remove` / `uv lock --upgrade-package`. Users never have to read `pyproject.toml`.
 
 The tab:
-- Lists direct dependencies parsed from `pyproject.toml`'s `[project].dependencies` array, each with its installed version.
+- Opens with an environment header driven by the `environment:activeInfo` IPC channel (backed by the main process's per-kernel `kernelEnvMeta` map): a mode badge ("uv-managed · shareable" vs "external environment"), the interpreter the kernel actually spawned on, and its Python version.
+- For uv mode, lists direct dependencies parsed from `pyproject.toml`'s `[project].dependencies` array, each with its installed version.
 - Supports add (PyPI name with optional version spec), remove, and per-package upgrade.
 - Runs every operation through `uv` so `uv.lock` stays consistent, and refreshes the kernel's import caches afterward exactly as §10.5.11 does.
 - Streams output to the same environment activity panel used by bootstrap.
-- Offers an "Edit pyproject.toml" escape hatch; the main process re-runs `uv sync` after any external edit.
+- For shared mode, shows the environment header plus a note that packages are managed by the external environment's own tooling and that changing an existing project's environment is a planned dedicated action (issue #335), not a settings toggle.
 
 PDV never parses or resolves dependency constraints itself — everything is delegated to `uv`.
 
@@ -1603,7 +1617,7 @@ A user-level setting (Settings → Python) holds a list of PEP 508 dependency sp
 
 #### 10.5.15 Python Version Acquisition
 
-If `environment.python_version` names an interpreter uv cannot find, `uv` can download one via `uv python install`. Because that is a tens-of-megabytes download, PDV gates it behind an explicit confirmation dialog the first time it is needed for a project ("This project requests Python 3.12, which is not installed. Download it now? (≈ 40 MB)"). Downloaded interpreters land in uv's standard location (§10.5.6) and are shared with any system `uv`.
+If the pinned version (`.python-version` / `--python`) names an interpreter uv cannot find, `uv sync` downloads one automatically as part of environment materialization — uv's default behavior, which PDV does not override. The download streams through the same blocking environment-setup modal as the rest of the sync, and the New Project dialog notes next to the version dropdown that missing versions are downloaded automatically. Downloaded interpreters land in uv's standard location (§10.5.6) and are shared with any system `uv`, so the tens-of-megabytes cost is paid once per machine per version.
 
 #### 10.5.16 Developer Mode (editable `pdv-python`)
 
@@ -1624,6 +1638,15 @@ The editable install is preferred over a `PYTHONPATH` shim because it both keeps
 All `uv` invocations in the main process go through one module, `electron/main/uv-runner.ts` — a single spawn helper that locates the bundled binary (or the `uv.binaryPath` override), runs `uv sync` / `add` / `remove` / `lock` / `pip install` / `python install`, and streams stdout/stderr over IPC to the environment activity panel. No other file in the main process spawns `uv` directly.
 
 The one uv invocation *outside* the main process is `pdv.install()` in the kernel (§10.5.11), which spawns `uv add` itself using the binary path the main process resolved with `uv-runner`'s resolver and passed to the kernel at init.
+
+#### 10.5.19 Default Runtime vs Project Environment
+
+The environment is a **property of the project, not of the app** — the settings UI is split along that line:
+
+- **Default Runtime tab** (tab id `runtime`, the environment selector): global scope only. It sets the interpreter used for the first run, shared-mode sessions started outside a project's own choice, and Julia. When a session is `ready`, selecting an environment there writes the global config **for future sessions only**, with an explanatory note — it never stops, restarts, or re-homes the live session. (The pre-rescope behavior — stop the kernel and relaunch shared-mode on the new interpreter — silently demoted uv projects to shared mode.) When no session is ready (first run, start-failure recovery, missing-interpreter fallback on open), the selector keeps its save-and-start behavior, which those flows depend on.
+- **Project Environment tab** (§10.5.13): per-project scope — what the active session actually runs on, and uv package management.
+
+There is deliberately **no mid-project environment switching**. The choice is made once in the New Project dialog (§10.5.8) and recorded in the manifest; a guarded, explicit "Change project environment…" action is tracked as issue #335.
 
 ---
 
@@ -1655,9 +1678,9 @@ The API surface:
 - `window.pdv.modules.*` — module management: `listInstalled`, `install`, `importToProject`, `listImported`, `removeImport`, `saveSettings`, `runAction`, `checkUpdates`, `uninstall`, `update`
 - `window.pdv.moduleWindows.*` — module GUI windows: `open`, `close`, `context`, `executeInMain`; push: `onExecuteRequest(cb) → unsub`
 - `window.pdv.guiEditor.*` — GUI editor and viewer windows: `open` (editor), `openViewer` (standalone GUI viewer), `context`, `read`, `save`
-- `window.pdv.environment.*` — Python environment management: `list`, `check`, `install`, `refresh`; push: `onInstallOutput(cb) → unsub`
+- `window.pdv.environment.*` — Python environment management: `list`, `check`, `install`, `refresh`, `activeInfo` (active kernel's environment metadata — mode, interpreter, Python version — for the Project Environment tab), plus the uv package UI: `listPackages`, `addPackage`, `removePackage`, `upgradePackage`; push: `onInstallOutput(cb) → unsub`, `onEnvActivity(cb) → unsub` (streaming uv output)
 - `window.pdv.chrome.*` — window chrome controls: `getInfo`, `minimize`, `toggleMaximize`, `close`; push: `onStateChanged(cb) → unsub`
-- `window.pdv.system.*` — constant host facts injected at preload time: `platform` (the main process's `process.platform`). Exposed as a plain value, not a function — it never changes during a session, so it needs no IPC channel
+- `window.pdv.system.*` — constant host facts injected at preload time: `platform` (the main process's `process.platform`), `supportedPythonVersions` and `defaultPythonVersion` (the New Project dialog's version range, from `python-versions.ts`). Exposed as plain values, not functions — they never change during a session, so they need no IPC channel
 - `window.pdv.launchers.*` — action-bar external-app launchers: `openAgent` (launch the configured AI agent in a terminal), `openWorkingDir` (open the active kernel's working directory in the configured editor/IDE), `checkAvailability` (probe whether a terminal/editor/file-manager is installed, without launching it — used to gate Settings Save)
 - `window.pdv.progress.*` — operation progress: push only: `onProgress(cb) → unsub`
 - `window.pdv.menu.*` — menu bridge: `updateRecentProjects(paths)`, `onAction(cb) → unsub`
@@ -1766,18 +1789,23 @@ The `chrome.*` IPC namespace (§11.2) provides the renderer with platform-specif
 
 ### 11.6 Kernel Restart with Project Reload
 
-When `kernels.restart()` is called while a project is loaded, the main process automatically preserves and reloads project state:
+When `kernels.restart()` is called, the main process automatically preserves and reloads project state:
 
-1. **Snapshot the uv environment** (uv mode only): before the old working directory is deleted, read its `pyproject.toml` and `uv.lock` into memory. This captures any packages installed during the session (e.g. via `pdv.install()`, §10.5.11) that may not yet be in the save directory.
-2. Stop the old kernel, start a new one (preserving `activeProjectDir`)
-3. **Re-materialize the uv environment** (uv mode only): write the snapshot into the new working directory and run the §10.5.9 sequence (`uv sync` → install `pdv-python`), launching the new kernel against the project venv interpreter. Shared-mode kernels skip this and relaunch on the app-selected interpreter as before.
-4. Send `project.onReloading` push with `{ status: "reloading" }` — renderer shows overlay
-5. Copy project files from the save directory to the new kernel's working directory
-6. Call `projectManager.load()` to re-populate the tree via `pdv.project.load`
-7. Re-run module setup (`pdv.modules.setup`)
-8. Send `project.onReloading` push with `{ status: "ready" }` — renderer removes overlay
+1. **Pre-restart tree snapshot**: attempt a fresh `.autosave` snapshot while the old session is still alive (§8.4 flow 3) — but **only when the server process is alive and idle**. Liveness is checked via the process state (`getKernelProcessState` / `status === "dead"`), not `executionState` alone, because the execution state stays stale-`idle` after a crash. The snapshot's kernel comm is bounded to 5 s (instead of the default 30 s) so a wedged-but-alive server cannot stall the restart. When skipped or failed, the most recent timer autosave serves as the snapshot.
+2. **Snapshot the uv environment** (uv mode only): before the old working directory is deleted, read its `pyproject.toml`, `uv.lock`, and `.python-version` into memory. This captures any packages installed during the session (e.g. via `pdv.install()`, §10.5.11) that may not yet be in the save directory. Hardening: if the old working directory is gone but the saved project has a `pyproject.toml`, the environment is rebuilt from the save directory instead of silently falling back to a shared-mode start.
+3. Stop the old kernel, start a new one (preserving `activeProjectDir` and carrying the per-kernel environment metadata to the new kernel id)
+4. **Re-materialize the uv environment** (uv mode only): write the snapshot into the new working directory and run the §10.5.9 sequence (`uv sync --python <pin>` → install `pdv-python`), launching the new kernel against the project venv interpreter. Shared-mode kernels skip this and relaunch on the app-selected interpreter as before.
+5. Send `project.onReloading` push with `{ status: "reloading" }` — renderer shows overlay
+6. Copy project files from the save directory to the new kernel's working directory, overlaying the `.autosave` snapshot when one exists (unsaved sessions restore via the welcome screen's recovery routine instead)
+7. Call `projectManager.load()` to re-populate the tree via `pdv.project.load`
+8. Re-run module setup (`pdv.modules.setup`)
+9. Send `project.onReloading` push with `{ status: "ready" }` — renderer removes overlay
 
-This ensures the project venv, tree state, module bindings, and `sys.path` configuration survive kernel restarts. Because the renderer's environment-mode indicator reflects the project (not the individual kernel), it stays correct across a restart that re-materializes the same venv.
+`kernels.restart` returns a `KernelRestartResult` — `{ kernel, restoredFromAutosave }` — so the renderer can tell the user what came back ("restored from the last autosave" vs "starting fresh") in the console.
+
+**Crash recovery.** The kernel crash handler (`onCrash`) deliberately does **not** delete the crashed kernel's working directory or its map entry: the directory holds the uv env spec the restart snapshots and any `.autosave` of an unsaved session. (It used to delete it, which silently demoted a crashed uv project to shared mode and destroyed unsaved work.) `kernels.restart` and `kernels.stop` clean the directory up; if the user quits instead, the stale `session.lock` surfaces it on the welcome screen as a recoverable session (§8.4). The StatusBar offers the ⟳ Restart control both while connected and in the `error` state when a restartable session exists (`canRestart`, i.e. a kernel id is known) — a crashed session can be restarted; a failed start cannot, and its recovery flows through the environment-setup retry surfaces instead.
+
+This ensures the project venv, tree state, module bindings, and `sys.path` configuration survive kernel restarts — including crashes. Because the renderer's environment-mode indicator reflects the project (not the individual kernel), it stays correct across a restart that re-materializes the same venv.
 
 ---
 

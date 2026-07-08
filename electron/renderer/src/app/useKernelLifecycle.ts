@@ -131,7 +131,10 @@ export function useKernelLifecycle(options: UseKernelLifecycleOptions) {
     });
   }, [doStartKernel]);
 
-  const handleEnvSave = useCallback(async (paths: { pythonPath?: string; juliaPath?: string }): Promise<boolean> => {
+  const handleEnvSave = useCallback(async (
+    paths: { pythonPath?: string; juliaPath?: string },
+    opts?: { restart?: boolean },
+  ): Promise<boolean> => {
     const language = paths.juliaPath && !paths.pythonPath ? 'julia' : 'python';
     const updatedConfig: Config = {
       kernelSpec: config?.kernelSpec ?? null,
@@ -146,6 +149,10 @@ export function useKernelLifecycle(options: UseKernelLifecycleOptions) {
 
     await window.pdv.config.set(updatedConfig);
     setConfig(updatedConfig);
+    // restart: false — a session is already running; the selection only
+    // updates the global default runtime for future sessions. Never stop
+    // or demote the live session's environment (§10.5.19).
+    if (opts?.restart === false) return true;
     return startKernel(updatedConfig, language);
   }, [config, setConfig, startKernel]);
 
@@ -155,10 +162,20 @@ export function useKernelLifecycle(options: UseKernelLifecycleOptions) {
     try {
       setKernelStatus('starting');
       setLastError(undefined);
-      const newKernel = await window.pdv.kernels.restart(currentKernelId);
-      setCurrentKernelId(newKernel.id);
+      const { kernel, restoredFromAutosave } =
+        await window.pdv.kernels.restart(currentKernelId);
+      setCurrentKernelId(kernel.id);
       setKernelStatus('ready');
-      setLogs([]);
+      // Replace the log history with a single entry saying what came back,
+      // so a crash-restart user knows whether their work was recovered.
+      setLogs([{
+        id: `restart-${Date.now()}`,
+        timestamp: Date.now(),
+        code: '',
+        stdout: restoredFromAutosave
+          ? 'Session restarted — restored from the last autosave.'
+          : 'Session restarted — no autosave found; starting fresh.',
+      }]);
       setNamespaceRefreshToken((prev) => prev + 1);
       setTreeRefreshToken((prev) => prev + 1);
     } catch (error) {

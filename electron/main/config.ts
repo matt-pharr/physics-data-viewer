@@ -17,6 +17,8 @@
 import * as fs from "fs";
 import * as path from "path";
 
+import { atomicWriteFileSync } from "./atomic-write";
+
 import {
   TERMINAL_PRESET_LIST,
   type AgentLauncherConfig,
@@ -615,8 +617,11 @@ export class ConfigStore {
     }
   }
 
-  // Persist current in-memory state to disk.
+  // Persist current in-memory state to disk. Atomic (tmp + rename): a
+  // crash mid-write must not tear preferences.json — the loader treats
+  // an unparseable file as corrupt and resets ALL settings, including
+  // the persisted MCP auth token.
   private persist(): void {
-    fs.writeFileSync(this.configPath, JSON.stringify(this.state, null, 2), "utf8");
+    atomicWriteFileSync(this.configPath, JSON.stringify(this.state, null, 2));
   }
 }
