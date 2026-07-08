@@ -2,15 +2,23 @@
 pdv.default_handlers — Built-in double-click plot handlers for common
 scientific Python types.
 
-Registers ``@pdv.handle(...)`` entries at kernel bootstrap so that
-double-clicking a tree node whose value is an ``np.ndarray``,
-``pd.Series``, ``pd.DataFrame``, or ``xr.DataArray`` opens a matplotlib
-window with a sensible default plot. Registrations are skipped silently
-if the corresponding library is not installed.
+Registers ``@pdv.handle(...)`` entries so that double-clicking a tree
+node whose value is an ``np.ndarray``, ``pd.Series``, ``pd.DataFrame``,
+or ``xr.DataArray`` opens a matplotlib window with a sensible default
+plot.
+
+Registration is **lazy**: :func:`register_defaults` only registers
+handlers for libraries that are already in ``sys.modules``, and the
+handler-registry lookups (:func:`pdv.modules.has_handler_for`,
+``dispatch_handler``) call it on every lookup. Importing numpy, pandas,
+and xarray eagerly at kernel bootstrap cost real startup latency and
+undercut the never-import-xarray design in ``serialization.py`` — and a
+tree value can only *be* one of these types if its library is already
+imported, so the sys.modules gate loses nothing.
 
 Users can override any default by registering their own handler for the
-same type in a module — ``pdv.handle`` overwrites with a one-line
-warning, which is the documented contract.
+same type in a module. Defaults never overwrite an existing
+registration, so a user handler wins regardless of registration order.
 
 Behavior summary
 ----------------
@@ -35,26 +43,61 @@ from __future__ import annotations
 from typing import Any, Callable
 
 
+# Libraries whose defaults have been registered since the last reset.
+# Latch so the per-lookup register_defaults() call is a cheap set check.
+_lazy_done: set[str] = set()
+
+
 def register_defaults() -> None:
-    """Register all built-in plot handlers whose dependencies are installed.
+    """Register built-in plot handlers for every library already imported.
 
-    Called once from :func:`pdv.bootstrap`. Safe to call multiple times —
-    ``pdv.handle`` normally warns on overwrite, but the overwrite warning
-    is meant to flag user-vs-user conflicts, so it is suppressed here.
+    Called lazily from the handler-registry lookups
+    (:func:`pdv.modules.has_handler_for` / ``dispatch_handler``) rather
+    than eagerly at kernel bootstrap — see the module docstring for why.
+    Checking ``sys.modules`` never triggers an import.
+
+    Never overwrites an existing registration (user handlers win). Safe
+    to call any number of times; each library is processed once until
+    :func:`pdv.modules.clear_handlers` resets the latch.
     """
-    import warnings  # noqa: PLC0415
+    import sys  # noqa: PLC0415
 
-    from pdv.modules import handle  # noqa: PLC0415
+    for lib_name, registrar in (
+        ("numpy", _register_numpy),
+        ("pandas", _register_pandas),
+        ("xarray", _register_xarray),
+    ):
+        if lib_name in _lazy_done or lib_name not in sys.modules:
+            continue
+        _lazy_done.add(lib_name)
+        registrar(_default_handle)
 
-    with warnings.catch_warnings():
-        warnings.filterwarnings(
-            "ignore",
-            message=r"Handler for .* overwritten.*",
-            category=UserWarning,
-        )
-        _register_numpy(handle)
-        _register_pandas(handle)
-        _register_xarray(handle)
+
+def _reset_lazy_state() -> None:
+    """Forget which libraries' defaults were registered.
+
+    Called by :func:`pdv.modules.clear_handlers` so a registry reset
+    (tests, primarily) gets defaults re-registered on the next lookup.
+    """
+    _lazy_done.clear()
+
+
+def _default_handle(cls: type) -> Callable:
+    """``pdv.handle`` variant for builtin defaults.
+
+    Skips registration when *cls* already has a handler, so a
+    user-registered handler for the same type always wins over the
+    builtin default — regardless of which registered first.
+    """
+
+    def decorator(func: Callable) -> Callable:
+        from pdv.modules import _handler_registry, handle  # noqa: PLC0415
+
+        if cls in _handler_registry:
+            return func
+        return handle(cls)(func)
+
+    return decorator
 
 
 def _plot_or_notice(path: str, draw: Callable[[Any, Any], None]) -> None:

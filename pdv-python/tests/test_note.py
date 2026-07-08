@@ -153,6 +153,9 @@ class TestDeserializeMarkdown:
     """Tests for deserialize_node() with markdown format."""
 
     def test_deserialize_reads_md_content(self, tmp_path):
+        """Not the production load path (tree_loader reconstructs PDVNote
+        from the descriptor type), but deserialize_node keeps markdown→text
+        for API symmetry with FORMAT_TXT."""
         node_uuid = "note_des_001"
         md_dir = tmp_path / "tree" / node_uuid
         md_dir.mkdir(parents=True)

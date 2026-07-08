@@ -626,6 +626,13 @@ class TestRoundtrip:
         assert post_load_checksum == checksum_before
 
 
+class _PlainState:
+    """Module-level (hence picklable) class with the default object repr."""
+
+    def __init__(self, x: int):
+        self.x = x
+
+
 class TestDunderDigestHook:
     """``__pdv_digest__`` opt-in for custom (KIND_UNKNOWN) values."""
 
@@ -649,6 +656,22 @@ class TestDunderDigestHook:
         cls = self._make_class()
         t1 = _make_tree(node=cls(7))
         t2 = _make_tree(node=cls(8))
+        assert tree_checksum(t1) != tree_checksum(t2)
+
+    def test_default_repr_object_digest_stable_across_instances(self):
+        """Without __pdv_digest__, the fallback digest is content-based
+        (pickle bytes), not repr-based. The default object repr embeds the
+        memory address, so a repr fallback changed every session and
+        guaranteed autosave-cache misses for custom objects (regression)."""
+        t1 = _make_tree(node=_PlainState(7))
+        t2 = _make_tree(node=_PlainState(7))
+        # Same content, different instances (and different addresses/reprs).
+        assert repr(t1["node"]) != repr(t2["node"])
+        assert tree_checksum(t1) == tree_checksum(t2)
+
+    def test_default_repr_object_digest_tracks_content(self):
+        t1 = _make_tree(node=_PlainState(7))
+        t2 = _make_tree(node=_PlainState(8))
         assert tree_checksum(t1) != tree_checksum(t2)
 
     def test_digest_exception_falls_back_to_repr(self):

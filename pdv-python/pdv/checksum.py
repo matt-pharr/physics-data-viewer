@@ -14,8 +14,9 @@ rather than raising, so partial sub-tree hashes work during debugging.
 Custom unknown-kind values may opt into stable digesting by defining a
 ``__pdv_digest__`` method (part of the dunder protocol — see
 :mod:`pdv.serializers`). When present, its byte payload is fed into the
-hasher under the ``b"dunder\\x00"`` type tag; otherwise ``repr(node)`` is
-used as a best-effort fallback.
+hasher under the ``b"dunder\\x00"`` type tag; otherwise the pickled
+bytes are used as a content-stable fallback (with an address-stripped
+``repr`` as the last resort for unpicklable values).
 
 XXH3-128 is a non-cryptographic hash used purely for change detection.
 It is not suitable for security purposes.
@@ -107,8 +108,8 @@ def _feed_node(h: xxhash.xxh3_128, node: Any, working_dir: str | None) -> None:
 
     Parameters
     ----------
-    h : hashlib._Hash
-        The running SHA-256 hasher.
+    h : xxhash.xxh3_128
+        The running XXH3-128 hasher.
     node : Any
         The value to encode.
     working_dir : str or None
@@ -324,7 +325,31 @@ def _feed_node(h: xxhash.xxh3_128, node: Any, working_dir: str | None) -> None:
                 return
             except Exception:  # noqa: BLE001
                 pass
-        _feed_str(h, repr(node))
+        # No dunder: feed the pickled bytes. Pickle is content-based, so
+        # the digest is stable across sessions and across save/load
+        # round-trips — unlike a repr() fallback, whose default object
+        # repr embeds the memory address and therefore changed on every
+        # run, guaranteeing autosave-cache misses and checksum mismatches
+        # for custom objects. (Unordered members — e.g. a set of strings
+        # under hash randomization — can still vary across interpreter
+        # runs; that limitation is inherent without type knowledge.)
+        import pickle  # noqa: PLC0415
+
+        try:
+            payload = pickle.dumps(node, protocol=5)
+        except Exception:  # noqa: BLE001
+            payload = None
+        if payload is not None:
+            h.update(b"pickle\x00")
+            h.update(struct.pack("<Q", len(payload)))
+            h.update(payload)
+            return
+        # Unpicklable and no dunder: last-resort repr, with any
+        # "at 0x..." memory addresses stripped so the digest is at least
+        # stable for the common default-repr shape.
+        import re  # noqa: PLC0415
+
+        _feed_str(h, re.sub(r" at 0x[0-9a-fA-F]+", "", repr(node)))
 
 
 def _feed_xarray_array(h: xxhash.xxh3_128, name: str, da: Any) -> None:
@@ -364,8 +389,8 @@ def _feed_str(h: xxhash.xxh3_128, s: str) -> None:
 
     Parameters
     ----------
-    h : hashlib._Hash
-        The running SHA-256 hasher.
+    h : xxhash.xxh3_128
+        The running XXH3-128 hasher.
     s : str
         String to encode.
     """
@@ -387,8 +412,8 @@ def _feed_file_content(
 
     Parameters
     ----------
-    h : hashlib._Hash
-        The running SHA-256 hasher.
+    h : xxhash.xxh3_128
+        The running XXH3-128 hasher.
     node : PDVFile
         A file-backed node with a ``resolve_path()`` method.
     working_dir : str or None

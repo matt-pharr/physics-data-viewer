@@ -44,7 +44,10 @@ def handle_init(msg: dict) -> None:
         Parsed PDV message envelope.
     """
     from pdv.comms import get_pdv_tree, send_error, send_message  # noqa: PLC0415
-    from pdv.environment import validate_working_dir  # noqa: PLC0415
+    from pdv.environment import (  # noqa: PLC0415
+        reset_cwd_to_home,
+        validate_working_dir,
+    )
     from pdv.errors import PDVPathError  # noqa: PLC0415
 
     msg_id = msg.get("msg_id")
@@ -92,7 +95,7 @@ def handle_init(msg: dict) -> None:
         server.start()
         comms_mod._query_server = server
 
-    os.chdir(os.path.expanduser("~"))
+    reset_cwd_to_home()
     send_message("pdv.init.response", {}, in_reply_to=msg_id)
 
 

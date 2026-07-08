@@ -104,6 +104,9 @@ def has_handler_for(obj: Any) -> bool:
         True if a handler is registered for ``type(obj)`` or any of its bases,
         or if the class defines a ``__pdv_handle__`` method.
     """
+    from pdv.default_handlers import register_defaults  # noqa: PLC0415
+
+    register_defaults()
     for cls in type(obj).__mro__:
         if cls in _handler_registry:
             return True
@@ -135,6 +138,9 @@ def dispatch_handler(obj: Any, path: str, pdv_tree: Any) -> dict:
         ``{"dispatched": False, "error": "..."}`` when no handler matches
         or the chosen handler raised.
     """
+    from pdv.default_handlers import register_defaults  # noqa: PLC0415
+
+    register_defaults()
     for cls in type(obj).__mro__:
         if cls in _handler_registry:
             try:
@@ -176,5 +182,8 @@ def get_handler_registry() -> dict[str, str]:
 
 
 def clear_handlers() -> None:
-    """Clear the handler registry. Used in tests."""
+    """Clear the handler registry (and the lazy-defaults latch). Used in tests."""
+    from pdv.default_handlers import _reset_lazy_state  # noqa: PLC0415
+
     _handler_registry.clear()
+    _reset_lazy_state()

@@ -161,6 +161,16 @@ def save_project(path: str | None = None) -> None:
         from pdv.handlers.project import serialize_tree_to_dir  # noqa: PLC0415
 
         results = serialize_tree_to_dir(tree, save_dir)
+        if results.get("missing_files"):
+            # The save was aborted before tree-index.json was written (see
+            # serialize_tree_to_dir). The app also surfaces this, but the
+            # user invoked save_project() from the console, so say it here.
+            missing = results["missing_files"]
+            print(
+                f"PDV: save aborted — {len(missing)} node(s) have missing "
+                f"backing files; nothing was persisted:\n  "
+                + "\n  ".join(missing)
+            )
         send_message(
             "pdv.project.save_completed",
             {"save_dir": save_dir, **results},
@@ -541,14 +551,13 @@ def bootstrap(ip=None):
     # Users can still override with %matplotlib <backend> after bootstrap.
     _configure_matplotlib()
 
-    # Register built-in double-click plot handlers for ndarray / Series /
-    # DataFrame / DataArray. Each registration is guarded by an import
-    # check, so missing optional deps just skip silently. Users can
-    # override any of these by registering their own handler for the
-    # same type in a module.
-    from pdv.default_handlers import register_defaults  # noqa: PLC0415
-
-    register_defaults()
+    # Built-in double-click plot handlers (ndarray / Series / DataFrame /
+    # DataArray) register lazily: the handler-registry lookups in
+    # pdv.modules call default_handlers.register_defaults(), which
+    # registers per-library defaults once numpy/pandas/xarray actually
+    # appear in sys.modules. Importing those libraries here cost real
+    # startup latency and undercut serialization.py's never-import-xarray
+    # design, so bootstrap deliberately does nothing for them.
 
     # Pay jedi's first-call grammar-table load cost here, on the same shell
     # thread that will later serve complete_request, so the user's first

@@ -157,7 +157,6 @@ export interface TreeNodeData
     | 'has_children'
     | 'python_type'
     | 'has_handler'
-    | 'created_at'
     | 'updated_at'
     | 'module_id'
     | 'module_name'
@@ -171,7 +170,6 @@ export interface TreeNodeData
   hasChildren: boolean;
   pythonType?: string;
   hasHandler?: boolean;
-  createdAt?: string;
   updatedAt?: string;
   moduleId?: string;
   moduleName?: string;

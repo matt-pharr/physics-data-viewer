@@ -320,7 +320,6 @@ class TestSerializeAndDeserialize:
             "parent_path",
             "type",
             "has_children",
-            "created_at",
             "updated_at",
             "storage",
             "metadata",
@@ -1005,3 +1004,74 @@ class TestVerifyOrRelocateCachedFile:
         canonical = uuid_tree_path(str(tmp_path), node_uuid, "x.npy")
         assert not os.path.exists(canonical)
         assert not os.path.exists(canonical + ".tmp")
+
+
+class TestAtomicDataWrites:
+    """Data-node writes must go through temp + rename so a crash mid-write
+    can never tear a file that a previously written tree-index.json (via an
+    autosave-cache hit) still references."""
+
+    def test_atomic_write_failure_preserves_existing_file(self, tmp_path):
+        from pdv.serialization import _atomic_write
+
+        target = tmp_path / "data.npy"
+        target.write_bytes(b"known-good contents")
+
+        def _torn_write(tmp_file: str) -> None:
+            with open(tmp_file, "wb") as fh:
+                fh.write(b"partial")
+            raise RuntimeError("simulated crash mid-write")
+
+        with pytest.raises(RuntimeError, match="simulated crash"):
+            _atomic_write(str(target), _torn_write)
+
+        # The final path still has the old bytes and no temp file remains.
+        assert target.read_bytes() == b"known-good contents"
+        assert list(tmp_path.iterdir()) == [target]
+
+    def test_atomic_write_success_replaces_contents(self, tmp_path):
+        from pdv.serialization import _atomic_write
+
+        target = tmp_path / "data.bin"
+        target.write_bytes(b"old")
+
+        def _write(tmp_file: str) -> None:
+            with open(tmp_file, "wb") as fh:
+                fh.write(b"new")
+
+        _atomic_write(str(target), _write)
+        assert target.read_bytes() == b"new"
+        assert list(tmp_path.iterdir()) == [target]
+
+    def test_serialize_ndarray_writes_valid_npy(self, tmp_path):
+        np = pytest.importorskip("numpy")
+
+        descriptor = serialize_node("arr", np.arange(5), str(tmp_path))
+        value = deserialize_node(descriptor["storage"], str(tmp_path))
+        assert list(value) == [0, 1, 2, 3, 4]
+        # No temp droppings next to the written file.
+        node_dir = tmp_path / "tree" / descriptor["storage"]["uuid"]
+        assert sorted(p.name for p in node_dir.iterdir()) == ["arr.npy"]
+
+    def test_custom_serializer_failure_leaves_no_partial_file(self, tmp_path):
+        from pdv import serializers
+
+        class Torn:
+            pass
+
+        def _save(value, file_path):
+            with open(file_path, "w", encoding="utf-8") as fh:
+                fh.write("partial")
+            raise RuntimeError("boom")
+
+        serializers.register(
+            Torn, format="torn", extension=".torn", save=_save, load=lambda p: None
+        )
+        try:
+            with pytest.raises(PDVSerializationError, match="failed to save"):
+                serialize_node("bad", Torn(), str(tmp_path))
+            tree_dir = tmp_path / "tree"
+            leftovers = list(tree_dir.rglob("*")) if tree_dir.exists() else []
+            assert all(not p.is_file() for p in leftovers)
+        finally:
+            serializers.clear()

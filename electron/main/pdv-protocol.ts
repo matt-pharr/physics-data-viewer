@@ -537,9 +537,7 @@ export interface NodeDescriptor {
   type: NodeKindValue;
   /** True if this node has child nodes. */
   has_children: boolean;
-  /** ISO 8601 creation timestamp. */
-  created_at?: string;
-  /** ISO 8601 last-modification timestamp. */
+  /** ISO 8601 timestamp of when this descriptor was serialized. */
   updated_at?: string;
   /** Human-readable preview string (e.g. "float64 array (1024 × 4)"). */
   preview?: string;

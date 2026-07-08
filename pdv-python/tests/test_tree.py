@@ -551,6 +551,43 @@ class TestPDVScript:
             {"name": "label", "type": "any", "default": None, "required": False},
         ]
 
+    def test_extract_script_params_does_not_execute_the_script(self, tmp_path):
+        """Param extraction must be side-effect-free: the UI calls it via
+        pdv.script.params, and the old import-based implementation ran the
+        script's entire top-level code just to read run()'s signature."""
+        script_file = tmp_path / "side_effect.py"
+        sentinel = tmp_path / "executed.txt"
+        script_file.write_text(
+            f"open({str(sentinel)!r}, 'w').write('ran')\n"
+            "def run(pdv_tree: dict, n: int = 3):\n"
+            "    return {}\n"
+        )
+        from pdv.tree import _extract_script_params
+
+        params = _extract_script_params(str(script_file))
+        assert params == [
+            {"name": "n", "type": "int", "default": 3, "required": False}
+        ]
+        assert not sentinel.exists()
+
+    def test_extract_script_params_nonliteral_default_falls_back_to_source(
+        self, tmp_path
+    ):
+        """Non-literal defaults can't be evaluated without importing the
+        script, so their source text is surfaced instead."""
+        script_file = tmp_path / "nonliteral.py"
+        script_file.write_text(
+            "import numpy as np\n"
+            "def run(pdv_tree: dict, angle: float = np.pi, *, tag: str = 'x'):\n"
+            "    return {}\n"
+        )
+        from pdv.tree import _extract_script_params
+
+        assert _extract_script_params(str(script_file)) == [
+            {"name": "angle", "type": "float", "default": "np.pi", "required": False},
+            {"name": "tag", "type": "str", "default": "x", "required": False},
+        ]
+
     def test_extract_script_params_empty_when_missing_or_invalid(self, tmp_path):
         """Missing or invalid script files produce an empty params list."""
         from pdv.tree import _extract_script_params

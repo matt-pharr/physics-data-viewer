@@ -34,7 +34,8 @@ ARCHITECTURE.md §7.2 (node types), §7.3 (node descriptor)
 from __future__ import annotations
 
 import math
-from typing import Any
+from dataclasses import dataclass
+from typing import Any, Callable
 
 from pdv.errors import PDVSerializationError
 
@@ -447,6 +448,584 @@ def _try_autosave_cache(
     return digest, None
 
 
+# ---------------------------------------------------------------------------
+# serialize_node internals — shared descriptor/storage builders plus one
+# serializer function per node kind, dispatched from serialize_node().
+# ---------------------------------------------------------------------------
+
+# Storage format for each file-backed PDVFile subclass kind. All of these
+# are handled by :func:`_serialize_file_backed`, which copies the node's
+# existing source file rather than writing a new data file.
+_PDVFILE_KIND_FORMATS: dict[str, str] = {
+    KIND_SCRIPT: FORMAT_PY_SCRIPT,
+    KIND_MARKDOWN: FORMAT_MARKDOWN,
+    KIND_GUI: FORMAT_GUI_JSON,
+    KIND_LIB: FORMAT_PY_LIB,
+    KIND_NAMELIST: FORMAT_NAMELIST,
+    KIND_FILE: FORMAT_FILE,
+}
+
+
+@dataclass
+class _SerializeContext:
+    """Per-call state threaded through the per-kind serializer functions.
+
+    Bundles the arguments of :func:`serialize_node` (with ``source_dir``
+    already defaulted to ``working_dir``) plus the derived ``key`` and
+    ``preview`` so per-kind functions take a uniform
+    ``(value, descriptor, ctx)`` signature.
+    """
+
+    tree_path: str
+    key: str
+    working_dir: str
+    source_dir: str
+    trusted: bool
+    preview: str
+    autosave_cache: "dict[str, tuple[bytes, dict]] | None"
+    autosave_hits: "list[int] | None"
+
+
+def _utc_now_iso() -> str:
+    """Return the current UTC time as an ISO-8601 string with a ``Z`` suffix."""
+    import datetime  # noqa: PLC0415
+
+    return (
+        datetime.datetime.now(datetime.timezone.utc)
+        .isoformat()
+        .replace("+00:00", "Z")
+    )
+
+
+def _base_descriptor(tree_path: str, value: Any, kind: str) -> dict:
+    """Build the descriptor fields common to every node kind.
+
+    Parameters
+    ----------
+    tree_path : str
+        Dot-separated tree path; also used as ``id`` and to derive
+        ``key``/``parent_path``.
+    value : Any
+        The value being serialized (consulted for ``python_type`` and
+        module-owned-file metadata).
+    kind : str
+        Kind string from :func:`detect_kind`, stored as ``type``.
+
+    Returns
+    -------
+    dict
+        Descriptor with the universal top-level fields; the caller's
+        per-kind serializer fills in ``storage``/``metadata`` (and
+        ``uuid``/``has_children`` where applicable).
+    """
+    from pdv.tree import PDVFile  # noqa: PLC0415
+
+    parts = tree_path.split(".")
+    now = _utc_now_iso()
+    descriptor: dict = {
+        "id": tree_path,
+        "path": tree_path,
+        "key": parts[-1],
+        "parent_path": ".".join(parts[:-1]) if len(parts) > 1 else "",
+        "type": kind,
+        "python_type": python_type_string(value),
+        "has_children": False,
+        # Single timestamp: when this descriptor was serialized. A
+        # created_at used to sit beside it but was regenerated on every
+        # save (always equal to updated_at), so it recorded nothing real.
+        "updated_at": now,
+    }
+    # Module-owned file nodes carry the rel-path inside their owning
+    # module's root so the save-time sync step can mirror working-dir
+    # edits back to <saveDir>/modules/<id>/. See ARCHITECTURE.md §5.13.
+    if isinstance(value, PDVFile) and getattr(value, "source_rel_path", None):
+        descriptor["source_rel_path"] = value.source_rel_path
+    return descriptor
+
+
+def _file_storage(node_uuid: str, filename: str, fmt: str) -> dict:
+    """Return the storage sub-dict for a ``local_file``-backed node."""
+    return {
+        "backend": "local_file",
+        "uuid": node_uuid,
+        "filename": filename,
+        "format": fmt,
+    }
+
+
+def _inline_storage(value: Any) -> dict:
+    """Return the storage sub-dict for an inline (index-embedded) value."""
+    return {"backend": "inline", "format": FORMAT_INLINE, "value": value}
+
+
+def _mint_data_file(ctx: _SerializeContext, extension: str) -> "tuple[str, str, str]":
+    """Mint a fresh UUID target for a data node's backing file.
+
+    Parameters
+    ----------
+    ctx : _SerializeContext
+        Current serialize call context (``key`` names the file,
+        ``working_dir`` roots it).
+    extension : str
+        Filename extension including the leading dot (e.g. ``".npy"``).
+
+    Returns
+    -------
+    tuple[str, str, str]
+        ``(node_uuid, filename, file_path)`` with the parent directory
+        already created, ready for the caller to write ``file_path``.
+    """
+    from pdv.environment import (  # noqa: PLC0415
+        ensure_parent,
+        generate_node_uuid,
+        uuid_tree_path,
+    )
+
+    node_uuid = generate_node_uuid()
+    filename = ctx.key + extension
+    file_path = uuid_tree_path(ctx.working_dir, node_uuid, filename)
+    ensure_parent(file_path)
+    return node_uuid, filename, file_path
+
+
+def _atomic_write(file_path: str, write: "Callable[[str], None]") -> None:
+    """Write a data file via a same-directory temp file + atomic rename.
+
+    ``write(tmp_path)`` produces the content; ``os.replace`` then moves it
+    into place, so a crash mid-write can never tear ``file_path``. This
+    matters for autosave-cache hits: the previous ``tree-index.json``
+    keeps referencing the same UUID file across saves, so a torn write
+    would corrupt a file that an intact index still points at.
+
+    The temp file lives in the same directory (same-volume rename) and
+    keeps the real filename as its suffix (``.tmp-<filename>``) so
+    extension-sniffing writers — custom serializers, ``np.save``'s
+    auto-append — behave exactly as they would on the final path.
+
+    On failure the temp file is removed best-effort and the exception
+    propagates.
+    """
+    import os  # noqa: PLC0415
+
+    tmp_path = os.path.join(
+        os.path.dirname(file_path), ".tmp-" + os.path.basename(file_path)
+    )
+    try:
+        write(tmp_path)
+        os.replace(tmp_path, file_path)
+    except BaseException:
+        try:
+            os.remove(tmp_path)
+        except OSError:
+            pass
+        raise
+
+
+def _write_pickle(file_path: str, value: Any) -> None:
+    """Pickle ``value`` to ``file_path`` (atomically, via temp + rename)."""
+    import pickle  # noqa: PLC0415
+
+    def _write(tmp_path: str) -> None:
+        with open(tmp_path, "wb") as fh:
+            pickle.dump(value, fh)
+
+    _atomic_write(file_path, _write)
+
+
+def _serialize_via_cache(
+    value: Any,
+    descriptor: dict,
+    ctx: _SerializeContext,
+    write: "Callable[[], None]",
+) -> dict:
+    """Run the shared autosave-cache pattern around a data-node write.
+
+    Checks the cache first (returning the cached descriptor verbatim on a
+    hit), otherwise calls ``write()`` — which must write the backing file
+    and fill ``descriptor``'s ``storage``/``metadata`` — and stores
+    ``(digest, descriptor)`` back into the cache. Single home for the
+    check/write/store dance shared by every cached data-node kind
+    (ndarray, DataFrame/Series, long text, binary, unknown).
+
+    If ``write`` raises, nothing is cached and the exception propagates.
+    """
+    digest, cached = _try_autosave_cache(
+        ctx.autosave_cache,
+        ctx.tree_path,
+        value,
+        ctx.source_dir,
+        ctx.autosave_hits,
+        ctx.working_dir,
+    )
+    if cached is not None:
+        return cached
+    write()
+    if digest is not None:
+        ctx.autosave_cache[ctx.tree_path] = (digest, descriptor)  # type: ignore[index]
+    return descriptor
+
+
+def _pickle_node(
+    value: Any,
+    descriptor: dict,
+    ctx: _SerializeContext,
+    metadata: "dict | None" = None,
+) -> dict:
+    """Write ``value`` as a pickle data file and finish ``descriptor``.
+
+    Shared by every branch that stores via pickle (non-JSON-native
+    scalars, non-array mappings/sequences, xarray objects, trusted
+    unknowns). Does not touch the autosave cache — callers that
+    participate wrap this in :func:`_serialize_via_cache`.
+    """
+    node_uuid, filename, file_path = _mint_data_file(ctx, ".pickle")
+    _write_pickle(file_path, value)
+    descriptor["uuid"] = node_uuid
+    descriptor["storage"] = _file_storage(node_uuid, filename, FORMAT_PICKLE)
+    descriptor["metadata"] = (
+        metadata if metadata is not None else {"preview": ctx.preview}
+    )
+    return descriptor
+
+
+def _serialize_folder(value: Any, descriptor: dict, ctx: _SerializeContext) -> dict:
+    """Serialize a PDVTree container node (no backing file)."""
+    descriptor["has_children"] = True
+    descriptor["storage"] = {"backend": "none", "format": "none"}
+    descriptor["metadata"] = {"preview": ctx.preview}
+    return descriptor
+
+
+def _serialize_module(value: Any, descriptor: dict, ctx: _SerializeContext) -> dict:
+    """Serialize a PDVModule node (inline identity metadata, no file)."""
+    module_meta = {
+        "module_id": value.module_id,
+        "name": value.name,
+        "version": value.version,
+    }
+    descriptor["has_children"] = True
+    descriptor["storage"] = {
+        "backend": "inline",
+        "format": FORMAT_MODULE_META,
+        "value": dict(module_meta),
+    }
+    descriptor["metadata"] = {**module_meta, "preview": ctx.preview}
+    return descriptor
+
+
+def _file_backed_metadata(value: Any, kind: str, preview: str) -> dict:
+    """Build the type-specific metadata for a file-backed node.
+
+    ``kind`` is authoritative (it was derived from the value's class in
+    :func:`detect_kind`), so attribute access per kind is safe.
+    """
+    meta: "dict[str, Any]" = {"preview": preview}
+    if kind == KIND_SCRIPT:
+        meta["language"] = value.language
+        meta["doc"] = value.doc
+    elif kind == KIND_LIB:
+        meta["language"] = "python"
+        if value.module_id:
+            meta["module_id"] = value.module_id
+    elif kind == KIND_GUI:
+        if value.module_id:
+            meta["module_id"] = value.module_id
+        meta["language"] = "json"
+    elif kind == KIND_MARKDOWN:
+        meta["language"] = "markdown"
+        if value.title:
+            meta["title"] = value.title
+    elif kind == KIND_NAMELIST:
+        meta["module_id"] = value.module_id
+        meta["namelist_format"] = value.format
+        meta["language"] = "namelist"
+    return meta
+
+
+def _serialize_file_backed(
+    value: Any,
+    descriptor: dict,
+    ctx: _SerializeContext,
+    kind: str,
+) -> dict:
+    """Serialize a PDVFile-backed node by copying its source file.
+
+    Covers every file-backed kind (script, markdown/note, gui, lib,
+    namelist, plain file). The node's own UUID and filename are reused —
+    file-backed nodes have stable identity across saves — and the source
+    file (living in ``ctx.source_dir``, typically the kernel working dir)
+    is smart-copied to ``<working_dir>/tree/<uuid>/<filename>`` when the
+    two paths differ.
+
+    Raises
+    ------
+    PDVSerializationError
+        If the source file does not exist. The save walker catches this
+        and records the node in ``missing_files`` instead of aborting.
+    """
+    import os  # noqa: PLC0415
+
+    from pdv.environment import smart_copy, uuid_tree_path  # noqa: PLC0415
+
+    source_path = value.resolve_path(ctx.source_dir)
+    if not os.path.exists(source_path):
+        raise PDVSerializationError(f"File not found: {source_path}")
+    node_uuid = value.uuid
+    node_filename = value.filename
+    dest_path = uuid_tree_path(ctx.working_dir, node_uuid, node_filename)
+    if os.path.abspath(source_path) != os.path.abspath(dest_path):
+        smart_copy(source_path, dest_path)
+    descriptor["uuid"] = node_uuid
+    descriptor["storage"] = _file_storage(
+        node_uuid, node_filename, _PDVFILE_KIND_FORMATS[kind]
+    )
+    descriptor["metadata"] = _file_backed_metadata(value, kind, ctx.preview)
+    return descriptor
+
+
+def _serialize_ndarray(value: Any, descriptor: dict, ctx: _SerializeContext) -> dict:
+    """Serialize a numpy ndarray to a ``.npy`` file (autosave-cached)."""
+
+    def _write() -> None:
+        import numpy as np  # noqa: PLC0415
+
+        node_uuid, filename, file_path = _mint_data_file(ctx, ".npy")
+
+        def _save(tmp_path: str) -> None:
+            # Write through an open handle — np.save on a path would
+            # append ".npy" to the temp filename and break the rename.
+            with open(tmp_path, "wb") as fh:
+                np.save(fh, value)
+
+        _atomic_write(file_path, _save)
+        descriptor["uuid"] = node_uuid
+        descriptor["storage"] = _file_storage(node_uuid, filename, FORMAT_NPY)
+        descriptor["metadata"] = {
+            "shape": list(value.shape),
+            "dtype": str(value.dtype),
+            "size_bytes": value.nbytes,
+            "preview": ctx.preview,
+        }
+
+    return _serialize_via_cache(value, descriptor, ctx, _write)
+
+
+def _serialize_pandas(
+    value: Any,
+    descriptor: dict,
+    ctx: _SerializeContext,
+    kind: str,
+) -> dict:
+    """Serialize a pandas DataFrame or Series to pickle (autosave-cached).
+
+    PDV saves are internal, so pandas objects go through pickle. This
+    avoids an external parquet-engine dependency and keeps
+    name/index/dtype/extension-type round-trips lossless. Users who want
+    parquet for interchange can write it themselves.
+    """
+
+    def _write() -> None:
+        node_uuid, filename, file_path = _mint_data_file(ctx, ".pickle")
+        _write_pickle(file_path, value)
+        descriptor["uuid"] = node_uuid
+        descriptor["storage"] = _file_storage(node_uuid, filename, FORMAT_PICKLE)
+        shape = list(value.shape) if kind == KIND_DATAFRAME else [len(value)]
+        descriptor["metadata"] = {"shape": shape, "preview": ctx.preview}
+
+    return _serialize_via_cache(value, descriptor, ctx, _write)
+
+
+def _serialize_scalar(value: Any, descriptor: dict, ctx: _SerializeContext) -> dict:
+    """Serialize a scalar: inline when JSON-faithful, pickle otherwise.
+
+    complex isn't JSON-native, so the inline path can't store it. NaN/inf
+    floats are accepted by ``json.dumps`` but serialize as bare
+    ``NaN``/``Infinity`` tokens — invalid JSON that the app's
+    ``JSON.parse`` rejects, corrupting tree-index.json — so they pickle
+    like other non-JSON-native values.
+    """
+    if isinstance(value, complex) or (
+        isinstance(value, float) and not math.isfinite(value)
+    ):
+        return _pickle_node(value, descriptor, ctx)
+    descriptor["storage"] = _inline_storage(value)
+    descriptor["metadata"] = {"preview": ctx.preview}
+    return descriptor
+
+
+def _serialize_text(value: Any, descriptor: dict, ctx: _SerializeContext) -> dict:
+    """Serialize a string: short strings inline, long ones as ``.txt`` files
+    (autosave-cached)."""
+    if len(value) <= 1000:
+        descriptor["storage"] = _inline_storage(value)
+        descriptor["metadata"] = {"preview": ctx.preview}
+        return descriptor
+
+    def _write() -> None:
+        node_uuid, filename, file_path = _mint_data_file(ctx, ".txt")
+
+        def _save(tmp_path: str) -> None:
+            with open(tmp_path, "w", encoding="utf-8") as fh:
+                fh.write(value)
+
+        _atomic_write(file_path, _save)
+        descriptor["uuid"] = node_uuid
+        descriptor["storage"] = _file_storage(node_uuid, filename, FORMAT_TXT)
+        descriptor["metadata"] = {"preview": ctx.preview}
+
+    return _serialize_via_cache(value, descriptor, ctx, _write)
+
+
+def _serialize_mapping(value: Any, descriptor: dict, ctx: _SerializeContext) -> dict:
+    """Serialize a dict: inline, whole-dict pickle, or composite container.
+
+    - Purely JSON-faithful dicts stay inline (cheap, no file).
+    - Dicts with no ndarray/DataFrame/Series anywhere pickle whole, so
+      nested tuples, sets, complex, bytes, etc. round-trip with type
+      fidelity.
+    - Dicts with at least one array leaf become a composite container
+      descriptor; the save walker (``_collect_nodes``) recurses and emits
+      per-leaf descriptors so each array reaches its own fast path
+      (.npy, .pickle, etc). Reconstructed on load as a plain dict.
+    """
+    if _can_inline_json(value):
+        descriptor["storage"] = _inline_storage(value)
+        descriptor["metadata"] = {"preview": ctx.preview}
+        return descriptor
+    if not _has_array_leaf(value):
+        return _pickle_node(value, descriptor, ctx)
+    descriptor["has_children"] = True
+    descriptor["storage"] = {"backend": "none", "format": "none"}
+    descriptor["metadata"] = {"preview": ctx.preview, "composite": True}
+    return descriptor
+
+
+def _serialize_sequence(value: Any, descriptor: dict, ctx: _SerializeContext) -> dict:
+    """Serialize a list/tuple/set/frozenset: inline, pickle, or reject.
+
+    Lists of purely JSON-faithful values stay inline. Anything else —
+    tuples, sets, frozensets, lists containing complex/bytes — pickles,
+    preserving type fidelity at every nesting level. Sequences containing
+    ndarray/DataFrame leaves are rejected: those need to be split into a
+    dict so each array gets its own file for fast random access.
+    """
+    if _can_inline_json(value):
+        descriptor["storage"] = _inline_storage(value)
+        descriptor["metadata"] = {"preview": ctx.preview}
+        return descriptor
+    if not _has_array_leaf(value):
+        return _pickle_node(value, descriptor, ctx)
+    raise PDVSerializationError(
+        f"Sequence at '{ctx.tree_path}' contains array leaves (ndarray, "
+        f"DataFrame, Series). PDV does not yet support composite "
+        f"sequences — wrap the values in a dict with named keys, "
+        f"e.g. {{'0': arr0, '1': arr1}}, so each element can be "
+        f"stored in its own file."
+    )
+
+
+def _serialize_binary(value: Any, descriptor: dict, ctx: _SerializeContext) -> dict:
+    """Serialize bytes/bytearray to a ``.bin`` file (autosave-cached)."""
+
+    def _write() -> None:
+        node_uuid, filename, file_path = _mint_data_file(ctx, ".bin")
+
+        def _save(tmp_path: str) -> None:
+            with open(tmp_path, "wb") as fh:
+                fh.write(value)
+
+        _atomic_write(file_path, _save)
+        descriptor["uuid"] = node_uuid
+        descriptor["storage"] = _file_storage(node_uuid, filename, "bin")
+        descriptor["metadata"] = {"preview": ctx.preview}
+
+    return _serialize_via_cache(value, descriptor, ctx, _write)
+
+
+def _serialize_unknown(value: Any, descriptor: dict, ctx: _SerializeContext) -> dict:
+    """Serialize a value with no builtin kind (autosave-cached).
+
+    Resolution order, inside a single autosave-cache check:
+
+    1. **xarray DataArray/Dataset** — pickled as a builtin, overriding any
+       user-registered custom serializer until first-class xarray support
+       lands in beta. This keeps round-trips reliable without requiring
+       users to import a registration module before loading a project.
+    2. **Registered custom serializer** (``pdv.register_serializer``).
+    3. **Dunder protocol** (``__pdv_serialize__`` on the value's class).
+    4. **Pickle**, gated on ``trusted=True`` — untrusted callers get a
+       :class:`PDVSerializationError` telling them to register a
+       serializer instead.
+    """
+
+    def _write() -> None:
+        if _is_xarray_object(value):
+            _pickle_node(
+                value,
+                descriptor,
+                ctx,
+                metadata={
+                    "preview": ctx.preview,
+                    "python_type": python_type_string(value),
+                },
+            )
+            return
+
+        from pdv import serializers as _serializers  # noqa: PLC0415
+
+        custom = _serializers.find_for_value(value)
+        if custom is not None:
+            node_uuid, filename, file_path = _mint_data_file(ctx, custom.extension)
+            try:
+                _atomic_write(
+                    file_path, lambda tmp_path: custom.save(value, tmp_path)
+                )
+            except Exception as exc:  # noqa: BLE001
+                raise PDVSerializationError(
+                    f"Custom serializer '{custom.class_name}' failed to save "
+                    f"value at '{ctx.tree_path}': {exc}"
+                ) from exc
+            descriptor["uuid"] = node_uuid
+            descriptor["storage"] = _file_storage(node_uuid, filename, custom.format)
+            descriptor["metadata"] = {
+                "preview": ctx.preview,
+                "python_type": python_type_string(value),
+                "serializer": custom.class_name,
+            }
+            return
+
+        dunder = _serializers.find_for_value_dunder(value)
+        if dunder is not None:
+            node_uuid, filename, file_path = _mint_data_file(ctx, dunder.extension)
+            try:
+                _atomic_write(
+                    file_path, lambda tmp_path: value.__pdv_serialize__(tmp_path)
+                )
+            except Exception as exc:  # noqa: BLE001
+                raise PDVSerializationError(
+                    f"Dunder serializer for '{dunder.class_name}' failed to save "
+                    f"value at '{ctx.tree_path}': {exc}"
+                ) from exc
+            descriptor["uuid"] = node_uuid
+            descriptor["storage"] = _file_storage(node_uuid, filename, dunder.format)
+            descriptor["metadata"] = {
+                "preview": ctx.preview,
+                "python_type": python_type_string(value),
+                "serializer": f"dunder:{dunder.class_name}",
+            }
+            return
+
+        if not ctx.trusted:
+            raise PDVSerializationError(
+                f"Cannot serialize value of type '{type(value).__name__}' at path "
+                f"'{ctx.tree_path}'. Register a custom serializer with "
+                f"pdv.register_serializer(), or pass trusted=True to allow pickle."
+            )
+        _pickle_node(value, descriptor, ctx)
+
+    return _serialize_via_cache(value, descriptor, ctx, _write)
+
+
 def serialize_node(
     tree_path: str,
     value: Any,
@@ -503,7 +1082,7 @@ def serialize_node(
     dict
         Node descriptor dict as defined in ARCHITECTURE.md §7.3,
         including ``id``, ``path``, ``key``, ``type``, ``storage``,
-        ``has_children``, ``created_at``, ``updated_at``,
+        ``has_children``, ``updated_at``,
         and a ``metadata`` sub-dict with type-specific fields
         (``shape``, ``dtype``, ``preview``, ``module_id``, etc.).
 
@@ -513,438 +1092,42 @@ def serialize_node(
         If the value cannot be serialized (e.g. unknown type and
         ``trusted=False``).
     """
-    import datetime
-    import json
-    import os
-    import pickle
-
-    from pdv.environment import (  # noqa: PLC0415
-        ensure_parent,
-        generate_node_uuid,
-        smart_copy,
-        uuid_tree_path,
-    )
-    from pdv.tree import PDVFile, PDVScript, PDVLib, PDVGui, PDVNote  # noqa: PLC0415
-
-    # File extension and format for each PDVFile subclass
-    _FILE_KIND_MAP: dict[str, tuple[str, str]] = {
-        KIND_SCRIPT: (".py", FORMAT_PY_SCRIPT),
-        KIND_MARKDOWN: (".md", FORMAT_MARKDOWN),
-        KIND_GUI: (".gui.json", FORMAT_GUI_JSON),
-        KIND_LIB: (".py", FORMAT_PY_LIB),
-    }
-
-    def _file_storage(node_uuid: str, filename: str, fmt: str) -> dict:
-        return {
-            "backend": "local_file",
-            "uuid": node_uuid,
-            "filename": filename,
-            "format": fmt,
-        }
-
-    _source_dir = source_dir or working_dir
-
     kind = detect_kind(value)
-    now = (
-        datetime.datetime.now(datetime.timezone.utc).isoformat().replace("+00:00", "Z")
+    ctx = _SerializeContext(
+        tree_path=tree_path,
+        key=tree_path.split(".")[-1],
+        working_dir=working_dir,
+        source_dir=source_dir or working_dir,
+        trusted=trusted,
+        preview=node_preview(value, kind),
+        autosave_cache=autosave_cache,
+        autosave_hits=autosave_hits,
     )
-    parts = tree_path.split(".")
-    key = parts[-1]
-    parent_path = ".".join(parts[:-1]) if len(parts) > 1 else ""
-
-    # Base descriptor fields common to all node types (universal top-level)
-    preview = node_preview(value, kind)
-    descriptor: dict = {
-        "id": tree_path,
-        "path": tree_path,
-        "key": key,
-        "parent_path": parent_path,
-        "type": kind,
-        "python_type": python_type_string(value),
-        "has_children": False,
-        "created_at": now,
-        "updated_at": now,
-    }
-    # Module-owned file nodes carry the rel-path inside their owning
-    # module's root so the save-time sync step can mirror working-dir
-    # edits back to <saveDir>/modules/<id>/. See ARCHITECTURE.md §5.13.
-    if isinstance(value, PDVFile) and getattr(value, "source_rel_path", None):
-        descriptor["source_rel_path"] = value.source_rel_path
+    descriptor = _base_descriptor(tree_path, value, kind)
 
     if kind == KIND_FOLDER:
-        descriptor["has_children"] = True
-        descriptor["storage"] = {"backend": "none", "format": "none"}
-        descriptor["metadata"] = {"preview": preview}
-        return descriptor
-
+        return _serialize_folder(value, descriptor, ctx)
     if kind == KIND_MODULE:
-        descriptor["has_children"] = True
-        descriptor["storage"] = {
-            "backend": "inline",
-            "format": FORMAT_MODULE_META,
-            "value": {
-                "module_id": value.module_id,
-                "name": value.name,
-                "version": value.version,
-            },
-        }
-        descriptor["metadata"] = {
-            "module_id": value.module_id,
-            "name": value.name,
-            "version": value.version,
-            "preview": preview,
-        }
-        return descriptor
-
-    # -- PDVFile subclasses (PDVScript, PDVNote, future file types) -----------
-    if kind in _FILE_KIND_MAP:
-        _ext, fmt = _FILE_KIND_MAP[kind]
-        source_path = value.resolve_path(_source_dir)  # type: ignore[union-attr]
-        if not os.path.exists(source_path):
-            raise PDVSerializationError(f"File not found: {source_path}")
-        node_uuid = value.uuid  # type: ignore[union-attr]
-        node_filename = value.filename  # type: ignore[union-attr]
-        dest_path = uuid_tree_path(working_dir, node_uuid, node_filename)
-        if os.path.abspath(source_path) != os.path.abspath(dest_path):
-            smart_copy(source_path, dest_path)
-        descriptor["uuid"] = node_uuid
-        descriptor["storage"] = _file_storage(node_uuid, node_filename, fmt)
-        # Build type-specific metadata
-        meta: dict[str, Any] = {"preview": preview}
-        if isinstance(value, PDVScript):
-            meta["language"] = value.language
-            meta["doc"] = value.doc
-        elif isinstance(value, PDVLib):
-            meta["language"] = "python"
-            if value.module_id:
-                meta["module_id"] = value.module_id
-        elif kind == KIND_GUI:
-            if isinstance(value, PDVGui) and value.module_id:
-                meta["module_id"] = value.module_id
-            meta["language"] = "json"
-        elif kind == KIND_MARKDOWN:
-            meta["language"] = "markdown"
-            if isinstance(value, PDVNote) and value.title:
-                meta["title"] = value.title
-        descriptor["metadata"] = meta
-        return descriptor
-
-    if kind == KIND_NAMELIST:
-        source_path = value.resolve_path(_source_dir)
-        if not os.path.exists(source_path):
-            raise PDVSerializationError(f"File not found: {source_path}")
-        node_uuid = value.uuid
-        node_filename = value.filename
-        dest_path = uuid_tree_path(working_dir, node_uuid, node_filename)
-        if os.path.abspath(source_path) != os.path.abspath(dest_path):
-            smart_copy(source_path, dest_path)
-        descriptor["uuid"] = node_uuid
-        descriptor["storage"] = _file_storage(node_uuid, node_filename, FORMAT_NAMELIST)
-        descriptor["metadata"] = {
-            "module_id": value.module_id,
-            "namelist_format": value.format,
-            "language": "namelist",
-            "preview": preview,
-        }
-        return descriptor
-
-    if kind == KIND_FILE:
-        source_path = value.resolve_path(_source_dir)
-        if not os.path.exists(source_path):
-            raise PDVSerializationError(f"File not found: {source_path}")
-        node_uuid = value.uuid
-        node_filename = value.filename
-        dest_path = uuid_tree_path(working_dir, node_uuid, node_filename)
-        if os.path.abspath(source_path) != os.path.abspath(dest_path):
-            smart_copy(source_path, dest_path)
-        descriptor["uuid"] = node_uuid
-        descriptor["storage"] = _file_storage(node_uuid, node_filename, FORMAT_FILE)
-        descriptor["metadata"] = {"preview": preview}
-        return descriptor
-
+        return _serialize_module(value, descriptor, ctx)
+    if kind in _PDVFILE_KIND_FORMATS:
+        return _serialize_file_backed(value, descriptor, ctx, kind)
     if kind == KIND_NDARRAY:
-        _digest, _cached = _try_autosave_cache(autosave_cache, tree_path, value, _source_dir, autosave_hits, working_dir)
-        if _cached is not None:
-            return _cached
-
-        import numpy as np  # noqa: PLC0415
-
-        node_uuid = generate_node_uuid()
-        filename = key + ".npy"
-        file_path = uuid_tree_path(working_dir, node_uuid, filename)
-        ensure_parent(file_path)
-        np.save(file_path, value)
-        descriptor["uuid"] = node_uuid
-        descriptor["storage"] = _file_storage(node_uuid, filename, FORMAT_NPY)
-        descriptor["metadata"] = {
-            "shape": list(value.shape),
-            "dtype": str(value.dtype),
-            "size_bytes": value.nbytes,
-            "preview": preview,
-        }
-        if _digest is not None:
-            autosave_cache[tree_path] = (_digest, descriptor)  # type: ignore[index]
-        return descriptor
-
+        return _serialize_ndarray(value, descriptor, ctx)
     if kind in (KIND_DATAFRAME, KIND_SERIES):
-        # PDV saves are internal, so pandas DataFrames and Series go through
-        # pickle. This avoids an external parquet-engine dependency and keeps
-        # name/index/dtype/extension-type round-trips lossless. Users who want
-        # parquet for interchange can write it themselves.
-        _digest, _cached = _try_autosave_cache(autosave_cache, tree_path, value, _source_dir, autosave_hits, working_dir)
-        if _cached is not None:
-            return _cached
-
-        node_uuid = generate_node_uuid()
-        filename = key + ".pickle"
-        file_path = uuid_tree_path(working_dir, node_uuid, filename)
-        ensure_parent(file_path)
-        with open(file_path, "wb") as fh:
-            pickle.dump(value, fh)
-        descriptor["uuid"] = node_uuid
-        descriptor["storage"] = _file_storage(node_uuid, filename, FORMAT_PICKLE)
-        if kind == KIND_DATAFRAME:
-            shape = list(value.shape)  # type: ignore[union-attr]
-        else:
-            shape = [len(value)]  # type: ignore[arg-type]
-        descriptor["metadata"] = {
-            "shape": shape,
-            "preview": preview,
-        }
-        if _digest is not None:
-            autosave_cache[tree_path] = (_digest, descriptor)  # type: ignore[index]
-        return descriptor
-
+        return _serialize_pandas(value, descriptor, ctx, kind)
     if kind == KIND_SCALAR:
-        if isinstance(value, complex) or (
-            isinstance(value, float) and not math.isfinite(value)
-        ):
-            # complex isn't JSON-native, so the inline path can't store it.
-            # NaN/inf floats are JSON-native to json.dumps but serialize as
-            # bare NaN/Infinity tokens — invalid JSON that the app's
-            # JSON.parse rejects, corrupting tree-index.json.
-            # Pickle both like other non-JSON-native values.
-            node_uuid = generate_node_uuid()
-            filename = key + ".pickle"
-            file_path = uuid_tree_path(working_dir, node_uuid, filename)
-            ensure_parent(file_path)
-            with open(file_path, "wb") as fh:
-                pickle.dump(value, fh)
-            descriptor["uuid"] = node_uuid
-            descriptor["storage"] = _file_storage(node_uuid, filename, FORMAT_PICKLE)
-            descriptor["metadata"] = {"preview": preview}
-            return descriptor
-        descriptor["storage"] = {
-            "backend": "inline",
-            "format": FORMAT_INLINE,
-            "value": value,
-        }
-        descriptor["metadata"] = {"preview": preview}
-        return descriptor
-
+        return _serialize_scalar(value, descriptor, ctx)
     if kind == KIND_TEXT:
-        # Store short strings inline; long strings as .txt files
-        if len(value) <= 1000:  # type: ignore[arg-type]
-            descriptor["storage"] = {
-                "backend": "inline",
-                "format": FORMAT_INLINE,
-                "value": value,
-            }
-        else:
-            _digest, _cached = _try_autosave_cache(autosave_cache, tree_path, value, _source_dir, autosave_hits, working_dir)
-            if _cached is not None:
-                return _cached
-            node_uuid = generate_node_uuid()
-            filename = key + ".txt"
-            file_path = uuid_tree_path(working_dir, node_uuid, filename)
-            ensure_parent(file_path)
-            with open(file_path, "w", encoding="utf-8") as fh:
-                fh.write(value)  # type: ignore[arg-type]
-            descriptor["uuid"] = node_uuid
-            descriptor["storage"] = _file_storage(node_uuid, filename, FORMAT_TXT)
-            if _digest is not None:
-                autosave_cache[tree_path] = (_digest, descriptor)  # type: ignore[index]
-        descriptor["metadata"] = {"preview": preview}
-        return descriptor
-
+        return _serialize_text(value, descriptor, ctx)
     if kind == KIND_MAPPING:
-        if _can_inline_json(value):
-            descriptor["storage"] = {
-                "backend": "inline",
-                "format": FORMAT_INLINE,
-                "value": value,
-            }
-            descriptor["metadata"] = {"preview": preview}
-            return descriptor
-        if not _has_array_leaf(value):
-            # No ndarray/DataFrame/Series anywhere — pickle the whole dict so
-            # nested tuples, sets, complex, bytes, etc. round-trip with type
-            # fidelity. (The composite/per-leaf path is reserved for dicts
-            # whose array leaves benefit from their own files.)
-            node_uuid = generate_node_uuid()
-            filename = key + ".pickle"
-            file_path = uuid_tree_path(working_dir, node_uuid, filename)
-            ensure_parent(file_path)
-            with open(file_path, "wb") as fh:
-                pickle.dump(value, fh)
-            descriptor["uuid"] = node_uuid
-            descriptor["storage"] = _file_storage(node_uuid, filename, FORMAT_PICKLE)
-            descriptor["metadata"] = {"preview": preview}
-            return descriptor
-        # Composite mapping: at least one array leaf. Emit a container
-        # descriptor; the save walker (_collect_nodes) recurses and emits
-        # per-leaf descriptors so each array reaches its own fast path
-        # (.npy, .pickle, etc). Reconstructed on load as a plain dict.
-        descriptor["has_children"] = True
-        descriptor["storage"] = {"backend": "none", "format": "none"}
-        descriptor["metadata"] = {"preview": preview, "composite": True}
-        return descriptor
-
+        return _serialize_mapping(value, descriptor, ctx)
     if kind == KIND_SEQUENCE:
-        # Lists of purely JSON-faithful values stay inline (cheap, no file).
-        if _can_inline_json(value):
-            descriptor["storage"] = {
-                "backend": "inline",
-                "format": FORMAT_INLINE,
-                "value": value,
-            }
-            descriptor["metadata"] = {"preview": preview}
-            return descriptor
-        # Anything else — tuples, sets, frozensets, lists of tuples, lists
-        # containing complex/bytes — pickles, which preserves type fidelity
-        # at every nesting level. Sequences containing ndarray/DataFrame
-        # leaves are still rejected: those need to be split into a dict so
-        # each array gets its own file for fast random access.
-        if not _has_array_leaf(value):
-            node_uuid = generate_node_uuid()
-            filename = key + ".pickle"
-            file_path = uuid_tree_path(working_dir, node_uuid, filename)
-            ensure_parent(file_path)
-            with open(file_path, "wb") as fh:
-                pickle.dump(value, fh)
-            descriptor["uuid"] = node_uuid
-            descriptor["storage"] = _file_storage(node_uuid, filename, FORMAT_PICKLE)
-            descriptor["metadata"] = {"preview": preview}
-            return descriptor
-        raise PDVSerializationError(
-            f"Sequence at '{tree_path}' contains array leaves (ndarray, "
-            f"DataFrame, Series). PDV does not yet support composite "
-            f"sequences — wrap the values in a dict with named keys, "
-            f"e.g. {{'0': arr0, '1': arr1}}, so each element can be "
-            f"stored in its own file."
-        )
-
+        return _serialize_sequence(value, descriptor, ctx)
     if kind == KIND_BINARY:
-        _digest, _cached = _try_autosave_cache(autosave_cache, tree_path, value, _source_dir, autosave_hits, working_dir)
-        if _cached is not None:
-            return _cached
-        node_uuid = generate_node_uuid()
-        filename = key + ".bin"
-        file_path = uuid_tree_path(working_dir, node_uuid, filename)
-        ensure_parent(file_path)
-        with open(file_path, "wb") as fh:
-            fh.write(value)  # type: ignore[arg-type]
-        descriptor["uuid"] = node_uuid
-        descriptor["storage"] = _file_storage(node_uuid, filename, "bin")
-        descriptor["metadata"] = {"preview": preview}
-        if _digest is not None:
-            autosave_cache[tree_path] = (_digest, descriptor)  # type: ignore[index]
-        return descriptor
-
-    # KIND_UNKNOWN — try a registered custom serializer before falling back to pickle.
-    _digest, _cached = _try_autosave_cache(autosave_cache, tree_path, value, _source_dir, autosave_hits, working_dir)
-    if _cached is not None:
-        return _cached
-
-    # xarray DataArrays and Datasets pickle as a builtin, overriding any
-    # user-registered custom serializer until first-class xarray support
-    # lands in beta. This keeps round-trips reliable without requiring
-    # users to import a registration module before loading a project.
-    if _is_xarray_object(value):
-        node_uuid = generate_node_uuid()
-        filename = key + ".pickle"
-        file_path = uuid_tree_path(working_dir, node_uuid, filename)
-        ensure_parent(file_path)
-        with open(file_path, "wb") as fh:
-            pickle.dump(value, fh)
-        descriptor["uuid"] = node_uuid
-        descriptor["storage"] = _file_storage(node_uuid, filename, FORMAT_PICKLE)
-        descriptor["metadata"] = {
-            "preview": preview,
-            "python_type": python_type_string(value),
-        }
-        if _digest is not None:
-            autosave_cache[tree_path] = (_digest, descriptor)  # type: ignore[index]
-        return descriptor
-
-    from pdv import serializers as _serializers  # noqa: PLC0415
-
-    custom = _serializers.find_for_value(value)
-    if custom is not None:
-        node_uuid = generate_node_uuid()
-        filename = key + custom.extension
-        file_path = uuid_tree_path(working_dir, node_uuid, filename)
-        ensure_parent(file_path)
-        try:
-            custom.save(value, file_path)
-        except Exception as exc:  # noqa: BLE001
-            raise PDVSerializationError(
-                f"Custom serializer '{custom.class_name}' failed to save "
-                f"value at '{tree_path}': {exc}"
-            ) from exc
-        descriptor["uuid"] = node_uuid
-        descriptor["storage"] = _file_storage(node_uuid, filename, custom.format)
-        descriptor["metadata"] = {
-            "preview": preview,
-            "python_type": python_type_string(value),
-            "serializer": custom.class_name,
-        }
-        if _digest is not None:
-            autosave_cache[tree_path] = (_digest, descriptor)  # type: ignore[index]
-        return descriptor
-
-    dunder = _serializers.find_for_value_dunder(value)
-    if dunder is not None:
-        node_uuid = generate_node_uuid()
-        filename = key + dunder.extension
-        file_path = uuid_tree_path(working_dir, node_uuid, filename)
-        ensure_parent(file_path)
-        try:
-            value.__pdv_serialize__(file_path)
-        except Exception as exc:  # noqa: BLE001
-            raise PDVSerializationError(
-                f"Dunder serializer for '{dunder.class_name}' failed to save "
-                f"value at '{tree_path}': {exc}"
-            ) from exc
-        descriptor["uuid"] = node_uuid
-        descriptor["storage"] = _file_storage(node_uuid, filename, dunder.format)
-        descriptor["metadata"] = {
-            "preview": preview,
-            "python_type": python_type_string(value),
-            "serializer": f"dunder:{dunder.class_name}",
-        }
-        if _digest is not None:
-            autosave_cache[tree_path] = (_digest, descriptor)  # type: ignore[index]
-        return descriptor
-
-    if not trusted:
-        raise PDVSerializationError(
-            f"Cannot serialize value of type '{type(value).__name__}' at path "
-            f"'{tree_path}'. Register a custom serializer with "
-            f"pdv.register_serializer(), or pass trusted=True to allow pickle."
-        )
-    node_uuid = generate_node_uuid()
-    filename = key + ".pickle"
-    file_path = uuid_tree_path(working_dir, node_uuid, filename)
-    ensure_parent(file_path)
-    with open(file_path, "wb") as fh:
-        pickle.dump(value, fh)
-    descriptor["uuid"] = node_uuid
-    descriptor["storage"] = _file_storage(node_uuid, filename, FORMAT_PICKLE)
-    descriptor["metadata"] = {"preview": preview}
-    if _digest is not None:
-        autosave_cache[tree_path] = (_digest, descriptor)  # type: ignore[index]
-    return descriptor
+        return _serialize_binary(value, descriptor, ctx)
+    # KIND_UNKNOWN, plus KIND_DATASET/KIND_DATAARRAY (xarray objects are
+    # handled by _serialize_unknown's builtin-pickle override).
+    return _serialize_unknown(value, descriptor, ctx)
 
 
 def pickle_fallback_node(tree_path: str, value: Any, working_dir: str) -> dict:
@@ -984,53 +1167,28 @@ def pickle_fallback_node(tree_path: str, value: Any, working_dir: str) -> dict:
         ``storage.format == FORMAT_PICKLE``, and
         ``metadata.fallback == "pickle"``.
     """
-    import datetime
-    import os
-    import pickle
-
-    from pdv.environment import (  # noqa: PLC0415
-        ensure_parent,
-        generate_node_uuid,
-        uuid_tree_path,
+    preview = node_preview(value, KIND_UNKNOWN)
+    ctx = _SerializeContext(
+        tree_path=tree_path,
+        key=tree_path.split(".")[-1],
+        working_dir=working_dir,
+        source_dir=working_dir,
+        trusted=True,
+        preview=preview,
+        autosave_cache=None,
+        autosave_hits=None,
     )
-
-    node_uuid = generate_node_uuid()
-    parts = tree_path.split(".")
-    key = parts[-1]
-    filename = key + ".pickle"
-    file_path = uuid_tree_path(working_dir, node_uuid, filename)
-    ensure_parent(file_path)
-    with open(file_path, "wb") as fh:
-        pickle.dump(value, fh)
-
-    now = (
-        datetime.datetime.now(datetime.timezone.utc).isoformat().replace("+00:00", "Z")
-    )
-    parent_path = ".".join(parts[:-1]) if len(parts) > 1 else ""
-
-    return {
-        "id": tree_path,
-        "path": tree_path,
-        "key": key,
-        "parent_path": parent_path,
-        "type": KIND_UNKNOWN,
-        "python_type": python_type_string(value),
-        "uuid": node_uuid,
-        "has_children": False,
-        "created_at": now,
-        "updated_at": now,
-        "storage": {
-            "backend": "local_file",
-            "uuid": node_uuid,
-            "filename": filename,
-            "format": FORMAT_PICKLE,
-        },
-        "metadata": {
-            "preview": node_preview(value, KIND_UNKNOWN),
+    descriptor = _base_descriptor(tree_path, value, KIND_UNKNOWN)
+    return _pickle_node(
+        value,
+        descriptor,
+        ctx,
+        metadata={
+            "preview": preview,
             "python_type": python_type_string(value),
             "fallback": "pickle",
         },
-    }
+    )
 
 
 def deserialize_node(
@@ -1115,10 +1273,17 @@ def deserialize_node(
                 return fh.read()
 
         if fmt == FORMAT_MARKDOWN:
+            # Not reached by project load — markdown nodes are file-backed
+            # PDVNotes that tree_loader reconstructs from the descriptor's
+            # *type* without reading content. Kept for API symmetry with
+            # FORMAT_TXT (deserialize_node on a markdown ref → its text).
             with open(abs_path, "r", encoding="utf-8") as fh:
                 return fh.read()
 
         if fmt == FORMAT_JSON:
+            # Legacy only: no current writer emits FORMAT_JSON data files
+            # (JSON-faithful values store inline). Kept so projects saved
+            # by pre-inline versions still load.
             with open(abs_path, "r", encoding="utf-8") as fh:
                 return json.load(fh)
 
