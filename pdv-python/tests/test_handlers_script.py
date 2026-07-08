@@ -6,7 +6,7 @@ import uuid
 from unittest.mock import MagicMock, patch
 
 import pdv.comms as comms_mod
-from pdv.handlers.script import handle_script_register
+from pdv.handlers.script import handle_script_params, handle_script_register
 from pdv.tree import PDVScript, PDVTree
 
 
@@ -174,3 +174,51 @@ class TestHandleScriptRegister:
         types = [envelope["type"] for envelope in mock_comm._sent]
         assert "pdv.tree.changed" in types
         assert "pdv.script.register.response" in types
+
+
+class TestHandleScriptParams:
+    def test_params_extracted_without_executing_script(self, tmp_path):
+        """pdv.script.params returns run()'s user params, parsed from source
+        (never imported — top-level side effects must not run)."""
+        node_uuid = "abc123def456"
+        script_dir = tmp_path / "tree" / node_uuid
+        script_dir.mkdir(parents=True)
+        sentinel = tmp_path / "executed.txt"
+        (script_dir / "fit.py").write_text(
+            f"open({str(sentinel)!r}, 'w').write('ran')\n"
+            "def run(pdv_tree: dict, n_iter: int = 10):\n"
+            "    return {}\n"
+        )
+        tree = PDVTree()
+        tree._set_working_dir(str(tmp_path))
+        tree["fit"] = PDVScript(uuid=node_uuid, filename="fit.py")
+        mock_comm = _make_mock_comm()
+        msg = _make_msg({"path": "fit"})
+        msg["type"] = "pdv.script.params"
+        with (
+            patch.object(comms_mod, "_comm", mock_comm),
+            patch.object(comms_mod, "_pdv_tree", tree),
+        ):
+            handle_script_params(msg)
+        response = mock_comm._sent[-1]
+        assert response["type"] == "pdv.script.params.response"
+        assert response["status"] == "ok"
+        assert response["payload"]["params"] == [
+            {"name": "n_iter", "type": "int", "default": 10, "required": False}
+        ]
+        assert not sentinel.exists()
+
+    def test_non_script_node_sends_error(self):
+        tree = PDVTree()
+        tree["data"] = 42
+        mock_comm = _make_mock_comm()
+        msg = _make_msg({"path": "data"})
+        msg["type"] = "pdv.script.params"
+        with (
+            patch.object(comms_mod, "_comm", mock_comm),
+            patch.object(comms_mod, "_pdv_tree", tree),
+        ):
+            handle_script_params(msg)
+        response = mock_comm._sent[-1]
+        assert response["status"] == "error"
+        assert response["payload"]["code"] == "script.not_a_script"

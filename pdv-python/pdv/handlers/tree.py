@@ -19,8 +19,6 @@ from pdv.handlers import register
 
 def _relocate_files(
     value: object,
-    old_tree_path: str,
-    new_tree_path: str,
     working_dir: str,
     *,
     copy: bool = False,
@@ -40,11 +38,7 @@ def _relocate_files(
         _relocate_single_file(value, working_dir, copy=copy)
     elif isinstance(value, dict):
         for key in list(dict.keys(value)):
-            child = dict.__getitem__(value, key)
-            old_child = f"{old_tree_path}.{key}"
-            new_child = f"{new_tree_path}.{key}"
-            _relocate_files(child, old_child, new_child, working_dir,
-                            copy=copy)
+            _relocate_files(dict.__getitem__(value, key), working_dir, copy=copy)
 
 
 def _relocate_single_file(
@@ -223,10 +217,18 @@ def handle_tree_list(msg: dict) -> None:
     send_message("pdv.tree.list.response", {"nodes": nodes}, in_reply_to=msg_id)
 
 
+# Character cap for the repr sent by pdv.tree.get's value mode. Without a
+# cap, a large builtin (multi-million-element list, giant string) produced
+# a multi-MB comm message; every known consumer truncates well below this
+# anyway (the MCP tree_get_data tool caps at 8 000 characters client-side).
+_VALUE_REPR_CAP = 10_000
+
+
 def handle_tree_get(msg: dict) -> None:
     """Handle the ``pdv.tree.get`` message.
 
-    Returns the value or metadata for a specific tree node.
+    Returns descriptive metadata — and, in value mode, a size-capped
+    ``repr`` — for a specific tree node.
 
     Expected payload
     ----------------
@@ -237,8 +239,11 @@ def handle_tree_get(msg: dict) -> None:
             "mode": "value"
         }
 
-    ``mode`` is one of ``'metadata'``, ``'preview'``, ``'value'``,
-    ``'slice'`` (see ARCHITECTURE.md §7).
+    ``mode`` is ``'value'`` (the default) or ``'metadata'``/``'preview'``.
+    Every mode responds with ``path``, ``type``, ``preview``,
+    ``python_type``, and ``has_handler``; value mode adds ``value`` — the
+    node's ``repr``, truncated to ``_VALUE_REPR_CAP`` characters with
+    ``value_truncated: true`` when the cap bites.
 
     Parameters
     ----------
@@ -282,17 +287,6 @@ def handle_tree_get(msg: dict) -> None:
         )
         return
 
-    if mode == "metadata":
-        value = tree[path]
-        kind = detect_kind(value)
-        send_message(
-            "pdv.tree.get.response",
-            {"path": path, "type": kind, "storage": {}},
-            in_reply_to=msg_id,
-        )
-        return
-
-    # mode == 'value' or 'preview': load value
     try:
         value = tree[path]
     except Exception as exc:
@@ -302,19 +296,30 @@ def handle_tree_get(msg: dict) -> None:
         return
 
     kind = detect_kind(value)
-    preview = node_preview(value, kind)
-    send_message(
-        "pdv.tree.get.response",
-        {
-            "path": path,
-            "type": kind,
-            "preview": preview,
-            "value": repr(value),
-            "python_type": python_type_string(value),
-            "has_handler": has_handler_for(value),
-        },
-        in_reply_to=msg_id,
-    )
+    result: dict = {
+        "path": path,
+        "type": kind,
+        "preview": node_preview(value, kind),
+        "python_type": python_type_string(value),
+        "has_handler": has_handler_for(value),
+    }
+    if mode not in ("metadata", "preview"):
+        # Pre-slice giant strings so repr never builds the full multi-MB
+        # text just to throw it away; other types repr in full (numpy
+        # self-truncates) and are capped below.
+        raw = (
+            repr(value[: _VALUE_REPR_CAP])
+            if isinstance(value, str) and len(value) > _VALUE_REPR_CAP
+            else repr(value)
+        )
+        if len(raw) > _VALUE_REPR_CAP or (
+            isinstance(value, str) and len(value) > _VALUE_REPR_CAP
+        ):
+            result["value"] = raw[:_VALUE_REPR_CAP] + "… (truncated)"
+            result["value_truncated"] = True
+        else:
+            result["value"] = raw
+    send_message("pdv.tree.get.response", result, in_reply_to=msg_id)
 
 
 def handle_tree_resolve_file(msg: dict) -> None:
@@ -595,7 +600,7 @@ def handle_tree_rename(msg: dict) -> None:
     value = tree[path]
 
     if tree._working_dir:
-        _relocate_files(value, path, new_path, tree._working_dir, copy=False)
+        _relocate_files(value, tree._working_dir, copy=False)
 
     tree.set_quiet(new_path, value)
     # Delete the old key at the dict level to avoid a second changed push
@@ -604,7 +609,12 @@ def handle_tree_rename(msg: dict) -> None:
         dict.__delitem__(parent, parts[-1])
     else:
         dict.__delitem__(tree, parts[-1])
-    tree._emit_changed(path, "renamed")
+    # A rename is a removal at the old path plus an addition at the new
+    # one — emit both (using _emit_changed's documented vocabulary) so the
+    # renderer refreshes everything affected. The debounced flush batches
+    # the two into a single pdv.tree.changed push.
+    tree._emit_changed(path, "removed")
+    tree._emit_changed(new_path, "added")
 
     send_message(
         "pdv.tree.rename.response",
@@ -720,8 +730,7 @@ def handle_tree_move(msg: dict) -> None:
     value = tree[path]
 
     if tree._working_dir:
-        _relocate_files(value, path, new_path, tree._working_dir,
-                        copy=False)
+        _relocate_files(value, tree._working_dir, copy=False)
 
     tree.set_quiet(new_path, value)
 
@@ -733,7 +742,14 @@ def handle_tree_move(msg: dict) -> None:
     else:
         dict.__delitem__(tree, old_parts[-1])
 
-    tree._emit_changed(path, "moved")
+    # A move is a removal at the old path plus an addition at the new one.
+    # Emitting only the old path (as this handler used to) meant a move to
+    # a *different* parent never refreshed the destination in the renderer
+    # until the safety-net poll caught it. Both events use _emit_changed's
+    # documented added/removed/updated vocabulary and are batched into a
+    # single push by the debounced flush.
+    tree._emit_changed(path, "removed")
+    tree._emit_changed(new_path, "added")
 
     send_message(
         "pdv.tree.move.response",
@@ -832,8 +848,7 @@ def handle_tree_duplicate(msg: dict) -> None:
     cloned = copy.deepcopy(value)
 
     if tree._working_dir:
-        _relocate_files(cloned, path, new_path, tree._working_dir,
-                        copy=True)
+        _relocate_files(cloned, tree._working_dir, copy=True)
 
     tree[new_path] = cloned
 

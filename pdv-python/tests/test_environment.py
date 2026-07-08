@@ -15,11 +15,8 @@ import os
 import pytest
 from pdv.environment import (
     validate_working_dir,
-    resolve_project_path,
-    path_is_safe,
     uuid_tree_path,
     ensure_parent,
-    make_working_dir,
 )
 from pdv.errors import PDVPathError
 
@@ -42,58 +39,6 @@ class TestValidateWorkingDir:
         f.write_text("data")
         with pytest.raises(PDVPathError):
             validate_working_dir(str(f))
-
-
-class TestResolveProjectPath:
-    def test_simple_relative_path(self, tmp_save_dir):
-        """A simple relative path resolves correctly."""
-        result = resolve_project_path("subdir/file.txt", tmp_save_dir)
-        assert result.startswith(tmp_save_dir)
-        assert result.endswith("file.txt")
-
-    def test_nested_relative_path(self, tmp_save_dir):
-        """A nested relative path resolves correctly."""
-        result = resolve_project_path("a/b/c.npy", tmp_save_dir)
-        assert result.startswith(tmp_save_dir)
-        assert "a" in result and "b" in result
-
-    def test_traversal_rejected(self, tmp_save_dir):
-        """A path with '../' must raise PDVPathError."""
-        with pytest.raises(PDVPathError):
-            resolve_project_path("../escape.txt", tmp_save_dir)
-
-    def test_absolute_path_rejected(self, tmp_save_dir):
-        """An absolute path must raise PDVPathError."""
-        with pytest.raises(PDVPathError):
-            resolve_project_path("/etc/passwd", tmp_save_dir)
-
-
-class TestPathIsSafe:
-    def test_inside_root(self, tmp_path):
-        """A path inside root is safe."""
-        child = str(tmp_path / "subdir" / "file.txt")
-        assert path_is_safe(child, str(tmp_path)) is True
-
-    def test_is_root(self, tmp_path):
-        """The root itself is safe."""
-        assert path_is_safe(str(tmp_path), str(tmp_path)) is True
-
-    def test_outside_root(self, tmp_path):
-        """A path outside root is not safe."""
-        parent = str(tmp_path.parent)
-        assert path_is_safe(parent, str(tmp_path)) is False
-
-    def test_sibling_not_safe(self, tmp_path):
-        """A sibling directory with a matching prefix is not safe."""
-        # Create a sibling: if tmp_path is /tmp/abc, sibling is /tmp/abcXXX
-        sibling = str(tmp_path) + "_sibling"
-        assert path_is_safe(sibling, str(tmp_path)) is False
-
-    def test_traversal_attempt_not_safe(self, tmp_path):
-        """A path built with .. that escapes the root is not safe."""
-        # Construct a path that would escape via traversal before realpath
-        attempt = os.path.join(str(tmp_path), "..", "outside")
-        assert path_is_safe(attempt, str(tmp_path)) is False
 
 
 class TestUuidTreePath:
@@ -122,21 +67,3 @@ class TestEnsureParent:
         target = str(tmp_path / "file.txt")
         result = ensure_parent(target)
         assert result == target
-
-
-class TestMakeWorkingDir:
-    def test_creates_directory(self, tmp_path):
-        """make_working_dir creates a new directory under the base."""
-        result = make_working_dir(str(tmp_path))
-        assert os.path.isdir(result)
-        assert result.startswith(str(tmp_path))
-
-    def test_prefix_is_pdv(self, tmp_path):
-        """Created directory name starts with 'pdv-'."""
-        result = make_working_dir(str(tmp_path))
-        assert os.path.basename(result).startswith("pdv-")
-
-    def test_nonexistent_base_raises(self, tmp_path):
-        """A non-existent base directory raises PDVPathError."""
-        with pytest.raises(PDVPathError):
-            make_working_dir(str(tmp_path / "nonexistent"))

@@ -273,3 +273,31 @@ class TestRegistration:
         np = sys.modules.get("numpy")
         if np is not None:
             assert has_handler_for(np.zeros(3))
+
+
+class TestLazyRegistration:
+    def test_lookup_registers_defaults_without_explicit_call(self):
+        """has_handler_for must self-serve: bootstrap no longer registers
+        defaults eagerly (that forced numpy/pandas/xarray imports at kernel
+        startup), so the registry lookups lazily register them for any
+        library that is already imported."""
+        np = pytest.importorskip("numpy")
+        # clear_handlers ran in the fixture; no register_defaults() here.
+        assert has_handler_for(np.zeros(3))
+
+    def test_user_handler_wins_over_lazy_default(self):
+        """A user handler registered before the lazy default latch fires
+        must not be clobbered when the default registers afterwards."""
+        np = pytest.importorskip("numpy")
+        from pdv.modules import handle
+
+        calls = []
+
+        @handle(np.ndarray)
+        def _user_handler(obj, path, pdv_tree):
+            calls.append(path)
+
+        result = dispatch_handler(np.zeros(3), "test.mine", None)
+        assert result == {"dispatched": True}
+        assert calls == ["test.mine"]
+        assert _figure_count() == 0  # default plot handler did NOT run

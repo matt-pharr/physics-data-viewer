@@ -161,7 +161,7 @@ All type strings are namespaced with `pdv.`. The convention is `pdv.<domain>.<ac
 | `pdv.project.load` | app → kernel | Instructs the kernel to load a project from a save directory. Payload: `{ save_dir, tree_index_dir? }`. When `tree_index_dir` is present and exists, the kernel reads `tree-index.json` from there instead of `save_dir`; used by autosave recovery to overlay an autosaved tree (see §8.4). |
 | `pdv.project.loaded` | kernel → app | Sent after the tree is fully populated from a project load. No `in_reply_to` (push notification). |
 | `pdv.project.save` | app → kernel | Instructs the kernel to serialize the tree to the save directory. Payload: `{ save_dir, is_autosave?, clear_cache? }`. When `is_autosave: true` the kernel consults its per-node checksum cache and reuses unchanged-data descriptors (see §8.4). `clear_cache: true` wipes the cache before saving (used after the user discards a stale `.autosave/`). |
-| `pdv.project.save.response` | kernel → app | Confirms save completed. Payload: `{ node_count, checksum, module_owned_files, module_manifests, missing_files, autosave_cache_hits }`. `module_owned_files` lists every file-backed node that belongs to a `PDVModule` (see §5.9) so the main process can mirror working-dir edits into `<saveDir>/modules/<id>/<source_rel_path>`. `module_manifests` carries per-module metadata + module-root-relative node descriptors for writing `pdv-module.json` and `module-index.json` under each module dir. Both fields are empty arrays when the tree contains no `PDVModule` nodes. `missing_files` lists tree paths of file-backed nodes whose backing files were missing during serialization; these nodes are skipped rather than pickled. `autosave_cache_hits` reports how many nodes were reused from the cache (only meaningful when the request set `is_autosave: true`). |
+| `pdv.project.save.response` | kernel → app | Confirms save completed. Payload: `{ node_count, checksum, aborted, module_owned_files, module_manifests, missing_files, autosave_cache_hits }`. `module_owned_files` lists every file-backed node that belongs to a `PDVModule` (see §5.9) so the main process can mirror working-dir edits into `<saveDir>/modules/<id>/<source_rel_path>`. `module_manifests` carries per-module metadata + module-root-relative node descriptors for writing `pdv-module.json` and `module-index.json` under each module dir. Both fields are empty arrays when the tree contains no `PDVModule` nodes. `missing_files` lists tree paths of file-backed nodes whose backing files were missing during serialization; these nodes are skipped rather than pickled. A non-empty `missing_files` (equivalently `aborted: true`) means the save was **aborted before `tree-index.json` was written** — the previous index stays in place, `checksum` is empty, and the main process responds by skipping its own `code-cells.json`/`project.json` writes while the renderer surfaces a "Save blocked" error. `autosave_cache_hits` reports how many nodes were reused from the cache (only meaningful when the request set `is_autosave: true`). |
 | `pdv.project.clear_autosave_cache` | app → kernel | Instructs the kernel to drop its in-memory `_autosave_cache`. Empty payload. Sent eagerly when the user clicks *Clear autosave data* so the kernel can't reuse descriptors whose backing files were just deleted from `<saveDir>/.autosave/tree/`. The `clear_cache: true` flag on `pdv.project.save` is the in-band fallback if this comm fails (kernel disconnected/busy); see §8.4. |
 | `pdv.project.clear_autosave_cache.response` | kernel → app | Confirms cache reset. Empty payload. |
 
@@ -171,8 +171,8 @@ All type strings are namespaced with `pdv.`. The convention is `pdv.<domain>.<ac
 |---|---|---|
 | `pdv.tree.list` | app → kernel | Request tree nodes at a given path. |
 | `pdv.tree.list.response` | kernel → app | Returns array of node metadata objects. |
-| `pdv.tree.get` | app → kernel | Request data value for a specific node. |
-| `pdv.tree.get.response` | kernel → app | Returns node value (may be lazy-loaded from save directory). |
+| `pdv.tree.get` | app → kernel | Request descriptive info (and optionally a repr) for a specific node. Payload: `{ path, mode? }` where `mode` is `"value"` (default) or `"metadata"`/`"preview"`. |
+| `pdv.tree.get.response` | kernel → app | Returns `{ path, type, preview, python_type, has_handler }` for every mode; `mode: "value"` adds `value` — the node's `repr`, truncated to 10 000 characters with `value_truncated: true` when the cap bites (so a giant builtin can't produce a multi-MB comm message). |
 | `pdv.tree.resolve_file` | app → kernel | Resolve a file-backed tree node (PDVFile subclass) to its absolute filesystem path. Payload: `{ path }`. |
 | `pdv.tree.resolve_file.response` | kernel → app | Returns `{ path, file_path }` where `file_path` is the absolute path on disk. |
 | `pdv.tree.changed` | kernel → app | Push notification. Sent when tree structure changes. Payload: `{ changed_paths: string[], change_type: "added" \| "removed" \| "updated" \| "batch" \| "unknown" }`. Notifications are **debounced** (100ms): rapid mutations are batched into a single notification with `change_type: "batch"` and all affected paths. Mutations on a **non-root `PDVTree`** (intermediate sub-tree, or a scratch instance the user constructed and is mutating before assigning into the root) emit `change_type: "unknown"` with empty `changed_paths`, signalling that the renderer should do a full refresh. No `in_reply_to`. See §7.4 for the full propagation contract. |
@@ -511,10 +511,10 @@ pdv/
 1. Registers the `pdv.kernel` comm target with IPython
 2. Injects `pdv_tree` into the IPython user namespace via a custom namespace class that blocks reassignment
 3. Configures an interactive matplotlib backend (or patches `plt.show()` for inline emission when none is available)
-4. Registers the built-in double-click plot handlers via `pdv.default_handlers.register_defaults()`. Each registration is guarded by an import check, so missing optional deps (numpy / pandas / xarray) silently skip. Per-type behavior: `np.ndarray` 1D → `ax.plot`, 2D → `ax.imshow` + colorbar, 0D/>2D → printed notice; `pd.Series` and `pd.DataFrame` → their built-in `.plot()`; `xr.DataArray` → its built-in `.plot()` (which dispatches 1D → line, 2D → pcolormesh, >2D → histogram by ndim). A value that cannot actually be plotted (e.g. a non-numeric `pd.Series` or an object-dtype array) closes its half-built figure and prints a `[PDV]` notice rather than raising — a raised exception would reach the renderer as an opaque `internal.error`. `xr.Dataset` is intentionally not registered — users drill into a specific `data_var`
+4. Arranges the built-in double-click plot handlers to register **lazily**: the handler-registry lookups in `pdv.modules` (`has_handler_for`, `dispatch_handler`) call `pdv.default_handlers.register_defaults()`, which registers per-library defaults once numpy / pandas / xarray actually appear in `sys.modules`. Bootstrap itself imports none of them — eager imports cost real startup latency and undercut the never-import-xarray design in `serialization.py`, and a tree value can only *be* one of these types if its library is already imported. Per-type behavior: `np.ndarray` 1D → `ax.plot`, 2D → `ax.imshow` + colorbar, 0D/>2D → printed notice; `pd.Series` and `pd.DataFrame` → their built-in `.plot()`; `xr.DataArray` → its built-in `.plot()` (which dispatches 1D → line, 2D → pcolormesh, >2D → histogram by ndim). A value that cannot actually be plotted (e.g. a non-numeric `pd.Series` or an object-dtype array) closes its half-built figure and prints a `[PDV]` notice rather than raising — a raised exception would reach the renderer as an opaque `internal.error`. `xr.Dataset` is intentionally not registered — users drill into a specific `data_var`
 5. Sends the `pdv.ready` comm message
 
-`bootstrap()` must be idempotent — calling it twice must not open a second comm or re-inject variables. Re-registering the default handlers is safe; the overwrite warning that `pdv.handle()` normally emits is suppressed inside `register_defaults()` because that warning is meant to flag user-vs-user conflicts.
+`bootstrap()` must be idempotent — calling it twice must not open a second comm or re-inject variables. `register_defaults()` is likewise safe to call any number of times: each library's defaults register once, and a default never overwrites an existing registration, so a user handler for the same type wins regardless of registration order.
 
 ### 5.4 Protected Namespace
 
@@ -567,7 +567,7 @@ A lightweight wrapper stored as a tree node value. Attributes:
 - `language`: `'python'` (Julia deferred)
 - `doc`: first line of the script's module docstring (for preview display)
 
-Note: `params` (the `ScriptParameter` array) is **not** stored as a class attribute. It is computed on-demand by `_extract_script_params()` at registration time and via the `pdv.script.params` comm handler, and included in `pdv.tree.list` responses. See below for the descriptor shape.
+Note: `params` (the `ScriptParameter` array) is **not** stored as a class attribute. It is computed on-demand by `_extract_script_params()` at registration time and via the `pdv.script.params` comm handler, and included in `pdv.tree.list` responses. Extraction parses the script with `ast` — it never imports or executes the module, so a UI param fetch cannot trigger the script's top-level side effects. Literal defaults come back as real values; non-literal defaults (e.g. `np.pi`) fall back to their source text. See below for the descriptor shape.
 
 `PDVScript.run(tree, **kwargs)` loads the module fresh (no import cache), calls `module.run(tree, **kwargs)`, and returns the result dict.
 
@@ -741,6 +741,8 @@ PDV has three tiers of module storage:
 The working directory is created by the Electron main process at kernel startup under `~/.PDV/working/`. It is the live filesystem backing for the current session. Using a persistent, app-managed directory instead of OS temp space prevents silent purging during long-running sessions.
 
 **Creation**: The main process calls `fs.mkdtemp()` to create a uniquely named directory under `~/.PDV/working/`. A `session.lock` file containing `{ pid, createdAt }` is written so that orphan cleanup on next startup can distinguish active sessions from crashed ones. The working directory path is passed to the kernel in the `pdv.init` message.
+
+**Kernel CWD policy**: the kernel process's *current working directory* is deliberately **not** the working directory. `pdv.environment.reset_cwd_to_home()` points the CWD at the user's home directory after `pdv.init` and again after every project load, so relative paths in user code resolve somewhere durable and predictable rather than into a session temp dir that is deleted on stop.
 
 **Structure** (UUID-based — see §6.3):
 ```
@@ -1057,7 +1059,6 @@ Each node in `tree-index.json` is produced by `serialization.serialize_node()`. 
   "type": "ndarray",
   "has_children": false,
   "lazy": false,
-  "created_at": "<iso8601>",
   "updated_at": "<iso8601>",
   "storage": { },
   "metadata": { "preview": "..." }
@@ -1072,8 +1073,7 @@ Each node in `tree-index.json` is produced by `serialization.serialize_node()`. 
 | `type` | string | One of the kind strings from §7.2 (e.g. `"ndarray"`, `"script"`, `"module"`). |
 | `has_children` | boolean | `true` for folder and module nodes that contain children. |
 | `lazy` | boolean | `true` for data nodes (ndarray, dataframe, series, large text) that are loaded on-demand. |
-| `created_at` | string | ISO 8601 timestamp of when the node was serialized. |
-| `updated_at` | string | ISO 8601 timestamp (same as `created_at` on first save). |
+| `updated_at` | string | ISO 8601 timestamp of when this descriptor was serialized. (A `created_at` field existed through v0.2.x but was regenerated on every save — always equal to `updated_at` — so it recorded nothing and was dropped.) |
 | `storage` | object | Describes where the data lives. See below. |
 | `metadata` | object | Type-specific metadata. Always contains at least `"preview"`. |
 
@@ -1193,7 +1193,7 @@ Module `storage` uses inline backend with `format: "module_meta"` and `value: { 
 
 #### 7.3.2 `pdv.tree.list` Response Descriptor (Runtime)
 
-The `pdv.tree.list` handler builds descriptors on-the-fly from live tree state. These are simpler — no `storage`, `metadata`, `created_at`, or `updated_at`. Type-specific fields are at top level alongside common fields.
+The `pdv.tree.list` handler builds descriptors on-the-fly from live tree state. These are simpler — no `storage`, `metadata`, or `updated_at`. Type-specific fields are at top level alongside common fields.
 
 ```json
 {
@@ -1316,7 +1316,7 @@ User triggers save
     └─► App updates title bar: "My Experiment"
 ```
 
-All on-disk writes in the save pipeline (`tree-index.json`, `code-cells.json`, per-module `pdv-module.json` / `module-index.json`, module-owned file copies, and `project.json`) are atomic: each is written to a sibling `.tmp` file and `rename`d onto its final path, so a process crash mid-save leaves the destination either fully-old or fully-new but never torn. `tree-index.json` is the kernel-side commit point for the tree (in `pdv-python/pdv/handlers/project.py`); `project.json`, written last by the app, is the overall commit gate that promises every other artifact is durable. See `docs/developer/save-pipeline.md` for the full atomicity audit.
+All on-disk writes in the save pipeline (`tree-index.json`, `code-cells.json`, per-module `pdv-module.json` / `module-index.json`, module-owned file copies, data-node files written by `serialize_node` (`.npy`, pickle, `.txt`, `.bin`, custom-serializer output), and `project.json`) are atomic: each is written to a sibling `.tmp` file and `rename`d onto its final path, so a process crash mid-save leaves the destination either fully-old or fully-new but never torn. `tree-index.json` is the kernel-side commit point for the tree (in `pdv-python/pdv/handlers/project.py`); `project.json`, written last by the app, is the overall commit gate that promises every other artifact is durable. See `docs/developer/save-pipeline.md` for the full atomicity audit.
 
 To prevent a concurrent module-settings IPC handler from silently overwriting the manifest snapshot taken inside `ProjectManager.save`, the entire save body runs inside `runSerializedProjectManifestMutation` (the same lock that `ipc-register-modules.ts` uses around its read-modify-write mutations of `project.json`). Lock order: save-lock (outer) → manifest-write-lock (inner). No deadlock: nothing acquires the save-lock while holding the manifest-write-lock.
 
@@ -1343,7 +1343,7 @@ Autosave protects against losing tree state and code cells when the user forgets
 
 The contents of `.autosave/` mirror the save-dir layout — `tree-index.json`, `code-cells.json`, and a `tree/` directory of file-backed nodes — so that recovery can use the same load primitives as a normal project open.
 
-**Incremental serialization.** The kernel keeps an in-memory `_autosave_cache: dict[tree_path, (digest, descriptor)]` (see `pdv-python/pdv/handlers/project.py`). The cache is consulted *and* updated on every save — autosave and explicit. On an explicit save it ends up populated with `(digest, descriptor)` pairs whose descriptors point at canonical UUIDs in `<saveDir>/tree/`; the next autosave then hits the cache for unchanged data nodes, returns the canonical descriptor (so its `tree-index.json` references the canonical UUID), and skips writing duplicate file contents under `<saveDir>/.autosave/tree/`. Only nodes that genuinely changed since the last save get a fresh UUID and a new file.
+**Incremental serialization.** The kernel keeps an in-memory `_autosave_cache: dict[tree_path, (digest, descriptor)]` (see `pdv-python/pdv/handlers/project.py`). The cache is consulted *and* updated on every save — autosave and explicit. On an explicit save it ends up populated with `(digest, descriptor)` pairs whose descriptors point at canonical UUIDs in `<saveDir>/tree/`; the next autosave then hits the cache for unchanged data nodes, returns the canonical descriptor (so its `tree-index.json` references the canonical UUID), and skips writing duplicate file contents under `<saveDir>/.autosave/tree/`. Only nodes that genuinely changed since the last save get a fresh UUID and a new file. At the end of every successful save the cache is pruned of tree paths that no longer exist, so it cannot grow without bound over a long session of creating and deleting nodes.
 
 **Cache-hit file reconciliation.** Because the cache survives across saves to *different* directories (`<saveDir>` for explicit saves, `<saveDir>/.autosave/` for autosaves), a cached descriptor's UUID may reference a file that physically lives in the *other* directory. `serialize_node` reconciles this on every cache hit via `_verify_or_relocate_cached_file`:
 

@@ -32,12 +32,11 @@ from pdv.handlers import register
 
 # In-memory autosave checksum cache. Maps tree_path → (digest_bytes, descriptor).
 # Allows subsequent autosaves to skip serialization for unchanged data nodes.
-# Populated by both explicit save and autosave; cleared only on user-initiated
-# `clear_cache` (Settings → Clear, decline-restore-on-load) and kernel shutdown.
-# TODO: stale entries for deleted tree paths accumulate for the kernel lifetime.
-# A long session that creates and deletes many large arrays will grow this dict
-# without bound. Consider pruning paths that aren't in the just-serialized tree
-# at the end of each save (cheap: set difference against the tree's path set).
+# Populated by both explicit save and autosave; cleared on user-initiated
+# `clear_cache` (Settings → Clear, decline-restore-on-load) and kernel
+# shutdown, and pruned of deleted tree paths at the end of every
+# successful save (see serialize_tree_to_dir) so it can't grow without
+# bound over a long churny session.
 _autosave_cache: dict[str, tuple[bytes, dict]] = {}
 
 
@@ -736,7 +735,9 @@ def handle_project_load(msg: dict) -> None:
             file=sys.stderr,
         )
 
-    os.chdir(os.path.expanduser("~"))
+    from pdv.environment import reset_cwd_to_home  # noqa: PLC0415
+
+    reset_cwd_to_home()
     node_count = len(nodes)
 
     from pdv.checksum import tree_checksum  # noqa: PLC0415
@@ -790,10 +791,24 @@ def serialize_tree_to_dir(
     Returns
     -------
     dict
-        ``{"node_count", "checksum", "module_owned_files", "module_manifests",
-        "missing_files", "autosave_cache_hits"}``. ``autosave_cache_hits``
-        is the number of nodes that reused a cached descriptor; meaningful
-        only when ``autosave_cache`` was provided.
+        ``{"node_count", "checksum", "aborted", "module_owned_files",
+        "module_manifests", "missing_files", "autosave_cache_hits"}``.
+        ``autosave_cache_hits`` is the number of nodes that reused a
+        cached descriptor; meaningful only when ``autosave_cache`` was
+        provided.
+
+        **Abort semantics:** when any file-backed node's backing file is
+        missing, the save is aborted — ``missing_files`` lists the
+        affected tree paths, ``aborted`` is True, ``checksum`` is empty,
+        and crucially **tree-index.json is NOT written** (the previous
+        index, if any, stays in place so the save directory remains
+        consistent). Data files serialized before the abort may exist on
+        disk; the next successful save's orphan purge collects them.
+        Callers must treat ``aborted``/non-empty ``missing_files`` as a
+        failed save. The main process does: ``ProjectManager.save``
+        returns early without writing ``code-cells.json`` or
+        ``project.json``, and the renderer surfaces a "Save blocked"
+        error.
 
     Raises
     ------
@@ -828,6 +843,7 @@ def serialize_tree_to_dir(
         return {
             "node_count": len(nodes),
             "checksum": "",
+            "aborted": True,
             "module_owned_files": [],
             "module_manifests": [],
             "missing_files": missing_files,
@@ -846,6 +862,15 @@ def serialize_tree_to_dir(
 
     _purge_orphaned_tree_files(save_dir, nodes)
 
+    if autosave_cache is not None:
+        # Prune cache entries whose tree paths no longer exist. Each entry
+        # pins a digest + descriptor for the kernel lifetime, so a long
+        # session that creates and deletes many nodes would otherwise grow
+        # the cache without bound.
+        live_paths = {node["path"] for node in nodes}
+        for stale in [p for p in autosave_cache if p not in live_paths]:
+            del autosave_cache[stale]
+
     from pdv.checksum import tree_checksum  # noqa: PLC0415
 
     checksum = tree_checksum(tree)
@@ -856,6 +881,7 @@ def serialize_tree_to_dir(
     return {
         "node_count": len(nodes),
         "checksum": checksum,
+        "aborted": False,
         "module_owned_files": module_owned_files,
         "module_manifests": module_manifests,
         "missing_files": missing_files,
@@ -898,12 +924,20 @@ def handle_project_save(msg: dict) -> None:
 
         {
           "node_count": 42,
-          "checksum": "<sha256-of-tree-index.json>",
+          "checksum": "<xxh3-tree-checksum>",
+          "aborted": false,
           "autosave_cache_hits": 0,
           "module_owned_files": [...],
           "module_manifests": [...],
           "missing_files": [...]
         }
+
+    A non-empty ``missing_files`` (equivalently ``aborted: true``) means
+    the save was **aborted before tree-index.json was written** — nothing
+    new persisted. The response status is still ``ok`` (the handler ran
+    to completion); the main process checks ``missing_files`` and aborts
+    its own manifest/code-cells writes, and the renderer surfaces a
+    "Save blocked" error. See :func:`serialize_tree_to_dir`.
 
     Parameters
     ----------

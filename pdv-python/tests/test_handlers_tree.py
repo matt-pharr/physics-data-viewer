@@ -365,6 +365,71 @@ class TestHandleTreeGet:
         assert response["status"] == "ok"
         assert response["payload"]["path"] == "ch1"
 
+    def test_value_mode_caps_giant_repr(self, tree_with_comm):
+        """value mode truncates the repr so a big builtin can't produce a
+        multi-MB comm message; the cap is flagged via value_truncated."""
+        from pdv.handlers.tree import _VALUE_REPR_CAP
+
+        tree_with_comm["big"] = list(range(200_000))
+        mock_comm = _make_mock_comm()
+        msg = _make_msg("pdv.tree.get", {"path": "big", "mode": "value"})
+        with (
+            patch.object(comms_mod, "_comm", mock_comm),
+            patch.object(comms_mod, "_pdv_tree", tree_with_comm),
+        ):
+            handle_tree_get(msg)
+        payload = mock_comm._sent[0]["payload"]
+        assert payload["value_truncated"] is True
+        assert len(payload["value"]) <= _VALUE_REPR_CAP + len("… (truncated)")
+        assert payload["value"].endswith("… (truncated)")
+
+    def test_value_mode_caps_giant_string_without_full_repr(self, tree_with_comm):
+        from pdv.handlers.tree import _VALUE_REPR_CAP
+
+        tree_with_comm["s"] = "x" * 5_000_000
+        mock_comm = _make_mock_comm()
+        msg = _make_msg("pdv.tree.get", {"path": "s", "mode": "value"})
+        with (
+            patch.object(comms_mod, "_comm", mock_comm),
+            patch.object(comms_mod, "_pdv_tree", tree_with_comm),
+        ):
+            handle_tree_get(msg)
+        payload = mock_comm._sent[0]["payload"]
+        assert payload["value_truncated"] is True
+        assert len(payload["value"]) <= _VALUE_REPR_CAP + len("… (truncated)")
+
+    def test_preview_mode_omits_value(self, tree_with_comm):
+        """preview/metadata modes must not pay the repr cost — the MCP
+        tree_get_node tool uses preview mode purely for metadata."""
+        tree_with_comm["ch1"] = list(range(1000))
+        mock_comm = _make_mock_comm()
+        msg = _make_msg("pdv.tree.get", {"path": "ch1", "mode": "preview"})
+        with (
+            patch.object(comms_mod, "_comm", mock_comm),
+            patch.object(comms_mod, "_pdv_tree", tree_with_comm),
+        ):
+            handle_tree_get(msg)
+        payload = mock_comm._sent[0]["payload"]
+        assert "value" not in payload
+        assert payload["type"] == "sequence"
+        assert payload["preview"]
+
+    def test_metadata_mode_has_no_fake_storage(self, tree_with_comm):
+        """metadata mode used to reply with a hardcoded storage:{} — an
+        honest response has descriptive fields and no storage lie."""
+        tree_with_comm["meta_val"] = 42
+        mock_comm = _make_mock_comm()
+        msg = _make_msg("pdv.tree.get", {"path": "meta_val", "mode": "metadata"})
+        with (
+            patch.object(comms_mod, "_comm", mock_comm),
+            patch.object(comms_mod, "_pdv_tree", tree_with_comm),
+        ):
+            handle_tree_get(msg)
+        payload = mock_comm._sent[0]["payload"]
+        assert "storage" not in payload
+        assert "value" not in payload
+        assert payload["python_type"] == "builtins.int"
+
     def test_get_indexed_list_element(self, tree_with_comm):
         """pdv.tree.get resolves a numeric path segment as a list index."""
         tree_with_comm["xs"] = ["alpha", "beta", "gamma"]

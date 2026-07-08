@@ -25,7 +25,7 @@ code. It can be imported and tested standalone.
 
 from __future__ import annotations
 
-import inspect
+import ast
 import importlib.metadata
 import importlib.util
 import re
@@ -141,30 +141,55 @@ class ScriptParameter(TypedDict):
     required: bool
 
 
-def _annotation_to_type_name(annotation: Any) -> str:
-    """Convert a Python annotation object to a stable string label."""
-    if annotation is inspect.Parameter.empty:
+def _annotation_source(annotation: "ast.expr | None") -> str:
+    """Render a parsed annotation node as a stable string label.
+
+    ``None`` (no annotation) becomes ``"any"``; string annotations lose
+    their quotes (``"int"`` → ``int``); everything else is the annotation's
+    source text via ``ast.unparse`` (``np.ndarray`` stays dotted).
+    """
+    if annotation is None:
         return "any"
-    if isinstance(annotation, str):
-        return annotation
-    if hasattr(annotation, "__name__"):
-        return str(annotation.__name__)
-    return str(annotation)
+    if isinstance(annotation, ast.Constant) and isinstance(annotation.value, str):
+        return annotation.value
+    try:
+        return ast.unparse(annotation)
+    except Exception:  # noqa: BLE001
+        return "any"
+
+
+def _default_source(default: "ast.expr | None") -> Any:
+    """Recover a parameter's default value from its parsed expression.
+
+    Literals evaluate to their real value via ``ast.literal_eval``.
+    Non-literal defaults (names, calls, attribute lookups like ``np.pi``)
+    fall back to their source text — evaluating them would require
+    importing the script, which is exactly what the AST parser exists to
+    avoid. Returns ``None`` when there is no default.
+    """
+    if default is None:
+        return None
+    try:
+        return ast.literal_eval(default)
+    except (ValueError, SyntaxError):
+        try:
+            return ast.unparse(default)
+        except Exception:  # noqa: BLE001
+            return None
 
 
 def _reset_script_module_cache(prefix: str, file_path: str) -> str:
     """Build a unique synthetic module name and clear any stale cache entry.
 
-    Used by both :func:`_extract_script_params` and :meth:`PDVScript.run` to
-    re-import a script file fresh, bypassing Python's import cache so that
-    in-place edits to the script file are always reflected.
+    Used by :meth:`PDVScript.run` to re-import a script file fresh,
+    bypassing Python's import cache so that in-place edits to the script
+    file are always reflected.
 
     Parameters
     ----------
     prefix : str
-        Internal prefix used to namespace the synthetic module names so
-        that signature-extraction and execution caches do not collide
-        (``"_pdv_script_params"`` vs ``"_pdv_script"``).
+        Internal prefix used to namespace the synthetic module names
+        (``"_pdv_script"``).
     file_path : str
         Absolute path to the script file. Hashed to derive a stable
         per-file module name.
@@ -181,53 +206,68 @@ def _reset_script_module_cache(prefix: str, file_path: str) -> str:
 
 
 def _extract_script_params(file_path: str) -> list[ScriptParameter]:
-    """Extract user-facing run() params from a script file.
+    """Extract user-facing run() params from a script file, without importing it.
+
+    Parses the source with :mod:`ast` rather than importing the module.
+    The previous import-based implementation executed the script's entire
+    top-level code — side effects and all — every time the UI asked for
+    parameters via ``pdv.script.params``, and only caught a narrow set of
+    exceptions. Parsing is side-effect-free and fast.
+
+    Literal default values are recovered as real Python values; non-literal
+    defaults (e.g. ``scale=np.pi``) fall back to their source text — see
+    :func:`_default_source`.
 
     Returns an empty list if the file does not exist, cannot be parsed,
-    or does not define a callable run() function.
+    or does not define a top-level ``run()`` function.
     """
-    if not os.path.exists(file_path):
-        return []
-
-    module_name = _reset_script_module_cache("_pdv_script_params", file_path)
-
-    spec = importlib.util.spec_from_file_location(module_name, file_path)
-    if spec is None or spec.loader is None:
-        return []
-
-    module = importlib.util.module_from_spec(spec)
     try:
-        spec.loader.exec_module(module)  # type: ignore[union-attr]
-    except (SyntaxError, FileNotFoundError, OSError, ImportError):
+        with open(file_path, "r", encoding="utf-8") as fh:
+            source = fh.read()
+    except OSError:
         return []
-
-    run_fn = getattr(module, "run", None)
-    if not callable(run_fn):
-        return []
-
     try:
-        signature = inspect.signature(run_fn)
-    except (TypeError, ValueError):
+        parsed = ast.parse(source, filename=file_path)
+    except (SyntaxError, ValueError):
         return []
+
+    run_def = next(
+        (
+            node
+            for node in parsed.body
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+            and node.name == "run"
+        ),
+        None,
+    )
+    if run_def is None:
+        return []
+
+    args = run_def.args
+    positional = [*args.posonlyargs, *args.args]
+    # ast stores defaults right-aligned against the positional list.
+    pos_defaults: list = [None] * (len(positional) - len(args.defaults)) + list(
+        args.defaults
+    )
 
     extracted: list[ScriptParameter] = []
-    for index, (param_name, param) in enumerate(signature.parameters.items()):
-        if index == 0:
-            continue
-        if param.kind in (
-            inspect.Parameter.VAR_POSITIONAL,
-            inspect.Parameter.VAR_KEYWORD,
-        ):
-            continue
-        has_default = param.default is not inspect.Parameter.empty
+
+    def _append(arg: ast.arg, default: "ast.expr | None") -> None:
         extracted.append(
             {
-                "name": param_name,
-                "type": _annotation_to_type_name(param.annotation),
-                "default": param.default if has_default else None,
-                "required": not has_default,
+                "name": arg.arg,
+                "type": _annotation_source(arg.annotation),
+                "default": _default_source(default),
+                "required": default is None,
             }
         )
+
+    for index, (arg, default) in enumerate(zip(positional, pos_defaults)):
+        if index == 0:
+            continue  # pdv_tree — injected by PDVScript.run(), not user-facing
+        _append(arg, default)
+    for arg, default in zip(args.kwonlyargs, args.kw_defaults):
+        _append(arg, default)
     return extracted
 
 

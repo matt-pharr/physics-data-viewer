@@ -6,8 +6,12 @@ manipulation (same logic the handlers use), plus file relocation helpers.
 """
 
 import os
+import uuid as _uuid
 
 import pytest
+from unittest.mock import patch
+
+import pdv.comms as comms_mod
 from pdv.tree import PDVTree, PDVScript, PDVNote
 
 
@@ -179,7 +183,7 @@ class TestRelocateFiles:
         script = PDVScript(uuid=node_uuid, filename="my_script.py")
         dict.__setitem__(container, "my_script", script)
 
-        _relocate_files(container, "parent", "new_parent", tmp_working_dir, copy=True)
+        _relocate_files(container, tmp_working_dir, copy=True)
         # Script should have a new UUID after copy
         assert script.uuid != node_uuid
         new_path = script.resolve_path(tmp_working_dir)
@@ -202,3 +206,82 @@ class TestRelocateFiles:
         assert note.uuid != node_uuid
         new_path = note.resolve_path(tmp_working_dir)
         assert os.path.exists(new_path)
+
+
+def _dispatch(handler, msg_type, payload, tree):
+    """Dispatch a handler with a mocked comm/tree, mirroring production."""
+    msg = {
+        "pdv_version": comms_mod.PDV_PROTOCOL_VERSION,
+        "msg_id": str(_uuid.uuid4()),
+        "in_reply_to": None,
+        "type": msg_type,
+        "payload": payload,
+    }
+    sent = []
+
+    class _Comm:
+        def send(self, data):
+            sent.append(data)
+
+    with (
+        patch.object(comms_mod, "_comm", _Comm()),
+        patch.object(comms_mod, "_pdv_tree", tree),
+    ):
+        handler(msg)
+    return sent
+
+
+class TestRenameMoveChangePushes:
+    """Rename/move must emit vocabulary-conformant change events for BOTH
+    paths. Emitting only the old path (as "renamed"/"moved", outside the
+    documented added/removed/updated vocabulary) meant a move to a different
+    parent never refreshed the destination in the renderer."""
+
+    def test_move_emits_removed_old_and_added_new(self, tree_with_comm, mock_send):
+        from pdv.handlers.tree import handle_tree_move
+
+        tree_with_comm["src.node"] = 1
+        tree_with_comm["dst"] = PDVTree()
+        tree_with_comm._flush_changes()  # drain setup mutations
+        mock_send.reset_mock()
+
+        responses = _dispatch(
+            handle_tree_move,
+            "pdv.tree.move",
+            {"path": "src.node", "new_path": "dst.node"},
+            tree_with_comm,
+        )
+        assert responses[-1]["status"] == "ok"
+
+        tree_with_comm._flush_changes()
+        changed = [
+            c.args for c in mock_send.call_args_list if c.args[0] == "pdv.tree.changed"
+        ]
+        assert changed, "expected a pdv.tree.changed push after move"
+        payload = changed[-1][1]
+        assert payload["change_type"] == "batch"
+        assert set(payload["changed_paths"]) == {"src.node", "dst.node"}
+
+    def test_rename_emits_removed_old_and_added_new(self, tree_with_comm, mock_send):
+        from pdv.handlers.tree import handle_tree_rename
+
+        tree_with_comm["folder.before"] = 7
+        tree_with_comm._flush_changes()  # drain setup mutations
+        mock_send.reset_mock()
+
+        responses = _dispatch(
+            handle_tree_rename,
+            "pdv.tree.rename",
+            {"path": "folder.before", "new_name": "after"},
+            tree_with_comm,
+        )
+        assert responses[-1]["status"] == "ok"
+
+        tree_with_comm._flush_changes()
+        changed = [
+            c.args for c in mock_send.call_args_list if c.args[0] == "pdv.tree.changed"
+        ]
+        assert changed, "expected a pdv.tree.changed push after rename"
+        payload = changed[-1][1]
+        assert payload["change_type"] == "batch"
+        assert set(payload["changed_paths"]) == {"folder.before", "folder.after"}

@@ -3,15 +3,15 @@ pdv.environment — Path utilities and working directory management.
 
 Centralises all filesystem path logic for pdv:
 
-- Creating and validating the working directory (received from the app
-  via ``pdv.init``).
-- Resolving project-relative paths to absolute paths, with path-traversal
-  protection.
-- Utility helpers used by serialization.py and tree.py.
+- Validating the working directory (received from the app via
+  ``pdv.init``) and owning the kernel-CWD policy
+  (:func:`reset_cwd_to_home`).
+- UUID-based node storage paths (:func:`uuid_tree_path`,
+  :func:`generate_node_uuid`) and copy helpers (:func:`smart_copy`).
 
-Design principle: ALL path safety checks live in this module. No other
-module should perform raw ``os.path.join`` + traversal checks — they must
-call functions from here.
+Design principle: ALL path construction and validation lives in this
+module. No other module should perform raw ``os.path.join`` against
+working/save directories — they must call functions from here.
 
 This module has NO dependency on IPython, comms, or any Electron-facing
 code. It can be imported and tested standalone.
@@ -35,35 +35,27 @@ from pdv.errors import PDVPathError
 _NODE_UUID_RE = re.compile(r"^[0-9a-f]{12}$")
 
 
-def make_working_dir(base_tmp_dir: str) -> str:
-    """Create a uniquely named PDV working directory under base_tmp_dir.
+def reset_cwd_to_home() -> None:
+    """Point the kernel process's CWD at the user's home directory.
 
-    Called by the app (not the kernel) in production, but available here
-    for testing. In production the app creates the directory and passes
-    the path via ``pdv.init``.
+    PDV deliberately keeps the process CWD out of both the ephemeral
+    working directory and the project save directory: relative paths in
+    user code should resolve somewhere durable and predictable, not into
+    a session temp dir that is deleted on stop (or a save dir the user
+    may move). This is the single home for that policy — called after
+    ``pdv.init`` (session start) and again after every project load,
+    which would otherwise leave the CWD wherever the previous session or
+    OS default put it.
 
-    Parameters
-    ----------
-    base_tmp_dir : str
-        Absolute path to the base temporary directory (e.g. ``/tmp``).
-
-    Returns
-    -------
-    str
-        Absolute path of the newly created working directory.
-
-    Raises
-    ------
-    PDVPathError
-        If ``base_tmp_dir`` does not exist or is not a directory.
+    Failures are swallowed: an unreadable home directory must not break
+    kernel init or project load.
     """
-    import tempfile
-
-    if not os.path.exists(base_tmp_dir):
-        raise PDVPathError(f"Base temporary directory does not exist: {base_tmp_dir}")
-    if not os.path.isdir(base_tmp_dir):
-        raise PDVPathError(f"Base temporary path is not a directory: {base_tmp_dir}")
-    return tempfile.mkdtemp(prefix="pdv-", dir=base_tmp_dir)
+    try:
+        os.chdir(os.path.expanduser("~"))
+    except OSError:
+        logging.getLogger("pdv").warning(
+            "Could not chdir to home directory; CWD left unchanged."
+        )
 
 
 def validate_working_dir(path: str) -> str:
@@ -92,66 +84,6 @@ def validate_working_dir(path: str) -> str:
     if not os.access(resolved, os.W_OK):
         raise PDVPathError(f"Working directory is not writable: {path}")
     return resolved
-
-
-def resolve_project_path(relative_path: str, project_root: str) -> str:
-    """Resolve a project-relative path to an absolute path, rejecting traversal.
-
-    Parameters
-    ----------
-    relative_path : str
-        A path relative to ``project_root``. Must not be absolute and must
-        not escape the project root via ``..`` components.
-    project_root : str
-        Absolute path to the project root directory.
-
-    Returns
-    -------
-    str
-        Absolute, realpath-resolved path within ``project_root``.
-
-    Raises
-    ------
-    PDVPathError
-        If the path is absolute, escapes the project root, or is otherwise unsafe.
-    """
-    if os.path.isabs(relative_path):
-        raise PDVPathError(
-            f"Expected a relative path, got absolute path: {relative_path}"
-        )
-    candidate = os.path.realpath(os.path.join(project_root, relative_path))
-    root = os.path.realpath(project_root)
-    if not path_is_safe(candidate, root):
-        raise PDVPathError(
-            f"Path '{relative_path}' escapes the project root '{project_root}'"
-        )
-    return candidate
-
-
-def path_is_safe(candidate: str, root: str) -> bool:
-    """Return True if ``candidate`` is inside ``root`` (no traversal).
-
-    Parameters
-    ----------
-    candidate : str
-        Absolute path to check.
-    root : str
-        Absolute root path.
-
-    Returns
-    -------
-    bool
-        True if ``candidate`` is equal to or a descendant of ``root``.
-    """
-    try:
-        candidate_real = os.path.realpath(candidate)
-        root_real = os.path.realpath(root)
-        return candidate_real == root_real or candidate_real.startswith(
-            root_real + os.sep
-        )
-    except Exception:
-        return False
-
 
 
 def ensure_parent(path: str) -> str:

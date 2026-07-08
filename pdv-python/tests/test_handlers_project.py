@@ -349,6 +349,27 @@ class TestHandleProjectSave:
                     npy_files.append(f)
         assert len(npy_files) > 0
 
+    def test_missing_backing_file_aborts_without_writing_index(
+        self, tree_with_comm, tmp_save_dir
+    ):
+        """A missing backing file aborts the save: tree-index.json is NOT
+        written, and the response carries aborted=True + the affected paths
+        so callers can't mistake the save for a success."""
+        tree_with_comm["x"] = 42
+        tree_with_comm["ghost"] = PDVScript(uuid="ghost_uuid01", filename="ghost.py")
+        mock_comm = _make_mock_comm()
+        msg = _make_msg("pdv.project.save", {"save_dir": tmp_save_dir})
+        with (
+            patch.object(comms_mod, "_comm", mock_comm),
+            patch.object(comms_mod, "_pdv_tree", tree_with_comm),
+        ):
+            handle_project_save(msg)
+        assert not os.path.exists(os.path.join(tmp_save_dir, "tree-index.json"))
+        response = mock_comm._sent[-1]["payload"]
+        assert response["aborted"] is True
+        assert response["missing_files"] == ["ghost"]
+        assert response["checksum"] == ""
+
     def test_response_has_node_count(self, tree_with_comm, tmp_save_dir):
         """Response payload includes node_count."""
         tree_with_comm["a"] = 1
@@ -632,6 +653,27 @@ class TestHandleProjectClearAutosaveCache:
         assert response["type"] == "pdv.project.clear_autosave_cache.response"
         assert response["status"] == "ok"
         assert response["in_reply_to"] == clear_msg["msg_id"]
+
+
+class TestAutosaveCachePruning:
+    def test_deleted_paths_pruned_from_cache_on_save(
+        self, tree_with_comm, tmp_save_dir
+    ):
+        """Cache entries for deleted tree paths are pruned at the end of a
+        successful save so the cache can't grow unboundedly over a long
+        session (each entry pins a digest + descriptor)."""
+        numpy = pytest.importorskip("numpy")
+        from pdv.handlers.project import serialize_tree_to_dir
+
+        cache: dict = {}
+        tree_with_comm["keep"] = numpy.arange(3)
+        tree_with_comm["doomed"] = numpy.arange(4)
+        serialize_tree_to_dir(tree_with_comm, tmp_save_dir, autosave_cache=cache)
+        assert set(cache) == {"keep", "doomed"}
+
+        del tree_with_comm["doomed"]
+        serialize_tree_to_dir(tree_with_comm, tmp_save_dir, autosave_cache=cache)
+        assert set(cache) == {"keep"}
 
 
 class TestTwoPassLoading:
