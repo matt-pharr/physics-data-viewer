@@ -110,7 +110,7 @@ vi.mock("./module-manifest-writer", () => ({
   writeModuleManifest: vi.fn(async () => undefined),
 }));
 
-import { IPC } from "./ipc";
+import { IPC, type ActiveEnvironmentInfo } from "./ipc";
 import { registerKernelIpcHandlers } from "./ipc-register-kernels";
 import { registerTreeNamespaceScriptIpcHandlers } from "./ipc-register-tree-namespace-script";
 import { registerModulesIpcHandlers } from "./ipc-register-modules";
@@ -177,6 +177,7 @@ function setupAll(): void {
     autoRefreshNamespace: false,
   });
   const kernelWorkingDirs = new Map<string, string>();
+  const kernelEnvMeta = new Map<string, ActiveEnvironmentInfo>();
   const crashHandlers = new Map<string, (id: string) => void>();
 
   registerKernelIpcHandlers({
@@ -187,6 +188,7 @@ function setupAll(): void {
     projectManager,
     moduleManager,
     kernelWorkingDirs,
+    kernelEnvMeta,
     crashHandlers,
     resetProjectState: vi.fn(),
     resetKernelState: vi.fn(),
@@ -250,6 +252,7 @@ function setupAll(): void {
     runSerializedProjectManifestMutation: async (_dir, fn) => fn(),
     getMainWindow: () => win.win,
     getInterpreterPath: () => "/usr/bin/python3",
+    getActiveKernelEnvMeta: () => undefined,
   });
   registerAppStateIpcHandlers({
     win: win.win,

@@ -35,6 +35,7 @@ import { WriteTab } from '../components/WriteTab';
 import { SettingsDialog } from '../components/SettingsDialog';
 import { ImportModuleDialog } from '../components/ImportModuleDialog';
 import { SaveAsDialog } from '../components/SaveAsDialog';
+import { NewProjectDialog } from '../components/NewProjectDialog';
 import { UnsavedChangesDialog } from '../components/UnsavedChangesDialog';
 import { WelcomeScreen, type RecentProject, type RecoverableSession } from '../components/WelcomeScreen';
 import { EnvSyncModal } from '../components/EnvSyncModal';
@@ -173,6 +174,7 @@ const App: React.FC = () => {
   const [showSettings, setShowSettings] = useState(false);
   const [showImportModule, setShowImportModule] = useState(false);
   const [showSaveAsDialog, setShowSaveAsDialog] = useState(false);
+  const [showNewProjectDialog, setShowNewProjectDialog] = useState(false);
   const [currentProjectName, setCurrentProjectName] = useState<string | null>(null);
   const [chromeInfo, setChromeInfo] = useState<WindowChromeInfo | null>(null);
   const [menuModel, setMenuModel] = useState<AppMenuTopLevel[]>([]);
@@ -1300,15 +1302,42 @@ const App: React.FC = () => {
   }, [config, runningPdvVersion, startKernel, openEnvSettings, lastErrorRef]);
 
   const handleWelcomeNewProject = useCallback(async (language: 'python' | 'julia') => {
-    dismissWelcome();
     if (language === 'python') {
-      // New Python projects are uv projects (§10.5.8). The EnvSyncModal covers
-      // the venv build; ensureKernel's shared-env pre-flight does not apply.
-      await launchUvKernel({ newProject: true });
+      // New Python projects open the setup dialog first (§10.5.8); the
+      // welcome screen stays mounted underneath until Create/Cancel.
+      setShowNewProjectDialog(true);
       return;
     }
+    dismissWelcome();
     await ensureKernel(language);
-  }, [dismissWelcome, ensureKernel, launchUvKernel]);
+  }, [dismissWelcome, ensureKernel]);
+
+  /** Create a uv-managed project with the dialog's version/package choices. */
+  const handleNewProjectCreateUv = useCallback(async (opts: { pythonVersion: string; packages: string[] }) => {
+    setShowNewProjectDialog(false);
+    dismissWelcome();
+    // The EnvSyncModal covers the venv build (including a first-time
+    // interpreter download); ensureKernel's shared-env pre-flight does not apply.
+    await launchUvKernel({
+      newProject: true,
+      pythonVersion: opts.pythonVersion,
+      packages: opts.packages,
+    });
+  }, [dismissWelcome, launchUvKernel]);
+
+  /**
+   * Create a project on an existing (conda/system) interpreter chosen in the
+   * dialog's advanced expander. Session-scoped override — the global config
+   * is not touched; the choice reaches the manifest on first save (§10.5).
+   */
+  const handleNewProjectCreateShared = useCallback(async (pythonPath: string) => {
+    setShowNewProjectDialog(false);
+    dismissWelcome();
+    setActiveLanguage('python');
+    const overrideConfig: Config = { ...(config ?? {} as Config), pythonPath };
+    const ok = await startKernel(overrideConfig, 'python');
+    if (!ok) openEnvSettings(lastErrorRef.current ?? 'Kernel failed to start with the selected environment.');
+  }, [config, dismissWelcome, startKernel, openEnvSettings, lastErrorRef]);
 
   /**
    * Open a project from the welcome screen. Peeks at the manifest to detect
@@ -1866,6 +1895,7 @@ const App: React.FC = () => {
           progress={progress}
           onRuntimeClick={() => { setSettingsInitialTab('runtime'); setShowSettings(true); }}
           onRestartSession={handleRestartKernel}
+          canRestart={currentKernelId !== null}
           lastChecksum={lastChecksum}
           checksumMismatch={checksumMismatch}
           savedPdvVersion={savedPdvVersion}
@@ -1902,11 +1932,22 @@ const App: React.FC = () => {
          initialTab={settingsInitialTab}
          activeLanguage={activeLanguage}
          environmentMode={environmentMode}
+         kernelRunning={currentKernelId !== null && kernelStatus === 'ready'}
          config={config}
          shortcuts={shortcuts}
          onClose={() => setShowSettings(false)}
          onSave={handleSettingsSave}
          onEnvSave={(paths) => {
+           if (currentKernelId !== null && kernelStatus === 'ready') {
+             // A session is running: the selection only updates the global
+             // default runtime for future sessions (§10.5.19) — no kernel
+             // stop, no dirty guard, and the live project keeps its
+             // environment.
+             setInterpreterWarning(null);
+             setShowSettings(false);
+             void handleEnvSave(paths, { restart: false });
+             return;
+           }
            guardDirty('change the interpreter', () => {
              setShowSettings(false);
              setInterpreterWarning(null);
@@ -1937,6 +1978,16 @@ const App: React.FC = () => {
            onRecoverSession={handleRecoverSession}
            onDiscardSession={handleDiscardSession}
            onClearRecents={handleClearRecents}
+         />
+       )}
+
+       {showNewProjectDialog && (
+         <NewProjectDialog
+           defaultPackages={config?.defaultPackages ?? []}
+           currentPythonPath={config?.pythonPath}
+           onCreateUv={(opts) => void handleNewProjectCreateUv(opts)}
+           onCreateShared={(pythonPath) => void handleNewProjectCreateShared(pythonPath)}
+           onCancel={() => setShowNewProjectDialog(false)}
          />
        )}
 

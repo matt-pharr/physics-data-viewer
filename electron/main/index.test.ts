@@ -931,10 +931,14 @@ describe("Step 5 IPC handlers", () => {
   it("kernels:restart falls back to stop+start when restart() is absent", async () => {
     const { kernelManager } = setup();
     const restart = getHandler(IPC.kernels.restart);
-    const result = (await restart({}, "kernel-1")) as KernelInfo;
+    const result = (await restart({}, "kernel-1")) as {
+      kernel: KernelInfo;
+      restoredFromAutosave: boolean;
+    };
     expect(kernelManager.stop).toHaveBeenCalledWith("kernel-1");
     expect(kernelManager.start).toHaveBeenCalled();
-    expect(result).toMatchObject({ id: expect.any(String), status: "idle" });
+    expect(result.kernel).toMatchObject({ id: expect.any(String), status: "idle" });
+    expect(result.restoredFromAutosave).toBe(false);
   });
 
   it("kernels:complete delegates to KernelManager.complete", async () => {
@@ -1205,6 +1209,10 @@ describe("Step 5 IPC handlers", () => {
     expect(projectManager.save).toHaveBeenCalledWith("/tmp/project", cells, {
       language: "python",
       interpreterPath: undefined,
+      projectName: undefined,
+      // No active kernel in this harness → explicit shared-mode recording
+      // (§10.5): the manifest states its environment rather than omitting it.
+      environment: { mode: "shared" },
     });
     expect(result).toEqual({ checksum: "abc123", nodeCount: 0 });
   });

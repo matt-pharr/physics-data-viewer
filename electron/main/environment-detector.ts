@@ -24,6 +24,7 @@ import * as os from "os";
 import * as fs from "fs";
 import { BrowserWindow } from "electron";
 import { coreVersion, getAppVersion } from "./pdv-protocol";
+import { parseMajorMinor } from "./python-versions";
 
 const execFileAsync = promisify(execFile);
 
@@ -293,6 +294,33 @@ export class EnvironmentDetector {
    */
   static async listAll(): Promise<DetectedEnvironment[]> {
     return EnvironmentDetector.detectEnvironments();
+  }
+
+  /**
+   * Resolve the ``major.minor`` Python version of an interpreter.
+   *
+   * Runs ``<python> --version`` with {@link PROBE_TIMEOUT_MS}. Used to
+   * record the authoritative Python version of a kernel's environment in
+   * the project manifest (§10.5). Never throws.
+   *
+   * @param pythonPath - Path to the Python executable to probe.
+   * @returns The ``"major.minor"`` string (e.g. ``"3.13"``), or undefined
+   *   when the executable is missing, times out, or prints no version.
+   */
+  static async resolvePythonMajorMinor(
+    pythonPath: string
+  ): Promise<string | undefined> {
+    try {
+      const { stdout, stderr } = await execFileAsync(
+        pythonPath,
+        ["--version"],
+        { timeout: PROBE_TIMEOUT_MS }
+      );
+      // Python 2 prints to stderr; Python 3 prints to stdout.
+      return parseMajorMinor((stdout + stderr).trim());
+    } catch {
+      return undefined;
+    }
   }
 
   /**

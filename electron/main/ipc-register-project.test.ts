@@ -37,6 +37,11 @@ const fsMocks = vi.hoisted(() => ({
   rm: vi.fn(
     async (_path: string, _options?: { recursive?: boolean; force?: boolean }) => undefined,
   ),
+  // Default: reject (file absent) so the save handler's pyproject.toml probe
+  // classifies sessions as shared-mode unless a test opts in to uv.
+  access: vi.fn<(path: string) => Promise<void>>(async () => {
+    throw Object.assign(new Error("ENOENT"), { code: "ENOENT" });
+  }),
 }));
 
 const moduleRuntimeMocks = vi.hoisted(() => ({
@@ -45,6 +50,7 @@ const moduleRuntimeMocks = vi.hoisted(() => ({
 
 const projectFileSyncMocks = vi.hoisted(() => ({
   copyFilesForLoad: vi.fn(async () => [] as string[]),
+  copyEnvFilesForSave: vi.fn(async () => [] as string[]),
   overlayAutosaveTreeFiles: vi.fn(async () => undefined),
 }));
 
@@ -65,7 +71,7 @@ vi.mock("./module-runtime", () => moduleRuntimeMocks);
 vi.mock("./project-file-sync", () => projectFileSyncMocks);
 vi.mock("./module-manifest-writer", () => manifestWriterMocks);
 
-import { IPC } from "./ipc";
+import { IPC, type ActiveEnvironmentInfo } from "./ipc";
 import {
   registerProjectIpcHandlers,
   syncModuleOwnedFilesToSaveDir,
@@ -108,6 +114,7 @@ interface Harness {
   setPendingModuleSettings: Mock<(settings: Record<string, Record<string, unknown>>) => void>;
   refreshProjectModuleHealth: Mock<(dir: string | null) => Promise<ProjectManifest | null>>;
   clearModuleHealthWarnings: Mock<() => void>;
+  getActiveKernelEnvMeta: Mock<() => ActiveEnvironmentInfo | undefined>;
   onExplicitSaveCompleted: Mock<(saveDir: string) => void>;
 }
 
@@ -134,6 +141,7 @@ function setup(): Harness {
     setPendingModuleSettings: vi.fn<(settings: Record<string, Record<string, unknown>>) => void>(),
     refreshProjectModuleHealth: vi.fn<(dir: string | null) => Promise<ProjectManifest | null>>(async () => null),
     clearModuleHealthWarnings: vi.fn<() => void>(),
+    getActiveKernelEnvMeta: vi.fn<() => ActiveEnvironmentInfo | undefined>(() => undefined),
     onExplicitSaveCompleted: vi.fn<(saveDir: string) => void>(),
   };
   void activeProjectDir;
@@ -154,6 +162,7 @@ function setup(): Harness {
     runSerializedProjectManifestMutation: async (_dir, fn) => fn(),
     getMainWindow: () => win.win,
     getInterpreterPath: () => "/usr/bin/python3",
+    getActiveKernelEnvMeta: harness.getActiveKernelEnvMeta,
     onExplicitSaveCompleted: harness.onExplicitSaveCompleted,
   });
   return harness;
@@ -193,6 +202,62 @@ describe("project:save", () => {
     expect(harness.onExplicitSaveCompleted).toHaveBeenCalledWith("/save");
     expect(result.checksum).toBe("abc123");
     expect(result.projectName).toBe("demo");
+  });
+
+  it("uv project: records mode + python_version from kernel env metadata, omits interpreter_path (§10.5)", async () => {
+    const harness = setup();
+    // uv detection: the active kernel's working dir must contain a
+    // pyproject.toml — make the access probe succeed for it.
+    harness.getActiveKernelId.mockReturnValue("k1");
+    harness.kernelWorkingDirs.set("k1", "/tmp/uv-wd");
+    fsMocks.access.mockResolvedValueOnce(undefined);
+    harness.getActiveKernelEnvMeta.mockReturnValue({
+      mode: "uv",
+      interpreterPath: "/tmp/uv-wd/.venv/bin/python",
+      pythonVersion: "3.12",
+    });
+
+    await getHandler(IPC.project.save)({}, "/save", validCells);
+
+    const saveOpts = (harness.projectManager.save as Mock).mock.calls.at(-1)?.[2] as {
+      environment?: { mode: string; python_version?: string };
+      interpreterPath?: string;
+    };
+    expect(saveOpts.environment).toEqual({ mode: "uv", python_version: "3.12" });
+    // The venv path is ephemeral (lives in the working dir) — never recorded.
+    expect(saveOpts.interpreterPath).toBeUndefined();
+  });
+
+  it("shared project: records the interpreter the kernel actually spawned on", async () => {
+    const harness = setup();
+    harness.getActiveKernelId.mockReturnValue("k1");
+    // No pyproject.toml in the working dir → shared mode.
+    harness.getActiveKernelEnvMeta.mockReturnValue({
+      mode: "shared",
+      interpreterPath: "/opt/conda/envs/mpi/bin/python",
+      pythonVersion: "3.12",
+    });
+
+    await getHandler(IPC.project.save)({}, "/save", validCells);
+
+    const saveOpts = (harness.projectManager.save as Mock).mock.calls.at(-1)?.[2] as {
+      environment?: { mode: string };
+      interpreterPath?: string;
+    };
+    expect(saveOpts.environment).toEqual({ mode: "shared" });
+    expect(saveOpts.interpreterPath).toBe("/opt/conda/envs/mpi/bin/python");
+  });
+
+  it("shared project without kernel metadata: falls back to the global config interpreter", async () => {
+    const harness = setup();
+    harness.getActiveKernelEnvMeta.mockReturnValue(undefined);
+
+    await getHandler(IPC.project.save)({}, "/save", validCells);
+
+    const saveOpts = (harness.projectManager.save as Mock).mock.calls.at(-1)?.[2] as {
+      interpreterPath?: string;
+    };
+    expect(saveOpts.interpreterPath).toBe("/usr/bin/python3");
   });
 
   it("blocks save and skips state mutation when missingFiles is non-empty", async () => {

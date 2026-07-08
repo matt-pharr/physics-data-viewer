@@ -64,8 +64,14 @@ interface SettingsDialogProps {
    *  caller can prompt about unsaved changes before the app restarts. */
   onInstallUpdate?: () => void;
   envWarning?: string | null;
-  /** Active environment mode — drives the Packages tab content (§10.5.13). */
+  /** Active environment mode — drives the Project Environment tab content (§10.5.13). */
   environmentMode?: 'uv' | 'shared';
+  /**
+   * True when a kernel session is up (`ready`). Gates the Runtime tab into
+   * default-runtime-only mode: selections update the global config for
+   * future sessions but never stop or demote the live session (§10.5.19).
+   */
+  kernelRunning?: boolean;
 }
 
 /** Top-level settings modal used by the App shell. */
@@ -81,6 +87,7 @@ export const SettingsDialog: React.FC<SettingsDialogProps> = ({
   onInstallUpdate,
   envWarning,
   environmentMode,
+  kernelRunning = false,
 }) => {
   const [activeTab, setActiveTab] = useState<SettingsTab>(initialTab);
   const [editedShortcuts, setEditedShortcuts] = useState<Shortcuts>(shortcuts);
@@ -474,8 +481,8 @@ export const SettingsDialog: React.FC<SettingsDialogProps> = ({
           <button className={`tab ${activeTab === 'shortcuts' ? 'active' : ''}`} onClick={() => setActiveTab('shortcuts')}>Keyboard Shortcuts</button>
           <button className={`tab ${activeTab === 'appearance' ? 'active' : ''}`} onClick={() => setActiveTab('appearance')}>Appearance</button>
           <button className={`tab ${activeTab === 'agents' ? 'active' : ''}`} onClick={() => setActiveTab('agents')}>Agents</button>
-          <button className={`tab ${activeTab === 'runtime' ? 'active' : ''}`} onClick={() => setActiveTab('runtime')}>Runtime</button>
-          <button className={`tab ${activeTab === 'packages' ? 'active' : ''}`} onClick={() => setActiveTab('packages')}>Packages</button>
+          <button className={`tab ${activeTab === 'runtime' ? 'active' : ''}`} onClick={() => setActiveTab('runtime')}>Default Runtime</button>
+          <button className={`tab ${activeTab === 'packages' ? 'active' : ''}`} onClick={() => setActiveTab('packages')}>Project Environment</button>
           <button className={`tab ${activeTab === 'about' ? 'active' : ''}`} onClick={() => setActiveTab('about')}>About</button>
         </div>
         <div className="dialog-body">
@@ -722,15 +729,29 @@ export const SettingsDialog: React.FC<SettingsDialogProps> = ({
           ) : activeTab === 'agents' ? (
             <AgentsTab />
           ) : activeTab === 'runtime' ? (
-            <EnvironmentSelector
-              embedded
-              isFirstRun={activeLanguage === 'julia' ? !config?.juliaPath : !config?.pythonPath}
-              activeLanguage={activeLanguage}
-              currentPythonPath={config?.pythonPath}
-              currentJuliaPath={config?.juliaPath}
-              warning={envWarning}
-              onSelect={onEnvSave}
-            />
+            <div className="settings-runtime">
+              <p className="settings-general-hint">
+                The default runtime is used for the first run, sessions on an
+                existing environment, and Julia. New Python projects manage
+                their own environment (see the New Project dialog).
+              </p>
+              {kernelRunning && (
+                <p className="settings-runtime-note" data-testid="runtime-future-note">
+                  A session is running. Selections here become the default for
+                  future sessions and do not change the current project&rsquo;s
+                  environment.
+                </p>
+              )}
+              <EnvironmentSelector
+                embedded
+                isFirstRun={activeLanguage === 'julia' ? !config?.juliaPath : !config?.pythonPath}
+                activeLanguage={activeLanguage}
+                currentPythonPath={config?.pythonPath}
+                currentJuliaPath={config?.juliaPath}
+                warning={envWarning}
+                onSelect={onEnvSave}
+              />
+            </div>
           ) : activeTab === 'packages' ? (
             <PackagesTab environmentMode={environmentMode} />
           ) : activeTab === 'about' ? (

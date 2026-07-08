@@ -6,6 +6,7 @@
  */
 
 import type {
+  ActiveEnvironmentInfo,
   AgentLauncherConfig,
   Config,
   EditorLauncherConfig,
@@ -16,6 +17,7 @@ import type {
   KernelExecutionError,
   KernelExecutionOrigin,
   KernelExecuteResult,
+  KernelRestartResult,
   KernelSpec,
   KernelUvContext,
   ProjectPackage,
@@ -54,6 +56,7 @@ import type {
 
 /** Re-export core preload API contract types for renderer imports. */
 export type {
+  ActiveEnvironmentInfo,
   AgentLauncherConfig,
   Config,
   EditorLauncherConfig,
@@ -63,6 +66,7 @@ export type {
   KernelExecutionError,
   KernelExecutionOrigin,
   KernelExecuteResult,
+  KernelRestartResult,
   KernelSpec,
   KernelUvContext,
   ProjectPackage,

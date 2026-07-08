@@ -363,6 +363,8 @@ export const IPC = {
     removePackage: "environment:removePackage",
     /** Packages UI: `uv lock --upgrade-package <names>` + `uv sync`. */
     upgradePackage: "environment:upgradePackage",
+    /** Active kernel's environment metadata (Project Environment tab header). */
+    activeInfo: "environment:activeInfo",
   },
   /** Native file/directory picker channels. */
   files: {
@@ -1485,6 +1487,46 @@ export interface KernelUvContext {
    * default packages (§10.5.8) rather than copying from a save directory.
    */
   newProject?: boolean;
+  /**
+   * Python version for a new project's venv, chosen in the New Project
+   * dialog (e.g. `"3.13"`). Passed to `uv sync --python` and pinned in the
+   * working dir's `.python-version`. Only meaningful with `newProject`;
+   * must be one of `SUPPORTED_PYTHON_VERSIONS`.
+   */
+  pythonVersion?: string;
+  /**
+   * Initial PEP 508 dependency specs for a new project's `pyproject.toml`,
+   * chosen in the New Project dialog. Only meaningful with `newProject`;
+   * when absent, the user's global default packages are used.
+   */
+  packages?: string[];
+}
+
+/**
+ * Result of `kernels.restart`: the freshly started kernel plus whether the
+ * project state was restored from a pre-restart autosave snapshot (`true`)
+ * or the session came back empty (`false`). Drives the renderer's
+ * post-restart console message.
+ */
+export interface KernelRestartResult {
+  /** Metadata of the newly started kernel. */
+  kernel: KernelInfo;
+  /** True when tree/cell state was reloaded from an autosave snapshot. */
+  restoredFromAutosave: boolean;
+}
+
+/**
+ * Environment metadata for the active kernel, shown in the Project
+ * Environment settings tab. `null` is returned by the IPC handler when no
+ * kernel is active.
+ */
+export interface ActiveEnvironmentInfo {
+  /** Whether the session runs in a uv-managed project venv or a shared env. */
+  mode: "uv" | "shared";
+  /** Interpreter the kernel actually spawned on (venv python for uv mode). */
+  interpreterPath?: string;
+  /** Resolved `major.minor` Python version of that interpreter. */
+  pythonVersion?: string;
 }
 
 /**
@@ -1701,12 +1743,12 @@ export interface PDVApi {
      */
     interrupt(kernelId: string): Promise<boolean>;
     /**
-     * Restart a running kernel.
+     * Restart a running (or crashed) kernel.
      *
      * @param kernelId - Target kernel ID.
-     * @returns Newly started kernel metadata.
+     * @returns The new kernel plus whether state was restored from autosave.
      */
-    restart(kernelId: string): Promise<KernelInfo>;
+    restart(kernelId: string): Promise<KernelRestartResult>;
     /**
      * Request code completion from a kernel.
      *
@@ -2319,6 +2361,14 @@ export interface PDVApi {
      * @returns The uv result.
      */
     upgradePackage(names: string[]): Promise<EnvironmentInstallResult>;
+    /**
+     * Fetch the active kernel's environment metadata for the Project
+     * Environment settings tab.
+     *
+     * @returns Mode, interpreter path, and Python version of the active
+     *   kernel's environment, or `null` when no kernel is active.
+     */
+    activeInfo(): Promise<ActiveEnvironmentInfo | null>;
   };
 
   /** App configuration accessors. */
@@ -2729,6 +2779,13 @@ export interface PDVApi {
      * action-bar buttons) can branch on platform without an async call.
      */
     platform: NodeJS.Platform;
+    /**
+     * CPython minor versions offered by the New Project dialog, oldest
+     * first. Compile-time constant from `python-versions.ts`.
+     */
+    supportedPythonVersions: readonly string[];
+    /** Version preselected in the New Project dialog (e.g. `"3.13"`). */
+    defaultPythonVersion: string;
   };
 
   /** External-app launchers driven by the action bar. */

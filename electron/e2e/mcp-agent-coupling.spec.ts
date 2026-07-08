@@ -30,6 +30,7 @@ import { test, expect } from "@playwright/test";
 import type { McpStatus, PDVApi } from "../renderer/src/types/pdv";
 import { expectKernelReady } from "./helpers/kernel-status";
 import { launchPDV, type LaunchedApp } from "./helpers/launch";
+import { createNewPythonProject } from "./helpers/new-project";
 
 let launched: LaunchedApp;
 
@@ -41,7 +42,7 @@ test.beforeAll(async () => {
       mcp: { mutatingToolsEnabled: true, pdvRunEnabled: true },
     },
   });
-  await launched.window.getByRole("button", { name: "New Python Project" }).click();
+  await createNewPythonProject(launched.window);
   await expectKernelReady(launched.window);
 });
 

@@ -21,9 +21,15 @@ interface StatusBarProps {
   lastDuration: number | null;
   progress: ProgressPayload | null;
   onRuntimeClick: () => void;
-  /** Restart the active session. Rendered only while connected; the tree
-   *  is snapshotted before teardown and restored afterwards. */
+  /** Restart the active session. Rendered while connected, and after a
+   *  crash when a restartable session exists (`canRestart`); the tree is
+   *  snapshotted before teardown (or recovered from the last autosave
+   *  after a crash) and restored afterwards. */
   onRestartSession?: () => void;
+  /** True when a session exists to restart (a kernel id is known). Gates
+   *  the restart affordance in the `error` state — a crashed session can
+   *  be restarted, a failed start cannot. */
+  canRestart?: boolean;
   lastChecksum: string | null;
   checksumMismatch: boolean;
   savedPdvVersion: string | null;
@@ -68,6 +74,7 @@ export const StatusBar: React.FC<StatusBarProps> = ({
   progress,
   onRuntimeClick,
   onRestartSession,
+  canRestart = false,
   lastChecksum,
   checksumMismatch,
   savedPdvVersion,
@@ -156,6 +163,7 @@ export const StatusBar: React.FC<StatusBarProps> = ({
           className="status-item status-clickable"
           onClick={onRuntimeClick}
           title={runtimeTitle}
+          data-testid="runtime-chip"
         >
           {runtimeLabel}
         </span>
@@ -185,11 +193,16 @@ export const StatusBar: React.FC<StatusBarProps> = ({
         <span className="status-item">
           Last: {lastDuration !== null ? `${Math.round(lastDuration)}ms` : '--'}
         </span>
-        {kernelStatus === 'ready' && onRestartSession && (
+        {(kernelStatus === 'ready' || (kernelStatus === 'error' && canRestart)) &&
+          onRestartSession && (
           <span
             className="status-item status-clickable"
             onClick={onRestartSession}
-            title="Restart the session — the tree is snapshotted and restored automatically"
+            title={
+              kernelStatus === 'error'
+                ? 'The session crashed — restart it. Work is restored from the last autosave when available.'
+                : 'Restart the session — the tree is snapshotted and restored automatically'
+            }
             data-testid="restart-session"
           >
             ⟳ Restart

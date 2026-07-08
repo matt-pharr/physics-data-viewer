@@ -15,6 +15,19 @@ import type { EnvironmentInfo, InstallOutputChunk } from '../../types';
 // Props
 // ---------------------------------------------------------------------------
 
+/**
+ * Imperative actions a host can drive when it owns the selector's buttons
+ * (see `hideConfirm`/`hideInstallButton`). Exposed via the `actionsRef` prop.
+ */
+export interface EnvironmentSelectorActions {
+  /**
+   * Install pdv-python into the currently selected environment — same flow
+   * as the inline install button (streaming output, post-install re-probe,
+   * badge refresh). Resolves `true` on success.
+   */
+  installPdv: () => Promise<boolean>;
+}
+
 interface EnvironmentSelectorProps {
   /** True when no interpreter has been configured yet. */
   isFirstRun: boolean;
@@ -28,6 +41,32 @@ interface EnvironmentSelectorProps {
   warning?: string | null;
   /** When true, renders inline (no modal overlay). Used in Settings → Runtime. */
   embedded?: boolean;
+  /**
+   * When true, the selector renders no confirm/cancel buttons of its own —
+   * the host owns the single confirm (e.g. the New Project dialog's Create
+   * button) and tracks the selection via `onSelectionChange`. Browse,
+   * Refresh, and the pdv-python install panel stay available.
+   */
+  hideConfirm?: boolean;
+  /**
+   * When true, the pdv-python install panel renders its message and
+   * streaming output but not its own install button — the host drives the
+   * install through `actionsRef.installPdv()` (e.g. the New Project
+   * dialog's footer button).
+   */
+  hideInstallButton?: boolean;
+  /**
+   * Receives the selector's imperative actions (install) so a host that
+   * hides the inline buttons can drive them from its own chrome.
+   */
+  actionsRef?: React.MutableRefObject<EnvironmentSelectorActions | null>;
+  /**
+   * Fires whenever the highlighted environment changes (row click, browse,
+   * refresh, post-install re-probe), with the freshest probe info — or null
+   * when the selection is cleared. Lets a host with `hideConfirm` gate its
+   * own confirm button on the selection's pdv status.
+   */
+  onSelectionChange?: (info: EnvironmentInfo | null) => void;
   /** Called when the user selects an environment. */
   onSelect: (config: { pythonPath?: string; juliaPath?: string }) => void;
   /** Called when the user cancels (not shown on first run). */
@@ -65,6 +104,10 @@ export const EnvironmentSelector: React.FC<EnvironmentSelectorProps> = ({
   currentJuliaPath,
   warning,
   embedded = false,
+  hideConfirm = false,
+  hideInstallButton = false,
+  actionsRef,
+  onSelectionChange,
   onSelect,
   onCancel,
 }) => {
@@ -89,6 +132,15 @@ export const EnvironmentSelector: React.FC<EnvironmentSelectorProps> = ({
 
   // -- Julia stub state ------------------------------------------------------
   const [juliaPath, setJuliaPath] = useState(currentJuliaPath || 'julia');
+
+  // Surface every selection change (row click, browse, refresh clear,
+  // post-install re-probe) to a host that owns the confirm button.
+  useEffect(() => {
+    onSelectionChange?.(selectedInfo);
+    // `onSelectionChange` is intentionally omitted: hosts pass inline
+    // closures, and re-firing on every parent render would loop.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedInfo]);
 
   // -- Load environments on mount --------------------------------------------
   const loadEnvironments = useCallback(async () => {
@@ -160,8 +212,8 @@ export const EnvironmentSelector: React.FC<EnvironmentSelectorProps> = ({
   }, []);
 
   // -- Install pdv-python ----------------------------------------------------
-  const handleInstall = useCallback(async () => {
-    if (!selectedPath) return;
+  const handleInstall = useCallback(async (): Promise<boolean> => {
+    if (!selectedPath) return false;
     setInstalling(true);
     setInstallOutput([]);
     setInstallResult(null);
@@ -185,16 +237,27 @@ export const EnvironmentSelector: React.FC<EnvironmentSelectorProps> = ({
           );
         }
       }
+      return result.success;
     } catch (err) {
       setInstallResult({
         success: false,
         output: err instanceof Error ? err.message : String(err),
       });
+      return false;
     } finally {
       unsubscribe();
       setInstalling(false);
     }
   }, [selectedPath]);
+
+  // Hand the imperative actions to a host that owns the buttons.
+  useEffect(() => {
+    if (!actionsRef) return;
+    actionsRef.current = { installPdv: handleInstall };
+    return () => {
+      actionsRef.current = null;
+    };
+  }, [actionsRef, handleInstall]);
 
   // Auto-scroll install output
   useEffect(() => {
@@ -360,18 +423,20 @@ export const EnvironmentSelector: React.FC<EnvironmentSelectorProps> = ({
               ? `pdv-python ${selectedInfo.pdvVersion} installed — v${appVersion ?? 'latest'} required.`
               : 'pdv-python is not installed in this environment.'}
           </div>
-          <button
-            className="btn btn-primary"
-            onClick={handleInstall}
-            disabled={installing}
-            type="button"
-          >
-            {installing
-              ? 'Installing...'
-              : selectedInfo.pdvVersionMismatch
-                ? `Install pdv-python ${appVersion ?? 'latest'}`
-                : 'Install pdv-python'}
-          </button>
+          {!hideInstallButton && (
+            <button
+              className="btn btn-primary"
+              onClick={() => void handleInstall()}
+              disabled={installing}
+              type="button"
+            >
+              {installing
+                ? 'Installing...'
+                : selectedInfo.pdvVersionMismatch
+                  ? `Install pdv-python ${appVersion ?? 'latest'}`
+                  : 'Install pdv-python'}
+            </button>
+          )}
 
           {/* Streaming output */}
           {(installOutput.length > 0 || installResult) && (
@@ -393,23 +458,26 @@ export const EnvironmentSelector: React.FC<EnvironmentSelectorProps> = ({
         </div>
       )}
 
-      {/* Confirm / Cancel */}
-      <div className="button-group">
-        <button
-          className="btn btn-primary"
-          onClick={handleConfirm}
-          disabled={!canConfirm}
-          type="button"
-          title={canConfirm ? undefined : 'Install pdv-python first'}
-        >
-          Select Environment
-        </button>
-        {!isFirstRun && onCancel && (
-          <button className="btn btn-secondary" onClick={onCancel} type="button">
-            Cancel
+      {/* Confirm / Cancel — suppressed when the host owns the confirm
+          (e.g. the New Project dialog's single Create button). */}
+      {!hideConfirm && (
+        <div className="button-group">
+          <button
+            className="btn btn-primary"
+            onClick={handleConfirm}
+            disabled={!canConfirm}
+            type="button"
+            title={canConfirm ? undefined : 'Install pdv-python first'}
+          >
+            Select Environment
           </button>
-        )}
-      </div>
+          {!isFirstRun && onCancel && (
+            <button className="btn btn-secondary" onClick={onCancel} type="button">
+              Cancel
+            </button>
+          )}
+        </div>
+      )}
     </>
   );
 

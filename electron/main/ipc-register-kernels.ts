@@ -22,7 +22,7 @@ import { handleIpc } from "./ipc-registry";
 import { CommRouter } from "./comm-router";
 import { QueryRouter } from "./query-router";
 import { EnvironmentDetector } from "./environment-detector";
-import { IPC } from "./ipc";
+import { IPC, type ActiveEnvironmentInfo, type KernelRestartResult } from "./ipc";
 import { KernelManager, type KernelInfo } from "./kernel-manager";
 import { initializeKernelSession } from "./kernel-session";
 import { executeAndTranscribe, TranscriptWriter } from "./mcp/transcript";
@@ -34,6 +34,10 @@ import { autosaveDirFor } from "./autosave-sidecars";
 import { materializeUvEnvironment } from "./uv-environment";
 import { resolveUvBinary } from "./uv-runner";
 import { generatePyproject } from "./pyproject";
+import {
+  DEFAULT_PYTHON_VERSION,
+  SUPPORTED_PYTHON_VERSIONS,
+} from "./python-versions";
 
 /**
  * The `kernel:memoryRss` listener currently attached to a KernelManager,
@@ -71,6 +75,14 @@ interface RegisterKernelIpcHandlersOptions {
   projectManager: ProjectManager;
   moduleManager: ModuleManager;
   kernelWorkingDirs: Map<string, string>;
+  /**
+   * Per-kernel environment metadata (mode, actual interpreter, resolved
+   * Python version). This module populates it on start/restart and deletes
+   * entries on stop; entries survive crashes so a crash-restart carries the
+   * environment over. Read by `environment:activeInfo` and the project save
+   * handler (§10.5).
+   */
+  kernelEnvMeta: Map<string, ActiveEnvironmentInfo>;
   crashHandlers: Map<string, (id: string) => void>;
   resetProjectState: () => void;
   resetKernelState: () => void;
@@ -155,6 +167,7 @@ export function registerKernelIpcHandlers(
     projectManager,
     moduleManager,
     kernelWorkingDirs,
+    kernelEnvMeta,
     crashHandlers,
     resetProjectState,
     resetKernelState,
@@ -188,9 +201,10 @@ export function registerKernelIpcHandlers(
    * process is spawned against the venv interpreter.
    *
    * @param uv - uv context: an existing project's `saveDir` to copy env
-   *   files from, `newProject` to seed a fresh `pyproject.toml` from the
-   *   user's default packages, or an `envSnapshot` of file contents captured
-   *   before the source working dir was torn down (used on restart, §11.6).
+   *   files from, `newProject` to seed a fresh `pyproject.toml` (from
+   *   `packages`, falling back to the user's default packages, pinned to
+   *   `pythonVersion` or the default), or an `envSnapshot` of file contents
+   *   captured before the source working dir was torn down (restart, §11.6).
    * @returns The pre-created working directory and the venv interpreter path.
    * @throws {Error} When uv environment setup fails. The partially-created
    *   working directory is removed before the error propagates.
@@ -199,7 +213,9 @@ export function registerKernelIpcHandlers(
     uv: {
       saveDir?: string;
       newProject?: boolean;
-      envSnapshot?: { pyproject: string; uvLock?: string };
+      pythonVersion?: string;
+      packages?: string[];
+      envSnapshot?: { pyproject: string; uvLock?: string; pythonVersionPin?: string };
     }
   ): Promise<{ workingDir: string; venvPython: string; uvBinary: string | undefined }> {
     // The resolved uv binary travels to the kernel in pdv.init so pdv.install()
@@ -220,15 +236,35 @@ export function registerKernelIpcHandlers(
         if (uv.envSnapshot.uvLock !== undefined) {
           await fs.writeFile(path.join(workingDir, "uv.lock"), uv.envSnapshot.uvLock, "utf8");
         }
+        if (uv.envSnapshot.pythonVersionPin !== undefined) {
+          await fs.writeFile(
+            path.join(workingDir, ".python-version"),
+            uv.envSnapshot.pythonVersionPin,
+            "utf8"
+          );
+          pythonVersion = uv.envSnapshot.pythonVersionPin.trim() || undefined;
+        }
       } else if (uv.saveDir) {
         // Opening an existing uv project: copy its env files in.
         await copyEnvFilesForLoad(uv.saveDir, workingDir);
         const manifest = await ProjectManager.readManifest(uv.saveDir);
         pythonVersion = manifest.environment?.python_version;
       } else {
-        // New uv project: generate a pyproject.toml from the default packages.
-        const toml = generatePyproject({ dependencies: getDefaultPackages() });
+        // New uv project: generate a pyproject.toml from the packages chosen
+        // in the New Project dialog (falling back to the user's defaults) and
+        // pin the chosen Python version. The pin is written as uv's native
+        // `.python-version` file so it round-trips through save/open/restart
+        // via ENV_FILES (§10.5.10) without touching the manifest schema.
+        const toml = generatePyproject({
+          dependencies: uv.packages ?? getDefaultPackages(),
+        });
         await fs.writeFile(path.join(workingDir, "pyproject.toml"), toml, "utf8");
+        pythonVersion = uv.pythonVersion ?? DEFAULT_PYTHON_VERSION;
+        await fs.writeFile(
+          path.join(workingDir, ".python-version"),
+          `${pythonVersion}\n`,
+          "utf8"
+        );
       }
       const result = await materializeUvEnvironment(workingDir, {
         pythonVersion,
@@ -317,7 +353,14 @@ export function registerKernelIpcHandlers(
     return withStartLock("kernels.start", async () => {
     let requestedSpec = spec as Parameters<KernelManager["start"]>[0];
     const requestedLanguage = requestedSpec?.language ?? "python";
-    const uv = uvContext as { saveDir?: string; newProject?: boolean } | undefined;
+    const uv = uvContext as
+      | { saveDir?: string; newProject?: boolean; pythonVersion?: string; packages?: string[] }
+      | undefined;
+    if (uv?.pythonVersion && !SUPPORTED_PYTHON_VERSIONS.includes(uv.pythonVersion)) {
+      throw new Error(
+        `Unsupported Python version "${uv.pythonVersion}". Supported: ${SUPPORTED_PYTHON_VERSIONS.join(", ")}.`
+      );
+    }
 
     // Starting a new kernel always means a new session — clear any in-memory
     // project state from a previous session (pending imports, active project
@@ -331,6 +374,10 @@ export function registerKernelIpcHandlers(
     // shared-mode pdv-install check below is skipped for uv kernels.
     let preCreatedWorkingDir: string | undefined;
     let uvBinaryForInit: string | undefined;
+    // Environment metadata recorded under the new kernel's id once it has
+    // started (§10.5): mode, the interpreter it actually spawned on, and
+    // the resolved Python version. Authoritative at project-save time.
+    let envMeta: ActiveEnvironmentInfo = { mode: "shared" };
     if (uv && requestedLanguage === "python") {
       const uvEnv = await startUvEnvironment(uv);
       preCreatedWorkingDir = uvEnv.workingDir;
@@ -340,6 +387,13 @@ export function registerKernelIpcHandlers(
         language: "python",
         argv: undefined,
         env: { ...(requestedSpec?.env ?? {}), PYTHON_PATH: uvEnv.venvPython },
+      };
+      envMeta = {
+        mode: "uv",
+        interpreterPath: uvEnv.venvPython,
+        pythonVersion:
+          (await EnvironmentDetector.resolvePythonMajorMinor(uvEnv.venvPython)) ??
+          uv.pythonVersion,
       };
     } else if (requestedLanguage === "python") {
       const pythonPath =
@@ -352,6 +406,12 @@ export function registerKernelIpcHandlers(
             `Selected Python runtime is missing pdv. Install it with: cd pdv-python && ${pythonPath} -m pip install -e ".[dev]"`
           );
         }
+        envMeta = {
+          mode: "shared",
+          interpreterPath: pythonPath,
+          pythonVersion:
+            await EnvironmentDetector.resolvePythonMajorMinor(pythonPath),
+        };
       }
     } else if (requestedLanguage === "julia") {
       const juliaPath = requestedSpec?.env?.JULIA_PATH ??
@@ -363,10 +423,12 @@ export function registerKernelIpcHandlers(
             `Selected Julia runtime is missing PDVKernel. Install it with: cd pdv-julia && julia --project=. -e 'using Pkg; Pkg.instantiate()'`
           );
         }
+        envMeta = { mode: "shared", interpreterPath: juliaPath };
       }
     }
 
     const kernel = await kernelManager.start(requestedSpec);
+    kernelEnvMeta.set(kernel.id, envMeta);
     commRouter.attach(kernelManager, kernel.id);
     queryRouter.detach();
     await initializeKernelSession(
@@ -388,7 +450,13 @@ export function registerKernelIpcHandlers(
       if (crashedId !== kernel.id) return;
       commRouter.detach();
       queryRouter.detach();
-      await cleanupKernelWorkingDir(projectManager, kernelManager, crashedId, kernelWorkingDirs, crashHandlers);
+      // Deliberately do NOT delete the working directory or its map entry
+      // here: it holds the uv env spec (pyproject.toml/uv.lock/
+      // .python-version) the restart handler snapshots to rebuild the venv,
+      // and any `.autosave` of an unsaved session. `kernels.restart` and
+      // `kernels.stop` clean it up; if the user quits instead, the stale
+      // `session.lock` surfaces it on the welcome screen as a recoverable
+      // session (§11.6).
       if (getActiveKernelId() === crashedId) setActiveKernelId(null);
       win.webContents.send(IPC.push.kernelCrashed, { kernelId: crashedId });
     };
@@ -402,6 +470,7 @@ export function registerKernelIpcHandlers(
   handleIpc(IPC.kernels.stop, async (_event, kernelId: string) => {
     return withStartLock("kernels.stop", async () => {
       await cleanupKernelWorkingDir(projectManager, kernelManager, kernelId, kernelWorkingDirs, crashHandlers);
+      kernelEnvMeta.delete(kernelId);
       projectManager.clearCachedKernelResults();
       await kernelManager.stop(kernelId);
       if (getActiveKernelId() === kernelId) {
@@ -468,7 +537,9 @@ export function registerKernelIpcHandlers(
       // (ARCHITECTURE.md §10.5.9, §11.6). The snapshot carries any packages
       // installed since load (e.g. via pdv.install, §10.5.11).
       const oldWorkingDir = kernelWorkingDirs.get(kernelId);
-      let envSnapshot: { pyproject: string; uvLock?: string } | undefined;
+      let envSnapshot:
+        | { pyproject: string; uvLock?: string; pythonVersionPin?: string }
+        | undefined;
       if (current.language === "python" && oldWorkingDir) {
         try {
           const pyproject = await fs.readFile(
@@ -481,9 +552,33 @@ export function registerKernelIpcHandlers(
           } catch {
             /* lock may not exist yet */
           }
-          envSnapshot = { pyproject, uvLock };
+          let pythonVersionPin: string | undefined;
+          try {
+            pythonVersionPin = await fs.readFile(
+              path.join(oldWorkingDir, ".python-version"),
+              "utf8"
+            );
+          } catch {
+            /* pin may not exist (pre-pin project) */
+          }
+          envSnapshot = { pyproject, uvLock, pythonVersionPin };
         } catch {
           /* no pyproject.toml -> shared-mode kernel */
+        }
+      }
+
+      // Hardening: if the old working dir (or its env files) is gone but the
+      // saved project is a uv project, rebuild the env from the save dir
+      // instead of silently falling back to a shared-mode start.
+      let uvSaveDirFallback: string | undefined;
+      if (!envSnapshot && current.language === "python") {
+        const projectDir = getActiveProjectDir();
+        if (projectDir) {
+          const hasPyproject = await fs
+            .access(path.join(projectDir, "pyproject.toml"))
+            .then(() => true)
+            .catch(() => false);
+          if (hasPyproject) uvSaveDirFallback = projectDir;
         }
       }
 
@@ -497,11 +592,19 @@ export function registerKernelIpcHandlers(
       );
       await kernelManager.stop(kernelId);
 
+      // Carry the old kernel's environment metadata to the new one — the
+      // restart re-materializes the same environment, so mode/interpreter/
+      // version are unchanged (the uv branch refreshes the venv path).
+      const oldEnvMeta = kernelEnvMeta.get(kernelId);
+      kernelEnvMeta.delete(kernelId);
+
       let preCreatedWorkingDir: string | undefined;
       let uvBinaryForInit: string | undefined;
       let restarted: KernelInfo;
-      if (envSnapshot) {
-        const uvEnv = await startUvEnvironment({ envSnapshot });
+      if (envSnapshot || uvSaveDirFallback) {
+        const uvEnv = await startUvEnvironment(
+          envSnapshot ? { envSnapshot } : { saveDir: uvSaveDirFallback }
+        );
         preCreatedWorkingDir = uvEnv.workingDir;
         uvBinaryForInit = uvEnv.uvBinary;
         restarted = await kernelManager.start({
@@ -509,11 +612,19 @@ export function registerKernelIpcHandlers(
           language: current.language,
           env: { PYTHON_PATH: uvEnv.venvPython },
         });
+        kernelEnvMeta.set(restarted.id, {
+          mode: "uv",
+          interpreterPath: uvEnv.venvPython,
+          pythonVersion:
+            (await EnvironmentDetector.resolvePythonMajorMinor(uvEnv.venvPython)) ??
+            oldEnvMeta?.pythonVersion,
+        });
       } else {
         restarted = await kernelManager.start({
           name: current.name,
           language: current.language,
         });
+        kernelEnvMeta.set(restarted.id, oldEnvMeta ?? { mode: "shared" });
       }
       commRouter.attach(kernelManager, restarted.id);
       queryRouter.detach();
@@ -533,6 +644,11 @@ export function registerKernelIpcHandlers(
 
     const restarted = await doRestart();
     setActiveKernelId(restarted.id);
+
+    // Whether the session's state was actually reloaded from an autosave
+    // snapshot — returned to the renderer so it can tell the user what
+    // came back (restored work vs. a fresh session).
+    let restoredFromAutosave = false;
 
     // If a project was active, auto-reload it into the new kernel — from
     // the pre-restart .autosave snapshot when one exists, so unsaved
@@ -559,6 +675,7 @@ export function registerKernelIpcHandlers(
             ? { treeIndexDir: autosaveDir, codeCellsDir: autosaveDir }
             : undefined
         );
+        restoredFromAutosave = restoreFromAutosave;
         await setupModuleNamespaces(restarted.id);
       } finally {
         win.webContents.send(IPC.push.projectReloading, { status: "ready" });
@@ -572,6 +689,7 @@ export function registerKernelIpcHandlers(
         win.webContents.send(IPC.push.projectReloading, { status: "reloading" });
         try {
           await recoverUnsavedAfterRestart(oldWorkingDir);
+          restoredFromAutosave = true;
         } catch (err) {
           console.warn(
             "[ipc-register-kernels] post-restart recovery failed; the old session remains recoverable from the welcome screen:",
@@ -584,7 +702,7 @@ export function registerKernelIpcHandlers(
     }
     await bindActiveProjectModules(restarted.id);
 
-    return restarted;
+    return { kernel: restarted, restoredFromAutosave } satisfies KernelRestartResult;
     });
   });
 

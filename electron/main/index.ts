@@ -61,6 +61,7 @@ import {
   ModuleHealthWarning,
   NamespaceQueryOptions,
   PDVConfig,
+  type ActiveEnvironmentInfo,
   type CodeCellData,
   type EnvironmentInstallResult,
   type McpStatus,
@@ -109,6 +110,15 @@ interface PushSubscription {
 
 const pushSubscriptions: PushSubscription[] = [];
 const kernelWorkingDirs = new Map<string, string>();
+/**
+ * Per-kernel environment metadata: mode (uv vs shared), the interpreter the
+ * kernel actually spawned on, and its resolved Python version. Populated by
+ * `kernels.start`/`kernels.restart`, deleted on stop; survives crashes so a
+ * crash-restart can carry the environment over. Authoritative source for
+ * the manifest's `environment`/`interpreter_path` fields at save time
+ * (§10.5) and for the Project Environment settings tab (`environment:activeInfo`).
+ */
+const kernelEnvMeta = new Map<string, ActiveEnvironmentInfo>();
 const crashHandlers = new Map<string, (id: string) => void>();
 const projectManifestMutationQueue = new Map<string, Promise<void>>();
 let activeKernelManagerRef: KernelManager | null = null;
@@ -469,6 +479,7 @@ export function registerIpcHandlers(
     projectManager,
     moduleManager,
     kernelWorkingDirs,
+    kernelEnvMeta,
     crashHandlers,
     resetProjectState: () => {
       activeProjectDir = null;
@@ -615,6 +626,8 @@ export function registerIpcHandlers(
         : "python";
       return lang === "julia" ? config.juliaPath : config.pythonPath;
     },
+    getActiveKernelEnvMeta: () =>
+      activeKernelId ? kernelEnvMeta.get(activeKernelId) : undefined,
     onExplicitSaveCompleted: (saveDir) => {
       void ProjectManager.clearAutosave(saveDir);
       projectManager.resetAutosaveTimer();
@@ -647,7 +660,7 @@ export function registerIpcHandlers(
     commRouter,
   });
 
-  registerEnvironmentIpcHandlers(win, configStore);
+  registerEnvironmentIpcHandlers(win, configStore, () => activeKernelId);
 
   // --- Packages tab (ARCHITECTURE.md §10.5.13) -----------------------------
   // Per-project package CRUD: list declared deps paired with installed
@@ -754,10 +767,15 @@ export function registerIpcHandlers(
    * manifest/module sidecars needed for recovery.
    *
    * @param codeCells - Code-cell state to bundle with the snapshot.
+   * @param opts - Optional overrides forwarded to ``projectManager.autosave``
+   *   (``timeoutMs`` bounds the kernel comm request).
    * @returns ``{ saved: boolean }`` — false when there is nowhere to save
    *   (no project dir or working dir) or the kernel-side save failed.
    */
-  async function performAutosave(codeCells: CodeCellData): Promise<{ saved: boolean }> {
+  async function performAutosave(
+    codeCells: CodeCellData,
+    opts?: { timeoutMs?: number },
+  ): Promise<{ saved: boolean }> {
     const baseDir = activeProjectDir || kernelWorkingDirs.get(activeKernelId ?? "");
     if (!baseDir) {
       console.warn(
@@ -785,7 +803,7 @@ export function registerIpcHandlers(
       win.webContents.send(IPC.push.autosaveStarted);
       try {
         const autosaveDir = autosaveDirFor(baseDir);
-        const result = await projectManager.autosave(autosaveDir, codeCells);
+        const result = await projectManager.autosave(autosaveDir, codeCells, opts);
         if (result === null) return { saved: false };
 
         await mirrorAutosaveSidecars(
@@ -817,11 +835,15 @@ export function registerIpcHandlers(
    *
    * Reads the code cells from the working dir's ``code-cells.json`` (the
    * renderer mirrors its tabs there on a debounce, so the on-disk copy is
-   * at most one debounce window behind) and takes a fresh autosave. When
-   * the server is not idle — a hung server is often *why* the user is
-   * restarting — the fresh save is skipped rather than stalling the
-   * restart on a comm request that may never answer; any snapshot from
-   * the timer-based autosave loop is reported instead.
+   * at most one debounce window behind) and takes a fresh autosave. The
+   * fresh save is attempted only when the server process is alive AND
+   * idle: a hung or crashed server is often *why* the user is restarting,
+   * and ``executionState`` can report a stale "idle" after a crash (the
+   * process exit handler never resets it), so process liveness is checked
+   * explicitly. When skipped, any snapshot from the timer-based autosave
+   * loop is reported instead. The comm request is bounded to 5 s so a
+   * wedged-but-alive server can't stall the restart on the default 30 s
+   * timeout.
    *
    * @param kernelId - The server session being restarted.
    * @returns True when ``<baseDir>/.autosave`` holds a usable snapshot.
@@ -831,7 +853,13 @@ export function registerIpcHandlers(
     const baseDir = activeProjectDir || workingDir;
     if (!baseDir) return false;
 
-    if (kernelManager.getExecutionState(kernelId) === "idle") {
+    const proc = kernelManager.getKernelProcessState(kernelId);
+    const dead =
+      !proc ||
+      proc.exitCode !== null ||
+      proc.killed ||
+      kernelManager.getKernel(kernelId)?.status === "dead";
+    if (!dead && kernelManager.getExecutionState(kernelId) === "idle") {
       let codeCells: CodeCellData = { tabs: [], activeTabId: 1 };
       if (workingDir) {
         try {
@@ -842,11 +870,13 @@ export function registerIpcHandlers(
           /* no cells mirrored yet — snapshot the tree with empty cells */
         }
       }
-      const result = await performAutosave(codeCells);
+      const result = await performAutosave(codeCells, { timeoutMs: 5000 });
       if (result.saved) return true;
     } else {
       console.warn(
-        "[autosave] pre-restart snapshot skipped: server not idle; falling back to the last timer autosave",
+        dead
+          ? "[autosave] pre-restart snapshot skipped: server process is dead; falling back to the last timer autosave"
+          : "[autosave] pre-restart snapshot skipped: server not idle; falling back to the last timer autosave",
       );
     }
     return (await ProjectManager.checkForAutosave(baseDir)).exists;
@@ -1143,11 +1173,25 @@ export function setMcpServerInstance(
 }
 
 /**
- * Register IPC handlers for Python environment discovery and installation.
+ * Register IPC handlers for Python environment discovery and installation,
+ * plus the active kernel's environment metadata (`environment:activeInfo`,
+ * consumed by the Project Environment settings tab).
  *
  * @param win - Main BrowserWindow for streaming install output.
+ * @param configStore - Config store for the configured interpreter path.
+ * @param getActiveKernelId - Accessor for the active kernel id, used to look
+ *   up `kernelEnvMeta`.
  */
-function registerEnvironmentIpcHandlers(win: BrowserWindow, configStore: ConfigStore): void {
+function registerEnvironmentIpcHandlers(
+  win: BrowserWindow,
+  configStore: ConfigStore,
+  getActiveKernelId: () => string | null
+): void {
+
+  handleIpc(IPC.environment.activeInfo, async () => {
+    const kernelId = getActiveKernelId();
+    return kernelId ? (kernelEnvMeta.get(kernelId) ?? null) : null;
+  });
 
   handleIpc(IPC.environment.list, async () => {
     const config = configStore.getAll();
@@ -1294,6 +1338,7 @@ export function unregisterIpcHandlers(): void {
     }
   }
   kernelWorkingDirs.clear();
+  kernelEnvMeta.clear();
   crashHandlers.clear();
   clearPushSubscriptions();
 }

@@ -18,7 +18,7 @@ import { type BrowserWindow } from "electron";
 import { handleIpc } from "./ipc-registry";
 
 import type { CommRouter } from "./comm-router";
-import type { CodeCellData } from "./ipc";
+import type { ActiveEnvironmentInfo, CodeCellData } from "./ipc";
 import { IPC } from "./ipc";
 import { ModuleManager } from "./module-manager";
 import { setupProjectModuleNamespaces } from "./module-runtime";
@@ -61,7 +61,19 @@ interface RegisterProjectIpcHandlersOptions {
    */
   runSerializedProjectManifestMutation: <T>(dir: string, task: () => Promise<T>) => Promise<T>;
   getMainWindow: () => BrowserWindow | null;
+  /**
+   * Fallback interpreter path from the global config, used only when the
+   * active kernel has no recorded environment metadata (legacy sessions).
+   */
   getInterpreterPath: () => string | undefined;
+  /**
+   * Environment metadata of the active kernel (mode, actual interpreter,
+   * resolved Python version), recorded by `kernels.start`/`restart`. The
+   * authoritative source for the manifest's `environment` and
+   * `interpreter_path` fields at save time (§10.5); undefined when no
+   * kernel is active or the entry is missing.
+   */
+  getActiveKernelEnvMeta: () => ActiveEnvironmentInfo | undefined;
   /** Called after a successful explicit save to clean up autosave state. */
   onExplicitSaveCompleted?: (saveDir: string) => void;
 }
@@ -253,6 +265,7 @@ export function registerProjectIpcHandlers(
     runSerializedProjectManifestMutation,
     getMainWindow,
     getInterpreterPath,
+    getActiveKernelEnvMeta,
     onExplicitSaveCompleted,
   } = options;
 
@@ -286,11 +299,21 @@ export function registerProjectIpcHandlers(
               .catch(() => false)
           : false;
 
+        // Environment recording (§10.5): uv projects record mode + the
+        // resolved Python version (the venv path is ephemeral, so no
+        // interpreter_path); shared projects record the interpreter the
+        // kernel actually spawned on — falling back to the global config
+        // value only when no per-kernel metadata exists (legacy sessions).
+        const envMeta = getActiveKernelEnvMeta();
         const saveResult = await projectManager.save(saveDir, codeCells, {
           language: getActiveKernelLanguage(),
-          interpreterPath: getInterpreterPath(),
+          interpreterPath: isUvProject
+            ? undefined
+            : (envMeta?.interpreterPath ?? getInterpreterPath()),
           projectName,
-          environment: isUvProject ? { mode: "uv" } : undefined,
+          environment: isUvProject
+            ? { mode: "uv", python_version: envMeta?.pythonVersion }
+            : { mode: "shared" },
         });
 
         // If the serializer detected missing backing files it aborted before
