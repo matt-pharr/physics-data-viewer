@@ -142,9 +142,13 @@ test("namespace auto-refresh keeps expanded rows open across ticks", async () =>
   await expand.click();
   await expect(window.locator(".namespace-row", { hasText: /\[0\]/ })).toBeVisible({ timeout: 15_000 });
 
-  // Let at least two 2 s refresh ticks land; the row must stay expanded
-  // (the old behavior reset all inspection state on every tick).
-  await window.waitForTimeout(5_000);
+  // Grow the list, then wait for an auto-refresh tick to surface the new
+  // element ([3]) under the still-expanded node. That both proves a refresh
+  // cycle actually ran (rather than a blind sleep) and that it re-inspected
+  // the expanded node — the old behavior reset all inspection state on every
+  // tick, collapsing the row.
+  await runInCodeCell("ns_arr.append(40)");
+  await expect(window.locator(".namespace-row", { hasText: /\[3\]/ })).toBeVisible({ timeout: 15_000 });
   await expect(window.locator(".namespace-row", { hasText: /\[0\]/ })).toBeVisible();
 
   await window.getByRole("checkbox", { name: "Auto-refresh" }).uncheck();

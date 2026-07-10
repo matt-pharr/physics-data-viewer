@@ -90,6 +90,7 @@ vi.mock("./menu", () => menuMocks);
 vi.mock("./auto-updater", () => updaterMocks);
 vi.mock("./app", () => appLifecycleMocks);
 
+import { app } from "electron";
 import { IPC } from "./ipc";
 import type { PDVConfig } from "./config";
 import { registerAppStateIpcHandlers } from "./ipc-register-app-state";
@@ -316,6 +317,7 @@ describe("app:confirmClose", () => {
     await getHandler(IPC.app.confirmClose)({});
     expect(setAllowClose).toHaveBeenCalledWith(true);
     expect(win.win.close).toHaveBeenCalled();
+    expect(app.quit).not.toHaveBeenCalled();
   });
 
   it("when isQuitting is true (autoUpdater / OS logout path), calls app.quit() instead of win.close()", async () => {
@@ -323,6 +325,7 @@ describe("app:confirmClose", () => {
     const { setAllowClose, win } = setup();
     await getHandler(IPC.app.confirmClose)({});
     expect(setAllowClose).toHaveBeenCalledWith(true);
+    expect(app.quit).toHaveBeenCalled();
     expect(win.win.close).not.toHaveBeenCalled();
   });
 
@@ -331,6 +334,7 @@ describe("app:confirmClose", () => {
     const { setAllowClose, win } = setup();
     await getHandler(IPC.app.confirmClose)({});
     expect(setAllowClose).toHaveBeenCalledWith(true);
+    expect(app.quit).toHaveBeenCalled();
     expect(win.win.close).not.toHaveBeenCalled();
     expect(appLifecycleMocks.clearQuitRequestPending).toHaveBeenCalled();
   });

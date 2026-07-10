@@ -79,10 +79,12 @@ test("scrolling up disengages auto-scroll, scrolling back re-engages", async () 
   await launched.window.evaluate(() => new Promise((r) => requestAnimationFrame(() => r(undefined))));
 
   await runInCodeCell("for i in range(200): print('extra', i)");
-  // The new output renders, but the scroll position should remain near
-  // the top while the user is reading. Wait long enough for streaming
-  // to land — we're asserting that auto-scroll did NOT happen.
-  await launched.window.waitForTimeout(2000);
+  // Wait for the streamed output to actually land (its last line renders in
+  // the DOM) instead of a blind sleep, then assert the viewport did NOT jump
+  // to the bottom — auto-scroll must stay disengaged while the user reads.
+  await expect(
+    launched.window.locator(".log-stdout").last()
+  ).toContainText("extra 199", { timeout: 30_000 });
   const scrolledUpDistance = await distanceFromBottom();
   expect(scrolledUpDistance).toBeGreaterThan(50);
 

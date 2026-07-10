@@ -57,7 +57,6 @@ import {
   createCommRouterMock,
   createKernelManagerMock,
   createModuleManagerMock,
-  makeKernelInfo,
   TEST_PDV_VERSION,
   type InvokeHandler,
 } from "./test-helpers";
@@ -75,6 +74,7 @@ interface Harness {
   commRouter: ReturnType<typeof createCommRouterMock>;
   moduleManager: ReturnType<typeof createModuleManagerMock>;
   pendingImports: ProjectModuleImport[];
+  pendingSettings: Record<string, Record<string, unknown>>;
   activeProjectDir: string | null;
   activeManifest: { modules: ProjectModuleImport[]; module_settings?: Record<string, unknown> } | null;
 }
@@ -85,12 +85,14 @@ function setup(initial: Partial<Harness> = {}): Harness {
   const commRouter = createCommRouterMock();
   const moduleManager = createModuleManagerMock();
   const pendingImports = initial.pendingImports ?? [];
+  const pendingSettings = initial.pendingSettings ?? {};
   const harness: Harness = {
     win,
     kernelManager,
     commRouter,
     moduleManager,
     pendingImports,
+    pendingSettings,
     activeProjectDir: initial.activeProjectDir ?? null,
     activeManifest: initial.activeManifest ?? null,
   };
@@ -104,7 +106,7 @@ function setup(initial: Partial<Harness> = {}): Harness {
     getActiveProjectDir: () => harness.activeProjectDir,
     getActiveKernelId: () => null,
     getPendingModuleImports: () => harness.pendingImports,
-    getPendingModuleSettings: () => ({}),
+    getPendingModuleSettings: () => harness.pendingSettings,
     getModuleHealthWarningsByAlias: () => new Map(),
     detectPythonVersion: async () => "3.11.6",
     getPdvVersion: () => TEST_PDV_VERSION,
@@ -248,12 +250,39 @@ describe("modules:listImported", () => {
 });
 
 describe("modules:saveSettings", () => {
-  it("forwards the request even with no project (pending settings path)", async () => {
+  it("stashes settings into the pending map when no project is active", async () => {
+    const harness = setup({
+      pendingImports: [
+        { module_id: "demo", alias: "demo", version: "1.0.0" } as ProjectModuleImport,
+      ],
+    });
+    const result = (await getHandler(IPC.modules.saveSettings)({}, {
+      moduleAlias: "demo",
+      values: { foo: 1 },
+    })) as { success: boolean };
+    expect(result.success).toBe(true);
+    // With no active project dir, the settings must land in the pending map
+    // (they get flushed into the manifest when the project is first saved).
+    expect(harness.pendingSettings.demo).toEqual({ foo: 1 });
+  });
+
+  it("rejects settings for an unknown module alias", async () => {
     setup();
     const result = (await getHandler(IPC.modules.saveSettings)({}, {
-      alias: "demo",
-      settings: { foo: 1 },
-    })) as { success: boolean };
-    expect(typeof result.success).toBe("boolean");
+      moduleAlias: "ghost",
+      values: { foo: 1 },
+    })) as { success: boolean; error?: string };
+    expect(result.success).toBe(false);
+    expect(result.error).toMatch(/alias not found/i);
+  });
+
+  it("rejects a non-object settings payload", async () => {
+    setup();
+    const result = (await getHandler(IPC.modules.saveSettings)({}, {
+      moduleAlias: "demo",
+      values: "nope",
+    })) as { success: boolean; error?: string };
+    expect(result.success).toBe(false);
+    expect(result.error).toMatch(/must be an object/i);
   });
 });
