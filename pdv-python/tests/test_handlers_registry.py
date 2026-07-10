@@ -46,7 +46,6 @@ HANDLERS_DIR = Path(handlers_pkg.__file__).resolve().parent
 # handler entry point. Each entry is a punch-list item: shrink this set,
 # don't grow it. New handlers must NOT land here without justification.
 KNOWN_UNTESTED: dict[str, str] = {
-    "pdv.tree.delete": "no handler-level test; tree mutation covered indirectly",
     "pdv.tree.resolve_file": "no test for resolve_file handler entry point",
     "pdv.module.register": "no test for module registration message handler",
     "pdv.gui.register": "no test for gui registration message handler",

@@ -17,6 +17,7 @@ import json
 import os
 import uuid
 import pytest
+import numpy
 from unittest.mock import MagicMock, patch
 import pdv.comms as comms_mod
 from pdv.handlers.project import (
@@ -87,7 +88,6 @@ class TestHandleProjectLoad:
 
     def test_file_backed_nodes_eagerly_loaded(self, tree_with_comm, tmp_save_dir):
         """File-backed nodes from tree-index.json are eagerly deserialized into the tree."""
-        numpy = pytest.importorskip("numpy")
         arr = numpy.array([1.0, 2.0, 3.0])
         node_uuid = "arr_uuid_001"
         tree_dir = os.path.join(tree_with_comm._working_dir, "tree", node_uuid)
@@ -332,7 +332,6 @@ class TestHandleProjectSave:
 
     def test_writes_data_files(self, tree_with_comm, tmp_save_dir):
         """Data files are written for each serializable node."""
-        numpy = pytest.importorskip("numpy")
         tree_with_comm["arr"] = numpy.array([1.0, 2.0, 3.0])
         mock_comm = _make_mock_comm()
         msg = _make_msg("pdv.project.save", {"save_dir": tmp_save_dir})
@@ -629,7 +628,6 @@ class TestHandleProjectClearAutosaveCache:
         descriptors whose backing files were just deleted from
         ``<saveDir>/.autosave/tree/``.
         """
-        numpy = pytest.importorskip("numpy")
         from pdv.handlers import project as project_mod
 
         # Prime the cache by running a save.
@@ -662,7 +660,6 @@ class TestAutosaveCachePruning:
         """Cache entries for deleted tree paths are pruned at the end of a
         successful save so the cache can't grow unboundedly over a long
         session (each entry pins a digest + descriptor)."""
-        numpy = pytest.importorskip("numpy")
         from pdv.handlers.project import serialize_tree_to_dir
 
         cache: dict = {}
@@ -908,7 +905,6 @@ class TestCompositeMapping:
         self, tree_with_comm, tmp_save_dir
     ):
         """The exact audit repro: dict with ndarray values must save and load."""
-        numpy = pytest.importorskip("numpy")
         arr_t = numpy.linspace(0, 1, 10)
         arr_x = numpy.sin(arr_t)
         arr_v = numpy.cos(arr_t)
@@ -958,7 +954,6 @@ class TestCompositeMapping:
         serialize_node raise, only that child gets pickled. Siblings keep their
         fast paths. Uses a nested list-of-ndarrays (which raises by design) as
         the raising leaf."""
-        numpy = pytest.importorskip("numpy")
         arr = numpy.array([1.0, 2.0, 3.0])
         raising_leaf = [numpy.array([1, 2]), numpy.array([3, 4])]
         tree_with_comm["data"] = {
@@ -1006,7 +1001,6 @@ class TestCompositeMapping:
         self, tree_with_comm, tmp_save_dir
     ):
         """A dict-in-dict with ndarray at the innermost level round-trips."""
-        numpy = pytest.importorskip("numpy")
         arr = numpy.arange(5)
         tree_with_comm["outer"] = {"inner": {"arr": arr, "tag": "hello"}}
 
@@ -1066,7 +1060,6 @@ class TestCompositeMapping:
     ):
         """serialize_node raises a helpful error for list-of-ndarrays, but the
         walker's pickle fallback catches it so project.save still succeeds."""
-        numpy = pytest.importorskip("numpy")
         tree_with_comm["seq"] = [numpy.array([1, 2]), numpy.array([3, 4])]
         mock_comm = _make_mock_comm()
         with (

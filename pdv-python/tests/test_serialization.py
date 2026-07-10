@@ -13,6 +13,8 @@ Reference: ARCHITECTURE.md §7.2, §7.3
 
 import os
 import pytest
+import numpy
+import numpy as np
 from pdv.serialization import (
     detect_kind,
     serialize_node,
@@ -84,7 +86,6 @@ class TestDetectKind:
 
     def test_numpy_array_is_ndarray(self):
         """numpy array returns KIND_NDARRAY (skipped if numpy absent)."""
-        numpy = pytest.importorskip("numpy")
         assert detect_kind(numpy.array([1.0, 2.0])) == KIND_NDARRAY
 
     def test_pandas_dataframe_is_dataframe(self):
@@ -240,7 +241,6 @@ class TestSerializeAndDeserialize:
 
     def test_numpy_npy_roundtrip(self, tmp_working_dir):
         """numpy array → npy file → back to array (pytest.importorskip)."""
-        numpy = pytest.importorskip("numpy")
         arr = numpy.array([[1.0, 2.0], [3.0, 4.0]])
         descriptor = serialize_node("data.arr", arr, tmp_working_dir)
         assert descriptor["type"] == KIND_NDARRAY
@@ -348,7 +348,6 @@ class TestNodePreview:
         assert node_preview(short, KIND_TEXT) == "hello"
 
     def test_ndarray_preview(self):
-        numpy = pytest.importorskip("numpy")
         arr = numpy.array([[1.0, 2.0], [3.0, 4.0]])
         preview = node_preview(arr, KIND_NDARRAY)
         assert "array" in preview.lower() or "float" in preview.lower()
@@ -537,7 +536,6 @@ class TestMetadataSubDict:
             )
 
     def test_ndarray_metadata(self, tmp_working_dir):
-        numpy = pytest.importorskip("numpy")
         arr = numpy.array([[1.0, 2.0], [3.0, 4.0]])
         desc = serialize_node("data.arr", arr, tmp_working_dir)
         meta = desc["metadata"]
@@ -561,7 +559,6 @@ class TestCompositeMappingSerialize:
     def test_dict_with_ndarray_emits_composite_descriptor(
         self, tmp_working_dir
     ):
-        numpy = pytest.importorskip("numpy")
         data = {"arr": numpy.array([1, 2]), "label": "x"}
         desc = serialize_node("m", data, tmp_working_dir)
         assert desc["type"] == KIND_MAPPING
@@ -575,7 +572,6 @@ class TestCompositeMappingSerialize:
         assert not desc["metadata"].get("composite")
 
     def test_sequence_with_ndarray_raises_helpful_error(self, tmp_working_dir):
-        numpy = pytest.importorskip("numpy")
         with pytest.raises(PDVSerializationError, match="wrap"):
             serialize_node(
                 "s", [numpy.array([1, 2]), numpy.array([3, 4])], tmp_working_dir
@@ -1044,7 +1040,6 @@ class TestAtomicDataWrites:
         assert list(tmp_path.iterdir()) == [target]
 
     def test_serialize_ndarray_writes_valid_npy(self, tmp_path):
-        np = pytest.importorskip("numpy")
 
         descriptor = serialize_node("arr", np.arange(5), str(tmp_path))
         value = deserialize_node(descriptor["storage"], str(tmp_path))

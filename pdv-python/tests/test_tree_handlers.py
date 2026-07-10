@@ -1,8 +1,12 @@
 """
 pdv-python/tests/test_tree_handlers.py — Unit tests for tree handler operations.
 
-Tests create_node, rename, move, and duplicate handlers via direct tree
-manipulation (same logic the handlers use), plus file relocation helpers.
+Drives the real create_node / rename / move / duplicate handlers in
+``pdv.handlers.tree`` (resolving the tree via ``comms.get_pdv_tree`` and
+replying through ``comms.send_message`` / ``comms.send_error``, all patched
+here), plus the file relocation helpers. These tests assert on the handlers'
+actual replies and error codes rather than re-implementing the tree
+manipulation the handlers perform.
 """
 
 import os
@@ -15,137 +19,295 @@ import pdv.comms as comms_mod
 from pdv.tree import PDVTree, PDVScript, PDVNote
 
 
+def _run_handler(handler, payload, tree, msg_id="m"):
+    """Dispatch a tree handler against *tree*, returning its
+    ``(send_message, send_error)`` mocks.
+
+    Mirrors the production path: the handler resolves the tree via
+    ``comms.get_pdv_tree`` and replies via ``comms.send_message`` /
+    ``comms.send_error``. On an error reply, ``send_error.call_args[0][1]`` is
+    the error code (the second positional argument).
+    """
+    with (
+        patch.object(comms_mod, "get_pdv_tree", return_value=tree),
+        patch.object(comms_mod, "send_message") as send_message,
+        patch.object(comms_mod, "send_error") as send_error,
+    ):
+        handler({"msg_id": msg_id, "payload": payload})
+    return send_message, send_error
+
+
 class TestCreateNode:
-    """Tests for create_node semantics (empty dict insertion)."""
-
-    def test_create_at_root(self, tree_with_comm):
-        tree_with_comm["new_node"] = PDVTree()
-        assert "new_node" in tree_with_comm
-        assert isinstance(tree_with_comm["new_node"], PDVTree)
-
-    def test_create_nested(self, tree_with_comm):
-        tree_with_comm["parent"] = PDVTree()
-        tree_with_comm["parent.child"] = PDVTree()
-        assert "parent.child" in tree_with_comm
-
-    def test_create_rejects_existing(self, tree_with_comm):
-        tree_with_comm["exists"] = PDVTree()
-        assert "exists" in tree_with_comm
+    """create_node handler: empty-dict insertion, dotted-name and dup guards."""
 
     def test_handler_creates_empty_node(self, tree_with_comm):
         from pdv.handlers.tree import handle_tree_create_node
 
-        with (
-            patch.object(comms_mod, "get_pdv_tree", return_value=tree_with_comm),
-            patch.object(comms_mod, "send_message") as send_message,
-            patch.object(comms_mod, "send_error") as send_error,
-        ):
-            handle_tree_create_node(
-                {"msg_id": "m1", "payload": {"parent_path": "", "name": "fresh"}}
-            )
+        send_message, send_error = _run_handler(
+            handle_tree_create_node,
+            {"parent_path": "", "name": "fresh"},
+            tree_with_comm,
+        )
         send_error.assert_not_called()
         send_message.assert_called_once()
         assert isinstance(tree_with_comm["fresh"], PDVTree)
 
-    def test_handler_rejects_dotted_name(self, tree_with_comm):
+    def test_creates_nested_node(self, tree_with_comm):
+        from pdv.handlers.tree import handle_tree_create_node
+
+        _run_handler(
+            handle_tree_create_node,
+            {"parent_path": "", "name": "parent"},
+            tree_with_comm,
+        )
+        send_message, send_error = _run_handler(
+            handle_tree_create_node,
+            {"parent_path": "parent", "name": "child"},
+            tree_with_comm,
+        )
+        send_error.assert_not_called()
+        assert isinstance(tree_with_comm["parent.child"], PDVTree)
+
+    def test_rejects_dotted_name(self, tree_with_comm):
         # A dot inside a key would corrupt dot-path addressing — the handler
         # must refuse it rather than silently create a nested subtree.
         from pdv.handlers.tree import handle_tree_create_node
 
-        with (
-            patch.object(comms_mod, "get_pdv_tree", return_value=tree_with_comm),
-            patch.object(comms_mod, "send_message") as send_message,
-            patch.object(comms_mod, "send_error") as send_error,
-        ):
-            handle_tree_create_node(
-                {"msg_id": "m2", "payload": {"parent_path": "", "name": "a.b"}}
-            )
+        send_message, send_error = _run_handler(
+            handle_tree_create_node,
+            {"parent_path": "", "name": "a.b"},
+            tree_with_comm,
+        )
         send_error.assert_called_once()
         assert send_error.call_args[0][1] == "tree.invalid_name"
         send_message.assert_not_called()
         assert "a" not in tree_with_comm
 
+    def test_rejects_existing(self, tree_with_comm):
+        from pdv.handlers.tree import handle_tree_create_node
+
+        tree_with_comm["exists"] = PDVTree()
+        send_message, send_error = _run_handler(
+            handle_tree_create_node,
+            {"parent_path": "", "name": "exists"},
+            tree_with_comm,
+        )
+        send_error.assert_called_once()
+        assert send_error.call_args[0][1] == "tree.already_exists"
+        send_message.assert_not_called()
+
+    def test_rejects_missing_parent(self, tree_with_comm):
+        from pdv.handlers.tree import handle_tree_create_node
+
+        send_message, send_error = _run_handler(
+            handle_tree_create_node,
+            {"parent_path": "nope", "name": "child"},
+            tree_with_comm,
+        )
+        send_error.assert_called_once()
+        assert send_error.call_args[0][1] == "tree.path_not_found"
+        send_message.assert_not_called()
+
+
+class TestDelete:
+    """delete handler: remove a node by path, plus the missing-path guard."""
+
+    def test_delete_removes_node(self, tree_with_comm):
+        from pdv.handlers.tree import handle_tree_delete
+
+        tree_with_comm["doomed"] = 1
+        send_message, send_error = _run_handler(
+            handle_tree_delete, {"path": "doomed"}, tree_with_comm
+        )
+        send_error.assert_not_called()
+        send_message.assert_called_once()
+        assert "doomed" not in tree_with_comm
+
+    def test_delete_nested_node(self, tree_with_comm):
+        from pdv.handlers.tree import handle_tree_delete
+
+        tree_with_comm["a.b.c"] = 1
+        send_message, send_error = _run_handler(
+            handle_tree_delete, {"path": "a.b"}, tree_with_comm
+        )
+        send_error.assert_not_called()
+        assert "a.b" not in tree_with_comm
+        assert "a" in tree_with_comm
+
+    def test_delete_rejects_missing_path(self, tree_with_comm):
+        from pdv.handlers.tree import handle_tree_delete
+
+        send_message, send_error = _run_handler(
+            handle_tree_delete, {"path": "ghost"}, tree_with_comm
+        )
+        send_error.assert_called_once()
+        assert send_error.call_args[0][1] == "tree.path_not_found"
+        send_message.assert_not_called()
+
 
 class TestRename:
-    """Tests for rename semantics (re-key under same parent)."""
+    """rename handler: re-key under the same parent, plus guards."""
 
     def test_rename_simple(self, tree_with_comm):
-        tree_with_comm["old"] = 42
-        value = tree_with_comm["old"]
-        tree_with_comm.set_quiet("new", value)
-        dict.__delitem__(tree_with_comm, "old")
-        assert "new" in tree_with_comm
-        assert "old" not in tree_with_comm
-        assert tree_with_comm["new"] == 42
+        from pdv.handlers.tree import handle_tree_rename
 
-    def test_rename_nested(self, tree_with_comm):
-        tree_with_comm["parent.old_child"] = "data"
-        value = tree_with_comm["parent.old_child"]
-        tree_with_comm.set_quiet("parent.new_child", value)
-        parent = tree_with_comm["parent"]
-        dict.__delitem__(parent, "old_child")
-        assert "parent.new_child" in tree_with_comm
-        assert "parent.old_child" not in tree_with_comm
+        tree_with_comm["old"] = 42
+        send_message, send_error = _run_handler(
+            handle_tree_rename, {"path": "old", "new_name": "new"}, tree_with_comm
+        )
+        send_error.assert_not_called()
+        assert tree_with_comm["new"] == 42
+        assert "old" not in tree_with_comm
 
     def test_rename_preserves_subtree(self, tree_with_comm):
+        from pdv.handlers.tree import handle_tree_rename
+
         tree_with_comm["a.b.c"] = 99
-        value = tree_with_comm["a.b"]
-        tree_with_comm.set_quiet("a.renamed", value)
-        parent = tree_with_comm["a"]
-        dict.__delitem__(parent, "b")
+        send_message, send_error = _run_handler(
+            handle_tree_rename, {"path": "a.b", "new_name": "renamed"}, tree_with_comm
+        )
+        send_error.assert_not_called()
         assert tree_with_comm["a.renamed.c"] == 99
         assert "a.b" not in tree_with_comm
 
+    def test_rename_rejects_duplicate(self, tree_with_comm):
+        from pdv.handlers.tree import handle_tree_rename
+
+        tree_with_comm["a"] = 1
+        tree_with_comm["b"] = 2
+        send_message, send_error = _run_handler(
+            handle_tree_rename, {"path": "a", "new_name": "b"}, tree_with_comm
+        )
+        send_error.assert_called_once()
+        assert send_error.call_args[0][1] == "tree.already_exists"
+        send_message.assert_not_called()
+        assert tree_with_comm["a"] == 1
+
+    def test_rename_rejects_missing_path(self, tree_with_comm):
+        from pdv.handlers.tree import handle_tree_rename
+
+        send_message, send_error = _run_handler(
+            handle_tree_rename, {"path": "ghost", "new_name": "x"}, tree_with_comm
+        )
+        send_error.assert_called_once()
+        assert send_error.call_args[0][1] == "tree.path_not_found"
+
+    def test_rename_rejects_dotted_name(self, tree_with_comm):
+        from pdv.handlers.tree import handle_tree_rename
+
+        tree_with_comm["node"] = 1
+        send_message, send_error = _run_handler(
+            handle_tree_rename, {"path": "node", "new_name": "a.b"}, tree_with_comm
+        )
+        send_error.assert_called_once()
+        assert send_error.call_args[0][1] == "tree.invalid_name"
+        send_message.assert_not_called()
+
 
 class TestMove:
-    """Tests for move semantics (re-parent a node)."""
+    """move handler: re-parent a node, plus circular/duplicate guards."""
 
     def test_move_simple(self, tree_with_comm):
+        from pdv.handlers.tree import handle_tree_move
+
         tree_with_comm["source"] = 42
         tree_with_comm["dest_parent"] = PDVTree()
-        value = tree_with_comm["source"]
-        tree_with_comm.set_quiet("dest_parent.moved", value)
-        dict.__delitem__(tree_with_comm, "source")
+        send_message, send_error = _run_handler(
+            handle_tree_move,
+            {"path": "source", "new_path": "dest_parent.moved"},
+            tree_with_comm,
+        )
+        send_error.assert_not_called()
         assert tree_with_comm["dest_parent.moved"] == 42
         assert "source" not in tree_with_comm
 
     def test_move_subtree(self, tree_with_comm):
+        from pdv.handlers.tree import handle_tree_move
+
         tree_with_comm["a.b.c"] = "deep"
         tree_with_comm["target"] = PDVTree()
-        value = tree_with_comm["a"]
-        tree_with_comm.set_quiet("target.a_moved", value)
-        dict.__delitem__(tree_with_comm, "a")
+        send_message, send_error = _run_handler(
+            handle_tree_move,
+            {"path": "a", "new_path": "target.a_moved"},
+            tree_with_comm,
+        )
+        send_error.assert_not_called()
         assert tree_with_comm["target.a_moved.b.c"] == "deep"
         assert "a" not in tree_with_comm
 
-    def test_circular_move_detected(self, tree_with_comm):
+    def test_circular_move_rejected(self, tree_with_comm):
+        # Moving a node into its own subtree must be refused by the handler,
+        # not just by a string check in the test.
+        from pdv.handlers.tree import handle_tree_move
+
         tree_with_comm["a.b.c"] = 1
-        path = "a.b"
-        new_path = "a.b.c.inside"
-        assert new_path.startswith(path + ".")
+        send_message, send_error = _run_handler(
+            handle_tree_move,
+            {"path": "a.b", "new_path": "a.b.c.inside"},
+            tree_with_comm,
+        )
+        send_error.assert_called_once()
+        assert send_error.call_args[0][1] == "tree.circular_move"
+        send_message.assert_not_called()
+        assert tree_with_comm["a.b.c"] == 1
+
+    def test_move_rejects_same_path(self, tree_with_comm):
+        from pdv.handlers.tree import handle_tree_move
+
+        tree_with_comm["x"] = 1
+        send_message, send_error = _run_handler(
+            handle_tree_move, {"path": "x", "new_path": "x"}, tree_with_comm
+        )
+        send_error.assert_called_once()
+        assert send_error.call_args[0][1] == "tree.same_path"
+        send_message.assert_not_called()
 
 
 class TestDuplicate:
-    """Tests for duplicate semantics (deep copy)."""
+    """duplicate handler: deep-copy a node, plus the duplicate-path guard."""
 
-    def test_duplicate_value(self, tree_with_comm):
-        import copy
+    def test_duplicate_value_is_independent(self, tree_with_comm):
+        from pdv.handlers.tree import handle_tree_duplicate
+
         tree_with_comm["original"] = [1, 2, 3]
-        cloned = copy.deepcopy(tree_with_comm["original"])
-        tree_with_comm["copy"] = cloned
-        assert tree_with_comm["copy"] == [1, 2, 3]
+        send_message, send_error = _run_handler(
+            handle_tree_duplicate,
+            {"path": "original", "new_path": "clone"},
+            tree_with_comm,
+        )
+        send_error.assert_not_called()
+        assert tree_with_comm["clone"] == [1, 2, 3]
+        # Mutating the original must not touch the deep copy.
         tree_with_comm["original"].append(4)
-        assert tree_with_comm["copy"] == [1, 2, 3]
+        assert tree_with_comm["clone"] == [1, 2, 3]
 
     def test_duplicate_subtree(self, tree_with_comm):
-        import copy
-        subtree = {"b": 42, "c": [1, 2]}
-        tree_with_comm["a"] = subtree
-        cloned = copy.deepcopy(tree_with_comm["a"])
-        tree_with_comm["a_copy"] = cloned
-        assert tree_with_comm["a_copy"]["b"] == 42
-        subtree["b"] = 99
-        assert tree_with_comm["a_copy"]["b"] == 42
+        from pdv.handlers.tree import handle_tree_duplicate
+
+        tree_with_comm["a.b"] = 42
+        tree_with_comm["a.c"] = [1, 2]
+        send_message, send_error = _run_handler(
+            handle_tree_duplicate,
+            {"path": "a", "new_path": "a_copy"},
+            tree_with_comm,
+        )
+        send_error.assert_not_called()
+        assert tree_with_comm["a_copy.b"] == 42
+        assert tree_with_comm["a_copy.c"] == [1, 2]
+
+    def test_duplicate_rejects_existing(self, tree_with_comm):
+        from pdv.handlers.tree import handle_tree_duplicate
+
+        tree_with_comm["src"] = 1
+        tree_with_comm["dst"] = 2
+        send_message, send_error = _run_handler(
+            handle_tree_duplicate,
+            {"path": "src", "new_path": "dst"},
+            tree_with_comm,
+        )
+        send_error.assert_called_once()
+        assert send_error.call_args[0][1] == "tree.already_exists"
+        send_message.assert_not_called()
 
 
 class TestRelocateFiles:

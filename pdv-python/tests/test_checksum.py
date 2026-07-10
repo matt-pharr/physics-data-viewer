@@ -15,6 +15,7 @@ import os
 from unittest.mock import MagicMock, patch
 
 import pytest
+import numpy as np
 
 import pdv.comms as comms_mod
 from pdv.checksum import tree_checksum
@@ -116,7 +117,6 @@ class TestSubtreeDigestMatchesRoot:
 class TestNdarrayContentSensitivity:
     def test_ndarray_content_sensitivity(self):
         """Changing one element of an ndarray changes the tree checksum."""
-        np = pytest.importorskip("numpy")
 
         arr1 = np.array([1.0, 2.0, 3.0])
         arr2 = np.array([1.0, 2.0, 9.9])
@@ -130,7 +130,6 @@ class TestNdarrayContentSensitivity:
 class TestXarrayContentSensitivity:
     def test_dataarray_value_change_changes_digest(self):
         """Mutating a single value inside an xr.DataArray changes the digest."""
-        np = pytest.importorskip("numpy")
         xr = pytest.importorskip("xarray")
 
         da1 = xr.DataArray(np.array([1.0, 2.0, 3.0]), dims=["x"], name="v")
@@ -140,7 +139,6 @@ class TestXarrayContentSensitivity:
 
     def test_dataarray_attrs_change_digest(self):
         """Changing ``.attrs`` on an xr.DataArray changes the digest."""
-        np = pytest.importorskip("numpy")
         xr = pytest.importorskip("xarray")
 
         arr = np.array([1.0, 2.0, 3.0])
@@ -151,7 +149,6 @@ class TestXarrayContentSensitivity:
 
     def test_dataset_var_change_changes_digest(self):
         """Mutating a data_var inside an xr.Dataset changes the digest."""
-        np = pytest.importorskip("numpy")
         xr = pytest.importorskip("xarray")
 
         ds1 = xr.Dataset({"a": (["x"], np.array([1.0, 2.0, 3.0]))})
@@ -161,7 +158,6 @@ class TestXarrayContentSensitivity:
 
     def test_dataset_coord_change_changes_digest(self):
         """Changing a coordinate value changes the digest even if data_vars match."""
-        np = pytest.importorskip("numpy")
         xr = pytest.importorskip("xarray")
 
         data = np.array([1.0, 2.0, 3.0])
@@ -176,7 +172,6 @@ class TestXarrayContentSensitivity:
 
     def test_dataset_unchanged_is_stable(self):
         """Two structurally identical Datasets produce the same digest."""
-        np = pytest.importorskip("numpy")
         xr = pytest.importorskip("xarray")
 
         def make():
@@ -283,7 +278,6 @@ class TestAutosaveCache:
 
     def test_cache_hit_on_unchanged_ndarray(self, tmp_path):
         """Re-serializing the same ndarray reuses the cached descriptor."""
-        np = pytest.importorskip("numpy")
         from pdv.serialization import serialize_node
 
         working_dir = str(tmp_path)
@@ -306,7 +300,6 @@ class TestAutosaveCache:
 
     def test_cache_miss_after_array_mutation(self, tmp_path):
         """Modifying the array's contents invalidates the cache entry."""
-        np = pytest.importorskip("numpy")
         from pdv.serialization import serialize_node
 
         working_dir = str(tmp_path)
@@ -330,7 +323,6 @@ class TestAutosaveCache:
 
     def test_cache_disabled_when_none(self, tmp_path):
         """``autosave_cache=None`` disables caching — every call is a miss."""
-        np = pytest.importorskip("numpy")
         from pdv.serialization import serialize_node
 
         working_dir = str(tmp_path)
@@ -350,7 +342,6 @@ class TestAutosaveCache:
 
     def test_cache_keyed_by_tree_path(self, tmp_path):
         """Identical values at different paths are cached independently."""
-        np = pytest.importorskip("numpy")
         from pdv.serialization import serialize_node
 
         working_dir = str(tmp_path)
@@ -379,7 +370,6 @@ class TestAutosaveCache:
         unchanged data node should hit the cache (no fresh write to the
         autosave dir, descriptor reused — referencing the original UUID).
         """
-        np = pytest.importorskip("numpy")
         from pdv.serialization import serialize_node
 
         save_dir = str(tmp_path / "save")
@@ -423,7 +413,6 @@ class TestAutosaveCache:
         the backing file under ``<saveDir>/tree/<uuid>/`` — otherwise the
         next project load hits ENOENT and the data is effectively lost.
         """
-        np = pytest.importorskip("numpy")
         import os
         from pdv.serialization import serialize_node
 
@@ -471,7 +460,6 @@ class TestAutosaveCache:
         ``<saveDir>/tree-index.json``) brings the file into the working dir
         at load time — no second copy needs to live under ``.autosave/tree/``.
         """
-        np = pytest.importorskip("numpy")
         import os
         from pdv.serialization import serialize_node
 
@@ -505,7 +493,6 @@ class TestAutosaveCache:
         (no canonical copy, no .autosave copy), treat the cache entry as
         stale and re-serialize so ``tree-index.json`` always references a
         file that exists on disk."""
-        np = pytest.importorskip("numpy")
         import os
         from pdv.serialization import serialize_node
 

@@ -14,6 +14,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 import pytest
+import numpy
 from pdv import comms
 from pdv.namespace import PDVNamespace, pdv_namespace
 from pdv.errors import PDVError, PDVProtectedNameError
@@ -199,7 +200,6 @@ class TestPDVNamespaceSnapshot:
 
     def test_ndarray_descriptor_has_children_and_preview(self, fresh_namespace):
         """ndarrays expose lazy-inspection metadata and sampled previews."""
-        numpy = pytest.importorskip("numpy")
         dict.__setitem__(fresh_namespace, "arr", numpy.array([1, 2, 3]))
         result = pdv_namespace(fresh_namespace)
         desc = result["arr"]
