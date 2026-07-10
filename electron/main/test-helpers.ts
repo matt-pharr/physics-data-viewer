@@ -10,10 +10,8 @@
  * Note on `vi.hoisted` and `vi.mock("electron")`: vitest hoists those calls
  * to the very top of the test file before regular imports run. So each test
  * file must declare its own `vi.hoisted(...)` block defining the captured
- * `ipcMain.handle`/`removeHandler` mocks. This file exposes
- * {@link createIpcRegistry} which can be called *inside* such a hoisted
- * block — the implementation references only `vi.fn` and `Map`, both
- * available at hoist time without imports.
+ * `ipcMain.handle`/`removeHandler` mocks (referencing only `vi.fn` and `Map`,
+ * both available at hoist time without imports).
  */
 
 import { vi } from "vitest";
@@ -45,6 +43,10 @@ export const TEST_PDV_VERSION: string = pkg.version;
 /**
  * {@link TEST_PDV_VERSION} with the `-test` suffix used where a test mocks
  * Electron's `app.getVersion()`.
+ *
+ * @public — read via a dynamic `require("./test-helpers")` inside a hoisted
+ * `vi.mock("electron")` factory (ipc-register-app-state.test.ts), which knip's
+ * static analysis can't follow.
  */
 export const TEST_PDV_VERSION_TEST_SUFFIX = `${pkg.version}-test`;
 
@@ -67,60 +69,6 @@ import type { GuiViewerWindowManager } from "./gui-viewer-window-manager";
 // ---------------------------------------------------------------------------
 
 export type InvokeHandler = (event: unknown, ...args: unknown[]) => unknown;
-
-export interface IpcRegistry {
-  handlers: Map<string, InvokeHandler>;
-  ipcHandle: ReturnType<typeof vi.fn>;
-  ipcRemoveHandler: ReturnType<typeof vi.fn>;
-  /** Throw if the handler is not registered, so test helpers can assume non-null. */
-  getHandler: (channel: string) => InvokeHandler;
-  /** Convenience: invoke the handler with a synthetic event-of-`{}`. */
-  invoke: (channel: string, ...args: unknown[]) => unknown;
-  /** Reset captured handlers (call from `beforeEach`). */
-  reset: () => void;
-}
-
-// ---------------------------------------------------------------------------
-// IPC registry — mock the `ipcMain.handle()` capture pattern.
-// ---------------------------------------------------------------------------
-
-/**
- * Build an {@link IpcRegistry}. Call inside a `vi.hoisted(...)` block so the
- * registry is constructed before `vi.mock("electron", ...)` evaluates.
- */
-export function createIpcRegistry(): IpcRegistry {
-  const handlers = new Map<string, InvokeHandler>();
-  const ipcHandle = vi.fn((channel: string, handler: InvokeHandler) => {
-    handlers.set(channel, handler);
-  });
-  const ipcRemoveHandler = vi.fn((channel: string) => {
-    handlers.delete(channel);
-  });
-  return {
-    handlers,
-    ipcHandle,
-    ipcRemoveHandler,
-    getHandler(channel: string): InvokeHandler {
-      const handler = handlers.get(channel);
-      if (!handler) {
-        throw new Error(`IPC handler not registered: ${channel}`);
-      }
-      return handler;
-    },
-    invoke(channel: string, ...args: unknown[]): unknown {
-      const handler = handlers.get(channel);
-      if (!handler) {
-        throw new Error(`IPC handler not registered: ${channel}`);
-      }
-      return handler({}, ...args);
-    },
-    reset() {
-      handlers.clear();
-      ipcHandle.mockClear();
-      ipcRemoveHandler.mockClear();
-    },
-  };
-}
 
 // ---------------------------------------------------------------------------
 // Message factories
@@ -148,20 +96,6 @@ export function makeOkResponse(payload: Record<string, unknown> = {}): PDVMessag
     type: "response",
     status: "ok",
     payload,
-  };
-}
-
-/**
- * Build an error `PDVMessage` envelope.
- */
-export function makeErrorResponse(code: string, message: string): PDVMessage {
-  return {
-    pdv_version: "0.0.0-test",
-    msg_id: "msg-test",
-    in_reply_to: "req-test",
-    type: "response",
-    status: "error",
-    payload: { code, message },
   };
 }
 

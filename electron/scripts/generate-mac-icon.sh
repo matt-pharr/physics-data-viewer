@@ -1,8 +1,12 @@
-#!/bin/sh
+#!/usr/bin/env bash
+set -euo pipefail
 
-cd ./assets/
+# Resolve the assets dir relative to this script so the working directory the
+# script is invoked from doesn't matter. `set -e` also aborts the run on the
+# first failing rsvg-convert/iconutil instead of pressing on with missing PNGs.
+cd "$(dirname "$0")/../assets"
 
-mkdir pdv-icon.iconset
+mkdir -p pdv-icon.iconset
 
 if ! command -v rsvg-convert >/dev/null 2>&1; then
   echo "Error: rsvg-convert is not installed."

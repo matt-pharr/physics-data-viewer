@@ -20,9 +20,10 @@ export default tseslint.config(
   {
     files: ["**/*.{ts,tsx}"],
     rules: {
-      // Allow unused vars prefixed with _
+      // Unused vars are an error (dead imports/bindings rot silently);
+      // prefix with _ to intentionally keep an unused binding.
       "@typescript-eslint/no-unused-vars": [
-        "warn",
+        "error",
         { argsIgnorePattern: "^_", varsIgnorePattern: "^_" },
       ],
     },

@@ -33,27 +33,11 @@ import {
   createModuleWindowManagerMock,
   type InvokeHandler,
 } from "./test-helpers";
-import type { BrowserWindow } from "electron";
-import type { ModuleWindowManager } from "./module-window-manager";
 
 function getHandler(channel: string): InvokeHandler {
   const h = ipcRegistry.handlers.get(channel);
   if (!h) throw new Error(`Channel not registered: ${channel}`);
   return h;
-}
-
-interface Harness {
-  win: BrowserWindow;
-  webContentsSend: ReturnType<typeof vi.fn>;
-  isDestroyed: ReturnType<typeof vi.fn>;
-  moduleWindowManager: ModuleWindowManager;
-}
-
-function setup(): Harness {
-  const { win, webContentsSend, isDestroyed } = createBrowserWindowMock();
-  const moduleWindowManager = createModuleWindowManagerMock();
-  registerModuleWindowIpcHandlers({ moduleWindowManager, mainWindow: win });
-  return { win, webContentsSend, isDestroyed, moduleWindowManager };
 }
 
 beforeEach(() => {
