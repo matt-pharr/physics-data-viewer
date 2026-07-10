@@ -90,7 +90,7 @@ describe("useKernelSubscriptions output coalescing", () => {
   });
 
   it("leaves entries for other executions untouched (identity preserved)", () => {
-    const other: LogEntry = { id: "exec-0", timestamp: 0, stdout: "done" };
+    const other: LogEntry = { id: "exec-0", timestamp: 0, code: "", stdout: "done" };
     const { getLogs, emitChunk } = renderSubscriptions([other, seedEntry]);
 
     act(() => {
