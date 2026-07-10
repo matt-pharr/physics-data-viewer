@@ -52,7 +52,10 @@ describe("handleIpc", () => {
   it("registers with ipcMain and records the channel", () => {
     const handler = vi.fn();
     handleIpc("test:one", handler);
-    expect(ipcMock.ipcMain.handle).toHaveBeenCalledWith("test:one", handler);
+    expect(ipcMock.ipcMain.handle).toHaveBeenCalledWith(
+      "test:one",
+      expect.any(Function),
+    );
     expect(listRegisteredIpcChannels()).toEqual(["test:one"]);
   });
 
@@ -61,6 +64,42 @@ describe("handleIpc", () => {
     expect(() => handleIpc("test:dup", vi.fn())).toThrow(/second handler/);
     // The failed registration must not be double-recorded.
     expect(listRegisteredIpcChannels()).toEqual(["test:dup"]);
+  });
+
+  it("passes arguments through and returns the handler's result", async () => {
+    handleIpc("test:echo", async (_event, a: number, b: number) => a + b);
+    const wrapped = ipcMock.handlers.get("test:echo") as (
+      event: unknown,
+      ...args: unknown[]
+    ) => Promise<unknown>;
+    await expect(wrapped({}, 2, 3)).resolves.toBe(5);
+  });
+
+  it("logs failures with the channel name and rethrows Error instances as-is", async () => {
+    const logSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const boom = new Error("kernel exploded");
+    handleIpc("test:boom", async () => {
+      throw boom;
+    });
+    const wrapped = ipcMock.handlers.get("test:boom") as (
+      event: unknown,
+    ) => Promise<unknown>;
+    await expect(wrapped({})).rejects.toBe(boom);
+    expect(logSpy).toHaveBeenCalledWith("[ipc] test:boom failed:", boom);
+    logSpy.mockRestore();
+  });
+
+  it("normalizes non-Error throws to Error instances", async () => {
+    const logSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    handleIpc("test:string-throw", async () => {
+      throw "raw string failure";
+    });
+    const wrapped = ipcMock.handlers.get("test:string-throw") as (
+      event: unknown,
+    ) => Promise<unknown>;
+    await expect(wrapped({})).rejects.toThrow("raw string failure");
+    await expect(wrapped({})).rejects.toBeInstanceOf(Error);
+    logSpy.mockRestore();
   });
 });
 
