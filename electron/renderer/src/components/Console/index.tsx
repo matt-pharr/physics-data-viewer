@@ -99,12 +99,19 @@ export const Console: React.FC<ConsoleProps> = ({ logs, onClear, onInstallPackag
   );
 };
 
-/** Render one console history item with optional streams/result/images. */
+/**
+ * Render one console history item with optional streams/result/images.
+ *
+ * Memoized: streamed output replaces only the affected LogEntry object, so
+ * every other entry keeps its identity and skips re-rendering. The ANSI→HTML
+ * conversions are additionally memoized per source string so the entry that
+ * did change re-parses only the stream that grew.
+ */
 const LogEntryView: React.FC<{
   log: LogEntry;
   index: number;
   onInstallPackage?: (moduleName: string) => void;
-}> = ({ log, index, onInstallPackage }) => {
+}> = React.memo(({ log, index, onInstallPackage }) => {
   const timestamp = useMemo(() => new Date(log.timestamp).toLocaleTimeString(), [log.timestamp]);
   const hasResult = log.result !== undefined;
   const hasImages = log.images && log.images.length > 0;
@@ -113,6 +120,22 @@ const LogEntryView: React.FC<{
   const locationText = formatLocationLabel(log.errorDetails?.location);
   const tracebackText = log.errorDetails?.traceback?.join('\n') ?? '';
   const isAgent = log.origin?.kind === 'agent';
+  const stdoutHtml = useMemo(
+    () => (log.stdout ? ansiToHtml(log.stdout) : ''),
+    [log.stdout],
+  );
+  const stderrHtml = useMemo(
+    () => (log.stderr ? ansiToHtml(log.stderr) : ''),
+    [log.stderr],
+  );
+  const errorHtml = useMemo(
+    () => (log.error ? 'Error: ' + ansiToHtml(log.error) : ''),
+    [log.error],
+  );
+  const tracebackHtml = useMemo(
+    () => (tracebackText ? ansiToHtml(tracebackText) : ''),
+    [tracebackText],
+  );
 
   return (
     <div className={`log-entry${isAgent ? ' log-entry-agent' : ''}`}>
@@ -130,22 +153,22 @@ const LogEntryView: React.FC<{
       {log.stdout && (
         <pre
           className="log-stdout"
-          dangerouslySetInnerHTML={{ __html: ansiToHtml(log.stdout) }}
+          dangerouslySetInnerHTML={{ __html: stdoutHtml }}
         />
       )}
       {log.stderr && (
         <pre
           className="log-stderr"
-          dangerouslySetInnerHTML={{ __html: ansiToHtml(log.stderr) }}
+          dangerouslySetInnerHTML={{ __html: stderrHtml }}
         />
       )}
       {hasResult && <pre className="log-result">{formatResult(log.result)}</pre>}
-      {log.error && <pre className="log-error" dangerouslySetInnerHTML={{ __html: 'Error: ' + ansiToHtml(log.error) }} />}
+      {log.error && <pre className="log-error" dangerouslySetInnerHTML={{ __html: errorHtml }} />}
       {log.error && locationText && <div className="log-error-context">{locationText}</div>}
       {tracebackText && (
         <pre
           className="log-traceback"
-          dangerouslySetInnerHTML={{ __html: ansiToHtml(tracebackText) }}
+          dangerouslySetInnerHTML={{ __html: tracebackHtml }}
         />
       )}
       {onInstallPackage && missingModule && (
@@ -173,7 +196,8 @@ const LogEntryView: React.FC<{
       )}
     </div>
   );
-};
+});
+LogEntryView.displayName = 'LogEntryView';
 
 function formatResult(value: unknown): string {
   if (value === null) return 'null';

@@ -317,6 +317,48 @@ describe("script:run", () => {
   });
 });
 
+describe("tree:print", () => {
+  it("Python: builds print(pdv_tree[\"path\"]) and executes it", async () => {
+    const harness = setup();
+    (harness.kernelManager.getKernel as ReturnType<typeof vi.fn>).mockReturnValue(
+      makeKernelInfo({ language: "python" }),
+    );
+    const result = (await getHandler(IPC.tree.print)({}, "k1", {
+      path: "data.x",
+      executionId: "e1",
+      origin: { kind: "unknown", label: "Tree print data.x" },
+    })) as { code: string; executionId: string };
+    expect(result.code).toBe('print(pdv_tree["data.x"])');
+    expect(result.executionId).toBe("e1");
+    expect(harness.kernelManager.execute).toHaveBeenCalled();
+  });
+
+  it("Julia: builds println(pdv_tree[...]); empty path prints the whole tree", async () => {
+    const harness = setup();
+    (harness.kernelManager.getKernel as ReturnType<typeof vi.fn>).mockReturnValue(
+      makeKernelInfo({ language: "julia" }),
+    );
+    const result = (await getHandler(IPC.tree.print)({}, "k1", {
+      path: "",
+      executionId: "e2",
+      origin: { kind: "unknown" },
+    })) as { code: string };
+    expect(result.code).toBe("println(pdv_tree)");
+  });
+
+  it("throws when the kernel is unknown", async () => {
+    const harness = setup();
+    (harness.kernelManager.getKernel as ReturnType<typeof vi.fn>).mockReturnValue(undefined);
+    await expect(
+      getHandler(IPC.tree.print)({}, "nope", {
+        path: "x",
+        executionId: "e3",
+        origin: { kind: "unknown" },
+      }),
+    ).rejects.toThrow(/Kernel not found/);
+  });
+});
+
 describe("script:edit", () => {
   it("returns success:false when the kernel cannot resolve a file path", async () => {
     const harness = setup();

@@ -5,7 +5,7 @@
  * persists updates through `window.pdv.config.set` and related preload APIs.
  */
 
-import React, { useEffect, useLayoutEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useLayoutEffect, useMemo, useState } from 'react';
 import type { Config, TerminalPreset, UpdateStatus } from '../../types';
 import { SHORTCUT_LABELS, DEFAULT_SHORTCUTS } from '../../shortcuts';
 import type { Shortcuts } from '../../shortcuts';
@@ -251,14 +251,52 @@ export const SettingsDialog: React.FC<SettingsDialogProps> = ({
     return window.pdv.updater.onUpdateStatus(setUpdateInfo);
   }, [isOpen]);
 
+  const applyMonacoThemeLive = useCallback((name: string) => {
+    const monacoThemeName = getMonacoTheme(name, BUILTIN_THEMES);
+    void loader.init().then((monaco) => {
+      defineMonacoThemes(monaco);
+      monaco.editor.setTheme(monacoThemeName);
+    });
+  }, []);
+
+  /**
+   * Re-apply the persisted appearance from `config`, discarding any live
+   * preview (theme/color/font/width changes are previewed onto the document
+   * as the user edits). Called on every cancel path; Save doesn't need it —
+   * the config update re-applies through useThemeManager.
+   */
+  const revertLivePreview = useCallback(() => {
+    const app = config?.settings?.appearance;
+    if (app) {
+      if (app.followSystemTheme) {
+        const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+        const activeName = (prefersDark ? app.darkTheme : app.lightTheme) ?? '';
+        const colors = resolveThemeColors(activeName, savedThemes);
+        if (colors) applyThemeColors(colors);
+        applyMonacoThemeLive(activeName);
+      } else if (app.colors) {
+        applyThemeColors(app.colors);
+        applyMonacoThemeLive(app.themeName ?? '');
+      }
+    }
+    const fonts = config?.settings?.fonts;
+    applyFontSettings(fonts?.codeFont, fonts?.displayFont);
+    applyMarkdownSettings(config?.settings?.markdown?.maxContentWidth);
+  }, [config, savedThemes, applyMonacoThemeLive]);
+
+  const handleCancel = useCallback(() => {
+    revertLivePreview();
+    onClose();
+  }, [revertLivePreview, onClose]);
+
   useEffect(() => {
     if (!isOpen) return;
     const onKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape' && !recordingKey) onClose();
+      if (e.key === 'Escape' && !recordingKey) handleCancel();
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [isOpen, onClose, recordingKey]);
+  }, [isOpen, handleCancel, recordingKey]);
 
   const allThemes = useMemo(() => [...BUILTIN_THEMES, ...savedThemes], [savedThemes]);
 
@@ -294,14 +332,6 @@ export const SettingsDialog: React.FC<SettingsDialogProps> = ({
   );
 
   if (!isOpen) return null;
-
-  const applyMonacoThemeLive = (name: string) => {
-    const monacoThemeName = getMonacoTheme(name, BUILTIN_THEMES);
-    void loader.init().then((monaco) => {
-      defineMonacoThemes(monaco);
-      monaco.editor.setTheme(monacoThemeName);
-    });
-  };
 
   const handleThemeSelect = (name: string) => {
     const theme = allThemes.find((t) => t.name === name);
@@ -474,7 +504,7 @@ export const SettingsDialog: React.FC<SettingsDialogProps> = ({
       <div className="settings-dialog">
         <div className="dialog-header">
           <h3>Settings</h3>
-          <button className="close-btn" onClick={onClose} aria-label="Close settings">×</button>
+          <button className="close-btn" onClick={handleCancel} aria-label="Close settings">×</button>
         </div>
         <div className="settings-tabs">
           <button className={`tab ${activeTab === 'general' ? 'active' : ''}`} onClick={() => setActiveTab('general')}>General</button>
@@ -968,7 +998,7 @@ export const SettingsDialog: React.FC<SettingsDialogProps> = ({
         </div>
         {activeTab !== 'runtime' && activeTab !== 'about' && activeTab !== 'agents' && (
           <div className="dialog-footer">
-            <button className="btn btn-secondary" onClick={onClose}>Cancel</button>
+            <button className="btn btn-secondary" onClick={handleCancel}>Cancel</button>
             <button
               className="btn btn-primary"
               onClick={() => void onSaveSettings()}

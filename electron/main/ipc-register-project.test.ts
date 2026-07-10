@@ -115,6 +115,9 @@ interface Harness {
   refreshProjectModuleHealth: Mock<(dir: string | null) => Promise<ProjectManifest | null>>;
   clearModuleHealthWarnings: Mock<() => void>;
   getActiveKernelEnvMeta: Mock<() => ActiveEnvironmentInfo | undefined>;
+  syncUvEnvironmentForLoad: Mock<
+    (saveDir: string, workingDir: string) => Promise<{ copied: string[]; synced: boolean; warning?: string }>
+  >;
   onExplicitSaveCompleted: Mock<(saveDir: string) => void>;
 }
 
@@ -142,6 +145,9 @@ function setup(): Harness {
     refreshProjectModuleHealth: vi.fn<(dir: string | null) => Promise<ProjectManifest | null>>(async () => null),
     clearModuleHealthWarnings: vi.fn<() => void>(),
     getActiveKernelEnvMeta: vi.fn<() => ActiveEnvironmentInfo | undefined>(() => undefined),
+    syncUvEnvironmentForLoad: vi.fn<
+      (saveDir: string, workingDir: string) => Promise<{ copied: string[]; synced: boolean; warning?: string }>
+    >(async () => ({ copied: [], synced: true })),
     onExplicitSaveCompleted: vi.fn<(saveDir: string) => void>(),
   };
   void activeProjectDir;
@@ -163,6 +169,7 @@ function setup(): Harness {
     getMainWindow: () => win.win,
     getInterpreterPath: () => "/usr/bin/python3",
     getActiveKernelEnvMeta: harness.getActiveKernelEnvMeta,
+    syncUvEnvironmentForLoad: harness.syncUvEnvironmentForLoad,
     onExplicitSaveCompleted: harness.onExplicitSaveCompleted,
   });
   return harness;
@@ -314,6 +321,51 @@ describe("project:load", () => {
       "/save/.autosave",
       "/tmp/wd",
     );
+  });
+
+  it("re-points a running uv session's env at the opened project and surfaces warnings", async () => {
+    const harness = setup();
+    harness.getActiveKernelId.mockReturnValue("k1");
+    harness.kernelWorkingDirs.set("k1", "/tmp/wd");
+    harness.getActiveKernelEnvMeta.mockReturnValue({ mode: "uv", pythonVersion: "3.13" });
+    harness.syncUvEnvironmentForLoad.mockResolvedValueOnce({
+      copied: ["pyproject.toml"],
+      synced: false,
+      warning: "uv sync failed while updating the session environment",
+    });
+    const result = (await getHandler(IPC.project.load)({}, "/save")) as {
+      envSyncWarning?: string;
+    };
+    expect(harness.syncUvEnvironmentForLoad).toHaveBeenCalledWith("/save", "/tmp/wd");
+    expect(result.envSyncWarning).toMatch(/uv sync failed/);
+  });
+
+  it("does not touch the env for shared-mode kernels", async () => {
+    const harness = setup();
+    harness.getActiveKernelId.mockReturnValue("k1");
+    harness.kernelWorkingDirs.set("k1", "/tmp/wd");
+    harness.getActiveKernelEnvMeta.mockReturnValue({
+      mode: "shared",
+      interpreterPath: "/usr/bin/python3",
+    });
+    const result = (await getHandler(IPC.project.load)({}, "/save")) as {
+      envSyncWarning?: string;
+    };
+    expect(harness.syncUvEnvironmentForLoad).not.toHaveBeenCalled();
+    expect(result.envSyncWarning).toBeUndefined();
+  });
+
+  it("still completes the load (with a warning) when env sync throws", async () => {
+    const harness = setup();
+    harness.getActiveKernelId.mockReturnValue("k1");
+    harness.kernelWorkingDirs.set("k1", "/tmp/wd");
+    harness.getActiveKernelEnvMeta.mockReturnValue({ mode: "uv" });
+    harness.syncUvEnvironmentForLoad.mockRejectedValueOnce(new Error("boom"));
+    const result = (await getHandler(IPC.project.load)({}, "/save")) as {
+      envSyncWarning?: string;
+      checksum: string | null;
+    };
+    expect(result.envSyncWarning).toMatch(/Failed to update the session environment/);
   });
 
   it("rewires sys.path via setupProjectModuleNamespaces after kernel repopulation", async () => {

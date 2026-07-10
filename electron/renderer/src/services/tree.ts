@@ -1,108 +1,49 @@
 /**
  * tree.ts — Renderer-side tree data access service.
  *
- * Wraps `window.pdv.tree.*` calls with a small in-memory cache keyed by
- * kernel-id + node path so tree expansion remains responsive.
+ * Thin adapter over `window.pdv.tree.list` that converts wire-format
+ * descriptors into renderer `TreeNodeData` objects. Deliberately uncached:
+ * every call returns freshly fetched, freshly built objects, so callers can
+ * tag UI state (`isExpanded`, `children`) onto the results without aliasing
+ * data seen by other callers, and no consumer ever renders stale structure.
+ * Listing goes through the kernel's dedicated read-only query thread
+ * (pdv.query_server), so fetches stay fast even mid-execution.
  */
 
 import type { NodeDescriptor } from '../types/pdv';
 import type { TreeNodeData } from '../types';
 
-/** Tree API adapter with per-kernel/path caching. */
+/** Tree API adapter converting wire descriptors to renderer node data. */
 class TreeService {
-  private cache: Map<string, TreeNodeData[]> = new Map();
-
   private async listAndEnrich(kernelId: string, path: string): Promise<TreeNodeData[]> {
     const nodes = await window.pdv.tree.list(kernelId, path);
     return nodes.map(this.enrichNode);
   }
 
-  /** Build a stable cache key scoped to kernel and tree path. */
-  private cacheKey(kernelId: string | null, path: string) {
-    const safeKernel = kernelId ?? '__none__';
-    return `${safeKernel}|${path}`;
-  }
-
-  /** Fetch and cache root-level tree nodes for the active kernel. */
-  async getRootNodes(
-    kernelId: string | null,
-    options?: { force?: boolean }
-  ): Promise<TreeNodeData[]> {
+  /** Fetch root-level tree nodes for the active kernel. */
+  async getRootNodes(kernelId: string | null): Promise<TreeNodeData[]> {
     if (!kernelId) return [];
-
-    const key = this.cacheKey(kernelId, '');
-    if (!options?.force) {
-      const cached = this.cache.get(key);
-      if (cached) {
-        return cached;
-      }
-    }
-
-    const enriched = await this.listAndEnrich(kernelId, '');
-    this.cache.set(key, enriched);
-    return enriched;
+    return this.listAndEnrich(kernelId, '');
   }
 
-  /** Fetch and cache children for one expanded parent node. */
-  async getChildren(
-    node: TreeNodeData,
-    kernelId: string | null,
-    options?: { force?: boolean }
-  ): Promise<TreeNodeData[]> {
+  /** Fetch children for one expanded parent node. */
+  async getChildren(node: TreeNodeData, kernelId: string | null): Promise<TreeNodeData[]> {
     if (!kernelId) return [];
     if (!node.hasChildren) {
       return [];
     }
-
-    return this.listByPath(kernelId, node.path, options);
+    return this.listAndEnrich(kernelId, node.path);
   }
 
   /**
-   * Fetch and cache children for an arbitrary tree path string.
+   * Fetch children for an arbitrary tree path string.
    *
    * Use this when the caller has a path but no `TreeNodeData` (e.g.
-   * Monaco autocomplete, module-window dropdown population). All cache
-   * semantics match {@link getChildren}.
+   * Monaco autocomplete, module-window dropdown population).
    */
-  async listByPath(
-    kernelId: string | null,
-    path: string,
-    options?: { force?: boolean }
-  ): Promise<TreeNodeData[]> {
+  async listByPath(kernelId: string | null, path: string): Promise<TreeNodeData[]> {
     if (!kernelId) return [];
-
-    const key = this.cacheKey(kernelId, path);
-    if (!options?.force) {
-      const cached = this.cache.get(key);
-      if (cached) {
-        return cached;
-      }
-    }
-
-    const enriched = await this.listAndEnrich(kernelId, path);
-    this.cache.set(key, enriched);
-    return enriched;
-  }
-
-  /** Invalidate the cache entry for a single path (leaves other entries intact). */
-  invalidatePath(kernelId: string, path: string): void {
-    const key = this.cacheKey(kernelId, path);
-    this.cache.delete(key);
-  }
-
-  /** Clear all cache entries, or only entries for a specific kernel id. */
-  clearCache(kernelId?: string | null): void {
-    if (!kernelId) {
-      this.cache.clear();
-      return;
-    }
-    const safeKernel = kernelId ?? '__none__';
-    const prefix = `${safeKernel}|`;
-    for (const key of Array.from(this.cache.keys())) {
-      if (key.startsWith(prefix)) {
-        this.cache.delete(key);
-      }
-    }
+    return this.listAndEnrich(kernelId, path);
   }
 
   /**

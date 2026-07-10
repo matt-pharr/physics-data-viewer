@@ -105,6 +105,12 @@ export const IPC = {
     duplicate: "tree:duplicate",
     invokeHandler: "tree:invokeHandler",
     delete: "tree:delete",
+    /**
+     * Print a tree node's value in the kernel and return the run for
+     * console logging. The main process builds the language-appropriate
+     * invocation string — no Python or Julia code belongs in the renderer.
+     */
+    print: "tree:print",
   },
   /** Namespace inspection channels. */
   namespace: {
@@ -365,6 +371,13 @@ export const IPC = {
     upgradePackage: "environment:upgradePackage",
     /** Active kernel's environment metadata (Project Environment tab header). */
     activeInfo: "environment:activeInfo",
+    /**
+     * Run `pdv.install("<module>")` in the kernel for the reactive
+     * missing-module affordance (§10.5.12). The main process builds the
+     * code string and brackets the run with executeBegin/executeFinish
+     * pushes so the console streams the install live.
+     */
+    installModule: "environment:installModule",
   },
   /** Native file/directory picker channels. */
   files: {
@@ -681,7 +694,23 @@ export interface ScriptRunRequest {
 }
 
 /**
- * Result returned by `script.run`.
+ * Request payload for `tree.print`.
+ *
+ * The main process uses the target kernel's language to build the
+ * appropriate print invocation string — no language-specific code
+ * belongs in the renderer.
+ */
+export interface TreePrintRequest {
+  /** Dot-delimited tree path of the node to print; "" prints the whole tree. */
+  path: string;
+  /** Caller-supplied execution ID for output correlation. */
+  executionId: string;
+  /** Execution origin metadata used in error summaries and the console. */
+  origin: KernelExecutionOrigin;
+}
+
+/**
+ * Result returned by `script.run` (and `tree.print`, which shares the shape).
  */
 export interface ScriptRunResult {
   /** The exact code string that was sent to the kernel (for console display). */
@@ -1452,6 +1481,12 @@ export interface ProjectLoadResult {
   projectName: string | null;
   /** Tree paths of file-backed nodes whose files were missing from the save directory. */
   missingFiles?: string[];
+  /**
+   * Warning from re-pointing a running uv session's environment at the
+   * opened project (e.g. Python-pin mismatch or a failed `uv sync`).
+   * Surfaced in the renderer's "Project loaded" console entry.
+   */
+  envSyncWarning?: string;
 }
 
 /**
@@ -2006,6 +2041,16 @@ export interface PDVApi {
       treePath: string
     ): Promise<{ success: boolean; error?: string }>;
     /**
+     * Print a tree node's value in the kernel and return the run for
+     * console logging. The main process builds the language-appropriate
+     * invocation (`print(...)` for Python, `println(...)` for Julia).
+     *
+     * @param kernelId - Target kernel ID.
+     * @param request - Node path, execution ID, and origin metadata.
+     * @returns The executed code plus the structured kernel result.
+     */
+    print(kernelId: string, request: TreePrintRequest): Promise<ScriptRunResult>;
+    /**
      * Subscribe to tree change push notifications.
      *
      * @param callback - Invoked with each tree-changed payload.
@@ -2369,6 +2414,17 @@ export interface PDVApi {
      *   kernel's environment, or `null` when no kernel is active.
      */
     activeInfo(): Promise<ActiveEnvironmentInfo | null>;
+    /**
+     * Run `pdv.install("<module>")` in the kernel for the reactive
+     * missing-module affordance (§10.5.12). The main process builds the
+     * code string and brackets the run with executeBegin/executeFinish
+     * pushes, so the console seeds a log entry and streams output live —
+     * the caller only awaits completion.
+     *
+     * @param kernelId - Target kernel.
+     * @param moduleName - Top-level module name to install.
+     */
+    installModule(kernelId: string, moduleName: string): Promise<void>;
   };
 
   /** App configuration accessors. */

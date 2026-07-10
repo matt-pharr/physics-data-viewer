@@ -395,6 +395,16 @@ export function registerKernelIpcHandlers(
           (await EnvironmentDetector.resolvePythonMajorMinor(uvEnv.venvPython)) ??
           uv.pythonVersion,
       };
+      // The environment is materialized — everything from here is kernel
+      // boot. Tell the EnvSyncModal so it can retitle to "Starting
+      // ipykernel…" (empty data: this is a stage marker, not output).
+      if (!win.isDestroyed()) {
+        win.webContents.send(IPC.push.envActivity, {
+          stream: "stdout",
+          data: "",
+          stage: "kernel-boot",
+        });
+      }
     } else if (requestedLanguage === "python") {
       const pythonPath =
         requestedSpec?.env?.PYTHON_PATH ??

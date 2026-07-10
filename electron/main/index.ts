@@ -17,10 +17,12 @@
 
 import { BrowserWindow, app } from "electron";
 import { handleIpc, removeAllIpcHandlers } from "./ipc-registry";
+import { randomUUID } from "node:crypto";
 import * as fs from "fs/promises";
 import * as fsSync from "fs";
 import * as os from "os";
 import * as path from "path";
+import { executeAndTranscribe, TranscriptWriter } from "./mcp/transcript";
 
 import { CommRouter } from "./comm-router";
 import { QueryRouter } from "./query-router";
@@ -40,7 +42,7 @@ import {
   bindProjectModulesToTree,
   setupProjectModuleNamespaces,
 } from "./module-runtime";
-import { copyFilesForLoad } from "./project-file-sync";
+import { copyFilesForLoad, syncUvEnvironmentForLoad } from "./project-file-sync";
 import {
   ProjectManager,
   type ProjectModuleImport,
@@ -628,6 +630,31 @@ export function registerIpcHandlers(
     },
     getActiveKernelEnvMeta: () =>
       activeKernelId ? kernelEnvMeta.get(activeKernelId) : undefined,
+    // Re-point the running uv session's environment at the opened project:
+    // copy its env files over the previous project's, `uv sync` the venv
+    // (streamed over envActivity), and refresh the kernel's import caches so
+    // newly synced packages import without a restart (§10.5.11 mechanism).
+    syncUvEnvironmentForLoad: async (saveDir, workingDir) => {
+      const result = await syncUvEnvironmentForLoad(saveDir, workingDir, {
+        runningPythonVersion: activeKernelId
+          ? kernelEnvMeta.get(activeKernelId)?.pythonVersion
+          : undefined,
+        runUvSync: async (cwd) => {
+          const sync = await uvSync({
+            cwd,
+            win,
+            pushChannel: IPC.push.envActivity,
+            binaryPath: readConfig(configStore).uv?.binaryPath,
+            // In-place sync under a live kernel: --inexact keeps pdv-python
+            // (installed outside the lock) from being uninstalled.
+            inexact: true,
+          });
+          return { success: sync.success, output: sync.output };
+        },
+      });
+      if (result.synced) await refreshKernelImportCaches();
+      return result;
+    },
     onExplicitSaveCompleted: (saveDir) => {
       void ProjectManager.clearAutosave(saveDir);
       projectManager.resetAutosaveTimer();
@@ -738,9 +765,56 @@ export function registerIpcHandlers(
       const opts = pkgRunOptions();
       const lock = await uvLockUpgrade(names, opts);
       if (!lock.success) return { success: false, output: lock.output };
-      const sync = await uvSync(opts);
+      // In-place sync under a live kernel: --inexact keeps pdv-python
+      // (installed outside the lock) from being uninstalled.
+      const sync = await uvSync({ ...opts, inexact: true });
       if (sync.success) await refreshKernelImportCaches();
       return { success: sync.success, output: lock.output + sync.output };
+    }
+  );
+
+  // Reactive missing-module install (§10.5.12). The renderer sends only the
+  // module name; the code string is built here and the run is bracketed with
+  // executeBegin/executeFinish pushes so the console seeds a log entry and
+  // streams the install output live — same pattern as MCP agent runs.
+  handleIpc(
+    IPC.environment.installModule,
+    async (_event, kernelId: string, moduleName: string): Promise<void> => {
+      if (!kernelManager.getKernel(kernelId)) {
+        throw new Error(`Kernel not found: ${kernelId}`);
+      }
+      const code = `pdv.install(${JSON.stringify(moduleName)})`;
+      const origin = { kind: "unknown" as const, label: `Install ${moduleName}` };
+      const workingDir = kernelWorkingDirs.get(kernelId);
+      const transcript = workingDir ? new TranscriptWriter(workingDir) : null;
+      const executionId = randomUUID();
+      const start = Date.now();
+      const send = (channel: string, payload: unknown): void => {
+        if (!win.isDestroyed()) win.webContents.send(channel, payload);
+      };
+      send(IPC.push.executeBegin, { executionId, code, origin, timestamp: start });
+      try {
+        const result = await executeAndTranscribe(
+          kernelManager.execute.bind(kernelManager),
+          transcript,
+          kernelId,
+          { code, executionId, origin },
+          (chunk) => send(IPC.push.executeOutput, chunk),
+        );
+        send(IPC.push.executeFinish, {
+          executionId,
+          duration: result.duration ?? Date.now() - start,
+          error: result.error,
+          errorDetails: result.errorDetails,
+        });
+      } catch (err) {
+        send(IPC.push.executeFinish, {
+          executionId,
+          duration: Date.now() - start,
+          error: err instanceof Error ? err.message : String(err),
+        });
+        throw err;
+      }
     }
   );
 

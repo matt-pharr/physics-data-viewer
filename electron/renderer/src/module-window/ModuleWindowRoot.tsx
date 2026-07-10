@@ -163,7 +163,7 @@ export const ModuleWindowRoot: React.FC = () => {
               }
               const treePath = input.optionsTreePath.trim();
               if (!treePath) return { ...input, options: [] };
-              const nodes = await treeService.listByPath(context.kernelId, treePath, { force: true });
+              const nodes = await treeService.listByPath(context.kernelId, treePath);
               return {
                 ...input,
                 options: nodes.map((node) => ({ label: node.key, value: node.key })),

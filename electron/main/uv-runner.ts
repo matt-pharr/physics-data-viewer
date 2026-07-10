@@ -209,17 +209,28 @@ export function runUv(args: string[], opts: UvRunOptions = {}): Promise<UvResult
  * Run `uv sync` — materialize the project venv from `pyproject.toml` /
  * `uv.lock` in `opts.cwd`.
  *
- * @param opts - Run options; `pythonVersion` adds `--python <version>`.
+ * `uv sync` is **exact** by default: it uninstalls anything not in the
+ * lockfile. pdv-python lives in the venv via `uv pip install` — outside the
+ * lock (§10.5.7) — so any in-place sync under a live kernel MUST pass
+ * `inexact: true` or it strips pdv-python out from under the running
+ * session. Only the initial materialization (which reinstalls pdv-python
+ * immediately after) may sync exactly.
+ *
+ * @param opts - Run options; `pythonVersion` adds `--python <version>`,
+ *   `inexact` adds `--inexact` (keep packages absent from the lockfile).
  * @returns The {@link UvResult} of the sync.
  * @throws {UvBinaryNotFoundError} When no `uv` binary can be located.
  */
 export function uvSync(
-  opts: UvRunOptions & { pythonVersion?: string } = {}
+  opts: UvRunOptions & { pythonVersion?: string; inexact?: boolean } = {}
 ): Promise<UvResult> {
-  const { pythonVersion, ...runOpts } = opts;
+  const { pythonVersion, inexact, ...runOpts } = opts;
   const args = ["sync"];
   if (pythonVersion) {
     args.push("--python", pythonVersion);
+  }
+  if (inexact) {
+    args.push("--inexact");
   }
   return runUv(args, runOpts);
 }

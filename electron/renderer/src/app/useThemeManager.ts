@@ -49,24 +49,37 @@ export function useThemeManager({ config }: UseThemeManagerOptions): string {
     if (!config?.settings?.appearance) return;
     const app = config.settings.appearance;
     if (app.followSystemTheme) {
-      const darkColors = resolveThemeColors(app.darkTheme, []);
-      const lightColors = resolveThemeColors(app.lightTheme, []);
-      const colors = systemPrefersDark ? darkColors : lightColors;
-      if (colors) {
-        applyThemeColors(colors);
-        syncWindowBackground(colors);
-        // eslint-disable-next-line react-hooks/set-state-in-effect -- deriving Monaco theme from config on change
-        setMonacoTheme(getMonacoTheme(
-          (systemPrefersDark ? app.darkTheme : app.lightTheme) ?? '', BUILTIN_THEMES,
-        ));
-      }
-      cacheTheme({ followSystem: true, darkColors, lightColors });
+      // The dark/light pair may name a user-saved custom theme, so the
+      // saved-themes store must be consulted — resolving against the
+      // built-ins alone silently fails to apply custom pair members.
+      let cancelled = false;
+      void window.pdv.themes
+        .get()
+        .catch(() => [])
+        .then((savedThemes) => {
+          if (cancelled) return;
+          const darkColors = resolveThemeColors(app.darkTheme, savedThemes);
+          const lightColors = resolveThemeColors(app.lightTheme, savedThemes);
+          const colors = systemPrefersDark ? darkColors : lightColors;
+          if (colors) {
+            applyThemeColors(colors);
+            syncWindowBackground(colors);
+            setMonacoTheme(getMonacoTheme(
+              (systemPrefersDark ? app.darkTheme : app.lightTheme) ?? '', BUILTIN_THEMES,
+            ));
+          }
+          cacheTheme({ followSystem: true, darkColors, lightColors });
+        });
+      return () => {
+        cancelled = true;
+      };
     } else {
       if (app.colors) {
         applyThemeColors(app.colors);
         syncWindowBackground(app.colors);
         cacheTheme({ followSystem: false, colors: app.colors });
       }
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- deriving Monaco theme from config on change
       setMonacoTheme(getMonacoTheme(app.themeName ?? '', BUILTIN_THEMES));
     }
   }, [config, systemPrefersDark]);

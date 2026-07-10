@@ -5,7 +5,7 @@
  * nested children through `window.pdv.namespace.inspect`.
  */
 
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type {
   NamespaceInspectResult,
   NamespaceInspectorNode,
@@ -58,12 +58,46 @@ export const NamespaceView: React.FC<NamespaceViewProps> = ({
   const [inspectLoading, setInspectLoading] = useState<Set<string>>(new Set());
   const [inspectErrors, setInspectErrors] = useState<Record<string, string>>({});
 
+  // Nodes the user has expanded, kept in a ref so refreshes can re-inspect
+  // them without depending on render state. Keyed by expression.
+  const expandedNodesRef = useRef<Map<string, NamespaceInspectorNode>>(new Map());
+  // Monotonic fetch sequence: a fetch only applies its results if it is
+  // still the latest, so overlapping fetches can't interleave stale state.
+  const fetchSeqRef = useRef(0);
+  const inFlightRef = useRef(false);
+
   const resetInspectionState = useCallback(() => {
+    expandedNodesRef.current.clear();
     setExpandedExpressions(new Set());
     setChildrenByExpression({});
     setInspectMetaByExpression({});
     setInspectLoading(new Set());
     setInspectErrors({});
+  }, []);
+
+  /** Drop one expression's expansion and cached inspection state. */
+  const dropExpansion = useCallback((expression: string) => {
+    expandedNodesRef.current.delete(expression);
+    setExpandedExpressions((prev) => {
+      const next = new Set(prev);
+      next.delete(expression);
+      return next;
+    });
+    setChildrenByExpression((prev) => {
+      const next = { ...prev };
+      delete next[expression];
+      return next;
+    });
+    setInspectMetaByExpression((prev) => {
+      const next = { ...prev };
+      delete next[expression];
+      return next;
+    });
+    setInspectErrors((prev) => {
+      const next = { ...prev };
+      delete next[expression];
+      return next;
+    });
   }, []);
 
   const handleSortClick = (col: 'name' | 'type' | 'size') => {
@@ -75,7 +109,35 @@ export const NamespaceView: React.FC<NamespaceViewProps> = ({
     }
   };
 
-  const fetchNamespace = useCallback(async () => {
+  /**
+   * Re-inspect every user-expanded node against fresh top-level results so
+   * a refresh keeps expanded subtrees both open and current. Nodes whose
+   * inspection now fails (e.g. the variable was deleted) are collapsed.
+   */
+  const refreshExpandedChildren = useCallback(
+    async (activeKernelId: string, freshVariables: NamespaceVariable[], seq: number) => {
+      const expandedNodes = Array.from(expandedNodesRef.current.values());
+      await Promise.all(
+        expandedNodes.map(async (node) => {
+          try {
+            const result = await window.pdv.namespace.inspect(activeKernelId, {
+              rootName: node.path.length === 0 ? node.name : findRootName(node, freshVariables),
+              path: node.path,
+            });
+            if (seq !== fetchSeqRef.current) return;
+            setChildrenByExpression((prev) => ({ ...prev, [node.expression]: result.children }));
+            setInspectMetaByExpression((prev) => ({ ...prev, [node.expression]: result }));
+          } catch {
+            if (seq !== fetchSeqRef.current) return;
+            dropExpansion(node.expression);
+          }
+        }),
+      );
+    },
+    [dropExpansion],
+  );
+
+  const fetchNamespace = useCallback(async (options?: { skipIfBusy?: boolean }) => {
     if (!kernelId || disabled) {
       setVariables([]);
       setError(undefined);
@@ -83,24 +145,35 @@ export const NamespaceView: React.FC<NamespaceViewProps> = ({
       resetInspectionState();
       return;
     }
+    // Auto-refresh ticks skip rather than pile onto a slow in-flight fetch.
+    if (options?.skipIfBusy && inFlightRef.current) return;
 
+    const seq = ++fetchSeqRef.current;
+    inFlightRef.current = true;
     setError(undefined);
     // Show spinner only if the fetch takes longer than 1s to avoid flashing.
     const loadingTimer = setTimeout(() => setLoading(true), 1000);
 
     try {
       const result = await window.pdv.namespace.query(kernelId, filters);
+      if (seq !== fetchSeqRef.current) return; // superseded by a newer fetch
       setVariables(result);
-      resetInspectionState();
+      // Keep user-expanded nodes open and refresh their children in place —
+      // resetting here would collapse the tree on every auto-refresh tick.
+      await refreshExpandedChildren(kernelId, result, seq);
     } catch (err) {
+      if (seq !== fetchSeqRef.current) return;
       setError(err instanceof Error ? err.message : String(err));
       setVariables([]);
       resetInspectionState();
     } finally {
       clearTimeout(loadingTimer);
-      setLoading(false);
+      if (seq === fetchSeqRef.current) {
+        setLoading(false);
+        inFlightRef.current = false;
+      }
     }
-  }, [kernelId, filters, disabled, resetInspectionState]);
+  }, [kernelId, filters, disabled, resetInspectionState, refreshExpandedChildren]);
 
   useEffect(() => {
     void fetchNamespace();
@@ -110,7 +183,7 @@ export const NamespaceView: React.FC<NamespaceViewProps> = ({
     if (!autoRefresh || !kernelId || disabled) return;
 
     const interval = setInterval(() => {
-      void fetchNamespace();
+      void fetchNamespace({ skipIfBusy: true });
     }, refreshInterval);
 
     return () => clearInterval(interval);
@@ -160,16 +233,22 @@ export const NamespaceView: React.FC<NamespaceViewProps> = ({
   const toggleExpanded = useCallback((node: NamespaceInspectorNode) => {
     if (!node.hasChildren) return;
     const key = node.expression;
+    const collapsing = expandedNodesRef.current.has(key);
+    if (collapsing) {
+      expandedNodesRef.current.delete(key);
+    } else {
+      expandedNodesRef.current.set(key, node);
+    }
     setExpandedExpressions((prev) => {
       const next = new Set(prev);
-      if (next.has(key)) {
+      if (collapsing) {
         next.delete(key);
       } else {
         next.add(key);
       }
       return next;
     });
-    if (!childrenByExpression[key] && !inspectLoading.has(key)) {
+    if (!collapsing && !childrenByExpression[key] && !inspectLoading.has(key)) {
       void fetchChildren(node);
     }
   }, [childrenByExpression, fetchChildren, inspectLoading]);

@@ -22,17 +22,17 @@
 
 .tab.active {
   background-color: var(--accent);
-  color: var(--text-on-accent, #ffffff);
+  color: var(--text-on-accent);
   font-weight: 600;
 }
 
 .tab.active .tab-close {
-  color: var(--text-on-accent, #ffffff);
+  color: var(--text-on-accent);
   opacity: 0.75;
 }
 
 .tab.active .tab-close:hover {
-  color: var(--text-on-accent, #ffffff);
+  color: var(--text-on-accent);
   opacity: 1;
 }
 

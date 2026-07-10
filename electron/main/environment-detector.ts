@@ -145,6 +145,13 @@ export interface InstallOutputChunk {
   stream: "stdout" | "stderr";
   /** The text data of the chunk. */
   data: string;
+  /**
+   * Optional launch-stage marker for the EnvSyncModal. `"kernel-boot"` is
+   * pushed (with empty `data`) once the uv environment is materialized and
+   * the kernel process is about to start, so the modal can swap its title
+   * from "Setting up project environment…" to "Starting ipykernel…".
+   */
+  stage?: "kernel-boot";
 }
 
 // ---------------------------------------------------------------------------

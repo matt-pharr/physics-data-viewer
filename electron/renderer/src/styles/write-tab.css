@@ -31,7 +31,7 @@
 
 .write-tab-hint {
   font-size: 12px;
-  color: var(--text-muted, var(--text-secondary));
+  color: var(--text-secondary);
   max-width: 280px;
   opacity: 0.7;
 }
@@ -230,19 +230,19 @@
 
 .pane-switcher-btn.active {
   background-color: var(--accent);
-  color: var(--text-on-accent, #ffffff);
+  color: var(--text-on-accent);
   cursor: default;
 }
 
 .pane-switcher-btn.active:hover {
   background-color: var(--accent);
-  color: var(--text-on-accent, #ffffff);
+  color: var(--text-on-accent);
 }
 
 .pane-switcher-btn.active:focus-visible,
 .pane-switcher-btn.active:active {
   background-color: var(--accent);
-  color: var(--text-on-accent, #ffffff);
+  color: var(--text-on-accent);
 }
 
 .pane-switcher-indicator {

@@ -52,7 +52,7 @@ import type {
   WindowChromeInfo,
 } from '../types';
 import { resolveShortcuts } from '../shortcuts';
-import { normalizeLoadedCodeCells, normalizeRecentProjects, mergeConfigUpdate } from './app-utils';
+import { newExecutionId, normalizeLoadedCodeCells, normalizeRecentProjects, mergeConfigUpdate } from './app-utils';
 import { CELL_UNDO_LIMIT, MAX_LOG_ENTRIES, NAMESPACE_REFRESH_INTERVAL_MS } from './constants';
 import { useCodeCellsPersistence } from './useCodeCellsPersistence';
 import { useKeyboardShortcuts } from './useKeyboardShortcuts';
@@ -465,6 +465,15 @@ const App: React.FC = () => {
     setPendingTreeChanges((prev) => [...prev, info]);
   }, []);
 
+  const handleTreeChangesConsumed = useCallback((consumed: TreeChangeInfo[]) => {
+    setPendingTreeChanges((prev) => {
+      // Drop only the consumed snapshot; a push that landed between render
+      // and the Tree's consume effect stays queued.
+      const consumedSet = new Set(consumed);
+      return prev.filter((c) => !consumedSet.has(c));
+    });
+  }, []);
+
   useKernelSubscriptions({
     currentKernelId,
     loadedProjectTabsRef,
@@ -481,8 +490,26 @@ const App: React.FC = () => {
   });
 
   const [environmentMode, setEnvironmentMode] = useState<'uv' | 'shared'>('shared');
-  const [uvSync, setUvSync] = useState<{ phase: 'idle' | 'syncing' | 'failed'; output: string; error?: string }>({ phase: 'idle', output: '' });
+  // Unified session-launch overlay state (EnvSyncModal): covers uv-project
+  // launches (env materialization + kernel boot) and shared/conda kernel
+  // launches (kernel boot only). `mode` selects the failure affordances
+  // (shared failures offer "Choose environment…").
+  const [kernelLaunch, setKernelLaunch] = useState<{
+    phase: 'idle' | 'syncing' | 'failed';
+    stage: 'env' | 'kernel-boot';
+    mode: 'uv' | 'shared';
+    language: 'python' | 'julia';
+    detail?: string;
+    output: string;
+    error?: string;
+  }>({ phase: 'idle', stage: 'env', mode: 'uv', language: 'python', output: '' });
   const lastUvLaunchRef = useRef<import('../types').KernelUvContext | null>(null);
+  // Replays the most recent launch (uv or shared) for the overlay's Retry.
+  const lastLaunchRef = useRef<(() => Promise<boolean>) | null>(null);
+  // Self-refs so a launch can enqueue its own replay without a TDZ cycle
+  // between the two launch callbacks.
+  const launchUvKernelRef = useRef<(ctx: import('../types').KernelUvContext) => Promise<boolean>>(async () => false);
+  const launchSharedKernelRef = useRef<(cfg: Config, language: 'python' | 'julia') => Promise<boolean>>(async () => false);
   const { startKernel, handleEnvSave, handleRestartKernel, lastErrorRef } = useKernelLifecycle({
     config,
     currentKernelId,
@@ -604,7 +631,7 @@ const App: React.FC = () => {
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [showSaveAsDialog, showImportModule, scriptDialog, createScriptTarget, createNoteTarget, createGuiTarget, createLibTarget, showNewModuleDialog, moduleMetadataTarget]);
+  }, [showSaveAsDialog, showImportModule, scriptDialog, renameTarget, moveTarget, duplicateTarget, createNodeTarget, createScriptTarget, createNoteTarget, createGuiTarget, createLibTarget, showNewModuleDialog, moduleMetadataTarget]);
 
   const handleSettingsSave = async (updates: Partial<Config>) => {
     await window.pdv.config.set(updates);
@@ -667,7 +694,15 @@ const App: React.FC = () => {
         prev.map((t) => (t.id === id ? { ...t, savedContent: t.content } : t)),
       );
     } catch (error) {
-      console.error('[App] Failed to save note:', error);
+      // Surface the failure in the console — the tab stays dirty, so the
+      // edits are not lost and the dirty dot keeps showing.
+      const message = error instanceof Error ? error.message : String(error);
+      setLogs((prev) => [...prev, {
+        id: `note-save-error-${Date.now()}`,
+        timestamp: Date.now(),
+        code: '',
+        error: `Failed to save note "${tab.name}": ${message}`,
+      }]);
     }
   };
 
@@ -688,7 +723,28 @@ const App: React.FC = () => {
     );
   }, [currentKernelId]);
 
-  const handleNoteCloseTab = (id: string) => {
+  const handleNoteCloseTab = async (id: string) => {
+    // Closing a dirty note flushes it first — the note lives in the tree,
+    // so a silent discard would lose real edits. Only ask the user when
+    // the flush can't happen (no kernel) or fails.
+    const tab = noteTabsRef.current.find((t) => t.id === id);
+    if (tab && tab.content !== tab.savedContent) {
+      let flushed = false;
+      if (currentKernelId) {
+        try {
+          await window.pdv.note.save(currentKernelId, tab.id, tab.content);
+          flushed = true;
+        } catch (error) {
+          console.error('[App] Failed to save note before closing:', error);
+        }
+      }
+      if (!flushed) {
+        const discard = window.confirm(
+          `"${tab.name}" has unsaved changes that could not be saved. Close it anyway and discard them?`,
+        );
+        if (!discard) return;
+      }
+    }
     setNoteTabs((prev) => {
       const updated = prev.filter((t) => t.id !== id);
       if (activeNoteTabId === id) {
@@ -761,10 +817,7 @@ const App: React.FC = () => {
       setScriptDialog(node);
     } else if (action === 'run_defaults' && node.type === 'script') {
       if (!currentKernelId) return;
-      const executionId =
-        typeof crypto !== 'undefined' && 'randomUUID' in crypto
-          ? crypto.randomUUID()
-          : `log-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+      const executionId = newExecutionId();
       const origin: KernelExecutionOrigin = {
         kind: 'tree-script',
         label: node.path,
@@ -785,10 +838,13 @@ const App: React.FC = () => {
         console.error('[App] Failed to open editor:', error);
       }
     } else if (action === 'copy_path') {
-      const pyExpr = node.path
-        ? node.path.split('.').reduce((acc, part) => `${acc}["${part}"]`, 'pdv_tree')
+      // Clipboard snippet (valid in both Python and Julia sessions —
+      // PDVTree indexes the same way in each). JSON.stringify escapes
+      // quotes/backslashes in keys so the pasted expression stays valid.
+      const indexExpr = node.path
+        ? node.path.split('.').reduce((acc, part) => `${acc}[${JSON.stringify(part)}]`, 'pdv_tree')
         : 'pdv_tree';
-      await navigator.clipboard.writeText(pyExpr);
+      await navigator.clipboard.writeText(indexExpr);
     } else if (action === 'handle') {
       if (!currentKernelId) return;
       const result = await window.pdv.tree.invokeHandler(currentKernelId, node.path);
@@ -819,13 +875,17 @@ const App: React.FC = () => {
       }
     } else if (action === 'print') {
       if (!currentKernelId) return;
-      const pyExpr = node.path
-        ? `pdv_tree[${JSON.stringify(node.path)}]`
-        : 'pdv_tree';
-      await handleExecute(`print(${pyExpr})`, {
-        kind: 'unknown',
-        label: `Tree print ${node.path || 'pdv_tree'}`,
+      // The main process builds the language-appropriate print invocation —
+      // no Python or Julia code strings belong in the renderer.
+      const printResult = await window.pdv.tree.print(currentKernelId, {
+        path: node.path,
+        executionId: newExecutionId(),
+        origin: {
+          kind: 'unknown',
+          label: `Tree print ${node.path || 'pdv_tree'}`,
+        },
       });
+      handleScriptRun(printResult);
     }
   };
 
@@ -994,10 +1054,19 @@ const App: React.FC = () => {
     }
   }, [isSaveInFlight, isQueuedExecution, executeImmediate]);
 
-  /** Run pdv.install("<name>") for a missing module (reactive affordance, §10.5.12). */
+  /**
+   * Run pdv.install("<name>") for a missing module (reactive affordance,
+   * §10.5.12). The main process builds the code string and streams the run
+   * to the console via executeBegin/executeOutput/executeFinish pushes.
+   */
   const handleInstallMissingModule = useCallback((moduleName: string) => {
-    void handleExecute(`pdv.install(${JSON.stringify(moduleName)})`);
-  }, [handleExecute]);
+    if (!currentKernelId) return;
+    void window.pdv.environment.installModule(currentKernelId, moduleName).catch((error) => {
+      // The failure itself is already logged in the console via the
+      // executeFinish push; this guards against IPC-level rejections.
+      console.error('[App] pdv.install dispatch failed:', error);
+    });
+  }, [currentKernelId]);
 
   // Subscribe to autosave-in-flight pushes from main.
   useEffect(() => {
@@ -1235,11 +1304,20 @@ const App: React.FC = () => {
     setShowSettings(true);
   }, []);
 
-  // --- uv environment setup modal ----------------------------------------
-  // Stream uv output into the EnvSyncModal while a uv-project launch runs.
+  // --- session launch overlay ---------------------------------------------
+  // Stream uv output into the EnvSyncModal while a launch runs. A
+  // `stage: "kernel-boot"` marker (empty data) flips the modal's title
+  // from environment setup to kernel startup.
   useEffect(() => {
     const unsub = window.pdv.environment.onEnvActivity((chunk) => {
-      setUvSync((s) => (s.phase === 'idle' ? s : { ...s, output: s.output + chunk.data }));
+      setKernelLaunch((s) =>
+        s.phase === 'idle'
+          ? s
+          : {
+              ...s,
+              output: s.output + chunk.data,
+              stage: chunk.stage === 'kernel-boot' ? 'kernel-boot' : s.stage,
+            });
     });
     return unsub;
   }, []);
@@ -1250,34 +1328,73 @@ const App: React.FC = () => {
    */
   const launchUvKernel = useCallback(async (uvContext: import('../types').KernelUvContext): Promise<boolean> => {
     lastUvLaunchRef.current = uvContext;
+    lastLaunchRef.current = () => launchUvKernelRef.current(uvContext);
     setActiveLanguage('python');
-    setUvSync({ phase: 'syncing', output: '' });
+    setKernelLaunch({ phase: 'syncing', stage: 'env', mode: 'uv', language: 'python', output: '' });
     const ok = await startKernel(config ?? {} as Config, 'python', uvContext);
     if (ok) {
-      setUvSync({ phase: 'idle', output: '' });
+      setKernelLaunch({ phase: 'idle', stage: 'env', mode: 'uv', language: 'python', output: '' });
     } else {
-      setUvSync((s) => ({ phase: 'failed', output: s.output, error: lastErrorRef.current }));
+      setKernelLaunch((s) => ({ ...s, phase: 'failed', error: lastErrorRef.current }));
     }
     return ok;
   }, [config, startKernel, lastErrorRef]);
 
-  /** Retry a failed uv environment setup (replays the last launch). */
-  const handleUvSyncRetry = useCallback(() => {
-    const ctx = lastUvLaunchRef.current;
-    if (ctx) void launchUvKernel(ctx);
-  }, [launchUvKernel]);
+  /**
+   * Launch (or relaunch) a shared-environment (conda/system) kernel behind
+   * the same blocking overlay as uv launches: "Starting ipykernel…" while
+   * the kernel boots, and on failure the modal stays up with
+   * Retry / Choose environment… / Cancel.
+   */
+  const launchSharedKernel = useCallback(async (cfg: Config, language: 'python' | 'julia'): Promise<boolean> => {
+    lastLaunchRef.current = () => launchSharedKernelRef.current(cfg, language);
+    setActiveLanguage(language);
+    setKernelLaunch({
+      phase: 'syncing',
+      stage: 'kernel-boot',
+      mode: 'shared',
+      language,
+      detail: language === 'julia' ? cfg.juliaPath : cfg.pythonPath,
+      output: '',
+    });
+    const ok = await startKernel(cfg, language);
+    if (ok) {
+      setKernelLaunch({ phase: 'idle', stage: 'env', mode: 'uv', language: 'python', output: '' });
+    } else {
+      setKernelLaunch((s) => ({ ...s, phase: 'failed', error: lastErrorRef.current }));
+    }
+    return ok;
+  }, [startKernel, lastErrorRef]);
 
-  /** Abandon a failed uv environment setup and return to the welcome screen. */
-  const handleUvSyncCancel = useCallback(() => {
-    setUvSync({ phase: 'idle', output: '' });
+  // Keep the self-refs current so a stored Retry closure always replays
+  // through the latest launch implementation.
+  useEffect(() => {
+    launchUvKernelRef.current = launchUvKernel;
+    launchSharedKernelRef.current = launchSharedKernel;
+  }, [launchUvKernel, launchSharedKernel]);
+
+  /** Retry a failed session launch (replays the last uv or shared launch). */
+  const handleLaunchRetry = useCallback(() => {
+    void lastLaunchRef.current?.();
+  }, []);
+
+  /** Abandon a failed session launch and return to the welcome screen. */
+  const handleLaunchCancel = useCallback(() => {
+    setKernelLaunch({ phase: 'idle', stage: 'env', mode: 'uv', language: 'python', output: '' });
     setForceWelcome(true);
   }, []);
+
+  /** Leave a failed shared launch for the environment selector (Settings → Runtime). */
+  const handleLaunchChooseEnv = useCallback(() => {
+    const error = kernelLaunch.error;
+    setKernelLaunch({ phase: 'idle', stage: 'env', mode: 'uv', language: 'python', output: '' });
+    openEnvSettings(error ?? 'Kernel failed to start.');
+  }, [kernelLaunch.error, openEnvSettings]);
 
   const ensureKernel = useCallback(async (language: 'python' | 'julia' = 'python') => {
     setActiveLanguage(language);
     if (language === 'julia') {
-      const ok = await startKernel(config ?? {} as Config, 'julia');
-      if (!ok) openEnvSettings(lastErrorRef.current ?? 'Kernel failed to start.');
+      await launchSharedKernel(config ?? {} as Config, 'julia');
     } else {
       if (!config?.pythonPath) {
         openEnvSettings();
@@ -1296,10 +1413,9 @@ const App: React.FC = () => {
       } catch {
         // Probe failed — try starting anyway
       }
-      const ok = await startKernel(config, 'python');
-      if (!ok) openEnvSettings(lastErrorRef.current ?? 'Kernel failed to start.');
+      await launchSharedKernel(config, 'python');
     }
-  }, [config, runningPdvVersion, startKernel, openEnvSettings, lastErrorRef]);
+  }, [config, runningPdvVersion, launchSharedKernel, openEnvSettings]);
 
   const handleWelcomeNewProject = useCallback(async (language: 'python' | 'julia') => {
     if (language === 'python') {
@@ -1333,11 +1449,10 @@ const App: React.FC = () => {
   const handleNewProjectCreateShared = useCallback(async (pythonPath: string) => {
     setShowNewProjectDialog(false);
     dismissWelcome();
-    setActiveLanguage('python');
     const overrideConfig: Config = { ...(config ?? {} as Config), pythonPath };
-    const ok = await startKernel(overrideConfig, 'python');
-    if (!ok) openEnvSettings(lastErrorRef.current ?? 'Kernel failed to start with the selected environment.');
-  }, [config, dismissWelcome, startKernel, openEnvSettings, lastErrorRef]);
+    // Failure keeps the launch overlay up with Retry / Choose environment… / Cancel.
+    await launchSharedKernel(overrideConfig, 'python');
+  }, [config, dismissWelcome, launchSharedKernel]);
 
   /**
    * Open a project from the welcome screen. Peeks at the manifest to detect
@@ -1365,12 +1480,11 @@ const App: React.FC = () => {
         const envInfo = await window.pdv.environment.check(peek.interpreterPath);
         if (envInfo && envInfo.pdvInstalled && envInfo.pdvCompatible) {
           // Use the project's saved interpreter
-          setActiveLanguage(language);
           const overrideConfig: Config = {
             ...config ?? {} as Config,
             pythonPath: peek.interpreterPath,
           };
-          await startKernel(overrideConfig, language);
+          await launchSharedKernel(overrideConfig, language);
           return;
         }
       } catch {
@@ -1383,7 +1497,25 @@ const App: React.FC = () => {
     }
 
     await ensureKernel(language);
-  }, [config, dismissWelcome, ensureKernel, openEnvSettings, startKernel, launchUvKernel]);
+  }, [config, dismissWelcome, ensureKernel, openEnvSettings, launchSharedKernel, launchUvKernel]);
+
+  /**
+   * Open a project into a fresh session while one is already running.
+   *
+   * Opening never reuses the live kernel: the previous session's namespace,
+   * temp working directory, and venv all belong to the abandoned project, so
+   * the kernel is stopped and replaced with one built for the opened
+   * project's environment (`openProjectFromWelcome` → `startKernel`, which
+   * stops the old kernel first). Renderer surfaces that would otherwise leak
+   * across sessions (note tabs referencing the old tree) are cleared here;
+   * cell tabs are replaced by the load itself once the new kernel is ready.
+   */
+  const openProjectFresh = useCallback(async (dir: string) => {
+    setNoteTabs([]);
+    setActiveNoteTabId(null);
+    setActivePane('code');
+    await openProjectFromWelcome(dir);
+  }, [openProjectFromWelcome]);
 
   /**
    * Open a project via the file picker, with smart-open resolution.
@@ -1398,23 +1530,23 @@ const App: React.FC = () => {
     if (kernelStatus === 'ready') {
       guardDirty('open another project', () => {
         dismissWelcome();
-        void executeOpenProject(dir);
+        void openProjectFresh(dir);
       });
     } else {
       await openProjectFromWelcome(dir);
     }
-  }, [currentProjectDir, kernelStatus, executeOpenProject, openProjectFromWelcome, guardDirty, dismissWelcome]);
+  }, [currentProjectDir, kernelStatus, openProjectFresh, openProjectFromWelcome, guardDirty, dismissWelcome]);
 
   const handleOpenRecent = useCallback(async (path: string) => {
     if (kernelStatus === 'ready') {
       guardDirty('open another project', () => {
         dismissWelcome();
-        void executeOpenProject(path);
+        void openProjectFresh(path);
       });
     } else {
       await openProjectFromWelcome(path);
     }
-  }, [kernelStatus, executeOpenProject, openProjectFromWelcome, guardDirty, dismissWelcome]);
+  }, [kernelStatus, openProjectFresh, openProjectFromWelcome, guardDirty, dismissWelcome]);
 
   /**
    * Recover an orphaned autosave into the active kernel session. The recovered
@@ -1524,13 +1656,17 @@ const App: React.FC = () => {
       )}
 
       {/* uv environment setup — blocking modal during a uv-project launch */}
-      {uvSync.phase !== 'idle' && (
+      {kernelLaunch.phase !== 'idle' && (
         <EnvSyncModal
-          phase={uvSync.phase}
-          output={uvSync.output}
-          errorMessage={uvSync.error}
-          onRetry={handleUvSyncRetry}
-          onCancel={handleUvSyncCancel}
+          phase={kernelLaunch.phase}
+          stage={kernelLaunch.stage}
+          language={kernelLaunch.language}
+          detail={kernelLaunch.detail}
+          output={kernelLaunch.output}
+          errorMessage={kernelLaunch.error}
+          onRetry={handleLaunchRetry}
+          onCancel={handleLaunchCancel}
+          onChooseEnv={kernelLaunch.mode === 'shared' ? handleLaunchChooseEnv : undefined}
         />
       )}
 
@@ -1577,9 +1713,10 @@ const App: React.FC = () => {
                     disabled={kernelStatus !== 'ready'}
                     refreshToken={treeRefreshToken}
                     pendingChanges={pendingTreeChanges}
-                    onChangesConsumed={() => setPendingTreeChanges([])}
+                    onChangesConsumed={handleTreeChangesConsumed}
                     onAction={handleTreeAction}
                     shortcuts={shortcuts}
+                    projectKey={currentProjectDir}
 
                   />
                 )}

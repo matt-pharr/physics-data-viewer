@@ -30,7 +30,7 @@ import {
   type ProjectManifest,
   type ProjectModuleImport,
 } from "./project-manager";
-import { copyEnvFilesForSave, copyFilesForLoad, overlayAutosaveTreeFiles } from "./project-file-sync";
+import { copyEnvFilesForSave, copyFilesForLoad, overlayAutosaveTreeFiles, type LoadEnvSyncResult } from "./project-file-sync";
 import {
   writeModuleIndex,
   writeModuleManifest,
@@ -74,6 +74,17 @@ interface RegisterProjectIpcHandlersOptions {
    * kernel is active or the entry is missing.
    */
   getActiveKernelEnvMeta: () => ActiveEnvironmentInfo | undefined;
+  /**
+   * Bring the running uv session's environment in line with the project
+   * being opened (`copy env files + uv sync`, see
+   * {@link syncUvEnvironmentForLoad} in project-file-sync.ts). Called by
+   * `project:load` when the active kernel is uv-mode; the returned warning
+   * (if any) is surfaced to the renderer via the load result.
+   */
+  syncUvEnvironmentForLoad?: (
+    saveDir: string,
+    workingDir: string
+  ) => Promise<LoadEnvSyncResult>;
   /** Called after a successful explicit save to clean up autosave state. */
   onExplicitSaveCompleted?: (saveDir: string) => void;
 }
@@ -266,6 +277,7 @@ export function registerProjectIpcHandlers(
     getMainWindow,
     getInterpreterPath,
     getActiveKernelEnvMeta,
+    syncUvEnvironmentForLoad,
     onExplicitSaveCompleted,
   } = options;
 
@@ -435,10 +447,28 @@ export function registerProjectIpcHandlers(
 
     // Copy file-backed node files from save dir into working dir before kernel load.
     let loadFailedPaths: string[] = [];
+    let envSyncWarning: string | undefined;
     const activeKernelId = getActiveKernelId();
     if (activeKernelId) {
       const workingDir = kernelWorkingDirs.get(activeKernelId);
       if (workingDir) {
+        // The session keeps its kernel across an open, so its uv environment
+        // must be re-pointed at the opened project: copy the project's env
+        // files over the previous project's and sync the venv. Without this
+        // the kernel can't import the opened project's packages and a later
+        // save would clobber the project's pyproject/uv.lock with the stale
+        // working-dir copies (§10.5.10).
+        if (getActiveKernelEnvMeta()?.mode === "uv" && syncUvEnvironmentForLoad) {
+          try {
+            const envSync = await syncUvEnvironmentForLoad(saveDir, workingDir);
+            envSyncWarning = envSync.warning;
+          } catch (err) {
+            console.warn("[ipc-register-project] env sync on load failed:", err);
+            envSyncWarning =
+              "Failed to update the session environment for this project — " +
+              "its packages may be unavailable.";
+          }
+        }
         const win = getMainWindow();
         const onProgress = win ? (current: number, total: number) => {
           win.webContents.send(IPC.push.progress, {
@@ -545,6 +575,7 @@ export function registerProjectIpcHandlers(
     return {
       codeCells, checksum, checksumValid, nodeCount, savedPdvVersion, projectName,
       missingFiles: loadFailedPaths.length > 0 ? loadFailedPaths : undefined,
+      envSyncWarning,
     };
   });
 

@@ -49,9 +49,15 @@ export const SaveAsDialog: React.FC<SaveAsDialogProps> = ({
   const canSave = sanitized.length > 0 && location.length > 0;
 
   const handlePickLocation = async () => {
-    const picked = await window.pdv.files.pickDirectory(location || undefined);
-    if (picked) {
-      setLocation(picked);
+    try {
+      const picked = await window.pdv.files.pickDirectory(location || undefined);
+      if (picked) {
+        setLocation(picked);
+      }
+    } catch (error) {
+      // Native picker failure is rare and non-actionable; don't let it
+      // escape as an unhandled rejection.
+      console.error('[SaveAsDialog] Directory picker failed:', error);
     }
   };
 

@@ -207,3 +207,137 @@ export async function copyEnvFilesForSave(
   }
   return copied;
 }
+
+/**
+ * Compare every env file between two directories, byte for byte. Files
+ * missing from both sides count as matching; a file present on only one
+ * side does not.
+ *
+ * @param dirA - First directory.
+ * @param dirB - Second directory.
+ * @returns True when all of `ENV_FILES` are identical across the two dirs.
+ */
+async function envFilesMatch(dirA: string, dirB: string): Promise<boolean> {
+  for (const name of ENV_FILES) {
+    let a: Buffer | null = null;
+    let b: Buffer | null = null;
+    try {
+      a = await fs.readFile(path.join(dirA, name));
+    } catch {
+      // Missing on side A.
+    }
+    try {
+      b = await fs.readFile(path.join(dirB, name));
+    } catch {
+      // Missing on side B.
+    }
+    if (a === null && b === null) continue;
+    if (a === null || b === null || !a.equals(b)) return false;
+  }
+  return true;
+}
+
+/** Result of {@link syncUvEnvironmentForLoad}. */
+export interface LoadEnvSyncResult {
+  /** Env-file names copied from the save dir into the working dir. */
+  copied: string[];
+  /** True when `uv sync` ran and succeeded, so the venv matches the project. */
+  synced: boolean;
+  /** Human-readable warning when the venv could not be brought in sync. */
+  warning?: string;
+}
+
+/**
+ * Bring a running uv session's environment in line with a project being
+ * opened into it (`project:load` with a kernel already running).
+ *
+ * Without this, the working dir keeps the *previous* project's
+ * `pyproject.toml`/`uv.lock`: the kernel can't import the opened project's
+ * packages, the Project Environment tab lists the wrong dependencies, and —
+ * worst — a subsequent save copies the stale env files into the opened
+ * project's save dir, silently clobbering its environment spec.
+ *
+ * In the standard flow this is a fast no-op: opening a project always starts
+ * a fresh kernel whose working dir was just materialized from the save dir,
+ * so the env files already match (step 2) and no uv run happens. The copy +
+ * sync below is the safety net for any `project:load` caller whose working
+ * dir predates the opened project.
+ *
+ * Steps:
+ * 1. No-op (empty result) when the save dir has no `pyproject.toml` — the
+ *    project wasn't saved as a uv project, and copying nothing keeps the
+ *    prior behavior for legacy/shared-mode saves.
+ * 2. Short-circuit (synced, nothing copied) when every env file in the save
+ *    dir is byte-identical to the working dir's — the venv was materialized
+ *    from these exact files.
+ * 3. Copy `ENV_FILES` from the save dir into the working dir. This alone
+ *    fixes the save-clobber hazard and the Packages tab's declared-deps list.
+ * 4. If the project pins a Python version different from the running
+ *    session's, skip the sync and return a warning — an in-place `uv sync`
+ *    would rebuild the venv on a different interpreter under the live
+ *    kernel (C-extension ABI hazard). A session restart rebuilds correctly
+ *    from the working-dir env snapshot.
+ * 5. Otherwise run `uv sync` (injected, callers pass `--inexact` so
+ *    pdv-python survives) in the working dir so the venv matches the
+ *    project's lockfile.
+ *
+ * @param saveDir - Project save directory being opened.
+ * @param workingDir - Active kernel's working directory.
+ * @param options - Injected sync runner and the running session's Python
+ *   version (major.minor) for the pin-mismatch guard.
+ * @returns Copy/sync outcome plus an optional user-facing warning.
+ * @throws {Error} Only for unexpected I/O errors while copying env files.
+ */
+export async function syncUvEnvironmentForLoad(
+  saveDir: string,
+  workingDir: string,
+  options: {
+    runningPythonVersion?: string;
+    runUvSync: (cwd: string) => Promise<{ success: boolean; output: string }>;
+  },
+): Promise<LoadEnvSyncResult> {
+  try {
+    await fs.access(path.join(saveDir, "pyproject.toml"));
+  } catch {
+    return { copied: [], synced: false };
+  }
+
+  if (await envFilesMatch(saveDir, workingDir)) {
+    return { copied: [], synced: true };
+  }
+
+  const copied = await copyEnvFilesForLoad(saveDir, workingDir);
+
+  let pinnedVersion: string | undefined;
+  try {
+    pinnedVersion = (await fs.readFile(path.join(saveDir, ".python-version"), "utf8")).trim();
+  } catch {
+    // No pin — sync with the session's interpreter.
+  }
+  if (
+    pinnedVersion &&
+    options.runningPythonVersion &&
+    !pinnedVersion.startsWith(options.runningPythonVersion)
+  ) {
+    return {
+      copied,
+      synced: false,
+      warning:
+        `This project pins Python ${pinnedVersion} but the session is running ` +
+        `Python ${options.runningPythonVersion}. Restart the session to rebuild ` +
+        `its environment for this project.`,
+    };
+  }
+
+  const sync = await options.runUvSync(workingDir);
+  if (!sync.success) {
+    return {
+      copied,
+      synced: false,
+      warning:
+        "uv sync failed while updating the session environment for this project — " +
+        "its packages may be unavailable until the environment is repaired.",
+    };
+  }
+  return { copied, synced: true };
+}

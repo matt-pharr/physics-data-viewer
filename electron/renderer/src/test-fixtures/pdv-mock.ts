@@ -70,6 +70,7 @@ function buildBase() {
       addFile: stub<PDVApi["tree"]["addFile"]>(async () => ({ success: true })),
       invokeHandler: stub<PDVApi["tree"]["invokeHandler"]>(async () => ({ success: true })),
       delete: stub<PDVApi["tree"]["delete"]>(async () => ({ success: true })),
+      print: stub<PDVApi["tree"]["print"]>(),
       onChanged: subStub<PDVApi["tree"]["onChanged"]>(),
     },
     namespace: {
@@ -104,6 +105,7 @@ function buildBase() {
       removePackage: stub<PDVApi["environment"]["removePackage"]>(async () => ({ success: true, output: "" })),
       upgradePackage: stub<PDVApi["environment"]["upgradePackage"]>(async () => ({ success: true, output: "" })),
       activeInfo: stub<PDVApi["environment"]["activeInfo"]>(async () => null),
+      installModule: stub<PDVApi["environment"]["installModule"]>(async () => undefined),
     },
     modules: {
       listInstalled: stub<PDVApi["modules"]["listInstalled"]>(async () => []),

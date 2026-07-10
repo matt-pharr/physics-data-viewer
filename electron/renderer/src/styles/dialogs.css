@@ -811,9 +811,9 @@
   border: 1px solid var(--border-color);
 }
 
-.env-kind-badge--conda { color: var(--success, #4ec9b0); border-color: var(--success, #4ec9b0); }
+.env-kind-badge--conda { color: var(--success); border-color: var(--success); }
 .env-kind-badge--venv { color: var(--accent); border-color: var(--accent); }
-.env-kind-badge--pyenv { color: var(--warning, #cca700); border-color: var(--warning, #cca700); }
+.env-kind-badge--pyenv { color: var(--warning); border-color: var(--warning); }
 
 /* Row info (label + path) */
 .env-row-info {
@@ -860,9 +860,9 @@
 }
 
 .env-badge--ok {
-  color: var(--success, #4ec9b0);
-  border-color: var(--success, #4ec9b0);
-  background: color-mix(in srgb, var(--success, #4ec9b0) 10%, transparent);
+  color: var(--success);
+  border-color: var(--success);
+  background: color-mix(in srgb, var(--success) 10%, transparent);
 }
 
 .env-badge--missing {
@@ -873,9 +873,9 @@
 }
 
 .env-badge--warning {
-  color: var(--warning, #cca700);
-  border-color: var(--warning, #cca700);
-  background: color-mix(in srgb, var(--warning, #cca700) 10%, transparent);
+  color: var(--warning);
+  border-color: var(--warning);
+  background: color-mix(in srgb, var(--warning) 10%, transparent);
 }
 
 /* Action bar */
@@ -1031,7 +1031,7 @@
 }
 
 .env-install-success {
-  color: var(--success, #4ec9b0);
+  color: var(--success);
   font-size: 13px;
   font-weight: 500;
 }
@@ -1323,12 +1323,12 @@
   font-size: 12px;
   border: 1px solid var(--border-color);
   border-radius: 4px;
-  background: var(--input-bg);
-  color: var(--text-color);
+  background: var(--bg-primary);
+  color: var(--text-primary);
 }
 
 .import-module-github-input::placeholder {
-  color: var(--text-muted);
+  color: var(--text-hint);
 }
 
 .import-module-section {

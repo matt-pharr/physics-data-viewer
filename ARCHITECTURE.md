@@ -95,7 +95,7 @@ PDV uses the standard Electron three-process architecture:
 - Manage lazy loading of tree node data from the save directory
 
 ### 2.4 What the Main Process Does NOT Do
-- The main process does not construct arbitrary Python or Julia business logic and send it via `execute_request`. All structured data exchange between the main process and the kernel happens via the PDV comm protocol (see Section 3). There are two well-defined exceptions: (1) the **bootstrap snippet** in `kernel-session.ts` that initializes `pdv_tree` at startup (a one-time init, not business logic), and (2) the **script invocation string** built by the `script:run` IPC handler, which constructs a minimal `pdv_tree["path"].run(kwargs)` call so that script output flows through the standard Jupyter iopub stream and appears in the console.
+- The main process does not construct arbitrary Python or Julia business logic and send it via `execute_request`. All structured data exchange between the main process and the kernel happens via the PDV comm protocol (see Section 3). The well-defined exceptions are minimal invocation strings whose output must flow through the standard Jupyter iopub stream so it appears in the console: (1) the **bootstrap snippet** in `kernel-session.ts` that initializes `pdv_tree` at startup (a one-time init, not business logic); (2) the **script invocation string** built by the `script:run` IPC handler (`pdv_tree["path"].run(kwargs)`); (3) the **print invocation** built by the `tree:print` IPC handler (`print(pdv_tree[...])` / Julia `println(...)`); and (4) the **install invocation** built by the `environment:installModule` IPC handler (`pdv.install("<module>")`, §10.5.12). These strings are always built in the main process — the renderer sends only structured requests and never contains Python or Julia code.
 - The main process does not scan the filesystem to build the tree. The kernel is the sole tree authority.
 
 ---
@@ -1245,7 +1245,7 @@ Mutations on the **root** `PDVTree` emit precise paths via the per-instance debo
 
 #### 7.4.2 Poll (safety net)
 
-The renderer also polls. Every second, the Tree component fetches fresh `pdv.tree.list` results for the root and every currently expanded subtree, structurally compares each child list against the rendered state (path / key / type / hasChildren / preview), and triggers a full reload only when it detects drift. Most ticks find no change and are effectively free, since `pdv.tree.list` is served by the kernel's dedicated read-only thread (`pdv.query_server`, §3.1) and doesn't block on user-code execution.
+The renderer also polls. Every second, the Tree component fetches fresh `pdv.tree.list` results for the root and every currently expanded subtree, structurally compares each child list against the rendered state (path / key / type / hasChildren / preview), and — when it detects drift — patches just the drifted path in place, merging the fresh children with the existing ones so surviving nodes keep their expansion state (no full-depth refetch, no loading flash). Most ticks find no change and are effectively free, since `pdv.tree.list` is served by the kernel's dedicated read-only thread (`pdv.query_server`, §3.1) and doesn't block on user-code execution. The next tick is scheduled only after the previous walk completes, so a slow walk over a large expanded tree never overlaps itself.
 
 The poll exists to catch mutations that push cannot see — primarily plain-`dict` values stored in the tree, which have no emission machinery. The user-facing contract is therefore:
 
@@ -1565,6 +1565,8 @@ When the main process loads a project whose manifest has `environment.mode: "uv"
 3. Install `pdv-python` (§10.5.7).
 4. Launch (or restart) the kernel against `<working-dir>/.venv`; §4.1 proceeds unchanged.
 
+The blocking modal (`EnvSyncModal`) is the **unified session-launch overlay** for both environment modes. For uv launches it shows "Setting up project environment…" with streamed uv output, then flips to "Starting ipykernel…" when the main process pushes a `stage: "kernel-boot"` marker over `envActivity` (sent the moment the environment is materialized and the kernel spawn begins). Shared/conda launches show the same overlay starting directly at the kernel-boot stage, with the interpreter path as the subtitle. On failure the overlay stays up with **Retry / Cancel** — plus **Choose environment…** for shared launches (routes to Settings → Default Runtime with the error as a warning), since picking a different interpreter is the natural recovery there. Pre-flight failures that never reach a kernel start (no interpreter configured, pdv-python missing/incompatible, saved interpreter unavailable) still route directly to the environment selector.
+
 `uv sync` always runs, because the working directory — and therefore `.venv/` — is created fresh each session. There is no lock-hash cache to consult and no venv to detect. The cost profile:
 
 - **Warm cache** (the project was opened before on this machine): `uv sync` resolves against the lock and hard-links/clones packages from uv's cache into a new `.venv/`. Sub-second to a few seconds even for a large scientific stack.
@@ -1577,6 +1579,10 @@ On failure the app surfaces uv's output verbatim and offers **Retry** and **Canc
 #### 10.5.10 Project Save Flow
 
 On `project.save`, `pyproject.toml`, `uv.lock`, and `.python-version` are written from the working directory back into the save directory alongside the tree (§8.1). The first two can change mid-session — `pdv.install()` and the package UI mutate them — so all are part of every save. `.venv/` is never saved. The manifest additionally records the environment (`mode`, `python_version` / `interpreter_path`) from the active kernel's metadata (§10.5.5).
+
+**Opening a project always starts a fresh session.** Opening while a session is running (e.g. abandoning an unsaved project to open a saved one) does not reuse the live kernel: the previous session's namespace, temp working directory, and venv all belong to the abandoned project, so the renderer stops the kernel and starts a new one built for the opened project's environment — the same path the welcome screen uses. Renderer-side note tabs are cleared with it; cell tabs are replaced by the load.
+
+As a safety net, `project:load` additionally verifies the working dir's env files against the save dir's before the kernel load (`syncUvEnvironmentForLoad`, uv-mode kernels only). In the standard flow the files are byte-identical (the working dir was just materialized from the save dir) and this is a no-op. If they diverge — any future caller loading into a pre-existing session — the project's env files are copied over the working dir's and `uv sync --inexact` runs in place (streamed over `envActivity`; `--inexact` because pdv-python is installed outside the lock, §10.5.7, and an exact sync would strip it from under the running kernel), followed by an import-cache refresh. Without the copy, save's working-dir → save-dir env-file copy would let a stale `pyproject.toml`/`uv.lock` silently clobber the opened project's. Two guarded cases return a warning (surfaced in the "Project loaded" console entry) instead of syncing: a Python-pin mismatch with the running interpreter (an in-place venv rebuild under a live kernel is an ABI hazard), and a failed `uv sync`. A save dir without `pyproject.toml` (legacy/shared-mode save) leaves the environment untouched.
 
 #### 10.5.11 `pdv.install()` — In-Kernel Installs
 
@@ -1596,6 +1602,8 @@ In shared mode (no project venv) the kernel is not given a uv binary path, and `
 #### 10.5.12 Reactive Install from Errors
 
 A `ModuleNotFoundError` raised by a code cell is detected in the kernel's output stream, and the console renders an affordance beneath the traceback: a one-click `Install with pdv.install("<name>")` action that runs the install for the user. Detection is not restricted to a curated package list — any missing module name is offered. A wrong suggestion (a typo, a missing local module) costs only an ignored button; the discoverability win for users who do not know `pdv.install()` exists is worth that.
+
+The click dispatches `environment:installModule` with just the module name; the main process builds the `pdv.install("<name>")` code string (§2.4) and brackets the run with `executeBegin`/`executeFinish` pushes — the same pattern as MCP agent runs (§15.7) — so the console seeds a log entry and streams the install output live.
 
 #### 10.5.13 Project Environment Tab (Package Management UI)
 
@@ -1898,7 +1906,7 @@ electron/
             styles/                     ← CSS stylesheets (base, layout, tabs, tree, editor, etc.)
             themes.ts                   ← Builtin themes, Monaco theme definitions, font helpers
             shortcuts.ts                ← Canonical shortcut registry and matcher
-            services/tree.ts            ← Renderer tree fetch/cache adapter
+            services/tree.ts            ← Renderer tree fetch adapter (deliberately uncached)
             types/                      ← Renderer view-model + preload API types
 examples/
     modules/

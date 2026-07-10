@@ -9,6 +9,17 @@ import type { CellTab, Config } from '../types';
 import { MAX_RECENT_PROJECTS } from './constants';
 
 /**
+ * Generate an execution ID for correlating a kernel run with its console
+ * log entry and streamed output chunks. Uses `crypto.randomUUID` when
+ * available with a timestamp-random fallback.
+ */
+export function newExecutionId(): string {
+  return typeof crypto !== 'undefined' && 'randomUUID' in crypto
+    ? crypto.randomUUID()
+    : `log-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+}
+
+/**
  * Normalize persisted code-cell payloads from config/project files into a safe
  * runtime shape expected by the renderer.
  */

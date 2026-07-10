@@ -133,6 +133,17 @@ export const EnvironmentSelector: React.FC<EnvironmentSelectorProps> = ({
   // -- Julia stub state ------------------------------------------------------
   const [juliaPath, setJuliaPath] = useState(currentJuliaPath || 'julia');
 
+  // The selector can unmount mid-flight (host dialog dismissed during a
+  // discovery scan or a pdv-python install); async handlers must not set
+  // state afterwards.
+  const mountedRef = useRef(true);
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
+
   // Surface every selection change (row click, browse, refresh clear,
   // post-install re-probe) to a host that owns the confirm button.
   useEffect(() => {
@@ -148,13 +159,15 @@ export const EnvironmentSelector: React.FC<EnvironmentSelectorProps> = ({
     setError(null);
     try {
       const envs = await window.pdv.environment.list();
+      if (!mountedRef.current) return null;
       setEnvironments(envs);
       return envs;
     } catch (err) {
+      if (!mountedRef.current) return null;
       setError(err instanceof Error ? err.message : String(err));
       return null;
     } finally {
-      setLoading(false);
+      if (mountedRef.current) setLoading(false);
     }
   }, []);
 
@@ -183,6 +196,7 @@ export const EnvironmentSelector: React.FC<EnvironmentSelectorProps> = ({
     // Re-probe to get fresh status
     try {
       const fresh = await window.pdv.environment.check(env.pythonPath);
+      if (!mountedRef.current) return;
       if (fresh) {
         setSelectedInfo(fresh);
         // Update the environment in the list too
@@ -203,11 +217,13 @@ export const EnvironmentSelector: React.FC<EnvironmentSelectorProps> = ({
     setSelectedInfo(null);
     try {
       const envs = await window.pdv.environment.refresh();
+      if (!mountedRef.current) return;
       setEnvironments(envs);
     } catch (err) {
+      if (!mountedRef.current) return;
       setError(err instanceof Error ? err.message : String(err));
     } finally {
-      setLoading(false);
+      if (mountedRef.current) setLoading(false);
     }
   }, []);
 
@@ -220,16 +236,18 @@ export const EnvironmentSelector: React.FC<EnvironmentSelectorProps> = ({
 
     // Subscribe to streaming output
     const unsubscribe = window.pdv.environment.onInstallOutput((chunk: InstallOutputChunk) => {
-      setInstallOutput((prev) => [...prev, chunk.data]);
+      if (mountedRef.current) setInstallOutput((prev) => [...prev, chunk.data]);
     });
 
     try {
       const result = await window.pdv.environment.install(selectedPath);
+      if (!mountedRef.current) return result.success;
       setInstallResult(result);
 
       if (result.success) {
         // Re-probe the environment to update badges
         const fresh = await window.pdv.environment.check(selectedPath);
+        if (!mountedRef.current) return result.success;
         if (fresh) {
           setSelectedInfo(fresh);
           setEnvironments((prev) =>
@@ -239,14 +257,16 @@ export const EnvironmentSelector: React.FC<EnvironmentSelectorProps> = ({
       }
       return result.success;
     } catch (err) {
-      setInstallResult({
-        success: false,
-        output: err instanceof Error ? err.message : String(err),
-      });
+      if (mountedRef.current) {
+        setInstallResult({
+          success: false,
+          output: err instanceof Error ? err.message : String(err),
+        });
+      }
       return false;
     } finally {
       unsubscribe();
-      setInstalling(false);
+      if (mountedRef.current) setInstalling(false);
     }
   }, [selectedPath]);
 
@@ -274,6 +294,7 @@ export const EnvironmentSelector: React.FC<EnvironmentSelectorProps> = ({
 
       // Probe the selected path
       const info = await window.pdv.environment.check(filePath);
+      if (!mountedRef.current) return;
       if (info) {
         setSelectedPath(info.pythonPath);
         setSelectedInfo(info);
@@ -288,7 +309,9 @@ export const EnvironmentSelector: React.FC<EnvironmentSelectorProps> = ({
         setError(`Could not detect a valid Python at: ${filePath}`);
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      if (mountedRef.current) {
+        setError(err instanceof Error ? err.message : String(err));
+      }
     }
   }, []);
 
@@ -515,6 +538,17 @@ export const EnvironmentSelector: React.FC<EnvironmentSelectorProps> = ({
   );
 
   const content = activeLanguage === 'python' ? pythonContent : juliaContent;
+
+  // Escape dismisses the modal variant when cancelling is allowed. Embedded
+  // hosts (Settings, New Project dialog) own their own keyboard handling.
+  useEffect(() => {
+    if (embedded || isFirstRun || !onCancel) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onCancel();
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [embedded, isFirstRun, onCancel]);
 
   if (embedded) {
     return <div className="environment-selector-embedded">{content}</div>;
