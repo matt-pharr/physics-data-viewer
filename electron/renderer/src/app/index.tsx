@@ -490,8 +490,26 @@ const App: React.FC = () => {
   });
 
   const [environmentMode, setEnvironmentMode] = useState<'uv' | 'shared'>('shared');
-  const [uvSync, setUvSync] = useState<{ phase: 'idle' | 'syncing' | 'failed'; output: string; error?: string }>({ phase: 'idle', output: '' });
+  // Unified session-launch overlay state (EnvSyncModal): covers uv-project
+  // launches (env materialization + kernel boot) and shared/conda kernel
+  // launches (kernel boot only). `mode` selects the failure affordances
+  // (shared failures offer "Choose environment…").
+  const [kernelLaunch, setKernelLaunch] = useState<{
+    phase: 'idle' | 'syncing' | 'failed';
+    stage: 'env' | 'kernel-boot';
+    mode: 'uv' | 'shared';
+    language: 'python' | 'julia';
+    detail?: string;
+    output: string;
+    error?: string;
+  }>({ phase: 'idle', stage: 'env', mode: 'uv', language: 'python', output: '' });
   const lastUvLaunchRef = useRef<import('../types').KernelUvContext | null>(null);
+  // Replays the most recent launch (uv or shared) for the overlay's Retry.
+  const lastLaunchRef = useRef<(() => Promise<boolean>) | null>(null);
+  // Self-refs so a launch can enqueue its own replay without a TDZ cycle
+  // between the two launch callbacks.
+  const launchUvKernelRef = useRef<(ctx: import('../types').KernelUvContext) => Promise<boolean>>(async () => false);
+  const launchSharedKernelRef = useRef<(cfg: Config, language: 'python' | 'julia') => Promise<boolean>>(async () => false);
   const { startKernel, handleEnvSave, handleRestartKernel, lastErrorRef } = useKernelLifecycle({
     config,
     currentKernelId,
@@ -1286,11 +1304,20 @@ const App: React.FC = () => {
     setShowSettings(true);
   }, []);
 
-  // --- uv environment setup modal ----------------------------------------
-  // Stream uv output into the EnvSyncModal while a uv-project launch runs.
+  // --- session launch overlay ---------------------------------------------
+  // Stream uv output into the EnvSyncModal while a launch runs. A
+  // `stage: "kernel-boot"` marker (empty data) flips the modal's title
+  // from environment setup to kernel startup.
   useEffect(() => {
     const unsub = window.pdv.environment.onEnvActivity((chunk) => {
-      setUvSync((s) => (s.phase === 'idle' ? s : { ...s, output: s.output + chunk.data }));
+      setKernelLaunch((s) =>
+        s.phase === 'idle'
+          ? s
+          : {
+              ...s,
+              output: s.output + chunk.data,
+              stage: chunk.stage === 'kernel-boot' ? 'kernel-boot' : s.stage,
+            });
     });
     return unsub;
   }, []);
@@ -1301,34 +1328,73 @@ const App: React.FC = () => {
    */
   const launchUvKernel = useCallback(async (uvContext: import('../types').KernelUvContext): Promise<boolean> => {
     lastUvLaunchRef.current = uvContext;
+    lastLaunchRef.current = () => launchUvKernelRef.current(uvContext);
     setActiveLanguage('python');
-    setUvSync({ phase: 'syncing', output: '' });
+    setKernelLaunch({ phase: 'syncing', stage: 'env', mode: 'uv', language: 'python', output: '' });
     const ok = await startKernel(config ?? {} as Config, 'python', uvContext);
     if (ok) {
-      setUvSync({ phase: 'idle', output: '' });
+      setKernelLaunch({ phase: 'idle', stage: 'env', mode: 'uv', language: 'python', output: '' });
     } else {
-      setUvSync((s) => ({ phase: 'failed', output: s.output, error: lastErrorRef.current }));
+      setKernelLaunch((s) => ({ ...s, phase: 'failed', error: lastErrorRef.current }));
     }
     return ok;
   }, [config, startKernel, lastErrorRef]);
 
-  /** Retry a failed uv environment setup (replays the last launch). */
-  const handleUvSyncRetry = useCallback(() => {
-    const ctx = lastUvLaunchRef.current;
-    if (ctx) void launchUvKernel(ctx);
-  }, [launchUvKernel]);
+  /**
+   * Launch (or relaunch) a shared-environment (conda/system) kernel behind
+   * the same blocking overlay as uv launches: "Starting ipykernel…" while
+   * the kernel boots, and on failure the modal stays up with
+   * Retry / Choose environment… / Cancel.
+   */
+  const launchSharedKernel = useCallback(async (cfg: Config, language: 'python' | 'julia'): Promise<boolean> => {
+    lastLaunchRef.current = () => launchSharedKernelRef.current(cfg, language);
+    setActiveLanguage(language);
+    setKernelLaunch({
+      phase: 'syncing',
+      stage: 'kernel-boot',
+      mode: 'shared',
+      language,
+      detail: language === 'julia' ? cfg.juliaPath : cfg.pythonPath,
+      output: '',
+    });
+    const ok = await startKernel(cfg, language);
+    if (ok) {
+      setKernelLaunch({ phase: 'idle', stage: 'env', mode: 'uv', language: 'python', output: '' });
+    } else {
+      setKernelLaunch((s) => ({ ...s, phase: 'failed', error: lastErrorRef.current }));
+    }
+    return ok;
+  }, [startKernel, lastErrorRef]);
 
-  /** Abandon a failed uv environment setup and return to the welcome screen. */
-  const handleUvSyncCancel = useCallback(() => {
-    setUvSync({ phase: 'idle', output: '' });
+  // Keep the self-refs current so a stored Retry closure always replays
+  // through the latest launch implementation.
+  useEffect(() => {
+    launchUvKernelRef.current = launchUvKernel;
+    launchSharedKernelRef.current = launchSharedKernel;
+  }, [launchUvKernel, launchSharedKernel]);
+
+  /** Retry a failed session launch (replays the last uv or shared launch). */
+  const handleLaunchRetry = useCallback(() => {
+    void lastLaunchRef.current?.();
+  }, []);
+
+  /** Abandon a failed session launch and return to the welcome screen. */
+  const handleLaunchCancel = useCallback(() => {
+    setKernelLaunch({ phase: 'idle', stage: 'env', mode: 'uv', language: 'python', output: '' });
     setForceWelcome(true);
   }, []);
+
+  /** Leave a failed shared launch for the environment selector (Settings → Runtime). */
+  const handleLaunchChooseEnv = useCallback(() => {
+    const error = kernelLaunch.error;
+    setKernelLaunch({ phase: 'idle', stage: 'env', mode: 'uv', language: 'python', output: '' });
+    openEnvSettings(error ?? 'Kernel failed to start.');
+  }, [kernelLaunch.error, openEnvSettings]);
 
   const ensureKernel = useCallback(async (language: 'python' | 'julia' = 'python') => {
     setActiveLanguage(language);
     if (language === 'julia') {
-      const ok = await startKernel(config ?? {} as Config, 'julia');
-      if (!ok) openEnvSettings(lastErrorRef.current ?? 'Kernel failed to start.');
+      await launchSharedKernel(config ?? {} as Config, 'julia');
     } else {
       if (!config?.pythonPath) {
         openEnvSettings();
@@ -1347,10 +1413,9 @@ const App: React.FC = () => {
       } catch {
         // Probe failed — try starting anyway
       }
-      const ok = await startKernel(config, 'python');
-      if (!ok) openEnvSettings(lastErrorRef.current ?? 'Kernel failed to start.');
+      await launchSharedKernel(config, 'python');
     }
-  }, [config, runningPdvVersion, startKernel, openEnvSettings, lastErrorRef]);
+  }, [config, runningPdvVersion, launchSharedKernel, openEnvSettings]);
 
   const handleWelcomeNewProject = useCallback(async (language: 'python' | 'julia') => {
     if (language === 'python') {
@@ -1384,11 +1449,10 @@ const App: React.FC = () => {
   const handleNewProjectCreateShared = useCallback(async (pythonPath: string) => {
     setShowNewProjectDialog(false);
     dismissWelcome();
-    setActiveLanguage('python');
     const overrideConfig: Config = { ...(config ?? {} as Config), pythonPath };
-    const ok = await startKernel(overrideConfig, 'python');
-    if (!ok) openEnvSettings(lastErrorRef.current ?? 'Kernel failed to start with the selected environment.');
-  }, [config, dismissWelcome, startKernel, openEnvSettings, lastErrorRef]);
+    // Failure keeps the launch overlay up with Retry / Choose environment… / Cancel.
+    await launchSharedKernel(overrideConfig, 'python');
+  }, [config, dismissWelcome, launchSharedKernel]);
 
   /**
    * Open a project from the welcome screen. Peeks at the manifest to detect
@@ -1416,12 +1480,11 @@ const App: React.FC = () => {
         const envInfo = await window.pdv.environment.check(peek.interpreterPath);
         if (envInfo && envInfo.pdvInstalled && envInfo.pdvCompatible) {
           // Use the project's saved interpreter
-          setActiveLanguage(language);
           const overrideConfig: Config = {
             ...config ?? {} as Config,
             pythonPath: peek.interpreterPath,
           };
-          await startKernel(overrideConfig, language);
+          await launchSharedKernel(overrideConfig, language);
           return;
         }
       } catch {
@@ -1434,7 +1497,7 @@ const App: React.FC = () => {
     }
 
     await ensureKernel(language);
-  }, [config, dismissWelcome, ensureKernel, openEnvSettings, startKernel, launchUvKernel]);
+  }, [config, dismissWelcome, ensureKernel, openEnvSettings, launchSharedKernel, launchUvKernel]);
 
   /**
    * Open a project into a fresh session while one is already running.
@@ -1593,13 +1656,17 @@ const App: React.FC = () => {
       )}
 
       {/* uv environment setup — blocking modal during a uv-project launch */}
-      {uvSync.phase !== 'idle' && (
+      {kernelLaunch.phase !== 'idle' && (
         <EnvSyncModal
-          phase={uvSync.phase}
-          output={uvSync.output}
-          errorMessage={uvSync.error}
-          onRetry={handleUvSyncRetry}
-          onCancel={handleUvSyncCancel}
+          phase={kernelLaunch.phase}
+          stage={kernelLaunch.stage}
+          language={kernelLaunch.language}
+          detail={kernelLaunch.detail}
+          output={kernelLaunch.output}
+          errorMessage={kernelLaunch.error}
+          onRetry={handleLaunchRetry}
+          onCancel={handleLaunchCancel}
+          onChooseEnv={kernelLaunch.mode === 'shared' ? handleLaunchChooseEnv : undefined}
         />
       )}
 

@@ -1,10 +1,12 @@
 /**
- * EnvSyncModal — Blocking overlay shown while a uv project's environment is
- * being materialized (`uv sync` + `pdv-python` install) and the kernel boots.
+ * EnvSyncModal — Blocking session-launch overlay.
  *
- * Streams uv output so a cold sync doesn't look like a frozen app, and on
- * failure surfaces the verbatim output with Retry / Cancel
- * (ARCHITECTURE.md §10.5.9).
+ * Covers both launch paths: uv projects (environment materialization
+ * streamed as uv output, then kernel boot) and shared/conda environments
+ * (kernel boot only). On failure it stays up with Retry / Cancel — plus
+ * "Choose environment…" when the host provides `onChooseEnv` (shared
+ * launches, where picking a different interpreter is the natural recovery).
+ * (ARCHITECTURE.md §10.5.9)
  */
 
 import React, { useLayoutEffect, useRef } from 'react';
@@ -12,23 +14,43 @@ import React, { useLayoutEffect, useRef } from 'react';
 interface EnvSyncModalProps {
   /** `'syncing'` while uv runs and the kernel boots; `'failed'` after a failure. */
   phase: 'syncing' | 'failed';
+  /**
+   * Launch stage within `'syncing'`: `'env'` while uv materializes the
+   * environment, `'kernel-boot'` once the kernel process is starting
+   * (pushed as a stage marker over `environment.onEnvActivity`).
+   * Shared/conda launches start directly at `'kernel-boot'`.
+   */
+  stage?: 'env' | 'kernel-boot';
+  /** Kernel language — selects the kernel-boot title wording. */
+  language?: 'python' | 'julia';
+  /** Optional detail line for the kernel-boot stage (e.g. interpreter path). */
+  detail?: string;
   /** Accumulated uv output streamed over `environment.onEnvActivity`. */
   output: string;
   /** Error message shown above the output when `phase` is `'failed'`. */
   errorMessage?: string;
-  /** Re-run the environment setup from scratch. */
+  /** Re-run the launch from scratch. */
   onRetry: () => void;
-  /** Abandon setup and return to the welcome screen. */
+  /** Abandon the launch and return to the welcome screen. */
   onCancel: () => void;
+  /**
+   * When provided, the failed state offers a "Choose environment…" button
+   * that hands recovery to the environment selector (shared launches).
+   */
+  onChooseEnv?: () => void;
 }
 
 /** Blocking modal for uv environment setup (ARCHITECTURE.md §10.5.9). */
 export const EnvSyncModal: React.FC<EnvSyncModalProps> = ({
   phase,
+  stage = 'env',
+  language = 'python',
+  detail,
   output,
   errorMessage,
   onRetry,
   onCancel,
+  onChooseEnv,
 }) => {
   const outputRef = useRef<HTMLPreElement>(null);
 
@@ -44,11 +66,19 @@ export const EnvSyncModal: React.FC<EnvSyncModalProps> = ({
     <div className="env-sync-overlay">
       <div className="env-sync-panel">
         <div className="env-sync-title">
-          {failed ? 'Environment setup failed' : 'Setting up project environment…'}
+          {failed
+            ? 'Session failed to start'
+            : stage === 'kernel-boot'
+              ? language === 'julia'
+                ? 'Starting the Julia kernel…'
+                : 'Starting ipykernel…'
+              : 'Setting up project environment…'}
         </div>
         {!failed && (
           <div className="env-sync-subtitle">
-            Resolving dependencies with uv. This can take a moment the first time.
+            {stage === 'kernel-boot'
+              ? detail ?? 'The environment is ready — launching the session.'
+              : 'Resolving dependencies with uv. This can take a moment the first time.'}
           </div>
         )}
         {failed && errorMessage && (
@@ -64,6 +94,11 @@ export const EnvSyncModal: React.FC<EnvSyncModalProps> = ({
             <button className="btn btn-secondary" onClick={onCancel}>
               Cancel
             </button>
+            {onChooseEnv && (
+              <button className="btn btn-secondary" onClick={onChooseEnv}>
+                Choose environment…
+              </button>
+            )}
             <button className="btn btn-primary" onClick={onRetry}>
               Retry
             </button>

@@ -1565,6 +1565,8 @@ When the main process loads a project whose manifest has `environment.mode: "uv"
 3. Install `pdv-python` (§10.5.7).
 4. Launch (or restart) the kernel against `<working-dir>/.venv`; §4.1 proceeds unchanged.
 
+The blocking modal (`EnvSyncModal`) is the **unified session-launch overlay** for both environment modes. For uv launches it shows "Setting up project environment…" with streamed uv output, then flips to "Starting ipykernel…" when the main process pushes a `stage: "kernel-boot"` marker over `envActivity` (sent the moment the environment is materialized and the kernel spawn begins). Shared/conda launches show the same overlay starting directly at the kernel-boot stage, with the interpreter path as the subtitle. On failure the overlay stays up with **Retry / Cancel** — plus **Choose environment…** for shared launches (routes to Settings → Default Runtime with the error as a warning), since picking a different interpreter is the natural recovery there. Pre-flight failures that never reach a kernel start (no interpreter configured, pdv-python missing/incompatible, saved interpreter unavailable) still route directly to the environment selector.
+
 `uv sync` always runs, because the working directory — and therefore `.venv/` — is created fresh each session. There is no lock-hash cache to consult and no venv to detect. The cost profile:
 
 - **Warm cache** (the project was opened before on this machine): `uv sync` resolves against the lock and hard-links/clones packages from uv's cache into a new `.venv/`. Sub-second to a few seconds even for a large scientific stack.

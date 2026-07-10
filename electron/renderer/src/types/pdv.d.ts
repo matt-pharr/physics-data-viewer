@@ -787,6 +787,12 @@ export interface EnvironmentInstallResult {
 export interface InstallOutputChunk {
   stream: "stdout" | "stderr";
   data: string;
+  /**
+   * Optional launch-stage marker: `"kernel-boot"` is pushed (with empty
+   * `data`) once the uv environment is materialized and the kernel process
+   * is about to start, so the EnvSyncModal can retitle accordingly.
+   */
+  stage?: "kernel-boot";
 }
 
 /** Complete preload API contract exposed as `window.pdv`. */
