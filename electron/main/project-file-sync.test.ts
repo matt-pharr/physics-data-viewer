@@ -9,7 +9,7 @@
  * `copyFilesForLoad` for the overlay).
  */
 
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import * as fs from "fs/promises";
 import * as os from "os";
 import * as path from "path";
@@ -18,6 +18,7 @@ import {
   copyEnvFilesForLoad,
   copyEnvFilesForSave,
   overlayAutosaveTreeFiles,
+  syncUvEnvironmentForLoad,
 } from "./project-file-sync";
 
 describe("overlayAutosaveTreeFiles()", () => {
@@ -163,5 +164,141 @@ describe("copyEnvFilesForLoad() / copyEnvFilesForSave()", () => {
     expect(await fs.readFile(path.join(otherWorkingDir, ".python-version"), "utf8")).toBe(
       "3.12\n",
     );
+  });
+});
+
+describe("syncUvEnvironmentForLoad()", () => {
+  let saveDir: string;
+  let workingDir: string;
+
+  beforeEach(async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "pdv-envsync-"));
+    saveDir = path.join(root, "save");
+    workingDir = path.join(root, "working");
+    await fs.mkdir(saveDir, { recursive: true });
+    await fs.mkdir(workingDir, { recursive: true });
+  });
+
+  afterEach(async () => {
+    await fs.rm(path.dirname(saveDir), { recursive: true, force: true });
+  });
+
+  const okSync = vi.fn(async () => ({ success: true, output: "" }));
+
+  it("no-ops (and leaves the working dir untouched) when the save has no pyproject.toml", async () => {
+    await fs.writeFile(path.join(workingDir, "pyproject.toml"), "previous-project\n");
+    okSync.mockClear();
+
+    const result = await syncUvEnvironmentForLoad(saveDir, workingDir, { runUvSync: okSync });
+
+    expect(result).toEqual({ copied: [], synced: false });
+    expect(okSync).not.toHaveBeenCalled();
+    expect(await fs.readFile(path.join(workingDir, "pyproject.toml"), "utf8")).toBe(
+      "previous-project\n",
+    );
+  });
+
+  it("short-circuits without copying or syncing when env files already match", async () => {
+    // The standard open flow: a fresh kernel was just materialized from this
+    // save dir, so the working dir's env files are byte-identical copies.
+    await fs.writeFile(path.join(saveDir, "pyproject.toml"), "same-project\n");
+    await fs.writeFile(path.join(saveDir, "uv.lock"), "same-lock\n");
+    await fs.writeFile(path.join(workingDir, "pyproject.toml"), "same-project\n");
+    await fs.writeFile(path.join(workingDir, "uv.lock"), "same-lock\n");
+    okSync.mockClear();
+
+    const result = await syncUvEnvironmentForLoad(saveDir, workingDir, {
+      runningPythonVersion: "3.13",
+      runUvSync: okSync,
+    });
+
+    expect(result).toEqual({ copied: [], synced: true });
+    expect(okSync).not.toHaveBeenCalled();
+  });
+
+  it("does not short-circuit when a file exists on only one side", async () => {
+    await fs.writeFile(path.join(saveDir, "pyproject.toml"), "same-project\n");
+    await fs.writeFile(path.join(saveDir, "uv.lock"), "opened-lock\n");
+    await fs.writeFile(path.join(workingDir, "pyproject.toml"), "same-project\n");
+    okSync.mockClear();
+
+    const result = await syncUvEnvironmentForLoad(saveDir, workingDir, {
+      runningPythonVersion: "3.13",
+      runUvSync: okSync,
+    });
+
+    expect(result.synced).toBe(true);
+    expect(result.copied).toContain("uv.lock");
+    expect(okSync).toHaveBeenCalledOnce();
+  });
+
+  it("replaces the previous project's env files and syncs the venv", async () => {
+    // Working dir holds the abandoned project's env spec — the exact state
+    // that used to leak into the opened project on save.
+    await fs.writeFile(path.join(workingDir, "pyproject.toml"), "previous-project\n");
+    await fs.writeFile(path.join(workingDir, "uv.lock"), "previous-lock\n");
+    await fs.writeFile(path.join(saveDir, "pyproject.toml"), "opened-project\n");
+    await fs.writeFile(path.join(saveDir, "uv.lock"), "opened-lock\n");
+    okSync.mockClear();
+
+    const result = await syncUvEnvironmentForLoad(saveDir, workingDir, {
+      runningPythonVersion: "3.13",
+      runUvSync: okSync,
+    });
+
+    expect(result.synced).toBe(true);
+    expect(result.warning).toBeUndefined();
+    expect(result.copied).toEqual(expect.arrayContaining(["pyproject.toml", "uv.lock"]));
+    expect(okSync).toHaveBeenCalledWith(workingDir);
+    expect(await fs.readFile(path.join(workingDir, "pyproject.toml"), "utf8")).toBe(
+      "opened-project\n",
+    );
+    expect(await fs.readFile(path.join(workingDir, "uv.lock"), "utf8")).toBe("opened-lock\n");
+  });
+
+  it("skips the sync with a warning when the project pins a different Python", async () => {
+    await fs.writeFile(path.join(saveDir, "pyproject.toml"), "opened-project\n");
+    await fs.writeFile(path.join(saveDir, ".python-version"), "3.12\n");
+    okSync.mockClear();
+
+    const result = await syncUvEnvironmentForLoad(saveDir, workingDir, {
+      runningPythonVersion: "3.13",
+      runUvSync: okSync,
+    });
+
+    expect(result.synced).toBe(false);
+    expect(result.warning).toMatch(/pins Python 3\.12.*running.*3\.13/s);
+    expect(okSync).not.toHaveBeenCalled();
+    // Env files are still copied so a later save round-trips correctly.
+    expect(await fs.readFile(path.join(workingDir, "pyproject.toml"), "utf8")).toBe(
+      "opened-project\n",
+    );
+  });
+
+  it("syncs when the pin matches the running version (patch-level pin included)", async () => {
+    await fs.writeFile(path.join(saveDir, "pyproject.toml"), "opened-project\n");
+    await fs.writeFile(path.join(saveDir, ".python-version"), "3.13.2\n");
+    okSync.mockClear();
+
+    const result = await syncUvEnvironmentForLoad(saveDir, workingDir, {
+      runningPythonVersion: "3.13",
+      runUvSync: okSync,
+    });
+
+    expect(result.synced).toBe(true);
+    expect(okSync).toHaveBeenCalledOnce();
+  });
+
+  it("returns a warning when uv sync fails, without throwing", async () => {
+    await fs.writeFile(path.join(saveDir, "pyproject.toml"), "opened-project\n");
+    const failSync = vi.fn(async () => ({ success: false, output: "resolution failed" }));
+
+    const result = await syncUvEnvironmentForLoad(saveDir, workingDir, {
+      runningPythonVersion: "3.13",
+      runUvSync: failSync,
+    });
+
+    expect(result.synced).toBe(false);
+    expect(result.warning).toMatch(/uv sync failed/);
   });
 });

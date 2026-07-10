@@ -98,6 +98,14 @@ describe("typed subcommand wrappers", () => {
     expect(result.output.trim()).toBe("argv:sync");
   });
 
+  it("uvSync passes --inexact when requested (in-place sync under a live kernel)", async () => {
+    // --inexact keeps packages absent from the lockfile installed —
+    // without it, an in-place sync uninstalls pdv-python from the very
+    // venv the running kernel imports from.
+    const result = await uvSync({ binaryPath: echoUv, inexact: true });
+    expect(result.output).toContain("argv:sync --inexact");
+  });
+
   it("uvAdd passes 'add' followed by every spec", async () => {
     const result = await uvAdd(["numpy", "scipy>=1.10"], { binaryPath: echoUv });
     expect(result.output).toContain("argv:add numpy scipy>=1.10");

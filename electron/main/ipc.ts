@@ -1481,6 +1481,12 @@ export interface ProjectLoadResult {
   projectName: string | null;
   /** Tree paths of file-backed nodes whose files were missing from the save directory. */
   missingFiles?: string[];
+  /**
+   * Warning from re-pointing a running uv session's environment at the
+   * opened project (e.g. Python-pin mismatch or a failed `uv sync`).
+   * Surfaced in the renderer's "Project loaded" console entry.
+   */
+  envSyncWarning?: string;
 }
 
 /**

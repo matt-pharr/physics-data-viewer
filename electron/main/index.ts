@@ -42,7 +42,7 @@ import {
   bindProjectModulesToTree,
   setupProjectModuleNamespaces,
 } from "./module-runtime";
-import { copyFilesForLoad } from "./project-file-sync";
+import { copyFilesForLoad, syncUvEnvironmentForLoad } from "./project-file-sync";
 import {
   ProjectManager,
   type ProjectModuleImport,
@@ -630,6 +630,31 @@ export function registerIpcHandlers(
     },
     getActiveKernelEnvMeta: () =>
       activeKernelId ? kernelEnvMeta.get(activeKernelId) : undefined,
+    // Re-point the running uv session's environment at the opened project:
+    // copy its env files over the previous project's, `uv sync` the venv
+    // (streamed over envActivity), and refresh the kernel's import caches so
+    // newly synced packages import without a restart (§10.5.11 mechanism).
+    syncUvEnvironmentForLoad: async (saveDir, workingDir) => {
+      const result = await syncUvEnvironmentForLoad(saveDir, workingDir, {
+        runningPythonVersion: activeKernelId
+          ? kernelEnvMeta.get(activeKernelId)?.pythonVersion
+          : undefined,
+        runUvSync: async (cwd) => {
+          const sync = await uvSync({
+            cwd,
+            win,
+            pushChannel: IPC.push.envActivity,
+            binaryPath: readConfig(configStore).uv?.binaryPath,
+            // In-place sync under a live kernel: --inexact keeps pdv-python
+            // (installed outside the lock) from being uninstalled.
+            inexact: true,
+          });
+          return { success: sync.success, output: sync.output };
+        },
+      });
+      if (result.synced) await refreshKernelImportCaches();
+      return result;
+    },
     onExplicitSaveCompleted: (saveDir) => {
       void ProjectManager.clearAutosave(saveDir);
       projectManager.resetAutosaveTimer();
@@ -740,7 +765,9 @@ export function registerIpcHandlers(
       const opts = pkgRunOptions();
       const lock = await uvLockUpgrade(names, opts);
       if (!lock.success) return { success: false, output: lock.output };
-      const sync = await uvSync(opts);
+      // In-place sync under a live kernel: --inexact keeps pdv-python
+      // (installed outside the lock) from being uninstalled.
+      const sync = await uvSync({ ...opts, inexact: true });
       if (sync.success) await refreshKernelImportCaches();
       return { success: sync.success, output: lock.output + sync.output };
     }

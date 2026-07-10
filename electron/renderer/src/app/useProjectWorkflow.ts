@@ -226,11 +226,14 @@ export function useProjectWorkflow(options: UseProjectWorkflowOptions) {
       const loadMissingWarn = result.missingFiles?.length
         ? `\nWarning: ${result.missingFiles.length} file(s) were missing from the save directory:\n  ${result.missingFiles.join('\n  ')}`
         : '';
+      const envSyncWarn = result.envSyncWarning
+        ? `\nWarning: ${result.envSyncWarning}`
+        : '';
       setLogs((prev) => [...prev, {
         id: `load-${Date.now()}`,
         timestamp: Date.now(),
         code: '',
-        stdout: `Project loaded${nodeCountMsg}${restoredMsg}${loadMissingWarn}`,
+        stdout: `Project loaded${nodeCountMsg}${restoredMsg}${loadMissingWarn}${envSyncWarn}`,
       }]);
     } catch (error) {
       setProgress(null);

@@ -1437,6 +1437,24 @@ const App: React.FC = () => {
   }, [config, dismissWelcome, ensureKernel, openEnvSettings, startKernel, launchUvKernel]);
 
   /**
+   * Open a project into a fresh session while one is already running.
+   *
+   * Opening never reuses the live kernel: the previous session's namespace,
+   * temp working directory, and venv all belong to the abandoned project, so
+   * the kernel is stopped and replaced with one built for the opened
+   * project's environment (`openProjectFromWelcome` → `startKernel`, which
+   * stops the old kernel first). Renderer surfaces that would otherwise leak
+   * across sessions (note tabs referencing the old tree) are cleared here;
+   * cell tabs are replaced by the load itself once the new kernel is ready.
+   */
+  const openProjectFresh = useCallback(async (dir: string) => {
+    setNoteTabs([]);
+    setActiveNoteTabId(null);
+    setActivePane('code');
+    await openProjectFromWelcome(dir);
+  }, [openProjectFromWelcome]);
+
+  /**
    * Open a project via the file picker, with smart-open resolution.
    * Works both from the welcome screen (kernel not ready) and after kernel start.
    */
@@ -1449,23 +1467,23 @@ const App: React.FC = () => {
     if (kernelStatus === 'ready') {
       guardDirty('open another project', () => {
         dismissWelcome();
-        void executeOpenProject(dir);
+        void openProjectFresh(dir);
       });
     } else {
       await openProjectFromWelcome(dir);
     }
-  }, [currentProjectDir, kernelStatus, executeOpenProject, openProjectFromWelcome, guardDirty, dismissWelcome]);
+  }, [currentProjectDir, kernelStatus, openProjectFresh, openProjectFromWelcome, guardDirty, dismissWelcome]);
 
   const handleOpenRecent = useCallback(async (path: string) => {
     if (kernelStatus === 'ready') {
       guardDirty('open another project', () => {
         dismissWelcome();
-        void executeOpenProject(path);
+        void openProjectFresh(path);
       });
     } else {
       await openProjectFromWelcome(path);
     }
-  }, [kernelStatus, executeOpenProject, openProjectFromWelcome, guardDirty, dismissWelcome]);
+  }, [kernelStatus, openProjectFresh, openProjectFromWelcome, guardDirty, dismissWelcome]);
 
   /**
    * Recover an orphaned autosave into the active kernel session. The recovered
