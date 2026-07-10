@@ -20,7 +20,6 @@ import { ProjectManager } from "./project-manager";
 const PYTHON_BOOTSTRAP = `
 from IPython import get_ipython
 import pdv
-from pdv import PDVTree
 import pdv.comms as _pdv_comms
 try:
     from ipykernel.comm import Comm

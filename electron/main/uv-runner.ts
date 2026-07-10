@@ -295,29 +295,6 @@ export function uvPipInstall(
 }
 
 /**
- * Run `uv python install <version>` — download and install a CPython build.
- *
- * @param version - Python version to install (e.g. `"3.12"`).
- * @param opts - Run options.
- * @returns The {@link UvResult} of the install.
- * @throws {UvBinaryNotFoundError} When no `uv` binary can be located.
- */
-export function uvPythonInstall(version: string, opts: UvRunOptions = {}): Promise<UvResult> {
-  return runUv(["python", "install", version], opts);
-}
-
-/**
- * Run `uv python list` — enumerate interpreters uv can see or fetch.
- *
- * @param opts - Run options.
- * @returns The {@link UvResult}; `output` is uv's interpreter listing.
- * @throws {UvBinaryNotFoundError} When no `uv` binary can be located.
- */
-export function uvPythonList(opts: UvRunOptions = {}): Promise<UvResult> {
-  return runUv(["python", "list"], opts);
-}
-
-/**
  * Run `uv pip list --format json --python <venvPython>` — enumerate the
  * packages actually installed in a venv. Used by the Packages UI to pair
  * declared specs with their resolved versions (§10.5.13).

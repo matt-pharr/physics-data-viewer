@@ -25,6 +25,7 @@ import { executeAndTranscribe, TranscriptWriter } from "./mcp/transcript";
 import { PDVMessageType, generateNodeUuid, resolveNodeDir, resolveNodePath, type PDVFileRegisterPayload } from "./pdv-protocol";
 import type { ProjectManager } from "./project-manager";
 import {
+  allocateAndRegisterLib,
   allocateAndRegisterNote,
   allocateAndRegisterScript,
   analyseModuleTarget,
@@ -95,10 +96,14 @@ function isRecord(value: unknown): value is Record<string, unknown> {
  */
 // `analyseModuleTarget` lives in `./tree-create` — imported above.
 
-function toNamespaceVariable(
-  name: string,
-  value: unknown
-): NamespaceVariable {
+/**
+ * Convert one raw kernel descriptor (snake_case, untrusted shape) into a
+ * {@link NamespaceVariable} / {@link NamespaceInspectorNode} (the two are
+ * type aliases). `name` is the display name the caller resolved — the map
+ * key for top-level query results, or the record's own `name` field for
+ * inspector children.
+ */
+function toNamespaceDescriptor(name: string, value: unknown): NamespaceVariable {
   if (!isRecord(value)) {
     return {
       name,
@@ -131,40 +136,11 @@ function toNamespaceVariable(
   return descriptor;
 }
 
+/** Convert an inspector child record, taking the display name from the record itself. */
 function toNamespaceInspectorNode(value: unknown): NamespaceInspectorNode {
-  if (!isRecord(value)) {
-    return {
-      name: "<unknown>",
-      kind: "unknown",
-      type: "unknown",
-      path: [],
-      expression: "<unknown>",
-    };
-  }
-  const descriptor: NamespaceInspectorNode = {
-    name: typeof value.name === "string" ? value.name : "<unknown>",
-    kind: typeof value.kind === "string" ? value.kind : "unknown",
-    type: typeof value.type === "string" ? value.type : "unknown",
-    path: Array.isArray(value.path) ? value.path as NamespaceInspectorNode["path"] : [],
-    expression:
-      typeof value.expression === "string"
-        ? value.expression
-        : (typeof value.name === "string" ? value.name : "<unknown>"),
-  };
-  if (typeof value.module === "string") descriptor.module = value.module;
-  if (
-    Array.isArray(value.shape) &&
-    value.shape.every((entry) => typeof entry === "number")
-  ) {
-    descriptor.shape = value.shape;
-  }
-  if (typeof value.dtype === "string") descriptor.dtype = value.dtype;
-  if (typeof value.length === "number") descriptor.length = value.length;
-  if (typeof value.size === "number") descriptor.size = value.size;
-  if (typeof value.preview === "string") descriptor.preview = value.preview;
-  if (typeof value.has_children === "boolean") descriptor.hasChildren = value.has_children;
-  if (typeof value.child_count === "number") descriptor.childCount = value.child_count;
-  return descriptor;
+  const name =
+    isRecord(value) && typeof value.name === "string" ? value.name : "<unknown>";
+  return toNamespaceDescriptor(name, value);
 }
 
 function normalizeNamespaceVariables(rawVariables: unknown): NamespaceVariable[] {
@@ -173,7 +149,7 @@ function normalizeNamespaceVariables(rawVariables: unknown): NamespaceVariable[]
   }
   if (isRecord(rawVariables)) {
     return Object.entries(rawVariables).map(([name, value]) =>
-      toNamespaceVariable(name, value)
+      toNamespaceDescriptor(name, value)
     );
   }
   return [];
@@ -374,61 +350,28 @@ export function registerTreeNamespaceScriptIpcHandlers(
       targetPath: string,
       libName: string,
     ): Promise<TreeCreateLibResult> => {
-      const kernel = kernelManager.getKernel(kernelId);
-      if (!kernel) {
+      if (!kernelManager.getKernel(kernelId)) {
         return { success: false, error: "No active kernel. Try restarting the kernel." };
       }
-      const language = kernel.language;
-      let workingDir = kernelWorkingDirs.get(kernelId);
-      if (!workingDir) {
-        workingDir = await projectManager.createWorkingDir(readConfig(configStore).workingDirBase);
-        kernelWorkingDirs.set(kernelId, workingDir);
+      try {
+        return await allocateAndRegisterLib(
+          {
+            kernelManager,
+            commRouter,
+            projectManager,
+            configStore,
+            kernelWorkingDirs,
+            readConfig,
+            getKnownModuleAliases,
+            ensureLibFile,
+          },
+          kernelId,
+          targetPath,
+          libName,
+        );
+      } catch (err) {
+        return { success: false, error: err instanceof Error ? err.message : String(err) };
       }
-      // Sanitize the filename — Python libs need their stem to be a valid
-      // import name, so we keep the usual alphanumeric-plus-underscore
-      // convention and guarantee a ``.py`` extension.
-      const rawName = libName.trim();
-      const stem = rawName.replace(/\.py$/i, "").replace(/\s+/g, "_").replace(/[^a-zA-Z0-9_]/g, "");
-      if (!stem) {
-        return {
-          success: false,
-          error: "Lib name must contain at least one letter or number.",
-        };
-      }
-      const filename = `${stem}.py`;
-
-      const knownAliases = await getKnownModuleAliases();
-      const moduleInfo = analyseModuleTarget(targetPath, knownAliases);
-
-      const nodeUuid = generateNodeUuid();
-      const libPath = resolveNodePath(workingDir, nodeUuid, filename);
-      await fs.mkdir(resolveNodeDir(workingDir, nodeUuid), { recursive: true });
-      await ensureLibFile(libPath, language, moduleInfo?.moduleAlias);
-
-      await commRouter.request(PDVMessageType.FILE_REGISTER, {
-        tree_path: targetPath,
-        filename,
-        uuid: nodeUuid,
-        node_type: "lib",
-        name: stem,
-        ...(moduleInfo
-          ? {
-              module_id: moduleInfo.moduleAlias,
-              source_rel_path: moduleInfo.sourceRelDir
-                ? `${moduleInfo.sourceRelDir}/${filename}`
-                : filename,
-            }
-          : {}),
-      } satisfies PDVFileRegisterPayload);
-
-      if (moduleInfo) {
-        await commRouter.request(PDVMessageType.MODULES_SETUP, {
-          modules: [{ alias: moduleInfo.moduleAlias }],
-        });
-      }
-
-      const treePath = targetPath ? `${targetPath}.${stem}` : stem;
-      return { success: true, libPath, treePath };
     },
   );
 

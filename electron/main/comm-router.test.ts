@@ -192,7 +192,7 @@ describe("CommRouter", () => {
     it("rejects with PDVCommTimeoutError after timeoutMs elapses", async () => {
       vi.useFakeTimers();
 
-      const requestPromise = router.request("pdv.namespace.query", {}, 100);
+      const requestPromise = router.request("pdv.namespace.query", {}, { timeoutMs: 100 });
 
       // No response — advance time past the timeout.
       vi.advanceTimersByTime(200);

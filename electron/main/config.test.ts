@@ -105,6 +105,30 @@ describe("ConfigStore", () => {
     });
   });
 
+  it("round-trips lastUpdateCheck across a reload (update-check throttle)", () => {
+    // Regression: parseConfig used to drop lastUpdateCheck on load, so the
+    // auto-updater's throttle reset on every app restart.
+    const appDataDir = makeTempDir();
+    const first = new ConfigStore(appDataDir);
+    first.set("lastUpdateCheck", 1234567890);
+
+    const reloaded = new ConfigStore(appDataDir);
+    expect(reloaded.get("lastUpdateCheck")).toBe(1234567890);
+  });
+
+  it("drops a malformed lastUpdateCheck instead of failing the load", () => {
+    const appDataDir = makeTempDir();
+    fs.writeFileSync(
+      path.join(appDataDir, "preferences.json"),
+      JSON.stringify({ lastUpdateCheck: "yesterday", pythonPath: "/usr/bin/python3" }),
+      "utf8"
+    );
+
+    const store = new ConfigStore(appDataDir);
+    expect(store.get("lastUpdateCheck")).toBeUndefined();
+    expect(store.get("pythonPath")).toBe("/usr/bin/python3");
+  });
+
   it("falls back to defaults and backs up a malformed preferences.json", () => {
     const appDataDir = makeTempDir();
     fs.writeFileSync(path.join(appDataDir, "preferences.json"), "{invalid-json", "utf8");

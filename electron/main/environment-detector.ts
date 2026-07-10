@@ -36,18 +36,6 @@ const execFileAsync = promisify(execFile);
 type EnvironmentKind = "conda" | "venv" | "pyenv" | "system" | "configured";
 
 /**
- * A detected Julia installation on the host machine.
- */
-export interface DetectedJuliaEnvironment {
-  /** Absolute path to the Julia executable. */
-  juliaPath: string;
-  /** Human-readable label for the environment selector UI. */
-  label: string;
-  /** Version string returned by ``julia --version``. */
-  juliaVersion: string;
-}
-
-/**
  * A single Python environment discovered on the host machine.
  *
  * See ARCHITECTURE.md §10.1 for field semantics.
@@ -78,18 +66,6 @@ interface PDVInstallStatus {
    * Always false when ``installed`` is false.
    */
   compatible: boolean;
-}
-
-/**
- * Result of running ``pip install pdv-python``.
- *
- * See ARCHITECTURE.md §10.3.
- */
-interface PDVInstallResult {
-  /** True when pip exited with code 0. */
-  success: boolean;
-  /** Combined stdout + stderr from the pip process. */
-  output: string;
 }
 
 /**
@@ -173,9 +149,6 @@ const CONDA_TIMEOUT_MS = 10_000;
  * Cleared by {@link EnvironmentDetector.clearCache}.
  */
 let _cache: DetectedEnvironment[] | null = null;
-
-/** Module-level cache of detected Julia environments. */
-let _juliaCache: DetectedJuliaEnvironment[] | null = null;
 
 /**
  * Detects Python environments and validates/install checks for `pdv`.
@@ -292,18 +265,6 @@ export class EnvironmentDetector {
   }
 
   /**
-   * List all detectable environments on this machine (for the Environment
-   * Selector UI).
-   *
-   * Delegates to {@link detectEnvironments} with no configured path.
-   *
-   * @returns Array of detected environments, ordered by priority.
-   */
-  static async listAll(): Promise<DetectedEnvironment[]> {
-    return EnvironmentDetector.detectEnvironments();
-  }
-
-  /**
    * Resolve the ``major.minor`` Python version of an interpreter.
    *
    * Runs ``<python> --version`` with {@link PROBE_TIMEOUT_MS}. Used to
@@ -363,97 +324,14 @@ export class EnvironmentDetector {
     }
   }
 
-  /**
-   * Verify that a given Python executable has the ``pdv`` package
-   * installed and that its version is compatible.
-   *
-   * @param pythonPath - Absolute path to the Python executable to check.
-   * @returns True if the package is installed and version-compatible.
-   */
-  static async hasPDVKernel(pythonPath: string): Promise<boolean> {
-    const status = await EnvironmentDetector.checkPDVInstalled(pythonPath);
-    return status.installed && status.compatible;
-  }
-
-  /**
-   * Install ``pdv-python`` into the given Python environment using pip.
-   *
-   * Runs: ``<python> -m pip install pdv-python``
-   * Streams stdout + stderr into the returned ``output`` string.
-   *
-   * @param pythonPath - Path to the target Python executable.
-   * @param timeoutMs - Optional subprocess timeout in milliseconds.
-   * @returns Install result with success flag and captured output.
-   */
-  static async installPDV(
-    pythonPath: string,
-    timeoutMs = 120_000
-  ): Promise<PDVInstallResult> {
-    try {
-      const { stdout, stderr } = await execFileAsync(
-        pythonPath,
-        ["-m", "pip", "install", "pdv-python"],
-        { timeout: timeoutMs }
-      );
-      return { success: true, output: stdout + stderr };
-    } catch (err) {
-      const error = err as { stdout?: string; stderr?: string; message?: string };
-      const output =
-        (error.stdout ?? "") + (error.stderr ?? "") || (error.message ?? "");
-      return { success: false, output };
-    }
-  }
-
   /** Clear the internal environment detection cache. */
   static clearCache(): void {
     _cache = null;
-    _juliaCache = null;
   }
 
   // -------------------------------------------------------------------------
   // Julia environment detection
   // -------------------------------------------------------------------------
-
-  /**
-   * Detect available Julia installations on this machine.
-   *
-   * Detection order:
-   * 1. User-configured path (``configuredPath`` argument).
-   * 2. ``julia`` on PATH.
-   *
-   * Results are cached; call {@link clearCache} to refresh.
-   *
-   * @param configuredPath - Optional user-configured Julia executable path.
-   * @returns Array of detected Julia environments.
-   */
-  static async detectJuliaEnvironments(
-    configuredPath?: string
-  ): Promise<DetectedJuliaEnvironment[]> {
-    if (_juliaCache !== null) {
-      return _juliaCache;
-    }
-
-    const results: DetectedJuliaEnvironment[] = [];
-    const seen = new Set<string>();
-
-    const add = (env: DetectedJuliaEnvironment): void => {
-      if (!seen.has(env.juliaPath)) {
-        seen.add(env.juliaPath);
-        results.push(env);
-      }
-    };
-
-    if (configuredPath) {
-      const env = await _probeJulia(configuredPath, "Configured");
-      if (env) add(env);
-    }
-
-    const systemEnv = await _probeJulia("julia", "System");
-    if (systemEnv) add(systemEnv);
-
-    _juliaCache = results;
-    return results;
-  }
 
   /**
    * Check whether ``PDVKernel`` is installed in the given Julia environment
@@ -481,18 +359,6 @@ export class EnvironmentDetector {
     } catch {
       return { installed: false, version: null, compatible: false };
     }
-  }
-
-  /**
-   * Verify that a given Julia executable has the ``PDVKernel`` package
-   * installed and that its version is compatible.
-   *
-   * @param juliaPath - Absolute path to the Julia executable to check.
-   * @returns True if the package is installed and version-compatible.
-   */
-  static async hasJuliaPDVKernel(juliaPath: string): Promise<boolean> {
-    const status = await EnvironmentDetector.checkJuliaPDVInstalled(juliaPath);
-    return status.installed && status.compatible;
   }
 
   // -------------------------------------------------------------------------
@@ -1010,31 +876,3 @@ function _listPyenvVersions(): string[] {
   }
 }
 
-/**
- * Probe a Julia executable and return a {@link DetectedJuliaEnvironment} if valid.
- *
- * Runs ``julia --version`` with {@link PROBE_TIMEOUT_MS}.
- *
- * @param juliaPath - Path or command name for the Julia executable.
- * @param kindLabel - Label prefix (e.g. "Configured", "System").
- * @returns Populated environment object, or null on failure.
- */
-async function _probeJulia(
-  juliaPath: string,
-  kindLabel: string
-): Promise<DetectedJuliaEnvironment | null> {
-  try {
-    const { stdout, stderr } = await execFileAsync(
-      juliaPath,
-      ["--version"],
-      { timeout: PROBE_TIMEOUT_MS }
-    );
-    const raw = (stdout + stderr).trim();
-    // Julia prints "julia version 1.x.y"
-    const juliaVersion = raw.replace(/^julia\s+version\s+/i, "");
-    const label = `${kindLabel} — Julia ${juliaVersion}${path.isAbsolute(juliaPath) ? ` (${juliaPath})` : ""}`;
-    return { juliaPath, label, juliaVersion };
-  } catch {
-    return null;
-  }
-}
