@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { TreeNodeData } from '../../types';
-import { childrenDiffer, findNode, flattenTree, updateNodeImmut } from './tree-utils';
+import { childrenDiffer, findNode, flattenTree, mergeChildren, updateNodeImmut } from './tree-utils';
 
 function makeNode(
   path: string,
@@ -137,5 +137,39 @@ describe('updateNodeImmut', () => {
     });
     const result = updateNodeImmut([parent], 'a.child', (n) => ({ ...n, preview: 'x' }));
     expect(result[0].children?.[0].preview).toBe('x');
+  });
+});
+
+describe('mergeChildren', () => {
+  it('returns fresh list unchanged when nothing existed before', () => {
+    const fresh = [makeNode('a'), makeNode('b')];
+    expect(mergeChildren(fresh, undefined)).toBe(fresh);
+    expect(mergeChildren(fresh, [])).toBe(fresh);
+  });
+
+  it('preserves expansion state and loaded children of surviving nodes', () => {
+    const grandchildren = [makeNode('a.x')];
+    const existing = [
+      makeNode('a', { isExpanded: true, children: grandchildren }),
+      makeNode('b'),
+    ];
+    const fresh = [
+      makeNode('a', { hasChildren: true, preview: 'updated' }),
+      makeNode('b', { preview: 'also updated' }),
+    ];
+    const merged = mergeChildren(fresh, existing);
+    expect(merged[0].isExpanded).toBe(true);
+    expect(merged[0].children).toBe(grandchildren);
+    expect(merged[0].preview).toBe('updated');
+    expect(merged[1].isExpanded).toBeUndefined();
+  });
+
+  it('drops removed nodes and adds new ones collapsed', () => {
+    const existing = [makeNode('gone', { isExpanded: true, children: [] })];
+    const fresh = [makeNode('new')];
+    const merged = mergeChildren(fresh, existing);
+    expect(merged).toHaveLength(1);
+    expect(merged[0].path).toBe('new');
+    expect(merged[0].isExpanded).toBeUndefined();
   });
 });

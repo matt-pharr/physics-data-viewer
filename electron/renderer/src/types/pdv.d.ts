@@ -591,7 +591,17 @@ export interface ScriptRunRequest {
   origin: KernelExecutionOrigin;
 }
 
-/** Result returned by `script.run`. */
+/** Request payload for `tree.print` (code string is built in main). */
+export interface TreePrintRequest {
+  /** Dot-delimited tree path of the node to print; "" prints the whole tree. */
+  path: string;
+  /** Caller-supplied execution ID for output correlation. */
+  executionId: string;
+  /** Execution origin metadata used in error summaries and the console. */
+  origin: KernelExecutionOrigin;
+}
+
+/** Result returned by `script.run` (and `tree.print`, which shares the shape). */
 export interface ScriptRunResult {
   /** The exact code string sent to the kernel (for console display). */
   code: string;
@@ -958,6 +968,11 @@ export interface PDVApi {
       kernelId: string,
       treePath: string
     ): Promise<{ success: boolean; error?: string }>;
+    /**
+     * Print a tree node's value in the kernel and return the run for
+     * console logging (invocation string built in the main process).
+     */
+    print(kernelId: string, request: TreePrintRequest): Promise<ScriptRunResult>;
     onChanged(
       callback: (payload: { changed_paths: string[]; change_type: "added" | "removed" | "updated" | "batch" | "unknown" }) => void
     ): () => void;
@@ -997,6 +1012,12 @@ export interface PDVApi {
     upgradePackage(names: string[]): Promise<EnvironmentInstallResult>;
     /** Active kernel's environment metadata, or null when no kernel is active. */
     activeInfo(): Promise<ActiveEnvironmentInfo | null>;
+    /**
+     * Run `pdv.install("<module>")` in the kernel (§10.5.12). The code
+     * string is built in main and the run streams to the console via
+     * executeBegin/executeOutput/executeFinish pushes.
+     */
+    installModule(kernelId: string, moduleName: string): Promise<void>;
   };
   modules: {
     listInstalled(): Promise<ModuleDescriptor[]>;

@@ -97,7 +97,10 @@ export const StatusBar: React.FC<StatusBarProps> = ({
     ? 'Project-specific environment managed by uv'
     : 'Click to change runtime';
 
-  const progressPct = progress ? Math.round((progress.current / progress.total) * 100) : 0;
+  // Guard total <= 0: a zero-item phase would otherwise render "Infinity%".
+  const progressPct = progress && progress.total > 0
+    ? Math.round((progress.current / progress.total) * 100)
+    : 0;
 
   return (
     <footer className="status-bar">

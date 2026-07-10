@@ -12,7 +12,7 @@
 }
 
 .gui-row-item + .gui-row-item {
-  border-left: 1px solid var(--border-color, #474747);
+  border-left: 1px solid var(--border-color);
 }
 
 .gui-column {
@@ -22,7 +22,7 @@
 }
 
 .gui-group {
-  border: 1px solid var(--border-color, #474747);
+  border: 1px solid var(--border-color);
   border-radius: 4px;
   padding: 0;
   margin: 0;
@@ -33,7 +33,7 @@
   cursor: pointer;
   font-size: 12px;
   font-weight: 600;
-  color: var(--text-primary, #d4d4d4);
+  color: var(--text-primary);
   user-select: none;
 }
 
@@ -49,7 +49,7 @@
 .gui-tabs-header {
   display: flex;
   gap: 0;
-  border-bottom: 1px solid var(--border-color, #474747);
+  border-bottom: 1px solid var(--border-color);
   margin-bottom: 8px;
 }
 
@@ -57,7 +57,7 @@
   padding: 6px 12px;
   border: none;
   background: transparent;
-  color: var(--text-secondary, #858585);
+  color: var(--text-secondary);
   font-size: 12px;
   cursor: pointer;
   border-bottom: 2px solid transparent;
@@ -65,12 +65,12 @@
 }
 
 .gui-tabs-btn:hover {
-  color: var(--text-primary, #d4d4d4);
+  color: var(--text-primary);
 }
 
 .gui-tabs-btn.active {
-  color: var(--accent, #007acc);
-  border-bottom-color: var(--accent, #007acc);
+  color: var(--accent);
+  border-bottom-color: var(--accent);
 }
 
 .gui-tabs-content {
@@ -96,7 +96,7 @@
 }
 
 .modules-imported-row:hover {
-  background-color: var(--bg-hover, #2a2d2e);
+  background-color: var(--bg-hover);
 }
 
 .modules-imported-row-info {
@@ -109,7 +109,7 @@
 
 .modules-imported-row-name {
   font-size: 12px;
-  color: var(--text-primary, #d4d4d4);
+  color: var(--text-primary);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -117,7 +117,7 @@
 
 .modules-imported-row-version {
   font-size: 10px;
-  color: var(--text-secondary, #858585);
+  color: var(--text-secondary);
   white-space: nowrap;
 }
 
@@ -131,16 +131,16 @@
 .modules-imported-row-open-btn {
   padding: 2px 8px;
   font-size: 11px;
-  border: 1px solid var(--border-color, #474747);
+  border: 1px solid var(--border-color);
   border-radius: 3px;
   background: transparent;
-  color: var(--text-primary, #d4d4d4);
+  color: var(--text-primary);
   cursor: pointer;
   transition: background-color 0.1s;
 }
 
 .modules-imported-row-open-btn:hover:not(:disabled) {
-  background-color: var(--bg-hover, #2a2d2e);
+  background-color: var(--bg-hover);
 }
 
 .modules-imported-row-open-btn:disabled {
@@ -154,15 +154,15 @@
   line-height: 1;
   border: none;
   background: transparent;
-  color: var(--text-secondary, #858585);
+  color: var(--text-secondary);
   cursor: pointer;
   border-radius: 3px;
   transition: color 0.1s, background-color 0.1s;
 }
 
 .modules-imported-row-remove-btn:hover {
-  color: var(--error, #f48771);
-  background-color: var(--bg-hover, #2a2d2e);
+  color: var(--error);
+  background-color: var(--bg-hover);
 }
 
 /* Namelist editor */
@@ -177,11 +177,11 @@
 .namelist-loading,
 .namelist-error {
   padding: 12px 8px;
-  color: var(--text-secondary, #858585);
+  color: var(--text-secondary);
 }
 
 .namelist-error {
-  color: var(--error, #f48771);
+  color: var(--error);
   display: flex;
   align-items: center;
   gap: 8px;
@@ -190,15 +190,15 @@
 .namelist-retry-btn {
   padding: 2px 8px;
   font-size: 11px;
-  border: 1px solid var(--border-color, #474747);
+  border: 1px solid var(--border-color);
   border-radius: 3px;
   background: transparent;
-  color: var(--text-primary, #d4d4d4);
+  color: var(--text-primary);
   cursor: pointer;
 }
 
 .namelist-group {
-  border: 1px solid var(--border-color, #474747);
+  border: 1px solid var(--border-color);
   border-radius: 4px;
 }
 
@@ -207,7 +207,7 @@
   cursor: pointer;
   font-size: 12px;
   font-weight: 600;
-  color: var(--text-primary, #d4d4d4);
+  color: var(--text-primary);
   user-select: none;
 }
 
@@ -228,20 +228,20 @@
 }
 
 .namelist-key-row.namelist-dirty {
-  border-left-color: var(--accent, #007acc);
+  border-left-color: var(--accent);
 }
 
 .namelist-key-label {
   flex: 0 0 140px;
   font-size: 12px;
-  color: var(--text-primary, #d4d4d4);
+  color: var(--text-primary);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 .namelist-hint {
-  color: var(--text-secondary, #858585);
+  color: var(--text-secondary);
   font-size: 10px;
   cursor: help;
 }
@@ -256,10 +256,10 @@
   width: 100%;
   padding: 2px 4px;
   font-size: 12px;
-  border: 1px solid var(--border-color, #474747);
+  border: 1px solid var(--border-color);
   border-radius: 3px;
-  background: var(--bg-secondary, #252526);
-  color: var(--text-primary, #d4d4d4);
+  background: var(--bg-secondary);
+  color: var(--text-primary);
   box-sizing: border-box;
 }
 
@@ -272,23 +272,23 @@
   align-items: center;
   justify-content: space-between;
   padding: 6px 8px;
-  background: var(--bg-secondary, #252526);
-  border: 1px solid var(--border-color, #474747);
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
   border-radius: 4px;
 }
 
 .namelist-dirty-count {
   font-size: 11px;
-  color: var(--text-secondary, #858585);
+  color: var(--text-secondary);
 }
 
 .namelist-save-btn {
   padding: 4px 12px;
   font-size: 12px;
-  border: 1px solid var(--accent, #007acc);
+  border: 1px solid var(--accent);
   border-radius: 3px;
-  background: var(--accent, #007acc);
-  color: var(--text-on-accent, #ffffff);
+  background: var(--accent);
+  color: var(--text-on-accent);
   cursor: pointer;
   transition: opacity 0.15s;
 }
@@ -305,7 +305,7 @@
 /* Module window root */
 
 .module-window-root {
-  font-family: var(--display-font, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif);
-  color: var(--text-primary, #d4d4d4);
-  background: var(--bg-primary, #1e1e1e);
+  font-family: var(--font-sans, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif);
+  color: var(--text-primary);
+  background: var(--bg-primary);
 }

@@ -19,7 +19,7 @@ import * as path from "path";
 import type { CommRouter } from "./comm-router";
 import type { QueryRouter } from "./query-router";
 import type { ConfigStore, PDVConfig } from "./config";
-import { IPC, type HandlerInvokeResult, type NamelistReadResult, type NamelistWriteResult, type NamespaceInspectResult, type NamespaceInspectTarget, type NamespaceInspectorNode, type NamespaceQueryOptions, type NamespaceVariable, type ScriptParameter, type ScriptRunRequest, type ScriptRunResult, type TreeAddFileResult, type TreeCreateGuiResult, type TreeCreateLibResult, type TreeCreateNodeResult, type TreeCreateNoteResult, type TreeCreateScriptResult, type TreeDuplicateResult, type TreeMoveResult, type TreeRenameResult } from "./ipc";
+import { IPC, type HandlerInvokeResult, type NamelistReadResult, type NamelistWriteResult, type NamespaceInspectResult, type NamespaceInspectTarget, type NamespaceInspectorNode, type NamespaceQueryOptions, type NamespaceVariable, type ScriptParameter, type ScriptRunRequest, type ScriptRunResult, type TreePrintRequest, type TreeAddFileResult, type TreeCreateGuiResult, type TreeCreateLibResult, type TreeCreateNodeResult, type TreeCreateNoteResult, type TreeCreateScriptResult, type TreeDuplicateResult, type TreeMoveResult, type TreeRenameResult } from "./ipc";
 import type { KernelManager } from "./kernel-manager";
 import { executeAndTranscribe, TranscriptWriter } from "./mcp/transcript";
 import { PDVMessageType, generateNodeUuid, resolveNodeDir, resolveNodePath, type PDVFileRegisterPayload } from "./pdv-protocol";
@@ -571,6 +571,27 @@ export function registerTreeNamespaceScriptIpcHandlers(
         ? `pdv_tree[${JSON.stringify(treePath)}].run(${kwargs})`
         : `pdv_tree[${JSON.stringify(treePath)}].run()`;
     }
+
+    const workingDir = kernelWorkingDirs.get(kernelId);
+    const transcript = workingDir ? new TranscriptWriter(workingDir) : null;
+    const result = await executeAndTranscribe(
+      kernelManager.execute.bind(kernelManager),
+      transcript,
+      kernelId,
+      { code, executionId, origin },
+    );
+    return { code, executionId, origin, result };
+  });
+
+  handleIpc(IPC.tree.print, async (_event, kernelId: string, request: TreePrintRequest): Promise<ScriptRunResult> => {
+    const kernel = kernelManager.getKernel(kernelId);
+    if (!kernel) throw new Error(`Kernel not found: ${kernelId}`);
+
+    const { path, executionId, origin } = request;
+    // Build the language-appropriate invocation here — no Python or Julia
+    // code strings belong in the renderer (ARCHITECTURE.md key design rules).
+    const expr = path ? `pdv_tree[${JSON.stringify(path)}]` : "pdv_tree";
+    const code = kernel.language === "julia" ? `println(${expr})` : `print(${expr})`;
 
     const workingDir = kernelWorkingDirs.get(kernelId);
     const transcript = workingDir ? new TranscriptWriter(workingDir) : null;

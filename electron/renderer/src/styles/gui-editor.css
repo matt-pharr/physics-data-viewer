@@ -8,9 +8,9 @@
   grid-template-rows: 40px 1fr;
   height: 100vh;
   overflow: hidden;
-  background: var(--bg-primary, #1e1e1e);
-  color: var(--text-primary, #d4d4d4);
-  font-family: var(--font-display, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif);
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  font-family: var(--font-sans, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif);
   font-size: 13px;
 }
 
@@ -23,8 +23,8 @@
   align-items: center;
   gap: 12px;
   padding: 0 12px;
-  background: var(--bg-secondary, #252526);
-  border-bottom: 1px solid var(--border-color, #474747);
+  background: var(--bg-secondary);
+  border-bottom: 1px solid var(--border-color);
   user-select: none;
 }
 
@@ -34,11 +34,11 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  color: var(--text-secondary, #858585);
+  color: var(--text-secondary);
 }
 
 .gui-editor-toolbar-title .dirty-indicator {
-  color: var(--warning, #dcdcaa);
+  color: var(--warning);
   margin-left: 4px;
 }
 
@@ -46,15 +46,15 @@
   padding: 4px 14px;
   border: none;
   border-radius: 3px;
-  background: var(--accent, #007acc);
-  color: var(--text-on-accent, #ffffff);
+  background: var(--accent);
+  color: var(--text-on-accent);
   cursor: pointer;
   font-size: 12px;
   font-weight: 500;
 }
 
 .gui-editor-save-btn:hover {
-  background: var(--accent-hover, #1a8fd1);
+  background: var(--accent-hover);
 }
 
 .gui-editor-save-btn:disabled {
@@ -64,7 +64,7 @@
 
 .gui-editor-save-status {
   font-size: 11px;
-  color: var(--success, #4ec9b0);
+  color: var(--success);
 }
 
 /* ── Column resizers ── */
@@ -73,12 +73,12 @@
   grid-row: 2;
   width: 4px;
   cursor: col-resize;
-  background: var(--border-color, #474747);
+  background: var(--border-color);
   transition: background 0.1s;
 }
 
 .gui-editor-col-resizer:hover {
-  background: var(--accent, #007acc);
+  background: var(--accent);
 }
 
 /* ── Row resizer (canvas / preview split) ── */
@@ -86,13 +86,13 @@
 .gui-editor-row-resizer {
   height: 4px;
   cursor: row-resize;
-  background: var(--border-color, #474747);
+  background: var(--border-color);
   flex-shrink: 0;
   transition: background 0.1s;
 }
 
 .gui-editor-row-resizer:hover {
-  background: var(--accent, #007acc);
+  background: var(--accent);
 }
 
 /* ── Element Palette (left) ── */
@@ -100,7 +100,7 @@
 .gui-editor-palette {
   grid-row: 2;
   overflow-y: auto;
-  background: var(--bg-secondary, #252526);
+  background: var(--bg-secondary);
   padding: 8px;
 }
 
@@ -113,7 +113,7 @@
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.05em;
-  color: var(--text-secondary, #858585);
+  color: var(--text-secondary);
   margin-bottom: 6px;
   padding: 0 4px;
 }
@@ -130,7 +130,7 @@
 }
 
 .gui-editor-palette-item:hover {
-  background: var(--bg-hover, #2a2d2e);
+  background: var(--bg-hover);
 }
 
 .gui-editor-palette-item:active {
@@ -144,7 +144,7 @@
   align-items: center;
   justify-content: center;
   border-radius: 3px;
-  background: var(--bg-tertiary, #2d2d30);
+  background: var(--bg-tertiary);
   font-size: 12px;
   flex-shrink: 0;
 }
@@ -160,7 +160,7 @@
 
 .gui-editor-palette-desc {
   font-size: 11px;
-  color: var(--text-secondary, #858585);
+  color: var(--text-secondary);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -189,7 +189,7 @@
   align-items: center;
   justify-content: center;
   height: 100%;
-  color: var(--text-hint, #5a5a5a);
+  color: var(--text-hint);
   font-style: italic;
   text-align: center;
   padding: 24px;
@@ -212,12 +212,12 @@
 }
 
 .canvas-node-row:hover {
-  background: var(--bg-hover, #2a2d2e);
+  background: var(--bg-hover);
 }
 
 .canvas-node-row.selected {
   background: color-mix(in srgb, var(--accent) 20%, transparent);
-  outline: 1px solid var(--accent, #007acc);
+  outline: 1px solid var(--accent);
 }
 
 .canvas-node-icon {
@@ -229,7 +229,7 @@
   font-size: 11px;
   flex-shrink: 0;
   border-radius: 2px;
-  background: var(--bg-tertiary, #2d2d30);
+  background: var(--bg-tertiary);
 }
 
 .canvas-node-label {
@@ -242,14 +242,14 @@
 
 .canvas-node-type {
   font-size: 11px;
-  color: var(--text-secondary, #858585);
+  color: var(--text-secondary);
 }
 
 .canvas-node-delete {
   opacity: 0;
   border: none;
   background: none;
-  color: var(--error, #f48771);
+  color: var(--error);
   cursor: pointer;
   font-size: 14px;
   padding: 0 2px;
@@ -272,7 +272,7 @@
   width: 14px;
   font-size: 10px;
   cursor: pointer;
-  color: var(--text-secondary, #858585);
+  color: var(--text-secondary);
   background: none;
   border: none;
   padding: 0;
@@ -291,11 +291,11 @@
 
 .canvas-drop-zone.active {
   height: 4px;
-  background: var(--accent, #007acc);
+  background: var(--accent);
 }
 
 .canvas-node-row.drop-target {
-  outline: 2px dashed var(--accent, #007acc);
+  outline: 2px dashed var(--accent);
   outline-offset: -2px;
 }
 
@@ -315,9 +315,9 @@
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.05em;
-  color: var(--text-secondary, #858585);
-  background: var(--bg-secondary, #252526);
-  border-bottom: 1px solid var(--border-color, #474747);
+  color: var(--text-secondary);
+  background: var(--bg-secondary);
+  border-bottom: 1px solid var(--border-color);
   user-select: none;
 }
 
@@ -330,7 +330,7 @@
   align-items: center;
   justify-content: center;
   height: 80px;
-  color: var(--text-hint, #5a5a5a);
+  color: var(--text-hint);
   font-style: italic;
 }
 
@@ -339,7 +339,7 @@
 .gui-editor-properties {
   grid-row: 2;
   overflow-y: auto;
-  background: var(--bg-secondary, #252526);
+  background: var(--bg-secondary);
   padding: 8px;
 }
 
@@ -348,13 +348,13 @@
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.05em;
-  color: var(--text-secondary, #858585);
+  color: var(--text-secondary);
   margin-bottom: 8px;
   padding: 0 4px;
 }
 
 .gui-editor-properties-empty {
-  color: var(--text-hint, #5a5a5a);
+  color: var(--text-hint);
   font-style: italic;
   font-size: 12px;
   padding: 12px 4px;
@@ -366,7 +366,7 @@
 
 .gui-editor-prop-label {
   font-size: 11px;
-  color: var(--text-secondary, #858585);
+  color: var(--text-secondary);
   margin-bottom: 3px;
   padding: 0 2px;
 }
@@ -374,10 +374,10 @@
 .gui-editor-prop-input {
   width: 100%;
   padding: 4px 6px;
-  border: 1px solid var(--border-color, #474747);
+  border: 1px solid var(--border-color);
   border-radius: 3px;
-  background: var(--bg-primary, #1e1e1e);
-  color: var(--text-primary, #d4d4d4);
+  background: var(--bg-primary);
+  color: var(--text-primary);
   font-size: 12px;
   font-family: inherit;
   box-sizing: border-box;
@@ -385,16 +385,16 @@
 
 .gui-editor-prop-input:focus {
   outline: none;
-  border-color: var(--accent, #007acc);
+  border-color: var(--accent);
 }
 
 .gui-editor-prop-select {
   width: 100%;
   padding: 4px 6px;
-  border: 1px solid var(--border-color, #474747);
+  border: 1px solid var(--border-color);
   border-radius: 3px;
-  background: var(--bg-primary, #1e1e1e);
-  color: var(--text-primary, #d4d4d4);
+  background: var(--bg-primary);
+  color: var(--text-primary);
   font-size: 12px;
   font-family: inherit;
   box-sizing: border-box;
@@ -402,7 +402,7 @@
 
 .gui-editor-prop-select:focus {
   outline: none;
-  border-color: var(--accent, #007acc);
+  border-color: var(--accent);
 }
 
 .gui-editor-prop-checkbox {
@@ -431,10 +431,10 @@
 .gui-editor-option-row input {
   flex: 1;
   padding: 3px 5px;
-  border: 1px solid var(--border-color, #474747);
+  border: 1px solid var(--border-color);
   border-radius: 3px;
-  background: var(--bg-primary, #1e1e1e);
-  color: var(--text-primary, #d4d4d4);
+  background: var(--bg-primary);
+  color: var(--text-primary);
   font-size: 11px;
   font-family: inherit;
 }
@@ -442,7 +442,7 @@
 .gui-editor-option-remove {
   border: none;
   background: none;
-  color: var(--error, #f48771);
+  color: var(--error);
   cursor: pointer;
   font-size: 14px;
   padding: 0 2px;
@@ -452,7 +452,7 @@
 .gui-editor-option-add {
   border: none;
   background: none;
-  color: var(--accent, #007acc);
+  color: var(--accent);
   cursor: pointer;
   font-size: 12px;
   padding: 2px 4px;
@@ -490,32 +490,32 @@
 }
 
 .gui-editor-error {
-  color: var(--error, #f48771);
+  color: var(--error);
 }
 
 /* ── Validation warnings ── */
 
 .gui-editor-prop-warning {
-  border-color: var(--warning, #dcdcaa) !important;
+  border-color: var(--warning) !important;
 }
 
 .gui-editor-prop-warning-text {
   font-size: 11px;
-  color: var(--warning, #dcdcaa);
+  color: var(--warning);
   margin-top: 2px;
   padding: 0 2px;
 }
 
 .gui-editor-prop-hint {
   font-size: 11px;
-  color: var(--text-hint, #5a5a5a);
+  color: var(--text-hint);
   margin-bottom: 8px;
   padding: 0 4px;
   line-height: 1.4;
 }
 
 .canvas-node-warning {
-  color: var(--warning, #dcdcaa);
+  color: var(--warning);
   font-size: 12px;
   margin-left: 4px;
   cursor: help;

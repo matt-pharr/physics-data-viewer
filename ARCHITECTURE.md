@@ -95,7 +95,7 @@ PDV uses the standard Electron three-process architecture:
 - Manage lazy loading of tree node data from the save directory
 
 ### 2.4 What the Main Process Does NOT Do
-- The main process does not construct arbitrary Python or Julia business logic and send it via `execute_request`. All structured data exchange between the main process and the kernel happens via the PDV comm protocol (see Section 3). There are two well-defined exceptions: (1) the **bootstrap snippet** in `kernel-session.ts` that initializes `pdv_tree` at startup (a one-time init, not business logic), and (2) the **script invocation string** built by the `script:run` IPC handler, which constructs a minimal `pdv_tree["path"].run(kwargs)` call so that script output flows through the standard Jupyter iopub stream and appears in the console.
+- The main process does not construct arbitrary Python or Julia business logic and send it via `execute_request`. All structured data exchange between the main process and the kernel happens via the PDV comm protocol (see Section 3). The well-defined exceptions are minimal invocation strings whose output must flow through the standard Jupyter iopub stream so it appears in the console: (1) the **bootstrap snippet** in `kernel-session.ts` that initializes `pdv_tree` at startup (a one-time init, not business logic); (2) the **script invocation string** built by the `script:run` IPC handler (`pdv_tree["path"].run(kwargs)`); (3) the **print invocation** built by the `tree:print` IPC handler (`print(pdv_tree[...])` / Julia `println(...)`); and (4) the **install invocation** built by the `environment:installModule` IPC handler (`pdv.install("<module>")`, §10.5.12). These strings are always built in the main process — the renderer sends only structured requests and never contains Python or Julia code.
 - The main process does not scan the filesystem to build the tree. The kernel is the sole tree authority.
 
 ---
@@ -1245,7 +1245,7 @@ Mutations on the **root** `PDVTree` emit precise paths via the per-instance debo
 
 #### 7.4.2 Poll (safety net)
 
-The renderer also polls. Every second, the Tree component fetches fresh `pdv.tree.list` results for the root and every currently expanded subtree, structurally compares each child list against the rendered state (path / key / type / hasChildren / preview), and triggers a full reload only when it detects drift. Most ticks find no change and are effectively free, since `pdv.tree.list` is served by the kernel's dedicated read-only thread (`pdv.query_server`, §3.1) and doesn't block on user-code execution.
+The renderer also polls. Every second, the Tree component fetches fresh `pdv.tree.list` results for the root and every currently expanded subtree, structurally compares each child list against the rendered state (path / key / type / hasChildren / preview), and — when it detects drift — patches just the drifted path in place, merging the fresh children with the existing ones so surviving nodes keep their expansion state (no full-depth refetch, no loading flash). Most ticks find no change and are effectively free, since `pdv.tree.list` is served by the kernel's dedicated read-only thread (`pdv.query_server`, §3.1) and doesn't block on user-code execution. The next tick is scheduled only after the previous walk completes, so a slow walk over a large expanded tree never overlaps itself.
 
 The poll exists to catch mutations that push cannot see — primarily plain-`dict` values stored in the tree, which have no emission machinery. The user-facing contract is therefore:
 
@@ -1597,6 +1597,8 @@ In shared mode (no project venv) the kernel is not given a uv binary path, and `
 
 A `ModuleNotFoundError` raised by a code cell is detected in the kernel's output stream, and the console renders an affordance beneath the traceback: a one-click `Install with pdv.install("<name>")` action that runs the install for the user. Detection is not restricted to a curated package list — any missing module name is offered. A wrong suggestion (a typo, a missing local module) costs only an ignored button; the discoverability win for users who do not know `pdv.install()` exists is worth that.
 
+The click dispatches `environment:installModule` with just the module name; the main process builds the `pdv.install("<name>")` code string (§2.4) and brackets the run with `executeBegin`/`executeFinish` pushes — the same pattern as MCP agent runs (§15.7) — so the console seeds a log entry and streams the install output live.
+
 #### 10.5.13 Project Environment Tab (Package Management UI)
 
 The **Project Environment** settings tab (tab id `packages`) answers "what is this session running on" and is the friendly face over `uv add` / `uv remove` / `uv lock --upgrade-package`. Users never have to read `pyproject.toml`.
@@ -1898,7 +1900,7 @@ electron/
             styles/                     ← CSS stylesheets (base, layout, tabs, tree, editor, etc.)
             themes.ts                   ← Builtin themes, Monaco theme definitions, font helpers
             shortcuts.ts                ← Canonical shortcut registry and matcher
-            services/tree.ts            ← Renderer tree fetch/cache adapter
+            services/tree.ts            ← Renderer tree fetch adapter (deliberately uncached)
             types/                      ← Renderer view-model + preload API types
 examples/
     modules/

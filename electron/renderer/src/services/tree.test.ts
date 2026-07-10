@@ -1,10 +1,12 @@
 // @vitest-environment jsdom
 
 /**
- * tree.test.ts — unit tests for renderer tree service caching behavior.
+ * tree.test.ts — unit tests for the renderer tree service.
  *
  * Uses the typed `installPdvMock` factory from `test-fixtures/pdv-mock` so the
- * mocked surface stays in sync with the real `PDVApi` contract.
+ * mocked surface stays in sync with the real `PDVApi` contract. The service is
+ * deliberately uncached — every call fetches fresh and returns new objects —
+ * so these tests pin the enrichment mapping and the fresh-objects contract.
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -41,23 +43,33 @@ describe('treeService', () => {
         }),
       },
     });
-
-    treeService.clearCache();
   });
 
   afterEach(() => {
     vi.restoreAllMocks();
   });
 
-  it('loads and caches root nodes', async () => {
+  it('loads root nodes with default UI state', async () => {
+    const nodes = await treeService.getRootNodes('k1');
+
+    expect(nodes).toHaveLength(rootNodes.length);
+    expect(nodes[0].isExpanded).toBe(false);
+    expect(nodes[0].isLoading).toBe(false);
+    expect(nodes[0].hasChildren).toBe(true);
+    expect(nodes[0].parentPath).toBeNull();
+  });
+
+  it('returns fresh objects on every call (no shared/cached state)', async () => {
     const first = await treeService.getRootNodes('k1');
+    // Callers tag UI state onto results; a second fetch must not see it.
+    first[0].isExpanded = true;
+
     const second = await treeService.getRootNodes('k1');
 
-    expect(pdv.tree.list).toHaveBeenCalledTimes(1);
-    expect(first).toBe(second);
-    expect(first).toHaveLength(rootNodes.length);
-    expect(first[0].isExpanded).toBe(false);
-    expect(first[0].isLoading).toBe(false);
+    expect(pdv.tree.list).toHaveBeenCalledTimes(2);
+    expect(second).not.toBe(first);
+    expect(second[0]).not.toBe(first[0]);
+    expect(second[0].isExpanded).toBe(false);
   });
 
   it('returns empty array when node has no children', async () => {
@@ -74,22 +86,20 @@ describe('treeService', () => {
     expect(pdv.tree.list).not.toHaveBeenCalledWith(node.path);
   });
 
-  it('loads and caches children by path', async () => {
+  it('loads children by parent node path', async () => {
     const parent = { ...rootNodes[0], hasChildren: true, parentPath: null };
 
-    const first = await treeService.getChildren(parent, 'k1');
-    const second = await treeService.getChildren(parent, 'k1');
+    const children = await treeService.getChildren(
+      parent as unknown as Parameters<typeof treeService.getChildren>[0],
+      'k1',
+    );
 
-    expect(pdv.tree.list).toHaveBeenCalledTimes(1);
-    expect(first).toBe(second);
-    expect(first[0].path).toBe('data.array1');
+    expect(children[0].path).toBe('data.array1');
   });
 
-  it('maintains cache per kernel', async () => {
-    const parent = { ...rootNodes[0], hasChildren: true, parentPath: null };
-    await treeService.getChildren(parent, 'k1');
-    await treeService.getChildren(parent, 'k2');
-
-    expect(pdv.tree.list).toHaveBeenCalledTimes(2);
+  it('returns empty for a null kernel id', async () => {
+    expect(await treeService.getRootNodes(null)).toEqual([]);
+    expect(await treeService.listByPath(null, 'data')).toEqual([]);
+    expect(pdv.tree.list).not.toHaveBeenCalled();
   });
 });

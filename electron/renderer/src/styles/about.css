@@ -112,11 +112,11 @@
 }
 
 .about-update-status--success {
-  color: var(--success, #4caf50);
+  color: var(--success);
 }
 
 .about-update-status--error {
-  color: var(--error, #f44336);
+  color: var(--error);
 }
 
 .about-progress {

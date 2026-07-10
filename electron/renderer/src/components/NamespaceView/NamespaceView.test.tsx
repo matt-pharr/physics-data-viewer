@@ -122,4 +122,44 @@ describe('NamespaceView', () => {
     render(<NamespaceView kernelId="k1" autoRefresh refreshInterval={20} />);
     await waitFor(() => expect(query.mock.calls.length).toBeGreaterThanOrEqual(3), { timeout: 2000 });
   });
+
+  it('keeps expanded nodes open (with refreshed children) across auto-refresh ticks', async () => {
+    const query = pdv.namespace.query;
+    const inspect = pdv.namespace.inspect;
+    render(<NamespaceView kernelId="k1" autoRefresh refreshInterval={20} />);
+    await waitFor(() => expect(screen.getByText('arr')).toBeTruthy());
+
+    fireEvent.click(screen.getByRole('button', { name: /Expand arr/ }));
+    await waitFor(() => expect(screen.getByText('[0]')).toBeTruthy());
+
+    const queriesAtExpand = query.mock.calls.length;
+    const inspectsAtExpand = inspect.mock.calls.length;
+    // Let at least two refresh ticks land.
+    await waitFor(
+      () => expect(query.mock.calls.length).toBeGreaterThanOrEqual(queriesAtExpand + 2),
+      { timeout: 2000 },
+    );
+
+    // Still expanded, and the refresh re-inspected the expanded node.
+    expect(screen.getByText('[0]')).toBeTruthy();
+    expect(inspect.mock.calls.length).toBeGreaterThan(inspectsAtExpand);
+  });
+
+  it('collapses an expanded node whose variable disappeared', async () => {
+    pdv.namespace.inspect.mockImplementation(async () => {
+      throw new Error("name 'arr' is not defined");
+    });
+    const query = pdv.namespace.query;
+    render(<NamespaceView kernelId="k1" autoRefresh refreshInterval={20} />);
+    await waitFor(() => expect(screen.getByText('arr')).toBeTruthy());
+
+    fireEvent.click(screen.getByRole('button', { name: /Expand arr/ }));
+    // The failed inspect surfaces an error row first; the next refresh tick
+    // then drops the dead expansion entirely.
+    await waitFor(() => expect(query.mock.calls.length).toBeGreaterThanOrEqual(3), { timeout: 2000 });
+    await waitFor(() => {
+      expect(document.querySelector('.namespace-message-error')).toBeNull();
+    });
+    expect(screen.queryByText('[0]')).toBeNull();
+  });
 });

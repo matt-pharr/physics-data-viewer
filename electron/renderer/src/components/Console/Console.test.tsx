@@ -9,8 +9,12 @@ afterEach(() => {
   cleanup();
 });
 
+const { ansiSpy } = vi.hoisted(() => ({
+  ansiSpy: vi.fn((value: string) => `<span>${value}</span>`),
+}));
+
 vi.mock('./ansi', () => ({
-  ansiToHtml: (value: string) => `<span>${value}</span>`,
+  ansiToHtml: ansiSpy,
 }));
 
 function makeLog(overrides: Partial<LogEntry> = {}): LogEntry {
@@ -102,5 +106,26 @@ describe('Console', () => {
   it('hides the install affordance in shared mode (no onInstallPackage)', () => {
     const { container } = render(<Console logs={[moduleNotFoundLog()]} onClear={vi.fn()} />);
     expect(container.querySelector('.log-install-action')).toBeNull();
+  });
+
+  it('does not re-parse ANSI for entries whose object identity is unchanged', () => {
+    const stable = makeLog({ id: 'stable', stdout: 'first entry output' });
+    const growing = makeLog({ id: 'growing', stdout: 'chunk-1' });
+    const onClear = vi.fn();
+    const { rerender } = render(<Console logs={[stable, growing]} onClear={onClear} />);
+    ansiSpy.mockClear();
+
+    // Streamed output replaces only the affected entry object (see
+    // useKernelSubscriptions); the other entry keeps identity and its
+    // memoized HTML.
+    rerender(
+      <Console
+        logs={[stable, { ...growing, stdout: growing.stdout + 'chunk-2' }]}
+        onClear={onClear}
+      />
+    );
+
+    expect(ansiSpy).toHaveBeenCalledTimes(1);
+    expect(ansiSpy).toHaveBeenCalledWith('chunk-1chunk-2');
   });
 });

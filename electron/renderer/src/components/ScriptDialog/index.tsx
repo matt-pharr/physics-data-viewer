@@ -5,7 +5,7 @@
  * opens, so edits to the script file are always reflected.
  */
 
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import type { KernelExecutionOrigin, ScriptParameter, ScriptRunResult, TreeNodeData } from '../../types';
 
 interface ScriptDialogProps {
@@ -48,6 +48,15 @@ export const ScriptDialog: React.FC<ScriptDialogProps> = ({ node, kernelId, onRu
   const [values, setValues] = useState<Record<string, unknown>>({});
   const [isRunning, setIsRunning] = useState(false);
   const [error, setError] = useState<string | undefined>(undefined);
+  // The dialog can be dismissed (overlay click, ×, Escape) while a run is
+  // in flight; state updates after the await must be skipped once unmounted.
+  const mountedRef = useRef(true);
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -111,11 +120,17 @@ export const ScriptDialog: React.FC<ScriptDialogProps> = ({ node, kernelId, onRu
         executionId,
         origin,
       });
+      // Always report the result so the run is logged in the console, even
+      // if the dialog was dismissed while the script was executing.
       onRun(runResult);
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      if (mountedRef.current) {
+        setError(err instanceof Error ? err.message : String(err));
+      }
     } finally {
-      setIsRunning(false);
+      if (mountedRef.current) {
+        setIsRunning(false);
+      }
     }
   };
 

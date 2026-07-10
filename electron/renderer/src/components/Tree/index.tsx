@@ -10,7 +10,7 @@ import { List, type ListImperativeAPI, type RowComponentProps } from 'react-wind
 import { treeService, type TreeNodeData } from '../../services/tree';
 import { TreeNodeRow } from './TreeNodeRow';
 import { ContextMenu } from './ContextMenu';
-import { childrenDiffer, flattenTree, findNode, removeNodeImmut, updateNodeImmut } from './tree-utils';
+import { childrenDiffer, flattenTree, findNode, mergeChildren, removeNodeImmut, updateNodeImmut } from './tree-utils';
 import type { TreeChangeInfo } from '../../types';
 import type { Shortcuts } from '../../shortcuts';
 import { matchesShortcut } from '../../shortcuts';
@@ -55,9 +55,20 @@ interface TreeProps {
   disabled?: boolean;
   refreshToken?: number;
   pendingChanges?: TreeChangeInfo[];
-  onChangesConsumed?: () => void;
+  /**
+   * Called with the exact change batch that was consumed so the owner can
+   * remove those entries (and only those) from its queue — changes pushed
+   * between render and effect commit must survive.
+   */
+  onChangesConsumed?: (consumed: TreeChangeInfo[]) => void;
   onAction?: (action: string, node: TreeNodeData) => void;
   shortcuts: Shortcuts;
+  /**
+   * Stable identity of the open project (e.g. its directory path), used to
+   * scope selection persistence so selection doesn't leak across projects.
+   * Null/undefined for a not-yet-saved project.
+   */
+  projectKey?: string | null;
 }
 
 interface ContextMenuState {
@@ -66,28 +77,37 @@ interface ContextMenuState {
   node: TreeNodeData;
 }
 
+/** Read the persisted selection for one project's storage key, or null. */
+function readStoredSelection(storageKey: string): string | null {
+  try {
+    return localStorage.getItem(storageKey);
+  } catch {
+    return null;
+  }
+}
+
 /** Tree browser component for node navigation and node actions. */
-export const Tree: React.FC<TreeProps> = ({ kernelId, disabled = false, refreshToken = 0, pendingChanges, onChangesConsumed, onAction, shortcuts }) => {
+export const Tree: React.FC<TreeProps> = ({ kernelId, disabled = false, refreshToken = 0, pendingChanges, onChangesConsumed, onAction, shortcuts, projectKey }) => {
   const [nodes, setNodes] = useState<TreeNodeData[]>([]);
   const nodesRef = useRef(nodes);
   nodesRef.current = nodes;
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | undefined>();
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
-  const [selectedPath, setSelectedPath] = useState<string | null>(() => {
-    try {
-      const stored = localStorage.getItem('pdv:selectedPath');
-      return stored !== null ? stored : null;
-    } catch {
-      return null;
-    }
-  });
-  
+  // Selection persistence is scoped per project so switching projects
+  // doesn't inherit (or clobber) another project's selection.
+  const selectionStorageKey = `pdv:selectedPath:${projectKey ?? '__unsaved__'}`;
+  const [selectedPath, setSelectedPath] = useState<string | null>(() =>
+    readStoredSelection(selectionStorageKey),
+  );
+
   const expandedPathsRef = useRef<Set<string>>(new Set());
   const listRef = useRef<ListImperativeAPI>(null);
 
-  const loadRoot = async (force?: boolean) => {
-    setLoading(nodes.length === 0);
+  const loadRoot = useCallback(async () => {
+    // Show the loading placeholder only when there is nothing on screen
+    // yet; refreshes of a populated tree swap content in place.
+    setLoading(nodesRef.current.length === 0);
     setError(undefined);
     if (!kernelId || disabled) {
       setNodes([]);
@@ -95,11 +115,8 @@ export const Tree: React.FC<TreeProps> = ({ kernelId, disabled = false, refreshT
       setError(undefined);
       return;
     }
-    if (force) {
-      treeService.clearCache(kernelId);
-    }
     try {
-      const rootNodes = await treeService.getRootNodes(kernelId, { force });
+      const rootNodes = await treeService.getRootNodes(kernelId);
 
       // Preserve the set of previously expanded paths so the tree doesn't
       // collapse on every refresh. Paths that no longer exist in the new tree
@@ -114,6 +131,8 @@ export const Tree: React.FC<TreeProps> = ({ kernelId, disabled = false, refreshT
         .sort((a, b) => a.split('.').length - b.split('.').length);
 
       // Build a lookup from path → node for the freshly-fetched root children.
+      // The service returns fresh objects on every call, so tagging expansion
+      // state onto them here mutates nothing shared with other callers.
       const nodeMap = new Map<string, TreeNodeData>();
       for (const n of rootNodes) nodeMap.set(n.path, n);
 
@@ -121,7 +140,7 @@ export const Tree: React.FC<TreeProps> = ({ kernelId, disabled = false, refreshT
         const target = nodeMap.get(expandPath);
         if (!target || !target.hasChildren) continue;
         try {
-          const children = await treeService.getChildren(target, kernelId, { force });
+          const children = await treeService.getChildren(target, kernelId);
           target.isExpanded = true;
           target.children = children;
           newExpanded.add(expandPath);
@@ -153,36 +172,44 @@ export const Tree: React.FC<TreeProps> = ({ kernelId, disabled = false, refreshT
     } finally {
       setLoading(false);
     }
-  };
+  }, [kernelId, disabled]);
 
-  // Persist selected path to localStorage
+  // Persist selection per project; when the project (storage key) changes,
+  // load that project's stored selection instead of persisting the old one.
+  const lastSelectionKeyRef = useRef(selectionStorageKey);
   useEffect(() => {
+    if (lastSelectionKeyRef.current !== selectionStorageKey) {
+      lastSelectionKeyRef.current = selectionStorageKey;
+      setSelectedPath(readStoredSelection(selectionStorageKey));
+      return;
+    }
     try {
       if (selectedPath !== null) {
-        localStorage.setItem('pdv:selectedPath', selectedPath);
+        localStorage.setItem(selectionStorageKey, selectedPath);
       } else {
-        localStorage.removeItem('pdv:selectedPath');
+        localStorage.removeItem(selectionStorageKey);
       }
     } catch (error) {
       console.warn('Failed to persist selected path:', error);
     }
-  }, [selectedPath]);
+  }, [selectedPath, selectionStorageKey]);
 
   useEffect(() => {
-    void loadRoot(true);
-  // eslint-disable-next-line react-hooks/exhaustive-deps -- loadRoot is stable for given kernelId; real triggers are kernelId/refreshToken/disabled
-  }, [kernelId, refreshToken, disabled]);
+    void loadRoot();
+  }, [loadRoot, refreshToken]);
 
   // Safety-net poll. Push notifications cover all PDVTree mutations, but
   // plain-dict mutations under the tree (e.g. `pdv_tree['data']['x'] = 1`
   // when `data` is a plain dict) emit nothing. Once a second, fetch the
   // root and every currently-expanded subtree, structurally compare the
-  // children, and trigger a full reload only on real drift. Most ticks
-  // detect no change and are effectively free thanks to the kernel's
-  // dedicated read-only query thread (pdv.query_server).
+  // children, and patch just the drifted paths in place. Most ticks detect
+  // no change and are effectively free thanks to the kernel's dedicated
+  // read-only query thread (pdv.query_server). The next tick is scheduled
+  // only after the previous walk finishes, so slow walks never overlap.
   useEffect(() => {
     if (!kernelId || disabled) return;
     let cancelled = false;
+    let timer: number | undefined;
 
     const pollOnce = async () => {
       // Snapshot the paths to check at tick start so concurrent expansion
@@ -190,13 +217,13 @@ export const Tree: React.FC<TreeProps> = ({ kernelId, disabled = false, refreshT
       const pathsToCheck = ['', ...expandedPathsRef.current];
 
       for (const path of pathsToCheck) {
-        if (cancelled || !kernelId) return;
+        if (cancelled) return;
         let fresh: TreeNodeData[];
         try {
           fresh =
             path === ''
-              ? await treeService.getRootNodes(kernelId, { force: true })
-              : await treeService.listByPath(kernelId, path, { force: true });
+              ? await treeService.getRootNodes(kernelId)
+              : await treeService.listByPath(kernelId, path);
         } catch {
           // Path may have been removed, or the kernel may be transiently
           // unavailable — skip without disturbing the UI.
@@ -209,29 +236,39 @@ export const Tree: React.FC<TreeProps> = ({ kernelId, disabled = false, refreshT
         const current = currentNode?.children ?? [];
 
         if (childrenDiffer(current, fresh)) {
-          if (!cancelled) void loadRoot(true);
-          return;
+          // Patch only the drifted path, preserving expansion state of
+          // surviving children — no full-depth refetch, no loading flash.
+          const merged = mergeChildren(fresh, current);
+          setNodes((prev) =>
+            updateNodeImmut(prev, path, (n) => ({ ...n, children: merged })),
+          );
         }
       }
     };
 
-    const interval = window.setInterval(() => {
-      void pollOnce();
-    }, 1000);
+    const scheduleNext = () => {
+      timer = window.setTimeout(() => {
+        void pollOnce().finally(() => {
+          if (!cancelled) scheduleNext();
+        });
+      }, 1000);
+    };
+    scheduleNext();
     return () => {
       cancelled = true;
-      window.clearInterval(interval);
+      window.clearTimeout(timer);
     };
-  // eslint-disable-next-line react-hooks/exhaustive-deps -- loadRoot is stable for kernelId; expandedPathsRef is read live, not as a dep
   }, [kernelId, disabled]);
 
   // Incremental tree update from push notifications — avoids full reload.
   // Processes a queue of changes so rapid successive updates are not lost.
   useEffect(() => {
     if (!pendingChanges || pendingChanges.length === 0 || !kernelId || disabled) return;
-    // Consume the entire queue in one pass.
+    // Consume this snapshot of the queue in one pass. Report exactly what
+    // was consumed so the owner removes only these entries — a change
+    // pushed between render and this effect must stay queued.
     const changes = pendingChanges;
-    onChangesConsumed?.();
+    onChangesConsumed?.(changes);
 
     // Collect all removals and parent paths to refresh across the batch.
     const removals: string[] = [];
@@ -244,10 +281,6 @@ export const Tree: React.FC<TreeProps> = ({ kernelId, disabled = false, refreshT
       for (const changedPath of changed_paths) {
         const dotIdx = changedPath.lastIndexOf('.');
         const parentPath = dotIdx > 0 ? changedPath.substring(0, dotIdx) : '';
-        // Invalidate cache for removed paths and batch (which may contain removals).
-        if (change_type === 'removed' || change_type === 'batch') {
-          treeService.invalidatePath(kernelId, parentPath);
-        }
         // For batch, added, or updated: re-fetch the parent.
         if (change_type !== 'removed') {
           parentsToRefresh.add(parentPath);
@@ -276,9 +309,9 @@ export const Tree: React.FC<TreeProps> = ({ kernelId, disabled = false, refreshT
           const parentNode = parentPath === '' ? null : findNode(nodesRef.current, parentPath);
           let freshChildren: TreeNodeData[];
           if (parentPath === '') {
-            freshChildren = await treeService.getRootNodes(kernelId, { force: true });
+            freshChildren = await treeService.getRootNodes(kernelId);
           } else if (parentNode) {
-            freshChildren = await treeService.getChildren(parentNode, kernelId, { force: true });
+            freshChildren = await treeService.getChildren(parentNode, kernelId);
           } else {
             continue;
           }
@@ -289,17 +322,7 @@ export const Tree: React.FC<TreeProps> = ({ kernelId, disabled = false, refreshT
           const existingParent = parentPath === ''
             ? nodesRef.current[0]
             : findNode(nodesRef.current, parentPath);
-          const existingChildren = existingParent?.children ?? [];
-          const existingMap = new Map<string, TreeNodeData>();
-          for (const c of existingChildren) existingMap.set(c.path, c);
-
-          const mergedChildren = freshChildren.map((fresh) => {
-            const existing = existingMap.get(fresh.path);
-            if (existing?.isExpanded && existing.children) {
-              return { ...fresh, isExpanded: true, children: existing.children };
-            }
-            return fresh;
-          });
+          const mergedChildren = mergeChildren(freshChildren, existingParent?.children);
 
           if (parentPath === '') {
             setNodes((prev) => updateNodeImmut(prev, '', (n) => ({ ...n, children: mergedChildren })));
@@ -332,9 +355,7 @@ export const Tree: React.FC<TreeProps> = ({ kernelId, disabled = false, refreshT
       setNodes((prev) => updateNodeImmut(prev, node.path, (n) => ({ ...n, isLoading: true })));
     }, 1000);
     try {
-      const children = await treeService.getChildren(node, kernelId, {
-        force: true,
-      });
+      const children = await treeService.getChildren(node, kernelId);
       clearTimeout(loadingTimer);
       expandedPathsRef.current.add(node.path);
       setNodes((prev) =>
@@ -386,7 +407,7 @@ export const Tree: React.FC<TreeProps> = ({ kernelId, disabled = false, refreshT
     if (disabled) return;
     setContextMenu(null);
     if (action === 'refresh') {
-      void loadRoot(true);
+      void loadRoot();
       return;
     }
     onAction?.(action, node);

@@ -88,6 +88,28 @@ export function childrenDiffer(a: TreeNodeData[], b: TreeNodeData[]): boolean {
   return false;
 }
 
+/**
+ * Merge freshly fetched children with the existing child list, preserving
+ * per-node UI state the fetch cannot know about (expansion and already-loaded
+ * grandchildren). Fresh nodes win on descriptor fields; nodes that no longer
+ * exist are dropped; new nodes appear collapsed.
+ */
+export function mergeChildren(
+  fresh: TreeNodeData[],
+  existing: TreeNodeData[] | undefined,
+): TreeNodeData[] {
+  if (!existing || existing.length === 0) return fresh;
+  const byPath = new Map<string, TreeNodeData>();
+  for (const node of existing) byPath.set(node.path, node);
+  return fresh.map((node) => {
+    const old = byPath.get(node.path);
+    if (old?.isExpanded && old.children) {
+      return { ...node, isExpanded: true, children: old.children };
+    }
+    return node;
+  });
+}
+
 /** Immutably update one node by path while preserving unrelated references. */
 export function updateNodeImmut(
   list: TreeNodeData[],

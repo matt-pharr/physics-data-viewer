@@ -133,13 +133,17 @@ export function GuiViewerRoot() {
       setRunningActionKey(actionKey);
 
       try {
-        // Resolve script path relative to GUI parent
+        // Resolve script path relative to GUI parent. Strip the script file
+        // extension language-agnostically (.py or .jl — not just Python).
         const guiParent = context.treePath.includes(".")
           ? context.treePath.substring(0, context.treePath.lastIndexOf("."))
           : "";
+        const scriptSegment = action.script_path
+          .replace(/\.(py|jl)$/i, "")
+          .replace(/\//g, ".");
         const scriptTreePath = guiParent
-          ? `${guiParent}.${action.script_path.replace(/\//g, ".").replace(/\.py$/, "")}`
-          : action.script_path.replace(/\//g, ".").replace(/\.py$/, "");
+          ? `${guiParent}.${scriptSegment}`
+          : scriptSegment;
 
         // Collect input values for the action
         const params: Record<string, string | number | boolean> = {};

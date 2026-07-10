@@ -1,7 +1,31 @@
 import { useEffect, type Dispatch, type MutableRefObject, type SetStateAction } from 'react';
 import type { CellTab, LogEntry, TreeChangeInfo } from '../types';
-import type { ProgressPayload } from '../types/pdv';
+import type { ExecuteOutputChunk, ProgressPayload } from '../types/pdv';
 import { MAX_LOG_ENTRIES } from './constants';
+
+/**
+ * How long buffered output chunks may sit before being applied to the log
+ * state (one frame at 60 Hz). Long-running executions can stream hundreds of
+ * chunks per second; applying each one individually re-renders the whole app
+ * per chunk. Coalescing to one state update per interval keeps the console
+ * visually live while bounding render work.
+ */
+const OUTPUT_FLUSH_INTERVAL_MS = 16;
+
+/** Apply a batch of buffered output chunks to the log entries in one pass. */
+function applyOutputChunks(prev: LogEntry[], chunks: ExecuteOutputChunk[]): LogEntry[] {
+  return prev.map((l) => {
+    let entry = l;
+    for (const chunk of chunks) {
+      if (entry.id !== chunk.executionId) continue;
+      if (chunk.type === 'stdout') entry = { ...entry, stdout: (entry.stdout ?? '') + chunk.text! };
+      else if (chunk.type === 'stderr') entry = { ...entry, stderr: (entry.stderr ?? '') + chunk.text! };
+      else if (chunk.type === 'image') entry = { ...entry, images: [...(entry.images ?? []), chunk.image!] };
+      else if (chunk.type === 'result') entry = { ...entry, result: chunk.result };
+    }
+    return entry;
+  });
+}
 
 /** Options for {@link useKernelSubscriptions}. Manages push-subscription lifecycle. */
 interface UseKernelSubscriptionsOptions {
@@ -46,19 +70,31 @@ export function useKernelSubscriptions({
   setKernelMemoryRss,
 }: UseKernelSubscriptionsOptions): void {
   useEffect(() => {
+    // Buffer chunks and flush at most once per OUTPUT_FLUSH_INTERVAL_MS. Each
+    // IPC push arrives in its own task, so React cannot auto-batch them; a
+    // per-chunk setLogs re-renders the app for every fragment of output.
+    let pending: ExecuteOutputChunk[] = [];
+    let flushTimer: ReturnType<typeof setTimeout> | null = null;
+
+    const flush = () => {
+      flushTimer = null;
+      if (pending.length === 0) return;
+      const chunks = pending;
+      pending = [];
+      setLogs((prev) => applyOutputChunks(prev, chunks));
+    };
+
     const unsubscribe = window.pdv.kernels.onOutput((chunk) => {
-      setLogs((prev) =>
-        prev.map((l) => {
-          if (l.id !== chunk.executionId) return l;
-          if (chunk.type === 'stdout') return { ...l, stdout: (l.stdout ?? '') + chunk.text! };
-          if (chunk.type === 'stderr') return { ...l, stderr: (l.stderr ?? '') + chunk.text! };
-          if (chunk.type === 'image') return { ...l, images: [...(l.images ?? []), chunk.image!] };
-          if (chunk.type === 'result') return { ...l, result: chunk.result };
-          return l;
-        })
-      );
+      pending.push(chunk);
+      if (flushTimer === null) {
+        flushTimer = setTimeout(flush, OUTPUT_FLUSH_INTERVAL_MS);
+      }
     });
-    return unsubscribe;
+    return () => {
+      unsubscribe();
+      if (flushTimer !== null) clearTimeout(flushTimer);
+      flush(); // don't drop buffered output when the subscription re-registers
+    };
   }, [setLogs]);
 
   // Main-initiated runs (MCP agent tools) push a `begin` event before the

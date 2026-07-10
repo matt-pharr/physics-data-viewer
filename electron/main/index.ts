@@ -17,10 +17,12 @@
 
 import { BrowserWindow, app } from "electron";
 import { handleIpc, removeAllIpcHandlers } from "./ipc-registry";
+import { randomUUID } from "node:crypto";
 import * as fs from "fs/promises";
 import * as fsSync from "fs";
 import * as os from "os";
 import * as path from "path";
+import { executeAndTranscribe, TranscriptWriter } from "./mcp/transcript";
 
 import { CommRouter } from "./comm-router";
 import { QueryRouter } from "./query-router";
@@ -741,6 +743,51 @@ export function registerIpcHandlers(
       const sync = await uvSync(opts);
       if (sync.success) await refreshKernelImportCaches();
       return { success: sync.success, output: lock.output + sync.output };
+    }
+  );
+
+  // Reactive missing-module install (§10.5.12). The renderer sends only the
+  // module name; the code string is built here and the run is bracketed with
+  // executeBegin/executeFinish pushes so the console seeds a log entry and
+  // streams the install output live — same pattern as MCP agent runs.
+  handleIpc(
+    IPC.environment.installModule,
+    async (_event, kernelId: string, moduleName: string): Promise<void> => {
+      if (!kernelManager.getKernel(kernelId)) {
+        throw new Error(`Kernel not found: ${kernelId}`);
+      }
+      const code = `pdv.install(${JSON.stringify(moduleName)})`;
+      const origin = { kind: "unknown" as const, label: `Install ${moduleName}` };
+      const workingDir = kernelWorkingDirs.get(kernelId);
+      const transcript = workingDir ? new TranscriptWriter(workingDir) : null;
+      const executionId = randomUUID();
+      const start = Date.now();
+      const send = (channel: string, payload: unknown): void => {
+        if (!win.isDestroyed()) win.webContents.send(channel, payload);
+      };
+      send(IPC.push.executeBegin, { executionId, code, origin, timestamp: start });
+      try {
+        const result = await executeAndTranscribe(
+          kernelManager.execute.bind(kernelManager),
+          transcript,
+          kernelId,
+          { code, executionId, origin },
+          (chunk) => send(IPC.push.executeOutput, chunk),
+        );
+        send(IPC.push.executeFinish, {
+          executionId,
+          duration: result.duration ?? Date.now() - start,
+          error: result.error,
+          errorDetails: result.errorDetails,
+        });
+      } catch (err) {
+        send(IPC.push.executeFinish, {
+          executionId,
+          duration: Date.now() - start,
+          error: err instanceof Error ? err.message : String(err),
+        });
+        throw err;
+      }
     }
   );
 

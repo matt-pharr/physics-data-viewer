@@ -31,6 +31,7 @@ export const PackagesTab: React.FC<PackagesTabProps> = ({ environmentMode }) => 
   const [busy, setBusy] = useState(false);
   const [addInput, setAddInput] = useState('');
   const [output, setOutput] = useState('');
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const outputRef = useRef<HTMLPreElement>(null);
 
   // Fetch the active session's environment metadata for the header.
@@ -54,6 +55,10 @@ export const PackagesTab: React.FC<PackagesTabProps> = ({ environmentMode }) => 
     setLoading(true);
     try {
       setPackages(await window.pdv.environment.listPackages());
+    } catch (err) {
+      setErrorMsg(
+        `Failed to list packages: ${err instanceof Error ? err.message : String(err)}`,
+      );
     } finally {
       setLoading(false);
     }
@@ -84,8 +89,17 @@ export const PackagesTab: React.FC<PackagesTabProps> = ({ environmentMode }) => 
     async (op: () => Promise<EnvironmentInstallResult>) => {
       setBusy(true);
       setOutput('');
+      setErrorMsg(null);
       try {
-        await op();
+        const result = await op();
+        if (!result.success) {
+          // Streaming output usually shows uv's own error; make sure the
+          // final output is there even if nothing streamed, and flag it.
+          if (result.output) setOutput((prev) => prev || result.output);
+          setErrorMsg('The uv command failed — see the output below.');
+        }
+      } catch (err) {
+        setErrorMsg(err instanceof Error ? err.message : String(err));
       } finally {
         // Re-list packages even on failure: uv may have partially applied.
         await refresh();
@@ -220,6 +234,8 @@ export const PackagesTab: React.FC<PackagesTabProps> = ({ environmentMode }) => 
           </tbody>
         </table>
       )}
+
+      {errorMsg && <p className="error-text">{errorMsg}</p>}
 
       {output && (
         <pre className="env-install-output" ref={outputRef}>

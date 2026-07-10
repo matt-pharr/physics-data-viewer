@@ -90,6 +90,8 @@ const api: PDVApi = {
       ipcRenderer.invoke(IPC.tree.invokeHandler, kernelId, nodePath),
     delete: (kernelId, treePath) =>
       ipcRenderer.invoke(IPC.tree.delete, kernelId, treePath),
+    print: (kernelId, request) =>
+      ipcRenderer.invoke(IPC.tree.print, kernelId, request),
     onChanged: (callback) => onPush(IPC.push.treeChanged, callback),
   },
   namespace: {
@@ -130,6 +132,8 @@ const api: PDVApi = {
     removePackage: (names) => ipcRenderer.invoke(IPC.environment.removePackage, names),
     upgradePackage: (names) => ipcRenderer.invoke(IPC.environment.upgradePackage, names),
     activeInfo: () => ipcRenderer.invoke(IPC.environment.activeInfo),
+    installModule: (kernelId, moduleName) =>
+      ipcRenderer.invoke(IPC.environment.installModule, kernelId, moduleName),
   },
   modules: {
     listInstalled: () => ipcRenderer.invoke(IPC.modules.listInstalled),

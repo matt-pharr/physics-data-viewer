@@ -52,7 +52,7 @@ import type {
   WindowChromeInfo,
 } from '../types';
 import { resolveShortcuts } from '../shortcuts';
-import { normalizeLoadedCodeCells, normalizeRecentProjects, mergeConfigUpdate } from './app-utils';
+import { newExecutionId, normalizeLoadedCodeCells, normalizeRecentProjects, mergeConfigUpdate } from './app-utils';
 import { CELL_UNDO_LIMIT, MAX_LOG_ENTRIES, NAMESPACE_REFRESH_INTERVAL_MS } from './constants';
 import { useCodeCellsPersistence } from './useCodeCellsPersistence';
 import { useKeyboardShortcuts } from './useKeyboardShortcuts';
@@ -465,6 +465,15 @@ const App: React.FC = () => {
     setPendingTreeChanges((prev) => [...prev, info]);
   }, []);
 
+  const handleTreeChangesConsumed = useCallback((consumed: TreeChangeInfo[]) => {
+    setPendingTreeChanges((prev) => {
+      // Drop only the consumed snapshot; a push that landed between render
+      // and the Tree's consume effect stays queued.
+      const consumedSet = new Set(consumed);
+      return prev.filter((c) => !consumedSet.has(c));
+    });
+  }, []);
+
   useKernelSubscriptions({
     currentKernelId,
     loadedProjectTabsRef,
@@ -604,7 +613,7 @@ const App: React.FC = () => {
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [showSaveAsDialog, showImportModule, scriptDialog, createScriptTarget, createNoteTarget, createGuiTarget, createLibTarget, showNewModuleDialog, moduleMetadataTarget]);
+  }, [showSaveAsDialog, showImportModule, scriptDialog, renameTarget, moveTarget, duplicateTarget, createNodeTarget, createScriptTarget, createNoteTarget, createGuiTarget, createLibTarget, showNewModuleDialog, moduleMetadataTarget]);
 
   const handleSettingsSave = async (updates: Partial<Config>) => {
     await window.pdv.config.set(updates);
@@ -667,7 +676,15 @@ const App: React.FC = () => {
         prev.map((t) => (t.id === id ? { ...t, savedContent: t.content } : t)),
       );
     } catch (error) {
-      console.error('[App] Failed to save note:', error);
+      // Surface the failure in the console — the tab stays dirty, so the
+      // edits are not lost and the dirty dot keeps showing.
+      const message = error instanceof Error ? error.message : String(error);
+      setLogs((prev) => [...prev, {
+        id: `note-save-error-${Date.now()}`,
+        timestamp: Date.now(),
+        code: '',
+        error: `Failed to save note "${tab.name}": ${message}`,
+      }]);
     }
   };
 
@@ -688,7 +705,28 @@ const App: React.FC = () => {
     );
   }, [currentKernelId]);
 
-  const handleNoteCloseTab = (id: string) => {
+  const handleNoteCloseTab = async (id: string) => {
+    // Closing a dirty note flushes it first — the note lives in the tree,
+    // so a silent discard would lose real edits. Only ask the user when
+    // the flush can't happen (no kernel) or fails.
+    const tab = noteTabsRef.current.find((t) => t.id === id);
+    if (tab && tab.content !== tab.savedContent) {
+      let flushed = false;
+      if (currentKernelId) {
+        try {
+          await window.pdv.note.save(currentKernelId, tab.id, tab.content);
+          flushed = true;
+        } catch (error) {
+          console.error('[App] Failed to save note before closing:', error);
+        }
+      }
+      if (!flushed) {
+        const discard = window.confirm(
+          `"${tab.name}" has unsaved changes that could not be saved. Close it anyway and discard them?`,
+        );
+        if (!discard) return;
+      }
+    }
     setNoteTabs((prev) => {
       const updated = prev.filter((t) => t.id !== id);
       if (activeNoteTabId === id) {
@@ -761,10 +799,7 @@ const App: React.FC = () => {
       setScriptDialog(node);
     } else if (action === 'run_defaults' && node.type === 'script') {
       if (!currentKernelId) return;
-      const executionId =
-        typeof crypto !== 'undefined' && 'randomUUID' in crypto
-          ? crypto.randomUUID()
-          : `log-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+      const executionId = newExecutionId();
       const origin: KernelExecutionOrigin = {
         kind: 'tree-script',
         label: node.path,
@@ -785,10 +820,13 @@ const App: React.FC = () => {
         console.error('[App] Failed to open editor:', error);
       }
     } else if (action === 'copy_path') {
-      const pyExpr = node.path
-        ? node.path.split('.').reduce((acc, part) => `${acc}["${part}"]`, 'pdv_tree')
+      // Clipboard snippet (valid in both Python and Julia sessions —
+      // PDVTree indexes the same way in each). JSON.stringify escapes
+      // quotes/backslashes in keys so the pasted expression stays valid.
+      const indexExpr = node.path
+        ? node.path.split('.').reduce((acc, part) => `${acc}[${JSON.stringify(part)}]`, 'pdv_tree')
         : 'pdv_tree';
-      await navigator.clipboard.writeText(pyExpr);
+      await navigator.clipboard.writeText(indexExpr);
     } else if (action === 'handle') {
       if (!currentKernelId) return;
       const result = await window.pdv.tree.invokeHandler(currentKernelId, node.path);
@@ -819,13 +857,17 @@ const App: React.FC = () => {
       }
     } else if (action === 'print') {
       if (!currentKernelId) return;
-      const pyExpr = node.path
-        ? `pdv_tree[${JSON.stringify(node.path)}]`
-        : 'pdv_tree';
-      await handleExecute(`print(${pyExpr})`, {
-        kind: 'unknown',
-        label: `Tree print ${node.path || 'pdv_tree'}`,
+      // The main process builds the language-appropriate print invocation —
+      // no Python or Julia code strings belong in the renderer.
+      const printResult = await window.pdv.tree.print(currentKernelId, {
+        path: node.path,
+        executionId: newExecutionId(),
+        origin: {
+          kind: 'unknown',
+          label: `Tree print ${node.path || 'pdv_tree'}`,
+        },
       });
+      handleScriptRun(printResult);
     }
   };
 
@@ -994,10 +1036,19 @@ const App: React.FC = () => {
     }
   }, [isSaveInFlight, isQueuedExecution, executeImmediate]);
 
-  /** Run pdv.install("<name>") for a missing module (reactive affordance, §10.5.12). */
+  /**
+   * Run pdv.install("<name>") for a missing module (reactive affordance,
+   * §10.5.12). The main process builds the code string and streams the run
+   * to the console via executeBegin/executeOutput/executeFinish pushes.
+   */
   const handleInstallMissingModule = useCallback((moduleName: string) => {
-    void handleExecute(`pdv.install(${JSON.stringify(moduleName)})`);
-  }, [handleExecute]);
+    if (!currentKernelId) return;
+    void window.pdv.environment.installModule(currentKernelId, moduleName).catch((error) => {
+      // The failure itself is already logged in the console via the
+      // executeFinish push; this guards against IPC-level rejections.
+      console.error('[App] pdv.install dispatch failed:', error);
+    });
+  }, [currentKernelId]);
 
   // Subscribe to autosave-in-flight pushes from main.
   useEffect(() => {
@@ -1577,9 +1628,10 @@ const App: React.FC = () => {
                     disabled={kernelStatus !== 'ready'}
                     refreshToken={treeRefreshToken}
                     pendingChanges={pendingTreeChanges}
-                    onChangesConsumed={() => setPendingTreeChanges([])}
+                    onChangesConsumed={handleTreeChangesConsumed}
                     onAction={handleTreeAction}
                     shortcuts={shortcuts}
+                    projectKey={currentProjectDir}
 
                   />
                 )}

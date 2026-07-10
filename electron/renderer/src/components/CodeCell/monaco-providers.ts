@@ -24,11 +24,16 @@ interface TabSnapshot {
   active: boolean;
 }
 
+// The providers themselves are registered once, but the refs they read are
+// re-pointed on every registration call. Without this, a CodeCell remount
+// would leave the singleton providers reading the *first* instance's refs —
+// a frozen kernel id and tab snapshot from a dead component.
+let activeKernelIdRef: React.MutableRefObject<string | null> | null = null;
+let activeTabsRef: React.MutableRefObject<TabSnapshot[]> | null = null;
+
 /** Returns a newline-terminated string of all non-active tabs' code to give jedi cross-cell import context. */
-function buildContextPrefix(
-  tabsRef: React.MutableRefObject<TabSnapshot[]>
-): string {
-  const tabs = tabsRef.current;
+function buildContextPrefix(): string {
+  const tabs = activeTabsRef?.current ?? [];
   const otherCode = tabs
     .filter((t) => !t.active)
     .map((t) => t.code.trim())
@@ -121,20 +126,24 @@ function mapCompletionKind(
  * Register the kernel-backed Python completion provider with Monaco.
  *
  * Supports both standard Jedi completions and pdv_tree path navigation.
- * No-ops if already registered (providers are page-level singletons).
+ * The provider is registered once (Monaco providers are page-level
+ * singletons); each call re-points the module-level refs so the provider
+ * always reads the state of the most recently mounted CodeCell.
  */
 export function registerKernelCompletionProvider(
   monacoInstance: typeof monaco,
   kernelIdRef: React.MutableRefObject<string | null>,
   tabsRef: React.MutableRefObject<TabSnapshot[]>
 ): void {
+  activeKernelIdRef = kernelIdRef;
+  activeTabsRef = tabsRef;
   if (completionProviderRegistered) return;
   completionProviderRegistered = true;
 
   monacoInstance.languages.registerCompletionItemProvider('python', {
     triggerCharacters: ['.', '[', "'", '"'],
     async provideCompletionItems(model, position, context) {
-      const kernelId = kernelIdRef.current;
+      const kernelId = activeKernelIdRef?.current ?? null;
       if (!kernelId) return { suggestions: [] };
 
       const code = model.getValue();
@@ -177,7 +186,7 @@ export function registerKernelCompletionProvider(
       }
 
       try {
-        const prefix = buildContextPrefix(tabsRef);
+        const prefix = buildContextPrefix();
         const prefixedCode = prefix + code;
         const prefixedOffset = prefix.length + offset;
         const result = await window.pdv.kernels.complete(kernelId, prefixedCode, prefixedOffset);
@@ -242,24 +251,28 @@ export function registerKernelCompletionProvider(
  * Register the kernel-backed Python hover provider with Monaco.
  *
  * Shows docstrings and type info on hover via `kernels.inspect`.
- * No-ops if already registered (providers are page-level singletons).
+ * The provider is registered once (Monaco providers are page-level
+ * singletons); each call re-points the module-level refs so the provider
+ * always reads the state of the most recently mounted CodeCell.
  */
 export function registerKernelHoverProvider(
   monacoInstance: typeof monaco,
   kernelIdRef: React.MutableRefObject<string | null>,
   tabsRef: React.MutableRefObject<TabSnapshot[]>
 ): void {
+  activeKernelIdRef = kernelIdRef;
+  activeTabsRef = tabsRef;
   if (hoverProviderRegistered) return;
   hoverProviderRegistered = true;
 
   monacoInstance.languages.registerHoverProvider('python', {
     async provideHover(model, position) {
-      const kernelId = kernelIdRef.current;
+      const kernelId = activeKernelIdRef?.current ?? null;
       if (!kernelId) return null;
 
       try {
         const code = model.getValue();
-        const prefix = buildContextPrefix(tabsRef);
+        const prefix = buildContextPrefix();
         const offset = prefix.length + model.getOffsetAt(position);
         const result = await window.pdv.kernels.inspect(kernelId, prefix + code, offset);
         const rawDoc = result.data?.['text/plain'];
