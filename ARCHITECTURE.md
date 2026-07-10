@@ -556,6 +556,7 @@ All other `pdv_*` names in the namespace are an error. Internal implementation f
 - **`__delitem__(key)`**: Removes from in-memory dict and from the lazy-load registry. Emits `pdv.tree.changed`.
 - **`set_quiet(key, value)`**: Same dot-path traversal as `__setitem__` (creating intermediate `PDVTree` containers as needed) but bypasses the change notification. Used by bulk loaders (`pdv.project.load`, `pdv.module.register`) to populate the tree without flooding the comm channel — callers typically emit a single `pdv.project.loaded` push when bulk load completes.
 - **Path notation**: Both `pdv_tree['key']` and `pdv_tree['parent.child.grandchild']` are supported as a convenience. Dot-separated paths are resolved recursively.
+- **Key naming**: Because `.` is the path separator, a single key must never contain a dot. Every UI creation surface enforces this — the shared `CreateTreeItemDialog` sanitizers strip dots (and other unsafe characters) per node kind, the main process's `sanitizeScriptName`/note/gui/lib sanitizers mirror them, and the kernel's `pdv.tree.create_node` handler rejects dotted names outright (`tree.invalid_name`) so programmatic callers (MCP tools, user scripts driving comms) can't corrupt path addressing either.
 - **`run_script(path, **kwargs)`**: Loads and executes the script at `path`, passing `pdv_tree` and `**kwargs` to its `run()` function.
 
 `PDVTree` does **not** handle serialization or filesystem layout directly. Those concerns live in `serialization.py` and `environment.py`.
@@ -1666,6 +1667,8 @@ The renderer cannot access Node.js APIs directly. Communication between renderer
 
 All IPC channel names are defined as constants in `electron/main/ipc.ts`. This file is the single source of truth for all IPC channel names and TypeScript types.
 
+**Error shape.** A handler reports failure in exactly one of two sanctioned ways: *throw* (the renderer `catch`es it) or *return* `{ success: false, error }` (the renderer renders the failure inline). Both ends of the boundary normalize the thrown path: `handleIpc` (in `ipc-registry.ts`) wraps every handler so failures are logged with their channel name and non-`Error` throws become `Error` instances, and the preload's shared `invoke` helper strips Electron's `Error invoking remote method '<channel>':` prefix so renderer error surfaces show the handler's original message.
+
 ### 11.2 Preload API (`window.pdv`)
 
 The preload bridge exposes exactly the operations the renderer needs. It never exposes raw Node.js or Electron APIs. The API is fully typed (see `ipc.ts`).
@@ -1852,6 +1855,8 @@ electron/
         ipc-register-kernels.ts           ← IPC handlers: kernel lifecycle + execution
         ipc-register-project.ts           ← IPC handlers: project save/load/new
         ipc-register-modules.ts           ← IPC handlers: module import/install
+        ipc-register-autosave.ts          ← IPC handlers: autosave run/clear/scan/recover + snapshot routines
+        ipc-register-environment.ts       ← IPC handlers: env discovery/install, Packages tab, installModule
         ipc-register-module-windows.ts    ← IPC handlers: module GUI window open/close/context
         ipc-register-gui-editor.ts        ← IPC handlers: GUI editor/viewer window open/context/read/save
         ipc-register-tree-namespace-script.ts ← IPC handlers: tree, namespace, script
@@ -1864,7 +1869,7 @@ electron/
             module-window-main.tsx      ← Module popup window renderer entry point
             vite-env.d.ts               ← Vite type declarations
             app/
-                index.tsx               ← Root App component (state orchestration, 7 hooks)
+                index.tsx               ← Root App component (state orchestration, 10 hooks)
                 HOOKS.md                ← Hook composition documentation
                 app-utils.ts            ← Shared App-level utility functions
                 constants.ts            ← App-level constants
@@ -1875,6 +1880,9 @@ electron/
                 useKernelLifecycle.ts    ← Kernel start/restart/env-save callbacks
                 useKeyboardShortcuts.ts ← Global keyboard shortcut listener
                 useProjectWorkflow.ts   ← Project save/load/new + unsaved dialog
+                useNoteTabs.ts          ← Markdown note tabs (open/save/close/dirty-flush)
+                useWelcomeState.ts      ← Welcome screen state, recents, recoverable sessions
+                useKernelLaunch.ts      ← Session-launch overlay (uv + shared) with retry
             components/
                 Icons.tsx               ← Shared SVG icon components
                 CodeCell/

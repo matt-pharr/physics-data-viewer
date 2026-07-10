@@ -101,31 +101,18 @@ def handle_script_params(msg: dict) -> None:
     msg : dict
         Parsed PDV message envelope.
     """
-    from pdv.comms import get_pdv_tree, send_error, send_message  # noqa: PLC0415
+    from pdv.comms import send_error, send_message  # noqa: PLC0415
     from pdv.tree import PDVScript, _extract_script_params  # noqa: PLC0415
+    from pdv.handlers._helpers import validate_register_request  # noqa: PLC0415
 
     msg_id = msg.get("msg_id")
-    payload = msg.get("payload", {})
+    validated = validate_register_request(
+        msg, "pdv.script.params.response", "script", required_fields=("path",)
+    )
+    if validated is None:
+        return
+    tree, payload = validated
     tree_path = payload.get("path", "")
-
-    if not tree_path:
-        send_error(
-            "pdv.script.params.response",
-            "script.missing_path",
-            "path is required in pdv.script.params payload",
-            in_reply_to=msg_id,
-        )
-        return
-
-    tree = get_pdv_tree()
-    if tree is None:
-        send_error(
-            "pdv.script.params.response",
-            "script.no_tree",
-            "PDVTree is not initialized",
-            in_reply_to=msg_id,
-        )
-        return
 
     try:
         node = tree[tree_path]

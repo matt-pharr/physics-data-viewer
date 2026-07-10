@@ -60,36 +60,26 @@ def handle_module_register(msg: dict) -> None:
     msg : dict
         Parsed PDV message envelope.
     """
-    from pdv.comms import get_pdv_tree, send_error, send_message  # noqa: PLC0415
+    from pdv.comms import send_message  # noqa: PLC0415
+    from pdv.handlers._helpers import validate_register_request  # noqa: PLC0415
     from pdv.tree import PDVModule  # noqa: PLC0415
 
     msg_id = msg.get("msg_id")
-    payload = msg.get("payload", {})
+    validated = validate_register_request(
+        msg,
+        "pdv.module.register.response",
+        "module",
+        required_fields=("path", "module_id"),
+    )
+    if validated is None:
+        return
+    tree, payload = validated
     alias = payload.get("path", "")
     module_id = payload.get("module_id", "")
     name = payload.get("name", "")
     version = payload.get("version", "")
     module_index = payload.get("module_index")
     dependencies = payload.get("dependencies", [])
-
-    if not alias or not module_id:
-        send_error(
-            "pdv.module.register.response",
-            "module.missing_fields",
-            "path and module_id are required in pdv.module.register payload",
-            in_reply_to=msg_id,
-        )
-        return
-
-    tree = get_pdv_tree()
-    if tree is None:
-        send_error(
-            "pdv.module.register.response",
-            "module.no_tree",
-            "PDVTree is not initialized",
-            in_reply_to=msg_id,
-        )
-        return
 
     working_dir = tree._working_dir or ""
 
@@ -292,35 +282,22 @@ def handle_module_create_empty(msg: dict) -> None:
     msg : dict
         Parsed PDV message envelope.
     """
-    from pdv.comms import get_pdv_tree, send_error, send_message  # noqa: PLC0415
+    from pdv.comms import send_error, send_message  # noqa: PLC0415
+    from pdv.handlers._helpers import validate_register_request  # noqa: PLC0415
     from pdv.tree import PDVModule, PDVTree  # noqa: PLC0415
 
     msg_id = msg.get("msg_id")
-    payload = msg.get("payload", {})
+    validated = validate_register_request(
+        msg, "pdv.module.create_empty.response", "module", required_fields=("id",)
+    )
+    if validated is None:
+        return
+    tree, payload = validated
     module_id = payload.get("id", "")
     name = payload.get("name", "") or module_id
     version = payload.get("version", "0.1.0")
     description = payload.get("description", "") or ""
     language = payload.get("language", "python") or "python"
-
-    if not module_id:
-        send_error(
-            "pdv.module.create_empty.response",
-            "module.missing_id",
-            "id is required in pdv.module.create_empty payload",
-            in_reply_to=msg_id,
-        )
-        return
-
-    tree = get_pdv_tree()
-    if tree is None:
-        send_error(
-            "pdv.module.create_empty.response",
-            "module.no_tree",
-            "PDVTree is not initialized",
-            in_reply_to=msg_id,
-        )
-        return
 
     # Reject collisions with any existing top-level tree key — not just
     # PDVModule nodes, since a data/folder node would also block access.
@@ -387,31 +364,18 @@ def handle_module_update(msg: dict) -> None:
     msg : dict
         Parsed PDV message envelope.
     """
-    from pdv.comms import get_pdv_tree, send_error, send_message  # noqa: PLC0415
+    from pdv.comms import send_error, send_message  # noqa: PLC0415
+    from pdv.handlers._helpers import validate_register_request  # noqa: PLC0415
     from pdv.tree import PDVModule  # noqa: PLC0415
 
     msg_id = msg.get("msg_id")
-    payload = msg.get("payload", {})
+    validated = validate_register_request(
+        msg, "pdv.module.update.response", "module", required_fields=("alias",)
+    )
+    if validated is None:
+        return
+    tree, payload = validated
     alias = payload.get("alias", "")
-
-    if not alias:
-        send_error(
-            "pdv.module.update.response",
-            "module.missing_alias",
-            "alias is required in pdv.module.update payload",
-            in_reply_to=msg_id,
-        )
-        return
-
-    tree = get_pdv_tree()
-    if tree is None:
-        send_error(
-            "pdv.module.update.response",
-            "module.no_tree",
-            "PDVTree is not initialized",
-            in_reply_to=msg_id,
-        )
-        return
 
     try:
         node = tree[alias]
@@ -591,22 +555,18 @@ def handle_handler_invoke(msg: dict) -> None:
     msg : dict
         Parsed PDV message envelope.
     """
-    from pdv.comms import get_pdv_tree, send_error, send_message  # noqa: PLC0415
+    from pdv.comms import send_error, send_message  # noqa: PLC0415
+    from pdv.handlers._helpers import validate_register_request  # noqa: PLC0415
     from pdv.modules import dispatch_handler  # noqa: PLC0415
 
     msg_id = msg.get("msg_id")
-    payload = msg.get("payload", {})
-    path = payload.get("path", "")
-
-    tree = get_pdv_tree()
-    if tree is None:
-        send_error(
-            "pdv.handler.invoke.response",
-            "tree.no_tree",
-            "PDVTree is not initialized",
-            in_reply_to=msg_id,
-        )
+    validated = validate_register_request(
+        msg, "pdv.handler.invoke.response", "tree", required_fields=()
+    )
+    if validated is None:
         return
+    tree, payload = validated
+    path = payload.get("path", "")
 
     if path not in tree:
         send_error(

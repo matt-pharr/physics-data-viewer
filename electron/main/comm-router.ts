@@ -264,14 +264,10 @@ export class CommRouter {
   request(
     type: string,
     payload: Record<string, unknown> = {},
-    options: CommRequestOptions | number = {}
+    options: CommRequestOptions = {}
   ): Promise<PDVMessage> {
-    // Support legacy call signature: request(type, payload, timeoutMs)
-    const opts: CommRequestOptions = typeof options === "number"
-      ? { timeoutMs: options }
-      : options;
-    const timeoutMs = opts.timeoutMs ?? 30_000;
-    const { keepAlivePushType } = opts;
+    const timeoutMs = options.timeoutMs ?? 30_000;
+    const { keepAlivePushType } = options;
 
     if (!this.kernelManager || !this.kernelId) {
       return Promise.reject(

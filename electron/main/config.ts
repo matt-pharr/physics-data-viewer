@@ -193,6 +193,40 @@ const CONFIG_DEFAULTS: PDVConfig = {
   },
 };
 
+// Field tables driving parseConfig. Every key in PDVConfig must appear in
+// exactly one table (or be handled explicitly in parseConfig) — a key
+// missing from all of them is silently dropped on load, which is how the
+// lastUpdateCheck throttle was lost across restarts before this refactor.
+
+/** Optional string keys: null/undefined tolerated (skipped), non-strings throw. */
+const STRING_KEYS = [
+  "pythonPath",
+  "juliaPath",
+  "lastProjectDir",
+  "pythonEditorCmd",
+  "juliaEditorCmd",
+  "defaultSaveLocation",
+  "workingDirBase",
+  "projectRoot",
+] as const;
+
+/** Boolean keys: anything but a literal boolean (including null) throws. */
+const BOOLEAN_KEYS = [
+  "showPrivateVariables",
+  "showModuleVariables",
+  "showCallableVariables",
+  "autoRefreshNamespace",
+] as const;
+
+/** String-array keys: null/undefined tolerated, non-string entries throw. */
+const STRING_ARRAY_KEYS = ["defaultPackages", "recentProjects"] as const;
+
+/**
+ * Nested-object keys passed through without deep validation:
+ * null/undefined tolerated, arrays and primitives throw.
+ */
+const OBJECT_KEYS = ["settings", "mcp", "uv"] as const;
+
 // Parse and type-check config JSON loaded from disk.
 // Optional string fields may be null/undefined to explicitly clear them.
 //
@@ -217,158 +251,74 @@ function parseConfig(raw: string, filePath: string): Partial<PDVConfig> {
   }
   const obj = parsed as Record<string, unknown>;
   const result: Partial<PDVConfig> = {};
+  const invalid = (key: string): never => {
+    throw new Error(`Invalid config value for ${key} in ${filePath}`);
+  };
 
-  if ("pythonPath" in obj) {
-    const pythonPath = obj.pythonPath;
-    if (pythonPath !== null && pythonPath !== undefined && typeof pythonPath !== "string") {
-      throw new Error(`Invalid config value for pythonPath in ${filePath}`);
-    }
-    if (typeof pythonPath === "string") {
-      result.pythonPath = pythonPath;
-    }
+  for (const key of STRING_KEYS) {
+    if (!(key in obj)) continue;
+    const val = obj[key];
+    if (val !== null && val !== undefined && typeof val !== "string") invalid(key);
+    if (typeof val === "string") result[key] = val;
   }
-  if ("juliaPath" in obj) {
-    const juliaPath = obj.juliaPath;
-    if (juliaPath !== null && juliaPath !== undefined && typeof juliaPath !== "string") {
-      throw new Error(`Invalid config value for juliaPath in ${filePath}`);
-    }
-    if (typeof juliaPath === "string") {
-      result.juliaPath = juliaPath;
-    }
+
+  for (const key of BOOLEAN_KEYS) {
+    if (!(key in obj)) continue;
+    const val = obj[key];
+    if (typeof val !== "boolean") invalid(key);
+    result[key] = val as boolean;
   }
-  if ("lastProjectDir" in obj) {
-    const lastProjectDir = obj.lastProjectDir;
-    if (
-      lastProjectDir !== null &&
-      lastProjectDir !== undefined &&
-      typeof lastProjectDir !== "string"
-    ) {
-      throw new Error(`Invalid config value for lastProjectDir in ${filePath}`);
+
+  for (const key of STRING_ARRAY_KEYS) {
+    if (!(key in obj)) continue;
+    const val = obj[key];
+    if (val === null || val === undefined) continue;
+    if (!Array.isArray(val) || !val.every((entry) => typeof entry === "string")) {
+      invalid(key);
     }
-    if (typeof lastProjectDir === "string") {
-      result.lastProjectDir = lastProjectDir;
-    }
+    result[key] = val as string[];
   }
-  if ("showPrivateVariables" in obj) {
-    if (typeof obj.showPrivateVariables !== "boolean") {
-      throw new Error(`Invalid config value for showPrivateVariables in ${filePath}`);
-    }
-    result.showPrivateVariables = obj.showPrivateVariables;
+
+  for (const key of OBJECT_KEYS) {
+    if (!(key in obj)) continue;
+    const val = obj[key];
+    if (val === null || val === undefined) continue;
+    if (typeof val !== "object" || Array.isArray(val)) invalid(key);
+    (result as Record<string, unknown>)[key] = val;
   }
-  if ("showModuleVariables" in obj) {
-    if (typeof obj.showModuleVariables !== "boolean") {
-      throw new Error(`Invalid config value for showModuleVariables in ${filePath}`);
-    }
-    result.showModuleVariables = obj.showModuleVariables;
-  }
-  if ("showCallableVariables" in obj) {
-    if (typeof obj.showCallableVariables !== "boolean") {
-      throw new Error(`Invalid config value for showCallableVariables in ${filePath}`);
-    }
-    result.showCallableVariables = obj.showCallableVariables;
-  }
-  if ("autoRefreshNamespace" in obj) {
-    if (typeof obj.autoRefreshNamespace !== "boolean") {
-      throw new Error(`Invalid config value for autoRefreshNamespace in ${filePath}`);
-    }
-    result.autoRefreshNamespace = obj.autoRefreshNamespace;
-  }
+
   if ("theme" in obj) {
     const theme = obj.theme;
     if (theme !== null && theme !== undefined && theme !== "light" && theme !== "dark") {
-      throw new Error(`Invalid config value for theme in ${filePath}`);
+      invalid("theme");
     }
     if (theme === "light" || theme === "dark") {
       result.theme = theme;
     }
   }
-  for (const key of ["pythonEditorCmd", "juliaEditorCmd", "defaultSaveLocation", "workingDirBase"] as const) {
-    if (key in obj) {
-      const val = obj[key];
-      if (val !== null && val !== undefined && typeof val !== "string") {
-        throw new Error(`Invalid config value for ${key} in ${filePath}`);
-      }
-      if (typeof val === "string") result[key] = val;
-    }
-  }
+
+  // Lenient by design: an out-of-range or malformed interval falls back to
+  // the default instead of failing the whole config load.
   if ("autoSaveIntervalSeconds" in obj) {
     const val = obj.autoSaveIntervalSeconds;
-    if (val !== null && val !== undefined && typeof val === "number" && val >= 30) {
+    if (typeof val === "number" && val >= 30) {
       result.autoSaveIntervalSeconds = val;
     }
   }
-  if ("defaultPackages" in obj) {
-    const defaultPackages = obj.defaultPackages;
-    if (defaultPackages !== null && defaultPackages !== undefined) {
-      if (
-        !Array.isArray(defaultPackages) ||
-        !defaultPackages.every((entry) => typeof entry === "string")
-      ) {
-        throw new Error(`Invalid config value for defaultPackages in ${filePath}`);
-      }
-      result.defaultPackages = defaultPackages;
-    }
+
+  // Internal timestamp; malformed values are dropped rather than fatal.
+  if ("lastUpdateCheck" in obj && typeof obj.lastUpdateCheck === "number") {
+    result.lastUpdateCheck = obj.lastUpdateCheck;
   }
-  if ("projectRoot" in obj) {
-    const projectRoot = obj.projectRoot;
-    if (projectRoot !== null && projectRoot !== undefined && typeof projectRoot !== "string") {
-      throw new Error(`Invalid config value for projectRoot in ${filePath}`);
-    }
-    if (typeof projectRoot === "string") {
-      result.projectRoot = projectRoot;
-    }
-  }
-  if ("recentProjects" in obj) {
-    const recentProjects = obj.recentProjects;
-    if (recentProjects !== null && recentProjects !== undefined) {
-      if (
-        !Array.isArray(recentProjects) ||
-        !recentProjects.every((entry) => typeof entry === "string")
-      ) {
-        throw new Error(`Invalid config value for recentProjects in ${filePath}`);
-      }
-      result.recentProjects = recentProjects;
-    }
-  }
-  if ("settings" in obj) {
-    const settings = obj.settings;
-    if (
-      settings !== null &&
-      settings !== undefined &&
-      (typeof settings !== "object" || Array.isArray(settings))
-    ) {
-      throw new Error(`Invalid config value for settings in ${filePath}`);
-    }
-    if (settings && typeof settings === "object" && !Array.isArray(settings)) {
-      result.settings = settings as PDVConfig["settings"];
-    }
-  }
-  if ("mcp" in obj) {
-    const mcp = obj.mcp;
-    if (mcp !== null && mcp !== undefined && (typeof mcp !== "object" || Array.isArray(mcp))) {
-      throw new Error(`Invalid config value for mcp in ${filePath}`);
-    }
-    if (mcp && typeof mcp === "object" && !Array.isArray(mcp)) {
-      result.mcp = mcp as PDVConfig["mcp"];
-    }
-  }
-  if ("uv" in obj) {
-    const uv = obj.uv;
-    if (uv !== null && uv !== undefined && (typeof uv !== "object" || Array.isArray(uv))) {
-      throw new Error(`Invalid config value for uv in ${filePath}`);
-    }
-    if (uv && typeof uv === "object" && !Array.isArray(uv)) {
-      result.uv = uv as PDVConfig["uv"];
-    }
-  }
+
   if ("launchers" in obj) {
     const launchers = obj.launchers;
     if (launchers !== null && launchers !== undefined) {
       if (typeof launchers !== "object" || Array.isArray(launchers)) {
-        throw new Error(`Invalid config value for launchers in ${filePath}`);
+        invalid("launchers");
       }
-      const parsed = parseLaunchers(launchers as Record<string, unknown>, filePath);
-      if (parsed) result.launchers = parsed;
+      const parsedLaunchers = parseLaunchers(launchers as Record<string, unknown>, filePath);
+      if (parsedLaunchers) result.launchers = parsedLaunchers;
     }
   }
 

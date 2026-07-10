@@ -175,36 +175,23 @@ def handle_file_register(msg: dict) -> None:
     """
     import os  # noqa: PLC0415
 
-    from pdv.comms import get_pdv_tree, send_error, send_message  # noqa: PLC0415
+    from pdv.comms import send_message  # noqa: PLC0415
+    from pdv.handlers._helpers import validate_register_request  # noqa: PLC0415
     from pdv.tree import PDVFile, PDVLib, PDVNamelist  # noqa: PLC0415
 
     msg_id = msg.get("msg_id")
-    payload = msg.get("payload", {})
+    validated = validate_register_request(
+        msg, "pdv.file.register.response", "file", required_fields=("filename",)
+    )
+    if validated is None:
+        return
+    tree, payload = validated
     tree_path = payload.get("tree_path", "")
     filename = payload.get("filename", "")
     node_type = payload.get("node_type", "file")
     explicit_name = payload.get("name", "")
     module_id = payload.get("module_id")
     source_rel_path = payload.get("source_rel_path")
-
-    if not filename:
-        send_error(
-            "pdv.file.register.response",
-            "file.missing_filename",
-            "filename is required in pdv.file.register payload",
-            in_reply_to=msg_id,
-        )
-        return
-
-    tree = get_pdv_tree()
-    if tree is None:
-        send_error(
-            "pdv.file.register.response",
-            "file.no_tree",
-            "PDVTree is not initialized",
-            in_reply_to=msg_id,
-        )
-        return
 
     node_uuid = payload.get("uuid", "")
     if not node_uuid:

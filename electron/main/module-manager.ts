@@ -231,6 +231,19 @@ export class ModuleManager {
   }
 
   /**
+   * Resolve the on-disk directory for a module record: its recorded
+   * `installPath` when present (project-local and bundled installs), else
+   * the module's default slot under the shared packages root.
+   *
+   * @param record - Stored module record.
+   * @param moduleId - Module identifier (names the default packages-root slot).
+   * @returns Absolute module directory path.
+   */
+  private moduleDirFor(record: StoredModuleRecord, moduleId: string): string {
+    return record.installPath ?? path.join(this.packagesRoot, moduleId);
+  }
+
+  /**
    * Resolve a module record by id, checking the store index first then
    * falling back to bundled example modules.
    *
@@ -302,7 +315,7 @@ export class ModuleManager {
     }
     const record = await this.resolveModuleRecord(moduleId, projectDir);
     if (!record) return null;
-    return record.installPath ?? path.join(this.packagesRoot, moduleId);
+    return this.moduleDirFor(record, moduleId);
   }
 
   /**
@@ -388,7 +401,7 @@ export class ModuleManager {
     if (module.source.type === "bundled") {
       return { success: false, error: "Cannot uninstall bundled modules" };
     }
-    const moduleDir = module.installPath ?? path.join(this.packagesRoot, moduleId);
+    const moduleDir = this.moduleDirFor(module, moduleId);
     await fs.rm(moduleDir, { recursive: true, force: true });
     delete index.modules[moduleId];
     await this.writeIndex(index);
@@ -535,7 +548,7 @@ export class ModuleManager {
     if (!module) {
       throw new Error(`Installed module not found: ${moduleId}`);
     }
-    const moduleDir = module.installPath ?? path.join(this.packagesRoot, moduleId);
+    const moduleDir = this.moduleDirFor(module, moduleId);
     const manifest = await this.readAndValidateManifest(moduleDir);
 
     const actions = await this.resolveActions(manifest, moduleDir);
@@ -593,7 +606,7 @@ export class ModuleManager {
     if (!module) {
       return [];
     }
-    const moduleDir = module.installPath ?? path.join(this.packagesRoot, moduleId);
+    const moduleDir = this.moduleDirFor(module, moduleId);
     const manifest = await this.readAndValidateManifest(moduleDir);
     const inputs = await this.resolveInputs(manifest, moduleDir);
     return inputs.map((input) => ({
@@ -636,7 +649,7 @@ export class ModuleManager {
       return { hasGui: false };
     }
     const moduleDir =
-      module.installPath ?? path.join(this.packagesRoot, moduleId);
+      this.moduleDirFor(module, moduleId);
     const manifest = await this.readAndValidateManifest(moduleDir);
     if (isV4Manifest(manifest)) {
       if (!manifest.default_gui) return { hasGui: false };
@@ -682,7 +695,7 @@ export class ModuleManager {
         },
       ];
     }
-    const moduleDir = module.installPath ?? path.join(this.packagesRoot, moduleId);
+    const moduleDir = this.moduleDirFor(module, moduleId);
     let manifest: ModuleManifestV1;
     try {
       manifest = await this.readAndValidateManifest(moduleDir);
@@ -811,7 +824,7 @@ export class ModuleManager {
   async readAndValidateGuiManifest(moduleId: string): Promise<GuiManifestV1 | null> {
     const module = await this.resolveModuleRecord(moduleId);
     if (!module) return null;
-    const moduleDir = module.installPath ?? path.join(this.packagesRoot, moduleId);
+    const moduleDir = this.moduleDirFor(module, moduleId);
     return readGuiManifest(moduleDir);
   }
 
@@ -824,7 +837,7 @@ export class ModuleManager {
   async getModuleInstallPath(moduleId: string, projectDir?: string | null): Promise<string | null> {
     const module = await this.resolveModuleRecord(moduleId, projectDir);
     if (!module) return null;
-    return module.installPath ?? path.join(this.packagesRoot, moduleId);
+    return this.moduleDirFor(module, moduleId);
   }
 
   /**
@@ -894,7 +907,7 @@ export class ModuleManager {
   ): Promise<Array<{ name: string; version?: string; marker?: string }>> {
     const module = await this.resolveModuleRecord(moduleId, projectDir);
     if (!module) return [];
-    const moduleDir = module.installPath ?? path.join(this.packagesRoot, moduleId);
+    const moduleDir = this.moduleDirFor(module, moduleId);
     try {
       const manifest = await this.readAndValidateManifest(moduleDir);
       return manifest.dependencies ?? [];
@@ -912,7 +925,7 @@ export class ModuleManager {
   async isV4Module(moduleId: string, projectDir?: string | null): Promise<boolean> {
     const module = await this.resolveModuleRecord(moduleId, projectDir);
     if (!module) return false;
-    const moduleDir = module.installPath ?? path.join(this.packagesRoot, moduleId);
+    const moduleDir = this.moduleDirFor(module, moduleId);
     try {
       const manifest = await this.readAndValidateManifest(moduleDir);
       return isV4Manifest(manifest);
@@ -966,7 +979,7 @@ export class ModuleManager {
     if (!module) {
       throw new Error(`Installed module not found: ${moduleId}`);
     }
-    const moduleDir = module.installPath ?? path.join(this.packagesRoot, moduleId);
+    const moduleDir = this.moduleDirFor(module, moduleId);
     const manifest = await this.readAndValidateManifest(moduleDir);
     return {
       installPath: moduleDir,

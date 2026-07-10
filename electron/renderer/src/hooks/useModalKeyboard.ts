@@ -4,8 +4,8 @@
  * Returns a `keyDownHandler` to attach to the modal's primary input. Pressing
  * Enter calls `onSubmit` (with `preventDefault`), and pressing Escape calls
  * `onCancel`. Used by every PDV dialog with a single text input
- * (CreateScriptDialog, CreateNoteDialog, CreateGuiDialog, SaveAsDialog,
- * etc.) to remove the duplicated inline handler.
+ * (CreateTreeItemDialog, SaveAsDialog, etc.) to remove the duplicated
+ * inline handler.
  */
 
 import type React from 'react';

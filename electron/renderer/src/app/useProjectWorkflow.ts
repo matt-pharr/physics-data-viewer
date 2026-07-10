@@ -42,8 +42,8 @@ interface UseProjectWorkflowOptions {
   setSavedPdvVersion: Dispatch<SetStateAction<string | null>>;
   /** Updates the project name displayed in the title bar. */
   setCurrentProjectName: Dispatch<SetStateAction<string | null>>;
-  /** Shows or hides the Save As dialog. */
-  setShowSaveAsDialog: Dispatch<SetStateAction<boolean>>;
+  /** Opens the Save As dialog. */
+  openSaveAsDialog: () => void;
   /** Ref holding the tabs snapshot from project.onLoaded push (consumed once). */
   loadedProjectTabsRef: MutableRefObject<{ tabs: CellTab[]; activeTabId: number } | null>;
   /** Validates and normalizes raw code-cells.json data into typed CellTab[]. */
@@ -72,7 +72,7 @@ export function useProjectWorkflow(options: UseProjectWorkflowOptions) {
     setChecksumMismatch,
     setSavedPdvVersion,
     setCurrentProjectName,
-    setShowSaveAsDialog,
+    openSaveAsDialog,
     loadedProjectTabsRef,
     normalizeLoadedCodeCells,
     flushDirtyNotes,
@@ -106,7 +106,7 @@ export function useProjectWorkflow(options: UseProjectWorkflowOptions) {
     // If Save As is requested or no project is open yet, show the SaveAs dialog
     // instead of the native directory picker.
     if (!options?.directory && (options?.saveAs || !currentProjectDir)) {
-      setShowSaveAsDialog(true);
+      openSaveAsDialog();
       // Returns false — not an error. The dialog will invoke handleSaveProject
       // again with { directory, projectName } once the user confirms.
       return false;
@@ -167,7 +167,7 @@ export function useProjectWorkflow(options: UseProjectWorkflowOptions) {
     setLogs,
     setModulesRefreshToken,
     setSavedPdvVersion,
-    setShowSaveAsDialog,
+    openSaveAsDialog,
   ]);
 
   const executeOpenProject = useCallback(async (directory?: string) => {

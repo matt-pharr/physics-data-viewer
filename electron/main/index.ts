@@ -16,13 +16,11 @@
  */
 
 import { BrowserWindow, app } from "electron";
-import { handleIpc, removeAllIpcHandlers } from "./ipc-registry";
-import { randomUUID } from "node:crypto";
+import { removeAllIpcHandlers } from "./ipc-registry";
 import * as fs from "fs/promises";
 import * as fsSync from "fs";
 import * as os from "os";
 import * as path from "path";
-import { executeAndTranscribe, TranscriptWriter } from "./mcp/transcript";
 
 import { CommRouter } from "./comm-router";
 import { QueryRouter } from "./query-router";
@@ -35,14 +33,10 @@ import {
 import { registerModulesIpcHandlers } from "./ipc-register-modules";
 import { registerProjectIpcHandlers } from "./ipc-register-project";
 import { shouldBumpOnSwap } from "./mcp/generation-guard";
-import { mirrorAutosaveSidecars, autosaveDirFor } from "./autosave-sidecars";
 import { KernelManager } from "./kernel-manager";
 import { ModuleManager } from "./module-manager";
-import {
-  bindProjectModulesToTree,
-  setupProjectModuleNamespaces,
-} from "./module-runtime";
-import { copyFilesForLoad, syncUvEnvironmentForLoad } from "./project-file-sync";
+import { bindProjectModulesToTree } from "./module-runtime";
+import { syncUvEnvironmentForLoad } from "./project-file-sync";
 import {
   ProjectManager,
   type ProjectModuleImport,
@@ -51,6 +45,8 @@ import {
 } from "./project-manager";
 import { ConfigStore, DEFAULT_AUTOSAVE_INTERVAL_S } from "./config";
 import { registerAppStateIpcHandlers } from "./ipc-register-app-state";
+import { registerAutosaveIpcHandlers } from "./ipc-register-autosave";
+import { registerEnvironmentIpcHandlers } from "./ipc-register-environment";
 import { registerGuiEditorIpcHandlers } from "./ipc-register-gui-editor";
 import { registerModuleWindowIpcHandlers } from "./ipc-register-module-windows";
 import { registerTreeNamespaceScriptIpcHandlers } from "./ipc-register-tree-namespace-script";
@@ -64,21 +60,9 @@ import {
   NamespaceQueryOptions,
   PDVConfig,
   type ActiveEnvironmentInfo,
-  type CodeCellData,
-  type EnvironmentInstallResult,
   type McpStatus,
-  type ProjectPackage,
 } from "./ipc";
-import { parseDependencies, normalizeDistName, specName } from "./pyproject";
-import {
-  uvAdd,
-  uvRemove,
-  uvLockUpgrade,
-  uvSync,
-  uvPipList,
-  type UvRunOptions,
-} from "./uv-runner";
-import { venvPythonPath } from "./uv-environment";
+import { uvSync } from "./uv-runner";
 import { PDVMessage, PDVMessageType, setAppVersion } from "./pdv-protocol";
 import { registerLaunchersIpcHandlers } from "./ipc-register-launchers";
 import type { McpServerHooks } from "./mcp/mcp-context";
@@ -236,15 +220,24 @@ function runSerializedProjectManifestMutation<T>(
 /**
  * Ensure script names are safe and end with the correct language extension.
  *
+ * The stem becomes the script's tree key, and tree keys are dot-path
+ * segments — a `.` inside the stem would corrupt path addressing, so only
+ * identifier characters survive. Mirrors the renderer-side preview in
+ * `CreateTreeItemDialog`.
+ *
  * @param scriptName - User-provided script name.
  * @param language - Target language (determines file extension).
- * @returns Sanitized filename.
+ * @returns Sanitized filename (`<identifier-safe stem><ext>`).
  */
 function sanitizeScriptName(scriptName: string, language: "python" | "julia" = "python"): string {
   const ext = language === "julia" ? ".jl" : ".py";
-  const trimmed = scriptName.trim() || "script";
-  const withExt = trimmed.endsWith(ext) ? trimmed : `${trimmed}${ext}`;
-  return withExt.replace(/[\\/]/g, "_");
+  const stem =
+    scriptName
+      .trim()
+      .replace(/\.(py|jl)$/i, "")
+      .replace(/\s+/g, "_")
+      .replace(/[^a-zA-Z0-9_]/g, "") || "script";
+  return `${stem}${ext}`;
 }
 
 /**
@@ -473,6 +466,28 @@ export function registerIpcHandlers(
   const guiEditorWindowManager = new GuiEditorWindowManager(preloadPath);
   const guiViewerWindowManager = new GuiViewerWindowManager(preloadPath);
 
+  // Autosave handlers + the snapshot routines shared with the kernel
+  // registrar (pre-restart snapshot, post-restart recovery) and the
+  // execution-state idle listener below.
+  const autosave = registerAutosaveIpcHandlers({
+    win,
+    kernelManager,
+    commRouter,
+    projectManager,
+    moduleManager,
+    configStore,
+    kernelWorkingDirs,
+    readConfig,
+    getActiveKernelId: () => activeKernelId,
+    getActiveProjectDir: () => activeProjectDir,
+    getPendingModuleImports: () => pendingModuleImports,
+    getPendingModuleSettings: () => pendingModuleSettings,
+    setPendingModuleState: (imports, settings) => {
+      pendingModuleImports = imports;
+      pendingModuleSettings = settings;
+    },
+  });
+
   registerKernelIpcHandlers({
     win,
     kernelManager,
@@ -512,7 +527,7 @@ export function registerIpcHandlers(
       if (id) {
         const config = readConfig(configStore);
         const intervalMs = (config.autoSaveIntervalSeconds ?? DEFAULT_AUTOSAVE_INTERVAL_S) * 1000;
-        projectManager.startAutosaveTimer(intervalMs, triggerAutosave);
+        projectManager.startAutosaveTimer(intervalMs, autosave.triggerAutosave);
       } else {
         projectManager.stopAutosaveTimer();
       }
@@ -523,12 +538,9 @@ export function registerIpcHandlers(
     getDefaultPackages: () => readConfig(configStore).defaultPackages ?? [],
     getUvBinaryPath: () => readConfig(configStore).uv?.binaryPath,
     bindActiveProjectModules,
-    // Function declarations below in this scope — hoisted, so referencing
-    // them here is safe. Defined next to the autosave IPC handlers whose
-    // logic they share.
-    autosaveBeforeRestart,
+    autosaveBeforeRestart: autosave.autosaveBeforeRestart,
     recoverUnsavedAfterRestart: async (orphanDir: string) => {
-      await recoverUnsavedSession(orphanDir);
+      await autosave.recoverUnsavedSession(orphanDir);
     },
   });
 
@@ -588,6 +600,18 @@ export function registerIpcHandlers(
     detectPythonVersion,
     getPdvVersion: () => app.getVersion(),
     runWithProjectManifestWriteLock: runSerializedProjectManifestMutation,
+  });
+
+  // Environment discovery/install + Packages tab + installModule. Returns
+  // the import-cache refresher the project-load env sync below reuses.
+  const { refreshKernelImportCaches } = registerEnvironmentIpcHandlers({
+    win,
+    configStore,
+    kernelManager,
+    kernelWorkingDirs,
+    kernelEnvMeta,
+    getActiveKernelId: () => activeKernelId,
+    readConfig,
   });
 
   registerProjectIpcHandlers({
@@ -671,7 +695,7 @@ export function registerIpcHandlers(
     onConfigChanged: (prev, next) => {
       if (prev.autoSaveIntervalSeconds !== next.autoSaveIntervalSeconds && activeKernelId) {
         const intervalMs = (next.autoSaveIntervalSeconds ?? DEFAULT_AUTOSAVE_INTERVAL_S) * 1000;
-        projectManager.startAutosaveTimer(intervalMs, triggerAutosave);
+        projectManager.startAutosaveTimer(intervalMs, autosave.triggerAutosave);
       }
     },
   });
@@ -687,444 +711,6 @@ export function registerIpcHandlers(
     commRouter,
   });
 
-  registerEnvironmentIpcHandlers(win, configStore, () => activeKernelId);
-
-  // --- Packages tab (ARCHITECTURE.md §10.5.13) -----------------------------
-  // Per-project package CRUD: list declared deps paired with installed
-  // versions, and add/remove/upgrade via uv. After each mutation the kernel's
-  // import-finder caches are invalidated so newly installed packages import
-  // without a restart (same mechanism as pdv.install, §10.5.11).
-  const pkgRunOptions = (): UvRunOptions => ({
-    cwd: activeKernelId ? kernelWorkingDirs.get(activeKernelId) : undefined,
-    win,
-    pushChannel: IPC.push.envActivity,
-    binaryPath: readConfig(configStore).uv?.binaryPath,
-  });
-  const refreshKernelImportCaches = async (): Promise<void> => {
-    if (!activeKernelId) return;
-    try {
-      await kernelManager.execute(activeKernelId, {
-        code: "import importlib; importlib.invalidate_caches()",
-        silent: true,
-      });
-    } catch (err) {
-      console.warn("[env] failed to refresh kernel import caches:", err);
-    }
-  };
-  handleIpc(IPC.environment.listPackages, async (): Promise<ProjectPackage[]> => {
-    if (!activeKernelId) return [];
-    const workingDir = kernelWorkingDirs.get(activeKernelId);
-    if (!workingDir) return [];
-    let pyprojectText: string;
-    try {
-      pyprojectText = await fs.readFile(path.join(workingDir, "pyproject.toml"), "utf8");
-    } catch {
-      return [];
-    }
-    const specs = await parseDependencies(pyprojectText);
-    const venvPython = venvPythonPath(workingDir);
-    const pipResult = await uvPipList(venvPython, {
-      cwd: workingDir,
-      binaryPath: readConfig(configStore).uv?.binaryPath,
-    });
-    const installed = new Map<string, string>();
-    if (pipResult.success) {
-      try {
-        const list = JSON.parse(pipResult.output) as Array<{ name?: string; version?: string }>;
-        for (const p of list) {
-          if (p.name && p.version) installed.set(normalizeDistName(p.name), p.version);
-        }
-      } catch {
-        // uv may emit warnings before the JSON; degrade gracefully.
-      }
-    }
-    return specs.map((spec) => {
-      const name = specName(spec);
-      return { spec, name, installedVersion: installed.get(name) };
-    });
-  });
-  handleIpc(
-    IPC.environment.addPackage,
-    async (_event, specs: string[]): Promise<EnvironmentInstallResult> => {
-      const result = await uvAdd(specs, pkgRunOptions());
-      if (result.success) await refreshKernelImportCaches();
-      return { success: result.success, output: result.output };
-    }
-  );
-  handleIpc(
-    IPC.environment.removePackage,
-    async (_event, names: string[]): Promise<EnvironmentInstallResult> => {
-      const result = await uvRemove(names, pkgRunOptions());
-      if (result.success) await refreshKernelImportCaches();
-      return { success: result.success, output: result.output };
-    }
-  );
-  handleIpc(
-    IPC.environment.upgradePackage,
-    async (_event, names: string[]): Promise<EnvironmentInstallResult> => {
-      const opts = pkgRunOptions();
-      const lock = await uvLockUpgrade(names, opts);
-      if (!lock.success) return { success: false, output: lock.output };
-      // In-place sync under a live kernel: --inexact keeps pdv-python
-      // (installed outside the lock) from being uninstalled.
-      const sync = await uvSync({ ...opts, inexact: true });
-      if (sync.success) await refreshKernelImportCaches();
-      return { success: sync.success, output: lock.output + sync.output };
-    }
-  );
-
-  // Reactive missing-module install (§10.5.12). The renderer sends only the
-  // module name; the code string is built here and the run is bracketed with
-  // executeBegin/executeFinish pushes so the console seeds a log entry and
-  // streams the install output live — same pattern as MCP agent runs.
-  handleIpc(
-    IPC.environment.installModule,
-    async (_event, kernelId: string, moduleName: string): Promise<void> => {
-      if (!kernelManager.getKernel(kernelId)) {
-        throw new Error(`Kernel not found: ${kernelId}`);
-      }
-      const code = `pdv.install(${JSON.stringify(moduleName)})`;
-      const origin = { kind: "unknown" as const, label: `Install ${moduleName}` };
-      const workingDir = kernelWorkingDirs.get(kernelId);
-      const transcript = workingDir ? new TranscriptWriter(workingDir) : null;
-      const executionId = randomUUID();
-      const start = Date.now();
-      const send = (channel: string, payload: unknown): void => {
-        if (!win.isDestroyed()) win.webContents.send(channel, payload);
-      };
-      send(IPC.push.executeBegin, { executionId, code, origin, timestamp: start });
-      try {
-        const result = await executeAndTranscribe(
-          kernelManager.execute.bind(kernelManager),
-          transcript,
-          kernelId,
-          { code, executionId, origin },
-          (chunk) => send(IPC.push.executeOutput, chunk),
-        );
-        send(IPC.push.executeFinish, {
-          executionId,
-          duration: result.duration ?? Date.now() - start,
-          error: result.error,
-          errorDetails: result.errorDetails,
-        });
-      } catch (err) {
-        send(IPC.push.executeFinish, {
-          executionId,
-          duration: Date.now() - start,
-          error: err instanceof Error ? err.message : String(err),
-        });
-        throw err;
-      }
-    }
-  );
-
-
-  // ---- Autosave IPC handlers and lifecycle wiring --------------------------
-
-  function triggerAutosave(): void {
-    if (!activeKernelId) return;
-    const state = kernelManager.getExecutionState(activeKernelId);
-    if (state !== "idle") {
-      console.log("[autosave] kernel busy, deferring until idle");
-      projectManager.setAutosavePending();
-      return;
-    }
-    win.webContents.send(IPC.push.autosaveTrigger);
-  }
-
-  /**
-   * Core autosave routine, shared by the renderer-triggered
-   * ``autosave.run`` IPC handler and the pre-restart snapshot.
-   *
-   * Saves the tree into ``<baseDir>/.autosave`` (the project dir when one
-   * is active, else the session working dir) and mirrors the
-   * manifest/module sidecars needed for recovery.
-   *
-   * @param codeCells - Code-cell state to bundle with the snapshot.
-   * @param opts - Optional overrides forwarded to ``projectManager.autosave``
-   *   (``timeoutMs`` bounds the kernel comm request).
-   * @returns ``{ saved: boolean }`` — false when there is nowhere to save
-   *   (no project dir or working dir) or the kernel-side save failed.
-   */
-  async function performAutosave(
-    codeCells: CodeCellData,
-    opts?: { timeoutMs?: number },
-  ): Promise<{ saved: boolean }> {
-    const baseDir = activeProjectDir || kernelWorkingDirs.get(activeKernelId ?? "");
-    if (!baseDir) {
-      console.warn(
-        "[autosave] skipped: no active project dir or kernel working dir",
-      );
-      return { saved: false };
-    }
-
-    // Snapshot the in-memory module-import state up front. The autosave is
-    // about to await a kernel comm + several disk writes; if a `modules:*`
-    // IPC mutates `pendingModuleImports` mid-flight the synthesized manifest
-    // could be torn. (Also belt-and-suspenders against the save-lock below.)
-    const importsSnapshot = [...pendingModuleImports];
-    const settingsSnapshot = { ...pendingModuleSettings };
-    const language: "python" | "julia" = activeKernelId
-      ? (kernelManager.getKernel(activeKernelId)?.language ?? "python")
-      : "python";
-
-    return projectManager.runWithSaveLock(async () => {
-      // Bracket the kernel comm with start/end pushes so the renderer can
-      // gate cell execution. An execute_request queued behind a
-      // pdv.project.save in ipykernel's shell channel can hang in ways
-      // that aren't worth root-causing here — easier to keep them off the
-      // wire entirely until the save returns.
-      win.webContents.send(IPC.push.autosaveStarted);
-      try {
-        const autosaveDir = autosaveDirFor(baseDir);
-        const result = await projectManager.autosave(autosaveDir, codeCells, opts);
-        if (result === null) return { saved: false };
-
-        await mirrorAutosaveSidecars(
-          autosaveDir,
-          result,
-          {
-            activeProjectDir,
-            pendingImports: importsSnapshot,
-            pendingSettings: settingsSnapshot,
-            language,
-            pdvVersion: app.getVersion(),
-          },
-          moduleManager,
-        );
-
-        return { saved: true };
-      } finally {
-        win.webContents.send(IPC.push.autosaveEnded);
-      }
-    });
-  }
-
-  handleIpc(IPC.autosave.run, async (_event, codeCells: unknown) => {
-    return performAutosave(codeCells as CodeCellData);
-  });
-
-  /**
-   * Pre-restart snapshot (see ``RegisterKernelIpcHandlersOptions``).
-   *
-   * Reads the code cells from the working dir's ``code-cells.json`` (the
-   * renderer mirrors its tabs there on a debounce, so the on-disk copy is
-   * at most one debounce window behind) and takes a fresh autosave. The
-   * fresh save is attempted only when the server process is alive AND
-   * idle: a hung or crashed server is often *why* the user is restarting,
-   * and ``executionState`` can report a stale "idle" after a crash (the
-   * process exit handler never resets it), so process liveness is checked
-   * explicitly. When skipped, any snapshot from the timer-based autosave
-   * loop is reported instead. The comm request is bounded to 5 s so a
-   * wedged-but-alive server can't stall the restart on the default 30 s
-   * timeout.
-   *
-   * @param kernelId - The server session being restarted.
-   * @returns True when ``<baseDir>/.autosave`` holds a usable snapshot.
-   */
-  async function autosaveBeforeRestart(kernelId: string): Promise<boolean> {
-    const workingDir = kernelWorkingDirs.get(kernelId);
-    const baseDir = activeProjectDir || workingDir;
-    if (!baseDir) return false;
-
-    const proc = kernelManager.getKernelProcessState(kernelId);
-    const dead =
-      !proc ||
-      proc.exitCode !== null ||
-      proc.killed ||
-      kernelManager.getKernel(kernelId)?.status === "dead";
-    if (!dead && kernelManager.getExecutionState(kernelId) === "idle") {
-      let codeCells: CodeCellData = { tabs: [], activeTabId: 1 };
-      if (workingDir) {
-        try {
-          codeCells = JSON.parse(
-            await fs.readFile(path.join(workingDir, "code-cells.json"), "utf8"),
-          ) as CodeCellData;
-        } catch {
-          /* no cells mirrored yet — snapshot the tree with empty cells */
-        }
-      }
-      const result = await performAutosave(codeCells, { timeoutMs: 5000 });
-      if (result.saved) return true;
-    } else {
-      console.warn(
-        dead
-          ? "[autosave] pre-restart snapshot skipped: server process is dead; falling back to the last timer autosave"
-          : "[autosave] pre-restart snapshot skipped: server not idle; falling back to the last timer autosave",
-      );
-    }
-    return (await ProjectManager.checkForAutosave(baseDir)).exists;
-  }
-
-  handleIpc(IPC.autosave.clear, async (_event, dir?: string) => {
-    const target = dir || activeProjectDir || kernelWorkingDirs.get(activeKernelId ?? "");
-    if (target) {
-      // Order matters: clear the kernel-side cache *before* deleting the
-      // `.autosave/` dir on disk. If an autosave timer were to fire between
-      // these two awaits, a populated cache + missing `.autosave/` is the
-      // exact stale-entry condition we're trying to avoid. Clearing the
-      // cache first means any racing autosave starts from a clean slate.
-      // markAutosaveCacheDirty() is the in-band fallback if the comm fails.
-      await projectManager.clearAutosaveCache();
-      projectManager.markAutosaveCacheDirty();
-      await ProjectManager.clearAutosave(target);
-    }
-  });
-
-  handleIpc(IPC.autosave.check, async (_event, dir: string) => {
-    return ProjectManager.checkForAutosave(dir);
-  });
-
-  handleIpc(IPC.autosave.scanWorkingDirs, async () => {
-    const config = readConfig(configStore);
-    const base = config.workingDirBase || path.join(os.homedir(), ".PDV", "working");
-    const results = await ProjectManager.scanForAutosaves(base);
-    // Hide the active session's own working dir so the welcome screen never
-    // offers it as recoverable. (Reachable via File → New Project, which
-    // shows the welcome screen mid-session without restarting the kernel.)
-    const activeWorkingDir = activeKernelId ? kernelWorkingDirs.get(activeKernelId) : undefined;
-    return activeWorkingDir
-      ? results.filter((r) => r.dir !== activeWorkingDir)
-      : results;
-  });
-
-  /**
-   * Restore an unsaved session's ``.autosave`` snapshot from ``orphanDir``
-   * into the active session's working dir, load the tree/cells from it,
-   * and delete the orphan. Shared by the welcome screen's Recover flow
-   * (``autosave.recoverUnsaved``) and the post-restart recovery callback
-   * passed to ``registerKernelIpcHandlers``.
-   *
-   * @param orphanDir - Working directory of the orphaned session.
-   * @returns The recovered code cells and any files that could not be
-   *   copied from the orphan.
-   * @throws {Error} When there is no active server session to recover
-   *   into, or the orphan dir is the active working dir.
-   */
-  async function recoverUnsavedSession(orphanDir: string) {
-    if (!activeKernelId) {
-      throw new Error("Cannot recover unsaved session: no active kernel");
-    }
-    const workingDir = kernelWorkingDirs.get(activeKernelId);
-    if (!workingDir) {
-      throw new Error("Cannot recover unsaved session: active kernel has no working dir");
-    }
-    if (workingDir === orphanDir) {
-      throw new Error("Cannot recover unsaved session: orphan dir is the active working dir");
-    }
-
-    const orphanAutosaveDir = path.join(orphanDir, ".autosave");
-    const onProgress = (current: number, total: number) => {
-      win.webContents.send(IPC.push.progress, {
-        operation: "load",
-        phase: "Copying files",
-        current,
-        total,
-      });
-    };
-
-    const missingFiles = await copyFilesForLoad(orphanAutosaveDir, workingDir, onProgress);
-    if (missingFiles.length > 0) {
-      console.warn(
-        `[autosave:recoverUnsaved] ${missingFiles.length} file(s) could not be copied from orphan autosave:`,
-        missingFiles,
-      );
-    }
-
-    // Copy the manifest snapshot + module mirror so module namespace setup
-    // (both the kernel-side _early_module_setup and the main-side
-    // setupProjectModuleNamespaces below) finds the bindings the user had
-    // before the crash. copyFilesForLoad only handles UUID tree files, so
-    // these are explicit. Each copy is best-effort: an autosave produced
-    // before this change ships won't have these files, and recovery should
-    // still proceed with whatever it can salvage.
-    const orphanProjectJson = path.join(orphanAutosaveDir, "project.json");
-    const orphanModulesDir = path.join(orphanAutosaveDir, "modules");
-    try {
-      await fs.copyFile(orphanProjectJson, path.join(workingDir, "project.json"));
-    } catch (err) {
-      const code = (err as NodeJS.ErrnoException)?.code;
-      if (code !== "ENOENT") {
-        console.warn("[autosave:recoverUnsaved] copy project.json failed", err);
-      }
-    }
-    try {
-      await fs.cp(orphanModulesDir, path.join(workingDir, "modules"), {
-        recursive: true,
-        force: true,
-        errorOnExist: false,
-      });
-    } catch (err) {
-      const code = (err as NodeJS.ErrnoException)?.code;
-      if (code !== "ENOENT") {
-        console.warn("[autosave:recoverUnsaved] copy modules dir failed", err);
-      }
-    }
-
-    // Restore in-memory pending-imports state from the recovered manifest so
-    // a future Save As writes the modules into the new save dir's manifest.
-    try {
-      const recovered = await ProjectManager.readManifest(workingDir);
-      pendingModuleImports = [...recovered.modules];
-      pendingModuleSettings = { ...recovered.module_settings };
-    } catch {
-      // No manifest in the orphan (older autosave format) — nothing to restore.
-    }
-
-    // Load the tree and code cells from the orphan's .autosave/. The kernel's
-    // save_dir is set to the new working dir; activeProjectDir stays null so
-    // the project remains in the unsaved state.
-    const { codeCells } = await projectManager.load(workingDir, {
-      treeIndexDir: orphanAutosaveDir,
-      codeCellsDir: orphanAutosaveDir,
-    });
-
-    // Mirror code-cells.json into the new working dir so the per-session
-    // autosave loop has an up-to-date baseline.
-    if (codeCells != null) {
-      try {
-        await fs.writeFile(
-          path.join(workingDir, "code-cells.json"),
-          JSON.stringify(codeCells, null, 2),
-          "utf8",
-        );
-      } catch (err) {
-        console.warn("[autosave:recoverUnsaved] mirror code-cells failed", err);
-      }
-    }
-
-    // Wire any module namespaces that the recovered tree references. Pass
-    // the working dir as the project root since there is no save dir yet.
-    await setupProjectModuleNamespaces(commRouter, moduleManager, workingDir);
-
-    // Remove the orphan now that the recovery has succeeded.
-    try {
-      await fs.rm(orphanDir, { recursive: true, force: true });
-    } catch (err) {
-      console.warn("[autosave:recoverUnsaved] failed to remove orphan dir", err);
-    }
-
-    return {
-      codeCells,
-      projectName: null,
-      missingFiles: missingFiles.length > 0 ? missingFiles : undefined,
-    };
-  }
-
-  handleIpc(IPC.autosave.recoverUnsaved, async (_event, orphanDir: string) => {
-    return recoverUnsavedSession(orphanDir);
-  });
-
-  handleIpc(IPC.autosave.deleteOrphan, async (_event, orphanDir: string) => {
-    // Defense in depth: the renderer-side scan already filters this out, but
-    // never let a bug or stale list cause us to rm -rf the live working dir.
-    const activeWorkingDir = activeKernelId ? kernelWorkingDirs.get(activeKernelId) : undefined;
-    if (activeWorkingDir && orphanDir === activeWorkingDir) {
-      throw new Error("Cannot discard the active session's working directory");
-    }
-    await fs.rm(orphanDir, { recursive: true, force: true });
-  });
-
   // When kernel goes idle and an autosave was deferred, trigger it now.
   // Tracked in `executionStateListener` so unregisterIpcHandlers can detach
   // it; otherwise repeated registerIpcHandlers calls (tests, future re-init)
@@ -1133,7 +719,7 @@ export function registerIpcHandlers(
     if (kernelId !== activeKernelId) return;
     if (state === "idle" && projectManager.consumeAutosavePending()) {
       console.log("[autosave] kernel idle, running deferred autosave");
-      triggerAutosave();
+      autosave.triggerAutosave();
     }
   };
   kernelManager.on("kernel:executionState", executionStateListener);
@@ -1244,47 +830,6 @@ export function setMcpServerInstance(
   server: { status: McpStatus } | null,
 ): void {
   mcpServerInstance = server;
-}
-
-/**
- * Register IPC handlers for Python environment discovery and installation,
- * plus the active kernel's environment metadata (`environment:activeInfo`,
- * consumed by the Project Environment settings tab).
- *
- * @param win - Main BrowserWindow for streaming install output.
- * @param configStore - Config store for the configured interpreter path.
- * @param getActiveKernelId - Accessor for the active kernel id, used to look
- *   up `kernelEnvMeta`.
- */
-function registerEnvironmentIpcHandlers(
-  win: BrowserWindow,
-  configStore: ConfigStore,
-  getActiveKernelId: () => string | null
-): void {
-
-  handleIpc(IPC.environment.activeInfo, async () => {
-    const kernelId = getActiveKernelId();
-    return kernelId ? (kernelEnvMeta.get(kernelId) ?? null) : null;
-  });
-
-  handleIpc(IPC.environment.list, async () => {
-    const config = configStore.getAll();
-    return EnvironmentDetector.listEnvironmentInfo(config.pythonPath);
-  });
-
-  handleIpc(IPC.environment.check, async (_event, pythonPath: string) => {
-    return EnvironmentDetector.checkEnvironment(pythonPath);
-  });
-
-  handleIpc(IPC.environment.install, async (_event, pythonPath: string) => {
-    return EnvironmentDetector.installPDVFromBundle(pythonPath, win, IPC.push.installOutput);
-  });
-
-  handleIpc(IPC.environment.refresh, async () => {
-    EnvironmentDetector.clearCache();
-    const config = configStore.getAll();
-    return EnvironmentDetector.listEnvironmentInfo(config.pythonPath);
-  });
 }
 
 /**

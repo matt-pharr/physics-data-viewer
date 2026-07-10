@@ -8,31 +8,14 @@
  */
 
 import { useState, useCallback } from "react";
-import type {
-  ImportedModuleActionDescriptor,
-  ModuleInputDescriptor,
-} from "../types/pdv.d";
+import type { ModuleInputDescriptor } from "../types/pdv.d";
 import { ContainerRenderer } from "../components/ModuleGui/ContainerRenderer";
+import { adaptGuiActions } from "../components/ModuleGui/gui-host-utils";
 import { useEditorState } from "./editor-state";
 
 type ModuleInputValue = string | number | boolean;
 
 const PREVIEW_ALIAS = "__editor_preview__";
-
-/**
- * Adapt GuiActionDescriptors to ImportedModuleActionDescriptors
- * for ContainerRenderer compatibility.
- */
-function adaptActions(
-  actions: { id: string; label: string; script_path: string; inputs?: string[] }[]
-): ImportedModuleActionDescriptor[] {
-  return actions.map((a) => ({
-    id: a.id,
-    label: a.label,
-    scriptName: a.script_path,
-    inputIds: a.inputs,
-  }));
-}
 
 export function LivePreview() {
   const state = useEditorState();
@@ -106,7 +89,7 @@ export function LivePreview() {
           node={layout}
           moduleAlias={PREVIEW_ALIAS}
           inputs={manifest.inputs}
-          actions={adaptActions(manifest.actions)}
+          actions={adaptGuiActions(manifest.actions)}
           inputValues={effectiveValues}
           sectionOpen={sectionOpen}
           runningActionKey={null}

@@ -32,6 +32,39 @@ class TestCreateNode:
         tree_with_comm["exists"] = PDVTree()
         assert "exists" in tree_with_comm
 
+    def test_handler_creates_empty_node(self, tree_with_comm):
+        from pdv.handlers.tree import handle_tree_create_node
+
+        with (
+            patch.object(comms_mod, "get_pdv_tree", return_value=tree_with_comm),
+            patch.object(comms_mod, "send_message") as send_message,
+            patch.object(comms_mod, "send_error") as send_error,
+        ):
+            handle_tree_create_node(
+                {"msg_id": "m1", "payload": {"parent_path": "", "name": "fresh"}}
+            )
+        send_error.assert_not_called()
+        send_message.assert_called_once()
+        assert isinstance(tree_with_comm["fresh"], PDVTree)
+
+    def test_handler_rejects_dotted_name(self, tree_with_comm):
+        # A dot inside a key would corrupt dot-path addressing — the handler
+        # must refuse it rather than silently create a nested subtree.
+        from pdv.handlers.tree import handle_tree_create_node
+
+        with (
+            patch.object(comms_mod, "get_pdv_tree", return_value=tree_with_comm),
+            patch.object(comms_mod, "send_message") as send_message,
+            patch.object(comms_mod, "send_error") as send_error,
+        ):
+            handle_tree_create_node(
+                {"msg_id": "m2", "payload": {"parent_path": "", "name": "a.b"}}
+            )
+        send_error.assert_called_once()
+        assert send_error.call_args[0][1] == "tree.invalid_name"
+        send_message.assert_not_called()
+        assert "a" not in tree_with_comm
+
 
 class TestRename:
     """Tests for rename semantics (re-key under same parent)."""

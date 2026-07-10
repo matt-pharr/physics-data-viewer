@@ -39,23 +39,52 @@ function onPush<TPayload>(
 }
 
 /**
+ * Invoke an IPC channel, stripping Electron's rejection prefix.
+ *
+ * When a main-process handler throws, Electron rewrites the message to
+ * `Error invoking remote method '<channel>': Error: <original>`. Every
+ * renderer error surface (console entries, dialogs, status banners) would
+ * otherwise have to strip that noise itself — doing it once here keeps the
+ * boundary's error shape uniform: callers always catch an `Error` whose
+ * message is the handler's original message.
+ *
+ * @param channel - IPC channel name (a constant from `ipc.ts`).
+ * @param args - Handler arguments, exactly as `ipcRenderer.invoke` accepts.
+ * @returns The handler's result.
+ * @throws {Error} The handler's failure, with the Electron prefix removed.
+ */
+async function invoke<TResult>(channel: string, ...args: unknown[]): Promise<TResult> {
+  try {
+    return (await ipcRenderer.invoke(channel, ...args)) as TResult;
+  } catch (err) {
+    if (err instanceof Error) {
+      err.message = err.message.replace(
+        /^Error invoking remote method '[^']*': (?:Error: )?/,
+        ""
+      );
+    }
+    throw err;
+  }
+}
+
+/**
  * Concrete implementation of the preload API contract.
  */
 const api: PDVApi = {
   kernels: {
-    list: () => ipcRenderer.invoke(IPC.kernels.list),
-    start: (spec, uvContext) => ipcRenderer.invoke(IPC.kernels.start, spec, uvContext),
-    stop: (kernelId) => ipcRenderer.invoke(IPC.kernels.stop, kernelId),
+    list: () => invoke(IPC.kernels.list),
+    start: (spec, uvContext) => invoke(IPC.kernels.start, spec, uvContext),
+    stop: (kernelId) => invoke(IPC.kernels.stop, kernelId),
     execute: (kernelId, request) =>
-      ipcRenderer.invoke(IPC.kernels.execute, kernelId, request),
-    interrupt: (kernelId) => ipcRenderer.invoke(IPC.kernels.interrupt, kernelId),
-    restart: (kernelId) => ipcRenderer.invoke(IPC.kernels.restart, kernelId),
+      invoke(IPC.kernels.execute, kernelId, request),
+    interrupt: (kernelId) => invoke(IPC.kernels.interrupt, kernelId),
+    restart: (kernelId) => invoke(IPC.kernels.restart, kernelId),
     complete: (kernelId, code, cursorPos) =>
-      ipcRenderer.invoke(IPC.kernels.complete, kernelId, code, cursorPos),
+      invoke(IPC.kernels.complete, kernelId, code, cursorPos),
     inspect: (kernelId, code, cursorPos) =>
-      ipcRenderer.invoke(IPC.kernels.inspect, kernelId, code, cursorPos),
+      invoke(IPC.kernels.inspect, kernelId, code, cursorPos),
     validate: (executablePath, language) =>
-      ipcRenderer.invoke(IPC.kernels.validate, executablePath, language),
+      invoke(IPC.kernels.validate, executablePath, language),
     onOutput: (callback) => onPush(IPC.push.executeOutput, callback),
     onExecuteBegin: (callback) => onPush(IPC.push.executeBegin, callback),
     onExecuteFinish: (callback) => onPush(IPC.push.executeFinish, callback),
@@ -65,101 +94,101 @@ const api: PDVApi = {
   },
   tree: {
     list: (kernelId, nodePath = "") =>
-      ipcRenderer.invoke(IPC.tree.list, kernelId, nodePath),
+      invoke(IPC.tree.list, kernelId, nodePath),
     get: (kernelId, nodePath) =>
-      ipcRenderer.invoke(IPC.tree.get, kernelId, nodePath),
+      invoke(IPC.tree.get, kernelId, nodePath),
     createScript: (kernelId, targetPath, scriptName) =>
-      ipcRenderer.invoke(IPC.tree.createScript, kernelId, targetPath, scriptName),
+      invoke(IPC.tree.createScript, kernelId, targetPath, scriptName),
     createNote: (kernelId, targetPath, noteName) =>
-      ipcRenderer.invoke(IPC.tree.createNote, kernelId, targetPath, noteName),
+      invoke(IPC.tree.createNote, kernelId, targetPath, noteName),
     createGui: (kernelId, targetPath, guiName) =>
-      ipcRenderer.invoke(IPC.tree.createGui, kernelId, targetPath, guiName),
+      invoke(IPC.tree.createGui, kernelId, targetPath, guiName),
     createLib: (kernelId, targetPath, libName) =>
-      ipcRenderer.invoke(IPC.tree.createLib, kernelId, targetPath, libName),
+      invoke(IPC.tree.createLib, kernelId, targetPath, libName),
     createNode: (kernelId, targetPath, nodeName) =>
-      ipcRenderer.invoke(IPC.tree.createNode, kernelId, targetPath, nodeName),
+      invoke(IPC.tree.createNode, kernelId, targetPath, nodeName),
     rename: (kernelId, treePath, newName) =>
-      ipcRenderer.invoke(IPC.tree.rename, kernelId, treePath, newName),
+      invoke(IPC.tree.rename, kernelId, treePath, newName),
     move: (kernelId, treePath, newPath) =>
-      ipcRenderer.invoke(IPC.tree.move, kernelId, treePath, newPath),
+      invoke(IPC.tree.move, kernelId, treePath, newPath),
     duplicate: (kernelId, treePath, newPath) =>
-      ipcRenderer.invoke(IPC.tree.duplicate, kernelId, treePath, newPath),
+      invoke(IPC.tree.duplicate, kernelId, treePath, newPath),
     addFile: (kernelId, sourcePath, targetTreePath, nodeType, filename) =>
-      ipcRenderer.invoke(IPC.tree.addFile, kernelId, sourcePath, targetTreePath, nodeType, filename),
+      invoke(IPC.tree.addFile, kernelId, sourcePath, targetTreePath, nodeType, filename),
     invokeHandler: (kernelId, nodePath) =>
-      ipcRenderer.invoke(IPC.tree.invokeHandler, kernelId, nodePath),
+      invoke(IPC.tree.invokeHandler, kernelId, nodePath),
     delete: (kernelId, treePath) =>
-      ipcRenderer.invoke(IPC.tree.delete, kernelId, treePath),
+      invoke(IPC.tree.delete, kernelId, treePath),
     print: (kernelId, request) =>
-      ipcRenderer.invoke(IPC.tree.print, kernelId, request),
+      invoke(IPC.tree.print, kernelId, request),
     onChanged: (callback) => onPush(IPC.push.treeChanged, callback),
   },
   namespace: {
     query: (kernelId, options) =>
-      ipcRenderer.invoke(IPC.namespace.query, kernelId, options),
+      invoke(IPC.namespace.query, kernelId, options),
     inspect: (kernelId, target) =>
-      ipcRenderer.invoke(IPC.namespace.inspect, kernelId, target),
+      invoke(IPC.namespace.inspect, kernelId, target),
   },
   script: {
     run: (kernelId, request) =>
-      ipcRenderer.invoke(IPC.script.run, kernelId, request),
+      invoke(IPC.script.run, kernelId, request),
     edit: (kernelId, scriptPath) =>
-      ipcRenderer.invoke(IPC.script.edit, kernelId, scriptPath),
+      invoke(IPC.script.edit, kernelId, scriptPath),
     getParams: (kernelId, treePath) =>
-      ipcRenderer.invoke(IPC.script.getParams, kernelId, treePath),
+      invoke(IPC.script.getParams, kernelId, treePath),
   },
   note: {
     save: (kernelId, treePath, content) =>
-      ipcRenderer.invoke(IPC.note.save, kernelId, treePath, content),
+      invoke(IPC.note.save, kernelId, treePath, content),
     read: (kernelId, treePath) =>
-      ipcRenderer.invoke(IPC.note.read, kernelId, treePath),
+      invoke(IPC.note.read, kernelId, treePath),
   },
   namelist: {
     read: (kernelId, treePath) =>
-      ipcRenderer.invoke(IPC.namelist.read, kernelId, treePath),
+      invoke(IPC.namelist.read, kernelId, treePath),
     write: (kernelId, treePath, data) =>
-      ipcRenderer.invoke(IPC.namelist.write, kernelId, treePath, data),
+      invoke(IPC.namelist.write, kernelId, treePath, data),
   },
   environment: {
-    list: () => ipcRenderer.invoke(IPC.environment.list),
-    check: (pythonPath) => ipcRenderer.invoke(IPC.environment.check, pythonPath),
-    install: (pythonPath) => ipcRenderer.invoke(IPC.environment.install, pythonPath),
-    refresh: () => ipcRenderer.invoke(IPC.environment.refresh),
+    list: () => invoke(IPC.environment.list),
+    check: (pythonPath) => invoke(IPC.environment.check, pythonPath),
+    install: (pythonPath) => invoke(IPC.environment.install, pythonPath),
+    refresh: () => invoke(IPC.environment.refresh),
     onInstallOutput: (callback) => onPush(IPC.push.installOutput, callback),
     onEnvActivity: (callback) => onPush(IPC.push.envActivity, callback),
-    listPackages: () => ipcRenderer.invoke(IPC.environment.listPackages),
-    addPackage: (specs) => ipcRenderer.invoke(IPC.environment.addPackage, specs),
-    removePackage: (names) => ipcRenderer.invoke(IPC.environment.removePackage, names),
-    upgradePackage: (names) => ipcRenderer.invoke(IPC.environment.upgradePackage, names),
-    activeInfo: () => ipcRenderer.invoke(IPC.environment.activeInfo),
+    listPackages: () => invoke(IPC.environment.listPackages),
+    addPackage: (specs) => invoke(IPC.environment.addPackage, specs),
+    removePackage: (names) => invoke(IPC.environment.removePackage, names),
+    upgradePackage: (names) => invoke(IPC.environment.upgradePackage, names),
+    activeInfo: () => invoke(IPC.environment.activeInfo),
     installModule: (kernelId, moduleName) =>
-      ipcRenderer.invoke(IPC.environment.installModule, kernelId, moduleName),
+      invoke(IPC.environment.installModule, kernelId, moduleName),
   },
   modules: {
-    listInstalled: () => ipcRenderer.invoke(IPC.modules.listInstalled),
-    install: (request) => ipcRenderer.invoke(IPC.modules.install, request),
-    checkUpdates: (moduleId) => ipcRenderer.invoke(IPC.modules.checkUpdates, moduleId),
+    listInstalled: () => invoke(IPC.modules.listInstalled),
+    install: (request) => invoke(IPC.modules.install, request),
+    checkUpdates: (moduleId) => invoke(IPC.modules.checkUpdates, moduleId),
     importToProject: (request) =>
-      ipcRenderer.invoke(IPC.modules.importToProject, request),
-    listImported: () => ipcRenderer.invoke(IPC.modules.listImported),
-    saveSettings: (request) => ipcRenderer.invoke(IPC.modules.saveSettings, request),
-    runAction: (request) => ipcRenderer.invoke(IPC.modules.runAction, request),
-    removeImport: (moduleAlias) => ipcRenderer.invoke(IPC.modules.removeImport, moduleAlias),
-    uninstall: (moduleId) => ipcRenderer.invoke(IPC.modules.uninstall, moduleId),
-    update: (moduleId) => ipcRenderer.invoke(IPC.modules.update, moduleId),
-    createEmpty: (request) => ipcRenderer.invoke(IPC.modules.createEmpty, request),
-    updateMetadata: (request) => ipcRenderer.invoke(IPC.modules.updateMetadata, request),
-    exportFromProject: (request) => ipcRenderer.invoke(IPC.modules.exportFromProject, request),
+      invoke(IPC.modules.importToProject, request),
+    listImported: () => invoke(IPC.modules.listImported),
+    saveSettings: (request) => invoke(IPC.modules.saveSettings, request),
+    runAction: (request) => invoke(IPC.modules.runAction, request),
+    removeImport: (moduleAlias) => invoke(IPC.modules.removeImport, moduleAlias),
+    uninstall: (moduleId) => invoke(IPC.modules.uninstall, moduleId),
+    update: (moduleId) => invoke(IPC.modules.update, moduleId),
+    createEmpty: (request) => invoke(IPC.modules.createEmpty, request),
+    updateMetadata: (request) => invoke(IPC.modules.updateMetadata, request),
+    exportFromProject: (request) => invoke(IPC.modules.exportFromProject, request),
   },
   project: {
     save: (saveDir, codeCells, projectName) =>
-      ipcRenderer.invoke(IPC.project.save, saveDir, codeCells, projectName),
-    load: (saveDir, options) => ipcRenderer.invoke(IPC.project.load, saveDir, options),
-    new: () => ipcRenderer.invoke(IPC.project.new),
+      invoke(IPC.project.save, saveDir, codeCells, projectName),
+    load: (saveDir, options) => invoke(IPC.project.load, saveDir, options),
+    new: () => invoke(IPC.project.new),
     peekLanguages: (paths) =>
-      ipcRenderer.invoke(IPC.project.peekLanguages, paths),
+      invoke(IPC.project.peekLanguages, paths),
     peekManifest: (dir) =>
-      ipcRenderer.invoke(IPC.project.peekManifest, dir),
+      invoke(IPC.project.peekManifest, dir),
     onLoaded: (callback) => onPush(IPC.push.projectLoaded, callback),
     onReloading: (callback) => onPush(IPC.push.projectReloading, callback),
   },
@@ -167,23 +196,23 @@ const api: PDVApi = {
     onProgress: (callback) => onPush(IPC.push.progress, callback),
   },
   config: {
-    get: () => ipcRenderer.invoke(IPC.config.get),
-    set: (updates) => ipcRenderer.invoke(IPC.config.set, updates),
+    get: () => invoke(IPC.config.get),
+    set: (updates) => invoke(IPC.config.set, updates),
   },
   mcp: {
-    getStatus: () => ipcRenderer.invoke(IPC.mcp.getStatus),
+    getStatus: () => invoke(IPC.mcp.getStatus),
     onClientStatus: (callback) => onPush(IPC.push.mcpClientStatus, callback),
   },
   window: {
-    setBackgroundColor: (color) => ipcRenderer.invoke(IPC.window.setBackgroundColor, color),
+    setBackgroundColor: (color) => invoke(IPC.window.setBackgroundColor, color),
   },
   autosave: {
-    run: (codeCells: unknown) => ipcRenderer.invoke(IPC.autosave.run, codeCells),
-    clear: (dir?: string) => ipcRenderer.invoke(IPC.autosave.clear, dir),
-    check: (dir: string) => ipcRenderer.invoke(IPC.autosave.check, dir),
-    scanWorkingDirs: () => ipcRenderer.invoke(IPC.autosave.scanWorkingDirs),
-    recoverUnsaved: (orphanDir: string) => ipcRenderer.invoke(IPC.autosave.recoverUnsaved, orphanDir),
-    deleteOrphan: (orphanDir: string) => ipcRenderer.invoke(IPC.autosave.deleteOrphan, orphanDir),
+    run: (codeCells: unknown) => invoke(IPC.autosave.run, codeCells),
+    clear: (dir?: string) => invoke(IPC.autosave.clear, dir),
+    check: (dir: string) => invoke(IPC.autosave.check, dir),
+    scanWorkingDirs: () => invoke(IPC.autosave.scanWorkingDirs),
+    recoverUnsaved: (orphanDir: string) => invoke(IPC.autosave.recoverUnsaved, orphanDir),
+    deleteOrphan: (orphanDir: string) => invoke(IPC.autosave.deleteOrphan, orphanDir),
     onTrigger: (cb: () => void) => onPush(IPC.push.autosaveTrigger, cb),
     onInFlightChange: (cb: (inFlight: boolean) => void) => {
       const offStart = onPush<void>(IPC.push.autosaveStarted, () => cb(true));
@@ -194,57 +223,57 @@ const api: PDVApi = {
   cells: {
     onRequest: (cb) => onPush(IPC.push.cellsRequest, cb),
     onWrite: (cb) => onPush(IPC.push.cellWrite, cb),
-    respond: (response) => ipcRenderer.invoke(IPC.cells.respond, response),
+    respond: (response) => invoke(IPC.cells.respond, response),
   },
   about: {
-    getVersion: () => ipcRenderer.invoke(IPC.about.getVersion),
-    openRepoPage: () => ipcRenderer.invoke(IPC.about.openRepoPage),
-    openIssuesPage: () => ipcRenderer.invoke(IPC.about.openIssuesPage),
-    openDocsPage: () => ipcRenderer.invoke(IPC.about.openDocsPage),
+    getVersion: () => invoke(IPC.about.getVersion),
+    openRepoPage: () => invoke(IPC.about.openRepoPage),
+    openIssuesPage: () => invoke(IPC.about.openIssuesPage),
+    openDocsPage: () => invoke(IPC.about.openDocsPage),
   },
   updater: {
-    checkForUpdates: () => ipcRenderer.invoke(IPC.updater.checkForUpdates),
-    downloadUpdate: () => ipcRenderer.invoke(IPC.updater.downloadUpdate),
-    installUpdate: () => ipcRenderer.invoke(IPC.updater.installUpdate),
-    openReleasesPage: () => ipcRenderer.invoke(IPC.updater.openReleasesPage),
-    getStatus: () => ipcRenderer.invoke(IPC.updater.getStatus),
+    checkForUpdates: () => invoke(IPC.updater.checkForUpdates),
+    downloadUpdate: () => invoke(IPC.updater.downloadUpdate),
+    installUpdate: () => invoke(IPC.updater.installUpdate),
+    openReleasesPage: () => invoke(IPC.updater.openReleasesPage),
+    getStatus: () => invoke(IPC.updater.getStatus),
     onUpdateStatus: (cb) => onPush(IPC.push.updateStatus, cb),
   },
   themes: {
-    get: () => ipcRenderer.invoke(IPC.themes.get),
-    save: (theme) => ipcRenderer.invoke(IPC.themes.save, theme),
-    openDir: () => ipcRenderer.invoke(IPC.themes.openDir),
+    get: () => invoke(IPC.themes.get),
+    save: (theme) => invoke(IPC.themes.save, theme),
+    openDir: () => invoke(IPC.themes.openDir),
   },
   codeCells: {
-    load: () => ipcRenderer.invoke(IPC.codeCells.load),
-    save: (data) => ipcRenderer.invoke(IPC.codeCells.save, data),
+    load: () => invoke(IPC.codeCells.load),
+    save: (data) => invoke(IPC.codeCells.save, data),
   },
   moduleWindows: {
-    open: (req) => ipcRenderer.invoke(IPC.moduleWindows.open, req),
-    close: (alias) => ipcRenderer.invoke(IPC.moduleWindows.close, alias),
-    context: () => ipcRenderer.invoke(IPC.moduleWindows.context),
-    executeInMain: (code) => ipcRenderer.invoke(IPC.moduleWindows.executeInMain, code),
+    open: (req) => invoke(IPC.moduleWindows.open, req),
+    close: (alias) => invoke(IPC.moduleWindows.close, alias),
+    context: () => invoke(IPC.moduleWindows.context),
+    executeInMain: (code) => invoke(IPC.moduleWindows.executeInMain, code),
     onExecuteRequest: (cb) => onPush(IPC.push.moduleExecuteRequest, cb),
   },
   guiEditor: {
-    open: (req) => ipcRenderer.invoke(IPC.guiEditor.open, req),
-    openViewer: (req) => ipcRenderer.invoke(IPC.guiEditor.openViewer, req),
-    context: () => ipcRenderer.invoke(IPC.guiEditor.context),
-    read: (treePath) => ipcRenderer.invoke(IPC.guiEditor.read, treePath),
-    save: (req) => ipcRenderer.invoke(IPC.guiEditor.save, req),
+    open: (req) => invoke(IPC.guiEditor.open, req),
+    openViewer: (req) => invoke(IPC.guiEditor.openViewer, req),
+    context: () => invoke(IPC.guiEditor.context),
+    read: (treePath) => invoke(IPC.guiEditor.read, treePath),
+    save: (req) => invoke(IPC.guiEditor.save, req),
   },
   files: {
-    pickExecutable: () => ipcRenderer.invoke(IPC.files.pickExecutable),
-    pickFile: () => ipcRenderer.invoke(IPC.files.pickFile),
-    pickDirectory: (defaultPath) => ipcRenderer.invoke(IPC.files.pickDirectory, defaultPath),
+    pickExecutable: () => invoke(IPC.files.pickExecutable),
+    pickFile: () => invoke(IPC.files.pickFile),
+    pickDirectory: (defaultPath) => invoke(IPC.files.pickDirectory, defaultPath),
   },
   menu: {
     updateRecentProjects: (paths) =>
-      ipcRenderer.invoke(IPC.menu.updateRecentProjects, paths),
+      invoke(IPC.menu.updateRecentProjects, paths),
     updateEnabled: (state) =>
-      ipcRenderer.invoke(IPC.menu.updateEnabled, state),
-    getModel: () => ipcRenderer.invoke(IPC.menu.getModel),
-    popup: (menuId, x, y) => ipcRenderer.invoke(IPC.menu.popup, menuId, x, y),
+      invoke(IPC.menu.updateEnabled, state),
+    getModel: () => invoke(IPC.menu.getModel),
+    popup: (menuId, x, y) => invoke(IPC.menu.popup, menuId, x, y),
     onAction: (callback) => onPush(IPC.push.menuAction, callback),
   },
   system: {
@@ -257,22 +286,22 @@ const api: PDVApi = {
     defaultPythonVersion: DEFAULT_PYTHON_VERSION,
   },
   launchers: {
-    openAgent: () => ipcRenderer.invoke(IPC.launchers.openAgent),
-    openWorkingDir: () => ipcRenderer.invoke(IPC.launchers.openWorkingDir),
-    checkAvailability: (check) => ipcRenderer.invoke(IPC.launchers.checkAvailability, check),
+    openAgent: () => invoke(IPC.launchers.openAgent),
+    openWorkingDir: () => invoke(IPC.launchers.openWorkingDir),
+    checkAvailability: (check) => invoke(IPC.launchers.checkAvailability, check),
   },
   chrome: {
-    getInfo: () => ipcRenderer.invoke(IPC.chrome.getInfo),
-    minimize: () => ipcRenderer.invoke(IPC.chrome.minimize),
-    toggleMaximize: () => ipcRenderer.invoke(IPC.chrome.toggleMaximize),
-    close: () => ipcRenderer.invoke(IPC.chrome.close),
+    getInfo: () => invoke(IPC.chrome.getInfo),
+    minimize: () => invoke(IPC.chrome.minimize),
+    toggleMaximize: () => invoke(IPC.chrome.toggleMaximize),
+    close: () => invoke(IPC.chrome.close),
     onStateChanged: (callback) => onPush(IPC.push.chromeStateChanged, callback),
   },
   app: {
-    confirmClose: () => ipcRenderer.invoke(IPC.app.confirmClose),
+    confirmClose: () => invoke(IPC.app.confirmClose),
     onRequestClose: (callback) => onPush<void>(IPC.push.requestClose, callback),
     setDocumentEdited: (edited) =>
-      ipcRenderer.invoke(IPC.app.setDocumentEdited, edited),
+      invoke(IPC.app.setDocumentEdited, edited),
   },
 };
 

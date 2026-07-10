@@ -31,6 +31,15 @@ const registeredChannels = new Set<string>();
  * Register an `ipcMain.handle` listener and record its channel for
  * later teardown.
  *
+ * The handler is wrapped so every failure crossing the process boundary
+ * has one shape: the error is logged with its channel name (handlers
+ * historically logged inconsistently or not at all), and non-`Error`
+ * throws are normalized to `Error` instances so the renderer never
+ * receives a bare string/object rejection. Handlers that report failure
+ * by *returning* `{ success: false, error }` are untouched — that is the
+ * other sanctioned shape, used where the renderer wants to render the
+ * failure inline rather than catch it.
+ *
  * @param channel - IPC channel name (a constant from `ipc.ts`).
  * @param handler - Invoke handler, exactly as `ipcMain.handle` accepts.
  * @throws Error if `ipcMain` already has a handler for `channel`
@@ -38,7 +47,15 @@ const registeredChannels = new Set<string>();
  *   a matching teardown, the exact bug this registry exists to prevent.
  */
 export function handleIpc(channel: string, handler: IpcInvokeHandler): void {
-  ipcMain.handle(channel, handler);
+  const wrapped: IpcInvokeHandler = async (event, ...args) => {
+    try {
+      return await handler(event, ...args);
+    } catch (err) {
+      console.error(`[ipc] ${channel} failed:`, err);
+      throw err instanceof Error ? err : new Error(String(err));
+    }
+  };
+  ipcMain.handle(channel, wrapped);
   registeredChannels.add(channel);
 }
 

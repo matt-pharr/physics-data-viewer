@@ -7,10 +7,8 @@
  * 1. detect() returns configured path when provided.
  * 2. detect() falls back to CONDA_PREFIX if no configured path.
  * 3. detect() falls back to system Python if no conda/venv.
- * 4. hasPDVKernel() returns true/false based on mock output.
- * 5. listAll() returns conda environments when conda is available.
- * 6. checkPDVInstalled() returns installed/not-installed status.
- * 7. detectEnvironments() returns system Python (always present in CI).
+ * 4. checkPDVInstalled() returns installed/not-installed status.
+ * 5. detectEnvironments() returns system Python (always present in CI).
  *
  * Reference: ARCHITECTURE.md §5.1, §10
  */
@@ -236,40 +234,6 @@ describe("EnvironmentDetector", () => {
     });
   });
 
-  describe("hasPDVKernel()", () => {
-    it("returns true when pdv is installed", async () => {
-      mockExecPerCommand({
-        "/usr/bin/python3": { stdout: "0.0.7\n" },
-      });
-
-      const result = await EnvironmentDetector.hasPDVKernel("/usr/bin/python3");
-      expect(result).toBe(true);
-    });
-
-    it("returns false when pdv is absent", async () => {
-      mockExecAlwaysFail();
-
-      const result = await EnvironmentDetector.hasPDVKernel("/bad/python");
-      expect(result).toBe(false);
-    });
-  });
-
-  describe("listAll()", () => {
-    it("includes system python in result", async () => {
-      mockExecPerCommand({
-        python3: { stdout: "Python 3.9.7\n" },
-        conda: { stdout: JSON.stringify({ envs: [] }) },
-      });
-
-      const all = await EnvironmentDetector.listAll();
-
-      expect(all.length).toBeGreaterThan(0);
-      const sys = all.find((e) => e.kind === "system");
-      expect(sys).toBeDefined();
-      expect(sys!.pythonPath).toBe("python3");
-    });
-  });
-
   describe("detectEnvironments()", () => {
     it("returns array with at least the system Python", async () => {
       // This mirrors the CI assertion for environment detection.
@@ -442,12 +406,12 @@ describe("EnvironmentDetector", () => {
         conda: { stdout: JSON.stringify({ envs: [] }) },
       });
 
-      const first = await EnvironmentDetector.listAll();
+      const first = await EnvironmentDetector.detectEnvironments();
       expect(mocks.execFileMock).toHaveBeenCalled();
 
       vi.clearAllMocks();
       // Second call — should use cache, no new execFile calls.
-      const second = await EnvironmentDetector.listAll();
+      const second = await EnvironmentDetector.detectEnvironments();
       expect(mocks.execFileMock).not.toHaveBeenCalled();
       expect(second).toEqual(first);
 
@@ -457,7 +421,7 @@ describe("EnvironmentDetector", () => {
         python3: { stdout: "Python 3.9.7\n" },
         conda: { stdout: JSON.stringify({ envs: [] }) },
       });
-      await EnvironmentDetector.listAll();
+      await EnvironmentDetector.detectEnvironments();
       expect(mocks.execFileMock).toHaveBeenCalled();
     });
   });

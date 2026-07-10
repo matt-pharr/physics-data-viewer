@@ -20,13 +20,9 @@ import { StatusBar } from '../components/StatusBar';
 
 import { NamespaceView } from '../components/NamespaceView';
 import { ScriptDialog } from '../components/ScriptDialog';
-import { CreateScriptDialog } from '../components/Tree/CreateScriptDialog';
-import { CreateLibDialog } from '../components/Tree/CreateLibDialog';
-import { CreateGuiDialog } from '../components/Tree/CreateGuiDialog';
+import { CreateTreeItemDialog } from '../components/Tree/CreateTreeItemDialog';
 import { NewModuleDialog } from '../components/NewModuleDialog';
 import { ModuleMetadataDialog } from '../components/ModuleMetadataDialog';
-import { CreateNodeDialog } from '../components/Tree/CreateNodeDialog';
-import { CreateNoteDialog } from '../components/Tree/CreateNoteDialog';
 import { DuplicateDialog } from '../components/Tree/DuplicateDialog';
 import { MoveDialog } from '../components/Tree/MoveDialog';
 import { RenameDialog } from '../components/Tree/RenameDialog';
@@ -37,7 +33,7 @@ import { ImportModuleDialog } from '../components/ImportModuleDialog';
 import { SaveAsDialog } from '../components/SaveAsDialog';
 import { NewProjectDialog } from '../components/NewProjectDialog';
 import { UnsavedChangesDialog } from '../components/UnsavedChangesDialog';
-import { WelcomeScreen, type RecentProject, type RecoverableSession } from '../components/WelcomeScreen';
+import { WelcomeScreen } from '../components/WelcomeScreen';
 import { EnvSyncModal } from '../components/EnvSyncModal';
 import type {
   CellTab,
@@ -45,7 +41,6 @@ import type {
   AppMenuTopLevel,
   KernelExecutionOrigin,
   LogEntry,
-  NoteTab,
   ScriptRunResult,
   TreeChangeInfo,
   TreeNodeData,
@@ -56,10 +51,13 @@ import { newExecutionId, normalizeLoadedCodeCells, normalizeRecentProjects, merg
 import { CELL_UNDO_LIMIT, MAX_LOG_ENTRIES, NAMESPACE_REFRESH_INTERVAL_MS } from './constants';
 import { useCodeCellsPersistence } from './useCodeCellsPersistence';
 import { useKeyboardShortcuts } from './useKeyboardShortcuts';
+import { useKernelLaunch } from './useKernelLaunch';
 import { useKernelLifecycle } from './useKernelLifecycle';
 import { useLayoutState } from './useLayoutState';
+import { useNoteTabs } from './useNoteTabs';
 import { useProjectWorkflow } from './useProjectWorkflow';
 import { useKernelSubscriptions } from './useKernelSubscriptions';
+import { useWelcomeState } from './useWelcomeState';
 import { useThemeManager } from './useThemeManager';
 import { useTreeAction } from '../hooks/useTreeAction';
 
@@ -69,6 +67,36 @@ type CodeCellExecutionError = {
   message: string;
   location?: { line?: number; column?: number };
 };
+
+/**
+ * The app-level modal currently open, or `null` for none. A discriminated
+ * union instead of one boolean/target per dialog: only one modal can be up
+ * at a time, so a single state slot makes "open X" implicitly close
+ * everything else and lets Escape close whatever is active without a
+ * priority chain.
+ */
+type ActiveDialog =
+  | { kind: 'script'; node: TreeNodeData }
+  | { kind: 'rename'; path: string; nodeKey: string }
+  | { kind: 'move'; path: string; nodeType: string }
+  | { kind: 'duplicate'; path: string; nodeType: string }
+  | { kind: 'createNode'; parentPath: string }
+  | { kind: 'createScript'; parentPath: string }
+  | { kind: 'createNote'; parentPath: string }
+  | { kind: 'createGui'; parentPath: string }
+  | { kind: 'createLib'; parentPath: string }
+  | { kind: 'newModule' }
+  | {
+      kind: 'moduleMetadata';
+      alias: string;
+      name: string;
+      version: string;
+      description?: string;
+      language?: 'python' | 'julia';
+    }
+  | { kind: 'importModule' }
+  | { kind: 'saveAs' }
+  | { kind: 'newProject' };
 
 
 /** Root PDV application component rendered in the Electron renderer process. */
@@ -154,37 +182,51 @@ const App: React.FC = () => {
 
   const runTreeAction = useTreeAction({ setLastError, setTreeRefreshToken });
 
+  // -- Welcome screen state ---------------------------------------------------
+  // Visibility flags, recent projects, and recoverable orphaned sessions all
+  // live in useWelcomeState; App keeps the flows that open/recover them.
+  const {
+    showWelcome,
+    forceWelcome,
+    setForceWelcome,
+    dismissWelcome,
+    recentProjects,
+    recoverableSessions,
+    refreshRecoverableSessions,
+    handleClearRecents,
+    handleDiscardSession,
+  } = useWelcomeState({ config, setConfig, kernelStatus, setLastError });
+
   // -- Dialog visibility state ----------------------------------------------
 
-  const [showWelcome, setShowWelcome] = useState(true);
-  const [forceWelcome, setForceWelcome] = useState(false);
-  const [scriptDialog, setScriptDialog] = useState<TreeNodeData | null>(null);
-  const [renameTarget, setRenameTarget] = useState<{ path: string; key: string } | null>(null);
-  const [moveTarget, setMoveTarget] = useState<{ path: string; type: string } | null>(null);
-  const [duplicateTarget, setDuplicateTarget] = useState<{ path: string; type: string } | null>(null);
-  const [createNodeTarget, setCreateNodeTarget] = useState<string | null>(null);
-  const [createScriptTarget, setCreateScriptTarget] = useState<string | null>(null);
-  const [createNoteTarget, setCreateNoteTarget] = useState<string | null>(null);
-  const [createGuiTarget, setCreateGuiTarget] = useState<string | null>(null);
-  const [createLibTarget, setCreateLibTarget] = useState<string | null>(null);
-  const [showNewModuleDialog, setShowNewModuleDialog] = useState(false);
-  const [moduleMetadataTarget, setModuleMetadataTarget] = useState<
-    { alias: string; name: string; version: string; description?: string; language?: 'python' | 'julia' } | null
-  >(null);
+  // One modal at a time: every app-level dialog is a variant of this union,
+  // so opening one implicitly closes the previous and Escape/close logic
+  // needs no priority chain. SettingsDialog stays outside (it suppresses
+  // Escape while recording shortcuts), as do the welcome overlay and the
+  // unsaved-changes confirm.
+  const [activeDialog, setActiveDialog] = useState<ActiveDialog | null>(null);
+  const closeDialog = useCallback(() => setActiveDialog(null), []);
   const [showSettings, setShowSettings] = useState(false);
-  const [showImportModule, setShowImportModule] = useState(false);
-  const [showSaveAsDialog, setShowSaveAsDialog] = useState(false);
-  const [showNewProjectDialog, setShowNewProjectDialog] = useState(false);
   const [currentProjectName, setCurrentProjectName] = useState<string | null>(null);
   const [chromeInfo, setChromeInfo] = useState<WindowChromeInfo | null>(null);
   const [menuModel, setMenuModel] = useState<AppMenuTopLevel[]>([]);
 
-  // -- Write tab (markdown notes) state ------------------------------------
-  const [activePane, setActivePane] = useState<'code' | 'write'>('code');
-  const [noteTabs, setNoteTabs] = useState<NoteTab[]>([]);
-  const noteTabsRef = useRef(noteTabs);
-  noteTabsRef.current = noteTabs;
-  const [activeNoteTabId, setActiveNoteTabId] = useState<string | null>(null);
+  // -- Write tab (markdown notes) state --------------------------------------
+  // Note-tab state and handlers live in useNoteTabs; App clears them on
+  // project switches via the returned setters.
+  const {
+    activePane,
+    setActivePane,
+    noteTabs,
+    setNoteTabs,
+    activeNoteTabId,
+    setActiveNoteTabId,
+    openNote,
+    handleNoteContentChange,
+    handleNoteSave,
+    handleNoteCloseTab,
+    flushDirtyNotes,
+  } = useNoteTabs({ currentKernelId, setLogs, setLastError });
   const [settingsInitialTab, setSettingsInitialTab] = useState<'general' | 'shortcuts' | 'appearance' | 'runtime' | 'about'>('general');
 
   // -- Project reloading state (kernel restart with active project) ----------
@@ -357,9 +399,9 @@ const App: React.FC = () => {
       } else if (payload.action === 'project:openRecent') {
         if (payload.path) void handleOpenRecentRef.current?.(payload.path);
       } else if (payload.action === 'modules:import') {
-        setShowImportModule(true);
+        setActiveDialog({ kind: 'importModule' });
       } else if (payload.action === 'modules:newEmpty') {
-        setShowNewModuleDialog(true);
+        setActiveDialog({ kind: 'newModule' });
       } else if (payload.action === 'settings:open') {
         setSettingsInitialTab('general');
         setShowSettings(true);
@@ -387,7 +429,9 @@ const App: React.FC = () => {
       }
     });
     return unsub;
-  }, []);
+    // The note/welcome setters come from hooks; they wrap stable useState
+    // setters, so listing them never re-subscribes in practice.
+  }, [setActiveNoteTabId, setForceWelcome, setNoteTabs]);
 
   // Sync File-menu enabled state: disable Save/SaveAs/Import when kernel isn't ready.
   const kernelReady = kernelStatus === 'ready';
@@ -490,26 +534,6 @@ const App: React.FC = () => {
   });
 
   const [environmentMode, setEnvironmentMode] = useState<'uv' | 'shared'>('shared');
-  // Unified session-launch overlay state (EnvSyncModal): covers uv-project
-  // launches (env materialization + kernel boot) and shared/conda kernel
-  // launches (kernel boot only). `mode` selects the failure affordances
-  // (shared failures offer "Choose environment…").
-  const [kernelLaunch, setKernelLaunch] = useState<{
-    phase: 'idle' | 'syncing' | 'failed';
-    stage: 'env' | 'kernel-boot';
-    mode: 'uv' | 'shared';
-    language: 'python' | 'julia';
-    detail?: string;
-    output: string;
-    error?: string;
-  }>({ phase: 'idle', stage: 'env', mode: 'uv', language: 'python', output: '' });
-  const lastUvLaunchRef = useRef<import('../types').KernelUvContext | null>(null);
-  // Replays the most recent launch (uv or shared) for the overlay's Retry.
-  const lastLaunchRef = useRef<(() => Promise<boolean>) | null>(null);
-  // Self-refs so a launch can enqueue its own replay without a TDZ cycle
-  // between the two launch callbacks.
-  const launchUvKernelRef = useRef<(ctx: import('../types').KernelUvContext) => Promise<boolean>>(async () => false);
-  const launchSharedKernelRef = useRef<(cfg: Config, language: 'python' | 'julia') => Promise<boolean>>(async () => false);
   const { startKernel, handleEnvSave, handleRestartKernel, lastErrorRef } = useKernelLifecycle({
     config,
     currentKernelId,
@@ -603,35 +627,22 @@ const App: React.FC = () => {
     setActiveCellTab,
     toggleLeftSidebar,
     toggleEditorCollapsed,
-    setShowImportModule,
+    openImportModule: () => setActiveDialog({ kind: 'importModule' }),
     kernelReady,
     addCellTab,
     removeCellTab: handleRemoveCellTab,
   });
 
-  // Global Escape handler — closes the topmost open dialog/overlay.
+  // Global Escape handler — closes the active app-level dialog.
   // SettingsDialog handles its own Escape (needs to suppress while recording shortcuts).
   useEffect(() => {
+    if (!activeDialog) return;
     const onKeyDown = (e: KeyboardEvent) => {
-      if (e.key !== 'Escape') return;
-      // Close in priority order (topmost first)
-      if (showSaveAsDialog) { setShowSaveAsDialog(false); return; }
-      if (showImportModule) { setShowImportModule(false); return; }
-      if (scriptDialog) { setScriptDialog(null); return; }
-      if (renameTarget) { setRenameTarget(null); return; }
-      if (moveTarget) { setMoveTarget(null); return; }
-      if (duplicateTarget) { setDuplicateTarget(null); return; }
-      if (createNodeTarget) { setCreateNodeTarget(null); return; }
-      if (createScriptTarget) { setCreateScriptTarget(null); return; }
-      if (createNoteTarget) { setCreateNoteTarget(null); return; }
-      if (createGuiTarget) { setCreateGuiTarget(null); return; }
-      if (createLibTarget) { setCreateLibTarget(null); return; }
-      if (showNewModuleDialog) { setShowNewModuleDialog(false); return; }
-      if (moduleMetadataTarget) { setModuleMetadataTarget(null); return; }
+      if (e.key === 'Escape') setActiveDialog(null);
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [showSaveAsDialog, showImportModule, scriptDialog, renameTarget, moveTarget, duplicateTarget, createNodeTarget, createScriptTarget, createNoteTarget, createGuiTarget, createLibTarget, showNewModuleDialog, moduleMetadataTarget]);
+  }, [activeDialog]);
 
   const handleSettingsSave = async (updates: Partial<Config>) => {
     await window.pdv.config.set(updates);
@@ -645,116 +656,6 @@ const App: React.FC = () => {
       await startKernel(mergedConfig, activeLanguage);
     }
     setShowSettings(false);
-  };
-
-  // -- Note (Write tab) helpers --------------------------------------------
-
-  /** Open a markdown node in the Write tab, reading its content from disk. */
-  const openNote = async (node: TreeNodeData) => {
-    // If already open, just switch to it
-    const existing = noteTabs.find((t) => t.id === node.path);
-    if (existing) {
-      setActiveNoteTabId(node.path);
-      setActivePane('write');
-      return;
-    }
-
-    if (!currentKernelId) return;
-
-    try {
-      const result = await window.pdv.note.read(currentKernelId, node.path);
-      const content = result.success && result.content ? result.content : '';
-      const newTab: NoteTab = {
-        id: node.path,
-        content,
-        savedContent: content,
-        name: node.key,
-      };
-      setNoteTabs((prev) => [...prev, newTab]);
-      setActiveNoteTabId(node.path);
-      setActivePane('write');
-    } catch (error) {
-      console.error('[App] Failed to read note:', error);
-      setLastError(error instanceof Error ? error.message : String(error));
-    }
-  };
-
-  const handleNoteContentChange = (id: string, content: string) => {
-    setNoteTabs((prev) =>
-      prev.map((tab) => (tab.id === id ? { ...tab, content } : tab)),
-    );
-  };
-
-  const handleNoteSave = async (id: string) => {
-    const tab = noteTabs.find((t) => t.id === id);
-    if (!tab || tab.content === tab.savedContent || !currentKernelId) return;
-    try {
-      await window.pdv.note.save(currentKernelId, tab.id, tab.content);
-      setNoteTabs((prev) =>
-        prev.map((t) => (t.id === id ? { ...t, savedContent: t.content } : t)),
-      );
-    } catch (error) {
-      // Surface the failure in the console — the tab stays dirty, so the
-      // edits are not lost and the dirty dot keeps showing.
-      const message = error instanceof Error ? error.message : String(error);
-      setLogs((prev) => [...prev, {
-        id: `note-save-error-${Date.now()}`,
-        timestamp: Date.now(),
-        code: '',
-        error: `Failed to save note "${tab.name}": ${message}`,
-      }]);
-    }
-  };
-
-  const flushDirtyNotes = useCallback(async () => {
-    if (!currentKernelId) return;
-    const dirty = noteTabsRef.current.filter((t) => t.content !== t.savedContent);
-    await Promise.all(
-      dirty.map(async (tab) => {
-        try {
-          await window.pdv.note.save(currentKernelId, tab.id, tab.content);
-          setNoteTabs((prev) =>
-            prev.map((t) => (t.id === tab.id ? { ...t, savedContent: t.content } : t)),
-          );
-        } catch (error) {
-          console.error('[App] Failed to flush note:', error);
-        }
-      }),
-    );
-  }, [currentKernelId]);
-
-  const handleNoteCloseTab = async (id: string) => {
-    // Closing a dirty note flushes it first — the note lives in the tree,
-    // so a silent discard would lose real edits. Only ask the user when
-    // the flush can't happen (no kernel) or fails.
-    const tab = noteTabsRef.current.find((t) => t.id === id);
-    if (tab && tab.content !== tab.savedContent) {
-      let flushed = false;
-      if (currentKernelId) {
-        try {
-          await window.pdv.note.save(currentKernelId, tab.id, tab.content);
-          flushed = true;
-        } catch (error) {
-          console.error('[App] Failed to save note before closing:', error);
-        }
-      }
-      if (!flushed) {
-        const discard = window.confirm(
-          `"${tab.name}" has unsaved changes that could not be saved. Close it anyway and discard them?`,
-        );
-        if (!discard) return;
-      }
-    }
-    setNoteTabs((prev) => {
-      const updated = prev.filter((t) => t.id !== id);
-      if (activeNoteTabId === id) {
-        setActiveNoteTabId(updated.length > 0 ? updated[updated.length - 1].id : null);
-      }
-      if (updated.length === 0) {
-        setActivePane('code');
-      }
-      return updated;
-    });
   };
 
   const handleTreeAction = async (action: string, node: TreeNodeData) => {
@@ -775,17 +676,18 @@ const App: React.FC = () => {
       return;
     }
     if (action === 'new_gui') {
-      setCreateGuiTarget(node.path);
+      setActiveDialog({ kind: 'createGui', parentPath: node.path });
       return;
     }
     if (action === 'create_node') {
-      setCreateNodeTarget(node.path);
+      setActiveDialog({ kind: 'createNode', parentPath: node.path });
     } else if (action === 'create_script') {
-      setCreateScriptTarget(node.path);
+      setActiveDialog({ kind: 'createScript', parentPath: node.path });
     } else if (action === 'create_lib') {
-      setCreateLibTarget(node.path);
+      setActiveDialog({ kind: 'createLib', parentPath: node.path });
     } else if (action === 'edit_module_metadata' && node.type === 'module') {
-      setModuleMetadataTarget({
+      setActiveDialog({
+        kind: 'moduleMetadata',
         alias: node.path || node.key,
         name: node.moduleName ?? node.key,
         version: node.moduleVersion ?? '0.1.0',
@@ -810,11 +712,11 @@ const App: React.FC = () => {
         setLastError(error instanceof Error ? error.message : String(error));
       }
     } else if (action === 'create_note') {
-      setCreateNoteTarget(node.path);
+      setActiveDialog({ kind: 'createNote', parentPath: node.path });
     } else if (action === 'open_note' && node.type === 'markdown') {
       await openNote(node);
     } else if (action === 'run' && node.type === 'script') {
-      setScriptDialog(node);
+      setActiveDialog({ kind: 'script', node });
     } else if (action === 'run_defaults' && node.type === 'script') {
       if (!currentKernelId) return;
       const executionId = newExecutionId();
@@ -853,15 +755,15 @@ const App: React.FC = () => {
       }
     } else if (action === 'rename') {
       if (node.path) {
-        setRenameTarget({ path: node.path, key: node.key });
+        setActiveDialog({ kind: 'rename', path: node.path, nodeKey: node.key });
       }
     } else if (action === 'move') {
       if (node.path) {
-        setMoveTarget({ path: node.path, type: node.type });
+        setActiveDialog({ kind: 'move', path: node.path, nodeType: node.type });
       }
     } else if (action === 'duplicate') {
       if (node.path) {
-        setDuplicateTarget({ path: node.path, type: node.type });
+        setActiveDialog({ kind: 'duplicate', path: node.path, nodeType: node.type });
       }
     } else if (action === 'delete') {
       if (!currentKernelId || !node.path) return;
@@ -920,7 +822,7 @@ const App: React.FC = () => {
       setLastDuration(result.duration);
     }
     setNamespaceRefreshToken((prev) => prev + 1);
-    setScriptDialog(null);
+    setActiveDialog((prev) => (prev?.kind === 'script' ? null : prev));
   };
 
   // Single-slot queue for a run held while a save is in flight. Stored in a
@@ -1210,7 +1112,7 @@ const App: React.FC = () => {
     setChecksumMismatch,
     setSavedPdvVersion,
     setCurrentProjectName,
-    setShowSaveAsDialog,
+    openSaveAsDialog: () => setActiveDialog({ kind: 'saveAs' }),
     loadedProjectTabsRef,
     normalizeLoadedCodeCells,
     flushDirtyNotes,
@@ -1237,63 +1139,6 @@ const App: React.FC = () => {
     void window.pdv?.app?.setDocumentEdited(projectDirty);
   }, [projectDirty]);
 
-  // -- Welcome screen (pristine session) ------------------------------------
-
-  const recentProjectPaths = useMemo(
-    () => normalizeRecentProjects(config?.recentProjects),
-    [config?.recentProjects],
-  );
-
-  /** Build RecentProject[] with language and name metadata from project.json files. */
-  const [recentProjects, setRecentProjects] = useState<RecentProject[]>([]);
-  useEffect(() => {
-    if (recentProjectPaths.length === 0) {
-      setRecentProjects([]);
-      return;
-    }
-    let cancelled = false;
-    Promise.all(
-      recentProjectPaths.map(async (p) => {
-        try {
-          const peek = await window.pdv.project.peekManifest(p);
-          return { path: p, language: peek.language, name: peek.projectName } as RecentProject;
-        } catch {
-          return { path: p } as RecentProject;
-        }
-      })
-    ).then((results) => {
-      if (!cancelled) setRecentProjects(results);
-    });
-    return () => { cancelled = true; };
-  }, [recentProjectPaths]);
-
-  // Orphaned autosaves available on the welcome screen. Refreshed on mount,
-  // again when the kernel becomes ready (in case scan races with kernel start),
-  // and after each Recover/Discard.
-  const [recoverableSessions, setRecoverableSessions] = useState<RecoverableSession[]>([]);
-  const refreshRecoverableSessions = useCallback(async () => {
-    try {
-      const sessions = await window.pdv.autosave.scanWorkingDirs();
-      setRecoverableSessions(sessions);
-    } catch (error) {
-      console.warn('[app] scanWorkingDirs failed', error);
-      setRecoverableSessions([]);
-    }
-  }, []);
-  useEffect(() => {
-    void refreshRecoverableSessions();
-  }, [refreshRecoverableSessions]);
-  useEffect(() => {
-    if (kernelStatus === 'ready') {
-      void refreshRecoverableSessions();
-    }
-  }, [kernelStatus, refreshRecoverableSessions]);
-
-  const dismissWelcome = useCallback(() => {
-    setShowWelcome(false);
-    setForceWelcome(false);
-  }, []);
-
   /**
    * Starts the kernel for the current config, or shows the environment
    * selector if no interpreter path is configured for the given language.
@@ -1305,91 +1150,24 @@ const App: React.FC = () => {
   }, []);
 
   // --- session launch overlay ---------------------------------------------
-  // Stream uv output into the EnvSyncModal while a launch runs. A
-  // `stage: "kernel-boot"` marker (empty data) flips the modal's title
-  // from environment setup to kernel startup.
-  useEffect(() => {
-    const unsub = window.pdv.environment.onEnvActivity((chunk) => {
-      setKernelLaunch((s) =>
-        s.phase === 'idle'
-          ? s
-          : {
-              ...s,
-              output: s.output + chunk.data,
-              stage: chunk.stage === 'kernel-boot' ? 'kernel-boot' : s.stage,
-            });
-    });
-    return unsub;
-  }, []);
-
-  /**
-   * Launch (or relaunch) a uv-project kernel behind the blocking EnvSyncModal.
-   * Resolves true on success; on failure the modal stays up with Retry/Cancel.
-   */
-  const launchUvKernel = useCallback(async (uvContext: import('../types').KernelUvContext): Promise<boolean> => {
-    lastUvLaunchRef.current = uvContext;
-    lastLaunchRef.current = () => launchUvKernelRef.current(uvContext);
-    setActiveLanguage('python');
-    setKernelLaunch({ phase: 'syncing', stage: 'env', mode: 'uv', language: 'python', output: '' });
-    const ok = await startKernel(config ?? {} as Config, 'python', uvContext);
-    if (ok) {
-      setKernelLaunch({ phase: 'idle', stage: 'env', mode: 'uv', language: 'python', output: '' });
-    } else {
-      setKernelLaunch((s) => ({ ...s, phase: 'failed', error: lastErrorRef.current }));
-    }
-    return ok;
-  }, [config, startKernel, lastErrorRef]);
-
-  /**
-   * Launch (or relaunch) a shared-environment (conda/system) kernel behind
-   * the same blocking overlay as uv launches: "Starting ipykernel…" while
-   * the kernel boots, and on failure the modal stays up with
-   * Retry / Choose environment… / Cancel.
-   */
-  const launchSharedKernel = useCallback(async (cfg: Config, language: 'python' | 'julia'): Promise<boolean> => {
-    lastLaunchRef.current = () => launchSharedKernelRef.current(cfg, language);
-    setActiveLanguage(language);
-    setKernelLaunch({
-      phase: 'syncing',
-      stage: 'kernel-boot',
-      mode: 'shared',
-      language,
-      detail: language === 'julia' ? cfg.juliaPath : cfg.pythonPath,
-      output: '',
-    });
-    const ok = await startKernel(cfg, language);
-    if (ok) {
-      setKernelLaunch({ phase: 'idle', stage: 'env', mode: 'uv', language: 'python', output: '' });
-    } else {
-      setKernelLaunch((s) => ({ ...s, phase: 'failed', error: lastErrorRef.current }));
-    }
-    return ok;
-  }, [startKernel, lastErrorRef]);
-
-  // Keep the self-refs current so a stored Retry closure always replays
-  // through the latest launch implementation.
-  useEffect(() => {
-    launchUvKernelRef.current = launchUvKernel;
-    launchSharedKernelRef.current = launchSharedKernel;
-  }, [launchUvKernel, launchSharedKernel]);
-
-  /** Retry a failed session launch (replays the last uv or shared launch). */
-  const handleLaunchRetry = useCallback(() => {
-    void lastLaunchRef.current?.();
-  }, []);
-
-  /** Abandon a failed session launch and return to the welcome screen. */
-  const handleLaunchCancel = useCallback(() => {
-    setKernelLaunch({ phase: 'idle', stage: 'env', mode: 'uv', language: 'python', output: '' });
-    setForceWelcome(true);
-  }, []);
-
-  /** Leave a failed shared launch for the environment selector (Settings → Runtime). */
-  const handleLaunchChooseEnv = useCallback(() => {
-    const error = kernelLaunch.error;
-    setKernelLaunch({ phase: 'idle', stage: 'env', mode: 'uv', language: 'python', output: '' });
-    openEnvSettings(error ?? 'Kernel failed to start.');
-  }, [kernelLaunch.error, openEnvSettings]);
+  // The blocking EnvSyncModal state and launch/retry/cancel machinery live
+  // in useKernelLaunch; App picks uv vs shared per project and calls
+  // launchUvKernel / launchSharedKernel from its welcome/open flows.
+  const {
+    kernelLaunch,
+    launchUvKernel,
+    launchSharedKernel,
+    handleLaunchRetry,
+    handleLaunchCancel,
+    handleLaunchChooseEnv,
+  } = useKernelLaunch({
+    config,
+    startKernel,
+    lastErrorRef,
+    setActiveLanguage,
+    openEnvSettings,
+    setForceWelcome,
+  });
 
   const ensureKernel = useCallback(async (language: 'python' | 'julia' = 'python') => {
     setActiveLanguage(language);
@@ -1421,7 +1199,7 @@ const App: React.FC = () => {
     if (language === 'python') {
       // New Python projects open the setup dialog first (§10.5.8); the
       // welcome screen stays mounted underneath until Create/Cancel.
-      setShowNewProjectDialog(true);
+      setActiveDialog({ kind: 'newProject' });
       return;
     }
     dismissWelcome();
@@ -1430,7 +1208,7 @@ const App: React.FC = () => {
 
   /** Create a uv-managed project with the dialog's version/package choices. */
   const handleNewProjectCreateUv = useCallback(async (opts: { pythonVersion: string; packages: string[] }) => {
-    setShowNewProjectDialog(false);
+    closeDialog();
     dismissWelcome();
     // The EnvSyncModal covers the venv build (including a first-time
     // interpreter download); ensureKernel's shared-env pre-flight does not apply.
@@ -1439,7 +1217,7 @@ const App: React.FC = () => {
       pythonVersion: opts.pythonVersion,
       packages: opts.packages,
     });
-  }, [dismissWelcome, launchUvKernel]);
+  }, [closeDialog, dismissWelcome, launchUvKernel]);
 
   /**
    * Create a project on an existing (conda/system) interpreter chosen in the
@@ -1447,12 +1225,12 @@ const App: React.FC = () => {
    * is not touched; the choice reaches the manifest on first save (§10.5).
    */
   const handleNewProjectCreateShared = useCallback(async (pythonPath: string) => {
-    setShowNewProjectDialog(false);
+    closeDialog();
     dismissWelcome();
     const overrideConfig: Config = { ...(config ?? {} as Config), pythonPath };
     // Failure keeps the launch overlay up with Retry / Choose environment… / Cancel.
     await launchSharedKernel(overrideConfig, 'python');
-  }, [config, dismissWelcome, launchSharedKernel]);
+  }, [closeDialog, config, dismissWelcome, launchSharedKernel]);
 
   /**
    * Open a project from the welcome screen. Peeks at the manifest to detect
@@ -1515,7 +1293,9 @@ const App: React.FC = () => {
     setActiveNoteTabId(null);
     setActivePane('code');
     await openProjectFromWelcome(dir);
-  }, [openProjectFromWelcome]);
+    // The note-tab setters come from useNoteTabs; they wrap stable useState
+    // setters, so listing them never changes this callback's identity.
+  }, [openProjectFromWelcome, setActiveNoteTabId, setActivePane, setNoteTabs]);
 
   /**
    * Open a project via the file picker, with smart-open resolution.
@@ -1603,25 +1383,6 @@ const App: React.FC = () => {
     pendingProjectRef.current = { type: 'recover', orphanDir };
     void ensureKernel('python');
   }, [kernelStatus, guardDirty, executeRecoverUnsaved, dismissWelcome, ensureKernel]);
-
-  const handleDiscardSession = useCallback(async (orphanDir: string) => {
-    try {
-      await window.pdv.autosave.deleteOrphan(orphanDir);
-    } catch (error) {
-      setLastError(error instanceof Error ? error.message : String(error));
-    } finally {
-      void refreshRecoverableSessions();
-    }
-  }, [setLastError, refreshRecoverableSessions]);
-
-  // Shared between the WelcomeScreen "Clear" button and the native
-  // File → Clear Menu action (see the menuAction useEffect below).
-  const handleClearRecents = useCallback(() => {
-    void window.pdv.config.set({ recentProjects: [] }).then((updated) => {
-      if (updated) setConfig((prev) => (prev ? { ...prev, recentProjects: [] } : prev));
-    });
-    void window.pdv.menu.updateRecentProjects([]);
-  }, []);
 
   // Keep refs in sync so the menu-action effect (subscribed once) calls the latest handlers.
   handleOpenWithPickerRef.current = handleOpenWithPicker;
@@ -1836,70 +1597,72 @@ const App: React.FC = () => {
 
       </main>
 
-      {scriptDialog && currentKernelId && (
+      {activeDialog?.kind === 'script' && currentKernelId && (
         <ScriptDialog
-          node={scriptDialog}
+          node={activeDialog.node}
           kernelId={currentKernelId}
           onRun={handleScriptRun}
-          onCancel={() => setScriptDialog(null)}
+          onCancel={closeDialog}
         />
       )}
 
-      {renameTarget !== null && currentKernelId && (
+      {activeDialog?.kind === 'rename' && currentKernelId && (
         <RenameDialog
-          currentKey={renameTarget.key}
-          nodePath={renameTarget.path}
-          onCancel={() => setRenameTarget(null)}
+          currentKey={activeDialog.nodeKey}
+          nodePath={activeDialog.path}
+          onCancel={closeDialog}
           onRename={(newName) => void runTreeAction(
-            () => window.pdv.tree.rename(currentKernelId, renameTarget.path, newName),
-            () => setRenameTarget(null),
+            () => window.pdv.tree.rename(currentKernelId, activeDialog.path, newName),
+            closeDialog,
           )}
         />
       )}
 
-      {moveTarget !== null && currentKernelId && (
+      {activeDialog?.kind === 'move' && currentKernelId && (
         <MoveDialog
-          currentPath={moveTarget.path}
-          nodeType={moveTarget.type}
+          currentPath={activeDialog.path}
+          nodeType={activeDialog.nodeType}
           kernelId={currentKernelId}
-          onCancel={() => setMoveTarget(null)}
+          onCancel={closeDialog}
           onMove={(newPath) => void runTreeAction(
-            () => window.pdv.tree.move(currentKernelId, moveTarget.path, newPath),
-            () => setMoveTarget(null),
+            () => window.pdv.tree.move(currentKernelId, activeDialog.path, newPath),
+            closeDialog,
           )}
         />
       )}
 
-      {duplicateTarget !== null && currentKernelId && (
+      {activeDialog?.kind === 'duplicate' && currentKernelId && (
         <DuplicateDialog
-          currentPath={duplicateTarget.path}
-          nodeType={duplicateTarget.type}
-          onCancel={() => setDuplicateTarget(null)}
+          currentPath={activeDialog.path}
+          nodeType={activeDialog.nodeType}
+          onCancel={closeDialog}
           onDuplicate={(newPath) => void runTreeAction(
-            () => window.pdv.tree.duplicate(currentKernelId, duplicateTarget.path, newPath),
-            () => setDuplicateTarget(null),
+            () => window.pdv.tree.duplicate(currentKernelId, activeDialog.path, newPath),
+            closeDialog,
           )}
         />
       )}
 
-      {createNodeTarget !== null && currentKernelId && (
-        <CreateNodeDialog
-          parentPath={createNodeTarget}
-          onCancel={() => setCreateNodeTarget(null)}
+      {activeDialog?.kind === 'createNode' && currentKernelId && (
+        <CreateTreeItemDialog
+          kind="node"
+          parentPath={activeDialog.parentPath}
+          onCancel={closeDialog}
           onCreate={(name) => void runTreeAction(
-            () => window.pdv.tree.createNode(currentKernelId, createNodeTarget, name),
-            () => setCreateNodeTarget(null),
+            () => window.pdv.tree.createNode(currentKernelId, activeDialog.parentPath, name),
+            closeDialog,
           )}
         />
       )}
 
-      {createScriptTarget !== null && currentKernelId && (
-        <CreateScriptDialog
-          parentPath={createScriptTarget}
-          onCancel={() => setCreateScriptTarget(null)}
+      {activeDialog?.kind === 'createScript' && currentKernelId && (
+        <CreateTreeItemDialog
+          kind="script"
+          parentPath={activeDialog.parentPath}
+          onCancel={closeDialog}
           onCreate={async (name) => {
             try {
-              const result = await window.pdv.tree.createScript(currentKernelId, createScriptTarget, name);
+              const result = await window.pdv.tree.createScript(currentKernelId, activeDialog.parentPath, name);
               if (!result.success) {
                 setLastError(result.error);
               } else if (result.treePath) {
@@ -1909,19 +1672,20 @@ const App: React.FC = () => {
             } catch (error) {
               setLastError(error instanceof Error ? error.message : String(error));
             } finally {
-              setCreateScriptTarget(null);
+              closeDialog();
             }
           }}
         />
       )}
 
-      {createNoteTarget !== null && currentKernelId && (
-        <CreateNoteDialog
-          parentPath={createNoteTarget}
-          onCancel={() => setCreateNoteTarget(null)}
+      {activeDialog?.kind === 'createNote' && currentKernelId && (
+        <CreateTreeItemDialog
+          kind="note"
+          parentPath={activeDialog.parentPath}
+          onCancel={closeDialog}
           onCreate={async (name) => {
             try {
-              const result = await window.pdv.tree.createNote(currentKernelId, createNoteTarget, name);
+              const result = await window.pdv.tree.createNote(currentKernelId, activeDialog.parentPath, name);
               if (!result.success) {
                 setLastError(result.error);
               } else if (result.treePath) {
@@ -1933,26 +1697,27 @@ const App: React.FC = () => {
                   type: 'markdown',
                   preview: '',
                   hasChildren: false,
-                  parentPath: createNoteTarget || null,
+                  parentPath: activeDialog.parentPath || null,
                 };
                 await openNote(noteNode);
               }
             } catch (error) {
               setLastError(error instanceof Error ? error.message : String(error));
             } finally {
-              setCreateNoteTarget(null);
+              closeDialog();
             }
           }}
         />
       )}
 
-      {createGuiTarget !== null && currentKernelId && (
-        <CreateGuiDialog
-          parentPath={createGuiTarget}
-          onCancel={() => setCreateGuiTarget(null)}
+      {activeDialog?.kind === 'createGui' && currentKernelId && (
+        <CreateTreeItemDialog
+          kind="gui"
+          parentPath={activeDialog.parentPath}
+          onCancel={closeDialog}
           onCreate={async (name) => {
             try {
-              const result = await window.pdv.tree.createGui(currentKernelId, createGuiTarget, name);
+              const result = await window.pdv.tree.createGui(currentKernelId, activeDialog.parentPath, name);
               if (!result.success) {
                 setLastError(result.error);
               } else if (result.treePath) {
@@ -1962,19 +1727,20 @@ const App: React.FC = () => {
             } catch (error) {
               setLastError(error instanceof Error ? error.message : String(error));
             } finally {
-              setCreateGuiTarget(null);
+              closeDialog();
             }
           }}
         />
       )}
 
-      {createLibTarget !== null && currentKernelId && (
-        <CreateLibDialog
-          parentPath={createLibTarget}
-          onCancel={() => setCreateLibTarget(null)}
+      {activeDialog?.kind === 'createLib' && currentKernelId && (
+        <CreateTreeItemDialog
+          kind="lib"
+          parentPath={activeDialog.parentPath}
+          onCancel={closeDialog}
           onCreate={async (name) => {
             try {
-              const result = await window.pdv.tree.createLib(currentKernelId, createLibTarget, name);
+              const result = await window.pdv.tree.createLib(currentKernelId, activeDialog.parentPath, name);
               if (!result.success) {
                 setLastError(result.error);
               } else if (result.treePath) {
@@ -1984,35 +1750,35 @@ const App: React.FC = () => {
             } catch (error) {
               setLastError(error instanceof Error ? error.message : String(error));
             } finally {
-              setCreateLibTarget(null);
+              closeDialog();
             }
           }}
         />
       )}
 
       <NewModuleDialog
-        isOpen={showNewModuleDialog}
+        isOpen={activeDialog?.kind === 'newModule'}
         defaultLanguage={activeLanguage === 'julia' ? 'julia' : 'python'}
-        onCancel={() => setShowNewModuleDialog(false)}
+        onCancel={closeDialog}
         onCreated={() => {
-          setShowNewModuleDialog(false);
+          closeDialog();
           setTreeRefreshToken((t) => t + 1);
         }}
       />
 
-      {moduleMetadataTarget && (
+      {activeDialog?.kind === 'moduleMetadata' && (
         <ModuleMetadataDialog
           isOpen={true}
-          alias={moduleMetadataTarget.alias}
+          alias={activeDialog.alias}
           initial={{
-            name: moduleMetadataTarget.name,
-            version: moduleMetadataTarget.version,
-            description: moduleMetadataTarget.description,
-            language: moduleMetadataTarget.language,
+            name: activeDialog.name,
+            version: activeDialog.version,
+            description: activeDialog.description,
+            language: activeDialog.language,
           }}
-          onCancel={() => setModuleMetadataTarget(null)}
+          onCancel={closeDialog}
           onSaved={() => {
-            setModuleMetadataTarget(null);
+            closeDialog();
             setTreeRefreshToken((t) => t + 1);
           }}
         />
@@ -2045,23 +1811,23 @@ const App: React.FC = () => {
         />
 
        <ImportModuleDialog
-         isOpen={showImportModule}
+         isOpen={activeDialog?.kind === 'importModule'}
          projectDir={currentProjectDir}
          activeLanguage={activeLanguage}
          refreshToken={modulesRefreshToken}
-         onClose={() => setShowImportModule(false)}
+         onClose={closeDialog}
        />
-       {showSaveAsDialog && (
+       {activeDialog?.kind === 'saveAs' && (
          <SaveAsDialog
            defaultLocation={currentProjectDir
              ? currentProjectDir.replace(/\/[^/]+\/?$/, '')
              : config?.defaultSaveLocation ?? null}
            defaultName={currentProjectName ?? undefined}
            onSave={async (projectName, saveDir) => {
-             setShowSaveAsDialog(false);
+             closeDialog();
              await handleSaveProject({ directory: saveDir, projectName });
            }}
-           onCancel={() => setShowSaveAsDialog(false)}
+           onCancel={closeDialog}
          />
        )}
        <SettingsDialog
@@ -2118,13 +1884,13 @@ const App: React.FC = () => {
          />
        )}
 
-       {showNewProjectDialog && (
+       {activeDialog?.kind === 'newProject' && (
          <NewProjectDialog
            defaultPackages={config?.defaultPackages ?? []}
            currentPythonPath={config?.pythonPath}
            onCreateUv={(opts) => void handleNewProjectCreateUv(opts)}
            onCreateShared={(pythonPath) => void handleNewProjectCreateShared(pythonPath)}
-           onCancel={() => setShowNewProjectDialog(false)}
+           onCancel={closeDialog}
          />
        )}
 

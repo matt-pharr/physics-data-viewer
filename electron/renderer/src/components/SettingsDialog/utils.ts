@@ -8,6 +8,16 @@ import type { LauncherCheck, TerminalPreset } from '../../types';
 export const IS_MAC = typeof navigator !== 'undefined' && navigator.platform.toUpperCase().startsWith('MAC');
 
 /**
+ * Platform identifier reported by the main process via the preload bridge.
+ * `process.platform` is a constant for the life of the session, so we read it
+ * synchronously rather than routing through an async IPC call. Falls back to
+ * `'linux'` only if the bridge is missing (e.g. unit-test environment without
+ * a preload step).
+ */
+export const PLATFORM: NodeJS.Platform =
+  (typeof window !== 'undefined' && window.pdv?.system?.platform) || 'linux';
+
+/**
  * Human-readable labels for each terminal preset shown in the General tab's
  * "Terminal application" dropdown.
  *
