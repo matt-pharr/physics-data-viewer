@@ -98,7 +98,8 @@ def handle_tree_list(msg: dict) -> None:
     msg : dict
         Parsed PDV message envelope.
     """
-    from pdv.comms import get_pdv_tree, send_error, send_message  # noqa: PLC0415
+    from pdv.comms import send_error, send_message  # noqa: PLC0415
+    from pdv.handlers._helpers import validate_register_request  # noqa: PLC0415
     from pdv.modules import has_handler_for  # noqa: PLC0415
     from pdv.serialization import (  # noqa: PLC0415
         is_xarray_dataset,
@@ -109,17 +110,13 @@ def handle_tree_list(msg: dict) -> None:
     from pdv.tree import PDVModule, PDVGui  # noqa: PLC0415
 
     msg_id = msg.get("msg_id")
-    path = msg.get("payload", {}).get("path", "")
-    tree = get_pdv_tree()
-
-    if tree is None:
-        send_error(
-            "pdv.tree.list.response",
-            "tree.no_tree",
-            "PDVTree is not initialized",
-            in_reply_to=msg_id,
-        )
+    validated = validate_register_request(
+        msg, "pdv.tree.list.response", "tree", required_fields=()
+    )
+    if validated is None:
         return
+    tree, payload = validated
+    path = payload.get("path", "")
 
     # Get the container at the given path (or the root tree itself)
     if path:
@@ -250,33 +247,20 @@ def handle_tree_get(msg: dict) -> None:
     msg : dict
         Parsed PDV message envelope.
     """
-    from pdv.comms import get_pdv_tree, send_error, send_message  # noqa: PLC0415
+    from pdv.comms import send_error, send_message  # noqa: PLC0415
+    from pdv.handlers._helpers import validate_register_request  # noqa: PLC0415
     from pdv.modules import has_handler_for  # noqa: PLC0415
     from pdv.serialization import detect_kind, node_preview, python_type_string  # noqa: PLC0415
 
     msg_id = msg.get("msg_id")
-    payload = msg.get("payload", {})
+    validated = validate_register_request(
+        msg, "pdv.tree.get.response", "tree", required_fields=("path",)
+    )
+    if validated is None:
+        return
+    tree, payload = validated
     path = payload.get("path", "")
     mode = payload.get("mode", "value")
-
-    tree = get_pdv_tree()
-    if tree is None:
-        send_error(
-            "pdv.tree.get.response",
-            "tree.no_tree",
-            "PDVTree is not initialized",
-            in_reply_to=msg_id,
-        )
-        return
-
-    if not path:
-        send_error(
-            "pdv.tree.get.response",
-            "tree.missing_path",
-            "path is required",
-            in_reply_to=msg_id,
-        )
-        return
 
     if path not in tree:
         send_error(
@@ -346,24 +330,20 @@ def handle_tree_resolve_file(msg: dict) -> None:
         Parsed PDV message envelope.
     """
 
-    from pdv.comms import get_pdv_tree, send_error, send_message  # noqa: PLC0415
+    from pdv.comms import send_error, send_message  # noqa: PLC0415
+    from pdv.handlers._helpers import validate_register_request  # noqa: PLC0415
     from pdv.tree import PDVFile  # noqa: PLC0415
 
     msg_id = msg.get("msg_id")
-    payload = msg.get("payload", {})
+    validated = validate_register_request(
+        msg, "pdv.tree.resolve_file.response", "tree", required_fields=("path",)
+    )
+    if validated is None:
+        return
+    tree, payload = validated
     path = payload.get("path", "")
 
-    tree = get_pdv_tree()
-    if tree is None:
-        send_error(
-            "pdv.tree.resolve_file.response",
-            "tree.no_tree",
-            "PDVTree is not initialized",
-            in_reply_to=msg_id,
-        )
-        return
-
-    if not path or path not in tree:
+    if path not in tree:
         send_error(
             "pdv.tree.resolve_file.response",
             "tree.path_not_found",
@@ -399,30 +379,17 @@ def handle_tree_delete(msg: dict) -> None:
     path : str
         Dot-separated tree path of the node to delete.
     """
-    from pdv.comms import send_message, send_error, get_pdv_tree  # noqa: PLC0415
+    from pdv.comms import send_message, send_error  # noqa: PLC0415
+    from pdv.handlers._helpers import validate_register_request  # noqa: PLC0415
 
     msg_id = msg.get("msg_id")
-    payload = msg.get("payload", {})
+    validated = validate_register_request(
+        msg, "pdv.tree.delete.response", "tree", required_fields=("path",)
+    )
+    if validated is None:
+        return
+    tree, payload = validated
     path = payload.get("path", "")
-
-    tree = get_pdv_tree()
-    if tree is None:
-        send_error(
-            "pdv.tree.delete.response",
-            "tree.not_initialized",
-            "PDVTree is not initialized.",
-            in_reply_to=msg_id,
-        )
-        return
-
-    if not path:
-        send_error(
-            "pdv.tree.delete.response",
-            "tree.invalid_path",
-            "Cannot delete the root tree.",
-            in_reply_to=msg_id,
-        )
-        return
 
     try:
         del tree[path]
@@ -452,29 +419,27 @@ def handle_tree_create_node(msg: dict) -> None:
     name : str
         Key name for the new node.
     """
-    from pdv.comms import send_message, send_error, get_pdv_tree  # noqa: PLC0415
+    from pdv.comms import send_message, send_error  # noqa: PLC0415
+    from pdv.handlers._helpers import validate_register_request  # noqa: PLC0415
     from pdv.tree import PDVTree  # noqa: PLC0415
 
     msg_id = msg.get("msg_id")
-    payload = msg.get("payload", {})
+    validated = validate_register_request(
+        msg, "pdv.tree.create_node.response", "tree", required_fields=("name",)
+    )
+    if validated is None:
+        return
+    tree, payload = validated
     parent_path = payload.get("parent_path", "")
     name = payload.get("name", "")
 
-    tree = get_pdv_tree()
-    if tree is None:
-        send_error(
-            "pdv.tree.create_node.response",
-            "tree.not_initialized",
-            "PDVTree is not initialized.",
-            in_reply_to=msg_id,
-        )
-        return
-
-    if not name:
+    if "." in name:
+        # Tree keys are dot-path segments; a dot inside a key would make the
+        # node unaddressable (every path lookup splits on ".").
         send_error(
             "pdv.tree.create_node.response",
             "tree.invalid_name",
-            "Node name must not be empty.",
+            f"Node name must not contain '.': {name!r}",
             in_reply_to=msg_id,
         )
         return
@@ -531,40 +496,21 @@ def handle_tree_rename(msg: dict) -> None:
     new_name : str
         New key name (single segment, no dots).
     """
-    from pdv.comms import send_message, send_error, get_pdv_tree  # noqa: PLC0415
+    from pdv.comms import send_message, send_error  # noqa: PLC0415
+    from pdv.handlers._helpers import validate_register_request  # noqa: PLC0415
 
     msg_id = msg.get("msg_id")
-    payload = msg.get("payload", {})
+    validated = validate_register_request(
+        msg,
+        "pdv.tree.rename.response",
+        "tree",
+        required_fields=("path", "new_name"),
+    )
+    if validated is None:
+        return
+    tree, payload = validated
     path = payload.get("path", "")
     new_name = payload.get("new_name", "")
-
-    tree = get_pdv_tree()
-    if tree is None:
-        send_error(
-            "pdv.tree.rename.response",
-            "tree.not_initialized",
-            "PDVTree is not initialized.",
-            in_reply_to=msg_id,
-        )
-        return
-
-    if not path:
-        send_error(
-            "pdv.tree.rename.response",
-            "tree.invalid_path",
-            "Cannot rename the root tree.",
-            in_reply_to=msg_id,
-        )
-        return
-
-    if not new_name:
-        send_error(
-            "pdv.tree.rename.response",
-            "tree.invalid_name",
-            "New name must not be empty.",
-            in_reply_to=msg_id,
-        )
-        return
 
     if "." in new_name:
         send_error(
@@ -633,40 +579,21 @@ def handle_tree_move(msg: dict) -> None:
     new_path : str
         Full dot-separated destination path.
     """
-    from pdv.comms import send_message, send_error, get_pdv_tree  # noqa: PLC0415
+    from pdv.comms import send_message, send_error  # noqa: PLC0415
+    from pdv.handlers._helpers import validate_register_request  # noqa: PLC0415
 
     msg_id = msg.get("msg_id")
-    payload = msg.get("payload", {})
+    validated = validate_register_request(
+        msg,
+        "pdv.tree.move.response",
+        "tree",
+        required_fields=("path", "new_path"),
+    )
+    if validated is None:
+        return
+    tree, payload = validated
     path = payload.get("path", "")
     new_path = payload.get("new_path", "")
-
-    tree = get_pdv_tree()
-    if tree is None:
-        send_error(
-            "pdv.tree.move.response",
-            "tree.not_initialized",
-            "PDVTree is not initialized.",
-            in_reply_to=msg_id,
-        )
-        return
-
-    if not path:
-        send_error(
-            "pdv.tree.move.response",
-            "tree.invalid_path",
-            "Cannot move the root tree.",
-            in_reply_to=msg_id,
-        )
-        return
-
-    if not new_path:
-        send_error(
-            "pdv.tree.move.response",
-            "tree.invalid_path",
-            "Destination path must not be empty.",
-            in_reply_to=msg_id,
-        )
-        return
 
     if path == new_path:
         send_error(
@@ -770,40 +697,21 @@ def handle_tree_duplicate(msg: dict) -> None:
     """
     import copy  # noqa: PLC0415
 
-    from pdv.comms import send_message, send_error, get_pdv_tree  # noqa: PLC0415
+    from pdv.comms import send_message, send_error  # noqa: PLC0415
+    from pdv.handlers._helpers import validate_register_request  # noqa: PLC0415
 
     msg_id = msg.get("msg_id")
-    payload = msg.get("payload", {})
+    validated = validate_register_request(
+        msg,
+        "pdv.tree.duplicate.response",
+        "tree",
+        required_fields=("path", "new_path"),
+    )
+    if validated is None:
+        return
+    tree, payload = validated
     path = payload.get("path", "")
     new_path = payload.get("new_path", "")
-
-    tree = get_pdv_tree()
-    if tree is None:
-        send_error(
-            "pdv.tree.duplicate.response",
-            "tree.not_initialized",
-            "PDVTree is not initialized.",
-            in_reply_to=msg_id,
-        )
-        return
-
-    if not path:
-        send_error(
-            "pdv.tree.duplicate.response",
-            "tree.invalid_path",
-            "Cannot duplicate the root tree.",
-            in_reply_to=msg_id,
-        )
-        return
-
-    if not new_path:
-        send_error(
-            "pdv.tree.duplicate.response",
-            "tree.invalid_path",
-            "Destination path must not be empty.",
-            in_reply_to=msg_id,
-        )
-        return
 
     if path not in tree:
         send_error(

@@ -323,31 +323,21 @@ def handle_resolve_path(msg: dict) -> None:
     msg : dict
         Parsed PDV message envelope.
     """
-    from pdv.comms import get_pdv_tree, send_error, send_message  # noqa: PLC0415
+    from pdv.comms import send_error, send_message  # noqa: PLC0415
+    from pdv.handlers._helpers import validate_register_request  # noqa: PLC0415
     from pdv.tree import PDVFile  # noqa: PLC0415
 
     msg_id = msg.get("msg_id")
-    payload = msg.get("payload", {})
+    validated = validate_register_request(
+        msg,
+        "pdv.tree.resolve_path.response",
+        "introspection",
+        required_fields=("path",),
+    )
+    if validated is None:
+        return
+    tree, payload = validated
     path = payload.get("path", "")
-
-    if not path:
-        send_error(
-            "pdv.tree.resolve_path.response",
-            "introspection.missing_path",
-            "path is required in pdv.tree.resolve_path payload",
-            in_reply_to=msg_id,
-        )
-        return
-
-    tree = get_pdv_tree()
-    if tree is None:
-        send_error(
-            "pdv.tree.resolve_path.response",
-            "tree.no_tree",
-            "PDVTree is not initialized",
-            in_reply_to=msg_id,
-        )
-        return
 
     working_dir = getattr(tree, "_working_dir", None)
 

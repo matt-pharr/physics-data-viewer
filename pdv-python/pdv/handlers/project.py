@@ -634,14 +634,20 @@ def handle_project_load(msg: dict) -> None:
     import os
     import sys
 
-    from pdv.comms import get_pdv_tree, send_error, send_message  # noqa: PLC0415
+    from pdv.comms import send_error, send_message  # noqa: PLC0415
+    from pdv.handlers._helpers import validate_register_request  # noqa: PLC0415
 
     msg_id = msg.get("msg_id")
-    payload = msg.get("payload", {})
+    validated = validate_register_request(
+        msg, "pdv.project.load.response", "project", required_fields=("save_dir",)
+    )
+    if validated is None:
+        return
+    tree, payload = validated
     save_dir = payload.get("save_dir", "")
     tree_index_dir = payload.get("tree_index_dir", "")
 
-    if not save_dir or not os.path.isdir(save_dir):
+    if not os.path.isdir(save_dir):
         send_error(
             "pdv.project.load.response",
             "project.invalid_save_dir",
@@ -679,16 +685,6 @@ def handle_project_load(msg: dict) -> None:
             "pdv.project.load.response",
             "project.corrupt_tree_index",
             f"Failed to parse tree-index.json: {exc}",
-            in_reply_to=msg_id,
-        )
-        return
-
-    tree = get_pdv_tree()
-    if tree is None:
-        send_error(
-            "pdv.project.load.response",
-            "project.no_tree",
-            "PDVTree is not initialized",
             in_reply_to=msg_id,
         )
         return
@@ -945,39 +941,27 @@ def handle_project_save(msg: dict) -> None:
         Parsed PDV message envelope.
     """
     global _autosave_cache  # noqa: PLW0603
-    from pdv.comms import get_pdv_tree, send_error, send_message  # noqa: PLC0415
+    from pdv.comms import send_error, send_message  # noqa: PLC0415
+    from pdv.handlers._helpers import validate_register_request  # noqa: PLC0415
 
     msg_id = msg.get("msg_id")
-    payload = msg.get("payload", {})
-    save_dir = payload.get("save_dir", "")
     # `is_autosave` is still part of the wire spec for forward compatibility
     # but the kernel no longer behaves differently based on it: the cache is
     # always passed to the serializer (so explicit saves populate it for the
     # next autosave) and the user-facing `clear_cache` flag is the sole reset
     # path. See ARCHITECTURE.md §8.4.
-    clear_cache = payload.get("clear_cache", False)
-
-    if clear_cache:
+    # The cache clear must run even when validation below fails — the flag
+    # is an explicit user action, not part of the save request proper.
+    if msg.get("payload", {}).get("clear_cache", False):
         _autosave_cache = {}
 
-    if not save_dir:
-        send_error(
-            "pdv.project.save.response",
-            "project.missing_save_dir",
-            "save_dir is required in the pdv.project.save payload",
-            in_reply_to=msg_id,
-        )
+    validated = validate_register_request(
+        msg, "pdv.project.save.response", "project", required_fields=("save_dir",)
+    )
+    if validated is None:
         return
-
-    tree = get_pdv_tree()
-    if tree is None:
-        send_error(
-            "pdv.project.save.response",
-            "project.no_tree",
-            "PDVTree is not initialized",
-            in_reply_to=msg_id,
-        )
-        return
+    tree, payload = validated
+    save_dir = payload.get("save_dir", "")
 
     def _progress(phase: str, current: int, total: int) -> None:
         send_message(
