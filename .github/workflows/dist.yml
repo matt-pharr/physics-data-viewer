@@ -7,7 +7,17 @@ on:
   workflow_dispatch:
 
 jobs:
+  # Run the full CI suite first (forced on via run-all). Both build jobs below
+  # depend on it, so a tag on red never ships a release.
+  ci:
+    uses: ./.github/workflows/ci.yml
+    permissions:
+      contents: read
+    with:
+      run-all: true
+
   dist-mac:
+    needs: ci
     runs-on: macos-latest
     permissions:
       contents: write
@@ -41,6 +51,7 @@ jobs:
         run: npm run build && npx electron-builder --mac --publish always
 
   dist-linux:
+    needs: ci
     runs-on: ubuntu-latest
     permissions:
       contents: write
