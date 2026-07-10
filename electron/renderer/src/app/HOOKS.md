@@ -1,18 +1,21 @@
 # App Hooks — Composition and Data Flow
 
-The root `App` component (`app/index.tsx`) orchestrates all application state via 7 custom hooks. This document explains each hook's purpose, what state it owns or consumes, and how the hooks relate to each other.
+The root `App` component (`app/index.tsx`) orchestrates all application state via 10 custom hooks. This document explains each hook's purpose, what state it owns or consumes, and how the hooks relate to each other.
 
 ## Architecture Overview
 
 ```
 App (index.tsx)
- ├── 21 useState declarations (grouped by domain — see §State Groups below)
+ ├── useState declarations (grouped by domain — see §State Groups below)
  ├── useLayoutState()           — sidebar/pane geometry (localStorage)
  ├── useThemeManager()          — theme colors + Monaco theme
  ├── useCodeCellsPersistence()  — autosave code tabs to <kernelWorkingDir>/code-cells.json
  ├── useKernelSubscriptions()   — push-subscription lifecycle
  ├── useKernelLifecycle()       — start / restart / env-save
+ ├── useKernelLaunch()          — session-launch overlay (EnvSyncModal) + launch callbacks
  ├── useKeyboardShortcuts()     — global keydown listener
+ ├── useNoteTabs()              — Write-tab markdown notes (tabs, save/flush handlers)
+ ├── useWelcomeState()          — welcome overlay flags, recent projects, recoverable sessions
  └── useProjectWorkflow()       — save / load / new project
 ```
 
@@ -107,6 +110,38 @@ Several hooks bump integer "refresh tokens" (e.g. `setTreeRefreshToken(t => t + 
 - `handleRestartKernel()` — restarts the current kernel (clears logs, bumps refresh tokens)
 
 **Dependencies**: Uses `currentKernelId` to know which kernel to stop/restart.
+
+---
+
+### `useKernelLaunch({ config, startKernel, lastErrorRef, ... })`
+
+**Purpose**: Owns the unified `kernelLaunch` state driving the blocking EnvSyncModal for both uv-project launches (env materialization + kernel boot) and shared/conda launches (kernel boot only), plus the uv-output streaming subscription that feeds it.
+
+**Takes**: `config`, `startKernel` and `lastErrorRef` (from useKernelLifecycle), `setActiveLanguage`, `openEnvSettings`, `setForceWelcome`.
+
+**Returns**: `kernelLaunch` (overlay state), `launchUvKernel(uvContext)`, `launchSharedKernel(cfg, language)`, and the overlay callbacks `handleLaunchRetry` / `handleLaunchCancel` / `handleLaunchChooseEnv`.
+
+**Internal refs**: `lastLaunchRef` stores a replay closure for Retry; `launchUvKernelRef`/`launchSharedKernelRef` are self-refs synced in a `useEffect` so stored Retry closures always call the latest launch implementation.
+
+---
+
+### `useNoteTabs({ currentKernelId, setLogs, setLastError })`
+
+**Purpose**: Owns the Write-tab surface — the Code/Write pane selector, open note tabs, and the active note tab — plus all note handlers (open from Tree, edit, save, close-with-flush, and `flushDirtyNotes` for project saves).
+
+**Takes**: `currentKernelId` (note reads/writes require a kernel), `setLogs` (save-failure console entries), `setLastError`.
+
+**Returns**: `activePane`/`setActivePane`, `noteTabs`/`setNoteTabs`, `activeNoteTabId`/`setActiveNoteTabId`, `openNote`, `handleNoteContentChange`, `handleNoteSave`, `handleNoteCloseTab`, `flushDirtyNotes`.
+
+---
+
+### `useWelcomeState({ config, setConfig, kernelStatus, setLastError })`
+
+**Purpose**: Owns welcome-screen state — `showWelcome`/`forceWelcome` visibility flags, the recent-project list enriched with manifest metadata, and the recoverable orphaned-autosave session list — plus the self-contained Clear Recents and Discard Session handlers. Project opening/recovery flows stay in App.
+
+**Takes**: `config` (recentProjects), `setConfig`, `kernelStatus` (re-scan on 'ready'), `setLastError`.
+
+**Returns**: `showWelcome`, `forceWelcome`, `setForceWelcome`, `dismissWelcome`, `recentProjects`, `recoverableSessions`, `refreshRecoverableSessions`, `handleClearRecents`, `handleDiscardSession`.
 
 ---
 

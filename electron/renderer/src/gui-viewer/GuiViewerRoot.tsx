@@ -6,38 +6,30 @@
  * action execution through the main window.
  */
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useRef, useState, useCallback } from "react";
 import type {
   GuiEditorContext,
   GuiManifestV1,
-  ImportedModuleActionDescriptor,
   ModuleInputDescriptor,
 } from "../types/pdv.d";
 import { ContainerRenderer } from "../components/ModuleGui/ContainerRenderer";
+import {
+  adaptGuiActions,
+  resolveTreeDropdownOptions,
+} from "../components/ModuleGui/gui-host-utils";
 import "../styles/module-gui.css";
 
 type ModuleInputValue = string | number | boolean;
-
-/**
- * Adapt GuiActionDescriptors to ImportedModuleActionDescriptors
- * for ContainerRenderer compatibility.
- */
-function adaptActions(
-  actions: { id: string; label: string; script_path: string; inputs?: string[] }[]
-): ImportedModuleActionDescriptor[] {
-  return actions.map((a) => ({
-    id: a.id,
-    label: a.label,
-    scriptName: a.script_path,
-    inputIds: a.inputs,
-  }));
-}
 
 export function GuiViewerRoot() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [context, setContext] = useState<GuiEditorContext | null>(null);
   const [manifest, setManifest] = useState<GuiManifestV1 | null>(null);
+  const manifestRef = useRef(manifest);
+  useEffect(() => {
+    manifestRef.current = manifest;
+  }, [manifest]);
 
   const [inputValues, setInputValues] = useState<Record<string, ModuleInputValue>>({});
   const [sectionOpen, setSectionOpen] = useState<Record<string, boolean>>({});
@@ -70,11 +62,18 @@ export function GuiViewerRoot() {
           return;
         }
 
-        setManifest(result.manifest);
+        // Resolve tree-backed dropdown options (dropdowns bound to an
+        // `optionsTreePath` were previously left empty in the viewer).
+        const resolvedInputs = await resolveTreeDropdownOptions(
+          result.manifest.inputs,
+          ctx.kernelId
+        );
+        if (cancelled) return;
+        setManifest({ ...result.manifest, inputs: resolvedInputs });
 
         // Initialize input defaults
         const defaults: Record<string, ModuleInputValue> = {};
-        for (const input of result.manifest.inputs) {
+        for (const input of resolvedInputs) {
           if (input.default != null) {
             defaults[`${ctx.treePath}:${input.id}`] = input.default;
           }
@@ -93,6 +92,28 @@ export function GuiViewerRoot() {
     void init();
     return () => { cancelled = true; };
   }, []);
+
+  // Refresh tree-backed dropdowns when the tree changes (same behavior as
+  // module windows).
+  useEffect(() => {
+    if (!context) return;
+    const unsub = window.pdv.tree.onChanged(() => {
+      const current = manifestRef.current;
+      if (!current) return;
+      void (async () => {
+        try {
+          const resolvedInputs = await resolveTreeDropdownOptions(
+            current.inputs,
+            context.kernelId
+          );
+          setManifest((prev) => (prev ? { ...prev, inputs: resolvedInputs } : prev));
+        } catch {
+          // Silently ignore refresh errors
+        }
+      })();
+    });
+    return unsub;
+  }, [context]);
 
   // ── Callbacks ──
   const setModuleInputValue = useCallback(
@@ -208,7 +229,7 @@ export function GuiViewerRoot() {
         node={manifest.gui.layout}
         moduleAlias={viewerAlias}
         inputs={manifest.inputs}
-        actions={adaptActions(manifest.actions)}
+        actions={adaptGuiActions(manifest.actions)}
         inputValues={inputValues}
         sectionOpen={sectionOpen}
         runningActionKey={runningActionKey}

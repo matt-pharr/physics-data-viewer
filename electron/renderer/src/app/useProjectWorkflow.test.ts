@@ -96,7 +96,7 @@ function createState(overrides: Partial<State> = {}): {
     setChecksumMismatch: ((v: unknown) => apply("checksumMismatch", v as never)) as never,
     setSavedPdvVersion: ((v: unknown) => apply("savedPdvVersion", v as never)) as never,
     setCurrentProjectName: ((v: unknown) => apply("currentProjectName", v as never)) as never,
-    setShowSaveAsDialog: ((v: unknown) => apply("showSaveAsDialog", v as never)) as never,
+    openSaveAsDialog: (() => apply("showSaveAsDialog", true as never)) as never,
     loadedProjectTabsRef: loadedProjectTabsRef as never,
     normalizeLoadedCodeCells: (data: unknown) => {
       const d = data as { tabs?: CellTab[]; activeTabId?: number } | null;

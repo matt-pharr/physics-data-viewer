@@ -16,7 +16,7 @@ import type {
 import { ModuleInputsPanel } from "../components/ModulesPanel/ModuleInputsPanel";
 import { ModuleActionsPanel } from "../components/ModulesPanel/ModuleActionsPanel";
 import { ContainerRenderer } from "../components/ModuleGui/ContainerRenderer";
-import { treeService } from "../services/tree";
+import { resolveTreeDropdownOptions } from "../components/ModuleGui/gui-host-utils";
 import {
   ACTIVE_TAB_SETTING_KEY,
   DEFAULT_MODULE_TAB,
@@ -70,20 +70,7 @@ export const ModuleWindowRoot: React.FC = () => {
         }
 
         // Resolve tree-backed dropdown options
-        const resolvedInputs = await Promise.all(
-          mod.inputs.map(async (input) => {
-            if (input.control !== "dropdown" || !input.optionsTreePath) {
-              return input;
-            }
-            const treePath = input.optionsTreePath.trim();
-            if (!treePath) return { ...input, options: [] };
-            const nodes = await treeService.listByPath(ctx.kernelId, treePath);
-            return {
-              ...input,
-              options: nodes.map((node) => ({ label: node.key, value: node.key })),
-            };
-          })
-        );
+        const resolvedInputs = await resolveTreeDropdownOptions(mod.inputs, ctx.kernelId);
 
         const resolvedMod = { ...mod, inputs: resolvedInputs };
 
@@ -156,19 +143,9 @@ export const ModuleWindowRoot: React.FC = () => {
       // Re-resolve tree-backed dropdowns
       (async () => {
         try {
-          const resolvedInputs = await Promise.all(
-            currentDescriptor.inputs.map(async (input) => {
-              if (input.control !== "dropdown" || !input.optionsTreePath) {
-                return input;
-              }
-              const treePath = input.optionsTreePath.trim();
-              if (!treePath) return { ...input, options: [] };
-              const nodes = await treeService.listByPath(context.kernelId, treePath);
-              return {
-                ...input,
-                options: nodes.map((node) => ({ label: node.key, value: node.key })),
-              };
-            })
+          const resolvedInputs = await resolveTreeDropdownOptions(
+            currentDescriptor.inputs,
+            context.kernelId
           );
           setDescriptor((prev) => (prev ? { ...prev, inputs: resolvedInputs } : prev));
         } catch {
