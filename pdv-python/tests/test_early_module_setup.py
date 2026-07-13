@@ -54,13 +54,24 @@ class TestEarlyModuleSetup:
                 sys.path.remove(lib_dir)
 
     def test_entry_point_imported(self, tmp_path):
+        # Use a uniquely-named module that is NOT already imported, dropped
+        # into a lib dir that _early_module_setup wires onto sys.path — so the
+        # assertion actually proves the entry point was imported. (A stdlib
+        # name like "json" is vacuous: it is always already in sys.modules.)
         working_dir = str(tmp_path / "work")
         save_dir = str(tmp_path / "save")
         os.makedirs(working_dir)
 
+        entry_name = "dummy_pdv_entrypoint_mod_xyz"
+        lib_uuid = "entrypoint_lib_0001"
+        lib_dir = os.path.join(working_dir, "tree", lib_uuid)
+        os.makedirs(lib_dir)
+        with open(os.path.join(lib_dir, f"{entry_name}.py"), "w") as f:
+            f.write("IMPORTED = True\n")
+
         mod_dir = os.path.join(save_dir, "modules", "test_mod")
         os.makedirs(mod_dir)
-        manifest = {"entry_point": "json"}
+        manifest = {"entry_point": entry_name}
         with open(os.path.join(mod_dir, "pdv-module.json"), "w") as f:
             json.dump(manifest, f)
 
@@ -71,10 +82,23 @@ class TestEarlyModuleSetup:
                 "metadata": {"module_id": "test_mod"},
                 "storage": {"value": {}},
             },
+            {
+                "path": "mymod.lib.entry",
+                "type": "lib",
+                "uuid": lib_uuid,
+                "storage": {"uuid": lib_uuid, "filename": f"{entry_name}.py"},
+            },
         ]
 
-        _early_module_setup(nodes, save_dir, working_dir)
-        assert "json" in sys.modules
+        assert entry_name not in sys.modules  # precondition: genuinely fresh
+        try:
+            _early_module_setup(nodes, save_dir, working_dir)
+            assert entry_name in sys.modules
+            assert getattr(sys.modules[entry_name], "IMPORTED", False) is True
+        finally:
+            sys.modules.pop(entry_name, None)
+            if lib_dir in sys.path:
+                sys.path.remove(lib_dir)
 
     def test_missing_manifest_skipped(self, tmp_path):
         working_dir = str(tmp_path / "work")

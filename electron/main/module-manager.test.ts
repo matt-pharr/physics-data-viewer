@@ -529,4 +529,75 @@ describe("ModuleManager", () => {
       ])
     );
   });
+
+  it("uninstall removes an installed local module", async () => {
+    const localSource = path.join(tmpDir, "uninstall-source");
+    await writeModuleFixture(localSource, "uninstall_mod", "1.0.0");
+    await manager.install({ source: { type: "local", location: localSource } });
+    expect((await manager.listInstalled()).some((m) => m.id === "uninstall_mod")).toBe(true);
+
+    const result = await manager.uninstall("uninstall_mod");
+    expect(result.success).toBe(true);
+    expect((await manager.listInstalled()).some((m) => m.id === "uninstall_mod")).toBe(false);
+  });
+
+  it("uninstall reports an error for a module that is not installed", async () => {
+    const result = await manager.uninstall("ghost_mod");
+    expect(result.success).toBe(false);
+    expect(result.error).toMatch(/not installed/i);
+  });
+
+  it("checkUpdates returns unknown for a module that is not installed", async () => {
+    const result = await manager.checkUpdates("ghost_mod");
+    expect(result.status).toBe("unknown");
+    expect(result.message).toMatch(/not installed/i);
+  });
+
+  it("checkUpdates reports not_implemented when the module has no upstream", async () => {
+    const localSource = path.join(tmpDir, "noupstream-source");
+    await writeModuleFixture(localSource, "noupstream_mod", "1.0.0");
+    await manager.install({ source: { type: "local", location: localSource } });
+
+    const result = await manager.checkUpdates("noupstream_mod");
+    expect(result.status).toBe("not_implemented");
+    expect(result.currentVersion).toBe("1.0.0");
+  });
+
+  it("update fails cleanly when the module has no upstream to update from", async () => {
+    const localSource = path.join(tmpDir, "update-noupstream-source");
+    await writeModuleFixture(localSource, "update_noup_mod", "1.0.0");
+    await manager.install({ source: { type: "local", location: localSource } });
+
+    const result = await manager.update("update_noup_mod");
+    expect(result.success).toBe(false);
+    expect(result.error).toMatch(/no upstream/i);
+  });
+
+  it("getModuleGuiInfo reports a GUI (from actions) but no explicit layout", async () => {
+    const localSource = path.join(tmpDir, "gui-source");
+    await writeModuleFixture(localSource, "gui_mod", "1.0.0");
+    await manager.install({ source: { type: "local", location: localSource } });
+
+    // The fixture defines one action; deriveHasGui treats actions as a GUI,
+    // but there is no explicit `gui` layout node.
+    const info = await manager.getModuleGuiInfo("gui_mod");
+    expect(info.hasGui).toBe(true);
+    expect(info.gui).toBeUndefined();
+  });
+
+  it("getModuleGuiInfo honours an explicit has_gui: false", async () => {
+    const localSource = path.join(tmpDir, "nogui-source");
+    await writeModuleFixture(localSource, "nogui_mod", "1.0.0", undefined, {
+      has_gui: false,
+    });
+    await manager.install({ source: { type: "local", location: localSource } });
+
+    const info = await manager.getModuleGuiInfo("nogui_mod");
+    expect(info.hasGui).toBe(false);
+  });
+
+  it("getModuleGuiInfo reports no GUI for a module that is not installed", async () => {
+    const info = await manager.getModuleGuiInfo("ghost_mod");
+    expect(info.hasGui).toBe(false);
+  });
 });

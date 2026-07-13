@@ -18,6 +18,7 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt  # noqa: E402
 
 import pytest  # noqa: E402
+import numpy as np  # noqa: E402
 
 from pdv.default_handlers import register_defaults  # noqa: E402
 from pdv.modules import clear_handlers, dispatch_handler, has_handler_for  # noqa: E402
@@ -48,7 +49,6 @@ def _figure_count() -> int:
 
 class TestNdarrayDefault:
     def test_1d_ndarray_plots(self):
-        np = pytest.importorskip("numpy")
         register_defaults()
 
         arr = np.arange(10, dtype=float)
@@ -60,7 +60,6 @@ class TestNdarrayDefault:
         assert plt.gcf().axes[0].get_title() == "test.arr1d"
 
     def test_2d_ndarray_plots_imshow_with_colorbar(self):
-        np = pytest.importorskip("numpy")
         register_defaults()
 
         arr = np.arange(12, dtype=float).reshape(3, 4)
@@ -77,7 +76,6 @@ class TestNdarrayDefault:
         assert fig.axes[0].get_title() == "test.arr2d"
 
     def test_object_dtype_ndarray_prints_notice(self, capsys):
-        np = pytest.importorskip("numpy")
         register_defaults()
 
         arr = np.array([{"x": 1}, {"y": 2}, {"z": 3}], dtype=object)
@@ -91,7 +89,6 @@ class TestNdarrayDefault:
         assert "[PDV]" in capsys.readouterr().out
 
     def test_0d_ndarray_prints_notice_no_plot(self, capsys):
-        np = pytest.importorskip("numpy")
         register_defaults()
 
         arr = np.array(3.14)
@@ -104,7 +101,6 @@ class TestNdarrayDefault:
         assert "1D and 2D only" in captured.out
 
     def test_3d_ndarray_prints_notice_no_plot(self, capsys):
-        np = pytest.importorskip("numpy")
         register_defaults()
 
         arr = np.zeros((2, 3, 4))
@@ -166,7 +162,6 @@ class TestPandasDefault:
 
 class TestXarrayDefault:
     def test_dataarray_1d_plots(self):
-        np = pytest.importorskip("numpy")
         xr = pytest.importorskip("xarray")
         register_defaults()
 
@@ -178,7 +173,6 @@ class TestXarrayDefault:
         assert plt.gcf().axes[0].get_title() == "test.da1d"
 
     def test_dataarray_2d_plots(self):
-        np = pytest.importorskip("numpy")
         xr = pytest.importorskip("xarray")
         register_defaults()
 
@@ -194,7 +188,6 @@ class TestXarrayDefault:
         assert plt.gcf().axes[0].get_title() == "test.da2d"
 
     def test_dataarray_3d_plots_histogram(self):
-        np = pytest.importorskip("numpy")
         xr = pytest.importorskip("xarray")
         register_defaults()
 
@@ -210,7 +203,6 @@ class TestXarrayDefault:
 
 class TestRegistration:
     def test_handlers_registered_for_present_types(self):
-        np = pytest.importorskip("numpy")
         register_defaults()
 
         assert has_handler_for(np.zeros(3))
@@ -222,7 +214,6 @@ class TestRegistration:
         warning flags user-vs-user conflicts, so ``register_defaults``
         suppresses it for its own re-registration (the documented contract).
         """
-        pytest.importorskip("numpy")
         register_defaults()
         register_defaults()  # overwrites the same default handlers
 
@@ -230,7 +221,6 @@ class TestRegistration:
         assert overwrite == []
 
     def test_user_can_override_default(self):
-        np = pytest.importorskip("numpy")
         register_defaults()
 
         from pdv.modules import handle  # local import to avoid circulars
@@ -281,14 +271,12 @@ class TestLazyRegistration:
         defaults eagerly (that forced numpy/pandas/xarray imports at kernel
         startup), so the registry lookups lazily register them for any
         library that is already imported."""
-        np = pytest.importorskip("numpy")
         # clear_handlers ran in the fixture; no register_defaults() here.
         assert has_handler_for(np.zeros(3))
 
     def test_user_handler_wins_over_lazy_default(self):
         """A user handler registered before the lazy default latch fires
         must not be clobbered when the default registers afterwards."""
-        np = pytest.importorskip("numpy")
         from pdv.modules import handle
 
         calls = []

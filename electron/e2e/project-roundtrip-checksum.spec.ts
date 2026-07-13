@@ -24,7 +24,6 @@ import { launchPDV } from "./helpers/launch";
 import { createNewPythonProject } from "./helpers/new-project";
 import { sendMenuAction } from "./helpers/menu-action";
 
-const MOD = process.platform === "darwin" ? "Meta" : "Control";
 const CHECKSUM_RE = /^[◆⚠]\s*[0-9a-f]{6}$/;
 
 /** The big code block the user designed, plus the extra nested types. */

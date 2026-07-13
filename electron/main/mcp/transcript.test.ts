@@ -16,7 +16,6 @@ import type {
   ExecuteOutputChunk,
   KernelExecuteRequest,
   KernelExecuteResult,
-  KernelExecutionOrigin,
 } from "../kernel-manager";
 import {
   executeAndTranscribe,

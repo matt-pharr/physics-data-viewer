@@ -28,7 +28,7 @@ LOGDIR="$WORKDIR/logs"
 # Boundary Python versions get full sweep; mid versions get smoke runs.
 BOUNDARY_PYTHONS=(3.10 3.14)
 SMOKE_PYTHONS=(3.11 3.12 3.13)
-EXTRAS_LIST=("" "data" "copy" "dev")
+EXTRAS_LIST=("" "data" "copy" "namelist" "xarray" "dev")
 RESOLUTIONS=(highest lowest-direct)
 
 if ! command -v uv >/dev/null 2>&1; then
@@ -54,28 +54,40 @@ run_cell() {
     rm -rf "$venv"
     {
         echo "### uv venv --python $py"
-        uv venv --python "$py" "$venv" 2>&1 || { echo "VENV_FAIL"; return; }
+        # Do NOT `return` from inside this redirect group on venv failure — a
+        # return here exits run_cell before the CSV row is written, so the cell
+        # silently vanishes and the final awk gate never sees it (a genuinely
+        # broken Python would leave the sweep green). Instead mark VENV_FAIL and
+        # let the group close, then emit a `no` row below.
+        if uv venv --python "$py" "$venv" 2>&1; then
+            local target="$PROJECT_DIR"
+            if [ -n "$extras" ]; then
+                target="${PROJECT_DIR}[${extras}]"
+            fi
+            local res_flag=""
+            if [ "$res" = "lowest-direct" ]; then
+                res_flag="--resolution=lowest-direct"
+            fi
 
-        local target="$PROJECT_DIR"
-        if [ -n "$extras" ]; then
-            target="${PROJECT_DIR}[${extras}]"
-        fi
-        local res_flag=""
-        if [ "$res" = "lowest-direct" ]; then
-            res_flag="--resolution=lowest-direct"
-        fi
-
-        echo "### uv pip install $res_flag $target  (package only)"
-        VIRTUAL_ENV="$venv" uv pip install $res_flag "$target" 2>&1
-        local pkg_rc=$?
-        if [ $pkg_rc -ne 0 ]; then
-            echo "PACKAGE_INSTALL_FAILED rc=$pkg_rc"
+            echo "### uv pip install $res_flag $target  (package only)"
+            VIRTUAL_ENV="$venv" uv pip install $res_flag "$target" 2>&1
+            local pkg_rc=$?
+            if [ $pkg_rc -ne 0 ]; then
+                echo "PACKAGE_INSTALL_FAILED rc=$pkg_rc"
+            else
+                echo "### uv pip install pytest  (default resolution)"
+                VIRTUAL_ENV="$venv" uv pip install "pytest>=8" 2>&1
+            fi
         else
-            echo "### uv pip install pytest pytest-asyncio  (default resolution)"
-            VIRTUAL_ENV="$venv" uv pip install "pytest>=8" "pytest-asyncio>=0.23" 2>&1
+            echo "VENV_FAIL"
         fi
     } > "$log" 2>&1
 
+    if grep -q "VENV_FAIL" "$log"; then
+        echo "$py,$extras,$res,no,,,,,,," >> "$RESULTS"
+        echo "  -> venv creation FAILED (see $log)"
+        return
+    fi
     if grep -q "PACKAGE_INSTALL_FAILED" "$log"; then
         echo "$py,$extras,$res,no,,,,,,," >> "$RESULTS"
         echo "  -> package install FAILED (see $log)"

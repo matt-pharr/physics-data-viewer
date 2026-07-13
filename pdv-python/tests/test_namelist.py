@@ -157,11 +157,13 @@ def toml_file(tmp_path):
 
 
 class TestTomlNamelist:
-    @pytest.fixture(autouse=True)
-    def _check_tomli_w(self):
-        pytest.importorskip("tomli_w")
-
     def test_read_write_roundtrip(self, toml_file, tmp_path):
+        # Reading TOML uses stdlib `tomllib` (Python 3.11+); writing uses the
+        # third-party `tomli_w`. Skip only when a backend is genuinely absent
+        # (e.g. 3.10 has no tomllib) rather than guarding the whole class —
+        # the hint-extraction test below needs neither backend.
+        pytest.importorskip("tomllib")
+        pytest.importorskip("tomli_w")
         from pdv.namelist_utils import read_namelist, write_namelist
 
         data = read_namelist(toml_file, format="toml")

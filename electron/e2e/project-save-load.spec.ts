@@ -17,7 +17,6 @@ import * as path from "path";
 import { expectKernelReady } from "./helpers/kernel-status";
 import { launchPDV } from "./helpers/launch";
 import { createNewPythonProject } from "./helpers/new-project";
-import { stubDialog } from "./helpers/dialog-mock";
 import { sendMenuAction } from "./helpers/menu-action";
 
 async function bootKernel(window: import("@playwright/test").Page): Promise<void> {

@@ -4,10 +4,20 @@ on:
   push:
     branches:
       - main
+      - develop
   pull_request:
     branches:
       - main
       - develop
+  # Called by dist.yml at release time so a tag can't ship on red — the full
+  # CI must pass first. `run-all` forces every job on because paths-filter has
+  # no diff base to compute changed files against on a tag ref.
+  workflow_call:
+    inputs:
+      run-all:
+        description: "Run all jobs regardless of changed paths (release gate)."
+        type: boolean
+        default: false
 
 jobs:
   # Detect which directory groups changed so downstream jobs can skip
@@ -24,13 +34,18 @@ jobs:
     permissions:
       contents: read
     outputs:
-      python: ${{ steps.filter.outputs.python }}
-      electron: ${{ steps.filter.outputs.electron }}
-      docs: ${{ steps.filter.outputs.docs }}
+      # When invoked as a release gate (run-all), force every group on;
+      # otherwise use the detected changes. `inputs.run-all` is empty (falsy)
+      # on push/pull_request events, so the `|| steps...` branch applies there.
+      python: ${{ inputs.run-all && 'true' || steps.filter.outputs.python }}
+      electron: ${{ inputs.run-all && 'true' || steps.filter.outputs.electron }}
+      docs: ${{ inputs.run-all && 'true' || steps.filter.outputs.docs }}
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
       - uses: dorny/paths-filter@fbd0ab8f3e69293af611ebaee6363fc25e6d187d  # v4.0.1
         id: filter
+        # Skip on the release gate: a tag ref has no base to diff against.
+        if: ${{ !inputs.run-all }}
         with:
           filters: |
             python:
@@ -153,6 +168,13 @@ jobs:
         working-directory: electron
         run: npm run typecheck
 
+      # knip catches unused files/exports/dependencies. Runs in the typecheck
+      # job to reuse the warmed node_modules cache rather than spinning up a
+      # separate job.
+      - name: Knip (unused files/exports/deps)
+        working-directory: electron
+        run: npm run knip
+
   python-tests:
     needs: filter
     if: needs.filter.outputs.python == 'true'
@@ -181,6 +203,36 @@ jobs:
       - name: Python tests
         working-directory: pdv-python
         run: pytest tests/ -v
+
+  dep-sweep:
+    # Enforce the CLAUDE.md pre-merge convention: any change under pdv-python/
+    # must pass the dependency-resolution sweep (Python 3.10–3.14 × extras ×
+    # highest/lowest-direct resolution). Catches unguarded optional imports and
+    # too-low version floors that the single [dev] install in `python-tests`
+    # would miss.
+    needs: filter
+    if: needs.filter.outputs.python == 'true'
+    name: Dependency sweep
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+
+      - name: Setup Python
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1  # v6.3.0
+        with:
+          python-version: "3.12"
+
+      - name: Install uv
+        run: pip install uv
+
+      # uv downloads managed CPython builds for the matrix versions not present
+      # on the runner. ~3-4 min total.
+      - name: Dependency-resolution sweep
+        working-directory: pdv-python
+        run: ./scripts/sweep-deps.sh
 
   node-main-tests:
     # Main-process tests spawn a real Python kernel from Electron code, so
@@ -431,3 +483,38 @@ jobs:
             echo "::error::mkdocs reported ERROR lines (see log above)"
             exit 1
           fi
+
+  # Single aggregate check for branch protection. Path-filtered jobs report
+  # "skipped" when their group didn't change; this job treats skipped/success
+  # as OK and fails only on a real failure or cancellation — so the required
+  # check stays stable even as the job matrix changes, and dist.yml can gate
+  # the release on this one job via workflow_call.
+  ci-ok:
+    name: CI OK
+    needs:
+      - filter
+      - version-parity
+      - build
+      - typecheck
+      - python-tests
+      - dep-sweep
+      - node-main-tests
+      - renderer-tests
+      - e2e-tests
+      - docs-build
+    if: always()
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Verify no required job failed
+        run: |
+          results='${{ join(needs.*.result, ' ') }}'
+          echo "Job results: $results"
+          for r in $results; do
+            if [ "$r" = "failure" ] || [ "$r" = "cancelled" ]; then
+              echo "::error::A required job did not succeed (result: $r)"
+              exit 1
+            fi
+          done
+          echo "All required jobs succeeded or were skipped."

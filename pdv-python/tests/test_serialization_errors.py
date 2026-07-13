@@ -29,12 +29,14 @@ def test_corrupted_npy_raises_descriptive_error(tmp_save_dir):
     tree_dir = os.path.join(tmp_save_dir, "tree", node_uuid)
     os.makedirs(tree_dir, exist_ok=True)
     bad_file = os.path.join(tree_dir, "bad.npy")
+    # Valid npy magic + version, then a header length that overruns the file —
+    # a genuinely corrupt array whose header parse fails. numpy raises a
+    # ValueError mentioning the array header (stable wording across the
+    # supported numpy floor 2.2.0 through current).
     with open(bad_file, "wb") as fh:
-        fh.write(b"not-a-valid-npy")
+        fh.write(b"\x93NUMPY\x01\x00\x76\x00{garbage header not a dict")
 
-    with pytest.raises(
-        Exception
-    ) as exc_info:  # numpy raises ValueError/OSError by version
+    with pytest.raises(ValueError, match="array header"):
         deserialize_node(
             {
                 "backend": "local_file",
@@ -44,7 +46,6 @@ def test_corrupted_npy_raises_descriptive_error(tmp_save_dir):
             },
             tmp_save_dir,
         )
-    assert str(exc_info.value)
 
 
 def test_wrong_format_hint_raises_error(tmp_save_dir):

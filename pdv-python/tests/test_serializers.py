@@ -12,6 +12,7 @@ import json
 import os
 
 import pytest
+import numpy as np
 
 from pdv import serializers
 from pdv.errors import PDVSerializationError
@@ -183,7 +184,6 @@ def test_public_register_serializer_entry_point_roundtrip(tmp_path):
     """End-to-end test using ``pdv.register_serializer`` (the public API
     that module developers actually call), modeled on the n-pendulum example.
     """
-    np = pytest.importorskip("numpy")
 
     import pdv
 

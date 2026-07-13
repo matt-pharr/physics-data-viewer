@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from unittest.mock import MagicMock, patch
 
 import pytest
+import numpy
 
 import pdv.comms as comms_mod
 from pdv.handlers.namespace import (
@@ -120,7 +121,6 @@ class TestHandleNamespaceQuery:
         assert response["payload"]["variables"] == {}
 
     def test_query_with_numpy_array_includes_type_info(self):
-        numpy = pytest.importorskip("numpy")
         ip = MagicMock()
         ip.user_ns = {"arr": numpy.array([[1, 2], [3, 4]], dtype=numpy.int64)}
         mock_comm = _make_mock_comm()
@@ -140,7 +140,6 @@ class TestHandleNamespaceQuery:
 
 class TestHandleNamespaceInspect:
     def test_inspect_array_returns_index_children(self):
-        numpy = pytest.importorskip("numpy")
         ip = MagicMock()
         ip.user_ns = {"arr": numpy.array([1, 2, 3])}
         mock_comm = _make_mock_comm()

@@ -26,6 +26,7 @@ JSON to pickle, and these tests pin down that contract.
 from __future__ import annotations
 
 import pytest
+import numpy as np
 
 from pdv.checksum import node_digest
 from pdv.serialization import deserialize_node, serialize_node
@@ -286,7 +287,6 @@ class TestXarrayPickleRoundtrip:
 
     def test_dataarray_roundtrip(self, tmp_working_dir):
         xr = pytest.importorskip("xarray")
-        np = pytest.importorskip("numpy")
         da = xr.DataArray(
             np.array([[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]]),
             dims=("time", "channel"),
@@ -308,7 +308,6 @@ class TestXarrayPickleRoundtrip:
 
     def test_dataset_roundtrip(self, tmp_working_dir):
         xr = pytest.importorskip("xarray")
-        np = pytest.importorskip("numpy")
         ds = xr.Dataset(
             data_vars={
                 "voltage": (("t",), np.array([1.0, 2.0, 3.0])),
@@ -332,7 +331,6 @@ class TestXarrayPickleRoundtrip:
     ):
         """Even with a user-registered xarray serializer, builtin pickle wins."""
         xr = pytest.importorskip("xarray")
-        np = pytest.importorskip("numpy")
         from pdv import serializers as _serializers
 
         save_calls = []

@@ -1,11 +1,16 @@
 [build-system]
-requires = ["setuptools>=68", "wheel"]
+# setuptools>=77 is required for the SPDX `license = "MIT"` string form below
+# (PEP 639); earlier releases only understand the deprecated table form.
+requires = ["setuptools>=77", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "pdv-python"
 version = "0.2.0"
 description = "PDV kernel support package — implements the PDV comm protocol and data structures for Python kernels."
+readme = "README.md"
+license = "MIT"
+authors = [{ name = "Matthew Pharr" }]
 requires-python = ">=3.10"
 dependencies = [
     "ipykernel>=6.0",
@@ -35,11 +40,31 @@ data = [
 copy = [
     "reflink-copy>=0.2",
 ]
+# Namelist editor (PDVNamelist) support. f90nml handles Fortran namelists;
+# tomli-w handles TOML writes (TOML reads use the stdlib `tomllib`). Both are
+# imported lazily inside pdv/namelist_utils.py — this extra is the supported
+# install path for the shipped namelist feature.
+namelist = [
+    "f90nml>=1.4",
+    "tomli-w>=1.0",
+]
+# xarray Dataset serialization support (imported lazily in serialization.py).
+# Pure-Python; no NetCDF engine is required — PDV serializes datasets without
+# calling `to_netcdf`.
+xarray = [
+    "xarray>=2024.7.0",
+]
+# The dev extra installs everything the test suite exercises so no test is
+# silently skipped: keep it a superset of every optional feature's deps, with
+# identical version floors so lowest-direct resolution agrees with the
+# feature extras above.
 dev = [
     "pytest>=8.0",
-    "pytest-asyncio>=0.23",
     "pandas>=2.2.3",
     "reflink-copy>=0.2",
+    "f90nml>=1.4",
+    "tomli-w>=1.0",
+    "xarray>=2024.7.0",
 ]
 
 [tool.setuptools.packages.find]
