@@ -1,3 +1,3 @@
-# contriuuting
+# Contributing
 
 <!-- TODO -->

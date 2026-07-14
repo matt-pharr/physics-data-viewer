@@ -138,6 +138,7 @@ nav:
   - Module Development: modules/index.md
   - Developer Guide:
       - Architecture: developer/architecture.md
+      - Save Pipeline: developer/save-pipeline.md
       - Developer Quick Start: developer/developer-quickstart.md
       - Contributing: developer/contributing.md
       - Development Setup: developer/setup.md

@@ -37,7 +37,7 @@ pdv-python/              ← Python kernel package (pip install pdv-python)
         __init__.py
         tree.py          ← PDVTree (dict subclass), PDVScript, PDVFile, PDVNote
         comms.py         ← comm target registration, message dispatch, bootstrap()
-        namespace.py     ← PDVNamespace (protected dict), PDVApp, pdv_namespace()
+        namespace.py     ← PDVNamespace (protected dict), pdv_namespace(), inspect_namespace()
         serialization.py ← type detection, format readers/writers
         environment.py   ← working dir helpers, path safety checks
         handlers/        ← one file per PDV message domain (lifecycle, project, tree, script, note, ...)
