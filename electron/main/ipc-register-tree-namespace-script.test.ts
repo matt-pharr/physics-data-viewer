@@ -333,7 +333,7 @@ describe("tree:print", () => {
     expect(harness.kernelManager.execute).toHaveBeenCalled();
   });
 
-  it("Julia: builds println(pdv_tree[...]); empty path prints the whole tree", async () => {
+  it("Julia: builds a size-limited text/plain show; empty path prints the whole tree", async () => {
     const harness = setup();
     (harness.kernelManager.getKernel as ReturnType<typeof vi.fn>).mockReturnValue(
       makeKernelInfo({ language: "julia" }),
@@ -343,7 +343,9 @@ describe("tree:print", () => {
       executionId: "e2",
       origin: { kind: "unknown" },
     })) as { code: string };
-    expect(result.code).toBe("println(pdv_tree)");
+    expect(result.code).toBe(
+      'show(IOContext(stdout, :limit => true), MIME("text/plain"), pdv_tree); println()',
+    );
   });
 
   it("throws when the kernel is unknown", async () => {

@@ -369,6 +369,28 @@ class TestHandleProjectSave:
         assert response["missing_files"] == ["ghost"]
         assert response["checksum"] == ""
 
+    def test_unpicklable_leaf_is_skipped_not_fatal(self, tree_with_comm, tmp_save_dir):
+        """A value even the pickle fallback refuses (a lambda) is skipped and
+        recorded in failed_nodes — one unpicklable leaf never aborts the save."""
+        tree_with_comm["good"] = 42
+        tree_with_comm["poison"] = lambda x: x + 1
+        mock_comm = _make_mock_comm()
+        msg = _make_msg("pdv.project.save", {"save_dir": tmp_save_dir})
+        with (
+            patch.object(comms_mod, "_comm", mock_comm),
+            patch.object(comms_mod, "_pdv_tree", tree_with_comm),
+        ):
+            handle_project_save(msg)
+        response = mock_comm._sent[-1]["payload"]
+        assert response["aborted"] is False
+        assert len(response["failed_nodes"]) == 1
+        assert response["failed_nodes"][0]["path"] == "poison"
+        with open(os.path.join(tmp_save_dir, "tree-index.json"), encoding="utf-8") as fh:
+            index = json.load(fh)
+        paths = {entry["path"] for entry in index}
+        assert "poison" not in paths  # skipped, not written
+        assert "good" in paths  # the rest saved fine
+
     def test_response_has_node_count(self, tree_with_comm, tmp_save_dir):
         """Response payload includes node_count."""
         tree_with_comm["a"] = 1

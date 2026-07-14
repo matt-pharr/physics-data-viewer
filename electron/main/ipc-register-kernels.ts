@@ -13,6 +13,7 @@
  * - Push forwarding.
  */
 
+import { randomUUID } from "node:crypto";
 import * as fs from "fs/promises";
 import * as path from "path";
 
@@ -458,6 +459,38 @@ export function registerKernelIpcHandlers(
     await setupModuleNamespaces(kernel.id);
     await bindActiveProjectModules(kernel.id);
 
+    // Forward "orphan" display_data — figures the kernel emits outside any
+    // in-flight execution — to the console as a synthetic entry. The main
+    // producer is a double-click plot handler (`pdv.handler.invoke` runs over
+    // the comm channel, so its display_data is parented to a stale execute
+    // msg and `execute()`'s per-execution collector never sees it). Python's
+    // native matplotlib windows sidestep iopub entirely, but Julia's inline
+    // Makie displays (and Python's Agg fallback) land here.
+    kernelManager.onIopubMessage(kernel.id, (jupMsg) => {
+      if (jupMsg.header.msg_type !== "display_data") return;
+      const parentId = String(jupMsg.parent_header?.msg_id ?? "");
+      if (kernelManager.isExecutionActive(parentId)) return;
+      const data = jupMsg.content?.data as Record<string, unknown> | undefined;
+      const png = data?.["image/png"];
+      const svg = data?.["image/svg+xml"];
+      const image =
+        typeof png === "string"
+          ? { mime: "image/png", data: png }
+          : typeof svg === "string"
+            ? { mime: "image/svg+xml", data: svg }
+            : null;
+      if (!image || win.isDestroyed()) return;
+      // Reuse the executeBegin/Output/Finish contract so the renderer needs
+      // no new channel: the begin push seeds a console entry, the image chunk
+      // attaches to it, and the finish push closes it out.
+      const executionId = `display-${randomUUID()}`;
+      const origin = { kind: "unknown" as const, label: "Plot" };
+      const timestamp = Date.now();
+      win.webContents.send(IPC.push.executeBegin, { executionId, code: "", origin, timestamp });
+      win.webContents.send(IPC.push.executeOutput, { executionId, type: "image", image });
+      win.webContents.send(IPC.push.executeFinish, { executionId, duration: 0 });
+    });
+
     const onCrash = async (crashedId: string): Promise<void> => {
       if (crashedId !== kernel.id) return;
       commRouter.detach();
@@ -504,6 +537,10 @@ export function registerKernelIpcHandlers(
       id,
       request as Parameters<KernelManager["execute"]>[1],
       (chunk) => event.sender.send(IPC.push.executeOutput, chunk),
+      // The console gets every chunk via the executeOutput push above;
+      // returning them again in the result double-prints when the push
+      // loses the race against the invoke resolution.
+      { keepStreamsInResult: false },
     );
   });
 

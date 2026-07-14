@@ -1530,7 +1530,14 @@ const App: React.FC = () => {
                 <Console
                   logs={logs}
                   onClear={handleClearConsole}
-                  onInstallPackage={environmentMode === 'uv' ? handleInstallMissingModule : undefined}
+                  // Reactive install works where an in-kernel installer exists:
+                  // uv-mode Python projects (pdv.install → uv add) and every
+                  // Julia session (PDVKernel.install → Pkg.add, §10.5.12).
+                  onInstallPackage={
+                    environmentMode === 'uv' || activeLanguage === 'julia'
+                      ? handleInstallMissingModule
+                      : undefined
+                  }
                 />
               </div>
               {editorCollapsed ? (

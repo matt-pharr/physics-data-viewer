@@ -7,7 +7,7 @@ This document is a roadmap, not a spec. It lists features planned beyond the cur
 | Release | Theme |
 |---|---|
 | **0.2.0-beta2** | Remote execution and AI agent integration |
-| **0.3.0-beta3** | Full Julia support |
+| **0.3.0-beta3** | Julia hardening and ecosystem follow-ups |
 | **Later beta** | Usability, infrastructure, and hardening — ordering TBD |
 | **1.0.0** | Later-beta items complete plus polish |
 | **Post-1.0.0** | Aspirational, not committed |
@@ -23,6 +23,7 @@ Landed during the beta series and documented in [`ARCHITECTURE.md`](ARCHITECTURE
 - **MCP server and visual coupling** — the active project's tree, cells, scripts, notes, kernel, and console are exposed to external AI agents via a local MCP server, with agent-originated operations tagged through the `origin` field.
 - **Namelist editor (`PDVNamelist`)** — a tree node type for Fortran/TOML namelists with comm-based parsing and a `gui.json` layout node bound by dropdown.
 - **File-on-disk node type (`PDVFile`) and smart-copy** — a user-facing `PDVFile` (via `pdv.add_file()`) plus a copy-on-write `smart_copy` helper with lazy materialization.
+- **Julia kernel backend (`pdv-julia` / PDVKernel.jl)** — full protocol parity with `pdv-python` on top of IJulia: tree types, dot-path access, change pushes, serialization (`.npy` for numeric arrays, Julia `Serialization` elsewhere), query server, script `run(pdv_tree; kwargs...)` contract, module/lib loading via `include` into `Main`, namelist parsing (built-in Fortran parser + TOML stdlib), and `PDVKernel.install()` via Pkg. Covered by a Julia test suite, a `JULIA_PATH`-gated integration suite, and a Playwright GUI smoke spec.
 
 ---
 
@@ -52,19 +53,24 @@ First-class tree node types for scientific data files: `PDVDataset` wraps `xarra
 
 ---
 
-# 0.3.0-beta3 — Full Julia Support
+# 0.3.0-beta3 — Julia Hardening
 
-The PDV comm protocol is language-agnostic (ARCHITECTURE.md §3). Julia is deferred to its own beta so it can be built on top of a stable remote/agents foundation rather than alongside it.
+The core Julia backend has shipped (see **Shipped** above): `pdv-julia` implements the
+full kernel protocol, the app boots Julia sessions from the welcome screen, and the
+bundled N-pendulum-julia module targets it. Remaining Julia work is hardening and
+ecosystem follow-ups:
 
 ### Scope
-- `pdv-julia` package: Julia equivalent of `pdv-python` with full protocol parity.
-- Julia kernel launch path in `KernelManager`.
-- `language_mode` field in `project.json` to drive kernel choice at open time.
-- `PDVScript` dispatch for `.jl` files.
-- Julia integration tests with parity to the Python pytest suite.
-- Julia completion provider via the existing `complete_request` IPC.
+- Packaging/registration of `PDVKernel.jl` (General registry or app-driven
+  `Pkg.develop`) so the app can offer one-click install like it does for pdv-python.
+- Julia environment discovery in the Environment Selector (today: manual path entry;
+  juliaup-aware discovery planned).
+- Tree queries during long compute-bound executions: the Julia query server runs
+  cooperatively (served at yield points); evaluate an interactive-thread or
+  snapshot approach for true mid-execution browsing.
+- Per-project Julia environments (the `Project.toml` analog of the uv flow).
 
-Target use case: a physicist running a Julia simulation code on a remote cluster, driven from a PDV module. Beta2 remote and agent work must be stable before this begins.
+Target use case: a physicist running a Julia simulation code on a remote cluster, driven from a PDV module.
 
 ---
 

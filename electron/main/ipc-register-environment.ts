@@ -229,10 +229,16 @@ export function registerEnvironmentIpcHandlers(
   handleIpc(
     IPC.environment.installModule,
     async (_event, kernelId: string, moduleName: string): Promise<void> => {
-      if (!kernelManager.getKernel(kernelId)) {
+      const kernel = kernelManager.getKernel(kernelId);
+      if (!kernel) {
         throw new Error(`Kernel not found: ${kernelId}`);
       }
-      const code = `pdv.install(${JSON.stringify(moduleName)})`;
+      // Language-appropriate install invocation (§2.4, §10.5.12): Julia
+      // kernels delegate to Pkg via PDVKernel.install.
+      const code =
+        kernel.language === "julia"
+          ? `PDVKernel.install(${JSON.stringify(moduleName)})`
+          : `pdv.install(${JSON.stringify(moduleName)})`;
       const origin = { kind: "unknown" as const, label: `Install ${moduleName}` };
       const workingDir = kernelWorkingDirs.get(kernelId);
       const transcript = workingDir ? new TranscriptWriter(workingDir) : null;

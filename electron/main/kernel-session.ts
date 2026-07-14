@@ -34,7 +34,12 @@ if _pdv_comms._comm is None:
     _pdv_comms.send_message("pdv.ready", {})
 `;
 
-const JULIA_BOOTSTRAP = `
+/**
+ * Kernel-side bootstrap snippet for Julia sessions. Exported so the Julia
+ * integration test (`integration-julia.test.ts`) drives the exact snippet
+ * production uses rather than a diverging copy.
+ */
+export const JULIA_BOOTSTRAP = `
 using PDVKernel
 PDVKernel.bootstrap()
 

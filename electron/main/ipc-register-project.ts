@@ -445,12 +445,23 @@ export function registerProjectIpcHandlers(
       // module handlers don't take the save-lock).
       return projectManager.runWithSaveLock(async () =>
         runSerializedProjectManifestMutation(saveDir, async () => {
+          // Best-effort pushes: a window torn down mid-save must not turn
+          // into an "Object has been destroyed" throw — and a throw from the
+          // finally leg would mask doSave's real error.
           const win = getMainWindow();
-          win?.webContents.send(IPC.push.autosaveStarted);
+          const safeSend = (channel: string): void => {
+            if (!win || win.isDestroyed()) return;
+            try {
+              win.webContents.send(channel);
+            } catch (err) {
+              console.warn(`[project:save] push ${channel} failed:`, err);
+            }
+          };
+          safeSend(IPC.push.autosaveStarted);
           try {
             return await doSave();
           } finally {
-            win?.webContents.send(IPC.push.autosaveEnded);
+            safeSend(IPC.push.autosaveEnded);
           }
         }),
       );

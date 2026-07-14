@@ -44,15 +44,29 @@ Grab the latest release for your platform from the
 
 ## 2. First launch
 
-Open PDV. You will land on the **Welcome screen** with two options:
+Open PDV. You will land on the **Welcome screen** with three options:
 
 - **New Python Project**
+- **New Julia Project**
 - **Open Project…**
 
 Pick **New Python Project**. If this is your first time, PDV will open the **Environment Selector** before starting a kernel.
 
 !!! info "Julia support"
-    Julia is a planned second kernel backend but the **New Julia Project** button is hidden until `pdv-julia` is ready. If you want to try an early build, [open an issue](https://github.com/matt-pharr/physics-data-viewer/issues/new).
+    **New Julia Project** starts a session on your Julia installation. It needs a
+    Julia environment (1.10+) with [IJulia](https://github.com/JuliaLang/IJulia.jl)
+    and the `PDVKernel` package installed:
+
+    ```julia-repl
+    julia> using Pkg
+    julia> Pkg.add("IJulia")
+    julia> Pkg.develop(path="/path/to/physics-data-viewer/pdv-julia")
+    ```
+
+    Point PDV at your `julia` executable under **Settings → Default Runtime**
+    (or leave it unset to use `julia` from your `PATH`). Julia sessions always
+    run on your shared Julia environment — the uv-managed per-project
+    environment flow is Python-only for now.
 
 ---
 

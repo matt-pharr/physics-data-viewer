@@ -36,7 +36,7 @@ PDV is an Electron desktop application for computational and experimental physic
 - A **persistent project data model** (the Tree — a live, hierarchical data object in a language kernel)
 - **Scripted, reusable analysis workflows** (scripts stored as tree nodes)
 - **Markdown notes** (first-class tree nodes with KaTeX math preview, edited in a dedicated Write tab)
-- **Multi-language backend support** (Python first; Julia planned, currently deferred)
+- **Multi-language backend support** (Python via `pdv-python` + ipykernel; Julia via `pdv-julia` (the `PDVKernel.jl` package) + IJulia — see §5.14)
 
 The defining characteristic that separates PDV from a Jupyter notebook is the **Tree**: a persistent, navigable, typed data hierarchy that lives in the kernel namespace and is the single authority on all project data. Users explore it via a graphical tree panel, store analysis results in it, attach scripts to it, and save/load it as part of a project.
 
@@ -95,7 +95,7 @@ PDV uses the standard Electron three-process architecture:
 - Manage lazy loading of tree node data from the save directory
 
 ### 2.4 What the Main Process Does NOT Do
-- The main process does not construct arbitrary Python or Julia business logic and send it via `execute_request`. All structured data exchange between the main process and the kernel happens via the PDV comm protocol (see Section 3). The well-defined exceptions are minimal invocation strings whose output must flow through the standard Jupyter iopub stream so it appears in the console: (1) the **bootstrap snippet** in `kernel-session.ts` that initializes `pdv_tree` at startup (a one-time init, not business logic); (2) the **script invocation string** built by the `script:run` IPC handler (`pdv_tree["path"].run(kwargs)`); (3) the **print invocation** built by the `tree:print` IPC handler (`print(pdv_tree[...])` / Julia `println(...)`); and (4) the **install invocation** built by the `environment:installModule` IPC handler (`pdv.install("<module>")`, §10.5.12). These strings are always built in the main process — the renderer sends only structured requests and never contains Python or Julia code.
+- The main process does not construct arbitrary Python or Julia business logic and send it via `execute_request`. All structured data exchange between the main process and the kernel happens via the PDV comm protocol (see Section 3). The well-defined exceptions are minimal invocation strings whose output must flow through the standard Jupyter iopub stream so it appears in the console: (1) the **bootstrap snippet** in `kernel-session.ts` that initializes `pdv_tree` at startup (a one-time init, not business logic); (2) the **script invocation string** built by the `script:run` IPC handler (`pdv_tree["path"].run(kwargs)`); (3) the **print invocation** built by the `tree:print` IPC handler (`print(pdv_tree[...])` / Julia's size-limited `show(IOContext(stdout, :limit => true), MIME("text/plain"), ...)`); and (4) the **install invocation** built by the `environment:installModule` IPC handler (`pdv.install("<module>")`, §10.5.12). These strings are always built in the main process — the renderer sends only structured requests and never contains Python or Julia code.
 - The main process does not scan the filesystem to build the tree. The kernel is the sole tree authority.
 
 ---
@@ -161,7 +161,7 @@ All type strings are namespaced with `pdv.`. The convention is `pdv.<domain>.<ac
 | `pdv.project.load` | app → kernel | Instructs the kernel to load a project from a save directory. Payload: `{ save_dir, tree_index_dir? }`. When `tree_index_dir` is present and exists, the kernel reads `tree-index.json` from there instead of `save_dir`; used by autosave recovery to overlay an autosaved tree (see §8.4). |
 | `pdv.project.loaded` | kernel → app | Sent after the tree is fully populated from a project load. No `in_reply_to` (push notification). |
 | `pdv.project.save` | app → kernel | Instructs the kernel to serialize the tree to the save directory. Payload: `{ save_dir, is_autosave?, clear_cache? }`. When `is_autosave: true` the kernel consults its per-node checksum cache and reuses unchanged-data descriptors (see §8.4). `clear_cache: true` wipes the cache before saving (used after the user discards a stale `.autosave/`). |
-| `pdv.project.save.response` | kernel → app | Confirms save completed. Payload: `{ node_count, checksum, aborted, module_owned_files, module_manifests, missing_files, autosave_cache_hits }`. `module_owned_files` lists every file-backed node that belongs to a `PDVModule` (see §5.9) so the main process can mirror working-dir edits into `<saveDir>/modules/<id>/<source_rel_path>`. `module_manifests` carries per-module metadata + module-root-relative node descriptors for writing `pdv-module.json` and `module-index.json` under each module dir. Both fields are empty arrays when the tree contains no `PDVModule` nodes. `missing_files` lists tree paths of file-backed nodes whose backing files were missing during serialization; these nodes are skipped rather than pickled. A non-empty `missing_files` (equivalently `aborted: true`) means the save was **aborted before `tree-index.json` was written** — the previous index stays in place, `checksum` is empty, and the main process responds by skipping its own `code-cells.json`/`project.json` writes while the renderer surfaces a "Save blocked" error. `autosave_cache_hits` reports how many nodes were reused from the cache (only meaningful when the request set `is_autosave: true`). |
+| `pdv.project.save.response` | kernel → app | Confirms save completed. Payload: `{ node_count, checksum, aborted, module_owned_files, module_manifests, missing_files, failed_nodes, autosave_cache_hits }`. `failed_nodes` lists `{ path, type, error }` entries for values that even the pickle/`Serialization` fallback could not write (running tasks, open handles, lambdas); such nodes are skipped — the save still succeeds without them and the main process logs a warning. `module_owned_files` lists every file-backed node that belongs to a `PDVModule` (see §5.9) so the main process can mirror working-dir edits into `<saveDir>/modules/<id>/<source_rel_path>`. `module_manifests` carries per-module metadata + module-root-relative node descriptors for writing `pdv-module.json` and `module-index.json` under each module dir. Both fields are empty arrays when the tree contains no `PDVModule` nodes. `missing_files` lists tree paths of file-backed nodes whose backing files were missing during serialization; these nodes are skipped rather than pickled. A non-empty `missing_files` (equivalently `aborted: true`) means the save was **aborted before `tree-index.json` was written** — the previous index stays in place, `checksum` is empty, and the main process responds by skipping its own `code-cells.json`/`project.json` writes while the renderer surfaces a "Save blocked" error. `autosave_cache_hits` reports how many nodes were reused from the cache (only meaningful when the request set `is_autosave: true`). |
 | `pdv.project.clear_autosave_cache` | app → kernel | Instructs the kernel to drop its in-memory `_autosave_cache`. Empty payload. Sent eagerly when the user clicks *Clear autosave data* so the kernel can't reuse descriptors whose backing files were just deleted from `<saveDir>/.autosave/tree/`. The `clear_cache: true` flag on `pdv.project.save` is the in-band fallback if this comm fails (kernel disconnected/busy); see §8.4. |
 | `pdv.project.clear_autosave_cache.response` | kernel → app | Confirms cache reset. Empty payload. |
 
@@ -587,7 +587,7 @@ All other `pdv_*` names in the namespace are an error. Internal implementation f
 
 A lightweight wrapper stored as a tree node value. Attributes:
 - `relative_path`: path of the script file relative to the project root
-- `language`: `'python'` (Julia deferred)
+- `language`: `'python'` or `'julia'`
 - `doc`: first line of the script's module docstring (for preview display)
 
 Note: `params` (the `ScriptParameter` array) is **not** stored as a class attribute. It is computed on-demand by `_extract_script_params()` at registration time and via the `pdv.script.params` comm handler, and included in `pdv.tree.list` responses. Extraction parses the script with `ast` — it never imports or executes the module, so a UI param fetch cannot trigger the script's top-level side effects. Literal defaults come back as real values; non-literal defaults (e.g. `np.pi`) fall back to their source text. See below for the descriptor shape.
@@ -616,6 +616,21 @@ Rules:
 - The **first parameter must be `pdv_tree`** (type hint `dict` is recommended so the language server does not flag tree references as errors). This argument is always injected by `PDVScript.run()` and is never supplied by the user.
 - All remaining parameters become the user-facing script parameters surfaced in the `ScriptDialog`. They may have default values and type hints.
 - The return value must be a `dict` (or `None`). Non-dict returns are ignored.
+
+Julia scripts follow the same contract with keyword parameters (`pdv_tree` is a
+`PDVTree`, an `AbstractDict` subtype — annotate `::AbstractDict`, not `::Dict`):
+
+```julia
+function run(pdv_tree::AbstractDict; amplitude::Float64 = 1.0, sigma::Float64 = 0.1)
+    data = pdv_tree["waveforms.ch1"]
+    # ... analysis ...
+    return Dict("fit_amplitude" => amplitude)
+end
+```
+
+Only keyword parameters are user-facing on Julia (positional parameters cannot be
+supplied by name at invocation); `pdv.script.params` extracts them by parsing the
+source with `Meta.parseall`, never executing it — same rule as the Python `ast` path.
 
 #### ScriptParameter Descriptor
 
@@ -754,6 +769,36 @@ PDV has three tiers of module storage:
 **Update**: Modules with an `upstream` URL can check for newer tags and re-install from upstream. Users must re-import into a project to pick up changes.
 
 **Dependency pre-flight**: Before executing a module action, the main process reads the module's `dependencies` list from `pdv-module.json` and sends them to the kernel for validation. Missing dependencies are reported to the user before execution proceeds.
+
+### 5.14 The pdv-julia Package (PDVKernel.jl)
+
+`pdv-julia/` contains **PDVKernel.jl**, the Julia counterpart of `pdv-python`. It implements the same comm protocol (§3), the same message-type catalogue (§3.4), and the same on-disk project format (§6–§8) on top of IJulia, so the Electron side is language-agnostic: the same `CommRouter`/`QueryRouter`, the same `tree-index.json` loader flows, and the same renderer. A Julia session is started by spawning `julia -e "import IJulia; IJulia.run_kernel()" <connection-file>` and executing the `JULIA_BOOTSTRAP` snippet in `kernel-session.ts` (which opens the `pdv.kernel` comm and sends `pdv.ready`, mirroring the Python snippet).
+
+The file layout mirrors `pdv-python` one-to-one (`tree.jl`, `serialization.jl`, `comms.jl`, `query_server.jl`, `checksum.jl`, `tree_loader.jl`, `namespace.jl`, `namelist_utils.jl`, `handlers/…`). Behavioral parity is exact at the wire level; the language-level differences are deliberate translations:
+
+| Concern | pdv-python | pdv-julia |
+|---|---|---|
+| Kernel host | ipykernel | IJulia |
+| Tree type | `PDVTree(dict)` subclass | `PDVTree <: AbstractDict{String,Any}` |
+| Protected `pdv_tree` | `PDVNamespace` blocks reassignment | `const pdv_tree` in `Main` (Julia rejects rebinding a const) |
+| Script contract | `run(pdv_tree, **params) -> dict` | `run(pdv_tree; params...) -> Dict` (keyword-only user params) |
+| Script loading | fresh `importlib` module per run | fresh anonymous `Module` + `Base.include` per run, lib-module exports brought into scope with `using` |
+| Module libs | lib dirs inserted into `sys.path`; entry point imported | lib files `include`d into `Main`; `reload_libs` re-includes (the `importlib.reload` analog) |
+| Double-click handlers | `@pdv.handle(Class)` registry + `__pdv_handle__` dunder | methods on the `pdv_handle(obj, path, tree)` generic function (multiple dispatch) + `register_handler` for foreign types |
+| Custom serializers | `pdv.register_serializer` + `__pdv_format__`/`__pdv_serialize__`/`__pdv_deserialize__` dunders | `register_serializer` + `pdv_format`/`pdv_serialize`/`pdv_deserialize` method protocol |
+| Data formats | ndarray → `.npy`, other data → pickle (`format: "pickle"`) | numeric `Array` → `.npy` (numpy-compatible via NPZ), other data → `Serialization` (`format: "jls"`); scripts/libs are `jl_script`/`jl_lib` |
+| Checksum | XXH3-128; unknown values digest via pickled bytes (pickle's memo table handles cyclic objects) | SHA-256 truncated to 128 bits (opaque to the app; same Merkle feeding scheme); unknown structs digest via a cycle-guarded structural field walk (name-based type tags, name-only functions, `Ptr` by type) with a feed budget — exhaustion or a walk error falls back to `Serialization` bytes. Keeps digests round-trip stable for Dict-bearing structs (Julia Dicts rehash on deserialize) and terminates on cyclic GUI objects like Makie figures |
+| Sequence keys in dot-paths | 0-based (`tree["xs.0"]`), negative from end | 1-based (`tree["xs.1"]`), negative from end |
+| Package installs | `pdv.install()` → `uv add` (uv-mode only) | `PDVKernel.install()` → `Pkg.add` (Julia sessions are always shared-mode) |
+| Query server | ZMQ REP on a daemon thread (GIL makes concurrent dict reads safe) | ZMQ REP on an async task — served whenever the kernel task yields; during compute-bound execution the app's QueryRouter falls back to the comm channel |
+| Save-walker rescue | any error → pickle fallback; a value even pickle refuses (lambda, open handle) is skipped and reported in `failed_nodes` | same contract: any error → jls fallback; a value even jls refuses (running `Task`, ...) is skipped and reported in `failed_nodes`. `Serialization` refuses more values than pickle, so this path is far more reachable on Julia |
+| Change debounce | `threading.Timer` (fires mid-execution) | libuv `Timer` (fires at yield points; the renderer's 1 Hz poll is the safety net during tight loops) |
+
+Because saved data formats differ (`pickle` vs `jls`), projects are per-language: `project.json`'s `language` field selects the kernel at open time, and the Julia loader rejects `pickle`-format nodes with a clear "open with a Python session" error (and vice-versa — the Python loader does not know `jls`).
+
+The unified version rule (§ key design rules) extends to Julia: `pdv-julia/Project.toml`'s `version` (and `PDVKernel.VERSION`) must match `electron/package.json` and `pdv-python/pyproject.toml`. The environment detector probes `julia -e 'using PDVKernel; println(PDVKernel.VERSION)'` and applies the same core-version compatibility rule as for pdv-python.
+
+Testing: `julia --project=pdv-julia -e 'using Pkg; Pkg.test()'` runs the kernel-free unit suite (comm transport stubbed); `JULIA_PATH=<julia> npm test -- main/integration-julia.test.ts` drives a real IJulia kernel through the production bootstrap; `e2e/julia-smoke.spec.ts` (gated on `JULIA_PATH`) drives the full app GUI.
 
 ---
 
@@ -2025,6 +2070,31 @@ pdv-python/
         test_integration_dispatch.py
 ```
 
+### 12.2.1 Julia Package
+
+```
+pdv-julia/
+    Project.toml             ← name PDVKernel, version unified with the app
+    src/
+        PDVKernel.jl         ← module root: exports, VERSION, bootstrap(), public API
+        errors.jl
+        environment.jl
+        tree.jl              ← PDVTree/PDVModule + PDVFile node structs
+        serializers.jl       ← registry + pdv_format/pdv_serialize/pdv_deserialize protocol
+        serialization.jl
+        checksum.jl
+        namespace.jl
+        modules.jl           ← pdv_handle dispatch + register_handler
+        script_exec.jl       ← fresh-module script runner, lib-module registry, param extraction
+        namelist_utils.jl    ← built-in Fortran namelist parser + TOML stdlib
+        tree_loader.jl
+        comms.jl
+        query_server.jl
+        handlers/            ← one file per PDV message domain (mirrors pdv/handlers/)
+    test/
+        runtests.jl          ← kernel-free unit suite (comm transport stubbed)
+```
+
 ### 12.3 Tests
 
 ```
@@ -2352,13 +2422,12 @@ PDV does not ship a static API reference, which would drift. Instead:
 
 The following features are acknowledged as future work and must not influence the current architecture in ways that complicate the above design:
 
-- **Julia kernel support** — protocol is designed to be language-agnostic; implementation is deferred
 - **Crash recovery** — working directory is deleted on close; future discussion required
 - **Remote execution** (SSH, HPC clusters) — no remote connector architecture in this version
 - **Autosave** — `.pdv-work/autosave/` directory is created but not used
 - **Modules ecosystem hardening** — core module lifecycle is implemented (install from disk/GitHub, import, uninstall, update, bundled examples, project-local storage); deeper registry/trust features are deferred
 - **Multiple simultaneous kernels** — architecture supports it (kernels have IDs) but UI exposes only one at a time
-- **R kernel support** — same deferral as Julia
+- **R kernel support** — deferred; would follow the `pdv-julia` pattern (a kernel-side package implementing the language-agnostic protocol of §3)
 
 ---
 

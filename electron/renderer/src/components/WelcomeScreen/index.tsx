@@ -150,10 +150,12 @@ export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({
           >
             New Python Project
           </button>
-          {/* Julia is supported by the kernel side but the workflow is
-              experimental; hidden from the welcome screen for the open
-              beta to keep the UX focused. Re-enable when Julia is
-              promoted past experimental. */}
+          <button
+            className="btn btn-secondary welcome-action-btn"
+            onClick={() => onNewProject("julia")}
+          >
+            New Julia Project
+          </button>
           <button
             className="btn btn-secondary welcome-action-btn"
             onClick={onOpenProject}

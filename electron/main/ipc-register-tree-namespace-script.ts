@@ -533,8 +533,14 @@ export function registerTreeNamespaceScriptIpcHandlers(
     const { path, executionId, origin } = request;
     // Build the language-appropriate invocation here — no Python or Julia
     // code strings belong in the renderer (ARCHITECTURE.md key design rules).
+    // Julia uses the :limit=>true text/plain display rather than println so
+    // large arrays print the truncated "256-element Vector{Float64}: …" form
+    // (matching numpy's self-truncating print) instead of a full dump.
     const expr = path ? `pdv_tree[${JSON.stringify(path)}]` : "pdv_tree";
-    const code = kernel.language === "julia" ? `println(${expr})` : `print(${expr})`;
+    const code =
+      kernel.language === "julia"
+        ? `show(IOContext(stdout, :limit => true), MIME("text/plain"), ${expr}); println()`
+        : `print(${expr})`;
 
     const workingDir = kernelWorkingDirs.get(kernelId);
     const transcript = workingDir ? new TranscriptWriter(workingDir) : null;

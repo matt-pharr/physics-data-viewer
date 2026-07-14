@@ -436,6 +436,7 @@ export class ProjectManager {
         module_owned_files?: ModuleOwnedFile[];
         module_manifests?: ModuleManifestBundle[];
         missing_files?: string[];
+        failed_nodes?: Array<{ path?: string; type?: string; error?: string }>;
       };
       checksum = payload.checksum ?? "";
       nodeCount = payload.node_count ?? 0;
@@ -448,6 +449,17 @@ export class ProjectManager {
       missingFiles = Array.isArray(payload.missing_files)
         ? payload.missing_files
         : [];
+
+      // Nodes the kernel could not serialize at all (Julia kernels only:
+      // Serialization refuses more values than pickle). The save proceeded
+      // without them — surface the loss loudly rather than silently.
+      const failedNodes = Array.isArray(payload.failed_nodes) ? payload.failed_nodes : [];
+      if (failedNodes.length > 0) {
+        console.warn(
+          `[ProjectManager.save] ${failedNodes.length} tree node(s) could not be serialized and were skipped: ` +
+            failedNodes.map((f) => `${f.path ?? "?"} (${f.error ?? "unknown error"})`).join("; "),
+        );
+      }
     }
 
     // If backing files are missing, abort before writing any project metadata.

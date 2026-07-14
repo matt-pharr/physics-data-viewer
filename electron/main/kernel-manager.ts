@@ -385,6 +385,15 @@ export class KernelManager extends EventEmitter {
   /** Per-kernel sets of iopub message listeners. */
   private readonly iopubListeners = new Map<string, Set<IopubCallback>>();
 
+  /**
+   * Shell msg_ids of executions currently awaiting their idle status.
+   * Consulted by {@link isExecutionActive} so callers can distinguish
+   * display_data bound to an in-flight execution (collected by `execute()`)
+   * from orphan displays parented to a stale execution — e.g. a figure a
+   * kernel emits while handling a comm message (`pdv.handler.invoke`).
+   */
+  private readonly activeExecutionMsgIds = new Set<string>();
+
   constructor() {
     super();
   }
@@ -728,6 +737,7 @@ export class KernelManager extends EventEmitter {
       managed.sessionId
     );
     const msgId = msg.header.msg_id;
+    this.activeExecutionMsgIds.add(msgId);
 
     return new Promise<KernelExecuteResult>((resolve) => {
       let done = false;
@@ -752,6 +762,7 @@ export class KernelManager extends EventEmitter {
       const finish = () => {
         if (done) return;
         done = true;
+        this.activeExecutionMsgIds.delete(msgId);
         this.removeListener("kernel:crashed", onCrash);
         cleanup();
         result.duration = Date.now() - startTime;
@@ -1031,6 +1042,16 @@ export class KernelManager extends EventEmitter {
    * @param callback - Invoked with each parsed JupyterMessage.
    * @returns A function that, when called, removes the listener.
    */
+  /**
+   * Whether a shell execution with the given msg_id is currently in flight.
+   *
+   * @param msgId - The `parent_header.msg_id` of an iopub message.
+   * @returns True while the execution awaits its idle status.
+   */
+  isExecutionActive(msgId: string): boolean {
+    return this.activeExecutionMsgIds.has(msgId);
+  }
+
   onIopubMessage(id: string, callback: IopubCallback): () => void {
     let listeners = this.iopubListeners.get(id);
     if (!listeners) {

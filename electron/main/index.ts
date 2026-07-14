@@ -266,7 +266,9 @@ async function ensureScriptFile(scriptPath: string, language: "python" | "julia"
       `  created by ${user} on ${host} on ${date} at ${time}\n` +
       "  Description: add your script description here.\n" +
       "=#\n\n" +
-      "function run(pdv_tree::Dict)\n" +
+      // pdv_tree is a PDVTree — an AbstractDict subtype, not a concrete Dict —
+      // so the annotation must be AbstractDict for dispatch to accept it.
+      "function run(pdv_tree::AbstractDict; kwargs...)\n" +
       "    # add your code here\n" +
       "    return Dict()\n" +
       "end\n"

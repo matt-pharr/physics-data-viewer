@@ -59,18 +59,45 @@ const PYTHON_TYPE_OVERRIDES: Record<string, string> = {
   NoneType: 'None',
 };
 
-/** Strip the `builtins.` module prefix from a fully qualified
- *  Python type so e.g. `builtins.int` reads as `int`. */
-function stripBuiltinsPrefix(qualified: string): string {
-  return qualified.startsWith('builtins.') ? qualified.slice('builtins.'.length) : qualified;
+/** Julia sessions reuse the same wire kind strings, but the Python class
+ *  names in {@link DISPLAY_LABELS} (`np.ndarray`, `pd.DataFrame`, …) would
+ *  be wrong for them. When the descriptor's type string identifies a Julia
+ *  type (see {@link isJuliaTypeString}) these labels win instead. */
+const JULIA_DISPLAY_LABELS: Record<string, string> = {
+  ndarray: 'Array',
+  dataframe: 'DataFrame',
+  mapping: 'Dict',
+  text: 'String',
+  binary: 'bytes',
+};
+
+/** Heuristic: module-qualified Julia type strings start with a Julia root
+ *  module (`Core.Int64`, `Base.Dict{…}`, `Main.NPendulum.…`,
+ *  `DataFrames.DataFrame`) or carry `{…}` type parameters — shapes a
+ *  fully-qualified Python type string never takes. */
+function isJuliaTypeString(qualified: string): boolean {
+  return /^(Core|Base|Main|DataFrames)\./.test(qualified) || qualified.includes('{');
+}
+
+/** Strip the module prefix from a fully qualified type so e.g.
+ *  `builtins.int` reads as `int` and `Core.Int64` reads as `Int64`. */
+function stripModulePrefix(qualified: string): string {
+  if (qualified.startsWith('builtins.')) return qualified.slice('builtins.'.length);
+  const juliaRoot = /^(Core|Base)\./.exec(qualified);
+  if (juliaRoot) return qualified.slice(juliaRoot[0].length);
+  return qualified;
 }
 
 /** Compute the chip label, preferring `pythonType` for kinds in
- *  {@link USE_PYTHON_TYPE} and falling back to the generic label. */
+ *  {@link USE_PYTHON_TYPE} and falling back to the generic label
+ *  (Julia-flavored when the type string identifies a Julia value). */
 function resolveTypeLabel(type: string, pythonType?: string): string {
   if (USE_PYTHON_TYPE.has(type) && pythonType) {
-    const stripped = stripBuiltinsPrefix(pythonType);
+    const stripped = stripModulePrefix(pythonType);
     return PYTHON_TYPE_OVERRIDES[stripped] ?? stripped;
+  }
+  if (pythonType && isJuliaTypeString(pythonType) && JULIA_DISPLAY_LABELS[type]) {
+    return JULIA_DISPLAY_LABELS[type];
   }
   return DISPLAY_LABELS[type] ?? type;
 }

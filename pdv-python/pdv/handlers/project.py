@@ -68,6 +68,7 @@ def _collect_nodes(
     on_progress: "Callable[[int], None] | None" = None,
     counter: "list[int] | None" = None,
     missing_files: "list[str] | None" = None,
+    failed_nodes: "list[dict] | None" = None,
     autosave_cache: "dict[str, tuple[bytes, dict]] | None" = None,
     autosave_hits: "list[int] | None" = None,
 ) -> list:
@@ -91,6 +92,11 @@ def _collect_nodes(
         Mutable list that collects tree paths of file-backed nodes whose
         backing files were missing. If provided, missing-file errors skip
         the node instead of falling back to pickle.
+    failed_nodes : list, optional
+        Mutable list that collects ``{"path", "type", "error"}`` entries for
+        values that even the pickle fallback could not serialize (lambdas,
+        open handles, ...). Such nodes are skipped so one unpicklable leaf
+        never aborts the whole save.
     autosave_cache : dict, optional
         Per-node checksum cache shared across calls. When provided, data
         nodes whose digest matches the cached value reuse the previous
@@ -136,8 +142,12 @@ def _collect_nodes(
                 autosave_cache=autosave_cache,
                 autosave_hits=autosave_hits,
             )
-        except PDVSerializationError as exc:
-            if missing_files is not None and str(exc).startswith("File not found:"):
+        except Exception as exc:  # noqa: BLE001 — any escape triggers the fallback
+            if (
+                isinstance(exc, PDVSerializationError)
+                and missing_files is not None
+                and str(exc).startswith("File not found:")
+            ):
                 log.warning(
                     "project.save: skipping node '%s' — backing file missing: %s",
                     path,
@@ -154,7 +164,31 @@ def _collect_nodes(
                 type(value).__name__,
                 exc,
             )
-            descriptor = pickle_fallback_node(path, value, save_dir)
+            try:
+                descriptor = pickle_fallback_node(path, value, save_dir)
+            except Exception as fallback_exc:  # noqa: BLE001
+                # Even pickle refused (lambda, open handle, ...). Skip the
+                # node and record it — one unpicklable leaf must never abort
+                # the whole save.
+                log.warning(
+                    "project.save: node '%s' (%s) could not be serialized at "
+                    "all — skipping: %s",
+                    path,
+                    type(value).__name__,
+                    fallback_exc,
+                )
+                if failed_nodes is not None:
+                    failed_nodes.append(
+                        {
+                            "path": path,
+                            "type": type(value).__name__,
+                            "error": str(fallback_exc),
+                        }
+                    )
+                counter[0] += 1
+                if on_progress is not None:
+                    on_progress(counter[0])
+                continue
         nodes.append(descriptor)
         counter[0] += 1
         if on_progress is not None:
@@ -169,6 +203,7 @@ def _collect_nodes(
                     on_progress=on_progress,
                     counter=counter,
                     missing_files=missing_files,
+                    failed_nodes=failed_nodes,
                     autosave_cache=autosave_cache,
                     autosave_hits=autosave_hits,
                 )
@@ -187,6 +222,7 @@ def _collect_nodes(
                     on_progress=on_progress,
                     counter=counter,
                     missing_files=missing_files,
+                    failed_nodes=failed_nodes,
                     autosave_cache=autosave_cache,
                     autosave_hits=autosave_hits,
                 )
@@ -788,7 +824,11 @@ def serialize_tree_to_dir(
     -------
     dict
         ``{"node_count", "checksum", "aborted", "module_owned_files",
-        "module_manifests", "missing_files", "autosave_cache_hits"}``.
+        "module_manifests", "missing_files", "failed_nodes",
+        "autosave_cache_hits"}``. ``failed_nodes`` lists
+        ``{"path", "type", "error"}`` entries for values that even the
+        pickle fallback could not serialize; such nodes are skipped (the
+        save still succeeds without them).
         ``autosave_cache_hits`` is the number of nodes that reused a
         cached descriptor; meaningful only when ``autosave_cache`` was
         provided.
@@ -825,6 +865,7 @@ def serialize_tree_to_dir(
                 on_progress("Serializing", current, total)
 
     missing_files: list[str] = []
+    failed_nodes: list[dict] = []
     autosave_hits: list[int] = [0]
     nodes = _collect_nodes(
         tree,
@@ -832,6 +873,7 @@ def serialize_tree_to_dir(
         working_dir=working_dir,
         on_progress=_emit_progress,
         missing_files=missing_files,
+        failed_nodes=failed_nodes,
         autosave_cache=autosave_cache,
         autosave_hits=autosave_hits,
     )
@@ -843,6 +885,7 @@ def serialize_tree_to_dir(
             "module_owned_files": [],
             "module_manifests": [],
             "missing_files": missing_files,
+            "failed_nodes": failed_nodes,
             "autosave_cache_hits": autosave_hits[0],
         }
 
@@ -881,6 +924,7 @@ def serialize_tree_to_dir(
         "module_owned_files": module_owned_files,
         "module_manifests": module_manifests,
         "missing_files": missing_files,
+        "failed_nodes": failed_nodes,
         "autosave_cache_hits": autosave_hits[0],
     }
 
