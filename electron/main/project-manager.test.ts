@@ -732,6 +732,32 @@ describe("ProjectManager", () => {
       expect(result.timestamp).toMatch(/^\d{4}-\d{2}-\d{2}T/);
       // mtime should be parseable and recent
       expect(Number.isNaN(Date.parse(result.timestamp!))).toBe(false);
+      // No sidecar manifest → language unknown (recovery defaults to python).
+      expect(result.language).toBeUndefined();
+    });
+
+    it("reads the kernel language from the sidecar project.json", async () => {
+      await fs.mkdir(path.join(dir, ".autosave"), { recursive: true });
+      await fs.writeFile(path.join(dir, ".autosave", "tree-index.json"), "[]", "utf8");
+      await fs.writeFile(
+        path.join(dir, ".autosave", "project.json"),
+        JSON.stringify({ language: "julia" }),
+        "utf8",
+      );
+
+      const result = await ProjectManager.checkForAutosave(dir);
+      expect(result.exists).toBe(true);
+      expect(result.language).toBe("julia");
+    });
+
+    it("ignores a malformed sidecar manifest", async () => {
+      await fs.mkdir(path.join(dir, ".autosave"), { recursive: true });
+      await fs.writeFile(path.join(dir, ".autosave", "tree-index.json"), "[]", "utf8");
+      await fs.writeFile(path.join(dir, ".autosave", "project.json"), "{not json", "utf8");
+
+      const result = await ProjectManager.checkForAutosave(dir);
+      expect(result.exists).toBe(true);
+      expect(result.language).toBeUndefined();
     });
   });
 
@@ -785,6 +811,25 @@ describe("ProjectManager", () => {
       for (const r of results) {
         expect(Number.isNaN(Date.parse(r.timestamp))).toBe(false);
       }
+    });
+
+    it("carries each autosave's sidecar language through to the results", async () => {
+      const jl = path.join(base, "julia-session");
+      const py = path.join(base, "python-session");
+      await fs.mkdir(path.join(jl, ".autosave"), { recursive: true });
+      await fs.mkdir(path.join(py, ".autosave"), { recursive: true });
+      await fs.writeFile(path.join(jl, ".autosave", "tree-index.json"), "[]", "utf8");
+      await fs.writeFile(path.join(py, ".autosave", "tree-index.json"), "[]", "utf8");
+      await fs.writeFile(
+        path.join(jl, ".autosave", "project.json"),
+        JSON.stringify({ language: "julia" }),
+        "utf8",
+      );
+
+      const results = await ProjectManager.scanForAutosaves(base);
+      const byDir = new Map(results.map((r) => [r.dir, r.language]));
+      expect(byDir.get(jl)).toBe("julia");
+      expect(byDir.get(py)).toBeUndefined();
     });
   });
 

@@ -1112,8 +1112,16 @@ export interface PDVApi {
   autosave: {
     run(codeCells: unknown): Promise<{ saved: boolean }>;
     clear(dir?: string): Promise<void>;
-    check(dir: string): Promise<{ exists: boolean; timestamp?: string }>;
-    scanWorkingDirs(): Promise<{ dir: string; timestamp: string }[]>;
+    check(dir: string): Promise<{
+      exists: boolean;
+      timestamp?: string;
+      language?: 'python' | 'julia';
+    }>;
+    scanWorkingDirs(): Promise<{
+      dir: string;
+      timestamp: string;
+      language?: 'python' | 'julia';
+    }[]>;
     recoverUnsaved(orphanDir: string): Promise<{
       codeCells: unknown;
       projectName: string | null;

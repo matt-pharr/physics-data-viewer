@@ -638,6 +638,59 @@ end
     clear_handlers!()
 end
 
+@testset "default handlers" begin
+    clear_handlers!()
+    t = PDVTree()
+
+    # Numeric arrays always have a default (pdv_handle methods on Base types);
+    # without a Makie backend the handler prints a [PDV] notice, never throws.
+    @test has_handler_for(rand(5))
+    @test has_handler_for(rand(3, 3))
+    @test has_handler_for(collect(1:4))            # Vector{Int}
+    @test !has_handler_for(Any[1, "x"])            # non-numeric: no default
+    local vec_result
+    notice = mktemp() do tmppath, tmpio
+        redirect_stdout(tmpio) do
+            vec_result = dispatch_handler(rand(5), "data.wave", t)
+        end
+        flush(tmpio)
+        read(tmppath, String)
+    end
+    @test vec_result["dispatched"] == true
+    @test occursin("[PDV] Cannot plot 'data.wave'", notice)
+    @test occursin("CairoMakie", notice)
+
+    # DataFrames is loaded in the test env → its default registers lazily and
+    # dispatch `display`s the value (IJulia forwards displays to the app).
+    df = DataFrame(a=[1, 2], b=[3.0, 4.0])
+    @test has_handler_for(df)
+    struct _CaptureDisplay <: AbstractDisplay
+        seen::Vector{Any}
+    end
+    Base.display(d::_CaptureDisplay, x) = (push!(d.seen, x); nothing)
+    cap = _CaptureDisplay(Any[])
+    pushdisplay(cap)
+    df_result = try
+        dispatch_handler(df, "data.table", t)
+    finally
+        popdisplay(cap)
+    end
+    @test df_result["dispatched"] == true
+    @test length(cap.seen) == 1 && cap.seen[1] === df
+
+    # A user-registered handler always wins over the default, regardless of
+    # registration order.
+    clear_handlers!()
+    user_calls = []
+    register_handler((obj, path, tree) -> push!(user_calls, path), DataFrame)
+    @test has_handler_for(df)                       # triggers lazy defaults too
+    result = dispatch_handler(df, "data.table", t)
+    @test result["dispatched"] == true
+    @test user_calls == ["data.table"]
+    clear_handlers!()
+end
+
+
 @testset "namelist utils" begin
     dir = mktempdir()
 

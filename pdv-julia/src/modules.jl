@@ -13,9 +13,10 @@
 #    the caller does not own. Registered handlers win over `pdv_handle`
 #    methods, mirroring Python's registered-over-dunder precedence.
 #
-# Built-in default plot handlers (Python's default_handlers.py) are not
-# pre-registered: Julia plotting packages provide their own `display`
-# machinery, and a module's `pdv_handle` methods are the intended hook.
+# Built-in default handlers (Python's default_handlers.py) live in
+# default_handlers.jl and register lazily from the lookup functions below —
+# numeric arrays plot via whatever Makie backend is loaded, Makie figures
+# and DataFrames display, and user registrations always win over defaults.
 
 """One explicitly registered handler mapping a type to a callable."""
 struct HandlerEntry
@@ -60,6 +61,7 @@ True when an explicitly registered handler matches `obj`'s type, or a
 `pdv_handle` method exists for it.
 """
 function has_handler_for(obj)::Bool
+    register_default_handlers!()
     _registered_handler_for(obj) !== nothing && return true
     return hasmethod(pdv_handle, Tuple{typeof(obj),String,PDVTree})
 end
@@ -72,6 +74,7 @@ Find and call the handler for `obj`. Exceptions are caught and returned as
 structured error rather than an opaque kernel exception.
 """
 function dispatch_handler(obj, path::AbstractString, tree)::Dict{String,Any}
+    register_default_handlers!()
     entry = _registered_handler_for(obj)
     if entry !== nothing
         try
@@ -117,5 +120,5 @@ function get_handler_registry()::Dict{String,String}
     return registry
 end
 
-"""Clear the explicit handler registry (used in tests)."""
-clear_handlers!() = (empty!(_HANDLER_REGISTRY); nothing)
+"""Clear the explicit handler registry and the lazy-defaults latch (tests)."""
+clear_handlers!() = (empty!(_HANDLER_REGISTRY); _reset_default_handlers!(); nothing)

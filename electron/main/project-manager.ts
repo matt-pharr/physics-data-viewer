@@ -897,11 +897,30 @@ export class ProjectManager {
    * @param dir - Project save directory (or working dir for unsaved projects).
    * @returns Whether .autosave/tree-index.json exists and its mtime.
    */
-  static async checkForAutosave(dir: string): Promise<{ exists: boolean; timestamp?: string }> {
+  static async checkForAutosave(
+    dir: string
+  ): Promise<{ exists: boolean; timestamp?: string; language?: "python" | "julia" }> {
     const indexPath = path.join(dir, ".autosave", "tree-index.json");
     try {
       const stat = await fs.stat(indexPath);
-      return { exists: true, timestamp: stat.mtime.toISOString() };
+      // The sidecar manifest records the kernel language so recovery can boot
+      // the right kernel (a Python kernel cannot load jls-format nodes and
+      // vice-versa). Absent/unreadable manifest (pre-sidecar autosaves) means
+      // undefined — callers default to python.
+      let language: "python" | "julia" | undefined;
+      try {
+        const manifestRaw = await fs.readFile(
+          path.join(dir, ".autosave", "project.json"),
+          "utf8"
+        );
+        const manifest = JSON.parse(manifestRaw) as { language?: unknown };
+        if (manifest.language === "julia" || manifest.language === "python") {
+          language = manifest.language;
+        }
+      } catch {
+        // Legacy autosave without a project.json snapshot.
+      }
+      return { exists: true, timestamp: stat.mtime.toISOString(), language };
     } catch {
       return { exists: false };
     }
@@ -924,8 +943,10 @@ export class ProjectManager {
    * @param workingDirBase - Base directory to scan (e.g. ~/.PDV/working/).
    * @returns List of directories with autosave data and their timestamps.
    */
-  static async scanForAutosaves(workingDirBase: string): Promise<{ dir: string; timestamp: string }[]> {
-    const results: { dir: string; timestamp: string }[] = [];
+  static async scanForAutosaves(
+    workingDirBase: string
+  ): Promise<{ dir: string; timestamp: string; language?: "python" | "julia" }[]> {
+    const results: { dir: string; timestamp: string; language?: "python" | "julia" }[] = [];
     try {
       const entries = await fs.readdir(workingDirBase, { withFileTypes: true });
       for (const entry of entries) {
@@ -933,7 +954,7 @@ export class ProjectManager {
         const dirPath = path.join(workingDirBase, entry.name);
         const check = await ProjectManager.checkForAutosave(dirPath);
         if (check.exists && check.timestamp) {
-          results.push({ dir: dirPath, timestamp: check.timestamp });
+          results.push({ dir: dirPath, timestamp: check.timestamp, language: check.language });
         }
       }
     } catch (err) {

@@ -44,6 +44,13 @@ test.beforeAll(async () => {
         `${path.join(os.homedir(), ".julia")}:`,
     },
   });
+  // Surface renderer console output (e.g. "[App] Handler failed: ...") in
+  // the test log — handler errors are otherwise invisible to the runner.
+  launched.window.on("console", (msg) => {
+    if (msg.type() === "error" || msg.text().includes("[App]")) {
+      console.log(`[renderer:${msg.type()}]`, msg.text());
+    }
+  });
   await launched.window.getByRole("button", { name: "New Julia Project" }).click();
   await expectKernelReady(launched.window, 240_000);
 });
@@ -61,7 +68,11 @@ async function runInCodeCell(code: string): Promise<void> {
   await window.keyboard.press(`${modifier}+a`);
   await window.keyboard.press("Backspace");
   await window.keyboard.type(code);
-  await window.getByRole("button", { name: "Execute" }).click();
+  // Execution is gated while the kernel is busy (project load's post-load
+  // checksum pays the first figure-render JIT; autosaves gate cells too).
+  const execute = window.getByRole("button", { name: "Execute" });
+  await expect(execute).toBeEnabled({ timeout: 120_000 });
+  await execute.click();
 }
 
 test("build a tree with a live CairoMakie figure", async () => {
@@ -73,6 +84,11 @@ test("build a tree with a live CairoMakie figure", async () => {
       "fig = Figure()",
       "ax = Axis(fig[1, 1])",
       "lines!(ax, 1:100, sin.(0.1 .* (1:100)))",
+      // Display before saving — the realistic flow, and what lets the reload
+      // round-trip cleanly: the serialized figure then references CairoMakie,
+      // whose load-time activation makes the rendered-pixels digest (and
+      // double-click display) work in the fresh kernel.
+      "display(fig)",
       'pdv_tree["lorenz"] = Dict{String,Any}()',
       'pdv_tree["lorenz.attractor_fig"] = fig',
       'pdv_tree["lorenz.trajectory"] = (t=collect(1.0:100.0), x=rand(100))',
@@ -183,4 +199,49 @@ test("saved figure loads back and is a live Figure in the kernel", async () => {
   await runInCodeCell('println(typeof(pdv_tree["lorenz.attractor_fig"]))');
   await expect(window.locator(".log-stdout", { hasText: "Figure" }).first())
     .toBeVisible({ timeout: 60_000 });
+
+  // The rendered-pixels pdv_digest makes figure digests survive the round
+  // trip, so the status bar must NOT show the checksum-mismatch warning.
+  await expect(window.locator(".status-item.status-warning")).toHaveCount(0);
+});
+
+test("default handlers: kernel reports and dispatches the figure handler", async () => {
+  test.setTimeout(240_000);
+  const { window } = launched;
+
+  // Kernel-side truth: the reloaded figure has a registered default handler.
+  await runInCodeCell(
+    'println("HH ", PDVKernel.has_handler_for(pdv_tree["lorenz.attractor_fig"]))');
+  await expect(window.locator(".log-stdout", { hasText: "HH true" }))
+    .toBeVisible({ timeout: 60_000 });
+
+  // A figure that was DISPLAYED before saving carries dead backend screens
+  // in its serialized form; Makie cannot safely re-display it, so the
+  // default handler degrades to an actionable [PDV] notice instead of an
+  // opaque error (or a kernel crash). See JULIA_KNOWN_ISSUES #14.
+  await runInCodeCell(
+    'PDVKernel.dispatch_handler(pdv_tree["lorenz.attractor_fig"], ' +
+    '"lorenz.attractor_fig", pdv_tree)');
+  await expect(window.locator(".log-stdout", { hasText: "[PDV] Cannot display" }))
+    .toBeVisible({ timeout: 120_000 });
+});
+
+test("default handlers: bare numeric vector is double-click plottable", async () => {
+  test.setTimeout(240_000);
+  const { window } = launched;
+
+  // Expansion state can persist from the earlier stages — expand only if
+  // the folder is currently collapsed.
+  const expandLorenz = window.getByRole("button", { name: "Expand lorenz" });
+  if (await expandLorenz.isVisible().catch(() => false)) {
+    await expandLorenz.click();
+  }
+
+  // Numeric Vector → lines plot via the loaded CairoMakie backend (the
+  // default pdv_handle method; previously an inert node).
+  const samplesRow = window.locator(".tree-row", { hasText: "samples" });
+  await expect(samplesRow).toBeVisible({ timeout: 15_000 });
+  const before = await window.locator(".log-image").count();
+  await samplesRow.dblclick();
+  await expect(window.locator(".log-image")).toHaveCount(before + 1, { timeout: 120_000 });
 });

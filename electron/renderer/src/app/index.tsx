@@ -1373,16 +1373,26 @@ const App: React.FC = () => {
     refreshRecoverableSessions,
   ]);
 
-  const handleRecoverSession = useCallback((orphanDir: string) => {
+  const handleRecoverSession = useCallback((orphanDir: string, language: 'python' | 'julia' = 'python') => {
+    // Boot (or reboot) a kernel of the autosave's language, then recover once
+    // it's ready. A mismatched live kernel cannot be reused: the Python
+    // loader rejects jls-format nodes and vice-versa.
+    const startAndRecover = () => {
+      dismissWelcome();
+      setInterpreterWarning(null);
+      pendingProjectRef.current = { type: 'recover', orphanDir };
+      void ensureKernel(language);
+    };
     if (kernelStatus === 'ready') {
-      guardDirty('recover an unsaved session', () => { void executeRecoverUnsaved(orphanDir); });
+      if (activeLanguage === language) {
+        guardDirty('recover an unsaved session', () => { void executeRecoverUnsaved(orphanDir); });
+      } else {
+        guardDirty('recover an unsaved session', startAndRecover);
+      }
       return;
     }
-    dismissWelcome();
-    setInterpreterWarning(null);
-    pendingProjectRef.current = { type: 'recover', orphanDir };
-    void ensureKernel('python');
-  }, [kernelStatus, guardDirty, executeRecoverUnsaved, dismissWelcome, ensureKernel]);
+    startAndRecover();
+  }, [kernelStatus, activeLanguage, guardDirty, executeRecoverUnsaved, dismissWelcome, ensureKernel]);
 
   // Keep refs in sync so the menu-action effect (subscribed once) calls the latest handlers.
   handleOpenWithPickerRef.current = handleOpenWithPicker;

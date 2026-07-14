@@ -2501,15 +2501,27 @@ export interface PDVApi {
      * Check if autosave data exists for a given directory.
      *
      * @param dir - Project save directory to check.
-     * @returns Whether autosave data exists and its timestamp.
+     * @returns Whether autosave data exists, its timestamp, and the kernel
+     *   language recorded in the sidecar manifest (absent for pre-sidecar
+     *   autosaves; callers default to python).
      */
-    check(dir: string): Promise<{ exists: boolean; timestamp?: string }>;
+    check(dir: string): Promise<{
+      exists: boolean;
+      timestamp?: string;
+      language?: "python" | "julia";
+    }>;
     /**
      * Scan working directories for orphaned autosave data (unsaved projects).
      *
-     * @returns List of working dirs containing .autosave/ data.
+     * @returns List of working dirs containing .autosave/ data, each with the
+     *   kernel language from its sidecar manifest so recovery can boot the
+     *   matching kernel (a Python kernel cannot load jls-format nodes).
      */
-    scanWorkingDirs(): Promise<{ dir: string; timestamp: string }[]>;
+    scanWorkingDirs(): Promise<{
+      dir: string;
+      timestamp: string;
+      language?: "python" | "julia";
+    }[]>;
     /**
      * Recover an unsaved session from an orphaned working dir's `.autosave/`.
      *

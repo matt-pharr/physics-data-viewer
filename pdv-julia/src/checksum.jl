@@ -106,6 +106,12 @@ value (see `_WALK_FEED_BUDGET`), the digest falls back to the node's
 Serialization bytes, and as a last resort to a pointer-stripped `repr`.
 """
 function node_digest(node, working_dir::Union{Nothing,AbstractString})::Vector{UInt8}
+    # Make sure lazily-registered default pdv_digest methods (e.g. the
+    # rendered-pixels digest for Makie figures) exist before the walk decides
+    # how to digest — otherwise a checksum computed right after project load
+    # (before any handler lookup ran) would disagree with one computed after.
+    # O(1) unless a new module was loaded since the last call.
+    register_default_handlers!()
     ctx = SHA.SHA2_256_CTX()
     try
         _feed_node!(ctx, node, working_dir, _WalkState())

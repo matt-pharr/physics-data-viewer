@@ -33,35 +33,31 @@ Residual quirk: a tree holding *displayed* figures may show the status-bar
 `⚠` checksum-mismatch marker after reload (display state is part of the live
 object but not of the reloaded one). Cosmetic; see issue 13.
 
-### 2. Autosave recovery on the welcome screen always boots a Python kernel
-Recovering an autosaved **Julia** session from "Recoverable Unsaved Sessions"
-starts a Python kernel and then loads the Julia tree into it. The autosave
-sidecar manifest records `language: "julia"` (`autosave-sidecars.ts`), but the
-welcome-screen recovery path (`onRecoverSession` → `ensureKernel()`) never
-reads it — `ensureKernel` defaults to `'python'`. Fix: plumb the sidecar's
-`language` through `autosave.scanWorkingDirs` results into the recovery
-handler. The same check is worth auditing on the recent-projects list and
-restart-recovery paths (project open does peek `language`; recovery may not).
+### 2. ~~Autosave recovery on the welcome screen always boots a Python kernel~~ — FIXED (2026-07-14)
+The sidecar's `language` now flows `checkForAutosave` →
+`autosave.scanWorkingDirs` → the welcome screen (which shows a
+`[Julia]`/`[Python]` badge on each recoverable entry) →
+`handleRecoverSession` → `ensureKernel(language)`. Recovering while a
+mismatched kernel is live restarts it in the autosave's language (behind the
+usual dirty-guard). Pre-sidecar autosaves without a manifest still default
+to python.
 
-### 3. Makie figures stored in the tree are not double-click showable
-`pdv_tree["fig"] = fig` (a `Makie.Figure`) lists as an `unknown` node with no
-double-click action. Root cause: the Julia backend registers **no built-in
-double-click handlers at all**, unlike Python's `default_handlers.py`
-(ndarray → plot, DataFrame/Series → `.plot()`). Parity fix: a
-`default_handlers.jl` that lazily registers (gated on the library being
-loaded, like Python's `sys.modules` gate):
-- `Makie.Figure` / `FigureAxisPlot` → `display(fig)`
-- numeric `Vector` → line plot; numeric `Matrix` → heatmap (via whichever
-  Makie backend is loaded)
-- `DataFrame` → table/summary display
-Module-defined types already work via `pdv_handle` methods (the N-pendulum
-solution plots fine); this gap is for bare values.
+### 3. ~~Makie figures stored in the tree are not double-click showable~~ — FIXED (2026-07-14)
+`default_handlers.jl` now registers lazily (gated on `Base.loaded_modules`,
+mirroring Python's `sys.modules` gate; user registrations always win):
+- `Makie.Figure` / `FigureAxisPlot` → `display`
+- numeric `Vector` → `lines`, numeric `Matrix` → `heatmap` + colorbar (via
+  the loaded Makie backend; a `[PDV]` notice tells the user to
+  `using CairoMakie` when none is)
+- `DataFrame` → `display`
+Makie figures also gain a lazy `pdv_digest` that hashes the rendered pixels
+(`colorbuffer`), which fixes issue 13 below. One residual carved out as
+issue 14: a figure that was *displayed* before saving cannot be re-displayed
+after reload (dead backend screens); its handler degrades to a `[PDV]`
+notice.
 
-### 4. "New Julia Project" button is not highlighted
-The welcome screen renders New Python Project as the primary (filled) button
-and New Julia Project as secondary (outline). One-line fix in
-`WelcomeScreen/index.tsx` (`btn-secondary` → `btn-primary`) if both should
-read as first-class actions.
+### 4. ~~"New Julia Project" button is not highlighted~~ — FIXED (2026-07-14)
+Both New Project buttons are now `btn-primary`.
 
 ---
 
@@ -144,15 +140,28 @@ Cosmetic (Monaco degrades gracefully), same behavior class as Python.
 Cosmetic: the interpreter slot shows the full juliaup-resolved binary path
 (long). Could display `julia <version>` instead.
 
-### 13. Checksum-mismatch marker after reloading a tree that holds live figures
-A reloaded `Makie.Figure` is content-identical but not digest-identical to
-the live one that was saved (weak references, display/screen state, and
-observable-listener registrations differ between a displayed figure and a
-freshly-deserialized one). After reopening such a project the status bar
-shows the `⚠` "data may have changed since last save" marker even though
-nothing did. Cosmetic — the next save clears it. A future `pdv_digest`
-method for figures (e.g. hashing the rendered image) could fix this
-properly; natural to bundle with the default-handlers work (issue 3).
+### 13. Checksum-mismatch marker after reloading a tree that holds live figures — MOSTLY FIXED (2026-07-14)
+Makie figures now digest via a lazy `pdv_digest` that hashes the rendered
+pixels (`colorbuffer`) — content-faithful and stable across save/load, unlike
+the live object graph (weak refs, display state). Caveat: rendering needs an
+**activated Makie backend**. A figure that was displayed before saving
+references CairoMakie in its `.jls`, so the reload auto-loads and activates
+the backend and the digest matches. A figure that was never displayed
+reloads with only Makie core available; the digest auto-requires CairoMakie
+when installed, otherwise it falls back to the structural walk and the
+cosmetic `⚠` marker can appear until the next save. Cosmetic residual only.
+
+### 14. Reloaded previously-displayed figures cannot be re-displayed
+A `Makie.Figure` that was displayed before saving serializes with its
+backend screens (dead C pointers after reload). Makie's `display` tries to
+re-render onto the corpse and fails (`AssertionError: surface.ptr !=
+C_NULL`) — and every attempt to sanitize the screens list (at save with
+strip-and-restore, at dispatch with a purge) crashed the kernel outright,
+so the screens are left untouched. The default handler catches the failure
+and prints an actionable `[PDV]` notice (re-run the plotting code) instead.
+Figures that were never displayed before saving re-display fine. A real fix
+probably needs an upstream-blessed way to detach a figure from its screens
+(`Makie.empty_screens!`-ish) or a figure deep-copy for serialization.
 
 ---
 
