@@ -60,6 +60,21 @@ function handle_tree_list(msg::AbstractDict)
         container = tree
     end
 
+    nodes, _ = _list_container_nodes(container, path)
+    send_message("pdv.tree.list.response", Dict{String,Any}("nodes" => nodes);
+                 in_reply_to=msg_id)
+    nothing
+end
+
+"""
+    _list_container_nodes(container, path) -> (nodes, expandable)
+
+Build the child node descriptors for a container — the shared core of
+`handle_tree_list` and the query-cache rebuild. `expandable` pairs each
+`has_children` child's path with its value so a cache walk can recurse
+without re-resolving dot paths.
+"""
+function _list_container_nodes(container, path::String)
     parent_is_opaque = container isa AbstractVector || container isa Tuple
     keys_iter = if container isa AbstractPDVTree
         collect(keys(container.data))
@@ -70,6 +85,7 @@ function handle_tree_list(msg::AbstractDict)
     end
 
     nodes = Dict{String,Any}[]
+    expandable = Tuple{String,Any}[]
     for key in keys_iter
         local value
         if container isa AbstractPDVTree
@@ -91,7 +107,7 @@ function handle_tree_list(msg::AbstractDict)
         preview_str = node_preview(value, kind)
         has_children = if value isa Union{AbstractPDVTree,AbstractDict}
             !isempty(value)
-        elseif detect_kind(value) == KIND_SEQUENCE && value isa Union{AbstractVector,Tuple}
+        elseif kind == KIND_SEQUENCE && value isa Union{AbstractVector,Tuple}
             !isempty(value)
         else
             false
@@ -119,11 +135,9 @@ function handle_tree_list(msg::AbstractDict)
             descriptor["module_id"] = value.module_id
         end
         push!(nodes, descriptor)
+        has_children && push!(expandable, (child_path, value))
     end
-
-    send_message("pdv.tree.list.response", Dict{String,Any}("nodes" => nodes);
-                 in_reply_to=msg_id)
-    nothing
+    return nodes, expandable
 end
 
 # Character cap for the repr sent by pdv.tree.get's value mode.

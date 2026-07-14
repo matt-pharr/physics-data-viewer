@@ -357,6 +357,8 @@ function _flush_global()
     catch err
         @warn "pdv.tree.changed global ping failed" exception = err
     end
+    # Nested-PDVTree mutations reach the snapshot through this path too.
+    _ROOT_TREE[] !== nothing && rebuild_query_cache!(_ROOT_TREE[])
     nothing
 end
 
@@ -388,6 +390,10 @@ function _flush_changes(tree::AbstractPDVTree)
     catch err
         @warn "pdv.tree.changed push failed" exception = err
     end
+    # Refresh the busy-time query snapshot now that mutations settled. The
+    # debounce timer runs on the main-thread scheduler, so the walk cannot
+    # race the mutations it is snapshotting.
+    _ROOT_TREE[] === tree && rebuild_query_cache!(tree)
     nothing
 end
 

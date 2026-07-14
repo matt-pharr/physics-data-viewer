@@ -507,6 +507,9 @@ function handle_project_load(msg::AbstractDict)
 
     reset_cwd_to_home()
     node_count = length(nodes)
+    # Refresh the busy-time query snapshot for the freshly-loaded tree
+    # (invokelatest for the same world-age reason as the checksum below).
+    Base.invokelatest(rebuild_query_cache!, tree)
     # invokelatest: loading may have Base.require'd packages (jls values from
     # not-yet-loaded packages); the checksum walk must run in that new world
     # or package methods (e.g. DataFrames getindex) are "too new".

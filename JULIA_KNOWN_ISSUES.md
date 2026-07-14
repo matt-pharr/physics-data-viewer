@@ -61,6 +61,32 @@ Both New Project buttons are now `btn-primary`.
 
 ---
 
+### 15. ~~Creating a new Julia lib makes a `.py` file~~ — FIXED (2026-07-14)
+`allocateAndRegisterLib` hardcoded the `.py` extension (and wrote the Julia
+stub into it). Now language-selects `.jl`/`.py`, the create dialog shows the
+right extension, and the Julia stub defines a `module <stem> ... end` wrapper
+(the include-based lib loader binds `Main.<stem>` — a module-less stub loaded
+but exported nothing).
+
+### 16. ~~Julia scripts have no preview~~ — FIXED (2026-07-14)
+Neither kernel ever extracted a doc preview from script source — `doc` only
+survived save/load metadata (module scripts looked fine because their
+manifests carry `doc`). Both kernels now extract it at `script.register` and
+refresh it on `script.params` (the params dialog re-reads the file anyway):
+Python takes the module docstring's first line via `ast`; Julia handles a
+leading `\"\"\"docstring\"\"\"`, a `#= block =#` (preferring the template's
+`Description:` line), or a leading `#` comment.
+
+### 17. ~~Strict `::Float64` kwargs reject JSON/UI integers~~ — FIXED (2026-07-14)
+GUI/MCP params cross a JSON boundary, so `tmax: 40` arrived as `Int64` and
+MethodError'd against `tmax::Float64`. `script_run` now coerces numeric
+kwargs to the `run()` signature's declared numeric types at the call
+boundary — lossless directions only (Integer → declared float type, integral
+float → declared integer type); everything else passes through, so `n=2.5`
+against `::Int` still errors.
+
+---
+
 ## Known parity gaps vs the Python backend
 
 ### 5. No per-project environments (biggest gap)
@@ -79,14 +105,24 @@ a manual executable-path input (blank → `julia` on PATH). No pdv-python-style
 one-click "Install PDVKernel into this environment" either; installation is a
 manual `Pkg.develop(path="pdv-julia")` (or `Pkg.add` once registered).
 
-### 7. Tree browsing stalls during compute-bound execution
-The kernel-side query server runs cooperatively (async task), so tree/namespace
-queries are served only when the kernel task yields. During a long pure-compute
-run, browsing waits until the next yield/finish (the QueryRouter falls back to
-the comm channel, which also queues). Python answers live because the GIL makes
-concurrent reads safe. Options if this bites in practice: an interactive-thread
-server with locking, or the snapshot approach from the original tree-query
-design notes.
+### 7. ~~Tree browsing stalls during compute-bound execution~~ — FIXED (2026-07-14)
+The query server now runs on a dedicated default-pool OS thread when the
+kernel has an interactive threadpool (the app spawns Julia with
+`--threads=auto,1`; a user-set `JULIA_NUM_THREADS` is respected and falls
+back to the old cooperative behavior). Two non-obvious constraints shaped
+the design, both verified empirically:
+- a thread blocked in `ZMQ.recv` still starves during compute (libuv
+  event-loop starvation) — the loop instead polls `sock.events` (a plain
+  getsockopt ccall) with `Libc.systemsleep`, measured at 2–7 ms replies
+  mid-computation;
+- without a GIL the thread must never read live tree values — `tree.list`
+  is served from a lock-guarded listings snapshot rebuilt on the main
+  thread (tree-changed debounce flush, IJulia postexecute hook, project
+  load). Mid-run mutations appear at the next yield (issue 8's contract).
+`tree.get` / namespace queries reply `query.kernel_busy` and the app falls
+back to the comm channel (fast failure instead of a 5 s timeout hang).
+Covered by an integration test that queries mid-compute and asserts a
+sub-2 s listing.
 
 ### 8. Tree-changed pushes flush at yield points
 Same cooperative-scheduling root cause as #7: the 100 ms debounce timer can't

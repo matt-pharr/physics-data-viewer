@@ -579,6 +579,36 @@ end
     result = run_script(tree, "scripts.compute"; x=21)
     @test result["doubled"] == 42
     clear_lib_modules!()
+
+    # Numeric params from the JSON boundary coerce to the declared kwarg
+    # type: tmax=40 (Int64 on the wire) must satisfy tmax::Float64, and an
+    # integral Float must satisfy ::Int. Non-integral floats to ::Int still
+    # error (lossy), and ::Real needs no coercion.
+    write(path, """
+        function run(pdv_tree; tmax::Float64 = 10.0, n::Int = 3, r::Real = 1)
+            return Dict("tmax" => tmax, "n" => n, "r" => r,
+                        "types" => (typeof(tmax), typeof(n), typeof(r)))
+        end
+        """)
+    result = run_script(tree, "scripts.compute"; tmax=40, n=5.0, r=2)
+    @test result["tmax"] === 40.0 && result["n"] === 5
+    @test result["types"] == (Float64, Int, Int)
+    @test_throws PDVScriptError run_script(tree, "scripts.compute"; n=2.5)
+
+    # Doc extraction: docstring, block comment (Description preferred),
+    # line comment, bare code.
+    doc_path = joinpath(wd, "docprobe.jl")
+    write(doc_path, "\"\"\"Fit a line to the data.\"\"\"\nfunction run(pdv_tree) end")
+    @test PDVKernel.extract_script_doc(doc_path) == "Fit a line to the data."
+    write(doc_path, "#=\n  myscript.jl\n  Description: Solve the ODE system.\n=#\nrun() = 1")
+    @test PDVKernel.extract_script_doc(doc_path) == "Solve the ODE system."
+    write(doc_path, "#=\n  first content line\n=#\nrun() = 1")
+    @test PDVKernel.extract_script_doc(doc_path) == "first content line"
+    write(doc_path, "# quick helper\nrun() = 1")
+    @test PDVKernel.extract_script_doc(doc_path) == "quick helper"
+    write(doc_path, "function run(pdv_tree) end")
+    @test PDVKernel.extract_script_doc(doc_path) === nothing
+    @test PDVKernel.extract_script_doc(joinpath(wd, "missing.jl")) === nothing
 end
 
 @testset "script params extraction" begin
@@ -869,18 +899,25 @@ end
     uuid = generate_node_uuid()
     spath = uuid_tree_path(wd, uuid, "fit.jl")
     ensure_parent(spath)
-    write(spath, "function run(pdv_tree; amplitude::Float64 = 1.0) Dict() end")
+    write(spath, "# Fit amplitudes.\nfunction run(pdv_tree; amplitude::Float64 = 1.0) Dict() end")
 
     captured = run_handler(tree, "pdv.script.register", Dict{String,Any}(
         "parent_path" => "scripts", "name" => "fit", "uuid" => uuid,
         "filename" => "fit.jl", "language" => "julia"))
     @test response_of(captured, "pdv.script.register")["payload"]["path"] == "scripts.fit"
     @test tree["scripts.fit"] isa PDVScript
+    # doc preview extracted from the leading comment at register time
+    @test tree["scripts.fit"].doc == "Fit amplitudes."
+    @test PDVKernel.preview(tree["scripts.fit"]) == "Fit amplitudes."
 
     captured = run_handler(tree, "pdv.script.params",
                            Dict{String,Any}("path" => "scripts.fit"))
     params = response_of(captured, "pdv.script.params")["payload"]["params"]
     @test length(params) == 1 && params[1]["name"] == "amplitude"
+    # params re-reads the file — the doc refreshes with it
+    write(spath, "# Fit amplitudes v2.\nfunction run(pdv_tree; amplitude::Float64 = 1.0) Dict() end")
+    run_handler(tree, "pdv.script.params", Dict{String,Any}("path" => "scripts.fit"))
+    @test tree["scripts.fit"].doc == "Fit amplitudes v2."
 
     # missing field → validation error
     captured = run_handler(tree, "pdv.script.register",
@@ -1286,6 +1323,70 @@ end
             stop!(server)
         end
     end
+end
+
+@testset "query cache (busy-time tree snapshot)" begin
+    wd = mktempdir()
+    tree = PDVTree()
+    tree.working_dir = wd
+    tree["data.arr"] = [1.0, 2.0, 3.0]
+    tree["config"] = Dict{String,Any}("mode" => "fast", "sub" => Dict("k" => 1))
+    tree["note_text"] = "hello"
+
+    PDVKernel.clear_query_cache!()
+    @test PDVKernel.cached_tree_listing("") === nothing   # no snapshot yet
+
+    PDVKernel.rebuild_query_cache!(tree)
+    root = PDVKernel.cached_tree_listing("")
+    @test root !== nothing
+    @test sort([n["key"] for n in root]) == ["config", "data", "note_text"]
+    # nested levels are pre-listed, including plain-Dict composites
+    @test any(n -> n["key"] == "arr", PDVKernel.cached_tree_listing("data"))
+    sub = PDVKernel.cached_tree_listing("config.sub")
+    @test sub !== nothing && sub[1]["key"] == "k"
+    # descriptors match the live listing shape
+    node = only(filter(n -> n["key"] == "arr", PDVKernel.cached_tree_listing("data")))
+    @test node["type"] == "ndarray" && node["parent_path"] == "data"
+
+    # mutations refresh through the debounce flush (the timer's callback)
+    tree["data.extra"] = 42
+    PDVKernel._flush_changes(tree)  # flush directly; timer needs a live event loop
+    # NOTE: _flush_changes only rebuilds when tree is the registered root —
+    # simulate that wiring, then verify the rebuild really happened.
+    if PDVKernel._ROOT_TREE[] === nothing
+        PDVKernel._ROOT_TREE[] = tree
+        tree.send_fn = (msg_type, payload) -> nothing  # flush needs a sink
+        try
+            tree["data.extra2"] = 43
+            PDVKernel._flush_changes(tree)
+            @test any(n -> n["key"] == "extra2", PDVKernel.cached_tree_listing("data"))
+        finally
+            PDVKernel._ROOT_TREE[] = nothing
+            tree.send_fn = nothing
+        end
+    end
+
+    # deleted paths drop out on rebuild
+    delete!(tree, "config")
+    PDVKernel.rebuild_query_cache!(tree)
+    @test PDVKernel.cached_tree_listing("config") === nothing
+    @test !any(n -> n["key"] == "config", PDVKernel.cached_tree_listing(""))
+
+    # threaded-mode request handling is pure snapshot: list served, value
+    # queries and cache misses bounce with query.kernel_busy
+    reqjson(t, p) = Vector{UInt8}(codeunits(JSON.json(request(t, p))))
+    resp = PDVKernel._handle_threaded_query(reqjson("pdv.tree.list", Dict{String,Any}("path" => "data")))
+    @test resp["status"] == "ok"
+    @test any(n -> n["key"] == "arr", resp["payload"]["nodes"])
+    resp = PDVKernel._handle_threaded_query(reqjson("pdv.tree.list", Dict{String,Any}("path" => "nope")))
+    @test resp["status"] == "error" && resp["payload"]["code"] == "query.kernel_busy"
+    resp = PDVKernel._handle_threaded_query(reqjson("pdv.tree.get", Dict{String,Any}("path" => "data.arr")))
+    @test resp["status"] == "error" && resp["payload"]["code"] == "query.kernel_busy"
+    resp = PDVKernel._handle_threaded_query(reqjson("pdv.tree.delete", Dict{String,Any}("path" => "x")))
+    @test resp["status"] == "error" && resp["payload"]["code"] == "query.not_allowed"
+    resp = PDVKernel._handle_threaded_query(Vector{UInt8}(codeunits("{not json")))
+    @test resp["status"] == "error"
+    PDVKernel.clear_query_cache!()
 end
 
 @testset "tree_loader: conflict strategies" begin

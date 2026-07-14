@@ -45,8 +45,36 @@ function handle_init(msg::AbstractDict)
         _query_server[] = server
     end
 
+    # Seed the busy-time query snapshot and keep it fresh at execution
+    # boundaries: the postexecute hook catches mutations that bypass PDVTree
+    # setindex! (composite plain-Dict children mutated through a held
+    # reference), the same drift the renderer's 1 Hz poll corrects.
+    if tree !== nothing
+        rebuild_query_cache!(tree)
+        _install_postexecute_cache_hook()
+    end
+
     reset_cwd_to_home()
     send_message("pdv.init.response", Dict{String,Any}(); in_reply_to=msg_id)
+    nothing
+end
+
+# Idempotent registration of the IJulia postexecute rebuild hook.
+const _postexecute_hook_installed = Ref(false)
+function _install_postexecute_cache_hook()
+    _postexecute_hook_installed[] && return nothing
+    try
+        IJulia.push_postexecute_hook!(() -> begin
+            tree = get_pdv_tree()
+            tree !== nothing && rebuild_query_cache!(tree)
+            nothing
+        end)
+        _postexecute_hook_installed[] = true
+    catch err
+        # Kernel-free sessions (tests) have no IJulia event loop — the
+        # debounce-flush rebuild still keeps the snapshot fresh.
+        @debug "postexecute cache hook not installed" exception = err
+    end
     nothing
 end
 

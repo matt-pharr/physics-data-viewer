@@ -148,6 +148,42 @@ describe("@slow Cross-boundary integration (Julia + Electron)", { timeout: 300_0
       const nodes = (response.payload as { nodes?: unknown }).nodes;
       expect(Array.isArray(nodes)).toBe(true);
     });
+
+    it("tree.list stays responsive while the kernel is compute-bound (#7)", async () => {
+      // Seed a node, then let its tree.changed debounce flush (which also
+      // rebuilds the query snapshot) land before going busy.
+      const seedExec = await km.execute(kernelId, {
+        code: 'pdv_tree["busyprobe"] = collect(1.0:8.0)',
+      });
+      expect(seedExec.error).toBeUndefined();
+      await new Promise((r) => setTimeout(r, 500));
+
+      // Kick off a pure-compute loop with no yield points (~6 s) WITHOUT
+      // awaiting it, then query mid-run. The kernel spawns with
+      // --threads=auto,1, so the threaded query server must answer from the
+      // snapshot in milliseconds; before #7 this timed out for the whole run.
+      const busyPromise = km.execute(kernelId, {
+        code:
+          "let acc = 0.0, t0 = time()\n" +
+          "  while time() - t0 < 6\n" +
+          "    for j in 1:200_000_000; acc += sin(j * 1e-9); end\n" +
+          "  end\n" +
+          "  acc\n" +
+          "end",
+      });
+      await new Promise((r) => setTimeout(r, 1_000)); // ensure it's mid-burn
+
+      const t0 = Date.now();
+      const response = await queryRouter.request(PDVMessageType.TREE_LIST, { path: "" });
+      const elapsed = Date.now() - t0;
+      expect(response.status).toBe("ok");
+      const nodes = (response.payload as { nodes?: Array<{ key?: string }> }).nodes ?? [];
+      expect(nodes.some((n) => n.key === "busyprobe")).toBe(true);
+      expect(elapsed).toBeLessThan(2_000);
+
+      const busyResult = await busyPromise;
+      expect(busyResult.error).toBeUndefined();
+    });
   });
 
   describe("tree change notifications", () => {
