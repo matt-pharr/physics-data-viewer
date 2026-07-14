@@ -16,6 +16,7 @@ import {
 } from "./ipc-register-project";
 import {
   ProjectManager,
+  SCHEMA_VERSION,
   type ProjectManifest,
   type ProjectModuleImport,
   type ModuleManifestBundle,
@@ -96,7 +97,7 @@ export async function mirrorAutosaveSidecars(
   }
   if (!manifest) {
     manifest = {
-      schema_version: "1.1",
+      schema_version: SCHEMA_VERSION,
       saved_at: new Date().toISOString(),
       pdv_version: manifestSource.pdvVersion,
       tree_checksum: result.checksum,
