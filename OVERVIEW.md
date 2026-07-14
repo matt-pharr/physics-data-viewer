@@ -37,10 +37,10 @@ See `ARCHITECTURE.md` §7.
 
 - `PDVTree`, `PDVScript`, `PDVNote`, lazy-load and serialization logic
 - comm target registration and dispatch
-- namespace protection (`pdv_tree` and `pdv` are protected bindings)
+- namespace protection (`pdv_tree` is the only injected, protected binding; `pdv` is just the importable package)
 - save/load, tree, script, lifecycle, and namespace handlers
 
-On kernel startup (triggered when the user selects an action from the WelcomeScreen), `bootstrap()` registers the comm target, injects `pdv_tree`/`pdv`, and emits readiness signaling used by the main-process handshake.
+On kernel startup (triggered when the user selects an action from the WelcomeScreen), `bootstrap()` registers the comm target, injects `pdv_tree`, and emits readiness signaling used by the main-process handshake.
 
 See `ARCHITECTURE.md` §5.
 

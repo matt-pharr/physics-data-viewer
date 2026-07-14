@@ -175,6 +175,16 @@ All type strings are namespaced with `pdv.`. The convention is `pdv.<domain>.<ac
 | `pdv.tree.get.response` | kernel → app | Returns `{ path, type, preview, python_type, has_handler }` for every mode; `mode: "value"` adds `value` — the node's `repr`, truncated to 10 000 characters with `value_truncated: true` when the cap bites (so a giant builtin can't produce a multi-MB comm message). |
 | `pdv.tree.resolve_file` | app → kernel | Resolve a file-backed tree node (PDVFile subclass) to its absolute filesystem path. Payload: `{ path }`. |
 | `pdv.tree.resolve_file.response` | kernel → app | Returns `{ path, file_path }` where `file_path` is the absolute path on disk. |
+| `pdv.tree.create_node` | app → kernel | Create an empty container node. Payload: `{ parent_path, name }`. A dotted `name` is rejected with `tree.invalid_name` (keys are dot-path segments). |
+| `pdv.tree.create_node.response` | kernel → app | Returns `{ path, created }`. |
+| `pdv.tree.delete` | app → kernel | Remove a node by path. Payload: `{ path }`. |
+| `pdv.tree.delete.response` | kernel → app | Returns `{ path, deleted }`. |
+| `pdv.tree.rename` | app → kernel | Re-key a node under the same parent. Payload: `{ path, new_name }`. Emits a removed-at-old + added-at-new pair (batched into one `pdv.tree.changed`). |
+| `pdv.tree.rename.response` | kernel → app | Returns `{ old_path, new_path, renamed }`. |
+| `pdv.tree.move` | app → kernel | Re-parent a node. Payload: `{ path, new_path }`. Rejects moving a node into its own subtree (`tree.circular_move`). |
+| `pdv.tree.move.response` | kernel → app | Returns `{ old_path, new_path, moved }`. |
+| `pdv.tree.duplicate` | app → kernel | Deep-copy a node to a new path. Payload: `{ path, new_path }`. File-backed descendants are copied with fresh UUIDs. |
+| `pdv.tree.duplicate.response` | kernel → app | Returns `{ new_path, duplicated }`. |
 | `pdv.tree.changed` | kernel → app | Push notification. Sent when tree structure changes. Payload: `{ changed_paths: string[], change_type: "added" \| "removed" \| "updated" \| "batch" \| "unknown" }`. Notifications are **debounced** (100ms): rapid mutations are batched into a single notification with `change_type: "batch"` and all affected paths. Mutations on a **non-root `PDVTree`** (intermediate sub-tree, or a scratch instance the user constructed and is mutating before assigning into the root) emit `change_type: "unknown"` with empty `changed_paths`, signalling that the renderer should do a full refresh. No `in_reply_to`. See §7.4 for the full propagation contract. |
 
 #### Namespace Messages
@@ -185,6 +195,17 @@ All type strings are namespaced with `pdv.`. The convention is `pdv.<domain>.<ac
 | `pdv.namespace.query.response` | kernel → app | Returns array of variable descriptors. |
 | `pdv.namespace.inspect` | app → kernel | Lazily inspect one namespace value. Payload: `{ root_name, path }` where `path` is an array of selector segments. |
 | `pdv.namespace.inspect.response` | kernel → app | Returns one level of child descriptors for the requested namespace value, plus truncation metadata. |
+
+#### Introspection Messages
+
+These are read-only and served both on the main comm channel and the QueryServer socket (see §5.10).
+
+| Message Type | Direction | Description |
+|---|---|---|
+| `pdv.help` | app → kernel | Introspect a `pdv` symbol. Payload: `{ symbol, include_source? }`. |
+| `pdv.help.response` | kernel → app | Returns `{ symbol, kind, signature, doc, source }` (`signature`/`doc`/`source` are `null` when not introspectable). |
+| `pdv.tree.resolve_path` | app → kernel | Resolve a tree path to a namespace-style expression for the namespace inspector. Payload: `{ path }`. |
+| `pdv.tree.resolve_path.response` | kernel → app | Returns the resolved path metadata. |
 
 #### Script Messages
 
@@ -482,7 +503,7 @@ pdv/
     comms.py             # Comm channel: register target, send/receive, dispatch, thread-local response sink
     tree.py              # PDVTree (debounced _emit_changed), PDVScript, PDVFile, PDVNote, PDVModule, PDVGui, PDVNamelist, PDVLib
     query_server.py      # QueryServer: ZMQ REP daemon thread for read-only queries during execution
-    namespace.py         # PDVNamespace (protected dict), PDVApp, pdv_namespace()
+    namespace.py         # PDVNamespace (protected dict), pdv_namespace(), inspect_namespace()
     serialization.py     # Type detection, format writers (npy, pickle, json, module, gui, namelist, lib)
     environment.py       # Path utilities, working dir management, project root logic
     errors.py            # PDVError, PDVPathError, PDVKeyError, PDVProtectedNameError, PDVSerializationError, PDVScriptError, PDVVersionError
@@ -494,13 +515,14 @@ pdv/
     handlers/
         __init__.py
         _helpers.py      # Shared register-validation, namelist resolution, and gui-attach helpers
-        lifecycle.py     # pdv.init, pdv.ready handlers
-        project.py       # pdv.project.load, pdv.project.save handlers
-        tree.py          # pdv.tree.list, pdv.tree.get, pdv.tree.resolve_file handlers
-        namespace.py     # pdv.namespace.query handler
-        script.py        # pdv.script.register handler
+        lifecycle.py     # pdv.init handler (pdv.ready is emitted, not handled)
+        project.py       # pdv.project.load, pdv.project.save, pdv.project.clear_autosave_cache handlers
+        tree.py          # pdv.tree.list/get/resolve_file/delete/create_node/rename/move/duplicate handlers
+        introspection.py # pdv.help, pdv.tree.resolve_path handlers
+        namespace.py     # pdv.namespace.query, pdv.namespace.inspect handlers
+        script.py        # pdv.script.register, pdv.script.params handlers
         note.py          # pdv.note.register handler
-        modules.py       # pdv.module.register, pdv.modules.setup, pdv.handler.invoke handlers
+        modules.py       # pdv.module.register/create_empty/update/reload_libs, pdv.modules.setup, pdv.handler.invoke handlers
         gui.py           # pdv.gui.register handler
         namelist.py      # pdv.namelist.read, pdv.namelist.write, pdv.file.register handlers
 ```
@@ -1695,6 +1717,12 @@ The API surface:
 - `window.pdv.launchers.*` — action-bar external-app launchers: `openAgent` (launch the configured AI agent in a terminal), `openWorkingDir` (open the active kernel's working directory in the configured editor/IDE), `checkAvailability` (probe whether a terminal/editor/file-manager is installed, without launching it — used to gate Settings Save)
 - `window.pdv.progress.*` — operation progress: push only: `onProgress(cb) → unsub`
 - `window.pdv.menu.*` — menu bridge: `updateRecentProjects(paths)`, `onAction(cb) → unsub`
+- `window.pdv.autosave.*` — autosave lifecycle: `run`, `clear`, `check`, `scanWorkingDirs`, `recoverUnsaved`, `deleteOrphan`; push: `onTrigger(cb) → unsub`, `onInFlightChange(cb) → unsub`
+- `window.pdv.updater.*` — app auto-update: `checkForUpdates`, `downloadUpdate`, `installUpdate`, `openReleasesPage`, `getStatus`; push: `onUpdateStatus(cb) → unsub`
+- `window.pdv.app.*` — window-close lifecycle: `confirmClose`, `setDocumentEdited`; push: `onRequestClose(cb) → unsub`
+- `window.pdv.window.*` — `setBackgroundColor` (sync the native window background to the active theme)
+- `window.pdv.mcp.*` — MCP server status: `getStatus`; push: `onClientStatus(cb) → unsub`
+- `window.pdv.cells.*` — MCP code-cell RPC bridge for agent cell execution: `respond`; push: `onRequest(cb) → unsub`, `onWrite(cb) → unsub`
 
 **Design decision — Settings**: The Settings dialog is opened by renderer-internal state (toolbar button, status bar click, or File → Settings menu action via `menu.onAction`). There is no dedicated `window.pdv.settings.*` IPC namespace; the menu action is forwarded as a `settings:open` payload through the existing `menu.onAction` push channel.
 
@@ -1861,8 +1889,33 @@ electron/
         ipc-register-gui-editor.ts        ← IPC handlers: GUI editor/viewer window open/context/read/save
         ipc-register-tree-namespace-script.ts ← IPC handlers: tree, namespace, script
         ipc-register-app-state.ts         ← IPC handlers: config, themes, code cells, files, about
+        ipc-register-launchers.ts         ← IPC handlers: external editor/terminal launch + availability
+        ipc-registry.ts                   ← handleIpc wrapper (logs + normalizes handler errors)
+        agent-launcher.ts       ← Spawn external AI agent CLIs against the MCP server
+        auto-updater.ts         ← electron-updater integration and update-check throttle
+        wake-handler.ts         ← Wake-from-sleep kernel-liveness recovery
+        atomic-write.ts         ← Atomic tmp+rename JSON/file writes
+        autosave-sidecars.ts    ← Autosave sidecar (.autosave/) manifest read/write
+        launcher-availability.ts ← Detect whether a configured editor/terminal exists
+        process-stats.ts        ← Kernel process RSS/CPU sampling
+        module-manifest-writer.ts ← Write v4 pdv-module.json + module-index.json
+        tree-create.ts          ← Shared allocate-uuid → write → register helpers for file nodes
+        uv-environment.ts       ← Per-project uv venv materialization/sync
+        uv-runner.ts            ← uv subprocess wrapper
+        pyproject.ts            ← Generate/parse project pyproject.toml
+        python-versions.ts      ← Supported Python versions + default
         modules/
-            manifest-utils.ts   ← Module manifest validation (v1/v2/v3), GUI manifest validation
+            manifest-utils.ts   ← Module manifest validation (v4), GUI manifest validation
+        mcp/
+            mcp-server.ts       ← Local MCP server exposing tree/cells/scripts/kernel to agents
+            mcp-auth.ts         ← MCP client authentication
+            mcp-config-writer.ts ← Write per-agent MCP client config
+            mcp-context.ts      ← Active-project context provided to MCP tools
+            mcp-instructions.ts ← System instructions surfaced to agents
+            cell-rpc.ts         ← Code-cell RPC bridge for agent cell execution
+            generation-guard.ts ← Guards against stale agent generations
+            transcript.ts       ← Agent-execution transcript writer (origin tagging)
+            tools/              ← Individual MCP tool implementations
     renderer/
         src/
             main.tsx                    ← Main window renderer entry point

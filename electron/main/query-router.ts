@@ -22,7 +22,8 @@ import type { KernelManager } from "./kernel-manager";
 /**
  * Lightweight router for read-only kernel queries on a dedicated ZMQ channel.
  *
- * @throws PDVQueryError when the kernel returns status='error'.
+ * @throws {Error} when the kernel returns status='error' (or on timeout / when
+ *   not attached to a kernel).
  */
 export class QueryRouter {
   private kernelManager: KernelManager | null = null;

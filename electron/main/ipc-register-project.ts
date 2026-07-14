@@ -203,6 +203,22 @@ async function readManifestOnlyFields(
   return {};
 }
 
+/**
+ * Write each module's v4 `pdv-module.json` + `module-index.json` under
+ * `<saveDir>/modules/<id>/` at save time.
+ *
+ * `entry_point` and `default_gui` are recovered from the installed module's
+ * manifest (via {@link readManifestOnlyFields}) because they are set during
+ * import/install and are not tracked in the kernel tree, so the kernel-side
+ * descriptor bundles can't carry them.
+ *
+ * @param saveDir - Absolute path to the project save directory.
+ * @param bundles - Per-module manifest bundles from the kernel save response;
+ *   a no-op when undefined or empty (project has no `PDVModule` nodes).
+ * @param moduleManager - Used to resolve the installed module directory when
+ *   recovering manifest-only fields.
+ * @returns Nothing.
+ */
 export async function writeModuleManifestsToSaveDir(
   saveDir: string,
   bundles: ModuleManifestBundle[] | undefined,

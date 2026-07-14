@@ -430,7 +430,9 @@ export function registerKernelIpcHandlers(
         const installStatus = await EnvironmentDetector.checkJuliaPDVInstalled(juliaPath);
         if (!installStatus.installed) {
           throw new Error(
-            `Selected Julia runtime is missing PDVKernel. Install it with: cd pdv-julia && julia --project=. -e 'using Pkg; Pkg.instantiate()'`
+            "Selected Julia runtime is missing the PDVKernel package. It must be " +
+              "installed into that Julia environment before PDV can use it. " +
+              "(Julia support is experimental and not yet packaged for install.)"
           );
         }
         envMeta = { mode: "shared", interpreterPath: juliaPath };
@@ -755,7 +757,9 @@ export function registerKernelIpcHandlers(
           return {
             valid: false,
             error:
-              'Missing PDVKernel.jl. Install it with: cd pdv-julia && julia --project=. -e \'using Pkg; Pkg.instantiate()\'',
+              "Missing the PDVKernel Julia package — it must be installed into " +
+              "this Julia environment. (Julia support is experimental and not " +
+              "yet packaged for install.)",
           };
         }
       }

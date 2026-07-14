@@ -116,6 +116,18 @@ export async function overlayAutosaveTreeFiles(
   }
 }
 
+/**
+ * Copy every file-backed tree node's payload from a project save directory into
+ * the kernel working directory at load time, preserving the `tree/<uuid>/`
+ * layout so the kernel resolves nodes to their new working-dir paths.
+ *
+ * @param saveDir - Absolute path to the project save directory being loaded.
+ * @param workingDir - Absolute path to the destination kernel working directory.
+ * @param onProgress - Optional callback invoked with `(current, total)` as each
+ *   file is copied, for a load-progress indicator.
+ * @returns Tree paths of nodes whose backing file was missing in `saveDir` and
+ *   therefore could not be copied (empty when all files were present).
+ */
 export async function copyFilesForLoad(
   saveDir: string,
   workingDir: string,

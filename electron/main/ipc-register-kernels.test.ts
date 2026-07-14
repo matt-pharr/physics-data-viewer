@@ -224,7 +224,7 @@ describe("kernels:start", () => {
         language: "julia",
         env: { JULIA_PATH: "/usr/bin/julia" },
       }),
-    ).rejects.toThrow(/missing PDVKernel/);
+    ).rejects.toThrow(/missing the PDVKernel package/);
   });
 
   it("crash handler preserves the working dir and pushes kernelCrashed to renderer", async () => {

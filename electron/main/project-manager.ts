@@ -178,7 +178,7 @@ export interface ModuleManifestBundle {
  * compatibility boundary (see {@link _assertCompatibleSchema}); minor bumps
  * are additive. ``1.2`` adds the optional ``environment`` block (§10.5).
  */
-const SCHEMA_VERSION = "1.2";
+export const SCHEMA_VERSION = "1.2";
 
 /** Default manifest returned when project.json is missing (ARCHITECTURE.md §8). */
 function defaultManifest(): ProjectManifest {
@@ -1078,10 +1078,9 @@ function _parseModuleSettings(
 /**
  * Read and parse ``code-cells.json`` from a project directory.
  *
- * Returns an empty array if the file does not exist.
- *
  * @param saveDir - Absolute path to the project directory.
- * @returns Parsed code-cell array, or ``[]`` when the file is absent.
+ * @returns The parsed code-cells object, or ``{ tabs: [], activeTabId: 1 }``
+ *   when the file is absent.
  */
 async function _readCodeCells(saveDir: string): Promise<unknown> {
   const filePath = path.join(saveDir, "code-cells.json");
