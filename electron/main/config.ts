@@ -428,8 +428,9 @@ function parseLaunchers(
  * Typed persistent configuration store for Electron main-process settings.
  *
  * Values are stored in `${appDataDir}/preferences.json` and loaded on startup.
- * If a legacy `config.json` is found in the same directory and `preferences.json`
- * does not yet exist, its contents are migrated automatically.
+ * Legacy `pythonEditorCmd`/`juliaEditorCmd` keys found in that file are migrated
+ * in place to the current `launchers.editor` shape on first load (see
+ * `migrateLegacyEditorCmd`).
  */
 export class ConfigStore {
   private readonly configPath: string;

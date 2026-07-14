@@ -479,7 +479,8 @@ export class EnvironmentDetector {
    * Read the version of the bundled ``pdv-python`` package from its
    * ``pyproject.toml`` in the app Resources directory.
    *
-   * @param resourcesPath - ``process.resourcesPath`` at runtime.
+   * @param pdvPythonPath - Path to the bundled ``pdv-python`` directory;
+   *   defaults to the resolved app Resources location when omitted.
    * @returns Bundled version string, or null if not found.
    */
   static getBundledPDVVersion(pdvPythonPath?: string | null): string | null {

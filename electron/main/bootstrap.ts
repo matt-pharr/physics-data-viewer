@@ -15,7 +15,7 @@
  * - `kernelManager`   — lazy-created on first window open so kernel infra
  *                        is not allocated during unit tests or quick exits.
  * - `configStore`     — lazy-created on first window open; reads/writes
- *                        `~/.PDV/config.json`.
+ *                        `~/.PDV/preferences.json`.
  *
  * The `openingWindow` promise acts as a mutex: concurrent calls to
  * `openMainWindow()` (e.g. rapid `second-instance` events) coalesce into
