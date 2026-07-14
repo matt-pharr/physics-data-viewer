@@ -291,9 +291,9 @@ async function ensureScriptFile(scriptPath: string, language: "python" | "julia"
  * their own helpers.
  *
  * @param libPath - Absolute path to the target ``.py`` / ``.jl`` file.
- * @param language - Active kernel language (only Python is actually
- *   supported by the ``tree:createLib`` handler today; Julia falls back
- *   to a block-comment equivalent for future-proofing).
+ * @param language - Active kernel language. Python stubs are plain modules;
+ *   Julia stubs wrap a ``module <stem> ... end`` so the include-based lib
+ *   loader can bind and re-export them.
  * @param moduleAlias - Top-level tree alias of the owning PDVModule (if
  *   any), so the stub can reference it in the header.
  */
@@ -323,12 +323,18 @@ async function ensureLibFile(
       `  ${filename}\n` +
       `  ${context}\n` +
       `  created by ${user} on ${host} on ${date} at ${time}\n` +
-      "=#\n\n" +
-      "# Define helper functions below — they will be importable from\n" +
-      `# sibling scripts as \`using ${path.parse(filename).name}\`.\n\n` +
+      "=#\n" +
+      // The lib loader (`load_lib_file!`) includes this file into Main and
+      // binds `Main.<stem>` — the module wrapper is what makes the lib's
+      // exports visible to sibling scripts, so it must not be removed.
+      `module ${path.parse(filename).name}\n\n` +
+      "# Define helper functions below — exported names become available\n" +
+      "# in sibling scripts automatically.\n\n" +
+      "# export example\n" +
       "# function example(x)\n" +
       "#     return x\n" +
-      "# end\n"
+      "# end\n\n" +
+      `end # module ${path.parse(filename).name}\n`
     : '"""\n' +
       `${filename}\n` +
       `${context}\n` +

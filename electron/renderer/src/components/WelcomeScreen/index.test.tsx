@@ -47,6 +47,7 @@ describe('WelcomeScreen — recoverable-session language', () => {
 
   it('defaults the badge to Python for pre-sidecar autosaves', () => {
     renderWelcome({
+      recentProjects: [],
       recoverableSessions: [
         { dir: '/tmp/work/old-session', timestamp: new Date().toISOString() },
       ],

@@ -18,6 +18,40 @@ from __future__ import annotations
 from pdv.handlers import register
 
 
+def _extract_script_doc(file_path: str) -> str | None:
+    """First line of the script's module docstring, for the tree preview.
+
+    Parses the source with :mod:`ast` (never executes it). Returns ``None``
+    when the file is missing, unparsable, or has no module docstring — the
+    tree chip already says ``script``, so no fallback text is needed.
+
+    Parameters
+    ----------
+    file_path : str
+        Absolute path to the script source file.
+
+    Returns
+    -------
+    str or None
+        The first non-empty docstring line, capped at 200 characters.
+    """
+    import ast  # noqa: PLC0415
+
+    try:
+        with open(file_path, encoding="utf-8") as fh:
+            tree = ast.parse(fh.read())
+    except Exception:  # noqa: BLE001 — missing/unparsable file: no preview
+        return None
+    doc = ast.get_docstring(tree)
+    if not doc:
+        return None
+    for line in doc.splitlines():
+        line = line.strip()
+        if line:
+            return line[:200]
+    return None
+
+
 def handle_script_register(msg: dict) -> None:
     """Handle the ``pdv.script.register`` message.
 
@@ -60,12 +94,26 @@ def handle_script_register(msg: dict) -> None:
     source_rel_path = payload.get("source_rel_path")
     module_id = payload.get("module_id", "")
 
+    # Tree-panel preview: first line of the module docstring (the file
+    # already exists — the app writes the template before registering).
+    from pdv.environment import uuid_tree_path  # noqa: PLC0415
+
+    doc = None
+    try:
+        if tree._working_dir:
+            doc = _extract_script_doc(
+                uuid_tree_path(tree._working_dir, node_uuid, filename)
+            )
+    except Exception:  # noqa: BLE001
+        doc = None
+
     script = PDVScript(
         uuid=node_uuid,
         filename=filename,
         language=language,
         module_id=module_id,
         source_rel_path=source_rel_path,
+        doc=doc,
     )
     full_path = f"{parent_path}.{name}" if parent_path else name
     tree[full_path] = script
@@ -137,6 +185,12 @@ def handle_script_params(msg: dict) -> None:
     working_dir = getattr(tree, "_working_dir", None)
     resolved_path = node.resolve_path(working_dir)
     params = _extract_script_params(resolved_path)
+    # Opportunistic freshness: the params dialog re-reads the file anyway, so
+    # refresh the doc preview from the current source at the same time.
+    try:
+        node._doc = _extract_script_doc(resolved_path)
+    except Exception:  # noqa: BLE001
+        pass
 
     send_message("pdv.script.params.response", {"params": params}, in_reply_to=msg_id)
 

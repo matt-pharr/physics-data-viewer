@@ -23,6 +23,12 @@ function handle_script_register(msg::AbstractDict)
     script = PDVScript(uuid=node_uuid, filename=filename, language=language,
                        module_id=module_id,
                        source_rel_path=src_rel_raw === nothing ? nothing : string(src_rel_raw))
+    # Tree-panel preview: first line of the script's leading docstring/comment
+    # (the file already exists — the app writes the template before registering).
+    try
+        script.doc = extract_script_doc(resolve_path(script, tree.working_dir))
+    catch
+    end
     full_path = isempty(parent_path) ? name : "$parent_path.$name"
     tree[full_path] = script
 
@@ -61,6 +67,12 @@ function handle_script_params(msg::AbstractDict)
 
     resolved = resolve_path(node, tree.working_dir)
     params = extract_script_params(resolved)
+    # Opportunistic freshness: the params dialog re-reads the file anyway, so
+    # refresh the doc preview from the current source at the same time.
+    try
+        node.doc = extract_script_doc(resolved)
+    catch
+    end
     send_message("pdv.script.params.response", Dict{String,Any}("params" => params);
                  in_reply_to=msg_id)
     nothing

@@ -1675,6 +1675,7 @@ const App: React.FC = () => {
       {activeDialog?.kind === 'createScript' && currentKernelId && (
         <CreateTreeItemDialog
           kind="script"
+          language={activeLanguage}
           parentPath={activeDialog.parentPath}
           onCancel={closeDialog}
           onCreate={async (name) => {
@@ -1753,6 +1754,7 @@ const App: React.FC = () => {
       {activeDialog?.kind === 'createLib' && currentKernelId && (
         <CreateTreeItemDialog
           kind="lib"
+          language={activeLanguage}
           parentPath={activeDialog.parentPath}
           onCancel={closeDialog}
           onCreate={async (name) => {

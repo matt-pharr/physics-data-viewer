@@ -159,9 +159,130 @@ function extract_script_params(file_path::AbstractString)::Vector{Dict{String,An
     return params
 end
 
+"""
+    extract_script_doc(file_path) -> Union{Nothing,String}
+
+First line of the script's leading docstring or comment block, for the tree
+panel preview. Handles a leading `\"\"\"docstring\"\"\"`, a `#= block =#`
+(preferring a `Description: ...` line, as in the new-script template), and a
+plain leading `#` comment. Returns `nothing` when the file starts straight
+with code (the tree chip already says "script").
+"""
+function extract_script_doc(file_path::AbstractString)::Union{Nothing,String}
+    source = try
+        read(file_path, String)
+    catch
+        return nothing
+    end
+    lines = split(source, '\n')
+    i = findfirst(l -> !isempty(strip(l)), lines)
+    i === nothing && return nothing
+    first_line = strip(lines[i])
+
+    clip(s) = (t = strip(s); isempty(t) ? nothing : String(first(t, 200)))
+
+    if startswith(first_line, "\"\"\"")
+        rest = strip(first_line[4:end])
+        if endswith(rest, "\"\"\"")                       # one-line docstring
+            return clip(rest[1:max(0, end - 3)])
+        end
+        !isempty(rest) && return clip(rest)
+        for j in (i + 1):length(lines)                     # opening quotes alone
+            t = strip(lines[j])
+            startswith(t, "\"\"\"") && return nothing
+            isempty(t) || return clip(first(split(t, "\"\"\"")))
+        end
+        return nothing
+    end
+
+    if startswith(first_line, "#=")                        # Julia block comment
+        m = match(r"#=(.*?)(=#|$)"s, source)
+        m === nothing && return nothing
+        block_lines = [strip(l) for l in split(m.captures[1], '\n')]
+        for t in block_lines                               # template convention
+            startswith(t, "Description:") &&
+                return clip(t[length("Description:")+1:end])
+        end
+        for t in block_lines
+            isempty(t) || return clip(t)
+        end
+        return nothing
+    end
+
+    if startswith(first_line, "#") && !startswith(first_line, "#!")
+        return clip(lstrip(first_line, ['#', ' ']))
+    end
+    return nothing
+end
+
 # ---------------------------------------------------------------------------
 # Script execution
 # ---------------------------------------------------------------------------
+
+# Raw kwarg annotations of run() as written in the source ("Float64", "Real",
+# ...), keyed by parameter name. Unlike extract_script_params (which
+# normalizes to wire labels), coercion needs the concrete type names.
+function _run_kwarg_annotations(file_path::AbstractString)::Dict{Symbol,String}
+    annotations = Dict{Symbol,String}()
+    source = try
+        read(file_path, String)
+    catch
+        return annotations
+    end
+    parsed = try
+        Meta.parseall(source; filename=String(file_path))
+    catch
+        return annotations
+    end
+    sig = _find_run_signature(parsed)
+    sig === nothing && return annotations
+    for arg in sig.args[2:end]
+        (arg isa Expr && arg.head == :parameters) || continue
+        for kw in arg.args
+            name_expr = kw isa Expr && kw.head == :kw ? kw.args[1] : kw
+            (name_expr isa Expr && name_expr.head == :(::)) || continue
+            pname, ann = name_expr.args[1], name_expr.args[2]
+            pname isa Symbol || continue
+            annotations[pname] = string(ann)
+        end
+    end
+    return annotations
+end
+
+const _COERCE_FLOAT_TYPES = Dict{String,DataType}(
+    "Float64" => Float64, "Float32" => Float32, "Float16" => Float16,
+    "AbstractFloat" => Float64)
+const _COERCE_INT_TYPES = Dict{String,DataType}(
+    "Int" => Int, "Int64" => Int64, "Int32" => Int32, "Int16" => Int16,
+    "Int8" => Int8, "Integer" => Int,
+    "UInt" => UInt, "UInt64" => UInt64, "UInt32" => UInt32)
+
+"""
+    _coerce_numeric_kwargs(file_path, kwargs) -> Dict{Symbol,Any}
+
+Coerce numeric keyword values to the `run()` signature's declared numeric
+types. Params from the GUI and MCP cross a JSON boundary, so whole numbers
+arrive as `Int64` and would MethodError against a strict `::Float64`
+annotation (`tmax=40` vs `tmax::Float64`); coercing at the call boundary
+spares every script from declaring `::Real` + `float()`. Only lossless
+conversions happen: Integer → declared float type, and integral floats →
+declared integer type. Anything else passes through untouched.
+"""
+function _coerce_numeric_kwargs(file_path::AbstractString, kwargs)::Dict{Symbol,Any}
+    coerced = Dict{Symbol,Any}(pairs(kwargs))
+    isempty(coerced) && return coerced
+    declared = _run_kwarg_annotations(file_path)
+    isempty(declared) && return coerced
+    for (k, v) in coerced
+        ann = get(declared, k, "")
+        if v isa Integer && !(v isa Bool) && haskey(_COERCE_FLOAT_TYPES, ann)
+            coerced[k] = _COERCE_FLOAT_TYPES[ann](v)
+        elseif v isa AbstractFloat && isinteger(v) && haskey(_COERCE_INT_TYPES, ann)
+            coerced[k] = _COERCE_INT_TYPES[ann](v)
+        end
+    end
+    return coerced
+end
 
 """
     check_module_dependencies(script, tree)
@@ -242,7 +363,8 @@ function script_run(script::PDVScript, tree::Union{Nothing,AbstractPDVTree}=noth
         "Script '$(script.filename)' does not define a run() function"))
 
     try
-        return Base.invokelatest(mod.run, tree; kwargs...)
+        coerced = _coerce_numeric_kwargs(file_path, kwargs)
+        return Base.invokelatest(mod.run, tree; coerced...)
     catch err
         throw(PDVScriptError(
             "Script '$(script.filename)' raised during run(): $(sprint(showerror, err))"))
