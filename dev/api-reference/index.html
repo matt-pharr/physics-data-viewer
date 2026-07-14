@@ -802,10 +802,10 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#two-primary-objects" class="md-nav__link">
+  <a href="#two-primary-names" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Two primary objects
+        Two primary names
       
     </span>
   </a>
@@ -1134,6 +1134,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../developer/save-pipeline/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Save Pipeline
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../developer/developer-quickstart/" class="md-nav__link">
         
   
@@ -1300,10 +1328,10 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#two-primary-objects" class="md-nav__link">
+  <a href="#two-primary-names" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Two primary objects
+        Two primary names
       
     </span>
   </a>
@@ -1389,8 +1417,8 @@
 <p>This reference documents the Python surface exposed by the <code>pdv</code>
 package — everything a user touches from a code cell, a script, or a
 module library.</p>
-<h2 id="two-primary-objects">Two primary objects<a class="headerlink" href="#two-primary-objects" title="Permanent link">&para;</a></h2>
-<p>Every PDV kernel has two names injected into the user namespace at startup:</p>
+<h2 id="two-primary-names">Two primary names<a class="headerlink" href="#two-primary-names" title="Permanent link">&para;</a></h2>
+<p>User code works with two names:</p>
 <table>
 <thead>
 <tr>
@@ -1402,16 +1430,21 @@ module library.</p>
 <tbody>
 <tr>
 <td><code>pdv_tree</code></td>
-<td>The live project data tree (a <code>dict</code> subclass).</td>
+<td>The live project data tree (a <code>dict</code> subclass). <strong>Injected</strong> and protected at kernel startup.</td>
 <td><a href="tree/">The Tree</a></td>
 </tr>
 <tr>
 <td><code>pdv</code></td>
-<td>An app object for session-level operations.</td>
+<td>The <code>pdv</code> <strong>package</strong> itself, exposing session-level functions.</td>
 <td><a href="app/">The App Object</a></td>
 </tr>
 </tbody>
 </table>
+<p><code>pdv_tree</code> is the only injected binding — the kernel installs it into the
+namespace and protects it from reassignment. <code>pdv</code> is not a special object:
+it is the importable <code>pdv</code> package (already importable because <code>pdv-python</code>
+is installed), and its session-level operations (<code>pdv.save()</code>, <code>pdv.help()</code>,
+<code>pdv.add_file()</code>, …) are module-level functions on that package.</p>
 <p>Most user code reads and writes <code>pdv_tree</code> to store results, attach files,
 register scripts, and build up a project hierarchy. The nodes you assign
 into the tree are instances of the <a href="nodes/">tree node types</a>.</p>
@@ -1472,7 +1505,7 @@ and surfaces as a <a href="errors/"><code>PDVVersionError</code></a>.</p>
     <span class="md-icon" title="Last update">
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M21 13.1c-.1 0-.3.1-.4.2l-1 1 2.1 2.1 1-1c.2-.2.2-.6 0-.8l-1.3-1.3c-.1-.1-.2-.2-.4-.2m-1.9 1.8-6.1 6V23h2.1l6.1-6.1zM12.5 7v5.2l4 2.4-1 1L11 13V7zM11 21.9c-5.1-.5-9-4.8-9-9.9C2 6.5 6.5 2 12 2c5.3 0 9.6 4.1 10 9.3-.3-.1-.6-.2-1-.2s-.7.1-1 .2C19.6 7.2 16.2 4 12 4c-4.4 0-8 3.6-8 8 0 4.1 3.1 7.5 7.1 7.9l-.1.2z"/></svg>
     </span>
-    <span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-date" title="April 20, 2026 23:59:33 UTC">April 20, 2026</span>
+    <span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-date" title="July 14, 2026 01:42:54 UTC">July 14, 2026</span>
   </span>
 
     

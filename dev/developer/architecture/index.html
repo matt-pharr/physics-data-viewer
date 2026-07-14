@@ -16,7 +16,7 @@
         <link rel="prev" href="../../modules/">
       
       
-        <link rel="next" href="../developer-quickstart/">
+        <link rel="next" href="../save-pipeline/">
       
       
         
@@ -1235,6 +1235,17 @@
     <span class="md-ellipsis">
       
         Namespace Messages
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#introspection-messages" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Introspection Messages
       
     </span>
   </a>
@@ -2589,6 +2600,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../save-pipeline/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Save Pipeline
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../developer-quickstart/" class="md-nav__link">
         
   
@@ -2932,6 +2971,17 @@
     <span class="md-ellipsis">
       
         Namespace Messages
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#introspection-messages" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Introspection Messages
       
     </span>
   </a>
@@ -4570,6 +4620,56 @@
 <td>Returns <code>{ path, file_path }</code> where <code>file_path</code> is the absolute path on disk.</td>
 </tr>
 <tr>
+<td><code>pdv.tree.create_node</code></td>
+<td>app → kernel</td>
+<td>Create an empty container node. Payload: <code>{ parent_path, name }</code>. A dotted <code>name</code> is rejected with <code>tree.invalid_name</code> (keys are dot-path segments).</td>
+</tr>
+<tr>
+<td><code>pdv.tree.create_node.response</code></td>
+<td>kernel → app</td>
+<td>Returns <code>{ path, created }</code>.</td>
+</tr>
+<tr>
+<td><code>pdv.tree.delete</code></td>
+<td>app → kernel</td>
+<td>Remove a node by path. Payload: <code>{ path }</code>.</td>
+</tr>
+<tr>
+<td><code>pdv.tree.delete.response</code></td>
+<td>kernel → app</td>
+<td>Returns <code>{ path, deleted }</code>.</td>
+</tr>
+<tr>
+<td><code>pdv.tree.rename</code></td>
+<td>app → kernel</td>
+<td>Re-key a node under the same parent. Payload: <code>{ path, new_name }</code>. Emits a removed-at-old + added-at-new pair (batched into one <code>pdv.tree.changed</code>).</td>
+</tr>
+<tr>
+<td><code>pdv.tree.rename.response</code></td>
+<td>kernel → app</td>
+<td>Returns <code>{ old_path, new_path, renamed }</code>.</td>
+</tr>
+<tr>
+<td><code>pdv.tree.move</code></td>
+<td>app → kernel</td>
+<td>Re-parent a node. Payload: <code>{ path, new_path }</code>. Rejects moving a node into its own subtree (<code>tree.circular_move</code>).</td>
+</tr>
+<tr>
+<td><code>pdv.tree.move.response</code></td>
+<td>kernel → app</td>
+<td>Returns <code>{ old_path, new_path, moved }</code>.</td>
+</tr>
+<tr>
+<td><code>pdv.tree.duplicate</code></td>
+<td>app → kernel</td>
+<td>Deep-copy a node to a new path. Payload: <code>{ path, new_path }</code>. File-backed descendants are copied with fresh UUIDs.</td>
+</tr>
+<tr>
+<td><code>pdv.tree.duplicate.response</code></td>
+<td>kernel → app</td>
+<td>Returns <code>{ new_path, duplicated }</code>.</td>
+</tr>
+<tr>
 <td><code>pdv.tree.changed</code></td>
 <td>kernel → app</td>
 <td>Push notification. Sent when tree structure changes. Payload: <code>{ changed_paths: string[], change_type: "added" \| "removed" \| "updated" \| "batch" \| "unknown" }</code>. Notifications are <strong>debounced</strong> (100ms): rapid mutations are batched into a single notification with <code>change_type: "batch"</code> and all affected paths. Mutations on a <strong>non-root <code>PDVTree</code></strong> (intermediate sub-tree, or a scratch instance the user constructed and is mutating before assigning into the root) emit <code>change_type: "unknown"</code> with empty <code>changed_paths</code>, signalling that the renderer should do a full refresh. No <code>in_reply_to</code>. See §7.4 for the full propagation contract.</td>
@@ -4605,6 +4705,39 @@
 <td><code>pdv.namespace.inspect.response</code></td>
 <td>kernel → app</td>
 <td>Returns one level of child descriptors for the requested namespace value, plus truncation metadata.</td>
+</tr>
+</tbody>
+</table>
+<h4 id="introspection-messages">Introspection Messages<a class="headerlink" href="#introspection-messages" title="Permanent link">&para;</a></h4>
+<p>These are read-only and served both on the main comm channel and the QueryServer socket (see §5.10).</p>
+<table>
+<thead>
+<tr>
+<th>Message Type</th>
+<th>Direction</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>pdv.help</code></td>
+<td>app → kernel</td>
+<td>Introspect a <code>pdv</code> symbol. Payload: <code>{ symbol, include_source? }</code>.</td>
+</tr>
+<tr>
+<td><code>pdv.help.response</code></td>
+<td>kernel → app</td>
+<td>Returns <code>{ symbol, kind, signature, doc, source }</code> (<code>signature</code>/<code>doc</code>/<code>source</code> are <code>null</code> when not introspectable).</td>
+</tr>
+<tr>
+<td><code>pdv.tree.resolve_path</code></td>
+<td>app → kernel</td>
+<td>Resolve a tree path to a namespace-style expression for the namespace inspector. Payload: <code>{ path }</code>.</td>
+</tr>
+<tr>
+<td><code>pdv.tree.resolve_path.response</code></td>
+<td>kernel → app</td>
+<td>Returns the resolved path metadata.</td>
 </tr>
 </tbody>
 </table>
@@ -4994,7 +5127,7 @@
 <a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a>    comms.py             # Comm channel: register target, send/receive, dispatch, thread-local response sink
 <a id="__codelineno-6-4" name="__codelineno-6-4" href="#__codelineno-6-4"></a>    tree.py              # PDVTree (debounced _emit_changed), PDVScript, PDVFile, PDVNote, PDVModule, PDVGui, PDVNamelist, PDVLib
 <a id="__codelineno-6-5" name="__codelineno-6-5" href="#__codelineno-6-5"></a>    query_server.py      # QueryServer: ZMQ REP daemon thread for read-only queries during execution
-<a id="__codelineno-6-6" name="__codelineno-6-6" href="#__codelineno-6-6"></a>    namespace.py         # PDVNamespace (protected dict), PDVApp, pdv_namespace()
+<a id="__codelineno-6-6" name="__codelineno-6-6" href="#__codelineno-6-6"></a>    namespace.py         # PDVNamespace (protected dict), pdv_namespace(), inspect_namespace()
 <a id="__codelineno-6-7" name="__codelineno-6-7" href="#__codelineno-6-7"></a>    serialization.py     # Type detection, format writers (npy, pickle, json, module, gui, namelist, lib)
 <a id="__codelineno-6-8" name="__codelineno-6-8" href="#__codelineno-6-8"></a>    environment.py       # Path utilities, working dir management, project root logic
 <a id="__codelineno-6-9" name="__codelineno-6-9" href="#__codelineno-6-9"></a>    errors.py            # PDVError, PDVPathError, PDVKeyError, PDVProtectedNameError, PDVSerializationError, PDVScriptError, PDVVersionError
@@ -5006,15 +5139,16 @@
 <a id="__codelineno-6-15" name="__codelineno-6-15" href="#__codelineno-6-15"></a>    handlers/
 <a id="__codelineno-6-16" name="__codelineno-6-16" href="#__codelineno-6-16"></a>        __init__.py
 <a id="__codelineno-6-17" name="__codelineno-6-17" href="#__codelineno-6-17"></a>        _helpers.py      # Shared register-validation, namelist resolution, and gui-attach helpers
-<a id="__codelineno-6-18" name="__codelineno-6-18" href="#__codelineno-6-18"></a>        lifecycle.py     # pdv.init, pdv.ready handlers
-<a id="__codelineno-6-19" name="__codelineno-6-19" href="#__codelineno-6-19"></a>        project.py       # pdv.project.load, pdv.project.save handlers
-<a id="__codelineno-6-20" name="__codelineno-6-20" href="#__codelineno-6-20"></a>        tree.py          # pdv.tree.list, pdv.tree.get, pdv.tree.resolve_file handlers
-<a id="__codelineno-6-21" name="__codelineno-6-21" href="#__codelineno-6-21"></a>        namespace.py     # pdv.namespace.query handler
-<a id="__codelineno-6-22" name="__codelineno-6-22" href="#__codelineno-6-22"></a>        script.py        # pdv.script.register handler
-<a id="__codelineno-6-23" name="__codelineno-6-23" href="#__codelineno-6-23"></a>        note.py          # pdv.note.register handler
-<a id="__codelineno-6-24" name="__codelineno-6-24" href="#__codelineno-6-24"></a>        modules.py       # pdv.module.register, pdv.modules.setup, pdv.handler.invoke handlers
-<a id="__codelineno-6-25" name="__codelineno-6-25" href="#__codelineno-6-25"></a>        gui.py           # pdv.gui.register handler
-<a id="__codelineno-6-26" name="__codelineno-6-26" href="#__codelineno-6-26"></a>        namelist.py      # pdv.namelist.read, pdv.namelist.write, pdv.file.register handlers
+<a id="__codelineno-6-18" name="__codelineno-6-18" href="#__codelineno-6-18"></a>        lifecycle.py     # pdv.init handler (pdv.ready is emitted, not handled)
+<a id="__codelineno-6-19" name="__codelineno-6-19" href="#__codelineno-6-19"></a>        project.py       # pdv.project.load, pdv.project.save, pdv.project.clear_autosave_cache handlers
+<a id="__codelineno-6-20" name="__codelineno-6-20" href="#__codelineno-6-20"></a>        tree.py          # pdv.tree.list/get/resolve_file/delete/create_node/rename/move/duplicate handlers
+<a id="__codelineno-6-21" name="__codelineno-6-21" href="#__codelineno-6-21"></a>        introspection.py # pdv.help, pdv.tree.resolve_path handlers
+<a id="__codelineno-6-22" name="__codelineno-6-22" href="#__codelineno-6-22"></a>        namespace.py     # pdv.namespace.query, pdv.namespace.inspect handlers
+<a id="__codelineno-6-23" name="__codelineno-6-23" href="#__codelineno-6-23"></a>        script.py        # pdv.script.register, pdv.script.params handlers
+<a id="__codelineno-6-24" name="__codelineno-6-24" href="#__codelineno-6-24"></a>        note.py          # pdv.note.register handler
+<a id="__codelineno-6-25" name="__codelineno-6-25" href="#__codelineno-6-25"></a>        modules.py       # pdv.module.register/create_empty/update/reload_libs, pdv.modules.setup, pdv.handler.invoke handlers
+<a id="__codelineno-6-26" name="__codelineno-6-26" href="#__codelineno-6-26"></a>        gui.py           # pdv.gui.register handler
+<a id="__codelineno-6-27" name="__codelineno-6-27" href="#__codelineno-6-27"></a>        namelist.py      # pdv.namelist.read, pdv.namelist.write, pdv.file.register handlers
 </code></pre></div>
 <h3 id="53-bootstrap">5.3 Bootstrap<a class="headerlink" href="#53-bootstrap" title="Permanent link">&para;</a></h3>
 <p><code>pdv.bootstrap()</code> is called by a bootstrap snippet that the main process sends via <code>execute_request</code> (silent mode) from <code>kernel-session.ts</code> immediately after the kernel subprocess starts. It:
@@ -6153,7 +6287,13 @@
 - <code>window.pdv.system.*</code> — constant host facts injected at preload time: <code>platform</code> (the main process's <code>process.platform</code>), <code>supportedPythonVersions</code> and <code>defaultPythonVersion</code> (the New Project dialog's version range, from <code>python-versions.ts</code>). Exposed as plain values, not functions — they never change during a session, so they need no IPC channel
 - <code>window.pdv.launchers.*</code> — action-bar external-app launchers: <code>openAgent</code> (launch the configured AI agent in a terminal), <code>openWorkingDir</code> (open the active kernel's working directory in the configured editor/IDE), <code>checkAvailability</code> (probe whether a terminal/editor/file-manager is installed, without launching it — used to gate Settings Save)
 - <code>window.pdv.progress.*</code> — operation progress: push only: <code>onProgress(cb) → unsub</code>
-- <code>window.pdv.menu.*</code> — menu bridge: <code>updateRecentProjects(paths)</code>, <code>onAction(cb) → unsub</code></p>
+- <code>window.pdv.menu.*</code> — menu bridge: <code>updateRecentProjects(paths)</code>, <code>onAction(cb) → unsub</code>
+- <code>window.pdv.autosave.*</code> — autosave lifecycle: <code>run</code>, <code>clear</code>, <code>check</code>, <code>scanWorkingDirs</code>, <code>recoverUnsaved</code>, <code>deleteOrphan</code>; push: <code>onTrigger(cb) → unsub</code>, <code>onInFlightChange(cb) → unsub</code>
+- <code>window.pdv.updater.*</code> — app auto-update: <code>checkForUpdates</code>, <code>downloadUpdate</code>, <code>installUpdate</code>, <code>openReleasesPage</code>, <code>getStatus</code>; push: <code>onUpdateStatus(cb) → unsub</code>
+- <code>window.pdv.app.*</code> — window-close lifecycle: <code>confirmClose</code>, <code>setDocumentEdited</code>; push: <code>onRequestClose(cb) → unsub</code>
+- <code>window.pdv.window.*</code> — <code>setBackgroundColor</code> (sync the native window background to the active theme)
+- <code>window.pdv.mcp.*</code> — MCP server status: <code>getStatus</code>; push: <code>onClientStatus(cb) → unsub</code>
+- <code>window.pdv.cells.*</code> — MCP code-cell RPC bridge for agent cell execution: <code>respond</code>; push: <code>onRequest(cb) → unsub</code>, <code>onWrite(cb) → unsub</code></p>
 <p><strong>Design decision — Settings</strong>: The Settings dialog is opened by renderer-internal state (toolbar button, status bar click, or File → Settings menu action via <code>menu.onAction</code>). There is no dedicated <code>window.pdv.settings.*</code> IPC namespace; the menu action is forwarded as a <code>settings:open</code> payload through the existing <code>menu.onAction</code> push channel.</p>
 <h3 id="113-keyboard-shortcuts">11.3 Keyboard Shortcuts<a class="headerlink" href="#113-keyboard-shortcuts" title="Permanent link">&para;</a></h3>
 <p>PDV has two distinct shortcut systems:</p>
@@ -6295,65 +6435,90 @@
 <a id="__codelineno-31-34" name="__codelineno-31-34" href="#__codelineno-31-34"></a>        ipc-register-gui-editor.ts        ← IPC handlers: GUI editor/viewer window open/context/read/save
 <a id="__codelineno-31-35" name="__codelineno-31-35" href="#__codelineno-31-35"></a>        ipc-register-tree-namespace-script.ts ← IPC handlers: tree, namespace, script
 <a id="__codelineno-31-36" name="__codelineno-31-36" href="#__codelineno-31-36"></a>        ipc-register-app-state.ts         ← IPC handlers: config, themes, code cells, files, about
-<a id="__codelineno-31-37" name="__codelineno-31-37" href="#__codelineno-31-37"></a>        modules/
-<a id="__codelineno-31-38" name="__codelineno-31-38" href="#__codelineno-31-38"></a>            manifest-utils.ts   ← Module manifest validation (v1/v2/v3), GUI manifest validation
-<a id="__codelineno-31-39" name="__codelineno-31-39" href="#__codelineno-31-39"></a>    renderer/
-<a id="__codelineno-31-40" name="__codelineno-31-40" href="#__codelineno-31-40"></a>        src/
-<a id="__codelineno-31-41" name="__codelineno-31-41" href="#__codelineno-31-41"></a>            main.tsx                    ← Main window renderer entry point
-<a id="__codelineno-31-42" name="__codelineno-31-42" href="#__codelineno-31-42"></a>            module-window-main.tsx      ← Module popup window renderer entry point
-<a id="__codelineno-31-43" name="__codelineno-31-43" href="#__codelineno-31-43"></a>            vite-env.d.ts               ← Vite type declarations
-<a id="__codelineno-31-44" name="__codelineno-31-44" href="#__codelineno-31-44"></a>            app/
-<a id="__codelineno-31-45" name="__codelineno-31-45" href="#__codelineno-31-45"></a>                index.tsx               ← Root App component (state orchestration, 10 hooks)
-<a id="__codelineno-31-46" name="__codelineno-31-46" href="#__codelineno-31-46"></a>                HOOKS.md                ← Hook composition documentation
-<a id="__codelineno-31-47" name="__codelineno-31-47" href="#__codelineno-31-47"></a>                app-utils.ts            ← Shared App-level utility functions
-<a id="__codelineno-31-48" name="__codelineno-31-48" href="#__codelineno-31-48"></a>                constants.ts            ← App-level constants
-<a id="__codelineno-31-49" name="__codelineno-31-49" href="#__codelineno-31-49"></a>                useLayoutState.ts       ← Sidebar/pane geometry (localStorage)
-<a id="__codelineno-31-50" name="__codelineno-31-50" href="#__codelineno-31-50"></a>                useThemeManager.ts      ← Theme colors, Monaco theme, font settings
-<a id="__codelineno-31-51" name="__codelineno-31-51" href="#__codelineno-31-51"></a>                useCodeCellsPersistence.ts ← Load/save code tabs to ~/.PDV/state/
-<a id="__codelineno-31-52" name="__codelineno-31-52" href="#__codelineno-31-52"></a>                useKernelSubscriptions.ts  ← Push subscription lifecycle
-<a id="__codelineno-31-53" name="__codelineno-31-53" href="#__codelineno-31-53"></a>                useKernelLifecycle.ts    ← Kernel start/restart/env-save callbacks
-<a id="__codelineno-31-54" name="__codelineno-31-54" href="#__codelineno-31-54"></a>                useKeyboardShortcuts.ts ← Global keyboard shortcut listener
-<a id="__codelineno-31-55" name="__codelineno-31-55" href="#__codelineno-31-55"></a>                useProjectWorkflow.ts   ← Project save/load/new + unsaved dialog
-<a id="__codelineno-31-56" name="__codelineno-31-56" href="#__codelineno-31-56"></a>                useNoteTabs.ts          ← Markdown note tabs (open/save/close/dirty-flush)
-<a id="__codelineno-31-57" name="__codelineno-31-57" href="#__codelineno-31-57"></a>                useWelcomeState.ts      ← Welcome screen state, recents, recoverable sessions
-<a id="__codelineno-31-58" name="__codelineno-31-58" href="#__codelineno-31-58"></a>                useKernelLaunch.ts      ← Session-launch overlay (uv + shared) with retry
-<a id="__codelineno-31-59" name="__codelineno-31-59" href="#__codelineno-31-59"></a>            components/
-<a id="__codelineno-31-60" name="__codelineno-31-60" href="#__codelineno-31-60"></a>                Icons.tsx               ← Shared SVG icon components
-<a id="__codelineno-31-61" name="__codelineno-31-61" href="#__codelineno-31-61"></a>                CodeCell/
-<a id="__codelineno-31-62" name="__codelineno-31-62" href="#__codelineno-31-62"></a>                    index.tsx           ← Tabbed Monaco editor surface
-<a id="__codelineno-31-63" name="__codelineno-31-63" href="#__codelineno-31-63"></a>                    monaco-providers.ts ← Completion + hover provider logic
-<a id="__codelineno-31-64" name="__codelineno-31-64" href="#__codelineno-31-64"></a>                WriteTab/
-<a id="__codelineno-31-65" name="__codelineno-31-65" href="#__codelineno-31-65"></a>                    index.tsx           ← Tabbed markdown editor (Edit/Read mode toggle)
-<a id="__codelineno-31-66" name="__codelineno-31-66" href="#__codelineno-31-66"></a>                    ReadView.tsx        ← Full rendered markdown view (marked + KaTeX)
-<a id="__codelineno-31-67" name="__codelineno-31-67" href="#__codelineno-31-67"></a>                    math-preview.ts     ← Inline KaTeX math preview in Monaco editor
-<a id="__codelineno-31-68" name="__codelineno-31-68" href="#__codelineno-31-68"></a>                Console/                ← Streamed output and result rendering
-<a id="__codelineno-31-69" name="__codelineno-31-69" href="#__codelineno-31-69"></a>                Tree/                   ← Tree browser + context menu actions
-<a id="__codelineno-31-70" name="__codelineno-31-70" href="#__codelineno-31-70"></a>                TitleBar/               ← Custom title bar (drag region, menus, window controls)
-<a id="__codelineno-31-71" name="__codelineno-31-71" href="#__codelineno-31-71"></a>                NamespaceView/          ← Namespace table and filtering
-<a id="__codelineno-31-72" name="__codelineno-31-72" href="#__codelineno-31-72"></a>                SettingsDialog/
-<a id="__codelineno-31-73" name="__codelineno-31-73" href="#__codelineno-31-73"></a>                    index.tsx           ← Settings modal shell + General/Shortcuts/Runtime/About tabs
-<a id="__codelineno-31-74" name="__codelineno-31-74" href="#__codelineno-31-74"></a>                    AppearanceTab.tsx   ← Appearance tab (themes, fonts, colors)
-<a id="__codelineno-31-75" name="__codelineno-31-75" href="#__codelineno-31-75"></a>                    ShortcutCapture.tsx ← Reusable shortcut key-capture widget
-<a id="__codelineno-31-76" name="__codelineno-31-76" href="#__codelineno-31-76"></a>                ScriptDialog/           ← Script execution dialog with parameter form
-<a id="__codelineno-31-77" name="__codelineno-31-77" href="#__codelineno-31-77"></a>                WelcomeScreen/          ← Welcome overlay shown on launch (no kernel running)
-<a id="__codelineno-31-78" name="__codelineno-31-78" href="#__codelineno-31-78"></a>                EnvironmentSelector/    ← Python environment selection dialog
-<a id="__codelineno-31-79" name="__codelineno-31-79" href="#__codelineno-31-79"></a>                ActivityBar/            ← Sidebar activity bar with panel selection
-<a id="__codelineno-31-80" name="__codelineno-31-80" href="#__codelineno-31-80"></a>                StatusBar/              ← Status bar with kernel and project info
-<a id="__codelineno-31-81" name="__codelineno-31-81" href="#__codelineno-31-81"></a>                ImportModuleDialog/     ← File &gt; Import Module... modal dialog
-<a id="__codelineno-31-82" name="__codelineno-31-82" href="#__codelineno-31-82"></a>                ModulesPanel/           ← Module actions and inputs panels (used inside module GUI)
-<a id="__codelineno-31-83" name="__codelineno-31-83" href="#__codelineno-31-83"></a>                ModuleGui/              ← Module GUI rendering: ContainerRenderer, InputControl, ActionButton, NamelistEditor
-<a id="__codelineno-31-84" name="__codelineno-31-84" href="#__codelineno-31-84"></a>            module-window/              ← Separate renderer entry for module GUI popup windows
-<a id="__codelineno-31-85" name="__codelineno-31-85" href="#__codelineno-31-85"></a>            gui-editor/                 ← GUI editor: drag-and-drop layout canvas, property editor, live preview
-<a id="__codelineno-31-86" name="__codelineno-31-86" href="#__codelineno-31-86"></a>            gui-viewer/                 ← Standalone GUI viewer for project GUIs (non-module)
-<a id="__codelineno-31-87" name="__codelineno-31-87" href="#__codelineno-31-87"></a>            styles/                     ← CSS stylesheets (base, layout, tabs, tree, editor, etc.)
-<a id="__codelineno-31-88" name="__codelineno-31-88" href="#__codelineno-31-88"></a>            themes.ts                   ← Builtin themes, Monaco theme definitions, font helpers
-<a id="__codelineno-31-89" name="__codelineno-31-89" href="#__codelineno-31-89"></a>            shortcuts.ts                ← Canonical shortcut registry and matcher
-<a id="__codelineno-31-90" name="__codelineno-31-90" href="#__codelineno-31-90"></a>            services/tree.ts            ← Renderer tree fetch adapter (deliberately uncached)
-<a id="__codelineno-31-91" name="__codelineno-31-91" href="#__codelineno-31-91"></a>            types/                      ← Renderer view-model + preload API types
-<a id="__codelineno-31-92" name="__codelineno-31-92" href="#__codelineno-31-92"></a>examples/
-<a id="__codelineno-31-93" name="__codelineno-31-93" href="#__codelineno-31-93"></a>    modules/
-<a id="__codelineno-31-94" name="__codelineno-31-94" href="#__codelineno-31-94"></a>        N-pendulum/                     ← Bundled Python example module
-<a id="__codelineno-31-95" name="__codelineno-31-95" href="#__codelineno-31-95"></a>        N-pendulum-julia/               ← Bundled Julia example module
+<a id="__codelineno-31-37" name="__codelineno-31-37" href="#__codelineno-31-37"></a>        ipc-register-launchers.ts         ← IPC handlers: external editor/terminal launch + availability
+<a id="__codelineno-31-38" name="__codelineno-31-38" href="#__codelineno-31-38"></a>        ipc-registry.ts                   ← handleIpc wrapper (logs + normalizes handler errors)
+<a id="__codelineno-31-39" name="__codelineno-31-39" href="#__codelineno-31-39"></a>        agent-launcher.ts       ← Spawn external AI agent CLIs against the MCP server
+<a id="__codelineno-31-40" name="__codelineno-31-40" href="#__codelineno-31-40"></a>        auto-updater.ts         ← electron-updater integration and update-check throttle
+<a id="__codelineno-31-41" name="__codelineno-31-41" href="#__codelineno-31-41"></a>        wake-handler.ts         ← Wake-from-sleep kernel-liveness recovery
+<a id="__codelineno-31-42" name="__codelineno-31-42" href="#__codelineno-31-42"></a>        atomic-write.ts         ← Atomic tmp+rename JSON/file writes
+<a id="__codelineno-31-43" name="__codelineno-31-43" href="#__codelineno-31-43"></a>        autosave-sidecars.ts    ← Autosave sidecar (.autosave/) manifest read/write
+<a id="__codelineno-31-44" name="__codelineno-31-44" href="#__codelineno-31-44"></a>        launcher-availability.ts ← Detect whether a configured editor/terminal exists
+<a id="__codelineno-31-45" name="__codelineno-31-45" href="#__codelineno-31-45"></a>        process-stats.ts        ← Kernel process RSS/CPU sampling
+<a id="__codelineno-31-46" name="__codelineno-31-46" href="#__codelineno-31-46"></a>        module-manifest-writer.ts ← Write v4 pdv-module.json + module-index.json
+<a id="__codelineno-31-47" name="__codelineno-31-47" href="#__codelineno-31-47"></a>        tree-create.ts          ← Shared allocate-uuid → write → register helpers for file nodes
+<a id="__codelineno-31-48" name="__codelineno-31-48" href="#__codelineno-31-48"></a>        uv-environment.ts       ← Per-project uv venv materialization/sync
+<a id="__codelineno-31-49" name="__codelineno-31-49" href="#__codelineno-31-49"></a>        uv-runner.ts            ← uv subprocess wrapper
+<a id="__codelineno-31-50" name="__codelineno-31-50" href="#__codelineno-31-50"></a>        pyproject.ts            ← Generate/parse project pyproject.toml
+<a id="__codelineno-31-51" name="__codelineno-31-51" href="#__codelineno-31-51"></a>        python-versions.ts      ← Supported Python versions + default
+<a id="__codelineno-31-52" name="__codelineno-31-52" href="#__codelineno-31-52"></a>        modules/
+<a id="__codelineno-31-53" name="__codelineno-31-53" href="#__codelineno-31-53"></a>            manifest-utils.ts   ← Module manifest validation (v4), GUI manifest validation
+<a id="__codelineno-31-54" name="__codelineno-31-54" href="#__codelineno-31-54"></a>        mcp/
+<a id="__codelineno-31-55" name="__codelineno-31-55" href="#__codelineno-31-55"></a>            mcp-server.ts       ← Local MCP server exposing tree/cells/scripts/kernel to agents
+<a id="__codelineno-31-56" name="__codelineno-31-56" href="#__codelineno-31-56"></a>            mcp-auth.ts         ← MCP client authentication
+<a id="__codelineno-31-57" name="__codelineno-31-57" href="#__codelineno-31-57"></a>            mcp-config-writer.ts ← Write per-agent MCP client config
+<a id="__codelineno-31-58" name="__codelineno-31-58" href="#__codelineno-31-58"></a>            mcp-context.ts      ← Active-project context provided to MCP tools
+<a id="__codelineno-31-59" name="__codelineno-31-59" href="#__codelineno-31-59"></a>            mcp-instructions.ts ← System instructions surfaced to agents
+<a id="__codelineno-31-60" name="__codelineno-31-60" href="#__codelineno-31-60"></a>            cell-rpc.ts         ← Code-cell RPC bridge for agent cell execution
+<a id="__codelineno-31-61" name="__codelineno-31-61" href="#__codelineno-31-61"></a>            generation-guard.ts ← Guards against stale agent generations
+<a id="__codelineno-31-62" name="__codelineno-31-62" href="#__codelineno-31-62"></a>            transcript.ts       ← Agent-execution transcript writer (origin tagging)
+<a id="__codelineno-31-63" name="__codelineno-31-63" href="#__codelineno-31-63"></a>            tools/              ← Individual MCP tool implementations
+<a id="__codelineno-31-64" name="__codelineno-31-64" href="#__codelineno-31-64"></a>    renderer/
+<a id="__codelineno-31-65" name="__codelineno-31-65" href="#__codelineno-31-65"></a>        src/
+<a id="__codelineno-31-66" name="__codelineno-31-66" href="#__codelineno-31-66"></a>            main.tsx                    ← Main window renderer entry point
+<a id="__codelineno-31-67" name="__codelineno-31-67" href="#__codelineno-31-67"></a>            module-window-main.tsx      ← Module popup window renderer entry point
+<a id="__codelineno-31-68" name="__codelineno-31-68" href="#__codelineno-31-68"></a>            vite-env.d.ts               ← Vite type declarations
+<a id="__codelineno-31-69" name="__codelineno-31-69" href="#__codelineno-31-69"></a>            app/
+<a id="__codelineno-31-70" name="__codelineno-31-70" href="#__codelineno-31-70"></a>                index.tsx               ← Root App component (state orchestration, 10 hooks)
+<a id="__codelineno-31-71" name="__codelineno-31-71" href="#__codelineno-31-71"></a>                HOOKS.md                ← Hook composition documentation
+<a id="__codelineno-31-72" name="__codelineno-31-72" href="#__codelineno-31-72"></a>                app-utils.ts            ← Shared App-level utility functions
+<a id="__codelineno-31-73" name="__codelineno-31-73" href="#__codelineno-31-73"></a>                constants.ts            ← App-level constants
+<a id="__codelineno-31-74" name="__codelineno-31-74" href="#__codelineno-31-74"></a>                useLayoutState.ts       ← Sidebar/pane geometry (localStorage)
+<a id="__codelineno-31-75" name="__codelineno-31-75" href="#__codelineno-31-75"></a>                useThemeManager.ts      ← Theme colors, Monaco theme, font settings
+<a id="__codelineno-31-76" name="__codelineno-31-76" href="#__codelineno-31-76"></a>                useCodeCellsPersistence.ts ← Load/save code tabs to ~/.PDV/state/
+<a id="__codelineno-31-77" name="__codelineno-31-77" href="#__codelineno-31-77"></a>                useKernelSubscriptions.ts  ← Push subscription lifecycle
+<a id="__codelineno-31-78" name="__codelineno-31-78" href="#__codelineno-31-78"></a>                useKernelLifecycle.ts    ← Kernel start/restart/env-save callbacks
+<a id="__codelineno-31-79" name="__codelineno-31-79" href="#__codelineno-31-79"></a>                useKeyboardShortcuts.ts ← Global keyboard shortcut listener
+<a id="__codelineno-31-80" name="__codelineno-31-80" href="#__codelineno-31-80"></a>                useProjectWorkflow.ts   ← Project save/load/new + unsaved dialog
+<a id="__codelineno-31-81" name="__codelineno-31-81" href="#__codelineno-31-81"></a>                useNoteTabs.ts          ← Markdown note tabs (open/save/close/dirty-flush)
+<a id="__codelineno-31-82" name="__codelineno-31-82" href="#__codelineno-31-82"></a>                useWelcomeState.ts      ← Welcome screen state, recents, recoverable sessions
+<a id="__codelineno-31-83" name="__codelineno-31-83" href="#__codelineno-31-83"></a>                useKernelLaunch.ts      ← Session-launch overlay (uv + shared) with retry
+<a id="__codelineno-31-84" name="__codelineno-31-84" href="#__codelineno-31-84"></a>            components/
+<a id="__codelineno-31-85" name="__codelineno-31-85" href="#__codelineno-31-85"></a>                Icons.tsx               ← Shared SVG icon components
+<a id="__codelineno-31-86" name="__codelineno-31-86" href="#__codelineno-31-86"></a>                CodeCell/
+<a id="__codelineno-31-87" name="__codelineno-31-87" href="#__codelineno-31-87"></a>                    index.tsx           ← Tabbed Monaco editor surface
+<a id="__codelineno-31-88" name="__codelineno-31-88" href="#__codelineno-31-88"></a>                    monaco-providers.ts ← Completion + hover provider logic
+<a id="__codelineno-31-89" name="__codelineno-31-89" href="#__codelineno-31-89"></a>                WriteTab/
+<a id="__codelineno-31-90" name="__codelineno-31-90" href="#__codelineno-31-90"></a>                    index.tsx           ← Tabbed markdown editor (Edit/Read mode toggle)
+<a id="__codelineno-31-91" name="__codelineno-31-91" href="#__codelineno-31-91"></a>                    ReadView.tsx        ← Full rendered markdown view (marked + KaTeX)
+<a id="__codelineno-31-92" name="__codelineno-31-92" href="#__codelineno-31-92"></a>                    math-preview.ts     ← Inline KaTeX math preview in Monaco editor
+<a id="__codelineno-31-93" name="__codelineno-31-93" href="#__codelineno-31-93"></a>                Console/                ← Streamed output and result rendering
+<a id="__codelineno-31-94" name="__codelineno-31-94" href="#__codelineno-31-94"></a>                Tree/                   ← Tree browser + context menu actions
+<a id="__codelineno-31-95" name="__codelineno-31-95" href="#__codelineno-31-95"></a>                TitleBar/               ← Custom title bar (drag region, menus, window controls)
+<a id="__codelineno-31-96" name="__codelineno-31-96" href="#__codelineno-31-96"></a>                NamespaceView/          ← Namespace table and filtering
+<a id="__codelineno-31-97" name="__codelineno-31-97" href="#__codelineno-31-97"></a>                SettingsDialog/
+<a id="__codelineno-31-98" name="__codelineno-31-98" href="#__codelineno-31-98"></a>                    index.tsx           ← Settings modal shell + General/Shortcuts/Runtime/About tabs
+<a id="__codelineno-31-99" name="__codelineno-31-99" href="#__codelineno-31-99"></a>                    AppearanceTab.tsx   ← Appearance tab (themes, fonts, colors)
+<a id="__codelineno-31-100" name="__codelineno-31-100" href="#__codelineno-31-100"></a>                    ShortcutCapture.tsx ← Reusable shortcut key-capture widget
+<a id="__codelineno-31-101" name="__codelineno-31-101" href="#__codelineno-31-101"></a>                ScriptDialog/           ← Script execution dialog with parameter form
+<a id="__codelineno-31-102" name="__codelineno-31-102" href="#__codelineno-31-102"></a>                WelcomeScreen/          ← Welcome overlay shown on launch (no kernel running)
+<a id="__codelineno-31-103" name="__codelineno-31-103" href="#__codelineno-31-103"></a>                EnvironmentSelector/    ← Python environment selection dialog
+<a id="__codelineno-31-104" name="__codelineno-31-104" href="#__codelineno-31-104"></a>                ActivityBar/            ← Sidebar activity bar with panel selection
+<a id="__codelineno-31-105" name="__codelineno-31-105" href="#__codelineno-31-105"></a>                StatusBar/              ← Status bar with kernel and project info
+<a id="__codelineno-31-106" name="__codelineno-31-106" href="#__codelineno-31-106"></a>                ImportModuleDialog/     ← File &gt; Import Module... modal dialog
+<a id="__codelineno-31-107" name="__codelineno-31-107" href="#__codelineno-31-107"></a>                ModulesPanel/           ← Module actions and inputs panels (used inside module GUI)
+<a id="__codelineno-31-108" name="__codelineno-31-108" href="#__codelineno-31-108"></a>                ModuleGui/              ← Module GUI rendering: ContainerRenderer, InputControl, ActionButton, NamelistEditor
+<a id="__codelineno-31-109" name="__codelineno-31-109" href="#__codelineno-31-109"></a>            module-window/              ← Separate renderer entry for module GUI popup windows
+<a id="__codelineno-31-110" name="__codelineno-31-110" href="#__codelineno-31-110"></a>            gui-editor/                 ← GUI editor: drag-and-drop layout canvas, property editor, live preview
+<a id="__codelineno-31-111" name="__codelineno-31-111" href="#__codelineno-31-111"></a>            gui-viewer/                 ← Standalone GUI viewer for project GUIs (non-module)
+<a id="__codelineno-31-112" name="__codelineno-31-112" href="#__codelineno-31-112"></a>            styles/                     ← CSS stylesheets (base, layout, tabs, tree, editor, etc.)
+<a id="__codelineno-31-113" name="__codelineno-31-113" href="#__codelineno-31-113"></a>            themes.ts                   ← Builtin themes, Monaco theme definitions, font helpers
+<a id="__codelineno-31-114" name="__codelineno-31-114" href="#__codelineno-31-114"></a>            shortcuts.ts                ← Canonical shortcut registry and matcher
+<a id="__codelineno-31-115" name="__codelineno-31-115" href="#__codelineno-31-115"></a>            services/tree.ts            ← Renderer tree fetch adapter (deliberately uncached)
+<a id="__codelineno-31-116" name="__codelineno-31-116" href="#__codelineno-31-116"></a>            types/                      ← Renderer view-model + preload API types
+<a id="__codelineno-31-117" name="__codelineno-31-117" href="#__codelineno-31-117"></a>examples/
+<a id="__codelineno-31-118" name="__codelineno-31-118" href="#__codelineno-31-118"></a>    modules/
+<a id="__codelineno-31-119" name="__codelineno-31-119" href="#__codelineno-31-119"></a>        N-pendulum/                     ← Bundled Python example module
+<a id="__codelineno-31-120" name="__codelineno-31-120" href="#__codelineno-31-120"></a>        N-pendulum-julia/               ← Bundled Julia example module
 </code></pre></div>
 <h3 id="122-python-package-separate-repository-or-subdirectory">12.2 Python Package (separate repository or subdirectory)<a class="headerlink" href="#122-python-package-separate-repository-or-subdirectory" title="Permanent link">&para;</a></h3>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-32-1" name="__codelineno-32-1" href="#__codelineno-32-1"></a>pdv-python/
@@ -6804,13 +6969,13 @@
         
         
           
-          <a href="../developer-quickstart/" class="md-footer__link md-footer__link--next" aria-label="Next: Developer Quick Start">
+          <a href="../save-pipeline/" class="md-footer__link md-footer__link--next" aria-label="Next: Save Pipeline">
             <div class="md-footer__title">
               <span class="md-footer__direction">
                 Next
               </span>
               <div class="md-ellipsis">
-                Developer Quick Start
+                Save Pipeline
               </div>
             </div>
             <div class="md-footer__button md-icon">

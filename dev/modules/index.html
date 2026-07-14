@@ -1007,10 +1007,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#manifest-split-schema-v3" class="md-nav__link">
+  <a href="#manifest-structure-schema-v4" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Manifest split (schema v3)
+        Manifest structure (schema v4)
       
     </span>
   </a>
@@ -1319,6 +1319,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../developer/save-pipeline/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Save Pipeline
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../developer/developer-quickstart/" class="md-nav__link">
         
   
@@ -1518,10 +1546,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#manifest-split-schema-v3" class="md-nav__link">
+  <a href="#manifest-structure-schema-v4" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Manifest split (schema v3)
+        Manifest structure (schema v4)
       
     </span>
   </a>
@@ -1793,30 +1821,29 @@
 <li>Metadata index: <code>&lt;pdvDir&gt;/modules/index.json</code></li>
 </ul>
 <p>Installation validates <code>pdv-module.json</code>, copies the full module directory (including <code>lib/</code>, <code>scripts/</code>, <code>gui.json</code>, <code>inputs/</code>), and stores normalized metadata (<code>id</code>, <code>name</code>, <code>version</code>, source, revision when available).</p>
-<h2 id="manifest-split-schema-v3">Manifest split (schema v3)<a class="headerlink" href="#manifest-split-schema-v3" title="Permanent link">&para;</a></h2>
-<p>In schema v3, the module manifest is split across two files:</p>
+<h2 id="manifest-structure-schema-v4">Manifest structure (schema v4)<a class="headerlink" href="#manifest-structure-schema-v4" title="Permanent link">&para;</a></h2>
+<p>A v4 module is described by three files in the module directory:</p>
 <ul>
-<li><strong><code>pdv-module.json</code></strong> retains identity (<code>id</code>, <code>name</code>, <code>version</code>, <code>schema_version</code>), <code>compatibility</code>, <code>scripts</code>, <code>files</code>, <code>lib</code>, <code>entry_point</code>, and <code>dependencies</code>.</li>
-<li><strong><code>gui.json</code></strong> holds <code>inputs</code>, <code>actions</code>, and the declarative <code>gui</code> layout. This file is optional — modules without a GUI omit it entirely.</li>
+<li><strong><code>pdv-module.json</code></strong> — identity and configuration (<code>id</code>, <code>name</code>, <code>version</code>, <code>schema_version</code>, <code>language</code>), plus <code>entry_point</code>, <code>lib_dir</code>, <code>default_gui</code>, <code>compatibility</code>, and <code>dependencies</code>.</li>
+<li><strong><code>gui.json</code></strong> (the file named by <code>default_gui</code>) — holds <code>inputs</code>, <code>actions</code>, and the declarative <code>gui</code> layout. Optional — modules without a GUI omit it and leave <code>default_gui</code> unset.</li>
+<li><strong><code>module-index.json</code></strong> — the list of tree-node descriptors the module contributes (its scripts, libs, files, and namelists). The loader uses it to reconstruct the module's subtree on import; the v4 loader rejects a module whose <code>module-index.json</code> is missing.</li>
 </ul>
-<p>This separation keeps the identity/compatibility manifest lightweight and allows GUI definitions to evolve independently.</p>
+<p>This separation keeps the identity/compatibility manifest lightweight, lets GUI definitions evolve independently, and moves the module's tree layout into a dedicated index.</p>
 <h2 id="supported-manifest-functionality">Supported manifest functionality<a class="headerlink" href="#supported-manifest-functionality" title="Permanent link">&para;</a></h2>
-<p>In schema v3, functionality is split across <code>pdv-module.json</code> and <code>gui.json</code>.</p>
 <h3 id="pdv-modulejson-identity-manifest"><code>pdv-module.json</code> (identity manifest)<a class="headerlink" href="#pdv-modulejson-identity-manifest" title="Permanent link">&para;</a></h3>
 <ul>
-<li>Required module identity fields (<code>schema_version</code>, <code>id</code>, <code>name</code>, <code>version</code>)</li>
+<li>Required identity fields (<code>schema_version</code> = <code>"4"</code>, <code>id</code>, <code>name</code>, <code>version</code>)</li>
+<li><code>language</code> — <code>"python"</code> (default) or <code>"julia"</code></li>
 <li><code>description</code></li>
-<li><code>scripts[]</code> — informational listing of action scripts: <code>{ name, path }</code></li>
-<li><code>files[]</code> — module-provided input files to copy and register:</li>
-<li><code>name</code> — tree node name</li>
-<li><code>path</code> — relative path within the module directory</li>
-<li><code>type</code> — <code>"namelist"</code>, <code>"lib"</code>, or <code>"file"</code></li>
 <li><code>entry_point</code> — Python module name to import after <code>sys.path</code> setup (e.g. <code>"n_pendulum"</code>)</li>
+<li><code>lib_dir</code> — relative path to the lib directory (defaults to <code>"lib"</code>)</li>
+<li><code>default_gui</code> — relative path to the GUI file (e.g. <code>"gui.json"</code>); omitted when the module has no GUI</li>
 <li>optional <code>compatibility</code> metadata:</li>
 <li><code>pdv_min</code>, <code>pdv_max</code></li>
 <li><code>python</code>, <code>python_min</code>, <code>python_max</code></li>
 <li>optional <code>dependencies[]</code> (warn-only)</li>
 </ul>
+<p>The module's scripts, input files, libs, and namelists are enumerated in <code>module-index.json</code> (and their contents live under <code>scripts/</code>, <code>inputs/</code>, and <code>lib/</code>), not as arrays inside <code>pdv-module.json</code>.</p>
 <h3 id="guijson-gui-and-interaction-manifest"><code>gui.json</code> (GUI and interaction manifest)<a class="headerlink" href="#guijson-gui-and-interaction-manifest" title="Permanent link">&para;</a></h3>
 <ul>
 <li><code>has_gui</code> — boolean flag</li>

@@ -13,6 +13,10 @@
         <link rel="canonical" href="https://matt-pharr.github.io/physics-data-viewer/dev/developer/save-pipeline/">
       
       
+        <link rel="prev" href="../architecture/">
+      
+      
+        <link rel="next" href="../developer-quickstart/">
       
       
         
@@ -23,7 +27,7 @@
     
     
       
-        <title>Save / Autosave / Clear-Autosave Pipeline - PDV - Physics Data Viewer</title>
+        <title>Save Pipeline - PDV - Physics Data Viewer</title>
       
     
     
@@ -123,7 +127,7 @@
         <div class="md-header__topic" data-md-component="header-topic">
           <span class="md-ellipsis">
             
-              Save / Autosave / Clear-Autosave Pipeline
+              Save Pipeline
             
           </span>
         </div>
@@ -332,10 +336,12 @@
   
   
   
+    
+  
   
     
     
-      <li class="md-tabs__item">
+      <li class="md-tabs__item md-tabs__item--active">
         <a href="../architecture/" class="md-tabs__link">
           
   
@@ -932,28 +938,31 @@
       
   
   
+    
   
   
+  
     
     
     
     
+      
+        
+        
       
       
         
       
     
     
-    <li class="md-nav__item md-nav__item--nested">
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
       
         
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_6" checked>
         
           
-        
-        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_6" >
-        
-          
-          <label class="md-nav__link" for="__nav_6" id="__nav_6_label" tabindex="0">
+          <label class="md-nav__link" for="__nav_6" id="__nav_6_label" tabindex="">
             
   
   
@@ -971,7 +980,7 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_6_label" aria-expanded="false">
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_6_label" aria-expanded="true">
           <label class="md-nav__title" for="__nav_6">
             <span class="md-nav__icon md-icon"></span>
             
@@ -1005,6 +1014,358 @@
   
 
       </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Save Pipeline
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Save Pipeline
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#1-explicit-save" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        1. Explicit save
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="1. Explicit save">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#renderer-main" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Renderer → main
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#main-ipcprojectsave-handler" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Main: IPC.project.save handler
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#main-projectmanagersave-project-managerts339444" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Main: ProjectManager.save() (project-manager.ts:339–444)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#kernel-handle_project_save-pdv-pythonpdvhandlersprojectpy851968" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Kernel: handle_project_save (pdv-python/pdv/handlers/project.py:851–968)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#post-save-cleanup-electronmainindexts641644" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Post-save cleanup (electron/main/index.ts:641–644)
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#2-autosave" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2. Autosave
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="2. Autosave">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#timer-project-managerts624662" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Timer (project-manager.ts:624–662)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#tick-path-electronmainindexts677686" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Tick path (electron/main/index.ts:677–686)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#ipcautosaverun-handler-indexts688737" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        IPC.autosave.run handler (index.ts:688–737)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#projectmanagerautosave-project-managerts735787" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        ProjectManager.autosave() (project-manager.ts:735–787)
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#3-autosave-cache" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3. Autosave cache
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="3. Autosave cache">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#definition-pdv-pythonpdvhandlersprojectpy41" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Definition (pdv-python/pdv/handlers/project.py:41)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#how-the-cache-is-consulted-pdv-pythonpdvserializationpy375411" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        How the cache is consulted (pdv-python/pdv/serialization.py:375–411)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#file-relocation-pdv-pythonpdvserializationpy284372" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        File relocation (pdv-python/pdv/serialization.py:284–372)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#cache-lifetime" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Cache lifetime
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#4-clear-autosave" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4. Clear-autosave
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="4. Clear-autosave">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#user-initiated-ipcautosaveclear-electronmainindexts739749" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        User-initiated: IPC.autosave.clear (electron/main/index.ts:739–749)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#kernel-handler-handle_project_clear_autosave_cache-projectpy970993" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Kernel handler: handle_project_clear_autosave_cache (project.py:970–993)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#post-explicit-save-onexplicitsavecompleted-indexts641644" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Post-explicit-save: onExplicitSaveCompleted (index.ts:641–644)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#orphan-recovery" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Orphan recovery
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#5-invariants-the-recent-commits-maintain" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5. Invariants the recent commits maintain
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#summary-diagram" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Summary diagram
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
     </li>
   
 
@@ -1964,6 +2325,44 @@ invariants. If you change anything in this pipeline, preserve them.</p>
       
         <footer class="md-footer">
   
+    
+      
+      <nav class="md-footer__inner md-grid" aria-label="Footer" >
+        
+          
+          <a href="../architecture/" class="md-footer__link md-footer__link--prev" aria-label="Previous: Architecture">
+            <div class="md-footer__button md-icon">
+              
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+            </div>
+            <div class="md-footer__title">
+              <span class="md-footer__direction">
+                Previous
+              </span>
+              <div class="md-ellipsis">
+                Architecture
+              </div>
+            </div>
+          </a>
+        
+        
+          
+          <a href="../developer-quickstart/" class="md-footer__link md-footer__link--next" aria-label="Next: Developer Quick Start">
+            <div class="md-footer__title">
+              <span class="md-footer__direction">
+                Next
+              </span>
+              <div class="md-ellipsis">
+                Developer Quick Start
+              </div>
+            </div>
+            <div class="md-footer__button md-icon">
+              
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M4 11v2h12l-5.5 5.5 1.42 1.42L19.84 12l-7.92-7.92L10.5 5.5 16 11z"/></svg>
+            </div>
+          </a>
+        
+      </nav>
     
   
   <div class="md-footer-meta md-typeset">
