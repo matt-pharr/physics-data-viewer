@@ -119,6 +119,22 @@ spinner — worth a "precompiling packages…" indicator eventually. This is als
 the most likely way a module demo "hangs" in front of an audience: pre-warm
 with `julia -e 'using DifferentialEquations, CairoMakie'` before presenting.
 
+Related boot-path failure mode, diagnosed 2026-07-14: a **wedged juliaup
+self-update** blocks the `julia` shim, so every shim-routed invocation —
+including the PDVKernel environment probe — hangs or times out, and PDV
+reports "Kernel startup timed out" / "PDVKernel missing" even though the
+caches are warm (`using IJulia; using PDVKernel` loads in ~1 s via the real
+binary). Anything that serializes precompilation (a stale precompile pidfile
+lock from a killed julia, two processes compiling the same packages) produces
+the same symptom. Mitigations shipped: the environment probe now uses
+`Base.locate_package` + Project.toml instead of `using PDVKernel` (never
+compiles, ~1 s), and pointing PDV at the real juliaup-resolved binary
+(`~/.julia/juliaup/julia-<ver>/bin/julia`) bypasses the shim entirely — worth
+doing automatically when juliaup discovery lands (issue 6). A genuine
+post-update recompile blowing the 60 s boot allowance is still possible;
+options: detect "Precompiling" on kernel stderr and extend the deadline, or
+precompile explicitly with progress UI before spawning the kernel.
+
 ### 11. Completion requests can time out while the kernel is busy
 `complete_request` shares the shell channel with execution; a completion issued
 mid-run logs a 5 s timeout (`kernels:complete failed`) and returns empty.
