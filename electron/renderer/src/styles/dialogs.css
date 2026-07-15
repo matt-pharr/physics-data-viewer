@@ -918,6 +918,24 @@
   margin: 0;
 }
 
+/* juliaup version-acquisition row (§10.7.5) */
+.env-add-version {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin-top: 10px;
+}
+
+.env-add-version input {
+  flex: 1;
+  padding: 6px 8px;
+  background: var(--bg-primary);
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  color: var(--text-primary);
+  font-size: 12px;
+}
+
 /* ===== uv ENVIRONMENT SETUP MODAL (ARCHITECTURE.md §10.5.9) ===== */
 .env-sync-overlay {
   position: fixed;

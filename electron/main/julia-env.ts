@@ -9,9 +9,11 @@
  * there is no binary to bundle or resolve — the session's Julia executable
  * is the environment tooling.
  *
- * Also home to the pkg-mode Packages-tab reader (§10.6.8):
- * `listJuliaProjectPackages` parses the working directory's `Project.toml`
- * (declared deps + compat) and `Manifest.toml` (resolved versions).
+ * Also home to the pkg-mode env-file readers: `listJuliaProjectPackages`
+ * (§10.6.8) parses the working directory's `Project.toml` (declared deps +
+ * compat) and `Manifest.toml` (resolved versions), and
+ * `readManifestJuliaVersion` (§10.7.5) reads the manifest's resolution
+ * Julia version for the load-time version check.
  *
  * Non-responsibilities:
  * - Kernel process lifecycle (kernel-manager.ts spawns the kernel itself).
@@ -53,6 +55,32 @@ export interface JuliaEnvOptions {
   pushChannel?: string;
   /** Abort signal; aborting kills the Julia subprocess. */
   signal?: AbortSignal;
+  /**
+   * Initial packages for a new project (§10.6.5): when non-empty, the
+   * subprocess runs `Pkg.add` with these instead of the bare instantiate,
+   * recording them into the fresh project's `Project.toml`. Accepts bare
+   * names and REPL-style `Name@version` pins (translated to
+   * `Pkg.PackageSpec`, matching `PDVKernel.install`).
+   */
+  packages?: string[];
+}
+
+/**
+ * Build the Julia `Pkg.PackageSpec(...)` expression for one package spec,
+ * translating an optional `Name@version` pin (same contract as
+ * `PDVKernel._package_spec` — `Pkg.add(::String)` rejects `@` pins).
+ *
+ * @param spec - Bare package name or `Name@version`.
+ * @returns Julia source for the corresponding `Pkg.PackageSpec` call.
+ */
+export function juliaPackageSpecExpr(spec: string): string {
+  const at = spec.indexOf("@");
+  if (at > 0) {
+    const name = spec.slice(0, at);
+    const version = spec.slice(at + 1);
+    return `Pkg.PackageSpec(name=${JSON.stringify(name)}, version=${JSON.stringify(version)})`;
+  }
+  return `Pkg.PackageSpec(name=${JSON.stringify(spec)})`;
 }
 
 /**
@@ -86,9 +114,15 @@ export function instantiateJuliaEnvironment(
   juliaPath: string,
   opts: JuliaEnvOptions = {}
 ): Promise<JuliaEnvResult> {
+  // A new project with initial packages runs `Pkg.add` instead of the bare
+  // instantiate (§10.6.5) — add resolves, installs, and precompiles, so a
+  // separate instantiate would be redundant.
+  const pkgOp = opts.packages?.length
+    ? `Pkg.add([${opts.packages.map(juliaPackageSpecExpr).join(", ")}])`
+    : "Pkg.instantiate()";
   const code =
     `println("${VERSION_MARKER}", VERSION); ` +
-    "import Pkg; Pkg.instantiate()";
+    `import Pkg; ${pkgOp}`;
   const args = [`--project=${workingDir}`, "--startup-file=no", "-e", code];
 
   return new Promise<JuliaEnvResult>((resolve) => {
@@ -205,4 +239,25 @@ export async function listJuliaProjectPackages(
         installedVersion: installed.get(name),
       };
     });
+}
+
+/**
+ * Read the top-level `julia_version` a project's `Manifest.toml` was
+ * resolved with (manifest format 2.0). Feeds the load-time version check
+ * (§10.7.5) — juliaup-runner.ts compares it against the installed channels.
+ *
+ * @param dir - Directory holding `Manifest.toml` (save dir or working dir).
+ * @returns The version string (e.g. `"1.10.4"`), or null when the manifest
+ *   is missing, unparseable, or predates the field. Never throws.
+ */
+export async function readManifestJuliaVersion(dir: string): Promise<string | null> {
+  try {
+    const parse = await _loadTomlParse();
+    const manifest = parse(
+      await fs.readFile(path.join(dir, "Manifest.toml"), "utf8")
+    ) as { julia_version?: unknown };
+    return typeof manifest.julia_version === "string" ? manifest.julia_version : null;
+  } catch {
+    return null;
+  }
 }

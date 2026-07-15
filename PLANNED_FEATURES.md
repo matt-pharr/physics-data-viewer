@@ -68,7 +68,11 @@ ecosystem follow-ups:
   (ARCHITECTURE.md §10.7.4). General-registry publication remains open.
 - ~~Julia environment discovery in the Environment Selector (today: manual path entry;
   juliaup-aware discovery planned)~~ — shipped on the Julia backend branch:
-  juliaup-channel discovery + automatic shim bypass (ARCHITECTURE.md §10.7).
+  juliaup-channel discovery + automatic shim bypass (ARCHITECTURE.md §10.7),
+  plus juliaup version management — `juliaup add` from the selector, one-click
+  juliaup bootstrap, a load-time `Manifest.toml` version check (§10.7.5), and
+  a New Julia Project dialog with a version picker + initial packages,
+  matching the Python dialog (§10.6.5).
 - ~~Tree queries during long compute-bound executions~~ — shipped on the Julia
   backend branch: threaded query server on a default-pool OS thread serving a
   lock-guarded listings snapshot (ARCHITECTURE.md §5.14).

@@ -239,6 +239,7 @@ end
     @test detect_kind("s") == "text"
     @test detect_kind(UInt8[1, 2]) == "binary"
     @test detect_kind(Dict("a" => 1)) == "mapping"
+    @test detect_kind((a = 1, b = 2)) == "mapping"   # NamedTuple: dict-like display
     @test detect_kind([1.0, 2.0]) == "ndarray"
     @test detect_kind(rand(3, 3)) == "ndarray"
     @test detect_kind(Any[1, "x"]) == "sequence"
@@ -306,6 +307,18 @@ end
     @test d["storage"]["backend"] == "none"
     @test d["metadata"]["composite"] == true
     @test d["has_children"] == true
+
+    # NamedTuple: displays as a mapping but persists as ONE .jls leaf —
+    # never the composite split, which would reload as a Dict. The concrete
+    # NamedTuple type (arrays and all) must survive the round trip.
+    nt = (alpha = 1.5, fields = (b = [1.0, 2.0], label = "eq"))
+    d = serialize_node("nt", nt, dir; trusted=true)
+    @test d["type"] == "mapping"
+    @test d["storage"]["format"] == "jls"
+    @test get(d["metadata"], "composite", false) == false
+    v = deserialize_node(d["storage"], dir; trusted=true)
+    @test v isa NamedTuple && v == nt
+    @test v.fields.b == [1.0, 2.0]
 
     # sequences: inline when JSON-faithful, jls otherwise, error with array leaves
     d = serialize_node("q1", Any[1, "two", false], dir)
@@ -412,6 +425,16 @@ end
     @test tree_checksum(t2, dir) != c1                     # content-sensitive
     # sequence flavor matters
     @test node_digest((1, 2), dir) != node_digest([1, 2], dir)
+
+    # NamedTuples digest via the mapping walk (sorted field names) and stay
+    # stable across a .jls round trip — arrays inside included.
+    nt = (alpha = 1.5, fields = (b = [1.0, 2.0], label = "eq"))
+    @test node_digest(nt, dir) == node_digest((fields = (label = "eq", b = [1.0, 2.0]), alpha = 1.5), dir)
+    io_nt = IOBuffer()
+    Serialization.serialize(io_nt, nt)
+    seekstart(io_nt)
+    @test node_digest(nt, dir) == node_digest(Serialization.deserialize(io_nt), dir)
+    @test node_digest(nt, dir) != node_digest(Dict("alpha" => 1.5), dir)
 
     # unknown structs digest structurally: a contained Dict's hash-table
     # layout (insertion order) must not leak into the digest, and a
@@ -814,6 +837,31 @@ end
     nodes = response_of(captured, "pdv.tree.list")["payload"]["nodes"]
     @test [n["key"] for n in nodes] == ["1", "2"]
     @test all(n["parent_is_opaque"] == true for n in nodes)
+
+    # tree.list on a NamedTuple: expandable like a nested dict, keyed by
+    # field name, read-only children (§5.14 — e.g. a solver's results bundle)
+    tree["nt"] = (alpha = 1.5, fields = (b = [1.0, 2.0], label = "eq"))
+    captured = run_handler(tree, "pdv.tree.list", Dict{String,Any}("path" => ""))
+    root_nodes = response_of(captured, "pdv.tree.list")["payload"]["nodes"]
+    nt_node = only(n for n in root_nodes if n["key"] == "nt")
+    @test nt_node["type"] == "mapping"
+    @test nt_node["has_children"] == true
+    @test nt_node["preview"] == "namedtuple (2 keys)"
+    @test nt_node["python_type"] == "Core.NamedTuple"
+    captured = run_handler(tree, "pdv.tree.list", Dict{String,Any}("path" => "nt"))
+    nodes = response_of(captured, "pdv.tree.list")["payload"]["nodes"]
+    byname = Dict(n["key"] => n for n in nodes)
+    @test Set(keys(byname)) == Set(["alpha", "fields"])
+    @test byname["fields"]["has_children"] == true
+    @test all(n["parent_is_opaque"] == true for n in nodes)
+
+    # dot-path traversal through NamedTuple fields (get + tree.get)
+    @test tree["nt.fields.b"] == [1.0, 2.0]
+    @test tree["nt.fields.label"] == "eq"
+    @test haskey(tree, "nt.fields.b")
+    @test !haskey(tree, "nt.fields.nope")
+    captured = run_handler(tree, "pdv.tree.get", Dict{String,Any}("path" => "nt.fields.label"))
+    @test occursin("eq", response_of(captured, "pdv.tree.get")["payload"]["value"])
 
     # tree.list errors
     captured = run_handler(tree, "pdv.tree.list", Dict{String,Any}("path" => "nope"))
@@ -1501,6 +1549,28 @@ end
     pre = PDVKernel._package_spec("Example@0.5.5-rc1")
     @test pre.name == "Example"
     @test pre.version == "0.5.5-rc1"
+end
+
+@testset "threaded-region leak heal (preexecute hook)" begin
+    # Nothing leaked → no-op.
+    @test ccall(:jl_in_threaded_region, Cint, ()) == 0
+    @test PDVKernel.heal_threaded_region_leak!() == false
+
+    # Simulate the leak an interrupted `@threads` loop leaves behind
+    # (threading_run enters the region but its exit is skipped when the
+    # waiting task unwinds): the heal clears it and reports doing so.
+    ccall(:jl_enter_threaded_region, Cvoid, ())
+    @test ccall(:jl_in_threaded_region, Cint, ()) != 0
+    @test (@test_logs (:warn, r"leaked threaded-region") PDVKernel.heal_threaded_region_leak!()) == true
+    @test ccall(:jl_in_threaded_region, Cint, ()) == 0
+
+    # `@threads :static` works again after the heal (this is the exact call
+    # that errors with "cannot be used concurrently or nested" pre-heal).
+    acc = zeros(Int, 4)
+    Threads.@threads :static for i in 1:4
+        acc[i] = i
+    end
+    @test acc == [1, 2, 3, 4]
 end
 
 end # top-level testset

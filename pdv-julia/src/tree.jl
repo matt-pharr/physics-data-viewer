@@ -442,8 +442,8 @@ end
     _resolve_nested(obj, parts) -> Any
 
 Recursively resolve path segments through nested containers: dicts by string
-key, vectors/tuples by (1-based) integer index. Throws `KeyError` on a
-missing segment.
+key, NamedTuples by field name, vectors/tuples by (1-based) integer index.
+Throws `KeyError` on a missing segment.
 """
 function _resolve_nested(obj, parts::Vector{String})
     current = obj
@@ -451,6 +451,10 @@ function _resolve_nested(obj, parts::Vector{String})
         if current isa AbstractPDVTree || current isa AbstractDict
             _child_has(current, part) || throw(KeyError(part))
             current = _child_get(current, part)
+        elseif current isa NamedTuple
+            sym = Symbol(part)
+            haskey(current, sym) || throw(KeyError(part))
+            current = current[sym]
         elseif current isa AbstractVector || current isa Tuple
             current = current[_sequence_index(current, part)]
         else

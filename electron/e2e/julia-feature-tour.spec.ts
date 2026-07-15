@@ -88,6 +88,8 @@ test("02 Julia kernel boots to Connected", async () => {
   test.setTimeout(300_000);
   const { window } = launched;
   await window.getByRole("button", { name: "New Julia Project" }).click();
+  // §10.6.5: the New Julia Project dialog (version + packages) - accept defaults.
+  await window.getByTestId("new-julia-project-create").click();
   await expectKernelReady(window, 240_000);
   await shot(window, "02-kernel-connected");
 });
@@ -354,6 +356,7 @@ test("12 project save → reopen restores the Julia tree", async () => {
   const second = await launchPDV({ preferences: { juliaPath }, env: JULIA_ENV });
   try {
     await second.window.getByRole("button", { name: "New Julia Project" }).click();
+    await second.window.getByTestId("new-julia-project-create").click();
     await expectKernelReady(second.window, 240_000);
     await second.window.evaluate(async (dir) => {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any

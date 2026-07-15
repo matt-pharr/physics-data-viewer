@@ -241,6 +241,8 @@ end
 # Dict keys sent over the wire lose their Julia type (Symbol → String, etc).
 # Try the raw value first, then a few faithful coercions.
 function _namespace_key_lookup(dict, raw)
+    # NamedTuples only accept Symbol/Int keys — haskey(nt, ::String) throws.
+    dict isa NamedTuple && raw isa AbstractString && return dict[Symbol(raw)]
     haskey(dict, raw) && return dict[raw]
     if raw isa AbstractString
         sym = Symbol(raw)

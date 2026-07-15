@@ -24,6 +24,7 @@ import {
   resolveJuliaShim,
 } from "./julia-discovery";
 import { instantiateJuliaEnvironment } from "./julia-env";
+import { checkJuliaVersionForLoad, juliaupStatus } from "./juliaup-runner";
 import {
   PDVMessage,
   PDVMessageType,
@@ -428,6 +429,34 @@ describe("@slow Cross-boundary integration (Julia + Electron)", { timeout: 300_0
             }
           })
         ).toBe(true);
+      }
+    });
+  });
+
+  describe("juliaup version management (§10.7.5)", () => {
+    it("finds the real juliaup and assesses a mismatched manifest (read-only)", async () => {
+      const status = juliaupStatus();
+      if (!status.installed) {
+        return; // machine without juliaup — nothing to assert
+      }
+      expect(fsSync.existsSync(status.juliaupPath!)).toBe(true);
+
+      // A manifest resolved with an ancient minor no channel provides:
+      // the check must produce the acquire-offer payload, never throw.
+      const saveDir = await fs.mkdtemp(path.join(os.tmpdir(), "pdv-jv-int-"));
+      try {
+        await fs.writeFile(
+          path.join(saveDir, "Manifest.toml"),
+          'julia_version = "1.0.5"\nmanifest_format = "2.0"\n'
+        );
+        const check = await checkJuliaVersionForLoad(saveDir, "1.11.6");
+        expect(check).toMatchObject({
+          manifestVersion: "1.0.5",
+          channel: "1.0",
+          juliaupInstalled: true,
+        });
+      } finally {
+        await fs.rm(saveDir, { recursive: true, force: true });
       }
     });
   });

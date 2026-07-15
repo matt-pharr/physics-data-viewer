@@ -13,9 +13,25 @@ import * as path from "path";
 
 import {
   instantiateJuliaEnvironment,
+  juliaPackageSpecExpr,
   listJuliaProjectPackages,
   parseJuliaVersion,
+  readManifestJuliaVersion,
 } from "./julia-env";
+
+describe("juliaPackageSpecExpr()", () => {
+  it("wraps a bare name in a PackageSpec", () => {
+    expect(juliaPackageSpecExpr("DataFrames")).toBe(
+      'Pkg.PackageSpec(name="DataFrames")'
+    );
+  });
+
+  it("translates a Name@version pin (Pkg.add(::String) rejects @)", () => {
+    expect(juliaPackageSpecExpr("CSV@1.6")).toBe(
+      'Pkg.PackageSpec(name="CSV", version="1.6")'
+    );
+  });
+});
 
 describe("parseJuliaVersion()", () => {
   it("extracts the version from the marker line", () => {
@@ -91,6 +107,19 @@ describe("instantiateJuliaEnvironment()", () => {
     expect(result.success).toBe(true);
     expect(result.output).toContain(`--project=${dir}`);
     expect(result.output).toContain("--startup-file=no");
+  });
+
+  it("runs Pkg.add with initial packages for a new project (§10.6.5)", async () => {
+    const stub = await writeStub("julia-pkgs", 'echo "$@"');
+
+    const result = await instantiateJuliaEnvironment(dir, stub, {
+      packages: ["DataFrames", "CSV@1.6"],
+    });
+
+    expect(result.output).toContain(
+      'Pkg.add([Pkg.PackageSpec(name="DataFrames"), Pkg.PackageSpec(name="CSV", version="1.6")])'
+    );
+    expect(result.output).not.toContain("Pkg.instantiate()");
   });
 });
 
@@ -183,5 +212,35 @@ describe("listJuliaProjectPackages() (§10.6.8)", () => {
     expect(packages).toEqual([
       { name: "NPZ", spec: "NPZ", installedVersion: undefined },
     ]);
+  });
+});
+
+describe("readManifestJuliaVersion() (§10.7.5)", () => {
+  let dir: string;
+
+  beforeEach(async () => {
+    dir = await fs.mkdtemp(path.join(os.tmpdir(), "pdv-julia-manifest-"));
+  });
+
+  afterEach(async () => {
+    await fs.rm(dir, { recursive: true, force: true });
+  });
+
+  it("reads the top-level julia_version", async () => {
+    await fs.writeFile(
+      path.join(dir, "Manifest.toml"),
+      'julia_version = "1.10.4"\nmanifest_format = "2.0"\n\n[[deps.NPZ]]\nversion = "0.4.3"\n'
+    );
+    expect(await readManifestJuliaVersion(dir)).toBe("1.10.4");
+  });
+
+  it("returns null when the manifest is missing, malformed, or predates the field", async () => {
+    expect(await readManifestJuliaVersion(dir)).toBeNull();
+
+    await fs.writeFile(path.join(dir, "Manifest.toml"), "not [ toml");
+    expect(await readManifestJuliaVersion(dir)).toBeNull();
+
+    await fs.writeFile(path.join(dir, "Manifest.toml"), 'manifest_format = "2.0"\n');
+    expect(await readManifestJuliaVersion(dir)).toBeNull();
   });
 });

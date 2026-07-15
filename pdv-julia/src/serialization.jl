@@ -96,6 +96,10 @@ Module-qualified type string for any value (e.g. `"Core.Int64"`,
 `python_type` for wire-schema compatibility.
 """
 function julia_type_string(value)::String
+    # A nested NamedTuple's parametric type spells out every field of every
+    # level — kilobytes per descriptor for deep results. The bare name is
+    # what the tree chip needs.
+    value isa NamedTuple && return "Core.NamedTuple"
     T = typeof(value)
     try
         s = string(T)
@@ -129,6 +133,9 @@ function detect_kind(value)::String
     value isa AbstractString && return KIND_TEXT
     value isa Vector{UInt8} && return KIND_BINARY
     value isa AbstractDict && return KIND_MAPPING
+    # NamedTuples display as mappings — expandable in the tree, keyed by
+    # field name — but save as one .jls leaf (see _serialize_mapping!).
+    value isa NamedTuple && return KIND_MAPPING
     _is_numeric_array(value) && return KIND_NDARRAY
     (value isa AbstractVector || value isa Tuple || value isa AbstractSet) && return KIND_SEQUENCE
     is_dataframe(value) && return KIND_DATAFRAME
@@ -215,6 +222,7 @@ function node_preview(value, kind::String)::String
         elseif kind == KIND_BINARY
             return "bytes ($(length(value)) bytes)"
         elseif kind == KIND_MAPPING
+            value isa NamedTuple && return "namedtuple ($(length(value)) keys)"
             return "dict ($(length(value)) keys)"
         elseif kind == KIND_SEQUENCE
             noun = value isa Tuple ? "tuple" : value isa AbstractSet ? "set" : "vector"
@@ -583,6 +591,13 @@ function _serialize_text!(value, descriptor, ctx)
 end
 
 function _serialize_mapping!(value, descriptor, ctx)
+    if value isa NamedTuple
+        # NamedTuples display as mappings (§5.14) but persist as a single
+        # .jls leaf: they are immutable and their concrete type is part of
+        # the data — a composite per-child split would reload as a Dict.
+        write = () -> _jls_node!(value, descriptor, ctx)
+        return _serialize_via_cache(write, value, descriptor, ctx)
+    end
     if _can_inline_json(value)
         descriptor["storage"] = _inline_storage(value)
         descriptor["metadata"] = Dict{String,Any}("preview" => ctx.preview)

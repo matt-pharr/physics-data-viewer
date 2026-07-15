@@ -39,6 +39,7 @@ import { ModuleManager } from "./module-manager";
 import { bindProjectModulesToTree } from "./module-runtime";
 import { syncPkgEnvironmentForLoad, syncUvEnvironmentForLoad } from "./project-file-sync";
 import { instantiateJuliaEnvironment } from "./julia-env";
+import { checkJuliaVersionForLoad } from "./juliaup-runner";
 import {
   ProjectManager,
   type ProjectModuleImport,
@@ -708,6 +709,9 @@ export function registerIpcHandlers(
           return { success: result.success, output: result.output };
         },
       }),
+    // Advisory Julia-version assessment on pkg-project open (§10.7.5).
+    checkJuliaVersionForLoad: (saveDir, runningVersion) =>
+      checkJuliaVersionForLoad(saveDir, runningVersion),
     onExplicitSaveCompleted: (saveDir) => {
       void ProjectManager.clearAutosave(saveDir);
       projectManager.resetAutosaveTimer();

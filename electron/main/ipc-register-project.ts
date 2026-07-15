@@ -18,7 +18,7 @@ import { type BrowserWindow } from "electron";
 import { handleIpc } from "./ipc-registry";
 
 import type { CommRouter } from "./comm-router";
-import type { ActiveEnvironmentInfo, CodeCellData } from "./ipc";
+import type { ActiveEnvironmentInfo, CodeCellData, JuliaVersionLoadCheck } from "./ipc";
 import { IPC } from "./ipc";
 import { ModuleManager } from "./module-manager";
 import { setupProjectModuleNamespaces } from "./module-runtime";
@@ -95,6 +95,17 @@ interface RegisterProjectIpcHandlersOptions {
     saveDir: string,
     workingDir: string
   ) => Promise<LoadEnvSyncResult>;
+  /**
+   * Compare the opened pkg project's `Manifest.toml` `julia_version` with
+   * the session's Julia and the installed juliaup channels (§10.7.5 —
+   * `checkJuliaVersionForLoad` in juliaup-runner.ts). The result rides the
+   * load result so the renderer can offer a `juliaup add`; advisory only,
+   * never blocks the load.
+   */
+  checkJuliaVersionForLoad?: (
+    saveDir: string,
+    runningVersion?: string
+  ) => Promise<JuliaVersionLoadCheck | undefined>;
   /** Called after a successful explicit save to clean up autosave state. */
   onExplicitSaveCompleted?: (saveDir: string) => void;
 }
@@ -305,6 +316,7 @@ export function registerProjectIpcHandlers(
     getActiveKernelEnvMeta,
     syncUvEnvironmentForLoad,
     syncPkgEnvironmentForLoad,
+    checkJuliaVersionForLoad,
     onExplicitSaveCompleted,
   } = options;
 
@@ -502,6 +514,7 @@ export function registerProjectIpcHandlers(
     // Copy file-backed node files from save dir into working dir before kernel load.
     let loadFailedPaths: string[] = [];
     let envSyncWarning: string | undefined;
+    let juliaVersionCheck: JuliaVersionLoadCheck | undefined;
     const activeKernelId = getActiveKernelId();
     if (activeKernelId) {
       const workingDir = kernelWorkingDirs.get(activeKernelId);
@@ -532,6 +545,19 @@ export function registerProjectIpcHandlers(
             envSyncWarning =
               "Failed to update the session environment for this project — " +
               "its packages may be unavailable.";
+          }
+        }
+        // Advisory Julia-version assessment (§10.7.5): does the project's
+        // Manifest.toml resolution version match the session, and if not,
+        // is the matching juliaup channel installed? Never blocks the load.
+        if (activeEnvMode === "pkg" && checkJuliaVersionForLoad) {
+          try {
+            juliaVersionCheck = await checkJuliaVersionForLoad(
+              saveDir,
+              getActiveKernelEnvMeta()?.juliaVersion
+            );
+          } catch (err) {
+            console.warn("[ipc-register-project] julia version check failed:", err);
           }
         }
         const win = getMainWindow();
@@ -641,6 +667,7 @@ export function registerProjectIpcHandlers(
       codeCells, checksum, checksumValid, nodeCount, savedPdvVersion, projectName,
       missingFiles: loadFailedPaths.length > 0 ? loadFailedPaths : undefined,
       envSyncWarning,
+      juliaVersionCheck,
     };
   });
 

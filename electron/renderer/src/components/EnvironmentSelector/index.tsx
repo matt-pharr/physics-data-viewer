@@ -153,6 +153,19 @@ export const EnvironmentSelector: React.FC<EnvironmentSelectorProps> = ({
   const [juliaInstallResult, setJuliaInstallResult] = useState<{ success: boolean; output: string } | null>(null);
   const juliaOutputRef = useRef<HTMLPreElement>(null);
 
+  // -- juliaup version management state (§10.7.5) -----------------------------
+  // null = presence not yet known (first scan in flight).
+  const [juliaupInstalled, setJuliaupInstalled] = useState<boolean | null>(null);
+  const [addVersionText, setAddVersionText] = useState('');
+  const [addingVersion, setAddingVersion] = useState(false);
+  const [addVersionOutput, setAddVersionOutput] = useState<string[]>([]);
+  const [addVersionResult, setAddVersionResult] = useState<{ success: boolean; output: string } | null>(null);
+  const addVersionOutputRef = useRef<HTMLPreElement>(null);
+  const [installingJuliaup, setInstallingJuliaup] = useState(false);
+  const [juliaupInstallOutput, setJuliaupInstallOutput] = useState<string[]>([]);
+  const [juliaupInstallResult, setJuliaupInstallResult] = useState<{ success: boolean; output: string } | null>(null);
+  const juliaupOutputRef = useRef<HTMLPreElement>(null);
+
   // The selector can unmount mid-flight (host dialog dismissed during a
   // discovery scan or a pdv-python install); async handlers must not set
   // state afterwards.
@@ -347,9 +360,13 @@ export const EnvironmentSelector: React.FC<EnvironmentSelectorProps> = ({
     setJuliaLoading(true);
     setJuliaError(null);
     try {
-      const runtimes = await window.pdv.environment.listJulia();
+      const [runtimes, juliaup] = await Promise.all([
+        window.pdv.environment.listJulia(),
+        window.pdv.environment.juliaupStatus(),
+      ]);
       if (!mountedRef.current) return null;
       setJuliaRuntimes(runtimes);
+      setJuliaupInstalled(juliaup.installed);
       return runtimes;
     } catch (err) {
       if (!mountedRef.current) return null;
@@ -482,6 +499,85 @@ export const EnvironmentSelector: React.FC<EnvironmentSelectorProps> = ({
       onSelect({ juliaPath: selectedJuliaPath });
     }
   }, [selectedJuliaPath, selectedJuliaInfo, onSelect]);
+
+  // -- juliaup version management (§10.7.5) -----------------------------------
+
+  const handleJuliaupAdd = useCallback(async () => {
+    const channel = addVersionText.trim();
+    if (!channel) return;
+    setAddingVersion(true);
+    setAddVersionOutput([]);
+    setAddVersionResult(null);
+
+    const unsubscribe = window.pdv.environment.onInstallOutput((chunk: InstallOutputChunk) => {
+      if (mountedRef.current) setAddVersionOutput((prev) => [...prev, chunk.data]);
+    });
+
+    try {
+      const result = await window.pdv.environment.juliaupAdd(channel);
+      if (!mountedRef.current) return;
+      setAddVersionResult(result);
+      if (result.success) {
+        setAddVersionText('');
+        // The new channel appears in the discovery list; its default env
+        // will need the one-click PDVKernel install (badges show that).
+        await loadJuliaRuntimes();
+      }
+    } catch (err) {
+      if (mountedRef.current) {
+        setAddVersionResult({
+          success: false,
+          output: err instanceof Error ? err.message : String(err),
+        });
+      }
+    } finally {
+      unsubscribe();
+      if (mountedRef.current) setAddingVersion(false);
+    }
+  }, [addVersionText, loadJuliaRuntimes]);
+
+  const handleInstallJuliaup = useCallback(async () => {
+    setInstallingJuliaup(true);
+    setJuliaupInstallOutput([]);
+    setJuliaupInstallResult(null);
+
+    const unsubscribe = window.pdv.environment.onInstallOutput((chunk: InstallOutputChunk) => {
+      if (mountedRef.current) setJuliaupInstallOutput((prev) => [...prev, chunk.data]);
+    });
+
+    try {
+      const result = await window.pdv.environment.installJuliaup();
+      if (!mountedRef.current) return;
+      setJuliaupInstallResult(result);
+      if (result.success) {
+        // The installer also installs a default Julia — rescan picks up
+        // both juliaup presence and the new channel.
+        await loadJuliaRuntimes();
+      }
+    } catch (err) {
+      if (mountedRef.current) {
+        setJuliaupInstallResult({
+          success: false,
+          output: err instanceof Error ? err.message : String(err),
+        });
+      }
+    } finally {
+      unsubscribe();
+      if (mountedRef.current) setInstallingJuliaup(false);
+    }
+  }, [loadJuliaRuntimes]);
+
+  // Auto-scroll the juliaup streaming panes
+  useEffect(() => {
+    if (addVersionOutputRef.current) {
+      addVersionOutputRef.current.scrollTop = addVersionOutputRef.current.scrollHeight;
+    }
+  }, [addVersionOutput]);
+  useEffect(() => {
+    if (juliaupOutputRef.current) {
+      juliaupOutputRef.current.scrollTop = juliaupOutputRef.current.scrollHeight;
+    }
+  }, [juliaupInstallOutput]);
 
   // -- Can the user confirm selection? ---------------------------------------
   // Free-threaded (no-GIL) Python builds cannot run a PDV kernel because
@@ -688,9 +784,9 @@ export const EnvironmentSelector: React.FC<EnvironmentSelectorProps> = ({
 
         {!juliaLoading && !juliaError && juliaRuntimes.length === 0 && (
           <div className="env-list-empty">
-            No Julia runtimes found. Install Julia with juliaup
-            (https://julialang.org/install/) or use Browse to locate a Julia
-            executable.
+            {juliaupInstalled === false
+              ? 'No Julia runtimes found. Use "Install juliaup" below to set everything up automatically, or Browse to locate a Julia executable.'
+              : 'No Julia runtimes found. Add a version below with juliaup, or use Browse to locate a Julia executable.'}
           </div>
         )}
 
@@ -737,6 +833,81 @@ export const EnvironmentSelector: React.FC<EnvironmentSelectorProps> = ({
           {juliaLoading ? 'Scanning...' : 'Refresh'}
         </button>
       </div>
+
+      {/* juliaup bootstrap — offered when juliaup is absent (§10.7.5). */}
+      {juliaupInstalled === false && (
+        <div className="env-install-panel">
+          <div className="env-install-header">
+            juliaup (the Julia version manager) is not installed. PDV uses it
+            to install and switch Julia versions; installing it also installs
+            the latest Julia.
+          </div>
+          <button
+            className="btn btn-primary"
+            onClick={() => void handleInstallJuliaup()}
+            disabled={installingJuliaup}
+            type="button"
+          >
+            {installingJuliaup
+              ? 'Installing juliaup... (this can take a few minutes)'
+              : 'Install juliaup'}
+          </button>
+          {(juliaupInstallOutput.length > 0 || juliaupInstallResult) && (
+            <pre className="env-install-output" ref={juliaupOutputRef}>
+              {juliaupInstallOutput.length > 0
+                ? juliaupInstallOutput.join('')
+                : juliaupInstallResult?.output ?? ''}
+            </pre>
+          )}
+          {juliaupInstallResult && (
+            <div className={juliaupInstallResult.success ? 'env-install-success' : 'error-text'}>
+              {juliaupInstallResult.success
+                ? 'juliaup installed.'
+                : 'juliaup installation failed.'}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Version acquisition — `juliaup add <channel>` (§10.7.5). */}
+      {juliaupInstalled === true && (
+        <div className="env-add-version">
+          <input
+            type="text"
+            placeholder='Add a Julia version with juliaup (e.g. "1.10", "lts", "rc")'
+            value={addVersionText}
+            onChange={(e) => setAddVersionText(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') void handleJuliaupAdd();
+            }}
+            disabled={addingVersion}
+          />
+          <button
+            className="btn btn-secondary"
+            onClick={() => void handleJuliaupAdd()}
+            disabled={addingVersion || !addVersionText.trim()}
+            type="button"
+          >
+            {addingVersion ? 'Adding...' : 'Add'}
+          </button>
+        </div>
+      )}
+      {(addVersionOutput.length > 0 || addVersionResult) && (
+        <>
+          <pre className="env-install-output" ref={addVersionOutputRef}>
+            {addVersionOutput.length > 0
+              ? addVersionOutput.join('')
+              : addVersionResult?.output ?? ''}
+          </pre>
+          {addVersionResult && (
+            <div className={addVersionResult.success ? 'env-install-success' : 'error-text'}>
+              {addVersionResult.success
+                ? 'Julia version installed — select its channel above and install PDVKernel into it.'
+                : 'juliaup add failed.'}
+            </div>
+          )}
+        </>
+      )}
 
       {/* Install panel — visible when the selected runtime needs PDVKernel/IJulia. */}
       {juliaNeedsInstall && (

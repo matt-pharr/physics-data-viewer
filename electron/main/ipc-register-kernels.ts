@@ -17,7 +17,7 @@ import { randomUUID } from "node:crypto";
 import * as fs from "fs/promises";
 import * as path from "path";
 
-import { BrowserWindow } from "electron";
+import { app, BrowserWindow } from "electron";
 import { handleIpc } from "./ipc-registry";
 
 import { CommRouter } from "./comm-router";
@@ -35,6 +35,8 @@ import { ProjectManager } from "./project-manager";
 import { autosaveDirFor } from "./autosave-sidecars";
 import { discoverDefaultJulia, resolveJuliaShim } from "./julia-discovery";
 import { instantiateJuliaEnvironment, type JuliaEnvResult } from "./julia-env";
+import { ensureJuliaVersionReady } from "./juliaup-runner";
+import { SUPPORTED_JULIA_VERSIONS } from "./julia-versions";
 import { materializeUvEnvironment } from "./uv-environment";
 import { resolveUvBinary } from "./uv-runner";
 import { generatePyproject } from "./pyproject";
@@ -344,6 +346,7 @@ export function registerKernelIpcHandlers(
     pkg: {
       saveDir?: string;
       newProject?: boolean;
+      packages?: string[];
       envSnapshot?: { projectToml: string; manifestToml?: string };
     },
     juliaPath: string
@@ -392,6 +395,9 @@ export function registerKernelIpcHandlers(
             win,
             pushChannel: IPC.push.envActivity,
             signal: controller.signal,
+            // New-project initial packages (§10.6.5): recorded into the
+            // fresh Project.toml by Pkg.add instead of the no-op resolve.
+            packages: pkg.newProject ? pkg.packages : undefined,
           })
         : undefined;
       return {
@@ -501,11 +507,22 @@ export function registerKernelIpcHandlers(
     let requestedSpec = spec as Parameters<KernelManager["start"]>[0];
     const requestedLanguage = requestedSpec?.language ?? "python";
     const uv = uvContext as
-      | { saveDir?: string; newProject?: boolean; pythonVersion?: string; packages?: string[] }
+      | {
+          saveDir?: string;
+          newProject?: boolean;
+          pythonVersion?: string;
+          packages?: string[];
+          juliaVersion?: string;
+        }
       | undefined;
     if (uv?.pythonVersion && !SUPPORTED_PYTHON_VERSIONS.includes(uv.pythonVersion)) {
       throw new Error(
         `Unsupported Python version "${uv.pythonVersion}". Supported: ${SUPPORTED_PYTHON_VERSIONS.join(", ")}.`
+      );
+    }
+    if (uv?.juliaVersion && !SUPPORTED_JULIA_VERSIONS.includes(uv.juliaVersion)) {
+      throw new Error(
+        `Unsupported Julia version "${uv.juliaVersion}". Supported: ${SUPPORTED_JULIA_VERSIONS.join(", ")}.`
       );
     }
 
@@ -578,12 +595,27 @@ export function registerKernelIpcHandlers(
     } else if (requestedLanguage === "julia") {
       let juliaPath = requestedSpec?.env?.JULIA_PATH ??
         (Array.isArray(requestedSpec?.argv) ? requestedSpec.argv[0] : undefined);
-      // §10.7.2: never spawn the juliaup shim — resolve the configured path
-      // to the real versioned binary, and when nothing is configured prefer
-      // the discovered juliaup default over the bare `julia` PATH fallback
-      // (which is usually the shim). Explicit argv specs (tests) are left
-      // untouched: kernel-manager spawns argv[0] directly.
-      if (!Array.isArray(requestedSpec?.argv)) {
+      if (uv?.juliaVersion && !Array.isArray(requestedSpec?.argv)) {
+        // §10.6.5: the New-Julia-Project version choice. Make the requested
+        // minor launchable — `juliaup add` when not installed, PDVKernel
+        // install into its default env when needed — streaming into the
+        // launch overlay, then spawn that channel's real binary.
+        juliaPath = await ensureJuliaVersionReady(uv.juliaVersion, {
+          stagingDir: path.join(app.getPath("userData"), "pdv-julia"),
+          win,
+          pushChannel: IPC.push.envActivity,
+        });
+        requestedSpec = {
+          ...(requestedSpec ?? {}),
+          language: "julia",
+          env: { ...(requestedSpec?.env ?? {}), JULIA_PATH: juliaPath },
+        };
+      } else if (!Array.isArray(requestedSpec?.argv)) {
+        // §10.7.2: never spawn the juliaup shim — resolve the configured path
+        // to the real versioned binary, and when nothing is configured prefer
+        // the discovered juliaup default over the bare `julia` PATH fallback
+        // (which is usually the shim). Explicit argv specs (tests) are left
+        // untouched: kernel-manager spawns argv[0] directly.
         const resolved = juliaPath
           ? resolveJuliaShim(juliaPath)
           : discoverDefaultJulia() ?? undefined;

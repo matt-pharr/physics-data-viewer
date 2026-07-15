@@ -41,6 +41,15 @@ const juliaEnvMocks = vi.hoisted(() => ({
   ]),
 }));
 
+const juliaupRunnerMocks = vi.hoisted(() => ({
+  juliaupStatus: vi.fn(() => ({
+    installed: true,
+    juliaupPath: "/home/user/.juliaup/bin/juliaup",
+  })),
+  juliaupAdd: vi.fn(async () => ({ success: true, output: "added" })),
+  installJuliaup: vi.fn(async () => ({ success: true, output: "installed" })),
+}));
+
 const uvRunnerMocks = vi.hoisted(() => ({
   uvAdd: vi.fn(async () => ({ success: true, output: "uv added" })),
   uvRemove: vi.fn(async () => ({ success: true, output: "uv removed" })),
@@ -77,6 +86,7 @@ vi.mock("./environment-detector", () => ({
 }));
 vi.mock("./julia-discovery", () => juliaDiscoveryMocks);
 vi.mock("./julia-env", () => juliaEnvMocks);
+vi.mock("./juliaup-runner", () => juliaupRunnerMocks);
 vi.mock("./uv-runner", () => uvRunnerMocks);
 vi.mock("./mcp/transcript", () => transcriptMocks);
 
@@ -238,6 +248,48 @@ describe("environment package mutations — Julia (§10.6.8)", () => {
 
     expect(result.success).toBe(false);
     expect(result.output).toContain("Unsatisfiable requirements");
+  });
+});
+
+describe("juliaup version management (§10.7.5)", () => {
+  it("juliaupStatus reports the runner's presence check", async () => {
+    setup("julia");
+
+    const result = await getHandler(IPC.environment.juliaupStatus)({});
+
+    expect(result).toEqual({
+      installed: true,
+      juliaupPath: "/home/user/.juliaup/bin/juliaup",
+    });
+  });
+
+  it("juliaupAdd forwards the channel and streams over installOutput", async () => {
+    const { win } = setup("julia");
+
+    const result = (await getHandler(IPC.environment.juliaupAdd)({}, "1.10")) as {
+      success: boolean;
+    };
+
+    expect(juliaupRunnerMocks.juliaupAdd).toHaveBeenCalledWith("1.10", {
+      win: win.win,
+      pushChannel: IPC.push.installOutput,
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it("juliaupInstall runs the official-installer bootstrap, streamed", async () => {
+    const { win } = setup("julia");
+
+    const result = (await getHandler(IPC.environment.juliaupInstall)({})) as {
+      success: boolean;
+      output: string;
+    };
+
+    expect(juliaupRunnerMocks.installJuliaup).toHaveBeenCalledWith({
+      win: win.win,
+      pushChannel: IPC.push.installOutput,
+    });
+    expect(result).toEqual({ success: true, output: "installed" });
   });
 });
 

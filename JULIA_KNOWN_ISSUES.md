@@ -130,8 +130,8 @@ streaming Pkg output. Shim bypass ships with it: every Julia launch resolves
 the configured path through `julialauncher` to the real versioned binary, and
 an unconfigured launch uses the discovered juliaup default instead of the
 PATH shim. Residual: juliaup-driven *installation* of missing Julia versions
-(auto-acquire on `Manifest.toml` version mismatch) — filed with an agreed
-design as #19.
+(auto-acquire on `Manifest.toml` version mismatch) — shipped as #19
+(2026-07-15).
 
 ### 7. ~~Tree browsing stalls during compute-bound execution~~ — FIXED (2026-07-14)
 The query server now runs on a dedicated default-pool OS thread when the
@@ -163,6 +163,13 @@ listed for completeness.
 no Julia counterpart. Julia custom types round-trip via the
 `pdv_format`/`pdv_serialize`/`pdv_deserialize` protocol instead. A
 DimensionalData.jl mapping could close this if there's demand.
+Related display gap closed 2026-07-15 (user request): **NamedTuples** now ride
+the `mapping` kind — expandable in the tree by field name (read-only children),
+dot-path navigable, `NamedTuple` chip, namespace-view children — while still
+persisting as a single `.jls` leaf so the concrete type survives save/load
+(ARCHITECTURE §7.2). Checksums flavor-tag them (nt ↔ Dict swaps digest
+differently); NamedTuples in pre-existing saves digest differently than before
+(one-time cosmetic ⚠ on reload of an old save holding one).
 
 ---
 
@@ -241,11 +248,46 @@ Marked for revisit (Matt, 2026-07-15). Two threads:
   parity-consistent gap, but if standalone-lib editing becomes a common
   workflow both kernels should reload standalone libs in the preflight too.
 
-### 19. juliaup-driven Julia version management (design agreed 2026-07-15)
+### 19. ~~juliaup-driven Julia version management~~ — IMPLEMENTED (2026-07-15)
 
-The follow-up half of #6: PDV should manage Julia *versions* the way uv
-manages Python interpreters. Design agreed with Matt — the **middle path**:
-drive the user's juliaup, never bundle it.
+The follow-up half of #6: PDV manages Julia *versions* the way uv manages
+Python interpreters. Shipped per the agreed **middle path** (ARCHITECTURE
+§10.7.5, `juliaup-runner.ts` — the juliaup single-spawn-site sibling of
+`uv-runner.ts`/`julia-env.ts`):
+
+- **Acquisition**: the selector's Julia tab has an "Add a Julia version"
+  field running `juliaup add <channel>` streamed (ANSI-stripped) over
+  `installOutput`, then rescanning the runtime list. juliaup is located via
+  PATH → `~/.juliaup/bin` → Homebrew (GUI apps miss the shell-rc PATH entry).
+- **Bootstrap**: when juliaup is absent the tab offers one-click **Install
+  juliaup** running the official script (`curl -fsSL
+  https://install.julialang.org | sh -s -- --yes`) streamed — it also
+  installs a default Julia, covering the nothing-installed case. Windows
+  resolves with Microsoft Store guidance.
+- **Load-time offer**: opening a pkg project compares the save dir's
+  `Manifest.toml` `julia_version` minor against the session and installed
+  channels (`juliaVersionCheck` on the load result). Channel installed →
+  console pointer to switch under Settings → Runtime; missing + juliaup
+  present → confirm dialog offering `juliaup add <minor>`; no juliaup →
+  pointer at the bootstrap button. Never blocks the load (§10.6.6).
+- Reminder honored in the UI copy: a newly-acquired minor has its own
+  default env, so PDVKernel/IJulia need the one-click install (#6) once per
+  version — the selector badges surface it.
+- **Version picker (2026-07-15, same day):** the **New Julia Project
+  dialog** now matches Python's (§10.6.5): a Julia-version dropdown over
+  the supported minors (installed juliaup channels marked; missing ones
+  "will be downloaded") plus an initial-packages field (`Name@version`
+  pins welcome, recorded via `Pkg.add` during the env subprocess).
+  `kernels.start` makes the chosen minor launchable before the spawn
+  (`ensureJuliaVersionReady`: `juliaup add` + the #6 PDVKernel install as
+  needed, streamed into the launch overlay) — the full uv "downloaded
+  automatically" experience. Without juliaup the dialog degrades to the
+  configured runtime with a pointer at the one-click bootstrap.
+
+Original design rationale kept below.
+
+**Original agreed design (2026-07-15):** drive the user's juliaup, never
+bundle it.
 
 - **Why not bundle (unlike uv):** uv earned bundling because it is on the hot
   path of every project open and keeps no user-global state. juliaup is
@@ -275,6 +317,22 @@ drive the user's juliaup, never bundle it.
   once per version — the selector badges already surface this.
 
 ---
+
+### 20. ~~`@threads :static` errors after an interrupted `@threads` run~~ — FIXED (2026-07-15)
+User-reported (GPEC's `sum_eigenmode_contributions`): "`@threads :static`
+cannot be used concurrently or nested" with no threading visible on the
+stack. Root cause is upstream: Base's `threading_run` has **no try/finally**
+around its wait loop, so interrupting a running `@threads` loop (PDV's
+Interrupt button → SIGINT → InterruptException unwinds the waiting task)
+leaks the global `jl_in_threaded_region` flag for the rest of the process.
+Every later `@threads :static` then errors (its only guard is that flag)
+while `:dynamic` keeps working — classic "worked until I interrupted once".
+Fix: PDVKernel installs an IJulia **preexecute hook**
+(`heal_threaded_region_leak!`) that clears a set flag before each cell —
+cells are serialized, so a set flag at cell start is always the leak — and
+logs a warning explaining what happened. Manual escape hatch in any Julia:
+`ccall(:jl_exit_threaded_region, Cvoid, ())`. Note PDV's `--threads=auto,1`
+spawn gives `@threads` the full default-thread pool; it is not the cause.
 
 ## Test-coverage gaps (code is language-agnostic + kernel handlers unit-tested,
 but not driven end-to-end on a Julia session)

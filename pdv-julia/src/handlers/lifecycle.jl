@@ -53,9 +53,55 @@ function handle_init(msg::AbstractDict)
         rebuild_query_cache!(tree)
         _install_postexecute_cache_hook()
     end
+    _install_preexecute_thread_heal_hook()
 
     reset_cwd_to_home()
     send_message("pdv.init.response", Dict{String,Any}(); in_reply_to=msg_id)
+    nothing
+end
+
+"""
+    heal_threaded_region_leak!() -> Bool
+
+Clear Base's global `jl_in_threaded_region` flag when it has leaked.
+
+Base's `threading_run` has no try/finally around its wait loop, so
+interrupting a running `@threads` loop (PDV's Interrupt button / Ctrl-C)
+leaves the flag set for the rest of the process — after which every
+`@threads :static` call errors with "cannot be used concurrently or
+nested" even though nothing is running. The kernel serializes cell
+execution, so a set flag at cell start is that leak (the one exception —
+a user-`@spawn`ed background task mid-`@threads` — is unharmed by the
+clear: its `threading_run` re-clears the flag on exit anyway).
+
+Returns true when a leak was cleared (a warning is logged so the console
+explains what happened).
+"""
+function heal_threaded_region_leak!()::Bool
+    ccall(:jl_in_threaded_region, Cint, ()) == 0 && return false
+    ccall(:jl_exit_threaded_region, Cvoid, ())
+    @warn "PDV cleared a leaked threaded-region flag (a previous `@threads` " *
+          "loop was likely interrupted mid-run); without this, " *
+          "`@threads :static` would error until the session restarts."
+    return true
+end
+
+# Idempotent registration of the IJulia preexecute heal hook: runs
+# heal_threaded_region_leak!() before every cell so an interrupted
+# `@threads` run can't poison later `@threads :static` calls.
+const _preexecute_hook_installed = Ref(false)
+function _install_preexecute_thread_heal_hook()
+    _preexecute_hook_installed[] && return nothing
+    try
+        IJulia.push_preexecute_hook!(() -> begin
+            heal_threaded_region_leak!()
+            nothing
+        end)
+        _preexecute_hook_installed[] = true
+    catch err
+        # Kernel-free sessions (tests) have no IJulia event loop.
+        @debug "preexecute thread-heal hook not installed" exception = err
+    end
     nothing
 end
 

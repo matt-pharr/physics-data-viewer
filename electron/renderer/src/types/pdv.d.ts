@@ -252,6 +252,12 @@ export interface ProjectLoadResult {
    * opened project (e.g. Python-pin mismatch or a failed `uv sync`).
    */
   envSyncWarning?: string;
+  /**
+   * Present when a pkg-mode Julia project was resolved with a different
+   * Julia minor than the session is running (§10.7.5). The load itself
+   * always proceeds.
+   */
+  juliaVersionCheck?: JuliaVersionLoadCheck;
 }
 
 /** Lightweight manifest peek returned before kernel start. */
@@ -283,7 +289,7 @@ export interface ProjectManifestPeek {
  * environment session — for Python, materialize the uv environment and
  * launch against the venv interpreter (§10.5.9); for Julia, seed the
  * project's `Project.toml`/`Manifest.toml`, activate via `JULIA_PROJECT`,
- * and `Pkg.instantiate` (§10.6). `pythonVersion`/`packages` are Python-only.
+ * and `Pkg.instantiate` (§10.6).
  */
 export interface KernelUvContext {
   /** Opening an existing uv/pkg project: its save directory. */
@@ -296,11 +302,18 @@ export interface KernelUvContext {
    */
   pythonVersion?: string;
   /**
-   * Initial PEP 508 dependency specs for a new project's `pyproject.toml`.
-   * Only meaningful with `newProject`; defaults to the global default
-   * packages when absent.
+   * Initial dependency specs for a new project, chosen in the New Project
+   * dialog: PEP 508 specs (Python) or package names with optional
+   * `Name@version` pins (Julia). Only meaningful with `newProject`.
    */
   packages?: string[];
+  /**
+   * Julia minor for a new pkg-mode project (e.g. `"1.10"`), chosen in the
+   * New Julia Project dialog (§10.6.5). The main process acquires it with
+   * juliaup and installs PDVKernel into it as needed before the kernel
+   * spawns. Only meaningful with `newProject`.
+   */
+  juliaVersion?: string;
 }
 
 /**
@@ -807,6 +820,49 @@ export interface JuliaRuntimeInfo {
   ijuliaInstalled: boolean;
 }
 
+/**
+ * A juliaup channel entry parsed from `juliaup.json` (§10.7.1).
+ * Mirrors `JuliaupChannel` in `main/julia-discovery.ts`.
+ */
+export interface JuliaupChannel {
+  /** Channel name (`"release"`, `"lts"`, `"1.10"`, a linked name, ...). */
+  channel: string;
+  /** Absolute path to the channel's Julia executable. */
+  juliaPath: string;
+  /** Version string (e.g. `"1.11.6"`), or null for linked channels. */
+  version: string | null;
+  /** True when this is the `Default` channel. */
+  isDefault: boolean;
+}
+
+/**
+ * Presence report for the user's juliaup installation (§10.7.5).
+ * Mirrors `JuliaupStatus` in `main/juliaup-runner.ts`.
+ */
+export interface JuliaupStatus {
+  /** True when a juliaup executable was found. */
+  installed: boolean;
+  /** Absolute path to the juliaup executable, or null when absent. */
+  juliaupPath: string | null;
+}
+
+/**
+ * Load-time Julia version assessment for a pkg-mode project (§10.7.5).
+ * Mirrors `JuliaVersionLoadCheck` in `main/juliaup-runner.ts`.
+ */
+export interface JuliaVersionLoadCheck {
+  /** `julia_version` recorded in the project's `Manifest.toml`. */
+  manifestVersion: string;
+  /** The juliaup channel that would provide it (`"1.10"`). */
+  channel: string;
+  /** Julia version the session is running, when known. */
+  runningVersion?: string;
+  /** True when an installed juliaup channel already provides that minor. */
+  channelInstalled: boolean;
+  /** True when juliaup itself is installed. */
+  juliaupInstalled: boolean;
+}
+
 /** Result of a streaming pip install operation. */
 export interface EnvironmentInstallResult {
   success: boolean;
@@ -1068,6 +1124,23 @@ export interface PDVApi {
      * (§10.7.4). Streams Pkg output via `onInstallOutput`.
      */
     installJulia(juliaPath: string): Promise<EnvironmentInstallResult>;
+    /** Is the user's juliaup installed, and where (§10.7.5)? */
+    juliaupStatus(): Promise<JuliaupStatus>;
+    /**
+     * Installed juliaup channels, filesystem-only (§10.7.1) — instant.
+     * Feeds the New Julia Project dialog's version dropdown.
+     */
+    juliaupChannels(): Promise<JuliaupChannel[]>;
+    /**
+     * Acquire a Julia version (`juliaup add <channel>`, §10.7.5). Streams
+     * ANSI-stripped output via `onInstallOutput`.
+     */
+    juliaupAdd(channel: string): Promise<EnvironmentInstallResult>;
+    /**
+     * Bootstrap juliaup via the official installer script (§10.7.5), which
+     * also installs a default Julia. Streams output via `onInstallOutput`.
+     */
+    installJuliaup(): Promise<EnvironmentInstallResult>;
   };
   modules: {
     listInstalled(): Promise<ModuleDescriptor[]>;
@@ -1235,6 +1308,10 @@ export interface PDVApi {
     platform: NodeJS.Platform;
     /** CPython minor versions offered by the New Project dialog, oldest first. */
     supportedPythonVersions: readonly string[];
+    /** Julia minors offered by the New Julia Project dialog, oldest first. */
+    supportedJuliaVersions: readonly string[];
+    /** Fallback preselected Julia version when no juliaup default applies. */
+    defaultJuliaVersion: string;
     /** Version preselected in the New Project dialog (e.g. `"3.13"`). */
     defaultPythonVersion: string;
   };

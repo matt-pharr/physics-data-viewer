@@ -30,9 +30,11 @@ end
     handle_tree_list(msg)
 
 Handle `pdv.tree.list`: return the children of the node at `path` as node
-descriptor Dicts. Dict children carry their own keys; vector/tuple children
-get stringified 1-based indices and a `parent_is_opaque` flag so the
-renderer suppresses structural mutations on them.
+descriptor Dicts. Dict children carry their own keys; NamedTuple children
+their field names; vector/tuple children get stringified 1-based indices.
+NamedTuple and vector/tuple children carry a `parent_is_opaque` flag so the
+renderer suppresses structural mutations on them (their parents are not
+key-addressable stores — NamedTuples are immutable).
 """
 function handle_tree_list(msg::AbstractDict)
     msg_id = get(msg, "msg_id", nothing)
@@ -51,7 +53,7 @@ function handle_tree_list(msg::AbstractDict)
                        "No node at path: '$path'"; in_reply_to=msg_id)
             return nothing
         end
-        if !(container isa Union{AbstractPDVTree,AbstractDict,AbstractVector,Tuple})
+        if !(container isa Union{AbstractPDVTree,AbstractDict,NamedTuple,AbstractVector,Tuple})
             send_error("pdv.tree.list.response", "tree.not_a_folder",
                        "Node at '$path' is not a folder"; in_reply_to=msg_id)
             return nothing
@@ -75,10 +77,11 @@ Build the child node descriptors for a container — the shared core of
 without re-resolving dot paths.
 """
 function _list_container_nodes(container, path::String)
-    parent_is_opaque = container isa AbstractVector || container isa Tuple
+    parent_is_opaque =
+        container isa AbstractVector || container isa Tuple || container isa NamedTuple
     keys_iter = if container isa AbstractPDVTree
         collect(keys(container.data))
-    elseif container isa AbstractDict
+    elseif container isa AbstractDict || container isa NamedTuple
         [string(k) for k in keys(container)]
     else
         [string(i) for i in 1:length(container)]
@@ -91,6 +94,8 @@ function _list_container_nodes(container, path::String)
         if container isa AbstractPDVTree
             haskey(container.data, key) || continue  # deleted concurrently
             value = container.data[key]
+        elseif container isa NamedTuple
+            value = container[Symbol(key)]
         elseif container isa AbstractDict
             if haskey(container, key)
                 value = container[key]
@@ -105,7 +110,7 @@ function _list_container_nodes(container, path::String)
         child_path = isempty(path) ? key : "$path.$key"
         kind = detect_kind(value)
         preview_str = node_preview(value, kind)
-        has_children = if value isa Union{AbstractPDVTree,AbstractDict}
+        has_children = if value isa Union{AbstractPDVTree,AbstractDict,NamedTuple}
             !isempty(value)
         elseif kind == KIND_SEQUENCE && value isa Union{AbstractVector,Tuple}
             !isempty(value)

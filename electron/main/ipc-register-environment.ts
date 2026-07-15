@@ -11,6 +11,10 @@
  * - Julia runtime discovery and PDVKernel installation
  *   (`environment:juliaList|juliaCheck|juliaInstall`, ARCHITECTURE.md §10.7)
  *   backing the selector's Julia tab.
+ * - juliaup version management (`environment:juliaupStatus|juliaupAdd|
+ *   juliaupInstall`, §10.7.5): presence check, `juliaup add` acquisition,
+ *   and the one-click juliaup bootstrap — all thin wrappers over
+ *   `juliaup-runner.ts`, streaming over the `installOutput` push channel.
  * - Per-project package management for the Packages tab
  *   (`environment:listPackages|addPackage|removePackage|upgradePackage`,
  *   ARCHITECTURE.md §10.5.13 / §10.6.8): declared deps paired with installed
@@ -42,9 +46,11 @@ import {
   clearJuliaRuntimeCache,
   installPDVKernel,
   listJuliaRuntimes,
+  listJuliaupChannels,
   resolveJuliaShim,
 } from "./julia-discovery";
 import { listJuliaProjectPackages } from "./julia-env";
+import { installJuliaup, juliaupAdd, juliaupStatus } from "./juliaup-runner";
 import { plainStreamText } from "./kernel-error-parser";
 import {
   IPC,
@@ -163,6 +169,23 @@ export function registerEnvironmentIpcHandlers(
       win,
       pushChannel: IPC.push.installOutput,
     });
+  });
+
+  // --- juliaup version management (§10.7.5) ---------------------------------
+  // PDV drives the user's juliaup and never bundles one; both acquisition
+  // ops stream over the same installOutput channel the selector already
+  // subscribes to.
+
+  handleIpc(IPC.environment.juliaupStatus, async () => juliaupStatus());
+
+  handleIpc(IPC.environment.juliaupChannels, async () => listJuliaupChannels());
+
+  handleIpc(IPC.environment.juliaupAdd, async (_event, channel: string) => {
+    return juliaupAdd(channel, { win, pushChannel: IPC.push.installOutput });
+  });
+
+  handleIpc(IPC.environment.juliaupInstall, async () => {
+    return installJuliaup({ win, pushChannel: IPC.push.installOutput });
   });
 
   // --- Packages tab (ARCHITECTURE.md §10.5.13 / §10.6.8) --------------------

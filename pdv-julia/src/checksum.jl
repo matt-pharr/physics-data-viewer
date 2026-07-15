@@ -254,8 +254,15 @@ function _feed_node!(ctx, node, working_dir::Union{Nothing,AbstractString},
         _feed!(ctx, node)
 
     elseif kind == KIND_MAPPING
-        _mark_seen!(ctx, state, node) && return
-        _feed!(ctx, "mapping\0")
+        # NamedTuples are immutable: they can't participate in a cycle on
+        # their own (any cycle passes through a mutable container that IS
+        # marked), and identity-marking value-egal immutables would collapse
+        # structurally-equal-but-distinct nodes. Same guard as sequences.
+        ismutable(node) && _mark_seen!(ctx, state, node) && return
+        # Flavor-tag NamedTuples so nt ↔ Dict swaps change the digest (same
+        # rationale as the tuple ↔ vector tag below). Field order still
+        # doesn't matter — keys feed sorted, like any mapping.
+        _feed!(ctx, node isa NamedTuple ? "mapping\0namedtuple\0" : "mapping\0")
         sorted_keys = sort!(collect(keys(node)); by=string)
         _feed_u64!(ctx, length(sorted_keys))
         for key in sorted_keys

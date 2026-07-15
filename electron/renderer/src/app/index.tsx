@@ -32,6 +32,7 @@ import { SettingsDialog } from '../components/SettingsDialog';
 import { ImportModuleDialog } from '../components/ImportModuleDialog';
 import { SaveAsDialog } from '../components/SaveAsDialog';
 import { NewProjectDialog } from '../components/NewProjectDialog';
+import { NewJuliaProjectDialog } from '../components/NewJuliaProjectDialog';
 import { UnsavedChangesDialog } from '../components/UnsavedChangesDialog';
 import { WelcomeScreen } from '../components/WelcomeScreen';
 import { EnvSyncModal } from '../components/EnvSyncModal';
@@ -96,7 +97,8 @@ type ActiveDialog =
     }
   | { kind: 'importModule' }
   | { kind: 'saveAs' }
-  | { kind: 'newProject' };
+  | { kind: 'newProject' }
+  | { kind: 'newJuliaProject' };
 
 
 /** Root PDV application component rendered in the Electron renderer process. */
@@ -1197,17 +1199,10 @@ const App: React.FC = () => {
   }, [config, runningPdvVersion, launchSharedKernel, openEnvSettings]);
 
   const handleWelcomeNewProject = useCallback(async (language: 'python' | 'julia') => {
-    if (language === 'python') {
-      // New Python projects open the setup dialog first (§10.5.8); the
-      // welcome screen stays mounted underneath until Create/Cancel.
-      setActiveDialog({ kind: 'newProject' });
-      return;
-    }
-    // New Julia projects are always pkg-mode — no dialog, because Julia's
-    // stacked environments make the project env strictly additive (§10.6.5).
-    dismissWelcome();
-    await launchPkgKernel({ newProject: true });
-  }, [dismissWelcome, launchPkgKernel]);
+    // Both languages open their setup dialog first (§10.5.8 / §10.6.5); the
+    // welcome screen stays mounted underneath until Create/Cancel.
+    setActiveDialog(language === 'python' ? { kind: 'newProject' } : { kind: 'newJuliaProject' });
+  }, []);
 
   /** Create a uv-managed project with the dialog's version/package choices. */
   const handleNewProjectCreateUv = useCallback(async (opts: { pythonVersion: string; packages: string[] }) => {
@@ -1221,6 +1216,23 @@ const App: React.FC = () => {
       packages: opts.packages,
     });
   }, [closeDialog, dismissWelcome, launchUvKernel]);
+
+  /**
+   * Create a pkg-mode Julia project with the dialog's version/package
+   * choices (§10.6.5). The EnvSyncModal covers version acquisition
+   * (`juliaup add` + PDVKernel install when needed) and the initial
+   * `Pkg.add`; without juliaup the version is undefined and the launch
+   * uses the configured runtime.
+   */
+  const handleNewProjectCreatePkg = useCallback(async (opts: { juliaVersion?: string; packages: string[] }) => {
+    closeDialog();
+    dismissWelcome();
+    await launchPkgKernel({
+      newProject: true,
+      juliaVersion: opts.juliaVersion,
+      packages: opts.packages,
+    });
+  }, [closeDialog, dismissWelcome, launchPkgKernel]);
 
   /**
    * Create a project on an existing (conda/system) interpreter chosen in the
@@ -1919,6 +1931,13 @@ const App: React.FC = () => {
            currentPythonPath={config?.pythonPath}
            onCreateUv={(opts) => void handleNewProjectCreateUv(opts)}
            onCreateShared={(pythonPath) => void handleNewProjectCreateShared(pythonPath)}
+           onCancel={closeDialog}
+         />
+       )}
+
+       {activeDialog?.kind === 'newJuliaProject' && (
+         <NewJuliaProjectDialog
+           onCreate={(opts) => void handleNewProjectCreatePkg(opts)}
            onCancel={closeDialog}
          />
        )}

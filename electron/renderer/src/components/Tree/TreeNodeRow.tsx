@@ -96,6 +96,11 @@ function resolveTypeLabel(type: string, pythonType?: string): string {
     const stripped = stripModulePrefix(pythonType);
     return PYTHON_TYPE_OVERRIDES[stripped] ?? stripped;
   }
+  // Julia NamedTuples ride the mapping kind (expandable like a Dict) but
+  // are their own thing — say so instead of "Dict".
+  if (type === 'mapping' && pythonType === 'Core.NamedTuple') {
+    return 'NamedTuple';
+  }
   if (pythonType && isJuliaTypeString(pythonType) && JULIA_DISPLAY_LABELS[type]) {
     return JULIA_DISPLAY_LABELS[type];
   }

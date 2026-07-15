@@ -1,9 +1,9 @@
 /**
- * julia-smoke.spec.ts — Julia-kernel end-to-end smoke test.
+ * julia-smoke.spec.ts â Julia-kernel end-to-end smoke test.
  *
- * Drives the full Julia session path through the real app: welcome screen →
- * "New Julia Project" → IJulia + PDVKernel boot → code-cell execution →
- * tree.changed push → tree panel refresh → script create + run.
+ * Drives the full Julia session path through the real app: welcome screen â
+ * "New Julia Project" â IJulia + PDVKernel boot â code-cell execution â
+ * tree.changed push â tree panel refresh â script create + run.
  *
  * Requires a Julia environment with IJulia and PDVKernel (dev-installed from
  * pdv-julia/). Skipped unless JULIA_PATH is set (or `julia` is on PATH and
@@ -19,7 +19,7 @@ import { launchPDV, type LaunchedApp } from "./helpers/launch";
 const juliaPath = process.env.JULIA_PATH ??
   (process.env.PDV_E2E_JULIA === "1" ? "julia" : undefined);
 
-test.skip(!juliaPath, "JULIA_PATH not set — Julia e2e smoke skipped");
+test.skip(!juliaPath, "JULIA_PATH not set â Julia e2e smoke skipped");
 
 let launched: LaunchedApp;
 
@@ -38,6 +38,8 @@ test.beforeAll(async () => {
     },
   });
   await launched.window.getByRole("button", { name: "New Julia Project" }).click();
+  // §10.6.5: the New Julia Project dialog (version + packages) - accept defaults.
+  await launched.window.getByTestId("new-julia-project-create").click();
   await expectKernelReady(launched.window, 240_000);
 });
 

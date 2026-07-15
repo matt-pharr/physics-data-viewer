@@ -1,11 +1,11 @@
 /**
- * julia-makie-save.spec.ts — GUI save flow with a live Makie figure in the tree.
+ * julia-makie-save.spec.ts â GUI save flow with a live Makie figure in the tree.
  *
  * Regression spec for the reported "save doesn't work" bug: a Julia project
  * holding CairoMakie figures hung the save (the checksum's structural walk
  * never terminated on the figure's cyclic observable graph). This drives the
- * REAL Save As dialog — menu action → name field → native directory picker
- * (stubbed) → Save — rather than the synthesized explicit-path save the other
+ * REAL Save As dialog â menu action â name field â native directory picker
+ * (stubbed) â Save â rather than the synthesized explicit-path save the other
  * specs use, then a plain Cmd+S resave, then a load round trip.
  *
  * Requires JULIA_PATH plus CairoMakie installed in the Julia environment.
@@ -22,7 +22,7 @@ import { sendMenuAction } from "./helpers/menu-action";
 const juliaPath = process.env.JULIA_PATH ??
   (process.env.PDV_E2E_JULIA === "1" ? "julia" : undefined);
 
-test.skip(!juliaPath, "JULIA_PATH not set — Julia Makie-save e2e skipped");
+test.skip(!juliaPath, "JULIA_PATH not set â Julia Makie-save e2e skipped");
 
 // Sequential stages over one app instance: a failure skips the rest instead
 // of restarting the worker (which would re-run beforeAll into a fresh dir).
@@ -45,13 +45,15 @@ test.beforeAll(async () => {
     },
   });
   // Surface renderer console output (e.g. "[App] Handler failed: ...") in
-  // the test log — handler errors are otherwise invisible to the runner.
+  // the test log â handler errors are otherwise invisible to the runner.
   launched.window.on("console", (msg) => {
     if (msg.type() === "error" || msg.text().includes("[App]")) {
       console.log(`[renderer:${msg.type()}]`, msg.text());
     }
   });
   await launched.window.getByRole("button", { name: "New Julia Project" }).click();
+  // §10.6.5: the New Julia Project dialog (version + packages) - accept defaults.
+  await launched.window.getByTestId("new-julia-project-create").click();
   await expectKernelReady(launched.window, 240_000);
 });
 
@@ -84,7 +86,7 @@ test("build a tree with a live CairoMakie figure", async () => {
       "fig = Figure()",
       "ax = Axis(fig[1, 1])",
       "lines!(ax, 1:100, sin.(0.1 .* (1:100)))",
-      // Display before saving — the realistic flow, and what lets the reload
+      // Display before saving â the realistic flow, and what lets the reload
       // round-trip cleanly: the serialized figure then references CairoMakie,
       // whose load-time activation makes the rendered-pixels digest (and
       // double-click display) work in the fresh kernel.
@@ -93,7 +95,7 @@ test("build a tree with a live CairoMakie figure", async () => {
       'pdv_tree["lorenz.attractor_fig"] = fig',
       'pdv_tree["lorenz.trajectory"] = (t=collect(1.0:100.0), x=rand(100))',
       // A numeric-array leaf makes "lorenz" a composite container (per-leaf
-      // descriptors) instead of one whole-dict .jls blob — matching the
+      // descriptors) instead of one whole-dict .jls blob â matching the
       // reported failing project, which held a DataFrame alongside figures.
       'pdv_tree["lorenz.samples"] = rand(200)',
       'println("tree seeded")',
@@ -126,12 +128,12 @@ test("Save As dialog flow writes the project to <location>/<name>/", async () =>
   await expect(window.getByRole("heading", { name: "Save Project As" })).toBeVisible();
   await window.getByLabel("Project name").fill(PROJECT_NAME);
   // The location row's <label> wraps the button, so its accessible name is
-  // the label text, not "Choose..." — target it by class instead.
+  // the label text, not "Choose..." â target it by class instead.
   await window.locator(".save-as-location-row button").click();
   await expect(window.locator(".save-as-location-path")).toHaveText(parentDir);
   await window.getByRole("button", { name: "Save", exact: true }).click();
 
-  // project.json is the save commit gate — written last (ARCHITECTURE §8.1).
+  // project.json is the save commit gate â written last (ARCHITECTURE Â§8.1).
   await expect
     .poll(
       async () => {
@@ -230,14 +232,14 @@ test("default handlers: bare numeric vector is double-click plottable", async ()
   test.setTimeout(240_000);
   const { window } = launched;
 
-  // Expansion state can persist from the earlier stages — expand only if
+  // Expansion state can persist from the earlier stages â expand only if
   // the folder is currently collapsed.
   const expandLorenz = window.getByRole("button", { name: "Expand lorenz" });
   if (await expandLorenz.isVisible().catch(() => false)) {
     await expandLorenz.click();
   }
 
-  // Numeric Vector → lines plot via the loaded CairoMakie backend (the
+  // Numeric Vector â lines plot via the loaded CairoMakie backend (the
   // default pdv_handle method; previously an inert node).
   const samplesRow = window.locator(".tree-row", { hasText: "samples" });
   await expect(samplesRow).toBeVisible({ timeout: 15_000 });

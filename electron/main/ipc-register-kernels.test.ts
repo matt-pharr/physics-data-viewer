@@ -62,7 +62,16 @@ const juliaDiscoveryMocks = vi.hoisted(() => ({
   discoverDefaultJulia: vi.fn((): string | null => null),
 }));
 
+// New-project Julia version acquisition (§10.6.5) — the real module would
+// run this machine's juliaup and probe real binaries.
+const juliaupRunnerMocks = vi.hoisted(() => ({
+  ensureJuliaVersionReady: vi.fn(
+    async () => "/depot/juliaup/julia-1.10.9/bin/julia",
+  ),
+}));
+
 vi.mock("electron", () => ({
+  app: { getPath: vi.fn(() => "/tmp/pdv-userdata") },
   ipcMain: {
     handle: ipcRegistry.ipcHandle,
     removeHandler: ipcRegistry.ipcRemoveHandler,
@@ -83,6 +92,7 @@ vi.mock("./project-file-sync", () => projectFileSyncMocks);
 vi.mock("./uv-environment", () => uvEnvironmentMocks);
 vi.mock("./julia-env", () => juliaEnvMocks);
 vi.mock("./julia-discovery", () => juliaDiscoveryMocks);
+vi.mock("./juliaup-runner", () => juliaupRunnerMocks);
 
 import { IPC, type ActiveEnvironmentInfo } from "./ipc";
 import { registerKernelIpcHandlers } from "./ipc-register-kernels";
@@ -198,6 +208,9 @@ beforeEach(() => {
   envDetectorMocks.resolvePythonMajorMinor.mockResolvedValue("3.13");
   juliaDiscoveryMocks.resolveJuliaShim.mockImplementation((p: string) => p);
   juliaDiscoveryMocks.discoverDefaultJulia.mockReturnValue(null);
+  juliaupRunnerMocks.ensureJuliaVersionReady.mockResolvedValue(
+    "/depot/juliaup/julia-1.10.9/bin/julia",
+  );
 });
 
 afterEach(() => {
@@ -448,6 +461,47 @@ describe("kernels:start — Julia pkg mode (§10.6)", () => {
     } finally {
       fs.rmSync(wd, { recursive: true, force: true });
     }
+  });
+
+  it("new project with a version choice routes through ensureJuliaVersionReady (§10.6.5)", async () => {
+    const { harness } = setupPkgStart();
+    harness.kernelManager.start = vi.fn(async () => makeKernelInfo({ id: "kver" }));
+
+    await getHandler(IPC.kernels.start)(
+      {},
+      { language: "julia", env: { JULIA_PATH: "/opt/julia/bin/julia" } },
+      { newProject: true, juliaVersion: "1.10", packages: ["DataFrames"] },
+    );
+
+    expect(juliaupRunnerMocks.ensureJuliaVersionReady).toHaveBeenCalledWith(
+      "1.10",
+      expect.objectContaining({ stagingDir: expect.stringContaining("pdv-julia") }),
+    );
+    const spec = (harness.kernelManager.start as Mock).mock.calls.at(-1)?.[0] as {
+      env: Record<string, string>;
+    };
+    // The ready channel binary is authoritative — no separate shim pass.
+    expect(spec.env.JULIA_PATH).toBe("/depot/juliaup/julia-1.10.9/bin/julia");
+    expect(juliaDiscoveryMocks.resolveJuliaShim).not.toHaveBeenCalled();
+    // Initial packages flow into the env subprocess as Pkg.add (§10.6.5).
+    expect(juliaEnvMocks.instantiateJuliaEnvironment).toHaveBeenCalledWith(
+      expect.any(String),
+      "/depot/juliaup/julia-1.10.9/bin/julia",
+      expect.objectContaining({ packages: ["DataFrames"] }),
+    );
+  });
+
+  it("rejects an unsupported Julia version before doing any work", async () => {
+    setupPkgStart();
+
+    await expect(
+      getHandler(IPC.kernels.start)(
+        {},
+        { language: "julia" },
+        { newProject: true, juliaVersion: "0.7" },
+      ),
+    ).rejects.toThrow(/Unsupported Julia version/);
+    expect(juliaupRunnerMocks.ensureJuliaVersionReady).not.toHaveBeenCalled();
   });
 
   it("without a launch context a Julia start stays shared-mode (legacy sessions)", async () => {
