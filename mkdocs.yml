@@ -135,6 +135,7 @@ nav:
       - The App Object (pdv): api-reference/app.md
       - Module API: api-reference/module-api.md
       - Exceptions: api-reference/errors.md
+      - Julia API (PDVKernel): api-reference/julia.md
   - Module Development: modules/index.md
   - Developer Guide:
       - Architecture: developer/architecture.md
