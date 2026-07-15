@@ -85,6 +85,16 @@ interface RegisterProjectIpcHandlersOptions {
     saveDir: string,
     workingDir: string
   ) => Promise<LoadEnvSyncResult>;
+  /**
+   * Julia analog for `mode: "pkg"` sessions (§10.6.6): copy the opened
+   * project's `Project.toml`/`Manifest.toml` over the working dir's and
+   * `Pkg.instantiate`. Called by `project:load` when the active kernel is
+   * pkg-mode.
+   */
+  syncPkgEnvironmentForLoad?: (
+    saveDir: string,
+    workingDir: string
+  ) => Promise<LoadEnvSyncResult>;
   /** Called after a successful explicit save to clean up autosave state. */
   onExplicitSaveCompleted?: (saveDir: string) => void;
 }
@@ -294,6 +304,7 @@ export function registerProjectIpcHandlers(
     getInterpreterPath,
     getActiveKernelEnvMeta,
     syncUvEnvironmentForLoad,
+    syncPkgEnvironmentForLoad,
     onExplicitSaveCompleted,
   } = options;
 
@@ -316,32 +327,46 @@ export function registerProjectIpcHandlers(
         console.debug(`[project:save] seq=${seq} starting (was queued behind previous save)`);
 
         // A uv project is identified by a pyproject.toml in the working dir
-        // (generated for new projects, copied for opened ones). Record uv mode
-        // in the manifest and write the env files back to the save dir (§10.5.10).
+        // (generated for new projects, copied for opened ones); a pkg-mode
+        // Julia project by a Project.toml (§10.6). Record the mode in the
+        // manifest and write the env files back to the save dir
+        // (§10.5.10 / §10.6.7).
         const activeKernelId = getActiveKernelId();
+        const activeLanguage = getActiveKernelLanguage();
         const uvWorkingDir = activeKernelId ? kernelWorkingDirs.get(activeKernelId) : undefined;
-        const isUvProject = uvWorkingDir
-          ? await fs
-              .access(path.join(uvWorkingDir, "pyproject.toml"))
-              .then(() => true)
-              .catch(() => false)
-          : false;
+        const isUvProject =
+          uvWorkingDir && activeLanguage !== "julia"
+            ? await fs
+                .access(path.join(uvWorkingDir, "pyproject.toml"))
+                .then(() => true)
+                .catch(() => false)
+            : false;
+        const isPkgProject =
+          uvWorkingDir && activeLanguage === "julia"
+            ? await fs
+                .access(path.join(uvWorkingDir, "Project.toml"))
+                .then(() => true)
+                .catch(() => false)
+            : false;
 
-        // Environment recording (§10.5): uv projects record mode + the
-        // resolved Python version (the venv path is ephemeral, so no
-        // interpreter_path); shared projects record the interpreter the
-        // kernel actually spawned on — falling back to the global config
-        // value only when no per-kernel metadata exists (legacy sessions).
+        // Environment recording (§10.5 / §10.6): uv projects record mode +
+        // the resolved Python version, pkg projects mode + the Julia version
+        // (the environment paths are ephemeral, so no interpreter_path);
+        // shared projects record the interpreter the kernel actually spawned
+        // on — falling back to the global config value only when no
+        // per-kernel metadata exists (legacy sessions).
         const envMeta = getActiveKernelEnvMeta();
         const saveResult = await projectManager.save(saveDir, codeCells, {
-          language: getActiveKernelLanguage(),
-          interpreterPath: isUvProject
+          language: activeLanguage,
+          interpreterPath: isUvProject || isPkgProject
             ? undefined
             : (envMeta?.interpreterPath ?? getInterpreterPath()),
           projectName,
           environment: isUvProject
             ? { mode: "uv", python_version: envMeta?.pythonVersion }
-            : { mode: "shared" },
+            : isPkgProject
+              ? { mode: "pkg", julia_version: envMeta?.juliaVersion }
+              : { mode: "shared" },
         });
 
         // If the serializer detected missing backing files it aborted before
@@ -407,11 +432,13 @@ export function registerProjectIpcHandlers(
         // implies the save is complete.
         await projectManager.commitProjectManifest(saveDir, finalManifest);
 
-        // Persist the uv environment spec alongside the manifest. Only files
+        // Persist the environment spec alongside the manifest. Only files
         // present in the working dir are copied, so a failed sync (no uv.lock)
-        // never clobbers a previously-saved lock (§10.5.10).
+        // never clobbers a previously-saved lock (§10.5.10 / §10.6.7).
         if (isUvProject && uvWorkingDir) {
           await copyEnvFilesForSave(uvWorkingDir, saveDir);
+        } else if (isPkgProject && uvWorkingDir) {
+          await copyEnvFilesForSave(uvWorkingDir, saveDir, "julia");
         }
 
         setActiveProjectDir(saveDir);
@@ -485,9 +512,20 @@ export function registerProjectIpcHandlers(
         // the kernel can't import the opened project's packages and a later
         // save would clobber the project's pyproject/uv.lock with the stale
         // working-dir copies (§10.5.10).
-        if (getActiveKernelEnvMeta()?.mode === "uv" && syncUvEnvironmentForLoad) {
+        const activeEnvMode = getActiveKernelEnvMeta()?.mode;
+        if (activeEnvMode === "uv" && syncUvEnvironmentForLoad) {
           try {
             const envSync = await syncUvEnvironmentForLoad(saveDir, workingDir);
+            envSyncWarning = envSync.warning;
+          } catch (err) {
+            console.warn("[ipc-register-project] env sync on load failed:", err);
+            envSyncWarning =
+              "Failed to update the session environment for this project — " +
+              "its packages may be unavailable.";
+          }
+        } else if (activeEnvMode === "pkg" && syncPkgEnvironmentForLoad) {
+          try {
+            const envSync = await syncPkgEnvironmentForLoad(saveDir, workingDir);
             envSyncWarning = envSync.warning;
           } catch (err) {
             console.warn("[ipc-register-project] env sync on load failed:", err);

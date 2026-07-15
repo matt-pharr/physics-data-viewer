@@ -23,6 +23,9 @@ using PDVKernel: set_quiet!, detect_kind, node_preview, serialize_node,
 import JSON
 import ZMQ
 import Serialization
+import Pkg
+import TOML
+using UUIDs: uuid4
 using DataFrames
 
 # ---------------------------------------------------------------------------
@@ -1451,6 +1454,37 @@ end
     # version constants agree
     @test PDVKernel.VERSION == PDVKernel.__pdv_protocol_version__
     @test occursin(r"^\d+\.\d+\.\d+", PDVKernel.VERSION)
+end
+
+@testset "package verbs target the active environment" begin
+    # Empty-arg calls print a notice and never touch Pkg.
+    @test PDVKernel.install() === nothing
+    @test PDVKernel.remove() === nothing
+
+    # remove() edits the ACTIVE project environment (§10.6.8): seed a dummy
+    # package into a temp project offline via Pkg.develop(path=...), then
+    # PDVKernel.remove it and confirm Project.toml's [deps] lost the entry.
+    dummy = mktempdir()
+    dummy_uuid = string(uuid4())
+    write(joinpath(dummy, "Project.toml"),
+          "name = \"PDVDummyPkg\"\nuuid = \"$dummy_uuid\"\nversion = \"0.1.0\"\n")
+    mkpath(joinpath(dummy, "src"))
+    write(joinpath(dummy, "src", "PDVDummyPkg.jl"), "module PDVDummyPkg\nend\n")
+
+    project_dir = mktempdir()
+    old_project = Base.active_project()
+    try
+        Pkg.activate(project_dir; io=devnull)
+        Pkg.develop(path=dummy; io=devnull)
+        deps = get(TOML.parsefile(joinpath(project_dir, "Project.toml")), "deps", Dict())
+        @test haskey(deps, "PDVDummyPkg")
+
+        PDVKernel.remove("PDVDummyPkg")
+        deps = get(TOML.parsefile(joinpath(project_dir, "Project.toml")), "deps", Dict())
+        @test !haskey(deps, "PDVDummyPkg")
+    finally
+        Pkg.activate(old_project; io=devnull)
+    end
 end
 
 end # top-level testset

@@ -533,7 +533,7 @@ const App: React.FC = () => {
     setKernelMemoryRss,
   });
 
-  const [environmentMode, setEnvironmentMode] = useState<'uv' | 'shared'>('shared');
+  const [environmentMode, setEnvironmentMode] = useState<'uv' | 'shared' | 'pkg'>('shared');
   const { startKernel, handleEnvSave, handleRestartKernel, lastErrorRef } = useKernelLifecycle({
     config,
     currentKernelId,
@@ -1156,6 +1156,7 @@ const App: React.FC = () => {
   const {
     kernelLaunch,
     launchUvKernel,
+    launchPkgKernel,
     launchSharedKernel,
     handleLaunchRetry,
     handleLaunchCancel,
@@ -1202,9 +1203,11 @@ const App: React.FC = () => {
       setActiveDialog({ kind: 'newProject' });
       return;
     }
+    // New Julia projects are always pkg-mode — no dialog, because Julia's
+    // stacked environments make the project env strictly additive (§10.6.5).
     dismissWelcome();
-    await ensureKernel(language);
-  }, [dismissWelcome, ensureKernel]);
+    await launchPkgKernel({ newProject: true });
+  }, [dismissWelcome, launchPkgKernel]);
 
   /** Create a uv-managed project with the dialog's version/package choices. */
   const handleNewProjectCreateUv = useCallback(async (opts: { pythonVersion: string; packages: string[] }) => {
@@ -1251,6 +1254,13 @@ const App: React.FC = () => {
       return;
     }
 
+    // pkg-mode Julia projects likewise: Pkg.instantiate overlaps the kernel
+    // boot behind the same overlay (§10.6.6).
+    if (peek.environment?.mode === 'pkg' && language === 'julia') {
+      await launchPkgKernel({ saveDir: dir });
+      return;
+    }
+
     // If the project saved an interpreter path, try to use it.
     // TODO: Add Julia interpreter validation once Julia supports saved interpreter paths.
     if (peek.interpreterPath && language === 'python') {
@@ -1275,7 +1285,7 @@ const App: React.FC = () => {
     }
 
     await ensureKernel(language);
-  }, [config, dismissWelcome, ensureKernel, openEnvSettings, launchSharedKernel, launchUvKernel]);
+  }, [config, dismissWelcome, ensureKernel, openEnvSettings, launchSharedKernel, launchUvKernel, launchPkgKernel]);
 
   /**
    * Open a project into a fresh session while one is already running.

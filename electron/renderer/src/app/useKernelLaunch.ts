@@ -10,7 +10,8 @@
  * Does NOT start kernels itself — the actual stop/start handshake lives in
  * useKernelLifecycle's `startKernel`, injected via options. Does NOT decide
  * which environment a project should launch with: App's welcome/open flows
- * pick uv vs shared and call `launchUvKernel` / `launchSharedKernel`.
+ * pick uv vs pkg vs shared and call `launchUvKernel` / `launchPkgKernel` /
+ * `launchSharedKernel`.
  */
 
 import { useCallback, useEffect, useRef, useState, type Dispatch, type MutableRefObject, type SetStateAction } from 'react';
@@ -49,18 +50,19 @@ export function useKernelLaunch(options: UseKernelLaunchOptions) {
   const [kernelLaunch, setKernelLaunch] = useState<{
     phase: 'idle' | 'syncing' | 'failed';
     stage: 'env' | 'kernel-boot';
-    mode: 'uv' | 'shared';
+    mode: 'uv' | 'shared' | 'pkg';
     language: 'python' | 'julia';
     detail?: string;
     output: string;
     error?: string;
   }>({ phase: 'idle', stage: 'env', mode: 'uv', language: 'python', output: '' });
   const lastUvLaunchRef = useRef<KernelUvContext | null>(null);
-  // Replays the most recent launch (uv or shared) for the overlay's Retry.
+  // Replays the most recent launch (uv, pkg, or shared) for the overlay's Retry.
   const lastLaunchRef = useRef<(() => Promise<boolean>) | null>(null);
   // Self-refs so a launch can enqueue its own replay without a TDZ cycle
-  // between the two launch callbacks.
+  // between the launch callbacks.
   const launchUvKernelRef = useRef<(ctx: KernelUvContext) => Promise<boolean>>(async () => false);
+  const launchPkgKernelRef = useRef<(ctx: KernelUvContext) => Promise<boolean>>(async () => false);
   const launchSharedKernelRef = useRef<(cfg: Config, language: 'python' | 'julia') => Promise<boolean>>(async () => false);
 
   // --- session launch overlay ---------------------------------------------
@@ -100,6 +102,33 @@ export function useKernelLaunch(options: UseKernelLaunchOptions) {
   }, [config, startKernel, lastErrorRef, setActiveLanguage]);
 
   /**
+   * Launch (or relaunch) a pkg-mode Julia kernel (§10.6) behind the blocking
+   * EnvSyncModal. The main process overlaps `Pkg.instantiate` with the kernel
+   * boot; the overlay starts at the environment stage and flips to
+   * kernel-boot on the instantiate-complete marker. Resolves true on
+   * success; on failure the modal stays up with Retry/Cancel.
+   */
+  const launchPkgKernel = useCallback(async (pkgContext: KernelUvContext): Promise<boolean> => {
+    lastLaunchRef.current = () => launchPkgKernelRef.current(pkgContext);
+    setActiveLanguage('julia');
+    setKernelLaunch({
+      phase: 'syncing',
+      stage: 'env',
+      mode: 'pkg',
+      language: 'julia',
+      detail: config?.juliaPath,
+      output: '',
+    });
+    const ok = await startKernel(config ?? {} as Config, 'julia', pkgContext);
+    if (ok) {
+      setKernelLaunch({ phase: 'idle', stage: 'env', mode: 'uv', language: 'python', output: '' });
+    } else {
+      setKernelLaunch((s) => ({ ...s, phase: 'failed', error: lastErrorRef.current }));
+    }
+    return ok;
+  }, [config, startKernel, lastErrorRef, setActiveLanguage]);
+
+  /**
    * Launch (or relaunch) a shared-environment (conda/system) kernel behind
    * the same blocking overlay as uv launches: "Starting ipykernel…" while
    * the kernel boots, and on failure the modal stays up with
@@ -129,8 +158,9 @@ export function useKernelLaunch(options: UseKernelLaunchOptions) {
   // through the latest launch implementation.
   useEffect(() => {
     launchUvKernelRef.current = launchUvKernel;
+    launchPkgKernelRef.current = launchPkgKernel;
     launchSharedKernelRef.current = launchSharedKernel;
-  }, [launchUvKernel, launchSharedKernel]);
+  }, [launchUvKernel, launchPkgKernel, launchSharedKernel]);
 
   /** Retry a failed session launch (replays the last uv or shared launch). */
   const handleLaunchRetry = useCallback(() => {
@@ -153,6 +183,7 @@ export function useKernelLaunch(options: UseKernelLaunchOptions) {
   return {
     kernelLaunch,
     launchUvKernel,
+    launchPkgKernel,
     launchSharedKernel,
     handleLaunchRetry,
     handleLaunchCancel,

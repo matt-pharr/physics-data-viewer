@@ -16,6 +16,7 @@ import { KernelManager } from "./kernel-manager";
 import { CommRouter } from "./comm-router";
 import { QueryRouter } from "./query-router";
 import { JULIA_BOOTSTRAP } from "./kernel-session";
+import { instantiateJuliaEnvironment } from "./julia-env";
 import {
   PDVMessage,
   PDVMessageType,
@@ -322,6 +323,58 @@ describe("@slow Cross-boundary integration (Julia + Electron)", { timeout: 300_0
       });
       expect(script.status).toBe("ok");
       expect((script.payload as { type?: unknown }).type).toBe("script");
+    });
+  });
+
+  describe("pkg-mode project environment (§10.6)", () => {
+    it("Pkg.instantiate runner resolves an empty project and reports the Julia version", async () => {
+      const projectDir = await fs.mkdtemp(path.join(os.tmpdir(), "pdv-julia-pkg-"));
+      tempDirs.push(projectDir);
+      await fs.writeFile(path.join(projectDir, "Project.toml"), "", "utf8");
+
+      const result = await instantiateJuliaEnvironment(projectDir, TEST_JULIA_EXECUTABLE);
+
+      expect(result.success).toBe(true);
+      expect(result.juliaVersion).toMatch(/^\d+\.\d+\.\d+/);
+    });
+
+    it("a kernel spawned with JULIA_PROJECT activates the project env and still loads PDVKernel", async () => {
+      const projectDir = await fs.mkdtemp(path.join(os.tmpdir(), "pdv-julia-pkgk-"));
+      tempDirs.push(projectDir);
+      await fs.writeFile(path.join(projectDir, "Project.toml"), "", "utf8");
+
+      const info = await km.start({
+        language: "julia",
+        env: { JULIA_PATH: TEST_JULIA_EXECUTABLE, JULIA_PROJECT: projectDir },
+      });
+      const pkgRouter = new CommRouter();
+      pkgRouter.attach(km, info.id);
+      try {
+        const readyPromise = waitForPush(pkgRouter, PDVMessageType.READY, 120_000);
+        // Bootstrap succeeding at all proves §10.6.1: PDVKernel/IJulia resolve
+        // from the default environment through the stacked LOAD_PATH even
+        // though the active project is the (empty) project env.
+        const boot = await km.execute(info.id, { code: JULIA_BOOTSTRAP, silent: true });
+        expect(boot.error).toBeUndefined();
+        await readyPromise;
+
+        const seed = await km.execute(info.id, {
+          code: `pdv_tree["active_project"] = Base.active_project()`,
+        });
+        expect(seed.error).toBeUndefined();
+        const response = await pkgRouter.request(PDVMessageType.TREE_GET, {
+          path: "active_project",
+          mode: "value",
+        });
+        expect(response.status).toBe("ok");
+        const value = String((response.payload as { value?: unknown }).value);
+        // Base.active_project() is <projectDir>/Project.toml. macOS tmpdirs
+        // resolve through /private; compare on the trailing segments.
+        expect(value).toContain(path.join(path.basename(projectDir), "Project.toml"));
+      } finally {
+        pkgRouter.detach();
+        await km.stop(info.id);
+      }
     });
   });
 });

@@ -272,6 +272,37 @@ describe("ProjectManager", () => {
       });
     });
 
+    it("records pkg mode with julia_version and preserves a prior one on re-save (§10.6.4)", async () => {
+      await fs.writeFile(
+        path.join(tmpDir, "project.json"),
+        JSON.stringify({
+          schema_version: "1.2",
+          saved_at: "2026-01-01T00:00:00.000Z",
+          pdv_version: getAppVersion(),
+          tree_checksum: "old",
+          language: "julia",
+          environment: { mode: "pkg", julia_version: "1.11.6" },
+        }),
+        "utf8"
+      );
+
+      const { router, requestMock } = makeMockRouter();
+      requestMock.mockResolvedValue(makeOkResponse({ checksum: "new" }));
+
+      const pm = new ProjectManager(router);
+      // A save whose env metadata lacks the version (e.g. restart-carried
+      // session) must not drop the previously recorded julia_version.
+      const result = await pm.save(tmpDir, EMPTY_CELLS, {
+        language: "julia",
+        environment: { mode: "pkg" },
+      });
+
+      expect(result.pendingManifest!.environment).toEqual({
+        mode: "pkg",
+        julia_version: "1.11.6",
+      });
+    });
+
     it("does not write project.json when kernel returns error", async () => {
       const { router, requestMock } = makeMockRouter();
       requestMock.mockRejectedValue(makeCommError("save.failed"));
@@ -643,6 +674,43 @@ describe("ProjectManager", () => {
 
       const result = await ProjectManager.readManifest(tmpDir);
       expect(result.environment).toEqual({ mode: "uv" });
+    });
+
+    it("parses a pkg environment block with julia_version (§10.6.4)", async () => {
+      const manifest = {
+        schema_version: "1.2",
+        saved_at: "2026-01-01T00:00:00.000Z",
+        pdv_version: getAppVersion(),
+        tree_checksum: "abc",
+        language: "julia",
+        environment: { mode: "pkg", julia_version: "1.11.6" },
+      };
+      await fs.writeFile(
+        path.join(tmpDir, "project.json"),
+        JSON.stringify(manifest),
+        "utf8"
+      );
+
+      const result = await ProjectManager.readManifest(tmpDir);
+      expect(result.environment).toEqual({ mode: "pkg", julia_version: "1.11.6" });
+    });
+
+    it("omits julia_version from a pkg environment block when it is not a string", async () => {
+      const manifest = {
+        schema_version: "1.2",
+        saved_at: "2026-01-01T00:00:00.000Z",
+        pdv_version: getAppVersion(),
+        tree_checksum: "abc",
+        environment: { mode: "pkg", julia_version: 1.11 },
+      };
+      await fs.writeFile(
+        path.join(tmpDir, "project.json"),
+        JSON.stringify(manifest),
+        "utf8"
+      );
+
+      const result = await ProjectManager.readManifest(tmpDir);
+      expect(result.environment).toEqual({ mode: "pkg" });
     });
 
     it("coerces a malformed environment block to shared", async () => {

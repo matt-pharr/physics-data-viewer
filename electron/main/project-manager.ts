@@ -77,19 +77,27 @@ export interface ProjectModuleImport {
  * Per-project Python environment configuration (ARCHITECTURE.md §10.5).
  *
  * ``"shared"`` uses the app-wide environment selected in the Environment
- * Selector (§10.2) — the default, and the home of conda users. ``"uv"`` uses
- * an isolated per-project environment materialized by ``uv`` from a
- * ``pyproject.toml`` + ``uv.lock`` pair.
+ * Selector (§10.2) — the home of conda users and of legacy manifests. ``"uv"``
+ * uses an isolated per-project Python environment materialized by ``uv`` from
+ * a ``pyproject.toml`` + ``uv.lock`` pair. ``"pkg"`` is the Julia analog
+ * (ARCHITECTURE.md §10.6): a Pkg-managed project environment carried by a
+ * ``Project.toml`` + ``Manifest.toml`` pair, activated via ``JULIA_PROJECT``.
  */
 export interface EnvironmentConfig {
   /** Which environment flow this project uses. */
-  mode: "uv" | "shared";
+  mode: "uv" | "shared" | "pkg";
   /**
    * Requested Python version for uv mode (e.g. ``"3.12"``). Absent means
    * uv picks the newest interpreter it can find or install. Ignored in
-   * shared mode.
+   * shared and pkg modes.
    */
   python_version?: string;
+  /**
+   * Julia version the session actually ran on, pkg mode only (e.g.
+   * ``"1.11.6"``). Display and mismatch-warning only — ``Manifest.toml``'s
+   * own ``julia_version`` entry is what Pkg checks (§10.6.4).
+   */
+  julia_version?: string;
 }
 
 /**
@@ -490,9 +498,8 @@ export class ProjectManager {
       // No prior manifest or unreadable — start fresh.
     }
     // Environment precedence: an explicit option (e.g. a new project being
-    // promoted to uv mode) wins, else the previously-saved environment, else
-    // shared. When promoting to uv, preserve any python_version a prior save
-    // recorded.
+    // promoted to uv/pkg mode) wins, else the previously-saved environment,
+    // else shared. When promoting, preserve any version a prior save recorded.
     let environment: EnvironmentConfig =
       options?.environment ?? existingEnvironment ?? { mode: "shared" };
     if (
@@ -501,6 +508,13 @@ export class ProjectManager {
       existingEnvironment?.python_version
     ) {
       environment = { ...environment, python_version: existingEnvironment.python_version };
+    }
+    if (
+      environment.mode === "pkg" &&
+      !environment.julia_version &&
+      existingEnvironment?.julia_version
+    ) {
+      environment = { ...environment, julia_version: existingEnvironment.julia_version };
     }
     const pendingManifest: ProjectManifest = {
       schema_version: SCHEMA_VERSION,
@@ -992,8 +1006,9 @@ function _assertCompatibleSchema(schemaVersion: string): void {
  *
  * Absent, malformed, or unrecognized values default to ``{ mode: "shared" }``
  * so legacy ``"1.1"`` manifests and hand-edited files load safely
- * (ARCHITECTURE.md §10.5.5). Only ``mode: "uv"`` opts into uv mode; any other
- * value is coerced to shared.
+ * (ARCHITECTURE.md §10.5.5). Only ``mode: "uv"`` opts into uv mode and only
+ * ``mode: "pkg"`` opts into Julia pkg mode (§10.6.4); any other value is
+ * coerced to shared.
  *
  * @param raw - The raw ``environment`` field from project.json, if any.
  * @returns A valid {@link EnvironmentConfig}.
@@ -1003,14 +1018,21 @@ function _parseEnvironment(raw: unknown): EnvironmentConfig {
     return { mode: "shared" };
   }
   const obj = raw as Record<string, unknown>;
-  if (obj.mode !== "uv") {
-    return { mode: "shared" };
+  if (obj.mode === "uv") {
+    const environment: EnvironmentConfig = { mode: "uv" };
+    if (typeof obj.python_version === "string") {
+      environment.python_version = obj.python_version;
+    }
+    return environment;
   }
-  const environment: EnvironmentConfig = { mode: "uv" };
-  if (typeof obj.python_version === "string") {
-    environment.python_version = obj.python_version;
+  if (obj.mode === "pkg") {
+    const environment: EnvironmentConfig = { mode: "pkg" };
+    if (typeof obj.julia_version === "string") {
+      environment.julia_version = obj.julia_version;
+    }
+    return environment;
   }
-  return environment;
+  return { mode: "shared" };
 }
 
 /**

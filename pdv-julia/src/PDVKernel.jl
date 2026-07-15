@@ -14,8 +14,9 @@ Public API
   `PDVModule`, `PDVLib` — tree node types.
 - `bootstrap()` — idempotent kernel-side initialization.
 - `save()`, `save_project(path)`, `save_project_as(path)`, `open_project(path)`,
-  `install(pkgs...)`, `add_file(path)`, `new_note(path; title)`, `help()`,
-  `working_dir()`, `log(args...)` — app-level operations.
+  `install(pkgs...)`, `remove(pkgs...)`, `update(pkgs...)`, `add_file(path)`,
+  `new_note(path; title)`, `help()`, `working_dir()`, `log(args...)` —
+  app-level operations.
 - `pdv_handle` / `pdv_preview` / `pdv_format` / `pdv_serialize` /
   `pdv_deserialize` / `pdv_digest` — protocol generic functions that modules
   extend with methods (the Julia analog of Python's `@pdv.handle` decorator
@@ -214,8 +215,14 @@ end
 
 Install Julia packages into the active environment via `Pkg.add`, blocking
 the cell until the install finishes. The packages become loadable without a
-kernel restart. (The Julia analog of `pdv.install()` — Julia kernels always
-run in a shared environment, so this delegates to Pkg rather than uv.)
+kernel restart. (The Julia analog of `pdv.install()`, delegating to Pkg
+rather than uv.)
+
+In a pkg-mode session (ARCHITECTURE.md §10.6) the active environment is the
+project's own — the app launches the kernel with `JULIA_PROJECT` pointing at
+the session working directory — so the install is recorded in the project's
+`Project.toml`/`Manifest.toml` and travels with the save. In a legacy
+shared-mode session it lands in the user's default environment.
 """
 function install(packages::AbstractString...)
     if isempty(packages)
@@ -224,6 +231,46 @@ function install(packages::AbstractString...)
     end
     println("PDVKernel.install: Pkg.add($(join(packages, ", ")))")
     Pkg.add(collect(String.(packages)))
+    nothing
+end
+
+"""
+    remove(packages...)
+
+Remove Julia packages from the active environment via `Pkg.rm`, blocking the
+cell until the operation finishes. In a pkg-mode session (ARCHITECTURE.md
+§10.6) this edits the project's `Project.toml`/`Manifest.toml`. An already-
+loaded module stays loaded until the kernel restarts — removal only affects
+what future `using`/`import` can resolve.
+"""
+function remove(packages::AbstractString...)
+    if isempty(packages)
+        println("PDVKernel.remove: no packages specified.")
+        return nothing
+    end
+    println("PDVKernel.remove: Pkg.rm($(join(packages, ", ")))")
+    Pkg.rm(collect(String.(packages)))
+    nothing
+end
+
+"""
+    update(packages...)
+
+Upgrade Julia packages in the active environment via `Pkg.update`, blocking
+the cell until the operation finishes. With no arguments, upgrades every
+package the environment allows. In a pkg-mode session (ARCHITECTURE.md §10.6)
+the new versions are recorded in the project's `Manifest.toml`. A package
+already loaded in this session keeps its old version until the kernel
+restarts — `Pkg` prints a note when that applies.
+"""
+function update(packages::AbstractString...)
+    if isempty(packages)
+        println("PDVKernel.update: Pkg.update()")
+        Pkg.update()
+    else
+        println("PDVKernel.update: Pkg.update($(join(packages, ", ")))")
+        Pkg.update(collect(String.(packages)))
+    end
     nothing
 end
 
@@ -303,6 +350,8 @@ function help(topic::Union{Nothing,AbstractString}=nothing)
             "  PDVKernel.save_project_as(\"path\") — save project to a new directory\n" *
             "  PDVKernel.open_project(\"path\")    — open a project from a directory\n" *
             "  PDVKernel.install(\"Pkg1\", \"Pkg2\") — install Julia packages\n" *
+            "  PDVKernel.remove(\"Pkg1\")  — remove packages from the environment\n" *
+            "  PDVKernel.update()         — upgrade packages (or update(\"Pkg1\"))\n" *
             "  PDVKernel.add_file(\"path/to/file\") — import a file into the tree\n" *
             "  PDVKernel.new_note(\"path\"; title=\"My Note\") — create a markdown note\n" *
             "  PDVKernel.help(\"pdv_tree\") — help on a specific topic\n")

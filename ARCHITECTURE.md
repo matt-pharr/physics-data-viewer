@@ -790,7 +790,8 @@ The file layout mirrors `pdv-python` one-to-one (`tree.jl`, `serialization.jl`, 
 | Data formats | ndarray → `.npy`, other data → pickle (`format: "pickle"`) | numeric `Array` → `.npy` (numpy-compatible via NPZ), other data → `Serialization` (`format: "jls"`); scripts/libs are `jl_script`/`jl_lib` |
 | Checksum | XXH3-128; unknown values digest via pickled bytes (pickle's memo table handles cyclic objects) | SHA-256 truncated to 128 bits (opaque to the app; same Merkle feeding scheme); unknown structs digest via a cycle-guarded structural field walk (name-based type tags, name-only functions, `Ptr` by type) with a feed budget — exhaustion or a walk error falls back to `Serialization` bytes. Keeps digests round-trip stable for Dict-bearing structs (Julia Dicts rehash on deserialize) and terminates on cyclic GUI objects like Makie figures |
 | Sequence keys in dot-paths | 0-based (`tree["xs.0"]`), negative from end | 1-based (`tree["xs.1"]`), negative from end |
-| Package installs | `pdv.install()` → `uv add` (uv-mode only) | `PDVKernel.install()` → `Pkg.add` (Julia sessions are always shared-mode) |
+| Package installs | `pdv.install()` → `uv add` (uv-mode only) | `PDVKernel.install()` → `Pkg.add` into the active environment — the per-project environment in pkg mode (§10.6), the user's default environment in shared mode |
+| Per-project environments | uv-managed venv from `pyproject.toml` + `uv.lock` (§10.5) | Pkg-managed project from `Project.toml` + `Manifest.toml` (§10.6); activation via `JULIA_PROJECT`, no venv analog — packages live in the shared depot |
 | Query server | ZMQ REP on a daemon thread (GIL makes concurrent dict reads safe) | ZMQ REP on a default-pool OS thread when the kernel has an interactive threadpool (the app spawns Julia with `--threads=auto,1`; the main task runs interactive). The thread never touches libuv (a blocked `ZMQ.recv` starves while the main thread computes) — it polls `sock.events` + `Libc.systemsleep`, and answers `pdv.tree.list` from a lock-guarded listings snapshot rebuilt on the main thread (debounce flush, postexecute hook, project load) so it never reads live tree values cross-thread. Other query types reply `query.kernel_busy`, which the app converts into a comm-channel fallback. Without spare threads it degrades to the original cooperative async-task loop |
 | Save-walker rescue | any error → pickle fallback; a value even pickle refuses (lambda, open handle) is skipped and reported in `failed_nodes` | same contract: any error → jls fallback; a value even jls refuses (running `Task`, ...) is skipped and reported in `failed_nodes`. `Serialization` refuses more values than pickle, so this path is far more reachable on Julia |
 | Change debounce | `threading.Timer` (fires mid-execution) | libuv `Timer` (fires at yield points; the renderer's 1 Hz poll is the safety net during tight loops) |
@@ -1724,6 +1725,83 @@ The environment is a **property of the project, not of the app** — the setting
 - **Project Environment tab** (§10.5.13): per-project scope — what the active session actually runs on, and uv package management.
 
 There is deliberately **no mid-project environment switching**. The choice is made once in the New Project dialog (§10.5.8) and recorded in the manifest; a guarded, explicit "Change project environment…" action is tracked as issue #335.
+
+### 10.6 Per-Project Julia Environments (Pkg-managed)
+
+Julia projects own an isolated dependency record, managed by Julia's built-in `Pkg`. This is the Julia analog of §10.5 and the **default for all newly created Julia projects**. Wherever this section is silent, §10.5's behavior applies unchanged — the two flows are deliberately symmetric, and the differences below are exactly the places where Julia's environment model genuinely differs from Python's.
+
+#### 10.6.1 What is different from uv mode
+
+Three Julia facts make this flow strictly simpler than §10.5:
+
+1. **There is no venv analog.** Julia packages live in the shared depot (`~/.julia/packages`), content-addressed by version. A "project environment" is just two text files — `Project.toml` (direct dependencies, user-owned) and `Manifest.toml` (the full resolved graph, `Pkg`-owned) — so materializing an environment copies two files, and `Pkg.instantiate` fetches only what the depot is missing, once per machine. Nothing is rebuilt per session and nothing needs garbage collection.
+2. **No binary needs bundling.** `Pkg` is a Julia stdlib; the Julia executable that runs the kernel is the environment tooling. There is no §10.5.6 analog.
+3. **Environments stack instead of isolating.** Julia's `LOAD_PATH` defaults to `["@", "@v#.#", "@stdlib"]`: with a project active, `using X` still finds an `X` installed in the user's default environment. Two consequences, both deliberate:
+   - **PDVKernel handling is free.** IJulia and PDVKernel resolve from the default environment even while the project environment is active — the §10.5.7 goal (the kernel's support package never appears in the user's dependency file) with no install step at all. PDVKernel is never written into a project's `Project.toml`.
+   - **Pkg mode is strictly additive, so it needs no mode choice.** Activating a project environment can never hide packages a shared-mode session would have seen; a cluster user's hand-curated default environment keeps working untouched. New Julia projects are therefore always pkg mode — there is no New Project dialog for Julia and no uv-style uv/shared fork (§10.6.5). `mode: "shared"` survives only as the reading of legacy manifests.
+
+   The trade-off is honesty about what travels: the project reproduces **what was recorded** — packages added via `PDVKernel.install()`, the Packages tab, or any `Pkg.add` run in a cell (all land in the active project). A package that happens to be installed in the machine's default environment but was never added to the project works locally and silently rides the stack, but is not in `Project.toml` and will not be instantiated on another machine. This matches standard Julia practice; PDV does not attempt venv-style hard isolation, because that would force PDVKernel and IJulia into the user's project file — exactly what §10.5.7 forbids.
+
+#### 10.6.2 The Two Directories
+
+| Artifact | Save directory | Working directory |
+|---|---|---|
+| `Project.toml` | ✓ | ✓ (materialized on open, written back on save) |
+| `Manifest.toml` | ✓ | ✓ (materialized on open, written back on save) |
+
+`JULIA_ENV_FILES = ["Project.toml", "Manifest.toml"]` rides the same materialize-on-open / write-on-save flow as Python's `PYTHON_ENV_FILES` (`project-file-sync.ts` selects the set by session language). The working directory is a textbook Julia project — `julia --project=<working-dir>`, VS Code's Julia extension, and `Pkg` from a terminal all behave exactly as in a hand-made project. `Manifest.toml` travels with the project so the environment reproduces deterministically (it records exact versions and the `julia_version` that resolved them). There is no third pin file: Julia version pinning is `Manifest.toml`'s `julia_version` entry, surfaced as a warning on mismatch rather than an auto-install (juliaup-driven version acquisition is future work, tracked with environment discovery).
+
+#### 10.6.3 Activation
+
+The kernel process itself runs with the project environment active: `kernels.start` sets `JULIA_PROJECT=<working-dir>` in the kernel spec's environment (Julia's native activation variable, honored at process start — no `Pkg.activate` call, no bootstrap change, and `Base.active_project()` reports the project from the first prompt). Restarts reuse the spec, and the crash handler already preserves the working directory, so activation survives kernel restarts for free. A missing `Project.toml` is not an error: Julia treats the path as an empty project and `Pkg.add` creates the file.
+
+#### 10.6.4 Manifest Additions
+
+`environment.mode` gains a third accepted value, `"pkg"`; the schema version stays `"1.2"` (the block's shape is unchanged — an older 1.2 app reading `mode: "pkg"` degrades to a shared-mode open, which still boots thanks to stacking).
+
+```json
+{
+  "schema_version": "1.2",
+  "language": "julia",
+  "environment": {
+    "mode": "pkg",
+    "julia_version": "1.11.6"
+  }
+}
+```
+
+| Field | Type | Description |
+|---|---|---|
+| `environment.mode` | string | `"uv"`, `"shared"`, or `"pkg"`. `"pkg"` is recorded for every project created by a pkg-capable app with a Julia session. |
+| `environment.julia_version` | string? | The Julia version the session actually ran on, pkg-mode only — captured at environment setup and recorded on every save. Display and mismatch-warning only; `Manifest.toml`'s own `julia_version` is what `Pkg` checks. |
+
+As with uv mode, no `interpreter_path` is recorded for `mode: "pkg"`: the Julia executable is the app-level Default Runtime choice (§10.5.19), not part of the project's identity.
+
+#### 10.6.5 New Project Flow
+
+Clicking **New Julia Project** starts a pkg-mode session directly — no dialog (§10.6.1's additivity is why the §10.5.8 choice point does not exist for Julia). The main process creates the fresh working directory, writes an empty `Project.toml`, and launches the kernel with `JULIA_PROJECT` set. The instantiate subprocess still runs (concurrently, §10.6.6) — it is a no-op resolve on an empty project, and its `VERSION` print is what stamps `julia_version` into the manifest on first save. The project reaches the manifest as `mode: "pkg"` on first save.
+
+#### 10.6.6 Project Open Flow
+
+When the main process loads a project whose manifest has `environment.mode: "pkg"`:
+
+1. Materialize the working directory, copying `Project.toml` and `Manifest.toml` from the save directory alongside the tree files.
+2. Run `Pkg.instantiate` **in parallel with the kernel boot** (see below), streaming output over `envActivity` into the same `EnvSyncModal` overlay uv launches use.
+3. The session is `ready` only when both the kernel handshake and the instantiate have completed; instantiate failure keeps the overlay up with **Retry / Cancel**, uv-style.
+
+The instantiate runs as a separate subprocess — `<julia> --project=<working-dir> --startup-file=no -e 'using Pkg; Pkg.instantiate()'` — via `julia-env.ts`, the Julia sibling of `uv-runner.ts` (§10.5.18's single-spawn-site rule applies: no other main-process file spawns Julia for environment work). Unlike `uv sync`, this is safe to overlap with the kernel boot: the kernel's own boot needs only IJulia and PDVKernel, which resolve from the default environment (§10.6.1), and no user code runs until the overlay drops. The overlap makes the warm-open cost **zero added wall-clock** — a satisfied `Manifest.toml` verifies in well under the kernel's own boot time — while a cold open streams download/precompile progress for as long as it takes. `Pkg.instantiate` also precompiles what it installs, so the first `using` after a cold open is not a multi-minute JIT surprise. The same subprocess prints `VERSION` so the main process can record `julia_version` in the per-kernel environment metadata (§10.6.4) without an extra probe.
+
+The §10.5.10 load-time safety net has a pkg analog (`syncPkgEnvironmentForLoad`): if the working directory's env files diverge from the save directory's, the project's files are copied over and `Pkg.instantiate` re-runs. The Python-pin ABI guard has no analog — Julia recompiles native code per version instead of breaking — so a `julia_version` mismatch is a console warning, never a block.
+
+#### 10.6.7 Save Flow
+
+On `project.save`, `Project.toml` and `Manifest.toml` are written from the working directory back into the save directory (both change mid-session via `PDVKernel.install()`, the Packages tab, and user `Pkg.add` in cells). The manifest records `mode: "pkg"` and `julia_version` from the active kernel's environment metadata.
+
+#### 10.6.8 `PDVKernel.install()` and the Packages Tab
+
+`PDVKernel.install("Pkg1", ...)` is unchanged in shape — `Pkg.add` into the **active** environment, blocking the cell — and needs no uv-style binary handoff in the init payload: with `JULIA_PROJECT` set, the active environment *is* the project, so installs are recorded in the project's `Project.toml` automatically. `PDVKernel.remove(...)` (→ `Pkg.rm`) and `PDVKernel.update(...)` (→ `Pkg.update`) complete the verb set. No import-cache invalidation step exists because Julia needs none. The reactive-install affordance (§10.5.12) already routes Julia sessions to `PDVKernel.install`.
+
+The Project Environment tab (§10.5.13) activates for pkg-mode Julia sessions: the header shows a "Pkg-managed · shareable" badge with the Julia executable and version (from `environment:activeInfo`); the dependency list is parsed in the main process from the working directory's `Project.toml` (`[deps]`) with installed versions from `Manifest.toml` (both TOML — parsed with the already-bundled `smol-toml`, never hand-parsed); add/remove/upgrade dispatch the corresponding `PDVKernel.install`/`remove`/`update` invocation through the same `executeAndTranscribe` bracket as §10.5.12, so operations stream to the console and are serialized with cell execution by the kernel's own queue (Julia has no uv-subprocess path — running Pkg inside the kernel is what keeps the live session and the files consistent). Shared-mode Julia sessions see the same "external environment" note as shared Python.
 
 ---
 

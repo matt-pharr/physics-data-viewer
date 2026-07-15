@@ -89,15 +89,29 @@ against `::Int` still errors.
 
 ## Known parity gaps vs the Python backend
 
-### 5. No per-project environments (biggest gap)
-Julia sessions are shared-mode only: no analog of the uv flow, no per-project
-`Project.toml`/`Manifest.toml`, Packages settings tab inactive, dependencies
-not recorded in the project manifest. `PDVKernel.install()` works but lands in
-the user's global env (`~/.julia/environments/v1.11`), so projects aren't
-self-carrying. The Julia-native design is straightforward (per-project
-`Project.toml` + `Pkg.activate` at kernel start + `Pkg.instantiate` on open —
-Pkg is built in, no bundled binary needed) and is scoped in
-PLANNED_FEATURES.md beta3.
+### 5. ~~No per-project environments (biggest gap)~~ — FIXED (2026-07-14)
+Pkg-managed per-project environments shipped (ARCHITECTURE.md §10.6, the uv
+analog). New Julia projects are always pkg-mode — no dialog, because Julia's
+stacked `LOAD_PATH` makes the project env strictly additive (a globally
+installed package stays visible; PDVKernel/IJulia keep resolving from the
+default env, so they never appear in the user's `Project.toml`). Mechanics:
+`Project.toml`/`Manifest.toml` ride the env-file save/open flow, the kernel
+spawns with `JULIA_PROJECT=<working-dir>` (native activation, no kernel-side
+code), and `Pkg.instantiate` runs **concurrently with the kernel boot** behind
+the EnvSyncModal (zero added wall-clock warm; streamed download/precompile
+progress cold). `PDVKernel.install()` now records into the project env;
+`PDVKernel.remove`/`update` added. The manifest records
+`environment: { mode: "pkg", julia_version }`. Restart snapshots the env files
+(and now relaunches on the recorded executable instead of the PATH shim —
+also fixed for shared Julia restarts). Legacy shared-mode Julia projects keep
+opening shared; no auto-migration.
+
+Residual (tracked, not blocking): the Packages settings tab shows the
+pkg-mode badge/version and a `PDVKernel.install` hint rather than the full
+uv-style CRUD list; a `Project.toml`-driven list view is a follow-up. What
+travels is what's *recorded*: a package present only in the user's default
+env silently rides the stack locally but won't instantiate elsewhere —
+inherent to Julia's stacked-env model and documented in §10.6.1.
 
 ### 6. Environment selection is a bare path field
 No discovery of juliaup channels / installed Julia versions — the selector is

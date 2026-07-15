@@ -65,10 +65,13 @@ ecosystem follow-ups:
   `Pkg.develop`) so the app can offer one-click install like it does for pdv-python.
 - Julia environment discovery in the Environment Selector (today: manual path entry;
   juliaup-aware discovery planned).
-- Tree queries during long compute-bound executions: the Julia query server runs
-  cooperatively (served at yield points); evaluate an interactive-thread or
-  snapshot approach for true mid-execution browsing.
-- Per-project Julia environments (the `Project.toml` analog of the uv flow).
+- ~~Tree queries during long compute-bound executions~~ — shipped on the Julia
+  backend branch: threaded query server on a default-pool OS thread serving a
+  lock-guarded listings snapshot (ARCHITECTURE.md §5.14).
+- ~~Per-project Julia environments (the `Project.toml` analog of the uv flow)~~ —
+  shipped on the Julia backend branch: Pkg-managed `mode: "pkg"` projects
+  (ARCHITECTURE.md §10.6). Follow-up: a `Project.toml`-driven package list in
+  the Project Environment tab (today: badge/version + `PDVKernel.install` hint).
 
 Target use case: a physicist running a Julia simulation code on a remote cluster, driven from a PDV module.
 

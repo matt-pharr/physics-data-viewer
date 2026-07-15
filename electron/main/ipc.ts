@@ -1509,17 +1509,22 @@ export interface ProjectManifestPeek {
 }
 
 /**
- * Extra context passed to `kernels.start` when opening a `mode: "uv"`
- * project. Its presence tells the main process to materialize the project's
- * uv environment (working dir + `uv sync` + `pdv-python`) and launch the
- * kernel against the venv interpreter (§10.5.9).
+ * Extra context passed to `kernels.start` when opening a per-project-
+ * environment session. For Python its presence tells the main process to
+ * materialize the project's uv environment (working dir + `uv sync` +
+ * `pdv-python`) and launch the kernel against the venv interpreter (§10.5.9).
+ * For Julia it selects pkg mode (§10.6): copy/seed `Project.toml` +
+ * `Manifest.toml` into the working dir, launch the kernel with
+ * `JULIA_PROJECT` pointing at it, and `Pkg.instantiate` on open.
+ * `pythonVersion`/`packages` are Python-only.
  */
 export interface KernelUvContext {
-  /** Opening an existing uv project: copy its env files from this save dir. */
+  /** Opening an existing uv/pkg project: copy its env files from this save dir. */
   saveDir?: string;
   /**
-   * Creating a brand-new uv project: seed `pyproject.toml` from the user's
-   * default packages (§10.5.8) rather than copying from a save directory.
+   * Creating a brand-new project: seed `pyproject.toml` from the user's
+   * default packages (§10.5.8, Python) or write an empty `Project.toml`
+   * (§10.6.5, Julia) rather than copying from a save directory.
    */
   newProject?: boolean;
   /**
@@ -1556,12 +1561,17 @@ export interface KernelRestartResult {
  * kernel is active.
  */
 export interface ActiveEnvironmentInfo {
-  /** Whether the session runs in a uv-managed project venv or a shared env. */
-  mode: "uv" | "shared";
+  /**
+   * Whether the session runs in a uv-managed project venv (`"uv"`), a
+   * Pkg-managed Julia project environment (`"pkg"`, §10.6), or a shared env.
+   */
+  mode: "uv" | "shared" | "pkg";
   /** Interpreter the kernel actually spawned on (venv python for uv mode). */
   interpreterPath?: string;
   /** Resolved `major.minor` Python version of that interpreter. */
   pythonVersion?: string;
+  /** Resolved Julia version of the session, pkg mode only (e.g. `"1.11.6"`). */
+  juliaVersion?: string;
 }
 
 /**

@@ -36,7 +36,8 @@ import { shouldBumpOnSwap } from "./mcp/generation-guard";
 import { KernelManager } from "./kernel-manager";
 import { ModuleManager } from "./module-manager";
 import { bindProjectModulesToTree } from "./module-runtime";
-import { syncUvEnvironmentForLoad } from "./project-file-sync";
+import { syncPkgEnvironmentForLoad, syncUvEnvironmentForLoad } from "./project-file-sync";
+import { instantiateJuliaEnvironment } from "./julia-env";
 import {
   ProjectManager,
   type ProjectModuleImport,
@@ -687,6 +688,25 @@ export function registerIpcHandlers(
       if (result.synced) await refreshKernelImportCaches();
       return result;
     },
+    // pkg-mode analog (§10.6.6): re-point the running Julia session's project
+    // environment at the opened project and Pkg.instantiate it. No import-
+    // cache refresh exists or is needed on the Julia side.
+    syncPkgEnvironmentForLoad: async (saveDir, workingDir) =>
+      syncPkgEnvironmentForLoad(saveDir, workingDir, {
+        runPkgInstantiate: async (cwd) => {
+          const juliaPath =
+            (activeKernelId
+              ? kernelEnvMeta.get(activeKernelId)?.interpreterPath
+              : undefined) ??
+            readConfig(configStore).juliaPath ??
+            "julia";
+          const result = await instantiateJuliaEnvironment(cwd, juliaPath, {
+            win,
+            pushChannel: IPC.push.envActivity,
+          });
+          return { success: result.success, output: result.output };
+        },
+      }),
     onExplicitSaveCompleted: (saveDir) => {
       void ProjectManager.clearAutosave(saveDir);
       projectManager.resetAutosaveTimer();

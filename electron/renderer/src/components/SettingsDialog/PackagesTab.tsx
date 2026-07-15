@@ -20,7 +20,7 @@ import type { ActiveEnvironmentInfo, EnvironmentInstallResult, ProjectPackage } 
 /** Props for {@link PackagesTab}. */
 interface PackagesTabProps {
   /** Active environment mode. Only `'uv'` enables the package CRUD UI. */
-  environmentMode?: 'uv' | 'shared';
+  environmentMode?: 'uv' | 'shared' | 'pkg';
 }
 
 /** Settings tab body for the project environment (info header + packages). */
@@ -116,18 +116,25 @@ export const PackagesTab: React.FC<PackagesTabProps> = ({ environmentMode }) => 
     void runMutation(() => window.pdv.environment.addPackage([spec]));
   }, [addInput, runMutation]);
 
-  // Environment info header shared by both modes (§10.5.19). Falls back to
+  // Environment info header shared by all modes (§10.5.19). Falls back to
   // the mode prop when the metadata fetch hasn't resolved yet.
   const mode = envInfo?.mode ?? environmentMode;
   const envHeader = (
     <div className="settings-env-header" data-testid="project-env-header">
       <span
-        className={`settings-env-badge ${mode === 'uv' ? 'settings-env-badge-uv' : 'settings-env-badge-shared'}`}
+        className={`settings-env-badge ${mode === 'uv' || mode === 'pkg' ? 'settings-env-badge-uv' : 'settings-env-badge-shared'}`}
       >
-        {mode === 'uv' ? 'uv-managed · shareable' : 'external environment'}
+        {mode === 'uv'
+          ? 'uv-managed · shareable'
+          : mode === 'pkg'
+            ? 'Pkg-managed · shareable'
+            : 'external environment'}
       </span>
       {envInfo?.pythonVersion && (
         <span className="settings-env-version">Python {envInfo.pythonVersion}</span>
+      )}
+      {envInfo?.juliaVersion && (
+        <span className="settings-env-version">Julia {envInfo.juliaVersion}</span>
       )}
       {envInfo?.interpreterPath && (
         <div className="settings-env-interpreter" title={envInfo.interpreterPath}>
@@ -136,6 +143,26 @@ export const PackagesTab: React.FC<PackagesTabProps> = ({ environmentMode }) => 
       )}
     </div>
   );
+
+  // pkg-mode Julia sessions (§10.6.8): the project environment is live and
+  // travels with the save; package operations run in the kernel. The
+  // uv-style CRUD list for Julia is a planned follow-up.
+  if (environmentMode === 'pkg') {
+    return (
+      <div className="settings-packages">
+        {envHeader}
+        <p className="settings-packages-hint">
+          This project owns a Pkg-managed Julia environment
+          (<code>Project.toml</code> / <code>Manifest.toml</code>), saved with
+          the project and instantiated automatically on open. Install packages
+          with <code>PDVKernel.install(&quot;PackageName&quot;)</code> in a
+          code cell (or <code>PDVKernel.remove</code> /{' '}
+          <code>PDVKernel.update</code>) — they are recorded in the
+          project&rsquo;s environment and travel with it.
+        </p>
+      </div>
+    );
+  }
 
   if (environmentMode !== 'uv') {
     return (

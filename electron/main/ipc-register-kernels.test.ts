@@ -47,6 +47,14 @@ const uvEnvironmentMocks = vi.hoisted(() => ({
   materializeUvEnvironment: vi.fn(),
 }));
 
+const juliaEnvMocks = vi.hoisted(() => ({
+  instantiateJuliaEnvironment: vi.fn(async () => ({
+    success: true,
+    output: "",
+    juliaVersion: "1.11.6",
+  })),
+}));
+
 vi.mock("electron", () => ({
   ipcMain: {
     handle: ipcRegistry.ipcHandle,
@@ -66,6 +74,7 @@ vi.mock("./kernel-session", () => kernelSessionMocks);
 vi.mock("./module-runtime", () => moduleRuntimeMocks);
 vi.mock("./project-file-sync", () => projectFileSyncMocks);
 vi.mock("./uv-environment", () => uvEnvironmentMocks);
+vi.mock("./julia-env", () => juliaEnvMocks);
 
 import { IPC, type ActiveEnvironmentInfo } from "./ipc";
 import { registerKernelIpcHandlers } from "./ipc-register-kernels";
@@ -338,6 +347,179 @@ describe("kernels:start — new uv project (§10.5.8)", () => {
     } finally {
       fs.rmSync(wd, { recursive: true, force: true });
     }
+  });
+});
+
+describe("kernels:start — Julia pkg mode (§10.6)", () => {
+  function setupPkgStart(): { harness: Harness; wd: string } {
+    const harness = setup();
+    const wd = fs.mkdtempSync(path.join(os.tmpdir(), "pdv-pkgproj-"));
+    (harness.projectManager.createWorkingDir as Mock).mockResolvedValue(wd);
+    juliaEnvMocks.instantiateJuliaEnvironment.mockResolvedValue({
+      success: true,
+      output: "",
+      juliaVersion: "1.11.6",
+    });
+    return { harness, wd };
+  }
+
+  it("new project: writes an empty Project.toml and activates it via JULIA_PROJECT (§10.6.5)", async () => {
+    const { harness, wd } = setupPkgStart();
+    harness.kernelManager.start = vi.fn(async () => makeKernelInfo({ id: "kj" }));
+    try {
+      await getHandler(IPC.kernels.start)(
+        {},
+        { language: "julia", env: { JULIA_PATH: "/opt/julia/bin/julia" } },
+        { newProject: true },
+      );
+      expect(fs.readFileSync(path.join(wd, "Project.toml"), "utf8")).toBe("");
+      const startArg = (harness.kernelManager.start as Mock).mock.calls.at(-1)?.[0] as {
+        env: Record<string, string>;
+      };
+      expect(startArg.env.JULIA_PROJECT).toBe(wd);
+      expect(startArg.env.JULIA_PATH).toBe("/opt/julia/bin/julia");
+      expect(harness.kernelEnvMeta.get("kj")).toEqual({
+        mode: "pkg",
+        interpreterPath: "/opt/julia/bin/julia",
+        juliaVersion: "1.11.6",
+      });
+    } finally {
+      fs.rmSync(wd, { recursive: true, force: true });
+    }
+  });
+
+  it("open project: copies the Julia env files and runs Pkg.instantiate (§10.6.6)", async () => {
+    const { harness, wd } = setupPkgStart();
+    try {
+      await getHandler(IPC.kernels.start)(
+        {},
+        { language: "julia", env: { JULIA_PATH: "/opt/julia/bin/julia" } },
+        { saveDir: "/projects/lorenz" },
+      );
+      expect(projectFileSyncMocks.copyEnvFilesForLoad).toHaveBeenCalledWith(
+        "/projects/lorenz",
+        wd,
+        "julia",
+      );
+      expect(juliaEnvMocks.instantiateJuliaEnvironment).toHaveBeenCalledWith(
+        wd,
+        "/opt/julia/bin/julia",
+        expect.anything(),
+      );
+      // The instantiate-complete marker flips the EnvSyncModal stage.
+      expect(harness.win.webContentsSend).toHaveBeenCalledWith(IPC.push.envActivity, {
+        stream: "stdout",
+        data: "",
+        stage: "kernel-boot",
+      });
+    } finally {
+      fs.rmSync(wd, { recursive: true, force: true });
+    }
+  });
+
+  it("tears the kernel back down when Pkg.instantiate fails", async () => {
+    const { harness, wd } = setupPkgStart();
+    harness.kernelManager.start = vi.fn(async () => makeKernelInfo({ id: "kfail" }));
+    juliaEnvMocks.instantiateJuliaEnvironment.mockResolvedValue({
+      success: false,
+      output: "Unsatisfiable requirements",
+      juliaVersion: "1.11.6",
+    });
+    try {
+      await expect(
+        getHandler(IPC.kernels.start)(
+          {},
+          { language: "julia", env: { JULIA_PATH: "/opt/julia/bin/julia" } },
+          { saveDir: "/projects/broken" },
+        ),
+      ).rejects.toThrow(/Julia environment setup failed[\s\S]*Unsatisfiable/);
+      expect(harness.kernelManager.stop).toHaveBeenCalledWith("kfail");
+      expect(harness.kernelEnvMeta.has("kfail")).toBe(false);
+    } finally {
+      fs.rmSync(wd, { recursive: true, force: true });
+    }
+  });
+
+  it("without a launch context a Julia start stays shared-mode (legacy sessions)", async () => {
+    const { harness } = setupPkgStart();
+    harness.kernelManager.start = vi.fn(async () => makeKernelInfo({ id: "kshared" }));
+    await getHandler(IPC.kernels.start)(
+      {},
+      { language: "julia", env: { JULIA_PATH: "/opt/julia/bin/julia" } },
+    );
+    expect(harness.projectManager.createWorkingDir).not.toHaveBeenCalled();
+    expect(juliaEnvMocks.instantiateJuliaEnvironment).not.toHaveBeenCalled();
+    expect(harness.kernelEnvMeta.get("kshared")).toEqual({
+      mode: "shared",
+      interpreterPath: "/opt/julia/bin/julia",
+    });
+  });
+});
+
+describe("kernels:restart — Julia pkg mode (§10.6)", () => {
+  it("snapshots Project.toml/Manifest.toml and relaunches with JULIA_PROJECT + JULIA_PATH", async () => {
+    const harness = setup();
+    const oldWd = fs.mkdtempSync(path.join(os.tmpdir(), "pdv-pkgrestart-old-"));
+    const newWd = fs.mkdtempSync(path.join(os.tmpdir(), "pdv-pkgrestart-new-"));
+    try {
+      fs.writeFileSync(path.join(oldWd, "Project.toml"), "[deps]\nNPZ = \"x\"\n");
+      fs.writeFileSync(path.join(oldWd, "Manifest.toml"), "julia_version = \"1.11.6\"\n");
+      harness.kernelWorkingDirs.set("kj", oldWd);
+      harness.kernelEnvMeta.set("kj", {
+        mode: "pkg",
+        interpreterPath: "/opt/julia/bin/julia",
+        juliaVersion: "1.11.6",
+      });
+      harness.kernelManager.getKernel = vi.fn(() =>
+        makeKernelInfo({ id: "kj", language: "julia" }),
+      );
+      (harness.projectManager.createWorkingDir as Mock).mockResolvedValue(newWd);
+      harness.kernelManager.start = vi.fn(async () => makeKernelInfo({ id: "kj2", language: "julia" }));
+
+      await getHandler(IPC.kernels.restart)({}, "kj");
+
+      // Env files re-seeded into the fresh working dir.
+      expect(fs.readFileSync(path.join(newWd, "Project.toml"), "utf8")).toContain("NPZ");
+      expect(fs.readFileSync(path.join(newWd, "Manifest.toml"), "utf8")).toContain(
+        "julia_version",
+      );
+      const startArg = (harness.kernelManager.start as Mock).mock.calls.at(-1)?.[0] as {
+        env: Record<string, string>;
+      };
+      expect(startArg.env.JULIA_PROJECT).toBe(newWd);
+      expect(startArg.env.JULIA_PATH).toBe("/opt/julia/bin/julia");
+      // Snapshot path: the depot already holds everything — no instantiate.
+      expect(juliaEnvMocks.instantiateJuliaEnvironment).not.toHaveBeenCalled();
+      expect(harness.kernelEnvMeta.get("kj2")).toEqual({
+        mode: "pkg",
+        interpreterPath: "/opt/julia/bin/julia",
+        juliaVersion: "1.11.6",
+      });
+    } finally {
+      fs.rmSync(oldWd, { recursive: true, force: true });
+      fs.rmSync(newWd, { recursive: true, force: true });
+    }
+  });
+
+  it("shared Julia restart relaunches on the recorded executable, not the PATH shim", async () => {
+    const harness = setup();
+    harness.kernelWorkingDirs.set("kj", "/tmp/nonexistent-pdv-wd");
+    harness.kernelEnvMeta.set("kj", {
+      mode: "shared",
+      interpreterPath: "/opt/julia/bin/julia",
+    });
+    harness.kernelManager.getKernel = vi.fn(() =>
+      makeKernelInfo({ id: "kj", language: "julia" }),
+    );
+    harness.kernelManager.start = vi.fn(async () => makeKernelInfo({ id: "kj2", language: "julia" }));
+
+    await getHandler(IPC.kernels.restart)({}, "kj");
+
+    const startArg = (harness.kernelManager.start as Mock).mock.calls.at(-1)?.[0] as {
+      env?: Record<string, string>;
+    };
+    expect(startArg.env?.JULIA_PATH).toBe("/opt/julia/bin/julia");
+    expect(startArg.env?.JULIA_PROJECT).toBeUndefined();
   });
 });
 

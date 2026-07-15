@@ -78,7 +78,9 @@ export const EnvSyncModal: React.FC<EnvSyncModalProps> = ({
           <div className="env-sync-subtitle">
             {stage === 'kernel-boot'
               ? detail ?? 'The environment is ready — launching the session.'
-              : 'Resolving dependencies with uv. This can take a moment the first time.'}
+              : language === 'julia'
+                ? 'Resolving project dependencies with Pkg. This can take a moment the first time.'
+                : 'Resolving dependencies with uv. This can take a moment the first time.'}
           </div>
         )}
         {failed && errorMessage && (

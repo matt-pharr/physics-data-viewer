@@ -255,12 +255,14 @@ export interface ProjectLoadResult {
 }
 
 /** Lightweight manifest peek returned before kernel start. */
-/** Per-project Python environment configuration (§10.5). */
+/** Per-project environment configuration (§10.5 uv / §10.6 Julia pkg). */
 export interface EnvironmentConfig {
   /** Which environment flow this project uses. */
-  mode: "uv" | "shared";
+  mode: "uv" | "shared" | "pkg";
   /** Requested Python version for uv mode (e.g. "3.12"). */
   python_version?: string;
+  /** Julia version the session ran on, pkg mode only (e.g. "1.11.6"). */
+  julia_version?: string;
 }
 
 export interface ProjectManifestPeek {
@@ -277,14 +279,16 @@ export interface ProjectManifestPeek {
 }
 
 /**
- * Extra context passed to `kernels.start` when opening a `mode: "uv"`
- * project — tells the main process to materialize the uv environment and
- * launch the kernel against the venv interpreter (§10.5.9).
+ * Extra context passed to `kernels.start` when opening a per-project-
+ * environment session — for Python, materialize the uv environment and
+ * launch against the venv interpreter (§10.5.9); for Julia, seed the
+ * project's `Project.toml`/`Manifest.toml`, activate via `JULIA_PROJECT`,
+ * and `Pkg.instantiate` (§10.6). `pythonVersion`/`packages` are Python-only.
  */
 export interface KernelUvContext {
-  /** Opening an existing uv project: its save directory. */
+  /** Opening an existing uv/pkg project: its save directory. */
   saveDir?: string;
-  /** Creating a brand-new uv project (seed from default packages, §10.5.8). */
+  /** Creating a brand-new project (§10.5.8 Python / §10.6.5 Julia). */
   newProject?: boolean;
   /**
    * Python version for a new project's venv (e.g. `"3.13"`), chosen in the
@@ -314,12 +318,17 @@ export interface KernelRestartResult {
  * Environment metadata for the active kernel (Project Environment tab).
  */
 export interface ActiveEnvironmentInfo {
-  /** Whether the session runs in a uv-managed project venv or a shared env. */
-  mode: 'uv' | 'shared';
+  /**
+   * Whether the session runs in a uv-managed project venv (`'uv'`), a
+   * Pkg-managed Julia project environment (`'pkg'`, §10.6), or a shared env.
+   */
+  mode: 'uv' | 'shared' | 'pkg';
   /** Interpreter the kernel actually spawned on (venv python for uv mode). */
   interpreterPath?: string;
   /** Resolved `major.minor` Python version of that interpreter. */
   pythonVersion?: string;
+  /** Resolved Julia version of the session, pkg mode only (e.g. "1.11.6"). */
+  juliaVersion?: string;
 }
 
 /**
