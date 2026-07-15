@@ -5,7 +5,7 @@ Tracking list for the Julia backend (`pdv-julia` / PDVKernel.jl) shipped on
 against the Python backend, rough edges, and test-coverage gaps. Items should
 graduate to GitHub issues as they're triaged.
 
-Last updated: 2026-07-14.
+Last updated: 2026-07-15.
 
 ---
 
@@ -106,18 +106,32 @@ progress cold). `PDVKernel.install()` now records into the project env;
 also fixed for shared Julia restarts). Legacy shared-mode Julia projects keep
 opening shared; no auto-migration.
 
-Residual (tracked, not blocking): the Packages settings tab shows the
-pkg-mode badge/version and a `PDVKernel.install` hint rather than the full
-uv-style CRUD list; a `Project.toml`-driven list view is a follow-up. What
-travels is what's *recorded*: a package present only in the user's default
-env silently rides the stack locally but won't instantiate elsewhere —
+~~Residual: the Packages settings tab shows only a badge + `PDVKernel.install`
+hint.~~ Closed 2026-07-15: pkg-mode sessions get the full uv-style CRUD list —
+deps from `Project.toml` `[deps]`+`[compat]` with resolved versions from
+`Manifest.toml`, and Add/Remove/Upgrade running `PDVKernel.install`/`remove`/
+`update` *inside the kernel* (console-bracketed, queued behind running cells,
+mirrored to the tab's output pane — §10.6.8). Remaining caveat by design:
+what travels is what's *recorded* — a package present only in the user's
+default env silently rides the stack locally but won't instantiate elsewhere,
 inherent to Julia's stacked-env model and documented in §10.6.1.
 
-### 6. Environment selection is a bare path field
-No discovery of juliaup channels / installed Julia versions — the selector is
-a manual executable-path input (blank → `julia` on PATH). No pdv-python-style
-one-click "Install PDVKernel into this environment" either; installation is a
-manual `Pkg.develop(path="pdv-julia")` (or `Pkg.add` once registered).
+### 6. ~~Environment selection is a bare path field~~ — FIXED (2026-07-15)
+The selector's Julia tab is now a full discovery list (ARCHITECTURE §10.7,
+`julia-discovery.ts`): juliaup channels are read straight from
+`juliaup.json` — filesystem-only, no subprocess, so a wedged shim can't hang
+discovery — plus the configured path and well-known system locations, each
+probed with a single spawn (Julia version + PDVKernel via `locate_package` +
+IJulia presence) and badged like the Python rows. One-click **Install
+PDVKernel** stages the bundled `pdv-julia` into `<userData>/pdv-julia/` and
+runs `Pkg.develop` + `Pkg.add("IJulia")` + a targeted precompile into the
+runtime's *default* environment (the stacking-correct target, §10.6.1) with
+streaming Pkg output. Shim bypass ships with it: every Julia launch resolves
+the configured path through `julialauncher` to the real versioned binary, and
+an unconfigured launch uses the discovered juliaup default instead of the
+PATH shim. Residual: juliaup-driven *installation* of missing Julia versions
+(auto-acquire on `Manifest.toml` version mismatch) — filed with an agreed
+design as #19.
 
 ### 7. ~~Tree browsing stalls during compute-bound execution~~ — FIXED (2026-07-14)
 The query server now runs on a dedicated default-pool OS thread when the
@@ -154,32 +168,28 @@ DimensionalData.jl mapping could close this if there's demand.
 
 ## Rough edges
 
-### 10. First-use JIT latency
-First import of a module that loads CairoMakie alongside DifferentialEquations
-pays a one-time extension precompile per machine — measured at **10.5 minutes**
-on an M-series Mac when the SciML↔Makie extension caches are fully cold (they
-can go cold again after package updates). First solve/plot pays JIT (~10–30 s).
-Cached afterwards. During the stall the kernel is busy, so tree queries and
-completions time out too (issues 7/11) and the only feedback is the busy
-spinner — worth a "precompiling packages…" indicator eventually. This is also
-the most likely way a module demo "hangs" in front of an audience: pre-warm
-with `julia -e 'using DifferentialEquations, CairoMakie'` before presenting.
+### 10. First-use JIT latency — BOOT PATH FIXED (2026-07-15)
+The boot-path half of this issue is fixed (ARCHITECTURE §10.8): both kernel
+boot waits now use **activity-based deadlines** — a 30 s / 60 s *idle*
+timeout that resets whenever the kernel shows signs of life (process
+stdout/stderr during IJulia's own boot; iopub `stream` traffic during the
+bootstrap's `using PDVKernel`), under 15 / 20-minute hard caps. A
+post-update recompile can no longer blow the boot allowance while printing
+progress, but a silently wedged kernel still fails in 30–60 s. The progress
+itself now streams (ANSI-stripped) into the EnvSyncModal, which swaps its
+subtitle to "Precompiling packages…" when it sees Pkg's output — no more
+bare spinner. The wedged-shim failure mode is closed by issue 6's automatic
+shim bypass (every launch spawns the real versioned binary), and the
+one-click PDVKernel install runs a targeted `Pkg.precompile` so the first
+boot after an install doesn't pay compile cost blind.
 
-Related boot-path failure mode, diagnosed 2026-07-14: a **wedged juliaup
-self-update** blocks the `julia` shim, so every shim-routed invocation —
-including the PDVKernel environment probe — hangs or times out, and PDV
-reports "Kernel startup timed out" / "PDVKernel missing" even though the
-caches are warm (`using IJulia; using PDVKernel` loads in ~1 s via the real
-binary). Anything that serializes precompilation (a stale precompile pidfile
-lock from a killed julia, two processes compiling the same packages) produces
-the same symptom. Mitigations shipped: the environment probe now uses
-`Base.locate_package` + Project.toml instead of `using PDVKernel` (never
-compiles, ~1 s), and pointing PDV at the real juliaup-resolved binary
-(`~/.julia/juliaup/julia-<ver>/bin/julia`) bypasses the shim entirely — worth
-doing automatically when juliaup discovery lands (issue 6). A genuine
-post-update recompile blowing the 60 s boot allowance is still possible;
-options: detect "Precompiling" on kernel stderr and extend the deadline, or
-precompile explicitly with progress UI before spawning the kernel.
+What remains (inherent, not boot-path): the first *mid-session* import of a
+cold module combo (SciML↔Makie extension caches, measured at **10.5 min**)
+still stalls the busy kernel, and tree queries/completions time out during
+it (issues 7/11) with only the console's streamed output as feedback.
+Pre-warm with `julia -e 'using DifferentialEquations, CairoMakie'` before a
+live demo. First solve/plot JIT (~10–30 s) is unchanged and cached
+afterwards.
 
 ### 11. Completion requests can time out while the kernel is busy
 `complete_request` shares the shell channel with execution; a completion issued
@@ -212,6 +222,57 @@ and prints an actionable `[PDV]` notice (re-run the plotting code) instead.
 Figures that were never displayed before saving re-display fine. A real fix
 probably needs an upstream-blessed way to detach a figure from its screens
 (`Makie.empty_screens!`-ish) or a figure deep-copy for serialization.
+
+### 18. Revisit calling lib functions from code cells (ergonomics + stale standalone libs)
+Marked for revisit (Matt, 2026-07-15). Two threads:
+
+- **Cell-side ergonomics.** Libs `include` into `Main` as a module named
+  after the file stem, so cells must call `mylib.smooth(x)` qualified or run
+  `using .mylib` by hand — unlike scripts, which get `using Main.<lib>`
+  injected automatically into their anonymous module. Options to evaluate:
+  auto-`using` registered libs into `Main` at load/register time (pollutes
+  the user namespace but matches script behavior), a `PDVKernel.libs()`
+  helper, or documentation-only.
+- **Standalone libs go stale after edits.** The `reload_libs` script-run
+  preflight only walks `PDVModule` nodes, so a standalone lib (plain tree
+  path) is `include`d at creation/project-load and never again — mid-session
+  edits don't take effect in cells *or* scripts until reload. Python has the
+  same module-scoped preflight (plus `sys.modules` caching), so this is a
+  parity-consistent gap, but if standalone-lib editing becomes a common
+  workflow both kernels should reload standalone libs in the preflight too.
+
+### 19. juliaup-driven Julia version management (design agreed 2026-07-15)
+
+The follow-up half of #6: PDV should manage Julia *versions* the way uv
+manages Python interpreters. Design agreed with Matt — the **middle path**:
+drive the user's juliaup, never bundle it.
+
+- **Why not bundle (unlike uv):** uv earned bundling because it is on the hot
+  path of every project open and keeps no user-global state. juliaup is
+  needed only for rare, explicit version-acquisition events — and it owns
+  persistent user-global state (`~/.julia/juliaup/juliaup.json`, the channel
+  DB, shims, self-update). A bundled copy co-managing that state with a
+  user-installed juliaup is the same class of external-state wedge the #6
+  shim bypass just engineered around.
+- **Gate on juliaup presence** (we already read its metadata for discovery).
+  When absent, offer one-click **"Install juliaup"** running the official
+  installer (`curl -fsSL https://install.julialang.org | sh -s -- --yes`)
+  with streamed output — covers the nothing-installed case too, since
+  juliaup then bootstraps a default Julia; the user ends up with a single,
+  standard, self-owned juliaup.
+- **Acquisition:** spawn `juliaup add <version>` as an explicit subprocess
+  with streamed progress (same pattern as the `Pkg.instantiate` runner).
+  The wedge-prone part of juliaup is only the *implicit* self-update inside
+  the `julia` shim, which PDV no longer touches.
+- **Auto-offer on open:** `Manifest.toml` records `julia_version`; when a
+  pkg-mode project's version has no installed channel, offer
+  "Install Julia X.Y with juliaup?" instead of today's silent
+  warning-and-proceed.
+- **Version picker:** a New-Julia-Project (and/or per-project) dropdown fed
+  by installed channels, analogous to the uv dialog's Python-version picker.
+- **Reminder:** each newly-acquired Julia minor version has its own default
+  env (`@v1.x`), so PDVKernel/IJulia need the one-click install (#6) run
+  once per version — the selector badges already surface this.
 
 ---
 

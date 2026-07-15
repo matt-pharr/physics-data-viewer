@@ -159,7 +159,7 @@ Ask the app to open a project from a directory.
 install(packages...)
 ```
 
-Install Julia packages into the active environment via `Pkg.add`, blocking the cell until the install finishes. The packages become loadable without a kernel restart. (The Julia analog of `pdv.install()`, delegating to Pkg rather than uv.)
+Install Julia packages into the active environment via `Pkg.add`, blocking the cell until the install finishes. The packages become loadable without a kernel restart. (The Julia analog of `pdv.install()`, delegating to Pkg rather than uv.) Each package is a name, optionally with a REPL-style version pin — `install("DataFrames")` or `install("DataFrames@1.6")` — which `Pkg.add`'s string form does not accept but this function translates to a `PackageSpec` for you.
 
 In a pkg-mode session (ARCHITECTURE.md §10.6) the active environment is the project's own — the app launches the kernel with `JULIA_PROJECT` pointing at the session working directory — so the install is recorded in the project's `Project.toml`/`Manifest.toml` and travels with the save. In a legacy shared-mode session it lands in the user's default environment.
 

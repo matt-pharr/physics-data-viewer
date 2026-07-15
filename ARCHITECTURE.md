@@ -792,13 +792,14 @@ The file layout mirrors `pdv-python` one-to-one (`tree.jl`, `serialization.jl`, 
 | Sequence keys in dot-paths | 0-based (`tree["xs.0"]`), negative from end | 1-based (`tree["xs.1"]`), negative from end |
 | Package installs | `pdv.install()` → `uv add` (uv-mode only) | `PDVKernel.install()` → `Pkg.add` into the active environment — the per-project environment in pkg mode (§10.6), the user's default environment in shared mode |
 | Per-project environments | uv-managed venv from `pyproject.toml` + `uv.lock` (§10.5) | Pkg-managed project from `Project.toml` + `Manifest.toml` (§10.6); activation via `JULIA_PROJECT`, no venv analog — packages live in the shared depot |
+| Runtime discovery + kernel-package install | conda/venv/pyenv/system scan (§10.2); one-click `pip install` of bundled pdv-python (§10.3) | juliaup-channel scan from `juliaup.json`, shim bypass to the real versioned binary (§10.7); one-click `Pkg.develop` of staged pdv-julia + `Pkg.add("IJulia")` into the default environment (§10.7.4) |
 | Query server | ZMQ REP on a daemon thread (GIL makes concurrent dict reads safe) | ZMQ REP on a default-pool OS thread when the kernel has an interactive threadpool (the app spawns Julia with `--threads=auto,1`; the main task runs interactive). The thread never touches libuv (a blocked `ZMQ.recv` starves while the main thread computes) — it polls `sock.events` + `Libc.systemsleep`, and answers `pdv.tree.list` from a lock-guarded listings snapshot rebuilt on the main thread (debounce flush, postexecute hook, project load) so it never reads live tree values cross-thread. Other query types reply `query.kernel_busy`, which the app converts into a comm-channel fallback. Without spare threads it degrades to the original cooperative async-task loop |
 | Save-walker rescue | any error → pickle fallback; a value even pickle refuses (lambda, open handle) is skipped and reported in `failed_nodes` | same contract: any error → jls fallback; a value even jls refuses (running `Task`, ...) is skipped and reported in `failed_nodes`. `Serialization` refuses more values than pickle, so this path is far more reachable on Julia |
 | Change debounce | `threading.Timer` (fires mid-execution) | libuv `Timer` (fires at yield points; the renderer's 1 Hz poll is the safety net during tight loops) |
 
 Because saved data formats differ (`pickle` vs `jls`), projects are per-language: `project.json`'s `language` field selects the kernel at open time, and the Julia loader rejects `pickle`-format nodes with a clear "open with a Python session" error (and vice-versa — the Python loader does not know `jls`).
 
-The unified version rule (§ key design rules) extends to Julia: `pdv-julia/Project.toml`'s `version` (and `PDVKernel.VERSION`) must match `electron/package.json` and `pdv-python/pyproject.toml`. The environment detector probes `julia -e 'using PDVKernel; println(PDVKernel.VERSION)'` and applies the same core-version compatibility rule as for pdv-python.
+The unified version rule (§ key design rules) extends to Julia: `pdv-julia/Project.toml`'s `version` (and `PDVKernel.VERSION`) must match `electron/package.json` and `pdv-python/pyproject.toml`. The environment detector reads PDVKernel's version via `Base.locate_package` + its `Project.toml` — never `using PDVKernel`, which recompiles when caches are stale (§10.7.3) — and applies the same core-version compatibility rule as for pdv-python.
 
 Testing: `julia --project=pdv-julia -e 'using Pkg; Pkg.test()'` runs the kernel-free unit suite (comm transport stubbed); `JULIA_PATH=<julia> npm test -- main/integration-julia.test.ts` drives a real IJulia kernel through the production bootstrap; `e2e/julia-smoke.spec.ts` (gated on `JULIA_PATH`) drives the full app GUI.
 
@@ -1801,7 +1802,51 @@ On `project.save`, `Project.toml` and `Manifest.toml` are written from the worki
 
 `PDVKernel.install("Pkg1", ...)` is unchanged in shape — `Pkg.add` into the **active** environment, blocking the cell — and needs no uv-style binary handoff in the init payload: with `JULIA_PROJECT` set, the active environment *is* the project, so installs are recorded in the project's `Project.toml` automatically. `PDVKernel.remove(...)` (→ `Pkg.rm`) and `PDVKernel.update(...)` (→ `Pkg.update`) complete the verb set. No import-cache invalidation step exists because Julia needs none. The reactive-install affordance (§10.5.12) already routes Julia sessions to `PDVKernel.install`.
 
-The Project Environment tab (§10.5.13) activates for pkg-mode Julia sessions: the header shows a "Pkg-managed · shareable" badge with the Julia executable and version (from `environment:activeInfo`); the dependency list is parsed in the main process from the working directory's `Project.toml` (`[deps]`) with installed versions from `Manifest.toml` (both TOML — parsed with the already-bundled `smol-toml`, never hand-parsed); add/remove/upgrade dispatch the corresponding `PDVKernel.install`/`remove`/`update` invocation through the same `executeAndTranscribe` bracket as §10.5.12, so operations stream to the console and are serialized with cell execution by the kernel's own queue (Julia has no uv-subprocess path — running Pkg inside the kernel is what keeps the live session and the files consistent). Shared-mode Julia sessions see the same "external environment" note as shared Python.
+The Project Environment tab (§10.5.13) activates for pkg-mode Julia sessions: the header shows a "Pkg-managed · shareable" badge with the Julia executable and version (from `environment:activeInfo`); the dependency list is parsed in the main process from the working directory's `Project.toml` (`[deps]`) with installed versions from `Manifest.toml` (both TOML — parsed with the already-bundled `smol-toml`, never hand-parsed); add/remove/upgrade dispatch the corresponding `PDVKernel.install`/`remove`/`update` invocation through the same `executeAndTranscribe` bracket as §10.5.12, so operations stream to the console and are serialized with cell execution by the kernel's own queue (Julia has no uv-subprocess path — running Pkg inside the kernel is what keeps the live session and the files consistent); the stream output is additionally mirrored over `envActivity` so the tab's output pane shows it live, matching uv's. Shared-mode Julia sessions see the same "external environment" note as shared Python.
+
+### 10.7 Julia Runtime Discovery and PDVKernel Installation
+
+The Julia analog of §10.2–10.3: the Environment Selector's Julia tab lists discovered Julia runtimes with PDVKernel/IJulia status badges and offers a one-click "Install PDVKernel" for runtimes that lack it. All discovery, probing, shim resolution, and installation live in `julia-discovery.ts` (main process); the kernel-spawn site itself stays in `kernel-manager.ts` and the `Pkg.instantiate` spawn site stays in `julia-env.ts` — the §10.5.18 single-spawn-site discipline, applied per concern.
+
+#### 10.7.1 Discovery
+
+Discovery is **filesystem-only** — it never runs a Julia subprocess, so it is instant and immune to the wedged-shim failure mode below. Sources, in priority order:
+
+1. **juliaup channels** — parse `~/.julia/juliaup/juliaup.json` (honoring `JULIA_DEPOT_PATH` overrides): every entry in `InstalledChannels` whose version maps into `InstalledVersions` becomes one runtime, with the executable at `<juliaup-dir>/<Path>/bin/julia` (the *real* versioned binary, never the shim). The `Default` channel is flagged and sorts first. Linked channels (`juliaup link` — a `Command` instead of a `Version`) surface with their command path as the executable.
+2. **The configured path** (`juliaPath` in app config), shim-resolved (§10.7.2), if not already covered.
+3. **Well-known system locations** — `julia` on `PATH`, `/opt/homebrew/bin/julia`, `/usr/local/bin/julia`, and macOS `/Applications/Julia-*.app` bundles — each shim-resolved and deduplicated against the juliaup entries by real path.
+
+The Julia version for juliaup entries comes free from the channel's version string; other entries get it from the probe (§10.7.3).
+
+#### 10.7.2 Shim Bypass
+
+The juliaup shim (`~/.juliaup/bin/julia` → `julialauncher`) checks for juliaup self-updates on every invocation; a wedged update blocks **every** shim-routed launch — kernel boots, probes, instantiates — while the real versioned binary keeps working. PDV therefore never spawns the shim when it can help it: `resolveJuliaShim(path)` follows symlinks and, when the target basename is `julialauncher`, resolves the default channel's real binary from `juliaup.json` (returning the input unchanged when it isn't the shim, or when juliaup metadata is missing/unparseable — never a hard failure). `kernels.start` applies this to the configured Julia path on every Julia launch, and when **no** path is configured it uses the discovered juliaup default instead of the bare `julia` PATH fallback. The resolved real path is what lands in the kernel spec, the environment metadata, and the manifest-restart snapshot.
+
+#### 10.7.3 Probing
+
+A selected or browsed runtime is probed with a **single** short-lived spawn (`--startup-file=no`, 5 s timeout) that prints the Julia `VERSION`, the PDVKernel version via `Base.locate_package` + its `Project.toml` (the §5.14 rule: never `using` — loading can trigger minutes of recompile), and IJulia presence via `Base.identify_package`. Compatibility is the same core-version match as pdv-python (§10.4, unified version rule 10).
+
+#### 10.7.4 One-Click PDVKernel Installation
+
+The install target is the **default environment** (`~/.julia/environments/v<major.minor>/`) — deliberately not a project environment: §10.6.1's stacking is what lets every pkg-mode project resolve PDVKernel without recording it, and the default env is the one place all sessions of that Julia version can see. The flow, streamed to the selector over the same `installOutput` push channel as pip installs:
+
+1. Stage the bundled `pdv-julia/` source (app resources in packaged builds, repo root in dev) into `<userData>/pdv-julia/` — a stable, writable path. `Pkg.develop` records an absolute source path in the default env's manifest, so it must not point into a translocated/read-only app bundle.
+2. Run `<julia> --startup-file=no -e 'import Pkg; Pkg.develop(path=<staged>); Pkg.add("IJulia"); Pkg.precompile()'` with plain output (`NO_COLOR`, no fancy progress). The explicit precompile front-loads the §10.8 boot cost into the visible install step.
+
+Because the install is a `Pkg.develop` of a staged copy, an app update re-stages the new source in place and the dev-path pickup is automatic; the version-mismatch badge (unified version rule) is what prompts the user to re-run the install when protocol changes require it.
+
+### 10.8 Precompile-Tolerant Kernel Boot
+
+Julia kernel startup can legitimately take minutes when precompile caches are cold (first boot after a package update, a Julia upgrade, or an edit to a dev-installed PDVKernel — §5.14). Flat boot timeouts misread this as a hang. Instead, both boot waits use **activity-based deadlines**: a short *idle* timeout that resets whenever the kernel shows signs of life, under a long hard cap.
+
+| Wait | Signal that resets the idle timer | Idle timeout | Hard cap |
+|---|---|---|---|
+| `waitForKernelReady` (process spawn → first iopub `idle`) | kernel process stdout/stderr | 30 s | Julia 15 min / Python 2 min |
+| `pdv.ready` handshake (bootstrap `using PDVKernel` → comm open) | kernel process output **or** iopub `stream` traffic | Julia 60 s / Python 15 s | Julia 20 min / Python 60 s |
+
+Two signal surfaces are needed because Pkg writes precompile progress to the **process stderr** during IJulia's own boot, but once the bootstrap `execute_request` is running, IJulia captures the streams and re-emits them as **iopub `stream` messages**. `KernelManager` re-emits process output as `kernel:processOutput` events (it already pipes them to the app's stdio); `kernel-session.ts` taps both surfaces. A genuinely wedged kernel still fails in 30–60 s of silence; a kernel that is visibly precompiling gets as long as the cap allows.
+
+The same taps drive the launch UI: during a Julia launch, `ipc-register-kernels.ts` forwards boot output (ANSI-stripped) over the `envActivity` push channel, so the `EnvSyncModal` streams precompile progress live instead of showing a bare spinner — and the modal swaps its subtitle to a "precompiling packages" explanation when the output says so. Timeout errors report which regime fired (idle vs cap) and the tail of the boot output.
 
 ---
 
@@ -2026,6 +2071,8 @@ electron/
         tree-create.ts          ← Shared allocate-uuid → write → register helpers for file nodes
         uv-environment.ts       ← Per-project uv venv materialization/sync
         uv-runner.ts            ← uv subprocess wrapper
+        julia-env.ts            ← Pkg.instantiate runner for pkg-mode Julia projects (§10.6)
+        julia-discovery.ts      ← Julia runtime discovery, shim bypass, PDVKernel install (§10.7)
         pyproject.ts            ← Generate/parse project pyproject.toml
         python-versions.ts      ← Supported Python versions + default
         modules/

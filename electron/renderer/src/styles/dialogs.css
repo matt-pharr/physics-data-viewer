@@ -814,6 +814,7 @@
 .env-kind-badge--conda { color: var(--success); border-color: var(--success); }
 .env-kind-badge--venv { color: var(--accent); border-color: var(--accent); }
 .env-kind-badge--pyenv { color: var(--warning); border-color: var(--warning); }
+.env-kind-badge--juliaup { color: var(--accent); border-color: var(--accent); }
 
 /* Row info (label + path) */
 .env-row-info {

@@ -11,7 +11,11 @@ import * as fs from "fs/promises";
 import * as os from "os";
 import * as path from "path";
 
-import { instantiateJuliaEnvironment, parseJuliaVersion } from "./julia-env";
+import {
+  instantiateJuliaEnvironment,
+  listJuliaProjectPackages,
+  parseJuliaVersion,
+} from "./julia-env";
 
 describe("parseJuliaVersion()", () => {
   it("extracts the version from the marker line", () => {
@@ -87,5 +91,97 @@ describe("instantiateJuliaEnvironment()", () => {
     expect(result.success).toBe(true);
     expect(result.output).toContain(`--project=${dir}`);
     expect(result.output).toContain("--startup-file=no");
+  });
+});
+
+describe("listJuliaProjectPackages() (§10.6.8)", () => {
+  let dir: string;
+
+  beforeEach(async () => {
+    dir = await fs.mkdtemp(path.join(os.tmpdir(), "pdv-julia-pkgs-"));
+  });
+
+  afterEach(async () => {
+    await fs.rm(dir, { recursive: true, force: true });
+  });
+
+  it("pairs [deps] names with compat bounds and manifest versions, sorted", async () => {
+    await fs.writeFile(
+      path.join(dir, "Project.toml"),
+      [
+        "[deps]",
+        'NPZ = "15e1cf62-19bd-5c73-a2f2-91e7b3e1f5c8"',
+        'DataFrames = "a93c6f00-e57d-5684-b7b6-d8193f3e46c0"',
+        'LinearAlgebra = "37e2e46d-f89d-539d-b4ee-838fcccc9c8e"',
+        "",
+        "[compat]",
+        'DataFrames = "1.6"',
+      ].join("\n")
+    );
+    await fs.writeFile(
+      path.join(dir, "Manifest.toml"),
+      [
+        'julia_version = "1.11.6"',
+        'manifest_format = "2.0"',
+        "",
+        "[[deps.DataFrames]]",
+        'uuid = "a93c6f00-e57d-5684-b7b6-d8193f3e46c0"',
+        'version = "1.7.0"',
+        "",
+        "[[deps.NPZ]]",
+        'uuid = "15e1cf62-19bd-5c73-a2f2-91e7b3e1f5c8"',
+        'version = "0.4.3"',
+        "",
+        "[[deps.LinearAlgebra]]",
+        'uuid = "37e2e46d-f89d-539d-b4ee-838fcccc9c8e"',
+      ].join("\n")
+    );
+
+    const packages = await listJuliaProjectPackages(dir);
+
+    expect(packages).toEqual([
+      { name: "DataFrames", spec: "DataFrames 1.6", installedVersion: "1.7.0" },
+      // Stdlib entries carry no version in the manifest.
+      { name: "LinearAlgebra", spec: "LinearAlgebra", installedVersion: undefined },
+      { name: "NPZ", spec: "NPZ", installedVersion: "0.4.3" },
+    ]);
+  });
+
+  it("lists declared deps with no versions when the manifest is missing", async () => {
+    await fs.writeFile(
+      path.join(dir, "Project.toml"),
+      '[deps]\nNPZ = "15e1cf62-19bd-5c73-a2f2-91e7b3e1f5c8"\n'
+    );
+
+    const packages = await listJuliaProjectPackages(dir);
+
+    expect(packages).toEqual([
+      { name: "NPZ", spec: "NPZ", installedVersion: undefined },
+    ]);
+  });
+
+  it("returns empty for a missing or empty Project.toml", async () => {
+    expect(await listJuliaProjectPackages(dir)).toEqual([]);
+    await fs.writeFile(path.join(dir, "Project.toml"), "");
+    expect(await listJuliaProjectPackages(dir)).toEqual([]);
+  });
+
+  it("returns empty (never throws) on malformed TOML", async () => {
+    await fs.writeFile(path.join(dir, "Project.toml"), "[deps\nbroken");
+    expect(await listJuliaProjectPackages(dir)).toEqual([]);
+  });
+
+  it("survives a malformed manifest (versions just stay undefined)", async () => {
+    await fs.writeFile(
+      path.join(dir, "Project.toml"),
+      '[deps]\nNPZ = "15e1cf62-19bd-5c73-a2f2-91e7b3e1f5c8"\n'
+    );
+    await fs.writeFile(path.join(dir, "Manifest.toml"), "not [ toml");
+
+    const packages = await listJuliaProjectPackages(dir);
+
+    expect(packages).toEqual([
+      { name: "NPZ", spec: "NPZ", installedVersion: undefined },
+    ]);
   });
 });

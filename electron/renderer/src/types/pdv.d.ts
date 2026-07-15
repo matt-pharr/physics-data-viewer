@@ -786,6 +786,27 @@ export interface EnvironmentInfo {
   isFreeThreaded: boolean;
 }
 
+/**
+ * A discovered Julia runtime with PDVKernel/IJulia status (§10.7).
+ * Mirrors `JuliaRuntimeInfo` in `main/julia-discovery.ts`.
+ */
+export interface JuliaRuntimeInfo {
+  kind: "juliaup" | "system" | "configured";
+  /** Absolute path to the real Julia executable (never the juliaup shim). */
+  juliaPath: string;
+  label: string;
+  juliaVersion: string | null;
+  /** juliaup channel name; undefined for non-juliaup runtimes. */
+  channel?: string;
+  /** True when this is the juliaup default channel. */
+  isDefault: boolean;
+  pdvKernelInstalled: boolean;
+  pdvKernelVersion: string | null;
+  pdvKernelCompatible: boolean;
+  pdvKernelVersionMismatch: boolean;
+  ijuliaInstalled: boolean;
+}
+
 /** Result of a streaming pip install operation. */
 export interface EnvironmentInstallResult {
   success: boolean;
@@ -1038,6 +1059,15 @@ export interface PDVApi {
      * executeBegin/executeOutput/executeFinish pushes.
      */
     installModule(kernelId: string, moduleName: string): Promise<void>;
+    /** List discovered Julia runtimes with PDVKernel/IJulia status (§10.7.1). */
+    listJulia(): Promise<JuliaRuntimeInfo[]>;
+    /** Re-probe a single Julia executable, bypassing the discovery cache. */
+    checkJulia(juliaPath: string): Promise<JuliaRuntimeInfo | null>;
+    /**
+     * Install PDVKernel + IJulia into a Julia runtime's default environment
+     * (§10.7.4). Streams Pkg output via `onInstallOutput`.
+     */
+    installJulia(juliaPath: string): Promise<EnvironmentInstallResult>;
   };
   modules: {
     listInstalled(): Promise<ModuleDescriptor[]>;

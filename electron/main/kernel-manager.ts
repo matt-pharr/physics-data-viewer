@@ -408,7 +408,9 @@ export class KernelManager extends EventEmitter {
    *
    * @param spec - Optional partial KernelSpec.  Defaults to Python 3.
    * @returns KernelInfo with status `'idle'` once the kernel is ready.
-   * @throws If the kernel fails to start within 30 seconds.
+   * @throws If the kernel goes silent for 30 s before becoming ready, or
+   *   blows the hard startup cap (2 min; 15 min for Julia, whose boot can
+   *   legitimately precompile for minutes while printing progress — §10.8).
    */
   async start(spec?: Partial<KernelSpec>): Promise<KernelInfo> {
     const language = spec?.language ?? "python";
@@ -489,11 +491,20 @@ export class KernelManager extends EventEmitter {
       stdio: ["ignore", "pipe", "pipe"],
     });
 
+    // Mirror the kernel's process stdio to the app's, and re-emit it as
+    // `kernel:processOutput` events: Pkg writes precompile progress to the
+    // process stderr during IJulia's own boot, and the activity-based boot
+    // deadline + EnvSyncModal streaming both key off these events
+    // (ARCHITECTURE.md §10.8).
     kernelProcess.stdout?.on("data", (d: Buffer) => {
-      process.stdout.write(`[kernel:${kernelId.slice(0, 8)}] ${d.toString()}`);
+      const text = d.toString();
+      process.stdout.write(`[kernel:${kernelId.slice(0, 8)}] ${text}`);
+      this.emit("kernel:processOutput", kernelId, "stdout", text);
     });
     kernelProcess.stderr?.on("data", (d: Buffer) => {
-      process.stderr.write(`[kernel:${kernelId.slice(0, 8)}] ${d.toString()}`);
+      const text = d.toString();
+      process.stderr.write(`[kernel:${kernelId.slice(0, 8)}] ${text}`);
+      this.emit("kernel:processOutput", kernelId, "stderr", text);
     });
 
     const zmq = await loadZmq();
@@ -583,8 +594,14 @@ export class KernelManager extends EventEmitter {
       }
     });
 
-    // Wait for the kernel to become responsive.
-    await this.waitForKernelReady(managed);
+    // Wait for the kernel to become responsive. Julia gets a much higher
+    // activity-capped ceiling: IJulia's own boot legitimately precompiles
+    // for minutes after a package update or Julia upgrade (§10.8).
+    await this.waitForKernelReady(
+      managed,
+      30_000,
+      language === "julia" ? 15 * 60_000 : 120_000
+    );
 
     kernelInfo.status = "idle";
 
@@ -1076,6 +1093,35 @@ export class KernelManager extends EventEmitter {
   }
 
   /**
+   * Register a listener for the named kernel's process stdout/stderr.
+   *
+   * This is the *process* stdio (already mirrored to the app's stdio), not
+   * iopub `stream` traffic — Pkg precompile progress during a Julia kernel's
+   * boot lands here (§10.8). Implemented over the `kernel:processOutput`
+   * event so listeners can attach after spawn without missing a beat.
+   *
+   * @param id - Kernel ID.
+   * @param callback - Invoked with each output chunk and its stream.
+   * @returns A function that, when called, removes the listener.
+   */
+  onProcessOutput(
+    id: string,
+    callback: (stream: "stdout" | "stderr", data: string) => void
+  ): () => void {
+    const handler = (
+      kernelId: string,
+      stream: "stdout" | "stderr",
+      data: string
+    ): void => {
+      if (kernelId === id) callback(stream, data);
+    };
+    this.on("kernel:processOutput", handler);
+    return () => {
+      this.off("kernel:processOutput", handler);
+    };
+  }
+
+  /**
    * Send raw data as a comm_msg on the kernel's shell socket.
    *
    * CommRouter calls this to deliver PDV protocol messages to the kernel.
@@ -1345,12 +1391,22 @@ export class KernelManager extends EventEmitter {
    *
    * Sends periodic kernel_info_request messages to provoke a status reply.
    *
+   * The deadline is activity-based (ARCHITECTURE.md §10.8): the idle timer
+   * resets whenever the kernel process writes to stdout/stderr — a Julia
+   * kernel legitimately spends minutes precompiling after a package update,
+   * printing progress the whole time — under a hard total cap. A silent hang
+   * still fails after `idleTimeoutMs`.
+   *
    * @param managed - The kernel to wait for.
-   * @param timeoutMs - Maximum wait time (default 30 s).
+   * @param idleTimeoutMs - Maximum silence (no process output) tolerated
+   *   before giving up (default 30 s).
+   * @param maxTotalMs - Hard ceiling on the whole wait regardless of
+   *   activity (default 2 min; Julia launches pass 15 min).
    */
   private async waitForKernelReady(
     managed: ManagedKernel,
-    timeoutMs = 30_000
+    idleTimeoutMs = 30_000,
+    maxTotalMs = 120_000
   ): Promise<void> {
     return new Promise<void>((resolve, reject) => {
       let finished = false;
@@ -1358,9 +1414,11 @@ export class KernelManager extends EventEmitter {
       const done = (err?: Error) => {
         if (finished) return;
         finished = true;
-        clearTimeout(timer);
+        clearTimeout(idleTimer);
+        clearTimeout(capTimer);
         clearInterval(pingInterval);
         cleanup();
+        cleanupOutput();
         if (err) { reject(err); } else { resolve(); }
       };
 
@@ -1373,10 +1431,40 @@ export class KernelManager extends EventEmitter {
         }
       });
 
-      const timer = setTimeout(
-        () => done(new Error("Kernel startup timed out")),
-        timeoutMs
+      let idleTimer = setTimeout(
+        () =>
+          done(
+            new Error(
+              `Kernel startup timed out (no output for ${Math.round(idleTimeoutMs / 1000)} s)`
+            )
+          ),
+        idleTimeoutMs
       );
+      const capTimer = setTimeout(
+        () =>
+          done(
+            new Error(
+              `Kernel startup timed out (still not ready after ${Math.round(maxTotalMs / 1000)} s)`
+            )
+          ),
+        maxTotalMs
+      );
+
+      // Any process output (e.g. Pkg precompile progress) is a sign of life:
+      // push the idle deadline back out.
+      const cleanupOutput = this.onProcessOutput(managed.info.id, () => {
+        if (finished) return;
+        clearTimeout(idleTimer);
+        idleTimer = setTimeout(
+          () =>
+            done(
+              new Error(
+                `Kernel startup timed out (no output for ${Math.round(idleTimeoutMs / 1000)} s)`
+              )
+            ),
+          idleTimeoutMs
+        );
+      });
 
       const sendPing = () => {
         if (finished) return;

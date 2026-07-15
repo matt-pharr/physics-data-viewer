@@ -10,12 +10,19 @@
 
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import * as fs from "fs/promises";
+import * as fsSync from "fs";
 import * as os from "os";
 import * as path from "path";
 import { KernelManager } from "./kernel-manager";
 import { CommRouter } from "./comm-router";
 import { QueryRouter } from "./query-router";
 import { JULIA_BOOTSTRAP } from "./kernel-session";
+import {
+  defaultJuliaupDir,
+  listJuliaupChannels,
+  probeJuliaRuntime,
+  resolveJuliaShim,
+} from "./julia-discovery";
 import { instantiateJuliaEnvironment } from "./julia-env";
 import {
   PDVMessage,
@@ -374,6 +381,53 @@ describe("@slow Cross-boundary integration (Julia + Electron)", { timeout: 300_0
       } finally {
         pkgRouter.detach();
         await km.stop(info.id);
+      }
+    });
+  });
+
+  describe("julia runtime discovery (§10.7)", () => {
+    it("the combined probe reports version, PDVKernel, and IJulia for the test runtime", async () => {
+      const probe = await probeJuliaRuntime(TEST_JULIA_EXECUTABLE);
+
+      expect(probe).not.toBeNull();
+      expect(probe!.juliaVersion).toMatch(/^\d+\.\d+\.\d+/);
+      // The integration environment dev-installs PDVKernel + IJulia (file
+      // header) — the probe must see both without loading either.
+      expect(probe!.pdvKernelVersion).toMatch(/^\d+\.\d+\.\d+/);
+      expect(probe!.ijuliaInstalled).toBe(true);
+    });
+
+    it("juliaup discovery finds real channel binaries and the shim resolves into them", () => {
+      const juliaupDir = defaultJuliaupDir();
+      if (!fsSync.existsSync(path.join(juliaupDir, "juliaup.json"))) {
+        return; // machine without juliaup — nothing to assert
+      }
+      const channels = listJuliaupChannels();
+      expect(channels.length).toBeGreaterThan(0);
+      expect(channels[0].isDefault).toBe(true);
+      expect(fsSync.existsSync(channels[0].juliaPath)).toBe(true);
+      // No channel entry is ever the julialauncher shim.
+      for (const ch of channels) {
+        expect(path.basename(fsSync.realpathSync(ch.juliaPath))).not.toMatch(
+          /julialauncher/
+        );
+      }
+
+      const shim = path.join(os.homedir(), ".juliaup", "bin", "julia");
+      if (fsSync.existsSync(shim)) {
+        const resolved = resolveJuliaShim(shim);
+        expect(resolved).not.toBe(shim);
+        expect(
+          channels.some((c) => {
+            try {
+              return (
+                fsSync.realpathSync(c.juliaPath) === fsSync.realpathSync(resolved)
+              );
+            } catch {
+              return false;
+            }
+          })
+        ).toBe(true);
       }
     });
   });

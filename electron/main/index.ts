@@ -28,6 +28,7 @@ import { EnvironmentDetector } from "./environment-detector";
 import { buildEditorSpawn, resolveEditorSpawn } from "./editor-spawn";
 import {
   registerKernelIpcHandlers,
+  removeKernelBootOutputListener,
   removeKernelMemoryListener,
 } from "./ipc-register-kernels";
 import { registerModulesIpcHandlers } from "./ipc-register-modules";
@@ -968,6 +969,7 @@ export function registerCommPushForwarding(
 export function unregisterIpcHandlers(): void {
   removeAllIpcHandlers();
   removeKernelMemoryListener();
+  removeKernelBootOutputListener();
   if (trackedExecutionStateListener) {
     trackedExecutionStateListener.km.removeListener(
       "kernel:executionState",

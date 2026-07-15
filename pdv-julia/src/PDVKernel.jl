@@ -216,7 +216,10 @@ end
 Install Julia packages into the active environment via `Pkg.add`, blocking
 the cell until the install finishes. The packages become loadable without a
 kernel restart. (The Julia analog of `pdv.install()`, delegating to Pkg
-rather than uv.)
+rather than uv.) Each package is a name, optionally with a REPL-style
+version pin — `install("DataFrames")` or `install("DataFrames@1.6")` —
+which `Pkg.add`'s string form does not accept but this function translates
+to a `PackageSpec` for you.
 
 In a pkg-mode session (ARCHITECTURE.md §10.6) the active environment is the
 project's own — the app launches the kernel with `JULIA_PROJECT` pointing at
@@ -230,8 +233,22 @@ function install(packages::AbstractString...)
         return nothing
     end
     println("PDVKernel.install: Pkg.add($(join(packages, ", ")))")
-    Pkg.add(collect(String.(packages)))
+    Pkg.add([_package_spec(String(p)) for p in packages])
     nothing
+end
+
+"""
+    _package_spec(package) -> Pkg.PackageSpec
+
+Translate a package string into a `Pkg.PackageSpec`, accepting the REPL-style
+`"Name@version"` pin form that `Pkg.add(::String)` rejects.
+"""
+function _package_spec(package::String)
+    if occursin('@', package)
+        name, version = split(package, '@'; limit=2)
+        return Pkg.PackageSpec(name=String(name), version=String(version))
+    end
+    return Pkg.PackageSpec(name=package)
 end
 
 """

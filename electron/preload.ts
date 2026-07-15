@@ -163,6 +163,9 @@ const api: PDVApi = {
     activeInfo: () => invoke(IPC.environment.activeInfo),
     installModule: (kernelId, moduleName) =>
       invoke(IPC.environment.installModule, kernelId, moduleName),
+    listJulia: () => invoke(IPC.environment.juliaList),
+    checkJulia: (juliaPath) => invoke(IPC.environment.juliaCheck, juliaPath),
+    installJulia: (juliaPath) => invoke(IPC.environment.juliaInstall, juliaPath),
   },
   modules: {
     listInstalled: () => invoke(IPC.modules.listInstalled),

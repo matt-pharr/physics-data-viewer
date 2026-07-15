@@ -24,6 +24,7 @@ import { CommRouter } from "./comm-router";
 import { QueryRouter } from "./query-router";
 import { EnvironmentDetector } from "./environment-detector";
 import { IPC, type ActiveEnvironmentInfo, type KernelRestartResult } from "./ipc";
+import { plainStreamText } from "./kernel-error-parser";
 import { KernelManager, type KernelInfo } from "./kernel-manager";
 import { initializeKernelSession } from "./kernel-session";
 import { executeAndTranscribe, TranscriptWriter } from "./mcp/transcript";
@@ -32,6 +33,7 @@ import { setupProjectModuleNamespaces } from "./module-runtime";
 import { copyEnvFilesForLoad, copyFilesForLoad, overlayAutosaveTreeFiles } from "./project-file-sync";
 import { ProjectManager } from "./project-manager";
 import { autosaveDirFor } from "./autosave-sidecars";
+import { discoverDefaultJulia, resolveJuliaShim } from "./julia-discovery";
 import { instantiateJuliaEnvironment, type JuliaEnvResult } from "./julia-env";
 import { materializeUvEnvironment } from "./uv-environment";
 import { resolveUvBinary } from "./uv-runner";
@@ -68,6 +70,33 @@ export function removeKernelMemoryListener(): void {
     trackedMemoryListener = null;
   }
 }
+
+/**
+ * The `kernel:processOutput` boot-forwarding listener currently attached to
+ * a KernelManager (same lifecycle discipline as the memory listener above).
+ */
+let trackedBootOutputListener:
+  | {
+      km: KernelManager;
+      fn: (kernelId: string, stream: "stdout" | "stderr", data: string) => void;
+    }
+  | null = null;
+
+/**
+ * Detach the tracked `kernel:processOutput` boot-forwarding listener, if any.
+ *
+ * @returns Nothing.
+ */
+export function removeKernelBootOutputListener(): void {
+  if (trackedBootOutputListener) {
+    trackedBootOutputListener.km.removeListener(
+      "kernel:processOutput",
+      trackedBootOutputListener.fn,
+    );
+    trackedBootOutputListener = null;
+  }
+}
+
 
 interface RegisterKernelIpcHandlersOptions {
   win: BrowserWindow;
@@ -394,6 +423,31 @@ export function registerKernelIpcHandlers(
   kernelManager.on("kernel:memoryRss", memoryListener);
   trackedMemoryListener = { km: kernelManager, fn: memoryListener };
 
+  // While a Julia kernel process is booting (spawn → first iopub idle), its
+  // kernel id is not yet known to this registrar, so per-kernel subscription
+  // is impossible — instead this flag-gated global listener forwards process
+  // output (Pkg precompile progress, §10.8) to the EnvSyncModal. The
+  // handshake phase that follows is covered per-kernel via
+  // initializeKernelSession's onBootOutput sink; the flag is cleared before
+  // that starts so nothing is forwarded twice. Launches are serialized by
+  // withStartLock, so one flag serves the single in-flight boot.
+  let forwardJuliaBootOutput = false;
+  const sendBootChunk = (data: string): void => {
+    const plain = plainStreamText(data);
+    if (plain.length === 0 || win.isDestroyed()) return;
+    win.webContents.send(IPC.push.envActivity, { stream: "stdout", data: plain });
+  };
+  removeKernelBootOutputListener();
+  const bootOutputListener = (
+    _kernelId: string,
+    _stream: "stdout" | "stderr",
+    data: string,
+  ): void => {
+    if (forwardJuliaBootOutput) sendBootChunk(data);
+  };
+  kernelManager.on("kernel:processOutput", bootOutputListener);
+  trackedBootOutputListener = { km: kernelManager, fn: bootOutputListener };
+
   // Serialize start/stop/restart of the Jupyter server process so concurrent
   // calls cannot race on the shared commRouter (which causes "CommRouter
   // detached" rejections).
@@ -522,15 +576,34 @@ export function registerKernelIpcHandlers(
         };
       }
     } else if (requestedLanguage === "julia") {
-      const juliaPath = requestedSpec?.env?.JULIA_PATH ??
+      let juliaPath = requestedSpec?.env?.JULIA_PATH ??
         (Array.isArray(requestedSpec?.argv) ? requestedSpec.argv[0] : undefined);
+      // §10.7.2: never spawn the juliaup shim — resolve the configured path
+      // to the real versioned binary, and when nothing is configured prefer
+      // the discovered juliaup default over the bare `julia` PATH fallback
+      // (which is usually the shim). Explicit argv specs (tests) are left
+      // untouched: kernel-manager spawns argv[0] directly.
+      if (!Array.isArray(requestedSpec?.argv)) {
+        const resolved = juliaPath
+          ? resolveJuliaShim(juliaPath)
+          : discoverDefaultJulia() ?? undefined;
+        if (resolved && resolved !== juliaPath) {
+          juliaPath = resolved;
+          requestedSpec = {
+            ...(requestedSpec ?? {}),
+            language: "julia",
+            env: { ...(requestedSpec?.env ?? {}), JULIA_PATH: resolved },
+          };
+        }
+      }
       if (juliaPath) {
         const installStatus = await EnvironmentDetector.checkJuliaPDVInstalled(juliaPath);
         if (!installStatus.installed) {
           throw new Error(
-            "Selected Julia runtime is missing the PDVKernel package. It must be " +
-              "installed into that Julia environment before PDV can use it. " +
-              "(Julia support is experimental and not yet packaged for install.)"
+            "Selected Julia runtime is missing the PDVKernel package. " +
+              "Install it from Settings → Runtime → Julia (one-click " +
+              "\"Install PDVKernel\"), or manually with " +
+              "julia -e 'import Pkg; Pkg.develop(path=\"<pdv-julia>\"); Pkg.add(\"IJulia\")'."
           );
         }
         envMeta = { mode: "shared", interpreterPath: juliaPath };
@@ -569,7 +642,14 @@ export function registerKernelIpcHandlers(
 
     let kernel: KernelInfo;
     try {
-      kernel = await kernelManager.start(requestedSpec);
+      // Julia boots stream their process output (Pkg precompile progress) to
+      // the EnvSyncModal while the kernel id is still unknown (§10.8).
+      forwardJuliaBootOutput = requestedLanguage === "julia";
+      try {
+        kernel = await kernelManager.start(requestedSpec);
+      } finally {
+        forwardJuliaBootOutput = false;
+      }
       kernelEnvMeta.set(kernel.id, envMeta);
       commRouter.attach(kernelManager, kernel.id);
       queryRouter.detach();
@@ -583,6 +663,10 @@ export function registerKernelIpcHandlers(
         getWorkingDirBase(),
         preCreatedWorkingDir,
         uvBinaryForInit,
+        // Handshake-phase boot output (`using PDVKernel` recompiles) streams
+        // to the same overlay (§10.8). Julia-only: Python handshakes are
+        // sub-second and their bootstrap prints nothing of interest.
+        requestedLanguage === "julia" ? sendBootChunk : undefined,
       );
     } catch (err) {
       // Don't leave a concurrent Pkg.instantiate running against a session

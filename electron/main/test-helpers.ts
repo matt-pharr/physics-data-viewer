@@ -150,6 +150,7 @@ export function createKernelManagerMock(
     getQueryPort: vi.fn(() => 12345),
     shutdownAll: vi.fn(async () => undefined),
     onIopubMessage: vi.fn(() => () => undefined),
+    onProcessOutput: vi.fn(() => () => undefined),
     isExecutionActive: vi.fn(() => false),
     on: vi.fn(),
     removeListener: vi.fn(),

@@ -58,6 +58,8 @@ export type {
 import type { UpdateStatus } from "./auto-updater";
 export type { UpdateStatus } from "./auto-updater";
 export type { EnvironmentInfo, EnvironmentInstallResult, InstallOutputChunk } from "./environment-detector";
+import type { JuliaRuntimeInfo } from "./julia-discovery";
+export type { JuliaRuntimeInfo } from "./julia-discovery";
 import type { EnvironmentConfig } from "./project-manager";
 export type { EnvironmentConfig } from "./project-manager";
 
@@ -355,7 +357,7 @@ export const IPC = {
     read: "guiEditor:read",
     save: "guiEditor:save",
   },
-  /** Python environment discovery and installation channels. */
+  /** Python + Julia environment discovery and installation channels. */
   environment: {
     list: "environment:list",
     check: "environment:check",
@@ -378,6 +380,12 @@ export const IPC = {
      * pushes so the console streams the install live.
      */
     installModule: "environment:installModule",
+    /** Julia runtime discovery (§10.7.1): juliaup channels + system locations. */
+    juliaList: "environment:juliaList",
+    /** Re-probe a single Julia path (§10.7.3), bypassing the discovery cache. */
+    juliaCheck: "environment:juliaCheck",
+    /** One-click PDVKernel + IJulia install into a runtime's default env (§10.7.4). */
+    juliaInstall: "environment:juliaInstall",
   },
   /** Native file/directory picker channels. */
   files: {
@@ -2335,7 +2343,7 @@ export interface PDVApi {
     onProgress(callback: (payload: ProgressPayload) => void): () => void;
   };
 
-  /** Python environment discovery and installation. */
+  /** Python + Julia environment discovery and installation. */
   environment: {
     /**
      * List all detected Python environments with package installation status.
@@ -2435,6 +2443,34 @@ export interface PDVApi {
      * @param moduleName - Top-level module name to install.
      */
     installModule(kernelId: string, moduleName: string): Promise<void>;
+    /**
+     * List all discovered Julia runtimes with PDVKernel/IJulia status
+     * (§10.7.1): juliaup channels (default first), the configured path, and
+     * well-known system locations — every entry shim-resolved to a real
+     * versioned binary.
+     *
+     * @returns Enriched runtime info array, ordered by priority.
+     */
+    listJulia(): Promise<JuliaRuntimeInfo[]>;
+    /**
+     * Re-probe a single Julia executable, bypassing the discovery cache
+     * (§10.7.3) — used after Browse and to refresh badges post-install.
+     *
+     * @param juliaPath - Path to the Julia executable to check.
+     * @returns Enriched runtime info, or null if the path is not a working Julia.
+     */
+    checkJulia(juliaPath: string): Promise<JuliaRuntimeInfo | null>;
+    /**
+     * Install PDVKernel (bundled source, `Pkg.develop` of a staged copy)
+     * and IJulia into a Julia runtime's default environment (§10.7.4).
+     *
+     * Streams Pkg output via the `installOutput` push channel. Subscribe
+     * to `onInstallOutput` before calling this method to receive live chunks.
+     *
+     * @param juliaPath - Target Julia executable.
+     * @returns Install result with success flag and full output.
+     */
+    installJulia(juliaPath: string): Promise<EnvironmentInstallResult>;
   };
 
   /** App configuration accessors. */

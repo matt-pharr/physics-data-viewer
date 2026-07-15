@@ -9,17 +9,31 @@
  * there is no binary to bundle or resolve — the session's Julia executable
  * is the environment tooling.
  *
+ * Also home to the pkg-mode Packages-tab reader (§10.6.8):
+ * `listJuliaProjectPackages` parses the working directory's `Project.toml`
+ * (declared deps + compat) and `Manifest.toml` (resolved versions).
+ *
  * Non-responsibilities:
  * - Kernel process lifecycle (kernel-manager.ts spawns the kernel itself).
  * - Environment/PDVKernel probing (environment-detector.ts).
  * - In-session package operations (`PDVKernel.install/remove/update` run
- *   inside the kernel, §10.6.8).
+ *   inside the kernel, §10.6.8 — dispatched by ipc-register-environment.ts).
  */
 
 import { spawn } from "child_process";
+import * as fs from "fs/promises";
+import * as path from "path";
 import { BrowserWindow } from "electron";
 
+import type { ProjectPackage } from "./ipc";
 import type { UvOutputChunk } from "./uv-runner";
+
+// `smol-toml` is published as an ES module; the main process is CommonJS, so
+// it is loaded via a dynamic `import()` (same pattern as pyproject.ts).
+async function _loadTomlParse(): Promise<(text: string) => unknown> {
+  const mod = await import("smol-toml");
+  return mod.parse;
+}
 
 /** Result of a completed (or failed) {@link instantiateJuliaEnvironment}. */
 export interface JuliaEnvResult {
@@ -131,4 +145,64 @@ export function parseJuliaVersion(output: string): string | undefined {
     new RegExp(`${VERSION_MARKER}(\\d+\\.\\d+\\.\\d+[^\\s]*)`)
   );
   return match?.[1];
+}
+
+/**
+ * List a pkg-mode Julia project's declared dependencies for the Packages tab
+ * (§10.6.8): names from `Project.toml`'s `[deps]`, the spec enriched with the
+ * `[compat]` bound when one is declared, and the installed version from
+ * `Manifest.toml` (manifest format 2.0, `[[deps.<Name>]]` entries — stdlib
+ * entries carry no version and report undefined).
+ *
+ * Read-only: every mutation goes through `PDVKernel.install`/`remove`/
+ * `update` inside the kernel, which keeps the live session and the files
+ * consistent (§10.6.8).
+ *
+ * @param workingDir - Project working directory holding the env files.
+ * @returns Alphabetically sorted package list; empty when `Project.toml` is
+ *   missing or unparseable. Never throws.
+ */
+export async function listJuliaProjectPackages(
+  workingDir: string
+): Promise<ProjectPackage[]> {
+  let project: {
+    deps?: Record<string, unknown>;
+    compat?: Record<string, unknown>;
+  };
+  try {
+    const parse = await _loadTomlParse();
+    project = parse(
+      await fs.readFile(path.join(workingDir, "Project.toml"), "utf8")
+    ) as typeof project;
+  } catch {
+    return [];
+  }
+
+  // Resolved versions from the manifest — best-effort (a fresh project may
+  // not have one yet, and a truncated file must not break the listing).
+  const installed = new Map<string, string>();
+  try {
+    const parse = await _loadTomlParse();
+    const manifest = parse(
+      await fs.readFile(path.join(workingDir, "Manifest.toml"), "utf8")
+    ) as { deps?: Record<string, Array<{ version?: unknown }>> };
+    for (const [name, entries] of Object.entries(manifest.deps ?? {})) {
+      const version = entries?.[0]?.version;
+      if (typeof version === "string") installed.set(name, version);
+    }
+  } catch {
+    /* no manifest yet — versions stay undefined */
+  }
+
+  const compat = project.compat ?? {};
+  return Object.keys(project.deps ?? {})
+    .sort((a, b) => a.localeCompare(b))
+    .map((name) => {
+      const bound = compat[name];
+      return {
+        name,
+        spec: typeof bound === "string" ? `${name} ${bound}` : name,
+        installedVersion: installed.get(name),
+      };
+    });
 }

@@ -61,23 +61,58 @@ if PDVKernel._comm[] === nothing
 end
 `;
 
-async function waitForPush(
+/**
+ * Wait for a comm push with an activity-based deadline (§10.8): the idle
+ * timer restarts on every `keepalive()` call, under a hard total cap.
+ *
+ * @param commRouter - Comm router to observe.
+ * @param type - Push message type to wait for.
+ * @param idleMs - Maximum silence tolerated between keepalives.
+ * @param maxMs - Hard ceiling on the whole wait regardless of activity.
+ * @returns The wait promise plus the `keepalive` reset handle.
+ */
+function waitForPush(
   commRouter: CommRouter,
   type: string,
-  timeoutMs: number
-): Promise<void> {
-  await new Promise<void>((resolve, reject) => {
-    const timer = setTimeout(() => {
+  idleMs: number,
+  maxMs: number
+): { promise: Promise<void>; keepalive: () => void } {
+  let keepalive: () => void = () => undefined;
+  const promise = new Promise<void>((resolve, reject) => {
+    let settled = false;
+    const settle = (err?: Error): void => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(idleTimer);
+      clearTimeout(capTimer);
       commRouter.offPush(type, handler);
-      reject(new Error(`Timed out waiting for push: ${type}`));
-    }, timeoutMs);
-    const handler = (): void => {
-      clearTimeout(timer);
-      commRouter.offPush(type, handler);
-      resolve();
+      if (err) { reject(err); } else { resolve(); }
     };
+    const idleExpired = (): void =>
+      settle(
+        new Error(
+          `Timed out waiting for push: ${type} (no kernel activity for ${Math.round(idleMs / 1000)} s)`
+        )
+      );
+    let idleTimer = setTimeout(idleExpired, idleMs);
+    const capTimer = setTimeout(
+      () =>
+        settle(
+          new Error(
+            `Timed out waiting for push: ${type} (still absent after ${Math.round(maxMs / 1000)} s)`
+          )
+        ),
+      maxMs
+    );
+    keepalive = (): void => {
+      if (settled) return;
+      clearTimeout(idleTimer);
+      idleTimer = setTimeout(idleExpired, idleMs);
+    };
+    const handler = (): void => settle();
     commRouter.onPush(type, handler);
   });
+  return { promise, keepalive };
 }
 
 /**
@@ -96,8 +131,14 @@ async function waitForPush(
  * @param uvBinaryPath - Optional absolute path to the resolved `uv` binary,
  *   passed to the kernel (uv-mode only) so `pdv.install()` can run `uv add`
  *   directly (§10.5.11).
+ * @param onBootOutput - Optional sink for kernel output produced during the
+ *   handshake (process stderr + iopub stream text). Julia launches forward
+ *   this to the EnvSyncModal so precompile progress is visible instead of a
+ *   bare spinner (§10.8).
  * @returns Nothing.
- * @throws {Error} When bootstrap execution fails or handshake times out.
+ * @throws {Error} When bootstrap execution fails or the handshake goes
+ *   silent past its idle allowance (or blows the hard cap) — see §10.8;
+ *   a kernel that is visibly precompiling keeps the wait alive.
  */
 export async function initializeKernelSession(
   kernelManager: KernelManager,
@@ -109,24 +150,48 @@ export async function initializeKernelSession(
   workingDirBase?: string,
   preCreatedWorkingDir?: string,
   uvBinaryPath?: string,
+  onBootOutput?: (text: string) => void,
 ): Promise<void> {
   const kernel = kernelManager.getKernel(kernelId);
   const language = kernel?.language ?? "python";
   const bootstrapCode = language === "julia" ? JULIA_BOOTSTRAP : PYTHON_BOOTSTRAP;
-  // Julia JIT compilation can be slow on first load; allow more time.
-  const readyTimeoutMs = language === "julia" ? 60_000 : 15_000;
+  // Activity-based ready deadline (§10.8): the bootstrap's `using PDVKernel`
+  // can legitimately recompile for minutes when caches are stale (package
+  // update, Julia upgrade, edited dev-install), streaming progress the whole
+  // time. Idle silence still fails fast; visible work extends up to the cap.
+  const readyIdleMs = language === "julia" ? 60_000 : 15_000;
+  const readyMaxMs = language === "julia" ? 20 * 60_000 : 60_000;
 
   // Track the last iopub msg_type seen during the handshake so that, if
   // anything throws, the diagnostic message can tell the user what the
   // kernel was last doing instead of just "Kernel failed to start".
   let lastIopubMsgType: string | null = null;
-  const disposeIopubObserver = kernelManager.onIopubMessage(kernelId, (m) => {
-    lastIopubMsgType = m.header.msg_type;
-  });
 
   let step: "bootstrap" | "ready" | "init" = "bootstrap";
+  const ready = waitForPush(commRouter, PDVMessageType.READY, readyIdleMs, readyMaxMs);
+
+  // Handshake activity taps (§10.8): iopub stream traffic (IJulia re-emits
+  // captured execution output there, which is where bootstrap-time precompile
+  // progress lands) and raw process output (where IJulia's own boot writes)
+  // both count as signs of life and both feed the boot-output sink.
+  const disposeIopubObserver = kernelManager.onIopubMessage(kernelId, (m) => {
+    lastIopubMsgType = m.header.msg_type;
+    if (m.header.msg_type === "stream") {
+      ready.keepalive();
+      const text = (m.content as { text?: unknown })?.text;
+      if (typeof text === "string" && text.length > 0) onBootOutput?.(text);
+    }
+  });
+  const disposeOutputObserver = kernelManager.onProcessOutput(
+    kernelId,
+    (_stream, data) => {
+      ready.keepalive();
+      onBootOutput?.(data);
+    }
+  );
+
   try {
-    const readyPromise = waitForPush(commRouter, PDVMessageType.READY, readyTimeoutMs);
+    const readyPromise = ready.promise;
     // Avoid unhandled rejection warnings if bootstrap fails before pdv.ready.
     void readyPromise.catch(() => undefined);
     const bootstrapResult = await kernelManager.execute(kernelId, {
@@ -170,5 +235,6 @@ export async function initializeKernelSession(
     );
   } finally {
     disposeIopubObserver();
+    disposeOutputObserver();
   }
 }

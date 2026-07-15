@@ -2,16 +2,22 @@
  * PackagesTab — the "Project Environment" settings tab.
  *
  * Shows the active session's environment (mode badge, interpreter path,
- * Python version, via `environment.activeInfo`), and for uv-mode projects
- * lists declared dependencies from `pyproject.toml` paired with the version
- * actually installed in the venv (via `uv pip list`), with add / remove /
- * upgrade actions that go through `uv add` / `uv remove` /
- * `uv lock --upgrade-package` in the main process. Streams uv output via
- * the existing `envActivity` push channel.
+ * Python/Julia version, via `environment.activeInfo`), and for managed
+ * projects lists declared dependencies with the resolved installed version,
+ * plus add / remove / upgrade actions:
+ *
+ * - uv mode (§10.5.13): deps from `pyproject.toml` + `uv pip list`;
+ *   mutations run `uv add` / `uv remove` / `uv lock --upgrade-package`
+ *   subprocesses in the main process.
+ * - pkg mode (§10.6.8): deps from `Project.toml` + `Manifest.toml`;
+ *   mutations run `PDVKernel.install/remove/update` inside the kernel
+ *   (logged to the console, serialized behind running cells).
+ *
+ * Both stream output via the existing `envActivity` push channel.
  *
  * See Also
  * --------
- * ARCHITECTURE.md §10.5.13 (Package Management UI), §10.5.19
+ * ARCHITECTURE.md §10.5.13 (Package Management UI), §10.5.19, §10.6.8
  */
 
 import React, { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
@@ -19,7 +25,7 @@ import type { ActiveEnvironmentInfo, EnvironmentInstallResult, ProjectPackage } 
 
 /** Props for {@link PackagesTab}. */
 interface PackagesTabProps {
-  /** Active environment mode. Only `'uv'` enables the package CRUD UI. */
+  /** Active environment mode. `'uv'` and `'pkg'` enable the package CRUD UI. */
   environmentMode?: 'uv' | 'shared' | 'pkg';
 }
 
@@ -69,7 +75,7 @@ export const PackagesTab: React.FC<PackagesTabProps> = ({ environmentMode }) => 
   // `react-hooks/set-state-in-effect` rule flags it but there's no derived-
   // state alternative for a list that comes from an IPC round-trip.
   useEffect(() => {
-    if (environmentMode === 'uv') {
+    if (environmentMode === 'uv' || environmentMode === 'pkg') {
       // eslint-disable-next-line react-hooks/set-state-in-effect
       void refresh();
     } else {
@@ -93,10 +99,10 @@ export const PackagesTab: React.FC<PackagesTabProps> = ({ environmentMode }) => 
       try {
         const result = await op();
         if (!result.success) {
-          // Streaming output usually shows uv's own error; make sure the
-          // final output is there even if nothing streamed, and flag it.
+          // Streaming output usually shows uv's/Pkg's own error; make sure
+          // the final output is there even if nothing streamed, and flag it.
           if (result.output) setOutput((prev) => prev || result.output);
-          setErrorMsg('The uv command failed — see the output below.');
+          setErrorMsg('The package operation failed — see the output below.');
         }
       } catch (err) {
         setErrorMsg(err instanceof Error ? err.message : String(err));
@@ -144,27 +150,9 @@ export const PackagesTab: React.FC<PackagesTabProps> = ({ environmentMode }) => 
     </div>
   );
 
-  // pkg-mode Julia sessions (§10.6.8): the project environment is live and
-  // travels with the save; package operations run in the kernel. The
-  // uv-style CRUD list for Julia is a planned follow-up.
-  if (environmentMode === 'pkg') {
-    return (
-      <div className="settings-packages">
-        {envHeader}
-        <p className="settings-packages-hint">
-          This project owns a Pkg-managed Julia environment
-          (<code>Project.toml</code> / <code>Manifest.toml</code>), saved with
-          the project and instantiated automatically on open. Install packages
-          with <code>PDVKernel.install(&quot;PackageName&quot;)</code> in a
-          code cell (or <code>PDVKernel.remove</code> /{' '}
-          <code>PDVKernel.update</code>) — they are recorded in the
-          project&rsquo;s environment and travel with it.
-        </p>
-      </div>
-    );
-  }
+  const isJulia = environmentMode === 'pkg';
 
-  if (environmentMode !== 'uv') {
+  if (environmentMode !== 'uv' && environmentMode !== 'pkg') {
     return (
       <div className="settings-packages">
         {envHeader}
@@ -183,17 +171,31 @@ export const PackagesTab: React.FC<PackagesTabProps> = ({ environmentMode }) => 
     <div className="settings-packages">
       {envHeader}
       <h4 className="settings-general-section">Project Dependencies</h4>
-      <p className="settings-packages-hint">
-        Packages declared in this project&rsquo;s <code>pyproject.toml</code>,
-        with the version installed in the venv. Add, remove, and upgrade run
-        through <code>uv</code> and update both <code>pyproject.toml</code> and{' '}
-        <code>uv.lock</code>.
-      </p>
+      {isJulia ? (
+        <p className="settings-packages-hint">
+          Packages declared in this project&rsquo;s <code>Project.toml</code>,
+          with the version resolved in <code>Manifest.toml</code>. Add,
+          remove, and update run <code>Pkg</code> inside the kernel (logged to
+          the console, queued behind any running cell) and update both files,
+          which are saved with the project.
+        </p>
+      ) : (
+        <p className="settings-packages-hint">
+          Packages declared in this project&rsquo;s <code>pyproject.toml</code>,
+          with the version installed in the venv. Add, remove, and upgrade run
+          through <code>uv</code> and update both <code>pyproject.toml</code>{' '}
+          and <code>uv.lock</code>.
+        </p>
+      )}
 
       <div className="settings-packages-add">
         <input
           type="text"
-          placeholder='package or PEP 508 spec (e.g. "numpy" or "scipy>=1.10")'
+          placeholder={
+            isJulia
+              ? 'package name (e.g. "DataFrames" or "DataFrames@1.6")'
+              : 'package or PEP 508 spec (e.g. "numpy" or "scipy>=1.10")'
+          }
           value={addInput}
           onChange={(e) => setAddInput(e.target.value)}
           onKeyDown={(e) => {
@@ -233,7 +235,11 @@ export const PackagesTab: React.FC<PackagesTabProps> = ({ environmentMode }) => 
                 <td className="settings-packages-actions">
                   <button
                     className="btn btn-secondary"
-                    title="Upgrade to the latest compatible version"
+                    title={
+                      isJulia
+                        ? 'Update to the latest compatible version (Pkg.update)'
+                        : 'Upgrade to the latest compatible version'
+                    }
                     disabled={busy}
                     onClick={() =>
                       void runMutation(() =>
@@ -245,7 +251,11 @@ export const PackagesTab: React.FC<PackagesTabProps> = ({ environmentMode }) => 
                   </button>
                   <button
                     className="btn btn-secondary"
-                    title="Remove from pyproject.toml and the venv"
+                    title={
+                      isJulia
+                        ? 'Remove from Project.toml (Pkg.rm)'
+                        : 'Remove from pyproject.toml and the venv'
+                    }
                     disabled={busy}
                     onClick={() =>
                       void runMutation(() =>

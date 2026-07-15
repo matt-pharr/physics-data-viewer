@@ -106,6 +106,9 @@ function buildBase() {
       upgradePackage: stub<PDVApi["environment"]["upgradePackage"]>(async () => ({ success: true, output: "" })),
       activeInfo: stub<PDVApi["environment"]["activeInfo"]>(async () => null),
       installModule: stub<PDVApi["environment"]["installModule"]>(async () => undefined),
+      listJulia: stub<PDVApi["environment"]["listJulia"]>(async () => []),
+      checkJulia: stub<PDVApi["environment"]["checkJulia"]>(async () => null),
+      installJulia: stub<PDVApi["environment"]["installJulia"]>(async () => ({ success: true, output: "" })),
     },
     modules: {
       listInstalled: stub<PDVApi["modules"]["listInstalled"]>(async () => []),

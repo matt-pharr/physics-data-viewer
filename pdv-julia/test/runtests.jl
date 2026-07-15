@@ -1487,4 +1487,20 @@ end
     end
 end
 
+@testset "install() accepts REPL-style Name@version pins" begin
+    # Pkg.add(::String) rejects "Name@1.6"; install() translates it to a
+    # PackageSpec so the Packages tab / cells can pin versions (§10.6.8).
+    plain = PDVKernel._package_spec("DataFrames")
+    @test plain.name == "DataFrames"
+
+    pinned = PDVKernel._package_spec("DataFrames@1.6")
+    @test pinned.name == "DataFrames"
+    @test pinned.version == "1.6"
+
+    # Only the first '@' splits — prerelease/build suffixes survive.
+    pre = PDVKernel._package_spec("Example@0.5.5-rc1")
+    @test pre.name == "Example"
+    @test pre.version == "0.5.5-rc1"
+end
+
 end # top-level testset

@@ -55,6 +55,13 @@ const juliaEnvMocks = vi.hoisted(() => ({
   })),
 }));
 
+// Deterministic shim/default resolution (§10.7.2) — the real module would
+// read this machine's juliaup metadata.
+const juliaDiscoveryMocks = vi.hoisted(() => ({
+  resolveJuliaShim: vi.fn((p: string) => p),
+  discoverDefaultJulia: vi.fn((): string | null => null),
+}));
+
 vi.mock("electron", () => ({
   ipcMain: {
     handle: ipcRegistry.ipcHandle,
@@ -75,6 +82,7 @@ vi.mock("./module-runtime", () => moduleRuntimeMocks);
 vi.mock("./project-file-sync", () => projectFileSyncMocks);
 vi.mock("./uv-environment", () => uvEnvironmentMocks);
 vi.mock("./julia-env", () => juliaEnvMocks);
+vi.mock("./julia-discovery", () => juliaDiscoveryMocks);
 
 import { IPC, type ActiveEnvironmentInfo } from "./ipc";
 import { registerKernelIpcHandlers } from "./ipc-register-kernels";
@@ -188,6 +196,8 @@ beforeEach(() => {
   envDetectorMocks.checkPDVInstalled.mockResolvedValue({ installed: true });
   envDetectorMocks.checkJuliaPDVInstalled.mockResolvedValue({ installed: true });
   envDetectorMocks.resolvePythonMajorMinor.mockResolvedValue("3.13");
+  juliaDiscoveryMocks.resolveJuliaShim.mockImplementation((p: string) => p);
+  juliaDiscoveryMocks.discoverDefaultJulia.mockReturnValue(null);
 });
 
 afterEach(() => {
@@ -453,6 +463,156 @@ describe("kernels:start — Julia pkg mode (§10.6)", () => {
       mode: "shared",
       interpreterPath: "/opt/julia/bin/julia",
     });
+  });
+});
+
+describe("kernels:start — Julia shim bypass + boot output forwarding (§10.7.2, §10.8)", () => {
+  it("resolves the configured path through the juliaup shim and spawns the real binary", async () => {
+    const harness = setup();
+    harness.kernelManager.start = vi.fn(async () => makeKernelInfo({ id: "kshim" }));
+    juliaDiscoveryMocks.resolveJuliaShim.mockReturnValue(
+      "/depot/juliaup/julia-1.11.6/bin/julia",
+    );
+
+    await getHandler(IPC.kernels.start)(
+      {},
+      { language: "julia", env: { JULIA_PATH: "/Users/u/.juliaup/bin/julia" } },
+    );
+
+    expect(juliaDiscoveryMocks.resolveJuliaShim).toHaveBeenCalledWith(
+      "/Users/u/.juliaup/bin/julia",
+    );
+    const spec = (harness.kernelManager.start as Mock).mock.calls[0][0] as {
+      env?: Record<string, string>;
+    };
+    expect(spec.env?.JULIA_PATH).toBe("/depot/juliaup/julia-1.11.6/bin/julia");
+    // The probe and the env metadata both use the real binary.
+    expect(envDetectorMocks.checkJuliaPDVInstalled).toHaveBeenCalledWith(
+      "/depot/juliaup/julia-1.11.6/bin/julia",
+    );
+    expect(harness.kernelEnvMeta.get("kshim")?.interpreterPath).toBe(
+      "/depot/juliaup/julia-1.11.6/bin/julia",
+    );
+  });
+
+  it("falls back to the discovered juliaup default when no path is configured", async () => {
+    const harness = setup();
+    harness.kernelManager.start = vi.fn(async () => makeKernelInfo({ id: "kdef" }));
+    juliaDiscoveryMocks.discoverDefaultJulia.mockReturnValue(
+      "/depot/juliaup/julia-1.11.6/bin/julia",
+    );
+
+    await getHandler(IPC.kernels.start)({}, { language: "julia" });
+
+    expect(juliaDiscoveryMocks.discoverDefaultJulia).toHaveBeenCalled();
+    const spec = (harness.kernelManager.start as Mock).mock.calls[0][0] as {
+      env?: Record<string, string>;
+    };
+    expect(spec.env?.JULIA_PATH).toBe("/depot/juliaup/julia-1.11.6/bin/julia");
+  });
+
+  it("leaves explicit argv specs untouched (integration-test escape hatch)", async () => {
+    const harness = setup();
+    harness.kernelManager.start = vi.fn(async () => makeKernelInfo({ id: "kargv" }));
+
+    await getHandler(IPC.kernels.start)(
+      {},
+      { language: "julia", argv: ["/custom/julia", "-e", "boot()"] },
+    );
+
+    expect(juliaDiscoveryMocks.resolveJuliaShim).not.toHaveBeenCalled();
+    const spec = (harness.kernelManager.start as Mock).mock.calls[0][0] as {
+      argv?: string[];
+    };
+    expect(spec.argv?.[0]).toBe("/custom/julia");
+  });
+
+  it("streams ANSI-stripped process output to envActivity while a Julia kernel boots — and stops once it is up", async () => {
+    const harness = setup();
+    // Grab the flag-gated kernel:processOutput listener the registrar attached.
+    const outputListener = (harness.kernelManager.on as Mock).mock.calls.find(
+      (c) => c[0] === "kernel:processOutput",
+    )?.[1] as (id: string, stream: string, data: string) => void;
+    expect(outputListener).toBeDefined();
+
+    let releaseStart!: () => void;
+    harness.kernelManager.start = vi.fn(
+      () =>
+        new Promise<ReturnType<typeof makeKernelInfo>>((resolve) => {
+          releaseStart = () => resolve(makeKernelInfo({ id: "kboot" }));
+        }),
+    );
+
+    const pending = getHandler(IPC.kernels.start)(
+      {},
+      { language: "julia", env: { JULIA_PATH: "/opt/julia/bin/julia" } },
+    );
+    await vi.waitFor(() =>
+      expect(harness.kernelManager.start).toHaveBeenCalled(),
+    );
+
+    outputListener("kboot", "stderr", "\x1b[32mPrecompiling\x1b[0m IJulia...\r");
+    expect(harness.win.webContentsSend).toHaveBeenCalledWith(
+      IPC.push.envActivity,
+      { stream: "stdout", data: "Precompiling IJulia...\n" },
+    );
+
+    releaseStart();
+    await pending;
+
+    // Boot finished — the flag is cleared, later output is not forwarded.
+    harness.win.webContentsSend.mockClear();
+    outputListener("kboot", "stderr", "runtime chatter\n");
+    expect(harness.win.webContentsSend).not.toHaveBeenCalledWith(
+      IPC.push.envActivity,
+      expect.objectContaining({ data: expect.stringContaining("runtime chatter") }),
+    );
+  });
+
+  it("does not forward Python boot output, and hands Julia handshakes a boot-output sink", async () => {
+    const harness = setup();
+    const outputListener = (harness.kernelManager.on as Mock).mock.calls.find(
+      (c) => c[0] === "kernel:processOutput",
+    )?.[1] as (id: string, stream: string, data: string) => void;
+
+    let releaseStart!: () => void;
+    harness.kernelManager.start = vi.fn(
+      () =>
+        new Promise<ReturnType<typeof makeKernelInfo>>((resolve) => {
+          releaseStart = () => resolve(makeKernelInfo({ id: "kpy" }));
+        }),
+    );
+    const pending = getHandler(IPC.kernels.start)(
+      {},
+      { language: "python", env: { PYTHON_PATH: "/usr/bin/python3" } },
+    );
+    await vi.waitFor(() =>
+      expect(harness.kernelManager.start).toHaveBeenCalled(),
+    );
+    outputListener("kpy", "stderr", "some python boot noise\n");
+    expect(harness.win.webContentsSend).not.toHaveBeenCalledWith(
+      IPC.push.envActivity,
+      expect.objectContaining({ data: expect.stringContaining("python boot noise") }),
+    );
+    releaseStart();
+    await pending;
+
+    // Python handshake gets no sink; Julia's got one (asserted via the shim
+    // test's initializeKernelSession call below).
+    const pyArgs = kernelSessionMocks.initializeKernelSession.mock.calls.at(
+      -1,
+    ) as unknown[];
+    expect(pyArgs[9]).toBeUndefined();
+
+    harness.kernelManager.start = vi.fn(async () => makeKernelInfo({ id: "kjl" }));
+    await getHandler(IPC.kernels.start)(
+      {},
+      { language: "julia", env: { JULIA_PATH: "/opt/julia/bin/julia" } },
+    );
+    const jlArgs = kernelSessionMocks.initializeKernelSession.mock.calls.at(
+      -1,
+    ) as unknown[];
+    expect(typeof jlArgs[9]).toBe("function");
   });
 });
 

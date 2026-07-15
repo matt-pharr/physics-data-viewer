@@ -61,6 +61,10 @@ export const EnvSyncModal: React.FC<EnvSyncModalProps> = ({
   }, [output]);
 
   const failed = phase === 'failed';
+  // Julia kernels stream Pkg's precompile progress during boot (§10.8);
+  // when it appears, explain the potentially minutes-long wait instead of
+  // showing only the interpreter path.
+  const precompiling = language === 'julia' && /Precompiling/.test(output);
 
   return (
     <div className="env-sync-overlay">
@@ -77,7 +81,9 @@ export const EnvSyncModal: React.FC<EnvSyncModalProps> = ({
         {!failed && (
           <div className="env-sync-subtitle">
             {stage === 'kernel-boot'
-              ? detail ?? 'The environment is ready — launching the session.'
+              ? precompiling
+                ? 'Precompiling packages — the first launch after an install, update, or Julia upgrade can take several minutes.'
+                : detail ?? 'The environment is ready — launching the session.'
               : language === 'julia'
                 ? 'Resolving project dependencies with Pkg. This can take a moment the first time.'
                 : 'Resolving dependencies with uv. This can take a moment the first time.'}

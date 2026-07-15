@@ -61,17 +61,21 @@ bundled N-pendulum-julia module targets it. Remaining Julia work is hardening an
 ecosystem follow-ups:
 
 ### Scope
-- Packaging/registration of `PDVKernel.jl` (General registry or app-driven
-  `Pkg.develop`) so the app can offer one-click install like it does for pdv-python.
-- Julia environment discovery in the Environment Selector (today: manual path entry;
-  juliaup-aware discovery planned).
+- ~~Packaging/registration of `PDVKernel.jl` (General registry or app-driven
+  `Pkg.develop`) so the app can offer one-click install like it does for pdv-python~~ —
+  shipped on the Julia backend branch: one-click install stages the bundled
+  `pdv-julia` and `Pkg.develop`s it into the runtime's default environment
+  (ARCHITECTURE.md §10.7.4). General-registry publication remains open.
+- ~~Julia environment discovery in the Environment Selector (today: manual path entry;
+  juliaup-aware discovery planned)~~ — shipped on the Julia backend branch:
+  juliaup-channel discovery + automatic shim bypass (ARCHITECTURE.md §10.7).
 - ~~Tree queries during long compute-bound executions~~ — shipped on the Julia
   backend branch: threaded query server on a default-pool OS thread serving a
   lock-guarded listings snapshot (ARCHITECTURE.md §5.14).
 - ~~Per-project Julia environments (the `Project.toml` analog of the uv flow)~~ —
   shipped on the Julia backend branch: Pkg-managed `mode: "pkg"` projects
-  (ARCHITECTURE.md §10.6). Follow-up: a `Project.toml`-driven package list in
-  the Project Environment tab (today: badge/version + `PDVKernel.install` hint).
+  (ARCHITECTURE.md §10.6), including the `Project.toml`-driven package list
+  with add/remove/update in the Project Environment tab (§10.6.8).
 
 Target use case: a physicist running a Julia simulation code on a remote cluster, driven from a PDV module.
 
