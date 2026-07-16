@@ -163,6 +163,12 @@ listed for completeness.
 no Julia counterpart. Julia custom types round-trip via the
 `pdv_format`/`pdv_serialize`/`pdv_deserialize` protocol instead. A
 DimensionalData.jl mapping could close this if there's demand.
+HDF5 files are part of the same story: browsable `.h5` nodes are the
+`PDVHdf5` design (PLANNED_FEATURES, issue #203, beta2) and will need
+`HDF5.jl` on the Julia side; a display-only stopgap (live `HDF5.File`
+handles browsing as read-only mappings, like NamedTuples below) was
+considered 2026-07-15 and deliberately deferred to #203 so persistence
+semantics ship correct the first time.
 Related display gap closed 2026-07-15 (user request): **NamedTuples** now ride
 the `mapping` kind — expandable in the tree by field name (read-only children),
 dot-path navigable, `NamedTuple` chip, namespace-view children — while still
