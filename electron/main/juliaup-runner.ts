@@ -274,7 +274,11 @@ export async function ensureJuliaVersionReady(
 
   let channel = findChannel();
   if (!channel) {
-    if (!juliaupStatus(opts.homeDir).installed) {
+    // An explicit binaryPath counts as juliaup being available — it is what
+    // juliaupAdd below will actually run. Gating on the home-dir/PATH probe
+    // alone would refuse a configured (or test-stubbed) juliaup on machines
+    // where the standard install locations are empty.
+    if (opts.binaryPath === undefined && !juliaupStatus(opts.homeDir).installed) {
       throw new Error(
         `Julia ${minor} is not installed and juliaup was not found. ` +
           "Install juliaup from Settings → Runtime → Julia first."
