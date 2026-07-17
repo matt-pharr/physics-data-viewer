@@ -63,6 +63,15 @@ export interface JuliaEnvOptions {
    * `Pkg.PackageSpec`, matching `PDVKernel.install`).
    */
   packages?: string[];
+  /**
+   * Maximum silence (no subprocess output) tolerated before the run is
+   * declared hung and killed (§10.8 activity-based deadline). Generous by
+   * default (10 min): progress bars are disabled on the piped stream, so a
+   * single large artifact download prints nothing until it completes.
+   */
+  idleTimeoutMs?: number;
+  /** Absolute cap on the whole run regardless of activity (default 60 min). */
+  hardTimeoutMs?: number;
 }
 
 /**
@@ -103,11 +112,18 @@ const VERSION_MARKER = "PDV_JULIA_VERSION=";
  * prints `VERSION` first so the result carries the Julia version for the
  * manifest's `environment.julia_version` even when instantiate itself fails.
  *
+ * The run is bounded by an activity-based deadline (§10.8, PR #347 review):
+ * the idle timer resets on every output chunk, so a visibly-working
+ * instantiate never times out, but a silently hung one (wedged registry
+ * lock, dead network) is killed instead of wedging the caller — the start
+ * handler awaits this promise under the launch lock, so an unbounded hang
+ * would block every later start/stop/restart until app relaunch.
+ *
  * @param workingDir - Project working directory holding `Project.toml`.
  * @param juliaPath - Julia executable to run (the session's kernel binary).
- * @param opts - Streaming/abort options; see {@link JuliaEnvOptions}.
- * @returns A {@link JuliaEnvResult}. A non-zero exit, spawn failure, or abort
- *   all resolve (never reject) with `success: false`.
+ * @param opts - Streaming/abort/deadline options; see {@link JuliaEnvOptions}.
+ * @returns A {@link JuliaEnvResult}. A non-zero exit, spawn failure, abort,
+ *   or deadline kill all resolve (never reject) with `success: false`.
  */
 export function instantiateJuliaEnvironment(
   workingDir: string,
@@ -141,20 +157,54 @@ export function instantiateJuliaEnvironment(
       signal: opts.signal,
     });
 
+    let settled = false;
     const sendChunk = (stream: "stdout" | "stderr", data: string): void => {
+      // A deadline kill settles before the process dies; late chunks from
+      // the dying process would stream stale envActivity into whatever the
+      // overlay is showing next.
+      if (settled) return;
       chunks.push(data);
+      resetIdleTimer();
       if (opts.win && !opts.win.isDestroyed() && opts.pushChannel) {
         opts.win.webContents.send(opts.pushChannel, { stream, data } as UvOutputChunk);
       }
     };
 
+    // Activity-based deadline (§10.8): idle timer resets on every chunk;
+    // the hard cap runs regardless. Either firing kills the subprocess and
+    // settles the promise immediately — the caller holds the start lock, so
+    // waiting for the (possibly unkillable) process to exit is not an option.
+    const idleTimeoutMs = opts.idleTimeoutMs ?? 600_000;
+    const hardTimeoutMs = opts.hardTimeoutMs ?? 3_600_000;
+    let idleTimer: NodeJS.Timeout;
+    const onDeadline = (kind: "idle" | "hard"): void => {
+      const limit = kind === "idle" ? idleTimeoutMs : hardTimeoutMs;
+      sendChunk(
+        "stderr",
+        `\nPkg.instantiate ${kind === "idle" ? "produced no output for" : "exceeded"} ` +
+          `${Math.round(limit / 60_000)} minutes — giving up.\n`
+      );
+      settle(false);
+      proc.kill("SIGTERM");
+      // A wedged Pkg (stuck registry lock) can ignore SIGTERM; make sure the
+      // orphan actually dies. unref so this never holds the app open.
+      setTimeout(() => proc.kill("SIGKILL"), 5_000).unref();
+    };
+    const resetIdleTimer = (): void => {
+      clearTimeout(idleTimer);
+      idleTimer = setTimeout(() => onDeadline("idle"), idleTimeoutMs);
+    };
+    resetIdleTimer();
+    const hardTimer = setTimeout(() => onDeadline("hard"), hardTimeoutMs);
+
     proc.stdout?.on("data", (buf: Buffer) => sendChunk("stdout", buf.toString()));
     proc.stderr?.on("data", (buf: Buffer) => sendChunk("stderr", buf.toString()));
 
-    let settled = false;
     const settle = (success: boolean): void => {
       if (settled) return;
       settled = true;
+      clearTimeout(idleTimer);
+      clearTimeout(hardTimer);
       const output = chunks.join("");
       resolve({ success, output, juliaVersion: parseJuliaVersion(output) });
     };

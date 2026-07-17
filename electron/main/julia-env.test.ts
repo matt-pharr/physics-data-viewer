@@ -121,6 +121,54 @@ describe("instantiateJuliaEnvironment()", () => {
     );
     expect(result.output).not.toContain("Pkg.instantiate()");
   });
+
+  it("kills a silently hung instantiate at the idle deadline (§10.8, review)", async () => {
+    // Prints once, then hangs with no further output — the wedged-Pkg shape
+    // that used to block every later kernel start under the launch lock.
+    const stub = await writeStub("julia-hang", 'echo "PDV_JULIA_VERSION=1.11.6"; sleep 60');
+
+    const t0 = Date.now();
+    const result = await instantiateJuliaEnvironment(dir, stub, {
+      idleTimeoutMs: 300,
+    });
+
+    expect(result.success).toBe(false);
+    expect(result.output).toContain("produced no output");
+    expect(result.juliaVersion).toBe("1.11.6");
+    // Settled at the deadline, not when the 60 s sleep ends.
+    expect(Date.now() - t0).toBeLessThan(5_000);
+  });
+
+  it("does not fire the idle deadline while output keeps flowing", async () => {
+    // Five 100 ms-spaced chunks with a 250 ms idle allowance: only an idle
+    // timer that resets on activity lets this finish successfully.
+    const stub = await writeStub(
+      "julia-slow",
+      'echo "PDV_JULIA_VERSION=1.11.6"\nfor i in 1 2 3 4 5; do sleep 0.1; echo "tick $i"; done',
+    );
+
+    const result = await instantiateJuliaEnvironment(dir, stub, {
+      idleTimeoutMs: 250,
+    });
+
+    expect(result.success).toBe(true);
+    expect(result.output).toContain("tick 5");
+  });
+
+  it("kills a still-streaming run at the hard cap", async () => {
+    const stub = await writeStub(
+      "julia-chatty",
+      'while true; do echo "still working"; sleep 0.05; done',
+    );
+
+    const result = await instantiateJuliaEnvironment(dir, stub, {
+      idleTimeoutMs: 60_000,
+      hardTimeoutMs: 400,
+    });
+
+    expect(result.success).toBe(false);
+    expect(result.output).toContain("exceeded");
+  });
 });
 
 describe("listJuliaProjectPackages() (§10.6.8)", () => {

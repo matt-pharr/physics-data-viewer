@@ -219,6 +219,23 @@ export interface ProgressPayload {
   total: number;
 }
 
+/**
+ * A tree node the kernel could not serialize during a save (Julia kernels
+ * only). The save proceeded without it; `preserved` reports whether the
+ * node's prior on-disk snapshot was carried forward (reload restores the
+ * last saved value) rather than lost.
+ */
+export interface ProjectFailedNode {
+  /** Tree path of the node that failed to serialize. */
+  path?: string;
+  /** Node type name (e.g. the Julia value's type). */
+  type?: string;
+  /** Serializer error message. */
+  error?: string;
+  /** True when the node's previous saved snapshot was kept in the index. */
+  preserved?: boolean;
+}
+
 /** Result returned from `project.save()`. */
 export interface ProjectSaveResult {
   /** SHA-256 checksum of the serialized tree-index.json. */
@@ -229,6 +246,8 @@ export interface ProjectSaveResult {
   projectName?: string;
   /** Tree paths of file-backed nodes whose backing files were missing during save. */
   missingFiles?: string[];
+  /** Nodes skipped because they could not be serialized (save still completed). */
+  failedNodes?: ProjectFailedNode[];
 }
 
 /** Result returned from `project.load()`. */

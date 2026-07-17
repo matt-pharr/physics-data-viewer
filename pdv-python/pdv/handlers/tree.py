@@ -543,6 +543,20 @@ def handle_tree_rename(msg: dict) -> None:
         )
         return
 
+    # Children of sequences (lists, tuples) are index-addressed, not
+    # key-addressed — ``set_quiet`` would replace the whole sequence with a
+    # dict holding only the renamed child. The renderer never offers the
+    # action (parent_is_opaque), but MCP agent tools reach this directly.
+    if parent_path and not isinstance(tree[parent_path], dict):
+        send_error(
+            "pdv.tree.rename.response",
+            "tree.not_a_container",
+            f"Parent of '{path}' is not a key-addressable container; "
+            "sequence children cannot be renamed.",
+            in_reply_to=msg_id,
+        )
+        return
+
     value = tree[path]
 
     if tree._working_dir:
@@ -653,6 +667,21 @@ def handle_tree_move(msg: dict) -> None:
                 in_reply_to=msg_id,
             )
             return
+
+    # Same guard for the SOURCE parent: a sequence child is index-addressed
+    # and cannot be key-deleted from its parent (see the rename handler's
+    # guard for the full failure mode).
+    old_parts = path.split(".")
+    old_parent_path = ".".join(old_parts[:-1])
+    if old_parent_path and not isinstance(tree[old_parent_path], dict):
+        send_error(
+            "pdv.tree.move.response",
+            "tree.not_a_container",
+            f"Parent of '{path}' is not a key-addressable container; "
+            "sequence children cannot be moved.",
+            in_reply_to=msg_id,
+        )
+        return
 
     value = tree[path]
 

@@ -239,10 +239,23 @@ export function resolveJuliaShim(
     // was a bare command name.
     return absolute;
   }
-  const fallback = listJuliaupChannels(juliaupDir).find(
-    (c) => c.isDefault && c.version !== null
-  );
-  return fallback?.juliaPath ?? juliaPath;
+  // The default channel's real binary — a versioned install's Path or a
+  // `juliaup link`ed channel's Command (version null; excluding it would
+  // defeat the bypass exactly when the user linked their default, PR #347
+  // review). Guard against a channel linked back to the shim itself.
+  const fallback = listJuliaupChannels(juliaupDir).find((c) => c.isDefault);
+  if (!fallback) return juliaPath;
+  try {
+    const fallbackBase = path
+      .basename(fs.realpathSync(fallback.juliaPath))
+      .toLowerCase();
+    if (fallbackBase === "julialauncher" || fallbackBase === "julialauncher.exe") {
+      return juliaPath;
+    }
+  } catch {
+    return juliaPath;
+  }
+  return fallback.juliaPath;
 }
 
 /**

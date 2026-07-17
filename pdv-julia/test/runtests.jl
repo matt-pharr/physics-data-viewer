@@ -17,7 +17,7 @@ using PDVKernel: set_quiet!, detect_kind, node_preview, serialize_node,
                  read_namelist, write_namelist, extract_hints, infer_types,
                  detect_namelist_format, QueryServer, start!, stop!,
                  serialize_tree_to_dir, clear_autosave_cache!, _autosave_cache,
-                 pdv_namespace, inspect_namespace, load_lib_file!,
+                 pdv_namespace, inspect_namespace, namespace_bindings, load_lib_file!,
                  clear_lib_modules!, AutosaveCache, KIND_NDARRAY, KIND_SEQUENCE,
                  KIND_SCALAR, KIND_TEXT, KIND_MAPPING, KIND_BINARY, KIND_UNKNOWN
 import JSON
@@ -382,6 +382,37 @@ end
     @test startswith(PDVKernel.error_message(err), "File not found:")
 end
 
+@testset "inline-JSON admits only the JSON-native fixed point (review)" begin
+    dir = mktempdir()
+    # Narrow/typed scalars must not inline: a JSON reload would widen them
+    # (Int32 → Int64, Float32 → Float64) with an unchanged digest. The .jls
+    # path preserves the concrete type exactly.
+    for (val, path) in [(Int32(7), "w1"), (Float32(1.5), "w2"), (UInt64(3), "w3"),
+                        (Int16(2), "w4"), (Float16(0.5), "w5")]
+        d = serialize_node(path, val, dir; trusted=true)
+        @test d["storage"]["format"] == "jls"
+        @test deserialize_node(d["storage"], dir; trusted=true) === val
+    end
+    # BitVector is not an `Array` (no .npy path) and must not inline either.
+    bv = BitVector([true, false, true])
+    d = serialize_node("bv", bv, dir; trusted=true)
+    @test d["storage"]["format"] == "jls"
+    v = deserialize_node(d["storage"], dir; trusted=true)
+    @test v isa BitVector && v == bv
+    # Typed containers keep their container type through .jls.
+    d = serialize_node("vs", ["a", "b"], dir; trusted=true)
+    @test d["storage"]["format"] == "jls"
+    @test deserialize_node(d["storage"], dir; trusted=true) isa Vector{String}
+    d = serialize_node("di", Dict("a" => 1, "b" => 2), dir; trusted=true)  # Dict{String,Int64}
+    @test d["storage"]["format"] == "jls"
+    @test deserialize_node(d["storage"], dir; trusted=true) isa Dict{String,Int64}
+    # The JSON-native fixed point still inlines: Int64/Float64/Bool/String/
+    # nothing inside Vector{Any}/Dict{String,Any}.
+    d = serialize_node("ok", Dict{String,Any}("n" => 1, "x" => 2.5, "s" => "t",
+                                              "v" => Any[1, "two", false, nothing]), dir)
+    @test d["storage"]["backend"] == "inline"
+end
+
 @testset "serialization: custom serializers and protocol" begin
     dir = mktempdir()
     clear_serializers!()
@@ -539,6 +570,15 @@ end
     deep = inspect_namespace(ns; root_name="seq",
                              path=Any[Dict("kind" => "index", "value" => 2)])
     @test deep["children"] == Any[] || isempty(deep["children"])  # scalar leaf
+
+    # namespace_bindings must keep user `_`-prefixed bindings so
+    # `include_private=true` has something to include (review) — the private
+    # filter lives in pdv_namespace (presentation), not the snapshot.
+    Core.eval(Main, :(_review_probe = 42))
+    bindings = namespace_bindings()
+    @test get(bindings, "_review_probe", nothing) == 42
+    @test !haskey(pdv_namespace(bindings), "_review_probe")
+    @test haskey(pdv_namespace(bindings; include_private=true), "_review_probe")
 end
 
 @testset "script execution" begin
@@ -641,6 +681,25 @@ end
     @test result["tmax"] === 40.0 && result["n"] === 5
     @test result["types"] == (Float64, Int, Int)
     @test_throws PDVScriptError run_script(tree, "scripts.compute"; n=2.5)
+
+    # Round-trip guard (review): an Int above the float type's mantissa
+    # width must NOT silently round — it passes through untouched and
+    # MethodErrors against the strict annotation. 2^53 itself is exactly
+    # representable and still coerces.
+    result = run_script(tree, "scripts.compute"; tmax=2^53)
+    @test result["tmax"] === 9.007199254740992e15
+    @test_throws PDVScriptError run_script(tree, "scripts.compute"; tmax=2^53 + 1)
+    write(path, """
+        function run(pdv_tree; f::Float32 = 1.0f0, k::Int32 = Int32(1))
+            return Dict("f" => f, "k" => k)
+        end
+        """)
+    result = run_script(tree, "scripts.compute"; f=2^24, k=7.0)
+    @test result["f"] === Float32(2^24) && result["k"] === Int32(7)
+    @test_throws PDVScriptError run_script(tree, "scripts.compute"; f=2^24 + 1)
+    # Integral float outside the integer type's range: the InexactError
+    # guard leaves it untouched instead of throwing mid-coercion.
+    @test_throws PDVScriptError run_script(tree, "scripts.compute"; k=1.0e10)
 
     # Doc extraction: docstring, block comment (Description preferred),
     # line comment, bare code.
@@ -963,6 +1022,20 @@ end
     captured = run_handler(tree, "pdv.tree.move",
                            Dict{String,Any}("path" => "data", "new_path" => "data.sub.x"))
     @test response_of(captured, "pdv.tree.move")["payload"]["code"] == "tree.circular_move"
+
+    # rename/move of a sequence child rejected (review): set_quiet! would
+    # replace the whole Vector with a PDVTree holding only that child. The
+    # renderer never offers these; MCP agent tools reach them directly.
+    tree["vec"] = Any[10, 20, 30]
+    captured = run_handler(tree, "pdv.tree.rename",
+                           Dict{String,Any}("path" => "vec.2", "new_name" => "elem"))
+    @test response_of(captured, "pdv.tree.rename")["payload"]["code"] == "tree.not_a_container"
+    @test tree["vec"] == Any[10, 20, 30]           # vector untouched
+    captured = run_handler(tree, "pdv.tree.move",
+                           Dict{String,Any}("path" => "vec.2", "new_path" => "loose"))
+    @test response_of(captured, "pdv.tree.move")["payload"]["code"] == "tree.not_a_container"
+    @test tree["vec"] == Any[10, 20, 30]
+    @test !haskey(tree, "loose")
 
     # duplicate (with file-backed node getting a fresh uuid)
     uuid = generate_node_uuid()
@@ -1578,6 +1651,27 @@ end
     @test resp["status"] == "error" && resp["payload"]["code"] == "query.not_allowed"
     resp = PDVKernel._handle_threaded_query(Vector{UInt8}(codeunits("{not json")))
     @test resp["status"] == "error"
+    PDVKernel.clear_query_cache!()
+
+    # Cycle guard (review): a self-referential Dict used to recurse to the
+    # 50k node cap (or a StackOverflow) on EVERY rebuild, leaving the
+    # snapshot permanently stale. The IdDict visited-set keeps the walk
+    # total; deeper paths into the cycle just bounce to the comm channel.
+    cyclic = Dict{String,Any}("val" => 1)
+    cyclic["self"] = cyclic
+    tree["loop"] = cyclic
+    tree["after"] = "still listed"
+    PDVKernel.rebuild_query_cache!(tree)
+    root2 = PDVKernel.cached_tree_listing("")
+    @test root2 !== nothing
+    @test any(n -> n["key"] == "after", root2)     # walk completed past the cycle
+    loop_nodes = PDVKernel.cached_tree_listing("loop")
+    @test loop_nodes !== nothing
+    @test sort([n["key"] for n in loop_nodes]) == ["self", "val"]
+    # the revisited container keeps its FIRST listing; the cyclic re-entry
+    # is simply absent from the snapshot (bounces live), not infinite
+    @test PDVKernel.cached_tree_listing("loop.self") === nothing
+    delete!(tree, "loop")
     PDVKernel.clear_query_cache!()
 end
 

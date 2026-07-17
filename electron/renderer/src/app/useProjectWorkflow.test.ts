@@ -202,6 +202,39 @@ describe("useProjectWorkflow.handleSaveProject", () => {
     expect(state.logs[0].stderr).toMatch(/foo\.npy/);
   });
 
+  it("failed-to-serialize nodes complete the save but append a loud warning (review)", async () => {
+    const { state, setters } = createState({ currentProjectDir: "/projects/x" });
+    const { result } = renderHookWithPdv(
+      () => useProjectWorkflow({ ...setters, currentProjectDir: "/projects/x" }),
+      {
+        pdvOverrides: {
+          project: {
+            save: vi.fn(async () => ({
+              checksum: "abcdef123456",
+              nodeCount: 5,
+              failedNodes: [
+                { path: "sim.task", type: "Task", error: "cannot serialize a running Task", preserved: true },
+                { path: "sim.chan", type: "Channel{Any}", error: "cannot serialize", preserved: false },
+              ],
+            })) as never,
+          },
+        },
+      },
+    );
+    let r: boolean | undefined;
+    await act(async () => {
+      r = await result.current.handleSaveProject();
+    });
+    // The save itself completed…
+    expect(r).toBe(true);
+    expect(state.logs).toHaveLength(1);
+    expect(state.logs[0].stdout).toMatch(/Project saved/);
+    // …but must not be indistinguishable from a clean one.
+    expect(state.logs[0].stderr).toMatch(/2 node\(s\) could not be serialized/);
+    expect(state.logs[0].stderr).toMatch(/sim\.task — cannot serialize a running Task \(previous saved value kept\)/);
+    expect(state.logs[0].stderr).toMatch(/sim\.chan — cannot serialize \(NOT in this save\)/);
+  });
+
   it("calls flushDirtyNotes before saving so dirty markdown reaches disk", async () => {
     const { setters, flushDirtyNotes } = createState({
       currentProjectDir: "/projects/x",

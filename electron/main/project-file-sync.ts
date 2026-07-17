@@ -397,6 +397,10 @@ export async function syncUvEnvironmentForLoad(
  * Steps:
  * 1. No-op (empty result) when the save dir has no `Project.toml` — a
  *    legacy/shared-mode Julia save; the environment is left untouched.
+ *    Note the previous project's env files then remain in the working dir
+ *    (removing them under a live `JULIA_PROJECT` kernel is unsafe); the
+ *    save handler's manifest-based mode guard keeps that residue from
+ *    being stamped onto the legacy project at save time (PR #347 review).
  * 2. Short-circuit (synced, nothing copied) when the env files already
  *    match byte-for-byte — the standard fresh-session open.
  * 3. Copy `Project.toml`/`Manifest.toml` from the save dir over the

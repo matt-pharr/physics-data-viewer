@@ -38,7 +38,7 @@ function rebuild_query_cache!(tree)::Nothing
     listings = Dict{String,Vector{Dict{String,Any}}}()
     try
         count = Ref(0)
-        _cache_walk!(listings, tree, "", count)
+        _cache_walk!(listings, tree, "", count, IdDict{Any,Nothing}())
     catch err
         @warn "query-cache rebuild failed; keeping previous snapshot" exception = err
         return nothing
@@ -50,13 +50,26 @@ function rebuild_query_cache!(tree)::Nothing
 end
 
 function _cache_walk!(listings::Dict{String,Vector{Dict{String,Any}}},
-                      container, path::String, count::Ref{Int})
+                      container, path::String, count::Ref{Int},
+                      seen::IdDict{Any,Nothing})
     count[] > _QUERY_CACHE_MAX_NODES && return nothing
+    # Cycle guard (same identity-based scheme as checksum.jl's _mark_seen!):
+    # a self-referential Dict would otherwise recurse to the node cap — or a
+    # StackOverflow — on EVERY rebuild, leaving the snapshot permanently
+    # stale. A revisited container keeps its first listing; deeper paths
+    # into the cycle bounce to the live comm channel like capped paths do.
+    # Only mutable containers are tracked: every reference cycle passes
+    # through one, and equal immutables (two `(1, 2)` tuples) may be
+    # `===`-merged, which would wrongly skip the second listing.
+    if ismutable(container)
+        haskey(seen, container) && return nothing
+        seen[container] = nothing
+    end
     nodes, expandable = _list_container_nodes(container, path)
     listings[path] = nodes
     count[] += length(nodes)
     for (child_path, child) in expandable
-        _cache_walk!(listings, child, child_path, count)
+        _cache_walk!(listings, child, child_path, count, seen)
     end
     nothing
 end

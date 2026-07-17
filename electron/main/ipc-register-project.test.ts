@@ -214,10 +214,15 @@ describe("project:save", () => {
   it("uv project: records mode + python_version from kernel env metadata, omits interpreter_path (§10.5)", async () => {
     const harness = setup();
     // uv detection: the active kernel's working dir must contain a
-    // pyproject.toml — make the access probe succeed for it.
+    // pyproject.toml — make the access probe succeed for it (and only it:
+    // the save dir has no project.json yet, so the manifest-based mode
+    // guard falls back to working-dir detection).
     harness.getActiveKernelId.mockReturnValue("k1");
     harness.kernelWorkingDirs.set("k1", "/tmp/uv-wd");
-    fsMocks.access.mockResolvedValueOnce(undefined);
+    fsMocks.access.mockImplementation(async (p: string) => {
+      if (String(p).endsWith("pyproject.toml")) return;
+      throw Object.assign(new Error("ENOENT"), { code: "ENOENT" });
+    });
     harness.getActiveKernelEnvMeta.mockReturnValue({
       mode: "uv",
       interpreterPath: "/tmp/uv-wd/.venv/bin/python",
@@ -233,6 +238,66 @@ describe("project:save", () => {
     expect(saveOpts.environment).toEqual({ mode: "uv", python_version: "3.12" });
     // The venv path is ephemeral (lives in the working dir) — never recorded.
     expect(saveOpts.interpreterPath).toBeUndefined();
+  });
+
+  it("legacy shared save keeps mode 'shared' despite foreign env files in the working dir (manifest guard)", async () => {
+    const harness = setup();
+    // A legacy shared project loaded into a live uv session: the previous
+    // project's pyproject.toml is still in the working dir, but /save has an
+    // existing project.json whose manifest declares no per-project env.
+    harness.getActiveKernelId.mockReturnValue("k1");
+    harness.kernelWorkingDirs.set("k1", "/tmp/uv-wd");
+    fsMocks.access.mockImplementation(async (p: string) => {
+      const s = String(p);
+      if (s.endsWith("pyproject.toml") || s.endsWith("project.json")) return;
+      throw Object.assign(new Error("ENOENT"), { code: "ENOENT" });
+    });
+    vi.spyOn(ProjectManager, "readManifest").mockResolvedValue({
+      project_name: "legacy",
+    } as never);
+    harness.getActiveKernelEnvMeta.mockReturnValue({
+      mode: "uv",
+      interpreterPath: "/tmp/uv-wd/.venv/bin/python",
+      pythonVersion: "3.12",
+    });
+
+    await getHandler(IPC.project.save)({}, "/save", validCells);
+
+    const saveOpts = (harness.projectManager.save as Mock).mock.calls.at(-1)?.[2] as {
+      environment?: { mode: string };
+    };
+    // The foreign env spec must NOT be stamped onto the legacy project…
+    expect(saveOpts.environment).toEqual({ mode: "shared" });
+    // …nor copied into its save dir.
+    expect(projectFileSyncMocks.copyEnvFilesForSave).not.toHaveBeenCalled();
+  });
+
+  it("existing uv manifest still saves as uv through the manifest guard", async () => {
+    const harness = setup();
+    harness.getActiveKernelId.mockReturnValue("k1");
+    harness.kernelWorkingDirs.set("k1", "/tmp/uv-wd");
+    fsMocks.access.mockImplementation(async (p: string) => {
+      const s = String(p);
+      if (s.endsWith("pyproject.toml") || s.endsWith("project.json")) return;
+      throw Object.assign(new Error("ENOENT"), { code: "ENOENT" });
+    });
+    vi.spyOn(ProjectManager, "readManifest").mockResolvedValue({
+      project_name: "uvproj",
+      environment: { mode: "uv" },
+    } as never);
+    harness.getActiveKernelEnvMeta.mockReturnValue({
+      mode: "uv",
+      interpreterPath: "/tmp/uv-wd/.venv/bin/python",
+      pythonVersion: "3.12",
+    });
+
+    await getHandler(IPC.project.save)({}, "/save", validCells);
+
+    const saveOpts = (harness.projectManager.save as Mock).mock.calls.at(-1)?.[2] as {
+      environment?: { mode: string; python_version?: string };
+    };
+    expect(saveOpts.environment).toEqual({ mode: "uv", python_version: "3.12" });
+    expect(projectFileSyncMocks.copyEnvFilesForSave).toHaveBeenCalled();
   });
 
   it("shared project: records the interpreter the kernel actually spawned on", async () => {

@@ -60,18 +60,25 @@ export const NewJuliaProjectDialog: React.FC<NewJuliaProjectDialogProps> = ({
     void Promise.all([
       window.pdv.environment.juliaupChannels(),
       window.pdv.environment.juliaupStatus(),
-    ]).then(([chs, status]) => {
-      if (cancelled) return;
-      setChannels(chs);
-      setJuliaupInstalled(status.installed);
-      // Preselect the juliaup default channel's minor when it is supported —
-      // the version the session would otherwise run.
-      const defaultMinor = chs
-        .filter((c) => c.isDefault && c.version !== null)
-        .map((c) => minorOf(c.version!))
-        .find((m) => m !== null && supportedVersions.includes(m));
-      if (defaultMinor) setJuliaVersion(defaultMinor);
-    });
+    ])
+      .then(([chs, status]) => {
+        if (cancelled) return;
+        setChannels(chs);
+        setJuliaupInstalled(status.installed);
+        // Preselect the juliaup default channel's minor when it is supported —
+        // the version the session would otherwise run.
+        const defaultMinor = chs
+          .filter((c) => c.isDefault && c.version !== null)
+          .map((c) => minorOf(c.version!))
+          .find((m) => m !== null && supportedVersions.includes(m));
+        if (defaultMinor) setJuliaVersion(defaultMinor);
+      })
+      .catch(() => {
+        // A failed probe must not leave the presence check stuck in its
+        // in-flight state (Create disabled forever) — degrade to the
+        // no-juliaup path, which uses the configured runtime.
+        if (!cancelled) setJuliaupInstalled(false);
+      });
     return () => {
       cancelled = true;
     };
@@ -84,6 +91,11 @@ export const NewJuliaProjectDialog: React.FC<NewJuliaProjectDialogProps> = ({
     channels.find((c) => c.version !== null && minorOf(c.version) === minor);
 
   const handleCreate = () => {
+    // Guard the probe's in-flight window (Create is disabled then, but the
+    // modal-keyboard Enter path reaches here too): submitting while
+    // `juliaupInstalled` is null would silently drop the version the dialog
+    // is displaying.
+    if (juliaupInstalled === null) return;
     onCreate({
       // Without juliaup there is nothing to acquire or switch — the launch
       // falls back to the configured runtime (§10.6.5).
@@ -166,6 +178,9 @@ export const NewJuliaProjectDialog: React.FC<NewJuliaProjectDialogProps> = ({
           <button
             className="btn btn-primary"
             onClick={handleCreate}
+            // Disabled only for the (near-instant) juliaup presence check —
+            // creating before it lands would drop the displayed version.
+            disabled={juliaupInstalled === null}
             data-testid="new-julia-project-create"
           >
             Create

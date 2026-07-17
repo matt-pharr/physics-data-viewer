@@ -135,7 +135,18 @@ function node_digest(node, working_dir::Union{Nothing,AbstractString})::Vector{U
         _feed_u64!(ctx, length(payload))
         _feed!(ctx, payload)
     else
-        _feed_str!(ctx, replace(repr(node), r"@0x[0-9a-fA-F]+" => "", r" at 0x[0-9a-fA-F]+" => ""))
+        # `repr` itself can throw on values with broken `show` methods (the
+        # OffsetInteger-without-its-axes-package precedent). This is the
+        # last resort of the last resort — after the save already rewrote
+        # tree-index.json and purged orphans — so it must NEVER propagate:
+        # a stable type-name digest beats reporting a serialization error
+        # against an already-committed save and leaving project.json stale.
+        text = try
+            replace(repr(node), r"@0x[0-9a-fA-F]+" => "", r" at 0x[0-9a-fA-F]+" => "")
+        catch
+            "repr_failed:" * string(typeof(node))
+        end
+        _feed_str!(ctx, text)
     end
     return SHA.digest!(ctx)[1:_DIGEST_BYTES]
 end

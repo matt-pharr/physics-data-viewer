@@ -345,6 +345,18 @@ function handle_tree_rename(msg::AbstractDict)
         return nothing
     end
 
+    # Children of sequences (Vectors, Tuples) are index-addressed, not
+    # key-addressed — `set_quiet!` would replace the whole sequence with a
+    # PDVTree holding only the renamed child. The renderer never offers the
+    # action (parent_is_opaque), but MCP agent tools reach this directly.
+    if !isempty(parent_path) &&
+       !(tree[parent_path] isa Union{AbstractPDVTree,AbstractDict})
+        send_error("pdv.tree.rename.response", "tree.not_a_container",
+                   "Parent of '$path' is not a key-addressable container; " *
+                   "sequence children cannot be renamed."; in_reply_to=msg_id)
+        return nothing
+    end
+
     value = tree[path]
     set_quiet!(tree, new_path, value)
     _raw_remove!(tree, path)
@@ -403,6 +415,20 @@ function handle_tree_move(msg::AbstractDict)
             send_error("pdv.tree.move.response", "tree.not_a_container",
                        "Destination parent '$dest_parent' is not a container.";
                        in_reply_to=msg_id)
+            return nothing
+        end
+    end
+
+    # Same guard for the SOURCE parent: a sequence child is index-addressed,
+    # and `_raw_remove!` cannot key-delete from a Vector (see the rename
+    # handler's guard for the full failure mode).
+    old_parts = split(path, ".")
+    if length(old_parts) > 1
+        old_parent = tree[join(old_parts[1:end-1], ".")]
+        if !(old_parent isa Union{AbstractPDVTree,AbstractDict})
+            send_error("pdv.tree.move.response", "tree.not_a_container",
+                       "Parent of '$path' is not a key-addressable container; " *
+                       "sequence children cannot be moved."; in_reply_to=msg_id)
             return nothing
         end
     end

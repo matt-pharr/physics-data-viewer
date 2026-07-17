@@ -392,7 +392,14 @@ function _flush_changes(tree::AbstractPDVTree)
     end
     # Refresh the busy-time query snapshot now that mutations settled. The
     # debounce timer runs on the main-thread scheduler, so the walk cannot
-    # race the mutations it is snapshotting.
+    # race MAIN-THREAD mutations — which is where cell code, script runs,
+    # and comm handlers all execute. User code that writes pdv_tree from a
+    # `Threads.@spawn`ed task on another thread is outside this contract:
+    # Julia has no GIL, so that walk-vs-write race (a Dict mid-rehash) is
+    # undefined behavior, same as any unsynchronized Dict shared across
+    # threads. Documented in JULIA_KNOWN_ISSUES (#21); funneling every
+    # setindex! through a shared lock would not close it anyway, because
+    # nested plain Dicts are mutated directly without any PDVTree hook.
     _ROOT_TREE[] === tree && rebuild_query_cache!(tree)
     nothing
 end

@@ -173,7 +173,7 @@ export function useKernelLaunch(options: UseKernelLaunchOptions) {
     setForceWelcome(true);
   }, [setForceWelcome]);
 
-  /** Leave a failed shared launch for the environment selector (Settings → Runtime). */
+  /** Leave a failed shared/pkg launch for the environment selector (Settings → Runtime). */
   const handleLaunchChooseEnv = useCallback(() => {
     const error = kernelLaunch.error;
     setKernelLaunch({ phase: 'idle', stage: 'env', mode: 'uv', language: 'python', output: '' });

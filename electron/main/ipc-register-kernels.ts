@@ -994,16 +994,24 @@ export function registerKernelIpcHandlers(
           oldEnvMeta?.interpreterPath ?? "julia"
         );
         preCreatedWorkingDir = pkgEnv.workingDir;
-        restarted = await kernelManager.start({
-          name: current.name,
-          language: current.language,
-          env: {
-            ...(oldEnvMeta?.interpreterPath
-              ? { JULIA_PATH: oldEnvMeta.interpreterPath }
-              : {}),
-            JULIA_PROJECT: pkgEnv.workingDir,
-          },
-        });
+        try {
+          restarted = await kernelManager.start({
+            name: current.name,
+            language: current.language,
+            env: {
+              ...(oldEnvMeta?.interpreterPath
+                ? { JULIA_PATH: oldEnvMeta.interpreterPath }
+                : {}),
+              JULIA_PROJECT: pkgEnv.workingDir,
+            },
+          });
+        } catch (err) {
+          // Same rule as the start handler: don't leave the concurrent
+          // Pkg.instantiate running (and streaming stale envActivity) against
+          // a session that will never exist.
+          pkgEnv.abortInstantiate();
+          throw err;
+        }
         const newMeta: ActiveEnvironmentInfo = {
           mode: "pkg",
           interpreterPath: oldEnvMeta?.interpreterPath,

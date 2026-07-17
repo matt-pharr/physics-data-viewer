@@ -1063,6 +1063,16 @@ export class KernelManager extends EventEmitter {
   }
 
   /**
+   * Whether a shell execution with the given msg_id is currently in flight.
+   *
+   * @param msgId - The `parent_header.msg_id` of an iopub message.
+   * @returns True while the execution awaits its idle status.
+   */
+  isExecutionActive(msgId: string): boolean {
+    return this.activeExecutionMsgIds.has(msgId);
+  }
+
+  /**
    * Register a listener for all raw iopub messages from the named kernel.
    *
    * Used by CommRouter to subscribe to the PDV comm channel. The callback
@@ -1073,16 +1083,6 @@ export class KernelManager extends EventEmitter {
    * @param callback - Invoked with each parsed JupyterMessage.
    * @returns A function that, when called, removes the listener.
    */
-  /**
-   * Whether a shell execution with the given msg_id is currently in flight.
-   *
-   * @param msgId - The `parent_header.msg_id` of an iopub message.
-   * @returns True while the execution awaits its idle status.
-   */
-  isExecutionActive(msgId: string): boolean {
-    return this.activeExecutionMsgIds.has(msgId);
-  }
-
   onIopubMessage(id: string, callback: IopubCallback): () => void {
     let listeners = this.iopubListeners.get(id);
     if (!listeners) {

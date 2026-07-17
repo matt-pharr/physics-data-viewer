@@ -422,8 +422,18 @@ export const EnvironmentSelector: React.FC<EnvironmentSelectorProps> = ({
     await loadJuliaRuntimes();
   }, [loadJuliaRuntimes]);
 
+  // Only one Julia install flow — PDVKernel install, `juliaup add`, or the
+  // juliaup bootstrap — may run at a time: all three stream onto the single
+  // onInstallOutput channel (their panes would interleave), and two
+  // Pkg/juliaup subprocesses would mutate the same depot concurrently. A ref
+  // (not state) so a double-click racing a re-render is still excluded; the
+  // per-flow state flags drive the button labels/disabling.
+  const juliaFlowBusyRef = useRef(false);
+
   const handleJuliaInstall = useCallback(async (): Promise<boolean> => {
     if (!selectedJuliaPath) return false;
+    if (juliaFlowBusyRef.current) return false;
+    juliaFlowBusyRef.current = true;
     setJuliaInstalling(true);
     setJuliaInstallOutput([]);
     setJuliaInstallResult(null);
@@ -458,6 +468,7 @@ export const EnvironmentSelector: React.FC<EnvironmentSelectorProps> = ({
       return false;
     } finally {
       unsubscribe();
+      juliaFlowBusyRef.current = false;
       if (mountedRef.current) setJuliaInstalling(false);
     }
   }, [selectedJuliaPath]);
@@ -505,6 +516,8 @@ export const EnvironmentSelector: React.FC<EnvironmentSelectorProps> = ({
   const handleJuliaupAdd = useCallback(async () => {
     const channel = addVersionText.trim();
     if (!channel) return;
+    if (juliaFlowBusyRef.current) return;
+    juliaFlowBusyRef.current = true;
     setAddingVersion(true);
     setAddVersionOutput([]);
     setAddVersionResult(null);
@@ -532,11 +545,14 @@ export const EnvironmentSelector: React.FC<EnvironmentSelectorProps> = ({
       }
     } finally {
       unsubscribe();
+      juliaFlowBusyRef.current = false;
       if (mountedRef.current) setAddingVersion(false);
     }
   }, [addVersionText, loadJuliaRuntimes]);
 
   const handleInstallJuliaup = useCallback(async () => {
+    if (juliaFlowBusyRef.current) return;
+    juliaFlowBusyRef.current = true;
     setInstallingJuliaup(true);
     setJuliaupInstallOutput([]);
     setJuliaupInstallResult(null);
@@ -563,6 +579,7 @@ export const EnvironmentSelector: React.FC<EnvironmentSelectorProps> = ({
       }
     } finally {
       unsubscribe();
+      juliaFlowBusyRef.current = false;
       if (mountedRef.current) setInstallingJuliaup(false);
     }
   }, [loadJuliaRuntimes]);
@@ -845,7 +862,7 @@ export const EnvironmentSelector: React.FC<EnvironmentSelectorProps> = ({
           <button
             className="btn btn-primary"
             onClick={() => void handleInstallJuliaup()}
-            disabled={installingJuliaup}
+            disabled={installingJuliaup || addingVersion || juliaInstalling}
             type="button"
           >
             {installingJuliaup
@@ -880,12 +897,12 @@ export const EnvironmentSelector: React.FC<EnvironmentSelectorProps> = ({
             onKeyDown={(e) => {
               if (e.key === 'Enter') void handleJuliaupAdd();
             }}
-            disabled={addingVersion}
+            disabled={addingVersion || juliaInstalling || installingJuliaup}
           />
           <button
             className="btn btn-secondary"
             onClick={() => void handleJuliaupAdd()}
-            disabled={addingVersion || !addVersionText.trim()}
+            disabled={addingVersion || juliaInstalling || installingJuliaup || !addVersionText.trim()}
             type="button"
           >
             {addingVersion ? 'Adding...' : 'Add'}
@@ -922,7 +939,7 @@ export const EnvironmentSelector: React.FC<EnvironmentSelectorProps> = ({
           <button
             className="btn btn-primary"
             onClick={() => void handleJuliaInstall()}
-            disabled={juliaInstalling}
+            disabled={juliaInstalling || addingVersion || installingJuliaup}
             type="button"
           >
             {juliaInstalling

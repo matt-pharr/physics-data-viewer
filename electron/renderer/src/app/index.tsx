@@ -1502,7 +1502,13 @@ const App: React.FC = () => {
             pendingProjectRef.current = null;
             handleLaunchCancel();
           }}
-          onChooseEnv={kernelLaunch.mode === 'shared' ? handleLaunchChooseEnv : undefined}
+          // Shared AND pkg launches get "Choose environment…": the commonest
+          // pkg failure (PDVKernel missing from the selected runtime's
+          // default env) is a runtime-selection error that Settings → Runtime
+          // fixes, while Retry re-fails identically. uv failures are
+          // project-spec sync problems where picking an interpreter wouldn't
+          // help.
+          onChooseEnv={kernelLaunch.mode !== 'uv' ? handleLaunchChooseEnv : undefined}
         />
       )}
 

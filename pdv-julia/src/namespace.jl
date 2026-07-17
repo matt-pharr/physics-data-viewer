@@ -20,7 +20,11 @@ function namespace_bindings()::Dict{String,Any}
     ns = Dict{String,Any}()
     for sym in names(Main; all=true, imported=false)
         s = string(sym)
-        (startswith(s, "#") || startswith(s, "_")) && continue
+        # Only compiler gensyms are dropped here. User `_`-prefixed bindings
+        # stay in the snapshot so `pdv_namespace`'s `include_private` option
+        # actually has something to include (matching pdv-python, where the
+        # private filter lives solely in the presentation layer).
+        startswith(s, "#") && continue
         s in _NAMESPACE_NOISE && continue
         isdefined(Main, sym) || continue
         ns[s] = getfield(Main, sym)

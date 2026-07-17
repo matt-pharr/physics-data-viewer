@@ -39,6 +39,7 @@ import { ModuleManager } from "./module-manager";
 import { bindProjectModulesToTree } from "./module-runtime";
 import { syncPkgEnvironmentForLoad, syncUvEnvironmentForLoad } from "./project-file-sync";
 import { instantiateJuliaEnvironment } from "./julia-env";
+import { resolveJuliaShim } from "./julia-discovery";
 import { checkJuliaVersionForLoad } from "./juliaup-runner";
 import {
   ProjectManager,
@@ -64,6 +65,7 @@ import {
   PDVConfig,
   type ActiveEnvironmentInfo,
   type McpStatus,
+  type ProjectFailedNode,
 } from "./ipc";
 import { uvSync } from "./uv-runner";
 import { PDVMessage, PDVMessageType, setAppVersion } from "./pdv-protocol";
@@ -696,12 +698,15 @@ export function registerIpcHandlers(
     syncPkgEnvironmentForLoad: async (saveDir, workingDir) =>
       syncPkgEnvironmentForLoad(saveDir, workingDir, {
         runPkgInstantiate: async (cwd) => {
+          // Prefer the live kernel's binary (already shim-bypassed at
+          // launch); the configured-path and bare-PATH fallbacks must be
+          // resolved here — this was the last spawn site that could hit the
+          // julialauncher shim (§10.7.2, PR #347 review).
           const juliaPath =
             (activeKernelId
               ? kernelEnvMeta.get(activeKernelId)?.interpreterPath
               : undefined) ??
-            readConfig(configStore).juliaPath ??
-            "julia";
+            resolveJuliaShim(readConfig(configStore).juliaPath ?? "julia");
           const result = await instantiateJuliaEnvironment(cwd, juliaPath, {
             win,
             pushChannel: IPC.push.envActivity,
@@ -956,6 +961,9 @@ export function registerCommPushForwarding(
           : [],
         missingFiles: Array.isArray(payload.missing_files)
           ? (payload.missing_files as string[])
+          : [],
+        failedNodes: Array.isArray(payload.failed_nodes)
+          ? (payload.failed_nodes as ProjectFailedNode[])
           : [],
       });
       win.webContents.send(IPC.push.menuAction, { action: "project:save", path: saveDir });

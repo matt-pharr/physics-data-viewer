@@ -210,6 +210,38 @@ describe("resolveJuliaShim()", () => {
     const ghost = path.join(dir, "no-such-julia");
     expect(resolveJuliaShim(ghost, path.join(dir, "no-juliaup"))).toBe(ghost);
   });
+
+  it("bypasses the shim to a LINKED default channel's command (review)", async () => {
+    // `juliaup link mybuild <path>` + `juliaup default mybuild`: the default
+    // channel has Command but no Version. Requiring a version here defeated
+    // the bypass exactly when the user linked their default.
+    const linked = await writeStub("custom/bin/julia", "exit 0");
+    const juliaupDir = await makeJuliaupDir({
+      defaultChannel: "mybuild",
+      channels: [
+        { name: "release", version: "1.11.6+0.x" },
+        { name: "mybuild", command: linked },
+      ],
+    });
+    const launcher = await writeStub("shim3/julialauncher", "exit 0");
+    const shim = path.join(dir, "shim3", "julia");
+    await fs.symlink(launcher, shim);
+
+    expect(resolveJuliaShim(shim, juliaupDir)).toBe(linked);
+  });
+
+  it("refuses a default channel linked back to the shim itself", async () => {
+    const launcher = await writeStub("shim4/julialauncher", "exit 0");
+    const shim = path.join(dir, "shim4", "julia");
+    await fs.symlink(launcher, shim);
+    // Pathological: the default channel's Command IS the launcher.
+    const juliaupDir = await makeJuliaupDir({
+      defaultChannel: "loop",
+      channels: [{ name: "loop", command: launcher }],
+    });
+
+    expect(resolveJuliaShim(shim, juliaupDir)).toBe(shim);
+  });
 });
 
 describe("discoverDefaultJulia()", () => {

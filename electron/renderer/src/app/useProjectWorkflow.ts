@@ -141,11 +141,22 @@ export function useProjectWorkflow(options: UseProjectWorkflowOptions) {
       setChecksumMismatch(false);
       setSavedPdvVersion(null); // Just saved with current version — no mismatch
       await rememberRecentProject(saveDir);
+
+      // Nodes the kernel could not serialize: the save completed without
+      // them, which must never look like a clean save. Preserved nodes kept
+      // their previously saved value on disk; unpreserved ones are absent
+      // from the save entirely.
+      const failedWarn = result.failedNodes?.length
+        ? `\nWarning: ${result.failedNodes.length} node(s) could not be serialized and were skipped:\n  ${result.failedNodes
+            .map((f) => `${f.path ?? '?'} — ${f.error ?? 'unknown error'}${f.preserved ? ' (previous saved value kept)' : ' (NOT in this save)'}`)
+            .join('\n  ')}`
+        : '';
       setLogs((prev) => [...prev, {
         id: `save-${Date.now()}`,
         timestamp: Date.now(),
         code: '',
         stdout: `Project saved (${result.nodeCount} nodes)`,
+        ...(failedWarn ? { stderr: failedWarn.trimStart() } : {}),
       }]);
       return true;
     } catch (error) {

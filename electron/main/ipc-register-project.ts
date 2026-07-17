@@ -18,7 +18,7 @@ import { type BrowserWindow } from "electron";
 import { handleIpc } from "./ipc-registry";
 
 import type { CommRouter } from "./comm-router";
-import type { ActiveEnvironmentInfo, CodeCellData, JuliaVersionLoadCheck } from "./ipc";
+import type { ActiveEnvironmentInfo, CodeCellData, JuliaVersionLoadCheck, ProjectFailedNode } from "./ipc";
 import { IPC } from "./ipc";
 import { ModuleManager } from "./module-manager";
 import { setupProjectModuleNamespaces } from "./module-runtime";
@@ -335,7 +335,13 @@ export function registerProjectIpcHandlers(
       const seq = ++saveSeq;
       console.debug(`[project:save] IPC received seq=${seq} saveDir=${saveDir}`);
 
-      const doSave = async (): Promise<{ checksum: string; nodeCount: number; projectName?: string; missingFiles?: string[] }> => {
+      const doSave = async (): Promise<{
+        checksum: string;
+        nodeCount: number;
+        projectName?: string;
+        missingFiles?: string[];
+        failedNodes?: ProjectFailedNode[];
+      }> => {
         console.debug(`[project:save] seq=${seq} starting (was queued behind previous save)`);
 
         // A uv project is identified by a pyproject.toml in the working dir
@@ -346,15 +352,42 @@ export function registerProjectIpcHandlers(
         const activeKernelId = getActiveKernelId();
         const activeLanguage = getActiveKernelLanguage();
         const uvWorkingDir = activeKernelId ? kernelWorkingDirs.get(activeKernelId) : undefined;
+
+        // Manifest-based guard (PR #347 review): loading a legacy shared
+        // save into a live per-project-env session leaves the PREVIOUS
+        // project's env files in the working dir — the load-time sync
+        // no-ops when the save dir has none. Working-dir presence alone
+        // would then re-stamp this project "uv"/"pkg" and copy that foreign
+        // env spec into its save dir. When the project already has a
+        // manifest, its recorded mode wins; only a manifest-less save dir
+        // (Save As / first save) falls back to working-dir detection.
+        let priorEnvMode: string | undefined;
+        const manifestExists = await fs
+          .access(path.join(saveDir, "project.json"))
+          .then(() => true)
+          .catch(() => false);
+        if (manifestExists) {
+          try {
+            const priorManifest = await ProjectManager.readManifest(saveDir);
+            priorEnvMode = priorManifest.environment?.mode ?? "shared";
+          } catch {
+            priorEnvMode = undefined; // unreadable manifest — detect from the working dir
+          }
+        }
+
         const isUvProject =
-          uvWorkingDir && activeLanguage !== "julia"
+          uvWorkingDir &&
+          activeLanguage !== "julia" &&
+          (priorEnvMode === undefined || priorEnvMode === "uv")
             ? await fs
                 .access(path.join(uvWorkingDir, "pyproject.toml"))
                 .then(() => true)
                 .catch(() => false)
             : false;
         const isPkgProject =
-          uvWorkingDir && activeLanguage === "julia"
+          uvWorkingDir &&
+          activeLanguage === "julia" &&
+          (priorEnvMode === undefined || priorEnvMode === "pkg")
             ? await fs
                 .access(path.join(uvWorkingDir, "Project.toml"))
                 .then(() => true)
@@ -391,6 +424,7 @@ export function registerProjectIpcHandlers(
             checksum: saveResult.checksum,
             nodeCount: saveResult.nodeCount,
             missingFiles: saveResult.missingFiles,
+            failedNodes: saveResult.failedNodes?.length ? saveResult.failedNodes : undefined,
           };
         }
 
@@ -464,6 +498,10 @@ export function registerProjectIpcHandlers(
           nodeCount: saveResult.nodeCount,
           projectName: finalManifest.project_name,
           missingFiles: allMissingFiles.length > 0 ? allMissingFiles : undefined,
+          // Nodes the kernel skipped because they refused to serialize — the
+          // save completed without them, so the renderer must warn (a save
+          // that skipped nodes must not be indistinguishable from complete).
+          failedNodes: saveResult.failedNodes?.length ? saveResult.failedNodes : undefined,
         };
       };
 

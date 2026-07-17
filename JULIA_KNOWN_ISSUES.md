@@ -77,13 +77,18 @@ Python takes the module docstring's first line via `ast`; Julia handles a
 leading `\"\"\"docstring\"\"\"`, a `#= block =#` (preferring the template's
 `Description:` line), or a leading `#` comment.
 
-### 17. ~~Strict `::Float64` kwargs reject JSON/UI integers~~ — FIXED (2026-07-14)
+### 17. ~~Strict `::Float64` kwargs reject JSON/UI integers~~ — FIXED (2026-07-14, revised 2026-07-17)
 GUI/MCP params cross a JSON boundary, so `tmax: 40` arrived as `Int64` and
 MethodError'd against `tmax::Float64`. `script_run` now coerces numeric
 kwargs to the `run()` signature's declared numeric types at the call
-boundary — lossless directions only (Integer → declared float type, integral
-float → declared integer type); everything else passes through, so `n=2.5`
-against `::Int` still errors.
+boundary — verified-lossless conversions only. **Revised 2026-07-17 (PR #347
+review):** "Integer → float is lossless" was false above the float type's
+mantissa width (2^53 for Float64, 2^24 for Float32) — a big Int would have
+silently rounded. Each conversion is now guarded by an exact round-trip
+check (and integral float → declared integer type by its natural
+InexactError); anything unrepresentable passes through untouched and
+MethodErrors loudly, so `n=2.5` against `::Int` still errors and
+`2^53 + 1` against `::Float64` errors instead of rounding.
 
 ---
 
@@ -352,6 +357,28 @@ escape hatch in any Julia: `PDVKernel.heal_threaded_region_leak!()` (or
 spawn gives `@threads` the full default-thread pool; it is not the cause.
 Limitation: user code that *catches* the InterruptException itself never
 errors the cell, so the hook doesn't see it — use the escape hatch.
+
+### 21. `pdv_tree` is not safe to mutate from user background threads
+Documented constraint (PR #347 review): everything PDV does with the tree —
+cell code, script runs, comm handlers, the busy-time query-snapshot rebuild —
+runs on the **main thread**, so those never race each other. User code that
+writes `pdv_tree` from a `Threads.@spawn`ed task on another thread while a
+snapshot rebuild walks the live Dicts is a data race (Julia has no GIL; a
+Dict mid-rehash can crash the reader), exactly like sharing any
+unsynchronized Dict across threads. Compute in the spawned task, assign the
+result into `pdv_tree` from the main task (`pdv_tree["x"] = fetch(t)`).
+Funneling `setindex!` through a lock would not close this: nested plain
+Dicts inside the tree are mutated directly, with no PDVTree hook to lock.
+
+### 22. Namelist editor retypes whole-number reals as integers (pre-existing, BOTH backends)
+Not a PR #347 defect — the namelist editor widget's JS JSON boundary
+collapses `1.0` to `1` (JSON has one number type and `JSON.stringify(1.0)`
+emits `"1"`). Saving an *untouched* namelist can therefore rewrite a Fortran
+real field `x = 1.0` as `x = 1`, and a later session's integer coercion can
+then turn an edited `0.5` into `0` for a field it now believes is integral.
+Fix belongs in `NamelistEditor.tsx` + both kernels' namelist handlers
+(preserve the parsed field's original type, not the JSON-inferred one) —
+tracked here alongside the M5 null-slot fix until it gets its own pass.
 
 ## Test-coverage gaps (code is language-agnostic + kernel handlers unit-tested,
 but not driven end-to-end on a Julia session)

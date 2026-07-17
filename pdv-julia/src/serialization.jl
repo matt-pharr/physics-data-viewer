@@ -149,28 +149,30 @@ end
 """
     _can_inline_json(value) -> Bool
 
-True when `value` round-trips losslessly through JSON: strings, Bool,
-machine ints, finite floats, `nothing`, and Vectors/Dicts (String keys)
-composed of those. Tuples, Sets, Complex, byte vectors, and non-finite
-floats are rejected — they go through the `.jls` path to preserve type
-fidelity (or, for NaN/Inf, to keep tree-index.json valid JSON).
+True when `value` round-trips through JSON as the *same Julia type*: the
+JSON-native fixed point of `nothing`, `Bool`, `Int64`, finite `Float64`,
+strings, `Vector{Any}`, and `Dict{String,Any}` — each composed of the same.
+Everything else goes through the `.jls` path to preserve the concrete type:
+a JSON reload widens/retypes silently (`Int32` → `Int64`, `Float32` →
+`Float64`, `BitVector`/`Vector{String}` → `Vector{Any}`, `Dict{String,Int}`
+→ `Dict{String,Any}`) with an UNCHANGED digest — the checksum feeds numbers
+width-insensitively — so the degradation would be invisible until a strict
+type annotation MethodErrors (PR #347 review). Strings are the deliberate
+exception: `SubString` et al. reload as `String`, matching the text-node
+path, and `.jls` would pin the parent string instead. NaN/Inf are rejected
+to keep tree-index.json valid JSON.
 """
 function _can_inline_json(value)::Bool
     value === nothing && return true
     value isa Bool && return true
     value isa AbstractString && return true
-    (value isa Integer && !(value isa Bool)) &&
-        return !(value isa BigInt) && typemin(Int64) <= value <= typemax(Int64)
-    value isa AbstractFloat && return isfinite(value) && !(value isa BigFloat)
-    if value isa Vector{UInt8}
-        return false  # binary kind
-    end
-    if value isa AbstractVector
-        _is_numeric_array(value) && return false  # ndarray kind
+    value isa Int64 && return true
+    value isa Float64 && return isfinite(value)
+    if value isa Vector{Any}
         return all(_can_inline_json, value)
     end
-    if value isa AbstractDict
-        return all(p -> (p.first isa AbstractString) && _can_inline_json(p.second), pairs(value))
+    if value isa Dict{String,Any}
+        return all(_can_inline_json, values(value))
     end
     return false
 end

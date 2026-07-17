@@ -265,8 +265,11 @@ types. Params from the GUI and MCP cross a JSON boundary, so whole numbers
 arrive as `Int64` and would MethodError against a strict `::Float64`
 annotation (`tmax=40` vs `tmax::Float64`); coercing at the call boundary
 spares every script from declaring `::Real` + `float()`. Only lossless
-conversions happen: Integer → declared float type, and integral floats →
-declared integer type. Anything else passes through untouched.
+conversions happen: Integer → declared float type and integral floats →
+declared integer type, each verified by an exact round-trip check — an Int
+above the float type's mantissa width (2^53 for Float64, 2^24 for Float32)
+or a float outside the integer type's range passes through untouched (and
+MethodErrors against the strict annotation) rather than silently rounding.
 """
 function _coerce_numeric_kwargs(file_path::AbstractString, kwargs)::Dict{Symbol,Any}
     coerced = Dict{Symbol,Any}(pairs(kwargs))
@@ -276,9 +279,19 @@ function _coerce_numeric_kwargs(file_path::AbstractString, kwargs)::Dict{Symbol,
     for (k, v) in coerced
         ann = get(declared, k, "")
         if v isa Integer && !(v isa Bool) && haskey(_COERCE_FLOAT_TYPES, ann)
-            coerced[k] = _COERCE_FLOAT_TYPES[ann](v)
+            f = _COERCE_FLOAT_TYPES[ann](v)
+            # Round-trip guard: conversion rounds above the mantissa width,
+            # and overflows small float types to Inf.
+            if isfinite(f) && BigInt(f) == BigInt(v)
+                coerced[k] = f
+            end
         elseif v isa AbstractFloat && isinteger(v) && haskey(_COERCE_INT_TYPES, ann)
-            coerced[k] = _COERCE_INT_TYPES[ann](v)
+            i = try
+                _COERCE_INT_TYPES[ann](v)  # InexactError when out of range
+            catch
+                nothing
+            end
+            i !== nothing && (coerced[k] = i)
         end
     end
     return coerced

@@ -35,7 +35,7 @@ import {
   type PDVProjectLoadResponsePayload,
   type PDVProjectSaveResponsePayload,
 } from "./pdv-protocol";
-import type { CodeCellData } from "./ipc";
+import type { CodeCellData, ProjectFailedNode } from "./ipc";
 import { atomicWriteJson } from "./atomic-write";
 import * as fs from "fs/promises";
 import * as path from "path";
@@ -330,6 +330,7 @@ export class ProjectManager {
     moduleOwnedFiles: ModuleOwnedFile[];
     moduleManifests: ModuleManifestBundle[];
     missingFiles: string[];
+    failedNodes: ProjectFailedNode[];
   }>();
 
   /**
@@ -347,6 +348,7 @@ export class ProjectManager {
       moduleOwnedFiles: ModuleOwnedFile[];
       moduleManifests: ModuleManifestBundle[];
       missingFiles: string[];
+      failedNodes: ProjectFailedNode[];
     },
   ): void {
     this._cachedKernelResults.set(saveDir, results);
@@ -410,6 +412,7 @@ export class ProjectManager {
     moduleOwnedFiles: ModuleOwnedFile[];
     moduleManifests: ModuleManifestBundle[];
     missingFiles: string[];
+    failedNodes: ProjectFailedNode[];
     pendingManifest?: ProjectManifest;
   }> {
     assertCodeCellData(codeCells);
@@ -426,11 +429,12 @@ export class ProjectManager {
     let moduleOwnedFiles: ModuleOwnedFile[];
     let moduleManifests: ModuleManifestBundle[];
     let missingFiles: string[];
+    let failedNodes: ProjectFailedNode[];
 
     if (cached) {
       this._cachedKernelResults.delete(saveDir);
       console.debug(`[ProjectManager.save] using cached kernel results for ${saveDir}`);
-      ({ checksum, nodeCount, moduleOwnedFiles, moduleManifests, missingFiles } = cached);
+      ({ checksum, nodeCount, moduleOwnedFiles, moduleManifests, missingFiles, failedNodes } = cached);
     } else {
       console.debug(`[ProjectManager.save] sending pdv.project.save comm (+${(performance.now() - t0).toFixed(0)}ms)`);
       const response = await this.commRouter.request(PDVMessageType.PROJECT_SAVE, {
@@ -444,7 +448,7 @@ export class ProjectManager {
         module_owned_files?: ModuleOwnedFile[];
         module_manifests?: ModuleManifestBundle[];
         missing_files?: string[];
-        failed_nodes?: Array<{ path?: string; type?: string; error?: string }>;
+        failed_nodes?: ProjectFailedNode[];
       };
       checksum = payload.checksum ?? "";
       nodeCount = payload.node_count ?? 0;
@@ -457,17 +461,18 @@ export class ProjectManager {
       missingFiles = Array.isArray(payload.missing_files)
         ? payload.missing_files
         : [];
+      failedNodes = Array.isArray(payload.failed_nodes) ? payload.failed_nodes : [];
+    }
 
-      // Nodes the kernel could not serialize at all (Julia kernels only:
-      // Serialization refuses more values than pickle). The save proceeded
-      // without them — surface the loss loudly rather than silently.
-      const failedNodes = Array.isArray(payload.failed_nodes) ? payload.failed_nodes : [];
-      if (failedNodes.length > 0) {
-        console.warn(
-          `[ProjectManager.save] ${failedNodes.length} tree node(s) could not be serialized and were skipped: ` +
-            failedNodes.map((f) => `${f.path ?? "?"} (${f.error ?? "unknown error"})`).join("; "),
-        );
-      }
+    // Nodes the kernel could not serialize at all (Julia kernels only:
+    // Serialization refuses more values than pickle). The save proceeded
+    // without them — returned to the caller so the renderer can surface the
+    // loss loudly rather than silently.
+    if (failedNodes.length > 0) {
+      console.warn(
+        `[ProjectManager.save] ${failedNodes.length} tree node(s) could not be serialized and were skipped: ` +
+          failedNodes.map((f) => `${f.path ?? "?"} (${f.error ?? "unknown error"})`).join("; "),
+      );
     }
 
     // If backing files are missing, abort before writing any project metadata.
@@ -477,7 +482,7 @@ export class ProjectManager {
       console.warn(
         `[ProjectManager.save] ABORTED — ${missingFiles.length} file-backed node(s) have missing backing files`,
       );
-      return { checksum, nodeCount, moduleOwnedFiles, moduleManifests, missingFiles };
+      return { checksum, nodeCount, moduleOwnedFiles, moduleManifests, missingFiles, failedNodes };
     }
 
     await atomicWriteJson(path.join(saveDir, "code-cells.json"), codeCells);
@@ -530,7 +535,7 @@ export class ProjectManager {
     };
     console.debug(`[ProjectManager.save] staged (+${(performance.now() - t0).toFixed(0)}ms)`);
 
-    return { checksum, nodeCount, moduleOwnedFiles, moduleManifests, missingFiles, pendingManifest };
+    return { checksum, nodeCount, moduleOwnedFiles, moduleManifests, missingFiles, failedNodes, pendingManifest };
   }
 
   /**
