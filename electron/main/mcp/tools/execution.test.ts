@@ -154,7 +154,14 @@ describe("Julia script_run codegen escaping (second review)", () => {
     // review M4; this MCP mirror was missed by the first fix pass — a bare
     // JSON.stringify lets `$` interpolate inside Julia strings.
     const { server, tools } = captureTools();
-    const executeSpy = vi.fn(async () => ({ stdout: "", duration: 0 }));
+    // Typed args so `.mock.calls` carries the request tuple (execute is
+    // called as `execute(kernelId, { code })`).
+    const executeSpy = vi.fn(
+      async (_kernelId: string, _request: { code: string }) => ({
+        stdout: "",
+        duration: 0,
+      }),
+    );
     const ctx = makeCtx({ mutatingEnabled: true });
     (ctx.kernelManager as { getKernel: unknown }).getKernel = () => ({
       id: "k1",
@@ -168,7 +175,8 @@ describe("Julia script_run codegen escaping (second review)", () => {
       extra,
     );
 
-    const code = (executeSpy.mock.calls.at(-1)?.[1] as { code: string }).code;
+    expect(executeSpy).toHaveBeenCalled();
+    const code = executeSpy.mock.calls.at(-1)![1].code;
     expect(code).toContain("PDVKernel.run_tree_script(pdv_tree, \"scripts.fit\";");
     // `$\alpha$ scan` must arrive with every $ escaped for Julia.
     expect(code).toContain('label="\\$\\\\alpha\\$ scan"');

@@ -243,6 +243,7 @@ function setupAll(): void {
     getActiveKernelId: () => null,
     getActiveKernelLanguage: () => "python",
     setActiveProjectDir: vi.fn(),
+    getActiveProjectDir: () => null,
     getPendingModuleImports: () => [],
     setPendingModuleImports: vi.fn(),
     getPendingModuleSettings: () => ({}),
