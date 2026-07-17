@@ -179,6 +179,34 @@ describe("activity-based ready deadline (§10.8)", () => {
     }
   });
 
+  it("a wedged bootstrap execute is unwound by the ready deadline (second review)", async () => {
+    vi.useFakeTimers();
+    try {
+      const km = makeKernelManager({
+        // Alive-but-silent `using PDVKernel` (e.g. stuck on another
+        // process's precompile pidfile lock): the execute never settles.
+        // Without racing it against the ready deadline this await hung
+        // forever under the start lock.
+        execute: vi.fn(() => new Promise<KernelExecuteResult>(() => undefined)),
+      });
+      const pending = initializeKernelSession(
+        km as unknown as KernelManager,
+        makeSilentCommRouter(),
+        makeQueryRouter(),
+        makeProjectManager(),
+        "k1",
+        new Map()
+      );
+      const assertion = expect(pending).rejects.toThrow(
+        /failed at step 'bootstrap': .*no kernel activity for 15 s/
+      );
+      await vi.advanceTimersByTimeAsync(15_100);
+      await assertion;
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("kernel activity (iopub streams / process output) extends the idle deadline up to the cap", async () => {
     vi.useFakeTimers();
     try {

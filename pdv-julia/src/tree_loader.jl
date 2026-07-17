@@ -179,7 +179,9 @@ function load_tree_index(tree::AbstractPDVTree, nodes::AbstractVector;
                 set_quiet!(tree, fp, PDVFile(
                     uuid=node_uuid, filename=node_filename, source_rel_path=src_rel))
             elseif backend == "inline"
-                set_quiet!(tree, fp, get(storage, "value", nothing))
+                # _materialize_inline: tree-index.json comes through JSON.parse,
+                # whose 1.x object type is not a Dict (see serialization.jl).
+                set_quiet!(tree, fp, _materialize_inline(get(storage, "value", nothing)))
             elseif backend == "local_file"
                 # invokelatest: deserializing an earlier leaf may have
                 # Base.require'd a package (see _read_jls), advancing the

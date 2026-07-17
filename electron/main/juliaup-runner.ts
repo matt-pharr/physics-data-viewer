@@ -322,7 +322,13 @@ function tailOf(output: string): string {
 // Load-time version assessment (§10.7.5)
 // ---------------------------------------------------------------------------
 
-/** `"1.10.4"` → `"1.10"`; null when the string does not start `major.minor`. */
+/**
+ * Extract the `major.minor` prefix of a Julia version string.
+ *
+ * @param version - Full or partial version (`"1.10.4"`, `"1.10"`).
+ * @returns `"major.minor"` (e.g. `"1.10"`), or null when the string does
+ *   not start with `major.minor`.
+ */
 export function juliaMinor(version: string): string | null {
   const match = version.match(/^(\d+\.\d+)(?:\.|$|[+-])/);
   return match?.[1] ?? null;

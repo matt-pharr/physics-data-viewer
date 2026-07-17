@@ -370,7 +370,11 @@ export async function probeJuliaRuntime(
  */
 let _cache: JuliaRuntimeInfo[] | null = null;
 
-/** Clear the runtime discovery cache (the selector's Refresh button). */
+/**
+ * Clear the runtime discovery cache (the selector's Refresh button).
+ *
+ * @returns Nothing.
+ */
 export function clearJuliaRuntimeCache(): void {
   _cache = null;
 }
@@ -602,6 +606,13 @@ export function resolveBundledPDVJuliaPath(): string | null {
  * `Pkg.add("IJulia")`, and a targeted `Pkg.precompile` so the first kernel
  * boot doesn't pay the compile cost blind.
  *
+ * Concurrent calls are serialized on a module-level chain: the staging dir
+ * is shared, and it is reachable from two uncoordinated paths — a
+ * `kernels.start` acquiring a fresh Julia version (under the start lock)
+ * and the selector's `environment:juliaInstall` (no lock) — so an
+ * unserialized second call could `rmSync` the staged tree out from under a
+ * running `Pkg.develop` (second review).
+ *
  * @param juliaPath - Target Julia executable (shim-resolve before calling).
  * @param opts - Staging directory and streaming options.
  * @returns Install result; a non-zero exit, spawn failure, staging failure,
@@ -609,6 +620,20 @@ export function resolveBundledPDVJuliaPath(): string | null {
  *   `success: false`. Never rejects.
  */
 export function installPDVKernel(
+  juliaPath: string,
+  opts: JuliaInstallOptions
+): Promise<EnvironmentInstallResult> {
+  const run = _installChain.then(() => _installPDVKernelExclusive(juliaPath, opts));
+  // The chain must survive a (never-expected) rejection without wedging
+  // every later install behind it.
+  _installChain = run.catch(() => undefined);
+  return run;
+}
+
+/** Serialization chain for {@link installPDVKernel} (shared staging dir). */
+let _installChain: Promise<unknown> = Promise.resolve();
+
+function _installPDVKernelExclusive(
   juliaPath: string,
   opts: JuliaInstallOptions
 ): Promise<EnvironmentInstallResult> {

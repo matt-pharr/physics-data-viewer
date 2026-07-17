@@ -393,9 +393,11 @@ export interface PDVProjectSaveResponsePayload {
    * Nodes the kernel could not serialize at all — even the pickle/jls
    * fallback refused (running Task, lambda, open handle). The save
    * proceeded without them; each entry names the skipped tree path, the
-   * value's type, and the serializer error.
+   * value's type, the serializer error, and whether the node's prior
+   * on-disk snapshot was carried forward in the index (`preserved`, review
+   * M1) so a reload restores the last saved value instead of losing it.
    */
-  failed_nodes?: Array<{ path: string; type: string; error: string }>;
+  failed_nodes?: Array<{ path: string; type: string; error: string; preserved?: boolean }>;
 }
 
 // ---------------------------------------------------------------------------

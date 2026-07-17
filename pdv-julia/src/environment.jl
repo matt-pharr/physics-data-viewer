@@ -139,8 +139,15 @@ function smart_copy(src::AbstractString, dst::AbstractString)
 
     ensure_parent(dst)
     try
-        cp(src, tmp; force=true)
-        mv(tmp, dst; force=true)
+        # follow_symlinks: a symlinked source must land as real bytes — the
+        # tree copy has to survive the link target moving (second review).
+        cp(src, tmp; force=true, follow_symlinks=true)
+        # NOT `mv(force=true)`: Base implements that as rm(dst) THEN rename,
+        # so a crash between the two loses the previous copy — the exact
+        # torn state this function promises to prevent (second review;
+        # pdv-python uses os.replace). `rename` overwrites atomically on the
+        # same filesystem, which `<dst>.tmp` guarantees.
+        Base.Filesystem.rename(tmp, dst)
     catch
         rm(tmp; force=true)
         rethrow()

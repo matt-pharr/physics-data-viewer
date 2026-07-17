@@ -194,10 +194,26 @@ export async function initializeKernelSession(
     const readyPromise = ready.promise;
     // Avoid unhandled rejection warnings if bootstrap fails before pdv.ready.
     void readyPromise.catch(() => undefined);
-    const bootstrapResult = await kernelManager.execute(kernelId, {
-      code: bootstrapCode,
-      silent: true,
+    // Race the bootstrap execute against the ready waiter's §10.8 deadline.
+    // KernelManager.execute has no deadline of its own, and this await runs
+    // under the start lock — without the race, an alive-but-silent bootstrap
+    // (`using PDVKernel` wedged on another process's precompile pidfile
+    // lock) would hang kernels.start forever and with it every later
+    // start/stop/restart (second review). Only the ready waiter's REJECTION
+    // can win the race: `pdv.ready` resolving is not a bootstrap failure —
+    // the comm push legitimately arrives before the execute's iopub idle —
+    // so resolution leaves this branch pending forever.
+    const readyDeadline = new Promise<never>((_, reject) => {
+      readyPromise.catch(reject);
     });
+    void readyDeadline.catch(() => undefined);
+    const bootstrapResult = await Promise.race([
+      kernelManager.execute(kernelId, {
+        code: bootstrapCode,
+        silent: true,
+      }),
+      readyDeadline,
+    ]);
     if (bootstrapResult.error) {
       throw new Error(bootstrapResult.error);
     }

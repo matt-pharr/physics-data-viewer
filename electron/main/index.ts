@@ -640,6 +640,7 @@ export function registerIpcHandlers(
       }
       return "python";
     },
+    getActiveProjectDir: () => activeProjectDir,
     setActiveProjectDir: (dir) => {
       const prevDir = activeProjectDir;
       activeProjectDir = dir;

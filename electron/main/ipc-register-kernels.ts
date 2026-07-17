@@ -454,6 +454,70 @@ export function registerKernelIpcHandlers(
   kernelManager.on("kernel:processOutput", bootOutputListener);
   trackedBootOutputListener = { km: kernelManager, fn: bootOutputListener };
 
+  /**
+   * Attach the per-kernel session listeners every live kernel needs
+   * regardless of how it came up — fresh start or restart (second review:
+   * only the start handler registered these, so every restart silently lost
+   * both double-click plot delivery and crash surfacing for the rest of the
+   * session):
+   *
+   * 1. The "orphan" display_data forwarder — figures the kernel emits
+   *    outside any in-flight execution become synthetic console entries.
+   *    The main producer is a double-click plot handler (`pdv.handler.invoke`
+   *    runs over the comm channel, so its display_data is parented to a
+   *    stale execute msg and `execute()`'s per-execution collector never
+   *    sees it). Python's native matplotlib windows sidestep iopub entirely,
+   *    but Julia's inline Makie displays (and Python's Agg fallback) land
+   *    here.
+   * 2. The crash handler that pushes `kernelCrashed` to the renderer and
+   *    clears the active-kernel pointer.
+   *
+   * @param kernelId - The freshly started (or restarted) kernel.
+   */
+  function attachKernelSessionListeners(kernelId: string): void {
+    kernelManager.onIopubMessage(kernelId, (jupMsg) => {
+      if (jupMsg.header.msg_type !== "display_data") return;
+      const parentId = String(jupMsg.parent_header?.msg_id ?? "");
+      if (kernelManager.isExecutionActive(parentId)) return;
+      const data = jupMsg.content?.data as Record<string, unknown> | undefined;
+      const png = data?.["image/png"];
+      const svg = data?.["image/svg+xml"];
+      const image =
+        typeof png === "string"
+          ? { mime: "image/png", data: png }
+          : typeof svg === "string"
+            ? { mime: "image/svg+xml", data: svg }
+            : null;
+      if (!image || win.isDestroyed()) return;
+      // Reuse the executeBegin/Output/Finish contract so the renderer needs
+      // no new channel: the begin push seeds a console entry, the image chunk
+      // attaches to it, and the finish push closes it out.
+      const executionId = `display-${randomUUID()}`;
+      const origin = { kind: "unknown" as const, label: "Plot" };
+      const timestamp = Date.now();
+      win.webContents.send(IPC.push.executeBegin, { executionId, code: "", origin, timestamp });
+      win.webContents.send(IPC.push.executeOutput, { executionId, type: "image", image });
+      win.webContents.send(IPC.push.executeFinish, { executionId, duration: 0 });
+    });
+
+    const onCrash = async (crashedId: string): Promise<void> => {
+      if (crashedId !== kernelId) return;
+      commRouter.detach();
+      queryRouter.detach();
+      // Deliberately do NOT delete the working directory or its map entry
+      // here: it holds the uv env spec (pyproject.toml/uv.lock/
+      // .python-version) the restart handler snapshots to rebuild the venv,
+      // and any `.autosave` of an unsaved session. `kernels.restart` and
+      // `kernels.stop` clean it up; if the user quits instead, the stale
+      // `session.lock` surfaces it on the welcome screen as a recoverable
+      // session (§11.6).
+      if (getActiveKernelId() === crashedId) setActiveKernelId(null);
+      win.webContents.send(IPC.push.kernelCrashed, { kernelId: crashedId });
+    };
+    crashHandlers.set(kernelId, onCrash);
+    kernelManager.on("kernel:crashed", onCrash);
+  }
+
   // Serialize start/stop/restart of the Jupyter server process so concurrent
   // calls cannot race on the shared commRouter (which causes "CommRouter
   // detached" rejections).
@@ -707,6 +771,13 @@ export function registerKernelIpcHandlers(
       throw err;
     }
 
+    // Session listeners attach BEFORE the possibly-minutes instantiate await
+    // below (second review): a kernel death in that window must surface as
+    // kernelCrashed immediately, not as generic comm timeouts against a dead
+    // process promoted to active. cleanupKernelWorkingDir in the failure
+    // teardown detaches the crash handler again.
+    attachKernelSessionListeners(kernel.id);
+
     // pkg-mode launches: the instantiate overlapped the boot; the session is
     // not ready until it succeeds (§10.6.6). On failure the kernel is torn
     // back down so the renderer's failed overlay offers a clean Retry.
@@ -725,61 +796,17 @@ export function registerKernelIpcHandlers(
           crashHandlers,
         );
         await kernelManager.stop(kernel.id).catch(() => undefined);
+        // Every other stop path detaches the routers; leaving them attached
+        // here let straggling renderer traffic burn full timeouts against
+        // dead sockets until the next start (second review).
+        commRouter.detach();
+        queryRouter.detach();
         throw new Error(`Julia environment setup failed (Pkg.instantiate):\n${inst.output}`);
       }
     }
     setActiveKernelId(kernel.id);
     await setupModuleNamespaces(kernel.id);
     await bindActiveProjectModules(kernel.id);
-
-    // Forward "orphan" display_data — figures the kernel emits outside any
-    // in-flight execution — to the console as a synthetic entry. The main
-    // producer is a double-click plot handler (`pdv.handler.invoke` runs over
-    // the comm channel, so its display_data is parented to a stale execute
-    // msg and `execute()`'s per-execution collector never sees it). Python's
-    // native matplotlib windows sidestep iopub entirely, but Julia's inline
-    // Makie displays (and Python's Agg fallback) land here.
-    kernelManager.onIopubMessage(kernel.id, (jupMsg) => {
-      if (jupMsg.header.msg_type !== "display_data") return;
-      const parentId = String(jupMsg.parent_header?.msg_id ?? "");
-      if (kernelManager.isExecutionActive(parentId)) return;
-      const data = jupMsg.content?.data as Record<string, unknown> | undefined;
-      const png = data?.["image/png"];
-      const svg = data?.["image/svg+xml"];
-      const image =
-        typeof png === "string"
-          ? { mime: "image/png", data: png }
-          : typeof svg === "string"
-            ? { mime: "image/svg+xml", data: svg }
-            : null;
-      if (!image || win.isDestroyed()) return;
-      // Reuse the executeBegin/Output/Finish contract so the renderer needs
-      // no new channel: the begin push seeds a console entry, the image chunk
-      // attaches to it, and the finish push closes it out.
-      const executionId = `display-${randomUUID()}`;
-      const origin = { kind: "unknown" as const, label: "Plot" };
-      const timestamp = Date.now();
-      win.webContents.send(IPC.push.executeBegin, { executionId, code: "", origin, timestamp });
-      win.webContents.send(IPC.push.executeOutput, { executionId, type: "image", image });
-      win.webContents.send(IPC.push.executeFinish, { executionId, duration: 0 });
-    });
-
-    const onCrash = async (crashedId: string): Promise<void> => {
-      if (crashedId !== kernel.id) return;
-      commRouter.detach();
-      queryRouter.detach();
-      // Deliberately do NOT delete the working directory or its map entry
-      // here: it holds the uv env spec (pyproject.toml/uv.lock/
-      // .python-version) the restart handler snapshots to rebuild the venv,
-      // and any `.autosave` of an unsaved session. `kernels.restart` and
-      // `kernels.stop` clean it up; if the user quits instead, the stale
-      // `session.lock` surfaces it on the welcome screen as a recoverable
-      // session (§11.6).
-      if (getActiveKernelId() === crashedId) setActiveKernelId(null);
-      win.webContents.send(IPC.push.kernelCrashed, { kernelId: crashedId });
-    };
-    crashHandlers.set(kernel.id, onCrash);
-    kernelManager.on("kernel:crashed", onCrash);
 
     return kernel;
     });
@@ -963,13 +990,29 @@ export function registerKernelIpcHandlers(
       let preCreatedWorkingDir: string | undefined;
       let uvBinaryForInit: string | undefined;
       let restarted: KernelInfo;
+
+      // §10.8 boot-output streaming applies to restarts too (second review):
+      // a Julia restart right after `PDVKernel.update()` recompiles for
+      // minutes, and without the forwarding flag the renderer shows a bare
+      // spinner exactly when progress matters most.
+      const startRestartKernel = async (
+        spec: Parameters<typeof kernelManager.start>[0]
+      ): Promise<KernelInfo> => {
+        forwardJuliaBootOutput = current.language === "julia";
+        try {
+          return await kernelManager.start(spec);
+        } finally {
+          forwardJuliaBootOutput = false;
+        }
+      };
+
       if (envSnapshot || uvSaveDirFallback) {
         const uvEnv = await startUvEnvironment(
           envSnapshot ? { envSnapshot } : { saveDir: uvSaveDirFallback }
         );
         preCreatedWorkingDir = uvEnv.workingDir;
         uvBinaryForInit = uvEnv.uvBinary;
-        restarted = await kernelManager.start({
+        restarted = await startRestartKernel({
           name: current.name,
           language: current.language,
           env: { PYTHON_PATH: uvEnv.venvPython },
@@ -995,7 +1038,7 @@ export function registerKernelIpcHandlers(
         );
         preCreatedWorkingDir = pkgEnv.workingDir;
         try {
-          restarted = await kernelManager.start({
+          restarted = await startRestartKernel({
             name: current.name,
             language: current.language,
             env: {
@@ -1031,7 +1074,7 @@ export function registerKernelIpcHandlers(
           }
         }
       } else {
-        restarted = await kernelManager.start({
+        restarted = await startRestartKernel({
           name: current.name,
           language: current.language,
           // A shared Julia restart must relaunch on the same executable —
@@ -1054,8 +1097,15 @@ export function registerKernelIpcHandlers(
         kernelWorkingDirs,
         getWorkingDirBase(),
         preCreatedWorkingDir,
-        uvBinaryForInit
+        uvBinaryForInit,
+        // Handshake-phase output streams to the overlay on restarts too —
+        // `using PDVKernel` recompiles land here (§10.8, second review).
+        current.language === "julia" ? sendBootChunk : undefined
       );
+      // Restarted kernels need the same session listeners as fresh starts:
+      // without this, every restart silently lost double-click plot delivery
+      // AND crash surfacing for the rest of the session (second review).
+      attachKernelSessionListeners(restarted.id);
       return restarted;
     }
 

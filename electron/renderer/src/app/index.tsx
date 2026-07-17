@@ -1413,6 +1413,10 @@ const App: React.FC = () => {
     // per-project environment boot with it active (the orphan dir doubles as
     // the env-file source, exactly like opening a uv/pkg project) so the
     // recovered session isn't silently demoted to shared mode (review M2).
+    // Known narrow gap (second review, note only): a READY same-language
+    // kernel below reuses the live session without activating the orphan's
+    // environment — the env files are still preserved into the working dir,
+    // so the mode stamps correctly on save and activates on restart.
     const startAndRecover = () => {
       dismissWelcome();
       setInterpreterWarning(null);

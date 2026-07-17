@@ -187,3 +187,13 @@ function pdv_handle(obj::AbstractMatrix{<:Real}, path::String, tree::PDVTree)
     end
     nothing
 end
+
+# 0-D and ≥3-D numeric arrays: a friendly notice with `dispatched: true`,
+# matching pdv-python's "[PDV] Cannot plot N-D ndarray" (second review —
+# without this the dispatch fell through to `dispatched: false` + error,
+# a kernel-visible response divergence between the backends).
+function pdv_handle(obj::AbstractArray{<:Real}, path::String, tree::PDVTree)
+    println("[PDV] Cannot plot $(ndims(obj))-D ndarray (size=$(size(obj))); " *
+            "default handler supports 1D and 2D only.")
+    nothing
+end

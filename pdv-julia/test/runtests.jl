@@ -411,6 +411,30 @@ end
     d = serialize_node("ok", Dict{String,Any}("n" => 1, "x" => 2.5, "s" => "t",
                                               "v" => Any[1, "two", false, nothing]), dir)
     @test d["storage"]["backend"] == "inline"
+
+    # Reload TYPES through a real JSON round trip (second review): the index
+    # comes back via JSON.parse, whose 1.x object type is NOT a Dict — the
+    # loader must materialize inline values to the fixed point, or
+    # `cfg isa Dict` breaks after reload and the next save silently reroutes
+    # the node to .jls pinning the JSON-internal type into saved data.
+    wd2 = mktempdir()
+    save2 = mktempdir()
+    t1 = PDVTree()
+    t1.working_dir = wd2
+    t1["cfg"] = Dict{String,Any}("thresh" => 1.5, "name" => "run7")
+    t1["seq"] = Any[1, "two", Dict{String,Any}("k" => true)]
+    serialize_tree_to_dir(t1, save2)
+    parsed_nodes = JSON.parsefile(joinpath(save2, "tree-index.json"))
+    t2 = PDVTree()
+    t2.working_dir = wd2
+    @test isempty(load_tree_index(t2, parsed_nodes; working_dir=save2))
+    @test t2["cfg"] isa Dict{String,Any}
+    @test t2["cfg"]["thresh"] === 1.5
+    @test t2["seq"] isa Vector{Any}
+    @test t2["seq"][3] isa Dict{String,Any}
+    # …and a resave keeps them inline: no silent .jls migration.
+    d = serialize_node("cfg", t2["cfg"], save2)
+    @test d["storage"]["backend"] == "inline"
 end
 
 @testset "serialization: custom serializers and protocol" begin
@@ -706,6 +730,10 @@ end
     doc_path = joinpath(wd, "docprobe.jl")
     write(doc_path, "\"\"\"Fit a line to the data.\"\"\"\nfunction run(pdv_tree) end")
     @test PDVKernel.extract_script_doc(doc_path) == "Fit a line to the data."
+    # one-liner ending in a multibyte char: byte-index slicing threw
+    # StringIndexError here (second review)
+    write(doc_path, "\"\"\"Compute Ψ\"\"\"\nfunction run(pdv_tree) end")
+    @test PDVKernel.extract_script_doc(doc_path) == "Compute Ψ"
     write(doc_path, "#=\n  myscript.jl\n  Description: Solve the ODE system.\n=#\nrun() = 1")
     @test PDVKernel.extract_script_doc(doc_path) == "Solve the ODE system."
     write(doc_path, "#=\n  first content line\n=#\nrun() = 1")
@@ -772,6 +800,38 @@ end
     result = dispatch_handler("no handler", "p", t)
     @test result["dispatched"] == false
     clear_handlers!()
+
+    # Abstract and parametric (UnionAll) registrations match subtypes
+    # (second review): the exact-type supertype walk alone never finds them
+    # — `_SpecImpl <: _AbstractSpec` walks concrete supertypes only, and
+    # `_Param{Float64}`'s chain holds `_Param{Float64}`, never the bare
+    # `_Param`. The most-specific registration wins.
+    abstract type _AbstractSpec end
+    struct _SpecImpl <: _AbstractSpec
+        v::Int
+    end
+    struct _Param{T}
+        x::T
+    end
+    abstract_calls = Any[]
+    register_handler((obj, path, tree) -> push!(abstract_calls, path), _AbstractSpec)
+    @test has_handler_for(_SpecImpl(1))
+    result = dispatch_handler(_SpecImpl(1), "spec.node", t)
+    @test result["dispatched"] == true
+    @test abstract_calls == ["spec.node"]
+    # a more specific concrete registration takes over
+    impl_calls = Any[]
+    register_handler((obj, path, tree) -> push!(impl_calls, path), _SpecImpl)
+    dispatch_handler(_SpecImpl(2), "spec.other", t)
+    @test impl_calls == ["spec.other"] && length(abstract_calls) == 1
+
+    param_calls = Any[]
+    register_handler((obj, path, tree) -> push!(param_calls, obj.x), _Param)
+    @test has_handler_for(_Param(1.5))
+    result = dispatch_handler(_Param(1.5), "p.q", t)
+    @test result["dispatched"] == true
+    @test param_calls == [1.5]
+    clear_handlers!()
 end
 
 @testset "default handlers" begin
@@ -795,6 +855,20 @@ end
     @test vec_result["dispatched"] == true
     @test occursin("[PDV] Cannot plot 'data.wave'", notice)
     @test occursin("CairoMakie", notice)
+
+    # 0-D/≥3-D numeric arrays: friendly notice with dispatched:true, matching
+    # Python's "[PDV] Cannot plot N-D ndarray" (second review parity fix).
+    @test has_handler_for(rand(2, 2, 2))
+    local nd_result
+    nd_notice = mktemp() do tmppath, tmpio
+        redirect_stdout(tmpio) do
+            nd_result = dispatch_handler(rand(2, 2, 2), "data.cube", t)
+        end
+        flush(tmpio)
+        read(tmppath, String)
+    end
+    @test nd_result["dispatched"] == true
+    @test occursin("3-D ndarray", nd_notice)
 
     # DataFrames is loaded in the test env → its default registers lazily and
     # dispatch `display`s the value (IJulia forwards displays to the app).
@@ -1119,6 +1193,23 @@ end
         "tree_path" => "mymod", "filename" => "solver.nml",
         "node_type" => "namelist", "uuid" => fuuid))
     @test tree["mymod.solver"] isa PDVNamelist
+
+    # file.register: dotfiles must terminate (second review — the stem
+    # strip loop spun forever on leading-dot names, pegging comm dispatch)
+    # and the surviving dot must not become a tree-path separator.
+    captured = run_handler(tree, "pdv.file.register", Dict{String,Any}(
+        "tree_path" => "", "filename" => ".bashrc",
+        "node_type" => "file", "uuid" => generate_node_uuid()))
+    @test tree["_bashrc"] isa PDVFile
+    captured = run_handler(tree, "pdv.file.register", Dict{String,Any}(
+        "tree_path" => "", "filename" => ".env.local",
+        "node_type" => "file", "uuid" => generate_node_uuid()))
+    @test tree["_env"] isa PDVFile
+    # double extensions still strip to the bare stem
+    captured = run_handler(tree, "pdv.file.register", Dict{String,Any}(
+        "tree_path" => "", "filename" => "layout.gui.json",
+        "node_type" => "file", "uuid" => generate_node_uuid()))
+    @test tree["layout"] isa PDVFile
 end
 
 @testset "handlers: namelist read/write" begin

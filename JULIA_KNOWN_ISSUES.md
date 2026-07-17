@@ -5,7 +5,7 @@ Tracking list for the Julia backend (`pdv-julia` / PDVKernel.jl) shipped on
 against the Python backend, rough edges, and test-coverage gaps. Items should
 graduate to GitHub issues as they're triaged.
 
-Last updated: 2026-07-15.
+Last updated: 2026-07-17.
 
 ---
 
@@ -379,6 +379,14 @@ then turn an edited `0.5` into `0` for a field it now believes is integral.
 Fix belongs in `NamelistEditor.tsx` + both kernels' namelist handlers
 (preserve the parsed field's original type, not the JSON-inferred one) —
 tracked here alongside the M5 null-slot fix until it gets its own pass.
+
+### 23. Dot-path `delete!` through sequence segments diverges from Python (benign)
+Julia's dot-path walk navigates Vector segments, so
+`delete!(pdv_tree, "runs.2.field")` succeeds on a Julia kernel where
+Python's dict-only walk raises KeyError for the same shape. Benign
+direction (Julia is merely more permissive), and index-addressed children
+are read-only from the app UI — documented rather than changed (PR #347
+second review).
 
 ## Test-coverage gaps (code is language-agnostic + kernel handlers unit-tested,
 but not driven end-to-end on a Julia session)

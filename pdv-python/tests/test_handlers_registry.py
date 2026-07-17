@@ -49,7 +49,6 @@ KNOWN_UNTESTED: dict[str, str] = {
     "pdv.tree.resolve_file": "no test for resolve_file handler entry point",
     "pdv.module.register": "no test for module registration message handler",
     "pdv.gui.register": "no test for gui registration message handler",
-    "pdv.file.register": "no test for file registration message handler",
     "pdv.namelist.read": "namelist parsing tested in test_namelist.py — handler entry point untested",
     "pdv.namelist.write": "namelist parsing tested in test_namelist.py — handler entry point untested",
 }

@@ -293,6 +293,43 @@ class TestMove:
         assert "loose" not in tree_with_comm
 
 
+class TestFileRegister:
+    """file.register stem derivation (PR #347 second review)."""
+
+    def test_dotfile_filenames_terminate_and_sanitize(self, tree_with_comm):
+        """The stem-strip loop spun forever on leading-dot names (splitext
+        treats ``.bashrc`` as all-stem), pegging comm dispatch until kernel
+        restart; and a surviving dot must not become a path separator."""
+        from pdv.handlers.namelist import handle_file_register
+        from pdv.tree import PDVFile
+
+        send_message, send_error = _run_handler(
+            handle_file_register,
+            {"tree_path": "", "filename": ".bashrc", "node_type": "file"},
+            tree_with_comm,
+        )
+        send_error.assert_not_called()
+        assert isinstance(tree_with_comm["_bashrc"], PDVFile)
+
+        _run_handler(
+            handle_file_register,
+            {"tree_path": "", "filename": ".env.local", "node_type": "file"},
+            tree_with_comm,
+        )
+        assert isinstance(tree_with_comm["_env"], PDVFile)
+
+    def test_double_extension_strips_to_stem(self, tree_with_comm):
+        from pdv.handlers.namelist import handle_file_register
+        from pdv.tree import PDVFile
+
+        _run_handler(
+            handle_file_register,
+            {"tree_path": "", "filename": "layout.gui.json", "node_type": "file"},
+            tree_with_comm,
+        )
+        assert isinstance(tree_with_comm["layout"], PDVFile)
+
+
 class TestDuplicate:
     """duplicate handler: deep-copy a node, plus the duplicate-path guard."""
 

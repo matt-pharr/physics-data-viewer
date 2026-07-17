@@ -776,6 +776,19 @@ end
 # Deserialization
 # ---------------------------------------------------------------------------
 
+# Materialize a JSON-parsed inline value to the JSON-native fixed point the
+# serializer admits (`Dict{String,Any}` / `Vector{Any}`, see _can_inline_json).
+# JSON.jl 1.x parses objects as `JSON.Object{String,Any}` — an internal
+# ordered type that is NOT a `Dict` — so without this a reloaded inline
+# mapping fails `isa Dict` in user code, and the next save reroutes it to a
+# `.jls` leaf that pins the JSON-internal type into saved data (PR #347
+# second review). Scalars and strings pass through untouched.
+_materialize_inline(value) = value
+_materialize_inline(value::AbstractDict) =
+    Dict{String,Any}(String(k) => _materialize_inline(v) for (k, v) in pairs(value))
+_materialize_inline(value::AbstractVector) =
+    Any[_materialize_inline(v) for v in value]
+
 """
     deserialize_node(storage_ref, save_dir; trusted=false, value_type="") -> Any
 
@@ -789,7 +802,7 @@ function deserialize_node(storage_ref::AbstractDict, save_dir::AbstractString;
     backend = get(storage_ref, "backend", "")
 
     backend == "none" && return Dict{String,Any}()
-    backend == "inline" && return storage_ref["value"]
+    backend == "inline" && return _materialize_inline(storage_ref["value"])
 
     if backend == "local_file"
         fmt = get(storage_ref, "format", "")

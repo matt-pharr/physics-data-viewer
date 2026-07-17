@@ -31,8 +31,10 @@ const _HANDLER_REGISTRY = Dict{Type,HandlerEntry}()
     register_handler(func, T::Type)
 
 Register `func(obj, path, tree)` as the double-click handler for values of
-type `T` (and subtypes, via supertype walk). The explicit-registration analog
-of adding a `pdv_handle` method; registered handlers take precedence.
+type `T` and its subtypes — concrete registrations match via the supertype
+walk, abstract/parametric ones via an `isa` scan (most-specific-wins). The
+explicit-registration analog of adding a `pdv_handle` method; registered
+handlers take precedence.
 """
 function register_handler(func::Function, T::Type)
     type_name = fully_qualified_type_name(T)
@@ -43,15 +45,31 @@ function register_handler(func::Function, T::Type)
     nothing
 end
 
-# Walk the type hierarchy for a registered entry.
+# Walk the type hierarchy for a registered entry. The exact-key supertype
+# walk covers concrete registrations cheaply, but abstract or parametric
+# (UnionAll) registrations — `register_handler(f, AbstractVector)`,
+# `register_handler(f, Spectrum)` where `Spectrum{T}` is parametric — never
+# appear in a concrete type's supertype chain (`Vector{Float64}` walks
+# through `AbstractVector{Float64}`, not `AbstractVector`), so the docstring
+# promise "and subtypes" silently never matched them (second review;
+# pdv-python's `__mro__` walk delivers base-class matches). Those fall back
+# to an `isa` scan, most-specific-wins.
 function _registered_handler_for(obj)
     T = typeof(obj)
     while true
         entry = get(_HANDLER_REGISTRY, T, nothing)
         entry !== nothing && return entry
-        T === Any && return nothing
+        T === Any && break
         T = supertype(T)
     end
+    best = nothing
+    for entry in values(_HANDLER_REGISTRY)
+        obj isa entry.type || continue
+        if best === nothing || entry.type <: best.type
+            best = entry
+        end
+    end
+    return best
 end
 
 """

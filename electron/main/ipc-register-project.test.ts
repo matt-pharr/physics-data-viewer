@@ -159,6 +159,7 @@ function setup(): Harness {
     getActiveKernelId: harness.getActiveKernelId,
     getActiveKernelLanguage: () => "python",
     setActiveProjectDir: harness.setActiveProjectDir,
+    getActiveProjectDir: () => activeProjectDir,
     getPendingModuleImports: harness.getPendingModuleImports,
     setPendingModuleImports: harness.setPendingModuleImports,
     getPendingModuleSettings: harness.getPendingModuleSettings,

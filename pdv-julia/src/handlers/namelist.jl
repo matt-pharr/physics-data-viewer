@@ -93,13 +93,22 @@ function handle_file_register(msg::AbstractDict)
         explicit_name
     else
         # Derive from the filename stem, stripping double extensions.
+        # `splitext` treats a leading-dot name (".bashrc", ".env.local") as
+        # all-stem, so strip only while the stem keeps shrinking — the
+        # unconditional `while occursin(".", stem)` spun forever on
+        # dotfiles, pegging comm dispatch until kernel restart (second
+        # review; same fix in pdv-python).
         stem = first(splitext(filename))
         while occursin(".", stem)
-            stem = first(splitext(stem))
+            shorter = first(splitext(stem))
+            shorter == stem && break
+            stem = shorter
         end
         stem
     end
-    node_name = replace(node_name, "-" => "_", " " => "_")
+    # Dots are tree-path separators, so a dotfile stem (".bashrc") must not
+    # survive into the node name.
+    node_name = replace(node_name, "-" => "_", " " => "_", "." => "_")
 
     full_path = isempty(tree_path) ? node_name : "$tree_path.$node_name"
 

@@ -45,6 +45,14 @@ interface RegisterProjectIpcHandlersOptions {
   getActiveKernelId: () => string | null;
   getActiveKernelLanguage: () => "python" | "julia";
   setActiveProjectDir: (dir: string | null) => void;
+  /**
+   * Save dir of the currently open project (null when none). Consulted by
+   * the save handler's env-mode guard on Save As: a manifest-less target
+   * inherits the OPEN project's recorded mode, so a legacy shared project
+   * Saved-As from a live pkg/uv session stays shared instead of absorbing
+   * the previous project's env files (PR #347 second review).
+   */
+  getActiveProjectDir: () => string | null;
   getPendingModuleImports: () => ProjectModuleImport[];
   setPendingModuleImports: (imports: ProjectModuleImport[]) => void;
   getPendingModuleSettings: () => Record<string, Record<string, unknown>>;
@@ -304,6 +312,7 @@ export function registerProjectIpcHandlers(
     getActiveKernelId,
     getActiveKernelLanguage,
     setActiveProjectDir,
+    getActiveProjectDir,
     getPendingModuleImports,
     setPendingModuleImports,
     getPendingModuleSettings,
@@ -372,6 +381,27 @@ export function registerProjectIpcHandlers(
             priorEnvMode = priorManifest.environment?.mode ?? "shared";
           } catch {
             priorEnvMode = undefined; // unreadable manifest — detect from the working dir
+          }
+        } else {
+          // Save As from an open project (second review): the target has no
+          // manifest yet, but the project being copied does — inherit its
+          // mode so a legacy shared project Saved-As out of a live pkg/uv
+          // session doesn't get stamped with the foreign env. Unsaved
+          // sessions (no open project) keep working-dir detection.
+          const activeDir = getActiveProjectDir();
+          if (activeDir && activeDir !== saveDir) {
+            const activeManifestExists = await fs
+              .access(path.join(activeDir, "project.json"))
+              .then(() => true)
+              .catch(() => false);
+            if (activeManifestExists) {
+              try {
+                const activeManifest = await ProjectManager.readManifest(activeDir);
+                priorEnvMode = activeManifest.environment?.mode ?? "shared";
+              } catch {
+                priorEnvMode = undefined;
+              }
+            }
           }
         }
 

@@ -184,7 +184,10 @@ function extract_script_doc(file_path::AbstractString)::Union{Nothing,String}
     if startswith(first_line, "\"\"\"")
         rest = strip(first_line[4:end])
         if endswith(rest, "\"\"\"")                       # one-line docstring
-            return clip(rest[1:max(0, end - 3)])
+            # chop, not `rest[1:end-3]`: index arithmetic is bytes, and a
+            # docstring ending in a multibyte char ("""Compute Ψ""") would
+            # throw StringIndexError (second review).
+            return clip(chop(rest; tail=3))
         end
         !isempty(rest) && return clip(rest)
         for j in (i + 1):length(lines)                     # opening quotes alone

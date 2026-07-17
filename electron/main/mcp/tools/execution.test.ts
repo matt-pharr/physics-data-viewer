@@ -148,6 +148,33 @@ describe("pdv_run gating", () => {
   });
 });
 
+describe("Julia script_run codegen escaping (second review)", () => {
+  it("builds run_tree_script with $-escaped path and string params", async () => {
+    // The IPC script:run handler was fixed to use juliaStringLiteral in
+    // review M4; this MCP mirror was missed by the first fix pass — a bare
+    // JSON.stringify lets `$` interpolate inside Julia strings.
+    const { server, tools } = captureTools();
+    const executeSpy = vi.fn(async () => ({ stdout: "", duration: 0 }));
+    const ctx = makeCtx({ mutatingEnabled: true });
+    (ctx.kernelManager as { getKernel: unknown }).getKernel = () => ({
+      id: "k1",
+      language: "julia",
+    });
+    (ctx.kernelManager as { execute: unknown }).execute = executeSpy;
+    registerExecutionTools(server, ctx);
+
+    await tools.get("script_run")!(
+      { tree_path: "scripts.fit", params: { label: "$\\alpha$ scan" } },
+      extra,
+    );
+
+    const code = (executeSpy.mock.calls.at(-1)?.[1] as { code: string }).code;
+    expect(code).toContain("PDVKernel.run_tree_script(pdv_tree, \"scripts.fit\";");
+    // `$\alpha$ scan` must arrive with every $ escaped for Julia.
+    expect(code).toContain('label="\\$\\\\alpha\\$ scan"');
+  });
+});
+
 describe("cell_write tab_id contract", () => {
   it("rejects with a clean error when tab_id refers to no existing tab", async () => {
     // The renderer rejects unknown ids with `No cell tab with id N`. The
