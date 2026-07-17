@@ -1233,6 +1233,7 @@ export interface PDVApi {
       dir: string;
       timestamp: string;
       language?: 'python' | 'julia';
+      envMode?: 'uv' | 'pkg';
     }[]>;
     recoverUnsaved(orphanDir: string): Promise<{
       codeCells: unknown;

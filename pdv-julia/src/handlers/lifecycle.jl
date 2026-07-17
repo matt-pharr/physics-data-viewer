@@ -53,7 +53,7 @@ function handle_init(msg::AbstractDict)
         rebuild_query_cache!(tree)
         _install_postexecute_cache_hook()
     end
-    _install_preexecute_thread_heal_hook()
+    _install_posterror_thread_heal_hook()
 
     reset_cwd_to_home()
     send_message("pdv.init.response", Dict{String,Any}(); in_reply_to=msg_id)
@@ -61,46 +61,82 @@ function handle_init(msg::AbstractDict)
 end
 
 """
-    heal_threaded_region_leak!() -> Bool
+    heal_threaded_region_leak!(leaks::Integer=1) -> Bool
 
-Clear Base's global `jl_in_threaded_region` flag when it has leaked.
+Decrement Base's global `jl_in_threaded_region` COUNTER by up to `leaks`,
+never below zero.
 
 Base's `threading_run` has no try/finally around its wait loop, so
 interrupting a running `@threads` loop (PDV's Interrupt button / Ctrl-C)
-leaves the flag set for the rest of the process — after which every
+leaks one increment for the rest of the process — after which every
 `@threads :static` call errors with "cannot be used concurrently or
-nested" even though nothing is running. The kernel serializes cell
-execution, so a set flag at cell start is that leak (the one exception —
-a user-`@spawn`ed background task mid-`@threads` — is unharmed by the
-clear: its `threading_run` re-clears the flag on exit anyway).
+nested" even though nothing is running.
 
-Returns true when a leak was cleared (a warning is logged so the console
-explains what happened).
+The value is a counter, not a flag: a user-`@spawn`ed background task
+mid-`@threads` legitimately holds an increment that its own
+`threading_run` will release on exit. Blindly clearing whenever nonzero
+would therefore underflow the counter once that task finishes and poison
+`@threads :static` PERMANENTLY (PR #347 review M3). Callers must only
+pass `leaks` they can attribute to an actual leak — the posterror hook
+counts interrupted `threading_run` frames; the manual escape hatch
+defaults to one.
+
+Returns true when at least one leaked increment was released (a warning
+is logged so the console explains what happened).
 """
-function heal_threaded_region_leak!()::Bool
-    ccall(:jl_in_threaded_region, Cint, ()) == 0 && return false
-    ccall(:jl_exit_threaded_region, Cvoid, ())
-    @warn "PDV cleared a leaked threaded-region flag (a previous `@threads` " *
-          "loop was likely interrupted mid-run); without this, " *
+function heal_threaded_region_leak!(leaks::Integer=1)::Bool
+    healed = 0
+    while healed < leaks && ccall(:jl_in_threaded_region, Cint, ()) != 0
+        ccall(:jl_exit_threaded_region, Cvoid, ())
+        healed += 1
+    end
+    healed == 0 && return false
+    @warn "PDV released $healed leaked threaded-region increment(s) (a " *
+          "`@threads` loop was interrupted mid-run); without this, " *
           "`@threads :static` would error until the session restarts."
     return true
 end
 
-# Idempotent registration of the IJulia preexecute heal hook: runs
-# heal_threaded_region_leak!() before every cell so an interrupted
-# `@threads` run can't poison later `@threads :static` calls.
-const _preexecute_hook_installed = Ref(false)
-function _install_preexecute_thread_heal_hook()
-    _preexecute_hook_installed[] && return nothing
+"""
+    _posterror_thread_heal()
+
+IJulia posterror hook body: heal the threaded-region counter only when the
+cell's exception stack shows an `InterruptException` that unwound through
+`Base.Threads.threading_run` — each such frame is exactly one leaked
+increment. Posterror hooks run inside IJulia's `catch`, so
+`current_exceptions()` still carries the cell's exception stack.
+
+A plain error, an interrupt outside `@threads`, or a *background* task's
+live `threading_run` (the interrupt unwinds the requests task, not the
+spawned one) all leave the counter alone — the blind per-cell decrement
+this replaces could underflow it (PR #347 review M3).
+"""
+function _posterror_thread_heal()
+    leaked = 0
+    for entry in current_exceptions()
+        entry.exception isa InterruptException || continue
+        leaked += count(frame -> frame.func === :threading_run,
+                        Base.stacktrace(entry.backtrace))
+    end
+    leaked > 0 && heal_threaded_region_leak!(leaked)
+    nothing
+end
+
+# Idempotent registration of the IJulia posterror heal hook: after a cell
+# errors, release exactly the threaded-region increments an interrupted
+# `@threads` run leaked so later `@threads :static` calls keep working.
+const _posterror_hook_installed = Ref(false)
+function _install_posterror_thread_heal_hook()
+    _posterror_hook_installed[] && return nothing
     try
-        IJulia.push_preexecute_hook!(() -> begin
-            heal_threaded_region_leak!()
+        IJulia.push_posterror_hook!(() -> begin
+            _posterror_thread_heal()
             nothing
         end)
-        _preexecute_hook_installed[] = true
+        _posterror_hook_installed[] = true
     catch err
         # Kernel-free sessions (tests) have no IJulia event loop.
-        @debug "preexecute thread-heal hook not installed" exception = err
+        @debug "posterror thread-heal hook not installed" exception = err
     end
     nothing
 end

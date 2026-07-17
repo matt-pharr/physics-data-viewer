@@ -23,6 +23,7 @@ import * as path from "path";
 import * as os from "os";
 import * as fs from "fs";
 import { BrowserWindow } from "electron";
+import { sanitizedJuliaEnv } from "./julia-discovery";
 import { coreVersion, getAppVersion } from "./pdv-protocol";
 import { parseMajorMinor } from "./python-versions";
 
@@ -364,10 +365,13 @@ export class EnvironmentDetector {
       'print(get(TOML.parsefile(proj), "version", ""))',
     ].join("; ");
     try {
+      // sanitizedJuliaEnv: probe the runtime's DEFAULT environment — a
+      // shell-exported JULIA_PROJECT would resolve PDVKernel from the
+      // user's own project instead (review M8).
       const { stdout } = await execFileAsync(
         juliaPath,
         ["--startup-file=no", "-e", probe],
-        { timeout: PROBE_TIMEOUT_MS }
+        { timeout: PROBE_TIMEOUT_MS, env: sanitizedJuliaEnv() }
       );
       const version = stdout.trim();
       // PDVKernel carries the unified PDV version (key design rule 10), so

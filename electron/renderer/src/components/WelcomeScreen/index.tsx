@@ -28,6 +28,10 @@ export interface RecoverableSession {
   /** Kernel language from the autosave's sidecar manifest (absent for
    *  pre-sidecar autosaves; recovery defaults to python). */
   language?: "python" | "julia";
+  /** Per-project environment mode when the orphan holds env files
+   *  (pyproject.toml → "uv", Project.toml → "pkg"); recovery boots the
+   *  kernel with that environment active instead of shared mode. */
+  envMode?: "uv" | "pkg";
 }
 
 interface WelcomeScreenProps {
@@ -42,8 +46,13 @@ interface WelcomeScreenProps {
   /** Called when the user clicks a recent project entry. */
   onOpenRecent: (path: string, language?: "python" | "julia") => void;
   /** Called when the user clicks "Recover" on an orphan autosave. Receives
-   *  the autosave's kernel language so the right kernel boots. */
-  onRecoverSession: (orphanDir: string, language?: "python" | "julia") => void;
+   *  the autosave's kernel language so the right kernel boots, and its env
+   *  mode so a uv/pkg session recovers with its environment active. */
+  onRecoverSession: (
+    orphanDir: string,
+    language?: "python" | "julia",
+    envMode?: "uv" | "pkg",
+  ) => void;
   /** Called when the user clicks "Discard" on an orphan autosave. */
   onDiscardSession: (orphanDir: string) => void;
   /** Called when the user clicks "Clear" beneath the recent-projects list. */
@@ -184,7 +193,7 @@ export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({
                   <div className="welcome-recoverable-actions">
                     <button
                       className="btn btn-primary"
-                      onClick={() => onRecoverSession(entry.dir, entry.language)}
+                      onClick={() => onRecoverSession(entry.dir, entry.language, entry.envMode)}
                     >
                       Recover
                     </button>

@@ -2623,12 +2623,16 @@ export interface PDVApi {
      *
      * @returns List of working dirs containing .autosave/ data, each with the
      *   kernel language from its sidecar manifest so recovery can boot the
-     *   matching kernel (a Python kernel cannot load jls-format nodes).
+     *   matching kernel (a Python kernel cannot load jls-format nodes), and
+     *   the per-project environment mode when the orphan holds env files
+     *   (`pyproject.toml` → `"uv"`, `Project.toml` → `"pkg"`) so recovery
+     *   can boot the kernel with that environment active.
      */
     scanWorkingDirs(): Promise<{
       dir: string;
       timestamp: string;
       language?: "python" | "julia";
+      envMode?: "uv" | "pkg";
     }[]>;
     /**
      * Recover an unsaved session from an orphaned working dir's `.autosave/`.

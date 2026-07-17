@@ -265,6 +265,31 @@ export function discoverDefaultJulia(
 // ---------------------------------------------------------------------------
 
 /**
+ * Build the environment for PDV-managed Julia subprocesses (probes and the
+ * PDVKernel install).
+ *
+ * Strips `JULIA_PROJECT` and `JULIA_LOAD_PATH`: PDV probes and mutates the
+ * runtime's *default* environment (`@v#.#`, §10.6.1), and a shell-exported
+ * project — common for cluster users — would otherwise redirect
+ * `Pkg.develop`/`Pkg.add` into the user's own `Project.toml` (the §10.5.7
+ * forbidden mutation) and skew probe results toward whatever that project
+ * resolves (PR #347 review M8). Kernel spawns are NOT sanitized — an
+ * explicitly exported project is honored for user code, and pkg-mode sets
+ * its own `JULIA_PROJECT`.
+ *
+ * @param extra - Additional variables merged over the sanitized base.
+ * @returns A copy of `process.env` without the Julia env-selection vars.
+ */
+export function sanitizedJuliaEnv(
+  extra: Record<string, string> = {}
+): NodeJS.ProcessEnv {
+  const env: NodeJS.ProcessEnv = { ...process.env, ...extra };
+  delete env.JULIA_PROJECT;
+  delete env.JULIA_LOAD_PATH;
+  return env;
+}
+
+/**
  * The single-spawn probe snippet: prints the Julia version, the PDVKernel
  * version (resolved via `Base.locate_package` + its `Project.toml` — never
  * `using`, which recompiles when caches are stale), and IJulia presence.
@@ -306,7 +331,7 @@ export async function probeJuliaRuntime(
     ({ stdout } = await execFileAsync(
       juliaPath,
       ["--startup-file=no", "-e", PROBE_SNIPPET],
-      { timeout: PROBE_TIMEOUT_MS }
+      { timeout: PROBE_TIMEOUT_MS, env: sanitizedJuliaEnv() }
     ));
   } catch {
     return null;
@@ -602,12 +627,13 @@ export function installPDVKernel(
 
   return new Promise((resolve) => {
     const chunks: string[] = [];
+    // sanitizedJuliaEnv: a shell-exported JULIA_PROJECT would redirect
+    // Pkg.develop/Pkg.add into the user's own project (review M8).
     const proc = spawn(juliaPath, ["--startup-file=no", "-e", code], {
-      env: {
-        ...process.env,
+      env: sanitizedJuliaEnv({
         NO_COLOR: "1",
         JULIA_PKG_PROGRESS_BARS: "0",
-      },
+      }),
       stdio: ["ignore", "pipe", "pipe"],
       timeout: INSTALL_TIMEOUT_MS,
     });

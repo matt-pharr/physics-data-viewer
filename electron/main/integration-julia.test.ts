@@ -169,7 +169,7 @@ describe("@slow Cross-boundary integration (Julia + Electron)", { timeout: 300_0
 
       // Kick off a pure-compute loop with no yield points (~6 s) WITHOUT
       // awaiting it, then query mid-run. The kernel spawns with
-      // --threads=auto,1, so the threaded query server must answer from the
+      // --threads=auto,2, so the threaded query server must answer from the
       // snapshot in milliseconds; before #7 this timed out for the whole run.
       const busyPromise = km.execute(kernelId, {
         code:
@@ -193,6 +193,31 @@ describe("@slow Cross-boundary integration (Julia + Electron)", { timeout: 300_0
       const busyResult = await busyPromise;
       expect(busyResult.error).toBeUndefined();
     });
+
+    it("`@threads :static` completes while the query server is live (review B1)", async () => {
+      // Regression for the PR #347 review blocker: the threaded query loop
+      // used to occupy a default-pool thread without yielding, so `@threads
+      // :static` — which pins one task per default thread and waits for all
+      // of them — deadlocked forever. The loop now lives on the spare
+      // interactive thread; a :static loop over more tasks than default
+      // threads must finish promptly.
+      const staticExec = await km.execute(kernelId, {
+        code:
+          "let n = Threads.Atomic{Int}(0)\n" +
+          "  Threads.@threads :static for i in 1:2*Threads.nthreads(:default)\n" +
+          "    Threads.atomic_add!(n, 1)\n" +
+          "    Libc.systemsleep(0.02)\n" +
+          "  end\n" +
+          "  n[]\n" +
+          "end",
+      });
+      expect(staticExec.error).toBeUndefined();
+
+      // And the query server is genuinely alive afterwards (still threaded,
+      // still answering) — not crashed or degraded by the :static run.
+      const response = await queryRouter.request(PDVMessageType.TREE_LIST, { path: "" });
+      expect(response.status).toBe("ok");
+    }, 30_000);
   });
 
   describe("tree change notifications", () => {

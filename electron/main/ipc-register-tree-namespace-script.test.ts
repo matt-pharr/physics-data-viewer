@@ -299,6 +299,24 @@ describe("script:run", () => {
     expect(result.code).toContain("flag=true");
   });
 
+  it("Julia scripts: escapes `$` in string params and tree paths (review M4)", async () => {
+    const harness = setup();
+    (harness.kernelManager.getKernel as ReturnType<typeof vi.fn>).mockReturnValue(
+      makeKernelInfo({ language: "julia" }),
+    );
+    const result = (await getHandler(IPC.script.run)({}, "k1", {
+      treePath: "scripts.$weird",
+      params: { label: "$\\alpha$ scan" },
+      executionId: "e1",
+      origin: { kind: "tree-script" },
+    })) as { code: string };
+    // Julia interpolates `$` in double-quoted literals; unescaped, a LaTeX
+    // label is a parse error or a silent kernel-variable splice.
+    expect(result.code).toContain('label="\\$\\\\alpha\\$ scan"');
+    expect(result.code).toContain('"scripts.\\$weird"');
+    expect(result.code).not.toMatch(/[^\\]\$\\alpha/);
+  });
+
   it("emits MODULE_RELOAD_LIBS preflight for module-owned scripts (path with a dot)", async () => {
     const harness = setup();
     (harness.kernelManager.getKernel as ReturnType<typeof vi.fn>).mockReturnValue(

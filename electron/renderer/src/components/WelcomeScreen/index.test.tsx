@@ -34,15 +34,20 @@ function renderWelcome(overrides: Partial<Parameters<typeof WelcomeScreen>[0]> =
 }
 
 describe('WelcomeScreen — recoverable-session language', () => {
-  it('passes the autosave language to onRecoverSession and shows the badge', async () => {
+  it('passes the autosave language + env mode to onRecoverSession and shows the badge', async () => {
     const { onRecoverSession } = renderWelcome({
       recoverableSessions: [
-        { dir: '/tmp/work/julia-session', timestamp: new Date().toISOString(), language: 'julia' },
+        {
+          dir: '/tmp/work/julia-session',
+          timestamp: new Date().toISOString(),
+          language: 'julia',
+          envMode: 'pkg',
+        },
       ],
     });
     expect(screen.getByText('[Julia]')).toBeTruthy();
     await userEvent.setup().click(screen.getByRole('button', { name: 'Recover' }));
-    expect(onRecoverSession).toHaveBeenCalledWith('/tmp/work/julia-session', 'julia');
+    expect(onRecoverSession).toHaveBeenCalledWith('/tmp/work/julia-session', 'julia', 'pkg');
   });
 
   it('defaults the badge to Python for pre-sidecar autosaves', () => {

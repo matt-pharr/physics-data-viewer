@@ -21,6 +21,7 @@ import {
   listJuliaupChannels,
   probeJuliaRuntime,
   resolveJuliaShim,
+  sanitizedJuliaEnv,
 } from "./julia-discovery";
 
 let dir: string;
@@ -276,6 +277,46 @@ describe("probeJuliaRuntime()", () => {
       'echo "PDV_JULIA_VERSION=1.11.6"; exit 1'
     );
     expect(await probeJuliaRuntime(broken)).toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// sanitizedJuliaEnv (review M8)
+// ---------------------------------------------------------------------------
+
+describe("sanitizedJuliaEnv()", () => {
+  it("strips JULIA_PROJECT/JULIA_LOAD_PATH and merges extras", () => {
+    process.env.JULIA_PROJECT = "/cluster/user/project";
+    process.env.JULIA_LOAD_PATH = "@:/cluster/user/project";
+    try {
+      const env = sanitizedJuliaEnv({ NO_COLOR: "1" });
+      expect(env.JULIA_PROJECT).toBeUndefined();
+      expect(env.JULIA_LOAD_PATH).toBeUndefined();
+      expect(env.NO_COLOR).toBe("1");
+      expect(env.PATH).toBe(process.env.PATH);
+    } finally {
+      delete process.env.JULIA_PROJECT;
+      delete process.env.JULIA_LOAD_PATH;
+    }
+  });
+
+  it("probes ignore a shell-exported JULIA_PROJECT (review M8)", async () => {
+    // A cluster user's exported project would otherwise redirect the probe
+    // (and Pkg.develop in the installer, which uses the same env) into
+    // their own Project.toml. The stub fails when either var leaks in.
+    process.env.JULIA_PROJECT = "/cluster/user/project";
+    try {
+      const stub = await writeStub(
+        "probe-clean/julia",
+        '[ -z "$JULIA_PROJECT" ] || exit 3\n' +
+          '[ -z "$JULIA_LOAD_PATH" ] || exit 3\n' +
+          'echo "PDV_JULIA_VERSION=1.11.6"'
+      );
+      const probe = await probeJuliaRuntime(stub);
+      expect(probe?.juliaVersion).toBe("1.11.6");
+    } finally {
+      delete process.env.JULIA_PROJECT;
+    }
   });
 });
 

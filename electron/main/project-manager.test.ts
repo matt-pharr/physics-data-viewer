@@ -899,6 +899,34 @@ describe("ProjectManager", () => {
       expect(byDir.get(jl)).toBe("julia");
       expect(byDir.get(py)).toBeUndefined();
     });
+
+    it("reports envMode for orphans holding project-environment files (review M2)", async () => {
+      const mk = async (name: string, language?: string, envFile?: string) => {
+        const dir = path.join(base, name);
+        await fs.mkdir(path.join(dir, ".autosave"), { recursive: true });
+        await fs.writeFile(path.join(dir, ".autosave", "tree-index.json"), "[]", "utf8");
+        if (language) {
+          await fs.writeFile(
+            path.join(dir, ".autosave", "project.json"),
+            JSON.stringify({ language }),
+            "utf8",
+          );
+        }
+        if (envFile) await fs.writeFile(path.join(dir, envFile), "", "utf8");
+        return dir;
+      };
+      const pkgJl = await mk("julia-pkg", "julia", "Project.toml");
+      const sharedJl = await mk("julia-shared", "julia");
+      const uvPy = await mk("python-uv", "python", "pyproject.toml");
+      const sharedPy = await mk("python-shared", "python");
+
+      const results = await ProjectManager.scanForAutosaves(base);
+      const byDir = new Map(results.map((r) => [r.dir, r.envMode]));
+      expect(byDir.get(pkgJl)).toBe("pkg");
+      expect(byDir.get(sharedJl)).toBeUndefined();
+      expect(byDir.get(uvPy)).toBe("uv");
+      expect(byDir.get(sharedPy)).toBeUndefined();
+    });
   });
 
   // -------------------------------------------------------------------------

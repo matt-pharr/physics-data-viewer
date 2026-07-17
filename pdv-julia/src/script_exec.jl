@@ -352,11 +352,22 @@ function script_run(script::PDVScript, tree::Union{Nothing,AbstractPDVTree}=noth
         end
     end
 
+    # Both rescues below keep the backtrace (`sprint(showerror, err, bt)`
+    # points at the failing file:line inside the user's script, like
+    # Python's chained traceback) and rethrow InterruptException — the
+    # user pressing Interrupt during a script run is a cancellation, not a
+    # script error, and swallowing it here would also hide the leak the
+    # posterror thread heal repairs (PR #347 review M7).
     try
         Base.include(mod, file_path)
     catch err
+        # Base.include wraps script errors in LoadError — unwrap so an
+        # include-time interrupt still surfaces as InterruptException.
+        err isa LoadError && err.error isa InterruptException && throw(err.error)
+        err isa InterruptException && rethrow()
+        bt = catch_backtrace()
         throw(PDVScriptError(
-            "Cannot load script '$(script.filename)': $(sprint(showerror, err))"))
+            "Cannot load script '$(script.filename)': $(sprint(showerror, err, bt))"))
     end
 
     isdefined(mod, :run) || throw(PDVScriptError(
@@ -366,8 +377,10 @@ function script_run(script::PDVScript, tree::Union{Nothing,AbstractPDVTree}=noth
         coerced = _coerce_numeric_kwargs(file_path, kwargs)
         return Base.invokelatest(mod.run, tree; coerced...)
     catch err
+        err isa InterruptException && rethrow()
+        bt = catch_backtrace()
         throw(PDVScriptError(
-            "Script '$(script.filename)' raised during run(): $(sprint(showerror, err))"))
+            "Script '$(script.filename)' raised during run(): $(sprint(showerror, err, bt))"))
     end
 end
 

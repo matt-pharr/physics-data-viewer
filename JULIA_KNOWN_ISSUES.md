@@ -133,12 +133,12 @@ PATH shim. Residual: juliaup-driven *installation* of missing Julia versions
 (auto-acquire on `Manifest.toml` version mismatch) — shipped as #19
 (2026-07-15).
 
-### 7. ~~Tree browsing stalls during compute-bound execution~~ — FIXED (2026-07-14)
-The query server now runs on a dedicated default-pool OS thread when the
-kernel has an interactive threadpool (the app spawns Julia with
-`--threads=auto,1`; a user-set `JULIA_NUM_THREADS` is respected and falls
-back to the old cooperative behavior). Two non-obvious constraints shaped
-the design, both verified empirically:
+### 7. ~~Tree browsing stalls during compute-bound execution~~ — FIXED (2026-07-14, revised 2026-07-17)
+The query server now runs on a dedicated **spare interactive-pool** OS
+thread when one exists (the app spawns Julia with `--threads=auto,2`; a
+user-set `JULIA_NUM_THREADS` is respected and falls back to the old
+cooperative behavior). Three non-obvious constraints shaped the design, all
+verified empirically:
 - a thread blocked in `ZMQ.recv` still starves during compute (libuv
   event-loop starvation) — the loop instead polls `sock.events` (a plain
   getsockopt ccall) with `Libc.systemsleep`, measured at 2–7 ms replies
@@ -146,11 +146,17 @@ the design, both verified empirically:
 - without a GIL the thread must never read live tree values — `tree.list`
   is served from a lock-guarded listings snapshot rebuilt on the main
   thread (tree-changed debounce flush, IJulia postexecute hook, project
-  load). Mid-run mutations appear at the next yield (issue 8's contract).
+  load). Mid-run mutations appear at the next yield (issue 8's contract);
+- the loop must NOT live on a default-pool thread (the original 2026-07-14
+  design, PR #347 review blocker B1): `@threads :static` pins one task per
+  default thread and waits for all of them, so a resident poll loop there
+  deadlocked every `:static` loop in the session. It now runs
+  `@spawn :interactive` with a `yield()` per tick (the yield keeps it from
+  ever starving the sticky root task if scheduled onto tid 1).
 `tree.get` / namespace queries reply `query.kernel_busy` and the app falls
 back to the comm channel (fast failure instead of a 5 s timeout hang).
-Covered by an integration test that queries mid-compute and asserts a
-sub-2 s listing.
+Covered by integration tests that query mid-compute (sub-2 s listing) and
+run a `@threads :static` loop to completion against the live query server.
 
 ### 8. Tree-changed pushes flush at yield points
 Same cooperative-scheduling root cause as #7: the 100 ms debounce timer can't
@@ -333,12 +339,19 @@ Interrupt button → SIGINT → InterruptException unwinds the waiting task)
 leaks the global `jl_in_threaded_region` flag for the rest of the process.
 Every later `@threads :static` then errors (its only guard is that flag)
 while `:dynamic` keeps working — classic "worked until I interrupted once".
-Fix: PDVKernel installs an IJulia **preexecute hook**
-(`heal_threaded_region_leak!`) that clears a set flag before each cell —
-cells are serialized, so a set flag at cell start is always the leak — and
-logs a warning explaining what happened. Manual escape hatch in any Julia:
-`ccall(:jl_exit_threaded_region, Cvoid, ())`. Note PDV's `--threads=auto,1`
+Fix (revised 2026-07-17, PR #347 review M3): PDVKernel installs an IJulia
+**posterror hook** (`_posterror_thread_heal`) that inspects the errored
+cell's exception stack and releases exactly one leaked increment per
+`threading_run` frame found in an `InterruptException` backtrace, with a
+warning explaining what happened. The value is a COUNTER, not a flag — the
+original per-cell "clear when nonzero" preexecute heal would underflow it
+whenever a background `Threads.@spawn` task was legitimately inside
+`@threads` during another cell, permanently re-poisoning `:static`. Manual
+escape hatch in any Julia: `PDVKernel.heal_threaded_region_leak!()` (or
+`ccall(:jl_exit_threaded_region, Cvoid, ())`). Note PDV's `--threads=auto,2`
 spawn gives `@threads` the full default-thread pool; it is not the cause.
+Limitation: user code that *catches* the InterruptException itself never
+errors the cell, so the hook doesn't see it — use the escape hatch.
 
 ## Test-coverage gaps (code is language-agnostic + kernel handlers unit-tested,
 but not driven end-to-end on a Julia session)

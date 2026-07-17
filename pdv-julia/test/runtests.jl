@@ -581,6 +581,27 @@ end
     write(path, "function run(pdv_tree; kwargs...); error(\"boom\"); end")
     @test_throws PDVScriptError run_script(tree, "scripts.compute")
 
+    # ...and carry the backtrace: the message must point at the failing
+    # line in the user's script file, like Python's chained traceback
+    # (review M7 — sprint(showerror, err) alone lost every frame).
+    err = try
+        run_script(tree, "scripts.compute")
+        nothing
+    catch e
+        e
+    end
+    @test err isa PDVScriptError
+    @test occursin("boom", PDVKernel.error_message(err))
+    @test occursin("compute.jl", PDVKernel.error_message(err))
+
+    # An interrupt mid-script is a cancellation, not a script error: it
+    # must rethrow unchanged so IJulia reports it (and the posterror
+    # thread heal sees it), not get relabeled PDVScriptError (review M7).
+    write(path, "function run(pdv_tree; kwargs...); throw(InterruptException()); end")
+    @test_throws InterruptException run_script(tree, "scripts.compute")
+    write(path, "throw(InterruptException())")   # interrupt during include
+    @test_throws InterruptException run_script(tree, "scripts.compute")
+
     # non-script node
     tree["notascript"] = 42
     @test_throws ArgumentError run_script(tree, "notascript")
@@ -793,6 +814,33 @@ end
     @test groups2["solver"]["n_steps"] == 100
     @test groups2["solver"]["coefs"] == [1.0, 2.0, 3.0]
     @test groups2["solver"]["damping"] === true
+
+    # Fortran NULL slots keep their positions (review M5): `1.0, , 3.0`
+    # leaves slot 2 untouched — dropping it shifted 3.0 into slot 2, silent
+    # physics-input corruption on an open-and-save.
+    gpath = joinpath(dir, "gaps.nml")
+    write(gpath, """
+        &arrays
+            x = 1.0, , 3.0
+            y(3) = 5.0
+            z = 1, 2,
+        /
+        """)
+    gaps = read_namelist(gpath)
+    @test gaps["arrays"]["x"] == [1.0, nothing, 3.0]
+    @test gaps["arrays"]["y"] == [nothing, nothing, 5.0]   # indexed write pads
+    @test gaps["arrays"]["z"] == [1, 2]                    # trailing comma ≠ null slot
+
+    # read↔write is a fixed point: null slots survive any number of
+    # open-and-save cycles (the second save used to corrupt `y`).
+    gout = joinpath(dir, "gaps-out.nml")
+    write_namelist(gout, gaps)
+    gaps2 = read_namelist(gout)
+    @test gaps2["arrays"]["x"] == [1.0, nothing, 3.0]
+    @test gaps2["arrays"]["y"] == [nothing, nothing, 5.0]
+    gout2 = joinpath(dir, "gaps-out2.nml")
+    write_namelist(gout2, gaps2)
+    @test read_namelist(gout2)["arrays"] == gaps["arrays"]
 
     # toml
     tpath = joinpath(dir, "config.toml")
@@ -1122,11 +1170,83 @@ end
     @test payload["aborted"] == false
     @test length(payload["failed_nodes"]) == 1
     @test payload["failed_nodes"][1]["path"] == "poison"
+    @test payload["failed_nodes"][1]["preserved"] == false  # no prior save to keep
     @test isfile(joinpath(save_dir2, "tree-index.json"))
     index = JSON.parsefile(joinpath(save_dir2, "tree-index.json"))
     @test !any(n -> n["path"] == "poison", index)          # skipped, not written
     @test any(n -> n["path"] == "notes_text", index)       # the rest saved fine
     delete!(tree, "poison")
+    clear_autosave_cache!()
+end
+
+@testset "non-String-keyed Dicts persist whole as .jls (review B2+M6)" begin
+    clear_autosave_cache!()
+    wd = mktempdir()
+    save_dir = mktempdir()
+    tree = PDVTree()
+    tree.working_dir = wd
+    tree["shots"] = Dict(1 => [1.0, 2.0, 3.0], 2 => [4.0, 5.0])  # Int keys + array leaves
+    tree["params"] = Dict(:alpha => [0.1, 0.2], :beta => 3)      # Symbol keys + array leaf
+
+    captured = run_handler(tree, "pdv.project.save",
+                           Dict{String,Any}("save_dir" => save_dir))
+    payload = response_of(captured, "pdv.project.save")["payload"]
+    @test payload["aborted"] == false     # B2: Int keys used to abort every save
+    @test isempty(payload["failed_nodes"])
+
+    # no composite split — one whole-jls leaf, no stringified child paths
+    index = JSON.parsefile(joinpath(save_dir, "tree-index.json"))
+    shots_node = only(filter(n -> n["path"] == "shots", index))
+    @test get(get(shots_node, "metadata", Dict{String,Any}()), "composite", false) == false
+    @test shots_node["storage"]["format"] == "jls"
+    @test !any(n -> startswith(n["path"], "shots."), index)
+
+    # M6: keys survive the round trip with their original types
+    tree2 = PDVTree()
+    tree2.working_dir = save_dir
+    run_handler(tree2, "pdv.project.load", Dict{String,Any}("save_dir" => save_dir))
+    @test haskey(tree2["shots"], 1) && tree2["shots"][1] == [1.0, 2.0, 3.0]
+    @test haskey(tree2["params"], :alpha) && tree2["params"][:alpha] == [0.1, 0.2]
+    clear_autosave_cache!()
+end
+
+@testset "failed node keeps its last good snapshot (review M1)" begin
+    clear_autosave_cache!()
+    wd = mktempdir()
+    save_dir = mktempdir()
+    tree = PDVTree()
+    tree.working_dir = wd
+    tree["vol"] = rand(64)   # file-backed (.npy) on the first save
+    tree["ok"] = 1
+
+    captured = run_handler(tree, "pdv.project.save",
+                           Dict{String,Any}("save_dir" => save_dir))
+    payload = response_of(captured, "pdv.project.save")["payload"]
+    @test payload["aborted"] == false && isempty(payload["failed_nodes"])
+    index1 = JSON.parsefile(joinpath(save_dir, "tree-index.json"))
+    vol_uuid = only(filter(n -> n["path"] == "vol", index1))["uuid"]
+    @test isdir(joinpath(save_dir, "tree", vol_uuid))
+    saved_vol = copy(tree["vol"])
+
+    # value becomes unserializable; the save must keep the previous snapshot
+    # instead of dropping the node from the index (which let the orphan
+    # purge destroy the last good copy)
+    tree["vol"] = _Unserializable()
+    captured = run_handler(tree, "pdv.project.save",
+                           Dict{String,Any}("save_dir" => save_dir))
+    payload = response_of(captured, "pdv.project.save")["payload"]
+    @test payload["aborted"] == false
+    @test length(payload["failed_nodes"]) == 1
+    @test payload["failed_nodes"][1]["path"] == "vol"
+    @test payload["failed_nodes"][1]["preserved"] == true
+    index2 = JSON.parsefile(joinpath(save_dir, "tree-index.json"))
+    @test only(filter(n -> n["path"] == "vol", index2))["uuid"] == vol_uuid
+    @test isdir(joinpath(save_dir, "tree", vol_uuid))   # purge kept the snapshot
+
+    tree2 = PDVTree()
+    tree2.working_dir = save_dir
+    run_handler(tree2, "pdv.project.load", Dict{String,Any}("save_dir" => save_dir))
+    @test tree2["vol"] == saved_vol                      # last good copy restored
     clear_autosave_cache!()
 end
 
@@ -1336,6 +1456,27 @@ end
                 Dict("content" => Dict("data" => bad)))
         end
         @test isempty(captured)
+    end
+end
+
+@testset "query server threaded-mode gate" begin
+    # Threaded mode needs a SPARE interactive thread: the poll loop must
+    # never take a default-pool thread (`@threads :static` pins one task per
+    # default thread — a resident loop there deadlocks every :static loop;
+    # PR #347 review B1) and must not share the main task's only interactive
+    # thread. Under Pkg.test (single-threaded) the gate must say no.
+    if Threads.nthreads(:interactive) == 0
+        # Pkg.test default: no interactive pool at all → cooperative only.
+        @test !PDVKernel._can_run_threaded()
+    elseif Threads.threadpool() === :interactive
+        # App-style config (main task interactive): a spare thread beyond
+        # the main task's is required — `--threads=auto,1` no longer
+        # qualifies, `--threads=auto,2` does.
+        @test PDVKernel._can_run_threaded() ==
+              (Threads.nthreads(:interactive) >= 2)
+    else
+        # Main task on the default pool: any interactive thread is spare.
+        @test PDVKernel._can_run_threaded()
     end
 end
 
@@ -1551,18 +1692,45 @@ end
     @test pre.version == "0.5.5-rc1"
 end
 
-@testset "threaded-region leak heal (preexecute hook)" begin
+@testset "threaded-region leak heal (posterror hook)" begin
+    region_count() = ccall(:jl_in_threaded_region, Cint, ())
+
     # Nothing leaked → no-op.
-    @test ccall(:jl_in_threaded_region, Cint, ()) == 0
+    @test region_count() == 0
     @test PDVKernel.heal_threaded_region_leak!() == false
 
-    # Simulate the leak an interrupted `@threads` loop leaves behind
-    # (threading_run enters the region but its exit is skipped when the
-    # waiting task unwinds): the heal clears it and reports doing so.
+    # Manual escape hatch: releases one leaked increment, never underflows.
     ccall(:jl_enter_threaded_region, Cvoid, ())
-    @test ccall(:jl_in_threaded_region, Cint, ()) != 0
+    @test region_count() != 0
     @test (@test_logs (:warn, r"leaked threaded-region") PDVKernel.heal_threaded_region_leak!()) == true
-    @test ccall(:jl_in_threaded_region, Cint, ()) == 0
+    @test region_count() == 0
+    # Asking for more than is leaked stops at zero (no underflow).
+    ccall(:jl_enter_threaded_region, Cvoid, ())
+    PDVKernel.heal_threaded_region_leak!(5)
+    @test region_count() == 0
+
+    # End-to-end: interrupt a real `@threads` loop mid-run. threading_run
+    # has no try/finally, so the unwind leaks one increment; the posterror
+    # heal (running inside the catch, like IJulia's posterror hooks) must
+    # release exactly it.
+    t = @task begin
+        try
+            Threads.@threads :static for i in 1:1
+                sleep(3)
+            end
+        catch
+            # Inside the catch, current_exceptions() carries the
+            # InterruptException with threading_run in its backtrace —
+            # exactly what the IJulia posterror hook sees.
+            PDVKernel._posterror_thread_heal()
+        end
+    end
+    schedule(t)
+    sleep(0.3)                       # let it block inside threading_run's wait
+    @test region_count() != 0        # loop is running: increment legitimately held
+    schedule(t, InterruptException(); error=true)
+    wait(t)
+    @test region_count() == 0        # leak healed by the posterror path
 
     # `@threads :static` works again after the heal (this is the exact call
     # that errors with "cannot be used concurrently or nested" pre-heal).
@@ -1571,6 +1739,26 @@ end
         acc[i] = i
     end
     @test acc == [1, 2, 3, 4]
+
+    # M3 regression: a nonzero counter held by someone else's LIVE
+    # threading_run must NOT be touched by an unrelated cell error — the
+    # old blind per-cell decrement underflowed it on background-task exit.
+    ccall(:jl_enter_threaded_region, Cvoid, ())   # simulate live background @threads
+    try
+        error("ordinary cell error")
+    catch
+        PDVKernel._posterror_thread_heal()        # posterror on a non-interrupt error
+    end
+    @test region_count() != 0        # untouched: nothing attributable leaked
+    # An interrupt with no threading_run frame is also not a leak.
+    try
+        throw(InterruptException())
+    catch
+        PDVKernel._posterror_thread_heal()
+    end
+    @test region_count() != 0
+    ccall(:jl_exit_threaded_region, Cvoid, ())    # background task exits cleanly
+    @test region_count() == 0
 end
 
 end # top-level testset

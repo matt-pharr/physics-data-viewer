@@ -887,12 +887,18 @@ def _serialize_mapping(value: Any, descriptor: dict, ctx: _SerializeContext) -> 
       descriptor; the save walker (``_collect_nodes``) recurses and emits
       per-leaf descriptors so each array reaches its own fast path
       (.npy, .pickle, etc). Reconstructed on load as a plain dict.
+    - Only all-``str``-keyed dicts may split composite (or inline): both
+      round-trip keys through string dot-path segments. Int/tuple/other
+      keys (shot-number dicts) must survive save/load unchanged, so those
+      dicts pickle whole even with array leaves (PR #347 review M6 parity).
     """
     if _can_inline_json(value):
         descriptor["storage"] = _inline_storage(value)
         descriptor["metadata"] = {"preview": ctx.preview}
         return descriptor
-    if not _has_array_leaf(value):
+    if not _has_array_leaf(value) or not all(
+        isinstance(k, str) for k in value.keys()
+    ):
         return _pickle_node(value, descriptor, ctx)
     descriptor["has_children"] = True
     descriptor["storage"] = {"backend": "none", "format": "none"}

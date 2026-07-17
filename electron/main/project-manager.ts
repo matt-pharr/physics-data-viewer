@@ -954,13 +954,27 @@ export class ProjectManager {
    * Scan a base directory for subdirectories containing .autosave/ data.
    * Used to find orphaned autosave data from unsaved projects.
    *
+   * Each entry also reports `envMode` when the orphan's working dir holds
+   * project-environment files (`pyproject.toml` → `"uv"`, `Project.toml` →
+   * `"pkg"`): the unsaved session ran in a per-project environment, so
+   * recovery must boot a matching kernel and preserve those files
+   * (PR #347 review M2).
+   *
    * @param workingDirBase - Base directory to scan (e.g. ~/.PDV/working/).
-   * @returns List of directories with autosave data and their timestamps.
+   * @returns List of directories with autosave data, their timestamps,
+   *   kernel language, and per-project environment mode (if any).
    */
   static async scanForAutosaves(
     workingDirBase: string
-  ): Promise<{ dir: string; timestamp: string; language?: "python" | "julia" }[]> {
-    const results: { dir: string; timestamp: string; language?: "python" | "julia" }[] = [];
+  ): Promise<
+    { dir: string; timestamp: string; language?: "python" | "julia"; envMode?: "uv" | "pkg" }[]
+  > {
+    const results: {
+      dir: string;
+      timestamp: string;
+      language?: "python" | "julia";
+      envMode?: "uv" | "pkg";
+    }[] = [];
     try {
       const entries = await fs.readdir(workingDirBase, { withFileTypes: true });
       for (const entry of entries) {
@@ -968,7 +982,17 @@ export class ProjectManager {
         const dirPath = path.join(workingDirBase, entry.name);
         const check = await ProjectManager.checkForAutosave(dirPath);
         if (check.exists && check.timestamp) {
-          results.push({ dir: dirPath, timestamp: check.timestamp, language: check.language });
+          const envMarker = check.language === "julia" ? "Project.toml" : "pyproject.toml";
+          const hasEnv = await fs
+            .access(path.join(dirPath, envMarker))
+            .then(() => true)
+            .catch(() => false);
+          results.push({
+            dir: dirPath,
+            timestamp: check.timestamp,
+            language: check.language,
+            envMode: hasEnv ? (check.language === "julia" ? "pkg" : "uv") : undefined,
+          });
         }
       }
     } catch (err) {

@@ -22,11 +22,14 @@ function _count_nodes(tree)::Int
 end
 
 # Uniform raw-key iteration across AbstractPDVTree and plain Dicts (composite
-# containers reached during recursion).
+# containers reached during recursion). The walker only recurses into Dicts
+# the serializer classified composite, and composite now implies all-String
+# keys (serialization.jl `_serialize_mapping!`; non-String-keyed Dicts
+# persist whole as .jls leaves) — so plain indexing cannot KeyError here.
 _container_keys(c::AbstractPDVTree) = collect(keys(c.data))
 _container_keys(c::AbstractDict) = collect(string(k) for k in keys(c))
 _container_value(c::AbstractPDVTree, k::String) = c.data[k]
-_container_value(c::AbstractDict, k::String) = haskey(c, k) ? c[k] : c[Symbol(k)]
+_container_value(c::AbstractDict, k::String) = c[k]
 
 """
     _collect_nodes(tree, save_dir; ...) -> Vector{Dict}
@@ -41,7 +44,10 @@ Unlike the Python walker, the rescue is not limited to
 pickle does (running `Task`s, open `Channel`s, ...), so any error escaping
 `serialize_node` triggers the jls fallback, and a value that even the
 fallback cannot write is skipped and recorded in `failed_nodes` — one
-unserializable leaf must never abort the whole save.
+unserializable leaf must never abort the whole save. When `prior_index`
+holds the node's descriptor from the previous save, the descriptor (and its
+children's) is re-used instead, so the last good on-disk snapshot survives
+both the new tree-index.json and the orphan purge (PR #347 review M1).
 """
 function _collect_nodes(tree, save_dir::String; prefix::String="",
                         working_dir::String="",
@@ -50,7 +56,8 @@ function _collect_nodes(tree, save_dir::String; prefix::String="",
                         missing_files::Union{Nothing,Vector{String}}=nothing,
                         failed_nodes::Union{Nothing,Vector{Dict{String,Any}}}=nothing,
                         autosave_cache::Union{Nothing,AutosaveCache}=nothing,
-                        autosave_hits::Union{Nothing,Ref{Int}}=nothing)
+                        autosave_hits::Union{Nothing,Ref{Int}}=nothing,
+                        prior_index::Union{Nothing,Vector{Any}}=nothing)
     nodes = Dict{String,Any}[]
     for key in _container_keys(tree)
         path = isempty(prefix) ? key : "$prefix.$key"
@@ -77,9 +84,15 @@ function _collect_nodes(tree, save_dir::String; prefix::String="",
             catch fallback_err
                 fallback_err isa InterruptException && rethrow()
                 fb_reason = sprint(showerror, fallback_err)
-                @warn "project.save: node '$path' ($(typeof(value))) could not be serialized at all — skipping: $fb_reason"
+                preserved = _preserve_prior_descriptors!(nodes, prior_index, path)
+                if preserved
+                    @warn "project.save: node '$path' ($(typeof(value))) could not be serialized — keeping its previously saved snapshot: $fb_reason"
+                else
+                    @warn "project.save: node '$path' ($(typeof(value))) could not be serialized at all — skipping: $fb_reason"
+                end
                 failed_nodes !== nothing && push!(failed_nodes, Dict{String,Any}(
-                    "path" => path, "type" => string(typeof(value)), "error" => fb_reason))
+                    "path" => path, "type" => string(typeof(value)),
+                    "error" => fb_reason, "preserved" => preserved))
                 counter[] += 1
                 on_progress !== nothing && on_progress(counter[])
                 continue
@@ -97,10 +110,38 @@ function _collect_nodes(tree, save_dir::String; prefix::String="",
                                           missing_files=missing_files,
                                           failed_nodes=failed_nodes,
                                           autosave_cache=autosave_cache,
-                                          autosave_hits=autosave_hits))
+                                          autosave_hits=autosave_hits,
+                                          prior_index=prior_index))
         end
     end
     return nodes
+end
+
+"""
+    _preserve_prior_descriptors!(nodes, prior_index, path) -> Bool
+
+When a node cannot be serialized at all, re-append its descriptor (and its
+children's, for prior composites/subtrees) from the previous save's
+tree-index.json. The node then stays in the new index and its `tree/<uuid>/`
+snapshot survives `_purge_orphaned_tree_files` — the alternative silently
+destroys the last good copy of the data (PR #347 review M1). Returns whether
+anything was preserved.
+"""
+function _preserve_prior_descriptors!(nodes::Vector{Dict{String,Any}},
+                                      prior_index::Union{Nothing,Vector{Any}},
+                                      path::String)::Bool
+    prior_index === nothing && return false
+    preserved = false
+    child_prefix = path * "."
+    for entry in prior_index
+        entry isa AbstractDict || continue
+        entry_path = string(get(entry, "path", ""))
+        if entry_path == path || startswith(entry_path, child_prefix)
+            push!(nodes, Dict{String,Any}(entry))
+            preserved = true
+        end
+    end
+    return preserved
 end
 
 """
@@ -384,13 +425,28 @@ function serialize_tree_to_dir(tree, save_dir::AbstractString;
         end
     end
 
+    # Previous save's index, consulted only to preserve the last good
+    # snapshot of nodes that fail to serialize (see
+    # `_preserve_prior_descriptors!`). Never used for current values.
+    prior_index = nothing
+    prior_index_path = joinpath(save_dir, "tree-index.json")
+    if isfile(prior_index_path)
+        prior_index = try
+            parsed = JSON.parsefile(prior_index_path)
+            parsed isa AbstractVector ? convert(Vector{Any}, parsed) : nothing
+        catch
+            nothing
+        end
+    end
+
     missing_files = String[]
     failed_nodes = Dict{String,Any}[]
     autosave_hits = Ref(0)
     nodes = _collect_nodes(tree, save_dir; working_dir=working_dir,
                            on_progress=emit_progress, missing_files=missing_files,
                            failed_nodes=failed_nodes,
-                           autosave_cache=autosave_cache, autosave_hits=autosave_hits)
+                           autosave_cache=autosave_cache, autosave_hits=autosave_hits,
+                           prior_index=prior_index)
     if !isempty(missing_files)
         return Dict{String,Any}(
             "node_count" => length(nodes), "checksum" => "", "aborted" => true,

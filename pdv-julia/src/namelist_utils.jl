@@ -225,12 +225,25 @@ function _split_fortran_values(payload::AbstractString)::Vector{String}
     return parts
 end
 
-# Expand `n*value` repeat syntax and parse each token.
+# Expand `n*value` repeat syntax and parse each token. Empty tokens are
+# Fortran NULL slots — `x = 1.0, , 3.0` leaves slot 2 untouched — and must
+# parse as `nothing` so positions survive an open-and-save round trip
+# (`_format_fortran_value` writes `nothing` back as an empty slot, making
+# read↔write a fixed point). Dropping them shifted every later slot left:
+# silent physics-input corruption (PR #347 review M5). A single trailing
+# empty token is the idiomatic trailing comma, not a null slot.
 function _parse_fortran_payload(payload::AbstractString)
+    parts = _split_fortran_values(payload)
+    if length(parts) > 1 && isempty(strip(parts[end]))
+        parts = parts[1:end-1]
+    end
     values = Any[]
-    for raw in _split_fortran_values(payload)
+    for raw in parts
         t = strip(raw)
-        isempty(t) && continue
+        if isempty(t)
+            push!(values, nothing)
+            continue
+        end
         m = match(r"^(\d+)\s*\*\s*(.+)$", t)
         if m !== nothing
             count = parse(Int, m.captures[1])

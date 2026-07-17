@@ -6,7 +6,13 @@ import { describe, expect, it, vi } from "vitest";
 
 import type { ModuleManager } from "./module-manager";
 import type { ProjectModuleImport } from "./project-manager";
-import { buildModulesSetupPayload, toPythonArgumentValue } from "./module-runtime";
+import {
+  buildModuleActionCode,
+  buildModulesSetupPayload,
+  juliaStringLiteral,
+  toJuliaArgumentValue,
+  toPythonArgumentValue,
+} from "./module-runtime";
 
 describe("toPythonArgumentValue", () => {
   it("preserves numeric literals for numeric text inputs", () => {
@@ -43,6 +49,31 @@ describe("toPythonArgumentValue", () => {
 
   it("returns null for empty string input", () => {
     expect(toPythonArgumentValue("   ")).toBeNull();
+  });
+});
+
+describe("juliaStringLiteral / toJuliaArgumentValue (review M4)", () => {
+  it("escapes `$` so Julia cannot interpolate kernel variables", () => {
+    // Unescaped, `"$\\alpha$ scan"` is a Julia parse error — or worse, a
+    // silent splice of a kernel variable into the string.
+    expect(juliaStringLiteral("$\\alpha$ scan")).toBe('"\\$\\\\alpha\\$ scan"');
+    expect(juliaStringLiteral("cost is $5")).toBe('"cost is \\$5"');
+    expect(juliaStringLiteral("plain")).toBe('"plain"');
+  });
+
+  it("still escapes quotes, backslashes, and control characters", () => {
+    expect(juliaStringLiteral('say "hi"\n')).toBe('"say \\"hi\\"\\n"');
+  });
+
+  it("toJuliaArgumentValue routes strings through the escaper", () => {
+    expect(toJuliaArgumentValue("$\\alpha$ scan")).toBe('"\\$\\\\alpha\\$ scan"');
+    expect(toJuliaArgumentValue(true)).toBe("true");
+    expect(toJuliaArgumentValue("2.5e-3")).toBe("2.5e-3");
+  });
+
+  it("buildModuleActionCode escapes `$` in the Julia tree path", () => {
+    const code = buildModuleActionCode("mod$ule", "run", [], "julia");
+    expect(code).toBe('PDVKernel.run_tree_script(pdv_tree, "mod\\$ule.scripts.run")');
   });
 });
 

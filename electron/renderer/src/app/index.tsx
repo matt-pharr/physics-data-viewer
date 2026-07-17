@@ -159,10 +159,17 @@ const App: React.FC = () => {
   const [currentProjectDir, setCurrentProjectDir] = useState<string | null>(null);
   const initRef = useRef(false);
   const loadedProjectTabsRef = useRef<{ tabs: CellTab[]; activeTabId: number } | null>(null);
-  /** Deferred project action to execute once the kernel becomes ready. */
+  /**
+   * Deferred project action to execute once the kernel becomes ready.
+   * Carries the language the action was queued for: the consume effect
+   * drops stale entries whose language doesn't match the kernel that
+   * actually came up — without this, a failed Julia recovery followed by a
+   * New Python Project fired the recovery into the Python kernel (PR #347
+   * review M9). Also cleared on launch failure/cancel.
+   */
   const pendingProjectRef = useRef<
     | { type: 'open'; path?: string; language?: 'python' | 'julia' }
-    | { type: 'recover'; orphanDir: string }
+    | { type: 'recover'; orphanDir: string; language: 'python' | 'julia' }
     | null
   >(null);
 
@@ -1395,15 +1402,28 @@ const App: React.FC = () => {
     refreshRecoverableSessions,
   ]);
 
-  const handleRecoverSession = useCallback((orphanDir: string, language: 'python' | 'julia' = 'python') => {
+  const handleRecoverSession = useCallback((
+    orphanDir: string,
+    language: 'python' | 'julia' = 'python',
+    envMode?: 'uv' | 'pkg',
+  ) => {
     // Boot (or reboot) a kernel of the autosave's language, then recover once
     // it's ready. A mismatched live kernel cannot be reused: the Python
-    // loader rejects jls-format nodes and vice-versa.
+    // loader rejects jls-format nodes and vice-versa. Orphans that ran in a
+    // per-project environment boot with it active (the orphan dir doubles as
+    // the env-file source, exactly like opening a uv/pkg project) so the
+    // recovered session isn't silently demoted to shared mode (review M2).
     const startAndRecover = () => {
       dismissWelcome();
       setInterpreterWarning(null);
-      pendingProjectRef.current = { type: 'recover', orphanDir };
-      void ensureKernel(language);
+      pendingProjectRef.current = { type: 'recover', orphanDir, language };
+      if (envMode === 'pkg') {
+        void launchPkgKernel({ saveDir: orphanDir });
+      } else if (envMode === 'uv') {
+        void launchUvKernel({ saveDir: orphanDir });
+      } else {
+        void ensureKernel(language);
+      }
     };
     if (kernelStatus === 'ready') {
       if (activeLanguage === language) {
@@ -1414,24 +1434,42 @@ const App: React.FC = () => {
       return;
     }
     startAndRecover();
-  }, [kernelStatus, activeLanguage, guardDirty, executeRecoverUnsaved, dismissWelcome, ensureKernel]);
+  }, [kernelStatus, activeLanguage, guardDirty, executeRecoverUnsaved, dismissWelcome, ensureKernel, launchPkgKernel, launchUvKernel]);
 
   // Keep refs in sync so the menu-action effect (subscribed once) calls the latest handlers.
   handleOpenWithPickerRef.current = handleOpenWithPicker;
   handleOpenRecentRef.current = handleOpenRecent;
   handleClearRecentsRef.current = handleClearRecents;
 
+  // A failed or cancelled launch abandons any deferred project action —
+  // otherwise it would fire into the NEXT kernel the user starts, which may
+  // be a different language entirely (review M9).
+  useEffect(() => {
+    if (kernelStatus === 'error') pendingProjectRef.current = null;
+  }, [kernelStatus]);
+
   // Execute deferred project action once the kernel becomes ready.
   useEffect(() => {
     if (kernelStatus !== 'ready' || !pendingProjectRef.current) return;
     const pending = pendingProjectRef.current;
     pendingProjectRef.current = null;
+    const wantedLanguage = pending.language;
+    if (wantedLanguage && activeLanguage && wantedLanguage !== activeLanguage) {
+      // Stale entry from an abandoned launch: the kernel that came up is
+      // not the one this action was queued for (review M9). Dropping it is
+      // strictly safer than loading cross-language data.
+      console.warn(
+        `[pdv] dropping deferred ${pending.type} action: queued for ${wantedLanguage}, ` +
+        `active kernel is ${activeLanguage}`,
+      );
+      return;
+    }
     if (pending.type === 'recover') {
       void executeRecoverUnsaved(pending.orphanDir);
     } else {
       void executeOpenProject(pending.path);
     }
-  }, [kernelStatus, executeOpenProject, executeRecoverUnsaved]);
+  }, [kernelStatus, activeLanguage, executeOpenProject, executeRecoverUnsaved]);
 
   const projectTitle = currentProjectName
     ?? (currentProjectDir
@@ -1458,7 +1496,12 @@ const App: React.FC = () => {
           output={kernelLaunch.output}
           errorMessage={kernelLaunch.error}
           onRetry={handleLaunchRetry}
-          onCancel={handleLaunchCancel}
+          onCancel={() => {
+            // Cancelling an abandoned launch also abandons its deferred
+            // open/recover action (review M9).
+            pendingProjectRef.current = null;
+            handleLaunchCancel();
+          }}
           onChooseEnv={kernelLaunch.mode === 'shared' ? handleLaunchChooseEnv : undefined}
         />
       )}

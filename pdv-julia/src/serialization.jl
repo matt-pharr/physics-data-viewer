@@ -603,7 +603,12 @@ function _serialize_mapping!(value, descriptor, ctx)
         descriptor["metadata"] = Dict{String,Any}("preview" => ctx.preview)
         return descriptor
     end
-    if !_has_array_leaf(value)
+    # Key fidelity: the composite split routes child lookups through
+    # stringified dot-path segments, so only all-String-keyed Dicts may
+    # split. Int/Symbol/other keys must survive save/load unchanged
+    # (shot-number Dicts, keyword tables) — those persist whole as one
+    # .jls leaf, same rule as NamedTuples (PR #347 review B2 + M6).
+    if !_has_array_leaf(value) || !all(k -> k isa AbstractString, keys(value))
         write = () -> _jls_node!(value, descriptor, ctx)
         return _serialize_via_cache(write, value, descriptor, ctx)
     end

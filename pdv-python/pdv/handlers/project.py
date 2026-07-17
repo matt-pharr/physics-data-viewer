@@ -71,6 +71,7 @@ def _collect_nodes(
     failed_nodes: "list[dict] | None" = None,
     autosave_cache: "dict[str, tuple[bytes, dict]] | None" = None,
     autosave_hits: "list[int] | None" = None,
+    prior_index: "list | None" = None,
 ) -> list:
     """Recursively serialize tree nodes and return descriptor list.
 
@@ -106,6 +107,11 @@ def _collect_nodes(
     autosave_hits : list, optional
         Single-element counter incremented once per cache hit. Used by
         the autosave handler to log cache effectiveness.
+    prior_index : list, optional
+        The previous save's tree-index.json node list. When a node cannot
+        be serialized at all, its descriptor (and its children's) is
+        re-used from here so the last good on-disk snapshot stays in the
+        new index and survives the orphan purge (PR #347 review M1).
 
     Returns
     -------
@@ -167,22 +173,34 @@ def _collect_nodes(
             try:
                 descriptor = pickle_fallback_node(path, value, save_dir)
             except Exception as fallback_exc:  # noqa: BLE001
-                # Even pickle refused (lambda, open handle, ...). Skip the
-                # node and record it — one unpicklable leaf must never abort
-                # the whole save.
-                log.warning(
-                    "project.save: node '%s' (%s) could not be serialized at "
-                    "all — skipping: %s",
-                    path,
-                    type(value).__name__,
-                    fallback_exc,
-                )
+                # Even pickle refused (lambda, open handle, ...). Keep the
+                # node's previously saved snapshot when one exists (so the
+                # purge cannot destroy the last good copy), else skip it —
+                # one unpicklable leaf must never abort the whole save.
+                preserved = _preserve_prior_descriptors(nodes, prior_index, path)
+                if preserved:
+                    log.warning(
+                        "project.save: node '%s' (%s) could not be serialized"
+                        " — keeping its previously saved snapshot: %s",
+                        path,
+                        type(value).__name__,
+                        fallback_exc,
+                    )
+                else:
+                    log.warning(
+                        "project.save: node '%s' (%s) could not be serialized"
+                        " at all — skipping: %s",
+                        path,
+                        type(value).__name__,
+                        fallback_exc,
+                    )
                 if failed_nodes is not None:
                     failed_nodes.append(
                         {
                             "path": path,
                             "type": type(value).__name__,
                             "error": str(fallback_exc),
+                            "preserved": preserved,
                         }
                     )
                 counter[0] += 1
@@ -206,6 +224,7 @@ def _collect_nodes(
                     failed_nodes=failed_nodes,
                     autosave_cache=autosave_cache,
                     autosave_hits=autosave_hits,
+                    prior_index=prior_index,
                 )
             )
         elif descriptor.get("metadata", {}).get("composite") and isinstance(value, dict):
@@ -225,9 +244,50 @@ def _collect_nodes(
                     failed_nodes=failed_nodes,
                     autosave_cache=autosave_cache,
                     autosave_hits=autosave_hits,
+                    prior_index=prior_index,
                 )
             )
     return nodes
+
+
+def _preserve_prior_descriptors(
+    nodes: list, prior_index: "list | None", path: str
+) -> bool:
+    """Re-append a failed node's descriptors from the previous save's index.
+
+    When a node cannot be serialized at all, re-using its descriptor (and
+    its children's, for prior composites/subtrees) keeps it in the new
+    tree-index.json, which in turn keeps its ``tree/<uuid>/`` snapshot out
+    of :func:`_purge_orphaned_tree_files` — the alternative silently
+    destroys the last good copy of the data (PR #347 review M1).
+
+    Parameters
+    ----------
+    nodes : list
+        The descriptor list being built; preserved descriptors are appended.
+    prior_index : list or None
+        The previous save's node list (``None`` when there is no prior
+        save or it could not be read).
+    path : str
+        Dot-separated tree path of the node that failed to serialize.
+
+    Returns
+    -------
+    bool
+        Whether at least one prior descriptor was preserved.
+    """
+    if prior_index is None:
+        return False
+    preserved = False
+    child_prefix = path + "."
+    for entry in prior_index:
+        if not isinstance(entry, dict):
+            continue
+        entry_path = str(entry.get("path", ""))
+        if entry_path == path or entry_path.startswith(child_prefix):
+            nodes.append(dict(entry))
+            preserved = True
+    return preserved
 
 
 def _purge_orphaned_tree_files(save_dir: str, nodes: list[dict]) -> None:
@@ -826,9 +886,11 @@ def serialize_tree_to_dir(
         ``{"node_count", "checksum", "aborted", "module_owned_files",
         "module_manifests", "missing_files", "failed_nodes",
         "autosave_cache_hits"}``. ``failed_nodes`` lists
-        ``{"path", "type", "error"}`` entries for values that even the
-        pickle fallback could not serialize; such nodes are skipped (the
-        save still succeeds without them).
+        ``{"path", "type", "error", "preserved"}`` entries for values that
+        even the pickle fallback could not serialize. When the node was in
+        the previous save, its last good snapshot is preserved in the new
+        index (``preserved`` is True); otherwise it is skipped. The save
+        still succeeds either way.
         ``autosave_cache_hits`` is the number of nodes that reused a
         cached descriptor; meaningful only when ``autosave_cache`` was
         provided.
@@ -864,6 +926,19 @@ def serialize_tree_to_dir(
             if on_progress is not None:
                 on_progress("Serializing", current, total)
 
+    # Previous save's index, consulted only to preserve the last good
+    # snapshot of nodes that fail to serialize (see
+    # ``_preserve_prior_descriptors``). Never used for current values.
+    prior_index: "list | None" = None
+    prior_index_path = os.path.join(save_dir, "tree-index.json")
+    if os.path.isfile(prior_index_path):
+        try:
+            with open(prior_index_path, encoding="utf-8") as fh:
+                parsed = json.load(fh)
+            prior_index = parsed if isinstance(parsed, list) else None
+        except Exception:  # noqa: BLE001 — a corrupt prior index just disables preservation
+            prior_index = None
+
     missing_files: list[str] = []
     failed_nodes: list[dict] = []
     autosave_hits: list[int] = [0]
@@ -876,6 +951,7 @@ def serialize_tree_to_dir(
         failed_nodes=failed_nodes,
         autosave_cache=autosave_cache,
         autosave_hits=autosave_hits,
+        prior_index=prior_index,
     )
     if missing_files:
         return {

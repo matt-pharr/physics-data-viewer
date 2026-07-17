@@ -461,16 +461,19 @@ export class KernelManager extends EventEmitter {
       argv = spec.argv;
     } else if (language === "julia") {
       const juliaExec = spec?.env?.JULIA_PATH ?? "julia";
-      // `--threads=auto,1` gives the kernel an interactive threadpool: the
-      // main task (user code) runs interactive, freeing the default pool for
-      // PDVKernel's threaded query server — tree browsing stays responsive
-      // during compute-bound execution. A user-set JULIA_NUM_THREADS wins
-      // (the flag would override the env var, so skip it); PDVKernel then
-      // falls back to the cooperative query server automatically.
+      // `--threads=auto,2` gives the kernel TWO interactive threads: the
+      // main task (user code) runs on one, and PDVKernel's threaded query
+      // server polls on the spare — tree browsing stays responsive during
+      // compute-bound execution. The query loop must NOT get a default-pool
+      // thread: `@threads :static` pins one task per default thread, so a
+      // resident loop there deadlocks every `:static` loop in the session.
+      // A user-set JULIA_NUM_THREADS wins (the flag would override the env
+      // var, so skip it); without a spare interactive thread PDVKernel falls
+      // back to the cooperative query server automatically.
       const threadFlags =
         process.env.JULIA_NUM_THREADS || spec?.env?.JULIA_NUM_THREADS
           ? []
-          : ["--threads=auto,1"];
+          : ["--threads=auto,2"];
       argv = [
         juliaExec,
         "-i",

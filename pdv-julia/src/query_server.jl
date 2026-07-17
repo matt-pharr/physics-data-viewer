@@ -7,14 +7,24 @@
 # event loop, which a non-yielding main thread never services — measured:
 # total timeouts during a tight loop, sub-ms when idle). Two modes:
 #
-# - **Threaded** (kernel started with an interactive threadpool, the app's
-#   default `--threads=auto,1`): the loop runs on a default-pool OS thread
-#   and never touches libuv — it polls `sock.events` (a plain getsockopt
-#   ccall) and sleeps via `Libc.systemsleep`. `pdv.tree.list` is answered
-#   from the query-cache snapshot (query_cache.jl) in single-digit
-#   milliseconds even mid-computation; every other query type gets a fast
-#   `query.kernel_busy` reply that the app's QueryRouter converts into a
-#   comm-channel fallback (served live at the next idle moment).
+# - **Threaded** (kernel started with a SPARE interactive thread, the app's
+#   default `--threads=auto,2`): the loop runs on an interactive-pool OS
+#   thread and never touches libuv — it polls `sock.events` (a plain
+#   getsockopt ccall), sleeps via `Libc.systemsleep`, and yields once per
+#   tick. `pdv.tree.list` is answered from the query-cache snapshot
+#   (query_cache.jl) in single-digit milliseconds even mid-computation;
+#   every other query type gets a fast `query.kernel_busy` reply that the
+#   app's QueryRouter converts into a comm-channel fallback (served live at
+#   the next idle moment).
+#
+#   The pool choice is load-bearing: `@threads :static` pins one task per
+#   DEFAULT-pool thread and `threading_run` waits for all of them, so a
+#   poll loop occupying a default thread deadlocks every `:static` loop in
+#   the session (and silently steals a compute thread besides). Interactive
+#   tids are never pinned by `@threads`, so the loop lives there. The
+#   per-tick `yield()` is equally load-bearing: `@spawn :interactive` may
+#   start the loop on tid 1 — where the sticky root task lives — and a
+#   never-yielding loop there would starve the kernel's main task outright.
 #
 # - **Cooperative** (no spare threads): the original async-task loop —
 #   queries are served whenever the kernel task yields, and the QueryRouter's
@@ -153,12 +163,15 @@ function _handle_threaded_query(raw::Vector{UInt8})::Dict{String,Any}
     end
 end
 
-# Threaded mode requires a default-pool thread that is NOT running the main
-# task: exactly the `--threads=N,M` configuration (main task joins the
-# interactive pool). A never-yielding poll loop sharing the main task's
-# thread would deadlock the kernel, so anything else uses cooperative mode.
+# Threaded mode requires an interactive-pool thread that is NOT running the
+# main task — the app's `--threads=auto,2` gives exactly that. The default
+# pool is off-limits (a resident loop there deadlocks `@threads :static`,
+# which pins one task per default thread), and sharing the main task's only
+# interactive thread would leave queries starved during compute — the exact
+# situation cooperative mode already handles, without paying for a thread.
 _can_run_threaded() =
-    Threads.nthreads(:default) >= 1 && Threads.threadpool() !== :default
+    Threads.nthreads(:interactive) >=
+    (Threads.threadpool() === :interactive ? 2 : 1)
 
 """Start the query server (threaded when a spare thread exists, else
 cooperative). Idempotent while running."""
@@ -182,9 +195,11 @@ function start!(server::QueryServer)
         # spawned thread from here on (the @spawn edge is the required
         # memory barrier); stop! only flags shutdown — the loop owns the
         # close. recv/send are only called when sock.events says they cannot
-        # block, so the loop never enters a libuv wait.
+        # block, so the loop never enters a libuv wait. Interactive pool +
+        # per-tick yield — see the pool-choice comment at the top of this
+        # file; :default here deadlocks `@threads :static` (review B1).
         server.threaded = true
-        server.task = Threads.@spawn :default begin
+        server.task = Threads.@spawn :interactive begin
             try
                 while !server.shutdown[]
                     events = try
@@ -211,6 +226,10 @@ function start!(server::QueryServer)
                     else
                         Libc.systemsleep(0.005)
                     end
+                    # Never own the thread: if the scheduler placed this loop
+                    # on the root task's tid, a tick without a yield point
+                    # would starve the kernel's main task permanently.
+                    yield()
                 end
             finally
                 try
