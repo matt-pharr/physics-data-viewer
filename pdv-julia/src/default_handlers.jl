@@ -203,12 +203,38 @@ end
 # Numeric-array defaults (Base types: plain pdv_handle methods)
 # ---------------------------------------------------------------------------
 
+# Tests disable the backend auto-load so suites stay deterministic (and
+# never drag a multi-second CairoMakie load into a unit test) regardless of
+# whether CairoMakie is resolvable from the test environment stack.
+const _MAKIE_AUTOLOAD_ENABLED = Ref(true)
+
+# When no Makie backend is loaded but CairoMakie is installed in the active
+# environment, load it and return the Makie module — the Julia analog of
+# Python's default handlers importing matplotlib on first plot (matplotlib
+# is a hard dep there; CairoMakie is optional here but prefilled into new
+# projects, so first double-click should plot, not lecture). Same precedent
+# as _makie_figure_digest's CairoMakie auto-require. Returns nothing when
+# unavailable or the load fails.
+function _try_autoload_makie_backend(path::String)
+    _MAKIE_AUTOLOAD_ENABLED[] || return nothing
+    Base.identify_package("CairoMakie") === nothing && return nothing
+    println("[PDV] Loading CairoMakie to plot '$path' (first plot in this session)…")
+    try
+        Base.require(Main, :CairoMakie)
+    catch err
+        println("[PDV] Failed to load CairoMakie: $(sprint(showerror, err))")
+        return nothing
+    end
+    return loaded_module(:Makie)
+end
+
 # Run `draw(makie_module)` and display what it returns, or print a `[PDV]`
 # notice — a raised exception would reach the renderer as an opaque
 # internal.error (same contract as Python's _plot_or_notice). Function-first
 # so call sites can use do-block syntax.
 function _plot_with_makie(draw::Function, path::String)
     mk = loaded_module(:Makie)
+    mk === nothing && (mk = _try_autoload_makie_backend(path))
     if mk === nothing
         println("[PDV] Cannot plot '$path': no Makie backend is loaded. " *
                 "Run e.g. `using CairoMakie` first.")

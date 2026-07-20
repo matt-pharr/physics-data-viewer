@@ -77,6 +77,12 @@ end
 response_of(captured, msg_type) =
     only(filter(m -> m["type"] == msg_type * ".response", captured))
 
+# The plot path auto-loads an *installed* CairoMakie on first use; keep that
+# off in tests so notice-path assertions are deterministic (and no test ever
+# pays a real CairoMakie load) even when the machine's environment stack can
+# resolve CairoMakie.
+PDVKernel._MAKIE_AUTOLOAD_ENABLED[] = false
+
 # A value Serialization refuses outright, for exercising the save walker's
 # skip-and-report path. (A sleeping Task, surprisingly, serializes fine.)
 struct _Unserializable end
@@ -1276,6 +1282,18 @@ end
     @test resp["status"] == "ok"
     payload = resp["payload"]
     @test payload["aborted"] == false
+
+    # Progress contract: an immediate 0/total emission (the renderer's bar
+    # must appear before the walk — a small tree's only other emission used
+    # to be current == total, which the renderer treats as "clear the bar"),
+    # then per-node emissions for small trees, ending at total/total.
+    progress = [m["payload"] for m in captured if m["type"] == "pdv.progress"]
+    @test !isempty(progress)
+    @test all(p["operation"] == "save" && p["phase"] == "Serializing" for p in progress)
+    @test progress[1]["current"] == 0
+    @test allequal(p["total"] for p in progress)
+    @test progress[end]["current"] == progress[end]["total"]
+    @test length(progress) >= 3          # 0, …every node…, total
     @test payload["node_count"] > 5
     @test length(payload["checksum"]) == 32
     @test isfile(joinpath(save_dir, "tree-index.json"))
