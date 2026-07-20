@@ -65,11 +65,100 @@ function _cache_walk!(listings::Dict{String,Vector{Dict{String,Any}}},
         haskey(seen, container) && return nothing
         seen[container] = nothing
     end
+    if container isa PDVHdf5
+        # File-backed HDF5 node: serve from the per-handle memo so a large
+        # (immutable, read-only) hierarchy isn't re-walked from disk on
+        # every rebuild — rebuilds fire at up to ~1 Hz.
+        _merge_hdf5_snapshot!(listings, container, path, count)
+        return nothing
+    end
+    if !(container isa Union{AbstractPDVTree,AbstractDict,NamedTuple,AbstractVector,Tuple})
+        # Other virtual containers (e.g. a live HDF5.Group a user stored in
+        # the tree): list live, but an unreadable one skips its own subtree
+        # instead of aborting the whole rebuild.
+        try
+            _cache_list_and_recurse!(listings, container, path, count, seen)
+        catch err
+            @warn "query-cache: skipping unreadable virtual container at '$path'" exception = err
+        end
+        return nothing
+    end
+    _cache_list_and_recurse!(listings, container, path, count, seen)
+    nothing
+end
+
+function _cache_list_and_recurse!(listings::Dict{String,Vector{Dict{String,Any}}},
+                                  container, path::String, count::Ref{Int},
+                                  seen::IdDict{Any,Nothing})
     nodes, expandable = _list_container_nodes(container, path)
     listings[path] = nodes
     count[] += length(nodes)
     for (child_path, child) in expandable
         _cache_walk!(listings, child, child_path, count, seen)
+    end
+    nothing
+end
+
+# ---------------------------------------------------------------------------
+# PDVHdf5 snapshot memo
+# ---------------------------------------------------------------------------
+#
+# The backing file of a PDVHdf5 node is read-only and byte-immutable in UUID
+# storage, so its listings can only change when the handle changes (close /
+# relocate) or the node moves to a different tree path. The memo stores the
+# node's full sub-hierarchy of listings, keyed by the tree-path prefix it
+# was built at, and is invalidated by `close_hdf5!`. Without it, a large .h5
+# hierarchy would be re-read from disk on every snapshot rebuild.
+
+"""Merge the (memoized) listings under a `PDVHdf5` node into the snapshot.
+Never throws — an unreadable file skips this subtree."""
+function _merge_hdf5_snapshot!(listings::Dict{String,Vector{Dict{String,Any}}},
+                               node::PDVHdf5, path::String, count::Ref{Int})
+    snap = try
+        _hdf5_snapshot_listings!(node, path)
+    catch err
+        @warn "query-cache: skipping unreadable HDF5 node at '$path'" exception = err
+        return nothing
+    end
+    for (p, nodes) in snap
+        count[] > _QUERY_CACHE_MAX_NODES && break
+        listings[p] = nodes
+        count[] += length(nodes)
+    end
+    nothing
+end
+
+"""
+    _hdf5_snapshot_listings!(node, prefix) -> Dict{String,Vector{Dict}}
+
+Return the complete `tree-path => child descriptors` map for everything
+under `node` (main task only; opens the file on first use). Memoized on the
+node per open handle and prefix; a rename/move rebuilds at the new prefix.
+"""
+function _hdf5_snapshot_listings!(node::PDVHdf5, prefix::String)
+    memo = node.listing_memo
+    if memo !== nothing && node.handle !== nothing && memo[1] == prefix
+        return memo[2]
+    end
+    listings = Dict{String,Vector{Dict{String,Any}}}()
+    count = Ref(0)
+    _hdf5_snapshot_walk!(listings, node, prefix, count)
+    # Memoize only while a handle is open — close_hdf5! invalidates.
+    node.handle !== nothing && (node.listing_memo = (prefix, listings))
+    return listings
+end
+
+# No cycle guard: group objects are freshly minted per listing, so identity
+# tracking can't work — the node cap bounds a hard-linked cycle instead
+# (deeper paths bounce to the live channel, same as any capped path).
+function _hdf5_snapshot_walk!(listings::Dict{String,Vector{Dict{String,Any}}},
+                              container, path::String, count::Ref{Int})
+    count[] > _QUERY_CACHE_MAX_NODES && return nothing
+    nodes, expandable = _list_container_nodes(container, path)
+    listings[path] = nodes
+    count[] += length(nodes)
+    for (child_path, child) in expandable
+        _hdf5_snapshot_walk!(listings, child, child_path, count)
     end
     nothing
 end

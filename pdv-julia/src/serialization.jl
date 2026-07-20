@@ -36,6 +36,12 @@ const KIND_GUI = "gui"
 const KIND_NAMELIST = "namelist"
 const KIND_LIB = "lib"
 const KIND_FILE = "file"
+const KIND_HDF5_FILE = "hdf5_file"
+# Runtime-only kinds for virtual children served from inside an open PDVHdf5
+# node (never real tree values, never serialized) — same strings as
+# pdv-python so the renderer treats both kernels identically.
+const KIND_HDF5_GROUP = "hdf5_group"
+const KIND_HDF5_DATASET = "hdf5_dataset"
 const KIND_UNKNOWN = "unknown"
 
 # Format strings — must match ARCHITECTURE.md §7.3 storage.format.
@@ -52,6 +58,10 @@ const FORMAT_NAMELIST = "namelist"
 const FORMAT_JL_LIB = "jl_lib"
 const FORMAT_FILE = "file"
 const FORMAT_BIN = "bin"
+const FORMAT_HDF5 = "hdf5"
+# Written only by Python kernels (PDVDataset); recognized here so the loader
+# can skip such nodes with an actionable message instead of "unsupported".
+const FORMAT_NETCDF = "netcdf"
 
 # Directory-name convention for the autosave sibling under a save dir.
 const AUTOSAVE_DIR_NAME = ".autosave"
@@ -87,6 +97,28 @@ end
 # Dense numeric Array (the np.ndarray analog). Vector{UInt8} is claimed by the
 # binary kind (the bytes analog) before this check runs.
 _is_numeric_array(value) = value isa Array && eltype(value) <: NPY_ELTYPES
+
+"""Return true when `value` is an `HDF5.Group` or `HDF5.File` and HDF5 is
+loaded (never triggers a load). `File` is included because the root of an
+open HDF5 file lists exactly like a group."""
+function is_hdf5_group(value)::Bool
+    # Cheap early-out before the loaded-modules scan (see is_dataframe).
+    n = nameof(typeof(value))
+    (n === :Group || n === :File) || return false
+    hdf5 = loaded_module(:HDF5)
+    hdf5 === nothing && return false
+    isdefined(hdf5, :Group) && value isa getproperty(hdf5, :Group) && return true
+    return isdefined(hdf5, :File) && value isa getproperty(hdf5, :File)
+end
+
+"""Return true when `value` is an `HDF5.Dataset` and HDF5 is loaded (never
+triggers a load)."""
+function is_hdf5_dataset(value)::Bool
+    nameof(typeof(value)) === :Dataset || return false
+    hdf5 = loaded_module(:HDF5)
+    hdf5 === nothing && return false
+    return isdefined(hdf5, :Dataset) && value isa getproperty(hdf5, :Dataset)
+end
 
 """
     julia_type_string(value) -> String
@@ -127,6 +159,7 @@ function detect_kind(value)::String
     value isa PDVGui && return KIND_GUI
     value isa PDVNamelist && return KIND_NAMELIST
     value isa PDVLib && return KIND_LIB
+    value isa PDVHdf5 && return KIND_HDF5_FILE
     value isa PDVFile && return KIND_FILE
     (value === nothing || value === missing) && return KIND_SCALAR
     value isa Number && return KIND_SCALAR
@@ -138,6 +171,11 @@ function detect_kind(value)::String
     value isa NamedTuple && return KIND_MAPPING
     _is_numeric_array(value) && return KIND_NDARRAY
     (value isa AbstractVector || value isa Tuple || value isa AbstractSet) && return KIND_SEQUENCE
+    # HDF5 objects only appear as virtual children served from inside an
+    # open PDVHdf5 node (never as real tree values), so these kinds are
+    # runtime-only. Both helpers are no-ops when HDF5 isn't loaded.
+    is_hdf5_group(value) && return KIND_HDF5_GROUP
+    is_hdf5_dataset(value) && return KIND_HDF5_DATASET
     is_dataframe(value) && return KIND_DATAFRAME
     return KIND_UNKNOWN
 end
@@ -214,8 +252,17 @@ function node_preview(value, kind::String)::String
         if kind == KIND_FOLDER
             return "tree ($(length(value)) items)"
         elseif kind in (KIND_MODULE, KIND_GUI, KIND_NAMELIST, KIND_LIB, KIND_SCRIPT,
-                        KIND_MARKDOWN, KIND_FILE)
+                        KIND_MARKDOWN, KIND_FILE, KIND_HDF5_FILE)
             return preview(value)
+        elseif kind == KIND_HDF5_GROUP
+            return "group ($(Base.invokelatest(length, value)) items)"
+        elseif kind == KIND_HDF5_DATASET
+            # numpy-style dtype names so Python and Julia sessions show the
+            # same chip for the same file (e.g. "float64 (2 × 3)").
+            shp = Base.invokelatest(size, value)
+            dtype = _dtype_name(Base.invokelatest(eltype, value))
+            shape_str = join(string.(shp), " × ")
+            return isempty(shape_str) ? dtype : "$dtype ($shape_str)"
         elseif kind == KIND_SCALAR
             return _truncate(string(value), 100)
         elseif kind == KIND_TEXT
@@ -349,6 +396,7 @@ const _PDVFILE_KIND_FORMATS = Dict{String,String}(
     KIND_LIB => FORMAT_JL_LIB,
     KIND_NAMELIST => FORMAT_NAMELIST,
     KIND_FILE => FORMAT_FILE,
+    KIND_HDF5_FILE => FORMAT_HDF5,
 )
 
 """Per-call state threaded through the per-kind serializer functions."""
@@ -828,6 +876,11 @@ function deserialize_node(storage_ref::AbstractDict, save_dir::AbstractString;
             throw(PDVSerializationError(
                 "Storage format 'pickle' was written by a Python kernel; this " *
                 "project must be opened with a Python session."))
+        elseif fmt == FORMAT_NETCDF
+            throw(PDVSerializationError(
+                "Storage format 'netcdf' (a PDVDataset NetCDF node) was written " *
+                "by a Python kernel; the Julia kernel does not yet support NetCDF " *
+                "data nodes. Open this project with a Python session to use this node."))
         end
 
         custom = find_for_format(fmt)

@@ -100,7 +100,7 @@ const _FORMAT_INDEX = Dict{String,SerializerEntry}()
 const _RESERVED_FORMATS = Set([
     "npy", "json", "txt", "pickle", "jls", "py_script", "jl_script",
     "markdown", "inline", "gui_json", "module_meta", "namelist",
-    "py_lib", "jl_lib", "bin", "file", "none",
+    "py_lib", "jl_lib", "bin", "file", "none", "netcdf", "hdf5",
 ])
 
 """

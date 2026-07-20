@@ -13,6 +13,9 @@ function _relocate_files(value, working_dir::String; copy::Bool=false)
         new_uuid = generate_node_uuid()
         new_abs = uuid_tree_path(working_dir, new_uuid, value.filename)
         isfile(old_abs) && smart_copy(old_abs, new_abs)
+        # Data nodes cache an open handle bound to the old UUID path — drop
+        # it before the swap so the next access opens the relocated file.
+        value isa PDVHdf5 && close_hdf5!(value)
         value.uuid = new_uuid
     elseif value isa AbstractPDVTree
         for key in collect(keys(value.data))
@@ -31,10 +34,12 @@ end
 
 Handle `pdv.tree.list`: return the children of the node at `path` as node
 descriptor Dicts. Dict children carry their own keys; NamedTuple children
-their field names; vector/tuple children get stringified 1-based indices.
-NamedTuple and vector/tuple children carry a `parent_is_opaque` flag so the
-renderer suppresses structural mutations on them (their parents are not
-key-addressable stores — NamedTuples are immutable).
+their field names; vector/tuple children get stringified 1-based indices;
+containers with a virtual-children adapter (`PDVHdf5` nodes, live
+`HDF5.Group`s — see virtual.jl) enumerate through the adapter. NamedTuple,
+vector/tuple, and virtual-container children carry a `parent_is_opaque` flag
+so the renderer suppresses structural mutations on them (their parents are
+not key-addressable stores the mutation handlers know how to edit).
 """
 function handle_tree_list(msg::AbstractDict)
     msg_id = get(msg, "msg_id", nothing)
@@ -53,7 +58,8 @@ function handle_tree_list(msg::AbstractDict)
                        "No node at path: '$path'"; in_reply_to=msg_id)
             return nothing
         end
-        if !(container isa Union{AbstractPDVTree,AbstractDict,NamedTuple,AbstractVector,Tuple})
+        if !(container isa Union{AbstractPDVTree,AbstractDict,NamedTuple,AbstractVector,Tuple}) &&
+           virtual_adapter(container) === nothing
             send_error("pdv.tree.list.response", "tree.not_a_folder",
                        "Node at '$path' is not a folder"; in_reply_to=msg_id)
             return nothing
@@ -62,7 +68,17 @@ function handle_tree_list(msg::AbstractDict)
         container = tree
     end
 
-    nodes, _ = _list_container_nodes(container, path)
+    local nodes
+    try
+        nodes, _ = _list_container_nodes(container, path)
+    catch err
+        # Adapter enumeration may throw (missing dependency, unreadable
+        # file) — surface it as an actionable load error, not internal.error.
+        send_error("pdv.tree.list.response", "tree.load_error",
+                   "Cannot list children of '$path': $(sprint(showerror, err))";
+                   in_reply_to=msg_id)
+        return nothing
+    end
     send_message("pdv.tree.list.response", Dict{String,Any}("nodes" => nodes);
                  in_reply_to=msg_id)
     nothing
@@ -75,38 +91,47 @@ Build the child node descriptors for a container — the shared core of
 `handle_tree_list` and the query-cache rebuild. `expandable` pairs each
 `has_children` child's path with its value so a cache walk can recurse
 without re-resolving dot paths.
+
+Virtual containers enumerate through their adapter; adapter errors propagate
+to the caller (`handle_tree_list` surfaces `tree.load_error`, the cache walk
+skips the subtree). Adapter `overrides` are merged onto the computed
+descriptor last.
 """
 function _list_container_nodes(container, path::String)
-    parent_is_opaque =
+    adapter = container isa Union{AbstractPDVTree,AbstractDict} ? nothing :
+              virtual_adapter(container)
+    parent_is_opaque = adapter !== nothing ||
         container isa AbstractVector || container isa Tuple || container isa NamedTuple
-    keys_iter = if container isa AbstractPDVTree
-        collect(keys(container.data))
-    elseif container isa AbstractDict || container isa NamedTuple
-        [string(k) for k in keys(container)]
+
+    entries = ChildEntry[]
+    if container isa AbstractPDVTree
+        for key in collect(keys(container.data))
+            haskey(container.data, key) || continue  # deleted concurrently
+            push!(entries, (key, container.data[key], nothing))
+        end
+    elseif adapter !== nothing
+        append!(entries, adapter_children(adapter, container))
+    elseif container isa NamedTuple
+        for k in keys(container)
+            push!(entries, (string(k), container[k], nothing))
+        end
+    elseif container isa AbstractDict
+        for key in [string(k) for k in keys(container)]
+            if haskey(container, key)
+                push!(entries, (key, container[key], nothing))
+            elseif haskey(container, Symbol(key))
+                push!(entries, (key, container[Symbol(key)], nothing))
+            end
+        end
     else
-        [string(i) for i in 1:length(container)]
+        for i in 1:length(container)
+            push!(entries, (string(i), container[i], nothing))
+        end
     end
 
     nodes = Dict{String,Any}[]
     expandable = Tuple{String,Any}[]
-    for key in keys_iter
-        local value
-        if container isa AbstractPDVTree
-            haskey(container.data, key) || continue  # deleted concurrently
-            value = container.data[key]
-        elseif container isa NamedTuple
-            value = container[Symbol(key)]
-        elseif container isa AbstractDict
-            if haskey(container, key)
-                value = container[key]
-            elseif haskey(container, Symbol(key))
-                value = container[Symbol(key)]
-            else
-                continue
-            end
-        else
-            value = container[parse(Int, key)]
-        end
+    for (key, value, overrides) in entries
         child_path = isempty(path) ? key : "$path.$key"
         kind = detect_kind(value)
         preview_str = node_preview(value, kind)
@@ -115,7 +140,9 @@ function _list_container_nodes(container, path::String)
         elseif kind == KIND_SEQUENCE && value isa Union{AbstractVector,Tuple}
             !isempty(value)
         else
-            false
+            child_adapter = virtual_adapter(value)
+            child_adapter === nothing ? false :
+                adapter_has_children(child_adapter, value)
         end
         descriptor = Dict{String,Any}(
             "id" => child_path,
@@ -139,6 +166,7 @@ function _list_container_nodes(container, path::String)
         if kind == KIND_GUI && value isa PDVGui
             descriptor["module_id"] = value.module_id
         end
+        overrides !== nothing && merge!(descriptor, overrides)
         push!(nodes, descriptor)
         has_children && push!(expandable, (child_path, value))
     end

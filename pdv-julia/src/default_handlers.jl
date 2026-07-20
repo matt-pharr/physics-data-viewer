@@ -1,8 +1,9 @@
 # default_handlers.jl — Built-in double-click handlers for common types.
 #
 # Port of pdv/default_handlers.py. Double-clicking a tree node whose value is
-# a numeric Vector/Matrix, a Makie Figure, or a DataFrame does something
-# sensible without the user writing a module.
+# a numeric or complex Vector/Matrix, a Makie Figure, a DataFrame, or an
+# HDF5 dataset (virtual child of a PDVHdf5 node) does something sensible
+# without the user writing a module.
 #
 # Registration is **lazy**, mirroring Python's sys.modules gate:
 # `register_default_handlers!()` runs from every registry lookup
@@ -64,6 +65,13 @@ function register_default_handlers!()
             _register_dataframes_defaults!(df)
         end
     end
+    if !(:HDF5 in _defaults_done)
+        h5 = loaded_module(:HDF5)
+        if h5 !== nothing
+            push!(_defaults_done, :HDF5)
+            _register_hdf5_defaults!(h5)
+        end
+    end
     nothing
 end
 
@@ -112,6 +120,51 @@ function _register_dataframes_defaults!(df::Module)
     isdefined(df, :DataFrame) || return nothing
     _register_default((obj, path, tree) -> Base.invokelatest(display, obj),
                       getproperty(df, :DataFrame))
+    nothing
+end
+
+# Double-clicking an HDF5 dataset (a virtual child of a PDVHdf5 node) never
+# silently materializes more than this many bytes into memory. A Ref so
+# tests can lower it without a 100 MB fixture.
+const _HDF5_PLOT_MAX_BYTES = Ref(100_000_000)
+
+function _register_hdf5_defaults!(h5::Module)
+    isdefined(h5, :Dataset) || return nothing
+    _register_default(_hdf5_dataset_handler, getproperty(h5, :Dataset))
+    nothing
+end
+
+# Default handler for HDF5.Dataset: materialize (under the size cap) and
+# reuse the numeric/complex array plot methods (same contract as Python's
+# h5py.Dataset handler).
+function _hdf5_dataset_handler(obj, path, tree)
+    nbytes = try
+        n = Base.invokelatest(length, obj)
+        T = Base.invokelatest(eltype, obj)
+        n * max(sizeof(T), 1)
+    catch
+        0
+    end
+    if nbytes > _HDF5_PLOT_MAX_BYTES[]
+        mb = round(nbytes / 1_000_000; digits=1)
+        cap_mb = max(_HDF5_PLOT_MAX_BYTES[] ÷ 1_000_000, 1)
+        println("[PDV] Dataset at '$path' is $(mb) MB — larger than the " *
+                "$(cap_mb) MB default-plot cap. Read a slice instead, e.g. " *
+                "pdv_tree[\"$path\"][1:1000].")
+        return nothing
+    end
+    data = try
+        Base.invokelatest(read, obj)
+    catch err
+        println("[PDV] Cannot read dataset at '$path': $(sprint(showerror, err))")
+        return nothing
+    end
+    if data isa AbstractArray && (eltype(data) <: Real || eltype(data) <: Complex)
+        Base.invokelatest(pdv_handle, data, String(path), tree)
+    else
+        println("[PDV] No default plot for dataset at '$path' " *
+                "(element type $(typeof(data)))")
+    end
     nothing
 end
 
@@ -194,6 +247,46 @@ end
 # a kernel-visible response divergence between the backends).
 function pdv_handle(obj::AbstractArray{<:Real}, path::String, tree::PDVTree)
     println("[PDV] Cannot plot $(ndims(obj))-D ndarray (size=$(size(obj))); " *
+            "default handler supports 1D and 2D only.")
+    nothing
+end
+
+# ---------------------------------------------------------------------------
+# Complex-array defaults (parity with pdv-python's complex plotting)
+# ---------------------------------------------------------------------------
+
+# 1-D complex: one axis with labeled Re and Im lines.
+function pdv_handle(obj::AbstractVector{<:Complex}, path::String, tree::PDVTree)
+    _plot_with_makie(path) do mk
+        fig = Base.invokelatest(getproperty(mk, :Figure))
+        ax = Base.invokelatest(getproperty(mk, :Axis), fig[1, 1]; title=path)
+        Base.invokelatest(getproperty(mk, :lines!), ax, real.(obj); label="Re")
+        Base.invokelatest(getproperty(mk, :lines!), ax, imag.(obj); label="Im")
+        Base.invokelatest(getproperty(mk, :axislegend), ax)
+        fig
+    end
+    nothing
+end
+
+# 2-D complex: side-by-side Re/Im heatmaps, each with its own colorbar
+# (the ranges are generally unrelated, so a shared bar would mislead).
+function pdv_handle(obj::AbstractMatrix{<:Complex}, path::String, tree::PDVTree)
+    _plot_with_makie(path) do mk
+        fig = Base.invokelatest(getproperty(mk, :Figure))
+        axr = Base.invokelatest(getproperty(mk, :Axis), fig[1, 1]; title="Re")
+        hmr = Base.invokelatest(getproperty(mk, :heatmap!), axr, real.(obj))
+        Base.invokelatest(getproperty(mk, :Colorbar), fig[1, 2], hmr)
+        axi = Base.invokelatest(getproperty(mk, :Axis), fig[1, 3]; title="Im")
+        hmi = Base.invokelatest(getproperty(mk, :heatmap!), axi, imag.(obj))
+        Base.invokelatest(getproperty(mk, :Colorbar), fig[1, 4], hmi)
+        Base.invokelatest(getproperty(mk, :Label), fig[0, :], path)
+        fig
+    end
+    nothing
+end
+
+function pdv_handle(obj::AbstractArray{<:Complex}, path::String, tree::PDVTree)
+    println("[PDV] Cannot plot $(ndims(obj))-D complex array (size=$(size(obj))); " *
             "default handler supports 1D and 2D only.")
     nothing
 end

@@ -15,8 +15,8 @@ Public API
 - `bootstrap()` — idempotent kernel-side initialization.
 - `save()`, `save_project(path)`, `save_project_as(path)`, `open_project(path)`,
   `install(pkgs...)`, `remove(pkgs...)`, `update(pkgs...)`, `add_file(path)`,
-  `new_note(path; title)`, `help()`, `working_dir()`, `log(args...)` —
-  app-level operations.
+  `add_hdf5(path)`, `new_note(path; title)`, `help()`, `working_dir()`,
+  `log(args...)` — app-level operations.
 - `pdv_handle` / `pdv_preview` / `pdv_format` / `pdv_serialize` /
   `pdv_deserialize` / `pdv_digest` — protocol generic functions that modules
   extend with methods (the Julia analog of Python's `@pdv.handle` decorator
@@ -44,7 +44,7 @@ const VERSION = "0.2.0"
 const __pdv_protocol_version__ = VERSION
 
 export PDVTree, PDVModule, PDVFile, PDVScript, PDVNote, PDVGui, PDVNamelist,
-       PDVLib, PDVException, PDVPathError, PDVKeyError, PDVProtectedNameError,
+       PDVLib, PDVHdf5, PDVException, PDVPathError, PDVKeyError, PDVProtectedNameError,
        PDVSerializationError, PDVScriptError, PDVVersionError,
        bootstrap, register_serializer, register_handler,
        pdv_handle, pdv_preview, pdv_format, pdv_serialize, pdv_deserialize,
@@ -53,6 +53,7 @@ export PDVTree, PDVModule, PDVFile, PDVScript, PDVNote, PDVGui, PDVNamelist,
 include("errors.jl")
 include("environment.jl")
 include("serializers.jl")
+include("virtual.jl")
 include("tree.jl")
 include("serialization.jl")
 include("checksum.jl")
@@ -291,17 +292,10 @@ function update(packages::AbstractString...)
     nothing
 end
 
-"""
-    add_file(source_path) -> PDVFile
-
-Import an arbitrary file into the tree as a `PDVFile`. Eagerly copies the
-source into the session working directory under a fresh UUID storage path;
-assign the returned node at the desired tree path:
-
-    mesh = PDVKernel.add_file("~/Downloads/mesh.h5")
-    pdv_tree["simulation.mesh"] = mesh
-"""
-function add_file(source_path::AbstractString)::PDVFile
+# Shared import-file plumbing: validate the source, copy it into UUID
+# storage under the session working directory, and return (uuid, filename).
+function _import_file_common(source_path::AbstractString,
+                             api_name::String)::Tuple{String,String}
     resolved = abspath(expanduser(String(source_path)))
     isfile(resolved) || (ispath(resolved) ?
         throw(ArgumentError("Source path is not a file: $source_path")) :
@@ -310,13 +304,55 @@ function add_file(source_path::AbstractString)::PDVFile
     tree = get_pdv_tree()
     wd = tree === nothing ? nothing : tree.working_dir
     wd === nothing && throw(PDVPathError(
-        "PDVKernel.add_file is not available: kernel has not received pdv.init"))
+        "PDVKernel.$api_name is not available: kernel has not received pdv.init"))
 
     filename = basename(resolved)
     node_uuid = generate_node_uuid()
     dest = uuid_tree_path(wd, node_uuid, filename)
     smart_copy(resolved, dest)
+    return (node_uuid, filename)
+end
+
+"""
+    add_file(source_path) -> AbstractPDVFile
+
+Import an arbitrary file into the tree. Eagerly copies the source into the
+session working directory under a fresh UUID storage path; assign the
+returned node at the desired tree path:
+
+    mesh = PDVKernel.add_file("~/Downloads/mesh.h5")
+    pdv_tree["simulation.mesh"] = mesh
+
+Files with an HDF5 extension (`.h5`/`.hdf5`) come back as a lazily-read
+[`PDVHdf5`](@ref) node; everything else as a generic `PDVFile`. Use
+[`add_hdf5`](@ref) to force the HDF5 node type for other extensions.
+"""
+function add_file(source_path::AbstractString)::AbstractPDVFile
+    node_uuid, filename = _import_file_common(source_path, "add_file")
+    ext = lowercase(last(splitext(filename)))
+    if ext in HDF5_EXTENSIONS
+        preload_hdf5!()
+        return PDVHdf5(uuid=node_uuid, filename=filename)
+    end
     return PDVFile(uuid=node_uuid, filename=filename)
+end
+
+"""
+    add_hdf5(source_path) -> PDVHdf5
+
+Import an HDF5 file into the tree as a lazily-read [`PDVHdf5`](@ref) node.
+
+Like [`add_file`](@ref) but always constructs an HDF5 node regardless of
+extension, and checks that HDF5.jl is installed *before* copying the file —
+so a missing dependency fails fast with an actionable message instead of
+after a multi-GB copy.
+"""
+function add_hdf5(source_path::AbstractString)::PDVHdf5
+    (loaded_module(:HDF5) !== nothing || hdf5_installed()) ||
+        error(_hdf5_dep_error_message())
+    preload_hdf5!()
+    node_uuid, filename = _import_file_common(source_path, "add_hdf5")
+    return PDVHdf5(uuid=node_uuid, filename=filename)
 end
 
 """
@@ -370,6 +406,7 @@ function help(topic::Union{Nothing,AbstractString}=nothing)
             "  PDVKernel.remove(\"Pkg1\")  — remove packages from the environment\n" *
             "  PDVKernel.update()         — upgrade packages (or update(\"Pkg1\"))\n" *
             "  PDVKernel.add_file(\"path/to/file\") — import a file into the tree\n" *
+            "  PDVKernel.add_hdf5(\"path/to/file.h5\") — import an HDF5 file (lazy)\n" *
             "  PDVKernel.new_note(\"path\"; title=\"My Note\") — create a markdown note\n" *
             "  PDVKernel.help(\"pdv_tree\") — help on a specific topic\n")
     else

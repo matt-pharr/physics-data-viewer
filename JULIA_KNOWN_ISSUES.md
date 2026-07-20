@@ -174,12 +174,14 @@ listed for completeness.
 no Julia counterpart. Julia custom types round-trip via the
 `pdv_format`/`pdv_serialize`/`pdv_deserialize` protocol instead. A
 DimensionalData.jl mapping could close this if there's demand.
-HDF5 files are part of the same story: browsable `.h5` nodes are the
-`PDVHdf5` design (PLANNED_FEATURES, issue #203, beta2) and will need
-`HDF5.jl` on the Julia side; a display-only stopgap (live `HDF5.File`
-handles browsing as read-only mappings, like NamedTuples below) was
-considered 2026-07-15 and deliberately deferred to #203 so persistence
-semantics ship correct the first time.
+**The HDF5 half of this shipped 2026-07-20**: Julia sessions have a full
+`PDVHdf5` (HDF5.jl, lazy read-only open, virtual children via `virtual.jl`,
+`PDVKernel.add_hdf5` + extension autodetect, same kind/format strings as
+Python — ARCHITECTURE §5.8.1/§5.14). The remaining gap is NetCDF:
+`PDVDataset` (`dataset_file`, `storage.format: "netcdf"`) exists only on
+Python, and the Julia loader skips such nodes with an "open with a Python
+session" pointer (the rest of the project loads fine). Closing it means
+settling the NCDatasets.jl vs DimensionalData.jl question — still open.
 Related display gap closed 2026-07-15 (user request): **NamedTuples** now ride
 the `mapping` kind — expandable in the tree by field name (read-only children),
 dot-path navigable, `NamedTuple` chip, namespace-view children — while still
