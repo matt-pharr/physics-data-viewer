@@ -23,7 +23,7 @@
       
       
       <link rel="icon" href="../../assets/pdv-icon.svg">
-      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.6">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.7">
     
     
       
@@ -31,7 +31,7 @@
       
     
     
-      <link rel="stylesheet" href="../../assets/stylesheets/main.484c7ddc.min.css">
+      <link rel="stylesheet" href="../../assets/stylesheets/main.ec1eaa64.min.css">
       
         
         <link rel="stylesheet" href="../../assets/stylesheets/palette.ab4e12ef.min.css">
@@ -1027,6 +1027,34 @@
 
               
             
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api-reference/julia/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Julia API (PDVKernel)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
           </ul>
         </nav>
       
@@ -1485,15 +1513,26 @@
 </div>
 <hr />
 <h2 id="2-first-launch">2. First launch<a class="headerlink" href="#2-first-launch" title="Permanent link">&para;</a></h2>
-<p>Open PDV. You will land on the <strong>Welcome screen</strong> with two options:</p>
+<p>Open PDV. You will land on the <strong>Welcome screen</strong> with three options:</p>
 <ul>
 <li><strong>New Python Project</strong></li>
+<li><strong>New Julia Project</strong></li>
 <li><strong>Open Project…</strong></li>
 </ul>
 <p>Pick <strong>New Python Project</strong>. If this is your first time, PDV will open the <strong>Environment Selector</strong> before starting a kernel.</p>
 <div class="admonition info">
 <p class="admonition-title">Julia support</p>
-<p>Julia is a planned second kernel backend but the <strong>New Julia Project</strong> button is hidden until <code>pdv-julia</code> is ready. If you want to try an early build, <a href="https://github.com/matt-pharr/physics-data-viewer/issues/new">open an issue</a>.</p>
+<p><strong>New Julia Project</strong> starts a session on your Julia installation. It needs a
+Julia environment (1.10+) with <a href="https://github.com/JuliaLang/IJulia.jl">IJulia</a>
+and the <code>PDVKernel</code> package installed:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="gp">julia&gt;</span><span class="w"> </span><span class="k">using</span><span class="w"> </span><span class="n">Pkg</span>
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="gp">julia&gt;</span><span class="w"> </span><span class="n">Pkg</span><span class="o">.</span><span class="n">add</span><span class="p">(</span><span class="s">&quot;IJulia&quot;</span><span class="p">)</span>
+<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="gp">julia&gt;</span><span class="w"> </span><span class="n">Pkg</span><span class="o">.</span><span class="n">develop</span><span class="p">(</span><span class="n">path</span><span class="o">=</span><span class="s">&quot;/path/to/physics-data-viewer/pdv-julia&quot;</span><span class="p">)</span>
+</code></pre></div>
+<p>Point PDV at your <code>julia</code> executable under <strong>Settings → Default Runtime</strong>
+(or leave it unset to use <code>julia</code> from your <code>PATH</code>). Julia sessions always
+run on your shared Julia environment — the uv-managed per-project
+environment flow is Python-only for now.</p>
 </div>
 <hr />
 <h2 id="3-pick-a-python-environment">3. Pick a Python environment<a class="headerlink" href="#3-pick-a-python-environment" title="Permanent link">&para;</a></h2>
@@ -1578,7 +1617,7 @@ It searches, in order:</p>
 <details class="question">
 <summary>macOS: "PDV is damaged and can't be opened"</summary>
 <p>This is a macOS quarantine issue. Remove the quarantine attribute:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>xattr<span class="w"> </span>-dr<span class="w"> </span>com.apple.quarantine<span class="w"> </span>/Applications/PDV.app
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>xattr<span class="w"> </span>-dr<span class="w"> </span>com.apple.quarantine<span class="w"> </span>/Applications/PDV.app
 </code></pre></div>
 <p>If this happens, please <a href="https://github.com/matt-pharr/physics-data-viewer/issues/new">open an issue</a> with your macOS version and the exact error message.</p>
 </details>
@@ -1610,7 +1649,7 @@ your OS, Python version, and PDV version (Help → About).</p>
     <span class="md-icon" title="Last update">
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M21 13.1c-.1 0-.3.1-.4.2l-1 1 2.1 2.1 1-1c.2-.2.2-.6 0-.8l-1.3-1.3c-.1-.1-.2-.2-.4-.2m-1.9 1.8-6.1 6V23h2.1l6.1-6.1zM12.5 7v5.2l4 2.4-1 1L11 13V7zM11 21.9c-5.1-.5-9-4.8-9-9.9C2 6.5 6.5 2 12 2c5.3 0 9.6 4.1 10 9.3-.3-.1-.6-.2-1-.2s-.7.1-1 .2C19.6 7.2 16.2 4 12 4c-4.4 0-8 3.6-8 8 0 4.1 3.1 7.5 7.1 7.9l-.1.2z"/></svg>
     </span>
-    <span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-date" title="May 8, 2026 06:00:12 UTC">May 8, 2026</span>
+    <span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-date" title="July 14, 2026 08:11:25 UTC">July 14, 2026</span>
   </span>
 
     
@@ -1839,7 +1878,7 @@ your OS, Python version, and PDV version (Help → About).</p>
       <script id="__config" type="application/json">{"annotate": null, "base": "../..", "features": ["navigation.tabs", "navigation.sections", "navigation.expand", "navigation.top", "navigation.footer", "search.suggest", "search.highlight", "content.code.copy", "content.code.annotate", "content.action.edit"], "search": "../../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": {"default": "latest", "provider": "mike"}}</script>
     
     
-      <script src="../../assets/javascripts/bundle.79ae519e.min.js"></script>
+      <script src="../../assets/javascripts/bundle.d7400e89.min.js"></script>
       
         <script src="https://unpkg.com/mathjax@3/es5/tex-mml-chtml.js"></script>
       

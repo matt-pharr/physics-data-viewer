@@ -1,0 +1,2782 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="Desktop application for computational and experimental physics analysis">
+      
+      
+      
+        <link rel="canonical" href="https://matt-pharr.github.io/physics-data-viewer/dev/api-reference/julia/">
+      
+      
+        <link rel="prev" href="../errors/">
+      
+      
+        <link rel="next" href="../../modules/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../../assets/pdv-icon.svg">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.7">
+    
+    
+      
+        <title>Julia API (PDVKernel) - PDV - Physics Data Viewer</title>
+      
+    
+    
+      <link rel="stylesheet" href="../../assets/stylesheets/main.ec1eaa64.min.css">
+      
+        
+        <link rel="stylesheet" href="../../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+      <link rel="stylesheet" href="../../assets/_mkdocstrings.css">
+    
+    <script>__md_scope=new URL("../..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+  
+
+
+  
+  
+
+<script id="__analytics">function __md_analytics(){function e(){dataLayer.push(arguments)}window.dataLayer=window.dataLayer||[],e("js",new Date),e("config","G-0FGZ9YFWWQ"),document.addEventListener("DOMContentLoaded",(function(){document.forms.search&&document.forms.search.query.addEventListener("blur",(function(){this.value&&e("event","search",{search_term:this.value})}));document$.subscribe((function(){var t=document.forms.feedback;if(void 0!==t)for(var a of t.querySelectorAll("[type=submit]"))a.addEventListener("click",(function(a){a.preventDefault();var n=document.location.pathname,d=this.getAttribute("data-md-value");e("event","feedback",{page:n,data:d}),t.firstElementChild.disabled=!0;var r=t.querySelector(".md-feedback__note [data-md-value='"+d+"']");r&&(r.hidden=!1)})),t.hidden=!1})),location$.subscribe((function(t){e("config","G-0FGZ9YFWWQ",{page_path:t.pathname})}))}));var t=document.createElement("script");t.async=!0,t.src="https://www.googletagmanager.com/gtag/js?id=G-0FGZ9YFWWQ",document.getElementById("__analytics").insertAdjacentElement("afterEnd",t)}</script>
+  
+    <script>if("undefined"!=typeof __md_analytics){var consent=__md_get("__consent");consent&&consent.analytics&&__md_analytics()}</script>
+  
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#julia-api-pdvkernel" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+      <div data-md-color-scheme="default" data-md-component="outdated" hidden>
+        
+      </div>
+    
+    
+      
+
+<header class="md-header" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href="../.." title="PDV - Physics Data Viewer" class="md-header__button md-logo" aria-label="PDV - Physics Data Viewer" data-md-component="logo">
+      
+  <img src="../../assets/pdv-icon.svg" alt="logo">
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            PDV - Physics Data Viewer
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Julia API (PDVKernel)
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: light)" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a4 4 0 0 0-4 4 4 4 0 0 0 4 4 4 4 0 0 0 4-4 4 4 0 0 0-4-4m0 10a6 6 0 0 1-6-6 6 6 0 0 1 6-6 6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: dark)" data-md-color-scheme="slate" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 18c-.89 0-1.74-.2-2.5-.55C11.56 16.5 13 14.42 13 12s-1.44-4.5-3.5-5.45C10.26 6.2 11.11 6 12 6a6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+        <div class="md-search__suggest" data-md-component="search-suggest"></div>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/matt-pharr/physics-data-viewer" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M173.9 397.4c0 2-2.3 3.6-5.2 3.6-3.3.3-5.6-1.3-5.6-3.6 0-2 2.3-3.6 5.2-3.6 3-.3 5.6 1.3 5.6 3.6m-31.1-4.5c-.7 2 1.3 4.3 4.3 4.9 2.6 1 5.6 0 6.2-2s-1.3-4.3-4.3-5.2c-2.6-.7-5.5.3-6.2 2.3m44.2-1.7c-2.9.7-4.9 2.6-4.6 4.9.3 2 2.9 3.3 5.9 2.6 2.9-.7 4.9-2.6 4.6-4.6-.3-1.9-3-3.2-5.9-2.9M252.8 8C114.1 8 8 113.3 8 252c0 110.9 69.8 205.8 169.5 239.2 12.8 2.3 17.3-5.6 17.3-12.1 0-6.2-.3-40.4-.3-61.4 0 0-70 15-84.7-29.8 0 0-11.4-29.1-27.8-36.6 0 0-22.9-15.7 1.6-15.4 0 0 24.9 2 38.6 25.8 21.9 38.6 58.6 27.5 72.9 20.9 2.3-16 8.8-27.1 16-33.7-55.9-6.2-112.3-14.3-112.3-110.5 0-27.5 7.6-41.3 23.6-58.9-2.6-6.5-11.1-33.3 2.6-67.9 20.9-6.5 69 27 69 27 20-5.6 41.5-8.5 62.8-8.5s42.8 2.9 62.8 8.5c0 0 48.1-33.6 69-27 13.7 34.7 5.2 61.4 2.6 67.9 16 17.7 25.8 31.5 25.8 58.9 0 96.5-58.9 104.2-114.8 110.5 9.2 7.9 17 22.9 17 46.4 0 33.7-.3 75.4-.3 83.6 0 6.5 4.6 14.4 17.3 12.1C436.2 457.8 504 362.9 504 252 504 113.3 391.5 8 252.8 8M105.2 352.9c-1.3 1-1 3.3.7 5.2 1.6 1.6 3.9 2.3 5.2 1 1.3-1 1-3.3-.7-5.2-1.6-1.6-3.9-2.3-5.2-1m-10.8-8.1c-.7 1.3.3 2.9 2.3 3.9 1.6 1 3.6.7 4.3-.7.7-1.3-.3-2.9-2.3-3.9-2-.6-3.6-.3-4.3.7m32.4 35.6c-1.6 1.3-1 4.3 1.3 6.2 2.3 2.3 5.2 2.6 6.5 1 1.3-1.3.7-4.3-1.3-6.2-2.2-2.3-5.2-2.6-6.5-1m-11.4-14.7c-1.6 1-1.6 3.6 0 5.9s4.3 3.3 5.6 2.3c1.6-1.3 1.6-3.9 0-6.2-1.4-2.3-4-3.3-5.6-2"/></svg>
+  </div>
+  <div class="md-source__repository">
+    matt-pharr/physics-data-viewer
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+            
+<nav class="md-tabs" aria-label="Tabs" data-md-component="tabs">
+  <div class="md-grid">
+    <ul class="md-tabs__list">
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../.." class="md-tabs__link">
+        
+  
+  
+    
+  
+  Home
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../getting-started/installation/" class="md-tabs__link">
+          
+  
+  
+  Getting Started
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../user-guide/" class="md-tabs__link">
+          
+  
+  
+  User Guide
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+    
+  
+  
+    
+    
+      <li class="md-tabs__item md-tabs__item--active">
+        <a href="../" class="md-tabs__link">
+          
+  
+  
+  API Reference
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../../modules/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Module Development
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../developer/architecture/" class="md-tabs__link">
+          
+  
+  
+  Developer Guide
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="https://github.com/matt-pharr/physics-data-viewer/releases" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Changelog
+
+      </a>
+    </li>
+  
+
+      
+    </ul>
+  </div>
+</nav>
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+  
+
+
+<nav class="md-nav md-nav--primary md-nav--lifted" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href="../.." title="PDV - Physics Data Viewer" class="md-nav__button md-logo" aria-label="PDV - Physics Data Viewer" data-md-component="logo">
+      
+  <img src="../../assets/pdv-icon.svg" alt="logo">
+
+    </a>
+    PDV - Physics Data Viewer
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/matt-pharr/physics-data-viewer" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M173.9 397.4c0 2-2.3 3.6-5.2 3.6-3.3.3-5.6-1.3-5.6-3.6 0-2 2.3-3.6 5.2-3.6 3-.3 5.6 1.3 5.6 3.6m-31.1-4.5c-.7 2 1.3 4.3 4.3 4.9 2.6 1 5.6 0 6.2-2s-1.3-4.3-4.3-5.2c-2.6-.7-5.5.3-6.2 2.3m44.2-1.7c-2.9.7-4.9 2.6-4.6 4.9.3 2 2.9 3.3 5.9 2.6 2.9-.7 4.9-2.6 4.6-4.6-.3-1.9-3-3.2-5.9-2.9M252.8 8C114.1 8 8 113.3 8 252c0 110.9 69.8 205.8 169.5 239.2 12.8 2.3 17.3-5.6 17.3-12.1 0-6.2-.3-40.4-.3-61.4 0 0-70 15-84.7-29.8 0 0-11.4-29.1-27.8-36.6 0 0-22.9-15.7 1.6-15.4 0 0 24.9 2 38.6 25.8 21.9 38.6 58.6 27.5 72.9 20.9 2.3-16 8.8-27.1 16-33.7-55.9-6.2-112.3-14.3-112.3-110.5 0-27.5 7.6-41.3 23.6-58.9-2.6-6.5-11.1-33.3 2.6-67.9 20.9-6.5 69 27 69 27 20-5.6 41.5-8.5 62.8-8.5s42.8 2.9 62.8 8.5c0 0 48.1-33.6 69-27 13.7 34.7 5.2 61.4 2.6 67.9 16 17.7 25.8 31.5 25.8 58.9 0 96.5-58.9 104.2-114.8 110.5 9.2 7.9 17 22.9 17 46.4 0 33.7-.3 75.4-.3 83.6 0 6.5 4.6 14.4 17.3 12.1C436.2 457.8 504 362.9 504 252 504 113.3 391.5 8 252.8 8M105.2 352.9c-1.3 1-1 3.3.7 5.2 1.6 1.6 3.9 2.3 5.2 1 1.3-1 1-3.3-.7-5.2-1.6-1.6-3.9-2.3-5.2-1m-10.8-8.1c-.7 1.3.3 2.9 2.3 3.9 1.6 1 3.6.7 4.3-.7.7-1.3-.3-2.9-2.3-3.9-2-.6-3.6-.3-4.3.7m32.4 35.6c-1.6 1.3-1 4.3 1.3 6.2 2.3 2.3 5.2 2.6 6.5 1 1.3-1.3.7-4.3-1.3-6.2-2.2-2.3-5.2-2.6-6.5-1m-11.4-14.7c-1.6 1-1.6 3.6 0 5.9s4.3 3.3 5.6 2.3c1.6-1.3 1.6-3.9 0-6.2-1.4-2.3-4-3.3-5.6-2"/></svg>
+  </div>
+  <div class="md-source__repository">
+    matt-pharr/physics-data-viewer
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../.." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_2" >
+        
+          
+          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Getting Started
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Getting Started
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../getting-started/installation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Installation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_3" >
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    User Guide
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    User Guide
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../user-guide/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Overview
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../user-guide/scripts-and-tree/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Scripts & the Tree
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../user-guide/notes-and-projects/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Notes & Projects
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    API Reference
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    API Reference
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Overview
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../tree/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    The Tree (pdv_tree)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../nodes/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Tree Node Types
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../app/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    The App Object (pdv)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../module-api/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Module API
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../errors/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Exceptions
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Julia API (PDVKernel)
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Julia API (PDVKernel)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#the-tree-pdv_tree" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The Tree (pdv_tree)
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="The Tree (pdv_tree)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#pdvkernelpdvtree" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        PDVKernel.PDVTree
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#tree-node-types" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Tree Node Types
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Tree Node Types">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#pdvkernelpdvscript" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        PDVKernel.PDVScript
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#pdvkernelpdvfile" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        PDVKernel.PDVFile
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#pdvkernelpdvnote" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        PDVKernel.PDVNote
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#pdvkernelpdvgui" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        PDVKernel.PDVGui
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#pdvkernelpdvnamelist" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        PDVKernel.PDVNamelist
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#pdvkernelpdvmodule" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        PDVKernel.PDVModule
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#pdvkernelpdvlib" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        PDVKernel.PDVLib
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#app-level-operations" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        App-Level Operations
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="App-Level Operations">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#pdvkernelworking_dir" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        PDVKernel.working_dir
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#pdvkernelsave" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        PDVKernel.save
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#pdvkernelsave_project" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        PDVKernel.save_project
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#pdvkernelsave_project_as" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        PDVKernel.save_project_as
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#pdvkernelopen_project" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        PDVKernel.open_project
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#pdvkernelinstall" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        PDVKernel.install
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#pdvkernelremove" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        PDVKernel.remove
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#pdvkernelupdate" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        PDVKernel.update
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#pdvkerneladd_file" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        PDVKernel.add_file
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#pdvkernelnew_note" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        PDVKernel.new_note
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#pdvkernelhelp" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        PDVKernel.help
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#pdvkernellog" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        PDVKernel.log
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#protocol-generic-functions-module-api" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Protocol Generic Functions (Module API)
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Protocol Generic Functions (Module API)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#pdvkernelpdv_handle" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        PDVKernel.pdv_handle
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#pdvkernelpdv_preview" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        PDVKernel.pdv_preview
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#pdvkernelpdv_format" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        PDVKernel.pdv_format
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#pdvkernelpdv_serialize" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        PDVKernel.pdv_serialize
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#pdvkernelpdv_deserialize" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        PDVKernel.pdv_deserialize
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#pdvkernelpdv_digest" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        PDVKernel.pdv_digest
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#pdvkernelregister_handler" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        PDVKernel.register_handler
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#pdvkernelregister_serializer" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        PDVKernel.register_serializer
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#script-execution" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Script Execution
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Script Execution">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#pdvkernelrun_tree_script" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        PDVKernel.run_tree_script
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#exceptions" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Exceptions
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Exceptions">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#pdvkernelpdvexception" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        PDVKernel.PDVException
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#pdvkernelpdvpatherror" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        PDVKernel.PDVPathError
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#pdvkernelpdvkeyerror" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        PDVKernel.PDVKeyError
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#pdvkernelpdvprotectednameerror" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        PDVKernel.PDVProtectedNameError
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#pdvkernelpdvserializationerror" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        PDVKernel.PDVSerializationError
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#pdvkernelpdvscripterror" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        PDVKernel.PDVScriptError
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#pdvkernelpdvversionerror" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        PDVKernel.PDVVersionError
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../modules/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Module Development
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_6" >
+        
+          
+          <label class="md-nav__link" for="__nav_6" id="__nav_6_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Developer Guide
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_6_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_6">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Developer Guide
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../developer/architecture/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Architecture
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../developer/save-pipeline/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Save Pipeline
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../developer/developer-quickstart/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Developer Quick Start
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../developer/contributing/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Contributing
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../developer/setup/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Development Setup
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../developer/testing/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Testing
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="https://github.com/matt-pharr/physics-data-viewer/releases" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Changelog
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#the-tree-pdv_tree" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The Tree (pdv_tree)
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="The Tree (pdv_tree)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#pdvkernelpdvtree" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        PDVKernel.PDVTree
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#tree-node-types" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Tree Node Types
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Tree Node Types">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#pdvkernelpdvscript" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        PDVKernel.PDVScript
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#pdvkernelpdvfile" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        PDVKernel.PDVFile
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#pdvkernelpdvnote" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        PDVKernel.PDVNote
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#pdvkernelpdvgui" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        PDVKernel.PDVGui
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#pdvkernelpdvnamelist" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        PDVKernel.PDVNamelist
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#pdvkernelpdvmodule" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        PDVKernel.PDVModule
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#pdvkernelpdvlib" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        PDVKernel.PDVLib
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#app-level-operations" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        App-Level Operations
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="App-Level Operations">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#pdvkernelworking_dir" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        PDVKernel.working_dir
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#pdvkernelsave" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        PDVKernel.save
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#pdvkernelsave_project" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        PDVKernel.save_project
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#pdvkernelsave_project_as" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        PDVKernel.save_project_as
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#pdvkernelopen_project" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        PDVKernel.open_project
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#pdvkernelinstall" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        PDVKernel.install
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#pdvkernelremove" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        PDVKernel.remove
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#pdvkernelupdate" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        PDVKernel.update
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#pdvkerneladd_file" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        PDVKernel.add_file
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#pdvkernelnew_note" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        PDVKernel.new_note
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#pdvkernelhelp" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        PDVKernel.help
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#pdvkernellog" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        PDVKernel.log
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#protocol-generic-functions-module-api" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Protocol Generic Functions (Module API)
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Protocol Generic Functions (Module API)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#pdvkernelpdv_handle" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        PDVKernel.pdv_handle
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#pdvkernelpdv_preview" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        PDVKernel.pdv_preview
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#pdvkernelpdv_format" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        PDVKernel.pdv_format
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#pdvkernelpdv_serialize" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        PDVKernel.pdv_serialize
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#pdvkernelpdv_deserialize" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        PDVKernel.pdv_deserialize
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#pdvkernelpdv_digest" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        PDVKernel.pdv_digest
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#pdvkernelregister_handler" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        PDVKernel.register_handler
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#pdvkernelregister_serializer" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        PDVKernel.register_serializer
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#script-execution" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Script Execution
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Script Execution">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#pdvkernelrun_tree_script" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        PDVKernel.run_tree_script
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#exceptions" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Exceptions
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Exceptions">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#pdvkernelpdvexception" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        PDVKernel.PDVException
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#pdvkernelpdvpatherror" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        PDVKernel.PDVPathError
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#pdvkernelpdvkeyerror" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        PDVKernel.PDVKeyError
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#pdvkernelpdvprotectednameerror" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        PDVKernel.PDVProtectedNameError
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#pdvkernelpdvserializationerror" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        PDVKernel.PDVSerializationError
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#pdvkernelpdvscripterror" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        PDVKernel.PDVScriptError
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#pdvkernelpdvversionerror" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        PDVKernel.PDVVersionError
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+    <a href="https://github.com/matt-pharr/physics-data-viewer/edit/develop/docs/api-reference/julia.md" title="Edit this page" class="md-content__button md-icon" rel="edit">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M10 20H6V4h7v5h5v3.1l2-2V8l-6-6H6c-1.1 0-2 .9-2 2v16c0 1.1.9 2 2 2h4zm10.2-7c.1 0 .3.1.4.2l1.3 1.3c.2.2.2.6 0 .8l-1 1-2.1-2.1 1-1c.1-.1.2-.2.4-.2m0 3.9L14.1 23H12v-2.1l6.1-6.1z"/></svg>
+    </a>
+  
+  
+
+
+<!-- GENERATED FILE — do not edit by hand.
+     Regenerate with:
+       julia --project=pdv-julia pdv-julia/scripts/generate-api-docs.jl
+     and commit the result. -->
+
+<h1 id="julia-api-pdvkernel">Julia API (<code>PDVKernel</code>)<a class="headerlink" href="#julia-api-pdvkernel" title="Permanent link">&para;</a></h1>
+<p>This reference documents the Julia surface exposed by the <code>PDVKernel</code>
+package — the <a href="../../developer/architecture/">Julia counterpart</a> of
+<code>pdv-python</code>, with full protocol parity. Everything here is extracted from
+the package's docstrings.</p>
+<p>Two primary names, as in Python:</p>
+<table>
+<thead>
+<tr>
+<th>Name</th>
+<th>What it is</th>
+<th>Reference</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>pdv_tree</code></td>
+<td>The live project data tree (dict-like). <strong>Injected</strong> into <code>Main</code> as a <code>const</code> at kernel startup.</td>
+<td><a href="#the-tree-pdv_tree">The Tree</a></td>
+</tr>
+<tr>
+<td><code>PDVKernel</code></td>
+<td>The package itself, exposing session-level functions.</td>
+<td><a href="#app-level-operations">App-Level Operations</a></td>
+</tr>
+</tbody>
+</table>
+<p>The deliberate Julia translations from the Python API: multiple-dispatch
+generic functions replace decorators and dunder protocols, <code>.jls</code>
+<code>Serialization</code> replaces pickle, sequence dot-paths are 1-based, and
+per-project environments are Pkg-managed (<code>Project.toml</code>/<code>Manifest.toml</code>)
+rather than uv-managed.</p>
+<h2 id="the-tree-pdv_tree">The Tree (<code>pdv_tree</code>)<a class="headerlink" href="#the-tree-pdv_tree" title="Permanent link">&para;</a></h2>
+<p><code>pdv_tree</code> is the live project data tree, injected into <code>Main</code> as a
+<code>const</code> at kernel startup (Julia's <code>const</code> rejection of rebinding
+replaces Python's protected namespace). It behaves like a <code>Dict</code>
+with dot-path access — <code>pdv_tree["results.run_01.temperature"]</code>
+resolves through intermediate dicts, creating them on write.
+Sequence indices in dot-paths are <strong>1-based</strong> (<code>pdv_tree["xs.1"]</code>),
+matching Julia convention; negative indices count from the end.</p>
+<h3 id="pdvkernelpdvtree"><code>PDVKernel.PDVTree</code><a class="headerlink" href="#pdvkernelpdvtree" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>PDVTree()
+</code></pre></div>
+<p>The live project data tree — the sole authority on all project data (ARCHITECTURE.md §5.6, §7.1). Supports dot-path access (<code>tree["data.waveforms.ch1"]</code>) and emits <code>pdv.tree.changed</code> push notifications on mutation when a comm is attached via <code>attach_comm!</code>.</p>
+<h2 id="tree-node-types">Tree Node Types<a class="headerlink" href="#tree-node-types" title="Permanent link">&para;</a></h2>
+<p>Values assigned into the tree are either plain data (numbers,
+strings, arrays, <code>Dict</code>s, arbitrary serializable structs) or
+instances of the node types below, which carry file-backed or
+app-visible behavior.</p>
+<h3 id="pdvkernelpdvscript"><code>PDVKernel.PDVScript</code><a class="headerlink" href="#pdvkernelpdvscript" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>PDVScript(; uuid, filename, language=&quot;julia&quot;, doc=nothing, module_id=&quot;&quot;,
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>          source_rel_path=nothing)
+</code></pre></div>
+<p>Script node. <code>script.run</code> is exposed via <code>script_run</code> / <code>run_tree_script</code>; every run loads the file fresh into an anonymous module so in-place edits always take effect. See ARCHITECTURE.md §5.7.</p>
+<h3 id="pdvkernelpdvfile"><code>PDVKernel.PDVFile</code><a class="headerlink" href="#pdvkernelpdvfile" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>PDVFile(; uuid, filename, source_rel_path=nothing)
+</code></pre></div>
+<p>Generic file-backed tree node (fallback kind <code>"file"</code>). See ARCHITECTURE.md §5.8.</p>
+<h3 id="pdvkernelpdvnote"><code>PDVKernel.PDVNote</code><a class="headerlink" href="#pdvkernelpdvnote" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>PDVNote(; uuid, filename, title=nothing)
+</code></pre></div>
+<p>Markdown note node backed by a <code>.md</code> file.</p>
+<h3 id="pdvkernelpdvgui"><code>PDVKernel.PDVGui</code><a class="headerlink" href="#pdvkernelpdvgui" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>PDVGui(; uuid, filename, module_id=nothing, source_rel_path=nothing)
+</code></pre></div>
+<p>GUI definition node backed by a <code>.gui.json</code> file.</p>
+<h3 id="pdvkernelpdvnamelist"><code>PDVKernel.PDVNamelist</code><a class="headerlink" href="#pdvkernelpdvnamelist" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a>PDVNamelist(; uuid, filename, format=&quot;auto&quot;, module_id=nothing,
+<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a>            source_rel_path=nothing)
+</code></pre></div>
+<p>Namelist node (<code>"fortran"</code>, <code>"toml"</code>, or <code>"auto"</code>) backed by a namelist file.</p>
+<h3 id="pdvkernelpdvmodule"><code>PDVKernel.PDVModule</code><a class="headerlink" href="#pdvkernelpdvmodule" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a>PDVModule(; module_id, name, version, gui=nothing, dependencies=[],
+<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a>          description=&quot;&quot;, language=&quot;julia&quot;)
+</code></pre></div>
+<p>Module metadata node. A <code>PDVTree</code>-like container so it holds children naturally (ARCHITECTURE.md §5.9).</p>
+<h3 id="pdvkernelpdvlib"><code>PDVKernel.PDVLib</code><a class="headerlink" href="#pdvkernelpdvlib" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a>PDVLib(; uuid, filename, module_id=nothing, source_rel_path=nothing)
+</code></pre></div>
+<p>Julia library file provided by a module's <code>lib/</code> branch. Lib files are <code>include</code>d into <code>Main</code> by <code>pdv.modules.setup</code> so their exports are available to scripts and handlers (the Julia analog of Python's <code>sys.path</code> wiring).</p>
+<h2 id="app-level-operations">App-Level Operations<a class="headerlink" href="#app-level-operations" title="Permanent link">&para;</a></h2>
+<p>The Julia analog of the <code>pdv</code> package's module-level functions:
+session-level operations that act on the running PDV application,
+called as <code>PDVKernel.&lt;name&gt;(...)</code> from any code cell.</p>
+<h3 id="pdvkernelworking_dir"><code>PDVKernel.working_dir</code><a class="headerlink" href="#pdvkernelworking_dir" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a>working_dir() -&gt; String
+</code></pre></div>
+<p>The session working directory (available after <code>pdv.init</code>).</p>
+<h3 id="pdvkernelsave"><code>PDVKernel.save</code><a class="headerlink" href="#pdvkernelsave" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a>save()
+</code></pre></div>
+<p>Trigger a project save. Equivalent to File → Save in the UI.</p>
+<h3 id="pdvkernelsave_project"><code>PDVKernel.save_project</code><a class="headerlink" href="#pdvkernelsave_project" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a>save_project(path=nothing)
+</code></pre></div>
+<p>Save the current project. With no <code>path</code>, saves to the current project location (or asks the app to run its save flow when no project is open).</p>
+<h3 id="pdvkernelsave_project_as"><code>PDVKernel.save_project_as</code><a class="headerlink" href="#pdvkernelsave_project_as" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a>save_project_as(path)
+</code></pre></div>
+<p>Save the project to a new directory (Save As).</p>
+<h3 id="pdvkernelopen_project"><code>PDVKernel.open_project</code><a class="headerlink" href="#pdvkernelopen_project" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a>open_project(path)
+</code></pre></div>
+<p>Ask the app to open a project from a directory.</p>
+<h3 id="pdvkernelinstall"><code>PDVKernel.install</code><a class="headerlink" href="#pdvkernelinstall" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-13-1" name="__codelineno-13-1" href="#__codelineno-13-1"></a>install(packages...)
+</code></pre></div>
+<p>Install Julia packages into the active environment via <code>Pkg.add</code>, blocking the cell until the install finishes. The packages become loadable without a kernel restart. (The Julia analog of <code>pdv.install()</code>, delegating to Pkg rather than uv.) Each package is a name, optionally with a REPL-style version pin — <code>install("DataFrames")</code> or <code>install("DataFrames@1.6")</code> — which <code>Pkg.add</code>'s string form does not accept but this function translates to a <code>PackageSpec</code> for you.</p>
+<p>In a pkg-mode session (ARCHITECTURE.md §10.6) the active environment is the project's own — the app launches the kernel with <code>JULIA_PROJECT</code> pointing at the session working directory — so the install is recorded in the project's <code>Project.toml</code>/<code>Manifest.toml</code> and travels with the save. In a legacy shared-mode session it lands in the user's default environment.</p>
+<h3 id="pdvkernelremove"><code>PDVKernel.remove</code><a class="headerlink" href="#pdvkernelremove" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-14-1" name="__codelineno-14-1" href="#__codelineno-14-1"></a>remove(packages...)
+</code></pre></div>
+<p>Remove Julia packages from the active environment via <code>Pkg.rm</code>, blocking the cell until the operation finishes. In a pkg-mode session (ARCHITECTURE.md §10.6) this edits the project's <code>Project.toml</code>/<code>Manifest.toml</code>. An already- loaded module stays loaded until the kernel restarts — removal only affects what future <code>using</code>/<code>import</code> can resolve.</p>
+<h3 id="pdvkernelupdate"><code>PDVKernel.update</code><a class="headerlink" href="#pdvkernelupdate" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-15-1" name="__codelineno-15-1" href="#__codelineno-15-1"></a>update(packages...)
+</code></pre></div>
+<p>Upgrade Julia packages in the active environment via <code>Pkg.update</code>, blocking the cell until the operation finishes. With no arguments, upgrades every package the environment allows. In a pkg-mode session (ARCHITECTURE.md §10.6) the new versions are recorded in the project's <code>Manifest.toml</code>. A package already loaded in this session keeps its old version until the kernel restarts — <code>Pkg</code> prints a note when that applies.</p>
+<h3 id="pdvkerneladd_file"><code>PDVKernel.add_file</code><a class="headerlink" href="#pdvkerneladd_file" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-16-1" name="__codelineno-16-1" href="#__codelineno-16-1"></a>add_file(source_path) -&gt; PDVFile
+</code></pre></div>
+<p>Import an arbitrary file into the tree as a <code>PDVFile</code>. Eagerly copies the source into the session working directory under a fresh UUID storage path; assign the returned node at the desired tree path:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-17-1" name="__codelineno-17-1" href="#__codelineno-17-1"></a>mesh = PDVKernel.add_file(&quot;~/Downloads/mesh.h5&quot;)
+<a id="__codelineno-17-2" name="__codelineno-17-2" href="#__codelineno-17-2"></a>pdv_tree[&quot;simulation.mesh&quot;] = mesh
+</code></pre></div>
+<h3 id="pdvkernelnew_note"><code>PDVKernel.new_note</code><a class="headerlink" href="#pdvkernelnew_note" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-18-1" name="__codelineno-18-1" href="#__codelineno-18-1"></a>new_note(path; title=nothing)
+</code></pre></div>
+<p>Create a markdown note in the tree at a dot-separated path.</p>
+<h3 id="pdvkernelhelp"><code>PDVKernel.help</code><a class="headerlink" href="#pdvkernelhelp" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-19-1" name="__codelineno-19-1" href="#__codelineno-19-1"></a>help(topic=nothing)
+</code></pre></div>
+<p>Print PDV help.</p>
+<h3 id="pdvkernellog"><code>PDVKernel.log</code><a class="headerlink" href="#pdvkernellog" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-20-1" name="__codelineno-20-1" href="#__codelineno-20-1"></a>log(args...)
+</code></pre></div>
+<p>Print a debug message directly to the real stderr (fd 2), bypassing IJulia's stream capture, so it appears in the Electron terminal prefixed with <code>[kernel:&lt;id&gt;]</code>.</p>
+<h2 id="protocol-generic-functions-module-api">Protocol Generic Functions (Module API)<a class="headerlink" href="#protocol-generic-functions-module-api" title="Permanent link">&para;</a></h2>
+<p>Where Python modules use decorators (<code>@pdv.handle</code>) and dunder
+methods (<code>__pdv_format__</code>, …), Julia modules extend <strong>generic
+functions</strong> with methods for their own types — multiple dispatch is
+the extension mechanism. Define a method and PDV picks it up; user
+methods always win over the built-in defaults by dispatch
+specificity.</p>
+<h3 id="pdvkernelpdv_handle"><code>PDVKernel.pdv_handle</code><a class="headerlink" href="#pdvkernelpdv_handle" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-21-1" name="__codelineno-21-1" href="#__codelineno-21-1"></a>pdv_handle(obj, path::AbstractString, tree)
+</code></pre></div>
+<p>Protocol hook: double-click handler for tree nodes holding values of the method's type. The Julia analog of Python's <code>@pdv.handle</code> decorator — modules register handlers by adding methods (see the bundled N-pendulum-julia module).</p>
+<h3 id="pdvkernelpdv_preview"><code>PDVKernel.pdv_preview</code><a class="headerlink" href="#pdvkernelpdv_preview" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-22-1" name="__codelineno-22-1" href="#__codelineno-22-1"></a>pdv_preview(obj) -&gt; String
+</code></pre></div>
+<p>Protocol hook: short human-readable preview shown in the tree panel.</p>
+<h3 id="pdvkernelpdv_format"><code>PDVKernel.pdv_format</code><a class="headerlink" href="#pdvkernelpdv_format" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-23-1" name="__codelineno-23-1" href="#__codelineno-23-1"></a>pdv_format(::Type{T}) -&gt; (format_name::String, extension::String)
+</code></pre></div>
+<p>Protocol hook: declare the on-disk format for values of type <code>T</code>. Required (together with <code>pdv_serialize</code> and <code>pdv_deserialize</code>) to opt a type into PDV persistence.</p>
+<h3 id="pdvkernelpdv_serialize"><code>PDVKernel.pdv_serialize</code><a class="headerlink" href="#pdvkernelpdv_serialize" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-24-1" name="__codelineno-24-1" href="#__codelineno-24-1"></a>pdv_serialize(obj, abs_path::AbstractString)
+</code></pre></div>
+<p>Protocol hook: write <code>obj</code>'s state to <code>abs_path</code>. PDV chooses the path.</p>
+<h3 id="pdvkernelpdv_deserialize"><code>PDVKernel.pdv_deserialize</code><a class="headerlink" href="#pdvkernelpdv_deserialize" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-25-1" name="__codelineno-25-1" href="#__codelineno-25-1"></a>pdv_deserialize(::Type{T}, abs_path::AbstractString) -&gt; T
+</code></pre></div>
+<p>Protocol hook: read the file written by <code>pdv_serialize</code> and return a reconstructed instance.</p>
+<h3 id="pdvkernelpdv_digest"><code>PDVKernel.pdv_digest</code><a class="headerlink" href="#pdvkernelpdv_digest" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-26-1" name="__codelineno-26-1" href="#__codelineno-26-1"></a>pdv_digest(obj) -&gt; Vector{UInt8} | String
+</code></pre></div>
+<p>Protocol hook: stable byte payload used for change-detection checksums.</p>
+<h3 id="pdvkernelregister_handler"><code>PDVKernel.register_handler</code><a class="headerlink" href="#pdvkernelregister_handler" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-27-1" name="__codelineno-27-1" href="#__codelineno-27-1"></a>register_handler(func, T::Type)
+</code></pre></div>
+<p>Register <code>func(obj, path, tree)</code> as the double-click handler for values of type <code>T</code> (and subtypes, via supertype walk). The explicit-registration analog of adding a <code>pdv_handle</code> method; registered handlers take precedence.</p>
+<h3 id="pdvkernelregister_serializer"><code>PDVKernel.register_serializer</code><a class="headerlink" href="#pdvkernelregister_serializer" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-28-1" name="__codelineno-28-1" href="#__codelineno-28-1"></a>register_serializer(T::Type; format, extension=&quot;.bin&quot;, save, load, preview=nothing)
+</code></pre></div>
+<p>Register a custom serializer for instances of <code>T</code>. PDV chooses the on-disk filename and passes an absolute path to <code>save(obj, abs_path)</code>; <code>load(abs_path)</code> must return a reconstructed instance at project-load time. Lookup walks the type hierarchy, so a serializer registered on an abstract type also covers subtypes.</p>
+<p>Throws <code>PDVSerializationError</code> when <code>format</code> is empty or collides with a builtin format name.</p>
+<h2 id="script-execution">Script Execution<a class="headerlink" href="#script-execution" title="Permanent link">&para;</a></h2>
+<p>PDV scripts define <code>run(pdv_tree; kwargs...)</code>; the app invokes them
+through <code>run_tree_script</code>, which is also callable directly from a
+cell.</p>
+<h3 id="pdvkernelrun_tree_script"><code>PDVKernel.run_tree_script</code><a class="headerlink" href="#pdvkernelrun_tree_script" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-29-1" name="__codelineno-29-1" href="#__codelineno-29-1"></a>run_tree_script(tree, script_path; kwargs...) -&gt; Any
+</code></pre></div>
+<p>Entry point used by the app's <code>script:run</code> IPC handler (see <code>ipc-register-tree-namespace-script.ts</code>). Identical to <code>run_script</code>.</p>
+<h2 id="exceptions">Exceptions<a class="headerlink" href="#exceptions" title="Permanent link">&para;</a></h2>
+<p>PDV error types, mirroring <code>pdv-python</code>'s exception hierarchy.</p>
+<h3 id="pdvkernelpdvexception"><code>PDVKernel.PDVException</code><a class="headerlink" href="#pdvkernelpdvexception" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-30-1" name="__codelineno-30-1" href="#__codelineno-30-1"></a>PDVException
+</code></pre></div>
+<p>Abstract supertype for all PDVKernel errors (mirror of Python's <code>PDVError</code>).</p>
+<h3 id="pdvkernelpdvpatherror"><code>PDVKernel.PDVPathError</code><a class="headerlink" href="#pdvkernelpdvpatherror" title="Permanent link">&para;</a></h3>
+<p>Raised when a path is invalid, escapes the project root, or is otherwise unsafe.</p>
+<h3 id="pdvkernelpdvkeyerror"><code>PDVKernel.PDVKeyError</code><a class="headerlink" href="#pdvkernelpdvkeyerror" title="Permanent link">&para;</a></h3>
+<p>Raised when a tree path does not exist.</p>
+<h3 id="pdvkernelpdvprotectednameerror"><code>PDVKernel.PDVProtectedNameError</code><a class="headerlink" href="#pdvkernelpdvprotectednameerror" title="Permanent link">&para;</a></h3>
+<p>Raised when user code attempts to reassign a protected kernel namespace name.</p>
+<h3 id="pdvkernelpdvserializationerror"><code>PDVKernel.PDVSerializationError</code><a class="headerlink" href="#pdvkernelpdvserializationerror" title="Permanent link">&para;</a></h3>
+<p>Raised when a value cannot be serialized to or deserialized from disk.</p>
+<h3 id="pdvkernelpdvscripterror"><code>PDVKernel.PDVScriptError</code><a class="headerlink" href="#pdvkernelpdvscripterror" title="Permanent link">&para;</a></h3>
+<p>Raised when a script fails to load or its <code>run()</code> function throws.</p>
+<h3 id="pdvkernelpdvversionerror"><code>PDVKernel.PDVVersionError</code><a class="headerlink" href="#pdvkernelpdvversionerror" title="Permanent link">&para;</a></h3>
+<p>Raised when the app's expected protocol version is incompatible with this package.</p>
+
+
+
+
+
+
+
+  
+    
+  
+  
+    
+  
+
+
+  <aside class="md-source-file">
+    
+      
+  <span class="md-source-file__fact">
+    <span class="md-icon" title="Last update">
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M21 13.1c-.1 0-.3.1-.4.2l-1 1 2.1 2.1 1-1c.2-.2.2-.6 0-.8l-1.3-1.3c-.1-.1-.2-.2-.4-.2m-1.9 1.8-6.1 6V23h2.1l6.1-6.1zM12.5 7v5.2l4 2.4-1 1L11 13V7zM11 21.9c-5.1-.5-9-4.8-9-9.9C2 6.5 6.5 2 12 2c5.3 0 9.6 4.1 10 9.3-.3-.1-.6-.2-1-.2s-.7.1-1 .2C19.6 7.2 16.2 4 12 4c-4.4 0-8 3.6-8 8 0 4.1 3.1 7.5 7.1 7.9l-.1.2z"/></svg>
+    </span>
+    <span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-date" title="July 15, 2026 07:49:53 UTC">July 15, 2026</span>
+  </span>
+
+    
+    
+      
+  <span class="md-source-file__fact">
+    <span class="md-icon" title="Created">
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M14.47 15.08 11 13V7h1.5v5.25l3.08 1.83c-.41.28-.79.62-1.11 1m-1.39 4.84c-.36.05-.71.08-1.08.08-4.42 0-8-3.58-8-8s3.58-8 8-8 8 3.58 8 8c0 .37-.03.72-.08 1.08.69.1 1.33.32 1.92.64.1-.56.16-1.13.16-1.72 0-5.5-4.5-10-10-10S2 6.5 2 12s4.47 10 10 10c.59 0 1.16-.06 1.72-.16-.32-.59-.54-1.23-.64-1.92M18 15v3h-3v2h3v3h2v-3h3v-2h-3v-3z"/></svg>
+    </span>
+    <span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-date" title="July 15, 2026 05:30:10 UTC">July 15, 2026</span>
+  </span>
+
+    
+    
+    
+  </aside>
+
+
+  
+
+
+
+  <form class="md-feedback" name="feedback" hidden>
+    <fieldset>
+      <legend class="md-feedback__title">
+        Was this page helpful?
+      </legend>
+      <div class="md-feedback__inner">
+        <div class="md-feedback__list">
+          
+            <button class="md-feedback__icon md-icon" type="submit" title="This page was helpful" data-md-value="1">
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 12a8 8 0 0 0-8-8 8 8 0 0 0-8 8 8 8 0 0 0 8 8 8 8 0 0 0 8-8m2 0a10 10 0 0 1-10 10A10 10 0 0 1 2 12 10 10 0 0 1 12 2a10 10 0 0 1 10 10M10 9.5c0 .8-.7 1.5-1.5 1.5S7 10.3 7 9.5 7.7 8 8.5 8s1.5.7 1.5 1.5m7 0c0 .8-.7 1.5-1.5 1.5S14 10.3 14 9.5 14.7 8 15.5 8s1.5.7 1.5 1.5m-5 7.73c-1.75 0-3.29-.73-4.19-1.81L9.23 14c.45.72 1.52 1.23 2.77 1.23s2.32-.51 2.77-1.23l1.42 1.42c-.9 1.08-2.44 1.81-4.19 1.81"/></svg>
+            </button>
+          
+            <button class="md-feedback__icon md-icon" type="submit" title="This page could be improved" data-md-value="0">
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 12a8 8 0 0 0-8-8 8 8 0 0 0-8 8 8 8 0 0 0 8 8 8 8 0 0 0 8-8m2 0a10 10 0 0 1-10 10A10 10 0 0 1 2 12 10 10 0 0 1 12 2a10 10 0 0 1 10 10m-6.5-4c.8 0 1.5.7 1.5 1.5s-.7 1.5-1.5 1.5-1.5-.7-1.5-1.5.7-1.5 1.5-1.5M10 9.5c0 .8-.7 1.5-1.5 1.5S7 10.3 7 9.5 7.7 8 8.5 8s1.5.7 1.5 1.5m2 4.5c1.75 0 3.29.72 4.19 1.81l-1.42 1.42C14.32 16.5 13.25 16 12 16s-2.32.5-2.77 1.23l-1.42-1.42C8.71 14.72 10.25 14 12 14"/></svg>
+            </button>
+          
+        </div>
+        <div class="md-feedback__note">
+          
+            <div data-md-value="1" hidden>
+              
+              
+                
+              
+              
+              
+                
+                
+              
+              Thanks for the feedback!
+            </div>
+          
+            <div data-md-value="0" hidden>
+              
+              
+                
+              
+              
+              
+                
+                
+              
+              Thanks for the feedback! Help us improve by <a href="https://github.com/matt-pharr/physics-data-viewer/issues/new?labels=documentation&title=Docs+feedback:+" target="_blank" rel="noopener">opening a documentation issue</a>.
+            </div>
+          
+        </div>
+      </div>
+    </fieldset>
+  </form>
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+    
+      
+      <nav class="md-footer__inner md-grid" aria-label="Footer" >
+        
+          
+          <a href="../errors/" class="md-footer__link md-footer__link--prev" aria-label="Previous: Exceptions">
+            <div class="md-footer__button md-icon">
+              
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+            </div>
+            <div class="md-footer__title">
+              <span class="md-footer__direction">
+                Previous
+              </span>
+              <div class="md-ellipsis">
+                Exceptions
+              </div>
+            </div>
+          </a>
+        
+        
+          
+          <a href="../../modules/" class="md-footer__link md-footer__link--next" aria-label="Next: Module Development">
+            <div class="md-footer__title">
+              <span class="md-footer__direction">
+                Next
+              </span>
+              <div class="md-ellipsis">
+                Module Development
+              </div>
+            </div>
+            <div class="md-footer__button md-icon">
+              
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M4 11v2h12l-5.5 5.5 1.42 1.42L19.84 12l-7.92-7.92L10.5 5.5 16 11z"/></svg>
+            </div>
+          </a>
+        
+      </nav>
+    
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+      <div class="md-consent" data-md-component="consent" id="__consent" hidden>
+        <div class="md-consent__overlay"></div>
+        <aside class="md-consent__inner">
+          <form class="md-consent__form md-grid md-typeset" name="consent">
+            
+
+
+
+  
+
+<h4>Cookie consent</h4>
+<p>We use cookies to measure documentation usage so we can see which pages are helpful and where users get stuck. Nothing personal is collected.</p>
+<input class="md-toggle" type="checkbox" id="__settings" checked>
+<div class="md-consent__settings">
+  <ul class="task-list">
+    
+    
+      
+        
+  
+  
+    
+    
+  
+  <li class="task-list-item">
+    <label class="task-list-control">
+      <input type="checkbox" name="analytics" checked>
+      <span class="task-list-indicator"></span>
+      Google Analytics
+    </label>
+  </li>
+
+      
+    
+    
+      
+        
+  
+  
+    
+    
+  
+  <li class="task-list-item">
+    <label class="task-list-control">
+      <input type="checkbox" name="github" checked>
+      <span class="task-list-indicator"></span>
+      GitHub
+    </label>
+  </li>
+
+      
+    
+    
+  </ul>
+</div>
+<div class="md-consent__controls">
+  
+    
+      <button class="md-button md-button--primary">Accept</button>
+    
+    
+    
+  
+</div>
+          </form>
+        </aside>
+      </div>
+      <script>var consent=__md_get("__consent");if(consent)for(var input of document.forms.consent.elements)input.name&&(input.checked=consent[input.name]||!1);else"file:"!==location.protocol&&setTimeout((function(){document.querySelector("[data-md-component=consent]").hidden=!1}),250);var form=document.forms.consent;for(var action of["submit","reset"])form.addEventListener(action,(function(e){if(e.preventDefault(),"reset"===e.type)for(var n of document.forms.consent.elements)n.name&&(n.checked=!1);__md_set("__consent",Object.fromEntries(Array.from(new FormData(form).keys()).map((function(e){return[e,!0]})))),location.hash="",location.reload()}))</script>
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "../..", "features": ["navigation.tabs", "navigation.sections", "navigation.expand", "navigation.top", "navigation.footer", "search.suggest", "search.highlight", "content.code.copy", "content.code.annotate", "content.action.edit"], "search": "../../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": {"default": "latest", "provider": "mike"}}</script>
+    
+    
+      <script src="../../assets/javascripts/bundle.d7400e89.min.js"></script>
+      
+        <script src="https://unpkg.com/mathjax@3/es5/tex-mml-chtml.js"></script>
+      
+    
+  </body>
+</html>
