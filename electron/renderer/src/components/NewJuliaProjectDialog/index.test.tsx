@@ -14,6 +14,7 @@ afterEach(() => {
 function renderDialog(overrides: {
   channels?: Awaited<ReturnType<PDVApi['environment']['juliaupChannels']>>;
   juliaupInstalled?: boolean;
+  defaultPackages?: string[];
 } = {}) {
   installPdvMock({
     environment: {
@@ -27,7 +28,12 @@ function renderDialog(overrides: {
     },
   });
   const handlers = { onCreate: vi.fn(), onCancel: vi.fn() };
-  render(<NewJuliaProjectDialog {...handlers} />);
+  render(
+    <NewJuliaProjectDialog
+      defaultPackages={overrides.defaultPackages ?? []}
+      {...handlers}
+    />,
+  );
   return handlers;
 }
 
@@ -60,6 +66,20 @@ describe('NewJuliaProjectDialog', () => {
       juliaVersion: '1.10',
       packages: ['DataFrames', 'CSV@1.6', 'NPZ'],
     });
+  });
+
+  it('prefills Initial packages from defaultJuliaPackages and keeps edits', async () => {
+    const { onCreate } = renderDialog({ defaultPackages: ['CairoMakie', 'HDF5'] });
+    const packages = screen.getByTestId('new-julia-project-packages') as HTMLInputElement;
+    expect(packages.value).toBe('CairoMakie, HDF5');
+    // Entries are removable per project — clearing one must stick.
+    const user = userEvent.setup();
+    await user.clear(packages);
+    await user.type(packages, 'HDF5');
+    await user.click(screen.getByTestId('new-julia-project-create'));
+    expect(onCreate).toHaveBeenCalledWith(
+      expect.objectContaining({ packages: ['HDF5'] }),
+    );
   });
 
   it('without juliaup: no version select, and Create passes no version', async () => {

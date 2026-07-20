@@ -416,6 +416,8 @@ export interface Config {
   autoSaveIntervalSeconds?: number;
   /** Packages (PEP 508 specs) seeded into a new uv project. */
   defaultPackages?: string[];
+  /** Julia packages (Pkg specs, `Name@version` pins allowed) seeded into a new pkg-mode project. */
+  defaultJuliaPackages?: string[];
   /** Local AI-agent MCP server settings, surfaced in the Agents tab. */
   mcp?: {
     /** Preferred TCP port for the MCP server to bind. */

@@ -87,6 +87,16 @@ export interface PDVConfig {
    * out of the box. Editing it never changes existing projects.
    */
   defaultPackages?: string[];
+  /**
+   * Julia sibling of defaultPackages: package specs (Pkg names, optionally
+   * `Name@version` pins) seeded into a new pkg-mode Julia project at
+   * creation (ARCHITECTURE.md §10.6.5). The New Julia Project dialog
+   * prefills from it so users can remove entries per project. Defaults to
+   * ["CairoMakie", "HDF5"] — a Makie backend so the default double-click
+   * plot handlers work out of the box, and HDF5.jl so PDVHdf5 nodes do.
+   * Editing it never changes existing projects.
+   */
+  defaultJuliaPackages?: string[];
   /** Renderer settings blob persisted by Settings dialog. */
   settings?: {
     shortcuts?: Record<string, string>;
@@ -186,6 +196,7 @@ const CONFIG_DEFAULTS: PDVConfig = {
   autoRefreshNamespace: false,
   autoSaveIntervalSeconds: DEFAULT_AUTOSAVE_INTERVAL_S,
   defaultPackages: ["numpy", "matplotlib", "xarray", "netcdf4", "h5py"],
+  defaultJuliaPackages: ["CairoMakie", "HDF5"],
   settings: {
     appearance: {
       themeName: "Dark+ (VSCode)",
@@ -222,7 +233,11 @@ const BOOLEAN_KEYS = [
 ] as const;
 
 /** String-array keys: null/undefined tolerated, non-string entries throw. */
-const STRING_ARRAY_KEYS = ["defaultPackages", "recentProjects"] as const;
+const STRING_ARRAY_KEYS = [
+  "defaultPackages",
+  "defaultJuliaPackages",
+  "recentProjects",
+] as const;
 
 /**
  * Nested-object keys passed through without deep validation:

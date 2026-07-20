@@ -47,6 +47,7 @@ describe("ConfigStore", () => {
       autoRefreshNamespace: false,
       autoSaveIntervalSeconds: 300,
       defaultPackages: ["numpy", "matplotlib", "xarray", "netcdf4", "h5py"],
+      defaultJuliaPackages: ["CairoMakie", "HDF5"],
       settings: {
         appearance: {
           themeName: "Dark+ (VSCode)",
@@ -95,6 +96,7 @@ describe("ConfigStore", () => {
       autoRefreshNamespace: false,
       autoSaveIntervalSeconds: 300,
       defaultPackages: ["numpy", "matplotlib", "xarray", "netcdf4", "h5py"],
+      defaultJuliaPackages: ["CairoMakie", "HDF5"],
       theme: "dark",
       settings: {
         appearance: {
@@ -142,6 +144,7 @@ describe("ConfigStore", () => {
       autoRefreshNamespace: false,
       autoSaveIntervalSeconds: 300,
       defaultPackages: ["numpy", "matplotlib", "xarray", "netcdf4", "h5py"],
+      defaultJuliaPackages: ["CairoMakie", "HDF5"],
       settings: {
         appearance: {
           themeName: "Dark+ (VSCode)",
@@ -361,6 +364,18 @@ describe("ConfigStore", () => {
 
     const store = new ConfigStore(appDataDir);
     expect(store.get("defaultPackages")).toEqual(["scipy", "xarray"]);
+  });
+
+  it("loads a custom defaultJuliaPackages list from preferences.json", () => {
+    const appDataDir = makeTempDir();
+    fs.writeFileSync(
+      path.join(appDataDir, "preferences.json"),
+      JSON.stringify({ defaultJuliaPackages: ["DataFrames@1.6"] }, null, 2),
+      "utf8"
+    );
+
+    const store = new ConfigStore(appDataDir);
+    expect(store.get("defaultJuliaPackages")).toEqual(["DataFrames@1.6"]);
   });
 
 });

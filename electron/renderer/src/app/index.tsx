@@ -1990,6 +1990,7 @@ const App: React.FC = () => {
 
        {activeDialog?.kind === 'newJuliaProject' && (
          <NewJuliaProjectDialog
+           defaultPackages={config?.defaultJuliaPackages ?? []}
            onCreate={(opts) => void handleNewProjectCreatePkg(opts)}
            onCancel={closeDialog}
          />
