@@ -1030,15 +1030,18 @@ class PDVDataset(PDVFile):
         """Close the cached handle (if any) and clear any recorded error.
 
         The next access reopens the file — this is also the retry path
-        after a failed open.
+        after a failed open. Serialized with :meth:`open` under the module
+        lock so a close on the main thread cannot interleave with handle
+        creation on the QueryServer thread.
         """
-        if self._ds is not None:
-            try:
-                self._ds.close()
-            except Exception:
-                pass
-        self._ds = None
-        self._open_error = None
+        with _DATA_FILE_OPEN_LOCK:
+            if self._ds is not None:
+                try:
+                    self._ds.close()
+                except Exception:
+                    pass
+            self._ds = None
+            self._open_error = None
 
     def __pdv_children__(self) -> list:
         """Virtual children: data variables, then coordinates."""
@@ -1215,14 +1218,20 @@ class PDVHdf5(PDVFile):
         return [str(k) for k in self.open().keys()]
 
     def close(self) -> None:
-        """Close the cached handle (if any) and clear any recorded error."""
-        if self._handle is not None:
-            try:
-                self._handle.close()
-            except Exception:
-                pass
-        self._handle = None
-        self._open_error = None
+        """Close the cached handle (if any) and clear any recorded error.
+
+        Serialized with :meth:`open` under the module lock so a close on
+        the main thread cannot interleave with handle creation on the
+        QueryServer thread.
+        """
+        with _DATA_FILE_OPEN_LOCK:
+            if self._handle is not None:
+                try:
+                    self._handle.close()
+                except Exception:
+                    pass
+            self._handle = None
+            self._open_error = None
 
     def __pdv_children__(self) -> list:
         """Virtual children: the root group's members.

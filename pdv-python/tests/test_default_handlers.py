@@ -343,6 +343,34 @@ class TestH5pyDefault:
         assert "Cannot plot 'test.big'" in out
         assert "Slice it in code" in out
 
+    def test_vlen_string_dataset_bails_before_reading(self, tmp_path, capsys):
+        """Non-numeric dtypes print the no-plot notice without materializing.
+
+        vlen/object dtypes report itemsize 8 (the pointer, not the payload),
+        so the size cap alone would wildly undercount a string dataset and
+        read it fully just to fail plotting — the dtype gate must fire first
+        (review). The floored cap proves the gate precedes the cap check.
+        """
+        h5py = pytest.importorskip("h5py")
+        from pdv import default_handlers
+
+        register_defaults()
+        with h5py.File(tmp_path / "t.h5", "w") as f:
+            f.create_dataset("s", data=["alpha", "beta"])
+        with h5py.File(tmp_path / "t.h5", "r") as f:
+            orig = default_handlers._H5PY_PLOT_MAX_BYTES
+            default_handlers._H5PY_PLOT_MAX_BYTES = 1
+            try:
+                result = dispatch_handler(f["s"], "test.strs", None)
+            finally:
+                default_handlers._H5PY_PLOT_MAX_BYTES = orig
+
+        assert result == {"dispatched": True}
+        assert _figure_count() == 0
+        out = capsys.readouterr().out
+        assert "No default plot for h5py dataset" in out
+        assert "cap" not in out
+
 
 class TestRegistration:
     def test_handlers_registered_for_present_types(self):

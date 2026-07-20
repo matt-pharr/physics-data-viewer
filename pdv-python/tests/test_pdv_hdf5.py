@@ -207,6 +207,34 @@ class TestGracefulFailure:
             assert node.preview() == "requires h5py"
             assert node.__pdv_has_children__() is False
 
+    def test_open_error_short_circuits_then_close_retries(self, tree_with_comm):
+        """A failed open records the error and short-circuits repeat opens;
+        close() clears it so a fixed file reopens (the retry path)."""
+        h5py = pytest.importorskip("h5py")
+        node_uuid = "bad000000003"
+        dest_dir = os.path.join(tree_with_comm._working_dir, "tree", node_uuid)
+        os.makedirs(dest_dir)
+        fpath = os.path.join(dest_dir, "flaky.h5")
+        with open(fpath, "wb") as f:
+            f.write(b"this is not an hdf5 file")
+        node = PDVHdf5(uuid=node_uuid, filename="flaky.h5")
+        tree_with_comm.set_quiet("flaky", node)
+        with patch.object(comms_mod, "_pdv_tree", tree_with_comm):
+            with pytest.raises(PDVError):
+                node.open()
+            recorded = node._open_error
+            assert recorded is not None
+            # Second open raises the recorded error without a fresh attempt.
+            with pytest.raises(PDVError, match="Cannot open 'flaky.h5'"):
+                node.open()
+            assert node._open_error == recorded
+            # Fix the file; close() clears the error → next open succeeds.
+            with h5py.File(fpath, "w") as f:
+                f.create_dataset("x", data=[1.0])
+            node.close()
+            assert node._open_error is None
+            assert node.keys() == ["x"]
+
     def test_corrupt_file_degrades(self, tree_with_comm):
         pytest.importorskip("h5py")
         node_uuid = "bad000000002"

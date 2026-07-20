@@ -270,6 +270,20 @@ def _register_h5py(handle: Any) -> None:
 
     @handle(h5py.Dataset)
     def _on_h5py_dataset(obj: Any, path: str, pdv_tree: Any) -> None:
+        # Only numeric/bool datasets have a default plot — decide from the
+        # dtype BEFORE any read. Also load-bearing for the cap: vlen/object
+        # dtypes report a bogus 8-byte itemsize (the pointer, not the
+        # payload), so the size estimate below would wildly undercount a
+        # string dataset and materialize it just to fail plotting (review).
+        if not (
+            np.issubdtype(obj.dtype, np.number)
+            or np.issubdtype(obj.dtype, np.bool_)
+        ):
+            print(
+                f"[PDV] No default plot for h5py dataset at {path!r} "
+                f"(dtype {obj.dtype})"
+            )
+            return
         nbytes = obj.size * obj.dtype.itemsize
         if nbytes > _H5PY_PLOT_MAX_BYTES:
             print(

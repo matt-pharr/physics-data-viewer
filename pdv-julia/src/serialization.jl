@@ -257,8 +257,11 @@ function node_preview(value, kind::String)::String
         elseif kind == KIND_HDF5_GROUP
             return "group ($(Base.invokelatest(length, value)) items)"
         elseif kind == KIND_HDF5_DATASET
-            # numpy-style dtype names so Python and Julia sessions show the
-            # same chip for the same file (e.g. "float64 (2 × 3)").
+            # numpy-style dtype names so both kernels label element types
+            # identically. The shape shows each language's TRUE array order
+            # for the same file — h5py previews a C-order dataset as
+            # "float64 (2 × 3)", HDF5.jl column-major as "float64 (3 × 2)" —
+            # a deliberate divergence pinned by julia-hdf5-smoke.spec.ts.
             shp = Base.invokelatest(size, value)
             dtype = _dtype_name(Base.invokelatest(eltype, value))
             shape_str = join(string.(shp), " × ")

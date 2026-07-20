@@ -249,6 +249,14 @@ describe("tree:invokeHandler", () => {
       error?: string;
     };
     expect(result).toEqual({ success: true, error: undefined });
+    // The generous timeout is load-bearing: a first plot can pay a
+    // CairoMakie auto-load + precompile (minutes); the default 30 s
+    // stamped a spurious timeout error (julia-hdf5-smoke e2e).
+    expect(harness.commRouter.request).toHaveBeenCalledWith(
+      PDVMessageType.HANDLER_INVOKE,
+      { path: "data.arr" },
+      { timeoutMs: 300_000 },
+    );
     const channels = harness.trackerPushes.map((p) => p.channel);
     expect(channels).toEqual([IPC.push.executeBegin, IPC.push.executeFinish]);
     const [begin, finish] = harness.trackerPushes.map((p) => p.payload);

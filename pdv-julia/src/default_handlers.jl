@@ -125,8 +125,9 @@ end
 
 # Double-clicking an HDF5 dataset (a virtual child of a PDVHdf5 node) never
 # silently materializes more than this many bytes into memory. A Ref so
-# tests can lower it without a 100 MB fixture.
-const _HDF5_PLOT_MAX_BYTES = Ref(100_000_000)
+# tests can lower it without a 100 MB fixture. Same value as pdv-python's
+# _H5PY_PLOT_MAX_BYTES.
+const _HDF5_PLOT_MAX_BYTES = Ref(100 * 1024 * 1024)
 
 function _register_hdf5_defaults!(h5::Module)
     isdefined(h5, :Dataset) || return nothing
@@ -138,17 +139,31 @@ end
 # reuse the numeric/complex array plot methods (same contract as Python's
 # h5py.Dataset handler).
 function _hdf5_dataset_handler(obj, path, tree)
-    nbytes = try
-        n = Base.invokelatest(length, obj)
-        T = Base.invokelatest(eltype, obj)
-        n * max(sizeof(T), 1)
+    # Only numeric datasets have a default plot — decide from the element
+    # type BEFORE any read. This is also load-bearing for the cap: sizeof
+    # throws for vlen/string element types, and a caught-to-zero estimate
+    # would bypass the cap and fully materialize a multi-GB dataset just to
+    # conclude "no default plot" (review finding).
+    T = try
+        Base.invokelatest(eltype, obj)
     catch
-        0
+        nothing
+    end
+    if T === nothing || !(T <: Real || T <: Complex)
+        println("[PDV] No default plot for dataset at '$path' " *
+                "(element type $(T === nothing ? "unknown" : T))")
+        return nothing
+    end
+    nbytes = try
+        Base.invokelatest(length, obj) * max(sizeof(T), 1)
+    catch
+        typemax(Int)  # uncomputable size counts as over-cap, never under
     end
     if nbytes > _HDF5_PLOT_MAX_BYTES[]
-        mb = round(nbytes / 1_000_000; digits=1)
         cap_mb = max(_HDF5_PLOT_MAX_BYTES[] ÷ 1_000_000, 1)
-        println("[PDV] Dataset at '$path' is $(mb) MB — larger than the " *
+        size_desc = nbytes == typemax(Int) ? "of unknown size" :
+                    "$(round(nbytes / 1_000_000; digits=1)) MB"
+        println("[PDV] Dataset at '$path' is $size_desc — larger than the " *
                 "$(cap_mb) MB default-plot cap. Read a slice instead, e.g. " *
                 "pdv_tree[\"$path\"][1:1000].")
         return nothing

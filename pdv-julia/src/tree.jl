@@ -686,10 +686,13 @@ function Base.haskey(t::AbstractPDVTree, key::AbstractString)
     try
         _resolve_nested(t, parts)
         return true
-    catch
+    catch e
         # Membership must never raise (Python-parity contract): a dot-path
         # probing into an unreadable data file (open error, missing
-        # dependency) is simply absent.
+        # dependency) is simply absent. Interrupts still propagate —
+        # Python's `except Exception` never caught KeyboardInterrupt either
+        # (review finding: a swallowed Ctrl-C read as "path absent").
+        e isa InterruptException && rethrow()
         return false
     end
 end

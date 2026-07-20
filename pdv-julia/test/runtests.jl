@@ -86,6 +86,16 @@ PDVKernel._MAKIE_AUTOLOAD_ENABLED[] = false
 # A value Serialization refuses outright, for exercising the save walker's
 # skip-and-report path. (A sleeping Task, surprisingly, serializes fine.)
 struct _Unserializable end
+
+# Virtual container whose child lookup throws — for pinning haskey's
+# exception contract (interrupts propagate, other errors mean "absent").
+struct _ThrowingVirtual end
+struct _ThrowingAdapter <: PDVKernel.VirtualAdapter end
+PDVKernel.virtual_adapter(::_ThrowingVirtual) = _ThrowingAdapter()
+PDVKernel.adapter_children(::_ThrowingAdapter, x) = PDVKernel.ChildEntry[]
+PDVKernel.adapter_has_children(::_ThrowingAdapter, x) = true
+PDVKernel.adapter_child(::_ThrowingAdapter, x, key::String) =
+    key == "interrupt" ? throw(InterruptException()) : error("unreadable")
 Serialization.serialize(::Serialization.AbstractSerializer, ::_Unserializable) =
     error("refusing to serialize _Unserializable")
 
@@ -2033,6 +2043,14 @@ end
     # env, so exercise the builder directly).
     @test occursin("PDVKernel.install(\"HDF5\")", PDVKernel._hdf5_dep_error_message())
 
+    # haskey exception contract (review): a virtual child lookup that
+    # throws means "absent" — EXCEPT interrupts, which must propagate
+    # (Python's `except Exception` never caught KeyboardInterrupt).
+    tv = PDVTree()
+    tv["v"] = _ThrowingVirtual()
+    @test !haskey(tv, "v.anything")
+    @test_throws InterruptException haskey(tv, "v.interrupt")
+
     # deepcopy drops the live handle (same uuid — duplicate handles the
     # fresh-uuid relocation separately).
     with_active_tree(tree) do
@@ -2317,6 +2335,36 @@ end
         end
         @test cresult["dispatched"] == true
         @test occursin("[PDV] Cannot plot 'h5.profiles.cvec'", cnotice)
+
+        # Non-numeric element types bail BEFORE any read — even with the
+        # cap floored, a string dataset must hit the no-default-plot notice,
+        # never the cap message (the sizeof-throws → nbytes=0 bypass would
+        # have materialized it first; review finding).
+        suuid = generate_node_uuid()
+        spath_h5 = uuid_tree_path(wd, suuid, "strings.h5")
+        ensure_parent(spath_h5)
+        HDF5.h5open(spath_h5, "w") do f
+            f["labels"] = ["alpha", "beta", "gamma"]
+        end
+        tree["strs"] = PDVHdf5(uuid=suuid, filename="strings.h5")
+        old_cap0 = PDVKernel._HDF5_PLOT_MAX_BYTES[]
+        PDVKernel._HDF5_PLOT_MAX_BYTES[] = 1
+        try
+            sdset = tree["strs.labels"]
+            local sresult
+            snotice = mktemp() do tmppath, tmpio
+                redirect_stdout(tmpio) do
+                    sresult = dispatch_handler(sdset, "strs.labels", tree)
+                end
+                flush(tmpio)
+                read(tmppath, String)
+            end
+            @test sresult["dispatched"] == true
+            @test occursin("No default plot", snotice)
+            @test !occursin("default-plot cap", snotice)
+        finally
+            PDVKernel._HDF5_PLOT_MAX_BYTES[] = old_cap0
+        end
 
         # Size cap: lower it and confirm the slice hint replaces the read.
         old_cap = PDVKernel._HDF5_PLOT_MAX_BYTES[]
