@@ -1073,7 +1073,7 @@ export interface PDVApi {
       kernelId: string,
       sourcePath: string,
       targetTreePath: string,
-      nodeType: "namelist" | "lib" | "file",
+      nodeType: "namelist" | "lib" | "file" | "dataset_file" | "hdf5_file",
       filename: string
     ): Promise<{ success: boolean; error?: string; workingDirPath?: string }>;
     invokeHandler(

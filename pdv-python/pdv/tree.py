@@ -34,7 +34,7 @@ import sys
 import threading
 from typing import Any, Callable, TypedDict
 
-from pdv.errors import PDVKeyError, PDVPathError, PDVScriptError
+from pdv.errors import PDVError, PDVKeyError, PDVPathError, PDVScriptError
 
 
 # ---------------------------------------------------------------------------
@@ -76,10 +76,11 @@ def _resolve_nested(obj: dict, parts: list[str]) -> Any:
     field of the first waveform when ``waveforms`` is a list of dicts).
     Negative indices are supported (``tree['xs.-1']`` returns the last
     element) since ``int('-n')`` parses and Python's sequence indexing
-    accepts negatives natively. When the current value is an
-    ``xarray.Dataset``, the next part is looked up via
-    ``Dataset.__getitem__``, which resolves both data variables and
-    coordinate names.
+    accepts negatives natively. Any other value with a virtual-children
+    adapter (live ``xarray.Dataset``, ``h5py.Group``, file-backed
+    ``PDVDataset``/``PDVHdf5`` nodes — see :mod:`pdv.virtual`) resolves
+    the next part through ``adapter.child``, so dot-paths descend into
+    those containers to arbitrary depth.
 
     Parameters
     ----------
@@ -99,7 +100,7 @@ def _resolve_nested(obj: dict, parts: list[str]) -> Any:
         If any part is not found at its level, or if a numeric index is
         out of range / non-integer where a list or tuple is expected.
     """
-    from pdv.serialization import is_xarray_dataset  # noqa: PLC0415
+    from pdv.virtual import get_virtual_adapter  # noqa: PLC0415
 
     current: Any = obj
     for part in parts:
@@ -114,16 +115,14 @@ def _resolve_nested(obj: dict, parts: list[str]) -> Any:
                 current = current[index]
             except IndexError:
                 raise KeyError(part) from None
-        elif is_xarray_dataset(current):
-            # Dataset.__getitem__ resolves both data_vars and coords by
-            # name, so coord dot-paths work even though the tree panel
-            # only lists data_vars as children.
+        else:
+            adapter = get_virtual_adapter(current)
+            if adapter is None:
+                raise KeyError(part)
             try:
-                current = current[part]
+                current = adapter.child(current, part)
             except KeyError:
                 raise KeyError(part) from None
-        else:
-            raise KeyError(part)
     return current
 
 
@@ -853,6 +852,438 @@ class PDVNote(PDVFile):
 
 
 # ---------------------------------------------------------------------------
+# PDVDataset / PDVHdf5 — lazy scientific data file nodes
+# ---------------------------------------------------------------------------
+
+
+# Serializes opens of scientific data files. xarray's and h5py's first
+# import/open paths are not guaranteed thread-safe, and tree listings can
+# arrive on the QueryServer thread while user code touches the same node
+# on the main thread.
+_DATA_FILE_OPEN_LOCK = threading.Lock()
+
+
+def _dep_error_message(cls_name: str, missing: list[str], extra: str) -> str:
+    """Build the actionable missing-dependency message for data file nodes.
+
+    Parameters
+    ----------
+    cls_name : str
+        User-facing class name (``'PDVDataset'`` / ``'PDVHdf5'``).
+    missing : list[str]
+        Missing pip package names.
+    extra : str
+        The pdv-python extras group that provides them.
+
+    Returns
+    -------
+    str
+        A message naming both ``pdv.install(...)`` and the pip extra.
+    """
+    pkgs = ", ".join(missing)
+    install_args = ", ".join(f"'{pkg}'" for pkg in missing)
+    return (
+        f"{cls_name} requires packages not installed in the active "
+        f"environment: {pkgs}. Install with pdv.install({install_args}) "
+        f"or pip install 'pdv-python[{extra}]'"
+    )
+
+
+class PDVDataset(PDVFile):
+    """
+    Lazy tree node wrapping an xarray-compatible NetCDF file.
+
+    Stored as the value at a tree path (e.g. ``pdv_tree['gpec.output']``).
+    The backing file is copied into UUID storage at import time and then
+    **never fully loaded**: the dataset is opened lazily (read-only) on
+    first access, xarray pages variable data from disk on demand, and the
+    tree panel lists variables/coordinates straight from the file header.
+    Save copies the file as-is.
+
+    Access from Python code returns live xarray objects::
+
+        pdv_tree['gpec.output']['Phi'].sel(m=5).plot()
+        pdv_tree['gpec.output.Phi']          # dot-path descent works too
+
+    The node is read-only by design: to modify data, load a variable into
+    memory (e.g. ``arr = node['Phi'].load()``), transform it, and store
+    the result at a normal tree path.
+
+    Requires the optional dependencies ``xarray`` plus a NetCDF backend
+    engine (``netcdf4``, ``h5netcdf``, or ``scipy``) — checked when the
+    file is first opened, *not* at construction, so projects containing
+    these nodes always load.
+
+    Parameters
+    ----------
+    uuid : str
+        12-hex-character UUID for this node's storage directory.
+    filename : str
+        Data filename (e.g. ``'gpec_output.nc'``).
+    source_rel_path : str or None
+        Module-relative source path, or None for ordinary project files.
+
+    See Also
+    --------
+    PDVHdf5 : the general-HDF5 sibling node type.
+    ARCHITECTURE.md §7.2
+    """
+
+    #: pip packages that can serve as the xarray NetCDF backend engine,
+    #: with their importable module names (find_spec is case-sensitive).
+    _ENGINE_MODULES = (("netcdf4", "netCDF4"), ("h5netcdf", "h5netcdf"),
+                      ("scipy", "scipy"))
+
+    def __init__(
+        self, uuid: str, filename: str, source_rel_path: str | None = None
+    ) -> None:
+        super().__init__(uuid, filename, source_rel_path)
+        self._ds: Any = None
+        self._open_error: str | None = None
+
+    @classmethod
+    def _missing_deps(cls) -> list[str]:
+        """Return the pip package names still needed to open this node.
+
+        Returns
+        -------
+        list[str]
+            Empty when xarray and at least one backend engine are
+            importable; otherwise the packages to install.
+        """
+        missing: list[str] = []
+        if importlib.util.find_spec("xarray") is None:
+            missing.append("xarray")
+        if not any(
+            importlib.util.find_spec(module) is not None
+            for _pip, module in cls._ENGINE_MODULES
+        ):
+            missing.append("netcdf4")
+        return missing
+
+    def open(self) -> Any:
+        """Open (or return the cached) backing dataset, read-only.
+
+        The first call opens the file with ``xarray.open_dataset`` —
+        lazy, so only headers and coordinates are read — and caches the
+        handle for the rest of the session. A recorded failure
+        short-circuits subsequent calls; :meth:`close` clears it to
+        allow a retry.
+
+        Returns
+        -------
+        xarray.Dataset
+            The live (lazily-paged) dataset.
+
+        Raises
+        ------
+        PDVError
+            If required dependencies are missing or the file cannot be
+            opened.
+        """
+        if self._ds is not None:
+            return self._ds
+        missing = self._missing_deps()
+        if missing:
+            raise PDVError(
+                _dep_error_message("PDVDataset", missing, "netcdf")
+            )
+        if self._open_error is not None:
+            raise PDVError(
+                f"Cannot open '{self._filename}': {self._open_error}"
+            )
+        with _DATA_FILE_OPEN_LOCK:
+            if self._ds is not None:
+                return self._ds
+            import xarray as xr  # noqa: PLC0415
+
+            path = self.resolve_path()
+            try:
+                self._ds = xr.open_dataset(path)
+            except Exception as exc:
+                self._open_error = str(exc)
+                raise PDVError(
+                    f"Cannot open '{self._filename}': {exc}"
+                ) from exc
+        return self._ds
+
+    @property
+    def ds(self) -> Any:
+        """The backing ``xarray.Dataset`` (opens the file on first use)."""
+        return self.open()
+
+    @property
+    def attrs(self) -> dict:
+        """Global attributes of the backing dataset."""
+        return dict(self.open().attrs)
+
+    def __getitem__(self, key: str) -> Any:
+        """Return the variable or coordinate ``key`` as a DataArray."""
+        return self.open()[key]
+
+    def keys(self) -> list[str]:
+        """Return variable names then coordinate names."""
+        ds = self.open()
+        return [str(k) for k in ds.data_vars] + [str(k) for k in ds.coords]
+
+    def close(self) -> None:
+        """Close the cached handle (if any) and clear any recorded error.
+
+        The next access reopens the file — this is also the retry path
+        after a failed open.
+        """
+        if self._ds is not None:
+            try:
+                self._ds.close()
+            except Exception:
+                pass
+        self._ds = None
+        self._open_error = None
+
+    def __pdv_children__(self) -> list:
+        """Virtual children: data variables, then coordinates."""
+        ds = self.open()
+        entries: list = [(str(name), ds[name], None) for name in ds.data_vars]
+        entries.extend(
+            (str(name), ds[name], {"is_coord": True}) for name in ds.coords
+        )
+        return entries
+
+    def __pdv_child__(self, key: str) -> Any:
+        """Single virtual child lookup for dot-path descent."""
+        try:
+            return self.open()[key]
+        except KeyError:
+            raise KeyError(key) from None
+
+    def __pdv_has_children__(self) -> bool:
+        """True if the file has any variables or coordinates.
+
+        Never raises: unopenable files simply report no children (the
+        expansion attempt itself surfaces the actionable error).
+        """
+        try:
+            return len(self.open().variables) > 0
+        except Exception:
+            return False
+
+    def preview(self) -> str:
+        """Return a short preview string for the tree panel.
+
+        Returns
+        -------
+        str
+            Variable/coordinate counts, a dependency hint, or an
+            unreadable marker — never raises.
+        """
+        missing = self._missing_deps()
+        if missing:
+            return f"requires {', '.join(missing)}"
+        try:
+            ds = self.open()
+        except Exception:
+            return f"{self._filename} (unreadable)"
+        return (
+            f"{self._filename} — {len(ds.data_vars)} vars, "
+            f"{len(ds.coords)} coords"
+        )
+
+    def __getstate__(self) -> dict:
+        """Drop the unpicklable live handle for pickle/deepcopy."""
+        state = self.__dict__.copy()
+        state["_ds"] = None
+        state["_open_error"] = None
+        return state
+
+    def __setstate__(self, state: dict) -> None:
+        """Restore with no live handle; the file reopens on next access."""
+        self.__dict__.update(state)
+        self._ds = None
+        self._open_error = None
+
+    def __repr__(self) -> str:
+        return f"PDVDataset(uuid='{self._uuid}', filename='{self._filename}')"
+
+
+class PDVHdf5(PDVFile):
+    """
+    Lazy tree node wrapping a general HDF5 file.
+
+    Stored as the value at a tree path (e.g. ``pdv_tree['efit.data']``).
+    Like :class:`PDVDataset`, the backing file is copied into UUID
+    storage at import time and opened lazily (read-only) on first access;
+    h5py pages data from disk on demand and the tree panel walks the
+    group hierarchy straight from the file. Save copies the file as-is.
+
+    Access from Python code returns live h5py objects, with native
+    slash-path support::
+
+        pdv_tree['efit.data']['profiles/pressure'][:]
+        pdv_tree['efit.data.profiles.pressure']   # dot-path descent
+
+    Read-only by design — load data into memory to transform it and
+    store results at a normal tree path.
+
+    Requires the optional dependency ``h5py``, checked when the file is
+    first opened (not at construction).
+
+    Parameters
+    ----------
+    uuid : str
+        12-hex-character UUID for this node's storage directory.
+    filename : str
+        Data filename (e.g. ``'efit_reconstruction.h5'``).
+    source_rel_path : str or None
+        Module-relative source path, or None for ordinary project files.
+
+    See Also
+    --------
+    PDVDataset : the xarray/NetCDF sibling node type.
+    ARCHITECTURE.md §7.2
+    """
+
+    def __init__(
+        self, uuid: str, filename: str, source_rel_path: str | None = None
+    ) -> None:
+        super().__init__(uuid, filename, source_rel_path)
+        self._handle: Any = None
+        self._open_error: str | None = None
+
+    @classmethod
+    def _missing_deps(cls) -> list[str]:
+        """Return ``['h5py']`` when h5py is not importable, else ``[]``."""
+        if importlib.util.find_spec("h5py") is None:
+            return ["h5py"]
+        return []
+
+    def open(self) -> Any:
+        """Open (or return the cached) backing file, read-only.
+
+        Opens with ``locking=False`` so a live read handle never
+        interferes with save-time copies of the same file.
+
+        Returns
+        -------
+        h5py.File
+            The live file handle (an ``h5py.Group`` at the root).
+
+        Raises
+        ------
+        PDVError
+            If h5py is missing or the file cannot be opened.
+        """
+        if self._handle is not None:
+            return self._handle
+        missing = self._missing_deps()
+        if missing:
+            raise PDVError(_dep_error_message("PDVHdf5", missing, "hdf5"))
+        if self._open_error is not None:
+            raise PDVError(
+                f"Cannot open '{self._filename}': {self._open_error}"
+            )
+        with _DATA_FILE_OPEN_LOCK:
+            if self._handle is not None:
+                return self._handle
+            import h5py  # noqa: PLC0415
+
+            path = self.resolve_path()
+            try:
+                self._handle = h5py.File(path, "r", locking=False)
+            except Exception as exc:
+                self._open_error = str(exc)
+                raise PDVError(
+                    f"Cannot open '{self._filename}': {exc}"
+                ) from exc
+        return self._handle
+
+    @property
+    def file(self) -> Any:
+        """The backing ``h5py.File`` (opens the file on first use)."""
+        return self.open()
+
+    @property
+    def attrs(self) -> dict:
+        """Root-group attributes of the backing file."""
+        return dict(self.open().attrs)
+
+    def __getitem__(self, key: str) -> Any:
+        """Return the group or dataset at ``key`` (slash paths work)."""
+        return self.open()[key]
+
+    def keys(self) -> list[str]:
+        """Return the root group's member names."""
+        return [str(k) for k in self.open().keys()]
+
+    def close(self) -> None:
+        """Close the cached handle (if any) and clear any recorded error."""
+        if self._handle is not None:
+            try:
+                self._handle.close()
+            except Exception:
+                pass
+        self._handle = None
+        self._open_error = None
+
+    def __pdv_children__(self) -> list:
+        """Virtual children: the root group's members.
+
+        Deeper levels are served by the ``h5py.Group`` adapter in
+        :mod:`pdv.virtual`; returned groups stay valid because they are
+        bound to the cached file handle on this node.
+        """
+        f = self.open()
+        return [(str(name), f[name], None) for name in f.keys()]
+
+    def __pdv_child__(self, key: str) -> Any:
+        """Single virtual child lookup for dot-path descent."""
+        try:
+            return self.open()[key]
+        except KeyError:
+            raise KeyError(key) from None
+
+    def __pdv_has_children__(self) -> bool:
+        """True if the root group has any members. Never raises."""
+        try:
+            return len(self.open()) > 0
+        except Exception:
+            return False
+
+    def preview(self) -> str:
+        """Return a short preview string for the tree panel.
+
+        Returns
+        -------
+        str
+            Root item count, a dependency hint, or an unreadable
+            marker — never raises.
+        """
+        missing = self._missing_deps()
+        if missing:
+            return f"requires {', '.join(missing)}"
+        try:
+            f = self.open()
+        except Exception:
+            return f"{self._filename} (unreadable)"
+        return f"{self._filename} — {len(f)} items"
+
+    def __getstate__(self) -> dict:
+        """Drop the unpicklable live handle for pickle/deepcopy."""
+        state = self.__dict__.copy()
+        state["_handle"] = None
+        state["_open_error"] = None
+        return state
+
+    def __setstate__(self, state: dict) -> None:
+        """Restore with no live handle; the file reopens on next access."""
+        self.__dict__.update(state)
+        self._handle = None
+        self._open_error = None
+
+    def __repr__(self) -> str:
+        return f"PDVHdf5(uuid='{self._uuid}', filename='{self._filename}')"
+
+
+# ---------------------------------------------------------------------------
 # PDVTree
 # ---------------------------------------------------------------------------
 
@@ -1298,7 +1729,12 @@ class PDVTree(dict):
         try:
             _resolve_nested(self, parts)
             return True
-        except (KeyError, TypeError):
+        except Exception:
+            # Membership must never raise. Besides the ordinary
+            # KeyError/TypeError misses, descent through a virtual
+            # container (pdv.virtual) can fail with a library error or a
+            # missing-optional-dependency PDVError — for ``in`` purposes
+            # all of those mean "not reachable".
             return False
 
     # ------------------------------------------------------------------

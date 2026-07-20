@@ -159,3 +159,120 @@ class TestNewNote:
 
         captured = capsys.readouterr()
         assert "notes.hello" in captured.out
+
+
+class TestAddFileAutodetect:
+    """Extension auto-detection for scientific data files (issue #203)."""
+
+    def test_nc_extension_returns_pdvdataset(self, tree_with_comm, tmp_path):
+        from pdv.tree import PDVDataset
+
+        source = tmp_path / "gpec_output.nc"
+        source.write_bytes(b"not a real netcdf, detection is by extension")
+        with patch.object(comms_mod, "get_pdv_tree", return_value=tree_with_comm):
+            result = pdv.add_file(str(source))
+        assert isinstance(result, PDVDataset)
+        assert result.filename == "gpec_output.nc"
+
+    def test_h5_extensions_return_pdvhdf5(self, tree_with_comm, tmp_path):
+        from pdv.tree import PDVHdf5
+
+        for name in ("efit.h5", "run.hdf5"):
+            source = tmp_path / name
+            source.write_bytes(b"detection is by extension")
+            with patch.object(
+                comms_mod, "get_pdv_tree", return_value=tree_with_comm
+            ):
+                result = pdv.add_file(str(source))
+            assert isinstance(result, PDVHdf5), name
+
+    def test_case_insensitive_extension(self, tree_with_comm, tmp_path):
+        from pdv.tree import PDVDataset
+
+        source = tmp_path / "DATA.NC"
+        source.write_bytes(b"x")
+        with patch.object(comms_mod, "get_pdv_tree", return_value=tree_with_comm):
+            result = pdv.add_file(str(source))
+        assert isinstance(result, PDVDataset)
+
+    def test_other_extension_stays_plain_pdvfile(self, tree_with_comm, tmp_path):
+        from pdv.tree import PDVDataset, PDVHdf5
+
+        source = tmp_path / "notes.txt"
+        source.write_text("hello")
+        with patch.object(comms_mod, "get_pdv_tree", return_value=tree_with_comm):
+            result = pdv.add_file(str(source))
+        assert isinstance(result, PDVFile)
+        assert not isinstance(result, (PDVDataset, PDVHdf5))
+
+
+class TestAddDatasetAddHdf5:
+    """Explicit typed-import functions with dep-check-before-copy."""
+
+    def test_add_dataset_forces_type_regardless_of_extension(
+        self, tree_with_comm, tmp_path
+    ):
+        from pdv.tree import PDVDataset
+
+        if PDVDataset._missing_deps():
+            pytest.skip("xarray/netcdf backend not installed")
+        source = tmp_path / "gpec.out"  # odd extension
+        source.write_bytes(b"x")
+        with patch.object(comms_mod, "get_pdv_tree", return_value=tree_with_comm):
+            result = pdv.add_dataset(str(source))
+        assert isinstance(result, PDVDataset)
+        assert os.path.exists(
+            os.path.join(
+                tree_with_comm._working_dir, "tree", result.uuid, "gpec.out"
+            )
+        )
+
+    def test_add_hdf5_forces_type(self, tree_with_comm, tmp_path):
+        from pdv.tree import PDVHdf5
+
+        if PDVHdf5._missing_deps():
+            pytest.skip("h5py not installed")
+        source = tmp_path / "geqdsk.dat"
+        source.write_bytes(b"x")
+        with patch.object(comms_mod, "get_pdv_tree", return_value=tree_with_comm):
+            result = pdv.add_hdf5(str(source))
+        assert isinstance(result, PDVHdf5)
+
+    def test_add_dataset_dep_check_fires_before_copy(
+        self, tree_with_comm, tmp_path
+    ):
+        """A missing dependency must fail fast — before the (potentially
+        multi-GB) file copy happens."""
+        from pdv.tree import PDVDataset
+
+        source = tmp_path / "big.nc"
+        source.write_bytes(b"x")
+        with (
+            patch.object(comms_mod, "get_pdv_tree", return_value=tree_with_comm),
+            patch.object(
+                PDVDataset, "_missing_deps", return_value=["xarray", "netcdf4"]
+            ),
+        ):
+            with pytest.raises(PDVError) as excinfo:
+                pdv.add_dataset(str(source))
+        assert "pdv.install('xarray', 'netcdf4')" in str(excinfo.value)
+        # No copy happened: the working dir's tree/ has no new entries.
+        tree_root = os.path.join(tree_with_comm._working_dir, "tree")
+        assert not os.path.exists(tree_root) or os.listdir(tree_root) == []
+
+    def test_add_hdf5_dep_check_fires_before_copy(
+        self, tree_with_comm, tmp_path
+    ):
+        from pdv.tree import PDVHdf5
+
+        source = tmp_path / "big.h5"
+        source.write_bytes(b"x")
+        with (
+            patch.object(comms_mod, "get_pdv_tree", return_value=tree_with_comm),
+            patch.object(PDVHdf5, "_missing_deps", return_value=["h5py"]),
+        ):
+            with pytest.raises(PDVError) as excinfo:
+                pdv.add_hdf5(str(source))
+        assert "pdv-python[hdf5]" in str(excinfo.value)
+        tree_root = os.path.join(tree_with_comm._working_dir, "tree")
+        assert not os.path.exists(tree_root) or os.listdir(tree_root) == []

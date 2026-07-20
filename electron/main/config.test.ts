@@ -46,7 +46,7 @@ describe("ConfigStore", () => {
       showCallableVariables: false,
       autoRefreshNamespace: false,
       autoSaveIntervalSeconds: 300,
-      defaultPackages: ["numpy", "matplotlib"],
+      defaultPackages: ["numpy", "matplotlib", "xarray", "netcdf4", "h5py"],
       settings: {
         appearance: {
           themeName: "Dark+ (VSCode)",
@@ -94,7 +94,7 @@ describe("ConfigStore", () => {
       showCallableVariables: false,
       autoRefreshNamespace: false,
       autoSaveIntervalSeconds: 300,
-      defaultPackages: ["numpy", "matplotlib"],
+      defaultPackages: ["numpy", "matplotlib", "xarray", "netcdf4", "h5py"],
       theme: "dark",
       settings: {
         appearance: {
@@ -141,7 +141,7 @@ describe("ConfigStore", () => {
       showCallableVariables: false,
       autoRefreshNamespace: false,
       autoSaveIntervalSeconds: 300,
-      defaultPackages: ["numpy", "matplotlib"],
+      defaultPackages: ["numpy", "matplotlib", "xarray", "netcdf4", "h5py"],
       settings: {
         appearance: {
           themeName: "Dark+ (VSCode)",

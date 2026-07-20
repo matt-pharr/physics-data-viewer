@@ -48,10 +48,10 @@ The MCP server + visual coupling (Agents track) and per-project uv environment m
 
 ## Data nodes track
 
-### PDVDataset and PDVHdf5 tree node types
-First-class tree node types for scientific data files: `PDVDataset` wraps `xarray.Dataset` / NetCDF, and `PDVHdf5` wraps `h5py` files. Both open lazily, expand into the tree to expose variables/groups as children, and treat their host libraries as optional dependencies — projects that don't use them don't pay for them. No metadata caching in the main process; the kernel remains the sole authority on dataset shape and contents. Tracked in [#203](https://github.com/matt-pharr/physics-data-viewer/issues/203). Independent of the other beta2 tracks.
+### PDVDataset and PDVHdf5 tree node types — SHIPPED (Python), 2026-07-20
+First-class tree node types for scientific data files: `PDVDataset` wraps NetCDF via xarray, and `PDVHdf5` wraps HDF5 via h5py. Both open lazily read-only, expand in the tree via the generic virtual-children protocol (`pdv/virtual.py`, ARCHITECTURE.md §5.8.1/§7.2) with headers re-read on demand (no metadata caching), auto-detect on import by extension, and treat their host libraries as optional dependencies (`pdv-python[netcdf]` / `pdv-python[hdf5]`). Closed [#203](https://github.com/matt-pharr/physics-data-viewer/issues/203). Deferred follow-ups: zarr directory stores, dotted-name HDF5 path escaping, Playwright e2e coverage.
 
-Two additions from the Julia-backend work (2026-07-15): (1) when #203 lands it needs Julia parity — `HDF5.jl` for PDVHdf5, and the `DimensionalData.jl`/`NCDatasets.jl` question for PDVDataset (JULIA_KNOWN_ISSUES #9); (2) a cheap incremental step exists ahead of the full design: live `HDF5.File`/`HDF5.Group` (and `h5py.File`/`Group`) *handles* placed in the tree could browse as read-only mappings the same way NamedTuples now do (§7.2) — display-only, not save/load-durable (open handles can't serialize; the save walker skips them via `failed_nodes`). Deliberately deferred until #203 to avoid shipping a lookalike with different persistence semantics.
+**Julia parity still pending** (per the cross-kernel parity rule): `HDF5.jl` for PDVHdf5, and the `DimensionalData.jl`/`NCDatasets.jl` question for PDVDataset (JULIA_KNOWN_ISSUES #9). The Python-side kind strings (`dataset_file`, `hdf5_file`, `hdf5_group`, `hdf5_dataset`), descriptor fields (`is_coord`), and storage formats (`netcdf`, `hdf5`) are language-neutral by design; the note about browsing live `HDF5.File` handles as read-only mappings remains a cheap incremental option on the Julia side.
 
 ---
 

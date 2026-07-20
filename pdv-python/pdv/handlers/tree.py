@@ -69,6 +69,12 @@ def _relocate_single_file(
     new_abs = uuid_tree_path(working_dir, new_uuid, file_node.filename)
     if os.path.exists(old_abs):
         smart_copy(old_abs, new_abs)
+    # Data nodes (PDVDataset/PDVHdf5) cache an open handle bound to the
+    # old UUID path — drop it before the swap so the next access opens
+    # the relocated file.
+    close = getattr(file_node, "close", None)
+    if callable(close):
+        close()
     file_node._uuid = new_uuid
 
 
@@ -102,12 +108,12 @@ def handle_tree_list(msg: dict) -> None:
     from pdv.handlers._helpers import validate_register_request  # noqa: PLC0415
     from pdv.modules import has_handler_for  # noqa: PLC0415
     from pdv.serialization import (  # noqa: PLC0415
-        is_xarray_dataset,
         detect_kind,
         node_preview,
         python_type_string,
     )
     from pdv.tree import PDVModule, PDVGui  # noqa: PLC0415
+    from pdv.virtual import ChildEntry, get_virtual_adapter  # noqa: PLC0415
 
     msg_id = msg.get("msg_id")
     validated = validate_register_request(
@@ -132,7 +138,7 @@ def handle_tree_list(msg: dict) -> None:
             return
         if not (
             isinstance(container, (dict, list, tuple))
-            or is_xarray_dataset(container)
+            or get_virtual_adapter(container) is not None
         ):
             send_error(
                 "pdv.tree.list.response",
@@ -144,37 +150,44 @@ def handle_tree_list(msg: dict) -> None:
     else:
         container = tree
 
-    # Iterate (key, value) pairs. Dict children carry their own string
-    # keys; list/tuple children get stringified integer indices; Dataset
-    # children enumerate only ``data_vars`` (in insertion order). All
-    # non-dict parents are flagged opaque on each child via
-    # ``parent_is_opaque: true`` so the renderer can hide
-    # structural-mutation actions (rename, move, duplicate, delete) —
-    # the tree-mutation handlers operate on dict keys inside containers
-    # the kernel knows how to mutate, which excludes lists/tuples
-    # (positional) and Datasets (variables live inside an opaque
-    # container the handlers don't traverse for mutation).
+    # Build (key, value, descriptor-overrides) entries. Dict children
+    # carry their own string keys; list/tuple children get stringified
+    # integer indices; any container with a virtual-children adapter
+    # (live Dataset, h5py group, file-backed dataset nodes — see
+    # pdv.virtual) enumerates through the adapter. All non-dict parents
+    # are flagged opaque on each child via ``parent_is_opaque: true`` so
+    # the renderer can hide structural-mutation actions (rename, move,
+    # duplicate, delete) — the tree-mutation handlers operate on dict
+    # keys inside containers the kernel knows how to mutate, which
+    # excludes lists/tuples (positional) and virtual containers (children
+    # live inside an opaque object the handlers don't traverse for
+    # mutation).
     parent_is_sequence = isinstance(container, (list, tuple))
-    parent_is_dataset = is_xarray_dataset(container)
-    parent_is_opaque = parent_is_sequence or parent_is_dataset
+    adapter = None if isinstance(container, dict) else get_virtual_adapter(container)
+    parent_is_opaque = parent_is_sequence or adapter is not None
+    entries: list[ChildEntry] = []
     if isinstance(container, dict):
-        keys_iter = list(dict.keys(container))
-    elif parent_is_dataset:
-        keys_iter = list(container.data_vars)
-    else:
-        keys_iter = [str(i) for i in range(len(container))]
-
-    nodes = []
-    for key in keys_iter:
-        if isinstance(container, dict):
+        for key in list(dict.keys(container)):
             try:
-                value = dict.__getitem__(container, key)
+                entries.append((key, dict.__getitem__(container, key), None))
             except KeyError:
                 continue  # key deleted concurrently by another thread
-        elif parent_is_dataset:
-            value = container[key]
-        else:
-            value = container[int(key)]
+    elif adapter is not None:
+        try:
+            entries = adapter.children(container)
+        except Exception as exc:
+            send_error(
+                "pdv.tree.list.response",
+                "tree.load_error",
+                f"Cannot list children of '{path}': {exc}",
+                in_reply_to=msg_id,
+            )
+            return
+    else:
+        entries = [(str(i), container[i], None) for i in range(len(container))]
+
+    nodes = []
+    for key, value, overrides in entries:
         child_path = f"{path}.{key}" if path else key
         kind = detect_kind(value)
         preview = node_preview(value, kind)
@@ -182,10 +195,13 @@ def handle_tree_list(msg: dict) -> None:
             has_children = bool(dict.keys(value))
         elif isinstance(value, (list, tuple)):
             has_children = len(value) > 0
-        elif is_xarray_dataset(value):
-            has_children = len(value.data_vars) > 0
         else:
-            has_children = False
+            child_adapter = get_virtual_adapter(value)
+            has_children = (
+                child_adapter.has_children(value)
+                if child_adapter is not None
+                else False
+            )
         descriptor = {
             "id": child_path,
             "path": child_path,
@@ -209,6 +225,8 @@ def handle_tree_list(msg: dict) -> None:
                 descriptor["module_language"] = value.language
         if kind == "gui" and isinstance(value, PDVGui):
             descriptor["module_id"] = value.module_id
+        if overrides:
+            descriptor.update(overrides)
         nodes.append(descriptor)
 
     send_message("pdv.tree.list.response", {"nodes": nodes}, in_reply_to=msg_id)

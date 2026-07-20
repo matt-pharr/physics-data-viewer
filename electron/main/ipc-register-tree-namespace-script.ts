@@ -383,7 +383,7 @@ export function registerTreeNamespaceScriptIpcHandlers(
       kernelId: string,
       sourcePath: string,
       targetTreePath: string,
-      nodeType: "namelist" | "lib" | "file",
+      nodeType: "namelist" | "lib" | "file" | "dataset_file" | "hdf5_file",
       filename: string
     ): Promise<TreeAddFileResult> => {
       if (!kernelManager.getKernel(kernelId)) throw new Error(`Kernel not found: ${kernelId}`);

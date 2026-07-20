@@ -106,6 +106,9 @@ _RESERVED_FORMATS: frozenset[str] = frozenset(
         "module_meta",
         "namelist",
         "py_lib",
+        "file",
+        "netcdf",
+        "hdf5",
         "bin",
         "none",
     }

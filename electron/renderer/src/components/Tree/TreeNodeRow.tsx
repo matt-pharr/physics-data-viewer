@@ -12,7 +12,18 @@ import { TYPE_ICONS, UnknownIcon } from './icons';
 /** Types that are containers (have or can have children). Drives the
  *  branch-vs-leaf visual distinction in tree.css (heavier name weight,
  *  elevated row background). Add new container types here if/when added. */
-const BRANCH_TYPES = new Set<string>(['root', 'folder', 'mapping', 'sequence', 'module', 'lib', 'dataset']);
+const BRANCH_TYPES = new Set<string>([
+  'root',
+  'folder',
+  'mapping',
+  'sequence',
+  'module',
+  'lib',
+  'dataset',
+  'dataset_file',
+  'hdf5_file',
+  'hdf5_group',
+]);
 
 /** User-facing label rendered in the Type chip. Shows the Python class
  *  name for built-in data (`np.ndarray`, `pd.DataFrame`, `str`, …) since
@@ -43,6 +54,12 @@ const DISPLAY_LABELS: Record<string, string> = {
   gui: 'gui',
   module: 'module',
   lib: 'lib',
+  // Lazy file-backed data nodes and their virtual children: format nouns
+  // ("what is this data"), matching the chip convention above.
+  dataset_file: 'netcdf',
+  hdf5_file: 'hdf5',
+  hdf5_group: 'group',
+  hdf5_dataset: 'h5.Dataset',
 };
 
 /** Kinds whose wire `type` is intentionally generic — the chip should
@@ -147,7 +164,7 @@ const TreeNodeRowInner: React.FC<TreeNodeRowProps> = ({
 
   return (
     <div
-      className={`tree-row ${isBranch ? 'branch' : 'leaf'}${selected ? ' selected' : ''}`}
+      className={`tree-row ${isBranch ? 'branch' : 'leaf'}${selected ? ' selected' : ''}${node.isCoord ? ' coord' : ''}`}
       style={style}
       {...ariaAttributes}
       onDoubleClick={() => onDoubleClick(node)}
@@ -189,6 +206,7 @@ const TreeNodeRowInner: React.FC<TreeNodeRowProps> = ({
       <div className="tree-col type">
         <span className="tree-type-badge">{resolveTypeLabel(node.type, node.pythonType)}</span>
         {node.language && <span className="tree-type-badge subtle">{node.language}</span>}
+        {node.isCoord && <span className="tree-type-badge subtle">coord</span>}
       </div>
 
       <div className="tree-col preview">{node.preview || '—'}</div>

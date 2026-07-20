@@ -80,8 +80,11 @@ export interface PDVConfig {
   autoSaveIntervalSeconds?: number;
   /**
    * Packages (PEP 508 specs) seeded into a new uv project's pyproject.toml
-   * at creation (ARCHITECTURE.md §10.5.14). Editable in Settings. Defaults
-   * to ["numpy", "matplotlib"]. Editing it never changes existing projects.
+   * at creation (ARCHITECTURE.md §10.5.14). Editable in Settings, and the
+   * New Project dialog prefills from it so users can remove entries per
+   * project. Defaults to ["numpy", "matplotlib", "xarray", "netcdf4",
+   * "h5py"] — the data stack is included so PDVDataset/PDVHdf5 nodes work
+   * out of the box. Editing it never changes existing projects.
    */
   defaultPackages?: string[];
   /** Renderer settings blob persisted by Settings dialog. */
@@ -182,7 +185,7 @@ const CONFIG_DEFAULTS: PDVConfig = {
   showCallableVariables: false,
   autoRefreshNamespace: false,
   autoSaveIntervalSeconds: DEFAULT_AUTOSAVE_INTERVAL_S,
-  defaultPackages: ["numpy", "matplotlib"],
+  defaultPackages: ["numpy", "matplotlib", "xarray", "netcdf4", "h5py"],
   settings: {
     appearance: {
       themeName: "Dark+ (VSCode)",

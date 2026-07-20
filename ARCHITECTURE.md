@@ -250,7 +250,7 @@ These are read-only and served both on the main comm channel and the QueryServer
 | `pdv.namelist.read.response` | kernel → app | Parsed namelist data. |
 | `pdv.namelist.write` | app → kernel | Write structured data back to a `PDVNamelist` backing file. Payload: `{ tree_path, data }`. |
 | `pdv.namelist.write.response` | kernel → app | Confirms write success. |
-| `pdv.file.register` | app → kernel | Register a file-backed tree node (`PDVNamelist`, `PDVLib`, or `PDVFile`). Payload: `{ tree_path, filename, node_type, name?, module_id?, source_rel_path? }`. When `node_type` is `"lib"`, creates a `PDVLib` node. `source_rel_path` is set by the module bind path and by `tree:createLib` / `tree:createScript` / `tree:createGui` when the target lives inside a known module alias; see §5.13. |
+| `pdv.file.register` | app → kernel | Register a file-backed tree node (`PDVNamelist`, `PDVLib`, `PDVDataset`, `PDVHdf5`, or `PDVFile`). Payload: `{ tree_path, filename, node_type, name?, module_id?, source_rel_path? }`. `node_type` is one of `"namelist"`, `"lib"`, `"dataset_file"`, `"hdf5_file"`, or `"file"` (default); with `"file"`, NetCDF/HDF5 extensions auto-detect to the typed data nodes (§5.8.1). `source_rel_path` is set by the module bind path and by `tree:createLib` / `tree:createScript` / `tree:createGui` when the target lives inside a known module alias; see §5.13. |
 | `pdv.file.register.response` | kernel → app | Confirms file registration with resulting path. |
 
 #### Progress Messages
@@ -508,7 +508,7 @@ pdv/
     environment.py       # Path utilities, working dir management, project root logic
     errors.py            # PDVError, PDVPathError, PDVKeyError, PDVProtectedNameError, PDVSerializationError, PDVScriptError, PDVVersionError
     modules.py           # Custom type handler registry and dispatch (@pdv.handle() decorator)
-    default_handlers.py  # Built-in double-click plot handlers for np.ndarray, pd.Series/DataFrame, xr.DataArray
+    default_handlers.py  # Built-in double-click plot handlers for np.ndarray, pd.Series/DataFrame, xr.DataArray, h5py.Dataset
     namelist_utils.py    # Fortran namelist and TOML parsing utilities
     checksum.py          # Content-based XXH3-128 Merkle-tree checksum for PDVTree (tree_checksum())
     tree_loader.py       # Shared two-pass tree-index loader used by project.load and module.register handlers
@@ -533,7 +533,7 @@ pdv/
 1. Registers the `pdv.kernel` comm target with IPython
 2. Injects `pdv_tree` into the IPython user namespace via a custom namespace class that blocks reassignment
 3. Configures an interactive matplotlib backend (or patches `plt.show()` for inline emission when none is available)
-4. Arranges the built-in double-click plot handlers to register **lazily**: the handler-registry lookups in `pdv.modules` (`has_handler_for`, `dispatch_handler`) call `pdv.default_handlers.register_defaults()`, which registers per-library defaults once numpy / pandas / xarray actually appear in `sys.modules`. Bootstrap itself imports none of them — eager imports cost real startup latency and undercut the never-import-xarray design in `serialization.py`, and a tree value can only *be* one of these types if its library is already imported. Per-type behavior: `np.ndarray` 1D → `ax.plot`, 2D → `ax.imshow` + colorbar, 0D/>2D → printed notice; `pd.Series` and `pd.DataFrame` → their built-in `.plot()`; `xr.DataArray` → its built-in `.plot()` (which dispatches 1D → line, 2D → pcolormesh, >2D → histogram by ndim). A value that cannot actually be plotted (e.g. a non-numeric `pd.Series` or an object-dtype array) closes its half-built figure and prints a `[PDV]` notice rather than raising — a raised exception would reach the renderer as an opaque `internal.error`. `xr.Dataset` is intentionally not registered — users drill into a specific `data_var`
+4. Arranges the built-in double-click plot handlers to register **lazily**: the handler-registry lookups in `pdv.modules` (`has_handler_for`, `dispatch_handler`) call `pdv.default_handlers.register_defaults()`, which registers per-library defaults once numpy / pandas / xarray actually appear in `sys.modules`. Bootstrap itself imports none of them — eager imports cost real startup latency and undercut the never-import-xarray design in `serialization.py`, and a tree value can only *be* one of these types if its library is already imported. Per-type behavior: `np.ndarray` 1D → `ax.plot`, 2D → `ax.imshow` + colorbar, 0D/>2D → printed notice; complex arrays (any source) split into parts — 1D plots labeled `Re`/`Im` lines on one axes, 2D shows side-by-side `Re`/`Im` `imshow` panels each with its own colorbar (the parts routinely span different ranges); `h5py.Dataset` → materialized (under a 100 MB cap with a slice-it-in-code notice) and drawn with the same array logic; `pd.Series` and `pd.DataFrame` → their built-in `.plot()`; `xr.DataArray` → its built-in `.plot()` (which dispatches 1D → line, 2D → pcolormesh, >2D → histogram by ndim). A value that cannot actually be plotted (e.g. a non-numeric `pd.Series` or an object-dtype array) closes its half-built figure and prints a `[PDV]` notice rather than raising — a raised exception would reach the renderer as an opaque `internal.error`. `xr.Dataset` is intentionally not registered — users drill into a specific `data_var`
 5. Sends the `pdv.ready` comm message
 
 `bootstrap()` must be idempotent — calling it twice must not open a second comm or re-inject variables. `register_defaults()` is likewise safe to call any number of times: each library's defaults register once, and a default never overwrites an existing registration, so a user handler for the same type wins regardless of registration order.
@@ -651,7 +651,7 @@ A parameter is `required` if it has no default value. `type` is the string repre
 
 ### 5.8 PDVFile and PDVNote Classes
 
-`PDVFile` is a base class for tree nodes backed by on-disk files that are not data or scripts. Subclasses include `PDVNote`, `PDVGui`, `PDVNamelist`, and `PDVLib`.
+`PDVFile` is a base class for tree nodes backed by on-disk files that are not data or scripts. Subclasses include `PDVNote`, `PDVGui`, `PDVNamelist`, `PDVLib`, `PDVDataset`, and `PDVHdf5`.
 
 **PDVFile** attributes (inherited by all subclasses):
 - `uuid`: 12-hex-character UUID identifying this node's storage directory (see §6.3)
@@ -665,6 +665,16 @@ A parameter is `required` if it has no default value. `type` is the string repre
 - `preview()`: returns the title, or the first non-empty line of the file, or `"Markdown note"` as fallback
 
 Notes are created via `pdv.note.register` (app → kernel) which creates a `PDVNote` instance and attaches it to the tree. The `.md` file itself lives in `<workingDir>/tree/<uuid>/<filename>` and is read/written directly by the main process via `note:read` / `note:save` IPC channels — no kernel round-trip is needed for content editing. On project save, the kernel serializes the note entry to `tree-index.json` and the main process copies the `.md` file into the save directory. On project load, the `.md` file is copied back from the save directory to the working directory and re-registered as a `PDVNote` in the tree.
+
+#### 5.8.1 PDVDataset and PDVHdf5 (lazy scientific data files)
+
+`PDVDataset` (NetCDF via xarray; kind `dataset_file`) and `PDVHdf5` (general HDF5 via h5py; kind `hdf5_file`) wrap large scientific data files that must never be fully loaded. Both are `PDVFile` subclasses — UUID storage, `smart_copy` import, save-as-copy — with three additional behaviors:
+
+- **Lazy, read-only open.** Construction does no I/O. The backing file opens on first access (`xr.open_dataset(...)` / `h5py.File(path, "r", locking=False)`) and the handle is cached on the node for the session. Both libraries page variable data from disk on demand, so multi-GB files on small machines are fine. Files are strictly read-only through these nodes: to modify data, read a variable into memory and store the result at a normal tree path. `close()` drops the handle (also the retry path after a failed open); `__getstate__` drops it for pickling, so the nodes stay save/deepcopy-safe.
+- **Virtual children.** Expanding the node in the tree panel reads the file header on demand through the virtual-children protocol (§7.2) — variables/coords for `PDVDataset`, the group hierarchy at arbitrary depth for `PDVHdf5`. No header metadata is cached in `tree-index.json`; every listing re-reads from the (cached, open) handle. Dot-paths descend into the file: `tree["efit.data.profiles.pressure"]` and `tree["efit.data"]["profiles/pressure"]` agree.
+- **Deferred dependency checks.** The optional deps (`pdv-python[netcdf]` = xarray + netcdf4; `pdv-python[hdf5]` = h5py) are checked at *open* time, not construction — a project containing these nodes always loads, and expansion without the deps degrades to a `tree.load_error` with a `pdv.install(...)`/pip hint. The explicit import APIs `pdv.add_dataset()` / `pdv.add_hdf5()` check deps *before* the file copy so a missing library fails fast. `pdv.add_file()` and the GUI Add File flow (`pdv.file.register`) auto-detect `.nc`/`.cdf` → `PDVDataset` and `.h5`/`.hdf5` → `PDVHdf5`.
+
+Known limitation: HDF5 object names containing `.` list in the tree but cannot be addressed by dot-path (dots are PDV path separators); use slash-path access from Python (`node["a.b/c"]`). Zarr directory stores are not supported (single-file storage only); tracked as a follow-up.
 
 ### 5.9 PDVModule Class
 
@@ -1078,12 +1088,18 @@ The following node types are supported:
 | `sequence` | Python list or tuple | Inline JSON |
 | `dataset` | xarray.Dataset (in-memory) | Pickle |
 | `dataarray` | xarray.DataArray (in-memory) | Pickle |
+| `dataset_file` | `PDVDataset` — lazy file-backed NetCDF dataset (§5.8.1) | `.nc`/`.cdf` file, copied as-is (`storage.format: "netcdf"`) |
+| `hdf5_file` | `PDVHdf5` — lazy file-backed HDF5 file (§5.8.1) | `.h5`/`.hdf5` file, copied as-is (`storage.format: "hdf5"`) |
+| `hdf5_group` | Virtual child: group inside an open HDF5 file | Runtime-only — never written to tree-index.json |
+| `hdf5_dataset` | Virtual child: dataset inside an open HDF5 file | Runtime-only — never written to tree-index.json |
 
 `mapping` and `sequence` containers are expandable in the tree panel. The `pdv.tree.list` handler descends into either kind, returning one descriptor per child. Sequence children carry stringified-int keys (`"0"`, `"1"`, …) and a `parent_is_opaque: true` flag; the renderer suppresses rename / move / duplicate / delete on those rows since the tree-mutation handlers can't address a child by key inside a non-dict parent. Sequence children remain navigable from Python: a numeric segment in a dot-path indexes into a list or tuple value (e.g. `tree["records.0.name"]` resolves through a list of dicts). Negative indices are supported (`tree["xs.-1"]` returns the last element).
 
 On Julia sessions, **NamedTuples ride the `mapping` kind** — they are the idiomatic "results bundle" (a nested dictionary in spirit), so they expand in the tree with field-name keys, dot-paths resolve through them (`tree["run.fields.b"]`), and the chip reads `NamedTuple`. Their children carry `parent_is_opaque` (NamedTuples are immutable — no structural mutations), and they persist as a single `.jls` leaf rather than the composite mapping split so the concrete NamedTuple type survives save/load (§10.6-era fidelity rule: a per-child split would reload as a Dict).
 
-`dataset` rows are likewise expandable: `pdv.tree.list` enumerates `ds.data_vars` in insertion order, one `dataarray` child per variable, each tagged with `parent_is_opaque: true` (same suppression semantics as sequence children — the tree-mutation handlers can't address a child by key inside a non-dict parent). Coords are intentionally omitted from the children list to match the OMFIT idiom; their information is implicit in the dim-size preview of each data variable (e.g. `"mode_C: 7, m_singcoup_out: 43"`). Coord values remain reachable via dot-path (`tree["ds.x_coord"]`) because `Dataset.__getitem__` resolves both data_vars and coords by name. `dataarray` is a leaf — DataArrays do not expand further, and dot-paths cannot descend past one (`tree["ds.var.0"]` raises `PDVKeyError`). xarray is an optional dependency; PDV runs unchanged when it isn't installed.
+**Virtual-children protocol.** Beyond dicts and sequences, some values expose children that are *not* real tree entries — a live `xarray.Dataset`'s variables, or the contents of a `PDVDataset`/`PDVHdf5` file read from its header on demand. These all flow through one dispatch point, `pdv/virtual.py`: PDV-owned classes implement `__pdv_children__()` / `__pdv_child__(key)` / `__pdv_has_children__()` directly, while foreign types (live `xr.Dataset`, `h5py.Group`) are matched by predicate in a registry of `VirtualAdapter`s (guarded via `sys.modules`, never triggering an import). `handle_tree_list`, per-child `has_children` computation, and dot-path resolution (`PDVTree._resolve_nested`) all dispatch through `get_virtual_adapter()`, so a new expandable type needs only an adapter (or the dunders) — no handler changes. Adapter enumeration failures (missing optional dependency, corrupt/missing file) surface as a `tree.load_error` response with an actionable message; they never crash the listing.
+
+Every adapter-served child is tagged `parent_is_opaque: true` (same suppression semantics as sequence children — the tree-mutation handlers can't address a child by key inside a non-dict parent). `dataset` and `dataset_file` rows enumerate data variables in insertion order **followed by coordinates**; coordinate rows additionally carry `is_coord: true`, which the renderer shows as a `coord` chip with muted styling so grids read as supporting context under the variables. (Through v0.2.x coords were omitted from live-Dataset listings; the file-backed dataset feature unified both on vars + coords.) `hdf5_group` children expand recursively to arbitrary depth; `dataarray` and `hdf5_dataset` are leaves — dot-paths cannot descend past one (`tree["ds.var.0"]` raises `PDVKeyError`). xarray and h5py are optional dependencies; PDV runs unchanged when they aren't installed.
 | `binary` | bytes / bytearray | `.bin` file |
 | `unknown` | Unrecognized type | Custom serializer file (if a module registered one for the type), otherwise `.pickle` (only if `trusted=True`) |
 
@@ -1255,6 +1271,17 @@ Module `storage` uses inline backend with `format: "module_meta"` and `value: { 
 }
 ```
 
+**Data file metadata** (`dataset_file` / `hdf5_file`):
+```json
+{
+  "metadata": {
+    "preview": "gpec_output.nc — 12 vars, 4 coords"
+  }
+}
+```
+
+Deliberately preview-only: variable names, shapes, and dtypes are *not* cached in `tree-index.json` — the tree panel re-reads them from the file header on every expansion (§5.8.1), so the index can never go stale against the file. `storage.format` is `"netcdf"` or `"hdf5"` and the file is copied as-is on save.
+
 **Unknown-kind metadata** (registered serializer or dunder protocol):
 ```json
 {
@@ -1291,6 +1318,8 @@ Additional fields present at top level for specific types:
 - **Scripts**: `"params": [{ name, type, default, required }, ...]` — the `ScriptParameter` array built from `run()` signature inspection.
 - **Modules**: `"module_id"`, `"module_name"`, `"module_version"` — module identity fields.
 - **GUIs**: `"module_id"` — owning module identifier.
+- **Children of opaque containers** (sequences and all virtual-adapter parents, §7.2): `"parent_is_opaque": true` — the renderer suppresses rename/move/duplicate/delete on these rows.
+- **Dataset coordinates** (children of `dataset` / `dataset_file` rows): `"is_coord": true` — rendered with a `coord` chip and muted styling.
 
 | Field | Type | Description |
 |---|---|---|
@@ -1698,7 +1727,7 @@ PDV never parses or resolves dependency constraints itself — everything is del
 
 #### 10.5.14 Default Packages
 
-A user-level setting (Settings → Python) holds a list of PEP 508 dependency specs. It is consulted **only** at new-project creation (§10.5.8), where it seeds the initial `[project].dependencies` of the generated `pyproject.toml`. Editing the list later never retroactively changes an existing project — once created, a project owns its own dependency set.
+A user-level setting (Settings → Python) holds a list of PEP 508 dependency specs. It is consulted **only** at new-project creation (§10.5.8), where it seeds the initial `[project].dependencies` of the generated `pyproject.toml` — via the New Project dialog's Initial-packages field, which prefills from this list so users can drop entries per project. Editing the list later never retroactively changes an existing project — once created, a project owns its own dependency set. The out-of-the-box default is `numpy, matplotlib, xarray, netcdf4, h5py`: the data stack is included so the lazy data-file nodes (§5.8.1) work in fresh projects without a manual install, and users who don't want it delete the entries in the dialog or trim the setting.
 
 #### 10.5.15 Python Version Acquisition
 

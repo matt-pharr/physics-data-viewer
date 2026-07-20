@@ -59,6 +59,13 @@ KIND_LIB = "lib"
 KIND_FILE = "file"
 KIND_DATASET = "dataset"
 KIND_DATAARRAY = "dataarray"
+KIND_DATASET_FILE = "dataset_file"
+KIND_HDF5_FILE = "hdf5_file"
+# Runtime-only kinds for virtual children served from inside an open HDF5
+# file. They appear in tree.list/tree.get descriptors but are never
+# written to tree-index.json (virtual children are not real tree nodes).
+KIND_HDF5_GROUP = "hdf5_group"
+KIND_HDF5_DATASET = "hdf5_dataset"
 KIND_UNKNOWN = "unknown"
 
 # Format strings — must match ARCHITECTURE.md §7.3 storage.format
@@ -74,6 +81,8 @@ FORMAT_MODULE_META = "module_meta"
 FORMAT_NAMELIST = "namelist"
 FORMAT_PY_LIB = "py_lib"
 FORMAT_FILE = "file"
+FORMAT_NETCDF = "netcdf"
+FORMAT_HDF5 = "hdf5"
 
 # Directory-name convention for the autosave sibling under a save dir.
 # Centralized here so `_verify_or_relocate_cached_file` and any future
@@ -144,6 +153,35 @@ def is_xarray_dataarray(value: Any) -> bool:
     if xr is None:
         return False
     return isinstance(value, xr.DataArray)
+
+
+def is_h5py_group(value: Any) -> bool:
+    """Return True if ``value`` is an h5py ``Group`` (including ``File``).
+
+    See :func:`is_xarray_dataset` for why this checks ``sys.modules``
+    rather than importing h5py. ``h5py.File`` subclasses ``h5py.Group``,
+    so one check covers both.
+    """
+    import sys  # noqa: PLC0415
+
+    h5py = sys.modules.get("h5py")
+    if h5py is None:
+        return False
+    return isinstance(value, h5py.Group)
+
+
+def is_h5py_dataset(value: Any) -> bool:
+    """Return True if ``value`` is an h5py ``Dataset``.
+
+    See :func:`is_xarray_dataset` for why this checks ``sys.modules``
+    rather than importing h5py.
+    """
+    import sys  # noqa: PLC0415
+
+    h5py = sys.modules.get("h5py")
+    if h5py is None:
+        return False
+    return isinstance(value, h5py.Dataset)
 
 
 def _is_xarray_object(value: Any) -> bool:
@@ -232,6 +270,8 @@ def detect_kind(value: Any) -> str:
         PDVGui,
         PDVNamelist,
         PDVLib,
+        PDVDataset,
+        PDVHdf5,
     )  # noqa: PLC0415
 
     if isinstance(value, PDVModule):
@@ -249,6 +289,10 @@ def detect_kind(value: Any) -> str:
             return KIND_NAMELIST
         if isinstance(value, PDVLib):
             return KIND_LIB
+        if isinstance(value, PDVDataset):
+            return KIND_DATASET_FILE
+        if isinstance(value, PDVHdf5):
+            return KIND_HDF5_FILE
         return KIND_FILE
     # bool must be checked before int (bool is a subclass of int)
     if isinstance(value, bool):
@@ -274,6 +318,13 @@ def detect_kind(value: Any) -> str:
         return KIND_DATASET
     if is_xarray_dataarray(value):
         return KIND_DATAARRAY
+    # h5py objects only appear as virtual children served from inside an
+    # open PDVHdf5 node (never as real tree values), so these kinds are
+    # runtime-only. Both helpers are no-ops when h5py isn't installed.
+    if is_h5py_group(value):
+        return KIND_HDF5_GROUP
+    if is_h5py_dataset(value):
+        return KIND_HDF5_DATASET
     # Lazy numpy/pandas checks
     try:
         import numpy as np  # noqa: PLC0415
@@ -463,6 +514,8 @@ _PDVFILE_KIND_FORMATS: dict[str, str] = {
     KIND_LIB: FORMAT_PY_LIB,
     KIND_NAMELIST: FORMAT_NAMELIST,
     KIND_FILE: FORMAT_FILE,
+    KIND_DATASET_FILE: FORMAT_NETCDF,
+    KIND_HDF5_FILE: FORMAT_HDF5,
 }
 
 
@@ -1394,6 +1447,15 @@ def node_preview(value: Any, kind: str) -> str:
             return value.preview() if hasattr(value, "preview") else kind
         if kind == KIND_FILE:
             return value.preview() if hasattr(value, "preview") else "file"
+        if kind in (KIND_DATASET_FILE, KIND_HDF5_FILE):
+            # PDVDataset/PDVHdf5 previews never raise; they degrade to a
+            # dependency hint or an "(unreadable)" marker themselves.
+            return value.preview()
+        if kind == KIND_HDF5_GROUP:
+            return f"group ({len(value)} items)"
+        if kind == KIND_HDF5_DATASET:
+            shape_str = " × ".join(str(d) for d in value.shape)
+            return f"{value.dtype} ({shape_str})" if shape_str else str(value.dtype)
         if kind == KIND_SCALAR:
             return str(value)[:100]
         if kind == KIND_TEXT:
