@@ -27,7 +27,7 @@ interface KindConfig {
   /** Characters removed from the name (everything not in the kind's safe set). */
   disallowed: RegExp;
   /** Preview line under the input, given the sanitized name. */
-  info: (sanitized: string) => React.ReactNode;
+  info: (sanitized: string, ext: string) => React.ReactNode;
 }
 
 const KIND_CONFIG: Record<CreateTreeItemKind, KindConfig> = {
@@ -46,7 +46,7 @@ const KIND_CONFIG: Record<CreateTreeItemKind, KindConfig> = {
     // Scripts are Python/Julia files whose stem becomes the tree key —
     // keep it identifier-safe, matching the main process's sanitizer.
     disallowed: /[^a-zA-Z0-9_]/g,
-    info: (n) => `Will create ${n || 'name'}.py inside the tree folder`,
+    info: (n, ext) => `Will create ${n || 'name'}${ext} inside the tree folder`,
   },
   note: {
     title: 'Create new note',
@@ -68,12 +68,12 @@ const KIND_CONFIG: Record<CreateTreeItemKind, KindConfig> = {
     title: 'Create new lib',
     label: 'Lib name',
     placeholder: 'helpers',
-    stripExtension: /\.py$/i,
-    // Libs must be importable Python modules — identifier characters only.
+    stripExtension: /\.(py|jl)$/i,
+    // Libs must be importable modules — identifier characters only.
     disallowed: /[^a-zA-Z0-9_]/g,
-    info: (n) => (
+    info: (n, ext) => (
       <>
-        Will create <code>{n || 'name'}.py</code> as an importable module lib.
+        Will create <code>{n || 'name'}{ext}</code> as an importable module lib.
       </>
     ),
   },
@@ -94,6 +94,9 @@ export function sanitizeTreeItemName(raw: string, kind: CreateTreeItemKind): str
 interface CreateTreeItemDialogProps {
   kind: CreateTreeItemKind;
   parentPath: string;
+  /** Active kernel language — selects the .py/.jl extension shown for
+   *  script and lib kinds (defaults to python). */
+  language?: 'python' | 'julia';
   onCreate: (name: string) => void;
   onCancel: () => void;
 }
@@ -102,6 +105,7 @@ interface CreateTreeItemDialogProps {
 export const CreateTreeItemDialog: React.FC<CreateTreeItemDialogProps> = ({
   kind,
   parentPath,
+  language = 'python',
   onCreate,
   onCancel,
 }) => {
@@ -149,7 +153,9 @@ export const CreateTreeItemDialog: React.FC<CreateTreeItemDialogProps> = ({
               placeholder={cfg.placeholder}
             />
           </label>
-          <div className="dialog-info-text">{cfg.info(sanitized)}</div>
+          <div className="dialog-info-text">
+            {cfg.info(sanitized, language === 'julia' ? '.jl' : '.py')}
+          </div>
         </div>
 
         <div className="dialog-footer">

@@ -70,4 +70,24 @@ describe('TreeNodeRow', () => {
     );
     expect(screen.getByText('▼')).toBeTruthy();
   });
+
+  it('labels the type chip by kind + language: Dict for Julia mappings, NamedTuple for NamedTuples', () => {
+    const chipFor = (pythonType: string): string | null | undefined => {
+      const { container } = render(
+        <TreeNodeRow
+          node={makeNode({ type: 'mapping', pythonType })}
+          onExpand={vi.fn()}
+          onDoubleClick={vi.fn()}
+          onRightClick={vi.fn()}
+          onClick={vi.fn()}
+        />,
+      );
+      const text = container.querySelector('.tree-type-badge')?.textContent;
+      cleanup();
+      return text;
+    };
+    expect(chipFor('builtins.dict')).toBe('dict');
+    expect(chipFor('Base.Dict{String, Any}')).toBe('Dict');
+    expect(chipFor('Core.NamedTuple')).toBe('NamedTuple');
+  });
 });

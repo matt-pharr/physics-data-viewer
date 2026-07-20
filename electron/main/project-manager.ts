@@ -35,7 +35,7 @@ import {
   type PDVProjectLoadResponsePayload,
   type PDVProjectSaveResponsePayload,
 } from "./pdv-protocol";
-import type { CodeCellData } from "./ipc";
+import type { CodeCellData, ProjectFailedNode } from "./ipc";
 import { atomicWriteJson } from "./atomic-write";
 import * as fs from "fs/promises";
 import * as path from "path";
@@ -77,19 +77,27 @@ export interface ProjectModuleImport {
  * Per-project Python environment configuration (ARCHITECTURE.md §10.5).
  *
  * ``"shared"`` uses the app-wide environment selected in the Environment
- * Selector (§10.2) — the default, and the home of conda users. ``"uv"`` uses
- * an isolated per-project environment materialized by ``uv`` from a
- * ``pyproject.toml`` + ``uv.lock`` pair.
+ * Selector (§10.2) — the home of conda users and of legacy manifests. ``"uv"``
+ * uses an isolated per-project Python environment materialized by ``uv`` from
+ * a ``pyproject.toml`` + ``uv.lock`` pair. ``"pkg"`` is the Julia analog
+ * (ARCHITECTURE.md §10.6): a Pkg-managed project environment carried by a
+ * ``Project.toml`` + ``Manifest.toml`` pair, activated via ``JULIA_PROJECT``.
  */
 export interface EnvironmentConfig {
   /** Which environment flow this project uses. */
-  mode: "uv" | "shared";
+  mode: "uv" | "shared" | "pkg";
   /**
    * Requested Python version for uv mode (e.g. ``"3.12"``). Absent means
    * uv picks the newest interpreter it can find or install. Ignored in
-   * shared mode.
+   * shared and pkg modes.
    */
   python_version?: string;
+  /**
+   * Julia version the session actually ran on, pkg mode only (e.g.
+   * ``"1.11.6"``). Display and mismatch-warning only — ``Manifest.toml``'s
+   * own ``julia_version`` entry is what Pkg checks (§10.6.4).
+   */
+  julia_version?: string;
 }
 
 /**
@@ -322,6 +330,7 @@ export class ProjectManager {
     moduleOwnedFiles: ModuleOwnedFile[];
     moduleManifests: ModuleManifestBundle[];
     missingFiles: string[];
+    failedNodes: ProjectFailedNode[];
   }>();
 
   /**
@@ -339,6 +348,7 @@ export class ProjectManager {
       moduleOwnedFiles: ModuleOwnedFile[];
       moduleManifests: ModuleManifestBundle[];
       missingFiles: string[];
+      failedNodes: ProjectFailedNode[];
     },
   ): void {
     this._cachedKernelResults.set(saveDir, results);
@@ -402,6 +412,7 @@ export class ProjectManager {
     moduleOwnedFiles: ModuleOwnedFile[];
     moduleManifests: ModuleManifestBundle[];
     missingFiles: string[];
+    failedNodes: ProjectFailedNode[];
     pendingManifest?: ProjectManifest;
   }> {
     assertCodeCellData(codeCells);
@@ -418,11 +429,12 @@ export class ProjectManager {
     let moduleOwnedFiles: ModuleOwnedFile[];
     let moduleManifests: ModuleManifestBundle[];
     let missingFiles: string[];
+    let failedNodes: ProjectFailedNode[];
 
     if (cached) {
       this._cachedKernelResults.delete(saveDir);
       console.debug(`[ProjectManager.save] using cached kernel results for ${saveDir}`);
-      ({ checksum, nodeCount, moduleOwnedFiles, moduleManifests, missingFiles } = cached);
+      ({ checksum, nodeCount, moduleOwnedFiles, moduleManifests, missingFiles, failedNodes } = cached);
     } else {
       console.debug(`[ProjectManager.save] sending pdv.project.save comm (+${(performance.now() - t0).toFixed(0)}ms)`);
       const response = await this.commRouter.request(PDVMessageType.PROJECT_SAVE, {
@@ -436,6 +448,7 @@ export class ProjectManager {
         module_owned_files?: ModuleOwnedFile[];
         module_manifests?: ModuleManifestBundle[];
         missing_files?: string[];
+        failed_nodes?: ProjectFailedNode[];
       };
       checksum = payload.checksum ?? "";
       nodeCount = payload.node_count ?? 0;
@@ -448,6 +461,18 @@ export class ProjectManager {
       missingFiles = Array.isArray(payload.missing_files)
         ? payload.missing_files
         : [];
+      failedNodes = Array.isArray(payload.failed_nodes) ? payload.failed_nodes : [];
+    }
+
+    // Nodes the kernel could not serialize at all (Julia kernels only:
+    // Serialization refuses more values than pickle). The save proceeded
+    // without them — returned to the caller so the renderer can surface the
+    // loss loudly rather than silently.
+    if (failedNodes.length > 0) {
+      console.warn(
+        `[ProjectManager.save] ${failedNodes.length} tree node(s) could not be serialized and were skipped: ` +
+          failedNodes.map((f) => `${f.path ?? "?"} (${f.error ?? "unknown error"})`).join("; "),
+      );
     }
 
     // If backing files are missing, abort before writing any project metadata.
@@ -457,7 +482,7 @@ export class ProjectManager {
       console.warn(
         `[ProjectManager.save] ABORTED — ${missingFiles.length} file-backed node(s) have missing backing files`,
       );
-      return { checksum, nodeCount, moduleOwnedFiles, moduleManifests, missingFiles };
+      return { checksum, nodeCount, moduleOwnedFiles, moduleManifests, missingFiles, failedNodes };
     }
 
     await atomicWriteJson(path.join(saveDir, "code-cells.json"), codeCells);
@@ -478,9 +503,8 @@ export class ProjectManager {
       // No prior manifest or unreadable — start fresh.
     }
     // Environment precedence: an explicit option (e.g. a new project being
-    // promoted to uv mode) wins, else the previously-saved environment, else
-    // shared. When promoting to uv, preserve any python_version a prior save
-    // recorded.
+    // promoted to uv/pkg mode) wins, else the previously-saved environment,
+    // else shared. When promoting, preserve any version a prior save recorded.
     let environment: EnvironmentConfig =
       options?.environment ?? existingEnvironment ?? { mode: "shared" };
     if (
@@ -489,6 +513,13 @@ export class ProjectManager {
       existingEnvironment?.python_version
     ) {
       environment = { ...environment, python_version: existingEnvironment.python_version };
+    }
+    if (
+      environment.mode === "pkg" &&
+      !environment.julia_version &&
+      existingEnvironment?.julia_version
+    ) {
+      environment = { ...environment, julia_version: existingEnvironment.julia_version };
     }
     const pendingManifest: ProjectManifest = {
       schema_version: SCHEMA_VERSION,
@@ -504,7 +535,7 @@ export class ProjectManager {
     };
     console.debug(`[ProjectManager.save] staged (+${(performance.now() - t0).toFixed(0)}ms)`);
 
-    return { checksum, nodeCount, moduleOwnedFiles, moduleManifests, missingFiles, pendingManifest };
+    return { checksum, nodeCount, moduleOwnedFiles, moduleManifests, missingFiles, failedNodes, pendingManifest };
   }
 
   /**
@@ -885,11 +916,30 @@ export class ProjectManager {
    * @param dir - Project save directory (or working dir for unsaved projects).
    * @returns Whether .autosave/tree-index.json exists and its mtime.
    */
-  static async checkForAutosave(dir: string): Promise<{ exists: boolean; timestamp?: string }> {
+  static async checkForAutosave(
+    dir: string
+  ): Promise<{ exists: boolean; timestamp?: string; language?: "python" | "julia" }> {
     const indexPath = path.join(dir, ".autosave", "tree-index.json");
     try {
       const stat = await fs.stat(indexPath);
-      return { exists: true, timestamp: stat.mtime.toISOString() };
+      // The sidecar manifest records the kernel language so recovery can boot
+      // the right kernel (a Python kernel cannot load jls-format nodes and
+      // vice-versa). Absent/unreadable manifest (pre-sidecar autosaves) means
+      // undefined — callers default to python.
+      let language: "python" | "julia" | undefined;
+      try {
+        const manifestRaw = await fs.readFile(
+          path.join(dir, ".autosave", "project.json"),
+          "utf8"
+        );
+        const manifest = JSON.parse(manifestRaw) as { language?: unknown };
+        if (manifest.language === "julia" || manifest.language === "python") {
+          language = manifest.language;
+        }
+      } catch {
+        // Legacy autosave without a project.json snapshot.
+      }
+      return { exists: true, timestamp: stat.mtime.toISOString(), language };
     } catch {
       return { exists: false };
     }
@@ -909,11 +959,27 @@ export class ProjectManager {
    * Scan a base directory for subdirectories containing .autosave/ data.
    * Used to find orphaned autosave data from unsaved projects.
    *
+   * Each entry also reports `envMode` when the orphan's working dir holds
+   * project-environment files (`pyproject.toml` → `"uv"`, `Project.toml` →
+   * `"pkg"`): the unsaved session ran in a per-project environment, so
+   * recovery must boot a matching kernel and preserve those files
+   * (PR #347 review M2).
+   *
    * @param workingDirBase - Base directory to scan (e.g. ~/.PDV/working/).
-   * @returns List of directories with autosave data and their timestamps.
+   * @returns List of directories with autosave data, their timestamps,
+   *   kernel language, and per-project environment mode (if any).
    */
-  static async scanForAutosaves(workingDirBase: string): Promise<{ dir: string; timestamp: string }[]> {
-    const results: { dir: string; timestamp: string }[] = [];
+  static async scanForAutosaves(
+    workingDirBase: string
+  ): Promise<
+    { dir: string; timestamp: string; language?: "python" | "julia"; envMode?: "uv" | "pkg" }[]
+  > {
+    const results: {
+      dir: string;
+      timestamp: string;
+      language?: "python" | "julia";
+      envMode?: "uv" | "pkg";
+    }[] = [];
     try {
       const entries = await fs.readdir(workingDirBase, { withFileTypes: true });
       for (const entry of entries) {
@@ -921,7 +987,17 @@ export class ProjectManager {
         const dirPath = path.join(workingDirBase, entry.name);
         const check = await ProjectManager.checkForAutosave(dirPath);
         if (check.exists && check.timestamp) {
-          results.push({ dir: dirPath, timestamp: check.timestamp });
+          const envMarker = check.language === "julia" ? "Project.toml" : "pyproject.toml";
+          const hasEnv = await fs
+            .access(path.join(dirPath, envMarker))
+            .then(() => true)
+            .catch(() => false);
+          results.push({
+            dir: dirPath,
+            timestamp: check.timestamp,
+            language: check.language,
+            envMode: hasEnv ? (check.language === "julia" ? "pkg" : "uv") : undefined,
+          });
         }
       }
     } catch (err) {
@@ -959,8 +1035,9 @@ function _assertCompatibleSchema(schemaVersion: string): void {
  *
  * Absent, malformed, or unrecognized values default to ``{ mode: "shared" }``
  * so legacy ``"1.1"`` manifests and hand-edited files load safely
- * (ARCHITECTURE.md §10.5.5). Only ``mode: "uv"`` opts into uv mode; any other
- * value is coerced to shared.
+ * (ARCHITECTURE.md §10.5.5). Only ``mode: "uv"`` opts into uv mode and only
+ * ``mode: "pkg"`` opts into Julia pkg mode (§10.6.4); any other value is
+ * coerced to shared.
  *
  * @param raw - The raw ``environment`` field from project.json, if any.
  * @returns A valid {@link EnvironmentConfig}.
@@ -970,14 +1047,21 @@ function _parseEnvironment(raw: unknown): EnvironmentConfig {
     return { mode: "shared" };
   }
   const obj = raw as Record<string, unknown>;
-  if (obj.mode !== "uv") {
-    return { mode: "shared" };
+  if (obj.mode === "uv") {
+    const environment: EnvironmentConfig = { mode: "uv" };
+    if (typeof obj.python_version === "string") {
+      environment.python_version = obj.python_version;
+    }
+    return environment;
   }
-  const environment: EnvironmentConfig = { mode: "uv" };
-  if (typeof obj.python_version === "string") {
-    environment.python_version = obj.python_version;
+  if (obj.mode === "pkg") {
+    const environment: EnvironmentConfig = { mode: "pkg" };
+    if (typeof obj.julia_version === "string") {
+      environment.julia_version = obj.julia_version;
+    }
+    return environment;
   }
-  return environment;
+  return { mode: "shared" };
 }
 
 /**

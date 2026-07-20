@@ -22,6 +22,7 @@ import type { ConfigStore, PDVConfig } from "./config";
 import { IPC, type HandlerInvokeResult, type NamelistReadResult, type NamelistWriteResult, type NamespaceInspectResult, type NamespaceInspectTarget, type NamespaceInspectorNode, type NamespaceQueryOptions, type NamespaceVariable, type ScriptParameter, type ScriptRunRequest, type ScriptRunResult, type TreePrintRequest, type TreeAddFileResult, type TreeCreateGuiResult, type TreeCreateLibResult, type TreeCreateNodeResult, type TreeCreateNoteResult, type TreeCreateScriptResult, type TreeDuplicateResult, type TreeMoveResult, type TreeRenameResult } from "./ipc";
 import type { KernelManager } from "./kernel-manager";
 import { executeAndTranscribe, TranscriptWriter } from "./mcp/transcript";
+import { juliaStringLiteral } from "./module-runtime";
 import { PDVMessageType, generateNodeUuid, resolveNodeDir, resolveNodePath, type PDVFileRegisterPayload } from "./pdv-protocol";
 import type { ProjectManager } from "./project-manager";
 import {
@@ -490,14 +491,16 @@ export function registerTreeNamespaceScriptIpcHandlers(
     let code: string;
 
     if (kernel.language === "julia") {
+      // juliaStringLiteral, not JSON.stringify: Julia interpolates `$` in
+      // double-quoted literals (PR #347 review M4).
       const kwargs = Object.entries(params)
         .map(([key, value]) => {
-          if (typeof value === "string") return `${key}=${JSON.stringify(value)}`;
+          if (typeof value === "string") return `${key}=${juliaStringLiteral(value)}`;
           if (typeof value === "boolean") return `${key}=${value ? "true" : "false"}`;
           return `${key}=${value}`;
         })
         .join(", ");
-      const pathStr = JSON.stringify(treePath);
+      const pathStr = juliaStringLiteral(treePath);
       code = kwargs
         ? `PDVKernel.run_tree_script(pdv_tree, ${pathStr}; ${kwargs})`
         : `PDVKernel.run_tree_script(pdv_tree, ${pathStr})`;
@@ -533,8 +536,15 @@ export function registerTreeNamespaceScriptIpcHandlers(
     const { path, executionId, origin } = request;
     // Build the language-appropriate invocation here — no Python or Julia
     // code strings belong in the renderer (ARCHITECTURE.md key design rules).
-    const expr = path ? `pdv_tree[${JSON.stringify(path)}]` : "pdv_tree";
-    const code = kernel.language === "julia" ? `println(${expr})` : `print(${expr})`;
+    // Julia uses the :limit=>true text/plain display rather than println so
+    // large arrays print the truncated "256-element Vector{Float64}: …" form
+    // (matching numpy's self-truncating print) instead of a full dump.
+    const literal = kernel.language === "julia" ? juliaStringLiteral : JSON.stringify;
+    const expr = path ? `pdv_tree[${literal(path)}]` : "pdv_tree";
+    const code =
+      kernel.language === "julia"
+        ? `show(IOContext(stdout, :limit => true), MIME("text/plain"), ${expr}); println()`
+        : `print(${expr})`;
 
     const workingDir = kernelWorkingDirs.get(kernelId);
     const transcript = workingDir ? new TranscriptWriter(workingDir) : null;

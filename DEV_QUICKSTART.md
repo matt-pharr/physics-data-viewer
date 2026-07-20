@@ -25,6 +25,9 @@ cd electron && npm install
 
 # Python kernel package
 cd ../pdv-python && pip install -e ".[dev]"
+
+# Julia kernel package (optional — enables Julia sessions; needs Julia ≥ 1.10)
+julia -e 'using Pkg; Pkg.add("IJulia"); Pkg.develop(path="pdv-julia")'
 ```
 
 > **Tip**: Use a Python virtual environment (`python -m venv .venv && source .venv/bin/activate`) to avoid polluting your system Python.
@@ -52,6 +55,9 @@ cd electron && npm test -- --reporter=verbose
 
 # Python kernel tests (pytest, 154 tests)
 cd pdv-python && PYTHONPATH=. pytest tests/ -q
+
+# Julia kernel tests (no kernel required)
+julia --project=pdv-julia -e 'using Pkg; Pkg.test()'
 
 # Unused code check
 cd electron && npm run knip
@@ -149,8 +155,8 @@ Components live in `renderer/src/components/<Name>/index.tsx`. Types come from `
 ### Adding a PDV comm message type
 
 1. Add the type string to `electron/main/pdv-protocol.ts`
-2. Add the Python handler in `pdv-python/pdv/handlers/`
-3. Register the handler in `pdv/comms.py`
+2. Add the Python handler in `pdv-python/pdv/handlers/` (registered at the bottom of the file)
+3. Add the Julia handler in `pdv-julia/src/handlers/` (registered via `register_message_handler`)
 
 ### Running a single test file
 

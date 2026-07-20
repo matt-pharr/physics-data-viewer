@@ -26,6 +26,13 @@ into the tree are instances of the [tree node types](nodes.md).
 Module developers additionally use `pdv.handle` and `pdv.register_serializer`
 to teach PDV about their own classes — see the [Module API](module-api.md).
 
+## Julia sessions
+
+Julia sessions expose the same surface through the `PDVKernel` package —
+`pdv_tree` works identically (with 1-based sequence dot-paths), and the
+session-level operations live on `PDVKernel` instead of `pdv`. See the
+[Julia API reference](julia.md), generated from PDVKernel's docstrings.
+
 ## What is not documented here
 
 Only the symbols described on these pages are public API. Everything else

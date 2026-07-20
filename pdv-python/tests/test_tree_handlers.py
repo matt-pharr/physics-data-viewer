@@ -203,6 +203,21 @@ class TestRename:
         assert send_error.call_args[0][1] == "tree.invalid_name"
         send_message.assert_not_called()
 
+    def test_rename_rejects_sequence_child(self, tree_with_comm):
+        """A list child is index-addressed: renaming it would replace the
+        whole list with a dict holding only the renamed element (PR #347
+        review). The renderer never offers this; MCP agent tools reach it."""
+        from pdv.handlers.tree import handle_tree_rename
+
+        tree_with_comm["vec"] = [10, 20, 30]
+        send_message, send_error = _run_handler(
+            handle_tree_rename, {"path": "vec.1", "new_name": "elem"}, tree_with_comm
+        )
+        send_error.assert_called_once()
+        assert send_error.call_args[0][1] == "tree.not_a_container"
+        send_message.assert_not_called()
+        assert tree_with_comm["vec"] == [10, 20, 30]  # untouched
+
 
 class TestMove:
     """move handler: re-parent a node, plus circular/duplicate guards."""
@@ -261,6 +276,58 @@ class TestMove:
         send_error.assert_called_once()
         assert send_error.call_args[0][1] == "tree.same_path"
         send_message.assert_not_called()
+
+    def test_move_rejects_sequence_child(self, tree_with_comm):
+        """Same guard as rename for the SOURCE parent: a list child cannot be
+        key-deleted from its parent (PR #347 review)."""
+        from pdv.handlers.tree import handle_tree_move
+
+        tree_with_comm["vec"] = [10, 20, 30]
+        send_message, send_error = _run_handler(
+            handle_tree_move, {"path": "vec.1", "new_path": "loose"}, tree_with_comm
+        )
+        send_error.assert_called_once()
+        assert send_error.call_args[0][1] == "tree.not_a_container"
+        send_message.assert_not_called()
+        assert tree_with_comm["vec"] == [10, 20, 30]
+        assert "loose" not in tree_with_comm
+
+
+class TestFileRegister:
+    """file.register stem derivation (PR #347 second review)."""
+
+    def test_dotfile_filenames_terminate_and_sanitize(self, tree_with_comm):
+        """The stem-strip loop spun forever on leading-dot names (splitext
+        treats ``.bashrc`` as all-stem), pegging comm dispatch until kernel
+        restart; and a surviving dot must not become a path separator."""
+        from pdv.handlers.namelist import handle_file_register
+        from pdv.tree import PDVFile
+
+        send_message, send_error = _run_handler(
+            handle_file_register,
+            {"tree_path": "", "filename": ".bashrc", "node_type": "file"},
+            tree_with_comm,
+        )
+        send_error.assert_not_called()
+        assert isinstance(tree_with_comm["_bashrc"], PDVFile)
+
+        _run_handler(
+            handle_file_register,
+            {"tree_path": "", "filename": ".env.local", "node_type": "file"},
+            tree_with_comm,
+        )
+        assert isinstance(tree_with_comm["_env"], PDVFile)
+
+    def test_double_extension_strips_to_stem(self, tree_with_comm):
+        from pdv.handlers.namelist import handle_file_register
+        from pdv.tree import PDVFile
+
+        _run_handler(
+            handle_file_register,
+            {"tree_path": "", "filename": "layout.gui.json", "node_type": "file"},
+            tree_with_comm,
+        )
+        assert isinstance(tree_with_comm["layout"], PDVFile)
 
 
 class TestDuplicate:

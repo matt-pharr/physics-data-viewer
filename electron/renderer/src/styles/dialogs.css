@@ -814,6 +814,7 @@
 .env-kind-badge--conda { color: var(--success); border-color: var(--success); }
 .env-kind-badge--venv { color: var(--accent); border-color: var(--accent); }
 .env-kind-badge--pyenv { color: var(--warning); border-color: var(--warning); }
+.env-kind-badge--juliaup { color: var(--accent); border-color: var(--accent); }
 
 /* Row info (label + path) */
 .env-row-info {
@@ -915,6 +916,24 @@
   white-space: pre-wrap;
   word-break: break-all;
   margin: 0;
+}
+
+/* juliaup version-acquisition row (§10.7.5) */
+.env-add-version {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin-top: 10px;
+}
+
+.env-add-version input {
+  flex: 1;
+  padding: 6px 8px;
+  background: var(--bg-primary);
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  color: var(--text-primary);
+  font-size: 12px;
 }
 
 /* ===== uv ENVIRONMENT SETUP MODAL (ARCHITECTURE.md §10.5.9) ===== */

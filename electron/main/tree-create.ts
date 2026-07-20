@@ -224,13 +224,13 @@ export async function allocateAndRegisterLib(
   const workingDir = await ensureWorkingDir(deps, kernelId);
   const stem = libName
     .trim()
-    .replace(/\.py$/i, "")
+    .replace(/\.(py|jl)$/i, "")
     .replace(/\s+/g, "_")
     .replace(/[^a-zA-Z0-9_]/g, "");
   if (!stem) {
     throw new Error("Lib name must contain at least one letter or number.");
   }
-  const filename = `${stem}.py`;
+  const filename = `${stem}${language === "julia" ? ".jl" : ".py"}`;
 
   const knownAliases = await deps.getKnownModuleAliases();
   const moduleInfo = analyseModuleTarget(targetPath, knownAliases);

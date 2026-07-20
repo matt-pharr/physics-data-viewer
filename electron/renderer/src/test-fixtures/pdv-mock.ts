@@ -106,6 +106,13 @@ function buildBase() {
       upgradePackage: stub<PDVApi["environment"]["upgradePackage"]>(async () => ({ success: true, output: "" })),
       activeInfo: stub<PDVApi["environment"]["activeInfo"]>(async () => null),
       installModule: stub<PDVApi["environment"]["installModule"]>(async () => undefined),
+      listJulia: stub<PDVApi["environment"]["listJulia"]>(async () => []),
+      checkJulia: stub<PDVApi["environment"]["checkJulia"]>(async () => null),
+      installJulia: stub<PDVApi["environment"]["installJulia"]>(async () => ({ success: true, output: "" })),
+      juliaupStatus: stub<PDVApi["environment"]["juliaupStatus"]>(async () => ({ installed: true, juliaupPath: "/home/user/.juliaup/bin/juliaup" })),
+      juliaupChannels: stub<PDVApi["environment"]["juliaupChannels"]>(async () => []),
+      juliaupAdd: stub<PDVApi["environment"]["juliaupAdd"]>(async () => ({ success: true, output: "" })),
+      installJuliaup: stub<PDVApi["environment"]["installJuliaup"]>(async () => ({ success: true, output: "" })),
     },
     modules: {
       listInstalled: stub<PDVApi["modules"]["listInstalled"]>(async () => []),
@@ -223,6 +230,8 @@ function buildBase() {
       platform: process.platform,
       supportedPythonVersions: ["3.10", "3.11", "3.12", "3.13", "3.14"],
       defaultPythonVersion: "3.13",
+      supportedJuliaVersions: ["1.10", "1.11", "1.12"],
+      defaultJuliaVersion: "1.11",
     },
     launchers: {
       openAgent: stub<PDVApi["launchers"]["openAgent"]>(async () => ({ success: true })),

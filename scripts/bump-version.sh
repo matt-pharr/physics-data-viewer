@@ -85,6 +85,14 @@ replace_in_file pdv-python/pyproject.toml \
     "^version = \"$OLD_RE\"" \
     "version = \"$NEW\""
 
+replace_in_file pdv-julia/Project.toml \
+    "^version = \"$OLD_RE\"" \
+    "version = \"$NEW\""
+
+replace_in_file pdv-julia/src/PDVKernel.jl \
+    "^const VERSION = \"$OLD_RE\"" \
+    "const VERSION = \"$NEW\""
+
 replace_in_file electron/package.json \
     "^([[:space:]]+)\"version\": \"$OLD_RE\"," \
     "\\1\"version\": \"$NEW\","

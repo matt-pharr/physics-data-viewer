@@ -17,6 +17,10 @@ import {
   DEFAULT_PYTHON_VERSION,
   SUPPORTED_PYTHON_VERSIONS,
 } from "./main/python-versions";
+import {
+  DEFAULT_JULIA_VERSION,
+  SUPPORTED_JULIA_VERSIONS,
+} from "./main/julia-versions";
 
 /**
  * Register an IPC push listener and return an unsubscribe callback.
@@ -163,6 +167,13 @@ const api: PDVApi = {
     activeInfo: () => invoke(IPC.environment.activeInfo),
     installModule: (kernelId, moduleName) =>
       invoke(IPC.environment.installModule, kernelId, moduleName),
+    listJulia: () => invoke(IPC.environment.juliaList),
+    checkJulia: (juliaPath) => invoke(IPC.environment.juliaCheck, juliaPath),
+    installJulia: (juliaPath) => invoke(IPC.environment.juliaInstall, juliaPath),
+    juliaupStatus: () => invoke(IPC.environment.juliaupStatus),
+    juliaupChannels: () => invoke(IPC.environment.juliaupChannels),
+    juliaupAdd: (channel) => invoke(IPC.environment.juliaupAdd, channel),
+    installJuliaup: () => invoke(IPC.environment.juliaupInstall),
   },
   modules: {
     listInstalled: () => invoke(IPC.modules.listInstalled),
@@ -284,6 +295,9 @@ const api: PDVApi = {
     // Compile-time constants from python-versions.ts; same rationale.
     supportedPythonVersions: SUPPORTED_PYTHON_VERSIONS,
     defaultPythonVersion: DEFAULT_PYTHON_VERSION,
+    // Julia siblings from julia-versions.ts (§10.6.5).
+    supportedJuliaVersions: SUPPORTED_JULIA_VERSIONS,
+    defaultJuliaVersion: DEFAULT_JULIA_VERSION,
   },
   launchers: {
     openAgent: () => invoke(IPC.launchers.openAgent),

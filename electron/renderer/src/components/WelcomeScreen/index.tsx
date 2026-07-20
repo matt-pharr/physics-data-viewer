@@ -25,6 +25,13 @@ export interface RecoverableSession {
   dir: string;
   /** ISO timestamp of the autosave (used to compute the relative label). */
   timestamp: string;
+  /** Kernel language from the autosave's sidecar manifest (absent for
+   *  pre-sidecar autosaves; recovery defaults to python). */
+  language?: "python" | "julia";
+  /** Per-project environment mode when the orphan holds env files
+   *  (pyproject.toml → "uv", Project.toml → "pkg"); recovery boots the
+   *  kernel with that environment active instead of shared mode. */
+  envMode?: "uv" | "pkg";
 }
 
 interface WelcomeScreenProps {
@@ -38,8 +45,14 @@ interface WelcomeScreenProps {
   onOpenProject: () => void;
   /** Called when the user clicks a recent project entry. */
   onOpenRecent: (path: string, language?: "python" | "julia") => void;
-  /** Called when the user clicks "Recover" on an orphan autosave. */
-  onRecoverSession: (orphanDir: string) => void;
+  /** Called when the user clicks "Recover" on an orphan autosave. Receives
+   *  the autosave's kernel language so the right kernel boots, and its env
+   *  mode so a uv/pkg session recovers with its environment active. */
+  onRecoverSession: (
+    orphanDir: string,
+    language?: "python" | "julia",
+    envMode?: "uv" | "pkg",
+  ) => void;
   /** Called when the user clicks "Discard" on an orphan autosave. */
   onDiscardSession: (orphanDir: string) => void;
   /** Called when the user clicks "Clear" beneath the recent-projects list. */
@@ -150,10 +163,12 @@ export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({
           >
             New Python Project
           </button>
-          {/* Julia is supported by the kernel side but the workflow is
-              experimental; hidden from the welcome screen for the open
-              beta to keep the UX focused. Re-enable when Julia is
-              promoted past experimental. */}
+          <button
+            className="btn btn-primary welcome-action-btn"
+            onClick={() => onNewProject("julia")}
+          >
+            New Julia Project
+          </button>
           <button
             className="btn btn-secondary welcome-action-btn"
             onClick={onOpenProject}
@@ -170,14 +185,15 @@ export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({
                 <li key={entry.dir} className="welcome-recoverable-item">
                   <div className="welcome-recoverable-info" title={entry.dir}>
                     <span className="welcome-recent-name">
-                      Autosaved {relativeTimeLabel(entry.timestamp)}
+                      Autosaved {relativeTimeLabel(entry.timestamp)}{' '}
+                      <span className="welcome-recent-badge">[{languageBadge(entry.language)}]</span>
                     </span>
                     <span className="welcome-recent-path">{entry.dir}</span>
                   </div>
                   <div className="welcome-recoverable-actions">
                     <button
                       className="btn btn-primary"
-                      onClick={() => onRecoverSession(entry.dir)}
+                      onClick={() => onRecoverSession(entry.dir, entry.language, entry.envMode)}
                     >
                       Recover
                     </button>

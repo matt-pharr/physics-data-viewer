@@ -33,6 +33,34 @@ function renderWelcome(overrides: Partial<Parameters<typeof WelcomeScreen>[0]> =
   return handlers;
 }
 
+describe('WelcomeScreen — recoverable-session language', () => {
+  it('passes the autosave language + env mode to onRecoverSession and shows the badge', async () => {
+    const { onRecoverSession } = renderWelcome({
+      recoverableSessions: [
+        {
+          dir: '/tmp/work/julia-session',
+          timestamp: new Date().toISOString(),
+          language: 'julia',
+          envMode: 'pkg',
+        },
+      ],
+    });
+    expect(screen.getByText('[Julia]')).toBeTruthy();
+    await userEvent.setup().click(screen.getByRole('button', { name: 'Recover' }));
+    expect(onRecoverSession).toHaveBeenCalledWith('/tmp/work/julia-session', 'julia', 'pkg');
+  });
+
+  it('defaults the badge to Python for pre-sidecar autosaves', () => {
+    renderWelcome({
+      recentProjects: [],
+      recoverableSessions: [
+        { dir: '/tmp/work/old-session', timestamp: new Date().toISOString() },
+      ],
+    });
+    expect(screen.getByText('[Python]')).toBeTruthy();
+  });
+});
+
 describe('WelcomeScreen — Clear recents button (#191)', () => {
   it('renders the Clear button when there are recent projects', () => {
     renderWelcome();

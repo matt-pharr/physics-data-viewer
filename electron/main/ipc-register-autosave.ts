@@ -316,6 +316,33 @@ export function registerAutosaveIpcHandlers(
       }
     }
 
+    // Preserve project-environment files from the orphan's working dir
+    // (pkg: Project.toml/Manifest.toml; uv: pyproject.toml/uv.lock/
+    // .python-version). The orphan is the ONLY copy for an unsaved session —
+    // without this, deleting the orphan below permanently demoted the
+    // recovered project to shared mode (PR #347 review M2). With the files
+    // in the new working dir, Save As stamps the right mode and a kernel
+    // restart re-activates the environment.
+    const envFiles = [
+      "Project.toml",
+      "Manifest.toml",
+      "pyproject.toml",
+      "uv.lock",
+      ".python-version",
+    ];
+    let envCopyFailed = false;
+    for (const envFile of envFiles) {
+      try {
+        await fs.copyFile(path.join(orphanDir, envFile), path.join(workingDir, envFile));
+      } catch (err) {
+        const code = (err as NodeJS.ErrnoException)?.code;
+        if (code !== "ENOENT") {
+          envCopyFailed = true;
+          console.warn(`[autosave:recoverUnsaved] copy ${envFile} failed`, err);
+        }
+      }
+    }
+
     // Restore in-memory pending-imports state from the recovered manifest so
     // a future Save As writes the modules into the new save dir's manifest.
     try {
@@ -351,11 +378,21 @@ export function registerAutosaveIpcHandlers(
     // the working dir as the project root since there is no save dir yet.
     await setupProjectModuleNamespaces(commRouter, moduleManager, workingDir);
 
-    // Remove the orphan now that the recovery has succeeded.
-    try {
-      await fs.rm(orphanDir, { recursive: true, force: true });
-    } catch (err) {
-      console.warn("[autosave:recoverUnsaved] failed to remove orphan dir", err);
+    // Remove the orphan now that the recovery has succeeded — but never
+    // while an environment file failed to copy out: the orphan holds the
+    // only copy, and losing Project.toml/pyproject.toml silently demotes
+    // the project to shared mode (PR #347 review M2).
+    if (envCopyFailed) {
+      console.warn(
+        "[autosave:recoverUnsaved] keeping orphan dir: environment file copy failed",
+        orphanDir,
+      );
+    } else {
+      try {
+        await fs.rm(orphanDir, { recursive: true, force: true });
+      } catch (err) {
+        console.warn("[autosave:recoverUnsaved] failed to remove orphan dir", err);
+      }
     }
 
     return {

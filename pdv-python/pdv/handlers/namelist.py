@@ -203,11 +203,19 @@ def handle_file_register(msg: dict) -> None:
         node_name = explicit_name
     else:
         node_name = os.path.splitext(filename)[0]
-        # Handle double extensions like .gui.json
+        # Handle double extensions like .gui.json. ``splitext`` treats a
+        # leading-dot name (".bashrc", ".env.local") as all-stem, so strip
+        # only while the stem keeps shrinking -- the unconditional loop spun
+        # forever on dotfiles, pegging comm dispatch until kernel restart
+        # (PR #347 second review; same fix in pdv-julia).
         while "." in node_name:
-            node_name = os.path.splitext(node_name)[0]
-    # Sanitize: replace characters invalid in tree paths
-    node_name = node_name.replace("-", "_").replace(" ", "_")
+            shorter = os.path.splitext(node_name)[0]
+            if shorter == node_name:
+                break
+            node_name = shorter
+    # Sanitize: replace characters invalid in tree paths. Dots are tree-path
+    # separators, so a dotfile stem (".bashrc") must not survive either.
+    node_name = node_name.replace("-", "_").replace(" ", "_").replace(".", "_")
 
     full_path = f"{tree_path}.{node_name}" if tree_path else node_name
 

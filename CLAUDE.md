@@ -2,7 +2,7 @@
 
 ## What this repository is
 
-PDV (Physics Data Viewer) is an Electron desktop application for computational and experimental physics analysis. It provides a tabbed Python command editor, an execution console, and a persistent hierarchical data model called the **Tree** that lives inside a Jupyter kernel. The Tree is what distinguishes PDV from a Jupyter notebook — it is a typed, navigable, save/load-able data hierarchy that persists across sessions.
+PDV (Physics Data Viewer) is an Electron desktop application for computational and experimental physics analysis. It provides a tabbed command editor (Python or Julia), an execution console, and a persistent hierarchical data model called the **Tree** that lives inside a Jupyter kernel. The Tree is what distinguishes PDV from a Jupyter notebook — it is a typed, navigable, save/load-able data hierarchy that persists across sessions.
 
 The authoritative design specification is **`ARCHITECTURE.md`** in the root directory. Read it before making non-trivial changes.
 
@@ -42,6 +42,12 @@ pdv-python/              ← Python kernel package (pip install pdv-python)
         environment.py   ← working dir helpers, path safety checks
         handlers/        ← one file per PDV message domain (lifecycle, project, tree, script, note, ...)
     tests/
+
+pdv-julia/               ← Julia kernel package (PDVKernel.jl; ARCHITECTURE.md §5.14)
+    Project.toml         ← version unified with electron/package.json + pyproject.toml
+    src/                 ← mirrors pdv/ one-to-one (tree.jl, serialization.jl, comms.jl,
+                           query_server.jl, handlers/, ...) on top of IJulia
+    test/runtests.jl     ← kernel-free unit suite (comm transport stubbed)
 ```
 
 ---
@@ -55,7 +61,7 @@ Renderer (React) ──window.pdv──► Preload ──ipcRenderer──► Ma
 - **Renderer** never accesses Node.js or the filesystem directly. All communication goes through `window.pdv.*`.
 - **`window.pdv`** is defined in `preload.ts` using Electron's `contextBridge`. It is the only bridge between renderer and main.
 - **Main process** owns ZeroMQ sockets, kernel lifecycle, filesystem, and config. All IPC channel names are constants in `ipc.ts`.
-- **Kernel** runs `ipykernel` + `pdv-python`. It communicates with the main process via a custom Jupyter comm channel (`pdv.kernel`) layered on top of ZeroMQ.
+- **Kernel** runs `ipykernel` + `pdv-python` (Python sessions) or `IJulia` + `pdv-julia`/PDVKernel.jl (Julia sessions). Both communicate with the main process via a custom Jupyter comm channel (`pdv.kernel`) layered on top of ZeroMQ; the protocol is language-agnostic.
 
 ---
 
@@ -79,7 +85,7 @@ Renderer (React) ──window.pdv──► Preload ──ipcRenderer──► Ma
 
 9. **Historical rewrite scaffolding is removed.** Do not add imports to deleted historical paths; use current architecture modules only.
 
-10. **Unified version number.** `electron/package.json` version and `pdv-python/pyproject.toml` version must always match. This single version is used as the protocol version in comm messages, stored in project manifests, and checked by the environment detector. When bumping the version, update both files.
+10. **Unified version number.** `electron/package.json`, `pdv-python/pyproject.toml`, and `pdv-julia/Project.toml` (plus the `PDVKernel.VERSION` constant in `pdv-julia/src/PDVKernel.jl`) must always match. This single version is used as the protocol version in comm messages, stored in project manifests, and checked by the environment detector. When bumping the version, update all of them.
 
 11. **Always use theme-engine CSS variables for colors.** New GUI elements must reference tokens like `var(--bg-primary)`, `var(--text-primary)`, `var(--accent)`, `var(--text-on-accent)`, etc. — defined in `electron/renderer/src/themes.ts` and exposed via the Appearance settings editor. Never hardcode hex colors (`#fff`, `#007acc`, etc.) or `rgb(...)` literals in component CSS. If you need a color that isn't in the token set, add it to `themes.ts` (with per-theme values and a `CSS_VAR_GROUPS` entry) rather than hardcoding it. This keeps every built-in and custom theme looking correct.
 
@@ -91,11 +97,18 @@ Renderer (React) ──window.pdv──► Preload ──ipcRenderer──► Ma
 # Python unit tests (no kernel required)
 cd pdv-python && pytest tests/ -v
 
+# Julia unit tests (no kernel required; comm transport stubbed)
+julia --project=pdv-julia -e 'using Pkg; Pkg.test()'
+
 # TypeScript unit tests
 cd electron && npm test -- --reporter=verbose
 
 # Integration tests (requires Python + ipykernel in PYTHON_PATH env)
 cd electron && PYTHON_PATH=/path/to/python npm test -- --reporter=verbose main/integration.test.ts
+
+# Julia integration tests (requires a Julia with IJulia + PDVKernel dev-installed:
+#   julia -e 'using Pkg; Pkg.develop(path="pdv-julia")')
+cd electron && JULIA_PATH=/path/to/julia npm test -- --reporter=verbose main/integration-julia.test.ts
 
 # Renderer end-to-end tests (Playwright drives the prod Electron bundle
 # against a real Python kernel). Build first, then run:
@@ -148,7 +161,7 @@ When reviewing a pull request (including via `/review`), check every item below 
 - [ ] **Preload bridge completeness** — Any new IPC channel exposed to the renderer has a corresponding method in `preload.ts` under `window.pdv`.
 - [ ] **Comm protocol consistency** — New or changed comm messages between main and kernel follow the `pdv.*` protocol defined in `pdv-protocol.ts`.
 - [ ] **Script signature** — New or modified PDV scripts define `run(pdv_tree: dict, **user_params) -> dict`.
-- [ ] **Version parity** — If either `electron/package.json` or `pdv-python/pyproject.toml` version was bumped, both were bumped to the same value.
+- [ ] **Version parity** — If any of `electron/package.json`, `pdv-python/pyproject.toml`, or `pdv-julia/Project.toml` (+ `PDVKernel.VERSION`) was bumped, all were bumped to the same value.
 - [ ] **JSDoc coverage** — New or modified exports in `electron/main/` have JSDoc with `@param`, `@returns`, `@throws`. No unguarded `any` types introduced.
 - [ ] **Documentation updated** — If the PR changes architecture, adds new IPC channels, modifies the comm protocol, introduces new tree node types, or alters any behavior described in `ARCHITECTURE.md` or `PLANNED_FEATURES.md`, those documents have been updated to match.
 - [ ] **Dependency sweep passed** — If the PR touches `pdv-python/` (source or `pyproject.toml`), `pdv-python/scripts/sweep-deps.sh` was run locally and exited green. Result is recorded in the PR description's "Test plan".

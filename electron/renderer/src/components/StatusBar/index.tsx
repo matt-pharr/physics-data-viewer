@@ -12,7 +12,7 @@ interface StatusBarProps {
   isExecuting: boolean;
   activeLanguage: 'python' | 'julia';
   /** Whether the active kernel runs in a per-project uv venv or a shared env. */
-  environmentMode?: 'uv' | 'shared';
+  environmentMode?: 'uv' | 'shared' | 'pkg';
   pythonPath: string | undefined;
   juliaPath: string | undefined;
   kernelSpec: string | undefined;
@@ -88,14 +88,19 @@ export const StatusBar: React.FC<StatusBarProps> = ({
   const showUpdateBadge =
     updateStatus?.state === 'available' || updateStatus?.state === 'downloaded';
   const isUvProject = activeLanguage === 'python' && environmentMode === 'uv';
+  const isPkgProject = activeLanguage === 'julia' && environmentMode === 'pkg';
   const runtimeLabel = activeLanguage === 'julia'
-    ? (juliaPath ?? 'julia')
+    ? isPkgProject
+      ? 'Pkg · project env'
+      : (juliaPath ?? 'julia')
     : isUvProject
       ? 'uv · project venv'
       : (pythonPath ?? kernelSpec ?? 'python3');
   const runtimeTitle = isUvProject
     ? 'Project-specific environment managed by uv'
-    : 'Click to change runtime';
+    : isPkgProject
+      ? 'Project-specific environment managed by Pkg'
+      : 'Click to change runtime';
 
   // Guard total <= 0: a zero-item phase would otherwise render "Infinity%".
   const progressPct = progress && progress.total > 0

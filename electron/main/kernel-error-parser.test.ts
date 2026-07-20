@@ -8,12 +8,39 @@
  */
 
 import { describe, it, expect } from "vitest";
-import { buildExecutionError } from "./kernel-error-parser";
+import { buildExecutionError, plainStreamText } from "./kernel-error-parser";
 import type { KernelExecutionOrigin } from "./kernel-manager";
 
 const cellOrigin = (label?: string): KernelExecutionOrigin => ({
   kind: "code-cell",
   label,
+});
+
+describe("plainStreamText — streamed-output normalization (§10.8)", () => {
+  it("strips SGR color sequences (Pkg add/status output)", () => {
+    expect(
+      plainStreamText(
+        "[90m[cf7118a7] [39m[92m+ UUIDs v1.11.0[39m\n"
+      )
+    ).toBe("[cf7118a7] + UUIDs v1.11.0\n");
+  });
+
+  it("strips bold/reset compounds and non-SGR CSI codes (cursor moves, line clears)", () => {
+    expect(
+      plainStreamText("[92m[1mPrecompiling[22m[39m project...\n")
+    ).toBe("Precompiling project...\n");
+    expect(plainStreamText("[1A[2Kdone\n")).toBe("done\n");
+  });
+
+  it("strips OSC 8 hyperlinks and converts bare carriage returns to newlines", () => {
+    expect(
+      plainStreamText("]8;;https://x.testlink]8;;")
+    ).toBe("link");
+    // Bare \r (progress redraw) becomes \n; a real \r\n line ending survives.
+    expect(plainStreamText("progress 10%\rprogress 90%\r\n")).toBe(
+      "progress 10%\nprogress 90%\r\n"
+    );
+  });
 });
 
 describe("buildExecutionError — name/message basics", () => {

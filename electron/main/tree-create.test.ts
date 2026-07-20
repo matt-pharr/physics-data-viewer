@@ -166,6 +166,24 @@ describe("allocate + register helpers", () => {
     );
   });
 
+  it("allocateAndRegisterLib uses the kernel language for the extension", async () => {
+    // Python kernel → .py (and a user-typed .jl extension is stripped).
+    const py = await allocateAndRegisterLib(makeDeps(), "k1", "", "helpers.jl");
+    expect(py.libPath).toMatch(/helpers\.py$/);
+
+    // Julia kernel → .jl (regression: libs were always created as .py).
+    requests = [];
+    const juliaDeps = makeDeps({
+      kernelManager: {
+        getKernel: (id: string) => (id === "k1" ? { language: "julia" as const } : undefined),
+      },
+    } as never);
+    const jl = await allocateAndRegisterLib(juliaDeps, "k1", "", "helpers");
+    expect(jl.libPath).toMatch(/helpers\.jl$/);
+    const fileReg = requests.find((r) => r.type === PDVMessageType.FILE_REGISTER)!;
+    expect((fileReg.payload as Record<string, unknown>).filename).toBe("helpers.jl");
+  });
+
   it("creates and records a working dir on first use when none exists yet", async () => {
     const created = await fs.mkdtemp(path.join(os.tmpdir(), "pdv-treecreate-new-"));
     try {
