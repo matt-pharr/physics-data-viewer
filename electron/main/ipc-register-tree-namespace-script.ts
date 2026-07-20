@@ -676,9 +676,17 @@ export function registerTreeNamespaceScriptIpcHandlers(
       // (the kernel replies only after the handler returns).
       const executionId = handlerInvokeTracker.begin(nodePath);
       try {
-        const response = await commRouter.request(PDVMessageType.HANDLER_INVOKE, {
-          path: nodePath,
-        });
+        // Generous timeout: a first plot legitimately pays a CairoMakie
+        // auto-load (potentially a full precompile in a fresh project env)
+        // plus time-to-first-plot, and user handlers can do real work. The
+        // default 30 s stamped a spurious "timed out" error on the entry
+        // while the kernel finished the plot anyway (caught by
+        // julia-hdf5-smoke e2e).
+        const response = await commRouter.request(
+          PDVMessageType.HANDLER_INVOKE,
+          { path: nodePath },
+          { timeoutMs: 300_000 },
+        );
         const payload = response.payload as {
           dispatched?: boolean;
           error?: string;
