@@ -56,11 +56,13 @@ xarray = [
 ]
 # PDVDataset (lazy NetCDF tree nodes): xarray plus a NetCDF backend engine.
 # netcdf4 is the canonical engine; at runtime PDV also accepts h5netcdf or
-# scipy if one of those is already present. 1.7.1 is the first netcdf4
-# release with numpy>=2 support.
+# scipy if one of those is already present. 1.7.4 is the first netcdf4
+# release with Python 3.14 Linux wheels — older floors fail the dep
+# sweep's py3.14 lowest-direct cell on CI (sdist build needs system
+# netcdf-c headers the runners don't have).
 netcdf = [
     "xarray>=2024.7.0",
-    "netcdf4>=1.7.1",
+    "netcdf4>=1.7.4",
 ]
 # PDVHdf5 (lazy HDF5 tree nodes). 3.15 is the first h5py release with
 # Python 3.14 wheels — older floors fail the dep sweep's py3.14
@@ -79,7 +81,7 @@ dev = [
     "f90nml>=1.4",
     "tomli-w>=1.0",
     "xarray>=2024.7.0",
-    "netcdf4>=1.7.1",
+    "netcdf4>=1.7.4",
     "h5py>=3.15",
 ]
 

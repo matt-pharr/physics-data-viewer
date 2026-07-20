@@ -127,7 +127,15 @@ class TestHandleHelp:
         ):
             handle_help(msg)
 
-        payload = mock_comm._sent[0]["payload"]
+        # Select the help response by type rather than trusting _sent[0]:
+        # a debounced tree-change push from a prior test can land in the
+        # patched comm mid-test on slow runners (observed once in CI) and
+        # would otherwise shadow the response.
+        payload = next(
+            m["payload"]
+            for m in mock_comm._sent
+            if m["type"] == "pdv.help.response"
+        )
         assert payload["source"] is not None
         assert "class PDVScript" in payload["source"]
 
