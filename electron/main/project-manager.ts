@@ -311,10 +311,25 @@ export class ProjectManager {
   /**
    * Recursively delete a working directory created by {@link createWorkingDir}.
    *
+   * Deletion often races the previous occupant's final writes: a kernel
+   * that was just stopped can still be flushing autosave sidecars,
+   * `__pycache__` entries, or cache files into the directory, and a
+   * recursive rm that sees new entries appear mid-walk fails with
+   * ENOTEMPTY (observed in CI as "Session failed to start ENOTEMPTY ...
+   * rmdir .../working/pdv-*" when opening a project tears down the
+   * scratch session). `maxRetries`/`retryDelay` enable Node's built-in
+   * linear-backoff retry for exactly this error class (ENOTEMPTY, EBUSY,
+   * EPERM, ...), absorbing writers that stop within a few seconds.
+   *
    * @param dirPath - Absolute path to the directory to remove.
    */
   async deleteWorkingDir(dirPath: string): Promise<void> {
-    await fs.rm(dirPath, { recursive: true, force: true });
+    await fs.rm(dirPath, {
+      recursive: true,
+      force: true,
+      maxRetries: 10,
+      retryDelay: 100,
+    });
   }
 
   /**

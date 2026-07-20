@@ -171,7 +171,18 @@ async function cleanupKernelWorkingDir(
   const oldDir = kernelWorkingDirs.get(kernelId);
   if (oldDir) {
     if (!preserveDir) {
-      await projectManager.deleteWorkingDir(oldDir);
+      // Best-effort: a stubborn writer (kernel still flushing during
+      // teardown) must not abort the session transition over a scratch
+      // directory — deleteWorkingDir already retries transient
+      // ENOTEMPTY/EBUSY internally; anything that survives that is
+      // leaked and reclaimed by the dead-PID orphan sweep on the next
+      // app launch (app.ts).
+      await projectManager.deleteWorkingDir(oldDir).catch((err) => {
+        console.warn(
+          `[kernels] failed to delete working dir ${oldDir}:`,
+          err,
+        );
+      });
     }
     kernelWorkingDirs.delete(kernelId);
   }
