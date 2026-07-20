@@ -23,6 +23,7 @@ import * as os from "os";
 import * as path from "path";
 
 import { CommRouter } from "./comm-router";
+import { HandlerInvokeTracker } from "./handler-invoke-tracker";
 import { QueryRouter } from "./query-router";
 import { EnvironmentDetector } from "./environment-detector";
 import { buildEditorSpawn, resolveEditorSpawn } from "./editor-spawn";
@@ -501,11 +502,18 @@ export function registerIpcHandlers(
     },
   });
 
+  // Shared between the kernel and tree registrars: gives each double-click
+  // handler invoke a real console entry (measured duration, routed output).
+  const handlerInvokeTracker = new HandlerInvokeTracker((channel, payload) => {
+    if (!win.isDestroyed()) win.webContents.send(channel, payload);
+  });
+
   registerKernelIpcHandlers({
     win,
     kernelManager,
     commRouter,
     queryRouter,
+    handlerInvokeTracker,
     projectManager,
     moduleManager,
     kernelWorkingDirs,
@@ -576,6 +584,7 @@ export function registerIpcHandlers(
     kernelManager,
     commRouter,
     queryRouter,
+    handlerInvokeTracker,
     projectManager,
     configStore,
     kernelWorkingDirs,

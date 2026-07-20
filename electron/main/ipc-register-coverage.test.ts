@@ -110,6 +110,7 @@ vi.mock("./module-manifest-writer", () => ({
   writeModuleManifest: vi.fn(async () => undefined),
 }));
 
+import { HandlerInvokeTracker } from "./handler-invoke-tracker";
 import { IPC, type ActiveEnvironmentInfo } from "./ipc";
 import { registerKernelIpcHandlers } from "./ipc-register-kernels";
 import { registerTreeNamespaceScriptIpcHandlers } from "./ipc-register-tree-namespace-script";
@@ -179,12 +180,14 @@ function setupAll(): void {
   const kernelWorkingDirs = new Map<string, string>();
   const kernelEnvMeta = new Map<string, ActiveEnvironmentInfo>();
   const crashHandlers = new Map<string, (id: string) => void>();
+  const handlerInvokeTracker = new HandlerInvokeTracker(() => undefined);
 
   registerKernelIpcHandlers({
     win: win.win,
     kernelManager,
     commRouter: commRouter.router,
     queryRouter,
+    handlerInvokeTracker,
     projectManager,
     moduleManager,
     kernelWorkingDirs,
@@ -206,6 +209,7 @@ function setupAll(): void {
     kernelManager,
     commRouter: commRouter.router,
     queryRouter,
+    handlerInvokeTracker,
     projectManager,
     configStore: config.store,
     kernelWorkingDirs,
