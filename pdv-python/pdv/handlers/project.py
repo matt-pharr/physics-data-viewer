@@ -921,8 +921,18 @@ def serialize_tree_to_dir(
     working_dir = tree._working_dir or save_dir
     total = _count_nodes(tree)
 
+    # Immediate 0/total emission so the renderer's bar appears before the
+    # walk starts (a single multi-GB file copy lives inside one node tick —
+    # without this a small tree's only emission is current == total, which
+    # the renderer treats as "done, clear the bar", and the whole save shows
+    # no feedback at all). Small trees then emit every node; the %5 throttle
+    # is for large trees where per-node comm messages are meaningful
+    # overhead.
+    if on_progress is not None:
+        on_progress("Serializing", 0, total)
+
     def _emit_progress(current: int) -> None:
-        if current % 5 == 0 or current == total:
+        if total <= 20 or current % 5 == 0 or current == total:
             if on_progress is not None:
                 on_progress("Serializing", current, total)
 

@@ -94,6 +94,7 @@ vi.mock("./julia-env", () => juliaEnvMocks);
 vi.mock("./julia-discovery", () => juliaDiscoveryMocks);
 vi.mock("./juliaup-runner", () => juliaupRunnerMocks);
 
+import { HandlerInvokeTracker } from "./handler-invoke-tracker";
 import { IPC, type ActiveEnvironmentInfo } from "./ipc";
 import { registerKernelIpcHandlers } from "./ipc-register-kernels";
 import { ProjectManager } from "./project-manager";
@@ -138,6 +139,8 @@ interface Harness {
   bindActiveProjectModules: Mock<(kernelId: string | null) => Promise<void>>;
   autosaveBeforeRestart: Mock<(kernelId: string) => Promise<boolean>>;
   recoverUnsavedAfterRestart: Mock<(orphanDir: string) => Promise<void>>;
+  handlerInvokeTracker: HandlerInvokeTracker;
+  trackerPushes: Array<{ channel: string; payload: Record<string, unknown> }>;
 }
 
 function setup(): Harness {
@@ -145,6 +148,10 @@ function setup(): Harness {
   const kernelManager = createKernelManagerMock();
   const commRouter = createCommRouterMock();
   const queryRouter = new QueryRouter();
+  const trackerPushes: Array<{ channel: string; payload: Record<string, unknown> }> = [];
+  const handlerInvokeTracker = new HandlerInvokeTracker((channel, payload) =>
+    trackerPushes.push({ channel, payload: payload as Record<string, unknown> }),
+  );
   const projectManager = createProjectManagerMock();
   const moduleManager = createModuleManagerMock();
   const kernelWorkingDirs = new Map<string, string>();
@@ -156,6 +163,8 @@ function setup(): Harness {
     kernelManager,
     commRouter,
     queryRouter,
+    handlerInvokeTracker,
+    trackerPushes,
     projectManager,
     moduleManager,
     kernelWorkingDirs,
@@ -180,6 +189,7 @@ function setup(): Harness {
     kernelManager,
     commRouter: commRouter.router,
     queryRouter,
+    handlerInvokeTracker,
     projectManager,
     moduleManager,
     kernelWorkingDirs,
@@ -281,6 +291,95 @@ describe("kernels:start", () => {
       IPC.push.kernelCrashed,
       { kernelId: result.id },
     );
+  });
+});
+
+describe("orphan iopub forwarding (handler invokes)", () => {
+  /** Start a kernel and return the iopub forwarder attachKernelSessionListeners registered. */
+  async function startAndGetForwarder() {
+    const harness = setup();
+    const result = (await getHandler(IPC.kernels.start)({}, {
+      language: "python",
+      env: { PYTHON_PATH: "/usr/bin/python3" },
+    })) as { id: string };
+    const call = (harness.kernelManager.onIopubMessage as Mock).mock.calls.find(
+      (c) => c[0] === result.id,
+    );
+    expect(call).toBeTruthy();
+    const forward = call![1] as (msg: unknown) => void;
+    return { harness, forward };
+  }
+
+  it("routes comm-parented stream + display output into the in-flight invoke entry", async () => {
+    const { harness, forward } = await startAndGetForwarder();
+    const id = harness.handlerInvokeTracker.begin("data.arr");
+    forward({
+      header: { msg_type: "stream" },
+      parent_header: { msg_id: "comm-1" },
+      content: { name: "stdout", text: "[PDV] Cannot plot\n" },
+    });
+    forward({
+      header: { msg_type: "display_data" },
+      parent_header: { msg_id: "comm-1" },
+      content: { data: { "image/png": "abc123" } },
+    });
+    const outputs = harness.trackerPushes.filter(
+      (p) => p.channel === IPC.push.executeOutput,
+    );
+    expect(outputs).toHaveLength(2);
+    expect(outputs[0].payload).toMatchObject({
+      executionId: id,
+      type: "stdout",
+      text: "[PDV] Cannot plot\n",
+    });
+    expect(outputs[1].payload).toMatchObject({
+      executionId: id,
+      type: "image",
+      image: { mime: "image/png", data: "abc123" },
+    });
+    // The synthetic fallback (hardcoded duration: 0) must not fire.
+    expect(harness.win.webContentsSend).not.toHaveBeenCalledWith(
+      IPC.push.executeFinish,
+      expect.objectContaining({ duration: 0 }),
+    );
+    harness.handlerInvokeTracker.finish(id);
+  });
+
+  it("figures with no invoke in flight keep the synthetic Plot fallback; orphan streams stay dropped", async () => {
+    const { harness, forward } = await startAndGetForwarder();
+    forward({
+      header: { msg_type: "stream" },
+      parent_header: { msg_id: "x" },
+      content: { name: "stdout", text: "boot noise\n" },
+    });
+    expect(harness.win.webContentsSend).not.toHaveBeenCalledWith(
+      IPC.push.executeOutput,
+      expect.anything(),
+    );
+    forward({
+      header: { msg_type: "display_data" },
+      parent_header: { msg_id: "x" },
+      content: { data: { "image/png": "zzz" } },
+    });
+    const sends = harness.win.webContentsSend.mock.calls;
+    const begin = sends.find((c) => c[0] === IPC.push.executeBegin);
+    expect(begin?.[1]).toMatchObject({ origin: { kind: "unknown", label: "Plot" } });
+    const finish = sends.find((c) => c[0] === IPC.push.executeFinish);
+    expect(finish?.[1]).toMatchObject({ duration: 0 });
+  });
+
+  it("output parented to a live execution is left to the per-execution collector", async () => {
+    const { harness, forward } = await startAndGetForwarder();
+    (harness.kernelManager.isExecutionActive as Mock).mockReturnValueOnce(true);
+    harness.handlerInvokeTracker.begin("p");
+    forward({
+      header: { msg_type: "display_data" },
+      parent_header: { msg_id: "exec-1" },
+      content: { data: { "image/png": "zzz" } },
+    });
+    expect(
+      harness.trackerPushes.filter((p) => p.channel === IPC.push.executeOutput),
+    ).toHaveLength(0);
   });
 });
 

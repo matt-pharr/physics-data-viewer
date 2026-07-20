@@ -28,7 +28,7 @@ LOGDIR="$WORKDIR/logs"
 # Boundary Python versions get full sweep; mid versions get smoke runs.
 BOUNDARY_PYTHONS=(3.10 3.14)
 SMOKE_PYTHONS=(3.11 3.12 3.13)
-EXTRAS_LIST=("" "data" "copy" "namelist" "xarray" "dev")
+EXTRAS_LIST=("" "data" "copy" "namelist" "xarray" "netcdf" "hdf5" "dev")
 RESOLUTIONS=(highest lowest-direct)
 
 if ! command -v uv >/dev/null 2>&1; then

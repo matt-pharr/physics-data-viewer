@@ -27,6 +27,7 @@ import Pkg
 import TOML
 using UUIDs: uuid4
 using DataFrames
+import HDF5
 
 # ---------------------------------------------------------------------------
 # Test harness helpers
@@ -76,9 +77,25 @@ end
 response_of(captured, msg_type) =
     only(filter(m -> m["type"] == msg_type * ".response", captured))
 
+# The plot path auto-loads an *installed* CairoMakie on first use; keep that
+# off in tests so notice-path assertions are deterministic (and no test ever
+# pays a real CairoMakie load) even when the machine's environment stack can
+# resolve CairoMakie.
+PDVKernel._MAKIE_AUTOLOAD_ENABLED[] = false
+
 # A value Serialization refuses outright, for exercising the save walker's
 # skip-and-report path. (A sleeping Task, surprisingly, serializes fine.)
 struct _Unserializable end
+
+# Virtual container whose child lookup throws — for pinning haskey's
+# exception contract (interrupts propagate, other errors mean "absent").
+struct _ThrowingVirtual end
+struct _ThrowingAdapter <: PDVKernel.VirtualAdapter end
+PDVKernel.virtual_adapter(::_ThrowingVirtual) = _ThrowingAdapter()
+PDVKernel.adapter_children(::_ThrowingAdapter, x) = PDVKernel.ChildEntry[]
+PDVKernel.adapter_has_children(::_ThrowingAdapter, x) = true
+PDVKernel.adapter_child(::_ThrowingAdapter, x, key::String) =
+    key == "interrupt" ? throw(InterruptException()) : error("unreadable")
 Serialization.serialize(::Serialization.AbstractSerializer, ::_Unserializable) =
     error("refusing to serialize _Unserializable")
 
@@ -1275,6 +1292,18 @@ end
     @test resp["status"] == "ok"
     payload = resp["payload"]
     @test payload["aborted"] == false
+
+    # Progress contract: an immediate 0/total emission (the renderer's bar
+    # must appear before the walk — a small tree's only other emission used
+    # to be current == total, which the renderer treats as "clear the bar"),
+    # then per-node emissions for small trees, ending at total/total.
+    progress = [m["payload"] for m in captured if m["type"] == "pdv.progress"]
+    @test !isempty(progress)
+    @test all(p["operation"] == "save" && p["phase"] == "Serializing" for p in progress)
+    @test progress[1]["current"] == 0
+    @test allequal(p["total"] for p in progress)
+    @test progress[end]["current"] == progress[end]["total"]
+    @test length(progress) >= 3          # 0, …every node…, total
     @test payload["node_count"] > 5
     @test length(payload["checksum"]) == 32
     @test isfile(joinpath(save_dir, "tree-index.json"))
@@ -1804,13 +1833,22 @@ end
     tree.working_dir = wd
     with_active_tree(tree) do
         capture_messages() do
-            src = joinpath(mktempdir(), "mesh.h5")
+            src = joinpath(mktempdir(), "mesh.dat")
             write(src, "fake-mesh-bytes")
             node = PDVKernel.add_file(src)
             @test node isa PDVFile
             @test isfile(resolve_path(node, wd))
             @test read(resolve_path(node, wd), String) == "fake-mesh-bytes"
             @test_throws ArgumentError PDVKernel.add_file(joinpath(wd, "nope.h5"))
+
+            # HDF5 extensions autodetect to the lazy node type (no open
+            # at import — the fake bytes would fail an eager open).
+            h5src = joinpath(mktempdir(), "mesh.h5")
+            write(h5src, "fake-h5-bytes")
+            h5node = PDVKernel.add_file(h5src)
+            @test h5node isa PDVHdf5
+            @test isfile(resolve_path(h5node, wd))
+            @test h5node.handle === nothing
 
             PDVKernel.new_note("notes.intro"; title="Introduction")
             @test tree["notes.intro"] isa PDVNote
@@ -1944,6 +1982,425 @@ end
     @test region_count() != 0
     ccall(:jl_exit_threaded_region, Cvoid, ())    # background task exits cleanly
     @test region_count() == 0
+end
+
+# ---------------------------------------------------------------------------
+# PDVHdf5 lazy data nodes (parity with pdv-python's PDVHdf5)
+# ---------------------------------------------------------------------------
+
+# Write a small nested HDF5 fixture: two root members, one nested group.
+function _write_test_h5(path::String)
+    ensure_parent(path)
+    HDF5.h5open(path, "w") do f
+        f["temp"] = collect(1.0:6.0)
+        g = HDF5.create_group(f, "profiles")
+        g["pressure"] = reshape(collect(1.0:6.0), 2, 3)
+        g["cvec"] = ComplexF64[1.0 + 2.0im, 3.0 - 1.0im]
+        sub = HDF5.create_group(g, "deep")
+        sub["flag"] = Int32[1, 2]
+    end
+    return path
+end
+
+# Register a PDVHdf5 node backed by a fresh fixture under `wd`.
+function _make_h5_node(wd::String; filename::String="data.h5")
+    uuid = generate_node_uuid()
+    _write_test_h5(uuid_tree_path(wd, uuid, filename))
+    return PDVHdf5(uuid=uuid, filename=filename)
+end
+
+@testset "PDVHdf5: lazy struct + previews" begin
+    wd = mktempdir()
+    node = _make_h5_node(wd)
+
+    # Construction is I/O-free; nothing opens until first access.
+    @test node.handle === nothing
+    @test node.open_error === nothing
+    @test detect_kind(node) == "hdf5_file"
+    @test occursin("PDVHdf5(uuid=", sprint(show, node))
+
+    tree = PDVTree()
+    tree.working_dir = wd
+    tree["h5"] = node
+    with_active_tree(tree) do
+        @test PDVKernel.preview(node) == "data.h5 — 2 items"   # opens lazily
+        @test node.handle !== nothing
+        @test Set(keys(node)) == Set(["temp", "profiles"])
+        # Slash paths resolve natively; dot-paths descend via the adapter.
+        @test node["profiles/pressure"][:, :] == reshape(collect(1.0:6.0), 2, 3)
+        @test_throws KeyError node["nope"]
+        @test haskey(node, "profiles/deep")
+        @test !haskey(node, "nope")
+
+        # close is the retry path: handle + memo drop, next access reopens
+        PDVKernel.close_hdf5!(node)
+        @test node.handle === nothing
+        @test node.listing_memo === nothing
+        @test node["temp"][:] == collect(1.0:6.0)
+    end
+
+    # Dependency message names the installer (HDF5 is present in the test
+    # env, so exercise the builder directly).
+    @test occursin("PDVKernel.install(\"HDF5\")", PDVKernel._hdf5_dep_error_message())
+
+    # haskey exception contract (review): a virtual child lookup that
+    # throws means "absent" — EXCEPT interrupts, which must propagate
+    # (Python's `except Exception` never caught KeyboardInterrupt).
+    tv = PDVTree()
+    tv["v"] = _ThrowingVirtual()
+    @test !haskey(tv, "v.anything")
+    @test_throws InterruptException haskey(tv, "v.interrupt")
+
+    # deepcopy drops the live handle (same uuid — duplicate handles the
+    # fresh-uuid relocation separately).
+    with_active_tree(tree) do
+        PDVKernel.open_hdf5!(node)
+        clone = deepcopy(node)
+        @test clone isa PDVHdf5
+        @test clone.uuid == node.uuid
+        @test clone.filename == node.filename
+        @test clone.handle === nothing
+        @test clone.open_error === nothing
+    end
+end
+
+@testset "PDVHdf5: virtual children in tree.list / tree.get" begin
+    wd = mktempdir()
+    tree = PDVTree()
+    tree.working_dir = wd
+    tree["h5"] = _make_h5_node(wd)
+
+    # Root listing: the node itself is expandable with a live preview.
+    captured = run_handler(tree, "pdv.tree.list", Dict{String,Any}("path" => ""))
+    root_nodes = response_of(captured, "pdv.tree.list")["payload"]["nodes"]
+    h5_node = only(n for n in root_nodes if n["key"] == "h5")
+    @test h5_node["type"] == "hdf5_file"
+    @test h5_node["has_children"] == true
+    @test h5_node["preview"] == "data.h5 — 2 items"
+    @test !haskey(h5_node, "parent_is_opaque")     # parent is the real tree
+
+    # Node listing: virtual children with runtime-only kinds, opaque parent.
+    captured = run_handler(tree, "pdv.tree.list", Dict{String,Any}("path" => "h5"))
+    nodes = response_of(captured, "pdv.tree.list")["payload"]["nodes"]
+    byname = Dict(n["key"] => n for n in nodes)
+    @test Set(keys(byname)) == Set(["temp", "profiles"])
+    @test all(n["parent_is_opaque"] == true for n in nodes)
+    @test byname["temp"]["type"] == "hdf5_dataset"
+    @test byname["temp"]["preview"] == "float64 (6)"
+    @test byname["temp"]["has_children"] == false
+    @test byname["profiles"]["type"] == "hdf5_group"
+    @test byname["profiles"]["preview"] == "group (3 items)"
+    @test byname["profiles"]["has_children"] == true
+
+    # Nested group listing through the foreign HDF5.Group adapter.
+    captured = run_handler(tree, "pdv.tree.list", Dict{String,Any}("path" => "h5.profiles"))
+    nodes = response_of(captured, "pdv.tree.list")["payload"]["nodes"]
+    byname = Dict(n["key"] => n for n in nodes)
+    @test Set(keys(byname)) == Set(["pressure", "cvec", "deep"])
+    @test byname["pressure"]["preview"] == "float64 (2 × 3)"
+    @test byname["cvec"]["preview"] == "complex128 (2)"
+    @test byname["deep"]["type"] == "hdf5_group"
+    captured = run_handler(tree, "pdv.tree.list",
+                           Dict{String,Any}("path" => "h5.profiles.deep"))
+    nodes = response_of(captured, "pdv.tree.list")["payload"]["nodes"]
+    @test only(nodes)["key"] == "flag"
+    @test only(nodes)["preview"] == "int32 (2)"
+
+    # Dot-path descent to arbitrary depth (live values + tree.get).
+    @test tree["h5.profiles.pressure"][:, :] == reshape(collect(1.0:6.0), 2, 3)
+    @test haskey(tree, "h5.profiles.deep.flag")
+    @test !haskey(tree, "h5.profiles.nope")
+    @test_throws PDVKeyError tree["h5.nope"]
+    captured = run_handler(tree, "pdv.tree.get",
+                           Dict{String,Any}("path" => "h5.profiles.pressure"))
+    resp = response_of(captured, "pdv.tree.get")
+    @test resp["status"] == "ok"
+    @test resp["payload"]["type"] == "hdf5_dataset"
+
+    # A dataset is a leaf: not listable, and resolve_file works on the node.
+    captured = run_handler(tree, "pdv.tree.list", Dict{String,Any}("path" => "h5.temp"))
+    @test response_of(captured, "pdv.tree.list")["payload"]["code"] == "tree.not_a_folder"
+    captured = run_handler(tree, "pdv.tree.resolve_file", Dict{String,Any}("path" => "h5"))
+    resp = response_of(captured, "pdv.tree.resolve_file")
+    @test resp["payload"]["file_path"] ==
+          uuid_tree_path(wd, tree["h5"].uuid, "data.h5")
+
+    # Unreadable file: parent listing degrades, direct listing reports
+    # tree.load_error, and close_hdf5! clears the recorded error (retry).
+    bad_uuid = generate_node_uuid()
+    bad_path = uuid_tree_path(wd, bad_uuid, "bad.h5")
+    ensure_parent(bad_path)
+    write(bad_path, "this is not an HDF5 file")
+    tree["bad"] = PDVHdf5(uuid=bad_uuid, filename="bad.h5")
+    captured = run_handler(tree, "pdv.tree.list", Dict{String,Any}("path" => ""))
+    root_nodes = response_of(captured, "pdv.tree.list")["payload"]["nodes"]
+    bad_node = only(n for n in root_nodes if n["key"] == "bad")
+    @test bad_node["preview"] == "bad.h5 (unreadable)"
+    @test bad_node["has_children"] == false
+    captured = run_handler(tree, "pdv.tree.list", Dict{String,Any}("path" => "bad"))
+    resp = response_of(captured, "pdv.tree.list")
+    @test resp["status"] == "error"
+    @test resp["payload"]["code"] == "tree.load_error"
+    @test occursin("Cannot open 'bad.h5'", resp["payload"]["message"])
+    @test tree["bad"].open_error !== nothing
+    # Fix the file and retry through close.
+    _write_test_h5(bad_path)
+    PDVKernel.close_hdf5!(tree["bad"])
+    captured = run_handler(tree, "pdv.tree.list", Dict{String,Any}("path" => "bad"))
+    @test response_of(captured, "pdv.tree.list")["status"] == "ok"
+end
+
+@testset "PDVHdf5: serialize / load / register / duplicate" begin
+    wd = mktempdir()
+    tree = PDVTree()
+    tree.working_dir = wd
+    node = _make_h5_node(wd)
+    tree["h5"] = node
+
+    # Serialize: copy-as-is with the shared kind/format strings and
+    # preview-only metadata (no header caching in tree-index.json).
+    descriptor = with_active_tree(tree) do
+        serialize_node("h5", node, wd)
+    end
+    @test descriptor["type"] == "hdf5_file"
+    @test descriptor["uuid"] == node.uuid
+    @test descriptor["storage"]["format"] == "hdf5"
+    @test descriptor["storage"]["backend"] == "local_file"
+    @test descriptor["storage"]["filename"] == "data.h5"
+    @test collect(keys(descriptor["metadata"])) == ["preview"]
+
+    # Loader round trip: reconstructed lazily with zero I/O.
+    tree2 = PDVTree()
+    tree2.working_dir = wd
+    skipped = load_tree_index(tree2, Any[descriptor]; working_dir=wd)
+    @test isempty(skipped)
+    reloaded = tree2["h5"]
+    @test reloaded isa PDVHdf5
+    @test reloaded.uuid == node.uuid
+    @test reloaded.filename == "data.h5"
+    @test reloaded.handle === nothing
+    with_active_tree(tree2) do
+        @test Set(keys(reloaded)) == Set(["temp", "profiles"])
+    end
+
+    # A Python-authored PDVDataset node skips gracefully with a pointer to
+    # Python sessions (project still loads).
+    nc_uuid = generate_node_uuid()
+    nc_path = uuid_tree_path(wd, nc_uuid, "sim.nc")
+    ensure_parent(nc_path)
+    write(nc_path, "netcdf bytes")
+    py_node = Dict{String,Any}(
+        "path" => "sim", "type" => "dataset_file", "uuid" => nc_uuid,
+        "storage" => Dict{String,Any}(
+            "backend" => "local_file", "uuid" => nc_uuid,
+            "filename" => "sim.nc", "format" => "netcdf"))
+    skipped = load_tree_index(tree2, Any[py_node]; working_dir=wd)
+    @test length(skipped) == 1
+    @test occursin("Python", skipped[1]["error"])
+    @test !haskey(tree2, "sim")
+
+    # file.register: explicit node_type and extension autodetect.
+    captured = run_handler(tree, "pdv.file.register", Dict{String,Any}(
+        "tree_path" => "", "filename" => "run_data.h5",
+        "node_type" => "hdf5_file", "uuid" => generate_node_uuid()))
+    @test response_of(captured, "pdv.file.register")["status"] == "ok"
+    @test tree["run_data"] isa PDVHdf5
+    captured = run_handler(tree, "pdv.file.register", Dict{String,Any}(
+        "tree_path" => "", "filename" => "auto.hdf5",
+        "node_type" => "file", "uuid" => generate_node_uuid()))
+    @test tree["auto"] isa PDVHdf5
+    captured = run_handler(tree, "pdv.file.register", Dict{String,Any}(
+        "tree_path" => "", "filename" => "plain.txt",
+        "node_type" => "file", "uuid" => generate_node_uuid()))
+    @test tree["plain"] isa PDVFile && !(tree["plain"] isa PDVHdf5)
+
+    # add_hdf5 forces the node type regardless of extension.
+    with_active_tree(tree) do
+        capture_messages() do
+            src = joinpath(mktempdir(), "renamed.dat")
+            _write_test_h5(src)
+            forced = PDVKernel.add_hdf5(src)
+            @test forced isa PDVHdf5
+            tree["forced"] = forced
+            @test Set(keys(forced)) == Set(["temp", "profiles"])
+        end
+    end
+
+    # Duplicate: fresh uuid, backing file copied, clone reads independently
+    # (the cached handle must not survive into the clone).
+    with_active_tree(tree) do
+        @test Set(keys(node)) == Set(["temp", "profiles"])   # source handle open
+        captured = run_handler(tree, "pdv.tree.duplicate",
+                               Dict{String,Any}("path" => "h5", "new_path" => "h5copy"))
+        @test response_of(captured, "pdv.tree.duplicate")["payload"]["duplicated"] == true
+        clone = tree["h5copy"]
+        @test clone isa PDVHdf5
+        @test clone.uuid != node.uuid
+        @test isfile(uuid_tree_path(wd, clone.uuid, "data.h5"))
+        @test clone.handle === nothing
+        @test Set(keys(clone)) == Set(["temp", "profiles"])
+        @test node["temp"][:] == collect(1.0:6.0)            # source unaffected
+    end
+end
+
+@testset "PDVHdf5: query-cache snapshot + memoization" begin
+    wd = mktempdir()
+    tree = PDVTree()
+    tree.working_dir = wd
+    node = _make_h5_node(wd)
+    tree["h5"] = node
+    tree["plain"] = Dict{String,Any}("k" => 1)
+
+    with_active_tree(tree) do
+        PDVKernel.clear_query_cache!()
+        PDVKernel.rebuild_query_cache!(tree)
+
+        # Virtual listings land in the snapshot at every depth.
+        h5_listing = PDVKernel.cached_tree_listing("h5")
+        @test h5_listing !== nothing
+        @test Set(n["key"] for n in h5_listing) == Set(["temp", "profiles"])
+        deep = PDVKernel.cached_tree_listing("h5.profiles.deep")
+        @test deep !== nothing && only(deep)["key"] == "flag"
+
+        # Threaded mode serves them read-only from the snapshot.
+        reqjson(t, p) = Vector{UInt8}(codeunits(JSON.json(request(t, p))))
+        resp = PDVKernel._handle_threaded_query(
+            reqjson("pdv.tree.list", Dict{String,Any}("path" => "h5.profiles")))
+        @test resp["status"] == "ok"
+        @test any(n -> n["key"] == "pressure", resp["payload"]["nodes"])
+
+        # Memoized per handle: a rebuild reuses the same listing vectors
+        # instead of re-walking the (immutable) file.
+        @test node.listing_memo !== nothing
+        before = PDVKernel.cached_tree_listing("h5.profiles")
+        PDVKernel.rebuild_query_cache!(tree)
+        @test PDVKernel.cached_tree_listing("h5.profiles") === before
+        # close invalidates the memo; the next rebuild re-reads.
+        PDVKernel.close_hdf5!(node)
+        @test node.listing_memo === nothing
+        PDVKernel.rebuild_query_cache!(tree)
+        after = PDVKernel.cached_tree_listing("h5.profiles")
+        @test after !== nothing && after !== before
+
+        # An unreadable node skips its own subtree, never the rebuild
+        # (its has_children degrades to false, so the walk never descends).
+        bad_uuid = generate_node_uuid()
+        bad_path = uuid_tree_path(wd, bad_uuid, "bad.h5")
+        ensure_parent(bad_path)
+        write(bad_path, "garbage")
+        tree["bad"] = PDVHdf5(uuid=bad_uuid, filename="bad.h5")
+        PDVKernel.rebuild_query_cache!(tree)
+        @test PDVKernel.cached_tree_listing("bad") === nothing
+        @test PDVKernel.cached_tree_listing("plain") !== nothing
+        @test PDVKernel.cached_tree_listing("h5") !== nothing
+
+        PDVKernel.clear_query_cache!()
+    end
+end
+
+@testset "PDVHdf5: default handlers (HDF5.Dataset + complex arrays)" begin
+    clear_handlers!()
+    wd = mktempdir()
+    tree = PDVTree()
+    tree.working_dir = wd
+    node = _make_h5_node(wd)
+    tree["h5"] = node
+
+    with_active_tree(tree) do
+        dset = tree["h5.temp"]
+        @test has_handler_for(dset)                 # lazy HDF5 default registered
+
+        # Without a Makie backend the handler materializes and prints the
+        # plot notice — dispatched, never thrown.
+        local result
+        notice = mktemp() do tmppath, tmpio
+            redirect_stdout(tmpio) do
+                result = dispatch_handler(dset, "h5.temp", tree)
+            end
+            flush(tmpio)
+            read(tmppath, String)
+        end
+        @test result["dispatched"] == true
+        @test occursin("[PDV] Cannot plot 'h5.temp'", notice)
+
+        # Complex 1-D through the same path (h5 read → complex pdv_handle).
+        cdset = tree["h5.profiles.cvec"]
+        local cresult
+        cnotice = mktemp() do tmppath, tmpio
+            redirect_stdout(tmpio) do
+                cresult = dispatch_handler(cdset, "h5.profiles.cvec", tree)
+            end
+            flush(tmpio)
+            read(tmppath, String)
+        end
+        @test cresult["dispatched"] == true
+        @test occursin("[PDV] Cannot plot 'h5.profiles.cvec'", cnotice)
+
+        # Non-numeric element types bail BEFORE any read — even with the
+        # cap floored, a string dataset must hit the no-default-plot notice,
+        # never the cap message (the sizeof-throws → nbytes=0 bypass would
+        # have materialized it first; review finding).
+        suuid = generate_node_uuid()
+        spath_h5 = uuid_tree_path(wd, suuid, "strings.h5")
+        ensure_parent(spath_h5)
+        HDF5.h5open(spath_h5, "w") do f
+            f["labels"] = ["alpha", "beta", "gamma"]
+        end
+        tree["strs"] = PDVHdf5(uuid=suuid, filename="strings.h5")
+        old_cap0 = PDVKernel._HDF5_PLOT_MAX_BYTES[]
+        PDVKernel._HDF5_PLOT_MAX_BYTES[] = 1
+        try
+            sdset = tree["strs.labels"]
+            local sresult
+            snotice = mktemp() do tmppath, tmpio
+                redirect_stdout(tmpio) do
+                    sresult = dispatch_handler(sdset, "strs.labels", tree)
+                end
+                flush(tmpio)
+                read(tmppath, String)
+            end
+            @test sresult["dispatched"] == true
+            @test occursin("No default plot", snotice)
+            @test !occursin("default-plot cap", snotice)
+        finally
+            PDVKernel._HDF5_PLOT_MAX_BYTES[] = old_cap0
+        end
+
+        # Size cap: lower it and confirm the slice hint replaces the read.
+        old_cap = PDVKernel._HDF5_PLOT_MAX_BYTES[]
+        PDVKernel._HDF5_PLOT_MAX_BYTES[] = 16
+        try
+            local capped
+            cap_notice = mktemp() do tmppath, tmpio
+                redirect_stdout(tmpio) do
+                    capped = dispatch_handler(dset, "h5.temp", tree)
+                end
+                flush(tmpio)
+                read(tmppath, String)
+            end
+            @test capped["dispatched"] == true
+            @test occursin("default-plot cap", cap_notice)
+            @test occursin("slice", cap_notice)
+        finally
+            PDVKernel._HDF5_PLOT_MAX_BYTES[] = old_cap
+        end
+    end
+
+    # Complex arrays have first-class defaults (Python complex parity).
+    cvec = ComplexF64[1.0 + 2.0im, 3.0 - 1.0im]
+    @test has_handler_for(cvec)
+    @test has_handler_for(rand(ComplexF64, 2, 2))
+    local c3result
+    c3notice = mktemp() do tmppath, tmpio
+        redirect_stdout(tmpio) do
+            c3result = dispatch_handler(rand(ComplexF64, 2, 2, 2), "data.ccube", tree)
+        end
+        flush(tmpio)
+        read(tmppath, String)
+    end
+    @test c3result["dispatched"] == true
+    @test occursin("3-D complex array", c3notice)
+    clear_handlers!()
 end
 
 end # top-level testset

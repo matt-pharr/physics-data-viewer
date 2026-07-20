@@ -206,15 +206,17 @@ class TestHandleTreeList:
         assert by_key["1"]["has_children"] is True
 
     def test_dataset_value_marks_has_children(self, tree_with_comm):
-        """Non-empty xarray.Dataset values report has_children so the
-        renderer shows a disclosure chevron."""
+        """xarray.Dataset values with any variables *or* coords report
+        has_children so the renderer shows a disclosure chevron; a truly
+        empty Dataset does not."""
         xr = pytest.importorskip("xarray")
         import numpy as np
         tree_with_comm["ds"] = xr.Dataset(
             {"a": (("x",), np.array([1, 2, 3]))},
             coords={"x": [0, 1, 2]},
         )
-        tree_with_comm["empty_ds"] = xr.Dataset(coords={"x": [0, 1]})
+        tree_with_comm["coords_only_ds"] = xr.Dataset(coords={"x": [0, 1]})
+        tree_with_comm["empty_ds"] = xr.Dataset()
         mock_comm = _make_mock_comm()
         msg = _make_msg("pdv.tree.list", {"path": ""})
         with (
@@ -226,11 +228,13 @@ class TestHandleTreeList:
         assert nodes["ds"]["type"] == "dataset"
         assert nodes["ds"]["has_children"] is True
         assert nodes["ds"]["preview"] == "1 vars"
+        assert nodes["coords_only_ds"]["has_children"] is True
         assert nodes["empty_ds"]["has_children"] is False
 
-    def test_dataset_lists_data_vars_only(self, tree_with_comm):
-        """pdv.tree.list at a Dataset path returns one child per data
-        variable in insertion order; coords are intentionally excluded."""
+    def test_dataset_lists_data_vars_then_coords(self, tree_with_comm):
+        """pdv.tree.list at a Dataset path returns data variables in
+        insertion order followed by coords, with coords flagged via
+        ``is_coord`` so the renderer can render them distinctly."""
         xr = pytest.importorskip("xarray")
         import numpy as np
         tree_with_comm["ds"] = xr.Dataset(
@@ -250,12 +254,15 @@ class TestHandleTreeList:
         response = mock_comm._sent[0]
         assert response["status"] == "ok"
         nodes = response["payload"]["nodes"]
-        assert [n["key"] for n in nodes] == ["a", "b"]
+        assert [n["key"] for n in nodes] == ["a", "b", "x"]
         assert all(n["type"] == "dataarray" for n in nodes)
         assert all(n["parent_is_opaque"] is True for n in nodes)
         assert all(n["has_children"] is False for n in nodes)
         assert nodes[0]["preview"] == "x: 3"
         assert nodes[1]["preview"] == "x: 3, y: 4"
+        assert "is_coord" not in nodes[0]
+        assert "is_coord" not in nodes[1]
+        assert nodes[2]["is_coord"] is True
 
     def test_dataarray_path_is_not_a_folder(self, tree_with_comm):
         """A DataArray inside a Dataset is a leaf — pdv.tree.list at its

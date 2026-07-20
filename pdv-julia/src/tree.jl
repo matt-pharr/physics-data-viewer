@@ -140,6 +140,182 @@ PDVLib(; uuid::AbstractString, filename::AbstractString,
            source_rel_path === nothing ? nothing : String(source_rel_path),
            module_id === nothing ? nothing : String(module_id))
 
+# Extensions `add_file` / `handle_file_register` autodetect as HDF5 imports.
+const HDF5_EXTENSIONS = (".h5", ".hdf5")
+
+"""
+    PDVHdf5(; uuid, filename, source_rel_path=nothing)
+
+Lazy tree node wrapping a general HDF5 file (ARCHITECTURE.md §5.8.1).
+
+Stored as the value at a tree path (e.g. `pdv_tree["efit.data"]`). The
+backing file is copied into UUID storage at import time and opened lazily
+(read-only) on first access; HDF5.jl pages data from disk on demand and the
+tree panel walks the group hierarchy straight from the file. Save copies the
+file as-is. Construction performs no I/O.
+
+Access from Julia code returns live HDF5.jl objects, with native slash-path
+support:
+
+    pdv_tree["efit.data"]["profiles/pressure"][:]
+    pdv_tree["efit.data.profiles.pressure"]   # dot-path descent
+
+Read-only by design — load data into memory to transform it and store
+results at a normal tree path.
+
+Requires the optional HDF5.jl package, checked when the file is first opened
+(not at construction). All opens and reads happen on the main task only —
+libhdf5 is not thread-safe, and the busy-time query server never touches
+live tree values (see query_cache.jl, which is also where `listing_memo` is
+maintained).
+"""
+mutable struct PDVHdf5 <: AbstractPDVFile
+    uuid::String
+    filename::String
+    source_rel_path::Union{Nothing,String}
+    handle::Any                      # HDF5.File or nothing; lazy, never serialized
+    open_error::Union{Nothing,String}
+    listing_memo::Any                # query-cache snapshot memo; see query_cache.jl
+end
+PDVHdf5(; uuid::AbstractString, filename::AbstractString,
+        source_rel_path::Union{Nothing,AbstractString}=nothing) =
+    PDVHdf5(String(uuid), String(filename),
+            source_rel_path === nothing ? nothing : String(source_rel_path),
+            nothing, nothing, nothing)
+
+"""Return true when the HDF5 package is installed in the active environment."""
+hdf5_installed()::Bool = Base.identify_package("HDF5") !== nothing
+
+# Actionable missing-dependency message (mirror of Python's
+# _dep_error_message, which names pdv.install + the pip extra).
+_hdf5_dep_error_message() =
+    "PDVHdf5 requires the HDF5 package, which is not installed in the " *
+    "active environment. Install it with PDVKernel.install(\"HDF5\")."
+
+"""
+    preload_hdf5!()
+
+Best-effort load of HDF5.jl on the main thread (mirror of Python's
+`preimport_data_libs`): the first `Base.require` of a package must not
+happen mid-listing on a code path that cannot afford it. No-op when HDF5 is
+already loaded or not installed; failures are logged, never thrown.
+"""
+function preload_hdf5!()
+    loaded_module(:HDF5) !== nothing && return nothing
+    try
+        hdf5_installed() || return nothing
+        Base.require(Main, :HDF5)
+    catch err
+        @warn "Failed to pre-load HDF5" exception = err
+    end
+    nothing
+end
+
+"""
+    open_hdf5!(node::PDVHdf5) -> HDF5.File
+
+Open (or return the cached) backing file, read-only. Main task only. Records
+`open_error` and short-circuits retries on failure — `close_hdf5!` clears it
+(the retry path).
+
+Throws when HDF5.jl is missing (with a `PDVKernel.install` hint) or the
+file cannot be opened.
+"""
+function open_hdf5!(node::PDVHdf5)
+    node.handle !== nothing && return node.handle
+    hdf5 = loaded_module(:HDF5)
+    if hdf5 === nothing
+        hdf5_installed() || error(_hdf5_dep_error_message())
+        Base.require(Main, :HDF5)  # first load must happen on the main thread
+        hdf5 = loaded_module(:HDF5)
+        hdf5 === nothing && error("HDF5 failed to load")
+    end
+    node.open_error !== nothing &&
+        error("Cannot open '$(node.filename)': $(node.open_error)")
+    path = resolve_path(node)
+    try
+        node.handle = Base.invokelatest(getproperty(hdf5, :h5open), path, "r")
+    catch err
+        node.open_error = sprint(showerror, err)
+        error("Cannot open '$(node.filename)': $(node.open_error)")
+    end
+    return node.handle
+end
+
+"""
+    close_hdf5!(node::PDVHdf5)
+
+Close the cached handle (if any) and clear the recorded open error and the
+query-cache listing memo. Also the retry path after a failed open.
+"""
+function close_hdf5!(node::PDVHdf5)
+    if node.handle !== nothing
+        try
+            Base.invokelatest(close, node.handle)
+        catch
+        end
+    end
+    node.handle = nothing
+    node.open_error = nothing
+    node.listing_memo = nothing
+    nothing
+end
+Base.close(node::PDVHdf5) = close_hdf5!(node)
+
+# Convenience access mirroring Python's PDVHdf5.__getitem__/keys: slash
+# paths resolve natively in HDF5.jl.
+function Base.getindex(node::PDVHdf5, key::AbstractString)
+    f = open_hdf5!(node)
+    Base.invokelatest(haskey, f, String(key)) || throw(KeyError(String(key)))
+    return Base.invokelatest(getindex, f, String(key))
+end
+Base.haskey(node::PDVHdf5, key::AbstractString) =
+    try
+        Base.invokelatest(haskey, open_hdf5!(node), String(key))
+    catch
+        false
+    end
+Base.keys(node::PDVHdf5) = String.(Base.invokelatest(keys, open_hdf5!(node)))
+
+# Virtual-children adapter (dispatch replaces Python's dunder protocol).
+struct PDVHdf5Adapter <: VirtualAdapter end
+const _PDVHDF5_ADAPTER = PDVHdf5Adapter()
+virtual_adapter(::PDVHdf5) = _PDVHDF5_ADAPTER
+
+# Root-group members. Deeper levels are served by the foreign HDF5.Group
+# adapter (virtual.jl); returned groups stay valid because they are bound to
+# the cached file handle on this node.
+function adapter_children(::PDVHdf5Adapter, node::PDVHdf5)::Vector{ChildEntry}
+    f = open_hdf5!(node)
+    ks = Base.invokelatest(keys, f)
+    return ChildEntry[(String(k), Base.invokelatest(getindex, f, String(k)), nothing)
+                      for k in ks]
+end
+
+function adapter_child(::PDVHdf5Adapter, node::PDVHdf5, key::String)
+    f = open_hdf5!(node)
+    Base.invokelatest(haskey, f, key) || throw(KeyError(key))
+    return Base.invokelatest(getindex, f, key)
+end
+
+function adapter_has_children(::PDVHdf5Adapter, node::PDVHdf5)::Bool
+    try
+        return Base.invokelatest(length, open_hdf5!(node)) > 0
+    catch
+        return false
+    end
+end
+
+# deepcopy must not clone the live handle/memo — the copy comes back closed
+# and reopens on next access (mirror of Python's __getstate__ contract).
+function Base.deepcopy_internal(node::PDVHdf5, stackdict::IdDict)
+    haskey(stackdict, node) && return stackdict[node]
+    new = PDVHdf5(uuid=node.uuid, filename=node.filename,
+                  source_rel_path=node.source_rel_path)
+    stackdict[node] = new
+    return new
+end
+
 """
     resolve_path(node::AbstractPDVFile, working_dir=nothing) -> String
 
@@ -171,6 +347,20 @@ preview(node::PDVNote) = node.title === nothing ? "" : first(node.title, 100)
 preview(node::PDVGui) = ""
 preview(node::PDVNamelist) = node.format
 preview(node::PDVLib) = node.filename
+# Root item count, a dependency hint, or an unreadable marker — never throws.
+# Opening on preview is deliberate Python parity: a visible node's first
+# listing is where the lazy open happens.
+function preview(node::PDVHdf5)
+    if loaded_module(:HDF5) === nothing && !hdf5_installed()
+        return "requires HDF5"
+    end
+    n = try
+        Base.invokelatest(length, open_hdf5!(node))
+    catch
+        return "$(node.filename) (unreadable)"
+    end
+    return "$(node.filename) — $n items"
+end
 
 function Base.show(io::IO, node::AbstractPDVFile)
     print(io, nameof(typeof(node)), "(uuid=\"", node.uuid,
@@ -450,7 +640,10 @@ end
 
 Recursively resolve path segments through nested containers: dicts by string
 key, NamedTuples by field name, vectors/tuples by (1-based) integer index.
-Throws `KeyError` on a missing segment.
+Any other value with a virtual-children adapter (a `PDVHdf5` node, a live
+`HDF5.Group` — see virtual.jl) resolves the next part through
+`adapter_child`, so dot-paths descend into those containers to arbitrary
+depth. Throws `KeyError` on a missing segment.
 """
 function _resolve_nested(obj, parts::Vector{String})
     current = obj
@@ -465,7 +658,9 @@ function _resolve_nested(obj, parts::Vector{String})
         elseif current isa AbstractVector || current isa Tuple
             current = current[_sequence_index(current, part)]
         else
-            throw(KeyError(part))
+            adapter = virtual_adapter(current)
+            adapter === nothing && throw(KeyError(part))
+            current = adapter_child(adapter, current, part)
         end
     end
     return current
@@ -492,8 +687,13 @@ function Base.haskey(t::AbstractPDVTree, key::AbstractString)
         _resolve_nested(t, parts)
         return true
     catch e
-        (e isa KeyError || e isa MethodError || e isa BoundsError) && return false
-        rethrow()
+        # Membership must never raise (Python-parity contract): a dot-path
+        # probing into an unreadable data file (open error, missing
+        # dependency) is simply absent. Interrupts still propagate —
+        # Python's `except Exception` never caught KeyboardInterrupt either
+        # (review finding: a swallowed Ctrl-C read as "path absent").
+        e isa InterruptException && rethrow()
+        return false
     end
 end
 Base.haskey(t::AbstractPDVTree, key) = false

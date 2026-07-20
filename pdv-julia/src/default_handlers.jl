@@ -1,8 +1,9 @@
 # default_handlers.jl — Built-in double-click handlers for common types.
 #
 # Port of pdv/default_handlers.py. Double-clicking a tree node whose value is
-# a numeric Vector/Matrix, a Makie Figure, or a DataFrame does something
-# sensible without the user writing a module.
+# a numeric or complex Vector/Matrix, a Makie Figure, a DataFrame, or an
+# HDF5 dataset (virtual child of a PDVHdf5 node) does something sensible
+# without the user writing a module.
 #
 # Registration is **lazy**, mirroring Python's sys.modules gate:
 # `register_default_handlers!()` runs from every registry lookup
@@ -64,6 +65,13 @@ function register_default_handlers!()
             _register_dataframes_defaults!(df)
         end
     end
+    if !(:HDF5 in _defaults_done)
+        h5 = loaded_module(:HDF5)
+        if h5 !== nothing
+            push!(_defaults_done, :HDF5)
+            _register_hdf5_defaults!(h5)
+        end
+    end
     nothing
 end
 
@@ -115,6 +123,66 @@ function _register_dataframes_defaults!(df::Module)
     nothing
 end
 
+# Double-clicking an HDF5 dataset (a virtual child of a PDVHdf5 node) never
+# silently materializes more than this many bytes into memory. A Ref so
+# tests can lower it without a 100 MB fixture. Same value as pdv-python's
+# _H5PY_PLOT_MAX_BYTES.
+const _HDF5_PLOT_MAX_BYTES = Ref(100 * 1024 * 1024)
+
+function _register_hdf5_defaults!(h5::Module)
+    isdefined(h5, :Dataset) || return nothing
+    _register_default(_hdf5_dataset_handler, getproperty(h5, :Dataset))
+    nothing
+end
+
+# Default handler for HDF5.Dataset: materialize (under the size cap) and
+# reuse the numeric/complex array plot methods (same contract as Python's
+# h5py.Dataset handler).
+function _hdf5_dataset_handler(obj, path, tree)
+    # Only numeric datasets have a default plot — decide from the element
+    # type BEFORE any read. This is also load-bearing for the cap: sizeof
+    # throws for vlen/string element types, and a caught-to-zero estimate
+    # would bypass the cap and fully materialize a multi-GB dataset just to
+    # conclude "no default plot" (review finding).
+    T = try
+        Base.invokelatest(eltype, obj)
+    catch
+        nothing
+    end
+    if T === nothing || !(T <: Real || T <: Complex)
+        println("[PDV] No default plot for dataset at '$path' " *
+                "(element type $(T === nothing ? "unknown" : T))")
+        return nothing
+    end
+    nbytes = try
+        Base.invokelatest(length, obj) * max(sizeof(T), 1)
+    catch
+        typemax(Int)  # uncomputable size counts as over-cap, never under
+    end
+    if nbytes > _HDF5_PLOT_MAX_BYTES[]
+        cap_mb = max(_HDF5_PLOT_MAX_BYTES[] ÷ 1_000_000, 1)
+        size_desc = nbytes == typemax(Int) ? "of unknown size" :
+                    "$(round(nbytes / 1_000_000; digits=1)) MB"
+        println("[PDV] Dataset at '$path' is $size_desc — larger than the " *
+                "$(cap_mb) MB default-plot cap. Read a slice instead, e.g. " *
+                "pdv_tree[\"$path\"][1:1000].")
+        return nothing
+    end
+    data = try
+        Base.invokelatest(read, obj)
+    catch err
+        println("[PDV] Cannot read dataset at '$path': $(sprint(showerror, err))")
+        return nothing
+    end
+    if data isa AbstractArray && (eltype(data) <: Real || eltype(data) <: Complex)
+        Base.invokelatest(pdv_handle, data, String(path), tree)
+    else
+        println("[PDV] No default plot for dataset at '$path' " *
+                "(element type $(typeof(data)))")
+    end
+    nothing
+end
+
 """
     _makie_figure_digest(fig) -> Vector{UInt8}
 
@@ -150,12 +218,38 @@ end
 # Numeric-array defaults (Base types: plain pdv_handle methods)
 # ---------------------------------------------------------------------------
 
+# Tests disable the backend auto-load so suites stay deterministic (and
+# never drag a multi-second CairoMakie load into a unit test) regardless of
+# whether CairoMakie is resolvable from the test environment stack.
+const _MAKIE_AUTOLOAD_ENABLED = Ref(true)
+
+# When no Makie backend is loaded but CairoMakie is installed in the active
+# environment, load it and return the Makie module — the Julia analog of
+# Python's default handlers importing matplotlib on first plot (matplotlib
+# is a hard dep there; CairoMakie is optional here but prefilled into new
+# projects, so first double-click should plot, not lecture). Same precedent
+# as _makie_figure_digest's CairoMakie auto-require. Returns nothing when
+# unavailable or the load fails.
+function _try_autoload_makie_backend(path::String)
+    _MAKIE_AUTOLOAD_ENABLED[] || return nothing
+    Base.identify_package("CairoMakie") === nothing && return nothing
+    println("[PDV] Loading CairoMakie to plot '$path' (first plot in this session)…")
+    try
+        Base.require(Main, :CairoMakie)
+    catch err
+        println("[PDV] Failed to load CairoMakie: $(sprint(showerror, err))")
+        return nothing
+    end
+    return loaded_module(:Makie)
+end
+
 # Run `draw(makie_module)` and display what it returns, or print a `[PDV]`
 # notice — a raised exception would reach the renderer as an opaque
 # internal.error (same contract as Python's _plot_or_notice). Function-first
 # so call sites can use do-block syntax.
 function _plot_with_makie(draw::Function, path::String)
     mk = loaded_module(:Makie)
+    mk === nothing && (mk = _try_autoload_makie_backend(path))
     if mk === nothing
         println("[PDV] Cannot plot '$path': no Makie backend is loaded. " *
                 "Run e.g. `using CairoMakie` first.")
@@ -194,6 +288,46 @@ end
 # a kernel-visible response divergence between the backends).
 function pdv_handle(obj::AbstractArray{<:Real}, path::String, tree::PDVTree)
     println("[PDV] Cannot plot $(ndims(obj))-D ndarray (size=$(size(obj))); " *
+            "default handler supports 1D and 2D only.")
+    nothing
+end
+
+# ---------------------------------------------------------------------------
+# Complex-array defaults (parity with pdv-python's complex plotting)
+# ---------------------------------------------------------------------------
+
+# 1-D complex: one axis with labeled Re and Im lines.
+function pdv_handle(obj::AbstractVector{<:Complex}, path::String, tree::PDVTree)
+    _plot_with_makie(path) do mk
+        fig = Base.invokelatest(getproperty(mk, :Figure))
+        ax = Base.invokelatest(getproperty(mk, :Axis), fig[1, 1]; title=path)
+        Base.invokelatest(getproperty(mk, :lines!), ax, real.(obj); label="Re")
+        Base.invokelatest(getproperty(mk, :lines!), ax, imag.(obj); label="Im")
+        Base.invokelatest(getproperty(mk, :axislegend), ax)
+        fig
+    end
+    nothing
+end
+
+# 2-D complex: side-by-side Re/Im heatmaps, each with its own colorbar
+# (the ranges are generally unrelated, so a shared bar would mislead).
+function pdv_handle(obj::AbstractMatrix{<:Complex}, path::String, tree::PDVTree)
+    _plot_with_makie(path) do mk
+        fig = Base.invokelatest(getproperty(mk, :Figure))
+        axr = Base.invokelatest(getproperty(mk, :Axis), fig[1, 1]; title="Re")
+        hmr = Base.invokelatest(getproperty(mk, :heatmap!), axr, real.(obj))
+        Base.invokelatest(getproperty(mk, :Colorbar), fig[1, 2], hmr)
+        axi = Base.invokelatest(getproperty(mk, :Axis), fig[1, 3]; title="Im")
+        hmi = Base.invokelatest(getproperty(mk, :heatmap!), axi, imag.(obj))
+        Base.invokelatest(getproperty(mk, :Colorbar), fig[1, 4], hmi)
+        Base.invokelatest(getproperty(mk, :Label), fig[0, :], path)
+        fig
+    end
+    nothing
+end
+
+function pdv_handle(obj::AbstractArray{<:Complex}, path::String, tree::PDVTree)
+    println("[PDV] Cannot plot $(ndims(obj))-D complex array (size=$(size(obj))); " *
             "default handler supports 1D and 2D only.")
     nothing
 end

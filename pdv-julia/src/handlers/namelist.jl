@@ -67,7 +67,8 @@ end
     handle_file_register(msg)
 
 Handle `pdv.file.register`: create a file-backed tree node (`PDVNamelist`,
-`PDVLib`, or generic `PDVFile`) at `tree_path`. Lib registrations also load
+`PDVLib`, `PDVHdf5`, or generic `PDVFile` — with HDF5 extension autodetect
+in the generic branch) at `tree_path`. Lib registrations also load
 the lib file into `Main` so its module becomes importable by scripts — the
 Julia analog of Python's `sys.path` insertion.
 """
@@ -118,8 +119,20 @@ function handle_file_register(msg::AbstractDict)
     elseif node_type == "lib"
         PDVLib(uuid=node_uuid, filename=filename, module_id=module_id,
                source_rel_path=src_rel)
+    elseif node_type == "hdf5_file"
+        preload_hdf5!()
+        PDVHdf5(uuid=node_uuid, filename=filename, source_rel_path=src_rel)
     else
-        PDVFile(uuid=node_uuid, filename=filename, source_rel_path=src_rel)
+        # Generic file: autodetect HDF5 by extension so the GUI "Add File"
+        # flow matches `PDVKernel.add_file` (Python parity; a `.nc` file
+        # stays a plain PDVFile — the Julia kernel has no PDVDataset yet).
+        ext = lowercase(last(splitext(filename)))
+        if ext in HDF5_EXTENSIONS
+            preload_hdf5!()
+            PDVHdf5(uuid=node_uuid, filename=filename, source_rel_path=src_rel)
+        else
+            PDVFile(uuid=node_uuid, filename=filename, source_rel_path=src_rel)
+        end
     end
 
     tree[full_path] = node

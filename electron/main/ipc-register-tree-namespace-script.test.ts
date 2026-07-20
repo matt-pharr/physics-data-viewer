@@ -54,6 +54,7 @@ vi.mock("electron", () => ({
 vi.mock("fs/promises", () => fsMocks);
 vi.mock("child_process", () => childProcessMocks);
 
+import { HandlerInvokeTracker } from "./handler-invoke-tracker";
 import { IPC } from "./ipc";
 import { registerTreeNamespaceScriptIpcHandlers } from "./ipc-register-tree-namespace-script";
 import { PDVMessageType } from "./pdv-protocol";
@@ -83,6 +84,8 @@ interface Harness {
   config: ReturnType<typeof createConfigStoreMock<PDVConfig>>;
   kernelWorkingDirs: Map<string, string>;
   knownAliases: Set<string>;
+  handlerInvokeTracker: HandlerInvokeTracker;
+  trackerPushes: Array<{ channel: string; payload: Record<string, unknown> }>;
 }
 
 function setup(initial: { knownAliases?: Set<string> } = {}): Harness {
@@ -90,6 +93,10 @@ function setup(initial: { knownAliases?: Set<string> } = {}): Harness {
   const commRouter = createCommRouterMock();
   const queryRouter = new QueryRouter();
   const projectManager = createProjectManagerMock();
+  const trackerPushes: Array<{ channel: string; payload: Record<string, unknown> }> = [];
+  const handlerInvokeTracker = new HandlerInvokeTracker((channel, payload) =>
+    trackerPushes.push({ channel, payload: payload as Record<string, unknown> }),
+  );
   const config = createConfigStoreMock<PDVConfig>({
     showPrivateVariables: false,
     showModuleVariables: false,
@@ -103,6 +110,7 @@ function setup(initial: { knownAliases?: Set<string> } = {}): Harness {
     kernelManager,
     commRouter: commRouter.router,
     queryRouter,
+    handlerInvokeTracker,
     projectManager,
     configStore: config.store,
     kernelWorkingDirs,
@@ -126,6 +134,8 @@ function setup(initial: { knownAliases?: Set<string> } = {}): Harness {
     config,
     kernelWorkingDirs,
     knownAliases,
+    handlerInvokeTracker,
+    trackerPushes,
   };
 }
 
@@ -222,6 +232,76 @@ describe("tree:createScript", () => {
       filename: "demo.jl",
       language: "julia",
     });
+  });
+});
+
+describe("tree:invokeHandler", () => {
+  it("wraps the invoke in a console entry with a measured duration", async () => {
+    const harness = setup();
+    (harness.kernelManager.getKernel as ReturnType<typeof vi.fn>).mockReturnValue(
+      makeKernelInfo({}),
+    );
+    harness.commRouter.request.mockResolvedValueOnce(
+      makeOkResponse({ dispatched: true }),
+    );
+    const result = (await getHandler(IPC.tree.invokeHandler)({}, "k1", "data.arr")) as {
+      success: boolean;
+      error?: string;
+    };
+    expect(result).toEqual({ success: true, error: undefined });
+    // The generous timeout is load-bearing: a first plot can pay a
+    // CairoMakie auto-load + precompile (minutes); the default 30 s
+    // stamped a spurious timeout error (julia-hdf5-smoke e2e).
+    expect(harness.commRouter.request).toHaveBeenCalledWith(
+      PDVMessageType.HANDLER_INVOKE,
+      { path: "data.arr" },
+      { timeoutMs: 300_000 },
+    );
+    const channels = harness.trackerPushes.map((p) => p.channel);
+    expect(channels).toEqual([IPC.push.executeBegin, IPC.push.executeFinish]);
+    const [begin, finish] = harness.trackerPushes.map((p) => p.payload);
+    expect(begin.origin).toMatchObject({ label: "Handler data.arr" });
+    expect(finish.executionId).toBe(begin.executionId);
+    expect(typeof finish.duration).toBe("number");
+    expect(finish.error).toBeUndefined();
+  });
+
+  it("undispatched invokes surface the kernel's error in the console entry", async () => {
+    const harness = setup();
+    (harness.kernelManager.getKernel as ReturnType<typeof vi.fn>).mockReturnValue(
+      makeKernelInfo({}),
+    );
+    harness.commRouter.request.mockResolvedValueOnce(
+      makeOkResponse({ dispatched: false, error: "No handler for Core.Int64" }),
+    );
+    const result = (await getHandler(IPC.tree.invokeHandler)({}, "k1", "x")) as {
+      success: boolean;
+      error?: string;
+    };
+    expect(result.success).toBe(false);
+    expect(result.error).toBe("No handler for Core.Int64");
+    const finish = harness.trackerPushes.find(
+      (p) => p.channel === IPC.push.executeFinish,
+    );
+    expect(finish?.payload.error).toBe("No handler for Core.Int64");
+  });
+
+  it("comm failures finish the entry instead of leaking it", async () => {
+    const harness = setup();
+    (harness.kernelManager.getKernel as ReturnType<typeof vi.fn>).mockReturnValue(
+      makeKernelInfo({}),
+    );
+    harness.commRouter.request.mockRejectedValueOnce(new Error("comm timeout"));
+    const result = (await getHandler(IPC.tree.invokeHandler)({}, "k1", "x")) as {
+      success: boolean;
+      error?: string;
+    };
+    expect(result.success).toBe(false);
+    expect(result.error).toBe("comm timeout");
+    const finish = harness.trackerPushes.find(
+      (p) => p.channel === IPC.push.executeFinish,
+    );
+    expect(finish?.payload.error).toBe("comm timeout");
   });
 });
 

@@ -283,6 +283,37 @@ class TestHandleProjectSave:
             nodes = json.load(f)
         assert isinstance(nodes, list)
 
+    def test_save_emits_progress_from_zero(self, tree_with_comm, tmp_save_dir):
+        """Save streams pdv.progress starting at 0/total (regression).
+
+        The renderer's loading bar only shows for ``current < total`` and
+        clears at ``current >= total`` — before the 0/total emission, a
+        small tree's sole event was the final ``total/total``, so the whole
+        save produced no visible feedback. Small trees now emit every node.
+        """
+        tree_with_comm["a"] = 1
+        tree_with_comm["b"] = [1.0, 2.0]
+        tree_with_comm["c"] = "text"
+        mock_comm = _make_mock_comm()
+        msg = _make_msg("pdv.project.save", {"save_dir": tmp_save_dir})
+        with (
+            patch.object(comms_mod, "_comm", mock_comm),
+            patch.object(comms_mod, "_pdv_tree", tree_with_comm),
+        ):
+            handle_project_save(msg)
+        progress = [
+            e["payload"] for e in mock_comm._sent if e["type"] == "pdv.progress"
+        ]
+        assert progress, "save sent no pdv.progress messages"
+        assert all(
+            p["operation"] == "save" and p["phase"] == "Serializing"
+            for p in progress
+        )
+        assert progress[0]["current"] == 0
+        assert len({p["total"] for p in progress}) == 1
+        assert progress[-1]["current"] == progress[-1]["total"]
+        assert len(progress) >= 3  # 0, ...every node (small tree)..., total
+
     def test_nan_scalar_saves_as_strictly_valid_json(
         self, tree_with_comm, tmp_save_dir
     ):

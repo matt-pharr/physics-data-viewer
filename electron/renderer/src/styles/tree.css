@@ -161,6 +161,18 @@
   color: var(--accent);
 }
 
+/* Coordinate rows (dataset coords vs data variables): muted name so the
+   psi/theta/time grids read as supporting context under the variables.
+   Selection still wins the color below (rule order matters). */
+.tree-row.coord .tree-key-text {
+  font-weight: 400;
+  color: var(--text-secondary);
+}
+
+.tree-row.coord.selected .tree-key-text {
+  color: var(--accent);
+}
+
 /* Type chip: bordered + transparent so it stays legible on every row
    background variant (primary, stripe-secondary, branch-tertiary,
    selected-accent-tint, hover). A solid fill collided with at least

@@ -7,7 +7,9 @@
  * uv-parity fields: the **Julia version** — a dropdown over the supported
  * minors, with installed juliaup channels marked and missing ones downloaded
  * automatically via `juliaup add` behind the launch overlay — and the
- * **initial package list** added to the fresh project environment.
+ * **initial package list** added to the fresh project environment,
+ * prefilled from the user-level `defaultJuliaPackages` setting so entries
+ * can be removed per project (mirror of NewProjectDialog's prefill).
  *
  * When juliaup is not installed the version choice collapses to the
  * configured runtime, with a pointer at the selector's one-click juliaup
@@ -21,6 +23,8 @@ import type { JuliaupChannel } from '../../types';
 import { useModalKeyboard } from '../../hooks/useModalKeyboard';
 
 interface NewJuliaProjectDialogProps {
+  /** Package specs prefilling the Initial-packages field (removable per project). */
+  defaultPackages: string[];
   /** Create a pkg-mode project with the chosen version and packages. */
   onCreate: (opts: { juliaVersion?: string; packages: string[] }) => void;
   /** Called when the user cancels (Escape, ×, backdrop, Cancel). */
@@ -41,6 +45,7 @@ function minorOf(version: string): string | null {
 }
 
 export const NewJuliaProjectDialog: React.FC<NewJuliaProjectDialogProps> = ({
+  defaultPackages,
   onCreate,
   onCancel,
 }) => {
@@ -48,7 +53,7 @@ export const NewJuliaProjectDialog: React.FC<NewJuliaProjectDialogProps> = ({
   const [juliaVersion, setJuliaVersion] = useState(
     window.pdv.system.defaultJuliaVersion
   );
-  const [packagesText, setPackagesText] = useState('');
+  const [packagesText, setPackagesText] = useState(defaultPackages.join(', '));
   const [channels, setChannels] = useState<JuliaupChannel[]>([]);
   // null = presence not yet known (the filesystem check is in flight).
   const [juliaupInstalled, setJuliaupInstalled] = useState<boolean | null>(null);

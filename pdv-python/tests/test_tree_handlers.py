@@ -329,6 +329,50 @@ class TestFileRegister:
         )
         assert isinstance(tree_with_comm["layout"], PDVFile)
 
+    def test_explicit_dataset_and_hdf5_node_types(self, tree_with_comm):
+        from pdv.handlers.namelist import handle_file_register
+        from pdv.tree import PDVDataset, PDVHdf5
+
+        send_message, send_error = _run_handler(
+            handle_file_register,
+            {
+                "tree_path": "",
+                "filename": "sim.out",
+                "node_type": "dataset_file",
+            },
+            tree_with_comm,
+        )
+        send_error.assert_not_called()
+        assert isinstance(tree_with_comm["sim"], PDVDataset)
+
+        _run_handler(
+            handle_file_register,
+            {"tree_path": "", "filename": "raw.bin", "node_type": "hdf5_file"},
+            tree_with_comm,
+        )
+        assert isinstance(tree_with_comm["raw"], PDVHdf5)
+
+    def test_default_node_type_autodetects_by_extension(self, tree_with_comm):
+        """GUI Add File sends node_type 'file' — .nc/.h5 files must still
+        become lazily-read data nodes (same rules as pdv.add_file)."""
+        from pdv.handlers.namelist import handle_file_register
+        from pdv.tree import PDVDataset, PDVFile, PDVHdf5
+
+        cases = [
+            ("gpec_output.nc", "gpec_output", PDVDataset),
+            ("scan.cdf", "scan", PDVDataset),
+            ("efit.h5", "efit", PDVHdf5),
+            ("run.hdf5", "run", PDVHdf5),
+            ("readme.txt", "readme", PDVFile),
+        ]
+        for filename, key, expected_cls in cases:
+            _run_handler(
+                handle_file_register,
+                {"tree_path": "", "filename": filename, "node_type": "file"},
+                tree_with_comm,
+            )
+            assert type(tree_with_comm[key]) is expected_cls, filename
+
 
 class TestDuplicate:
     """duplicate handler: deep-copy a node, plus the duplicate-path guard."""
@@ -429,6 +473,34 @@ class TestRelocateFiles:
         from pdv.handlers.tree import _relocate_single_file
         with pytest.raises(TypeError, match="Expected PDVFile"):
             _relocate_single_file("not_a_file", "/tmp", copy=False)
+
+    def test_relocate_closes_data_node_handle(self, tmp_working_dir):
+        """Duplicating a PDVHdf5 must drop its cached handle before the
+        UUID swap — otherwise later reads hit the old file's handle."""
+        h5py = pytest.importorskip("h5py")
+        import numpy as np
+
+        from pdv.handlers.tree import _relocate_single_file
+        from pdv.tree import PDVHdf5
+
+        node_uuid = "reloc_uuid04"
+        tree_dir = os.path.join(tmp_working_dir, "tree", node_uuid)
+        os.makedirs(tree_dir)
+        with h5py.File(os.path.join(tree_dir, "d.h5"), "w") as f:
+            f.create_dataset("x", data=np.arange(3))
+
+        node = PDVHdf5(uuid=node_uuid, filename="d.h5")
+        node.resolve_path(tmp_working_dir)
+        # Open against the OLD uuid path.
+        handle = h5py.File(node.resolve_path(tmp_working_dir), "r")
+        node._handle = handle
+
+        _relocate_single_file(node, tmp_working_dir, copy=True)
+
+        assert node.uuid != node_uuid
+        assert node._handle is None
+        assert not handle.id.valid  # old handle actually closed
+        assert os.path.exists(node.resolve_path(tmp_working_dir))
 
     def test_relocate_files_recursive_copy(self, tmp_working_dir):
         """Recursive duplicate assigns fresh UUIDs to file-backed descendants."""

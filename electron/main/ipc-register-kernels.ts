@@ -21,6 +21,7 @@ import { app, BrowserWindow } from "electron";
 import { handleIpc } from "./ipc-registry";
 
 import { CommRouter } from "./comm-router";
+import { HandlerInvokeTracker } from "./handler-invoke-tracker";
 import { QueryRouter } from "./query-router";
 import { EnvironmentDetector } from "./environment-detector";
 import { IPC, type ActiveEnvironmentInfo, type KernelRestartResult } from "./ipc";
@@ -105,6 +106,12 @@ interface RegisterKernelIpcHandlersOptions {
   kernelManager: KernelManager;
   commRouter: CommRouter;
   queryRouter: QueryRouter;
+  /**
+   * Shared tracker for in-flight `pdv.handler.invoke` console entries: the
+   * orphan-iopub forwarder routes comm-parented display/stream output into
+   * the invoke's entry (see `handler-invoke-tracker.ts`).
+   */
+  handlerInvokeTracker: HandlerInvokeTracker;
   projectManager: ProjectManager;
   moduleManager: ModuleManager;
   kernelWorkingDirs: Map<string, string>;
@@ -171,7 +178,18 @@ async function cleanupKernelWorkingDir(
   const oldDir = kernelWorkingDirs.get(kernelId);
   if (oldDir) {
     if (!preserveDir) {
-      await projectManager.deleteWorkingDir(oldDir);
+      // Best-effort: a stubborn writer (kernel still flushing during
+      // teardown) must not abort the session transition over a scratch
+      // directory — deleteWorkingDir already retries transient
+      // ENOTEMPTY/EBUSY internally; anything that survives that is
+      // leaked and reclaimed by the dead-PID orphan sweep on the next
+      // app launch (app.ts).
+      await projectManager.deleteWorkingDir(oldDir).catch((err) => {
+        console.warn(
+          `[kernels] failed to delete working dir ${oldDir}:`,
+          err,
+        );
+      });
     }
     kernelWorkingDirs.delete(kernelId);
   }
@@ -197,6 +215,7 @@ export function registerKernelIpcHandlers(
     kernelManager,
     commRouter,
     queryRouter,
+    handlerInvokeTracker,
     projectManager,
     moduleManager,
     kernelWorkingDirs,
@@ -461,14 +480,19 @@ export function registerKernelIpcHandlers(
    * both double-click plot delivery and crash surfacing for the rest of the
    * session):
    *
-   * 1. The "orphan" display_data forwarder — figures the kernel emits
-   *    outside any in-flight execution become synthetic console entries.
-   *    The main producer is a double-click plot handler (`pdv.handler.invoke`
-   *    runs over the comm channel, so its display_data is parented to a
-   *    stale execute msg and `execute()`'s per-execution collector never
-   *    sees it). Python's native matplotlib windows sidestep iopub entirely,
-   *    but Julia's inline Makie displays (and Python's Agg fallback) land
-   *    here.
+   * 1. The "orphan" iopub forwarder — output the kernel emits outside any
+   *    in-flight execution. The main producer is a double-click handler
+   *    (`pdv.handler.invoke` runs over the comm channel, so its
+   *    display_data and stream output are parented to the comm msg and
+   *    `execute()`'s per-execution collector never sees them). While an
+   *    invoke is in flight, everything routes into its console entry via
+   *    {@link HandlerInvokeTracker} — real duration, visible `[PDV]`
+   *    notices. Figures with no invoke in flight (a background task
+   *    drawing) still become synthetic "Plot" entries; orphan stream
+   *    output with no invoke in flight stays dropped (kernel boot noise).
+   *    Python's native matplotlib windows sidestep iopub entirely, but
+   *    Julia's inline Makie displays (and Python's inline/Agg backend)
+   *    land here.
    * 2. The crash handler that pushes `kernelCrashed` to the renderer and
    *    clears the active-kernel pointer.
    *
@@ -476,9 +500,22 @@ export function registerKernelIpcHandlers(
    */
   function attachKernelSessionListeners(kernelId: string): void {
     kernelManager.onIopubMessage(kernelId, (jupMsg) => {
-      if (jupMsg.header.msg_type !== "display_data") return;
+      const msgType = jupMsg.header.msg_type;
+      if (msgType !== "display_data" && msgType !== "stream") return;
       const parentId = String(jupMsg.parent_header?.msg_id ?? "");
       if (kernelManager.isExecutionActive(parentId)) return;
+
+      if (msgType === "stream") {
+        const content = jupMsg.content as { name?: string; text?: unknown };
+        const text = String(content?.text ?? "");
+        if (!text) return;
+        handlerInvokeTracker.emitOutput({
+          type: content?.name === "stderr" ? "stderr" : "stdout",
+          text,
+        });
+        return;
+      }
+
       const data = jupMsg.content?.data as Record<string, unknown> | undefined;
       const png = data?.["image/png"];
       const svg = data?.["image/svg+xml"];
@@ -488,10 +525,14 @@ export function registerKernelIpcHandlers(
           : typeof svg === "string"
             ? { mime: "image/svg+xml", data: svg }
             : null;
-      if (!image || win.isDestroyed()) return;
-      // Reuse the executeBegin/Output/Finish contract so the renderer needs
-      // no new channel: the begin push seeds a console entry, the image chunk
-      // attaches to it, and the finish push closes it out.
+      if (!image) return;
+      if (handlerInvokeTracker.emitOutput({ type: "image", image })) return;
+      if (win.isDestroyed()) return;
+      // Fallback for figures with no invoke in flight. Reuse the
+      // executeBegin/Output/Finish contract so the renderer needs no new
+      // channel: the begin push seeds a console entry, the image chunk
+      // attaches to it, and the finish push closes it out. Nothing measured
+      // anything here, so no duration is claimed.
       const executionId = `display-${randomUUID()}`;
       const origin = { kind: "unknown" as const, label: "Plot" };
       const timestamp = Date.now();

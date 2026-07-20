@@ -419,8 +419,16 @@ function serialize_tree_to_dir(tree, save_dir::AbstractString;
     working_dir = tree.working_dir === nothing ? save_dir : tree.working_dir
     total = _count_nodes(tree)
 
+    # Immediate 0/total emission so the renderer's bar appears before the
+    # walk starts (first-save JIT and a single multi-GB file copy both live
+    # inside one node tick — without this a small tree's only emission is
+    # current == total, which the renderer treats as "done, clear the bar",
+    # and the whole save shows no feedback at all). Small trees then emit
+    # every node; the %5 throttle is for large trees where per-node comm
+    # messages are meaningful overhead.
+    on_progress !== nothing && on_progress("Serializing", 0, total)
     emit_progress = function (current::Int)
-        if current % 5 == 0 || current == total
+        if total <= 20 || current % 5 == 0 || current == total
             on_progress !== nothing && on_progress("Serializing", current, total)
         end
     end

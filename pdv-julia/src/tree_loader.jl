@@ -178,6 +178,13 @@ function load_tree_index(tree::AbstractPDVTree, nodes::AbstractVector;
             elseif node_type == "file"
                 set_quiet!(tree, fp, PDVFile(
                     uuid=node_uuid, filename=node_filename, source_rel_path=src_rel))
+            elseif node_type == "hdf5_file"
+                # Zero I/O: the node opens lazily on first listing. The
+                # best-effort pre-load keeps HDF5's first `Base.require`
+                # on the main thread (mirror of Python's preimport).
+                preload_hdf5!()
+                set_quiet!(tree, fp, PDVHdf5(
+                    uuid=node_uuid, filename=node_filename, source_rel_path=src_rel))
             elseif backend == "inline"
                 # _materialize_inline: tree-index.json comes through JSON.parse,
                 # whose 1.x object type is not a Dict (see serialization.jl).
