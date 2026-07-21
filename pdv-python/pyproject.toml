@@ -6,7 +6,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "pdv-python"
-version = "0.2.1"
+version = "0.2.0"
 description = "PDV kernel support package — implements the PDV comm protocol and data structures for Python kernels."
 readme = "README.md"
 license = "MIT"

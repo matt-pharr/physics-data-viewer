@@ -40,7 +40,7 @@ import Pkg
 # Unified PDV version (must match electron/package.json and
 # pdv-python/pyproject.toml — ARCHITECTURE.md key design rule 10). Probed by
 # the app's environment detector via `println(PDVKernel.VERSION)`.
-const VERSION = "0.2.1"
+const VERSION = "0.2.0"
 const __pdv_protocol_version__ = VERSION
 
 export PDVTree, PDVModule, PDVFile, PDVScript, PDVNote, PDVGui, PDVNamelist,
