@@ -18,6 +18,7 @@ import {
   copyEnvFilesForLoad,
   copyEnvFilesForSave,
   overlayAutosaveTreeFiles,
+  syncPkgEnvironmentForLoad,
   syncUvEnvironmentForLoad,
 } from "./project-file-sync";
 
@@ -148,6 +149,35 @@ describe("copyEnvFilesForLoad() / copyEnvFilesForSave()", () => {
 
     expect(copied).toEqual(["pyproject.toml"]);
     expect(await fs.readFile(path.join(saveDir, "uv.lock"), "utf8")).toBe("good-lock\n");
+  });
+
+  it("copies the Julia env-file set when language is julia (§10.6.2)", async () => {
+    await fs.writeFile(path.join(saveDir, "Project.toml"), "[deps]\n");
+    await fs.writeFile(path.join(saveDir, "Manifest.toml"), "julia_version = \"1.11.6\"\n");
+    // A stray Python env file must NOT ride along for a Julia session.
+    await fs.writeFile(path.join(saveDir, "pyproject.toml"), "[project]\n");
+
+    const copied = await copyEnvFilesForLoad(saveDir, workingDir, "julia");
+
+    expect(copied.sort()).toEqual(["Manifest.toml", "Project.toml"]);
+    await expect(fs.stat(path.join(workingDir, "pyproject.toml"))).rejects.toMatchObject({
+      code: "ENOENT",
+    });
+  });
+
+  it("writes the Julia env-file set back on save without clobbering a saved Manifest.toml (§10.6.7)", async () => {
+    await fs.writeFile(path.join(saveDir, "Manifest.toml"), "good-manifest\n");
+    await fs.writeFile(path.join(workingDir, "Project.toml"), "[deps]\nNPZ = \"x\"\n");
+
+    const copied = await copyEnvFilesForSave(workingDir, saveDir, "julia");
+
+    expect(copied).toEqual(["Project.toml"]);
+    expect(await fs.readFile(path.join(saveDir, "Manifest.toml"), "utf8")).toBe(
+      "good-manifest\n",
+    );
+    expect(await fs.readFile(path.join(saveDir, "Project.toml"), "utf8")).toBe(
+      "[deps]\nNPZ = \"x\"\n",
+    );
   });
 
   it("round-trips the .python-version pin through save and open (§10.5.8)", async () => {
@@ -300,5 +330,85 @@ describe("syncUvEnvironmentForLoad()", () => {
 
     expect(result.synced).toBe(false);
     expect(result.warning).toMatch(/uv sync failed/);
+  });
+});
+
+describe("syncPkgEnvironmentForLoad() (§10.6.6)", () => {
+  let saveDir: string;
+  let workingDir: string;
+
+  beforeEach(async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "pdv-pkgsync-"));
+    saveDir = path.join(root, "save");
+    workingDir = path.join(root, "working");
+    await fs.mkdir(saveDir, { recursive: true });
+    await fs.mkdir(workingDir, { recursive: true });
+  });
+
+  afterEach(async () => {
+    await fs.rm(path.dirname(saveDir), { recursive: true, force: true });
+  });
+
+  const okInstantiate = vi.fn(async () => ({ success: true, output: "" }));
+
+  it("no-ops when the save has no Project.toml (legacy/shared Julia save)", async () => {
+    await fs.writeFile(path.join(workingDir, "Project.toml"), "previous-project\n");
+    okInstantiate.mockClear();
+
+    const result = await syncPkgEnvironmentForLoad(saveDir, workingDir, {
+      runPkgInstantiate: okInstantiate,
+    });
+
+    expect(result).toEqual({ copied: [], synced: false });
+    expect(okInstantiate).not.toHaveBeenCalled();
+    expect(await fs.readFile(path.join(workingDir, "Project.toml"), "utf8")).toBe(
+      "previous-project\n",
+    );
+  });
+
+  it("short-circuits without copying or instantiating when env files already match", async () => {
+    await fs.writeFile(path.join(saveDir, "Project.toml"), "same-project\n");
+    await fs.writeFile(path.join(saveDir, "Manifest.toml"), "same-manifest\n");
+    await fs.writeFile(path.join(workingDir, "Project.toml"), "same-project\n");
+    await fs.writeFile(path.join(workingDir, "Manifest.toml"), "same-manifest\n");
+    okInstantiate.mockClear();
+
+    const result = await syncPkgEnvironmentForLoad(saveDir, workingDir, {
+      runPkgInstantiate: okInstantiate,
+    });
+
+    expect(result).toEqual({ copied: [], synced: true });
+    expect(okInstantiate).not.toHaveBeenCalled();
+  });
+
+  it("replaces the previous project's env files and instantiates", async () => {
+    await fs.writeFile(path.join(saveDir, "Project.toml"), "opened-project\n");
+    await fs.writeFile(path.join(saveDir, "Manifest.toml"), "opened-manifest\n");
+    await fs.writeFile(path.join(workingDir, "Project.toml"), "stale-project\n");
+    okInstantiate.mockClear();
+
+    const result = await syncPkgEnvironmentForLoad(saveDir, workingDir, {
+      runPkgInstantiate: okInstantiate,
+    });
+
+    expect(result.synced).toBe(true);
+    expect(result.copied.sort()).toEqual(["Manifest.toml", "Project.toml"]);
+    expect(okInstantiate).toHaveBeenCalledOnce();
+    expect(okInstantiate).toHaveBeenCalledWith(workingDir);
+    expect(await fs.readFile(path.join(workingDir, "Project.toml"), "utf8")).toBe(
+      "opened-project\n",
+    );
+  });
+
+  it("returns a warning when Pkg.instantiate fails, without throwing", async () => {
+    await fs.writeFile(path.join(saveDir, "Project.toml"), "opened-project\n");
+    const failInstantiate = vi.fn(async () => ({ success: false, output: "resolve error" }));
+
+    const result = await syncPkgEnvironmentForLoad(saveDir, workingDir, {
+      runPkgInstantiate: failInstantiate,
+    });
+
+    expect(result.synced).toBe(false);
+    expect(result.warning).toMatch(/Pkg\.instantiate failed/);
   });
 });

@@ -9,19 +9,22 @@ The tree stores two kinds of values:
    one wraps a file on disk and carries enough metadata for PDV to render,
    edit, or execute it from the UI.
 
-Construct a node and assign it into the tree at a dot-path:
+Each file node is keyed by a `uuid` (its storage directory is
+`tree/<uuid>/` under the working dir) and a `filename`. You rarely construct
+these by hand — `pdv.add_file(...)` and the UI allocate the UUID and copy the
+file for you — but the constructor signatures are:
 
 ```python
 from pdv import PDVScript, PDVNote
 
-pdv_tree['analysis.fit'] = PDVScript(relative_path='fit.py')
-pdv_tree['notes.intro']  = PDVNote(relative_path='intro.md', title='Intro')
+PDVScript(uuid, filename, language='python', doc=None, module_id='', source_rel_path=None)
+PDVNote(uuid, filename, title=None)
 ```
 
 All node types are importable from the top-level `pdv` package.
-`PDVFile` is the base class for every file-backed node — its attributes
-(`relative_path`, `source_rel_path`, `resolve_path`) are inherited by all
-of the subclasses below.
+`PDVFile` is the base class for every file-backed node — its `uuid`,
+`filename`, `source_rel_path`, and `resolve_path()` members are inherited by
+all of the subclasses below.
 
 ---
 

@@ -23,6 +23,7 @@ import * as path from "path";
 import * as os from "os";
 import * as fs from "fs";
 import { BrowserWindow } from "electron";
+import { sanitizedJuliaEnv } from "./julia-discovery";
 import { coreVersion, getAppVersion } from "./pdv-protocol";
 import { parseMajorMinor } from "./python-versions";
 
@@ -337,8 +338,16 @@ export class EnvironmentDetector {
    * Check whether ``PDVKernel`` is installed in the given Julia environment
    * and return its version.
    *
-   * Runs: ``julia -e 'using PDVKernel; println(PDVKernel.VERSION)'``
-   * with a 5-second timeout.
+   * Deliberately probes WITHOUT loading the package: ``using PDVKernel``
+   * triggers recompilation whenever precompile caches were invalidated (a
+   * package update, an edit to a dev-installed pdv-julia, a Julia upgrade),
+   * which can take seconds to minutes and blew straight through the 5-second
+   * probe timeout — PDV then falsely reported PDVKernel as missing and
+   * refused to boot the kernel. ``Base.locate_package`` resolves the package
+   * from the load path in milliseconds, and the version comes from its
+   * ``Project.toml`` (the unified-version rule keeps it equal to
+   * ``PDVKernel.VERSION``). Any genuine recompile is paid inside the kernel
+   * boot, which has its own generous allowance.
    *
    * @param juliaPath - Path to the Julia executable to probe.
    * @returns Install status object.
@@ -346,15 +355,28 @@ export class EnvironmentDetector {
   static async checkJuliaPDVInstalled(
     juliaPath: string
   ): Promise<PDVInstallStatus> {
+    const probe = [
+      'id = Base.identify_package("PDVKernel")',
+      'id === nothing && exit(2)',
+      "src = Base.locate_package(id)",
+      "src === nothing && exit(2)",
+      'proj = joinpath(dirname(dirname(src)), "Project.toml")',
+      "import TOML",
+      'print(get(TOML.parsefile(proj), "version", ""))',
+    ].join("; ");
     try {
+      // sanitizedJuliaEnv: probe the runtime's DEFAULT environment — a
+      // shell-exported JULIA_PROJECT would resolve PDVKernel from the
+      // user's own project instead (review M8).
       const { stdout } = await execFileAsync(
         juliaPath,
-        ["-e", 'using PDVKernel; println(PDVKernel.VERSION)'],
-        { timeout: PROBE_TIMEOUT_MS }
+        ["--startup-file=no", "-e", probe],
+        { timeout: PROBE_TIMEOUT_MS, env: sanitizedJuliaEnv() }
       );
       const version = stdout.trim();
-      const major = version.split(".")[0];
-      const compatible = major === "1";
+      // PDVKernel carries the unified PDV version (key design rule 10), so
+      // compatibility is the same core-version match used for pdv-python.
+      const compatible = coreVersion(version) === coreVersion(getAppVersion());
       return { installed: true, version, compatible };
     } catch {
       return { installed: false, version: null, compatible: false };
@@ -479,7 +501,8 @@ export class EnvironmentDetector {
    * Read the version of the bundled ``pdv-python`` package from its
    * ``pyproject.toml`` in the app Resources directory.
    *
-   * @param resourcesPath - ``process.resourcesPath`` at runtime.
+   * @param pdvPythonPath - Path to the bundled ``pdv-python`` directory;
+   *   defaults to the resolved app Resources location when omitted.
    * @returns Bundled version string, or null if not found.
    */
   static getBundledPDVVersion(pdvPythonPath?: string | null): string | null {

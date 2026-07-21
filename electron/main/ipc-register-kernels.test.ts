@@ -47,7 +47,31 @@ const uvEnvironmentMocks = vi.hoisted(() => ({
   materializeUvEnvironment: vi.fn(),
 }));
 
+const juliaEnvMocks = vi.hoisted(() => ({
+  instantiateJuliaEnvironment: vi.fn(async () => ({
+    success: true,
+    output: "",
+    juliaVersion: "1.11.6",
+  })),
+}));
+
+// Deterministic shim/default resolution (§10.7.2) — the real module would
+// read this machine's juliaup metadata.
+const juliaDiscoveryMocks = vi.hoisted(() => ({
+  resolveJuliaShim: vi.fn((p: string) => p),
+  discoverDefaultJulia: vi.fn((): string | null => null),
+}));
+
+// New-project Julia version acquisition (§10.6.5) — the real module would
+// run this machine's juliaup and probe real binaries.
+const juliaupRunnerMocks = vi.hoisted(() => ({
+  ensureJuliaVersionReady: vi.fn(
+    async () => "/depot/juliaup/julia-1.10.9/bin/julia",
+  ),
+}));
+
 vi.mock("electron", () => ({
+  app: { getPath: vi.fn(() => "/tmp/pdv-userdata") },
   ipcMain: {
     handle: ipcRegistry.ipcHandle,
     removeHandler: ipcRegistry.ipcRemoveHandler,
@@ -66,7 +90,11 @@ vi.mock("./kernel-session", () => kernelSessionMocks);
 vi.mock("./module-runtime", () => moduleRuntimeMocks);
 vi.mock("./project-file-sync", () => projectFileSyncMocks);
 vi.mock("./uv-environment", () => uvEnvironmentMocks);
+vi.mock("./julia-env", () => juliaEnvMocks);
+vi.mock("./julia-discovery", () => juliaDiscoveryMocks);
+vi.mock("./juliaup-runner", () => juliaupRunnerMocks);
 
+import { HandlerInvokeTracker } from "./handler-invoke-tracker";
 import { IPC, type ActiveEnvironmentInfo } from "./ipc";
 import { registerKernelIpcHandlers } from "./ipc-register-kernels";
 import { ProjectManager } from "./project-manager";
@@ -111,6 +139,8 @@ interface Harness {
   bindActiveProjectModules: Mock<(kernelId: string | null) => Promise<void>>;
   autosaveBeforeRestart: Mock<(kernelId: string) => Promise<boolean>>;
   recoverUnsavedAfterRestart: Mock<(orphanDir: string) => Promise<void>>;
+  handlerInvokeTracker: HandlerInvokeTracker;
+  trackerPushes: Array<{ channel: string; payload: Record<string, unknown> }>;
 }
 
 function setup(): Harness {
@@ -118,6 +148,10 @@ function setup(): Harness {
   const kernelManager = createKernelManagerMock();
   const commRouter = createCommRouterMock();
   const queryRouter = new QueryRouter();
+  const trackerPushes: Array<{ channel: string; payload: Record<string, unknown> }> = [];
+  const handlerInvokeTracker = new HandlerInvokeTracker((channel, payload) =>
+    trackerPushes.push({ channel, payload: payload as Record<string, unknown> }),
+  );
   const projectManager = createProjectManagerMock();
   const moduleManager = createModuleManagerMock();
   const kernelWorkingDirs = new Map<string, string>();
@@ -129,6 +163,8 @@ function setup(): Harness {
     kernelManager,
     commRouter,
     queryRouter,
+    handlerInvokeTracker,
+    trackerPushes,
     projectManager,
     moduleManager,
     kernelWorkingDirs,
@@ -153,6 +189,7 @@ function setup(): Harness {
     kernelManager,
     commRouter: commRouter.router,
     queryRouter,
+    handlerInvokeTracker,
     projectManager,
     moduleManager,
     kernelWorkingDirs,
@@ -179,6 +216,11 @@ beforeEach(() => {
   envDetectorMocks.checkPDVInstalled.mockResolvedValue({ installed: true });
   envDetectorMocks.checkJuliaPDVInstalled.mockResolvedValue({ installed: true });
   envDetectorMocks.resolvePythonMajorMinor.mockResolvedValue("3.13");
+  juliaDiscoveryMocks.resolveJuliaShim.mockImplementation((p: string) => p);
+  juliaDiscoveryMocks.discoverDefaultJulia.mockReturnValue(null);
+  juliaupRunnerMocks.ensureJuliaVersionReady.mockResolvedValue(
+    "/depot/juliaup/julia-1.10.9/bin/julia",
+  );
 });
 
 afterEach(() => {
@@ -224,7 +266,7 @@ describe("kernels:start", () => {
         language: "julia",
         env: { JULIA_PATH: "/usr/bin/julia" },
       }),
-    ).rejects.toThrow(/missing PDVKernel/);
+    ).rejects.toThrow(/missing the PDVKernel package/);
   });
 
   it("crash handler preserves the working dir and pushes kernelCrashed to renderer", async () => {
@@ -249,6 +291,95 @@ describe("kernels:start", () => {
       IPC.push.kernelCrashed,
       { kernelId: result.id },
     );
+  });
+});
+
+describe("orphan iopub forwarding (handler invokes)", () => {
+  /** Start a kernel and return the iopub forwarder attachKernelSessionListeners registered. */
+  async function startAndGetForwarder() {
+    const harness = setup();
+    const result = (await getHandler(IPC.kernels.start)({}, {
+      language: "python",
+      env: { PYTHON_PATH: "/usr/bin/python3" },
+    })) as { id: string };
+    const call = (harness.kernelManager.onIopubMessage as Mock).mock.calls.find(
+      (c) => c[0] === result.id,
+    );
+    expect(call).toBeTruthy();
+    const forward = call![1] as (msg: unknown) => void;
+    return { harness, forward };
+  }
+
+  it("routes comm-parented stream + display output into the in-flight invoke entry", async () => {
+    const { harness, forward } = await startAndGetForwarder();
+    const id = harness.handlerInvokeTracker.begin("data.arr");
+    forward({
+      header: { msg_type: "stream" },
+      parent_header: { msg_id: "comm-1" },
+      content: { name: "stdout", text: "[PDV] Cannot plot\n" },
+    });
+    forward({
+      header: { msg_type: "display_data" },
+      parent_header: { msg_id: "comm-1" },
+      content: { data: { "image/png": "abc123" } },
+    });
+    const outputs = harness.trackerPushes.filter(
+      (p) => p.channel === IPC.push.executeOutput,
+    );
+    expect(outputs).toHaveLength(2);
+    expect(outputs[0].payload).toMatchObject({
+      executionId: id,
+      type: "stdout",
+      text: "[PDV] Cannot plot\n",
+    });
+    expect(outputs[1].payload).toMatchObject({
+      executionId: id,
+      type: "image",
+      image: { mime: "image/png", data: "abc123" },
+    });
+    // The synthetic fallback (hardcoded duration: 0) must not fire.
+    expect(harness.win.webContentsSend).not.toHaveBeenCalledWith(
+      IPC.push.executeFinish,
+      expect.objectContaining({ duration: 0 }),
+    );
+    harness.handlerInvokeTracker.finish(id);
+  });
+
+  it("figures with no invoke in flight keep the synthetic Plot fallback; orphan streams stay dropped", async () => {
+    const { harness, forward } = await startAndGetForwarder();
+    forward({
+      header: { msg_type: "stream" },
+      parent_header: { msg_id: "x" },
+      content: { name: "stdout", text: "boot noise\n" },
+    });
+    expect(harness.win.webContentsSend).not.toHaveBeenCalledWith(
+      IPC.push.executeOutput,
+      expect.anything(),
+    );
+    forward({
+      header: { msg_type: "display_data" },
+      parent_header: { msg_id: "x" },
+      content: { data: { "image/png": "zzz" } },
+    });
+    const sends = harness.win.webContentsSend.mock.calls;
+    const begin = sends.find((c) => c[0] === IPC.push.executeBegin);
+    expect(begin?.[1]).toMatchObject({ origin: { kind: "unknown", label: "Plot" } });
+    const finish = sends.find((c) => c[0] === IPC.push.executeFinish);
+    expect(finish?.[1]).toMatchObject({ duration: 0 });
+  });
+
+  it("output parented to a live execution is left to the per-execution collector", async () => {
+    const { harness, forward } = await startAndGetForwarder();
+    (harness.kernelManager.isExecutionActive as Mock).mockReturnValueOnce(true);
+    harness.handlerInvokeTracker.begin("p");
+    forward({
+      header: { msg_type: "display_data" },
+      parent_header: { msg_id: "exec-1" },
+      content: { data: { "image/png": "zzz" } },
+    });
+    expect(
+      harness.trackerPushes.filter((p) => p.channel === IPC.push.executeOutput),
+    ).toHaveLength(0);
   });
 });
 
@@ -338,6 +469,370 @@ describe("kernels:start — new uv project (§10.5.8)", () => {
     } finally {
       fs.rmSync(wd, { recursive: true, force: true });
     }
+  });
+});
+
+describe("kernels:start — Julia pkg mode (§10.6)", () => {
+  function setupPkgStart(): { harness: Harness; wd: string } {
+    const harness = setup();
+    const wd = fs.mkdtempSync(path.join(os.tmpdir(), "pdv-pkgproj-"));
+    (harness.projectManager.createWorkingDir as Mock).mockResolvedValue(wd);
+    juliaEnvMocks.instantiateJuliaEnvironment.mockResolvedValue({
+      success: true,
+      output: "",
+      juliaVersion: "1.11.6",
+    });
+    return { harness, wd };
+  }
+
+  it("new project: writes an empty Project.toml and activates it via JULIA_PROJECT (§10.6.5)", async () => {
+    const { harness, wd } = setupPkgStart();
+    harness.kernelManager.start = vi.fn(async () => makeKernelInfo({ id: "kj" }));
+    try {
+      await getHandler(IPC.kernels.start)(
+        {},
+        { language: "julia", env: { JULIA_PATH: "/opt/julia/bin/julia" } },
+        { newProject: true },
+      );
+      expect(fs.readFileSync(path.join(wd, "Project.toml"), "utf8")).toBe("");
+      const startArg = (harness.kernelManager.start as Mock).mock.calls.at(-1)?.[0] as {
+        env: Record<string, string>;
+      };
+      expect(startArg.env.JULIA_PROJECT).toBe(wd);
+      expect(startArg.env.JULIA_PATH).toBe("/opt/julia/bin/julia");
+      expect(harness.kernelEnvMeta.get("kj")).toEqual({
+        mode: "pkg",
+        interpreterPath: "/opt/julia/bin/julia",
+        juliaVersion: "1.11.6",
+      });
+    } finally {
+      fs.rmSync(wd, { recursive: true, force: true });
+    }
+  });
+
+  it("open project: copies the Julia env files and runs Pkg.instantiate (§10.6.6)", async () => {
+    const { harness, wd } = setupPkgStart();
+    try {
+      await getHandler(IPC.kernels.start)(
+        {},
+        { language: "julia", env: { JULIA_PATH: "/opt/julia/bin/julia" } },
+        { saveDir: "/projects/lorenz" },
+      );
+      expect(projectFileSyncMocks.copyEnvFilesForLoad).toHaveBeenCalledWith(
+        "/projects/lorenz",
+        wd,
+        "julia",
+      );
+      expect(juliaEnvMocks.instantiateJuliaEnvironment).toHaveBeenCalledWith(
+        wd,
+        "/opt/julia/bin/julia",
+        expect.anything(),
+      );
+      // The instantiate-complete marker flips the EnvSyncModal stage.
+      expect(harness.win.webContentsSend).toHaveBeenCalledWith(IPC.push.envActivity, {
+        stream: "stdout",
+        data: "",
+        stage: "kernel-boot",
+      });
+    } finally {
+      fs.rmSync(wd, { recursive: true, force: true });
+    }
+  });
+
+  it("tears the kernel back down when Pkg.instantiate fails", async () => {
+    const { harness, wd } = setupPkgStart();
+    harness.kernelManager.start = vi.fn(async () => makeKernelInfo({ id: "kfail" }));
+    juliaEnvMocks.instantiateJuliaEnvironment.mockResolvedValue({
+      success: false,
+      output: "Unsatisfiable requirements",
+      juliaVersion: "1.11.6",
+    });
+    try {
+      await expect(
+        getHandler(IPC.kernels.start)(
+          {},
+          { language: "julia", env: { JULIA_PATH: "/opt/julia/bin/julia" } },
+          { saveDir: "/projects/broken" },
+        ),
+      ).rejects.toThrow(/Julia environment setup failed[\s\S]*Unsatisfiable/);
+      expect(harness.kernelManager.stop).toHaveBeenCalledWith("kfail");
+      expect(harness.kernelEnvMeta.has("kfail")).toBe(false);
+    } finally {
+      fs.rmSync(wd, { recursive: true, force: true });
+    }
+  });
+
+  it("new project with a version choice routes through ensureJuliaVersionReady (§10.6.5)", async () => {
+    const { harness } = setupPkgStart();
+    harness.kernelManager.start = vi.fn(async () => makeKernelInfo({ id: "kver" }));
+
+    await getHandler(IPC.kernels.start)(
+      {},
+      { language: "julia", env: { JULIA_PATH: "/opt/julia/bin/julia" } },
+      { newProject: true, juliaVersion: "1.10", packages: ["DataFrames"] },
+    );
+
+    expect(juliaupRunnerMocks.ensureJuliaVersionReady).toHaveBeenCalledWith(
+      "1.10",
+      expect.objectContaining({ stagingDir: expect.stringContaining("pdv-julia") }),
+    );
+    const spec = (harness.kernelManager.start as Mock).mock.calls.at(-1)?.[0] as {
+      env: Record<string, string>;
+    };
+    // The ready channel binary is authoritative — no separate shim pass.
+    expect(spec.env.JULIA_PATH).toBe("/depot/juliaup/julia-1.10.9/bin/julia");
+    expect(juliaDiscoveryMocks.resolveJuliaShim).not.toHaveBeenCalled();
+    // Initial packages flow into the env subprocess as Pkg.add (§10.6.5).
+    expect(juliaEnvMocks.instantiateJuliaEnvironment).toHaveBeenCalledWith(
+      expect.any(String),
+      "/depot/juliaup/julia-1.10.9/bin/julia",
+      expect.objectContaining({ packages: ["DataFrames"] }),
+    );
+  });
+
+  it("rejects an unsupported Julia version before doing any work", async () => {
+    setupPkgStart();
+
+    await expect(
+      getHandler(IPC.kernels.start)(
+        {},
+        { language: "julia" },
+        { newProject: true, juliaVersion: "0.7" },
+      ),
+    ).rejects.toThrow(/Unsupported Julia version/);
+    expect(juliaupRunnerMocks.ensureJuliaVersionReady).not.toHaveBeenCalled();
+  });
+
+  it("without a launch context a Julia start stays shared-mode (legacy sessions)", async () => {
+    const { harness } = setupPkgStart();
+    harness.kernelManager.start = vi.fn(async () => makeKernelInfo({ id: "kshared" }));
+    await getHandler(IPC.kernels.start)(
+      {},
+      { language: "julia", env: { JULIA_PATH: "/opt/julia/bin/julia" } },
+    );
+    expect(harness.projectManager.createWorkingDir).not.toHaveBeenCalled();
+    expect(juliaEnvMocks.instantiateJuliaEnvironment).not.toHaveBeenCalled();
+    expect(harness.kernelEnvMeta.get("kshared")).toEqual({
+      mode: "shared",
+      interpreterPath: "/opt/julia/bin/julia",
+    });
+  });
+});
+
+describe("kernels:start — Julia shim bypass + boot output forwarding (§10.7.2, §10.8)", () => {
+  it("resolves the configured path through the juliaup shim and spawns the real binary", async () => {
+    const harness = setup();
+    harness.kernelManager.start = vi.fn(async () => makeKernelInfo({ id: "kshim" }));
+    juliaDiscoveryMocks.resolveJuliaShim.mockReturnValue(
+      "/depot/juliaup/julia-1.11.6/bin/julia",
+    );
+
+    await getHandler(IPC.kernels.start)(
+      {},
+      { language: "julia", env: { JULIA_PATH: "/Users/u/.juliaup/bin/julia" } },
+    );
+
+    expect(juliaDiscoveryMocks.resolveJuliaShim).toHaveBeenCalledWith(
+      "/Users/u/.juliaup/bin/julia",
+    );
+    const spec = (harness.kernelManager.start as Mock).mock.calls[0][0] as {
+      env?: Record<string, string>;
+    };
+    expect(spec.env?.JULIA_PATH).toBe("/depot/juliaup/julia-1.11.6/bin/julia");
+    // The probe and the env metadata both use the real binary.
+    expect(envDetectorMocks.checkJuliaPDVInstalled).toHaveBeenCalledWith(
+      "/depot/juliaup/julia-1.11.6/bin/julia",
+    );
+    expect(harness.kernelEnvMeta.get("kshim")?.interpreterPath).toBe(
+      "/depot/juliaup/julia-1.11.6/bin/julia",
+    );
+  });
+
+  it("falls back to the discovered juliaup default when no path is configured", async () => {
+    const harness = setup();
+    harness.kernelManager.start = vi.fn(async () => makeKernelInfo({ id: "kdef" }));
+    juliaDiscoveryMocks.discoverDefaultJulia.mockReturnValue(
+      "/depot/juliaup/julia-1.11.6/bin/julia",
+    );
+
+    await getHandler(IPC.kernels.start)({}, { language: "julia" });
+
+    expect(juliaDiscoveryMocks.discoverDefaultJulia).toHaveBeenCalled();
+    const spec = (harness.kernelManager.start as Mock).mock.calls[0][0] as {
+      env?: Record<string, string>;
+    };
+    expect(spec.env?.JULIA_PATH).toBe("/depot/juliaup/julia-1.11.6/bin/julia");
+  });
+
+  it("leaves explicit argv specs untouched (integration-test escape hatch)", async () => {
+    const harness = setup();
+    harness.kernelManager.start = vi.fn(async () => makeKernelInfo({ id: "kargv" }));
+
+    await getHandler(IPC.kernels.start)(
+      {},
+      { language: "julia", argv: ["/custom/julia", "-e", "boot()"] },
+    );
+
+    expect(juliaDiscoveryMocks.resolveJuliaShim).not.toHaveBeenCalled();
+    const spec = (harness.kernelManager.start as Mock).mock.calls[0][0] as {
+      argv?: string[];
+    };
+    expect(spec.argv?.[0]).toBe("/custom/julia");
+  });
+
+  it("streams ANSI-stripped process output to envActivity while a Julia kernel boots — and stops once it is up", async () => {
+    const harness = setup();
+    // Grab the flag-gated kernel:processOutput listener the registrar attached.
+    const outputListener = (harness.kernelManager.on as Mock).mock.calls.find(
+      (c) => c[0] === "kernel:processOutput",
+    )?.[1] as (id: string, stream: string, data: string) => void;
+    expect(outputListener).toBeDefined();
+
+    let releaseStart!: () => void;
+    harness.kernelManager.start = vi.fn(
+      () =>
+        new Promise<ReturnType<typeof makeKernelInfo>>((resolve) => {
+          releaseStart = () => resolve(makeKernelInfo({ id: "kboot" }));
+        }),
+    );
+
+    const pending = getHandler(IPC.kernels.start)(
+      {},
+      { language: "julia", env: { JULIA_PATH: "/opt/julia/bin/julia" } },
+    );
+    await vi.waitFor(() =>
+      expect(harness.kernelManager.start).toHaveBeenCalled(),
+    );
+
+    outputListener("kboot", "stderr", "\x1b[32mPrecompiling\x1b[0m IJulia...\r");
+    expect(harness.win.webContentsSend).toHaveBeenCalledWith(
+      IPC.push.envActivity,
+      { stream: "stdout", data: "Precompiling IJulia...\n" },
+    );
+
+    releaseStart();
+    await pending;
+
+    // Boot finished — the flag is cleared, later output is not forwarded.
+    harness.win.webContentsSend.mockClear();
+    outputListener("kboot", "stderr", "runtime chatter\n");
+    expect(harness.win.webContentsSend).not.toHaveBeenCalledWith(
+      IPC.push.envActivity,
+      expect.objectContaining({ data: expect.stringContaining("runtime chatter") }),
+    );
+  });
+
+  it("does not forward Python boot output, and hands Julia handshakes a boot-output sink", async () => {
+    const harness = setup();
+    const outputListener = (harness.kernelManager.on as Mock).mock.calls.find(
+      (c) => c[0] === "kernel:processOutput",
+    )?.[1] as (id: string, stream: string, data: string) => void;
+
+    let releaseStart!: () => void;
+    harness.kernelManager.start = vi.fn(
+      () =>
+        new Promise<ReturnType<typeof makeKernelInfo>>((resolve) => {
+          releaseStart = () => resolve(makeKernelInfo({ id: "kpy" }));
+        }),
+    );
+    const pending = getHandler(IPC.kernels.start)(
+      {},
+      { language: "python", env: { PYTHON_PATH: "/usr/bin/python3" } },
+    );
+    await vi.waitFor(() =>
+      expect(harness.kernelManager.start).toHaveBeenCalled(),
+    );
+    outputListener("kpy", "stderr", "some python boot noise\n");
+    expect(harness.win.webContentsSend).not.toHaveBeenCalledWith(
+      IPC.push.envActivity,
+      expect.objectContaining({ data: expect.stringContaining("python boot noise") }),
+    );
+    releaseStart();
+    await pending;
+
+    // Python handshake gets no sink; Julia's got one (asserted via the shim
+    // test's initializeKernelSession call below).
+    const pyArgs = kernelSessionMocks.initializeKernelSession.mock.calls.at(
+      -1,
+    ) as unknown[];
+    expect(pyArgs[9]).toBeUndefined();
+
+    harness.kernelManager.start = vi.fn(async () => makeKernelInfo({ id: "kjl" }));
+    await getHandler(IPC.kernels.start)(
+      {},
+      { language: "julia", env: { JULIA_PATH: "/opt/julia/bin/julia" } },
+    );
+    const jlArgs = kernelSessionMocks.initializeKernelSession.mock.calls.at(
+      -1,
+    ) as unknown[];
+    expect(typeof jlArgs[9]).toBe("function");
+  });
+});
+
+describe("kernels:restart — Julia pkg mode (§10.6)", () => {
+  it("snapshots Project.toml/Manifest.toml and relaunches with JULIA_PROJECT + JULIA_PATH", async () => {
+    const harness = setup();
+    const oldWd = fs.mkdtempSync(path.join(os.tmpdir(), "pdv-pkgrestart-old-"));
+    const newWd = fs.mkdtempSync(path.join(os.tmpdir(), "pdv-pkgrestart-new-"));
+    try {
+      fs.writeFileSync(path.join(oldWd, "Project.toml"), "[deps]\nNPZ = \"x\"\n");
+      fs.writeFileSync(path.join(oldWd, "Manifest.toml"), "julia_version = \"1.11.6\"\n");
+      harness.kernelWorkingDirs.set("kj", oldWd);
+      harness.kernelEnvMeta.set("kj", {
+        mode: "pkg",
+        interpreterPath: "/opt/julia/bin/julia",
+        juliaVersion: "1.11.6",
+      });
+      harness.kernelManager.getKernel = vi.fn(() =>
+        makeKernelInfo({ id: "kj", language: "julia" }),
+      );
+      (harness.projectManager.createWorkingDir as Mock).mockResolvedValue(newWd);
+      harness.kernelManager.start = vi.fn(async () => makeKernelInfo({ id: "kj2", language: "julia" }));
+
+      await getHandler(IPC.kernels.restart)({}, "kj");
+
+      // Env files re-seeded into the fresh working dir.
+      expect(fs.readFileSync(path.join(newWd, "Project.toml"), "utf8")).toContain("NPZ");
+      expect(fs.readFileSync(path.join(newWd, "Manifest.toml"), "utf8")).toContain(
+        "julia_version",
+      );
+      const startArg = (harness.kernelManager.start as Mock).mock.calls.at(-1)?.[0] as {
+        env: Record<string, string>;
+      };
+      expect(startArg.env.JULIA_PROJECT).toBe(newWd);
+      expect(startArg.env.JULIA_PATH).toBe("/opt/julia/bin/julia");
+      // Snapshot path: the depot already holds everything — no instantiate.
+      expect(juliaEnvMocks.instantiateJuliaEnvironment).not.toHaveBeenCalled();
+      expect(harness.kernelEnvMeta.get("kj2")).toEqual({
+        mode: "pkg",
+        interpreterPath: "/opt/julia/bin/julia",
+        juliaVersion: "1.11.6",
+      });
+    } finally {
+      fs.rmSync(oldWd, { recursive: true, force: true });
+      fs.rmSync(newWd, { recursive: true, force: true });
+    }
+  });
+
+  it("shared Julia restart relaunches on the recorded executable, not the PATH shim", async () => {
+    const harness = setup();
+    harness.kernelWorkingDirs.set("kj", "/tmp/nonexistent-pdv-wd");
+    harness.kernelEnvMeta.set("kj", {
+      mode: "shared",
+      interpreterPath: "/opt/julia/bin/julia",
+    });
+    harness.kernelManager.getKernel = vi.fn(() =>
+      makeKernelInfo({ id: "kj", language: "julia" }),
+    );
+    harness.kernelManager.start = vi.fn(async () => makeKernelInfo({ id: "kj2", language: "julia" }));
+
+    await getHandler(IPC.kernels.restart)({}, "kj");
+
+    const startArg = (harness.kernelManager.start as Mock).mock.calls.at(-1)?.[0] as {
+      env?: Record<string, string>;
+    };
+    expect(startArg.env?.JULIA_PATH).toBe("/opt/julia/bin/julia");
+    expect(startArg.env?.JULIA_PROJECT).toBeUndefined();
   });
 });
 

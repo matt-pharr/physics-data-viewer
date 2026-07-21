@@ -18,7 +18,7 @@ import { type BrowserWindow } from "electron";
 import { handleIpc } from "./ipc-registry";
 
 import type { CommRouter } from "./comm-router";
-import type { ActiveEnvironmentInfo, CodeCellData } from "./ipc";
+import type { ActiveEnvironmentInfo, CodeCellData, JuliaVersionLoadCheck, ProjectFailedNode } from "./ipc";
 import { IPC } from "./ipc";
 import { ModuleManager } from "./module-manager";
 import { setupProjectModuleNamespaces } from "./module-runtime";
@@ -45,6 +45,14 @@ interface RegisterProjectIpcHandlersOptions {
   getActiveKernelId: () => string | null;
   getActiveKernelLanguage: () => "python" | "julia";
   setActiveProjectDir: (dir: string | null) => void;
+  /**
+   * Save dir of the currently open project (null when none). Consulted by
+   * the save handler's env-mode guard on Save As: a manifest-less target
+   * inherits the OPEN project's recorded mode, so a legacy shared project
+   * Saved-As from a live pkg/uv session stays shared instead of absorbing
+   * the previous project's env files (PR #347 second review).
+   */
+  getActiveProjectDir: () => string | null;
   getPendingModuleImports: () => ProjectModuleImport[];
   setPendingModuleImports: (imports: ProjectModuleImport[]) => void;
   getPendingModuleSettings: () => Record<string, Record<string, unknown>>;
@@ -85,6 +93,27 @@ interface RegisterProjectIpcHandlersOptions {
     saveDir: string,
     workingDir: string
   ) => Promise<LoadEnvSyncResult>;
+  /**
+   * Julia analog for `mode: "pkg"` sessions (§10.6.6): copy the opened
+   * project's `Project.toml`/`Manifest.toml` over the working dir's and
+   * `Pkg.instantiate`. Called by `project:load` when the active kernel is
+   * pkg-mode.
+   */
+  syncPkgEnvironmentForLoad?: (
+    saveDir: string,
+    workingDir: string
+  ) => Promise<LoadEnvSyncResult>;
+  /**
+   * Compare the opened pkg project's `Manifest.toml` `julia_version` with
+   * the session's Julia and the installed juliaup channels (§10.7.5 —
+   * `checkJuliaVersionForLoad` in juliaup-runner.ts). The result rides the
+   * load result so the renderer can offer a `juliaup add`; advisory only,
+   * never blocks the load.
+   */
+  checkJuliaVersionForLoad?: (
+    saveDir: string,
+    runningVersion?: string
+  ) => Promise<JuliaVersionLoadCheck | undefined>;
   /** Called after a successful explicit save to clean up autosave state. */
   onExplicitSaveCompleted?: (saveDir: string) => void;
 }
@@ -203,6 +232,22 @@ async function readManifestOnlyFields(
   return {};
 }
 
+/**
+ * Write each module's v4 `pdv-module.json` + `module-index.json` under
+ * `<saveDir>/modules/<id>/` at save time.
+ *
+ * `entry_point` and `default_gui` are recovered from the installed module's
+ * manifest (via {@link readManifestOnlyFields}) because they are set during
+ * import/install and are not tracked in the kernel tree, so the kernel-side
+ * descriptor bundles can't carry them.
+ *
+ * @param saveDir - Absolute path to the project save directory.
+ * @param bundles - Per-module manifest bundles from the kernel save response;
+ *   a no-op when undefined or empty (project has no `PDVModule` nodes).
+ * @param moduleManager - Used to resolve the installed module directory when
+ *   recovering manifest-only fields.
+ * @returns Nothing.
+ */
 export async function writeModuleManifestsToSaveDir(
   saveDir: string,
   bundles: ModuleManifestBundle[] | undefined,
@@ -267,6 +312,7 @@ export function registerProjectIpcHandlers(
     getActiveKernelId,
     getActiveKernelLanguage,
     setActiveProjectDir,
+    getActiveProjectDir,
     getPendingModuleImports,
     setPendingModuleImports,
     getPendingModuleSettings,
@@ -278,6 +324,8 @@ export function registerProjectIpcHandlers(
     getInterpreterPath,
     getActiveKernelEnvMeta,
     syncUvEnvironmentForLoad,
+    syncPkgEnvironmentForLoad,
+    checkJuliaVersionForLoad,
     onExplicitSaveCompleted,
   } = options;
 
@@ -296,36 +344,104 @@ export function registerProjectIpcHandlers(
       const seq = ++saveSeq;
       console.debug(`[project:save] IPC received seq=${seq} saveDir=${saveDir}`);
 
-      const doSave = async (): Promise<{ checksum: string; nodeCount: number; projectName?: string; missingFiles?: string[] }> => {
+      const doSave = async (): Promise<{
+        checksum: string;
+        nodeCount: number;
+        projectName?: string;
+        missingFiles?: string[];
+        failedNodes?: ProjectFailedNode[];
+      }> => {
         console.debug(`[project:save] seq=${seq} starting (was queued behind previous save)`);
 
         // A uv project is identified by a pyproject.toml in the working dir
-        // (generated for new projects, copied for opened ones). Record uv mode
-        // in the manifest and write the env files back to the save dir (§10.5.10).
+        // (generated for new projects, copied for opened ones); a pkg-mode
+        // Julia project by a Project.toml (§10.6). Record the mode in the
+        // manifest and write the env files back to the save dir
+        // (§10.5.10 / §10.6.7).
         const activeKernelId = getActiveKernelId();
+        const activeLanguage = getActiveKernelLanguage();
         const uvWorkingDir = activeKernelId ? kernelWorkingDirs.get(activeKernelId) : undefined;
-        const isUvProject = uvWorkingDir
-          ? await fs
-              .access(path.join(uvWorkingDir, "pyproject.toml"))
-              .then(() => true)
-              .catch(() => false)
-          : false;
 
-        // Environment recording (§10.5): uv projects record mode + the
-        // resolved Python version (the venv path is ephemeral, so no
-        // interpreter_path); shared projects record the interpreter the
-        // kernel actually spawned on — falling back to the global config
-        // value only when no per-kernel metadata exists (legacy sessions).
+        // Manifest-based guard (PR #347 review): loading a legacy shared
+        // save into a live per-project-env session leaves the PREVIOUS
+        // project's env files in the working dir — the load-time sync
+        // no-ops when the save dir has none. Working-dir presence alone
+        // would then re-stamp this project "uv"/"pkg" and copy that foreign
+        // env spec into its save dir. When the project already has a
+        // manifest, its recorded mode wins; only a manifest-less save dir
+        // (Save As / first save) falls back to working-dir detection.
+        let priorEnvMode: string | undefined;
+        const manifestExists = await fs
+          .access(path.join(saveDir, "project.json"))
+          .then(() => true)
+          .catch(() => false);
+        if (manifestExists) {
+          try {
+            const priorManifest = await ProjectManager.readManifest(saveDir);
+            priorEnvMode = priorManifest.environment?.mode ?? "shared";
+          } catch {
+            priorEnvMode = undefined; // unreadable manifest — detect from the working dir
+          }
+        } else {
+          // Save As from an open project (second review): the target has no
+          // manifest yet, but the project being copied does — inherit its
+          // mode so a legacy shared project Saved-As out of a live pkg/uv
+          // session doesn't get stamped with the foreign env. Unsaved
+          // sessions (no open project) keep working-dir detection.
+          const activeDir = getActiveProjectDir();
+          if (activeDir && activeDir !== saveDir) {
+            const activeManifestExists = await fs
+              .access(path.join(activeDir, "project.json"))
+              .then(() => true)
+              .catch(() => false);
+            if (activeManifestExists) {
+              try {
+                const activeManifest = await ProjectManager.readManifest(activeDir);
+                priorEnvMode = activeManifest.environment?.mode ?? "shared";
+              } catch {
+                priorEnvMode = undefined;
+              }
+            }
+          }
+        }
+
+        const isUvProject =
+          uvWorkingDir &&
+          activeLanguage !== "julia" &&
+          (priorEnvMode === undefined || priorEnvMode === "uv")
+            ? await fs
+                .access(path.join(uvWorkingDir, "pyproject.toml"))
+                .then(() => true)
+                .catch(() => false)
+            : false;
+        const isPkgProject =
+          uvWorkingDir &&
+          activeLanguage === "julia" &&
+          (priorEnvMode === undefined || priorEnvMode === "pkg")
+            ? await fs
+                .access(path.join(uvWorkingDir, "Project.toml"))
+                .then(() => true)
+                .catch(() => false)
+            : false;
+
+        // Environment recording (§10.5 / §10.6): uv projects record mode +
+        // the resolved Python version, pkg projects mode + the Julia version
+        // (the environment paths are ephemeral, so no interpreter_path);
+        // shared projects record the interpreter the kernel actually spawned
+        // on — falling back to the global config value only when no
+        // per-kernel metadata exists (legacy sessions).
         const envMeta = getActiveKernelEnvMeta();
         const saveResult = await projectManager.save(saveDir, codeCells, {
-          language: getActiveKernelLanguage(),
-          interpreterPath: isUvProject
+          language: activeLanguage,
+          interpreterPath: isUvProject || isPkgProject
             ? undefined
             : (envMeta?.interpreterPath ?? getInterpreterPath()),
           projectName,
           environment: isUvProject
             ? { mode: "uv", python_version: envMeta?.pythonVersion }
-            : { mode: "shared" },
+            : isPkgProject
+              ? { mode: "pkg", julia_version: envMeta?.juliaVersion }
+              : { mode: "shared" },
         });
 
         // If the serializer detected missing backing files it aborted before
@@ -338,6 +454,7 @@ export function registerProjectIpcHandlers(
             checksum: saveResult.checksum,
             nodeCount: saveResult.nodeCount,
             missingFiles: saveResult.missingFiles,
+            failedNodes: saveResult.failedNodes?.length ? saveResult.failedNodes : undefined,
           };
         }
 
@@ -391,11 +508,13 @@ export function registerProjectIpcHandlers(
         // implies the save is complete.
         await projectManager.commitProjectManifest(saveDir, finalManifest);
 
-        // Persist the uv environment spec alongside the manifest. Only files
+        // Persist the environment spec alongside the manifest. Only files
         // present in the working dir are copied, so a failed sync (no uv.lock)
-        // never clobbers a previously-saved lock (§10.5.10).
+        // never clobbers a previously-saved lock (§10.5.10 / §10.6.7).
         if (isUvProject && uvWorkingDir) {
           await copyEnvFilesForSave(uvWorkingDir, saveDir);
+        } else if (isPkgProject && uvWorkingDir) {
+          await copyEnvFilesForSave(uvWorkingDir, saveDir, "julia");
         }
 
         setActiveProjectDir(saveDir);
@@ -409,6 +528,10 @@ export function registerProjectIpcHandlers(
           nodeCount: saveResult.nodeCount,
           projectName: finalManifest.project_name,
           missingFiles: allMissingFiles.length > 0 ? allMissingFiles : undefined,
+          // Nodes the kernel skipped because they refused to serialize — the
+          // save completed without them, so the renderer must warn (a save
+          // that skipped nodes must not be indistinguishable from complete).
+          failedNodes: saveResult.failedNodes?.length ? saveResult.failedNodes : undefined,
         };
       };
 
@@ -429,12 +552,23 @@ export function registerProjectIpcHandlers(
       // module handlers don't take the save-lock).
       return projectManager.runWithSaveLock(async () =>
         runSerializedProjectManifestMutation(saveDir, async () => {
+          // Best-effort pushes: a window torn down mid-save must not turn
+          // into an "Object has been destroyed" throw — and a throw from the
+          // finally leg would mask doSave's real error.
           const win = getMainWindow();
-          win?.webContents.send(IPC.push.autosaveStarted);
+          const safeSend = (channel: string): void => {
+            if (!win || win.isDestroyed()) return;
+            try {
+              win.webContents.send(channel);
+            } catch (err) {
+              console.warn(`[project:save] push ${channel} failed:`, err);
+            }
+          };
+          safeSend(IPC.push.autosaveStarted);
           try {
             return await doSave();
           } finally {
-            win?.webContents.send(IPC.push.autosaveEnded);
+            safeSend(IPC.push.autosaveEnded);
           }
         }),
       );
@@ -448,6 +582,7 @@ export function registerProjectIpcHandlers(
     // Copy file-backed node files from save dir into working dir before kernel load.
     let loadFailedPaths: string[] = [];
     let envSyncWarning: string | undefined;
+    let juliaVersionCheck: JuliaVersionLoadCheck | undefined;
     const activeKernelId = getActiveKernelId();
     if (activeKernelId) {
       const workingDir = kernelWorkingDirs.get(activeKernelId);
@@ -458,7 +593,8 @@ export function registerProjectIpcHandlers(
         // the kernel can't import the opened project's packages and a later
         // save would clobber the project's pyproject/uv.lock with the stale
         // working-dir copies (§10.5.10).
-        if (getActiveKernelEnvMeta()?.mode === "uv" && syncUvEnvironmentForLoad) {
+        const activeEnvMode = getActiveKernelEnvMeta()?.mode;
+        if (activeEnvMode === "uv" && syncUvEnvironmentForLoad) {
           try {
             const envSync = await syncUvEnvironmentForLoad(saveDir, workingDir);
             envSyncWarning = envSync.warning;
@@ -467,6 +603,29 @@ export function registerProjectIpcHandlers(
             envSyncWarning =
               "Failed to update the session environment for this project — " +
               "its packages may be unavailable.";
+          }
+        } else if (activeEnvMode === "pkg" && syncPkgEnvironmentForLoad) {
+          try {
+            const envSync = await syncPkgEnvironmentForLoad(saveDir, workingDir);
+            envSyncWarning = envSync.warning;
+          } catch (err) {
+            console.warn("[ipc-register-project] env sync on load failed:", err);
+            envSyncWarning =
+              "Failed to update the session environment for this project — " +
+              "its packages may be unavailable.";
+          }
+        }
+        // Advisory Julia-version assessment (§10.7.5): does the project's
+        // Manifest.toml resolution version match the session, and if not,
+        // is the matching juliaup channel installed? Never blocks the load.
+        if (activeEnvMode === "pkg" && checkJuliaVersionForLoad) {
+          try {
+            juliaVersionCheck = await checkJuliaVersionForLoad(
+              saveDir,
+              getActiveKernelEnvMeta()?.juliaVersion
+            );
+          } catch (err) {
+            console.warn("[ipc-register-project] julia version check failed:", err);
           }
         }
         const win = getMainWindow();
@@ -576,6 +735,7 @@ export function registerProjectIpcHandlers(
       codeCells, checksum, checksumValid, nodeCount, savedPdvVersion, projectName,
       missingFiles: loadFailedPaths.length > 0 ? loadFailedPaths : undefined,
       envSyncWarning,
+      juliaVersionCheck,
     };
   });
 

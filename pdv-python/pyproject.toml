@@ -54,6 +54,25 @@ namelist = [
 xarray = [
     "xarray>=2024.7.0",
 ]
+# PDVDataset (lazy NetCDF tree nodes): xarray plus a NetCDF backend engine.
+# netcdf4 is the canonical engine; at runtime PDV also accepts h5netcdf or
+# scipy if one of those is already present. 1.7.4 is the first netcdf4
+# release with Python 3.14 Linux wheels — older floors fail the dep
+# sweep's py3.14 lowest-direct cell on CI (sdist build needs system
+# netcdf-c headers the runners don't have).
+netcdf = [
+    "xarray>=2024.7.0",
+    "netcdf4>=1.7.4",
+]
+# PDVHdf5 (lazy HDF5 tree nodes). 3.15 is the first h5py release with
+# Python 3.14 wheels, but its bundled libhdf5 clashes in-process with the
+# libhdf5 inside netcdf4 1.7.4's Linux wheels ("RuntimeError: NetCDF: HDF
+# error" as soon as both are imported) — 3.16 is the first h5py that
+# coexists with the netcdf4 floor, caught by the sweep's py3.10 dev
+# lowest-direct cell.
+hdf5 = [
+    "h5py>=3.16",
+]
 # The dev extra installs everything the test suite exercises so no test is
 # silently skipped: keep it a superset of every optional feature's deps, with
 # identical version floors so lowest-direct resolution agrees with the
@@ -65,6 +84,8 @@ dev = [
     "f90nml>=1.4",
     "tomli-w>=1.0",
     "xarray>=2024.7.0",
+    "netcdf4>=1.7.4",
+    "h5py>=3.16",
 ]
 
 [tool.setuptools.packages.find]

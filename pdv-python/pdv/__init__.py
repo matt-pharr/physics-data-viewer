@@ -55,6 +55,8 @@ from pdv.tree import (
     PDVNamelist,
     PDVModule,
     PDVLib,
+    PDVDataset,
+    PDVHdf5,
 )
 from pdv.errors import PDVError
 from pdv.modules import handle
@@ -82,6 +84,8 @@ __all__ = [
     "PDVNamelist",
     "PDVModule",
     "PDVLib",
+    "PDVDataset",
+    "PDVHdf5",
     "PDVError",
     "bootstrap",
     "handle",
@@ -94,6 +98,8 @@ __all__ = [
     "open_project",
     "install",
     "add_file",
+    "add_dataset",
+    "add_hdf5",
     "new_note",
     "help",
     "working_dir",
@@ -308,25 +314,32 @@ def open_project(path: str) -> None:
         print("PDV: No comm channel open. Cannot open project.")
 
 
-def add_file(source_path: str) -> _PDVFile:
-    """Import an arbitrary file into the tree as a :class:`PDVFile`.
+# File extensions that auto-detect to a typed data node in add_file and
+# the GUI Add File flow. Mirrored in pdv/handlers/namelist.py
+# (handle_file_register) — keep the two in sync.
+DATASET_EXTENSIONS = (".nc", ".cdf")
+HDF5_EXTENSIONS = (".h5", ".hdf5")
 
-    Eagerly copies the source file into the session working directory
-    under a fresh UUID-based storage path. The returned node is not
-    yet attached to the tree — assign it at the desired tree path::
 
-        mesh = pdv.add_file("~/Downloads/mesh.h5")
-        pdv_tree["simulation.mesh"] = mesh
+def _import_file_common(source_path: str, api_name: str) -> tuple[str, str]:
+    """Copy ``source_path`` into fresh UUID storage; return (uuid, filename).
+
+    Shared body of :func:`add_file` / :func:`add_dataset` /
+    :func:`add_hdf5`: resolves and validates the source path, requires an
+    initialized kernel working directory, and ``smart_copy``-s the file
+    to ``<working_dir>/tree/<uuid>/<filename>``.
 
     Parameters
     ----------
     source_path : str
         Filesystem path to the source file. ``~`` is expanded.
+    api_name : str
+        The public function name, used in error messages.
 
     Returns
     -------
-    PDVFile
-        A new file-backed node wrapping the imported file.
+    tuple[str, str]
+        The freshly minted node UUID and the file's basename.
 
     Raises
     ------
@@ -345,7 +358,6 @@ def add_file(source_path: str) -> _PDVFile:
         smart_copy,
         uuid_tree_path,
     )
-    from pdv.tree import PDVFile as _File  # noqa: PLC0415
 
     resolved = os.path.realpath(os.path.expanduser(source_path))
     if not os.path.exists(resolved):
@@ -357,14 +369,148 @@ def add_file(source_path: str) -> _PDVFile:
     working_dir = getattr(tree, "_working_dir", None) if tree is not None else None
     if not working_dir:
         raise PDVError(
-            "pdv.add_file is not available: kernel has not received pdv.init"
+            f"pdv.{api_name} is not available: kernel has not received pdv.init"
         )
 
     filename = os.path.basename(resolved)
     node_uuid = generate_node_uuid()
     dest = uuid_tree_path(working_dir, node_uuid, filename)
     smart_copy(resolved, dest)
-    return _File(uuid=node_uuid, filename=filename)
+    return node_uuid, filename
+
+
+def add_file(source_path: str) -> _PDVFile:
+    """Import a file into the tree, auto-detecting scientific data types.
+
+    Eagerly copies the source file into the session working directory
+    under a fresh UUID-based storage path. The returned node is not
+    yet attached to the tree — assign it at the desired tree path::
+
+        mesh = pdv.add_file("~/Downloads/mesh.h5")
+        pdv_tree["simulation.mesh"] = mesh
+
+    Files with a NetCDF extension (``.nc``, ``.cdf``) come back as
+    :class:`PDVDataset` and HDF5 extensions (``.h5``, ``.hdf5``) as
+    :class:`PDVHdf5` — lazily-read, tree-expandable data nodes. Use
+    :func:`add_dataset` / :func:`add_hdf5` to force a type for files
+    with unusual extensions. Everything else imports as a plain
+    :class:`PDVFile`.
+
+    Parameters
+    ----------
+    source_path : str
+        Filesystem path to the source file. ``~`` is expanded.
+
+    Returns
+    -------
+    PDVFile
+        A new file-backed node wrapping the imported file
+        (``PDVDataset``/``PDVHdf5`` when the extension matches).
+
+    Raises
+    ------
+    FileNotFoundError
+        If ``source_path`` does not exist.
+    ValueError
+        If ``source_path`` is not a regular file.
+    PDVError
+        If no kernel working directory is available.
+    """
+    import os  # noqa: PLC0415
+
+    from pdv.tree import PDVDataset, PDVFile, PDVHdf5  # noqa: PLC0415
+
+    node_uuid, filename = _import_file_common(source_path, "add_file")
+    ext = os.path.splitext(filename)[1].lower()
+    if ext in DATASET_EXTENSIONS:
+        _preimport("xarray")
+        return PDVDataset(uuid=node_uuid, filename=filename)
+    if ext in HDF5_EXTENSIONS:
+        _preimport("h5py")
+        return PDVHdf5(uuid=node_uuid, filename=filename)
+    return PDVFile(uuid=node_uuid, filename=filename)
+
+
+def add_dataset(source_path: str) -> "PDVDataset":
+    """Import a NetCDF file into the tree as a :class:`PDVDataset`.
+
+    Like :func:`add_file` but always constructs a dataset node regardless
+    of extension, and checks that xarray plus a NetCDF backend engine are
+    installed *before* copying the file — so a missing dependency fails
+    fast with an actionable message instead of after a multi-GB copy.
+
+    Parameters
+    ----------
+    source_path : str
+        Filesystem path to the NetCDF file. ``~`` is expanded.
+
+    Returns
+    -------
+    PDVDataset
+        A new lazily-read dataset node wrapping the imported file.
+
+    Raises
+    ------
+    PDVError
+        If required dependencies are missing (before any copy) or no
+        kernel working directory is available.
+    FileNotFoundError
+        If ``source_path`` does not exist.
+    ValueError
+        If ``source_path`` is not a regular file.
+    """
+    from pdv.tree import PDVDataset, _dep_error_message  # noqa: PLC0415
+
+    missing = PDVDataset._missing_deps()
+    if missing:
+        raise PDVError(_dep_error_message("PDVDataset", missing, "netcdf"))
+    _preimport("xarray")
+    node_uuid, filename = _import_file_common(source_path, "add_dataset")
+    return PDVDataset(uuid=node_uuid, filename=filename)
+
+
+def add_hdf5(source_path: str) -> "PDVHdf5":
+    """Import an HDF5 file into the tree as a :class:`PDVHdf5`.
+
+    Like :func:`add_file` but always constructs an HDF5 node regardless
+    of extension, and checks that h5py is installed *before* copying the
+    file.
+
+    Parameters
+    ----------
+    source_path : str
+        Filesystem path to the HDF5 file. ``~`` is expanded.
+
+    Returns
+    -------
+    PDVHdf5
+        A new lazily-read HDF5 node wrapping the imported file.
+
+    Raises
+    ------
+    PDVError
+        If h5py is missing (before any copy) or no kernel working
+        directory is available.
+    FileNotFoundError
+        If ``source_path`` does not exist.
+    ValueError
+        If ``source_path`` is not a regular file.
+    """
+    from pdv.tree import PDVHdf5, _dep_error_message  # noqa: PLC0415
+
+    missing = PDVHdf5._missing_deps()
+    if missing:
+        raise PDVError(_dep_error_message("PDVHdf5", missing, "hdf5"))
+    _preimport("h5py")
+    node_uuid, filename = _import_file_common(source_path, "add_hdf5")
+    return PDVHdf5(uuid=node_uuid, filename=filename)
+
+
+def _preimport(module: str) -> None:
+    """Pre-import a data library on the main thread (see environment.py)."""
+    from pdv.environment import preimport_data_libs  # noqa: PLC0415
+
+    preimport_data_libs(module)
 
 
 def new_note(path: str, title: str | None = None) -> None:

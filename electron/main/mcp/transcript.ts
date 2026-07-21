@@ -150,6 +150,14 @@ export type KernelExecuteFn = (
  * @param kernelId - The kernel to run on.
  * @param request - The execute request (forwarded verbatim).
  * @param onChunk - Optional streaming-output listener (forwarded verbatim).
+ * @param options - `keepStreamsInResult` (default true): whether accumulated
+ *   stdout/stderr are patched back onto the returned result when streaming.
+ *   MCP callers need them for structured summaries; the renderer-facing
+ *   `kernels:execute` handler passes false, because its console already
+ *   receives every chunk as an `executeOutput` push and re-applying the
+ *   result would duplicate output whenever the chunk push loses the race
+ *   against the invoke resolution (reliably visible on a Julia session's
+ *   first cell).
  * @returns The kernel's execute result.
  */
 export async function executeAndTranscribe(
@@ -158,15 +166,14 @@ export async function executeAndTranscribe(
   kernelId: string,
   request: KernelExecuteRequest,
   onChunk?: (chunk: ExecuteOutputChunk) => void,
+  options?: { keepStreamsInResult?: boolean },
 ): Promise<KernelExecuteResult> {
   const start = Date.now();
   // kernelManager.execute deletes `result.stdout`/`stderr`/`images` whenever
   // an `onChunk` is supplied (defensive against renderer double-render — see
   // kernel-manager.ts:752-761). The transcript and the MCP-tool structured
   // summary both need the accumulated text, so we accumulate it ourselves
-  // here and patch it back onto the result before returning. The renderer
-  // is unaffected because its handler reads `l.stdout ?? result.stdout` —
-  // when streaming, `l.stdout` is already populated and shadows ours.
+  // here and patch it back onto the result before recording/returning.
   let accumulatedStdout = "";
   let accumulatedStderr = "";
   const composedOnChunk: ((chunk: ExecuteOutputChunk) => void) | undefined =
@@ -202,6 +209,10 @@ export async function executeAndTranscribe(
       status: result.error ? "error" : "ok",
       durationSeconds,
     });
+  }
+  if (composedOnChunk && options?.keepStreamsInResult === false) {
+    delete result.stdout;
+    delete result.stderr;
   }
   return result;
 }

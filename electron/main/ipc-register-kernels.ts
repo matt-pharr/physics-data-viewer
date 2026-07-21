@@ -13,16 +13,19 @@
  * - Push forwarding.
  */
 
+import { randomUUID } from "node:crypto";
 import * as fs from "fs/promises";
 import * as path from "path";
 
-import { BrowserWindow } from "electron";
+import { app, BrowserWindow } from "electron";
 import { handleIpc } from "./ipc-registry";
 
 import { CommRouter } from "./comm-router";
+import { HandlerInvokeTracker } from "./handler-invoke-tracker";
 import { QueryRouter } from "./query-router";
 import { EnvironmentDetector } from "./environment-detector";
 import { IPC, type ActiveEnvironmentInfo, type KernelRestartResult } from "./ipc";
+import { plainStreamText } from "./kernel-error-parser";
 import { KernelManager, type KernelInfo } from "./kernel-manager";
 import { initializeKernelSession } from "./kernel-session";
 import { executeAndTranscribe, TranscriptWriter } from "./mcp/transcript";
@@ -31,6 +34,10 @@ import { setupProjectModuleNamespaces } from "./module-runtime";
 import { copyEnvFilesForLoad, copyFilesForLoad, overlayAutosaveTreeFiles } from "./project-file-sync";
 import { ProjectManager } from "./project-manager";
 import { autosaveDirFor } from "./autosave-sidecars";
+import { discoverDefaultJulia, resolveJuliaShim } from "./julia-discovery";
+import { instantiateJuliaEnvironment, type JuliaEnvResult } from "./julia-env";
+import { ensureJuliaVersionReady } from "./juliaup-runner";
+import { SUPPORTED_JULIA_VERSIONS } from "./julia-versions";
 import { materializeUvEnvironment } from "./uv-environment";
 import { resolveUvBinary } from "./uv-runner";
 import { generatePyproject } from "./pyproject";
@@ -67,11 +74,44 @@ export function removeKernelMemoryListener(): void {
   }
 }
 
+/**
+ * The `kernel:processOutput` boot-forwarding listener currently attached to
+ * a KernelManager (same lifecycle discipline as the memory listener above).
+ */
+let trackedBootOutputListener:
+  | {
+      km: KernelManager;
+      fn: (kernelId: string, stream: "stdout" | "stderr", data: string) => void;
+    }
+  | null = null;
+
+/**
+ * Detach the tracked `kernel:processOutput` boot-forwarding listener, if any.
+ *
+ * @returns Nothing.
+ */
+export function removeKernelBootOutputListener(): void {
+  if (trackedBootOutputListener) {
+    trackedBootOutputListener.km.removeListener(
+      "kernel:processOutput",
+      trackedBootOutputListener.fn,
+    );
+    trackedBootOutputListener = null;
+  }
+}
+
+
 interface RegisterKernelIpcHandlersOptions {
   win: BrowserWindow;
   kernelManager: KernelManager;
   commRouter: CommRouter;
   queryRouter: QueryRouter;
+  /**
+   * Shared tracker for in-flight `pdv.handler.invoke` console entries: the
+   * orphan-iopub forwarder routes comm-parented display/stream output into
+   * the invoke's entry (see `handler-invoke-tracker.ts`).
+   */
+  handlerInvokeTracker: HandlerInvokeTracker;
   projectManager: ProjectManager;
   moduleManager: ModuleManager;
   kernelWorkingDirs: Map<string, string>;
@@ -138,7 +178,18 @@ async function cleanupKernelWorkingDir(
   const oldDir = kernelWorkingDirs.get(kernelId);
   if (oldDir) {
     if (!preserveDir) {
-      await projectManager.deleteWorkingDir(oldDir);
+      // Best-effort: a stubborn writer (kernel still flushing during
+      // teardown) must not abort the session transition over a scratch
+      // directory — deleteWorkingDir already retries transient
+      // ENOTEMPTY/EBUSY internally; anything that survives that is
+      // leaked and reclaimed by the dead-PID orphan sweep on the next
+      // app launch (app.ts).
+      await projectManager.deleteWorkingDir(oldDir).catch((err) => {
+        console.warn(
+          `[kernels] failed to delete working dir ${oldDir}:`,
+          err,
+        );
+      });
     }
     kernelWorkingDirs.delete(kernelId);
   }
@@ -164,6 +215,7 @@ export function registerKernelIpcHandlers(
     kernelManager,
     commRouter,
     queryRouter,
+    handlerInvokeTracker,
     projectManager,
     moduleManager,
     kernelWorkingDirs,
@@ -283,6 +335,101 @@ export function registerKernelIpcHandlers(
     }
   }
 
+  /**
+   * Prepare a pkg-mode Julia project's environment before its kernel spawns
+   * (ARCHITECTURE.md §10.6).
+   *
+   * Creates the kernel working directory and seeds its env files —
+   * `Project.toml`/`Manifest.toml` copied from the save directory (open), an
+   * empty `Project.toml` (new project, §10.6.5), or the contents snapshotted
+   * before a restart tore the old working dir down. For opens and new
+   * projects it also kicks off `Pkg.instantiate` as a background subprocess
+   * (streamed over `envActivity`) that the caller awaits **after** the kernel
+   * boot — the two deliberately overlap, because the kernel's own boot only
+   * needs IJulia and PDVKernel from the default environment (§10.6.6).
+   * Restarts skip the instantiate: the depot already holds everything the
+   * live session just used, and the Julia version carries over in the old
+   * kernel's environment metadata.
+   *
+   * @param pkg - pkg context: an existing project's `saveDir`, `newProject`,
+   *   or an `envSnapshot` of file contents captured before restart (§11.6).
+   * @param juliaPath - Julia executable for the instantiate subprocess.
+   * @returns The pre-created working directory, the pending instantiate
+   *   result (undefined when no instantiate is needed), and an abort handle
+   *   for it (used when the kernel boot fails first).
+   * @throws {Error} When the working directory cannot be created/seeded. The
+   *   partially-created working directory is removed before the error
+   *   propagates.
+   */
+  async function startPkgEnvironment(
+    pkg: {
+      saveDir?: string;
+      newProject?: boolean;
+      packages?: string[];
+      envSnapshot?: { projectToml: string; manifestToml?: string };
+    },
+    juliaPath: string
+  ): Promise<{
+    workingDir: string;
+    instantiate?: Promise<JuliaEnvResult>;
+    abortInstantiate: () => void;
+  }> {
+    const workingDir = await projectManager.createWorkingDir(getWorkingDirBase());
+    try {
+      let needsInstantiate = false;
+      if (pkg.envSnapshot) {
+        // Restart: re-create the env files snapshotted before the old
+        // working dir was deleted, so packages installed since load survive.
+        // The depot already holds them — no instantiate needed.
+        await fs.writeFile(
+          path.join(workingDir, "Project.toml"),
+          pkg.envSnapshot.projectToml,
+          "utf8"
+        );
+        if (pkg.envSnapshot.manifestToml !== undefined) {
+          await fs.writeFile(
+            path.join(workingDir, "Manifest.toml"),
+            pkg.envSnapshot.manifestToml,
+            "utf8"
+          );
+        }
+      } else if (pkg.saveDir) {
+        // Opening an existing pkg project: copy its env files in and
+        // instantiate against the manifest (§10.6.6).
+        await copyEnvFilesForLoad(pkg.saveDir, workingDir, "julia");
+        needsInstantiate = true;
+      } else {
+        // New pkg project: an empty Project.toml makes the working dir a
+        // textbook (empty) Julia project; Pkg.add fills it in (§10.6.5).
+        // The instantiate is a no-op resolve here, run anyway because its
+        // VERSION print is what stamps `julia_version` into the manifest
+        // on first save.
+        await fs.writeFile(path.join(workingDir, "Project.toml"), "", "utf8");
+        needsInstantiate = true;
+      }
+
+      const controller = new AbortController();
+      const instantiate = needsInstantiate
+        ? instantiateJuliaEnvironment(workingDir, juliaPath, {
+            win,
+            pushChannel: IPC.push.envActivity,
+            signal: controller.signal,
+            // New-project initial packages (§10.6.5): recorded into the
+            // fresh Project.toml by Pkg.add instead of the no-op resolve.
+            packages: pkg.newProject ? pkg.packages : undefined,
+          })
+        : undefined;
+      return {
+        workingDir,
+        instantiate,
+        abortInstantiate: () => controller.abort(),
+      };
+    } catch (err) {
+      await projectManager.deleteWorkingDir(workingDir).catch(() => undefined);
+      throw err;
+    }
+  }
+
   // Forward periodic kernel-memory snapshots to the renderer. Registered once
   // for this window/manager pair (the payload carries `kernelId` so a single
   // listener serves any number of kernels). Tracked so re-registration (e.g.
@@ -300,6 +447,117 @@ export function registerKernelIpcHandlers(
   };
   kernelManager.on("kernel:memoryRss", memoryListener);
   trackedMemoryListener = { km: kernelManager, fn: memoryListener };
+
+  // While a Julia kernel process is booting (spawn → first iopub idle), its
+  // kernel id is not yet known to this registrar, so per-kernel subscription
+  // is impossible — instead this flag-gated global listener forwards process
+  // output (Pkg precompile progress, §10.8) to the EnvSyncModal. The
+  // handshake phase that follows is covered per-kernel via
+  // initializeKernelSession's onBootOutput sink; the flag is cleared before
+  // that starts so nothing is forwarded twice. Launches are serialized by
+  // withStartLock, so one flag serves the single in-flight boot.
+  let forwardJuliaBootOutput = false;
+  const sendBootChunk = (data: string): void => {
+    const plain = plainStreamText(data);
+    if (plain.length === 0 || win.isDestroyed()) return;
+    win.webContents.send(IPC.push.envActivity, { stream: "stdout", data: plain });
+  };
+  removeKernelBootOutputListener();
+  const bootOutputListener = (
+    _kernelId: string,
+    _stream: "stdout" | "stderr",
+    data: string,
+  ): void => {
+    if (forwardJuliaBootOutput) sendBootChunk(data);
+  };
+  kernelManager.on("kernel:processOutput", bootOutputListener);
+  trackedBootOutputListener = { km: kernelManager, fn: bootOutputListener };
+
+  /**
+   * Attach the per-kernel session listeners every live kernel needs
+   * regardless of how it came up — fresh start or restart (second review:
+   * only the start handler registered these, so every restart silently lost
+   * both double-click plot delivery and crash surfacing for the rest of the
+   * session):
+   *
+   * 1. The "orphan" iopub forwarder — output the kernel emits outside any
+   *    in-flight execution. The main producer is a double-click handler
+   *    (`pdv.handler.invoke` runs over the comm channel, so its
+   *    display_data and stream output are parented to the comm msg and
+   *    `execute()`'s per-execution collector never sees them). While an
+   *    invoke is in flight, everything routes into its console entry via
+   *    {@link HandlerInvokeTracker} — real duration, visible `[PDV]`
+   *    notices. Figures with no invoke in flight (a background task
+   *    drawing) still become synthetic "Plot" entries; orphan stream
+   *    output with no invoke in flight stays dropped (kernel boot noise).
+   *    Python's native matplotlib windows sidestep iopub entirely, but
+   *    Julia's inline Makie displays (and Python's inline/Agg backend)
+   *    land here.
+   * 2. The crash handler that pushes `kernelCrashed` to the renderer and
+   *    clears the active-kernel pointer.
+   *
+   * @param kernelId - The freshly started (or restarted) kernel.
+   */
+  function attachKernelSessionListeners(kernelId: string): void {
+    kernelManager.onIopubMessage(kernelId, (jupMsg) => {
+      const msgType = jupMsg.header.msg_type;
+      if (msgType !== "display_data" && msgType !== "stream") return;
+      const parentId = String(jupMsg.parent_header?.msg_id ?? "");
+      if (kernelManager.isExecutionActive(parentId)) return;
+
+      if (msgType === "stream") {
+        const content = jupMsg.content as { name?: string; text?: unknown };
+        const text = String(content?.text ?? "");
+        if (!text) return;
+        handlerInvokeTracker.emitOutput({
+          type: content?.name === "stderr" ? "stderr" : "stdout",
+          text,
+        });
+        return;
+      }
+
+      const data = jupMsg.content?.data as Record<string, unknown> | undefined;
+      const png = data?.["image/png"];
+      const svg = data?.["image/svg+xml"];
+      const image =
+        typeof png === "string"
+          ? { mime: "image/png", data: png }
+          : typeof svg === "string"
+            ? { mime: "image/svg+xml", data: svg }
+            : null;
+      if (!image) return;
+      if (handlerInvokeTracker.emitOutput({ type: "image", image })) return;
+      if (win.isDestroyed()) return;
+      // Fallback for figures with no invoke in flight. Reuse the
+      // executeBegin/Output/Finish contract so the renderer needs no new
+      // channel: the begin push seeds a console entry, the image chunk
+      // attaches to it, and the finish push closes it out. Nothing measured
+      // anything here, so no duration is claimed.
+      const executionId = `display-${randomUUID()}`;
+      const origin = { kind: "unknown" as const, label: "Plot" };
+      const timestamp = Date.now();
+      win.webContents.send(IPC.push.executeBegin, { executionId, code: "", origin, timestamp });
+      win.webContents.send(IPC.push.executeOutput, { executionId, type: "image", image });
+      win.webContents.send(IPC.push.executeFinish, { executionId, duration: 0 });
+    });
+
+    const onCrash = async (crashedId: string): Promise<void> => {
+      if (crashedId !== kernelId) return;
+      commRouter.detach();
+      queryRouter.detach();
+      // Deliberately do NOT delete the working directory or its map entry
+      // here: it holds the uv env spec (pyproject.toml/uv.lock/
+      // .python-version) the restart handler snapshots to rebuild the venv,
+      // and any `.autosave` of an unsaved session. `kernels.restart` and
+      // `kernels.stop` clean it up; if the user quits instead, the stale
+      // `session.lock` surfaces it on the welcome screen as a recoverable
+      // session (§11.6).
+      if (getActiveKernelId() === crashedId) setActiveKernelId(null);
+      win.webContents.send(IPC.push.kernelCrashed, { kernelId: crashedId });
+    };
+    crashHandlers.set(kernelId, onCrash);
+    kernelManager.on("kernel:crashed", onCrash);
+  }
 
   // Serialize start/stop/restart of the Jupyter server process so concurrent
   // calls cannot race on the shared commRouter (which causes "CommRouter
@@ -354,11 +612,22 @@ export function registerKernelIpcHandlers(
     let requestedSpec = spec as Parameters<KernelManager["start"]>[0];
     const requestedLanguage = requestedSpec?.language ?? "python";
     const uv = uvContext as
-      | { saveDir?: string; newProject?: boolean; pythonVersion?: string; packages?: string[] }
+      | {
+          saveDir?: string;
+          newProject?: boolean;
+          pythonVersion?: string;
+          packages?: string[];
+          juliaVersion?: string;
+        }
       | undefined;
     if (uv?.pythonVersion && !SUPPORTED_PYTHON_VERSIONS.includes(uv.pythonVersion)) {
       throw new Error(
         `Unsupported Python version "${uv.pythonVersion}". Supported: ${SUPPORTED_PYTHON_VERSIONS.join(", ")}.`
+      );
+    }
+    if (uv?.juliaVersion && !SUPPORTED_JULIA_VERSIONS.includes(uv.juliaVersion)) {
+      throw new Error(
+        `Unsupported Julia version "${uv.juliaVersion}". Supported: ${SUPPORTED_JULIA_VERSIONS.join(", ")}.`
       );
     }
 
@@ -374,6 +643,11 @@ export function registerKernelIpcHandlers(
     // shared-mode pdv-install check below is skipped for uv kernels.
     let preCreatedWorkingDir: string | undefined;
     let uvBinaryForInit: string | undefined;
+    // pkg-mode Julia launches run Pkg.instantiate concurrently with the
+    // kernel boot (§10.6.6); the pending result is awaited after the session
+    // handshake, and the abort handle kills the subprocess if the boot fails.
+    let pkgInstantiate: Promise<JuliaEnvResult> | undefined;
+    let pkgAbortInstantiate: (() => void) | undefined;
     // Environment metadata recorded under the new kernel's id once it has
     // started (§10.5): mode, the interpreter it actually spawned on, and
     // the resolved Python version. Authoritative at project-save time.
@@ -424,54 +698,156 @@ export function registerKernelIpcHandlers(
         };
       }
     } else if (requestedLanguage === "julia") {
-      const juliaPath = requestedSpec?.env?.JULIA_PATH ??
+      let juliaPath = requestedSpec?.env?.JULIA_PATH ??
         (Array.isArray(requestedSpec?.argv) ? requestedSpec.argv[0] : undefined);
+      if (uv?.juliaVersion && !Array.isArray(requestedSpec?.argv)) {
+        // §10.6.5: the New-Julia-Project version choice. Make the requested
+        // minor launchable — `juliaup add` when not installed, PDVKernel
+        // install into its default env when needed — streaming into the
+        // launch overlay, then spawn that channel's real binary.
+        juliaPath = await ensureJuliaVersionReady(uv.juliaVersion, {
+          stagingDir: path.join(app.getPath("userData"), "pdv-julia"),
+          win,
+          pushChannel: IPC.push.envActivity,
+        });
+        requestedSpec = {
+          ...(requestedSpec ?? {}),
+          language: "julia",
+          env: { ...(requestedSpec?.env ?? {}), JULIA_PATH: juliaPath },
+        };
+      } else if (!Array.isArray(requestedSpec?.argv)) {
+        // §10.7.2: never spawn the juliaup shim — resolve the configured path
+        // to the real versioned binary, and when nothing is configured prefer
+        // the discovered juliaup default over the bare `julia` PATH fallback
+        // (which is usually the shim). Explicit argv specs (tests) are left
+        // untouched: kernel-manager spawns argv[0] directly.
+        const resolved = juliaPath
+          ? resolveJuliaShim(juliaPath)
+          : discoverDefaultJulia() ?? undefined;
+        if (resolved && resolved !== juliaPath) {
+          juliaPath = resolved;
+          requestedSpec = {
+            ...(requestedSpec ?? {}),
+            language: "julia",
+            env: { ...(requestedSpec?.env ?? {}), JULIA_PATH: resolved },
+          };
+        }
+      }
       if (juliaPath) {
         const installStatus = await EnvironmentDetector.checkJuliaPDVInstalled(juliaPath);
         if (!installStatus.installed) {
           throw new Error(
-            `Selected Julia runtime is missing PDVKernel. Install it with: cd pdv-julia && julia --project=. -e 'using Pkg; Pkg.instantiate()'`
+            "Selected Julia runtime is missing the PDVKernel package. " +
+              "Install it from Settings → Runtime → Julia (one-click " +
+              "\"Install PDVKernel\"), or manually with " +
+              "julia -e 'import Pkg; Pkg.develop(path=\"<pdv-julia>\"); Pkg.add(\"IJulia\")'."
           );
         }
         envMeta = { mode: "shared", interpreterPath: juliaPath };
       }
+      if (uv) {
+        // pkg-mode boot (§10.6): pre-create the working dir with the
+        // project's Project.toml/Manifest.toml and activate it natively via
+        // JULIA_PROJECT on the kernel process. IJulia/PDVKernel keep
+        // resolving from the default environment through Julia's stacked
+        // LOAD_PATH (§10.6.1), so — unlike uv — the kernel boot needs
+        // nothing from the instantiate and the two run concurrently.
+        const pkgEnv = await startPkgEnvironment(uv, juliaPath ?? "julia");
+        preCreatedWorkingDir = pkgEnv.workingDir;
+        pkgAbortInstantiate = pkgEnv.abortInstantiate;
+        // Flip the EnvSyncModal to its kernel-boot stage the moment the
+        // instantiate finishes — the kernel boot it overlapped may still be
+        // running (empty data: a stage marker, not output).
+        pkgInstantiate = pkgEnv.instantiate?.then((res) => {
+          if (res.success && !win.isDestroyed()) {
+            win.webContents.send(IPC.push.envActivity, {
+              stream: "stdout",
+              data: "",
+              stage: "kernel-boot",
+            });
+          }
+          return res;
+        });
+        requestedSpec = {
+          ...(requestedSpec ?? {}),
+          language: "julia",
+          env: { ...(requestedSpec?.env ?? {}), JULIA_PROJECT: pkgEnv.workingDir },
+        };
+        envMeta = { mode: "pkg", interpreterPath: juliaPath };
+      }
     }
 
-    const kernel = await kernelManager.start(requestedSpec);
-    kernelEnvMeta.set(kernel.id, envMeta);
-    commRouter.attach(kernelManager, kernel.id);
-    queryRouter.detach();
-    await initializeKernelSession(
-      kernelManager,
-      commRouter,
-      queryRouter,
-      projectManager,
-      kernel.id,
-      kernelWorkingDirs,
-      getWorkingDirBase(),
-      preCreatedWorkingDir,
-      uvBinaryForInit,
-    );
+    let kernel: KernelInfo;
+    try {
+      // Julia boots stream their process output (Pkg precompile progress) to
+      // the EnvSyncModal while the kernel id is still unknown (§10.8).
+      forwardJuliaBootOutput = requestedLanguage === "julia";
+      try {
+        kernel = await kernelManager.start(requestedSpec);
+      } finally {
+        forwardJuliaBootOutput = false;
+      }
+      kernelEnvMeta.set(kernel.id, envMeta);
+      commRouter.attach(kernelManager, kernel.id);
+      queryRouter.detach();
+      await initializeKernelSession(
+        kernelManager,
+        commRouter,
+        queryRouter,
+        projectManager,
+        kernel.id,
+        kernelWorkingDirs,
+        getWorkingDirBase(),
+        preCreatedWorkingDir,
+        uvBinaryForInit,
+        // Handshake-phase boot output (`using PDVKernel` recompiles) streams
+        // to the same overlay (§10.8). Julia-only: Python handshakes are
+        // sub-second and their bootstrap prints nothing of interest.
+        requestedLanguage === "julia" ? sendBootChunk : undefined,
+      );
+    } catch (err) {
+      // Don't leave a concurrent Pkg.instantiate running against a session
+      // that will never exist.
+      pkgAbortInstantiate?.();
+      throw err;
+    }
+
+    // Session listeners attach BEFORE the possibly-minutes instantiate await
+    // below (second review): a kernel death in that window must surface as
+    // kernelCrashed immediately, not as generic comm timeouts against a dead
+    // process promoted to active. cleanupKernelWorkingDir in the failure
+    // teardown detaches the crash handler again.
+    attachKernelSessionListeners(kernel.id);
+
+    // pkg-mode launches: the instantiate overlapped the boot; the session is
+    // not ready until it succeeds (§10.6.6). On failure the kernel is torn
+    // back down so the renderer's failed overlay offers a clean Retry.
+    if (pkgInstantiate) {
+      const inst = await pkgInstantiate;
+      if (inst.juliaVersion) {
+        envMeta.juliaVersion = inst.juliaVersion;
+      }
+      if (!inst.success) {
+        kernelEnvMeta.delete(kernel.id);
+        await cleanupKernelWorkingDir(
+          projectManager,
+          kernelManager,
+          kernel.id,
+          kernelWorkingDirs,
+          crashHandlers,
+        );
+        await kernelManager.stop(kernel.id).catch(() => undefined);
+        // Every other stop path detaches the routers; leaving them attached
+        // here let straggling renderer traffic burn full timeouts against
+        // dead sockets until the next start (second review).
+        commRouter.detach();
+        queryRouter.detach();
+        throw new Error(`Julia environment setup failed (Pkg.instantiate):\n${inst.output}`);
+      }
+    }
     setActiveKernelId(kernel.id);
     await setupModuleNamespaces(kernel.id);
     await bindActiveProjectModules(kernel.id);
-
-    const onCrash = async (crashedId: string): Promise<void> => {
-      if (crashedId !== kernel.id) return;
-      commRouter.detach();
-      queryRouter.detach();
-      // Deliberately do NOT delete the working directory or its map entry
-      // here: it holds the uv env spec (pyproject.toml/uv.lock/
-      // .python-version) the restart handler snapshots to rebuild the venv,
-      // and any `.autosave` of an unsaved session. `kernels.restart` and
-      // `kernels.stop` clean it up; if the user quits instead, the stale
-      // `session.lock` surfaces it on the welcome screen as a recoverable
-      // session (§11.6).
-      if (getActiveKernelId() === crashedId) setActiveKernelId(null);
-      win.webContents.send(IPC.push.kernelCrashed, { kernelId: crashedId });
-    };
-    crashHandlers.set(kernel.id, onCrash);
-    kernelManager.on("kernel:crashed", onCrash);
 
     return kernel;
     });
@@ -502,6 +878,10 @@ export function registerKernelIpcHandlers(
       id,
       request as Parameters<KernelManager["execute"]>[1],
       (chunk) => event.sender.send(IPC.push.executeOutput, chunk),
+      // The console gets every chunk via the executeOutput push above;
+      // returning them again in the result double-prints when the push
+      // loses the race against the invoke resolution.
+      { keepStreamsInResult: false },
     );
   });
 
@@ -577,6 +957,33 @@ export function registerKernelIpcHandlers(
         }
       }
 
+      // Julia analog (§10.6): snapshot Project.toml/Manifest.toml so a
+      // pkg-mode kernel relaunches with its project environment active,
+      // carrying any packages installed since load (PDVKernel.install).
+      let juliaEnvSnapshot:
+        | { projectToml: string; manifestToml?: string }
+        | undefined;
+      if (current.language === "julia" && oldWorkingDir) {
+        try {
+          const projectToml = await fs.readFile(
+            path.join(oldWorkingDir, "Project.toml"),
+            "utf8"
+          );
+          let manifestToml: string | undefined;
+          try {
+            manifestToml = await fs.readFile(
+              path.join(oldWorkingDir, "Manifest.toml"),
+              "utf8"
+            );
+          } catch {
+            /* manifest may not exist yet (nothing installed) */
+          }
+          juliaEnvSnapshot = { projectToml, manifestToml };
+        } catch {
+          /* no Project.toml -> shared-mode (legacy) julia kernel */
+        }
+      }
+
       // Hardening: if the old working dir (or its env files) is gone but the
       // saved project is a uv project, rebuild the env from the save dir
       // instead of silently falling back to a shared-mode start.
@@ -589,6 +996,19 @@ export function registerKernelIpcHandlers(
             .then(() => true)
             .catch(() => false);
           if (hasPyproject) uvSaveDirFallback = projectDir;
+        }
+      }
+
+      // Same hardening for pkg-mode Julia projects (§10.6.6).
+      let pkgSaveDirFallback: string | undefined;
+      if (!juliaEnvSnapshot && current.language === "julia") {
+        const projectDir = getActiveProjectDir();
+        if (projectDir) {
+          const hasProjectToml = await fs
+            .access(path.join(projectDir, "Project.toml"))
+            .then(() => true)
+            .catch(() => false);
+          if (hasProjectToml) pkgSaveDirFallback = projectDir;
         }
       }
 
@@ -611,13 +1031,29 @@ export function registerKernelIpcHandlers(
       let preCreatedWorkingDir: string | undefined;
       let uvBinaryForInit: string | undefined;
       let restarted: KernelInfo;
+
+      // §10.8 boot-output streaming applies to restarts too (second review):
+      // a Julia restart right after `PDVKernel.update()` recompiles for
+      // minutes, and without the forwarding flag the renderer shows a bare
+      // spinner exactly when progress matters most.
+      const startRestartKernel = async (
+        spec: Parameters<typeof kernelManager.start>[0]
+      ): Promise<KernelInfo> => {
+        forwardJuliaBootOutput = current.language === "julia";
+        try {
+          return await kernelManager.start(spec);
+        } finally {
+          forwardJuliaBootOutput = false;
+        }
+      };
+
       if (envSnapshot || uvSaveDirFallback) {
         const uvEnv = await startUvEnvironment(
           envSnapshot ? { envSnapshot } : { saveDir: uvSaveDirFallback }
         );
         preCreatedWorkingDir = uvEnv.workingDir;
         uvBinaryForInit = uvEnv.uvBinary;
-        restarted = await kernelManager.start({
+        restarted = await startRestartKernel({
           name: current.name,
           language: current.language,
           env: { PYTHON_PATH: uvEnv.venvPython },
@@ -629,10 +1065,65 @@ export function registerKernelIpcHandlers(
             (await EnvironmentDetector.resolvePythonMajorMinor(uvEnv.venvPython)) ??
             oldEnvMeta?.pythonVersion,
         });
+      } else if (juliaEnvSnapshot || pkgSaveDirFallback) {
+        // pkg-mode Julia restart (§10.6): re-seed the env files into a fresh
+        // working dir and relaunch with JULIA_PROJECT pointing at it. The
+        // snapshot path needs no instantiate (the depot already holds what
+        // the live session used); the save-dir fallback spawns one, awaited
+        // below as best-effort.
+        const pkgEnv = await startPkgEnvironment(
+          juliaEnvSnapshot
+            ? { envSnapshot: juliaEnvSnapshot }
+            : { saveDir: pkgSaveDirFallback },
+          oldEnvMeta?.interpreterPath ?? "julia"
+        );
+        preCreatedWorkingDir = pkgEnv.workingDir;
+        try {
+          restarted = await startRestartKernel({
+            name: current.name,
+            language: current.language,
+            env: {
+              ...(oldEnvMeta?.interpreterPath
+                ? { JULIA_PATH: oldEnvMeta.interpreterPath }
+                : {}),
+              JULIA_PROJECT: pkgEnv.workingDir,
+            },
+          });
+        } catch (err) {
+          // Same rule as the start handler: don't leave the concurrent
+          // Pkg.instantiate running (and streaming stale envActivity) against
+          // a session that will never exist.
+          pkgEnv.abortInstantiate();
+          throw err;
+        }
+        const newMeta: ActiveEnvironmentInfo = {
+          mode: "pkg",
+          interpreterPath: oldEnvMeta?.interpreterPath,
+          juliaVersion: oldEnvMeta?.juliaVersion,
+        };
+        kernelEnvMeta.set(restarted.id, newMeta);
+        if (pkgEnv.instantiate) {
+          const inst = await pkgEnv.instantiate;
+          if (inst.juliaVersion) newMeta.juliaVersion = inst.juliaVersion;
+          if (!inst.success) {
+            // Non-fatal on restart: the session comes back on whatever the
+            // depot already holds; missing packages surface on first use.
+            console.warn(
+              "[ipc-register-kernels] Pkg.instantiate failed during restart:",
+              inst.output
+            );
+          }
+        }
       } else {
-        restarted = await kernelManager.start({
+        restarted = await startRestartKernel({
           name: current.name,
           language: current.language,
+          // A shared Julia restart must relaunch on the same executable —
+          // omitting JULIA_PATH would fall back to the PATH `julia` shim.
+          env:
+            current.language === "julia" && oldEnvMeta?.interpreterPath
+              ? { JULIA_PATH: oldEnvMeta.interpreterPath }
+              : undefined,
         });
         kernelEnvMeta.set(restarted.id, oldEnvMeta ?? { mode: "shared" });
       }
@@ -647,8 +1138,15 @@ export function registerKernelIpcHandlers(
         kernelWorkingDirs,
         getWorkingDirBase(),
         preCreatedWorkingDir,
-        uvBinaryForInit
+        uvBinaryForInit,
+        // Handshake-phase output streams to the overlay on restarts too —
+        // `using PDVKernel` recompiles land here (§10.8, second review).
+        current.language === "julia" ? sendBootChunk : undefined
       );
+      // Restarted kernels need the same session listeners as fresh starts:
+      // without this, every restart silently lost double-click plot delivery
+      // AND crash surfacing for the rest of the session (second review).
+      attachKernelSessionListeners(restarted.id);
       return restarted;
     }
 
@@ -755,7 +1253,9 @@ export function registerKernelIpcHandlers(
           return {
             valid: false,
             error:
-              'Missing PDVKernel.jl. Install it with: cd pdv-julia && julia --project=. -e \'using Pkg; Pkg.instantiate()\'',
+              "Missing the PDVKernel Julia package — it must be installed into " +
+              "this Julia environment. (Julia support is experimental and not " +
+              "yet packaged for install.)",
           };
         }
       }

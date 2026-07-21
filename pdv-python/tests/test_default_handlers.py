@@ -201,6 +201,177 @@ class TestXarrayDefault:
         assert plt.gcf().axes[0].get_title() == "test.da3d"
 
 
+class TestComplexArrayDefault:
+    def test_1d_complex_plots_re_and_im_lines(self):
+        register_defaults()
+
+        arr = np.arange(6, dtype=float) + 1j * np.arange(6, dtype=float)[::-1]
+        result = dispatch_handler(arr, "test.c1d", None)
+
+        assert result == {"dispatched": True}
+        assert _figure_count() == 1
+        ax = plt.gcf().axes[0]
+        assert ax.get_title() == "test.c1d"
+        assert len(ax.get_lines()) == 2
+        assert [line.get_label() for line in ax.get_lines()] == ["Re", "Im"]
+
+    def test_2d_complex_plots_re_im_panels_with_own_colorbars(self):
+        register_defaults()
+
+        base = np.arange(12, dtype=float).reshape(3, 4)
+        arr = base + 1j * (10.0 * base)
+        result = dispatch_handler(arr, "test.c2d", None)
+
+        assert result == {"dispatched": True}
+        assert _figure_count() == 1
+        fig = plt.gcf()
+        assert fig.get_suptitle() == "test.c2d"
+        # Two image panels + one colorbar each = 4 axes total.
+        assert len(fig.axes) == 4
+        image_axes = [ax for ax in fig.axes if ax.get_images()]
+        assert [ax.get_title() for ax in image_axes] == ["Re", "Im"]
+        # Own colorbars: the two images carry independent scale limits.
+        clims = [ax.get_images()[0].get_clim() for ax in image_axes]
+        assert clims[0] == (0.0, 11.0)
+        assert clims[1] == (0.0, 110.0)
+
+    def test_3d_complex_prints_notice(self, capsys):
+        register_defaults()
+
+        arr = np.zeros((2, 2, 2), dtype=np.complex128)
+        result = dispatch_handler(arr, "test.c3d", None)
+
+        assert result == {"dispatched": True}
+        assert _figure_count() == 0
+        assert "Cannot plot 3-D complex ndarray" in capsys.readouterr().out
+
+
+class TestH5pyDefault:
+    def test_1d_dataset_plots(self, tmp_path):
+        h5py = pytest.importorskip("h5py")
+        register_defaults()
+
+        with h5py.File(tmp_path / "t.h5", "w") as f:
+            f.create_dataset("d", data=np.arange(6, dtype=float))
+        with h5py.File(tmp_path / "t.h5", "r") as f:
+            result = dispatch_handler(f["d"], "test.h5d1", None)
+
+        assert result == {"dispatched": True}
+        assert _figure_count() == 1
+        assert plt.gcf().axes[0].get_title() == "test.h5d1"
+
+    def test_2d_dataset_plots(self, tmp_path):
+        h5py = pytest.importorskip("h5py")
+        register_defaults()
+
+        with h5py.File(tmp_path / "t.h5", "w") as f:
+            f.create_dataset("d", data=np.zeros((3, 4)))
+        with h5py.File(tmp_path / "t.h5", "r") as f:
+            result = dispatch_handler(f["d"], "test.h5d2", None)
+
+        assert result == {"dispatched": True}
+        assert _figure_count() == 1
+
+    def test_1d_complex128_dataset_plots_re_im_lines(self, tmp_path):
+        h5py = pytest.importorskip("h5py")
+        register_defaults()
+
+        data = np.arange(5, dtype=float) * (1 + 1j)
+        with h5py.File(tmp_path / "t.h5", "w") as f:
+            f.create_dataset("d", data=data.astype(np.complex128))
+        with h5py.File(tmp_path / "t.h5", "r") as f:
+            result = dispatch_handler(f["d"], "test.h5c1", None)
+
+        assert result == {"dispatched": True}
+        assert _figure_count() == 1
+        ax = plt.gcf().axes[0]
+        assert [line.get_label() for line in ax.get_lines()] == ["Re", "Im"]
+
+    def test_2d_complex128_dataset_plots_re_im_panels(self, tmp_path):
+        h5py = pytest.importorskip("h5py")
+        register_defaults()
+
+        data = (np.ones((2, 3)) + 3j * np.ones((2, 3))).astype(np.complex128)
+        with h5py.File(tmp_path / "t.h5", "w") as f:
+            f.create_dataset("d", data=data)
+        with h5py.File(tmp_path / "t.h5", "r") as f:
+            result = dispatch_handler(f["d"], "test.h5c2", None)
+
+        assert result == {"dispatched": True}
+        assert _figure_count() == 1
+        fig = plt.gcf()
+        assert fig.get_suptitle() == "test.h5c2"
+        image_axes = [ax for ax in fig.axes if ax.get_images()]
+        assert [ax.get_title() for ax in image_axes] == ["Re", "Im"]
+
+    def test_3d_dataset_prints_notice(self, tmp_path, capsys):
+        h5py = pytest.importorskip("h5py")
+        register_defaults()
+
+        with h5py.File(tmp_path / "t.h5", "w") as f:
+            f.create_dataset("d", data=np.zeros((2, 2, 2)))
+        with h5py.File(tmp_path / "t.h5", "r") as f:
+            result = dispatch_handler(f["d"], "test.h5d3", None)
+
+        assert result == {"dispatched": True}
+        assert _figure_count() == 0
+        out = capsys.readouterr().out
+        assert "[PDV] Cannot plot 3-D h5py dataset" in out
+
+    def test_size_cap_prints_notice_without_reading(self, tmp_path, capsys):
+        """Datasets over the plot cap print a slicing hint instead of
+        being materialized (guards against multi-GB double-clicks)."""
+        h5py = pytest.importorskip("h5py")
+        from pdv import default_handlers
+
+        register_defaults()
+
+        with h5py.File(tmp_path / "t.h5", "w") as f:
+            f.create_dataset("d", data=np.arange(1000, dtype=float))
+        with h5py.File(tmp_path / "t.h5", "r") as f:
+            # Lower the cap instead of writing a >100 MB fixture.
+            orig = default_handlers._H5PY_PLOT_MAX_BYTES
+            default_handlers._H5PY_PLOT_MAX_BYTES = 100
+            try:
+                result = dispatch_handler(f["d"], "test.big", None)
+            finally:
+                default_handlers._H5PY_PLOT_MAX_BYTES = orig
+
+        assert result == {"dispatched": True}
+        assert _figure_count() == 0
+        out = capsys.readouterr().out
+        assert "Cannot plot 'test.big'" in out
+        assert "Slice it in code" in out
+
+    def test_vlen_string_dataset_bails_before_reading(self, tmp_path, capsys):
+        """Non-numeric dtypes print the no-plot notice without materializing.
+
+        vlen/object dtypes report itemsize 8 (the pointer, not the payload),
+        so the size cap alone would wildly undercount a string dataset and
+        read it fully just to fail plotting — the dtype gate must fire first
+        (review). The floored cap proves the gate precedes the cap check.
+        """
+        h5py = pytest.importorskip("h5py")
+        from pdv import default_handlers
+
+        register_defaults()
+        with h5py.File(tmp_path / "t.h5", "w") as f:
+            f.create_dataset("s", data=["alpha", "beta"])
+        with h5py.File(tmp_path / "t.h5", "r") as f:
+            orig = default_handlers._H5PY_PLOT_MAX_BYTES
+            default_handlers._H5PY_PLOT_MAX_BYTES = 1
+            try:
+                result = dispatch_handler(f["s"], "test.strs", None)
+            finally:
+                default_handlers._H5PY_PLOT_MAX_BYTES = orig
+
+        assert result == {"dispatched": True}
+        assert _figure_count() == 0
+        out = capsys.readouterr().out
+        assert "No default plot for h5py dataset" in out
+        assert "cap" not in out
+
+
 class TestRegistration:
     def test_handlers_registered_for_present_types(self):
         register_defaults()

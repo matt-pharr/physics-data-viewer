@@ -141,11 +141,22 @@ export function useProjectWorkflow(options: UseProjectWorkflowOptions) {
       setChecksumMismatch(false);
       setSavedPdvVersion(null); // Just saved with current version — no mismatch
       await rememberRecentProject(saveDir);
+
+      // Nodes the kernel could not serialize: the save completed without
+      // them, which must never look like a clean save. Preserved nodes kept
+      // their previously saved value on disk; unpreserved ones are absent
+      // from the save entirely.
+      const failedWarn = result.failedNodes?.length
+        ? `\nWarning: ${result.failedNodes.length} node(s) could not be serialized and were skipped:\n  ${result.failedNodes
+            .map((f) => `${f.path ?? '?'} — ${f.error ?? 'unknown error'}${f.preserved ? ' (previous saved value kept)' : ' (NOT in this save)'}`)
+            .join('\n  ')}`
+        : '';
       setLogs((prev) => [...prev, {
         id: `save-${Date.now()}`,
         timestamp: Date.now(),
         code: '',
         stdout: `Project saved (${result.nodeCount} nodes)`,
+        ...(failedWarn ? { stderr: failedWarn.trimStart() } : {}),
       }]);
       return true;
     } catch (error) {
@@ -235,6 +246,63 @@ export function useProjectWorkflow(options: UseProjectWorkflowOptions) {
         code: '',
         stdout: `Project loaded${nodeCountMsg}${restoredMsg}${loadMissingWarn}${envSyncWarn}`,
       }]);
+
+      // §10.7.5: the project's environment was resolved with a different
+      // Julia minor than the session is running. Point at the installed
+      // matching channel, or offer to acquire it with juliaup. The load
+      // itself has already completed — this is advisory.
+      const jv = result.juliaVersionCheck;
+      if (jv) {
+        const running = jv.runningVersion
+          ? `Julia ${jv.runningVersion}`
+          : 'a different Julia version';
+        const resolvedWith =
+          `This project's packages were resolved with Julia ${jv.manifestVersion}, `
+          + `but this session is running ${running}`;
+        if (jv.channelInstalled) {
+          setLogs((prev) => [...prev, {
+            id: `julia-version-${Date.now()}`,
+            timestamp: Date.now(),
+            code: '',
+            stdout: `${resolvedWith}. juliaup channel ${jv.channel} is installed — `
+              + 'select it under Settings → Runtime and restart the session to match.',
+          }]);
+        } else if (jv.juliaupInstalled) {
+          const install = window.confirm(
+            `${resolvedWith} and Julia ${jv.channel} is not installed.\n\n`
+            + `Install Julia ${jv.channel} with juliaup now? Afterwards, select it `
+            + 'under Settings → Runtime (and install PDVKernel into it) to use it '
+            + 'for this project.'
+          );
+          if (install) {
+            setLogs((prev) => [...prev, {
+              id: `juliaup-add-start-${Date.now()}`,
+              timestamp: Date.now(),
+              code: '',
+              stdout: `Installing Julia ${jv.channel} with juliaup...`,
+            }]);
+            void window.pdv.environment.juliaupAdd(jv.channel).then((res) => {
+              setLogs((prev) => [...prev, {
+                id: `juliaup-add-${Date.now()}`,
+                timestamp: Date.now(),
+                code: '',
+                stdout: res.success
+                  ? `Julia ${jv.channel} installed. Select it under Settings → Runtime `
+                    + '(and install PDVKernel into it) to use it for this project.'
+                  : `juliaup add ${jv.channel} failed:\n${res.output}`,
+              }]);
+            });
+          }
+        } else {
+          setLogs((prev) => [...prev, {
+            id: `julia-version-${Date.now()}`,
+            timestamp: Date.now(),
+            code: '',
+            stdout: `${resolvedWith}, and Julia ${jv.channel} is not installed. `
+              + 'Install juliaup (Settings → Runtime) to add it.',
+          }]);
+        }
+      }
     } catch (error) {
       setProgress(null);
       setLastError(error instanceof Error ? error.message : String(error));

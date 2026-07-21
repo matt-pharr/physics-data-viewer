@@ -40,33 +40,32 @@ The Electron main process manages module storage and metadata:
 
 Installation validates `pdv-module.json`, copies the full module directory (including `lib/`, `scripts/`, `gui.json`, `inputs/`), and stores normalized metadata (`id`, `name`, `version`, source, revision when available).
 
-## Manifest split (schema v3)
+## Manifest structure (schema v4)
 
-In schema v3, the module manifest is split across two files:
+A v4 module is described by three files in the module directory:
 
-- **`pdv-module.json`** retains identity (`id`, `name`, `version`, `schema_version`), `compatibility`, `scripts`, `files`, `lib`, `entry_point`, and `dependencies`.
-- **`gui.json`** holds `inputs`, `actions`, and the declarative `gui` layout. This file is optional — modules without a GUI omit it entirely.
+- **`pdv-module.json`** — identity and configuration (`id`, `name`, `version`, `schema_version`, `language`), plus `entry_point`, `lib_dir`, `default_gui`, `compatibility`, and `dependencies`.
+- **`gui.json`** (the file named by `default_gui`) — holds `inputs`, `actions`, and the declarative `gui` layout. Optional — modules without a GUI omit it and leave `default_gui` unset.
+- **`module-index.json`** — the list of tree-node descriptors the module contributes (its scripts, libs, files, and namelists). The loader uses it to reconstruct the module's subtree on import; the v4 loader rejects a module whose `module-index.json` is missing.
 
-This separation keeps the identity/compatibility manifest lightweight and allows GUI definitions to evolve independently.
+This separation keeps the identity/compatibility manifest lightweight, lets GUI definitions evolve independently, and moves the module's tree layout into a dedicated index.
 
 ## Supported manifest functionality
 
-In schema v3, functionality is split across `pdv-module.json` and `gui.json`.
-
 ### `pdv-module.json` (identity manifest)
 
-- Required module identity fields (`schema_version`, `id`, `name`, `version`)
+- Required identity fields (`schema_version` = `"4"`, `id`, `name`, `version`)
+- `language` — `"python"` (default) or `"julia"`
 - `description`
-- `scripts[]` — informational listing of action scripts: `{ name, path }`
-- `files[]` — module-provided input files to copy and register:
-  - `name` — tree node name
-  - `path` — relative path within the module directory
-  - `type` — `"namelist"`, `"lib"`, or `"file"`
 - `entry_point` — Python module name to import after `sys.path` setup (e.g. `"n_pendulum"`)
+- `lib_dir` — relative path to the lib directory (defaults to `"lib"`)
+- `default_gui` — relative path to the GUI file (e.g. `"gui.json"`); omitted when the module has no GUI
 - optional `compatibility` metadata:
   - `pdv_min`, `pdv_max`
   - `python`, `python_min`, `python_max`
 - optional `dependencies[]` (warn-only)
+
+The module's scripts, input files, libs, and namelists are enumerated in `module-index.json` (and their contents live under `scripts/`, `inputs/`, and `lib/`), not as arrays inside `pdv-module.json`.
 
 ### `gui.json` (GUI and interaction manifest)
 

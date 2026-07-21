@@ -32,6 +32,12 @@ echo
 # version strings (e.g. test fixture module versions, dependency floors).
 SITES=(
     "pdv-python/pyproject.toml|^version = \"$CANONICAL\"\$"
+    # Julia kernel package: Project.toml's version AND the PDVKernel.VERSION
+    # constant (read by the environment detector without loading the
+    # package) — unified-version rule 10 in CLAUDE.md. Both were missing
+    # from this check until the PR #347 third review flagged it.
+    "pdv-julia/Project.toml|^version = \"$CANONICAL\"\$"
+    "pdv-julia/src/PDVKernel.jl|^const VERSION = \"$CANONICAL\"\$"
     "electron/package.json|^[[:space:]]+\"version\": \"$CANONICAL\","
     "README.md|\`v$CANONICAL\`"
     "ARCHITECTURE.md|^\*\*Version\*\*: $CANONICAL\$"

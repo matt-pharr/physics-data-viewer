@@ -7,6 +7,10 @@ __pycache__/
 /node_modules/
 .DS_Store
 pdv-python/build/
+pdv-python/.venv/
+# The sweep and local dev create ad-hoc venvs/locks under pdv-python; the
+# package ships without a committed lockfile (libraries pin floors, not locks).
+pdv-python/uv.lock
 .playwright-mcp/
 
 # Claude Code local working files (plans, settings, agent worktrees)
@@ -33,7 +37,13 @@ electron/resources/
 # electron/package-lock.json IS tracked and required.
 /package-lock.json
 
+# Playwright results and the audit scratch dir when run from the repo root.
+/test-results/
+/.pdv_audit/
+
 pdv-icon.iconset
 
 # Docs
 site/
+# Julia package manager artifacts (pdv-julia is a library; the manifest is machine-local)
+pdv-julia/Manifest.toml

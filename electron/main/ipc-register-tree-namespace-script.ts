@@ -17,11 +17,13 @@ import * as fs from "fs/promises";
 import * as path from "path";
 
 import type { CommRouter } from "./comm-router";
+import type { HandlerInvokeTracker } from "./handler-invoke-tracker";
 import type { QueryRouter } from "./query-router";
 import type { ConfigStore, PDVConfig } from "./config";
 import { IPC, type HandlerInvokeResult, type NamelistReadResult, type NamelistWriteResult, type NamespaceInspectResult, type NamespaceInspectTarget, type NamespaceInspectorNode, type NamespaceQueryOptions, type NamespaceVariable, type ScriptParameter, type ScriptRunRequest, type ScriptRunResult, type TreePrintRequest, type TreeAddFileResult, type TreeCreateGuiResult, type TreeCreateLibResult, type TreeCreateNodeResult, type TreeCreateNoteResult, type TreeCreateScriptResult, type TreeDuplicateResult, type TreeMoveResult, type TreeRenameResult } from "./ipc";
 import type { KernelManager } from "./kernel-manager";
 import { executeAndTranscribe, TranscriptWriter } from "./mcp/transcript";
+import { juliaStringLiteral } from "./module-runtime";
 import { PDVMessageType, generateNodeUuid, resolveNodeDir, resolveNodePath, type PDVFileRegisterPayload } from "./pdv-protocol";
 import type { ProjectManager } from "./project-manager";
 import {
@@ -35,6 +37,12 @@ interface RegisterTreeNamespaceScriptIpcHandlersOptions {
   kernelManager: KernelManager;
   commRouter: CommRouter;
   queryRouter: QueryRouter;
+  /**
+   * Shared tracker giving each `tree:invokeHandler` call a real console
+   * entry (measured duration; comm-parented output routed in by the
+   * orphan-iopub forwarder in `ipc-register-kernels.ts`).
+   */
+  handlerInvokeTracker: HandlerInvokeTracker;
   projectManager: ProjectManager;
   configStore: ConfigStore;
   kernelWorkingDirs: Map<string, string>;
@@ -182,6 +190,7 @@ export function registerTreeNamespaceScriptIpcHandlers(
     kernelManager,
     commRouter,
     queryRouter,
+    handlerInvokeTracker,
     projectManager,
     configStore,
     kernelWorkingDirs,
@@ -382,7 +391,7 @@ export function registerTreeNamespaceScriptIpcHandlers(
       kernelId: string,
       sourcePath: string,
       targetTreePath: string,
-      nodeType: "namelist" | "lib" | "file",
+      nodeType: "namelist" | "lib" | "file" | "dataset_file" | "hdf5_file",
       filename: string
     ): Promise<TreeAddFileResult> => {
       if (!kernelManager.getKernel(kernelId)) throw new Error(`Kernel not found: ${kernelId}`);
@@ -490,14 +499,16 @@ export function registerTreeNamespaceScriptIpcHandlers(
     let code: string;
 
     if (kernel.language === "julia") {
+      // juliaStringLiteral, not JSON.stringify: Julia interpolates `$` in
+      // double-quoted literals (PR #347 review M4).
       const kwargs = Object.entries(params)
         .map(([key, value]) => {
-          if (typeof value === "string") return `${key}=${JSON.stringify(value)}`;
+          if (typeof value === "string") return `${key}=${juliaStringLiteral(value)}`;
           if (typeof value === "boolean") return `${key}=${value ? "true" : "false"}`;
           return `${key}=${value}`;
         })
         .join(", ");
-      const pathStr = JSON.stringify(treePath);
+      const pathStr = juliaStringLiteral(treePath);
       code = kwargs
         ? `PDVKernel.run_tree_script(pdv_tree, ${pathStr}; ${kwargs})`
         : `PDVKernel.run_tree_script(pdv_tree, ${pathStr})`;
@@ -533,8 +544,15 @@ export function registerTreeNamespaceScriptIpcHandlers(
     const { path, executionId, origin } = request;
     // Build the language-appropriate invocation here — no Python or Julia
     // code strings belong in the renderer (ARCHITECTURE.md key design rules).
-    const expr = path ? `pdv_tree[${JSON.stringify(path)}]` : "pdv_tree";
-    const code = kernel.language === "julia" ? `println(${expr})` : `print(${expr})`;
+    // Julia uses the :limit=>true text/plain display rather than println so
+    // large arrays print the truncated "256-element Vector{Float64}: …" form
+    // (matching numpy's self-truncating print) instead of a full dump.
+    const literal = kernel.language === "julia" ? juliaStringLiteral : JSON.stringify;
+    const expr = path ? `pdv_tree[${literal(path)}]` : "pdv_tree";
+    const code =
+      kernel.language === "julia"
+        ? `show(IOContext(stdout, :limit => true), MIME("text/plain"), ${expr}); println()`
+        : `print(${expr})`;
 
     const workingDir = kernelWorkingDirs.get(kernelId);
     const transcript = workingDir ? new TranscriptWriter(workingDir) : null;
@@ -652,11 +670,39 @@ export function registerTreeNamespaceScriptIpcHandlers(
       if (!kernelManager.getKernel(kernelId)) {
         return { success: false, error: "No active kernel. Try restarting the kernel." };
       }
-      const response = await commRouter.request(PDVMessageType.HANDLER_INVOKE, {
-        path: nodePath,
-      });
-      const payload = response.payload as { dispatched: boolean; error?: string };
-      return { success: payload.dispatched, error: payload.error };
+      // The invoke owns a console entry: begin seeds it, the orphan-iopub
+      // forwarder (ipc-register-kernels.ts) streams the handler's figures
+      // and prints into it, and finish stamps the real wall-clock duration
+      // (the kernel replies only after the handler returns).
+      const executionId = handlerInvokeTracker.begin(nodePath);
+      try {
+        // Generous timeout: a first plot legitimately pays a CairoMakie
+        // auto-load (potentially a full precompile in a fresh project env)
+        // plus time-to-first-plot, and user handlers can do real work. The
+        // default 30 s stamped a spurious "timed out" error on the entry
+        // while the kernel finished the plot anyway (caught by
+        // julia-hdf5-smoke e2e).
+        const response = await commRouter.request(
+          PDVMessageType.HANDLER_INVOKE,
+          { path: nodePath },
+          { timeoutMs: 300_000 },
+        );
+        const payload = response.payload as {
+          dispatched?: boolean;
+          error?: string;
+          message?: string;
+        };
+        // Error responses (path_not_found, load_error) carry code/message
+        // instead of dispatched/error.
+        const error =
+          payload.error ?? (payload.dispatched === true ? undefined : payload.message);
+        handlerInvokeTracker.finish(executionId, error);
+        return { success: payload.dispatched === true, error };
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        handlerInvokeTracker.finish(executionId, message);
+        return { success: false, error: message };
+      }
     }
   );
 

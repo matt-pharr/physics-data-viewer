@@ -1,8 +1,9 @@
 # The App Object (`pdv`)
 
-`pdv` is a session-level app object injected into the kernel namespace
-alongside `pdv_tree`. It exposes operations that act on the running PDV
-application rather than on project data.
+`pdv` is the Python package itself — importable in any kernel because
+`pdv-python` is installed (only `pdv_tree` is an injected, protected binding).
+Its module-level functions provide session-level operations that act on the
+running PDV application rather than on project data.
 
 ```python
 pdv.working_dir              # Path to the session working directory

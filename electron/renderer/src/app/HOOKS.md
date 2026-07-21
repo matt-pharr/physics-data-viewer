@@ -25,7 +25,7 @@ Hooks never call each other directly. They communicate through **shared state**:
 
 ## State Groups
 
-App's 21 `useState` calls are organized into these logical groups:
+App's 39 `useState` calls are organized into these logical groups:
 
 | Group | States | Primary Consumers |
 |-------|--------|--------------------|
@@ -172,8 +172,7 @@ Several hooks bump integer "refresh tokens" (e.g. `setTreeRefreshToken(t => t + 
 
 **Returns**:
 - `handleSaveProject(options?)` — saves the current project (prompts for directory if needed)
-- `handleOpenProject(path)` — loads a project from the given path
-- `executeOpenProject(path)` — opens a project directly
+- `executeOpenProject(path)` — opens a project from the given path directly
 
 **Menu listener**: Subscribes to `window.pdv.menu.onAction()` for File menu actions (save, open, close, recent project).
 
@@ -214,8 +213,8 @@ Several hooks bump integer "refresh tokens" (e.g. `setTreeRefreshToken(t => t + 
 
                     ┌──────────────────┐
   kernelStatus ────►│useProjectWorkflow │──► handleSaveProject(),
-  cellTabs ────────►│                  │    handleOpenProject(),
-  config ──────────►│                  │    executeOpenProject()
+  cellTabs ────────►│                  │    executeOpenProject()
+  config ──────────►│                  │
                     └──────────────────┘
 ```
 

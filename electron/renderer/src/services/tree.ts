@@ -66,6 +66,7 @@ class TreeService {
       module_description,
       module_language,
       parent_is_opaque,
+      is_coord,
       ...rest
     } = node;
     return {
@@ -81,6 +82,7 @@ class TreeService {
       moduleDescription: module_description,
       moduleLanguage: module_language,
       parentIsOpaque: Boolean(parent_is_opaque),
+      isCoord: Boolean(is_coord),
       isExpanded: false,
       isLoading: false,
     };

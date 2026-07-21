@@ -64,6 +64,9 @@ cd electron && npm install
 # Python kernel package
 cd ../pdv-python && pip install -e ".[dev]"
 
+# Julia kernel package (optional — enables Julia sessions)
+julia -e 'using Pkg; Pkg.add("IJulia"); Pkg.develop(path="pdv-julia")'
+
 # Build & run
 cd ../electron && npm run build && npm run dev
 ```
@@ -73,6 +76,9 @@ cd ../electron && npm run build && npm run dev
 ```bash
 # Python
 cd pdv-python && pytest tests/ -v
+
+# Julia
+julia --project=pdv-julia -e 'using Pkg; Pkg.test()'
 
 # TypeScript
 cd electron && npm test -- --reporter=verbose
@@ -86,6 +92,7 @@ electron/            Electron app (TypeScript)
   renderer/src/      React frontend — tree, editor, console, modules
 pdv-python/          Python kernel package (pip install pdv-python)
   pdv/        Tree, comm protocol, serialization, handlers
+pdv-julia/           Julia kernel package (PDVKernel.jl — protocol parity with pdv-python)
 examples/modules/    Bundled example modules
 ```
 
