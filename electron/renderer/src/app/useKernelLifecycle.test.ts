@@ -36,7 +36,7 @@ interface Setters {
   setLogs: (v: LogEntry[] | ((prev: LogEntry[]) => LogEntry[])) => void;
   setNamespaceRefreshToken: (v: number | ((prev: number) => number)) => void;
   setTreeRefreshToken: (v: number | ((prev: number) => number)) => void;
-  setEnvironmentMode: (v: 'uv' | 'shared' | ((prev: 'uv' | 'shared') => 'uv' | 'shared')) => void;
+  setEnvironmentMode: (v: 'uv' | 'shared' | 'pkg' | ((prev: 'uv' | 'shared' | 'pkg') => 'uv' | 'shared' | 'pkg')) => void;
 }
 
 function createState(): { state: State; setters: Setters } {

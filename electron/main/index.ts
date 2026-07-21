@@ -23,11 +23,13 @@ import * as os from "os";
 import * as path from "path";
 
 import { CommRouter } from "./comm-router";
+import { HandlerInvokeTracker } from "./handler-invoke-tracker";
 import { QueryRouter } from "./query-router";
 import { EnvironmentDetector } from "./environment-detector";
 import { buildEditorSpawn, resolveEditorSpawn } from "./editor-spawn";
 import {
   registerKernelIpcHandlers,
+  removeKernelBootOutputListener,
   removeKernelMemoryListener,
 } from "./ipc-register-kernels";
 import { registerModulesIpcHandlers } from "./ipc-register-modules";
@@ -36,7 +38,10 @@ import { shouldBumpOnSwap } from "./mcp/generation-guard";
 import { KernelManager } from "./kernel-manager";
 import { ModuleManager } from "./module-manager";
 import { bindProjectModulesToTree } from "./module-runtime";
-import { syncUvEnvironmentForLoad } from "./project-file-sync";
+import { syncPkgEnvironmentForLoad, syncUvEnvironmentForLoad } from "./project-file-sync";
+import { instantiateJuliaEnvironment } from "./julia-env";
+import { resolveJuliaShim } from "./julia-discovery";
+import { checkJuliaVersionForLoad } from "./juliaup-runner";
 import {
   ProjectManager,
   type ProjectModuleImport,
@@ -61,6 +66,7 @@ import {
   PDVConfig,
   type ActiveEnvironmentInfo,
   type McpStatus,
+  type ProjectFailedNode,
 } from "./ipc";
 import { uvSync } from "./uv-runner";
 import { PDVMessage, PDVMessageType, setAppVersion } from "./pdv-protocol";
@@ -266,7 +272,9 @@ async function ensureScriptFile(scriptPath: string, language: "python" | "julia"
       `  created by ${user} on ${host} on ${date} at ${time}\n` +
       "  Description: add your script description here.\n" +
       "=#\n\n" +
-      "function run(pdv_tree::Dict)\n" +
+      // pdv_tree is a PDVTree — an AbstractDict subtype, not a concrete Dict —
+      // so the annotation must be AbstractDict for dispatch to accept it.
+      "function run(pdv_tree::AbstractDict; kwargs...)\n" +
       "    # add your code here\n" +
       "    return Dict()\n" +
       "end\n"
@@ -289,9 +297,9 @@ async function ensureScriptFile(scriptPath: string, language: "python" | "julia"
  * their own helpers.
  *
  * @param libPath - Absolute path to the target ``.py`` / ``.jl`` file.
- * @param language - Active kernel language (only Python is actually
- *   supported by the ``tree:createLib`` handler today; Julia falls back
- *   to a block-comment equivalent for future-proofing).
+ * @param language - Active kernel language. Python stubs are plain modules;
+ *   Julia stubs wrap a ``module <stem> ... end`` so the include-based lib
+ *   loader can bind and re-export them.
  * @param moduleAlias - Top-level tree alias of the owning PDVModule (if
  *   any), so the stub can reference it in the header.
  */
@@ -321,12 +329,18 @@ async function ensureLibFile(
       `  ${filename}\n` +
       `  ${context}\n` +
       `  created by ${user} on ${host} on ${date} at ${time}\n` +
-      "=#\n\n" +
-      "# Define helper functions below — they will be importable from\n" +
-      `# sibling scripts as \`using ${path.parse(filename).name}\`.\n\n` +
+      "=#\n" +
+      // The lib loader (`load_lib_file!`) includes this file into Main and
+      // binds `Main.<stem>` — the module wrapper is what makes the lib's
+      // exports visible to sibling scripts, so it must not be removed.
+      `module ${path.parse(filename).name}\n\n` +
+      "# Define helper functions below — exported names become available\n" +
+      "# in sibling scripts automatically.\n\n" +
+      "# export example\n" +
       "# function example(x)\n" +
       "#     return x\n" +
-      "# end\n"
+      "# end\n\n" +
+      `end # module ${path.parse(filename).name}\n`
     : '"""\n' +
       `${filename}\n` +
       `${context}\n` +
@@ -488,11 +502,18 @@ export function registerIpcHandlers(
     },
   });
 
+  // Shared between the kernel and tree registrars: gives each double-click
+  // handler invoke a real console entry (measured duration, routed output).
+  const handlerInvokeTracker = new HandlerInvokeTracker((channel, payload) => {
+    if (!win.isDestroyed()) win.webContents.send(channel, payload);
+  });
+
   registerKernelIpcHandlers({
     win,
     kernelManager,
     commRouter,
     queryRouter,
+    handlerInvokeTracker,
     projectManager,
     moduleManager,
     kernelWorkingDirs,
@@ -563,6 +584,7 @@ export function registerIpcHandlers(
     kernelManager,
     commRouter,
     queryRouter,
+    handlerInvokeTracker,
     projectManager,
     configStore,
     kernelWorkingDirs,
@@ -627,6 +649,7 @@ export function registerIpcHandlers(
       }
       return "python";
     },
+    getActiveProjectDir: () => activeProjectDir,
     setActiveProjectDir: (dir) => {
       const prevDir = activeProjectDir;
       activeProjectDir = dir;
@@ -679,6 +702,31 @@ export function registerIpcHandlers(
       if (result.synced) await refreshKernelImportCaches();
       return result;
     },
+    // pkg-mode analog (§10.6.6): re-point the running Julia session's project
+    // environment at the opened project and Pkg.instantiate it. No import-
+    // cache refresh exists or is needed on the Julia side.
+    syncPkgEnvironmentForLoad: async (saveDir, workingDir) =>
+      syncPkgEnvironmentForLoad(saveDir, workingDir, {
+        runPkgInstantiate: async (cwd) => {
+          // Prefer the live kernel's binary (already shim-bypassed at
+          // launch); the configured-path and bare-PATH fallbacks must be
+          // resolved here — this was the last spawn site that could hit the
+          // julialauncher shim (§10.7.2, PR #347 review).
+          const juliaPath =
+            (activeKernelId
+              ? kernelEnvMeta.get(activeKernelId)?.interpreterPath
+              : undefined) ??
+            resolveJuliaShim(readConfig(configStore).juliaPath ?? "julia");
+          const result = await instantiateJuliaEnvironment(cwd, juliaPath, {
+            win,
+            pushChannel: IPC.push.envActivity,
+          });
+          return { success: result.success, output: result.output };
+        },
+      }),
+    // Advisory Julia-version assessment on pkg-project open (§10.7.5).
+    checkJuliaVersionForLoad: (saveDir, runningVersion) =>
+      checkJuliaVersionForLoad(saveDir, runningVersion),
     onExplicitSaveCompleted: (saveDir) => {
       void ProjectManager.clearAutosave(saveDir);
       projectManager.resetAutosaveTimer();
@@ -924,6 +972,9 @@ export function registerCommPushForwarding(
         missingFiles: Array.isArray(payload.missing_files)
           ? (payload.missing_files as string[])
           : [],
+        failedNodes: Array.isArray(payload.failed_nodes)
+          ? (payload.failed_nodes as ProjectFailedNode[])
+          : [],
       });
       win.webContents.send(IPC.push.menuAction, { action: "project:save", path: saveDir });
     };
@@ -940,6 +991,7 @@ export function registerCommPushForwarding(
 export function unregisterIpcHandlers(): void {
   removeAllIpcHandlers();
   removeKernelMemoryListener();
+  removeKernelBootOutputListener();
   if (trackedExecutionStateListener) {
     trackedExecutionStateListener.km.removeListener(
       "kernel:executionState",

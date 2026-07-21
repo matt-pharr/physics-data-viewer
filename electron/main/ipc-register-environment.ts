@@ -8,12 +8,22 @@
  * - Environment discovery/installation (`environment:list|check|install|
  *   refresh|activeInfo`) backing the environment selector and the Project
  *   Environment settings tab.
+ * - Julia runtime discovery and PDVKernel installation
+ *   (`environment:juliaList|juliaCheck|juliaInstall`, ARCHITECTURE.md §10.7)
+ *   backing the selector's Julia tab.
+ * - juliaup version management (`environment:juliaupStatus|juliaupAdd|
+ *   juliaupInstall`, §10.7.5): presence check, `juliaup add` acquisition,
+ *   and the one-click juliaup bootstrap — all thin wrappers over
+ *   `juliaup-runner.ts`, streaming over the `installOutput` push channel.
  * - Per-project package management for the Packages tab
  *   (`environment:listPackages|addPackage|removePackage|upgradePackage`,
- *   ARCHITECTURE.md §10.5.13): declared deps paired with installed versions,
- *   and add/remove/upgrade via uv. After each mutation the kernel's
- *   import-finder caches are invalidated so newly installed packages import
- *   without a restart (same mechanism as `pdv.install`, §10.5.11).
+ *   ARCHITECTURE.md §10.5.13 / §10.6.8): declared deps paired with installed
+ *   versions, and add/remove/upgrade. Python sessions mutate via uv
+ *   subprocesses and then invalidate the kernel's import-finder caches so
+ *   newly installed packages import without a restart (§10.5.11); Julia
+ *   sessions run `PDVKernel.install/remove/update` inside the kernel
+ *   (console-bracketed, mirrored to `envActivity`) — no cache step exists
+ *   because Julia needs none.
  * - Reactive missing-module install (`environment:installModule`,
  *   §10.5.12): builds the `pdv.install(...)` code string in the main
  *   process and brackets the run with executeBegin/executeFinish pushes.
@@ -24,13 +34,24 @@
  * - It does not own the `kernelEnvMeta` map; the caller passes it in.
  */
 
-import { BrowserWindow } from "electron";
+import { app, BrowserWindow } from "electron";
 import { randomUUID } from "node:crypto";
 import * as fs from "fs/promises";
 import * as path from "path";
 
 import { ConfigStore, PDVConfig } from "./config";
 import { EnvironmentDetector } from "./environment-detector";
+import {
+  checkJuliaRuntime,
+  clearJuliaRuntimeCache,
+  installPDVKernel,
+  listJuliaRuntimes,
+  listJuliaupChannels,
+  resolveJuliaShim,
+} from "./julia-discovery";
+import { listJuliaProjectPackages } from "./julia-env";
+import { installJuliaup, juliaupAdd, juliaupStatus } from "./juliaup-runner";
+import { plainStreamText } from "./kernel-error-parser";
 import {
   IPC,
   type ActiveEnvironmentInfo,
@@ -129,7 +150,45 @@ export function registerEnvironmentIpcHandlers(
     return EnvironmentDetector.listEnvironmentInfo(config.pythonPath);
   });
 
-  // --- Packages tab (ARCHITECTURE.md §10.5.13) -----------------------------
+  // --- Julia runtime discovery / installation (§10.7) ----------------------
+  // The selector's Refresh reuses juliaList after clearing the cache, so no
+  // separate refresh channel exists: the renderer calls juliaList again.
+
+  handleIpc(IPC.environment.juliaList, async () => {
+    clearJuliaRuntimeCache();
+    return listJuliaRuntimes(configStore.getAll().juliaPath);
+  });
+
+  handleIpc(IPC.environment.juliaCheck, async (_event, juliaPath: string) => {
+    return checkJuliaRuntime(juliaPath);
+  });
+
+  handleIpc(IPC.environment.juliaInstall, async (_event, juliaPath: string) => {
+    return installPDVKernel(resolveJuliaShim(juliaPath), {
+      stagingDir: path.join(app.getPath("userData"), "pdv-julia"),
+      win,
+      pushChannel: IPC.push.installOutput,
+    });
+  });
+
+  // --- juliaup version management (§10.7.5) ---------------------------------
+  // PDV drives the user's juliaup and never bundles one; both acquisition
+  // ops stream over the same installOutput channel the selector already
+  // subscribes to.
+
+  handleIpc(IPC.environment.juliaupStatus, async () => juliaupStatus());
+
+  handleIpc(IPC.environment.juliaupChannels, async () => listJuliaupChannels());
+
+  handleIpc(IPC.environment.juliaupAdd, async (_event, channel: string) => {
+    return juliaupAdd(channel, { win, pushChannel: IPC.push.installOutput });
+  });
+
+  handleIpc(IPC.environment.juliaupInstall, async () => {
+    return installJuliaup({ win, pushChannel: IPC.push.installOutput });
+  });
+
+  // --- Packages tab (ARCHITECTURE.md §10.5.13 / §10.6.8) --------------------
 
   const pkgRunOptions = (): UvRunOptions => {
     const activeKernelId = getActiveKernelId();
@@ -140,6 +199,90 @@ export function registerEnvironmentIpcHandlers(
       binaryPath: readConfig(configStore).uv?.binaryPath,
     };
   };
+
+  /** Language of the active kernel, or null when no kernel is running. */
+  const activeKernelLanguage = (): "python" | "julia" | null => {
+    const activeKernelId = getActiveKernelId();
+    if (!activeKernelId) return null;
+    return kernelManager.getKernel(activeKernelId)?.language ?? null;
+  };
+
+  /**
+   * Run a Packages-tab Pkg operation inside the active Julia kernel
+   * (§10.6.8): `PDVKernel.install`/`remove`/`update` mutate the project's
+   * `Project.toml`/`Manifest.toml` and the live session together, and the
+   * kernel's own execution queue serializes the operation against running
+   * cells. The run is bracketed with executeBegin/executeFinish pushes so
+   * the console logs it (same as §10.5.12 reactive installs), and its
+   * stream output is mirrored over `envActivity` so the Packages tab's
+   * output pane shows it live.
+   *
+   * @param code - The `PDVKernel.<verb>(...)` invocation to execute.
+   * @param label - Console origin label (e.g. `"Add DataFrames"`).
+   * @returns Install-style result; a kernel-side Pkg error resolves with
+   *   `success: false` and the error appended to the output.
+   */
+  const runJuliaPkgOp = async (
+    code: string,
+    label: string,
+  ): Promise<EnvironmentInstallResult> => {
+    const kernelId = getActiveKernelId();
+    if (!kernelId) {
+      return { success: false, output: "No active kernel." };
+    }
+    const workingDir = kernelWorkingDirs.get(kernelId);
+    const transcript = workingDir ? new TranscriptWriter(workingDir) : null;
+    const executionId = randomUUID();
+    const origin = { kind: "unknown" as const, label };
+    const start = Date.now();
+    const send = (channel: string, payload: unknown): void => {
+      if (!win.isDestroyed()) win.webContents.send(channel, payload);
+    };
+    const chunks: string[] = [];
+    send(IPC.push.executeBegin, { executionId, code, origin, timestamp: start });
+    try {
+      const result = await executeAndTranscribe(
+        kernelManager.execute.bind(kernelManager),
+        transcript,
+        kernelId,
+        { code, executionId, origin },
+        (chunk) => {
+          send(IPC.push.executeOutput, chunk);
+          if ((chunk.type === "stdout" || chunk.type === "stderr") && chunk.text) {
+            // The console gets the raw chunk (it renders ANSI); the tab's
+            // <pre> pane gets plain text (§10.8's standard normalization).
+            const plain = plainStreamText(chunk.text);
+            if (plain) {
+              chunks.push(plain);
+              send(IPC.push.envActivity, { stream: chunk.type, data: plain });
+            }
+          }
+        },
+      );
+      send(IPC.push.executeFinish, {
+        executionId,
+        duration: result.duration ?? Date.now() - start,
+        error: result.error,
+        errorDetails: result.errorDetails,
+      });
+      return {
+        success: !result.error,
+        output: chunks.join("") + (result.error ? `\n${result.error}` : ""),
+      };
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      send(IPC.push.executeFinish, {
+        executionId,
+        duration: Date.now() - start,
+        error: message,
+      });
+      return { success: false, output: chunks.join("") + `\n${message}` };
+    }
+  };
+
+  /** Quote package names as a Julia argument list (`"A", "B"`). */
+  const juliaArgList = (names: string[]): string =>
+    names.map((n) => JSON.stringify(n)).join(", ");
 
   const refreshKernelImportCaches = async (): Promise<void> => {
     const activeKernelId = getActiveKernelId();
@@ -159,6 +302,10 @@ export function registerEnvironmentIpcHandlers(
     if (!activeKernelId) return [];
     const workingDir = kernelWorkingDirs.get(activeKernelId);
     if (!workingDir) return [];
+    // Julia pkg-mode projects (§10.6.8): deps from Project.toml/Manifest.toml.
+    if (activeKernelLanguage() === "julia") {
+      return listJuliaProjectPackages(workingDir);
+    }
     let pyprojectText: string;
     try {
       pyprojectText = await fs.readFile(path.join(workingDir, "pyproject.toml"), "utf8");
@@ -188,9 +335,19 @@ export function registerEnvironmentIpcHandlers(
     });
   });
 
+  // Mutations: Julia sessions run Pkg inside the kernel (§10.6.8 — no
+  // import-cache refresh needed, Julia has none); Python sessions go
+  // through uv subprocesses (§10.5.13).
+
   handleIpc(
     IPC.environment.addPackage,
     async (_event, specs: string[]): Promise<EnvironmentInstallResult> => {
+      if (activeKernelLanguage() === "julia") {
+        return runJuliaPkgOp(
+          `PDVKernel.install(${juliaArgList(specs)})`,
+          `Add ${specs.join(", ")}`,
+        );
+      }
       const result = await uvAdd(specs, pkgRunOptions());
       if (result.success) await refreshKernelImportCaches();
       return { success: result.success, output: result.output };
@@ -200,6 +357,12 @@ export function registerEnvironmentIpcHandlers(
   handleIpc(
     IPC.environment.removePackage,
     async (_event, names: string[]): Promise<EnvironmentInstallResult> => {
+      if (activeKernelLanguage() === "julia") {
+        return runJuliaPkgOp(
+          `PDVKernel.remove(${juliaArgList(names)})`,
+          `Remove ${names.join(", ")}`,
+        );
+      }
       const result = await uvRemove(names, pkgRunOptions());
       if (result.success) await refreshKernelImportCaches();
       return { success: result.success, output: result.output };
@@ -209,6 +372,12 @@ export function registerEnvironmentIpcHandlers(
   handleIpc(
     IPC.environment.upgradePackage,
     async (_event, names: string[]): Promise<EnvironmentInstallResult> => {
+      if (activeKernelLanguage() === "julia") {
+        return runJuliaPkgOp(
+          `PDVKernel.update(${juliaArgList(names)})`,
+          `Update ${names.join(", ")}`,
+        );
+      }
       const opts = pkgRunOptions();
       const lock = await uvLockUpgrade(names, opts);
       if (!lock.success) return { success: false, output: lock.output };
@@ -229,10 +398,16 @@ export function registerEnvironmentIpcHandlers(
   handleIpc(
     IPC.environment.installModule,
     async (_event, kernelId: string, moduleName: string): Promise<void> => {
-      if (!kernelManager.getKernel(kernelId)) {
+      const kernel = kernelManager.getKernel(kernelId);
+      if (!kernel) {
         throw new Error(`Kernel not found: ${kernelId}`);
       }
-      const code = `pdv.install(${JSON.stringify(moduleName)})`;
+      // Language-appropriate install invocation (§2.4, §10.5.12): Julia
+      // kernels delegate to Pkg via PDVKernel.install.
+      const code =
+        kernel.language === "julia"
+          ? `PDVKernel.install(${JSON.stringify(moduleName)})`
+          : `pdv.install(${JSON.stringify(moduleName)})`;
       const origin = { kind: "unknown" as const, label: `Install ${moduleName}` };
       const workingDir = kernelWorkingDirs.get(kernelId);
       const transcript = workingDir ? new TranscriptWriter(workingDir) : null;

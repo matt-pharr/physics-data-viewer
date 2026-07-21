@@ -389,6 +389,15 @@ export interface PDVProjectSaveResponsePayload {
   autosave_cache_hits?: number;
   /** Tree paths whose backing files were missing at save time. */
   missing_files?: string[];
+  /**
+   * Nodes the kernel could not serialize at all — even the pickle/jls
+   * fallback refused (running Task, lambda, open handle). The save
+   * proceeded without them; each entry names the skipped tree path, the
+   * value's type, the serializer error, and whether the node's prior
+   * on-disk snapshot was carried forward in the index (`preserved`, review
+   * M1) so a reload restores the last saved value instead of losing it.
+   */
+  failed_nodes?: Array<{ path: string; type: string; error: string; preserved?: boolean }>;
 }
 
 // ---------------------------------------------------------------------------
@@ -467,7 +476,7 @@ export interface PDVFileRegisterPayload {
   /** 12-hex-character UUID for the node's storage directory. */
   uuid?: string;
   /** Node type classification for the file. */
-  node_type: "namelist" | "lib" | "file";
+  node_type: "namelist" | "lib" | "file" | "dataset_file" | "hdf5_file";
   /** Optional explicit tree node name. When omitted the kernel derives it from filename. */
   name?: string;
   /** Optional module ID that owns this file node. */
@@ -506,6 +515,14 @@ const NodeKind = {
   MARKDOWN: "markdown",
   DATASET: "dataset",
   DATAARRAY: "dataarray",
+  /** File-backed lazy NetCDF node (PDVDataset). */
+  DATASET_FILE: "dataset_file",
+  /** File-backed lazy HDF5 node (PDVHdf5). */
+  HDF5_FILE: "hdf5_file",
+  /** Virtual child: a group inside an open HDF5 file (runtime-only). */
+  HDF5_GROUP: "hdf5_group",
+  /** Virtual child: a dataset inside an open HDF5 file (runtime-only). */
+  HDF5_DATASET: "hdf5_dataset",
 } as const;
 
 /** Union of all valid node `type` values in tree descriptors. */
@@ -560,14 +577,20 @@ export interface NodeDescriptor {
   /** Module kernel language. Present when type is "module". */
   module_language?: "python" | "julia";
   /** True when this node lives inside a parent the tree-mutation
-   *  handlers can't address by key — currently a list, tuple, or
-   *  ``xarray.Dataset``. The renderer uses this to hide structural
+   *  handlers can't address by key — a list, tuple, or any virtual
+   *  container (live ``xarray.Dataset``, file-backed PDVDataset/PDVHdf5
+   *  nodes, HDF5 groups). The renderer uses this to hide structural
    *  mutation actions (rename / move / duplicate / delete) on those
-   *  rows: list/tuple keys are positional, and Dataset variables live
+   *  rows: list/tuple keys are positional, and virtual children live
    *  inside an opaque container the kernel-side handlers don't traverse
    *  for mutation. The flag is *not* about value mutability — the
    *  underlying value may still be mutable through normal Python access. */
   parent_is_opaque?: boolean;
+  /** True when this row is a coordinate of a dataset parent (live
+   *  ``xarray.Dataset`` or file-backed PDVDataset). Coordinates render
+   *  with a distinct marker so grids are distinguishable from data
+   *  variables; the node is otherwise a normal ``dataarray`` row. */
+  is_coord?: boolean;
 }
 
 // ---------------------------------------------------------------------------

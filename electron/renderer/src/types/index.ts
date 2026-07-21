@@ -13,6 +13,10 @@ import type {
   EnvironmentInfo,
   EnvironmentInstallResult,
   InstallOutputChunk,
+  JuliaRuntimeInfo,
+  JuliaupChannel,
+  JuliaupStatus,
+  JuliaVersionLoadCheck,
   LauncherCheck,
   KernelExecutionError,
   KernelExecutionOrigin,
@@ -63,6 +67,10 @@ export type {
   EnvironmentInfo,
   EnvironmentInstallResult,
   InstallOutputChunk,
+  JuliaRuntimeInfo,
+  JuliaupChannel,
+  JuliaupStatus,
+  JuliaVersionLoadCheck,
   KernelExecutionError,
   KernelExecutionOrigin,
   KernelExecuteResult,
@@ -164,6 +172,7 @@ export interface TreeNodeData
     | 'module_description'
     | 'module_language'
     | 'parent_is_opaque'
+    | 'is_coord'
   > {
   type: NodeDescriptor['type'] | 'root';
   parentPath: string | null;
@@ -181,6 +190,10 @@ export interface TreeNodeData
    *  rename / move / duplicate / delete on this row. See the wire field
    *  ``parent_is_opaque`` on ``NodeDescriptor`` for the full contract. */
   parentIsOpaque?: boolean;
+  /** True when this row is a coordinate of a dataset parent — renders
+   *  with a `coord` chip marker and muted styling. Wire field
+   *  ``is_coord`` on ``NodeDescriptor``. */
+  isCoord?: boolean;
   children?: TreeNodeData[];
   isExpanded?: boolean;
   isLoading?: boolean;

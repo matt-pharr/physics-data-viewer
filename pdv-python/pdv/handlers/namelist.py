@@ -153,8 +153,11 @@ def handle_namelist_write(msg: dict) -> None:
 def handle_file_register(msg: dict) -> None:
     """Handle the ``pdv.file.register`` message.
 
-    Creates a file-backed tree node (PDVNamelist, or generic PDVFile)
-    at the specified parent path.
+    Creates a file-backed tree node (PDVNamelist, PDVLib, PDVDataset,
+    PDVHdf5, or generic PDVFile) at the specified parent path. When
+    ``node_type`` is omitted (or ``"file"``), NetCDF/HDF5 extensions
+    auto-detect to the typed data nodes — same rules as
+    :func:`pdv.add_file`.
 
     Expected payload
     ----------------
@@ -166,6 +169,9 @@ def handle_file_register(msg: dict) -> None:
             "node_type": "namelist"
         }
 
+    ``node_type`` is one of ``"namelist"``, ``"lib"``,
+    ``"dataset_file"``, ``"hdf5_file"``, or ``"file"`` (the default).
+
     Response type: ``pdv.file.register.response``
 
     Parameters
@@ -176,8 +182,15 @@ def handle_file_register(msg: dict) -> None:
     import os  # noqa: PLC0415
 
     from pdv.comms import send_message  # noqa: PLC0415
+    from pdv.environment import preimport_data_libs  # noqa: PLC0415
     from pdv.handlers._helpers import validate_register_request  # noqa: PLC0415
-    from pdv.tree import PDVFile, PDVLib, PDVNamelist  # noqa: PLC0415
+    from pdv.tree import (  # noqa: PLC0415
+        PDVDataset,
+        PDVFile,
+        PDVHdf5,
+        PDVLib,
+        PDVNamelist,
+    )
 
     msg_id = msg.get("msg_id")
     validated = validate_register_request(
@@ -203,11 +216,19 @@ def handle_file_register(msg: dict) -> None:
         node_name = explicit_name
     else:
         node_name = os.path.splitext(filename)[0]
-        # Handle double extensions like .gui.json
+        # Handle double extensions like .gui.json. ``splitext`` treats a
+        # leading-dot name (".bashrc", ".env.local") as all-stem, so strip
+        # only while the stem keeps shrinking -- the unconditional loop spun
+        # forever on dotfiles, pegging comm dispatch until kernel restart
+        # (PR #347 second review; same fix in pdv-julia).
         while "." in node_name:
-            node_name = os.path.splitext(node_name)[0]
-    # Sanitize: replace characters invalid in tree paths
-    node_name = node_name.replace("-", "_").replace(" ", "_")
+            shorter = os.path.splitext(node_name)[0]
+            if shorter == node_name:
+                break
+            node_name = shorter
+    # Sanitize: replace characters invalid in tree paths. Dots are tree-path
+    # separators, so a dotfile stem (".bashrc") must not survive either.
+    node_name = node_name.replace("-", "_").replace(" ", "_").replace(".", "_")
 
     full_path = f"{tree_path}.{node_name}" if tree_path else node_name
 
@@ -226,12 +247,47 @@ def handle_file_register(msg: dict) -> None:
             module_id=module_id,
             source_rel_path=source_rel_path,
         )
-    else:
-        node = PDVFile(
+    elif node_type == "dataset_file":
+        preimport_data_libs("xarray")
+        node = PDVDataset(
             uuid=node_uuid,
             filename=filename,
             source_rel_path=source_rel_path,
         )
+    elif node_type == "hdf5_file":
+        preimport_data_libs("h5py")
+        node = PDVHdf5(
+            uuid=node_uuid,
+            filename=filename,
+            source_rel_path=source_rel_path,
+        )
+    else:
+        # Auto-detect scientific data files by extension — the GUI Add
+        # File flow sends node_type "file", so a dropped .nc/.h5 becomes
+        # a lazily-read data node. Same rules as pdv.add_file.
+        from pdv import DATASET_EXTENSIONS, HDF5_EXTENSIONS  # noqa: PLC0415
+
+        ext = os.path.splitext(filename)[1].lower()
+        if ext in DATASET_EXTENSIONS:
+            preimport_data_libs("xarray")
+            node = PDVDataset(
+                uuid=node_uuid,
+                filename=filename,
+                source_rel_path=source_rel_path,
+            )
+        elif ext in HDF5_EXTENSIONS:
+            preimport_data_libs("h5py")
+            node = PDVHdf5(
+                uuid=node_uuid,
+                filename=filename,
+                source_rel_path=source_rel_path,
+            )
+        else:
+            node = PDVFile(
+                uuid=node_uuid,
+                filename=filename,
+                source_rel_path=source_rel_path,
+            )
 
     tree[full_path] = node
 

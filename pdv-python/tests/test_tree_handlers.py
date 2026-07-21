@@ -203,6 +203,21 @@ class TestRename:
         assert send_error.call_args[0][1] == "tree.invalid_name"
         send_message.assert_not_called()
 
+    def test_rename_rejects_sequence_child(self, tree_with_comm):
+        """A list child is index-addressed: renaming it would replace the
+        whole list with a dict holding only the renamed element (PR #347
+        review). The renderer never offers this; MCP agent tools reach it."""
+        from pdv.handlers.tree import handle_tree_rename
+
+        tree_with_comm["vec"] = [10, 20, 30]
+        send_message, send_error = _run_handler(
+            handle_tree_rename, {"path": "vec.1", "new_name": "elem"}, tree_with_comm
+        )
+        send_error.assert_called_once()
+        assert send_error.call_args[0][1] == "tree.not_a_container"
+        send_message.assert_not_called()
+        assert tree_with_comm["vec"] == [10, 20, 30]  # untouched
+
 
 class TestMove:
     """move handler: re-parent a node, plus circular/duplicate guards."""
@@ -261,6 +276,102 @@ class TestMove:
         send_error.assert_called_once()
         assert send_error.call_args[0][1] == "tree.same_path"
         send_message.assert_not_called()
+
+    def test_move_rejects_sequence_child(self, tree_with_comm):
+        """Same guard as rename for the SOURCE parent: a list child cannot be
+        key-deleted from its parent (PR #347 review)."""
+        from pdv.handlers.tree import handle_tree_move
+
+        tree_with_comm["vec"] = [10, 20, 30]
+        send_message, send_error = _run_handler(
+            handle_tree_move, {"path": "vec.1", "new_path": "loose"}, tree_with_comm
+        )
+        send_error.assert_called_once()
+        assert send_error.call_args[0][1] == "tree.not_a_container"
+        send_message.assert_not_called()
+        assert tree_with_comm["vec"] == [10, 20, 30]
+        assert "loose" not in tree_with_comm
+
+
+class TestFileRegister:
+    """file.register stem derivation (PR #347 second review)."""
+
+    def test_dotfile_filenames_terminate_and_sanitize(self, tree_with_comm):
+        """The stem-strip loop spun forever on leading-dot names (splitext
+        treats ``.bashrc`` as all-stem), pegging comm dispatch until kernel
+        restart; and a surviving dot must not become a path separator."""
+        from pdv.handlers.namelist import handle_file_register
+        from pdv.tree import PDVFile
+
+        send_message, send_error = _run_handler(
+            handle_file_register,
+            {"tree_path": "", "filename": ".bashrc", "node_type": "file"},
+            tree_with_comm,
+        )
+        send_error.assert_not_called()
+        assert isinstance(tree_with_comm["_bashrc"], PDVFile)
+
+        _run_handler(
+            handle_file_register,
+            {"tree_path": "", "filename": ".env.local", "node_type": "file"},
+            tree_with_comm,
+        )
+        assert isinstance(tree_with_comm["_env"], PDVFile)
+
+    def test_double_extension_strips_to_stem(self, tree_with_comm):
+        from pdv.handlers.namelist import handle_file_register
+        from pdv.tree import PDVFile
+
+        _run_handler(
+            handle_file_register,
+            {"tree_path": "", "filename": "layout.gui.json", "node_type": "file"},
+            tree_with_comm,
+        )
+        assert isinstance(tree_with_comm["layout"], PDVFile)
+
+    def test_explicit_dataset_and_hdf5_node_types(self, tree_with_comm):
+        from pdv.handlers.namelist import handle_file_register
+        from pdv.tree import PDVDataset, PDVHdf5
+
+        send_message, send_error = _run_handler(
+            handle_file_register,
+            {
+                "tree_path": "",
+                "filename": "sim.out",
+                "node_type": "dataset_file",
+            },
+            tree_with_comm,
+        )
+        send_error.assert_not_called()
+        assert isinstance(tree_with_comm["sim"], PDVDataset)
+
+        _run_handler(
+            handle_file_register,
+            {"tree_path": "", "filename": "raw.bin", "node_type": "hdf5_file"},
+            tree_with_comm,
+        )
+        assert isinstance(tree_with_comm["raw"], PDVHdf5)
+
+    def test_default_node_type_autodetects_by_extension(self, tree_with_comm):
+        """GUI Add File sends node_type 'file' — .nc/.h5 files must still
+        become lazily-read data nodes (same rules as pdv.add_file)."""
+        from pdv.handlers.namelist import handle_file_register
+        from pdv.tree import PDVDataset, PDVFile, PDVHdf5
+
+        cases = [
+            ("gpec_output.nc", "gpec_output", PDVDataset),
+            ("scan.cdf", "scan", PDVDataset),
+            ("efit.h5", "efit", PDVHdf5),
+            ("run.hdf5", "run", PDVHdf5),
+            ("readme.txt", "readme", PDVFile),
+        ]
+        for filename, key, expected_cls in cases:
+            _run_handler(
+                handle_file_register,
+                {"tree_path": "", "filename": filename, "node_type": "file"},
+                tree_with_comm,
+            )
+            assert type(tree_with_comm[key]) is expected_cls, filename
 
 
 class TestDuplicate:
@@ -362,6 +473,34 @@ class TestRelocateFiles:
         from pdv.handlers.tree import _relocate_single_file
         with pytest.raises(TypeError, match="Expected PDVFile"):
             _relocate_single_file("not_a_file", "/tmp", copy=False)
+
+    def test_relocate_closes_data_node_handle(self, tmp_working_dir):
+        """Duplicating a PDVHdf5 must drop its cached handle before the
+        UUID swap — otherwise later reads hit the old file's handle."""
+        h5py = pytest.importorskip("h5py")
+        import numpy as np
+
+        from pdv.handlers.tree import _relocate_single_file
+        from pdv.tree import PDVHdf5
+
+        node_uuid = "reloc_uuid04"
+        tree_dir = os.path.join(tmp_working_dir, "tree", node_uuid)
+        os.makedirs(tree_dir)
+        with h5py.File(os.path.join(tree_dir, "d.h5"), "w") as f:
+            f.create_dataset("x", data=np.arange(3))
+
+        node = PDVHdf5(uuid=node_uuid, filename="d.h5")
+        node.resolve_path(tmp_working_dir)
+        # Open against the OLD uuid path.
+        handle = h5py.File(node.resolve_path(tmp_working_dir), "r")
+        node._handle = handle
+
+        _relocate_single_file(node, tmp_working_dir, copy=True)
+
+        assert node.uuid != node_uuid
+        assert node._handle is None
+        assert not handle.id.valid  # old handle actually closed
+        assert os.path.exists(node.resolve_path(tmp_working_dir))
 
     def test_relocate_files_recursive_copy(self, tmp_working_dir):
         """Recursive duplicate assigns fresh UUIDs to file-backed descendants."""

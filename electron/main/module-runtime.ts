@@ -109,13 +109,30 @@ export function toPythonArgumentValue(value: ModuleInputValue): string | null {
 }
 
 /**
+ * Render a JS string as a Julia double-quoted string literal.
+ *
+ * `JSON.stringify` covers quotes, backslashes, and control characters, but
+ * Julia additionally treats `$` inside double-quoted literals as
+ * interpolation — a LaTeX-ish value like `"$\\alpha$ scan"` would be a
+ * parse error or, worse, silently splice a kernel variable into the string
+ * (PR #347 review M4). Every main-process site that embeds a string into
+ * Julia code must go through this helper, never bare `JSON.stringify`.
+ *
+ * @param value - The exact string the kernel should receive.
+ * @returns A Julia literal that evaluates back to `value`.
+ */
+export function juliaStringLiteral(value: string): string {
+  return JSON.stringify(value).replace(/\$/g, "\\$$");
+}
+
+/**
  * Convert one module input value into a Julia argument expression.
  *
  * Mirrors {@link toPythonArgumentValue} but emits Julia syntax:
  * - booleans → `true` / `false`
  * - numeric strings → passed through as-is
  * - Julia keywords (`true`, `false`, `nothing`) → passed through
- * - other strings → JSON-encoded double-quoted literals
+ * - other strings → double-quoted literals via {@link juliaStringLiteral}
  *
  * @param value - Raw value from module settings/UI state.
  * @returns Julia expression string, or null when the value is empty/invalid.
@@ -140,8 +157,7 @@ export function toJuliaArgumentValue(value: ModuleInputValue): string | null {
   if (trimmed === "true" || trimmed === "false" || trimmed === "nothing") {
     return trimmed;
   }
-  // JSON.stringify produces a safe, double-quoted Julia string literal.
-  return JSON.stringify(trimmed);
+  return juliaStringLiteral(trimmed);
 }
 
 /**
@@ -159,11 +175,12 @@ export function buildModuleActionCode(
   kwargs: string[],
   language: "python" | "julia"
 ): string {
-  const treePath = JSON.stringify(`${moduleAlias}.scripts.${scriptName}`);
   if (language === "julia") {
+    const treePath = juliaStringLiteral(`${moduleAlias}.scripts.${scriptName}`);
     const argStr = kwargs.length > 0 ? `; ${kwargs.join(", ")}` : "";
     return `PDVKernel.run_tree_script(pdv_tree, ${treePath}${argStr})`;
   }
+  const treePath = JSON.stringify(`${moduleAlias}.scripts.${scriptName}`);
   const argStr = kwargs.length > 0 ? `(${kwargs.join(", ")})` : "()";
   return `pdv_tree[${treePath}].run${argStr}`;
 }

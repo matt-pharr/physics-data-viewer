@@ -57,8 +57,8 @@ interface SettingsDialogProps {
    *  caller can prompt about unsaved changes before the app restarts. */
   onInstallUpdate?: () => void;
   envWarning?: string | null;
-  /** Active environment mode — drives the Project Environment tab content (§10.5.13). */
-  environmentMode?: 'uv' | 'shared';
+  /** Active environment mode — drives the Project Environment tab content (§10.5.13 / §10.6.8). */
+  environmentMode?: 'uv' | 'shared' | 'pkg';
   /**
    * True when a kernel session is up (`ready`). Gates the Runtime tab into
    * default-runtime-only mode: selections update the global config for

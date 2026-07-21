@@ -153,33 +153,53 @@ export async function copyFilesForLoad(
 }
 
 /**
- * uv environment files that travel between the save dir and working dir.
- * `.python-version` is uv's native interpreter pin, written at project
+ * Python (uv) environment files that travel between the save dir and working
+ * dir. `.python-version` is uv's native interpreter pin, written at project
  * creation from the New Project dialog's version choice; carrying it here
  * makes the pinned version survive save → open round-trips.
  */
-const ENV_FILES = ["pyproject.toml", "uv.lock", ".python-version"];
+const PYTHON_ENV_FILES = ["pyproject.toml", "uv.lock", ".python-version"];
 
 /**
- * Copy uv environment files (`pyproject.toml`, `uv.lock`,
- * `.python-version`) from the project save directory into the kernel
- * working directory.
+ * Julia (Pkg) environment files that travel between the save dir and working
+ * dir (ARCHITECTURE.md §10.6.2). There is no third pin file: the Julia
+ * version is recorded inside `Manifest.toml` itself.
+ */
+const JULIA_ENV_FILES = ["Project.toml", "Manifest.toml"];
+
+/**
+ * The env-file set for a session language (§10.5.3 / §10.6.2).
  *
- * Called for `mode: "uv"` projects before `uv sync` so the working directory
- * is a self-contained uv project (ARCHITECTURE.md §10.5.3, §10.5.9). Files
+ * @param language - Kernel language of the session.
+ * @returns Relative env-file names for that language.
+ */
+function envFilesFor(language: "python" | "julia"): string[] {
+  return language === "julia" ? JULIA_ENV_FILES : PYTHON_ENV_FILES;
+}
+
+/**
+ * Copy environment files from the project save directory into the kernel
+ * working directory — `pyproject.toml`/`uv.lock`/`.python-version` for
+ * Python, `Project.toml`/`Manifest.toml` for Julia.
+ *
+ * Called for `mode: "uv"` projects before `uv sync` (ARCHITECTURE.md
+ * §10.5.3, §10.5.9) and for `mode: "pkg"` projects before `Pkg.instantiate`
+ * (§10.6.6) so the working directory is a self-contained project. Files
  * absent from the save directory are skipped silently.
  *
  * @param saveDir - Project save directory (source).
  * @param workingDir - Kernel working directory (destination).
+ * @param language - Session language selecting the env-file set (default python).
  * @returns Relative names of the files that were copied.
  * @throws {Error} For any I/O error other than a missing source file.
  */
 export async function copyEnvFilesForLoad(
   saveDir: string,
-  workingDir: string
+  workingDir: string,
+  language: "python" | "julia" = "python"
 ): Promise<string[]> {
   const copied: string[] = [];
-  for (const name of ENV_FILES) {
+  for (const name of envFilesFor(language)) {
     try {
       await fs.copyFile(path.join(saveDir, name), path.join(workingDir, name));
       copied.push(name);
@@ -191,9 +211,8 @@ export async function copyEnvFilesForLoad(
 }
 
 /**
- * Copy uv environment files (`pyproject.toml`, `uv.lock`,
- * `.python-version`) from the kernel working directory back into the
- * project save directory (§10.5.10).
+ * Copy environment files from the kernel working directory back into the
+ * project save directory (§10.5.10 / §10.6.7).
  *
  * Only files present in the working directory are copied — a project whose
  * `uv sync` failed may have no `uv.lock`, and a missing working-dir file must
@@ -201,15 +220,17 @@ export async function copyEnvFilesForLoad(
  *
  * @param workingDir - Kernel working directory (source).
  * @param saveDir - Project save directory (destination).
+ * @param language - Session language selecting the env-file set (default python).
  * @returns Relative names of the files that were copied.
  * @throws {Error} For any I/O error other than a missing source file.
  */
 export async function copyEnvFilesForSave(
   workingDir: string,
-  saveDir: string
+  saveDir: string,
+  language: "python" | "julia" = "python"
 ): Promise<string[]> {
   const copied: string[] = [];
-  for (const name of ENV_FILES) {
+  for (const name of envFilesFor(language)) {
     try {
       await fs.copyFile(path.join(workingDir, name), path.join(saveDir, name));
       copied.push(name);
@@ -221,16 +242,21 @@ export async function copyEnvFilesForSave(
 }
 
 /**
- * Compare every env file between two directories, byte for byte. Files
- * missing from both sides count as matching; a file present on only one
- * side does not.
+ * Compare every env file in a set between two directories, byte for byte.
+ * Files missing from both sides count as matching; a file present on only
+ * one side does not.
  *
  * @param dirA - First directory.
  * @param dirB - Second directory.
- * @returns True when all of `ENV_FILES` are identical across the two dirs.
+ * @param files - Relative env-file names to compare.
+ * @returns True when all of `files` are identical across the two dirs.
  */
-async function envFilesMatch(dirA: string, dirB: string): Promise<boolean> {
-  for (const name of ENV_FILES) {
+async function envFilesMatch(
+  dirA: string,
+  dirB: string,
+  files: string[] = PYTHON_ENV_FILES
+): Promise<boolean> {
+  for (const name of files) {
     let a: Buffer | null = null;
     let b: Buffer | null = null;
     try {
@@ -349,6 +375,70 @@ export async function syncUvEnvironmentForLoad(
       warning:
         "uv sync failed while updating the session environment for this project — " +
         "its packages may be unavailable until the environment is repaired.",
+    };
+  }
+  return { copied, synced: true };
+}
+
+/**
+ * Julia analog of {@link syncUvEnvironmentForLoad} for `mode: "pkg"`
+ * projects (ARCHITECTURE.md §10.6.6): bring a running pkg session's
+ * environment in line with a project being opened into it.
+ *
+ * Same shape and rationale as the uv variant, with two simplifications:
+ * there is no interpreter-pin ABI guard (Julia recompiles native code per
+ * version rather than breaking, so a version mismatch is at most a console
+ * warning elsewhere), and no post-sync import-cache refresh is needed.
+ * With `JULIA_PROJECT` already pointing at the working dir, copying the
+ * project's `Project.toml`/`Manifest.toml` over it re-homes the live
+ * session's environment; `Pkg.instantiate` then fetches anything the depot
+ * is missing.
+ *
+ * Steps:
+ * 1. No-op (empty result) when the save dir has no `Project.toml` — a
+ *    legacy/shared-mode Julia save; the environment is left untouched.
+ *    Note the previous project's env files then remain in the working dir
+ *    (removing them under a live `JULIA_PROJECT` kernel is unsafe); the
+ *    save handler's manifest-based mode guard keeps that residue from
+ *    being stamped onto the legacy project at save time (PR #347 review).
+ * 2. Short-circuit (synced, nothing copied) when the env files already
+ *    match byte-for-byte — the standard fresh-session open.
+ * 3. Copy `Project.toml`/`Manifest.toml` from the save dir over the
+ *    working dir's, then run the injected `Pkg.instantiate`.
+ *
+ * @param saveDir - Project save directory being opened.
+ * @param workingDir - Active kernel's working directory.
+ * @param options - Injected instantiate runner (a `julia-env.ts` wrapper).
+ * @returns Copy/sync outcome plus an optional user-facing warning.
+ * @throws {Error} Only for unexpected I/O errors while copying env files.
+ */
+export async function syncPkgEnvironmentForLoad(
+  saveDir: string,
+  workingDir: string,
+  options: {
+    runPkgInstantiate: (cwd: string) => Promise<{ success: boolean; output: string }>;
+  },
+): Promise<LoadEnvSyncResult> {
+  try {
+    await fs.access(path.join(saveDir, "Project.toml"));
+  } catch {
+    return { copied: [], synced: false };
+  }
+
+  if (await envFilesMatch(saveDir, workingDir, JULIA_ENV_FILES)) {
+    return { copied: [], synced: true };
+  }
+
+  const copied = await copyEnvFilesForLoad(saveDir, workingDir, "julia");
+
+  const sync = await options.runPkgInstantiate(workingDir);
+  if (!sync.success) {
+    return {
+      copied,
+      synced: false,
+      warning:
+        "Pkg.instantiate failed while updating the session environment for this " +
+        "project — its packages may be unavailable until the environment is repaired.",
     };
   }
   return { copied, synced: true };

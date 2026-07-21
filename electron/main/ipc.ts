@@ -58,6 +58,10 @@ export type {
 import type { UpdateStatus } from "./auto-updater";
 export type { UpdateStatus } from "./auto-updater";
 export type { EnvironmentInfo, EnvironmentInstallResult, InstallOutputChunk } from "./environment-detector";
+import type { JuliaRuntimeInfo, JuliaupChannel } from "./julia-discovery";
+export type { JuliaRuntimeInfo, JuliaupChannel } from "./julia-discovery";
+import type { JuliaupStatus, JuliaVersionLoadCheck } from "./juliaup-runner";
+export type { JuliaupStatus, JuliaVersionLoadCheck } from "./juliaup-runner";
 import type { EnvironmentConfig } from "./project-manager";
 export type { EnvironmentConfig } from "./project-manager";
 
@@ -355,7 +359,7 @@ export const IPC = {
     read: "guiEditor:read",
     save: "guiEditor:save",
   },
-  /** Python environment discovery and installation channels. */
+  /** Python + Julia environment discovery and installation channels. */
   environment: {
     list: "environment:list",
     check: "environment:check",
@@ -378,6 +382,20 @@ export const IPC = {
      * pushes so the console streams the install live.
      */
     installModule: "environment:installModule",
+    /** Julia runtime discovery (§10.7.1): juliaup channels + system locations. */
+    juliaList: "environment:juliaList",
+    /** Re-probe a single Julia path (§10.7.3), bypassing the discovery cache. */
+    juliaCheck: "environment:juliaCheck",
+    /** One-click PDVKernel + IJulia install into a runtime's default env (§10.7.4). */
+    juliaInstall: "environment:juliaInstall",
+    /** Is the user's juliaup installed, and where (§10.7.5)? */
+    juliaupStatus: "environment:juliaupStatus",
+    /** Installed juliaup channels, filesystem-only — instant (§10.7.1). */
+    juliaupChannels: "environment:juliaupChannels",
+    /** Acquire a Julia version: `juliaup add <channel>`, streamed (§10.7.5). */
+    juliaupAdd: "environment:juliaupAdd",
+    /** Bootstrap juliaup via the official installer script, streamed (§10.7.5). */
+    juliaupInstall: "environment:juliaupInstall",
   },
   /** Native file/directory picker channels. */
   files: {
@@ -1450,6 +1468,24 @@ export interface KernelMemoryPayload {
 }
 
 /**
+ * A tree node the kernel could not serialize during a save (Julia kernels
+ * only: `Serialization` refuses more values than pickle). The save proceeded
+ * without it; `preserved` reports whether the prior on-disk snapshot of the
+ * node was carried forward (so a reload restores the last saved value)
+ * rather than lost.
+ */
+export interface ProjectFailedNode {
+  /** Tree path of the node that failed to serialize. */
+  path?: string;
+  /** Node type name (e.g. the Julia value's type). */
+  type?: string;
+  /** Serializer error message. */
+  error?: string;
+  /** True when the node's previous saved snapshot was kept in the index. */
+  preserved?: boolean;
+}
+
+/**
  * Result returned from `project.save()`.
  */
 export interface ProjectSaveResult {
@@ -1461,6 +1497,8 @@ export interface ProjectSaveResult {
   projectName?: string;
   /** Tree paths of file-backed nodes whose backing files were missing during save. */
   missingFiles?: string[];
+  /** Nodes skipped because they could not be serialized (save still completed). */
+  failedNodes?: ProjectFailedNode[];
 }
 
 /**
@@ -1487,6 +1525,13 @@ export interface ProjectLoadResult {
    * Surfaced in the renderer's "Project loaded" console entry.
    */
   envSyncWarning?: string;
+  /**
+   * Present when a pkg-mode Julia project was resolved with a different
+   * Julia minor than the session is running (§10.7.5). The renderer either
+   * points at the installed matching channel or offers to `juliaup add` it;
+   * the load itself always proceeds (§10.6.6 — never a block).
+   */
+  juliaVersionCheck?: JuliaVersionLoadCheck;
 }
 
 /**
@@ -1509,17 +1554,22 @@ export interface ProjectManifestPeek {
 }
 
 /**
- * Extra context passed to `kernels.start` when opening a `mode: "uv"`
- * project. Its presence tells the main process to materialize the project's
- * uv environment (working dir + `uv sync` + `pdv-python`) and launch the
- * kernel against the venv interpreter (§10.5.9).
+ * Extra context passed to `kernels.start` when opening a per-project-
+ * environment session. For Python its presence tells the main process to
+ * materialize the project's uv environment (working dir + `uv sync` +
+ * `pdv-python`) and launch the kernel against the venv interpreter (§10.5.9).
+ * For Julia it selects pkg mode (§10.6): copy/seed `Project.toml` +
+ * `Manifest.toml` into the working dir, launch the kernel with
+ * `JULIA_PROJECT` pointing at it, and `Pkg.instantiate` on open.
+ * `pythonVersion`/`packages` are Python-only.
  */
 export interface KernelUvContext {
-  /** Opening an existing uv project: copy its env files from this save dir. */
+  /** Opening an existing uv/pkg project: copy its env files from this save dir. */
   saveDir?: string;
   /**
-   * Creating a brand-new uv project: seed `pyproject.toml` from the user's
-   * default packages (§10.5.8) rather than copying from a save directory.
+   * Creating a brand-new project: seed `pyproject.toml` from the user's
+   * default packages (§10.5.8, Python) or write an empty `Project.toml`
+   * (§10.6.5, Julia) rather than copying from a save directory.
    */
   newProject?: boolean;
   /**
@@ -1530,11 +1580,22 @@ export interface KernelUvContext {
    */
   pythonVersion?: string;
   /**
-   * Initial PEP 508 dependency specs for a new project's `pyproject.toml`,
-   * chosen in the New Project dialog. Only meaningful with `newProject`;
-   * when absent, the user's global default packages are used.
+   * Initial dependency specs for a new project, chosen in the New Project
+   * dialog. Only meaningful with `newProject`. Python: PEP 508 specs for
+   * `pyproject.toml` (when absent, the user's global default packages are
+   * used). Julia: package names (optionally `Name@version`-pinned) added
+   * to the fresh project environment via `Pkg.add` (§10.6.5).
    */
   packages?: string[];
+  /**
+   * Julia minor for a new pkg-mode project, chosen in the New Julia
+   * Project dialog (e.g. `"1.10"`). The main process makes it launchable
+   * before the kernel spawns — `juliaup add` when not installed, plus the
+   * §10.7.4 PDVKernel install into its default env when needed — streaming
+   * over `envActivity` (§10.6.5). Only meaningful with `newProject`; must
+   * be one of `SUPPORTED_JULIA_VERSIONS`.
+   */
+  juliaVersion?: string;
 }
 
 /**
@@ -1556,12 +1617,17 @@ export interface KernelRestartResult {
  * kernel is active.
  */
 export interface ActiveEnvironmentInfo {
-  /** Whether the session runs in a uv-managed project venv or a shared env. */
-  mode: "uv" | "shared";
+  /**
+   * Whether the session runs in a uv-managed project venv (`"uv"`), a
+   * Pkg-managed Julia project environment (`"pkg"`, §10.6), or a shared env.
+   */
+  mode: "uv" | "shared" | "pkg";
   /** Interpreter the kernel actually spawned on (venv python for uv mode). */
   interpreterPath?: string;
   /** Resolved `major.minor` Python version of that interpreter. */
   pythonVersion?: string;
+  /** Resolved Julia version of the session, pkg mode only (e.g. `"1.11.6"`). */
+  juliaVersion?: string;
 }
 
 /**
@@ -1963,7 +2029,7 @@ export interface PDVApi {
       kernelId: string,
       sourcePath: string,
       targetTreePath: string,
-      nodeType: "namelist" | "lib" | "file",
+      nodeType: "namelist" | "lib" | "file" | "dataset_file" | "hdf5_file",
       filename: string
     ): Promise<TreeAddFileResult>;
     /**
@@ -2325,7 +2391,7 @@ export interface PDVApi {
     onProgress(callback: (payload: ProgressPayload) => void): () => void;
   };
 
-  /** Python environment discovery and installation. */
+  /** Python + Julia environment discovery and installation. */
   environment: {
     /**
      * List all detected Python environments with package installation status.
@@ -2425,6 +2491,68 @@ export interface PDVApi {
      * @param moduleName - Top-level module name to install.
      */
     installModule(kernelId: string, moduleName: string): Promise<void>;
+    /**
+     * List all discovered Julia runtimes with PDVKernel/IJulia status
+     * (§10.7.1): juliaup channels (default first), the configured path, and
+     * well-known system locations — every entry shim-resolved to a real
+     * versioned binary.
+     *
+     * @returns Enriched runtime info array, ordered by priority.
+     */
+    listJulia(): Promise<JuliaRuntimeInfo[]>;
+    /**
+     * Re-probe a single Julia executable, bypassing the discovery cache
+     * (§10.7.3) — used after Browse and to refresh badges post-install.
+     *
+     * @param juliaPath - Path to the Julia executable to check.
+     * @returns Enriched runtime info, or null if the path is not a working Julia.
+     */
+    checkJulia(juliaPath: string): Promise<JuliaRuntimeInfo | null>;
+    /**
+     * Install PDVKernel (bundled source, `Pkg.develop` of a staged copy)
+     * and IJulia into a Julia runtime's default environment (§10.7.4).
+     *
+     * Streams Pkg output via the `installOutput` push channel. Subscribe
+     * to `onInstallOutput` before calling this method to receive live chunks.
+     *
+     * @param juliaPath - Target Julia executable.
+     * @returns Install result with success flag and full output.
+     */
+    installJulia(juliaPath: string): Promise<EnvironmentInstallResult>;
+    /**
+     * Report whether the user's juliaup is installed and where (§10.7.5).
+     * The selector gates its version-management affordances on this.
+     *
+     * @returns The current {@link JuliaupStatus}.
+     */
+    juliaupStatus(): Promise<JuliaupStatus>;
+    /**
+     * List the installed juliaup channels, filesystem-only (§10.7.1) —
+     * instant, no probing. Feeds the New Julia Project dialog's version
+     * dropdown (§10.6.5).
+     *
+     * @returns Installed channels (default first); empty when juliaup is
+     *   not installed.
+     */
+    juliaupChannels(): Promise<JuliaupChannel[]>;
+    /**
+     * Acquire a Julia version with the user's juliaup
+     * (`juliaup add <channel>`, §10.7.5). Streams ANSI-stripped output via
+     * the `installOutput` push channel — subscribe with `onInstallOutput`
+     * before calling to receive live chunks.
+     *
+     * @param channel - juliaup channel (`"1.10"`, `"lts"`, `"1.10.4"`, ...).
+     * @returns Install result with success flag and full output.
+     */
+    juliaupAdd(channel: string): Promise<EnvironmentInstallResult>;
+    /**
+     * Bootstrap juliaup via the official installer script (§10.7.5), which
+     * also installs a default Julia. Streams output via the
+     * `installOutput` push channel.
+     *
+     * @returns Install result with success flag and full output.
+     */
+    installJuliaup(): Promise<EnvironmentInstallResult>;
   };
 
   /** App configuration accessors. */
@@ -2501,15 +2629,31 @@ export interface PDVApi {
      * Check if autosave data exists for a given directory.
      *
      * @param dir - Project save directory to check.
-     * @returns Whether autosave data exists and its timestamp.
+     * @returns Whether autosave data exists, its timestamp, and the kernel
+     *   language recorded in the sidecar manifest (absent for pre-sidecar
+     *   autosaves; callers default to python).
      */
-    check(dir: string): Promise<{ exists: boolean; timestamp?: string }>;
+    check(dir: string): Promise<{
+      exists: boolean;
+      timestamp?: string;
+      language?: "python" | "julia";
+    }>;
     /**
      * Scan working directories for orphaned autosave data (unsaved projects).
      *
-     * @returns List of working dirs containing .autosave/ data.
+     * @returns List of working dirs containing .autosave/ data, each with the
+     *   kernel language from its sidecar manifest so recovery can boot the
+     *   matching kernel (a Python kernel cannot load jls-format nodes), and
+     *   the per-project environment mode when the orphan holds env files
+     *   (`pyproject.toml` → `"uv"`, `Project.toml` → `"pkg"`) so recovery
+     *   can boot the kernel with that environment active.
      */
-    scanWorkingDirs(): Promise<{ dir: string; timestamp: string }[]>;
+    scanWorkingDirs(): Promise<{
+      dir: string;
+      timestamp: string;
+      language?: "python" | "julia";
+      envMode?: "uv" | "pkg";
+    }[]>;
     /**
      * Recover an unsaved session from an orphaned working dir's `.autosave/`.
      *
@@ -2842,6 +2986,13 @@ export interface PDVApi {
     supportedPythonVersions: readonly string[];
     /** Version preselected in the New Project dialog (e.g. `"3.13"`). */
     defaultPythonVersion: string;
+    /**
+     * Julia minor versions offered by the New Julia Project dialog, oldest
+     * first. Compile-time constant from `julia-versions.ts` (§10.6.5).
+     */
+    supportedJuliaVersions: readonly string[];
+    /** Fallback preselected Julia version when no juliaup default applies. */
+    defaultJuliaVersion: string;
   };
 
   /** External-app launchers driven by the action bar. */

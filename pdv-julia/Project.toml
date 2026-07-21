@@ -1,0 +1,32 @@
+name = "PDVKernel"
+uuid = "8f4a2c1e-7b3d-4e5f-9a6b-2c8d1e0f3a7b"
+version = "0.2.0"
+
+[deps]
+Base64 = "2a0f44e3-6c83-55bd-87e4-b1978d98bd5f"
+Dates = "ade2ca70-3891-5945-98fb-dc099432e06a"
+IJulia = "7073ff75-c697-5162-941a-fcdaad2a7d2a"
+JSON = "682c06a0-de6a-54ab-a142-c8b1cf79cde6"
+Logging = "56ddb016-857b-54e1-b83d-db4d58db5568"
+NPZ = "15e1cf62-19b3-5cfa-8e77-841668bca605"
+Pkg = "44cfe95a-1eb2-52ea-b672-e2afdf69b78f"
+SHA = "ea8e919c-243c-51af-8825-aaa63cd721ce"
+Serialization = "9e88b42a-f829-5b0c-bbe9-9e923198166b"
+TOML = "fa267f1f-6049-4f14-aa54-33bafae1ed76"
+UUIDs = "cf7118a7-6976-5b1a-9a39-7adc72f591a4"
+ZMQ = "c2297ded-f4af-51ae-bb23-16f91089e4e1"
+
+[compat]
+IJulia = "1.24"
+JSON = "0.21, 1"
+NPZ = "0.4"
+ZMQ = "1.2"
+julia = "1.10"
+
+[extras]
+Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
+DataFrames = "a93c6f00-e57d-5684-b7b6-d8193f3e46c0"
+HDF5 = "f67ccb44-e63f-5c2f-98bd-6dc0ccc4ba2f"
+
+[targets]
+test = ["Test", "DataFrames", "HDF5"]

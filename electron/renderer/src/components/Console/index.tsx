@@ -22,15 +22,30 @@ interface ConsoleProps {
 }
 
 /**
- * Extract the top-level package name from a `ModuleNotFoundError`, or null.
+ * Extract the missing package from a failed-import error, or null.
+ *
+ * Detects Python's `ModuleNotFoundError` ("No module named 'x'") and Julia's
+ * `ArgumentError` ("Package X not found in current path"). The returned
+ * `installer` label matches the invocation the main process will build for
+ * the active kernel language (§10.5.12).
  *
  * @param log - The console log entry.
- * @returns The missing top-level module name, or null when not applicable.
+ * @returns The missing top-level module name and installer label, or null.
  */
-function missingModuleName(log: LogEntry): string | null {
-  if (log.errorDetails?.name !== 'ModuleNotFoundError') return null;
-  const match = /No module named ['"]([\w.]+)['"]/.exec(log.errorDetails.message ?? '');
-  return match ? match[1].split('.')[0] : null;
+function missingModuleName(log: LogEntry): { name: string; installer: string } | null {
+  const message = log.errorDetails?.message ?? '';
+  if (log.errorDetails?.name === 'ModuleNotFoundError') {
+    const match = /No module named ['"]([\w.]+)['"]/.exec(message);
+    return match ? { name: match[1].split('.')[0], installer: 'pdv.install' } : null;
+  }
+  // Julia: `ArgumentError: Package Foo not found in current path.` — often
+  // surfaced wrapped (`LoadError: ArgumentError: …`), so match the message
+  // pattern rather than the error name.
+  const juliaMatch = /ArgumentError: Package\s+([A-Za-z_][\w]*)\s+not found in current path/.exec(message);
+  if (juliaMatch) {
+    return { name: juliaMatch[1], installer: 'PDVKernel.install' };
+  }
+  return null;
 }
 
 /** Pixels of slack at the bottom that still count as "pinned". Larger
@@ -175,10 +190,10 @@ const LogEntryView: React.FC<{
         <div className="log-install-action">
           <button
             className="btn btn-secondary"
-            onClick={() => onInstallPackage(missingModule)}
+            onClick={() => onInstallPackage(missingModule.name)}
             title="Install the missing package into this project's environment"
           >
-            Install with pdv.install("{missingModule}")
+            Install with {missingModule.installer}("{missingModule.name}")
           </button>
         </div>
       )}

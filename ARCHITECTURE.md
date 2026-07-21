@@ -36,7 +36,7 @@ PDV is an Electron desktop application for computational and experimental physic
 - A **persistent project data model** (the Tree — a live, hierarchical data object in a language kernel)
 - **Scripted, reusable analysis workflows** (scripts stored as tree nodes)
 - **Markdown notes** (first-class tree nodes with KaTeX math preview, edited in a dedicated Write tab)
-- **Multi-language backend support** (Python first; Julia planned, currently deferred)
+- **Multi-language backend support** (Python via `pdv-python` + ipykernel; Julia via `pdv-julia` (the `PDVKernel.jl` package) + IJulia — see §5.14)
 
 The defining characteristic that separates PDV from a Jupyter notebook is the **Tree**: a persistent, navigable, typed data hierarchy that lives in the kernel namespace and is the single authority on all project data. Users explore it via a graphical tree panel, store analysis results in it, attach scripts to it, and save/load it as part of a project.
 
@@ -95,7 +95,7 @@ PDV uses the standard Electron three-process architecture:
 - Manage lazy loading of tree node data from the save directory
 
 ### 2.4 What the Main Process Does NOT Do
-- The main process does not construct arbitrary Python or Julia business logic and send it via `execute_request`. All structured data exchange between the main process and the kernel happens via the PDV comm protocol (see Section 3). The well-defined exceptions are minimal invocation strings whose output must flow through the standard Jupyter iopub stream so it appears in the console: (1) the **bootstrap snippet** in `kernel-session.ts` that initializes `pdv_tree` at startup (a one-time init, not business logic); (2) the **script invocation string** built by the `script:run` IPC handler (`pdv_tree["path"].run(kwargs)`); (3) the **print invocation** built by the `tree:print` IPC handler (`print(pdv_tree[...])` / Julia `println(...)`); and (4) the **install invocation** built by the `environment:installModule` IPC handler (`pdv.install("<module>")`, §10.5.12). These strings are always built in the main process — the renderer sends only structured requests and never contains Python or Julia code.
+- The main process does not construct arbitrary Python or Julia business logic and send it via `execute_request`. All structured data exchange between the main process and the kernel happens via the PDV comm protocol (see Section 3). The well-defined exceptions are minimal invocation strings whose output must flow through the standard Jupyter iopub stream so it appears in the console: (1) the **bootstrap snippet** in `kernel-session.ts` that initializes `pdv_tree` at startup (a one-time init, not business logic); (2) the **script invocation string** built by the `script:run` IPC handler (`pdv_tree["path"].run(kwargs)`); (3) the **print invocation** built by the `tree:print` IPC handler (`print(pdv_tree[...])` / Julia's size-limited `show(IOContext(stdout, :limit => true), MIME("text/plain"), ...)`); and (4) the **install invocation** built by the `environment:installModule` IPC handler (`pdv.install("<module>")`, §10.5.12). These strings are always built in the main process — the renderer sends only structured requests and never contains Python or Julia code.
 - The main process does not scan the filesystem to build the tree. The kernel is the sole tree authority.
 
 ---
@@ -161,7 +161,7 @@ All type strings are namespaced with `pdv.`. The convention is `pdv.<domain>.<ac
 | `pdv.project.load` | app → kernel | Instructs the kernel to load a project from a save directory. Payload: `{ save_dir, tree_index_dir? }`. When `tree_index_dir` is present and exists, the kernel reads `tree-index.json` from there instead of `save_dir`; used by autosave recovery to overlay an autosaved tree (see §8.4). |
 | `pdv.project.loaded` | kernel → app | Sent after the tree is fully populated from a project load. No `in_reply_to` (push notification). |
 | `pdv.project.save` | app → kernel | Instructs the kernel to serialize the tree to the save directory. Payload: `{ save_dir, is_autosave?, clear_cache? }`. When `is_autosave: true` the kernel consults its per-node checksum cache and reuses unchanged-data descriptors (see §8.4). `clear_cache: true` wipes the cache before saving (used after the user discards a stale `.autosave/`). |
-| `pdv.project.save.response` | kernel → app | Confirms save completed. Payload: `{ node_count, checksum, aborted, module_owned_files, module_manifests, missing_files, autosave_cache_hits }`. `module_owned_files` lists every file-backed node that belongs to a `PDVModule` (see §5.9) so the main process can mirror working-dir edits into `<saveDir>/modules/<id>/<source_rel_path>`. `module_manifests` carries per-module metadata + module-root-relative node descriptors for writing `pdv-module.json` and `module-index.json` under each module dir. Both fields are empty arrays when the tree contains no `PDVModule` nodes. `missing_files` lists tree paths of file-backed nodes whose backing files were missing during serialization; these nodes are skipped rather than pickled. A non-empty `missing_files` (equivalently `aborted: true`) means the save was **aborted before `tree-index.json` was written** — the previous index stays in place, `checksum` is empty, and the main process responds by skipping its own `code-cells.json`/`project.json` writes while the renderer surfaces a "Save blocked" error. `autosave_cache_hits` reports how many nodes were reused from the cache (only meaningful when the request set `is_autosave: true`). |
+| `pdv.project.save.response` | kernel → app | Confirms save completed. Payload: `{ node_count, checksum, aborted, module_owned_files, module_manifests, missing_files, failed_nodes, autosave_cache_hits }`. `failed_nodes` lists `{ path, type, error }` entries for values that even the pickle/`Serialization` fallback could not write (running tasks, open handles, lambdas); such nodes are skipped — the save still succeeds without them and the main process logs a warning. `module_owned_files` lists every file-backed node that belongs to a `PDVModule` (see §5.9) so the main process can mirror working-dir edits into `<saveDir>/modules/<id>/<source_rel_path>`. `module_manifests` carries per-module metadata + module-root-relative node descriptors for writing `pdv-module.json` and `module-index.json` under each module dir. Both fields are empty arrays when the tree contains no `PDVModule` nodes. `missing_files` lists tree paths of file-backed nodes whose backing files were missing during serialization; these nodes are skipped rather than pickled. A non-empty `missing_files` (equivalently `aborted: true`) means the save was **aborted before `tree-index.json` was written** — the previous index stays in place, `checksum` is empty, and the main process responds by skipping its own `code-cells.json`/`project.json` writes while the renderer surfaces a "Save blocked" error. `autosave_cache_hits` reports how many nodes were reused from the cache (only meaningful when the request set `is_autosave: true`). |
 | `pdv.project.clear_autosave_cache` | app → kernel | Instructs the kernel to drop its in-memory `_autosave_cache`. Empty payload. Sent eagerly when the user clicks *Clear autosave data* so the kernel can't reuse descriptors whose backing files were just deleted from `<saveDir>/.autosave/tree/`. The `clear_cache: true` flag on `pdv.project.save` is the in-band fallback if this comm fails (kernel disconnected/busy); see §8.4. |
 | `pdv.project.clear_autosave_cache.response` | kernel → app | Confirms cache reset. Empty payload. |
 
@@ -240,7 +240,7 @@ These are read-only and served both on the main comm channel and the QueryServer
 | `pdv.modules.setup` | app → kernel | Add lib file parent directories to `sys.path` and import entry points. Payload: `{ modules: [{ lib_paths: string[], lib_dir?: string, entry_point?: string }] }`. Sent after module import and on kernel start/restart. |
 | `pdv.modules.setup.response` | kernel → app | Confirms module setup with handler registry. |
 | `pdv.handler.invoke` | app → kernel | Dispatch a registered handler for a tree node. Payload: `{ path }`. |
-| `pdv.handler.invoke.response` | kernel → app | Returns handler dispatch result. |
+| `pdv.handler.invoke.response` | kernel → app | Returns handler dispatch result. The main process wraps each invoke in a Console entry (`handler-invoke-tracker.ts`): the comm round-trip is the handler's measured wall-clock duration, and the handler's comm-parented iopub output (inline figures, `[PDV]` notices) is routed into the entry while the invoke is in flight. Figures with no invoke in flight still surface as synthetic "Plot" entries. |
 
 #### Namelist Messages
 
@@ -250,7 +250,7 @@ These are read-only and served both on the main comm channel and the QueryServer
 | `pdv.namelist.read.response` | kernel → app | Parsed namelist data. |
 | `pdv.namelist.write` | app → kernel | Write structured data back to a `PDVNamelist` backing file. Payload: `{ tree_path, data }`. |
 | `pdv.namelist.write.response` | kernel → app | Confirms write success. |
-| `pdv.file.register` | app → kernel | Register a file-backed tree node (`PDVNamelist`, `PDVLib`, or `PDVFile`). Payload: `{ tree_path, filename, node_type, name?, module_id?, source_rel_path? }`. When `node_type` is `"lib"`, creates a `PDVLib` node. `source_rel_path` is set by the module bind path and by `tree:createLib` / `tree:createScript` / `tree:createGui` when the target lives inside a known module alias; see §5.13. |
+| `pdv.file.register` | app → kernel | Register a file-backed tree node (`PDVNamelist`, `PDVLib`, `PDVDataset`, `PDVHdf5`, or `PDVFile`). Payload: `{ tree_path, filename, node_type, name?, module_id?, source_rel_path? }`. `node_type` is one of `"namelist"`, `"lib"`, `"dataset_file"`, `"hdf5_file"`, or `"file"` (default); with `"file"`, NetCDF/HDF5 extensions auto-detect to the typed data nodes (§5.8.1). Julia kernels support the HDF5 half only — `"hdf5_file"` and `.h5`/`.hdf5` autodetect map to Julia's `PDVHdf5`; `.nc` stays a plain `PDVFile` (no Julia `PDVDataset` yet). `source_rel_path` is set by the module bind path and by `tree:createLib` / `tree:createScript` / `tree:createGui` when the target lives inside a known module alias; see §5.13. |
 | `pdv.file.register.response` | kernel → app | Confirms file registration with resulting path. |
 
 #### Progress Messages
@@ -508,7 +508,7 @@ pdv/
     environment.py       # Path utilities, working dir management, project root logic
     errors.py            # PDVError, PDVPathError, PDVKeyError, PDVProtectedNameError, PDVSerializationError, PDVScriptError, PDVVersionError
     modules.py           # Custom type handler registry and dispatch (@pdv.handle() decorator)
-    default_handlers.py  # Built-in double-click plot handlers for np.ndarray, pd.Series/DataFrame, xr.DataArray
+    default_handlers.py  # Built-in double-click plot handlers for np.ndarray, pd.Series/DataFrame, xr.DataArray, h5py.Dataset
     namelist_utils.py    # Fortran namelist and TOML parsing utilities
     checksum.py          # Content-based XXH3-128 Merkle-tree checksum for PDVTree (tree_checksum())
     tree_loader.py       # Shared two-pass tree-index loader used by project.load and module.register handlers
@@ -533,7 +533,7 @@ pdv/
 1. Registers the `pdv.kernel` comm target with IPython
 2. Injects `pdv_tree` into the IPython user namespace via a custom namespace class that blocks reassignment
 3. Configures an interactive matplotlib backend (or patches `plt.show()` for inline emission when none is available)
-4. Arranges the built-in double-click plot handlers to register **lazily**: the handler-registry lookups in `pdv.modules` (`has_handler_for`, `dispatch_handler`) call `pdv.default_handlers.register_defaults()`, which registers per-library defaults once numpy / pandas / xarray actually appear in `sys.modules`. Bootstrap itself imports none of them — eager imports cost real startup latency and undercut the never-import-xarray design in `serialization.py`, and a tree value can only *be* one of these types if its library is already imported. Per-type behavior: `np.ndarray` 1D → `ax.plot`, 2D → `ax.imshow` + colorbar, 0D/>2D → printed notice; `pd.Series` and `pd.DataFrame` → their built-in `.plot()`; `xr.DataArray` → its built-in `.plot()` (which dispatches 1D → line, 2D → pcolormesh, >2D → histogram by ndim). A value that cannot actually be plotted (e.g. a non-numeric `pd.Series` or an object-dtype array) closes its half-built figure and prints a `[PDV]` notice rather than raising — a raised exception would reach the renderer as an opaque `internal.error`. `xr.Dataset` is intentionally not registered — users drill into a specific `data_var`
+4. Arranges the built-in double-click plot handlers to register **lazily**: the handler-registry lookups in `pdv.modules` (`has_handler_for`, `dispatch_handler`) call `pdv.default_handlers.register_defaults()`, which registers per-library defaults once numpy / pandas / xarray actually appear in `sys.modules`. Bootstrap itself imports none of them — eager imports cost real startup latency and undercut the never-import-xarray design in `serialization.py`, and a tree value can only *be* one of these types if its library is already imported. Per-type behavior: `np.ndarray` 1D → `ax.plot`, 2D → `ax.imshow` + colorbar, 0D/>2D → printed notice; complex arrays (any source) split into parts — 1D plots labeled `Re`/`Im` lines on one axes, 2D shows side-by-side `Re`/`Im` `imshow` panels each with its own colorbar (the parts routinely span different ranges); `h5py.Dataset` → materialized (under a 100 MB cap with a slice-it-in-code notice) and drawn with the same array logic; `pd.Series` and `pd.DataFrame` → their built-in `.plot()`; `xr.DataArray` → its built-in `.plot()` (which dispatches 1D → line, 2D → pcolormesh, >2D → histogram by ndim). A value that cannot actually be plotted (e.g. a non-numeric `pd.Series` or an object-dtype array) closes its half-built figure and prints a `[PDV]` notice rather than raising — a raised exception would reach the renderer as an opaque `internal.error`. `xr.Dataset` is intentionally not registered — users drill into a specific `data_var`
 5. Sends the `pdv.ready` comm message
 
 `bootstrap()` must be idempotent — calling it twice must not open a second comm or re-inject variables. `register_defaults()` is likewise safe to call any number of times: each library's defaults register once, and a default never overwrites an existing registration, so a user handler for the same type wins regardless of registration order.
@@ -587,7 +587,7 @@ All other `pdv_*` names in the namespace are an error. Internal implementation f
 
 A lightweight wrapper stored as a tree node value. Attributes:
 - `relative_path`: path of the script file relative to the project root
-- `language`: `'python'` (Julia deferred)
+- `language`: `'python'` or `'julia'`
 - `doc`: first line of the script's module docstring (for preview display)
 
 Note: `params` (the `ScriptParameter` array) is **not** stored as a class attribute. It is computed on-demand by `_extract_script_params()` at registration time and via the `pdv.script.params` comm handler, and included in `pdv.tree.list` responses. Extraction parses the script with `ast` — it never imports or executes the module, so a UI param fetch cannot trigger the script's top-level side effects. Literal defaults come back as real values; non-literal defaults (e.g. `np.pi`) fall back to their source text. See below for the descriptor shape.
@@ -617,6 +617,21 @@ Rules:
 - All remaining parameters become the user-facing script parameters surfaced in the `ScriptDialog`. They may have default values and type hints.
 - The return value must be a `dict` (or `None`). Non-dict returns are ignored.
 
+Julia scripts follow the same contract with keyword parameters (`pdv_tree` is a
+`PDVTree`, an `AbstractDict` subtype — annotate `::AbstractDict`, not `::Dict`):
+
+```julia
+function run(pdv_tree::AbstractDict; amplitude::Float64 = 1.0, sigma::Float64 = 0.1)
+    data = pdv_tree["waveforms.ch1"]
+    # ... analysis ...
+    return Dict("fit_amplitude" => amplitude)
+end
+```
+
+Only keyword parameters are user-facing on Julia (positional parameters cannot be
+supplied by name at invocation); `pdv.script.params` extracts them by parsing the
+source with `Meta.parseall`, never executing it — same rule as the Python `ast` path.
+
 #### ScriptParameter Descriptor
 
 When a `PDVScript` is constructed (at registration time), `pdv` inspects the `run()` function's signature via `inspect.signature` and extracts all parameters except `pdv_tree`. Each becomes a `ScriptParameter` descriptor stored on the `PDVScript` and included in the `NodeDescriptor` returned by `pdv.tree.list.response`:
@@ -636,7 +651,7 @@ A parameter is `required` if it has no default value. `type` is the string repre
 
 ### 5.8 PDVFile and PDVNote Classes
 
-`PDVFile` is a base class for tree nodes backed by on-disk files that are not data or scripts. Subclasses include `PDVNote`, `PDVGui`, `PDVNamelist`, and `PDVLib`.
+`PDVFile` is a base class for tree nodes backed by on-disk files that are not data or scripts. Subclasses include `PDVNote`, `PDVGui`, `PDVNamelist`, `PDVLib`, `PDVDataset`, and `PDVHdf5`.
 
 **PDVFile** attributes (inherited by all subclasses):
 - `uuid`: 12-hex-character UUID identifying this node's storage directory (see §6.3)
@@ -650,6 +665,18 @@ A parameter is `required` if it has no default value. `type` is the string repre
 - `preview()`: returns the title, or the first non-empty line of the file, or `"Markdown note"` as fallback
 
 Notes are created via `pdv.note.register` (app → kernel) which creates a `PDVNote` instance and attaches it to the tree. The `.md` file itself lives in `<workingDir>/tree/<uuid>/<filename>` and is read/written directly by the main process via `note:read` / `note:save` IPC channels — no kernel round-trip is needed for content editing. On project save, the kernel serializes the note entry to `tree-index.json` and the main process copies the `.md` file into the save directory. On project load, the `.md` file is copied back from the save directory to the working directory and re-registered as a `PDVNote` in the tree.
+
+#### 5.8.1 PDVDataset and PDVHdf5 (lazy scientific data files)
+
+`PDVDataset` (NetCDF via xarray; kind `dataset_file`) and `PDVHdf5` (general HDF5 via h5py; kind `hdf5_file`) wrap large scientific data files that must never be fully loaded. Both are `PDVFile` subclasses — UUID storage, `smart_copy` import, save-as-copy — with three additional behaviors:
+
+- **Lazy, read-only open.** Construction does no I/O. The backing file opens on first access (`xr.open_dataset(...)` / `h5py.File(path, "r", locking=False)`) and the handle is cached on the node for the session. Both libraries page variable data from disk on demand, so multi-GB files on small machines are fine. Files are strictly read-only through these nodes: to modify data, read a variable into memory and store the result at a normal tree path. `close()` drops the handle (also the retry path after a failed open); `__getstate__` drops it for pickling, so the nodes stay save/deepcopy-safe.
+- **Virtual children.** Expanding the node in the tree panel reads the file header on demand through the virtual-children protocol (§7.2) — variables/coords for `PDVDataset`, the group hierarchy at arbitrary depth for `PDVHdf5`. No header metadata is cached in `tree-index.json`; every listing re-reads from the (cached, open) handle. Dot-paths descend into the file: `tree["efit.data.profiles.pressure"]` and `tree["efit.data"]["profiles/pressure"]` agree.
+- **Deferred dependency checks.** The optional deps (`pdv-python[netcdf]` = xarray + netcdf4; `pdv-python[hdf5]` = h5py) are checked at *open* time, not construction — a project containing these nodes always loads, and expansion without the deps degrades to a `tree.load_error` with a `pdv.install(...)`/pip hint. The explicit import APIs `pdv.add_dataset()` / `pdv.add_hdf5()` check deps *before* the file copy so a missing library fails fast. `pdv.add_file()` and the GUI Add File flow (`pdv.file.register`) auto-detect `.nc`/`.cdf` → `PDVDataset` and `.h5`/`.hdf5` → `PDVHdf5`.
+
+Known limitation: HDF5 object names containing `.` list in the tree but cannot be addressed by dot-path (dots are PDV path separators); use slash-path access from Python (`node["a.b/c"]`). Zarr directory stores are not supported (single-file storage only); tracked as a follow-up.
+
+**Julia kernels ship the HDF5 half.** PDVKernel.jl has its own `PDVHdf5` (`PDVHdf5 <: AbstractPDVFile`, opened via HDF5.jl) with the same kind strings, storage format, wire behavior, and lazy/read-only/deferred-dep contract — `HDF5.jl` is an optional package resolved from the active environment (`PDVKernel.install("HDF5")`), never a PDVKernel dependency. Import via `PDVKernel.add_hdf5(path)` or extension autodetect in `PDVKernel.add_file` / the GUI Add File flow. The virtual-children protocol lives in `pdv-julia/src/virtual.jl` (multiple dispatch on `virtual_adapter` replaces Python's dunder protocol; a predicate registry covers foreign `HDF5.Group` values). Two Julia-specific constraints: all HDF5 I/O happens on the main task only (libhdf5 is not thread-safe; the busy-time query server serves listings from the main-thread snapshot, which memoizes a node's listings per open handle since the backing file is immutable), and there is no Julia `PDVDataset` yet — a Python-authored `dataset_file` node is skipped at load with an "open with a Python session" pointer (JULIA_KNOWN_ISSUES #9 tracks the NCDatasets.jl/DimensionalData.jl question).
 
 ### 5.9 PDVModule Class
 
@@ -754,6 +781,44 @@ PDV has three tiers of module storage:
 **Update**: Modules with an `upstream` URL can check for newer tags and re-install from upstream. Users must re-import into a project to pick up changes.
 
 **Dependency pre-flight**: Before executing a module action, the main process reads the module's `dependencies` list from `pdv-module.json` and sends them to the kernel for validation. Missing dependencies are reported to the user before execution proceeds.
+
+### 5.14 The pdv-julia Package (PDVKernel.jl)
+
+`pdv-julia/` contains **PDVKernel.jl**, the Julia counterpart of `pdv-python`. It implements the same comm protocol (§3), the same message-type catalogue (§3.4), and the same on-disk project format (§6–§8) on top of IJulia, so the Electron side is language-agnostic: the same `CommRouter`/`QueryRouter`, the same `tree-index.json` loader flows, and the same renderer. A Julia session is started by spawning `julia -e "import IJulia; IJulia.run_kernel()" <connection-file>` and executing the `JULIA_BOOTSTRAP` snippet in `kernel-session.ts` (which opens the `pdv.kernel` comm and sends `pdv.ready`, mirroring the Python snippet).
+
+The file layout mirrors `pdv-python` one-to-one (`tree.jl`, `serialization.jl`, `comms.jl`, `query_server.jl`, `checksum.jl`, `tree_loader.jl`, `namespace.jl`, `namelist_utils.jl`, `handlers/…`). Behavioral parity is exact at the wire level; the language-level differences are deliberate translations:
+
+| Concern | pdv-python | pdv-julia |
+|---|---|---|
+| Kernel host | ipykernel | IJulia |
+| Tree type | `PDVTree(dict)` subclass | `PDVTree <: AbstractDict{String,Any}` |
+| Protected `pdv_tree` | `PDVNamespace` blocks reassignment | `const pdv_tree` in `Main` (Julia rejects rebinding a const) |
+| Script contract | `run(pdv_tree, **params) -> dict` | `run(pdv_tree; params...) -> Dict` (keyword-only user params) |
+| Script loading | fresh `importlib` module per run | fresh anonymous `Module` + `Base.include` per run, lib-module exports brought into scope with `using` |
+| Module libs | lib dirs inserted into `sys.path`; entry point imported | lib files `include`d into `Main`; `reload_libs` re-includes (the `importlib.reload` analog) |
+| Double-click handlers | `@pdv.handle(Class)` registry + `__pdv_handle__` dunder | methods on the `pdv_handle(obj, path, tree)` generic function (multiple dispatch) + `register_handler` for foreign types |
+| Default double-click handlers | `default_handlers.py`, lazily gated on `sys.modules` (ndarray → plot, complex arrays → Re/Im split, Series/DataFrame → `.plot()`, DataArray → `.plot()`, `h5py.Dataset` → materialize under a 100 MB cap + array logic) | `default_handlers.jl`, lazily gated on `Base.loaded_modules` (numeric Vector → `lines`, Matrix → `heatmap` via the loaded Makie backend — an installed-but-unloaded CairoMakie is auto-`require`d on first plot, so the §10.5.14 prefill makes fresh-project double-clicks plot without a manual `using`; complex Vector → labeled Re/Im `lines` + `axislegend`, complex Matrix → side-by-side Re/Im `heatmap` panels each with its own `Colorbar`; `HDF5.Dataset` → materialize under the same 100 MB cap + array logic; Makie `Figure`/`FigureAxisPlot` → `display`, `DataFrame` → `display`); Makie figures also gain a lazy `pdv_digest` hashing the rendered pixels so figure digests survive save/load |
+| Custom serializers | `pdv.register_serializer` + `__pdv_format__`/`__pdv_serialize__`/`__pdv_deserialize__` dunders | `register_serializer` + `pdv_format`/`pdv_serialize`/`pdv_deserialize` method protocol |
+| Data formats | ndarray → `.npy`, other data → pickle (`format: "pickle"`) | numeric `Array` → `.npy` (numpy-compatible via NPZ), other data → `Serialization` (`format: "jls"`); scripts/libs are `jl_script`/`jl_lib` |
+| Inline-JSON admission | JSON round-trips Python's str/int/float/bool/None/list/dict faithfully, so anything JSON-encodable inlines | only the JSON-native **fixed point** inlines — `nothing`, `Bool`, `Int64`, finite `Float64`, strings, `Vector{Any}`, `Dict{String,Any}` of the same. Anything narrower or typed (`Int32`, `Float32`, `BitVector`, `Vector{String}`, `Dict{String,Int}`) persists as `.jls`: a JSON reload would widen/retype it silently with an unchanged digest (the checksum feeds numbers width-insensitively), invisible until a strict type annotation MethodErrors (PR #347 review) |
+| Checksum | XXH3-128; unknown values digest via pickled bytes (pickle's memo table handles cyclic objects) | SHA-256 truncated to 128 bits (opaque to the app; same Merkle feeding scheme); unknown structs digest via a cycle-guarded structural field walk (name-based type tags, name-only functions, `Ptr` by type) with a feed budget — exhaustion or a walk error falls back to `Serialization` bytes. Keeps digests round-trip stable for Dict-bearing structs (Julia Dicts rehash on deserialize) and terminates on cyclic GUI objects like Makie figures |
+| Sequence keys in dot-paths | 0-based (`tree["xs.0"]`), negative from end | 1-based (`tree["xs.1"]`), negative from end |
+| Results-bundle display | plain dicts expand as `mapping` nodes | plain Dicts *and* NamedTuples expand as `mapping` nodes (field-name keys, read-only children, dot-path navigable); NamedTuples persist as one `.jls` leaf for type fidelity (§7.2) |
+| Lazy data-file nodes (§5.8.1) | `PDVDataset` (xarray/NetCDF, kind `dataset_file`) + `PDVHdf5` (h5py, kind `hdf5_file`); virtual children via `pdv/virtual.py` dunders + predicate registry | `PDVHdf5` via HDF5.jl (optional package, never a PDVKernel dep; kind/format strings identical); virtual children via `virtual.jl` (`virtual_adapter` multiple dispatch + predicate registry); all HDF5 I/O main-task only, busy-time listings served from the query-cache snapshot with per-open-handle memoization; no `PDVDataset` yet — Python `dataset_file` nodes are skipped at load with an "open with a Python session" pointer (JULIA_KNOWN_ISSUES #9) |
+| Interrupt-safety heal | n/a (no threaded-region counter) | an IJulia **posterror** hook releases leaked `jl_in_threaded_region` increments (Base's `threading_run` lacks try/finally, so interrupting an `@threads` loop otherwise poisons every later `@threads :static` in the session). The heal counts `threading_run` frames in the cell's `InterruptException` backtrace and releases exactly that many — the value is a counter, and a blind clear would underflow it while a background task's live `@threads` legitimately holds an increment |
+| Package installs | `pdv.install()` → `uv add` (uv-mode only) | `PDVKernel.install()` → `Pkg.add` into the active environment — the per-project environment in pkg mode (§10.6), the user's default environment in shared mode |
+| Per-project environments | uv-managed venv from `pyproject.toml` + `uv.lock` (§10.5) | Pkg-managed project from `Project.toml` + `Manifest.toml` (§10.6); activation via `JULIA_PROJECT`, no venv analog — packages live in the shared depot |
+| Runtime discovery + kernel-package install | conda/venv/pyenv/system scan (§10.2); one-click `pip install` of bundled pdv-python (§10.3) | juliaup-channel scan from `juliaup.json`, shim bypass to the real versioned binary (§10.7); one-click `Pkg.develop` of staged pdv-julia + `Pkg.add("IJulia")` into the default environment (§10.7.4) |
+| Runtime version acquisition | bundled uv downloads interpreters on demand (`uv python install`, §10.5.7) | the *user's* juliaup, never bundled (§10.7.5): selector-driven `juliaup add`, one-click juliaup bootstrap via the official script, and a load-time `Manifest.toml` version check with a `juliaup add` offer |
+| Query server | ZMQ REP on a daemon thread (GIL makes concurrent dict reads safe) | ZMQ REP on a **spare interactive-pool** OS thread when one exists (the app spawns Julia with `--threads=auto,2`: the main task holds one interactive thread, the query loop the other). The pool choice is load-bearing — `@threads :static` pins one task per *default*-pool thread, so a resident loop on a default thread would deadlock every `:static` loop in the session; interactive tids are never pinned. The loop never touches libuv (a blocked `ZMQ.recv` starves while the main thread computes) — it polls `sock.events` + `Libc.systemsleep` with a `yield()` per tick (so it can never starve the sticky root task if scheduled onto tid 1), and answers `pdv.tree.list` from a lock-guarded listings snapshot rebuilt on the main thread (debounce flush, postexecute hook, project load) so it never reads live tree values cross-thread. Other query types reply `query.kernel_busy`, which the app converts into a comm-channel fallback. Without a spare interactive thread it degrades to the original cooperative async-task loop |
+| Save-walker rescue | any error → pickle fallback; a value even pickle refuses (lambda, open handle) is skipped and reported in `failed_nodes` | same contract: any error → jls fallback; a value even jls refuses (running `Task`, ...) is skipped and reported in `failed_nodes`. `Serialization` refuses more values than pickle, so this path is far more reachable on Julia |
+| Change debounce | `threading.Timer` (fires mid-execution) | libuv `Timer` (fires at yield points; the renderer's 1 Hz poll is the safety net during tight loops) |
+
+Because saved data formats differ (`pickle` vs `jls`), projects are per-language: `project.json`'s `language` field selects the kernel at open time, and the Julia loader rejects `pickle`-format nodes with a clear "open with a Python session" error (and vice-versa — the Python loader does not know `jls`).
+
+The unified version rule (§ key design rules) extends to Julia: `pdv-julia/Project.toml`'s `version` (and `PDVKernel.VERSION`) must match `electron/package.json` and `pdv-python/pyproject.toml`. The environment detector reads PDVKernel's version via `Base.locate_package` + its `Project.toml` — never `using PDVKernel`, which recompiles when caches are stale (§10.7.3) — and applies the same core-version compatibility rule as for pdv-python.
+
+Testing: `julia --project=pdv-julia -e 'using Pkg; Pkg.test()'` runs the kernel-free unit suite (comm transport stubbed); `JULIA_PATH=<julia> npm test -- main/integration-julia.test.ts` drives a real IJulia kernel through the production bootstrap; `e2e/julia-smoke.spec.ts` (gated on `JULIA_PATH`) drives the full app GUI.
 
 ---
 
@@ -1026,10 +1091,18 @@ The following node types are supported:
 | `sequence` | Python list or tuple | Inline JSON |
 | `dataset` | xarray.Dataset (in-memory) | Pickle |
 | `dataarray` | xarray.DataArray (in-memory) | Pickle |
+| `dataset_file` | `PDVDataset` — lazy file-backed NetCDF dataset (§5.8.1) | `.nc`/`.cdf` file, copied as-is (`storage.format: "netcdf"`) |
+| `hdf5_file` | `PDVHdf5` — lazy file-backed HDF5 file (§5.8.1) | `.h5`/`.hdf5` file, copied as-is (`storage.format: "hdf5"`) |
+| `hdf5_group` | Virtual child: group inside an open HDF5 file | Runtime-only — never written to tree-index.json |
+| `hdf5_dataset` | Virtual child: dataset inside an open HDF5 file | Runtime-only — never written to tree-index.json |
 
 `mapping` and `sequence` containers are expandable in the tree panel. The `pdv.tree.list` handler descends into either kind, returning one descriptor per child. Sequence children carry stringified-int keys (`"0"`, `"1"`, …) and a `parent_is_opaque: true` flag; the renderer suppresses rename / move / duplicate / delete on those rows since the tree-mutation handlers can't address a child by key inside a non-dict parent. Sequence children remain navigable from Python: a numeric segment in a dot-path indexes into a list or tuple value (e.g. `tree["records.0.name"]` resolves through a list of dicts). Negative indices are supported (`tree["xs.-1"]` returns the last element).
 
-`dataset` rows are likewise expandable: `pdv.tree.list` enumerates `ds.data_vars` in insertion order, one `dataarray` child per variable, each tagged with `parent_is_opaque: true` (same suppression semantics as sequence children — the tree-mutation handlers can't address a child by key inside a non-dict parent). Coords are intentionally omitted from the children list to match the OMFIT idiom; their information is implicit in the dim-size preview of each data variable (e.g. `"mode_C: 7, m_singcoup_out: 43"`). Coord values remain reachable via dot-path (`tree["ds.x_coord"]`) because `Dataset.__getitem__` resolves both data_vars and coords by name. `dataarray` is a leaf — DataArrays do not expand further, and dot-paths cannot descend past one (`tree["ds.var.0"]` raises `PDVKeyError`). xarray is an optional dependency; PDV runs unchanged when it isn't installed.
+On Julia sessions, **NamedTuples ride the `mapping` kind** — they are the idiomatic "results bundle" (a nested dictionary in spirit), so they expand in the tree with field-name keys, dot-paths resolve through them (`tree["run.fields.b"]`), and the chip reads `NamedTuple`. Their children carry `parent_is_opaque` (NamedTuples are immutable — no structural mutations), and they persist as a single `.jls` leaf rather than the composite mapping split so the concrete NamedTuple type survives save/load (§10.6-era fidelity rule: a per-child split would reload as a Dict).
+
+**Virtual-children protocol.** Beyond dicts and sequences, some values expose children that are *not* real tree entries — a live `xarray.Dataset`'s variables, or the contents of a `PDVDataset`/`PDVHdf5` file read from its header on demand. These all flow through one dispatch point, `pdv/virtual.py`: PDV-owned classes implement `__pdv_children__()` / `__pdv_child__(key)` / `__pdv_has_children__()` directly, while foreign types (live `xr.Dataset`, `h5py.Group`) are matched by predicate in a registry of `VirtualAdapter`s (guarded via `sys.modules`, never triggering an import). `handle_tree_list`, per-child `has_children` computation, and dot-path resolution (`PDVTree._resolve_nested`) all dispatch through `get_virtual_adapter()`, so a new expandable type needs only an adapter (or the dunders) — no handler changes. Adapter enumeration failures (missing optional dependency, corrupt/missing file) surface as a `tree.load_error` response with an actionable message; they never crash the listing.
+
+Every adapter-served child is tagged `parent_is_opaque: true` (same suppression semantics as sequence children — the tree-mutation handlers can't address a child by key inside a non-dict parent). `dataset` and `dataset_file` rows enumerate data variables in insertion order **followed by coordinates**; coordinate rows additionally carry `is_coord: true`, which the renderer shows as a `coord` chip with muted styling so grids read as supporting context under the variables. (Through v0.2.x coords were omitted from live-Dataset listings; the file-backed dataset feature unified both on vars + coords.) `hdf5_group` children expand recursively to arbitrary depth; `dataarray` and `hdf5_dataset` are leaves — dot-paths cannot descend past one (`tree["ds.var.0"]` raises `PDVKeyError`). xarray and h5py are optional dependencies; PDV runs unchanged when they aren't installed.
 | `binary` | bytes / bytearray | `.bin` file |
 | `unknown` | Unrecognized type | Custom serializer file (if a module registered one for the type), otherwise `.pickle` (only if `trusted=True`) |
 
@@ -1095,7 +1168,7 @@ Each node in `tree-index.json` is produced by `serialization.serialize_node()`. 
 | `parent_path` | string | Dot-separated parent path. Empty string `""` for top-level nodes. |
 | `type` | string | One of the kind strings from §7.2 (e.g. `"ndarray"`, `"script"`, `"module"`). |
 | `has_children` | boolean | `true` for folder and module nodes that contain children. |
-| `lazy` | boolean | `true` for data nodes (ndarray, dataframe, series, large text) that are loaded on-demand. |
+| `lazy` | boolean | Reserved for the planned lazy-loading design (see PLANNED_FEATURES); both kernels currently write `false` on every node — project load materializes all values eagerly. |
 | `updated_at` | string | ISO 8601 timestamp of when this descriptor was serialized. (A `created_at` field existed through v0.2.x but was regenerated on every save — always equal to `updated_at` — so it recorded nothing and was dropped.) |
 | `storage` | object | Describes where the data lives. See below. |
 | `metadata` | object | Type-specific metadata. Always contains at least `"preview"`. |
@@ -1201,6 +1274,17 @@ Module `storage` uses inline backend with `format: "module_meta"` and `value: { 
 }
 ```
 
+**Data file metadata** (`dataset_file` / `hdf5_file`):
+```json
+{
+  "metadata": {
+    "preview": "gpec_output.nc — 12 vars, 4 coords"
+  }
+}
+```
+
+Deliberately preview-only: variable names, shapes, and dtypes are *not* cached in `tree-index.json` — the tree panel re-reads them from the file header on every expansion (§5.8.1), so the index can never go stale against the file. `storage.format` is `"netcdf"` or `"hdf5"` and the file is copied as-is on save.
+
 **Unknown-kind metadata** (registered serializer or dunder protocol):
 ```json
 {
@@ -1237,6 +1321,8 @@ Additional fields present at top level for specific types:
 - **Scripts**: `"params": [{ name, type, default, required }, ...]` — the `ScriptParameter` array built from `run()` signature inspection.
 - **Modules**: `"module_id"`, `"module_name"`, `"module_version"` — module identity fields.
 - **GUIs**: `"module_id"` — owning module identifier.
+- **Children of opaque containers** (sequences and all virtual-adapter parents, §7.2): `"parent_is_opaque": true` — the renderer suppresses rename/move/duplicate/delete on these rows.
+- **Dataset coordinates** (children of `dataset` / `dataset_file` rows): `"is_coord": true` — rendered with a `coord` chip and muted styling.
 
 | Field | Type | Description |
 |---|---|---|
@@ -1386,7 +1472,7 @@ The cache covers in-memory data kinds — ndarray, DataFrame, Series, scalar, te
 1. **Recovery on project open.** When the user opens a project that has a `<saveDir>/.autosave/` younger than (or independent of) the canonical save, the renderer prompts: "Restore autosaved changes?" If yes, the main process copies any file-backed nodes from `.autosave/` into the kernel working dir and calls `projectManager.load(saveDir, { treeIndexDir: <saveDir>/.autosave, codeCellsDir: <saveDir>/.autosave })`. The kernel reads `tree-index.json` from the override directory; everything else (the `save_dir` argument, the kernel's `_set_save_dir`) is unchanged. After a successful load the `.autosave/` directory is cleared.
 
 2. **Recovery on welcome screen (unsaved sessions).** When the welcome screen renders, the renderer calls `IPC.autosave.scanWorkingDirs`, which lists `pdv-*` subdirectories of the working-dir base that contain `.autosave/tree-index.json`. Each entry is shown under "Recoverable Unsaved Sessions" with a Recover and a Discard button.
-    - **Recover** starts the kernel (deferring via the welcome-screen pending-action ref if needed), then calls `IPC.autosave.recoverUnsaved(orphanDir)`. The handler copies file-backed nodes from `<orphan>/.autosave/` into the new kernel's working dir, calls `projectManager.load(workingDir, { treeIndexDir: …, codeCellsDir: … })`, mirrors `code-cells.json`, runs module setup, and then deletes the orphan directory. The renderer leaves `currentProjectDir = null` so the project remains in the unsaved state — the user is expected to Save As to keep it.
+    - **Recover** starts the kernel (deferring via the welcome-screen pending-action ref if needed), then calls `IPC.autosave.recoverUnsaved(orphanDir)`. Each scanned entry carries an `envMode` (`"uv"` when the orphan root holds `pyproject.toml`, `"pkg"` for `Project.toml`): sessions that ran in a per-project environment boot the recovery kernel through `launchUvKernel`/`launchPkgKernel` with the orphan dir as the env-file source — exactly like opening a uv/pkg project — instead of a shared-mode start. The handler copies file-backed nodes from `<orphan>/.autosave/` into the new kernel's working dir, copies any project-environment files (`Project.toml`/`Manifest.toml`, `pyproject.toml`/`uv.lock`/`.python-version`) from the orphan root, calls `projectManager.load(workingDir, { treeIndexDir: …, codeCellsDir: … })`, mirrors `code-cells.json`, runs module setup, and then deletes the orphan directory — unless an environment-file copy failed, in which case the orphan (the only copy of the env) is kept. The renderer leaves `currentProjectDir = null` so the project remains in the unsaved state — the user is expected to Save As to keep it.
     - **Discard** calls `IPC.autosave.deleteOrphan(orphanDir)`, which removes the directory wholesale.
 
 3. **Restart preservation.** A user-initiated restart (the StatusBar **⟳ Restart** control, driving `IPC.kernels.restart`) must not lose in-memory work. Before the old session is torn down, the restart handler takes a snapshot: if the session is idle it hands the current code-cell tabs back and runs the same `performAutosave` core as the timer, writing a fresh `.autosave/` next to the active project (or in the working dir for an unsaved session). A non-idle session — often *why* the user is restarting — is not snapshotted; the handler falls back to whatever the last timer autosave left. After the new session is ready, restore reuses the two flows above:
@@ -1644,7 +1730,9 @@ PDV never parses or resolves dependency constraints itself — everything is del
 
 #### 10.5.14 Default Packages
 
-A user-level setting (Settings → Python) holds a list of PEP 508 dependency specs. It is consulted **only** at new-project creation (§10.5.8), where it seeds the initial `[project].dependencies` of the generated `pyproject.toml`. Editing the list later never retroactively changes an existing project — once created, a project owns its own dependency set.
+A user-level setting (Settings → Python) holds a list of PEP 508 dependency specs. It is consulted **only** at new-project creation (§10.5.8), where it seeds the initial `[project].dependencies` of the generated `pyproject.toml` — via the New Project dialog's Initial-packages field, which prefills from this list so users can drop entries per project. Editing the list later never retroactively changes an existing project — once created, a project owns its own dependency set. The out-of-the-box default is `numpy, matplotlib, xarray, netcdf4, h5py`: the data stack is included so the lazy data-file nodes (§5.8.1) work in fresh projects without a manual install, and users who don't want it delete the entries in the dialog or trim the setting.
+
+The Julia sibling is `defaultJuliaPackages`, consulted only by the New Julia Project dialog (§10.6.5) with the same prefill/removability semantics. Its out-of-the-box default is `CairoMakie, HDF5`: a Makie backend so the default double-click plot handlers render instead of printing a load-a-backend notice (the plot path auto-`require`s an installed CairoMakie on first use — installing alone is enough, no manual `using`), and HDF5.jl so `PDVHdf5` nodes open. (CairoMakie's first-ever install precompiles for a few minutes behind the standard environment overlay; the compiled cache is shared across projects per depot.)
 
 #### 10.5.15 Python Version Acquisition
 
@@ -1678,6 +1766,144 @@ The environment is a **property of the project, not of the app** — the setting
 - **Project Environment tab** (§10.5.13): per-project scope — what the active session actually runs on, and uv package management.
 
 There is deliberately **no mid-project environment switching**. The choice is made once in the New Project dialog (§10.5.8) and recorded in the manifest; a guarded, explicit "Change project environment…" action is tracked as issue #335.
+
+### 10.6 Per-Project Julia Environments (Pkg-managed)
+
+Julia projects own an isolated dependency record, managed by Julia's built-in `Pkg`. This is the Julia analog of §10.5 and the **default for all newly created Julia projects**. Wherever this section is silent, §10.5's behavior applies unchanged — the two flows are deliberately symmetric, and the differences below are exactly the places where Julia's environment model genuinely differs from Python's.
+
+#### 10.6.1 What is different from uv mode
+
+Three Julia facts make this flow strictly simpler than §10.5:
+
+1. **There is no venv analog.** Julia packages live in the shared depot (`~/.julia/packages`), content-addressed by version. A "project environment" is just two text files — `Project.toml` (direct dependencies, user-owned) and `Manifest.toml` (the full resolved graph, `Pkg`-owned) — so materializing an environment copies two files, and `Pkg.instantiate` fetches only what the depot is missing, once per machine. Nothing is rebuilt per session and nothing needs garbage collection.
+2. **No binary needs bundling.** `Pkg` is a Julia stdlib; the Julia executable that runs the kernel is the environment tooling. There is no §10.5.6 analog.
+3. **Environments stack instead of isolating.** Julia's `LOAD_PATH` defaults to `["@", "@v#.#", "@stdlib"]`: with a project active, `using X` still finds an `X` installed in the user's default environment. Two consequences, both deliberate:
+   - **PDVKernel handling is free.** IJulia and PDVKernel resolve from the default environment even while the project environment is active — the §10.5.7 goal (the kernel's support package never appears in the user's dependency file) with no install step at all. PDVKernel is never written into a project's `Project.toml`.
+   - **Pkg mode is strictly additive, so it needs no mode choice.** Activating a project environment can never hide packages a shared-mode session would have seen; a cluster user's hand-curated default environment keeps working untouched. New Julia projects are therefore always pkg mode — the New Julia Project dialog offers a Julia version and initial packages (§10.6.5) but no uv-style uv/shared fork. `mode: "shared"` survives only as the reading of legacy manifests.
+
+   The trade-off is honesty about what travels: the project reproduces **what was recorded** — packages added via `PDVKernel.install()`, the Packages tab, or any `Pkg.add` run in a cell (all land in the active project). A package that happens to be installed in the machine's default environment but was never added to the project works locally and silently rides the stack, but is not in `Project.toml` and will not be instantiated on another machine. This matches standard Julia practice; PDV does not attempt venv-style hard isolation, because that would force PDVKernel and IJulia into the user's project file — exactly what §10.5.7 forbids.
+
+#### 10.6.2 The Two Directories
+
+| Artifact | Save directory | Working directory |
+|---|---|---|
+| `Project.toml` | ✓ | ✓ (materialized on open, written back on save) |
+| `Manifest.toml` | ✓ | ✓ (materialized on open, written back on save) |
+
+`JULIA_ENV_FILES = ["Project.toml", "Manifest.toml"]` rides the same materialize-on-open / write-on-save flow as Python's `PYTHON_ENV_FILES` (`project-file-sync.ts` selects the set by session language). The working directory is a textbook Julia project — `julia --project=<working-dir>`, VS Code's Julia extension, and `Pkg` from a terminal all behave exactly as in a hand-made project. `Manifest.toml` travels with the project so the environment reproduces deterministically (it records exact versions and the `julia_version` that resolved them). There is no third pin file: Julia version pinning is `Manifest.toml`'s `julia_version` entry. On a mismatch at load, §10.7.5's juliaup flow either points the session at the installed matching channel or offers a streamed `juliaup add` of the missing minor — never a silent auto-install, and the load itself always proceeds (§10.6.6).
+
+#### 10.6.3 Activation
+
+The kernel process itself runs with the project environment active: `kernels.start` sets `JULIA_PROJECT=<working-dir>` in the kernel spec's environment (Julia's native activation variable, honored at process start — no `Pkg.activate` call, no bootstrap change, and `Base.active_project()` reports the project from the first prompt). Restarts reuse the spec, and the crash handler already preserves the working directory, so activation survives kernel restarts for free. A missing `Project.toml` is not an error: Julia treats the path as an empty project and `Pkg.add` creates the file.
+
+#### 10.6.4 Manifest Additions
+
+`environment.mode` gains a third accepted value, `"pkg"`; the schema version stays `"1.2"` (the block's shape is unchanged — an older 1.2 app reading `mode: "pkg"` degrades to a shared-mode open, which still boots thanks to stacking).
+
+```json
+{
+  "schema_version": "1.2",
+  "language": "julia",
+  "environment": {
+    "mode": "pkg",
+    "julia_version": "1.11.6"
+  }
+}
+```
+
+| Field | Type | Description |
+|---|---|---|
+| `environment.mode` | string | `"uv"`, `"shared"`, or `"pkg"`. `"pkg"` is recorded for every project created by a pkg-capable app with a Julia session. |
+| `environment.julia_version` | string? | The Julia version the session actually ran on, pkg-mode only — captured at environment setup and recorded on every save. Display and mismatch-warning only; `Manifest.toml`'s own `julia_version` is what `Pkg` checks. |
+
+As with uv mode, no `interpreter_path` is recorded for `mode: "pkg"`: the Julia executable is the app-level Default Runtime choice (§10.5.19), not part of the project's identity.
+
+#### 10.6.5 New Project Flow
+
+Clicking **New Julia Project** opens the New Julia Project dialog — the Julia sibling of §10.5.8's, with two differences. First, there is no uv/shared mode fork to offer: §10.6.1's additivity means every new Julia project is pkg-mode, so the dialog carries only the two uv-parity fields. Second, the version choice is juliaup-driven (§10.7.5) rather than uv-driven:
+
+- **Julia version** — a dropdown over `SUPPORTED_JULIA_VERSIONS` (`julia-versions.ts`, the sibling of `python-versions.ts`; its floor tracks pdv-julia's `julia` compat bound). Installed juliaup channels are marked with their exact version (the juliaup default channel's minor is preselected); missing minors read "will be downloaded". On Create, `kernels.start` makes the requested minor launchable **before** the kernel spawns via `ensureJuliaVersionReady` (juliaup-runner.ts): `juliaup add <minor>` when no installed channel provides it, then the §10.7.4 PDVKernel/IJulia install into that version's default environment when needed — both streamed into the launch overlay, the uv "downloaded automatically" experience. The ready channel's real binary becomes the session's `JULIA_PATH` (no separate shim pass needed). When juliaup is not installed, the version field collapses to a pointer at the §10.7.5 one-click bootstrap and the launch uses the configured runtime.
+- **Initial packages** — package names (with optional REPL-style `Name@version` pins, translated to `Pkg.PackageSpec` exactly like `PDVKernel.install`), prefilled from the user-level `defaultJuliaPackages` list (the §10.5.14 sibling; out-of-the-box `CairoMakie, HDF5` so the default double-click plot handlers and PDVHdf5 nodes work in fresh projects — users delete entries in the dialog or trim the setting). They ride the §10.6.6 environment subprocess: a new project with packages runs `Pkg.add([...])` instead of the bare no-op instantiate, recording them into the fresh `Project.toml` while the kernel boots.
+
+The main process then creates the fresh working directory, writes an empty `Project.toml`, and launches the kernel with `JULIA_PROJECT` set. The environment subprocess's `VERSION` print is what stamps `julia_version` into the manifest on first save. The project reaches the manifest as `mode: "pkg"` on first save.
+
+#### 10.6.6 Project Open Flow
+
+When the main process loads a project whose manifest has `environment.mode: "pkg"`:
+
+1. Materialize the working directory, copying `Project.toml` and `Manifest.toml` from the save directory alongside the tree files.
+2. Run `Pkg.instantiate` **in parallel with the kernel boot** (see below), streaming output over `envActivity` into the same `EnvSyncModal` overlay uv launches use.
+3. The session is `ready` only when both the kernel handshake and the instantiate have completed; instantiate failure keeps the overlay up with **Retry / Cancel**, uv-style.
+
+The instantiate runs as a separate subprocess — `<julia> --project=<working-dir> --startup-file=no -e 'using Pkg; Pkg.instantiate()'` — via `julia-env.ts`, the Julia sibling of `uv-runner.ts` (§10.5.18's single-spawn-site rule applies: no other main-process file spawns Julia for environment work). Unlike `uv sync`, this is safe to overlap with the kernel boot: the kernel's own boot needs only IJulia and PDVKernel, which resolve from the default environment (§10.6.1), and no user code runs until the overlay drops. The overlap makes the warm-open cost **zero added wall-clock** — a satisfied `Manifest.toml` verifies in well under the kernel's own boot time — while a cold open streams download/precompile progress for as long as it takes. `Pkg.instantiate` also precompiles what it installs, so the first `using` after a cold open is not a multi-minute JIT surprise. The same subprocess prints `VERSION` so the main process can record `julia_version` in the per-kernel environment metadata (§10.6.4) without an extra probe.
+
+The §10.5.10 load-time safety net has a pkg analog (`syncPkgEnvironmentForLoad`): if the working directory's env files diverge from the save directory's, the project's files are copied over and `Pkg.instantiate` re-runs. The Python-pin ABI guard has no analog — Julia recompiles native code per version instead of breaking — so a `julia_version` mismatch is never a block; §10.7.5's load-time check turns it into an actionable message (switch to the installed matching channel, or a `juliaup add` offer) instead of a silent proceed.
+
+#### 10.6.7 Save Flow
+
+On `project.save`, `Project.toml` and `Manifest.toml` are written from the working directory back into the save directory (both change mid-session via `PDVKernel.install()`, the Packages tab, and user `Pkg.add` in cells). The manifest records `mode: "pkg"` and `julia_version` from the active kernel's environment metadata.
+
+#### 10.6.8 `PDVKernel.install()` and the Packages Tab
+
+`PDVKernel.install("Pkg1", ...)` is unchanged in shape — `Pkg.add` into the **active** environment, blocking the cell — and needs no uv-style binary handoff in the init payload: with `JULIA_PROJECT` set, the active environment *is* the project, so installs are recorded in the project's `Project.toml` automatically. `PDVKernel.remove(...)` (→ `Pkg.rm`) and `PDVKernel.update(...)` (→ `Pkg.update`) complete the verb set. No import-cache invalidation step exists because Julia needs none. The reactive-install affordance (§10.5.12) already routes Julia sessions to `PDVKernel.install`.
+
+The Project Environment tab (§10.5.13) activates for pkg-mode Julia sessions: the header shows a "Pkg-managed · shareable" badge with the Julia executable and version (from `environment:activeInfo`); the dependency list is parsed in the main process from the working directory's `Project.toml` (`[deps]`) with installed versions from `Manifest.toml` (both TOML — parsed with the already-bundled `smol-toml`, never hand-parsed); add/remove/upgrade dispatch the corresponding `PDVKernel.install`/`remove`/`update` invocation through the same `executeAndTranscribe` bracket as §10.5.12, so operations stream to the console and are serialized with cell execution by the kernel's own queue (Julia has no uv-subprocess path — running Pkg inside the kernel is what keeps the live session and the files consistent); the stream output is additionally mirrored over `envActivity` so the tab's output pane shows it live, matching uv's. Shared-mode Julia sessions see the same "external environment" note as shared Python.
+
+### 10.7 Julia Runtime Discovery and PDVKernel Installation
+
+The Julia analog of §10.2–10.3: the Environment Selector's Julia tab lists discovered Julia runtimes with PDVKernel/IJulia status badges and offers a one-click "Install PDVKernel" for runtimes that lack it. All discovery, probing, shim resolution, and installation live in `julia-discovery.ts` (main process); the kernel-spawn site itself stays in `kernel-manager.ts` and the `Pkg.instantiate` spawn site stays in `julia-env.ts` — the §10.5.18 single-spawn-site discipline, applied per concern.
+
+#### 10.7.1 Discovery
+
+Discovery is **filesystem-only** — it never runs a Julia subprocess, so it is instant and immune to the wedged-shim failure mode below. Sources, in priority order:
+
+1. **juliaup channels** — parse `~/.julia/juliaup/juliaup.json` (honoring `JULIA_DEPOT_PATH` overrides): every entry in `InstalledChannels` whose version maps into `InstalledVersions` becomes one runtime, with the executable at `<juliaup-dir>/<Path>/bin/julia` (the *real* versioned binary, never the shim). The `Default` channel is flagged and sorts first. Linked channels (`juliaup link` — a `Command` instead of a `Version`) surface with their command path as the executable.
+2. **The configured path** (`juliaPath` in app config), shim-resolved (§10.7.2), if not already covered.
+3. **Well-known system locations** — `julia` on `PATH`, `/opt/homebrew/bin/julia`, `/usr/local/bin/julia`, and macOS `/Applications/Julia-*.app` bundles — each shim-resolved and deduplicated against the juliaup entries by real path.
+
+The Julia version for juliaup entries comes free from the channel's version string; other entries get it from the probe (§10.7.3).
+
+#### 10.7.2 Shim Bypass
+
+The juliaup shim (`~/.juliaup/bin/julia` → `julialauncher`) checks for juliaup self-updates on every invocation; a wedged update blocks **every** shim-routed launch — kernel boots, probes, instantiates — while the real versioned binary keeps working. PDV therefore never spawns the shim when it can help it: `resolveJuliaShim(path)` follows symlinks and, when the target basename is `julialauncher`, resolves the default channel's real binary from `juliaup.json` (returning the input unchanged when it isn't the shim, or when juliaup metadata is missing/unparseable — never a hard failure). `kernels.start` applies this to the configured Julia path on every Julia launch, and when **no** path is configured it uses the discovered juliaup default instead of the bare `julia` PATH fallback. The resolved real path is what lands in the kernel spec, the environment metadata, and the manifest-restart snapshot.
+
+#### 10.7.3 Probing
+
+A selected or browsed runtime is probed with a **single** short-lived spawn (`--startup-file=no`, 5 s timeout) that prints the Julia `VERSION`, the PDVKernel version via `Base.locate_package` + its `Project.toml` (the §5.14 rule: never `using` — loading can trigger minutes of recompile), and IJulia presence via `Base.identify_package`. Compatibility is the same core-version match as pdv-python (§10.4, unified version rule 10).
+
+#### 10.7.4 One-Click PDVKernel Installation
+
+The install target is the **default environment** (`~/.julia/environments/v<major.minor>/`) — deliberately not a project environment: §10.6.1's stacking is what lets every pkg-mode project resolve PDVKernel without recording it, and the default env is the one place all sessions of that Julia version can see. The flow, streamed to the selector over the same `installOutput` push channel as pip installs:
+
+1. Stage the bundled `pdv-julia/` source (app resources in packaged builds, repo root in dev) into `<userData>/pdv-julia/` — a stable, writable path. `Pkg.develop` records an absolute source path in the default env's manifest, so it must not point into a translocated/read-only app bundle.
+2. Run `<julia> --startup-file=no -e 'import Pkg; Pkg.develop(path=<staged>); Pkg.add("IJulia"); Pkg.precompile()'` with plain output (`NO_COLOR`, no fancy progress). The explicit precompile front-loads the §10.8 boot cost into the visible install step.
+
+Because the install is a `Pkg.develop` of a staged copy, an app update re-stages the new source in place and the dev-path pickup is automatic; the version-mismatch badge (unified version rule) is what prompts the user to re-run the install when protocol changes require it.
+
+#### 10.7.5 juliaup Version Management
+
+The version-acquisition half of the analogy: uv manages Python interpreters for PDV (§10.5.7), and juliaup manages Julia versions — but by a deliberately different mechanism. **PDV drives the user's juliaup and never bundles one.** uv earned bundling because it is on the hot path of every project open and keeps no user-global state; juliaup is needed only for rare, explicit acquisition events and owns persistent user-global state (`<depot>/juliaup/juliaup.json`, the channel database, shims, background self-update). A bundled copy co-managing that state with a user-installed juliaup is the same class of external-state wedge the §10.7.2 shim bypass exists to avoid. All juliaup subprocess work lives in `juliaup-runner.ts` (the §10.5.18 single-spawn-site discipline; `julia-discovery.ts` keeps the filesystem-only *metadata* reads).
+
+The pieces, all gated on juliaup presence (`juliaupStatus` — `PATH`, then the official installer's `~/.juliaup/bin`, then Homebrew locations; GUI apps often miss the shell-rc `PATH` entry):
+
+- **Acquisition** — the selector's Julia tab gains an "Add a Julia version" field running `juliaup add <channel>` (`1.10`, `lts`, `rc`, ...) as an explicit subprocess with output streamed (ANSI-stripped, §10.8) over the `installOutput` push channel, then rescans. The wedge-prone part of juliaup is only the *implicit* self-update inside the `julia` shim, which PDV no longer touches. A newly-acquired minor has its own default environment (`@v1.x`), so PDVKernel/IJulia need the one-click install (§10.7.4) once per version — the selector badges surface exactly that.
+- **Bootstrap** — when juliaup is absent, the tab offers one-click **Install juliaup** running the official installer (`curl -fsSL https://install.julialang.org | sh -s -- --yes`) streamed; the script also installs a default Julia, so this covers the nothing-installed first run with a single, standard, self-owned juliaup. On Windows the button defers to the Microsoft Store (the official distribution channel there).
+- **Load-time version check** — opening a pkg-mode project reads the save dir's `Manifest.toml` `julia_version` and compares its minor against the running session and the installed channels (`checkJuliaVersionForLoad`, returned on the load result as `juliaVersionCheck`). A mismatch never blocks the load (§10.6.6 — Julia re-resolves cross-version); the renderer turns it into the most actionable available message: matching channel installed → console pointer to select it under Settings → Runtime; not installed but juliaup present → a confirm offering `juliaup add <minor>` (streamed, then a console pointer to switch runtimes); no juliaup → console pointer at the bootstrap button.
+
+The selector's channel list doubles as the per-session version picker — selecting a juliaup channel row and confirming switches the configured runtime. The per-project choice at creation time is the New Julia Project dialog's version dropdown (§10.6.5), whose `ensureJuliaVersionReady` path composes the acquisition and PDVKernel-install pieces above into the uv-style "downloaded automatically" flow.
+
+### 10.8 Precompile-Tolerant Kernel Boot
+
+Julia kernel startup can legitimately take minutes when precompile caches are cold (first boot after a package update, a Julia upgrade, or an edit to a dev-installed PDVKernel — §5.14). Flat boot timeouts misread this as a hang. Instead, both boot waits use **activity-based deadlines**: a short *idle* timeout that resets whenever the kernel shows signs of life, under a long hard cap.
+
+| Wait | Signal that resets the idle timer | Idle timeout | Hard cap |
+|---|---|---|---|
+| `waitForKernelReady` (process spawn → first iopub `idle`) | kernel process stdout/stderr | 30 s | Julia 15 min / Python 2 min |
+| `pdv.ready` handshake (bootstrap `using PDVKernel` → comm open) | kernel process output **or** iopub `stream` traffic | Julia 60 s / Python 15 s | Julia 20 min / Python 60 s |
+
+Two signal surfaces are needed because Pkg writes precompile progress to the **process stderr** during IJulia's own boot, but once the bootstrap `execute_request` is running, IJulia captures the streams and re-emits them as **iopub `stream` messages**. `KernelManager` re-emits process output as `kernel:processOutput` events (it already pipes them to the app's stdio); `kernel-session.ts` taps both surfaces. A genuinely wedged kernel still fails in 30–60 s of silence; a kernel that is visibly precompiling gets as long as the cap allows.
+
+The same taps drive the launch UI: during a Julia launch, `ipc-register-kernels.ts` forwards boot output (ANSI-stripped) over the `envActivity` push channel, so the `EnvSyncModal` streams precompile progress live instead of showing a bare spinner — and the modal swaps its subtitle to a "precompiling packages" explanation when the output says so. Timeout errors report which regime fired (idle vs cap) and the tail of the boot output.
 
 ---
 
@@ -1713,7 +1939,7 @@ The API surface:
 - `window.pdv.guiEditor.*` — GUI editor and viewer windows: `open` (editor), `openViewer` (standalone GUI viewer), `context`, `read`, `save`
 - `window.pdv.environment.*` — Python environment management: `list`, `check`, `install`, `refresh`, `activeInfo` (active kernel's environment metadata — mode, interpreter, Python version — for the Project Environment tab), plus the uv package UI: `listPackages`, `addPackage`, `removePackage`, `upgradePackage`; push: `onInstallOutput(cb) → unsub`, `onEnvActivity(cb) → unsub` (streaming uv output)
 - `window.pdv.chrome.*` — window chrome controls: `getInfo`, `minimize`, `toggleMaximize`, `close`; push: `onStateChanged(cb) → unsub`
-- `window.pdv.system.*` — constant host facts injected at preload time: `platform` (the main process's `process.platform`), `supportedPythonVersions` and `defaultPythonVersion` (the New Project dialog's version range, from `python-versions.ts`). Exposed as plain values, not functions — they never change during a session, so they need no IPC channel
+- `window.pdv.system.*` — constant host facts injected at preload time: `platform` (the main process's `process.platform`), `supportedPythonVersions` and `defaultPythonVersion` (the New Project dialog's version range, from `python-versions.ts`), and their Julia siblings `supportedJuliaVersions` and `defaultJuliaVersion` (from `julia-versions.ts`, §10.6.5). Exposed as plain values, not functions — they never change during a session, so they need no IPC channel
 - `window.pdv.launchers.*` — action-bar external-app launchers: `openAgent` (launch the configured AI agent in a terminal), `openWorkingDir` (open the active kernel's working directory in the configured editor/IDE), `checkAvailability` (probe whether a terminal/editor/file-manager is installed, without launching it — used to gate Settings Save)
 - `window.pdv.progress.*` — operation progress: push only: `onProgress(cb) → unsub`
 - `window.pdv.menu.*` — menu bridge: `updateRecentProjects(paths)`, `onAction(cb) → unsub`
@@ -1902,6 +2128,10 @@ electron/
         tree-create.ts          ← Shared allocate-uuid → write → register helpers for file nodes
         uv-environment.ts       ← Per-project uv venv materialization/sync
         uv-runner.ts            ← uv subprocess wrapper
+        julia-env.ts            ← Pkg.instantiate runner for pkg-mode Julia projects (§10.6)
+        julia-discovery.ts      ← Julia runtime discovery, shim bypass, PDVKernel install (§10.7)
+        juliaup-runner.ts       ← juliaup version management: add/bootstrap/load-time check (§10.7.5)
+        julia-versions.ts       ← supported Julia minors for new projects (§10.6.5)
         pyproject.ts            ← Generate/parse project pyproject.toml
         python-versions.ts      ← Supported Python versions + default
         modules/
@@ -2023,6 +2253,31 @@ pdv-python/
         test_handlers_modules.py
         test_integration_bootstrap.py
         test_integration_dispatch.py
+```
+
+### 12.2.1 Julia Package
+
+```
+pdv-julia/
+    Project.toml             ← name PDVKernel, version unified with the app
+    src/
+        PDVKernel.jl         ← module root: exports, VERSION, bootstrap(), public API
+        errors.jl
+        environment.jl
+        tree.jl              ← PDVTree/PDVModule + PDVFile node structs
+        serializers.jl       ← registry + pdv_format/pdv_serialize/pdv_deserialize protocol
+        serialization.jl
+        checksum.jl
+        namespace.jl
+        modules.jl           ← pdv_handle dispatch + register_handler
+        script_exec.jl       ← fresh-module script runner, lib-module registry, param extraction
+        namelist_utils.jl    ← built-in Fortran namelist parser + TOML stdlib
+        tree_loader.jl
+        comms.jl
+        query_server.jl
+        handlers/            ← one file per PDV message domain (mirrors pdv/handlers/)
+    test/
+        runtests.jl          ← kernel-free unit suite (comm transport stubbed)
 ```
 
 ### 12.3 Tests
@@ -2352,13 +2607,12 @@ PDV does not ship a static API reference, which would drift. Instead:
 
 The following features are acknowledged as future work and must not influence the current architecture in ways that complicate the above design:
 
-- **Julia kernel support** — protocol is designed to be language-agnostic; implementation is deferred
 - **Crash recovery** — working directory is deleted on close; future discussion required
 - **Remote execution** (SSH, HPC clusters) — no remote connector architecture in this version
 - **Autosave** — `.pdv-work/autosave/` directory is created but not used
 - **Modules ecosystem hardening** — core module lifecycle is implemented (install from disk/GitHub, import, uninstall, update, bundled examples, project-local storage); deeper registry/trust features are deferred
 - **Multiple simultaneous kernels** — architecture supports it (kernels have IDs) but UI exposes only one at a time
-- **R kernel support** — same deferral as Julia
+- **R kernel support** — deferred; would follow the `pdv-julia` pattern (a kernel-side package implementing the language-agnostic protocol of §3)
 
 ---
 

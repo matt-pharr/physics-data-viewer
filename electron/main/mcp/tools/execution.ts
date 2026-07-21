@@ -33,6 +33,7 @@ import type {
   KernelExecuteResult,
   KernelExecutionOrigin,
 } from "../../kernel-manager";
+import { juliaStringLiteral } from "../../module-runtime";
 import { PDVMessageType } from "../../pdv-protocol";
 import type { McpToolContext } from "../mcp-context";
 import { executeAndTranscribe, TranscriptWriter } from "../transcript";
@@ -339,7 +340,10 @@ function buildScriptInvocation(
     const kwargs = entries
       .map(([k, v]) => formatJuliaKwarg(k, v))
       .join(", ");
-    const pathStr = JSON.stringify(treePath);
+    // juliaStringLiteral, not bare JSON.stringify: `$` interpolates inside
+    // Julia double-quoted strings (review M4; this mirror was missed by the
+    // first fix pass — second review).
+    const pathStr = juliaStringLiteral(treePath);
     return kwargs
       ? `PDVKernel.run_tree_script(pdv_tree, ${pathStr}; ${kwargs})`
       : `PDVKernel.run_tree_script(pdv_tree, ${pathStr})`;
@@ -359,7 +363,9 @@ function formatPythonKwarg(key: string, value: unknown): string {
 
 function formatJuliaKwarg(key: string, value: unknown): string {
   if (value === null || value === undefined) return `${key}=nothing`;
-  if (typeof value === "string") return `${key}=${JSON.stringify(value)}`;
+  // juliaStringLiteral escapes `$` (Julia string interpolation) on top of
+  // JSON.stringify's quoting — see buildScriptInvocation's path literal.
+  if (typeof value === "string") return `${key}=${juliaStringLiteral(value)}`;
   if (typeof value === "boolean") return `${key}=${value ? "true" : "false"}`;
   return `${key}=${String(value)}`;
 }

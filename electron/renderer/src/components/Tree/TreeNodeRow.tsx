@@ -12,7 +12,18 @@ import { TYPE_ICONS, UnknownIcon } from './icons';
 /** Types that are containers (have or can have children). Drives the
  *  branch-vs-leaf visual distinction in tree.css (heavier name weight,
  *  elevated row background). Add new container types here if/when added. */
-const BRANCH_TYPES = new Set<string>(['root', 'folder', 'mapping', 'sequence', 'module', 'lib', 'dataset']);
+const BRANCH_TYPES = new Set<string>([
+  'root',
+  'folder',
+  'mapping',
+  'sequence',
+  'module',
+  'lib',
+  'dataset',
+  'dataset_file',
+  'hdf5_file',
+  'hdf5_group',
+]);
 
 /** User-facing label rendered in the Type chip. Shows the Python class
  *  name for built-in data (`np.ndarray`, `pd.DataFrame`, `str`, …) since
@@ -43,6 +54,12 @@ const DISPLAY_LABELS: Record<string, string> = {
   gui: 'gui',
   module: 'module',
   lib: 'lib',
+  // Lazy file-backed data nodes and their virtual children: format nouns
+  // ("what is this data"), matching the chip convention above.
+  dataset_file: 'netcdf',
+  hdf5_file: 'hdf5',
+  hdf5_group: 'group',
+  hdf5_dataset: 'h5.Dataset',
 };
 
 /** Kinds whose wire `type` is intentionally generic — the chip should
@@ -59,18 +76,50 @@ const PYTHON_TYPE_OVERRIDES: Record<string, string> = {
   NoneType: 'None',
 };
 
-/** Strip the `builtins.` module prefix from a fully qualified
- *  Python type so e.g. `builtins.int` reads as `int`. */
-function stripBuiltinsPrefix(qualified: string): string {
-  return qualified.startsWith('builtins.') ? qualified.slice('builtins.'.length) : qualified;
+/** Julia sessions reuse the same wire kind strings, but the Python class
+ *  names in {@link DISPLAY_LABELS} (`np.ndarray`, `pd.DataFrame`, …) would
+ *  be wrong for them. When the descriptor's type string identifies a Julia
+ *  type (see {@link isJuliaTypeString}) these labels win instead. */
+const JULIA_DISPLAY_LABELS: Record<string, string> = {
+  ndarray: 'Array',
+  dataframe: 'DataFrame',
+  mapping: 'Dict',
+  text: 'String',
+  binary: 'bytes',
+};
+
+/** Heuristic: module-qualified Julia type strings start with a Julia root
+ *  module (`Core.Int64`, `Base.Dict{…}`, `Main.NPendulum.…`,
+ *  `DataFrames.DataFrame`) or carry `{…}` type parameters — shapes a
+ *  fully-qualified Python type string never takes. */
+function isJuliaTypeString(qualified: string): boolean {
+  return /^(Core|Base|Main|DataFrames)\./.test(qualified) || qualified.includes('{');
+}
+
+/** Strip the module prefix from a fully qualified type so e.g.
+ *  `builtins.int` reads as `int` and `Core.Int64` reads as `Int64`. */
+function stripModulePrefix(qualified: string): string {
+  if (qualified.startsWith('builtins.')) return qualified.slice('builtins.'.length);
+  const juliaRoot = /^(Core|Base)\./.exec(qualified);
+  if (juliaRoot) return qualified.slice(juliaRoot[0].length);
+  return qualified;
 }
 
 /** Compute the chip label, preferring `pythonType` for kinds in
- *  {@link USE_PYTHON_TYPE} and falling back to the generic label. */
+ *  {@link USE_PYTHON_TYPE} and falling back to the generic label
+ *  (Julia-flavored when the type string identifies a Julia value). */
 function resolveTypeLabel(type: string, pythonType?: string): string {
   if (USE_PYTHON_TYPE.has(type) && pythonType) {
-    const stripped = stripBuiltinsPrefix(pythonType);
+    const stripped = stripModulePrefix(pythonType);
     return PYTHON_TYPE_OVERRIDES[stripped] ?? stripped;
+  }
+  // Julia NamedTuples ride the mapping kind (expandable like a Dict) but
+  // are their own thing — say so instead of "Dict".
+  if (type === 'mapping' && pythonType === 'Core.NamedTuple') {
+    return 'NamedTuple';
+  }
+  if (pythonType && isJuliaTypeString(pythonType) && JULIA_DISPLAY_LABELS[type]) {
+    return JULIA_DISPLAY_LABELS[type];
   }
   return DISPLAY_LABELS[type] ?? type;
 }
@@ -115,7 +164,7 @@ const TreeNodeRowInner: React.FC<TreeNodeRowProps> = ({
 
   return (
     <div
-      className={`tree-row ${isBranch ? 'branch' : 'leaf'}${selected ? ' selected' : ''}`}
+      className={`tree-row ${isBranch ? 'branch' : 'leaf'}${selected ? ' selected' : ''}${node.isCoord ? ' coord' : ''}`}
       style={style}
       {...ariaAttributes}
       onDoubleClick={() => onDoubleClick(node)}
@@ -157,6 +206,7 @@ const TreeNodeRowInner: React.FC<TreeNodeRowProps> = ({
       <div className="tree-col type">
         <span className="tree-type-badge">{resolveTypeLabel(node.type, node.pythonType)}</span>
         {node.language && <span className="tree-type-badge subtle">{node.language}</span>}
+        {node.isCoord && <span className="tree-type-badge subtle">coord</span>}
       </div>
 
       <div className="tree-col preview">{node.preview || '—'}</div>
