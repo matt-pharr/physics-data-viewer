@@ -32,6 +32,7 @@ import { SettingsDialog } from '../components/SettingsDialog';
 import { ImportModuleDialog } from '../components/ImportModuleDialog';
 import { SaveAsDialog } from '../components/SaveAsDialog';
 import { NewProjectDialog } from '../components/NewProjectDialog';
+import { NewJuliaProjectDialog } from '../components/NewJuliaProjectDialog';
 import { UnsavedChangesDialog } from '../components/UnsavedChangesDialog';
 import { WelcomeScreen } from '../components/WelcomeScreen';
 import { EnvSyncModal } from '../components/EnvSyncModal';
@@ -96,7 +97,8 @@ type ActiveDialog =
     }
   | { kind: 'importModule' }
   | { kind: 'saveAs' }
-  | { kind: 'newProject' };
+  | { kind: 'newProject' }
+  | { kind: 'newJuliaProject' };
 
 
 /** Root PDV application component rendered in the Electron renderer process. */
@@ -157,10 +159,17 @@ const App: React.FC = () => {
   const [currentProjectDir, setCurrentProjectDir] = useState<string | null>(null);
   const initRef = useRef(false);
   const loadedProjectTabsRef = useRef<{ tabs: CellTab[]; activeTabId: number } | null>(null);
-  /** Deferred project action to execute once the kernel becomes ready. */
+  /**
+   * Deferred project action to execute once the kernel becomes ready.
+   * Carries the language the action was queued for: the consume effect
+   * drops stale entries whose language doesn't match the kernel that
+   * actually came up — without this, a failed Julia recovery followed by a
+   * New Python Project fired the recovery into the Python kernel (PR #347
+   * review M9). Also cleared on launch failure/cancel.
+   */
   const pendingProjectRef = useRef<
     | { type: 'open'; path?: string; language?: 'python' | 'julia' }
-    | { type: 'recover'; orphanDir: string }
+    | { type: 'recover'; orphanDir: string; language: 'python' | 'julia' }
     | null
   >(null);
 
@@ -533,7 +542,7 @@ const App: React.FC = () => {
     setKernelMemoryRss,
   });
 
-  const [environmentMode, setEnvironmentMode] = useState<'uv' | 'shared'>('shared');
+  const [environmentMode, setEnvironmentMode] = useState<'uv' | 'shared' | 'pkg'>('shared');
   const { startKernel, handleEnvSave, handleRestartKernel, lastErrorRef } = useKernelLifecycle({
     config,
     currentKernelId,
@@ -1156,6 +1165,7 @@ const App: React.FC = () => {
   const {
     kernelLaunch,
     launchUvKernel,
+    launchPkgKernel,
     launchSharedKernel,
     handleLaunchRetry,
     handleLaunchCancel,
@@ -1196,15 +1206,10 @@ const App: React.FC = () => {
   }, [config, runningPdvVersion, launchSharedKernel, openEnvSettings]);
 
   const handleWelcomeNewProject = useCallback(async (language: 'python' | 'julia') => {
-    if (language === 'python') {
-      // New Python projects open the setup dialog first (§10.5.8); the
-      // welcome screen stays mounted underneath until Create/Cancel.
-      setActiveDialog({ kind: 'newProject' });
-      return;
-    }
-    dismissWelcome();
-    await ensureKernel(language);
-  }, [dismissWelcome, ensureKernel]);
+    // Both languages open their setup dialog first (§10.5.8 / §10.6.5); the
+    // welcome screen stays mounted underneath until Create/Cancel.
+    setActiveDialog(language === 'python' ? { kind: 'newProject' } : { kind: 'newJuliaProject' });
+  }, []);
 
   /** Create a uv-managed project with the dialog's version/package choices. */
   const handleNewProjectCreateUv = useCallback(async (opts: { pythonVersion: string; packages: string[] }) => {
@@ -1218,6 +1223,23 @@ const App: React.FC = () => {
       packages: opts.packages,
     });
   }, [closeDialog, dismissWelcome, launchUvKernel]);
+
+  /**
+   * Create a pkg-mode Julia project with the dialog's version/package
+   * choices (§10.6.5). The EnvSyncModal covers version acquisition
+   * (`juliaup add` + PDVKernel install when needed) and the initial
+   * `Pkg.add`; without juliaup the version is undefined and the launch
+   * uses the configured runtime.
+   */
+  const handleNewProjectCreatePkg = useCallback(async (opts: { juliaVersion?: string; packages: string[] }) => {
+    closeDialog();
+    dismissWelcome();
+    await launchPkgKernel({
+      newProject: true,
+      juliaVersion: opts.juliaVersion,
+      packages: opts.packages,
+    });
+  }, [closeDialog, dismissWelcome, launchPkgKernel]);
 
   /**
    * Create a project on an existing (conda/system) interpreter chosen in the
@@ -1251,6 +1273,13 @@ const App: React.FC = () => {
       return;
     }
 
+    // pkg-mode Julia projects likewise: Pkg.instantiate overlaps the kernel
+    // boot behind the same overlay (§10.6.6).
+    if (peek.environment?.mode === 'pkg' && language === 'julia') {
+      await launchPkgKernel({ saveDir: dir });
+      return;
+    }
+
     // If the project saved an interpreter path, try to use it.
     // TODO: Add Julia interpreter validation once Julia supports saved interpreter paths.
     if (peek.interpreterPath && language === 'python') {
@@ -1275,7 +1304,7 @@ const App: React.FC = () => {
     }
 
     await ensureKernel(language);
-  }, [config, dismissWelcome, ensureKernel, openEnvSettings, launchSharedKernel, launchUvKernel]);
+  }, [config, dismissWelcome, ensureKernel, openEnvSettings, launchSharedKernel, launchUvKernel, launchPkgKernel]);
 
   /**
    * Open a project into a fresh session while one is already running.
@@ -1373,33 +1402,78 @@ const App: React.FC = () => {
     refreshRecoverableSessions,
   ]);
 
-  const handleRecoverSession = useCallback((orphanDir: string) => {
+  const handleRecoverSession = useCallback((
+    orphanDir: string,
+    language: 'python' | 'julia' = 'python',
+    envMode?: 'uv' | 'pkg',
+  ) => {
+    // Boot (or reboot) a kernel of the autosave's language, then recover once
+    // it's ready. A mismatched live kernel cannot be reused: the Python
+    // loader rejects jls-format nodes and vice-versa. Orphans that ran in a
+    // per-project environment boot with it active (the orphan dir doubles as
+    // the env-file source, exactly like opening a uv/pkg project) so the
+    // recovered session isn't silently demoted to shared mode (review M2).
+    // Known narrow gap (second review, note only): a READY same-language
+    // kernel below reuses the live session without activating the orphan's
+    // environment — the env files are still preserved into the working dir,
+    // so the mode stamps correctly on save and activates on restart.
+    const startAndRecover = () => {
+      dismissWelcome();
+      setInterpreterWarning(null);
+      pendingProjectRef.current = { type: 'recover', orphanDir, language };
+      if (envMode === 'pkg') {
+        void launchPkgKernel({ saveDir: orphanDir });
+      } else if (envMode === 'uv') {
+        void launchUvKernel({ saveDir: orphanDir });
+      } else {
+        void ensureKernel(language);
+      }
+    };
     if (kernelStatus === 'ready') {
-      guardDirty('recover an unsaved session', () => { void executeRecoverUnsaved(orphanDir); });
+      if (activeLanguage === language) {
+        guardDirty('recover an unsaved session', () => { void executeRecoverUnsaved(orphanDir); });
+      } else {
+        guardDirty('recover an unsaved session', startAndRecover);
+      }
       return;
     }
-    dismissWelcome();
-    setInterpreterWarning(null);
-    pendingProjectRef.current = { type: 'recover', orphanDir };
-    void ensureKernel('python');
-  }, [kernelStatus, guardDirty, executeRecoverUnsaved, dismissWelcome, ensureKernel]);
+    startAndRecover();
+  }, [kernelStatus, activeLanguage, guardDirty, executeRecoverUnsaved, dismissWelcome, ensureKernel, launchPkgKernel, launchUvKernel]);
 
   // Keep refs in sync so the menu-action effect (subscribed once) calls the latest handlers.
   handleOpenWithPickerRef.current = handleOpenWithPicker;
   handleOpenRecentRef.current = handleOpenRecent;
   handleClearRecentsRef.current = handleClearRecents;
 
+  // A failed or cancelled launch abandons any deferred project action —
+  // otherwise it would fire into the NEXT kernel the user starts, which may
+  // be a different language entirely (review M9).
+  useEffect(() => {
+    if (kernelStatus === 'error') pendingProjectRef.current = null;
+  }, [kernelStatus]);
+
   // Execute deferred project action once the kernel becomes ready.
   useEffect(() => {
     if (kernelStatus !== 'ready' || !pendingProjectRef.current) return;
     const pending = pendingProjectRef.current;
     pendingProjectRef.current = null;
+    const wantedLanguage = pending.language;
+    if (wantedLanguage && activeLanguage && wantedLanguage !== activeLanguage) {
+      // Stale entry from an abandoned launch: the kernel that came up is
+      // not the one this action was queued for (review M9). Dropping it is
+      // strictly safer than loading cross-language data.
+      console.warn(
+        `[pdv] dropping deferred ${pending.type} action: queued for ${wantedLanguage}, ` +
+        `active kernel is ${activeLanguage}`,
+      );
+      return;
+    }
     if (pending.type === 'recover') {
       void executeRecoverUnsaved(pending.orphanDir);
     } else {
       void executeOpenProject(pending.path);
     }
-  }, [kernelStatus, executeOpenProject, executeRecoverUnsaved]);
+  }, [kernelStatus, activeLanguage, executeOpenProject, executeRecoverUnsaved]);
 
   const projectTitle = currentProjectName
     ?? (currentProjectDir
@@ -1426,8 +1500,19 @@ const App: React.FC = () => {
           output={kernelLaunch.output}
           errorMessage={kernelLaunch.error}
           onRetry={handleLaunchRetry}
-          onCancel={handleLaunchCancel}
-          onChooseEnv={kernelLaunch.mode === 'shared' ? handleLaunchChooseEnv : undefined}
+          onCancel={() => {
+            // Cancelling an abandoned launch also abandons its deferred
+            // open/recover action (review M9).
+            pendingProjectRef.current = null;
+            handleLaunchCancel();
+          }}
+          // Shared AND pkg launches get "Choose environment…": the commonest
+          // pkg failure (PDVKernel missing from the selected runtime's
+          // default env) is a runtime-selection error that Settings → Runtime
+          // fixes, while Retry re-fails identically. uv failures are
+          // project-spec sync problems where picking an interpreter wouldn't
+          // help.
+          onChooseEnv={kernelLaunch.mode !== 'uv' ? handleLaunchChooseEnv : undefined}
         />
       )}
 
@@ -1530,7 +1615,14 @@ const App: React.FC = () => {
                 <Console
                   logs={logs}
                   onClear={handleClearConsole}
-                  onInstallPackage={environmentMode === 'uv' ? handleInstallMissingModule : undefined}
+                  // Reactive install works where an in-kernel installer exists:
+                  // uv-mode Python projects (pdv.install → uv add) and every
+                  // Julia session (PDVKernel.install → Pkg.add, §10.5.12).
+                  onInstallPackage={
+                    environmentMode === 'uv' || activeLanguage === 'julia'
+                      ? handleInstallMissingModule
+                      : undefined
+                  }
                 />
               </div>
               {editorCollapsed ? (
@@ -1658,6 +1750,7 @@ const App: React.FC = () => {
       {activeDialog?.kind === 'createScript' && currentKernelId && (
         <CreateTreeItemDialog
           kind="script"
+          language={activeLanguage}
           parentPath={activeDialog.parentPath}
           onCancel={closeDialog}
           onCreate={async (name) => {
@@ -1736,6 +1829,7 @@ const App: React.FC = () => {
       {activeDialog?.kind === 'createLib' && currentKernelId && (
         <CreateTreeItemDialog
           kind="lib"
+          language={activeLanguage}
           parentPath={activeDialog.parentPath}
           onCancel={closeDialog}
           onCreate={async (name) => {
@@ -1890,6 +1984,14 @@ const App: React.FC = () => {
            currentPythonPath={config?.pythonPath}
            onCreateUv={(opts) => void handleNewProjectCreateUv(opts)}
            onCreateShared={(pythonPath) => void handleNewProjectCreateShared(pythonPath)}
+           onCancel={closeDialog}
+         />
+       )}
+
+       {activeDialog?.kind === 'newJuliaProject' && (
+         <NewJuliaProjectDialog
+           defaultPackages={config?.defaultJuliaPackages ?? []}
+           onCreate={(opts) => void handleNewProjectCreatePkg(opts)}
            onCancel={closeDialog}
          />
        )}

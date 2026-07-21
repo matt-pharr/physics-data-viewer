@@ -68,8 +68,10 @@ def _collect_nodes(
     on_progress: "Callable[[int], None] | None" = None,
     counter: "list[int] | None" = None,
     missing_files: "list[str] | None" = None,
+    failed_nodes: "list[dict] | None" = None,
     autosave_cache: "dict[str, tuple[bytes, dict]] | None" = None,
     autosave_hits: "list[int] | None" = None,
+    prior_index: "list | None" = None,
 ) -> list:
     """Recursively serialize tree nodes and return descriptor list.
 
@@ -91,6 +93,11 @@ def _collect_nodes(
         Mutable list that collects tree paths of file-backed nodes whose
         backing files were missing. If provided, missing-file errors skip
         the node instead of falling back to pickle.
+    failed_nodes : list, optional
+        Mutable list that collects ``{"path", "type", "error"}`` entries for
+        values that even the pickle fallback could not serialize (lambdas,
+        open handles, ...). Such nodes are skipped so one unpicklable leaf
+        never aborts the whole save.
     autosave_cache : dict, optional
         Per-node checksum cache shared across calls. When provided, data
         nodes whose digest matches the cached value reuse the previous
@@ -100,6 +107,11 @@ def _collect_nodes(
     autosave_hits : list, optional
         Single-element counter incremented once per cache hit. Used by
         the autosave handler to log cache effectiveness.
+    prior_index : list, optional
+        The previous save's tree-index.json node list. When a node cannot
+        be serialized at all, its descriptor (and its children's) is
+        re-used from here so the last good on-disk snapshot stays in the
+        new index and survives the orphan purge (PR #347 review M1).
 
     Returns
     -------
@@ -136,8 +148,12 @@ def _collect_nodes(
                 autosave_cache=autosave_cache,
                 autosave_hits=autosave_hits,
             )
-        except PDVSerializationError as exc:
-            if missing_files is not None and str(exc).startswith("File not found:"):
+        except Exception as exc:  # noqa: BLE001 — any escape triggers the fallback
+            if (
+                isinstance(exc, PDVSerializationError)
+                and missing_files is not None
+                and str(exc).startswith("File not found:")
+            ):
                 log.warning(
                     "project.save: skipping node '%s' — backing file missing: %s",
                     path,
@@ -154,7 +170,43 @@ def _collect_nodes(
                 type(value).__name__,
                 exc,
             )
-            descriptor = pickle_fallback_node(path, value, save_dir)
+            try:
+                descriptor = pickle_fallback_node(path, value, save_dir)
+            except Exception as fallback_exc:  # noqa: BLE001
+                # Even pickle refused (lambda, open handle, ...). Keep the
+                # node's previously saved snapshot when one exists (so the
+                # purge cannot destroy the last good copy), else skip it —
+                # one unpicklable leaf must never abort the whole save.
+                preserved = _preserve_prior_descriptors(nodes, prior_index, path)
+                if preserved:
+                    log.warning(
+                        "project.save: node '%s' (%s) could not be serialized"
+                        " — keeping its previously saved snapshot: %s",
+                        path,
+                        type(value).__name__,
+                        fallback_exc,
+                    )
+                else:
+                    log.warning(
+                        "project.save: node '%s' (%s) could not be serialized"
+                        " at all — skipping: %s",
+                        path,
+                        type(value).__name__,
+                        fallback_exc,
+                    )
+                if failed_nodes is not None:
+                    failed_nodes.append(
+                        {
+                            "path": path,
+                            "type": type(value).__name__,
+                            "error": str(fallback_exc),
+                            "preserved": preserved,
+                        }
+                    )
+                counter[0] += 1
+                if on_progress is not None:
+                    on_progress(counter[0])
+                continue
         nodes.append(descriptor)
         counter[0] += 1
         if on_progress is not None:
@@ -169,8 +221,10 @@ def _collect_nodes(
                     on_progress=on_progress,
                     counter=counter,
                     missing_files=missing_files,
+                    failed_nodes=failed_nodes,
                     autosave_cache=autosave_cache,
                     autosave_hits=autosave_hits,
+                    prior_index=prior_index,
                 )
             )
         elif descriptor.get("metadata", {}).get("composite") and isinstance(value, dict):
@@ -187,11 +241,53 @@ def _collect_nodes(
                     on_progress=on_progress,
                     counter=counter,
                     missing_files=missing_files,
+                    failed_nodes=failed_nodes,
                     autosave_cache=autosave_cache,
                     autosave_hits=autosave_hits,
+                    prior_index=prior_index,
                 )
             )
     return nodes
+
+
+def _preserve_prior_descriptors(
+    nodes: list, prior_index: "list | None", path: str
+) -> bool:
+    """Re-append a failed node's descriptors from the previous save's index.
+
+    When a node cannot be serialized at all, re-using its descriptor (and
+    its children's, for prior composites/subtrees) keeps it in the new
+    tree-index.json, which in turn keeps its ``tree/<uuid>/`` snapshot out
+    of :func:`_purge_orphaned_tree_files` — the alternative silently
+    destroys the last good copy of the data (PR #347 review M1).
+
+    Parameters
+    ----------
+    nodes : list
+        The descriptor list being built; preserved descriptors are appended.
+    prior_index : list or None
+        The previous save's node list (``None`` when there is no prior
+        save or it could not be read).
+    path : str
+        Dot-separated tree path of the node that failed to serialize.
+
+    Returns
+    -------
+    bool
+        Whether at least one prior descriptor was preserved.
+    """
+    if prior_index is None:
+        return False
+    preserved = False
+    child_prefix = path + "."
+    for entry in prior_index:
+        if not isinstance(entry, dict):
+            continue
+        entry_path = str(entry.get("path", ""))
+        if entry_path == path or entry_path.startswith(child_prefix):
+            nodes.append(dict(entry))
+            preserved = True
+    return preserved
 
 
 def _purge_orphaned_tree_files(save_dir: str, nodes: list[dict]) -> None:
@@ -788,7 +884,13 @@ def serialize_tree_to_dir(
     -------
     dict
         ``{"node_count", "checksum", "aborted", "module_owned_files",
-        "module_manifests", "missing_files", "autosave_cache_hits"}``.
+        "module_manifests", "missing_files", "failed_nodes",
+        "autosave_cache_hits"}``. ``failed_nodes`` lists
+        ``{"path", "type", "error", "preserved"}`` entries for values that
+        even the pickle fallback could not serialize. When the node was in
+        the previous save, its last good snapshot is preserved in the new
+        index (``preserved`` is True); otherwise it is skipped. The save
+        still succeeds either way.
         ``autosave_cache_hits`` is the number of nodes that reused a
         cached descriptor; meaningful only when ``autosave_cache`` was
         provided.
@@ -819,12 +921,36 @@ def serialize_tree_to_dir(
     working_dir = tree._working_dir or save_dir
     total = _count_nodes(tree)
 
+    # Immediate 0/total emission so the renderer's bar appears before the
+    # walk starts (a single multi-GB file copy lives inside one node tick —
+    # without this a small tree's only emission is current == total, which
+    # the renderer treats as "done, clear the bar", and the whole save shows
+    # no feedback at all). Small trees then emit every node; the %5 throttle
+    # is for large trees where per-node comm messages are meaningful
+    # overhead.
+    if on_progress is not None:
+        on_progress("Serializing", 0, total)
+
     def _emit_progress(current: int) -> None:
-        if current % 5 == 0 or current == total:
+        if total <= 20 or current % 5 == 0 or current == total:
             if on_progress is not None:
                 on_progress("Serializing", current, total)
 
+    # Previous save's index, consulted only to preserve the last good
+    # snapshot of nodes that fail to serialize (see
+    # ``_preserve_prior_descriptors``). Never used for current values.
+    prior_index: "list | None" = None
+    prior_index_path = os.path.join(save_dir, "tree-index.json")
+    if os.path.isfile(prior_index_path):
+        try:
+            with open(prior_index_path, encoding="utf-8") as fh:
+                parsed = json.load(fh)
+            prior_index = parsed if isinstance(parsed, list) else None
+        except Exception:  # noqa: BLE001 — a corrupt prior index just disables preservation
+            prior_index = None
+
     missing_files: list[str] = []
+    failed_nodes: list[dict] = []
     autosave_hits: list[int] = [0]
     nodes = _collect_nodes(
         tree,
@@ -832,8 +958,10 @@ def serialize_tree_to_dir(
         working_dir=working_dir,
         on_progress=_emit_progress,
         missing_files=missing_files,
+        failed_nodes=failed_nodes,
         autosave_cache=autosave_cache,
         autosave_hits=autosave_hits,
+        prior_index=prior_index,
     )
     if missing_files:
         return {
@@ -843,6 +971,7 @@ def serialize_tree_to_dir(
             "module_owned_files": [],
             "module_manifests": [],
             "missing_files": missing_files,
+            "failed_nodes": failed_nodes,
             "autosave_cache_hits": autosave_hits[0],
         }
 
@@ -881,6 +1010,7 @@ def serialize_tree_to_dir(
         "module_owned_files": module_owned_files,
         "module_manifests": module_manifests,
         "missing_files": missing_files,
+        "failed_nodes": failed_nodes,
         "autosave_cache_hits": autosave_hits[0],
     }
 

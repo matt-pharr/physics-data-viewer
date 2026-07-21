@@ -56,6 +56,40 @@ class TestHandleScriptRegister:
         assert response["status"] == "ok"
         assert response["payload"]["path"] == "scripts.analysis.fit_model"
 
+    def test_register_extracts_docstring_preview(self, tmp_path):
+        """The module docstring's first line becomes the tree preview."""
+        from pdv.environment import uuid_tree_path
+
+        tree = PDVTree()
+        tree._working_dir = str(tmp_path)
+        node_uuid = "abc123def456"
+        script_path = uuid_tree_path(str(tmp_path), node_uuid, "fit_model.py")
+        import os
+
+        os.makedirs(os.path.dirname(script_path), exist_ok=True)
+        with open(script_path, "w", encoding="utf-8") as fh:
+            fh.write('"""Fit a model to the data.\n\nDetails."""\n\ndef run(pdv_tree):\n    return {}\n')
+
+        mock_comm = _make_mock_comm()
+        msg = _make_msg(
+            {
+                "parent_path": "scripts",
+                "name": "fit_model",
+                "uuid": node_uuid,
+                "filename": "fit_model.py",
+                "language": "python",
+            }
+        )
+        with (
+            patch.object(comms_mod, "_comm", mock_comm),
+            patch.object(comms_mod, "_pdv_tree", tree),
+        ):
+            handle_script_register(msg)
+
+        node = tree["scripts.fit_model"]
+        assert node.doc == "Fit a model to the data."
+        assert node.preview() == "Fit a model to the data."
+
     def test_register_with_source_rel_path_persists_on_node(self):
         """source_rel_path from payload is stored on the PDVScript node.
 

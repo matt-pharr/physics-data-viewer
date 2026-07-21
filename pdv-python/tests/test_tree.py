@@ -129,8 +129,8 @@ class TestDotPathAccess:
         assert result.equals(ds["a"])
 
     def test_get_descends_to_dataset_coord(self, tree_with_comm):
-        """Coord names resolve incidentally via Dataset.__getitem__ even
-        though the tree panel only lists data_vars as children."""
+        """Coord names resolve via the Dataset virtual-children adapter,
+        matching the tree panel, which lists data_vars and coords."""
         xr = pytest.importorskip("xarray")
         import numpy as np
         ds = xr.Dataset(

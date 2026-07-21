@@ -38,6 +38,7 @@ jobs:
       # otherwise use the detected changes. `inputs.run-all` is empty (falsy)
       # on push/pull_request events, so the `|| steps...` branch applies there.
       python: ${{ inputs.run-all && 'true' || steps.filter.outputs.python }}
+      julia: ${{ inputs.run-all && 'true' || steps.filter.outputs.julia }}
       electron: ${{ inputs.run-all && 'true' || steps.filter.outputs.electron }}
       docs: ${{ inputs.run-all && 'true' || steps.filter.outputs.docs }}
     steps:
@@ -50,6 +51,9 @@ jobs:
           filters: |
             python:
               - 'pdv-python/**'
+              - '.github/workflows/ci.yml'
+            julia:
+              - 'pdv-julia/**'
               - '.github/workflows/ci.yml'
             electron:
               - 'electron/**'
@@ -203,6 +207,43 @@ jobs:
       - name: Python tests
         working-directory: pdv-python
         run: pytest tests/ -v
+
+  julia-tests:
+    # The PDVKernel.jl unit suite (kernel-free — the comm transport is
+    # stubbed, so no IJulia/Jupyter session is spawned). Until this job
+    # existed the 500+ Julia tests ran only on developer machines, so a
+    # pdv-julia regression could merge on green CI (third-review finding).
+    # Julia-side integration against a real kernel remains local-only
+    # (main/integration-julia.test.ts, JULIA_PATH-gated).
+    needs: filter
+    if: needs.filter.outputs.julia == 'true'
+    name: Julia tests
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+
+      - name: Setup Julia
+        uses: julia-actions/setup-julia@fa02766e078afaaf09b14210362cee14137e6a32  # v3.0.2
+        with:
+          # Track the minor the app develops and ships against (§10.7);
+          # exact patch floats with the channel, same as juliaup's "1.11".
+          version: '1.11'
+
+      # Caches ~/.julia (packages, artifacts, compiled caches) keyed on the
+      # Project.toml; first cold run pays the full resolve+precompile
+      # (~5-10 min), warm runs start in seconds.
+      - name: Cache Julia depot
+        uses: julia-actions/cache@a45e8fa8be21c18a06b7177052533149e61e9b38  # v3.1.0
+
+      - name: Julia tests
+        run: |
+          julia --project=pdv-julia --color=yes -e '
+            using Pkg
+            Pkg.instantiate()
+            Pkg.test()'
 
   dep-sweep:
     # Enforce the CLAUDE.md pre-merge convention: any change under pdv-python/
@@ -497,6 +538,7 @@ jobs:
       - build
       - typecheck
       - python-tests
+      - julia-tests
       - dep-sweep
       - node-main-tests
       - renderer-tests

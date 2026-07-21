@@ -70,4 +70,63 @@ describe('TreeNodeRow', () => {
     );
     expect(screen.getByText('▼')).toBeTruthy();
   });
+
+  it('labels the type chip by kind + language: Dict for Julia mappings, NamedTuple for NamedTuples', () => {
+    const chipFor = (pythonType: string): string | null | undefined => {
+      const { container } = render(
+        <TreeNodeRow
+          node={makeNode({ type: 'mapping', pythonType })}
+          onExpand={vi.fn()}
+          onDoubleClick={vi.fn()}
+          onRightClick={vi.fn()}
+          onClick={vi.fn()}
+        />,
+      );
+      const text = container.querySelector('.tree-type-badge')?.textContent;
+      cleanup();
+      return text;
+    };
+    expect(chipFor('builtins.dict')).toBe('dict');
+    expect(chipFor('Base.Dict{String, Any}')).toBe('Dict');
+    expect(chipFor('Core.NamedTuple')).toBe('NamedTuple');
+  });
+
+  it('marks coordinate rows with a coord chip and muted row class', () => {
+    const { container } = render(
+      <TreeNodeRow
+        node={makeNode({
+          type: 'dataarray',
+          hasChildren: false,
+          isCoord: true,
+        })}
+        onExpand={vi.fn()}
+        onDoubleClick={vi.fn()}
+        onRightClick={vi.fn()}
+        onClick={vi.fn()}
+      />,
+    );
+    expect(container.querySelector('.tree-row')?.className.includes('coord')).toBe(true);
+    expect(screen.getByText('coord')).toBeTruthy();
+  });
+
+  it('labels lazy data file nodes with format nouns', () => {
+    const chipFor = (type: string): string | null | undefined => {
+      const { container } = render(
+        <TreeNodeRow
+          node={makeNode({ type })}
+          onExpand={vi.fn()}
+          onDoubleClick={vi.fn()}
+          onRightClick={vi.fn()}
+          onClick={vi.fn()}
+        />,
+      );
+      const text = container.querySelector('.tree-type-badge')?.textContent;
+      cleanup();
+      return text;
+    };
+    expect(chipFor('dataset_file')).toBe('netcdf');
+    expect(chipFor('hdf5_file')).toBe('hdf5');
+    expect(chipFor('hdf5_group')).toBe('group');
+    expect(chipFor('hdf5_dataset')).toBe('h5.Dataset');
+  });
 });

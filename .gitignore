@@ -45,3 +45,5 @@ pdv-icon.iconset
 
 # Docs
 site/
+# Julia package manager artifacts (pdv-julia is a library; the manifest is machine-local)
+pdv-julia/Manifest.toml

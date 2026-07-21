@@ -121,8 +121,10 @@ def load_tree_index(
     # Local imports to avoid circular dependencies — tree.py imports nothing
     # from this module, so importing tree.py here is safe.
     from pdv.tree import (  # noqa: PLC0415
+        PDVDataset,
         PDVFile,
         PDVGui,
+        PDVHdf5,
         PDVLib,
         PDVModule,
         PDVNamelist,
@@ -130,6 +132,7 @@ def load_tree_index(
         PDVScript,
         PDVTree,
     )
+    from pdv.environment import preimport_data_libs  # noqa: PLC0415
     from pdv.serialization import deserialize_node  # noqa: PLC0415
 
     def _full_path(node_path_rel: str) -> str:
@@ -330,6 +333,26 @@ def load_tree_index(
                 tree.set_quiet(
                     full_path,
                     PDVFile(
+                        uuid=node_uuid,
+                        filename=node_filename,
+                        source_rel_path=src_rel,
+                    ),
+                )
+            elif node_type == "dataset_file":
+                preimport_data_libs("xarray")
+                tree.set_quiet(
+                    full_path,
+                    PDVDataset(
+                        uuid=node_uuid,
+                        filename=node_filename,
+                        source_rel_path=src_rel,
+                    ),
+                )
+            elif node_type == "hdf5_file":
+                preimport_data_libs("h5py")
+                tree.set_quiet(
+                    full_path,
+                    PDVHdf5(
                         uuid=node_uuid,
                         filename=node_filename,
                         source_rel_path=src_rel,

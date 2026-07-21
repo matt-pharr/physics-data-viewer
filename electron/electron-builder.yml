@@ -44,6 +44,17 @@ extraResources:
       - "!**/tests/**"
       - "!**/.pytest_cache/**"
       - "!**/.git/**"
+  # pdv-julia source, staged by julia-discovery.ts into <userData>/pdv-julia
+  # and Pkg.develop'ed by the one-click PDVKernel install (§10.7.4).
+  # resolveBundledPDVJuliaPath() expects <Resources>/pdv-julia in packaged
+  # builds — without this entry the install can only ever work in dev
+  # (PR #347 review B3).
+  - from: ../pdv-julia
+    to: pdv-julia
+    filter:
+      - "**/*"
+      - "!test/**"
+      - "!**/.git/**"
   - from: ../examples/modules
     to: examples/modules
     filter:

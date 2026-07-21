@@ -24,7 +24,7 @@ interface UseKernelLifecycleOptions {
   /** Bumps the token to trigger a Tree panel refetch. */
   setTreeRefreshToken: Dispatch<SetStateAction<number>>;
   /** Setter for the active environment mode ("uv" project venv vs shared). */
-  setEnvironmentMode: Dispatch<SetStateAction<'uv' | 'shared'>>;
+  setEnvironmentMode: Dispatch<SetStateAction<'uv' | 'shared' | 'pkg'>>;
 }
 
 export function useKernelLifecycle(options: UseKernelLifecycleOptions) {
@@ -77,9 +77,10 @@ export function useKernelLifecycle(options: UseKernelLifecycleOptions) {
 
       const kernel = await window.pdv.kernels.start(spec, uvContext);
       setCurrentKernelId(kernel.id);
-      // uvContext is only supplied for uv-project launches; its presence is
-      // the authoritative signal that this kernel runs in a project venv.
-      setEnvironmentMode(uvContext ? 'uv' : 'shared');
+      // A launch context is only supplied for per-project-environment
+      // launches; its presence is the authoritative signal that this kernel
+      // runs in a project env — uv for Python (§10.5), pkg for Julia (§10.6).
+      setEnvironmentMode(uvContext ? (language === 'julia' ? 'pkg' : 'uv') : 'shared');
       setTreeRefreshToken((prev) => prev + 1);
       setNamespaceRefreshToken((prev) => prev + 1);
       setKernelStatus('ready');

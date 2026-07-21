@@ -41,6 +41,11 @@ export interface KernelExecutionLocation {
 
 // eslint-disable-next-line no-control-regex
 const ANSI_ESCAPE_RE = /\u001b\[[0-9;]*m|\u001b\]8;[^\u0007\u001b]*(?:\u0007|\u001b\\)/g;
+// Superset of the above for streamed output: any CSI sequence (colors,
+// cursor movement, line clears - Pkg progress uses them all), plus OSC 8
+// hyperlinks.
+// eslint-disable-next-line no-control-regex
+const ANSI_STREAM_RE = /\u001b\[[0-9;?]*[A-Za-z]|\u001b\]8;[^\u0007\u001b]*(?:\u0007|\u001b\\)/g;
 const TRACEBACK_FILE_LINE_RE = /^\s*File "([^"]+)", line (\d+)(?:, in .+)?$/;
 const TRACEBACK_FILE_LINE_BARE_RE = /^\s*File ([^,]+), line (\d+)(?:, in .+)?$/;
 const TRACEBACK_CELL_LINE_RE = /^\s*Cell In\[\d+\], line (\d+)(?:, in .+)?$/;
@@ -65,6 +70,23 @@ interface TracebackFrame {
 
 function stripAnsi(line: string): string {
   return line.replace(ANSI_ESCAPE_RE, "");
+}
+
+/**
+ * Normalize a streamed output chunk to plain text for panes that render raw
+ * strings (the EnvSyncModal / Packages-tab output panes, which accumulate
+ * into a `<pre>`): strips every ANSI escape sequence — SGR colors, cursor
+ * movement, line clears, OSC 8 hyperlinks — and converts bare carriage
+ * returns (progress-bar redraws) into newlines.
+ *
+ * This is the project-standard helper for de-ANSI-ing kernel/subprocess
+ * stream output; prefer it over ad-hoc regexes (ARCHITECTURE.md §10.8).
+ *
+ * @param text - Raw output chunk (kernel stdio, iopub stream, subprocess pipe).
+ * @returns Plain-text chunk safe for a non-ANSI-aware pane.
+ */
+export function plainStreamText(text: string): string {
+  return text.replace(ANSI_STREAM_RE, "").replace(/\r(?!\n)/g, "\n");
 }
 
 /**

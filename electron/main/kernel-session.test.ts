@@ -16,6 +16,7 @@ interface FakeKernelManager {
   getKernel: ReturnType<typeof vi.fn>;
   execute: ReturnType<typeof vi.fn>;
   onIopubMessage: ReturnType<typeof vi.fn>;
+  onProcessOutput: ReturnType<typeof vi.fn>;
   getQueryPort: ReturnType<typeof vi.fn>;
   getKernelProcessState: ReturnType<typeof vi.fn>;
 }
@@ -30,6 +31,7 @@ function makeKernelManager(overrides: Partial<FakeKernelManager> = {}): FakeKern
     })),
     execute: vi.fn(async (): Promise<KernelExecuteResult> => ({})),
     onIopubMessage: vi.fn(() => () => undefined),
+    onProcessOutput: vi.fn(() => () => undefined),
     getQueryPort: vi.fn(() => 0),
     getKernelProcessState: vi.fn(() => ({ exitCode: null, killed: false })),
     ...overrides,
@@ -139,5 +141,162 @@ describe("initializeKernelSession diagnostics", () => {
       )
     ).rejects.toThrow();
     expect(dispose).toHaveBeenCalledOnce();
+  });
+});
+
+describe("activity-based ready deadline (§10.8)", () => {
+  /**
+   * Comm router whose pdv.ready never arrives, so the ready wait is governed
+   * entirely by its timers.
+   */
+  function makeSilentCommRouter(): CommRouter {
+    return {
+      onPush: vi.fn(),
+      offPush: vi.fn(),
+      request: vi.fn(async () => ({})),
+    } as unknown as CommRouter;
+  }
+
+  it("times out after the idle allowance when the kernel is silent", async () => {
+    vi.useFakeTimers();
+    try {
+      const km = makeKernelManager();
+      const pending = initializeKernelSession(
+        km as unknown as KernelManager,
+        makeSilentCommRouter(),
+        makeQueryRouter(),
+        makeProjectManager(),
+        "k1",
+        new Map()
+      );
+      const assertion = expect(pending).rejects.toThrow(
+        /no kernel activity for 15 s/
+      );
+      await vi.advanceTimersByTimeAsync(15_100);
+      await assertion;
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("a wedged bootstrap execute is unwound by the ready deadline (second review)", async () => {
+    vi.useFakeTimers();
+    try {
+      const km = makeKernelManager({
+        // Alive-but-silent `using PDVKernel` (e.g. stuck on another
+        // process's precompile pidfile lock): the execute never settles.
+        // Without racing it against the ready deadline this await hung
+        // forever under the start lock.
+        execute: vi.fn(() => new Promise<KernelExecuteResult>(() => undefined)),
+      });
+      const pending = initializeKernelSession(
+        km as unknown as KernelManager,
+        makeSilentCommRouter(),
+        makeQueryRouter(),
+        makeProjectManager(),
+        "k1",
+        new Map()
+      );
+      const assertion = expect(pending).rejects.toThrow(
+        /failed at step 'bootstrap': .*no kernel activity for 15 s/
+      );
+      await vi.advanceTimersByTimeAsync(15_100);
+      await assertion;
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("kernel activity (iopub streams / process output) extends the idle deadline up to the cap", async () => {
+    vi.useFakeTimers();
+    try {
+      type IopubMsg = {
+        header: { msg_type: string };
+        content?: { text?: string };
+      };
+      const iopubListeners: Array<(msg: IopubMsg) => void> = [];
+      const km = makeKernelManager({
+        onIopubMessage: vi.fn((_id, cb) => {
+          iopubListeners.push(cb as (msg: IopubMsg) => void);
+          return () => undefined;
+        }),
+      });
+      const bootOutput: string[] = [];
+      const pending = initializeKernelSession(
+        km as unknown as KernelManager,
+        makeSilentCommRouter(),
+        makeQueryRouter(),
+        makeProjectManager(),
+        "k1",
+        new Map(),
+        undefined,
+        undefined,
+        undefined,
+        (text) => bootOutput.push(text)
+      );
+      const assertion = expect(pending).rejects.toThrow(
+        /still absent after 60 s/
+      );
+
+      // Emit stream traffic every 10 s — each one inside the 15 s idle
+      // allowance, so the wait must survive far past 15 s and fail only at
+      // the 60 s hard cap.
+      for (let i = 0; i < 7; i++) {
+        await vi.advanceTimersByTimeAsync(10_000);
+        iopubListeners[0]?.({
+          header: { msg_type: "stream" },
+          content: { text: `Precompiling chunk ${i}\n` },
+        });
+      }
+      await assertion;
+      // The stream text was forwarded to the boot-output sink.
+      expect(bootOutput.join("")).toContain("Precompiling chunk 0");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("process output resets the idle deadline and reaches the boot-output sink", async () => {
+    vi.useFakeTimers();
+    try {
+      const outputListeners: Array<
+        (stream: "stdout" | "stderr", data: string) => void
+      > = [];
+      const km = makeKernelManager({
+        onProcessOutput: vi.fn((_id, cb) => {
+          outputListeners.push(
+            cb as (stream: "stdout" | "stderr", data: string) => void
+          );
+          return () => undefined;
+        }),
+      });
+      const bootOutput: string[] = [];
+      const pending = initializeKernelSession(
+        km as unknown as KernelManager,
+        makeSilentCommRouter(),
+        makeQueryRouter(),
+        makeProjectManager(),
+        "k1",
+        new Map(),
+        undefined,
+        undefined,
+        undefined,
+        (text) => bootOutput.push(text)
+      );
+      const assertion = expect(pending).rejects.toThrow(
+        /no kernel activity for 15 s/
+      );
+
+      // One burst of process output at t=10 s pushes the idle deadline to
+      // t=25 s; silence after that fails at the idle allowance, proving the
+      // reset happened (a flat deadline would have fired at t=15 s).
+      await vi.advanceTimersByTimeAsync(10_000);
+      outputListeners[0]?.("stderr", "Precompiling IJulia...\n");
+      await vi.advanceTimersByTimeAsync(15_100);
+      await assertion;
+      expect(bootOutput.join("")).toContain("Precompiling IJulia");
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

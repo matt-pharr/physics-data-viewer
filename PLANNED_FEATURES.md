@@ -7,7 +7,7 @@ This document is a roadmap, not a spec. It lists features planned beyond the cur
 | Release | Theme |
 |---|---|
 | **0.2.0-beta2** | Remote execution and AI agent integration |
-| **0.3.0-beta3** | Full Julia support |
+| **0.3.0-beta3** | Julia hardening and ecosystem follow-ups |
 | **Later beta** | Usability, infrastructure, and hardening — ordering TBD |
 | **1.0.0** | Later-beta items complete plus polish |
 | **Post-1.0.0** | Aspirational, not committed |
@@ -23,6 +23,7 @@ Landed during the beta series and documented in [`ARCHITECTURE.md`](ARCHITECTURE
 - **MCP server and visual coupling** — the active project's tree, cells, scripts, notes, kernel, and console are exposed to external AI agents via a local MCP server, with agent-originated operations tagged through the `origin` field.
 - **Namelist editor (`PDVNamelist`)** — a tree node type for Fortran/TOML namelists with comm-based parsing and a `gui.json` layout node bound by dropdown.
 - **File-on-disk node type (`PDVFile`) and smart-copy** — a user-facing `PDVFile` (via `pdv.add_file()`) plus a copy-on-write `smart_copy` helper with lazy materialization.
+- **Julia kernel backend (`pdv-julia` / PDVKernel.jl)** — full protocol parity with `pdv-python` on top of IJulia: tree types, dot-path access, change pushes, serialization (`.npy` for numeric arrays, Julia `Serialization` elsewhere), query server, script `run(pdv_tree; kwargs...)` contract, module/lib loading via `include` into `Main`, namelist parsing (built-in Fortran parser + TOML stdlib), and `PDVKernel.install()` via Pkg. Covered by a Julia test suite, a `JULIA_PATH`-gated integration suite, and a Playwright GUI smoke spec.
 
 ---
 
@@ -47,24 +48,42 @@ The MCP server + visual coupling (Agents track) and per-project uv environment m
 
 ## Data nodes track
 
-### PDVDataset and PDVHdf5 tree node types
-First-class tree node types for scientific data files: `PDVDataset` wraps `xarray.Dataset` / NetCDF, and `PDVHdf5` wraps `h5py` files. Both open lazily, expand into the tree to expose variables/groups as children, and treat their host libraries as optional dependencies — projects that don't use them don't pay for them. No metadata caching in the main process; the kernel remains the sole authority on dataset shape and contents. Tracked in [#203](https://github.com/matt-pharr/physics-data-viewer/issues/203). Independent of the other beta2 tracks.
+### PDVDataset and PDVHdf5 tree node types — SHIPPED (Python), 2026-07-20
+First-class tree node types for scientific data files: `PDVDataset` wraps NetCDF via xarray, and `PDVHdf5` wraps HDF5 via h5py. Both open lazily read-only, expand in the tree via the generic virtual-children protocol (`pdv/virtual.py`, ARCHITECTURE.md §5.8.1/§7.2) with headers re-read on demand (no metadata caching), auto-detect on import by extension, and treat their host libraries as optional dependencies (`pdv-python[netcdf]` / `pdv-python[hdf5]`). Closed [#203](https://github.com/matt-pharr/physics-data-viewer/issues/203). Shipped with Playwright e2e coverage for both kernels (`electron/e2e/dataset-nodes.spec.ts`, `electron/e2e/julia-hdf5-smoke.spec.ts`). Deferred follow-ups: zarr directory stores (#350), dotted-name HDF5 path escaping (#351).
+
+**Julia parity: the HDF5 half shipped 2026-07-20** (same PR): PDVKernel.jl has its own `PDVHdf5` via `HDF5.jl` (optional package, `PDVKernel.install("HDF5")`), the generic virtual-children protocol in `pdv-julia/src/virtual.jl`, `PDVKernel.add_hdf5` + extension autodetect, HDF5.Dataset and complex Re/Im default plot handlers, and query-cache snapshot integration with per-open-handle listing memoization — reusing the language-neutral kind strings (`hdf5_file`, `hdf5_group`, `hdf5_dataset`) and storage format (`hdf5`), so the same `.h5` file shows the identical tree in either kernel. Still pending: PDVDataset/NetCDF on Julia — the `DimensionalData.jl`/`NCDatasets.jl` question (JULIA_KNOWN_ISSUES #9); a Python-authored `dataset_file` node is skipped by the Julia loader with an "open with a Python session" pointer.
 
 ---
 
-# 0.3.0-beta3 — Full Julia Support
+# 0.3.0-beta3 — Julia Hardening
 
-The PDV comm protocol is language-agnostic (ARCHITECTURE.md §3). Julia is deferred to its own beta so it can be built on top of a stable remote/agents foundation rather than alongside it.
+The core Julia backend has shipped (see **Shipped** above): `pdv-julia` implements the
+full kernel protocol, the app boots Julia sessions from the welcome screen, and the
+bundled N-pendulum-julia module targets it. Remaining Julia work is hardening and
+ecosystem follow-ups:
 
 ### Scope
-- `pdv-julia` package: Julia equivalent of `pdv-python` with full protocol parity.
-- Julia kernel launch path in `KernelManager`.
-- `language_mode` field in `project.json` to drive kernel choice at open time.
-- `PDVScript` dispatch for `.jl` files.
-- Julia integration tests with parity to the Python pytest suite.
-- Julia completion provider via the existing `complete_request` IPC.
+- ~~Packaging/registration of `PDVKernel.jl` (General registry or app-driven
+  `Pkg.develop`) so the app can offer one-click install like it does for pdv-python~~ —
+  shipped on the Julia backend branch: one-click install stages the bundled
+  `pdv-julia` and `Pkg.develop`s it into the runtime's default environment
+  (ARCHITECTURE.md §10.7.4). General-registry publication remains open.
+- ~~Julia environment discovery in the Environment Selector (today: manual path entry;
+  juliaup-aware discovery planned)~~ — shipped on the Julia backend branch:
+  juliaup-channel discovery + automatic shim bypass (ARCHITECTURE.md §10.7),
+  plus juliaup version management — `juliaup add` from the selector, one-click
+  juliaup bootstrap, a load-time `Manifest.toml` version check (§10.7.5), and
+  a New Julia Project dialog with a version picker + initial packages,
+  matching the Python dialog (§10.6.5).
+- ~~Tree queries during long compute-bound executions~~ — shipped on the Julia
+  backend branch: threaded query server on a default-pool OS thread serving a
+  lock-guarded listings snapshot (ARCHITECTURE.md §5.14).
+- ~~Per-project Julia environments (the `Project.toml` analog of the uv flow)~~ —
+  shipped on the Julia backend branch: Pkg-managed `mode: "pkg"` projects
+  (ARCHITECTURE.md §10.6), including the `Project.toml`-driven package list
+  with add/remove/update in the Project Environment tab (§10.6.8).
 
-Target use case: a physicist running a Julia simulation code on a remote cluster, driven from a PDV module. Beta2 remote and agent work must be stable before this begins.
+Target use case: a physicist running a Julia simulation code on a remote cluster, driven from a PDV module.
 
 ---
 

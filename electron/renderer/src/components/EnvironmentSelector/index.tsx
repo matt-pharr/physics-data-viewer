@@ -1,15 +1,19 @@
 /**
- * EnvironmentSelector — Python environment discovery picker with auto-install.
+ * EnvironmentSelector — Python/Julia environment discovery picker with
+ * auto-install.
  *
  * In Python mode: discovers conda, venv, pyenv, and system Python environments,
  * shows package status badges, and offers one-click pdv-python installation from
  * the bundled source with streaming pip output.
  *
- * In Julia mode: shows a stub with manual path input (discovery not yet implemented).
+ * In Julia mode (§10.7): discovers juliaup channels (real versioned binaries,
+ * never the shim) and system Julia installs, shows PDVKernel/IJulia status
+ * badges, and offers one-click PDVKernel + IJulia installation into the
+ * runtime's default environment with streaming Pkg output.
  */
 
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import type { EnvironmentInfo, InstallOutputChunk } from '../../types';
+import type { EnvironmentInfo, InstallOutputChunk, JuliaRuntimeInfo } from '../../types';
 
 // ---------------------------------------------------------------------------
 // Props
@@ -83,6 +87,7 @@ const KIND_ICONS: Record<string, string> = {
   pyenv: 'P',
   system: 'S',
   configured: '*',
+  juliaup: 'J',
 };
 
 const KIND_TOOLTIPS: Record<string, string> = {
@@ -90,6 +95,13 @@ const KIND_TOOLTIPS: Record<string, string> = {
   venv: 'Virtual environment',
   pyenv: 'pyenv environment',
   system: 'System Python',
+  configured: 'Manually configured',
+  juliaup: 'juliaup channel',
+};
+
+const JULIA_KIND_TOOLTIPS: Record<string, string> = {
+  juliaup: 'juliaup channel',
+  system: 'System Julia',
   configured: 'Manually configured',
 };
 
@@ -130,8 +142,29 @@ export const EnvironmentSelector: React.FC<EnvironmentSelectorProps> = ({
   const [installResult, setInstallResult] = useState<{ success: boolean; output: string } | null>(null);
   const outputRef = useRef<HTMLPreElement>(null);
 
-  // -- Julia stub state ------------------------------------------------------
-  const [juliaPath, setJuliaPath] = useState(currentJuliaPath || 'julia');
+  // -- Julia discovery state (§10.7) -----------------------------------------
+  const [juliaRuntimes, setJuliaRuntimes] = useState<JuliaRuntimeInfo[]>([]);
+  const [juliaLoading, setJuliaLoading] = useState(true);
+  const [juliaError, setJuliaError] = useState<string | null>(null);
+  const [selectedJuliaPath, setSelectedJuliaPath] = useState<string | null>(null);
+  const [selectedJuliaInfo, setSelectedJuliaInfo] = useState<JuliaRuntimeInfo | null>(null);
+  const [juliaInstalling, setJuliaInstalling] = useState(false);
+  const [juliaInstallOutput, setJuliaInstallOutput] = useState<string[]>([]);
+  const [juliaInstallResult, setJuliaInstallResult] = useState<{ success: boolean; output: string } | null>(null);
+  const juliaOutputRef = useRef<HTMLPreElement>(null);
+
+  // -- juliaup version management state (§10.7.5) -----------------------------
+  // null = presence not yet known (first scan in flight).
+  const [juliaupInstalled, setJuliaupInstalled] = useState<boolean | null>(null);
+  const [addVersionText, setAddVersionText] = useState('');
+  const [addingVersion, setAddingVersion] = useState(false);
+  const [addVersionOutput, setAddVersionOutput] = useState<string[]>([]);
+  const [addVersionResult, setAddVersionResult] = useState<{ success: boolean; output: string } | null>(null);
+  const addVersionOutputRef = useRef<HTMLPreElement>(null);
+  const [installingJuliaup, setInstallingJuliaup] = useState(false);
+  const [juliaupInstallOutput, setJuliaupInstallOutput] = useState<string[]>([]);
+  const [juliaupInstallResult, setJuliaupInstallResult] = useState<{ success: boolean; output: string } | null>(null);
+  const juliaupOutputRef = useRef<HTMLPreElement>(null);
 
   // The selector can unmount mid-flight (host dialog dismissed during a
   // discovery scan or a pdv-python install); async handlers must not set
@@ -322,17 +355,246 @@ export const EnvironmentSelector: React.FC<EnvironmentSelectorProps> = ({
     }
   }, [selectedPath, selectedInfo, onSelect]);
 
-  // -- Julia browse ----------------------------------------------------------
+  // -- Julia discovery / selection (§10.7) ------------------------------------
+  const loadJuliaRuntimes = useCallback(async () => {
+    setJuliaLoading(true);
+    setJuliaError(null);
+    try {
+      const [runtimes, juliaup] = await Promise.all([
+        window.pdv.environment.listJulia(),
+        window.pdv.environment.juliaupStatus(),
+      ]);
+      if (!mountedRef.current) return null;
+      setJuliaRuntimes(runtimes);
+      setJuliaupInstalled(juliaup.installed);
+      return runtimes;
+    } catch (err) {
+      if (!mountedRef.current) return null;
+      setJuliaError(err instanceof Error ? err.message : String(err));
+      return null;
+    } finally {
+      if (mountedRef.current) setJuliaLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (activeLanguage !== 'julia') return;
+    void loadJuliaRuntimes().then((runtimes) => {
+      if (!runtimes) return;
+      // Auto-select the configured runtime, falling back to the juliaup
+      // default channel on first run.
+      const current =
+        runtimes.find((r) => r.juliaPath === currentJuliaPath)
+        ?? runtimes.find((r) => r.isDefault);
+      if (current) {
+        setSelectedJuliaPath(current.juliaPath);
+        setSelectedJuliaInfo(current);
+      }
+    });
+  // Only run on mount / language change — not when currentJuliaPath changes.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeLanguage, loadJuliaRuntimes]);
+
+  const handleJuliaSelect = useCallback(async (runtime: JuliaRuntimeInfo) => {
+    setSelectedJuliaPath(runtime.juliaPath);
+    setSelectedJuliaInfo(runtime);
+    setJuliaInstallResult(null);
+    setJuliaInstallOutput([]);
+
+    // Re-probe for fresh PDVKernel/IJulia status.
+    try {
+      const fresh = await window.pdv.environment.checkJulia(runtime.juliaPath);
+      if (!mountedRef.current) return;
+      if (fresh) {
+        setSelectedJuliaInfo(fresh);
+        setJuliaRuntimes((prev) =>
+          prev.map((r) => (r.juliaPath === fresh.juliaPath ? fresh : r))
+        );
+      }
+    } catch {
+      // Keep stale info on probe failure
+    }
+  }, []);
+
+  const handleJuliaRefresh = useCallback(async () => {
+    setSelectedJuliaPath(null);
+    setSelectedJuliaInfo(null);
+    await loadJuliaRuntimes();
+  }, [loadJuliaRuntimes]);
+
+  // Only one Julia install flow — PDVKernel install, `juliaup add`, or the
+  // juliaup bootstrap — may run at a time: all three stream onto the single
+  // onInstallOutput channel (their panes would interleave), and two
+  // Pkg/juliaup subprocesses would mutate the same depot concurrently. A ref
+  // (not state) so a double-click racing a re-render is still excluded; the
+  // per-flow state flags drive the button labels/disabling.
+  const juliaFlowBusyRef = useRef(false);
+
+  const handleJuliaInstall = useCallback(async (): Promise<boolean> => {
+    if (!selectedJuliaPath) return false;
+    if (juliaFlowBusyRef.current) return false;
+    juliaFlowBusyRef.current = true;
+    setJuliaInstalling(true);
+    setJuliaInstallOutput([]);
+    setJuliaInstallResult(null);
+
+    const unsubscribe = window.pdv.environment.onInstallOutput((chunk: InstallOutputChunk) => {
+      if (mountedRef.current) setJuliaInstallOutput((prev) => [...prev, chunk.data]);
+    });
+
+    try {
+      const result = await window.pdv.environment.installJulia(selectedJuliaPath);
+      if (!mountedRef.current) return result.success;
+      setJuliaInstallResult(result);
+
+      if (result.success) {
+        const fresh = await window.pdv.environment.checkJulia(selectedJuliaPath);
+        if (!mountedRef.current) return result.success;
+        if (fresh) {
+          setSelectedJuliaInfo(fresh);
+          setJuliaRuntimes((prev) =>
+            prev.map((r) => (r.juliaPath === fresh.juliaPath ? fresh : r))
+          );
+        }
+      }
+      return result.success;
+    } catch (err) {
+      if (mountedRef.current) {
+        setJuliaInstallResult({
+          success: false,
+          output: err instanceof Error ? err.message : String(err),
+        });
+      }
+      return false;
+    } finally {
+      unsubscribe();
+      juliaFlowBusyRef.current = false;
+      if (mountedRef.current) setJuliaInstalling(false);
+    }
+  }, [selectedJuliaPath]);
+
+  // Auto-scroll the Julia install output
+  useEffect(() => {
+    if (juliaOutputRef.current) {
+      juliaOutputRef.current.scrollTop = juliaOutputRef.current.scrollHeight;
+    }
+  }, [juliaInstallOutput]);
+
   const handleJuliaBrowse = useCallback(async () => {
     try {
       const filePath = await window.pdv.files.pickExecutable();
-      if (filePath) setJuliaPath(filePath);
-    } catch { /* ignore */ }
+      if (!filePath) return;
+      const info = await window.pdv.environment.checkJulia(filePath);
+      if (!mountedRef.current) return;
+      if (info) {
+        setSelectedJuliaPath(info.juliaPath);
+        setSelectedJuliaInfo(info);
+        setJuliaRuntimes((prev) => {
+          if (prev.some((r) => r.juliaPath === info.juliaPath)) {
+            return prev.map((r) => (r.juliaPath === info.juliaPath ? info : r));
+          }
+          return [info, ...prev];
+        });
+      } else {
+        setJuliaError(`Could not detect a working Julia at: ${filePath}`);
+      }
+    } catch (err) {
+      if (mountedRef.current) {
+        setJuliaError(err instanceof Error ? err.message : String(err));
+      }
+    }
   }, []);
 
   const handleJuliaConfirm = useCallback(() => {
-    onSelect({ juliaPath });
-  }, [juliaPath, onSelect]);
+    if (selectedJuliaPath && selectedJuliaInfo) {
+      onSelect({ juliaPath: selectedJuliaPath });
+    }
+  }, [selectedJuliaPath, selectedJuliaInfo, onSelect]);
+
+  // -- juliaup version management (§10.7.5) -----------------------------------
+
+  const handleJuliaupAdd = useCallback(async () => {
+    const channel = addVersionText.trim();
+    if (!channel) return;
+    if (juliaFlowBusyRef.current) return;
+    juliaFlowBusyRef.current = true;
+    setAddingVersion(true);
+    setAddVersionOutput([]);
+    setAddVersionResult(null);
+
+    const unsubscribe = window.pdv.environment.onInstallOutput((chunk: InstallOutputChunk) => {
+      if (mountedRef.current) setAddVersionOutput((prev) => [...prev, chunk.data]);
+    });
+
+    try {
+      const result = await window.pdv.environment.juliaupAdd(channel);
+      if (!mountedRef.current) return;
+      setAddVersionResult(result);
+      if (result.success) {
+        setAddVersionText('');
+        // The new channel appears in the discovery list; its default env
+        // will need the one-click PDVKernel install (badges show that).
+        await loadJuliaRuntimes();
+      }
+    } catch (err) {
+      if (mountedRef.current) {
+        setAddVersionResult({
+          success: false,
+          output: err instanceof Error ? err.message : String(err),
+        });
+      }
+    } finally {
+      unsubscribe();
+      juliaFlowBusyRef.current = false;
+      if (mountedRef.current) setAddingVersion(false);
+    }
+  }, [addVersionText, loadJuliaRuntimes]);
+
+  const handleInstallJuliaup = useCallback(async () => {
+    if (juliaFlowBusyRef.current) return;
+    juliaFlowBusyRef.current = true;
+    setInstallingJuliaup(true);
+    setJuliaupInstallOutput([]);
+    setJuliaupInstallResult(null);
+
+    const unsubscribe = window.pdv.environment.onInstallOutput((chunk: InstallOutputChunk) => {
+      if (mountedRef.current) setJuliaupInstallOutput((prev) => [...prev, chunk.data]);
+    });
+
+    try {
+      const result = await window.pdv.environment.installJuliaup();
+      if (!mountedRef.current) return;
+      setJuliaupInstallResult(result);
+      if (result.success) {
+        // The installer also installs a default Julia — rescan picks up
+        // both juliaup presence and the new channel.
+        await loadJuliaRuntimes();
+      }
+    } catch (err) {
+      if (mountedRef.current) {
+        setJuliaupInstallResult({
+          success: false,
+          output: err instanceof Error ? err.message : String(err),
+        });
+      }
+    } finally {
+      unsubscribe();
+      juliaFlowBusyRef.current = false;
+      if (mountedRef.current) setInstallingJuliaup(false);
+    }
+  }, [loadJuliaRuntimes]);
+
+  // Auto-scroll the juliaup streaming panes
+  useEffect(() => {
+    if (addVersionOutputRef.current) {
+      addVersionOutputRef.current.scrollTop = addVersionOutputRef.current.scrollHeight;
+    }
+  }, [addVersionOutput]);
+  useEffect(() => {
+    if (juliaupOutputRef.current) {
+      juliaupOutputRef.current.scrollTop = juliaupOutputRef.current.scrollHeight;
+    }
+  }, [juliaupInstallOutput]);
 
   // -- Can the user confirm selection? ---------------------------------------
   // Free-threaded (no-GIL) Python builds cannot run a PDV kernel because
@@ -504,29 +766,219 @@ export const EnvironmentSelector: React.FC<EnvironmentSelectorProps> = ({
     </>
   );
 
+  // A runtime is launchable once PDVKernel (compatible) and IJulia resolve.
+  const canConfirmJulia =
+    selectedJuliaInfo?.pdvKernelInstalled
+    && selectedJuliaInfo?.pdvKernelCompatible
+    && selectedJuliaInfo?.ijuliaInstalled;
+
+  const juliaNeedsInstall =
+    selectedJuliaInfo
+    && (!selectedJuliaInfo.pdvKernelInstalled
+      || selectedJuliaInfo.pdvKernelVersionMismatch
+      || !selectedJuliaInfo.ijuliaInstalled);
+
   const juliaContent = (
     <>
-      <h2>Configure Julia Runtime</h2>
-      <p className="help-text">
-        Julia environment discovery is not yet available. Enter a Julia executable path below.
-      </p>
-      <div className="input-group">
-        <label>Julia Executable</label>
-        <div className="input-with-button">
+      <h2>Select Julia Runtime</h2>
+
+      {warning && (
+        <p className="error-text">{warning}</p>
+      )}
+
+      {isFirstRun && (
+        <p className="help-text">
+          PDV needs a Julia runtime with the PDVKernel package to run. Select
+          one below and we'll install everything automatically.
+        </p>
+      )}
+
+      {/* Runtime list */}
+      <div className="env-list">
+        {juliaLoading && <div className="env-list-loading">Detecting Julia runtimes...</div>}
+
+        {!juliaLoading && juliaError && <div className="error-text">{juliaError}</div>}
+
+        {!juliaLoading && !juliaError && juliaRuntimes.length === 0 && (
+          <div className="env-list-empty">
+            {juliaupInstalled === false
+              ? 'No Julia runtimes found. Use "Install juliaup" below to set everything up automatically, or Browse to locate a Julia executable.'
+              : 'No Julia runtimes found. Add a version below with juliaup, or use Browse to locate a Julia executable.'}
+          </div>
+        )}
+
+        {!juliaLoading && juliaRuntimes.map((runtime) => (
+          <button
+            key={runtime.juliaPath}
+            className={`env-row ${selectedJuliaPath === runtime.juliaPath ? 'env-row--selected' : ''}`}
+            onClick={() => void handleJuliaSelect(runtime)}
+            type="button"
+          >
+            <span className={`env-kind-badge env-kind-badge--${runtime.kind}`} title={JULIA_KIND_TOOLTIPS[runtime.kind] ?? 'Unknown'}>
+              {KIND_ICONS[runtime.kind] ?? '?'}
+            </span>
+            <span className="env-row-info">
+              <span className="env-row-label">{runtime.label}</span>
+              <span className="env-row-path">{runtime.juliaPath}</span>
+            </span>
+            <span className="env-row-badges">
+              {runtime.pdvKernelInstalled ? (
+                runtime.pdvKernelVersionMismatch ? (
+                  <span className="env-badge env-badge--warning" title={`Version mismatch: ${runtime.pdvKernelVersion} (app: ${appVersion ?? '?'})`}>PDVKernel {runtime.pdvKernelVersion}</span>
+                ) : (
+                  <span className="env-badge env-badge--ok" title={`PDVKernel ${runtime.pdvKernelVersion}`}>PDVKernel {runtime.pdvKernelVersion}</span>
+                )
+              ) : (
+                <span className="env-badge env-badge--missing" title="PDVKernel not installed">PDVKernel</span>
+              )}
+              {runtime.ijuliaInstalled ? (
+                <span className="env-badge env-badge--ok" title="IJulia installed">IJulia</span>
+              ) : (
+                <span className="env-badge env-badge--missing" title="IJulia not installed">IJulia</span>
+              )}
+            </span>
+          </button>
+        ))}
+      </div>
+
+      {/* Action bar: Browse + Refresh */}
+      <div className="env-actions">
+        <button className="btn btn-secondary" onClick={handleJuliaBrowse} type="button">
+          Browse...
+        </button>
+        <button className="btn btn-secondary" onClick={() => void handleJuliaRefresh()} disabled={juliaLoading} type="button">
+          {juliaLoading ? 'Scanning...' : 'Refresh'}
+        </button>
+      </div>
+
+      {/* juliaup bootstrap — offered when juliaup is absent (§10.7.5). */}
+      {juliaupInstalled === false && (
+        <div className="env-install-panel">
+          <div className="env-install-header">
+            juliaup (the Julia version manager) is not installed. PDV uses it
+            to install and switch Julia versions; installing it also installs
+            the latest Julia.
+          </div>
+          <button
+            className="btn btn-primary"
+            onClick={() => void handleInstallJuliaup()}
+            disabled={installingJuliaup || addingVersion || juliaInstalling}
+            type="button"
+          >
+            {installingJuliaup
+              ? 'Installing juliaup... (this can take a few minutes)'
+              : 'Install juliaup'}
+          </button>
+          {(juliaupInstallOutput.length > 0 || juliaupInstallResult) && (
+            <pre className="env-install-output" ref={juliaupOutputRef}>
+              {juliaupInstallOutput.length > 0
+                ? juliaupInstallOutput.join('')
+                : juliaupInstallResult?.output ?? ''}
+            </pre>
+          )}
+          {juliaupInstallResult && (
+            <div className={juliaupInstallResult.success ? 'env-install-success' : 'error-text'}>
+              {juliaupInstallResult.success
+                ? 'juliaup installed.'
+                : 'juliaup installation failed.'}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Version acquisition — `juliaup add <channel>` (§10.7.5). */}
+      {juliaupInstalled === true && (
+        <div className="env-add-version">
           <input
             type="text"
-            value={juliaPath}
-            onChange={(e) => setJuliaPath(e.target.value)}
-            placeholder="/usr/local/bin/julia"
+            placeholder='Add a Julia version with juliaup (e.g. "1.10", "lts", "rc")'
+            value={addVersionText}
+            onChange={(e) => setAddVersionText(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') void handleJuliaupAdd();
+            }}
+            disabled={addingVersion || juliaInstalling || installingJuliaup}
           />
-          <button className="btn btn-secondary" onClick={handleJuliaBrowse} type="button">
-            Browse
+          <button
+            className="btn btn-secondary"
+            onClick={() => void handleJuliaupAdd()}
+            disabled={addingVersion || juliaInstalling || installingJuliaup || !addVersionText.trim()}
+            type="button"
+          >
+            {addingVersion ? 'Adding...' : 'Add'}
           </button>
         </div>
-      </div>
+      )}
+      {(addVersionOutput.length > 0 || addVersionResult) && (
+        <>
+          <pre className="env-install-output" ref={addVersionOutputRef}>
+            {addVersionOutput.length > 0
+              ? addVersionOutput.join('')
+              : addVersionResult?.output ?? ''}
+          </pre>
+          {addVersionResult && (
+            <div className={addVersionResult.success ? 'env-install-success' : 'error-text'}>
+              {addVersionResult.success
+                ? 'Julia version installed — select its channel above and install PDVKernel into it.'
+                : 'juliaup add failed.'}
+            </div>
+          )}
+        </>
+      )}
+
+      {/* Install panel — visible when the selected runtime needs PDVKernel/IJulia. */}
+      {juliaNeedsInstall && (
+        <div className="env-install-panel">
+          <div className="env-install-header">
+            {selectedJuliaInfo.pdvKernelVersionMismatch
+              ? `PDVKernel ${selectedJuliaInfo.pdvKernelVersion} installed — v${appVersion ?? 'latest'} required.`
+              : !selectedJuliaInfo.pdvKernelInstalled
+                ? 'PDVKernel is not installed in this runtime’s default environment.'
+                : 'IJulia is not installed in this runtime’s default environment.'}
+          </div>
+          <button
+            className="btn btn-primary"
+            onClick={() => void handleJuliaInstall()}
+            disabled={juliaInstalling || addingVersion || installingJuliaup}
+            type="button"
+          >
+            {juliaInstalling
+              ? 'Installing... (first install can take a few minutes)'
+              : selectedJuliaInfo.pdvKernelVersionMismatch
+                ? `Install PDVKernel ${appVersion ?? 'latest'}`
+                : 'Install PDVKernel'}
+          </button>
+
+          {/* Streaming Pkg output */}
+          {(juliaInstallOutput.length > 0 || juliaInstallResult) && (
+            <pre className="env-install-output" ref={juliaOutputRef}>
+              {juliaInstallOutput.length > 0
+                ? juliaInstallOutput.join('')
+                : juliaInstallResult?.output ?? ''}
+            </pre>
+          )}
+
+          {/* Result message */}
+          {juliaInstallResult && (
+            <div className={juliaInstallResult.success ? 'env-install-success' : 'error-text'}>
+              {juliaInstallResult.success
+                ? 'Installation complete.'
+                : 'Installation failed.'}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Confirm / Cancel */}
       <div className="button-group">
-        <button className="btn btn-primary" onClick={handleJuliaConfirm} type="button">
-          Save
+        <button
+          className="btn btn-primary"
+          onClick={handleJuliaConfirm}
+          disabled={!canConfirmJulia}
+          type="button"
+          title={canConfirmJulia ? undefined : 'Install PDVKernel first'}
+        >
+          Select Runtime
         </button>
         {!isFirstRun && onCancel && (
           <button className="btn btn-secondary" onClick={onCancel} type="button">

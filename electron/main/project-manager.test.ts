@@ -272,6 +272,37 @@ describe("ProjectManager", () => {
       });
     });
 
+    it("records pkg mode with julia_version and preserves a prior one on re-save (§10.6.4)", async () => {
+      await fs.writeFile(
+        path.join(tmpDir, "project.json"),
+        JSON.stringify({
+          schema_version: "1.2",
+          saved_at: "2026-01-01T00:00:00.000Z",
+          pdv_version: getAppVersion(),
+          tree_checksum: "old",
+          language: "julia",
+          environment: { mode: "pkg", julia_version: "1.11.6" },
+        }),
+        "utf8"
+      );
+
+      const { router, requestMock } = makeMockRouter();
+      requestMock.mockResolvedValue(makeOkResponse({ checksum: "new" }));
+
+      const pm = new ProjectManager(router);
+      // A save whose env metadata lacks the version (e.g. restart-carried
+      // session) must not drop the previously recorded julia_version.
+      const result = await pm.save(tmpDir, EMPTY_CELLS, {
+        language: "julia",
+        environment: { mode: "pkg" },
+      });
+
+      expect(result.pendingManifest!.environment).toEqual({
+        mode: "pkg",
+        julia_version: "1.11.6",
+      });
+    });
+
     it("does not write project.json when kernel returns error", async () => {
       const { router, requestMock } = makeMockRouter();
       requestMock.mockRejectedValue(makeCommError("save.failed"));
@@ -645,6 +676,43 @@ describe("ProjectManager", () => {
       expect(result.environment).toEqual({ mode: "uv" });
     });
 
+    it("parses a pkg environment block with julia_version (§10.6.4)", async () => {
+      const manifest = {
+        schema_version: "1.2",
+        saved_at: "2026-01-01T00:00:00.000Z",
+        pdv_version: getAppVersion(),
+        tree_checksum: "abc",
+        language: "julia",
+        environment: { mode: "pkg", julia_version: "1.11.6" },
+      };
+      await fs.writeFile(
+        path.join(tmpDir, "project.json"),
+        JSON.stringify(manifest),
+        "utf8"
+      );
+
+      const result = await ProjectManager.readManifest(tmpDir);
+      expect(result.environment).toEqual({ mode: "pkg", julia_version: "1.11.6" });
+    });
+
+    it("omits julia_version from a pkg environment block when it is not a string", async () => {
+      const manifest = {
+        schema_version: "1.2",
+        saved_at: "2026-01-01T00:00:00.000Z",
+        pdv_version: getAppVersion(),
+        tree_checksum: "abc",
+        environment: { mode: "pkg", julia_version: 1.11 },
+      };
+      await fs.writeFile(
+        path.join(tmpDir, "project.json"),
+        JSON.stringify(manifest),
+        "utf8"
+      );
+
+      const result = await ProjectManager.readManifest(tmpDir);
+      expect(result.environment).toEqual({ mode: "pkg" });
+    });
+
     it("coerces a malformed environment block to shared", async () => {
       for (const bad of ["nonsense", 42, ["uv"], { mode: "bogus" }, null]) {
         const manifest = {
@@ -732,6 +800,32 @@ describe("ProjectManager", () => {
       expect(result.timestamp).toMatch(/^\d{4}-\d{2}-\d{2}T/);
       // mtime should be parseable and recent
       expect(Number.isNaN(Date.parse(result.timestamp!))).toBe(false);
+      // No sidecar manifest → language unknown (recovery defaults to python).
+      expect(result.language).toBeUndefined();
+    });
+
+    it("reads the kernel language from the sidecar project.json", async () => {
+      await fs.mkdir(path.join(dir, ".autosave"), { recursive: true });
+      await fs.writeFile(path.join(dir, ".autosave", "tree-index.json"), "[]", "utf8");
+      await fs.writeFile(
+        path.join(dir, ".autosave", "project.json"),
+        JSON.stringify({ language: "julia" }),
+        "utf8",
+      );
+
+      const result = await ProjectManager.checkForAutosave(dir);
+      expect(result.exists).toBe(true);
+      expect(result.language).toBe("julia");
+    });
+
+    it("ignores a malformed sidecar manifest", async () => {
+      await fs.mkdir(path.join(dir, ".autosave"), { recursive: true });
+      await fs.writeFile(path.join(dir, ".autosave", "tree-index.json"), "[]", "utf8");
+      await fs.writeFile(path.join(dir, ".autosave", "project.json"), "{not json", "utf8");
+
+      const result = await ProjectManager.checkForAutosave(dir);
+      expect(result.exists).toBe(true);
+      expect(result.language).toBeUndefined();
     });
   });
 
@@ -785,6 +879,53 @@ describe("ProjectManager", () => {
       for (const r of results) {
         expect(Number.isNaN(Date.parse(r.timestamp))).toBe(false);
       }
+    });
+
+    it("carries each autosave's sidecar language through to the results", async () => {
+      const jl = path.join(base, "julia-session");
+      const py = path.join(base, "python-session");
+      await fs.mkdir(path.join(jl, ".autosave"), { recursive: true });
+      await fs.mkdir(path.join(py, ".autosave"), { recursive: true });
+      await fs.writeFile(path.join(jl, ".autosave", "tree-index.json"), "[]", "utf8");
+      await fs.writeFile(path.join(py, ".autosave", "tree-index.json"), "[]", "utf8");
+      await fs.writeFile(
+        path.join(jl, ".autosave", "project.json"),
+        JSON.stringify({ language: "julia" }),
+        "utf8",
+      );
+
+      const results = await ProjectManager.scanForAutosaves(base);
+      const byDir = new Map(results.map((r) => [r.dir, r.language]));
+      expect(byDir.get(jl)).toBe("julia");
+      expect(byDir.get(py)).toBeUndefined();
+    });
+
+    it("reports envMode for orphans holding project-environment files (review M2)", async () => {
+      const mk = async (name: string, language?: string, envFile?: string) => {
+        const dir = path.join(base, name);
+        await fs.mkdir(path.join(dir, ".autosave"), { recursive: true });
+        await fs.writeFile(path.join(dir, ".autosave", "tree-index.json"), "[]", "utf8");
+        if (language) {
+          await fs.writeFile(
+            path.join(dir, ".autosave", "project.json"),
+            JSON.stringify({ language }),
+            "utf8",
+          );
+        }
+        if (envFile) await fs.writeFile(path.join(dir, envFile), "", "utf8");
+        return dir;
+      };
+      const pkgJl = await mk("julia-pkg", "julia", "Project.toml");
+      const sharedJl = await mk("julia-shared", "julia");
+      const uvPy = await mk("python-uv", "python", "pyproject.toml");
+      const sharedPy = await mk("python-shared", "python");
+
+      const results = await ProjectManager.scanForAutosaves(base);
+      const byDir = new Map(results.map((r) => [r.dir, r.envMode]));
+      expect(byDir.get(pkgJl)).toBe("pkg");
+      expect(byDir.get(sharedJl)).toBeUndefined();
+      expect(byDir.get(uvPy)).toBe("uv");
+      expect(byDir.get(sharedPy)).toBeUndefined();
     });
   });
 

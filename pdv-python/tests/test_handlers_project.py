@@ -283,6 +283,37 @@ class TestHandleProjectSave:
             nodes = json.load(f)
         assert isinstance(nodes, list)
 
+    def test_save_emits_progress_from_zero(self, tree_with_comm, tmp_save_dir):
+        """Save streams pdv.progress starting at 0/total (regression).
+
+        The renderer's loading bar only shows for ``current < total`` and
+        clears at ``current >= total`` — before the 0/total emission, a
+        small tree's sole event was the final ``total/total``, so the whole
+        save produced no visible feedback. Small trees now emit every node.
+        """
+        tree_with_comm["a"] = 1
+        tree_with_comm["b"] = [1.0, 2.0]
+        tree_with_comm["c"] = "text"
+        mock_comm = _make_mock_comm()
+        msg = _make_msg("pdv.project.save", {"save_dir": tmp_save_dir})
+        with (
+            patch.object(comms_mod, "_comm", mock_comm),
+            patch.object(comms_mod, "_pdv_tree", tree_with_comm),
+        ):
+            handle_project_save(msg)
+        progress = [
+            e["payload"] for e in mock_comm._sent if e["type"] == "pdv.progress"
+        ]
+        assert progress, "save sent no pdv.progress messages"
+        assert all(
+            p["operation"] == "save" and p["phase"] == "Serializing"
+            for p in progress
+        )
+        assert progress[0]["current"] == 0
+        assert len({p["total"] for p in progress}) == 1
+        assert progress[-1]["current"] == progress[-1]["total"]
+        assert len(progress) >= 3  # 0, ...every node (small tree)..., total
+
     def test_nan_scalar_saves_as_strictly_valid_json(
         self, tree_with_comm, tmp_save_dir
     ):
@@ -368,6 +399,116 @@ class TestHandleProjectSave:
         assert response["aborted"] is True
         assert response["missing_files"] == ["ghost"]
         assert response["checksum"] == ""
+
+    def test_unpicklable_leaf_is_skipped_not_fatal(self, tree_with_comm, tmp_save_dir):
+        """A value even the pickle fallback refuses (a lambda) is skipped and
+        recorded in failed_nodes — one unpicklable leaf never aborts the save."""
+        tree_with_comm["good"] = 42
+        tree_with_comm["poison"] = lambda x: x + 1
+        mock_comm = _make_mock_comm()
+        msg = _make_msg("pdv.project.save", {"save_dir": tmp_save_dir})
+        with (
+            patch.object(comms_mod, "_comm", mock_comm),
+            patch.object(comms_mod, "_pdv_tree", tree_with_comm),
+        ):
+            handle_project_save(msg)
+        response = mock_comm._sent[-1]["payload"]
+        assert response["aborted"] is False
+        assert len(response["failed_nodes"]) == 1
+        assert response["failed_nodes"][0]["path"] == "poison"
+        assert response["failed_nodes"][0]["preserved"] is False  # no prior save
+        with open(os.path.join(tmp_save_dir, "tree-index.json"), encoding="utf-8") as fh:
+            index = json.load(fh)
+        paths = {entry["path"] for entry in index}
+        assert "poison" not in paths  # skipped, not written
+        assert "good" in paths  # the rest saved fine
+
+    def test_non_str_keyed_dict_pickles_whole(self, tree_with_comm, tmp_save_dir):
+        """Dicts with non-str keys never split composite: int shot-number
+        keys must survive save/load unchanged, and the composite path would
+        round-trip them as strings (PR #347 review M6 parity)."""
+        tree_with_comm["shots"] = {
+            1: numpy.array([1.0, 2.0]),
+            2: numpy.array([3.0]),
+        }
+        mock_comm = _make_mock_comm()
+        msg = _make_msg("pdv.project.save", {"save_dir": tmp_save_dir})
+        with (
+            patch.object(comms_mod, "_comm", mock_comm),
+            patch.object(comms_mod, "_pdv_tree", tree_with_comm),
+        ):
+            handle_project_save(msg)
+        response = mock_comm._sent[-1]["payload"]
+        assert response["aborted"] is False
+        assert not response["failed_nodes"]
+        with open(os.path.join(tmp_save_dir, "tree-index.json"), encoding="utf-8") as fh:
+            index = json.load(fh)
+        (shots_entry,) = [e for e in index if e["path"] == "shots"]
+        assert not shots_entry.get("metadata", {}).get("composite")
+        assert shots_entry["storage"]["format"] == "pickle"
+        assert not any(e["path"].startswith("shots.") for e in index)
+
+        # keys survive the round trip with their original types
+        fresh = PDVTree()
+        fresh._working_dir = tmp_save_dir
+        load_msg = _make_msg("pdv.project.load", {"save_dir": tmp_save_dir})
+        with (
+            patch.object(comms_mod, "_comm", _make_mock_comm()),
+            patch.object(comms_mod, "_pdv_tree", fresh),
+        ):
+            handle_project_load(load_msg)
+        shots = dict.__getitem__(fresh, "shots")
+        assert set(shots.keys()) == {1, 2}
+        assert numpy.array_equal(shots[1], numpy.array([1.0, 2.0]))
+
+    def test_failed_node_keeps_last_good_snapshot(self, tree_with_comm, tmp_save_dir):
+        """When a node that saved fine before becomes unpicklable, the save
+        re-uses its previous descriptor so the last good snapshot survives
+        both the index and the orphan purge (PR #347 review M1)."""
+        arr = numpy.arange(64.0)
+        tree_with_comm["vol"] = arr
+        tree_with_comm["ok"] = 1
+        mock_comm = _make_mock_comm()
+        msg = _make_msg("pdv.project.save", {"save_dir": tmp_save_dir})
+        with (
+            patch.object(comms_mod, "_comm", mock_comm),
+            patch.object(comms_mod, "_pdv_tree", tree_with_comm),
+        ):
+            handle_project_save(msg)
+        with open(os.path.join(tmp_save_dir, "tree-index.json"), encoding="utf-8") as fh:
+            index1 = json.load(fh)
+        (vol_entry,) = [e for e in index1 if e["path"] == "vol"]
+        vol_uuid = vol_entry["uuid"]
+        assert os.path.isdir(os.path.join(tmp_save_dir, "tree", vol_uuid))
+
+        # value becomes unpicklable; the save must keep the previous snapshot
+        tree_with_comm["vol"] = lambda x: x
+        mock_comm = _make_mock_comm()
+        with (
+            patch.object(comms_mod, "_comm", mock_comm),
+            patch.object(comms_mod, "_pdv_tree", tree_with_comm),
+        ):
+            handle_project_save(_make_msg("pdv.project.save", {"save_dir": tmp_save_dir}))
+        response = mock_comm._sent[-1]["payload"]
+        assert response["aborted"] is False
+        assert len(response["failed_nodes"]) == 1
+        assert response["failed_nodes"][0]["path"] == "vol"
+        assert response["failed_nodes"][0]["preserved"] is True
+        with open(os.path.join(tmp_save_dir, "tree-index.json"), encoding="utf-8") as fh:
+            index2 = json.load(fh)
+        (vol_entry2,) = [e for e in index2 if e["path"] == "vol"]
+        assert vol_entry2["uuid"] == vol_uuid  # prior descriptor re-used
+        assert os.path.isdir(os.path.join(tmp_save_dir, "tree", vol_uuid))
+
+        # the last good copy is what a reload gets back
+        fresh = PDVTree()
+        fresh._working_dir = tmp_save_dir
+        with (
+            patch.object(comms_mod, "_comm", _make_mock_comm()),
+            patch.object(comms_mod, "_pdv_tree", fresh),
+        ):
+            handle_project_load(_make_msg("pdv.project.load", {"save_dir": tmp_save_dir}))
+        assert numpy.array_equal(dict.__getitem__(fresh, "vol"), arr)
 
     def test_response_has_node_count(self, tree_with_comm, tmp_save_dir):
         """Response payload includes node_count."""

@@ -108,6 +108,33 @@ def ensure_parent(path: str) -> str:
 # ---------------------------------------------------------------------------
 
 
+def preimport_data_libs(*modules: str) -> None:
+    """Best-effort import of scientific data libraries on this thread.
+
+    Called wherever a :class:`~pdv.tree.PDVDataset`/:class:`~pdv.tree.PDVHdf5`
+    node is created or loaded (``pdv.add_file``/``add_dataset``/``add_hdf5``,
+    ``pdv.file.register``, the tree loader). xarray's and h5py's *first*
+    import is not safe to drive concurrently from multiple threads, and
+    tree listings for data nodes can arrive on the QueryServer thread —
+    importing at creation time on the main comm thread makes later
+    query-thread use a pure ``sys.modules``/isinstance affair. Missing
+    libraries are simply skipped: the node still constructs, and its
+    ``open()`` reports the actionable install hint.
+
+    Parameters
+    ----------
+    *modules : str
+        Importable module names (e.g. ``"xarray"``, ``"h5py"``).
+    """
+    import importlib  # noqa: PLC0415
+
+    for module in modules:
+        try:
+            importlib.import_module(module)
+        except Exception:  # noqa: BLE001 — absence handled at open()
+            pass
+
+
 def generate_node_uuid() -> str:
     """Generate a 12-hex-character UUID for a tree node.
 

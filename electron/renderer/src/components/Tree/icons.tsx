@@ -200,6 +200,39 @@ export const GuiIcon: React.FC<IconProps> = (props) => (
   </svg>
 );
 
+/** `PDVDataset` (lazy NetCDF file). Document with layered-grid cutout —
+ *  a 2×2 variable grid over a coordinate baseline. */
+export const DatasetFileIcon: React.FC<IconProps> = (props) => (
+  <svg {...defaults} {...props}>
+    <path
+      fillRule="evenodd"
+      d="M5 3 H13 L17 7 V17 H5 Z M7 9 H10 V11.5 H7 Z M11.5 9 H14.5 V11.5 H11.5 Z M7 12.7 H10 V15.2 H7 Z M11.5 12.7 H14.5 V15.2 H11.5 Z"
+    />
+  </svg>
+);
+
+/** `PDVHdf5` (lazy HDF5 file). Document with nested-boxes cutout —
+ *  an outer group containing an inner dataset block. */
+export const Hdf5Icon: React.FC<IconProps> = (props) => (
+  <svg {...defaults} {...props}>
+    <path
+      fillRule="evenodd"
+      d="M5 3 H13 L17 7 V17 H5 Z M7 9 H14.5 V15.5 H7 Z M8.3 10.3 H13.2 V14.2 H8.3 Z M9.6 11.6 H11.9 V12.9 H9.6 Z"
+    />
+  </svg>
+);
+
+/** HDF5 group (virtual child inside an open HDF5 file). Folder silhouette
+ *  with a small dataset-grid cutout to distinguish it from tree folders. */
+export const Hdf5GroupIcon: React.FC<IconProps> = (props) => (
+  <svg {...defaults} {...props}>
+    <path
+      fillRule="evenodd"
+      d="M3 5 H8 L10 7 H17 V16 H3 Z M6.5 9.5 H9.5 V11.5 H6.5 Z M11 9.5 H14 V11.5 H11 Z M6.5 12.7 H9.5 V14.7 H6.5 Z M11 12.7 H14 V14.7 H11 Z"
+    />
+  </svg>
+);
+
 // ---------------------------------------------------------------------------
 // PDV concepts that aren't single files
 // ---------------------------------------------------------------------------
@@ -245,6 +278,10 @@ export const TYPE_ICONS: Record<string, React.FC<IconProps>> = {
   series: SeriesIcon,
   dataset: NdarrayIcon,
   dataarray: NdarrayIcon,
+  dataset_file: DatasetFileIcon,
+  hdf5_file: Hdf5Icon,
+  hdf5_group: Hdf5GroupIcon,
+  hdf5_dataset: NdarrayIcon,
   file: FileIcon,
   script: ScriptIcon,
   markdown: MarkdownIcon,

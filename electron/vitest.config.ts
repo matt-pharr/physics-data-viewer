@@ -24,6 +24,9 @@ import { defineConfig, configDefaults } from "vitest/config";
  * stalls in node-main-tests. Fast tests still run in parallel locally.
  */
 const runSlow = !!process.env.PYTHON_PATH;
+// Julia @slow tests opt in separately: they need a Julia env with IJulia and
+// PDVKernel (dev-installed from pdv-julia/), which not every contributor has.
+const runSlowJulia = !!process.env.JULIA_PATH;
 
 const slowFiles = [
   "main/integration.test.ts",
@@ -31,15 +34,18 @@ const slowFiles = [
   "main/kernel-manager-errors.test.ts",
 ];
 
+const slowJuliaFiles = ["main/integration-julia.test.ts"];
+
 export default defineConfig({
   test: {
     pool: "forks",
-    fileParallelism: !runSlow,
+    fileParallelism: !(runSlow || runSlowJulia),
     exclude: [
       ...configDefaults.exclude,
       // Playwright specs live under ./e2e and are not vitest tests.
       "e2e/**",
       ...(runSlow ? [] : slowFiles),
+      ...(runSlowJulia ? [] : slowJuliaFiles),
     ],
   },
 });
