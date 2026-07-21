@@ -2,12 +2,11 @@
  * tree.ts — Renderer-side tree data access service.
  *
  * Thin adapter over `window.pdv.tree.list` that converts wire-format
- * descriptors into renderer `TreeNodeData` objects. Deliberately uncached:
- * every call returns freshly fetched, freshly built objects, so callers can
- * tag UI state (`isExpanded`, `children`) onto the results without aliasing
- * data seen by other callers, and no consumer ever renders stale structure.
- * Listing goes through the kernel's dedicated read-only query thread
- * (pdv.query_server), so fetches stay fast even mid-execution.
+ * descriptors into renderer `TreeNodeData` objects. This layer itself never
+ * caches — it is the queryFn layer for `queries/tree.ts`, where caching and
+ * invalidation live with principled push-driven invalidation. Listing goes
+ * through the kernel's dedicated read-only query thread (pdv.query_server),
+ * so fetches stay fast even mid-execution.
  */
 
 import type { NodeDescriptor } from '../types/pdv';

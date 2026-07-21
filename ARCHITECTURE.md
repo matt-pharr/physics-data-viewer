@@ -812,7 +812,7 @@ The file layout mirrors `pdv-python` one-to-one (`tree.jl`, `serialization.jl`, 
 | Runtime version acquisition | bundled uv downloads interpreters on demand (`uv python install`, §10.5.7) | the *user's* juliaup, never bundled (§10.7.5): selector-driven `juliaup add`, one-click juliaup bootstrap via the official script, and a load-time `Manifest.toml` version check with a `juliaup add` offer |
 | Query server | ZMQ REP on a daemon thread (GIL makes concurrent dict reads safe) | ZMQ REP on a **spare interactive-pool** OS thread when one exists (the app spawns Julia with `--threads=auto,2`: the main task holds one interactive thread, the query loop the other). The pool choice is load-bearing — `@threads :static` pins one task per *default*-pool thread, so a resident loop on a default thread would deadlock every `:static` loop in the session; interactive tids are never pinned. The loop never touches libuv (a blocked `ZMQ.recv` starves while the main thread computes) — it polls `sock.events` + `Libc.systemsleep` with a `yield()` per tick (so it can never starve the sticky root task if scheduled onto tid 1), and answers `pdv.tree.list` from a lock-guarded listings snapshot rebuilt on the main thread (debounce flush, postexecute hook, project load) so it never reads live tree values cross-thread. Other query types reply `query.kernel_busy`, which the app converts into a comm-channel fallback. Without a spare interactive thread it degrades to the original cooperative async-task loop |
 | Save-walker rescue | any error → pickle fallback; a value even pickle refuses (lambda, open handle) is skipped and reported in `failed_nodes` | same contract: any error → jls fallback; a value even jls refuses (running `Task`, ...) is skipped and reported in `failed_nodes`. `Serialization` refuses more values than pickle, so this path is far more reachable on Julia |
-| Change debounce | `threading.Timer` (fires mid-execution) | libuv `Timer` (fires at yield points; the renderer's 1 Hz poll is the safety net during tight loops) |
+| Change debounce | `threading.Timer` (fires mid-execution) | libuv `Timer` (fires at yield points; the renderer's version-check poll (§7.4.3) is the safety net during tight loops) |
 
 Because saved data formats differ (`pickle` vs `jls`), projects are per-language: `project.json`'s `language` field selects the kernel at open time, and the Julia loader rejects `pickle`-format nodes with a clear "open with a Python session" error (and vice-versa — the Python loader does not know `jls`).
 
@@ -1333,7 +1333,7 @@ Additional fields present at top level for specific types:
 
 ### 7.4 Tree-Update Propagation
 
-Tree changes propagate to the renderer by two complementary mechanisms — push notifications for snappy live updates, and a 1 Hz poll as a safety net for mutations that bypass push.
+Tree changes propagate to the renderer by three complementary mechanisms — push notifications for snappy live updates, a post-execute structural fingerprint that catches silent mutations at the source, and a low-frequency version-check poll as the last-resort safety net.
 
 #### 7.4.1 Push (primary)
 
@@ -1352,14 +1352,20 @@ Whenever the tree structure changes — a node is added, deleted, or its value u
 
 Mutations on the **root** `PDVTree` emit precise paths via the per-instance debounced queue (§7.1.2). Mutations on **any other** `PDVTree` (intermediate sub-trees, scratch instances) emit `change_type: "unknown"` with empty `changed_paths` via a class-level global channel — local paths can't be reconciled with the renderer's absolute view, so the renderer responds with a full refresh-with-expansion. Both channels share the 100 ms debounce.
 
-#### 7.4.2 Poll (safety net)
+#### 7.4.2 Post-execute fingerprint (silent-mutation detection)
 
-The renderer also polls. Every second, the Tree component fetches fresh `pdv.tree.list` results for the root and every currently expanded subtree, structurally compares each child list against the rendered state (path / key / type / hasChildren / preview), and — when it detects drift — patches just the drifted path in place, merging the fresh children with the existing ones so surviving nodes keep their expansion state (no full-depth refetch, no loading flash). Most ticks find no change and are effectively free, since `pdv.tree.list` is served by the kernel's dedicated read-only thread (`pdv.query_server`, §3.1) and doesn't block on user-code execution. The next tick is scheduled only after the previous walk completes, so a slow walk over a large expanded tree never overlaps itself.
+Push cannot see mutations of plain-`dict` values stored in the tree (`pdv_tree['data']['x'] = 1` where `data` is a plain dict) — they have no emission machinery. Both kernels therefore compare a cheap structural fingerprint of the root tree after every execution (IPython `post_execute` event / IJulia postexecute hook). The fingerprint covers what listings display — keys, value type names, scalar values (previews show them), and shape/length for sized containers — and never touches array contents, with a node budget and depth cap bounding pathological trees. When the fingerprint drifts and no precise notification already covered the execution, the kernel bumps its **tree version counter** and emits a coarse `change_type: "unknown"` ping so the renderer refreshes immediately.
 
-The poll exists to catch mutations that push cannot see — primarily plain-`dict` values stored in the tree, which have no emission machinery. The user-facing contract is therefore:
+The version counter (`PDVTree._tree_version` / `PDVKernel._TREE_VERSION`) is a monotonic integer bumped by every mutation notification and by fingerprint drift. It is served by the read-only query server as `pdv.tree.version` → `{ "version": n }`, answerable mid-execution (in Julia's threaded query mode it is answered off-thread directly, since it reads only a lock-guarded counter).
 
-- Mutations on `PDVTree` values are reflected in the tree panel within ~100 ms.
-- Mutations on plain `dict` values stored in the tree are reflected within ~1 s.
+#### 7.4.3 Poll (safety net)
+
+The renderer also polls, as a last resort for mutations neither push nor the fingerprint sees (e.g. a background thread in user code mutating between executions). Every 2 s — and only when no `pdv.tree.changed` push arrived in the last 2 s, since a live push stream proves the pipeline works — the Tree issues **one** `pdv.tree.version` query and compares the counter. On change, it invalidates the React Query tree cache; the root and every expanded listing then refetch **in parallel** (≈1 round trip of wall-clock) and structural sharing keeps unchanged listings identity-stable, so no-op refreshes render nothing. Kernels that predate the version channel are feature-detected once (the query returns null) and polled by listing instead: the same parallel revalidation of root + expanded paths through the query cache.
+
+The user-facing contract:
+
+- Mutations on `PDVTree` values are reflected in the tree panel within ~100 ms (push).
+- Mutations on plain `dict` values stored in the tree are reflected at the end of the execution that made them (fingerprint ping), or within ~2–4 s in the worst case (version poll).
 
 This is the trade we accept to avoid silently coercing user-supplied `dict` values into `PDVTree` at assignment time, which would change the type of stored values out from under the user.
 
@@ -1999,8 +2005,11 @@ useEffect(() => {
 useEffect(() => {
   if (!currentKernelId) return;
 
-  const unsubTree = window.pdv.tree.onChanged(_payload => {
-    setTreeRefreshToken(t => t + 1);
+  const unsubTree = window.pdv.tree.onChanged(payload => {
+    // Targeted React Query invalidation (queries/invalidation.ts):
+    // removals patch the parent listing in place; adds/updates invalidate
+    // only the changed parents; "unknown" invalidates every listing.
+    applyTreeChange(currentKernelId, payload);
   });
 
   const unsubProject = window.pdv.project.onLoaded(payload => {
@@ -2038,10 +2047,10 @@ useEffect(() => {
 ```
 
 Rules:
-- **One owner (main window)**: Within the main window, only `App` (via its hooks) directly registers push subscriptions. Child components receive state/refresh tokens as props. Module popup windows are independent roots and manage their own subscriptions.
-- **Kernel-scoped cleanup**: `tree.onChanged`, `project.onLoaded`, `kernels.onKernelStatus`, `project.onReloading`, and `progress.onProgress` are torn down/re-registered whenever kernel identity changes.
+- **One owner (main window)**: Within the main window, only `App` (via its hooks) directly registers push subscriptions. Handlers translate pushes into React Query invalidations (`renderer/src/queries/invalidation.ts`) and Zustand store updates; components read server state through query hooks (`renderer/src/queries/`) and shared UI state through `useStore` selectors — never via refresh-token props, and never by subscribing to `window.pdv` push channels themselves. Module popup windows are independent roots and manage their own subscriptions.
+- **Kernel-scoped cleanup**: `tree.onChanged`, `project.onLoaded`, `kernels.onKernelStatus`, `project.onReloading`, and `progress.onProgress` are torn down/re-registered whenever kernel identity changes. Kernel-scoped query caches are removed on kernel switch (`invalidateAllKernelState`).
 - **App-scoped cleanup**: `kernels.onOutput`, `menu.onAction`, and `chrome.onStateChanged` are registered once and cleaned up on unmount.
-- **No polling**: Tree/project updates are push-driven; renderer does not poll these domains.
+- **Round-trip discipline**: Server state is cached by React Query and refreshed by push-driven invalidation; common interactions cost at most one round trip, and idle traffic is O(1) per tick (the §7.4.3 version-check poll), never proportional to how much of the tree is expanded. No new refresh tokens or ad-hoc polling.
 - **Hook composition**: See `electron/renderer/src/app/HOOKS.md` for the full hook dependency graph and data flow documentation.
 
 ### 11.5 Custom Title Bar and Window Chrome

@@ -124,6 +124,12 @@ export interface LogEntry {
   origin?: KernelExecutionOrigin;
   duration?: number;
   images?: Array<{ mime: string; data: string }>;
+  /**
+   * Count of images dropped from this entry to bound renderer memory (base64
+   * plots are large; only the newest entries keep theirs). Rendered as an
+   * "image expired" note.
+   */
+  imagesDropped?: number;
 }
 
 /** A persisted/active code-cell tab in the editor pane. */

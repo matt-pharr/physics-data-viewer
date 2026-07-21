@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { TreeNodeData } from '../../types';
-import { childrenDiffer, findNode, flattenTree, mergeChildren, updateNodeImmut } from './tree-utils';
+import { collapseSubtree, flattenFromCache } from './tree-utils';
 
 function makeNode(
   path: string,
@@ -19,157 +19,92 @@ function makeNode(
   };
 }
 
-describe('flattenTree', () => {
-  it('returns empty list for empty input', () => {
-    expect(flattenTree([])).toEqual([]);
+const NONE = new Set<string>();
+
+describe('flattenFromCache', () => {
+  it('always includes the synthetic root row', () => {
+    const rows = flattenFromCache(new Map(), NONE, NONE);
+    expect(rows).toHaveLength(1);
+    expect(rows[0].path).toBe('');
+    expect(rows[0].key).toBe('pdv_tree');
+    expect(rows[0].depth).toBe(0);
+    expect(rows[0].isExpanded).toBe(true);
   });
 
-  it('returns flat nodes at depth 0', () => {
-    const nodes = [makeNode('a'), makeNode('b')];
-    const result = flattenTree(nodes);
-    expect(result).toHaveLength(2);
-    expect(result[0].depth).toBe(0);
-    expect(result[1].depth).toBe(0);
-    expect(result.map((n) => n.path)).toEqual(['a', 'b']);
+  it('renders root children at depth 1', () => {
+    const cache = new Map([['', [makeNode('a'), makeNode('b')]]]);
+    const rows = flattenFromCache(cache, NONE, NONE);
+    expect(rows.map((n) => n.path)).toEqual(['', 'a', 'b']);
+    expect(rows[1].depth).toBe(1);
+    expect(rows[2].depth).toBe(1);
   });
 
-  it('includes expanded children and omits collapsed children', () => {
-    const expanded = makeNode('a', {
-      isExpanded: true,
-      children: [makeNode('a.x')],
-    });
-    const collapsed = makeNode('b', {
-      isExpanded: false,
-      children: [makeNode('b.y')],
-    });
-    const result = flattenTree([expanded, collapsed]);
-    expect(result.map((n) => n.path)).toEqual(['a', 'a.x', 'b']);
-    expect(result.find((n) => n.path === 'a.x')?.depth).toBe(1);
+  it('includes children of expanded paths and omits collapsed ones', () => {
+    const cache = new Map([
+      ['', [makeNode('a', { hasChildren: true }), makeNode('b', { hasChildren: true })]],
+      ['a', [makeNode('a.x')]],
+      ['b', [makeNode('b.y')]],
+    ]);
+    const rows = flattenFromCache(cache, new Set(['a']), NONE);
+    expect(rows.map((n) => n.path)).toEqual(['', 'a', 'a.x', 'b']);
+    expect(rows.find((n) => n.path === 'a')?.isExpanded).toBe(true);
+    expect(rows.find((n) => n.path === 'b')?.isExpanded).toBe(false);
+    expect(rows.find((n) => n.path === 'a.x')?.depth).toBe(2);
   });
 
-  it('computes nested depths correctly', () => {
-    const nested = makeNode('root', {
-      isExpanded: true,
-      children: [
-        makeNode('root.child', {
-          isExpanded: true,
-          children: [makeNode('root.child.leaf')],
-        }),
-      ],
-    });
-    const result = flattenTree([nested]);
-    expect(result.find((n) => n.path === 'root')?.depth).toBe(0);
-    expect(result.find((n) => n.path === 'root.child')?.depth).toBe(1);
-    expect(result.find((n) => n.path === 'root.child.leaf')?.depth).toBe(2);
-  });
-});
-
-describe('findNode', () => {
-  const tree = [
-    makeNode('data', {
-      children: [makeNode('data.x'), makeNode('data.y', { children: [makeNode('data.y.z')] })],
-    }),
-  ];
-
-  it('finds root-level nodes', () => {
-    expect(findNode(tree, 'data')?.path).toBe('data');
+  it('treats an expanded path without cached children as expanded-but-empty', () => {
+    const cache = new Map([['', [makeNode('a', { hasChildren: true })]]]);
+    const rows = flattenFromCache(cache, new Set(['a']), NONE);
+    expect(rows.map((n) => n.path)).toEqual(['', 'a']);
+    expect(rows.find((n) => n.path === 'a')?.isExpanded).toBe(true);
   });
 
-  it('finds nested nodes', () => {
-    expect(findNode(tree, 'data.y.z')?.path).toBe('data.y.z');
+  it('never expands nodes without hasChildren, even if in the expansion set', () => {
+    const cache = new Map([
+      ['', [makeNode('a', { hasChildren: false })]],
+      ['a', [makeNode('a.ghost')]],
+    ]);
+    const rows = flattenFromCache(cache, new Set(['a']), NONE);
+    expect(rows.map((n) => n.path)).toEqual(['', 'a']);
+    expect(rows.find((n) => n.path === 'a')?.isExpanded).toBe(false);
   });
 
-  it('returns undefined when path does not exist', () => {
-    expect(findNode(tree, 'missing.path')).toBeUndefined();
-  });
-});
-
-describe('childrenDiffer', () => {
-  it('returns false for identical lists', () => {
-    expect(childrenDiffer([makeNode('a'), makeNode('b')], [makeNode('a'), makeNode('b')])).toBe(false);
+  it('marks loading paths', () => {
+    const cache = new Map([['', [makeNode('a', { hasChildren: true })]]]);
+    const rows = flattenFromCache(cache, new Set(['a']), new Set(['a']));
+    expect(rows.find((n) => n.path === 'a')?.isLoading).toBe(true);
   });
 
-  it('returns true on different length', () => {
-    expect(childrenDiffer([makeNode('a')], [makeNode('a'), makeNode('b')])).toBe(true);
-  });
-
-  it('returns true when a path is replaced', () => {
-    expect(childrenDiffer([makeNode('a')], [makeNode('b')])).toBe(true);
-  });
-
-  it('returns true when type changes', () => {
-    const a = makeNode('a', { type: 'folder' });
-    const b = makeNode('a', { type: 'script' });
-    expect(childrenDiffer([a], [b])).toBe(true);
-  });
-
-  it('returns true when preview changes (catches deep dict mutations)', () => {
-    const a = makeNode('a', { preview: '{x: 1}' });
-    const b = makeNode('a', { preview: '{x: 1, y: 2}' });
-    expect(childrenDiffer([a], [b])).toBe(true);
-  });
-
-  it('returns true when hasChildren flips', () => {
-    const a = makeNode('a', { hasChildren: false });
-    const b = makeNode('a', { hasChildren: true });
-    expect(childrenDiffer([a], [b])).toBe(true);
-  });
-
-  it('ignores ordering — equal sets compare equal', () => {
-    expect(
-      childrenDiffer([makeNode('a'), makeNode('b')], [makeNode('b'), makeNode('a')]),
-    ).toBe(false);
+  it('handles deep nesting with correct depths', () => {
+    const cache = new Map([
+      ['', [makeNode('r', { hasChildren: true })]],
+      ['r', [makeNode('r.c', { hasChildren: true })]],
+      ['r.c', [makeNode('r.c.leaf')]],
+    ]);
+    const rows = flattenFromCache(cache, new Set(['r', 'r.c']), NONE);
+    expect(rows.map((n) => [n.path, n.depth])).toEqual([
+      ['', 0],
+      ['r', 1],
+      ['r.c', 2],
+      ['r.c.leaf', 3],
+    ]);
   });
 });
 
-describe('updateNodeImmut', () => {
-  it('updates matching node and preserves unrelated references', () => {
-    const first = makeNode('a');
-    const second = makeNode('b');
-    const result = updateNodeImmut([first, second], 'a', (n) => ({ ...n, preview: 'updated' }));
-    expect(result[0].preview).toBe('updated');
-    expect(result[1]).toBe(second);
+describe('collapseSubtree', () => {
+  it('removes the path itself', () => {
+    expect(collapseSubtree(new Set(['a', 'b']), 'a')).toEqual(new Set(['b']));
   });
 
-  it('updates nested matching node', () => {
-    const parent = makeNode('a', {
-      children: [makeNode('a.child')],
-    });
-    const result = updateNodeImmut([parent], 'a.child', (n) => ({ ...n, preview: 'x' }));
-    expect(result[0].children?.[0].preview).toBe('x');
-  });
-});
-
-describe('mergeChildren', () => {
-  it('returns fresh list unchanged when nothing existed before', () => {
-    const fresh = [makeNode('a'), makeNode('b')];
-    expect(mergeChildren(fresh, undefined)).toBe(fresh);
-    expect(mergeChildren(fresh, [])).toBe(fresh);
+  it('removes all descendants but not similarly-prefixed siblings', () => {
+    const expanded = new Set(['a', 'a.x', 'a.x.y', 'ab', 'ab.z', 'b']);
+    expect(collapseSubtree(expanded, 'a')).toEqual(new Set(['ab', 'ab.z', 'b']));
   });
 
-  it('preserves expansion state and loaded children of surviving nodes', () => {
-    const grandchildren = [makeNode('a.x')];
-    const existing = [
-      makeNode('a', { isExpanded: true, children: grandchildren }),
-      makeNode('b'),
-    ];
-    const fresh = [
-      makeNode('a', { hasChildren: true, preview: 'updated' }),
-      makeNode('b', { preview: 'also updated' }),
-    ];
-    const merged = mergeChildren(fresh, existing);
-    expect(merged[0].isExpanded).toBe(true);
-    expect(merged[0].children).toBe(grandchildren);
-    expect(merged[0].preview).toBe('updated');
-    expect(merged[1].isExpanded).toBeUndefined();
-  });
-
-  it('drops removed nodes and adds new ones collapsed', () => {
-    const existing = [makeNode('gone', { isExpanded: true, children: [] })];
-    const fresh = [makeNode('new')];
-    const merged = mergeChildren(fresh, existing);
-    expect(merged).toHaveLength(1);
-    expect(merged[0].path).toBe('new');
-    expect(merged[0].isExpanded).toBeUndefined();
+  it('leaves unrelated paths untouched and does not mutate the input', () => {
+    const expanded = new Set(['a', 'b.c']);
+    const result = collapseSubtree(expanded, 'b.c');
+    expect(result).toEqual(new Set(['a']));
+    expect(expanded.has('b.c')).toBe(true);
   });
 });

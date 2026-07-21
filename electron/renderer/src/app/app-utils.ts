@@ -5,8 +5,40 @@
  * config merge helpers. These are side-effect-free and have no React dependency.
  */
 
-import type { CellTab, Config } from '../types';
-import { MAX_RECENT_PROJECTS } from './constants';
+import type { CellTab, Config, LogEntry } from '../types';
+import { MAX_IMAGE_LOG_ENTRIES, MAX_LOG_ENTRIES, MAX_RECENT_PROJECTS } from './constants';
+
+/**
+ * Append a console log entry, enforcing both retention caps: total entries
+ * (`MAX_LOG_ENTRIES`) and how many recent entries keep their inline images
+ * (`MAX_IMAGE_LOG_ENTRIES`). Entries pushed past the image window have their
+ * base64 images replaced by an `imagesDropped` count; untouched entries keep
+ * their identity so memoized rows don't re-render.
+ *
+ * @param prev - Current log entries (not mutated).
+ * @param entry - The new entry to append.
+ * @returns The capped log list.
+ */
+export function appendLogEntry(prev: LogEntry[], entry: LogEntry): LogEntry[] {
+  let next = [...prev, entry];
+  if (next.length > MAX_LOG_ENTRIES) {
+    next = next.slice(next.length - MAX_LOG_ENTRIES);
+  }
+  const imageCutoff = next.length - MAX_IMAGE_LOG_ENTRIES;
+  if (imageCutoff > 0) {
+    for (let i = 0; i < imageCutoff; i++) {
+      const old = next[i];
+      if (old.images && old.images.length > 0) {
+        next[i] = {
+          ...old,
+          images: undefined,
+          imagesDropped: (old.imagesDropped ?? 0) + old.images.length,
+        };
+      }
+    }
+  }
+  return next;
+}
 
 /**
  * Generate an execution ID for correlating a kernel run with its console

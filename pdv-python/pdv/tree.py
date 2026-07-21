@@ -1334,6 +1334,34 @@ class PDVTree(dict):
     _global_timer: threading.Timer | None = None
     _global_lock: threading.Lock = threading.Lock()
 
+    # Monotonic mutation counter served by ``pdv.tree.version`` (query
+    # server). The renderer's safety-net poll compares this instead of
+    # re-listing every expanded level — one cheap round trip per tick.
+    # Bumped by every mutation notification and by the post-execute
+    # structural fingerprint (which catches plain-dict mutations that emit
+    # nothing). Class-level: versions only need to be comparable within one
+    # kernel process.
+    _tree_version: int = 0
+    _version_lock: threading.Lock = threading.Lock()
+    # Post-execute fingerprint state: the last fingerprint of the root tree,
+    # and whether any mutation notification fired since the last check (so a
+    # fingerprint drift that was already precisely notified doesn't fire a
+    # redundant coarse ping).
+    _last_fingerprint: int | None = None
+    _changed_since_fingerprint: bool = False
+
+    @classmethod
+    def _bump_version(cls) -> None:
+        """Increment the tree-version counter (thread-safe)."""
+        with cls._version_lock:
+            cls._tree_version += 1
+
+    @classmethod
+    def get_tree_version(cls) -> int:
+        """Return the current tree-version counter (thread-safe)."""
+        with cls._version_lock:
+            return cls._tree_version
+
     def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__()
         self._working_dir: str | None = None
@@ -1433,6 +1461,8 @@ class PDVTree(dict):
         change_type : str
             One of ``'added'``, ``'removed'``, or ``'updated'``.
         """
+        PDVTree._bump_version()
+        PDVTree._changed_since_fingerprint = True
         if self is PDVTree._root_tree:
             if self._send_fn is None:
                 return
@@ -1486,6 +1516,99 @@ class PDVTree(dict):
             "pdv.tree.changed",
             {"changed_paths": [], "change_type": "unknown"},
         )
+
+    @classmethod
+    def _structure_fingerprint(cls, tree: dict) -> int:
+        """Compute a cheap structural fingerprint of *tree*.
+
+        Captures what the renderer's listings display: keys, value type
+        names, scalar values (whose previews show the value), and
+        shape/length for sized containers (whose previews show structure,
+        not contents). Deliberately never touches array/dataframe contents,
+        so the walk stays fast on large data. Bounded by a node budget and a
+        depth cap against pathological trees.
+
+        Fingerprints are only compared within one kernel process, so
+        Python's per-process ``hash()`` randomization is harmless.
+
+        Parameters
+        ----------
+        tree : dict
+            The root tree (or any dict) to fingerprint.
+
+        Returns
+        -------
+        int
+            A hash that changes when the renderer-visible structure does.
+        """
+        parts: list[object] = []
+        budget = 100_000
+
+        def visit(node: dict, depth: int) -> None:
+            nonlocal budget
+            if depth > 32:
+                return
+            for key in list(dict.keys(node)):
+                if budget <= 0:
+                    return
+                budget -= 1
+                try:
+                    value = dict.__getitem__(node, key)
+                except KeyError:
+                    continue  # deleted concurrently
+                parts.append(key)
+                if isinstance(value, dict):
+                    parts.append("{")
+                    visit(value, depth + 1)
+                    parts.append("}")
+                    continue
+                parts.append(type(value).__name__)
+                if value is None or isinstance(value, (bool, int, float, str)):
+                    parts.append(value)
+                else:
+                    shape = getattr(value, "shape", None)
+                    if shape is not None:
+                        parts.append(str(shape))
+                    else:
+                        try:
+                            parts.append(len(value))  # type: ignore[arg-type]
+                        except TypeError:
+                            pass
+
+        visit(tree, 0)
+        return hash(tuple(parts))
+
+    @classmethod
+    def _post_execute_check(cls) -> None:
+        """Detect silent tree mutations after each execution.
+
+        Registered as an IPython ``post_execute`` event. Plain-dict
+        mutations under the tree (``pdv_tree['data']['x'] = 1`` where
+        ``data`` is a plain dict) emit no change notification; comparing a
+        structural fingerprint before/after execution catches them at the
+        source. On silent drift, the version counter is bumped and a coarse
+        ``change_type: "unknown"`` ping is emitted so the renderer refreshes
+        immediately. Drift that was already precisely notified only records
+        the new fingerprint (the precise push and version bump already
+        happened).
+        """
+        root = cls._root_tree
+        if root is None:
+            return
+        try:
+            fingerprint = cls._structure_fingerprint(root)
+        except Exception:  # noqa: BLE001 — user objects can break anything
+            return
+        already_notified = cls._changed_since_fingerprint
+        cls._changed_since_fingerprint = False
+        if fingerprint == cls._last_fingerprint:
+            return
+        first_check = cls._last_fingerprint is None
+        cls._last_fingerprint = fingerprint
+        if already_notified or first_check:
+            return
+        cls._bump_version()
+        cls._emit_global_ping()
 
     def _flush_changes(self) -> None:
         """Send all pending change notifications as a single batch.

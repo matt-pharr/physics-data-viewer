@@ -1,11 +1,19 @@
 /**
  * NamespaceView — live tree-style browser of kernel namespace variables.
  *
- * Queries `window.pdv.namespace.query` for top-level values and lazily expands
- * nested children through `window.pdv.namespace.inspect`.
+ * Server state lives in React Query: one query for the top-level
+ * `namespace.query` (keyed by kernel + filter set) and one per expanded
+ * node's `namespace.inspect` (keyed by expression). Refresh is event-driven
+ * — execution-finish and project-load invalidate the `namespace` domains via
+ * `queries/invalidation.ts` — with an opt-in interval that simply invalidates
+ * on a timer. Expanded queries refetch in parallel on invalidation, which
+ * replaces the old hand-rolled fetch-sequence/in-flight guards.
  */
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useQuery, useQueries } from '@tanstack/react-query';
+import { keys } from '../../queries/keys';
+import { invalidateNamespace } from '../../queries/invalidation';
 import type {
   NamespaceInspectResult,
   NamespaceInspectorNode,
@@ -18,7 +26,6 @@ interface NamespaceViewProps {
   disabled?: boolean;
   autoRefresh?: boolean;
   refreshInterval?: number;
-  refreshToken?: number;
   onToggleAutoRefresh?: (value: boolean) => void;
 }
 
@@ -32,18 +39,28 @@ interface VisibleNamespaceRow {
 
 const INDENT_PX = 16;
 
+/** Show a pending state only after it has lasted this long (no flashing). */
+function useDeferredFlag(pending: boolean, delayMs: number): boolean {
+  const [deferred, setDeferred] = useState(false);
+  useEffect(() => {
+    if (!pending) {
+      setDeferred(false);
+      return;
+    }
+    const timer = setTimeout(() => setDeferred(true), delayMs);
+    return () => clearTimeout(timer);
+  }, [pending, delayMs]);
+  return deferred;
+}
+
 /** Kernel namespace browser panel. */
 export const NamespaceView: React.FC<NamespaceViewProps> = ({
   kernelId,
   disabled = false,
   autoRefresh = false,
   refreshInterval = 2000,
-  refreshToken = 0,
   onToggleAutoRefresh,
 }) => {
-  const [variables, setVariables] = useState<NamespaceVariable[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | undefined>();
   const [filters, setFilters] = useState<NamespaceQueryOptions>({
     includePrivate: false,
     includeModules: false,
@@ -52,53 +69,93 @@ export const NamespaceView: React.FC<NamespaceViewProps> = ({
   const [searchQuery, setSearchQuery] = useState('');
   const [sortBy, setSortBy] = useState<'name' | 'type' | 'size'>('name');
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc');
-  const [expandedExpressions, setExpandedExpressions] = useState<Set<string>>(new Set());
-  const [childrenByExpression, setChildrenByExpression] = useState<Record<string, NamespaceInspectorNode[]>>({});
-  const [inspectMetaByExpression, setInspectMetaByExpression] = useState<Record<string, NamespaceInspectResult>>({});
-  const [inspectLoading, setInspectLoading] = useState<Set<string>>(new Set());
-  const [inspectErrors, setInspectErrors] = useState<Record<string, string>>({});
+  // Nodes the user has expanded, keyed by expression. The node object is
+  // retained because re-inspection needs its rootName/path.
+  const [expandedNodes, setExpandedNodes] = useState<ReadonlyMap<string, NamespaceInspectorNode>>(
+    () => new Map(),
+  );
 
-  // Nodes the user has expanded, kept in a ref so refreshes can re-inspect
-  // them without depending on render state. Keyed by expression.
-  const expandedNodesRef = useRef<Map<string, NamespaceInspectorNode>>(new Map());
-  // Monotonic fetch sequence: a fetch only applies its results if it is
-  // still the latest, so overlapping fetches can't interleave stale state.
-  const fetchSeqRef = useRef(0);
-  const inFlightRef = useRef(false);
+  const enabled = kernelId !== null && !disabled;
+  const filtersHash = `${+!!filters.includePrivate}${+!!filters.includeModules}${+!!filters.includeCallables}`;
+  const variablesQuery = useQuery({
+    queryKey: keys.namespace(kernelId ?? '__no-kernel__', filtersHash),
+    queryFn: () => window.pdv.namespace.query(kernelId!, filters),
+    enabled,
+  });
+  const variables = useMemo(
+    () => (enabled ? variablesQuery.data ?? [] : []),
+    [enabled, variablesQuery.data],
+  );
+  const error = enabled && variablesQuery.error
+    ? (variablesQuery.error instanceof Error ? variablesQuery.error.message : String(variablesQuery.error))
+    : undefined;
+  // Spinner only for the initial (no data yet) fetch, deferred 1 s to avoid
+  // flashing; background refetches swap content in place.
+  const loading = useDeferredFlag(enabled && variablesQuery.data === undefined && !error, 1000);
 
-  const resetInspectionState = useCallback(() => {
-    expandedNodesRef.current.clear();
-    setExpandedExpressions(new Set());
-    setChildrenByExpression({});
-    setInspectMetaByExpression({});
-    setInspectLoading(new Set());
-    setInspectErrors({});
-  }, []);
+  // findRootName needs the freshest variables at inspect time, not the ones
+  // captured when the queryFn closure was built.
+  const variablesRef = useRef<NamespaceVariable[]>([]);
+  variablesRef.current = variables;
 
-  /** Drop one expression's expansion and cached inspection state. */
-  const dropExpansion = useCallback((expression: string) => {
-    expandedNodesRef.current.delete(expression);
-    setExpandedExpressions((prev) => {
-      const next = new Set(prev);
-      next.delete(expression);
-      return next;
+  const expandedList = useMemo(() => Array.from(expandedNodes.values()), [expandedNodes]);
+  const inspectResults = useQueries({
+    queries: expandedList.map((node) => ({
+      queryKey: keys.namespaceInspect(kernelId ?? '__no-kernel__', node.expression),
+      queryFn: () =>
+        window.pdv.namespace.inspect(kernelId!, {
+          rootName: node.path.length === 0 ? node.name : findRootName(node, variablesRef.current),
+          path: node.path,
+        }),
+      enabled,
+    })),
+  });
+
+  // Derived per-expression inspection state (children, meta, errors, pending).
+  const expandedExpressions = useMemo(() => new Set(expandedNodes.keys()), [expandedNodes]);
+  const childrenByExpression: Record<string, NamespaceInspectorNode[]> = {};
+  const inspectMetaByExpression: Record<string, NamespaceInspectResult> = {};
+  const inspectErrors: Record<string, string> = {};
+  const inspectLoading = new Set<string>();
+  expandedList.forEach((node, i) => {
+    const result = inspectResults[i];
+    if (result.data) {
+      childrenByExpression[node.expression] = result.data.children;
+      inspectMetaByExpression[node.expression] = result.data;
+    } else if (result.error) {
+      inspectErrors[node.expression] =
+        result.error instanceof Error ? result.error.message : String(result.error);
+    } else {
+      inspectLoading.add(node.expression);
+    }
+  });
+
+  // Collapse expansions whose root variable no longer exists in the fresh
+  // top-level listing (e.g. deleted between refreshes) so their queries
+  // don't linger and re-error forever.
+  const freshVariables = variablesQuery.data;
+  useEffect(() => {
+    if (!freshVariables) return;
+    setExpandedNodes((prev) => {
+      let changed = false;
+      const next = new Map(prev);
+      for (const [expression, node] of prev) {
+        const rootExists = node.path.length === 0
+          ? freshVariables.some((v) => v.name === node.name)
+          : freshVariables.some(
+              (v) =>
+                expression === v.expression ||
+                expression.startsWith(`${v.expression}.`) ||
+                expression.startsWith(`${v.expression}[`),
+            );
+        if (!rootExists) {
+          next.delete(expression);
+          changed = true;
+        }
+      }
+      return changed ? next : prev;
     });
-    setChildrenByExpression((prev) => {
-      const next = { ...prev };
-      delete next[expression];
-      return next;
-    });
-    setInspectMetaByExpression((prev) => {
-      const next = { ...prev };
-      delete next[expression];
-      return next;
-    });
-    setInspectErrors((prev) => {
-      const next = { ...prev };
-      delete next[expression];
-      return next;
-    });
-  }, []);
+  }, [freshVariables]);
 
   const handleSortClick = (col: 'name' | 'type' | 'size') => {
     if (col === sortBy) {
@@ -109,85 +166,18 @@ export const NamespaceView: React.FC<NamespaceViewProps> = ({
     }
   };
 
-  /**
-   * Re-inspect every user-expanded node against fresh top-level results so
-   * a refresh keeps expanded subtrees both open and current. Nodes whose
-   * inspection now fails (e.g. the variable was deleted) are collapsed.
-   */
-  const refreshExpandedChildren = useCallback(
-    async (activeKernelId: string, freshVariables: NamespaceVariable[], seq: number) => {
-      const expandedNodes = Array.from(expandedNodesRef.current.values());
-      await Promise.all(
-        expandedNodes.map(async (node) => {
-          try {
-            const result = await window.pdv.namespace.inspect(activeKernelId, {
-              rootName: node.path.length === 0 ? node.name : findRootName(node, freshVariables),
-              path: node.path,
-            });
-            if (seq !== fetchSeqRef.current) return;
-            setChildrenByExpression((prev) => ({ ...prev, [node.expression]: result.children }));
-            setInspectMetaByExpression((prev) => ({ ...prev, [node.expression]: result }));
-          } catch {
-            if (seq !== fetchSeqRef.current) return;
-            dropExpansion(node.expression);
-          }
-        }),
-      );
-    },
-    [dropExpansion],
-  );
-
-  const fetchNamespace = useCallback(async (options?: { skipIfBusy?: boolean }) => {
-    if (!kernelId || disabled) {
-      setVariables([]);
-      setError(undefined);
-      setLoading(false);
-      resetInspectionState();
-      return;
-    }
-    // Auto-refresh ticks skip rather than pile onto a slow in-flight fetch.
-    if (options?.skipIfBusy && inFlightRef.current) return;
-
-    const seq = ++fetchSeqRef.current;
-    inFlightRef.current = true;
-    setError(undefined);
-    // Show spinner only if the fetch takes longer than 1s to avoid flashing.
-    const loadingTimer = setTimeout(() => setLoading(true), 1000);
-
-    try {
-      const result = await window.pdv.namespace.query(kernelId, filters);
-      if (seq !== fetchSeqRef.current) return; // superseded by a newer fetch
-      setVariables(result);
-      // Keep user-expanded nodes open and refresh their children in place —
-      // resetting here would collapse the tree on every auto-refresh tick.
-      await refreshExpandedChildren(kernelId, result, seq);
-    } catch (err) {
-      if (seq !== fetchSeqRef.current) return;
-      setError(err instanceof Error ? err.message : String(err));
-      setVariables([]);
-      resetInspectionState();
-    } finally {
-      clearTimeout(loadingTimer);
-      if (seq === fetchSeqRef.current) {
-        setLoading(false);
-        inFlightRef.current = false;
-      }
-    }
-  }, [kernelId, filters, disabled, resetInspectionState, refreshExpandedChildren]);
-
-  useEffect(() => {
-    void fetchNamespace();
-  }, [fetchNamespace, refreshToken]);
-
+  // Opt-in interval refresh: invalidate the namespace domains on a timer;
+  // the top-level query and every expanded inspection refetch in parallel.
+  // React Query dedupes ticks that land while a refetch is in flight.
   useEffect(() => {
     if (!autoRefresh || !kernelId || disabled) return;
 
     const interval = setInterval(() => {
-      void fetchNamespace({ skipIfBusy: true });
+      invalidateNamespace(kernelId);
     }, refreshInterval);
 
     return () => clearInterval(interval);
-  }, [autoRefresh, refreshInterval, kernelId, fetchNamespace, disabled]);
+  }, [autoRefresh, refreshInterval, kernelId, disabled]);
 
   const sortedVariables = useMemo(() => {
     return [...variables].sort((a, b) => {
@@ -199,94 +189,43 @@ export const NamespaceView: React.FC<NamespaceViewProps> = ({
     });
   }, [variables, sortBy, sortDir]);
 
-  const fetchChildren = useCallback(async (node: NamespaceInspectorNode) => {
-    if (!kernelId) return;
-    const key = node.expression;
-    setInspectLoading((prev) => new Set(prev).add(key));
-    setInspectErrors((prev) => {
-      const next = { ...prev };
-      delete next[key];
-      return next;
-    });
-
-    try {
-      const result = await window.pdv.namespace.inspect(kernelId, {
-        rootName: node.path.length === 0 ? node.name : findRootName(node, variables),
-        path: node.path,
-      });
-      setChildrenByExpression((prev) => ({ ...prev, [key]: result.children }));
-      setInspectMetaByExpression((prev) => ({ ...prev, [key]: result }));
-    } catch (err) {
-      setInspectErrors((prev) => ({
-        ...prev,
-        [key]: err instanceof Error ? err.message : String(err),
-      }));
-    } finally {
-      setInspectLoading((prev) => {
-        const next = new Set(prev);
-        next.delete(key);
-        return next;
-      });
-    }
-  }, [kernelId, variables]);
-
+  // Expanding mounts the node's inspect query (cache-hit renders instantly,
+  // stale data revalidates in the background); collapsing unmounts it.
   const toggleExpanded = useCallback((node: NamespaceInspectorNode) => {
     if (!node.hasChildren) return;
-    const key = node.expression;
-    const collapsing = expandedNodesRef.current.has(key);
-    if (collapsing) {
-      expandedNodesRef.current.delete(key);
-    } else {
-      expandedNodesRef.current.set(key, node);
-    }
-    setExpandedExpressions((prev) => {
-      const next = new Set(prev);
-      if (collapsing) {
-        next.delete(key);
+    setExpandedNodes((prev) => {
+      const next = new Map(prev);
+      if (next.has(node.expression)) {
+        next.delete(node.expression);
       } else {
-        next.add(key);
+        next.set(node.expression, node);
       }
       return next;
     });
-    if (!collapsing && !childrenByExpression[key] && !inspectLoading.has(key)) {
-      void fetchChildren(node);
-    }
-  }, [childrenByExpression, fetchChildren, inspectLoading]);
+  }, []);
 
-  const visibleRows = useMemo(() => {
-    const rows: VisibleNamespaceRow[] = [];
-    for (const variable of sortedVariables) {
-      appendVisibleRows({
-        rows,
-        node: variable,
-        depth: 0,
-        expandedExpressions,
-        childrenByExpression,
-        inspectMetaByExpression,
-        inspectErrors,
-      });
-    }
-
-    if (!searchQuery.trim()) {
-      return rows;
-    }
-
-    const query = searchQuery.toLowerCase();
-    return rows.filter((row) => {
-      if (row.kind !== 'node' || !row.node) {
-        return false;
-      }
-      const haystack = `${row.node.name} ${row.node.expression} ${row.node.preview || ''}`.toLowerCase();
-      return haystack.includes(query);
+  const rows: VisibleNamespaceRow[] = [];
+  for (const variable of sortedVariables) {
+    appendVisibleRows({
+      rows,
+      node: variable,
+      depth: 0,
+      expandedExpressions,
+      childrenByExpression,
+      inspectMetaByExpression,
+      inspectErrors,
     });
-  }, [
-    sortedVariables,
-    expandedExpressions,
-    childrenByExpression,
-    inspectMetaByExpression,
-    inspectErrors,
-    searchQuery,
-  ]);
+  }
+  const trimmedQuery = searchQuery.trim().toLowerCase();
+  const visibleRows = !trimmedQuery
+    ? rows
+    : rows.filter((row) => {
+        if (row.kind !== 'node' || !row.node) {
+          return false;
+        }
+        const haystack = `${row.node.name} ${row.node.expression} ${row.node.preview || ''}`.toLowerCase();
+        return haystack.includes(trimmedQuery);
+      });
 
   const handleDoubleClick = (node: NamespaceInspectorNode) => {
     if (navigator?.clipboard?.writeText) {
@@ -295,7 +234,7 @@ export const NamespaceView: React.FC<NamespaceViewProps> = ({
   };
 
   const handleRefresh = () => {
-    void fetchNamespace();
+    if (kernelId) invalidateNamespace(kernelId);
   };
 
   const handleHeaderKeyDown = (sortKey: 'name' | 'type' | 'size') => (event: React.KeyboardEvent<HTMLTableCellElement>) => {

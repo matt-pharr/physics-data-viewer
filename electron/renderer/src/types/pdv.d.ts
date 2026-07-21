@@ -1031,6 +1031,11 @@ export interface PDVApi {
   tree: {
     list(kernelId: string, path?: string): Promise<NodeDescriptor[]>;
     get(kernelId: string, path: string): Promise<Record<string, unknown>>;
+    /**
+     * Monotonic tree-version counter, or null when the kernel predates the
+     * version channel (callers fall back to listing-based polling).
+     */
+    getVersion(kernelId: string): Promise<number | null>;
     createScript(
       kernelId: string,
       targetPath: string,
@@ -1336,6 +1341,11 @@ export interface PDVApi {
     defaultJuliaVersion: string;
     /** Version preselected in the New Project dialog (e.g. `"3.13"`). */
     defaultPythonVersion: string;
+    /**
+     * E2E-only diagnostics: snapshot of per-channel invoke counts (empty
+     * outside PDV_E2E=1). Read by the round-trip-budget spec.
+     */
+    getInvokeCounts(): Record<string, number>;
   };
   /** External-app launchers driven by the action bar. */
   launchers: {

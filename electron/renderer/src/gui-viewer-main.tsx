@@ -7,7 +7,9 @@
 
 import React from 'react';
 import ReactDOM from 'react-dom/client';
+import { QueryClientProvider } from '@tanstack/react-query';
 import { GuiViewerRoot } from './gui-viewer/GuiViewerRoot';
+import { queryClient } from './queries/client';
 import './styles/index.css';
 
 const rootElement = document.getElementById('root');
@@ -18,6 +20,8 @@ if (!rootElement) {
 
 ReactDOM.createRoot(rootElement).render(
   <React.StrictMode>
-    <GuiViewerRoot />
+    <QueryClientProvider client={queryClient}>
+      <GuiViewerRoot />
+    </QueryClientProvider>
   </React.StrictMode>
 );

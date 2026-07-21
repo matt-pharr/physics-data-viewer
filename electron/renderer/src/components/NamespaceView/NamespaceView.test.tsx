@@ -1,10 +1,14 @@
 // @vitest-environment jsdom
 
+import React from 'react';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { QueryClientProvider } from '@tanstack/react-query';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { NamespaceInspectorNode, NamespaceVariable } from '../../types';
 import type { PDVApi } from '../../types/pdv';
 import { installPdvMock, type PdvMock } from '../../test-fixtures/pdv-mock';
+import { queryClient } from '../../queries/client';
+import { invalidateNamespace } from '../../queries/invalidation';
 import { NamespaceView } from './index';
 
 function makeVars(): NamespaceVariable[] {
@@ -59,7 +63,22 @@ function makeChildren(): NamespaceInspectorNode[] {
 
 let pdv: PdvMock;
 
+function renderNamespaceView(props: React.ComponentProps<typeof NamespaceView>) {
+  const wrap = (p: React.ComponentProps<typeof NamespaceView>) => (
+    <QueryClientProvider client={queryClient}>
+      <NamespaceView {...p} />
+    </QueryClientProvider>
+  );
+  const rendered = render(wrap(props));
+  return {
+    ...rendered,
+    rerender: (nextProps: React.ComponentProps<typeof NamespaceView>) =>
+      rendered.rerender(wrap(nextProps)),
+  };
+}
+
 beforeEach(() => {
+  queryClient.clear();
   pdv = installPdvMock({
     namespace: {
       query: vi.fn<PDVApi['namespace']['query']>(async () => makeVars()),
@@ -79,12 +98,12 @@ afterEach(() => {
 // and lazy-expand are all covered indirectly when a real kernel runs against
 // NamespaceView in the larger E2E flow. The unit tests retained here pin the
 // mapping between UI controls and the request shape sent to
-// `namespace.query`/`inspect`, plus the polling cadence — both of which are
-// hard to verify with on/off-only observability.
+// `namespace.query`/`inspect`, plus the invalidation-driven refresh flow —
+// both of which are hard to verify with on/off-only observability.
 describe('NamespaceView', () => {
   it('applies filter toggles to subsequent API requests', async () => {
     const query = pdv.namespace.query;
-    render(<NamespaceView kernelId="k1" />);
+    renderNamespaceView({ kernelId: 'k1' });
     await waitFor(() => expect(query).toHaveBeenCalledTimes(1));
 
     fireEvent.click(screen.getByRole('checkbox', { name: /Private/i }));
@@ -102,9 +121,9 @@ describe('NamespaceView', () => {
     );
   });
 
-  it('sorts top-level rows by column header clicks and reacts to refreshToken changes', async () => {
+  it('sorts top-level rows by column header clicks and refetches on invalidation', async () => {
     const query = pdv.namespace.query;
-    const { rerender } = render(<NamespaceView kernelId="k1" refreshToken={0} />);
+    renderNamespaceView({ kernelId: 'k1' });
     await waitFor(() => {
       expect(screen.getByText('alpha')).toBeTruthy();
     });
@@ -113,20 +132,20 @@ describe('NamespaceView', () => {
     const rows = document.querySelectorAll('.namespace-row');
     expect(rows[0]?.textContent).toContain('beta');
 
-    rerender(<NamespaceView kernelId="k1" refreshToken={1} />);
+    invalidateNamespace('k1');
     await waitFor(() => expect(query.mock.calls.length).toBeGreaterThanOrEqual(2));
   });
 
   it('auto-refresh triggers interval-based re-queries', async () => {
     const query = pdv.namespace.query;
-    render(<NamespaceView kernelId="k1" autoRefresh refreshInterval={20} />);
+    renderNamespaceView({ kernelId: 'k1', autoRefresh: true, refreshInterval: 20 });
     await waitFor(() => expect(query.mock.calls.length).toBeGreaterThanOrEqual(3), { timeout: 2000 });
   });
 
   it('keeps expanded nodes open (with refreshed children) across auto-refresh ticks', async () => {
     const query = pdv.namespace.query;
     const inspect = pdv.namespace.inspect;
-    render(<NamespaceView kernelId="k1" autoRefresh refreshInterval={20} />);
+    renderNamespaceView({ kernelId: 'k1', autoRefresh: true, refreshInterval: 20 });
     await waitFor(() => expect(screen.getByText('arr')).toBeTruthy());
 
     fireEvent.click(screen.getByRole('button', { name: /Expand arr/ }));
@@ -146,20 +165,23 @@ describe('NamespaceView', () => {
   });
 
   it('collapses an expanded node whose variable disappeared', async () => {
-    pdv.namespace.inspect.mockImplementation(async () => {
-      throw new Error("name 'arr' is not defined");
-    });
     const query = pdv.namespace.query;
-    render(<NamespaceView kernelId="k1" autoRefresh refreshInterval={20} />);
+    renderNamespaceView({ kernelId: 'k1', autoRefresh: true, refreshInterval: 20 });
     await waitFor(() => expect(screen.getByText('arr')).toBeTruthy());
 
     fireEvent.click(screen.getByRole('button', { name: /Expand arr/ }));
-    // The failed inspect surfaces an error row first; the next refresh tick
-    // then drops the dead expansion entirely.
-    await waitFor(() => expect(query.mock.calls.length).toBeGreaterThanOrEqual(3), { timeout: 2000 });
-    await waitFor(() => {
-      expect(document.querySelector('.namespace-message-error')).toBeNull();
+    await waitFor(() => expect(screen.getByText('[0]')).toBeTruthy());
+
+    // The variable vanishes from the kernel: subsequent top-level queries no
+    // longer include it, and inspecting it would fail.
+    query.mockImplementation(async () => makeVars().filter((v) => v.name !== 'arr'));
+    pdv.namespace.inspect.mockImplementation(async () => {
+      throw new Error("name 'arr' is not defined");
     });
+
+    // The next refresh tick drops the row and prunes the dead expansion.
+    await waitFor(() => expect(screen.queryByText('arr')).toBeNull(), { timeout: 2000 });
     expect(screen.queryByText('[0]')).toBeNull();
+    expect(document.querySelector('.namespace-message-error')).toBeNull();
   });
 });

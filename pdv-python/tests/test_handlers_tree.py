@@ -478,3 +478,93 @@ class TestHandleTreeGet:
         response = mock_comm._sent[0]
         assert response["status"] == "error"
         assert "path_not_found" in response["payload"]["code"]
+
+
+class TestTreeVersion:
+    def test_version_bumps_on_mutation(self, tree_with_comm):
+        """Every mutation notification increments the class-level counter."""
+        from pdv.tree import PDVTree
+
+        before = PDVTree.get_tree_version()
+        tree_with_comm["v1"] = 1
+        tree_with_comm["v1"] = 2
+        del tree_with_comm["v1"]
+        assert PDVTree.get_tree_version() >= before + 3
+
+    def test_handle_tree_version_returns_counter(self, tree_with_comm):
+        """pdv.tree.version responds with the current counter."""
+        from pdv.handlers.tree import handle_tree_version
+        from pdv.tree import PDVTree
+
+        mock_comm = _make_mock_comm()
+        msg = _make_msg("pdv.tree.version", {})
+        with (
+            patch.object(comms_mod, "_comm", mock_comm),
+            patch.object(comms_mod, "_pdv_tree", tree_with_comm),
+        ):
+            handle_tree_version(msg)
+        response = mock_comm._sent[0]
+        assert response["type"] == "pdv.tree.version.response"
+        assert response["status"] == "ok"
+        assert response["payload"]["version"] == PDVTree.get_tree_version()
+        assert response["in_reply_to"] == msg["msg_id"]
+
+    def test_version_allowed_on_query_server(self):
+        """The query server whitelists pdv.tree.version as read-only."""
+        from pdv.query_server import _ALLOWED_TYPES
+
+        assert "pdv.tree.version" in _ALLOWED_TYPES
+
+
+class TestPostExecuteFingerprint:
+    def _fresh_root(self, tree):
+        """Reset class-level fingerprint state around a root tree."""
+        from pdv.tree import PDVTree
+
+        PDVTree._last_fingerprint = None
+        PDVTree._changed_since_fingerprint = False
+        return PDVTree
+
+    def test_silent_plain_dict_mutation_bumps_and_pings(self, tree_with_comm):
+        """A plain-dict mutation (no notification) is caught post-execute."""
+        PDVTree = self._fresh_root(tree_with_comm)
+        tree_with_comm.set_quiet("data", {"x": 1})
+        PDVTree._post_execute_check()  # baseline (first check never pings)
+
+        before = PDVTree.get_tree_version()
+        # Mutate the plain dict directly — emits no pdv.tree.changed.
+        dict.__getitem__(tree_with_comm, "data")["y"] = 2
+        with patch.object(PDVTree, "_emit_global_ping") as ping:
+            PDVTree._post_execute_check()
+        assert PDVTree.get_tree_version() == before + 1
+        ping.assert_called_once()
+
+    def test_notified_mutation_does_not_double_ping(self, tree_with_comm):
+        """Drift already covered by a precise notification stays quiet."""
+        PDVTree = self._fresh_root(tree_with_comm)
+        PDVTree._post_execute_check()  # baseline
+
+        tree_with_comm["k"] = 1  # emits a precise notification
+        with patch.object(PDVTree, "_emit_global_ping") as ping:
+            PDVTree._post_execute_check()
+        ping.assert_not_called()
+
+    def test_no_drift_no_bump(self, tree_with_comm):
+        """An execution that touches nothing leaves version and ping alone."""
+        PDVTree = self._fresh_root(tree_with_comm)
+        PDVTree._post_execute_check()  # baseline
+        before = PDVTree.get_tree_version()
+        with patch.object(PDVTree, "_emit_global_ping") as ping:
+            PDVTree._post_execute_check()
+        assert PDVTree.get_tree_version() == before
+        ping.assert_not_called()
+
+    def test_scalar_value_change_is_detected(self, tree_with_comm):
+        """Scalar leaf values participate in the fingerprint (previews show them)."""
+        PDVTree = self._fresh_root(tree_with_comm)
+        tree_with_comm.set_quiet("data", {"x": 1})
+        PDVTree._post_execute_check()  # baseline
+        dict.__getitem__(tree_with_comm, "data")["x"] = 999
+        with patch.object(PDVTree, "_emit_global_ping") as ping:
+            PDVTree._post_execute_check()
+        ping.assert_called_once()

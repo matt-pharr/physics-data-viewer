@@ -34,7 +34,6 @@ interface State {
   config: Config | null;
   logs: LogEntry[];
   modulesRefreshToken: number;
-  namespaceRefreshToken: number;
   progress: ProgressPayload | null;
   lastError: string | undefined;
   lastChecksum: string | null;
@@ -57,7 +56,6 @@ function createState(overrides: Partial<State> = {}): {
     config: { recentProjects: [] } as Config,
     logs: [],
     modulesRefreshToken: 0,
-    namespaceRefreshToken: 0,
     progress: null,
     lastError: undefined,
     lastChecksum: null,
@@ -88,7 +86,7 @@ function createState(overrides: Partial<State> = {}): {
     setCellTabs: ((v: unknown) => apply("cellTabs", v as never)) as never,
     setActiveCellTab: ((v: unknown) => apply("activeCellTab", v as never)) as never,
     setModulesRefreshToken: ((v: unknown) => apply("modulesRefreshToken", v as never)) as never,
-    setNamespaceRefreshToken: ((v: unknown) => apply("namespaceRefreshToken", v as never)) as never,
+    currentKernelId: "k1",
     setProgress: ((v: unknown) => apply("progress", v as never)) as never,
     setLastError: ((v: unknown) => apply("lastError", v as never)) as never,
     setLogs: ((v: unknown) => apply("logs", v as never)) as never,

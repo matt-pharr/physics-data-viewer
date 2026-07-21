@@ -522,8 +522,21 @@ function handle_tree_duplicate(msg::AbstractDict)
     nothing
 end
 
+# Handle `pdv.tree.version`: return the tree's monotonic mutation counter.
+# Served through the read-only query server so the renderer's safety-net
+# poll costs one cheap round trip regardless of tree size. Mirrors
+# pdv-python's handle_tree_version.
+function handle_tree_version(msg::AbstractDict)
+    msg_id = get(msg, "msg_id", nothing)
+    send_message("pdv.tree.version.response",
+                 Dict{String,Any}("version" => get_tree_version());
+                 in_reply_to=msg_id)
+    nothing
+end
+
 register_message_handler("pdv.tree.list", handle_tree_list)
 register_message_handler("pdv.tree.get", handle_tree_get)
+register_message_handler("pdv.tree.version", handle_tree_version)
 register_message_handler("pdv.tree.resolve_file", handle_tree_resolve_file)
 register_message_handler("pdv.tree.delete", handle_tree_delete)
 register_message_handler("pdv.tree.create_node", handle_tree_create_node)

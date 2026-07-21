@@ -1,5 +1,6 @@
 import { useCallback, useRef, type Dispatch, type SetStateAction } from 'react';
 import type { Config, LogEntry } from '../types';
+import { invalidateAllKernelState } from '../queries/invalidation';
 
 type KernelStatus = 'idle' | 'starting' | 'ready' | 'error';
 
@@ -19,10 +20,6 @@ interface UseKernelLifecycleOptions {
   setConfig: Dispatch<SetStateAction<Config | null>>;
   /** Clears the console log entries on kernel restart. */
   setLogs: Dispatch<SetStateAction<LogEntry[]>>;
-  /** Bumps the token to trigger a NamespaceView refetch. */
-  setNamespaceRefreshToken: Dispatch<SetStateAction<number>>;
-  /** Bumps the token to trigger a Tree panel refetch. */
-  setTreeRefreshToken: Dispatch<SetStateAction<number>>;
   /** Setter for the active environment mode ("uv" project venv vs shared). */
   setEnvironmentMode: Dispatch<SetStateAction<'uv' | 'shared' | 'pkg'>>;
 }
@@ -36,8 +33,6 @@ export function useKernelLifecycle(options: UseKernelLifecycleOptions) {
     setLastError,
     setConfig,
     setLogs,
-    setNamespaceRefreshToken,
-    setTreeRefreshToken,
     setEnvironmentMode,
   } = options;
 
@@ -59,6 +54,10 @@ export function useKernelLifecycle(options: UseKernelLifecycleOptions) {
     try {
       if (currentKernelId) {
         await window.pdv.kernels.stop(currentKernelId);
+        // Drop the dead kernel's cached queries outright — no refetch storm
+        // for a kernel that no longer exists. The new kernel's queries start
+        // cold and fetch on mount.
+        invalidateAllKernelState(currentKernelId, 'kernel-switch');
       }
 
       let spec: import('../types').KernelSpec;
@@ -81,8 +80,8 @@ export function useKernelLifecycle(options: UseKernelLifecycleOptions) {
       // launches; its presence is the authoritative signal that this kernel
       // runs in a project env — uv for Python (§10.5), pkg for Julia (§10.6).
       setEnvironmentMode(uvContext ? (language === 'julia' ? 'pkg' : 'uv') : 'shared');
-      setTreeRefreshToken((prev) => prev + 1);
-      setNamespaceRefreshToken((prev) => prev + 1);
+      // In case the kernel id was reused, make sure nothing stale survives.
+      invalidateAllKernelState(kernel.id, 'kernel-switch');
       setKernelStatus('ready');
       return true;
     } catch (error) {
@@ -99,8 +98,6 @@ export function useKernelLifecycle(options: UseKernelLifecycleOptions) {
     setCurrentKernelId,
     setKernelStatus,
     setLastError,
-    setNamespaceRefreshToken,
-    setTreeRefreshToken,
     setEnvironmentMode,
   ]);
 
@@ -177,8 +174,10 @@ export function useKernelLifecycle(options: UseKernelLifecycleOptions) {
           ? 'Session restarted — restored from the last autosave.'
           : 'Session restarted — no autosave found; starting fresh.',
       }]);
-      setNamespaceRefreshToken((prev) => prev + 1);
-      setTreeRefreshToken((prev) => prev + 1);
+      // The restarted kernel starts from autosave (or fresh): every cached
+      // listing is suspect. Remove the old and (possibly reused) new ids.
+      invalidateAllKernelState(currentKernelId, 'kernel-switch');
+      invalidateAllKernelState(kernel.id, 'kernel-switch');
     } catch (error) {
       console.error('[App] Failed to restart kernel:', error);
       setKernelStatus('error');
@@ -190,8 +189,6 @@ export function useKernelLifecycle(options: UseKernelLifecycleOptions) {
     setKernelStatus,
     setLastError,
     setLogs,
-    setNamespaceRefreshToken,
-    setTreeRefreshToken,
   ]);
 
   return {

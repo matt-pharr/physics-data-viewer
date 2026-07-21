@@ -36,6 +36,7 @@
 const _QUERY_ALLOWED_TYPES = Set([
     "pdv.tree.list",
     "pdv.tree.get",
+    "pdv.tree.version",
     "pdv.tree.resolve_file",
     "pdv.tree.resolve_path",
     "pdv.help",
@@ -150,6 +151,14 @@ function _handle_threaded_query(raw::Vector{UInt8})::Dict{String,Any}
             listing = cached_tree_listing(path)
             listing !== nothing && return _threaded_reply(
                 msg_id, msg_type, "ok", Dict{String,Any}("nodes" => listing))
+        end
+
+        # The version counter is two lock-guarded Refs — safe to read
+        # off-thread, and answering here keeps the renderer's poll at one
+        # round trip even while the main thread is compute-bound.
+        if msg_type == "pdv.tree.version"
+            return _threaded_reply(msg_id, msg_type, "ok",
+                Dict{String,Any}("version" => get_tree_version()))
         end
 
         return _threaded_reply(msg_id, msg_type, "error", Dict{String,Any}(

@@ -2403,4 +2403,65 @@ end
     clear_handlers!()
 end
 
+@testset "tree version counter + post-execute fingerprint" begin
+    # Mirrors pdv-python's TestTreeVersion / TestPostExecuteFingerprint.
+    t = PDVTree()
+    msgs = Tuple{String,Dict}[]
+    attach_comm!(t, (ty, pl) -> push!(msgs, (ty, pl)))
+    try
+        # Every mutation notification bumps the counter.
+        before = PDVKernel.get_tree_version()
+        t["v1"] = 1
+        t["v1"] = 2
+        delete!(t, "v1")
+        @test PDVKernel.get_tree_version() >= before + 3
+
+        # pdv.tree.version handler responds with the counter.
+        captured = run_handler(t, "pdv.tree.version")
+        resp = response_of(captured, "pdv.tree.version")
+        @test resp["status"] == "ok"
+        @test resp["payload"]["version"] == PDVKernel.get_tree_version()
+
+        # Whitelisted on the query server.
+        @test "pdv.tree.version" in PDVKernel._QUERY_ALLOWED_TYPES
+
+        # Post-execute fingerprint: baseline, then a silent plain-Dict
+        # mutation bumps and pings; notified mutations stay quiet.
+        PDVKernel._LAST_FINGERPRINT[] = nothing
+        PDVKernel._CHANGED_SINCE_FINGERPRINT[] = false
+        set_quiet!(t, "data", Dict{String,Any}("x" => 1))
+        PDVKernel._post_execute_version_check()  # baseline; first check never pings
+
+        vbefore = PDVKernel.get_tree_version()
+        t.data["data"]["y"] = 2  # bypasses PDVTree setindex! — no notification
+        PDVKernel._post_execute_version_check()
+        @test PDVKernel.get_tree_version() == vbefore + 1
+        # The coarse ping is debounced; flush it and check it arrived.
+        PDVKernel._flush_global()
+        @test any(m -> m[2]["change_type"] == "unknown", msgs)
+
+        # A notified mutation records the new fingerprint without pinging.
+        empty!(msgs)
+        t["notified"] = 1
+        _flush_changes(t)
+        vafter = PDVKernel.get_tree_version()
+        PDVKernel._post_execute_version_check()
+        @test PDVKernel.get_tree_version() == vafter  # no extra bump
+        PDVKernel._flush_global()
+        @test !any(m -> m[2]["change_type"] == "unknown", msgs)
+
+        # No drift → no bump, no ping.
+        vquiet = PDVKernel.get_tree_version()
+        PDVKernel._post_execute_version_check()
+        @test PDVKernel.get_tree_version() == vquiet
+
+        # Scalar leaf values participate (previews show them).
+        t.data["data"]["x"] = 999
+        PDVKernel._post_execute_version_check()
+        @test PDVKernel.get_tree_version() == vquiet + 1
+    finally
+        detach_comm!(t)
+    end
+end
+
 end # top-level testset

@@ -6,7 +6,7 @@
  * Covers: startKernel happy path with state transitions, error path,
  * concurrent-call queuing (only the latest queued call resolves true),
  * handleEnvSave config-then-start chain, handleRestartKernel clearing logs
- * and bumping refresh tokens.
+ * and dropping kernel-scoped query caches.
  */
 
 import { act } from "@testing-library/react";
@@ -15,6 +15,11 @@ import { renderHookWithPdv } from "../test-fixtures/hook-helpers";
 import type { Config, KernelInfo } from "../types/pdv";
 import type { LogEntry } from "../types";
 import { useKernelLifecycle } from "./useKernelLifecycle";
+import { invalidateAllKernelState } from "../queries/invalidation";
+
+vi.mock("../queries/invalidation", () => ({
+  invalidateAllKernelState: vi.fn(),
+}));
 
 type KernelStatus = "idle" | "starting" | "ready" | "error";
 
@@ -24,8 +29,6 @@ interface State {
   lastError: string | undefined;
   config: Config | null;
   logs: LogEntry[];
-  namespaceRefreshToken: number;
-  treeRefreshToken: number;
 }
 
 interface Setters {
@@ -34,8 +37,6 @@ interface Setters {
   setLastError: (v: string | undefined | ((prev: string | undefined) => string | undefined)) => void;
   setConfig: (v: Config | null | ((prev: Config | null) => Config | null)) => void;
   setLogs: (v: LogEntry[] | ((prev: LogEntry[]) => LogEntry[])) => void;
-  setNamespaceRefreshToken: (v: number | ((prev: number) => number)) => void;
-  setTreeRefreshToken: (v: number | ((prev: number) => number)) => void;
   setEnvironmentMode: (v: 'uv' | 'shared' | 'pkg' | ((prev: 'uv' | 'shared' | 'pkg') => 'uv' | 'shared' | 'pkg')) => void;
 }
 
@@ -46,8 +47,6 @@ function createState(): { state: State; setters: Setters } {
     lastError: undefined,
     config: { pythonPath: "/usr/bin/python3" } as Config,
     logs: [],
-    namespaceRefreshToken: 0,
-    treeRefreshToken: 0,
   };
   const apply = <K extends keyof State>(key: K, v: State[K] | ((prev: State[K]) => State[K])): void => {
     state[key] = typeof v === "function" ? (v as (prev: State[K]) => State[K])(state[key]) : v;
@@ -58,8 +57,6 @@ function createState(): { state: State; setters: Setters } {
     setLastError: (v) => apply("lastError", v as never),
     setConfig: (v) => apply("config", v as never),
     setLogs: (v) => apply("logs", v as never),
-    setNamespaceRefreshToken: (v) => apply("namespaceRefreshToken", v as never),
-    setTreeRefreshToken: (v) => apply("treeRefreshToken", v as never),
     setEnvironmentMode: () => {},
   };
   return { state, setters };
@@ -74,7 +71,7 @@ afterEach(() => {
 });
 
 describe("useKernelLifecycle.startKernel", () => {
-  it("happy path: status idle → starting → ready, sets kernel id, bumps tokens", async () => {
+  it("happy path: status idle → starting → ready, sets kernel id, clears kernel cache", async () => {
     const { state, setters } = createState();
     const kernelInfo: KernelInfo = {
       id: "k1",
@@ -107,8 +104,8 @@ describe("useKernelLifecycle.startKernel", () => {
     expect(state.currentKernelId).toBe("k1");
     expect(state.kernelStatus).toBe("ready");
     expect(state.lastError).toBeUndefined();
-    expect(state.namespaceRefreshToken).toBe(1);
-    expect(state.treeRefreshToken).toBe(1);
+    // Fresh kernel id — cache cleared for it in case the id was reused.
+    expect(invalidateAllKernelState).toHaveBeenCalledWith("k1", "kernel-switch");
   });
 
   it("failure path: sets status error and lastError, leaves currentKernelId null", async () => {
@@ -259,7 +256,7 @@ describe("useKernelLifecycle.handleEnvSave", () => {
 });
 
 describe("useKernelLifecycle.handleRestartKernel", () => {
-  it("calls pdv.kernels.restart, seeds a restored-state log entry, bumps both refresh tokens", async () => {
+  it("calls pdv.kernels.restart, seeds a restored-state log entry, purges kernel caches", async () => {
     const { state, setters } = createState();
     state.currentKernelId = "k1";
     state.logs = [{ executionId: "e1", chunks: [] } as never];
@@ -296,8 +293,9 @@ describe("useKernelLifecycle.handleRestartKernel", () => {
     // came back (restored vs fresh).
     expect(state.logs).toHaveLength(1);
     expect((state.logs[0] as { stdout?: string }).stdout).toMatch(/restored from the last autosave/i);
-    expect(state.namespaceRefreshToken).toBe(1);
-    expect(state.treeRefreshToken).toBe(1);
+    // Both the pre-restart and post-restart kernel ids are purged.
+    expect(invalidateAllKernelState).toHaveBeenCalledWith("k1", "kernel-switch");
+    expect(invalidateAllKernelState).toHaveBeenCalledWith("k2", "kernel-switch");
   });
 
   it("reports a fresh session when nothing was restored", async () => {

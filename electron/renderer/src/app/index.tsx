@@ -43,13 +43,13 @@ import type {
   KernelExecutionOrigin,
   LogEntry,
   ScriptRunResult,
-  TreeChangeInfo,
   TreeNodeData,
   WindowChromeInfo,
 } from '../types';
+import { invalidateTree, invalidateNamespace, invalidateCompletions } from '../queries/invalidation';
 import { resolveShortcuts } from '../shortcuts';
-import { newExecutionId, normalizeLoadedCodeCells, normalizeRecentProjects, mergeConfigUpdate } from './app-utils';
-import { CELL_UNDO_LIMIT, MAX_LOG_ENTRIES, NAMESPACE_REFRESH_INTERVAL_MS } from './constants';
+import { appendLogEntry, newExecutionId, normalizeLoadedCodeCells, normalizeRecentProjects, mergeConfigUpdate } from './app-utils';
+import { CELL_UNDO_LIMIT, NAMESPACE_REFRESH_INTERVAL_MS } from './constants';
 import { useCodeCellsPersistence } from './useCodeCellsPersistence';
 import { useKeyboardShortcuts } from './useKeyboardShortcuts';
 import { useKernelLaunch } from './useKernelLaunch';
@@ -61,6 +61,7 @@ import { useKernelSubscriptions } from './useKernelSubscriptions';
 import { useWelcomeState } from './useWelcomeState';
 import { useThemeManager } from './useThemeManager';
 import { useTreeAction } from '../hooks/useTreeAction';
+import { useStore } from '../store';
 
 type KernelStatus = 'idle' | 'starting' | 'ready' | 'error';
 type CodeCellExecutionError = {
@@ -68,37 +69,6 @@ type CodeCellExecutionError = {
   message: string;
   location?: { line?: number; column?: number };
 };
-
-/**
- * The app-level modal currently open, or `null` for none. A discriminated
- * union instead of one boolean/target per dialog: only one modal can be up
- * at a time, so a single state slot makes "open X" implicitly close
- * everything else and lets Escape close whatever is active without a
- * priority chain.
- */
-type ActiveDialog =
-  | { kind: 'script'; node: TreeNodeData }
-  | { kind: 'rename'; path: string; nodeKey: string }
-  | { kind: 'move'; path: string; nodeType: string }
-  | { kind: 'duplicate'; path: string; nodeType: string }
-  | { kind: 'createNode'; parentPath: string }
-  | { kind: 'createScript'; parentPath: string }
-  | { kind: 'createNote'; parentPath: string }
-  | { kind: 'createGui'; parentPath: string }
-  | { kind: 'createLib'; parentPath: string }
-  | { kind: 'newModule' }
-  | {
-      kind: 'moduleMetadata';
-      alias: string;
-      name: string;
-      version: string;
-      description?: string;
-      language?: 'python' | 'julia';
-    }
-  | { kind: 'importModule' }
-  | { kind: 'saveAs' }
-  | { kind: 'newProject' }
-  | { kind: 'newJuliaProject' };
 
 
 /** Root PDV application component rendered in the Electron renderer process. */
@@ -126,7 +96,11 @@ const App: React.FC = () => {
   cellTabsRef.current = cellTabs;
   const activeCellTabRef = useRef(activeCellTab);
   activeCellTabRef.current = activeCellTab;
-  const [logs, setLogs] = useState<LogEntry[]>([]);
+  // Console logs live in the store so only the Console panel re-renders on
+  // streamed output. App subscribes to emptiness only (for the pristine
+  // check), never to the entries themselves.
+  const setLogs = useStore((s) => s.setLogs);
+  const logsEmpty = useStore((s) => s.logs.length === 0);
 
   // -- Kernel state ---------------------------------------------------------
   const [activeLanguage, setActiveLanguage] = useState<'python' | 'julia'>('python');
@@ -181,15 +155,13 @@ const App: React.FC = () => {
   /**
    * Refresh tokens — integer counters bumped to signal child components to re-fetch data.
    * Incrementing a token causes any useEffect that lists it as a dependency to re-run.
-   * This is the renderer's lightweight alternative to a pub/sub or state-management library.
+   * Tree state has moved to React Query (see `queries/`); these remaining
+   * tokens migrate there in later steps of the #233 refactor.
    */
   const [autoRefreshNamespace, setAutoRefreshNamespace] = useState(false);
-  const [namespaceRefreshToken, setNamespaceRefreshToken] = useState(0);
-  const [treeRefreshToken, setTreeRefreshToken] = useState(0);
-  const [pendingTreeChanges, setPendingTreeChanges] = useState<TreeChangeInfo[]>([]);
   const [modulesRefreshToken, setModulesRefreshToken] = useState(0);
 
-  const runTreeAction = useTreeAction({ setLastError, setTreeRefreshToken });
+  const runTreeAction = useTreeAction({ setLastError, kernelId: currentKernelId });
 
   // -- Welcome screen state ---------------------------------------------------
   // Visibility flags, recent projects, and recoverable orphaned sessions all
@@ -208,14 +180,15 @@ const App: React.FC = () => {
 
   // -- Dialog visibility state ----------------------------------------------
 
-  // One modal at a time: every app-level dialog is a variant of this union,
-  // so opening one implicitly closes the previous and Escape/close logic
-  // needs no priority chain. SettingsDialog stays outside (it suppresses
-  // Escape while recording shortcuts), as do the welcome overlay and the
-  // unsaved-changes confirm.
-  const [activeDialog, setActiveDialog] = useState<ActiveDialog | null>(null);
-  const closeDialog = useCallback(() => setActiveDialog(null), []);
-  const [showSettings, setShowSettings] = useState(false);
+  // Modal state lives in the store's dialog slice (one modal at a time via
+  // the ActiveDialog union; Escape priority in closeTopmost). Store actions
+  // are identity-stable, so they slot in where the old setters were used.
+  const activeDialog = useStore((s) => s.activeDialog);
+  const setActiveDialog = useStore((s) => s.setActiveDialog);
+  const closeDialog = useStore((s) => s.closeDialog);
+  const showSettings = useStore((s) => s.showSettings);
+  const setShowSettings = useStore((s) => s.setShowSettings);
+  const openSettings = useStore((s) => s.openSettings);
   const [currentProjectName, setCurrentProjectName] = useState<string | null>(null);
   const [chromeInfo, setChromeInfo] = useState<WindowChromeInfo | null>(null);
   const [menuModel, setMenuModel] = useState<AppMenuTopLevel[]>([]);
@@ -236,7 +209,7 @@ const App: React.FC = () => {
     handleNoteCloseTab,
     flushDirtyNotes,
   } = useNoteTabs({ currentKernelId, setLogs, setLastError });
-  const [settingsInitialTab, setSettingsInitialTab] = useState<'general' | 'shortcuts' | 'appearance' | 'runtime' | 'about'>('general');
+  const settingsInitialTab = useStore((s) => s.settingsInitialTab);
 
   // -- Project reloading state (kernel restart with active project) ----------
   const [projectReloading, setProjectReloading] = useState(false);
@@ -248,9 +221,8 @@ const App: React.FC = () => {
   // `guardDirty` helper, so a future PR can refine the heuristic by changing
   // only where/how `setProjectDirty` is called.
   const [projectDirty, setProjectDirty] = useState(false);
-  const [pendingDirtyAction, setPendingDirtyAction] = useState<
-    { label: string; run: () => void } | null
-  >(null);
+  const pendingDirtyAction = useStore((s) => s.pendingDirtyAction);
+  const setPendingDirtyAction = useStore((s) => s.setPendingDirtyAction);
 
   // -- Save/load progress state -----------------------------------------------
   const [progress, setProgress] = useState<import('../types/pdv').ProgressPayload | null>(null);
@@ -412,8 +384,7 @@ const App: React.FC = () => {
       } else if (payload.action === 'modules:newEmpty') {
         setActiveDialog({ kind: 'newModule' });
       } else if (payload.action === 'settings:open') {
-        setSettingsInitialTab('general');
-        setShowSettings(true);
+        openSettings('general');
       } else if (payload.action === 'project:new') {
         guardDirtyRef.current('start a new project', () => {
           // Reset renderer-side project state so the workspace behind the
@@ -514,31 +485,16 @@ const App: React.FC = () => {
     setPendingDirtyAction({ label, run: action });
   }, [projectDirty]);
 
-  const handleTreeChanged = useCallback((info: TreeChangeInfo) => {
-    setPendingTreeChanges((prev) => [...prev, info]);
-  }, []);
-
-  const handleTreeChangesConsumed = useCallback((consumed: TreeChangeInfo[]) => {
-    setPendingTreeChanges((prev) => {
-      // Drop only the consumed snapshot; a push that landed between render
-      // and the Tree's consume effect stays queued.
-      const consumedSet = new Set(consumed);
-      return prev.filter((c) => !consumedSet.has(c));
-    });
-  }, []);
-
   useKernelSubscriptions({
     currentKernelId,
     loadedProjectTabsRef,
     setCellTabs,
     setActiveCellTab,
     setLogs,
-    setTreeRefreshToken,
     setModulesRefreshToken,
     setProjectReloading,
     setProgress,
     onKernelCrash: handleKernelCrash,
-    onTreeChanged: handleTreeChanged,
     setKernelMemoryRss,
   });
 
@@ -551,8 +507,6 @@ const App: React.FC = () => {
     setLastError,
     setConfig,
     setLogs,
-    setNamespaceRefreshToken,
-    setTreeRefreshToken,
     setEnvironmentMode,
   });
 
@@ -647,7 +601,7 @@ const App: React.FC = () => {
   useEffect(() => {
     if (!activeDialog) return;
     const onKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') setActiveDialog(null);
+      if (e.key === 'Escape' && useStore.getState().closeTopmost()) e.preventDefault();
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
@@ -820,17 +774,14 @@ const App: React.FC = () => {
       duration: result.duration,
       images: result.images,
     };
-    setLogs((prev) => {
-      const next = [...prev, logEntry];
-      return next.length > MAX_LOG_ENTRIES ? next.slice(next.length - MAX_LOG_ENTRIES) : next;
-    });
+    setLogs((prev) => appendLogEntry(prev, logEntry));
     if (result.error) {
       setLastError(result.error);
     }
     if (typeof result.duration === 'number') {
       setLastDuration(result.duration);
     }
-    setNamespaceRefreshToken((prev) => prev + 1);
+    if (currentKernelId) invalidateNamespace(currentKernelId);
     setActiveDialog((prev) => (prev?.kind === 'script' ? null : prev));
   };
 
@@ -863,13 +814,7 @@ const App: React.FC = () => {
     };
 
     // Create the log entry immediately so output appears as it streams in.
-    setLogs((prev) => {
-      const next = [
-        ...prev,
-        { id: executionId, timestamp: Date.now(), code, origin },
-      ];
-      return next.length > MAX_LOG_ENTRIES ? next.slice(next.length - MAX_LOG_ENTRIES) : next;
-    });
+    setLogs((prev) => appendLogEntry(prev, { id: executionId, timestamp: Date.now(), code, origin }));
 
     try {
       const result = await window.pdv.kernels.execute(currentKernelId, {
@@ -919,13 +864,16 @@ const App: React.FC = () => {
       setCodeCellExecutionError(undefined);
     } finally {
       setIsExecuting(false);
-      setNamespaceRefreshToken((prev) => prev + 1);
+      invalidateNamespace(currentKernelId);
+      // Execution can define/rebind anything: cached Monaco completions and
+      // hovers are stale now.
+      invalidateCompletions(currentKernelId);
       // Defense in depth: a script that mutates a sub-PDVTree directly
       // (e.g. `pdv_tree['big']['x'] = ...`) doesn't fire `pdv.tree.changed`
-      // because sub-trees don't carry _send_fn. Refetching the tree after
-      // execution catches those silent mutations even before that's fixed
-      // properly upstream, and is cheap (a single tree.list query).
-      setTreeRefreshToken((prev) => prev + 1);
+      // because sub-trees don't carry _send_fn. Invalidating after execution
+      // catches those silent mutations; visible listings refetch in
+      // parallel, unexpanded ones lazily on expansion.
+      invalidateTree(currentKernelId);
     }
   }, [currentKernelId, kernelStatus]);
 
@@ -1096,7 +1044,7 @@ const App: React.FC = () => {
   // Whether the session has no user work (no project, no code, no logs, no notes).
   const isPristine = currentProjectDir === null
     && cellTabs.every((t) => !t.code.trim())
-    && logs.length === 0
+    && logsEmpty
     && noteTabs.length === 0;
 
   const {
@@ -1113,7 +1061,7 @@ const App: React.FC = () => {
     setCellTabs,
     setActiveCellTab,
     setModulesRefreshToken,
-    setNamespaceRefreshToken,
+    currentKernelId,
     setProgress,
     setLastError,
     setLogs,
@@ -1154,8 +1102,7 @@ const App: React.FC = () => {
    */
   const openEnvSettings = useCallback((warning?: string) => {
     if (warning) setInterpreterWarning(warning);
-    setSettingsInitialTab('runtime');
-    setShowSettings(true);
+    openSettings('runtime');
   }, []);
 
   // --- session launch overlay ---------------------------------------------
@@ -1373,7 +1320,7 @@ const App: React.FC = () => {
       setCurrentProjectDir(null);
       setCurrentProjectName(null);
       setModulesRefreshToken((prev) => prev + 1);
-      setNamespaceRefreshToken((prev) => prev + 1);
+      if (currentKernelId) invalidateNamespace(currentKernelId);
 
       const missingWarn = result.missingFiles?.length
         ? `\nWarning: ${result.missingFiles.length} file(s) could not be copied:\n  ${result.missingFiles.join('\n  ')}`
@@ -1396,7 +1343,7 @@ const App: React.FC = () => {
     setCurrentProjectDir,
     setCurrentProjectName,
     setModulesRefreshToken,
-    setNamespaceRefreshToken,
+    currentKernelId,
     setLogs,
     setLastError,
     refreshRecoverableSessions,
@@ -1531,7 +1478,7 @@ const App: React.FC = () => {
           leftSidebarOpen={leftSidebarOpen}
           leftPanel={leftPanel}
           onActivityBarClick={handleActivityBarClick}
-          onSettingsClick={() => { setSettingsInitialTab('general'); setShowSettings(true); }}
+          onSettingsClick={() => openSettings('general')}
           onAgentClick={handleOpenAgent}
           onOpenWorkingDir={handleOpenWorkingDir}
           guiModules={importedGuiModules}
@@ -1557,13 +1504,9 @@ const App: React.FC = () => {
                   <Tree
                     kernelId={currentKernelId}
                     disabled={kernelStatus !== 'ready'}
-                    refreshToken={treeRefreshToken}
-                    pendingChanges={pendingTreeChanges}
-                    onChangesConsumed={handleTreeChangesConsumed}
                     onAction={handleTreeAction}
                     shortcuts={shortcuts}
                     projectKey={currentProjectDir}
-
                   />
                 )}
                 {leftPanel === 'namespace' && (
@@ -1571,7 +1514,6 @@ const App: React.FC = () => {
                     kernelId={currentKernelId}
                     disabled={kernelStatus !== 'ready'}
                     autoRefresh={autoRefreshNamespace}
-                    refreshToken={namespaceRefreshToken}
                     refreshInterval={NAMESPACE_REFRESH_INTERVAL_MS}
                     onToggleAutoRefresh={(next) => {
                       setAutoRefreshNamespace(next);
@@ -1613,7 +1555,6 @@ const App: React.FC = () => {
             <>
               <div className="console-wrapper">
                 <Console
-                  logs={logs}
                   onClear={handleClearConsole}
                   // Reactive install works where an in-kernel installer exists:
                   // uv-mode Python projects (pdv.install → uv add) and every
@@ -1759,7 +1700,7 @@ const App: React.FC = () => {
               if (!result.success) {
                 setLastError(result.error);
               } else if (result.treePath) {
-                setTreeRefreshToken((t) => t + 1);
+                if (currentKernelId) invalidateTree(currentKernelId);
                 await window.pdv.script.edit(currentKernelId, result.treePath);
               }
             } catch (error) {
@@ -1782,7 +1723,7 @@ const App: React.FC = () => {
               if (!result.success) {
                 setLastError(result.error);
               } else if (result.treePath) {
-                setTreeRefreshToken((t) => t + 1);
+                if (currentKernelId) invalidateTree(currentKernelId);
                 const noteNode: TreeNodeData = {
                   id: result.treePath,
                   key: name,
@@ -1814,7 +1755,7 @@ const App: React.FC = () => {
               if (!result.success) {
                 setLastError(result.error);
               } else if (result.treePath) {
-                setTreeRefreshToken((t) => t + 1);
+                if (currentKernelId) invalidateTree(currentKernelId);
                 void window.pdv.guiEditor.open({ treePath: result.treePath, kernelId: currentKernelId });
               }
             } catch (error) {
@@ -1838,7 +1779,7 @@ const App: React.FC = () => {
               if (!result.success) {
                 setLastError(result.error);
               } else if (result.treePath) {
-                setTreeRefreshToken((t) => t + 1);
+                if (currentKernelId) invalidateTree(currentKernelId);
                 await window.pdv.script.edit(currentKernelId, result.treePath);
               }
             } catch (error) {
@@ -1856,7 +1797,7 @@ const App: React.FC = () => {
         onCancel={closeDialog}
         onCreated={() => {
           closeDialog();
-          setTreeRefreshToken((t) => t + 1);
+          if (currentKernelId) invalidateTree(currentKernelId);
         }}
       />
 
@@ -1873,7 +1814,7 @@ const App: React.FC = () => {
           onCancel={closeDialog}
           onSaved={() => {
             closeDialog();
-            setTreeRefreshToken((t) => t + 1);
+            if (currentKernelId) invalidateTree(currentKernelId);
           }}
         />
       )}
@@ -1890,7 +1831,7 @@ const App: React.FC = () => {
           kernelStatus={kernelStatus}
           lastDuration={lastDuration}
           progress={progress}
-          onRuntimeClick={() => { setSettingsInitialTab('runtime'); setShowSettings(true); }}
+          onRuntimeClick={() => openSettings('runtime')}
           onRestartSession={handleRestartKernel}
           canRestart={currentKernelId !== null}
           lastChecksum={lastChecksum}
@@ -1900,7 +1841,7 @@ const App: React.FC = () => {
           lastAutosaveAt={lastAutosaveAt}
           kernelMemoryRss={kernelMemoryRss}
           updateStatus={updateStatus}
-          onUpdateClick={() => { setSettingsInitialTab('about'); setShowSettings(true); }}
+          onUpdateClick={() => openSettings('about')}
           mcpClientAttached={mcpClientAttached}
         />
 

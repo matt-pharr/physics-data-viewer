@@ -30,16 +30,16 @@ App's 39 `useState` calls are organized into these logical groups:
 | Group | States | Primary Consumers |
 |-------|--------|--------------------|
 | **Code editor** | `cellTabs`, `activeCellTab` | CodeCell, useCodeCellsPersistence, useKeyboardShortcuts, useProjectWorkflow |
-| **Console** | `logs` | Console, useKernelSubscriptions, useKernelLifecycle |
+| **Console** | `logs` (Zustand `consoleSlice` — Console subscribes directly) | Console, useKernelSubscriptions, useKernelLifecycle |
 | **Kernel** | `currentKernelId`, `kernelStatus`, `isExecuting`, `lastError`, `codeCellExecutionError`, `lastDuration` | useKernelLifecycle, useKernelSubscriptions, CodeCell, Tree, status bar |
 | **Config** | `config` | useThemeManager, useKernelLifecycle, useProjectWorkflow, CodeCell, ModulesPanel |
 | **Project** | `currentProjectDir` | useProjectWorkflow, title bar |
-| **Refresh tokens** | `treeRefreshToken`, `namespaceRefreshToken`, `modulesRefreshToken`, `autoRefreshNamespace` | Tree, NamespaceView, ModulesPanel |
+| **Refresh tokens** | `modulesRefreshToken` (last survivor — modules queries not yet migrated), `autoRefreshNamespace` | ModulesPanel |
 | **Dialogs** | `showEnvSelector`, `scriptDialog`, `createScriptTarget`, `showSettings`, `settingsInitialTab` | EnvironmentSelector, ScriptDialog, CreateScriptDialog, SettingsDialog |
 
-### Refresh Token Pattern
+### Server-State Pattern (React Query)
 
-Several hooks bump integer "refresh tokens" (e.g. `setTreeRefreshToken(t => t + 1)`) to signal child components that they should refetch data. This avoids passing full data objects through the component tree — children own their own fetch logic and simply re-run it when their token prop changes.
+Tree and namespace data live in the React Query cache (`renderer/src/queries/`), keyed per kernel and parent path/expression. Push events translate into targeted invalidations (`queries/invalidation.ts`); components mount query hooks and re-render only when data actually changes. The old integer "refresh token" pattern survives only for the modules listings (`modulesRefreshToken`), pending their query migration.
 
 ---
 
@@ -87,10 +87,10 @@ Several hooks bump integer "refresh tokens" (e.g. `setTreeRefreshToken(t => t + 
 
 **Purpose**: Registers and tears down three push subscriptions keyed on `currentKernelId`:
 - `window.pdv.kernels.onOutput()` → appends stdout/stderr/images to console logs
-- `window.pdv.tree.onChanged()` → bumps tree and modules refresh tokens
+- `window.pdv.tree.onChanged()` → applies targeted React Query invalidations (applyTreeChange) and bumps the modules refresh token
 - `window.pdv.project.onLoaded()` → restores code cell tabs from project snapshot
 
-**Takes**: `currentKernelId`, `loadedProjectTabsRef`, and setters for logs, cellTabs, activeCellTab, treeRefreshToken, modulesRefreshToken.
+**Takes**: `currentKernelId`, `loadedProjectTabsRef`, and setters for logs, cellTabs, activeCellTab, modulesRefreshToken.
 
 **Returns**: Nothing (void). Subscriptions are cleaned up on kernel change or unmount.
 
@@ -102,12 +102,12 @@ Several hooks bump integer "refresh tokens" (e.g. `setTreeRefreshToken(t => t + 
 
 **Purpose**: Provides callbacks for starting, restarting, and reconfiguring the kernel.
 
-**Takes**: Config, current kernel ID, and setters for kernel status, error state, env selector visibility, logs, and refresh tokens.
+**Takes**: Config, current kernel ID, and setters for kernel status, error state, env selector visibility, and logs.
 
 **Returns**:
 - `startKernel(cfg)` — stops any existing kernel, starts a new one with the given config
 - `handleEnvSave(paths)` — saves new environment paths to config and calls `startKernel`
-- `handleRestartKernel()` — restarts the current kernel (clears logs, bumps refresh tokens)
+- `handleRestartKernel()` — restarts the current kernel (clears logs, purges kernel-scoped query caches)
 
 **Dependencies**: Uses `currentKernelId` to know which kernel to stop/restart.
 
@@ -195,7 +195,7 @@ Several hooks bump integer "refresh tokens" (e.g. `setTreeRefreshToken(t => t + 
                     └──────────────────────┘
 
                     ┌──────────────────────┐
-  currentKernelId ─►│useKernelSubscriptions │──► setLogs, setTreeRefreshToken,
+  currentKernelId ─►│useKernelSubscriptions │──► setLogs, query invalidations,
                     │                      │    setModulesRefreshToken,
                     │                      │    setCellTabs (on project load)
                     └──────────────────────┘
@@ -222,7 +222,7 @@ Several hooks bump integer "refresh tokens" (e.g. `setTreeRefreshToken(t => t + 
 
 1. **No circular dependencies** — hooks receive state as props and only call provided setters; they never import or call each other.
 2. **One subscription owner** — only `useKernelSubscriptions` registers push subscriptions. Other hooks read state but don't subscribe.
-3. **Refresh tokens as triggers** — child components (Tree, NamespaceView, ModulesPanel) receive token props and refetch when they change. They don't subscribe to push events directly. Incrementing a token (e.g. `setTreeRefreshToken(t => t + 1)`) causes any `useEffect` that lists it as a dependency to re-run, acting as a lightweight pub/sub without a state-management library.
+3. **Query invalidation as triggers** — Tree and NamespaceView mount React Query hooks and refetch when their keys are invalidated by push handlers (`queries/invalidation.ts`); they don't subscribe to push events directly. ModulesPanel still uses the legacy `modulesRefreshToken` prop pending its query migration.
 4. **Ref-based stability** — `useKeyboardShortcuts` stores frequently-changing values in refs to avoid re-registering the global listener on every render.
 
 ---

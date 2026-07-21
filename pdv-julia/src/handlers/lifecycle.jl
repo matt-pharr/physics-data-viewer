@@ -149,6 +149,10 @@ function _install_postexecute_cache_hook()
         IJulia.push_postexecute_hook!(() -> begin
             tree = get_pdv_tree()
             tree !== nothing && rebuild_query_cache!(tree)
+            # Silent-mutation detection: bumps the tree version (served by
+            # pdv.tree.version) and pings the renderer on drift that no
+            # precise notification covered.
+            _post_execute_version_check()
             nothing
         end)
         _postexecute_hook_installed[] = true

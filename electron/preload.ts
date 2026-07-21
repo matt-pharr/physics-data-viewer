@@ -57,7 +57,20 @@ function onPush<TPayload>(
  * @returns The handler's result.
  * @throws {Error} The handler's failure, with the Electron prefix removed.
  */
+/**
+ * Per-channel invoke counters, populated only under E2E (`PDV_E2E=1`).
+ * The round-trip-budget spec reads these to assert the renderer's latency
+ * discipline — idle traffic O(1) per tick, ≤1 round trip per interaction —
+ * which is what keeps PDV usable when every invoke is a network hop in
+ * remote mode.
+ */
+const invokeCounts: Record<string, number> = {};
+const COUNT_INVOKES = process.env.PDV_E2E === "1";
+
 async function invoke<TResult>(channel: string, ...args: unknown[]): Promise<TResult> {
+  if (COUNT_INVOKES) {
+    invokeCounts[channel] = (invokeCounts[channel] ?? 0) + 1;
+  }
   try {
     return (await ipcRenderer.invoke(channel, ...args)) as TResult;
   } catch (err) {
@@ -101,6 +114,8 @@ const api: PDVApi = {
       invoke(IPC.tree.list, kernelId, nodePath),
     get: (kernelId, nodePath) =>
       invoke(IPC.tree.get, kernelId, nodePath),
+    getVersion: (kernelId) =>
+      invoke(IPC.tree.getVersion, kernelId),
     createScript: (kernelId, targetPath, scriptName) =>
       invoke(IPC.tree.createScript, kernelId, targetPath, scriptName),
     createNote: (kernelId, targetPath, noteName) =>
@@ -298,6 +313,9 @@ const api: PDVApi = {
     // Julia siblings from julia-versions.ts (§10.6.5).
     supportedJuliaVersions: SUPPORTED_JULIA_VERSIONS,
     defaultJuliaVersion: DEFAULT_JULIA_VERSION,
+    // E2E-only diagnostics: per-channel invoke counts for the
+    // round-trip-budget spec. Returns a snapshot copy; empty outside E2E.
+    getInvokeCounts: () => ({ ...invokeCounts }),
   },
   launchers: {
     openAgent: () => invoke(IPC.launchers.openAgent),
